@@ -20,6 +20,10 @@ iterated independently.
   the resume-cache invariant and the prompt-invariants test).
 - **Dev loop** — `claude --plugin-dir <repo>` loads the working tree live; stable channel is a
   marketplace install from GitHub.
+- **Verified** — `claude plugin validate` clean; `node --check` / `bash -n` / `py_compile` pass;
+  all three test suites green from the new paths (incl. the byte-identical resume-cache invariant);
+  installed cache at `~/.claude/plugins/cache/wave/wave/1.0.0/` resolves every bundled path the
+  `${CLAUDE_PLUGIN_ROOT}` references point at.
 
 ## 2026-06-04 — Operational backlog cleared (was claude-config PR #1)
 
@@ -44,5 +48,7 @@ fixes shipped + validated (giflab PR #52). Everything since traces back to this 
 
 - Optional: a small live giflab rollout slice to exercise scripted reconcile + infra-rerun
   end-to-end from the installed plugin.
-- Verify `${CLAUDE_PLUGIN_ROOT}` substitutes inside the Workflow `scriptPath` value at runtime
-  (the one path the plugin packaging didn't change in behaviour, only in spelling).
+- First live `/wave:execute` run: confirm the harness substitutes `${CLAUDE_PLUGIN_ROOT}` in the
+  Workflow `scriptPath` value (the target file is already verified present in both the install
+  cache and the working tree; substitution is the standard documented plugin mechanism, so this is
+  belt-and-braces). Fallback if it ever doesn't: resolve the path in a Bash `echo` step first.
