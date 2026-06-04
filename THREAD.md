@@ -24,6 +24,13 @@ iterated independently.
   all three test suites green from the new paths (incl. the byte-identical resume-cache invariant);
   installed cache at `~/.claude/plugins/cache/wave/wave/1.0.0/` resolves every bundled path the
   `${CLAUDE_PLUGIN_ROOT}` references point at.
+- **Why a plugin, not a symlink** — symlinked skill/command discovery is unreliable (hardlinks
+  were needed for shared commands); `--plugin-dir` gives live working-tree iteration without that
+  risk, so "clean external repo" and "fast iteration" stopped trading off.
+- **Refactor-order quirk** — rewrite self-paths to `${CLAUDE_PLUGIN_ROOT}` BEFORE renaming
+  `wave-execute`→`execute`: `skills/wave-execute/wave-execute.workflow.js` contains the substring
+  `/wave-execute`, so the rename rule corrupted the engine filename to `wave:execute.workflow.js`
+  (would break `scriptPath`). Caught + fixed; cache-path + prompt-invariants checks guard it.
 
 ## 2026-06-04 — Operational backlog cleared (was claude-config PR #1)
 
