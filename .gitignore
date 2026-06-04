@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor / local
+.idea/
+.vscode/
+
+# Local plugin/worktree scratch (never belongs in the repo)
+.claude/worktrees/
+.claude/merge-wave.status

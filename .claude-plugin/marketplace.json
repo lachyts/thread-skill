@@ -1,0 +1,15 @@
+{
+  "name": "wave",
+  "description": "Wave planning + execution skills (/wave:plan, /wave:execute) for running large multi-PR changes as a wave-by-wave convergence rollout.",
+  "owner": {
+    "name": "Lachlan Tetlow-Stuart"
+  },
+  "plugins": [
+    {
+      "name": "wave",
+      "source": "./",
+      "description": "Wave planning + execution: /wave:plan and /wave:execute. A planner that clusters tasks into dependency-ordered waves, and an executor that runs a three-layer convergence loop with deterministic per-wave auto-merge.",
+      "version": "1.0.0"
+    }
+  ]
+}
