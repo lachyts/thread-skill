@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Use when planning a parallel rollout of multiple Obsidian tasks under a single project — produces a thin rollout note (data only) that the `/wave:execute` skill reads and runs on the Workflow engine. Reads tasks from ~/repos/obsidian/Work/Tasks/, computes wave structure from file-overlap + dependency analysis, auto-merges affine same-file task clusters (same change, artificially split) into a single sequential dispatch unit, writes <project-slug>-rollout.md with `protocol_version: 3` frontmatter + rollout-level config defaults (verifier, max_iterations, max_review_rounds, max_plan_rounds, plan_approval, parallel_ceiling), and stamps wave: N on each task. Scope: Obsidian only.
+description: Use when planning a parallel rollout of multiple Obsidian tasks under a single project — produces a thin rollout note (data only) that the `/wave:execute` skill reads and runs on the Workflow engine. Reads tasks from ~/repos/obsidian/Work/Tasks/, computes wave structure from file-overlap + dependency analysis, auto-merges affine same-file task clusters (same change, artificially split) into a single sequential dispatch unit, writes <project-slug>-rollout.md with `protocol_version: 3` frontmatter + rollout-level config defaults (verifier, max_iterations, max_review_rounds, max_plan_rounds, plan_approval, parallel_ceiling, model), and stamps wave: N on each task. Scope: Obsidian only.
 ---
 
 # /wave:plan — turn a backlog of Obsidian tasks into a rollout note
@@ -164,6 +164,20 @@ The rollout then references only the combined note, as an ordinary `cross-cuttin
 
 **Confirm the result before writing.** Show the user each proposed merge (members → combined note, plus the affinity signal that fired) and — just as important — the same-file pairs you deliberately *kept apart* and the guard that fired for each. This is where a misread gets caught. Get a y/n before authoring anything.
 
+### 4.7. Assign model tier per task
+
+Every agent in the convergence engine runs **Fable 5 by default** (`model: fable`, the rollout-level default in the template frontmatter). The only decision here is which tasks can safely *drop down* to Opus — **err toward Fable when uncertain**.
+
+Suggest `model: opus` for a task only when **all** of these hold:
+
+- `scope: single-file` (step 4)
+- `work_depth:` is `shallow` or absent
+- the change is **mechanical**, judged from the task body — a config edit, a rename, a small contained fix with crisp acceptance criteria. If the body needs design judgement (API shape, algorithm choice, subtle interactions), it is not mechanical.
+
+Everything else stays Fable: cross-cutting tasks, `deep` tasks, read-only investigations (analysis-heavy despite making no edits), and merged units from step 4.5 (always `cross-cutting`).
+
+Present the suggested drop-downs as a batch ("these N tasks look mechanical enough for opus: …") with one line of justification each, and get a y/n (or per-task veto) before stamping in step 7. No qualifying tasks ⇒ say nothing and move on. Note for the user if asked: the drop-down only affects the task's planner/implementer/reviser — the plan-judge and review-judge are engine-pinned to Fable regardless (see `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`).
+
 ### 5. Compute waves
 
 **Core invariant: two tasks that touch the same file never share a wave.** Same-file tasks are serialised across consecutive waves — the later one rebases onto main after the first lands. (This is the fix for the #30/#31 incident, where two same-wave tasks both edited `metrics.py` and a stale-base squash silently dropped the first task's changes.)
@@ -204,7 +218,7 @@ Use the template at `${CLAUDE_PLUGIN_ROOT}/skills/plan/rollout-template.md`. Sub
 - `{{FILE_SETS}}` — a **machine-readable** per-task file-set block (one line per *editing* task: `- <full-slug> (wave N): file, file, …`), rendered from the **confirmed step-2 file-sets** (unioned for merged units, exactly as step 5 colours them). Omit read-only tasks (no edits). `/wave:execute` reads this block for its blocked-task smart-halt: if a task fails to land and its files reappear in a later wave, the rollout halts rather than branching that later wave from a `main` missing the fix. This is **rollout-note data** — a derivation of sets the user already confirmed in step 2, not a fresh guess — so it is distinct from, and does not violate, the task-frontmatter `touches:` Don't (it lives in the rollout note, never stamped onto the individual tasks).
 - `{{KNOWN_BASELINE_FAILURES}}` — the `## Known baseline failures` block from step 2.6: one `- <test_id> — <reason>` line per test already red on a clean `main`, or `none`. `/wave:execute` reads this block, threads it into every agent, and shifts the Ralph green criterion to "no NEW failures beyond this set" (never `--deselect`). Like `{{FILE_SETS}}`, this is rollout-note data the executor reads, never task frontmatter.
 
-The template's frontmatter carries `protocol_version: 3` plus rollout-level convergence defaults (`max_iterations: 3`, `max_review_rounds: 4`, `max_plan_rounds: 3`, `plan_approval: scope-gated`, `parallel_ceiling: 4`). These are inherited by every task in the rollout; per-task overrides go in the task's own frontmatter. When step 2.7 detected an env-bootstrap command, uncomment the template's `env_bootstrap:` line and set it (`/wave:execute` runs it once per worktree); leave it commented out when none. `plan_approval: scope-gated` means the plan-gate fires only for `scope: cross-cutting` tasks (other values: `off`, `required`) — see `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` for the gate semantics. (`completion_sentinel` is gone as of protocol 3 — the Workflow engine returns validated structured output instead of parsing sentinel strings.)
+The template's frontmatter carries `protocol_version: 3` plus rollout-level convergence defaults (`max_iterations: 3`, `max_review_rounds: 4`, `max_plan_rounds: 3`, `plan_approval: scope-gated`, `parallel_ceiling: 4`, `model: fable`). These are inherited by every task in the rollout; per-task overrides go in the task's own frontmatter. When step 2.7 detected an env-bootstrap command, uncomment the template's `env_bootstrap:` line and set it (`/wave:execute` runs it once per worktree); leave it commented out when none. `plan_approval: scope-gated` means the plan-gate fires only for `scope: cross-cutting` tasks (other values: `off`, `required`) — see `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` for the gate semantics. (`completion_sentinel` is gone as of protocol 3 — the Workflow engine returns validated structured output instead of parsing sentinel strings.)
 
 Render each task reference as `[[<full-slug>|<short-alias>]]` in the wave-structure table for readability. In the per-wave detail section use the full `[[<full-slug>]]` form.
 
@@ -216,13 +230,14 @@ For each task in the rollout:
 - Add `rollout: "[[<rollout-slug>]]"` backlink
 - Add `scope:` if not already set (single-file / cross-cutting / read-only — see step 4) — `/wave:execute` uses this to route master-review depth
 - For `scope: read-only` tasks specifically, also add `max_iterations: 1` (nothing to retry)
+- For tasks the user confirmed as Opus drop-downs in step 4.7, add `model: opus` — never stamp `model: fable` (that's the rollout-level default every task inherits)
 - Preserve all other frontmatter fields verbatim
 
 The combined notes authored in step 4.5 are stamped here like any other task (`wave:`, `rollout:`, `scope: cross-cutting`). Their folded-in members are **not** stamped `wave:` — they already carry `status: merged` + `merged_into:` from step 4.5 and are never dispatched.
 
 Use the same YAML field ordering the file already has; insert the new fields just below the existing `status:` line.
 
-**Do NOT stamp `verifier:` / `max_iterations:` / `max_review_rounds:` on individual tasks by default.** Those fields are rollout-level defaults — tasks inherit them automatically. Only set them per-task if the user explicitly asks to override the rollout default for a specific task during the confirm-batch step.
+**Do NOT stamp `verifier:` / `max_iterations:` / `max_review_rounds:` / `model:` on individual tasks by default.** Those fields are rollout-level defaults — tasks inherit them automatically. Only set them per-task if the user explicitly asks to override the rollout default for a specific task during the confirm-batch step. The sanctioned exceptions are read-only's `max_iterations: 1` and the user-confirmed `model: opus` from step 4.7 — both are deliberate per-task decisions, not defaults.
 
 ### 8. Print summary
 
@@ -268,7 +283,7 @@ End-to-end test against an existing backlog (e.g. GifLab):
 3. Step 2.5 detects `make test` (or whatever GifLab's CLAUDE.md prescribes) — prints it and asks to confirm
 4. Computes wave structure
 5. If `giflab-rollout.md` doesn't exist: writes it. If it does: prompts.
-6. Rollout note carries `protocol_version: 3`, `verifier:`, `max_iterations: 3`, `max_review_rounds: 4`, `max_plan_rounds: 3`, `plan_approval: scope-gated`, `parallel_ceiling: 4` in frontmatter. No inline execution playbook — the rollout body is data only.
+6. Rollout note carries `protocol_version: 3`, `verifier:`, `max_iterations: 3`, `max_review_rounds: 4`, `max_plan_rounds: 3`, `plan_approval: scope-gated`, `parallel_ceiling: 4`, `model: fable` in frontmatter. No inline execution playbook — the rollout body is data only.
 7. Stamps `wave: N`, `rollout: "[[...]]"`, and `scope:` on each task
 8. Prints summary pointing the user toward `/wave:execute`
 

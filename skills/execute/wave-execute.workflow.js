@@ -40,6 +40,10 @@ export const meta = {
 //       maxPlanRounds   : number,    // plan-gate budget
 //       ignoreGate      : boolean,   // optional; true ⇒ inject an operator override of any human/release
 //                                    //   gate in the note (per-task-override-channel). Absent/false ⇒ byte-identical.
+//       model           : "fable" | "opus",
+//                                    // optional; resolved by the skill (task → rollout → "fable").
+//                                    //   Applies to planner/implementer/reviser/investigator. Judges
+//                                    //   (plan-judge, review-judge) are pinned to "fable" regardless.
 //     }]
 //   }]
 // }
@@ -446,11 +450,18 @@ function chunk(arr, n) {
   return out
 }
 
+// ---- Model tiering -----------------------------------------------------------
+// Fable 5 is the deliberate default for every agent; wave:plan may drop an easy
+// task (single-file + shallow/mechanical) to opus via task frontmatter. The two
+// judge roles gatekeep merges, so they stay on max capability regardless.
+const JUDGE_MODEL = 'fable'
+function taskModel(task) { return task.model || 'fable' }
+
 // ---- The three convergence layers -------------------------------------------
 
 async function planLoop(task, a) {
   let plan = await agent(plannerPrompt(task, a), {
-    label: `plan:${task.slug}`, phase: 'Plan-gate', schema: PLAN_VERDICT,
+    label: `plan:${task.slug}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: taskModel(task),
   })
   if (plan.blocked || !plan.ready) {
     return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: plan.blockerCause || 'planner returned no plan', planRoundsUsed: 0 }
@@ -462,7 +473,7 @@ async function planLoop(task, a) {
   let round = 1
   while (round <= task.maxPlanRounds) {
     const verdict = await agent(planJudgePrompt(task, plan.plan, a), {
-      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE,
+      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: JUDGE_MODEL,
     })
     if (verdict.verdict === 'approve') {
       return { task, blocked: false, plan: plan.plan, planRoundsUsed: round }
@@ -479,7 +490,7 @@ async function planLoop(task, a) {
       }
     }
     plan = await agent(planReviserPrompt(task, plan.plan, priorFeedback, round + 1, a), {
-      label: `plan-revise:${task.slug} r${round + 1}`, phase: 'Plan-gate', schema: PLAN_VERDICT,
+      label: `plan-revise:${task.slug} r${round + 1}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: taskModel(task),
     })
     if (plan.blocked || !plan.ready) {
       return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: plan.blockerCause || 'plan-reviser returned no plan', planRoundsUsed: round + 1 }
@@ -492,18 +503,18 @@ async function implement(task, prev, a) {
   if (prev && prev.blocked) return prev // plan-blocked passthrough
   if (task.scope === 'read-only') {
     return await agent(readOnlyPrompt(task, a), {
-      label: `investigate:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT,
+      label: `investigate:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: taskModel(task),
     })
   }
   if (task.planGate && prev && prev.plan) {
     const r = await agent(approvedPlanImplementerPrompt(task, prev.plan, a), {
-      label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT,
+      label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: taskModel(task),
     })
     // thread the plan-stage metadata forward so the final report shows plan_rounds_used
     return r ? { ...r, planRoundsUsed: prev.planRoundsUsed || 0 } : r
   }
   return await agent(implementerPrompt(task, a), {
-    label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT,
+    label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: taskModel(task),
   })
 }
 
@@ -518,7 +529,7 @@ async function reviewLoop(task, prev, a) {
   let round = 1
   while (round <= task.maxReviewRounds) {
     const verdict = await agent(reviewJudgePrompt(task, current, a), {
-      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT,
+      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: JUDGE_MODEL,
     })
     if (verdict.verdict === 'approve') {
       return { ...current, status: 'review', reviewRoundsUsed: round }
@@ -527,7 +538,7 @@ async function reviewLoop(task, prev, a) {
       return { ...current, status: 'review-blocked', reviewRoundsUsed: round, reviewFeedback: verdict.feedback }
     }
     const revised = await agent(reviserPrompt(task, current, verdict.feedback, round + 1, a), {
-      label: `revise:${task.slug} r${round + 1}`, phase: 'Review', schema: IMPL_RESULT,
+      label: `revise:${task.slug} r${round + 1}`, phase: 'Review', schema: IMPL_RESULT, model: taskModel(task),
     })
     if (revised.blocked) {
       return { ...current, status: 'blocked', blockerDiagnosis: revised.blockerDiagnosis }

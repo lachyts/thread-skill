@@ -18,6 +18,7 @@ max_review_rounds: 4
 max_plan_rounds: 3  # 2 was insufficient for cross-cutting plan-gates; 3-with-accumulated-feedback converges (wave:execute item 1)
 plan_approval: scope-gated  # off | scope-gated | required
 parallel_ceiling: 4
+model: fable  # fable | opus — default for every task's agents; wave:plan stamps `model: opus` per-task on easy (single-file + shallow) tasks. Judges always run fable.
 # env_bootstrap:   # optional: shell cmd wave:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — wave:plan step 2.7
 merged_through_wave: 0  # wave:execute continuous-mode cursor: highest wave merged to main (0 = none yet)
 # supersedes: "[[<prior-rollout-slug>]]"   # add only when --regenerate replaces an earlier rollout (see SKILL.md step 6)
@@ -40,7 +41,7 @@ execute [[{{ROLLOUT_SLUG}}]]                # full-rollout continuous mode
 execute [[{{ROLLOUT_SLUG}}]] --gated        # full-rollout, pause between waves
 ```
 
-The contract lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` — three-layer convergence (plan-gate → Ralph-style agent-side verifier retry → master-side review-and-revise loop). The rollout-level defaults in this note's frontmatter (`verifier`, `max_iterations`, `max_review_rounds`, `plan_approval`, `max_plan_rounds`, `parallel_ceiling`) are inherited by every task; per-task overrides go in the task's own frontmatter.
+The contract lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` — three-layer convergence (plan-gate → Ralph-style agent-side verifier retry → master-side review-and-revise loop). The rollout-level defaults in this note's frontmatter (`verifier`, `max_iterations`, `max_review_rounds`, `plan_approval`, `max_plan_rounds`, `parallel_ceiling`, `model`) are inherited by every task; per-task overrides go in the task's own frontmatter.
 
 `plan_approval: scope-gated` (the default) makes the plan-gate fire only for `scope: cross-cutting` tasks — single-file + read-only tasks skip it. Set to `off` for legacy behaviour (no plan-gate); `required` to gate every task. The plan-gate inserts one review round before Ralph: the subagent posts a structured plan under `## Plan (round N)` in the task note, the lead session reviews, and only after approval does the implementer phase begin.
 
