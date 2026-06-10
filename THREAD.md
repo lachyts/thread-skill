@@ -6,6 +6,26 @@ lives in the Obsidian vault at `Work/Tasks/wave-execute-e2e-test-giflab`; the pr
 
 ---
 
+## 2026-06-10 — Per-task model tiering (fable default, opus drop-down)
+
+Agents previously inherited whatever model the invoking session ran — non-deterministic across
+sessions. Model is now an explicit config field resolved task frontmatter → rollout frontmatter →
+`fable` (commit `db21202`).
+
+- **Stance (Lachy's call):** err toward Fable 5. Fable is the default for every agent; Opus is a
+  deliberate per-task *drop-down*, never the other way round.
+- **Easy-task heuristic** — `/wave:plan` step 4.7 suggests `model: opus` only when ALL of:
+  `scope: single-file`, `work_depth` shallow/absent, change is mechanical (judged from the body).
+  Suggestions are a user-confirmed batch; only confirmed tasks get `model: opus` stamped (never
+  stamp `model: fable` — it's the rollout-level default in the template frontmatter).
+- **Judges engine-pinned to fable** — the task model applies to planner/implementer/reviser/
+  investigator; `plan-judge` + `review-judge` always run `JUDGE_MODEL = 'fable'` (merge
+  gatekeepers keep max capability even on an opus task). Not configurable by design.
+- **No protocol bump** — v3 rollouts without `model:` resolve to `fable`, the intended default.
+  Existing rollouts need no regeneration; `model: opus` can be hand-stamped on any task anytime.
+- **Quirk** — adding `model` to `agent()` opts is a one-time resume-cache break for pre-feature
+  runs (opts are part of the cache key). New runs are stable: the resolved model is deterministic.
+
 ## 2026-06-04 — Extracted into its own repo, as the `wave` plugin
 
 Pulled `wave-plan` / `wave-execute` out of `~/.claude` (the `lachyts/claude-config` repo) into
@@ -59,3 +79,5 @@ fixes shipped + validated (giflab PR #52). Everything since traces back to this 
   Workflow `scriptPath` value (the target file is already verified present in both the install
   cache and the working tree; substitution is the standard documented plugin mechanism, so this is
   belt-and-braces). Fallback if it ever doesn't: resolve the path in a Bash `echo` step first.
+  Same run: confirm `/workflows` shows subagents on Fable 5 (and Opus on any opus-stamped task) —
+  the model-tiering smoke check.
