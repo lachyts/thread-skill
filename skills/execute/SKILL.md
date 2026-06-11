@@ -119,7 +119,14 @@ In continuous mode the lead session is the conductor: run ONE wave on the engine
    - **sentinel `ok` → advance the cursor to `merged_through_wave: K`** via the helper (not a hand-edit):
      `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py cursor --rollout <rollout-note> --wave K`
 4. **Smart-halt check** before launching K+1: if any wave-K task did **not** land (`blocked` / `review-blocked` / `plan-blocked`) **and** its file-set (from the rollout note's `## File-sets` block) intersects the union of any later wave's file-sets → **HALT** with a clear report (e.g. "wave K left [[task]] unlanded; wave M edits the same file `<f>` — continuing would branch it from a main missing the fix"). The user fixes the blocker and re-invokes. Otherwise launch wave K+1 (its worktrees branch from the freshly-merged `origin/main`).
-5. Repeat until the last wave merges, then run the rollout note's **## Post-rollout** checklist (mark the rollout `status: done`, re-run any post-audit step, close the thread).
+5. Repeat until the last wave merges, then **perform the completion ceremony** (don't just point the user at the checklist):
+   - Stamp `status: done` + `completed: <date>` on the rollout frontmatter.
+   - File any follow-on work the rollout's Post-rollout section names (validation re-runs, audits, deferred items) as **new open tasks** in `Work/Tasks/`, and rewrite those items in the rollout note as thin pointers to the new tasks.
+   - Append a `## Completion log` to the rollout note: dispatch dates, waves → PRs (links + merge dates), convergence stats per task, disposition of each post-rollout item.
+   - Close out the associated thread (see `~/.claude/skills/thread/SKILL.md`) — or record in the log why it stays open.
+   - Move the rollout note to `Work/Tasks/Archive/Rollouts/` (`git mv` in the vault) and commit the vault. Wikilinks resolve by filename, so `[[<slug>]]` references and task `rollout:` backlinks survive the move.
+
+   A done rollout left sitting in `Work/Tasks/` is invisible-but-present — every Bases view filters `status != done`, so it vanishes from view with no record of what happened. The ceremony is what makes completion legible weeks later.
 
 **Cold resume.** Re-invoking `execute [[rollout]]` when `merged_through_wave: N` is set: first re-run `merge-wave.sh` against wave N+1's already-open PRs (idempotent — merged PRs are skipped, so this flushes any half-merged wave), then continue the loop.
 
