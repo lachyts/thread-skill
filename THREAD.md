@@ -6,6 +6,24 @@ lives in the Obsidian vault at `Work/Tasks/wave-execute-e2e-test-giflab`; the pr
 
 ---
 
+## 2026-06-12 — mark-done: tasks no longer stranded at `review` after landing
+
+The lifecycle ended at `status: review` — engine stamps review, merge-wave merges, ceremony
+closes the rollout, but nothing flipped the task notes. Seven landed giflab tasks (PRs #56–#60)
+piled up as false "awaiting acceptance" items before Lachy noticed.
+
+- **New `reconcile-wave.py mark-done`** — flips `review` → `done` only; refuses any other status
+  (exit 1) so blocked tasks can't be swept along. Test coverage in `reconcile-wave.test.sh`.
+- **Wired into every merge-confirmation point** in execute SKILL: §4.5 step 3 (after cursor
+  advance — PR tasks *and* the wave's read-only tasks), single-wave mode, cold resume, and a
+  straggler sweep as ceremony item 1.
+- **Drift healed** — the dated-rollout ordinal naming (plan §6, execute §1) existed only as
+  direct edits to the installed cache; ported into the repo. Reminder: the installed cache at
+  `~/.claude/plugins/cache/wave/wave/1.0.0/` is a COPY — edit the repo, then re-sync the cache
+  (or reinstall); editing either alone re-creates two-way drift.
+
+---
+
 ## 2026-06-04 — Extracted into its own repo, as the `wave` plugin
 
 Pulled `wave-plan` / `wave-execute` out of `~/.claude` (the `lachyts/claude-config` repo) into
