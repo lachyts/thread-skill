@@ -185,8 +185,10 @@ Location: `~/repos/obsidian/Work/Tasks/<project-slug>-rollout.md` (project slug 
 
 If the file already exists, prompt:
 - **Overwrite** — replace it (preserves wave history nowhere)
-- **Date-suffix** — write to `<project-slug>-rollout-<YYYY-MM-DD>.md` instead
+- **Date-suffix** — write to a dated note instead (the usual choice for a new, distinct effort)
 - **Cancel** — abort
+
+**Dated-note naming — handles more than one rollout per day.** The date-suffix is `<project-slug>-rollout-<YYYY-MM-DD>.md` for the **first** rollout of a given day, and `<project-slug>-rollout-<YYYY-MM-DD>-<N>.md` (N≥2) for each **subsequent** rollout that same day. Resolve N deterministically: glob `<project-slug>-rollout-<YYYY-MM-DD>*.md` — nothing matches → bare date (no `-N`); only the bare-date note exists → `-2`; otherwise → one past the highest existing ordinal. The first-of-day note never carries `-1` (kept bare, backward-compatible with every existing dated rollout). So a day's sequence reads `…-2026-06-09.md`, `…-2026-06-09-2.md`, `…-2026-06-09-3.md`. **Never overwrite or reuse an existing dated note** — always advance to the next free ordinal (pick **Overwrite** only to replace a same-day note you just wrote in error). Substitute the resolved slug into `{{ROLLOUT_SLUG}}` everywhere downstream — the note's own filename, the per-task `rollout:` stamps (step 7), the summary (step 8), and any `supersedes:` / `superseded_by:` links.
 
 **Superseding a prior rollout.** When `--regenerate` replaces an earlier rollout (commonly a dated one whose still-open tasks are being re-planned here), stamp `supersedes: "[[<prior-rollout-slug>]]"` in this note's frontmatter, and close out the prior rollout: set `status: done` (TaskNotes only knows `open` / `in-progress` / `done`, and `done` auto-archives it out of the open list) + `superseded_by: "[[<this-slug>]]"` to record *why* it closed and keep the lineage navigable. Its already-landed tasks stay `done`; its still-open tasks are re-planned into this rollout.
 

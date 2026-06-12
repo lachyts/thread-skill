@@ -113,6 +113,25 @@ echo "$OUT" | grep -qx "task-planblocked"  && echo "ok   - plan-blocked re-dispa
 if echo "$OUT" | grep -qx "task-approved"; then echo "FAIL - done task re-dispatched"; fail=1; else echo "ok   - done task excluded"; fi
 if echo "$OUT" | grep -qx "task-revised"; then echo "FAIL - review task re-dispatched"; fail=1; else echo "ok   - review task excluded"; fi
 
+echo "== mark-done (post-merge review->done flip) =="
+# State here: task-approved=done, task-revised=review, task-blocked=blocked.
+python3 "$SCRIPT" mark-done --tasks "task-revised" --tasks-dir "$TMP" || { echo "FAIL - mark-done exit"; fail=1; }
+check "review task flipped to done"     "status: done"                                 "$TMP/task-revised.md"
+refute "review status gone"             "status: review"                               "$TMP/task-revised.md"
+python3 "$SCRIPT" mark-done --tasks "task-approved" --tasks-dir "$TMP" >/dev/null \
+  && echo "ok   - already-done is a no-op (exit 0)" || { echo "FAIL - already-done errored"; fail=1; }
+if python3 "$SCRIPT" mark-done --tasks "task-blocked" --tasks-dir "$TMP" >/dev/null 2>&1; then
+  echo "FAIL - blocked task accepted"; fail=1
+else echo "ok   - blocked task refused (exit 1)"; fi
+check "blocked status untouched"        "status: blocked"                              "$TMP/task-blocked.md"
+# Mixed call: the refusal must not stop the valid flip (read-only task at review, no pr).
+mknote task-readonly review
+if python3 "$SCRIPT" mark-done --tasks "task-readonly,task-planblocked" --tasks-dir "$TMP" >/dev/null 2>&1; then
+  echo "FAIL - mixed call with a non-review slug exited 0"; fail=1
+else echo "ok   - mixed call reports the error (exit 1)"; fi
+check "read-only flipped despite mixed" "status: done"                                 "$TMP/task-readonly.md"
+check "plan-blocked untouched"          "status: plan-blocked"                         "$TMP/task-planblocked.md"
+
 echo
-if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fi
+if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fail=1; fi
 exit $fail
