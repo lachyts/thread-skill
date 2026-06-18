@@ -1,17 +1,17 @@
 ---
 name: execute
-description: Use to execute a wave rollout — reads a rollout note at ~/repos/obsidian/Work/Tasks/<slug>-rollout.md, resolves per-task config, and calls the Workflow tool with wave-execute.workflow.js to run the convergence engine (per-task plan-gate → Ralph-style verifier retry → master review, converging in parallel within each wave). In continuous mode (bare "execute [[rollout]]") it auto-merges each wave before launching the next — zero-touch, no per-PR confirmation — with --gated as the manual-merge escape hatch. Triggers on natural-language "execute Wave N of [[rollout-slug]]" or "execute [[rollout-slug]]" patterns, or explicit /wave:execute invocation. Only runs rollouts with protocol_version: 3; refuses older rollouts and prompts for regeneration via /wave:plan --regenerate.
+description: Use to execute a wave rollout — reads a rollout note at ~/repos/obsidian/Work/Tasks/<slug>-rollout.md, resolves per-task config, and calls the Workflow tool with wave-execute.workflow.js to run the convergence engine (per-task plan-gate → Ralph-style verifier retry → master review, converging in parallel within each wave). In continuous mode (bare "execute [[rollout]]") it auto-merges each wave before launching the next — zero-touch, no per-PR confirmation — with --gated as the manual-merge escape hatch. Triggers on natural-language "execute Wave N of [[rollout-slug]]" or "execute [[rollout-slug]]" patterns, or explicit /wave:execute invocation. Only runs rollouts with protocol_version: 3; refuses older rollouts and prompts for regeneration via /wave:schedule --regenerate.
 ---
 
 # /wave:execute — run a wave rollout on the Workflow engine
 
-`/wave:execute` is the executor half of the wave split. Where `/wave:plan` writes the rollout note (data), this skill reads it, resolves config, and hands the convergence work to a **dynamic Workflow** script. This skill is a thin shim; the engine lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/wave-execute.workflow.js`.
+`/wave:execute` is the executor half of the wave split. Where `/wave:schedule` writes the rollout note (data), this skill reads it, resolves config, and hands the convergence work to a **dynamic Workflow** script. This skill is a thin shim; the engine lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/wave-execute.workflow.js`.
 
 The engine runs three layers per task — optional plan-gate (autonomous judge) → Ralph-style agent-side verifier retry → master-side review-and-revise loop — and converges tasks **in parallel within each wave** (a task can be in master-review while a wave-mate is still implementing). The skill itself stays in the conversation to do vault I/O, the protocol gate, status reconciliation, reporting, and the `--gated` between-wave pause (which an autonomous background workflow cannot do).
 
 ## Scope
 
-Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout.md` produced by `/wave:plan`. The Workflow's agents operate in isolated git worktrees they create under the target repo (`<repoPath>/.claude/worktrees/`) and open PRs. The lead session updates task frontmatter in the vault. Does not touch any other backlog source.
+Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout.md` produced by `/wave:schedule`. The Workflow's agents operate in isolated git worktrees they create under the target repo (`<repoPath>/.claude/worktrees/`) and open PRs. The lead session updates task frontmatter in the vault. Does not touch any other backlog source.
 
 ## Invocation forms
 
@@ -33,11 +33,11 @@ Single-wave mode opens PRs and leaves merging to you.
 
 Resolve `[[<slug>]]` to `~/repos/obsidian/Work/Tasks/<slug>.md`. Read frontmatter + body.
 
-The slug is whatever the invocation names. `/wave:plan` writes rollout notes as `<project-slug>-rollout` (the original, undated), `<project-slug>-rollout-<YYYY-MM-DD>` (first rollout of a day), or `<project-slug>-rollout-<YYYY-MM-DD>-<N>` (N≥2, each subsequent rollout that same day — the first-of-day stays bare-date). The ordinal is purely `/wave:plan`'s collision-avoidance scheme; execute reads the exact note it's handed and needs no special parsing. If the user names a rollout ambiguously (e.g. "execute today's giflab rollout") and several dated/ordinal notes match, **list the matches and ask which** — don't assume the highest ordinal.
+The slug is whatever the invocation names. `/wave:schedule` writes rollout notes as `<project-slug>-rollout` (the original, undated), `<project-slug>-rollout-<YYYY-MM-DD>` (first rollout of a day), or `<project-slug>-rollout-<YYYY-MM-DD>-<N>` (N≥2, each subsequent rollout that same day — the first-of-day stays bare-date). The ordinal is purely `/wave:schedule`'s collision-avoidance scheme; execute reads the exact note it's handed and needs no special parsing. If the user names a rollout ambiguously (e.g. "execute today's giflab rollout") and several dated/ordinal notes match, **list the matches and ask which** — don't assume the highest ordinal.
 
 ### 2. Protocol-version gate
 
-- Missing `protocol_version` **or** `protocol_version: 2` → print: "This rollout predates the Workflow engine. Regenerate it to run under the current contract: `/wave:plan <project> --regenerate`." Stop. (The legacy prose executor has been retired — there is no in-conversation engine to fall back to.)
+- Missing `protocol_version` **or** `protocol_version: 2` → print: "This rollout predates the Workflow engine. Regenerate it to run under the current contract: `/wave:schedule <project> --regenerate`." Stop. (The legacy prose executor has been retired — there is no in-conversation engine to fall back to.)
 - `protocol_version` other than `3` → print "unsupported protocol version <N>; this executor supports protocol_version: 3" and stop.
 - `protocol_version: 3` → proceed.
 
@@ -57,7 +57,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 | `ignore_gate` | `false` (omit) | `task.ignoreGate` (per-task) |
 | `model` | `fable` | `task.model` (per-task; `fable` \| `opus`) |
 
-`scope:` is read directly from each task's frontmatter (set by `/wave:plan`). `completion_sentinel` is no longer used — the Workflow returns validated structured output instead of parsing sentinel strings.
+`scope:` is read directly from each task's frontmatter (set by `/wave:schedule`). `completion_sentinel` is no longer used — the Workflow returns validated structured output instead of parsing sentinel strings.
 
 `env_bootstrap` (rollout-level) is an optional shell command the engine runs once per worktree so agents start from a working interpreter + deps (e.g. `poetry env use 3.11 && poetry install`) — read it from the rollout frontmatter and pass it as `envBootstrap`; **omit the key when absent** so the worktree-setup prompt stays byte-identical (resume-cache invariant). `ignore_gate` (per-task) is an explicit override for a task note that carries a human/release gate in prose ("don't action until a release ships"); when `true`, pass `ignoreGate: true` on that task so the engine tells the agent the gate is overridden for this run — **omit/false** otherwise.
 
@@ -92,13 +92,13 @@ Build the `args` object the workflow expects:
         "scope": "single-file", "planGate": false,
         "maxIterations": 3, "maxReviewRounds": 4, "maxPlanRounds": 2,
         "ignoreGate": false,                 // per-task; omit/false unless overriding a human/release gate
-        "model": "fable" }                   // per-task; "opus" when wave:plan dropped an easy task down
+        "model": "fable" }                   // per-task; "opus" when wave:schedule dropped an easy task down
     ]}
   ]
 }
 ```
 
-Also read the rollout note's **`## Known baseline failures`** block (`/wave:plan` step 2.6): when it lists tests (not `none`/empty), pass them as `knownBaselineFailures: ["<test_id> — <reason>", …]`. The engine threads the manifest into every agent and shifts the Ralph green criterion to "no NEW failures beyond this set" — it keeps running the full verifier and never `--deselect`s the listed reds (per the project's `CLAUDE.md`: a comparison reference, not a mute button). Omit the key when the block is absent or `none` — the engine then behaves exactly as before (`verifier` exit 0 = pass).
+Also read the rollout note's **`## Known baseline failures`** block (`/wave:schedule` step 2.6): when it lists tests (not `none`/empty), pass them as `knownBaselineFailures: ["<test_id> — <reason>", …]`. The engine threads the manifest into every agent and shifts the Ralph green criterion to "no NEW failures beyond this set" — it keeps running the full verifier and never `--deselect`s the listed reds (per the project's `CLAUDE.md`: a comparison reference, not a mute button). Omit the key when the block is absent or `none` — the engine then behaves exactly as before (`verifier` exit 0 = pass).
 
 - **Single-wave mode** (`execute Wave N of [[rollout]]`) → include only wave N in `waves`. Opens PRs; the user merges. No auto-merge. The tasks therefore end the session at `status: review` — once the user confirms the merges (or a later invocation finds the PRs merged in pre-flight), run `reconcile-wave.py mark-done` on them so they don't linger as false "awaiting acceptance" items.
 - **Continuous auto-merge mode** (`execute [[rollout]]`, no wave number, no flag — the DEFAULT) → do **not** pass all waves at once. Drive the rollout **one wave per Workflow call** across turns, auto-merging each wave before launching the next. This is the zero-touch path — see §4.5.
@@ -147,7 +147,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py resume-fi
 #   prints the subset whose status ∉ {done, review, merged} — build args from exactly those
 ```
 
-**No `## File-sets` block?** (an older rollout) the precise smart-halt can't run — fall back to the **coarse** rule: any unlanded task + any later wave ⇒ HALT. Tell the user to `/wave:plan --regenerate` for precise halting.
+**No `## File-sets` block?** (an older rollout) the precise smart-halt can't run — fall back to the **coarse** rule: any unlanded task + any later wave ⇒ HALT. Tell the user to `/wave:schedule --regenerate` for precise halting.
 
 ### 5. Call the Workflow
 
@@ -243,7 +243,7 @@ Each **code-writing** agent (implementer / approved-plan implementer) creates it
 
 | Version | Contract | Status |
 |---|---|---|
-| (absent) / 2 | Legacy in-conversation playbook (prose-driven dispatch + sentinel parsing) | Retired — regenerate via `/wave:plan --regenerate` |
+| (absent) / 2 | Legacy in-conversation playbook (prose-driven dispatch + sentinel parsing) | Retired — regenerate via `/wave:schedule --regenerate` |
 | 3 | Workflow-engine convergence (`wave-execute.workflow.js`): structured output, in-pipeline parallel review, autonomous plan-gate judge, journaled resume | Current |
 
 Future protocol bumps follow the same rule: a new executor refuses older versions and asks the user to regenerate.

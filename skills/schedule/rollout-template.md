@@ -18,8 +18,8 @@ max_review_rounds: 4
 max_plan_rounds: 3  # 2 was insufficient for cross-cutting plan-gates; 3-with-accumulated-feedback converges (wave:execute item 1)
 plan_approval: scope-gated  # off | scope-gated | required
 parallel_ceiling: 4
-model: fable  # fable | opus — default for every task's agents; wave:plan stamps `model: opus` per-task on easy (single-file + shallow) tasks. Judges always run fable.
-# env_bootstrap:   # optional: shell cmd wave:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — wave:plan step 2.7
+model: fable  # fable | opus — default for every task's agents; wave:schedule stamps `model: opus` per-task on easy (single-file + shallow) tasks. Judges always run fable.
+# env_bootstrap:   # optional: shell cmd wave:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — wave:schedule step 2.7
 merged_through_wave: 0  # wave:execute continuous-mode cursor: highest wave merged to main (0 = none yet)
 # supersedes: "[[<prior-rollout-slug>]]"   # add only when --regenerate replaces an earlier rollout (see SKILL.md step 6)
 ---
@@ -49,7 +49,7 @@ The contract lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` — three-
 
 Tasks scheduled so that same-file tasks never share a wave (and dependencies follow their blockers). Within a wave, agents run in parallel via git worktree isolation. Between waves (single-wave mode), the previous wave's PRs must land first.
 
-The table's **Mode** column reads `parallel` for tasks that fan out within a wave, `solo` for a cross-cutting task alone in its wave, and `sequential-merged (one agent/PR)` for a unit `/wave:plan` folded from an affine same-file cluster — one agent works its sub-tasks in sequence on one branch/PR.
+The table's **Mode** column reads `parallel` for tasks that fan out within a wave, `solo` for a cross-cutting task alone in its wave, and `sequential-merged (one agent/PR)` for a unit `/wave:schedule` folded from an affine same-file cluster — one agent works its sub-tasks in sequence on one branch/PR.
 
 {{WAVE_TABLE}}
 
@@ -76,7 +76,7 @@ If a wave has more tasks than the budget allows, the executor dispatches in two 
 ## File-sets
 
 <!-- Machine-readable: wave:execute's continuous auto-merge reads this for the blocked-task smart-halt.
-     Authored by wave:plan from the confirmed step-2 file-sets (unioned for merged units). One line per
+     Authored by wave:schedule from the confirmed step-2 file-sets (unioned for merged units). One line per
      EDITING task; read-only tasks omitted. This is rollout-note data, NOT task-frontmatter `touches:`. -->
 
 {{FILE_SETS}}

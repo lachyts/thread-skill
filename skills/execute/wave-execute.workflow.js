@@ -1,6 +1,6 @@
 export const meta = {
   name: 'wave-execute',
-  description: 'Run a wave-plan rollout: per-task plan-gate → Ralph verify → master review, converging in parallel within each wave',
+  description: 'Run a wave-schedule rollout: per-task plan-gate → Ralph verify → master review, converging in parallel within each wave',
   phases: [
     { title: 'Plan-gate' },
     { title: 'Implement' },
@@ -451,7 +451,7 @@ function chunk(arr, n) {
 }
 
 // ---- Model tiering -----------------------------------------------------------
-// Fable 5 is the deliberate default for every agent; wave:plan may drop an easy
+// Fable 5 is the deliberate default for every agent; wave:schedule may drop an easy
 // task (single-file + shallow/mechanical) to opus via task frontmatter. The two
 // judge roles gatekeep merges, so they stay on max capability regardless.
 const JUDGE_MODEL = 'fable'

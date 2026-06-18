@@ -6,6 +6,30 @@ lives in the Obsidian vault at `Work/Tasks/wave-execute-e2e-test-giflab`; the pr
 
 ---
 
+## 2026-06-18 — `/wave:split` added + `plan → schedule` rename (pipeline is now split → schedule → execute)
+
+Two changes in one pass:
+
+- **New `/wave:split`** (`skills/split/`) — the missing upstream stage: takes a plan/design (vault
+  note, plan-mode plan file, or inline prose), decomposes it into **PR-sized, phased Obsidian task
+  notes** (with the runnable prompt + context + `touches:` + deps), and slims the source into a
+  linked outline. Emits **schedule-ready** tasks (writes `touches:`, leaves `wave:`/`scope:` for the
+  scheduler). Propose→approve→write gate; honours explicit phases, else infers dependency layers.
+- **Renamed `/wave:plan` → `/wave:schedule`** — once `split` does the "turn intent into tasks"
+  work, the middle stage isn't *planning*, it's **scheduling** (clustering existing tasks into
+  parallel-safe waves). `skills/plan/` is now a thin deprecated **alias stub** that redirects to
+  `/wave:schedule`. Live surfaces updated (README, manifests, execute cross-refs, rollout-template);
+  archived rollout notes left as historical record — execute reads the rollout *data contract*, not
+  the command name, so existing rollouts are unaffected.
+- **Forked-clone reconciliation first** — the repo (model-tiering) and the marketplace/cache
+  (completion-ceremony + mark-done) had re-diverged since 2026-06-12; merged into one history
+  (`d2ceda8`, only THREAD.md conflicted) and re-unified all three copies before layering these on.
+- **Canonical source going forward:** the repo `~/repos/tools/wave-skill` is the dev source — edit
+  here, then sync the marketplace + the installed cache down from it. (Supersedes the old
+  "edit the marketplace" note.)
+
+---
+
 ## 2026-06-12 — mark-done: tasks no longer stranded at `review` after landing
 
 The lifecycle ended at `status: review` — engine stamps review, merge-wave merges, ceremony

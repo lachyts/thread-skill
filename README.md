@@ -3,7 +3,7 @@
 A Claude Code plugin for running large, multi-PR changes as a **wave-by-wave convergence
 rollout**. Two skills:
 
-- **`/wave:plan`** — the *planner*. Reads a backlog of related Obsidian tasks under one project,
+- **`/wave:schedule`** — the *planner*. Reads a backlog of related Obsidian tasks under one project,
   computes wave structure from file-overlap + dependency analysis, auto-merges affine same-file
   task clusters, and writes a thin `<project-slug>-rollout.md` note (data only) with
   `protocol_version: 3` frontmatter + rollout-level config defaults.
@@ -52,9 +52,9 @@ Cut a versioned release with `claude plugin tag` once `plugin.json` + `marketpla
 
 ## Invocation
 
-`/wave:plan <Project>` to build a rollout, then `/wave:execute [[<slug>-rollout]]` (or natural
+`/wave:schedule <Project>` to build a rollout, then `/wave:execute [[<slug>-rollout]]` (or natural
 language: `execute Wave 1 of [[<slug>-rollout]]`). The executor only runs `protocol_version: 3`
-rollouts and prompts for regeneration via `/wave:plan --regenerate` on older notes.
+rollouts and prompts for regeneration via `/wave:schedule --regenerate` on older notes.
 
 ## Layout
 
