@@ -7,13 +7,19 @@ fumble-prone edits across a rollout. This helper performs ALL of those writes de
 returned task array, and (finding #7) computes the per-task resume set so a partial wave resumes without
 re-dispatching already-landed work.
 
-Three subcommands:
+Four subcommands:
 
   reconcile   Read the workflow result JSON ({rolloutSlug, tasks:[...]}) and write each task note's
               frontmatter + any blocked-feedback body section. Idempotent (safe to re-run on resume).
 
   cursor      Set `merged_through_wave: N` on a rollout note (the durable continuous-mode cursor),
               run AFTER merge-wave.sh reports `ok` for wave N.
+
+  mark-done   Flip task notes `status: review` -> `status: done`, run AFTER the wave's merge is
+              confirmed (merge-wave.sh `ok` sentinel). `review` means "landed, awaiting confirmation";
+              the merge IS that confirmation for PR tasks, and the wave completing is it for read-only
+              tasks (master-review approval, nothing to merge). Refuses any note at another status —
+              a blocked/unmerged task can never be swept to done. Idempotent (already-done = no-op).
 
   resume-filter  Given a wave's task slugs, print (one per line) the slugs that still need dispatch —
               i.e. whose current note status is NOT already landed/approved ({done, review, merged}).
@@ -210,6 +216,39 @@ def cmd_cursor(args) -> int:
     return 0
 
 
+# ---- mark-done ---------------------------------------------------------------
+
+def cmd_mark_done(args) -> int:
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
+    errors = []
+    for slug in slugs:
+        path = tasks_dir / f"{slug}.md"
+        if not path.exists():
+            errors.append(f"{slug}: task note not found at {path}")
+            continue
+        try:
+            note = Note(path)
+        except ValueError as e:
+            errors.append(str(e))
+            continue
+        status = note.get("status")
+        if status == "done":
+            print(f"{slug}: already done [no-change]")
+            continue
+        if status != "review":
+            # Only a `review` note is "landed, awaiting confirmation". Anything else means the
+            # caller's picture of the wave is stale — refuse rather than mask a blocked/unmerged task.
+            errors.append(f"{slug}: status is {status!r}, not 'review' — refusing to mark done")
+            continue
+        note.set("status", "done")
+        note.save(dry_run=args.dry_run)
+        print(f"{slug}: status=done" + (" (dry-run)" if args.dry_run else " [written]"))
+    for e in errors:
+        print(f"ERROR: {e}", file=sys.stderr)
+    return 1 if errors else 0
+
+
 # ---- resume-filter ----------------------------------------------------------
 
 def cmd_resume_filter(args) -> int:
@@ -250,6 +289,12 @@ def main() -> int:
     c.add_argument("--wave", type=int, required=True)
     c.add_argument("--dry-run", action="store_true")
     c.set_defaults(func=cmd_cursor)
+
+    d = sub.add_parser("mark-done", help="flip task notes review->done after their wave's merge is confirmed")
+    d.add_argument("--tasks", required=True, help="comma-separated task slugs (every wave task that ended at review)")
+    d.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
+    d.add_argument("--dry-run", action="store_true")
+    d.set_defaults(func=cmd_mark_done)
 
     f = sub.add_parser("resume-filter", help="print the slugs in a wave that still need dispatch")
     f.add_argument("--tasks", required=True, help="comma-separated task slugs for the target wave")
