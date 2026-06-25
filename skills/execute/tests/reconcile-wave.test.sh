@@ -132,6 +132,69 @@ else echo "ok   - mixed call reports the error (exit 1)"; fi
 check "read-only flipped despite mixed" "status: done"                                 "$TMP/task-readonly.md"
 check "plan-blocked untouched"          "status: plan-blocked"                         "$TMP/task-planblocked.md"
 
+echo "== status / resolve / defer (rollout-scoped, /wave:status + /wave:repair) =="
+cat > "$TMP/st-rollout.md" <<EOF
+---
+tags: [task, rollout]
+status: open
+protocol_version: 3
+merged_through_wave: 1
+---
+
+## Notes
+EOF
+mklinked() {  # mklinked <slug> <status> <wave> <pr-or-empty>
+  cat > "$TMP/$1.md" <<EOF
+---
+tags: [task, Demo]
+status: $2
+wave: $3
+rollout: "[[st-rollout]]"
+$( [ -n "$4" ] && echo "pr: \"$4\"" )
+---
+
+body $1
+EOF
+}
+mklinked st-a  review         1 "https://github.com/o/r/pull/10"
+mklinked st-ro review         1 ""                                  # read-only style, no pr
+mklinked st-b  review-blocked 2 "https://github.com/o/r/pull/11"
+printf '\n## Review-blocked feedback\n\n- needs the value supplied out-of-band\n' >> "$TMP/st-b.md"
+cat > "$TMP/st-foreign.md" <<EOF
+---
+tags: [task, Demo]
+status: open
+rollout: "[[other-rollout]]"
+---
+
+nope
+EOF
+
+JSON=$(python3 "$SCRIPT" status --rollout "$TMP/st-rollout.md" --tasks-dir "$TMP")
+echo "$JSON" | grep -q '"merged_through_wave": 1' && echo "ok   - status: cursor read"             || { echo "FAIL - status cursor"; fail=1; }
+echo "$JSON" | grep -q '"slug": "st-ro"'          && echo "ok   - status: read-only task included" || { echo "FAIL - read-only missing"; fail=1; }
+echo "$JSON" | grep -q '"slug": "st-b"'           && echo "ok   - status: blocked task included"   || { echo "FAIL - blocked missing"; fail=1; }
+if echo "$JSON" | grep -q '"slug": "st-foreign"'; then echo "FAIL - foreign rollout leaked"; fail=1; else echo "ok   - status: foreign rollout excluded"; fi
+echo "$JSON" | grep -q 'supplied out-of-band'     && echo "ok   - status: blockerSummary extracted" || { echo "FAIL - blockerSummary missing"; fail=1; }
+echo "$JSON" | grep -q '"total_waves": 2'         && echo "ok   - status: total_waves computed"     || { echo "FAIL - total_waves"; fail=1; }
+
+# resolve: drift gap-closer (blocked -> done), refuses a non-blocked note
+python3 "$SCRIPT" resolve --tasks "st-b" --tasks-dir "$TMP" || { echo "FAIL - resolve exit"; fail=1; }
+check  "resolve: review-blocked -> done" "status: done"   "$TMP/st-b.md"
+if python3 "$SCRIPT" resolve --tasks "st-a" --tasks-dir "$TMP" >/dev/null 2>&1; then
+  echo "FAIL - resolve accepted a review task"; fail=1
+else echo "ok   - resolve refuses non-blocked (review)"; fi
+check  "resolve: review task untouched"  "status: review" "$TMP/st-a.md"
+
+# defer: pop to backlog (clears wave/rollout), refuses a cross-rollout note
+python3 "$SCRIPT" defer --tasks "st-ro" --rollout "$TMP/st-rollout.md" --tasks-dir "$TMP" || { echo "FAIL - defer exit"; fail=1; }
+check  "defer: status open"   "status: open" "$TMP/st-ro.md"
+refute "defer: wave cleared"    "wave:"      "$TMP/st-ro.md"
+refute "defer: rollout cleared" "rollout:"   "$TMP/st-ro.md"
+if python3 "$SCRIPT" defer --tasks "st-foreign" --rollout "$TMP/st-rollout.md" --tasks-dir "$TMP" >/dev/null 2>&1; then
+  echo "FAIL - defer accepted a foreign-rollout task"; fail=1
+else echo "ok   - defer refuses cross-rollout"; fi
+
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fail=1; fi
 exit $fail

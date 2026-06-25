@@ -6,6 +6,73 @@ lives in the Obsidian vault at `Work/Tasks/wave-execute-e2e-test-giflab`; the pr
 
 ---
 
+## 2026-06-25 — `/wave:status` + `/wave:repair`: rollout-scoped situational awareness & repair
+
+Added the two operational verbs Lachy asked for — *"where is this rollout?"* and *"sort it out"* —
+plus the `judgeModel` engine fix from the giflab smoke test (not previously logged). The grill (via
+`/grill-with-docs`) killed the original "repair engine" design: re-running `/wave:execute` **already**
+re-attempts blocked tasks (the engine's worktree setup is idempotent on re-dispatch —
+`wave-execute.workflow.js:432` — and `resume-filter` treats blocked statuses as "needs dispatch"). So
+repair is a **conductor**, not a second engine.
+
+- **`/wave:status [[rollout]]`** (`skills/status/SKILL.md`) — read-only situational report. Vault read
+  via a new `reconcile-wave.py status` mode (glob-by-`rollout:`-backlink, so read-only tasks the
+  `## File-sets` block omits are included) + a **live cross-check** (one `git worktree list`, one
+  `gh pr view` per PR'd task) that flags **drift**. `--offline` skips the network.
+- **`/wave:repair [[rollout]]`** (`skills/repair/SKILL.md`) — conductor. Diagnoses, then: reconciles
+  drift → done, auto-retries agent-fixable blocks (cap one/run), asks only **input-gated** decisions
+  and injects them into the notes, **dependency-aware-defers** wedged tasks, and hands off to execute's
+  §4.5 resume. Never merges except via `merge-wave.sh`. Decision recorded in
+  `docs/adr/0001-repair-is-a-conductor-not-an-engine.md`.
+- **`reconcile-wave.py` +3 modes** — `status` (emit situational JSON, pure read), `resolve` (flip a
+  *blocked* note → done, the `review-blocked → done` gap-closer for the out-of-band-merge case; refuses
+  any non-blocked note — caller must verify the PR merged), `defer` (pop a task back to open backlog,
+  clearing `wave:`/`rollout:`/`owner:`). Covered by new cases in `reconcile-wave.test.sh`.
+- **Engine: re-dispatch is feedback-aware.** A static `PRIOR_FEEDBACK_NOTE` line in the implementer /
+  planner / approved-plan-implementer prompts tells a resumed agent to treat a prior
+  `## Review-blocked feedback` / `## Blocker diagnosis` / `## Plan-blocked feedback` / `## Repair input`
+  section as authoritative — so repair's auto-retry converges instead of silently repeating rejected
+  work. `prompt-invariants.test.mjs` still green (the change doesn't touch the gated pure functions).
+- **`judgeModel` fix (from the smoke test).** The two judge roles were hard-pinned to `fable`; when
+  Fable 5 was unavailable the whole run died. Judges now default to `fable` but are overridable per-run
+  via the `judgeModel` arg.
+- **Domain model captured** — `CONTEXT.md` glossary (conductor vs engine, input-gated vs agent-fixable
+  block, drift, clean defer, dependent closure, situational report) via `/grill-with-docs`.
+
+---
+
+## 2026-06-24 — Orca coexistence: separate lanes + cockpit, wave keeps merge authority (docs only)
+
+Lachy is adopting **Orca** (onorca.dev — open-source GUI ADE / human-in-the-loop cockpit for
+parallel agents) as his daily driver and asked how it changes wave, "especially git worktrees."
+After a 3-stream investigation (wave architecture · Orca internals · 2026 best-practices) the
+answer was **no engine change** — the two coexist cleanly and the work was documentation.
+
+- **Posture — separate lanes + cockpit.** wave = autonomous batch rollouts (unchanged); Orca =
+  supervised/exploratory work (one gnarly task, fan-N-pick-winner which wave structurally can't do,
+  design-mode, multi-provider) **plus** a read-only window onto wave's live worktrees. They never
+  hand-edit the same worktree mid-rollout.
+- **Worktrees don't collide.** wave registers via standard `git worktree add` under
+  `.claude/worktrees/<slug>`; Orca auto-discovers external worktrees (`git worktree list`),
+  classifies them `external`, displays them when external-visibility is on. Free visibility, zero
+  integration code.
+- **Repair bridge — wave keeps merge authority.** A blocked task is repaired in Orca (fix + push,
+  **never merge there**); re-running `/wave:execute` lands it via idempotent `merge-wave.sh`,
+  keeping the cursor / smart-halt / file-set invariants intact. Documented in README +
+  cross-ref at execute SKILL §7.
+- **Billing was a red herring** — Workflow subagents inherit the session's auth, which is a Stripe
+  subscription (not API), so rollouts already run on the subscription; Orca wraps the same `claude`
+  CLI and changes nothing. The real cost lever stays model-tiering (Fable-first).
+- **Reaper verified safe** — `daily-sweep.sh:179-218` (the 11am `daily-git-sweep`) removes only
+  clean+merged worktrees, so the bridge (blocked = unmerged) is never reaped. A plain
+  `git worktree lock` does NOT protect a worktree (the sweep unlocks non-live-PID locks) — that
+  mitigation was investigated and dropped.
+- **Deferred:** scripting wave to drive `orca serve`/RPC (loses Workflow resume-cache + harness-
+  native simplicity; Orca's interactive agent dispatch is GUI-only). Revisit only if read-only
+  visibility proves insufficient.
+
+---
+
 ## 2026-06-18 — `/wave:split` added + `plan → schedule` rename (pipeline is now split → schedule → execute)
 
 Two changes in one pass:

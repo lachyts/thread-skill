@@ -1,0 +1,106 @@
+---
+name: status
+description: Use to see the present situation of a wave rollout — a read-only situational report. Triggers on "wave status of [[rollout]]", "where is [[rollout]] / this rollout", "what state is the rollout in", "what's left on [[rollout]]", "is [[rollout]] done", or pointing at a rollout note and asking what's happening. Reads the rollout note + every linked task note and cross-checks live GitHub PRs + git worktrees, flags drift, and recommends the next action. NEVER writes the vault or merges anything. Read-only sibling of /wave:repair. Scope: Obsidian + read-only gh/git.
+---
+
+# /wave:status — the present situation of a rollout
+
+`/wave:status [[rollout]]` answers one question: **where is this rollout right now?** It reads the
+rollout note and every task carrying `rollout: [[<slug>]]`, cross-checks them against live GitHub PR
+state + git worktrees, flags any **drift**, and prints a single recommended next action.
+
+It is **read-only** — it never stamps frontmatter, never merges, never dispatches. To *act* on what it
+finds, that's `/wave:repair` (the conductor) or `/wave:execute` (resume). This skill is the diagnosis;
+those are the treatment.
+
+## Scope
+
+Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout.md` + its linked task notes, and makes **read-only**
+`gh`/`git` calls against the target repo. Writes nothing. Obsidian + GitHub read access only.
+
+## Invocation forms
+
+```
+/wave:status [[giflab-rollout]]            # full situational report (live cross-check, the default)
+status of [[giflab-rollout]]               # natural language — same thing
+/wave:status [[giflab-rollout]] --offline  # vault-only: skip the gh/git cross-check (instant)
+```
+
+## Skill flow
+
+### 1. Resolve the rollout note
+
+Resolve `[[<slug>]]` → `~/repos/obsidian/Work/Tasks/<slug>.md`. If several dated/ordinal notes match an
+ambiguous name (e.g. "today's giflab rollout"), **list the matches and ask which** — don't assume. Read
+the body's `Project root: \`<repoPath>\`` line — it's the repo for the live checks. (No protocol gate:
+status is read-only and reports whatever it finds, noting if a note predates `protocol_version: 3`.)
+
+### 2. Gather the vault state (deterministic)
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py status --rollout <rollout-note>
+```
+
+Returns JSON: `{ rollout, rolloutStatus, merged_through_wave, total_waves, tasks: [{ slug, wave,
+status, pr, blockerSummary }] }` — **every** task carrying `rollout: [[<slug>]]` (glob-by-backlink, so
+read-only tasks the `## File-sets` block omits are still included), sorted by wave then slug. Pure read,
+no network.
+
+### 3. Live cross-check (default; `--offline` skips)
+
+The vault is the engine's source of truth — but status is exactly the moment you suspect it's stale.
+Cross-check cheaply and flag **drift**:
+
+- **Worktrees** — one `git -C <repoPath> worktree list --porcelain`. For each non-landed task, its
+  worktree is `<repoPath>/.claude/worktrees/<slug>`. A blocked task whose worktree is **gone** (reaped
+  by the 11am sweep) → note it (re-dispatch will branch fresh from `origin/main` — fine, not an error).
+- **PRs** — for each task with a `pr:`, one `gh pr view <pr> --json state,mergedAt,statusCheckRollup`.
+  Flag drift:
+  - note `review`/`review-blocked` but PR **MERGED** → *out-of-band merge*. (`review` → resolves on the
+    next execute via `mark-done`; `review-blocked` → genuine drift, needs `/wave:repair` to reconcile → done.)
+  - note `review-blocked` but PR **OPEN with checks now green** → may already be fixed; flag for a retry.
+  - note `blocked`/`plan-blocked` carrying an open PR → unusual; surface it.
+
+Keep it to one `worktree list` + one `gh` call per PR'd task. On `--offline`, skip this step entirely and
+say the report is vault-only.
+
+### 4. Render the situational report
+
+```
+[[<rollout>]] — wave <K>/<N> merged   (status: <rolloutStatus>)
+
+Wave 1  ✓ merged
+  [[task-a]]   done
+Wave 2  ~ in progress
+  [[task-c]]   review        PR #42 (open)        → awaiting merge
+  [[task-d]]   review-blocked PR #43              ⚠ needs: <first line of blockerSummary>
+  [[task-e]]   blocked       (worktree present)   ⚠ needs: <first line of blockerSummary>
+Wave 3  ◦ not started
+  [[task-f]]   open
+
+Drift:
+  ⚠ [[task-d]] PR #43 is MERGED on origin but note says review-blocked → /wave:repair reconciles to done
+
+Recommended next action: <one line>
+```
+
+Group by wave; within a wave list each task with status, PR (+ live state), and — for any blocker — the
+*first line* of its `blockerSummary` as "needs: …". Surface drift in its own block. Then **one**
+recommended next action:
+
+- all tasks `done` → "rollout complete — run the completion ceremony" (or "already archived").
+- approved PRs awaiting merge / cursor behind → "re-run `/wave:execute [[<rollout>]]` to merge & continue".
+- any blocker or drift → "run `/wave:repair [[<rollout>]]`".
+- nothing dispatched yet → "run `/wave:execute [[<rollout>]]` to start".
+
+Keep the whole report scannable — it's a glance, not a wall of text.
+
+## Don'ts
+
+- **Don't write anything.** No frontmatter edits, no merges, no dispatch — that's `/wave:repair` /
+  `/wave:execute`. If you find yourself wanting to fix something, stop and recommend the repair verb.
+- **Don't re-scan GitHub for the cursor.** `merged_through_wave` in the note is the source of truth for
+  "how far merged"; the live PR check is only for drift flags.
+- **Don't parse the rollout's markdown wave table** for the task list — use the `status` subcommand's
+  glob-by-backlink (it catches read-only tasks the table/`## File-sets` block omit).
+- **Don't make more than one `gh` call per PR'd task.** Status is a glance; keep it cheap.

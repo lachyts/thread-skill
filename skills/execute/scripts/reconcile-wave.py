@@ -7,7 +7,7 @@ fumble-prone edits across a rollout. This helper performs ALL of those writes de
 returned task array, and (finding #7) computes the per-task resume set so a partial wave resumes without
 re-dispatching already-landed work.
 
-Four subcommands:
+Seven subcommands:
 
   reconcile   Read the workflow result JSON ({rolloutSlug, tasks:[...]}) and write each task note's
               frontmatter + any blocked-feedback body section. Idempotent (safe to re-run on resume).
@@ -25,6 +25,20 @@ Four subcommands:
               i.e. whose current note status is NOT already landed/approved ({done, review, merged}).
               This is the per-task resume rule: the task-note status is the source of truth, so a wave
               that returned one approved + one blocked resumes by re-dispatching only the blocked one.
+
+  status      Read-only situational scan for /wave:status. Given a rollout note, find every task note
+              carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
+              `## File-sets` block omits) and emit JSON {rollout, merged_through_wave, status, tasks:
+              [{slug, wave, status, pr, blockerSummary}]}. Pure read; no network (the skill owns gh/git).
+
+  resolve     Flip a *blocked* task (review-blocked/blocked/plan-blocked) -> done. The gap-closer for
+              the drift case (a blocked note whose PR actually merged out-of-band). Refuses any note
+              that isn't in a blocked state — the CALLER (the /wave:repair skill) must have verified
+              the work truly landed (e.g. `gh pr view` shows MERGED) before invoking. Idempotent.
+
+  defer       Pop task(s) out of a rollout, back to open backlog: clears `wave:`/`rollout:`/`owner:`
+              and sets `status: open` so a future /wave:schedule re-plans them. The dependent-closure
+              safety check lives in the /wave:repair skill; this only does the frontmatter surgery.
 
 Stdlib only (the claude-config repo has no dependency manager). Frontmatter is edited line-surgically
 (not via a YAML round-trip) to preserve field order, comments, and spacing exactly — matching how the
@@ -104,8 +118,29 @@ class Note:
         self._fm.append(newline)
         self.dirty = True
 
+    def remove(self, key: str):
+        """Delete the `key:` line from frontmatter entirely (idempotent — no-op if absent)."""
+        pat = re.compile(rf"^{re.escape(key)}:\s*")
+        kept = [line for line in self._fm if not pat.match(line)]
+        if len(kept) != len(self._fm):
+            self._fm = kept
+            self.dirty = True
+
     def has_heading(self, heading: str) -> bool:
         return any(line.strip() == heading for line in self._body.split("\n"))
+
+    def section_text(self, heading: str) -> str:
+        """Return the body text under `## heading`, up to the next `## ` heading or EOF (read-only)."""
+        out, capturing = [], False
+        for line in self._body.split("\n"):
+            if line.strip() == heading:
+                capturing = True
+                continue
+            if capturing and line.startswith("## "):
+                break
+            if capturing:
+                out.append(line)
+        return "\n".join(out).strip()
 
     def append_section(self, heading: str, content: str):
         """Append `## heading\\n\\n<content>` to the body once (idempotent on the heading)."""
@@ -270,6 +305,150 @@ def cmd_resume_filter(args) -> int:
     return 0
 
 
+# ---- status -----------------------------------------------------------------
+
+def _wikilink_slug(value):
+    """Normalise a frontmatter wikilink/string (`"[[Area/Foo|alias]]"`) to a bare slug for comparison."""
+    if value is None:
+        return None
+    s = value.strip().strip('"').strip("'").strip()
+    s = s.replace("[[", "").replace("]]", "").strip()
+    s = s.split("|")[0].split("/")[-1].strip()  # drop any alias, then any path, keep the leaf
+    if s.endswith(".md"):
+        s = s[:-3]
+    return s or None
+
+
+def cmd_status(args) -> int:
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.exists():
+        print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
+        return 1
+    rollout_slug = rollout_path.stem
+    rollout_note = Note(rollout_path)
+    cursor = rollout_note.get("merged_through_wave")
+    try:
+        cursor = int(cursor) if cursor is not None else 0
+    except (TypeError, ValueError):
+        cursor = 0
+
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    found = []
+    for path in sorted(tasks_dir.rglob("*.md")):  # rglob to catch already-archived done tasks too
+        if path == rollout_path:
+            continue
+        try:
+            note = Note(path)
+        except ValueError:
+            continue  # not a frontmatter note
+        if (_wikilink_slug(note.get("rollout")) or "").lower() != rollout_slug.lower():
+            continue
+        wave = note.get("wave")
+        try:
+            wave = int(wave) if wave is not None else None
+        except (TypeError, ValueError):
+            wave = None
+        pr = note.get("pr")
+        blocker = ""
+        for heading in BLOCKED_SECTIONS.values():
+            t = note.section_text(heading)
+            if t:
+                blocker = t
+                break
+        found.append({
+            "slug": path.stem,
+            "wave": wave,
+            "status": note.get("status"),
+            "pr": (pr.strip().strip('"') if pr else None),
+            "blockerSummary": blocker,
+        })
+
+    found.sort(key=lambda t: (t["wave"] if t["wave"] is not None else 9999, t["slug"]))
+    total_waves = max((t["wave"] for t in found if t["wave"] is not None), default=0)
+    out = {
+        "rollout": rollout_slug,
+        "rolloutPath": str(rollout_path),
+        "rolloutStatus": rollout_note.get("status"),
+        "merged_through_wave": cursor,
+        "total_waves": total_waves,
+        "tasks": found,
+    }
+    print(json.dumps(out, indent=2))
+    return 0
+
+
+# ---- resolve ----------------------------------------------------------------
+
+# Only a *blocked* note is resolvable to done out-of-band (the drift gap-closer). `review` -> done is
+# mark-done's job; open/in_progress means the task never landed and must not be masked.
+RESOLVABLE_STATUSES = set(BLOCKED_SECTIONS.keys())  # review-blocked, blocked, plan-blocked
+
+
+def cmd_resolve(args) -> int:
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
+    errors = []
+    for slug in slugs:
+        path = tasks_dir / f"{slug}.md"
+        if not path.exists():
+            errors.append(f"{slug}: task note not found at {path}")
+            continue
+        try:
+            note = Note(path)
+        except ValueError as e:
+            errors.append(str(e))
+            continue
+        status = note.get("status")
+        if status == "done":
+            print(f"{slug}: already done [no-change]")
+            continue
+        if status not in RESOLVABLE_STATUSES:
+            errors.append(
+                f"{slug}: status is {status!r}, not a blocked status "
+                f"({'/'.join(sorted(RESOLVABLE_STATUSES))}) — refusing to resolve")
+            continue
+        note.set("status", "done")
+        note.save(dry_run=args.dry_run)
+        print(f"{slug}: status={status}->done" + (" (dry-run)" if args.dry_run else " [written]"))
+    for e in errors:
+        print(f"ERROR: {e}", file=sys.stderr)
+    return 1 if errors else 0
+
+
+# ---- defer ------------------------------------------------------------------
+
+def cmd_defer(args) -> int:
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
+    expected = Path(os.path.expanduser(args.rollout)).stem.lower() if args.rollout else None
+    errors = []
+    for slug in slugs:
+        path = tasks_dir / f"{slug}.md"
+        if not path.exists():
+            errors.append(f"{slug}: task note not found at {path}")
+            continue
+        try:
+            note = Note(path)
+        except ValueError as e:
+            errors.append(str(e))
+            continue
+        if expected is not None:
+            cur = (_wikilink_slug(note.get("rollout")) or "").lower()
+            if cur and cur != expected:
+                errors.append(f"{slug}: belongs to rollout {cur!r}, not {expected!r} — refusing to defer")
+                continue
+        note.set("status", "open")
+        note.remove("wave")
+        note.remove("rollout")
+        note.remove("owner")
+        note.save(dry_run=args.dry_run)
+        print(f"{slug}: deferred->open (wave/rollout/owner cleared)" +
+              (" (dry-run)" if args.dry_run else " [written]"))
+    for e in errors:
+        print(f"ERROR: {e}", file=sys.stderr)
+    return 1 if errors else 0
+
+
 # ---- CLI --------------------------------------------------------------------
 
 def main() -> int:
@@ -300,6 +479,24 @@ def main() -> int:
     f.add_argument("--tasks", required=True, help="comma-separated task slugs for the target wave")
     f.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
     f.set_defaults(func=cmd_resume_filter)
+
+    s = sub.add_parser("status", help="emit JSON situational report for a rollout (read-only; /wave:status)")
+    s.add_argument("--rollout", required=True, help="path to the rollout note")
+    s.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
+    s.set_defaults(func=cmd_status)
+
+    rv = sub.add_parser("resolve", help="flip a *blocked* task -> done (drift gap-closer; caller must verify the PR merged)")
+    rv.add_argument("--tasks", required=True, help="comma-separated task slugs (must be in a blocked status)")
+    rv.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
+    rv.add_argument("--dry-run", action="store_true")
+    rv.set_defaults(func=cmd_resolve)
+
+    df = sub.add_parser("defer", help="pop task(s) out of a rollout back to open backlog (/wave:repair)")
+    df.add_argument("--tasks", required=True, help="comma-separated task slugs to defer")
+    df.add_argument("--rollout", default=None, help="rollout note path (optional; asserts membership before deferring)")
+    df.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
+    df.add_argument("--dry-run", action="store_true")
+    df.set_defaults(func=cmd_defer)
 
     args = p.parse_args()
     return args.func(args)

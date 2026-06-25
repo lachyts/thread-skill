@@ -114,6 +114,13 @@ Before you open or update a PR, run these preflight checks:
 - Worktree safety: run \`git rev-parse --show-toplevel\` and confirm it is NOT the project's main checkout. Run \`git diff --stat\` and confirm every modified path is in your task's scope — if you see unrelated files, STOP and report instead of committing.
 - Worktree path discipline: your worktree root is the absolute path \`git rev-parse --show-toplevel\` prints — call it $WT. Every Read/Edit/Write MUST target a path UNDER $WT (e.g. \`$WT/src/foo.py\`). Edit requires an absolute path — do NOT absolutize against the project root you were handed (that is the MAIN checkout): an edit to a \`<project-root>/…\` path lands in the main checkout, OUTSIDE your branch and invisible to your PR — which looks exactly like a "silent Edit no-op" but is really a wrong-tree edit. After editing, \`git -C $WT diff\` MUST show your change; if it does not, you edited the wrong tree — redo it against the \`$WT/…\` path.`.trim()
 
+// Re-dispatch awareness. A resumed blocked task carries the prior attempt's diagnosis in its note —
+// reconcile-wave.py appends `## Review-blocked feedback` / `## Blocker diagnosis` / `## Plan-blocked
+// feedback`, and /wave:repair may inject a `## Repair input` with a human decision. Without an explicit
+// nudge the agent can re-read the note and silently repeat the rejected work. This line is static (always
+// in the prompt) and harmless on a fresh task where no such section exists.
+const PRIOR_FEEDBACK_NOTE = `If the task note has a "## Review-blocked feedback", "## Blocker diagnosis", "## Plan-blocked feedback", or "## Repair input" section from a PRIOR attempt, treat it as AUTHORITATIVE — resolve every point in it first, and use any "## Repair input" value exactly as given (do not re-derive or second-guess it).`
+
 // Known-baseline-failures manifest (item 2). When the rollout declares tests that already fail on a clean
 // `main` for environmental reasons, every agent gets this so N agents don't each independently re-diagnose
 // the same reds. Returns "" when empty so the surrounding prompt is BYTE-IDENTICAL to pre-item-2 behaviour
@@ -196,7 +203,7 @@ Project root: ${a.repoPath}
 ${worktreeSetup(a, task)}
 
 Steps:
-1. Read the task note in full + every source file it references. Do not skim.
+1. Read the task note in full + every source file it references. Do not skim. ${PRIOR_FEEDBACK_NOTE}
 2. If the fix is well-defined, work test-first (write the failing test before the fix). Use the
    superpowers:test-driven-development skill if applicable.
 3. If the task is investigation-first, produce findings, propose a fix in the task note, then implement.
@@ -244,7 +251,7 @@ Investigate READ-ONLY directly against the project repo at ${a.repoPath} (no wor
 you are producing a plan only; the implementer opens the worktree later.
 
 Steps:
-1. Read the task note in full + every source file it references. Do not skim.
+1. Read the task note in full + every source file it references. Do not skim. ${PRIOR_FEEDBACK_NOTE}
 2. Read-only investigation to back the plan:
    - grep for sibling sites of the same anti-pattern across the file + codebase
    - identify callers of any function you intend to change/add
@@ -335,7 +342,7 @@ wrong (an assumption breaks, a named file doesn't exist as described), STOP and 
 blockerDiagnosis="plan-divergence: <one line>" instead of forging ahead.
 
 Steps:
-1. Implement the plan (test-first where the plan says so).
+1. Implement the plan (test-first where the plan says so). ${PRIOR_FEEDBACK_NOTE}
 2. ${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
 3. On verifier pass: open a PR titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
 4. Return your structured result: verified, blocked, prUrl, branch, worktreePath (git rev-parse --show-toplevel),
@@ -453,8 +460,9 @@ function chunk(arr, n) {
 // ---- Model tiering -----------------------------------------------------------
 // Fable 5 is the deliberate default for every agent; wave:schedule may drop an easy
 // task (single-file + shallow/mechanical) to opus via task frontmatter. The two
-// judge roles gatekeep merges, so they stay on max capability regardless.
-const JUDGE_MODEL = 'fable'
+// judge roles gatekeep merges, so they default to fable — overridable per-run via the
+// `judgeModel` arg (e.g. when fable is unavailable); falls back to fable when unset.
+function judgeModel(a) { return (a && a.judgeModel) || 'fable' }
 function taskModel(task) { return task.model || 'fable' }
 
 // ---- The three convergence layers -------------------------------------------
@@ -473,7 +481,7 @@ async function planLoop(task, a) {
   let round = 1
   while (round <= task.maxPlanRounds) {
     const verdict = await agent(planJudgePrompt(task, plan.plan, a), {
-      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: JUDGE_MODEL,
+      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: judgeModel(a),
     })
     if (verdict.verdict === 'approve') {
       return { task, blocked: false, plan: plan.plan, planRoundsUsed: round }
@@ -529,7 +537,7 @@ async function reviewLoop(task, prev, a) {
   let round = 1
   while (round <= task.maxReviewRounds) {
     const verdict = await agent(reviewJudgePrompt(task, current, a), {
-      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: JUDGE_MODEL,
+      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: judgeModel(a),
     })
     if (verdict.verdict === 'approve') {
       return { ...current, status: 'review', reviewRoundsUsed: round }

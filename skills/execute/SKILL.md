@@ -221,7 +221,7 @@ Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS au
 - `merge-wave.sh` exits non-zero (a real merge conflict or red required check), or
 - the smart-halt check fires (an unlanded task's file reappears in a later wave).
 
-In every halt case the work merged so far stays on `main`; the user fixes the cause and re-invokes `execute [[rollout]]` to resume from the `merged_through_wave` cursor.
+In every halt case the work merged so far stays on `main`; the user fixes the cause and re-invokes `execute [[rollout]]` to resume from the `merged_through_wave` cursor. To see *why* a rollout halted, run `/wave:status [[rollout]]` (read-only situational report). To **sort out** a stalled rollout without ceding merge authority, run `/wave:repair [[rollout]]` — it reconciles drift, re-dispatches agent-fixable blocks, captures input-gated decisions, defers wedged tasks, and resumes via this skill's §4.5 loop (`merge-wave.sh` stays the sole merger). `/wave:repair` is the systematised replacement for hand-repairing a worktree in an external cockpit (README → *Coexistence with Orca*).
 
 ## Don'ts
 
