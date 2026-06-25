@@ -38,6 +38,10 @@ repair is a **conductor**, not a second engine.
   via the `judgeModel` arg.
 - **Domain model captured** — `CONTEXT.md` glossary (conductor vs engine, input-gated vs agent-fixable
   block, drift, clean defer, dependent closure, situational report) via `/grill-with-docs`.
+- **Open / next** — the live paths aren't exercised yet: status **drift** against a *really*-merged PR
+  and a full **repair end-to-end** re-dispatch both need a real rollout (the deterministic core is
+  unit-tested). Run them on the next rollout. Possible follow-up: bump the plugin version /
+  `claude plugin tag` to publish the two new skills.
 
 ---
 
