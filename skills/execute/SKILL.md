@@ -134,6 +134,7 @@ In continuous mode the lead session is the conductor: run ONE wave on the engine
    - File any follow-on work the rollout's Post-rollout section names (validation re-runs, audits, deferred items) as **new open tasks** in `Work/Tasks/`, and rewrite those items in the rollout note as thin pointers to the new tasks.
    - Append a `## Completion log` to the rollout note: dispatch dates, waves → PRs (links + merge dates), convergence stats per task, disposition of each post-rollout item.
    - Close out the associated thread (see `~/.claude/skills/thread/SKILL.md`) — or record in the log why it stays open.
+   - Delete the rollout's `WAVE-HEARTBEAT` cron if one is registered (`CronList` → `CronDelete`); the heartbeat also self-deletes on its next tick, but don't leave it ticking for up to 20 minutes against a finished rollout.
    - Move the rollout note to `Work/Tasks/Archive/Rollouts/` (`git mv` in the vault) and commit the vault. Wikilinks resolve by filename, so `[[<slug>]]` references and task `rollout:` backlinks survive the move.
 
    A done rollout left sitting in `Work/Tasks/` is invisible-but-present — every Bases view filters `status != done`, so it vanishes from view with no record of what happened. The ceremony is what makes completion legible weeks later.
@@ -163,6 +164,12 @@ Workflow({
 Pass `args` as an actual JSON object in the tool call. (Note: the Workflow tool delivers `args` to a `scriptPath` workflow JSON-**stringified** — confirmed by smoke test — so the engine parses it defensively with `typeof args === 'string' ? JSON.parse(args) : args`. Don't remove that parse thinking it's redundant.)
 
 Tell the user the run launched, which waves/tasks it covers, and that they can watch live with `/workflows`. Record the returned `runId` — if the run dies, resume with `Workflow({ scriptPath, args, resumeFromRunId: <runId> })` (unchanged `agent()` calls replay from cache).
+
+**Register the heartbeat (continuous mode, once per rollout).** In the same turn as the first wave launch, check `CronList` for an existing `WAVE-HEARTBEAT <rollout-slug>` task; if none, register one via `CronCreate` (schedule `*/20 * * * *`) with this prompt:
+
+> WAVE-HEARTBEAT <rollout-slug>: Read the last WAVE-STATUS line for this rollout in the conversation. If state=done or state=halted (or the rollout note is archived), find this cron via CronList and CronDelete it, then stop. If a Workflow run for the rollout is still visibly running in /workflows, do nothing — end the turn silently. Otherwise the rollout has stalled (no run in flight, waves remain): re-enter /wave:execute [[<rollout-slug>]] §4.5 resume from the cursor.
+
+This is the backstop for a hung Workflow run or a missed completion notification — the stall mode nothing else catches. Then **end the launch turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=waiting`** so the Stop-hook driver (§8) lets the session idle until the notification arrives.
 
 ### 6. Reconcile + report
 
@@ -209,19 +216,57 @@ Ralph-blocked (no PR opened):
 Recommended merge order: <list>
 ```
 
+**End every execute turn with the machine-readable status line** (after the report, or alone on turns that only reconcile/merge/resume):
+
+```
+WAVE-STATUS: <rollout-slug> cursor=<K>/<N> state=<running|waiting|halted|done>[ reason="<short halt reason>"]
+```
+
+- `running` — in-session driving work remains **right now** (a wave returned and needs reconcile/merge; the next wave needs launching). The plugin's Stop-hook driver (§8) refuses to let the session stop on this state — so never end a turn on `running` unless you genuinely stopped mid-work.
+- `waiting` — a wave's Workflow call is in flight; nothing to do until its completion notification (the heartbeat cron is the backstop). Emit this after launching a wave.
+- `halted` — a §7 stop condition fired or `--gated` is waiting on the user (always include `reason=`).
+- `done` — completion ceremony performed.
+
+This line is the contract the automatic driver (§8) keys off — the Stop hook parses it with a strict regex, so keep the format byte-stable.
+
 **Merging:** in `--gated` / single-wave mode, do NOT merge — the user decides. In continuous auto-merge mode the lead session merges this wave via `scripts/merge-wave.sh` (§4.5) — never an inline `gh pr merge`. Within a wave the approved PRs are file-disjoint (the wave invariant), so they don't conflict with each other; the merge script brings each up to date with `main` in turn before squash-merging.
 
 The merge gate is the repo's **required** checks — branch-protection's own definition of mergeable — **not** GitHub's cosmetic `CLEAN` (which also waits on non-required checks). A `main` that legitimately carries red *non-required* checks reports every PR as `UNSTABLE`, never `CLEAN`; gating on `CLEAN` would merge no wave at all. `merge-wave.sh`'s `UNSTABLE)` case handles this by waiting on `--required` checks only — a genuinely-failing required check surfaces as `BLOCKED`, not `UNSTABLE`, so it stays safe. Don't "tidy" it back to `CLEAN`-only (see `giflab-rollout-merge-wave-unstable-fix`).
 
 ### 7. Continuous-mode stop conditions
 
-Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS automatically** — surface the reason prominently, leave everything merged-so-far landed, and stop — when:
+Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS automatically** — surface the reason prominently, leave everything merged-so-far landed, end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="…"` (§6) so the automatic driver releases (§8), and stop — when:
 
 - a wave produces **zero** approved (`status: review`) PRs (nothing to merge; downstream presumptively unsafe), or
 - `merge-wave.sh` exits non-zero (a real merge conflict or red required check), or
 - the smart-halt check fires (an unlanded task's file reappears in a later wave).
 
 In every halt case the work merged so far stays on `main`; the user fixes the cause and re-invokes `execute [[rollout]]` to resume from the `merged_through_wave` cursor. To see *why* a rollout halted, run `/wave:status [[rollout]]` (read-only situational report). To **sort out** a stalled rollout without ceding merge authority, run `/wave:repair [[rollout]]` — it reconciles drift, re-dispatches agent-fixable blocks, captures input-gated decisions, defers wedged tasks, and resumes via this skill's §4.5 loop (`merge-wave.sh` stays the sole merger). `/wave:repair` is the systematised replacement for hand-repairing a worktree in an external cockpit (README → *Coexistence with Orca*).
+
+### 8. Unattended driving — the automatic driver
+
+The §4.5 loop is driven across turns by Workflow-completion notifications — nothing in the notifications themselves *enforces* that it keeps going. The plugin closes that gap with two self-managing pieces; **the user types nothing**:
+
+**The Stop-hook driver** (`hooks/wave-stop-driver.py`, wired via the plugin's `hooks.json`). On every session stop it reads the last `WAVE-STATUS` line (§6) and, while `state=running`, **blocks the stop** and hands back the exact next step (reconcile → merge → advance cursor → launch next wave). It releases on `waiting` (a Workflow run is legitimately in flight), `halted` (§7 — human's turn), and `done`. It is progress-aware: three consecutive blocks without the cursor advancing release the stop and surface "likely wedged — run /wave:status or /wave:repair" instead of spinning forever. This is the programmatic twin of a `/goal` condition, shipped so nobody has to remember to set one.
+
+**The heartbeat cron** (registered by step 5 at first wave launch, `*/20 * * * *`). Catches the one stall the Stop hook can't see: a hung Workflow run or missed completion notification while the session idles at `state=waiting`. Each tick checks; if nothing needs doing it ends silently; if the rollout stalled it re-enters §4.5 cold resume (idempotent — cursor + `resume-filter` + merge-wave.sh's merged-PR skip make re-entry duplicate-free); it deletes itself once the rollout is done or halted.
+
+Division of labour: **Stop hook** = "don't stop while there's driving work"; **heartbeat** = "wake up if the thing you were waiting for never arrives"; **§7 HALTs** = the deliberate exits both respect.
+
+**Manual fallbacks** (when the plugin's hooks are disabled, or driving from an environment without them):
+
+- `/goal The WAVE-STATUS line for <rollout-slug> reports state=done or state=halted, or stop after 4 hours` — transcript-only evaluator, auto-continues a stopped session; always include the time/turn bound and the `state=halted` release clause. Note it will also bounce `state=waiting` turns, so expect some no-op continuations while a wave runs.
+- `/loop 45m /wave:status [[<rollout>]]` — read-only watchdog for drift and stranded-`review` tasks (the failure mode that let seven landed tasks sit unnoticed in the giflab rollout); stop it (`/loop stop`) once the rollout archives.
+
+**Guardrails + limits:**
+
+- **Everything here is session-scoped.** The Stop hook and heartbeat cron only act while the session is alive; a closed terminal stops them all (they resume with `claude --resume`). True detachment is a `/schedule` cloud routine — out of wave's scope.
+- **Never automate `/wave:repair`** — it is input-gated by design (it asks the user decisions no agent can make); the driver, the heartbeat, and any loop must route a wedged rollout *to* repair, never *through* it.
+- **`--gated` mode is exempt from unattended driving** — the per-wave human merge pause is the point. In gated mode end merge-pause turns with `state=halted reason="gated: awaiting user merge"` so the Stop hook releases.
+- **A §7 HALT ends unattended driving.** Emit `state=halted` with the reason — the Stop hook releases, the heartbeat self-deletes on its next tick, and a well-worded `/goal` fallback releases on the clause.
+- **What none of this fixes:** the blocking waits *inside* single tool calls — the Workflow call (~1h worst case per stubborn task, §Resource budget) and `merge-wave.sh`'s serial required-checks watching — are untouched by any driver.
+- **Skill invocation under /loop (fallbacks):** slash-command payloads are invoked normally (`/loop 5m /babysit-prs` is the built-in's own example). The only frontmatter that breaks this is `disable-model-invocation: true` — never add it to `execute` or `status`. (There is no `autonomous:` frontmatter key; that's a myth — verified against the 2.1.199 binary.)
+- Cloud providers (Bedrock/Vertex) downgrade dynamic `/loop` to a fixed ~10-minute cadence.
 
 ## Don'ts
 

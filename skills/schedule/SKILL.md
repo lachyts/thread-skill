@@ -206,7 +206,7 @@ If the file already exists, prompt:
 
 **Superseding a prior rollout.** When `--regenerate` replaces an earlier rollout (commonly a dated one whose still-open tasks are being re-planned here), stamp `supersedes: "[[<prior-rollout-slug>]]"` in this note's frontmatter, and close out the prior rollout: set `status: done` (TaskNotes only knows `open` / `in-progress` / `done`, and `done` auto-archives it out of the open list) + `superseded_by: "[[<this-slug>]]"` to record *why* it closed and keep the lineage navigable. Its already-landed tasks stay `done`; its still-open tasks are re-planned into this rollout.
 
-Use the template at `${CLAUDE_PLUGIN_ROOT}/skills/plan/rollout-template.md`. Substitute:
+Use the template at `${CLAUDE_PLUGIN_ROOT}/skills/schedule/rollout-template.md`. Substitute:
 - `{{PROJECT_NAME}}` — display name (e.g. `GifLab`)
 - `{{PROJECT_SLUG}}` — kebab form (e.g. `giflab`)
 - `{{ROLLOUT_SLUG}}` — the rollout filename slug (e.g. `giflab-rollout`)

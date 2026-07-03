@@ -95,6 +95,15 @@ recommended next action:
 
 Keep the whole report scannable — it's a glance, not a wall of text.
 
+## Loopable
+
+Status is read-only, so it's safe to run under the built-in `/loop` as a rollout watchdog:
+`/loop 45m /wave:status [[<rollout>]]` during a long rollout catches drift and stranded-`review`
+tasks early instead of days later. When a looped status finds the rollout `done`/archived, say so and
+stop the loop (a dynamic loop ends by not rescheduling; a fixed loop needs `/loop stop`) — don't keep
+polling a finished rollout. The loop watches and recommends; it never triggers `/wave:repair` or
+`/wave:execute` on its own. See execute's §8 (*Unattended driving*) for the full pattern set.
+
 ## Don'ts
 
 - **Don't write anything.** No frontmatter edits, no merges, no dispatch — that's `/wave:repair` /

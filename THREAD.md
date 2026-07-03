@@ -6,6 +6,95 @@ lives in the Obsidian vault at `Work/Tasks/wave-execute-e2e-test-giflab`; the pr
 
 ---
 
+## 2026-07-03 (later) — automatic driver: Stop hook + heartbeat cron (wave drives itself)
+
+Lachy's pushback on the morning's audit landed: *"I don't understand why I've been given it as a user
+to type these in. WAVE should do this by itself."* Correct — `/goal` and `/loop` are just user-facing
+wrappers over primitives the plugin can own (Stop hooks and CronCreate). Wave now ships both; the user
+types nothing.
+
+- **`hooks/wave-stop-driver.py`** (+ `hooks/hooks.json`, wired via new `"hooks"` key in `plugin.json`,
+  version bumped 1.0.0 → 1.1.0) — a Stop hook, the programmatic twin of a `/goal` condition. Parses
+  the last assistant-emitted `WAVE-STATUS` line: `running` → blocks the stop with the exact next step;
+  `waiting`/`halted`/`done` → releases (halted/done also clear driver state). Progress-aware cap: 3
+  consecutive blocks without cursor advance → release + "likely wedged — /wave:status or /wave:repair"
+  systemMessage (the harness's `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` is a second floor). Only
+  assistant-authored text blocks count — tool results/user messages quoting the line (docs, THREAD) are
+  ignored, and `<K>`-style template placeholders can't match the strict regex. 13-case
+  `wave-stop-driver.test.sh` green; state per session in `~/.claude/wave-driver/<session_id>.json`
+  (override: `WAVE_DRIVER_STATE_DIR`).
+- **WAVE-STATUS gained a 4th state: `waiting`** — critical to avoid the busy-spin the morning audit
+  flagged for `/goal`: a launched wave idling on its Workflow-completion notification is *legitimate*
+  stopping (`waiting`, driver releases); only `running` (reconcile/merge/launch work outstanding) blocks.
+- **Heartbeat cron** (execute step 5): at first wave launch the lead session self-registers a
+  `*/20 * * * *` CronCreate — the backstop for the one stall the Stop hook can't see (hung Workflow /
+  missed notification while `waiting`). Tick: done/halted → self-delete; run visibly in flight → silent
+  no-op; stalled → re-enter §4.5 cold resume (idempotent). Completion ceremony + §7 halts delete it.
+- **§8 rewritten**: automatic driver is the default; `/goal` + `/loop /wave:status` demoted to manual
+  fallbacks (hooks disabled / foreign environments). Gated mode ends merge-pause turns with
+  `state=halted reason="gated: awaiting user merge"` so the driver releases — gated stays human.
+- **Ship path**: plugin installs from GitHub `lachyts/wave-skill` (marketplace `wave`) — needs commit +
+  push + `claude plugin update wave`; next session start will prompt to trust the new hook.
+- **Live battery (same day): PASS — with one real bug found and fixed.** Headless sessions via
+  `claude --plugin-dir <repo> -p … --model haiku --include-hook-events`:
+  - **Race bug**: the first live run never blocked — the final assistant message is flushed to the
+    transcript file *after* Stop hooks fire (verified: transcript grew ~6KB post-hook), so the
+    transcript-only parser saw stale history. Fix: the Stop payload carries **`last_assistant_message`**
+    (verified on 2.1.199) — now the primary source, race-free; transcript scan demoted to history
+    fallback (still catches a turn that *forgot* the line). Unit suite grew to 16 cases, all green.
+  - T1 no-op safety (non-wave session, machine-wide): PASS — clean 1-turn stop, zero interference.
+  - T2 block→converge: PASS — `running` blocked, harness auto-continued, model followed the block
+    reason to `waiting`, released; state file recorded blocks=1. Registration confirmed: 10 Stop hooks
+    baseline → 11 with the plugin.
+  - T3 wedge cap: the *mechanism* passed so well the cap never engaged — the block reason redirected a
+    model told to stay wedged forever into printing `waiting` on the very next turn. Cap arithmetic
+    stays unit-tested (cases 5–6).
+  - T4 halted: PASS — zero blocks, immediate release.
+  - Bonus discovery: the Stop payload also carries **`background_tasks`** and **`session_crons`** — a
+    future driver iteration could distinguish "waiting with a live run" from "stalled" without touching
+    /workflows. `WAVE_DRIVER_DEBUG=<path>` env now makes the hook append diagnostics (kept — it found
+    the race).
+- **Open / next** — remaining live checks (next real rollout, with the *installed* plugin): (a) the
+  driver + heartbeat + execute engine together, (b) `waiting` means no busy-spin during an hour-long
+  wave, (c) heartbeat registers once / self-deletes on done. Also unverified: whether plugin-hook
+  changes apply without a re-trust prompt on `claude plugin update`.
+
+---
+
+## 2026-07-03 — /loop + /goal audit: unattended driving documented (docs only)
+
+Audited Claude Code's built-in `/loop` (recurring re-invocation, fixed-cron or self-paced) and `/goal`
+(per-turn Stop-hook convergence evaluator, transcript-only, Haiku) against wave. Verdict: both map
+cleanly onto wave's biggest operational gap — the §4.5 continuous loop had **no durable driver** (grep:
+zero scheduling primitives in the repo; the loop was model discipline + Workflow-completion
+notifications). Wave was already loop-shaped (durable cursor, idempotent cold resume, `resume-filter`,
+clean §7 HALTs), so the integration is docs-only — no engine change, resume-cache invariants untouched.
+
+- **execute §6** — every execute turn now ends with a machine-readable
+  `WAVE-STATUS: <slug> cursor=K/N state=running|halted|done [reason=…]` line, the deterministic hook a
+  transcript-only `/goal` evaluator (or looped prompt) keys off.
+- **execute §8 (new)** — *Unattended driving*: `/goal …state=done or state=halted, or stop after 4
+  hours` as the continuous-mode backstop; dynamic `/loop` as a stall heartbeat re-entering cold resume;
+  fixed `/loop 45m /wave:status` for drift sweeps. Guardrails: never past a §7 HALT, `--gated`
+  incompatible, in-call waits (Workflow call, merge-wave.sh CI watching) unaffected, loops are
+  session-scoped (true detachment = `/schedule` cloud routine).
+- **status** — new *Loopable* section (watchdog pattern, self-terminate when rollout done).
+- **repair** — new Don't: never run under `/loop` (input-gated by design).
+- **Research correction worth remembering:** a subagent "verified" a v2.1.196 changelog rule that only
+  skills with `autonomous: true` frontmatter run inside /loop — **fabricated**. The 2.1.199 binary has
+  no such key; the real (inverse) gate is `disable-model-invocation: true`, and slash-command loop
+  payloads are first-class (`/loop 5m /babysit-prs` is the built-in's own example). Wave skills need no
+  frontmatter change — just never add `disable-model-invocation`.
+- **Drive-by fix** — `schedule/SKILL.md` pointed at `skills/plan/rollout-template.md` (dangling since
+  the plan→schedule rename); now `skills/schedule/rollout-template.md`.
+- **Open / next** — live-verify on the next real rollout: (a) `/loop 45m /wave:status [[rollout]]`
+  smoke test — confirm the skill invokes from a tick and stays read-only; (b) `/goal` behaviour while a
+  wave's Workflow call is in flight — does the evaluator busy-spin no-op turns during the ~1h run? If it
+  spins, prefer the dynamic-/loop heartbeat and keep `/goal` for headless one-shots; record either way.
+  These join the still-pending status-drift + repair end-to-end live checks.
+
+---
+
 ## 2026-06-25 — `/wave:status` + `/wave:repair`: rollout-scoped situational awareness & repair
 
 Added the two operational verbs Lachy asked for — *"where is this rollout?"* and *"sort it out"* —

@@ -120,3 +120,7 @@ any dependents moved with it).
   is the out-of-band-merge gap-closer only.
 - **Don't defer a task with true dependents alone.** Compute the closure first; defer the chain or fix it.
 - **Don't loop.** One retry per task per run; then surface and let the user decide.
+- **Don't run repair under the built-in `/loop` (and never suggest it).** Repair is input-gated by
+  design — it asks the user decisions no agent can make, so an unattended loop would either hang on the
+  question or steamroll it. Unattended driving belongs to execute (§8: the Stop-hook driver +
+  heartbeat cron) and status (read-only sweeps); repair stays a hands-on verb.
