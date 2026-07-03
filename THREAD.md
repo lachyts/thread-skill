@@ -6,6 +6,17 @@ lives in the Obsidian vault at `Work/Tasks/wave-execute-e2e-test-giflab`; the pr
 
 ---
 
+## 2026-07-03 (evening) — /wave:plan alias removed; /wave:schedule is the only name
+
+The deprecated alias stub at `skills/plan/` (left behind by the 2026-06-18 rename) is gone. Lachy's
+call: the lingering `/wave:plan` command muddied the concept — "plan" suggests planner logic that no
+longer lives there, and the pipeline reads cleaner as exactly **`/wave:split` → `/wave:schedule` →
+`/wave:execute`** with no plan-named entry point. No engine change, no version bump (in-place sync at
+1.1.0 across repo → marketplace → cache, same as the 2026-06-12 reconcile). Anyone typing
+`/wave:plan` now simply finds no such command instead of a redirect.
+
+---
+
 ## 2026-07-03 (later) — automatic driver: Stop hook + heartbeat cron (wave drives itself)
 
 Lachy's pushback on the morning's audit landed: *"I don't understand why I've been given it as a user
