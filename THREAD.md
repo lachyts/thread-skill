@@ -54,10 +54,13 @@ types nothing.
     future driver iteration could distinguish "waiting with a live run" from "stalled" without touching
     /workflows. `WAVE_DRIVER_DEBUG=<path>` env now makes the hook append diagnostics (kept — it found
     the race).
-- **Open / next** — remaining live checks (next real rollout, with the *installed* plugin): (a) the
-  driver + heartbeat + execute engine together, (b) `waiting` means no busy-spin during an hour-long
-  wave, (c) heartbeat registers once / self-deletes on done. Also unverified: whether plugin-hook
-  changes apply without a re-trust prompt on `claude plugin update`.
+- **Shipped same day**: pushed (09255ef), `claude plugin update wave@wave` 1.0.0 → 1.1.0, and the
+  post-update parity test (T2 against the *installed* plugin, no --plugin-dir) passed identically —
+  including the answer to the trust question: **the new hook fired in a fresh headless session with no
+  re-trust prompt**.
+- **Open / next** — remaining live checks (next real rollout): (a) the driver + heartbeat + execute
+  engine together, (b) `waiting` means no busy-spin during an hour-long wave, (c) heartbeat registers
+  once / self-deletes on done.
 
 ---
 
