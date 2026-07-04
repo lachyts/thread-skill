@@ -166,17 +166,16 @@ The rollout then references only the combined note, as an ordinary `cross-cuttin
 
 ### 4.7. Assign model tier per task
 
-Every agent in the convergence engine runs **Opus 4.8 by default** (`model: opus`, the rollout-level default in the template frontmatter). The only decision here is which tasks genuinely need to *step up* to Fable — **err toward Opus when uncertain**. Opus 4.8 handles the overwhelming majority of rollout work; Fable is the exception you justify, not the default.
+Every agent in the convergence engine runs **Opus 4.8 by default** (`model: opus`, the rollout-level default in the template frontmatter). Opus is the tier for **mechanical execution**; whole tasks step **up** to Fable when they're structural or hard. **Err toward Fable** — this rollout puts anything with real thinking in it on Fable, and reserves Opus for the mechanical bulk.
 
-Suggest `model: fable` for a task only when it genuinely needs frontier reasoning — **all** of these hold:
+Stamp `model: fable` on a task when **either** holds:
 
-- `scope: cross-cutting` **or** `work_depth: deep`
-- the change needs real **design judgement** — API shape, algorithm choice, subtle cross-file interactions, or a long-horizon investigation — not a mechanical edit
-- crisp acceptance criteria are hard to state up front
+- **`scope: cross-cutting`** — it spans multiple files, so getting the structure coherent is the work, **or**
+- **`work_depth: deep`** — flagged deep/design-heavy (algorithm choice, subtle interactions, long-horizon investigation).
 
-Everything else stays Opus: single-file tasks, `shallow`/mechanical changes (config edits, renames, contained fixes), and most read-only investigations. A task that's merely cross-cutting but mechanically clear does **not** need Fable.
+Everything else stays Opus: single-file `shallow`/mechanical changes — config edits, renames, contained fixes with crisp acceptance criteria — and single-file read-only checks. A single-file task steps up only if it's genuinely `deep`. Merged units from step 4.5 (always `cross-cutting`) go to Fable.
 
-Present the suggested step-ups as a batch ("these N tasks look hard enough to warrant fable: …") with one line of justification each, and get a y/n (or per-task veto) before stamping in step 7. No qualifying tasks ⇒ say nothing and move on. Note for the user if asked: the step-up only affects the task's planner/implementer/reviser — the plan-judge and review-judge run Opus by default regardless (see `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`).
+A Fable task runs **end-to-end on Fable** — its planner, implementer, reviser, **and** both judges (judges follow the task's tier — see `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`). Present the step-ups as a batch ("these N are structural/deep → fable: …") with one line of justification each, and get a y/n (or per-task veto) before stamping in step 7 — veto a rote cross-cutting task (e.g. a mechanical rename across files) down to Opus if it needs no real judgement. Everything not stamped runs Opus.
 
 ### 5. Compute waves
 

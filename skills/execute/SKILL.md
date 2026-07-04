@@ -61,7 +61,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 
 `env_bootstrap` (rollout-level) is an optional shell command the engine runs once per worktree so agents start from a working interpreter + deps (e.g. `poetry env use 3.11 && poetry install`) — read it from the rollout frontmatter and pass it as `envBootstrap`; **omit the key when absent** so the worktree-setup prompt stays byte-identical (resume-cache invariant). `ignore_gate` (per-task) is an explicit override for a task note that carries a human/release gate in prose ("don't action until a release ships"); when `true`, pass `ignoreGate: true` on that task so the engine tells the agent the gate is overridden for this run — **omit/false** otherwise.
 
-`model` resolves task frontmatter → rollout frontmatter → `opus` and sets the model for that task's planner/implementer/reviser/investigator agents. The two judge roles (plan-judge, review-judge) default to `opus` (the engine default, overridable per-run via the `judgeModel` arg) — so the merge gatekeepers run a consistent, capable model regardless of a task's own tier.
+`model` resolves task frontmatter → rollout frontmatter → `opus` and sets the model for the **whole task** — planner/implementer/reviser/investigator **and** its two judge roles (plan-judge, review-judge). Judges **follow the task's tier**, so a `fable` task gets Fable review end-to-end and an `opus` task gets Opus review. (A run can still pin all judges to one model via the `judgeModel` arg — it wins when set — but by default they track `task.model`.)
 
 ### 3.5. Resolve the plan-gate per task → `task.planGate` (boolean)
 

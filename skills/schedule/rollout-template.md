@@ -18,7 +18,7 @@ max_review_rounds: 4
 max_plan_rounds: 3  # 2 was insufficient for cross-cutting plan-gates; 3-with-accumulated-feedback converges (wave:execute item 1)
 plan_approval: scope-gated  # off | scope-gated | required
 parallel_ceiling: 4
-model: opus  # opus | fable — default for every task's agents and judges; wave:schedule stamps `model: fable` per-task only on genuinely hard (deep-reasoning / long-horizon) tasks.
+model: opus  # opus | fable — default (mechanical execution). wave:schedule stamps `model: fable` on structural (cross-cutting) or deep tasks; a fable task runs end-to-end incl. its judges.
 # env_bootstrap:   # optional: shell cmd wave:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — wave:schedule step 2.7
 merged_through_wave: 0  # wave:execute continuous-mode cursor: highest wave merged to main (0 = none yet)
 # supersedes: "[[<prior-rollout-slug>]]"   # add only when --regenerate replaces an earlier rollout (see SKILL.md step 6)

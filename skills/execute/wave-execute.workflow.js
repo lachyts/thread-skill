@@ -42,8 +42,8 @@ export const meta = {
 //                                    //   gate in the note (per-task-override-channel). Absent/false ⇒ byte-identical.
 //       model           : "opus" | "fable",
 //                                    // optional; resolved by the skill (task → rollout → "opus").
-//                                    //   Applies to planner/implementer/reviser/investigator. Judges
-//                                    //   (plan-judge, review-judge) default to "opus" (overridable via judgeModel arg).
+//                                    //   Applies to the whole task: planner/implementer/reviser/investigator
+//                                    //   AND its plan-judge/review-judge (judges follow the task's tier).
 //     }]
 //   }]
 // }
@@ -458,11 +458,12 @@ function chunk(arr, n) {
 }
 
 // ---- Model tiering -----------------------------------------------------------
-// Opus 4.8 is the default for every agent; wave:schedule may step a genuinely hard
-// task (cross-cutting / deep-reasoning) up to fable via task frontmatter. The two
-// judge roles gatekeep merges; they default to opus — overridable per-run via the
-// `judgeModel` arg (e.g. pin to fable for a genuinely hard rollout); falls back to opus when unset.
-function judgeModel(a) { return (a && a.judgeModel) || 'opus' }
+// Opus 4.8 is the default for every agent; wave:schedule steps structural (cross-cutting)
+// or deep tasks up to fable via task frontmatter, and a fable task runs its WHOLE pipeline
+// on fable — the two judge roles FOLLOW the task's tier (fable task ⇒ fable review, opus
+// task ⇒ opus review). A run can still pin all judges to one model via the `judgeModel`
+// arg (it wins when set); otherwise judges track task.model, falling back to opus.
+function judgeModel(a, task) { return (a && a.judgeModel) || (task && task.model) || 'opus' }
 function taskModel(task) { return task.model || 'opus' }
 
 // ---- The three convergence layers -------------------------------------------
@@ -481,7 +482,7 @@ async function planLoop(task, a) {
   let round = 1
   while (round <= task.maxPlanRounds) {
     const verdict = await agent(planJudgePrompt(task, plan.plan, a), {
-      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: judgeModel(a),
+      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: judgeModel(a, task),
     })
     if (verdict.verdict === 'approve') {
       return { task, blocked: false, plan: plan.plan, planRoundsUsed: round }
@@ -537,7 +538,7 @@ async function reviewLoop(task, prev, a) {
   let round = 1
   while (round <= task.maxReviewRounds) {
     const verdict = await agent(reviewJudgePrompt(task, current, a), {
-      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: judgeModel(a),
+      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: judgeModel(a, task),
     })
     if (verdict.verdict === 'approve') {
       return { ...current, status: 'review', reviewRoundsUsed: round }
