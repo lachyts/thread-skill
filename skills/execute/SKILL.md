@@ -55,13 +55,13 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 | `parallel_ceiling` | `4` | `concurrency` (rollout-level) |
 | `env_bootstrap` | none (omit) | `envBootstrap` (rollout-level) |
 | `ignore_gate` | `false` (omit) | `task.ignoreGate` (per-task) |
-| `model` | `fable` | `task.model` (per-task; `fable` \| `opus`) |
+| `model` | `opus` | `task.model` (per-task; `opus` \| `fable`) |
 
 `scope:` is read directly from each task's frontmatter (set by `/wave:schedule`). `completion_sentinel` is no longer used — the Workflow returns validated structured output instead of parsing sentinel strings.
 
 `env_bootstrap` (rollout-level) is an optional shell command the engine runs once per worktree so agents start from a working interpreter + deps (e.g. `poetry env use 3.11 && poetry install`) — read it from the rollout frontmatter and pass it as `envBootstrap`; **omit the key when absent** so the worktree-setup prompt stays byte-identical (resume-cache invariant). `ignore_gate` (per-task) is an explicit override for a task note that carries a human/release gate in prose ("don't action until a release ships"); when `true`, pass `ignoreGate: true` on that task so the engine tells the agent the gate is overridden for this run — **omit/false** otherwise.
 
-`model` resolves task frontmatter → rollout frontmatter → `fable` and sets the model for that task's planner/implementer/reviser/investigator agents. The two judge roles (plan-judge, review-judge) always run `fable` — engine-pinned, not configurable — so the merge gatekeepers keep maximum capability even when an easy task drops to `opus`.
+`model` resolves task frontmatter → rollout frontmatter → `opus` and sets the model for that task's planner/implementer/reviser/investigator agents. The two judge roles (plan-judge, review-judge) default to `opus` (the engine default, overridable per-run via the `judgeModel` arg) — so the merge gatekeepers run a consistent, capable model regardless of a task's own tier.
 
 ### 3.5. Resolve the plan-gate per task → `task.planGate` (boolean)
 
@@ -92,7 +92,7 @@ Build the `args` object the workflow expects:
         "scope": "single-file", "planGate": false,
         "maxIterations": 3, "maxReviewRounds": 4, "maxPlanRounds": 2,
         "ignoreGate": false,                 // per-task; omit/false unless overriding a human/release gate
-        "model": "fable" }                   // per-task; "opus" when wave:schedule dropped an easy task down
+        "model": "opus" }                    // per-task; "fable" when wave:schedule stepped a hard task up
     ]}
   ]
 }

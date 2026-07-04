@@ -40,10 +40,10 @@ export const meta = {
 //       maxPlanRounds   : number,    // plan-gate budget
 //       ignoreGate      : boolean,   // optional; true ⇒ inject an operator override of any human/release
 //                                    //   gate in the note (per-task-override-channel). Absent/false ⇒ byte-identical.
-//       model           : "fable" | "opus",
-//                                    // optional; resolved by the skill (task → rollout → "fable").
+//       model           : "opus" | "fable",
+//                                    // optional; resolved by the skill (task → rollout → "opus").
 //                                    //   Applies to planner/implementer/reviser/investigator. Judges
-//                                    //   (plan-judge, review-judge) are pinned to "fable" regardless.
+//                                    //   (plan-judge, review-judge) default to "opus" (overridable via judgeModel arg).
 //     }]
 //   }]
 // }
@@ -458,12 +458,12 @@ function chunk(arr, n) {
 }
 
 // ---- Model tiering -----------------------------------------------------------
-// Fable 5 is the deliberate default for every agent; wave:schedule may drop an easy
-// task (single-file + shallow/mechanical) to opus via task frontmatter. The two
-// judge roles gatekeep merges, so they default to fable — overridable per-run via the
-// `judgeModel` arg (e.g. when fable is unavailable); falls back to fable when unset.
-function judgeModel(a) { return (a && a.judgeModel) || 'fable' }
-function taskModel(task) { return task.model || 'fable' }
+// Opus 4.8 is the default for every agent; wave:schedule may step a genuinely hard
+// task (cross-cutting / deep-reasoning) up to fable via task frontmatter. The two
+// judge roles gatekeep merges; they default to opus — overridable per-run via the
+// `judgeModel` arg (e.g. pin to fable for a genuinely hard rollout); falls back to opus when unset.
+function judgeModel(a) { return (a && a.judgeModel) || 'opus' }
+function taskModel(task) { return task.model || 'opus' }
 
 // ---- The three convergence layers -------------------------------------------
 
