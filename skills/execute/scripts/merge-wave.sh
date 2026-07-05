@@ -20,6 +20,10 @@
 #     provisioning) from a genuine test failure and auto-`gh run rerun --failed`s the former up to
 #     INFRA_RERUN_MAX times before halting (finding #4). FAIL-CLOSED: only a provably setup/infra-only
 #     failure reruns; a real test failure (or any unrecognised step) still halts immediately.
+#   * Treats an ABSENT required check as *pending* (not missing) while any workflow run is in flight on
+#     the head SHA — repos whose only required check is an end-of-workflow roll-up job (e.g. giflab's
+#     aggregate `Checks Complete` gate) don't even get that check run CREATED until the rest of the
+#     suite finishes. "Never appeared" halts only when nothing is running at all — nothing is coming.
 #   * Idempotent: already-MERGED PRs are skipped, so a re-run after a partial merge resumes cleanly
 #     (this is how a cold-resumed session flushes a half-merged wave).
 #   * Writes a result sentinel `<repoPath>/.claude/merge-wave.status` (`ok` / `failed:<code>`) on exit, so a
@@ -39,7 +43,7 @@ set -uo pipefail
 # ---- tuning ----------------------------------------------------------------
 SHA_POLL_MAX=60        # update-branch is async; poll up to 60 * 5s = 5 min for the new head to land
 SHA_POLL_INTERVAL=5
-CHECK_RETRY_MAX=10     # tolerate "no checks reported yet" right after a head change
+CHECK_RETRY_MAX=10     # consecutive "no required checks AND no CI in flight" polls before halting
 CHECK_INTERVAL=15      # gh pr checks --watch refresh
 STATE_GUARD_MAX=8      # bound the per-PR state machine (BEHIND->checks->CLEAN is ~3 hops)
 INFRA_RERUN_MAX=2      # finding #4: transient-infra reruns of a failed required job before halting
@@ -139,6 +143,26 @@ echo "== merge-wave.sh: $OWNER/$REPO — ${#PRS[@]} PR(s): ${PRS[*]} =="
 
 prfield() { gh pr view "$1" -R "$OWNER/$REPO" --json "$2" -q ".$2" 2>/dev/null; }
 
+ci_runs_in_flight() {  # $1=PR — success (0) when ≥1 workflow run on the PR's head SHA is not completed
+  # "Never appeared" must mean "nothing is coming", not "hasn't appeared yet": a repo whose ONLY
+  # required check is an end-of-workflow roll-up job (giflab's `Checks Complete`: `needs:` every other
+  # job) doesn't get that check run CREATED until ~the whole suite has run — far longer than the
+  # CHECK_RETRY_MAX appear budget (halted 3× in the 2026-07-04 giflab rollout). While this returns
+  # true, wait_required_checks treats absent required checks as pending, not missing.
+  # Probe WORKFLOW RUNS, not check-suites: installed apps (digitalocean, cursor) leave phantom check
+  # suites permanently `queued` with 0 check runs on every commit — a check-suite probe would read
+  # "in flight" forever. FAIL-CLOSED throughout: empty SHA (an empty head_sha= param is IGNORED by the
+  # API and returns the repo's entire run list — a false in-flight), API error, or unparseable count
+  # all return 1, so the caller falls back to the bounded appear budget exactly as before this fix.
+  local PR="$1" sha n
+  sha="$(prfield "$PR" headRefOid)"
+  [ -z "$sha" ] && return 1
+  n="$(gh api "repos/$OWNER/$REPO/actions/runs?head_sha=$sha&per_page=100" \
+       -q '[.workflow_runs[] | select(.status != "completed")] | length' 2>/dev/null)"
+  case "$n" in ''|*[!0-9]*) return 1;; esac
+  [ "$n" -gt 0 ]
+}
+
 update_branch() {  # $1=PR  $2=pre-update head SHA
   local PR="$1" PRE="$2" out rc i now
   echo "  PR #$PR is BEHIND main — updating branch (REST update-branch)…"
@@ -201,14 +225,25 @@ infra_flake_rerun() {  # $1=PR — returns 0 if it re-ran failed jobs (caller sh
 }
 
 wait_required_checks() {  # $1=PR
-  local PR="$1" cw=0 out rc infra_reruns=0
+  local PR="$1" absent=0 out rc infra_reruns=0
   echo "  PR #$PR — waiting on required checks…"
   while : ; do
-    cw=$((cw+1)); [ "$cw" -gt "$CHECK_RETRY_MAX" ] && { echo "ERROR: required checks never appeared for PR #$PR" >&2; return 1; }
     out=$(gh pr checks "$PR" -R "$OWNER/$REPO" --required --watch --fail-fast --interval "$CHECK_INTERVAL" 2>&1); rc=$?
     [ $rc -eq 0 ] && return 0
-    # "no checks reported" right after a head change is transient — the new runs haven't registered yet.
-    if printf '%s' "$out" | grep -qiE 'no checks reported|no required checks'; then sleep "$CHECK_INTERVAL"; continue; fi
+    # Required checks ABSENT — either not created YET (late roll-up check; CI still in flight on the
+    # head) or genuinely never coming. While anything is running, wait — same trust semantics as
+    # --watch on a visible pending check, bounded in practice by GitHub's own job timeouts. The
+    # CHECK_RETRY_MAX budget only counts CONSECUTIVE polls where nothing is running anywhere.
+    if printf '%s' "$out" | grep -qiE 'no checks reported|no required checks'; then
+      if ci_runs_in_flight "$PR"; then
+        absent=0
+        echo "  PR #$PR — required checks not created yet; CI in flight on head — waiting…"
+      else
+        absent=$((absent+1))
+        [ "$absent" -gt "$CHECK_RETRY_MAX" ] && { echo "ERROR: required checks never appeared for PR #$PR — no CI runs in flight on its head SHA, nothing is coming" >&2; return 1; }
+      fi
+      sleep "$CHECK_INTERVAL"; continue
+    fi
     echo "ERROR: a REQUIRED check FAILED on PR #$PR (Ralph passed locally, but remote CI is red):" >&2
     printf '%s\n' "$out" | tail -6 >&2
     # Finding #4: tell a transient infra/setup flake from a genuine test failure; auto-rerun the former a

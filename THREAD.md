@@ -6,6 +6,33 @@ lives in the Obsidian vault at `Work/Tasks/wave-execute-e2e-test-giflab`; the pr
 
 ---
 
+## 2026-07-05 — merge-wave: absent required check + CI in flight = pending, not "never appeared"
+
+The 2026-07-04 giflab rollout halted 3× (once per fresh check-run cycle: initial push, each REST
+update-branch) on `ERROR: required checks never appeared` — the mono's sole required check is the
+end-of-workflow roll-up `Checks Complete` (`needs:` every other job), and GitHub only *creates* that
+check run when its `needs:` finish (~7–8 min), far past the ~2.5 min appear budget
+(`CHECK_RETRY_MAX × CHECK_INTERVAL`). Recovery was poll-then-rerun babysitting; the aggregate-only
+required-check pattern is common (it's what keeps branch protection stable across path-conditional
+jobs), so this was a real zero-touch hole. Task: `wave-merge-rollup-check-appear-timeout`.
+
+- **Fix (option 2 from the task note — the real one):** new `ci_runs_in_flight()` probes
+  `actions/runs?head_sha=<head>`; while any workflow run on the head SHA is not `completed`,
+  `wait_required_checks` treats absent required checks as *pending* and keeps waiting (heartbeat
+  logged). The `CHECK_RETRY_MAX` budget now counts only CONSECUTIVE polls with nothing running
+  anywhere — "never appeared" fires only when nothing is coming. Red-check/infra-rerun path untouched.
+- **Probe gotcha #1 — workflow runs, NOT check-suites:** installed apps (digitalocean, cursor) leave
+  phantom check suites permanently `queued` with 0 check runs on every giflab commit; a check-suite
+  probe would read "in flight" forever. Verified live before writing the fix.
+- **Probe gotcha #2 — empty `head_sha=` is silently IGNORED** by the API and returns the repo's entire
+  run list (a false in-flight → infinite wait). `ci_runs_in_flight` is fail-closed: empty SHA, API
+  error, or unparseable count all fall back to the bounded appear budget — external-CI repos behave
+  exactly as before.
+- No version bump (in-place sync at 1.1.0, per the 2026-06-12 precedent). Live acceptance rides on the
+  next giflab wave: all PRs merge with zero manual intervention, including after update-branch cycles.
+
+---
+
 ## 2026-07-03 (evening) — /wave:plan alias removed; /wave:schedule is the only name
 
 The deprecated alias stub at `skills/plan/` (left behind by the 2026-06-18 rename) is gone. Lachy's
