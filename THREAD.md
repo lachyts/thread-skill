@@ -6,6 +6,33 @@ lives in the Obsidian vault at `Work/Tasks/wave-execute-e2e-test-giflab`; the pr
 
 ---
 
+## 2026-07-07 (afternoon) — stacked project blocks: the phase roadmap is query-driven, prose dies
+
+Second grill, triggered by Lachy opening [[Focus App]]: the morning design put the Phases view behind
+a base-block *tab* while the visible roadmap stayed hand-maintained prose — a phase created by
+`/add`/split surfaced only in the hidden place. Fix: project notes open with **two stacked,
+always-visible base blocks** — open tasks (`groupBy: phase`) + the `Work/Phases/` roadmap as a
+`type: table` (unfiltered by status; done phases are history). Prose `## Phases` deleted from Focus
+App (`## Later (unscheduled)` prose survives for uncommitted ideas); retroactive **done phase notes
+for P1 and P2** complete the 1→4 arc (P2 shipped mid-session in the concurrent P2 run — its phase
+note's prefix base surfaces [[focus-app-p2-watcher-drift]] as the one pre-protocol task that
+delivered it). Template + `add-project.md` + `add-phase.md` step 4 + schema § Project/§ Phase
+updated; other projects inherit lazily on first phase. Vault `8395835`, workspaces `67326d1`.
+
+- **Open**: `groupBy` on the tasknotesTaskList view parses + renders clean at 0 results, but group
+  headers are unverified (Focus App had zero open tasks). Eyeball when the P3 split writes tasks;
+  fallback = drop `groupBy`, keep phase-first sort (documented in schema changelog).
+- **Gotcha (recurring)**: editing this repo does NOT update the installed plugin — Claude Code loads
+  skills from `~/.claude/plugins/cache/wave/wave/1.1.0/`. Caught live: `/wave:split` loaded the
+  pre-session SKILL.md mid-run. Fixed with the in-place rsync (no version bump, 2026-06-12
+  precedent): `rsync -a --delete --exclude .git ~/repos/tools/wave-skill/ ~/.claude/plugins/cache/wave/wave/1.1.0/`.
+- **P3 split is Lachy's to run interactively** (grill-style) — deliberately not automated this
+  session; the sandbox exercise (Wave Protocol Test project, created + fully torn down) validated
+  the whole protocol end-to-end instead: classifier, fresh + legacy split paths, discovery filter,
+  archive pass, live Bases rendering.
+
+---
+
 ## 2026-07-07 — a phase is a plan, not a task: Phase becomes a vault type, split inherits phase numbers
 
 Grill-with-docs session triggered by the Focus App collision: roadmap phases (P1–P4) had been
