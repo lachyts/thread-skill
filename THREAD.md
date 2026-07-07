@@ -6,6 +6,31 @@ lives in the Obsidian vault at `Work/Tasks/wave-execute-e2e-test-giflab`; the pr
 
 ---
 
+## 2026-07-07 — a phase is a plan, not a task: Phase becomes a vault type, split inherits phase numbers
+
+Grill-with-docs session triggered by the Focus App collision: roadmap phases (P1–P4) had been
+captured as task notes, and splitting one would have nested a second phase counter
+(`focus-app-p2-watcher-drift-p1-1-…`) with `projects:` pointing at a task masquerading as a project.
+Key clarification now in CONTEXT.md: **two ladders share one atom** — planning (project → phase →
+task, ordered by meaning) and execution (rollout → wave → task, ordered by file-safety). Phase never
+enters the engine; wave never appears in planning; one phase = one rollout by convention only.
+
+- **Phase is a first-class vault type**: `tags: [phase, <area>]`, `phase: N`, home
+  `Work/Phases/<project>-p<N>-<desc>`, archive parity with tasks. Writer spec (single source of the
+  note shape, read by `/add`, split, and free-form agents):
+  `workspaces/_shared/knowledge/add-writers/add-phase.md`. ADR 0002.
+- **split**: detects a phase-note source → project slug = parent from `projects:`, tasks inherit
+  `phase: N` (never a nested counter; intra-phase order = dependency links only). Gate table gains a
+  proposed-filename column + source-disposition footer; step 6 retags/moves legacy task-tagged
+  sources.
+- **schedule**: discovery gained the positive `tags: contains task` filter — the old exclusion-only
+  filter would have dispatched any open non-task note linked to the project (found during the grill).
+- Rejected: janitor sweeps, validation hooks, `--phase` flags, per-project phase folders — wave's
+  gates are the intentional correction moments; authoring-time knowledge prevents the mess upstream.
+- No engine changes; no version bump. First live exercise: splitting Focus App P3.
+
+---
+
 ## 2026-07-05 — merge-wave: absent required check + CI in flight = pending, not "never appeared"
 
 The 2026-07-04 giflab rollout halted 3× (once per fresh check-run cycle: initial push, each REST

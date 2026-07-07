@@ -1,6 +1,6 @@
 ---
 name: split
-description: Use when turning a plan or design into a set of numbered, phased Obsidian task notes — decomposing "a plan" into PR-sized tasks that /wave:schedule then groups into waves. Triggers on "split this plan into tasks", "decompose this", "turn this design into tasks", "break this into numbered/phased tasks", or pointing at a design/project note or an approved plan and asking for tasks. Input: a vault design/project note, a plan-mode plan file, or inline prose. Writes <slug>-pN-M task notes + slims the source into a linked outline. First stage of /wave:split → /wave:schedule → /wave:execute. Scope: Obsidian only.
+description: Use when turning a plan or design into a set of numbered, phased Obsidian task notes — decomposing "a plan" into PR-sized tasks that /wave:schedule then groups into waves. Triggers on "split this plan into tasks", "decompose this", "turn this design into tasks", "break this into numbered/phased tasks", or pointing at a design/project/phase note or an approved plan and asking for tasks. Input: a vault design/project note, a phase note (tasks inherit its phase number and parent project — never a nested counter), a plan-mode plan file, or inline prose. Writes <project>-pN-M task notes + slims the source into a linked outline. First stage of /wave:split → /wave:schedule → /wave:execute. Scope: Obsidian only.
 ---
 
 # /wave:split — decompose a plan into numbered, phased tasks
@@ -36,7 +36,13 @@ note. Not for Linear, GitHub issues, or in-repo Spec Kit `tasks.md` (that's `/sp
 Resolve the argument by shape:
 
 - **`[[wikilink]]` or a vault path** → read that note. It is both the source to decompose *and* the
-  project note to slim (step 6). The **project slug** is the note's title.
+  note to slim (step 6). The **project slug** is the note's title — **unless it's a phase note**:
+  - **Phase-note source** — the note is `tags: [phase]`, or (legacy) a task-tagged note whose
+    filename matches `<project>-p<N>-…` or whose body reads "Phase N of [[Project]]". Then the
+    **project slug is the parent project** from the note's `projects:` frontmatter (never the phase
+    note's own title), and **phase = N is inherited** by every task. Both are confirmed at the
+    step-4 gate. Note shape source of truth:
+    `~/repos/workspaces/_shared/knowledge/add-writers/add-phase.md`.
 - **A file path** (e.g. `~/.claude/plans/*.md`) or **inline prose** → read it as the plan. There is
   no vault node yet — derive a slug from the plan's title/topic and confirm it with the user; step 6
   will **create** the project/outline note.
@@ -65,16 +71,27 @@ natural-language build prompt — lifted/adapted from the plan).
   let `/wave:schedule` resolve it later — do not guess.
 - **Dependencies** — "needs X", "after X lands", "depends on", or a later task building on an earlier
   artifact → record as `[[task]]` links in the dependent's body.
-- **Phases** — if the plan **states phases** (e.g. "Phase 0–3"), honour them. Otherwise **infer**
-  phases as dependency layers (topological): tasks that depend on nothing = phase 0; tasks that depend
-  only on phase-0 tasks = phase 1; and so on.
+- **Phases** — **never nest phases.** A phase-note source (step 1) is a *single* phase: every task
+  inherits its `phase: N`, and intra-phase ordering is expressed as dependency links only —
+  `/wave:schedule` re-derives layers from deps, so sub-phase numbering adds zero machine value.
+  For a multi-phase plan: if it **states phases** (e.g. "Phase 0–3"), honour them; otherwise
+  **infer** phases as dependency layers (topological): tasks that depend on nothing = phase 0; tasks
+  that depend only on phase-0 tasks = phase 1; and so on. Inferred layers ARE the project's roadmap
+  phases — author one **phase note per phase** (per `add-phase.md`, at
+  `Work/Phases/<project>-p<N>-<desc>`) so the structure is uniform from day one.
 
 ### 4. Propose — approve before writing (the gate)
 
 Print the proposed breakdown as a table and get a y/n (or adjustments) **before writing any files**:
 
 ```
-# | phase | task title | scope (1 line) | deps | touches | repo/cwd | process
+# | proposed filename | phase | task title | scope (1 line) | deps | touches | repo/cwd | process
+```
+
+Below the table, print a **source-disposition footer** so the protocol is visible at the gate, e.g.:
+
+```
+source: focus-app-p3-capture-tasknotes → phase note (legacy task-tagged: retag [phase] + move to Work/Phases/)
 ```
 
 The user may merge, split, rename, re-phase, or drop rows. Re-render until approved. This is where
@@ -120,6 +137,11 @@ captured: <today>
   with a numbered, phase-grouped `[[task]]`-linked outline. **Idempotent** — replace only that
   section; never clobber the rest of the note. Ensure the project note carries the standard Bases
   task-query block (copy from a sibling project note) so the tasks auto-surface.
+- **Source is a phase note** → same Build-sequence slim (design content stays), plus bring it up to
+  the Phase shape (`add-phase.md`): if legacy task-tagged, swap `task` → `phase` in `tags:` (keep
+  area tags), add `phase: N`, move the file to `~/repos/obsidian/Work/Phases/`, and ensure it
+  carries the embedded task base (`file.hasTag("task") && file.name.startsWith("<project>-p<N>-")`).
+  Wikilinks are unpathed, so the move breaks nothing.
 - **Source was a plan-file / inline** → create the project/outline note at
   `~/repos/obsidian/Work/Projects/<Area>/<Project>.md` (project frontmatter + Bases block + the
   `## Build sequence` outline).
@@ -136,3 +158,8 @@ List the tasks written, show the outline, and name the next step: **`/wave:sched
 - **Don't stamp `wave:` or `scope:`** — those belong to `/wave:schedule`.
 - **Don't write before the gate.** Step 4's approval precedes any file write.
 - **Don't clobber the source note** — the `## Build sequence` edit is section-scoped and idempotent.
+- **Don't leave a split source task-tagged** — a phase is a plan, never a task (`tags: [phase]`,
+  `Work/Phases/`); a task-tagged phase note is dispatchable by mistake. See ADR 0002.
+- **Don't restart a phase counter inside a phase** — tasks inherit the roadmap number
+  (`<project>-p<N>-<M>-…`), never `…-p1-1` under a `p2` source. Note shape lives in
+  `add-writers/add-phase.md` — don't duplicate the schema here.

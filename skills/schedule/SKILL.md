@@ -32,6 +32,8 @@ Walk `~/repos/obsidian/Work/Tasks/*.md`. Filter:
 
 - `status: open` (default — `--include-done` to override)
 - `projects:` contains the target wikilink
+- `tags:` **contains** `task` — phase notes (`tags: [phase]`, see ADR 0002) and any other non-task
+  note linked to the project are never dispatched
 - `tags:` does **not** contain `rollout` (rollouts aren't tasks)
 - Skip tasks that already have `wave:` set unless `--regenerate` is passed
 - Skip tasks with `status: merged` — step 4.5 folded these into a combined note; their `merged_into:` target carries the work and gets dispatched in their place

@@ -3,6 +3,22 @@
 The domain language of the wave plugin — decomposing, scheduling, and executing a large multi-PR change
 as a wave-by-wave convergence rollout. Terms here are wave-specific; general programming concepts are not.
 
+## Planning structure
+
+**Task**:
+One PR-sized, independently-shippable unit, written as a single Obsidian task note
+(`Work/Tasks/<project>-p<N>-<M>-<desc>`, `tags: [task, …]`) — the atom of the pipeline and the only
+object on both ladders: planning (project → phase → task) and execution (rollout → wave → task).
+_Avoid_: ticket, item, story, step.
+
+**Phase**:
+A project's roadmap tier — an ordered milestone (P1, P2, …) whose tasks carry `phase: N`. A human
+planning concept only: phases order meaning, waves order merges, and the engine never reads `phase:`.
+One phase = one rollout by convention. A phase is a plan, never a task — its note is
+`Work/Phases/<project>-p<N>-<desc>` with `tags: [phase]`, and `/wave:split` de-tasks a legacy
+task-tagged phase note when decomposing it.
+_Avoid_: stage, iteration, wave.
+
 ## Rollout structure
 
 **Rollout**:
