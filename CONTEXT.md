@@ -98,3 +98,24 @@ _Avoid_: dashboard, summary, snapshot.
 The path by which a blocked task is fixed and re-landed while the engine keeps sole merge authority —
 now driven by `/wave:repair` (the human supplies decisions; Claude does the mechanics).
 _Avoid_: handoff, recovery.
+
+## Model tiering
+
+**Tier**:
+The model a task's agents run on — `opus` (the first-pass tier, for mechanical execution) or `fable`
+(the escalation tier, for anything that has to be thought through). A task has exactly one tier at any
+moment, and its judges follow it.
+_Avoid_: model level, grade.
+
+**Step-up**:
+The planning-time, predictive assignment of the fable tier to a task — `/wave:schedule` stamps
+structural or deep tasks before any evidence exists, from the task's shape alone.
+_Avoid_: escalation (that's run-time), upgrade.
+
+**Escalation**:
+The run-time, evidence-driven flip of an opus task to fable at the first sign of hardness — a rejected
+plan, a red one-shot verifier run, a rejected review round, or any first-pass block. One-way and
+sticky: the task finishes on fable, and the flip is recorded durably so every later re-dispatch starts
+there. Opus never iterates — the first pass is a one-shot, and iteration itself is fable's job.
+_Avoid_: fallback (it suggests dropping DOWN to a degraded path — this is the opposite), retry,
+promotion.

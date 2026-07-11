@@ -179,6 +179,8 @@ Everything else stays Opus: single-file `shallow`/mechanical changes — config 
 
 A Fable task runs **end-to-end on Fable** — its planner, implementer, reviser, **and** both judges (judges follow the task's tier — see `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`). Present the step-ups as a batch ("these N are structural/deep → fable: …") with one line of justification each, and get a y/n (or per-task veto) before stamping in step 7 — veto a rote cross-cutting task (e.g. a mechanical rename across files) down to Opus if it needs no real judgement. Everything not stamped runs Opus.
 
+The step-up is **predictive** — it fires on the task's shape before any run. Its evidence-driven twin lives in the engine: an Opus task gets a one-shot first pass, and the first rejection or red verifier run **escalates** it to Fable mid-run (see execute SKILL.md § Model escalation). So a borderline candidate can safely stay Opus — a wrong call costs one cheap first pass, not a blocked rollout.
+
 ### 5. Compute waves
 
 **Core invariant: two tasks that touch the same file never share a wave.** Same-file tasks are serialised across consecutive waves — the later one rebases onto main after the first lands. (This is the fix for the #30/#31 incident, where two same-wave tasks both edited `metrics.py` and a stale-base squash silently dropped the first task's changes.)

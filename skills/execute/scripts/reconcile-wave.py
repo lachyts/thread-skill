@@ -199,6 +199,13 @@ def cmd_reconcile(args) -> int:
 
         note.set("status", status)
 
+        # Escalation is durable: a task that flipped opus→fable mid-run has proven non-mechanical,
+        # so every later re-dispatch (resume, /wave:repair) must start at fable, not re-pay the
+        # opus one-shot toll. Stamped for every status — including landed ones, as the record of
+        # what it took. Idempotent via Note.set.
+        if task.get("escalated"):
+            note.set("model", "fable")
+
         pr = (task.get("prUrl") or "").strip()
         if status in STATUS_WITH_PR and pr:
             note.set("pr", pr)
@@ -219,7 +226,8 @@ def cmd_reconcile(args) -> int:
 
         note.save(dry_run=args.dry_run)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
-        print(f"{slug}: status={status}{(' pr=' + pr) if pr else ''}{flag}")
+        esc = " model=fable(escalated)" if task.get("escalated") else ""
+        print(f"{slug}: status={status}{(' pr=' + pr) if pr else ''}{esc}{flag}")
 
     if args.wave is not None and args.rollout and not errors:
         # Optional convenience: advance the cursor in the same call (only when the caller asserts the

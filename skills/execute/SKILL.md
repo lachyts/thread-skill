@@ -61,7 +61,9 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 
 `env_bootstrap` (rollout-level) is an optional shell command the engine runs once per worktree so agents start from a working interpreter + deps (e.g. `poetry env use 3.11 && poetry install`) — read it from the rollout frontmatter and pass it as `envBootstrap`; **omit the key when absent** so the worktree-setup prompt stays byte-identical (resume-cache invariant). `ignore_gate` (per-task) is an explicit override for a task note that carries a human/release gate in prose ("don't action until a release ships"); when `true`, pass `ignoreGate: true` on that task so the engine tells the agent the gate is overridden for this run — **omit/false** otherwise.
 
-`model` resolves task frontmatter → rollout frontmatter → `opus` and sets the model for the **whole task** — planner/implementer/reviser/investigator **and** its two judge roles (plan-judge, review-judge). Judges **follow the task's tier**, so a `fable` task gets Fable review end-to-end and an `opus` task gets Opus review. (A run can still pin all judges to one model via the `judgeModel` arg — it wins when set — but by default they track `task.model`.)
+`model` resolves task frontmatter → rollout frontmatter → `opus` and sets the task's **starting tier**. Judges **follow the task's live tier**, so a `fable` task gets Fable review end-to-end. (A run can still pin all judges to one model via the `judgeModel` arg — it wins when set.)
+
+**Model escalation (one-shot first pass).** An `opus` task gets exactly one un-iterated pass at each layer: one plan, one implementation with a **single** verifier run (the Ralph `max_iterations` budget does not apply to the first pass), one judged PR round. The first evidence of hardness anywhere — a plan-judge `changes` verdict, a first-pass planner/investigator block, a red one-shot verifier run, an implementer block, or a review-judge `changes` verdict — **escalates the task to `fable` for all remaining work**, judges included. Escalation is one-way, sticky, and happens inside the engine (no re-invocation): the fable agent inherits the prior attempt's worktree, committed work, and note diagnosis, and runs the full Ralph loop. A `fable` task (stepped up by `/wave:schedule` §4.7 or a rollout-level `model: fable`) never escalates — there is nothing above fable — and runs the full loop from the start, exactly as before. Escalation is **durable**: reconcile (§6) stamps `model: fable` on the task note, so resume / `/wave:repair` re-dispatches start at fable and never re-pay the opus toll. There is no config switch — escalation is always on for opus tasks.
 
 ### 3.5. Resolve the plan-gate per task → `task.planGate` (boolean)
 
@@ -92,7 +94,8 @@ Build the `args` object the workflow expects:
         "scope": "single-file", "planGate": false,
         "maxIterations": 3, "maxReviewRounds": 4, "maxPlanRounds": 2,
         "ignoreGate": false,                 // per-task; omit/false unless overriding a human/release gate
-        "model": "opus" }                    // per-task; "fable" when wave:schedule stepped a hard task up
+        "model": "opus" }                    // per-task STARTING tier; "fable" when wave:schedule stepped a
+                                             //   hard task up. The engine may escalate opus→fable mid-run.
     ]}
   ]
 }
@@ -173,7 +176,7 @@ This is the backstop for a hung Workflow run or a missed completion notification
 
 ### 6. Reconcile + report
 
-The workflow returns `{ rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath, reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, summary }] }` where `status ∈ review | review-blocked | blocked | plan-blocked`.
+The workflow returns `{ rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath, reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, summary, model, escalated, escalatedAt }] }` where `status ∈ review | review-blocked | blocked | plan-blocked`, `model` is the FINAL tier the task ran on, and `escalated`/`escalatedAt` (`plan` | `implement` | `review`) record an opus→fable escalation.
 
 **Reconcile with the deterministic helper — do NOT hand-edit frontmatter.** Write the returned object to a temp file (or pipe it on stdin) and run:
 
@@ -187,6 +190,7 @@ The helper resolves each task note by slug under `~/repos/obsidian/Work/Tasks/` 
 - `review-blocked` → `status: review-blocked`, `pr: <url>`; appends `reviewFeedback` under `## Review-blocked feedback`
 - `blocked` → `status: blocked`; appends `blockerDiagnosis` under `## Blocker diagnosis` (skipped if the agent already wrote it)
 - `plan-blocked` → `status: plan-blocked`; appends the accumulated plan feedback under `## Plan-blocked feedback`
+- any status with `escalated: true` → additionally stamps `model: fable` (durable escalation — later re-dispatches start at fable)
 
 (This replaces ~5 fumble-prone frontmatter edits per wave — finding #6. The lead session still owns the call; subagents never write task `status:`.)
 
@@ -203,6 +207,9 @@ Approved after revision:
 
 Approved after plan revision:
 - [[task-g]] — plan_rounds_used = 2 — PR <url>
+
+Approved after escalation (opus → fable):
+- [[task-i]] — escalated at implement — PR <url>
 
 Review-blocked (max rounds reached):
 - [[task-e]] — PR <url> — see "## Review-blocked feedback"
@@ -296,5 +303,7 @@ Future protocol bumps follow the same rule: a new executor refuses older version
 ## Resource budget
 
 The engine chunks each wave by `parallel_ceiling` (default 4) so heavy-model waves never run more than that many worktrees concurrently. Convergence multiplies wall-clock, not memory: worst-case per task is roughly `max_iterations × verifier-time × max_review_rounds`. With defaults (3 × 5 min × 4) one stubborn task can occupy a worktree ~an hour. For waves dominated by cross-cutting long-verifier tasks, lower `max_review_rounds` in the rollout frontmatter.
+
+Escalation shifts that arithmetic for `opus` tasks: the opus first pass costs at most one implementation + **one** verifier run, and only an escalated task pays the full fable convergence bill on top (`1 × verifier` + fable's `max_iterations × verifier × max_review_rounds`). Mechanical tasks that land first-shot get cheaper than the old always-iterate profile; proven-hard tasks cost one extra opus pass over pre-stamping them fable.
 
 **Continuous auto-merge adds serial merge time per wave.** Merges into a `strict`-protected `main` can't be parallelised — each merge advances `main`, so the next PR must re-update its branch and re-pass its required checks. Budget ≈ (update-branch + required-checks runtime + squash) per approved PR, **sequentially** — new wall-clock the old "human merges later" path didn't charge to the run.

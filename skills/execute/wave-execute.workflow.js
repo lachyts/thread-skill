@@ -42,15 +42,20 @@ export const meta = {
 //                                    //   gate in the note (per-task-override-channel). Absent/false ⇒ byte-identical.
 //       model           : "opus" | "fable",
 //                                    // optional; resolved by the skill (task → rollout → "opus").
-//                                    //   Applies to the whole task: planner/implementer/reviser/investigator
-//                                    //   AND its plan-judge/review-judge (judges follow the task's tier).
+//                                    //   The task's STARTING tier. An opus task gets a ONE-SHOT first
+//                                    //   pass at each layer (one plan, one implementation + one verifier
+//                                    //   run, one review round); the first rejection/red/block ESCALATES
+//                                    //   the task to fable for all remaining work — sticky, judges follow.
+//                                    //   A fable task runs its whole pipeline on fable, as before.
 //     }]
 //   }]
 // }
 //
 // Returns { rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath,
-//   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, summary }] }
-// where status ∈ review | review-blocked | blocked | plan-blocked.
+//   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, summary,
+//   model, escalated, escalatedAt }] }
+// where status ∈ review | review-blocked | blocked | plan-blocked, model is the FINAL tier the task
+// ran on, and escalated/escalatedAt ('plan' | 'implement' | 'review') record an opus→fable escalation.
 // =============================================================================
 
 // ---- Structured schemas (replace the old sentinel strings) ------------------
@@ -83,13 +88,14 @@ const IMPL_RESULT = {
   properties: {
     verified: { type: 'boolean', description: 'true if the verifier reached the accepted green state (exit 0, or — when a baseline manifest is present — only known-baseline tests fail, each matching its listed reason) before the PR was opened' },
     blocked: { type: 'boolean', description: 'true if Ralph exhausted max iterations or the worktree was unsafe' },
+    escalate: { type: 'boolean', description: 'true ONLY when your instructions gave you a ONE-SHOT verifier run and it was red — the task hands over to the stronger tier. Always false when you ran the full verification loop or did no implementation.' },
     prUrl: { type: 'string', description: 'PR URL, or empty string when blocked / read-only' },
     branch: { type: 'string', description: 'branch name, or empty string' },
     worktreePath: { type: 'string', description: 'absolute worktree path from git rev-parse --show-toplevel' },
     blockerDiagnosis: { type: 'string', description: 'one-paragraph diagnosis when blocked, else empty string' },
     summary: { type: 'string', description: 'one-paragraph summary of what changed and was tested' },
   },
-  required: ['verified', 'blocked', 'prUrl', 'branch', 'worktreePath', 'blockerDiagnosis', 'summary'],
+  required: ['verified', 'blocked', 'escalate', 'prUrl', 'branch', 'worktreePath', 'blockerDiagnosis', 'summary'],
 }
 
 const REVIEW_VERDICT = {
@@ -192,9 +198,53 @@ Verification loop (Ralph-style):
      it did not converge. Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.`.trim()
 }
 
+// The opus first pass does NOT iterate — one verifier run, then either green or hand-over. Iteration is
+// evidence of hardness, and iteration runs at fable (see Model tiering below). baseline: same
+// "test_id — reason" array as ralphLoop; the green criterion stays baseline-aware.
+function oneShotVerify(verifier, baseline) {
+  const green = baseline && baseline.length ? `
+- KNOWN BASELINE FAILURES (pre-existing, environmental — NOT yours; keep running the full verifier, do NOT
+  \`--deselect\`/skip them — that hides real regressions):
+${baseline.map((b) => '  - ' + b).join('\n')}
+- GREEN CRITERION (baseline-aware): the work is verified when EVERY failing test is in the known-baseline
+  set above (fewer is fine — a baseline red going green is GOOD, never a failure; a baseline entry absent
+  from this run is simply ignored).` : `
+- GREEN CRITERION: the verifier exits 0 — the work is verified.`
+  return `
+Verification (ONE-SHOT first pass — you do NOT iterate):
+- Verifier: ${verifier}
+- Run the verifier EXACTLY ONCE.${green}
+- If green: the work is verified — proceed.
+- If red (any failure outside the green criterion): do NOT attempt a fix, do NOT run the verifier again,
+  and do NOT open/update a PR. Commit your work so far on the branch (so the next tier inherits it),
+  append a one-paragraph diagnosis of the failure to the task note under a "## Blocker diagnosis"
+  heading, and return escalate=true, verified=false, blocked=false with the same diagnosis in
+  blockerDiagnosis. A stronger model picks up your worktree and iterates from there.`.trim()
+}
+
+// Tier-selected verification block for code-writing prompts: the opus first pass gets the one-shot,
+// fable (seeded or escalated) gets the full Ralph loop.
+function verifyBlock(tier, verifier, maxIterations, baseline) {
+  return tier === 'opus' ? oneShotVerify(verifier, baseline) : ralphLoop(verifier, maxIterations, baseline)
+}
+
+// Escalation hand-over context (empty-when-unused, like baselineManifest/gateOverride — the non-empty
+// string carries its OWN leading "\n\n" so callers interpolate it bare). `prior` is the first-pass
+// attempt's diagnosis/feedback verbatim.
+function escalationContext(prior) {
+  if (!prior) return ''
+  return `
+
+ESCALATION: you are the STRONGER-TIER takeover of this task — a first-pass attempt at a lower tier did
+not land it, and you own it from here. The prior attempt's diagnosis (verbatim):
+${prior}
+Any committed work from that attempt is already on your branch — build on or replace it as the diagnosis
+warrants; do not blindly repeat the failed approach.`
+}
+
 // ---- Prompt builders (5 variants, inlined; this file cannot read .md at runtime) ----
 
-function implementerPrompt(task, a) {
+function implementerPrompt(task, a, tier, prior) {
   return `You're picking up [[${task.slug}]] from the rollout at [[${a.rolloutSlug}]].
 
 Task note: ${task.taskPath}
@@ -207,18 +257,19 @@ Steps:
 2. If the fix is well-defined, work test-first (write the failing test before the fix). Use the
    superpowers:test-driven-development skill if applicable.
 3. If the task is investigation-first, produce findings, propose a fix in the task note, then implement.
-4. ${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
+4. ${verifyBlock(tier, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
 5. If the verifier passed: open a PR titled \`audit-fix: <task subject>\`. The body must link the task
    note and explain what changed and why.
-6. Return your structured result: verified, blocked, prUrl, branch, worktreePath (from
-   \`git rev-parse --show-toplevel\`), blockerDiagnosis (empty if not blocked), and a one-paragraph summary.
+6. Return your structured result: verified, blocked, escalate (as your verification block instructs;
+   false otherwise), prUrl, branch, worktreePath (from \`git rev-parse --show-toplevel\`),
+   blockerDiagnosis (empty if not blocked), and a one-paragraph summary.
 
-${BUG_PREFLIGHTS}${baselineManifest(a)}${gateOverride(task)}
+${BUG_PREFLIGHTS}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior)}
 
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.`
 }
 
-function readOnlyPrompt(task, a) {
+function readOnlyPrompt(task, a, prior) {
   return `You're picking up [[${task.slug}]] from the rollout at [[${a.rolloutSlug}]]. This is a
 READ-ONLY task (scope: read-only) — investigation / audit, NO source edits, NO PR.
 
@@ -233,11 +284,11 @@ Steps:
 2. Run the read-only investigation it asks for (greps, baseline verifier run to OBSERVE, reading tests).
 3. Append your findings to the task note under a "## Findings" heading — concrete, with file:line refs.
 4. Return your structured result: verified=true (findings produced) or blocked=true (could not complete),
-   prUrl="", branch="", worktreePath="" (read-only tasks open no worktree), blockerDiagnosis (empty unless
-   blocked), and a one-paragraph summary of what you found.${baselineManifest(a)}`
+   escalate=false, prUrl="", branch="", worktreePath="" (read-only tasks open no worktree),
+   blockerDiagnosis (empty unless blocked), and a one-paragraph summary of what you found.${baselineManifest(a)}${escalationContext(prior)}`
 }
 
-function plannerPrompt(task, a) {
+function plannerPrompt(task, a, prior) {
   return `You're picking up [[${task.slug}]] from the rollout at [[${a.rolloutSlug}]].
 
 This task is GATED ON PLAN APPROVAL. In this dispatch you produce a structured plan ONLY — DO NOT write
@@ -268,7 +319,7 @@ Steps:
 
 If during investigation you find the task is fundamentally malformed (impossible, contradicts a committed
 change, etc.), append a one-paragraph diagnosis to the task note under "## Blocker diagnosis" and return
-ready=false, blocked=true, blockerCause="<one line>", plan="".${baselineManifest(a)}${gateOverride(task)}`
+ready=false, blocked=true, blockerCause="<one line>", plan="".${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior)}`
 }
 
 function planJudgePrompt(task, planText, a) {
@@ -322,7 +373,7 @@ ready=true with the rewritten plan in \`plan\`. If you discover the task is unre
 ready=false, blocked=true, blockerCause="<one line>".`
 }
 
-function approvedPlanImplementerPrompt(task, planText, a) {
+function approvedPlanImplementerPrompt(task, planText, a, tier, prior) {
   return `PLAN APPROVED for [[${task.slug}]] (rollout [[${a.rolloutSlug}]]). Implement the approved plan below.
 
 Task note: ${task.taskPath}
@@ -343,12 +394,12 @@ blockerDiagnosis="plan-divergence: <one line>" instead of forging ahead.
 
 Steps:
 1. Implement the plan (test-first where the plan says so). ${PRIOR_FEEDBACK_NOTE}
-2. ${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
+2. ${verifyBlock(tier, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
 3. On verifier pass: open a PR titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
-4. Return your structured result: verified, blocked, prUrl, branch, worktreePath (git rev-parse --show-toplevel),
-   blockerDiagnosis, summary.
+4. Return your structured result: verified, blocked, escalate (as your verification block instructs; false
+   otherwise), prUrl, branch, worktreePath (git rev-parse --show-toplevel), blockerDiagnosis, summary.
 
-${BUG_PREFLIGHTS}${baselineManifest(a)}${gateOverride(task)}
+${BUG_PREFLIGHTS}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior)}
 
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.`
 }
@@ -396,8 +447,8 @@ ${BUG_PREFLIGHTS}${baselineManifest(a)}
 
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.
 
-Return your structured result: verified, blocked, prUrl (unchanged), branch (unchanged), worktreePath,
-blockerDiagnosis, summary.`
+Return your structured result: verified, blocked, escalate=false (you run the full verification loop),
+prUrl (unchanged), branch (unchanged), worktreePath, blockerDiagnosis, summary.`
 }
 
 // ---- Helpers ----------------------------------------------------------------
@@ -458,20 +509,37 @@ function chunk(arr, n) {
 }
 
 // ---- Model tiering -----------------------------------------------------------
-// Opus 4.8 is the default for every agent; wave:schedule steps structural (cross-cutting)
-// or deep tasks up to fable via task frontmatter, and a fable task runs its WHOLE pipeline
-// on fable — the two judge roles FOLLOW the task's tier (fable task ⇒ fable review, opus
-// task ⇒ opus review). A run can still pin all judges to one model via the `judgeModel`
-// arg (it wins when set); otherwise judges track task.model, falling back to opus.
-function judgeModel(a, task) { return (a && a.judgeModel) || (task && task.model) || 'opus' }
+// task.model seeds the task's STARTING tier (task → rollout → 'opus'; wave:schedule pre-stamps
+// structural/deep tasks 'fable' — the predictive step-up). At run time the tier is per-task MUTABLE
+// state: an opus task gets a one-shot first pass at each layer, and the first evidence of hardness
+// anywhere — plan-judge 'changes', a first-pass planner/investigator block, a red one-shot verifier
+// run, an implementer block, or a review-judge 'changes' — ESCALATES the task to fable for all
+// remaining work. Escalation is one-way and sticky; judges follow the live tier (a.judgeModel, when
+// set, still pins all judges). A fable-seeded task never escalates — there is nothing above fable —
+// and runs the full Ralph loop from the start, exactly as before. The skill stamps `model: fable`
+// on the note at reconcile when a task escalated, so later re-dispatches start at fable.
 function taskModel(task) { return task.model || 'opus' }
+function judgeFor(a, st) { return (a && a.judgeModel) || st.tier }
+function escalate(st, slug, at) {
+  st.tier = 'fable'
+  st.escalated = true
+  if (!st.escalatedAt) st.escalatedAt = at
+  log(`escalation: ${slug} → fable (${at})`)
+}
 
 // ---- The three convergence layers -------------------------------------------
 
-async function planLoop(task, a) {
-  let plan = await agent(plannerPrompt(task, a), {
-    label: `plan:${task.slug}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: taskModel(task),
+async function planLoop(task, st, a) {
+  let plan = await agent(plannerPrompt(task, a, ''), {
+    label: `plan:${task.slug}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier,
   })
+  if ((plan.blocked || !plan.ready) && st.tier === 'opus') {
+    // A first-pass planner failure is evidence of hardness — one fable retry before plan-blocked.
+    escalate(st, task.slug, 'plan')
+    plan = await agent(plannerPrompt(task, a, plan.blockerCause || 'first-pass planner produced no plan'), {
+      label: `plan:${task.slug}@fable`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier,
+    })
+  }
   if (plan.blocked || !plan.ready) {
     return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: plan.blockerCause || 'planner returned no plan', planRoundsUsed: 0 }
   }
@@ -482,7 +550,7 @@ async function planLoop(task, a) {
   let round = 1
   while (round <= task.maxPlanRounds) {
     const verdict = await agent(planJudgePrompt(task, plan.plan, a), {
-      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: judgeModel(a, task),
+      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: judgeFor(a, st),
     })
     if (verdict.verdict === 'approve') {
       return { task, blocked: false, plan: plan.plan, planRoundsUsed: round }
@@ -498,8 +566,10 @@ async function planLoop(task, a) {
           priorFeedback.map((r) => 'Round ' + r.round + ': ' + r.feedback.join('; ')).join('\n'),
       }
     }
+    // Opus got its one judged round; revision is iteration, and iteration runs at fable.
+    if (st.tier === 'opus') escalate(st, task.slug, 'plan')
     plan = await agent(planReviserPrompt(task, plan.plan, priorFeedback, round + 1, a), {
-      label: `plan-revise:${task.slug} r${round + 1}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: taskModel(task),
+      label: `plan-revise:${task.slug} r${round + 1}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier,
     })
     if (plan.blocked || !plan.ready) {
       return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: plan.blockerCause || 'plan-reviser returned no plan', planRoundsUsed: round + 1 }
@@ -508,26 +578,48 @@ async function planLoop(task, a) {
   }
 }
 
-async function implement(task, prev, a) {
+async function implement(task, st, prev, a) {
   if (prev && prev.blocked) return prev // plan-blocked passthrough
   if (task.scope === 'read-only') {
-    return await agent(readOnlyPrompt(task, a), {
-      label: `investigate:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: taskModel(task),
+    let r = await agent(readOnlyPrompt(task, a, ''), {
+      label: `investigate:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier,
     })
+    if (r && r.blocked && st.tier === 'opus') {
+      escalate(st, task.slug, 'implement')
+      r = await agent(readOnlyPrompt(task, a, r.blockerDiagnosis || 'first-pass investigation did not complete'), {
+        label: `investigate:${task.slug}@fable`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier,
+      })
+    }
+    return r
   }
-  if (task.planGate && prev && prev.plan) {
-    const r = await agent(approvedPlanImplementerPrompt(task, prev.plan, a), {
-      label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: taskModel(task),
-    })
-    // thread the plan-stage metadata forward so the final report shows plan_rounds_used
-    return r ? { ...r, planRoundsUsed: prev.planRoundsUsed || 0 } : r
-  }
-  return await agent(implementerPrompt(task, a), {
-    label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: taskModel(task),
+  // Same builder for both passes: st.tier is read at build time, so the opus call renders the
+  // one-shot verification block and the post-escalation call renders the full Ralph loop.
+  const prompt = (prior) => (task.planGate && prev && prev.plan)
+    ? approvedPlanImplementerPrompt(task, prev.plan, a, st.tier, prior)
+    : implementerPrompt(task, a, st.tier, prior)
+  let r = await agent(prompt(''), {
+    label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier,
   })
+  if (r && (r.escalate || r.blocked) && st.tier === 'opus') {
+    // One-shot red or a first-pass block: the task has proven non-mechanical. Fable takes over in the
+    // same worktree (the committed attempt + note diagnosis carry over; an approved plan is NOT
+    // re-planned) with the full Ralph budget.
+    escalate(st, task.slug, 'implement')
+    const prior = [r.blockerDiagnosis, r.summary].filter((s) => s && s.trim()).join('\n')
+      || 'first-pass attempt did not verify green'
+    r = await agent(prompt(prior), {
+      label: `implement:${task.slug}@fable`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier,
+    })
+  }
+  // Defensive: a result that neither verified nor blocked and has no PR cannot go to review.
+  if (r && !r.verified && !r.blocked && !r.prUrl) {
+    r = { ...r, blocked: true, blockerDiagnosis: r.blockerDiagnosis || 'agent returned neither verified nor blocked' }
+  }
+  // thread the plan-stage metadata forward so the final report shows plan_rounds_used
+  return (task.planGate && prev && prev.plan && r) ? { ...r, planRoundsUsed: prev.planRoundsUsed || 0 } : r
 }
 
-async function reviewLoop(task, prev, a) {
+async function reviewLoop(task, st, prev, a) {
   // plan-blocked passthrough (no IMPL_RESULT shape)
   if (prev && prev.blocked && prev.status === 'plan-blocked') return prev
   // Ralph-blocked implement result
@@ -538,7 +630,7 @@ async function reviewLoop(task, prev, a) {
   let round = 1
   while (round <= task.maxReviewRounds) {
     const verdict = await agent(reviewJudgePrompt(task, current, a), {
-      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: judgeModel(a, task),
+      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: judgeFor(a, st),
     })
     if (verdict.verdict === 'approve') {
       return { ...current, status: 'review', reviewRoundsUsed: round }
@@ -546,8 +638,10 @@ async function reviewLoop(task, prev, a) {
     if (round === task.maxReviewRounds) {
       return { ...current, status: 'review-blocked', reviewRoundsUsed: round, reviewFeedback: verdict.feedback }
     }
+    // Opus got its one judged PR round; revision is iteration, and iteration runs at fable.
+    if (st.tier === 'opus') escalate(st, task.slug, 'review')
     const revised = await agent(reviserPrompt(task, current, verdict.feedback, round + 1, a), {
-      label: `revise:${task.slug} r${round + 1}`, phase: 'Review', schema: IMPL_RESULT, model: taskModel(task),
+      label: `revise:${task.slug} r${round + 1}`, phase: 'Review', schema: IMPL_RESULT, model: st.tier,
     })
     if (revised.blocked) {
       return { ...current, status: 'blocked', blockerDiagnosis: revised.blockerDiagnosis }
@@ -555,6 +649,17 @@ async function reviewLoop(task, prev, a) {
     current = { ...current, ...revised }
     round += 1
   }
+}
+
+// One task, end to end: plan-gate → implement → review, sharing a single mutable tier state so an
+// escalation in any layer carries into every later agent AND judge. Tasks converge independently —
+// the orchestration below runs converge() per item with no cross-task barrier inside a chunk.
+async function converge(task, a) {
+  const st = { tier: taskModel(task), escalated: false, escalatedAt: '' }
+  const planned = task.planGate ? await planLoop(task, st, a) : { task, plan: null, blocked: false }
+  const impl = await implement(task, st, planned, a)
+  const reviewed = await reviewLoop(task, st, impl, a)
+  return reviewed ? { ...reviewed, model: st.tier, escalated: st.escalated, escalatedAt: st.escalatedAt } : reviewed
 }
 
 // ---- Orchestration: waves are barriers, tasks within a wave pipeline ---------
@@ -571,14 +676,10 @@ log(`wave-execute: ${a.rolloutSlug} — ${a.waves.length} wave(s), parallel ceil
 for (const wave of a.waves) {
   log(`Wave ${wave.wave}: ${wave.tasks.length} task(s)`)
   // Memory-safety: chunk heavy waves so no more than `ceiling` worktrees run at once.
-  // Within a chunk, pipeline() lets task A reach Review while task B is still Implementing — no barrier.
+  // Within a chunk, converge() runs per task with no barrier — task A can be in Review while
+  // task B is still Implementing, exactly as the old three-stage pipeline allowed.
   for (const group of chunk(wave.tasks, ceiling)) {
-    const out = await pipeline(
-      group,
-      (t) => (t.planGate ? planLoop(t, a) : { task: t, plan: null, blocked: false }),
-      (prev, t) => implement(t, prev, a),
-      (prev, t) => reviewLoop(t, prev, a),
-    )
+    const out = await pipeline(group, (t) => converge(t, a))
     out.forEach((r, i) => {
       const t = group[i]
       const norm = r || { blocked: true, status: 'blocked', blockerDiagnosis: 'workflow stage threw — see /workflows' }
@@ -594,6 +695,9 @@ for (const wave of a.waves) {
         blockerDiagnosis: norm.blockerDiagnosis || '',
         reviewFeedback: norm.reviewFeedback || [],
         summary: norm.summary || '',
+        model: norm.model || taskModel(t),
+        escalated: !!norm.escalated,
+        escalatedAt: norm.escalatedAt || '',
       })
     })
   }

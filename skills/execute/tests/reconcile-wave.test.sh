@@ -56,9 +56,9 @@ EOF
 cat > "$TMP/result.json" <<EOF
 { "rolloutSlug": "test-rollout", "tasks": [
   { "slug": "task-approved",     "scope": "single-file",  "status": "review",         "prUrl": "https://github.com/o/r/pull/1", "reviewRoundsUsed": 1, "planRoundsUsed": 0 },
-  { "slug": "task-revised",      "scope": "cross-cutting","status": "review",         "prUrl": "https://github.com/o/r/pull/2", "reviewRoundsUsed": 3, "planRoundsUsed": 2 },
+  { "slug": "task-revised",      "scope": "cross-cutting","status": "review",         "prUrl": "https://github.com/o/r/pull/2", "reviewRoundsUsed": 3, "planRoundsUsed": 2, "model": "fable", "escalated": true, "escalatedAt": "review" },
   { "slug": "task-reviewblocked","scope": "single-file",  "status": "review-blocked", "prUrl": "https://github.com/o/r/pull/3", "reviewRoundsUsed": 4, "reviewFeedback": ["bound assertion is a no-op", "missed sibling site in foo.py"] },
-  { "slug": "task-blocked",      "scope": "single-file",  "status": "blocked",        "prUrl": "", "blockerDiagnosis": "verifier never went green after 3 tries; root cause is an env mismatch." },
+  { "slug": "task-blocked",      "scope": "single-file",  "status": "blocked",        "prUrl": "", "blockerDiagnosis": "verifier never went green after 3 tries; root cause is an env mismatch.", "model": "fable", "escalated": true, "escalatedAt": "implement" },
   { "slug": "task-planblocked",  "scope": "cross-cutting","status": "plan-blocked",   "prUrl": "", "blockerDiagnosis": "plan not approved after 3 rounds. Accumulated feedback: ..." }
 ] }
 EOF
@@ -75,6 +75,8 @@ check "approved: pr after owner"        "owner: wave-execute-test"              
 check "revised: status review"          "status: review"                              "$TMP/task-revised.md"
 check "revised: review_rounds_used 3"   "review_rounds_used: 3"                        "$TMP/task-revised.md"
 check "revised: plan_rounds_used 2"     "plan_rounds_used: 2"                          "$TMP/task-revised.md"
+check "revised: escalation stamped on landed task" "model: fable"                     "$TMP/task-revised.md"
+refute "approved: no model stamp (not escalated)"  "model:"                           "$TMP/task-approved.md"
 
 check "review-blocked: status"          "status: review-blocked"                       "$TMP/task-reviewblocked.md"
 check "review-blocked: pr"              "pr: https://github.com/o/r/pull/3"            "$TMP/task-reviewblocked.md"
@@ -85,6 +87,7 @@ check "blocked: status"                 "status: blocked"                       
 check "blocked: heading"                "## Blocker diagnosis"                         "$TMP/task-blocked.md"
 check "blocked: content"                "env mismatch"                                 "$TMP/task-blocked.md"
 refute "blocked: no pr written (empty)" "pr:"                                          "$TMP/task-blocked.md"
+check "blocked: escalation stamped (re-dispatch starts at fable)" "model: fable"      "$TMP/task-blocked.md"
 
 check "plan-blocked: status"            "status: plan-blocked"                         "$TMP/task-planblocked.md"
 check "plan-blocked: heading"           "## Plan-blocked feedback"                     "$TMP/task-planblocked.md"
