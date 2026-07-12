@@ -6,6 +6,47 @@ lives in the Obsidian vault at `Work/Tasks/wave-execute-e2e-test-giflab`; the pr
 
 ---
 
+## 2026-07-12 — model escalation: one-shot opus first pass, iteration runs at fable
+
+Grill-with-docs session on `wave-skill-fable-fallback`. The brief said "configure Fable as the
+fallback model and re-run"; Lachy's mid-grill counter-proposal inverted it — *"drop the ralph loop
+for opus tasks and if it doesn't pass first time, escalate to fable"* — and that generalised to all
+three convergence loops. An opus task now gets exactly one un-iterated pass per layer (one plan, one
+implementation + a **single** verifier run, one judged PR round); the first rejection/red/block
+anywhere **escalates** the task to fable for all remaining work — sticky, judges follow the live
+tier, and reconcile stamps `model: fable` on the note so resume/repair re-dispatches start at fable.
+`max_iterations` is now purely fable's budget. Shipped `e90e504`, pushed; cache synced in place at
+1.1.0 (no version bump).
+
+- **Engine restructure**: the 3-stage `pipeline(plan, implement, review)` became single-stage
+  `converge(task)` holding mutable tier state (`st.tier`) — same no-barrier parallelism, but an
+  escalation in any layer carries into every later agent AND judge. New empty-when-unused fragments
+  `oneShotVerify` (replaces ralphLoop at opus tier; red ⇒ commit work, no PR, note diagnosis,
+  `escalate=true`) + `escalationContext` (fable takeover inherits worktree + diagnosis; approved
+  plans carry over un-replanned). `IMPL_RESULT` gained required `escalate`; results gained
+  `model`/`escalated`/`escalatedAt`; reconcile-wave.py stamps the note.
+- **Terminology (CONTEXT.md § Model tiering + ADR 0003)**: **Step-up** = schedule §4.7's predictive
+  fable stamp; **Escalation** = the engine's evidence-driven flip. "Fallback" rejected — nothing
+  falls back, the task steps up. Consequence for schedule: borderline step-up candidates can safely
+  stay opus (a wrong call costs one cheap first pass, not a blocked rollout).
+- **Deliberate resume-cache break**: the opus implementer prompt changed unconditionally (one-shot
+  block is always-on for opus), so in-flight rollouts resumed across the upgrade re-run implement
+  stages. Landed between rollouts — nothing was in flight. The fable arm is byte-identical to
+  ralphLoop (asserted in prompt-invariants, now 19 cases; reconcile test covers the stamp on landed
+  AND still-blocked escalated tasks).
+- **Stance memory updated**: "judges always Fable" was stale (judges follow task tier since
+  `841df76`); the memory now records one-shot + escalation as the current embodiment of "err toward
+  Fable" — escalate on first evidence of hardness rather than defaulting everything up.
+- **Open / next** — first live observation rides the next genuine rollout (gstack adoption is the
+  candidate), alongside the still-pending status-drift + repair end-to-end drills
+  ([[wave-verify-status-repair-live]] § Live bed): watch for an opus task landing green first-shot,
+  an escalation firing (`model: fable` stamped + "escalated at …" report line), and no
+  over-escalation on trivial review nitpicks — if judges reject too eagerly at r1, the lever is
+  judge prompt wording, not the escalation rule. Consider a version bump + `claude plugin tag` once
+  the status/repair pair and escalation have a live pass.
+
+---
+
 ## 2026-07-07 (afternoon) — stacked project blocks: the phase roadmap is query-driven, prose dies
 
 Second grill, triggered by Lachy opening [[Focus App]]: the morning design put the Phases view behind
