@@ -6,6 +6,33 @@ lives in the Obsidian vault at `Work/Tasks/wave-execute-e2e-test-giflab`; the pr
 
 ---
 
+## 2026-07-13 — 1.2.0 ships: duplicate-hooks load failure fixed; gstack eval shrinks the live bed
+
+The plugin had been **fully dead** — `claude plugin list` showed `✘ failed to load` on 1.1.0 with
+"Duplicate hooks file detected", killing every `/wave:*` command AND the Stop-hook driver. Root
+cause: Claude Code now auto-loads the standard `hooks/hooks.json`, so the explicit `"hooks"` key in
+`plugin.json` (added deliberately with the driver in 1.1.0) became a fatal double-registration.
+Fixed by dropping the key and shipping **1.2.0** (`19f7fef`): marketplace.json re-synced from its
+stale 1.0.0 (README "versions must agree" rule), `claude plugin marketplace update wave` +
+`claude plugin update wave@wave`, verified `✔ enabled` with the driver files intact in the new
+cache dir.
+
+- **Known quirk (permanent)**: never reference `hooks/hooks.json` from `plugin.json` — the manifest
+  `hooks` key is only for *additional* hook files beyond the auto-loaded standard one. Re-adding it
+  bricks the whole plugin, not just the hook.
+- **Version drift resolved**: 1.2.0 formally publishes everything the in-place rsyncs had smuggled
+  into the 1.1.0 cache (model escalation, phase-source inheritance, merge-wave CI fix, alias
+  removal). `claude plugin tag` still deferred until the escalation + status/repair live pass.
+- **Live-bed change**: the 07-12 entry named "gstack adoption" as the candidate rollout for the
+  live drills. The gstack deep-dive (2026-07-13, [[evaluate-gstack-for-our-setup]] — verdicts in
+  [[External Skill Sources]]) killed that: gstack skills are ~75% generated boilerplate over a
+  Bun-binary runtime, so nothing is adopted wholesale — just two standalone build tasks
+  ([[distill-plan-critique-skill]], [[adapt-design-shotgun-lightweight]]), no multi-wave rollout.
+  **The live bed for the escalation observation + wave-verify drills moves to the next Animately
+  rollout.**
+
+---
+
 ## 2026-07-12 — model escalation: one-shot opus first pass, iteration runs at fable
 
 Grill-with-docs session on `wave-skill-fable-fallback`. The brief said "configure Fable as the
