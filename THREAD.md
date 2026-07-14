@@ -52,7 +52,12 @@ None right now.
   verified well-formed; don't debug this again.
 - Skills execute from `~/.claude/plugins/cache/thread/thread/<version>/`, not
   the `marketplaces/thread/` clone — `${CLAUDE_PLUGIN_ROOT}` resolves to the
-  cache path. Update flow: push → `claude plugin marketplace update thread`.
+  cache path. The cache is **version-keyed**: `claude plugin marketplace
+  update thread` alone only refreshes the clone and never rebuilds the cache.
+  Full update flow: bump the version in BOTH `.claude-plugin/plugin.json` and
+  `.claude-plugin/marketplace.json` → push → `claude plugin marketplace update
+  thread` → `claude plugin update thread@thread` → restart the session to
+  apply (verified 2026-07-14 shipping 1.0.1).
 
 ## Resume instructions
 
