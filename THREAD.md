@@ -10,13 +10,15 @@ scope: Build + maintain the thread:* continuity plugin (router + decisive routes
 
 ## Where we are
 
-v1.0.0 built AND installed 2026-07-14 (`thread@thread`, user scope, GitHub
+v1.0.1 built AND installed 2026-07-14 (`thread@thread`, user scope, GitHub
 marketplace from `lachyts/thread-skill`). All six members live; flat skills
 retired; workspace references migrated; vault project note [[Thread Skill]]
-created. First real invocation happened same-day: `thread:close` ran this
-repo's own close from the plugin cache. Remaining: the live end-to-end
-verification checklist (fresh session) — tracked by the vault task
-`thread-plugin-live-verification`, scheduled 2026-07-15.
+created. Same-day follow-up: Notion retired ecosystem-wide — close's
+cross-machine-handoff destination deleted; plugin + Codex adapter +
+workspaces instruction surfaces swept; shipped as 1.0.1 (session restart
+applies it). Remaining: the live end-to-end verification checklist (fresh
+session) — tracked by the vault task `thread-plugin-live-verification`,
+scheduled 2026-07-15.
 
 ## What's been built / decided
 
@@ -35,10 +37,15 @@ verification checklist (fresh session) — tracked by the vault task
   human-facing surface (goal, terminology, wave-sibling framing); its
   `repos:` frontmatter auto-routes tasks captured from this repo's CWD.
 - Build lineage: `docs/build-plan.md` (the approved plan, copied in at close).
+- Notion handoff destination deleted from close (2026-07-14), not re-routed:
+  Notion is a read-only legacy archive (personal → Obsidian migration
+  pending); THREAD.md, git-committed by the close flow, is the cold-pickup
+  artifact — a Notion page duplicated that guarantee.
 
 ## Open questions / decisions pending
 
-None right now.
+- Nit: with Notion gone, close has exactly 4 proposable destination sections,
+  so its ">4 sections" menu-merge prose is unreachable — delete on next touch.
 
 ## Known quirks (don't re-derive)
 
@@ -46,6 +53,9 @@ None right now.
   carries the bare `name:` and Claude Code composes the prefix.
 - `disable-model-invocation: true` hides a skill from the model's list but
   keeps the `/slash` form — used by `thread:handoff`.
+- `AskUserQuestion` requires ≥2 options per question — a close destination
+  section with a single candidate can't be its own menu question; merge
+  single-candidate sections into one combined multiSelect.
 - A plugin installed **mid-session** hot-registers member *names* into the
   running session's skill list, but descriptions only index at session start —
   members render bare (`thread:close`) until a fresh session. Files were
@@ -69,6 +79,6 @@ None right now.
 
 ## Session log
 
-- 2026-07-14: Notion handoff concept removed from close — Notion retired to legacy-archive status; cold pickup is THREAD.md's job.
+- 2026-07-14 (latest): Notion retired ecosystem-wide — handoff destination deleted from close, workspaces + Codex adapter swept, migration task + global memory captured, v1.0.1 shipped (found: plugin cache is version-keyed).
 - 2026-07-14 (later): installed as thread@thread + references migrated + vault project note; first live close ran from the plugin itself; verification task scheduled for 2026-07-15.
 - 2026-07-14: thread created — v1.0.0 built end-to-end from approved plan.
