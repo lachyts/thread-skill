@@ -1,6 +1,6 @@
 ---
 name: close
-description: End-of-thread capture — update the active thread (project THREAD.md or shared _shared/threads/<slug>.md) with what happened this session, then triage anything else worth saving (vault tasks, memory, knowledge, notion handoff). Auto-commits workspace + vault git repos for session-changed files. Available globally — works from any CWD. Use when the work is FINISHED for now and state should persist; if the work continues elsewhere use thread:handoff, if it's being set down for later use thread:stash or thread:defer. Invoke with `/thread:close` or "close this thread".
+description: End-of-thread capture — update the active thread (project THREAD.md or shared _shared/threads/<slug>.md) with what happened this session, then triage anything else worth saving (vault tasks, memory, knowledge). Auto-commits workspace + vault git repos for session-changed files. Available globally — works from any CWD. Use when the work is FINISHED for now and state should persist; if the work continues elsewhere use thread:handoff, if it's being set down for later use thread:stash or thread:defer. Invoke with `/thread:close` or "close this thread".
 ---
 
 # /thread:close — close out this thread
@@ -12,7 +12,7 @@ End-of-thread capture. The thread is about to end — make sure nothing valuable
 **Commits are automatic. Creative writes are proposed first.**
 
 - **Auto-execute, no asking**: git commits in `~/repos/workspaces/` and the Obsidian vault for any session-changed files. This includes staging + committing knowledge-file edits once they're written. Never surface these as approval items.
-- **Propose first, then wait**: thread updates, vault tasks, Notion handoffs, auto-memory entries, and the *content* of any knowledge edits. These are creative decisions Lachy should confirm before they land on disk.
+- **Propose first, then wait**: thread updates, vault tasks, auto-memory entries, and the *content* of any knowledge edits. These are creative decisions Lachy should confirm before they land on disk.
 
 **Wrong route?** If the conversation reveals the work is *not* finished — it's being parked or continued — dispatch to the right sibling instead: `thread:stash` / `thread:defer` (set down, capture task per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md`) or `thread:handoff` (fork to a fresh agent now).
 
@@ -48,7 +48,6 @@ Each candidate lands in exactly one of these. When in doubt, prefer the destinat
 | Obsidian vault changes made this session (`ops-workspace` only) | Git commit in the vault repo — auto, session-changed files only | Auto |
 | **Thread state — where we left off, what shifted, new decisions, new known quirks, session log entry** | **Active `THREAD.md` (project or shared)** | **Propose diff** |
 | Concrete follow-up actions for Lachy | New file in `vault/Work/Tasks/<slug>.md` — routing + frontmatter shape per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` §§ 1 & 4 (ordinary follow-ups omit the `thread` marker tag — that's for stash/defer captures). Never to `vault/_Inbox/` — that's Lachy's capture surface only | Propose |
-| Cross-machine handoff (work continues on a different device) | Notion page, self-contained so a cold session can pick up | Propose |
 | User preferences, recurring patterns, reusable feedback | Auto-memory at the correct scope per `_shared/base-instructions.md` § Memory Management — global, workspace, or project area `CLAUDE.md` | Propose |
 | Reusable workspace knowledge (gotchas, schemas, processes) | `<workspace>/knowledge/<topic>.md` — same rules as `/learn` | Propose content |
 | Not worth keeping | Discard, note it briefly so Lachy can object | — |
@@ -70,7 +69,6 @@ Before proposing any auto-memory entry, run the scope test from `base-instructio
 - **Respect the workspace-vs-project split**: config lives in `~/repos/workspaces/`, project artefacts live in `~/Projects/<Area>/`. Project-specific notes go to the project's `THREAD.md` or files in the project directory — not the workspace.
 - **UK English spelling.**
 - **No em dashes in any message drafts Lachy will send.**
-- **Don't invent a Notion page** unless the thread is genuinely a cross-machine handoff.
 - **Don't create tasks unsolicited** — propose them, let Lachy approve.
 - **Don't save ephemeral conversation context** as memory. The bar is: non-obvious, reusable, verified.
 
@@ -112,9 +110,6 @@ Before proposing any auto-memory entry, run the scope test from `base-instructio
    ### Vault tasks
    - <task title> → `Work/Tasks/<slug>.md`, scheduled: <date | unscheduled>, project: [[<project>]] | standalone, <one-line context>
 
-   ### Notion handoff
-   - <page title>, purpose: <one line>  (skip if no cross-machine handoff)
-
    ### Auto-memory
    - <title>, scope: global | workspace | project-area, <one-line why> + redirect target if narrowed
 
@@ -127,7 +122,7 @@ Before proposing any auto-memory entry, run the scope test from `base-instructio
 
    Do **not** end this message with a text question — the menu in step 6 replaces it.
 
-6. **Collect approvals via `AskUserQuestion`.** One **multiSelect** question per destination that has proposed items (Thread update, Vault tasks, Notion handoff, Auto-memory, Workspace knowledge). Each option = one candidate: `label` is a short title, `description` is the one-line why. Auto-commit sections are NOT in the menu — those happen regardless. If there are zero proposed items across all sections, skip the menu entirely and go straight to step 7.
+6. **Collect approvals via `AskUserQuestion`.** One **multiSelect** question per destination that has proposed items (Thread update, Vault tasks, Auto-memory, Workspace knowledge). Each option = one candidate: `label` is a short title, `description` is the one-line why. Auto-commit sections are NOT in the menu — those happen regardless. If there are zero proposed items across all sections, skip the menu entirely and go straight to step 7.
 
    Handle answers:
    - Options the user ticks → execute in step 7.
@@ -136,7 +131,7 @@ Before proposing any auto-memory entry, run the scope test from `base-instructio
 
    **Fitting within the menu limits (4 questions × 4 options).** Aim for a single `AskUserQuestion` call.
 
-   - **>4 sections with proposed items:** merge low-volume sections (often Notion + Workspace knowledge) into a combined "Other saves" multiSelect. Each merged item becomes one option; prefix the label with type (`Notion: …`, `Knowledge: …`).
+   - **>4 sections with proposed items:** merge low-volume sections (often Workspace knowledge) into a combined "Other saves" multiSelect. Each merged item becomes one option; prefix the label with type (`Knowledge: …`).
    - **>4 items in one section:** collapse to ≤4 options:
      1. *Save all N* — every candidate.
      2. *Save core set* — list top 2-3 in label.
@@ -148,10 +143,9 @@ Before proposing any auto-memory entry, run the scope test from `base-instructio
    1. Approved thread update — write THREAD.md (the most important file).
    2. Approved creative writes: workspace knowledge edits.
    3. Approved vault tasks: new files at `vault/Work/Tasks/<slug>.md` with Task frontmatter.
-   4. Approved Notion page (if any).
-   5. Approved auto-memory files + MEMORY.md index updates. Honour the scope hook — if a Write blocks, save to the redirect target instead.
-   6. **Auto-commit workspaces repo** — see "Commit hygiene" below. Never ask.
-   7. **Auto-commit vault repo** (if ops-workspace and session-changed files exist there) — same rules.
+   4. Approved auto-memory files + MEMORY.md index updates. Honour the scope hook — if a Write blocks, save to the redirect target instead.
+   5. **Auto-commit workspaces repo** — see "Commit hygiene" below. Never ask.
+   6. **Auto-commit vault repo** (if ops-workspace and session-changed files exist there) — same rules.
 
 ### Commit hygiene (both repos)
 
@@ -165,7 +159,7 @@ git -C <repo> commit <path1> <path2> ... -m "<message>"
 
 This commits only the named paths even if other files are staged. **Before committing**, run `git -C <repo> diff --cached --name-only` and scan what's already staged. If anything is staged that isn't a session-changed file, don't `git reset` it (destructive) — just use named-paths commit. Mention in the saved summary that other files sit in the index for separate handling.
 
-8. **Print a compact "saved" summary** (≤8 lines): what landed where, including commit SHAs for both repos, vault task file paths (as clickable `[[wiki-link]]`), the Notion URL if applicable, and a one-line "thread state" pointer (e.g. `THREAD.md updated · state: active · open questions: 2`).
+8. **Print a compact "saved" summary** (≤8 lines): what landed where, including commit SHAs for both repos, vault task file paths (as clickable `[[wiki-link]]`), and a one-line "thread state" pointer (e.g. `THREAD.md updated · state: active · open questions: 2`).
 
 9. **End with the closing banner.** After the summary, add a blank line, a horizontal rule (`---`), another blank line, then this exact line as the final line of the response:
 

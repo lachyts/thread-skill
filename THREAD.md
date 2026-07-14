@@ -64,5 +64,6 @@ None right now.
 
 ## Session log
 
+- 2026-07-14: Notion handoff concept removed from close — Notion retired to legacy-archive status; cold pickup is THREAD.md's job.
 - 2026-07-14 (later): installed as thread@thread + references migrated + vault project note; first live close ran from the plugin itself; verification task scheduled for 2026-07-15.
 - 2026-07-14: thread created — v1.0.0 built end-to-end from approved plan.
