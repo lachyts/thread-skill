@@ -1,0 +1,15 @@
+{
+  "name": "thread",
+  "description": "Thread continuity skills (/thread:open, /thread:next, /thread:stash, /thread:defer, /thread:handoff, /thread:close) for capturing agent-thread state into Obsidian and disposing of threads without losing context.",
+  "owner": {
+    "name": "Lachlan Tetlow-Stuart"
+  },
+  "plugins": [
+    {
+      "name": "thread",
+      "source": "./",
+      "description": "Continuity family: thread:next routes the undecided 'what's my move?' moment; thread:stash and thread:defer write self-contained Obsidian tasks (dateless / scheduled); thread:handoff forks to a fresh agent; thread:open resumes durable state; thread:close persists and commits.",
+      "version": "1.0.0"
+    }
+  ]
+}
