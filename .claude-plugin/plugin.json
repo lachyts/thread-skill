@@ -1,6 +1,6 @@
 {
   "name": "wave",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Decompose, schedule, and execute large multi-PR changes as a wave-by-wave convergence rollout. /wave:split turns a plan or design into numbered, phased Obsidian tasks; /wave:schedule clusters them into dependency-ordered, parallel-safe waves; /wave:execute runs them on the Workflow engine through a three-layer convergence loop (plan-gate -> Ralph-style verifier retry -> master review) with deterministic per-wave auto-merge.",
   "author": {
     "name": "Lachlan Tetlow-Stuart"
