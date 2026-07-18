@@ -23,7 +23,11 @@
 #   * Treats an ABSENT required check as *pending* (not missing) while any workflow run is in flight on
 #     the head SHA — repos whose only required check is an end-of-workflow roll-up job (e.g. giflab's
 #     aggregate `Checks Complete` gate) don't even get that check run CREATED until the rest of the
-#     suite finishes. "Never appeared" halts only when nothing is running at all — nothing is coming.
+#     suite finishes. "Never appeared" halts only when nothing is running at all — nothing is coming —
+#     AND the PR has not turned CLEAN: after each merge advances main, GitHub recomputes mergeability
+#     asynchronously, so in a repo with NO CI configured the next PR transiently reads UNKNOWN/BLOCKED
+#     and lands in the wait path with no checks ever coming. The wait loop re-polls mergeStateStatus
+#     each pass and returns as soon as it goes CLEAN (narcissus-avp 2026-07-18 false-halt fix).
 #   * Idempotent: already-MERGED PRs are skipped, so a re-run after a partial merge resumes cleanly
 #     (this is how a cold-resumed session flushes a half-merged wave).
 #   * Writes a result sentinel `<repoPath>/.claude/merge-wave.status` (`ok` / `failed:<code>`) on exit, so a
@@ -225,7 +229,7 @@ infra_flake_rerun() {  # $1=PR — returns 0 if it re-ran failed jobs (caller sh
 }
 
 wait_required_checks() {  # $1=PR
-  local PR="$1" absent=0 out rc infra_reruns=0
+  local PR="$1" absent=0 out rc infra_reruns=0 mss_now
   echo "  PR #$PR — waiting on required checks…"
   while : ; do
     out=$(gh pr checks "$PR" -R "$OWNER/$REPO" --required --watch --fail-fast --interval "$CHECK_INTERVAL" 2>&1); rc=$?
@@ -235,6 +239,21 @@ wait_required_checks() {  # $1=PR
     # --watch on a visible pending check, bounded in practice by GitHub's own job timeouts. The
     # CHECK_RETRY_MAX budget only counts CONSECUTIVE polls where nothing is running anywhere.
     if printf '%s' "$out" | grep -qiE 'no checks reported|no required checks'; then
+      # No-CI recompute guard: after the PREVIOUS merge advances main, GitHub recomputes every open
+      # PR's mergeability ASYNCHRONOUSLY — the state machine can sample a transient UNKNOWN/BLOCKED
+      # and land here even in a repo with NO required checks configured at all (statusCheckRollup
+      # empty). Without this re-poll, the loop counted absent polls while the PR quietly turned
+      # CLEAN and then halted with "never appeared" — reproduced twice (narcissus-avp PRs #3, #5,
+      # 2026-07-18), where an immediate re-run merged the same PR CLEAN first try. Re-poll
+      # mergeStateStatus every pass: CLEAN means branch protection has nothing left to wait for —
+      # hand back to the state machine, which re-reads the state and merges. A genuinely red
+      # required check never takes this branch (gh pr checks reports the failure, not absence), so
+      # BLOCKED semantics are untouched.
+      mss_now=$(prfield "$PR" mergeStateStatus)
+      if [ "$mss_now" = "CLEAN" ]; then
+        echo "  PR #$PR — no required checks and mergeStateStatus=CLEAN — nothing to wait for."
+        return 0
+      fi
       if ci_runs_in_flight "$PR"; then
         absent=0
         echo "  PR #$PR — required checks not created yet; CI in flight on head — waiting…"
