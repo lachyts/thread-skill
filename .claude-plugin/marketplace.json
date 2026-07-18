@@ -1,6 +1,6 @@
 {
   "name": "wave",
-  "description": "Wave pipeline skills (/wave:split, /wave:schedule, /wave:execute) for running large multi-PR changes as a wave-by-wave convergence rollout.",
+  "description": "Wave pipeline skills (/wave:split, /wave:gather, /wave:schedule, /wave:execute) for running large multi-PR changes as a wave-by-wave convergence rollout.",
   "owner": {
     "name": "Lachlan Tetlow-Stuart"
   },
@@ -8,8 +8,8 @@
     {
       "name": "wave",
       "source": "./",
-      "description": "Wave pipeline: /wave:split decomposes a plan or design into numbered, phased Obsidian tasks, /wave:schedule clusters them into dependency-ordered parallel-safe waves, and /wave:execute runs a three-layer convergence loop with deterministic per-wave auto-merge.",
-      "version": "1.3.0"
+      "description": "Wave pipeline: /wave:split decomposes a plan or design into numbered, phased Obsidian tasks, /wave:gather turns a project's loose tasks into a phased roadmap, /wave:schedule clusters them into dependency-ordered parallel-safe waves, and /wave:execute runs a three-layer convergence loop with deterministic per-wave auto-merge.",
+      "version": "1.4.0"
     }
   ]
 }
