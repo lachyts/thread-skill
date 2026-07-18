@@ -22,7 +22,10 @@ _Avoid_: stage, iteration, wave.
 ## Rollout structure
 
 **Rollout**:
-A backlog of related tasks landed as one coordinated effort, described by a single Obsidian rollout note.
+A backlog of related tasks landed as one coordinated effort, described by a single Obsidian rollout
+note named `<slug>-rollout-<YYYY-MM-DD>` (slug = the project slug, or a natural scope slug when the
+batch has one; date = the day `/wave:schedule` writes it). Always dated — undated names collide on a
+project's second rollout. Older undated notes keep their names.
 _Avoid_: batch, run, campaign.
 
 **Wave**:
@@ -56,6 +59,13 @@ _Avoid_: failed, stuck, errored.
 A block that needs a human decision no agent can supply — a value, a design choice, an ambiguity. Re-
 dispatching alone loops forever on the same wall; the decision must be written into the note first.
 _Avoid_: manual block, human block.
+
+**Gated input**:
+A human authorisation a task's plan declares up front — API spend (with a cap), credentials, or an
+irreversible action. The predictive twin of the reactive input-gated block: a non-empty declaration
+always pauses for human sign-off, even in continuous mode, and the approval is written into the task
+note so re-dispatches never re-ask.
+_Avoid_: approval item, spend gate, pre-approval.
 
 **Agent-fixable block**:
 A block a re-dispatched agent can resolve on its own — a real test failure, a missed case, concrete
@@ -99,13 +109,28 @@ The path by which a blocked task is fixed and re-landed while the engine keeps s
 now driven by `/wave:repair` (the human supplies decisions; Claude does the mechanics).
 _Avoid_: handoff, recovery.
 
+**Pause**:
+Stopping a rollout run without losing its place. **Soft**: a `pause_requested` flag on the rollout
+note — the engine finishes and merges the current wave, then exits as paused. **Hard**: stop the run
+now — in-flight agents die but their worktrees keep the work. Either way the pause is recorded on the
+rollout note.
+_Avoid_: suspend, halt, abort.
+
+**Reinstate**:
+Resuming a paused rollout — plain `/wave:execute` on the rollout note. The normal resume path clears
+the pause stamp and re-dispatches whatever didn't land; there is no separate resume command.
+_Avoid_: restart, relaunch, unpause.
+
 ## Model tiering
 
 **Tier**:
-The model a task's agents run on — `opus` (the first-pass tier, for mechanical execution) or `fable`
-(the escalation tier, for anything that has to be thought through). A task has exactly one tier at any
-moment, and its judges follow it.
-_Avoid_: model level, grade.
+The model **and effort** bundle a task's agents run on — `opus` (the first-pass tier, for mechanical
+execution: planner/implementer at medium effort, judges high) or `fable` (the escalation tier, for
+anything that has to be thought through: planner/implementer high, judges high, master review xhigh).
+Mechanical reconcile stages run at low effort on either tier. A task has exactly one tier at any
+moment, its judges follow it, and moving tier moves effort with it; per-task `effort:` frontmatter is
+the escape hatch, never a second ladder.
+_Avoid_: model level, grade, model (alone — a tier is model AND effort).
 
 **Step-up**:
 The planning-time, predictive assignment of the fable tier to a task — `/wave:schedule` stamps
