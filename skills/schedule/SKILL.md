@@ -1,6 +1,6 @@
 ---
 name: schedule
-description: Use when planning a parallel rollout of multiple Obsidian tasks under a single project — produces a thin rollout note (data only) that the `/wave:execute` skill reads and runs on the Workflow engine. Reads tasks from ~/repos/obsidian/Work/Tasks/, computes wave structure from file-overlap + dependency analysis, auto-merges affine same-file task clusters (same change, artificially split) into a single sequential dispatch unit, writes an always-dated <project-slug>-rollout-<YYYY-MM-DD>.md with `protocol_version: 3` frontmatter + rollout-level config defaults (verifier, max_iterations, max_review_rounds, max_plan_rounds, plan_approval, parallel_ceiling, model), and stamps wave: N on each task. Scope: Obsidian only.
+description: 'Use when planning a parallel rollout of multiple Obsidian tasks under a single project — produces a thin rollout note (data only) that the `/wave:execute` skill reads and runs on the Workflow engine. Reads tasks from ~/repos/obsidian/Work/Tasks/, computes wave structure from file-overlap + dependency analysis, auto-merges affine same-file task clusters (same change, artificially split) into a single sequential dispatch unit, writes an always-dated <project-slug>-rollout-<YYYY-MM-DD>.md with `protocol_version: 3` frontmatter + rollout-level config defaults (verifier, max_iterations, max_review_rounds, max_plan_rounds, plan_approval, parallel_ceiling, model), and stamps wave: N on each task. Scope: Obsidian only.'
 ---
 
 # /wave:schedule — turn a backlog of Obsidian tasks into a rollout note

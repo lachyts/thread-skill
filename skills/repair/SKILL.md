@@ -1,6 +1,6 @@
 ---
 name: repair
-description: Use to unstick a wave rollout that has stalled — run it whenever there's an issue with the whole rollout, not a single task. Triggers on "repair [[rollout]]", "fix this rollout", "[[rollout]] is stuck", "sort out [[rollout]]", "unblock the rollout", or after /wave:status shows blockers/drift. A thin CONDUCTOR over /wave:execute (never a second engine): it diagnoses (runs /wave:status), reconciles drift, asks YOU only the decisions no agent can make and writes them into the notes, auto-retries agent-fixable blocks, dependency-aware-defers wedged tasks, then hands off to execute's resume — wave keeps sole merge authority. Scope: Obsidian + gh/git + the execute engine.
+description: 'Use to unstick a wave rollout that has stalled — run it whenever there''s an issue with the whole rollout, not a single task. Triggers on "repair [[rollout]]", "fix this rollout", "[[rollout]] is stuck", "sort out [[rollout]]", "unblock the rollout", or after /wave:status shows blockers/drift. A thin CONDUCTOR over /wave:execute (never a second engine): it diagnoses (runs /wave:status), reconciles drift, asks YOU only the decisions no agent can make and writes them into the notes, auto-retries agent-fixable blocks, dependency-aware-defers wedged tasks, then hands off to execute''s resume — wave keeps sole merge authority. Scope: Obsidian + gh/git + the execute engine.'
 ---
 
 # /wave:repair — sort out a stuck rollout (conductor, not an engine)

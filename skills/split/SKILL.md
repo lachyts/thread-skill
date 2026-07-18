@@ -1,6 +1,6 @@
 ---
 name: split
-description: Use when turning a plan or design into a set of numbered, phased Obsidian task notes — decomposing "a plan" into PR-sized tasks that /wave:schedule then groups into waves. Triggers on "split this plan into tasks", "decompose this", "turn this design into tasks", "break this into numbered/phased tasks", or pointing at a design/project/phase note or an approved plan and asking for tasks. Input: a vault design/project note, a phase note (tasks inherit its phase number and parent project — never a nested counter), a plan-mode plan file, or inline prose. Writes <project>-pN-M task notes + slims the source into a linked outline. First stage of /wave:split → /wave:schedule → /wave:execute. Scope: Obsidian only.
+description: 'Use when turning a plan or design into a set of numbered, phased Obsidian task notes — decomposing "a plan" into PR-sized tasks that /wave:schedule then groups into waves. Triggers on "split this plan into tasks", "decompose this", "turn this design into tasks", "break this into numbered/phased tasks", or pointing at a design/project/phase note or an approved plan and asking for tasks. Input: a vault design/project note, a phase note (tasks inherit its phase number and parent project — never a nested counter), a plan-mode plan file, or inline prose. Writes <project>-pN-M task notes + slims the source into a linked outline. First stage of /wave:split → /wave:schedule → /wave:execute. Scope: Obsidian only.'
 ---
 
 # /wave:split — decompose a plan into numbered, phased tasks
