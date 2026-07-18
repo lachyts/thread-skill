@@ -20,9 +20,12 @@ const marker = '// ---- Orchestration'
 const idx = src.indexOf(marker)
 if (idx === -1) { console.error('FAIL - orchestration marker not found'); process.exit(1) }
 let head = src.slice(0, idx).replace('export const meta', 'const meta')
-head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt };\n'
+head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, runAgent, planLoop, implement, reviewLoop, converge };\n'
 
-const ctx = { console }
+// `agent` and `log` are Workflow globals the engine expects at run time. The layer functions resolve them
+// against the sandbox global at CALL time, so the transient-death tests below swap `ctx.agent` per case to
+// script agent deaths (a null return) and observe that no stage throws.
+const ctx = { console, log: () => {}, agent: async () => null }
 vm.createContext(ctx)
 vm.runInContext(head, ctx)
 const T = ctx.__t
@@ -72,6 +75,78 @@ const prior = 'the verifier failed on test_y'
 const pPrior = T.implementerPrompt(taskI, aI, 'fable', prior)
 ok(pPrior.includes('ESCALATION'), 'implementerPrompt: escalation context present when prior set')
 ok(pPrior.replace(T.escalationContext(prior), '') === pFable, 'implementerPrompt: with prior == without + exactly the injected block (byte-identical base)')
+
+// ---- Transient agent death: null-return hardening ----------------------------
+// Observed 2026-07-18 (narcissus-avp): implementer agents died mid-run on "API Error: Connection closed
+// mid-response". agent() returns null on such a terminal error; unguarded, the null flowed into reviewLoop
+// and threw `null is not an object (evaluating 'prevImpl.prUrl')`, then got reported with the useless
+// generic "workflow stage threw" diagnosis. These assert runAgent's retry + sentinel and every layer's
+// CLEAN, CLASSIFIED transient block. `agent` is swapped on ctx per case (resolved against the sandbox global
+// at call time). Uses top-level await (this is an ESM module).
+
+// runAgent: retries exactly once on a null return, then returns the { __dead: true } sentinel.
+let deadCalls = 0
+ctx.agent = async () => { deadCalls++; return null }
+const dead = await T.runAgent('p', { label: 'x' })
+ok(dead && dead.__dead === true, 'runAgent: returns { __dead:true } sentinel when the agent stays dead')
+ok(deadCalls === 2, 'runAgent: one automatic retry on null (2 dispatches total)')
+
+// runAgent: a live result on the first try is returned as-is, no retry.
+let liveCalls = 0
+ctx.agent = async () => { liveCalls++; return { verified: true } }
+const live = await T.runAgent('p', { label: 'x' })
+ok(live && live.verified === true && liveCalls === 1, 'runAgent: live first result returned as-is, no retry')
+
+// runAgent: null then a live result on the retry recovers (the common transient case).
+let mixCalls = 0
+ctx.agent = async () => { mixCalls++; return mixCalls === 1 ? null : { verified: true } }
+const recovered = await T.runAgent('p', { label: 'x' })
+ok(recovered && recovered.verified === true && !recovered.__dead && mixCalls === 2, 'runAgent: recovers when the retry succeeds')
+
+const aT = { repoPath: '/repo', rolloutSlug: 'proj-rollout', verifier: 'make test' }
+const baseTask = { taskPath: '/v/t.md', maxIterations: 3, maxReviewRounds: 2, maxPlanRounds: 2 }
+
+// REGRESSION: a dead implementer must NOT throw in reviewLoop and must report a classified transient block.
+ctx.agent = async () => null
+const taskImpl = { ...baseTask, slug: 'proj-fix-x', scope: 'single-file', planGate: false }
+let threw = false, implRes
+try { implRes = await T.converge(taskImpl, aT) } catch (e) { threw = true }
+ok(!threw, 'converge: dead implementer does not throw (regression: prevImpl.prUrl on a null)')
+ok(implRes && implRes.status === 'blocked', 'converge: dead implementer → status blocked')
+ok(implRes && /transient infrastructure/i.test(implRes.blockerDiagnosis), 'converge: dead implementer → transient-infra diagnosis (not "workflow stage threw")')
+
+// A dead planner on a plan-gated task → plan-blocked with the transient diagnosis, no throw.
+ctx.agent = async () => null
+const taskPlan = { ...baseTask, slug: 'proj-fix-y', scope: 'single-file', planGate: true }
+let planThrew = false, planRes
+try { planRes = await T.converge(taskPlan, aT) } catch (e) { planThrew = true }
+ok(!planThrew, 'converge: dead planner does not throw')
+ok(planRes && planRes.status === 'plan-blocked', 'converge: dead planner → status plan-blocked')
+ok(planRes && /transient infrastructure/i.test(planRes.blockerDiagnosis), 'converge: dead planner → transient-infra diagnosis')
+
+// Implementer succeeds + opens a PR, then the review-judge dies → blocked, transient diagnosis, PR preserved.
+ctx.agent = async (prompt, opts) => {
+  if (opts.phase === 'Implement') {
+    return { verified: true, blocked: false, escalate: false, prUrl: 'https://pr/1', branch: 'audit-fix/fix-z', worktreePath: '/wt', blockerDiagnosis: '', summary: 'done' }
+  }
+  return null // the review judge dies
+}
+const taskRev = { ...baseTask, slug: 'proj-fix-z', scope: 'single-file', planGate: false }
+let revThrew = false, revRes
+try { revRes = await T.converge(taskRev, aT) } catch (e) { revThrew = true }
+ok(!revThrew, 'converge: dead review-judge does not throw')
+ok(revRes && revRes.status === 'blocked', 'converge: dead review-judge → status blocked')
+ok(revRes && /transient infrastructure/i.test(revRes.blockerDiagnosis), 'converge: dead review-judge → transient-infra diagnosis')
+ok(revRes && revRes.prUrl === 'https://pr/1', 'converge: dead review-judge preserves the open PR url')
+
+// A dead read-only investigator → blocked (NOT a spurious clean "review"), no throw.
+ctx.agent = async () => null
+const taskRO = { ...baseTask, slug: 'proj-audit', scope: 'read-only', planGate: false }
+let roThrew = false, roRes
+try { roRes = await T.converge(taskRO, aT) } catch (e) { roThrew = true }
+ok(!roThrew, 'converge: dead read-only investigator does not throw')
+ok(roRes && roRes.status === 'blocked', 'converge: dead read-only investigator → blocked, not spurious review')
+ok(roRes && /transient infrastructure/i.test(roRes.blockerDiagnosis), 'converge: dead read-only investigator → transient-infra diagnosis')
 
 console.log()
 console.log(fail === 0 ? 'ALL PASS' : 'SOME FAILED')

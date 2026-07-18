@@ -527,18 +527,55 @@ function escalate(st, slug, at) {
   log(`escalation: ${slug} → fable (${at})`)
 }
 
+// ---- Dispatch resilience: transient agent death -----------------------------
+// A terminal API/connection error (observed 2026-07-18: "API Error: Connection closed mid-response") kills
+// the agent process mid-run, and the Workflow `agent()` global surfaces that as a `null` return. Left
+// unguarded that null propagates into a later stage and throws (e.g. `null is not an object (evaluating
+// 'prevImpl.prUrl')` when a dead implementer's null reaches reviewLoop), and the task is reported with the
+// useless generic "workflow stage threw" diagnosis. runAgent() centralises the guard: it does ONE automatic
+// in-run retry (connection deaths are near-always transient — the manual re-dispatch recovered first-try in
+// every observed case), and if the agent is STILL dead it returns a distinguished `{ __dead: true }`
+// sentinel instead of a raw null. Every layer below checks `.__dead` immediately after the call and converts
+// it into a CLEAN transient block, so no stage ever dereferences a null and the cause is CLASSIFIED —
+// reconcile then writes an actionable "re-dispatch cleanly" note instead of the generic stage-threw string.
+const TRANSIENT_DIAGNOSIS =
+  'transient infrastructure failure — the agent process died mid-run on a terminal API/connection error ' +
+  '(e.g. "Connection closed mid-response"), NOT a task-authored blocker. Re-dispatch cleanly: the worktree ' +
+  'and any committed work are reusable and a fresh dispatch of the same prompt should proceed normally.'
+
+async function runAgent(prompt, opts) {
+  let r = await agent(prompt, opts)
+  if (r == null) {
+    log(`agent death (null return) on ${(opts && opts.label) || '?'} — one automatic retry`)
+    r = await agent(prompt, opts)
+  }
+  return r == null ? { __dead: true } : r
+}
+
+// Layer-appropriate clean blocks for a dead agent (see runAgent). The specific diagnosis is what makes the
+// transient case cheap: reconcile writes "re-dispatch cleanly" and the lead auto-retries instead of
+// hand-diagnosing an infra blip from the <failures> block.
+function transientPlanBlock(task, rounds) {
+  return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS, planRoundsUsed: rounds }
+}
+function transientImplBlock(extra) {
+  return { blocked: true, blockerDiagnosis: TRANSIENT_DIAGNOSIS, ...(extra || {}) }
+}
+
 // ---- The three convergence layers -------------------------------------------
 
 async function planLoop(task, st, a) {
-  let plan = await agent(plannerPrompt(task, a, ''), {
+  let plan = await runAgent(plannerPrompt(task, a, ''), {
     label: `plan:${task.slug}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier,
   })
+  if (plan.__dead) return transientPlanBlock(task, 0)
   if ((plan.blocked || !plan.ready) && st.tier === 'opus') {
     // A first-pass planner failure is evidence of hardness — one fable retry before plan-blocked.
     escalate(st, task.slug, 'plan')
-    plan = await agent(plannerPrompt(task, a, plan.blockerCause || 'first-pass planner produced no plan'), {
+    plan = await runAgent(plannerPrompt(task, a, plan.blockerCause || 'first-pass planner produced no plan'), {
       label: `plan:${task.slug}@fable`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier,
     })
+    if (plan.__dead) return transientPlanBlock(task, 0)
   }
   if (plan.blocked || !plan.ready) {
     return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: plan.blockerCause || 'planner returned no plan', planRoundsUsed: 0 }
@@ -549,9 +586,10 @@ async function planLoop(task, st, a) {
   const priorFeedback = []
   let round = 1
   while (round <= task.maxPlanRounds) {
-    const verdict = await agent(planJudgePrompt(task, plan.plan, a), {
+    const verdict = await runAgent(planJudgePrompt(task, plan.plan, a), {
       label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: judgeFor(a, st),
     })
+    if (verdict.__dead) return transientPlanBlock(task, round)
     if (verdict.verdict === 'approve') {
       return { task, blocked: false, plan: plan.plan, planRoundsUsed: round }
     }
@@ -568,9 +606,10 @@ async function planLoop(task, st, a) {
     }
     // Opus got its one judged round; revision is iteration, and iteration runs at fable.
     if (st.tier === 'opus') escalate(st, task.slug, 'plan')
-    plan = await agent(planReviserPrompt(task, plan.plan, priorFeedback, round + 1, a), {
+    plan = await runAgent(planReviserPrompt(task, plan.plan, priorFeedback, round + 1, a), {
       label: `plan-revise:${task.slug} r${round + 1}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier,
     })
+    if (plan.__dead) return transientPlanBlock(task, round + 1)
     if (plan.blocked || !plan.ready) {
       return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: plan.blockerCause || 'plan-reviser returned no plan', planRoundsUsed: round + 1 }
     }
@@ -580,15 +619,19 @@ async function planLoop(task, st, a) {
 
 async function implement(task, st, prev, a) {
   if (prev && prev.blocked) return prev // plan-blocked passthrough
+  // Plan-stage metadata to thread forward (or carry onto a transient block) when a plan was approved.
+  const planExtra = (task.planGate && prev && prev.plan) ? { planRoundsUsed: prev.planRoundsUsed || 0 } : undefined
   if (task.scope === 'read-only') {
-    let r = await agent(readOnlyPrompt(task, a, ''), {
+    let r = await runAgent(readOnlyPrompt(task, a, ''), {
       label: `investigate:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier,
     })
-    if (r && r.blocked && st.tier === 'opus') {
+    if (r.__dead) return transientImplBlock()
+    if (r.blocked && st.tier === 'opus') {
       escalate(st, task.slug, 'implement')
-      r = await agent(readOnlyPrompt(task, a, r.blockerDiagnosis || 'first-pass investigation did not complete'), {
+      r = await runAgent(readOnlyPrompt(task, a, r.blockerDiagnosis || 'first-pass investigation did not complete'), {
         label: `investigate:${task.slug}@fable`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier,
       })
+      if (r.__dead) return transientImplBlock()
     }
     return r
   }
@@ -597,41 +640,46 @@ async function implement(task, st, prev, a) {
   const prompt = (prior) => (task.planGate && prev && prev.plan)
     ? approvedPlanImplementerPrompt(task, prev.plan, a, st.tier, prior)
     : implementerPrompt(task, a, st.tier, prior)
-  let r = await agent(prompt(''), {
+  let r = await runAgent(prompt(''), {
     label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier,
   })
-  if (r && (r.escalate || r.blocked) && st.tier === 'opus') {
+  // A dead agent is transient infra, NOT evidence of hardness — do NOT escalate; report a clean block.
+  if (r.__dead) return transientImplBlock(planExtra)
+  if ((r.escalate || r.blocked) && st.tier === 'opus') {
     // One-shot red or a first-pass block: the task has proven non-mechanical. Fable takes over in the
     // same worktree (the committed attempt + note diagnosis carry over; an approved plan is NOT
     // re-planned) with the full Ralph budget.
     escalate(st, task.slug, 'implement')
     const prior = [r.blockerDiagnosis, r.summary].filter((s) => s && s.trim()).join('\n')
       || 'first-pass attempt did not verify green'
-    r = await agent(prompt(prior), {
+    r = await runAgent(prompt(prior), {
       label: `implement:${task.slug}@fable`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier,
     })
+    if (r.__dead) return transientImplBlock(planExtra)
   }
   // Defensive: a result that neither verified nor blocked and has no PR cannot go to review.
-  if (r && !r.verified && !r.blocked && !r.prUrl) {
+  if (!r.verified && !r.blocked && !r.prUrl) {
     r = { ...r, blocked: true, blockerDiagnosis: r.blockerDiagnosis || 'agent returned neither verified nor blocked' }
   }
   // thread the plan-stage metadata forward so the final report shows plan_rounds_used
-  return (task.planGate && prev && prev.plan && r) ? { ...r, planRoundsUsed: prev.planRoundsUsed || 0 } : r
+  return planExtra ? { ...r, ...planExtra } : r
 }
 
 async function reviewLoop(task, st, prev, a) {
   // plan-blocked passthrough (no IMPL_RESULT shape)
   if (prev && prev.blocked && prev.status === 'plan-blocked') return prev
-  // Ralph-blocked implement result
+  // Ralph-blocked OR transient-dead implement result (both carry blocked=true)
   if (prev && prev.blocked) return { ...prev, status: 'blocked' }
   if (task.scope === 'read-only') return { ...prev, status: 'review', reviewRoundsUsed: 0 }
 
   let current = prev
   let round = 1
   while (round <= task.maxReviewRounds) {
-    const verdict = await agent(reviewJudgePrompt(task, current, a), {
+    const verdict = await runAgent(reviewJudgePrompt(task, current, a), {
       label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: judgeFor(a, st),
     })
+    // Dead review-judge: the PR is real and stands — block on transient infra so the lead re-judges it.
+    if (verdict.__dead) return { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS }
     if (verdict.verdict === 'approve') {
       return { ...current, status: 'review', reviewRoundsUsed: round }
     }
@@ -640,9 +688,10 @@ async function reviewLoop(task, st, prev, a) {
     }
     // Opus got its one judged PR round; revision is iteration, and iteration runs at fable.
     if (st.tier === 'opus') escalate(st, task.slug, 'review')
-    const revised = await agent(reviserPrompt(task, current, verdict.feedback, round + 1, a), {
+    const revised = await runAgent(reviserPrompt(task, current, verdict.feedback, round + 1, a), {
       label: `revise:${task.slug} r${round + 1}`, phase: 'Review', schema: IMPL_RESULT, model: st.tier,
     })
+    if (revised.__dead) return { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS }
     if (revised.blocked) {
       return { ...current, status: 'blocked', blockerDiagnosis: revised.blockerDiagnosis }
     }
