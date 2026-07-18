@@ -1,6 +1,6 @@
 ---
 name: schedule
-description: Use when planning a parallel rollout of multiple Obsidian tasks under a single project — produces a thin rollout note (data only) that the `/wave:execute` skill reads and runs on the Workflow engine. Reads tasks from ~/repos/obsidian/Work/Tasks/, computes wave structure from file-overlap + dependency analysis, auto-merges affine same-file task clusters (same change, artificially split) into a single sequential dispatch unit, writes <project-slug>-rollout.md with `protocol_version: 3` frontmatter + rollout-level config defaults (verifier, max_iterations, max_review_rounds, max_plan_rounds, plan_approval, parallel_ceiling, model), and stamps wave: N on each task. Scope: Obsidian only.
+description: Use when planning a parallel rollout of multiple Obsidian tasks under a single project — produces a thin rollout note (data only) that the `/wave:execute` skill reads and runs on the Workflow engine. Reads tasks from ~/repos/obsidian/Work/Tasks/, computes wave structure from file-overlap + dependency analysis, auto-merges affine same-file task clusters (same change, artificially split) into a single sequential dispatch unit, writes an always-dated <project-slug>-rollout-<YYYY-MM-DD>.md with `protocol_version: 3` frontmatter + rollout-level config defaults (verifier, max_iterations, max_review_rounds, max_plan_rounds, plan_approval, parallel_ceiling, model), and stamps wave: N on each task. Scope: Obsidian only.
 ---
 
 # /wave:schedule — turn a backlog of Obsidian tasks into a rollout note
@@ -206,21 +206,16 @@ Dependencies trump the colouring: if task A depends on task B, A's wave must com
 
 ### 6. Write the rollout note
 
-Location: `~/repos/obsidian/Work/Tasks/<project-slug>-rollout.md` (project slug is the lowercase kebab form of the project wikilink — e.g. `[[GifLab]]` → `giflab-rollout.md`).
+Location: `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` — **always dated** (slug = the lowercase kebab form of the project wikilink, or a natural scope slug when the batch has one; date = today, the day you write the note — e.g. `[[GifLab]]` on 2026-07-18 → `giflab-rollout-2026-07-18.md`). The date is mandatory: an undated `<slug>-rollout` name collides with the project's next rollout, so it is **never emitted**. Legacy undated notes keep their names — no migration; the readers (`/wave:execute`, `/wave:status`, `/wave:repair`) still resolve both forms. This is the canonical rule in CONTEXT.md § Rollout.
 
-If the file already exists, prompt:
-- **Overwrite** — replace it (preserves wave history nowhere)
-- **Date-suffix** — write to a dated note instead (the usual choice for a new, distinct effort)
-- **Cancel** — abort
-
-**Dated-note naming — handles more than one rollout per day.** The date-suffix is `<project-slug>-rollout-<YYYY-MM-DD>.md` for the **first** rollout of a given day, and `<project-slug>-rollout-<YYYY-MM-DD>-<N>.md` (N≥2) for each **subsequent** rollout that same day. Resolve N deterministically: glob `<project-slug>-rollout-<YYYY-MM-DD>*.md` — nothing matches → bare date (no `-N`); only the bare-date note exists → `-2`; otherwise → one past the highest existing ordinal. The first-of-day note never carries `-1` (kept bare, backward-compatible with every existing dated rollout). So a day's sequence reads `…-2026-06-09.md`, `…-2026-06-09-2.md`, `…-2026-06-09-3.md`. **Never overwrite or reuse an existing dated note** — always advance to the next free ordinal (pick **Overwrite** only to replace a same-day note you just wrote in error). Substitute the resolved slug into `{{ROLLOUT_SLUG}}` everywhere downstream — the note's own filename, the per-task `rollout:` stamps (step 7), the summary (step 8), and any `supersedes:` / `superseded_by:` links.
+**Dated-note naming — handles more than one rollout per day.** The filename is `<slug>-rollout-<YYYY-MM-DD>.md` for the **first** rollout of a given day, and `<slug>-rollout-<YYYY-MM-DD>-<N>.md` (N≥2) for each **subsequent** rollout that same day. Resolve N deterministically: glob `<slug>-rollout-<YYYY-MM-DD>*.md` — nothing matches → bare date (no `-N`); only the bare-date note exists → `-2`; otherwise → one past the highest existing ordinal. The first-of-day note never carries `-1` (kept bare, backward-compatible with every existing dated rollout). So a day's sequence reads `…-2026-06-09.md`, `…-2026-06-09-2.md`, `…-2026-06-09-3.md`. **Never overwrite or reuse an existing dated note** — always advance to the next free ordinal. The one prompt is when today's note already exists and you're re-running to *replace* one you just wrote in error: offer **Overwrite** (replace the same-day note), **Advance** (write the next free ordinal — the usual choice for a new, distinct effort), or **Cancel**. Substitute the resolved slug into `{{ROLLOUT_SLUG}}` everywhere downstream — the note's own filename, the per-task `rollout:` stamps (step 7), the summary (step 8), and any `supersedes:` / `superseded_by:` links.
 
 **Superseding a prior rollout.** When `--regenerate` replaces an earlier rollout (commonly a dated one whose still-open tasks are being re-planned here), stamp `supersedes: "[[<prior-rollout-slug>]]"` in this note's frontmatter, and close out the prior rollout: set `status: done` (TaskNotes only knows `open` / `in-progress` / `done`, and `done` auto-archives it out of the open list) + `superseded_by: "[[<this-slug>]]"` to record *why* it closed and keep the lineage navigable. Its already-landed tasks stay `done`; its still-open tasks are re-planned into this rollout.
 
 Use the template at `${CLAUDE_PLUGIN_ROOT}/skills/schedule/rollout-template.md`. Substitute:
 - `{{PROJECT_NAME}}` — display name (e.g. `GifLab`)
 - `{{PROJECT_SLUG}}` — kebab form (e.g. `giflab`)
-- `{{ROLLOUT_SLUG}}` — the rollout filename slug (e.g. `giflab-rollout`)
+- `{{ROLLOUT_SLUG}}` — the resolved dated rollout slug, no extension (e.g. `giflab-rollout-2026-07-18`)
 - `{{DATE}}` — today's date (YYYY-MM-DD)
 - `{{VERIFIER}}` — the verifier command detected in step 2.5 (or user-provided)
 - `{{REPO_PATH}}` — the project's local repo path from the project note's `Local:` line, if discoverable; otherwise leave a `<TODO>` marker
@@ -305,12 +300,12 @@ End-to-end test against an existing backlog (e.g. GifLab):
 2. Confirms ~9 open tasks, prints detected files per task, asks to confirm
 3. Step 2.5 detects `make test` (or whatever GifLab's CLAUDE.md prescribes) — prints it and asks to confirm
 4. Computes wave structure
-5. If `giflab-rollout.md` doesn't exist: writes it. If it does: prompts.
+5. Writes the always-dated note `giflab-rollout-<YYYY-MM-DD>.md` (advancing to the next `-N` ordinal if today's already exists).
 6. Rollout note carries `protocol_version: 3`, `verifier:`, `max_iterations: 3`, `max_review_rounds: 4`, `max_plan_rounds: 3`, `plan_approval: scope-gated`, `parallel_ceiling: 4`, `model: opus` in frontmatter. No inline execution playbook — the rollout body is data only.
 7. Stamps `wave: N`, `rollout: "[[...]]"`, and `scope:` on each task
 8. Prints summary pointing the user toward `/wave:execute`
 
-Then from a fresh session: paste `execute Wave 1 of [[giflab-rollout]]` — the `/wave:execute` skill should pick it up, gate on `protocol_version: 3`, resolve per-task config, and call the Workflow tool with `wave-execute.workflow.js` to run the three-layer convergence engine per task (visible live via `/workflows`).
+Then from a fresh session: paste `execute Wave 1 of [[giflab-rollout-<YYYY-MM-DD>]]` (the dated note just written) — the `/wave:execute` skill should pick it up, gate on `protocol_version: 3`, resolve per-task config, and call the Workflow tool with `wave-execute.workflow.js` to run the three-layer convergence engine per task (visible live via `/workflows`).
 
 ### Merge regression (step 4.5)
 

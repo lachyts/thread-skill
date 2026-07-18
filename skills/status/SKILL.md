@@ -15,7 +15,8 @@ those are the treatment.
 
 ## Scope
 
-Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout.md` + its linked task notes, and makes **read-only**
+Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` (older undated `<slug>-rollout` notes
+still resolve — see step 1) + its linked task notes, and makes **read-only**
 `gh`/`git` calls against the target repo. Writes nothing. Obsidian + GitHub read access only.
 
 ## Invocation forms

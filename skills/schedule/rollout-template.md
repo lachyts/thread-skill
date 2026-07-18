@@ -11,6 +11,7 @@ contexts: []
 scheduled: 
 due: 
 captured: {{DATE}}
+# saved as: <slug>-rollout-<YYYY-MM-DD>.md — always dated (a 2nd same-day rollout gets a -N suffix); legacy undated <slug>-rollout notes keep their names, the wave readers resolve both. See schedule SKILL.md step 6.
 protocol_version: 3
 verifier: {{VERIFIER}}
 max_iterations: 3

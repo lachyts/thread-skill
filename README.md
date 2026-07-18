@@ -7,7 +7,7 @@ rollout**. The pipeline:
   Obsidian task notes.
 - **`/wave:schedule`** — the *planner*. Reads a backlog of related tasks under one project, computes
   wave structure from file-overlap + dependency analysis, auto-merges affine same-file task clusters,
-  and writes a thin `<project-slug>-rollout.md` note (data only) with `protocol_version: 3` frontmatter.
+  and writes a thin, always-dated `<project-slug>-rollout-<YYYY-MM-DD>.md` note (data only) with `protocol_version: 3` frontmatter.
 - **`/wave:execute`** — the *executor*. Reads that rollout note, resolves per-task config, and hands
   the convergence work to a dynamic **Workflow** script. Continuous mode auto-merges each wave before
   launching the next (zero-touch); `--gated` is the manual-merge escape hatch.
