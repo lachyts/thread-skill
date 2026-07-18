@@ -19,6 +19,14 @@ One phase = one rollout by convention. A phase is a plan, never a task — its n
 task-tagged phase note when decomposing it.
 _Avoid_: stage, iteration, wave.
 
+**Gather**:
+The roadmap-forming pass — turning a project's loose, unphased open tasks into phases: cluster
+proposal → grilled meaning (the human names, orders, and assigns membership; gather never invents
+phases silently) → the mechanical writes (phase notes, `<project>-p<N>-<M>` renames + `phase:`
+stamps, project-note surfacing). The inverse of split (plan → tasks); both converge on
+`/wave:schedule`. Phases order meaning, waves order merges — gather never writes `wave:`.
+_Avoid_: triage, backlog grooming, auto-roadmap, sort.
+
 ## Rollout structure
 
 **Rollout**:

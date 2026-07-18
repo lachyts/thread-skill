@@ -5,6 +5,10 @@ rollout**. The pipeline:
 
 - **`/wave:split`** — the *decomposer*. Turns a plan or design into numbered, phased, PR-sized
   Obsidian task notes.
+- **`/wave:gather`** — the *roadmap-former*, split's inverse. Turns a project's loose, unphased
+  Obsidian tasks into a phased roadmap: cluster proposal → grilled meaning (via the user's
+  grill-with-docs / grill-me skills) → phase notes + `pN-M` renames + project-note surfacing.
+  Converges on `/wave:schedule`.
 - **`/wave:schedule`** — the *planner*. Reads a backlog of related tasks under one project, computes
   wave structure from file-overlap + dependency analysis, auto-merges affine same-file task clusters,
   and writes a thin, always-dated `<project-slug>-rollout-<YYYY-MM-DD>.md` note (data only) with `protocol_version: 3` frontmatter.
@@ -60,7 +64,8 @@ Cut a versioned release with `claude plugin tag` once `plugin.json` + `marketpla
 
 ## Invocation
 
-`/wave:schedule <Project>` to build a rollout, then `/wave:execute [[<slug>-rollout]]` (or natural
+Two entry points feed the planner: a plan or design → `/wave:split`; a loose, unphased backlog →
+`/wave:gather <Project>`. Then `/wave:schedule <Project>` to build a rollout, then `/wave:execute [[<slug>-rollout]]` (or natural
 language: `execute Wave 1 of [[<slug>-rollout]]`). The executor only runs `protocol_version: 3`
 rollouts and prompts for regeneration via `/wave:schedule --regenerate` on older notes.
 
@@ -87,6 +92,7 @@ CONTEXT.md            glossary — the domain language (rollout, wave, conductor
 docs/adr/             architecture decision records
 skills/
   split/     SKILL.md
+  gather/    SKILL.md
   schedule/  SKILL.md, rollout-template.md
   execute/   SKILL.md, wave-execute.workflow.js, subagent-prompt-template.md,
              scripts/{merge-wave.sh, reconcile-wave.py},

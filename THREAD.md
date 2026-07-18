@@ -6,6 +6,27 @@ lives in the Obsidian vault at `Work/Tasks/wave-execute-e2e-test-giflab`; the pr
 
 ---
 
+## 2026-07-19 — 1.4.0 ships: /wave:gather — loose tasks → roadmap, grill skills wired in live
+
+The gather build (specced in the 2026-07-18 grill, deferred via `wave-skill-gather-skill`) lands as
+`skills/gather/SKILL.md`: cluster proposals → grilled meaning → mechanical writes (phase notes per
+`add-phase.md`, `pN-M` renames + `phase:` stamps with vault-wide backlink rewrite, two-block
+surfacing), `--light` for clustering-only. Split's inverse; both feed `/wave:schedule`.
+
+**New this session — the interview step is wired to Lachy's grill skills by name, never copied**,
+so his edits to them propagate for free. Gate rule (grilled 2026-07-19): repo (from the project
+note's `repos:`) has `CONTEXT.md`/`CONTEXT-MAP.md` → invoke `grill-with-docs` silently, doc writes
+directed at that repo (not the session CWD); repo without → one up-front ask ("start a CONTEXT.md?");
+no repo → `grill-me`; neither installed (public plugin, personal skills) → inline interview shape.
+This adds the one sanctioned exception to gather's vault-only scope: the grill step inherits
+grill-with-docs' write surface (`CONTEXT.md` + `docs/adr/` in the resolved repo). Recorded here in
+lieu of an ADR — additive, cheap to reverse, no new architecture.
+
+Other grilled calls: joins into **existing** phases allowed (`M` = next free ordinal, never
+renumber); no `--regenerate` (the no-`phase:` discovery filter makes re-runs incremental by
+construction); backlinks rewritten in-place on rename. CONTEXT.md gains the **Gather** glossary
+entry; README gains the pipeline bullet + layout + routing line. Shipped as **1.4.0**.
+
 ## 2026-07-19 — 1.3.0 ships: the self-hosting rollout — wave builds six features into itself
 
 A grill-with-docs session turned the project's own backlog (5 brain-dump captures + 1 specced
