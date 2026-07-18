@@ -39,6 +39,8 @@ The manual runbook matched the protocol wave 3 had codified hours earlier.
 - Shipped as **1.3.0** (`c66e221`): manifest + marketplace bumped, cache dir synced from repo,
   `installed_plugins.json` repointed. Vault also gained `/wave:gather` specced (grill-me-by-default
   gather route — tasks → roadmap/phases), riding a later rollout.
+- 2026-07-19: set down via thread:defer → vault `wave-skill-gather-skill` (scheduled today, resume
+  prompt inside) — the gather build is the next session's work; ships as 1.4.0.
 
 ## 2026-07-13 — 1.2.0 ships: duplicate-hooks load failure fixed; gstack eval shrinks the live bed
 
