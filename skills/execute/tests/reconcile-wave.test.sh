@@ -198,6 +198,100 @@ if python3 "$SCRIPT" defer --tasks "st-foreign" --rollout "$TMP/st-rollout.md" -
   echo "FAIL - defer accepted a foreign-rollout task"; fail=1
 else echo "ok   - defer refuses cross-rollout"; fi
 
+echo "== pause / reinstate (soft pause honoured at the cursor step; clear-pause reinstates) =="
+cat > "$TMP/pz-rollout.md" <<EOF
+---
+tags: [task, rollout]
+status: open
+protocol_version: 3
+merged_through_wave: 1
+pause_requested: true
+---
+
+## Notes
+EOF
+CUROUT=$(python3 "$SCRIPT" cursor --rollout "$TMP/pz-rollout.md" --wave 2) || { echo "FAIL - pause cursor exit"; fail=1; }
+check  "pause: cursor still advances"        "merged_through_wave: 2" "$TMP/pz-rollout.md"
+check  "pause: paused stamp written"         "paused: "               "$TMP/pz-rollout.md"
+refute "pause: pause_requested cleared"      "pause_requested"        "$TMP/pz-rollout.md"
+echo "$CUROUT" | grep -q "paused=" && echo "ok   - pause: cursor output signals the pause" \
+  || { echo "FAIL - pause: no paused= line in cursor output"; fail=1; }
+
+# no pending request → cursor must NOT stamp or signal anything (byte-stable default path)
+cat > "$TMP/pz-plain.md" <<EOF
+---
+tags: [task, rollout]
+status: open
+merged_through_wave: 0
+---
+
+## Notes
+EOF
+CUROUT=$(python3 "$SCRIPT" cursor --rollout "$TMP/pz-plain.md" --wave 1) || { echo "FAIL - plain cursor exit"; fail=1; }
+refute "no request: nothing stamped"         "paused"                 "$TMP/pz-plain.md"
+if echo "$CUROUT" | grep -q "paused="; then echo "FAIL - no request: spurious paused= output"; fail=1
+else echo "ok   - no request: no pause signal"; fi
+
+# status surfaces the honoured pause (timestamp set, no pending request)
+JSON=$(python3 "$SCRIPT" status --rollout "$TMP/pz-rollout.md" --tasks-dir "$TMP")
+echo "$JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('paused') else 1)" \
+  && echo "ok   - status: paused surfaced" || { echo "FAIL - status: paused missing"; fail=1; }
+echo "$JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('pause_requested') is False else 1)" \
+  && echo "ok   - status: pause_requested false after honour" || { echo "FAIL - status: pause_requested wrong"; fail=1; }
+
+# a pending (not yet honoured) request also surfaces via status
+cat > "$TMP/pz-pending.md" <<EOF
+---
+tags: [task, rollout]
+status: open
+merged_through_wave: 0
+pause_requested: true
+---
+
+## Notes
+EOF
+JSON=$(python3 "$SCRIPT" status --rollout "$TMP/pz-pending.md" --tasks-dir "$TMP")
+echo "$JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('pause_requested') is True and not d.get('paused') else 1)" \
+  && echo "ok   - status: pending request surfaced" || { echo "FAIL - status: pending request missing"; fail=1; }
+
+# clear-pause: reinstate removes the stamp (cursor untouched); idempotent on re-run
+python3 "$SCRIPT" clear-pause --rollout "$TMP/pz-rollout.md" || { echo "FAIL - clear-pause exit"; fail=1; }
+refute "reinstate: paused cleared"           "paused"                 "$TMP/pz-rollout.md"
+check  "reinstate: cursor untouched"         "merged_through_wave: 2" "$TMP/pz-rollout.md"
+python3 "$SCRIPT" clear-pause --rollout "$TMP/pz-rollout.md" >/dev/null \
+  && echo "ok   - reinstate: idempotent (exit 0)" || { echo "FAIL - reinstate: second run errored"; fail=1; }
+# clear-pause also clears a pending request (hard-pause-before-honour edge)
+python3 "$SCRIPT" clear-pause --rollout "$TMP/pz-pending.md" >/dev/null || { echo "FAIL - clear-pause pending exit"; fail=1; }
+refute "reinstate: pending request cleared"  "pause_requested"        "$TMP/pz-pending.md"
+
+# the `reconcile --wave` convenience arm honours the flag too (cmd_reconcile -> _set_cursor ->
+# _print_pause_honoured) — the OTHER cursor call site, must behave exactly like the standalone subcommand
+cat > "$TMP/pz-conv.md" <<EOF
+---
+tags: [task, rollout]
+status: open
+protocol_version: 3
+merged_through_wave: 2
+pause_requested: true
+---
+
+## Notes
+EOF
+mknote pz-conv-task in_progress
+cat > "$TMP/pz-conv-result.json" <<EOF
+{ "rolloutSlug": "pz-conv", "tasks": [
+  { "slug": "pz-conv-task", "scope": "single-file", "status": "review", "prUrl": "https://github.com/o/r/pull/12", "reviewRoundsUsed": 1, "planRoundsUsed": 0 }
+] }
+EOF
+RECOUT=$(python3 "$SCRIPT" reconcile --result "$TMP/pz-conv-result.json" --tasks-dir "$TMP" --rollout "$TMP/pz-conv.md" --wave 3) \
+  || { echo "FAIL - reconcile --wave pause exit"; fail=1; }
+check  "reconcile --wave: task reconciled"         "status: review"         "$TMP/pz-conv-task.md"
+check  "reconcile --wave: cursor advanced"         "merged_through_wave: 3" "$TMP/pz-conv.md"
+check  "reconcile --wave: paused stamp written"    "paused: "               "$TMP/pz-conv.md"
+refute "reconcile --wave: pause_requested cleared" "pause_requested"        "$TMP/pz-conv.md"
+echo "$RECOUT" | grep -q "paused=" && echo "ok   - reconcile --wave: output signals the pause" \
+  || { echo "FAIL - reconcile --wave: no paused= line in output"; fail=1; }
+
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fail=1; fi
 exit $fail

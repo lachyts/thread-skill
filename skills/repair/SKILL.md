@@ -37,6 +37,20 @@ Resolve `[[<slug>]]` (ask if ambiguous). Run the **`/wave:status` scan with the 
 drift flags + the repo path. Show the user the situational report first — they should see what they're
 repairing.
 
+**Paused is not stuck.** Two distinct pause states in the status JSON (execute → *Pausing + reinstating
+a rollout*) — do not conflate them:
+
+- `paused:` stamp → the rollout is deliberately paused; its unlanded tasks are waiting for reinstate,
+  not wedged. Say so, point at `/wave:execute [[<rollout>]]` to reinstate, and stop.
+- `pause_requested:` only (no stamp) → the rollout is still **live and mid-wave**; the pause takes
+  effect at the next wave boundary. Report "pause pending — takes effect at the next wave boundary,
+  nothing to do" (matching status's rendering) and stop. There is nothing to reinstate, and **never
+  recommend re-invoking `/wave:execute` against a live run** — the running loop honours the flag itself.
+
+In either case, continue into repair only for something genuinely independent of the pause (e.g. drift —
+a PR merged out-of-band before the pause) and the user confirms; even then, **never clear the pause
+stamp or the pending flag, and never resume** — reinstate belongs to `/wave:execute`.
+
 ### 2. Classify each non-landed task
 
 For every task whose note status is not `done`, classify from its `blockerSummary` + live PR state:
@@ -110,6 +124,10 @@ any dependents moved with it).
 
 ## Don'ts
 
+- **Don't treat `paused:` or `pause_requested:` as drift or a blocker.** A pause is intentional (see §1)
+  — repair never clears the stamp or the pending flag, never resumes the loop, and never points a
+  pending-only rollout (still live, mid-wave) at a re-invocation of execute; reinstate — for a stamped
+  pause only — is `/wave:execute [[<rollout>]]`.
 - **Don't re-implement merge or convergence.** Drift → `resolve`; everything else → execute's §4.5
   resume. If you're writing a dispatch/merge loop, you've turned the conductor into an engine — stop.
 - **Don't merge anywhere but `merge-wave.sh`.** No inline `gh pr merge`, no `--admin`, no force-push.

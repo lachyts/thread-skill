@@ -13,8 +13,11 @@ export const meta = {
 //
 // Invoked by the wave-execute skill via Workflow({ scriptPath, args }). The skill
 // owns vault I/O, the protocol gate, config resolution, status reconciliation,
-// reporting, and the --gated between-wave pause. This script owns ONLY the
-// three-layer convergence engine.
+// reporting, the --gated between-wave pause, and the soft-pause check (a
+// `pause_requested: true` flag on the rollout note, honoured by reconcile-wave.py's
+// end-of-wave cursor step — the engine never sees a pause because continuous mode
+// passes it ONE wave per call, and the skill simply doesn't launch the next one).
+// This script owns ONLY the three-layer convergence engine.
 //
 // args = {
 //   rolloutSlug : string,            // e.g. "giflab-rollout"

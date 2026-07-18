@@ -1,6 +1,6 @@
 ---
 name: execute
-description: Use to execute a wave rollout — reads a rollout note at ~/repos/obsidian/Work/Tasks/<slug>-rollout.md, resolves per-task config, and calls the Workflow tool with wave-execute.workflow.js to run the convergence engine (per-task plan-gate → Ralph-style verifier retry → master review, converging in parallel within each wave). In continuous mode (bare "execute [[rollout]]") it auto-merges each wave before launching the next — zero-touch, no per-PR confirmation — with --gated as the manual-merge escape hatch. Triggers on natural-language "execute Wave N of [[rollout-slug]]" or "execute [[rollout-slug]]" patterns, or explicit /wave:execute invocation. Only runs rollouts with protocol_version: 3; refuses older rollouts and prompts for regeneration via /wave:schedule --regenerate.
+description: Use to execute a wave rollout — reads a rollout note at ~/repos/obsidian/Work/Tasks/<slug>-rollout.md, resolves per-task config, and calls the Workflow tool with wave-execute.workflow.js to run the convergence engine (per-task plan-gate → Ralph-style verifier retry → master review, converging in parallel within each wave). In continuous mode (bare "execute [[rollout]]") it auto-merges each wave before launching the next — zero-touch, no per-PR confirmation — with --gated as the manual-merge escape hatch. Triggers on natural-language "execute Wave N of [[rollout-slug]]" or "execute [[rollout-slug]]" patterns, explicit /wave:execute invocation, or "pause the rollout" / "reinstate [[rollout]]" (safe pause: soft via pause_requested on the rollout note, hard via TaskStop + a paused: stamp; reinstate is plain re-invocation — see §Pausing). Only runs rollouts with protocol_version: 3; refuses older rollouts and prompts for regeneration via /wave:schedule --regenerate.
 ---
 
 # /wave:execute — run a wave rollout on the Workflow engine
@@ -34,6 +34,8 @@ Single-wave mode opens PRs and leaves merging to you.
 Resolve `[[<slug>]]` to `~/repos/obsidian/Work/Tasks/<slug>.md`. Read frontmatter + body.
 
 The slug is whatever the invocation names. `/wave:schedule` writes rollout notes as `<project-slug>-rollout` (the original, undated), `<project-slug>-rollout-<YYYY-MM-DD>` (first rollout of a day), or `<project-slug>-rollout-<YYYY-MM-DD>-<N>` (N≥2, each subsequent rollout that same day — the first-of-day stays bare-date). The ordinal is purely `/wave:schedule`'s collision-avoidance scheme; execute reads the exact note it's handed and needs no special parsing. If the user names a rollout ambiguously (e.g. "execute today's giflab rollout") and several dated/ordinal notes match, **list the matches and ask which** — don't assume the highest ordinal.
+
+If the frontmatter carries a `paused:` stamp, this invocation is a **reinstate** — see §4.5 *Reinstate* and *Pausing + reinstating a rollout* below.
 
 ### 2. Protocol-version gate
 
@@ -145,7 +147,8 @@ In continuous mode the lead session is the conductor: run ONE wave on the engine
    - **…then flip the wave's landed tasks to `done`** (same helper):
      `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py mark-done --tasks <slugA,slugB,…>`
      Pass **every wave-K task that ended at `status: review`** — both the just-merged PR tasks (the merge IS the confirmation a `review` note was waiting for) and the wave's read-only tasks (no PR to merge; their master-review approval was their confirmation, and the wave completing is when that becomes final). Idempotent; the helper refuses any note not at `review`/`done`, so a blocked task can never be swept along. Without this flip, landed tasks pile up at `review` as false "awaiting acceptance" items — seven had accumulated by 2026-06-12.
-4. **Smart-halt check** before launching K+1: if any wave-K task did **not** land (`blocked` / `review-blocked` / `plan-blocked`) **and** its file-set (from the rollout note's `## File-sets` block) intersects the union of any later wave's file-sets → **HALT** with a clear report (e.g. "wave K left [[task]] unlanded; wave M edits the same file `<f>` — continuing would branch it from a main missing the fix"). The user fixes the blocker and re-invokes. Otherwise launch wave K+1 (its worktrees branch from the freshly-merged `origin/main`).
+   - **Soft-pause check (rides the cursor step — zero extra calls).** The `cursor` helper honours a `pause_requested: true` flag on the rollout note: it stamps `paused: <timestamp>`, clears the flag, and prints a `paused=` line alongside the cursor advance. When that line appears, the user asked for a soft pause — do **NOT** launch wave K+1. Print a short paused report (what merged this wave, what's left) and end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="paused at user request"`. The Stop-hook driver releases on `halted`, and the heartbeat cron deletes itself on its next tick — on this `halted` line, or on the `paused:` stamp its prompt checks ahead of the stall diagnosis (§5), which is what keeps "nothing auto-resumes a paused rollout" true for a hard pause too (a hard pause never emits `halted`; its runbook also deletes the cron outright). Reinstate is plain `/wave:execute [[rollout]]` — see *Pausing + reinstating a rollout* below.
+4. **Smart-halt check** before launching K+1: if any wave-K task did **not** land (`blocked` / `review-blocked` / `plan-blocked`) **and** its file-set (from the rollout note's `## File-sets` block) intersects the union of any later wave's file-sets → **HALT** with a clear report (e.g. "wave K left [[task]] unlanded; wave M edits the same file `<f>` — continuing would branch it from a main missing the fix"). The user fixes the blocker and re-invokes. Otherwise, **honour any pending pause before launching K+1**: a partially-landed wave never runs step 3's cursor advance (*Per-task resume within a wave* below), so a `pause_requested: true` still sitting on the rollout note has NOT been honoured yet — check the note, and if the flag is pending, re-run `reconcile-wave.py cursor --rollout <rollout-note> --wave <current merged_through_wave>` (cursor-idempotent — re-setting the same value changes nothing — while performing the stamp + clear + `paused=` signal) and exit exactly as the step-3 *Soft-pause check* does: no wave K+1, paused report, `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="paused at user request"`. With no pending pause, launch wave K+1 (its worktrees branch from the freshly-merged `origin/main`).
 5. Repeat until the last wave merges, then **perform the completion ceremony** (don't just point the user at the checklist):
    - Sweep the rollout's task notes: every task should already read `status: done` (step 3's `mark-done` flips them wave by wave). Flip any straggler still at `review` whose PR is verifiably merged (`mark-done` again); a straggler at any *other* status means the rollout isn't actually complete — stop and say so.
    - Stamp `status: done` + `completed: <date>` on the rollout frontmatter.
@@ -158,6 +161,14 @@ In continuous mode the lead session is the conductor: run ONE wave on the engine
    A done rollout left sitting in `Work/Tasks/` is invisible-but-present — every Bases view filters `status != done`, so it vanishes from view with no record of what happened. The ceremony is what makes completion legible weeks later.
 
 **Cold resume.** Re-invoking `execute [[rollout]]` when `merged_through_wave: N` is set: first re-run `merge-wave.sh` against wave N+1's already-open PRs (idempotent — merged PRs are skipped, so this flushes any half-merged wave), `mark-done` the tasks whose PRs are now confirmed merged, then continue the loop.
+
+**Reinstate (resuming a paused rollout).** If the rollout note carries a `paused:` stamp, this invocation IS the reinstate — clear the stamp first, deterministically:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py clear-pause --rollout <rollout-note>
+```
+
+then continue the normal cold resume above (flush any half-merged wave, `resume-filter`, re-dispatch whatever didn't land). There is no separate resume command. `clear-pause` also removes any still-pending `pause_requested` (the hard-pause-before-honour edge) so a freshly reinstated rollout doesn't immediately re-pause. **Only trigger it on a `paused:` stamp** — a pending `pause_requested` with no stamp is a live user request that must survive resumes (including the heartbeat cron's re-entry) and takes effect at the next wave boundary.
 
 **Per-task resume within a wave (finding #7).** A wave that returned one approved + one blocked task merges the approved PR but can't advance the cursor (the wave is incomplete). On resume, dispatch only the tasks in that wave whose note status is **not already landed/approved** — the task-note `status:` is the source of truth, not the cursor. Compute the still-to-dispatch set deterministically rather than re-dispatching the whole wave (which would re-run already-merged work):
 
@@ -185,7 +196,7 @@ Tell the user the run launched, which waves/tasks it covers, and that they can w
 
 **Register the heartbeat (continuous mode, once per rollout).** In the same turn as the first wave launch, check `CronList` for an existing `WAVE-HEARTBEAT <rollout-slug>` task; if none, register one via `CronCreate` (schedule `*/20 * * * *`) with this prompt:
 
-> WAVE-HEARTBEAT <rollout-slug>: Read the last WAVE-STATUS line for this rollout in the conversation. If state=done or state=halted (or the rollout note is archived), find this cron via CronList and CronDelete it, then stop. If a Workflow run for the rollout is still visibly running in /workflows, do nothing — end the turn silently. Otherwise the rollout has stalled (no run in flight, waves remain): re-enter /wave:execute [[<rollout-slug>]] §4.5 resume from the cursor.
+> WAVE-HEARTBEAT <rollout-slug>: Read the last WAVE-STATUS line for this rollout in the conversation. If state=done or state=halted (or the rollout note is archived), find this cron via CronList and CronDelete it, then stop. If the rollout note's frontmatter carries a `paused:` stamp, the rollout is deliberately paused — a hard pause emits no halted line, so check the note BEFORE any stall diagnosis: CronDelete this cron and stop; never resume a paused rollout. If a Workflow run for the rollout is still visibly running in /workflows, do nothing — end the turn silently. Otherwise the rollout has stalled (no run in flight, waves remain): re-enter /wave:execute [[<rollout-slug>]] §4.5 resume from the cursor.
 
 This is the backstop for a hung Workflow run or a missed completion notification — the stall mode nothing else catches. Then **end the launch turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=waiting`** so the Stop-hook driver (§8) lets the session idle until the notification arrives.
 
@@ -246,7 +257,7 @@ WAVE-STATUS: <rollout-slug> cursor=<K>/<N> state=<running|waiting|halted|done>[ 
 
 - `running` — in-session driving work remains **right now** (a wave returned and needs reconcile/merge; the next wave needs launching). The plugin's Stop-hook driver (§8) refuses to let the session stop on this state — so never end a turn on `running` unless you genuinely stopped mid-work.
 - `waiting` — a wave's Workflow call is in flight; nothing to do until its completion notification (the heartbeat cron is the backstop). Emit this after launching a wave.
-- `halted` — a §7 stop condition fired or `--gated` is waiting on the user (always include `reason=`).
+- `halted` — a §7 stop condition fired, `--gated` is waiting on the user, or a requested pause took effect (*Pausing + reinstating a rollout*) — always include `reason=`.
 - `done` — completion ceremony performed.
 
 This line is the contract the automatic driver (§8) keys off — the Stop hook parses it with a strict regex, so keep the format byte-stable.
@@ -263,6 +274,8 @@ Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS au
 - `merge-wave.sh` exits non-zero (a real merge conflict or red required check), or
 - the smart-halt check fires (an unlanded task's file reappears in a later wave).
 
+A **soft pause** (*Pausing + reinstating a rollout* below) exits through the same `state=halted` mechanics but is **deliberate**, not a failure — there is no cause to fix, and reinstating is plain re-invocation.
+
 In every halt case the work merged so far stays on `main`; the user fixes the cause and re-invokes `execute [[rollout]]` to resume from the `merged_through_wave` cursor. To see *why* a rollout halted, run `/wave:status [[rollout]]` (read-only situational report). To **sort out** a stalled rollout without ceding merge authority, run `/wave:repair [[rollout]]` — it reconciles drift, re-dispatches agent-fixable blocks, captures input-gated decisions, defers wedged tasks, and resumes via this skill's §4.5 loop (`merge-wave.sh` stays the sole merger). `/wave:repair` is the systematised replacement for hand-repairing a worktree in an external cockpit (README → *Coexistence with Orca*).
 
 ### 8. Unattended driving — the automatic driver
@@ -271,7 +284,7 @@ The §4.5 loop is driven across turns by Workflow-completion notifications — n
 
 **The Stop-hook driver** (`hooks/wave-stop-driver.py`, wired via the plugin's `hooks.json`). On every session stop it reads the last `WAVE-STATUS` line (§6) and, while `state=running`, **blocks the stop** and hands back the exact next step (reconcile → merge → advance cursor → launch next wave). It releases on `waiting` (a Workflow run is legitimately in flight), `halted` (§7 — human's turn), and `done`. It is progress-aware: three consecutive blocks without the cursor advancing release the stop and surface "likely wedged — run /wave:status or /wave:repair" instead of spinning forever. This is the programmatic twin of a `/goal` condition, shipped so nobody has to remember to set one.
 
-**The heartbeat cron** (registered by step 5 at first wave launch, `*/20 * * * *`). Catches the one stall the Stop hook can't see: a hung Workflow run or missed completion notification while the session idles at `state=waiting`. Each tick checks; if nothing needs doing it ends silently; if the rollout stalled it re-enters §4.5 cold resume (idempotent — cursor + `resume-filter` + merge-wave.sh's merged-PR skip make re-entry duplicate-free); it deletes itself once the rollout is done or halted.
+**The heartbeat cron** (registered by step 5 at first wave launch, `*/20 * * * *`). Catches the one stall the Stop hook can't see: a hung Workflow run or missed completion notification while the session idles at `state=waiting`. Each tick checks; if nothing needs doing it ends silently; if the rollout stalled it re-enters §4.5 cold resume (idempotent — cursor + `resume-filter` + merge-wave.sh's merged-PR skip make re-entry duplicate-free); it deletes itself once the rollout is done, halted, or paused (its prompt checks the rollout note's `paused:` stamp before diagnosing a stall — a hard pause emits no `halted` line, and "stalled" must never re-dispatch a wave the user deliberately stopped).
 
 Division of labour: **Stop hook** = "don't stop while there's driving work"; **heartbeat** = "wake up if the thing you were waiting for never arrives"; **§7 HALTs** = the deliberate exits both respect.
 
@@ -289,6 +302,24 @@ Division of labour: **Stop hook** = "don't stop while there's driving work"; **h
 - **What none of this fixes:** the blocking waits *inside* single tool calls — the Workflow call (~1h worst case per stubborn task, §Resource budget) and `merge-wave.sh`'s serial required-checks watching — are untouched by any driver.
 - **Skill invocation under /loop (fallbacks):** slash-command payloads are invoked normally (`/loop 5m /babysit-prs` is the built-in's own example). The only frontmatter that breaks this is `disable-model-invocation: true` — never add it to `execute` or `status`. (There is no `autonomous:` frontmatter key; that's a myth — verified against the 2.1.199 binary.)
 - Cloud providers (Bedrock/Vertex) downgrade dynamic `/loop` to a fixed ~10-minute cadence.
+
+## Pausing + reinstating a rollout
+
+"Pause the rollout" means **soft pause** by default; **hard pause** only when it must stop *now*. Either way the pause is recorded on the rollout note, and reinstating is plain `/wave:execute [[rollout]]` — no separate resume command, no new state machine. (Terms: `CONTEXT.md` → *Pause*, *Reinstate*.)
+
+**Soft pause (default).** Stamp `pause_requested: true` on the rollout note's frontmatter (a lead-session edit — it's rollout config, not task status). Nothing is interrupted: the in-flight wave finishes, merges, and advances the cursor as normal; the end-of-wave `cursor` helper then honours the flag — stamps `paused: <timestamp>`, clears `pause_requested` — and the loop exits with `state=halted reason="paused at user request"` instead of launching the next wave (§4.5 step 3, *Soft-pause check*; a partially-landed wave skips step 3's cursor advance, so step 4 honours the still-pending flag before any K+1 launch instead). Zero extra agent calls; the pause lands on a clean wave boundary. To cancel a pending request before it takes effect, remove the `pause_requested:` line (or run `clear-pause`).
+
+**Hard pause (urgent).** Stop the run now — in-flight agents die, but their worktrees keep all committed (and any uncommitted) work. This is a documented protocol, not engine code:
+
+1. Find the rollout's active Workflow run (`/workflows`, or the task list) and **TaskStop** it.
+2. Stamp the rollout note by hand: `paused: <timestamp>` in frontmatter, plus a short `## Pause log` body entry with the `runId` and which wave/tasks were in flight — the context the stamp alone can't carry.
+3. Delete the rollout's `WAVE-HEARTBEAT` cron (`CronList` → `CronDelete`), mirroring the completion-ceremony step (§4.5). A hard pause emits no `state=halted` line, so the last WAVE-STATUS still reads `waiting` — a live heartbeat would diagnose "stalled" on its next ≤20-min tick and re-dispatch the wave you just killed. The heartbeat prompt's own paused-stamp check (§5) is the backstop if this step is missed, but delete the cron anyway rather than leaning on it.
+
+The killed wave's tasks simply didn't land: their notes still read `in_progress`, so `resume-filter` re-dispatches them on reinstate, and the engine's worktree setup reuses each task's existing worktree + branch (resume-safe by design). Losses are bounded to in-flight agent context — committed work, and uncommitted files sitting in the worktrees, survive.
+
+**Reinstate.** `/wave:execute [[rollout]]`. The resume path (§4.5 *Reinstate*) sees the `paused:` stamp, clears it via `reconcile-wave.py clear-pause`, and continues from the cursor — flush any half-merged wave, re-dispatch whatever didn't land. The heartbeat cron re-registers at the next wave launch (§5; the paused rollout's old one is already gone — self-deleted on the soft pause's `halted` line or on its prompt's paused-stamp check, or deleted directly by hard-pause step 3 — so a pause is never auto-resumed by a leftover tick).
+
+A paused rollout is **intentional**, not stalled: `/wave:status` reports it as paused (stamp + since-when + what's left), and `/wave:repair` treats it as nothing-to-fix.
 
 ## Don'ts
 

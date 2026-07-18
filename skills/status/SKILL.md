@@ -41,10 +41,12 @@ status is read-only and reports whatever it finds, noting if a note predates `pr
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py status --rollout <rollout-note>
 ```
 
-Returns JSON: `{ rollout, rolloutStatus, merged_through_wave, total_waves, tasks: [{ slug, wave,
-status, pr, blockerSummary }] }` — **every** task carrying `rollout: [[<slug>]]` (glob-by-backlink, so
-read-only tasks the `## File-sets` block omits are still included), sorted by wave then slug. Pure read,
-no network.
+Returns JSON: `{ rollout, rolloutStatus, paused, pause_requested, merged_through_wave, total_waves,
+tasks: [{ slug, wave, status, pr, blockerSummary }] }` — **every** task carrying `rollout: [[<slug>]]`
+(glob-by-backlink, so read-only tasks the `## File-sets` block omits are still included), sorted by wave
+then slug. Pure read, no network. `paused` is the pause stamp's timestamp (null when not paused);
+`pause_requested` is true when a soft pause is pending and will take effect at the next wave boundary
+(execute → *Pausing + reinstating a rollout*).
 
 ### 3. Live cross-check (default; `--offline` skips)
 
@@ -85,9 +87,19 @@ Recommended next action: <one line>
 ```
 
 Group by wave; within a wave list each task with status, PR (+ live state), and — for any blocker — the
-*first line* of its `blockerSummary` as "needs: …". Surface drift in its own block. Then **one**
-recommended next action:
+*first line* of its `blockerSummary` as "needs: …". Surface drift in its own block.
 
+**A paused rollout renders as paused, not stalled.** When the JSON carries `paused: <timestamp>`,
+headline it — `[[<rollout>]] — PAUSED since <timestamp> — wave <K>/<N> merged` — list what's left as
+usual, and skip the stalled/blocked framing: the pause is intentional (execute → *Pausing + reinstating
+a rollout*), so unlanded tasks behind it are "waiting for reinstate", not blockers to escalate. When
+`pause_requested` is true (stamp not yet written), report "pause pending — the in-flight wave finishes +
+merges, then the rollout pauses at the wave boundary."
+
+Then **one** recommended next action:
+
+- `paused` stamped → "reinstate with `/wave:execute [[<rollout>]]`" (never `/wave:repair` — a pause
+  needs no repair; only recommend repair for drift that is independent of the pause, and say so).
 - all tasks `done` → "rollout complete — run the completion ceremony" (or "already archived").
 - approved PRs awaiting merge / cursor behind → "re-run `/wave:execute [[<rollout>]]` to merge & continue".
 - any blocker or drift → "run `/wave:repair [[<rollout>]]`".

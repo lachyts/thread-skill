@@ -7,13 +7,17 @@ fumble-prone edits across a rollout. This helper performs ALL of those writes de
 returned task array, and (finding #7) computes the per-task resume set so a partial wave resumes without
 re-dispatching already-landed work.
 
-Seven subcommands:
+Eight subcommands:
 
   reconcile   Read the workflow result JSON ({rolloutSlug, tasks:[...]}) and write each task note's
               frontmatter + any blocked-feedback body section. Idempotent (safe to re-run on resume).
 
   cursor      Set `merged_through_wave: N` on a rollout note (the durable continuous-mode cursor),
-              run AFTER merge-wave.sh reports `ok` for wave N.
+              run AFTER merge-wave.sh reports `ok` for wave N. Also the SOFT-PAUSE honour point:
+              when the rollout note carries `pause_requested: true`, it stamps `paused: <timestamp>`,
+              clears the flag, and prints a `paused=` line — the caller (execute §4.5) must then end
+              the wave loop instead of launching the next wave. Riding the cursor step means the
+              pause lands on a clean wave boundary with zero extra agent calls.
 
   mark-done   Flip task notes `status: review` -> `status: done`, run AFTER the wave's merge is
               confirmed (merge-wave.sh `ok` sentinel). `review` means "landed, awaiting confirmation";
@@ -40,6 +44,11 @@ Seven subcommands:
               and sets `status: open` so a future /wave:schedule re-plans them. The dependent-closure
               safety check lives in the /wave:repair skill; this only does the frontmatter surgery.
 
+  clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
+              `pause_requested`) from the rollout note. Run by /wave:execute's resume path when it
+              finds a `paused:` stamp — reinstating IS plain re-invocation, so there is no separate
+              resume command. Idempotent (no stamp = no-op).
+
 Stdlib only (the claude-config repo has no dependency manager). Frontmatter is edited line-surgically
 (not via a YAML round-trip) to preserve field order, comments, and spacing exactly — matching how the
 rest of the vault tooling treats frontmatter.
@@ -56,6 +65,7 @@ import json
 import os
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 DEFAULT_TASKS_DIR = Path(os.path.expanduser("~/repos/obsidian/Work/Tasks"))
@@ -164,6 +174,13 @@ def bullets(items):
     return "\n".join(f"- {s}" for s in items if str(s).strip())
 
 
+def _truthy_flag(value) -> bool:
+    """Frontmatter boolean-ish: true/yes/1 (any case, quoted or bare) counts as set."""
+    if value is None:
+        return False
+    return value.strip().strip('"').strip("'").lower() in {"true", "yes", "1"}
+
+
 # ---- reconcile --------------------------------------------------------------
 
 def resolve_task_path(task, tasks_dir: Path) -> Path:
@@ -232,8 +249,9 @@ def cmd_reconcile(args) -> int:
     if args.wave is not None and args.rollout and not errors:
         # Optional convenience: advance the cursor in the same call (only when the caller asserts the
         # wave fully merged — normally `cursor` is a separate post-merge step gated on merge-wave.sh ok).
-        _set_cursor(Path(os.path.expanduser(args.rollout)), args.wave, args.dry_run)
+        _, paused_at = _set_cursor(Path(os.path.expanduser(args.rollout)), args.wave, args.dry_run)
         print(f"cursor: merged_through_wave={args.wave}" + (" (dry-run)" if args.dry_run else ""))
+        _print_pause_honoured(paused_at, args.dry_run)
 
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -243,10 +261,28 @@ def cmd_reconcile(args) -> int:
 # ---- cursor -----------------------------------------------------------------
 
 def _set_cursor(rollout_path: Path, wave: int, dry_run=False):
+    """Advance the cursor; honour a pending soft-pause request in the same write.
+
+    Returns (note, paused_at): paused_at is the timestamp stamped when `pause_requested: true`
+    was honoured this call, else None. The honour deliberately rides the cursor step — it runs at
+    exactly the end-of-wave moment (post-merge), so a soft pause lands on a clean wave boundary
+    with zero extra agent calls (execute SKILL.md §Pausing + reinstating a rollout).
+    """
     note = Note(rollout_path)
     note.set("merged_through_wave", int(wave), after=("merged_through_wave", "parallel_ceiling", "status"))
+    paused_at = None
+    if _truthy_flag(note.get("pause_requested")):
+        paused_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        note.set("paused", paused_at, after=("pause_requested", "merged_through_wave", "status"))
+        note.remove("pause_requested")
     note.save(dry_run=dry_run)
-    return note
+    return note, paused_at
+
+
+def _print_pause_honoured(paused_at, dry_run=False):
+    if paused_at:
+        print(f"paused={paused_at} (pause_requested honoured — end the wave loop; "
+              f"do NOT launch the next wave)" + (" (dry-run)" if dry_run else ""))
 
 
 def cmd_cursor(args) -> int:
@@ -254,8 +290,9 @@ def cmd_cursor(args) -> int:
     if not path.exists():
         print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
         return 1
-    _set_cursor(path, args.wave, args.dry_run)
+    _, paused_at = _set_cursor(path, args.wave, args.dry_run)
     print(f"merged_through_wave={args.wave}" + (" (dry-run)" if args.dry_run else ""))
+    _print_pause_honoured(paused_at, args.dry_run)
     return 0
 
 
@@ -373,10 +410,16 @@ def cmd_status(args) -> int:
 
     found.sort(key=lambda t: (t["wave"] if t["wave"] is not None else 9999, t["slug"]))
     total_waves = max((t["wave"] for t in found if t["wave"] is not None), default=0)
+    paused = rollout_note.get("paused")
     out = {
         "rollout": rollout_slug,
         "rolloutPath": str(rollout_path),
         "rolloutStatus": rollout_note.get("status"),
+        # Pause state (execute §Pausing): `paused` = the stamp's timestamp when the rollout is
+        # paused (render as PAUSED, not stalled); `pause_requested` = a soft pause is pending and
+        # takes effect at the next wave boundary.
+        "paused": (paused.strip().strip('"').strip("'") or None) if paused else None,
+        "pause_requested": _truthy_flag(rollout_note.get("pause_requested")),
         "merged_through_wave": cursor,
         "total_waves": total_waves,
         "tasks": found,
@@ -457,6 +500,33 @@ def cmd_defer(args) -> int:
     return 1 if errors else 0
 
 
+# ---- clear-pause ------------------------------------------------------------
+
+def cmd_clear_pause(args) -> int:
+    """Reinstate: remove `paused:` + any pending `pause_requested` from the rollout note.
+
+    Called by /wave:execute's resume path ONLY when it finds a `paused:` stamp — a pending
+    `pause_requested` with no stamp is a live user request that must survive resumes (the heartbeat
+    cron re-enters execute's resume, and it must never cancel a pause the user asked for). Clearing
+    both here covers the hard-pause-before-honour edge (stamp hand-written while a soft request was
+    still pending) so a freshly reinstated rollout doesn't immediately re-pause.
+    """
+    path = Path(os.path.expanduser(args.rollout))
+    if not path.exists():
+        print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
+        return 1
+    note = Note(path)
+    note.remove("paused")
+    note.remove("pause_requested")
+    note.save(dry_run=args.dry_run)
+    if note.dirty:
+        print("pause cleared (paused/pause_requested removed)" +
+              (" (dry-run)" if args.dry_run else " [written]"))
+    else:
+        print("no pause stamp [no-change]")
+    return 0
+
+
 # ---- CLI --------------------------------------------------------------------
 
 def main() -> int:
@@ -505,6 +575,11 @@ def main() -> int:
     df.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
     df.add_argument("--dry-run", action="store_true")
     df.set_defaults(func=cmd_defer)
+
+    cp = sub.add_parser("clear-pause", help="reinstate a paused rollout: remove paused/pause_requested (/wave:execute resume)")
+    cp.add_argument("--rollout", required=True, help="path to the rollout note")
+    cp.add_argument("--dry-run", action="store_true")
+    cp.set_defaults(func=cmd_clear_pause)
 
     args = p.parse_args()
     return args.func(args)
