@@ -27,6 +27,14 @@ renumber); no `--regenerate` (the no-`phase:` discovery filter makes re-runs inc
 construction); backlinks rewritten in-place on rename. CONTEXT.md gains the **Gather** glossary
 entry; README gains the pipeline bullet + layout + routing line. Shipped as **1.4.0**.
 
+- **Gotcha (permanent rule): quote SKILL.md descriptions.** All six frontmatters were invalid
+  strict YAML — every description carried `: ` mid-scalar (`Scope: Obsidian only`), which
+  `claude plugin tag` rejects ("loads with empty metadata") even though `plugin validate` and the
+  lenient runtime parser pass it. Fixed by single-quoting all six (`f614cbb`); any future skill's
+  description must be quoted from day one.
+- Cache synced repo → `cache/wave/wave/1.4.0`, `installed_plugins.json` repointed (1.3.0
+  precedent); `claude plugin list` shows 1.4.0 ✔ enabled. Tag `wave--v1.4.0` cut, not yet pushed.
+
 ## 2026-07-19 — 1.3.0 ships: the self-hosting rollout — wave builds six features into itself
 
 A grill-with-docs session turned the project's own backlog (5 brain-dump captures + 1 specced
