@@ -118,6 +118,9 @@ Build the `args` object the workflow expects:
     "test_color_reducer_functionality — ImageMagick 0-byte output (pre-existing, env)"
   ],
   "envBootstrap": "poetry env use 3.11 && poetry install",  // from rollout `env_bootstrap:`; OMIT when absent
+  "progress": "wave 1/4 dispatched — 0m elapsed",  // optional; mark-dispatched's progress line (§4.5 step 1) —
+                                                   //   the engine log()s it verbatim (its sandbox has no clock);
+                                                   //   OMIT when mark-dispatched printed none
   "waves": [
     { "wave": 1, "tasks": [
       { "slug": "giflab-fix-x", "taskPath": "/abs/.../giflab-fix-x.md",
@@ -150,7 +153,11 @@ In continuous mode the lead session is the conductor: run ONE wave on the engine
 
 **Per wave K** (K = `merged_through_wave` + 1):
 
-1. Resolve config + stamp `status: in_progress` for wave K's tasks (step 4); build args with `waves: [waveK]` only; call the Workflow (step 5).
+1. Resolve config + stamp `status: in_progress` for wave K's tasks (step 4). Stamp the wave's **dispatch boundary** on the rollout note — the engine's sandbox has no clock, so wall-clock enters here:
+   ```
+   python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py mark-dispatched --rollout <rollout-note> --wave K
+   ```
+   (writes `wave_K_dispatched: <timestamp>`; idempotent — **first dispatch wins**, so a resume re-dispatch never resets the wave clock). It prints a `progress:` line — "wave K/N dispatched — 42m elapsed, ~50m remaining (rough)" — surface it to the user and pass its text as the args `progress` string so the engine `log()`s it live in `/workflows`. Then build args with `waves: [waveK]` only; call the Workflow (step 5).
 2. On completion → reconcile vault frontmatter (step 6).
 3. **Auto-merge wave K.** Collect the wave's tasks that returned `status: review` **and** have a non-empty `pr` (read-only tasks have none; **never** merge `review-blocked` / `blocked` / `plan-blocked` / `gate-pending`), in the report's recommended order. Run:
    ```
@@ -160,6 +167,7 @@ In continuous mode the lead session is the conductor: run ONE wave on the engine
    - **sentinel ≠ `ok` → HALT the rollout.** Surface the script's message verbatim (which PR, why, the exact next step) and stop. Do **not** advance the cursor or launch the next wave.
    - **sentinel `ok` → advance the cursor to `merged_through_wave: K`** via the helper (not a hand-edit):
      `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py cursor --rollout <rollout-note> --wave K`
+     The cursor step also stamps the **merge boundary** (`wave_K_merged: <timestamp>`, first merge wins) and prints a `progress:` line — "wave K/N merged — 1h 24m elapsed, ~50m remaining (rough)" — include it in the wave report. The estimate is in-rollout arithmetic only (average task convergence from this rollout's completed waves × remaining ÷ ceiling), **always labelled rough (~)** — never restate it with false precision; before any wave completes it shows elapsed only (no basis yet), and on the final wave it prints the total instead ("rollout complete in 2h 10m").
    - **…then flip the wave's landed tasks to `done`** (same helper):
      `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py mark-done --tasks <slugA,slugB,…>`
      Pass **every wave-K task that ended at `status: review`** — both the just-merged PR tasks (the merge IS the confirmation a `review` note was waiting for) and the wave's read-only tasks (no PR to merge; their master-review approval was their confirmation, and the wave completing is when that becomes final). Idempotent; the helper refuses any note not at `review`/`done`, so a blocked task can never be swept along. Without this flip, landed tasks pile up at `review` as false "awaiting acceptance" items — seven had accumulated by 2026-06-12.
@@ -169,7 +177,7 @@ In continuous mode the lead session is the conductor: run ONE wave on the engine
    - Sweep the rollout's task notes: every task should already read `status: done` (step 3's `mark-done` flips them wave by wave). Flip any straggler still at `review` whose PR is verifiably merged (`mark-done` again); a straggler at any *other* status means the rollout isn't actually complete — stop and say so.
    - Stamp `status: done` + `completed: <date>` on the rollout frontmatter.
    - File any follow-on work the rollout's Post-rollout section names (validation re-runs, audits, deferred items) as **new open tasks** in `Work/Tasks/`, and rewrite those items in the rollout note as thin pointers to the new tasks.
-   - Append a `## Completion log` to the rollout note: dispatch dates, waves → PRs (links + merge dates), convergence stats per task, disposition of each post-rollout item.
+   - Append a `## Completion log` to the rollout note: dispatch dates, waves → PRs (links + merge dates), convergence stats per task, **total duration + a per-wave duration breakdown** (read the `timeline` block from `reconcile-wave.py status --rollout <rollout-note>` — it's computed from the `wave_N_dispatched`/`wave_N_merged` stamps), and the disposition of each post-rollout item.
    - Close out the associated thread (see `~/.claude/skills/thread/SKILL.md`) — or record in the log why it stays open.
    - Delete the rollout's `WAVE-HEARTBEAT` cron if one is registered (`CronList` → `CronDelete`); the heartbeat also self-deletes on its next tick, but don't leave it ticking for up to 20 minutes against a finished rollout.
    - Move the rollout note to `Work/Tasks/Archive/Rollouts/` (`git mv` in the vault) and commit the vault. Wikilinks resolve by filename, so `[[<slug>]]` references and task `rollout:` backlinks survive the move.

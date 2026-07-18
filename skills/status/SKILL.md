@@ -42,11 +42,20 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py status --
 ```
 
 Returns JSON: `{ rollout, rolloutStatus, paused, pause_requested, merged_through_wave, total_waves,
-tasks: [{ slug, wave, status, pr, blockerSummary }] }` — **every** task carrying `rollout: [[<slug>]]`
-(glob-by-backlink, so read-only tasks the `## File-sets` block omits are still included), sorted by wave
-then slug. Pure read, no network. `paused` is the pause stamp's timestamp (null when not paused);
-`pause_requested` is true when a soft pause is pending and will take effect at the next wave boundary
-(execute → *Pausing + reinstating a rollout*).
+timeline, tasks: [{ slug, wave, status, pr, blockerSummary }] }` — **every** task carrying
+`rollout: [[<slug>]]` (glob-by-backlink, so read-only tasks the `## File-sets` block omits are still
+included), sorted by wave then slug. Pure read, no network. `paused` is the pause stamp's timestamp
+(null when not paused); `pause_requested` is true when a soft pause is pending and will take effect at
+the next wave boundary (execute → *Pausing + reinstating a rollout*).
+
+`timeline` is the progress/ETA block, computed from the `wave_N_dispatched:` / `wave_N_merged:`
+wave-boundary stamps execute writes on the rollout note (`mark-dispatched` at each wave launch, the
+`cursor` step post-merge): per-wave `{ wave, tasks, dispatched, merged, durationMinutes }`, plus
+`elapsedMinutes`/`elapsedLabel`, `avgTaskMinutes`, `remainingEstimateMinutes`/`remainingLabel` (always
+a `~… (rough)` figure — in-rollout arithmetic only, no calibration), `totalWaves`, `complete`. The
+stamps are durable frontmatter, so elapsed + estimate render **without any workflow run being alive**
+— exactly what a kill/resume needs. `null` when the rollout has no stamps (predates the feature):
+omit the timing line rather than guessing.
 
 ### 3. Live cross-check (default; `--offline` skips)
 
@@ -69,9 +78,9 @@ say the report is vault-only.
 ### 4. Render the situational report
 
 ```
-[[<rollout>]] — wave <K>/<N> merged   (status: <rolloutStatus>)
+[[<rollout>]] — wave <K>/<N> merged — 1h 24m elapsed, ~50m remaining (rough)   (status: <rolloutStatus>)
 
-Wave 1  ✓ merged
+Wave 1  ✓ merged (30m)
   [[task-a]]   done
 Wave 2  ~ in progress
   [[task-c]]   review        PR #42 (open)        → awaiting merge
@@ -88,6 +97,13 @@ Recommended next action: <one line>
 
 Group by wave; within a wave list each task with status, PR (+ live state), and — for any blocker — the
 *first line* of its `blockerSummary` as "needs: …". Surface drift in its own block.
+
+**Timing comes from `timeline`, and the estimate is always rough.** Headline `elapsedLabel` +
+`remainingLabel` when present; put each merged wave's `durationMinutes` in parentheses on its wave
+header. Render the estimate exactly as labelled — `~50m remaining (rough)` — never restate it as a
+precise figure. With no completed wave yet (`avgTaskMinutes` null) show elapsed only; `complete: true`
+→ show the total instead ("completed in 2h 10m"); `timeline: null` → no timing line at all (the
+rollout predates the wave-boundary stamps).
 
 **A paused rollout renders as paused, not stalled.** When the JSON carries `paused: <timestamp>`,
 headline it — `[[<rollout>]] — PAUSED since <timestamp> — wave <K>/<N> merged` — list what's left as

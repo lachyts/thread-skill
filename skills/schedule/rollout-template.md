@@ -21,6 +21,10 @@ parallel_ceiling: 4
 model: opus  # opus | fable — default (mechanical execution). wave:schedule stamps `model: fable` on structural (cross-cutting) or deep tasks; a fable task runs end-to-end incl. its judges.
 # env_bootstrap:   # optional: shell cmd wave:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — wave:schedule step 2.7
 merged_through_wave: 0  # wave:execute continuous-mode cursor: highest wave merged to main (0 = none yet)
+# wave_N_dispatched: / wave_N_merged:   # engine-stamped wave-boundary timestamps (flat per-wave keys, ISO):
+#   reconcile-wave.py mark-dispatched writes the first at wave launch (first dispatch wins), cursor writes the
+#   second post-merge. They feed the per-wave progress lines and /wave:status's elapsed + rough (~) remaining
+#   estimate. Never hand-edit or pre-seed them — the engine loop owns these stamps.
 # supersedes: "[[<prior-rollout-slug>]]"   # add only when --regenerate replaces an earlier rollout (see SKILL.md step 6)
 ---
 

@@ -334,6 +334,15 @@ ok(!roThrew, 'converge: dead read-only investigator does not throw')
 ok(roRes && roRes.status === 'blocked', 'converge: dead read-only investigator → blocked, not spurious review')
 ok(roRes && /transient infrastructure/i.test(roRes.blockerDiagnosis), 'converge: dead read-only investigator → transient-infra diagnosis')
 
+// ---- Progress / ETA (wave-boundary timestamps — the engine has no clock) ------
+// The Workflow sandbox cannot read clocks (Date.now() throws), so wave-boundary timestamps are stamped
+// on the ROLLOUT NOTE by reconcile-wave.py (mark-dispatched at wave launch, cursor post-merge) and the
+// skill threads a precomputed `progress` line into args for the engine to relay via log(). Comments may
+// NAME Date.now(); code must never CALL it — strip line comments before scanning.
+const codeOnly = src.replace(/\/\/[^\n]*/g, '')
+ok(!/\bDate\s*\.\s*now\b|\bnew\s+Date\b/.test(codeOnly), 'engine: no clock reads — Date is unavailable in the Workflow sandbox')
+ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precomputed progress line (absent ⇒ byte-identical logs)')
+
 console.log()
 console.log(fail === 0 ? 'ALL PASS' : 'SOME FAILED')
 process.exit(fail)

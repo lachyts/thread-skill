@@ -31,6 +31,13 @@ export const meta = {
 //   envBootstrap : string,           // optional; shell command run ONCE per worktree right after the agent
 //                                    //   cd's in (env-bootstrap), e.g. "poetry env use 3.11 && poetry install".
 //                                    //   Absent/empty ⇒ worktree setup renders byte-identical to pre-feature.
+//   progress    : string,            // optional; a precomputed progress line — "wave 2/4 dispatched — 42m
+//                                    //   elapsed, ~50m remaining (rough)" — from reconcile-wave.py
+//                                    //   mark-dispatched (skill §4.5 step 1). This sandbox has no clock
+//                                    //   (Date.now() throws): the wave-boundary timestamps live on the
+//                                    //   rollout note, the arithmetic lives in reconcile-wave.py, and the
+//                                    //   engine only RELAYS the line via log() for live /workflows
+//                                    //   visibility. Absent/empty ⇒ no extra log line (byte-identical).
 //   waves       : [{
 //     wave  : number,
 //     tasks : [{
@@ -885,6 +892,9 @@ const ceiling = a.concurrency || 4
 const allResults = []
 
 log(`wave-execute: ${a.rolloutSlug} — ${a.waves.length} wave(s), parallel ceiling ${ceiling}/wave`)
+// Progress/ETA relay: the sandbox has no clock, so the skill precomputes this line (reconcile-wave.py
+// mark-dispatched) from the rollout note's wave-boundary stamps and the engine just surfaces it.
+if (a.progress) log(a.progress)
 
 for (const wave of a.waves) {
   log(`Wave ${wave.wave}: ${wave.tasks.length} task(s)`)

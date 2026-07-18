@@ -7,7 +7,7 @@ fumble-prone edits across a rollout. This helper performs ALL of those writes de
 returned task array, and (finding #7) computes the per-task resume set so a partial wave resumes without
 re-dispatching already-landed work.
 
-Nine subcommands:
+Ten subcommands:
 
   reconcile   Read the workflow result JSON ({rolloutSlug, tasks:[...]}) and write each task note's
               frontmatter + any blocked-feedback body section. Idempotent (safe to re-run on resume).
@@ -17,7 +17,16 @@ Nine subcommands:
               when the rollout note carries `pause_requested: true`, it stamps `paused: <timestamp>`,
               clears the flag, and prints a `paused=` line — the caller (execute §4.5) must then end
               the wave loop instead of launching the next wave. Riding the cursor step means the
-              pause lands on a clean wave boundary with zero extra agent calls.
+              pause lands on a clean wave boundary with zero extra agent calls. Also the MERGE-side
+              wave-boundary timestamp (progress/ETA): stamps `wave_N_merged: <timestamp>` (first
+              merge wins) and prints a `progress:` line with elapsed + the rough (~) remaining
+              estimate when the rollout carries dispatch stamps.
+
+  mark-dispatched  Stamp `wave_N_dispatched: <timestamp>` on a rollout note at wave launch — the
+              DISPATCH-side wave boundary (progress/ETA). First dispatch wins (a resume re-dispatch
+              of a partially-landed wave never resets the wave clock); prints the same `progress:`
+              line as cursor. The Workflow sandbox has no clock (Date.now() throws), so both wave
+              boundaries enter through this script, never the engine.
 
   mark-done   Flip task notes `status: review` -> `status: done`, run AFTER the wave's merge is
               confirmed (merge-wave.sh `ok` sentinel). `review` means "landed, awaiting confirmation";
@@ -32,8 +41,11 @@ Nine subcommands:
 
   status      Read-only situational scan for /wave:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
-              `## File-sets` block omits) and emit JSON {rollout, merged_through_wave, status, tasks:
-              [{slug, wave, status, pr, blockerSummary}]}. Pure read; no network (the skill owns gh/git).
+              `## File-sets` block omits) and emit JSON {rollout, merged_through_wave, status, timeline,
+              tasks: [{slug, wave, status, pr, blockerSummary}]}. `timeline` is the progress/ETA block
+              computed from the wave_N_dispatched/wave_N_merged stamps (null when the note has none) —
+              durable, so elapsed + the rough estimate render without any workflow run being alive.
+              Pure read; no network (the skill owns gh/git).
 
   resolve     Flip a *blocked* task (review-blocked/blocked/plan-blocked) -> done. The gap-closer for
               the drift case (a blocked note whose PR actually merged out-of-band). Refuses any note
@@ -105,6 +117,12 @@ SECTION_BY_STATUS = {**BLOCKED_SECTIONS, GATE_PENDING_STATUS: GATE_PENDING_SECTI
 
 # Matches the "(approved <date>)" sign-off annotation approve-gates appends to a gate line.
 GATE_ANNOT_RE = re.compile(r"\s*\(approved [^)]*\)\s*$", re.I)
+
+# Wave-boundary timestamp fields (progress/ETA). Deliberately FLAT per-wave frontmatter keys —
+# the human-decided shape (task note "## Repair input", 2026-07-18): matches this script's
+# line-surgical editing (no nested-YAML surgery), individually queryable, trivially greppable.
+# Never a nested `timeline:` map.
+WAVE_STAMP_RE = re.compile(r"^wave_(\d+)_(dispatched|merged):\s*(.*)$")
 
 
 # ---- frontmatter surgery (order/format preserving) --------------------------
@@ -246,6 +264,179 @@ def _truthy_flag(value) -> bool:
     return value.strip().strip('"').strip("'").lower() in {"true", "yes", "1"}
 
 
+def _int_field(value, default):
+    """Parse an int-ish frontmatter value, tolerating quotes and inline `# comments`."""
+    if value is None:
+        return default
+    s = str(value).split("#", 1)[0].strip().strip('"').strip("'")
+    try:
+        return int(s)
+    except ValueError:
+        return default
+
+
+# ---- progress / ETA (wave-boundary timestamps) ------------------------------
+# The Workflow engine cannot read clocks (Date.now() throws in its sandbox), so wall-clock enters
+# here: mark-dispatched stamps `wave_N_dispatched:` at wave launch, the cursor step stamps
+# `wave_N_merged:` post-merge, and everything below is IN-ROLLOUT arithmetic over those stamps —
+# average task convergence time from this rollout's completed waves x remaining dispatch chunks at
+# the parallel ceiling. Deliberately rough (always rendered with `~` + "rough"): no cross-rollout
+# stats file, no calibration — the task-note spec forbids false precision.
+
+def _parse_ts(value):
+    """ISO timestamp from a frontmatter value, or None. Naive values are assumed local time."""
+    s = (value or "").strip().strip('"').strip("'")
+    if not s:
+        return None
+    try:
+        ts = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    return ts if ts.tzinfo else ts.astimezone()
+
+
+def _now_stamp() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _fmt_min(minutes) -> str:
+    """42 -> '42m', 84 -> '1h 24m', 120 -> '2h'."""
+    m = max(0, int(round(minutes)))
+    if m < 60:
+        return f"{m}m"
+    h, r = divmod(m, 60)
+    return f"{h}h {r}m" if r else f"{h}h"
+
+
+def _rough_label(minutes, infix: str = "") -> str:
+    """The single rendering of the remaining estimate — always '~<duration>[infix] (rough)'.
+    Both `remainingLabel` and the progress line derive from here so the 'always labelled
+    rough' invariant has one source and the two renderings can never drift."""
+    return f"~{_fmt_min(minutes)}{infix} (rough)"
+
+
+def _wave_stamps(note) -> dict:
+    """{(wave:int, 'dispatched'|'merged'): datetime} for every parseable wave-boundary stamp."""
+    out = {}
+    for line in note._fm:
+        m = WAVE_STAMP_RE.match(line)
+        if m:
+            ts = _parse_ts(m.group(3))
+            if ts is not None:
+                out[(int(m.group(1)), m.group(2))] = ts
+    return out
+
+
+def _linked_task_notes(rollout_path: Path, tasks_dir: Path):
+    """(path, Note) for every task note carrying `rollout: [[<slug>]]` for this rollout
+    (glob-by-backlink — captures read-only tasks the `## File-sets` block omits). Shared by
+    `status` and the timeline computation."""
+    rollout_slug = rollout_path.stem
+    out = []
+    for path in sorted(tasks_dir.rglob("*.md")):  # rglob to catch already-archived done tasks too
+        if path == rollout_path:
+            continue
+        try:
+            note = Note(path)
+        except ValueError:
+            continue  # not a frontmatter note
+        if (_wikilink_slug(note.get("rollout")) or "").lower() != rollout_slug.lower():
+            continue
+        out.append((path, note))
+    return out
+
+
+def _compute_timeline(note, tasks_dir: Path, now=None):
+    """The progress/ETA block for a rollout note, or None when it has no wave-boundary stamps
+    (pre-timestamps rollouts stay renderable — callers omit timing rather than guessing).
+
+    A wave counts toward the average only when BOTH stamps are present; the per-task time is
+    approximated as wave duration / dispatch chunks (ceil(tasks/ceiling) — parallel tasks share
+    wall-clock), and the remaining estimate is that average x the chunks still ahead of the
+    cursor. Rough by design."""
+    stamps = _wave_stamps(note)
+    if not stamps:
+        return None
+    now = now or datetime.now().astimezone()
+
+    counts = {}
+    for _path, tn in _linked_task_notes(note.path, tasks_dir):
+        w = _int_field(tn.get("wave"), None)
+        if w is not None:
+            counts[w] = counts.get(w, 0) + 1
+    ceiling = max(1, _int_field(note.get("parallel_ceiling"), 4) or 4)
+    cursor = _int_field(note.get("merged_through_wave"), 0) or 0
+    total = max([*counts, *(w for w, _kind in stamps)], default=0)
+
+    def chunks(w):  # dispatch chunks a wave needs at this ceiling (unknown task count => 1)
+        return max(1, -(-counts.get(w, 1) // ceiling))
+
+    waves, completed_min, completed_chunks = [], 0.0, 0
+    for w in range(1, total + 1):
+        d, m = stamps.get((w, "dispatched")), stamps.get((w, "merged"))
+        dur = (m - d).total_seconds() / 60.0 if d and m else None
+        if dur is not None and dur >= 0:
+            completed_min += dur
+            completed_chunks += chunks(w)
+        else:
+            dur = None  # negative (hand-edited/clock-skewed) stamps carry no signal
+        waves.append({
+            "wave": w,
+            "tasks": counts.get(w),
+            "dispatched": d.isoformat(timespec="seconds") if d else None,
+            "merged": m.isoformat(timespec="seconds") if m else None,
+            "durationMinutes": int(round(dur)) if dur is not None else None,
+        })
+
+    first_dispatch = min((ts for (_w, k), ts in stamps.items() if k == "dispatched"), default=None)
+    last_merged = max((ts for (_w, k), ts in stamps.items() if k == "merged"), default=None)
+    complete = total > 0 and cursor >= total
+    elapsed = None
+    if first_dispatch is not None:
+        end = last_merged if (complete and last_merged) else now
+        elapsed = max(0.0, (end - first_dispatch).total_seconds() / 60.0)
+
+    avg_task = (completed_min / completed_chunks) if completed_chunks else None
+    remaining_chunks = sum(chunks(w) for w in range(cursor + 1, total + 1))
+    remaining = avg_task * remaining_chunks if (avg_task is not None and remaining_chunks and not complete) else None
+
+    return {
+        "waves": waves,
+        "totalWaves": total,
+        "mergedThroughWave": cursor,
+        "elapsedMinutes": int(round(elapsed)) if elapsed is not None else None,
+        "elapsedLabel": _fmt_min(elapsed) if elapsed is not None else None,
+        "avgTaskMinutes": round(avg_task, 1) if avg_task is not None else None,
+        "remainingEstimateMinutes": int(round(remaining)) if remaining is not None else None,
+        "remainingLabel": _rough_label(remaining) if remaining is not None else None,
+        "complete": complete,
+    }
+
+
+def _progress_line(note, tasks_dir: Path, event: str, wave: int):
+    """One `progress:` line for a wave boundary ('dispatched' | 'merged'), or None when the rollout
+    has no dispatch stamp yet (pre-timestamps rollouts: output stays byte-stable). The skill relays
+    this line to the user and threads it into the engine's `progress` arg for a live log()."""
+    if wave < 1:
+        # Wave 0 is the pre-wave-1 cursor position (pause-honour on a partially-landed wave 1) —
+        # no wave 0 was ever dispatched or merged, so any progress claim about it would be false.
+        return None
+    if not any(kind == "dispatched" for _w, kind in _wave_stamps(note)):
+        # No dispatch anchor -> elapsed can never render. Return BEFORE _compute_timeline so the
+        # stampless path never rglob-scans tasks_dir (byte-stable in behaviour, not just bytes).
+        return None
+    tl = _compute_timeline(note, tasks_dir)
+    if tl is None or tl["elapsedLabel"] is None:
+        return None
+    total = tl["totalWaves"] or "?"
+    if event == "merged" and tl["complete"]:
+        return f"progress: wave {wave}/{total} merged — rollout complete in {tl['elapsedLabel']}"
+    line = f"progress: wave {wave}/{total} {event} — {tl['elapsedLabel']} elapsed"
+    if tl["remainingEstimateMinutes"] is not None:
+        line += ", " + _rough_label(tl["remainingEstimateMinutes"], infix=" remaining")
+    return line
+
+
 # ---- reconcile --------------------------------------------------------------
 
 def resolve_task_path(task, tasks_dir: Path) -> Path:
@@ -321,8 +512,11 @@ def cmd_reconcile(args) -> int:
     if args.wave is not None and args.rollout and not errors:
         # Optional convenience: advance the cursor in the same call (only when the caller asserts the
         # wave fully merged — normally `cursor` is a separate post-merge step gated on merge-wave.sh ok).
-        _, paused_at = _set_cursor(Path(os.path.expanduser(args.rollout)), args.wave, args.dry_run)
+        rollout_note, paused_at = _set_cursor(Path(os.path.expanduser(args.rollout)), args.wave, args.dry_run)
         print(f"cursor: merged_through_wave={args.wave}" + (" (dry-run)" if args.dry_run else ""))
+        line = _progress_line(rollout_note, tasks_dir, "merged", args.wave)
+        if line:
+            print(line)
         _print_pause_honoured(paused_at, args.dry_run)
 
     for e in errors:
@@ -342,9 +536,18 @@ def _set_cursor(rollout_path: Path, wave: int, dry_run=False):
     """
     note = Note(rollout_path)
     note.set("merged_through_wave", int(wave), after=("merged_through_wave", "parallel_ceiling", "status"))
+    # Merge-side wave-boundary timestamp (progress/ETA). First merge wins: an idempotent cursor
+    # re-run (cold resume, pause-honour re-set) must never shift a recorded boundary. Wave 0 is
+    # the pre-wave-1 cursor position (pause-honour re-set on a partially-landed wave 1) — nothing
+    # merged, so a `wave_0_merged` stamp would be junk the engine loop never owns; skip it.
+    if int(wave) >= 1:
+        stamp_key = f"wave_{int(wave)}_merged"
+        if note.get(stamp_key) is None:
+            note.set(stamp_key, _now_stamp(),
+                     after=(f"wave_{int(wave)}_dispatched", "merged_through_wave", "parallel_ceiling", "status"))
     paused_at = None
     if _truthy_flag(note.get("pause_requested")):
-        paused_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        paused_at = _now_stamp()
         note.set("paused", paused_at, after=("pause_requested", "merged_through_wave", "status"))
         note.remove("pause_requested")
     note.save(dry_run=dry_run)
@@ -362,9 +565,39 @@ def cmd_cursor(args) -> int:
     if not path.exists():
         print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
         return 1
-    _, paused_at = _set_cursor(path, args.wave, args.dry_run)
+    note, paused_at = _set_cursor(path, args.wave, args.dry_run)
     print(f"merged_through_wave={args.wave}" + (" (dry-run)" if args.dry_run else ""))
+    line = _progress_line(note, Path(os.path.expanduser(args.tasks_dir)), "merged", args.wave)
+    if line:
+        print(line)
     _print_pause_honoured(paused_at, args.dry_run)
+    return 0
+
+
+# ---- mark-dispatched --------------------------------------------------------
+
+def cmd_mark_dispatched(args) -> int:
+    """Stamp the dispatch-side wave boundary (`wave_N_dispatched:`) at wave launch (execute §4.5
+    step 1). First dispatch wins — a resume re-dispatch of a partially-landed wave must NOT reset
+    the wave clock, or completed-wave durations would drift under the estimate's feet."""
+    path = Path(os.path.expanduser(args.rollout))
+    if not path.exists():
+        print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
+        return 1
+    note = Note(path)
+    key = f"wave_{args.wave}_dispatched"
+    existing = note.get(key)
+    if existing is not None:
+        print(f"{key}={existing} [no-change]")
+    else:
+        ts = _now_stamp()
+        note.set(key, ts, after=(f"wave_{args.wave - 1}_merged", f"wave_{args.wave - 1}_dispatched",
+                                 "merged_through_wave", "parallel_ceiling", "status"))
+        note.save(dry_run=args.dry_run)
+        print(f"{key}={ts}" + (" (dry-run)" if args.dry_run else " [written]"))
+    line = _progress_line(note, Path(os.path.expanduser(args.tasks_dir)), "dispatched", args.wave)
+    if line:
+        print(line)
     return 0
 
 
@@ -457,15 +690,7 @@ def cmd_status(args) -> int:
 
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     found = []
-    for path in sorted(tasks_dir.rglob("*.md")):  # rglob to catch already-archived done tasks too
-        if path == rollout_path:
-            continue
-        try:
-            note = Note(path)
-        except ValueError:
-            continue  # not a frontmatter note
-        if (_wikilink_slug(note.get("rollout")) or "").lower() != rollout_slug.lower():
-            continue
+    for path, note in _linked_task_notes(rollout_path, tasks_dir):
         wave = note.get("wave")
         try:
             wave = int(wave) if wave is not None else None
@@ -500,6 +725,10 @@ def cmd_status(args) -> int:
         "pause_requested": _truthy_flag(rollout_note.get("pause_requested")),
         "merged_through_wave": cursor,
         "total_waves": total_waves,
+        # Progress/ETA from the wave_N_dispatched/merged stamps — durable on the note, so elapsed
+        # + the rough (~) remaining estimate render with no workflow run alive. null when the
+        # rollout predates the stamps (callers omit timing rather than guessing).
+        "timeline": _compute_timeline(rollout_note, tasks_dir),
         "tasks": found,
     }
     print(json.dumps(out, indent=2))
@@ -676,11 +905,19 @@ def main() -> int:
     r.add_argument("--dry-run", action="store_true")
     r.set_defaults(func=cmd_reconcile)
 
-    c = sub.add_parser("cursor", help="set merged_through_wave:N on a rollout note (post-merge)")
+    c = sub.add_parser("cursor", help="set merged_through_wave:N + stamp wave_N_merged on a rollout note (post-merge)")
     c.add_argument("--rollout", required=True)
     c.add_argument("--wave", type=int, required=True)
+    c.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir for the progress line's per-wave task counts")
     c.add_argument("--dry-run", action="store_true")
     c.set_defaults(func=cmd_cursor)
+
+    mdp = sub.add_parser("mark-dispatched", help="stamp wave_N_dispatched on a rollout note at wave launch (first dispatch wins)")
+    mdp.add_argument("--rollout", required=True)
+    mdp.add_argument("--wave", type=int, required=True)
+    mdp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir for the progress line's per-wave task counts")
+    mdp.add_argument("--dry-run", action="store_true")
+    mdp.set_defaults(func=cmd_mark_dispatched)
 
     d = sub.add_parser("mark-done", help="flip task notes review->done after their wave's merge is confirmed")
     d.add_argument("--tasks", required=True, help="comma-separated task slugs (every wave task that ended at review)")
