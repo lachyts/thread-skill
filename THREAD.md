@@ -33,7 +33,15 @@ entry; README gains the pipeline bullet + layout + routing line. Shipped as **1.
   lenient runtime parser pass it. Fixed by single-quoting all six (`f614cbb`); any future skill's
   description must be quoted from day one.
 - Cache synced repo → `cache/wave/wave/1.4.0`, `installed_plugins.json` repointed (1.3.0
-  precedent); `claude plugin list` shows 1.4.0 ✔ enabled. Tag `wave--v1.4.0` cut, not yet pushed.
+  precedent); `claude plugin list` shows 1.4.0 ✔ enabled. Tag `wave--v1.4.0` cut and pushed with
+  master — the stable channel serves 1.4.0.
+- **Acceptance run pending — Agent Reader is the fixture** (chosen end-of-session): 7 loose open
+  tasks incl. 4 prose brain-dump captures, zero existing phases, repo has `CONTEXT.md` (→
+  grill-with-docs route), project note already carries both surfacing blocks (idempotency check).
+  Run from a **fresh session in `~/repos/tools/agent-reader`** — gather resolves the repo from
+  `repos:` regardless of CWD, but the interview wants the project's CLAUDE.md + scoped memory
+  loaded. `/wave:gather Agent Reader`, then confirm `/wave:schedule` accepts the output untouched.
+  Exercise `--light` on a different project later — Agent Reader deserves full depth.
 
 ## 2026-07-19 — 1.3.0 ships: the self-hosting rollout — wave builds six features into itself
 
