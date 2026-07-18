@@ -6,6 +6,10 @@
 //   - escalationContext(prior)→ '' when prior is empty, hand-over block when set; a prompt with prior
 //                               equals the prior-less prompt PLUS exactly the injected block.
 //   - verifyBlock(tier, …)    → opus renders the ONE-SHOT block (no iteration), fable the full Ralph loop.
+//   - gated inputs (ADR 0005) → the plan prompt ALWAYS renders the Gated inputs requirement; a non-empty
+//                               unapproved declaration pauses the task (status gate-pending) even when
+//                               planGate is false; approved gates on the note are never re-asked; "None"
+//                               leaves behaviour identical (zero-touch).
 // Evaluates only the pure-function region of the engine (before the orchestration that needs Workflow
 // globals) in a vm sandbox. Run: node tests/prompt-invariants.test.mjs   (exit 0 = pass)
 import fs from 'node:fs'
@@ -20,7 +24,7 @@ const marker = '// ---- Orchestration'
 const idx = src.indexOf(marker)
 if (idx === -1) { console.error('FAIL - orchestration marker not found'); process.exit(1) }
 let head = src.slice(0, idx).replace('export const meta', 'const meta')
-head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort };\n'
+head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviserPrompt, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort };\n'
 
 // `agent` and `log` are Workflow globals the engine expects at run time. The layer functions resolve them
 // against the sandbox global at CALL time, so the transient-death tests below swap `ctx.agent` per case to
@@ -124,7 +128,7 @@ const call = (label) => effortCalls.find((c) => c.label.startsWith(label))
 effortCalls.length = 0
 ctx.agent = recordingAgent(async (prompt, opts) => {
   if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
-  if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'PLAN' }
+  if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'PLAN\n### Gated inputs\nNone' }
   if (opts.phase === 'Implement') return greenImpl
   return { verdict: 'approve', feedback: [] } // review judge
 })
@@ -156,7 +160,7 @@ ok(call('review:proj-eff-b') && call('review:proj-eff-b').effort === 'xhigh' && 
 effortCalls.length = 0
 ctx.agent = recordingAgent(async (prompt, opts) => {
   if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
-  if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'PLAN' }
+  if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'PLAN\n### Gated inputs\nNone' }
   if (opts.phase === 'Implement') return greenImpl
   return { verdict: 'approve', feedback: [] }
 })
@@ -180,6 +184,83 @@ await T.converge({ ...baseEff, slug: 'proj-eff-d', scope: 'single-file', planGat
 ok(call('implement:proj-eff-d') && call('implement:proj-eff-d').effort === 'max', 'effort D: override holds on the opus first pass')
 ok(call('implement:proj-eff-d@fable') && call('implement:proj-eff-d@fable').effort === 'max', 'effort D: override survives the fable takeover')
 ok(call('review:proj-eff-d') && call('review:proj-eff-d').effort === 'xhigh', 'effort D: master review still follows the matrix (xhigh @ fable)')
+
+// ---- Gated inputs (ADR 0005): a declared gate always pauses for a human -------
+// The plan carries a REQUIRED "### Gated inputs" section (spend with a hard cap / credentials /
+// irreversible actions, or exactly "None"). A non-empty declaration not covered by the task note's
+// approved gates returns the task at status 'gate-pending' — regardless of plan_approval config or
+// continuous mode — and NEVER escalates (a gate stop is a human decision, not evidence of hardness).
+// Approved gates (task.approvedGates, read from the note's "## Approved gates") skip the stop for
+// exactly those gates, so re-dispatches never re-ask.
+
+// The requirement is ALWAYS rendered — in the planner, the plan-reviser, the plan-judge's checklist,
+// and every code-writing prompt's stop rule (the plan_approval:false path).
+const plPrompt = T.plannerPrompt(taskI, aI, '')
+ok(plPrompt.includes('### Gated inputs'), 'plannerPrompt: always renders the Gated inputs requirement')
+ok(/hard cap/i.test(plPrompt), 'plannerPrompt: spend gates require a hard cap')
+const prvPrompt = T.planReviserPrompt(taskI, 'PLAN', [{ round: 1, feedback: ['x'] }], 2, aI)
+ok(prvPrompt.includes('Gated inputs'), 'planReviserPrompt: required sub-sections include Gated inputs')
+const pjPrompt = T.planJudgePrompt(taskI, 'PLAN', aI)
+ok(pjPrompt.includes('Gated inputs') && /automatic "changes"/.test(pjPrompt), 'planJudgePrompt: missing Gated inputs section is an automatic changes')
+ok(pOpus.includes('Gated inputs (hard rule'), 'implementerPrompt: carries the gated-inputs stop rule')
+ok(T.approvedPlanImplementerPrompt(taskI, 'PLAN', aI, 'fable', '').includes('Gated inputs (hard rule'), 'approvedPlanImplementerPrompt: carries the stop rule')
+ok(T.reviserPrompt(taskI, { prUrl: 'u', branch: 'b', worktreePath: '/wt' }, ['f'], 2, aI).includes('Gated inputs (hard rule'), 'reviserPrompt: carries the stop rule')
+
+// Parser: None → [], bullets → entries, missing section → null (fail-closed upstream).
+ok(T.parseGatedInputs('PLAN\n### Gated inputs\nNone\n### Risks / unknowns\nnone') !== null
+  && T.parseGatedInputs('PLAN\n### Gated inputs\nNone\n### Risks / unknowns\nnone').length === 0,
+  'parseGatedInputs: explicit None → empty declaration')
+const parsed = T.parseGatedInputs('PLAN\n### Gated inputs\n- spend: Replicate API — cap USD 30\n- credential: PROD_API_KEY\n### Risks')
+ok(parsed && parsed.length === 2 && parsed[0] === 'spend: Replicate API — cap USD 30', 'parseGatedInputs: bullets become gate entries')
+ok(T.parseGatedInputs('PLAN with no section') === null, 'parseGatedInputs: missing section → null')
+ok(T.parseGatedInputs('x\n## Gated inputs\n- a\n## next')[0] === 'a', 'parseGatedInputs: tolerates a ## heading level')
+ok(T.unapprovedGates(['Spend: X — cap  USD 30'], ['spend: x — cap usd 30']).length === 0, 'unapprovedGates: match is case/whitespace-insensitive')
+ok(T.unapprovedGates(['spend: x — cap usd 50'], ['spend: x — cap usd 30']).length === 1, 'unapprovedGates: a changed cap is a NEW gate')
+
+// Scenario gate-A — plan-gated task declares a gate: pauses at the plan-gate, nothing implemented.
+effortCalls.length = 0
+ctx.agent = recordingAgent(async (prompt, opts) => {
+  if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
+  if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'PLAN\n### Gated inputs\n- spend: Replicate API — cap USD 30' }
+  if (opts.phase === 'Implement') return greenImpl
+  return { verdict: 'approve', feedback: [] }
+})
+const gPlan = await T.converge({ ...baseEff, slug: 'proj-gate-a', scope: 'cross-cutting', planGate: true }, aEff)
+ok(gPlan && gPlan.status === 'gate-pending', 'gate A: non-empty declaration pauses at the plan-gate (gate-pending)')
+ok(gPlan.gatedInputs && gPlan.gatedInputs.length === 1 && /cap USD 30/.test(gPlan.gatedInputs[0]), 'gate A: the declared gate (with its cap) is surfaced')
+ok(!call('implement:proj-gate-a'), 'gate A: no implementation dispatched before sign-off')
+ok(!gPlan.escalated, 'gate A: a gate stop never escalates')
+
+// Scenario gate-B — the same gate already approved on the note: NOT re-asked, task proceeds.
+effortCalls.length = 0
+const gApproved = await T.converge({ ...baseEff, slug: 'proj-gate-b', scope: 'cross-cutting', planGate: true, approvedGates: ['spend: Replicate API — cap USD 30'] }, aEff)
+ok(gApproved && gApproved.status === 'review', 'gate B: an approved gate is not re-asked — the task lands')
+ok(call('implement:proj-gate-b'), 'gate B: implementation proceeds past the approved gate')
+
+// Scenario gate-C — plan_approval:false run: the IMPLEMENTER's declaration pauses the task too.
+effortCalls.length = 0
+ctx.agent = recordingAgent(async (prompt, opts) => {
+  if (opts.phase === 'Implement') {
+    return { verified: false, blocked: true, escalate: false, prUrl: '', branch: '', worktreePath: '/wt', blockerDiagnosis: 'needs the prod key', summary: '', gatedInputs: ['credential: PROD_API_KEY (read-only)'] }
+  }
+  return { verdict: 'approve', feedback: [] }
+})
+const gImpl = await T.converge({ ...baseEff, slug: 'proj-gate-c', scope: 'single-file', planGate: false }, aEff)
+ok(gImpl && gImpl.status === 'gate-pending', 'gate C: an implementer-declared gate pauses a plan_approval:false run')
+ok(gImpl.gatedInputs && gImpl.gatedInputs[0] === 'credential: PROD_API_KEY (read-only)', 'gate C: the declaration is surfaced verbatim')
+ok(!gImpl.escalated && gImpl.model === 'opus', 'gate C: a gate stop on the opus first pass does not escalate')
+ok(!call('implement:proj-gate-c@fable'), 'gate C: no fable takeover on a gate stop')
+
+// Scenario gate-D — judge approved a plan WITHOUT the required section: fail-closed to plan-blocked
+// (re-plan; no bogus sign-off request — there is nothing concrete to sign).
+ctx.agent = recordingAgent(async (prompt, opts) => {
+  if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
+  if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'PLAN with no gated section' }
+  if (opts.phase === 'Implement') return greenImpl
+  return { verdict: 'approve', feedback: [] }
+})
+const gMissing = await T.converge({ ...baseEff, slug: 'proj-gate-d', scope: 'cross-cutting', planGate: true }, aEff)
+ok(gMissing && gMissing.status === 'plan-blocked' && /Gated inputs/.test(gMissing.blockerDiagnosis), 'gate D: approved plan missing the section fails closed to plan-blocked')
 
 // ---- Transient agent death: null-return hardening ----------------------------
 // Observed 2026-07-18 (narcissus-avp): implementer agents died mid-run on "API Error: Connection closed

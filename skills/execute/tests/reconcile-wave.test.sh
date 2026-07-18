@@ -198,6 +198,53 @@ if python3 "$SCRIPT" defer --tasks "st-foreign" --rollout "$TMP/st-rollout.md" -
   echo "FAIL - defer accepted a foreign-rollout task"; fail=1
 else echo "ok   - defer refuses cross-rollout"; fi
 
+echo "== gated inputs (ADR 0005: gate-pending reconcile + approve-gates sign-off) =="
+mknote task-gated in_progress
+cat > "$TMP/gate-result.json" <<EOF
+{ "rolloutSlug": "test-rollout", "tasks": [
+  { "slug": "task-gated", "scope": "cross-cutting", "status": "gate-pending", "prUrl": "",
+    "gatedInputs": ["spend: Replicate API — cap USD 30", "credential: PROD_API_KEY (read-only)"],
+    "blockerDiagnosis": "gated inputs await human sign-off", "planRoundsUsed": 1 }
+] }
+EOF
+python3 "$SCRIPT" reconcile --result "$TMP/gate-result.json" --tasks-dir "$TMP" || { echo "FAIL - gate reconcile exit"; fail=1; }
+check  "gate: status gate-pending"      "status: gate-pending"                       "$TMP/task-gated.md"
+check  "gate: pending section written"  "## Gated inputs (awaiting sign-off)"        "$TMP/task-gated.md"
+check  "gate: gate bullet carries cap"  "- spend: Replicate API — cap USD 30"        "$TMP/task-gated.md"
+refute "gate: no pr written"            "pr:"                                        "$TMP/task-gated.md"
+
+# resume-filter must NOT auto-redispatch a task awaiting human sign-off (nothing may bypass the gate)
+OUT=$(python3 "$SCRIPT" resume-filter --tasks "task-gated,task-blocked" --tasks-dir "$TMP" 2>/dev/null)
+if echo "$OUT" | grep -qx "task-gated"; then echo "FAIL - gate-pending re-dispatched"; fail=1; else echo "ok   - gate-pending excluded from resume"; fi
+echo "$OUT" | grep -qx "task-blocked" && echo "ok   - blocked still re-dispatched alongside" || { echo "FAIL - blocked missing (gate arm)"; fail=1; }
+
+# a refreshed declaration REPLACES the pending section (no duplicates, no stale gates)
+cat > "$TMP/gate-result2.json" <<EOF
+{ "rolloutSlug": "test-rollout", "tasks": [
+  { "slug": "task-gated", "scope": "cross-cutting", "status": "gate-pending", "prUrl": "",
+    "gatedInputs": ["spend: Replicate API — cap USD 45"], "blockerDiagnosis": "gated inputs await human sign-off", "planRoundsUsed": 1 }
+] }
+EOF
+python3 "$SCRIPT" reconcile --result "$TMP/gate-result2.json" --tasks-dir "$TMP" >/dev/null || { echo "FAIL - gate reconcile 2 exit"; fail=1; }
+check  "gate: refreshed cap present"    "cap USD 45"                                 "$TMP/task-gated.md"
+refute "gate: stale cap replaced"       "cap USD 30"                                 "$TMP/task-gated.md"
+n=$(grep -c "## Gated inputs (awaiting sign-off)" "$TMP/task-gated.md")
+[ "$n" -eq 1 ] && echo "ok   - gate: pending section not duplicated" || { echo "FAIL - pending section duplicated ($n)"; fail=1; }
+
+# approve-gates: pending -> approved (gate + cap + sign-off date), status back to in_progress
+python3 "$SCRIPT" approve-gates --tasks "task-gated" --tasks-dir "$TMP" --date 2026-07-18 || { echo "FAIL - approve-gates exit"; fail=1; }
+check  "approve: approved section"      "## Approved gates"                          "$TMP/task-gated.md"
+check  "approve: gate + cap + sign-off" "- spend: Replicate API — cap USD 45 (approved 2026-07-18)" "$TMP/task-gated.md"
+refute "approve: pending section gone"  "awaiting sign-off"                          "$TMP/task-gated.md"
+check  "approve: status in_progress"    "status: in_progress"                        "$TMP/task-gated.md"
+python3 "$SCRIPT" approve-gates --tasks "task-gated" --tasks-dir "$TMP" >/dev/null \
+  && echo "ok   - approve: idempotent re-run (exit 0)" || { echo "FAIL - approve re-run errored"; fail=1; }
+OUT=$(python3 "$SCRIPT" resume-filter --tasks "task-gated" --tasks-dir "$TMP")
+echo "$OUT" | grep -qx "task-gated" && echo "ok   - approved task re-dispatchable" || { echo "FAIL - approved task still excluded"; fail=1; }
+if python3 "$SCRIPT" approve-gates --tasks "task-planblocked" --tasks-dir "$TMP" >/dev/null 2>&1; then
+  echo "FAIL - approve-gates accepted a non-gated note"; fail=1
+else echo "ok   - approve-gates refuses non-gate-pending"; fi
+
 echo "== pause / reinstate (soft pause honoured at the cursor step; clear-pause reinstates) =="
 cat > "$TMP/pz-rollout.md" <<EOF
 ---

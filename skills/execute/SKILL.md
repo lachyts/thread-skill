@@ -1,6 +1,6 @@
 ---
 name: execute
-description: Use to execute a wave rollout — reads a rollout note at ~/repos/obsidian/Work/Tasks/<slug>-rollout.md, resolves per-task config, and calls the Workflow tool with wave-execute.workflow.js to run the convergence engine (per-task plan-gate → Ralph-style verifier retry → master review, converging in parallel within each wave). In continuous mode (bare "execute [[rollout]]") it auto-merges each wave before launching the next — zero-touch, no per-PR confirmation — with --gated as the manual-merge escape hatch. Triggers on natural-language "execute Wave N of [[rollout-slug]]" or "execute [[rollout-slug]]" patterns, explicit /wave:execute invocation, or "pause the rollout" / "reinstate [[rollout]]" (safe pause: soft via pause_requested on the rollout note, hard via TaskStop + a paused: stamp; reinstate is plain re-invocation — see §Pausing). Only runs rollouts with protocol_version: 3; refuses older rollouts and prompts for regeneration via /wave:schedule --regenerate.
+description: Use to execute a wave rollout — reads a rollout note at ~/repos/obsidian/Work/Tasks/<slug>-rollout.md, resolves per-task config, and calls the Workflow tool with wave-execute.workflow.js to run the convergence engine (per-task plan-gate → Ralph-style verifier retry → master review, converging in parallel within each wave). In continuous mode (bare "execute [[rollout]]") it auto-merges each wave before launching the next — zero-touch, no per-PR confirmation — with --gated as the manual-merge escape hatch; the one designed exception is a task whose plan declares gated inputs (API spend / credentials / irreversible actions), which always pauses for human sign-off (ADR 0005, §3.7). Triggers on natural-language "execute Wave N of [[rollout-slug]]" or "execute [[rollout-slug]]" patterns, explicit /wave:execute invocation, or "pause the rollout" / "reinstate [[rollout]]" (safe pause: soft via pause_requested on the rollout note, hard via TaskStop + a paused: stamp; reinstate is plain re-invocation — see §Pausing). Only runs rollouts with protocol_version: 3; refuses older rollouts and prompts for regeneration via /wave:schedule --regenerate.
 ---
 
 # /wave:execute — run a wave rollout on the Workflow engine
@@ -85,9 +85,25 @@ Every `agent()` spawn site sets `effort` from the task's **live** tier + the age
 - `plan_approval: required` → `planGate: true`
 - `plan_approval: scope-gated` → `planGate: true` iff `scope: cross-cutting`; `single-file` and `read-only` → `false`
 
+(`/wave:schedule`'s gated-input sweep may have stamped `plan_approval: required` on tasks that smell of spend/credentials — that per-task frontmatter wins here as usual. It is advisory: it guarantees a plan-gate exists where the plan's own declaration can pause; the declaration itself is authoritative — §3.7.)
+
+### 3.7. Gated inputs — the unconditional human stop (ADR 0005)
+
+Every plan the engine's planner produces must carry a **`### Gated inputs`** section — API spend (with a **hard cap**), credentials, irreversible actions, or an explicit `None`. A missing section is a plan-judge `changes` (and the engine fails closed to `plan-blocked` if a judge ever approves one without it). After the plan-judge approves a plan, the engine compares the declared gates against the task's **approved gates** and, if any declared gate is not yet approved, returns the task at **`status: gate-pending`** without implementing — **regardless of `plan_approval` config or continuous mode**. Tasks with no plan-gate are covered by the same rule reactively: every code-writing prompt carries a stop rule, so an implementer that finds an undeclared/unapproved gated input stops *before* the gated action and returns it in `gatedInputs`, which the engine converts to the same `gate-pending` stop. A gate stop is a human decision, not evidence of hardness — it never escalates an opus task.
+
+**Resolve `task.approvedGates` when building args (step 4):** read the task note's `## Approved gates` section; each bullet, with its `(approved …)` annotation stripped, becomes one entry. Omit the key when the note has no such section. The engine skips the stop for exactly these gates (whitespace/case-insensitive match; **a changed cap is a NEW gate**). The approval is durable on the note, so re-dispatches and resumes never re-ask.
+
+**Sign-off flow (the pause continuous mode makes for gated tasks):** reconcile (§6) writes the declared gates under `## Gated inputs (awaiting sign-off)` and sets `status: gate-pending`. Present each gate **verbatim** to the user and ask for sign-off — this pause is **designed** (ADR 0005), not a failure. On sign-off run:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py approve-gates --tasks <slugA,slugB>
+```
+
+(moves the pending gates to `## Approved gates` with the sign-off date — gate + cap + sign-off — and flips the note to `in_progress`), then re-dispatch exactly those tasks (per-task resume within the wave). If the user declines a gate, defer the task or leave it — the wave then follows the normal incomplete-wave rules. If nobody is present to sign off, end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="gated inputs await sign-off: [[task]]"`. `resume-filter` **excludes** `gate-pending` notes, so no unattended re-entry (heartbeat included) can bypass or spam a pending gate — only `approve-gates`, run after an explicit human sign-off, makes the task dispatchable again. The approved cap is a **ceiling** the implementer must respect; blowing it is a verifier/review failure, not a re-ask.
+
 ### 4. Stamp in-progress + build args
 
-Before launching, for each task in scope: stamp `status: in_progress` and `owner: <session-tag>` on the task's frontmatter (blocks duplicate dispatches). Keep this in the lead session — subagents never write task `status:`.
+Before launching, for each task in scope: stamp `status: in_progress` and `owner: <session-tag>` on the task's frontmatter (blocks duplicate dispatches). Keep this in the lead session — subagents never write task `status:`. In the launch message, **flag any task expected to gate** (a `plan_approval: required` stamped by `/wave:schedule`'s gated-input sweep, or a note that smells of spend/credentials) so the eventual `gate-pending` pause is expected, not a surprise (§3.7).
 
 Build the `args` object the workflow expects:
 
@@ -136,7 +152,7 @@ In continuous mode the lead session is the conductor: run ONE wave on the engine
 
 1. Resolve config + stamp `status: in_progress` for wave K's tasks (step 4); build args with `waves: [waveK]` only; call the Workflow (step 5).
 2. On completion → reconcile vault frontmatter (step 6).
-3. **Auto-merge wave K.** Collect the wave's tasks that returned `status: review` **and** have a non-empty `pr` (read-only tasks have none; **never** merge `review-blocked` / `blocked` / `plan-blocked`), in the report's recommended order. Run:
+3. **Auto-merge wave K.** Collect the wave's tasks that returned `status: review` **and** have a non-empty `pr` (read-only tasks have none; **never** merge `review-blocked` / `blocked` / `plan-blocked` / `gate-pending`), in the report's recommended order. Run:
    ```
    ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-wave.sh <repoPath> <pr> <pr> …
    ```
@@ -148,7 +164,7 @@ In continuous mode the lead session is the conductor: run ONE wave on the engine
      `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py mark-done --tasks <slugA,slugB,…>`
      Pass **every wave-K task that ended at `status: review`** — both the just-merged PR tasks (the merge IS the confirmation a `review` note was waiting for) and the wave's read-only tasks (no PR to merge; their master-review approval was their confirmation, and the wave completing is when that becomes final). Idempotent; the helper refuses any note not at `review`/`done`, so a blocked task can never be swept along. Without this flip, landed tasks pile up at `review` as false "awaiting acceptance" items — seven had accumulated by 2026-06-12.
    - **Soft-pause check (rides the cursor step — zero extra calls).** The `cursor` helper honours a `pause_requested: true` flag on the rollout note: it stamps `paused: <timestamp>`, clears the flag, and prints a `paused=` line alongside the cursor advance. When that line appears, the user asked for a soft pause — do **NOT** launch wave K+1. Print a short paused report (what merged this wave, what's left) and end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="paused at user request"`. The Stop-hook driver releases on `halted`, and the heartbeat cron deletes itself on its next tick — on this `halted` line, or on the `paused:` stamp its prompt checks ahead of the stall diagnosis (§5), which is what keeps "nothing auto-resumes a paused rollout" true for a hard pause too (a hard pause never emits `halted`; its runbook also deletes the cron outright). Reinstate is plain `/wave:execute [[rollout]]` — see *Pausing + reinstating a rollout* below.
-4. **Smart-halt check** before launching K+1: if any wave-K task did **not** land (`blocked` / `review-blocked` / `plan-blocked`) **and** its file-set (from the rollout note's `## File-sets` block) intersects the union of any later wave's file-sets → **HALT** with a clear report (e.g. "wave K left [[task]] unlanded; wave M edits the same file `<f>` — continuing would branch it from a main missing the fix"). The user fixes the blocker and re-invokes. Otherwise, **honour any pending pause before launching K+1**: a partially-landed wave never runs step 3's cursor advance (*Per-task resume within a wave* below), so a `pause_requested: true` still sitting on the rollout note has NOT been honoured yet — check the note, and if the flag is pending, re-run `reconcile-wave.py cursor --rollout <rollout-note> --wave <current merged_through_wave>` (cursor-idempotent — re-setting the same value changes nothing — while performing the stamp + clear + `paused=` signal) and exit exactly as the step-3 *Soft-pause check* does: no wave K+1, paused report, `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="paused at user request"`. With no pending pause, launch wave K+1 (its worktrees branch from the freshly-merged `origin/main`).
+4. **Smart-halt check** before launching K+1: if any wave-K task did **not** land (`blocked` / `review-blocked` / `plan-blocked` / `gate-pending`) **and** its file-set (from the rollout note's `## File-sets` block) intersects the union of any later wave's file-sets → **HALT** with a clear report (e.g. "wave K left [[task]] unlanded; wave M edits the same file `<f>` — continuing would branch it from a main missing the fix"). The user fixes the blocker and re-invokes. Otherwise, **honour any pending pause before launching K+1**: a partially-landed wave never runs step 3's cursor advance (*Per-task resume within a wave* below), so a `pause_requested: true` still sitting on the rollout note has NOT been honoured yet — check the note, and if the flag is pending, re-run `reconcile-wave.py cursor --rollout <rollout-note> --wave <current merged_through_wave>` (cursor-idempotent — re-setting the same value changes nothing — while performing the stamp + clear + `paused=` signal) and exit exactly as the step-3 *Soft-pause check* does: no wave K+1, paused report, `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="paused at user request"`. With no pending pause, launch wave K+1 (its worktrees branch from the freshly-merged `origin/main`).
 5. Repeat until the last wave merges, then **perform the completion ceremony** (don't just point the user at the checklist):
    - Sweep the rollout's task notes: every task should already read `status: done` (step 3's `mark-done` flips them wave by wave). Flip any straggler still at `review` whose PR is verifiably merged (`mark-done` again); a straggler at any *other* status means the rollout isn't actually complete — stop and say so.
    - Stamp `status: done` + `completed: <date>` on the rollout frontmatter.
@@ -174,7 +190,9 @@ then continue the normal cold resume above (flush any half-merged wave, `resume-
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py resume-filter --tasks slugA,slugB,slugC
-#   prints the subset whose status ∉ {done, review, merged} — build args from exactly those
+#   prints the subset whose status ∉ {done, review, merged} — build args from exactly those.
+#   gate-pending notes are ALSO excluded (with a stderr WARN): they await a human sign-off, not a
+#   dispatch — approve-gates makes them dispatchable again (§3.7).
 ```
 
 **No `## File-sets` block?** (an older rollout) the precise smart-halt can't run — fall back to the **coarse** rule: any unlanded task + any later wave ⇒ HALT. Tell the user to `/wave:schedule --regenerate` for precise halting.
@@ -202,7 +220,7 @@ This is the backstop for a hung Workflow run or a missed completion notification
 
 ### 6. Reconcile + report
 
-The workflow returns `{ rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath, reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, summary, model, escalated, escalatedAt }] }` where `status ∈ review | review-blocked | blocked | plan-blocked`, `model` is the FINAL tier the task ran on, and `escalated`/`escalatedAt` (`plan` | `implement` | `review`) record an opus→fable escalation.
+The workflow returns `{ rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath, reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, summary, model, escalated, escalatedAt, gatedInputs }] }` where `status ∈ review | review-blocked | blocked | plan-blocked | gate-pending`, `model` is the FINAL tier the task ran on, `escalated`/`escalatedAt` (`plan` | `implement` | `review`) record an opus→fable escalation, and `gatedInputs` lists the declared-but-unapproved gates when the task paused at `gate-pending` (§3.7).
 
 **Reconcile with the deterministic helper — do NOT hand-edit frontmatter.** Write the returned object to a temp file (or pipe it on stdin) and run:
 
@@ -216,6 +234,7 @@ The helper resolves each task note by slug under `~/repos/obsidian/Work/Tasks/` 
 - `review-blocked` → `status: review-blocked`, `pr: <url>`; appends `reviewFeedback` under `## Review-blocked feedback`
 - `blocked` → `status: blocked`; appends `blockerDiagnosis` under `## Blocker diagnosis` (skipped if the agent already wrote it)
 - `plan-blocked` → `status: plan-blocked`; appends the accumulated plan feedback under `## Plan-blocked feedback`
+- `gate-pending` → `status: gate-pending`; **upserts** the declared gates under `## Gated inputs (awaiting sign-off)` (upsert, not append — the pending list always reflects the latest declaration)
 - any status with `escalated: true` → additionally stamps `model: fable` (durable escalation — later re-dispatches start at fable)
 
 (This replaces ~5 fumble-prone frontmatter edits per wave — finding #6. The lead session still owns the call; subagents never write task `status:`.)
@@ -246,6 +265,10 @@ Plan-blocked (no PR opened):
 Ralph-blocked (no PR opened):
 - [[task-f]] — see "## Blocker diagnosis"
 
+Gate-pending (awaiting YOUR sign-off — a declared gate always pauses, ADR 0005):
+- [[task-j]] — declared: spend: Replicate API — cap USD 30
+  → sign off, then: reconcile-wave.py approve-gates --tasks task-j; re-dispatch via resume-filter
+
 Recommended merge order: <list>
 ```
 
@@ -272,7 +295,8 @@ Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS au
 
 - a wave produces **zero** approved (`status: review`) PRs (nothing to merge; downstream presumptively unsafe), or
 - `merge-wave.sh` exits non-zero (a real merge conflict or red required check), or
-- the smart-halt check fires (an unlanded task's file reappears in a later wave).
+- the smart-halt check fires (an unlanded task's file reappears in a later wave), or
+- a wave leaves `gate-pending` tasks and nobody is present to sign off (`reason="gated inputs await sign-off: …"` — a **designed** pause, ADR 0005, not a failure: the user signs off, `approve-gates` runs, and re-invocation resumes; when the user IS present, ask for the sign-off in-conversation instead of halting — §3.7).
 
 A **soft pause** (*Pausing + reinstating a rollout* below) exits through the same `state=halted` mechanics but is **deliberate**, not a failure — there is no cause to fix, and reinstating is plain re-invocation.
 

@@ -55,15 +55,22 @@ export const meta = {
 //                                    //   bundle's planner/implementer effort for THIS task only — judges
 //                                    //   always keep the EFFORT matrix. low | medium | high | xhigh | max.
 //                                    //   Absent ⇒ the tier bundle decides (opus: medium, fable: high).
+//       approvedGates   : string[],  // optional; gated inputs a human already signed off, resolved by the
+//                                    //   skill from the task note's "## Approved gates" section (bullets,
+//                                    //   "(approved …)" annotations stripped). The engine pauses a task
+//                                    //   ONLY for declared gates NOT in this list (ADR 0005) — so
+//                                    //   re-dispatches and resumes never re-ask. Omit/empty when none.
 //     }]
 //   }]
 // }
 //
 // Returns { rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, summary,
-//   model, escalated, escalatedAt }] }
-// where status ∈ review | review-blocked | blocked | plan-blocked, model is the FINAL tier the task
-// ran on, and escalated/escalatedAt ('plan' | 'implement' | 'review') record an opus→fable escalation.
+//   model, escalated, escalatedAt, gatedInputs }] }
+// where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending, model is the FINAL tier
+// the task ran on, escalated/escalatedAt ('plan' | 'implement' | 'review') record an opus→fable
+// escalation, and gatedInputs lists the declared-but-unapproved gates when status is gate-pending
+// (a declared gate always pauses for a human — ADR 0005).
 // =============================================================================
 
 // ---- Structured schemas (replace the old sentinel strings) ------------------
@@ -75,7 +82,7 @@ const PLAN_VERDICT = {
     ready: { type: 'boolean', description: 'true when a complete plan was produced' },
     blocked: { type: 'boolean', description: 'true if the task is malformed / unrecoverable' },
     blockerCause: { type: 'string', description: 'one-line cause when blocked, else empty string' },
-    plan: { type: 'string', description: 'full structured plan text (Files to modify, Test strategy, Sibling-site check, Caller-wiring, Edge cases, Risks). Empty string if blocked.' },
+    plan: { type: 'string', description: 'full structured plan text (Files to modify, Test strategy, Sibling-site check, Caller-wiring, Edge cases, Risks, Gated inputs). Empty string if blocked.' },
   },
   required: ['ready', 'blocked', 'blockerCause', 'plan'],
 }
@@ -102,6 +109,7 @@ const IMPL_RESULT = {
     worktreePath: { type: 'string', description: 'absolute worktree path from git rev-parse --show-toplevel' },
     blockerDiagnosis: { type: 'string', description: 'one-paragraph diagnosis when blocked, else empty string' },
     summary: { type: 'string', description: 'one-paragraph summary of what changed and was tested' },
+    gatedInputs: { type: 'array', items: { type: 'string' }, description: 'ONLY when you stopped before a gated action (ADR 0005): one line per human authorisation the task needs that the note\'s "## Approved gates" does not cover ("spend: <what> — cap <amount>" / "credential: <what>" / "irreversible: <what>"). Omit or empty otherwise.' },
   },
   required: ['verified', 'blocked', 'escalate', 'prUrl', 'branch', 'worktreePath', 'blockerDiagnosis', 'summary'],
 }
@@ -134,6 +142,64 @@ Before you open or update a PR, run these preflight checks:
 // nudge the agent can re-read the note and silently repeat the rejected work. This line is static (always
 // in the prompt) and harmless on a fresh task where no such section exists.
 const PRIOR_FEEDBACK_NOTE = `If the task note has a "## Review-blocked feedback", "## Blocker diagnosis", "## Plan-blocked feedback", or "## Repair input" section from a PRIOR attempt, treat it as AUTHORITATIVE — resolve every point in it first, and use any "## Repair input" value exactly as given (do not re-derive or second-guess it).`
+
+// Gated inputs (ADR 0005): API spend, credentials, and irreversible actions are decisions no agent may
+// make. Two faces of one rule — the PLAN declares them up front (a required "### Gated inputs" section,
+// enforced by the plan-judge), and every code-writing agent stops BEFORE any gated action it finds
+// undeclared/unapproved (the plan_approval:false path). Both are STATIC prompt text — always rendered,
+// a required contract, not an optional feature — and the ENGINE enforces the pause: parseGatedInputs /
+// unapprovedGates below turn a non-empty unapproved declaration into a 'gate-pending' stop regardless
+// of plan_approval config or continuous mode. Approval lives durably on the task note ("## Approved
+// gates", passed in as task.approvedGates), so re-dispatches never re-ask those exact gates.
+const GATED_INPUTS_CHECK = `Gated inputs (hard rule — ADR 0005): BEFORE any gated action, identify every human authorisation this
+task needs — API spend (a hard cap is mandatory), credentials, or an irreversible action. If the task
+note's "## Approved gates" section covers ALL of them, proceed — an approved cap is a CEILING to respect,
+never a target (blowing it is a verifier/review failure, not a re-ask). Otherwise STOP BEFORE the gated
+action: no spend, no credential use, no irreversible step, no PR. Return blocked=true with one line per
+missing gate in gatedInputs ("spend: <what> — cap <amount>" / "credential: <what>" / "irreversible:
+<what>") and name them in blockerDiagnosis — a human signs off on the note and you'll be re-dispatched.
+No operator override elsewhere in this prompt (release/hold gates) ever overrides THIS rule.`
+
+// Parse the plan's "### Gated inputs" section (any ##–#### level). Returns null when the section is
+// MISSING (the caller fails closed — the judge should never have approved it), [] for an explicit
+// "None", else the declared gate lines (bullets stripped; bare prose lines count as declarations —
+// fail-closed in the ambiguous direction).
+function parseGatedInputs(planText) {
+  const lines = (planText || '').split('\n')
+  const start = lines.findIndex((l) => /^#{2,4}\s+gated inputs\b/i.test(l.trim()))
+  if (start === -1) return null
+  const out = []
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (/^#{1,6}\s/.test(line)) break // next heading ends the section
+    if (!line) continue
+    const bare = line.replace(/^[-*]\s+/, '').trim()
+    if (/^none\b/i.test(bare)) continue // explicit None — not a gate
+    out.push(bare)
+  }
+  return out
+}
+
+// A gate matches an approval on normalized text (whitespace-collapsed, case-insensitive, any
+// "(approved …)" annotation stripped). Deliberately EXACT beyond that: a changed cap is a NEW gate.
+function normalizeGate(s) {
+  return String(s || '')
+    .replace(/^[-*]\s+/, '')
+    .replace(/\s*\(approved [^)]*\)\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
+function unapprovedGates(declared, approved) {
+  const ok = new Set((approved || []).map(normalizeGate))
+  return (declared || []).filter((g) => !ok.has(normalizeGate(g)))
+}
+
+function gateDiagnosis(gates) {
+  return 'gated inputs await human sign-off (a declared gate always pauses — ADR 0005):\n'
+    + gates.map((g) => '- ' + g).join('\n')
+}
 
 // Known-baseline-failures manifest (item 2). When the rollout declares tests that already fail on a clean
 // `main` for environmental reasons, every agent gets this so N agents don't each independently re-diagnose
@@ -272,7 +338,9 @@ Steps:
    false otherwise), prUrl, branch, worktreePath (from \`git rev-parse --show-toplevel\`),
    blockerDiagnosis (empty if not blocked), and a one-paragraph summary.
 
-${BUG_PREFLIGHTS}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior)}
+${BUG_PREFLIGHTS}
+
+${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior)}
 
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.`
 }
@@ -323,6 +391,13 @@ Steps:
    ### Caller-wiring     (what calls the new/changed surface; grep proof; are tests the only callers?)
    ### Edge cases        (explicit list)
    ### Risks / unknowns  (what could go wrong; what you want the reviewer to weigh in on)
+   ### Gated inputs      (REQUIRED — one line per human authorisation the task needs: "spend: <what> — cap
+                          <amount>" (a hard cap is mandatory), "credential: <what>", "irreversible: <what>";
+                          or exactly "None". A non-empty declaration pauses the task for human sign-off —
+                          regardless of config or continuous mode (ADR 0005). If the task note carries a
+                          "## Approved gates" section, restate each still-needed approved gate VERBATIM
+                          (without its "(approved …)" annotation) — restated approved gates do not
+                          re-pause; only NEW gates do.)
 4. Return your structured result: ready=true with the full plan text in \`plan\`, blocked=false, blockerCause="".
 
 If during investigation you find the task is fundamentally malformed (impossible, contradicts a committed
@@ -350,6 +425,9 @@ Check, against the task brief:
 - Caller-wiring check done (dead-code prevention — is the new surface actually called in production)?
 - Are the edge cases the right ones?
 - Are the stated risks/unknowns the real ones?
+- Does the plan carry the required "### Gated inputs" section — either exactly "None" or concrete gates
+  (spend WITH a hard cap / credential / irreversible action)? A missing section, or a spend gate without
+  a cap, is an automatic "changes" (ADR 0005). Also flag a gate the brief implies but the plan omits.
 
 Read the brief and grep the repo as needed to verify the plan's claims — do not approve on faith.
 Decide: verdict "approve" if the plan is sound (clean or trivially nitpicky), else "changes" with 3–8
@@ -376,8 +454,9 @@ revision demonstrably resolves it; do not drop an earlier round's concern to sat
 ${grouped}
 
 Run additional READ-ONLY investigation as needed. Rewrite the plan with the SAME required sub-sections
-(Files to modify / Test strategy / Sibling-site check / Caller-wiring / Edge cases / Risks). Return
-ready=true with the rewritten plan in \`plan\`. If you discover the task is unrecoverable, return
+(Files to modify / Test strategy / Sibling-site check / Caller-wiring / Edge cases / Risks /
+Gated inputs — declare spend with a hard cap, credentials, irreversible actions, or exactly "None").
+Return ready=true with the rewritten plan in \`plan\`. If you discover the task is unrecoverable, return
 ready=false, blocked=true, blockerCause="<one line>".`
 }
 
@@ -407,7 +486,9 @@ Steps:
 4. Return your structured result: verified, blocked, escalate (as your verification block instructs; false
    otherwise), prUrl, branch, worktreePath (git rev-parse --show-toplevel), blockerDiagnosis, summary.
 
-${BUG_PREFLIGHTS}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior)}
+${BUG_PREFLIGHTS}
+
+${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior)}
 
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.`
 }
@@ -451,7 +532,9 @@ new PR.
 
 ${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
 
-${BUG_PREFLIGHTS}${baselineManifest(a)}
+${BUG_PREFLIGHTS}
+
+${GATED_INPUTS_CHECK}${baselineManifest(a)}
 
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.
 
@@ -633,6 +716,26 @@ async function planLoop(task, st, a) {
     })
     if (verdict.__dead) return transientPlanBlock(task, round)
     if (verdict.verdict === 'approve') {
+      // Gated inputs (ADR 0005): a declared gate always pauses for a human — regardless of
+      // plan_approval config or continuous mode. Gates already approved on the note
+      // (task.approvedGates) are skipped, so re-dispatches never re-ask those exact gates.
+      const declared = parseGatedInputs(plan.plan)
+      if (declared === null) {
+        // The judge approved a plan WITHOUT the required section (its checklist forbids this).
+        // Fail closed — but to plan-blocked, not gate-pending: there is nothing concrete for a
+        // human to sign, and a re-plan under the current prompt self-heals with a declaration.
+        return {
+          task, blocked: true, status: 'plan-blocked', planRoundsUsed: round,
+          blockerDiagnosis: 'plan was approved without the required "### Gated inputs" section (fail-closed, ADR 0005) — re-plan and declare the gates or an explicit "None"',
+        }
+      }
+      const gates = unapprovedGates(declared, task.approvedGates)
+      if (gates.length) {
+        return {
+          task, blocked: true, status: 'gate-pending', gatedInputs: gates,
+          planRoundsUsed: round, blockerDiagnosis: gateDiagnosis(gates),
+        }
+      }
       return { task, blocked: false, plan: plan.plan, planRoundsUsed: round }
     }
     // Record this round's rejection BEFORE the max-rounds return and the reviser dispatch, so both the
@@ -682,11 +785,22 @@ async function implement(task, st, prev, a) {
   const prompt = (prior) => (task.planGate && prev && prev.plan)
     ? approvedPlanImplementerPrompt(task, prev.plan, a, st.tier, prior)
     : implementerPrompt(task, a, st.tier, prior)
+  // A stop for gated inputs (ADR 0005) is a HUMAN decision, not evidence of hardness: convert it to a
+  // clean gate-pending block and never escalate on it. Checked before the escalation branch on both
+  // passes. Approved gates are filtered out defensively (the prompt already tells the agent to proceed
+  // past them), so an already-signed gate can never be re-asked.
+  const gatePending = (r) => {
+    const gates = unapprovedGates(r.gatedInputs, task.approvedGates)
+    if (!gates.length) return null
+    return { ...r, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates), ...(planExtra || {}) }
+  }
   let r = await runAgent(prompt(''), {
     label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
   })
   // A dead agent is transient infra, NOT evidence of hardness — do NOT escalate; report a clean block.
   if (r.__dead) return transientImplBlock(planExtra)
+  const gatedFirst = gatePending(r)
+  if (gatedFirst) return gatedFirst
   if ((r.escalate || r.blocked) && st.tier === 'opus') {
     // One-shot red or a first-pass block: the task has proven non-mechanical. Fable takes over in the
     // same worktree (the committed attempt + note diagnosis carry over; an approved plan is NOT
@@ -698,6 +812,8 @@ async function implement(task, st, prev, a) {
       label: `implement:${task.slug}@fable`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
     })
     if (r.__dead) return transientImplBlock(planExtra)
+    const gatedRetry = gatePending(r)
+    if (gatedRetry) return gatedRetry
   }
   // Defensive: a result that neither verified nor blocked and has no PR cannot go to review.
   if (!r.verified && !r.blocked && !r.prUrl) {
@@ -708,8 +824,8 @@ async function implement(task, st, prev, a) {
 }
 
 async function reviewLoop(task, st, prev, a) {
-  // plan-blocked passthrough (no IMPL_RESULT shape)
-  if (prev && prev.blocked && prev.status === 'plan-blocked') return prev
+  // plan-blocked / gate-pending passthrough (already carry their own status — never remap to 'blocked')
+  if (prev && prev.blocked && (prev.status === 'plan-blocked' || prev.status === 'gate-pending')) return prev
   // Ralph-blocked OR transient-dead implement result (both carry blocked=true)
   if (prev && prev.blocked) return { ...prev, status: 'blocked' }
   if (task.scope === 'read-only') return { ...prev, status: 'review', reviewRoundsUsed: 0 }
@@ -735,6 +851,12 @@ async function reviewLoop(task, st, prev, a) {
     })
     if (revised.__dead) return { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS }
     if (revised.blocked) {
+      // A reviser can DISCOVER a gated input the earlier passes never hit (ADR 0005) — same human
+      // stop, never a plain block.
+      const gates = unapprovedGates(revised.gatedInputs, task.approvedGates)
+      if (gates.length) {
+        return { ...current, ...revised, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates) }
+      }
       return { ...current, status: 'blocked', blockerDiagnosis: revised.blockerDiagnosis }
     }
     current = { ...current, ...revised }
@@ -785,6 +907,7 @@ for (const wave of a.waves) {
         planRoundsUsed: norm.planRoundsUsed || 0,
         blockerDiagnosis: norm.blockerDiagnosis || '',
         reviewFeedback: norm.reviewFeedback || [],
+        gatedInputs: norm.gatedInputs || [],
         summary: norm.summary || '',
         model: norm.model || taskModel(t),
         escalated: !!norm.escalated,
@@ -792,7 +915,7 @@ for (const wave of a.waves) {
       })
     })
   }
-  const blockedThisWave = allResults.filter((r) => r.status === 'blocked' || r.status === 'plan-blocked' || r.status === 'review-blocked')
+  const blockedThisWave = allResults.filter((r) => r.status === 'blocked' || r.status === 'plan-blocked' || r.status === 'review-blocked' || r.status === 'gate-pending')
   log(`Wave ${wave.wave} done — ${allResults.filter((r) => r.status === 'review').length} clean, ${blockedThisWave.length} blocked so far`)
 }
 

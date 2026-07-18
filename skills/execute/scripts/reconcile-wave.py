@@ -7,7 +7,7 @@ fumble-prone edits across a rollout. This helper performs ALL of those writes de
 returned task array, and (finding #7) computes the per-task resume set so a partial wave resumes without
 re-dispatching already-landed work.
 
-Eight subcommands:
+Nine subcommands:
 
   reconcile   Read the workflow result JSON ({rolloutSlug, tasks:[...]}) and write each task note's
               frontmatter + any blocked-feedback body section. Idempotent (safe to re-run on resume).
@@ -49,6 +49,14 @@ Eight subcommands:
               finds a `paused:` stamp — reinstating IS plain re-invocation, so there is no separate
               resume command. Idempotent (no stamp = no-op).
 
+  approve-gates  Sign off a gate-pending task's declared gated inputs (ADR 0005): move the bullets
+              under "## Gated inputs (awaiting sign-off)" into "## Approved gates" with a sign-off
+              date (gate + cap + sign-off — the durable record the engine reads via task.approvedGates
+              so re-dispatches never re-ask those exact gates), remove the pending section, and flip
+              the note back to in_progress so resume-filter re-dispatches it. Refuses a note that
+              isn't gate-pending; idempotent once approved (already-approved note = no-op). Run by
+              the lead session ONLY after the human explicitly signs off — never unattended.
+
 Stdlib only (the claude-config repo has no dependency manager). Frontmatter is edited line-surgically
 (not via a YAML round-trip) to preserve field order, comments, and spacing exactly — matching how the
 rest of the vault tooling treats frontmatter.
@@ -58,6 +66,8 @@ Status mapping (workflow status -> note writes), per wave-execute/SKILL.md §6:
   review-blocked -> status: review-blocked; pr: <url>; append reviewFeedback under "## Review-blocked feedback"
   blocked        -> status: blocked;        append blockerDiagnosis under "## Blocker diagnosis" (if absent)
   plan-blocked   -> status: plan-blocked;   append blockerDiagnosis under "## Plan-blocked feedback"
+  gate-pending   -> status: gate-pending;   UPSERT gatedInputs under "## Gated inputs (awaiting sign-off)"
+                    (upsert, not append: a refreshed declaration replaces the pending list, never stales)
 """
 
 import argparse
@@ -82,6 +92,19 @@ BLOCKED_SECTIONS = {
     "blocked": "## Blocker diagnosis",
     "plan-blocked": "## Plan-blocked feedback",
 }
+
+# Gated inputs (ADR 0005): a task the engine paused for human sign-off of declared gates. Deliberately
+# NOT in BLOCKED_SECTIONS — `resolve` must never flip an unsigned gate to done, and resume-filter must
+# never auto-redispatch one (only approve-gates makes it dispatchable again).
+GATE_PENDING_STATUS = "gate-pending"
+GATE_PENDING_SECTION = "## Gated inputs (awaiting sign-off)"
+APPROVED_GATES_SECTION = "## Approved gates"
+
+# Every workflow status with a body section to write (reconcile) or scan (status).
+SECTION_BY_STATUS = {**BLOCKED_SECTIONS, GATE_PENDING_STATUS: GATE_PENDING_SECTION}
+
+# Matches the "(approved <date>)" sign-off annotation approve-gates appends to a gate line.
+GATE_ANNOT_RE = re.compile(r"\s*\(approved [^)]*\)\s*$", re.I)
 
 
 # ---- frontmatter surgery (order/format preserving) --------------------------
@@ -161,6 +184,48 @@ class Note:
         self._body = f"{block}{sep}\n{heading}\n\n{content.rstrip()}\n"
         self.dirty = True
 
+    def _section_bounds(self, heading: str):
+        """(start, end) line indices of `## heading` + its content, or None if absent."""
+        lines = self._body.split("\n")
+        for i, line in enumerate(lines):
+            if line.strip() == heading:
+                end = i + 1
+                while end < len(lines) and not lines[end].startswith("## "):
+                    end += 1
+                return lines, i, end
+        return None
+
+    def upsert_section(self, heading: str, content: str):
+        """Create `## heading` with content, or REPLACE the existing section's content in place
+        (unlike append_section's heading-idempotence — for sections whose content must track the
+        latest state, e.g. a refreshed gated-inputs declaration). Idempotent on identical content."""
+        found = self._section_bounds(heading)
+        if found is None:
+            self.append_section(heading, content)
+            return
+        lines, start, end = found
+        new_lines = lines[:start + 1] + [""] + content.rstrip().split("\n") + [""] + lines[end:]
+        new_body = "\n".join(new_lines)
+        if new_body != self._body:
+            self._body = new_body
+            self.dirty = True
+
+    def remove_section(self, heading: str):
+        """Delete `## heading` and its content from the body (idempotent — no-op if absent)."""
+        found = self._section_bounds(heading)
+        if found is None:
+            return
+        lines, start, end = found
+        while start > 0 and not lines[start - 1].strip():
+            start -= 1  # absorb the blank gap above the heading so removal leaves no double gap
+        head, tail = lines[:start], lines[end:]
+        if head and tail and head[-1].strip():
+            head.append("")  # keep one blank line between the neighbours we just joined
+        if head and not tail:
+            head.append("")  # section was last — preserve the trailing newline
+        self._body = "\n".join(head + tail)
+        self.dirty = True
+
     def render(self) -> str:
         return "---\n" + "\n".join(self._fm) + "\n---\n" + self._body
 
@@ -205,7 +270,7 @@ def cmd_reconcile(args) -> int:
         if not path.exists():
             errors.append(f"{slug}: task note not found at {path}")
             continue
-        if status not in ("review", "review-blocked", "blocked", "plan-blocked"):
+        if status not in ("review", "review-blocked", "blocked", "plan-blocked", GATE_PENDING_STATUS):
             errors.append(f"{slug}: unexpected workflow status {status!r} — left untouched")
             continue
         try:
@@ -232,14 +297,21 @@ def cmd_reconcile(args) -> int:
             if plan_rounds > 0:
                 note.set("plan_rounds_used", plan_rounds)
 
-        if status in BLOCKED_SECTIONS:
-            heading = BLOCKED_SECTIONS[status]
+        if status in SECTION_BY_STATUS:
+            heading = SECTION_BY_STATUS[status]
             if status == "review-blocked":
                 content = bullets(task.get("reviewFeedback") or [])
+            elif status == GATE_PENDING_STATUS:
+                content = bullets(task.get("gatedInputs") or []) or (task.get("blockerDiagnosis") or "").strip()
             else:
                 content = (task.get("blockerDiagnosis") or "").strip()
             if content:
-                note.append_section(heading, content)
+                if status == GATE_PENDING_STATUS:
+                    # Upsert, not append: a re-planned task may declare a DIFFERENT gate set (e.g. a
+                    # revised cap) — the pending list must always be the latest declaration, never stale.
+                    note.upsert_section(heading, content)
+                else:
+                    note.append_section(heading, content)
 
         note.save(dry_run=args.dry_run)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
@@ -343,6 +415,12 @@ def cmd_resume_filter(args) -> int:
             to_dispatch.append(slug)
             continue
         status = Note(path).get("status")
+        if status == GATE_PENDING_STATUS:
+            # Awaiting a human sign-off (ADR 0005) — auto-resume (heartbeat included) must never burn a
+            # dispatch on, or bypass, a pending gate. approve-gates flips it back to dispatchable.
+            print(f"WARN: {slug}: gate-pending (gated inputs await human sign-off) — excluded from "
+                  f"dispatch; run approve-gates after the sign-off", file=sys.stderr)
+            continue
         if status not in LANDED_STATUSES:
             to_dispatch.append(slug)
     for slug in to_dispatch:
@@ -395,7 +473,7 @@ def cmd_status(args) -> int:
             wave = None
         pr = note.get("pr")
         blocker = ""
-        for heading in BLOCKED_SECTIONS.values():
+        for heading in SECTION_BY_STATUS.values():  # includes the pending-gates section (gate-pending)
             t = note.section_text(heading)
             if t:
                 blocker = t
@@ -500,6 +578,63 @@ def cmd_defer(args) -> int:
     return 1 if errors else 0
 
 
+# ---- approve-gates ----------------------------------------------------------
+
+def _norm_gate(line: str) -> str:
+    """Normalise a gate line for duplicate detection: bullet + sign-off annotation stripped,
+    whitespace collapsed, case-folded (mirrors the engine's normalizeGate — a changed cap is
+    a DIFFERENT gate)."""
+    s = re.sub(r"^[-*]\s+", "", line.strip())
+    s = GATE_ANNOT_RE.sub("", s)
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def cmd_approve_gates(args) -> int:
+    """Record the human sign-off for a gate-pending task's declared gated inputs (ADR 0005).
+
+    The CALLER's contract: run this only after the user explicitly signed off the gates in
+    conversation — the sign-off itself is the one decision no agent may make.
+    """
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
+    date = args.date or datetime.now().astimezone().date().isoformat()
+    errors = []
+    for slug in slugs:
+        path = tasks_dir / f"{slug}.md"
+        if not path.exists():
+            errors.append(f"{slug}: task note not found at {path}")
+            continue
+        try:
+            note = Note(path)
+        except ValueError as e:
+            errors.append(str(e))
+            continue
+        status = note.get("status")
+        pending = note.section_text(GATE_PENDING_SECTION)
+        if status != GATE_PENDING_STATUS:
+            if note.has_heading(APPROVED_GATES_SECTION) and not pending:
+                print(f"{slug}: gates already approved [no-change]")
+                continue
+            errors.append(f"{slug}: status is {status!r}, not {GATE_PENDING_STATUS!r} — refusing to approve gates")
+            continue
+        gates = [re.sub(r"^[-*]\s+", "", l.strip()) for l in pending.split("\n") if l.strip()]
+        if not gates:
+            errors.append(f"{slug}: no gates under {GATE_PENDING_SECTION!r} — nothing to sign off")
+            continue
+        existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
+        have = {_norm_gate(l) for l in existing}
+        merged = existing + [f"- {g} (approved {date})" for g in gates if _norm_gate(g) not in have]
+        note.upsert_section(APPROVED_GATES_SECTION, "\n".join(merged))
+        note.remove_section(GATE_PENDING_SECTION)
+        note.set("status", "in_progress")
+        note.save(dry_run=args.dry_run)
+        print(f"{slug}: {len(gates)} gate(s) approved (signed off {date}) -> status in_progress"
+              + (" (dry-run)" if args.dry_run else " [written]"))
+    for e in errors:
+        print(f"ERROR: {e}", file=sys.stderr)
+    return 1 if errors else 0
+
+
 # ---- clear-pause ------------------------------------------------------------
 
 def cmd_clear_pause(args) -> int:
@@ -580,6 +715,13 @@ def main() -> int:
     cp.add_argument("--rollout", required=True, help="path to the rollout note")
     cp.add_argument("--dry-run", action="store_true")
     cp.set_defaults(func=cmd_clear_pause)
+
+    ag = sub.add_parser("approve-gates", help="record the human sign-off for a gate-pending task's gated inputs (ADR 0005)")
+    ag.add_argument("--tasks", required=True, help="comma-separated task slugs (must be at status gate-pending)")
+    ag.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
+    ag.add_argument("--date", default=None, help="sign-off date stamped on each gate (default: today)")
+    ag.add_argument("--dry-run", action="store_true")
+    ag.set_defaults(func=cmd_approve_gates)
 
     args = p.parse_args()
     return args.func(args)

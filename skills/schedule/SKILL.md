@@ -101,6 +101,12 @@ Look for:
 
 Some task notes carry a **human/release gate** in prose — "don't action until a release ships", "hold for sign-off", "gated on the next deploy". A `/wave:execute` agent reads the note and may refuse mid-dispatch when it hits one, so a buried gate is unreliable either way. Scan each task body for gate language (`don't action until`, `do not action until`, `hold for`, `until a release`, `until the next release`, `gated on a release`, `human sign-off`, `wait for sign-off`). Collect any matches — they become the **pre-flight decision** surfaced in step 8: the user either clears each gate (set `ignore_gate: true` on the task to override it for the run, or remove the gate text) or drops the task from this rollout. Don't bury the gate in the body and hope the agent honours it.
 
+### 3.6. Sweep for gated-input smell (advisory — ADR 0005)
+
+Distinct from 3.5's release/hold gates: **gated inputs** are human *authorisations* — API spend, credentials, irreversible actions. Scan each task body for spend smell (`credits`, `paid API`, `$`, `budget`, `billable`, `API cost`), credential smell (`API key`, `token`, `secret`, `credential`, `prod access`), and irreversibility smell (`irreversible`, `cannot be undone`, `delete production`, `wipe`). Tasks that match get **`plan_approval: required`** stamped in step 7 (user-confirmed in the same batch as the model step-ups), so they always produce a plan whose required `### Gated inputs` declaration the engine can pause on.
+
+**Advisory only — the plan's declaration is authoritative** (ADR 0005): only the implementer's plan reliably knows the task needs $30 of Replicate credits, so the engine pauses on the *declaration*, never on this sweep. The stamp merely guarantees the gate surfaces predictively at the plan-gate rather than reactively mid-implementation (a missed smell still stops — every code-writing agent carries the same stop rule). List the stamped tasks in step 8's summary as **expected to gate**, so the pause reads as designed when it happens.
+
 ### 4. Classify scope per task
 
 Look for a `scope:` frontmatter field. Valid values:
@@ -240,13 +246,14 @@ For each task in the rollout:
 - For `scope: read-only` tasks specifically, also add `max_iterations: 1` (nothing to retry)
 - For tasks the user confirmed as Fable step-ups in step 4.7, add `model: fable` — never stamp `model: opus` (that's the rollout-level default every task inherits)
 - For a task the user explicitly confirmed an effort override for (§4.7 — rare), add `effort: <low|medium|high|xhigh|max>` — never stamp `effort:` by default, and never add it to the rollout note (it has no rollout-level form; the tier bundle decides everywhere else)
+- For tasks the §3.6 sweep flagged (user-confirmed), add `plan_approval: required` — advisory: it guarantees a plan-gate exists where the plan's own `### Gated inputs` declaration (the authoritative signal, ADR 0005) can pause for sign-off
 - Preserve all other frontmatter fields verbatim
 
 The combined notes authored in step 4.5 are stamped here like any other task (`wave:`, `rollout:`, `scope: cross-cutting`). Their folded-in members are **not** stamped `wave:` — they already carry `status: merged` + `merged_into:` from step 4.5 and are never dispatched.
 
 Use the same YAML field ordering the file already has; insert the new fields just below the existing `status:` line.
 
-**Do NOT stamp `verifier:` / `max_iterations:` / `max_review_rounds:` / `model:` on individual tasks by default.** Those fields are rollout-level defaults — tasks inherit them automatically. Only set them per-task if the user explicitly asks to override the rollout default for a specific task during the confirm-batch step. The sanctioned exceptions are read-only's `max_iterations: 1`, the user-confirmed `model: fable` from step 4.7, and the user-confirmed per-task `effort:` override (§4.7 — unlike the others it has no rollout-level form at all, so per-task frontmatter is the only place it can ever live) — all deliberate per-task decisions, not defaults.
+**Do NOT stamp `verifier:` / `max_iterations:` / `max_review_rounds:` / `model:` on individual tasks by default.** Those fields are rollout-level defaults — tasks inherit them automatically. Only set them per-task if the user explicitly asks to override the rollout default for a specific task during the confirm-batch step. The sanctioned exceptions are read-only's `max_iterations: 1`, the user-confirmed `model: fable` from step 4.7, the user-confirmed per-task `effort:` override (§4.7 — unlike the others it has no rollout-level form at all, so per-task frontmatter is the only place it can ever live), and the §3.6 sweep's `plan_approval: required` on gated-input-smelling tasks — all deliberate per-task decisions, not defaults.
 
 ### 8. Print summary
 
@@ -268,6 +275,13 @@ The wave:execute skill at ${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md reads th
 ⚠️ Pre-flight — these tasks carry a human/release gate. Clear each before executing, or they'll refuse mid-dispatch:
   - [[task-x]] — "don't action until the v0.5 release ships"
 To run one anyway, set `ignore_gate: true` on its task note (overrides the gate for the run); or drop it from the rollout.
+```
+
+Likewise list the §3.6 gated-input step-ups so the eventual pause reads as designed (ADR 0005 — these will stop at their plan-gate for your sign-off even in continuous mode; `ignore_gate` does NOT override a gated input):
+
+```
+Expected to gate (will pause for your sign-off at their plan-gate):
+  - [[task-y]] — smells of API spend ("~$30 of Replicate credits") → plan_approval: required
 ```
 
 ## Execution lives in `/wave:execute`

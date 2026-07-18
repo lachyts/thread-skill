@@ -21,6 +21,6 @@ The variants and the functions that build them:
 
 Sentinel strings (`WAVE-VERIFIED` / `PLAN-READY` / `BLOCKED:`) are gone — every agent now returns a validated structured object (the `schema:` option on `agent()`), so the engine branches on typed fields instead of parsing free text.
 
-The shared fragments (`BUG_PREFLIGHTS`, `ralphLoop(...)`) carry the verifier-retry contract and the giflab-rollout bug preflights (dead code / no-op assertions / sibling-site blindness / worktree-safety) into every code-writing prompt.
+The shared fragments (`BUG_PREFLIGHTS`, `GATED_INPUTS_CHECK`, `ralphLoop(...)`) carry the verifier-retry contract, the gated-inputs stop rule (ADR 0005 — spend/credentials/irreversible actions always pause for human sign-off; its predictive face is the plan's required `### Gated inputs` section, enforced by the plan-judge and paused on by the engine via `parseGatedInputs`/`unapprovedGates`), and the giflab-rollout bug preflights (dead code / no-op assertions / sibling-site blindness / worktree-safety) into every code-writing prompt.
 
 To change a prompt, edit the builder in the workflow script.
