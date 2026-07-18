@@ -181,6 +181,8 @@ A Fable task runs **end-to-end on Fable** — its planner, implementer, reviser,
 
 The step-up is **predictive** — it fires on the task's shape before any run. Its evidence-driven twin lives in the engine: an Opus task gets a one-shot first pass, and the first rejection or red verifier run **escalates** it to Fable mid-run (see execute SKILL.md § Model escalation). So a borderline candidate can safely stay Opus — a wrong call costs one cheap first pass, not a blocked rollout.
 
+**Effort rides the tier — never plan it separately (ADR 0004).** A tier is a (model, per-role effort) **bundle**: Opus runs its planner/implementer at medium, Fable at high; judges run high on either tier, the master review at xhigh on Fable, mechanical reconcile stages at low. The matrix is fixed in the engine (see execute SKILL.md § Effort bundles) — there is deliberately **no rollout-level effort config**, so stepping a task up to Fable is the one move that raises both model and effort. The **single escape hatch** is per-task `effort:` frontmatter (`low` \| `medium` \| `high` \| `xhigh` \| `max`), which overrides the planner/implementer effort for that task only — judges keep the matrix. Reserve it for the rare monster task the user explicitly flags (e.g. a Fable step-up worth `effort: max`), confirm it in the same y/n batch as the step-ups, and stamp it in step 7. Never stamp it by default, and never add an `effort:` key to the rollout note.
+
 ### 5. Compute waves
 
 **Core invariant: two tasks that touch the same file never share a wave.** Same-file tasks are serialised across consecutive waves — the later one rebases onto main after the first lands. (This is the fix for the #30/#31 incident, where two same-wave tasks both edited `metrics.py` and a stale-base squash silently dropped the first task's changes.)
@@ -237,13 +239,14 @@ For each task in the rollout:
 - Add `scope:` if not already set (single-file / cross-cutting / read-only — see step 4) — `/wave:execute` uses this to route master-review depth
 - For `scope: read-only` tasks specifically, also add `max_iterations: 1` (nothing to retry)
 - For tasks the user confirmed as Fable step-ups in step 4.7, add `model: fable` — never stamp `model: opus` (that's the rollout-level default every task inherits)
+- For a task the user explicitly confirmed an effort override for (§4.7 — rare), add `effort: <low|medium|high|xhigh|max>` — never stamp `effort:` by default, and never add it to the rollout note (it has no rollout-level form; the tier bundle decides everywhere else)
 - Preserve all other frontmatter fields verbatim
 
 The combined notes authored in step 4.5 are stamped here like any other task (`wave:`, `rollout:`, `scope: cross-cutting`). Their folded-in members are **not** stamped `wave:` — they already carry `status: merged` + `merged_into:` from step 4.5 and are never dispatched.
 
 Use the same YAML field ordering the file already has; insert the new fields just below the existing `status:` line.
 
-**Do NOT stamp `verifier:` / `max_iterations:` / `max_review_rounds:` / `model:` on individual tasks by default.** Those fields are rollout-level defaults — tasks inherit them automatically. Only set them per-task if the user explicitly asks to override the rollout default for a specific task during the confirm-batch step. The sanctioned exceptions are read-only's `max_iterations: 1` and the user-confirmed `model: fable` from step 4.7 — both are deliberate per-task decisions, not defaults.
+**Do NOT stamp `verifier:` / `max_iterations:` / `max_review_rounds:` / `model:` on individual tasks by default.** Those fields are rollout-level defaults — tasks inherit them automatically. Only set them per-task if the user explicitly asks to override the rollout default for a specific task during the confirm-batch step. The sanctioned exceptions are read-only's `max_iterations: 1`, the user-confirmed `model: fable` from step 4.7, and the user-confirmed per-task `effort:` override (§4.7 — unlike the others it has no rollout-level form at all, so per-task frontmatter is the only place it can ever live) — all deliberate per-task decisions, not defaults.
 
 ### 8. Print summary
 

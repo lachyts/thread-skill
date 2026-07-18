@@ -47,6 +47,11 @@ export const meta = {
 //                                    //   run, one review round); the first rejection/red/block ESCALATES
 //                                    //   the task to fable for all remaining work — sticky, judges follow.
 //                                    //   A fable task runs its whole pipeline on fable, as before.
+//       effort          : string,    // optional; per-task ESCAPE HATCH (ADR 0004), resolved by the skill
+//                                    //   from the task note's `effort:` frontmatter. Overrides the tier
+//                                    //   bundle's planner/implementer effort for THIS task only — judges
+//                                    //   always keep the EFFORT matrix. low | medium | high | xhigh | max.
+//                                    //   Absent ⇒ the tier bundle decides (opus: medium, fable: high).
 //     }]
 //   }]
 // }
@@ -527,6 +532,40 @@ function escalate(st, slug, at) {
   log(`escalation: ${slug} → fable (${at})`)
 }
 
+// ---- Effort bundles (ADR 0004) ----------------------------------------------
+// A tier is a (model, per-role EFFORT) bundle, not two knobs. This matrix is the ONE place the
+// per-role efforts live — fixed in the engine, deliberately not rollout config (tuning it means
+// editing this file: the matrix encodes a stance about where effort is worth paying, not a
+// per-rollout preference — see ADR 0004's rejected options). Escalation flips st.tier, and every
+// spawn site reads this matrix at dispatch time, so a mid-task opus→fable flip carries effort
+// automatically: no second ladder, no extra stamp.
+//   implementer  — the plan/code-writing role: planner, plan-reviser, implementer, reviser,
+//                  read-only investigator
+//   judge        — the plan-gate judge
+//   masterReview — the PR-review judge (the master-side review layer)
+//   reconcile    — mechanical reconcile stages. Documented stance only today: reconcile is
+//                  deterministic Python (scripts/reconcile-wave.py), so no agent() consumes this
+//                  row — it fixes the effort for any future mechanical agent stage.
+const EFFORT = {
+  opus:  { implementer: 'medium', judge: 'high', masterReview: 'high',  reconcile: 'low' },
+  fable: { implementer: 'high',   judge: 'high', masterReview: 'xhigh', reconcile: 'low' },
+}
+
+// Effort for the planner/implementer role at the task's LIVE tier. Per-task `effort:` frontmatter
+// (task.effort) is the SINGLE escape hatch (ADR 0004): it overrides the bundle's planner/implementer
+// effort for that task only — judges always keep the matrix — and it is absolute across an
+// escalation (a monster task at fable/max stays at max).
+function implEffort(st, task) {
+  return (task && task.effort) || EFFORT[st.tier].implementer
+}
+
+// Effort for a judge role ('judge' | 'masterReview'). Judges take the bundle of the tier they RUN
+// on — judgeFor() — so a judgeModel pin moves model and effort together (a tier is a bundle). The
+// fallback guards a judgeModel value with no matrix row (fail to the task's tier, never crash).
+function judgeEffort(a, st, role) {
+  return (EFFORT[judgeFor(a, st)] || EFFORT[st.tier])[role]
+}
+
 // ---- Dispatch resilience: transient agent death -----------------------------
 // A terminal API/connection error (observed 2026-07-18: "API Error: Connection closed mid-response") kills
 // the agent process mid-run, and the Workflow `agent()` global surfaces that as a `null` return. Left
@@ -566,14 +605,14 @@ function transientImplBlock(extra) {
 
 async function planLoop(task, st, a) {
   let plan = await runAgent(plannerPrompt(task, a, ''), {
-    label: `plan:${task.slug}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier,
+    label: `plan:${task.slug}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier, effort: implEffort(st, task),
   })
   if (plan.__dead) return transientPlanBlock(task, 0)
   if ((plan.blocked || !plan.ready) && st.tier === 'opus') {
     // A first-pass planner failure is evidence of hardness — one fable retry before plan-blocked.
     escalate(st, task.slug, 'plan')
     plan = await runAgent(plannerPrompt(task, a, plan.blockerCause || 'first-pass planner produced no plan'), {
-      label: `plan:${task.slug}@fable`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier,
+      label: `plan:${task.slug}@fable`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier, effort: implEffort(st, task),
     })
     if (plan.__dead) return transientPlanBlock(task, 0)
   }
@@ -587,7 +626,7 @@ async function planLoop(task, st, a) {
   let round = 1
   while (round <= task.maxPlanRounds) {
     const verdict = await runAgent(planJudgePrompt(task, plan.plan, a), {
-      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: judgeFor(a, st),
+      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: judgeFor(a, st), effort: judgeEffort(a, st, 'judge'),
     })
     if (verdict.__dead) return transientPlanBlock(task, round)
     if (verdict.verdict === 'approve') {
@@ -607,7 +646,7 @@ async function planLoop(task, st, a) {
     // Opus got its one judged round; revision is iteration, and iteration runs at fable.
     if (st.tier === 'opus') escalate(st, task.slug, 'plan')
     plan = await runAgent(planReviserPrompt(task, plan.plan, priorFeedback, round + 1, a), {
-      label: `plan-revise:${task.slug} r${round + 1}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier,
+      label: `plan-revise:${task.slug} r${round + 1}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier, effort: implEffort(st, task),
     })
     if (plan.__dead) return transientPlanBlock(task, round + 1)
     if (plan.blocked || !plan.ready) {
@@ -623,13 +662,13 @@ async function implement(task, st, prev, a) {
   const planExtra = (task.planGate && prev && prev.plan) ? { planRoundsUsed: prev.planRoundsUsed || 0 } : undefined
   if (task.scope === 'read-only') {
     let r = await runAgent(readOnlyPrompt(task, a, ''), {
-      label: `investigate:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier,
+      label: `investigate:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
     })
     if (r.__dead) return transientImplBlock()
     if (r.blocked && st.tier === 'opus') {
       escalate(st, task.slug, 'implement')
       r = await runAgent(readOnlyPrompt(task, a, r.blockerDiagnosis || 'first-pass investigation did not complete'), {
-        label: `investigate:${task.slug}@fable`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier,
+        label: `investigate:${task.slug}@fable`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
       })
       if (r.__dead) return transientImplBlock()
     }
@@ -641,7 +680,7 @@ async function implement(task, st, prev, a) {
     ? approvedPlanImplementerPrompt(task, prev.plan, a, st.tier, prior)
     : implementerPrompt(task, a, st.tier, prior)
   let r = await runAgent(prompt(''), {
-    label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier,
+    label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
   })
   // A dead agent is transient infra, NOT evidence of hardness — do NOT escalate; report a clean block.
   if (r.__dead) return transientImplBlock(planExtra)
@@ -653,7 +692,7 @@ async function implement(task, st, prev, a) {
     const prior = [r.blockerDiagnosis, r.summary].filter((s) => s && s.trim()).join('\n')
       || 'first-pass attempt did not verify green'
     r = await runAgent(prompt(prior), {
-      label: `implement:${task.slug}@fable`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier,
+      label: `implement:${task.slug}@fable`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
     })
     if (r.__dead) return transientImplBlock(planExtra)
   }
@@ -676,7 +715,7 @@ async function reviewLoop(task, st, prev, a) {
   let round = 1
   while (round <= task.maxReviewRounds) {
     const verdict = await runAgent(reviewJudgePrompt(task, current, a), {
-      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: judgeFor(a, st),
+      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: judgeFor(a, st), effort: judgeEffort(a, st, 'masterReview'),
     })
     // Dead review-judge: the PR is real and stands — block on transient infra so the lead re-judges it.
     if (verdict.__dead) return { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS }
@@ -689,7 +728,7 @@ async function reviewLoop(task, st, prev, a) {
     // Opus got its one judged PR round; revision is iteration, and iteration runs at fable.
     if (st.tier === 'opus') escalate(st, task.slug, 'review')
     const revised = await runAgent(reviserPrompt(task, current, verdict.feedback, round + 1, a), {
-      label: `revise:${task.slug} r${round + 1}`, phase: 'Review', schema: IMPL_RESULT, model: st.tier,
+      label: `revise:${task.slug} r${round + 1}`, phase: 'Review', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
     })
     if (revised.__dead) return { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS }
     if (revised.blocked) {

@@ -20,7 +20,7 @@ const marker = '// ---- Orchestration'
 const idx = src.indexOf(marker)
 if (idx === -1) { console.error('FAIL - orchestration marker not found'); process.exit(1) }
 let head = src.slice(0, idx).replace('export const meta', 'const meta')
-head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, runAgent, planLoop, implement, reviewLoop, converge };\n'
+head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort };\n'
 
 // `agent` and `log` are Workflow globals the engine expects at run time. The layer functions resolve them
 // against the sandbox global at CALL time, so the transient-death tests below swap `ctx.agent` per case to
@@ -75,6 +75,111 @@ const prior = 'the verifier failed on test_y'
 const pPrior = T.implementerPrompt(taskI, aI, 'fable', prior)
 ok(pPrior.includes('ESCALATION'), 'implementerPrompt: escalation context present when prior set')
 ok(pPrior.replace(T.escalationContext(prior), '') === pFable, 'implementerPrompt: with prior == without + exactly the injected block (byte-identical base)')
+
+// ---- Effort bundles (ADR 0004): a tier is a (model, per-role effort) bundle ----
+// The matrix is fixed in the engine — opus: implementer medium / judges high / master review high;
+// fable: implementer high / judges high / master review xhigh; reconcile low on either tier. Per-task
+// `effort:` frontmatter is the SINGLE escape hatch: it overrides the planner/implementer effort only —
+// judges always keep the matrix. Escalation flips st.tier, so effort carries automatically.
+
+ok(T.EFFORT.opus.implementer === 'medium' && T.EFFORT.opus.judge === 'high'
+  && T.EFFORT.opus.masterReview === 'high' && T.EFFORT.opus.reconcile === 'low',
+  'EFFORT: opus bundle = implementer medium, judges high, master review high, reconcile low')
+ok(T.EFFORT.fable.implementer === 'high' && T.EFFORT.fable.judge === 'high'
+  && T.EFFORT.fable.masterReview === 'xhigh' && T.EFFORT.fable.reconcile === 'low',
+  'EFFORT: fable bundle = implementer high, judges high, master review xhigh, reconcile low')
+
+ok(T.implEffort({ tier: 'opus' }, {}) === 'medium', 'implEffort: opus tier → medium')
+ok(T.implEffort({ tier: 'fable' }, {}) === 'high', 'implEffort: fable tier → high')
+ok(T.implEffort({ tier: 'opus' }, { effort: 'max' }) === 'max', 'implEffort: per-task effort override wins at opus')
+ok(T.implEffort({ tier: 'fable' }, { effort: 'max' }) === 'max', 'implEffort: per-task effort override wins at fable')
+ok(T.judgeEffort(undefined, { tier: 'opus' }, 'judge') === 'high', 'judgeEffort: plan judge high at opus')
+ok(T.judgeEffort(undefined, { tier: 'fable' }, 'judge') === 'high', 'judgeEffort: plan judge high at fable')
+ok(T.judgeEffort(undefined, { tier: 'opus' }, 'masterReview') === 'high', 'judgeEffort: master review high at opus')
+ok(T.judgeEffort(undefined, { tier: 'fable' }, 'masterReview') === 'xhigh', 'judgeEffort: master review xhigh at fable')
+ok(T.judgeEffort({ judgeModel: 'fable' }, { tier: 'opus' }, 'masterReview') === 'xhigh',
+  'judgeEffort: a judgeModel pin carries the pinned tier\'s effort (model + effort travel together)')
+
+// No rollout-level effort config, deliberately (ADR 0004 rejected options): the rollout template must
+// never grow an `effort:` key.
+const tpl = fs.readFileSync(path.join(here, '..', '..', 'schedule', 'rollout-template.md'), 'utf8')
+ok(!/\beffort\s*:/i.test(tpl), 'rollout template: no effort: key (no rollout-level effort config)')
+
+// End-to-end: every spawn site passes the matrix effort for its role + the task's LIVE tier.
+// ctx.agent records (label, model, effort) per dispatch; converge() drives all three layers.
+const aEff = { repoPath: '/repo', rolloutSlug: 'proj-rollout', verifier: 'make test' }
+const baseEff = { taskPath: '/v/t.md', maxIterations: 3, maxReviewRounds: 2, maxPlanRounds: 2 }
+const effortCalls = []
+function recordingAgent(impl) {
+  return async (prompt, opts) => {
+    effortCalls.push({ label: opts.label, model: opts.model, effort: opts.effort })
+    return impl(prompt, opts)
+  }
+}
+const greenImpl = { verified: true, blocked: false, escalate: false, prUrl: 'https://pr/9', branch: 'b', worktreePath: '/wt', blockerDiagnosis: '', summary: 's' }
+const call = (label) => effortCalls.find((c) => c.label.startsWith(label))
+
+// Scenario A — plan-gated opus task, clean pass: planner medium, plan judge high, implementer
+// medium, master review high; nothing escalates.
+effortCalls.length = 0
+ctx.agent = recordingAgent(async (prompt, opts) => {
+  if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
+  if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'PLAN' }
+  if (opts.phase === 'Implement') return greenImpl
+  return { verdict: 'approve', feedback: [] } // review judge
+})
+const cleanOpus = await T.converge({ ...baseEff, slug: 'proj-eff-a', scope: 'cross-cutting', planGate: true }, aEff)
+ok(cleanOpus && cleanOpus.status === 'review' && !cleanOpus.escalated, 'effort A: clean plan-gated opus task lands unescalated')
+ok(call('plan:proj-eff-a') && call('plan:proj-eff-a').effort === 'medium' && call('plan:proj-eff-a').model === 'opus', 'effort A: planner runs medium @ opus')
+ok(call('plan-judge:proj-eff-a') && call('plan-judge:proj-eff-a').effort === 'high', 'effort A: plan judge runs high (matrix)')
+ok(call('implement:proj-eff-a') && call('implement:proj-eff-a').effort === 'medium' && call('implement:proj-eff-a').model === 'opus', 'effort A: implementer runs medium @ opus')
+ok(call('review:proj-eff-a') && call('review:proj-eff-a').effort === 'high', 'effort A: master review runs high @ opus')
+
+// Scenario B — escalation flip mid-task: the opus one-shot goes red (escalate=true), the fable
+// takeover runs at high, and the master review — now at the fable tier — runs at xhigh.
+effortCalls.length = 0
+ctx.agent = recordingAgent(async (prompt, opts) => {
+  if (opts.phase === 'Implement') {
+    if (opts.label.endsWith('@fable')) return greenImpl
+    return { verified: false, blocked: false, escalate: true, prUrl: '', branch: 'b', worktreePath: '/wt', blockerDiagnosis: 'red one-shot', summary: '' }
+  }
+  return { verdict: 'approve', feedback: [] }
+})
+const escRes = await T.converge({ ...baseEff, slug: 'proj-eff-b', scope: 'single-file', planGate: false }, aEff)
+ok(escRes && escRes.status === 'review' && escRes.escalated && escRes.model === 'fable', 'effort B: red one-shot escalates and lands at fable')
+ok(call('implement:proj-eff-b') && call('implement:proj-eff-b').effort === 'medium' && call('implement:proj-eff-b').model === 'opus', 'effort B: opus first pass runs medium')
+ok(call('implement:proj-eff-b@fable') && call('implement:proj-eff-b@fable').effort === 'high' && call('implement:proj-eff-b@fable').model === 'fable', 'effort B: fable takeover runs high (bundle flips with the tier)')
+ok(call('review:proj-eff-b') && call('review:proj-eff-b').effort === 'xhigh' && call('review:proj-eff-b').model === 'fable', 'effort B: master review after escalation runs xhigh @ fable')
+
+// Scenario C — per-task `effort: max` escape hatch on a plan-gated opus task: planner + implementer
+// run at max, judges keep the matrix (plan judge high, master review high @ opus).
+effortCalls.length = 0
+ctx.agent = recordingAgent(async (prompt, opts) => {
+  if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
+  if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'PLAN' }
+  if (opts.phase === 'Implement') return greenImpl
+  return { verdict: 'approve', feedback: [] }
+})
+await T.converge({ ...baseEff, slug: 'proj-eff-c', scope: 'cross-cutting', planGate: true, effort: 'max' }, aEff)
+ok(call('plan:proj-eff-c') && call('plan:proj-eff-c').effort === 'max', 'effort C: effort override applies to the planner')
+ok(call('implement:proj-eff-c') && call('implement:proj-eff-c').effort === 'max', 'effort C: effort override applies to the implementer')
+ok(call('plan-judge:proj-eff-c') && call('plan-judge:proj-eff-c').effort === 'high', 'effort C: plan judge keeps the matrix (high) despite the override')
+ok(call('review:proj-eff-c') && call('review:proj-eff-c').effort === 'high', 'effort C: master review keeps the matrix (high @ opus) despite the override')
+
+// Scenario D — the override survives an escalation flip: implementer stays max on both tiers while
+// the master review follows the matrix to xhigh.
+effortCalls.length = 0
+ctx.agent = recordingAgent(async (prompt, opts) => {
+  if (opts.phase === 'Implement') {
+    if (opts.label.endsWith('@fable')) return greenImpl
+    return { verified: false, blocked: false, escalate: true, prUrl: '', branch: 'b', worktreePath: '/wt', blockerDiagnosis: 'red one-shot', summary: '' }
+  }
+  return { verdict: 'approve', feedback: [] }
+})
+await T.converge({ ...baseEff, slug: 'proj-eff-d', scope: 'single-file', planGate: false, effort: 'max' }, aEff)
+ok(call('implement:proj-eff-d') && call('implement:proj-eff-d').effort === 'max', 'effort D: override holds on the opus first pass')
+ok(call('implement:proj-eff-d@fable') && call('implement:proj-eff-d@fable').effort === 'max', 'effort D: override survives the fable takeover')
+ok(call('review:proj-eff-d') && call('review:proj-eff-d').effort === 'xhigh', 'effort D: master review still follows the matrix (xhigh @ fable)')
 
 // ---- Transient agent death: null-return hardening ----------------------------
 // Observed 2026-07-18 (narcissus-avp): implementer agents died mid-run on "API Error: Connection closed

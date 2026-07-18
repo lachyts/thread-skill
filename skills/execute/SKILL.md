@@ -56,12 +56,24 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 | `env_bootstrap` | none (omit) | `envBootstrap` (rollout-level) |
 | `ignore_gate` | `false` (omit) | `task.ignoreGate` (per-task) |
 | `model` | `opus` | `task.model` (per-task; `opus` \| `fable`) |
+| `effort` | none (omit) | `task.effort` (per-task ONLY — the ADR 0004 escape hatch; it has no rollout-level form) |
 
 `scope:` is read directly from each task's frontmatter (set by `/wave:schedule`). `completion_sentinel` is no longer used — the Workflow returns validated structured output instead of parsing sentinel strings.
 
 `env_bootstrap` (rollout-level) is an optional shell command the engine runs once per worktree so agents start from a working interpreter + deps (e.g. `poetry env use 3.11 && poetry install`) — read it from the rollout frontmatter and pass it as `envBootstrap`; **omit the key when absent** so the worktree-setup prompt stays byte-identical (resume-cache invariant). `ignore_gate` (per-task) is an explicit override for a task note that carries a human/release gate in prose ("don't action until a release ships"); when `true`, pass `ignoreGate: true` on that task so the engine tells the agent the gate is overridden for this run — **omit/false** otherwise.
 
 `model` resolves task frontmatter → rollout frontmatter → `opus` and sets the task's **starting tier**. Judges **follow the task's live tier**, so a `fable` task gets Fable review end-to-end. (A run can still pin all judges to one model via the `judgeModel` arg — it wins when set.)
+
+**Effort bundles (ADR 0004).** A tier is a **(model, per-role effort) bundle**, not two knobs — reasoning effort rides the same ladder as the model. The per-role matrix is fixed in ONE place in the engine (`wave-execute.workflow.js`, the `EFFORT` constant):
+
+| Role | `opus` tier | `fable` tier |
+|---|---|---|
+| planner / implementer (incl. revisers + read-only investigator) | medium | high |
+| judges (plan + review) | high | high |
+| master review (the PR-review judge — refines the judges row) | high | xhigh |
+| mechanical reconcile stages | low | low |
+
+Every `agent()` spawn site sets `effort` from the task's **live** tier + the agent's role, so escalation carries effort automatically — flipping a task to fable is one move that upgrades model AND effort, and judges follow (judges pinned via `judgeModel` take the pinned tier's row — model and effort always travel together). The **single escape hatch** is per-task `effort:` frontmatter (`low` \| `medium` \| `high` \| `xhigh` \| `max`): resolve it from the task note and pass it as `task.effort` — it overrides the planner/implementer effort for that task only, judges always keep the matrix, and it holds across an escalation (a monster task at fable/max stays at max). There is deliberately **no rollout-level effort config** (see ADR 0004's rejected options) — tuning the matrix means editing the engine, because the matrix encodes a stance (where effort is worth paying), not a per-rollout preference. The reconcile row is documented stance only today: reconcile is deterministic Python (`reconcile-wave.py`), so no agent consumes it.
 
 **Model escalation (one-shot first pass).** An `opus` task gets exactly one un-iterated pass at each layer: one plan, one implementation with a **single** verifier run (the Ralph `max_iterations` budget does not apply to the first pass), one judged PR round. The first evidence of hardness anywhere — a plan-judge `changes` verdict, a first-pass planner/investigator block, a red one-shot verifier run, an implementer block, or a review-judge `changes` verdict — **escalates the task to `fable` for all remaining work**, judges included. Escalation is one-way, sticky, and happens inside the engine (no re-invocation): the fable agent inherits the prior attempt's worktree, committed work, and note diagnosis, and runs the full Ralph loop. A `fable` task (stepped up by `/wave:schedule` §4.7 or a rollout-level `model: fable`) never escalates — there is nothing above fable — and runs the full loop from the start, exactly as before. Escalation is **durable**: reconcile (§6) stamps `model: fable` on the task note, so resume / `/wave:repair` re-dispatches start at fable and never re-pay the opus toll. There is no config switch — escalation is always on for opus tasks.
 
@@ -94,8 +106,11 @@ Build the `args` object the workflow expects:
         "scope": "single-file", "planGate": false,
         "maxIterations": 3, "maxReviewRounds": 4, "maxPlanRounds": 2,
         "ignoreGate": false,                 // per-task; omit/false unless overriding a human/release gate
-        "model": "opus" }                    // per-task STARTING tier; "fable" when wave:schedule stepped a
+        "model": "opus",                     // per-task STARTING tier; "fable" when wave:schedule stepped a
                                              //   hard task up. The engine may escalate opus→fable mid-run.
+        "effort": "max" }                    // per-task ONLY, from the task note's `effort:` frontmatter —
+                                             //   OMIT when absent. Overrides the tier bundle's planner/
+                                             //   implementer effort; judges keep the matrix (ADR 0004).
     ]}
   ]
 }
