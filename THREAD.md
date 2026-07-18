@@ -6,6 +6,40 @@ lives in the Obsidian vault at `Work/Tasks/wave-execute-e2e-test-giflab`; the pr
 
 ---
 
+## 2026-07-19 — 1.3.0 ships: the self-hosting rollout — wave builds six features into itself
+
+A grill-with-docs session turned the project's own backlog (5 brain-dump captures + 1 specced
+task) into [[wave-skill-rollout-2026-07-18]] and ran it same-day: **6 waves, fully serial**
+(complete conflict graph — `wave-execute.workflow.js` is a 5-of-6 hub), PRs #1–#6, zero
+escalations (both opus tasks first-shot green; four predictive fable step-ups). Landed:
+
+- **Transient-death handling** (#1) — `runAgent()` wrapper: one in-run retry, `__dead` sentinel at
+  all 10 call sites, layer-appropriate transient blocks, no escalation on infra death.
+- **Effort bundles** (#2, ADR 0004) — tier = (model + effort); per-role matrix in the engine;
+  per-task `effort:` escape hatch. One ladder, not two knobs.
+- **Pause/reinstate** (#3) — soft (`pause_requested`, wave-boundary, via reconcile) + hard
+  (TaskStop protocol incl. heartbeat CronDelete); reinstate = plain execute resume.
+- **Gated inputs** (#4, ADR 0005) — required plan declaration; `gate-pending` pauses regardless of
+  plan_approval/continuous; `approve-gates` records durable sign-off; resume-filter excludes.
+- **Progress/ETA** (#5) — flat `wave_N_dispatched/merged` stamps via reconcile (input-gated
+  decision, injected live by /wave:repair mid-rollout), rough in-rollout estimate, status render.
+- **Dated rollout naming** (#6) — emit `<slug>-rollout-<YYYY-MM-DD>` everywhere, resolve legacy.
+
+**The rollout was also the wave-verify live bed — all three drills passed** (status drift flag;
+repair drift-resolve + input-gated inject + re-dispatch; defer-with-dependent chain surfacing).
+And it took a real **hard pause** (fable credits, 20:55→02:24): TaskStop mid-implement, heartbeat
+deleted, `paused:` stamp, one-shot resume cron — `resumeFromRunId` recovered the worktree work.
+The manual runbook matched the protocol wave 3 had codified hours earlier.
+
+- **Gotcha caught pre-flight**: the narcissus no-CI merge-wave guard lived only in the plugin
+  cache — never committed. Ported to the repo (`8a3614c`) before dispatch; it then fired live on
+  PRs #3/#5. Rule: a cache hot-patch must be committed back the same day.
+- **Escalation flip still unobserved live** (unit-tested only) — watch on the next mixed rollout;
+  live-bed checklist: vault `wave-skill-live-bed-v13-features`.
+- Shipped as **1.3.0** (`c66e221`): manifest + marketplace bumped, cache dir synced from repo,
+  `installed_plugins.json` repointed. Vault also gained `/wave:gather` specced (grill-me-by-default
+  gather route — tasks → roadmap/phases), riding a later rollout.
+
 ## 2026-07-13 — 1.2.0 ships: duplicate-hooks load failure fixed; gstack eval shrinks the live bed
 
 The plugin had been **fully dead** — `claude plugin list` showed `✘ failed to load` on 1.1.0 with
