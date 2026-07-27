@@ -9,7 +9,7 @@
       "name": "thread",
       "source": "./",
       "description": "Continuity family: thread:next routes the undecided 'what's my move?' moment; thread:stash and thread:defer write self-contained Obsidian tasks (dateless / scheduled); thread:handoff forks to a fresh agent; thread:open resumes durable state; thread:close persists and commits.",
-      "version": "1.0.1"
+      "version": "1.1.0"
     }
   ]
 }

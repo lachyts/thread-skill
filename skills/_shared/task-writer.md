@@ -66,11 +66,20 @@ priority: normal
 projects: ["[[<Project>]]", "[[<Area>]]"]
 scheduled: <YYYY-MM-DD>        # defer only — OMIT the line entirely for stash
 captured: <YYYY-MM-DD today>
+launch: <cc-* alias>           # qualifying tasks only — OMIT when no alias applies
 ---
 ```
 
 - `<area>` tag = lowercase area (animately, art, skate, vault, life…), the
   same denormalisation every task carries.
+- `launch:` = the `cc-*` launch-alias literal (e.g. `cc-animately-seo`) when
+  the capture **qualifies for launch context** — any concrete signal: the
+  project has a repo, the work needs named MCP servers, or live
+  branch/worktree state exists (a stash/defer from a repo session almost
+  always qualifies). Inherit the project note's `launch:` default as a prior,
+  then fit-check it for this task. Omit the field when no alias applies.
+  Threshold, fit check, canonical templates:
+  `~/repos/workspaces/_shared/knowledge/task-launch-context.md`.
 - `thread` marker tag = this is a thread capture; makes dateless stashes
   queryable (`/weekly`'s Stashed-threads pass depends on it). Documented in
   `_shared/knowledge/obsidian-schema.md`.
@@ -86,12 +95,23 @@ captured: <YYYY-MM-DD today>
 **Thread:** [THREAD.md](<absolute path>) · state: <state>   ← only if one exists
 **Set down:** <YYYY-MM-DD> from <workspace/project context>
 
+## Launch                                                    ← qualifying tasks only
+
+- **Launch:** `<cc-* alias>` (Codex: `<cx-* twin>`)          ← or: `claude` from `~/repos/<path>`
+- **Repo:** `~/repos/<path>` — branch `<name>` (WIP)         ← live state / real constraint only
+- **MCP:** required `mcp__<ns>__*`, …; optional `mcp__<ns>__*`
+
 ## Resume prompt
 
 Paste into a fresh agent session:
 
 ​```
 You're picking up "<title>", set down on <date>.
+Launch: <cc-* alias>   (Codex: <cx-* twin>)                      ← qualifying only
+Preflight — before any work: verify each required namespace has   ← qualifying only,
+tools loaded (mcp__<ns>__*, …) and make one cheap authenticated      MCP-needing tasks
+call per namespace; if any is missing or unauthenticated: STOP
+and report exactly which — do not proceed without it.
 First: you now own this work — mark the capture done: set `status: done` and
 add `completed: <today>` in ~/repos/obsidian/Work/Tasks/<slug>.md.
 Context: <2–4 lines of state — what's built, what's decided, what's blocked.>
@@ -100,9 +120,16 @@ Next move: <the single concrete next step>
 ​```
 ```
 
-The **first instruction closes the capture** (pickup auto-complete, ADR 0001
-consequence). It's inside the prompt so it works even when pasted into a
-non-Claude harness. If the work is conversation-gated (needs Lachy's input
+The `## Launch` section and the Launch/Preflight prompt lines appear only when
+the capture **qualifies** (any concrete launch signal — see § 4 `launch:`);
+non-qualifying captures keep the original shape exactly. Preflight guards two
+distinct failures: namespace absent (wrong profile) and
+connected-but-unauthenticated (expired OAuth — the silent-degrade case).
+
+The **close-the-capture instruction runs first once preflight passes** (pickup
+auto-complete, ADR 0001 consequence) — deliberately *after* preflight, so a
+failed pickup never marks the capture done. It's inside the prompt so it works
+even when pasted into a non-Claude harness. If the work is conversation-gated (needs Lachy's input
 before an agent can act), say so explicitly in the Notes line — this is what
 keeps `/wave:schedule` from sweeping it into an autonomous rollout.
 
