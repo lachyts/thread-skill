@@ -8,7 +8,8 @@ description: 'Use when turning a project''s disparate loose Obsidian tasks into 
 `/wave:gather` turns **a project's disparate loose tasks** into a roadmap: cluster proposals →
 grilled meaning → phase notes + `pN-M` renames + project-note surfacing. It is the **inverse of
 `/wave:split`** — split decomposes a plan into tasks; gather forms phases from tasks that already
-exist. Both converge on `/wave:schedule` (phases order meaning, waves order merges).
+exist. Both converge on `/wave:schedule` **when the work is wave-shaped** (phases order meaning,
+waves order merges — but not every roadmap wants a rollout; see step 5's execution-fit test).
 
 Reference roadmap shape: the `[[GifLab]]` project note — phase notes in `Work/Phases/`,
 `<project>-pN-M` task naming, two always-visible base blocks at the top of the project note.
@@ -125,11 +126,25 @@ schema**: `~/repos/workspaces/_shared/knowledge/add-writers/add-phase.md` (phase
    a sibling like `[[GifLab]]`). **Only if absent** — idempotent, never clobber existing blocks.
 4. **Misfits stay loose** — untouched, listed in the report.
 
-### 5. Hand off
+### 5. Hand off — run the execution-fit test before naming a next step
 
 Report what was written (phases as clickable `obsidian://` links, renames, surfacing status,
-misfits), and name the next step: **`/wave:schedule <slug>`** when a phase is ready to land as a
-rollout. Phases order meaning, waves order merges — gather never writes `wave:`.
+misfits). Then decide which next step to name — **do not default to `/wave:schedule`**:
+
+- **Wave-shaped work** → name **`/wave:schedule <slug>`**. Wave-shaped means the phase's tasks
+  converge on ONE code repo, each task lands as a PR, and success is machine-verifiable inside
+  the run (tests / build / greps).
+- **Everything else** → name **calendar/session-driven execution**: work each phase's
+  `## Build sequence` one scoped session at a time (the task's `launch:` alias), letting
+  `scheduled:` dates and measurement-calendar rows do the dispatch. Signs the roadmap is NOT
+  wave-shaped: the core action of tasks is an external publish (CMS / live site / DNS / config
+  console); ordering constraints are measurement windows or calendar dates rather than file
+  overlap; verification only exists days or weeks after the change (impact measures). A rollout
+  buys nothing there — the engine's parallelism is forbidden by the isolation windows, every
+  externally-publishing task pauses at the human gate, and the verifier loop has nothing to
+  verify inside the run.
+
+Phases order meaning, waves order merges — gather never writes `wave:` either way.
 
 ## Don'ts
 

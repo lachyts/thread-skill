@@ -9,7 +9,7 @@
       "name": "wave",
       "source": "./",
       "description": "Wave pipeline: /wave:split decomposes a plan or design into numbered, phased Obsidian tasks, /wave:gather turns a project's loose tasks into a phased roadmap, /wave:schedule clusters them into dependency-ordered parallel-safe waves, and /wave:execute runs a three-layer convergence loop with deterministic per-wave auto-merge.",
-      "version": "1.4.0"
+      "version": "1.4.1"
     }
   ]
 }

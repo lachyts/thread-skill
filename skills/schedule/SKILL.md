@@ -26,6 +26,20 @@ The argument resolves to a project-note slug (the thing the task's `projects:` f
 
 ## Skill flow
 
+### 0. Execution-fit gate
+
+Wave rollouts are for **wave-shaped** work: tasks that converge on ONE code repo, land as a PR
+each, and verify machine-checkably inside the run (tests / build / greps). Before computing
+anything, scan the candidate set for misfits — tasks whose core action is an external publish
+(CMS / live site / DNS / config console), whose ordering constraint is a measurement window or
+calendar date rather than file overlap, or whose verification only arrives days later (impact
+measures). If such tasks dominate, **stop and recommend calendar/session-driven execution
+instead** (work the phase's `## Build sequence` one scoped session at a time; `scheduled:` dates
+do the dispatch): the engine's parallelism is forbidden by isolation windows, every
+externally-publishing task pauses at the human gate (ADR 0005 §3.7), and file-overlap wave
+computation cannot see window/calendar constraints. A mixed set is fine if the wave-shaped
+majority can roll out while the misfits stay unstamped — name them in the gate.
+
 ### 1. Discover tasks
 
 Walk `~/repos/obsidian/Work/Tasks/*.md`. Filter:
