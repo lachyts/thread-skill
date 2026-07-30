@@ -14,10 +14,10 @@ The decisive "this is <day>'s problem" route. Same capture as `thread:stash`, pl
    - No argument → tomorrow (`TZ="Australia/Melbourne" date -v +1d "+%Y-%m-%d"`).
    - Named day → next *future* occurrence, never today (`defer monday` on a Monday = +7).
    - Explicit date → as given; refuse past dates.
-2. **Write the capture task** — follow `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` exactly: § 1 routing, § 2 dedup (re-deferring an open capture = move its `scheduled:`, don't duplicate), § 4 frontmatter **with `scheduled: <resolved date>`**, § 5 self-contained body, § 6 THREAD.md upgrade only if thread-worthy.
-3. **Confirm** per § 7, always echoing the resolved date: `→ [[<slug>]] scheduled **Mon 20 Jul** — surfaces on that day's page. <Project>.` — clickable task link, then state plainly that the session is safe to end.
+2. **Write the capture task** — follow `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` exactly: § 1 routing, § 2 dedup (re-deferring an open capture = move its `scheduled:`, don't duplicate), § 3b **day-page To do line** (the visible surface), § 4 frontmatter **with `scheduled: <resolved date>`**, § 5 self-contained body, § 6 THREAD.md upgrade only if thread-worthy.
+3. **Confirm** per § 7, always echoing the resolved date: `→ [[<slug>]] scheduled **Mon 20 Jul** — on that day page's To do list. <Project>.` — clickable task link, then state plainly that the session is safe to end.
 
-The day-page surfacing is free: `/morning` finds tasks by `rg "^scheduled: $TODAY"` and the TaskNotes agenda shows them — no day-note editing, exactly like `/reflect`'s carry-forward.
+**The day page is the visible surface — frontmatter alone is not enough.** Always run task-writer § 3b: add the `- [ ] [[<slug>|<title>]]` line to the target day note's `## To do` (creating the note from the Day template if needed). `/morning`'s `rg "^scheduled: $TODAY"` and the TaskNotes agenda are secondary discovery, not the surface Lachy sees.
 
 ## Don't
 

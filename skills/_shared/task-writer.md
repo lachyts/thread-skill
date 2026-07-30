@@ -53,6 +53,25 @@ Deterministic rules, `Australia/Melbourne`:
 The confirmation ALWAYS echoes the resolved date (§ 7) so a parse surprise is
 visible immediately.
 
+## 3b. Make it visible on the day page (`defer` only)
+
+`scheduled:` frontmatter alone is INVISIBLE — the day note's `## To do`
+checklist is the surface Lachy actually works from (2026-07-30 feedback: a
+deferred task he could not see on the Monday page). After writing the task
+file, put a line on the target day's note:
+
+1. **Locate the day note**: glob `~/repos/obsidian/Days/*/*/*/<YYYY-MM-DD> *.md`.
+   If missing, create it at
+   `Days/<YYYY>/<month-folder>/<YYYY>-W<ww>/<YYYY-MM-DD> <ddd>.md` from
+   `_System/Templates/Day.md` — ISO week number; the month folder is the month
+   of that ISO week's **Sunday** (so 2026-07-30 Thu lives under
+   `2026-08/2026-W31/`).
+2. **Append under `## To do`** (create the section above `## Notes` if absent):
+   `- [ ] [[<slug>|<Short human title, incl. deadline if one exists>]]`
+3. **Dedup**: skip if any line linking `[[<slug>]]` already exists in the note.
+   Re-deferring moves the line — add to the new day, remove the unchecked line
+   from the old day's note.
+
 ## 4. Task file shape
 
 Path: `~/repos/obsidian/Work/Tasks/<kebab-slug>.md`. Slug: ≤5 words, names the
@@ -149,7 +168,7 @@ keeps `/wave:schedule` from sweeping it into an autonomous rollout.
 
 One compact confirmation, always echoing the concrete outcome:
 
-- defer: `→ [[<slug>]] scheduled **Mon 20 Jul** — surfaces on that day's page. <Project>.`
+- defer: `→ [[<slug>]] scheduled **Mon 20 Jul** — on that day page's To do list. <Project>.`
 - stash: `→ [[<slug>]] stashed (no date) — resurfaces in /weekly's Stashed threads. <Project>.`
 
 Render the task link clickable (`obsidian://open?...` per the global link
