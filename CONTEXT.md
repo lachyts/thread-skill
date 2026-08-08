@@ -13,6 +13,19 @@ The ubiquitous language of the `thread:*` plugin. Terms only — no implementati
   disposes of the current thread with known intent.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"
   then dispatches to a route. A sibling, not a parent.
+- **Orient** — the project-altitude router: audits a whole project/area (not
+  one thread), recommends the best use of time, asks the steering mode, then
+  routes — dispatch artefacts, `open`, or `/wave:*`.
+- **Batch** — a parallel-safe cluster of open work (disjoint files/surfaces)
+  matched to the narrowest covering launch profile; the unit orient
+  dispatches.
+- **Dispatch artefact** — what an orient dispatch actually produces: a batch
+  prompt file under `<workspace>/.scratch/orient/` plus a scoped-profile
+  terminal one-liner. Artefacts are emitted, never launched.
+- **`dispatched:` stamp** — `dispatched: YYYY-MM-DD` task frontmatter written
+  at emission; marks the task in-flight so orient never double-batches it.
+  Superseded by the batch session's end-of-run note update; stale stamps are
+  cleared by `--debrief`.
 - **Task floor** — the invariant: every stash/defer writes a self-contained
   vault task routed to the right project. The guarantee that makes shutting an
   agent down feel safe.

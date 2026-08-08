@@ -1,7 +1,7 @@
 {
   "name": "thread",
-  "version": "1.2.0",
-  "description": "A continuity family for agent threads: answer 'what's my next move?' or decisively dispose of the current thread — open/resume durable state (thread:open), route when undecided (thread:next), lock a thread dormant (thread:stash), set it down onto a specific day (thread:defer), fork it to a fresh agent (thread:handoff), or finish and persist (thread:close). Every stash/defer writes a self-contained Obsidian task routed to the right project, so shutting an agent down never loses context.",
+  "version": "1.3.0",
+  "description": "A continuity family for agent threads: answer 'what's my next move?' or decisively dispose of the current thread — open/resume durable state (thread:open), route when undecided (thread:next), orient on a whole project/area and dispatch parallel background batches or a focus item (thread:orient), lock a thread dormant (thread:stash), set it down onto a specific day (thread:defer), fork it to a fresh agent (thread:handoff), or finish and persist (thread:close). Every stash/defer writes a self-contained Obsidian task routed to the right project, so shutting an agent down never loses context.",
   "author": {
     "name": "Lachlan Tetlow-Stuart"
   },
