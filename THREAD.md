@@ -86,6 +86,14 @@ scheduled 2026-07-15.
   running session's skill list, but descriptions only index at session start —
   members render bare (`thread:close`) until a fresh session. Files were
   verified well-formed; don't debug this again.
+- NotchBar's AgentStatus (Bartender) rewrites the direct `~/.codex/hooks.json`
+  on its own schedule, injecting notify handlers tagged
+  `# notchbar-agents-codex-hook` into every event (including a `Stop`) and
+  flipping `features.codex_hooks` in the direct config only.
+  `check-agent-parity.py` treats both as app-managed (carve-out added
+  2026-08-12, same precedent as its `node_repl` fields). Codex `hooks.state`
+  `trusted_hash` values are Codex-internal — they match no derivable
+  serialisation of the hook; never hand-author trust entries.
 - Skills execute from `~/.claude/plugins/cache/thread/thread/<version>/`, not
   the `marketplaces/thread/` clone — `${CLAUDE_PLUGIN_ROOT}` resolves to the
   cache path. The cache is **version-keyed**: `claude plugin marketplace
@@ -105,6 +113,7 @@ scheduled 2026-07-15.
 
 ## Session log
 
-- 2026-07-14 (latest): Notion retired ecosystem-wide — handoff destination deleted from close, workspaces + Codex adapter swept, migration task + global memory captured, v1.0.1 shipped (found: plugin cache is version-keyed).
+- 2026-08-12 (latest): merge-day parity follow-up — the 4 reported checker errors (plus 10 same-day drift) diagnosed to NotchBar's Codex hook injection + hardlink/mode drift; checker gained the NotchBar app-managed carve-out, add.md fan-out re-linked, PASS restored. Follow-up: [[notchbar-codex-hooks-follow-up]].
+- 2026-07-14: Notion retired ecosystem-wide — handoff destination deleted from close, workspaces + Codex adapter swept, migration task + global memory captured, v1.0.1 shipped (found: plugin cache is version-keyed).
 - 2026-07-14 (later): installed as thread@thread + references migrated + vault project note; first live close ran from the plugin itself; verification task scheduled for 2026-07-15.
 - 2026-07-14: thread created — v1.0.0 built end-to-end from approved plan.
