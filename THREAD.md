@@ -10,6 +10,17 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-08-12 — v2.0.1: handoff becomes model-invocable.** Grilled same day as
+the merge: the `disable-model-invocation: true` flag on handoff was inherited
+from the flat-skill Pocock port (build-plan said "keeps", no rationale ever
+recorded), and the asymmetry was backwards — close auto-commits two repos and
+is visible; handoff writes only a temp file and was the one hidden route.
+Flag dropped; description + body now gate on explicit fork intent or router
+dispatch, with a hard no-proactive rule (context-feels-long → recommend
+`next`, never self-fire). Decided: visible/explicit-intent over
+visible/proactive and keep-hidden. No ADR — one-line reversible flag, stance
+recorded here + CONTEXT.md § Handoff.
+
 **2026-08-12 — v2.0.0: thread absorbs wave (ADR 0009).** The wave plugin
 (`lachyts/wave-skill`, v1.4.1) merged in with full git history; all six
 rollout verbs renamed `/wave:*` → `/thread:*`; "wave" is now a glossary

@@ -54,7 +54,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Stash** — dispose dormant, no date. "Not my focus, lock it in."
 - **Defer** — dispose onto a specific day (`scheduled:`). "Tomorrow's problem."
 - **Handoff** — fork the working context to a fresh agent *now*; work continues
-  immediately, this session ends.
+  immediately, this session ends. Model-invocable on explicit fork intent (or
+  router dispatch) only — never self-initiated because the context feels long;
+  that recommendation belongs to `next`.
 - **Close** — the work is finished; persist + commit, end-of-thread ritual.
 - **Pickup** — resuming a stashed/deferred thread from its task. Pickup
   auto-completes the capture task: the capture's job ends the moment the

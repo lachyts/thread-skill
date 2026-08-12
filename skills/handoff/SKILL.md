@@ -1,8 +1,7 @@
 ---
 name: handoff
-description: 'Fork the current conversation to a fresh agent NOW — compact it into an inline copy-paste prompt (plus an optional temp doc) so a new session continues this exact task immediately. Use when the context window is filling up, when forking into a separate session, or when handing a task to another agent mid-stream. Distinct from thread:open/thread:close (persistent continuity) and thread:stash/thread:defer (set down for later) — this is a one-shot compaction for resuming THIS task right now.'
+description: 'Fork the current conversation to a fresh agent NOW — compact it into an inline copy-paste prompt (plus an optional temp doc) so a new session continues this exact task immediately. Trigger ONLY on explicit fork intent — "hand this off", "handoff this thread", "fork this to a fresh agent", "new session and keep going", explicit /thread:handoff — or on dispatch from a router (thread:next / thread:orient). Do NOT trigger when "handoff" refers to people or other systems, when handoffs are merely being discussed, or proactively because the context feels long — for the undecided moment recommend thread:next instead. Distinct from thread:open/thread:close (persistent continuity) and thread:stash/thread:defer (set down for later) — this is a one-shot compaction for resuming THIS task right now.'
 argument-hint: "What will the next session focus on?"
-disable-model-invocation: true
 author: Matt Pocock
 license: MIT
 source: https://github.com/mattpocock/skills (skills/productivity/handoff) — adapted under MIT
@@ -11,6 +10,15 @@ source: https://github.com/mattpocock/skills (skills/productivity/handoff) — a
 # /thread:handoff — fork this thread to a fresh agent
 
 Compact the current conversation so a fresh agent can continue the work *immediately*. The primary output is an **inline copy-paste prompt** printed in the response; a temp-file handoff doc is the optional deep-context companion.
+
+**Invocation gate.** Run this only on explicit fork intent (the user asked for a
+handoff of THIS conversation) or when a router (`next`/`orient`) dispatched it.
+Never self-initiate a handoff because the session feels long or the context is
+filling — that is a recommendation, and recommendations for the undecided
+moment belong to `thread:next`'s ask-first menu. (Model invocation enabled
+2026-08-12: the old `disable-model-invocation` flag was inherited from the
+flat-skill port, never a recorded decision, and handoff is the cheapest-misfire
+route of the family — it writes nothing durable.)
 
 ## Output 1 — the inline prompt (always)
 
