@@ -57,7 +57,7 @@ export const meta = {
 //                                    //   run, one review round); the first rejection/red/block ESCALATES
 //                                    //   the task to fable for all remaining work — sticky, judges follow.
 //                                    //   A fable task runs its whole pipeline on fable, as before.
-//       effort          : string,    // optional; per-task ESCAPE HATCH (ADR 0004), resolved by the skill
+//       effort          : string,    // optional; per-task ESCAPE HATCH (ADR 0007), resolved by the skill
 //                                    //   from the task note's `effort:` frontmatter. Overrides the tier
 //                                    //   bundle's planner/implementer effort for THIS task only — judges
 //                                    //   always keep the EFFORT matrix. low | medium | high | xhigh | max.
@@ -65,7 +65,7 @@ export const meta = {
 //       approvedGates   : string[],  // optional; gated inputs a human already signed off, resolved by the
 //                                    //   skill from the task note's "## Approved gates" section (bullets,
 //                                    //   "(approved …)" annotations stripped). The engine pauses a task
-//                                    //   ONLY for declared gates NOT in this list (ADR 0005) — so
+//                                    //   ONLY for declared gates NOT in this list (ADR 0008) — so
 //                                    //   re-dispatches and resumes never re-ask. Omit/empty when none.
 //     }]
 //   }]
@@ -77,7 +77,7 @@ export const meta = {
 // where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending, model is the FINAL tier
 // the task ran on, escalated/escalatedAt ('plan' | 'implement' | 'review') record an opus→fable
 // escalation, and gatedInputs lists the declared-but-unapproved gates when status is gate-pending
-// (a declared gate always pauses for a human — ADR 0005).
+// (a declared gate always pauses for a human — ADR 0008).
 // =============================================================================
 
 // ---- Structured schemas (replace the old sentinel strings) ------------------
@@ -116,7 +116,7 @@ const IMPL_RESULT = {
     worktreePath: { type: 'string', description: 'absolute worktree path from git rev-parse --show-toplevel' },
     blockerDiagnosis: { type: 'string', description: 'one-paragraph diagnosis when blocked, else empty string' },
     summary: { type: 'string', description: 'one-paragraph summary of what changed and was tested' },
-    gatedInputs: { type: 'array', items: { type: 'string' }, description: 'ONLY when you stopped before a gated action (ADR 0005): one line per human authorisation the task needs that the note\'s "## Approved gates" does not cover ("spend: <what> — cap <amount>" / "credential: <what>" / "irreversible: <what>"). Omit or empty otherwise.' },
+    gatedInputs: { type: 'array', items: { type: 'string' }, description: 'ONLY when you stopped before a gated action (ADR 0008): one line per human authorisation the task needs that the note\'s "## Approved gates" does not cover ("spend: <what> — cap <amount>" / "credential: <what>" / "irreversible: <what>"). Omit or empty otherwise.' },
   },
   required: ['verified', 'blocked', 'escalate', 'prUrl', 'branch', 'worktreePath', 'blockerDiagnosis', 'summary'],
 }
@@ -150,7 +150,7 @@ Before you open or update a PR, run these preflight checks:
 // in the prompt) and harmless on a fresh task where no such section exists.
 const PRIOR_FEEDBACK_NOTE = `If the task note has a "## Review-blocked feedback", "## Blocker diagnosis", "## Plan-blocked feedback", or "## Repair input" section from a PRIOR attempt, treat it as AUTHORITATIVE — resolve every point in it first, and use any "## Repair input" value exactly as given (do not re-derive or second-guess it).`
 
-// Gated inputs (ADR 0005): API spend, credentials, and irreversible actions are decisions no agent may
+// Gated inputs (ADR 0008): API spend, credentials, and irreversible actions are decisions no agent may
 // make. Two faces of one rule — the PLAN declares them up front (a required "### Gated inputs" section,
 // enforced by the plan-judge), and every code-writing agent stops BEFORE any gated action it finds
 // undeclared/unapproved (the plan_approval:false path). Both are STATIC prompt text — always rendered,
@@ -158,7 +158,7 @@ const PRIOR_FEEDBACK_NOTE = `If the task note has a "## Review-blocked feedback"
 // unapprovedGates below turn a non-empty unapproved declaration into a 'gate-pending' stop regardless
 // of plan_approval config or continuous mode. Approval lives durably on the task note ("## Approved
 // gates", passed in as task.approvedGates), so re-dispatches never re-ask those exact gates.
-const GATED_INPUTS_CHECK = `Gated inputs (hard rule — ADR 0005): BEFORE any gated action, identify every human authorisation this
+const GATED_INPUTS_CHECK = `Gated inputs (hard rule — ADR 0008): BEFORE any gated action, identify every human authorisation this
 task needs — API spend (a hard cap is mandatory), credentials, or an irreversible action. If the task
 note's "## Approved gates" section covers ALL of them, proceed — an approved cap is a CEILING to respect,
 never a target (blowing it is a verifier/review failure, not a re-ask). Otherwise STOP BEFORE the gated
@@ -204,7 +204,7 @@ function unapprovedGates(declared, approved) {
 }
 
 function gateDiagnosis(gates) {
-  return 'gated inputs await human sign-off (a declared gate always pauses — ADR 0005):\n'
+  return 'gated inputs await human sign-off (a declared gate always pauses — ADR 0008):\n'
     + gates.map((g) => '- ' + g).join('\n')
 }
 
@@ -401,7 +401,7 @@ Steps:
    ### Gated inputs      (REQUIRED — one line per human authorisation the task needs: "spend: <what> — cap
                           <amount>" (a hard cap is mandatory), "credential: <what>", "irreversible: <what>";
                           or exactly "None". A non-empty declaration pauses the task for human sign-off —
-                          regardless of config or continuous mode (ADR 0005). If the task note carries a
+                          regardless of config or continuous mode (ADR 0008). If the task note carries a
                           "## Approved gates" section, restate each still-needed approved gate VERBATIM
                           (without its "(approved …)" annotation) — restated approved gates do not
                           re-pause; only NEW gates do.)
@@ -434,7 +434,7 @@ Check, against the task brief:
 - Are the stated risks/unknowns the real ones?
 - Does the plan carry the required "### Gated inputs" section — either exactly "None" or concrete gates
   (spend WITH a hard cap / credential / irreversible action)? A missing section, or a spend gate without
-  a cap, is an automatic "changes" (ADR 0005). Also flag a gate the brief implies but the plan omits.
+  a cap, is an automatic "changes" (ADR 0008). Also flag a gate the brief implies but the plan omits.
 
 Read the brief and grep the repo as needed to verify the plan's claims — do not approve on faith.
 Decide: verdict "approve" if the plan is sound (clean or trivially nitpicky), else "changes" with 3–8
@@ -625,11 +625,11 @@ function escalate(st, slug, at) {
   log(`escalation: ${slug} → fable (${at})`)
 }
 
-// ---- Effort bundles (ADR 0004) ----------------------------------------------
+// ---- Effort bundles (ADR 0007) ----------------------------------------------
 // A tier is a (model, per-role EFFORT) bundle, not two knobs. This matrix is the ONE place the
 // per-role efforts live — fixed in the engine, deliberately not rollout config (tuning it means
 // editing this file: the matrix encodes a stance about where effort is worth paying, not a
-// per-rollout preference — see ADR 0004's rejected options). Escalation flips st.tier, and every
+// per-rollout preference — see ADR 0007's rejected options). Escalation flips st.tier, and every
 // spawn site reads this matrix at dispatch time, so a mid-task opus→fable flip carries effort
 // automatically: no second ladder, no extra stamp.
 //   implementer  — the plan/code-writing role: planner, plan-reviser, implementer, reviser,
@@ -645,7 +645,7 @@ const EFFORT = {
 }
 
 // Effort for the planner/implementer role at the task's LIVE tier. Per-task `effort:` frontmatter
-// (task.effort) is the SINGLE escape hatch (ADR 0004): it overrides the bundle's planner/implementer
+// (task.effort) is the SINGLE escape hatch (ADR 0007): it overrides the bundle's planner/implementer
 // effort for that task only — judges always keep the matrix — and it is absolute across an
 // escalation (a monster task at fable/max stays at max).
 function implEffort(st, task) {
@@ -723,7 +723,7 @@ async function planLoop(task, st, a) {
     })
     if (verdict.__dead) return transientPlanBlock(task, round)
     if (verdict.verdict === 'approve') {
-      // Gated inputs (ADR 0005): a declared gate always pauses for a human — regardless of
+      // Gated inputs (ADR 0008): a declared gate always pauses for a human — regardless of
       // plan_approval config or continuous mode. Gates already approved on the note
       // (task.approvedGates) are skipped, so re-dispatches never re-ask those exact gates.
       const declared = parseGatedInputs(plan.plan)
@@ -733,7 +733,7 @@ async function planLoop(task, st, a) {
         // human to sign, and a re-plan under the current prompt self-heals with a declaration.
         return {
           task, blocked: true, status: 'plan-blocked', planRoundsUsed: round,
-          blockerDiagnosis: 'plan was approved without the required "### Gated inputs" section (fail-closed, ADR 0005) — re-plan and declare the gates or an explicit "None"',
+          blockerDiagnosis: 'plan was approved without the required "### Gated inputs" section (fail-closed, ADR 0008) — re-plan and declare the gates or an explicit "None"',
         }
       }
       const gates = unapprovedGates(declared, task.approvedGates)
@@ -792,7 +792,7 @@ async function implement(task, st, prev, a) {
   const prompt = (prior) => (task.planGate && prev && prev.plan)
     ? approvedPlanImplementerPrompt(task, prev.plan, a, st.tier, prior)
     : implementerPrompt(task, a, st.tier, prior)
-  // A stop for gated inputs (ADR 0005) is a HUMAN decision, not evidence of hardness: convert it to a
+  // A stop for gated inputs (ADR 0008) is a HUMAN decision, not evidence of hardness: convert it to a
   // clean gate-pending block and never escalate on it. Checked before the escalation branch on both
   // passes. Approved gates are filtered out defensively (the prompt already tells the agent to proceed
   // past them), so an already-signed gate can never be re-asked.
@@ -858,7 +858,7 @@ async function reviewLoop(task, st, prev, a) {
     })
     if (revised.__dead) return { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS }
     if (revised.blocked) {
-      // A reviser can DISCOVER a gated input the earlier passes never hit (ADR 0005) — same human
+      // A reviser can DISCOVER a gated input the earlier passes never hit (ADR 0008) — same human
       // stop, never a plain block.
       const gates = unapprovedGates(revised.gatedInputs, task.approvedGates)
       if (gates.length) {

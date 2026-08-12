@@ -159,7 +159,7 @@ List the tasks written, show the outline, and name the next step: **`/thread:sch
 - **Don't write before the gate.** Step 4's approval precedes any file write.
 - **Don't clobber the source note** — the `## Build sequence` edit is section-scoped and idempotent.
 - **Don't leave a split source task-tagged** — a phase is a plan, never a task (`tags: [phase]`,
-  `Work/Phases/`); a task-tagged phase note is dispatchable by mistake. See ADR 0002.
+  `Work/Phases/`); a task-tagged phase note is dispatchable by mistake. See ADR 0005.
 - **Don't restart a phase counter inside a phase** — tasks inherit the roadmap number
   (`<project>-p<N>-<M>-…`), never `…-p1-1` under a `p2` source. Note shape lives in
   `add-writers/add-phase.md` — don't duplicate the schema here.

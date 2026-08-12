@@ -35,7 +35,7 @@ weakening zero-touch autonomy where autonomy is safe.
   dispatch summary so the pause is expected.
 - The plan prompt template gains a required section; a plan without it (or with an undeclared gate
   discovered mid-implementation) is a plan-judge `changes`, which on an opus task also triggers
-  escalation (ADR 0003).
+  escalation (ADR 0006).
 - Approved gates in the task note become part of the durable contract: `/thread:repair` treats a task
   blocked on an *undeclared* gate as input-gated, and a task re-blocked on an *approved* gate as
   agent-fixable evidence that the implementation ignored its contract.

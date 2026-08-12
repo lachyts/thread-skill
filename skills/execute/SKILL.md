@@ -1,6 +1,6 @@
 ---
 name: execute
-description: 'Use to execute a wave rollout — reads a rollout note at ~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md (legacy undated notes still resolve), resolves per-task config, and calls the Workflow tool with wave-execute.workflow.js to run the convergence engine (per-task plan-gate → Ralph-style verifier retry → master review, converging in parallel within each wave). In continuous mode (bare "execute [[rollout]]") it auto-merges each wave before launching the next — zero-touch, no per-PR confirmation — with --gated as the manual-merge escape hatch; the one designed exception is a task whose plan declares gated inputs (API spend / credentials / irreversible actions), which always pauses for human sign-off (ADR 0005, §3.7). Triggers on natural-language "execute Wave N of [[rollout-slug]]" or "execute [[rollout-slug]]" patterns, explicit /thread:execute invocation, or "pause the rollout" / "reinstate [[rollout]]" (safe pause: soft via pause_requested on the rollout note, hard via TaskStop + a paused: stamp; reinstate is plain re-invocation — see §Pausing). Only runs rollouts with protocol_version: 3; refuses older rollouts and prompts for regeneration via /thread:schedule --regenerate.'
+description: 'Use to execute a wave rollout — reads a rollout note at ~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md (legacy undated notes still resolve), resolves per-task config, and calls the Workflow tool with wave-execute.workflow.js to run the convergence engine (per-task plan-gate → Ralph-style verifier retry → master review, converging in parallel within each wave). In continuous mode (bare "execute [[rollout]]") it auto-merges each wave before launching the next — zero-touch, no per-PR confirmation — with --gated as the manual-merge escape hatch; the one designed exception is a task whose plan declares gated inputs (API spend / credentials / irreversible actions), which always pauses for human sign-off (ADR 0008, §3.7). Triggers on natural-language "execute Wave N of [[rollout-slug]]" or "execute [[rollout-slug]]" patterns, explicit /thread:execute invocation, or "pause the rollout" / "reinstate [[rollout]]" (safe pause: soft via pause_requested on the rollout note, hard via TaskStop + a paused: stamp; reinstate is plain re-invocation — see §Pausing). Only runs rollouts with protocol_version: 3; refuses older rollouts and prompts for regeneration via /thread:schedule --regenerate.'
 ---
 
 # /thread:execute — run a wave rollout on the Workflow engine
@@ -58,7 +58,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 | `env_bootstrap` | none (omit) | `envBootstrap` (rollout-level) |
 | `ignore_gate` | `false` (omit) | `task.ignoreGate` (per-task) |
 | `model` | `opus` | `task.model` (per-task; `opus` \| `fable`) |
-| `effort` | none (omit) | `task.effort` (per-task ONLY — the ADR 0004 escape hatch; it has no rollout-level form) |
+| `effort` | none (omit) | `task.effort` (per-task ONLY — the ADR 0007 escape hatch; it has no rollout-level form) |
 
 `scope:` is read directly from each task's frontmatter (set by `/thread:schedule`). `completion_sentinel` is no longer used — the Workflow returns validated structured output instead of parsing sentinel strings.
 
@@ -66,7 +66,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 
 `model` resolves task frontmatter → rollout frontmatter → `opus` and sets the task's **starting tier**. Judges **follow the task's live tier**, so a `fable` task gets Fable review end-to-end. (A run can still pin all judges to one model via the `judgeModel` arg — it wins when set.)
 
-**Effort bundles (ADR 0004).** A tier is a **(model, per-role effort) bundle**, not two knobs — reasoning effort rides the same ladder as the model. The per-role matrix is fixed in ONE place in the engine (`wave-execute.workflow.js`, the `EFFORT` constant):
+**Effort bundles (ADR 0007).** A tier is a **(model, per-role effort) bundle**, not two knobs — reasoning effort rides the same ladder as the model. The per-role matrix is fixed in ONE place in the engine (`wave-execute.workflow.js`, the `EFFORT` constant):
 
 | Role | `opus` tier | `fable` tier |
 |---|---|---|
@@ -75,7 +75,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 | master review (the PR-review judge — refines the judges row) | high | xhigh |
 | mechanical reconcile stages | low | low |
 
-Every `agent()` spawn site sets `effort` from the task's **live** tier + the agent's role, so escalation carries effort automatically — flipping a task to fable is one move that upgrades model AND effort, and judges follow (judges pinned via `judgeModel` take the pinned tier's row — model and effort always travel together). The **single escape hatch** is per-task `effort:` frontmatter (`low` \| `medium` \| `high` \| `xhigh` \| `max`): resolve it from the task note and pass it as `task.effort` — it overrides the planner/implementer effort for that task only, judges always keep the matrix, and it holds across an escalation (a monster task at fable/max stays at max). There is deliberately **no rollout-level effort config** (see ADR 0004's rejected options) — tuning the matrix means editing the engine, because the matrix encodes a stance (where effort is worth paying), not a per-rollout preference. The reconcile row is documented stance only today: reconcile is deterministic Python (`reconcile-wave.py`), so no agent consumes it.
+Every `agent()` spawn site sets `effort` from the task's **live** tier + the agent's role, so escalation carries effort automatically — flipping a task to fable is one move that upgrades model AND effort, and judges follow (judges pinned via `judgeModel` take the pinned tier's row — model and effort always travel together). The **single escape hatch** is per-task `effort:` frontmatter (`low` \| `medium` \| `high` \| `xhigh` \| `max`): resolve it from the task note and pass it as `task.effort` — it overrides the planner/implementer effort for that task only, judges always keep the matrix, and it holds across an escalation (a monster task at fable/max stays at max). There is deliberately **no rollout-level effort config** (see ADR 0007's rejected options) — tuning the matrix means editing the engine, because the matrix encodes a stance (where effort is worth paying), not a per-rollout preference. The reconcile row is documented stance only today: reconcile is deterministic Python (`reconcile-wave.py`), so no agent consumes it.
 
 **Model escalation (one-shot first pass).** An `opus` task gets exactly one un-iterated pass at each layer: one plan, one implementation with a **single** verifier run (the Ralph `max_iterations` budget does not apply to the first pass), one judged PR round. The first evidence of hardness anywhere — a plan-judge `changes` verdict, a first-pass planner/investigator block, a red one-shot verifier run, an implementer block, or a review-judge `changes` verdict — **escalates the task to `fable` for all remaining work**, judges included. Escalation is one-way, sticky, and happens inside the engine (no re-invocation): the fable agent inherits the prior attempt's worktree, committed work, and note diagnosis, and runs the full Ralph loop. A `fable` task (stepped up by `/thread:schedule` §4.7 or a rollout-level `model: fable`) never escalates — there is nothing above fable — and runs the full loop from the start, exactly as before. Escalation is **durable**: reconcile (§6) stamps `model: fable` on the task note, so resume / `/thread:repair` re-dispatches start at fable and never re-pay the opus toll. There is no config switch — escalation is always on for opus tasks.
 
@@ -87,13 +87,13 @@ Every `agent()` spawn site sets `effort` from the task's **live** tier + the age
 
 (`/thread:schedule`'s gated-input sweep may have stamped `plan_approval: required` on tasks that smell of spend/credentials — that per-task frontmatter wins here as usual. It is advisory: it guarantees a plan-gate exists where the plan's own declaration can pause; the declaration itself is authoritative — §3.7.)
 
-### 3.7. Gated inputs — the unconditional human stop (ADR 0005)
+### 3.7. Gated inputs — the unconditional human stop (ADR 0008)
 
 Every plan the engine's planner produces must carry a **`### Gated inputs`** section — API spend (with a **hard cap**), credentials, irreversible actions, or an explicit `None`. A missing section is a plan-judge `changes` (and the engine fails closed to `plan-blocked` if a judge ever approves one without it). After the plan-judge approves a plan, the engine compares the declared gates against the task's **approved gates** and, if any declared gate is not yet approved, returns the task at **`status: gate-pending`** without implementing — **regardless of `plan_approval` config or continuous mode**. Tasks with no plan-gate are covered by the same rule reactively: every code-writing prompt carries a stop rule, so an implementer that finds an undeclared/unapproved gated input stops *before* the gated action and returns it in `gatedInputs`, which the engine converts to the same `gate-pending` stop. A gate stop is a human decision, not evidence of hardness — it never escalates an opus task.
 
 **Resolve `task.approvedGates` when building args (step 4):** read the task note's `## Approved gates` section; each bullet, with its `(approved …)` annotation stripped, becomes one entry. Omit the key when the note has no such section. The engine skips the stop for exactly these gates (whitespace/case-insensitive match; **a changed cap is a NEW gate**). The approval is durable on the note, so re-dispatches and resumes never re-ask.
 
-**Sign-off flow (the pause continuous mode makes for gated tasks):** reconcile (§6) writes the declared gates under `## Gated inputs (awaiting sign-off)` and sets `status: gate-pending`. Present each gate **verbatim** to the user and ask for sign-off — this pause is **designed** (ADR 0005), not a failure. On sign-off run:
+**Sign-off flow (the pause continuous mode makes for gated tasks):** reconcile (§6) writes the declared gates under `## Gated inputs (awaiting sign-off)` and sets `status: gate-pending`. Present each gate **verbatim** to the user and ask for sign-off — this pause is **designed** (ADR 0008), not a failure. On sign-off run:
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py approve-gates --tasks <slugA,slugB>
@@ -131,7 +131,7 @@ Build the `args` object the workflow expects:
                                              //   hard task up. The engine may escalate opus→fable mid-run.
         "effort": "max" }                    // per-task ONLY, from the task note's `effort:` frontmatter —
                                              //   OMIT when absent. Overrides the tier bundle's planner/
-                                             //   implementer effort; judges keep the matrix (ADR 0004).
+                                             //   implementer effort; judges keep the matrix (ADR 0007).
     ]}
   ]
 }
@@ -273,7 +273,7 @@ Plan-blocked (no PR opened):
 Ralph-blocked (no PR opened):
 - [[task-f]] — see "## Blocker diagnosis"
 
-Gate-pending (awaiting YOUR sign-off — a declared gate always pauses, ADR 0005):
+Gate-pending (awaiting YOUR sign-off — a declared gate always pauses, ADR 0008):
 - [[task-j]] — declared: spend: Replicate API — cap USD 30
   → sign off, then: reconcile-wave.py approve-gates --tasks task-j; re-dispatch via resume-filter
 
@@ -304,7 +304,7 @@ Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS au
 - a wave produces **zero** approved (`status: review`) PRs (nothing to merge; downstream presumptively unsafe), or
 - `merge-wave.sh` exits non-zero (a real merge conflict or red required check), or
 - the smart-halt check fires (an unlanded task's file reappears in a later wave), or
-- a wave leaves `gate-pending` tasks and nobody is present to sign off (`reason="gated inputs await sign-off: …"` — a **designed** pause, ADR 0005, not a failure: the user signs off, `approve-gates` runs, and re-invocation resumes; when the user IS present, ask for the sign-off in-conversation instead of halting — §3.7).
+- a wave leaves `gate-pending` tasks and nobody is present to sign off (`reason="gated inputs await sign-off: …"` — a **designed** pause, ADR 0008, not a failure: the user signs off, `approve-gates` runs, and re-invocation resumes; when the user IS present, ask for the sign-off in-conversation instead of halting — §3.7).
 
 A **soft pause** (*Pausing + reinstating a rollout* below) exits through the same `state=halted` mechanics but is **deliberate**, not a failure — there is no cause to fix, and reinstating is plain re-invocation.
 

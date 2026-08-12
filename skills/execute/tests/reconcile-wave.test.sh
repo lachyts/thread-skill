@@ -198,7 +198,7 @@ if python3 "$SCRIPT" defer --tasks "st-foreign" --rollout "$TMP/st-rollout.md" -
   echo "FAIL - defer accepted a foreign-rollout task"; fail=1
 else echo "ok   - defer refuses cross-rollout"; fi
 
-echo "== gated inputs (ADR 0005: gate-pending reconcile + approve-gates sign-off) =="
+echo "== gated inputs (ADR 0008: gate-pending reconcile + approve-gates sign-off) =="
 mknote task-gated in_progress
 cat > "$TMP/gate-result.json" <<EOF
 { "rolloutSlug": "test-rollout", "tasks": [

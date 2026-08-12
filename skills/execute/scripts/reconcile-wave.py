@@ -61,7 +61,7 @@ Ten subcommands:
               finds a `paused:` stamp — reinstating IS plain re-invocation, so there is no separate
               resume command. Idempotent (no stamp = no-op).
 
-  approve-gates  Sign off a gate-pending task's declared gated inputs (ADR 0005): move the bullets
+  approve-gates  Sign off a gate-pending task's declared gated inputs (ADR 0008): move the bullets
               under "## Gated inputs (awaiting sign-off)" into "## Approved gates" with a sign-off
               date (gate + cap + sign-off — the durable record the engine reads via task.approvedGates
               so re-dispatches never re-ask those exact gates), remove the pending section, and flip
@@ -105,7 +105,7 @@ BLOCKED_SECTIONS = {
     "plan-blocked": "## Plan-blocked feedback",
 }
 
-# Gated inputs (ADR 0005): a task the engine paused for human sign-off of declared gates. Deliberately
+# Gated inputs (ADR 0008): a task the engine paused for human sign-off of declared gates. Deliberately
 # NOT in BLOCKED_SECTIONS — `resolve` must never flip an unsigned gate to done, and resume-filter must
 # never auto-redispatch one (only approve-gates makes it dispatchable again).
 GATE_PENDING_STATUS = "gate-pending"
@@ -649,7 +649,7 @@ def cmd_resume_filter(args) -> int:
             continue
         status = Note(path).get("status")
         if status == GATE_PENDING_STATUS:
-            # Awaiting a human sign-off (ADR 0005) — auto-resume (heartbeat included) must never burn a
+            # Awaiting a human sign-off (ADR 0008) — auto-resume (heartbeat included) must never burn a
             # dispatch on, or bypass, a pending gate. approve-gates flips it back to dispatchable.
             print(f"WARN: {slug}: gate-pending (gated inputs await human sign-off) — excluded from "
                   f"dispatch; run approve-gates after the sign-off", file=sys.stderr)
@@ -819,7 +819,7 @@ def _norm_gate(line: str) -> str:
 
 
 def cmd_approve_gates(args) -> int:
-    """Record the human sign-off for a gate-pending task's declared gated inputs (ADR 0005).
+    """Record the human sign-off for a gate-pending task's declared gated inputs (ADR 0008).
 
     The CALLER's contract: run this only after the user explicitly signed off the gates in
     conversation — the sign-off itself is the one decision no agent may make.
@@ -953,7 +953,7 @@ def main() -> int:
     cp.add_argument("--dry-run", action="store_true")
     cp.set_defaults(func=cmd_clear_pause)
 
-    ag = sub.add_parser("approve-gates", help="record the human sign-off for a gate-pending task's gated inputs (ADR 0005)")
+    ag = sub.add_parser("approve-gates", help="record the human sign-off for a gate-pending task's gated inputs (ADR 0008)")
     ag.add_argument("--tasks", required=True, help="comma-separated task slugs (must be at status gate-pending)")
     ag.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
     ag.add_argument("--date", default=None, help="sign-off date stamped on each gate (default: today)")

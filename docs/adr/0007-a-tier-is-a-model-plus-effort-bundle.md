@@ -25,7 +25,7 @@ to think about it*.
   it uniformly. Rejected: uniform effort overpays mechanical stages and underpowers judges — the
   exact opposite of the engine guidance (cheap mechanical stages, expensive verify/judge stages).
 - **Tier bundles with a fixed per-role matrix (chosen)** — one ladder, richer rungs. Zero new config
-  surface; escalation semantics (ADR 0003) extend without modification; the stance memory holds
+  surface; escalation semantics (ADR 0006) extend without modification; the stance memory holds
   (capability on hard work, savings on the mechanical bulk).
 
 ## Consequences

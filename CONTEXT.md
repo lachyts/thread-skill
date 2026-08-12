@@ -1,6 +1,26 @@
 # Thread — domain glossary
 
-The ubiquitous language of the `thread:*` plugin. Terms only — no implementation.
+The ubiquitous language of the `thread:*` plugin: one system that drives work
+through time, from attention to merged PRs. Terms only — no implementation.
+
+## The system
+
+- **Lane** — one of the two dispatch surfaces every cluster of open work gets
+  exactly one of: the **rollout lane** (`schedule` → `execute`: worktrees,
+  PRs, convergence engine, auto-merge) or the **session lane** (scoped
+  sessions dispatched by calendar and attention: `defer`, a task's `## Launch`
+  block via `open`, orient's cc-* batches).
+- **Execution-fit test** — the single rule deciding a cluster's lane
+  (`skills/_shared/execution-fit.md`). Decides hard, never as a preference.
+- **Wave-shaped** — passes the fit test: converges on ONE code repo, lands as
+  a PR per task, verifies machine-checkably inside the run. Shape only —
+  count is never a criterion (ADR 0009).
+- **Task floor** — the invariant: every stash/defer writes a self-contained
+  vault task routed to the right project. The guarantee that makes shutting an
+  agent down feel safe. The Task is also the shared atom of both ladders:
+  planning (project → phase → task) and execution (rollout → wave → task).
+
+## Continuity (threads and attention)
 
 - **Thread** — a live agent conversation carrying working context. Ephemeral;
   dies with the session. (Deliberately overloaded with the file below — the
@@ -15,10 +35,12 @@ The ubiquitous language of the `thread:*` plugin. Terms only — no implementati
   then dispatches to a route. A sibling, not a parent.
 - **Orient** — the project-altitude router: audits a whole project/area (not
   one thread), recommends the best use of time, asks the steering mode, then
-  routes — dispatch artefacts, `open`, or `/wave:*`.
+  routes by the execution-fit test — wave-shaped clusters to the rollout lane
+  (`gather`/`schedule`), everything else to `open` or batch dispatch
+  artefacts.
 - **Batch** — a parallel-safe cluster of open work (disjoint files/surfaces)
-  matched to the narrowest covering launch profile; the unit orient
-  dispatches.
+  matched to the narrowest covering launch profile; the session-lane unit
+  orient dispatches. Never contains a wave-shaped cluster.
 - **Dispatch artefact** — what an orient dispatch actually produces: a batch
   prompt file under `<workspace>/.scratch/orient/` plus a scoped-profile
   terminal one-liner. Artefacts are emitted, never launched.
@@ -26,9 +48,6 @@ The ubiquitous language of the `thread:*` plugin. Terms only — no implementati
   at emission; marks the task in-flight so orient never double-batches it.
   Superseded by the batch session's end-of-run note update; stale stamps are
   cleared by `--debrief`.
-- **Task floor** — the invariant: every stash/defer writes a self-contained
-  vault task routed to the right project. The guarantee that makes shutting an
-  agent down feel safe.
 - **Thread-worthy** — passes the thread-shape test (8+ substantive turns,
   deferred decisions, artefacts produced). Only thread-worthy work earns a
   THREAD.md.
@@ -40,3 +59,95 @@ The ubiquitous language of the `thread:*` plugin. Terms only — no implementati
 - **Pickup** — resuming a stashed/deferred thread from its task. Pickup
   auto-completes the capture task: the capture's job ends the moment the
   thread is live again.
+
+## Planning structure (rollout lane)
+
+- **Task** — one PR-sized, independently-shippable unit, written as a single
+  Obsidian task note (`Work/Tasks/<project>-p<N>-<M>-<desc>`,
+  `tags: [task, …]`). _Avoid_: ticket, item, story, step.
+- **Phase** — a project's roadmap tier: an ordered milestone (P1, P2, …) whose
+  tasks carry `phase: N`. A human planning concept only: phases order meaning,
+  waves order merges, and the engine never reads `phase:`. One phase = one
+  rollout by convention. A phase is a plan, never a task (ADR 0005).
+  _Avoid_: stage, iteration, wave.
+- **Gather** — the roadmap-forming pass: loose, unphased open tasks → phases
+  (cluster proposal → grilled meaning → mechanical writes). The inverse of
+  split (plan → tasks); both converge on `schedule` when the work is
+  wave-shaped. _Avoid_: triage, backlog grooming, auto-roadmap, sort.
+
+## Rollout structure
+
+- **Rollout** — a backlog of related tasks landed as one coordinated effort,
+  described by one always-dated Obsidian note
+  (`<slug>-rollout-<YYYY-MM-DD>`). _Avoid_: batch, run, campaign.
+- **Wave** — a set of tasks within a rollout that are safe to run in parallel
+  because no two of them edit the same file. Waves land in order; a later
+  wave branches from the `main` earlier waves merged into. Since ADR 0009 the
+  wave is a glossary object, not a namespace. _Avoid_: round, phase, stage.
+- **Cursor** — the durable record of rollout progress:
+  `merged_through_wave: N` in the rollout note. The single source of truth
+  for "where was I". _Avoid_: checkpoint, pointer, progress marker.
+- **Dependent closure** — the set of tasks transitively depending on a task
+  via `depends-on:` / `blocked-by:` / body wikilinks — the blast radius that
+  must move together if it's deferred. _Avoid_: dependency tree, downstream.
+
+## Task lifecycle (rollout lane)
+
+- **Landed** — work final on `main` (`status: done`, or `review`/`merged`
+  awaiting confirmation). Never re-dispatched on resume.
+  _Avoid_: finished, complete, shipped.
+- **Blocked** — the umbrella for a task that did not land: `blocked` (verifier
+  never green), `plan-blocked` (plan never approved), or `review-blocked`
+  (open PR, review rejected). _Avoid_: failed, stuck, errored.
+- **Input-gated block** — a block needing a human decision no agent can
+  supply; the decision must be written into the note before re-dispatch.
+  _Avoid_: manual block, human block.
+- **Gated input** — a human authorisation a task's plan declares up front
+  (API spend with a cap, credentials, an irreversible action). Always pauses
+  for sign-off, even in continuous mode (ADR 0008).
+  _Avoid_: approval item, spend gate, pre-approval.
+- **Agent-fixable block** — a block a re-dispatched agent can resolve alone;
+  repair retries these without asking the human. _Avoid_: auto-block, soft block.
+- **Drift** — divergence between the vault's recorded state and live
+  GitHub/git reality. `status` flags it; `repair` reconciles it.
+  _Avoid_: desync, staleness, mismatch.
+- **Clean defer** — taking a task out of a rollout back to the open backlog
+  (clearing `wave:`/`rollout:`/`owner:`), permitted only when nothing in the
+  rollout depends on it. _Avoid_: drop, cancel, skip.
+
+## Convergence engine
+
+- **Convergence** — the per-task loop driving a task to mergeable: plan-gate →
+  verifier retry → master review. Owned by `execute`.
+  _Avoid_: the pipeline, the build, processing.
+- **Engine** — the component that *does* convergence (`execute` and its
+  Workflow script). Spawns agents, runs the verifier, merges PRs.
+  _Avoid_: runner, executor (as a generic term).
+- **Conductor** — a component that *orchestrates* the engine without
+  re-implementing it (`repair`). Diagnoses, captures decisions, reconciles
+  drift, hands off to the engine's resume — never merges or converges
+  (ADR 0004). _Avoid_: orchestrator, controller, wrapper.
+- **Situational report** — the read-only output of `status`: cursor, per-task
+  state by wave, blockers, drift flags, one recommended next action.
+  _Avoid_: dashboard, summary, snapshot.
+- **Repair bridge** — the path by which a blocked task is fixed and re-landed
+  while the engine keeps sole merge authority. _Avoid_: handoff, recovery.
+- **Pause** — stopping a rollout run without losing its place. Soft: a
+  `pause_requested` flag (finish + merge the current wave, exit paused).
+  Hard: stop now; worktrees keep the work. _Avoid_: suspend, halt, abort.
+- **Reinstate** — resuming a paused rollout: plain `execute` on the rollout
+  note. No separate resume command. _Avoid_: restart, relaunch, unpause.
+
+## Model tiering
+
+- **Tier** — the model **and effort** bundle a task's agents run on: `opus`
+  (first-pass, mechanical) or `fable` (escalation, anything that must be
+  thought through). One tier per task at any moment; judges follow it; moving
+  tier moves effort with it (ADR 0007). Per-task `effort:` frontmatter is the
+  escape hatch, never a second ladder. _Avoid_: model level, grade, model
+  (alone).
+- **Step-up** — the planning-time, predictive assignment of the fable tier
+  from the task's shape alone. _Avoid_: escalation (that's run-time), upgrade.
+- **Escalation** — the run-time, evidence-driven flip of an opus task to
+  fable at the first sign of hardness. One-way and sticky (ADR 0006).
+  _Avoid_: fallback, retry, promotion.

@@ -51,7 +51,7 @@ Walk `~/repos/obsidian/Work/Tasks/*.md`. Filter:
 
 - `status: open` (default — `--include-done` to override)
 - `projects:` contains the target wikilink
-- `tags:` **contains** `task` — phase notes (`tags: [phase]`, see ADR 0002) and any other non-task
+- `tags:` **contains** `task` — phase notes (`tags: [phase]`, see ADR 0005) and any other non-task
   note linked to the project are never dispatched
 - `tags:` does **not** contain `rollout` (rollouts aren't tasks)
 - Skip tasks that already have `wave:` set unless `--regenerate` is passed
@@ -120,11 +120,11 @@ Look for:
 
 Some task notes carry a **human/release gate** in prose — "don't action until a release ships", "hold for sign-off", "gated on the next deploy". A `/thread:execute` agent reads the note and may refuse mid-dispatch when it hits one, so a buried gate is unreliable either way. Scan each task body for gate language (`don't action until`, `do not action until`, `hold for`, `until a release`, `until the next release`, `gated on a release`, `human sign-off`, `wait for sign-off`). Collect any matches — they become the **pre-flight decision** surfaced in step 8: the user either clears each gate (set `ignore_gate: true` on the task to override it for the run, or remove the gate text) or drops the task from this rollout. Don't bury the gate in the body and hope the agent honours it.
 
-### 3.6. Sweep for gated-input smell (advisory — ADR 0005)
+### 3.6. Sweep for gated-input smell (advisory — ADR 0008)
 
 Distinct from 3.5's release/hold gates: **gated inputs** are human *authorisations* — API spend, credentials, irreversible actions. Scan each task body for spend smell (`credits`, `paid API`, `$`, `budget`, `billable`, `API cost`), credential smell (`API key`, `token`, `secret`, `credential`, `prod access`), and irreversibility smell (`irreversible`, `cannot be undone`, `delete production`, `wipe`). Tasks that match get **`plan_approval: required`** stamped in step 7 (user-confirmed in the same batch as the model step-ups), so they always produce a plan whose required `### Gated inputs` declaration the engine can pause on.
 
-**Advisory only — the plan's declaration is authoritative** (ADR 0005): only the implementer's plan reliably knows the task needs $30 of Replicate credits, so the engine pauses on the *declaration*, never on this sweep. The stamp merely guarantees the gate surfaces predictively at the plan-gate rather than reactively mid-implementation (a missed smell still stops — every code-writing agent carries the same stop rule). List the stamped tasks in step 8's summary as **expected to gate**, so the pause reads as designed when it happens.
+**Advisory only — the plan's declaration is authoritative** (ADR 0008): only the implementer's plan reliably knows the task needs $30 of Replicate credits, so the engine pauses on the *declaration*, never on this sweep. The stamp merely guarantees the gate surfaces predictively at the plan-gate rather than reactively mid-implementation (a missed smell still stops — every code-writing agent carries the same stop rule). List the stamped tasks in step 8's summary as **expected to gate**, so the pause reads as designed when it happens.
 
 ### 4. Classify scope per task
 
@@ -206,7 +206,7 @@ A Fable task runs **end-to-end on Fable** — its planner, implementer, reviser,
 
 The step-up is **predictive** — it fires on the task's shape before any run. Its evidence-driven twin lives in the engine: an Opus task gets a one-shot first pass, and the first rejection or red verifier run **escalates** it to Fable mid-run (see execute SKILL.md § Model escalation). So a borderline candidate can safely stay Opus — a wrong call costs one cheap first pass, not a blocked rollout.
 
-**Effort rides the tier — never plan it separately (ADR 0004).** A tier is a (model, per-role effort) **bundle**: Opus runs its planner/implementer at medium, Fable at high; judges run high on either tier, the master review at xhigh on Fable, mechanical reconcile stages at low. The matrix is fixed in the engine (see execute SKILL.md § Effort bundles) — there is deliberately **no rollout-level effort config**, so stepping a task up to Fable is the one move that raises both model and effort. The **single escape hatch** is per-task `effort:` frontmatter (`low` \| `medium` \| `high` \| `xhigh` \| `max`), which overrides the planner/implementer effort for that task only — judges keep the matrix. Reserve it for the rare monster task the user explicitly flags (e.g. a Fable step-up worth `effort: max`), confirm it in the same y/n batch as the step-ups, and stamp it in step 7. Never stamp it by default, and never add an `effort:` key to the rollout note.
+**Effort rides the tier — never plan it separately (ADR 0007).** A tier is a (model, per-role effort) **bundle**: Opus runs its planner/implementer at medium, Fable at high; judges run high on either tier, the master review at xhigh on Fable, mechanical reconcile stages at low. The matrix is fixed in the engine (see execute SKILL.md § Effort bundles) — there is deliberately **no rollout-level effort config**, so stepping a task up to Fable is the one move that raises both model and effort. The **single escape hatch** is per-task `effort:` frontmatter (`low` \| `medium` \| `high` \| `xhigh` \| `max`), which overrides the planner/implementer effort for that task only — judges keep the matrix. Reserve it for the rare monster task the user explicitly flags (e.g. a Fable step-up worth `effort: max`), confirm it in the same y/n batch as the step-ups, and stamp it in step 7. Never stamp it by default, and never add an `effort:` key to the rollout note.
 
 ### 5. Compute waves
 
@@ -260,7 +260,7 @@ For each task in the rollout:
 - For `scope: read-only` tasks specifically, also add `max_iterations: 1` (nothing to retry)
 - For tasks the user confirmed as Fable step-ups in step 4.7, add `model: fable` — never stamp `model: opus` (that's the rollout-level default every task inherits)
 - For a task the user explicitly confirmed an effort override for (§4.7 — rare), add `effort: <low|medium|high|xhigh|max>` — never stamp `effort:` by default, and never add it to the rollout note (it has no rollout-level form; the tier bundle decides everywhere else)
-- For tasks the §3.6 sweep flagged (user-confirmed), add `plan_approval: required` — advisory: it guarantees a plan-gate exists where the plan's own `### Gated inputs` declaration (the authoritative signal, ADR 0005) can pause for sign-off
+- For tasks the §3.6 sweep flagged (user-confirmed), add `plan_approval: required` — advisory: it guarantees a plan-gate exists where the plan's own `### Gated inputs` declaration (the authoritative signal, ADR 0008) can pause for sign-off
 - Preserve all other frontmatter fields verbatim
 
 The combined notes authored in step 4.5 are stamped here like any other task (`wave:`, `rollout:`, `scope: cross-cutting`). Their folded-in members are **not** stamped `wave:` — they already carry `status: merged` + `merged_into:` from step 4.5 and are never dispatched.
@@ -291,7 +291,7 @@ The thread:execute skill at ${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md reads 
 To run one anyway, set `ignore_gate: true` on its task note (overrides the gate for the run); or drop it from the rollout.
 ```
 
-Likewise list the §3.6 gated-input step-ups so the eventual pause reads as designed (ADR 0005 — these will stop at their plan-gate for your sign-off even in continuous mode; `ignore_gate` does NOT override a gated input):
+Likewise list the §3.6 gated-input step-ups so the eventual pause reads as designed (ADR 0008 — these will stop at their plan-gate for your sign-off even in continuous mode; `ignore_gate` does NOT override a gated input):
 
 ```
 Expected to gate (will pause for your sign-off at their plan-gate):

@@ -1,16 +1,31 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-07-14
+last_touched: 2026-08-12
 state: active
-scope: Build + maintain the thread:* continuity plugin (router + decisive routes)
+scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
 ---
 
 # thread-skill — THREAD
 
 ## Where we are
 
-v1.0.1 built AND installed 2026-07-14 (`thread@thread`, user scope, GitHub
+**2026-08-12 — v2.0.0: thread absorbs wave (ADR 0009).** The wave plugin
+(`lachyts/wave-skill`, v1.4.1) merged in with full git history; all six
+rollout verbs renamed `/wave:*` → `/thread:*`; "wave" is now a glossary
+object, not a namespace (`wave:` frontmatter, `WAVE-STATUS:`, engine
+internals unchanged). Behavioural changes from the same grill interview:
+the execution-fit test got one canonical home
+(`skills/_shared/execution-fit.md`) and decides the lane HARD (orient never
+offers cc-* batches for wave-shaped clusters — closes the 08-10
+GifLab/Smart Slider leak); schedule's <3-task floor is gone (shape decides,
+not count — one-task rollouts are valid); the session-lane fallback names
+its owners (defer / open's ## Launch). Wave ADRs renumbered 0004–0008;
+wave's THREAD.md preserved at docs/wave-THREAD-archive.md; wave-skill
+pinned at wave--v1.4.1 and archived. Live rollout notes (protocol_version:
+3, incl. the open giflab-rollout-2026-08-12) remain executable unchanged.
+
+Previous state: v1.0.1 built AND installed 2026-07-14 (`thread@thread`, user scope, GitHub
 marketplace from `lachyts/thread-skill`). All six members live; flat skills
 retired; workspace references migrated; vault project note [[Thread Skill]]
 created. Same-day follow-up: Notion retired ecosystem-wide — close's

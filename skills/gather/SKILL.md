@@ -42,7 +42,7 @@ Walk `~/repos/obsidian/Work/Tasks/*.md`. Filter:
 
 - `status: open`
 - `projects:` contains the target wikilink
-- `tags:` **contains** `task` — phase notes (`tags: [phase]`, ADR 0002) are never gathered
+- `tags:` **contains** `task` — phase notes (`tags: [phase]`, ADR 0005) are never gathered
 - `tags:` does **not** contain `rollout`; skip `status: merged` tombstones
 - **no `phase:`** — a phased task already has a home; gather only handles the loose ones
 

@@ -6,7 +6,7 @@
 //   - escalationContext(prior)→ '' when prior is empty, hand-over block when set; a prompt with prior
 //                               equals the prior-less prompt PLUS exactly the injected block.
 //   - verifyBlock(tier, …)    → opus renders the ONE-SHOT block (no iteration), fable the full Ralph loop.
-//   - gated inputs (ADR 0005) → the plan prompt ALWAYS renders the Gated inputs requirement; a non-empty
+//   - gated inputs (ADR 0008) → the plan prompt ALWAYS renders the Gated inputs requirement; a non-empty
 //                               unapproved declaration pauses the task (status gate-pending) even when
 //                               planGate is false; approved gates on the note are never re-asked; "None"
 //                               leaves behaviour identical (zero-touch).
@@ -80,7 +80,7 @@ const pPrior = T.implementerPrompt(taskI, aI, 'fable', prior)
 ok(pPrior.includes('ESCALATION'), 'implementerPrompt: escalation context present when prior set')
 ok(pPrior.replace(T.escalationContext(prior), '') === pFable, 'implementerPrompt: with prior == without + exactly the injected block (byte-identical base)')
 
-// ---- Effort bundles (ADR 0004): a tier is a (model, per-role effort) bundle ----
+// ---- Effort bundles (ADR 0007): a tier is a (model, per-role effort) bundle ----
 // The matrix is fixed in the engine — opus: implementer medium / judges high / master review high;
 // fable: implementer high / judges high / master review xhigh; reconcile low on either tier. Per-task
 // `effort:` frontmatter is the SINGLE escape hatch: it overrides the planner/implementer effort only —
@@ -104,7 +104,7 @@ ok(T.judgeEffort(undefined, { tier: 'fable' }, 'masterReview') === 'xhigh', 'jud
 ok(T.judgeEffort({ judgeModel: 'fable' }, { tier: 'opus' }, 'masterReview') === 'xhigh',
   'judgeEffort: a judgeModel pin carries the pinned tier\'s effort (model + effort travel together)')
 
-// No rollout-level effort config, deliberately (ADR 0004 rejected options): the rollout template must
+// No rollout-level effort config, deliberately (ADR 0007 rejected options): the rollout template must
 // never grow an `effort:` key.
 const tpl = fs.readFileSync(path.join(here, '..', '..', 'schedule', 'rollout-template.md'), 'utf8')
 ok(!/\beffort\s*:/i.test(tpl), 'rollout template: no effort: key (no rollout-level effort config)')
@@ -185,7 +185,7 @@ ok(call('implement:proj-eff-d') && call('implement:proj-eff-d').effort === 'max'
 ok(call('implement:proj-eff-d@fable') && call('implement:proj-eff-d@fable').effort === 'max', 'effort D: override survives the fable takeover')
 ok(call('review:proj-eff-d') && call('review:proj-eff-d').effort === 'xhigh', 'effort D: master review still follows the matrix (xhigh @ fable)')
 
-// ---- Gated inputs (ADR 0005): a declared gate always pauses for a human -------
+// ---- Gated inputs (ADR 0008): a declared gate always pauses for a human -------
 // The plan carries a REQUIRED "### Gated inputs" section (spend with a hard cap / credentials /
 // irreversible actions, or exactly "None"). A non-empty declaration not covered by the task note's
 // approved gates returns the task at status 'gate-pending' — regardless of plan_approval config or

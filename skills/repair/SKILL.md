@@ -9,7 +9,7 @@ description: 'Use to unstick a wave rollout that has stalled — run it whenever
 it at the rollout (never a single task); it figures out what's stuck across every wave, does the
 mechanics, and asks you only the decisions no agent can make.
 
-It is a **conductor**, not an engine (see `docs/adr/0001-repair-is-a-conductor-not-an-engine.md`). The
+It is a **conductor**, not an engine (see `docs/adr/0004-repair-is-a-conductor-not-an-engine.md`). The
 execute engine's worktree setup is already idempotent on re-dispatch and `resume-filter` already
 re-attempts blocked tasks — so repair **reuses execute's resume** and adds only the three things
 re-running execute can't do: reconcile **drift**, inject an **input-gated** decision, and **defer** a
