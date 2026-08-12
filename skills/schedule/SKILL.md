@@ -28,17 +28,22 @@ The argument resolves to a project-note slug (the thing the task's `projects:` f
 
 ### 0. Execution-fit gate
 
-Wave rollouts are for **wave-shaped** work: tasks that converge on ONE code repo, land as a PR
-each, and verify machine-checkably inside the run (tests / build / greps). Before computing
-anything, scan the candidate set for misfits — tasks whose core action is an external publish
-(CMS / live site / DNS / config console), whose ordering constraint is a measurement window or
-calendar date rather than file overlap, or whose verification only arrives days later (impact
-measures). If such tasks dominate, **stop and recommend calendar/session-driven execution
-instead** (work the phase's `## Build sequence` one scoped session at a time; `scheduled:` dates
-do the dispatch): the engine's parallelism is forbidden by isolation windows, every
-externally-publishing task pauses at the human gate (ADR 0005 §3.7), and file-overlap wave
-computation cannot see window/calendar constraints. A mixed set is fine if the wave-shaped
-majority can roll out while the misfits stay unstamped — name them in the gate.
+Run the execution-fit test (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` — the
+canonical definition). Wave rollouts are for **wave-shaped** work: tasks that converge on ONE
+code repo, land as a PR each, and verify machine-checkably inside the run (tests / build /
+greps). Before computing anything, scan the candidate set for misfits — tasks whose core action
+is an external publish (CMS / live site / DNS / config console), whose ordering constraint is a
+measurement window or calendar date rather than file overlap, or whose verification only
+arrives days later (impact measures). If misfits dominate, **stop and route the set to the
+session lane** (`defer` for `scheduled:`-date dispatch, `open` via the task's `## Launch`
+block) instead of forcing a rollout: the engine's parallelism is forbidden by isolation
+windows, every externally-publishing task pauses at the human gate (ADR 0008 §3.7), and
+file-overlap wave computation cannot see window/calendar constraints. A mixed set is fine if
+the wave-shaped subset can roll out while the misfits stay unstamped — name them in the gate.
+
+There is no minimum size: shape decides, not count. A wave-shaped cluster of one still rolls
+out — the plan gate, verifier retry, master review, and auto-merge are the point. For N ≤ 2,
+note that the ceremony is thin and proceed.
 
 ### 1. Discover tasks
 
@@ -299,7 +304,7 @@ This skill does not execute anything. The rollout note it produces is read by th
 
 ## Don'ts
 
-- Don't write rollouts for projects with <3 tasks — overhead exceeds benefit. Tell the user to run them sequentially.
+- Don't refuse small rollouts — shape decides, not count (`skills/_shared/execution-fit.md`). A one-task wave-shaped rollout is valid; note the ceremony is thin and proceed.
 - Don't auto-merge dependency cycles silently — if A depends on B and B depends on A, surface and ask. (This is about *dependency* cycles — distinct from the affinity-cluster consolidation in step 4.5, which is a sanctioned auto-merge of same-*change* tasks.)
 - Don't overwrite an existing rollout without prompting.
 - Don't touch tasks outside the target project (the `projects:` filter is strict).

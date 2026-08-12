@@ -1,6 +1,6 @@
 ---
 name: orient
-description: 'Project-altitude orientation — audit a whole project/area after time away, recommend the best use of Lachy''s time, ask how he wants to steer (background agents vs hands-on focus), then route. Triggers on "orient me on <project>", "where is <project> at overall", "I haven''t looked at <project> in a while — what''s open?", "audit <project> and tell me where my time should go", "fan out background sessions on <project>", or explicit /thread:orient [target]. Also /thread:orient <target> --debrief to sweep previously dispatched batches. For ONE thread''s next move use thread:next; for PR-shaped repo rollouts use /wave:*.'
+description: 'Project-altitude orientation — audit a whole project/area after time away, recommend the best use of Lachy''s time, ask how he wants to steer (background agents vs hands-on focus), then route. Triggers on "orient me on <project>", "where is <project> at overall", "I haven''t looked at <project> in a while — what''s open?", "audit <project> and tell me where my time should go", "fan out background sessions on <project>", or explicit /thread:orient [target]. Also /thread:orient <target> --debrief to sweep previously dispatched batches. For ONE thread''s next move use thread:next; wave-shaped clusters (one repo, PR-per-task, machine-verifiable in-run) route to the rollout lane — thread:gather / thread:schedule — per the execution-fit test.'
 ---
 
 # /thread:orient — where should my time go on this project?
@@ -16,8 +16,11 @@ sessions** — Lachy runs the one-liners himself.
 
 **Contains no route logic of its own** beyond batching/emission: hands-on
 focus dispatches to `${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` (or the
-task's own `## Launch` block); PR-shaped clusters are referred to `/wave:*`,
-never re-implemented here.
+task's own `## Launch` block); wave-shaped clusters route to the rollout lane
+by running `${CLAUDE_PLUGIN_ROOT}/skills/gather/SKILL.md` or
+`skills/schedule/SKILL.md`, never re-implemented here. The execution-fit test
+(`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`) decides the lane —
+hard, not as a preference.
 
 ## Process
 
@@ -84,14 +87,23 @@ almost nothing is parallel-safe, recommend Hands-on):
 - **Hands-on** (and the focus half of Mixed) → if the item has a THREAD.md or
   capture task, run `open`'s pickup logic; else follow the task note's
   `## Launch` / `## Resume prompt`. No ceremony beyond that.
-- **Autonomous** (and the batch half of Mixed) → §§ 6–7.
-- **PR-shaped clusters** (repo code work wanting branches/PRs/merge) →
-  recommend `/thread:gather` or `/thread:schedule` for that cluster. Orient never
-  re-implements the merge engine (`feedback_wave_fit_test`).
+- **Autonomous** (and the batch half of Mixed) → §§ 6–7 for clusters that
+  FAIL the execution-fit test; clusters that pass it go to the rollout lane
+  below, regardless of the steering answer.
+- **Wave-shaped clusters** (pass the execution-fit test:
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` — one repo,
+  PR-per-task, machine-verifiable in-run) → **the rollout lane is the default,
+  not a suggestion**: run `${CLAUDE_PLUGIN_ROOT}/skills/gather/SKILL.md`
+  (loose tasks needing a roadmap) or `skills/schedule/SKILL.md` (already
+  phased) for that cluster. cc-* batches are not offered for wave-shaped
+  clusters — the 2026-08-10 GifLab and Smart Slider batches were this leak.
+  Orient never re-implements the merge engine.
 
 ### 6. Batch (Autonomous / Mixed)
 
-Cluster the dispatchable open work into **parallel-safe batches**:
+Batching is the session lane — only work that **fails** the execution-fit test
+is batched here (wave-shaped clusters already routed via § 5). Cluster the
+dispatchable open work into **parallel-safe batches**:
 
 - **Disjoint surfaces**: no two batches may edit the same files, vault notes,
   or external surfaces (e.g. the same Webflow page/fields). A shared surface
@@ -171,7 +183,9 @@ lightweight version of this.
   anything in Report-only or dry runs.
 - **Don't recommend more than one focus item**, and don't pad the audit —
   headline, balls in the air, one recommendation, then the steering menu.
-- **Don't re-implement siblings or wave.** Hands-on focus runs `open`'s
-  logic; PR-shaped work goes to `/wave:*`; batch clusters never grow a merge
-  engine here.
+- **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s
+  logic; wave-shaped work goes to the rollout lane (the execution-fit test
+  decides, hard); batch clusters never grow a merge engine here.
+- **Don't batch a wave-shaped cluster.** If it passes the fit test it rolls
+  out — cc-* batches are for work the engine can't take.
 - **Don't use orient for a single live thread** — that's `next`.

@@ -129,20 +129,17 @@ schema**: `~/repos/workspaces/_shared/knowledge/add-writers/add-phase.md` (phase
 ### 5. Hand off — run the execution-fit test before naming a next step
 
 Report what was written (phases as clickable `obsidian://` links, renames, surfacing status,
-misfits). Then decide which next step to name — **do not default to `/thread:schedule`**:
+misfits). Then run the execution-fit test
+(`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` — the canonical definition) on each
+phase and name its lane — **do not default to `/thread:schedule`**:
 
-- **Wave-shaped work** → name **`/thread:schedule <slug>`**. Wave-shaped means the phase's tasks
-  converge on ONE code repo, each task lands as a PR, and success is machine-verifiable inside
-  the run (tests / build / greps).
-- **Everything else** → name **calendar/session-driven execution**: work each phase's
-  `## Build sequence` one scoped session at a time (the task's `launch:` alias), letting
-  `scheduled:` dates and measurement-calendar rows do the dispatch. Signs the roadmap is NOT
-  wave-shaped: the core action of tasks is an external publish (CMS / live site / DNS / config
-  console); ordering constraints are measurement windows or calendar dates rather than file
-  overlap; verification only exists days or weeks after the change (impact measures). A rollout
-  buys nothing there — the engine's parallelism is forbidden by the isolation windows, every
-  externally-publishing task pauses at the human gate, and the verifier loop has nothing to
-  verify inside the run.
+- **Wave-shaped** (one repo, PR-per-task, machine-verifiable in-run) → name
+  **`/thread:schedule <slug>`**. Any size — a one-task phase still qualifies; shape decides,
+  not count.
+- **Everything else** → the session lane: work the phase's `## Build sequence` one scoped
+  session at a time — `defer` sets a task onto a day (`scheduled:` dates do the dispatch),
+  `open` picks one up via its `## Launch` / `## Resume prompt` block. The fit-test doc lists
+  the disqualifying signs (external publishes, window/calendar ordering, late verification).
 
 Phases order meaning, waves order merges — gather never writes `wave:` either way.
 
