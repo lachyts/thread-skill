@@ -145,7 +145,7 @@ Before you open or update a PR, run these preflight checks:
 
 // Re-dispatch awareness. A resumed blocked task carries the prior attempt's diagnosis in its note —
 // reconcile-wave.py appends `## Review-blocked feedback` / `## Blocker diagnosis` / `## Plan-blocked
-// feedback`, and /wave:repair may inject a `## Repair input` with a human decision. Without an explicit
+// feedback`, and /thread:repair may inject a `## Repair input` with a human decision. Without an explicit
 // nudge the agent can re-read the note and silently repeat the rejected work. This line is static (always
 // in the prompt) and harmless on a fresh task where no such section exists.
 const PRIOR_FEEDBACK_NOTE = `If the task note has a "## Review-blocked feedback", "## Blocker diagnosis", "## Plan-blocked feedback", or "## Repair input" section from a PRIOR attempt, treat it as AUTHORITATIVE — resolve every point in it first, and use any "## Repair input" value exactly as given (do not re-derive or second-guess it).`
@@ -607,7 +607,7 @@ function chunk(arr, n) {
 }
 
 // ---- Model tiering -----------------------------------------------------------
-// task.model seeds the task's STARTING tier (task → rollout → 'opus'; wave:schedule pre-stamps
+// task.model seeds the task's STARTING tier (task → rollout → 'opus'; thread:schedule pre-stamps
 // structural/deep tasks 'fable' — the predictive step-up). At run time the tier is per-task MUTABLE
 // state: an opus task gets a one-shot first pass at each layer, and the first evidence of hardness
 // anywhere — plan-judge 'changes', a first-pass planner/investigator block, a red one-shot verifier

@@ -36,7 +36,7 @@ weakening zero-touch autonomy where autonomy is safe.
 - The plan prompt template gains a required section; a plan without it (or with an undeclared gate
   discovered mid-implementation) is a plan-judge `changes`, which on an opus task also triggers
   escalation (ADR 0003).
-- Approved gates in the task note become part of the durable contract: `/wave:repair` treats a task
+- Approved gates in the task note become part of the durable contract: `/thread:repair` treats a task
   blocked on an *undeclared* gate as input-gated, and a task re-blocked on an *approved* gate as
   agent-fixable evidence that the implementation ignored its contract.
 - The cap in a spend gate is a ceiling the implementer must respect, not a target; blowing it is a

@@ -1,16 +1,16 @@
 ---
 name: status
-description: 'Use to see the present situation of a wave rollout — a read-only situational report. Triggers on "wave status of [[rollout]]", "where is [[rollout]] / this rollout", "what state is the rollout in", "what''s left on [[rollout]]", "is [[rollout]] done", or pointing at a rollout note and asking what''s happening. Reads the rollout note + every linked task note and cross-checks live GitHub PRs + git worktrees, flags drift, and recommends the next action. NEVER writes the vault or merges anything. Read-only sibling of /wave:repair. Scope: Obsidian + read-only gh/git.'
+description: 'Use to see the present situation of a wave rollout — a read-only situational report. Triggers on "wave status of [[rollout]]", "where is [[rollout]] / this rollout", "what state is the rollout in", "what''s left on [[rollout]]", "is [[rollout]] done", or pointing at a rollout note and asking what''s happening. Reads the rollout note + every linked task note and cross-checks live GitHub PRs + git worktrees, flags drift, and recommends the next action. NEVER writes the vault or merges anything. Read-only sibling of /thread:repair. Scope: Obsidian + read-only gh/git.'
 ---
 
-# /wave:status — the present situation of a rollout
+# /thread:status — the present situation of a rollout
 
-`/wave:status [[rollout]]` answers one question: **where is this rollout right now?** It reads the
+`/thread:status [[rollout]]` answers one question: **where is this rollout right now?** It reads the
 rollout note and every task carrying `rollout: [[<slug>]]`, cross-checks them against live GitHub PR
 state + git worktrees, flags any **drift**, and prints a single recommended next action.
 
 It is **read-only** — it never stamps frontmatter, never merges, never dispatches. To *act* on what it
-finds, that's `/wave:repair` (the conductor) or `/wave:execute` (resume). This skill is the diagnosis;
+finds, that's `/thread:repair` (the conductor) or `/thread:execute` (resume). This skill is the diagnosis;
 those are the treatment.
 
 ## Scope
@@ -22,9 +22,9 @@ still resolve — see step 1) + its linked task notes, and makes **read-only**
 ## Invocation forms
 
 ```
-/wave:status [[giflab-rollout]]            # full situational report (live cross-check, the default)
+/thread:status [[giflab-rollout]]            # full situational report (live cross-check, the default)
 status of [[giflab-rollout]]               # natural language — same thing
-/wave:status [[giflab-rollout]] --offline  # vault-only: skip the gh/git cross-check (instant)
+/thread:status [[giflab-rollout]] --offline  # vault-only: skip the gh/git cross-check (instant)
 ```
 
 ## Skill flow
@@ -69,7 +69,7 @@ Cross-check cheaply and flag **drift**:
 - **PRs** — for each task with a `pr:`, one `gh pr view <pr> --json state,mergedAt,statusCheckRollup`.
   Flag drift:
   - note `review`/`review-blocked` but PR **MERGED** → *out-of-band merge*. (`review` → resolves on the
-    next execute via `mark-done`; `review-blocked` → genuine drift, needs `/wave:repair` to reconcile → done.)
+    next execute via `mark-done`; `review-blocked` → genuine drift, needs `/thread:repair` to reconcile → done.)
   - note `review-blocked` but PR **OPEN with checks now green** → may already be fixed; flag for a retry.
   - note `blocked`/`plan-blocked` carrying an open PR → unusual; surface it.
 
@@ -91,7 +91,7 @@ Wave 3  ◦ not started
   [[task-f]]   open
 
 Drift:
-  ⚠ [[task-d]] PR #43 is MERGED on origin but note says review-blocked → /wave:repair reconciles to done
+  ⚠ [[task-d]] PR #43 is MERGED on origin but note says review-blocked → /thread:repair reconciles to done
 
 Recommended next action: <one line>
 ```
@@ -115,28 +115,28 @@ merges, then the rollout pauses at the wave boundary."
 
 Then **one** recommended next action:
 
-- `paused` stamped → "reinstate with `/wave:execute [[<rollout>]]`" (never `/wave:repair` — a pause
+- `paused` stamped → "reinstate with `/thread:execute [[<rollout>]]`" (never `/thread:repair` — a pause
   needs no repair; only recommend repair for drift that is independent of the pause, and say so).
 - all tasks `done` → "rollout complete — run the completion ceremony" (or "already archived").
-- approved PRs awaiting merge / cursor behind → "re-run `/wave:execute [[<rollout>]]` to merge & continue".
-- any blocker or drift → "run `/wave:repair [[<rollout>]]`".
-- nothing dispatched yet → "run `/wave:execute [[<rollout>]]` to start".
+- approved PRs awaiting merge / cursor behind → "re-run `/thread:execute [[<rollout>]]` to merge & continue".
+- any blocker or drift → "run `/thread:repair [[<rollout>]]`".
+- nothing dispatched yet → "run `/thread:execute [[<rollout>]]` to start".
 
 Keep the whole report scannable — it's a glance, not a wall of text.
 
 ## Loopable
 
 Status is read-only, so it's safe to run under the built-in `/loop` as a rollout watchdog:
-`/loop 45m /wave:status [[<rollout>]]` during a long rollout catches drift and stranded-`review`
+`/loop 45m /thread:status [[<rollout>]]` during a long rollout catches drift and stranded-`review`
 tasks early instead of days later. When a looped status finds the rollout `done`/archived, say so and
 stop the loop (a dynamic loop ends by not rescheduling; a fixed loop needs `/loop stop`) — don't keep
-polling a finished rollout. The loop watches and recommends; it never triggers `/wave:repair` or
-`/wave:execute` on its own. See execute's §8 (*Unattended driving*) for the full pattern set.
+polling a finished rollout. The loop watches and recommends; it never triggers `/thread:repair` or
+`/thread:execute` on its own. See execute's §8 (*Unattended driving*) for the full pattern set.
 
 ## Don'ts
 
-- **Don't write anything.** No frontmatter edits, no merges, no dispatch — that's `/wave:repair` /
-  `/wave:execute`. If you find yourself wanting to fix something, stop and recommend the repair verb.
+- **Don't write anything.** No frontmatter edits, no merges, no dispatch — that's `/thread:repair` /
+  `/thread:execute`. If you find yourself wanting to fix something, stop and recommend the repair verb.
 - **Don't re-scan GitHub for the cursor.** `merged_through_wave` in the note is the source of truth for
   "how far merged"; the live PR check is only for drift flags.
 - **Don't parse the rollout's markdown wave table** for the task list — use the `status` subcommand's

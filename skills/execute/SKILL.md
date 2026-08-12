@@ -1,25 +1,25 @@
 ---
 name: execute
-description: 'Use to execute a wave rollout — reads a rollout note at ~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md (legacy undated notes still resolve), resolves per-task config, and calls the Workflow tool with wave-execute.workflow.js to run the convergence engine (per-task plan-gate → Ralph-style verifier retry → master review, converging in parallel within each wave). In continuous mode (bare "execute [[rollout]]") it auto-merges each wave before launching the next — zero-touch, no per-PR confirmation — with --gated as the manual-merge escape hatch; the one designed exception is a task whose plan declares gated inputs (API spend / credentials / irreversible actions), which always pauses for human sign-off (ADR 0005, §3.7). Triggers on natural-language "execute Wave N of [[rollout-slug]]" or "execute [[rollout-slug]]" patterns, explicit /wave:execute invocation, or "pause the rollout" / "reinstate [[rollout]]" (safe pause: soft via pause_requested on the rollout note, hard via TaskStop + a paused: stamp; reinstate is plain re-invocation — see §Pausing). Only runs rollouts with protocol_version: 3; refuses older rollouts and prompts for regeneration via /wave:schedule --regenerate.'
+description: 'Use to execute a wave rollout — reads a rollout note at ~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md (legacy undated notes still resolve), resolves per-task config, and calls the Workflow tool with wave-execute.workflow.js to run the convergence engine (per-task plan-gate → Ralph-style verifier retry → master review, converging in parallel within each wave). In continuous mode (bare "execute [[rollout]]") it auto-merges each wave before launching the next — zero-touch, no per-PR confirmation — with --gated as the manual-merge escape hatch; the one designed exception is a task whose plan declares gated inputs (API spend / credentials / irreversible actions), which always pauses for human sign-off (ADR 0005, §3.7). Triggers on natural-language "execute Wave N of [[rollout-slug]]" or "execute [[rollout-slug]]" patterns, explicit /thread:execute invocation, or "pause the rollout" / "reinstate [[rollout]]" (safe pause: soft via pause_requested on the rollout note, hard via TaskStop + a paused: stamp; reinstate is plain re-invocation — see §Pausing). Only runs rollouts with protocol_version: 3; refuses older rollouts and prompts for regeneration via /thread:schedule --regenerate.'
 ---
 
-# /wave:execute — run a wave rollout on the Workflow engine
+# /thread:execute — run a wave rollout on the Workflow engine
 
-`/wave:execute` is the executor half of the wave split. Where `/wave:schedule` writes the rollout note (data), this skill reads it, resolves config, and hands the convergence work to a **dynamic Workflow** script. This skill is a thin shim; the engine lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/wave-execute.workflow.js`.
+`/thread:execute` is the executor half of the wave split. Where `/thread:schedule` writes the rollout note (data), this skill reads it, resolves config, and hands the convergence work to a **dynamic Workflow** script. This skill is a thin shim; the engine lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/wave-execute.workflow.js`.
 
 The engine runs three layers per task — optional plan-gate (autonomous judge) → Ralph-style agent-side verifier retry → master-side review-and-revise loop — and converges tasks **in parallel within each wave** (a task can be in master-review while a wave-mate is still implementing). The skill itself stays in the conversation to do vault I/O, the protocol gate, status reconciliation, reporting, and the `--gated` between-wave pause (which an autonomous background workflow cannot do).
 
 ## Scope
 
-Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` produced by `/wave:schedule` (older undated `<slug>-rollout` notes still resolve — see step 1). The Workflow's agents operate in isolated git worktrees they create under the target repo (`<repoPath>/.claude/worktrees/`) and open PRs. The lead session updates task frontmatter in the vault. Does not touch any other backlog source.
+Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` produced by `/thread:schedule` (older undated `<slug>-rollout` notes still resolve — see step 1). The Workflow's agents operate in isolated git worktrees they create under the target repo (`<repoPath>/.claude/worktrees/`) and open PRs. The lead session updates task frontmatter in the vault. Does not touch any other backlog source.
 
 ## Invocation forms
 
 ```
 execute Wave 1 of [[giflab-rollout]]       # single wave — opens PRs, you merge
 execute [[giflab-rollout]]                 # full rollout, CONTINUOUS AUTO-MERGE (zero-touch — the default)
-/wave:execute Wave 1 of [[giflab-rollout]] # explicit, single wave
-/wave:execute [[giflab-rollout]] --gated   # full rollout, MANUAL merge: pause between waves for you to merge
+/thread:execute Wave 1 of [[giflab-rollout]] # explicit, single wave
+/thread:execute [[giflab-rollout]] --gated   # full rollout, MANUAL merge: pause between waves for you to merge
 ```
 
 Bare `execute [[rollout]]` is **continuous auto-merge**: the lead session runs each wave, merges that
@@ -33,13 +33,13 @@ Single-wave mode opens PRs and leaves merging to you.
 
 Resolve `[[<slug>]]` to `~/repos/obsidian/Work/Tasks/<slug>.md`. Read frontmatter + body.
 
-The slug is whatever the invocation names. `/wave:schedule` writes rollout notes **always dated** — `<project-slug>-rollout-<YYYY-MM-DD>` for the first rollout of a day, or `<project-slug>-rollout-<YYYY-MM-DD>-<N>` (N≥2) for each subsequent rollout that same day (the first-of-day stays bare-date). Legacy notes from before this rule use the undated `<project-slug>-rollout`; execute still resolves them. The ordinal is purely `/wave:schedule`'s collision-avoidance scheme; execute reads the exact note it's handed and needs no special parsing. If the user names a rollout ambiguously (e.g. "execute today's giflab rollout") and several dated/ordinal notes match, **list the matches and ask which** — don't assume the highest ordinal.
+The slug is whatever the invocation names. `/thread:schedule` writes rollout notes **always dated** — `<project-slug>-rollout-<YYYY-MM-DD>` for the first rollout of a day, or `<project-slug>-rollout-<YYYY-MM-DD>-<N>` (N≥2) for each subsequent rollout that same day (the first-of-day stays bare-date). Legacy notes from before this rule use the undated `<project-slug>-rollout`; execute still resolves them. The ordinal is purely `/thread:schedule`'s collision-avoidance scheme; execute reads the exact note it's handed and needs no special parsing. If the user names a rollout ambiguously (e.g. "execute today's giflab rollout") and several dated/ordinal notes match, **list the matches and ask which** — don't assume the highest ordinal.
 
 If the frontmatter carries a `paused:` stamp, this invocation is a **reinstate** — see §4.5 *Reinstate* and *Pausing + reinstating a rollout* below.
 
 ### 2. Protocol-version gate
 
-- Missing `protocol_version` **or** `protocol_version: 2` → print: "This rollout predates the Workflow engine. Regenerate it to run under the current contract: `/wave:schedule <project> --regenerate`." Stop. (The legacy prose executor has been retired — there is no in-conversation engine to fall back to.)
+- Missing `protocol_version` **or** `protocol_version: 2` → print: "This rollout predates the Workflow engine. Regenerate it to run under the current contract: `/thread:schedule <project> --regenerate`." Stop. (The legacy prose executor has been retired — there is no in-conversation engine to fall back to.)
 - `protocol_version` other than `3` → print "unsupported protocol version <N>; this executor supports protocol_version: 3" and stop.
 - `protocol_version: 3` → proceed.
 
@@ -60,7 +60,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 | `model` | `opus` | `task.model` (per-task; `opus` \| `fable`) |
 | `effort` | none (omit) | `task.effort` (per-task ONLY — the ADR 0004 escape hatch; it has no rollout-level form) |
 
-`scope:` is read directly from each task's frontmatter (set by `/wave:schedule`). `completion_sentinel` is no longer used — the Workflow returns validated structured output instead of parsing sentinel strings.
+`scope:` is read directly from each task's frontmatter (set by `/thread:schedule`). `completion_sentinel` is no longer used — the Workflow returns validated structured output instead of parsing sentinel strings.
 
 `env_bootstrap` (rollout-level) is an optional shell command the engine runs once per worktree so agents start from a working interpreter + deps (e.g. `poetry env use 3.11 && poetry install`) — read it from the rollout frontmatter and pass it as `envBootstrap`; **omit the key when absent** so the worktree-setup prompt stays byte-identical (resume-cache invariant). `ignore_gate` (per-task) is an explicit override for a task note that carries a human/release gate in prose ("don't action until a release ships"); when `true`, pass `ignoreGate: true` on that task so the engine tells the agent the gate is overridden for this run — **omit/false** otherwise.
 
@@ -77,7 +77,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 
 Every `agent()` spawn site sets `effort` from the task's **live** tier + the agent's role, so escalation carries effort automatically — flipping a task to fable is one move that upgrades model AND effort, and judges follow (judges pinned via `judgeModel` take the pinned tier's row — model and effort always travel together). The **single escape hatch** is per-task `effort:` frontmatter (`low` \| `medium` \| `high` \| `xhigh` \| `max`): resolve it from the task note and pass it as `task.effort` — it overrides the planner/implementer effort for that task only, judges always keep the matrix, and it holds across an escalation (a monster task at fable/max stays at max). There is deliberately **no rollout-level effort config** (see ADR 0004's rejected options) — tuning the matrix means editing the engine, because the matrix encodes a stance (where effort is worth paying), not a per-rollout preference. The reconcile row is documented stance only today: reconcile is deterministic Python (`reconcile-wave.py`), so no agent consumes it.
 
-**Model escalation (one-shot first pass).** An `opus` task gets exactly one un-iterated pass at each layer: one plan, one implementation with a **single** verifier run (the Ralph `max_iterations` budget does not apply to the first pass), one judged PR round. The first evidence of hardness anywhere — a plan-judge `changes` verdict, a first-pass planner/investigator block, a red one-shot verifier run, an implementer block, or a review-judge `changes` verdict — **escalates the task to `fable` for all remaining work**, judges included. Escalation is one-way, sticky, and happens inside the engine (no re-invocation): the fable agent inherits the prior attempt's worktree, committed work, and note diagnosis, and runs the full Ralph loop. A `fable` task (stepped up by `/wave:schedule` §4.7 or a rollout-level `model: fable`) never escalates — there is nothing above fable — and runs the full loop from the start, exactly as before. Escalation is **durable**: reconcile (§6) stamps `model: fable` on the task note, so resume / `/wave:repair` re-dispatches start at fable and never re-pay the opus toll. There is no config switch — escalation is always on for opus tasks.
+**Model escalation (one-shot first pass).** An `opus` task gets exactly one un-iterated pass at each layer: one plan, one implementation with a **single** verifier run (the Ralph `max_iterations` budget does not apply to the first pass), one judged PR round. The first evidence of hardness anywhere — a plan-judge `changes` verdict, a first-pass planner/investigator block, a red one-shot verifier run, an implementer block, or a review-judge `changes` verdict — **escalates the task to `fable` for all remaining work**, judges included. Escalation is one-way, sticky, and happens inside the engine (no re-invocation): the fable agent inherits the prior attempt's worktree, committed work, and note diagnosis, and runs the full Ralph loop. A `fable` task (stepped up by `/thread:schedule` §4.7 or a rollout-level `model: fable`) never escalates — there is nothing above fable — and runs the full loop from the start, exactly as before. Escalation is **durable**: reconcile (§6) stamps `model: fable` on the task note, so resume / `/thread:repair` re-dispatches start at fable and never re-pay the opus toll. There is no config switch — escalation is always on for opus tasks.
 
 ### 3.5. Resolve the plan-gate per task → `task.planGate` (boolean)
 
@@ -85,7 +85,7 @@ Every `agent()` spawn site sets `effort` from the task's **live** tier + the age
 - `plan_approval: required` → `planGate: true`
 - `plan_approval: scope-gated` → `planGate: true` iff `scope: cross-cutting`; `single-file` and `read-only` → `false`
 
-(`/wave:schedule`'s gated-input sweep may have stamped `plan_approval: required` on tasks that smell of spend/credentials — that per-task frontmatter wins here as usual. It is advisory: it guarantees a plan-gate exists where the plan's own declaration can pause; the declaration itself is authoritative — §3.7.)
+(`/thread:schedule`'s gated-input sweep may have stamped `plan_approval: required` on tasks that smell of spend/credentials — that per-task frontmatter wins here as usual. It is advisory: it guarantees a plan-gate exists where the plan's own declaration can pause; the declaration itself is authoritative — §3.7.)
 
 ### 3.7. Gated inputs — the unconditional human stop (ADR 0005)
 
@@ -103,7 +103,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py approve-g
 
 ### 4. Stamp in-progress + build args
 
-Before launching, for each task in scope: stamp `status: in_progress` and `owner: <session-tag>` on the task's frontmatter (blocks duplicate dispatches). Keep this in the lead session — subagents never write task `status:`. In the launch message, **flag any task expected to gate** (a `plan_approval: required` stamped by `/wave:schedule`'s gated-input sweep, or a note that smells of spend/credentials) so the eventual `gate-pending` pause is expected, not a surprise (§3.7).
+Before launching, for each task in scope: stamp `status: in_progress` and `owner: <session-tag>` on the task's frontmatter (blocks duplicate dispatches). Keep this in the lead session — subagents never write task `status:`. In the launch message, **flag any task expected to gate** (a `plan_approval: required` stamped by `/thread:schedule`'s gated-input sweep, or a note that smells of spend/credentials) so the eventual `gate-pending` pause is expected, not a surprise (§3.7).
 
 Build the `args` object the workflow expects:
 
@@ -127,7 +127,7 @@ Build the `args` object the workflow expects:
         "scope": "single-file", "planGate": false,
         "maxIterations": 3, "maxReviewRounds": 4, "maxPlanRounds": 2,
         "ignoreGate": false,                 // per-task; omit/false unless overriding a human/release gate
-        "model": "opus",                     // per-task STARTING tier; "fable" when wave:schedule stepped a
+        "model": "opus",                     // per-task STARTING tier; "fable" when thread:schedule stepped a
                                              //   hard task up. The engine may escalate opus→fable mid-run.
         "effort": "max" }                    // per-task ONLY, from the task note's `effort:` frontmatter —
                                              //   OMIT when absent. Overrides the tier bundle's planner/
@@ -137,7 +137,7 @@ Build the `args` object the workflow expects:
 }
 ```
 
-Also read the rollout note's **`## Known baseline failures`** block (`/wave:schedule` step 2.6): when it lists tests (not `none`/empty), pass them as `knownBaselineFailures: ["<test_id> — <reason>", …]`. The engine threads the manifest into every agent and shifts the Ralph green criterion to "no NEW failures beyond this set" — it keeps running the full verifier and never `--deselect`s the listed reds (per the project's `CLAUDE.md`: a comparison reference, not a mute button). Omit the key when the block is absent or `none` — the engine then behaves exactly as before (`verifier` exit 0 = pass).
+Also read the rollout note's **`## Known baseline failures`** block (`/thread:schedule` step 2.6): when it lists tests (not `none`/empty), pass them as `knownBaselineFailures: ["<test_id> — <reason>", …]`. The engine threads the manifest into every agent and shifts the Ralph green criterion to "no NEW failures beyond this set" — it keeps running the full verifier and never `--deselect`s the listed reds (per the project's `CLAUDE.md`: a comparison reference, not a mute button). Omit the key when the block is absent or `none` — the engine then behaves exactly as before (`verifier` exit 0 = pass).
 
 - **Single-wave mode** (`execute Wave N of [[rollout]]`) → include only wave N in `waves`. Opens PRs; the user merges. No auto-merge. The tasks therefore end the session at `status: review` — once the user confirms the merges (or a later invocation finds the PRs merged in pre-flight), run `reconcile-wave.py mark-done` on them so they don't linger as false "awaiting acceptance" items.
 - **Continuous auto-merge mode** (`execute [[rollout]]`, no wave number, no flag — the DEFAULT) → do **not** pass all waves at once. Drive the rollout **one wave per Workflow call** across turns, auto-merging each wave before launching the next. This is the zero-touch path — see §4.5.
@@ -171,14 +171,14 @@ In continuous mode the lead session is the conductor: run ONE wave on the engine
    - **…then flip the wave's landed tasks to `done`** (same helper):
      `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py mark-done --tasks <slugA,slugB,…>`
      Pass **every wave-K task that ended at `status: review`** — both the just-merged PR tasks (the merge IS the confirmation a `review` note was waiting for) and the wave's read-only tasks (no PR to merge; their master-review approval was their confirmation, and the wave completing is when that becomes final). Idempotent; the helper refuses any note not at `review`/`done`, so a blocked task can never be swept along. Without this flip, landed tasks pile up at `review` as false "awaiting acceptance" items — seven had accumulated by 2026-06-12.
-   - **Soft-pause check (rides the cursor step — zero extra calls).** The `cursor` helper honours a `pause_requested: true` flag on the rollout note: it stamps `paused: <timestamp>`, clears the flag, and prints a `paused=` line alongside the cursor advance. When that line appears, the user asked for a soft pause — do **NOT** launch wave K+1. Print a short paused report (what merged this wave, what's left) and end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="paused at user request"`. The Stop-hook driver releases on `halted`, and the heartbeat cron deletes itself on its next tick — on this `halted` line, or on the `paused:` stamp its prompt checks ahead of the stall diagnosis (§5), which is what keeps "nothing auto-resumes a paused rollout" true for a hard pause too (a hard pause never emits `halted`; its runbook also deletes the cron outright). Reinstate is plain `/wave:execute [[rollout]]` — see *Pausing + reinstating a rollout* below.
+   - **Soft-pause check (rides the cursor step — zero extra calls).** The `cursor` helper honours a `pause_requested: true` flag on the rollout note: it stamps `paused: <timestamp>`, clears the flag, and prints a `paused=` line alongside the cursor advance. When that line appears, the user asked for a soft pause — do **NOT** launch wave K+1. Print a short paused report (what merged this wave, what's left) and end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="paused at user request"`. The Stop-hook driver releases on `halted`, and the heartbeat cron deletes itself on its next tick — on this `halted` line, or on the `paused:` stamp its prompt checks ahead of the stall diagnosis (§5), which is what keeps "nothing auto-resumes a paused rollout" true for a hard pause too (a hard pause never emits `halted`; its runbook also deletes the cron outright). Reinstate is plain `/thread:execute [[rollout]]` — see *Pausing + reinstating a rollout* below.
 4. **Smart-halt check** before launching K+1: if any wave-K task did **not** land (`blocked` / `review-blocked` / `plan-blocked` / `gate-pending`) **and** its file-set (from the rollout note's `## File-sets` block) intersects the union of any later wave's file-sets → **HALT** with a clear report (e.g. "wave K left [[task]] unlanded; wave M edits the same file `<f>` — continuing would branch it from a main missing the fix"). The user fixes the blocker and re-invokes. Otherwise, **honour any pending pause before launching K+1**: a partially-landed wave never runs step 3's cursor advance (*Per-task resume within a wave* below), so a `pause_requested: true` still sitting on the rollout note has NOT been honoured yet — check the note, and if the flag is pending, re-run `reconcile-wave.py cursor --rollout <rollout-note> --wave <current merged_through_wave>` (cursor-idempotent — re-setting the same value changes nothing — while performing the stamp + clear + `paused=` signal) and exit exactly as the step-3 *Soft-pause check* does: no wave K+1, paused report, `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="paused at user request"`. With no pending pause, launch wave K+1 (its worktrees branch from the freshly-merged `origin/main`).
 5. Repeat until the last wave merges, then **perform the completion ceremony** (don't just point the user at the checklist):
    - Sweep the rollout's task notes: every task should already read `status: done` (step 3's `mark-done` flips them wave by wave). Flip any straggler still at `review` whose PR is verifiably merged (`mark-done` again); a straggler at any *other* status means the rollout isn't actually complete — stop and say so.
    - Stamp `status: done` + `completed: <date>` on the rollout frontmatter.
    - File any follow-on work the rollout's Post-rollout section names (validation re-runs, audits, deferred items) as **new open tasks** in `Work/Tasks/`, and rewrite those items in the rollout note as thin pointers to the new tasks.
    - Append a `## Completion log` to the rollout note: dispatch dates, waves → PRs (links + merge dates), convergence stats per task, **total duration + a per-wave duration breakdown** (read the `timeline` block from `reconcile-wave.py status --rollout <rollout-note>` — it's computed from the `wave_N_dispatched`/`wave_N_merged` stamps), and the disposition of each post-rollout item.
-   - Close out the associated thread (see `~/.claude/skills/thread/SKILL.md`) — or record in the log why it stays open.
+   - Close out the associated thread (run `/thread:close` — a sibling: `${CLAUDE_PLUGIN_ROOT}/skills/close/SKILL.md`) — or record in the log why it stays open.
    - Delete the rollout's `WAVE-HEARTBEAT` cron if one is registered (`CronList` → `CronDelete`); the heartbeat also self-deletes on its next tick, but don't leave it ticking for up to 20 minutes against a finished rollout.
    - Move the rollout note to `Work/Tasks/Archive/Rollouts/` (`git mv` in the vault) and commit the vault. Wikilinks resolve by filename, so `[[<slug>]]` references and task `rollout:` backlinks survive the move.
 
@@ -203,7 +203,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py resume-fi
 #   dispatch — approve-gates makes them dispatchable again (§3.7).
 ```
 
-**No `## File-sets` block?** (an older rollout) the precise smart-halt can't run — fall back to the **coarse** rule: any unlanded task + any later wave ⇒ HALT. Tell the user to `/wave:schedule --regenerate` for precise halting.
+**No `## File-sets` block?** (an older rollout) the precise smart-halt can't run — fall back to the **coarse** rule: any unlanded task + any later wave ⇒ HALT. Tell the user to `/thread:schedule --regenerate` for precise halting.
 
 ### 5. Call the Workflow
 
@@ -222,7 +222,7 @@ Tell the user the run launched, which waves/tasks it covers, and that they can w
 
 **Register the heartbeat (continuous mode, once per rollout).** In the same turn as the first wave launch, check `CronList` for an existing `WAVE-HEARTBEAT <rollout-slug>` task; if none, register one via `CronCreate` (schedule `*/20 * * * *`) with this prompt:
 
-> WAVE-HEARTBEAT <rollout-slug>: Read the last WAVE-STATUS line for this rollout in the conversation. If state=done or state=halted (or the rollout note is archived), find this cron via CronList and CronDelete it, then stop. If the rollout note's frontmatter carries a `paused:` stamp, the rollout is deliberately paused — a hard pause emits no halted line, so check the note BEFORE any stall diagnosis: CronDelete this cron and stop; never resume a paused rollout. If a Workflow run for the rollout is still visibly running in /workflows, do nothing — end the turn silently. Otherwise the rollout has stalled (no run in flight, waves remain): re-enter /wave:execute [[<rollout-slug>]] §4.5 resume from the cursor.
+> WAVE-HEARTBEAT <rollout-slug>: Read the last WAVE-STATUS line for this rollout in the conversation. If state=done or state=halted (or the rollout note is archived), find this cron via CronList and CronDelete it, then stop. If the rollout note's frontmatter carries a `paused:` stamp, the rollout is deliberately paused — a hard pause emits no halted line, so check the note BEFORE any stall diagnosis: CronDelete this cron and stop; never resume a paused rollout. If a Workflow run for the rollout is still visibly running in /workflows, do nothing — end the turn silently. Otherwise the rollout has stalled (no run in flight, waves remain): re-enter /thread:execute [[<rollout-slug>]] §4.5 resume from the cursor.
 
 This is the backstop for a hung Workflow run or a missed completion notification — the stall mode nothing else catches. Then **end the launch turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=waiting`** so the Stop-hook driver (§8) lets the session idle until the notification arrives.
 
@@ -308,13 +308,13 @@ Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS au
 
 A **soft pause** (*Pausing + reinstating a rollout* below) exits through the same `state=halted` mechanics but is **deliberate**, not a failure — there is no cause to fix, and reinstating is plain re-invocation.
 
-In every halt case the work merged so far stays on `main`; the user fixes the cause and re-invokes `execute [[rollout]]` to resume from the `merged_through_wave` cursor. To see *why* a rollout halted, run `/wave:status [[rollout]]` (read-only situational report). To **sort out** a stalled rollout without ceding merge authority, run `/wave:repair [[rollout]]` — it reconciles drift, re-dispatches agent-fixable blocks, captures input-gated decisions, defers wedged tasks, and resumes via this skill's §4.5 loop (`merge-wave.sh` stays the sole merger). `/wave:repair` is the systematised replacement for hand-repairing a worktree in an external cockpit (README → *Coexistence with Orca*).
+In every halt case the work merged so far stays on `main`; the user fixes the cause and re-invokes `execute [[rollout]]` to resume from the `merged_through_wave` cursor. To see *why* a rollout halted, run `/thread:status [[rollout]]` (read-only situational report). To **sort out** a stalled rollout without ceding merge authority, run `/thread:repair [[rollout]]` — it reconciles drift, re-dispatches agent-fixable blocks, captures input-gated decisions, defers wedged tasks, and resumes via this skill's §4.5 loop (`merge-wave.sh` stays the sole merger). `/thread:repair` is the systematised replacement for hand-repairing a worktree in an external cockpit (README → *Coexistence with Orca*).
 
 ### 8. Unattended driving — the automatic driver
 
 The §4.5 loop is driven across turns by Workflow-completion notifications — nothing in the notifications themselves *enforces* that it keeps going. The plugin closes that gap with two self-managing pieces; **the user types nothing**:
 
-**The Stop-hook driver** (`hooks/wave-stop-driver.py`, wired via the plugin's `hooks.json`). On every session stop it reads the last `WAVE-STATUS` line (§6) and, while `state=running`, **blocks the stop** and hands back the exact next step (reconcile → merge → advance cursor → launch next wave). It releases on `waiting` (a Workflow run is legitimately in flight), `halted` (§7 — human's turn), and `done`. It is progress-aware: three consecutive blocks without the cursor advancing release the stop and surface "likely wedged — run /wave:status or /wave:repair" instead of spinning forever. This is the programmatic twin of a `/goal` condition, shipped so nobody has to remember to set one.
+**The Stop-hook driver** (`hooks/wave-stop-driver.py`, wired via the plugin's `hooks.json`). On every session stop it reads the last `WAVE-STATUS` line (§6) and, while `state=running`, **blocks the stop** and hands back the exact next step (reconcile → merge → advance cursor → launch next wave). It releases on `waiting` (a Workflow run is legitimately in flight), `halted` (§7 — human's turn), and `done`. It is progress-aware: three consecutive blocks without the cursor advancing release the stop and surface "likely wedged — run /thread:status or /thread:repair" instead of spinning forever. This is the programmatic twin of a `/goal` condition, shipped so nobody has to remember to set one.
 
 **The heartbeat cron** (registered by step 5 at first wave launch, `*/20 * * * *`). Catches the one stall the Stop hook can't see: a hung Workflow run or missed completion notification while the session idles at `state=waiting`. Each tick checks; if nothing needs doing it ends silently; if the rollout stalled it re-enters §4.5 cold resume (idempotent — cursor + `resume-filter` + merge-wave.sh's merged-PR skip make re-entry duplicate-free); it deletes itself once the rollout is done, halted, or paused (its prompt checks the rollout note's `paused:` stamp before diagnosing a stall — a hard pause emits no `halted` line, and "stalled" must never re-dispatch a wave the user deliberately stopped).
 
@@ -323,12 +323,12 @@ Division of labour: **Stop hook** = "don't stop while there's driving work"; **h
 **Manual fallbacks** (when the plugin's hooks are disabled, or driving from an environment without them):
 
 - `/goal The WAVE-STATUS line for <rollout-slug> reports state=done or state=halted, or stop after 4 hours` — transcript-only evaluator, auto-continues a stopped session; always include the time/turn bound and the `state=halted` release clause. Note it will also bounce `state=waiting` turns, so expect some no-op continuations while a wave runs.
-- `/loop 45m /wave:status [[<rollout>]]` — read-only watchdog for drift and stranded-`review` tasks (the failure mode that let seven landed tasks sit unnoticed in the giflab rollout); stop it (`/loop stop`) once the rollout archives.
+- `/loop 45m /thread:status [[<rollout>]]` — read-only watchdog for drift and stranded-`review` tasks (the failure mode that let seven landed tasks sit unnoticed in the giflab rollout); stop it (`/loop stop`) once the rollout archives.
 
 **Guardrails + limits:**
 
 - **Everything here is session-scoped.** The Stop hook and heartbeat cron only act while the session is alive; a closed terminal stops them all (they resume with `claude --resume`). True detachment is a `/schedule` cloud routine — out of wave's scope.
-- **Never automate `/wave:repair`** — it is input-gated by design (it asks the user decisions no agent can make); the driver, the heartbeat, and any loop must route a wedged rollout *to* repair, never *through* it.
+- **Never automate `/thread:repair`** — it is input-gated by design (it asks the user decisions no agent can make); the driver, the heartbeat, and any loop must route a wedged rollout *to* repair, never *through* it.
 - **`--gated` mode is exempt from unattended driving** — the per-wave human merge pause is the point. In gated mode end merge-pause turns with `state=halted reason="gated: awaiting user merge"` so the Stop hook releases.
 - **A §7 HALT ends unattended driving.** Emit `state=halted` with the reason — the Stop hook releases, the heartbeat self-deletes on its next tick, and a well-worded `/goal` fallback releases on the clause.
 - **What none of this fixes:** the blocking waits *inside* single tool calls — the Workflow call (~1h worst case per stubborn task, §Resource budget) and `merge-wave.sh`'s serial required-checks watching — are untouched by any driver.
@@ -337,7 +337,7 @@ Division of labour: **Stop hook** = "don't stop while there's driving work"; **h
 
 ## Pausing + reinstating a rollout
 
-"Pause the rollout" means **soft pause** by default; **hard pause** only when it must stop *now*. Either way the pause is recorded on the rollout note, and reinstating is plain `/wave:execute [[rollout]]` — no separate resume command, no new state machine. (Terms: `CONTEXT.md` → *Pause*, *Reinstate*.)
+"Pause the rollout" means **soft pause** by default; **hard pause** only when it must stop *now*. Either way the pause is recorded on the rollout note, and reinstating is plain `/thread:execute [[rollout]]` — no separate resume command, no new state machine. (Terms: `CONTEXT.md` → *Pause*, *Reinstate*.)
 
 **Soft pause (default).** Stamp `pause_requested: true` on the rollout note's frontmatter (a lead-session edit — it's rollout config, not task status). Nothing is interrupted: the in-flight wave finishes, merges, and advances the cursor as normal; the end-of-wave `cursor` helper then honours the flag — stamps `paused: <timestamp>`, clears `pause_requested` — and the loop exits with `state=halted reason="paused at user request"` instead of launching the next wave (§4.5 step 3, *Soft-pause check*; a partially-landed wave skips step 3's cursor advance, so step 4 honours the still-pending flag before any K+1 launch instead). Zero extra agent calls; the pause lands on a clean wave boundary. To cancel a pending request before it takes effect, remove the `pause_requested:` line (or run `clear-pause`).
 
@@ -349,9 +349,9 @@ Division of labour: **Stop hook** = "don't stop while there's driving work"; **h
 
 The killed wave's tasks simply didn't land: their notes still read `in_progress`, so `resume-filter` re-dispatches them on reinstate, and the engine's worktree setup reuses each task's existing worktree + branch (resume-safe by design). Losses are bounded to in-flight agent context — committed work, and uncommitted files sitting in the worktrees, survive.
 
-**Reinstate.** `/wave:execute [[rollout]]`. The resume path (§4.5 *Reinstate*) sees the `paused:` stamp, clears it via `reconcile-wave.py clear-pause`, and continues from the cursor — flush any half-merged wave, re-dispatch whatever didn't land. The heartbeat cron re-registers at the next wave launch (§5; the paused rollout's old one is already gone — self-deleted on the soft pause's `halted` line or on its prompt's paused-stamp check, or deleted directly by hard-pause step 3 — so a pause is never auto-resumed by a leftover tick).
+**Reinstate.** `/thread:execute [[rollout]]`. The resume path (§4.5 *Reinstate*) sees the `paused:` stamp, clears it via `reconcile-wave.py clear-pause`, and continues from the cursor — flush any half-merged wave, re-dispatch whatever didn't land. The heartbeat cron re-registers at the next wave launch (§5; the paused rollout's old one is already gone — self-deleted on the soft pause's `halted` line or on its prompt's paused-stamp check, or deleted directly by hard-pause step 3 — so a pause is never auto-resumed by a leftover tick).
 
-A paused rollout is **intentional**, not stalled: `/wave:status` reports it as paused (stamp + since-when + what's left), and `/wave:repair` treats it as nothing-to-fix.
+A paused rollout is **intentional**, not stalled: `/thread:status` reports it as paused (stamp + since-when + what's left), and `/thread:repair` treats it as nothing-to-fix.
 
 ## Don'ts
 
@@ -373,7 +373,7 @@ Each **code-writing** agent (implementer / approved-plan implementer) creates it
 
 | Version | Contract | Status |
 |---|---|---|
-| (absent) / 2 | Legacy in-conversation playbook (prose-driven dispatch + sentinel parsing) | Retired — regenerate via `/wave:schedule --regenerate` |
+| (absent) / 2 | Legacy in-conversation playbook (prose-driven dispatch + sentinel parsing) | Retired — regenerate via `/thread:schedule --regenerate` |
 | 3 | Workflow-engine convergence (`wave-execute.workflow.js`): structured output, in-pipeline parallel review, autonomous plan-gate judge, journaled resume | Current |
 
 Future protocol bumps follow the same rule: a new executor refuses older versions and asks the user to regenerate.

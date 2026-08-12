@@ -1,6 +1,6 @@
 ---
 name: orient
-description: Project-altitude orientation — audit a whole project/area after time away, recommend the best use of Lachy's time, ask how he wants to steer (background agents vs hands-on focus), then route. Triggers on "orient me on <project>", "where is <project> at overall", "I haven't looked at <project> in a while — what's open?", "audit <project> and tell me where my time should go", "fan out background sessions on <project>", or explicit /thread:orient [target]. Also /thread:orient <target> --debrief to sweep previously dispatched batches. For ONE thread's next move use thread:next; for PR-shaped repo rollouts use /wave:*.
+description: 'Project-altitude orientation — audit a whole project/area after time away, recommend the best use of Lachy''s time, ask how he wants to steer (background agents vs hands-on focus), then route. Triggers on "orient me on <project>", "where is <project> at overall", "I haven''t looked at <project> in a while — what''s open?", "audit <project> and tell me where my time should go", "fan out background sessions on <project>", or explicit /thread:orient [target]. Also /thread:orient <target> --debrief to sweep previously dispatched batches. For ONE thread''s next move use thread:next; for PR-shaped repo rollouts use /wave:*.'
 ---
 
 # /thread:orient — where should my time go on this project?
@@ -86,7 +86,7 @@ almost nothing is parallel-safe, recommend Hands-on):
   `## Launch` / `## Resume prompt`. No ceremony beyond that.
 - **Autonomous** (and the batch half of Mixed) → §§ 6–7.
 - **PR-shaped clusters** (repo code work wanting branches/PRs/merge) →
-  recommend `/wave:gather` or `/wave:schedule` for that cluster. Orient never
+  recommend `/thread:gather` or `/thread:schedule` for that cluster. Orient never
   re-implements the merge engine (`feedback_wave_fit_test`).
 
 ### 6. Batch (Autonomous / Mixed)

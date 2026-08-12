@@ -39,7 +39,7 @@ Ten subcommands:
               This is the per-task resume rule: the task-note status is the source of truth, so a wave
               that returned one approved + one blocked resumes by re-dispatching only the blocked one.
 
-  status      Read-only situational scan for /wave:status. Given a rollout note, find every task note
+  status      Read-only situational scan for /thread:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, merged_through_wave, status, timeline,
               tasks: [{slug, wave, status, pr, blockerSummary}]}. `timeline` is the progress/ETA block
@@ -49,15 +49,15 @@ Ten subcommands:
 
   resolve     Flip a *blocked* task (review-blocked/blocked/plan-blocked) -> done. The gap-closer for
               the drift case (a blocked note whose PR actually merged out-of-band). Refuses any note
-              that isn't in a blocked state — the CALLER (the /wave:repair skill) must have verified
+              that isn't in a blocked state — the CALLER (the /thread:repair skill) must have verified
               the work truly landed (e.g. `gh pr view` shows MERGED) before invoking. Idempotent.
 
   defer       Pop task(s) out of a rollout, back to open backlog: clears `wave:`/`rollout:`/`owner:`
-              and sets `status: open` so a future /wave:schedule re-plans them. The dependent-closure
-              safety check lives in the /wave:repair skill; this only does the frontmatter surgery.
+              and sets `status: open` so a future /thread:schedule re-plans them. The dependent-closure
+              safety check lives in the /thread:repair skill; this only does the frontmatter surgery.
 
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
-              `pause_requested`) from the rollout note. Run by /wave:execute's resume path when it
+              `pause_requested`) from the rollout note. Run by /thread:execute's resume path when it
               finds a `paused:` stamp — reinstating IS plain re-invocation, so there is no separate
               resume command. Idempotent (no stamp = no-op).
 
@@ -473,7 +473,7 @@ def cmd_reconcile(args) -> int:
         note.set("status", status)
 
         # Escalation is durable: a task that flipped opus→fable mid-run has proven non-mechanical,
-        # so every later re-dispatch (resume, /wave:repair) must start at fable, not re-pay the
+        # so every later re-dispatch (resume, /thread:repair) must start at fable, not re-pay the
         # opus one-shot toll. Stamped for every status — including landed ones, as the record of
         # what it took. Idempotent via Note.set.
         if task.get("escalated"):
@@ -869,7 +869,7 @@ def cmd_approve_gates(args) -> int:
 def cmd_clear_pause(args) -> int:
     """Reinstate: remove `paused:` + any pending `pause_requested` from the rollout note.
 
-    Called by /wave:execute's resume path ONLY when it finds a `paused:` stamp — a pending
+    Called by /thread:execute's resume path ONLY when it finds a `paused:` stamp — a pending
     `pause_requested` with no stamp is a live user request that must survive resumes (the heartbeat
     cron re-enters execute's resume, and it must never cancel a pause the user asked for). Clearing
     both here covers the hard-pause-before-honour edge (stamp hand-written while a soft request was
@@ -930,7 +930,7 @@ def main() -> int:
     f.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
     f.set_defaults(func=cmd_resume_filter)
 
-    s = sub.add_parser("status", help="emit JSON situational report for a rollout (read-only; /wave:status)")
+    s = sub.add_parser("status", help="emit JSON situational report for a rollout (read-only; /thread:status)")
     s.add_argument("--rollout", required=True, help="path to the rollout note")
     s.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
     s.set_defaults(func=cmd_status)
@@ -941,14 +941,14 @@ def main() -> int:
     rv.add_argument("--dry-run", action="store_true")
     rv.set_defaults(func=cmd_resolve)
 
-    df = sub.add_parser("defer", help="pop task(s) out of a rollout back to open backlog (/wave:repair)")
+    df = sub.add_parser("defer", help="pop task(s) out of a rollout back to open backlog (/thread:repair)")
     df.add_argument("--tasks", required=True, help="comma-separated task slugs to defer")
     df.add_argument("--rollout", default=None, help="rollout note path (optional; asserts membership before deferring)")
     df.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
     df.add_argument("--dry-run", action="store_true")
     df.set_defaults(func=cmd_defer)
 
-    cp = sub.add_parser("clear-pause", help="reinstate a paused rollout: remove paused/pause_requested (/wave:execute resume)")
+    cp = sub.add_parser("clear-pause", help="reinstate a paused rollout: remove paused/pause_requested (/thread:execute resume)")
     cp.add_argument("--rollout", required=True, help="path to the rollout note")
     cp.add_argument("--dry-run", action="store_true")
     cp.set_defaults(func=cmd_clear_pause)

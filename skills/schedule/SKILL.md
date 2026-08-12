@@ -1,13 +1,13 @@
 ---
 name: schedule
-description: 'Use when planning a parallel rollout of multiple Obsidian tasks under a single project — produces a thin rollout note (data only) that the `/wave:execute` skill reads and runs on the Workflow engine. Reads tasks from ~/repos/obsidian/Work/Tasks/, computes wave structure from file-overlap + dependency analysis, auto-merges affine same-file task clusters (same change, artificially split) into a single sequential dispatch unit, writes an always-dated <project-slug>-rollout-<YYYY-MM-DD>.md with `protocol_version: 3` frontmatter + rollout-level config defaults (verifier, max_iterations, max_review_rounds, max_plan_rounds, plan_approval, parallel_ceiling, model), and stamps wave: N on each task. Scope: Obsidian only.'
+description: 'Use when planning a parallel rollout of multiple Obsidian tasks under a single project — produces a thin rollout note (data only) that the `/thread:execute` skill reads and runs on the Workflow engine. Reads tasks from ~/repos/obsidian/Work/Tasks/, computes wave structure from file-overlap + dependency analysis, auto-merges affine same-file task clusters (same change, artificially split) into a single sequential dispatch unit, writes an always-dated <project-slug>-rollout-<YYYY-MM-DD>.md with `protocol_version: 3` frontmatter + rollout-level config defaults (verifier, max_iterations, max_review_rounds, max_plan_rounds, plan_approval, parallel_ceiling, model), and stamps wave: N on each task. Scope: Obsidian only.'
 ---
 
-# /wave:schedule — turn a backlog of Obsidian tasks into a rollout note
+# /thread:schedule — turn a backlog of Obsidian tasks into a rollout note
 
 A **wave plan** groups a backlog of related Obsidian tasks into parallel-safe waves, so a single Claude Code session can fan them out across worktree-isolated subagents.
 
-This skill is the **planner**. The rollout note it produces is a data artefact — the dispatch + convergence contract lives in the sibling **`/wave:execute`** skill (`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`).
+This skill is the **planner**. The rollout note it produces is a data artefact — the dispatch + convergence contract lives in the sibling **`/thread:execute`** skill (`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`).
 
 ## Scope
 
@@ -16,10 +16,10 @@ This skill is the **planner**. The rollout note it produces is a data artefact �
 ## Invocation forms
 
 ```
-/wave:schedule GifLab                       # default: all open tasks linked to [[GifLab]]
-/wave:schedule [[GifLab]]                   # explicit wikilink form
-/wave:schedule GifLab --regenerate          # re-plan even tasks that already have wave: set
-/wave:schedule --tasks task-a,task-b,task-c # explicit set instead of project filter
+/thread:schedule GifLab                       # default: all open tasks linked to [[GifLab]]
+/thread:schedule [[GifLab]]                   # explicit wikilink form
+/thread:schedule GifLab --regenerate          # re-plan even tasks that already have wave: set
+/thread:schedule --tasks task-a,task-b,task-c # explicit set instead of project filter
 ```
 
 The argument resolves to a project-note slug (the thing the task's `projects:` frontmatter list contains). Strip `[[...]]` wrappers and case-fold for comparison.
@@ -72,31 +72,31 @@ If a task touches zero files after both passes, classify it as `scope: read-only
 
 ### 2.5. Detect the project's verifier
 
-Resolve the rollout-level default verifier — the shell command(s) `/wave:execute` will run inside each subagent's worktree to decide pass/fail. Detection order:
+Resolve the rollout-level default verifier — the shell command(s) `/thread:execute` will run inside each subagent's worktree to decide pass/fail. Detection order:
 
 1. Project's `CLAUDE.md` — look for a line like `Verifier: \`<cmd>\`` or a "Verification" / "Testing" section that names a single canonical command
 2. Project's `Makefile` at repo root — presence of a `test` target → `make test`
 3. `pyproject.toml` with `[tool.poetry]` → `poetry run pytest`
 4. `package.json` with a `test` script → `npm test`
-5. Fall back to no detection → surface to user, ask them to provide one (or proceed without; `/wave:execute` will refuse to dispatch without a verifier)
+5. Fall back to no detection → surface to user, ask them to provide one (or proceed without; `/thread:execute` will refuse to dispatch without a verifier)
 
 Print the detected command and ask the user to confirm or override before continuing. Store it for step 6.
 
 ### 2.6. Capture known baseline failures
 
-Some repos carry tests that already fail on a clean `main` for environmental / pre-existing reasons (an ImageMagick 0-byte quirk, a perf ratio over a hardcoded ceiling, a Windows-only tool gap). Without a manifest, **every** dispatched agent independently re-diagnoses the same reds and burns tool-calls proving they're out of scope (14× in the first giflab run). Capture them once here so `/wave:execute` can thread them into every agent and treat "only these fail" as green.
+Some repos carry tests that already fail on a clean `main` for environmental / pre-existing reasons (an ImageMagick 0-byte quirk, a perf ratio over a hardcoded ceiling, a Windows-only tool gap). Without a manifest, **every** dispatched agent independently re-diagnoses the same reds and burns tool-calls proving they're out of scope (14× in the first giflab run). Capture them once here so `/thread:execute` can thread them into every agent and treat "only these fail" as green.
 
 - **Declare by default** — ask the user for the known baseline failures as `<test_id> — <one-line reason>` lines.
 - **Opt-in detection** — offer to run the verifier once on a clean `main` (clean checkout, run `{{VERIFIER}}`, collect the failing test ids) and present the set for the user to confirm + annotate with reasons.
 - If clean `main` is fully green, record `none`.
 
-**Honesty constraint** (per the project's `CLAUDE.md`): the manifest is a **comparison reference, not a mute button** — `/wave:execute` keeps running the full verifier and only ignores these exact reds; it never `--deselect`s them (that would hide a real regression in them). The manifest is a point-in-time snapshot with no liveness guarantee — re-capture on `--regenerate`.
+**Honesty constraint** (per the project's `CLAUDE.md`): the manifest is a **comparison reference, not a mute button** — `/thread:execute` keeps running the full verifier and only ignores these exact reds; it never `--deselect`s them (that would hide a real regression in them). The manifest is a point-in-time snapshot with no liveness guarantee — re-capture on `--regenerate`.
 
 Store the confirmed lines for step 6's `{{KNOWN_BASELINE_FAILURES}}` block.
 
 ### 2.7. Detect the env-bootstrap command (optional)
 
-If the verifier needs a one-time environment setup before it runs in a **fresh** worktree — the recurring "wrong Python / no editable install" friction where each agent independently rediscovers `poetry env use 3.11 && poetry install` — capture it once as the rollout's `env_bootstrap`. `/wave:execute` then runs it once per worktree right after the agent enters it, so no agent has to rediscover it. Detection:
+If the verifier needs a one-time environment setup before it runs in a **fresh** worktree — the recurring "wrong Python / no editable install" friction where each agent independently rediscovers `poetry env use 3.11 && poetry install` — capture it once as the rollout's `env_bootstrap`. `/thread:execute` then runs it once per worktree right after the agent enters it, so no agent has to rediscover it. Detection:
 
 1. Project's `CLAUDE.md` — a line like `Env bootstrap: \`<cmd>\`` or a documented "set up the worktree env" command.
 2. Otherwise ask the user (the common shapes are `poetry env use <ver> && poetry install`, `npm ci`, `uv sync`), or leave it unset.
@@ -113,7 +113,7 @@ Look for:
 
 ### 3.5. Detect human/release gates
 
-Some task notes carry a **human/release gate** in prose — "don't action until a release ships", "hold for sign-off", "gated on the next deploy". A `/wave:execute` agent reads the note and may refuse mid-dispatch when it hits one, so a buried gate is unreliable either way. Scan each task body for gate language (`don't action until`, `do not action until`, `hold for`, `until a release`, `until the next release`, `gated on a release`, `human sign-off`, `wait for sign-off`). Collect any matches — they become the **pre-flight decision** surfaced in step 8: the user either clears each gate (set `ignore_gate: true` on the task to override it for the run, or remove the gate text) or drops the task from this rollout. Don't bury the gate in the body and hope the agent honours it.
+Some task notes carry a **human/release gate** in prose — "don't action until a release ships", "hold for sign-off", "gated on the next deploy". A `/thread:execute` agent reads the note and may refuse mid-dispatch when it hits one, so a buried gate is unreliable either way. Scan each task body for gate language (`don't action until`, `do not action until`, `hold for`, `until a release`, `until the next release`, `gated on a release`, `human sign-off`, `wait for sign-off`). Collect any matches — they become the **pre-flight decision** surfaced in step 8: the user either clears each gate (set `ignore_gate: true` on the task to override it for the run, or remove the gate text) or drops the task from this rollout. Don't bury the gate in the body and hope the agent honours it.
 
 ### 3.6. Sweep for gated-input smell (advisory — ADR 0005)
 
@@ -182,7 +182,7 @@ Then turn each member into a **tombstone** — don't delete it (backlinks to it 
 
 `merged` is a configured TaskNotes status (`isCompleted: true`, `autoArchive: true`), so tombstones auto-archive into `Work/Tasks/Archive/` and leave the active list — their backlinks (and the combined note's `## Folded-in tasks` links) still resolve, since wikilinks are unpathed. See `obsidian-schema.md` § Task.
 
-The rollout then references only the combined note, as an ordinary `cross-cutting` task — so `/wave:execute` and its engine need to know nothing about merging.
+The rollout then references only the combined note, as an ordinary `cross-cutting` task — so `/thread:execute` and its engine need to know nothing about merging.
 
 **Confirm the result before writing.** Show the user each proposed merge (members → combined note, plus the affinity signal that fired) and — just as important — the same-file pairs you deliberately *kept apart* and the guard that fired for each. This is where a misread gets caught. Get a y/n before authoring anything.
 
@@ -207,7 +207,7 @@ The step-up is **predictive** — it fires on the task's shape before any run. I
 
 **Core invariant: two tasks that touch the same file never share a wave.** Same-file tasks are serialised across consecutive waves — the later one rebases onto main after the first lands. (This is the fix for the #30/#31 incident, where two same-wave tasks both edited `metrics.py` and a stale-base squash silently dropped the first task's changes.)
 
-Algorithm — **one** file-overlap graph-colouring over *every editing task* (`single-file`, `cross-cutting`, and merged units alike). Scope does **not** decide wave placement — it only drives review depth and the plan-gate downstream (steps 6–7 and `/wave:execute`). Wave eligibility is governed *solely* by file-overlap, so a `cross-cutting` task whose file-set is disjoint from its candidate wave-mates runs in parallel with them, exactly like a `single-file` one. (Two disjoint cross-cutting tasks can still interact *semantically* — both touch composite logic in different files — but that's caught by their rigorous review + plan-gate, not by wave isolation; the wave graph only prevents same-*file* overwrites.)
+Algorithm — **one** file-overlap graph-colouring over *every editing task* (`single-file`, `cross-cutting`, and merged units alike). Scope does **not** decide wave placement — it only drives review depth and the plan-gate downstream (steps 6–7 and `/thread:execute`). Wave eligibility is governed *solely* by file-overlap, so a `cross-cutting` task whose file-set is disjoint from its candidate wave-mates runs in parallel with them, exactly like a `single-file` one. (Two disjoint cross-cutting tasks can still interact *semantically* — both touch composite logic in different files — but that's caught by their rigorous review + plan-gate, not by wave isolation; the wave graph only prevents same-*file* overwrites.)
 
 1. Build a **conflict graph**: an edge between two editing tasks iff their resolved file-sets (from step 2, **unioned** for merged units) share ≥1 file. Read-only tasks make no edits, so they carry no edges.
 2. **Colour by file-overlap.** Process tasks in **descending conflict-degree** (ties broken alphabetically by slug, for determinism), placing each in the **earliest wave that contains no task it shares a file with**. Degree-0 tasks (disjoint from everything) fill the earliest waves for maximum parallel safety; a task on a hot file gets pushed later, one wave per same-file rival. Tasks that merely cluster — sharing a *neighbour* but not a *file* — still run in the same wave.
@@ -220,7 +220,7 @@ Dependencies trump the colouring: if task A depends on task B, A's wave must com
 
 ### 6. Write the rollout note
 
-Location: `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` — **always dated** (slug = the lowercase kebab form of the project wikilink, or a natural scope slug when the batch has one; date = today, the day you write the note — e.g. `[[GifLab]]` on 2026-07-18 → `giflab-rollout-2026-07-18.md`). The date is mandatory: an undated `<slug>-rollout` name collides with the project's next rollout, so it is **never emitted**. Legacy undated notes keep their names — no migration; the readers (`/wave:execute`, `/wave:status`, `/wave:repair`) still resolve both forms. This is the canonical rule in CONTEXT.md § Rollout.
+Location: `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` — **always dated** (slug = the lowercase kebab form of the project wikilink, or a natural scope slug when the batch has one; date = today, the day you write the note — e.g. `[[GifLab]]` on 2026-07-18 → `giflab-rollout-2026-07-18.md`). The date is mandatory: an undated `<slug>-rollout` name collides with the project's next rollout, so it is **never emitted**. Legacy undated notes keep their names — no migration; the readers (`/thread:execute`, `/thread:status`, `/thread:repair`) still resolve both forms. This is the canonical rule in CONTEXT.md § Rollout.
 
 **Dated-note naming — handles more than one rollout per day.** The filename is `<slug>-rollout-<YYYY-MM-DD>.md` for the **first** rollout of a given day, and `<slug>-rollout-<YYYY-MM-DD>-<N>.md` (N≥2) for each **subsequent** rollout that same day. Resolve N deterministically: glob `<slug>-rollout-<YYYY-MM-DD>*.md` — nothing matches → bare date (no `-N`); only the bare-date note exists → `-2`; otherwise → one past the highest existing ordinal. The first-of-day note never carries `-1` (kept bare, backward-compatible with every existing dated rollout). So a day's sequence reads `…-2026-06-09.md`, `…-2026-06-09-2.md`, `…-2026-06-09-3.md`. **Never overwrite or reuse an existing dated note** — always advance to the next free ordinal. The one prompt is when today's note already exists and you're re-running to *replace* one you just wrote in error: offer **Overwrite** (replace the same-day note), **Advance** (write the next free ordinal — the usual choice for a new, distinct effort), or **Cancel**. Substitute the resolved slug into `{{ROLLOUT_SLUG}}` everywhere downstream — the note's own filename, the per-task `rollout:` stamps (step 7), the summary (step 8), and any `supersedes:` / `superseded_by:` links.
 
@@ -237,11 +237,11 @@ Use the template at `${CLAUDE_PLUGIN_ROOT}/skills/schedule/rollout-template.md`.
 - `{{WAVE_TABLE}}` — rendered wave structure table (see template). A merged unit (step 4.5) renders as a normal row with **Mode = `sequential-merged (one agent/PR)`**, signalling that one agent does the folded sub-tasks in sequence
 - `{{WAVE_RATIONALE}}` — short prose explaining the ordering
 - `{{TASKS_BY_WAVE}}` — wikilink list per wave (see template)
-- `{{FILE_SETS}}` — a **machine-readable** per-task file-set block (one line per *editing* task: `- <full-slug> (wave N): file, file, …`), rendered from the **confirmed step-2 file-sets** (unioned for merged units, exactly as step 5 colours them). Omit read-only tasks (no edits). `/wave:execute` reads this block for its blocked-task smart-halt: if a task fails to land and its files reappear in a later wave, the rollout halts rather than branching that later wave from a `main` missing the fix. This is **rollout-note data** — a derivation of sets the user already confirmed in step 2, not a fresh guess — so it is distinct from, and does not violate, the task-frontmatter `touches:` Don't (it lives in the rollout note, never stamped onto the individual tasks).
-- `{{KNOWN_BASELINE_FAILURES}}` — the `## Known baseline failures` block from step 2.6: one `- <test_id> — <reason>` line per test already red on a clean `main`, or `none`. `/wave:execute` reads this block, threads it into every agent, and shifts the Ralph green criterion to "no NEW failures beyond this set" (never `--deselect`). Like `{{FILE_SETS}}`, this is rollout-note data the executor reads, never task frontmatter.
+- `{{FILE_SETS}}` — a **machine-readable** per-task file-set block (one line per *editing* task: `- <full-slug> (wave N): file, file, …`), rendered from the **confirmed step-2 file-sets** (unioned for merged units, exactly as step 5 colours them). Omit read-only tasks (no edits). `/thread:execute` reads this block for its blocked-task smart-halt: if a task fails to land and its files reappear in a later wave, the rollout halts rather than branching that later wave from a `main` missing the fix. This is **rollout-note data** — a derivation of sets the user already confirmed in step 2, not a fresh guess — so it is distinct from, and does not violate, the task-frontmatter `touches:` Don't (it lives in the rollout note, never stamped onto the individual tasks).
+- `{{KNOWN_BASELINE_FAILURES}}` — the `## Known baseline failures` block from step 2.6: one `- <test_id> — <reason>` line per test already red on a clean `main`, or `none`. `/thread:execute` reads this block, threads it into every agent, and shifts the Ralph green criterion to "no NEW failures beyond this set" (never `--deselect`). Like `{{FILE_SETS}}`, this is rollout-note data the executor reads, never task frontmatter.
 - `{{POST_ROLLOUT_ITEMS}}` — rollout-specific post-completion items (audit re-runs, downstream unblocks, validation sweeps), one numbered/bulleted line each, or `none`. These slot under the template's fixed completion-ceremony steps; at completion the ceremony (execute SKILL §4.5 step 5) converts each into a new open task + thin pointer, so phrase them as work descriptions, not instructions to leave in place.
 
-The template's frontmatter carries `protocol_version: 3` plus rollout-level convergence defaults (`max_iterations: 3`, `max_review_rounds: 4`, `max_plan_rounds: 3`, `plan_approval: scope-gated`, `parallel_ceiling: 4`, `model: opus`). These are inherited by every task in the rollout; per-task overrides go in the task's own frontmatter. When step 2.7 detected an env-bootstrap command, uncomment the template's `env_bootstrap:` line and set it (`/wave:execute` runs it once per worktree); leave it commented out when none. `plan_approval: scope-gated` means the plan-gate fires only for `scope: cross-cutting` tasks (other values: `off`, `required`) — see `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` for the gate semantics. (`completion_sentinel` is gone as of protocol 3 — the Workflow engine returns validated structured output instead of parsing sentinel strings.)
+The template's frontmatter carries `protocol_version: 3` plus rollout-level convergence defaults (`max_iterations: 3`, `max_review_rounds: 4`, `max_plan_rounds: 3`, `plan_approval: scope-gated`, `parallel_ceiling: 4`, `model: opus`). These are inherited by every task in the rollout; per-task overrides go in the task's own frontmatter. When step 2.7 detected an env-bootstrap command, uncomment the template's `env_bootstrap:` line and set it (`/thread:execute` runs it once per worktree); leave it commented out when none. `plan_approval: scope-gated` means the plan-gate fires only for `scope: cross-cutting` tasks (other values: `off`, `required`) — see `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` for the gate semantics. (`completion_sentinel` is gone as of protocol 3 — the Workflow engine returns validated structured output instead of parsing sentinel strings.)
 
 Render each task reference as `[[<full-slug>|<short-alias>]]` in the wave-structure table for readability. In the per-wave detail section use the full `[[<full-slug>]]` form.
 
@@ -251,7 +251,7 @@ For each task in the rollout:
 
 - Add `wave: <N>` (or update if `--regenerate`)
 - Add `rollout: "[[<rollout-slug>]]"` backlink
-- Add `scope:` if not already set (single-file / cross-cutting / read-only — see step 4) — `/wave:execute` uses this to route master-review depth
+- Add `scope:` if not already set (single-file / cross-cutting / read-only — see step 4) — `/thread:execute` uses this to route master-review depth
 - For `scope: read-only` tasks specifically, also add `max_iterations: 1` (nothing to retry)
 - For tasks the user confirmed as Fable step-ups in step 4.7, add `model: fable` — never stamp `model: opus` (that's the rollout-level default every task inherits)
 - For a task the user explicitly confirmed an effort override for (§4.7 — rare), add `effort: <low|medium|high|xhigh|max>` — never stamp `effort:` by default, and never add it to the rollout note (it has no rollout-level form; the tier bundle decides everywhere else)
@@ -275,7 +275,7 @@ Open in Obsidian to review. To execute:
   execute Wave 1 of [[{{ROLLOUT_SLUG}}]]      # one wave
   execute [[{{ROLLOUT_SLUG}}]]                # full rollout (continuous)
 
-The wave:execute skill at ${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md reads this note and runs the three-layer convergence engine (plan-gate → Ralph retry → master review) via the Workflow tool.
+The thread:execute skill at ${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md reads this note and runs the three-layer convergence engine (plan-gate → Ralph retry → master review) via the Workflow tool.
 ```
 
 **Pre-flight — gated tasks.** If step 3.5 found any human/release-gated tasks, list them above the summary so the user clears them before executing (an unaddressed gate makes the agent refuse mid-run):
@@ -293,9 +293,9 @@ Expected to gate (will pause for your sign-off at their plan-gate):
   - [[task-y]] — smells of API spend ("~$30 of Replicate credits") → plan_approval: required
 ```
 
-## Execution lives in `/wave:execute`
+## Execution lives in `/thread:execute`
 
-This skill does not execute anything. The rollout note it produces is read by the sibling **`/wave:execute`** skill (`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`), which resolves per-task config and calls the **Workflow** tool with `wave-execute.workflow.js` — the convergence engine (plan-gate → Ralph retry → master review). The engine is not duplicated into individual rollout notes; improvements to the script reach every rollout immediately.
+This skill does not execute anything. The rollout note it produces is read by the sibling **`/thread:execute`** skill (`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`), which resolves per-task config and calls the **Workflow** tool with `wave-execute.workflow.js` — the convergence engine (plan-gate → Ralph retry → master review). The engine is not duplicated into individual rollout notes; improvements to the script reach every rollout immediately.
 
 ## Don'ts
 
@@ -310,20 +310,20 @@ This skill does not execute anything. The rollout note it produces is read by th
 
 End-to-end test against an existing backlog (e.g. GifLab):
 
-1. `/wave:schedule GifLab` from any Claude Code session
+1. `/thread:schedule GifLab` from any Claude Code session
 2. Confirms ~9 open tasks, prints detected files per task, asks to confirm
 3. Step 2.5 detects `make test` (or whatever GifLab's CLAUDE.md prescribes) — prints it and asks to confirm
 4. Computes wave structure
 5. Writes the always-dated note `giflab-rollout-<YYYY-MM-DD>.md` (advancing to the next `-N` ordinal if today's already exists).
 6. Rollout note carries `protocol_version: 3`, `verifier:`, `max_iterations: 3`, `max_review_rounds: 4`, `max_plan_rounds: 3`, `plan_approval: scope-gated`, `parallel_ceiling: 4`, `model: opus` in frontmatter. No inline execution playbook — the rollout body is data only.
 7. Stamps `wave: N`, `rollout: "[[...]]"`, and `scope:` on each task
-8. Prints summary pointing the user toward `/wave:execute`
+8. Prints summary pointing the user toward `/thread:execute`
 
-Then from a fresh session: paste `execute Wave 1 of [[giflab-rollout-<YYYY-MM-DD>]]` (the dated note just written) — the `/wave:execute` skill should pick it up, gate on `protocol_version: 3`, resolve per-task config, and call the Workflow tool with `wave-execute.workflow.js` to run the three-layer convergence engine per task (visible live via `/workflows`).
+Then from a fresh session: paste `execute Wave 1 of [[giflab-rollout-<YYYY-MM-DD>]]` (the dated note just written) — the `/thread:execute` skill should pick it up, gate on `protocol_version: 3`, resolve per-task config, and call the Workflow tool with `wave-execute.workflow.js` to run the three-layer convergence engine per task (visible live via `/workflows`).
 
 ### Merge regression (step 4.5)
 
-The GifLab backlog is a good fixture because it exercises both a merge and a deliberate non-merge in one run. Against the open backlog, `/wave:schedule GifLab --regenerate` should:
+The GifLab backlog is a good fixture because it exercises both a merge and a deliberate non-merge in one run. Against the open backlog, `/thread:schedule GifLab --regenerate` should:
 
 - **MERGE → "metrics.py sentinel → NaN hardening":** `giflab-dry-ssimulacra2-fallback-dict` + `giflab-lpips-fallback-nan-sentinel` + `giflab-per-frame-exception-nan-sentinel`. All replace fabricated sentinels with `float("nan")` + NaN-aware aggregation in `metrics.py` error paths, and the LPIPS task literally says *"consider folding LPIPS into the same DRY-up… shared `_nan_fallback_dict(keys)`"* (strong signal). 3 serial waves → 1.
 - **MERGE → "content-classifier lossy ceiling":** `giflab-data-viz-animation-lossy-guard` + `giflab-photographic-content-lossy-ceiling`. Both build the same pre-compression classifier + `lossy_max` machinery; only the heuristic differs. 2 waves → 1.

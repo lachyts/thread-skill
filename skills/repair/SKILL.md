@@ -1,11 +1,11 @@
 ---
 name: repair
-description: 'Use to unstick a wave rollout that has stalled — run it whenever there''s an issue with the whole rollout, not a single task. Triggers on "repair [[rollout]]", "fix this rollout", "[[rollout]] is stuck", "sort out [[rollout]]", "unblock the rollout", or after /wave:status shows blockers/drift. A thin CONDUCTOR over /wave:execute (never a second engine): it diagnoses (runs /wave:status), reconciles drift, asks YOU only the decisions no agent can make and writes them into the notes, auto-retries agent-fixable blocks, dependency-aware-defers wedged tasks, then hands off to execute''s resume — wave keeps sole merge authority. Scope: Obsidian + gh/git + the execute engine.'
+description: 'Use to unstick a wave rollout that has stalled — run it whenever there''s an issue with the whole rollout, not a single task. Triggers on "repair [[rollout]]", "fix this rollout", "[[rollout]] is stuck", "sort out [[rollout]]", "unblock the rollout", or after /thread:status shows blockers/drift. A thin CONDUCTOR over /thread:execute (never a second engine): it diagnoses (runs /thread:status), reconciles drift, asks YOU only the decisions no agent can make and writes them into the notes, auto-retries agent-fixable blocks, dependency-aware-defers wedged tasks, then hands off to execute''s resume — wave keeps sole merge authority. Scope: Obsidian + gh/git + the execute engine.'
 ---
 
-# /wave:repair — sort out a stuck rollout (conductor, not an engine)
+# /thread:repair — sort out a stuck rollout (conductor, not an engine)
 
-`/wave:repair [[rollout]]` is the **"something's wrong with this rollout — sort it out"** verb. You point
+`/thread:repair [[rollout]]` is the **"something's wrong with this rollout — sort it out"** verb. You point
 it at the rollout (never a single task); it figures out what's stuck across every wave, does the
 mechanics, and asks you only the decisions no agent can make.
 
@@ -18,12 +18,12 @@ wedged task. It never re-implements merge or convergence, and **wave keeps sole 
 ## Scope
 
 Reads/writes `~/repos/obsidian/Work/Tasks/`, makes `gh`/`git` calls against the target repo, and drives
-`/wave:execute`'s resume. Merges only ever happen via execute's `merge-wave.sh`.
+`/thread:execute`'s resume. Merges only ever happen via execute's `merge-wave.sh`.
 
 ## Invocation forms
 
 ```
-/wave:repair [[giflab-rollout]]      # diagnose, fix what it can, ask only the decisions, resume to done
+/thread:repair [[giflab-rollout]]      # diagnose, fix what it can, ask only the decisions, resume to done
 repair [[giflab-rollout]]            # natural language — same thing
 fix this rollout                     # resolves to the rollout in context
 ```
@@ -32,7 +32,7 @@ fix this rollout                     # resolves to the rollout in context
 
 ### 1. Diagnose
 
-Resolve `[[<slug>]]` (ask if ambiguous). Run the **`/wave:status` scan with the live cross-check on**
+Resolve `[[<slug>]]` (ask if ambiguous). Run the **`/thread:status` scan with the live cross-check on**
 (repair is about to act, so it always checks reality): get the per-task state JSON + the PR/worktree
 drift flags + the repo path. Show the user the situational report first — they should see what they're
 repairing.
@@ -41,15 +41,15 @@ repairing.
 a rollout*) — do not conflate them:
 
 - `paused:` stamp → the rollout is deliberately paused; its unlanded tasks are waiting for reinstate,
-  not wedged. Say so, point at `/wave:execute [[<rollout>]]` to reinstate, and stop.
+  not wedged. Say so, point at `/thread:execute [[<rollout>]]` to reinstate, and stop.
 - `pause_requested:` only (no stamp) → the rollout is still **live and mid-wave**; the pause takes
   effect at the next wave boundary. Report "pause pending — takes effect at the next wave boundary,
   nothing to do" (matching status's rendering) and stop. There is nothing to reinstate, and **never
-  recommend re-invoking `/wave:execute` against a live run** — the running loop honours the flag itself.
+  recommend re-invoking `/thread:execute` against a live run** — the running loop honours the flag itself.
 
 In either case, continue into repair only for something genuinely independent of the pause (e.g. drift —
 a PR merged out-of-band before the pause) and the user confirms; even then, **never clear the pause
-stamp or the pending flag, and never resume** — reinstate belongs to `/wave:execute`.
+stamp or the pending flag, and never resume** — reinstate belongs to `/thread:execute`.
 
 ### 2. Classify each non-landed task
 
@@ -84,7 +84,7 @@ status transition).
 ### 4. Auto-retry the agent-fixable + just-injected tasks (hand off to execute)
 
 These re-dispatch through the **existing** engine — do **not** write a new loop. Follow
-`/wave:execute` §4.5 (the continuous per-wave resume): compute the still-to-dispatch set with
+`/thread:execute` §4.5 (the continuous per-wave resume): compute the still-to-dispatch set with
 `reconcile-wave.py resume-filter`, run the Workflow one wave at a time, merge each wave with
 `merge-wave.sh`, advance the cursor, `mark-done`. The re-dispatched agent reads the prior
 `## Review-blocked feedback` / `## Blocker diagnosis` / `## Repair input` from the note.
@@ -107,7 +107,7 @@ When the user opts to defer a task (or declines further retries on a re-blocked 
    gh pr close <pr> --delete-branch --comment "deferred out of [[<rollout>]] — back to backlog"   # if a PR exists
    python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py defer --tasks <slug> --rollout <rollout-note>
    ```
-   (`defer` clears `wave:`/`rollout:`/`owner:` and sets `status: open`, so a future `/wave:schedule`
+   (`defer` clears `wave:`/`rollout:`/`owner:` and sets `status: open`, so a future `/thread:schedule`
    re-plans it.) For any file-overlap successor, give a one-line confirm: *"[[B]] edits the same file and
    will now branch without this change — OK?"*
 3. **Has true dependents** → **STOP**: surface the chain and `AskUserQuestion`: *"[[B]], [[C]] depend on
@@ -127,7 +127,7 @@ any dependents moved with it).
 - **Don't treat `paused:` or `pause_requested:` as drift or a blocker.** A pause is intentional (see §1)
   — repair never clears the stamp or the pending flag, never resumes the loop, and never points a
   pending-only rollout (still live, mid-wave) at a re-invocation of execute; reinstate — for a stamped
-  pause only — is `/wave:execute [[<rollout>]]`.
+  pause only — is `/thread:execute [[<rollout>]]`.
 - **Don't re-implement merge or convergence.** Drift → `resolve`; everything else → execute's §4.5
   resume. If you're writing a dispatch/merge loop, you've turned the conductor into an engine — stop.
 - **Don't merge anywhere but `merge-wave.sh`.** No inline `gh pr merge`, no `--admin`, no force-push.

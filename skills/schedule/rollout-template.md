@@ -16,22 +16,22 @@ protocol_version: 3
 verifier: {{VERIFIER}}
 max_iterations: 3
 max_review_rounds: 4
-max_plan_rounds: 3  # 2 was insufficient for cross-cutting plan-gates; 3-with-accumulated-feedback converges (wave:execute item 1)
+max_plan_rounds: 3  # 2 was insufficient for cross-cutting plan-gates; 3-with-accumulated-feedback converges (thread:execute item 1)
 plan_approval: scope-gated  # off | scope-gated | required
 parallel_ceiling: 4
-model: opus  # opus | fable — default (mechanical execution). wave:schedule stamps `model: fable` on structural (cross-cutting) or deep tasks; a fable task runs end-to-end incl. its judges.
-# env_bootstrap:   # optional: shell cmd wave:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — wave:schedule step 2.7
-merged_through_wave: 0  # wave:execute continuous-mode cursor: highest wave merged to main (0 = none yet)
+model: opus  # opus | fable — default (mechanical execution). thread:schedule stamps `model: fable` on structural (cross-cutting) or deep tasks; a fable task runs end-to-end incl. its judges.
+# env_bootstrap:   # optional: shell cmd thread:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — thread:schedule step 2.7
+merged_through_wave: 0  # thread:execute continuous-mode cursor: highest wave merged to main (0 = none yet)
 # wave_N_dispatched: / wave_N_merged:   # engine-stamped wave-boundary timestamps (flat per-wave keys, ISO):
 #   reconcile-wave.py mark-dispatched writes the first at wave launch (first dispatch wins), cursor writes the
-#   second post-merge. They feed the per-wave progress lines and /wave:status's elapsed + rough (~) remaining
+#   second post-merge. They feed the per-wave progress lines and /thread:status's elapsed + rough (~) remaining
 #   estimate. Never hand-edit or pre-seed them — the engine loop owns these stamps.
 # supersedes: "[[<prior-rollout-slug>]]"   # add only when --regenerate replaces an earlier rollout (see SKILL.md step 6)
 ---
 
 ## Notes
 
-Parallel-rollout plan for landing the open backlog of `[[{{PROJECT_NAME}}]]` tasks. Each wave fans out across worktree-isolated subagents; the `/wave:execute` skill owns the dispatch + convergence contract.
+Parallel-rollout plan for landing the open backlog of `[[{{PROJECT_NAME}}]]` tasks. Each wave fans out across worktree-isolated subagents; the `/thread:execute` skill owns the dispatch + convergence contract.
 
 Project root: `{{REPO_PATH}}`
 {{THREAD_LINE}}
@@ -54,7 +54,7 @@ The contract lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` — three-
 
 Tasks scheduled so that same-file tasks never share a wave (and dependencies follow their blockers). Within a wave, agents run in parallel via git worktree isolation. Between waves (single-wave mode), the previous wave's PRs must land first.
 
-The table's **Mode** column reads `parallel` for tasks that fan out within a wave, `solo` for a cross-cutting task alone in its wave, and `sequential-merged (one agent/PR)` for a unit `/wave:schedule` folded from an affine same-file cluster — one agent works its sub-tasks in sequence on one branch/PR.
+The table's **Mode** column reads `parallel` for tasks that fan out within a wave, `solo` for a cross-cutting task alone in its wave, and `sequential-merged (one agent/PR)` for a unit `/thread:schedule` folded from an affine same-file cluster — one agent works its sub-tasks in sequence on one branch/PR.
 
 {{WAVE_TABLE}}
 
@@ -80,31 +80,31 @@ If a wave has more tasks than the budget allows, the executor dispatches in two 
 
 ## File-sets
 
-<!-- Machine-readable: wave:execute's continuous auto-merge reads this for the blocked-task smart-halt.
-     Authored by wave:schedule from the confirmed step-2 file-sets (unioned for merged units). One line per
+<!-- Machine-readable: thread:execute's continuous auto-merge reads this for the blocked-task smart-halt.
+     Authored by thread:schedule from the confirmed step-2 file-sets (unioned for merged units). One line per
      EDITING task; read-only tasks omitted. This is rollout-note data, NOT task-frontmatter `touches:`. -->
 
 {{FILE_SETS}}
 
 ## Known baseline failures
 
-<!-- Machine-readable: wave:execute threads this into every agent so they don't re-diagnose tests that
+<!-- Machine-readable: thread:execute threads this into every agent so they don't re-diagnose tests that
      already fail on a clean `main` for environmental reasons. The engine's green criterion shifts to "no
      NEW failures beyond this set" — it keeps running the full verifier and never --deselects them (that
      would hide a real regression). One line per failing test: `- <test_id> — <one-line reason>`. This is a
      point-in-time snapshot (no liveness guarantee); re-capture on --regenerate. Write `none` when clean
-     `main` is fully green ⇒ wave:execute then behaves exactly as before (verifier exit 0 = pass). -->
+     `main` is fully green ⇒ thread:execute then behaves exactly as before (verifier exit 0 = pass). -->
 
 {{KNOWN_BASELINE_FAILURES}}
 
 ## Post-rollout
 
-When every wave's PRs have merged, run the **completion ceremony** (`/wave:execute` performs this as its final step in continuous mode — see its §4.5 step 5; do it manually if the run ended early or in gated/single-wave mode):
+When every wave's PRs have merged, run the **completion ceremony** (`/thread:execute` performs this as its final step in continuous mode — see its §4.5 step 5; do it manually if the run ended early or in gated/single-wave mode):
 
 1. Mark this rollout `status: done` and stamp `completed: <YYYY-MM-DD>` in the frontmatter.
 2. File any follow-on work (validation re-runs, audits, deferred items) as **new open tasks** in `Work/Tasks/` and rewrite the items below as thin pointers to them. Never leave live work as checklist prose inside a done note — the moment `status: done` lands, every Bases view filters this note out and the work goes invisible.
 3. Append a `## Completion log`: dispatch dates, waves → PRs (links + merge dates), convergence stats (plan/review rounds per task), and the disposition of each post-rollout item.
-4. Close out any associated thread (see `~/.claude/skills/thread/SKILL.md`) — or record here why it stays open.
+4. Close out any associated thread (run `/thread:close`) — or record here why it stays open.
 5. Move this note to `Work/Tasks/Archive/Rollouts/` and commit the vault. Obsidian wikilinks resolve by filename, so `[[<slug>]]` references and the task notes' `rollout:` backlinks survive the move.
 
 Rollout-specific items (audit re-runs etc.) go here:

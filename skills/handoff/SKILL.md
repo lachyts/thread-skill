@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Fork the current conversation to a fresh agent NOW — compact it into an inline copy-paste prompt (plus an optional temp doc) so a new session continues this exact task immediately. Use when the context window is filling up, when forking into a separate session, or when handing a task to another agent mid-stream. Distinct from thread:open/thread:close (persistent continuity) and thread:stash/thread:defer (set down for later) — this is a one-shot compaction for resuming THIS task right now.
+description: 'Fork the current conversation to a fresh agent NOW — compact it into an inline copy-paste prompt (plus an optional temp doc) so a new session continues this exact task immediately. Use when the context window is filling up, when forking into a separate session, or when handing a task to another agent mid-stream. Distinct from thread:open/thread:close (persistent continuity) and thread:stash/thread:defer (set down for later) — this is a one-shot compaction for resuming THIS task right now.'
 argument-hint: "What will the next session focus on?"
 disable-model-invocation: true
 author: Matt Pocock

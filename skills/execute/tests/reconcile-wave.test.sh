@@ -135,7 +135,7 @@ else echo "ok   - mixed call reports the error (exit 1)"; fi
 check "read-only flipped despite mixed" "status: done"                                 "$TMP/task-readonly.md"
 check "plan-blocked untouched"          "status: plan-blocked"                         "$TMP/task-planblocked.md"
 
-echo "== status / resolve / defer (rollout-scoped, /wave:status + /wave:repair) =="
+echo "== status / resolve / defer (rollout-scoped, /thread:status + /thread:repair) =="
 cat > "$TMP/st-rollout.md" <<EOF
 ---
 tags: [task, rollout]

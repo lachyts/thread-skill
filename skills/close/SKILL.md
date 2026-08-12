@@ -1,6 +1,6 @@
 ---
 name: close
-description: End-of-thread capture — update the active thread (project THREAD.md or shared _shared/threads/<slug>.md) with what happened this session, then triage anything else worth saving (vault tasks, memory, knowledge). Auto-commits workspace + vault git repos for session-changed files. Available globally — works from any CWD. Use when the work is FINISHED for now and state should persist; if the work continues elsewhere use thread:handoff, if it's being set down for later use thread:stash or thread:defer. Invoke with `/thread:close` or "close this thread".
+description: 'End-of-thread capture — update the active thread (project THREAD.md or shared _shared/threads/<slug>.md) with what happened this session, then triage anything else worth saving (vault tasks, memory, knowledge). Auto-commits workspace + vault git repos for session-changed files. Available globally — works from any CWD. Use when the work is FINISHED for now and state should persist; if the work continues elsewhere use thread:handoff, if it''s being set down for later use thread:stash or thread:defer. Invoke with `/thread:close` or "close this thread".'
 ---
 
 # /thread:close — close out this thread

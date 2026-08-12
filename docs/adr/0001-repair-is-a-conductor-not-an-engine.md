@@ -1,6 +1,6 @@
 # Repair is a conductor, not an engine
 
-`/wave:repair` orchestrates the existing `/wave:execute` engine to unstick a rollout — it diagnoses,
+`/thread:repair` orchestrates the existing `/thread:execute` engine to unstick a rollout — it diagnoses,
 captures human decisions into task notes, reconciles drift, and then hands off to execute's resume. It
 deliberately does **not** contain its own merge or convergence logic. We chose this because the engine's
 worktree setup is already idempotent on re-dispatch (`wave-execute.workflow.js`) and `resume-filter`

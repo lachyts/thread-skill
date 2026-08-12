@@ -150,7 +150,7 @@ auto-complete, ADR 0001 consequence) — deliberately *after* preflight, so a
 failed pickup never marks the capture done. It's inside the prompt so it works
 even when pasted into a non-Claude harness. If the work is conversation-gated (needs Lachy's input
 before an agent can act), say so explicitly in the Notes line — this is what
-keeps `/wave:schedule` from sweeping it into an autonomous rollout.
+keeps `/thread:schedule` from sweeping it into an autonomous rollout.
 
 ## 6. THREAD.md — optional upgrade, never manufactured
 

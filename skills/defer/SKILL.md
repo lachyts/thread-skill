@@ -1,6 +1,6 @@
 ---
 name: defer
-description: Set the current thread down onto a specific day — writes a self-contained Obsidian task SCHEDULED for that day (default tomorrow), routed to the right project, carrying a summary + copy-paste resume prompt. The task surfaces on that day's page via /morning and the TaskNotes agenda. Triggers on "defer this", "pick this up tomorrow/monday", "put this on tomorrow", "come back to this friday", "this is tomorrow's problem", or explicit /thread:defer [day]. For "no particular day, just don't lose it" use thread:stash instead.
+description: 'Set the current thread down onto a specific day — writes a self-contained Obsidian task SCHEDULED for that day (default tomorrow), routed to the right project, carrying a summary + copy-paste resume prompt. The task surfaces on that day''s page via /morning and the TaskNotes agenda. Triggers on "defer this", "pick this up tomorrow/monday", "put this on tomorrow", "come back to this friday", "this is tomorrow''s problem", or explicit /thread:defer [day]. For "no particular day, just don''t lose it" use thread:stash instead.'
 argument-hint: "[day — tomorrow if omitted: monday | fri | next tue | 2026-07-20]"
 ---
 

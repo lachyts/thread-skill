@@ -164,7 +164,7 @@ def main():
             "systemMessage": (
                 f"wave-driver: released the stop after {entry['blocks']} continuations "
                 f"without cursor progress — [[{slug}]] still reports state=running at "
-                f"cursor {cursor}/{total}. Likely wedged: run /wave:status or /wave:repair."
+                f"cursor {cursor}/{total}. Likely wedged: run /thread:status or /thread:repair."
             )
         }))
         return

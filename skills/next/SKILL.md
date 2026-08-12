@@ -1,6 +1,6 @@
 ---
 name: next
-description: The undecided moment — "what's my next move?" for the current thread. Summarises where the work is, recommends ONE move (keep going / defer / stash / handoff / close), then dispatches to the chosen sibling route. Triggers on "what's my next move", "what should I do with this thread", "where are we — what now", "should I keep going or close this", "next steps?", or explicit /thread:next. If the intent is already decisive ("stash this", "defer to friday"), skip this router and invoke that route directly.
+description: 'The undecided moment — "what''s my next move?" for the current thread. Summarises where the work is, recommends ONE move (keep going / defer / stash / handoff / close), then dispatches to the chosen sibling route. Triggers on "what''s my next move", "what should I do with this thread", "where are we — what now", "should I keep going or close this", "next steps?", or explicit /thread:next. If the intent is already decisive ("stash this", "defer to friday"), skip this router and invoke that route directly.'
 ---
 
 # /thread:next — what's my next move?

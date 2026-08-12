@@ -1,6 +1,6 @@
 ---
 name: stash
-description: Lock the current thread away dormant — out of time, not the current focus, but must not be lost. Writes a self-contained Obsidian task (NO scheduled date) routed to the right project, carrying a summary + copy-paste resume prompt, so the session can be shut down safely. Triggers on "stash this thread", "lock this in", "park this", "I'm out of time — save this", "not my focus right now, don't lose it", or explicit /thread:stash. For "pick it up on <day>" use thread:defer instead; for "work continues right now in a new session" use thread:handoff.
+description: 'Lock the current thread away dormant — out of time, not the current focus, but must not be lost. Writes a self-contained Obsidian task (NO scheduled date) routed to the right project, carrying a summary + copy-paste resume prompt, so the session can be shut down safely. Triggers on "stash this thread", "lock this in", "park this", "I''m out of time — save this", "not my focus right now, don''t lose it", or explicit /thread:stash. For "pick it up on <day>" use thread:defer instead; for "work continues right now in a new session" use thread:handoff.'
 ---
 
 # /thread:stash — lock this thread in, dormant

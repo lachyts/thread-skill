@@ -2,16 +2,16 @@
 
 A project's roadmap phase (P1, P2, …) is its own vault type — `tags: [phase]`, home folder
 `Work/Phases/`, named `<project>-p<N>-<desc>` — never a `task`-tagged note. Tasks inherit their
-phase's number (`phase: N`, filenames `<project>-p<N>-<M>-<desc>`); `/wave:split` never starts a
+phase's number (`phase: N`, filenames `<project>-p<N>-<M>-<desc>`); `/thread:split` never starts a
 second phase counter inside a phase, and it de-tasks a legacy task-tagged phase note it decomposes.
-Phases stay a purely human planning tier: `/wave:schedule` requires `tags: task` at discovery and
+Phases stay a purely human planning tier: `/thread:schedule` requires `tags: task` at discovery and
 computes waves only from file overlap + dependency links, so phase notes are structurally
 undispatchable. One phase = one rollout holds by convention, not machinery.
 
 We chose this after the Focus App collision (2026-07-07): P2 had been captured as a task note that
 was really a multi-deliverable plan. Splitting it as-is would have made the note title the project
 slug, restarted the phase counter (`focus-app-p2-watcher-drift-p1-1-…`), pointed `projects:` at a
-task masquerading as a project, and left a "task" in the backlog that `/wave:schedule` would happily
+task masquerading as a project, and left a "task" in the backlog that `/thread:schedule` would happily
 dispatch as one giant unit.
 
 ## Considered Options
@@ -28,7 +28,7 @@ dispatch as one giant unit.
   approve-before-write table, schedule's discovery filter) are the intentional checkpoints.
 - **First-class Phase type + authoring-time protocol (chosen)** — phase becomes a vault type with
   archive parity; the note shape lives in one writer spec (`_shared/knowledge/add-writers/add-phase.md`)
-  read by `/add`, `/wave:split`, and free-form agents via CLAUDE.md § Task home.
+  read by `/add`, `/thread:split`, and free-form agents via CLAUDE.md § Task home.
 
 ## Consequences
 

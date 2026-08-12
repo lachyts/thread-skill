@@ -1,18 +1,18 @@
 ---
 name: split
-description: 'Use when turning a plan or design into a set of numbered, phased Obsidian task notes — decomposing "a plan" into PR-sized tasks that /wave:schedule then groups into waves. Triggers on "split this plan into tasks", "decompose this", "turn this design into tasks", "break this into numbered/phased tasks", or pointing at a design/project/phase note or an approved plan and asking for tasks. Input: a vault design/project note, a phase note (tasks inherit its phase number and parent project — never a nested counter), a plan-mode plan file, or inline prose. Writes <project>-pN-M task notes + slims the source into a linked outline. First stage of /wave:split → /wave:schedule → /wave:execute. Scope: Obsidian only.'
+description: 'Use when turning a plan or design into a set of numbered, phased Obsidian task notes — decomposing "a plan" into PR-sized tasks that /thread:schedule then groups into waves. Triggers on "split this plan into tasks", "decompose this", "turn this design into tasks", "break this into numbered/phased tasks", or pointing at a design/project/phase note or an approved plan and asking for tasks. Input: a vault design/project note, a phase note (tasks inherit its phase number and parent project — never a nested counter), a plan-mode plan file, or inline prose. Writes <project>-pN-M task notes + slims the source into a linked outline. First stage of /thread:split → /thread:schedule → /thread:execute. Scope: Obsidian only.'
 ---
 
-# /wave:split — decompose a plan into numbered, phased tasks
+# /thread:split — decompose a plan into numbered, phased tasks
 
-`/wave:split` turns **a plan or design** into a backlog of **PR-sized Obsidian task notes**, numbered
+`/thread:split` turns **a plan or design** into a backlog of **PR-sized Obsidian task notes**, numbered
 and grouped into phases, each carrying the runnable prompt + context to execute it. It then slims the
 source into a linked outline.
 
-This is the **front stage** of the pipeline. `/wave:schedule` (the planner) reads the tasks it writes
-and clusters them into parallel-safe waves; `/wave:execute` runs them. So `split` emits
+This is the **front stage** of the pipeline. `/thread:schedule` (the planner) reads the tasks it writes
+and clusters them into parallel-safe waves; `/thread:execute` runs them. So `split` emits
 **schedule-ready** tasks — it writes `touches:` and dependency links, and leaves `wave:` for
-`/wave:schedule` to stamp.
+`/thread:schedule` to stamp.
 
 ## Scope
 
@@ -22,11 +22,11 @@ note. Not for Linear, GitHub issues, or in-repo Spec Kit `tasks.md` (that's `/sp
 ## Invocation forms
 
 ```
-/wave:split [[gifLook]]                 # a vault design/project note (wikilink)
-/wave:split Work/Projects/Animately/gifLook   # vault path
-/wave:split ~/.claude/plans/<plan>.md   # an approved plan-mode plan file
-/wave:split "<prose describing the work>"     # inline
-/wave:split [[gifLook]] --regenerate    # re-decompose; otherwise skip a slug whose tasks exist
+/thread:split [[gifLook]]                 # a vault design/project note (wikilink)
+/thread:split Work/Projects/Animately/gifLook   # vault path
+/thread:split ~/.claude/plans/<plan>.md   # an approved plan-mode plan file
+/thread:split "<prose describing the work>"     # inline
+/thread:split [[gifLook]] --regenerate    # re-decompose; otherwise skip a slug whose tasks exist
 ```
 
 ## Skill flow
@@ -53,7 +53,7 @@ Read the whole source. If it names a target repo / project, note it (drives `cwd
 
 A task = **one independently-shippable, separately-verifiable unit** (≈ one PR / one coherent
 change). Bias to a coherent deliverable, not a step — do **not** manufacture the artificially-split
-same-file clusters `/wave:schedule` step 4.5 has to re-merge. Heuristics:
+same-file clusters `/thread:schedule` step 4.5 has to re-merge. Heuristics:
 
 - A distinct artifact (a new module/skill/command, a spec change, a doc) → one task.
 - "And then" / "depends on the above" → a phase boundary or a dependency, not necessarily a new task.
@@ -66,14 +66,14 @@ natural-language build prompt — lifted/adapted from the plan).
 ### 3. Detect `touches:`, dependencies, phases
 
 - **`touches:`** — file paths the plan names for each task (inline code, fenced blocks, bare repo
-  paths). This is the one place a task's file-set is authored up front; `/wave:schedule` consumes it
+  paths). This is the one place a task's file-set is authored up front; `/thread:schedule` consumes it
   as authoritative (no regex fallback). When a task's files aren't inferable, **omit** `touches:` and
-  let `/wave:schedule` resolve it later — do not guess.
+  let `/thread:schedule` resolve it later — do not guess.
 - **Dependencies** — "needs X", "after X lands", "depends on", or a later task building on an earlier
   artifact → record as `[[task]]` links in the dependent's body.
 - **Phases** — **never nest phases.** A phase-note source (step 1) is a *single* phase: every task
   inherits its `phase: N`, and intra-phase ordering is expressed as dependency links only —
-  `/wave:schedule` re-derives layers from deps, so sub-phase numbering adds zero machine value.
+  `/thread:schedule` re-derives layers from deps, so sub-phase numbering adds zero machine value.
   For a multi-phase plan: if it **states phases** (e.g. "Phase 0–3"), honour them; otherwise
   **infer** phases as dependency layers (topological): tasks that depend on nothing = phase 0; tasks
   that depend only on phase-0 tasks = phase 1; and so on. Inferred layers ARE the project's roadmap
@@ -127,8 +127,8 @@ captured: <today>
 **Verify:** <how to know it's done>.
 ```
 
-- Leave **`wave:` unset** — `/wave:schedule` stamps it.
-- Don't set `scope:` — `/wave:schedule` infers it from `touches:` (single source of that logic).
+- Leave **`wave:` unset** — `/thread:schedule` stamps it.
+- Don't set `scope:` — `/thread:schedule` infers it from `touches:` (single source of that logic).
 - Skip a `<slug>-*` task that already exists unless `--regenerate`.
 
 ### 6. Slim the source into a linked outline
@@ -148,14 +148,14 @@ captured: <today>
 
 ### 7. Report
 
-List the tasks written, show the outline, and name the next step: **`/wave:schedule <slug>`**.
+List the tasks written, show the outline, and name the next step: **`/thread:schedule <slug>`**.
 
 ## Don'ts
 
 - **Don't over-split.** Coherent PR-sized units, not steps. If you'd be creating two tasks that edit
   the same file as one change, make it one task.
 - **Don't guess `touches:`.** Author it only from paths the plan actually names; otherwise omit.
-- **Don't stamp `wave:` or `scope:`** — those belong to `/wave:schedule`.
+- **Don't stamp `wave:` or `scope:`** — those belong to `/thread:schedule`.
 - **Don't write before the gate.** Step 4's approval precedes any file write.
 - **Don't clobber the source note** — the `## Build sequence` edit is section-scoped and idempotent.
 - **Don't leave a split source task-tagged** — a phase is a plan, never a task (`tags: [phase]`,

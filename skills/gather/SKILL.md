@@ -1,14 +1,14 @@
 ---
 name: gather
-description: 'Use when turning a project''s disparate loose Obsidian tasks into a phased roadmap — the inverse of /wave:split (plan → tasks): gather is loose-tasks → phases, and both converge on /wave:schedule. Triggers on "turn these tasks into a roadmap", "gather these tasks", "roadmap-ify this backlog", "phase this backlog", or pointing at a project with a pile of loose tasks and asking for a roadmap. Proposes theme+dependency clusters (a proposal, never a decision), then grills by default at full depth — a grill-with-docs / grill-me interview (invoked by skill name, never copied) resolving roadmap meaning (phase names, ordering, membership — the human decides; gather never invents phases silently) AND per-task speccing; --light = clustering-only, bodies untouched. Then the mechanical writes per the shared add-phase/add-task writer specs: phase notes in Work/Phases/, <project>-pN-M renames + phase: stamps (backlink rewrite first), two-block surfacing on the project note; misfits stay loose. Never dispatches, never stamps wave:. Scope: Obsidian, plus CONTEXT.md/ADR writes in the project''s repo when grilling with docs.'
+description: 'Use when turning a project''s disparate loose Obsidian tasks into a phased roadmap — the inverse of /thread:split (plan → tasks): gather is loose-tasks → phases, and both converge on /thread:schedule. Triggers on "turn these tasks into a roadmap", "gather these tasks", "roadmap-ify this backlog", "phase this backlog", or pointing at a project with a pile of loose tasks and asking for a roadmap. Proposes theme+dependency clusters (a proposal, never a decision), then grills by default at full depth — a grill-with-docs / grill-me interview (invoked by skill name, never copied) resolving roadmap meaning (phase names, ordering, membership — the human decides; gather never invents phases silently) AND per-task speccing; --light = clustering-only, bodies untouched. Then the mechanical writes per the shared add-phase/add-task writer specs: phase notes in Work/Phases/, <project>-pN-M renames + phase: stamps (backlink rewrite first), two-block surfacing on the project note; misfits stay loose. Never dispatches, never stamps wave:. Scope: Obsidian, plus CONTEXT.md/ADR writes in the project''s repo when grilling with docs.'
 ---
 
-# /wave:gather — turn loose tasks into a roadmap
+# /thread:gather — turn loose tasks into a roadmap
 
-`/wave:gather` turns **a project's disparate loose tasks** into a roadmap: cluster proposals →
+`/thread:gather` turns **a project's disparate loose tasks** into a roadmap: cluster proposals →
 grilled meaning → phase notes + `pN-M` renames + project-note surfacing. It is the **inverse of
-`/wave:split`** — split decomposes a plan into tasks; gather forms phases from tasks that already
-exist. Both converge on `/wave:schedule` **when the work is wave-shaped** (phases order meaning,
+`/thread:split`** — split decomposes a plan into tasks; gather forms phases from tasks that already
+exist. Both converge on `/thread:schedule` **when the work is wave-shaped** (phases order meaning,
 waves order merges — but not every roadmap wants a rollout; see step 5's execution-fit test).
 
 Reference roadmap shape: the `[[GifLab]]` project note — phase notes in `Work/Phases/`,
@@ -25,12 +25,12 @@ and nothing else outside the vault, ever.
 ## Invocation forms
 
 ```
-/wave:gather GifLab               # all loose open tasks linked to [[GifLab]]
-/wave:gather [[GifLab]]           # explicit wikilink form
-/wave:gather GifLab --light       # clustering-only: no interview, task bodies untouched
+/thread:gather GifLab               # all loose open tasks linked to [[GifLab]]
+/thread:gather [[GifLab]]           # explicit wikilink form
+/thread:gather GifLab --light       # clustering-only: no interview, task bodies untouched
 ```
 
-The argument resolves to a project-note slug exactly as `/wave:schedule` does (strip `[[...]]`,
+The argument resolves to a project-note slug exactly as `/thread:schedule` does (strip `[[...]]`,
 case-fold). There is no `--regenerate`: the discovery filter (no `phase:`) makes re-runs
 incremental by construction — already-phased tasks never re-enter.
 
@@ -129,9 +129,9 @@ schema**: `~/repos/workspaces/_shared/knowledge/add-writers/add-phase.md` (phase
 ### 5. Hand off — run the execution-fit test before naming a next step
 
 Report what was written (phases as clickable `obsidian://` links, renames, surfacing status,
-misfits). Then decide which next step to name — **do not default to `/wave:schedule`**:
+misfits). Then decide which next step to name — **do not default to `/thread:schedule`**:
 
-- **Wave-shaped work** → name **`/wave:schedule <slug>`**. Wave-shaped means the phase's tasks
+- **Wave-shaped work** → name **`/thread:schedule <slug>`**. Wave-shaped means the phase's tasks
   converge on ONE code repo, each task lands as a PR, and success is machine-verifiable inside
   the run (tests / build / greps).
 - **Everything else** → name **calendar/session-driven execution**: work each phase's
@@ -152,7 +152,7 @@ Phases order meaning, waves order merges — gather never writes `wave:` either 
   human's — via the step-3 interview or the step-4 gate.
 - **Don't renumber.** Existing phases and task ordinals are immutable; new phases continue from
   `N_max`, joins take the next free `M`.
-- **Don't stamp `wave:`, `rollout:`, or `scope:`** — those belong to `/wave:schedule`.
+- **Don't stamp `wave:`, `rollout:`, or `scope:`** — those belong to `/thread:schedule`.
 - **Don't touch bodies under `--light`** — rename + `phase:` stamp only, byte-identical otherwise.
 - **Don't force-phase a misfit.** Loose is a valid end state.
 - **Don't write before the step-4 gate.**
@@ -169,7 +169,7 @@ Phases order meaning, waves order merges — gather never writes `wave:` either 
 
 End-to-end against a fixture project with 6+ loose tasks (including empty brain-dump captures):
 
-1. `/wave:gather <Fixture>` — discovers the loose set, reports the existing roadmap, proposes
+1. `/thread:gather <Fixture>` — discovers the loose set, reports the existing roadmap, proposes
    clusters + misfits.
 2. Full run: interview resolves phases + specs; gate table approved; produces phase notes with
    correct naming/frontmatter/embedded base, renamed `pN-M` tasks with real bodies, surfacing
@@ -179,5 +179,5 @@ End-to-end against a fixture project with 6+ loose tasks (including empty brain-
 4. Docs-gate spot checks: project whose repo has `CONTEXT.md` → `grill-with-docs` invoked and doc
    writes land in that repo (not the session CWD); repo without → the one-time ask; vault-only
    project → `grill-me`.
-5. `/wave:schedule <Fixture>` accepts gather's output with zero manual edits.
+5. `/thread:schedule <Fixture>` accepts gather's output with zero manual edits.
 6. Grep the touched tasks: no `wave:` was ever stamped.

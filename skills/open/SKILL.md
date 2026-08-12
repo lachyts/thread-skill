@@ -1,6 +1,6 @@
 ---
 name: open
-description: Open, resume, or start durable thread state. Use to load a THREAD.md (project threads at ~/Projects/<Area>/<Project>/THREAD.md, shared threads at ~/repos/workspaces/_shared/threads/<slug>.md), to list active threads, or to PICK UP a stashed/deferred thread capture from an Obsidian task — "/thread:open [[<task>]]" reads the task, primes from its resume prompt, and marks the capture done. Triggers on "open/load/resume the <slug> thread", "pick up [[task]]", "resume this task", "/thread:open", or when a conversation develops thread shape and no thread exists yet.
+description: 'Open, resume, or start durable thread state. Use to load a THREAD.md (project threads at ~/Projects/<Area>/<Project>/THREAD.md, shared threads at ~/repos/workspaces/_shared/threads/<slug>.md), to list active threads, or to PICK UP a stashed/deferred thread capture from an Obsidian task — "/thread:open [[<task>]]" reads the task, primes from its resume prompt, and marks the capture done. Triggers on "open/load/resume the <slug> thread", "pick up [[task]]", "resume this task", "/thread:open", or when a conversation develops thread shape and no thread exists yet.'
 ---
 
 # /thread:open — open or resume durable thread state

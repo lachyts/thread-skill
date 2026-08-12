@@ -5,7 +5,7 @@ implementation with a single verifier run, one judged PR round. The first eviden
 anywhere (a plan-judge `changes`, a first-pass planner/investigator block, a red one-shot verifier
 run, an implementer block, a review-judge `changes`) escalates the task to `fable` for all remaining
 work, judges included. The flip is one-way, sticky within the run, and stamped `model: fable` on the
-task note at reconcile, so resume / `/wave:repair` re-dispatches start at fable. Opus never runs the
+task note at reconcile, so resume / `/thread:repair` re-dispatches start at fable. Opus never runs the
 Ralph loop: `max_iterations` is fable's budget. Pre-stamped fable tasks (schedule §4.7 step-ups)
 never escalate — there is nothing above fable — and run the full loop from the start. There is no
 config switch.
@@ -42,10 +42,10 @@ See CONTEXT.md § Model tiering.)
 
 ## Consequences
 
-- `wave:schedule` §4.7 step-ups become a *predictive* lever only; borderline candidates can safely
+- `thread:schedule` §4.7 step-ups become a *predictive* lever only; borderline candidates can safely
   stay opus since a wrong call costs one cheap first pass, not a blocked rollout.
 - `review-blocked` and plan/Ralph blocks now always exit at fable — a block is a genuine wall or an
-  input-gated decision, never "the cheap model wasn't enough", which sharpens `/wave:repair`'s
+  input-gated decision, never "the cheap model wasn't enough", which sharpens `/thread:repair`'s
   input-gated-vs-agent-fixable triage.
 - The opus implementer prompt changed unconditionally (the one-shot block is always-on for opus
   tasks), so this feature deliberately breaks the byte-identical resume-cache invariant across the
