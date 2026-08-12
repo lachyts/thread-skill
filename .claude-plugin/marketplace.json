@@ -1,6 +1,6 @@
 {
   "name": "thread",
-  "description": "Thread continuity skills (/thread:open, /thread:next, /thread:stash, /thread:defer, /thread:handoff, /thread:close) for capturing agent-thread state into Obsidian and disposing of threads without losing context.",
+  "description": "One system that drives work through time: thread continuity verbs (/thread:open, /thread:next, /thread:orient, /thread:stash, /thread:defer, /thread:handoff, /thread:close) plus the wave rollout engine (/thread:split, /thread:gather, /thread:schedule, /thread:execute, /thread:status, /thread:repair).",
   "owner": {
     "name": "Lachlan Tetlow-Stuart"
   },
@@ -8,8 +8,8 @@
     {
       "name": "thread",
       "source": "./",
-      "description": "Continuity family: thread:next routes the undecided 'what's my move?' moment; thread:stash and thread:defer write self-contained Obsidian tasks (dateless / scheduled); thread:handoff forks to a fresh agent; thread:open resumes durable state; thread:close persists and commits.",
-      "version": "1.2.0"
+      "description": "Continuity family (open/next/orient/stash/defer/handoff/close: durable thread state, Obsidian captures, routing) + rollout family (split/gather/schedule/execute/status/repair: phased tasks, parallel-safe waves, three-layer convergence with per-wave auto-merge). The execution-fit test decides which lane owns a cluster.",
+      "version": "2.0.0"
     }
   ]
 }

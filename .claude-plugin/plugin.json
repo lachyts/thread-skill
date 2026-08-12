@@ -1,7 +1,7 @@
 {
   "name": "thread",
-  "version": "1.3.0",
-  "description": "A continuity family for agent threads: answer 'what's my next move?' or decisively dispose of the current thread — open/resume durable state (thread:open), route when undecided (thread:next), orient on a whole project/area and dispatch parallel background batches or a focus item (thread:orient), lock a thread dormant (thread:stash), set it down onto a specific day (thread:defer), fork it to a fresh agent (thread:handoff), or finish and persist (thread:close). Every stash/defer writes a self-contained Obsidian task routed to the right project, so shutting an agent down never loses context.",
+  "version": "2.0.0",
+  "description": "One system that drives work through time — from attention to merged PRs. The continuity verbs answer 'what's my next move?' or decisively dispose of the current thread: open/resume durable state (thread:open), route when undecided (thread:next), orient on a whole project/area and steer (thread:orient), lock a thread dormant (thread:stash), set it down onto a specific day (thread:defer), fork it to a fresh agent (thread:handoff), or finish and persist (thread:close). The rollout verbs drive wave-shaped work through a convergence engine: thread:split decomposes a plan into phased Obsidian tasks, thread:gather turns loose tasks into a roadmap, thread:schedule clusters tasks into parallel-safe waves, thread:execute converges them (plan-gate -> verifier retry -> master review -> per-wave auto-merge), with thread:status and thread:repair for oversight. One execution-fit test routes work between lanes.",
   "author": {
     "name": "Lachlan Tetlow-Stuart"
   },
@@ -11,9 +11,15 @@
     "continuity",
     "threads",
     "handoff",
+    "workflow",
+    "orchestration",
+    "multi-agent",
+    "rollout",
+    "convergence",
     "obsidian",
     "tasks",
     "context-management",
+    "automation",
     "claude-code"
   ]
 }
