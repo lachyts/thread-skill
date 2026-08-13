@@ -10,6 +10,21 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-08-13 — v2.0.2 shipped; the merged plugin is live-proven.** The
+giflab-rollout-2026-08-12 ran end-to-end on thread 2.0.x — the first
+orient-originated rollout ever to reach the engine: 6/6 PRs merged
+(giflab #64–#69), one designed gate pause (spend sign-off, amended live via
+grill: cap $10→$50, subscription-CLI Claude arms), zero escalations/blocks.
+2.0.2 = execute+gather description trims for the skill-listing budget (see
+Known quirks); paired with user-settings `skillListingBudgetFraction: 0.02`.
+Post-rollout Ralph-loop audit found the review loop has no cross-round
+memory (plan loop accumulates feedback; review loop hands revisers only the
+latest rejection) and no re-plan lever — three-fix task filed:
+vault `thread-execute-review-loop-memory` (scheduled 2026-08-14), plus
+`thread-schedule-package-init-fileset-blindness` from the wave-2
+`__init__.py` merge-conflict incident. Both are wave-shaped; a two-task
+self-rollout is the natural vehicle.
+
 **2026-08-12 — v2.0.1: handoff becomes model-invocable.** Grilled same day as
 the merge: the `disable-model-invocation: true` flag on handoff was inherited
 from the flat-skill Pocock port (build-plan said "keeps", no rationale ever
@@ -94,6 +109,15 @@ scheduled 2026-07-15.
   2026-08-12, same precedent as its `node_repl` fields). Codex `hooks.state`
   `trusted_hash` values are Codex-internal — they match no derivable
   serialisation of the hook; never hand-author trust entries.
+- **Skill-listing budget silently drops descriptions.** Claude Code caps the
+  model-facing skill listing at `skillListingBudgetFraction` (default 0.01 =
+  1% of context) with a 1536-char per-description cap; over budget, whole
+  descriptions vanish and skills render as bare names — killing their
+  natural-language triggering (7 of 13 thread skills were bare pre-fix).
+  User settings carry `0.02` since 2026-08-13; keep SKILL.md descriptions
+  ~600–700 chars (2.0.2 trimmed execute+gather; `schedule` is the next trim
+  candidate). Files can be perfectly valid YAML and still render bare —
+  check the budget before debugging frontmatter.
 - Skills execute from `~/.claude/plugins/cache/thread/thread/<version>/`, not
   the `marketplaces/thread/` clone — `${CLAUDE_PLUGIN_ROOT}` resolves to the
   cache path. The cache is **version-keyed**: `claude plugin marketplace
@@ -113,7 +137,8 @@ scheduled 2026-07-15.
 
 ## Session log
 
-- 2026-08-12 (latest): merge-day parity follow-up — the 4 reported checker errors (plus 10 same-day drift) diagnosed to NotchBar's Codex hook injection + hardlink/mode drift; checker gained the NotchBar app-managed carve-out, add.md fan-out re-linked, PASS restored. Follow-up: [[notchbar-codex-hooks-follow-up]].
+- 2026-08-13 (latest): 2.0.1 (handoff visible, intent-gated) + 2.0.2 (description trims) shipped; skill-listing budget discovered + bumped to 0.02; giflab rollout landed 6/6 through the merged plugin (first orient→engine loop); Ralph-loop audit → review-loop-memory + package-init-blindness tasks filed.
+- 2026-08-12 (merge-day follow-up): merge-day parity follow-up — the 4 reported checker errors (plus 10 same-day drift) diagnosed to NotchBar's Codex hook injection + hardlink/mode drift; checker gained the NotchBar app-managed carve-out, add.md fan-out re-linked, PASS restored. Follow-up: [[notchbar-codex-hooks-follow-up]].
 - 2026-07-14: Notion retired ecosystem-wide — handoff destination deleted from close, workspaces + Codex adapter swept, migration task + global memory captured, v1.0.1 shipped (found: plugin cache is version-keyed).
 - 2026-07-14 (later): installed as thread@thread + references migrated + vault project note; first live close ran from the plugin itself; verification task scheduled for 2026-07-15.
 - 2026-07-14: thread created — v1.0.0 built end-to-end from approved plan.
