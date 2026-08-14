@@ -74,8 +74,11 @@ Stdlib only (the claude-config repo has no dependency manager). Frontmatter is e
 rest of the vault tooling treats frontmatter.
 
 Status mapping (workflow status -> note writes), per wave-execute/SKILL.md §6:
-  review         -> status: review;        pr: <url>; review_rounds_used: <n>; plan_rounds_used: <n> (if >0)
-  review-blocked -> status: review-blocked; pr: <url>; append reviewFeedback under "## Review-blocked feedback"
+  review         -> status: review;        pr: <url>; review_rounds_used: <n>; plan_rounds_used: <n> (if >0);
+                    when approvedAtCeiling: append reviewHistory (grouped by round) under
+                    "## Review history (approved at ceiling)" — ceiling approvals stay auditable
+  review-blocked -> status: review-blocked; pr: <url>; append reviewHistory (grouped by round; legacy
+                    results without it fall back to final-round reviewFeedback) under "## Review-blocked feedback"
   blocked        -> status: blocked;        append blockerDiagnosis under "## Blocker diagnosis" (if absent)
   plan-blocked   -> status: plan-blocked;   append blockerDiagnosis under "## Plan-blocked feedback"
   gate-pending   -> status: gate-pending;   UPSERT gatedInputs under "## Gated inputs (awaiting sign-off)"
@@ -111,6 +114,13 @@ BLOCKED_SECTIONS = {
 GATE_PENDING_STATUS = "gate-pending"
 GATE_PENDING_SECTION = "## Gated inputs (awaiting sign-off)"
 APPROVED_GATES_SECTION = "## Approved gates"
+
+# Review-loop memory (2026-08-14): an approval on the FINAL review round with real rejection history
+# (engine flag approvedAtCeiling) persists the accumulated by-round rationale — previously only
+# blocked outcomes wrote anything, so ceiling approvals were unauditable. An AUDIT RECORD, not an
+# instruction: deliberately absent from the engine's PRIOR_FEEDBACK_NOTE authoritative-sections list
+# (a landed task is never re-dispatched).
+REVIEW_HISTORY_SECTION = "## Review history (approved at ceiling)"
 
 # Every workflow status with a body section to write (reconcile) or scan (status).
 SECTION_BY_STATUS = {**BLOCKED_SECTIONS, GATE_PENDING_STATUS: GATE_PENDING_SECTION}
@@ -255,6 +265,16 @@ class Note:
 
 def bullets(items):
     return "\n".join(f"- {s}" for s in items if str(s).strip())
+
+
+def history_block(history):
+    """Grouped by-round review history (engine reviewHistory: [{round, feedback: []}], latest last)."""
+    rounds = []
+    for entry in history or []:
+        body = bullets(entry.get("feedback") or [])
+        if body:
+            rounds.append(f"Round {entry.get('round', '?')}:\n{body}")
+    return "\n\n".join(rounds)
 
 
 def _truthy_flag(value) -> bool:
@@ -487,11 +507,21 @@ def cmd_reconcile(args) -> int:
             plan_rounds = int(task.get("planRoundsUsed") or 0)
             if plan_rounds > 0:
                 note.set("plan_rounds_used", plan_rounds)
+            # Ceiling approval: persist the accumulated rejection rationale (audit record; the engine
+            # sets the flag only when there IS history — a clean first-try approve records nothing).
+            # append_section is heading-idempotent, so a re-reconcile never duplicates it.
+            if task.get("approvedAtCeiling"):
+                history = history_block(task.get("reviewHistory"))
+                if history:
+                    note.append_section(REVIEW_HISTORY_SECTION, history)
 
         if status in SECTION_BY_STATUS:
             heading = SECTION_BY_STATUS[status]
             if status == "review-blocked":
-                content = bullets(task.get("reviewFeedback") or [])
+                # Full grouped history when the engine provides it (review-loop memory) — the
+                # re-dispatched agent treats this section as authoritative and must see every round,
+                # not just the last. Legacy results (pre-2.0.3 engine) fall back to the final bullets.
+                content = history_block(task.get("reviewHistory")) or bullets(task.get("reviewFeedback") or [])
             elif status == GATE_PENDING_STATUS:
                 content = bullets(task.get("gatedInputs") or []) or (task.get("blockerDiagnosis") or "").strip()
             else:

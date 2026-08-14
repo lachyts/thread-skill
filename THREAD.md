@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-08-12
+last_touched: 2026-08-14
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
 ---
@@ -9,6 +9,26 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-08-14 — v2.0.3: the review loop has a memory.** The Ralph-loop audit's
+review-loop gap closed hands-on (grilled via plan mode, not the self-rollout
+the capture's Launch block sketched): the review loop now accumulates
+feedback like the plan loop, but with review semantics — the reviser gets the
+latest round as its work order plus earlier rounds as ANTI-REGRESSION
+constraints (fixes already committed on the branch must not regress), and the
+judge gets the same history plus an anti-goalpost discipline (new objections
+must come from new commits; round-1-visible nitpicks don't reject). After 2
+rejections the round-3+ reviser upgrades to a **step-back round**: licence to
+restructure, deviating from the approved plan where the accumulated feedback
+demands it — deviations always declared (grilled decision: brief is contract,
+plan is reference). Both ceiling outcomes now persist: `approvedAtCeiling`
+appends the grouped history under `## Review history (approved at ceiling)`
+(the p6-2 auditability gap), and `## Review-blocked feedback` upgrades from
+final-round bullets to the full grouped history (legacy results fall back).
+`STEP_BACK_AFTER = 2` is an engine constant, deliberately not rollout config
+(EFFORT-matrix stance). Glossary gained accumulated feedback / step-back
+round / ceiling approval. No ADR — prompt shapes are cheap to reverse.
+Remaining from the audit: `thread-schedule-package-init-fileset-blindness`.
 
 **2026-08-13 — v2.0.2 shipped; the merged plugin is live-proven.** The
 giflab-rollout-2026-08-12 ran end-to-end on thread 2.0.x — the first
@@ -137,7 +157,8 @@ scheduled 2026-07-15.
 
 ## Session log
 
-- 2026-08-13 (latest): 2.0.1 (handoff visible, intent-gated) + 2.0.2 (description trims) shipped; skill-listing budget discovered + bumped to 0.02; giflab rollout landed 6/6 through the merged plugin (first orient→engine loop); Ralph-loop audit → review-loop-memory + package-init-blindness tasks filed.
+- 2026-08-14 (latest): 2.0.3 shipped — review-loop memory (accumulated feedback with anti-regression framing, anti-goalpost judge discipline, step-back round at 2 rejections, ceiling outcomes persisted to the note); grilled 4 design forks via grill-with-docs; all suites green; capture task done.
+- 2026-08-13: 2.0.1 (handoff visible, intent-gated) + 2.0.2 (description trims) shipped; skill-listing budget discovered + bumped to 0.02; giflab rollout landed 6/6 through the merged plugin (first orient→engine loop); Ralph-loop audit → review-loop-memory + package-init-blindness tasks filed.
 - 2026-08-12 (merge-day follow-up): merge-day parity follow-up — the 4 reported checker errors (plus 10 same-day drift) diagnosed to NotchBar's Codex hook injection + hardlink/mode drift; checker gained the NotchBar app-managed carve-out, add.md fan-out re-linked, PASS restored. Follow-up: [[notchbar-codex-hooks-follow-up]].
 - 2026-07-14: Notion retired ecosystem-wide — handoff destination deleted from close, workspaces + Codex adapter swept, migration task + global memory captured, v1.0.1 shipped (found: plugin cache is version-keyed).
 - 2026-07-14 (later): installed as thread@thread + references migrated + vault project note; first live close ran from the plugin itself; verification task scheduled for 2026-07-15.

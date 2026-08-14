@@ -228,7 +228,7 @@ This is the backstop for a hung Workflow run or a missed completion notification
 
 ### 6. Reconcile + report
 
-The workflow returns `{ rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath, reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, summary, model, escalated, escalatedAt, gatedInputs }] }` where `status ∈ review | review-blocked | blocked | plan-blocked | gate-pending`, `model` is the FINAL tier the task ran on, `escalated`/`escalatedAt` (`plan` | `implement` | `review`) record an opus→fable escalation, and `gatedInputs` lists the declared-but-unapproved gates when the task paused at `gate-pending` (§3.7).
+The workflow returns `{ rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath, reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory, approvedAtCeiling, summary, model, escalated, escalatedAt, gatedInputs }] }` where `status ∈ review | review-blocked | blocked | plan-blocked | gate-pending`, `model` is the FINAL tier the task ran on, `escalated`/`escalatedAt` (`plan` | `implement` | `review`) record an opus→fable escalation, `gatedInputs` lists the declared-but-unapproved gates when the task paused at `gate-pending` (§3.7), `reviewHistory` is the accumulated by-round review-judge rejection rationale, and `approvedAtCeiling` marks an approval on the final review round with real rejection history (a ceiling approval).
 
 **Reconcile with the deterministic helper — do NOT hand-edit frontmatter.** Write the returned object to a temp file (or pipe it on stdin) and run:
 
@@ -238,8 +238,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py reconcile
 ```
 
 The helper resolves each task note by slug under `~/repos/obsidian/Work/Tasks/` and performs every per-task write the old hand-edit loop did — **idempotently**, so it's safe to re-run on resume. Per returned `status`:
-- `review` → `status: review`, `pr: <url>`, `review_rounds_used: <n>` (and `plan_rounds_used: <n>` when the task was plan-gated)
-- `review-blocked` → `status: review-blocked`, `pr: <url>`; appends `reviewFeedback` under `## Review-blocked feedback`
+- `review` → `status: review`, `pr: <url>`, `review_rounds_used: <n>` (and `plan_rounds_used: <n>` when the task was plan-gated); a ceiling approval (`approvedAtCeiling`) additionally appends the grouped `reviewHistory` under `## Review history (approved at ceiling)` — an audit record, never re-dispatch input
+- `review-blocked` → `status: review-blocked`, `pr: <url>`; appends the grouped `reviewHistory` (every round, latest last; legacy results without it fall back to final-round `reviewFeedback`) under `## Review-blocked feedback`
 - `blocked` → `status: blocked`; appends `blockerDiagnosis` under `## Blocker diagnosis` (skipped if the agent already wrote it)
 - `plan-blocked` → `status: plan-blocked`; appends the accumulated plan feedback under `## Plan-blocked feedback`
 - `gate-pending` → `status: gate-pending`; **upserts** the declared gates under `## Gated inputs (awaiting sign-off)` (upsert, not append — the pending list always reflects the latest declaration)

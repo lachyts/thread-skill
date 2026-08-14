@@ -72,12 +72,15 @@ export const meta = {
 // }
 //
 // Returns { rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath,
-//   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, summary,
-//   model, escalated, escalatedAt, gatedInputs }] }
+//   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
+//   approvedAtCeiling, summary, model, escalated, escalatedAt, gatedInputs }] }
 // where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending, model is the FINAL tier
 // the task ran on, escalated/escalatedAt ('plan' | 'implement' | 'review') record an opus→fable
 // escalation, and gatedInputs lists the declared-but-unapproved gates when status is gate-pending
-// (a declared gate always pauses for a human — ADR 0008).
+// (a declared gate always pauses for a human — ADR 0008). reviewHistory is the accumulated by-round
+// review-judge rejection rationale ([{ round, feedback: [] }], empty when the PR approved first try);
+// approvedAtCeiling marks an approval on the FINAL review round with actual rejection history —
+// reconcile persists that history to the task note so ceiling approvals stay auditable.
 // =============================================================================
 
 // ---- Structured schemas (replace the old sentinel strings) ------------------
@@ -323,6 +326,65 @@ Any committed work from that attempt is already on your branch — build on or r
 warrants; do not blindly repeat the failed approach.`
 }
 
+// ---- Review-round memory (review-loop-memory, 2026-08-14) --------------------
+// The review loop used to hand each reviser ONLY the latest rejection and judge each round fresh —
+// whack-a-mole (fix B, regress A) and judge goalpost-moving were unguarded, the exact failures the
+// plan loop was hardened against (giflab p6-2 rode to its 4-round ceiling). Both fragments below are
+// empty-when-unused with their OWN leading "\n\n" (like baselineManifest/escalationContext), so a
+// round-1 judge prompt and a no-history render stay BYTE-IDENTICAL to the pre-feature templates.
+
+function groupedRounds(priorFeedback) {
+  return priorFeedback
+    .map((r) => `Round ${r.round} rejection:\n${r.feedback.map((f) => '- ' + f).join('\n')}`)
+    .join('\n\n')
+}
+
+// Judge side: the accumulated history of the judge's OWN prior rejections plus an anti-goalpost
+// discipline. A regression of an earlier fix is grounds for rejection; a brand-new objection that was
+// visible in round 1 is not — that path rides tasks to the ceiling.
+function reviewHistoryBlock(priorFeedback) {
+  if (!priorFeedback || !priorFeedback.length) return ''
+  return `
+
+Prior review rounds — ACCUMULATED history of your earlier rejections on this PR (each since addressed
+by commits on the branch):
+${groupedRounds(priorFeedback)}
+
+Discipline for this round:
+- VERIFY each earlier concern is still resolved — a regression of an earlier fix is grounds for rejection.
+- Do not contradict guidance you gave in an earlier round.
+- A NEW objection justifies "changes" ONLY if the new commits introduced it, or it was genuinely not
+  visible earlier. Anything you could have raised in round 1 but didn't is a nitpick — note it in your
+  feedback if you must, but do not reject on it.`
+}
+
+// After this many accumulated rejections the reviser prompt upgrades to a STEP-BACK round. Fixed in
+// the engine, deliberately not rollout config (same stance as the EFFORT matrix — this encodes when
+// patching has demonstrably failed, not a per-rollout preference).
+const STEP_BACK_AFTER = 2
+
+// Reviser side, round 3+: licence to restructure — the re-planning lever WITHOUT re-entering the plan
+// gate mid-worktree. planText is the original approved plan for a plan-gated task ('' otherwise; the
+// licence then runs against the task brief alone). The brief stays the contract; the plan is reference,
+// not law — deviations must be DECLARED so the reviewer (who sees the same history) judges them open-eyed.
+function stepBackBlock(priorFeedback, planText) {
+  if (!priorFeedback || priorFeedback.length < STEP_BACK_AFTER) return ''
+  const plan = planText ? `
+
+The ORIGINAL APPROVED PLAN, for reference:
+---
+${planText}
+---` : ''
+  return `
+
+STEP-BACK ROUND: ${priorFeedback.length} review rounds have not converged — stop patching, step back.
+Re-read the task brief${planText ? ' and the original approved plan below' : ''}. You are LICENSED to
+restructure the approach${planText ? ' — including deviating from the approved plan —' : ''} where the
+accumulated feedback demands it, rather than only applying this round's bullets. The brief remains your
+contract${planText ? '; the plan is reference, not law' : ''}. State every ${planText ? 'deviation from the plan' : 'structural change of approach'}
+explicitly in the PR body and your summary so the reviewer judges it with eyes open.${plan}`
+}
+
 // ---- Prompt builders (5 variants, inlined; this file cannot read .md at runtime) ----
 
 function implementerPrompt(task, a, tier, prior) {
@@ -442,9 +504,7 @@ specific, actionable feedback bullets.`
 }
 
 function planReviserPrompt(task, priorPlan, priorFeedback, round, a) {
-  const grouped = priorFeedback
-    .map((r) => `Round ${r.round} rejection:\n${r.feedback.map((f) => '- ' + f).join('\n')}`)
-    .join('\n\n')
+  const grouped = groupedRounds(priorFeedback)
   return `PLAN REVISION ROUND ${round}: a reviewer requested changes to your prior plan for [[${task.slug}]]
 (rollout [[${a.rolloutSlug}]]). Still plan-only — NO code, NO PR, NO source edits.
 
@@ -500,7 +560,7 @@ ${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationCont
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.`
 }
 
-function reviewJudgePrompt(task, prevImpl, a) {
+function reviewJudgePrompt(task, prevImpl, a, priorFeedback) {
   const depth = task.scope === 'cross-cutting'
     ? `This is a CROSS-CUTTING change — review it structurally and rigorously. Apply the discipline of the
 superpowers:requesting-code-review skill: correctness, brief adherence, missed sibling sites, dead code,
@@ -516,10 +576,22 @@ Project root: ${a.repoPath}
 ${depth}
 
 Read \`gh pr diff ${prevImpl.prUrl}\` and the task brief. Decide: verdict "approve" if the PR is sound, else
-"changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${baselineManifest(a)}`
+"changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}`
 }
 
-function reviserPrompt(task, prevImpl, feedback, round, a) {
+// priorFeedback is the FULL accumulated [{ round, feedback }] history (latest round last) — the latest
+// round is the work order, earlier rounds render as anti-regression constraints (their fixes are already
+// committed on the branch; "fix B, regress A" is the failure this guards). planText: original approved
+// plan for the step-back round ('' otherwise).
+function reviserPrompt(task, prevImpl, priorFeedback, round, a, planText) {
+  const latest = priorFeedback[priorFeedback.length - 1]
+  const earlier = priorFeedback.slice(0, -1)
+  const guard = earlier.length ? `
+
+Prior rounds — ACCUMULATED history. These were addressed by commits already on this branch: treat them
+as ANTI-REGRESSION constraints. Your new changes must not undo them; before pushing, verify each still
+holds.
+${groupedRounds(earlier)}` : ''
   return `REVISION ROUND ${round}: master review requested changes on your prior pass for [[${task.slug}]]
 (rollout [[${a.rolloutSlug}]]).
 
@@ -531,11 +603,10 @@ PR: ${prevImpl.prUrl}
 First action: \`cd ${prevImpl.worktreePath}\` and confirm via \`git rev-parse --show-toplevel\` that you are
 in that worktree (NOT the project's main checkout) and on branch ${prevImpl.branch}.
 
-Review feedback to address (verbatim):
-${feedback.map((f) => '- ' + f).join('\n')}
+Review feedback — ROUND ${latest.round} (your work order; apply every bullet, verbatim below):
+${latest.feedback.map((f) => '- ' + f).join('\n')}${guard}${stepBackBlock(priorFeedback, planText)}
 
-Apply every feedback bullet. Push new commits to the existing branch (the PR auto-updates) — do NOT open a
-new PR.
+Push new commits to the existing branch (the PR auto-updates) — do NOT open a new PR.
 
 ${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
 
@@ -830,7 +901,7 @@ async function implement(task, st, prev, a) {
   return planExtra ? { ...r, ...planExtra } : r
 }
 
-async function reviewLoop(task, st, prev, a) {
+async function reviewLoop(task, st, prev, a, planText) {
   // plan-blocked / gate-pending passthrough (already carry their own status — never remap to 'blocked')
   if (prev && prev.blocked && (prev.status === 'plan-blocked' || prev.status === 'gate-pending')) return prev
   // Ralph-blocked OR transient-dead implement result (both carry blocked=true)
@@ -838,22 +909,37 @@ async function reviewLoop(task, st, prev, a) {
   if (task.scope === 'read-only') return { ...prev, status: 'review', reviewRoundsUsed: 0 }
 
   let current = prev
+  // Accumulate every round's rejection rationale (review-loop-memory), mirroring planLoop: the judge
+  // sees the full history (anti-goalpost discipline), each reviser gets the latest round as its work
+  // order plus earlier rounds as anti-regression constraints, and the history is RETURNED on both
+  // ceiling outcomes so reconcile can persist it (a ceiling approval previously left no record at all).
+  const priorFeedback = []
   let round = 1
   while (round <= task.maxReviewRounds) {
-    const verdict = await runAgent(reviewJudgePrompt(task, current, a), {
+    const verdict = await runAgent(reviewJudgePrompt(task, current, a, priorFeedback), {
       label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: judgeFor(a, st), effort: judgeEffort(a, st, 'masterReview'),
     })
     // Dead review-judge: the PR is real and stands — block on transient infra so the lead re-judges it.
     if (verdict.__dead) return { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS }
     if (verdict.verdict === 'approve') {
-      return { ...current, status: 'review', reviewRoundsUsed: round }
+      // approvedAtCeiling: an approval on the LAST possible round with real rejection history — the
+      // unauditable case the audit flagged (giflab p6-2). A clean first-round approve at a 1-round
+      // ceiling has no history: not a ceiling event, nothing to record.
+      return {
+        ...current, status: 'review', reviewRoundsUsed: round, reviewHistory: priorFeedback,
+        approvedAtCeiling: round === task.maxReviewRounds && priorFeedback.length > 0,
+      }
     }
+    // Record this round's rejection BEFORE the ceiling return and the reviser dispatch, so the
+    // review-blocked record and the next reviser/judge all see the complete accumulated rationale
+    // (push with the judge round `round`, not `round + 1` — same off-by-one guard as planLoop).
+    priorFeedback.push({ round, feedback: verdict.feedback })
     if (round === task.maxReviewRounds) {
-      return { ...current, status: 'review-blocked', reviewRoundsUsed: round, reviewFeedback: verdict.feedback }
+      return { ...current, status: 'review-blocked', reviewRoundsUsed: round, reviewFeedback: verdict.feedback, reviewHistory: priorFeedback }
     }
     // Opus got its one judged PR round; revision is iteration, and iteration runs at fable.
     if (st.tier === 'opus') escalate(st, task.slug, 'review')
-    const revised = await runAgent(reviserPrompt(task, current, verdict.feedback, round + 1, a), {
+    const revised = await runAgent(reviserPrompt(task, current, priorFeedback, round + 1, a, planText), {
       label: `revise:${task.slug} r${round + 1}`, phase: 'Review', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
     })
     if (revised.__dead) return { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS }
@@ -878,7 +964,9 @@ async function converge(task, a) {
   const st = { tier: taskModel(task), escalated: false, escalatedAt: '' }
   const planned = task.planGate ? await planLoop(task, st, a) : { task, plan: null, blocked: false }
   const impl = await implement(task, st, planned, a)
-  const reviewed = await reviewLoop(task, st, impl, a)
+  // The approved plan rides into the review loop for the step-back round's reference ('' when the
+  // task was not plan-gated — the step-back licence then runs against the brief alone).
+  const reviewed = await reviewLoop(task, st, impl, a, (task.planGate && planned && planned.plan) || '')
   return reviewed ? { ...reviewed, model: st.tier, escalated: st.escalated, escalatedAt: st.escalatedAt } : reviewed
 }
 
@@ -917,6 +1005,8 @@ for (const wave of a.waves) {
         planRoundsUsed: norm.planRoundsUsed || 0,
         blockerDiagnosis: norm.blockerDiagnosis || '',
         reviewFeedback: norm.reviewFeedback || [],
+        reviewHistory: norm.reviewHistory || [],
+        approvedAtCeiling: !!norm.approvedAtCeiling,
         gatedInputs: norm.gatedInputs || [],
         summary: norm.summary || '',
         model: norm.model || taskModel(t),

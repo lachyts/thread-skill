@@ -10,6 +10,12 @@
 //                               unapproved declaration pauses the task (status gate-pending) even when
 //                               planGate is false; approved gates on the note are never re-asked; "None"
 //                               leaves behaviour identical (zero-touch).
+//   - review-loop memory      → reviewHistoryBlock/stepBackBlock '' when unused (round-1 judge prompt
+//                               byte-identical); reviser gets latest round as work order + earlier rounds
+//                               as anti-regression constraints; step-back (with the approved plan when
+//                               gated) fires on the round-3+ reviser; both ceiling outcomes return the
+//                               accumulated reviewHistory, and only a with-history final-round approval
+//                               sets approvedAtCeiling.
 // Evaluates only the pure-function region of the engine (before the orchestration that needs Workflow
 // globals) in a vm sandbox. Run: node tests/prompt-invariants.test.mjs   (exit 0 = pass)
 import fs from 'node:fs'
@@ -24,7 +30,7 @@ const marker = '// ---- Orchestration'
 const idx = src.indexOf(marker)
 if (idx === -1) { console.error('FAIL - orchestration marker not found'); process.exit(1) }
 let head = src.slice(0, idx).replace('export const meta', 'const meta')
-head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviserPrompt, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort };\n'
+head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort };\n'
 
 // `agent` and `log` are Workflow globals the engine expects at run time. The layer functions resolve them
 // against the sandbox global at CALL time, so the transient-death tests below swap `ctx.agent` per case to
@@ -204,7 +210,7 @@ const pjPrompt = T.planJudgePrompt(taskI, 'PLAN', aI)
 ok(pjPrompt.includes('Gated inputs') && /automatic "changes"/.test(pjPrompt), 'planJudgePrompt: missing Gated inputs section is an automatic changes')
 ok(pOpus.includes('Gated inputs (hard rule'), 'implementerPrompt: carries the gated-inputs stop rule')
 ok(T.approvedPlanImplementerPrompt(taskI, 'PLAN', aI, 'fable', '').includes('Gated inputs (hard rule'), 'approvedPlanImplementerPrompt: carries the stop rule')
-ok(T.reviserPrompt(taskI, { prUrl: 'u', branch: 'b', worktreePath: '/wt' }, ['f'], 2, aI).includes('Gated inputs (hard rule'), 'reviserPrompt: carries the stop rule')
+ok(T.reviserPrompt(taskI, { prUrl: 'u', branch: 'b', worktreePath: '/wt' }, [{ round: 1, feedback: ['f'] }], 2, aI, '').includes('Gated inputs (hard rule'), 'reviserPrompt: carries the stop rule')
 
 // Parser: None → [], bullets → entries, missing section → null (fail-closed upstream).
 ok(T.parseGatedInputs('PLAN\n### Gated inputs\nNone\n### Risks / unknowns\nnone') !== null
@@ -261,6 +267,101 @@ ctx.agent = recordingAgent(async (prompt, opts) => {
 })
 const gMissing = await T.converge({ ...baseEff, slug: 'proj-gate-d', scope: 'cross-cutting', planGate: true }, aEff)
 ok(gMissing && gMissing.status === 'plan-blocked' && /Gated inputs/.test(gMissing.blockerDiagnosis), 'gate D: approved plan missing the section fails closed to plan-blocked')
+
+// ---- Review-loop memory (2026-08-14): accumulated feedback + step-back + ceiling record ----
+// The review loop mirrors planLoop's accumulation but with review semantics: the LATEST round is the
+// reviser's work order, EARLIER rounds are anti-regression constraints (their fixes are committed on the
+// branch), the judge gets the history plus an anti-goalpost discipline, the round-3+ reviser gets the
+// step-back licence (with the original approved plan when the task was plan-gated), and both ceiling
+// outcomes return the accumulated history for reconcile to persist.
+
+const prevI = { prUrl: 'https://pr/1', branch: 'audit-fix/fix-x', worktreePath: '/wt' }
+const h1 = [{ round: 1, feedback: ['fix the null check'] }]
+const h2 = [{ round: 1, feedback: ['fix the null check'] }, { round: 2, feedback: ['add the test'] }]
+
+ok(T.reviewHistoryBlock([]) === '' && T.reviewHistoryBlock(undefined) === '', 'reviewHistoryBlock: empty when unused')
+const judgeEmpty = T.reviewJudgePrompt(taskI, prevI, aI, [])
+ok(!/Prior review rounds|Discipline for this round/.test(judgeEmpty), 'reviewJudgePrompt: round-1 prompt carries no history block (byte-clean base)')
+const judgeH = T.reviewJudgePrompt(taskI, prevI, aI, h2)
+ok(judgeH.includes('Round 1 rejection') && judgeH.includes('Round 2 rejection'), 'reviewJudgePrompt: history renders grouped rounds')
+ok(/could have raised in round 1/.test(judgeH), 'reviewJudgePrompt: anti-goalpost discipline present')
+ok(judgeH.replace(T.reviewHistoryBlock(h2), '') === judgeEmpty, 'reviewJudgePrompt: with history == without + exactly the injected block')
+
+const rev1 = T.reviserPrompt(taskI, prevI, h1, 2, aI, '')
+ok(rev1.includes('ROUND 1 (your work order'), 'reviserPrompt: latest round labelled as the work order')
+ok(!rev1.includes('ANTI-REGRESSION') && !rev1.includes('STEP-BACK'), 'reviserPrompt: round-2 reviser has no guard and no step-back')
+ok(T.stepBackBlock(h1, '') === '', 'stepBackBlock: empty below the trigger (1 rejection)')
+
+const rev2 = T.reviserPrompt(taskI, prevI, h2, 3, aI, '')
+ok(rev2.includes('ROUND 2 (your work order'), 'reviserPrompt: round-3 work order is the LATEST round')
+ok(rev2.includes('ANTI-REGRESSION') && rev2.includes('Round 1 rejection'), 'reviserPrompt: earlier rounds render as anti-regression constraints')
+ok(rev2.includes('STEP-BACK ROUND'), 'reviserPrompt: step-back fires on the round-3 reviser (2 accumulated rejections)')
+ok(rev2.includes(T.stepBackBlock(h2, '')), 'reviserPrompt: contains exactly the brief-only step-back block')
+
+const revPlan = T.reviserPrompt(taskI, prevI, h2, 3, aI, 'THE APPROVED PLAN')
+ok(revPlan.includes('THE APPROVED PLAN') && revPlan.includes('deviating from the approved plan'), 'reviserPrompt: step-back embeds the approved plan + deviation licence')
+ok(revPlan.replace(T.stepBackBlock(h2, 'THE APPROVED PLAN'), '') === rev2.replace(T.stepBackBlock(h2, ''), ''), 'reviserPrompt: the plan changes ONLY the step-back block')
+
+// Scenario memory-A — reject r1, reject r2, approve r3 at a 3-round ceiling: the r3 judge sees the
+// history + discipline, the r3 reviser gets step-back + anti-regression, and the result records the
+// ceiling approval with the full history.
+const promptsA = {}
+ctx.agent = async (prompt, opts) => {
+  promptsA[opts.label] = prompt
+  if (opts.phase === 'Implement') return greenImpl
+  if (opts.label.startsWith('revise:')) return { ...greenImpl, summary: 'revised' }
+  const m = opts.label.match(/ r(\d+)$/)
+  if (m && Number(m[1]) <= 2) return { verdict: 'changes', feedback: [`bullet r${m[1]}`] }
+  return { verdict: 'approve', feedback: [] }
+}
+const memA = await T.converge({ ...baseEff, slug: 'proj-mem-a', scope: 'single-file', planGate: false, maxReviewRounds: 3 }, aEff)
+ok(memA && memA.status === 'review' && memA.reviewRoundsUsed === 3, 'memory A: converges to review on round 3')
+ok(memA.approvedAtCeiling === true, 'memory A: final-round approval with history sets approvedAtCeiling')
+ok(memA.reviewHistory.length === 2 && memA.reviewHistory[1].feedback[0] === 'bullet r2', 'memory A: result carries both rejection rounds')
+ok(!promptsA['review:proj-mem-a r1'].includes('Prior review rounds'), 'memory A: round-1 judge prompt is history-free')
+ok(promptsA['review:proj-mem-a r3'].includes('Round 1 rejection') && promptsA['review:proj-mem-a r3'].includes('Discipline for this round'), 'memory A: round-3 judge saw the accumulated history + discipline')
+ok(promptsA['revise:proj-mem-a r2'] && !promptsA['revise:proj-mem-a r2'].includes('STEP-BACK'), 'memory A: round-2 reviser is a plain revision')
+ok(promptsA['revise:proj-mem-a r3'].includes('STEP-BACK ROUND'), 'memory A: round-3 reviser got the step-back')
+ok(promptsA['revise:proj-mem-a r3'].includes('ANTI-REGRESSION') && promptsA['revise:proj-mem-a r3'].includes('bullet r1'), 'memory A: round-3 reviser carries round 1 as anti-regression')
+
+// Scenario memory-B — clean approve at a 1-round ceiling: round === max but NO history, so it is not
+// a ceiling event and nothing is recorded.
+ctx.agent = async (prompt, opts) => {
+  if (opts.phase === 'Implement') return greenImpl
+  return { verdict: 'approve', feedback: [] }
+}
+const memB = await T.converge({ ...baseEff, slug: 'proj-mem-b', scope: 'single-file', planGate: false, maxReviewRounds: 1 }, aEff)
+ok(memB && memB.status === 'review' && memB.approvedAtCeiling === false && memB.reviewHistory.length === 0, 'memory B: clean approve at a 1-round ceiling is NOT a ceiling event')
+
+// Scenario memory-C — reject at the ceiling (max 2): reviewFeedback keeps the latest bullets
+// (back-compat) AND reviewHistory carries the full accumulated record for reconcile.
+ctx.agent = async (prompt, opts) => {
+  if (opts.phase === 'Implement') return greenImpl
+  if (opts.label.startsWith('revise:')) return { ...greenImpl, summary: 'revised' }
+  const m = opts.label.match(/ r(\d+)$/)
+  return { verdict: 'changes', feedback: [`bullet r${m ? m[1] : '?'}`] }
+}
+const memC = await T.converge({ ...baseEff, slug: 'proj-mem-c', scope: 'single-file', planGate: false }, aEff)
+ok(memC && memC.status === 'review-blocked' && memC.reviewRoundsUsed === 2, 'memory C: rides to the 2-round ceiling review-blocked')
+ok(memC.reviewFeedback[0] === 'bullet r2', 'memory C: reviewFeedback keeps the latest bullets (back-compat)')
+ok(memC.reviewHistory.length === 2 && memC.reviewHistory[0].feedback[0] === 'bullet r1', 'memory C: reviewHistory carries the full accumulated record')
+
+// Scenario memory-D — plan-gated: the ORIGINAL approved plan rides into the round-3 step-back only.
+const promptsD = {}
+ctx.agent = async (prompt, opts) => {
+  promptsD[opts.label] = prompt
+  if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
+  if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'GRAND DESIGN\n### Gated inputs\nNone' }
+  if (opts.phase === 'Implement') return greenImpl
+  if (opts.label.startsWith('revise:')) return { ...greenImpl, summary: 'revised' }
+  const m = opts.label.match(/ r(\d+)$/)
+  if (m && Number(m[1]) <= 2) return { verdict: 'changes', feedback: [`bullet r${m[1]}`] }
+  return { verdict: 'approve', feedback: [] }
+}
+const memD = await T.converge({ ...baseEff, slug: 'proj-mem-d', scope: 'cross-cutting', planGate: true, maxReviewRounds: 3 }, aEff)
+ok(memD && memD.status === 'review' && memD.approvedAtCeiling === true, 'memory D: plan-gated task lands at the ceiling')
+ok(promptsD['revise:proj-mem-d r3'].includes('GRAND DESIGN') && promptsD['revise:proj-mem-d r3'].includes('reference, not law'), 'memory D: step-back embeds the ORIGINAL approved plan')
+ok(promptsD['revise:proj-mem-d r2'] && !promptsD['revise:proj-mem-d r2'].includes('GRAND DESIGN'), 'memory D: the pre-step-back reviser does not carry the plan')
 
 // ---- Transient agent death: null-return hardening ----------------------------
 // Observed 2026-07-18 (narcissus-avp): implementer agents died mid-run on "API Error: Connection closed

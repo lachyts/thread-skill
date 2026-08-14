@@ -482,6 +482,39 @@ check "eta: wave_3_merged stamped via reconcile --wave" "wave_3_merged: " "$TMP/
 echo "$RECOUT" | grep -q "rollout complete in" && echo "ok   - eta: final wave reports total duration" \
   || { echo "FAIL - eta: completion line missing: $RECOUT"; fail=1; }
 
+echo "== review-loop memory (ceiling approvals auditable; review-blocked carries full history) =="
+# (the task-reviewblocked case above, whose result has NO reviewHistory, already proves the legacy
+# fallback to final-round reviewFeedback bullets — pre-2.0.3 engine results stay reconcilable)
+mknote task-ceiling in_progress
+mknote task-easyland in_progress
+mknote task-histblocked in_progress
+cat > "$TMP/mem-result.json" <<EOF
+{ "rolloutSlug": "test-rollout", "tasks": [
+  { "slug": "task-ceiling", "scope": "cross-cutting", "status": "review", "prUrl": "https://github.com/o/r/pull/20",
+    "reviewRoundsUsed": 3, "planRoundsUsed": 0, "approvedAtCeiling": true,
+    "reviewHistory": [ { "round": 1, "feedback": ["tighten the null guard"] }, { "round": 2, "feedback": ["cover the empty-list case"] } ] },
+  { "slug": "task-easyland", "scope": "single-file", "status": "review", "prUrl": "https://github.com/o/r/pull/21",
+    "reviewRoundsUsed": 2, "planRoundsUsed": 0, "approvedAtCeiling": false,
+    "reviewHistory": [ { "round": 1, "feedback": ["rename the helper"] } ] },
+  { "slug": "task-histblocked", "scope": "single-file", "status": "review-blocked", "prUrl": "https://github.com/o/r/pull/22",
+    "reviewRoundsUsed": 2, "reviewFeedback": ["final-round bullet"],
+    "reviewHistory": [ { "round": 1, "feedback": ["first-round bullet"] }, { "round": 2, "feedback": ["final-round bullet"] } ] }
+] }
+EOF
+python3 "$SCRIPT" reconcile --result "$TMP/mem-result.json" --tasks-dir "$TMP" || { echo "FAIL - memory reconcile exit"; fail=1; }
+check  "ceiling: history section written"   "## Review history (approved at ceiling)" "$TMP/task-ceiling.md"
+check  "ceiling: rounds grouped"            "Round 1:"                                "$TMP/task-ceiling.md"
+check  "ceiling: round-2 bullet"            "- cover the empty-list case"             "$TMP/task-ceiling.md"
+check  "ceiling: review_rounds_used"        "review_rounds_used: 3"                   "$TMP/task-ceiling.md"
+refute "non-ceiling: no history section"    "## Review history"                       "$TMP/task-easyland.md"
+check  "non-ceiling: still lands clean"     "status: review"                          "$TMP/task-easyland.md"
+check  "hist-blocked: heading"              "## Review-blocked feedback"              "$TMP/task-histblocked.md"
+check  "hist-blocked: earlier round kept"   "- first-round bullet"                    "$TMP/task-histblocked.md"
+check  "hist-blocked: grouped by round"     "Round 2:"                                "$TMP/task-histblocked.md"
+python3 "$SCRIPT" reconcile --result "$TMP/mem-result.json" --tasks-dir "$TMP" >/dev/null || { echo "FAIL - memory re-reconcile exit"; fail=1; }
+n=$(grep -c "## Review history (approved at ceiling)" "$TMP/task-ceiling.md")
+[ "$n" -eq 1 ] && echo "ok   - ceiling: history section not duplicated on re-run" || { echo "FAIL - ceiling section duplicated ($n)"; fail=1; }
+
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fail=1; fi
 exit $fail

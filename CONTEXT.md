@@ -125,6 +125,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Engine** — the component that *does* convergence (`execute` and its
   Workflow script). Spawns agents, runs the verifier, merges PRs.
   _Avoid_: runner, executor (as a generic term).
+- **Accumulated feedback** — the by-round history of judge rejections,
+  threaded into every later reviser and judge in both gated loops (plan and
+  review). In the review loop the latest round is the reviser's work order
+  and earlier rounds are anti-regression constraints; the judge carries an
+  anti-goalpost discipline. _Avoid_: feedback log, memory (alone).
+- **Step-back round** — the round-3+ revision round, triggered by two
+  accumulated rejections: the reviser stops patching and is licensed to
+  restructure the approach — deviations from the approved plan permitted but
+  always declared. The re-planning lever without re-entering the plan gate.
+  _Avoid_: re-plan round, redesign.
+- **Ceiling approval** — an approval on the final review round with real
+  rejection history; always leaves an auditable `## Review history` record
+  on the task note. _Avoid_: barely-passed, last-chance approval.
 - **Conductor** — a component that *orchestrates* the engine without
   re-implementing it (`repair`). Diagnoses, captures decisions, reconciles
   drift, hands off to the engine's resume — never merges or converges
