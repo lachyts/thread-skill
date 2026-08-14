@@ -41,9 +41,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Batch** — a parallel-safe cluster of open work (disjoint files/surfaces)
   matched to the narrowest covering launch profile; the session-lane unit
   orient dispatches. Never contains a wave-shaped cluster.
-- **Dispatch artefact** — what an orient dispatch actually produces: a batch
-  prompt file under `<workspace>/.scratch/orient/` plus a scoped-profile
-  terminal one-liner. Artefacts are emitted, never launched.
+- **Dispatch artefact** — a batch's durable contract: the prompt file under
+  `<workspace>/.scratch/orient/`. Since ADR 0010 orient launches the batch
+  session from it itself — the steering answer is the sole authorisation —
+  and a hand-run terminal one-liner survives only as the no-cmux fallback.
 - **`dispatched:` stamp** — `dispatched: YYYY-MM-DD` task frontmatter written
   at emission; marks the task in-flight so orient never double-batches it.
   Superseded by the batch session's end-of-run note update; stale stamps are

@@ -11,8 +11,9 @@ area* — many sub-projects, tasks, and threads, returned to after time away.
 It audits the balls in the air, recommends ONE best use of Lachy's time, asks
 how he wants to steer, then routes: parallel-safe batches dispatched as
 background scoped sessions, a focus item opened for his own attention, or
-both. The deliverable of a dispatch is **launch artefacts, never launched
-sessions** — Lachy runs the one-liners himself.
+both. A dispatch **launches its batches itself** (ADR 0010): the steering
+answer is the sole authorisation, the prompt file remains the batch's durable
+contract, and a hand-run one-liner survives only as the no-cmux fallback.
 
 **Contains no route logic of its own** beyond batching/emission: hands-on
 focus dispatches to `${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` (or the
@@ -73,8 +74,10 @@ A situational report written for Lachy catching up, not a log:
 `AskUserQuestion`, recommended option first (informed by the audit — e.g. if
 almost nothing is parallel-safe, recommend Hands-on):
 
-- **Autonomous** — cluster the parallelisable open work into batches and emit
-  dispatch artefacts; Lachy stays focused elsewhere.
+- **Autonomous** — cluster the parallelisable open work into batches and
+  launch them as background scoped sessions; Lachy stays focused elsewhere.
+  This answer IS the launch authorisation — no per-batch confirm follows
+  (ADR 0010).
 - **Hands-on** — he has time for this project: route the best-focus item into
   `thread:open` / its task's `## Launch` block and work it here.
 - **Mixed** — dispatch the background-safe batches AND hand him the
@@ -116,7 +119,7 @@ dispatchable open work into **parallel-safe batches**:
   them for Hands-on); tasks with a recent `dispatched:` stamp; work whose
   playbook demands human sign-off before external effects.
 
-### 7. Emit dispatch artefacts
+### 7. Dispatch the batches
 
 For each batch:
 
@@ -125,7 +128,28 @@ For each batch:
 2. Stamp `dispatched: <YYYY-MM-DD>` into the frontmatter of every task note
    the batch covers (this is the double-dispatch guard § 2 reads; the batch
    session's end-of-run note update supersedes it).
-3. Emit one fenced `bash` block per batch:
+3. **Launch the batch as a cmux workspace** (the steering answer already
+   authorised this — no second confirm, ADR 0010):
+
+   ```bash
+   cmux workspace create --name "<batch title>" --cwd <workspace-dir> \
+     --focus false \
+     --command '<expanded profile command> "$(cat <prompt-file>)"'
+   ```
+
+   The `--command` text is the profile alias's full expansion from `~/.zshrc`
+   (aliases don't resolve in non-interactive shells): `claude
+   --dangerously-skip-permissions --add-dir … --mcp-config
+   <profile>.mcp.json --strict-mcp-config` plus the prompt argument. The
+   command runs through a shell, so `"$(cat …)"` expands. Drop the alias's
+   leading `cd` — `--cwd` covers it.
+4. **Verify the launch**: `cmux read-screen --workspace <ref> --scrollback` —
+   the prompt text visible in the transcript and the session working means
+   launched; an idle input box means the prompt never arrived (close the
+   workspace, fix quoting, relaunch).
+5. **Fallback — no reachable cmux socket** (`cmux ping` fails: Desktop app,
+   SSH, cmux not running): emit one fenced `bash` block per batch for Lachy
+   to run himself, and say launching fell back to emission:
 
    ```bash
    cc-animately-seo "$(cat ~/repos/workspaces/animately-workspace/.scratch/orient/2026-08-08-seo-batch-prompt.txt)"
@@ -155,14 +179,15 @@ For each batch:
 - **In place, never worktrees** — `.mcp.json` + `profiles/` are gitignored, so
   a worktree session has no workspace MCPs (`reference_orca_inplace_vs_worktree`).
 
-Close the emission with the artefact list and a reminder that nothing has been
-launched. **Never launch the batches yourself.**
+Close the dispatch with one line per batch: workspace ref, batch title, tasks
+covered, and launch-verified or fell-back-to-emission.
 
 ### 8. `--debrief`
 
 `/thread:orient <target> --debrief` skips steering: sweep the area's
 `dispatched:`-stamped task notes (and, where more detail is needed, the batch
-sessions' transcripts via `ccd_session_mgmt`), then report per batch —
+sessions' transcripts via `ccd_session_mgmt`, or a still-open batch workspace
+live via `cmux read-screen --scrollback`), then report per batch —
 completed / stalled / never launched. Clear `dispatched:` from any task whose
 stamp is stale (>7 days with no progress update, or artefact never launched).
 Fire-and-forget remains the default; a fresh `/thread:orient` audit is the
@@ -170,15 +195,19 @@ lightweight version of this.
 
 ## Don't
 
-- **Don't launch batch sessions.** The deliverable is artefacts; Lachy runs
-  the one-liners.
+- **Don't run batches as Workflows or subagents inside the orient session.**
+  Subagents inherit the parent session's MCP config — they cannot load a
+  different scoped profile, which is the whole point of a batch. Separate
+  launched sessions only.
+- **Don't ask a second launch confirmation.** The steering answer authorises
+  the launch (ADR 0010); composing batches and firing them is mechanics.
 - **Don't dispatch from (or into) a full-profile session.** Kitchen-sink MCP
   sets kill sub-agent fan-out ("Prompt is too long") — scoped profiles are
   the entire point.
 - **Don't emit Claude Desktop chips or cloud launches.** Chips wrapped every
   prompt in `/grill-with-docs` on 2026-08-08 (batches never executed —
-  investigation task open); no cloud environment is configured. Terminal
-  one-liners are the v1 surface.
+  investigation task open); no cloud environment is configured. cmux launch
+  is the surface; hand-run terminal one-liners are the fallback.
 - **Don't re-batch a task with a recent `dispatched:` stamp**, and don't stamp
   anything in Report-only or dry runs.
 - **Don't recommend more than one focus item**, and don't pad the audit —

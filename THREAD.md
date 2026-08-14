@@ -10,6 +10,28 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-08-14 (later) — v2.1.0: orient launches its own batches (ADR 0010).**
+Lachy challenged the SEO orient's paste hand-off believing the cc-* lane had
+been retired into the engine. The docs won the factual half: the lane was
+never retired (ADR 0009 kept it; the 2026-08-10 mis-routings were the thing
+fixed), both SEO batches genuinely fail the fit test, and "run them as
+Workflows inside the parent" is impossible — subagents inherit the parent's
+MCP config and can never load a different scoped profile. The residue was
+real though: the repair-autonomy principle ("never hand him commands to
+type") generalises, and the tooling gap ADR 0003 was written against had
+closed — `cmux workspace create --cwd … --command` delivers programmatic
+scoped-session launch. Two grilled rulings: (1) orient launches batches
+itself via cmux with the *expanded* profile alias (emission survives only as
+the no-cmux fallback); (2) the steering answer alone authorises — no
+per-batch confirm, accepted knowing batches run
+`--dangerously-skip-permissions` unreviewed. Live-proven same-day: the SEO
+p4/p5 batches fired as cmux workspaces 38/39, prompts verified
+in-transcript. Orient §7 rewritten (write + stamp + launch + verify +
+fallback), Don'ts gained the no-in-session-Workflow rule, glossary "Dispatch
+artefact" updated, memory generalised. **2.1.0 is committed but not yet
+shipped through the cache** — needs push → marketplace update → plugin
+update → session restart (same dance as ever).
+
 **2026-08-14 — v2.0.3: the review loop has a memory.** The Ralph-loop audit's
 review-loop gap closed hands-on (grilled via plan mode, not the self-rollout
 the capture's Launch block sketched): the review loop now accumulates
@@ -160,7 +182,8 @@ scheduled 2026-07-15.
 
 ## Session log
 
-- 2026-08-14 (latest): 2.0.3 shipped — review-loop memory (accumulated feedback with anti-regression framing, anti-goalpost judge discipline, step-back round at 2 rejections, ceiling outcomes persisted to the note); grilled 4 design forks via grill-with-docs; all suites green; capture task done.
+- 2026-08-14 (later): 2.1.0 — orient self-launches its batches via `cmux workspace create` (ADR 0010: steering answer = sole authorisation, emission = no-cmux fallback); rulings grilled off the SEO orient paste-hand-off challenge; live-proven by firing the SEO p4/p5 batches (workspaces 38/39); wave-repair-autonomy memory generalised. Ship pending: cache dance + restart.
+- 2026-08-14: 2.0.3 shipped — review-loop memory (accumulated feedback with anti-regression framing, anti-goalpost judge discipline, step-back round at 2 rejections, ceiling outcomes persisted to the note); grilled 4 design forks via grill-with-docs; all suites green; capture task done.
 - 2026-08-13: 2.0.1 (handoff visible, intent-gated) + 2.0.2 (description trims) shipped; skill-listing budget discovered + bumped to 0.02; giflab rollout landed 6/6 through the merged plugin (first orient→engine loop); Ralph-loop audit → review-loop-memory + package-init-blindness tasks filed.
 - 2026-08-12 (merge-day follow-up): merge-day parity follow-up — the 4 reported checker errors (plus 10 same-day drift) diagnosed to NotchBar's Codex hook injection + hardlink/mode drift; checker gained the NotchBar app-managed carve-out, add.md fan-out re-linked, PASS restored. Follow-up: [[notchbar-codex-hooks-follow-up]].
 - 2026-07-14: Notion retired ecosystem-wide — handoff destination deleted from close, workspaces + Codex adapter swept, migration task + global memory captured, v1.0.1 shipped (found: plugin cache is version-keyed).
