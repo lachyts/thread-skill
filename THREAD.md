@@ -28,7 +28,10 @@ final-round bullets to the full grouped history (legacy results fall back).
 `STEP_BACK_AFTER = 2` is an engine constant, deliberately not rollout config
 (EFFORT-matrix stance). Glossary gained accumulated feedback / step-back
 round / ceiling approval. No ADR — prompt shapes are cheap to reverse.
-Remaining from the audit: `thread-schedule-package-init-fileset-blindness`.
+Remaining from the audit: `thread-schedule-package-init-fileset-blindness` —
+run it as a one-task self-rollout from a FRESH session (the version-keyed
+cache means only a restart loads 2.0.3): the first live exercise of the
+review-loop memory.
 
 **2026-08-13 — v2.0.2 shipped; the merged plugin is live-proven.** The
 giflab-rollout-2026-08-12 ran end-to-end on thread 2.0.x — the first
