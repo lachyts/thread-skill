@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-08-14
+last_touched: 2026-08-18
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
 ---
@@ -9,6 +9,31 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-08-18: Windows minimal footprint; 2.1.0 finally through the cache.**
+The Windows machine (native Windows, user `lachl`, rarely used) requested a
+Mac bootstrap that would have re-created infrastructure that already exists:
+`~/.claude` is already the private `lachyts/claude-config` repo (allowlist
+gitignore, daily-sweep pushed), and its `skills/` entries are Mac-absolute
+symlinks whose real bodies live in `lachyts/agents-config`. Grilled twice:
+first the transport got corrected, then Lachy called overkill and the scope
+collapsed to the three verbs he actually uses there (next/close/orient).
+Rulings: plugin + Obsidian-synced vault is the whole Windows footprint; no
+personal-config transport (standalone skills and global CLAUDE.md stay
+Mac-only); no workspaces clone (shared-thread/registry features degrade
+deliberately; clone only when a verb complains); no Windows fork of skill
+bodies (a rewrite costs more than the two-command install and drifts
+forever); no machine.json indirection (all 46 hardcoded paths resolve via
+`expanduser` / Git Bash `~` once the vault syncs to
+`C:\Users\lachl\repos\obsidian`). `docs/windows-setup.md` written
+full-system (4307eee) then slimmed to the minimal path (118ae5a). Same
+session: wave-skill's local clone deleted (the archived `lachyts/wave-skill`
+tombstone remains; losslessly verified first); the vault swept NTFS-legal
+for Obsidian Sync to Windows (11 renames incl. `*Active* Supplement
+Protocol` with 18 wikilink updates; over-length titles shortened with
+original phrasing preserved in bodies); and the 08-14 ship-pending item
+closed: marketplace + plugin updated 2.0.3 → 2.1.0 on the Mac (session
+restart applies). Windows plugin install in flight at close.
 
 **2026-08-14 (later) — v2.1.0: orient launches its own batches (ADR 0010).**
 Lachy challenged the SEO orient's paste hand-off believing the cc-* lane had
@@ -132,6 +157,12 @@ scheduled 2026-07-15.
 
 - Nit: with Notion gone, close has exactly 4 proposable destination sections,
   so its ">4 sections" menu-merge prose is unreachable — delete on next touch.
+- Does `${CLAUDE_PLUGIN_ROOT}` expand in the Stop-hook command under the
+  native-Windows hook runner? The first Windows session end answers it; if it
+  fails, the fix lands in `hooks/hooks.json` here, never a local patch.
+- Windows install verification pending: marketplace add (gh auth), first
+  `/thread:next` (vault path resolution), Stop-hook noise (python3 shim is
+  the optional quieting fix).
 
 ## Known quirks (don't re-derive)
 
@@ -163,6 +194,11 @@ scheduled 2026-07-15.
   ~600–700 chars (2.0.2 trimmed execute+gather; `schedule` is the next trim
   candidate). Files can be perfectly valid YAML and still render bare —
   check the budget before debugging frontmatter.
+- **Vault filenames must stay NTFS-legal** (no `? * : " < > |`, no trailing
+  space/dot, basenames within MAX_PATH) or Obsidian Sync silently refuses
+  them on Windows. Capture titles become filenames, so task-writer is a
+  producer of this risk (sanitisation task proposed and declined 2026-08-18;
+  vault swept clean same day, link-safety verified before each rename).
 - Skills execute from `~/.claude/plugins/cache/thread/thread/<version>/`, not
   the `marketplaces/thread/` clone — `${CLAUDE_PLUGIN_ROOT}` resolves to the
   cache path. The cache is **version-keyed**: `claude plugin marketplace
@@ -182,6 +218,7 @@ scheduled 2026-07-15.
 
 ## Session log
 
+- 2026-08-18: Windows scope grilled down to a next/close/orient minimal footprint (plugin + synced vault; personal-config transport killed; no workspaces clone; no fork; no machine.json); docs/windows-setup.md added then slimmed; wave-skill local clone deleted (archived tombstone kept); vault NTFS-filename sweep (11 renames, 18 wikilinks updated); 2.1.0 shipped through the cache (restart applies); Windows install in flight.
 - 2026-08-14 (later): 2.1.0 — orient self-launches its batches via `cmux workspace create` (ADR 0010: steering answer = sole authorisation, emission = no-cmux fallback); rulings grilled off the SEO orient paste-hand-off challenge; live-proven by firing the SEO p4/p5 batches (workspaces 38/39); wave-repair-autonomy memory generalised. Ship pending: cache dance + restart.
 - 2026-08-14: 2.0.3 shipped — review-loop memory (accumulated feedback with anti-regression framing, anti-goalpost judge discipline, step-back round at 2 rejections, ceiling outcomes persisted to the note); grilled 4 design forks via grill-with-docs; all suites green; capture task done.
 - 2026-08-13: 2.0.1 (handoff visible, intent-gated) + 2.0.2 (description trims) shipped; skill-listing budget discovered + bumped to 0.02; giflab rollout landed 6/6 through the merged plugin (first orient→engine loop); Ralph-loop audit → review-loop-memory + package-init-blindness tasks filed.
