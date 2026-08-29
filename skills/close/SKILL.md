@@ -1,6 +1,6 @@
 ---
 name: close
-description: 'End-of-thread capture — update the active thread (project THREAD.md or shared _shared/threads/<slug>.md) with what happened this session, then triage anything else worth saving (vault tasks, memory, knowledge). Auto-commits workspace + vault git repos for session-changed files. Available globally — works from any CWD. Use when the work is FINISHED for now and state should persist; if the work continues elsewhere use thread:handoff, if it''s being set down for later use thread:stash or thread:defer. Invoke with `/thread:close` or "close this thread".'
+description: 'End-of-thread capture — update the active thread (project THREAD.md or shared _shared/threads/<slug>.md) with what happened this session, then save the rest autonomously: auto-memory (save-time triage, provenance-stamped), workspace knowledge, and git commits all happen without asking; vault tasks are the only proposal. Available globally — works from any CWD. Use when the work is FINISHED for now and state should persist; if the work continues elsewhere use thread:handoff, if it''s being set down for later use thread:stash or thread:defer. Invoke with `/thread:close` or "close this thread".'
 ---
 
 # /thread:close — close out this thread
@@ -9,10 +9,10 @@ End-of-thread capture. The thread is about to end — make sure nothing valuable
 
 **The active thread is always the primary destination.** Update its `THREAD.md` first; everything else (vault tasks, memory, etc.) is supporting capture.
 
-**Commits are automatic. Creative writes are proposed first.**
+**Everything saves autonomously except vault tasks.**
 
-- **Auto-execute, no asking**: git commits in `~/repos/workspaces/` and the Obsidian vault for any session-changed files. This includes staging + committing knowledge-file edits once they're written. Never surface these as approval items.
-- **Propose first, then wait**: thread updates, vault tasks, auto-memory entries, and the *content* of any knowledge edits. These are creative decisions Lachy should confirm before they land on disk.
+- **Auto-execute, no asking**: git commits in `~/repos/workspaces/` and the Obsidian vault (session-changed files only), the thread update, auto-memory entries (via the save-time triage below), and workspace knowledge edits. The safety net that replaced per-item approval sits downstream, not in a menu: auto-memory lands `provisional` with provenance, nothing is ever hard-deleted, and the weekly memory curator archives what turns out to be junk (ADR 0011).
+- **Propose first, then wait**: vault tasks only. Tasks surface on Lachy's daily agenda, so a junk task has ongoing attention cost — "don't create tasks unsolicited" survives as the sole approval gate.
 
 **Wrong route?** If the conversation reveals the work is *not* finished — it's being parked or continued — dispatch to the right sibling instead: `thread:stash` / `thread:defer` (set down, capture task per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md`) or `thread:handoff` (fork to a fresh agent now).
 
@@ -46,22 +46,45 @@ Each candidate lands in exactly one of these. When in doubt, prefer the destinat
 |---|---|---|
 | Workspace config / knowledge file edits made this session | Git commit in `~/repos/workspaces/` — auto, session-changed files only | Auto |
 | Obsidian vault changes made this session (`ops-workspace` only) | Git commit in the vault repo — auto, session-changed files only | Auto |
-| **Thread state — where we left off, what shifted, new decisions, new known quirks, session log entry** | **Active `THREAD.md` (project or shared)** | **Propose diff** |
-| Concrete follow-up actions for Lachy | New file in `vault/Work/Tasks/<slug>.md` — routing + frontmatter shape per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` §§ 1 & 4 (ordinary follow-ups omit the `thread` marker tag — that's for stash/defer captures). Never to `vault/_Inbox/` — that's Lachy's capture surface only | Propose |
-| User preferences, recurring patterns, reusable feedback | Auto-memory at the correct scope per `_shared/base-instructions.md` § Memory Management — global, workspace, or project area `CLAUDE.md` | Propose |
-| Reusable workspace knowledge (gotchas, schemas, processes) | `<workspace>/knowledge/<topic>.md` — same rules as `/learn` | Propose content |
-| Not worth keeping | Discard, note it briefly so Lachy can object | — |
+| Thread state — where we left off, what shifted, new decisions, new known quirks, session log entry | Active `THREAD.md` (project or shared) | Auto |
+| Concrete follow-up actions for Lachy | New file in `vault/Work/Tasks/<slug>.md` — routing + frontmatter shape per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` §§ 1 & 4 (ordinary follow-ups omit the `thread` marker tag — that's for stash/defer captures). Never to `vault/_Inbox/` — that's Lachy's capture surface only | **Propose** |
+| User preferences, recurring patterns, reusable feedback | Auto-memory at the correct scope per `~/repos/workspaces/_shared/claude-base-instructions.md` § Claude memory management — global, workspace, or project area `AGENTS.md` — via the save-time triage below | Auto |
+| Reusable workspace knowledge (gotchas, schemas, processes) | `<workspace>/knowledge/<topic>.md` — same rules as `/learn` | Auto |
+| Not worth keeping | Discard; one line in the "What landed" report so Lachy can object | — |
 
 ## Memory scope discipline
 
-A `PreToolUse` hook (`_shared/hooks/check-memory-scope.sh`) blocks Write calls to *global* memory paths if the content matches project-area or ops-only keywords. Don't fight it — read the redirect target in the block reason and save there instead.
+A `PreToolUse` hook (`_shared/hooks/check-memory-scope.sh`) blocks Write calls to *global* memory paths if the content matches project-area or ops-only keywords. Don't fight it — read the redirect target in the block reason and save there instead, recording `redirected: global → <scope>` in the report. If the redirect target is ambiguous, or the redirected write also blocks, do **not** save anywhere: emit NOOP for that candidate and list it under a `Needs your call:` line in the report — never as a question (the banner stays last).
 
-Before proposing any auto-memory entry, run the scope test from `base-instructions.md`:
+Before saving any auto-memory entry, run the scope test from `claude-base-instructions.md` § Claude memory management:
 
 - **Global memory**: "Would this be loaded usefully in *every* conversation across *every* workspace?" If no, narrow.
 - **Workspace memory**: "Is this relevant to multiple unrelated tasks in this workspace?" If only one project, narrow further.
-- **Project area `CLAUDE.md`**: "Is this a rule that applies to all work in this area?" If yes, save here.
+- **Project area `AGENTS.md`**: "Is this a rule that applies to all work in this area?" If yes, save here.
 - **THREAD.md**: state-of-play of one effort — captured by the thread update, not memory.
+
+## Save-time triage — four verbs
+
+Before **any** memory Write, resolve the candidate against what already exists. Grep the target scope's `MEMORY.md` for hook keywords from the candidate, Read the 1–3 plausibly related topic files, then emit exactly one verb:
+
+- **ADD** — genuinely new: write a new topic file + index line.
+- **UPDATE `<file>`** — the fact enriches or extends an existing memory: edit that file in place, bump its `metadata.last_confirmed`, leave its status untouched.
+- **SUPERSEDE `<file>`** — the fact contradicts or replaces an existing memory: write the new file, set the old file's `metadata.status: superseded` + `metadata.superseded_by: <new-file>.md`, and swap the index line to the new file. The curator archives superseded files on its next pass — never delete them here.
+- **NOOP** — already covered, ephemeral, or below the bar. **NOOP is a success state**, listed in the report with its one-line reason.
+
+Every file written or updated carries the memory frontmatter contract, nested under the harness's existing shape:
+
+```yaml
+metadata:
+  type: feedback            # user | feedback | project | reference
+  captured: 2026-08-29
+  last_confirmed: 2026-08-29
+  status: provisional       # provisional | active | superseded
+  provenance: close-inferred  # close-inferred | user-explicit | legacy
+  permanent: false
+```
+
+Close-inferred saves land `status: provisional` — the curator promotes them to `active` once they're recalled again, and archives them if they never are. An explicit in-conversation "remember this" from Lachy lands `provenance: user-explicit, status: active`. Set `permanent: true` only when Lachy says so or the fact is plainly identity/health/hard-constraint — permanent entries are never recency-culled.
 
 ## Guardrails
 
@@ -69,8 +92,8 @@ Before proposing any auto-memory entry, run the scope test from `base-instructio
 - **Respect the workspace-vs-project split**: config lives in `~/repos/workspaces/`, project artefacts live in `~/Projects/<Area>/`. Project-specific notes go to the project's `THREAD.md` or files in the project directory — not the workspace.
 - **UK English spelling.**
 - **No em dashes in any message drafts Lachy will send.**
-- **Don't create tasks unsolicited** — propose them, let Lachy approve.
-- **Don't save ephemeral conversation context** as memory. The bar is: non-obvious, reusable, verified.
+- **Don't create tasks unsolicited** — propose them, let Lachy approve. The one surviving gate.
+- **Don't save ephemeral conversation context** as memory. The bar is: non-obvious, reusable, verified. When in doubt, NOOP — the four-verb triage makes "don't save" a first-class outcome.
 
 ## Process
 
@@ -93,57 +116,15 @@ Before proposing any auto-memory entry, run the scope test from `base-instructio
    - Resume instructions: update if next-session entry-point shifted.
    - Session log: prepend `- YYYY-MM-DD: <one-line of what shifted>` (newest first).
 
-5. **Present the save plan** as a single message, one section per destination. Auto-items are listed as "will do" (Lachy sees them but doesn't approve); proposed items are listed for the approval menu that follows:
+5. **Compute the full save set silently** — no "proposed plan" message. Work out: the auto-commit file lists, the thread diff, each memory candidate's verb (via the four-verb triage), knowledge edits, vault-task candidates, and what's being discarded. Nothing is shown to Lachy until the report in step 8 — except the task menu, if there is one.
 
-   ```
-   ## Proposed save plan
-
-   ### Will auto-commit (workspaces repo)
-   - <file path> — <one-line why>
-
-   ### Will auto-commit (Obsidian vault)
-   - <file path> — <one-line why>  (omit if no vault changes or not ops-workspace)
-
-   ### Thread update — <path to active THREAD.md>
-   - <summary of the diff: which sections change>
-
-   ### Vault tasks
-   - <task title> → `Work/Tasks/<slug>.md`, scheduled: <date | unscheduled>, project: [[<project>]] | standalone, <one-line context>
-
-   ### Auto-memory
-   - <title>, scope: global | workspace | project-area, <one-line why> + redirect target if narrowed
-
-   ### Workspace knowledge
-   - <file path> — <section> — <what to add>
-
-   ### Discard
-   - <brief list of what's being dropped and why>
-   ```
-
-   Do **not** end this message with a text question — the menu in step 6 replaces it.
-
-6. **Collect approvals via `AskUserQuestion`.** One **multiSelect** question per destination that has proposed items (Thread update, Vault tasks, Auto-memory, Workspace knowledge). Each option = one candidate: `label` is a short title, `description` is the one-line why. Auto-commit sections are NOT in the menu — those happen regardless. If there are zero proposed items across all sections, skip the menu entirely and go straight to step 7.
-
-   Handle answers:
-   - Options the user ticks → execute in step 7.
-   - Options not ticked → discard silently.
-   - Free-text via "Other" → treat as a redirect. Scope tweaks apply directly. Substantive redirects re-propose with an updated plan + fresh menu.
-
-   **Fitting within the menu limits (4 questions × 4 options).** Aim for a single `AskUserQuestion` call.
-
-   - **>4 sections with proposed items:** merge low-volume sections (often Workspace knowledge) into a combined "Other saves" multiSelect. Each merged item becomes one option; prefix the label with type (`Knowledge: …`).
-   - **>4 items in one section:** collapse to ≤4 options:
-     1. *Save all N* — every candidate.
-     2. *Save core set* — list top 2-3 in label.
-     3. *Skip section* — discard all.
-     4. Optional: a named subset.
-   - **Still won't fit:** move overflow to Discard with "auto-discarding unless redirected", surface only top-priority in the menu.
+6. **Vault tasks only — collect approval via `AskUserQuestion`.** If (and only if) there are proposed vault tasks: one multiSelect question, one option per task (`label` = short title, `description` = the one-line why). A single task candidate gets an explicit second option (`Skip — don't create it`) to satisfy the ≥2-option minimum. More than 4 candidates: collapse per `_shared/knowledge/triage-batching-protocol.md` §6 (*Save all N* / *Save core set* / *Skip section* / named subset). Zero task candidates → no menu at all; go straight to step 7. Ticked → create in step 7; unticked → discard silently; "Other" free-text → treat as a redirect.
 
 7. **Execute.** Order:
-   1. Approved thread update — write THREAD.md (the most important file).
-   2. Approved creative writes: workspace knowledge edits.
-   3. Approved vault tasks: new files at `vault/Work/Tasks/<slug>.md` with Task frontmatter.
-   4. Approved auto-memory files + MEMORY.md index updates. Honour the scope hook — if a Write blocks, save to the redirect target instead.
+   1. Thread update — write THREAD.md (the most important file).
+   2. Workspace knowledge edits.
+   3. Auto-memory via the four verbs + MEMORY.md index updates. Honour the scope hook per "Memory scope discipline" — redirect or NOOP, autonomously.
+   4. Approved vault tasks: new files at `vault/Work/Tasks/<slug>.md` with Task frontmatter.
    5. **Auto-commit workspaces repo** — see "Commit hygiene" below. Never ask.
    6. **Auto-commit vault repo** (if ops-workspace and session-changed files exist there) — same rules.
 
@@ -159,9 +140,9 @@ git -C <repo> commit <path1> <path2> ... -m "<message>"
 
 This commits only the named paths even if other files are staged. **Before committing**, run `git -C <repo> diff --cached --name-only` and scan what's already staged. If anything is staged that isn't a session-changed file, don't `git reset` it (destructive) — just use named-paths commit. Mention in the saved summary that other files sit in the index for separate handling.
 
-8. **Print a compact "saved" summary** (≤8 lines): what landed where, including commit SHAs for both repos, vault task file paths (as clickable `[[wiki-link]]`), and a one-line "thread state" pointer (e.g. `THREAD.md updated · state: active · open questions: 2`).
+8. **Print the "What landed" report** (≤12 lines): thread-state pointer (e.g. `THREAD.md updated · state: active · open questions: 2`), memory verbs with paths (`ADD feedback_x.md (provisional)` / `UPDATE reference_y.md` / `SUPERSEDE a.md → b.md` / `NOOP: <reason>`), knowledge edits, vault task files as clickable `[[wiki-links]]`, commit SHAs for both repos, any `redirected:` or `Needs your call:` lines, and a one-line discard note.
 
-9. **End with the closing banner.** After the summary, add a blank line, a horizontal rule (`---`), another blank line, then this exact line as the final line of the response:
+9. **End with the closing banner.** After the report, add a blank line, a horizontal rule (`---`), another blank line, then this exact line as the final line of the response:
 
    ```
    **Thread closed. Safe to end this session — nothing valuable left in conversation state.**
@@ -171,7 +152,8 @@ This commits only the named paths even if other files are staged. **Before commi
 
 ## Edge cases
 
-- **Nothing to save.** Say so: "Nothing worth capturing — closing cleanly." Still run the auto-commit step(s) if there are session-changed files.
+- **Nothing to save.** Say so: "Nothing worth capturing — closing cleanly." An all-NOOP close is a healthy close. Still run the auto-commit step(s) if there are session-changed files.
+- **Ambiguous scope redirect.** A blocked memory write whose redirect target is unclear (or itself blocks) becomes a NOOP + `Needs your call:` report line — never a question, never a fought hook.
 - **Thread touched multiple projects.** Per-project sections in the thread-update + vault-tasks groupings. Don't merge.
 - **Thread was mostly exploratory / no concrete outcome.** Maybe one or two memory saves; thread update may be just a session-log entry. Don't pad.
 - **Thread produced destructive changes.** Make sure the "why" lands somewhere — commit message, THREAD.md "Known quirks", or memory.
@@ -181,4 +163,4 @@ This commits only the named paths even if other files are staged. **Before commi
 
 ## Why this exists
 
-Threads routinely end with valuable state only in the conversation — open questions, rationale behind a pivot, a concrete next step that never made it to disk. Without a close ritual, that state evaporates and the next session re-derives it from scratch. `thread:close` is the ritual: triage, route, persist, commit, done.
+Threads routinely end with valuable state only in the conversation — open questions, rationale behind a pivot, a concrete next step that never made it to disk. Without a close ritual, that state evaporates and the next session re-derives it from scratch. `thread:close` is the ritual: triage, route, persist, commit, done. The approval gate moved from save-time to curation-time (ADR 0011): saves are cheap and reversible, so the weekly curator — not a menu — is what keeps memory clean.

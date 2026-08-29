@@ -63,6 +63,30 @@ through time, from attention to merged PRs. Terms only — no implementation.
   auto-completes the capture task: the capture's job ends the moment the
   thread is live again.
 
+## Memory capture (close-side)
+
+- **Four-verb triage** — the save-time resolution of every memory candidate
+  against existing memory: `ADD`, `UPDATE <file>`, `SUPERSEDE <file>`, or
+  `NOOP`. NOOP is a success state, never a failure to capture.
+  _Avoid_: save/skip, dedupe pass.
+- **Provisional** — an auto-saved memory not yet corroborated; the curator
+  promotes it to active on a later recall and archives it if none comes.
+  _Avoid_: draft, pending, tentative.
+- **Provenance** — who initiated a memory: `close-inferred`, `user-explicit`,
+  or `legacy`. Sets the prune bar (explicit saves are harder to cull).
+  _Avoid_: source, origin.
+- **Recall** — a live session Reading a memory topic file; the usage signal,
+  harvested daily from session transcripts. Index loads never count.
+  _Avoid_: hit, access, view.
+- **Curator** — the weekly autonomous pass holding sole destructive authority
+  over memory (promote, expire, decay-archive, merge, demote, rebuild
+  indexes). Lives outside this repo; close only writes what it reads.
+  _Avoid_: garbage collector, janitor, cleanup job.
+- **Permanent** — the exemption class never recency-culled: identity, health,
+  hard constraints. _Avoid_: pinned, sticky.
+- **Demotion** — the curator verb moving a global memory to the one workspace
+  whose sessions actually recall it. _Avoid_: downgrade, relocation.
+
 ## Planning structure (rollout lane)
 
 - **Task** — one PR-sized, independently-shippable unit, written as a single

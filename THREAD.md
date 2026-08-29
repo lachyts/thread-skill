@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-08-18
+last_touched: 2026-08-29
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
 ---
@@ -9,6 +9,24 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-08-29 — v2.2.0: close saves autonomously; vault tasks stay gated (ADR 0011).**
+Lachy called out the close menu as rubber-stamp theatre — he ticks every
+memory suggestion unread, so the gate filtered nothing while the memory
+estate rotted un-pruned (ops index in ALERT, global triage 65 days overdue).
+Grilled six rulings (ADR 0011): the menu survives only for vault tasks;
+memory/thread/knowledge auto-execute behind a four-verb save-time triage
+(`ADD | UPDATE | SUPERSEDE | NOOP`, NOOP a success state) and a frontmatter
+contract (`captured` / `last_confirmed` / `status: provisional|active|
+superseded` / `provenance` / `permanent`). The safety moved downstream: a
+weekly autonomous **memory curator** (new `~/.agents/skills/memory-curator`,
+launchd Sunday 09:30, archive-first — never deletes) prunes/merges/demotes on
+*observed* usage from a new daily transcript recall harvest
+(`_shared/scripts/memory-recall-harvest.py`); `/memory-triage` retired.
+Close's dangling doctrine pointers repaired to
+`claude-base-instructions.md § Claude memory management`; project-area file
+canonically `AGENTS.md`. The frontmatter contract is a cross-repo interface —
+change close and the curator in lockstep.
 
 **2026-08-18: Windows minimal footprint; 2.1.0 finally through the cache.**
 The Windows machine (native Windows, user `lachl`, rarely used) requested a
@@ -155,8 +173,6 @@ scheduled 2026-07-15.
 
 ## Open questions / decisions pending
 
-- Nit: with Notion gone, close has exactly 4 proposable destination sections,
-  so its ">4 sections" menu-merge prose is unreachable — delete on next touch.
 - Does `${CLAUDE_PLUGIN_ROOT}` expand in the Stop-hook command under the
   native-Windows hook runner? The first Windows session end answers it; if it
   fails, the fix lands in `hooks/hooks.json` here, never a local patch.
@@ -218,6 +234,7 @@ scheduled 2026-07-15.
 
 ## Session log
 
+- 2026-08-29: 2.2.0 — close de-gated (ADR 0011): menu only for vault tasks; four-verb save-time triage + provisional/provenance frontmatter; weekly memory-curator system + daily recall harvest built on the workspaces side; /memory-triage retired; doctrine pointers repaired; ">4 sections" dead prose deleted (open-question nit resolved).
 - 2026-08-18: Windows scope grilled down to a next/close/orient minimal footprint (plugin + synced vault; personal-config transport killed; no workspaces clone; no fork; no machine.json); docs/windows-setup.md added then slimmed; wave-skill local clone deleted (archived tombstone kept); vault NTFS-filename sweep (11 renames, 18 wikilinks updated); 2.1.0 shipped through the cache (restart applies); Windows install in flight.
 - 2026-08-14 (later): 2.1.0 — orient self-launches its batches via `cmux workspace create` (ADR 0010: steering answer = sole authorisation, emission = no-cmux fallback); rulings grilled off the SEO orient paste-hand-off challenge; live-proven by firing the SEO p4/p5 batches (workspaces 38/39); wave-repair-autonomy memory generalised. Ship pending: cache dance + restart.
 - 2026-08-14: 2.0.3 shipped — review-loop memory (accumulated feedback with anti-regression framing, anti-goalpost judge discipline, step-back round at 2 rejections, ceiling outcomes persisted to the note); grilled 4 design forks via grill-with-docs; all suites green; capture task done.
