@@ -1,5 +1,14 @@
 # `orient` is project-altitude `next`, and dispatch is an artefact
 
+Date: 2026-08-08
+Status: accepted, then partially superseded — the **packaging** conclusion by
+ADR 0009 (thread absorbs wave; there is no `/wave:*` namespace left to refer
+to), the **launch** conclusion by ADR 0010 (orient launches its own batch
+sessions; emitted artefacts are the no-cmux fallback). The **scope** reasoning
+below stands and is explicitly preserved at ADR 0009 § Decision — orient never
+grows a merge engine, and non-PR ops work is still the wrong fit for it. The
+body is left as written: a correct record of what was decided on the day.
+
 `thread:orient` joins the family as the *project-altitude* router: where
 `next` reads one live thread and recommends its next move, `orient` reads a
 whole project/area (sub-project notes, task frontmatter, THREAD.md states,

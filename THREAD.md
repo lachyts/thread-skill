@@ -152,8 +152,11 @@ scheduled 2026-07-15.
 ## What's been built / decided
 
 - Plugin scaffold mirroring wave: manifests, CONTEXT.md, docs/adr/, README.
-- ADR 0001: the task is the floor; the thread is the upgrade.
-- ADR 0002: `next` is a sibling, not a parent.
+- Decisions live in `docs/adr/` — read the directory, never a remembered
+  subset. ADR 0001 (the task is the floor; the thread is the upgrade) and
+  ADR 0002 (`next` is a sibling, not a parent) shaped this scaffold; 0009
+  (thread absorbs wave), 0010 (orient launches its own batches) and 0011
+  (close saves autonomously) govern current behaviour.
 - Canonical THREAD-template.md home: `~/.agents/skills/thread/THREAD-template.md`
   (harness-neutral; `check-agent-parity.py` pins it).
 - Pickup auto-completes the capture task (decided in design interview).
@@ -162,7 +165,7 @@ scheduled 2026-07-15.
   **native translations** (not thinned to pointers as the plan suggested) —
   undoing deliberate Codex-safety work wasn't worth the dedup; only
   `handoff`'s canonical pointer was repointed at this repo.
-- Vault project note `Work/Projects/Side projects/Thread Skill.md` is the
+- Vault project note `Work/Projects/AI/Thread Skill.md` is the
   human-facing surface (goal, terminology, wave-sibling framing); its
   `repos:` frontmatter auto-routes tasks captured from this repo's CWD.
 - Build lineage: `docs/build-plan.md` (the approved plan, copied in at close).
@@ -185,7 +188,8 @@ scheduled 2026-07-15.
 - Colon namespace (`thread:defer`) requires plugin packaging; skill frontmatter
   carries the bare `name:` and Claude Code composes the prefix.
 - `disable-model-invocation: true` hides a skill from the model's list but
-  keeps the `/slash` form — used by `thread:handoff`.
+  keeps the `/slash` form. No skill here carries it any more (handoff dropped
+  it at 2.0.1); `skills/execute/SKILL.md` warns against ever adding one.
 - `AskUserQuestion` requires ≥2 options per question — a close destination
   section with a single candidate can't be its own menu question; merge
   single-candidate sections into one combined multiSelect.
@@ -226,11 +230,18 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-1. Read this file, then `CONTEXT.md` and the two ADRs.
+1. Read this file, then `CONTEXT.md` and the ADRs in `docs/adr/` — the whole
+   directory, not a subset. The rollout lane, orient's self-launching and
+   close's autonomy each rest on an ADR added after v1.0.0.
 2. `skills/_shared/task-writer.md` is the single source for task shape —
    never change task behaviour in a route skill directly.
-3. Live testing checklist is in the plan's Verification section (plan file:
-   `~/.claude/plans/so-i-want-to-rippling-taco.md`, mirrored in repo history).
+3. Automated checks are `README.md` § Tests. A live end-to-end checklist is
+   written from the current specs — `task-writer.md` § 3b (a `defer` is not
+   done until the target day note carries its `## To do` line; the TaskNotes
+   agenda is secondary discovery) plus each route's SKILL.md.
+   `docs/build-plan.md` § Verification is the historical v1.0.0 checklist: it
+   predates § 3b and passes a defer that writes only `scheduled:`. Don't
+   route live testing through it.
 
 ## Session log
 

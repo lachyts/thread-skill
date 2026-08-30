@@ -66,7 +66,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 
 `model` resolves task frontmatter → rollout frontmatter → `opus` and sets the task's **starting tier**. Judges **follow the task's live tier**, so a `fable` task gets Fable review end-to-end. (A run can still pin all judges to one model via the `judgeModel` arg — it wins when set.)
 
-**Effort bundles (ADR 0007).** A tier is a **(model, per-role effort) bundle**, not two knobs — reasoning effort rides the same ladder as the model. The per-role matrix is fixed in ONE place in the engine (`wave-execute.workflow.js`, the `EFFORT` constant):
+**Effort bundles (ADR 0007).** A tier is a **(model, per-role effort) bundle**, not two knobs — reasoning effort rides the same ladder as the model. The per-role matrix is fixed in ONE place in the engine (`wave-execute.workflow.js`, the `EFFORT` constant), restated below for reading only — **the constant is canonical; if the two ever disagree, this table is the bug**:
 
 | Role | `opus` tier | `fable` tier |
 |---|---|---|

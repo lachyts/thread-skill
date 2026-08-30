@@ -31,7 +31,7 @@ buys nothing there.
 - Its verification only arrives days or weeks later (impact measures) — the
   verifier loop has nothing to verify inside the run.
 - It is conversation-gated: it needs Lachy's input before an agent can act
-  (task-writer § 4 notes this in the body).
+  (task-writer § 5 notes this in the body).
 
 **Mixed sets split.** The wave-shaped subset rolls out; the misfits stay
 unstamped in the session lane. Name the split when reporting.

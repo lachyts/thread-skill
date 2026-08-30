@@ -1,6 +1,6 @@
 ---
 name: repair
-description: 'Use to unstick a wave rollout that has stalled — run it whenever there''s an issue with the whole rollout, not a single task. Triggers on "repair [[rollout]]", "fix this rollout", "[[rollout]] is stuck", "sort out [[rollout]]", "unblock the rollout", or after /thread:status shows blockers/drift. A thin CONDUCTOR over /thread:execute (never a second engine): it diagnoses (runs /thread:status), reconciles drift, asks YOU only the decisions no agent can make and writes them into the notes, auto-retries agent-fixable blocks, dependency-aware-defers wedged tasks, then hands off to execute''s resume — wave keeps sole merge authority. Scope: Obsidian + gh/git + the execute engine.'
+description: 'Use to unstick a wave rollout that has stalled — run it whenever there''s an issue with the whole rollout, not a single task. Triggers on "repair [[rollout]]", "fix this rollout", "[[rollout]] is stuck", "sort out [[rollout]]", "unblock the rollout", or after /thread:status shows blockers/drift. A thin CONDUCTOR over /thread:execute (never a second engine): it diagnoses (runs /thread:status), reconciles drift, asks YOU only the decisions no agent can make and writes them into the notes, auto-retries agent-fixable blocks, dependency-aware-defers wedged tasks, then hands off to execute''s resume — the engine keeps sole merge authority. Scope: Obsidian + gh/git + the execute engine.'
 ---
 
 # /thread:repair — sort out a stuck rollout (conductor, not an engine)
@@ -13,7 +13,7 @@ It is a **conductor**, not an engine (see `docs/adr/0004-repair-is-a-conductor-n
 execute engine's worktree setup is already idempotent on re-dispatch and `resume-filter` already
 re-attempts blocked tasks — so repair **reuses execute's resume** and adds only the three things
 re-running execute can't do: reconcile **drift**, inject an **input-gated** decision, and **defer** a
-wedged task. It never re-implements merge or convergence, and **wave keeps sole merge authority**.
+wedged task. It never re-implements merge or convergence, and **the engine keeps sole merge authority**.
 
 ## Scope
 
@@ -131,7 +131,7 @@ any dependents moved with it).
 - **Don't re-implement merge or convergence.** Drift → `resolve`; everything else → execute's §4.5
   resume. If you're writing a dispatch/merge loop, you've turned the conductor into an engine — stop.
 - **Don't merge anywhere but `merge-wave.sh`.** No inline `gh pr merge`, no `--admin`, no force-push.
-  Wave keeps sole merge authority (README → *Coexistence with Orca*).
+  The engine keeps sole merge authority (README → *Coexistence with Orca*).
 - **Don't ask the user about agent-fixable blocks.** Retry them silently (cap one); ping only for
   input-gated decisions or a second block.
 - **Don't `resolve` a task whose PR isn't verified MERGED.** That would mask unfinished work — `resolve`

@@ -1,5 +1,13 @@
 # Plan: `thread:*` — a continuity family (router + intentional routes)
 
+> **Historical — the approved build plan of 2026-07-14, frozen verbatim.**
+> It describes thread at v1.0.0 (six members, two ADRs) and has not been
+> touched since the build. Read it as lineage, never as current state: the
+> live glossary is `CONTEXT.md`, the live decisions are `docs/adr/`, the live
+> membership is `skills/`. Its § Verification checklist predates
+> `skills/_shared/task-writer.md` § 3b — copying it forward green-lights a
+> `defer` that never writes its day-page `## To do` line.
+
 ## Context — why
 
 Lachy runs too many agent threads at once and resists shutting them down for

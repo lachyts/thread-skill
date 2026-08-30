@@ -19,7 +19,7 @@ machine-verifiable in-run) rolls out; everything else runs as scoped sessions.
 |---|---|---|
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
-| `/thread:orient` | back on a project, balls in the air | Project-altitude router: audit an area's open work, recommend the best use of time, ask the steering mode, then route by the execution-fit test — wave-shaped clusters to `gather`/`schedule`, the rest to `open` or batch dispatch artefacts. |
+| `/thread:orient` | back on a project, balls in the air | Project-altitude router: audit an area's open work, recommend the best use of time, ask the steering mode, then route by the execution-fit test — wave-shaped clusters to `gather`/`schedule`, the rest to `open` or to background batch sessions it launches itself (ADR 0010; the steering answer is the authorisation, dispatch artefacts are the no-cmux fallback). |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
 | `/thread:handoff` | fork now | Compact this conversation into an inline copy-paste prompt for a fresh agent. |
@@ -51,9 +51,10 @@ converging tasks **in parallel within each wave**:
 
 Worktree isolation is explicit: each task runs in
 `<repoPath>/.claude/worktrees/<slug>`. Merges go **only** through
-`scripts/merge-wave.sh` — gated on *required* status checks, never `--admin`,
-never force. `scripts/reconcile-wave.py` writes all per-task vault frontmatter
-transitions deterministically and drives per-task resume.
+`skills/execute/scripts/merge-wave.sh` — gated on *required* status checks,
+never `--admin`, never force. `skills/execute/scripts/reconcile-wave.py`
+writes all per-task vault frontmatter transitions deterministically and drives
+per-task resume.
 
 ## Design
 
@@ -62,13 +63,17 @@ transitions deterministically and drives per-task resume.
 - `skills/_shared/execution-fit.md` — the canonical lane rule.
 - `skills/_shared/task-writer.md` — the single spec for writing + routing the
   vault task (dedup, day parsing, resume prompt, pickup auto-complete).
-- `docs/adr/0001`–`0003` — the continuity decisions (task floor; next is a
-  sibling; orient is project-altitude next).
-- `docs/adr/0004`–`0008` — the engine decisions (repair is a conductor; a
-  phase is a plan; one-shot first pass, iteration escalates to Fable; a tier
-  is a model+effort bundle; a declared gate always pauses).
-- `docs/adr/0009` — thread absorbs wave: one plugin, one prefix, two lanes.
+- `docs/adr/` — the decision record; read the directory for the current set.
+  `0001`–`0003` are the continuity decisions (task floor; next is a sibling;
+  orient is project-altitude next — 0003's packaging and launch conclusions
+  since superseded by 0009 and 0010). `0004`–`0008` are the engine decisions
+  (repair is a conductor; a phase is a plan; one-shot first pass, iteration
+  escalates to Fable; a tier is a model+effort bundle; a declared gate always
+  pauses). `0009` — thread absorbs wave: one plugin, one prefix, two lanes.
+  `0010` — orient launches its own batches. `0011` — close saves
+  autonomously; vault tasks stay gated.
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
+- `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
 ## Install
 
