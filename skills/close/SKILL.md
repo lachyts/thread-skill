@@ -35,6 +35,7 @@ Walk the conversation back and collect candidates under these categories:
 4. **Decisions made in-thread that aren't yet persisted** — agreements or choices that only live in the conversation. If it's already in a file or commit, skip it.
 5. **Discovered context a future session would miss** — non-obvious constraints, dead ends ruled out, why a particular path was chosen. (These belong in THREAD.md "Known quirks".)
 6. **Patterns / preferences Lachy expressed** — feedback-style guidance worth saving across sessions (not just this thread).
+7. **Process observations** — a genuine stage-shift, pivot, reusable move, revealing failure, or cross-workstream effect in *how the project is being made*. Stage-gated, never per-iteration: another numbered pass existing is not an observation; discovering that one variable had to lock before the others could move is. Most sessions have none — NOOP is the expected outcome here too.
 
 Skip anything that's obvious from reading the current code, already in docs, or purely ephemeral (one-off debugging, tool noise).
 
@@ -50,6 +51,7 @@ Each candidate lands in exactly one of these. When in doubt, prefer the destinat
 | Concrete follow-up actions for Lachy | New file in `vault/Work/Tasks/<slug>.md` — routing + frontmatter shape per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` §§ 1 & 4 (ordinary follow-ups omit the `thread` marker tag — that's for stash/defer captures). Never to `vault/_Inbox/` — that's Lachy's capture surface only | **Propose** |
 | User preferences, recurring patterns, reusable feedback | Auto-memory at the correct scope per `~/repos/workspaces/_shared/claude-base-instructions.md` § Claude memory management — global, workspace, or project area `AGENTS.md` — via the save-time triage below | Auto |
 | Reusable workspace knowledge (gotchas, schemas, processes) | `<workspace>/knowledge/<topic>.md` — same rules as `/learn` | Auto |
+| Process observation (category 7) | Append to the project's `METHOD.md` `## Candidates` — dated, source-attributed, evidence-linked, per the `method` skill's capture contract (create the file from `~/.agents/skills/method/METHOD-template.md` if absent). Candidates are non-curated; the `## Method` section stays untouchable without Lachy's confirmed `/method` apply (ADR 0012) | Auto |
 | Not worth keeping | Discard; one line in the "What landed" report so Lachy can object | — |
 
 ## Memory scope discipline
