@@ -159,7 +159,8 @@ const PRIOR_FEEDBACK_NOTE = `If the task note has a "## Review-blocked feedback"
 // undeclared/unapproved (the plan_approval:false path). Both are STATIC prompt text — always rendered,
 // a required contract, not an optional feature — and the ENGINE enforces the pause: parseGatedInputs /
 // unapprovedGates below turn a non-empty unapproved declaration into a 'gate-pending' stop regardless
-// of plan_approval config or continuous mode. Approval lives durably on the task note ("## Approved
+// of plan_approval config or continuous mode (list items only — prose in the section is commentary,
+// ADR 0013). Approval lives durably on the task note ("## Approved
 // gates", passed in as task.approvedGates), so re-dispatches never re-ask those exact gates.
 const GATED_INPUTS_CHECK = `Gated inputs (hard rule — ADR 0008): BEFORE any gated action, identify every human authorisation this
 task needs — API spend (a hard cap is mandatory), credentials, or an irreversible action. If the task
@@ -170,24 +171,43 @@ missing gate in gatedInputs ("spend: <what> — cap <amount>" / "credential: <wh
 <what>") and name them in blockerDiagnosis — a human signs off on the note and you'll be re-dispatched.
 No operator override elsewhere in this prompt (release/hold gates) ever overrides THIS rule.`
 
-// Parse the plan's "### Gated inputs" section (any ##–#### level). Returns null when the section is
-// MISSING (the caller fails closed — the judge should never have approved it), [] for an explicit
-// "None", else the declared gate lines (bullets stripped; bare prose lines count as declarations —
-// fail-closed in the ambiguous direction).
+// Parse the plan's "### Gated inputs" section (any ##–#### level). Only TOP-LEVEL markdown list items
+// ("- " / "* " / "+ " / "1. " / "1) " at indent < 2) count as declarations — prose, footnotes, and
+// nested sub-bullets are commentary, never a gate (observed live 2026-09-01: a planner footnote after
+// bullets restating approved gates was captured as a phantom gate and paused a fully signed-off task;
+// ADR 0013). An indented non-list line directly under a gate is a soft-wrap continuation and is joined
+// back on, so a wrapped spend gate never loses its mandatory cap. "None" counts only when a line (or
+// bullet) is EXACTLY "None" — an embellished "None yet, but …" is not a clean declaration. Returns
+// null when the section is MISSING or carries no parseable declaration — no top-level list items and
+// no exact "None" — so a gate written ONLY as prose can never silently pass: the caller fails closed
+// to plan-blocked and a re-plan under the bullets-only prompt self-heals. Returns [] for an explicit
+// "None", else the declared gate lines (markers stripped, wraps rejoined).
 function parseGatedInputs(planText) {
   const lines = (planText || '').split('\n')
   const start = lines.findIndex((l) => /^#{2,4}\s+gated inputs\b/i.test(l.trim()))
   if (start === -1) return null
   const out = []
+  let sawNone = false
+  let open = false // the previous consumed line was a gate (or its wrap) — continuation may attach
   for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i].trim()
+    const raw = lines[i]
+    const line = raw.trim()
     if (/^#{1,6}\s/.test(line)) break // next heading ends the section
-    if (!line) continue
-    const bare = line.replace(/^[-*]\s+/, '').trim()
-    if (/^none\b/i.test(bare)) continue // explicit None — not a gate
-    out.push(bare)
+    if (!line) { open = false; continue } // a blank line ends any soft-wrap
+    const indent = raw.length - raw.replace(/^[ \t]+/, '').length
+    const m = line.match(/^(?:[-*+]|\d+[.)])\s+(.*)$/)
+    if (m && indent < 2) { // top-level list item — a declaration (or an explicit None)
+      const bare = m[1].trim()
+      if (/^none\.?$/i.test(bare)) { sawNone = true; open = false; continue }
+      if (bare) { out.push(bare); open = true } else open = false
+      continue
+    }
+    if (!m && indent >= 2 && open) { out[out.length - 1] += ' ' + line; continue } // soft-wrap — keep the cap
+    // everything else — prose, footnotes, nested sub-bullets — is commentary, never a gate
+    if (/^none\.?$/i.test(line)) sawNone = true
+    open = false
   }
-  return out
+  return out.length || sawNone ? out : null // no items, no exact None — fail closed, same as missing
 }
 
 // A gate matches an approval on normalized text (whitespace-collapsed, case-insensitive, any
@@ -460,12 +480,14 @@ Steps:
    ### Caller-wiring     (what calls the new/changed surface; grep proof; are tests the only callers?)
    ### Edge cases        (explicit list)
    ### Risks / unknowns  (what could go wrong; what you want the reviewer to weigh in on)
-   ### Gated inputs      (REQUIRED — one line per human authorisation the task needs: "spend: <what> — cap
-                          <amount>" (a hard cap is mandatory), "credential: <what>", "irreversible: <what>";
-                          or exactly "None". A non-empty declaration pauses the task for human sign-off —
+   ### Gated inputs      (REQUIRED — one markdown bullet ("- ") per human authorisation the task needs:
+                          "- spend: <what> — cap <amount>" (a hard cap is mandatory), "- credential: <what>",
+                          "- irreversible: <what>"; or exactly "None". BULLETS ONLY — no prose, commentary,
+                          or footnotes in this section: the engine reads only list lines, and anything else
+                          is rejected. A non-empty declaration pauses the task for human sign-off —
                           regardless of config or continuous mode (ADR 0008). If the task note carries a
-                          "## Approved gates" section, restate each still-needed approved gate VERBATIM
-                          (without its "(approved …)" annotation) — restated approved gates do not
+                          "## Approved gates" section, restate each still-needed approved gate VERBATIM as
+                          a bullet (without its "(approved …)" annotation) — restated approved gates do not
                           re-pause; only NEW gates do.)
 4. Return your structured result: ready=true with the full plan text in \`plan\`, blocked=false, blockerCause="".
 
@@ -494,9 +516,11 @@ Check, against the task brief:
 - Caller-wiring check done (dead-code prevention — is the new surface actually called in production)?
 - Are the edge cases the right ones?
 - Are the stated risks/unknowns the real ones?
-- Does the plan carry the required "### Gated inputs" section — either exactly "None" or concrete gates
-  (spend WITH a hard cap / credential / irreversible action)? A missing section, or a spend gate without
-  a cap, is an automatic "changes" (ADR 0008). Also flag a gate the brief implies but the plan omits.
+- Does the plan carry the required "### Gated inputs" section — either exactly "None" or concrete gate
+  BULLETS ("- spend: … — cap …" WITH a hard cap / "- credential: …" / "- irreversible: …")? A missing
+  section, a spend gate without a cap, or non-bullet prose in the section (the engine reads only list
+  lines — a gate written as prose is rejected, and commentary does not belong there) is an
+  automatic "changes" (ADR 0008). Also flag a gate the brief implies but the plan omits.
 
 Read the brief and grep the repo as needed to verify the plan's claims — do not approve on faith.
 Decide: verdict "approve" if the plan is sound (clean or trivially nitpicky), else "changes" with 3–8
@@ -522,7 +546,8 @@ ${grouped}
 
 Run additional READ-ONLY investigation as needed. Rewrite the plan with the SAME required sub-sections
 (Files to modify / Test strategy / Sibling-site check / Caller-wiring / Edge cases / Risks /
-Gated inputs — declare spend with a hard cap, credentials, irreversible actions, or exactly "None").
+Gated inputs — bullets only: declare spend with a hard cap, credentials, irreversible actions, or
+exactly "None").
 Return ready=true with the rewritten plan in \`plan\`. If you discover the task is unrecoverable, return
 ready=false, blocked=true, blockerCause="<one line>".`
 }
@@ -799,12 +824,13 @@ async function planLoop(task, st, a) {
       // (task.approvedGates) are skipped, so re-dispatches never re-ask those exact gates.
       const declared = parseGatedInputs(plan.plan)
       if (declared === null) {
-        // The judge approved a plan WITHOUT the required section (its checklist forbids this).
+        // The judge approved a plan WITHOUT the required section, or with a section carrying no
+        // parseable declaration — no list items, no "None" (its checklist forbids both, ADR 0013).
         // Fail closed — but to plan-blocked, not gate-pending: there is nothing concrete for a
         // human to sign, and a re-plan under the current prompt self-heals with a declaration.
         return {
           task, blocked: true, status: 'plan-blocked', planRoundsUsed: round,
-          blockerDiagnosis: 'plan was approved without the required "### Gated inputs" section (fail-closed, ADR 0008) — re-plan and declare the gates or an explicit "None"',
+          blockerDiagnosis: 'plan was approved without a parseable "### Gated inputs" section — gates must be markdown bullets ("- spend/credential/irreversible: …") or exactly "None" (fail-closed, ADR 0008) — re-plan and declare each gate as a bullet or an explicit "None"',
         }
       }
       const gates = unapprovedGates(declared, task.approvedGates)

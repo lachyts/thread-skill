@@ -9,7 +9,9 @@
 //   - gated inputs (ADR 0008) → the plan prompt ALWAYS renders the Gated inputs requirement; a non-empty
 //                               unapproved declaration pauses the task (status gate-pending) even when
 //                               planGate is false; approved gates on the note are never re-asked; "None"
-//                               leaves behaviour identical (zero-touch).
+//                               leaves behaviour identical (zero-touch). Only list items declare gates —
+//                               prose is commentary (ADR 0013); a section with no items and no "None"
+//                               fails closed to plan-blocked, same as a missing section.
 //   - review-loop memory      → reviewHistoryBlock/stepBackBlock '' when unused (round-1 judge prompt
 //                               byte-identical); reviser gets latest round as work order + earlier rounds
 //                               as anti-regression constraints; step-back (with the approved plan when
@@ -208,11 +210,18 @@ const prvPrompt = T.planReviserPrompt(taskI, 'PLAN', [{ round: 1, feedback: ['x'
 ok(prvPrompt.includes('Gated inputs'), 'planReviserPrompt: required sub-sections include Gated inputs')
 const pjPrompt = T.planJudgePrompt(taskI, 'PLAN', aI)
 ok(pjPrompt.includes('Gated inputs') && /automatic "changes"/.test(pjPrompt), 'planJudgePrompt: missing Gated inputs section is an automatic changes')
+ok(plPrompt.includes('BULLETS ONLY'), 'plannerPrompt: gated-inputs section forbids non-bullet prose')
+ok(/non-bullet prose/.test(pjPrompt), 'planJudgePrompt: prose in the gated-inputs section is an automatic changes')
+ok(/bullets only/i.test(prvPrompt), 'planReviserPrompt: revision keeps the bullets-only rule')
 ok(pOpus.includes('Gated inputs (hard rule'), 'implementerPrompt: carries the gated-inputs stop rule')
 ok(T.approvedPlanImplementerPrompt(taskI, 'PLAN', aI, 'fable', '').includes('Gated inputs (hard rule'), 'approvedPlanImplementerPrompt: carries the stop rule')
 ok(T.reviserPrompt(taskI, { prUrl: 'u', branch: 'b', worktreePath: '/wt' }, [{ round: 1, feedback: ['f'] }], 2, aI, '').includes('Gated inputs (hard rule'), 'reviserPrompt: carries the stop rule')
 
-// Parser: None → [], bullets → entries, missing section → null (fail-closed upstream).
+// Parser: None → [], list items → entries, missing section → null (fail-closed upstream). Only list
+// items declare gates (ADR 0013, 2026-09-01 live failure): non-list prose is COMMENTARY, never a gate —
+// a planner footnote after bullets restating approved gates must not manufacture a phantom gate. A
+// section with NO list items and no "None" parses as null — a gate written only as prose never
+// silently passes.
 ok(T.parseGatedInputs('PLAN\n### Gated inputs\nNone\n### Risks / unknowns\nnone') !== null
   && T.parseGatedInputs('PLAN\n### Gated inputs\nNone\n### Risks / unknowns\nnone').length === 0,
   'parseGatedInputs: explicit None → empty declaration')
@@ -222,6 +231,18 @@ ok(T.parseGatedInputs('PLAN with no section') === null, 'parseGatedInputs: missi
 ok(T.parseGatedInputs('x\n## Gated inputs\n- a\n## next')[0] === 'a', 'parseGatedInputs: tolerates a ## heading level')
 ok(T.unapprovedGates(['Spend: X — cap  USD 30'], ['spend: x — cap usd 30']).length === 0, 'unapprovedGates: match is case/whitespace-insensitive')
 ok(T.unapprovedGates(['spend: x — cap usd 50'], ['spend: x — cap usd 30']).length === 1, 'unapprovedGates: a changed cap is a NEW gate')
+const footnoted = T.parseGatedInputs('PLAN\n### Gated inputs\n- spend: Replicate API — cap USD 30\n- credential: PROD_API_KEY\n(Both restated verbatim from the task note\'s "## Approved gates" — no new gates.)\n### Risks')
+ok(footnoted && footnoted.length === 2 && footnoted[1] === 'credential: PROD_API_KEY', 'parseGatedInputs: trailing prose footnote after bullets is not a gate')
+ok(T.parseGatedInputs('PLAN\n### Gated inputs\nThe task needs prod credentials at some point.\n### Risks') === null, 'parseGatedInputs: prose-only section (no list items, no None) → null (fail-closed)')
+const numbered = T.parseGatedInputs('PLAN\n### Gated inputs\n1. spend: Replicate API — cap USD 30\n2) credential: PROD_API_KEY\n### Risks')
+ok(numbered && numbered.length === 2 && numbered[0] === 'spend: Replicate API — cap USD 30', 'parseGatedInputs: numbered-list items count as declarations, markers stripped')
+ok(T.parseGatedInputs('PLAN\n### Gated inputs\n- None\n### Risks') !== null && T.parseGatedInputs('PLAN\n### Gated inputs\n- None\n### Risks').length === 0, 'parseGatedInputs: a bulleted None is the empty declaration')
+ok(T.parseGatedInputs('PLAN\n### Gated inputs\nNone — the task is read-only.\n### Risks') === null, 'parseGatedInputs: an embellished None is not a clean declaration — fail-closed to null')
+ok(T.parseGatedInputs('PLAN\n### Gated inputs\nNone yet, but the deploy step will need PROD_API_KEY.\n### Risks') === null, 'parseGatedInputs: None-prefixed prose that declares a need fails closed, never a silent pass')
+const nested = T.parseGatedInputs('PLAN\n### Gated inputs\n- spend: Replicate API — cap USD 30\n- credential: PROD_API_KEY\n  - Both restated verbatim from the task note (no new gates.)\n### Risks')
+ok(nested && nested.length === 2 && nested[1] === 'credential: PROD_API_KEY', 'parseGatedInputs: an indented sub-bullet is commentary, not a gate')
+const wrapped = T.parseGatedInputs('PLAN\n### Gated inputs\n- spend: Replicate API for the full corpus re-render —\n  cap USD 30\n### Risks')
+ok(wrapped && wrapped.length === 1 && wrapped[0] === 'spend: Replicate API for the full corpus re-render — cap USD 30', 'parseGatedInputs: a soft-wrapped gate keeps its cap (continuation rejoined)')
 
 // Scenario gate-A — plan-gated task declares a gate: pauses at the plan-gate, nothing implemented.
 effortCalls.length = 0
@@ -267,6 +288,32 @@ ctx.agent = recordingAgent(async (prompt, opts) => {
 })
 const gMissing = await T.converge({ ...baseEff, slug: 'proj-gate-d', scope: 'cross-cutting', planGate: true }, aEff)
 ok(gMissing && gMissing.status === 'plan-blocked' && /Gated inputs/.test(gMissing.blockerDiagnosis), 'gate D: approved plan missing the section fails closed to plan-blocked')
+
+// Scenario gate-E (2026-09-01 live failure, ADR 0013) — plan restates the approved gates as bullets then
+// adds a prose footnote: the footnote is commentary, not a phantom gate — the task proceeds, no re-ask.
+effortCalls.length = 0
+ctx.agent = recordingAgent(async (prompt, opts) => {
+  if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
+  if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'PLAN\n### Gated inputs\n- spend: Replicate API — cap USD 30\n- credential: PROD_API_KEY\n(Both restated verbatim from the task note\'s "## Approved gates" — no new gates.)\n### Risks' }
+  if (opts.phase === 'Implement') return greenImpl
+  return { verdict: 'approve', feedback: [] }
+})
+const gFoot = await T.converge({ ...baseEff, slug: 'proj-gate-e', scope: 'cross-cutting', planGate: true, approvedGates: ['spend: Replicate API — cap USD 30', 'credential: PROD_API_KEY'] }, aEff)
+ok(gFoot && gFoot.status === 'review', 'gate E: footnote after restated approved gates does not re-pause — the task lands')
+ok(call('implement:proj-gate-e'), 'gate E: implementation proceeds (no spurious gate-pending)')
+
+// Scenario gate-F — the section exists but declares a gate ONLY as prose: fail-closed to plan-blocked
+// (a re-plan under the bullets-only prompt self-heals) — never a silent pass, never a bogus sign-off ask.
+effortCalls.length = 0
+ctx.agent = recordingAgent(async (prompt, opts) => {
+  if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
+  if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'PLAN\n### Gated inputs\nThe task will need about USD 30 of Replicate spend.\n### Risks' }
+  if (opts.phase === 'Implement') return greenImpl
+  return { verdict: 'approve', feedback: [] }
+})
+const gProse = await T.converge({ ...baseEff, slug: 'proj-gate-f', scope: 'cross-cutting', planGate: true }, aEff)
+ok(gProse && gProse.status === 'plan-blocked' && /bullets/.test(gProse.blockerDiagnosis), 'gate F: prose-only declaration fails closed to plan-blocked, not gate-pending, not a silent pass')
+ok(!call('implement:proj-gate-f'), 'gate F: nothing implemented on the malformed declaration')
 
 // ---- Review-loop memory (2026-08-14): accumulated feedback + step-back + ceiling record ----
 // The review loop mirrors planLoop's accumulation but with review semantics: the LATEST round is the
