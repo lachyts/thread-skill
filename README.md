@@ -71,7 +71,8 @@ per-task resume.
   escalates to Fable; a tier is a model+effort bundle; a declared gate always
   pauses). `0009` — thread absorbs wave: one plugin, one prefix, two lanes.
   `0010` — orient launches its own batches. `0011` — close saves
-  autonomously; vault tasks stay gated.
+  autonomously; vault tasks stay gated. `0012` — process candidates flow to
+  the project's METHOD.md (cross-repo interface with the `method` skill).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 

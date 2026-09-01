@@ -1,6 +1,6 @@
 ---
 name: close
-description: 'End-of-thread capture — update the active thread (project THREAD.md or shared _shared/threads/<slug>.md) with what happened this session, then save the rest autonomously: auto-memory (save-time triage, provenance-stamped), workspace knowledge, and git commits all happen without asking; vault tasks are the only proposal. Available globally — works from any CWD. Use when the work is FINISHED for now and state should persist; if the work continues elsewhere use thread:handoff, if it''s being set down for later use thread:stash or thread:defer. Invoke with `/thread:close` or "close this thread".'
+description: 'End-of-thread capture — update the active thread (project THREAD.md or shared _shared/threads/<slug>.md) with what happened this session, then save the rest autonomously: auto-memory (save-time triage, provenance-stamped), workspace knowledge, process-observation candidates to the project''s METHOD.md (project closes only), and git commits all happen without asking; vault tasks are the only proposal. Available globally — works from any CWD. Use when the work is FINISHED for now and state should persist; if the work continues elsewhere use thread:handoff, if it''s being set down for later use thread:stash or thread:defer. Invoke with `/thread:close` or "close this thread".'
 ---
 
 # /thread:close — close out this thread
@@ -35,7 +35,7 @@ Walk the conversation back and collect candidates under these categories:
 4. **Decisions made in-thread that aren't yet persisted** — agreements or choices that only live in the conversation. If it's already in a file or commit, skip it.
 5. **Discovered context a future session would miss** — non-obvious constraints, dead ends ruled out, why a particular path was chosen. (These belong in THREAD.md "Known quirks".)
 6. **Patterns / preferences Lachy expressed** — feedback-style guidance worth saving across sessions (not just this thread).
-7. **Process observations** — a genuine stage-shift, pivot, reusable move, revealing failure, or cross-workstream effect in *how the project is being made*. Stage-gated, never per-iteration: another numbered pass existing is not an observation; discovering that one variable had to lock before the others could move is. Most sessions have none — NOOP is the expected outcome here too.
+7. **Process observations** — a genuine stage-shift, pivot, reusable move, revealing failure, or cross-workstream effect in *how the project is being made*. Stage-gated, never per-iteration: another numbered pass existing is not an observation; discovering that one variable had to lock before the others could move is. Most sessions have none — NOOP is the expected outcome here too. This category applies **only when the close resolves a project directory** (identification branch 1, or per-project in a multi-project close); shared threads and no-project closes NOOP it. Routing exception to the one-destination rule below: an observation about *how the work is done* goes to METHOD.md even when it would also fit Known quirks — Known quirks holds project-state gotchas, METHOD.md holds process.
 
 Skip anything that's obvious from reading the current code, already in docs, or purely ephemeral (one-off debugging, tool noise).
 
@@ -51,7 +51,7 @@ Each candidate lands in exactly one of these. When in doubt, prefer the destinat
 | Concrete follow-up actions for Lachy | New file in `vault/Work/Tasks/<slug>.md` — routing + frontmatter shape per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` §§ 1 & 4 (ordinary follow-ups omit the `thread` marker tag — that's for stash/defer captures). Never to `vault/_Inbox/` — that's Lachy's capture surface only | **Propose** |
 | User preferences, recurring patterns, reusable feedback | Auto-memory at the correct scope per `~/repos/workspaces/_shared/claude-base-instructions.md` § Claude memory management — global, workspace, or project area `AGENTS.md` — via the save-time triage below | Auto |
 | Reusable workspace knowledge (gotchas, schemas, processes) | `<workspace>/knowledge/<topic>.md` — same rules as `/learn` | Auto |
-| Process observation (category 7) | Append to the project's `METHOD.md` `## Candidates` — dated, source-attributed, evidence-linked, per the `method` skill's capture contract (create the file from `~/.agents/skills/method/METHOD-template.md` if absent). Candidates are non-curated; the `## Method` section stays untouchable without Lachy's confirmed `/method` apply (ADR 0012) | Auto |
+| Process observation (category 7) | Append to the project's `METHOD.md` `## Candidates` as a `- YYYY-MM-DD [provisional] <observation> — source: <harness/thread>, evidence: <links>` row, per the `method` skill's capture contract (create the file from `~/.agents/skills/method/METHOD-template.md` if absent, following its creation rules — fill frontmatter, keep placeholders commented out). Candidates are non-curated; the `## Method` section stays untouchable without Lachy's confirmed `/method` apply (ADR 0012) | Auto |
 | Not worth keeping | Discard; one line in the "What landed" report so Lachy can object | — |
 
 ## Memory scope discipline
@@ -108,7 +108,7 @@ Close-inferred saves land `status: provisional` — the curator promotes them to
    - `git -C ~/repos/workspaces status --short` — identify which modified files were actually touched in this session vs stale from prior threads. Only session-changed files are in scope.
    - If session is in `ops-workspace`, also `git -C "<vault-path>" status --short` — same filter: only files this thread touched.
 
-3. **Scan the conversation** for the six categories above.
+3. **Scan the conversation** for the seven categories above.
 
 4. **Compute the thread-update diff** (if a thread is active):
    - Where-we-are: rewrite if state advanced; keep if not.
@@ -118,17 +118,18 @@ Close-inferred saves land `status: provisional` — the curator promotes them to
    - Resume instructions: update if next-session entry-point shifted.
    - Session log: prepend `- YYYY-MM-DD: <one-line of what shifted>` (newest first).
 
-5. **Compute the full save set silently** — no "proposed plan" message. Work out: the auto-commit file lists, the thread diff, each memory candidate's verb (via the four-verb triage), knowledge edits, vault-task candidates, and what's being discarded. Nothing is shown to Lachy until the report in step 8 — except the task menu, if there is one.
+5. **Compute the full save set silently** — no "proposed plan" message. Work out: the auto-commit file lists, the thread diff, each memory candidate's verb (via the four-verb triage), knowledge edits, process-observation candidates (category 7, with the resolved METHOD.md path — or NOOP), vault-task candidates, and what's being discarded. Nothing is shown to Lachy until the report in step 8 — except the task menu, if there is one.
 
 6. **Vault tasks only — collect approval via `AskUserQuestion`.** If (and only if) there are proposed vault tasks: one multiSelect question, one option per task (`label` = short title, `description` = the one-line why). A single task candidate gets an explicit second option (`Skip — don't create it`) to satisfy the ≥2-option minimum. More than 4 candidates: collapse per `_shared/knowledge/triage-batching-protocol.md` §6 (*Save all N* / *Save core set* / *Skip section* / named subset). Zero task candidates → no menu at all; go straight to step 7. Ticked → create in step 7; unticked → discard silently; "Other" free-text → treat as a redirect.
 
 7. **Execute.** Order:
    1. Thread update — write THREAD.md (the most important file).
    2. Workspace knowledge edits.
-   3. Auto-memory via the four verbs + MEMORY.md index updates. Honour the scope hook per "Memory scope discipline" — redirect or NOOP, autonomously.
-   4. Approved vault tasks: new files at `vault/Work/Tasks/<slug>.md` with Task frontmatter.
-   5. **Auto-commit workspaces repo** — see "Commit hygiene" below. Never ask.
-   6. **Auto-commit vault repo** (if ops-workspace and session-changed files exist there) — same rules.
+   3. Process-observation candidates — append to the project's `METHOD.md` per the Destinations row, then **auto-commit that file in its containing repo** (named path, same hygiene rules as below) so the append is versioned immediately rather than waiting on the daily sweep. Skip when category 7 resolved to NOOP.
+   4. Auto-memory via the four verbs + MEMORY.md index updates. Honour the scope hook per "Memory scope discipline" — redirect or NOOP, autonomously.
+   5. Approved vault tasks: new files at `vault/Work/Tasks/<slug>.md` with Task frontmatter.
+   6. **Auto-commit workspaces repo** — see "Commit hygiene" below. Never ask.
+   7. **Auto-commit vault repo** (if ops-workspace and session-changed files exist there) — same rules.
 
 ### Commit hygiene (both repos)
 
@@ -142,7 +143,7 @@ git -C <repo> commit <path1> <path2> ... -m "<message>"
 
 This commits only the named paths even if other files are staged. **Before committing**, run `git -C <repo> diff --cached --name-only` and scan what's already staged. If anything is staged that isn't a session-changed file, don't `git reset` it (destructive) — just use named-paths commit. Mention in the saved summary that other files sit in the index for separate handling.
 
-8. **Print the "What landed" report** (≤12 lines): thread-state pointer (e.g. `THREAD.md updated · state: active · open questions: 2`), memory verbs with paths (`ADD feedback_x.md (provisional)` / `UPDATE reference_y.md` / `SUPERSEDE a.md → b.md` / `NOOP: <reason>`), knowledge edits, vault task files as clickable `[[wiki-links]]`, commit SHAs for both repos, any `redirected:` or `Needs your call:` lines, and a one-line discard note.
+8. **Print the "What landed" report** (≤12 lines): thread-state pointer (e.g. `THREAD.md updated · state: active · open questions: 2`), memory verbs with paths (`ADD feedback_x.md (provisional)` / `UPDATE reference_y.md` / `SUPERSEDE a.md → b.md` / `NOOP: <reason>`), knowledge edits, any METHOD.md candidate append (file path + the observation in one line — this write lands outside the workspace and vault, so it is never silent), vault task files as clickable `[[wiki-links]]`, commit SHAs for all repos touched, any `redirected:` or `Needs your call:` lines, and a one-line discard note.
 
 9. **End with the closing banner.** After the report, add a blank line, a horizontal rule (`---`), another blank line, then this exact line as the final line of the response:
 

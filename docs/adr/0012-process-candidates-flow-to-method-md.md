@@ -28,11 +28,17 @@ created from `~/.agents/skills/method/METHOD-template.md` on first write),
 dated, source-attributed and evidence-linked.
 
 Autonomy is safe by the same argument as ADR 0011: the Candidates section is
-explicitly non-curated, entries are provenance-stamped and reversible (the
-`~/Projects` monorepo commits every `.md`), and the approval gate sits
-downstream — nothing reaches `## Method` without Lachy confirming a `/method`
-propose. Close appends candidates; it never synthesises, because a thread sees
-only its own slice — filesystem-wide reconciliation belongs to `/method`.
+explicitly non-curated, entries are provenance-stamped and reversible — close
+itself auto-commits the METHOD.md file in its containing repo immediately
+after the append (Execute step 3; fresh-review 2026-09-01 caught that leaning
+on the daily sweep left a window, and that the monorepo's prune list — TSMS/,
+_archive/, Tutorials/, unlisted nested repos — makes sweep-only versioning
+false in parts of the tree) — and the approval gate sits downstream: nothing
+reaches `## Method` without Lachy confirming a `/method` propose. Close
+appends candidates; it never synthesises, because a thread sees only its own
+slice — filesystem-wide reconciliation belongs to `/method`. Category 7 fires
+only on closes that resolve a project directory; shared-thread and no-project
+closes NOOP it.
 
 ## Rejected
 
