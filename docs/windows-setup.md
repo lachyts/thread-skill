@@ -14,6 +14,8 @@ Minimal footprint for running the continuity verbs (chiefly `/thread:next`, `/th
 
 Features of `close`/`orient` that read `~/repos/workspaces` (shared threads, the workspace registry) are absent. Project `THREAD.md` handling still works in whatever repo you are in, and vault captures sync back to the Mac. If a verb ever genuinely needs it, clone `lachyts/claude-workspaces` to `C:\Users\<you>\repos\workspaces` and it lights up; do not pre-provision.
 
+`close`'s process-observation capture (category 7, thread-skill ADR 0012) also NOOPs on Windows: it resolves a project directory under `~/Projects` and creates METHOD.md from the template at `~/.agents/skills/method/METHOD-template.md`, and neither surface exists there. Observations that would have qualified are simply not captured — do not substitute a local ledger; the METHOD.md contract is Mac-side.
+
 ## Full system (only if Windows use grows)
 
 The rollout engine (`split`/`schedule`/`execute`/`status`/`repair`) additionally requires `python3` (no longer optional), the workspaces clone above, and target repos under `~/repos/`. All path resolution already goes through `expanduser` / Git Bash `~`, so mirroring the Mac's `~/repos` layout needs no skill changes.

@@ -60,6 +60,7 @@ closes NOOP it.
   `method` skill (agents-config repo) owns reconcile/propose/apply. Change the
   entry format in lockstep or not at all.
 - Stash/defer/handoff are deliberately untouched — they are low-energy exits
-  and must not force a process pass.
+  and must not force a process pass. *(Amended by ADR 0014, 2026-09-01: stash
+  and defer now run the scan silently; handoff remains untouched.)*
 - If capture proves too chatty in practice, tighten the category-7 bar here
   rather than adding an approval gate.

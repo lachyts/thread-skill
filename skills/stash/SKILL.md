@@ -15,10 +15,11 @@ The decisive "I'm done here *for now*, and I don't know when I'll be back" route
    - § 4 frontmatter with **no `scheduled:` line** — that's what makes it a stash.
    - § 5 body: summary, resume prompt (first instruction closes the capture), THREAD.md link if one exists.
    - § 6 THREAD.md upgrade only if the work is thread-worthy — never manufactured.
-2. **Confirm** per § 7: `→ [[<slug>]] stashed (no date) — resurfaces in /weekly's Stashed threads. <Project>.` — with a clickable task link. Then state plainly that the session is safe to end.
+2. **Process scan, silent** (ADR 0014) — only when § 1 resolved a project directory: run `close`'s category-7 process-observation scan per the method skill's capture contract (stage-gated — pivots, reusable moves, revealing failures, cross-workstream effects; never iteration churn). NOOP is the expected outcome and produces **no output**. A hit appends to the project's `METHOD.md` `## Candidates` (create from `~/.agents/skills/method/METHOD-template.md` if absent), auto-commits that file in its containing repo, and adds one line to the confirmation.
+3. **Confirm** per § 7: `→ [[<slug>]] stashed (no date) — resurfaces in /weekly's Stashed threads. <Project>.` — with a clickable task link. Then state plainly that the session is safe to end.
 
 ## Don't
 
 - Don't ask clarifying questions when the routing is resolvable — stash is invoked at low-energy, end-of-rope moments; be fast and decisive. Ask only if the project is genuinely ambiguous (task-writer § 1.4).
-- Don't run the full `thread:close` triage (memory, knowledge, commits) — stash is the lightweight exit. If the conversation obviously also produced durable decisions worth persisting, say so in one line and offer `thread:close` as a follow-up, but never block the stash on it.
+- Don't run the full `thread:close` triage (memory, knowledge, commits) — stash is the lightweight exit; the silent process scan (§ 2) is the one deliberate exception (ADR 0014). If the conversation obviously also produced durable decisions worth persisting, say so in one line and offer `thread:close` as a follow-up, but never block the stash on it.
 - Don't schedule it. A stash with a date is a defer — dispatch to `thread:defer` if a day is mentioned.
