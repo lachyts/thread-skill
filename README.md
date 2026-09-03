@@ -22,7 +22,7 @@ machine-verifiable in-run) rolls out; everything else runs as scoped sessions.
 | `/thread:orient` | back on a project, balls in the air | Project-altitude router: audit an area's open work, recommend the best use of time, ask the steering mode, then route by the execution-fit test — wave-shaped clusters to `gather`/`schedule`, the rest to `open` or to background batch sessions it launches itself (ADR 0010; the steering answer is the authorisation, dispatch artefacts are the no-cmux fallback). |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
-| `/thread:handoff` | fork now | Compact this conversation into an inline copy-paste prompt for a fresh agent. |
+| `/thread:handoff` | fork now | Create a fresh visible sidebar task in Codex Desktop, seeded with compacted context; fail visibly with a manual prompt if native task creation is unavailable. |
 | `/thread:close` | done | Persist to THREAD.md + auto-commit; end-of-thread ritual. |
 
 ## Rollout verbs
