@@ -15,6 +15,18 @@ re-attempts blocked tasks — so repair **reuses execute's resume** and adds onl
 re-running execute can't do: reconcile **drift**, inject an **input-gated** decision, and **defer** a
 wedged task. It never re-implements merge or convergence, and **the engine keeps sole merge authority**.
 
+## Native runtime binding
+
+Diagnosis and authorised deterministic reconciliation run in either harness.
+Any re-dispatch goes through execute's native runtime preflight and its canonical
+engine, with the original run's caller/session and native child identities.
+Read `~/repos/workspaces/_shared/scripts/native_workflow.md`. A new harness must
+not adopt or replay another session's pending claims. Recover the actual native
+children first; otherwise report the unresolved ownership. Codex's detached
+continuous Wave driver remains unavailable: preserve the diagnosis and resume
+point, and do not claim that a request for continuous repair has been completed
+by preparing a single-wave input. Never create a second convergence engine.
+
 ## Scope
 
 Reads/writes `~/repos/obsidian/Work/Tasks/`, makes `gh`/`git` calls against the target repo, and drives

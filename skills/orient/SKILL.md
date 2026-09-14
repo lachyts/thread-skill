@@ -13,7 +13,7 @@ how he wants to steer, then routes: parallel-safe batches dispatched as
 background scoped sessions, a focus item opened for his own attention, or
 both. A dispatch **launches its batches itself** (ADR 0010): the steering
 answer is the sole authorisation, the prompt file remains the batch's durable
-contract, and a hand-run one-liner survives only as the no-cmux fallback.
+contract, and missing native capabilities remain explicitly undispatched.
 
 **Contains no route logic of its own** beyond batching/emission: hands-on
 focus dispatches to `${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` (or the
@@ -25,31 +25,23 @@ hard, not as a preference.
 
 ## Runtime boundary
 
-The read-only project audit, recommendation and task-note debrief are portable
-across harnesses with local filesystem access. Hands-on pickup follows `open`'s
-own runtime contract. Planning a batch does not mean this harness can launch it.
+The project audit, steering and task-note debrief are shared. Autonomous batches
+use the calling harness's native child tools and current account, never a model
+CLI or a new cmux/Orca model session. The shared exchange at
+`~/repos/workspaces/_shared/scripts/native_workflow.md` supplies journalled
+claims, native child bindings and result validation. Its generic batch engine
+is `native_workflow_batch.workflow.js`; it dispatches already prepared prompts
+and contains no project/domain workflow.
 
-The batch launcher in §§ 6–7 is a **Claude Code scoped-profile runtime**: it
-expands a `cc-*` alias into a Claude process and uses cmux to start a separate
-session with that profile's MCP configuration. Before offering a launch or
-writing any `dispatched:` stamp, check that the calling session is Claude Code,
-the intended profile is available, and cmux is reachable. Keep the calling
-session's account; a generic permission to batch work does not authorise spending
-another harness or account's quota.
+Native children inherit available tools; a target workspace path does not load
+another MCP profile. Before dispatch, check every batch's required capability
+and account against the calling session. If a required scoped capability is
+absent, retain the prompt and report that batch blocked/undispatched. Do not
+silently switch harness, account or launch a broader profile. Other independent
+batches may proceed. Hands-on pickup follows `open`'s contract.
 
-In Codex or another harness, complete the portable audit and supported hands-on
-work. If background batches are requested, prepare their durable prompts and
-clearly labelled manual Claude-profile launch commands for Lachy, then report
-that automatic dispatch requires the Claude scoped-profile runtime. Leave those
-tasks unstamped until a launch is verified. Missing cmux in Claude uses the same
-manual-emission fallback. Never turn this launcher into same-session subagents,
-Workflows, or a silent `claude` shell execution from another harness: those do
-not preserve the separate profile and account contract.
-
-Wave-shaped work still routes to `gather` / `schedule` for planning. Execution
-and repair require the canonical Wave runtime specified by `execute`; discovery
-of a skill is not runtime support. Do not improvise a replacement engine or port
-Wave as part of orient.
+Wave-shaped work still routes to gather/schedule and execute's runtime gate.
+The native exchange does not supply the detached Wave hook/heartbeat driver.
 
 ## Process
 
@@ -151,41 +143,23 @@ dispatchable open work into **parallel-safe batches**:
 
 For each batch:
 
-1. Write the batch prompt to
+1. Write its durable prompt to
    `<workspace>/.scratch/orient/<YYYY-MM-DD>-<batch-slug>-prompt.txt`.
-2. Apply the runtime boundary above. If automatic launch is unsupported,
-   go directly to the manual-emission fallback in step 5, without stamping tasks.
-3. **Launch the batch as a cmux workspace** (the steering answer already
-   authorised this — no second confirm, ADR 0010):
-
-   ```bash
-   cmux workspace create --name "<batch title>" --cwd <workspace-dir> \
-     --focus false \
-     --command '<expanded profile command> "$(cat <prompt-file>)"'
-   ```
-
-   The `--command` text is the profile alias's full expansion from `~/.zshrc`
-   (aliases don't resolve in non-interactive shells): `claude
-   --dangerously-skip-permissions --add-dir … --mcp-config
-   <profile>.mcp.json --strict-mcp-config` plus the prompt argument. The
-   command runs through a shell, so `"$(cat …)"` expands. Drop the alias's
-   leading `cd` — `--cwd` covers it.
-4. **Verify the launch**: `cmux read-screen --workspace <ref> --scrollback` —
-   the prompt text visible in the transcript and the session working means
-   launched; an idle input box means the prompt never arrived (close the
-   workspace, fix quoting, relaunch). After verification, stamp
-   `dispatched: <YYYY-MM-DD>` into every covered task note (the double-dispatch
-   guard § 2 reads; the batch session's end-of-run update supersedes it).
-5. **Fallback — unsupported harness or no reachable cmux socket** (`cmux
-   ping` fails: Desktop app, SSH, cmux not running): emit one fenced `bash` block per batch for Lachy
-   to run himself, and say launching fell back to emission:
-
-   ```bash
-   cc-animately-seo "$(cat ~/repos/workspaces/animately-workspace/.scratch/orient/2026-08-08-seo-batch-prompt.txt)"
-   ```
-
-   Profile aliases take a trailing prompt directly; **bare aliases**
-   (`cc-giflab` etc.) need `-- "prompt"` (`reference_claude_cli_add_dir_variadic`).
+2. Check required tools/accounts and file ownership. Assemble `args.jobs` for
+   supported batches: `{ key: <batch-slug>, prompt: <full prompt>, options: {} }`.
+   Use the shared batch engine and one stable private run directory for this
+   dispatch. Keep unsupported batches unstamped and explain the missing tool.
+3. Follow the shared host protocol: `advance`, claim a pending request, spawn a
+   clean native child, and bind the actual returned child ID immediately. Include
+   workspace context and ownership in the prompt. Children and all their nested
+   agents/reviewers stay in the calling harness and account.
+4. Only after the native spawn has returned a real child ID and is bound, stamp
+   `dispatched: <YYYY-MM-DD>` on its covered task notes. A prepared request or a
+   claim without a verified child is not a launch. Respect available concurrency;
+   queue excess batches without launching another model process.
+5. Collect native child output and accept its envelope, then advance the journal.
+   Recover the actual child on interruption rather than clearing its claim. Report
+   each batch as running, complete or blocked with its native ID/run directory.
 
 **Every batch prompt must carry** (the emission spec):
 
@@ -205,18 +179,18 @@ For each batch:
 - **End-of-run updates** — update each covered task note per TaskNotes
   conventions (status/progress stamp, superseding `dispatched:`), so a later
   orient run or `--debrief` reads the truth from the notes.
-- **In place, never worktrees** — `.mcp.json` + `profiles/` are gitignored, so
-  a worktree session has no workspace MCPs (`reference_orca_inplace_vs_worktree`).
+- **Execution context** — identify the canonical workspace, project and required
+  authenticated tools. Native tools come from the parent session. Isolate code
+  edits in worktrees where needed; do not expect a worktree to load MCP profiles.
 
-Close the dispatch with one line per batch: workspace ref, batch title, tasks
-covered, and launch-verified or fell-back-to-emission.
+Close the dispatch with one line per batch: native child ID, batch title, tasks
+covered, and verified-running, completed or blocked.
 
 ### 8. `--debrief`
 
 `/thread:orient <target> --debrief` skips steering: sweep the area's
 `dispatched:`-stamped task notes (and, where more detail is needed, the batch
-sessions' transcripts via `ccd_session_mgmt`, or a still-open batch workspace
-live via `cmux read-screen --scrollback`), then report per batch —
+native run journals and the calling harness's native child status/results), then report per batch —
 completed / stalled / never launched. Clear `dispatched:` from any task whose
 stamp is stale (>7 days with no progress update, or artefact never launched).
 Fire-and-forget remains the default; a fresh `/thread:orient` audit is the
@@ -224,19 +198,15 @@ lightweight version of this.
 
 ## Don't
 
-- **Don't run batches as Workflows or subagents inside the orient session.**
-  Subagents inherit the parent session's MCP config — they cannot load a
-  different scoped profile, which is the whole point of a batch. Separate
-  launched sessions only.
+- **Do not pretend native children load a different profile.** Check required
+  tools in the calling session; missing dependencies block that batch.
 - **Don't ask a second launch confirmation.** The steering answer authorises
   the launch (ADR 0010); composing batches and firing them is mechanics.
 - **Don't dispatch from (or into) a full-profile session.** Kitchen-sink MCP
   sets kill sub-agent fan-out ("Prompt is too long") — scoped profiles are
   the entire point.
-- **Don't emit Claude Desktop chips or cloud launches.** Chips wrapped every
-  prompt in `/grill-with-docs` on 2026-08-08 (batches never executed —
-  investigation task open); no cloud environment is configured. cmux launch
-  is the surface; hand-run terminal one-liners are the fallback.
+- **Do not substitute another harness or account.** Native child dispatch is the
+  default; absent capabilities are reported instead of shelling out to a model.
 - **Don't re-batch a task with a recent `dispatched:` stamp**, and don't stamp
   anything in Report-only or dry runs.
 - **Don't recommend more than one focus item**, and don't pad the audit —

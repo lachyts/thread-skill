@@ -9,6 +9,31 @@ description: 'Use to execute a wave rollout — reads the rollout note, resolves
 
 The engine runs three layers per task — optional plan-gate (autonomous judge) → Ralph-style agent-side verifier retry → master-side review-and-revise loop — and converges tasks **in parallel within each wave** (a task can be in master-review while a wave-mate is still implementing). The skill itself stays in the conversation to do vault I/O, the protocol gate, status reconciliation, reporting, and the `--gated` between-wave pause (which an autonomous background workflow cannot do).
 
+## Native runtime binding
+
+The canonical JavaScript engine also runs through
+`~/repos/workspaces/_shared/scripts/native_workflow.mjs`; read the co-located
+`native_workflow.md` host protocol before dispatch. It injects `agent`, `pipeline`,
+`phase` and `log` and journals native-child requests/results. Claude and Codex
+both keep children, nested reviewers and retries in the calling harness/account.
+Provider tier names in this engine (`opus` / `fable`) require explicit verified
+native model bindings; do not silently downgrade escalation to one inherited model.
+
+**Preflight before any task status or owner stamp:** select a supported execution
+mode and verify native children, role/model bindings and required project tools.
+A session-driven single wave can use the exchange. Use one stable private run
+directory; recover claims and bound native IDs on interruption, never dispatch
+again because an `advance` call was repeated. The canonical engine still owns
+convergence, budgets and gates; the lead still owns reconciliation and merging.
+
+The continuous detached lifecycle in §8 (Stop hook, heartbeat and cold-resume
+notifications) is still a Claude runtime integration. It is **not ported to Codex**
+by the exchange adapter. In Codex, a default invocation requiring that lifecycle
+must stop at this preflight and report the unsupported driver; do not stamp tasks,
+register a substitute cron, or silently reinterpret the invocation as single-wave.
+Only a specifically requested session-driven single wave bypasses the detached
+driver requirement. Existing scheduled jobs and journals retain their runtime.
+
 ## Scope
 
 Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` produced by `/thread:schedule` (older undated `<slug>-rollout` notes still resolve — see step 1). The Workflow's agents operate in isolated git worktrees they create under the target repo (`<repoPath>/.claude/worktrees/`) and open PRs. The lead session updates task frontmatter in the vault. Does not touch any other backlog source.
