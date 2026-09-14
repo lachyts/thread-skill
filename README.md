@@ -36,6 +36,14 @@ machine-verifiable in-run) rolls out; everything else runs as scoped sessions.
 | `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. |
 | `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. |
 
+## Runtime support
+
+Orient's local read/audit and task-note debrief are portable; its automatic
+batch dispatch requires a Claude Code session, a scoped `cc-*` profile and
+cmux. Other harnesses can prepare manual launch prompts without marking tasks
+dispatched. The Wave executor still requires its canonical Workflow runtime;
+shared source and skill discovery do not provide that runtime.
+
 ## The convergence engine
 
 `skills/execute/wave-execute.workflow.js` runs **three layers per task**,

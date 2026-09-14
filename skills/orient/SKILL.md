@@ -23,6 +23,34 @@ by running `${CLAUDE_PLUGIN_ROOT}/skills/gather/SKILL.md` or
 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`) decides the lane —
 hard, not as a preference.
 
+## Runtime boundary
+
+The read-only project audit, recommendation and task-note debrief are portable
+across harnesses with local filesystem access. Hands-on pickup follows `open`'s
+own runtime contract. Planning a batch does not mean this harness can launch it.
+
+The batch launcher in §§ 6–7 is a **Claude Code scoped-profile runtime**: it
+expands a `cc-*` alias into a Claude process and uses cmux to start a separate
+session with that profile's MCP configuration. Before offering a launch or
+writing any `dispatched:` stamp, check that the calling session is Claude Code,
+the intended profile is available, and cmux is reachable. Keep the calling
+session's account; a generic permission to batch work does not authorise spending
+another harness or account's quota.
+
+In Codex or another harness, complete the portable audit and supported hands-on
+work. If background batches are requested, prepare their durable prompts and
+clearly labelled manual Claude-profile launch commands for Lachy, then report
+that automatic dispatch requires the Claude scoped-profile runtime. Leave those
+tasks unstamped until a launch is verified. Missing cmux in Claude uses the same
+manual-emission fallback. Never turn this launcher into same-session subagents,
+Workflows, or a silent `claude` shell execution from another harness: those do
+not preserve the separate profile and account contract.
+
+Wave-shaped work still routes to `gather` / `schedule` for planning. Execution
+and repair require the canonical Wave runtime specified by `execute`; discovery
+of a skill is not runtime support. Do not improvise a replacement engine or port
+Wave as part of orient.
+
 ## Process
 
 ### 1. Resolve the target
@@ -125,9 +153,8 @@ For each batch:
 
 1. Write the batch prompt to
    `<workspace>/.scratch/orient/<YYYY-MM-DD>-<batch-slug>-prompt.txt`.
-2. Stamp `dispatched: <YYYY-MM-DD>` into the frontmatter of every task note
-   the batch covers (this is the double-dispatch guard § 2 reads; the batch
-   session's end-of-run note update supersedes it).
+2. Apply the runtime boundary above. If automatic launch is unsupported,
+   go directly to the manual-emission fallback in step 5, without stamping tasks.
 3. **Launch the batch as a cmux workspace** (the steering answer already
    authorised this — no second confirm, ADR 0010):
 
@@ -146,9 +173,11 @@ For each batch:
 4. **Verify the launch**: `cmux read-screen --workspace <ref> --scrollback` —
    the prompt text visible in the transcript and the session working means
    launched; an idle input box means the prompt never arrived (close the
-   workspace, fix quoting, relaunch).
-5. **Fallback — no reachable cmux socket** (`cmux ping` fails: Desktop app,
-   SSH, cmux not running): emit one fenced `bash` block per batch for Lachy
+   workspace, fix quoting, relaunch). After verification, stamp
+   `dispatched: <YYYY-MM-DD>` into every covered task note (the double-dispatch
+   guard § 2 reads; the batch session's end-of-run update supersedes it).
+5. **Fallback — unsupported harness or no reachable cmux socket** (`cmux
+   ping` fails: Desktop app, SSH, cmux not running): emit one fenced `bash` block per batch for Lachy
    to run himself, and say launching fell back to emission:
 
    ```bash
