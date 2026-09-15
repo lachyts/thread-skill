@@ -108,8 +108,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   frontmatter's provisional/active/superseded, which describes memory files,
   not candidate rows. Those writers write candidates only: nothing enters the
   gate-protected `## Method` section, at any altitude, without an interactive
-  `/method` apply Lachy has ruled on. _Avoid_: process ledger, retro doc,
-  processes.md.
+  `/method` apply Lachy has ruled on. _Correction 2026-09-15 (evening)_: a
+  `/method` pass under the skill's working agreement — routine curation automatic,
+  scheduled headless from the daily sweep, only consequential exceptions ruled by
+  Lachy in the pass's vault task (workspaces ADR 0003, second amendment); the
+  candidates-only rule for these writers is unchanged. _Avoid_: process ledger,
+  retro doc, processes.md.
 
 ## Planning structure (rollout lane)
 
