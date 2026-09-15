@@ -28,10 +28,13 @@ autonomously and silently:
   definition — both skills point at the same contract.
 - Scope rule unchanged: the scan runs only when the capture resolves a
   project directory; shared-thread and no-project exits NOOP it.
+  *(Amended by ADR 0015, 2026-09-15: the scan runs on every stash and
+  defer; the destination resolves by altitude.)*
 - **NOOP is silent** — no "no process observations" line in the confirmation.
   A hit appends to the project's `METHOD.md` `## Candidates`, auto-commits
   that file (same hygiene as close), and adds at most one line to the
-  stash/defer confirmation.
+  stash/defer confirmation. *(Amended by ADR 0015, 2026-09-15: the ledger is
+  the one the routing test resolves — project, seat or estate.)*
 - `handoff` stays untouched: the work continues immediately in a fresh
   session, and that session's eventual close scans with full context.
 

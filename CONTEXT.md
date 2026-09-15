@@ -86,18 +86,30 @@ through time, from attention to merged PRs. Terms only — no implementation.
   hard constraints. _Avoid_: pinned, sticky.
 - **Demotion** — the curator verb moving a global memory to the one workspace
   whose sessions actually recall it. _Avoid_: downgrade, relocation.
-- **Process observation** — close's scan category 7: a stage-shift, pivot,
-  reusable move, revealing failure, or cross-workstream effect in *how* a
-  project is being made. Stage-gated; project closes only. _Avoid_: learning,
-  insight, retro item.
-- **METHOD.md / Candidates** — the per-project surface (ADR 0012, owned by the
-  `method` skill in agents-config) close appends process observations to.
-  Candidate rows carry their own status vocabulary
-  (`[provisional]`/`[confirmed]`/`[rejected]`/`[deferred]`/`[contradicted]`) —
-  deliberately distinct from the memory frontmatter's
-  provisional/active/superseded, which describes memory files, not candidate
-  rows. Close writes candidates only; the gate-protected `## Method` section
-  belongs to `/method` apply. _Avoid_: process ledger, retro doc.
+- **Seat** — the workspace altitude of a METHOD ledger,
+  `~/repos/workspaces/<workspace>/knowledge/METHOD.md`; defined in
+  `~/repos/workspaces/_shared/CONTEXT.md` § Method. _Avoid_: workspace method.
+- **Estate** — the everywhere altitude,
+  `~/repos/workspaces/_shared/knowledge/METHOD.md`; defined in
+  `~/repos/workspaces/_shared/CONTEXT.md` § Method. _Avoid_: global method,
+  org method.
+- **Process observation** — the category-7 scan (close, stash and defer): a
+  stage-shift, pivot, reusable move, revealing failure, or cross-workstream
+  effect in *how* a project is being made. Stage-gated; routed by altitude
+  (project / seat / estate) via the method skill's routing test. _Avoid_:
+  learning, insight, retro item.
+- **METHOD.md / Candidates** — the per-altitude surface (ADR 0012, 0015; owned
+  by the `method` skill in agents-config) the category-7 scan (close, stash and
+  defer) appends process observations to. Candidate rows carry their own
+  six-token status vocabulary
+  (`[provisional]`/`[confirmed]`/`[rejected]`/`[deferred]`/
+  `[contradicted]`/`[correction]`, the last an annotation on another row — not
+  an observation, never clustered) — deliberately distinct from the memory
+  frontmatter's provisional/active/superseded, which describes memory files,
+  not candidate rows. Those writers write candidates only: nothing enters the
+  gate-protected `## Method` section, at any altitude, without an interactive
+  `/method` apply Lachy has ruled on. _Avoid_: process ledger, retro doc,
+  processes.md.
 
 ## Planning structure (rollout lane)
 

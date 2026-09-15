@@ -1,6 +1,6 @@
 ---
 name: close
-description: 'End-of-thread capture — update the active thread (project THREAD.md or shared _shared/threads/<slug>.md) with what happened this session, then save the rest autonomously: auto-memory (save-time triage, provenance-stamped), workspace knowledge, process-observation candidates to the project''s METHOD.md (project closes only), and git commits all happen without asking; vault tasks are the only proposal. Available globally — works from any CWD. Use when the work is FINISHED for now and state should persist; if the work continues elsewhere use thread:handoff, if it''s being set down for later use thread:stash or thread:defer. Invoke with `/thread:close` or "close this thread".'
+description: 'End-of-thread capture — update the active thread (project THREAD.md or shared _shared/threads/<slug>.md) with what happened this session, then save the rest autonomously: auto-memory (save-time triage, provenance-stamped), workspace knowledge, process-observation candidates to the METHOD.md the altitude routing test resolves (project, seat or estate), and git commits all happen without asking; vault tasks are the only proposal. Available globally — works from any CWD. Use when the work is FINISHED for now and state should persist; if the work continues elsewhere use thread:handoff, if it''s being set down for later use thread:stash or thread:defer. Invoke with `/thread:close` or "close this thread".'
 ---
 
 # /thread:close — close out this thread
@@ -25,6 +25,16 @@ In order:
 3. **Conversation has thread shape but no thread exists** (8+ substantive turns, decisions deferred, artefacts produced) → offer to create one via `thread:open <suggested-slug>` first, then proceed.
 4. **Genuinely no thread context** (quick lookup, one-shot edit) → skip thread update; still run the rest of the close flow.
 
+### Project directory resolution
+
+Category 7's **project** ledger needs a project *directory* on disk, and a code repo is not one: `~/repos/animately/giflab` is the code, `~/Projects/Animately/giflab/` is the project. Resolve the directory in order, stopping at the first hit:
+
+1. **CWD inside `~/Projects/<Area>/<Project>/`** (branch 1 above) → that directory.
+2. **CWD inside a code repo** → the vault project note paired with it: grep `repos:` frontmatter across `~/repos/obsidian/Work/Projects/**` for an entry matching this CWD's repo (expand `~` to `$HOME` before comparing). If that note names a project directory under `~/Projects/` — its `Local:` line, or the paired path the `repos:` entry resolves to — that directory is the answer.
+3. **The paired note names no `~/Projects/` path at all** → take the note's area (its `area:` frontmatter, else the `Work/Projects/<Area>/` folder it sits in) plus the code repo's basename, and use `~/Projects/<Area>/<basename>/` **only if that directory already exists**. GifLab is the case: its note's `repos:` and `Local:` both name the code repo `~/repos/animately/giflab`, area `Animately`, basename `giflab` — and `~/Projects/Animately/giflab/` exists, so that is the answer. Never create the directory, and never guess past this rung.
+
+Nothing else resolves. Never invent a path from the note's title, and never create a project directory just to hold a ledger. **A tool repo — any repo outside `~/Projects/` — is never a project surface, even when it has its own `THREAD.md`**: a THREAD.md is thread state, not a project ledger, and a tool repo's process rows go to the estate. If no rung hits, there is no project directory — say so and let the routing test skip its project step. Stash and defer cite this sub-section rather than restating it.
+
 ## What to scan for
 
 Walk the conversation back and collect candidates under these categories:
@@ -35,7 +45,7 @@ Walk the conversation back and collect candidates under these categories:
 4. **Decisions made in-thread that aren't yet persisted** — agreements or choices that only live in the conversation. If it's already in a file or commit, skip it.
 5. **Discovered context a future session would miss** — non-obvious constraints, dead ends ruled out, why a particular path was chosen. (These belong in THREAD.md "Known quirks".)
 6. **Patterns / preferences Lachy expressed** — feedback-style guidance worth saving across sessions (not just this thread).
-7. **Process observations** — a genuine stage-shift, pivot, reusable move, revealing failure, or cross-workstream effect in *how the project is being made*. Stage-gated, never per-iteration: another numbered pass existing is not an observation; discovering that one variable had to lock before the others could move is. Most sessions have none — NOOP is the expected outcome here too. This category applies **only when the close resolves a project directory** (identification branch 1, or per-project in a multi-project close); shared threads and no-project closes NOOP it. Routing exception to the one-destination rule below: an observation about *how the work is done* goes to METHOD.md even when it would also fit Known quirks — Known quirks holds project-state gotchas, METHOD.md holds process.
+7. **Process observations** — a genuine stage-shift, pivot, reusable move, revealing failure, or cross-workstream effect in *how the project is being made*. Stage-gated, never per-iteration: another numbered pass existing is not an observation; discovering that one variable had to lock before the others could move is. Most sessions have none — NOOP is the expected outcome here too. Route with the `method` skill's routing test — `~/.agents/skills/method/SKILL.md` § Which ledger a row goes to; unsure → project; when no project directory resolves, unsure → the seat if a workspace resolves, else the estate (ADR 0015). That section is the single definition of the test, including sub-seats, areas with no paired workspace, and contexts with no project or no workspace: cite it, never restate its rungs here. A project ledger is a destination only when `close`'s § Project directory resolution yields a directory; otherwise the routing test skips its project step. On Windows (no `~/.agents` tree — the method contract and template are not shipped there) the category-7 scan NOOPs at every altitude; never hand-roll a row or a ledger. Routing exception to the one-destination rule below: an observation about *how the work is done* goes to METHOD.md even when it would also fit Known quirks — Known quirks holds project-state gotchas, METHOD.md holds process.
 
 Skip anything that's obvious from reading the current code, already in docs, or purely ephemeral (one-off debugging, tool noise).
 
@@ -50,8 +60,8 @@ Each candidate lands in exactly one of these. When in doubt, prefer the destinat
 | Thread state — where we left off, what shifted, new decisions, new known quirks, session log entry | Active `THREAD.md` (project or shared) | Auto |
 | Concrete follow-up actions for Lachy | New file in `vault/Work/Tasks/<slug>.md` — routing + frontmatter shape per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` §§ 1 & 4 (ordinary follow-ups omit the `thread` marker tag — that's for stash/defer captures). Never to `vault/_Inbox/` — that's Lachy's capture surface only | **Propose** |
 | User preferences, recurring patterns, reusable feedback | Auto-memory at the correct scope per `~/repos/workspaces/_shared/claude-base-instructions.md` § Claude memory management — global, workspace, or project area `AGENTS.md` — via the save-time triage below | Auto |
-| Reusable workspace knowledge (gotchas, schemas, processes) | `<workspace>/knowledge/<topic>.md` — same rules as `/learn` | Auto |
-| Process observation (category 7) | Append to the project's `METHOD.md` `## Candidates` as a `- YYYY-MM-DD [provisional] <observation> — source: <harness/thread>, evidence: <links>` row, per the `method` skill's capture contract (create the file from `~/.agents/skills/method/METHOD-template.md` if absent, following its creation rules — fill frontmatter, keep placeholders commented out). Candidates are non-curated; the `## Method` section stays untouchable without Lachy's confirmed `/method` apply (ADR 0012) | Auto |
+| Reusable workspace knowledge — facts about a tool or system (gotchas, schemas, limits, quirks) | `<workspace>/knowledge/<topic>.md` — same rules as `/learn`. A process observation is not a fact about a tool: it takes the row below | Auto |
+| Process observation (category 7) | Append to the `METHOD.md` `## Candidates` the routing test resolves — project, seat (`~/repos/workspaces/<workspace>/knowledge/METHOD.md`, or a declared sub-seat's such as `~/repos/workspaces/animately-workspace/seo/knowledge/METHOD.md`) or estate (`~/repos/workspaces/_shared/knowledge/METHOD.md`) — as a `- YYYY-MM-DD [provisional] K<nn> — <observation> — source: <harness/thread>, evidence: <path § heading>` row (`K` + one more than the highest existing `K` ordinal in that ledger, `K01` when none, independent of other prefixes; link-checked), per the `method` skill's capture contract (create the file from `~/.agents/skills/method/METHOD-template.md` if absent, following its creation rules — fill the frontmatter for that altitude, keep placeholders commented out). Capture does not curate `## Method`; an authorised method pass follows the method skill's working agreement for routine curation and user decisions on exceptions (the 2026-09-15 agreement supersedes the earlier blanket apply gate) | Auto |
 | Not worth keeping | Discard; one line in the "What landed" report so Lachy can object | — |
 
 ## Memory scope discipline
@@ -118,14 +128,14 @@ Close-inferred saves land `status: provisional` — the curator promotes them to
    - Resume instructions: update if next-session entry-point shifted.
    - Session log: prepend `- YYYY-MM-DD: <one-line of what shifted>` (newest first).
 
-5. **Compute the full save set silently** — no "proposed plan" message. Work out: the auto-commit file lists, the thread diff, each memory candidate's verb (via the four-verb triage), knowledge edits, process-observation candidates (category 7, with the resolved METHOD.md path — or NOOP), vault-task candidates, and what's being discarded. Nothing is shown to Lachy until the report in step 8 — except the task menu, if there is one.
+5. **Compute the full save set silently** — no "proposed plan" message. Work out: the auto-commit file lists, the thread diff, each memory candidate's verb (via the four-verb triage), knowledge edits, process-observation candidates (category 7, with the METHOD.md path the routing test resolved — or NOOP), vault-task candidates, and what's being discarded. Nothing is shown to Lachy until the report in step 8 — except the task menu, if there is one.
 
 6. **Vault tasks only — collect approval via `AskUserQuestion`.** If (and only if) there are proposed vault tasks: one multiSelect question, one option per task (`label` = short title, `description` = the one-line why). A single task candidate gets an explicit second option (`Skip — don't create it`) to satisfy the ≥2-option minimum. More than 4 candidates: collapse per `_shared/knowledge/triage-batching-protocol.md` §6 (*Save all N* / *Save core set* / *Skip section* / named subset). Zero task candidates → no menu at all; go straight to step 7. Ticked → create in step 7; unticked → discard silently; "Other" free-text → treat as a redirect.
 
 7. **Execute.** Order:
    1. Thread update — write THREAD.md (the most important file).
    2. Workspace knowledge edits.
-   3. Process-observation candidates — append to the project's `METHOD.md` per the Destinations row, then **auto-commit that file in its containing repo** (named path, same hygiene rules as below) so the append is versioned immediately rather than waiting on the daily sweep. Skip when category 7 resolved to NOOP.
+   3. Process-observation candidates — append to the `METHOD.md` the routing test resolved, per the Destinations row. Skip when category 7 resolved to NOOP. **One rule at every altitude:** commit the append immediately in its containing repo — a project ledger in the `~/Projects` monorepo, a seat or estate ledger in `~/repos/workspaces` — with the add-then-pathspec form in "Commit hygiene" below, so it is versioned immediately rather than waiting on the daily sweep (ADR 0012). Sub-step 6's workspaces auto-commit then finds a seat or estate ledger already committed.
    4. Auto-memory via the four verbs + MEMORY.md index updates. Honour the scope hook per "Memory scope discipline" — redirect or NOOP, autonomously.
    5. Approved vault tasks: new files at `vault/Work/Tasks/<slug>.md` with Task frontmatter.
    6. **Auto-commit workspaces repo** — see "Commit hygiene" below. Never ask.
@@ -141,9 +151,17 @@ Always commit with explicit file paths:
 git -C <repo> commit <path1> <path2> ... -m "<message>"
 ```
 
-This commits only the named paths even if other files are staged. **Before committing**, run `git -C <repo> diff --cached --name-only` and scan what's already staged. If anything is staged that isn't a session-changed file, don't `git reset` it (destructive) — just use named-paths commit. Mention in the saved summary that other files sit in the index for separate handling.
+This commits only the named paths even if other files are staged. **Before staging or committing anything**, run `git -C <repo> diff --cached --name-only` and scan what is already in the index — the scan comes first, because the `git add` below writes to that same index and would hide what was there. If anything is staged that isn't a session-changed file, don't `git reset` it (destructive) — just use named-paths commit. Mention in the saved summary that other files sit in the index for separate handling.
 
-8. **Print the "What landed" report** (≤12 lines): thread-state pointer (e.g. `THREAD.md updated · state: active · open questions: 2`), memory verbs with paths (`ADD feedback_x.md (provisional)` / `UPDATE reference_y.md` / `SUPERSEDE a.md → b.md` / `NOOP: <reason>`), knowledge edits, any METHOD.md candidate append (file path + the observation in one line — this write lands outside the workspace and vault, so it is never silent), vault task files as clickable `[[wiki-links]]`, commit SHAs for all repos touched, any `redirected:` or `Needs your call:` lines, and a one-line discard note.
+Only then stage. A file **created this session** — a `METHOD.md` written from the template, a new knowledge topic file — is untracked, so a pathspec commit alone fails with `pathspec ... did not match any file(s) known to git`. Add it first, then commit that path:
+
+```
+git -C <repo> add <path> && git -C <repo> commit -m "<message>" -- <path>
+```
+
+If `git add` fails — an ignored path such as `~/Projects/Tutorials/`, `_archive/` or `TSMS/` — **do not commit**. Report `not versioned: <path> (<reason>)` in the What landed report instead of a SHA.
+
+8. **Print the "What landed" report** (≤12 lines): thread-state pointer (e.g. `THREAD.md updated · state: active · open questions: 2`), memory verbs with paths (`ADD feedback_x.md (provisional)` / `UPDATE reference_y.md` / `SUPERSEDE a.md → b.md` / `NOOP: <reason>`), knowledge edits, any METHOD.md candidate append, at any altitude (file path + the observation in one line — the project ledger lands outside the workspace and vault, and the seat/estate ledgers are doctrine surfaces; neither is ever silent), vault task files as clickable `[[wiki-links]]`, commit SHAs for all repos touched, any `not versioned: <path> (<reason>)` line from a failed stage (see Commit hygiene), any `redirected:` or `Needs your call:` lines, and a one-line discard note.
 
 9. **End with the closing banner.** After the report, add a blank line, a horizontal rule (`---`), another blank line, then this exact line as the final line of the response:
 

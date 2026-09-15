@@ -38,7 +38,9 @@ reaches `## Method` without Lachy confirming a `/method` propose. Close
 appends candidates; it never synthesises, because a thread sees only its own
 slice — filesystem-wide reconciliation belongs to `/method`. Category 7 fires
 only on closes that resolve a project directory; shared-thread and no-project
-closes NOOP it.
+closes NOOP it. *(Amended by ADR 0015, 2026-09-15: capture routes by
+altitude — a no-project close now appends to a seat or estate ledger
+instead of NOOPing.)*
 
 ## Rejected
 

@@ -81,6 +81,10 @@ per-task resume.
   `0010` — orient launches its own batches. `0011` — close saves
   autonomously; vault tasks stay gated. `0012` — process candidates flow to
   the project's METHOD.md (cross-repo interface with the `method` skill).
+  `0013` — only list items declare gates. `0014` — stash and defer run the
+  silent process scan. `0015` — process candidates route by altitude
+  (project / seat / estate; amends 0012 and 0014; canonical design record is
+  workspaces ADR 0003).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
