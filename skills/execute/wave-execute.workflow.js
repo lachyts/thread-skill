@@ -769,10 +769,18 @@ const TOP_TIER = 'fable'
 // are genuinely absent. An unrecognised non-empty value is a typo, not an intent to lift the cap —
 // it caps at the strictest tier and says so, because the failure it guards is spending a quota the
 // account does not have.
+// ONE lookup for the rank table. Bare `TIER_RANK[tier]` answers for every inherited Object.prototype
+// key — `TIER_RANK['constructor']` is a function, not undefined — so a `model: constructor` sailed
+// through clampTier unclamped and read as non-terminal. Every rank read goes through here.
+function rank(tier) {
+  return Object.prototype.hasOwnProperty.call(TIER_RANK, tier) ? TIER_RANK[tier] : undefined
+}
+function knownTier(tier) { return rank(tier) !== undefined }
+
 function normaliseTier(v, fallback) {
   if (v === undefined || v === null || v === '') return fallback
   const t = String(v).trim().toLowerCase()
-  return Object.prototype.hasOwnProperty.call(TIER_RANK, t) ? t : fallback
+  return knownTier(t) ? t : fallback
 }
 
 let __capWarned = false
@@ -793,8 +801,8 @@ function tierCap(a) {
 // DOWN to the cap, and with no cap it stays as written, where terminalTier gives it the full loop —
 // the safe default the pre-ceiling code had.
 function clampTier(tier, cap) {
-  const t = TIER_RANK[tier] === undefined ? TIER_RANK[TOP_TIER] : TIER_RANK[tier]
-  const c = TIER_RANK[cap] === undefined ? TIER_RANK[TOP_TIER] : TIER_RANK[cap]
+  const t = knownTier(tier) ? rank(tier) : rank(TOP_TIER)
+  const c = knownTier(cap) ? rank(cap) : rank(TOP_TIER)
   return t > c ? cap : tier
 }
 function taskModel(task, cap) { return clampTier((task && task.model) || 'opus', cap) }
@@ -804,7 +812,7 @@ function judgeFor(a, st) { return clampTier(normaliseTier(a && a.judgeModel, st.
 
 // True when no higher tier can take this task over in this run — because it is already at the top
 // tier, or because the cap makes its current tier the last one available.
-function terminalTier(st) { return TIER_RANK[st.tier] === undefined || st.tier === TOP_TIER || st.tier === st.cap }
+function terminalTier(st) { return !knownTier(st.tier) || st.tier === TOP_TIER || st.tier === st.cap }
 
 // Returns whether the tier actually changed, so callers can tell an agent the truth about which pass
 // it is (a suppressed escalation is a same-tier retry, not a stronger-tier takeover).
@@ -848,8 +856,14 @@ const EFFORT = {
 // effort for that task only — judges always keep the matrix — and it is absolute across an
 // escalation (a monster task at fable/max stays at max).
 function effortTier(st) { return st.capSuppressed ? TOP_TIER : st.tier }
+// Same guard as rank(): a bare EFFORT[tier] answers for inherited Object.prototype keys, so an
+// unrecognised `model:` reaching st.tier would yield a truthy non-row whose .implementer is undefined.
+// Every matrix read goes through here and falls back to a REAL row rather than crashing the task.
+function effortRow(tier) {
+  return Object.prototype.hasOwnProperty.call(EFFORT, tier) ? EFFORT[tier] : EFFORT[TOP_TIER]
+}
 function implEffort(st, task) {
-  return (task && task.effort) || EFFORT[effortTier(st)].implementer
+  return (task && task.effort) || effortRow(effortTier(st)).implementer
 }
 
 // Effort for a judge role ('judge' | 'masterReview'). Judges take the bundle of the tier they RUN
@@ -859,8 +873,8 @@ function judgeEffort(a, st, role) {
   // A pin names the MODEL. Effort is not quota-scarce, so it still follows effortTier — otherwise
   // pinning a judge to the tier the run is already capped at would silently LOWER review effort.
   const pinned = a && a.judgeModel ? judgeFor(a, st) : null
-  const tier = pinned && TIER_RANK[pinned] > TIER_RANK[effortTier(st)] ? pinned : effortTier(st)
-  return (EFFORT[tier] || EFFORT[st.tier])[role]
+  const tier = pinned && rank(pinned) > rank(effortTier(st)) ? pinned : effortTier(st)
+  return effortRow(tier)[role]
 }
 
 // ---- Dispatch resilience: transient agent death -----------------------------

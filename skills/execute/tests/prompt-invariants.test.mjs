@@ -249,6 +249,15 @@ ok(T.judgeFor({ judgeModel: '  fable  ' }, { tier: 'opus', cap: 'fable' }) === '
 ok(T.judgeFor({ judgeModel: 'nonsense' }, { tier: 'opus', cap: 'fable' }) === 'opus', 'judgeModel: an unrecognised pin falls back to the task tier, never a guess')
 ok(T.judgeEffort({ judgeModel: 'opus' }, { tier: 'opus', cap: 'opus', capSuppressed: true }, 'masterReview') === 'xhigh', 'judgeModel: pinning to the capped tier does not LOWER review effort')
 ok(T.clampTier('sonnet', 'opus') === 'opus', 'clampTier: an unrecognised tier ranks at the top, so a cap clamps it down')
+// Inherited Object.prototype keys answer a bare TIER_RANK[tier] lookup, so every rank read goes
+// through a hasOwnProperty-guarded helper. Without it `model: constructor` sailed through unclamped
+// AND read as non-terminal (one-shot, no takeover).
+ok(T.clampTier('constructor', 'opus') === 'opus', 'clampTier: an inherited prototype key is clamped, not passed through')
+ok(T.clampTier('toString', 'opus') === 'opus', 'clampTier: no prototype key escapes the ceiling')
+ok(T.taskModel({ model: 'constructor' }, 'opus') === 'opus', 'maxTier: a prototype-key model seed is clamped')
+ok(T.terminalTier({ tier: 'constructor', cap: 'fable' }) === true, 'terminalTier: an unknown tier is terminal, however it is spelled')
+ok(T.verifyBlock({ tier: 'constructor', cap: 'fable' }, 'make test', 3, []) === T.ralphLoop('make test', 3, []), 'verifyBlock: a prototype-key tier still gets the full loop')
+ok(T.implEffort({ tier: 'constructor', capSuppressed: false }, {}) === 'high', 'implEffort: an unknown tier falls back to a real EFFORT row instead of throwing')
 
 // Scenario C — per-task `effort: max` escape hatch on a plan-gated opus task: planner + implementer
 // run at max, judges keep the matrix (plan judge high, master review high @ opus).
