@@ -80,6 +80,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 | `max_plan_rounds` | `3` | `task.maxPlanRounds` |
 | `plan_approval` | `scope-gated` | drives `task.planGate` (see 3.5) |
 | `parallel_ceiling` | `4` | `concurrency` (rollout-level) |
+| `max_tier` | none (omit) | `maxTier` (rollout-level; `opus` \| `fable`) — the ADR 0016 tier **ceiling**. Set it ONLY when the account's fable quota is exhausted, never as a cost preference: it clamps the seed, suppresses escalation (reported as `tierCapped`), and clamps a `judgeModel` pin. A capped tier is terminal, so it runs the full Ralph loop at the higher tier's effort. Omit ⇒ byte-identical to pre-ceiling. |
 | `env_bootstrap` | none (omit) | `envBootstrap` (rollout-level) |
 | `ignore_gate` | `false` (omit) | `task.ignoreGate` (per-task) |
 | `model` | `opus` | `task.model` (per-task; `opus` \| `fable`) |
@@ -143,6 +144,9 @@ Build the `args` object the workflow expects:
     "test_color_reducer_functionality — ImageMagick 0-byte output (pre-existing, env)"
   ],
   "envBootstrap": "poetry env use 3.11 && poetry install",  // from rollout `env_bootstrap:`; OMIT when absent
+  "maxTier": "opus",                      // from rollout `max_tier:` (ADR 0016); OMIT when absent —
+                                          //   a quota ceiling, never a cost knob. Check the account's
+                                          //   quota before setting it, and say so in the launch message.
   "progress": "wave 1/4 dispatched — 0m elapsed",  // optional; mark-dispatched's progress line (§4.5 step 1) —
                                                    //   the engine log()s it verbatim (its sandbox has no clock);
                                                    //   OMIT when mark-dispatched printed none
@@ -263,6 +267,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py reconcile
 ```
 
 The helper resolves each task note by slug under `~/repos/obsidian/Work/Tasks/` and performs every per-task write the old hand-edit loop did — **idempotently**, so it's safe to re-run on resume. Per returned `status`:
+- any status with `tierCapped: true` → the run was capped by `maxTier` (ADR 0016): a block on that task is **not** evidence of a genuine wall, and it is re-dispatchable uncapped once the higher tier's quota returns. Say so in the report; never let `/thread:repair` read it as input-gated.
 - `review` → `status: review`, `pr: <url>`, `review_rounds_used: <n>` (and `plan_rounds_used: <n>` when the task was plan-gated); a ceiling approval (`approvedAtCeiling`) additionally appends the grouped `reviewHistory` under `## Review history (approved at ceiling)` — an audit record, never re-dispatch input
 - `review-blocked` → `status: review-blocked`, `pr: <url>`; appends the grouped `reviewHistory` (every round, latest last; legacy results without it fall back to final-round `reviewFeedback`) under `## Review-blocked feedback`
 - `blocked` → `status: blocked`; appends `blockerDiagnosis` under `## Blocker diagnosis` (skipped if the agent already wrote it)

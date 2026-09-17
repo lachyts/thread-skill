@@ -32,7 +32,7 @@ const marker = '// ---- Orchestration'
 const idx = src.indexOf(marker)
 if (idx === -1) { console.error('FAIL - orchestration marker not found'); process.exit(1) }
 let head = src.slice(0, idx).replace('export const meta', 'const meta')
-head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort };\n'
+head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort, tierCap, clampTier, taskModel, judgeFor, terminalTier, escalate, effortTier };\n'
 
 // `agent` and `log` are Workflow globals the engine expects at run time. The layer functions resolve them
 // against the sandbox global at CALL time, so the transient-death tests below swap `ctx.agent` per case to
@@ -162,6 +162,56 @@ ok(escRes && escRes.status === 'review' && escRes.escalated && escRes.model === 
 ok(call('implement:proj-eff-b') && call('implement:proj-eff-b').effort === 'medium' && call('implement:proj-eff-b').model === 'opus', 'effort B: opus first pass runs medium')
 ok(call('implement:proj-eff-b@fable') && call('implement:proj-eff-b@fable').effort === 'high' && call('implement:proj-eff-b@fable').model === 'fable', 'effort B: fable takeover runs high (bundle flips with the tier)')
 ok(call('review:proj-eff-b') && call('review:proj-eff-b').effort === 'xhigh' && call('review:proj-eff-b').model === 'fable', 'effort B: master review after escalation runs xhigh @ fable')
+
+// ---- maxTier ceiling (args.maxTier) -----------------------------------------
+// The ceiling exists for one condition: the higher tier's quota is exhausted. Its whole promise is
+// "the same run on a cheaper model", so the cases that matter are (a) absent ⇒ byte-identical, and
+// (b) capped ⇒ still the FULL loop, not a silently weaker one-shot run.
+
+// Parsing: only a genuinely absent value lifts the cap; a typo caps strictly rather than spending a
+// quota the account does not have.
+ok(T.tierCap({}) === 'fable' && T.tierCap(undefined) === 'fable' && T.tierCap({ maxTier: '' }) === 'fable', 'maxTier: absent/empty ⇒ uncapped (fable)')
+ok(T.tierCap({ maxTier: 'opus' }) === 'opus' && T.tierCap({ maxTier: '  OPUS ' }) === 'opus', 'maxTier: case/whitespace-insensitive')
+ok(T.tierCap({ maxTier: 'Opus5' }) === 'opus' && T.tierCap({ maxTier: 'fabel' }) === 'opus', 'maxTier: unrecognised value fails CLOSED to opus, never silently uncapped')
+
+// clampTier is a ceiling, never a lift.
+ok(T.clampTier('fable', 'opus') === 'opus', 'clampTier: above the cap clamps down')
+ok(T.clampTier('opus', 'fable') === 'opus', 'clampTier: below the cap passes through (never raised)')
+ok(T.taskModel({ model: 'fable' }, 'opus') === 'opus' && T.taskModel({ model: 'fable' }, 'fable') === 'fable', 'maxTier: seed clamped only under the cap')
+ok(T.judgeFor({ judgeModel: 'fable' }, { tier: 'opus', cap: 'opus' }) === 'opus', 'maxTier: a judgeModel pin is clamped too')
+
+// escalate() under the cap: no tier change, no escalated stamp (reconcile must not write a tier the
+// account cannot use), and a durable capSuppressed marker so a block is not misread as a wall.
+{
+  const capped = { tier: 'opus', cap: 'opus', escalated: false, escalatedAt: '', capSuppressed: false }
+  const moved = T.escalate(capped, 'x', 'plan')
+  ok(moved === false && capped.tier === 'opus' && capped.escalated === false && capped.capSuppressed === true, 'maxTier: escalation suppressed, recorded, not stamped as an escalation')
+  const free = { tier: 'opus', cap: 'fable', escalated: false, escalatedAt: '', capSuppressed: false }
+  const moved2 = T.escalate(free, 'x', 'plan')
+  ok(moved2 === true && free.tier === 'fable' && free.escalated === true && !free.capSuppressed, 'maxTier: absent ⇒ escalation behaves exactly as before')
+}
+
+// The regression this ceiling shipped with: a capped tier is TERMINAL, so it must render the full
+// Ralph loop. Rendering the one-shot would give a capped run one verifier pass and zero fix
+// iterations — strictly weaker than the run it replaces, with no stronger tier to hand over to.
+{
+  const ralph = T.verifyBlock('fable', 'make test', 3, [])
+  const capped = T.verifyBlock('opus', 'make test', 3, [], 'opus')
+  const firstPass = T.verifyBlock('opus', 'make test', 3, [], 'fable')
+  ok(capped === ralph, 'maxTier: a capped opus tier renders the FULL Ralph loop, not the one-shot')
+  ok(firstPass === T.oneShotVerify('make test', []), 'maxTier: absent ⇒ the opus first pass still gets the one-shot')
+  ok(firstPass !== ralph, 'maxTier: the two verification blocks are genuinely different text')
+}
+
+// Effort is not quota-scarce: once an escalation is suppressed the task takes the higher tier's row.
+ok(T.effortTier({ tier: 'opus', capSuppressed: true }) === 'fable' && T.effortTier({ tier: 'opus', capSuppressed: false }) === 'opus', 'maxTier: suppressed escalation keeps the higher tier EFFORT row')
+ok(T.implEffort({ tier: 'opus', capSuppressed: true }, {}) === 'high', 'maxTier: capped implementer runs high, not medium')
+ok(T.judgeEffort({}, { tier: 'opus', cap: 'opus', capSuppressed: true }, 'masterReview') === 'xhigh', 'maxTier: capped master review runs xhigh')
+
+// A same-tier retry must not be told it is a stronger-tier takeover.
+ok(T.escalationContext('diag', true).includes('SECOND PASS') && !T.escalationContext('diag', true).includes('STRONGER-TIER'), 'maxTier: capped retry prompt says second pass, not stronger-tier takeover')
+ok(T.escalationContext('diag', false).includes('STRONGER-TIER'), 'maxTier: uncapped escalation keeps the takeover framing')
+ok(T.escalationContext('', true) === '', 'maxTier: no prior ⇒ still empty (byte-identical)')
 
 // Scenario C — per-task `effort: max` escape hatch on a plan-gated opus task: planner + implementer
 // run at max, judges keep the matrix (plan judge high, master review high @ opus).

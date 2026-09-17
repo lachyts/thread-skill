@@ -219,3 +219,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Escalation** — the run-time, evidence-driven flip of an opus task to
   fable at the first sign of hardness. One-way and sticky (ADR 0006).
   _Avoid_: fallback, retry, promotion.
+- **Ceiling** — a run-wide cap on every tier decision (`args.maxTier`), set
+  because the account's quota for the higher tier is exhausted. It names a
+  resource fact, never a judgement about a task, which is why it does not
+  contradict ADR 0006's "no config switch" (ADR 0016). A capped tier is
+  **terminal**: it runs the full Ralph loop and takes the higher tier's effort
+  row, and a block on it is reported `tierCapped` rather than as a wall.
+  _Avoid_: downgrade, throttle, cheap mode.

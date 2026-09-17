@@ -25,6 +25,15 @@ export const meta = {
 //   verifier    : string,            // shell command that decides pass/fail in a worktree
 //   date        : string,            // YYYY-MM-DD (passed in; Date.now() is unavailable here)
 //   concurrency : number,            // per-wave parallel ceiling (memory safety; default 4)
+//   maxTier     : string,            // optional; 'opus' | 'fable'. Tier CEILING for the whole run — use
+//                                    //   when the account's fable quota is exhausted. Clamps the seed,
+//                                    //   suppresses opus→fable escalation (recorded as tierCapped), and
+//                                    //   clamps a judgeModel pin. A capped tier is TERMINAL, so it runs
+//                                    //   the full Ralph loop and takes the higher tier's EFFORT row once
+//                                    //   an escalation has been suppressed. Absent ⇒ 'fable' ⇒ prompts
+//                                    //   and dispatch render byte-identical to pre-ceiling.
+//   judgeModel  : string,            // optional; pins EVERY judge to one tier (model + effort together),
+//                                    //   clamped by maxTier. Absent ⇒ judges follow the task's live tier.
 //   knownBaselineFailures : string[],// optional; "test_id — reason" lines for tests already red on a
 //                                    //   clean main. Threaded into every agent so they don't re-diagnose
 //                                    //   them. Absent/empty ⇒ prompts render byte-identical to pre-item-2.
@@ -73,10 +82,13 @@ export const meta = {
 //
 // Returns { rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
-//   approvedAtCeiling, summary, model, escalated, escalatedAt, gatedInputs }] }
+//   approvedAtCeiling, summary, model, escalated, escalatedAt, tierCapped, gatedInputs }] }
 // where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending, model is the FINAL tier
 // the task ran on, escalated/escalatedAt ('plan' | 'implement' | 'review') record an opus→fable
-// escalation, and gatedInputs lists the declared-but-unapproved gates when status is gate-pending
+// escalation. tierCapped is true when maxTier suppressed an escalation this task would otherwise have
+// taken — a block on a tierCapped task is NOT evidence of a genuine wall (ADR 0006's triage invariant
+// holds only in an uncapped run); re-dispatch it uncapped when the higher tier's quota returns.
+// gatedInputs lists the declared-but-unapproved gates when status is gate-pending
 // (a declared gate always pauses for a human — ADR 0008). reviewHistory is the accumulated by-round
 // review-judge rejection rationale ([{ round, feedback: [] }], empty when the PR approved first try);
 // approvedAtCeiling marks an approval on the FINAL review round with actual rejection history —
@@ -326,17 +338,27 @@ Verification (ONE-SHOT first pass — you do NOT iterate):
   blockerDiagnosis. A stronger model picks up your worktree and iterates from there.`.trim()
 }
 
-// Tier-selected verification block for code-writing prompts: the opus first pass gets the one-shot,
-// fable (seeded or escalated) gets the full Ralph loop.
-function verifyBlock(tier, verifier, maxIterations, baseline) {
-  return tier === 'opus' ? oneShotVerify(verifier, baseline) : ralphLoop(verifier, maxIterations, baseline)
+// Tier-selected verification block for code-writing prompts: a NON-terminal opus first pass gets the
+// one-shot (hand over to fable on the first red), and every terminal tier — fable, or opus under a
+// maxTier cap — gets the full Ralph loop, because there is no stronger tier to hand to.
+function verifyBlock(tier, verifier, maxIterations, baseline, cap) {
+  const terminal = tier === TOP_TIER || tier === (cap || TOP_TIER)
+  return terminal ? ralphLoop(verifier, maxIterations, baseline) : oneShotVerify(verifier, baseline)
 }
 
 // Escalation hand-over context (empty-when-unused, like baselineManifest/gateOverride — the non-empty
 // string carries its OWN leading "\n\n" so callers interpolate it bare). `prior` is the first-pass
 // attempt's diagnosis/feedback verbatim.
-function escalationContext(prior) {
+function escalationContext(prior, sameTier) {
   if (!prior) return ''
+  if (sameTier) return `
+
+SECOND PASS: a first attempt did not land this task, and you own it from here. No stronger tier is
+available in this run, so there is no hand-over: run the FULL verification loop and finish the work.
+The prior attempt's diagnosis (verbatim):
+${prior}
+Any committed work from that attempt is already on your branch — build on or replace it as the diagnosis
+warrants.`
   return `
 
 ESCALATION: you are the STRONGER-TIER takeover of this task — a first-pass attempt at a lower tier did
@@ -420,7 +442,7 @@ Steps:
 2. If the fix is well-defined, work test-first (write the failing test before the fix). Use the
    superpowers:test-driven-development skill if applicable.
 3. If the task is investigation-first, produce findings, propose a fix in the task note, then implement.
-4. ${verifyBlock(tier, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
+4. ${verifyBlock(tier, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, tierCap(a))}
 5. If the verifier passed: open a PR titled \`audit-fix: <task subject>\`. The body must link the task
    note and explain what changed and why.
 6. Return your structured result: verified, blocked, escalate (as your verification block instructs;
@@ -429,7 +451,7 @@ Steps:
 
 ${BUG_PREFLIGHTS}
 
-${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior)}
+${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, tierCap(a) !== TOP_TIER)}
 
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.`
 }
@@ -450,7 +472,7 @@ Steps:
 3. Append your findings to the task note under a "## Findings" heading — concrete, with file:line refs.
 4. Return your structured result: verified=true (findings produced) or blocked=true (could not complete),
    escalate=false, prUrl="", branch="", worktreePath="" (read-only tasks open no worktree),
-   blockerDiagnosis (empty unless blocked), and a one-paragraph summary of what you found.${baselineManifest(a)}${escalationContext(prior)}`
+   blockerDiagnosis (empty unless blocked), and a one-paragraph summary of what you found.${baselineManifest(a)}${escalationContext(prior, tierCap(a) !== TOP_TIER)}`
 }
 
 function plannerPrompt(task, a, prior) {
@@ -573,14 +595,14 @@ blockerDiagnosis="plan-divergence: <one line>" instead of forging ahead.
 
 Steps:
 1. Implement the plan (test-first where the plan says so). ${PRIOR_FEEDBACK_NOTE}
-2. ${verifyBlock(tier, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
+2. ${verifyBlock(tier, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, tierCap(a))}
 3. On verifier pass: open a PR titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
 4. Return your structured result: verified, blocked, escalate (as your verification block instructs; false
    otherwise), prUrl, branch, worktreePath (git rev-parse --show-toplevel), blockerDiagnosis, summary.
 
 ${BUG_PREFLIGHTS}
 
-${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior)}
+${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, tierCap(a) !== TOP_TIER)}
 
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.`
 }
@@ -712,13 +734,68 @@ function chunk(arr, n) {
 // set, still pins all judges). A fable-seeded task never escalates — there is nothing above fable —
 // and runs the full Ralph loop from the start, exactly as before. The skill stamps `model: fable`
 // on the note at reconcile when a task escalated, so later re-dispatches start at fable.
-function taskModel(task) { return task.model || 'opus' }
-function judgeFor(a, st) { return (a && a.judgeModel) || st.tier }
+// ---- Tier ceiling (args.maxTier) --------------------------------------------
+// `args.maxTier` caps every tier decision for the whole run. It exists for ONE operating condition:
+// the account's quota for the higher tier is exhausted, so the choice is a capped run or no run.
+// Absent/unrecognised ⇒ 'fable' ⇒ byte-identical behaviour to before the ceiling existed.
+//
+// Three things follow from a cap, and each is load-bearing:
+//   1. The capped tier becomes TERMINAL. A terminal tier runs the full Ralph loop (verifyBlock), never
+//      the one-shot hand-over — the one-shot is a protocol for handing work to a stronger tier, and
+//      under a cap there is nobody to hand to. Without this the cap would silently buy a WEAKER run
+//      (one verifier pass, zero fix iterations) rather than the same run on a cheaper model.
+//   2. Effort is NOT capped. A tier is a (model, effort) bundle (ADR 0007), but only the model is
+//      quota-scarce: once a cap has suppressed an escalation, the task takes the HIGHER tier's effort
+//      row (see effortTier) — it is the capability still available to pay for.
+//   3. A suppressed escalation is recorded (`st.capSuppressed` → the result's `tierCapped`). ADR 0006's
+//      triage invariant is that a block is a genuine wall, never "the cheap model wasn't enough"; under
+//      a cap that is no longer true, so the result says so and /thread:repair can re-dispatch the task
+//      when the higher tier's quota returns instead of reading it as a wall.
+const TIER_RANK = { opus: 0, fable: 1 }
+const TOP_TIER = 'fable'
+
+// Free-form operator input: normalise, and fail CLOSED to the uncapped default only for values that
+// are genuinely absent. An unrecognised non-empty value is a typo, not an intent to lift the cap —
+// it caps at the strictest tier and says so, because the failure it guards is spending a quota the
+// account does not have.
+function tierCap(a) {
+  const raw = a && a.maxTier
+  if (raw === undefined || raw === null || raw === '') return TOP_TIER
+  const v = String(raw).trim().toLowerCase()
+  if (Object.prototype.hasOwnProperty.call(TIER_RANK, v)) return v
+  log(`maxTier: unrecognised value ${JSON.stringify(raw)} — capping at opus (the strict reading)`)
+  return 'opus'
+}
+
+// A ceiling, never a lift: a tier at or below the cap passes through unchanged.
+function clampTier(tier, cap) {
+  const t = TIER_RANK[tier] === undefined ? TIER_RANK.opus : TIER_RANK[tier]
+  const c = TIER_RANK[cap] === undefined ? TIER_RANK[TOP_TIER] : TIER_RANK[cap]
+  return t > c ? cap : tier
+}
+function taskModel(task, cap) { return clampTier((task && task.model) || 'opus', cap) }
+function judgeFor(a, st) { return clampTier((a && a.judgeModel) || st.tier, st.cap) }
+
+// True when no higher tier can take this task over in this run — because it is already at the top
+// tier, or because the cap makes its current tier the last one available.
+function terminalTier(st) { return st.tier === TOP_TIER || st.tier === st.cap }
+
+// Returns whether the tier actually changed, so callers can tell an agent the truth about which pass
+// it is (a suppressed escalation is a same-tier retry, not a stronger-tier takeover).
 function escalate(st, slug, at) {
-  st.tier = 'fable'
+  if (terminalTier(st)) {
+    if (!st.capSuppressed) {
+      st.capSuppressed = true
+      st.capSuppressedAt = at
+      log(`escalation suppressed (maxTier=${st.cap}): ${slug} stays on ${st.tier} and runs the full loop (${at})`)
+    }
+    return false
+  }
+  st.tier = TOP_TIER
   st.escalated = true
   if (!st.escalatedAt) st.escalatedAt = at
-  log(`escalation: ${slug} → fable (${at})`)
+  log(`escalation: ${slug} → ${TOP_TIER} (${at})`)
+  return true
 }
 
 // ---- Effort bundles (ADR 0007) ----------------------------------------------
@@ -744,15 +821,17 @@ const EFFORT = {
 // (task.effort) is the SINGLE escape hatch (ADR 0007): it overrides the bundle's planner/implementer
 // effort for that task only — judges always keep the matrix — and it is absolute across an
 // escalation (a monster task at fable/max stays at max).
+function effortTier(st) { return st.capSuppressed ? TOP_TIER : st.tier }
 function implEffort(st, task) {
-  return (task && task.effort) || EFFORT[st.tier].implementer
+  return (task && task.effort) || EFFORT[effortTier(st)].implementer
 }
 
 // Effort for a judge role ('judge' | 'masterReview'). Judges take the bundle of the tier they RUN
 // on — judgeFor() — so a judgeModel pin moves model and effort together (a tier is a bundle). The
 // fallback guards a judgeModel value with no matrix row (fail to the task's tier, never crash).
 function judgeEffort(a, st, role) {
-  return (EFFORT[judgeFor(a, st)] || EFFORT[st.tier])[role]
+  const pinned = a && a.judgeModel ? judgeFor(a, st) : effortTier(st)
+  return (EFFORT[pinned] || EFFORT[st.tier])[role]
 }
 
 // ---- Dispatch resilience: transient agent death -----------------------------
@@ -801,7 +880,7 @@ async function planLoop(task, st, a) {
     // A first-pass planner failure is evidence of hardness — one fable retry before plan-blocked.
     escalate(st, task.slug, 'plan')
     plan = await runAgent(plannerPrompt(task, a, plan.blockerCause || 'first-pass planner produced no plan'), {
-      label: `plan:${task.slug}@fable`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier, effort: implEffort(st, task),
+      label: `plan:${task.slug}@${st.tier}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier, effort: implEffort(st, task),
     })
     if (plan.__dead) return transientPlanBlock(task, 0)
   }
@@ -878,7 +957,7 @@ async function implement(task, st, prev, a) {
     if (r.blocked && st.tier === 'opus') {
       escalate(st, task.slug, 'implement')
       r = await runAgent(readOnlyPrompt(task, a, r.blockerDiagnosis || 'first-pass investigation did not complete'), {
-        label: `investigate:${task.slug}@fable`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
+        label: `investigate:${task.slug}@${st.tier}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
       })
       if (r.__dead) return transientImplBlock()
     }
@@ -913,7 +992,7 @@ async function implement(task, st, prev, a) {
     const prior = [r.blockerDiagnosis, r.summary].filter((s) => s && s.trim()).join('\n')
       || 'first-pass attempt did not verify green'
     r = await runAgent(prompt(prior), {
-      label: `implement:${task.slug}@fable`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
+      label: `implement:${task.slug}@${st.tier}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
     })
     if (r.__dead) return transientImplBlock(planExtra)
     const gatedRetry = gatePending(r)
@@ -987,13 +1066,16 @@ async function reviewLoop(task, st, prev, a, planText) {
 // escalation in any layer carries into every later agent AND judge. Tasks converge independently —
 // the orchestration below runs converge() per item with no cross-task barrier inside a chunk.
 async function converge(task, a) {
-  const st = { tier: taskModel(task), escalated: false, escalatedAt: '' }
+  const cap = tierCap(a)
+  const st = { tier: taskModel(task, cap), cap, escalated: false, escalatedAt: '', capSuppressed: false, capSuppressedAt: '' }
   const planned = task.planGate ? await planLoop(task, st, a) : { task, plan: null, blocked: false }
   const impl = await implement(task, st, planned, a)
   // The approved plan rides into the review loop for the step-back round's reference ('' when the
   // task was not plan-gated — the step-back licence then runs against the brief alone).
   const reviewed = await reviewLoop(task, st, impl, a, (task.planGate && planned && planned.plan) || '')
-  return reviewed ? { ...reviewed, model: st.tier, escalated: st.escalated, escalatedAt: st.escalatedAt } : reviewed
+  return reviewed
+    ? { ...reviewed, model: st.tier, escalated: st.escalated, escalatedAt: st.escalatedAt, tierCapped: !!st.capSuppressed }
+    : reviewed
 }
 
 // ---- Orchestration: waves are barriers, tasks within a wave pipeline ---------
@@ -1006,6 +1088,7 @@ const ceiling = a.concurrency || 4
 const allResults = []
 
 log(`wave-execute: ${a.rolloutSlug} — ${a.waves.length} wave(s), parallel ceiling ${ceiling}/wave`)
+if (tierCap(a) !== TOP_TIER) log(`maxTier=${tierCap(a)} — escalation is capped; capped tasks run the full loop at the higher tier's effort`)
 // Progress/ETA relay: the sandbox has no clock, so the skill precomputes this line (reconcile-wave.py
 // mark-dispatched) from the rollout note's wave-boundary stamps and the engine just surfaces it.
 if (a.progress) log(a.progress)
@@ -1035,9 +1118,10 @@ for (const wave of a.waves) {
         approvedAtCeiling: !!norm.approvedAtCeiling,
         gatedInputs: norm.gatedInputs || [],
         summary: norm.summary || '',
-        model: norm.model || taskModel(t),
+        model: norm.model || taskModel(t, tierCap(a)),
         escalated: !!norm.escalated,
         escalatedAt: norm.escalatedAt || '',
+        tierCapped: !!norm.tierCapped,
       })
     })
   }
