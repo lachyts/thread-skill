@@ -32,7 +32,7 @@ const marker = '// ---- Orchestration'
 const idx = src.indexOf(marker)
 if (idx === -1) { console.error('FAIL - orchestration marker not found'); process.exit(1) }
 let head = src.slice(0, idx).replace('export const meta', 'const meta')
-head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort, tierCap, clampTier, taskModel, judgeFor, terminalTier, escalate, effortTier };\n'
+head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort, tierCap, clampTier, taskModel, judgeFor, terminalTier, escalate, effortTier, readOnlyPrompt, normaliseTier };\n'
 
 // `agent` and `log` are Workflow globals the engine expects at run time. The layer functions resolve them
 // against the sandbox global at CALL time, so the transient-death tests below swap `ctx.agent` per case to
@@ -63,30 +63,35 @@ ok(wtE.replace(T.envBootstrapStep(aE), '') === wt0, 'worktreeSetup: set == unset
 
 // ---- Model tiering: one-shot first pass + escalation hand-over ----------------
 
+// State doubles: ST_OPUS an uncapped opus first pass, ST_FABLE an escalated/seeded fable task,
+// ST_CAPPED an opus task under maxTier:'opus' whose escalation has been suppressed.
+const ST_OPUS = { tier: 'opus', cap: 'fable', escalated: false, capSuppressed: false }
+const ST_FABLE = { tier: 'fable', cap: 'fable', escalated: true, capSuppressed: false }
+const ST_CAPPED = { tier: 'opus', cap: 'opus', escalated: false, capSuppressed: true }
 ok(T.escalationContext('') === '', 'escalationContext: empty when unused (empty string)')
-ok(T.escalationContext(undefined) === '', 'escalationContext: empty when unused (undefined)')
-ok(T.escalationContext('diag').includes('ESCALATION'), 'escalationContext: hand-over block when set')
+ok(T.escalationContext(undefined, ST_FABLE) === '', 'escalationContext: empty when unused (undefined)')
+ok(T.escalationContext('diag', ST_FABLE).includes('ESCALATION'), 'escalationContext: hand-over block when set')
 
-const vOpus = T.verifyBlock('opus', 'make test', 3, undefined)
-const vFable = T.verifyBlock('fable', 'make test', 3, undefined)
+const vOpus = T.verifyBlock(ST_OPUS, 'make test', 3, undefined)
+const vFable = T.verifyBlock(ST_FABLE, 'make test', 3, undefined)
 ok(vOpus.includes('ONE-SHOT') && !vOpus.includes('Max iterations'), 'verifyBlock: opus = one-shot, no iteration budget')
 ok(vOpus.includes('escalate=true'), 'verifyBlock: one-shot instructs the escalate signal on red')
 ok(vFable.includes('Max iterations: 3') && !vFable.includes('ONE-SHOT'), 'verifyBlock: fable = full Ralph loop')
 ok(vFable === T.ralphLoop('make test', 3, undefined), 'verifyBlock: fable arm is byte-identical to ralphLoop (resume-cache)')
 
-const vOpusB = T.verifyBlock('opus', 'make test', 3, ['test_x — env'])
+const vOpusB = T.verifyBlock(ST_OPUS, 'make test', 3, ['test_x — env'])
 ok(vOpusB.includes('KNOWN BASELINE FAILURES') && vOpusB.includes('test_x — env'), 'oneShotVerify: baseline arm renders the manifest')
 
 const taskI = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', ignoreGate: false, maxIterations: 3 }
 const aI = { repoPath: '/repo', rolloutSlug: 'proj-rollout', verifier: 'make test' }
-const pOpus = T.implementerPrompt(taskI, aI, 'opus', '')
-const pFable = T.implementerPrompt(taskI, aI, 'fable', '')
+const pOpus = T.implementerPrompt(taskI, aI, ST_OPUS, '')
+const pFable = T.implementerPrompt(taskI, aI, ST_FABLE, '')
 ok(pOpus.includes('ONE-SHOT') && !pOpus.includes('Max iterations'), 'implementerPrompt: opus tier renders the one-shot block')
 ok(pFable.includes('Max iterations: 3') && !pFable.includes('ONE-SHOT'), 'implementerPrompt: fable tier renders the Ralph loop')
 const prior = 'the verifier failed on test_y'
-const pPrior = T.implementerPrompt(taskI, aI, 'fable', prior)
+const pPrior = T.implementerPrompt(taskI, aI, ST_FABLE, prior)
 ok(pPrior.includes('ESCALATION'), 'implementerPrompt: escalation context present when prior set')
-ok(pPrior.replace(T.escalationContext(prior), '') === pFable, 'implementerPrompt: with prior == without + exactly the injected block (byte-identical base)')
+ok(pPrior.replace(T.escalationContext(prior, ST_FABLE), '') === pFable, 'implementerPrompt: with prior == without + exactly the injected block (byte-identical base)')
 
 // ---- Effort bundles (ADR 0007): a tier is a (model, per-role effort) bundle ----
 // The matrix is fixed in the engine — opus: implementer medium / judges high / master review high;
@@ -195,12 +200,15 @@ ok(T.judgeFor({ judgeModel: 'fable' }, { tier: 'opus', cap: 'opus' }) === 'opus'
 // Ralph loop. Rendering the one-shot would give a capped run one verifier pass and zero fix
 // iterations — strictly weaker than the run it replaces, with no stronger tier to hand over to.
 {
-  const ralph = T.verifyBlock('fable', 'make test', 3, [])
-  const capped = T.verifyBlock('opus', 'make test', 3, [], 'opus')
-  const firstPass = T.verifyBlock('opus', 'make test', 3, [], 'fable')
+  const ralph = T.verifyBlock(ST_FABLE, 'make test', 3, [])
+  const capped = T.verifyBlock(ST_CAPPED, 'make test', 3, [])
+  const firstPass = T.verifyBlock(ST_OPUS, 'make test', 3, [])
   ok(capped === ralph, 'maxTier: a capped opus tier renders the FULL Ralph loop, not the one-shot')
   ok(firstPass === T.oneShotVerify('make test', []), 'maxTier: absent ⇒ the opus first pass still gets the one-shot')
   ok(firstPass !== ralph, 'maxTier: the two verification blocks are genuinely different text')
+  // An unrecognised tier is TERMINAL, so it keeps the full loop — the pre-ceiling default. A
+  // terminality test must not invert what `tier === 'opus' ? oneShot : ralph` used to give.
+  ok(T.verifyBlock({ tier: 'sonnet', cap: 'fable' }, 'make test', 3, []) === ralph, 'maxTier: an unrecognised tier still gets the full loop, never the one-shot')
 }
 
 // Effort is not quota-scarce: once an escalation is suppressed the task takes the higher tier's row.
@@ -209,9 +217,38 @@ ok(T.implEffort({ tier: 'opus', capSuppressed: true }, {}) === 'high', 'maxTier:
 ok(T.judgeEffort({}, { tier: 'opus', cap: 'opus', capSuppressed: true }, 'masterReview') === 'xhigh', 'maxTier: capped master review runs xhigh')
 
 // A same-tier retry must not be told it is a stronger-tier takeover.
-ok(T.escalationContext('diag', true).includes('SECOND PASS') && !T.escalationContext('diag', true).includes('STRONGER-TIER'), 'maxTier: capped retry prompt says second pass, not stronger-tier takeover')
-ok(T.escalationContext('diag', false).includes('STRONGER-TIER'), 'maxTier: uncapped escalation keeps the takeover framing')
-ok(T.escalationContext('', true) === '', 'maxTier: no prior ⇒ still empty (byte-identical)')
+ok(T.escalationContext('diag', ST_CAPPED).includes('SECOND PASS') && !T.escalationContext('diag', ST_CAPPED).includes('STRONGER-TIER'), 'maxTier: capped retry says second pass, not stronger-tier takeover')
+ok(T.escalationContext('diag', ST_FABLE).includes('STRONGER-TIER'), 'maxTier: a real escalation keeps the takeover framing')
+ok(T.escalationContext('', ST_CAPPED) === '', 'maxTier: no prior ⇒ still empty (byte-identical)')
+// The read-only second pass must not inherit the code-writing wording: no verification loop, no branch.
+{
+  const ro = T.escalationContext('diag', ST_CAPPED, 'readonly')
+  ok(ro.includes('SECOND PASS') && !ro.includes('FULL verification loop') && !ro.includes('on your branch'), 'maxTier: read-only second pass keeps its read-only contract')
+}
+
+// CLASS closer: every builder derives its framing from st, so no call site can be forgotten (the
+// plannerPrompt site was missed exactly this way and shipped green against a helper-only assertion).
+{
+  const aCap = { maxTier: 'opus', verifier: 'make test' }
+  const tk = { slug: 'cap-sweep', scope: 'cross-cutting', maxIterations: 3 }
+  const built = [
+    T.plannerPrompt(tk, aCap, ST_CAPPED, 'prior diag'),
+    T.implementerPrompt(tk, aCap, ST_CAPPED, 'prior diag'),
+    T.approvedPlanImplementerPrompt(tk, 'PLAN', aCap, ST_CAPPED, 'prior diag'),
+    T.readOnlyPrompt(tk, aCap, ST_CAPPED, 'prior diag'),
+  ]
+  ok(built.every((p) => !p.includes('STRONGER-TIER')), 'maxTier: NO builder promises a stronger-tier takeover under a cap')
+  ok(built.every((p) => p.includes('SECOND PASS')), 'maxTier: every builder renders the second-pass framing under a cap')
+  ok(T.plannerPrompt(tk, { verifier: 'make test' }, ST_FABLE, 'prior diag').includes('STRONGER-TIER')
+    && T.implementerPrompt(tk, { verifier: 'make test' }, ST_FABLE, 'prior diag').includes('STRONGER-TIER'), 'maxTier: a real escalation still reads as a takeover in every builder')
+}
+
+// judgeModel is free-form operator input: normalised, clamped, never able to lift the cap.
+ok(T.judgeFor({ judgeModel: 'Fable' }, { tier: 'opus', cap: 'opus' }) === 'opus', 'judgeModel: a case-variant pin is normalised then clamped')
+ok(T.judgeFor({ judgeModel: '  fable  ' }, { tier: 'opus', cap: 'fable' }) === 'fable', 'judgeModel: whitespace tolerated when the cap allows it')
+ok(T.judgeFor({ judgeModel: 'nonsense' }, { tier: 'opus', cap: 'fable' }) === 'opus', 'judgeModel: an unrecognised pin falls back to the task tier, never a guess')
+ok(T.judgeEffort({ judgeModel: 'opus' }, { tier: 'opus', cap: 'opus', capSuppressed: true }, 'masterReview') === 'xhigh', 'judgeModel: pinning to the capped tier does not LOWER review effort')
+ok(T.clampTier('sonnet', 'opus') === 'opus', 'clampTier: an unrecognised tier ranks at the top, so a cap clamps it down')
 
 // Scenario C — per-task `effort: max` escape hatch on a plan-gated opus task: planner + implementer
 // run at max, judges keep the matrix (plan judge high, master review high @ opus).
@@ -253,7 +290,7 @@ ok(call('review:proj-eff-d') && call('review:proj-eff-d').effort === 'xhigh', 'e
 
 // The requirement is ALWAYS rendered — in the planner, the plan-reviser, the plan-judge's checklist,
 // and every code-writing prompt's stop rule (the plan_approval:false path).
-const plPrompt = T.plannerPrompt(taskI, aI, '')
+const plPrompt = T.plannerPrompt(taskI, aI, ST_OPUS, '')
 ok(plPrompt.includes('### Gated inputs'), 'plannerPrompt: always renders the Gated inputs requirement')
 ok(/hard cap/i.test(plPrompt), 'plannerPrompt: spend gates require a hard cap')
 const prvPrompt = T.planReviserPrompt(taskI, 'PLAN', [{ round: 1, feedback: ['x'] }], 2, aI)
@@ -264,7 +301,7 @@ ok(plPrompt.includes('BULLETS ONLY'), 'plannerPrompt: gated-inputs section forbi
 ok(/non-bullet prose/.test(pjPrompt), 'planJudgePrompt: prose in the gated-inputs section is an automatic changes')
 ok(/bullets only/i.test(prvPrompt), 'planReviserPrompt: revision keeps the bullets-only rule')
 ok(pOpus.includes('Gated inputs (hard rule'), 'implementerPrompt: carries the gated-inputs stop rule')
-ok(T.approvedPlanImplementerPrompt(taskI, 'PLAN', aI, 'fable', '').includes('Gated inputs (hard rule'), 'approvedPlanImplementerPrompt: carries the stop rule')
+ok(T.approvedPlanImplementerPrompt(taskI, 'PLAN', aI, ST_FABLE, '').includes('Gated inputs (hard rule'), 'approvedPlanImplementerPrompt: carries the stop rule')
 ok(T.reviserPrompt(taskI, { prUrl: 'u', branch: 'b', worktreePath: '/wt' }, [{ round: 1, feedback: ['f'] }], 2, aI, '').includes('Gated inputs (hard rule'), 'reviserPrompt: carries the stop rule')
 
 // Parser: None → [], list items → entries, missing section → null (fail-closed upstream). Only list
