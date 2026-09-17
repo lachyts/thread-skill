@@ -35,7 +35,10 @@ Three consequences are load-bearing, and the first is the one that makes the cei
 2. **Effort is not capped.** A tier is a (model, effort) bundle (ADR 0007), but only the
    model is quota-scarce. Once a cap suppresses an escalation, the task takes the higher
    tier's effort row — the capability still available to pay for.
-3. **A suppressed escalation is recorded** as `tierCapped` on the result. ADR 0006's triage
+3. **A suppressed escalation is recorded** as `tierCapped` on the result and, durably, as
+   `tier_capped: <layer>` on the task note at reconcile — `/thread:status` and `/thread:repair` build
+   their triage from note frontmatter, so a marker that lives only in the workflow return dies with
+   the lead session. ADR 0006's triage
    invariant — a block is a genuine wall or an input-gated decision, never "the cheap model
    wasn't enough" — holds only in an uncapped run. A `tierCapped` block is explicitly not
    evidence of a wall, and is re-dispatchable uncapped once quota returns. Nothing stamps

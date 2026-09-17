@@ -158,6 +158,16 @@ class Note:
                 return mm.group(1).strip()
         return None
 
+    def unset(self, key: str):
+        """Remove `key:` from the frontmatter entirely. Idempotent; used to retire a marker that a
+        later, better-informed run has superseded (a stale marker is triaged against, so leaving one
+        is worse than never writing it)."""
+        pat = re.compile(rf"^{re.escape(key)}:\s*")
+        kept = [line for line in self._fm if not pat.match(line)]
+        if len(kept) != len(self._fm):
+            self._fm = kept
+            self.dirty = True
+
     def set(self, key: str, value, after=("owner", "status")):
         """Replace `key:`'s value in place, or insert a new line after the first present anchor key."""
         newline = f"{key}: {value}"
@@ -499,6 +509,19 @@ def cmd_reconcile(args) -> int:
         if task.get("escalated"):
             note.set("model", "fable")
 
+        # A tier ceiling (args.maxTier, ADR 0016) suppressed an escalation this task would otherwise
+        # have taken. That has to be DURABLE: /thread:status and /thread:repair build their triage
+        # entirely from note frontmatter, so without a stamp a capped block reads as a genuine wall
+        # and is never re-dispatched once the higher tier's quota returns. Deliberately NOT `model:
+        # fable` — the run could not use that tier, and stamping it would send the next dispatch
+        # straight back into the exhausted quota.
+        if task.get("tierCapped"):
+            note.set("tier_capped", (task.get("tierCappedAt") or "true"))
+        elif note.get("tier_capped"):
+            # An uncapped re-run that got further supersedes the old marker rather than leaving a
+            # stale one to be triaged against.
+            note.unset("tier_capped")
+
         pr = (task.get("prUrl") or "").strip()
         if status in STATUS_WITH_PR and pr:
             note.set("pr", pr)
@@ -537,6 +560,7 @@ def cmd_reconcile(args) -> int:
         note.save(dry_run=args.dry_run)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
         esc = " model=fable(escalated)" if task.get("escalated") else ""
+        esc += f" tier_capped={task.get('tierCappedAt') or 'true'}" if task.get("tierCapped") else ""
         print(f"{slug}: status={status}{(' pr=' + pr) if pr else ''}{esc}{flag}")
 
     if args.wave is not None and args.rollout and not errors:
