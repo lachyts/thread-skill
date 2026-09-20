@@ -55,12 +55,30 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Stash** — dispose dormant, no date. "Not my focus, lock it in."
 - **Defer** — dispose onto a specific day (`scheduled:`). "Tomorrow's problem."
 - **Handoff** — fork the working context to a fresh agent *now*; work continues
-  immediately, this session ends. Model-invocable on explicit fork intent (or
-  router dispatch) only — never self-initiated because the context feels long;
-  that recommendation belongs to `next`.
+  immediately, this session ends. Always produces a **handoff doc** (below) and
+  a paste-ready prompt; in Codex Desktop also a visible native task. Model-invocable
+  on explicit fork intent (or router dispatch) only — never self-initiated because
+  the context feels long; that recommendation belongs to `next`.
+- **Handoff doc** — the durable brief `thread:handoff` (or the session-safepoint
+  stop hook) writes to `<home>/docs/handoffs/<date>-<slug>.md` and commits —
+  `<home>` the unit directory: the project dir under `~/Projects/`, the
+  workspace dir under `~/repos/workspaces/`, else the git toplevel.
+  Lifecycle `pending → consumed → deleted`: marked `status: consumed` at
+  pickup, deleted in the consumer's close-out commit; git history is the
+  archive, so the working tree lists only in-flight handoffs. One doc, one
+  consumer. Never OS temp, never the vault (ADR 0017). A doc with no `status:`
+  front matter is **legacy** — listed by `close`, never touched. _Avoid_: temp
+  doc, compaction file, handoff note.
+- **Continuation** — the part of a thread's follow-up that the next session,
+  working from a pending handoff doc, would do. While the doc is pending,
+  `close` routes it to the doc (refreshing it in place) and never to a vault
+  task. Its complement is a **loose end** — work outside the thread's scope
+  line — which reaches the task menu as before (ADR 0017). _Avoid_: next
+  steps (ambiguous), remaining work.
 - **Close** — the work is finished; persist + commit, end-of-thread ritual.
-- **Pickup** — resuming a stashed/deferred thread from its task. Pickup
-  auto-completes the capture task: the capture's job ends the moment the
+- **Pickup** — resuming a stashed/deferred thread from its task, or a handed-off
+  thread from its handoff doc. Pickup auto-completes the capture — the task is
+  marked done, the handoff doc consumed: the capture's job ends the moment the
   thread is live again.
 
 ## Memory capture (close-side)

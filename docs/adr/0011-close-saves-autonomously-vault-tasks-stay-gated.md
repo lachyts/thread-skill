@@ -3,6 +3,9 @@
 Date: 2026-08-29
 Status: accepted (supersedes close's original "Propose first, then wait" rule
 for thread updates, auto-memory, and workspace knowledge)
+*(Amended by ADR 0017, 2026-09-21: while a handoff doc is pending, the thread's
+continuation is routed to that doc and is not proposed as vault tasks; the
+vault-task gate itself stands.)*
 
 ## Context
 
@@ -53,7 +56,9 @@ if never recalled.
 
 - **Fully autonomous including vault tasks** — the gate is theatre for disk
   writes, but a junk task pollutes the agenda until manually cleaned; that is
-  maintenance, the thing this change removes.
+  maintenance, the thing this change removes. *(Narrowed by ADR 0017,
+  2026-09-21: a pending handoff doc removes the thread's continuation from the
+  proposal set — the doc is not on the agenda and is Lachy's to convert.)*
 - **Supervised inaugural curator run** — a one-time gate on the backlog
   cleanup. Rejected: archive-first makes every action reversible; the
   changelog is skimmable after the fact.

@@ -11,7 +11,7 @@ End-of-thread capture. The thread is about to end — make sure nothing valuable
 
 **Everything saves autonomously except vault tasks.**
 
-- **Auto-execute, no asking**: git commits in `~/repos/workspaces/` and the Obsidian vault (session-changed files only), the thread update, auto-memory entries (via the save-time triage below), and workspace knowledge edits. The safety net that replaced per-item approval sits downstream, not in a menu: auto-memory lands `provisional` with provenance, nothing is ever hard-deleted, and the weekly memory curator archives what turns out to be junk (ADR 0011).
+- **Auto-execute, no asking**: git commits in `~/repos/workspaces/` and the Obsidian vault (session-changed files only) plus one more file, by pathspec, in whatever repo holds the handoff doc (§ The handoff owns the continuation), the thread update, auto-memory entries (via the save-time triage below), and workspace knowledge edits. The safety net that replaced per-item approval sits downstream, not in a menu: auto-memory lands `provisional` with provenance, nothing is ever hard-deleted, and the weekly memory curator archives what turns out to be junk (ADR 0011).
 - **Propose first, then wait**: vault tasks only. Tasks surface on Lachy's daily agenda, so a junk task has ongoing attention cost — "don't create tasks unsolicited" survives as the sole approval gate.
 
 **Wrong route?** If the conversation reveals the work is *not* finished — it's being parked or continued — dispatch to the right sibling instead: `thread:stash` / `thread:defer` (set down, capture task per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md`) or `thread:handoff` (fork to a fresh agent now).
@@ -57,12 +57,44 @@ Each candidate lands in exactly one of these. When in doubt, prefer the destinat
 |---|---|---|
 | Workspace config / knowledge file edits made this session | Git commit in `~/repos/workspaces/` — auto, session-changed files only | Auto |
 | Obsidian vault changes made this session (`ops-workspace` only) | Git commit in the vault repo — auto, session-changed files only | Auto |
-| Thread state — where we left off, what shifted, new decisions, new known quirks, session log entry | Active `THREAD.md` (project or shared) | Auto |
-| Concrete follow-up actions for Lachy | New file in `vault/Work/Tasks/<slug>.md` — routing + frontmatter shape per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` §§ 1 & 4 (ordinary follow-ups omit the `thread` marker tag — that's for stash/defer captures). Never to `vault/_Inbox/` — that's Lachy's capture surface only | **Propose** |
+| Thread state — where we left off, what shifted, new decisions, new known quirks, session log entry, resume instructions (a pointer to the pending handoff doc when one exists — never a copy of it) | Active `THREAD.md` (project or shared) | Auto |
+| Thread continuation while a handoff doc is pending — category 3 only: what remains, the next move, the paste-ready prompt | The pending doc itself, `<home>/docs/handoffs/<date>-<slug>.md`, refreshed in place and committed by pathspec — § The handoff owns the continuation | Auto |
+| Concrete follow-up actions for Lachy. While a handoff doc is pending, only *loose ends* qualify — the thread's continuation belongs to the row above (§ The handoff owns the continuation) | New file in `vault/Work/Tasks/<slug>.md` — routing + frontmatter shape per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` §§ 1 & 4 (ordinary follow-ups omit the `thread` marker tag — that's for stash/defer captures). Never to `vault/_Inbox/` — that's Lachy's capture surface only | **Propose** |
 | User preferences, recurring patterns, reusable feedback | Auto-memory at the correct scope per `~/repos/workspaces/_shared/claude-base-instructions.md` § Claude memory management — global, workspace, or project area `AGENTS.md` — via the save-time triage below | Auto |
 | Reusable workspace knowledge — facts about a tool or system (gotchas, schemas, limits, quirks) | `<workspace>/knowledge/<topic>.md` — same rules as `/learn`. A process observation is not a fact about a tool: it takes the row below | Auto |
 | Process observation (category 7) | Append to the `METHOD.md` `## Candidates` the routing test resolves — project, seat (`~/repos/workspaces/<workspace>/knowledge/METHOD.md`, or a declared sub-seat's such as `~/repos/workspaces/animately-workspace/seo/knowledge/METHOD.md`) or estate (`~/repos/workspaces/_shared/knowledge/METHOD.md`) — as a `- YYYY-MM-DD [provisional] K<nn> — <observation> — source: <harness/thread>, evidence: <path § heading>` row (`K` + one more than the highest existing `K` ordinal in that ledger, `K01` when none, independent of other prefixes; link-checked), per the `method` skill's capture contract (create the file from `~/.agents/skills/method/METHOD-template.md` if absent, following its creation rules — fill the frontmatter for that altitude, keep placeholders commented out). Capture does not curate `## Method`; an authorised method pass follows the method skill's working agreement for routine curation and user decisions on exceptions (the 2026-09-15 agreement supersedes the earlier blanket apply gate) | Auto |
 | Not worth keeping | Discard; one line in the "What landed" report so Lachy can object | — |
+
+## The handoff owns the continuation
+
+A **handoff doc** is a file in `<home>/docs/handoffs/`, written by `thread:handoff` or by the session-safepoint stop hook. `<home>` is the *unit directory* handoff § Handoff document defines — the project directory under `~/Projects/`, the workspace directory under `~/repos/workspaces/`, else the CWD's git toplevel — so the scan below resolves it the same way. Its front matter says `status: pending` until the session that picks it up sets `status: consumed`. A doc with **no `status:` line is legacy** (pre-ADR 0017): counted in the step-8 report and otherwise left alone — never refreshed, never deleted, never a reason to suppress. A pending doc in `<home>/docs/handoffs/` is *this thread's* by construction; the one exception is a `<home>` that carries more than one THREAD.md-backed thread, where a doc whose `thread:` names a thread other than the active one is that thread's and is left alone. Lachy tracks the doc as a **single object**: he acts on it, or he converts it into a task himself. A close that proposes vault tasks restating it is a second tracker for work he is already tracking, and reads as though the handoff did not count (ruled 2026-09-19; ADR 0017).
+
+**The test is on disk, never in memory** — run the scan in step 2 and again before step 6, so it survives a context compaction. One directory, no recursion (`<home>/docs/handoffs/` is where handoff writes); `find`, not a glob, because the Bash tool is zsh, where an unmatched glob aborts the command before it runs.
+
+```
+case "$PWD" in
+  "$HOME"/Projects/*/*)        home="$(printf '%s' "$PWD" | sed -E "s#^($HOME/Projects/[^/]+/[^/]+).*#\1#")" ;;
+  "$HOME"/repos/workspaces/*)  home="$(printf '%s' "$PWD" | sed -E "s#^($HOME/repos/workspaces/[^/]+).*#\1#")" ;;
+  *)                           home="$(git rev-parse --show-toplevel 2>/dev/null || echo "$HOME/repos/workspaces/_shared")" ;;
+esac
+find "$home/docs/handoffs" -maxdepth 1 -name '*.md' 2>/dev/null | while IFS= read -r f; do
+  s="$(awk 'NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} /^status:/{print $2; exit}' "$f" | tr -d "\"'" | tr '[:upper:]' '[:lower:]')"
+  case "$s" in pending|consumed) ;; "") s=legacy ;; *) s="unknown($s)" ;; esac
+  echo "$s $f"
+done
+```
+
+`pending` → this thread's continuation (the rules below). `consumed` → deleted in step 7, **whoever marked it**: consumed means the thread it briefed went live, and git history keeps the pending version — nothing about that decision lives in this conversation. `legacy` and `unknown(…)` → one counted report line, untouched. The status is read from the front-matter block only (quotes stripped, case-folded), so a body that mentions `status: pending` does not count.
+
+Three rules, for this thread's pending doc:
+
+1. **Scope is the line.** For each vault-task candidate ask one question: *would the next session, working from this doc, do it?* Yes → it is **continuation**, and the doc is its only destination. No → it is a **loose end** — a malformed vault note to rename, a supplier to chase, anything the thread's `scope:` line does not cover — and it reaches the task menu exactly as before. The doc's own title and § What remains decide the question, not who asked for the handoff: a hook-forced handoff counts exactly like a requested one.
+2. **Refresh, don't restate — continuation only.** Re-read the doc's § What remains and § Paste-ready prompt against **category 3** of the scan. A remaining item this session completed moves to § Done and verified; a next step the doc lacks is added; a next move that has moved on is rewritten; add `refreshed: <today>` to the front matter (the optional key handoff's contract reserves for this) and commit the file by pathspec in `<home>`'s repo (step 7). Categories 1, 2, 4 and 5 land in THREAD.md exactly as before — the doc is refreshed for continuation, never as a second state record, so every candidate still has one destination. This is the whole handling for a handoff written mid-session and then overtaken by hours of further work: the doc stays the one true object instead of the menu quietly growing a second one. A doc the scan finds nothing to change is left byte-identical and reported `unchanged`.
+3. **No annotation, no asking.** Never label a candidate "already in the handoff", never ask whether he has done it. Both hand back a decision the rule has already made. The report row in step 8 is the visibility — it carries the doc's `written:` date, so a handoff that has sat pending for weeks is visible at every close without a TTL deciding for him.
+
+A **manual handoff** — the doc and prompt were produced but no native task was created (handoff § Fail closed) — is a complete handoff for this rule: the committed doc is the object he tracks, and the step-8 row shows it pending. What it lacks is a task, not a tracker. A handoff **withdrawn in the same session** ("never mind, keep going") is no handoff at all: the session removes the doc (handoff § Lifecycle) and close finds nothing pending.
+
+THREAD.md is updated as normal — state, decisions, quirks, session log — but its *Resume instructions* point at the pending doc (`Read <home>/docs/handoffs/<doc> first`) rather than restating it: the doc is the single copy of the continuation. When this session **consumed** the doc, the pointer goes with it — step 4 writes real resume instructions again, because step 7 deletes the file.
 
 ## Memory scope discipline
 
@@ -117,6 +149,7 @@ Close-inferred saves land `status: provisional` — the curator promotes them to
 2. **Check git state**:
    - `git -C ~/repos/workspaces status --short` — identify which modified files were actually touched in this session vs stale from prior threads. Only session-changed files are in scope.
    - If session is in `ops-workspace`, also `git -C "<vault-path>" status --short` — same filter: only files this thread touched.
+   - Run the handoff scan from § The handoff owns the continuation. Record: pending doc(s) for this thread, consumed doc(s), the legacy/unknown count.
 
 3. **Scan the conversation** for the seven categories above.
 
@@ -125,21 +158,22 @@ Close-inferred saves land `status: provisional` — the curator promotes them to
    - What's-built/decided: append new items.
    - Open questions: resolve answered ones (move to "decided"), add new ones.
    - Known quirks: append discoveries from this session.
-   - Resume instructions: update if next-session entry-point shifted.
+   - Resume instructions: update if next-session entry-point shifted; when a handoff doc is pending, the entry point is `Read <home>/docs/handoffs/<doc> first` — a pointer, never a copy. When this session consumed a doc, replace that pointer with real instructions — the file is deleted in step 7.
    - Session log: prepend `- YYYY-MM-DD: <one-line of what shifted>` (newest first).
 
-5. **Compute the full save set silently** — no "proposed plan" message. Work out: the auto-commit file lists, the thread diff, each memory candidate's verb (via the four-verb triage), knowledge edits, process-observation candidates (category 7, with the METHOD.md path the routing test resolved — or NOOP), vault-task candidates, and what's being discarded. Nothing is shown to Lachy until the report in step 8 — except the task menu, if there is one.
+5. **Compute the full save set silently** — no "proposed plan" message. Work out: the auto-commit file lists, the thread diff, each memory candidate's verb (via the four-verb triage), knowledge edits, process-observation candidates (category 7, with the METHOD.md path the routing test resolved — or NOOP), the pending handoff doc's refresh diff (§ The handoff owns the continuation — or `unchanged`), vault-task candidates (loose ends only while a handoff doc is pending), and what's being discarded. Nothing is shown to Lachy until the report in step 8 — except the task menu, if there is one.
 
-6. **Vault tasks only — collect approval via `AskUserQuestion`.** If (and only if) there are proposed vault tasks: one multiSelect question, one option per task (`label` = short title, `description` = the one-line why). A single task candidate gets an explicit second option (`Skip — don't create it`) to satisfy the ≥2-option minimum. More than 4 candidates: collapse per `_shared/knowledge/triage-batching-protocol.md` §6 (*Save all N* / *Save core set* / *Skip section* / named subset). Zero task candidates → no menu at all; go straight to step 7. Ticked → create in step 7; unticked → discard silently; "Other" free-text → treat as a redirect.
+6. **Vault tasks only — collect approval via `AskUserQuestion`.** If (and only if) there are proposed vault tasks: one multiSelect question, one option per task (`label` = short title, `description` = the one-line why). A single task candidate gets an explicit second option (`Skip — don't create it`) to satisfy the ≥2-option minimum. More than 4 candidates: collapse per `_shared/knowledge/triage-batching-protocol.md` §6 (*Save all N* / *Save core set* / *Skip section* / named subset). Zero task candidates — including when every candidate was continuation folded into a pending handoff doc — → no menu at all; go straight to step 7. Ticked → create in step 7; unticked → discard silently; "Other" free-text → treat as a redirect.
 
 7. **Execute.** Order:
    1. Thread update — write THREAD.md (the most important file).
-   2. Workspace knowledge edits.
-   3. Process-observation candidates — append to the `METHOD.md` the routing test resolved, per the Destinations row. Skip when category 7 resolved to NOOP. **One rule at every altitude:** commit the append immediately in its containing repo — a project ledger in the `~/Projects` monorepo, a seat or estate ledger in `~/repos/workspaces` — with the add-then-pathspec form in "Commit hygiene" below, so it is versioned immediately rather than waiting on the daily sweep (ADR 0012). Sub-step 6's workspaces auto-commit then finds a seat or estate ledger already committed.
-   4. Auto-memory via the four verbs + MEMORY.md index updates. Honour the scope hook per "Memory scope discipline" — redirect or NOOP, autonomously.
-   5. Approved vault tasks: new files at `vault/Work/Tasks/<slug>.md` with Task frontmatter.
-   6. **Auto-commit workspaces repo** — see "Commit hygiene" below. Never ask.
-   7. **Auto-commit vault repo** (if ops-workspace and session-changed files exist there) — same rules.
+   2. Handoff lifecycle, in `<home>`'s repo (`$home` from step 2; `git -C "$home"` works from a subdirectory), by pathspec per "Commit hygiene" below — one file, on the branch the work is on, and nothing else in that repo. A pending doc for this thread: apply the refresh diff, then `git -C "$home" commit -m "📝 docs(handoff): refresh <slug> at close" -- <abs path>`; skip when `unchanged`. A consumed doc: `git -C "$home" rm -f <abs path>` (`-f` — the consumed mark is an uncommitted local modification, and plain `git rm` refuses it) then `git -C "$home" commit -m "🔧 chore(handoff): <slug> consumed — delete (history keeps it)" -- <abs path>`; a consumed doc that was never committed (handoff wrote it on a detached HEAD) is plain-`rm`'d and reported `not versioned: <path> (never committed)`. If `<home>`'s repo has a half-applied git operation (`rebase-merge`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `BISECT_LOG` under `.git/`) or a detached HEAD, do not commit: leave the edit in place and report `not versioned: <path> (<reason>)`. When `<home>` is under `~/repos/workspaces`, sub-step 7's auto-commit carries the file instead.
+   3. Workspace knowledge edits.
+   4. Process-observation candidates — append to the `METHOD.md` the routing test resolved, per the Destinations row. Skip when category 7 resolved to NOOP. **One rule at every altitude:** commit the append immediately in its containing repo — a project ledger in the `~/Projects` monorepo, a seat or estate ledger in `~/repos/workspaces` — with the add-then-pathspec form in "Commit hygiene" below, so it is versioned immediately rather than waiting on the daily sweep (ADR 0012). Sub-step 7's workspaces auto-commit then finds a seat or estate ledger already committed.
+   5. Auto-memory via the four verbs + MEMORY.md index updates. Honour the scope hook per "Memory scope discipline" — redirect or NOOP, autonomously.
+   6. Approved vault tasks: new files at `vault/Work/Tasks/<slug>.md` with Task frontmatter.
+   7. **Auto-commit workspaces repo** — see "Commit hygiene" below. Never ask.
+   8. **Auto-commit vault repo** (if ops-workspace and session-changed files exist there) — same rules.
 
 ### Commit hygiene (both repos)
 
@@ -161,7 +195,7 @@ git -C <repo> add <path> && git -C <repo> commit -m "<message>" -- <path>
 
 If `git add` fails — an ignored path such as `~/Projects/Tutorials/`, `_archive/` or `TSMS/` — **do not commit**. Report `not versioned: <path> (<reason>)` in the What landed report instead of a SHA.
 
-8. **Print the "What landed" report** (≤12 lines): thread-state pointer (e.g. `THREAD.md updated · state: active · open questions: 2`), memory verbs with paths (`ADD feedback_x.md (provisional)` / `UPDATE reference_y.md` / `SUPERSEDE a.md → b.md` / `NOOP: <reason>`), knowledge edits, any METHOD.md candidate append, at any altitude (file path + the observation in one line — the project ledger lands outside the workspace and vault, and the seat/estate ledgers are doctrine surfaces; neither is ever silent), vault task files as clickable `[[wiki-links]]`, commit SHAs for all repos touched, any `not versioned: <path> (<reason>)` line from a failed stage (see Commit hygiene), any `redirected:` or `Needs your call:` lines, and a one-line discard note.
+8. **Print the "What landed" report** (≤12 lines): thread-state pointer (e.g. `THREAD.md updated · state: active · open questions: 2`), memory verbs with paths (`ADD feedback_x.md (provisional)` / `UPDATE reference_y.md` / `SUPERSEDE a.md → b.md` / `NOOP: <reason>`), knowledge edits, any METHOD.md candidate append, at any altitude (file path + the observation in one line — the project ledger lands outside the workspace and vault, and the seat/estate ledgers are doctrine surfaces; neither is ever silent), handoff rows — never silent when a doc exists — `handoff pending: <path> · written <date> · written this session | refreshed (<what changed>) | unchanged · continuation: <N> candidate(s) kept in the doc (<K> added this close), none proposed`, `handoff consumed: <path> · deleted in <sha>`, and one `handoff legacy: <N> doc(s) in <home>/docs/handoffs/ (no or unknown front matter — untouched)` line when the count is non-zero, vault task files as clickable `[[wiki-links]]`, commit SHAs for all repos touched, any `not versioned: <path> (<reason>)` line from a failed stage (see Commit hygiene), any `redirected:` or `Needs your call:` lines, and a one-line discard note.
 
 9. **End with the closing banner.** After the report, add a blank line, a horizontal rule (`---`), another blank line, then this exact line as the final line of the response:
 
@@ -179,9 +213,13 @@ If `git add` fails — an ignored path such as `~/Projects/Tutorials/`, `_archiv
 - **Thread was mostly exploratory / no concrete outcome.** Maybe one or two memory saves; thread update may be just a session-log entry. Don't pad.
 - **Thread produced destructive changes.** Make sure the "why" lands somewhere — commit message, THREAD.md "Known quirks", or memory.
 - **Stale uncommitted files from prior sessions** (flagged by SessionStart hook) are **not in scope**. `thread:close` only handles this thread's work.
+- **A handoff doc is pending but this session's work was unrelated to it.** The refresh finds nothing to add; the doc is left byte-identical and reported `unchanged`; loose ends reach the menu as normal.
+- **A consumed handoff doc left by a session that died before its close** → deleted all the same (consumed is decided on disk; the dead session's own uncommitted work, not the doc, is where its state sits, and SessionStart flags that as stale).
+- **A legacy handoff doc** (no `status:` front matter — written before ADR 0017) → counted on the `handoff legacy:` line; never refreshed, deleted or used to suppress. If it is plainly this thread's continuation and Lachy wants it in the lifecycle, he adds the front matter; close never guesses.
+- **`<home>`'s repo mid-rebase / mid-merge / detached HEAD** → the handoff-lifecycle commit is skipped with a `not versioned:` line; the edit stays in the tree for the next close.
 - **Not inside `~/repos/workspaces/`.** Skip the workspaces-commit step; everything else still applies.
 - **No active thread, no project context.** That's fine — skip thread-update, still run the rest of the triage. Offer to create a thread if the conversation looks worth one.
 
 ## Why this exists
 
-Threads routinely end with valuable state only in the conversation — open questions, rationale behind a pivot, a concrete next step that never made it to disk. Without a close ritual, that state evaporates and the next session re-derives it from scratch. `thread:close` is the ritual: triage, route, persist, commit, done. The approval gate moved from save-time to curation-time (ADR 0011): saves are cheap and reversible, so the weekly curator — not a menu — is what keeps memory clean.
+Threads routinely end with valuable state only in the conversation — open questions, rationale behind a pivot, a concrete next step that never made it to disk. Without a close ritual, that state evaporates and the next session re-derives it from scratch. `thread:close` is the ritual: triage, route, persist, commit, done. The approval gate moved from save-time to curation-time (ADR 0011): saves are cheap and reversible, so the weekly curator — not a menu — is what keeps memory clean. A pending handoff doc is the one narrowing of that gate: it is already the tracker for the thread's continuation, so close refreshes it rather than proposing a second (ADR 0017).

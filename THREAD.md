@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-08-29
+last_touched: 2026-09-21
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
 ---
@@ -9,6 +9,26 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-09-21 — v2.5.0: handoff docs are durable, and a pending one owns the
+continuation (ADR 0017, amends 0011).** Picked up from the deferred capture
+`thread-handoff-durable-lifecycle`. Part 1: `thread:handoff` always writes and
+commits `<home>/docs/handoffs/<date>-<slug>.md` — `<home>` the unit directory
+(project dir under `~/Projects`, workspace dir under `~/repos/workspaces`, else
+the git toplevel) — never OS temp; front matter `thread`/`written`/`status`;
+the consumer marks it `consumed` at pickup (paste prompt, or `thread:open`'s new
+handoff-doc mode) and its close `git rm -f`s it. Part 2: close § The handoff owns
+the continuation — scope test ("would the next session, working from this doc, do
+it?"), refresh-don't-restate for the mid-session-then-superseded case, no
+annotation, no asking; all tests on disk (one-directory `find`, awk front matter,
+consumed = delete whoever marked it); legacy docs without front matter are
+counted and untouched. Verified by a five-then-nine-rep close rig (controls
+proposed all four candidates; every treatment rep proposed exactly the two loose
+ends). Two xhigh clean-room rounds (14 + 15 findings, all dispositioned in
+`docs/reviews/2026-09-21-*`); round 2 was 53% about round 1's fixes, so the chain
+stopped by METHOD K27 and the rig gated the ship. Stop hook message aligned
+(`session_safepoint.py`, fixtures 38/0); Codex adapter stub's OS-temp line
+dropped. Manifests re-synced at 2.5.0 (they had drifted 2.4.0 / 2.3.5).
 
 **2026-08-29 — v2.2.0: close saves autonomously; vault tasks stay gated (ADR 0011).**
 Lachy called out the close menu as rubber-stamp theatre — he ticks every
@@ -245,6 +265,7 @@ scheduled 2026-07-15.
 
 ## Session log
 
+- 2026-09-21: 2.5.0 — durable handoff lifecycle in `thread:handoff` (docs/handoffs, never temp; pending→consumed→deleted) + close's handoff-owns-the-continuation rule (ADR 0017 amends 0011); `thread:open` handoff-doc pickup; two xhigh rounds consumed, K27 stop, rig-gated; hook + Codex stub aligned; manifests 2.5.0. Ship pending: push → marketplace update → plugin update → restart.
 - 2026-09-01: 2.3.1 — phantom-gate footnote fix (ADR 0013): parseGatedInputs reads only list items ("- "/"* "/"+ "/numbered), prose in "### Gated inputs" is commentary; a section with no items and no "None" fails closed to plan-blocked (self-healing re-plan, same door as missing); planner/judge/reviser prompts hardened to bullets-only. Live trigger: chorus-rollout wave 2's planner footnote paused a fully signed-off task at gate-pending. Prompt bytes changed — in-flight resume caches re-run (clean, not corrupt). Shipped through the cache; restart applies.
 - 2026-08-31: 2.2.1 — docs-only patch shipping the 2026-08-30 doc-audit remediation through the cache (0ee53f6): repair's model-facing description now matches the ADR 0009 glossary (engine, not wave, holds merge authority); THREAD.md resume instructions point at all of docs/adr/; build-plan.md stamped historical.
 - 2026-08-29: 2.2.0 — close de-gated (ADR 0011): menu only for vault tasks; four-verb save-time triage + provisional/provenance frontmatter; weekly memory-curator system + daily recall harvest built on the workspaces side; /memory-triage retired; doctrine pointers repaired; ">4 sections" dead prose deleted (open-question nit resolved). Curator dry-run clean (byte-identical restore) → 7 spec fixes; inaugural live launchd run OK (archived 1 · merged 2 · demoted 3 · 47 index lines repaired; decay correctly gated by legacy grace) after one exit-127 fix (launchd PATH omits ~/.local/bin — runner resolves CLAUDE_BIN). 2.2.0 shipped through the cache; restart applies.

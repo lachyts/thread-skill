@@ -22,7 +22,7 @@ machine-verifiable in-run) rolls out; everything else runs as scoped sessions.
 | `/thread:orient` | back on a project, balls in the air | Project-altitude router: audit an area's open work, recommend the best use of time, ask the steering mode, then route by the execution-fit test — wave-shaped clusters to `gather`/`schedule`, the rest to `open` or to background batch sessions it launches itself (ADR 0010; the steering answer is the authorisation, dispatch artefacts are the no-cmux fallback). |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
-| `/thread:handoff` | fork now | Create a fresh visible sidebar task in Codex Desktop, seeded with compacted context; fail visibly with a manual prompt if native task creation is unavailable. |
+| `/thread:handoff` | fork now | Write and commit a durable `docs/handoffs/` doc + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop also create a fresh visible sidebar task seeded with it; elsewhere label it a manual handoff. |
 | `/thread:close` | done | Persist to THREAD.md + auto-commit; end-of-thread ritual. |
 
 ## Rollout verbs
@@ -84,7 +84,10 @@ per-task resume.
   `0013` — only list items declare gates. `0014` — stash and defer run the
   silent process scan. `0015` — process candidates route by altitude
   (project / seat / estate; amends 0012 and 0014; canonical design record is
-  workspaces ADR 0003).
+  workspaces ADR 0003). `0016` — a tier ceiling caps escalation when quota is
+  gone (amends 0006). `0017` — a pending handoff owns the thread's
+  continuation: handoff docs are durable and self-cleaning, and close refreshes
+  a pending one instead of proposing vault tasks that restate it (amends 0011).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 

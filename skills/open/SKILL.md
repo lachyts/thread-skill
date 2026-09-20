@@ -1,6 +1,6 @@
 ---
 name: open
-description: 'Open, resume, or start durable thread state. Use to load a THREAD.md (project threads at ~/Projects/<Area>/<Project>/THREAD.md, shared threads at ~/repos/workspaces/_shared/threads/<slug>.md), to list active threads, or to PICK UP a stashed/deferred thread capture from an Obsidian task — "/thread:open [[<task>]]" reads the task, primes from its resume prompt, and marks the capture done. Triggers on "open/load/resume the <slug> thread", "pick up [[task]]", "resume this task", "/thread:open", or when a conversation develops thread shape and no thread exists yet.'
+description: 'Open, resume, or start durable thread state. Use to load a THREAD.md (project threads at ~/Projects/<Area>/<Project>/THREAD.md, shared threads at ~/repos/workspaces/_shared/threads/<slug>.md), to list active threads, or to PICK UP a stashed/deferred thread capture from an Obsidian task — "/thread:open [[<task>]]" reads the task, primes from its resume prompt, and marks the capture done; "/thread:open docs/handoffs/<doc>" does the same for a handoff doc and marks it consumed. Triggers on "open/load/resume the <slug> thread", "pick up [[task]]", "resume this task", "/thread:open", or when a conversation develops thread shape and no thread exists yet.'
 ---
 
 # /thread:open — open or resume durable thread state
@@ -43,7 +43,7 @@ State comes from each file's frontmatter `state:` field. Skip threads with `stat
 1. Look for existing thread:
    - `~/repos/workspaces/_shared/threads/<slug>.md`
    - `find ~/Projects -name THREAD.md` and grep frontmatter `slug: <slug>` matches.
-2. If found → read the file, present a 4–6 line briefing (scope, state, where-we-are headline, top open question), and continue the conversation with that context loaded.
+2. If found → read the file, present a 4–6 line briefing (scope, state, where-we-are headline, top open question), and continue the conversation with that context loaded. If its Resume instructions point at a handoff doc (`Read <home>/docs/handoffs/<doc> first`), read that too and **mark it consumed** — set `status: consumed` in its front matter, no commit — exactly as the handoff-doc pickup below does; the thread is live again and `thread:close` will delete the doc. If the file is gone (its consumer's close deleted it and the pointer was never rewritten), say so in one line and brief from THREAD.md alone — `git log --all -- '<path>'` recovers the text if it matters.
 3. If not found → confirm with the user, ask for the scope (one line), then create the file from the canonical template with frontmatter populated. New shared threads also get appended to `INDEX.md`.
 
 ### `/thread:open [[<task>]]` — pick up a stashed/deferred capture
@@ -54,6 +54,15 @@ The pickup half of the stash/defer loop (see `${CLAUDE_PLUGIN_ROOT}/skills/_shar
 2. Read the linked `THREAD.md` if the task has one; brief from both.
 3. **Complete the capture**: set `status: done`, add `completed: <today>` in the task file. The capture's job ended the moment this thread went live — if the work gets set down again later, a fresh capture is written (dedup finds no open task).
 4. Confirm in one line: `Picked up [[<slug>]] — capture closed. Next move: <from the prompt>.` Then get on with the work.
+
+### `/thread:open <path-to-handoff-doc>` — pick up a handed-off thread
+
+The pickup half of the handoff loop (`${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` § Lifecycle). Accepts a path under a `docs/handoffs/` directory.
+
+1. Read the doc. Prime from its § What remains, § Decisions settled and § Gotchas; its § Paste-ready prompt is the working brief.
+2. Read the linked `THREAD.md` if the doc's `thread:` names one; brief from both.
+3. **Consume it**: set `status: consumed` in the doc's front matter, in place, with no commit. The consuming session's `thread:close` deletes the file in its close-out commit; git history keeps it. A doc with no `status:` line is legacy — brief from it, but leave it untouched.
+4. Confirm in one line: `Picked up <doc> — marked consumed. Next move: <from the prompt>.` Then get on with the work.
 
 ### `/thread:open save` — checkpoint without closing
 
@@ -100,4 +109,4 @@ Group by state in the index — Active first, then Paused, then Done at the bott
 - Don't create a thread for one-shot work — daily-task-shaped things go to vault tasks, not threads (`thread:stash` / `thread:defer` handle the capture).
 - Don't create a thread when an existing one fits — search first.
 - Don't skip `thread:close` at the end of a session that touched a thread — the thread is only useful if it stays current.
-- Don't leave the capture task open after a pickup — step 3 of pickup is not optional.
+- Don't leave the capture task open after a pickup — step 3 of pickup is not optional. The same for a handoff doc: an unmarked doc stays pending forever and keeps the next close from proposing that thread's tasks.

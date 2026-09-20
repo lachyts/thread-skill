@@ -25,9 +25,9 @@ The router for the undecided moment. A sibling of the decisive routes, not their
    - **`handoff`** — the work continues *right now* but this context is exhausted or the task deserves a fresh head. "New thread / new prompt" = this route.
    - **`close`** — the work is genuinely done for now; persist and commit.
 
-4. **Offer the routes via `AskUserQuestion`** — recommended option first with "(Recommended)", the other viable routes after (drop any that plainly don't apply; keep ≤4). Option descriptions say what each route would *do to this specific thread* ("task on tomorrow's page", "inline prompt to paste into a fresh session"), not generic definitions.
+4. **Offer the routes via `AskUserQuestion`** — recommended option first with "(Recommended)", the other viable routes after (drop any that plainly don't apply; keep ≤4). Option descriptions say what each route would *do to this specific thread* ("task on tomorrow's page", "committed handoff doc + prompt to paste into a fresh session"), not generic definitions.
 
-5. **Dispatch.** Run the chosen sibling's logic in full — task-writer capture for stash/defer, inline prompt (+ optional doc) for handoff, the complete persist-and-commit ritual for close. "Keep going" means exactly that: state the next step and continue working, no ceremony.
+5. **Dispatch.** Run the chosen sibling's logic in full — task-writer capture for stash/defer, the committed `docs/handoffs/` doc + paste-ready prompt for handoff (plus the native task in Codex Desktop), the complete persist-and-commit ritual for close. "Keep going" means exactly that: state the next step and continue working, no ceremony.
 
 ## Don't
 
