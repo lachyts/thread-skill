@@ -10,6 +10,36 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-09-21 (latest) — the tier ceiling is consumed, corrected and shipped as
+2.5.1; the review chain was stopped by the ledger, not by exhaustion.** Three
+clean-room rounds ran this session. Round 1 (`7ed7e6f`/`aaa87d`) was **lost** —
+killed mid-run when the CLI process exited, no findings, no doc (estate
+[[K42]]). Round 2 (`07ddc75`/`e55ab3`) returned 12 findings, all fixed. Round 3
+(`c9f09dd`/`df669e`) returned 15 — and `review-ledger.py` fired **STOP** at 60%
+regressions, nine of fifteen citing lines the chain itself had added, every
+culprit one of its own fix commits. No round 4 was dispatched. Per fresh-review
+§ Rounds the response was **revert to the root**: findings 1, 3, 4 and 8 were
+resolved by *deleting* a contortion, not adding a layer to it.
+
+Two real engine defects came out of it, both against the documented contract and
+both probe-confirmed: `effortTier` keyed off the lagging `capSuppressed` **event**
+flag, so a non-plan-gated capped task ran its full Ralph loop at the LOWER effort
+row; and the capped retry budget `floor(n/2)` was **1** at the template default,
+where a 1-iteration `ralphLoop` fires step (d) at i==1 and blocks *without*
+re-running the verifier. The first fix for the second one was itself defective —
+`min(n, max(2, floor(n/2)))` handed n=2 a full second budget, worse at that input
+than what it replaced — which is what triggered the revert-to-root. The settled
+form is a constant, `CAPPED_RETRY_ITERATIONS = 2`: capped implement cost is
+exactly `max_iterations + 2` against an uncapped `1 + max_iterations`, at every n,
+no edges. ADR 0016 § 2 was amended to match (it had still taught the event-flag
+rule the code now contradicts).
+
+Suite 191 assertions / 0 failures, full README § Tests 7/7, every fix
+mutation-checked — including the one that halves a *genuine* escalation's budget,
+which passed all 184 assertions before Scenario B was added. **2.5.1 is shipped
+and verified**: cache byte-identical to the repo by `diff -rq`, suite green from
+the cache copy. Tree clean, `origin/master` == HEAD, zero pending review docs.
+
 **2026-09-21 (later) — leftovers handed off; the consumer ran and died mid-batch.**
 The first handoff doc under the new contract
 (`docs/handoffs/2026-09-21-tier-review-triage-and-ship.md`) briefed a fresh
@@ -300,6 +330,15 @@ scheduled 2026-07-15.
   them on Windows. Capture titles become filenames, so task-writer is a
   producer of this risk (sanitisation task proposed and declined 2026-08-18;
   vault swept clean same day, link-safety verified before each rename).
+- **A backgrounded clean-room review does not survive the CLI process
+  exiting.** Round 1 of the 2026-09-21 tier-ceiling chain was dispatched
+  `run_in_background: true`, the process restarted mid-run, and the task
+  notification read "no completion record was found" — no findings, no review
+  doc, ~5 minutes of engine time for nothing. fresh-review's never-blocking rule
+  ("dispatch, keep working, findings land in `docs/reviews/` if you're gone by
+  then") assumes the session outlives the agent. Re-dispatching in the
+  background worked twice afterwards, both returning synchronously through the
+  wrapper's Skill call. Estate [[K42]] holds the general form.
 - **The version-keyed cache no longer governs this plugin — corrected
   2026-09-21.** The old rule (skills execute from
   `~/.claude/plugins/cache/thread/thread/<version>/`; bump both manifests →
@@ -347,12 +386,16 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-0. **First, the uncommitted four-file batch** left by the 2026-09-21 consumer
-   session: read `docs/reviews/2026-09-17-f4ba792-round2.md` § disposition to
-   see which four findings it fixed, run README § Tests, then either
-   `/fresh-review xhigh` it (batch uncommitted while the round runs — K25) and
-   commit by pathspec, or discard it deliberately. Then run the 2.5.0 cache
-   dance (Known quirks).
+0. **Nothing is half-done — the tree is clean and 2.5.1 is shipped.** The
+   2026-09-21 four-file batch was reviewed, corrected across two rounds and
+   committed; the cache dance ran and was verified (`diff -rq` against the
+   2.5.1 cache, suite green from the cache copy). A session restart is all that
+   is needed for 2.5.1 to load. Do **not** open a new `/code-review` chain on
+   the tier ceiling: `review-ledger.py` stopped the last one at 60%
+   regressions. The shipped code at `6b8188c` has had no clean-room pass —
+   `/simplify` is the engine that has never run on it and is the honest way to
+   close that gap. Start from § Open questions, which carries the two deferred
+   findings.
 1. Read this file, then `CONTEXT.md` and the ADRs in `docs/adr/` — the whole
    directory, not a subset. The rollout lane, orient's self-launching and
    close's autonomy each rest on an ADR added after v1.0.0.
@@ -368,6 +411,7 @@ scheduled 2026-07-15.
 
 ## Session log
 
+- 2026-09-21 (latest): consumed the stale 2026-09-17 tier-ceiling review and two further clean-room rounds (12 + 15 findings); round 1 lost to a CLI restart; round 3 hit the ledger's STOP at 60% regressions, so no round 4 — reverted to the root instead (retry budget is now a constant, not arithmetic over max_iterations). Two real engine defects fixed (effort keyed off a lagging event flag; a 1-iteration retry loop at the template default), ADR 0016 §2 amended, Scenarios F and G added, 191 assertions. Shipped 2.5.1 and verified the cache byte-identical — the version-keyed cache is still live and a same-version content change does NOT refresh it. Two findings deferred to § Open questions + vault tasks.
 - 2026-09-21 (later): handed the leftovers off via the first ADR 0017 doc; the consumer consumed the 2026-09-17 round-2 review (af0094f) and left its four-file fix batch uncommitted, no close; this close deleted the consumed handoff doc + the two consumed 2026-09-21 review docs; concurrent-checkout hazard logged (open question + estate METHOD row); ship still pending the cache dance.
 - 2026-09-21: 2.5.0 — durable handoff lifecycle in `thread:handoff` (docs/handoffs, never temp; pending→consumed→deleted) + close's handoff-owns-the-continuation rule (ADR 0017 amends 0011); `thread:open` handoff-doc pickup; two xhigh rounds consumed, K27 stop, rig-gated; hook + Codex stub aligned; manifests 2.5.0. Ship pending: push → marketplace update → plugin update → restart.
 - 2026-09-01: 2.3.1 — phantom-gate footnote fix (ADR 0013): parseGatedInputs reads only list items ("- "/"* "/"+ "/numbered), prose in "### Gated inputs" is commentary; a section with no items and no "None" fails closed to plan-blocked (self-healing re-plan, same door as missing); planner/judge/reviser prompts hardened to bullets-only. Live trigger: chorus-rollout wave 2's planner footnote paused a fully signed-off task at gate-pending. Prompt bytes changed — in-flight resume caches re-run (clean, not corrupt). Shipped through the cache; restart applies.
