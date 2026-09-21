@@ -336,7 +336,14 @@ scheduled 2026-07-15.
   sitting in the tree.) Verify a release two ways, not one: the repo tree AND
   `~/.claude/plugins/cache/thread/thread/<version>/`, which `claude plugin
   update thread@thread` still rebuilds and which `${CLAUDE_PLUGIN_ROOT}` may
-  resolve to for script paths.
+  resolve to for script paths. **The version-keyed half of the old rule is
+  still live, and this is where it bites**: changing content *under an
+  already-cached version number* does NOT refresh the cache. Measured
+  2026-09-21 — 2.5.0 was cached, four skill files were then fixed and pushed
+  still at 2.5.0, and the cache kept serving the defective engine
+  (`CAPPED_RETRY_ITERATIONS` absent from the cached copy while the repo had
+  it). A content change that matters therefore needs a version BUMP, not just
+  a re-run of the update; `diff -rq <cache>/skills skills` is the check.
 
 ## Resume instructions
 
