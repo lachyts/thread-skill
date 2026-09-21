@@ -215,6 +215,13 @@ scheduled 2026-07-15.
   running), the originating session's close would pull the file out from under
   it. Guard on `ListAgents` peers sharing the cwd, or accept (history keeps it,
   the consumer already read it)? Proposed as a vault task at close.
+- **Chorus Suggestion-card seam (estate METHOD K40, 2026-09-21).** The Stage's
+  Suggestion card (chorus ADR 0036) has a **Keep** that writes a vault task
+  directly — the Host writes it, so close's ADR 0017 rule never gets a vote —
+  and a **Start** that carries no pointer to the pending handoff doc. Handed to
+  this thread as findings-not-spec; the seam is deliberately undecided: does
+  the Stage learn what a handoff doc is, or does `thread:handoff` emit a
+  Suggestion? Owner is this thread.
 - Does `${CLAUDE_PLUGIN_ROOT}` expand in the Stop-hook command under the
   native-Windows hook runner? The first Windows session end answers it; if it
   fails, the fix lands in `hooks/hooks.json` here, never a local patch.
