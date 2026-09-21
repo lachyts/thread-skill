@@ -20,6 +20,14 @@ max_plan_rounds: 3  # 2 was insufficient for cross-cutting plan-gates; 3-with-ac
 plan_approval: scope-gated  # off | scope-gated | required
 parallel_ceiling: 4
 model: opus  # opus | fable — default (mechanical execution). thread:schedule stamps `model: fable` on structural (cross-cutting) or deep tasks; a fable task runs end-to-end incl. its judges.
+# max_tier: opus   # optional CEILING. `opus` is the ONLY value that caps anything — `fable` is the
+#             uncapped default, so `max_tier: fable` is a no-op. Set it ONLY when the fable quota is
+#             exhausted, never as a cost preference. It clamps the seed, suppresses escalation (a capped
+#             tier is terminal, so it runs the FULL loop at the higher tier's effort) and clamps a
+#             judgeModel pin. Uncomment the line AS WRITTEN, with the value: a bare `max_tier:` parses
+#             as null, which reads as ABSENT and runs UNCAPPED with no warning line. Omit ⇒
+#             byte-identical to an uncapped run. ADR 0016; execute SKILL.md § "3. Resolve effective
+#             config per task".
 # env_bootstrap:   # optional: shell cmd thread:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — thread:schedule step 2.7
 merged_through_wave: 0  # thread:execute continuous-mode cursor: highest wave merged to main (0 = none yet)
 # wave_N_dispatched: / wave_N_merged:   # engine-stamped wave-boundary timestamps (flat per-wave keys, ISO):
@@ -66,7 +74,7 @@ The table's **Mode** column reads `parallel` for tasks that fan out within a wav
 
 On Lachy's M3 96GB, the safe parallel ceiling is **3-4 agents per wave** when tasks load large models (e.g. LPIPS ≈ 500 MB / 30s startup). Light tasks (config edits, validation, small fixes) can fan wider.
 
-**Two-layer convergence multiplies wall-clock, not memory.** Worst-case per task is `max_iterations × verifier-time × max_review_rounds`. With this rollout's defaults (3 × verifier × 4 review rounds), a 5-minute verifier means up to ~60 min per task in the worst case. Lower `max_review_rounds` per-rollout (here in frontmatter) or per-task if a wave is dominated by cross-cutting long-verifier work.
+**Two-layer convergence multiplies wall-clock, not memory.** Worst-case per task is `max_iterations × verifier-time × max_review_rounds`. With this rollout's defaults (3 × verifier × 4 review rounds), a 5-minute verifier means up to ~60 min per task in the worst case. Lower `max_review_rounds` per-rollout (here in frontmatter) or per-task if a wave is dominated by cross-cutting long-verifier work. **Under `max_tier` the implement layer costs more, not less**: the capped first pass is terminal so it spends the full `max_iterations`, and the same-tier retry spends half again (floored at 2) — about `1.5 × max_iterations` against an uncapped run's `1 + max_iterations`. Budget a capped wave accordingly.
 
 **Two costs the per-task budget above does NOT model — add them for deep cross-cutting waves:**
 - **Plan-block re-dispatch.** A `scope: cross-cutting` task that exhausts `max_plan_rounds` halts and re-dispatches with the judge's feedback — a *full extra* plan→implement→review cycle. On the 2026-06-02 giflab run 3/3 cross-cutting tasks plan-blocked once each, then converged on the next round; budget those as elevated re-dispatch risk (this is why `max_plan_rounds` defaults to 3 for cross-cutting).

@@ -814,8 +814,12 @@ function judgeFor(a, st) { return clampTier(normaliseTier(a && a.judgeModel, st.
 // tier, or because the cap makes its current tier the last one available.
 function terminalTier(st) { return !knownTier(st.tier) || st.tier === TOP_TIER || st.tier === st.cap }
 
-// Returns whether the tier actually changed, so callers can tell an agent the truth about which pass
-// it is (a suppressed escalation is a same-tier retry, not a stronger-tier takeover).
+// Returns whether the tier actually CHANGED. Prompt framing does NOT read this return: every builder
+// takes `st` and derives its own framing from it — escalationContext off `st.escalated`, verifyBlock
+// off `terminalTier(st)` — which is what makes the plannerPrompt class of omission unwritable (a
+// builder that forgets `st` does not compile a prompt at all). The one live consumer of the RETURN is
+// implement()'s budget split: a suppressed escalation means the first pass was already terminal and
+// spent a full Ralph budget, so the retry gets a reduced one rather than another full one.
 function escalate(st, slug, at) {
   if (terminalTier(st)) {
     if (!st.capSuppressed) {
@@ -855,7 +859,16 @@ const EFFORT = {
 // (task.effort) is the SINGLE escape hatch (ADR 0007): it overrides the bundle's planner/implementer
 // effort for that task only — judges always keep the matrix — and it is absolute across an
 // escalation (a monster task at fable/max stays at max).
-function effortTier(st) { return st.capSuppressed ? TOP_TIER : st.tier }
+// Effort is NOT quota-scarce (ADR 0016), so a task the cap has made TERMINAL takes the top tier's
+// effort row. Key that off terminality — a run-level fact true from the first dispatch — not off
+// st.capSuppressed, which is an EVENT flag escalate() sets only once a hand-over has been refused.
+// On a non-plan-gated capped task nothing calls escalate() before the first implement dispatch, so
+// the flag alone gave that pass the full Ralph loop at the LOWER row — the opposite of the contract
+// in execute/SKILL.md and rollout-template.md. capSuppressed is kept in the test: it implies
+// terminality and state doubles in the suite set it without a `cap`.
+function effortTier(st) {
+  return (st.capSuppressed || terminalTier(st)) && st.tier !== TOP_TIER ? TOP_TIER : st.tier
+}
 // Same guard as rank(): a bare EFFORT[tier] answers for inherited Object.prototype keys, so an
 // unrecognised `model:` reaching st.tier would yield a truthy non-row whose .implementer is undefined.
 // Every matrix read goes through here and falls back to a REAL row rather than crashing the task.
@@ -1037,7 +1050,13 @@ async function implement(task, st, prev, a) {
     // Under a cap the first pass was ALREADY terminal, so it spent a full Ralph budget. Another full
     // budget would make a capped task cost ~2x max_iterations of verifier work on the model chosen
     // because resources were scarce. The two passes SHARE the budget instead.
-    const retryTask = moved ? task : { ...task, maxIterations: Math.max(1, Math.floor((task.maxIterations || 3) / 2)) }
+    // Under a cap the first pass was ALREADY terminal, so it spent a full Ralph budget. The retry
+    // gets HALF — but floored at 2, because a 1-iteration ralphLoop is degenerate: step (d) fires on
+    // i == maxIterations and blocks WITHOUT re-running the verifier, so the agent commits an
+    // unverified fix. At the template default (3) the old floor(3/2) handed the retry exactly that.
+    // Capped worst case is therefore ~1.5x max_iterations, not 2x — rollout-template.md says so.
+    const retryBudget = (n) => Math.min(n, Math.max(2, Math.floor(n / 2)))
+    const retryTask = moved ? task : { ...task, maxIterations: retryBudget(task.maxIterations || 3) }
     r = await runAgent(prompt(prior, retryTask), {
       label: `implement:${task.slug}@${st.tier}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
     })

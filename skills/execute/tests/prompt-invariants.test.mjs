@@ -129,12 +129,15 @@ const baseEff = { taskPath: '/v/t.md', maxIterations: 3, maxReviewRounds: 2, max
 const effortCalls = []
 function recordingAgent(impl) {
   return async (prompt, opts) => {
-    effortCalls.push({ label: opts.label, model: opts.model, effort: opts.effort })
+    effortCalls.push({ label: opts.label, model: opts.model, effort: opts.effort, prompt })
     return impl(prompt, opts)
   }
 }
 const greenImpl = { verified: true, blocked: false, escalate: false, prUrl: 'https://pr/9', branch: 'b', worktreePath: '/wt', blockerDiagnosis: '', summary: 's' }
 const call = (label) => effortCalls.find((c) => c.label.startsWith(label))
+// Exact-match sibling: `call` is a PREFIX match, so it cannot distinguish a first pass from
+// its `@tier` retry. Use callAt when the retry is the subject.
+const callAt = (label) => effortCalls.find((c) => c.label === label)
 
 // Scenario A — plan-gated opus task, clean pass: planner medium, plan judge high, implementer
 // medium, master review high; nothing escalates.
@@ -288,6 +291,87 @@ await T.converge({ ...baseEff, slug: 'proj-eff-d', scope: 'single-file', planGat
 ok(call('implement:proj-eff-d') && call('implement:proj-eff-d').effort === 'max', 'effort D: override holds on the opus first pass')
 ok(call('implement:proj-eff-d@fable') && call('implement:proj-eff-d@fable').effort === 'max', 'effort D: override survives the fable takeover')
 ok(call('review:proj-eff-d') && call('review:proj-eff-d').effort === 'xhigh', 'effort D: master review still follows the matrix (xhigh @ fable)')
+
+// Scenario E — the CAP, end to end (ADR 0016). Everything above in the maxTier block pokes helpers in
+// isolation; nothing drove converge() under a cap, so the plannerPrompt STRONGER-TIER lie, the judge
+// effort inversion and the doubled Ralph budget all passed a green suite. A plan-gated task SEEDED at
+// fable with judges PINNED to fable, under maxTier:'opus', failing its first pass in BOTH layers.
+// The judgeModel pin is load-bearing: without it judgeFor() returns st.tier either way and the
+// "judges are clamped" claim passes vacuously (proven by mutation — removing the clamp entirely
+// failed zero assertions here).
+effortCalls.length = 0
+ctx.agent = recordingAgent(async (prompt, opts) => {
+  if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
+  if (opts.label.startsWith('plan:')) {
+    return opts.label.endsWith('@opus')
+      ? { ready: true, blocked: false, blockerCause: '', plan: 'PLAN\n### Gated inputs\nNone' }
+      : { ready: false, blocked: false, blockerCause: 'first planner produced no plan', plan: '' }
+  }
+  if (opts.phase === 'Implement') {
+    // A CAPPED first pass renders ralphLoop, and ralphLoop never instructs escalate=true — its step
+    // (d) says blocked=true, verified=false. Only oneShotVerify asks for escalate. Returning
+    // escalate here would script a reply the capped prompt forbids, so the capped path must be
+    // reached through the arm a compliant agent can actually take.
+    return opts.label.endsWith('@opus')
+      ? greenImpl
+      : { verified: false, blocked: true, escalate: false, prUrl: '', branch: 'b', worktreePath: '/wt', blockerDiagnosis: 'red first pass', summary: '' }
+  }
+  return { verdict: 'approve', feedback: [] } // master review
+})
+const capRes = await T.converge(
+  { ...baseEff, slug: 'proj-eff-e', scope: 'cross-cutting', planGate: true, model: 'fable', maxIterations: 4 },
+  { ...aEff, maxTier: 'opus', judgeModel: 'fable' },
+)
+// (a) the ceiling holds at every dispatch — the fable SEED, the fable JUDGE PIN and the master
+// review each reach the model by a different path (taskModel / judgeFor / st.tier).
+ok(effortCalls.length > 0 && effortCalls.every((c) => c.model === 'opus'), 'cap E: EVERY dispatch runs at the capped tier — seed clamped, pinned judges clamped, no layer escapes')
+// (b) the result tells the truth: capped, NOT escalated (reconcile must never stamp an unusable tier).
+ok(capRes && capRes.tierCapped === true && capRes.escalated === false && capRes.model === 'opus', 'cap E: result reports tierCapped, never escalated, and lands on the capped tier')
+ok(capRes && capRes.tierCappedAt === 'plan' && capRes.escalatedAt === '', 'cap E: the layer the cap FIRST bit is reported; no escalation stamp')
+ok(capRes && capRes.status === 'review', 'cap E: a capped run still converges — the cap is not a failure mode')
+// (c) no same-tier retry is told it is a stronger-tier takeover, in EITHER layer.
+const capSecond = effortCalls.filter((c) => c.label.endsWith('@opus'))
+ok(capSecond.length === 2, 'cap E: both layers ran a same-tier second pass (plan + implement)')
+ok(capSecond.every((c) => c.prompt.includes('SECOND PASS') && !c.prompt.includes('STRONGER-TIER')), 'cap E: no second-pass prompt claims a stronger-tier takeover')
+// (d) effort is NOT quota-scarce. The cap makes the task terminal from the FIRST dispatch, so the
+// higher row applies immediately — not only after escalate() has recorded a suppression.
+ok(call('plan:proj-eff-e') && call('plan:proj-eff-e').effort === 'high', 'cap E: even the FIRST planner pass takes the higher tier EFFORT row — the cap makes it terminal at dispatch')
+ok(callAt('plan:proj-eff-e@opus') && callAt('plan:proj-eff-e@opus').effort === 'high', 'cap E: the suppressed plan retry keeps the higher tier EFFORT row')
+ok(call('implement:proj-eff-e') && call('implement:proj-eff-e').effort === 'high', 'cap E: the capped implementer runs high, not medium')
+ok(callAt('review:proj-eff-e r1') && callAt('review:proj-eff-e r1').effort === 'xhigh', 'cap E: master review runs xhigh — the effort an escalated run would have got')
+// (e) budget: a capped first pass is TERMINAL, so it already spends a full Ralph budget. The retry
+// gets a REDUCED one — capped cost is ~1.5x max_iterations, against an uncapped run's 1 + n. It is
+// not "shared" down to parity, and the template's resource-budget line says so.
+const capImplFirst = call('implement:proj-eff-e')
+const capImplRetry = callAt('implement:proj-eff-e@opus')
+ok(capImplFirst && capImplFirst.prompt.includes('Max iterations: 4') && !capImplFirst.prompt.includes('EXACTLY ONCE'), 'cap E: the capped first pass is terminal — full Ralph loop, never the one-shot')
+ok(capImplRetry && capImplRetry.prompt.includes('Max iterations: 2'), 'cap E: the capped retry runs a REDUCED budget (4 ⇒ 2), never a second full one')
+
+// Scenario F — the TEMPLATE DEFAULT capped task: scope single-file, so plan_approval: scope-gated
+// leaves planGate false, and max_iterations is the template's 3. This is the COMMON capped shape and
+// the one Scenario E cannot see: with no plan layer, nothing calls escalate() before the first
+// implement dispatch, so any effort rule keyed on the capSuppressed EVENT flag rather than on
+// terminality silently hands this pass the lower row. It also pins the retry budget floor: floor(3/2)
+// is 1, and a 1-iteration ralphLoop blocks without ever re-running the verifier.
+effortCalls.length = 0
+ctx.agent = recordingAgent(async (prompt, opts) => {
+  if (opts.phase === 'Implement') {
+    return opts.label.endsWith('@opus')
+      ? greenImpl
+      : { verified: false, blocked: true, escalate: false, prUrl: '', branch: 'b', worktreePath: '/wt', blockerDiagnosis: 'red first pass', summary: '' }
+  }
+  return { verdict: 'approve', feedback: [] }
+})
+const capDef = await T.converge(
+  { ...baseEff, slug: 'proj-eff-f', scope: 'single-file', planGate: false, maxIterations: 3 },
+  { ...aEff, maxTier: 'opus' },
+)
+ok(capDef && capDef.tierCapped === true && capDef.escalated === false, 'cap F: the default-shaped capped task reports tierCapped, never escalated')
+ok(call('implement:proj-eff-f') && call('implement:proj-eff-f').effort === 'high', 'cap F: the FIRST pass of a non-plan-gated capped task runs high — effort follows terminality, not the capSuppressed event')
+const defFirst = call('implement:proj-eff-f')
+const defRetry = callAt('implement:proj-eff-f@opus')
+ok(defFirst && defFirst.prompt.includes('Max iterations: 3') && !defFirst.prompt.includes('EXACTLY ONCE'), 'cap F: the capped first pass spends the FULL template budget on the Ralph loop')
+ok(defRetry && defRetry.prompt.includes('Max iterations: 2'), 'cap F: the retry budget floors at 2 — a 1-iteration loop blocks without ever re-running the verifier')
 
 // ---- Gated inputs (ADR 0008): a declared gate always pauses for a human -------
 // The plan carries a REQUIRED "### Gated inputs" section (spend with a hard cap / credentials /
