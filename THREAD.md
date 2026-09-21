@@ -209,6 +209,31 @@ scheduled 2026-07-15.
 
 ## Open questions / decisions pending
 
+- **Two tier-ceiling gaps deferred from the 2026-09-21 round-3 review**
+  (`docs/reviews/2026-09-21-c9f09dd-df669e.md`, findings 12 and 14). Both are
+  pre-existing — neither was introduced by that chain — and both were left
+  alone deliberately because `review-ledger.py` fired STOP on that round
+  (60% regressions, culprits the chain's own fix commits), so a fourth patch
+  round was the wrong move. Recorded here because the review doc is deleted at
+  close-out.
+  1. **`/thread:status` and `/thread:repair` never mention `tier_capped`.**
+     ADR 0016 § 3 names those two skills as the consumers of the durable
+     marker — the whole justification for stamping it on the note rather than
+     leaving it in the workflow return — but `grep -rn 'tier_capped' skills/`
+     matches only schedule, execute and `reconcile-wave.py`. So a capped
+     rollout's blocked tasks get triaged by `/thread:repair` as genuine walls,
+     which is exactly the failure mode ADR 0016 § 3 exists to prevent. Fix is
+     two conductor-skill edits; needs a decision on the triage wording.
+  2. **A capped run that goes green on its first pass records nothing.**
+     `escalate()` is never called, so `capSuppressed` stays false, so
+     `tierCapped` is false and reconcile stamps no marker. That task ran a full
+     Ralph loop at the higher EFFORT row on the capped model — a materially
+     different profile from an uncapped opus success — and the note cannot be
+     told apart from one afterwards. Auditing which tasks in a rollout ran
+     ceilinged is impossible once the lead session ends. Fix needs a new result
+     field (the run was capped) distinct from the existing one (an escalation
+     was suppressed), plus a reconcile change: a design decision, not a cleanup.
+
 - `close` § The handoff owns the continuation deletes a *consumed* doc "whoever
   marked it". When the consumer is a live peer session in the **same checkout**
   (observed 2026-09-21: the consumer had marked the doc consumed while still
@@ -299,6 +324,19 @@ scheduled 2026-07-15.
   resolve into the 2.3.4 cache — check that before assuming scripts are live.
   Still bump both manifests on a release: the version is the record, and a
   github-sourced install elsewhere would need it.
+- **The hazard that correction creates.** The version-keyed cache was an
+  accidental safety barrier: nothing shipped until two manifests were bumped
+  and the plugin updated. With a directory source there is no barrier, so
+  **uncommitted, half-finished edits in this working tree are live in every new
+  session across the estate** — a SKILL.md mid-rewrite, a `workflow.js` with a
+  syntax error, a prompt with a contradiction. The guard is behavioural: land
+  skill edits in one write rather than leaving them open across a break, and
+  `git stash` before stepping away from a partial edit. (This is not
+  hypothetical — the 2026-09-21 session began with four modified skill files
+  sitting in the tree.) Verify a release two ways, not one: the repo tree AND
+  `~/.claude/plugins/cache/thread/thread/<version>/`, which `claude plugin
+  update thread@thread` still rebuilds and which `${CLAUDE_PLUGIN_ROOT}` may
+  resolve to for script paths.
 
 ## Resume instructions
 

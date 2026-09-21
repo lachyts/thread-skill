@@ -80,7 +80,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 | `max_plan_rounds` | `3` | `task.maxPlanRounds` |
 | `plan_approval` | `scope-gated` | drives `task.planGate` (see 3.5) |
 | `parallel_ceiling` | `4` | `concurrency` (rollout-level) |
-| `max_tier` | none (omit) | `maxTier` (rollout-level; `opus` \| `fable`) — the ADR 0016 tier **ceiling**. Set it ONLY when the account's fable quota is exhausted, never as a cost preference: it clamps the seed, suppresses escalation (reported as `tierCapped`), and clamps a `judgeModel` pin. A capped tier is terminal, so it runs the full Ralph loop at the higher tier's effort. Omit ⇒ byte-identical to pre-ceiling. |
+| `max_tier` | none (omit) | `maxTier` (rollout-level; **`opus` is the only value that caps anything** — `fable` is the uncapped default, so `max_tier: fable` is a no-op, and an empty `max_tier:` parses as null and also runs uncapped, with no log line) — the ADR 0016 tier **ceiling**. Set it ONLY when the account's fable quota is exhausted, never as a cost preference: it clamps the seed, suppresses escalation (reported as `tierCapped`), and clamps a `judgeModel` pin. A capped tier is terminal, so it runs the full Ralph loop at the higher tier's effort. Omit ⇒ byte-identical to pre-ceiling. |
 | `env_bootstrap` | none (omit) | `envBootstrap` (rollout-level) |
 | `ignore_gate` | `false` (omit) | `task.ignoreGate` (per-task) |
 | `model` | `opus` | `task.model` (per-task; `opus` \| `fable`) |

@@ -33,8 +33,26 @@ Three consequences are load-bearing, and the first is the one that makes the cei
    flight; it was stopped and re-dispatched. `verifyBlock` now selects on terminality, not
    on the tier name.
 2. **Effort is not capped.** A tier is a (model, effort) bundle (ADR 0007), but only the
-   model is quota-scarce. Once a cap suppresses an escalation, the task takes the higher
-   tier's effort row — the capability still available to pay for.
+   model is quota-scarce. A task the cap has made TERMINAL takes the higher tier's effort
+   row — the capability still available to pay for.
+
+   *Amended 2026-09-21.* This clause originally read "once a cap suppresses an escalation,
+   the task takes the higher tier's effort row", and the implementation followed it
+   literally: `effortTier` keyed off the `capSuppressed` **event** flag. But `escalate()`
+   only sets that flag when a hand-over is refused, and on a non-plan-gated task nothing
+   calls `escalate()` before the first implement dispatch — so the common capped task ran
+   its full Ralph loop at the LOWER effort row, the opposite of this clause's intent.
+   Effort now follows `terminalTier(st)`, a run-level fact true from the first dispatch.
+   Do not restore the event-flag reading; `prompt-invariants` Scenario F exists to catch it.
+
+   **The capped retry's budget is part of this consequence.** The capped first pass is
+   terminal, so it spends the full `max_iterations`; the same-tier retry then gets a fixed
+   `CAPPED_RETRY_ITERATIONS` (2 — one fix-and-re-verify cycle), making the capped implement
+   layer cost exactly `max_iterations + 2` against an uncapped run's `1 + max_iterations`.
+   It is deliberately **not** a function of `max_iterations`: two attempts at arithmetic
+   (`floor(n/2)`, then a floor of 2 around it) each shipped a defect at an edge — 1
+   iteration at the template default, which blocks without ever re-running the verifier,
+   and a full second budget at n=2.
 3. **A suppressed escalation is recorded** as `tierCapped` on the result and, durably, as
    `tier_capped: <layer>` on the task note at reconcile — `/thread:status` and `/thread:repair` build
    their triage from note frontmatter, so a marker that lives only in the workflow return dies with

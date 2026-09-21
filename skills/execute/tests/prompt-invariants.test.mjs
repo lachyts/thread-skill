@@ -170,6 +170,10 @@ ok(escRes && escRes.status === 'review' && escRes.escalated && escRes.model === 
 ok(call('implement:proj-eff-b') && call('implement:proj-eff-b').effort === 'medium' && call('implement:proj-eff-b').model === 'opus', 'effort B: opus first pass runs medium')
 ok(call('implement:proj-eff-b@fable') && call('implement:proj-eff-b@fable').effort === 'high' && call('implement:proj-eff-b@fable').model === 'fable', 'effort B: fable takeover runs high (bundle flips with the tier)')
 ok(call('review:proj-eff-b') && call('review:proj-eff-b').effort === 'xhigh' && call('review:proj-eff-b').model === 'fable', 'effort B: master review after escalation runs xhigh @ fable')
+// The escalated retry keeps the FULL iteration budget — that is what the hand-over to a stronger
+// tier buys. Only a SUPPRESSED escalation (no hand-over) gets the reduced constant. Without this,
+// dropping implement()'s `moved ?` guard silently halves every real escalation and ships green.
+ok(callAt('implement:proj-eff-b@fable') && callAt('implement:proj-eff-b@fable').prompt.includes('Max iterations: 3'), 'effort B: a REAL escalation keeps the FULL max_iterations, never the capped retry constant')
 
 // ---- maxTier ceiling (args.maxTier) -----------------------------------------
 // The ceiling exists for one condition: the higher tier's quota is exhausted. Its whole promise is
@@ -214,9 +218,13 @@ ok(T.judgeFor({ judgeModel: 'fable' }, { tier: 'opus', cap: 'opus' }) === 'opus'
   ok(T.verifyBlock({ tier: 'sonnet', cap: 'fable' }, 'make test', 3, []) === ralph, 'maxTier: an unrecognised tier still gets the full loop, never the one-shot')
 }
 
-// Effort is not quota-scarce: once an escalation is suppressed the task takes the higher tier's row.
-ok(T.effortTier({ tier: 'opus', capSuppressed: true }) === 'fable' && T.effortTier({ tier: 'opus', capSuppressed: false }) === 'opus', 'maxTier: suppressed escalation keeps the higher tier EFFORT row')
-ok(T.implEffort({ tier: 'opus', capSuppressed: true }, {}) === 'high', 'maxTier: capped implementer runs high, not medium')
+// Effort is not quota-scarce: a task the cap has made TERMINAL takes the higher tier's row — from the
+// FIRST dispatch, not from the moment an escalation is refused. Every double carries a `cap`, because
+// a state with capSuppressed and no cap is one converge() cannot produce (escalate() only ever sets
+// the flag inside its `if (terminalTier(st))` branch).
+ok(T.effortTier({ tier: 'opus', cap: 'opus', capSuppressed: false }) === 'fable', 'maxTier: a capped tier takes the higher EFFORT row BEFORE any suppression is recorded')
+ok(T.effortTier({ tier: 'opus', cap: 'opus', capSuppressed: true }) === 'fable' && T.effortTier({ tier: 'opus', cap: 'fable', capSuppressed: false }) === 'opus', 'maxTier: terminal ⇒ higher row; uncapped opus ⇒ its own row')
+ok(T.implEffort({ tier: 'opus', cap: 'opus', capSuppressed: true }, {}) === 'high', 'maxTier: capped implementer runs high, not medium')
 ok(T.judgeEffort({}, { tier: 'opus', cap: 'opus', capSuppressed: true }, 'masterReview') === 'xhigh', 'maxTier: capped master review runs xhigh')
 
 // A same-tier retry must not be told it is a stronger-tier takeover.
@@ -371,7 +379,35 @@ ok(call('implement:proj-eff-f') && call('implement:proj-eff-f').effort === 'high
 const defFirst = call('implement:proj-eff-f')
 const defRetry = callAt('implement:proj-eff-f@opus')
 ok(defFirst && defFirst.prompt.includes('Max iterations: 3') && !defFirst.prompt.includes('EXACTLY ONCE'), 'cap F: the capped first pass spends the FULL template budget on the Ralph loop')
-ok(defRetry && defRetry.prompt.includes('Max iterations: 2'), 'cap F: the retry budget floors at 2 — a 1-iteration loop blocks without ever re-running the verifier')
+ok(defRetry && defRetry.prompt.includes('Max iterations: 2'), 'cap F: the capped retry gets the fixed one-cycle constant, not a function of max_iterations')
+// Scenario E cannot see either of these: it HAS a plan layer, so its cap bites at 'plan' and its
+// judges are plan-judges. On the non-plan-gated path the cap first bites at implement.
+ok(capDef && capDef.tierCappedAt === 'implement', 'cap F: with no plan layer the cap first bites at the IMPLEMENT layer, and says so')
+ok(effortCalls.length > 0 && effortCalls.every((c) => c.model === 'opus'), 'cap F: the ceiling holds on every dispatch of the non-plan-gated path too')
+// n differs between E (4) and F (3) and both retries are 2 — that is what pins the budget as a
+// CONSTANT rather than an arithmetic function that happens to land on 2 at one value of n.
+ok(capImplRetry && capImplRetry.prompt.includes('Max iterations: 2') && defRetry.prompt.includes('Max iterations: 2'), 'cap E+F: the capped retry budget is independent of max_iterations (4 and 3 both ⇒ 2)')
+
+// Scenario G — the budget edge BOTH previous arithmetic attempts got wrong, pinned at a value where
+// a constant and a halving visibly disagree. floor(n/2) and min(n, max(2, floor(n/2))) both return 2
+// at n=3 and n=4, so Scenarios E and F cannot tell an arithmetic function from a constant; at n=8
+// the halving returns 4 and the constant still returns 2. Without this, reverting to either
+// arithmetic form ships green — and each of those forms shipped a real defect (1 iteration at the
+// template default; a full second budget at n=2).
+effortCalls.length = 0
+ctx.agent = recordingAgent(async (prompt, opts) => {
+  if (opts.phase === 'Implement') {
+    return opts.label.endsWith('@opus')
+      ? greenImpl
+      : { verified: false, blocked: true, escalate: false, prUrl: '', branch: 'b', worktreePath: '/wt', blockerDiagnosis: 'red', summary: '' }
+  }
+  return { verdict: 'approve', feedback: [] }
+})
+await T.converge({ ...baseEff, slug: 'proj-eff-g', scope: 'single-file', planGate: false, maxIterations: 8 }, { ...aEff, maxTier: 'opus' })
+const gFirst = call('implement:proj-eff-g')
+const gRetry = callAt('implement:proj-eff-g@opus')
+ok(gFirst && gFirst.prompt.includes('Max iterations: 8'), 'cap G: the capped first pass still spends the full task budget')
+ok(gRetry && gRetry.prompt.includes('Max iterations: 2'), 'cap G: the capped retry is a CONSTANT one cycle at n=8 — not half (4), not a second full budget')
 
 // ---- Gated inputs (ADR 0008): a declared gate always pauses for a human -------
 // The plan carries a REQUIRED "### Gated inputs" section (spend with a hard cap / credentials /

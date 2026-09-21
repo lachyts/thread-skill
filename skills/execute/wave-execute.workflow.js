@@ -763,6 +763,8 @@ function chunk(arr, n) {
 //      a cap that is no longer true, so the result says so and /thread:repair can re-dispatch the task
 //      when the higher tier's quota returns instead of reading it as a wall.
 const TIER_RANK = { opus: 0, fable: 1 }
+// Iterations the capped same-tier retry gets: one fix-and-re-verify cycle. See implement().
+const CAPPED_RETRY_ITERATIONS = 2
 const TOP_TIER = 'fable'
 
 // Free-form operator input: normalise, and fail CLOSED to the uncapped default only for values that
@@ -814,12 +816,15 @@ function judgeFor(a, st) { return clampTier(normaliseTier(a && a.judgeModel, st.
 // tier, or because the cap makes its current tier the last one available.
 function terminalTier(st) { return !knownTier(st.tier) || st.tier === TOP_TIER || st.tier === st.cap }
 
-// Returns whether the tier actually CHANGED. Prompt framing does NOT read this return: every builder
-// takes `st` and derives its own framing from it — escalationContext off `st.escalated`, verifyBlock
-// off `terminalTier(st)` — which is what makes the plannerPrompt class of omission unwritable (a
-// builder that forgets `st` does not compile a prompt at all). The one live consumer of the RETURN is
-// implement()'s budget split: a suppressed escalation means the first pass was already terminal and
-// spent a full Ralph budget, so the retry gets a reduced one rather than another full one.
+// Returns whether the tier actually CHANGED. Prompt framing does NOT read this return — every builder
+// takes `st` and derives its own framing from it (escalationContext off `st.escalated`, verifyBlock
+// off `terminalTier(st)`). That is a CONVENTION, not a structural guarantee, and two review rounds
+// have now been burned on comments here claiming otherwise: `plannerPrompt` and `readOnlyPrompt` both
+// render a complete, wrongly-framed prompt when `st` is undefined, because escalationContext's
+// `!(st && st.escalated)` guard reads a missing `st` as "not escalated". Only the implementer
+// builders throw (they reach verifyBlock). The cap-sweep assertions in the suite are what actually
+// catch a forgotten `st`; do not claim the omission is unwritable.
+// The one live consumer of the RETURN is implement()'s retry budget.
 function escalate(st, slug, at) {
   if (terminalTier(st)) {
     if (!st.capSuppressed) {
@@ -866,9 +871,7 @@ const EFFORT = {
 // the flag alone gave that pass the full Ralph loop at the LOWER row — the opposite of the contract
 // in execute/SKILL.md and rollout-template.md. capSuppressed is kept in the test: it implies
 // terminality and state doubles in the suite set it without a `cap`.
-function effortTier(st) {
-  return (st.capSuppressed || terminalTier(st)) && st.tier !== TOP_TIER ? TOP_TIER : st.tier
-}
+function effortTier(st) { return terminalTier(st) ? TOP_TIER : st.tier }
 // Same guard as rank(): a bare EFFORT[tier] answers for inherited Object.prototype keys, so an
 // unrecognised `model:` reaching st.tier would yield a truthy non-row whose .implementer is undefined.
 // Every matrix read goes through here and falls back to a REAL row rather than crashing the task.
@@ -1047,16 +1050,17 @@ async function implement(task, st, prev, a) {
     const moved = escalate(st, task.slug, 'implement')
     const prior = [r.blockerDiagnosis, r.summary].filter((s) => s && s.trim()).join('\n')
       || 'first-pass attempt did not verify green'
-    // Under a cap the first pass was ALREADY terminal, so it spent a full Ralph budget. Another full
-    // budget would make a capped task cost ~2x max_iterations of verifier work on the model chosen
-    // because resources were scarce. The two passes SHARE the budget instead.
-    // Under a cap the first pass was ALREADY terminal, so it spent a full Ralph budget. The retry
-    // gets HALF — but floored at 2, because a 1-iteration ralphLoop is degenerate: step (d) fires on
-    // i == maxIterations and blocks WITHOUT re-running the verifier, so the agent commits an
-    // unverified fix. At the template default (3) the old floor(3/2) handed the retry exactly that.
-    // Capped worst case is therefore ~1.5x max_iterations, not 2x — rollout-template.md says so.
-    const retryBudget = (n) => Math.min(n, Math.max(2, Math.floor(n / 2)))
-    const retryTask = moved ? task : { ...task, maxIterations: retryBudget(task.maxIterations || 3) }
+    // Under a cap the first pass was ALREADY terminal, so it spent a FULL Ralph budget; a second full
+    // one would double the verifier spend on the model chosen because resources were scarce. The
+    // retry budget is NOT a function of max_iterations — two rounds of arithmetic (floor(n/2), then a
+    // floor of 2 around it) each broke at an edge: floor(n/2) gave 1 at the template default, and a
+    // 1-iteration ralphLoop fires step (d) at i == 1 and blocks WITHOUT re-running the verifier, so
+    // the agent commits an unverified fix; the floor then handed n=2 a full second budget, the exact
+    // doubling being guarded against. What the retry actually needs is one fix-and-re-verify cycle,
+    // which is a CONSTANT. Capped cost is therefore exactly `max_iterations + CAPPED_RETRY_ITERATIONS`
+    // against an uncapped run's `1 + max_iterations` — one extra iteration at every n, no edge cases.
+    // An escalation that really moved tier keeps its full budget: that is what the hand-over buys.
+    const retryTask = moved ? task : { ...task, maxIterations: CAPPED_RETRY_ITERATIONS }
     r = await runAgent(prompt(prior, retryTask), {
       label: `implement:${task.slug}@${st.tier}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
     })
