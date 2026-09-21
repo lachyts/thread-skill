@@ -275,14 +275,30 @@ scheduled 2026-07-15.
   them on Windows. Capture titles become filenames, so task-writer is a
   producer of this risk (sanitisation task proposed and declined 2026-08-18;
   vault swept clean same day, link-safety verified before each rename).
-- Skills execute from `~/.claude/plugins/cache/thread/thread/<version>/`, not
-  the `marketplaces/thread/` clone — `${CLAUDE_PLUGIN_ROOT}` resolves to the
-  cache path. The cache is **version-keyed**: `claude plugin marketplace
-  update thread` alone only refreshes the clone and never rebuilds the cache.
-  Full update flow: bump the version in BOTH `.claude-plugin/plugin.json` and
-  `.claude-plugin/marketplace.json` → push → `claude plugin marketplace update
-  thread` → `claude plugin update thread@thread` → restart the session to
-  apply (verified 2026-07-14 shipping 1.0.1).
+- **The version-keyed cache no longer governs this plugin — corrected
+  2026-09-21.** The old rule (skills execute from
+  `~/.claude/plugins/cache/thread/thread/<version>/`; bump both manifests →
+  push → `claude plugin marketplace update thread` → `claude plugin update
+  thread@thread` → restart) was verified 2026-07-14 shipping 1.0.1 and is kept
+  here only so the next reader does not re-derive it from a stale memory.
+  Since the marketplace was re-registered as a **`directory` source pointing at
+  this repo** (`extraKnownMarketplaces.thread` →
+  `{"source":"directory","path":"/Users/lachlants/repos/tools/thread-skill"}`,
+  `installLocation` = the repo itself), a session loads the skills from the
+  **working tree**. Evidence, 2026-09-21: the newest cache dir anywhere is
+  `2.3.4` (there has never been a 2.4.0 or 2.5.0, in either
+  `~/.claude/plugins/` or `~/.claude-profiles/animately/plugins/`), that tree's
+  `skills/handoff/SKILL.md` has **zero** occurrences of `docs/handoffs`, yet a
+  session started at 2.5.0 lists `thread:handoff` with the full durable-doc
+  description. So: **a committed change is live in the next session with no
+  cache dance at all**, and `claude plugin list` reporting `2.3.4` is stale
+  registry metadata from the last explicit update (2026-09-14), not what runs.
+  Caveat on scope: what is verified is that the *skill text the model sees*
+  comes from the repo. `${CLAUDE_PLUGIN_ROOT}` was not separately probed, so a
+  skill that shells out to `${CLAUDE_PLUGIN_ROOT}/scripts/...` may still
+  resolve into the 2.3.4 cache — check that before assuming scripts are live.
+  Still bump both manifests on a release: the version is the record, and a
+  github-sourced install elsewhere would need it.
 
 ## Resume instructions
 
