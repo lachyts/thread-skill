@@ -10,6 +10,19 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-09-21 (later) — leftovers handed off; the consumer ran and died mid-batch.**
+The first handoff doc under the new contract
+(`docs/handoffs/2026-09-21-tier-review-triage-and-ship.md`) briefed a fresh
+session on the stale 2026-09-17 tier-ceiling review and the 2.5.0 ship. That
+session consumed the review doc (`af0094f`: 12 dispositioned, 6 verified at
+HEAD, 4 fixed) and marked the handoff consumed, then ended without closing —
+its four-file fix batch (`wave-execute.workflow.js`, `prompt-invariants.test.mjs`,
+`schedule/SKILL.md`, `rollout-template.md`; +60/−4) sits **uncommitted** in this
+checkout, presumably per K25 with no review round dispatched. The originating
+session's close deleted the consumed handoff doc and its own two consumed
+review docs. **The 2.5.0 cache dance has not been run** — sessions still load
+2.4.0 until push → marketplace update → plugin update → restart.
+
 **2026-09-21 — v2.5.0: handoff docs are durable, and a pending one owns the
 continuation (ADR 0017, amends 0011).** Picked up from the deferred capture
 `thread-handoff-durable-lifecycle`. Part 1: `thread:handoff` always writes and
@@ -196,6 +209,12 @@ scheduled 2026-07-15.
 
 ## Open questions / decisions pending
 
+- `close` § The handoff owns the continuation deletes a *consumed* doc "whoever
+  marked it". When the consumer is a live peer session in the **same checkout**
+  (observed 2026-09-21: the consumer had marked the doc consumed while still
+  running), the originating session's close would pull the file out from under
+  it. Guard on `ListAgents` peers sharing the cwd, or accept (history keeps it,
+  the consumer already read it)? Proposed as a vault task at close.
 - Does `${CLAUDE_PLUGIN_ROOT}` expand in the Stop-hook command under the
   native-Windows hook runner? The first Windows session end answers it; if it
   fails, the fix lands in `hooks/hooks.json` here, never a local patch.
@@ -205,6 +224,16 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **Two sessions can share one checkout** (a handoff consumer opened in the
+  same directory). Every delete-at-close lifecycle here — handoff docs, review
+  docs — assumes one writer; a `git rm -f` or a restore in one session lands in
+  the other's working tree (the 2026-09-17 review "working-tree incident" is the
+  precedent). Check `ListAgents` for a peer in this cwd before deleting or
+  restoring anything another session may hold.
+- **The plugin cache stays on the old version until the dance is run.** A
+  `/thread:handoff` invoked from a session launched with `--plugin-dir` on this
+  repo loads the working-tree text (2.5.0 seen 2026-09-21); an installed-plugin
+  session loads the cached 2.4.0 text until the restart.
 - Colon namespace (`thread:defer`) requires plugin packaging; skill frontmatter
   carries the bare `name:` and Claude Code composes the prefix.
 - `disable-model-invocation: true` hides a skill from the model's list but
@@ -250,6 +279,12 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+0. **First, the uncommitted four-file batch** left by the 2026-09-21 consumer
+   session: read `docs/reviews/2026-09-17-f4ba792-round2.md` § disposition to
+   see which four findings it fixed, run README § Tests, then either
+   `/fresh-review xhigh` it (batch uncommitted while the round runs — K25) and
+   commit by pathspec, or discard it deliberately. Then run the 2.5.0 cache
+   dance (Known quirks).
 1. Read this file, then `CONTEXT.md` and the ADRs in `docs/adr/` — the whole
    directory, not a subset. The rollout lane, orient's self-launching and
    close's autonomy each rest on an ADR added after v1.0.0.
@@ -265,6 +300,7 @@ scheduled 2026-07-15.
 
 ## Session log
 
+- 2026-09-21 (later): handed the leftovers off via the first ADR 0017 doc; the consumer consumed the 2026-09-17 round-2 review (af0094f) and left its four-file fix batch uncommitted, no close; this close deleted the consumed handoff doc + the two consumed 2026-09-21 review docs; concurrent-checkout hazard logged (open question + estate METHOD row); ship still pending the cache dance.
 - 2026-09-21: 2.5.0 — durable handoff lifecycle in `thread:handoff` (docs/handoffs, never temp; pending→consumed→deleted) + close's handoff-owns-the-continuation rule (ADR 0017 amends 0011); `thread:open` handoff-doc pickup; two xhigh rounds consumed, K27 stop, rig-gated; hook + Codex stub aligned; manifests 2.5.0. Ship pending: push → marketplace update → plugin update → restart.
 - 2026-09-01: 2.3.1 — phantom-gate footnote fix (ADR 0013): parseGatedInputs reads only list items ("- "/"* "/"+ "/numbered), prose in "### Gated inputs" is commentary; a section with no items and no "None" fails closed to plan-blocked (self-healing re-plan, same door as missing); planner/judge/reviser prompts hardened to bullets-only. Live trigger: chorus-rollout wave 2's planner footnote paused a fully signed-off task at gate-pending. Prompt bytes changed — in-flight resume caches re-run (clean, not corrupt). Shipped through the cache; restart applies.
 - 2026-08-31: 2.2.1 — docs-only patch shipping the 2026-08-30 doc-audit remediation through the cache (0ee53f6): repair's model-facing description now matches the ADR 0009 glossary (engine, not wave, holds merge authority); THREAD.md resume instructions point at all of docs/adr/; build-plan.md stamped historical.
