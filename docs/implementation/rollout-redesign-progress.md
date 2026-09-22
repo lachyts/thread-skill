@@ -83,3 +83,7 @@ The earlier tables above describe their original validation checkpoint. The
 [correction batch](2026-09-23-routing-and-corrections.md) and its
 [acceptance matrix](2026-09-23-routing-acceptance.md) track the current candidate
 and explicitly distinguish fixture results from outstanding native proof.
+
+The correction batch is now committed and reviewed. The
+[delivery record](2026-09-23-routing-delivery.md) identifies all four source
+commits, final validation and the prepared native acceptance boundary.
