@@ -7,10 +7,15 @@ fumble-prone edits across a rollout. This helper performs ALL of those writes de
 returned task array, and (finding #7) computes the per-task resume set so a partial wave resumes without
 re-dispatching already-landed work.
 
-Ten subcommands:
+Eleven subcommands:
 
   reconcile   Read the workflow result JSON ({rolloutSlug, tasks:[...]}) and write each task note's
-              frontmatter + any blocked-feedback body section. Idempotent (safe to re-run on resume).
+              frontmatter + blocked feedback per distinct result. Identified deliveries replay as no-ops.
+              A repeated legacy diagnosis restores blocked status after a fresh in_progress stamp.
+              Optional runId/attemptId + generation fields (or CLI fallbacks) order deliveries;
+              task fields override result-envelope fields. Generations increase per task across runs.
+              Existing v3 results need no schema rewrite, but unseen legacy results cannot be ordered:
+              use identified deliveries for stale-result protection and same-content retry history.
 
   cursor      Set `merged_through_wave: N` on a rollout note (the durable continuous-mode cursor),
               run AFTER merge-wave.sh reports `ok` for wave N. Also the SOFT-PAUSE honour point:
@@ -42,7 +47,7 @@ Ten subcommands:
   status      Read-only situational scan for /thread:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, merged_through_wave, status, timeline,
-              tasks: [{slug, wave, status, pr, blockerSummary}]}. `timeline` is the progress/ETA block
+              tasks: [{slug, wave, status, pr, tier_capped, blockerSummary}]}. `timeline` is the progress/ETA block
               computed from the wave_N_dispatched/wave_N_merged stamps (null when the note has none) —
               durable, so elapsed + the rough estimate render without any workflow run being alive.
               Pure read; no network (the skill owns gh/git).
@@ -53,8 +58,14 @@ Ten subcommands:
               the work truly landed (e.g. `gh pr view` shows MERGED) before invoking. Idempotent.
 
   defer       Pop task(s) out of a rollout, back to open backlog: clears `wave:`/`rollout:`/`owner:`
-              and sets `status: open` so a future /thread:schedule re-plans them. The dependent-closure
-              safety check lives in the /thread:repair skill; this only does the frontmatter surgery.
+              and sets `status: open` plus `reconcile_deferred: true` so late results cannot reopen
+              them. Explicit reschedule retires that tombstone while retaining any delivery
+              generation; the next identified result increments it. The dependent-closure safety check lives in
+              the /thread:repair skill; this only does the frontmatter surgery.
+
+  reschedule  Explicitly assign deferred open tasks to an existing v3 rollout and positive wave,
+              retiring reconcile_deferred but preserving delivery history/generation. Ordinary
+              resume never clears the marker; this command is the deliberate scheduling boundary.
 
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
               `pause_requested`) from the rollout note. Run by /thread:execute's resume path when it
@@ -73,19 +84,25 @@ Stdlib only (the claude-config repo has no dependency manager). Frontmatter is e
 (not via a YAML round-trip) to preserve field order, comments, and spacing exactly — matching how the
 rest of the vault tooling treats frontmatter.
 
+Every non-empty prUrl is recorded, including blocked and gated results. Feedback appends once per
+identified delivery (legacy: once per distinct payload), never merely once per heading. Existing
+terminal and deferred states cannot be reopened. A tier_capped marker is retired only with explicit
+uncapped higher-tier evidence (tierCapped: false plus model: fable), not an absent suppression flag.
+
 Status mapping (workflow status -> note writes), per wave-execute/SKILL.md §6:
   review         -> status: review;        pr: <url>; review_rounds_used: <n>; plan_rounds_used: <n> (if >0);
                     when approvedAtCeiling: append reviewHistory (grouped by round) under
                     "## Review history (approved at ceiling)" — ceiling approvals stay auditable
   review-blocked -> status: review-blocked; pr: <url>; append reviewHistory (grouped by round; legacy
                     results without it fall back to final-round reviewFeedback) under "## Review-blocked feedback"
-  blocked        -> status: blocked;        append blockerDiagnosis under "## Blocker diagnosis" (if absent)
+  blocked        -> status: blocked;        append blockerDiagnosis under "## Blocker diagnosis"
   plan-blocked   -> status: plan-blocked;   append blockerDiagnosis under "## Plan-blocked feedback"
   gate-pending   -> status: gate-pending;   UPSERT gatedInputs under "## Gated inputs (awaiting sign-off)"
                     (upsert, not append: a refreshed declaration replaces the pending list, never stales)
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -98,8 +115,8 @@ DEFAULT_TASKS_DIR = Path(os.path.expanduser("~/repos/obsidian/Work/Tasks"))
 # Statuses that count as "already landed/approved" — never re-dispatched on resume (finding #7).
 LANDED_STATUSES = {"done", "review", "merged"}
 
-# Which workflow statuses carry a PR to record.
-STATUS_WITH_PR = {"review", "review-blocked"}
+# Completion is monotonic: a workflow delivery never reopens these note states.
+TERMINAL_STATUSES = {"done", "merged", "deferred"}
 
 # Per-status body section to append when the engine reports blocked feedback.
 BLOCKED_SECTIONS = {
@@ -157,6 +174,10 @@ class Note:
             if mm:
                 return mm.group(1).strip()
         return None
+
+    def scalar(self, key: str):
+        """Read a flat YAML scalar without changing its original formatting."""
+        return _scalar(self.get(key))
 
     def unset(self, key: str):
         """Remove `key:` from the frontmatter entirely. Idempotent; used to retire a marker that a
@@ -248,6 +269,15 @@ class Note:
             self._body = new_body
             self.dirty = True
 
+    def append_feedback(self, heading: str, content: str):
+        """Append a delivery's feedback inside one authoritative section.
+
+        The caller has already checked delivery identity. Heading existence is not evidence
+        that this attempt's feedback has been written; retries may repeat the same diagnosis.
+        """
+        previous = self.section_text(heading)
+        self.upsert_section(heading, f"{previous}\n\n{content}" if previous else content)
+
     def remove_section(self, heading: str):
         """Delete `## heading` and its content from the body (idempotent — no-op if absent)."""
         found = self._section_bounds(heading)
@@ -287,11 +317,33 @@ def history_block(history):
     return "\n\n".join(rounds)
 
 
+def _scalar(value):
+    """Parse the flat string scalars this tool consumes, including YAML quotes/comments.
+
+    This is deliberately not a YAML round-trip: unknown fields and their formatting stay intact.
+    Reject malformed quoting instead of treating an unreadable gate status as dispatchable.
+    """
+    if value is None:
+        return None
+    value = str(value).strip()
+    if value.startswith("'"):
+        match = re.fullmatch(r"'((?:[^']|'')*)'\s*(?:#.*)?", value)
+        if not match:
+            raise ValueError(f"invalid quoted scalar: {value!r}")
+        return match.group(1).replace("''", "'")
+    if value.startswith('"'):
+        result, end = json.JSONDecoder().raw_decode(value)
+        if value[end:].strip() and not value[end:].lstrip().startswith("#"):
+            raise ValueError(f"invalid quoted scalar: {value!r}")
+        return result
+    return re.split(r"\s+#", value, maxsplit=1)[0].strip()
+
+
 def _truthy_flag(value) -> bool:
     """Frontmatter boolean-ish: true/yes/1 (any case, quoted or bare) counts as set."""
     if value is None:
         return False
-    return value.strip().strip('"').strip("'").lower() in {"true", "yes", "1"}
+    return _scalar(value).lower() in {"true", "yes", "1"}
 
 
 def _int_field(value, default):
@@ -478,6 +530,90 @@ def resolve_task_path(task, tasks_dir: Path) -> Path:
     return tasks_dir / f"{task['slug']}.md"
 
 
+def _delivery_identity(task, data, args):
+    """Optional ordered identity: task fields override envelope fields, then CLI defaults.
+
+    Generation is a positive, monotonically increasing integer for this task note, across
+    runs and rollouts. At least one of runId/attemptId is required with it. Resume of the same
+    delivery keeps all three unchanged; each new result increments generation. A v3 caller
+    upgrades by supplying these fields without changing protocol_version or task semantics.
+    """
+    identity = {}
+    for key, option in (("runId", "run_id"), ("attemptId", "attempt_id"), ("generation", "generation")):
+        identity[key] = task.get(key, data.get(key, getattr(args, option, None)))
+    if all(value is None for value in identity.values()):
+        return None
+    generation = identity["generation"]
+    if type(generation) is not int or generation < 1:
+        raise ValueError("ordered reconciliation requires a positive integer generation; "
+                         "supply runId/attemptId plus generation for this delivery")
+    for key in ("runId", "attemptId"):
+        value = identity[key]
+        if value is not None and (not isinstance(value, str) or not value.strip() or
+                                  any(ord(char) < 32 for char in value)):
+            raise ValueError(f"{key} must be a non-empty single-line identifier")
+    if not (identity["runId"] or identity["attemptId"]):
+        raise ValueError("generation requires runId or attemptId to identify the delivery")
+    return identity
+
+
+def _reconciliation_delivery(note, task, data, args):
+    """Validate before any mutation; return (digest, identity, prior digests, replay).
+
+    Legacy v3 results remain usable: distinct payloads append feedback and known deliveries
+    are idempotent. Unseen out-of-order legacy payloads cannot be ordered without invented
+    evidence. Callers needing that guarantee (or distinct same-content attempts) must supply
+    runId/attemptId + generation. Once upgraded, unidentified writes fail closed.
+    """
+    identity = _delivery_identity(task, data, args)
+    rollout = _wikilink_slug(data.get("rolloutSlug"))
+    assigned = _wikilink_slug(note.get("rollout"))
+    if assigned and rollout and assigned.lower() != rollout.lower():
+        raise ValueError(f"belongs to rollout {assigned!r}, not {rollout!r}; refusing stale delivery")
+    if _truthy_flag(note.get("reconcile_deferred")):
+        raise ValueError("task was deferred; explicitly re-schedule it and retire reconcile_deferred "
+                         "before accepting a new result")
+
+    payload = {key: value for key, value in task.items()
+               if key not in {"taskPath", "runId", "attemptId", "generation"}}
+    digest = hashlib.sha256(json.dumps({"rollout": rollout, "task": payload, "identity": identity},
+                                      sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    deliveries = json.loads(note.get("reconcile_deliveries") or "[]")
+    if not isinstance(deliveries, list) or any(not isinstance(item, str) or
+                                              not re.fullmatch(r"[0-9a-f]{64}", item)
+                                              for item in deliveries):
+        raise ValueError("invalid reconcile_deliveries; refusing to discard delivery history")
+    previous = note.scalar("reconcile_generation")
+    if previous is not None:
+        if not re.fullmatch(r"[1-9][0-9]*", previous):
+            raise ValueError("invalid reconcile_generation; cannot establish delivery order")
+        if identity is None:
+            raise ValueError("task has ordered reconciliation state; supply runId/attemptId and "
+                             "a newer generation (legacy delivery is ambiguous)")
+        generation = identity["generation"]
+        if generation < int(previous):
+            raise ValueError(f"stale generation {generation}; newest accepted generation is {previous}")
+        if generation == int(previous) and digest not in deliveries:
+            raise ValueError(f"conflicting result for generation {generation}; genuine retries need "
+                             "a new generation so their feedback is preserved")
+    if digest in deliveries:
+        return digest, identity, deliveries, True
+    if note.scalar("status") in TERMINAL_STATUSES:
+        raise ValueError(f"task is {note.scalar('status')!r}; refusing to reopen a terminal task")
+    return digest, identity, deliveries, False
+
+
+def _record_delivery(note, digest, identity, deliveries):
+    note.set("reconcile_deliveries", json.dumps([*deliveries, digest]))
+    if identity is not None:
+        note.set("reconcile_generation", identity["generation"])
+        for key, source in (("reconcile_run_id", "runId"), ("reconcile_attempt_id", "attemptId")):
+            if identity[source] is None:
+                note.remove(key)
+            else:
+                note.set(key, json.dumps(identity[source]))
+
+
 def cmd_reconcile(args) -> int:
     raw = sys.stdin.read() if args.result == "-" else Path(os.path.expanduser(args.result)).read_text()
     data = json.loads(raw)
@@ -500,6 +636,23 @@ def cmd_reconcile(args) -> int:
             errors.append(str(e))
             continue
 
+        try:
+            digest, identity, deliveries, replay = _reconciliation_delivery(note, task, data, args)
+        except (ValueError, TypeError) as error:
+            errors.append(f"{slug}: {error} — left untouched")
+            continue
+        if replay:
+            if identity is None and status in BLOCKED_SECTIONS and note.scalar("status") == "in_progress":
+                # Legacy dispatch restamps in_progress but has no attempt identity. A repeated
+                # deterministic diagnosis must finish that dispatch instead of leaving it running.
+                # Keep its existing feedback once; never reopen terminal notes or an approved gate.
+                note.set("status", status)
+                note.save(dry_run=args.dry_run)
+                print(f"{slug}: status={status} (repeated legacy diagnosis)" +
+                      (" (dry-run)" if args.dry_run else " [written]"))
+            else:
+                print(f"{slug}: identical delivery [no-change]")
+            continue
         note.set("status", status)
 
         # Escalation is durable: a task that flipped opus→fable mid-run has proven non-mechanical,
@@ -509,6 +662,17 @@ def cmd_reconcile(args) -> int:
         if task.get("escalated"):
             note.set("model", "fable")
 
+        # A final-round rejection can recommend the higher tier without ever executing it.
+        # Keep that dispatch recommendation separate from actual escalation provenance, and
+        # retain it through transient failures until a result proves the higher tier ran.
+        if task.get("model") == "fable":
+            note.remove("next_model")
+            note.remove("next_model_reason")
+        elif task.get("nextModel") == "fable":
+            note.set("next_model", "fable")
+            if task.get("nextModelReason"):
+                note.set("next_model_reason", json.dumps(task["nextModelReason"]))
+
         # A tier ceiling (args.maxTier, ADR 0016) suppressed an escalation this task would otherwise
         # have taken. That has to be DURABLE: /thread:status and /thread:repair build their triage
         # entirely from note frontmatter, so without a stamp a capped block reads as a genuine wall
@@ -517,13 +681,15 @@ def cmd_reconcile(args) -> int:
         # straight back into the exhausted quota.
         if task.get("tierCapped"):
             note.set("tier_capped", (task.get("tierCappedAt") or "true"))
-        elif note.get("tier_capped"):
-            # An uncapped re-run that got further supersedes the old marker rather than leaving a
-            # stale one to be triaged against.
+        elif (note.get("tier_capped") and task.get("tierCapped") is False and
+              task.get("model") == "fable"):
+            # A false/missing suppression flag alone says nothing about available capability:
+            # capped runs that never attempted escalation also report false. Only an explicit
+            # observation of the higher tier supersedes the earlier cap provenance.
             note.unset("tier_capped")
 
         pr = (task.get("prUrl") or "").strip()
-        if status in STATUS_WITH_PR and pr:
+        if pr:
             note.set("pr", pr)
         if status == "review":
             note.set("review_rounds_used", int(task.get("reviewRoundsUsed") or 0))
@@ -532,11 +698,11 @@ def cmd_reconcile(args) -> int:
                 note.set("plan_rounds_used", plan_rounds)
             # Ceiling approval: persist the accumulated rejection rationale (audit record; the engine
             # sets the flag only when there IS history — a clean first-try approve records nothing).
-            # append_section is heading-idempotent, so a re-reconcile never duplicates it.
+            # Delivery identity, rather than heading existence, makes re-reconciliation idempotent.
             if task.get("approvedAtCeiling"):
                 history = history_block(task.get("reviewHistory"))
                 if history:
-                    note.append_section(REVIEW_HISTORY_SECTION, history)
+                    note.append_feedback(REVIEW_HISTORY_SECTION, history)
 
         if status in SECTION_BY_STATUS:
             heading = SECTION_BY_STATUS[status]
@@ -555,8 +721,9 @@ def cmd_reconcile(args) -> int:
                     # revised cap) — the pending list must always be the latest declaration, never stale.
                     note.upsert_section(heading, content)
                 else:
-                    note.append_section(heading, content)
+                    note.append_feedback(heading, content)
 
+        _record_delivery(note, digest, identity, deliveries)
         note.save(dry_run=args.dry_run)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
         esc = " model=fable(escalated)" if task.get("escalated") else ""
@@ -671,7 +838,7 @@ def cmd_mark_done(args) -> int:
         except ValueError as e:
             errors.append(str(e))
             continue
-        status = note.get("status")
+        status = note.scalar("status")
         if status == "done":
             print(f"{slug}: already done [no-change]")
             continue
@@ -701,7 +868,12 @@ def cmd_resume_filter(args) -> int:
             print(f"WARN: {slug}: note not found at {path} — including for dispatch", file=sys.stderr)
             to_dispatch.append(slug)
             continue
-        status = Note(path).get("status")
+        note = Note(path)
+        status = note.scalar("status")
+        if status == "deferred" or _truthy_flag(note.get("reconcile_deferred")):
+            print(f"WARN: {slug}: deferred — excluded from dispatch until explicitly re-scheduled",
+                  file=sys.stderr)
+            continue
         if status == GATE_PENDING_STATUS:
             # Awaiting a human sign-off (ADR 0008) — auto-resume (heartbeat included) must never burn a
             # dispatch on, or bypass, a pending gate. approve-gates flips it back to dispatchable.
@@ -721,7 +893,7 @@ def _wikilink_slug(value):
     """Normalise a frontmatter wikilink/string (`"[[Area/Foo|alias]]"`) to a bare slug for comparison."""
     if value is None:
         return None
-    s = value.strip().strip('"').strip("'").strip()
+    s = _scalar(value).strip()
     s = s.replace("[[", "").replace("]]", "").strip()
     s = s.split("|")[0].split("/")[-1].strip()  # drop any alias, then any path, keep the leaf
     if s.endswith(".md"):
@@ -760,7 +932,10 @@ def cmd_status(args) -> int:
         found.append({
             "slug": path.stem,
             "wave": wave,
-            "status": note.get("status"),
+            "status": note.scalar("status"),
+            "tier_capped": note.scalar("tier_capped"),
+            "next_model": note.scalar("next_model"),
+            "next_model_reason": note.scalar("next_model_reason"),
             "pr": (pr.strip().strip('"') if pr else None),
             "blockerSummary": blocker,
         })
@@ -771,7 +946,7 @@ def cmd_status(args) -> int:
     out = {
         "rollout": rollout_slug,
         "rolloutPath": str(rollout_path),
-        "rolloutStatus": rollout_note.get("status"),
+        "rolloutStatus": rollout_note.scalar("status"),
         # Pause state (execute §Pausing): `paused` = the stamp's timestamp when the rollout is
         # paused (render as PAUSED, not stalled); `pause_requested` = a soft pause is pending and
         # takes effect at the next wave boundary.
@@ -810,7 +985,7 @@ def cmd_resolve(args) -> int:
         except ValueError as e:
             errors.append(str(e))
             continue
-        status = note.get("status")
+        status = note.scalar("status")
         if status == "done":
             print(f"{slug}: already done [no-change]")
             continue
@@ -849,6 +1024,9 @@ def cmd_defer(args) -> int:
             if cur and cur != expected:
                 errors.append(f"{slug}: belongs to rollout {cur!r}, not {expected!r} — refusing to defer")
                 continue
+        # Membership is removed below, so retain a tombstone that an in-flight result cannot
+        # erase. Explicit re-scheduling must retire this marker before accepting new work.
+        note.set("reconcile_deferred", "true")
         note.set("status", "open")
         note.remove("wave")
         note.remove("rollout")
@@ -858,6 +1036,57 @@ def cmd_defer(args) -> int:
               (" (dry-run)" if args.dry_run else " [written]"))
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
+    return 1 if errors else 0
+
+
+# ---- reschedule -------------------------------------------------------------
+
+def cmd_reschedule(args) -> int:
+    """Explicit scheduling boundary for deferred backlog; never part of automatic resume."""
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    try:
+        if args.wave < 1:
+            raise ValueError("reschedule wave must be a positive integer")
+        if not rollout_path.is_file():
+            raise ValueError(f"rollout note not found at {rollout_path}")
+        rollout_note = Note(rollout_path)
+        if _int_field(rollout_note.get("protocol_version"), None) != 3:
+            raise ValueError("reschedule requires protocol_version 3; v4 membership belongs to its execution record")
+        if rollout_note.scalar("status") in TERMINAL_STATUSES:
+            raise ValueError("cannot reschedule into a terminal rollout")
+    except ValueError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    expected = rollout_path.stem
+    errors = []
+    for slug in (s.strip() for s in args.tasks.split(",") if s.strip()):
+        path = tasks_dir / f"{slug}.md"
+        try:
+            if not path.is_file():
+                raise ValueError(f"task note not found at {path}")
+            note = Note(path)
+            if note.scalar("status") != "open":
+                raise ValueError("only an open backlog task can be rescheduled")
+            current = _wikilink_slug(note.get("rollout"))
+            if current and current.lower() != expected.lower():
+                raise ValueError(f"already belongs to rollout {current!r}; defer it before rescheduling")
+            if not _truthy_flag(note.get("reconcile_deferred")):
+                if current and _int_field(note.get("wave"), None) == args.wave:
+                    print(f"{slug}: already rescheduled [no-change]")
+                    continue
+                raise ValueError("task is not marked deferred; ordinary scheduling must not clear recovery state")
+            note.set("rollout", json.dumps(f"[[{expected}]]"))
+            note.set("wave", args.wave)
+            note.remove("reconcile_deferred")
+            note.save(dry_run=args.dry_run)
+            print(f"{slug}: rescheduled to {expected} wave {args.wave}" +
+                  (" (dry-run)" if args.dry_run else " [written]"))
+        except ValueError as error:
+            errors.append(f"{slug}: {error} — left untouched")
+    for error in errors:
+        print(f"ERROR: {error}", file=sys.stderr)
     return 1 if errors else 0
 
 
@@ -892,7 +1121,7 @@ def cmd_approve_gates(args) -> int:
         except ValueError as e:
             errors.append(str(e))
             continue
-        status = note.get("status")
+        status = note.scalar("status")
         pending = note.section_text(GATE_PENDING_SECTION)
         if status != GATE_PENDING_STATUS:
             if note.has_heading(APPROVED_GATES_SECTION) and not pending:
@@ -956,6 +1185,9 @@ def main() -> int:
     r.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
     r.add_argument("--rollout", default=None, help="rollout note path (only with --wave, to advance the cursor)")
     r.add_argument("--wave", type=int, default=None, help="advance merged_through_wave to N in the same call")
+    r.add_argument("--run-id", help="fallback runId for ordered result delivery")
+    r.add_argument("--attempt-id", help="fallback attemptId for ordered result delivery")
+    r.add_argument("--generation", type=int, help="fallback positive, increasing per-task result generation")
     r.add_argument("--dry-run", action="store_true")
     r.set_defaults(func=cmd_reconcile)
 
@@ -1001,6 +1233,14 @@ def main() -> int:
     df.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
     df.add_argument("--dry-run", action="store_true")
     df.set_defaults(func=cmd_defer)
+
+    rs = sub.add_parser("reschedule", help="explicitly reassign deferred open tasks while preserving delivery history")
+    rs.add_argument("--tasks", required=True, help="comma-separated deferred open task slugs")
+    rs.add_argument("--rollout", required=True, help="existing legacy rollout note with protocol_version 3")
+    rs.add_argument("--wave", type=int, required=True, help="positive wave number in the new schedule")
+    rs.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
+    rs.add_argument("--dry-run", action="store_true")
+    rs.set_defaults(func=cmd_reschedule)
 
     cp = sub.add_parser("clear-pause", help="reinstate a paused rollout: remove paused/pause_requested (/thread:execute resume)")
     cp.add_argument("--rollout", required=True, help="path to the rollout note")

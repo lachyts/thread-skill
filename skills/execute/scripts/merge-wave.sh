@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# merge-wave.sh — deterministically merge ONE wave's approved PRs into a strict-protected main.
+# merge-wave.sh — deterministically merge ONE wave's approved PRs into the repository's protected target branch.
 #
 # Usage:  merge-wave.sh <repoPath> <pr> [<pr> ...]
 #   <repoPath>  absolute path to the target repo (origin must be a GitHub remote)
@@ -10,8 +10,8 @@
 # master review). It is the ONLY place wave-execute ever merges — the background engine never merges.
 #
 # Contract (keep these invariants — see wave-execute/SKILL.md "Don'ts"):
-#   * Respects branch protection. Each PR is brought up to date with main (origin/giflab main is
-#     `strict: true`) and its REQUIRED checks must go green before it merges.
+#   * Respects branch protection. Each PR targets the expected base; required checks and GitHub protection still apply.
+#     A branch update invalidates head approval and stops for reapproval before merging.
 #   * NEVER uses `--admin` (the account is a repo admin; bypassing protection would merge a red branch
 #     and defeat the whole safety rationale). NEVER force-pushes.
 #   * HALTS (exit 1) on any real merge conflict or red required check — never forces through. The
@@ -24,23 +24,23 @@
 #     the head SHA — repos whose only required check is an end-of-workflow roll-up job (e.g. giflab's
 #     aggregate `Checks Complete` gate) don't even get that check run CREATED until the rest of the
 #     suite finishes. "Never appeared" halts only when nothing is running at all — nothing is coming —
-#     AND the PR has not turned CLEAN: after each merge advances main, GitHub recomputes mergeability
+#     AND the PR has not turned CLEAN/UNSTABLE: after each merge advances main, GitHub recomputes mergeability
 #     asynchronously, so in a repo with NO CI configured the next PR transiently reads UNKNOWN/BLOCKED
 #     and lands in the wait path with no checks ever coming. The wait loop re-polls mergeStateStatus
-#     each pass and returns as soon as it goes CLEAN (narcissus-avp 2026-07-18 false-halt fix).
-#   * Idempotent: already-MERGED PRs are skipped, so a re-run after a partial merge resumes cleanly
+#     each pass and returns as soon as protection permits it (narcissus-avp 2026-07-18 false-halt fix).
+#   * Idempotent: already-MERGED PRs with matching head/base and merge-commit evidence are skipped, so a re-run after a partial merge resumes cleanly
 #     (this is how a cold-resumed session flushes a half-merged wave).
-#   * Writes a result sentinel `<repoPath>/.claude/merge-wave.status` (`ok` / `failed:<code>`) on exit, so a
+#   * Writes a result sentinel `<repoPath>/.claude/merge-wave.status` (`ok` / `pending:3` / `failed:<code>`) on exit, so a
 #     BACKGROUNDED caller reads the TRUE outcome instead of a trailing-command-masked exit code (finding #5).
 #
 # Why the REST update-branch (not `gh pr update-branch`): the installed gh (2.43.1) predates that
 # subcommand (added 2.44.0) — and `gh pr update-branch --help` exits 0 on generic help, so a naive
 # script wouldn't even notice it's missing. The REST endpoint is gh-version-robust.
 #
-# Local-branch cleanup is intentionally left to the daily worktree reaper: `gh pr merge --delete-branch`
+# Branch cleanup is intentionally left to the daily worktree reaper: `gh pr merge --delete-branch`
 # would try to `git branch -d` a branch that is checked out in the task's worktree, which git refuses —
 # turning a SUCCESSFUL merge into a non-zero exit (a false halt). So we squash-merge without
-# --delete-branch and best-effort delete only the REMOTE ref afterwards.
+# --delete-branch. Remote refs are also left to the reaper to avoid deleting a newly advanced head.
 
 set -uo pipefail
 
@@ -83,8 +83,7 @@ classify_failed_steps() {  # stdin: failed step names; stdout: "infra" | "genuin
 }
 
 # Self-test hook: `merge-wave.sh --self-test-classify` runs the classifier assertions and exits. Keeps the
-# fail-closed heart covered without a live repo (this script otherwise has no unit test — see the UNSTABLE
-# guard comment below). Must precede the arg-count check; uses ${1:-} for `set -u` safety.
+# fail-closed heart covered without a live repo (offline CLI regression coverage lives in ../tests/merge-wave.test.sh). Must precede the arg-count check; uses ${1:-} for `set -u` safety.
 if [ "${1:-}" = "--self-test-classify" ]; then
   st_fail=0
   st() {  # st <expected> <label> ; failed step names on stdin
@@ -107,41 +106,166 @@ if [ "${1:-}" = "--self-test-classify" ]; then
   exit "$st_fail"
 fi
 
-# ---- args ------------------------------------------------------------------
-if [ "$#" -lt 2 ]; then
-  echo "usage: merge-wave.sh <repoPath> <pr> [<pr> ...]" >&2
+# ---- arguments and durable result contract ---------------------------------
+# Legacy: merge-wave.sh <repoPath> <pr> [<pr> ...]
+# Reviewed callers: add --expected-base <branch> and repeat --expected-head <pr>=<40-char-sha>.
+# A bare --expected-head <sha> is accepted only for a single PR. Without an explicit head, v3
+# captures every PR's current head before doing any checks or mutations. Every merge binds that
+# head with --match-head-commit. A changed head (including update-branch) requires reapproval.
+# --json writes exactly one JSON result to stdout; progress goes to stderr. The same result is
+# always saved to .claude/merge-wave.result.json. Exit 0 = all verified merged; 3 = queued/pending
+# (STOP this serial wave and resume later); 1 = blocked; 2 = invalid input/environment. The legacy
+# sentinel remains ok / failed:<code>, with pending:3 added for an accepted but unmerged request.
+if [ "$#" -lt 1 ]; then
+  echo "usage: merge-wave.sh <repoPath> [--expected-base BRANCH] [--expected-head PR=SHA] [--json] <pr> ..." >&2
   exit 2
 fi
 REPO_PATH="$1"; shift
-PRS=("$@")
-
-command -v gh >/dev/null 2>&1 || { echo "ERROR: gh not found on PATH" >&2; exit 2; }
+PRS=(); HEAD_ARGS=(); REVIEWED_HEADS=(); JSON_MODE=0; BASE=""; SLUG=""; REASON=""
+# Select the output channel before validation so invalid retries replace stale success evidence.
+for token in "$@"; do [ "$token" != '--json' ] || JSON_MODE=1; done
+command -v python3 >/dev/null 2>&1 || { echo 'ERROR: python3 not found on PATH' >&2; exit 2; }
+case "$REPO_PATH" in /*) ;; *) echo 'ERROR: repoPath must be absolute' >&2; exit 2;; esac
 git -C "$REPO_PATH" rev-parse --git-dir >/dev/null 2>&1 || { echo "ERROR: $REPO_PATH is not a git repo" >&2; exit 2; }
 
-# ---- result sentinel (finding #5) ------------------------------------------
-# A backgrounded `merge-wave.sh … & wait; echo done` wrapper reports the trailing command's exit, not the
-# script's — masking a real halt as success (the documented background-exit-masking gotcha). Write an
-# unambiguous status file the caller reads instead of trusting a possibly-masked exit code: `ok` ONLY on a
-# clean exit 0, `failed:<code>` on any non-zero (including a trap/abort). Cleared at start so a stale file
-# from a prior run can never read as success.
+# JSON is handled by Python's standard library; no jq executable or shell evaluation is needed.
+json_tool() {
+  python3 - "$@" <<'PYJSON'
+import json, os, pathlib, re, sys
+mode, *a = sys.argv[1:]
+def fail(message):
+    print('ERROR: '+message, file=sys.stderr)
+    sys.exit(1)
+def pr_number(raw, slug):
+    if re.fullmatch(r'[1-9][0-9]*', raw): return raw
+    match = re.fullmatch(r'https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/([1-9][0-9]*)/?', raw, re.I)
+    if not match or match[1].lower() != slug.lower():
+        fail('PR must be a number or a pull URL in '+slug+': '+raw)
+    return match[2]
+def write(path, value):
+    path=pathlib.Path(path)
+    tmp=path.with_name(path.name+'.'+str(os.getpid())+'.tmp')
+    tmp.write_text(json.dumps(value, indent=2)+'\n')
+    tmp.replace(path)
+try:
+    if mode == 'origin':
+        match = re.fullmatch(r'(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?', a[0], re.I)
+        if not match: fail('origin must be a GitHub repository URL')
+        print(match[1])
+    elif mode == 'pr': print(pr_number(*a))
+    elif mode == 'sha':
+        if not re.fullmatch(r'[0-9a-fA-F]{40}', a[0]): fail('expected head must be a full 40-character commit SHA')
+        print(a[0].lower())
+    elif mode == 'snapshot':
+        raw, slug, number = a
+        data=json.loads(raw)
+        if str(data.get('number')) != number or pr_number(data.get('url',''),slug) != number:
+            fail('PR response identity does not match the requested repository and number')
+        state=data['state']; head=data['headRefOid']; base=data['baseRefName']; mss=data['mergeStateStatus']
+        if state not in ('OPEN','CLOSED','MERGED') or not re.fullmatch(r'[0-9a-f]{40}', head): fail('invalid PR state/head evidence')
+        if not isinstance(base,str) or not base or any(c in base for c in '\r\n\t'): fail('invalid PR base evidence')
+        if not isinstance(mss,str) or any(c in mss for c in '\r\n\t'): fail('invalid merge-state evidence')
+        commit=(data.get('mergeCommit') or {}).get('oid') or '-'
+        if commit != '-' and not re.fullmatch(r'[0-9a-f]{40}',commit): fail('invalid merge commit evidence')
+        print('\t'.join((state,mss or 'UNKNOWN',head,base,commit,data['url'])))
+    elif mode == 'init': write(a[0], {'schemaVersion':1,'outcome':'blocked','repository':'','base':'','results':[]})
+    elif mode == 'meta':
+        data=json.loads(pathlib.Path(a[0]).read_text()); data.update(repository=a[1],base=a[2]); write(a[0],data)
+    elif mode == 'record':
+        path,number,outcome,reviewed,reason,raw=a
+        data=json.loads(pathlib.Path(path).read_text()); snap=json.loads(raw)
+        data['results'].append({'pr':int(number),'outcome':outcome,'state':snap.get('state'),
+            'repository':data['repository'],'base':snap.get('baseRefName'),'expectedBase':data['base'],
+            'url':snap.get('url'),'reviewedHead':reviewed,'head':snap.get('headRefOid'),
+            'mergeStateStatus':snap.get('mergeStateStatus'),
+            'mergeCommit':(snap.get('mergeCommit') or {}).get('oid'),'reason':reason})
+        write(path,data)
+    elif mode == 'finish':
+        path,code,reason=a; code=int(code)
+        data=json.loads(pathlib.Path(path).read_text())
+        data.update(outcome='merged' if code == 0 else 'pending' if code == 3 else 'blocked', exitCode=code, reason=reason)
+        write(path,data)
+except (ValueError, KeyError, TypeError, AttributeError, OSError) as exc:
+    fail('invalid or unavailable merge evidence: '+str(exc))
+PYJSON
+}
+
 SENTINEL="$REPO_PATH/.claude/merge-wave.status"
-mkdir -p "$REPO_PATH/.claude" 2>/dev/null || true
-rm -f "$SENTINEL" 2>/dev/null || true
-write_sentinel() {  # EXIT trap — $? MUST be captured first, before any other command overwrites it
+RESULT="$REPO_PATH/.claude/merge-wave.result.json"
+mkdir -p "$REPO_PATH/.claude" || exit 2
+rm -f "$SENTINEL" || exit 2
+json_tool init "$RESULT" || exit 2
+# Keep a dedicated stdout only for the opt-in machine response.
+exec 3>&1
+[ "$JSON_MODE" -eq 0 ] || exec 1>&2
+write_sentinel() {
   local code=$?
-  if [ "$code" -eq 0 ]; then printf 'ok\n' > "$SENTINEL" 2>/dev/null || true
-  else printf 'failed:%s\n' "$code" > "$SENTINEL" 2>/dev/null || true; fi
+  trap - EXIT
+  if ! json_tool finish "$RESULT" "$code" "$REASON"; then code=1; fi
+  case "$code" in
+    0) printf 'ok\n' > "$SENTINEL" || code=1 ;;
+    3) printf 'pending:3\n' > "$SENTINEL" || code=1 ;;
+    *) printf 'failed:%s\n' "$code" > "$SENTINEL" || true ;;
+  esac
+  [ "$JSON_MODE" -eq 0 ] || cat "$RESULT" >&3
+  exit "$code"
 }
 trap write_sentinel EXIT
+trap 'REASON="interrupted"; exit 130' INT
+trap 'REASON="terminated"; exit 143' TERM
 
-ORIGIN_URL=$(git -C "$REPO_PATH" remote get-url origin 2>/dev/null) || { echo "ERROR: no 'origin' remote in $REPO_PATH" >&2; exit 2; }
-SLUG=$(printf '%s' "$ORIGIN_URL" | sed -E 's#^.*github\.com[:/]+##; s#\.git$##')
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --json) JSON_MODE=1; shift ;;
+    --expected-base)
+      [ "$#" -ge 2 ] && [ -n "${2:-}" ] && [ -z "$BASE" ] || { REASON='--expected-base requires one nonempty branch'; echo "ERROR: $REASON" >&2; exit 2; }
+      BASE="$2"; shift 2 ;;
+    --expected-head)
+      [ "$#" -ge 2 ] || { REASON='--expected-head requires PR=SHA'; echo "ERROR: $REASON" >&2; exit 2; }
+      HEAD_ARGS+=("$2"); shift 2 ;;
+    --*) REASON="unknown option $1"; echo "ERROR: $REASON" >&2; exit 2 ;;
+    *) PRS+=("$1"); shift ;;
+  esac
+done
+[ "${#PRS[@]}" -gt 0 ] || { REASON='at least one PR is required'; echo "ERROR: $REASON" >&2; exit 2; }
+command -v gh >/dev/null 2>&1 || { REASON='gh not found on PATH'; echo "ERROR: $REASON" >&2; exit 2; }
+
+ORIGIN_URL=$(git -C "$REPO_PATH" remote get-url origin 2>/dev/null) || { REASON='no origin remote'; exit 2; }
+SLUG=$(json_tool origin "$ORIGIN_URL") || { REASON='invalid origin repository'; exit 2; }
 OWNER="${SLUG%%/*}"; REPO="${SLUG#*/}"
-if [ -z "$OWNER" ] || [ -z "$REPO" ] || [ "$OWNER" = "$SLUG" ]; then
-  echo "ERROR: could not derive owner/repo from origin url '$ORIGIN_URL'" >&2; exit 2
+json_tool meta "$RESULT" "$SLUG" "$BASE" || exit 1
+# Validate the ENTIRE request before the first mutation, including later PRs and approval bindings.
+for ((i=0; i<${#PRS[@]}; i++)); do
+  PRS[$i]=$(json_tool pr "${PRS[$i]}" "$SLUG") || { REASON='invalid PR identity'; exit 2; }
+  for ((j=0; j<i; j++)); do
+    [ "${PRS[$j]}" != "${PRS[$i]}" ] || { REASON='duplicate PR input'; echo "ERROR: $REASON" >&2; exit 2; }
+  done
+  REVIEWED_HEADS[$i]=""
+done
+for ((binding_index=0; binding_index<${#HEAD_ARGS[@]}; binding_index++)); do
+  binding="${HEAD_ARGS[$binding_index]}"
+  case "$binding" in
+    *=*) number="${binding%%=*}"; sha="${binding#*=}" ;;
+    *) [ "${#PRS[@]}" -eq 1 ] || { REASON='bare expected head needs exactly one PR'; exit 2; }
+       number="${PRS[0]}"; sha="$binding" ;;
+  esac
+  number=$(json_tool pr "$number" "$SLUG") || { REASON='invalid expected-head PR'; exit 2; }
+  sha=$(json_tool sha "$sha") || { REASON='invalid expected-head SHA'; exit 2; }
+  found=0
+  for ((i=0; i<${#PRS[@]}; i++)); do
+    if [ "${PRS[$i]}" = "$number" ]; then
+      [ -z "${REVIEWED_HEADS[$i]}" ] || { REASON='duplicate expected head'; exit 2; }
+      REVIEWED_HEADS[$i]="$sha"; found=1
+    fi
+  done
+  [ "$found" -eq 1 ] || { REASON='expected head does not name a requested PR'; exit 2; }
+done
+if [ -z "$BASE" ]; then
+  BASE=$(gh repo view "$SLUG" --json defaultBranchRef -q '.defaultBranchRef.name') || { REASON='could not resolve default branch'; exit 1; }
 fi
-
-echo "== merge-wave.sh: $OWNER/$REPO — ${#PRS[@]} PR(s): ${PRS[*]} =="
+[ -n "$BASE" ] && [ "$BASE" != 'null' ] && git check-ref-format --branch "$BASE" >/dev/null 2>&1 || { REASON='invalid target base branch'; exit 2; }
+json_tool meta "$RESULT" "$SLUG" "$BASE" || exit 1
+echo "== merge-wave.sh: $SLUG → $BASE — ${#PRS[@]} PR(s): ${PRS[*]} =="
 
 # ---- per-PR primitives -----------------------------------------------------
 
@@ -169,13 +293,13 @@ ci_runs_in_flight() {  # $1=PR — success (0) when ≥1 workflow run on the PR'
 
 update_branch() {  # $1=PR  $2=pre-update head SHA
   local PR="$1" PRE="$2" out rc i now
-  echo "  PR #$PR is BEHIND main — updating branch (REST update-branch)…"
-  out=$(gh api --method PUT "repos/$OWNER/$REPO/pulls/$PR/update-branch" -H "Accept: application/vnd.github+json" 2>&1); rc=$?
+  echo "  PR #$PR is BEHIND $BASE — updating branch (REST update-branch)…"
+  out=$(gh api --method PUT "repos/$OWNER/$REPO/pulls/$PR/update-branch" -H "Accept: application/vnd.github+json" -f "expected_head_sha=$PRE" 2>&1); rc=$?
   if [ $rc -ne 0 ]; then
     if printf '%s' "$out" | grep -qiE 'conflict|not mergeable'; then
-      echo "ERROR: PR #$PR cannot update — MERGE CONFLICT with main." >&2
+      echo "ERROR: PR #$PR cannot update — MERGE CONFLICT with $BASE." >&2
       echo "  The wave's file-overlap analysis was too coarse, or a hub file changed under it." >&2
-      echo "  Next: rebase the branch onto origin/main in its worktree and resolve, OR pull this task" >&2
+      echo "  Next: rebase the branch onto origin/$BASE in its worktree and resolve, OR pull this task" >&2
       echo "        out of the wave and re-plan. Do NOT force. Re-run merge-wave.sh after fixing." >&2
     else
       echo "ERROR: PR #$PR update-branch failed: $out" >&2
@@ -250,8 +374,8 @@ wait_required_checks() {  # $1=PR
       # required check never takes this branch (gh pr checks reports the failure, not absence), so
       # BLOCKED semantics are untouched.
       mss_now=$(prfield "$PR" mergeStateStatus)
-      if [ "$mss_now" = "CLEAN" ]; then
-        echo "  PR #$PR — no required checks and mergeStateStatus=CLEAN — nothing to wait for."
+      if [ "$mss_now" = "CLEAN" ] || [ "$mss_now" = "UNSTABLE" ]; then
+        echo "  PR #$PR — no required checks and mergeStateStatus=$mss_now — nothing to wait for."
         return 0
       fi
       if ci_runs_in_flight "$PR"; then
@@ -278,107 +402,123 @@ wait_required_checks() {  # $1=PR
   done
 }
 
-merge_pr() {  # $1=PR
-  local PR="$1" br st2
-  br=$(prfield "$PR" headRefName)
-  echo "  PR #$PR is CLEAN — squash-merging…"
-  if ! gh pr merge "$PR" -R "$OWNER/$REPO" --squash; then
-    st2=$(prfield "$PR" state)
-    [ "$st2" = "MERGED" ] || { echo "ERROR: gh pr merge failed for PR #$PR (state=$st2)" >&2; return 1; }
-  fi
-  echo "  PR #$PR merged (squash)."
-  # Best-effort REMOTE branch cleanup (non-fatal). Local branch + worktree are the reaper's job.
-  if [ -n "$br" ] && [ "$br" != "main" ] && [ "$br" != "master" ]; then
-    if gh api --method DELETE "repos/$OWNER/$REPO/git/refs/heads/$br" >/dev/null 2>&1; then
-      echo "  remote branch '$br' deleted."
-    else
-      echo "  (remote branch '$br' left for the reaper.)"
-    fi
-  fi
+# Read identity, state, base and head together rather than joining separate API observations.
+load_snapshot() {
+  local fields
+  CURRENT_JSON='{}'
+  CURRENT_JSON=$(gh pr view "$PR" -R "$SLUG" --json number,url,state,baseRefName,headRefOid,mergeStateStatus,mergeCommit 2>/dev/null) || {
+    CURRENT_JSON='{}'; REASON='could not read PR evidence'; return 1;
+  }
+  fields=$(json_tool snapshot "$CURRENT_JSON" "$SLUG" "$PR") || { CURRENT_JSON='{}'; REASON='invalid PR identity or evidence'; return 1; }
+  IFS=$'\t' read -r STATE MSS HEAD ACTUAL_BASE MERGE_COMMIT PR_URL <<< "$fields"
 }
 
-process_pr() {  # $1=PR — run the state machine until merged or halt
-  local PR="$1" checks_done=0 guard=0 mss headoid
+assert_binding() {
+  [ "$ACTUAL_BASE" = "$BASE" ] || { REASON="base changed or differs from approved base $BASE"; return 1; }
+  [ "$HEAD" = "$EXPECTED_HEAD" ] || { REASON='head changed; reapproval required'; return 1; }
+  case "$STATE" in OPEN|MERGED) ;; *) REASON="PR is $STATE, not OPEN/MERGED"; return 1;; esac
+}
+
+verify_merged() {
+  [ "$STATE" = 'MERGED' ] && [ "$MERGE_COMMIT" != '-' ] || { REASON='MERGED state and merge commit evidence are required'; return 1; }
+  REASON='verified merged with matching reviewed head'
+  echo "  PR #$PR merged at $MERGE_COMMIT (reviewed head $EXPECTED_HEAD)."
+}
+
+merge_pr() {
+  local rc
+  # Re-read immediately before mutation; --match-head-commit closes the head-update race at GitHub.
+  load_snapshot && assert_binding || return 1
+  if [ "$STATE" = 'MERGED' ]; then verify_merged; return $?; fi
+  echo "  PR #$PR — requesting squash merge of reviewed head ${EXPECTED_HEAD}…"
+  gh pr merge "$PR" -R "$SLUG" --squash --match-head-commit "$EXPECTED_HEAD"
+  rc=$?
+  # A zero CLI exit can mean queued/auto-merge enabled. Only observable MERGED counts as complete.
+  load_snapshot && assert_binding || return 1
+  if [ "$STATE" = 'MERGED' ]; then verify_merged; return $?; fi
+  if [ "$rc" -eq 0 ] && [ "$STATE" = 'OPEN' ]; then
+    REASON='merge request accepted but PR remains OPEN; queued or pending'
+    echo "  PR #$PR — $REASON."
+    return 3
+  fi
+  REASON="merge request failed (exit $rc, state $STATE)"
+  return 1
+  # Branch deletion belongs to the reaper, including after a verified merge. A branch can advance
+  # again while GitHub processes the request; deleting its ref here could remove newer work.
+}
+
+process_pr() {
+  local checks_done=0 guard=0
   while : ; do
-    guard=$((guard+1)); [ "$guard" -gt "$STATE_GUARD_MAX" ] && { echo "ERROR: PR #$PR did not converge to a mergeable state" >&2; return 1; }
-    mss=$(prfield "$PR" mergeStateStatus)
-    case "$mss" in
+    guard=$((guard+1))
+    [ "$guard" -le "$STATE_GUARD_MAX" ] || { REASON='PR did not converge to a mergeable state'; return 1; }
+    load_snapshot && assert_binding || return 1
+    if [ "$STATE" = 'MERGED' ]; then verify_merged; return $?; fi
+    case "$MSS" in
       DIRTY)
-        echo "ERROR: PR #$PR has a MERGE CONFLICT with main (mergeStateStatus=DIRTY)." >&2
-        echo "  Resolve in the worktree (rebase onto origin/main) or pull this task from the wave." >&2
-        echo "  Do NOT force. Re-run merge-wave.sh after fixing." >&2
+        REASON="merge conflict with $BASE; resolve and reapprove the changed head"
         return 1 ;;
       BEHIND)
-        headoid=$(prfield "$PR" headRefOid)
-        update_branch "$PR" "$headoid" || return 1
-        checks_done=0 ;;   # head moved — the prior green checks no longer count
+        update_branch "$PR" "$EXPECTED_HEAD" || { REASON='branch update failed or did not become observable'; return 1; }
+        # Updating a branch creates a different commit: green checks do not replace head approval.
+        load_snapshot || return 1
+        REASON='branch updated; changed head requires reapproval'
+        return 1 ;;
       BLOCKED|UNKNOWN)
         if [ "$checks_done" -eq 1 ]; then
-          echo "ERROR: PR #$PR is $mss but required checks are already green — a NON-check gate is" >&2
-          echo "  blocking it (an unexpected required review or unresolved conversation). Resolve on" >&2
-          echo "  GitHub: $(prfield "$PR" url)" >&2
+          REASON="PR is $MSS after required checks; a non-check gate or mergeability computation remains"
           return 1
         fi
-        wait_required_checks "$PR" || return 1
+        wait_required_checks "$PR" || { REASON='required checks failed or unavailable'; return 1; }
         checks_done=1 ;;
       UNSTABLE)
-        # Mergeable under branch protection, but a NON-required check is red or still pending.
-        # GitHub never reports CLEAN while a non-required check is red — and this repo's main
-        # legitimately carries red non-required checks (lint/mypy → baseline-red-ci, perf →
-        # perf-tier-calibration, Windows ext-tools → env) that other tasks fix. Gate on REQUIRED
-        # checks only — exactly what branch protection enforces — then squash-merge. A genuinely
-        # failing REQUIRED check surfaces as BLOCKED, not UNSTABLE, so this never merges a red gate.
-        # ⚠️ DO NOT "tidy" this back to CLEAN-only. CLEAN requires EVERY check green (required AND
-        # non-required); a repo whose main carries red non-required checks would then merge NO wave of
-        # any rollout — the exact failure from the 2026-06-02 giflab run (see giflab-rollout-merge-wave-
-        # unstable-fix). Gating on `--required` is branch protection's own definition of mergeable.
-        # There is no unit test for this live-GitHub script, so this comment IS the guard.
+        # Optional red checks do not become requirements. GitHub still enforces branch protection.
         if [ "$checks_done" -eq 0 ]; then
-          wait_required_checks "$PR" || return 1
+          wait_required_checks "$PR" || { REASON='required checks failed or unavailable'; return 1; }
           checks_done=1
         fi
-        merge_pr "$PR" || return 1
-        return 0 ;;
-      CLEAN)
-        merge_pr "$PR" || return 1
-        return 0 ;;
-      ""|null)
-        echo "ERROR: PR #$PR — could not read mergeStateStatus (network or auth?)" >&2; return 1 ;;
-      *)
-        echo "ERROR: PR #$PR unexpected mergeStateStatus='$mss'" >&2; return 1 ;;
+        merge_pr; return $? ;;
+      CLEAN) merge_pr; return $? ;;
+      *) REASON="unexpected mergeStateStatus: $MSS"; return 1 ;;
     esac
   done
 }
 
-# ---- merge each PR in order (serial: each merge advances main, flipping the next to BEHIND) -------
-for raw in "${PRS[@]}"; do
-  PR=$(printf '%s' "$raw" | grep -oE '[0-9]+' | tail -1)
-  [ -z "${PR:-}" ] && { echo "ERROR: cannot parse a PR number from '$raw'" >&2; exit 1; }
-  st=$(prfield "$PR" state) || { echo "ERROR: cannot read PR #$PR in $OWNER/$REPO" >&2; exit 1; }
-  case "$st" in
-    MERGED) echo "PR #$PR already merged — skipping."; continue ;;
-    OPEN) ;;
-    *) echo "ERROR: PR #$PR is '$st' (not OPEN/MERGED) — refusing to merge. Resolve manually." >&2; exit 1 ;;
-  esac
-  echo "== PR #$PR =="
-  process_pr "$PR" || exit 1
+# Capture all implicit v3 heads up front, and validate all explicit bindings before any mutation.
+for ((i=0; i<${#PRS[@]}; i++)); do
+  PR="${PRS[$i]}"; EXPECTED_HEAD="${REVIEWED_HEADS[$i]}"
+  if ! load_snapshot; then
+    json_tool record "$RESULT" "$PR" blocked "$EXPECTED_HEAD" "$REASON" "$CURRENT_JSON" || true
+    exit 1
+  fi
+  [ -n "$EXPECTED_HEAD" ] || EXPECTED_HEAD="$HEAD"
+  REVIEWED_HEADS[$i]="$EXPECTED_HEAD"
+  if ! assert_binding; then
+    echo "ERROR: PR #$PR — $REASON" >&2
+    json_tool record "$RESULT" "$PR" blocked "$EXPECTED_HEAD" "$REASON" "$CURRENT_JSON" || true
+    exit 1
+  fi
 done
 
-# ---- advance the local root checkout's main (cosmetic; correctness rides on origin/main) ----------
-# The wave is ALREADY landed on origin/main by here, and the next wave's worktrees branch from a
-# freshly-fetched origin/main — so a stale LOCAL main is not a safety issue. Keep it tidy when easy,
-# but NEVER fail the script for it (that would be a false halt after a successful merge).
-echo "== all wave PRs merged — refreshing local main =="
-git -C "$REPO_PATH" fetch origin main >/dev/null 2>&1 || echo "  WARN: git fetch origin main failed (non-fatal)."
-cur_branch=$(git -C "$REPO_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null)
-if [ "$cur_branch" = "main" ]; then
-  if git -C "$REPO_PATH" merge --ff-only origin/main >/dev/null 2>&1; then
-    echo "  local main fast-forwarded to origin/main."
-  else
-    echo "  WARN: local main did not fast-forward (root checkout diverged). origin/main holds the merges;"
-    echo "        next wave's worktrees branch from origin/main regardless. Tidy the root when convenient."
+# Serial: a pending request stops the wave just as a block does. Never advance on queue acceptance.
+for ((i=0; i<${#PRS[@]}; i++)); do
+  PR="${PRS[$i]}"; EXPECTED_HEAD="${REVIEWED_HEADS[$i]}"; REASON=''
+  echo "== PR #$PR =="
+  process_pr; rc=$?
+  case "$rc" in 0) outcome=merged;; 3) outcome=pending;; *) outcome=blocked;; esac
+  json_tool record "$RESULT" "$PR" "$outcome" "$EXPECTED_HEAD" "$REASON" "$CURRENT_JSON" || exit 1
+  if [ "$rc" -ne 0 ]; then
+    echo "PR #$PR: $outcome — $REASON" >&2
+    exit "$rc"
   fi
-else
-  echo "  NOTE: root checkout is on '$cur_branch', not main — skipped local fast-forward (harmless)."
+done
+
+# Local checkout refresh is cosmetic and only occurs after every merge has been verified.
+echo "== all wave PRs merged — refreshing local $BASE =="
+git -C "$REPO_PATH" fetch origin "$BASE" >/dev/null 2>&1 || echo "  WARN: fetch of $BASE failed (non-fatal)."
+cur_branch=$(git -C "$REPO_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null)
+if [ "$cur_branch" = "$BASE" ]; then
+  git -C "$REPO_PATH" merge --ff-only "origin/$BASE" >/dev/null 2>&1 || echo "  WARN: local $BASE did not fast-forward (non-fatal)."
 fi
-echo "== merge-wave.sh: wave complete. =="
+REASON='all PRs verified merged'
+echo '== merge-wave.sh: wave complete. =='

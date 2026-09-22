@@ -56,3 +56,7 @@ See CONTEXT.md § Model tiering.)
 - The engine's result surface and reconcile grew `model` / `escalated` / `escalatedAt`, and the wave
   report an "Approved after escalation" section — escalations are legible per wave and in the
   completion log.
+
+## Finite-round clarification (2026-09-22)
+
+A rejection on the last permitted round cannot dispatch another tier without exceeding the configured budget. The result therefore records `nextModel` and its cause while preserving the actual executed `model`; reconciliation persists a separate next-tier recommendation for a later authorised attempt. Exhaustion before stronger-tier work is not evidence that the strongest approach failed. Protocol 4 additionally retains cumulative execution allowances under [ADR 0020](0020-requirements-and-execution-evidence-have-distinct-authorities.md).

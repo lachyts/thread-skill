@@ -515,6 +515,303 @@ python3 "$SCRIPT" reconcile --result "$TMP/mem-result.json" --tasks-dir "$TMP" >
 n=$(grep -c "## Review history (approved at ceiling)" "$TMP/task-ceiling.md")
 [ "$n" -eq 1 ] && echo "ok   - ceiling: history section not duplicated on re-run" || { echo "FAIL - ceiling section duplicated ($n)"; fail=1; }
 
+
+echo "== reconciliation safety regressions =="
+python3 - "$SCRIPT" "$TMP" <<'PYTEST' || fail=1
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import unittest
+
+SCRIPT, ROOT = sys.argv[1:]
+sys.argv = [sys.argv[0]]
+
+class ReconciliationSafety(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(dir=ROOT)
+        self.root = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+        self.note = self.root / 'task.md'
+        self.note.write_text('---\nstatus: in_progress\nrollout: "[[rollout]]"\nwave: 1\n---\n\nBody.\n')
+        (self.root / 'rollout.md').write_text('---\nstatus: open\nprotocol_version: 3\n---\n')
+
+    def cli(self, *args):
+        return subprocess.run([sys.executable, SCRIPT, *args, '--tasks-dir', str(self.root)],
+                              text=True, capture_output=True)
+
+    def reconcile(self, status='blocked', generation=None, attempt='attempt-1', run='run-1', **fields):
+        task = {'slug': 'task', 'status': status, **fields}
+        data = {'rolloutSlug': 'rollout', 'tasks': [task]}
+        if generation is not None:
+            data.update(runId=run, attemptId=attempt, generation=generation)
+        path = self.root / 'result.json'
+        path.write_text(json.dumps(data))
+        return self.cli('reconcile', '--result', str(path))
+
+    def accepted(self, **kwargs):
+        result = self.reconcile(**kwargs)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return self.note.read_text()
+
+    def test_resume_parses_quoted_statuses_and_inline_comments(self):
+        for value in ['"gate-pending"', "'gate-pending' # awaiting sign-off", '"done"', "'review'", '"merged" # landed']:
+            with self.subTest(value=value):
+                self.note.write_text(f'---\nstatus: {value}\n---\n')
+                result = self.cli('resume-filter', '--tasks', 'task')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), '')
+
+    def test_blocked_and_gated_results_keep_their_pr(self):
+        for status in ['blocked', 'plan-blocked', 'gate-pending']:
+            with self.subTest(status=status):
+                text = self.accepted(status=status, prUrl='https://github.com/o/r/pull/44')
+                self.assertIn('pr: https://github.com/o/r/pull/44', text)
+
+    def test_quoted_rollout_with_comment_accepts_its_own_result(self):
+        self.note.write_text('---\nstatus: in_progress\nrollout: "[[rollout]]" # current\n---\n')
+        self.accepted(generation=1, blockerDiagnosis='owned by current rollout')
+
+    def test_deferred_task_is_excluded_from_stale_resume_list(self):
+        result = self.cli('defer', '--tasks', 'task', '--rollout', str(self.root / 'rollout.md'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.cli('resume-filter', '--tasks', 'task')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), '')
+
+    def test_explicit_rescheduling_keeps_ordering_and_allows_new_result(self):
+        self.accepted(generation=1, blockerDiagnosis='old diagnosis')
+        result = self.cli('defer', '--tasks', 'task', '--rollout', str(self.root / 'rollout.md'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        before = self.note.read_bytes()
+        args = ['reschedule', '--tasks', 'task', '--rollout', str(self.root / 'rollout.md'), '--wave', '2']
+        result = self.cli(*args, '--dry-run')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.note.read_bytes(), before)
+        result = self.cli(*args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = self.note.read_text()
+        self.assertNotIn('reconcile_deferred:', text)
+        self.assertIn('reconcile_generation: 1', text)
+        self.assertIn('wave: 2', text)
+        self.assertIn('rollout: "[[rollout]]"', text)
+        self.assertIn('status: open', text)
+        before = self.note.read_bytes()
+        self.assertEqual(self.cli(*args).returncode, 0)
+        self.assertEqual(self.note.read_bytes(), before)
+        result = self.accepted(generation=2, attempt='attempt-2', blockerDiagnosis='rescheduled diagnosis')
+        self.assertIn('rescheduled diagnosis', result)
+        self.assertIn('old diagnosis', result)
+
+    def test_reschedule_requires_a_real_rollout_and_positive_wave(self):
+        self.cli('defer', '--tasks', 'task', '--rollout', str(self.root / 'rollout.md'))
+        before = self.note.read_bytes()
+        (self.root / 'rollout-v4.md').write_text('---\nstatus: open\nprotocol_version: 4\n---\n')
+        for rollout, wave in [('missing.md', '1'), ('rollout.md', '0'), ('rollout.md', '-1'), ('rollout-v4.md', '1')]:
+            with self.subTest(rollout=rollout, wave=wave):
+                result = self.cli('reschedule', '--tasks', 'task', '--rollout', str(self.root / rollout), '--wave', wave)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.note.read_bytes(), before)
+
+    def test_reschedule_refuses_non_open_or_unmarked_tasks_and_foreign_membership(self):
+        fixtures = ['status: done\nreconcile_deferred: true',
+                    'status: in_progress\nreconcile_deferred: true',
+                    'status: open',
+                    'status: open\nreconcile_deferred: true\nrollout: "[[other-rollout]]"']
+        for fields in fixtures:
+            with self.subTest(fields=fields):
+                self.note.write_text(f'---\n{fields}\n---\n')
+                before = self.note.read_bytes()
+                result = self.cli('reschedule', '--tasks', 'task', '--rollout', str(self.root / 'rollout.md'), '--wave', '1')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.note.read_bytes(), before)
+
+    def test_cli_identity_can_upgrade_existing_v3_without_rewriting_protocol(self):
+        self.accepted(blockerDiagnosis='legacy diagnosis')
+        path = self.root / 'result.json'
+        path.write_text(json.dumps({'rolloutSlug': 'rollout', 'tasks': [
+            {'slug': 'task', 'status': 'blocked', 'blockerDiagnosis': 'ordered diagnosis'}]}))
+        args = ['reconcile', '--result', str(path), '--run-id', 'run-cli', '--attempt-id', 'retry-cli', '--generation', '1']
+        result = self.cli(*args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        before = self.note.read_bytes()
+        self.assertIn(b'ordered diagnosis', before)
+        self.assertIn('protocol_version: 3', (self.root / 'rollout.md').read_text())
+        self.assertEqual(self.cli(*args).returncode, 0)
+        self.assertEqual(self.note.read_bytes(), before)
+
+    def test_ambiguous_identity_does_not_advance_cursor(self):
+        self.accepted(generation=2, blockerDiagnosis='latest diagnosis')
+        path = self.root / 'result.json'
+        path.write_text(json.dumps({'runId': 'old-run', 'generation': 1, 'rolloutSlug': 'rollout', 'tasks': [
+            {'slug': 'task', 'status': 'review'}]}))
+        before = (self.root / 'rollout.md').read_bytes()
+        result = self.cli('reconcile', '--result', str(path), '--wave', '1', '--rollout', str(self.root / 'rollout.md'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.root / 'rollout.md').read_bytes(), before)
+
+    def test_legacy_changed_feedback_is_preserved_and_replays_are_idempotent(self):
+        self.accepted(blockerDiagnosis='first diagnosis')
+        second = self.accepted(blockerDiagnosis='second diagnosis')
+        self.assertIn('first diagnosis', second)
+        self.assertIn('second diagnosis', second)
+        self.assertEqual(second.count('## Blocker diagnosis'), 1)
+        self.assertEqual(self.accepted(blockerDiagnosis='second diagnosis'), second)
+        self.assertEqual(self.accepted(blockerDiagnosis='first diagnosis'), second)
+
+    def test_legacy_same_payload_retry_restores_blocked_status_after_dispatch_stamp(self):
+        for status, feedback in [('blocked', {'blockerDiagnosis':'unchanged transient diagnosis'}),
+                                 ('plan-blocked', {'blockerDiagnosis':'unchanged planning diagnosis'}),
+                                 ('review-blocked', {'reviewFeedback':['unchanged review diagnosis']})]:
+            with self.subTest(status=status):
+                self.note.write_text('---\nstatus: in_progress\nrollout: "[[rollout]]"\n---\n')
+                self.accepted(status=status, **feedback)
+                self.note.write_text(self.note.read_text().replace(f'status: {status}', 'status: in_progress'))
+                retried = self.accepted(status=status, **feedback)
+                self.assertIn(f'status: {status}\n', retried)
+                diagnosis = feedback.get('blockerDiagnosis') or feedback['reviewFeedback'][0]
+                self.assertEqual(retried.count(diagnosis), 1)
+
+    def test_identified_replay_does_not_rewrite_a_new_dispatch_status(self):
+        self.accepted(generation=1, blockerDiagnosis='accepted diagnosis')
+        self.note.write_text(self.note.read_text().replace('status: blocked', 'status: in_progress'))
+        before = self.note.read_bytes()
+        self.accepted(generation=1, blockerDiagnosis='accepted diagnosis')
+        self.assertEqual(self.note.read_bytes(), before)
+
+    def test_legacy_replay_cannot_reopen_terminal_task_or_approved_gate(self):
+        self.accepted(blockerDiagnosis='already resolved diagnosis')
+        self.note.write_text(self.note.read_text().replace('status: blocked', 'status: done'))
+        before = self.note.read_bytes()
+        self.accepted(blockerDiagnosis='already resolved diagnosis')
+        self.assertEqual(self.note.read_bytes(), before)
+        self.note.write_text('---\nstatus: in_progress\nrollout: "[[rollout]]"\n---\n')
+        self.accepted(status='gate-pending', gatedInputs=['spend: cap AUD 10'])
+        result = self.cli('approve-gates', '--tasks', 'task')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        before = self.note.read_bytes()
+        self.accepted(status='gate-pending', gatedInputs=['spend: cap AUD 10'])
+        self.assertEqual(self.note.read_bytes(), before)
+
+    def test_distinct_attempts_keep_even_identical_feedback(self):
+        self.accepted(generation=1, blockerDiagnosis='still failing')
+        text = self.accepted(generation=2, attempt='attempt-2', blockerDiagnosis='still failing')
+        self.assertEqual(text.count('still failing'), 2)
+        self.assertEqual(text.count('## Blocker diagnosis'), 1)
+        self.assertEqual(self.accepted(generation=2, attempt='attempt-2', blockerDiagnosis='still failing'), text)
+
+    def test_review_history_is_appended_for_each_distinct_result(self):
+        self.accepted(status='review-blocked', generation=1, reviewHistory=[{'round': 1, 'feedback': ['first issue']}])
+        text = self.accepted(status='review-blocked', generation=2, attempt='attempt-2',
+                             reviewHistory=[{'round': 1, 'feedback': ['second issue']}])
+        self.assertIn('- first issue', text)
+        self.assertIn('- second issue', text)
+
+    def test_stale_ordered_delivery_cannot_overwrite_newer_result(self):
+        self.accepted(generation=3, blockerDiagnosis='current diagnosis', prUrl='https://github.com/o/r/pull/50')
+        before = self.note.read_bytes()
+        result = self.reconcile(status='review', generation=2, prUrl='https://github.com/o/r/pull/49')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.note.read_bytes(), before)
+
+    def test_generation_collision_is_rejected_without_losing_feedback(self):
+        self.accepted(generation=1, blockerDiagnosis='current diagnosis')
+        before = self.note.read_bytes()
+        result = self.reconcile(generation=1, blockerDiagnosis='new feedback with ambiguous order')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.note.read_bytes(), before)
+        self.assertIn('generation', result.stderr)
+
+    def test_legacy_result_cannot_overwrite_identity_bearing_state(self):
+        self.accepted(generation=1, blockerDiagnosis='identified diagnosis')
+        before = self.note.read_bytes()
+        result = self.reconcile(blockerDiagnosis='unidentified late delivery')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.note.read_bytes(), before)
+
+    def test_partial_identity_fails_closed(self):
+        path = self.root / 'result.json'
+        path.write_text(json.dumps({'runId': 'run-1', 'tasks': [{'slug': 'task', 'status': 'blocked'}]}))
+        before = self.note.read_bytes()
+        result = self.cli('reconcile', '--result', str(path))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.note.read_bytes(), before)
+
+    def test_terminal_status_cannot_be_reopened(self):
+        for value in ['done', '"done"', 'merged', 'deferred']:
+            with self.subTest(value=value):
+                self.note.write_text(f'---\nstatus: {value}\n---\nuntouched\n')
+                before = self.note.read_bytes()
+                result = self.reconcile(blockerDiagnosis='late failure')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.note.read_bytes(), before)
+
+    def test_late_result_cannot_reopen_deferred_backlog_task(self):
+        self.accepted(generation=1, blockerDiagnosis='old diagnosis')
+        result = self.cli('defer', '--tasks', 'task', '--rollout', str(self.root / 'rollout.md'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        before = self.note.read_bytes()
+        result = self.reconcile(generation=2, status='review')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.note.read_bytes(), before)
+
+    def test_foreign_rollout_result_cannot_overwrite_task(self):
+        self.note.write_text('---\nstatus: in_progress\nrollout: "[[new-rollout]]"\n---\n')
+        before = self.note.read_bytes()
+        result = self.reconcile(generation=1, blockerDiagnosis='old rollout failure')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.note.read_bytes(), before)
+
+    def test_tier_cap_stays_until_higher_tier_is_explicitly_observed(self):
+        self.accepted(generation=1, tierCapped=True, tierCappedAt='implement', model='opus')
+        text = self.accepted(generation=2, attempt='attempt-2', blockerDiagnosis='unknown capability')
+        self.assertIn('tier_capped: implement', text)
+        text = self.accepted(generation=3, attempt='attempt-3', tierCapped=False, model='opus')
+        self.assertIn('tier_capped: implement', text)
+        text = self.accepted(generation=4, attempt='attempt-4', tierCapped=False, model='fable')
+        self.assertNotIn('tier_capped:', text)
+
+    def test_next_model_recommendation_is_not_executed_model_provenance(self):
+        text = self.accepted(status='review-blocked', generation=1, model='opus', escalated=False,
+                             nextModel='fable', nextModelReason='Final review round rejected.')
+        self.assertIn('next_model: fable', text)
+        self.assertIn('next_model_reason:', text)
+        self.assertNotIn('\nmodel: fable\n', text)
+        result = self.cli('status', '--rollout', str(self.root / 'rollout.md'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = json.loads(result.stdout)['tasks'][0]
+        self.assertEqual(task.get('next_model'), 'fable')
+        self.assertEqual(task.get('next_model_reason'), 'Final review round rejected.')
+        text = self.accepted(generation=2, attempt='attempt-2', blockerDiagnosis='Transient environment failure')
+        self.assertIn('next_model: fable', text)
+        text = self.accepted(generation=3, attempt='attempt-3', model='fable', blockerDiagnosis='Higher tier actually ran')
+        self.assertNotIn('next_model:', text)
+        self.assertNotIn('next_model_reason:', text)
+
+    def test_status_exposes_tier_cap_and_normalises_status(self):
+        self.note.write_text('---\nstatus: "blocked" # diagnosis\nrollout: "[[rollout]]"\nwave: 1\ntier_capped: "implement"\n---\n')
+        result = self.cli('status', '--rollout', str(self.root / 'rollout.md'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        task = json.loads(result.stdout)['tasks'][0]
+        self.assertEqual(task['status'], 'blocked')
+        self.assertEqual(task.get('tier_capped'), 'implement')
+
+    def test_identified_result_dry_run_does_not_claim_delivery(self):
+        path = self.root / 'result.json'
+        path.write_text(json.dumps({'runId': 'run-1', 'attemptId': 'attempt-1', 'generation': 1,
+                                   'tasks': [{'slug': 'task', 'status': 'blocked', 'blockerDiagnosis': 'dry run diagnosis'}]}))
+        before = self.note.read_bytes()
+        result = self.cli('reconcile', '--result', str(path), '--dry-run')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.note.read_bytes(), before)
+        result = self.cli('reconcile', '--result', str(path))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.note.read_text().count('dry run diagnosis'), 1)
+
+unittest.main(verbosity=2)
+PYTEST
+
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fail=1; fi
 exit $fail
