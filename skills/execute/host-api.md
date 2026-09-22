@@ -13,6 +13,16 @@ verified account/tool availability, current record and native tool responses.
 In particular, never invent a child ID, successful output, stop confirmation,
 review, approval, no-dispatch observation or merge result to fill a payload.
 
+## New-source evidence and routing contract
+
+This source initialises `evidenceContractVersion: 1`; it requires exact authority
+text/context/source, an explicit external-verifier input manifest and independent
+built-in review receipts. New routing is explicitly selected by
+`config.routingPolicy`. Read [the correction contract](routing-and-evidence.md)
+for its complete fields and acceptance boundaries before using these payloads.
+The `models` example below illustrates the retained legacy tier route only.
+It is not the default model recommendation for new policy executions.
+
 ## Calling the CLI and identifying the owner
 
 Invocation shape: `node <HOST_PATH> <COMMAND> <ABSOLUTE_RECORD_DIRECTORY>
@@ -32,7 +42,9 @@ absolute and not a symlink. `init` refuses an existing record.
 | `advance` | `owner` | Reconcile source changes, drain resolved superseded work, replay engine results, admit ready tasks and settle the execution. |
 | `claim` | `owner`, `taskId`, `requestId` | Reserve allowance and native capacity before spawning. |
 | `bind` | `owner`, `taskId`, `requestId`, `claimToken`, `childId` | Record the actual child returned by the native spawn tool. |
-| `accept` | `owner`, `taskId`, `envelope` | Validate and accept an observed native result. |
+| `unavailable` | `owner`, `taskId`, `requestId`, `claimToken`, `proof` | Record a proven refusal of the prepared recovery model before any child exists; preserve the spent claim. |
+| `accept` | `owner`, `taskId`, `envelope`, `reviewReceipt` for successful review | Validate and accept an observed native result. |
+| `verify` | `owner`, `taskId`, `operation` | Reserve and run supplementary verification exactly once per operation ID. |
 | `merge` | `owner`, `taskId` | Recheck the current approval and repository, invoke the pinned merger, then verify the integrated result. |
 | `transition` | `owner`, `command` | Apply a supported explicit domain transition. |
 | `recover` | New `owner`, `evidence` | Transfer a stopped owner's execution and native runs using observed evidence. |
@@ -76,7 +88,8 @@ Schematic `init` payload:
       "path": "/ABS/REPOSITORY",
       "identity": "github.com/EXAMPLE/REPOSITORY",
       "baseBranch": "<actual-base-branch>",
-      "verifier": "<configured-repository-verifier-command>"
+      "verifier": "<configured-repository-verifier-command>",
+      "verifierInputs": []
     },
     "authority": {
       "outcomes": ["<authorised outcome>"],
@@ -84,7 +97,8 @@ Schematic `init` payload:
       "allowedActions": ["merge"],
       "reservedDecisions": ["<decision retained by the user>"],
       "gates": [],
-      "mergeEffects": []
+      "mergeEffects": [],
+      "evidence": {"userText":"<exact user instruction>","context":"<exact proposal and amendments approved>","source":"<durable conversation evidence>"}
     },
     "tasks": [
       {
@@ -395,7 +409,9 @@ parent's values. The domain replaces them with the parent's allowance and
 assigns the **same pool**, so this adds no fresh calls, verifier runs or recovery
 budget. It adds the dependency and invalidates the parent's affected outcomes.
 
-### Substitute available native model bindings
+### Substitute available native model bindings (legacy tier route)
+
+This transition is unavailable with a pinned `routingPolicy`: its prepared recovery binding is the only automatic model substitution for that execution. Changing the policy requires a separately prepared new execution, not a mutation of a running or historical record.
 
 For an inactive unfinished task with remaining allowance, the same owner may
 record an actually available same-account model mapping:

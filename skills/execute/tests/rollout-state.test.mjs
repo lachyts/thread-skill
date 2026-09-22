@@ -961,3 +961,36 @@ test("rollback rejects peer commits and missing revert authority", () => {
     /owned/,
   );
 });
+
+test("known native recovery-model refusal ends only an unbound claim without refund", () => {
+  const setup = spec([task("a")]); setup.routingPolicy = { recovery: { model: "recovery-native" } };
+  let s = start(createRollout(setup, owner), "a");
+  s = run(s, { type: "claim", taskId: "a", requestId: "claim-1", verifierRuns: 1 });
+  const proof = { source: "native-launch", neverStarted: true, model: "recovery-native", evidence: "Fixture native launch explicitly refused; no child was created" };
+  const command = { type: "request-unavailable", taskId: "a", requestId: "claim-1", proof };
+  assert.throws(() => run(s, { ...command, proof: { ...proof, neverStarted: false } }), /native launch/);
+  const dispatched = run(s, { type: "request-state", taskId: "a", requestId: "claim-1", status: "dispatched", childId: "actual-child" });
+  assert.throws(() => run(dispatched, command), /unbound claim/);
+  const denied = run(s, command);
+  assert.equal(denied.execution.requests['claim-1'].status, "denied");
+  assert.equal(denied.execution.requests['claim-1'].childId, undefined);
+  assert.equal(denied.execution.pools.a.spent.calls, 1);
+  assert.equal(denied.execution.pools.a.spent.verifierRuns, 1);
+  assert.deepEqual(run(denied, command), denied);
+  assert.throws(() => run(denied, { ...command, proof: { ...proof, evidence: "different evidence" } }), /conflicting/);
+});
+
+test("a durable unavailable recovery route cannot be silently removed or changed", () => {
+  const setup = spec([task("a")]);
+  setup.routingPolicy = { policyDigest: "policy-fixture", recovery: { model: "recovery-native" } };
+  const s = start(createRollout(setup, owner), "a");
+  const route = { version: 1, policyDigest: "policy-fixture", qualityFailures: 2, stage: "maximum-unavailable",
+    recoveryUnavailable: { model: "recovery-native", evidence: "Fixture native refusal" } };
+  s.tasks.a.routingState = route;
+  const command = { type: "converged", taskId: "a", attemptId: s.tasks.a.attempt.id,
+    revision: s.tasks.a.revision.hash, result: { status: "blocked", routingState: route } };
+  const removed = structuredClone(route); delete removed.recoveryUnavailable;
+  for (const changed of [removed, { ...route, recoveryUnavailable: { ...route.recoveryUnavailable, evidence: "different" } }])
+    assert.throws(() => run(s, { ...command, result: { status: "blocked", routingState: changed } }), /unavailable recovery/);
+  assert.deepEqual(run(s, command).tasks.a.routingState, route);
+});

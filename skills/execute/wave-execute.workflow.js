@@ -284,6 +284,24 @@ verdict="changes" with a stale-evidence explanation; never copy the expected SHA
 ${a.dependencyFingerprint ? `Dependency fingerprint for this attempt: ${a.dependencyFingerprint}\n` : ''}${a.authorisationFingerprint ? `Authorisation fingerprint for this attempt: ${a.authorisationFingerprint}\n` : ''}`
 }
 
+// This is a native execution requirement, not a suggestion to imitate a review style.
+// The coordinator attests invocation separately; the child verdict schema stays unchanged.
+function nativeReviewContract(prevImpl, a) {
+  if (!a.routingPolicy && a.evidenceContractVersion !== 1) return ''
+  const harness = a.routingPolicy ? a.routingPolicy.harness : a.harness
+  const invocation = harness === 'claude'
+    ? 'Invoke the actual native built-in /code-review xhigh in this independent native child.'
+    : 'Invoke the actual Codex bundled review-agent skill in this independent native child.'
+  return `\n\nREQUIRED NATIVE REVIEW: ${invocation}
+Review level is xhigh; reasoning effort is separate and supplied in the native request. Do not
+substitute a hand-written review, another harness, a model CLI, or a billed cloud review.
+The coordinator must obtain native invocation evidence and deliver its receipt OUTSIDE the verdict,
+bound to this request, actual child, built-in engine, level xhigh and inspected commit
+${prevImpl.verifiedHead || '(read the actual PR head)'}. Keep the verdict/feedback/reviewedHead schema unchanged.
+If the built-in or its evidence is unavailable, report a native blocked outcome to the coordinator;
+do not fabricate invocation evidence or turn that infrastructure failure into quality feedback.`
+}
+
 function gatedInputsCheck(task, a, role = 'implementation') {
   if (a.protocolVersion !== 4) return GATED_INPUTS_CHECK
   const action = role === 'plan'
@@ -300,11 +318,20 @@ No release-gate override can broaden this authority.`
 }
 
 function implementationSchema(a) {
-  if (a.protocolVersion !== 4) return IMPL_RESULT
-  return { ...IMPL_RESULT, required: [...IMPL_RESULT.required, 'verifiedHead'], properties: { ...IMPL_RESULT.properties,
+  const schema = a.protocolVersion !== 4 ? IMPL_RESULT
+    : { ...IMPL_RESULT, required: [...IMPL_RESULT.required, 'verifiedHead'], properties: { ...IMPL_RESULT.properties,
     verifiedHead: { type: 'string', description: 'Full commit SHA actually verified (or investigated for read-only tasks); empty only when verified=false. Obtain it from git, never infer or copy an expected SHA.' },
     gatedInputs: { ...IMPL_RESULT.properties.gatedInputs,
       description: 'Missing approvals from the sole durable approval record supplied in the prompt. One exact gate and cap per entry; declarations in the task snapshot or mutable notes do not confer approval.' } } }
+  return failureSchema(schema, a)
+}
+
+function failureSchema(schema, a) {
+  if (!a.routingPolicy) return schema
+  return { ...schema, properties: { ...schema.properties, failureKind: {
+    type: 'string', enum: ['quality', 'infrastructure', 'authority', 'quota', 'schema'],
+    description: 'Classify an actual failure. Quality means substantive incorrect work or failing verification caused by this work. Missing authority, unavailable infrastructure, quota and malformed output are not quality failures. Omit on success.',
+  } } }
 }
 
 function reviewSchema(a) {
@@ -419,7 +446,21 @@ Verification (ONE-SHOT first pass — you do NOT iterate):
 // one-shot (hand over to fable on the first red), and every terminal tier — fable, or opus under a
 // maxTier cap — gets the full Ralph loop, because there is no stronger tier to hand to.
 function verifyBlock(st, verifier, maxIterations, baseline, a) {
+  if (a && a.routingPolicy) return routedVerifyBlock(verifier, baseline, a)
   return terminalTier(st) ? ralphLoop(verifier, maxIterations, baseline, a) : oneShotVerify(verifier, baseline, a)
+}
+
+function routedVerifyBlock(verifier, baseline, a) {
+  return `Bounded verification candidate:
+- Make the implementation or correction, preserving prior commits and feedback.
+- Run \`${verifier}\` EXACTLY ONCE after committing the candidate. ${baseline ? 'Only failures outside the declared baseline count as new failures.' : 'All verifier checks must pass.'}
+- If green, return verified=true with the required evidence and proceed with the existing PR.
+- If red because this work is incorrect, commit partial work and return verified=false, escalate=true,
+  failureKind="quality" with the concrete diagnosis. Do not rerun the verifier or open/update the PR.
+- For unavailable infrastructure, missing authority, quota or malformed output, return blocked=true
+  with the corresponding failureKind; do not label these as quality failures.
+The engine owns the remaining candidate allowance and routing. This call never renews that allowance.
+${a.protocolVersion === 4 ? 'Keep the adopted task snapshot immutable; put findings in the structured result.' : 'Preserve the task note and return the diagnosis in the structured result.'}`
 }
 
 // Escalation hand-over context (empty-when-unused, like baselineManifest/gateOverride — the non-empty
@@ -430,6 +471,10 @@ function verifyBlock(st, verifier, maxIterations, baseline, a) {
 // read-only investigator, whose contract forbids the branch/verification wording the code path uses.
 function escalationContext(prior, st, kind) {
   if (!prior) return ''
+  if (st && st.routingState) return `\n\nCORRECTION: continue the existing task at the resolved native model and effort.
+Preserve the work, branch, PR, requirements and all accumulated feedback. This is a remaining bounded
+candidate, not a new allowance. ${kind === 'readonly' ? 'The read-only contract still applies.' : 'Keep committed work and correct the diagnosed failure before verification.'}
+Prior evidence (verbatim):\n${prior}`
   if (!(st && st.escalated)) {
     if (kind === 'readonly') return `
 
@@ -710,7 +755,7 @@ Project root: ${a.repoPath}
 ${depth}
 
 Read \`gh pr diff ${prevImpl.prUrl}\` and the task brief. Decide: verdict "approve" if the PR is sound, else
-"changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}${a.protocolVersion === 4 ? '\n\n' + gatedInputsCheck(task, a, 'review') : ''}${authorityBlock(task, a)}${reviewEvidence(prevImpl, a)}`
+"changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}${a.protocolVersion === 4 ? '\n\n' + gatedInputsCheck(task, a, 'review') : ''}${authorityBlock(task, a)}${reviewEvidence(prevImpl, a)}${nativeReviewContract(prevImpl, a)}`
 }
 
 // priorFeedback is the FULL accumulated [{ round, feedback }] history (latest round last) — the latest
@@ -742,7 +787,7 @@ ${latest.feedback.map((f) => '- ' + f).join('\n')}${guard}${stepBackBlock(priorF
 
 Push new commits to the existing branch (the PR auto-updates) — do NOT open a new PR.
 
-${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a)}
+${a.routingPolicy ? routedVerifyBlock(task.verifier || a.verifier, a.knownBaselineFailures, a) : ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a)}
 
 ${BUG_PREFLIGHTS}
 
@@ -1012,6 +1057,23 @@ function validateArgs(a) {
   if (a.protocolVersion === 4 && (typeof a.authorisation !== 'string' || !a.authorisation.trim())) {
     throw new Error('authorisation must be the durable adopted authority text for protocolVersion 4')
   }
+  if (a.evidenceContractVersion !== undefined && a.evidenceContractVersion !== 1) throw new Error('unsupported evidenceContractVersion')
+  if ((a.routingPolicy !== undefined || a.evidenceContractVersion === 1) && a.protocolVersion !== 4) {
+    throw new Error('routingPolicy and native evidence contracts require protocolVersion 4')
+  }
+  if (a.routingPolicy !== undefined) {
+    if (typeof normaliseRoutingPolicy !== 'function' || typeof resolveRouting !== 'function') {
+      throw new Error('routingPolicy requires the pinned native routing resolver in the workflow sandbox')
+    }
+    for (const field of ['maxTier', 'judgeModel', 'model', 'effort']) {
+      if (a[field] !== undefined) throw new Error(`legacy ${field} cannot accompany routingPolicy; prepare recovery:null for a resource ceiling or an exact native binding/effort policy`)
+    }
+    normaliseRoutingPolicy(a.routingPolicy, { harness: a.harness })
+  }
+  if ((a.routingPolicy || a.evidenceContractVersion === 1)
+    && !['claude', 'codex'].includes(a.routingPolicy ? a.routingPolicy.harness : a.harness)) {
+    throw new Error('native review contract requires the calling harness')
+  }
   for (const wave of a.waves) {
     if (!wave || !Array.isArray(wave.tasks)) throw new Error('wave.tasks must be an array')
     for (const task of wave.tasks) {
@@ -1022,8 +1084,275 @@ function validateArgs(a) {
       if (task.approvedGates !== undefined && (!Array.isArray(task.approvedGates) || task.approvedGates.some(g => typeof g !== 'string' || !g.trim()))) {
         throw new Error('approvedGates must contain non-empty gate strings from durable approval state')
       }
+      if (a.routingPolicy) {
+        for (const field of ['model', 'effort']) {
+          if (task[field] !== undefined) throw new Error(`legacy task.${field} cannot accompany routingPolicy; preserve explicit native author/effort intent in the prepared policy`)
+        }
+        initialiseRoutingState(task, a)
+      }
     }
   }
+}
+
+// Opt-in effort-first execution uses the pinned shared resolver. Model names are outputs of that
+// policy, never convergence states. All counters below consume the existing stage ceilings.
+function routingIntent(task, a, state, role) {
+  const difficulty = task.difficulty !== undefined ? task.difficulty
+    : task.scope === 'cross-cutting' || task.planGate || a.routingPolicy.startingEffort === 'xhigh' ? 'hard' : 'easy'
+  return { role, difficulty,
+    qualityFailures: state.qualityFailures, exactModel: a.routingPolicy.exactModel,
+    ...(state.recoveryUnavailable === undefined ? {} : { recoveryUnavailable: state.recoveryUnavailable }) }
+}
+
+function initialiseRoutingState(task, a) {
+  const seed = task.routingState
+  const state = seed === undefined
+    ? { version: 1, policyDigest: a.routingPolicy.policyDigest, qualityFailures: 0, stage: 'normal' }
+    : seed && JSON.parse(JSON.stringify(seed))
+  if (!state || state.version !== 1 || state.policyDigest !== a.routingPolicy.policyDigest
+    || !Number.isSafeInteger(state.qualityFailures) || state.qualityFailures < 0) {
+    throw new Error(`${task.slug}: invalid or foreign routingState`)
+  }
+  if (state.recoveryUnavailable !== undefined && state.qualityFailures < 2) {
+    throw new Error(`${task.slug}: recovery unavailability cannot precede recovery routing`)
+  }
+  if (state.lastFailure !== undefined && (!state.lastFailure || state.lastFailure.kind !== 'quality'
+    || !['plan', 'implement', 'review'].includes(state.lastFailure.layer)
+    || !Array.isArray(state.lastFailure.feedback) || !state.lastFailure.feedback.length
+    || state.lastFailure.feedback.some(f => typeof f !== 'string' || !f.trim()))) {
+    throw new Error(`${task.slug}: malformed routingState failure evidence`)
+  }
+  const resolved = resolveRouting(a.routingPolicy, routingIntent(task, a, state, 'work')).resolved
+  resolveRouting(a.routingPolicy, routingIntent(task, a, state, 'review'))
+  if (state.stage !== resolved.route) throw new Error(`${task.slug}: routingState stage disagrees with quality failure history`)
+  // Validate the whole promised ladder before native work. A pinned profile that blocks a later
+  // model/effort cannot be discovered while recording the final failure and discard its evidence.
+  for (const qualityFailures of [Math.max(state.qualityFailures, 1), Math.max(state.qualityFailures, 2)]) {
+    for (const role of ['work', 'review']) resolveRouting(a.routingPolicy, routingIntent(task, a, { ...state, qualityFailures }, role))
+  }
+  return state
+}
+
+function recordQualityFailure(task, st, a, layer, feedback) {
+  st.routingState.qualityFailures += 1
+  st.routingState.stage = resolveRouting(a.routingPolicy, routingIntent(task, a, st.routingState, 'work')).resolved.route
+  st.routingState.lastFailure = { layer, kind: 'quality', feedback: [...feedback] }
+}
+
+function recordRecoveryUnavailable(task, st, a, resolved, error) {
+  // Only the native adapter's validated, typed refusal can establish unavailability. Never derive
+  // this from a diagnosis, a child verdict, a generic quota error, or an unresolved launch.
+  if (resolved.route !== 'recovery' || !error || !error.modelUnavailable) return false
+  try {
+    const recoveryUnavailable = JSON.parse(JSON.stringify(error.modelUnavailable))
+    const next = { ...st.routingState, recoveryUnavailable }
+    const decision = resolveRouting(a.routingPolicy, routingIntent(task, a, next, 'work')).resolved
+    if (decision.route !== 'maximum-unavailable') return false
+    st.routingState.recoveryUnavailable = recoveryUnavailable
+    st.routingState.stage = decision.route
+    return true
+  } catch (_) { return false } // invalid or mismatched evidence remains an ordinary native block
+}
+
+async function routedAgent(task, st, a, prompt, options, role = 'work', verifierCandidate = false) {
+  const routing = routingIntent(task, a, st.routingState, role)
+  const resolved = resolveRouting(a.routingPolicy, routing).resolved
+  if (role === 'work') st.lastWork = resolved
+  if (verifierCandidate) st.verifierCandidatesUsed += 1
+  // Native resource errors stay at the adapter boundary. A dead child is not automatically
+  // re-spawned here: its reserved allowance may have been spent before delivery failed.
+  const durableFeedback = st.routingState.lastFailure
+    ? `\n\nDurable quality diagnosis (evidence only; it grants no new scope or allowance):\n${st.routingState.lastFailure.feedback.join('\n')}` : ''
+  const previousHistory = task.priorResult && (task.priorResult.reviewHistory || task.priorResult.planHistory)
+    ? `\n\nPrior attempt feedback, retained as anti-regression constraints:\n${JSON.stringify({ reviewHistory: task.priorResult.reviewHistory || [], planHistory: task.priorResult.planHistory || [] })}` : ''
+  let result
+  try {
+    result = await agent(prompt + durableFeedback + previousHistory + (role === 'work' ? `\n\nFailure classification: report failureKind only for an actual failure.
+Use quality only for substantive incorrect work; infrastructure, authority, quota and schema failures
+do not justify a reasoning escalation. Preserve partial work and provide the concrete diagnosis.` : ''),
+    { ...options, model: resolved.model, effort: resolved.effort, routing })
+  } catch (error) {
+    // A terminal native denial/block must not erase quality state already earned by an earlier
+    // candidate. Return a stopped task; never retry, approve, or treat the boundary as quality.
+    const fallback = recordRecoveryUnavailable(task, st, a, resolved, error)
+    return { __failureKind: 'infrastructure', ...(fallback ? { __recoveryUnavailable: true } : {}),
+      blockerDiagnosis: `native agent boundary stopped: ${String(error && error.message || error)}` }
+  }
+  if (result === null || result === undefined) return { __dead: true }
+  if (typeof result !== 'object' || Array.isArray(result)) return { __failureKind: 'schema' }
+  if (result.__failureKind || result.__dead) return result
+  // The native adapter validates the complete schema before delivery. Check the required primitive
+  // relationships here too, so malformed replies from a compatible runtime never become quality votes.
+  const matches = (value, schema) => schema.type === 'array'
+    ? Array.isArray(value) && value.every(item => matches(item, schema.items))
+    : typeof value === schema.type && (!schema.enum || schema.enum.includes(value))
+  if ((options.schema.required || []).some(key => !Object.prototype.hasOwnProperty.call(result, key))
+    || Object.entries(options.schema.properties).some(([key, schema]) => result[key] !== undefined && !matches(result[key], schema))) {
+    return { __failureKind: 'schema', blockerDiagnosis: 'native child returned malformed structured output' }
+  }
+  return result
+}
+
+function substantiveFailure(result) {
+  if (result.__dead || result.__failureKind) return false
+  if (result.failureKind !== undefined) return result.failureKind === 'quality'
+  // An explicit verifier-red signal is quality evidence; a generic block is not.
+  return result.escalate === true
+}
+
+function failureDiagnosis(result, fallback) {
+  return result.__dead ? TRANSIENT_DIAGNOSIS : result.blockerDiagnosis || result.blockerCause || fallback
+}
+
+function preservedResult(prior, next) {
+  return { ...prior, ...next, prUrl: next.prUrl || prior.prUrl || '',
+    branch: next.branch || prior.branch || '', worktreePath: next.worktreePath || prior.worktreePath || '' }
+}
+
+function validJudge(result) {
+  return !result.__dead && !result.__failureKind && ['approve', 'changes'].includes(result.verdict)
+    && Array.isArray(result.feedback) && result.feedback.every(f => typeof f === 'string' && f.trim())
+    && (result.verdict === 'approve' || result.feedback.length > 0)
+}
+
+async function routedPlan(task, st, a) {
+  const history = []
+  let previous = null
+  let retainedPlan = null
+  for (let round = 1; round <= task.maxPlanRounds; round += 1) {
+    const prompt = previous && previous.ready
+      ? planReviserPrompt(task, previous.plan, history, round, a)
+      : plannerPrompt(task, a, st, previous ? failureDiagnosis(previous, 'The prior plan did not complete') : '')
+    const plan = retainedPlan || await routedAgent(task, st, a, prompt, {
+      label: `${previous ? 'plan-revise' : 'plan'}:${task.slug} r${round}`, phase: 'Plan-gate', schema: failureSchema(PLAN_VERDICT, a),
+    })
+    retainedPlan = null
+    const base = { task, planRoundsUsed: round, planHistory: history }
+    if (plan.__dead || plan.__failureKind || plan.blocked || plan.ready !== true || typeof plan.plan !== 'string') {
+      const diagnosis = failureDiagnosis(plan, 'planner returned no valid plan')
+      if (plan.__recoveryUnavailable && round < task.maxPlanRounds) continue
+      if (!substantiveFailure(plan)) return { ...base, blocked: true, status: 'plan-blocked', blockerDiagnosis: diagnosis }
+      history.push({ round, feedback: [diagnosis] })
+      recordQualityFailure(task, st, a, 'plan', [diagnosis])
+      previous = plan
+      if (round === task.maxPlanRounds) return { ...base, blocked: true, status: 'plan-blocked', blockerDiagnosis: diagnosis }
+      continue
+    }
+    // Malformed gate syntax and missing authority are independent of reasoning quality.
+    const declared = parseGatedInputs(plan.plan)
+    if (declared === null) return { ...base, blocked: true, status: 'plan-blocked',
+      blockerDiagnosis: 'plan has no parseable Gated inputs section; repair formatting within the remaining allowance' }
+    const gates = unapprovedGates(declared, task.approvedGates)
+    if (gates.length) return { ...base, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates) }
+    const verdict = await routedAgent(task, st, a, planJudgePrompt(task, plan.plan, a) + reviewHistoryBlock(history), {
+      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE,
+    }, 'review')
+    if (!validJudge(verdict)) {
+      if (verdict.__recoveryUnavailable && round < task.maxPlanRounds) { retainedPlan = plan; continue }
+      return { ...base, blocked: true, status: 'plan-blocked',
+        blockerDiagnosis: failureDiagnosis(verdict, 'plan judge returned no valid verdict') }
+    }
+    if (verdict.verdict === 'approve') return { ...base, blocked: false, plan: plan.plan }
+    history.push({ round, feedback: verdict.feedback })
+    recordQualityFailure(task, st, a, 'plan', verdict.feedback)
+    if (round === task.maxPlanRounds) return { ...base, blocked: true, status: 'plan-blocked',
+      blockerDiagnosis: `plan not approved after ${round} rounds.\n${groupedRounds(history)}` }
+    previous = plan
+  }
+}
+
+async function routedImplement(task, st, planned, a) {
+  if (planned.blocked) return planned
+  let current = { ...(task.priorResult || {}), planRoundsUsed: planned.planRoundsUsed || 0, planHistory: planned.planHistory || [] }
+  for (let candidate = 1; candidate <= task.maxIterations; candidate += 1) {
+    const prior = candidate === 1 ? '' : [current.blockerDiagnosis, current.summary,
+      `Worktree: ${current.worktreePath || ''}; branch: ${current.branch || ''}; PR: ${current.prUrl || ''}`].filter(Boolean).join('\n')
+    const prompt = task.scope === 'read-only' ? readOnlyPrompt(task, a, st, prior)
+      : planned.plan ? approvedPlanImplementerPrompt(task, planned.plan, a, st, prior) : implementerPrompt(task, a, st, prior)
+    const result = await routedAgent(task, st, a, prompt, {
+      label: `${task.scope === 'read-only' ? 'investigate' : 'implement'}:${task.slug}@${st.routingState.stage} c${candidate}`,
+      phase: 'Implement', schema: implementationSchema(a),
+    }, 'work', true)
+    current = preservedResult(current, result)
+    const gates = unapprovedGates(result.gatedInputs, task.approvedGates)
+    if (gates.length) return { ...current, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates) }
+    if (!result.__dead && !result.__failureKind && !result.blocked && !result.escalate && hasVerification(result, a)) return current
+    const diagnosis = failureDiagnosis(result, 'implementation did not report valid successful verification')
+    if (result.__recoveryUnavailable && candidate < task.maxIterations) continue
+    if (!substantiveFailure(result)) return { ...current, verified: false, blocked: true, status: 'blocked', blockerDiagnosis: diagnosis }
+    recordQualityFailure(task, st, a, 'implement', [diagnosis])
+    current = { ...current, blockerDiagnosis: diagnosis }
+    if (candidate === task.maxIterations) return { ...current, verified: false, blocked: true, status: 'blocked' }
+  }
+}
+
+function reviewContractOptions(current, a) {
+  if (!a.routingPolicy && a.evidenceContractVersion !== 1) return {}
+  const harness = a.routingPolicy ? a.routingPolicy.harness : a.harness
+  return { reviewContract: { engine: harness === 'claude' ? 'claude-code-review' : 'codex-review-agent',
+    level: 'xhigh', reviewedHead: current.verifiedHead || null } }
+}
+
+async function routedReview(task, st, initial, a, planText) {
+  if (initial.blocked) return initial
+  if (task.scope === 'read-only') return { ...initial, status: 'review', reviewRoundsUsed: 0 }
+  let current = initial
+  const history = []
+  let reviseNext = false
+  for (let round = 1; round <= task.maxReviewRounds; round += 1) {
+    if (reviseNext) {
+      const revised = await routedAgent(task, st, a, reviserPrompt(task, current, history, round, a, planText), {
+        label: `revise:${task.slug} r${round}`, phase: 'Review', schema: implementationSchema(a),
+      }, 'work', true)
+      current = { ...preservedResult(current, revised), reviewHistory: history }
+      const gates = unapprovedGates(revised.gatedInputs, task.approvedGates)
+      if (gates.length) return { ...current, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates), reviewRoundsUsed: round }
+      if (revised.__dead || revised.__failureKind || revised.blocked || revised.escalate || !hasVerification(revised, a)) {
+        const diagnosis = failureDiagnosis(revised, 'revision did not report valid successful verification')
+        const quality = substantiveFailure(revised)
+        if (quality) {
+          history.push({ round, feedback: [diagnosis] })
+          recordQualityFailure(task, st, a, 'review', [diagnosis])
+        }
+        current = { ...current, verified: false, blockerDiagnosis: diagnosis, reviewFeedback: [diagnosis] }
+        // A failed candidate consumes this round even though no judge can inspect unverified work.
+        // Only an existing later round may try the resulting routing state.
+        if ((quality || revised.__recoveryUnavailable) && round < task.maxReviewRounds) continue
+        return { ...current, blocked: true, status: 'blocked', reviewRoundsUsed: round }
+      }
+    }
+    const verdict = await routedAgent(task, st, a, reviewJudgePrompt(task, current, a, history), {
+      label: `review:${task.slug} r${round}`, phase: 'Review', schema: reviewSchema(a), ...reviewContractOptions(current, a),
+    }, 'review')
+    const base = { ...current, reviewRoundsUsed: round, reviewHistory: history }
+    if (!validJudge(verdict)) {
+      if (verdict.__recoveryUnavailable && round < task.maxReviewRounds) { reviseNext = false; continue }
+      return { ...base, blocked: true, status: 'blocked',
+        blockerDiagnosis: failureDiagnosis(verdict, 'reviewer returned no valid verdict') }
+    }
+    if (a.protocolVersion === 4 && verdict.reviewedHead !== current.verifiedHead) return {
+      ...base, status: 'review-blocked', reviewedHead: verdict.reviewedHead || '',
+      blockerDiagnosis: 'stale review evidence: reviewed head does not match the verified commit',
+      reviewFeedback: verdict.feedback,
+    }
+    if (verdict.verdict === 'approve') return { ...base, status: 'review',
+      ...(a.protocolVersion === 4 ? { reviewedHead: verdict.reviewedHead } : {}),
+      approvedAtCeiling: round === task.maxReviewRounds && history.length > 0 }
+    history.push({ round, feedback: verdict.feedback })
+    recordQualityFailure(task, st, a, 'review', verdict.feedback)
+    if (round === task.maxReviewRounds) return { ...base, status: 'review-blocked', reviewFeedback: verdict.feedback }
+    current = { ...current, reviewHistory: history, reviewFeedback: verdict.feedback }
+    reviseNext = true
+  }
+}
+
+async function convergeRouted(task, a) {
+  const st = { routingState: initialiseRoutingState(task, a), verifierCandidatesUsed: 0, lastWork: null }
+  const planned = task.planGate ? await routedPlan(task, st, a) : { task, plan: null, blocked: false }
+  const implemented = await routedImplement(task, st, planned, a)
+  const result = await routedReview(task, st, implemented, a, planned.plan || '')
+  return { ...result, routingState: st.routingState, verifierCandidatesUsed: st.verifierCandidatesUsed,
+    model: st.lastWork ? st.lastWork.model : '', requestedProfile: st.lastWork }
 }
 
 // ---- Model tiering -----------------------------------------------------------
@@ -1412,7 +1741,7 @@ async function reviewLoop(task, st, prev, a, planText) {
   let round = 1
   while (round <= task.maxReviewRounds) {
     const verdict = await runAgent(reviewJudgePrompt(task, current, a, priorFeedback), {
-      label: `review:${task.slug} r${round}`, phase: 'Review', schema: reviewSchema(a), model: judgeFor(a, st), effort: judgeEffort(a, st, 'masterReview'),
+      label: `review:${task.slug} r${round}`, phase: 'Review', schema: reviewSchema(a), model: judgeFor(a, st), effort: judgeEffort(a, st, 'masterReview'), ...reviewContractOptions(current, a),
     })
     // Dead review-judge: the PR is real and stands — block on transient infra so the lead re-judges it.
     if (verdict.__dead) return { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS }
@@ -1467,6 +1796,7 @@ async function reviewLoop(task, st, prev, a, planText) {
 // escalation in any layer carries into every later agent AND judge. Tasks converge independently —
 // the orchestration below runs converge() per item with no cross-task barrier inside a chunk.
 async function converge(task, a) {
+  if (a.routingPolicy) return convergeRouted(task, a)
   const cap = tierCap(a)
   const st = { tier: taskModel(task, cap), cap, escalated: false, escalatedAt: '', capSuppressed: false, capSuppressedAt: '' }
   const planned = task.planGate ? await planLoop(task, st, a) : { task, plan: null, blocked: false }
@@ -1529,6 +1859,9 @@ for (const wave of a.waves) {
         tierCappedAt: norm.tierCappedAt || '',
         nextModel: norm.nextModel || '',
         nextModelReason: norm.nextModelReason || '',
+        ...(a.routingPolicy ? { routingState: norm.routingState,
+          verifierCandidatesUsed: norm.verifierCandidatesUsed || 0, requestedProfile: norm.requestedProfile || null,
+          planHistory: norm.planHistory || [] } : {}),
       })
     })
   }

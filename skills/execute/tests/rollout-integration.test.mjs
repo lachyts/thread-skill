@@ -100,6 +100,7 @@ function rig(t, harness, { parallel = false } = {}) {
         identity: "github.com/fixture/project",
         baseBranch: "master",
         verifier: "test -f check.txt",
+        verifierInputs: [],
       },
       authority: {
         outcomes: ["Preserve fixture behaviour"],
@@ -108,6 +109,7 @@ function rig(t, harness, { parallel = false } = {}) {
         reservedDecisions: [],
         gates: [],
         mergeEffects: [],
+        evidence: { userText: "Authorise isolated fixture only.", context: "No live model or GitHub action.", source: "fixture:user-request" },
       },
       tasks,
     },
@@ -172,11 +174,18 @@ async function accept(
   childId,
   owner = f.owner,
   nativeEpoch = claim.caller.epoch,
+  result = output(request.label, f),
+  beforeAccept,
 ) {
-  await f.host.accept(
-    f.record,
-    request.taskId,
-    {
+  let receipt;
+  if (request.label.startsWith("review:")) {
+    const evidencePath = path.join(f.dir, `native-review-${request.id}.json`);
+    fs.writeFileSync(evidencePath, JSON.stringify({ fixture: true, requestId: request.id, childId, reviewedHead: f.head }));
+    receipt = { version: 1, requestId: request.id, childId, harness: owner.harness,
+      engine: owner.harness === "claude" ? "code-review" : "review-agent", reviewLevel: "xhigh",
+      reviewedHead: f.head, invocationId: `fixture-${request.id}`, nativeEvidence: { path: evidencePath } };
+  }
+  const envelope = {
       version: 1,
       runId: claim.runId,
       requestId: request.id,
@@ -189,10 +198,23 @@ async function accept(
         epoch: nativeEpoch,
       },
       status: "ok",
-      output: output(request.label, f),
-    },
+      output: result,
+      ...(claim.native.routing ? { routing: {
+        requestId: request.id, childId, policyDigest: claim.native.routing.resolved.policyDigest,
+        requested: claim.native.routing.requested, resolved: claim.native.routing.resolved,
+        observed: { model: claim.native.routing.resolved.model, effort: claim.native.routing.resolved.effort,
+          source: "native-runtime", evidence: "TEST FIXTURE native observation, not live proof" },
+      } } : {}),
+    };
+  if (beforeAccept) await beforeAccept(envelope, receipt);
+  await f.host.accept(
+    f.record,
+    request.taskId,
+    envelope,
     owner,
+    receipt,
   );
+  return { envelope, receipt };
 }
 async function converge(f, id, owner = f.owner) {
   for (let n = 0; n < 12; n++) {
@@ -287,3 +309,229 @@ test(
     );
   },
 );
+
+async function routedRig(t, harness, difficulty = "easy") {
+  const f = rig(t, harness);
+  const routing = await import(pathToFileURL(path.join(path.dirname(adapter), "native_routing.mjs")).href);
+  const normalModel = harness === "claude" ? "claude-opus-5-5" : "gpt-fixture-normal";
+  const recoveryModel = harness === "claude" ? "claude-fable-5-1" : "gpt-fixture-recovery";
+  const supportedEfforts = ["low", "medium", "high", "xhigh", "max"];
+  f.config.routingPolicy = routing.createRoutingPolicy({ harness, normalModel, recoveryModel, difficulty,
+    capabilities: { harness, verified: true, source: "native-capability-preflight", evidence: "TEST FIXTURE capabilities only",
+      models: { [normalModel]: { supportedEfforts }, [recoveryModel]: { supportedEfforts } } } });
+  f.config.engine = { maxIterations: 3, maxPlanRounds: 3, maxReviewRounds: 3 };
+  f.spec.tasks[0].difficulty = difficulty;
+  f.spec.authority.evidence = { userText: "  Exact fixture authorisation.\nKeep this second line.  ",
+    context: "Fixture context with a trailing newline.\n", source: "fixture:user-request" };
+  const verifierInput = path.join(f.dir, "external-verifier.sh");
+  fs.writeFileSync(verifierInput, "test -f check.txt\n");
+  f.spec.repository.verifier = `sh '${verifierInput}'`;
+  f.spec.repository.verifierInputs = [verifierInput];
+  return { ...f, normalModel, recoveryModel, verifierInput };
+}
+
+for (const [harness, difficulty] of [["claude", "easy"], ["codex", "hard"]])
+  test(`real policy/engine/adapter/host ${harness} ${difficulty} fixture preserves the full ladder and evidence`,
+    { skip: !adapter && "set THREAD_TEST_NATIVE_ADAPTER" }, async t => {
+      const f = await routedRig(t, harness, difficulty);
+      await host.initialise(f.record, f.spec, f.owner, f.config);
+      const pinnedHost = host.status(f.record).pinnedHost;
+      f.host = await import(pathToFileURL(pinnedHost).href);
+      const read = () => JSON.parse(fs.readFileSync(path.join(f.record, "state.json")));
+      const initial = read();
+      assert.deepEqual(initial.authority.evidence, f.spec.authority.evidence, "exact authority text survives preparation");
+      assert.equal(initial.repository.verifierInputs[0].path, f.verifierInput);
+      assert.match(initial.repository.verifierInputs[0].sha256, /^[a-f0-9]{64}$/);
+      assert.equal(initial.host.release.routing.sha256.length, 64);
+      assert.equal(initial.host.release.routingPolicy.sha256.length, 64);
+      const calls = [];
+      let reviewCount = 0;
+      for (let n = 0; n < 12; n++) {
+        const s = await f.host.advance(f.record, f.owner);
+        if (s.readyToMerge.includes("first")) break;
+        const request = s.requests.find(r => r.taskId === "first" && r.claimable);
+        assert.ok(request, JSON.stringify(s));
+        const { claim, childId } = await dispatch(f, request);
+        calls.push({ label: request.label, ...claim.native.routing.resolved, role: claim.options.routing.role });
+        if (n === 0) {
+          const oldOwner = f.owner;
+          f.owner = { ...oldOwner, session: "routing-fixture-replacement", epoch: 2 };
+          await f.host.recover(f.record, f.owner, { previousCaller: { harness, account: oldOwner.account, session: oldOwner.session },
+            previousEpoch: 1, previousOwnerStopped: true, reason: "TEST FIXTURE terminal owner inventory",
+            requests: { [request.id]: { childId, status: "running", evidence: "TEST FIXTURE native child inventory" } } });
+          await assert.rejects(f.host.advance(f.record, oldOwner), /owner|epoch/);
+          f.host = await import(pathToFileURL(host.status(f.record).pinnedHost).href);
+          assert.equal(host.status(f.record).pinnedHost, pinnedHost, "recovery resumes the pinned implementation");
+          assert.equal(read().execution.pools.first.spent.calls, 1, "ownership recovery does not renew allowance");
+        }
+        const next = request.label.startsWith("review:") && ++reviewCount < 3
+          ? { verdict: "changes", feedback: [`Fixture substantive quality failure ${reviewCount}`], reviewedHead: f.head }
+          : output(request.label, f);
+        const delivered = await accept(f, request, claim, childId, f.owner, 2, next,
+          request.label.startsWith("review:") ? async (envelope, receipt) => {
+            const spent = read().execution.pools.first.spent;
+            await assert.rejects(f.host.accept(f.record, request.taskId, envelope, f.owner), /receipt required/);
+            await assert.rejects(f.host.accept(f.record, request.taskId,
+              { ...envelope, routing: { ...envelope.routing, observed: null } }, f.owner, receipt), /observation.*required/);
+            assert.deepEqual(read().execution.pools.first.spent, spent, "invalid evidence spends no new allowance");
+          } : undefined);
+        const spent = read().execution.pools.first.spent;
+        await f.host.accept(f.record, request.taskId, delivered.envelope, f.owner, delivered.receipt);
+        assert.deepEqual(read().execution.pools.first.spent, spent, "identical delivery does not reserve another request");
+      }
+      assert.ok(f.host.status(f.record).readyToMerge.includes("first"));
+      const beforeMerge = read();
+      assert.equal(beforeMerge.tasks.first.routingState.qualityFailures, 2);
+      assert.equal(beforeMerge.tasks.first.routingState.stage, "recovery");
+      assert.equal(beforeMerge.tasks.first.attempt.result.reviewHistory.length, 2);
+      assert.deepEqual(calls.filter(c => c.role === "work").map(c => [c.model, c.effort]), [
+        [f.normalModel, difficulty === "hard" ? "xhigh" : "high"],
+        [f.normalModel, difficulty === "hard" ? "xhigh" : "high"],
+        [f.normalModel, "max"], [f.recoveryModel, "max"],
+      ]);
+      const run = Object.values(beforeMerge.host.runs)[0];
+      const accepted = Object.values(run.accepted);
+      assert.equal(accepted.length, 8, "plan + implementation + three independent reviews + two corrections");
+      assert.ok(accepted.every(r => r.routing?.observed?.source === "native-runtime"));
+      const reviews = accepted.filter(r => r.label.startsWith("review:"));
+      assert.equal(reviews.length, 3);
+      assert.ok(reviews.every(r => r.reviewReceipt?.reviewedHead === f.head && fs.existsSync(r.reviewReceipt.nativeEvidence.path)));
+      assert.equal(beforeMerge.execution.pools.first.spent.calls, 8);
+      assert.equal(beforeMerge.execution.pools.first.spent.verifierRuns, 4);
+      assert.equal(beforeMerge.execution.pools.first.spent.recoveries, 1);
+      const verifierBytes = fs.readFileSync(f.verifierInput);
+      fs.writeFileSync(f.verifierInput, "false # changed external verifier bytes\n");
+      await assert.rejects(f.host.merge(f.record, "first", f.owner), /verifier input changed/);
+      assert.equal(read().execution.pools.first.spent.verifierRuns, 4, "input drift stops before another reservation");
+      fs.writeFileSync(f.verifierInput, verifierBytes);
+      await f.host.merge(f.record, "first", f.owner);
+      assert.equal(f.host.status(f.record).rolloutComplete, true);
+      const final = read();
+      assert.equal(final.tasks.first.approval.head, f.head);
+      assert.equal(final.execution.pools.first.spent.verifierRuns, 5, "the combined postmerge integration verification remains charged");
+    });
+
+test("new-policy preparation refuses insufficient declared ladder allowance before native dispatch",
+  { skip: !adapter && "set THREAD_TEST_NATIVE_ADAPTER" }, async t => {
+    for (const [rollback, field, value] of [[false, "calls", 7], [false, "verifierRuns", 5],
+      [true, "calls", 9], [true, "verifierRuns", 8]]) {
+      const f = await routedRig(t, "claude");
+      if (rollback) f.spec.authority.allowedActions.push("revert-run-owned");
+      f.spec.tasks[0].allowance[field] = value;
+      await assert.rejects(host.initialise(f.record, f.spec, f.owner, f.config), /allowance|headroom/);
+      assert.equal(fs.existsSync(path.join(f.record, "state.json")), false);
+    }
+  });
+
+test("native quota block after a quality failure preserves routing and PR in durable host state",
+  { skip: !adapter && "set THREAD_TEST_NATIVE_ADAPTER" }, async t => {
+    const f = await routedRig(t, "claude");
+    f.spec.tasks[0].planGate = false;
+    await host.initialise(f.record, f.spec, f.owner, f.config);
+    f.host = await import(pathToFileURL(host.status(f.record).pinnedHost).href);
+    const first = (await f.host.advance(f.record, f.owner)).requests.find(r => r.claimable);
+    const initial = await dispatch(f, first);
+    await accept(f, first, initial.claim, initial.childId, f.owner, 1,
+      { ...output(first.label, f), verified: false, verifiedHead: "", escalate: true,
+        failureKind: "quality", blockerDiagnosis: "TEST FIXTURE implementation is incorrect" });
+    const second = (await f.host.advance(f.record, f.owner)).requests.find(r => r.claimable);
+    const { claim, childId } = await dispatch(f, second);
+    assert.equal(claim.native.routing.resolved.route, "maximum");
+    await f.host.accept(f.record, second.taskId, { version: 1, runId: claim.runId, requestId: second.id,
+      claimToken: claim.claimToken, childId, caller: claim.caller, status: "blocked",
+      reason: "TEST FIXTURE quota unavailable", routing: { requestId: second.id, childId,
+        policyDigest: claim.native.routing.resolved.policyDigest, requested: claim.native.routing.requested,
+        resolved: claim.native.routing.resolved, observed: null } }, f.owner);
+    await f.host.advance(f.record, f.owner);
+    const record = JSON.parse(fs.readFileSync(path.join(f.record, "state.json")));
+    assert.equal(record.tasks.first.status, "blocked");
+    assert.equal(record.tasks.first.routingState.qualityFailures, 1);
+    assert.equal(record.tasks.first.routingState.stage, "maximum");
+    assert.equal(record.tasks.first.attempt.result.prUrl, "https://github.com/fixture/project/pull/1");
+    assert.match(record.tasks.first.attempt.result.blockerDiagnosis, /quota unavailable/);
+    assert.equal(record.execution.pools.first.spent.calls, 2);
+    assert.equal(record.execution.pools.first.spent.verifierRuns, 2);
+  });
+
+test("host rejects explicit legacy routing knobs instead of losing the operator's model intent",
+  { skip: !adapter && "set THREAD_TEST_NATIVE_ADAPTER" }, async t => {
+    for (const [where, field, value] of [["engine", "maxTier", "opus"], ["engine", "judgeModel", "fable"],
+      ["engine", "model", "opus"], ["engine", "effort", "max"], ["task", "model", "opus"], ["task", "effort", "max"]]) {
+      const f = await routedRig(t, "claude");
+      (where === "engine" ? f.config.engine : f.spec.tasks[0])[field] = value;
+      await assert.rejects(host.initialise(f.record, f.spec, f.owner, f.config), /legacy|routingPolicy|prepared policy/);
+      assert.equal(fs.existsSync(path.join(f.record, "state.json")), false);
+    }
+  });
+
+for (const maxIterations of [3, 4])
+  test(`attested native launch refusal preserves the original ceiling ${maxIterations}, fallback and restart state`,
+    { skip: !adapter && "set THREAD_TEST_NATIVE_ADAPTER" }, async t => {
+      const f = await routedRig(t, "claude");
+      f.spec.tasks[0].planGate = false;
+      f.config.engine.maxIterations = maxIterations;
+      await host.initialise(f.record, f.spec, f.owner, f.config);
+      f.host = await import(pathToFileURL(host.status(f.record).pinnedHost).href);
+      const read = () => JSON.parse(fs.readFileSync(path.join(f.record, "state.json")));
+      for (let candidate = 1; candidate <= 2; candidate++) {
+        const request = (await f.host.advance(f.record, f.owner)).requests.find(r => r.claimable);
+        const { claim, childId } = await dispatch(f, request);
+        assert.equal(claim.native.routing.resolved.model, f.normalModel);
+        await accept(f, request, claim, childId, f.owner, claim.caller.epoch,
+          { ...output(request.label, f), verified: false, verifiedHead: "", escalate: true, failureKind: "quality",
+            blockerDiagnosis: `TEST FIXTURE substantive quality failure ${candidate}` });
+      }
+      const refused = (await f.host.advance(f.record, f.owner)).requests.find(r => r.claimable);
+      const claim = await f.host.claim(f.record, refused.taskId, refused.id, f.owner);
+      assert.equal(claim.native.routing.resolved.route, "recovery");
+      const proof = { model: f.recoveryModel, evidence: "TEST FIXTURE native launch explicitly refused before creating child",
+        source: "native-launch", neverStarted: true };
+      await f.host.recordUnavailable(f.record, refused.taskId, refused.id, claim.claimToken, proof, f.owner);
+      const spent = read().execution.pools.first.spent;
+      assert.deepEqual(spent, { calls: 3, verifierRuns: 3, recoveries: 0 });
+      assert.equal(read().execution.requests[refused.id].status, "denied");
+      assert.ok(!read().execution.requests[refused.id].childId, "a refused launch never fabricates a native child");
+      await f.host.recordUnavailable(f.record, refused.taskId, refused.id, claim.claimToken, proof, f.owner);
+      assert.deepEqual(read().execution.pools.first.spent, spent, "identical refusal is idempotent and does not refund its claim");
+      await assert.rejects(f.host.recordUnavailable(f.record, refused.taskId, refused.id, claim.claimToken,
+        { ...proof, evidence: "conflicting fixture proof" }, f.owner), /conflict|already|refusal/i);
+      const afterRefusal = await f.host.advance(f.record, f.owner);
+      const unavailable = { model: proof.model, evidence: proof.evidence };
+      if (maxIterations === 3) {
+        assert.equal(read().tasks.first.status, "blocked");
+        assert.equal(afterRefusal.requests.filter(r => r.claimable).length, 0, "last candidate cannot create another attempt");
+        assert.deepEqual(read().tasks.first.routingState.recoveryUnavailable, unavailable);
+        assert.equal(read().tasks.first.routingState.qualityFailures, 2);
+        await f.host.transition(f.record, { type: "retry", taskId: "first" }, f.owner);
+        await f.host.transition(f.record, { type: "resume" }, f.owner);
+        assert.deepEqual(read().execution.pools.first.spent, spent, "explicit retry retains the same spent pool");
+      }
+      const nextState = await f.host.advance(f.record, f.owner);
+      const pending = nextState.requests.find(r => r.claimable);
+      assert.ok(pending, JSON.stringify({ execution: nextState.execution, tasks: nextState.tasks }));
+      assert.equal(pending.native.routing.resolved.model, f.normalModel);
+      assert.equal(pending.native.routing.resolved.effort, "max");
+      assert.equal(pending.native.routing.resolved.route, "maximum-unavailable");
+      assert.deepEqual(pending.native.routing.requested.recoveryUnavailable, unavailable);
+      const previousOwner = f.owner;
+      f.owner = { ...previousOwner, session: "fallback-restart", epoch: 2 };
+      await f.host.recover(f.record, f.owner, { previousCaller: { harness: previousOwner.harness, account: previousOwner.account,
+        session: previousOwner.session }, previousEpoch: 1, previousOwnerStopped: true,
+        reason: "TEST FIXTURE stopped owner; pending fallback survives process restart", requests: {} });
+      f.host = await import(pathToFileURL(host.status(f.record).pinnedHost).href);
+      const restarted = (await f.host.advance(f.record, f.owner)).requests.find(r => r.claimable);
+      assert.equal(restarted.id, pending.id, "restart preserves the pending fallback identity");
+      assert.deepEqual(restarted.native.routing.requested.recoveryUnavailable, unavailable);
+      await converge(f, "first");
+      assert.ok(f.host.status(f.record).readyToMerge.includes("first"));
+      const completed = read();
+      assert.equal(completed.tasks.first.routingState.stage, "maximum-unavailable");
+      assert.equal(completed.tasks.first.routingState.qualityFailures, 2);
+      assert.deepEqual(completed.tasks.first.routingState.recoveryUnavailable, unavailable);
+      assert.equal(completed.execution.pools.first.spent.calls, 5);
+      assert.equal(completed.execution.pools.first.spent.verifierRuns, 4);
+      assert.equal(completed.execution.pools.first.spent.recoveries, 1);
+      assert.ok(!completed.execution.requests[refused.id].childId);
+      await f.host.merge(f.record, "first", f.owner);
+      assert.equal(f.host.status(f.record).rolloutComplete, true);
+    });

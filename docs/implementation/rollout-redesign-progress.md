@@ -76,3 +76,10 @@ Reproduce the domain/host/engine checks with `node --test skills/execute/tests/r
 The shared adapter candidate lives in `/Users/lachlants/.codex/worktrees/thread-native-recovery`, branch `codex/thread-native-recovery`. It is intentionally separate from the live shared workspace. Protocol 4 preparation must name an adapter containing the accepted recovery API; existing installed adapters are not silently replaced.
 
 Shared adapter implementation/review commits: `42263b4`, `192244e`; migration evidence: `5cb5b72`. The remaining live gate is saved as [Thread v4 native acceptance](/Users/lachlants/repos/obsidian/Work/Tasks/thread-rollout-v4-native-acceptance.md), linked to Thread Skill and Shared Skills. R-WAVE remains open. The calling Codex session cannot stand in for a native Claude run; its implementation/review children and simulated harness labels are not rollout acceptance evidence.
+
+## 23 September shared routing and pilot corrections
+
+The earlier tables above describe their original validation checkpoint. The
+[correction batch](2026-09-23-routing-and-corrections.md) and its
+[acceptance matrix](2026-09-23-routing-acceptance.md) track the current candidate
+and explicitly distinguish fixture results from outstanding native proof.

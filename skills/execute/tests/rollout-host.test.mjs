@@ -17,7 +17,7 @@ else if(s.requests.length===1&&s.requests[0].status==='accepted')s.requests.push
 if(s.requests.length===2&&s.requests[1].status==='accepted'){s.status='complete';s.output={tasks:[{slug:task.slug,status:process.env.HOST_TEST_GATE?'gate-pending':'review',gatedInputs:process.env.HOST_TEST_GATE?[process.env.HOST_TEST_GATE]:[],verified:true,verifiedHead:head,reviewedHead:head,prUrl:'https://github.com/acme/widgets/pull/'+(task.slug.includes('-rollback-')?'2':'1'),summary:'verified'}]}}else s.status='waiting';return write(d,s)}
 export function claim(d,id){if(process.env.HOST_TEST_CLAIM_FAIL)throw Error('fixture interruption before adapter claim');const s=read(d),r=s.requests.find(r=>r.id===id);if(r.status!=='pending')throw Error('already claimed');r.status='claimed';r.claimToken='token-'+id;write(d,s);return r}
 export function bind(d,id,token,childId){const s=read(d),r=s.requests.find(r=>r.id===id);if(r.claimToken!==token)throw Error('token');r.status='dispatched';r.childId=childId;write(d,s);return r}
-export function accept(d,e){const s=read(d),r=s.requests.find(r=>r.id===e.requestId);if(r.claimToken!==e.claimToken||r.childId!==e.childId)throw Error('attestation');r.status=e.status==='ok'?'accepted':e.status;r.output=e.output;write(d,s);return r}
+export function accept(d,e){const s=read(d),r=s.requests.find(r=>r.id===e.requestId);if(r.claimToken!==e.claimToken||r.childId!==e.childId)throw Error('attestation');if(e.status==='ok'&&r.label.startsWith('review:')&&!Array.isArray(e.output?.feedback))throw Error('fixture schema rejected feedback');r.status=e.status==='ok'?'accepted':e.status;r.output=e.output;write(d,s);return r}
 export function recover(d,caller,e){const s=read(d);if(process.env.HOST_TEST_RECOVER_FAIL&&s.args.waves[0].tasks[0].slug.endsWith('task1'))throw Error('fixture partial transfer');if(!e.previousOwnerStopped||s.caller.harness!==caller.harness||s.config.account!==caller.account||e.previousEpoch!==s.ownershipEpoch||caller.epoch!==s.ownershipEpoch+1)throw Error('unsafe recovery epoch');for(const r of s.requests.filter(r=>['claimed','dispatched'].includes(r.status))){const p=e.requests[r.id];if(!p)throw Error('no proof');if(p.status==='not-started')r.status='interrupted';else{r.childId=p.childId;r.status='dispatched'}}s.caller={harness:caller.harness,session:caller.session};s.ownershipEpoch++;return write(d,s)}
 `;
 const owner = {
@@ -118,6 +118,7 @@ function setup(
       identity: "github.com/acme/widgets",
       baseBranch: "main",
       verifier,
+      verifierInputs: [],
     },
     authority: {
       outcomes: ["Working changes"],
@@ -126,6 +127,7 @@ function setup(
       reservedDecisions: [],
       gates: [],
       mergeEffects: [],
+      evidence: { userText: "Authorise this isolated fixture rollout.", context: "Test fixture only; no live actions.", source: "fixture:user-request" },
     },
     tasks: taskSpecs,
   };
@@ -149,6 +151,12 @@ async function initialise(t, options) {
 }
 function state(f) {
   return JSON.parse(fs.readFileSync(path.join(f.record, "state.json"), "utf8"));
+}
+function reviewReceipt(f, requestId, childId, head = f.head) {
+  const evidencePath = path.join(f.dir, `native-review-${requestId}.json`);
+  fs.writeFileSync(evidencePath, JSON.stringify({ fixture: true, requestId, childId, engine: "review-agent", reviewedHead: head }));
+  return { version: 1, requestId, childId, harness: owner.harness, engine: "review-agent", reviewLevel: "xhigh", reviewedHead: head,
+    invocationId: `fixture-invocation-${requestId}`, nativeEvidence: { path: evidencePath } };
 }
 async function completeRequest(f, taskId, childId, output) {
   const s = await host.advance(f.record, owner),
@@ -179,6 +187,7 @@ async function completeRequest(f, taskId, childId, output) {
       output,
     },
     owner,
+    request.label.startsWith("review:") ? reviewReceipt(f, request.id, childId, output.reviewedHead) : undefined,
   );
 }
 async function converge(f) {
@@ -991,4 +1000,127 @@ test("a legacy PID-only merger lease cannot prove that the command stopped", asy
   );
   assert.equal(fs.existsSync(lock), true);
   assert.equal(state(f).execution.epoch, 1);
+});
+
+
+test("new preparation binds exact authority and external verifier inputs", async (t) => {
+  const f = setup(t);
+  const missing = structuredClone(f.spec); delete missing.authority.evidence;
+  await assert.rejects(host.initialise(f.record, missing, owner, f.config), /authority.*evidence|userText/);
+  const external = path.join(f.dir, "verifier.sh");
+  fs.writeFileSync(external, "exit 0\n");
+  f.spec.repository.verifier = `bash '${external}'`;
+  f.spec.repository.verifierInputs = [external];
+  await host.initialise(f.record, f.spec, owner, f.config);
+  const s = state(f);
+  assert.equal(s.host.evidenceContractVersion, 1);
+  assert.equal(s.authority.evidence.userText, f.spec.authority.evidence.userText);
+  assert.match(s.repository.verifierInputs[0].sha256, /^[a-f0-9]{64}$/);
+  fs.writeFileSync(external, "exit 1\n");
+  await assert.rejects(host.advance(f.record, owner), /verifier input.*changed/);
+  assert.equal(state(f).execution.pools.task0.spent.calls, 0);
+});
+
+async function reviewEnvelope(f) {
+  await completeRequest(f, "task0", "implement-child", { verified: true, verifiedHead: f.head, prUrl: "https://github.com/acme/widgets/pull/1", summary: "passed" });
+  const request = (await host.advance(f.record, owner)).requests.find(r => r.status === "pending");
+  const claim = await host.claim(f.record, "task0", request.id, owner);
+  await host.bind(f.record, "task0", request.id, claim.claimToken, "review-child", owner);
+  return { version: 1, runId: claim.runId, requestId: request.id, claimToken: claim.claimToken, childId: "review-child", caller: claim.caller, status: "ok", output: { verdict: "approve", reviewedHead: f.head, feedback: [] } };
+}
+
+test("built-in review receipt is required, bound, and immutable across duplicate results", async (t) => {
+  const f = await initialise(t);
+  const envelope = await reviewEnvelope(f);
+  await assert.rejects(host.accept(f.record, "task0", envelope, owner), /review receipt/);
+  const receipt = reviewReceipt(f, envelope.requestId, envelope.childId);
+  for (const change of [{ childId: "someone-else" }, { reviewedHead: "b".repeat(40) }, { engine: "hand-rolled" }, { reviewLevel: "high" }]) {
+    await assert.rejects(host.accept(f.record, "task0", envelope, owner, { ...receipt, ...change }), /review receipt|review engine|review level/);
+  }
+  await host.accept(f.record, "task0", envelope, owner, receipt);
+  await host.accept(f.record, "task0", envelope, owner, receipt);
+  await assert.rejects(host.accept(f.record, "task0", envelope, owner, { ...receipt, invocationId: "different-invocation" }), /conflicting.*receipt/);
+  await host.advance(f.record, owner);
+  const s = state(f);
+  assert.match(s.tasks.task0.approval.reviewReceipt, /^[a-f0-9]{64}$/);
+  assert.ok(s.tasks.task0.approval.verifierInputs);
+});
+
+test("supplementary verification reserves once, binds commit, and cannot approve a task", async (t) => {
+  const f = await initialise(t);
+  await host.advance(f.record, owner);
+  const before = state(f).execution.pools.task0.spent.verifierRuns;
+  const operation = { operationId: "diagnostic-1", commit: f.head, purpose: "Recover missing verifier output" };
+  const first = await host.verifyTask(f.record, "task0", operation, owner);
+  const again = await host.verifyTask(f.record, "task0", operation, owner);
+  assert.deepEqual(again, first);
+  assert.equal(first.result.exitCode, 0);
+  assert.equal(first.result.commit, f.head);
+  assert.equal(state(f).execution.pools.task0.spent.verifierRuns, before + 1);
+  assert.equal(state(f).tasks.task0.approval, undefined);
+  await assert.rejects(host.verifyTask(f.record, "task0", { ...operation, purpose: "different" }, owner), /conflicting.*verification/);
+});
+
+
+test("recovery fences supplementary verification and retains its reservation", async (t) => {
+  const f = await initialise(t);
+  await host.advance(f.record, owner);
+  const operation = { operationId: "recover-diagnostic", commit: f.head, purpose: "diagnostic" };
+  await host.verifyTask(f.record, "task0", operation, owner);
+  const saved = state(f), spent = saved.execution.pools.task0.spent.verifierRuns;
+  const record = Object.values(saved.host.verifications)[0];
+  record.status = "running"; delete record.result;
+  fs.writeFileSync(path.join(f.record, "state.json"), JSON.stringify(saved));
+  const implementation = saved.host.release.host.sha256;
+  const lease = { pid: process.pid, token: "fixture-verifier-token", owner, processLease: { version: 1, state: "not-started", implementation } };
+  fs.writeFileSync(record.leasePath, JSON.stringify(lease));
+  const next = { ...owner, session: "replacement", epoch: 2 };
+  const evidence = { previousCaller: { harness: owner.harness, account: owner.account, session: owner.session }, previousEpoch: 1,
+    previousOwnerStopped: true, reason: "verified dead prior host", requests: {} };
+  await assert.rejects(host.recover(f.record, next, evidence), /still running|proven stopped/);
+  assert.equal(state(f).execution.epoch, 1);
+  lease.pid = 99999999;
+  fs.writeFileSync(record.leasePath, JSON.stringify(lease));
+  await host.recover(f.record, next, evidence);
+  const recovered = await host.verifyTask(f.record, "task0", operation, next);
+  assert.equal(recovered.status, "interrupted");
+  assert.equal(recovered.result, undefined);
+  assert.equal(state(f).execution.pools.task0.spent.verifierRuns, spent);
+  assert.equal(fs.existsSync(record.leasePath), false);
+});
+
+
+test("supplementary verification cannot exceed allowance, even after restart", async (t) => {
+  const f = await initialise(t, { allowance: { calls: 8, verifierRuns: 1, recoveries: 2 } });
+  await host.advance(f.record, owner);
+  const operation = { operationId: "only-check", commit: f.head, purpose: "diagnostic" };
+  const first = await host.verifyTask(f.record, "task0", operation, owner);
+  await assert.rejects(host.verifyTask(f.record, "task0", { ...operation, operationId: "extra-check" }, owner), /allowance exhausted/);
+  assert.equal(state(f).execution.pools.task0.spent.verifierRuns, 1);
+  assert.deepEqual(await host.verifyTask(f.record, "task0", operation, owner), first);
+});
+
+test("captured native review evidence cannot be changed before progress", async (t) => {
+  const f = await initialise(t), envelope = await reviewEnvelope(f);
+  await host.accept(f.record, "task0", envelope, owner, reviewReceipt(f, envelope.requestId, envelope.childId));
+  const run = Object.values(state(f).host.runs)[0];
+  const captured = run.accepted[envelope.requestId].reviewReceipt.nativeEvidence.path;
+  fs.chmodSync(captured, 0o600);
+  fs.writeFileSync(captured, "changed evidence");
+  await assert.rejects(host.advance(f.record, owner), /review evidence.*changed/);
+  assert.equal(state(f).tasks.task0.approval, undefined);
+});
+
+
+test("rejected review formatting cannot poison corrected native evidence", async (t) => {
+  const f = await initialise(t), envelope = await reviewEnvelope(f);
+  const receipt = reviewReceipt(f, envelope.requestId, envelope.childId);
+  envelope.output.feedback = "not an array";
+  await assert.rejects(host.accept(f.record, "task0", envelope, owner, receipt), /schema rejected/);
+  assert.equal(Object.values(state(f).host.runs)[0].accepted[envelope.requestId], undefined);
+  fs.appendFileSync(receipt.nativeEvidence.path, "\nSame child corrected output after schema rejection.\n");
+  envelope.output.feedback = [];
+  await host.accept(f.record, "task0", envelope, owner, receipt);
+  await host.advance(f.record, owner);
+  assert.ok(state(f).tasks.task0.approval);
 });

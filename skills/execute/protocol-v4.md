@@ -2,9 +2,11 @@
 
 Read the [compatibility gate](../../docs/implementation/rollout-compatibility.md) first. This is a development pilot until real unattended acceptance is recorded in both harnesses. Existing protocol 3 records keep their original engine and driver. Never change an existing note's version to use this page.
 
+New preparations using this candidate must also follow [routing and evidence](routing-and-evidence.md), including host-recorded built-in review and actual model/effort observations. Old pinned pilots retain their original contract; do not add these fields to their journals.
+
 ## Preparation: interactive, before execution
 
-Use grill-with-docs. Read CONTEXT and ADRs 0018–0020. Settle the following with the user using one consequential question at a time, resolving discoverable repository facts yourself:
+Use grill-with-docs. Read CONTEXT and ADRs 0018–0021. Settle the following with the user using one consequential question at a time, resolving discoverable repository facts yourself:
 
 1. Required outcomes, acceptance checks and boundaries; record which implementation choices are delegated and which decisions are explicitly reserved.
 2. Repository and target branch; resolve the remote identity and a verifier that passes on the clean base. Include bootstrap needs and detect deployment/publication effects of merging, covering those effects explicitly before launch.

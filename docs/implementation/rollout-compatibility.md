@@ -7,6 +7,14 @@
 
 The standalone canonical skills remain pointers to this repository. There is one convergence engine and one merger, with native child exchange for the calling harness/account. An installed old native adapter without explicit ownership recovery cannot satisfy protocol 4 preflight.
 
+## 23 September correction candidate
+
+New source supports explicit `routingPolicy` snapshots and evidence contract 1
+for protocol 4. See [routing/evidence payloads](../../skills/execute/routing-and-evidence.md)
+and the [current acceptance matrix](2026-09-23-routing-acceptance.md). Existing
+pinned runs are unchanged. The source candidate and guarded profile/skill
+migrations are not installed or promoted.
+
 ## Promotion checklist
 
 - Domain scenario and native exchange regression suites pass.

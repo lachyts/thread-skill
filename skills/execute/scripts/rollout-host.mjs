@@ -167,6 +167,7 @@ async function transaction(directory, owner, action, { recover = false } = {}) {
         "ownership recovery is in progress; resume that exact transfer",
       );
       checkRelease(s);
+      checkVerifierInputs(s.repository);
     }
     const tx = {
       directory,
@@ -273,7 +274,7 @@ function validConfig(config, owner) {
     Number.isSafeInteger(config.maxConcurrent) && config.maxConcurrent > 0,
     "maxConcurrent must be positive",
   );
-  for (const tier of ["opus", "fable"]) {
+  for (const tier of config.routingPolicy ? [] : ["opus", "fable"]) {
     const b = config.models?.[tier];
     demand(
       b &&
@@ -288,7 +289,7 @@ function validConfig(config, owner) {
       `engine.${key} must be positive`,
     );
   demand(!config.engine?.ignoreGate, "ignoreGate is forbidden");
-  if (config.engine.maxTier !== "opus")
+  if (!config.routingPolicy && config.engine.maxTier !== "opus")
     demand(
       config.models.opus.model &&
         config.models.fable.model &&
@@ -301,6 +302,20 @@ function validConfig(config, owner) {
         Number.isSafeInteger(config[key]) && config[key] > 0,
         `${key} must be positive`,
       );
+}
+function bindVerifierInputs(repository) {
+  demand(Array.isArray(repository.verifierInputs), "repository.verifierInputs must explicitly declare external inputs (or [])");
+  return repository.verifierInputs.map((input) => {
+    const filename = typeof input === "string" ? input : input.path;
+    demand(path.isAbsolute(filename || ""), "verifier input path must be absolute");
+    demand(fs.statSync(filename).isFile(), "verifier input must be a file");
+    return { path: filename, realPath: fs.realpathSync(filename), sha256: bytes(fs.readFileSync(filename)) };
+  });
+}
+function checkVerifierInputs(repository) {
+  for (const input of repository.verifierInputs || [])
+    demand(fs.existsSync(input.path) && fs.realpathSync(input.path) === input.realPath &&
+      bytes(fs.readFileSync(input.path)) === input.sha256, `verifier input changed: ${input.path}`);
 }
 function immutable(filename, text, mode = 0o400) {
   if (fs.existsSync(filename)) {
@@ -371,6 +386,12 @@ function pinRelease(directory, s, config) {
       source,
     };
   }
+  const routingSource = previous?.routing?.path || path.join(path.dirname(config.nativeAdapter), "native_routing.mjs");
+  if (previous?.routing || fs.existsSync(routingSource)) {
+    const policySource = previous?.routingPolicy?.path || path.resolve(path.dirname(config.nativeAdapter), "../state/native-routing-policy.json");
+    out.routing = { ...immutable(path.join(releaseDirectory, "native_routing.mjs"), fs.readFileSync(routingSource)), source: routingSource };
+    out.routingPolicy = { ...immutable(path.resolve(releaseDirectory, "../state/native-routing-policy.json"), fs.readFileSync(policySource)), source: policySource };
+  }
   return out;
 }
 function checkRelease(s) {
@@ -384,6 +405,12 @@ function checkRelease(s) {
       bytes(loadedState) === s.host.release.state.sha256,
     "installed host/state differs from this execution; invoke its pinnedHost",
   );
+  for (const run of Object.values(s.host.runs || {}))
+    for (const accepted of Object.values(run.accepted || {})) {
+      const evidence = accepted.reviewReceipt?.nativeEvidence;
+      if (evidence) demand(fs.existsSync(evidence.path) && bytes(fs.readFileSync(evidence.path)) === evidence.sha256,
+        "captured native review evidence changed");
+    }
 }
 async function adapter(s) {
   checkRelease(s);
@@ -530,7 +557,9 @@ async function verify(
   commit,
   purpose,
   timeoutMs = 600000,
+  lease,
 ) {
+  checkVerifierInputs(repository);
   const worktree = path.join(directory, "verification", crypto.randomUUID());
   fs.mkdirSync(path.dirname(worktree), { recursive: true, mode: 0o700 });
   await git(repository.path, "worktree", "add", "--detach", worktree, commit);
@@ -547,7 +576,9 @@ async function verify(
     result = await boundedProcess("/bin/bash", ["-lc", repository.verifier], {
       cwd: worktree,
       timeout: timeoutMs,
+      lease,
     });
+    checkVerifierInputs(repository);
     return {
       purpose,
       commit,
@@ -758,10 +789,27 @@ export async function initialise(directory, spec, owner, config) {
       "record already exists; advance or recover it",
     );
     validConfig(config, owner);
+    for (const key of ["userText", "context", "source"])
+      demand(typeof spec.authority?.evidence?.[key] === "string" && spec.authority.evidence[key].trim(), `authority.evidence.${key} must preserve exact authorisation evidence`);
+    if (config.routingPolicy) {
+      for (const key of ["maxTier", "judgeModel", "model", "effort"])
+        demand(config.engine[key] === undefined, `engine.${key} is legacy-only; prepare a native routingPolicy (recovery:null for a resource ceiling, exactModel for a requested author)`);
+      for (const task of spec.tasks)
+        demand(task.model === undefined && task.effort === undefined,
+          `task ${task.id} model/effort overrides are legacy-only; preserve requested author/effort in the prepared native policy`);
+      const routing = await import(pathToFileURL(path.join(path.dirname(config.nativeAdapter), "native_routing.mjs")).href);
+      config = { ...config, routingPolicy: routing.normaliseRoutingPolicy(config.routingPolicy, { harness: owner.harness }) };
+      const rounds = config.routingPolicy.recovery ? 3 : 2;
+      for (const key of ["maxIterations", "maxReviewRounds", ...(spec.tasks.some(t => t.planGate ?? t.scope === "cross-cutting") ? ["maxPlanRounds"] : [])])
+        demand(config.engine[key] >= rounds, `engine.${key} lacks headroom for the prepared effort/recovery path`);
+    }
     const resolved = {
       ...clone(spec),
       repository: await resolveRepository(spec.repository),
     };
+    resolved.repository.verifierInputs = bindVerifierInputs(resolved.repository);
+    resolved.evidenceContractVersion = 1;
+    if (config.routingPolicy) resolved.routingPolicy = config.routingPolicy;
     let s = createRollout(resolved, owner);
     for (const t of Object.values(s.tasks)) {
       demand(path.isAbsolute(t.sourcePath), "sourcePath must be absolute");
@@ -773,6 +821,18 @@ export async function initialise(directory, spec, owner, config) {
         t.scope !== "read-only",
         "protocol 4 supports PR-shaped tasks only",
       );
+    }
+    if (config.routingPolicy) {
+      const candidates = config.routingPolicy.recovery ? 3 : 2;
+      const rollback = s.authority.allowedActions.includes("revert-run-owned");
+      for (const task of Object.values(s.tasks)) {
+        const gated = task.planGate ?? task.scope === "cross-cutting";
+        const minimumCalls = 2 * candidates + (gated ? 2 : 0) + (rollback ? 2 : 0);
+        const minimumVerifiers = candidates + (gated ? 1 : 0) + 2 + (rollback ? 3 : 0);
+        const pool = s.execution.pools[task.pool];
+        demand(pool.limit.calls >= minimumCalls && pool.limit.verifierRuns >= minimumVerifiers,
+          `task ${task.id} allowance lacks prepared correction/review/merge headroom (${minimumCalls} calls, ${minimumVerifiers} verifiers)`);
+      }
     }
     const base = await fetchBase(s.repository);
     await checkMergeEffects(s.repository, base, s.authority);
@@ -795,6 +855,7 @@ export async function initialise(directory, spec, owner, config) {
         );
     s.host = {
       version: 1,
+      evidenceContractVersion: 1,
       statePath: path.join(directory, "state.json"),
       rollbackReserve: s.authority.allowedActions.includes("revert-run-owned")
         ? { calls: 2, verifierRuns: 3 }
@@ -807,6 +868,7 @@ export async function initialise(directory, spec, owner, config) {
       merges: {},
       recoveries: [],
       settings: {},
+      verifications: {},
     };
     for (const t of Object.values(s.tasks))
       s.host.adopted[t.id] = adopt(directory, s, t);
@@ -889,11 +951,12 @@ function engineTask(s, t) {
     maxIterations: cfg.maxIterations,
     maxPlanRounds: cfg.maxPlanRounds,
     maxReviewRounds: cfg.maxReviewRounds,
-    model:
-      t.attempt.purpose === "rollback"
-        ? cfg.model
-        : t.model || cfg.model || "opus",
-    ...(t.effort ? { effort: t.effort } : {}),
+    ...(!s.host.config.routingPolicy ? {
+      model: t.attempt.purpose === "rollback" ? cfg.model : t.model || cfg.model || "opus",
+      ...(t.effort ? { effort: t.effort } : {}),
+    } : {}),
+    ...(t.difficulty ? { difficulty: t.difficulty } : {}),
+    ...(t.routingState ? { routingState: t.routingState } : {}),
     approvedGates: [
       ...new Set([
         ...s.authority.gates.filter((g) => typeof g === "string"),
@@ -908,6 +971,8 @@ function engineArgs(s, t) {
     cfg = settingsFor(s, t).engine;
   return {
     protocolVersion: 4,
+    ...(s.host.evidenceContractVersion ? { evidenceContractVersion: s.host.evidenceContractVersion, harness: s.execution.owner.harness } : {}),
+    ...(s.host.config.routingPolicy ? { routingPolicy: s.host.config.routingPolicy } : {}),
     rolloutSlug: s.rolloutId,
     repoPath: s.repository.path,
     verifier: s.repository.verifier,
@@ -948,6 +1013,7 @@ async function initialiseAttempt(tx, t) {
             models: existing.settings.models,
             roles: existing.settings.roles || {},
             maxConcurrent: s.host.config.maxConcurrent,
+            ...(s.host.config.routingPolicy ? { routingPolicy: s.host.config.routingPolicy } : {}),
           },
         );
     existing.initialisation = "ready";
@@ -997,6 +1063,7 @@ async function initialiseAttempt(tx, t) {
         models: run.settings.models,
         roles: run.settings.roles || {},
         maxConcurrent: s.host.config.maxConcurrent,
+        ...(s.host.config.routingPolicy ? { routingPolicy: s.host.config.routingPolicy } : {}),
       },
     );
   run.initialisation = "ready";
@@ -1072,7 +1139,7 @@ async function consumeComplete(tx, t, run) {
   const evidence = Object.values(run.accepted);
   const reviews = evidence.filter(
     (e) =>
-      e.label.startsWith("review:") &&
+      e.status === "accepted" && e.label?.startsWith("review:") &&
       e.status === "accepted" &&
       e.output?.verdict === "approve" &&
       e.output.reviewedHead === r.reviewedHead,
@@ -1090,6 +1157,9 @@ async function consumeComplete(tx, t, run) {
   );
   const reviewer = reviews.at(-1),
     implementation = implementations.at(-1);
+  if (tx.state.host.evidenceContractVersion)
+    demand(reviewer.reviewReceipt?.reviewedHead === r.reviewedHead,
+      "built-in review receipt missing or stale at convergence");
   demand(
     reviewer.childId !== implementation.childId &&
       reviewer.childId !== tx.state.execution.owner.session,
@@ -1109,6 +1179,7 @@ async function consumeComplete(tx, t, run) {
       ...r,
       head: actual.headRefOid,
       reviewer: `${reviewer.childId}:${reviewer.requestId}`,
+      ...(reviewer.reviewReceipt ? { reviewReceipt: digest(reviewer.reviewReceipt) } : {}),
       verification: JSON.stringify({
         implementation: implementation.requestId,
         child: implementation.childId,
@@ -1351,6 +1422,7 @@ function runFor(s, taskId) {
 }
 function verifierCost(s, request, run) {
   const label = request.label || request.options?.label || "";
+  if (run.args.routingPolicy && /^(implement|revise|plan|plan-revise):/.test(label)) return 1;
   if (/^(implement|revise):/.test(label))
     return Math.max(run.args.waves[0].tasks[0].maxIterations, 2);
   if (/^plan:/.test(label)) return 1;
@@ -1465,7 +1537,55 @@ export async function bind(
     return result;
   });
 }
-export async function accept(directory, taskId, envelope, owner) {
+/** Record a proven native refusal before creation of any child, never a timeout. */
+export async function recordUnavailable(directory, taskId, requestId, claimToken, proof, owner) {
+  return transaction(directory, owner, async (tx) => {
+    const request = tx.state.execution.requests[requestId];
+    demand(request?.taskId === taskId && request.claimToken === claimToken && !request.childId,
+      "native refusal requires this owner's unbound claim");
+    let { run } = runFor(tx.state, taskId);
+    const native = await adapter(tx.state);
+    demand(typeof native.recordUnavailable === "function", "pinned adapter cannot attest a native launch refusal");
+    const result = native.recordUnavailable(run.directory, requestId, claimToken, proof, nativeContext(owner, run));
+    tx.apply({ type: "request-unavailable", taskId, requestId, proof });
+    run = runFor(tx.state, taskId).run;
+    run.accepted[requestId] = { requestId, label: result.options?.label || result.label,
+      status: "denied", launchUnavailable: clone(proof) };
+    run.snapshot = native.inspect(run.directory, nativeContext(owner, run));
+    return result;
+  });
+}
+function captureReviewReceipt(directory, run, request, envelope, receipt, owner) {
+  demand(receipt?.version === 1, "built-in review receipt required");
+  demand(receipt.requestId === envelope.requestId && receipt.childId === envelope.childId &&
+    receipt.harness === owner.harness && receipt.reviewedHead === envelope.output?.reviewedHead &&
+    /^[a-f0-9]{40,64}$/.test(receipt.reviewedHead || ""), "review receipt identity or head mismatch");
+  demand(receipt.engine === (owner.harness === "claude" ? "code-review" : "review-agent"), "native built-in review engine required");
+  demand(["xhigh", "max"].includes(receipt.reviewLevel), "review level must satisfy the xhigh floor");
+  if (request.native?.reviewContract || request.options?.reviewContract) {
+    const contract = request.native?.reviewContract || request.options.reviewContract;
+    demand(contract.engine === (owner.harness === "claude" ? "claude-code-review" : "codex-review-agent") &&
+      contract.level === receipt.reviewLevel && contract.reviewedHead === receipt.reviewedHead,
+      "review receipt differs from dispatched review contract");
+  }
+  demand(typeof receipt.invocationId === "string" && receipt.invocationId.trim(), "review receipt native invocation id required");
+  const previous = run.accepted[envelope.requestId];
+  if (previous?.reviewReceipt) {
+    demand(previous.reviewReceiptInputHash === digest(receipt), "conflicting review receipt replay");
+    return previous.reviewReceipt;
+  }
+  const filename = receipt.nativeEvidence?.path;
+  demand(path.isAbsolute(filename || "") && fs.existsSync(filename) && fs.statSync(filename).isFile(), "review receipt native evidence file required");
+  const content = fs.readFileSync(filename);
+  demand(content.length > 0, "review receipt native evidence must not be empty");
+  if (receipt.nativeEvidence.sha256)
+    demand(receipt.nativeEvidence.sha256 === bytes(content), "review receipt evidence digest mismatch");
+  // A rejected schema delivery is not an accepted receipt. Its immutable capture
+  // may coexist with corrected evidence from the same child without poisoning it.
+  const captured = immutable(path.join(directory, "review-evidence", bytes(envelope.requestId) + "-" + bytes(content) + ".json"), content);
+  return { ...clone(receipt), nativeEvidence: { ...captured, source: filename } };
+}
+export async function accept(directory, taskId, envelope, owner, reviewReceipt) {
   return transaction(directory, owner, async (tx) => {
     let { run } = runFor(tx.state, taskId);
     const r = tx.state.execution.requests[envelope.requestId];
@@ -1486,6 +1606,9 @@ export async function accept(directory, taskId, envelope, owner) {
       replay || digest(envelope.caller) === digest(nativeContext(owner, run)),
       "result must attest the current same-account native owner",
     );
+    const label = nativeAccepted?.options?.label || nativeAccepted?.label || "";
+    const receipt = tx.state.host.evidenceContractVersion && label.startsWith("review:") && envelope.status === "ok"
+      ? captureReviewReceipt(directory, run, nativeAccepted, envelope, reviewReceipt, owner) : undefined;
     const native = await adapter(tx.state),
       accepted = native.accept(
         run.directory,
@@ -1506,9 +1629,51 @@ export async function accept(directory, taskId, envelope, owner) {
       status: accepted.status,
       output: accepted.output,
       envelopeHash: digest(envelope),
+      ...(receipt ? { reviewReceipt: receipt, reviewReceiptInputHash: digest(reviewReceipt) } : {}),
+      ...(accepted.routingProvenance ? { routing: accepted.routingProvenance } : {}),
     };
     run.snapshot = native.inspect(run.directory, nativeContext(owner, run));
     return accepted;
+  });
+}
+
+/** Supplementary evidence only: never substitutes for native implementation/review approval. */
+export async function verifyTask(directory, taskId, operation, owner) {
+  return transaction(directory, owner, async (tx) => {
+    const t = tx.state.tasks[taskId];
+    demand(t?.attempt, "supplementary verification requires a task attempt");
+    demand(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(operation.operationId || ""), "verification operationId required");
+    demand(/^[a-f0-9]{40,64}$/.test(operation.commit || ""), "verification needs a concrete commit");
+    demand(typeof operation.purpose === "string" && operation.purpose.trim(), "verification purpose required");
+    const key = tx.state.execution.id + ":" + operation.operationId;
+    const basis = { taskId, attemptId: t.attempt.id, revision: t.revision.hash, commit: operation.commit,
+      purpose: operation.purpose, verifier: digest({ command: tx.state.repository.verifier, inputs: tx.state.repository.verifierInputs || [] }) };
+    const hash = digest(basis), previous = tx.state.host.verifications?.[key];
+    if (previous) {
+      demand(previous.inputHash === hash, "conflicting supplementary verification operation");
+      demand(["complete", "interrupted"].includes(previous.status), "supplementary verification interrupted; reconcile owner before retrying with a new operation id");
+      return clone(previous);
+    }
+    const pool = tx.state.execution.pools[t.pool], reserve = tx.state.host.rollbackReserve?.verifierRuns || 0;
+    demand(pool.spent.verifierRuns + 1 <= pool.limit.verifierRuns - reserve, "supplementary verifier allowance exhausted or reserved for rollback");
+    demand(await git(tx.state.repository.path, "rev-parse", `${operation.commit}^{commit}`) === operation.commit, "verification commit unavailable");
+    tx.apply({ type: "reserve-verifier", taskId, verifierRuns: 1, purpose: operation.purpose });
+    const leasePath = path.join(directory, "verification-leases", bytes(key) + ".lock");
+    fs.mkdirSync(path.dirname(leasePath), { recursive: true, mode: 0o700 });
+    const record = { ...basis, operationId: operation.operationId, executionId: tx.state.execution.id, inputHash: hash,
+      status: "reserved", owner: clone(owner), leasePath };
+    (tx.state.host.verifications ??= {})[key] = record;
+    tx.save();
+    const lease = acquire(leasePath, owner, { processLease: true });
+    try {
+      record.status = "running"; tx.save();
+      record.result = await verify(directory, tx.state.repository, operation.commit, operation.purpose, tx.state.host.config.verifierTimeoutMs, lease);
+      record.status = "complete";
+    } catch (error) {
+      record.status = "interrupted"; record.error = error.message;
+      throw error;
+    } finally { tx.save(); lease(); }
+    return clone(record);
   });
 }
 
@@ -1841,6 +2006,7 @@ const publicTransitions = new Set([
 export async function transition(directory, change, owner) {
   return transaction(directory, owner, async (tx) => {
     if (change.type === "substitute") {
+      demand(!tx.state.host.config.routingPolicy, "new-policy model bindings are pinned; recovery uses the prepared routing policy");
       const t = tx.state.tasks[change.taskId];
       demand(
         t && !["active", "review", "waiting", "draining"].includes(t.status),
@@ -2032,6 +2198,23 @@ export async function recover(directory, owner, evidence) {
     owner,
     async (tx) => {
       const previous = tx.state.execution.owner;
+      for (const operation of Object.values(tx.state.host.verifications || {})) {
+        if (!["reserved", "running"].includes(operation.status)) continue;
+        demand(matchesOwner(operation.owner, predecessor), "supplementary verifier belongs to another owner");
+        if (fs.existsSync(operation.leasePath)) {
+          releaseProvenDeadLock(operation.leasePath, {
+            owner: predecessor, epoch: predecessor.epoch, processLease: true,
+          });
+        } else if (operation.status === "running") {
+          const proof = evidence.verifications?.[operation.operationId];
+          demand(proof?.status === "stopped" && typeof proof.evidence === "string" && proof.evidence.trim(),
+            "missing supplementary verifier process evidence; reconcile before recovery");
+        }
+        operation.status = "interrupted";
+        operation.error = "Prior owner stopped before verification was durably completed; reservation retained";
+        delete operation.result;
+        tx.save();
+      }
       demand(
         previous.harness === owner.harness &&
           previous.account === owner.account,
@@ -2213,7 +2396,13 @@ async function main() {
       );
       break;
     case "accept":
-      out = await accept(directory, p.taskId, p.envelope, p.owner);
+      out = await accept(directory, p.taskId, p.envelope, p.owner, p.reviewReceipt);
+      break;
+    case "unavailable":
+      out = await recordUnavailable(directory, p.taskId, p.requestId, p.claimToken, p.proof, p.owner);
+      break;
+    case "verify":
+      out = await verifyTask(directory, p.taskId, p.operation, p.owner);
       break;
     case "merge":
       out = await merge(directory, p.taskId, p.owner);

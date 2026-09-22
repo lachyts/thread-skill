@@ -139,6 +139,8 @@ export function createRollout(spec, owner) {
   validateGraph(tasks);
   const s = {
     protocolVersion: 4,
+    ...(spec.evidenceContractVersion ? { evidenceContractVersion: spec.evidenceContractVersion } : {}),
+    ...(spec.routingPolicy ? { routingPolicy: copy(spec.routingPolicy) } : {}),
     rolloutId: spec.rolloutId,
     repository: copy(spec.repository),
     authority: copy(spec.authority),
@@ -239,6 +241,11 @@ function approvalBasis(s, t, head) {
     revision: t.revision.hash,
     authority: s.authorityHash,
     verifier: digest(s.repository.verifier),
+    ...(s.evidenceContractVersion ? {
+      verifierInputs: digest(s.repository.verifierInputs || []),
+      reviewReceipt: t.attempt.result.reviewReceipt,
+    } : {}),
+    ...(s.routingPolicy ? { routingPolicy: digest(s.routingPolicy) } : {}),
     baseRef: t.attempt.baseRef,
     purpose: t.attempt.purpose || "outcome",
     reverts: t.attempt.reverts || [],
@@ -449,6 +456,21 @@ export function apply(previous, command, context) {
         p.spent.verifierRuns += c.verifierRuns;
         break;
       }
+      case "request-unavailable": {
+        const r = e.requests[c.requestId];
+        requireThat(r && r.taskId === t.id, "unknown request");
+        requireThat(c.proof?.source === "native-launch" && c.proof.neverStarted === true &&
+          s.routingPolicy?.recovery?.model === c.proof.model, "native launch refusal evidence required");
+        text(c.proof.evidence, "native launch refusal evidence");
+        if (r.launchUnavailable) {
+          requireThat(digest(r.launchUnavailable) === digest(c.proof), "conflicting native launch refusal");
+          return previous;
+        }
+        requireThat(r.status === "claimed" && !r.childId, "native refusal requires an unbound claim");
+        r.status = "denied";
+        r.launchUnavailable = copy(c.proof);
+        break;
+      }
       case "request-state": {
         const r = e.requests[c.requestId];
         requireThat(r && r.taskId === t.id, "unknown request");
@@ -498,6 +520,21 @@ export function apply(previous, command, context) {
         );
         t.attempt.resultHash = hash;
         t.attempt.result = copy(c.result);
+        if (s.routingPolicy && c.result.routingState) {
+          const route = c.result.routingState;
+          requireThat(route.version === 1 && route.policyDigest === s.routingPolicy.policyDigest &&
+            Number.isSafeInteger(route.qualityFailures) && route.qualityFailures >= (t.routingState?.qualityFailures || 0),
+            "invalid or regressed routing state");
+          if (route.recoveryUnavailable) {
+            requireThat(route.recoveryUnavailable.model === s.routingPolicy.recovery?.model && route.qualityFailures >= 2,
+              "invalid unavailable recovery binding");
+            text(route.recoveryUnavailable.evidence, "unavailable recovery evidence");
+          }
+          if (t.routingState?.recoveryUnavailable)
+            requireThat(digest(route.recoveryUnavailable || null) === digest(t.routingState.recoveryUnavailable),
+              "unavailable recovery evidence cannot be removed or changed");
+          t.routingState = copy(route);
+        }
         if (c.result.status === "review") {
           requireThat(
             c.result.verified === true && sha(c.result.head),
@@ -510,6 +547,8 @@ export function apply(previous, command, context) {
           );
           text(c.result.reviewer, "independent reviewer");
           text(c.result.verification, "verification evidence");
+          if (s.evidenceContractVersion)
+            requireThat(/^[a-f0-9]{64}$/.test(c.result.reviewReceipt || ""), "built-in review receipt required");
           text(c.result.prUrl, "PR URL");
           const url = new URL(c.result.prUrl);
           requireThat(

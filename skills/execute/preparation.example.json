@@ -5,28 +5,50 @@
     "path": "/absolute/project/repository",
     "identity": "github.com/owner/repository",
     "baseBranch": "master",
-    "verifier": "npm test"
+    "verifier": "npm test",
+    "verifierInputs": []
   },
   "authority": {
-    "outcomes": ["Deliver the agreed feature with existing behaviour preserved"],
-    "constraints": ["One repository; no paid services or account switching"],
-    "allowedActions": ["edit", "test", "open-pr", "merge"],
-    "reservedDecisions": ["Any change to the agreed product outcome"],
+    "outcomes": [
+      "Deliver the agreed feature with existing behaviour preserved"
+    ],
+    "constraints": [
+      "One repository; no paid services or account switching"
+    ],
+    "allowedActions": [
+      "edit",
+      "test",
+      "open-pr",
+      "merge"
+    ],
+    "reservedDecisions": [
+      "Any change to the agreed product outcome"
+    ],
     "gates": [],
     "mergeEffects": [],
-    "evidence": "Replace with the user's actual authorisation and its context"
+    "evidence": {
+      "userText": "Replace with the user's exact authorisation text",
+      "context": "Replace with the proposal and amendments that text approved",
+      "source": "Replace with the durable conversation/message evidence reference"
+    }
   },
   "tasks": [
     {
       "id": "example-task",
       "sourcePath": "/absolute/obsidian/Work/Tasks/example-task.md",
       "requirements": "Replace with the exact task note text at preparation",
-      "acceptance": ["Verifier passes and an independent reviewer approves the exact commit"],
+      "acceptance": [
+        "Verifier passes and an independent reviewer approves the exact commit"
+      ],
       "dependsOn": [],
       "conflicts": [],
       "scope": "cross-cutting",
       "planGate": true,
-      "allowance": {"calls": 32, "verifierRuns": 32, "recoveries": 2}
+      "allowance": {
+        "calls": 32,
+        "verifierRuns": 32,
+        "recoveries": 2
+      }
     }
   ]
 }
