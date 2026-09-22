@@ -16,6 +16,14 @@ The independent bundled reviewer reproduced this with an ignored `local.txt` con
 
 Recommended repair: use `--no-overwrite-ignore` or an equivalent collision guard, and add a real-Git regression proving a collision leaves the local contents and prior branch head intact. Keep this finding open until the correction and focused recheck pass. See the [complete independent code review](../reviews/2026-09-22-pilot-fix-independent-audit.md).
 
+### Follow-up correction — 22 September 2026
+
+The finding is now resolved in candidate commit `fa937dfb342c8e03da9c77826d6e17ebb18c730a`. Testing showed that the suggested Git flag alone did not prevent the overwrite. The correction previews the merge's actual resulting paths before any worktree merge, including paths moved by directory-rename detection, and checks both path collisions and filesystem identities. The actual merge explicitly uses the preview's strategy and suppresses branch-specific strategy overrides for that command.
+
+All seven new regressions passed: matching files, case aliases, both file/directory collision directions, directory-rename relocation, a branch strategy override, and unrelated ignored contents that must remain usable. The combined engine safety and prompt suite passed 49 Node tests with no failures or skips. A [fresh independent review of the correction](../reviews/2026-09-22-ignored-file-fix.md) returned no findings. Its scope and tested Git/filesystem versions are recorded there; the combined test log is retained at `.thread/independent-audit-2026-09-22/ignored-file-fix-tests.log`.
+
+This follow-up changes the candidate source and tests. It does not alter the completed pilot's pinned implementation, execution record or spent allowances. A new authorised execution must pin the corrected candidate to establish live recovery acceptance. The other acceptance boundaries below remain unchanged.
+
 ## Independently confirmed results
 
 Authenticated GitHub reads during this audit confirmed all three actual merges into `main`, their head identities and their file scopes:
@@ -58,4 +66,4 @@ These are acceptance gaps, not additional observed code defects. They are alread
 
 ## Recommended next move
 
-Repair the ignored-file collision in the changed-base correction, obtain a focused independent recheck, then run a small Codex pilot pinned to the corrected candidate that naturally advances the base while another task's PR remains open. Verify that the task integrates, revalidates, receives fresh review and merges without the coordinator's ad hoc local Git repair. Preserve the other outstanding acceptance cases and the separate native Claude run before release.
+With the ignored-file finding resolved and independently rechecked, run a small new Codex execution pinned to the corrected candidate that naturally advances the base while another task's PR remains open. Verify that the task integrates, revalidates, receives fresh review and merges without the coordinator's ad hoc local Git repair. Preserve the other outstanding acceptance cases and the separate native Claude run before release. The existing pilot task can coordinate this new execution; the completed execution's allowances and evidence must not be reused as a fresh launch.

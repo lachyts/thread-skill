@@ -6,7 +6,7 @@ engine: review-agent
 mode: code
 effort: xhigh
 reviewed: 2026-09-22
-status: pending
+status: consumed
 ---
 
 [P2] Preserve ignored files when integrating the adopted base — skills/execute/wave-execute.workflow.js:862
@@ -26,3 +26,9 @@ Checks:
 - Additional real-Git reproduction: the emitted retry setup successfully overwrote an ignored local file; `git status --porcelain` was empty both before and after. Temporary fixture removed afterwards.
 
 The agent boundary remains mocked in the test suite; no live PR or native implementation agent was dispatched. Source, index and HEAD were not modified. Only this requested audit report was written; no prior review reports were read.
+
+## Follow-up disposition — 22 September 2026
+
+Resolved by `fa937dfb342c8e03da9c77826d6e17ebb18c730a` and consumed by the originating session after the [fresh correction review](2026-09-22-ignored-file-fix.md) returned no findings. The suggested `--no-overwrite-ignore` flag alone failed the real-Git reproduction on Git 2.47.0. The correction instead checks the previewed merge result for ignored-file collisions before modifying the worktree, including filesystem aliases and directory-rename destinations. The applied merge uses the same strategy as the preview.
+
+Seven new real-Git regressions passed alongside the existing checks: 49 combined Node tests passed, with no failures or skips. This resolves the source defect; it does not establish live acceptance of the corrected native retry path or complete the release gates. The original finding and its original scope above are retained as historical evidence.
