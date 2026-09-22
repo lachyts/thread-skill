@@ -1,7 +1,7 @@
 ---
 thread: thread-skill
 written: 2026-09-22
-status: pending
+status: consumed
 ---
 
 # Thread rollout: prepare and run a live pilot
