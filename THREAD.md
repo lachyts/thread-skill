@@ -10,6 +10,32 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-09-22 (Claude pilot lane, latest) — the native Claude protocol 4 pilot
+ran unattended to completion; both harness slices now carry real evidence.**
+Session `9fce5030…` picked up the restart handoff, probed a fresh session
+(Fable children now at xhigh because the profile's per-model effort governs),
+initialised execution `db955f02…` at candidate `5d3e40f` + adapter `0cdc433`,
+and drove A/B/C on `lachyts/agent-reader` through fresh native children only:
+C [#18](https://github.com/lachyts/agent-reader/pull/18) → `2a1ef647`,
+A [#19](https://github.com/lachyts/agent-reader/pull/19) → `dca45b0e`,
+B [#20](https://github.com/lachyts/agent-reader/pull/20) → `19bf1ac8`, each
+squash-merged by the pinned merger after fresh Fable-xhigh review and
+post-merge verifier exit 0. The **corrected changed-base entry recovered three
+consecutive base movements unattended** (C's merge, then thread 3's #16 and
+#17) — the case the Codex slice had left open — and A's 8-call allowance was
+consumed exactly. Also observed: draining pause → `paused`, heartbeat read
+`paused` and deleted itself, one recorded one-shot coordinator resume with
+allowances unchanged, five real session-cron deliveries, a review-requested
+revision round on B, immediate B admission after A's merge, the Stop hook
+firing at every turn end. Not observed: a real Stop-driver block, "A merged
+while B held solely by pause", cold/ambiguous recovery, revisions,
+prerequisites, partial ending, relaunch, revert. Five child outputs carried
+out-of-schema keys; the host boundary rejected each and the same children
+re-emitted validly. Evidence: `docs/implementation/2026-09-22-live-pilot.md`
+§ Native Claude slice; private record `.thread/pilot-claude-2026-09-22/`.
+Profile effort restored to `high`, pilot agent definitions and the local Stop
+hook removed. Nothing installed or released; release is Lachy's call.
+
 **2026-09-22 (Claude pilot lane) — the native Claude protocol 4 pilot is fully
 prepared, explicitly agreed, and handed to a fresh session for launch.** The
 preparing session (`31cefbdc…`) consumed the Claude pilot handoff, pinned the
@@ -427,6 +453,14 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Claude pilot lane, 22 September 2026: complete.** Execution `db955f02…` is
+`ended` with all three outcomes merged; read `docs/implementation/2026-09-22-live-pilot.md`
+§ Native Claude slice and the acceptance task
+`~/repos/obsidian/Work/Tasks/thread-rollout-v4-native-acceptance.md` for what
+both slices observed and what is still open. Do not re-initialise or relaunch
+that execution. Release/installation of either candidate is a decision for
+Lachy, not an inference from these runs.
+
 **Rollout redesign, 22 September 2026:** coordination now belongs to **thread 1**.
 Read the [thread 2 handback](/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/docs/implementation/2026-09-22-thread-2-closeout.md)
 and the current records owned by thread 3 and the native Claude pilot before
@@ -466,6 +500,7 @@ read its `record/` status first if it exists.
 
 ## Session log
 
+- 2026-09-22 (latest): Claude pilot lane — consumed the restart handoff, probed Fable at xhigh in the fresh session, initialised execution `db955f02…`, ran A/B/C to completion through fresh native children (#18, #19, #20 merged by the pinned host), observed pause/heartbeat-self-delete/single resume, three unattended changed-base recoveries through the corrected entry, one review-requested revision, five host-boundary schema rejections; wrote the report section, acceptance task and R-WAVE ledger entry (`d38a6ec` in the adapter worktree); restored the profile effort and removed the pilot definitions and Stop hook.
 - 2026-09-22: Claude pilot lane — consumed the Claude handoff, verified candidate `5d3e40f`, agreed A/B/C with allowances and a pause plan, prepared the private record/verifier/notes, probed hooks (hot-reload yes), agent definitions (model yes, effort no) and effort settings (no reload); withheld launch per the xhigh rule and handed off to a fresh session (`cc8640e`), which consumed it.
 - 2026-09-22: Closed only thread 2 and saved its Claude-pilot agreement/status/evidence handback; thread 1 now leads, thread 3 and Claude continue independently, rollout redesign remains open.
 - 2026-09-21 (latest): consumed the stale 2026-09-17 tier-ceiling review and two further clean-room rounds (12 + 15 findings); round 1 lost to a CLI restart; round 3 hit the ledger's STOP at 60% regressions, so no round 4 — reverted to the root instead (retry budget is now a constant, not arithmetic over max_iterations). Two real engine defects fixed (effort keyed off a lagging event flag; a 1-iteration retry loop at the template default), ADR 0016 §2 amended, Scenarios F and G added, 191 assertions. Shipped 2.5.1 and verified the cache byte-identical — the version-keyed cache is still live and a same-version content change does NOT refresh it. Two findings deferred to § Open questions + vault tasks.
