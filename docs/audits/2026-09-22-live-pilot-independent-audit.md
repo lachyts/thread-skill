@@ -67,3 +67,7 @@ These are acceptance gaps, not additional observed code defects. They are alread
 ## Recommended next move
 
 With the ignored-file finding resolved and independently rechecked, run a small new Codex execution pinned to the corrected candidate that naturally advances the base while another task's PR remains open. Verify that the task integrates, revalidates, receives fresh review and merges without the coordinator's ad hoc local Git repair. Preserve the other outstanding acceptance cases and the separate native Claude run before release. The existing pilot task can coordinate this new execution; the completed execution's allowances and evidence must not be reused as a fresh launch.
+
+### Subsequent live acceptance — 22 September 2026
+
+The new authorised two-task execution completed this next move. The [independent changed-base audit](2026-09-22-changed-base-independent-audit.md) confirms that the corrected native child entry integrated the changed base into the existing PR, preserved task work and an ignored local probe, received fresh verification and independent review, and merged through the canonical host without coordinator Git repair. This closes the corrected Codex retry gap identified above. The first pilot's historical findings, pinned implementation and spent allowances remain unchanged; the other acceptance boundaries and separate Claude acceptance remain open.
