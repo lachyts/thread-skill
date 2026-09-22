@@ -180,6 +180,78 @@ test("conflicts exclude concurrency without inventing outcome dependencies", () 
   s = start(s, "b");
   assert.deepEqual(eligible(s), ["c"]);
 });
+test("covered declaration records bounded authority mapping without granting new authority or allowance", () => {
+  let s = start(fresh(), "a");
+  s = run(s, {
+    type: "claim",
+    taskId: "a",
+    requestId: "gate-planner",
+    verifierRuns: 1,
+  });
+  s = run(s, {
+    type: "request-state",
+    taskId: "a",
+    requestId: "gate-planner",
+    status: "dispatched",
+    childId: "native-gate-planner",
+  });
+  s = run(s, {
+    type: "request-state",
+    taskId: "a",
+    requestId: "gate-planner",
+    status: "accepted",
+  });
+  s = run(s, {
+    type: "converged",
+    taskId: "a",
+    attemptId: s.tasks.a.attempt.id,
+    revision: s.tasks.a.revision.hash,
+    result: {
+      status: "gate-pending",
+      gatedInputs: ["irreversible: merge the reviewed change"],
+      reason: "gate declaration needs coverage",
+    },
+  });
+  const before = structuredClone(s.execution.pools),
+    authorityHash = s.authorityHash;
+  const command = {
+    type: "cover-gate",
+    taskId: "a",
+    declaration: "irreversible: merge the reviewed change",
+    assessment: {
+      withinAuthority: true,
+      authorityHash,
+      evidence:
+        "Rollout permits merge of this agreed task; this declaration names that same action and limits.",
+    },
+  };
+  assert.throws(
+    () => run(s, { ...command, declaration: "spend: new external service" }),
+    /declared/,
+  );
+  assert.throws(
+    () =>
+      run(s, {
+        ...command,
+        assessment: { ...command.assessment, withinAuthority: false },
+      }),
+    /authority/,
+  );
+  s = run(s, command);
+  assert.deepEqual(s.execution.pools, before);
+  assert.equal(s.authorityHash, authorityHash);
+  assert.equal(s.tasks.a.status, "blocked");
+  assert.equal(s.tasks.a.coveredGates[0].revision, s.tasks.a.revision.hash);
+  assert.deepEqual(run(s, command), s);
+  s = run(s, {
+    type: "revise",
+    taskId: "a",
+    requirements: "Revised outcome",
+    assessment: command.assessment,
+  });
+  assert.notEqual(s.tasks.a.coveredGates[0].revision, s.tasks.a.revision.hash);
+  assert.throws(() => run(s, command), /current|blocked/);
+});
 test("revision invalidates current and dependent outcomes while retaining landing history", () => {
   let s = finish(finish(fresh(), "a"), "b");
   const old = s.tasks.a.revision.hash;

@@ -63,6 +63,7 @@ function task(input) {
     status: "open",
     member: true,
     landings: [],
+    coveredGates: [],
     attempts: [],
     generation: 0,
   };
@@ -677,6 +678,40 @@ export function apply(previous, command, context) {
           requireThat(o.state === "OPEN", "PR closed without merge");
           t.status = "waiting";
         }
+        break;
+      }
+      case "cover-gate": {
+        assessment(s, c.assessment);
+        requireThat(
+          t.status === "blocked" &&
+            !t.requiresAssessment &&
+            t.attempt?.revision === t.revision.hash &&
+            !t.attempt.superseded &&
+            t.attempt.result?.status === "gate-pending",
+          "current blocked gate declaration required",
+        );
+        text(c.declaration, "gate declaration");
+        requireThat(
+          t.attempt.result.gatedInputs?.includes(c.declaration),
+          "gate was not declared by the current attempt",
+        );
+        t.coveredGates ??= [];
+        if (
+          t.coveredGates.some(
+            (g) =>
+              g.declaration === c.declaration &&
+              g.revision === t.revision.hash &&
+              g.authorityHash === s.authorityHash,
+          )
+        )
+          return previous;
+        t.coveredGates.push({
+          declaration: c.declaration,
+          revision: t.revision.hash,
+          authorityHash: s.authorityHash,
+          evidence: c.assessment.evidence,
+          attemptId: t.attempt.id,
+        });
         break;
       }
       case "block": {

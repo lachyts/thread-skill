@@ -31,3 +31,7 @@ After host integration, the same independent reviewer inspected actual rollback 
 | P2 Record reversion relationships on every actual rollback landing | Fixed: successful, superseded and failed-verification landings retain the reverted commit list and mark original landings as reverted. |
 
 Both reproductions were added as failing regressions before the fixes. Narrow independent recheck: no findings; all 36 state tests pass. Source edits retain an assessment hold; historical queued landings never complete revised outcomes. Actual native wake/queue behaviour remains a live acceptance item.
+
+## Covered gate declaration
+
+A native documentation review found the runbook promised semantic coverage of newly declared gates but exposed no supported operation. Added `cover-gate`: it accepts only an inactive current gate-pending declaration, records its evidence against unchanged authority/current revision, and preserves spent allowance. The host passes only current mappings plus their assessment to independent review. It never creates new authority or silently clears a pause. A failing regression preceded the implementation; scoped independent recheck reported no findings, with all 37 state tests and the targeted host binding test passing.
