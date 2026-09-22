@@ -453,6 +453,8 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Read `docs/handoffs/2026-09-22-claude-pilot-audit-and-release.md` first** — pending handoff (written 2026-09-22): independent audit of the Claude slice, then Lachy's release decision.
+
 **Claude pilot lane, 22 September 2026: complete.** Execution `db955f02…` is
 `ended` with all three outcomes merged; read `docs/implementation/2026-09-22-live-pilot.md`
 § Native Claude slice and the acceptance task
