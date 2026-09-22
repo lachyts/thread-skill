@@ -154,6 +154,8 @@ Verification: 41 engine-safety tests, prompt invariants and diff checks passed o
 
 ## Native Claude slice, 22 September 2026
 
+**Independent follow-up, 23 September:** the [Claude pilot audit](../audits/2026-09-23-claude-pilot-independent-audit.md) substantiates the merges and three native recoveries, with qualifications: built-in review routing was not exercised, the verifier writes to shared reader files, and several evidence/count claims need narrowing. Read that audit and its record check before making a release decision. The original report below is retained as the historical handback.
+
 Status: Claude pilot execution ended with all three outcomes complete. Heartbeat self-deleted on pause and again on end. Neither candidate is installed or released. This section records the native Claude run that the Codex slice above left open.
 
 ### Preflight and launch gate

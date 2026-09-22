@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-09-22
+last_touched: 2026-09-23
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
 ---
@@ -9,6 +9,17 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-09-23 — Claude evidence independently audited; release remains pending.**
+The [independent audit](docs/audits/2026-09-23-claude-pilot-independent-audit.md)
+confirms all three merges, three native changed-base retries, fourteen real
+child/result bindings and unchanged reservation limits. Thirty isolated tests
+passed on the final merged commit. Acceptance is qualified: review children
+did not invoke the required built-in engine, and the supplied verifier wrote
+shared reader files. Address those findings, tighten schema instructions and
+evidence/accounting, then assess the remaining live acceptance gaps. The audit
+also corrects the Stop count and other report shorthand. No pilot was resumed,
+no allowance renewed, and nothing installed or released.
 
 **2026-09-22 (Claude pilot lane, latest) — the native Claude protocol 4 pilot
 ran unattended to completion; both harness slices now carry real evidence.**
@@ -453,7 +464,7 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**Read `docs/handoffs/2026-09-22-claude-pilot-audit-and-release.md` first** — pending handoff (written 2026-09-22): independent audit of the Claude slice, then Lachy's release decision.
+**Read [the 23 September independent audit](docs/audits/2026-09-23-claude-pilot-independent-audit.md) first.** The audit requested by `docs/handoffs/2026-09-22-claude-pilot-audit-and-release.md` is complete in the main task. That handoff's release step is now qualified by the findings above; do not repeat the pilot or assume its completion establishes release readiness.
 
 **Claude pilot lane, 22 September 2026: complete.** Execution `db955f02…` is
 `ended` with all three outcomes merged; read `docs/implementation/2026-09-22-live-pilot.md`
