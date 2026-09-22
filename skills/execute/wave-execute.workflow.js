@@ -859,7 +859,45 @@ git cat-file -e "$BASE^{commit}"
 git merge-base --is-ancestor "$PRIOR_HEAD" HEAD
 if ! git merge-base --is-ancestor "$BASE" HEAD; then
   [ "$(git rev-parse HEAD)" = "$PRIOR_HEAD" ]
-  if ! git -c rerere.enabled=false merge --no-ff --no-edit "$BASE"; then
+  # Some Git merge strategies overwrite ignored paths even with --no-overwrite-ignore.
+  # Reject incoming file/directory collisions before a merge can modify the worktree.
+  node - "$BASE" <<'NODE'
+const { execFileSync } = require('node:child_process')
+const { lstatSync } = require('node:fs')
+const { dirname } = require('node:path')
+const git = (...args) => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+const ignored = git('ls-files', '--others', '--ignored', '--exclude-standard', '-z').split('\\0').filter(Boolean)
+if (!ignored.length) process.exit(0)
+// Preview ort's resulting paths, including files relocated by directory rename detection.
+const tree = git('merge-tree', '--write-tree', '--no-messages', 'HEAD', process.argv[2]).trim()
+const incoming = git('diff', '--name-only', '--no-renames', '--diff-filter=ACMT', '-z', 'HEAD', tree, '--').split('\\0').filter(Boolean)
+const identity = name => {
+  try {
+    const stat = lstatSync(name, { bigint: true })
+    return stat.dev + ':' + stat.ino
+  } catch (error) {
+    if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error
+    return null
+  }
+}
+const prefixes = name => {
+  const names = [name]
+  while (dirname(name) !== '.') { name = dirname(name); names.push(name) }
+  return names
+}
+// Inode identity also catches case/Unicode aliases on the actual worktree filesystem.
+const ignoredFiles = new Set(ignored.map(identity).filter(Boolean))
+const ignoredParents = new Set(ignored.flatMap(prefixes).map(identity).filter(Boolean))
+const collision = incoming.find(remote => ignored.some(local =>
+  local === remote || local.startsWith(remote + '/') || remote.startsWith(local + '/')) ||
+  ignoredParents.has(identity(remote)) || prefixes(remote).some(name => ignoredFiles.has(identity(name))))
+if (collision !== undefined) {
+  console.error('Blocked: adopted base would overwrite ignored local work at ' + JSON.stringify(collision))
+  process.exit(1)
+}
+NODE
+  # Match the ort preview; branch-local strategy options must not change the write paths.
+  if ! git -c rerere.enabled=false -c "branch.$BR.mergeOptions=" merge --strategy=ort --no-ff --no-edit "$BASE"; then
     git merge --abort
     exit 1
   fi

@@ -182,7 +182,7 @@ test('planning and implementation use the adopted commit even when remote and ro
 
 // Execute the emitted entry contract against divergent real Git histories. The regression
 // is the unconditional BASE-ancestor check stopping an authorised same-PR integration.
-function changedBaseFixture(t, { conflict = false } = {}) {
+function changedBaseFixture(t, { conflict = false, incomingPath = 'peer.txt', renameDirectory = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thread-changed-base-'))
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
   const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args],
@@ -191,17 +191,25 @@ function changedBaseFixture(t, { conflict = false } = {}) {
   git(origin, 'init', '--initial-branch=trunk')
   git(origin, 'config', 'user.email', 'test@example.invalid'); git(origin, 'config', 'user.name', 'Test')
   fs.writeFileSync(path.join(origin, 'shared.txt'), 'original\n')
+  if (renameDirectory) {
+    fs.mkdirSync(path.join(origin, 'old'))
+    fs.writeFileSync(path.join(origin, 'old/keep.txt'), 'directory rename anchor\n')
+  }
   git(origin, 'add', '.'); git(origin, 'commit', '-m', 'original base')
   const originalBase = git(origin, 'rev-parse', 'HEAD')
   const repo = path.join(dir, 'repo with spaces')
   execFileSync('git', ['clone', origin, repo], { stdio: 'pipe' })
   git(repo, 'config', 'user.email', 'test@example.invalid'); git(repo, 'config', 'user.name', 'Test')
+  if (renameDirectory) git(repo, 'config', 'merge.directoryRenames', 'true')
   const wt = path.join(repo, '.claude/worktrees/project-task'), branch = 'audit-fix/task'
   git(repo, 'worktree', 'add', '-b', branch, wt, originalBase)
+  if (renameDirectory) git(wt, 'mv', 'old', 'new')
   fs.writeFileSync(path.join(wt, conflict ? 'shared.txt' : 'task.txt'), 'task work\n')
   git(wt, 'add', '.'); git(wt, 'commit', '-m', 'existing task work')
   const priorHead = git(wt, 'rev-parse', 'HEAD')
-  fs.writeFileSync(path.join(origin, conflict ? 'shared.txt' : 'peer.txt'), 'adopted peer work\n')
+  const incoming = path.join(origin, conflict ? 'shared.txt' : incomingPath)
+  fs.mkdirSync(path.dirname(incoming), { recursive: true })
+  fs.writeFileSync(incoming, 'adopted peer work\n')
   git(origin, 'add', '.'); git(origin, 'commit', '-m', 'peer merged')
   const baseRef = git(origin, 'rev-parse', 'HEAD')
   fs.writeFileSync(path.join(origin, 'later.txt'), 'unadopted remote work\n')
@@ -303,6 +311,44 @@ for (const unsafe of ['dirty tracked', 'dirty untracked', 'wrong branch', 'unkno
       assert.equal(fs.existsSync(f.wt), false, 'a retry never silently replaces its missing branch')
       assert.throws(() => f.git(f.repo, 'show-ref', '--verify', 'refs/heads/' + f.branch))
     }
+  })
+}
+
+for (const { name, filename, incomingPath, collision, caseAlias, renameDirectory, mergeOptions } of [
+  { name: 'same file', filename: 'peer.txt', collision: true },
+  { name: 'case alias', filename: 'PEER.txt', collision: true, caseAlias: true },
+  { name: 'local directory', filename: 'peer.txt/local.txt', collision: true },
+  { name: 'incoming directory', filename: 'cache', incomingPath: 'cache/peer.txt', collision: true },
+  { name: 'renamed directory', filename: 'new/peer.txt', incomingPath: 'old/peer.txt', renameDirectory: true, collision: true },
+  { name: 'branch strategy override', filename: 'old/peer.txt', incomingPath: 'old/peer.txt', renameDirectory: true, mergeOptions: '-s resolve', collision: false },
+  { name: 'unrelated file', filename: 'local-only.txt', collision: false },
+]) {
+  test(`v4 changed-base entry preserves ignored local files: ${name}`, async (t) => {
+    const f = changedBaseFixture(t, { incomingPath, renameDirectory })
+    if (mergeOptions) f.git(f.wt, 'config', `branch.${f.branch}.mergeOptions`, mergeOptions)
+    const ignored = path.join(f.wt, filename), contents = 'local work to preserve\n'
+    const exclude = path.resolve(f.wt, f.git(f.wt, 'rev-parse', '--git-path', 'info/exclude'))
+    fs.appendFileSync(exclude, `\n${filename}\n`)
+    fs.mkdirSync(path.dirname(ignored), { recursive: true })
+    fs.writeFileSync(ignored, contents)
+    if (caseAlias && !fs.existsSync(path.join(f.wt, 'peer.txt'))) return t.skip('filesystem is case-sensitive')
+    assert.equal(f.git(f.wt, 'check-ignore', filename), filename)
+    assert.equal(f.git(f.wt, 'status', '--porcelain'), '')
+
+    const result = await f.enter()
+    assert.equal(fs.readFileSync(ignored, 'utf8'), contents, 'integration must preserve ignored local contents')
+    if (collision) {
+      assert.ok(result.error, 'an incoming tracked path must not overwrite an ignored local file')
+      assert.equal(f.git(f.wt, 'rev-parse', 'HEAD'), f.priorHead)
+      assert.throws(() => f.git(f.wt, 'rev-parse', '--verify', 'MERGE_HEAD'))
+    } else {
+      assert.ifError(result.error)
+      f.git(f.wt, 'merge-base', '--is-ancestor', f.baseRef, 'HEAD')
+      if (renameDirectory) assert.equal(fs.readFileSync(path.join(f.wt, 'new/peer.txt'), 'utf8'), 'adopted peer work\n')
+    }
+    if (mergeOptions) assert.equal(f.git(f.wt, 'config', '--get', `branch.${f.branch}.mergeOptions`), mergeOptions)
+    assert.equal(f.git(f.wt, 'branch', '--show-current'), f.branch)
+    assert.equal(f.git(f.wt, 'status', '--porcelain'), '')
   })
 }
 
