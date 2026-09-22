@@ -20,3 +20,14 @@ Reviewer: rollout_doc_audit, using the bundled Codex review-agent, read-only. Si
 | P2 Recover claims proven never dispatched | Fixed: explicit never-started native proof only for unbound claims, no invented child and no allowance refund. |
 
 Integration also requires recovery evidence to name the previous ownership epoch, preventing A→B→A replay. All changes have regression tests; scoped recheck follows the fix commit. This review does not establish real unattended acceptance.
+
+## Scoped rollback and queue review
+
+After host integration, the same independent reviewer inspected actual rollback landing, stale queue and terminal-request changes. It confirmed the terminal cleanup fix and reported two further findings:
+
+| Finding | Parent resolution |
+| --- | --- |
+| P2 Make successful rollback observation replay idempotent | Fixed: recognise identical historical rollback evidence before the current-attempt guard; conflicting evidence fails. |
+| P2 Record reversion relationships on every actual rollback landing | Fixed: successful, superseded and failed-verification landings retain the reverted commit list and mark original landings as reverted. |
+
+Both reproductions were added as failing regressions before the fixes. Narrow independent recheck: no findings; all 36 state tests pass. Source edits retain an assessment hold; historical queued landings never complete revised outcomes. Actual native wake/queue behaviour remains a live acceptance item.
