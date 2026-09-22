@@ -10,6 +10,23 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-09-22 (Claude pilot lane) — the native Claude protocol 4 pilot is fully
+prepared, explicitly agreed, and handed to a fresh session for launch.** The
+preparing session (`31cefbdc…`) consumed the Claude pilot handoff, pinned the
+target to `5d3e40f` (contains the changed-base correction `67a825f` and the
+ignored-file fix `fa937df`, fresh review no findings), agreed A/B/C on
+`lachyts/agent-reader` (A new `tests/test_claude_state.py`, B `tests/README.md`
+depends on A, C `README.md`) with 8/16/2 per-task allowances, maxConcurrent 2,
+engine 3/2/2, one draining pause aiming at "A merged, B held solely by pause"
+and one recorded resume. Private record dir `.thread/pilot-claude-2026-09-22/`
+holds the verbatim agreement, preparation, config, isolated verifier (baseline
+green on `fbf1f93`) and every probe's evidence. Launch was withheld there
+because a running Claude session does not reload effort settings and Lachy
+ruled no launch with Fable review below xhigh; the restart handoff
+`docs/handoffs/2026-09-22-claude-pilot-restart.md` was picked up by session
+`9fce5030…`, which owns init, the marker, the heartbeat and the loop. Nothing
+was initialised, merged, installed or released by the preparing session.
+
 **2026-09-22 — thread 2 closed; rollout redesign remains open.** Lachy designated
 **thread 1** as the main project conversation. **thread 3** and Claude's
 **Thread rollout redesign native pilot** continue independently. Read the
@@ -393,6 +410,21 @@ scheduled 2026-07-15.
   it). A content change that matters therefore needs a version BUMP, not just
   a re-run of the update; `diff -rq <cache>/skills skills` is the check.
 
+- **Claude harness facts settled by probes (2026-09-22, Claude Code 2.1.278):**
+  an unknown `subagent_type` spawns a general-purpose child *silently*, so a
+  spawn success never proves a definition applied — read the child transcript's
+  `model`/`effort` fields under `<session>/subagents/`. Definitions dropped into
+  `~/.claude-profiles/<p>/agents/` mid-session are picked up, but only after
+  about two minutes (the harness announces them); their `model` governs, their
+  `effort` does **not** when the profile's `modelSettings.<model>.effortLevel`
+  is set — that per-model value wins for every child. Hooks in a worktree-local
+  `.claude/settings.local.json` hot-reload within a turn; `effortLevel` /
+  `modelSettings` edits do **not** reach a running session (five probes over
+  three minutes). Evidence: `.thread/pilot-claude-2026-09-22/evidence/`.
+- **Three sessions share this worktree** (thread 1 Codex, the Codex pilot lane,
+  the Claude pilot lane). HEAD moved twice under the Claude session in one
+  afternoon. Re-read `git log` before pinning anything; commit by pathspec only.
+
 ## Resume instructions
 
 **Rollout redesign, 22 September 2026:** coordination now belongs to **thread 1**.
@@ -401,6 +433,13 @@ and the current records owned by thread 3 and the native Claude pilot before
 acting. Their work continues independently; do not duplicate dispatch, reuse the
 completed Codex pools, or infer release readiness. The instructions below describe
 the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidate.
+
+**Claude pilot lane, 22 September 2026:** owned by session `9fce5030…` via the
+restart handoff `docs/handoffs/2026-09-22-claude-pilot-restart.md` (consumed;
+that session's close deletes it and restores `modelSettings.claude-fable-5-1.effortLevel`
+to `high`, removes the eight `rollout-*` agent definitions and the local Stop
+hook). Do not initialise a second execution against `.thread/pilot-claude-2026-09-22/`;
+read its `record/` status first if it exists.
 
 0. **Nothing is half-done — the tree is clean and 2.5.1 is shipped.** The
    2026-09-21 four-file batch was reviewed, corrected across two rounds and
@@ -427,6 +466,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-22: Claude pilot lane — consumed the Claude handoff, verified candidate `5d3e40f`, agreed A/B/C with allowances and a pause plan, prepared the private record/verifier/notes, probed hooks (hot-reload yes), agent definitions (model yes, effort no) and effort settings (no reload); withheld launch per the xhigh rule and handed off to a fresh session (`cc8640e`), which consumed it.
 - 2026-09-22: Closed only thread 2 and saved its Claude-pilot agreement/status/evidence handback; thread 1 now leads, thread 3 and Claude continue independently, rollout redesign remains open.
 - 2026-09-21 (latest): consumed the stale 2026-09-17 tier-ceiling review and two further clean-room rounds (12 + 15 findings); round 1 lost to a CLI restart; round 3 hit the ledger's STOP at 60% regressions, so no round 4 — reverted to the root instead (retry budget is now a constant, not arithmetic over max_iterations). Two real engine defects fixed (effort keyed off a lagging event flag; a 1-iteration retry loop at the template default), ADR 0016 §2 amended, Scenarios F and G added, 191 assertions. Shipped 2.5.1 and verified the cache byte-identical — the version-keyed cache is still live and a same-version content change does NOT refresh it. Two findings deferred to § Open questions + vault tasks.
 - 2026-09-21 (later): handed the leftovers off via the first ADR 0017 doc; the consumer consumed the 2026-09-17 round-2 review (af0094f) and left its four-file fix batch uncommitted, no close; this close deleted the consumed handoff doc + the two consumed 2026-09-21 review docs; concurrent-checkout hazard logged (open question + estate METHOD row); ship still pending the cache dance.
