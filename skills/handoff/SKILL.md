@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: 'Fork the current conversation to a fresh agent NOW. Always writes and commits a durable handoff doc at docs/handoffs/YYYY-MM-DD-<slug>.md in the session''s repo (never OS temp) plus a paste-ready prompt; the consumer marks it consumed and its close deletes it. In Codex Desktop a successful handoff also creates a new visible sidebar task seeded with that prompt — a headless session or subagent is never a substitute; elsewhere label it a manual handoff. Trigger ONLY on explicit fork intent — "hand this off", "fork this to a fresh agent", "new session and keep going", /thread:handoff — or on router dispatch (thread:next / thread:orient). Never when "handoff" means people or other systems, never proactively because the context feels long — recommend thread:next instead.'
+description: 'Fork the current conversation to a fresh agent NOW. Always writes and commits a durable handoff doc at docs/handoffs/YYYY-MM-DD-<slug>.md in the session''s repo (never OS temp) plus a paste-ready prompt; the consumer marks it consumed and its close deletes it. In Codex Desktop or a Chorus Session a successful handoff also creates a new visible task seeded with that prompt — a headless session or subagent is never a substitute; elsewhere label it a manual handoff. Trigger ONLY on explicit fork intent — "hand this off", "fork this to a fresh agent", "new session and keep going", /thread:handoff — or on router dispatch (thread:next / thread:orient). Never when "handoff" means people or other systems, never proactively because the context feels long — recommend thread:next instead.'
 argument-hint: "What will the next session focus on?"
 author: Matt Pocock
 license: MIT
@@ -11,7 +11,7 @@ source: https://github.com/mattpocock/skills (skills/productivity/handoff) — a
 
 Compact the current conversation so a fresh agent can continue the work *immediately*.
 
-Every handoff produces two artefacts: a **durable handoff doc**, committed to the repo the session is working in, and a **paste-ready prompt** that points at it. In **Codex Desktop**, the primary outcome is additionally a **new visible sidebar task** that the user can open and interact with; the prompt is the payload used to create that task. The doc is the object Lachy tracks — it is never optional and never lives in OS temp (ADR 0017).
+Every handoff produces two artefacts: a **durable handoff doc**, committed to the repo the session is working in, and a **paste-ready prompt** that points at it. In **Codex Desktop or a Chorus Session**, the primary outcome is additionally a **new visible task** that the user can open and interact with; the prompt is the payload used to create that task. (On the Stage the call raises a Handoff card the listener Starts — an offer, not yet a live Session, which is what the queued `clientThreadId` form of the directive already means; ADR 0047.) The doc is the object Lachy tracks — it is never optional and never lives in OS temp (ADR 0017).
 
 **Invocation gate.** Run this only on explicit fork intent (the user asked for a
 handoff of THIS conversation) or when a router (`next`/`orient`) dispatched it.
@@ -24,7 +24,7 @@ route of the family. Since ADR 0017 a misfire costs one committed doc — and it
 must be removed, not left: a pending doc nobody meant silences the next
 `thread:close`'s continuation tasks for that thread. See § Lifecycle, withdrawn.)
 
-## Success contract in Codex Desktop
+## Success contract in Codex Desktop or a Chorus Session
 
 A handoff is complete only when all of these are true:
 
@@ -120,7 +120,7 @@ When native task creation succeeds, seed the new task with the prompt (the doc p
 
 ## Other hosts
 
-In a host with an equivalent native visible-session creation tool, use that tool and verify the returned session identifier. In a host with no such capability, the doc + prompt manual handoff is allowed only when it is explicitly labelled as a manual handoff; never claim that a new task was created.
+In a host with an equivalent native visible-session creation tool — a Chorus Session serves `create_thread` under the same name — use that tool and verify the returned session identifier. In a host with no such capability, the doc + prompt manual handoff is allowed only when it is explicitly labelled as a manual handoff; never claim that a new task was created.
 
 ## Relationship to the other thread:* routes
 
