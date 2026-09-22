@@ -167,9 +167,9 @@ _Avoid_: second engine.
 
 **Tier**: A model and effort bundle used together for a task's work and review.
 
-**Step-up**: Assigning a stronger starting tier because of the expected difficulty of the task.
+**Step-up**: Assigning a more capable starting tier because of the expected difficulty or consequences of the task. A step-up may increase effort without changing model.
 
-**Escalation**: Moving to a stronger tier in response to evidence encountered during execution.
+**Escalation**: Moving to the next agreed tier in response to substantive quality evidence encountered during execution. It may increase effort or change model; it does not renew allowance or widen authorisation.
 
 **Ceiling**: A resource limit on usable tiers, distinct from a judgement that a task cannot be solved. A ceiling never weakens acceptance or verification requirements.
 

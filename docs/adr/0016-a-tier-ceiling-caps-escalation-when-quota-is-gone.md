@@ -92,3 +92,7 @@ blocks are treated as walls.
 ## Protocol 4 amendment (2026-09-22)
 
 [0020-requirements-and-execution-evidence-have-distinct-authorities](0020-requirements-and-execution-evidence-have-distinct-authorities.md) amends this decision for the new rollout contract. The historical rationale and protocol 3 behaviour above remain unchanged; consult the implementation compatibility guide before execution.
+
+## Shared routing amendment (2026-09-23)
+
+[ADR 0021](0021-shared-effort-first-routing.md) adopts effort-first routing for new policy-bound executions. Status: accepted, implementation pending. The historical behaviour above remains the contract for pinned executions.

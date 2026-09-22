@@ -37,3 +37,7 @@ to think about it*.
   no second stamp is needed. Only an explicit per-task `effort:` override appears in frontmatter.
 - Tuning the matrix means editing the engine, not a rollout note. That is deliberate: the matrix
   encodes a stance (where effort is worth paying), not a per-rollout preference.
+
+## Shared routing amendment (2026-09-23)
+
+[ADR 0021](0021-shared-effort-first-routing.md) adopts effort-first routing for new policy-bound executions. Status: accepted, implementation pending. The historical behaviour above remains the contract for pinned executions.
