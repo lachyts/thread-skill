@@ -531,7 +531,7 @@ Steps:
    superpowers:test-driven-development skill if applicable.
 3. If the task is investigation-first, produce findings, propose a fix ${a.protocolVersion === 4 ? 'in your structured summary' : 'in the task note'}, then implement.
 4. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a)}
-5. If the verifier passed: open a PR${prBaseInstruction(a)} titled \`audit-fix: <task subject>\`. The body must link the task
+5. If the verifier passed: ${implementationPrAction(a, task)}${prBaseInstruction(a)} titled \`audit-fix: <task subject>\`. The body must link the task
    note and explain what changed and why.
 6. Return your structured result: verified, blocked, escalate (as your verification block instructs;
    false otherwise), prUrl, branch, worktreePath (from \`git rev-parse --show-toplevel\`),
@@ -683,7 +683,7 @@ blockerDiagnosis="plan-divergence: <one line>" instead of forging ahead.
 Steps:
 1. Implement the plan (test-first where the plan says so). ${PRIOR_FEEDBACK_NOTE}
 2. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a)}
-3. On verifier pass: open a PR${prBaseInstruction(a)} titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
+3. On verifier pass: ${implementationPrAction(a, task)}${prBaseInstruction(a)} titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
 4. Return your structured result: verified, blocked, escalate (as your verification block instructs; false
    otherwise), prUrl, branch, worktreePath (git rev-parse --show-toplevel), blockerDiagnosis, summary.
 
@@ -805,7 +805,82 @@ function prBaseInstruction(a) {
   return a.baseRef ? ` with explicit \`--base ${shellQuote(a.baseBranch)}\`` : ''
 }
 
+// Only the host's durable, matching same-task retry contract authorises integration.
+// Prior agent prose or a branch merely existing is insufficient. Keep legacy prompts
+// untouched; an unrecognised authority contract retains the strict ancestry check.
+// The emitted shell proves the worktree's derived location against Git's canonical
+// repository root before any write; this sandbox cannot resolve filesystem aliases.
+function adoptedRetry(a, task) {
+  if (a.protocolVersion !== 4 || !task.priorResult) return null
+  let auth
+  try { auth = JSON.parse(a.authorisation) } catch { return null }
+  const prior = task.priorResult, recorded = auth && auth.priorAttempt
+  const actions = auth && auth.authority && auth.authority.allowedActions
+  if (!recorded || !Array.isArray(actions) || !actions.includes('edit') || !actions.includes('commit')
+    || auth.retryPolicy !== 'Reuse the existing task branch and PR. Preserve prior feedback. A changed base requires explicit integration and fresh verification/review; never open a duplicate PR to evade it.'
+    || prior.slug !== task.slug || prior.branch !== `audit-fix/${shortAlias(task.slug)}`
+    || typeof prior.worktreePath !== 'string' || !prior.worktreePath.startsWith('/') || !fullCommit(prior.head)
+    || typeof prior.prUrl !== 'string' || !/^https:\/\/[^/\s]+\/[^/\s]+\/[^/\s]+\/pull\/[1-9]\d*$/.test(prior.prUrl)
+    || ['slug', 'branch', 'worktreePath', 'prUrl', 'head'].some(key => prior[key] !== recorded[key])) return null
+  return prior
+}
+
+function implementationPrAction(a, task) {
+  const retry = adoptedRetry(a, task)
+  return retry ? `update the existing PR ${retry.prUrl}` : 'open a PR'
+}
+
+function retryWorktreeSetup(a, task, retry) {
+  return `First, resume the recorded task branch and explicitly integrate the pinned adopted base if needed.
+Run exactly:
+\`\`\`bash
+set -eu
+REPO=${shellQuote(a.repoPath)}
+WT=${shellQuote(retry.worktreePath)}
+BR=${shellQuote(retry.branch)}
+BASE=${shellQuote(a.baseRef)}
+PRIOR_HEAD=${shellQuote(retry.head)}
+# Resolve the repository spelling before comparing the recorded canonical worktree path.
+[ "$WT" = "$(git -C "$REPO" rev-parse --show-toplevel)"/${shellQuote(`.claude/worktrees/${task.slug}`)} ]
+git -C "$REPO" show-ref --verify --quiet "refs/heads/$BR"
+if [ ! -d "$WT" ]; then
+  git -C "$REPO" worktree add "$WT" "$BR"
+fi
+cd "$WT"
+[ "$(git rev-parse --show-toplevel)" = "$(pwd -P)" ]
+[ "$(pwd -P)" != "$(cd "$REPO" && pwd -P)" ]
+[ "$(git rev-parse --path-format=absolute --git-common-dir)" = "$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir)" ]
+[ "$(git branch --show-current)" = "$BR" ]
+[ -z "$(git status --porcelain)" ]
+for state in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-apply rebase-merge; do
+  [ ! -e "$(git rev-parse --git-path "$state")" ]
+done
+git cat-file -e "$BASE^{commit}"
+git merge-base --is-ancestor "$PRIOR_HEAD" HEAD
+if ! git merge-base --is-ancestor "$BASE" HEAD; then
+  [ "$(git rev-parse HEAD)" = "$PRIOR_HEAD" ]
+  if ! git -c rerere.enabled=false merge --no-ff --no-edit "$BASE"; then
+    git merge --abort
+    exit 1
+  fi
+fi
+git merge-base --is-ancestor "$BASE" HEAD
+git merge-base --is-ancestor "$PRIOR_HEAD" HEAD
+[ -z "$(git status --porcelain)" ]${envBootstrapStep(a)}
+\`\`\`
+Stop on any failed check or integration conflict and return blocked=true with the diagnosis.
+Never reset, rebase, force-push, discard peer edits or replace the recorded branch. The merge above
+is authorised only from the recorded prior head; it preserves that work and integrates ${a.baseRef},
+never a later remote tip. If already integrated, preserve the existing descendant commits.
+Every source read, edit, verifier and PR command must run in this worktree, never the launch checkout
+or planning snapshot. Reuse ${retry.prUrl} against ${a.baseBranch}; do not open a new PR.
+Prior verification and review are stale: commit all changes, obtain fresh commit-bound verification
+and independent review within the existing allowance. Return the same PR URL and branch.`
+}
+
 function explicitWorktreeSetup(a, task) {
+  const retry = adoptedRetry(a, task)
+  if (retry) return retryWorktreeSetup(a, task, retry)
   return `First, enter your isolated implementation worktree at the SAME adopted base used for planning.
 Run exactly:
 \`\`\`bash

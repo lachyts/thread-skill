@@ -180,6 +180,154 @@ test('planning and implementation use the adopted commit even when remote and ro
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
 
+// Execute the emitted entry contract against divergent real Git histories. The regression
+// is the unconditional BASE-ancestor check stopping an authorised same-PR integration.
+function changedBaseFixture(t, { conflict = false } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'thread-changed-base-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  const origin = path.join(dir, 'origin'); fs.mkdirSync(origin)
+  git(origin, 'init', '--initial-branch=trunk')
+  git(origin, 'config', 'user.email', 'test@example.invalid'); git(origin, 'config', 'user.name', 'Test')
+  fs.writeFileSync(path.join(origin, 'shared.txt'), 'original\n')
+  git(origin, 'add', '.'); git(origin, 'commit', '-m', 'original base')
+  const originalBase = git(origin, 'rev-parse', 'HEAD')
+  const repo = path.join(dir, 'repo with spaces')
+  execFileSync('git', ['clone', origin, repo], { stdio: 'pipe' })
+  git(repo, 'config', 'user.email', 'test@example.invalid'); git(repo, 'config', 'user.name', 'Test')
+  const wt = path.join(repo, '.claude/worktrees/project-task'), branch = 'audit-fix/task'
+  git(repo, 'worktree', 'add', '-b', branch, wt, originalBase)
+  fs.writeFileSync(path.join(wt, conflict ? 'shared.txt' : 'task.txt'), 'task work\n')
+  git(wt, 'add', '.'); git(wt, 'commit', '-m', 'existing task work')
+  const priorHead = git(wt, 'rev-parse', 'HEAD')
+  fs.writeFileSync(path.join(origin, conflict ? 'shared.txt' : 'peer.txt'), 'adopted peer work\n')
+  git(origin, 'add', '.'); git(origin, 'commit', '-m', 'peer merged')
+  const baseRef = git(origin, 'rev-parse', 'HEAD')
+  fs.writeFileSync(path.join(origin, 'later.txt'), 'unadopted remote work\n')
+  git(origin, 'add', '.'); git(origin, 'commit', '-m', 'remote moved again')
+  git(repo, 'fetch', 'origin')
+  const priorResult = { ...green, slug: 'project-task', branch, worktreePath: git(wt, 'rev-parse', '--show-toplevel'),
+    head: priorHead, verifiedHead: priorHead, reviewedHead: priorHead, status: 'review' }
+  const authority = { authority: { allowedActions: ['edit', 'test', 'commit', 'push', 'open-pr', 'merge'] },
+    priorAttempt: priorResult,
+    retryPolicy: 'Reuse the existing task branch and PR. Preserve prior feedback. A changed base requires explicit integration and fresh verification/review; never open a duplicate PR to evade it.' }
+  const config = { ...v4, repoPath: repo, baseRef, authorisation: JSON.stringify(authority),
+    ...oneTask({ planGate: false, model: 'fable', priorResult }) }
+  async function enter(overrides = {}) {
+    let setup, head
+    const result = await run({ ...config, ...overrides }, (prompt, opts) => {
+      if (opts.label.startsWith('implement:')) {
+        setup = prompt.match(/```bash\n([\s\S]*?)```/)[1]
+        execFileSync('bash', ['-c', setup], { stdio: 'pipe' })
+        head = git(wt, 'rev-parse', 'HEAD')
+        return { ...priorResult, verifiedHead: head }
+      }
+      return opts.schema.properties.ready ? plan : opts.schema.properties.verdict
+        ? { ...approve, reviewedHead: head } : verified
+    })
+    return { ...result, setup, head }
+  }
+  return { git, repo, wt, branch, originalBase, priorHead, baseRef, priorResult, authority, config, enter }
+}
+
+for (const planGate of [false, true]) {
+  test(`v4 authorised changed-base retry integrates the pinned commit and retains the task branch (planGate=${planGate})`, async (t) => {
+    const f = changedBaseFixture(t)
+    const result = await f.enter(oneTask({ planGate, model: 'fable', priorResult: f.priorResult }))
+    assert.ifError(result.error)
+    assert.equal(result.result.tasks[0].status, 'review')
+    assert.equal(result.result.tasks[0].prUrl, f.priorResult.prUrl)
+    f.git(f.wt, 'merge-base', '--is-ancestor', f.priorHead, 'HEAD')
+    f.git(f.wt, 'merge-base', '--is-ancestor', f.baseRef, 'HEAD')
+    assert.equal(f.git(f.wt, 'branch', '--show-current'), f.branch)
+    assert.equal(fs.readFileSync(path.join(f.wt, 'task.txt'), 'utf8'), 'task work\n')
+    assert.equal(fs.readFileSync(path.join(f.wt, 'peer.txt'), 'utf8'), 'adopted peer work\n')
+    assert.equal(fs.existsSync(path.join(f.wt, 'later.txt')), false, 'later remote movement must not replace the adopted SHA')
+    assert.equal(f.git(f.repo, 'rev-parse', 'HEAD'), f.originalBase, 'launch checkout is unchanged')
+    assert.equal(f.git(f.wt, 'status', '--porcelain'), '')
+    const repeated = await f.enter()
+    assert.ifError(repeated.error)
+    assert.equal(repeated.head, result.head, 're-entry creates no duplicate integration commit')
+  })
+}
+
+for (const suffix of ['/', '/.', '/./']) {
+  test(`v4 changed-base entry resolves canonical worktree identity with repository suffix ${suffix}`, async (t) => {
+    const f = changedBaseFixture(t)
+    const result = await f.enter({ repoPath: f.repo + suffix })
+    assert.ifError(result.error)
+    assert.equal(result.result.tasks[0].status, 'review')
+    f.git(f.wt, 'merge-base', '--is-ancestor', f.priorHead, 'HEAD')
+    f.git(f.wt, 'merge-base', '--is-ancestor', f.baseRef, 'HEAD')
+    assert.equal(f.git(f.wt, 'status', '--porcelain'), '')
+  })
+}
+
+test('v4 changed-base entry rejects a matching durable record for a different worktree location', async (t) => {
+  const f = changedBaseFixture(t), elsewhere = path.join(f.repo, 'elsewhere')
+  f.git(f.repo, 'worktree', 'move', f.wt, elsewhere)
+  const priorResult = { ...f.priorResult, worktreePath: f.git(elsewhere, 'rev-parse', '--show-toplevel') }
+  const result = await f.enter({ ...oneTask({ planGate: false, model: 'fable', priorResult }),
+    authorisation: JSON.stringify({ ...f.authority, priorAttempt: priorResult }) })
+  assert.ok(result.error)
+  assert.equal(f.git(elsewhere, 'rev-parse', 'HEAD'), f.priorHead)
+  assert.equal(f.git(elsewhere, 'status', '--porcelain'), '')
+})
+
+for (const unsafe of ['dirty tracked', 'dirty untracked', 'wrong branch', 'unknown head', 'missing branch', 'conflict']) {
+  test(`v4 changed-base entry rejects ${unsafe} without losing existing work`, async (t) => {
+    const f = changedBaseFixture(t, { conflict: unsafe === 'conflict' })
+    if (unsafe === 'dirty tracked') fs.appendFileSync(path.join(f.wt, 'shared.txt'), 'peer edit\n')
+    if (unsafe === 'dirty untracked') fs.writeFileSync(path.join(f.wt, 'untracked.txt'), 'peer edit\n')
+    if (unsafe === 'wrong branch') f.git(f.wt, 'checkout', '-b', 'someone-else')
+    if (unsafe === 'unknown head') {
+      fs.writeFileSync(path.join(f.wt, 'unknown.txt'), 'unexpected committed work\n')
+      f.git(f.wt, 'add', '.'); f.git(f.wt, 'commit', '-m', 'unknown work')
+    }
+    if (unsafe === 'missing branch') {
+      f.git(f.repo, 'worktree', 'remove', f.wt)
+      f.git(f.repo, 'branch', '-D', f.branch)
+    }
+    const before = unsafe === 'missing branch' ? null : {
+      head: f.git(f.wt, 'rev-parse', 'HEAD'), status: f.git(f.wt, 'status', '--porcelain'),
+      shared: fs.readFileSync(path.join(f.wt, 'shared.txt'), 'utf8') }
+    const result = await f.enter()
+    assert.ok(result.error, 'unsafe entry must stop before implementation/verification')
+    if (before) {
+      assert.equal(f.git(f.wt, 'rev-parse', 'HEAD'), before.head)
+      assert.equal(f.git(f.wt, 'status', '--porcelain'), before.status)
+      assert.equal(fs.readFileSync(path.join(f.wt, 'shared.txt'), 'utf8'), before.shared)
+      assert.throws(() => f.git(f.wt, 'rev-parse', '--verify', 'MERGE_HEAD'), 'no unfinished integration survives a failed entry')
+    } else {
+      assert.equal(fs.existsSync(f.wt), false, 'a retry never silently replaces its missing branch')
+      assert.throws(() => f.git(f.repo, 'show-ref', '--verify', 'refs/heads/' + f.branch))
+    }
+  })
+}
+
+for (const invalid of ['protocol3', 'no prior', 'malformed authority', 'no retry policy', 'no commit authority',
+  'different task', 'different branch', 'different worktree', 'different PR', 'different head']) {
+  test(`changed-base integration requires matching durable retry context: ${invalid}`, async (t) => {
+    const f = changedBaseFixture(t)
+    const authority = JSON.parse(JSON.stringify(f.authority)), overrides = {}
+    if (invalid === 'protocol3') overrides.protocolVersion = 3
+    if (invalid === 'no prior') Object.assign(overrides, oneTask({ planGate: false, model: 'fable' }))
+    if (invalid === 'no retry policy') delete authority.retryPolicy
+    if (invalid === 'no commit authority') authority.authority.allowedActions = ['edit']
+    if (invalid === 'different task') authority.priorAttempt.slug = 'another-task'
+    if (invalid === 'different branch') authority.priorAttempt.branch = 'another-branch'
+    if (invalid === 'different worktree') authority.priorAttempt.worktreePath = f.repo
+    if (invalid === 'different PR') authority.priorAttempt.prUrl = 'https://github.com/owner/repo/pull/2'
+    if (invalid === 'different head') authority.priorAttempt.head = f.baseRef
+    overrides.authorisation = invalid === 'malformed authority' ? '{broken' : JSON.stringify(authority)
+    const result = await f.enter(overrides)
+    assert.ok(result.error, 'unrecognised retry authority retains the strict ancestry check')
+    assert.equal(f.git(f.wt, 'rev-parse', 'HEAD'), f.priorHead)
+    assert.equal(f.git(f.wt, 'status', '--porcelain'), '')
+  })
+}
+
 test('v4 rejects release-gate overrides and keeps durable approved gates authoritative', async () => {
   const binding = v4
   const invalid = await run({ ...binding, ...oneTask({ ignoreGate: true }) })
