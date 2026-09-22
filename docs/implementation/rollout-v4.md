@@ -1,11 +1,11 @@
 # Task-ready rollout implementation
 
-Status: implementation in progress; not a claim of live unattended support.
+Status: implementation candidate reviewed and fixture-tested; live unattended acceptance and release remain pending.
 Decision basis: [glossary](../../CONTEXT.md), [ADR 0018](../adr/0018-preparation-delegates-within-rollout-authorisation.md), [ADR 0019](../adr/0019-task-readiness-governs-progress.md), [ADR 0020](../adr/0020-requirements-and-execution-evidence-have-distinct-authorities.md).
 
 ## Contract and preparation
 
-Protocol 3 remains the existing wave-barrier runtime. Protocol 4 is explicit and uses a durable project record, one task-level invocation of the same `wave-execute.workflow.js`, the shared native Workflow adapter and the existing `merge-wave.sh`. It never feeds v4 state to the v3 cursor or silently upgrades a live rollout. A release pins engine, native adapter and merger bytes per execution; changing installed source does not change a running execution.
+Protocol 3 remains the existing wave-barrier runtime. Protocol 4 is explicit and uses a durable project record, one task-level invocation of the same `wave-execute.workflow.js`, the shared native Workflow adapter and the existing `merge-wave.sh`. It never feeds v4 state to the v3 cursor or silently upgrades a live rollout. A release pins host, state transitions, engine, native adapter and merger bytes per execution; changing installed source does not change a running execution.
 
 Preparation captures repository identity, base branch, verifier, outcomes, acceptance checks, constraints, permitted actions, reserved decisions, preapproved gates and merge-triggered effects. It resolves the repository and fetched base and runs the verifier on an isolated clean base before workers begin. An unrecognised deployment/publication consequence blocks launch until covered. Scope stays one repository and PR-shaped machine-verifiable tasks.
 
@@ -15,7 +15,11 @@ The preparation interview asks about consequential trade-offs, not every impleme
 
 The project record owns authorisation, execution IDs, task membership, adopted requirement snapshots, attempts, allowances, approvals, current outcome validity and merge evidence. Source task notes own requirements. Derived note statuses are projections, never merge evidence. Requirement fingerprints exclude machine-owned progress only when an explicit parser can distinguish it; otherwise an edit requires assessment, never silent adoption.
 
+The initial implementation fingerprints complete source notes. Its lead projects progress into a separate Obsidian rollout note from the host's status view, leaving source requirements unchanged. This avoids interpreting the system's own progress writes as requirement revisions; an interrupted projection is refreshed from the authoritative record on the next wake.
+
 Each mutation uses a private atomic record under an exclusive process lock. The record carries an owner (harness, account and session) and monotonically increasing ownership epoch. A recovered owner must reconcile every claimed/dispatched native child before redispatch. Same harness/account is required; old epochs are fenced. Lost spawn responses are ambiguous and consume capacity until resolved, not invitations to spawn twice. A local host outage leaves evidence intact; an expired timestamp alone proves neither termination nor failure.
+
+The repository merge lease additionally checkpoints the subprocess group before releasing a start gate. Parent-liveness loss stops that group, and recovery requires it to be stopped before releasing the lease. A local process death still leaves any GitHub outcome uncertain; every durable merge intent stays held until remote evidence and its domain transition are recorded.
 
 The native adapter remains the only interpreter of canonical Workflow requests. The lead claims before native spawn, binds the actual native child ID immediately, waits using native tools, then accepts the attested structured result. Independent stages use independent children. No standalone model process, cross-account switch or quota purchase is allowed. A suitable same-account binding may be substituted only in a new immutable attempt segment with cumulative allowance preserved.
 
@@ -27,6 +31,8 @@ Readiness requires: membership in the requested scope, unsatisfied current outco
 
 Each converged task is processed immediately. The merger is serial per repository, binds repository/base/head, observes the actual merge and preserves queue-pending state. Approval is tied to requirement revision, authority, verifier, fetched base, dependency evidence and PR head. Any change invalidates stale approval. A successful queue admission never marks complete or deletes its branch.
 
+A superseded queued PR remains in flight until observed closed or merged. It cannot silently drain into a replacement. A later actual landing is recorded against its historical approval and revision, verified, and triggers current-outcome revalidation without claiming completion.
+
 Normal pause stops admitting new tasks while active attempts finish bounded work and may merge. Immediate stop fences new claims and merges and asks the native host to interrupt active children. Both require explicit reinstatement. Quota loss cannot lower quality gates. Exhaustion blocks a task; an execution ends partial only after no ready task and no evidenced in-flight activity remain. The rollout remains open while any required outcome is unsatisfied.
 
 ## Recovery and changed requirements
@@ -34,6 +40,8 @@ Normal pause stops admitting new tasks while active attempts finish bounded work
 Before each admission and merge, compare the source requirement fingerprint. The lead assesses edits against existing authority; approved adoption saves a new immutable revision and invalidates its old review/completion and dependent completion. Out-of-authority edits hold the affected work pending a new user decision; the original permission never grows by editing a note.
 
 A post-merge regression holds merging for that repository. Bounded repair uses the same engine and remaining task allowance; if it cannot repair, a safe revert of attributable execution-owned changes is independently checked, preserving peer work. Revert evidence remains in history and invalidates outcomes of affected tasks and dependants. If neither repair nor safe revert is possible within authority, retain the hold and report the specific blocker.
+
+When preparation authorises reverting run-owned changes, the host reserves two native calls and three verifier runs inside each original pool for that fallback. This reduces the allowance available for ordinary convergence and repair; it does not grant extra work. The fallback still uses the canonical engine, a fresh independent reviewer and the canonical merger. An isolated Git revert tree must match the reviewed candidate exactly. Actual reversal relationships are retained even if integration verification fails or the rollback was superseded while queued.
 
 Explicit relaunch of an ended execution grants fresh finite allowances only to requested unfinished tasks. Prior executions and their spent allowances remain immutable history. Restart, heartbeat, owner transfer, pause/resume and a source edit never invoke relaunch.
 

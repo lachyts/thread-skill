@@ -12,3 +12,7 @@ __pycache__/
 # Local plugin/worktree scratch (never belongs in the repo)
 .claude/worktrees/
 .claude/merge-wave.status
+
+# Durable local rollout records contain task requirements and native evidence
+.thread/
+.claude/merge-wave.result.json

@@ -13,6 +13,10 @@ It is **read-only** — it never stamps frontmatter, never merges, never dispatc
 finds, that's `/thread:repair` (the conductor) or `/thread:execute` (resume). This skill is the diagnosis;
 those are the treatment.
 
+## Protocol 4 routing
+
+For `protocol_version: 4`, read the linked execution record with `node <plugin>/skills/execute/scripts/rollout-host.mjs status <record-directory>` and report its summary fields: execution state separately from rollout completion, ready tasks, evidenced active work, blockers, remaining allowances and assessment holds. Inspect current PR evidence read-only where needed. Never infer completion from a wave cursor or task-note status. Follow [the v4 contract](../execute/protocol-v4.md); the procedure below remains protocol 3.
+
 ## Scope
 
 Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` (older undated `<slug>-rollout` notes
@@ -43,7 +47,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py status --
 ```
 
 Returns JSON: `{ rollout, rolloutStatus, paused, pause_requested, merged_through_wave, total_waves,
-timeline, tasks: [{ slug, wave, status, pr, blockerSummary }] }` — **every** task carrying
+timeline, tasks: [{ slug, wave, status, pr, blockerSummary, tier_capped, next_model, next_model_reason }] }` — **every** task carrying
 `rollout: [[<slug>]]` (glob-by-backlink, so read-only tasks the `## File-sets` block omits are still
 included), sorted by wave then slug. Pure read, no network. `paused` is the pause stamp's timestamp
 (null when not paused); `pause_requested` is true when a soft pause is pending and will take effect at
@@ -142,3 +146,5 @@ polling a finished rollout. The loop watches and recommends; it never triggers `
 - **Don't parse the rollout's markdown wave table** for the task list — use the `status` subcommand's
   glob-by-backlink (it catches read-only tasks the table/`## File-sets` block omit).
 - **Don't make more than one `gh` call per PR'd task.** Status is a glance; keep it cheap.
+
+When `tier_capped` is true, label the block resource-constrained. It is not evidence that the strongest permitted approach was tried and failed.

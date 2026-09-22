@@ -15,6 +15,10 @@ re-attempts blocked tasks — so repair **reuses execute's resume** and adds onl
 re-running execute can't do: reconcile **drift**, inject an **input-gated** decision, and **defer** a
 wedged task. It never re-implements merge or convergence, and **the engine keeps sole merge authority**.
 
+## Protocol 4 routing
+
+For `protocol_version: 4`, use [protocol-v4.md](../execute/protocol-v4.md) and the durable record. Diagnose and recover existing ownership/children before retrying through execute. Uncertainty within delegated authority is an agent decision; record it and obtain independent review. Missing authority holds only affected tasks and dependants. Revisions, prerequisites and retries spend the same execution allowance; exhaustion needs explicit relaunch of unfinished scope. Normal pause drains active work; repair never silently clears it. Do not use the protocol 3 cursor, note approvals or retry procedure below for a v4 record.
+
 ## Native runtime binding
 
 Diagnosis and authorised deterministic reconciliation run in either harness.
@@ -71,6 +75,7 @@ For every task whose note status is not `done`, classify from its `blockerSummar
 |---|---|---|
 | **landed-unconfirmed** | `review` with an open PR | none here — execute's resume merges + `mark-done`s it |
 | **drift** | `review-blocked`/`blocked` whose PR is verified **MERGED** | reconcile to done now (step 3a); never re-dispatch |
+| **resource-constrained** | `tier_capped: true` and no confirmed merge | retain cap provenance; choose a suitable available same-account binding within remaining allowance, or report the resource block; never label it a genuine wall |
 | **agent-fixable** | `blocked`/`plan-blocked`/`review-blocked`, PR not merged, feedback an agent can act on (test failure, missed case, concrete review note) | auto-retry via execute (step 4), no user input |
 | **input-gated** | feedback signals a human decision — "human-decided", "supplied out-of-band", "needs a value", "ambiguous", "design choice" | ask you + inject (step 3b) |
 

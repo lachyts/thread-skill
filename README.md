@@ -13,6 +13,12 @@ machine-verifiable in-run) rolls out; everything else runs as scoped sessions.
 > (`lachyts/wave-skill`, now archived). "Wave" lives on as the domain term —
 > rollouts still have waves — but the namespace is `/thread:*` throughout.
 
+## Rollout redesign status
+
+The accepted model now separates rollout outcomes, bounded executions and planning waves. [ADRs 0018–0020](docs/adr/0018-preparation-delegates-within-rollout-authorisation.md) record delegated authorisation, task readiness and evidence ownership; the [implementation specification](docs/implementation/rollout-v4.md) and [compatibility gate](docs/implementation/rollout-compatibility.md) track delivery.
+
+Protocol 3 remains the supported legacy wave contract. Protocol 4 is an explicit development pilot using the same convergence engine and merger with a durable task-level host. Do not claim unattended support in either harness until its live acceptance is recorded. The new host never migrates an existing record implicitly.
+
 ## Continuity verbs
 
 | Member | Moment | What it does |
@@ -46,7 +52,7 @@ shared source and skill discovery do not provide that runtime.
 
 ## The convergence engine
 
-`skills/execute/wave-execute.workflow.js` runs **three layers per task**,
+`skills/execute/wave-execute.workflow.js` runs **three layers per code-changing task**,
 converging tasks **in parallel within each wave**:
 
 1. **Plan-gate** — an autonomous judge approves the implementation plan before
@@ -56,6 +62,8 @@ converging tasks **in parallel within each wave**:
    verifier and self-corrects until green or the iteration budget is spent.
 3. **Master review-and-revise** — a master-side reviewer accepts or sends the
    task back with feedback, up to `max_review_rounds`.
+
+The legacy read-only investigator path returns its own findings without a master-review judge.
 
 Worktree isolation is explicit: each task runs in
 `<repoPath>/.claude/worktrees/<slug>`. Merges go **only** through

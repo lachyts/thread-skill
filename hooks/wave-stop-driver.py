@@ -24,6 +24,7 @@ second, coarser floor). State lives per-session under
 import json
 import os
 import re
+import runpy
 import sys
 
 MAX_BLOCKS_WITHOUT_PROGRESS = 3
@@ -142,6 +143,21 @@ def main():
         return
 
     slug, cursor, total, state = m["slug"], int(m["k"]), int(m["n"]), m["state"]
+
+    # A session has one active rollout lifecycle. A later v4 marker must prove
+    # private durable ownership before it can supersede this legacy fallback.
+    # Load only the installed sibling helper, never a path from the marker.
+    try:
+        v4 = runpy.run_path(os.path.join(os.path.dirname(os.path.realpath(__file__)), "rollout-stop-driver.py"))
+        superseded = v4["supersedes_wave"](payload)
+    except (OSError, ValueError, KeyError):
+        superseded = False
+    if superseded:
+        driver = load_state(session_id)
+        if slug in driver:
+            del driver[slug]
+            save_state(session_id, driver)
+        return
 
     if state == "waiting":
         return

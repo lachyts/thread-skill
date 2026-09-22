@@ -1,0 +1,32 @@
+{
+  "protocolVersion": 4,
+  "rolloutId": "example-rollout-2026-09-22",
+  "repository": {
+    "path": "/absolute/project/repository",
+    "identity": "github.com/owner/repository",
+    "baseBranch": "master",
+    "verifier": "npm test"
+  },
+  "authority": {
+    "outcomes": ["Deliver the agreed feature with existing behaviour preserved"],
+    "constraints": ["One repository; no paid services or account switching"],
+    "allowedActions": ["edit", "test", "open-pr", "merge"],
+    "reservedDecisions": ["Any change to the agreed product outcome"],
+    "gates": [],
+    "mergeEffects": [],
+    "evidence": "Replace with the user's actual authorisation and its context"
+  },
+  "tasks": [
+    {
+      "id": "example-task",
+      "sourcePath": "/absolute/obsidian/Work/Tasks/example-task.md",
+      "requirements": "Replace with the exact task note text at preparation",
+      "acceptance": ["Verifier passes and an independent reviewer approves the exact commit"],
+      "dependsOn": [],
+      "conflicts": [],
+      "scope": "cross-cutting",
+      "planGate": true,
+      "allowance": {"calls": 32, "verifierRuns": 32, "recoveries": 2}
+    }
+  ]
+}

@@ -9,7 +9,15 @@ A **wave plan** groups a backlog of related Obsidian tasks into parallel-safe wa
 
 This skill is the **planner**. The rollout note it produces is a data artefact — the dispatch + convergence contract lives in the sibling **`/thread:execute`** skill (`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`).
 
-## Scope
+## Choose the contract before following this skill
+
+The default template remains protocol 3 until the [compatibility gate](../../docs/implementation/rollout-compatibility.md) has real native acceptance evidence. For an explicitly requested protocol 4 pilot, **route to [protocol-v4.md](../execute/protocol-v4.md) and return before the legacy flow below**. Its preparation process replaces this skill's mutation steps. Use grill-with-docs to settle outcomes, acceptance checks, constraints, reserved decisions, permitted merge effects and bounded allowances before launch. Record domain changes in CONTEXT and consequential choices in ADRs.
+
+Capture dependencies as required outcomes and conflicts as concurrency exclusions. Include shared generated files, package manifests/lockfiles and initialisation scaffolding in conflict analysis. Waves are a provisional view for this contract, never barriers. Persist a separate v4 preparation record and link it from the rollout note; do not change a live v3 note's protocol.
+
+The v4 route may reuse the read-only discovery methods below: finding task notes, inspecting file scope, discovering verifier/bootstrap commands and identifying dependency or authority questions. It must not run the legacy affinity-folding, model stamping, wave assignment, v3 rollout creation or task stamping steps. Its task requirements still come from Obsidian; its private project execution record is deliberately outside the legacy “Obsidian only” write scope. Neither route dispatches tasks during scheduling.
+
+## Legacy protocol 3 scope
 
 **Obsidian only.** Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
 
@@ -252,6 +260,15 @@ Render each task reference as `[[<full-slug>|<short-alias>]]` in the wave-struct
 
 ### 7. Update each task's frontmatter
 
+For a previously clean-deferred task selected for explicit re-scheduling, first run:
+
+```sh
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py reschedule --tasks <slug> --rollout <new-rollout-note> --wave <N>
+```
+
+This retires the defer tombstone and stamps renewed membership, preserving generation and delivery history. It accepts protocol 3 only; protocol 4 membership belongs to its durable record. Continue with the remaining scope/config fields below. Never clear the tombstone during ordinary resume.
+
+
 For each task in the rollout:
 
 - Add `wave: <N>` (or update if `--regenerate`)
@@ -335,3 +352,5 @@ The GifLab backlog is a good fixture because it exercises both a merge and a del
 - **KEEP SEPARATE (guard fires):** the `composite_quality` trio `giflab-composite-quality-bare-vs-mean-key-mismatch` + `giflab-composite-quality-nan-guard` + `giflab-temporal-consistency-composite-quality-fix`. They share `enhanced_metrics.py`, but the nan-guard task calls the per-frame task *"independent changes to different callsites"* and scopes the temporal task out — explicit-independence hard block. Stay serialised across waves.
 - Members of the two merges end up `status: merged` + `merged_into:`, with **no `wave:`**; a second `--regenerate` skips them (step 1).
 - Wave count drops from ~9 to ~6 (the two merges save three waves).
+
+For identity-bearing results after explicit re-scheduling, supply a generation higher than the retained `reconcile_generation`, with the new execution result identity.

@@ -119,5 +119,55 @@ assistant_line "WAVE-STATUS: demo2 cursor=0/4 state=running" > "$T"
 run_driver_msg "wave 1 merged, all good" "$T" s13
 echo "$OUT" | grep -q '"decision": "block"' && ok "forgetting net: transcript running still blocks" || fail "forgetting net: expected block, got: $OUT"
 
+# --- 14. only a newer, owned durable v4 marker supersedes legacy driving ---
+python3 - "$DRIVER" "$TMP" <<'PY'
+import json, os, pathlib, subprocess, sys
+driver, tmp = sys.argv[1:]
+record = pathlib.Path(tmp) / 'v4 record'
+record.mkdir(mode=0o700)
+state = {'protocolVersion': 4, 'execution': {'id': 'v4-id', 'status': 'running',
+         'owner': {'harness': 'claude', 'account': 'test', 'session': 'mixed-session'}}}
+state_path = record / 'state.json'
+def save():
+    state_path.write_text(json.dumps(state))
+    state_path.chmod(0o600)
+save()
+wave = 'WAVE-STATUS: legacy cursor=0/3 state=running'
+marker = 'THREAD-EXECUTION: ' + json.dumps({'record': str(record), 'execution': 'v4-id'})
+transcript = pathlib.Path(tmp) / 'mixed.jsonl'
+def history(*messages):
+    transcript.write_text(''.join(json.dumps({'type': 'assistant', 'message': {'content': text}}) + '\n' for text in messages))
+def run(message):
+    payload = {'session_id': 'mixed-session', 'last_assistant_message': message, 'transcript_path': str(transcript)}
+    result = subprocess.run([sys.executable, driver], input=json.dumps(payload), text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout) if result.stdout.strip() else {}
+history(wave)
+assert run('ordinary reply').get('decision') == 'block'
+assert run(marker) == {}, 'owned v4 marker must suppress stale v3 fallback'
+counter = pathlib.Path(os.environ['WAVE_DRIVER_STATE_DIR']) / 'mixed-session.json'
+assert 'legacy' not in json.loads(counter.read_text()), 'superseded v3 counter must be cleared'
+history(wave, marker)
+assert run('ordinary reply') == {}, 'newest valid transcript lifecycle wins'
+assert run(wave).get('decision') == 'block', 'new v3 marker must preserve v3 behavior'
+history(wave)
+assert run('THREAD-EXECUTION: {broken').get('decision') == 'block', 'malformed marker has no authority'
+state['execution']['owner']['session'] = 'different-session'
+save()
+assert run(marker).get('decision') == 'block', 'wrong owner must not disable v3'
+# Reset only the test counter; every remaining invalid case must still exercise blocking.
+for change in [lambda: state.update(protocolVersion=3),
+               lambda: state['execution']['owner'].update(harness='codex'),
+               lambda: state['execution'].update(id='different-execution')]:
+    counter.unlink(missing_ok=True)
+    state['protocolVersion'] = 4
+    state['execution'].update(id='v4-id')
+    state['execution']['owner'].update(harness='claude', session='mixed-session')
+    change(); save()
+    assert run(marker).get('decision') == 'block', 'invalid v4 record must not suppress v3'
+print('ok   - mixed lifecycle markers use private v4 state and actual session authority')
+PY
+if [ "$?" -ne 0 ]; then fail "mixed lifecycle marker routing"; fi
+
 rm -rf "$TMP"
 if [ "$FAILURES" -eq 0 ]; then echo; echo "ALL PASS"; else echo; echo "$FAILURES FAILURE(S)"; exit 1; fi
