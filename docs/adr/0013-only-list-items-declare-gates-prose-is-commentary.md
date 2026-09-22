@@ -73,3 +73,7 @@ contract — only clean bullet text ever reaches "## Approved gates".
 - `reconcile-wave.py` (`cmd_approve_gates`, the pending section) is untouched:
   it parses the machine-written section reconcile itself emits from the
   engine's `gatedInputs` array, which is always bullets.
+
+## Protocol 4 amendment (2026-09-22)
+
+[0018-preparation-delegates-within-rollout-authorisation](0018-preparation-delegates-within-rollout-authorisation.md) amends this decision for the new rollout contract. The historical rationale and protocol 3 behaviour above remain unchanged; consult the implementation compatibility guide before execution.

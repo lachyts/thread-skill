@@ -88,3 +88,7 @@ Escalation. The skill resolves `max_tier` from rollout frontmatter into `args.ma
 the knob is reachable through the documented dispatch path rather than by hand-editing a
 tool call. A rollout that ran capped should be re-read with `tierCapped` in mind before its
 blocks are treated as walls.
+
+## Protocol 4 amendment (2026-09-22)
+
+[0020-requirements-and-execution-evidence-have-distinct-authorities](0020-requirements-and-execution-evidence-have-distinct-authorities.md) amends this decision for the new rollout contract. The historical rationale and protocol 3 behaviour above remain unchanged; consult the implementation compatibility guide before execution.

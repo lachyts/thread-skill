@@ -41,3 +41,7 @@ weakening zero-touch autonomy where autonomy is safe.
   agent-fixable evidence that the implementation ignored its contract.
 - The cap in a spend gate is a ceiling the implementer must respect, not a target; blowing it is a
   verifier/review failure, not a re-ask.
+
+## Protocol 4 amendment (2026-09-22)
+
+[0018-preparation-delegates-within-rollout-authorisation](0018-preparation-delegates-within-rollout-authorisation.md) amends this decision for the new rollout contract. The historical rationale and protocol 3 behaviour above remain unchanged; consult the implementation compatibility guide before execution.

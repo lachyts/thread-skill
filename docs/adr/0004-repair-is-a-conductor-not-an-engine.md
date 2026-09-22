@@ -24,3 +24,7 @@ work. A repair that owned fix logic would duplicate the convergence loop and ris
   must have verified the PR merged). `mark-done` still refuses anything not at `review`.
 - A trivial fix (e.g. filling one placeholder value) pays for a full re-dispatch + re-review rather than a
   one-line patch. Accepted as the price of not duplicating the engine and not bypassing review.
+
+## Protocol 4 amendment (2026-09-22)
+
+[0020-requirements-and-execution-evidence-have-distinct-authorities](0020-requirements-and-execution-evidence-have-distinct-authorities.md) amends this decision for the new rollout contract. The historical rationale and protocol 3 behaviour above remain unchanged; consult the implementation compatibility guide before execution.

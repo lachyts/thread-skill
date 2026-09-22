@@ -62,3 +62,7 @@ that the engine must live in a separate namespace — is superseded.
   `wave--v1.4.1` and archived.
 - Every external `/wave:*` reference (AGENTS.md, shared writer specs,
   parity checker, vault notes, memories) swept in the same cutover.
+
+## Protocol 4 amendment (2026-09-22)
+
+[0019-task-readiness-governs-progress](0019-task-readiness-governs-progress.md) amends this decision for the new rollout contract. The historical rationale and protocol 3 behaviour above remain unchanged; consult the implementation compatibility guide before execution.
