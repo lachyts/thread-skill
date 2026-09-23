@@ -1,55 +1,103 @@
 ---
 thread: thread-skill
 written: 2026-09-22
+refreshed: 2026-09-23
 status: pending
+scope: Resume the paused rollout redesign by resolving native review-contract and evidence gaps before further acceptance or release.
 ---
 
-# Claude protocol 4 pilot: independent audit, then the release decision
+# Rollout redesign: resume after the Claude review-path check
 
-Manual handoff written at a session safepoint after `thread:close`. The native Claude pilot is finished and every record is committed; what remains is the audit that the Codex slice already received, and a decision only Lachy can make.
+**Paused at Lachy’s explicit request on 23 September 2026.** This is the single
+continuation for coordinator task `thread 1`. It does not launch another session,
+renew a spent allowance or authorise a live rollout. The earlier audit/release
+handoff was overtaken by reviewed corrections and subsequent native findings;
+its original form remains in Git history.
 
 ## Done and verified
 
-- Native Claude session `9fce5030-d194-4c32-a286-5a9705505228` ran execution `db955f02-9692-4777-afcb-48645277ba5f` (candidate `5d3e40f`, adapter `0cdc433`) to `ended`, `rolloutComplete: true`. PRs [#18](https://github.com/lachyts/agent-reader/pull/18) → `2a1ef647`, [#19](https://github.com/lachyts/agent-reader/pull/19) → `dca45b0e`, [#20](https://github.com/lachyts/agent-reader/pull/20) → `19bf1ac8`, each squash-merged by the pinned merger after fresh `claude-fable-5-1` review at `xhigh` and post-merge verifier exit 0. Spent A 8/13/0, B 4/7/0, C 2/4/0 of 8/16/2.
-- Observed and recorded: profile effort governs children in a fresh session (Fable at xhigh); draining pause → `paused`; heartbeat read `paused` and deleted itself; one recorded one-shot coordinator resume with allowances unchanged; five real session-cron deliveries; the corrected changed-base entry recovering three consecutive base movements unattended; a review-requested revision round; immediate dependent admission; Stop hook firing at every turn end; five out-of-schema child outputs rejected at the host boundary and re-emitted validly by the same bound children.
-- Written and committed: report section `docs/implementation/2026-09-22-live-pilot.md` § Native Claude slice (`2b11d8c`); `THREAD.md` state, quirks, resume (`2b11d8c`, pointer `be577fb`); R-WAVE ledger entry in the adapter worktree `/Users/lachlants/.codex/worktrees/thread-native-recovery` (`d38a6ec`); estate METHOD candidates K62–K63 (`401a8c2` in `~/repos/workspaces`); vault rollout note `agent-reader-claude-pilot-rollout-2026-09-22` (status done) and acceptance task `thread-rollout-v4-native-acceptance` § Claude live evidence (Obsidian Sync; git sweep later).
-- Private record and evidence: `.thread/pilot-claude-2026-09-22/` (gitignored, mode 700): `approval.json`, `preparation.json`, `config.json`, `payloads/`, `outputs/` (every host call and raw child output), `evidence/*.json`, `record/` (authoritative state and pinned release).
-- Close-out done: `modelSettings.claude-fable-5-1.effortLevel` restored to `high` (file hash equals the pre-edit hash `25c034d9…`); the eight `rollout-*` agent definitions and `.claude/settings.local.json` removed; both consumed handoff docs deleted (`31b1c1c`, `deafb5d`).
+- The original Claude pilot audit is complete; see
+  `docs/audits/2026-09-23-claude-pilot-independent-audit.md`. Earlier successful
+  merges do not validate the later routing/review contract.
+- Shared routing and the pilot corrections were implemented and reviewed. The
+  latest reviewed Thread runtime is `db18cb467172861fa8d626b318561d724dcf0a2a`;
+  shared adapter is `214aee11a52fe6d1d20759681db4cb664ffe2b29` at
+  `/Users/lachlants/.codex/worktrees/thread-native-recovery`. Delivery and local
+  test results: `docs/implementation/2026-09-23-claude-review-correction.md`.
+- Codex task `thread 4` completed its five native probes at `8c5980b`, then its
+  separately bounded preparation correction at `150504df`. Its ten local verifier
+  invocations are spent. Audit/review records are in this candidate’s docs.
+- Claude’s original five capability probes completed at `4a1dd06`. The later
+  review-path check used all six of its separate slots. Its report and evidence
+  index are saved, untracked, in `docs/implementation/2026-09-23-claude-review-path-check-*`.
+  Read `THREAD.md`’s latest checkpoint for the coordinator’s qualifications and
+  interrupted independent collection-helper audit. All 122 indexed hashes and
+  all six original native child transcripts were checked; no new probe followed.
+- Claude pilot verifier v2’s twelve deterministic preparation invocations are
+  spent; its versioned packet and tested bytes remain unchanged. No proposed
+  Codex or Claude pilot has been initialised or merged. No candidate is installed
+  or released. The routing monitor is paused; thread 3 stays archived.
 
 ## What remains
 
-1. **Independent audit of the Claude slice**, mirroring thread 3's audit of the Codex slice (`bd04272`, `docs/audits/2026-09-22-*`). A fresh reviewer child (not this session's lineage) checks the report section against the private record: every merge in `record/state.json` `host.merges` matches GitHub; every child ID in `outputs/bind-*.json` has a transcript under the session's `subagents/`; every accepted envelope's output equals the child's final transcript text; pinned release hashes equal `evidence/launch-hashes.json`; the three source task notes still match their adopted snapshots. Record the audit under `docs/audits/` and disposition any finding.
-2. **Coordinate with thread 1** (the main project conversation) before acting further; thread 3 continues independently. Do not duplicate dispatch, re-initialise or relaunch execution `db955f02…`, and never reuse either pilot's pools.
-3. **Lachy's release decision.** Both harness slices now have real unattended evidence; the remaining acceptance cases are listed in the acceptance task (real Stop-driver block, A merged while B held solely by pause, cold/ambiguous recovery, revisions/prerequisites, partial ending, relaunch, revert). Present the two options plainly: release on current evidence, or run a further bounded slice for named cases with fresh finite authority. If he says release: integrate the shared adapter and Thread candidate, bump both Thread plugin manifests together, run the cache dance and verify installed cache hashes per the acceptance task; keep active v3/v4 executions pinned.
-4. **Candidate contract finding to raise, not fix silently:** children add out-of-schema keys about a third of the time; the preamble should name the exact allowed keys. And the allowance model should treat base movement as a cost (K62).
-5. Housekeeping Lachy may want: close source task notes `agent-reader-claude-pilot-{a,b,c}` (still `status: open`, untouched because they were fingerprinted); the session-only heartbeat cron `efc4721b` dies with the session.
+1. **Resume with the contract decision, not another probe.** Re-read CONTEXT.md,
+   shared routing policy/ADR and Thread ADRs 0021–0022 against the actual native
+   findings. `/code-review xhigh` fixes the fork’s effort at xhigh; native `max`
+   uses a fan-out recipe. Preserve Lachy’s maximum-effort intent. Determine whether
+   every descendant can be bounded, reserved, observed and recovered under one
+   cumulative allowance before proposing a supported maximum route. Do not simply
+   change the command, suppress built-in children, accept lower effort as max or
+   weaken verification. Record any necessary contract departure explicitly in an
+   ADR before implementation; an exception to a user choice needs that choice.
+2. **Specify and correct dispatch/results.** Use evidence to settle plain-subagent
+   versus named-teammate behaviour, exact native delivery, process termination and
+   the definition of concurrent capacity. Preserve the original findings bytes
+   separately from any structured verdict; make retention checkable. Keep review
+   code/brief separate from answer keys and private coordinator evidence. The
+   previous accepted adapter envelope alone is not full prompt or isolation proof.
+3. **Finish the interrupted helper audit and version corrections.** The known
+   schema, ledger-transition, transport/handback and self-hash findings are captured
+   in THREAD.md. Do not rerun or edit the old private helpers/packet in place.
+   Collect the existing reviewer’s remaining status if available only after work
+   is resumed, and distinguish preliminary findings from a completed audit.
+4. **Record the completed check accurately.** Qualify pair 1’s “end to end” claim,
+   preserve the report/index, update the acceptance matrix and reviewed design,
+   and commit the two peer-authored report files only under the resumed work’s
+   explicit file scope. The current source fixes remain fixture-tested; native
+   maximum review and host receipt capture remain incomplete.
+5. **Native cleanup and a new bounded check.** Two named Claude wrappers were last
+   seen idle, not terminated. Reconcile/close them through native Claude controls
+   if that session is still available; do not kill unrelated processes. After
+   source correction and review, prepare a separately bounded check of only the
+   unresolved routes, including all possible review descendants. Old five-/six-
+   child ceilings and ten-/twelve-verifier ceilings remain exhausted. No repeat
+   test is authorised by this handoff or by a restart.
+6. **Only then revisit pilot/release preparation.** Recheck repository/base/effects,
+   immutable verifier, task modes, independent built-in review and finite recovery
+   allowances against the corrected contract. Obtain the concrete pilot launch
+   agreement before PRs/merges. Installation and release remain separate decisions.
 
-## Decisions settled
+## Decisions and boundaries retained
 
-- The pilot scope (A/B/C, 8/16/2, maxConcurrent 2, engine 3/2/2, one pause and one resume) is fully executed; no relaunch, no renewed allowance, nothing installed or released.
-- The changed-base acceptance claim is made only for what was observed: three unattended recoveries through the corrected entry with fresh verification and review, landed by the unchanged pinned merger.
-- Unobserved cases stay open and are not inferred.
+Prepare interactively; authorised execution makes informed choices unattended,
+merges within agreed authority and continues independent work around blockers.
+One convergence engine, one merge authority, native same-harness/account children,
+cumulative spending, current-outcome completion and preserved historical v3/v4
+pins remain requirements. The separately billed `/code-review ultra` is excluded.
+Unknown provenance, missing authority and exhausted allowance cannot become success.
 
-## Gotchas found the hard way
+This close creates no vault task, new automation or new agent session. Do not
+resume the paused monitor automatically. Keep historical evidence immutable.
 
-- Children (Opus and Fable) return extra JSON keys despite "Return ONLY JSON satisfying the supplied schema"; the host rejects at `accept` with no state change. Recover by messaging the same bound child to re-emit the allowed keys; never edit output or re-spawn.
-- A sibling thread merging into the same repo forces integrate + review per movement; A's allowance was consumed exactly. Serialise pilots per repository or budget for the merge rate.
-- `CronCreate` heartbeats arrive 5–10 minutes after the scheduled minute; child idle notifications arrive first. The Stop driver only blocks when a turn ends with actionable work.
-- The agent definition `effort:` field does not govern; the profile's per-model `modelSettings.<model>.effortLevel` does, and only at session start.
-- `gh pr edit` fails silently on `lachyts/agent-reader` (Projects-classic GraphQL deprecation); use the REST pulls endpoint and read back.
-- The originating Codex sessions commit into this worktree concurrently; re-read `git log` before pinning anything. Deleting the last handoff doc removes `docs/handoffs/` itself; `mkdir -p` before writing a new one.
+## Entry point and paste-ready prompt
 
-## Suggested skills
+Working directory:
+`/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill`.
 
-- `thread:open` with this doc's path (marks it consumed), then `fresh-review` for the audit child, then the acceptance task's § Resume prompt if Lachy decides to release.
-
-## Paste-ready prompt
-
-```
-You're continuing "Claude protocol 4 pilot: independent audit, then the release decision" — a live handoff, not a cold pickup.
-Read first: /Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/docs/handoffs/2026-09-22-claude-pilot-audit-and-release.md — then mark it consumed: set `status: consumed` in its front matter (no commit; your thread:close deletes it).
-Context: the native Claude protocol 4 pilot on lachyts/agent-reader is finished (execution db955f02, PRs #18/#19/#20 merged by the pinned host) and fully recorded in docs/implementation/2026-09-22-live-pilot.md § Native Claude slice, THREAD.md, the R-WAVE ledger and the acceptance task. Nothing is installed or released.
-Also read: THREAD.md § Where we are (top entry) and § Known quirks; docs/audits/2026-09-22-live-pilot-independent-audit.md and 2026-09-22-changed-base-independent-audit.md (how thread 3 audited the Codex slice); ~/repos/obsidian/Work/Tasks/thread-rollout-v4-native-acceptance.md.
-Suggested skills: thread:open (this doc), fresh-review for the audit child.
-Next move: run an independent audit of the Claude slice against .thread/pilot-claude-2026-09-22/ (private, gitignored) and GitHub, record it under docs/audits/, then put the release decision to Lachy with both options and act only on his answer.
-```
+Resume the paused Thread rollout redesign. Read this handoff and THREAD.md’s
+latest checkpoint first. The Claude six-child review-path check is exhausted and
+did not pass; do not rerun it. Start by resolving the native maximum-review
+contract and bounded descendant accounting, then finish the saved helper audit.
+Preserve original evidence and user decisions. Prepare/review source corrections
+before proposing any new finite native check; do not initialise, merge, install,
+release or restart the monitor under this handoff alone.
