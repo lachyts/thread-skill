@@ -71,16 +71,26 @@ ok "$rc" 1 "spaced path, no origin → exit 1"
 has "$err" "--source \"$tmp/no remote here\"" "spaced path, no origin → remedy quotes the whole path"
 
 # ---- the wiring --------------------------------------------------------------------------------------------
+# Every phrase below is one only this change's text carries, so each check fails on the docs before it.
+ef=$(tr '\n' ' ' < skills/_shared/execution-fit.md)   # one line, so a phrase may wrap
+engine=$(awk '/^\*\*Engine path\.\*\*/{on=1} on && /^$/{on=0} on' skills/_shared/execution-fit.md | tr '\n' ' ')
+has "$engine" "**Engine path.**" "execution-fit names the engine-path blocker"
+has "$engine" "execute § 5 carries the scratchpad fallback" "engine-path blocker cites execute § 5"
+has "$ef" "schedule § 0 runs these checks" "execution-fit names schedule § 0 as the gate"
+
 s0=$(awk '/^### 0\./{on=1} /^### 1\./{on=0} on' skills/schedule/SKILL.md)
-has "$s0" "Dispatch blockers" "schedule § 0 points at § Dispatch blockers"
-has "$s0" "execution-fit.md" "schedule § 0 names execution-fit.md"
-has "$s0" "no rollout note" "schedule § 0 stops before any write"
+has "$s0" "execution-fit.md\` § Dispatch blockers" "schedule § 0 points at execution-fit.md § Dispatch blockers"
+has "$s0" "stop before step 1" "schedule § 0 stops before step 1"
+has "$s0" "no task stamped" "schedule § 0 stamps no task"
+has "$s0" "no rollout note" "schedule § 0 writes no rollout note"
+has "$s0" "no heartbeat" "schedule § 0 registers no heartbeat"
 ok "$(grep -c '# thread:remote-check' skills/schedule/SKILL.md)" 0 "schedule does not copy the snippet"
 
 s5=$(awk '/^### 5\./{on=1} /^### 6\./{on=0} on' skills/execute/SKILL.md)
-for w in scratchpad cmp resumeFromRunId "Never edit"; do
+for w in scratchpad cmp "Never edit"; do
   has "$s5" "$w" "execute § 5 fallback mentions $w"
 done
+has "$s5" "scriptPath\` the run started with" "execute § 5 resume re-passes the scriptPath the run started with"
 
 echo; [ "$fail" -eq 0 ] && echo "execution-fit-remote: ALL PASS" || echo "execution-fit-remote: SOME FAILED"
 exit "$fail"
