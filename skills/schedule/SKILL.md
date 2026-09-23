@@ -37,7 +37,7 @@ measurement window or calendar date rather than file overlap, or whose verificat
 arrives days later (impact measures). If misfits dominate, **stop and route the set to the
 session lane** (`defer` for `scheduled:`-date dispatch, `open` via the task's `## Launch`
 block) instead of forcing a rollout: the engine's parallelism is forbidden by isolation
-windows, every externally-publishing task pauses at the human gate (ADR 0008 §3.7), and
+windows, every externally-publishing task pauses at the human gate (ADR 0008; execute § 3.7), and
 file-overlap wave computation cannot see window/calendar constraints. A mixed set is fine if
 the wave-shaped subset can roll out while the misfits stay unstamped — name them in the gate.
 
@@ -233,12 +233,11 @@ Location: `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` — **alw
 
 Use the template at `${CLAUDE_PLUGIN_ROOT}/skills/schedule/rollout-template.md`. Substitute:
 - `{{PROJECT_NAME}}` — display name (e.g. `GifLab`)
-- `{{PROJECT_SLUG}}` — kebab form (e.g. `giflab`)
 - `{{ROLLOUT_SLUG}}` — the resolved dated rollout slug, no extension (e.g. `giflab-rollout-2026-07-18`)
 - `{{DATE}}` — today's date (YYYY-MM-DD)
 - `{{VERIFIER}}` — the verifier command detected in step 2.5 (or user-provided)
 - `{{REPO_PATH}}` — the project's local repo path from the project note's `Local:` line, if discoverable; otherwise leave a `<TODO>` marker
-- `{{THREAD_PATH}}` — path to the project's THREAD.md if one exists; otherwise omit the line
+- `{{THREAD_LINE}}` — the whole line `` Thread: `<path to the thread file>` ``, naming the project's THREAD.md or its shared thread file when one exists (e.g. `` Thread: `~/repos/tools/chorus/THREAD.md` ``); otherwise delete the line entirely — no blank placeholder line
 - `{{WAVE_TABLE}}` — rendered wave structure table (see template). A merged unit (step 4.5) renders as a normal row with **Mode = `sequential-merged (one agent/PR)`**, signalling that one agent does the folded sub-tasks in sequence
 - `{{WAVE_RATIONALE}}` — short prose explaining the ordering
 - `{{TASKS_BY_WAVE}}` — wikilink list per wave (see template)
