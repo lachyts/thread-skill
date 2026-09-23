@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-09-21
+last_touched: 2026-09-22
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
 ---
@@ -9,6 +9,15 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-09-22 — thread 2 closed; rollout redesign remains open.** Lachy designated
+**thread 1** as the main project conversation. **thread 3** and Claude's
+**Thread rollout redesign native pilot** continue independently. Read the
+[thread 2 closeout and Claude agreement](/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/docs/implementation/2026-09-22-thread-2-closeout.md)
+for the approved A/B/C scope, finite allowances, authority, last observed
+preflight state and evidence locations. The completed Codex pilot is retained;
+its success is not full release acceptance. Neither candidate is installed or
+released. This closeout does not stop peers or change their runtime records.
 
 **2026-09-21 (latest) — the tier ceiling is consumed, corrected and shipped as
 2.5.1; the review chain was stopped by the ledger, not by exhaustion.** Three
@@ -386,6 +395,13 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Rollout redesign, 22 September 2026:** coordination now belongs to **thread 1**.
+Read the [thread 2 handback](/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/docs/implementation/2026-09-22-thread-2-closeout.md)
+and the current records owned by thread 3 and the native Claude pilot before
+acting. Their work continues independently; do not duplicate dispatch, reuse the
+completed Codex pools, or infer release readiness. The instructions below describe
+the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidate.
+
 0. **Nothing is half-done — the tree is clean and 2.5.1 is shipped.** The
    2026-09-21 four-file batch was reviewed, corrected across two rounds and
    committed; the cache dance ran and was verified (`diff -rq` against the
@@ -411,6 +427,7 @@ scheduled 2026-07-15.
 
 ## Session log
 
+- 2026-09-22: Closed only thread 2 and saved its Claude-pilot agreement/status/evidence handback; thread 1 now leads, thread 3 and Claude continue independently, rollout redesign remains open.
 - 2026-09-21 (latest): consumed the stale 2026-09-17 tier-ceiling review and two further clean-room rounds (12 + 15 findings); round 1 lost to a CLI restart; round 3 hit the ledger's STOP at 60% regressions, so no round 4 — reverted to the root instead (retry budget is now a constant, not arithmetic over max_iterations). Two real engine defects fixed (effort keyed off a lagging event flag; a 1-iteration retry loop at the template default), ADR 0016 §2 amended, Scenarios F and G added, 191 assertions. Shipped 2.5.1 and verified the cache byte-identical — the version-keyed cache is still live and a same-version content change does NOT refresh it. Two findings deferred to § Open questions + vault tasks.
 - 2026-09-21 (later): handed the leftovers off via the first ADR 0017 doc; the consumer consumed the 2026-09-17 round-2 review (af0094f) and left its four-file fix batch uncommitted, no close; this close deleted the consumed handoff doc + the two consumed 2026-09-21 review docs; concurrent-checkout hazard logged (open question + estate METHOD row); ship still pending the cache dance.
 - 2026-09-21: 2.5.0 — durable handoff lifecycle in `thread:handoff` (docs/handoffs, never temp; pending→consumed→deleted) + close's handoff-owns-the-continuation rule (ADR 0017 amends 0011); `thread:open` handoff-doc pickup; two xhigh rounds consumed, K27 stop, rig-gated; hook + Codex stub aligned; manifests 2.5.0. Ship pending: push → marketplace update → plugin update → restart.
