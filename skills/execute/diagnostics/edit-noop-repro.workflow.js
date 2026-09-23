@@ -16,7 +16,7 @@ export const meta = {
 //   Arm C — Write a new file via the WORKTREE path: the contrast the original bug report drew
 //           ("Write persisted, Edit did not").
 //
-// args = { repoPath: "<abs path to scratch working clone>", indices: [0,1,2,3] }
+// args = { repoPath: "<abs path to scratch working clone>", indices: [0,1,2,3], defaultBranch: "<optional, default main>" }
 // Returns { probes: [PROBE, ...] }.
 // =============================================================================
 
@@ -58,7 +58,7 @@ const PROBE = {
   required: ['index', 'worktreeToplevel', 'armA', 'armB', 'armC', 'notes'],
 }
 
-function buildPrompt(i, repoPath) {
+function buildPrompt(i, repoPath, base) {
   return `You are a reproduction PROBE for a suspected "Edit tool silently no-ops inside a git worktree" bug.
 Follow these steps EXACTLY and report precisely what you observe. Do NOT try to fix anything — OBSERVE and REPORT.
 
@@ -69,7 +69,7 @@ STEP 1 — create an isolated worktree of the scratch repo (mirrors the wave-exe
   RP="${repoPath}"; WT="$RP/.claude/worktrees/repro-${i}"; BR="audit-fix/repro-${i}"
   if [ -d "$WT" ]; then cd "$WT";
   elif git -C "$RP" show-ref --verify --quiet "refs/heads/$BR"; then git -C "$RP" worktree add "$WT" "$BR" && cd "$WT";
-  else git -C "$RP" fetch origin --quiet && git -C "$RP" worktree add "$WT" -b "$BR" origin/main && cd "$WT"; fi
+  else git -C "$RP" fetch origin --quiet && git -C "$RP" worktree add "$WT" -b "$BR" ${base} && cd "$WT"; fi
   git rev-parse --show-toplevel
 Record the printed toplevel as worktreeToplevel — it MUST be "$WT".
 
@@ -95,12 +95,13 @@ STEP 5 — return the structured result with index=${i}, worktreeToplevel, armA,
 
 const a = typeof args === 'string' ? JSON.parse(args) : args
 const repoPath = a.repoPath
+const base = `origin/${a.defaultBranch || 'main'}`
 const indices = a.indices || [0, 1, 2, 3]
 
 log(`edit-noop-repro: ${indices.length} parallel probes against ${repoPath}`)
 
 const probes = await parallel(
-  indices.map((i) => () => agent(buildPrompt(i, repoPath), {
+  indices.map((i) => () => agent(buildPrompt(i, repoPath, base), {
     label: `probe:${i}`, phase: 'Probe', schema: PROBE,
   })),
 )

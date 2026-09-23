@@ -129,14 +129,18 @@ final check that the run wrote nothing into the tree):
   `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files.
 - **Default branch** — `tests/default-branch.test.{mjs,sh}`: `defaultBranch` keeps pre-fix bytes when
   unset, refuses unsafe names, and the resolver in `execute/SKILL.md` § 4 works against fixture remotes.
+- **Release check** — `tests/release-check.test.sh`: the real `make release-check` recipe against a temp
+  tree and a fake config dir (matching, stray, noise-only, differing, missing and mismatched caches).
 
 New suites join by filename: `tests/*.test.mjs`, `tests/contracts/*.test.mjs` and
 `skills/execute/tests/*.test.mjs` run under `node --test`; `tests/*.test.sh` and
-`skills/execute/tests/*.test.sh` run one by one. `skills/execute/diagnostics/` holds paid live
+`skills/execute/tests/*.test.sh` run concurrently, output grouped per suite. `skills/execute/diagnostics/` holds paid live
 diagnostics (Workflow runtime + real agents) — parse-checked, never run by `make test`.
 
 After a release, `make release-check` confirms both manifests agree and the version-keyed plugin
-cache (what `${CLAUDE_PLUGIN_ROOT}` — the engine, scripts and hook — runs from) matches the tree.
+cache (what `${CLAUDE_PLUGIN_ROOT}` — the engine, scripts and hook — runs from) matches the tree. It
+also fails on cache files the tree doesn't track (`.DS_Store` and `__pycache__/` exempt), so run it
+on the released commit, right after the plugin update.
 
 ## Coexistence with Orca
 

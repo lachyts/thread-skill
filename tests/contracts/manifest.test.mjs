@@ -92,12 +92,9 @@ test('hooks.json parses and every hook command targets a file in this plugin', (
 })
 
 test('every ${CLAUDE_PLUGIN_ROOT}/… path the skills and README cite exists', () => {
-  const files = ['README.md', ...skillDirs.map((d) => `skills/${d}/SKILL.md`)]
-  for (const extra of ['skills/_shared', 'skills/schedule', 'skills/execute']) {
-    for (const f of fs.readdirSync(path.join(root, extra))) if (f.endsWith('.md')) files.push(`${extra}/${f}`)
-  }
+  const files = ['README.md', ...fs.readdirSync(path.join(root, 'skills'), { recursive: true }).filter((f) => f.endsWith('.md')).map((f) => `skills/${f}`)]
   const missing = []
-  for (const f of new Set(files)) {
+  for (const f of files) {
     for (const ref of read(f).match(/\$\{CLAUDE_PLUGIN_ROOT\}\/[A-Za-z0-9_./<>-]+/g) || []) {
       const rel = ref.replace('${CLAUDE_PLUGIN_ROOT}/', '').replace(/[.)]+$/, '')
       if (rel.includes('<')) continue   // a pattern like skills/<route>/SKILL.md, not a path
