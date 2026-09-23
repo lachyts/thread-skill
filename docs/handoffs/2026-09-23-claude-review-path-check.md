@@ -12,6 +12,31 @@ Project-local review definitions are prepared there before startup. Their presen
 is not proof that they load or govern execution; establish both from native tools.
 Do not use a foreign model CLI or launch another account from Codex.
 
+## Start in the prepared directory
+
+The first attempted session, `0c1fdfb0-000c-43dc-a4a7-14e2d25352a5`, started in
+the parent Thread worktree. Its startup inventory lacked all three definitions;
+changing cwd inside that session did not load them. It stopped before creating
+an exchange or reserving any child. The existing six-slot allowance is unchanged.
+The private evidence is `evidence/2026-09-23-startup-precondition-0c1fdfb0.json`.
+
+Create a new session with the prepared directory selected **before startup**.
+Do not resume the blocked session or ask it to change directories. In a graphical
+launcher, choose the exact prepared directory as the project/working folder before
+creating the session; the parent `thread-skill` folder is not equivalent.
+
+Alternatively, Lachy can run this in a terminal outside an agent session. It
+starts interactive native Claude with the same `fauxmuse` profile as the blocked
+preflight. It neither changes the global account selection nor uses print mode:
+
+```sh
+cd '/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/.thread/claude-review-path-check-2026-09-23' && env CLAUDE_CONFIG_DIR='/Users/lachlants/.claude-profiles/fauxmuse' claude --name 'Claude review-path check' 'Read START-HERE.md and execute the linked bounded check. First confirm all three thread-review-check agents are loaded. Preserve the six-child ceiling.'
+```
+
+The installed CLI help confirms interactive startup and the `--name`/prompt
+syntax. This command has not been launched by Codex. Correct startup scope is
+the next controlled check; it is not yet proof that the definitions will load.
+
 This is a new finite check of the corrected wrapper/fork path, prepared following
 Lachy's request to execute the audit's next steps. The original five capability
 probes are complete and exhausted. Their records and allowances are immutable.
