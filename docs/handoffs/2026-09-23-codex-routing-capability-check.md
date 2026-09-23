@@ -1,7 +1,9 @@
 ---
 thread: thread-skill
 written: 2026-09-23
-status: pending
+status: consumed
+consumed_by: 01a0cb8c-f0c5-7bc1-ba50-adf198d8e8fe
+consumed_on: 2026-09-23
 ---
 
 # Codex routing capability check
