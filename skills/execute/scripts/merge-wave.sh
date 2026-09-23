@@ -83,13 +83,14 @@ classify_failed_steps() {  # stdin: failed step names; stdout: "infra" | "genuin
   printf '%s' "$verdict"
 }
 
-# ---- local base refresh (cosmetic; correctness rides on origin/<base>) ------------------------------
-# After a wave lands, fast-forward the root checkout's base branch so a human sees the merges locally.
-# ONLY when the root is actually on that branch: a root parked on any other branch (a release hold, a
-# feature branch) is left exactly as it is — that skip is what lets a self-rollout of a plugin that is
-# loaded from its own working tree keep merged waves out of live sessions until release. Never fails the
-# script (a false halt after a successful merge). Defined before the self-test hooks so
-# --self-test-base can exercise it against a temp repo.
+# ---- local base refresh --------------------------------------------------------------------------------
+# After a wave lands, fast-forward the checkout at repoPath — only when it is on the base branch; a
+# checkout on any other branch is left exactly as it is. Worktrees branch from origin/<base>, so this is
+# not what the next wave's implementers build on, but the read-only agents (planner, plan judge and
+# reviser, investigator, review judge) read this checkout directly (execute SKILL.md § Worktree
+# lifecycle), so a checkout left behind is reported, never called harmless. Never fails the script (a
+# false halt after a successful merge). Defined before the self-test hooks so --self-test-base can
+# exercise it against a temp repo.
 refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
   local repo="$1" base="$2" cur
   if [ -z "$base" ]; then
@@ -103,17 +104,17 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
     if git -C "$repo" merge --ff-only "origin/$base" >/dev/null 2>&1; then
       echo "  local $base fast-forwarded to origin/$base."
     else
-      echo "  WARN: local $base did not fast-forward (root checkout diverged). origin/$base holds the merges;"
-      echo "        next wave's worktrees branch from origin/$base regardless. Tidy the root when convenient."
+      echo "  WARN: local $base did not fast-forward (checkout dirty or diverged). origin/$base holds the merges"
+      echo "        and the next wave's worktrees branch from it, but read-only agents read this checkout."
     fi
   else
-    echo "  NOTE: root checkout is on '$cur', not $base — skipped local fast-forward (harmless)."
+    echo "  NOTE: checkout is on '$cur', not $base — left as it is; read-only agents read it un-advanced."
   fi
 }
 
 # Self-test hook: `merge-wave.sh --self-test-base` drives refresh_local_base against a throwaway repo
-# whose origin default branch is `master` (no `main` anywhere): root on master ⇒ fast-forwarded; root on
-# a hold branch ⇒ untouched; unresolved base ⇒ skipped. Needs git only — no GitHub.
+# whose origin default branch is `master` (no `main` anywhere): checkout on master ⇒ fast-forwarded;
+# checkout on another branch ⇒ untouched; unresolved base ⇒ skipped. Needs git only — no GitHub.
 if [ "${1:-}" = "--self-test-base" ]; then
   st_fail=0
   sb_ok() { if [ "$1" = "$2" ]; then echo "ok   - $3"; else echo "FAIL - $3: expected $2 got $1"; st_fail=1; fi; }
@@ -128,12 +129,12 @@ if [ "${1:-}" = "--self-test-base" ]; then
   out=$(refresh_local_base "$tmp/root" master)
   sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$landed" "root on master: fast-forwarded to origin/master"
   case "$out" in *"local master fast-forwarded to origin/master."*) sb_ok y y "reports the master fast-forward";; *) sb_ok n y "reports the master fast-forward";; esac
-  g -C "$tmp/root" switch -q -c hold/test
+  g -C "$tmp/root" switch -q -c feature/test
   held=$(git -C "$tmp/root" rev-parse HEAD)
   g -C "$tmp/other" commit -q --allow-empty -m wave2 && g -C "$tmp/other" push -q origin master
   out=$(refresh_local_base "$tmp/root" master)
-  sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "root on a hold branch: left untouched"
-  case "$out" in *"skipped local fast-forward"*) sb_ok y y "reports the hold skip";; *) sb_ok n y "reports the hold skip";; esac
+  sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "checkout on another branch: left untouched"
+  case "$out" in *"left as it is"*) sb_ok y y "reports the non-base skip";; *) sb_ok n y "reports the non-base skip";; esac
   out=$(refresh_local_base "$tmp/root" "")
   case "$out" in *"could not resolve"*) sb_ok y y "unresolved base: skipped, non-fatal";; *) sb_ok n y "unresolved base: skipped, non-fatal";; esac
   echo; [ "$st_fail" -eq 0 ] && echo "base: ALL PASS" || echo "base: SOME FAILED"
@@ -445,6 +446,6 @@ for PR in "${NUMS[@]}"; do
   process_pr "$PR" || exit 1
 done
 
-# ---- advance the local root checkout's base (cosmetic; correctness rides on origin/<base>) ---------
+# ---- advance the checkout at repoPath (read by the read-only agents; see refresh_local_base) ---------
 refresh_local_base "$REPO_PATH" "$BASE"
 echo "== merge-wave.sh: wave complete. =="

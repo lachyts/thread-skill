@@ -104,6 +104,6 @@ depending on live runs to find drift.
   resolver in `execute/SKILL.md` § 4 asks the remote (`ls-remote --symref`; a cached `origin/HEAD` can
   be stale) and stops rather than assume `main`. `merge-wave.sh` reads the default from GitHub and
   checks every PR before the first merge — off-base, mixed, unreadable or CLOSED halts with nothing
-  merged (`tests/merge-wave-base.test.sh`, fake `gh`); `--self-test-base` proves a root parked on a
-  hold branch is never fast-forwarded.
+  merged (`tests/merge-wave-base.test.sh`, fake `gh`); `--self-test-base` proves a checkout on another branch
+  is left untouched.
 - `make release-check` for the version-keyed cache.
