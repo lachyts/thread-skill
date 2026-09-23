@@ -10,6 +10,27 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-09-23 (night) — the E2E is recorded; the self-rollout is scheduled and runs unattended from a
+clone.**
+- **E2E done** (`docs/e2e/2026-09-23-baseline.md`, `status: recorded`). Verbs 1–15 ran: 14 PASS
+  and 1 FAIL (verb 7, repair: `in_progress` + a merged PR). The `defaultBranch` proof passed on all
+  five points. The leak check was clean. Cleanup was done except the final
+  `rm -rf ~/repos/tools/zz-thread-e2e`, which is the rollout lead's first step; the fixture's GitHub
+  repo is deleted. The § 5 findings were folded into phase tasks, and the engine fixes went to the
+  protocol 4 intake.
+- **Roadmap gathered** (Lachy skimmed the Claude-drafted tasks). `[[Thread Skill]]` now has P1 test
+  floor and contracts, P2 continuity core, P3 routing and docs coherence and P4 behaviour evals: 20
+  tasks, 11 absorbed tasks tombstoned. p4-5 (the description trims and the 700-char cap) is held until
+  the eval baseline exists.
+- **Rollout** `[[thread-skill-rollout-2026-09-23]]` covers 19 tasks in about 7 waves, continuous
+  auto-merge, verifier `make test`. It runs from the GitHub clone `~/repos/tools/thread-skill-rollout`,
+  and its **lead session is launched in that clone**. The engine's agents `cd $WT` once and rely on it
+  persisting, so worktrees outside the launch tree would fall back to this checkout.
+- **Freeze:** don't commit in this checkout until the release's `git pull --ff-only`. Its local
+  master must stay a strict ancestor of `origin/master`.
+- **Next (human):** release 2.6.0 per the brief § S2 step 6, re-run the E2E with fresh fixtures,
+  record the eval baseline, then schedule p4-5.
+
 **2026-09-23 (later) — E2E § 0 is set up. The verbs run in a second session, launched in the
 fixture.**
 - **Setup:** the setup session (launched here) confirmed 2.5.3 and ran checklist § 0. It created the
@@ -457,6 +478,15 @@ scheduled 2026-07-15.
   a re-run of the update; `diff -rq <cache>/skills skills` is the check.
 
 ## Resume instructions
+
+**Now (from 2026-09-23 night): the self-rollout is running unattended.**
+- **Check it** with `/thread:status [[thread-skill-rollout-2026-09-23]]` from a session launched in
+  `~/repos/tools/thread-skill-rollout`, never from here.
+- **If it stalls,** run status first. Don't hand-edit a task back to `in_progress`: that is the verb 7
+  gap, and resume would re-dispatch merged work.
+- **When it's done,** release 2.6.0 (brief § S2 step 6). Pull here first (`git pull --ff-only`),
+  then bump, then run the cache dance.
+- The older instructions below predate this and are kept for history.
 
 **The live E2E baseline is running.**
 - **The S1 verbs session is live**, launched in `~/repos/tools/zz-thread-e2e` (peer `zz-thread-e2e-0b`).
