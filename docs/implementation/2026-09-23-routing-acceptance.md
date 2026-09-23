@@ -8,19 +8,19 @@ supplementary checks. They do not validate this corrected contract.
 
 | Promise | Candidate fixture or source evidence | Native live evidence for these bytes |
 | --- | --- | --- |
-| Easy high, difficult xhigh; reviewer floor | Shared resolver + engine routing tests | Codex native bindings observed; Claude pending |
-| First quality failure goes directly to model maximum | Engine routing sequences, accumulated feedback assertions | Codex maximum binding observed; actual failure transition pending both harnesses |
-| Failed maximum correction permits alternative at its maximum | Shared resolver + engine + host integration fixtures | Pending both harnesses |
+| Easy high, difficult xhigh; reviewer floor | Shared resolver + engine routing tests | Codex bindings and Claude Opus high/xhigh observed, including independent review |
+| First quality failure goes directly to model maximum | Engine routing sequences, accumulated feedback assertions | Codex ultra and Claude Opus max bindings observed; actual failure transition pending both harnesses |
+| Failed maximum correction permits alternative at its maximum | Shared resolver + engine + host integration fixtures | Claude Fable max binding observed with synthetic selector; genuine transition pending; Codex has no configured alternative |
 | Fable unavailable retains Opus maximum within allowance | Resolver/engine unavailable-route cases, including typed native evidence after preparation | Pending Claude |
 | Infrastructure, authority, formatting and quota do not escalate reasoning | Engine failure-classification tests | Pending representative native failure |
-| Profile override or unsupported effort cannot silently lower execution | Resolver capability/provenance rejections | Codex high/xhigh/ultra observed; conflicting-profile rejection remains a local fixture; Claude pending |
-| Request/resolution/observation recorded separately | Adapter and full host integration fixtures, including duplicate deliveries | Codex diagnostic adapter exchange observed; durable rollout-host path pending |
-| Independent built-in review bound to exact child and commit | Host receipt rejection, immutable evidence, adapter/engine contract fixtures | Codex built-in invocation observed; immutable rollout-host capture and Claude pending |
+| Profile override or unsupported effort cannot silently lower execution | Resolver capability/provenance rejections | Codex high/xhigh/ultra observed; Claude 2.1.280 definition effort overrides existing pins in observed children; rejection remains local fixture evidence |
+| Request/resolution/observation recorded separately | Adapter and full host integration fixtures, including duplicate deliveries | Diagnostic adapter exchanges observed in both harnesses; durable rollout-host path pending; Claude prompt-delivery exceptions recorded |
+| Independent built-in review bound to exact child and commit | Host receipt rejection, immutable evidence, adapter/engine contract fixtures | Both built-in invocations observed; immutable rollout-host capture pending; Claude fork/result contract requires correction |
 | Exact authorisation and verifier inputs remain bound | Host source-text and external-byte drift cases | Pending launch record |
 | Supplementary check reserves once; interruption is not success | Host idempotency, exhausted pool and lease-recovery tests | Pending native owner interruption |
 | Existing work, feedback and escalation survive recovery | Engine histories, host recovery and same-record integration fixtures | Pending native cold recovery |
 | Reader override contains canonical text/log plus response outputs | Two simultaneous real hook subprocesses with private homes, model calls disabled | Local subprocess proof; no model-call claim |
-| Ordinary skill defaults agree; exact comparisons retain authors | Skills source checks, actual helper wrapper-to-adapter fixtures using a session snapshot, allocation hook fixtures, guarded profile/council migration plan | Activation and native probes pending |
+| Ordinary skill defaults agree; exact comparisons retain authors | Skills source checks, actual helper wrapper-to-adapter fixtures using a session snapshot, allocation hook fixtures, guarded profile/council migration plan | Bounded native binding probes completed; estate-wide activation and representative skill execution remain pending |
 | Existing v3 and pinned v4 keep their contract | Legacy engine suites, old native journal tests, pin/hash checks | Historical executions untouched |
 
 The correction batch delivers reviewed source. It does not install, release or
@@ -49,7 +49,36 @@ review history. Actual reasoning effort was not independently observable. See
 the [review record](../reviews/2026-09-23-routing-and-evidence.md). This limitation
 does not change the pending native evidence column above.
 
-## Bounded native check contract (prepared, not launched)
+## Claude capability checkpoint
+
+The five bounded probes in native Claude session
+`83243d46-2dbd-49ef-8e6b-194a8e84abdb`, reported at `4a1dd06`, demonstrate
+Opus 5.5 high/xhigh/max and Fable 5.1 max on Claude Code 2.1.280. The
+[coordinator audit](../audits/2026-09-23-claude-routing-capability-audit.md)
+checks all 72 indexed hashes against saved evidence, and saved child transcripts
+and metadata against the original native records. The built-in xhigh review
+found the deliberate defect at the exact fixture commit.
+
+These observations do not validate the current Claude rollout review contract:
+the built-in forks and reports to the lead, whereas the bound review child is
+asked to return the structured verdict. The proposed relay remains unimplemented
+and untested. Independent source review found gaps in fork accounting/recovery,
+escalated review bindings and per-task completion/dependency claims. The two-task
+proposal requires correction and verifier preparation before a launch agreement.
+No pilot is authorised.
+
+The settings migration is not needed for the observed per-child routes on this
+runtime version. Approved temporary user agent definitions were removed with
+byte guards; shared settings remained unchanged. Startup loading of project
+definitions remains unobserved. The recovery prompt had a disclosed one-character
+delivery mismatch; neither that probe nor the built-in's distinct rendered prompt
+establishes byte-identical adapter prompt delivery. No new probe allowance was
+granted or spent by this audit.
+
+## Bounded native check contract (historical scope; both checks completed)
+
+The following records the original bounded scope. Source-local checks have now
+run without global candidate installation. It grants no repeat-probe allowance.
 
 Run separately in each calling harness/account after candidate installation is
 explicitly chosen. First capture runtime version, exact policy hash, role/model
