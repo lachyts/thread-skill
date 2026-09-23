@@ -265,7 +265,7 @@ Pass `args` as an actual JSON object in the tool call. (Note: the Workflow tool 
 
 **If the Workflow tool refuses the engine path.** Some harnesses refuse the `${CLAUDE_PLUGIN_ROOT}` path with "scriptPath must be a script path this tool returned, or a file you can already read"; a prior `Read` of the file does not help. Fall back to a scratchpad copy:
 
-1. `mkdir -p <scratchpad>/wave && cp "${CLAUDE_PLUGIN_ROOT}/skills/execute/wave-execute.workflow.js" <scratchpad>/wave/wave-execute.workflow.js`, where `<scratchpad>` is this session's scratchpad directory.
+1. `mkdir -p "<scratchpad>/wave" && cp "${CLAUDE_PLUGIN_ROOT}/skills/execute/wave-execute.workflow.js" "<scratchpad>/wave/wave-execute.workflow.js"`, where `<scratchpad>` is this session's scratchpad directory.
 2. `cmp` the copy against the source. If `cmp` reports any difference, stop.
 3. Pass `<scratchpad>/wave/wave-execute.workflow.js` as `scriptPath`.
 

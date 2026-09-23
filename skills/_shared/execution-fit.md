@@ -43,9 +43,11 @@ decides, not size. (Decided 2026-08-12, ADR 0009; supersedes schedule's old
 ## Dispatch blockers — wave-shaped but not yet runnable
 
 A cluster that fails a blocker is **still wave-shaped**: do not route it to the
-session lane. The gate stops before anything is written (no task stamped, no
-rollout note, no heartbeat) and names the remedy. Fix the blocker, then schedule
-again. Two blockers:
+session lane. schedule § 0 runs these checks; gather and orient, which read
+this file for the fit test, don't run the check or the stop themselves. The
+schedule gate stops before anything is written (no task stamped, no rollout
+note, no heartbeat) and names the remedy. Fix the blocker, then schedule again.
+Two blockers:
 
 **GitHub `origin`.** The engine branches every worktree from
 `origin/<default branch>` and lands each task as a GitHub PR that merge-wave

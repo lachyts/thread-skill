@@ -42,10 +42,9 @@ file-overlap wave computation cannot see window/calendar constraints. A mixed se
 the wave-shaped subset can roll out while the misfits stay unstamped — name them in the gate.
 
 After the misfit scan, check the dispatch blockers for the target repo, i.e. the project root the
-rollout note will carry. Resolve it from the same source step 6 uses for `{{REPO_PATH}}` (the
-project note's `Local:` line); if none is found, ask the user for the path, since the check
-cannot run against a `<TODO>`. Then run the remote check in
-`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers against it (point at
+rollout note will carry. Resolve it from the project note's `Local:` line; if there is none, ask
+the user for the path (step 6 writes this resolved path as `{{REPO_PATH}}`). Then run the remote
+check in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers against it (point at
 it; never copy the snippet here), followed by its `gh repo view` confirmation. On either failure
 **stop before step 1**: no task stamped, no rollout note, no heartbeat. Print the snippet's
 remedy line verbatim (or gh's error). The cluster is still wave-shaped; don't re-route it to the
@@ -246,7 +245,7 @@ Use the template at `${CLAUDE_PLUGIN_ROOT}/skills/schedule/rollout-template.md`.
 - `{{ROLLOUT_SLUG}}` — the resolved dated rollout slug, no extension (e.g. `giflab-rollout-2026-07-18`)
 - `{{DATE}}` — today's date (YYYY-MM-DD)
 - `{{VERIFIER}}` — the verifier command detected in step 2.5 (or user-provided)
-- `{{REPO_PATH}}` — the project's local repo path from the project note's `Local:` line, if discoverable; otherwise leave a `<TODO>` marker. In practice this is the path § 0 confirmed (§ 0 asks for it rather than let the gate run on a `<TODO>`)
+- `{{REPO_PATH}}` — the repo path § 0 resolved and checked (the project note's `Local:` line, or the path the user gave)
 - `{{THREAD_LINE}}` — the whole line `` Thread: `<path to the thread file>` ``, naming the project's THREAD.md or its shared thread file when one exists (e.g. `` Thread: `~/repos/tools/chorus/THREAD.md` ``); otherwise delete the line entirely — no blank placeholder line
 - `{{WAVE_TABLE}}` — rendered wave structure table (see template). A merged unit (step 4.5) renders as a normal row with **Mode = `sequential-merged (one agent/PR)`**, signalling that one agent does the folded sub-tasks in sequence
 - `{{WAVE_RATIONALE}}` — short prose explaining the ordering
