@@ -2,21 +2,27 @@
 # The handoff scan in skills/close/SKILL.md § The handoff owns the continuation, extracted by its marker
 # and run against runtime-generated fixtures (LF and CRLF) and the four <home> resolutions, under bash and
 # under `zsh -f` when zsh is installed (the Bash tool is zsh). Hermetic: every path lives under mktemp,
-# HOME is a temp dir per case, and GIT_CEILING_DIRECTORIES stops git walking above the temp root.
+# HOME is a temp dir per case, GIT_CEILING_DIRECTORIES stops git walking above the temp root, and the
+# caller's GIT_DIR & co. are unset (a git hook running `make test` exports them, and they would point
+# every git call here at the outer repo).
 # bash 3.2-compatible (macOS).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
 
 # pwd -P: macOS $TMPDIR is under /var, a symlink to /private/var, and git rev-parse prints the resolved path.
 tmp=$(cd "$(mktemp -d)" && pwd -P); trap 'rm -rf "$tmp"' EXIT
 
 # ---- the scan, verbatim from the skill ---------------------------------------------------------------
 awk '/^# thread:handoff-scan/{on=1; next} /^# end thread:handoff-scan/{on=0} on' skills/close/SKILL.md > "$tmp/scan.sh"
-ok "$(grep -c '^# thread:handoff-scan' skills/close/SKILL.md)" 1 "exactly one scan marker"
+open=$(grep -c '^# thread:handoff-scan' skills/close/SKILL.md); close=$(grep -c '^# end thread:handoff-scan' skills/close/SKILL.md)
+ok "$open" 1 "exactly one opening scan marker"
+ok "$close" 1 "exactly one closing scan marker"
 ok "$(grep -c '^find "\$home/docs/handoffs"' "$tmp/scan.sh")" 1 "scan snippet found in close/SKILL.md"
-if ! grep -q '^find "\$home/docs/handoffs"' "$tmp/scan.sh"; then
-  echo "FAIL - the # thread:handoff-scan block is missing from skills/close/SKILL.md; nothing to run"
+# Without the closing marker awk would capture the rest of the SKILL and the scans would run prose.
+if [ "$open" != 1 ] || [ "$close" != 1 ] || ! grep -q '^find "\$home/docs/handoffs"' "$tmp/scan.sh"; then
+  echo "FAIL - the # thread:handoff-scan … # end thread:handoff-scan pair is not exactly once in skills/close/SKILL.md; nothing to run"
   exit 1
 fi
 
@@ -40,6 +46,7 @@ printf -- '---\ntitle: x\n---\nbody\n'                                > "$d/fm-n
 printf -- '---\nstatus: draft\n---\nbody\n'                           > "$d/draft.md"
 printf -- '---\r\ntitle: x\r\n---\r\nstatus: pending\r\n'             > "$d/fm-no-status-body-pending.md"
 printf -- '# A doc\nstatus: pending\n'                                > "$d/no-fm-body-pending.md"
+printf -- '---\nstatus: pending\r\r\n---\nbody\n'                     > "$d/crcr-pending.md"   # awk strips one CR, tr the other
 printf -- '---\nstatus: pending\n---\n'                               > "$d/notes.txt"
 printf -- '---\nstatus: pending\n---\n'                               > "$d/sub/nested.md"
 expected="consumed crlf-consumed.md
@@ -48,6 +55,7 @@ legacy fm-no-status-body-pending.md
 legacy fm-no-status.md
 legacy no-fm-body-pending.md
 legacy no-fm.md
+pending crcr-pending.md
 pending crlf-pending.md
 pending lf-pending.md
 pending quoted-pending.md
@@ -58,13 +66,19 @@ expected=$(printf '%s\n' "$expected" | LC_ALL=C sort)
 tg() { HOME="$1" GIT_CONFIG_NOSYSTEM=1 git -c init.defaultBranch=main "${@:2}"; }
 pend() { mkdir -p "$1/docs/handoffs" && printf -- '---\nstatus: pending\n---\n' > "$1/docs/handoffs/lf-pending.md"; }
 hg="$tmp/hg"; mkdir -p "$hg" "$tmp/repo/sub"; tg "$hg" init -q "$tmp/repo"; pend "$tmp/repo"
-hp="$tmp/hp"; mkdir -p "$hp/Projects/Area/Proj/sub"; pend "$hp/Projects/Area/Proj"
-hw="$tmp/hw"; mkdir -p "$hw/repos/workspaces/ws/sub"; pend "$hw/repos/workspaces/ws"
+# ~/Projects and ~/repos are git repos here, as the ~/Projects monorepo is for real: the case block must win
+# over git, or every project's handoffs pool at the monorepo toplevel.
+hp="$tmp/hp"; mkdir -p "$hp/Projects/Area/Proj/sub"; pend "$hp/Projects/Area/Proj"; tg "$hp" init -q "$hp/Projects"
+hw="$tmp/hw"; mkdir -p "$hw/repos/workspaces/ws/sub"; pend "$hw/repos/workspaces/ws"; tg "$hw" init -q "$hw/repos"
 hn="$tmp/hn"; mkdir -p "$tmp/plain2/sub"; pend "$hn/repos/workspaces/_shared"
 mkdir -p "$tmp/home2/repos/workspaces/_shared"   # an _shared with no docs/handoffs/
 
 ok "$(cd "$tmp/plain2/sub" && GIT_CEILING_DIRECTORIES="$tmp" git rev-parse --show-toplevel >/dev/null 2>&1; echo $?)" 128 \
   "plain2/sub is outside any git repo (precondition)"
+ok "$(cd "$hp/Projects/Area/Proj/sub" && GIT_CEILING_DIRECTORIES="$tmp" git rev-parse --show-toplevel 2>/dev/null)" "$hp/Projects" \
+  "the project dir's git toplevel is the Projects monorepo, so the case diverges from git (precondition)"
+ok "$(cd "$hw/repos/workspaces/ws/sub" && GIT_CEILING_DIRECTORIES="$tmp" git rev-parse --show-toplevel 2>/dev/null)" "$hw/repos" \
+  "the workspace dir's git toplevel is ~/repos, so the case diverges from git (precondition)"
 
 shells=("bash"); command -v zsh >/dev/null 2>&1 && shells+=("zsh -f")
 for sh in "${shells[@]}"; do
@@ -76,11 +90,11 @@ for sh in "${shells[@]}"; do
   for want in "pending lf-pending.md" "pending crlf-pending.md" "consumed lf-consumed.md" \
               "consumed crlf-consumed.md" "pending quoted-pending.md" "legacy no-fm.md" \
               "legacy fm-no-status.md" "unknown(draft) draft.md" "legacy fm-no-status-body-pending.md" \
-              "legacy no-fm-body-pending.md"; do
+              "legacy no-fm-body-pending.md" "pending crcr-pending.md"; do
     f="${want#* }"
     ok "$(printf '%s\n' "$got" | awk -v f="$f" '$2==f' )" "$want" "$L $f reads ${want%% *}"
   done
-  ok "$got" "$expected" "$L the whole list: 10 docs, no notes.txt, no sub/nested.md"
+  ok "$got" "$expected" "$L the whole list: 11 docs, no notes.txt, no sub/nested.md"
 
   # missing docs/handoffs/ → nothing printed, exit 0
   scan "$sh" "$tmp/plain" "$tmp/home2"
