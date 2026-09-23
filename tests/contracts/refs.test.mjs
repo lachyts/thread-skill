@@ -4,17 +4,21 @@
 // wrong. Three rules, one matcher (findViolations) shared by the real scan and the control case:
 //
 //   A  every `ADR NNNN` in README.md, skills/**/*.md and docs/adr/*.md resolves to exactly one
-//      docs/adr/NNNN-*.md, unless a foreign-repo qualifier precedes it ("Chorus ADR 0047"). An
-//      `ADR NNNN § X` must also resolve X against that ADR's headings.
+//      docs/adr/NNNN-*.md, unless a foreign-repo qualifier precedes it ("Chorus ADR 0047"). Every
+//      number of a list resolves too ("ADR 0014, 0015", "ADR 0006/0007", "ADRs 0001–0005" by both
+//      endpoints). An `ADR NNNN § X` must also resolve X against that ADR's headings.
 //   B  a `§` citation of a named in-repo target (a skill, a skills/_shared spec, CONTEXT.md, README)
 //      in README.md or skills/**/*.md resolves against that file's headings or bold paragraph labels.
+//      The target sits directly before the `§` ("execute § 3.7", "execute (§8: …"), or is chained:
+//      "`task-writer.md` exactly: § 1 routing, § 2 dedup, …" inline to the sentence end, or the same
+//      introducer followed by nested "- § 1 …" list items (see carryZones).
 //   C  a `§` citation of a file outside the repo can't be checked hermetically, so it must match an
 //      EXTERNAL entry, hand-verified. A new or changed external citation fails until someone checks
 //      it and adds it.
 //
-// Out of scope by design: intra-file bare `§ N`, a citation whose target isn't directly before its `§`
-// (a chained "`task-writer.md` exactly: § 1 …, § 3b …"), § citations in .js/.py/.sh files, and the
-// historical records under docs/ (ADRs are scanned for rule A only). Reads files only.
+// Out of scope by design: intra-file bare `§ N`, a target that is neither directly before its `§` nor
+// a `:` / `exactly:` introducer, § citations in .js/.py/.sh files, and the historical records under
+// docs/ (ADRs are scanned for rule A only). Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -138,13 +142,50 @@ function classify(target, ctx) {
   return null
 }
 
-// The token(s) directly before a §: "execute", "`close`'s", "execute SKILL.md", "(handoff", …
+// The token(s) directly before a §: "execute", "`close`'s", "execute SKILL.md", "(handoff", and the
+// token before an opening paren ("execute (§8: …").
 function targetBefore(pre) {
+  if (/\(\s*$/.test(pre)) pre = pre.replace(/\(\s*$/, '')
   const m = pre.match(/(?:(\S+)\s+)?(\S+)\s*$/)
   if (!m) return ''
   const last = stripToken(m[2])
   if ((last === 'SKILL.md' || last === 'SKILL') && m[1]) return `${stripToken(m[1])} ${last}`
   return last
+}
+
+// Chained citations: a named target followed by `:` or `exactly:` carries to the bare § refs after it.
+// Inline ("`task-writer.md` exactly: § 1 routing, § 2 dedup, …") the carry runs to the sentence end, a
+// blank line or a new list item. When the colon ends its line, it runs through the more-indented lines
+// directly under it (the nested "- § 1 …" items) and stops at the next line indented no deeper. The
+// matcher also stops it at the first § that has its own named target. → [{ start, end, raw, c }].
+function carryZones(text, ctx) {
+  const zones = []
+  for (const m of text.matchAll(/(\S+?)(?:\s+exactly)?:(?=[ \t]|\n|$)/g)) {
+    const raw = targetBefore(text.slice(Math.max(0, m.index - 300), m.index + m[1].length))
+    const c = raw && classify(raw, ctx)
+    if (!c) continue
+    const colon = m.index + m[0].length - 1
+    // A colon inside a code span ("`status: open`") introduces nothing.
+    if ((text.slice(text.lastIndexOf('\n', colon) + 1, colon).match(/`/g) || []).length % 2) continue
+    const start = colon + 1
+    const eol = text.indexOf('\n', start) < 0 ? text.length : text.indexOf('\n', start)
+    let end
+    if (text.slice(start, eol).trim() === '') {
+      const lineStart = text.lastIndexOf('\n', m.index) + 1
+      const indent = text.slice(lineStart).match(/^[ \t]*/)[0].length
+      end = eol
+      while (end < text.length) {
+        const next = text.slice(end + 1).split('\n')[0]
+        if (!next.trim() || next.match(/^[ \t]*/)[0].length <= indent) break
+        end += 1 + next.length
+      }
+    } else {
+      const stop = text.slice(start).search(/\.(?=\s|$)|\n[ \t]*\n|\n[ \t]*(?:[-*+]|\d+\.)\s/)
+      end = stop < 0 ? text.length : start + stop
+    }
+    if (end > start) zones.push({ start, end, raw, c })
+  }
+  return zones
 }
 
 // ---- the matcher --------------------------------------------------------------------------------
@@ -169,29 +210,40 @@ function findViolations(sources, ctx, checked = { A: 0, B: 0, C: 0 }) {
     const push = (i, rule, cite, why) => out.push({ file, line: lineAt(text, i), rule, cite, why })
 
     if (rules.includes('A')) {
-      for (const m of text.matchAll(/\bADR\s+(\d{4})\b/g)) {
+      // "ADR 0014, 0015", "ADR 0006/0007", "ADR 0011 and 0014", "ADRs 0001–0005": every listed number
+      // resolves (a range by both endpoints). A continuation number followed by `-` or a digit is a date
+      // ("ADR 0015, 2026-09-15"), not an ADR. A trailing `§ X` belongs to the last number.
+      const NUM = String.raw`\d{4}(?![-\d])`
+      const LIST = new RegExp(String.raw`\bADRs?\s+(\d{4})\b((?:\s*(?:,|\/|&|–|\band\b)\s*${NUM})*)`, 'g')
+      for (const m of text.matchAll(LIST)) {
         const q = (text.slice(Math.max(0, m.index - 60), m.index).match(/(\S+)\s+$/)?.[1] || '')
           .replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, '')
         if (FOREIGN_ADR_QUALIFIERS.includes(q)) continue
-        checked.A++
-        const hits = ctx.adrs.get(m[1]) || []
+        const nums = [m[1], ...(m[2].match(/\d{4}/g) || [])]
         const rest = text.slice(m.index + m[0].length).match(/^\s*§§?\s*/)
         const section = rest ? sectionAfter(text, m.index + m[0].length + rest[0].length) : ''
-        const cite = `ADR ${m[1]}${rest ? ` § ${section.slice(0, 40)}` : ''}`
-        if (hits.length !== 1) { push(m.index, 'A', cite, `${hits.length} docs/adr/${m[1]}-*.md files (need exactly 1)`); continue }
-        if (rest) {
-          const t = indexOf(`docs/adr/${hits[0]}`)
-          const why = resolveSection(t.text, section, t.idx)
-          if (why) push(m.index, 'A', cite, `docs/adr/${hits[0]}: ${why}`)
-        }
+        nums.forEach((n, i) => {
+          checked.A++
+          const last = i === nums.length - 1
+          const hits = ctx.adrs.get(n) || []
+          const cite = `ADR ${n}${rest && last ? ` § ${section.slice(0, 40)}` : ''}`
+          if (hits.length !== 1) { push(m.index, 'A', cite, `${hits.length} docs/adr/${n}-*.md files (need exactly 1)`); return }
+          if (rest && last) {
+            const t = indexOf(`docs/adr/${hits[0]}`)
+            const why = resolveSection(t.text, section, t.idx)
+            if (why) push(m.index, 'A', cite, `docs/adr/${hits[0]}: ${why}`)
+          }
+        })
       }
     }
 
     if (rules.includes('B') || rules.includes('C')) {
+      const zones = carryZones(text, ctx)
       for (const m of text.matchAll(/§§?/g)) {
-        const raw = targetBefore(text.slice(Math.max(0, m.index - 300), m.index))
-        if (!raw) continue
-        const c = classify(raw, ctx)
+        let raw = targetBefore(text.slice(Math.max(0, m.index - 300), m.index))
+        let c = raw ? classify(raw, ctx) : null
+        const zone = zones.find((z) => m.index >= z.start && m.index < z.end)
+        if (c) { if (zone) zone.end = m.index } else if (zone) { raw = zone.raw; c = zone.c; }
         if (!c) continue
         const section = sectionAfter(text, m.index + m[0].length).replace(/^§+\s*/, '')
         const cite = `${raw} § ${section.slice(0, 40)}`
@@ -199,10 +251,12 @@ function findViolations(sources, ctx, checked = { A: 0, B: 0, C: 0 }) {
         if (c.ext) {
           if (!rules.includes('C')) continue
           checked.C++
+          // A numeric section compares whole (6 ≠ 6.4 ≠ 6b), so a changed number fails until re-verified.
           const num = section.match(NUMERIC)
+          const numKey = num ? num[1] + (num[2] ? `.${num[2]}` : '') + (num[3] || '') : null
           const key = citeKey(section)
           const ok = EXTERNAL.some(([p, s]) => (c.ext === p || c.ext.endsWith(`/${p}`)) &&
-            (/^\d/.test(s) ? !!num && num[1] === s : key === s.toLowerCase()))
+            (/^\d/.test(s) ? numKey === s : key === s.toLowerCase()))
           if (!ok) push(m.index, 'C', cite, 'external citation not on the EXTERNAL allowlist (verify by hand, then add it)')
           continue
         }
@@ -267,20 +321,35 @@ test('rule C: every external § citation is on the hand-verified EXTERNAL allowl
 test('control: the matcher rejects known-bad citations and accepts known-good ones', () => {
   const run = (text) => findViolations([{ file: 'control.md', text }], ctx)
   for (const bad of ['execute § 99', 'ADR 0999', 'ADR 0008 § Nope', '`add-task.md` § Nope',
-    '`add-task.md` § Phased tasks', 'task-writer § 9.9']) {
+    '`add-task.md` § Phased tasks', 'task-writer § 9.9', 'execute (§ 99',
+    // chained: inline run and nested list items carry the introducer to each bare §
+    '`task-writer.md` exactly: § 1 routing, § 99 nope', '`task-writer.md`: § 1 routing, § 3b day page, § 99 nope',
+    'follow `task-writer.md` exactly:\n   - § 1 routing.\n   - § 99 nope.\n   - § 2 dedup.',
+    // every number of an ADR list, both endpoints of a range
+    'ADR 0014, 0999', 'ADR 0006/0999', 'ADR 0011 and 0999', 'ADRs 0001–0999',
+    // an external numeric section compares whole, not by its major number
+    '`_shared/knowledge/triage-batching-protocol.md` §6.4', '`_shared/knowledge/triage-batching-protocol.md` § 6b']) {
     assert.equal(run(bad).length, 1, `expected exactly one violation for: ${bad} → ${JSON.stringify(run(bad))}`)
   }
   for (const good of ['Chorus ADR 0047', 'workspaces ADR 0003', 'task-writer § 1.4', 'handoff § Handoff document defines',
     'close § The handoff owns the continuation has the scan', 'execute SKILL §4.5 step 5',
-    '/thread:schedule §4.7', 'CONTEXT.md § Rollout.']) {
+    '/thread:schedule §4.7', 'CONTEXT.md § Rollout.', 'execute (§8: x',
+    // chained runs stop at a sentence end, a shallower list item, another named target, a code-span colon
+    '`task-writer.md` exactly: § 1 routing. Then § 99 is bare.',
+    'follow `task-writer.md` exactly:\n   - § 1 routing.\n- § 99 is a new top-level item.',
+    '`task-writer.md` exactly: § 1 routing, CONTEXT.md § Rollout, § 99 is bare',
+    'a `status: open` task, § 99 is bare',
+    'ADR 0006/0007', 'ADR 0011 and 0014', 'ADRs 0001–0005', 'ADR 0015, 2026-09-15: amended',
+    '`_shared/knowledge/triage-batching-protocol.md` §6']) {
     assert.deepEqual(run(good).map(fmt), [], `expected no violation for: ${good}`)
   }
 })
 
-// Floors sit below the 2026-09-23 counts (A 97 after the Chorus qualifier, B 29, C 9) so sibling edits
-// that add or drop a citation don't trip them; a scan that silently stops matching does.
+// Floors sit well below the 2026-09-23 counts (A 103 with list continuations, B 43 with the chained
+// task-writer citations, C 9) so sibling edits that move or drop citations don't trip them; a matcher
+// that silently stops matching does.
 test('non-vacuity: the real scan checked a floor of references per rule', () => {
-  assert.ok(checked.A >= 90, `rule A checked only ${checked.A} ADR references`)
+  assert.ok(checked.A >= 50, `rule A checked only ${checked.A} ADR references`)
   assert.ok(checked.B >= 25, `rule B checked only ${checked.B} in-repo § citations`)
   assert.ok(checked.C >= 6, `rule C checked only ${checked.C} external § citations`)
 })
