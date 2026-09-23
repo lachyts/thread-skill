@@ -1,0 +1,480 @@
+{
+  "check": "claude-native-routing-capability",
+  "date": "2026-09-23",
+  "session": "83243d46-2dbd-49ef-8e6b-194a8e84abdb",
+  "runtime": "2.1.280 (Claude Code)",
+  "runtimeBinarySha256": "387a5c5dcdbb815085edf0baf79591f9d8894efe922bceaf3d75b1b08055229d",
+  "account": "claude-account-85b950f122615c51",
+  "policyDigest": "d2eb7979ad0423484979dedfbb76b52713421583256357637032c32e06a66f2d",
+  "capabilities": {
+    "claude-opus-5-5": {
+      "name": "Opus 5.5",
+      "section": "main",
+      "effortOptions": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "catalogueDefault": [
+        "medium"
+      ]
+    },
+    "claude-fable-5-1": {
+      "name": "Fable 5.1",
+      "section": "main",
+      "effortOptions": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "catalogueDefault": [
+        "high"
+      ]
+    }
+  },
+  "capabilityCatalogueSha256": "24a6f29c2b574ba984f22753bb5fddd4dd762cdb3e890fe441170f3291c7de8b",
+  "sharedSettings": {
+    "sha256Before": "c8707904a3b6a7e4f8fa67f7cb5262f4f6d04774447ee7b82b5dbbcfcd3422ae",
+    "sha256After": "c8707904a3b6a7e4f8fa67f7cb5262f4f6d04774447ee7b82b5dbbcfcd3422ae",
+    "effortLevel": "xhigh",
+    "modelSettings": {
+      "claude-haiku-4-5": {
+        "effortLevel": "high"
+      },
+      "claude-fable-5-1": {
+        "effortLevel": "high"
+      },
+      "claude-opus-5": {
+        "effortLevel": "xhigh"
+      },
+      "claude-opus-5-5": {
+        "effortLevel": "xhigh"
+      }
+    }
+  },
+  "sources": [
+    {
+      "name": "thread",
+      "commit": "aa184cd56fca8176b28f873f93bc6d435d5c4210",
+      "currentHead": "45a093b67a8c3942ab8bdb6f6798af8ec66fbd32",
+      "matched": true,
+      "scopedStatusClean": true
+    },
+    {
+      "name": "shared",
+      "commit": "ac028d47aeb7844b8c18cd0156acc5c3a7ebb749",
+      "currentHead": "ac028d47aeb7844b8c18cd0156acc5c3a7ebb749",
+      "matched": true,
+      "scopedStatusClean": true
+    },
+    {
+      "name": "skills",
+      "commit": "7273ac93833cd4d895534e45e37bead16fb6a834",
+      "currentHead": "7273ac93833cd4d895534e45e37bead16fb6a834",
+      "matched": true,
+      "scopedStatusClean": true
+    },
+    {
+      "name": "reader",
+      "commit": "8e5072c52ae69b7f19c2b7ec771305f258c3f887",
+      "currentHead": "8e5072c52ae69b7f19c2b7ec771305f258c3f887",
+      "matched": true,
+      "scopedStatusClean": true
+    }
+  ],
+  "fixture": {
+    "base": "f41bab93562a5626e9820175ad67fa0ddbfc6bd2",
+    "head": "90b7591125a033c1378aabe79016285e820bc7b2",
+    "baselineExit": 0,
+    "candidateExit": 1
+  },
+  "spending": {
+    "ceiling": 5,
+    "attempted": 5,
+    "completed": 5,
+    "refusals": 0,
+    "formattingCorrections": 0,
+    "descendants": 0,
+    "peakLive": 2
+  },
+  "probes": [
+    {
+      "slot": 1,
+      "label": "easy",
+      "requestId": "8fb65143c11236a09bdcd59551f58ef3",
+      "childId": "ac2dedf6711ce201c",
+      "agentType": "thread-routing-probe-opus-high",
+      "requested": {
+        "model": null,
+        "effort": null,
+        "role": "work",
+        "difficulty": "easy",
+        "qualityFailures": 0,
+        "exactModel": false
+      },
+      "resolved": {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": "high",
+        "policyDigest": "d2eb7979ad0423484979dedfbb76b52713421583256357637032c32e06a66f2d",
+        "route": "normal"
+      },
+      "observed": {
+        "model": "claude-opus-5-5",
+        "effort": "high",
+        "source": "native-runtime",
+        "evidence": "Claude Code 2.1.280 child transcript agent-ac2dedf6711ce201c.jsonl sha256 72dbf84317fb7c0309fed7ee10f556a49ef65295ee65e32ea58c4489e5d6a339: all 4 assistant entries carry message.model=claude-opus-5-5 effort=high perTurnEffort=high; meta agentType=thread-routing-probe-opus-high"
+      },
+      "assistantTurns": 4,
+      "transcriptSha256": "72dbf84317fb7c0309fed7ee10f556a49ef65295ee65e32ea58c4489e5d6a339",
+      "toolUses": [
+        "Bash"
+      ],
+      "promptDeliveredVerbatim": true,
+      "status": "accepted"
+    },
+    {
+      "slot": 2,
+      "label": "hard",
+      "requestId": "b657922c64176a9441614c3d3bfe4dfd",
+      "childId": "a0753ab59eb4903a4",
+      "agentType": "thread-routing-probe-opus-xhigh",
+      "requested": {
+        "model": null,
+        "effort": null,
+        "role": "work",
+        "difficulty": "hard",
+        "qualityFailures": 0,
+        "exactModel": false
+      },
+      "resolved": {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": "xhigh",
+        "policyDigest": "d2eb7979ad0423484979dedfbb76b52713421583256357637032c32e06a66f2d",
+        "route": "normal"
+      },
+      "observed": {
+        "model": "claude-opus-5-5",
+        "effort": "xhigh",
+        "source": "native-runtime",
+        "evidence": "Claude Code 2.1.280 child transcript agent-a0753ab59eb4903a4.jsonl sha256 ffe700fc912cab5d393c82deb7eb2e6ad9cd3df5ed7dfdc13560591b99cf9c40: all 7 assistant entries carry message.model=claude-opus-5-5 effort=xhigh perTurnEffort=xhigh; meta agentType=thread-routing-probe-opus-xhigh"
+      },
+      "assistantTurns": 7,
+      "transcriptSha256": "ffe700fc912cab5d393c82deb7eb2e6ad9cd3df5ed7dfdc13560591b99cf9c40",
+      "toolUses": [
+        "Bash"
+      ],
+      "promptDeliveredVerbatim": true,
+      "status": "accepted"
+    },
+    {
+      "slot": 3,
+      "label": "review",
+      "requestId": "efcefae5d79825473856bf0c58a1beca",
+      "childId": "a0780129298d84ee1",
+      "agentType": "general-purpose",
+      "requested": {
+        "model": null,
+        "effort": null,
+        "role": "review",
+        "difficulty": "hard",
+        "qualityFailures": 0,
+        "exactModel": false
+      },
+      "resolved": {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": "xhigh",
+        "policyDigest": "d2eb7979ad0423484979dedfbb76b52713421583256357637032c32e06a66f2d",
+        "route": "normal"
+      },
+      "observed": {
+        "model": "claude-opus-5-5",
+        "effort": "xhigh",
+        "source": "native-runtime",
+        "evidence": "Claude Code 2.1.280 child transcript agent-a0780129298d84ee1.jsonl sha256 860c524121d6f53702302f87b1418e49bce750e8bea8eb7ec0cb06419edbb746: all 11 assistant entries carry message.model=claude-opus-5-5 effort=xhigh perTurnEffort=xhigh; meta agentType=general-purpose"
+      },
+      "assistantTurns": 11,
+      "transcriptSha256": "860c524121d6f53702302f87b1418e49bce750e8bea8eb7ec0cb06419edbb746",
+      "toolUses": [
+        "Bash"
+      ],
+      "promptDeliveredVerbatim": false,
+      "status": "accepted"
+    },
+    {
+      "slot": 4,
+      "label": "maximum",
+      "requestId": "a6fc55f4c145658d340f43d203799f8c",
+      "childId": "ae7efea807d78907b",
+      "agentType": "thread-routing-probe-opus-max",
+      "requested": {
+        "model": null,
+        "effort": null,
+        "role": "work",
+        "difficulty": "hard",
+        "qualityFailures": 1,
+        "exactModel": false
+      },
+      "resolved": {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": "max",
+        "policyDigest": "d2eb7979ad0423484979dedfbb76b52713421583256357637032c32e06a66f2d",
+        "route": "maximum"
+      },
+      "observed": {
+        "model": "claude-opus-5-5",
+        "effort": "max",
+        "source": "native-runtime",
+        "evidence": "Claude Code 2.1.280 child transcript agent-ae7efea807d78907b.jsonl sha256 0117a9e0faf20791714191e40d2354a6a9aa112471534258462d4b99430d6cd1: all 12 assistant entries carry message.model=claude-opus-5-5 effort=max perTurnEffort=max; meta agentType=thread-routing-probe-opus-max"
+      },
+      "assistantTurns": 12,
+      "transcriptSha256": "0117a9e0faf20791714191e40d2354a6a9aa112471534258462d4b99430d6cd1",
+      "toolUses": [
+        "Bash"
+      ],
+      "promptDeliveredVerbatim": true,
+      "status": "accepted"
+    },
+    {
+      "slot": 5,
+      "label": "recovery",
+      "requestId": "d2f27f13470a7905811d1902f1f7ac9e",
+      "childId": "a6bdd2e2c5d6e38f8",
+      "agentType": "thread-routing-probe-fable-max",
+      "requested": {
+        "model": null,
+        "effort": null,
+        "role": "work",
+        "difficulty": "hard",
+        "qualityFailures": 2,
+        "exactModel": false
+      },
+      "resolved": {
+        "harness": "claude",
+        "model": "claude-fable-5-1",
+        "effort": "max",
+        "policyDigest": "d2eb7979ad0423484979dedfbb76b52713421583256357637032c32e06a66f2d",
+        "route": "recovery"
+      },
+      "observed": {
+        "model": "claude-fable-5-1",
+        "effort": "max",
+        "source": "native-runtime",
+        "evidence": "Claude Code 2.1.280 child transcript agent-a6bdd2e2c5d6e38f8.jsonl sha256 ce95bd8afff7ec52ac361995212f2b2d26b9953865529427202c2ed5ff2051be: all 13 assistant entries carry message.model=claude-fable-5-1 effort=max perTurnEffort=max; meta agentType=thread-routing-probe-fable-max"
+      },
+      "assistantTurns": 13,
+      "transcriptSha256": "ce95bd8afff7ec52ac361995212f2b2d26b9953865529427202c2ed5ff2051be",
+      "toolUses": [
+        "Bash"
+      ],
+      "promptDeliveredVerbatim": false,
+      "status": "accepted"
+    }
+  ],
+  "review": {
+    "receipt": {
+      "version": 1,
+      "requestId": "efcefae5d79825473856bf0c58a1beca",
+      "childId": "a0780129298d84ee1",
+      "harness": "claude",
+      "engine": "code-review",
+      "reviewLevel": "xhigh",
+      "reviewedHead": "90b7591125a033c1378aabe79016285e820bc7b2",
+      "invocationId": "toolu_01AqsR7ZxtnP3oYSkwjSJM5n",
+      "nativeEvidence": {
+        "path": "/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/.thread/claude-routing-capability-2026-09-23/review-invocation-evidence.json"
+      }
+    },
+    "invocationEvidenceSha256": "82550181f0fdd08fd82c3a89b2af286e8c88271bc9212a1e8d2ad75f7e2cc1f5",
+    "promptDelivery": "built-in forked child receives rendered target plus unmodified xhigh recipe; adapter preamble not deliverable"
+  },
+  "recoveryPromptDefect": {
+    "label": "recovery",
+    "claimPromptLength": 2628,
+    "deliveredLength": 2628,
+    "differences": [
+      [
+        "replace",
+        " failures or a correction ladder.",
+        "-failures or a correction ladder."
+      ]
+    ],
+    "cause": "lead transcription error when copying the claimed prompt into the native Agent call; not a child or adapter change"
+  },
+  "localConflictFixture": [
+    {
+      "name": "opus-pin-vs-easy-high",
+      "profile": {
+        "model": "claude-opus-5-5",
+        "effort": "xhigh"
+      },
+      "intent": {
+        "role": "work",
+        "difficulty": "easy"
+      },
+      "rejection": "Native profile effort conflicts with requested routing; do not silently override it."
+    },
+    {
+      "name": "opus-pin-vs-first-failure-max",
+      "profile": {
+        "model": "claude-opus-5-5",
+        "effort": "xhigh"
+      },
+      "intent": {
+        "role": "work",
+        "difficulty": "hard",
+        "qualityFailures": 1
+      },
+      "rejection": "Native profile effort conflicts with requested routing; do not silently override it."
+    },
+    {
+      "name": "fable-pin-vs-recovery-max",
+      "profile": {
+        "model": "claude-fable-5-1",
+        "effort": "high"
+      },
+      "intent": {
+        "role": "work",
+        "difficulty": "hard",
+        "qualityFailures": 2
+      },
+      "rejection": "Native profile effort conflicts with requested routing; do not silently override it."
+    }
+  ],
+  "temporaryActivation": {
+    "approval": "Lachy selected \"Temporary user-level agents (Recommended)\" in this session (AskUserQuestion), 2026-09-23",
+    "added": {
+      "thread-routing-probe-fable-max.md": "16e551592f912eff4699a1c0bde96281f683baa648a271e621ed80880f4bd548",
+      "thread-routing-probe-opus-high.md": "42fc09aeb3e8049a05aa70e7cfcef01571f649d6dcd6bace61594d3255a6c3d5",
+      "thread-routing-probe-opus-max.md": "ca95ab45afb9946959aec3b22983235eab0b7ebd414a20ea68fcd999772e81f2",
+      "thread-routing-probe-opus-xhigh.md": "d850a373453dbd7fa69b379a4ce1b15e3695ad76ae319c4be30aa789c9cc8535"
+    },
+    "addedAt": "2026-09-23T13:01:02.137858+10:00",
+    "rollback": {
+      "removedAt": "2026-09-23T13:08:02.973958+10:00",
+      "user": {
+        "thread-routing-probe-fable-max.md": "removed (bytes matched)",
+        "thread-routing-probe-opus-high.md": "removed (bytes matched)",
+        "thread-routing-probe-opus-max.md": "removed (bytes matched)",
+        "thread-routing-probe-opus-xhigh.md": "removed (bytes matched)"
+      },
+      "project": {
+        "thread-routing-probe-fable-max.md": "removed (bytes matched)",
+        "thread-routing-probe-opus-high.md": "removed (bytes matched)",
+        "thread-routing-probe-opus-max.md": "removed (bytes matched)",
+        "thread-routing-probe-opus-xhigh.md": "removed (bytes matched)"
+      }
+    }
+  },
+  "postProbeChecks": {
+    "sourceDrift": [],
+    "fixtureHeadUnchanged": true,
+    "fixtureClean": true,
+    "fixtureBytesUnchanged": true,
+    "settingsUnchanged": true,
+    "settingsSha256": "c8707904a3b6a7e4f8fa67f7cb5262f4f6d04774447ee7b82b5dbbcfcd3422ae",
+    "childInventory": [
+      "a0753ab59eb4903a4",
+      "a0780129298d84ee1",
+      "a6bdd2e2c5d6e38f8",
+      "ac2dedf6711ce201c",
+      "ae7efea807d78907b"
+    ],
+    "boundChildren": [
+      "a0753ab59eb4903a4",
+      "a0780129298d84ee1",
+      "a6bdd2e2c5d6e38f8",
+      "ac2dedf6711ce201c",
+      "ae7efea807d78907b"
+    ],
+    "inventoryEqualsBound": true,
+    "descendants": [],
+    "spawnDepths": [
+      1
+    ]
+  },
+  "privateEvidence": {
+    "directory": "/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/.thread/claude-routing-capability-2026-09-23",
+    "files": {
+      "collect.py": "40791ebaceb1b7d5d98cdbfd48b59bcf39d08a478f524cbdf8493d1799bee685",
+      "drive.mjs": "e36aa43f339cb043334574111bd09c5476b22a3dfaa5d6b022b7ba518e93c652",
+      "easy-accepted.json": "dac9fd392a8231c657cb7ef2c12820af35862598a17cf4ccab24fd6ef1456e58",
+      "easy-claim.json": "e828d584b331244f20d3c3858b1ebde9eab5133ea362665f28cc9f21457d4fd4",
+      "easy-envelope.json": "60732257a84d5ac48676835ab65ed5444088d3b3211a32b2d754b612b7ba1a82",
+      "easy-native-receipt.json": "e8b18fb6f90c43a853288f1335b063fa200a1caa892a9f6ea423fb21f5cc90c7",
+      "easy-observation.json": "c7e06a96e7c8a9bc693dd07cfcd7e0a7dc1c5e8029dd82a522915c4de3a3fdad",
+      "easy-prompt.txt": "a6cdab548e212b14c125164476a491aba4c3b6a5c675305fd70404dcc9df6062",
+      "exchange/run.json": "722d1598738997dcbe50ff49797149ebbf7a0e8756a5b37d92d40c343e2c5e59",
+      "finalise.py": "a406d43982246d97a1f042b37d275ca63c27f6e29331becc9385245e44ef04ff",
+      "fixture/capacity.py": "4fd66457231638bc9dc978af6b0ce89f5842b80dab608439d97b7274f97a4f2a",
+      "fixture/verify.py": "7098742c813256d7828c132fefd6f442ad1d016573317f786b9a6c1051b89f94",
+      "fixture.json": "8e44578e6069409e15e1a6a640c82d5e42a77834ed01315cb5483b8930aa5335",
+      "hard-accepted.json": "57f9d879849368d4f0f09f207aad222c57b49b69bb633b1847e99e1398ef9960",
+      "hard-claim.json": "7cd8ffbb08e9ddaf84a8d2bb89a31ccf1811b1d6f126064eeeefd736eed20b87",
+      "hard-envelope.json": "1f0d0ab74fcfd0e71c7e57669b370aa7cfad5bb4e43dce371d6d476145f88c32",
+      "hard-native-receipt.json": "0059b3a8effef73e0ba383aa04c5880269b2de52d360e92fe2c9a5167c25b28f",
+      "hard-observation.json": "cc3c758cce7e5dfaabff8d7c1ed8e5da355ea4461b6575067929cdd397248f6f",
+      "hard-prompt.txt": "96149ec542ca28a6f56d538624cd24c85f253533aa69e8c6b77e94ce9399ed55",
+      "latest-status.json": "b0b4b830398d9f60e038be4c3e0683f74081ab6cd649189b2391e489d97866b5",
+      "local-conflict-fixture.json": "7566ce6ab7adc7b0606abe9e9892ae70a98c24b69777f680b91d7d6f62203f47",
+      "maximum-accepted.json": "2505f9a8a7cefd9ac92e6724e556eac996fdc0a3746be8541b233ad58b104ed1",
+      "maximum-claim.json": "d05269c5196230b88a68a2c731f064059305f1a53d9b38b89105140aaf1839ed",
+      "maximum-envelope.json": "734a895b3273f15faccb6b9366161ac6a8d4928c810e6e189a2b451a5023f0c7",
+      "maximum-native-receipt.json": "b1f5923bcfe7fadbc410c8f78076cf8075add2d4df7766517019261373379386",
+      "maximum-observation.json": "ae23d64d2a0488bf2677bd6035241b373426ba36a986338180314dee46a2d762",
+      "maximum-prompt.txt": "ab72b5bb8bc72d5906b7cdd1cc31b9ec699a2c3a6574c4cb968389c7dba7b595",
+      "native-preflight.json": "c4d23511d2db6127fd9ee0c2b0e61dfc30bae6bf961a6cd1907919ee27435b98",
+      "pinned/scripts/native_inference.py": "5b2f3d013fd3c180c6945de23b0600dfe4499a0a59fd73d6450314dc55437fd3",
+      "pinned/scripts/native_routing.mjs": "a6ba0b9ed156c9c56bdddb37f1a8cbeb95d28b2e5a45b2de8addcb0b37d271e1",
+      "pinned/scripts/native_workflow.mjs": "94f1a8a3694c714b8955fb2ea91f42b8d0eb06eff17f86777314b511ec1c8b7b",
+      "pinned/state/native-routing-policy.json": "c779955de6d15d48f96baa5888f811793328e1ff01ca3dd2c8c567b3961d213a",
+      "post-probe-checks.json": "84c087a3964e7eeb823b24448c6a9aced671a0babb6eb7164edb47375a2ef230",
+      "prepare.py": "31b817a10f558afb66268faaffb60ed073ccb57b75af38bf74c6b58ff4814e09",
+      "prepared-requests.json": "5171ac0e65180a49d4332ec82640c1d29a1b5f6f51593a8e8ce36e63b5dca5bb",
+      "probe-definitions.json": "16085cee041d34f80b28dfef3d9c0190d9f5425b8e29ff6c0018718c3e41f52a",
+      "probe-spending.json": "5a10427d4f2ea77be55c113715233a4c634fc12305c0e6fec8f62464c56d0d60",
+      "probe.workflow.js": "56c98bc90d3809234536b86e46d8a933c01414f6fa935cea517aa381ffd8c396",
+      "receipts/agent-a0753ab59eb4903a4.jsonl": "ffe700fc912cab5d393c82deb7eb2e6ad9cd3df5ed7dfdc13560591b99cf9c40",
+      "receipts/agent-a0753ab59eb4903a4.meta.json": "64cc227cdaa4bae6c4b77e0f15865d4223c18842925ea5c7a97e54c7144b9f9e",
+      "receipts/agent-a0780129298d84ee1.jsonl": "860c524121d6f53702302f87b1418e49bce750e8bea8eb7ec0cb06419edbb746",
+      "receipts/agent-a0780129298d84ee1.meta.json": "46e884daf44f1fb58046bcfd4748453000bdc42b6d7afecdb3e86d5228ab873c",
+      "receipts/agent-a6bdd2e2c5d6e38f8.jsonl": "ce95bd8afff7ec52ac361995212f2b2d26b9953865529427202c2ed5ff2051be",
+      "receipts/agent-a6bdd2e2c5d6e38f8.meta.json": "7199e9e3ff04d7ab04788af6c5d8fc5dd6f9cdf428f186d565d84808d0f279d0",
+      "receipts/agent-ac2dedf6711ce201c.jsonl": "72dbf84317fb7c0309fed7ee10f556a49ef65295ee65e32ea58c4489e5d6a339",
+      "receipts/agent-ac2dedf6711ce201c.meta.json": "a63c71d61acd298b9e0c6389f2e157e3ea48cfa3e43b2d8fc8d707bab1e12f93",
+      "receipts/agent-ae7efea807d78907b.jsonl": "0117a9e0faf20791714191e40d2354a6a9aa112471534258462d4b99430d6cd1",
+      "receipts/agent-ae7efea807d78907b.meta.json": "f2404761706a683c45257cfc895b70cf5faed27fc9234b9c13dc303bd9b4a87c",
+      "recovery-accepted.json": "013ea8e14cf75b93fb06ff5464063a346a66bb122826bed80a24894037e4010e",
+      "recovery-claim.json": "057a675cacf11db7294c2a577cc44cfe389cd2fe9f43197c47817b62177c9b85",
+      "recovery-envelope.json": "593defb4fb41a64ff5f7f8e3cd19752d953dacb69f09adae618d99520a1a152e",
+      "recovery-native-receipt.json": "48e81cd96823d58f78eee84e9e7fa7b75b98e053f3c45c74a2ecadadda41a143",
+      "recovery-observation.json": "cab947ba85a79e0168fef41b471e3f823d05fe8cd805a21d93343459a540284a",
+      "recovery-prompt-delivery-defect.json": "cc60e6f97f7ddfa9ef6316444ce3f1f8a73ad4870b4e33b1d9212b20b5f0ebf8",
+      "recovery-prompt.txt": "2aa974f19f2247dd2b12504d0da99ff3b2c3315240abd2cf1ebda9cca8414fde",
+      "resolver-tests.tap": "ef19d9bb4c977138b97ed07f88e5a5efb983ce1e5bde354459747c66a2f4e699",
+      "review-accepted.json": "37050fe38f83aed436f378ae63e1a7b2b3d724a55b0e888eef10ef6a4ea3fb32",
+      "review-claim.json": "9d070405189402223be6c955563f315462d4399121fc8027948cbcf55cc275af",
+      "review-engine.json": "bc3331e46f8a6507a73560f185fcc0fb9102ca8d05d82e3c809302ef3ab37d5f",
+      "review-envelope.json": "bb2a5063f6d6b2bf09dc134f64e452c7cb73ac278daaf6954ac98a5a561f3a32",
+      "review-invocation-evidence.json": "82550181f0fdd08fd82c3a89b2af286e8c88271bc9212a1e8d2ad75f7e2cc1f5",
+      "review-native-receipt.json": "6c001339478e52ca58fafa7d1d3946b18cf4c99da75afcd43ac7714da328b3c0",
+      "review-observation.json": "95ecfd9a876842dd685ab7af5f8f9fcb4bd70464bb7e9894bd9758e02fc65438",
+      "review-prompt.txt": "3e403bc5679043d9a83598e0c24468e74d3a87a5143ba4b86d922306a4dff753",
+      "review-receipt.json": "0c3372d6c3a876a0463cf37ed498b32b3270d701ead74d0c89d6ad5fbbe86b68",
+      "routing-policy.json": "0d1f8e6556d0b2b6fd17244a40e08dee14b2e09c5ce4ab37f55d5eab7eb18154",
+      "source-manifest.json": "9e55806d064766e1ef9aa327f84ec91f0604d8d3c57e8981bc0a4f6a01773d7d",
+      "subagents-after-review.txt": "e7679deb0c6448d49ae061bc7c3b924f9971691841fceff822b5c70375da5936",
+      "subagents-before-review.txt": "558de167041669aa15a5b46d6cdb9b54c374d35e0bfdbee0c54bec091ff35b6c",
+      "temporary-activation.json": "44cdc18aba5d496db35d2ea63f12bacd1c8a5db820e8667dea01c18e8fd03c9d",
+      "user-agents-after.txt": "901723db69afe0cb5f9abc75454fc7c0909e2608f9533186f28a732b8f104588",
+      "user-agents-before.txt": "62f66969296bf904a534a218acaf1c16b6d58fdae85d24593af665a523d04f92"
+    }
+  }
+}

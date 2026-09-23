@@ -1,7 +1,8 @@
 ---
 thread: thread-skill
 written: 2026-09-23
-status: pending
+status: consumed
+consumed: 2026-09-23 by native Claude session 83243d46-2dbd-49ef-8e6b-194a8e84abdb
 ---
 
 # Claude routing capability check
