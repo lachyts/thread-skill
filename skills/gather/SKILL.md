@@ -109,7 +109,7 @@ phases to create (pN — name) | old filename → new filename | joins existing 
 
 Then write, per the shared writer specs — **reference them for note shape, never duplicate the
 schema**: `~/repos/workspaces/_shared/knowledge/add-writers/add-phase.md` (phase notes) and
-`add-task.md` § Phased tasks (renamed tasks).
+`add-task.md` § Step 4 (its *Phased task* bullet) for renamed tasks.
 
 1. **Phase notes** — `Work/Phases/<project-slug>-p<N>-<kebab-desc>.md` (`tags: [phase, <area>]`,
    `phase: N`, embedded name-prefix task base, `## Build sequence` listing the members), numbering

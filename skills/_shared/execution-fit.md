@@ -24,7 +24,7 @@ buys nothing there.
 **Signs a task is NOT wave-shaped** (any one disqualifies it):
 
 - Its core action is an external publish — CMS, live site, DNS, config console.
-  (These always pause at the human gate regardless — ADR 0008 §3.7.)
+  (These always pause at the human gate regardless — ADR 0008; execute § 3.7.)
 - Its ordering constraint is a measurement window or calendar date, not file
   overlap. The engine's parallelism is forbidden by isolation windows, and
   file-overlap wave computation cannot see window/calendar constraints.
