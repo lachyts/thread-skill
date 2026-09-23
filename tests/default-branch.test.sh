@@ -7,7 +7,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
-unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
+unset $(git rev-parse --local-env-vars)   # git's own list of repo-local vars (GIT_DIR, GIT_CONFIG_PARAMETERS, …)
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch="${GB:-master}" "$@"; }
