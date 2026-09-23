@@ -8,14 +8,14 @@ supplementary checks. They do not validate this corrected contract.
 
 | Promise | Candidate fixture or source evidence | Native live evidence for these bytes |
 | --- | --- | --- |
-| Easy high, difficult xhigh; reviewer floor | Shared resolver + engine routing tests | Pending both harnesses |
-| First quality failure goes directly to model maximum | Engine routing sequences, accumulated feedback assertions | Pending both harnesses |
+| Easy high, difficult xhigh; reviewer floor | Shared resolver + engine routing tests | Codex native bindings observed; Claude pending |
+| First quality failure goes directly to model maximum | Engine routing sequences, accumulated feedback assertions | Codex maximum binding observed; actual failure transition pending both harnesses |
 | Failed maximum correction permits alternative at its maximum | Shared resolver + engine + host integration fixtures | Pending both harnesses |
 | Fable unavailable retains Opus maximum within allowance | Resolver/engine unavailable-route cases, including typed native evidence after preparation | Pending Claude |
 | Infrastructure, authority, formatting and quota do not escalate reasoning | Engine failure-classification tests | Pending representative native failure |
-| Profile override or unsupported effort cannot silently lower execution | Resolver capability/provenance rejections | Pending actual child effort observation |
-| Request/resolution/observation recorded separately | Adapter and full host integration fixtures, including duplicate deliveries | Pending native attestation |
-| Independent built-in review bound to exact child and commit | Host receipt rejection, immutable evidence, adapter/engine contract fixtures | Pending both harnesses; custom prior reviews do not count |
+| Profile override or unsupported effort cannot silently lower execution | Resolver capability/provenance rejections | Codex high/xhigh/ultra observed; conflicting-profile rejection remains a local fixture; Claude pending |
+| Request/resolution/observation recorded separately | Adapter and full host integration fixtures, including duplicate deliveries | Codex diagnostic adapter exchange observed; durable rollout-host path pending |
+| Independent built-in review bound to exact child and commit | Host receipt rejection, immutable evidence, adapter/engine contract fixtures | Codex built-in invocation observed; immutable rollout-host capture and Claude pending |
 | Exact authorisation and verifier inputs remain bound | Host source-text and external-byte drift cases | Pending launch record |
 | Supplementary check reserves once; interruption is not success | Host idempotency, exhausted pool and lease-recovery tests | Pending native owner interruption |
 | Existing work, feedback and escalation survive recovery | Engine histories, host recovery and same-record integration fixtures | Pending native cold recovery |
@@ -27,6 +27,16 @@ The correction batch delivers reviewed source. It does not install, release or
 start a new unattended rollout. The planned profile changes are guarded source
 migration operations; live settings and council definitions remain unchanged.
 A requested setting or an arbitrary receipt-shaped JSON file is not live proof.
+
+## Codex capability checkpoint
+
+The five bounded probes in task **thread 4**, commit `8c5980b`, passed. The
+[coordinator audit](../audits/2026-09-23-codex-routing-capability-audit.md) confirms
+the 49 saved file hashes and original native turn settings. Maximum selectors
+were synthetic; no real failed correction ladder or owner transfer was tested.
+There was no configured alternative model. This supports proceeding to the
+separate Claude capability check. The proposed Codex rollout has two preparation
+findings and is being corrected; it has not been launched or approved.
 
 Independent native source review is complete with no remaining findings. The
 reviewer was reused after fresh creation hit the harness thread limit; it had no

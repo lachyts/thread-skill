@@ -17,6 +17,14 @@ out \"thread 3\"?" The Codex check runs first in a fresh native task. This Claud
 brief is prepared for a separate native Claude session after that report is
 available; no Claude process has been launched by Codex.
 
+Codex report now available: task **thread 4**, commit `8c5980b`,
+`/Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/implementation/2026-09-23-codex-routing-capability-report.md`.
+The five capability probes passed; the coordinator independently checked native
+turn observations and all 49 saved evidence hashes. Read the
+[coordinator audit](../audits/2026-09-23-codex-routing-capability-audit.md) for the
+limits. Two findings concern the separately proposed Codex rollout's verifier;
+they do not invalidate the capability result or expand this Claude check.
+
 ## What remains
 
 1. Mark this handoff consumed when launched. Work in
