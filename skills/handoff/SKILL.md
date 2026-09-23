@@ -86,7 +86,7 @@ The pathspec keeps a dirty index out of the commit (close § Commit hygiene). An
 
 **Thread state.** If the thread has a THREAD.md, apply `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state's handoff row now, after the doc is committed (or written, when the commit was skipped as `not versioned`).
 
-**Lifecycle.** The doc's states, pickup, close-out and the manual-handoff rule are `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md`. The one lifecycle procedure that runs here is **withdrawal** (`handoff-lifecycle.md` § Withdrawn): if the handoff is called off in the same session, remove the doc at once — `git -C "<home>" rm -f <path> && git -C "<home>" commit -m "🔧 chore(handoff): withdraw <slug>" -- <path>` (plain `rm` if it was never committed; same repo-state guard as above).
+**Lifecycle.** The doc's states, pickup, close-out and the manual-handoff rule are `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md`. The one lifecycle procedure that runs here is **withdrawal** (`handoff-lifecycle.md` § Withdrawn): if the handoff is called off in the same session, remove the doc at once — `git -C "<home>" rm -f <path> && git -C "<home>" commit -m "🔧 chore(handoff): withdraw <slug>" -- <path>` (plain `rm` if it was never committed; same repo-state guard as above), and undo the handoff row: when the thread has a THREAD.md, rewrite real Resume instructions there in place of the `Read <abs doc path> first` pointer.
 
 ## Build the handoff prompt
 

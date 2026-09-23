@@ -95,7 +95,7 @@ Body sections from the template; mostly empty placeholders that fill in over tim
 
 ## Index updates (shared threads only)
 
-When a shared thread is created or its state changes, update `_shared/threads/INDEX.md`:
+On a shared thread's creation and on every `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state transition (including one that leaves `state:` unchanged), update `_shared/threads/INDEX.md`:
 
 ```markdown
 - [<slug>](<slug>.md) — <one-line scope>  · state: <active|paused|parked|done> · last: <YYYY-MM-DD>

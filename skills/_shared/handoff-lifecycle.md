@@ -27,11 +27,11 @@ refreshed: <YYYY-MM-DD>  # optional — added by thread:close when it refreshes 
 - **legacy** — no `status:` line (written before ADR 0017). Counted in close's step-8 report and otherwise left alone: never refreshed, never deleted, never marked consumed, never a reason to suppress. Add the front matter by hand to bring one into the lifecycle.
 - **`unknown(…)`** — a `status:` value other than the two above. One counted report line, untouched, like legacy.
 
-The status is read from the front-matter block only (quotes stripped, case-folded, CRLF tolerated), so a body that mentions `status: pending` does not count. `close` § The handoff owns the continuation holds the scan that classifies them.
+`close` § The handoff owns the continuation holds the scan that classifies them, and how it reads the status.
 
 ## Pickup
 
-The consuming session's first instruction — carried in the prompt, and equally `thread:open`'s handoff-doc pickup or a `/thread:open <slug>` resume whose Resume instructions point at the doc — reads the doc and then sets `status: consumed` in its front matter, in place, with no commit. The doc's job ended the moment the thread went live, exactly as a stash/defer capture is marked done at pickup (ADR 0001). Marking it also applies § Thread state's pickup row. A legacy doc is briefed from but never marked.
+The consuming session's first instruction — carried in the prompt, and equally `thread:open`'s handoff-doc pickup or a `/thread:open <slug>` resume whose Resume instructions point at the doc — reads the doc and then sets `status: consumed` in its front matter, in place, with no commit. The doc's job ended the moment the thread went live, exactly as a stash/defer capture is marked done at pickup (ADR 0001). A `/thread:open` pickup also applies § Thread state's pickup row; a prompt-carried pickup has nothing to apply, because the handoff row already set the thread `active`. A legacy doc is briefed from but never marked.
 
 ## While pending
 
@@ -47,7 +47,7 @@ A consumer that exits by `stash` or `defer` instead leaves the consumed doc for 
 
 ## Withdrawn
 
-A handoff called off in the same session ("never mind, keep going") is no handoff at all: the session removes the doc at once — the command is handoff § Lifecycle — so no pending doc outlives the intent, and close finds nothing pending. A doc left by a misfire is the one way the handoff route can silence a later close: a pending doc nobody meant suppresses that thread's continuation tasks.
+A handoff called off in the same session ("never mind, keep going") is no handoff at all: the session removes the doc at once — the command is handoff § Lifecycle — and undoes the handoff row: when the thread has a THREAD.md, it rewrites real Resume instructions there in place of the `Read <abs doc path> first` pointer (the session's own close then carries the file). No pending doc outlives the intent, no pointer names a deleted file, and close finds nothing pending. A doc left by a misfire is the one way the handoff route can silence a later close: a pending doc nobody meant suppresses that thread's continuation tasks.
 
 ## Thread state
 

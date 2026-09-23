@@ -152,6 +152,7 @@ Close-inferred saves land `status: provisional` — the curator promotes them to
    - Known quirks: append discoveries from this session.
    - Resume instructions: update if next-session entry-point shifted; when a handoff doc is pending, the entry point is `Read <home>/docs/handoffs/<doc> first` — a pointer, never a copy. When this session consumed a doc, replace that pointer with real instructions — the file is deleted in step 7.
    - Session log: prepend `- YYYY-MM-DD: <one-line of what shifted>` (newest first).
+   - Thread state: apply `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state's close row — `last_touched:` and, for a shared thread, the INDEX line's `last:` set to today; `state: done` and the INDEX line's move to `## Done` only on Lachy's explicit word that the thread is finished. `/thread:open save` runs this same step.
 
 5. **Compute the full save set silently** — no "proposed plan" message. Work out: the auto-commit file lists, the thread diff, each memory candidate's verb (via the four-verb triage), knowledge edits, process-observation candidates (category 7, with the METHOD.md path the routing test resolved — or NOOP), the pending handoff doc's refresh diff (§ The handoff owns the continuation — or `unchanged`), vault-task candidates (loose ends only while a handoff doc is pending), and what's being discarded. Nothing is shown to Lachy until the report in step 8 — except the task menu, if there is one.
 
