@@ -42,6 +42,9 @@ The final handoff, three project-only definition templates, corrected two-task
 proposal and API documentation passed the separate preparation review with
 **no findings**. The six-call limit, observed fork effort, exact prompt adaptation,
 same-wrapper relay, API shapes and fixture/native boundaries match current source.
-The private directory/manifest is prepared after committing the reviewed sources;
-its mechanical hash checks are separate from this source review. No native calls,
-rollout, PR or merge are authorised by this review record.
+After source commit, the reviewer independently checked all twelve private
+snapshot files against manifest hashes and pinned Git bytes, exactly three
+project-local definitions, the zero-spend six-slot ledger and the empty local
+Git root with no refs. **No findings.** Startup loading, actual wrapper/fork effort
+and same-wrapper relay remain unproved. No probes or verifier calls were made.
+No native calls, rollout, PR or merge are authorised by this review record.

@@ -71,7 +71,7 @@ to check xhigh, maximum and recovery review routes. No native child has run unde
 that new scope. Project-local definitions are prepared before a fresh native
 Claude session starts; startup loading and actual fork effort remain unproved.
 
-Source pins and final local check results are recorded below after commit. The
+Source pins and final local check results are recorded below. The
 private check directory's `preparation.json` binds those pins and exact definition
 hashes. Preparing that directory does not initialise a rollout or spend native
 slots. Installation, release and the two-task live pilot remain separate.
@@ -95,3 +95,32 @@ The final host/state log is private at
 are detailed in the review record. Syntax, whitespace and all declared verifier
 artifact hashes were checked before commit. No model or pilot-verifier call was
 made to perform the final hash checks.
+
+## Pinned source and prepared entry point
+
+| Candidate | Reviewed commit |
+| --- | --- |
+| Thread runtime, tests, verifier and preparation templates | `db18cb467172861fa8d626b318561d724dcf0a2a` |
+| Shared native adapter and recovery | `214aee11a52fe6d1d20759681db4cb664ffe2b29` |
+| Skill guidance, unchanged | `7273ac93833cd4d895534e45e37bead16fb6a834` |
+| Agent Reader isolation, unchanged | `8e5072c52ae69b7f19c2b7ec771305f258c3f887` |
+
+The fresh native Claude session starts in:
+
+```text
+/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/.thread/claude-review-path-check-2026-09-23
+```
+
+Twelve source/definition files have been copied byte-for-byte from those commits
+and hash-checked. The private manifest `preparation.json` has SHA-256
+`1a63a4f1ee8dcf53c63f1aa09a28459ee1584c80ec281e282b70713451c9a62b`.
+The private spending ledger has zero reservations and zero native attempts.
+There is no exchange or rollout record. Its empty local Git root establishes
+the intended project scope for startup loading; it publishes nothing.
+
+Read `START-HERE.md` there and execute the linked handoff in native Claude.
+Codex has prepared this check but has no exposed native Claude session launcher;
+starting a foreign CLI model process would violate the agreed harness boundary.
+Actual project-definition loading, maximum-effort fork inheritance and faithful
+same-wrapper relay remain the next native evidence to collect. No repeated old
+probe, pilot-verifier invocation, global profile change or live rollout was made.

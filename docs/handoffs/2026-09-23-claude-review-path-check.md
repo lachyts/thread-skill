@@ -50,8 +50,10 @@ pilot verifier; its twelve preparation calls are spent. No new pilot branch.
    effort support and actual startup agent inventory. Preserve shared settings;
    if the needed definitions do not load, report that precise limitation. Do not
    hot-install user-level definitions under an old approval.
-2. Copy the pinned adapter/resolver/policy to an immutable private snapshot,
-   preserving relative imports. Use a new account-bound **adapter exchange**, not
+2. Verify and use the already prepared immutable adapter/resolver/policy snapshot,
+   which preserves relative imports. The private directory has its own empty
+   local Git root solely to establish a project startup scope, not a rollout or
+   published branch. Use a new account-bound **adapter exchange**, not
    `rollout-host init`. Set its `maxConcurrent` to two. Reserve each pair in a
    durable six-slot ledger before spawning. The adapter tracks identities and
    capacity; this capability ledger provides the finite run allowance.
