@@ -124,12 +124,23 @@ ok "$(yn $?)" y "repair § 2: a table row classifies in_progress + MERGED with a
 r1=$(region "$REPAIR" '^### 1\.' '^### 2\.')
 has "$r1" "/workflows" "repair § 1 mentions /workflows"
 has "$r1" "owner" "repair § 1 names the owner session"
+printf '%s\n' "$r1" | grep -i 'stranded' | grep -q '3c'
+ok "$(yn $?)" y "repair § 1: a stranded-merged task is escalated (3c)"
+printf '%s\n' "$r1" | grep '^- `paused:` stamp' -A3 | tr '\n' ' ' | grep -q 'stranded.*escalate'
+ok "$(yn $?)" y "repair § 1: the paused bullet escalates a stranded merge instead of pointing at reinstate"
+has "$r1" "points at neither reinstate nor resume" "repair § 1: no reinstate or resume while a stranded merge remains"
+r3=$(region "$REPAIR" '^### 3\.' '^### 4\.')
+has "$r3" "merge-base --is-ancestor" "repair § 3c: checks the merge commit is on the default branch"
+has "$r3" "log -p" "repair § 3c: shows the vault note's git history as evidence"
+has "$r3" "never writes that task's status" "repair § 3c: never writes the stranded task's status"
+has "$r3" "## Notes" "repair § 3c: records the escalation in the rollout note's ## Notes"
 r4=$(region "$REPAIR" '^### 4\.' '^### 5\.')
 has "$r4" "stranded" "repair § 4 is gated on stranded merges"
 r6=$(region "$REPAIR" "^### 6\\." "^## Don'ts")
 has "$r6" "stranded" "repair § 6 is gated on stranded merges"
 printf '%s\n' "$r6" | grep -q 'escalat'
 ok "$(yn $?)" y "repair § 6 logs escalations"
+has "$r6" "## Notes" "repair § 6 copies escalations from the 3c ## Notes records"
 grep -q 'protocol 4' "$REPAIR"
 ok "$(yn $?)" y "repair names the protocol 4 fix that lifts the guard"
 
@@ -151,18 +162,36 @@ items=$(awk '
   END {if (cur != "") print cur}
 ' "$STATUS")
 idx() { printf '%s\n' "$items" | grep -n -m1 -- "$1" | cut -d: -f1; }
-P=$(idx paused); F=$(idx 'in flight'); S=$(idx stranded); C=$(idx 'cursor behind')
+P=$(idx '^- `paused`'); F=$(idx 'in flight'); S=$(idx '^- any stranded'); C=$(idx 'cursor behind')
 echo "     (list indexes: paused=$P in-flight=$F stranded=$S cursor-behind=$C)"
 if [ -n "$P" ] && [ -n "$F" ] && [ -n "$S" ] && [ -n "$C" ] && [ "$P" -lt "$F" ] && [ "$F" -lt "$S" ] && [ "$S" -lt "$C" ]; then
   ok y y "status list order: paused < in flight < stranded < cursor behind"
 else
   ok n y "status list order: paused < in flight < stranded < cursor behind"
 fi
+itemP=$( [ -n "$P" ] && printf '%s\n' "$items" | sed -n "${P}p")
 itemF=$( [ -n "$F" ] && printf '%s\n' "$items" | sed -n "${F}p")
 itemS=$( [ -n "$S" ] && printf '%s\n' "$items" | sed -n "${S}p")
 has "$itemF" "owner" "the in-flight item names the owner session"
 has "$itemF" "/workflows" "the in-flight item points at /workflows"
 has "$itemS" "/thread:repair" "the stranded item routes to /thread:repair"
+# Precedence: the earlier paused and in-flight items must not send a stranded merge to execute.
+printf '%s\n' "$itemP" | grep -q 'stranded merge.*/thread:repair'
+ok "$(yn $?)" y "the paused item routes a stranded merge to /thread:repair, not reinstate"
+printf '%s\n' "$itemF" | grep -q 'stranded merge.*/thread:repair'
+ok "$(yn $?)" y "the in-flight item's no-run branch routes a stranded merge to /thread:repair"
+has "$itemF" "offline" "the in-flight item carries the offline caveat"
+prec=$(awk '/^The list is first-match/ {on=1} on && /^[[:space:]]*$/ {exit} on {print}' "$STATUS" | tr '\n' ' ')
+has "$prec" "stranded merge" "the first-match note carries the stranded-merge precedence rule"
+has "$prec" "/thread:repair" "the precedence rule routes to /thread:repair"
+s4=$(region "$STATUS" '^### 4\.' '^## Loopable')
+has "$s4" "In continuous mode" "the owner-session qualifier scopes the heartbeat to continuous mode"
+printf '%s\n' "$s4" | grep -q 'never needs to'
+ok "$(yn $?)" n "the owner-session qualifier no longer says another session never needs to resume"
+printf '%s\n' "$s4" | grep -q '<tasks-dir>'
+ok "$(yn $?)" n "status § 4 uses no undefined <tasks-dir>"
+printf '%s\n' "$s4" | grep -q 'stranded merge; /thread:repair escalates'
+ok "$(yn $?)" y "the example Drift block carries a stranded-merge sample line"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "repair-stranded-merged: ALL PASS"; else echo "repair-stranded-merged: FAILED"; fi
