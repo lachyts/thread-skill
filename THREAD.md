@@ -10,6 +10,19 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-09-23 (later) — E2E § 0 is set up. The verbs run in a second session, launched in the
+fixture.**
+- **Setup:** the setup session (launched here) confirmed 2.5.3 and ran checklist § 0. It created the
+  private repo `lachyts/zz-thread-e2e` (`master` only), the checkout `~/repos/tools/zz-thread-e2e`,
+  the vault project [[ZZ Thread E2E]] with tasks t1, t2, t3 and cms, and a leak baseline in the
+  fixture's `.git/e2e-leak/`.
+- **The split:** a session can't `cd` outside its launch directory, so it couldn't run the verbs
+  there. Lachy ruled the split, and the verbs session is now live in the fixture.
+- **Findings for S2 to file:** the 2.5.2 and 2.5.3 caches both hold a stray copy of the plugin under
+  `.claude/worktrees/enabler/`, which `release-check` misses (checklist § 5).
+- **S2's own cwd trap:** S2's cleanup would `rm -rf` its own launch directory. The verbs handoff tells
+  verb 13 to split S2 from an S3 that runs the rollout from thread-skill.
+
 **2026-09-23 — audit done; 2.5.2 and 2.5.3 shipped; a live E2E baseline and a self-rollout are
 next.** A `/thread:orient` audit (`docs/audits/2026-09-23-thread-audit.md`) found the plugin carrying
 two eras (master protocol 3 and the paused protocol 4 redesign), 33 open tasks with no phases, and a
@@ -332,10 +345,15 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
-- **A `cd` in a Bash call moves the session's primary working directory.** Background clean-room
-  reviewers resolve `git diff` against that directory. So while a review runs, the lead uses `git -C`
-  and absolute paths only. (2026-09-23: one `cd` into the root checkout mid-review would have pointed a
-  worktree review at a clean tree. Caught and reverted before the fork started.)
+- **A `cd` in a Bash call moves the session's working directory, but only inside the launch tree.**
+  - Inside the tree, it moves. Background clean-room reviewers resolve `git diff` against that
+    directory, so while a review runs the lead uses `git -C` and absolute paths only. (2026-09-23: one
+    `cd` into the root checkout mid-review would have pointed a worktree review at a clean tree. Caught
+    and reverted before the fork started.)
+  - A `cd` outside the tree is reset by the harness: `Shell cwd was reset to <launch dir>`. So work
+    that needs the CWD-bound verbs against another repo needs a session **launched there**:
+    open/close thread lookup, stash/defer routing, and handoff's `<home>`. The engine is exempt,
+    because it anchors on `repoPath`. (2026-09-23: this forced the E2E's S1 split.)
 - **`plugin update` at one version is not enough.** The cache follows the version number. A content
   change needs both manifests bumped, then `claude plugin update thread@thread`, then `make
   release-check`. The check compares the cache's `skills/` and `hooks/` with the tree, and it
@@ -440,9 +458,15 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**Read `/Users/lachlants/repos/tools/thread-skill/docs/handoffs/2026-09-23-thread-e2e-baseline.md` first**
-(pending): live E2E baseline S1. The shared brief `docs/audits/2026-09-23-rollout-brief.md` carries S2
-and the gather draft.
+**The live E2E baseline is running.**
+- **The S1 verbs session is live**, launched in `~/repos/tools/zz-thread-e2e` (peer `zz-thread-e2e-0b`).
+  It consumed `docs/handoffs/2026-09-23-thread-e2e-verbs-1-13.md` and runs verbs 1–13.
+- **The live record** is `docs/e2e/2026-09-23-baseline.md`, which that session edits and commits.
+- **Pick up S2 from** the handoff its verb 13 writes into `~/repos/tools/zz-thread-e2e/docs/handoffs/`.
+  - Don't start S2 from here. The shared brief `docs/audits/2026-09-23-rollout-brief.md` § S2 carries
+    the rest, and the gather draft.
+  - Expect S2 to split: S2 in the fixture, then S3 here for the `rm -rf` and the rollout.
+- **Pending deletion:** the next close here deletes the consumed verbs doc, once no peer holds it.
 
 **Rollout redesign, 22 September 2026:** coordination now belongs to **thread 1**.
 Read the [thread 2 handback](/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/docs/implementation/2026-09-22-thread-2-closeout.md)
@@ -476,6 +500,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-23 (later): E2E setup. Checklist § 0 is done: fixture repo and GitHub repo, the vault fixture, and the leak baseline. A `cd` outside the launch directory gets reset, so S1 split into this setup session and a verbs session launched in the fixture (Lachy's ruling). § 5 records the stray worktree copy in the plugin caches. The cd quirk is corrected.
 - 2026-09-23: /thread:orient audit. Shipped 2.5.2 (make test, the contract floor, args.defaultBranch; one source for the base after the ledger STOP) and 2.5.3 (execute names the read-only agents). Wrote the E2E checklist, the rollout brief and the S1 handoff. Engine defects held for protocol 4. Stale 2.3.4 install left pending (settings symlink hazard).
 - 2026-09-22: Closed only thread 2 and saved its Claude-pilot agreement/status/evidence handback; thread 1 now leads, thread 3 and Claude continue independently, rollout redesign remains open.
 - 2026-09-21 (latest): consumed the stale 2026-09-17 tier-ceiling review and two further clean-room rounds (12 + 15 findings); round 1 lost to a CLI restart; round 3 hit the ledger's STOP at 60% regressions, so no round 4 — reverted to the root instead (retry budget is now a constant, not arithmetic over max_iterations). Two real engine defects fixed (effort keyed off a lagging event flag; a 1-iteration retry loop at the template default), ADR 0016 §2 amended, Scenarios F and G added, 191 assertions. Shipped 2.5.1 and verified the cache byte-identical — the version-keyed cache is still live and a same-version content change does NOT refresh it. Two findings deferred to § Open questions + vault tasks.
