@@ -75,10 +75,12 @@ natural-language build prompt — lifted/adapted from the plan).
   inherits its `phase: N`, and intra-phase ordering is expressed as dependency links only —
   `/thread:schedule` re-derives layers from deps, so sub-phase numbering adds zero machine value.
   For a multi-phase plan: if it **states phases** (e.g. "Phase 0–3"), honour them; otherwise
-  **infer** phases as dependency layers (topological): tasks that depend on nothing = phase 0; tasks
-  that depend only on phase-0 tasks = phase 1; and so on. Inferred layers ARE the project's roadmap
-  phases — author one **phase note per phase** (per `add-phase.md`, at
-  `Work/Phases/<project>-p<N>-<desc>`) so the structure is uniform from day one.
+  **infer** phases as dependency layers (topological), numbered from `N_max + 1` exactly as
+  `/thread:gather` § 1 defines it (the project's existing `Work/Phases/` notes, Archive included; P1
+  when the project has none): tasks that depend on nothing = the first new phase; tasks that depend
+  only on those = the next; and so on. Inferred layers ARE the project's roadmap phases — author one
+  **phase note per phase** (per `add-phase.md`, at `Work/Phases/<project>-p<N>-<desc>`) so the
+  structure is uniform from day one.
 
 ### 4. Propose — approve before writing (the gate)
 
@@ -100,33 +102,19 @@ granularity is corrected cheaply — files don't exist yet.
 ### 5. Write the task notes
 
 For each approved task, write `~/repos/obsidian/Work/Tasks/<slug>-pN-M-<kebab-desc>.md` (`p<phase>`,
-`M` = sequence within phase) from the vault Task template
-(`~/repos/obsidian/_System/Templates/Task.md`):
+`M` = sequence within phase). **Note shape is the writer spec's, not this skill's** — reference it,
+never duplicate the schema here: `~/repos/workspaces/_shared/knowledge/add-writers/add-task.md` § Step 4
+(frontmatter, `## Notes` body, its *Phased task* bullet) and, for a task with a launch signal (a repo,
+named MCP servers, live branch state), `add-task.md` § Launch context (its `## Launch` and
+`## Resume prompt` blocks). Split adds only what the decomposition knows:
 
-```markdown
----
-tags: [task, <area>, <repo>]
-status: open
-priority: normal
-work_depth: <shallow|standard|deep>
-projects: ["[[<Project>]]", "[[<Area>]]"]   # + "[[<RepoProject>]]" when repo-specific
-phase: <N>
-touches: ["<path>", ...]    # omit when not inferable
-captured: <today>
----
-
-## Notes
-**Phase N · Task M** of [[<Project>]]. <Spec Kit | greenfield>. cwd `<repo>`. Depends on [[...]].
-
-<goal, 1–2 lines>
-
-​```
-<the runnable prompt to paste>
-​```
-
-**Verify:** <how to know it's done>.
-```
-
+- **Frontmatter** — `phase: <N>`; `work_depth:` (shallow / standard / deep) from the task's size;
+  `touches:` from step 3, omitted when not inferable.
+- **`## Notes`** — opens with `**Phase N · Task M** of [[<Project>]]`, the process (Spec Kit or
+  greenfield), the cwd, and `Depends on [[...]]` links; then the 1–2-line goal.
+- **The runnable prompt** — goes in the `## Resume prompt` block when the task qualifies for launch
+  context; otherwise as a fenced block under `## Notes`.
+- **A closing `**Verify:**` line** — how to know it's done.
 - Leave **`wave:` unset** — `/thread:schedule` stamps it.
 - Don't set `scope:` — `/thread:schedule` infers it from `touches:` (single source of that logic).
 - Skip a `<slug>-*` task that already exists unless `--regenerate`.
@@ -161,5 +149,6 @@ List the tasks written, show the outline, and name the next step: **`/thread:sch
 - **Don't leave a split source task-tagged** — a phase is a plan, never a task (`tags: [phase]`,
   `Work/Phases/`); a task-tagged phase note is dispatchable by mistake. See ADR 0005.
 - **Don't restart a phase counter inside a phase** — tasks inherit the roadmap number
-  (`<project>-p<N>-<M>-…`), never `…-p1-1` under a `p2` source. Note shape lives in
-  `add-writers/add-phase.md` — don't duplicate the schema here.
+  (`<project>-p<N>-<M>-…`), never `…-p1-1` under a `p2` source. Note shape lives in the writer
+  specs — `add-writers/add-task.md` (tasks) and `add-writers/add-phase.md` (phases) — don't
+  duplicate either schema here.

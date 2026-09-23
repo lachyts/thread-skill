@@ -37,6 +37,7 @@ const FOREIGN_ADR_QUALIFIERS = ['Chorus', 'workspaces']
 // External § citations, hand-verified 2026-09-23. [path as cited (or its trailing segment), section].
 const EXTERNAL = [
   ['add-task.md', 'Step 4'],
+  ['add-task.md', 'Launch context'],
   ['obsidian-schema.md', 'Task'],
   ['claude-base-instructions.md', 'Claude memory management'],
   ['triage-batching-protocol.md', '6'],
