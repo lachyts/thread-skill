@@ -98,11 +98,12 @@ depending on live runs to find drift.
   check: a truncated orchestration tail passes `node --check` and fails the new check.
 - `tests/contracts/manifest.test.mjs` — manifests, skill names, description cap and total ratchet,
   hook targets, `${CLAUDE_PLUGIN_ROOT}` references.
-- `args.defaultBranch` in the engine: validated against git's ref-name rules, byte-identical prompts
-  when unset or `main` (golden-hashed), fresh worktrees cut from `origin/<it>` and PRs opened with an
-  explicit `--base` when it is set. The resolver in `execute/SKILL.md` § 4 asks the remote
-  (`ls-remote --symref`, the source `gh` uses; a cached `origin/HEAD` can be stale) and stops rather than
-  assume `main`. `merge-wave.sh` reads the base from the PRs, halts a wave whose PRs disagree before
-  anything merges (`tests/merge-wave-base.test.sh`, fake `gh`), and `--self-test-base` proves a root
-  parked on a hold branch is never fast-forwarded.
+- One source for the base: the repo's GitHub default branch. `args.defaultBranch` in the engine
+  (validated against git's ref-name rules; byte-identical prompts when unset or `main`, golden-hashed)
+  cuts fresh worktrees from `origin/<it>`; `gh pr create` targets the same default on its own. The
+  resolver in `execute/SKILL.md` § 4 asks the remote (`ls-remote --symref`; a cached `origin/HEAD` can
+  be stale) and stops rather than assume `main`. `merge-wave.sh` reads the default from GitHub and
+  checks every PR before the first merge — off-base, mixed, unreadable or CLOSED halts with nothing
+  merged (`tests/merge-wave-base.test.sh`, fake `gh`); `--self-test-base` proves a root parked on a
+  hold branch is never fast-forwarded.
 - `make release-check` for the version-keyed cache.

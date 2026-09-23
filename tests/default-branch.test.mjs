@@ -43,19 +43,18 @@ const t = { ...task, taskPath: '/vault/proj-fix-x.md', maxIterations: 3 }
 const st = { tier: 'opus', cap: 'fable', escalated: false, capSuppressed: false }
 const prompts = (a) => [T.implementerPrompt(t, a, st, ''), T.approvedPlanImplementerPrompt(t, 'PLAN', a, st, '')]
 
-test('the base reaches both worktree-creating prompts, and their PRs target it', () => {
+test('the base reaches both worktree-creating prompts', () => {
   for (const p of prompts({ repoPath: '/repo', defaultBranch: 'trunk', verifier: 'make test' })) {
     assert.ok(p.includes('worktree add "$WT" -b "$BR" origin/trunk'))
-    assert.ok(p.includes('open a PR against `trunk` (`gh pr create --base trunk`) titled'))
     assert.ok(!p.includes('origin/main'))
   }
 })
 
-test("'main' and unset render identical implementer prompts, with no explicit PR base", () => {
+test("'main' and unset render identical implementer prompts; PRs take gh's default base", () => {
   const unset = prompts({ repoPath: '/repo', verifier: 'make test' })
-  const main = prompts({ repoPath: '/repo', verifier: 'make test', defaultBranch: 'main' })
-  assert.deepEqual(main, unset)
-  for (const p of unset) assert.ok(p.includes('open a PR titled') && !p.includes('--base'))
+  assert.deepEqual(prompts({ repoPath: '/repo', verifier: 'make test', defaultBranch: 'main' }), unset)
+  // One source: the base is the repo's GitHub default, which `gh pr create` targets on its own.
+  for (const p of prompts({ repoPath: '/repo', verifier: 'make test', defaultBranch: 'trunk' })) assert.ok(!p.includes('--base'))
 })
 
 test('branch names that could reach bash are refused', () => {

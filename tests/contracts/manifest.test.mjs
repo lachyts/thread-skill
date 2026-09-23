@@ -38,9 +38,16 @@ function frontmatter(text, file) {
   return out
 }
 
-const skillDirs = fs.readdirSync(path.join(root, 'skills'))
-  .filter((d) => fs.existsSync(path.join(root, 'skills', d, 'SKILL.md')))
+// Every directory under skills/ is a skill except these shared-spec homes — so a skill that loses its
+// SKILL.md fails here instead of silently dropping out of the listing.
+const NOT_SKILLS = new Set(['_shared'])
+const skillDirs = fs.readdirSync(path.join(root, 'skills'), { withFileTypes: true })
+  .filter((e) => e.isDirectory() && !NOT_SKILLS.has(e.name))
+  .map((e) => e.name)
   .sort()
+for (const d of skillDirs) {
+  assert.ok(fs.existsSync(path.join(root, 'skills', d, 'SKILL.md')), `skills/${d}/ has no SKILL.md (a shared dir belongs in NOT_SKILLS)`)
+}
 const skills = skillDirs.map((d) => ({ dir: d, fm: frontmatter(read(`skills/${d}/SKILL.md`), `skills/${d}/SKILL.md`) }))
 
 test('both manifests carry the same version', () => {

@@ -137,9 +137,9 @@ Build the `args` object the workflow expects:
 {
   "rolloutSlug": "giflab-rollout",
   "repoPath": "/abs/path/to/repo",      // from the rollout's "Project root" line
-  "defaultBranch": "<branch>",           // ONLY when the resolver below prints something other than
-                                          //   "main" (e.g. "master"); OMIT for main repos — this giflab
-                                          //   example omits it (byte-identical prompts)
+  // "defaultBranch": "master",           // ONLY when the resolver below prints something other than
+                                          //   "main"; absent for main repos like this giflab example
+                                          //   (byte-identical prompts)
   "verifier": "make test",               // resolved rollout-level verifier
   "date": "2026-05-29",                  // pass it in — Date.now() is unavailable in the script
   "concurrency": 4,                       // parallel_ceiling
@@ -169,7 +169,7 @@ Build the `args` object the workflow expects:
 }
 ```
 
-**Resolve `defaultBranch` before the first wave** — fresh worktrees branch from `origin/<it>`, the engine's PRs target it (`gh pr create --base`), and `merge-wave.sh` halts a wave whose PRs disagree. Ask the **remote**, the same source `gh` uses for its default: the local `refs/remotes/origin/HEAD` is often unset and can be stale (it survives a default-branch rename and even the deletion of the branch it names). **Stop** when the remote does not answer — never assume `main`, which fails at the first worktree of a `master` repo:
+**Resolve `defaultBranch` when building each wave's args** — it is the repo's GitHub default branch, the one source the whole rollout shares: fresh worktrees branch from `origin/<it>`, `gh pr create` targets the same default on its own, and `merge-wave.sh` refuses a wave whose PRs target anything else. Ask the **remote**: the local `refs/remotes/origin/HEAD` is often unset and can be stale (it survives a default-branch rename and even the deletion of the branch it names). The answer is deterministic, so a resume re-passes the same value. **Stop** when the remote does not answer — never assume `main`, which fails at the first worktree of a `master` repo:
 
 ```bash
 # thread:default-branch-resolver (extracted and tested by tests/default-branch.test.sh)
@@ -180,7 +180,7 @@ echo "$b"
 # end thread:default-branch-resolver
 ```
 
-Pass the printed name as `defaultBranch` only when it is not `main`. A repo whose mainline is not its GitHub default (e.g. `develop` while `main` is production) passes that branch instead — worktrees, PRs and merges all follow it. A resume (`resumeFromRunId`) re-passes the run's ORIGINAL args unchanged — adding `defaultBranch` to a run that started without it changes prompt bytes and re-runs cached agents.
+Pass the printed name as `defaultBranch` only when it is not `main`. A resume (`resumeFromRunId`) re-passes the run's ORIGINAL args unchanged — adding `defaultBranch` to a run that started without it changes prompt bytes and re-runs cached agents.
 
 Also read the rollout note's **`## Known baseline failures`** block (`/thread:schedule` step 2.6): when it lists tests (not `none`/empty), pass them as `knownBaselineFailures: ["<test_id> — <reason>", …]`. The engine threads the manifest into every agent and shifts the Ralph green criterion to "no NEW failures beyond this set" — it keeps running the full verifier and never `--deselect`s the listed reds (per the project's `CLAUDE.md`: a comparison reference, not a mute button). Omit the key when the block is absent or `none` — the engine then behaves exactly as before (`verifier` exit 0 = pass).
 
@@ -354,7 +354,7 @@ Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS au
 
 A **soft pause** (*Pausing + reinstating a rollout* below) exits through the same `state=halted` mechanics but is **deliberate**, not a failure — there is no cause to fix, and reinstating is plain re-invocation.
 
-In every halt case the work merged so far stays on `main`; the user fixes the cause and re-invokes `execute [[rollout]]` to resume from the `merged_through_wave` cursor. To see *why* a rollout halted, run `/thread:status [[rollout]]` (read-only situational report). To **sort out** a stalled rollout without ceding merge authority, run `/thread:repair [[rollout]]` — it reconciles drift, re-dispatches agent-fixable blocks, captures input-gated decisions, defers wedged tasks, and resumes via this skill's §4.5 loop (`merge-wave.sh` stays the sole merger). `/thread:repair` is the systematised replacement for hand-repairing a worktree in an external cockpit (README → *Coexistence with Orca*).
+In every halt case the work merged so far stays on the base branch; the user fixes the cause and re-invokes `execute [[rollout]]` to resume from the `merged_through_wave` cursor. To see *why* a rollout halted, run `/thread:status [[rollout]]` (read-only situational report). To **sort out** a stalled rollout without ceding merge authority, run `/thread:repair [[rollout]]` — it reconciles drift, re-dispatches agent-fixable blocks, captures input-gated decisions, defers wedged tasks, and resumes via this skill's §4.5 loop (`merge-wave.sh` stays the sole merger). `/thread:repair` is the systematised replacement for hand-repairing a worktree in an external cockpit (README → *Coexistence with Orca*).
 
 ### 8. Unattended driving — the automatic driver
 

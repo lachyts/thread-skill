@@ -457,7 +457,7 @@ Steps:
    superpowers:test-driven-development skill if applicable.
 3. If the task is investigation-first, produce findings, propose a fix in the task note, then implement.
 4. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
-5. If the verifier passed: open a PR${prBase(a)} titled \`audit-fix: <task subject>\`. The body must link the task
+5. If the verifier passed: open a PR titled \`audit-fix: <task subject>\`. The body must link the task
    note and explain what changed and why.
 6. Return your structured result: verified, blocked, escalate (as your verification block instructs;
    false otherwise), prUrl, branch, worktreePath (from \`git rev-parse --show-toplevel\`),
@@ -610,7 +610,7 @@ blockerDiagnosis="plan-divergence: <one line>" instead of forging ahead.
 Steps:
 1. Implement the plan (test-first where the plan says so). ${PRIOR_FEEDBACK_NOTE}
 2. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
-3. On verifier pass: open a PR${prBase(a)} titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
+3. On verifier pass: open a PR titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
 4. Return your structured result: verified, blocked, escalate (as your verification block instructs; false
    otherwise), prUrl, branch, worktreePath (git rev-parse --show-toplevel), blockerDiagnosis, summary.
 
@@ -711,8 +711,9 @@ function envBootstrapStep(a) {
   ${a.envBootstrap}   # one-time env bootstrap from the rollout (env_bootstrap): establish interpreter + deps`
 }
 
-// The branch the rollout builds on (args.defaultBranch): fresh worktrees are cut from origin/<it> and
-// PRs target it. The skill resolves it from the remote and passes it only when it is not 'main'.
+// The branch the rollout builds on (args.defaultBranch): the repo's GitHub default, which the skill
+// resolves from the remote and passes only when it is not 'main'. Fresh worktrees are cut from
+// origin/<it>; `gh pr create` already targets that same default, so PRs need no explicit base.
 // Unset/'main' renders every prompt BYTE-IDENTICAL to the pre-fix engine (resume-cache invariant), so
 // each rollout that predates this argument replays from cache. The name is interpolated into bash, so
 // it must be a plain ref name git would accept — a safe charset plus git's check-ref-format rules (no
@@ -726,13 +727,6 @@ function defaultBranch(a) {
     throw new Error(`defaultBranch: refusing ${JSON.stringify(b)} — not a valid branch name`)
   }
   return b
-}
-
-// The PR-base clause: '' for main (byte-identical prompts), otherwise the explicit --base, so the PR
-// targets the same branch the worktree was cut from instead of gh's implicit repo default.
-function prBase(a) {
-  const b = defaultBranch(a)
-  return b === 'main' ? '' : ` against \`${b}\` (\`gh pr create --base ${b}\`)`
 }
 
 // Bash the code-writing agents run as their FIRST action to enter an isolated worktree of the

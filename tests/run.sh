@@ -63,7 +63,8 @@ done
 
 # A run must leave the checkout exactly as it found it (no bytecode, no stray state files).
 tree_unchanged() {
-  local w; w=$(find "$root" -path "$root/.git" -prune -o -newer "$stamp" -type f ! -name .DS_Store -print)
+  # .git is git's; .claude holds other sessions' worktrees and merge-wave's sentinel, not this run's output.
+  local w; w=$(find "$root" \( -path "$root/.git" -o -path "$root/.claude" \) -prune -o -newer "$stamp" -type f ! -name .DS_Store -print)
   [ -z "$w" ] || { echo "written during the run:"; echo "$w"; return 1; }
 }
 step "run wrote nothing into the checkout" tree_unchanged

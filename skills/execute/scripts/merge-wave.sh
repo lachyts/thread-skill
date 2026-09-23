@@ -201,12 +201,6 @@ fi
 
 echo "== merge-wave.sh: $OWNER/$REPO — ${#PRS[@]} PR(s): ${PRS[*]} =="
 
-# The base branch is READ from the PRs (gh merges each into its own base), never assumed. Fallback when
-# every PR is already merged: the repo's default branch from GitHub. Used for messages, the
-# branch-delete guard and the local refresh.
-BASE=""
-pr_number() { printf '%s' "$1" | grep -oE '[0-9]+' | tail -1; }
-
 # ---- per-PR primitives -----------------------------------------------------
 
 prfield() { gh pr view "$1" -R "$OWNER/$REPO" --json "$2" -q ".$2" 2>/dev/null; }
@@ -414,40 +408,43 @@ process_pr() {  # $1=PR — run the state machine until merged or halt
   done
 }
 
-# ---- one base per wave -------------------------------------------------------------------------------
-# Every open PR in a wave must target the same branch — the one the engine cut the wave's worktrees from
-# (args.defaultBranch, `main` when unset). A PR aimed anywhere else would land its work on a branch the
-# next wave never branches from (the #30/#31 squash-drop exposure), so a mixed wave halts before
-# anything merges.
+# ---- the wave's base: the repo's default branch, one source ---------------------------------------
+# The engine cuts worktrees from origin/<GitHub default> (execute § 4 resolves it from the remote) and
+# `gh pr create` targets that same default, so every open PR in the wave must target it — a PR aimed
+# anywhere else would land its work on a branch the next wave never branches from (the #30/#31
+# squash-drop exposure). Everything is read and checked BEFORE the first merge, one read per PR: an
+# unreadable PR, one that is neither OPEN nor MERGED, or one off the base halts with nothing merged.
+BASE=$(gh repo view "$OWNER/$REPO" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null)
+[ -n "$BASE" ] || { echo "ERROR: cannot read the default branch of $OWNER/$REPO — nothing was merged." >&2; exit 1; }
+NUMS=(); STATES=()
 for raw in "${PRS[@]}"; do
-  PR=$(pr_number "$raw")
-  [ -z "${PR:-}" ] && { echo "ERROR: cannot parse a PR number from '$raw'" >&2; exit 1; }
-  [ "$(prfield "$PR" state)" = "OPEN" ] || continue
-  b=$(prfield "$PR" baseRefName)
-  [ -z "$b" ] && { echo "ERROR: cannot read the base branch of PR #$PR" >&2; exit 1; }
-  if [ -z "$BASE" ]; then BASE="$b"
-  elif [ "$b" != "$BASE" ]; then
-    echo "ERROR: PR #$PR targets '$b' but this wave's other PRs target '$BASE' — refusing to merge a mixed wave." >&2
-    echo "  Retarget it (gh pr edit $PR --base $BASE) or pull the task from the wave. Nothing was merged." >&2
-    exit 1
-  fi
+  PR=$(printf '%s' "$raw" | grep -oE '[0-9]+' | tail -1)
+  [ -n "$PR" ] || { echo "ERROR: cannot parse a PR number from '$raw' — nothing was merged." >&2; exit 1; }
+  sb=$(gh pr view "$PR" -R "$OWNER/$REPO" --json state,baseRefName -q '.state + " " + .baseRefName' 2>/dev/null)
+  st=${sb%% *}; b=${sb#* }
+  case "$st" in
+    OPEN)
+      if [ "$b" != "$BASE" ]; then
+        echo "ERROR: PR #$PR targets '$b', not the default branch '$BASE' — nothing was merged." >&2
+        echo "  Retarget it (gh pr edit $PR --base $BASE) or pull the task from the wave." >&2
+        exit 1
+      fi ;;
+    MERGED) ;;
+    '') echo "ERROR: cannot read PR #$PR in $OWNER/$REPO — nothing was merged." >&2; exit 1 ;;
+    *)  echo "ERROR: PR #$PR is '$st' (not OPEN/MERGED) — nothing was merged. Resolve manually." >&2; exit 1 ;;
+  esac
+  NUMS+=("$PR"); STATES+=("$st")
 done
 
 # ---- merge each PR in order (serial: each merge advances the base, flipping the next to BEHIND) -------
-for raw in "${PRS[@]}"; do
-  PR=$(pr_number "$raw")
-  [ -z "${PR:-}" ] && { echo "ERROR: cannot parse a PR number from '$raw'" >&2; exit 1; }
-  st=$(prfield "$PR" state) || { echo "ERROR: cannot read PR #$PR in $OWNER/$REPO" >&2; exit 1; }
-  case "$st" in
-    MERGED) echo "PR #$PR already merged — skipping."; continue ;;
-    OPEN) ;;
-    *) echo "ERROR: PR #$PR is '$st' (not OPEN/MERGED) — refusing to merge. Resolve manually." >&2; exit 1 ;;
-  esac
+i=0
+for PR in "${NUMS[@]}"; do
+  st=${STATES[$i]}; i=$((i+1))
+  if [ "$st" = "MERGED" ]; then echo "PR #$PR already merged — skipping."; continue; fi
   echo "== PR #$PR (into $BASE) =="
   process_pr "$PR" || exit 1
 done
 
 # ---- advance the local root checkout's base (cosmetic; correctness rides on origin/<base>) ---------
-[ -z "$BASE" ] && BASE=$(gh repo view "$OWNER/$REPO" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null)
 refresh_local_base "$REPO_PATH" "$BASE"
 echo "== merge-wave.sh: wave complete. =="
