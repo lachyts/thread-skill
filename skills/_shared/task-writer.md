@@ -45,10 +45,32 @@ task for the same thread. Re-deferring is a reschedule, not a new capture.
 
 Deterministic rules, `Australia/Melbourne`:
 
-- Bare `defer` → tomorrow: `TZ="Australia/Melbourne" date -v +1d "+%Y-%m-%d"`.
+- Bare `defer` → tomorrow.
 - A named day (`monday`, `fri`, `next tue`) → the **next future** occurrence,
-  never today: `defer monday` said on a Monday means +7 days.
+  never today: `defer monday` said on a Monday means +7 days. `next tue`
+  means the same as `tue`.
 - An explicit date (`2026-07-20`, `20 jul`) → that date; refuse past dates.
+
+Never do this arithmetic in your head: run the resolver, which applies these
+rules on the Melbourne calendar date (DST-safe, any OS):
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-day.py [<day>]
+```
+
+- **Accepted `<day>`** (case-insensitive): absent or `tomorrow`; a weekday
+  (`monday`/`mon` … `sunday`/`sun`, optional leading `next`); `YYYY-MM-DD`,
+  `D mon` or `mon D` (English month name or 3-letter abbreviation; year = the
+  current Melbourne year). Normalise any other phrasing to one of these first.
+- **Exit 0** → one stdout line `YYYY-MM-DD Ddd` (e.g. `2026-09-25 Fri`): the
+  date is `scheduled:` and the day note's stem (§ 3b); `Ddd` is what § 7 echoes.
+- **Exit 2 with stderr starting `resolve-day:`** → the input was refused
+  (unparseable, or before today). Apply the rules above: say a past date is
+  refused, and a day that can't be resolved is a stash, not a guess.
+- **Exit 3, or the resolver can't run at all** (no `python3`, the script
+  missing, any other status) → compute the date by hand from these rules and
+  state that interpretation explicitly in the § 7 confirmation — never
+  silently. Exit 3 means no tz data: `python3 -m pip install tzdata`.
 
 The confirmation ALWAYS echoes the resolved date (§ 7) so a parse surprise is
 visible immediately.
