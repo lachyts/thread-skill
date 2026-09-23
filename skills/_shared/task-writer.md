@@ -176,14 +176,20 @@ keeps `/thread:schedule` from sweeping it into an autonomous rollout.
 
 ## 6. THREAD.md — optional upgrade, never manufactured
 
-- Thread already exists → update it (state, session log line
-  `- YYYY-MM-DD: set down via thread:<route> → [[<task-slug>]]`), link it from
+- Thread already exists → update it: set `state:` per
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state
+  (stash → `parked`, defer → `paused`) and `last_touched:` to today, move a
+  shared thread's INDEX line to that group with `last:` today, and add the
+  session log line
+  `- YYYY-MM-DD: set down via thread:<route> → [[<task-slug>]]`; link it from
   the task.
 - No thread + work is **thread-worthy** (8+ substantive turns, deferred
   decisions, artefacts) → create one from the canonical template
   `~/.agents/skills/thread/THREAD-template.md` (project-side
   `~/Projects/<Area>/<Project>/THREAD.md`, or `_shared/threads/<slug>.md`),
-  then link it.
+  then link it. A thread created here takes the route's state, not
+  `active` — the creation row and then the route's row of
+  `handoff-lifecycle.md` § Thread state, in this one step.
 - No thread + one-off work → **don't create one.** The task carries everything.
 
 ## 7. Confirm

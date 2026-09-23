@@ -26,6 +26,9 @@ autonomously and silently:
 - The bar, the destination, and the entry format are `close`'s category 7
   verbatim (ADR 0012 / the method skill's capture contract). No second
   definition — both skills point at the same contract.
+  *(Amended by the p2-1 audit fix, 2026-09-24: the shared category-7 text
+  now lives in `skills/_shared/process-scan.md`; close, stash and defer
+  cite it.)*
 - Scope rule unchanged: the scan runs only when the capture resolves a
   project directory; shared-thread and no-project exits NOOP it.
   *(Amended by ADR 0015, 2026-09-15: the scan runs on every stash and

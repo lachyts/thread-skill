@@ -63,7 +63,8 @@ test('each continuity phrase lives in exactly one file under skills/, the shared
 test('close no longer carries a Project directory resolution heading', () => {
   const close = readIf('skills/close/SKILL.md')
   assert.ok(close != null, 'skills/close/SKILL.md is missing')
-  assert.doesNotMatch(close, /^#{1,6}\s+Project directory resolution/m)
+  assert.ok(!/^#{1,6}\s+Project directory resolution/m.test(close),
+    'close still has a Project directory resolution heading (it lives in process-scan.md)')
 })
 
 test('the writers cite the shared specs by plugin path', () => {

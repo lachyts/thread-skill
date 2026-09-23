@@ -22,7 +22,7 @@ moment belong to `thread:next`'s ask-first menu. (Model invocation enabled
 flat-skill port, never a recorded decision, and handoff is the cheapest-misfire
 route of the family. Since ADR 0017 a misfire costs one committed doc — and it
 must be removed, not left: a pending doc nobody meant silences the next
-`thread:close`'s continuation tasks for that thread. See § Lifecycle, withdrawn.)
+`thread:close`'s continuation tasks for that thread. See `handoff-lifecycle.md` § Withdrawn.)
 
 ## Success contract in Codex Desktop or a Chorus Session
 
@@ -61,18 +61,9 @@ This strict failure behaviour matters because a technically persistent session t
 - Otherwise → `git rev-parse --show-toplevel` (a tool repo such as `~/repos/tools/<name>/`).
 - CWD in no git repo at all → the session's workspace directory under `~/repos/workspaces/`.
 
-Never the OS temp directory (macOS clears it on reboot; a handoff must survive reboots and account switches) and never the vault. Slug: ≤5 words naming the work. Create `docs/handoffs/` if absent. If `<home>`'s repo ignores the path (`git check-ignore -q <path>` — `~/Projects/Tutorials/`, `_archive/`, `TSMS/` are deliberately ignored), do **not** edit `.gitignore`: write the doc under the session's workspace directory instead, which is never ignored, and name that path in the prompt. **One doc, one consumer**: a handoff that briefs two sessions is two docs (they may both point at one shared reference file) — the lifecycle below deletes a doc when its consumer closes, and a second reader would be stranded. Every path in this skill, in `thread:close` and in `thread:open` is this same `<home>/docs/handoffs/<doc>`; the prompt carries it **absolute**.
+Never the OS temp directory (macOS clears it on reboot; a handoff must survive reboots and account switches) and never the vault. Slug: ≤5 words naming the work. Create `docs/handoffs/` if absent. If `<home>`'s repo ignores the path (`git check-ignore -q <path>` — `~/Projects/Tutorials/`, `_archive/`, `TSMS/` are deliberately ignored), do **not** edit `.gitignore`: write the doc under the session's workspace directory instead, which is never ignored, and name that path in the prompt. A doc briefs exactly one consumer (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md`). Every path in this skill, in `thread:close` and in `thread:open` is this same `<home>/docs/handoffs/<doc>`; the prompt carries it **absolute**.
 
-**Shape.** Front matter, then the body:
-
-```yaml
----
-thread: <the active THREAD.md's `slug:` front-matter value, whether project-side or shared; else this handoff's slug>
-written: <YYYY-MM-DD>
-status: pending          # pending -> consumed, set by the session that picks it up
-refreshed: <YYYY-MM-DD>  # optional — added by thread:close when it refreshes a pending doc
----
-```
+**Shape.** Front matter — the block in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Front matter, written with `status: pending` — then the body.
 
 Body sections, in this order — the same list the session-safepoint stop hook mandates, so a hook-forced handoff and a requested one produce the same artefact:
 
@@ -93,13 +84,9 @@ git -C "<home>" add "<home>/docs/handoffs/<doc>" && git -C "<home>" commit -m "�
 
 The pathspec keeps a dirty index out of the commit (close § Commit hygiene). An uncommitted handoff is not durable, and an uncommitted doc the consumer later deletes is destroyed rather than archived. Same guard as close's: if the repo has a half-applied operation (`rebase-merge`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `BISECT_LOG` under `.git/`) or a detached HEAD, write the doc but do not commit — a commit on a detached HEAD is dropped by the next checkout — and say `not versioned: <path> (<reason>)` in the handoff output so Lachy knows the doc is on disk only.
 
-**Lifecycle.** The working tree holds in-flight handoffs only: `ls docs/handoffs/` is the live list, and a doc is pending until its front matter says `status: consumed` (close § The handoff owns the continuation has the scan).
+**Thread state.** If the thread has a THREAD.md, apply `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state's handoff row now, after the doc is committed (or written, when the commit was skipped as `not versioned`).
 
-- **Pickup.** The consuming session's first instruction — carried in the prompt, and equally `thread:open`'s handoff-doc pickup or a resume whose THREAD.md points at the doc — reads the doc and then sets `status: consumed` in its front matter, in place, with no commit. The doc's job ended the moment the thread went live, exactly as a stash/defer capture is marked done at pickup (ADR 0001).
-- **Close-out.** That session's `thread:close` deletes the consumed doc in its close-out commit (`git rm -f` — the consumed mark is a local modification plain `git rm` refuses — committed by pathspec). Git history keeps it forever; deletion is the cleanup, so there is no buildup. A consumer that exits by `stash`/`defer` instead leaves the consumed doc for the next close in that repo.
-- **While pending**, `thread:close` treats the doc as the thread's continuation: it refreshes the doc in place when later work has made it stale, and proposes no vault task for anything the doc carries (close § The handoff owns the continuation, ADR 0017).
-- **Withdrawn.** If the handoff is called off in the same session ("never mind, keep going"), remove the doc at once — `git -C "<home>" rm -f <path> && git -C "<home>" commit -m "🔧 chore(handoff): withdraw <slug>" -- <path>` (plain `rm` if it was never committed; same repo-state guard as above) — so no pending doc outlives the intent. A doc left by a misfire is the one way this route can silence a later close.
-- **Legacy.** Docs written before this contract carry no front matter. `thread:close` lists them and leaves them alone; add the front matter by hand to bring one into the lifecycle.
+**Lifecycle.** The doc's states, pickup, close-out and the manual-handoff rule are `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md`. The one lifecycle procedure that runs here is **withdrawal** (`handoff-lifecycle.md` § Withdrawn): if the handoff is called off in the same session, remove the doc at once — `git -C "<home>" rm -f <path> && git -C "<home>" commit -m "🔧 chore(handoff): withdraw <slug>" -- <path>` (plain `rm` if it was never committed; same repo-state guard as above).
 
 ## Build the handoff prompt
 
