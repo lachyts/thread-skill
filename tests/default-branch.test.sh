@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # The default-branch resolver in skills/execute/SKILL.md § 4, extracted by its marker and run against
 # fixture remotes, plus the engine's rendered worktree setup executed against a `master`-only origin.
-# Hermetic: every repo lives under mktemp; git identity is passed per command.
+# Hermetic: every repo lives under mktemp; git identity is passed per command; the caller's GIT_DIR & co.
+# are unset — exported (as inside a git hook), they turn every `git -C "$tmp/..."` below into a commit,
+# HEAD switch and `push origin` against the outer repo and its real remote.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch="${GB:-master}" "$@"; }
