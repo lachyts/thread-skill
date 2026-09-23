@@ -1,0 +1,203 @@
+{
+  "base": "50152902fdb57f926ab8f01a91f49859aca94a8b",
+  "cases": [
+    {
+      "case": "baseline",
+      "exit": 0,
+      "expectedExit": 0,
+      "expectedMode": "baseline",
+      "invocation": 1,
+      "passed": true,
+      "report": {
+        "head": "50152902fdb57f926ab8f01a91f49859aca94a8b",
+        "mode": "baseline"
+      },
+      "unchanged": true
+    },
+    {
+      "case": "partial",
+      "exit": 0,
+      "expectedExit": 0,
+      "expectedMode": "partial",
+      "invocation": 2,
+      "passed": true,
+      "report": {
+        "head": "a37ec6e5caa0768da83464f474d83834973933bf",
+        "mode": "partial"
+      },
+      "unchanged": true
+    },
+    {
+      "case": "complete",
+      "exit": 0,
+      "expectedExit": 0,
+      "expectedMode": "complete",
+      "invocation": 3,
+      "passed": true,
+      "report": {
+        "head": "f6cc81a4b238c4db5cd082cfc2841eacd29f26a6",
+        "mode": "complete"
+      },
+      "unchanged": true
+    },
+    {
+      "case": "empty-descendant",
+      "exit": 1,
+      "expectedExit": 1,
+      "expectedMode": "invalid",
+      "invocation": 4,
+      "passed": true,
+      "report": {
+        "head": "b08c915d4e6c35046deaa73384c303ae9ac5dfa1",
+        "mode": "invalid"
+      },
+      "unchanged": true
+    },
+    {
+      "case": "b-only",
+      "exit": 1,
+      "expectedExit": 1,
+      "expectedMode": "invalid",
+      "invocation": 5,
+      "passed": true,
+      "report": {
+        "head": "a472588ff186d44cf5114bcbf4ce58f6fa421195",
+        "mode": "invalid"
+      },
+      "unchanged": true
+    },
+    {
+      "case": "missing-clause",
+      "exit": 1,
+      "expectedExit": 1,
+      "expectedMode": "invalid",
+      "invocation": 6,
+      "passed": true,
+      "report": {
+        "head": "7cd6e7ea54364382f9dc9fb1686c20e8a70f7b4a",
+        "mode": "invalid"
+      },
+      "unchanged": true
+    },
+    {
+      "case": "stale-digest",
+      "exit": 1,
+      "expectedExit": 1,
+      "expectedMode": "invalid",
+      "invocation": 7,
+      "passed": true,
+      "report": {
+        "head": "d65b299fe0ae003c5c6014931f9f49596201eea4",
+        "mode": "invalid"
+      },
+      "unchanged": true
+    },
+    {
+      "case": "file-symlink",
+      "exit": 1,
+      "expectedExit": 1,
+      "expectedMode": "invalid",
+      "invocation": 8,
+      "passed": true,
+      "report": {
+        "head": "7ec5f053e39ad71fc7c414354509ffcf672143be",
+        "mode": "invalid"
+      },
+      "unchanged": true
+    },
+    {
+      "case": "parent-symlink",
+      "exit": 1,
+      "expectedExit": 1,
+      "expectedMode": "invalid",
+      "invocation": 9,
+      "passed": true,
+      "report": {
+        "head": "f3373064f4053100aba829e3c5982fe3ac9e53b4",
+        "mode": "invalid"
+      },
+      "unchanged": true
+    },
+    {
+      "case": "extra-pilot-file",
+      "exit": 1,
+      "expectedExit": 1,
+      "expectedMode": "invalid",
+      "invocation": 10,
+      "passed": true,
+      "report": {
+        "head": "c51c9df2c2f92e8a1fbefdf4787fb4976df55435",
+        "mode": "invalid"
+      },
+      "unchanged": true
+    },
+    {
+      "case": "out-of-scope",
+      "exit": 1,
+      "expectedExit": 1,
+      "expectedMode": "invalid",
+      "invocation": 11,
+      "passed": true,
+      "report": {
+        "head": "daf3b5b72e26f1de8308842dd41a8addfec2a4c2",
+        "mode": "invalid"
+      },
+      "unchanged": true
+    },
+    {
+      "case": "dirty-repository",
+      "exit": 1,
+      "expectedExit": 1,
+      "expectedMode": "invalid",
+      "invocation": 12,
+      "passed": true,
+      "report": {
+        "head": "1395fc532d41fab93c7fb890b70c0d9d9af6ace5",
+        "mode": "invalid"
+      },
+      "unchanged": true
+    }
+  ],
+  "ceiling": 12,
+  "contentTests": {
+    "green": {
+      "failed": 0,
+      "passed": 6,
+      "tests": 6
+    },
+    "kind": "in-process, no verifier subprocess",
+    "red": {
+      "failed": 2,
+      "passed": 4,
+      "tests": 6
+    }
+  },
+  "files": {
+    "claude-pilot-verify-v2.py": "e5600fe57beb947b636acfbfe332ed297270fb28040535f0ac9ed744cdb7e4bf",
+    "review-policy.fixture.md": "d6c6d5dbb36e18fe71a930d421281d57ddccf2820e925bcd9770d84331090ac2",
+    "test-content.py": "c09f08b641570d27c793d1357b55972c9d920c4075d1cefb8ee98280e51e646e",
+    "test-local-once.py": "f019ec4d3dbbc2043429d73eb15ad5a25dae306672177a9e0f1f99ce337d28db",
+    "work-policy.fixture.md": "275b5bdc53b3fed2b42e438ac11fe7d33e8893919923236a78e61bfa662a6649"
+  },
+  "git": {
+    "path": "/opt/homebrew/bin/git",
+    "version": "git version 2.47.0"
+  },
+  "kind": "local-deterministic-fixture-only",
+  "nativeDispatches": 0,
+  "privateEvidenceDirectory": ".thread/claude-verifier-v2-preparation-20260923",
+  "privateEvidenceSha256": {
+    "invocations.jsonl": "3fb43adf6f33db8f1d0592d3e1def216090d25d16956ed03c8c25e38fc291c33",
+    "results.json": "21b9132f61b3d5b69dda80301ea96ffd8222d0a895fe150386ad8f4d2df149b0"
+  },
+  "python": {
+    "path": "/Users/lachlants/.pyenv/versions/3.11.3/bin/python3",
+    "version": "3.11.3 (main, May 16 2023, 08:49:50) [Clang 14.0.3 (clang-1403.0.22.14.1)]"
+  },
+  "remainingVerifierInvocations": 0,
+  "reviewFixtureSha256": "cf8951622f6c081e27503de38d5df78da35961ba2349e419e485c66059dd6bf6",
+  "scriptSha256": "e5600fe57beb947b636acfbfe332ed297270fb28040535f0ac9ed744cdb7e4bf",
+  "verifierInvocations": 12,
+  "version": 2,
+  "workFixtureSha256": "275b5bdc53b3fed2b42e438ac11fe7d33e8893919923236a78e61bfa662a6649"
+}

@@ -70,6 +70,153 @@ async function run({ config = {}, task: fields = {}, respond = answer, resolver 
 const work = r => r.calls.filter(c => c.routing?.role === 'work')
 const route = r => work(r).map(c => [c.model, c.effort])
 
+const forkReview = { claudeReviewProtocol: 'claude-fork-v1', evidenceContractVersion: 2 }
+const verifierContract = { version: 1, baselineModes: ['repository-valid'] }
+
+test('Claude fork review requires its explicit native policy and evidence contract before dispatch', async () => {
+  for (const config of [
+    { ...forkReview, claudeReviewProtocol: 'unknown' },
+    { ...forkReview, routingPolicy: undefined },
+    { ...forkReview, harness: undefined },
+    { ...forkReview, harness: 'codex' },
+    { ...forkReview, evidenceContractVersion: 1 },
+    { ...forkReview, evidenceContractVersion: '2' },
+    { ...forkReview, evidenceContractVersion: 2.5 },
+    { ...forkReview, protocolVersion: 3 },
+  ]) {
+    const r = await run({ config })
+    assert.ok(r.error, JSON.stringify(config))
+    assert.equal(r.calls.length, 0)
+  }
+})
+
+test('Claude fork wrappers use every exact resolved binding and retain all verbatim findings', async () => {
+  const findings = Array.from({ length: 11 }, (_, i) => `VERBATIM native finding ${i + 1}: preserve punctuation [${i}].`)
+  let reviews = 0
+  const r = await run({ config: forkReview, respond: (p, o) => o.label.startsWith('review:')
+    ? ++reviews < 3 ? { ...changes, feedback: findings } : approve : answer(p, o) })
+  assert.ifError(r.error)
+  const wrappers = r.calls.filter(c => c.label.startsWith('review:'))
+  assert.deepEqual(wrappers.map(c => [c.model, c.effort]), [[normal, 'xhigh'], [normal, 'max'], [recovery, 'max']])
+  for (const wrapper of wrappers) {
+    assert.equal(wrapper.reviewContract.protocol, 'claude-fork-v1')
+    assert.equal(wrapper.reviewContract.reviewedHead, head)
+    assert.equal(wrapper.reviewContract.level, 'xhigh')
+    assert.match(wrapper.prompt, new RegExp(`model=${wrapper.model}; reasoning effort=${wrapper.effort}`))
+    assert.match(wrapper.prompt, /Skill-capable native definition/)
+    assert.match(wrapper.prompt, /unmodified.*\/code-review xhigh.*EXACTLY ONCE/)
+    assert.match(wrapper.prompt, /same-child messaging/)
+    assert.match(wrapper.prompt, /VERBATIM findings/)
+    assert.match(wrapper.prompt, /launched.*not completion/i)
+    assert.match(wrapper.prompt, /Do not.*(?:re-review|another review)/)
+    assert.match(wrapper.prompt, /actual fork.*separately observed/i)
+    assert.doesNotMatch(wrapper.prompt, /3–8|Read `gh pr diff|Apply the discipline/)
+    assert.deepEqual(Object.keys(wrapper.schema.properties).sort(), ['feedback', 'reviewedHead', 'verdict'])
+  }
+  assert.equal(r.result.tasks[0].status, 'review')
+  assert.deepEqual(r.result.tasks[0].reviewHistory.map(x => x.feedback), [findings, findings])
+  assert.ok(r.calls.filter(c => c.label.startsWith('revise:')).every(c => findings.every(f => c.prompt.includes(f))))
+})
+
+test('an asynchronous native fork leaves the same wrapper pending until findings arrive', async () => {
+  let relay
+  let wrapperStarted
+  let finished = false
+  const started = new Promise(resolve => { wrapperStarted = resolve })
+  const delivered = new Promise(resolve => { relay = resolve })
+  const pending = run({ config: forkReview, respond: async (p, o) => {
+    if (o.label.startsWith('review:')) { wrapperStarted(); return delivered }
+    return answer(p, o)
+  } }).then(r => { finished = true; return r })
+  // A rejected preflight must also release the test, so the red witness cannot hang.
+  const first = await Promise.race([started.then(() => 'started'), pending.then(() => 'finished')])
+  assert.equal(first, 'started')
+  assert.equal(finished, false)
+  relay(approve)
+  const r = await pending
+  assert.ifError(r.error)
+  assert.equal(r.calls.filter(c => c.label.startsWith('review:')).length, 1)
+  assert.match(r.calls.at(-1).prompt, /Do not.*fabricated verdict/)
+  assert.match(r.calls.at(-1).prompt, /pending.*wait/i)
+  assert.equal(r.result.tasks[0].status, 'review')
+})
+
+test('a fork launch acknowledgement cannot become approval or another quality correction', async () => {
+  const r = await run({ config: forkReview, respond: (p, o) => o.label.startsWith('review:')
+    ? { status: 'launched', forkId: 'FIXTURE-NOT-LIVE' } : answer(p, o) })
+  assert.ifError(r.error)
+  assert.equal(r.result.tasks[0].status, 'blocked')
+  assert.equal(r.result.tasks[0].routingState.qualityFailures, 0)
+  assert.equal(r.calls.length, 2)
+})
+
+test('unflagged native and pinned legacy review requests do not acquire the fork protocol', async () => {
+  for (const config of [{}, { routingPolicy: undefined },
+    { routingPolicy: undefined, evidenceContractVersion: undefined },
+    { routingPolicy: undefined, harness: 'codex' }]) {
+    const r = await run({ config })
+    assert.ifError(r.error)
+    const review = r.calls.find(c => c.label.startsWith('review:'))
+    assert.equal(review.reviewContract?.protocol, undefined)
+    assert.doesNotMatch(review.prompt, /claude-fork-v1|same-child messaging|VERBATIM findings/)
+    assert.match(review.prompt, /3–8 specific/)
+  }
+})
+
+test('verifier modes bind implementation, approved-plan work, revisions and reviews to the task candidate', async () => {
+  for (const planGate of [false, true]) {
+    let reviews = 0
+    const r = await run({ config: { verifierContract }, task: { planGate, verifierModes: ['task-a-complete', 'all-complete'] },
+      respond: (p, o) => o.label.startsWith('review:') ? ++reviews === 1 ? changes : approve : answer(p, o) })
+    assert.ifError(r.error)
+    const candidates = r.calls.filter(c => /^(implement|revise|review):/.test(c.label))
+    assert.equal(candidates.length, 4)
+    for (const c of candidates) {
+      assert.match(c.prompt, /JSON.*\{.*mode.*head/)
+      assert.match(c.prompt, /task-a-complete/)
+      assert.match(c.prompt, /all-complete/)
+      assert.match(c.prompt, /repository-valid/)
+      assert.match(c.prompt, /head.*(?:exact|match).*candidate/i)
+      assert.match(c.prompt, /exit.?0.*(?:insufficient|not sufficient)/i)
+      assert.match(c.prompt, /single verifier/)
+    }
+    assert.equal(r.result.tasks[0].status, 'review')
+  }
+})
+
+test('invalid or unpaired verifier-mode contracts fail before any child', async () => {
+  for (const verifierModes of [undefined, [], '', [''], ['  '], ['done', 1], null]) {
+    const r = await run({ config: { verifierContract }, task: { verifierModes } })
+    assert.ok(r.error, JSON.stringify(verifierModes))
+    assert.equal(r.calls.length, 0)
+  }
+  for (const contract of [undefined, null, { version: 2, baselineModes: ['base'] },
+    { version: 1, baselineModes: [] }, { version: 1, baselineModes: [' '] },
+    { version: 1, baselineModes: 'base' }]) {
+    const r = await run({ config: { verifierContract: contract }, task: { verifierModes: ['done'] } })
+    assert.ok(r.error, JSON.stringify(contract))
+    assert.equal(r.calls.length, 0)
+  }
+  const old = await run({ config: { protocolVersion: 3, routingPolicy: undefined,
+    evidenceContractVersion: undefined, verifierContract }, task: { verifierModes: ['done'] } })
+  assert.ok(old.error)
+  assert.equal(old.calls.length, 0)
+})
+
+test('resumed routing and retained PR work keep verifier modes across bounded retries', async () => {
+  const routingState = { version: 1, policyDigest: digest, qualityFailures: 1, stage: 'maximum',
+    lastFailure: { layer: 'review', kind: 'quality', feedback: ['Preserved diagnosis'] } }
+  let candidates = 0
+  const r = await run({ config: { verifierContract }, task: { verifierModes: ['restored-task-complete'],
+    routingState, priorResult: { ...green, reviewHistory: [{ round: 1, feedback: ['Preserved diagnosis'] }] } },
+    respond: (p, o) => o.label.startsWith('implement:') ? ++candidates === 1 ? red : green : answer(p, o) })
+  assert.ifError(r.error)
+  assert.deepEqual(route(r), [[normal, 'max'], [recovery, 'max']])
+  assert.equal(r.result.tasks[0].prUrl, green.prUrl)
+  for (const call of r.calls) assert.match(call.prompt, /restored-task-complete/)
+  assert.match(work(r)[1].prompt, /Preserved diagnosis/)
+})
+
 test('normal effort follows easy/hard policy and independent reviewers stay at xhigh', async () => {
   for (const startingEffort of ['high', 'xhigh']) {
     const r = await run({ config: { routingPolicy: policy({ startingEffort }) },

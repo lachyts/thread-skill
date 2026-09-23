@@ -15,7 +15,8 @@ supplementary checks. They do not validate this corrected contract.
 | Infrastructure, authority, formatting and quota do not escalate reasoning | Engine failure-classification tests | Pending representative native failure |
 | Profile override or unsupported effort cannot silently lower execution | Resolver capability/provenance rejections | Codex high/xhigh/ultra observed; Claude 2.1.280 definition effort overrides existing pins in observed children; rejection remains local fixture evidence |
 | Request/resolution/observation recorded separately | Adapter and full host integration fixtures, including duplicate deliveries | Diagnostic adapter exchanges observed in both harnesses; durable rollout-host path pending; Claude prompt-delivery exceptions recorded |
-| Independent built-in review bound to exact child and commit | Host receipt rejection, immutable evidence, adapter/engine contract fixtures | Both built-in invocations observed; immutable rollout-host capture pending; Claude fork/result contract requires correction |
+| Independent built-in review bound to exact child and commit | Host receipt rejection, immutable evidence; corrected Claude wrapper/fork reservation, relay, identity and recovery fixtures | Historical built-in invocations observed; corrected native wrapper/fork path and rollout-host capture pending |
+| Task completion requires its pinned verifier mode and head | Candidate and integrated host mode gates; versioned two-task verifier with 12 saved local cases | Pending a new native rollout; partial repository validity is not B completion |
 | Exact authorisation and verifier inputs remain bound | Host source-text and external-byte drift cases | Pending launch record |
 | Supplementary check reserves once; interruption is not success | Host idempotency, exhausted pool and lease-recovery tests | Pending native owner interruption |
 | Existing work, feedback and escalation survive recovery | Engine histories, host recovery and same-record integration fixtures | Pending native cold recovery |
@@ -59,13 +60,20 @@ checks all 72 indexed hashes against saved evidence, and saved child transcripts
 and metadata against the original native records. The built-in xhigh review
 found the deliberate defect at the exact fixture commit.
 
-These observations do not validate the current Claude rollout review contract:
+These observations did not validate the audited Claude rollout review contract:
 the built-in forks and reports to the lead, whereas the bound review child is
 asked to return the structured verdict. The proposed relay remains unimplemented
-and untested. Independent source review found gaps in fork accounting/recovery,
+and untested at that checkpoint. Independent source review found gaps in fork accounting/recovery,
 escalated review bindings and per-task completion/dependency claims. The two-task
 proposal requires correction and verifier preparation before a launch agreement.
 No pilot is authorised.
+
+The [subsequent correction](2026-09-23-claude-review-correction.md) implements
+fork accounting/recovery, every resolved review binding, exact-head verbatim relay
+receipts and per-task completion gates in candidate source. Focused fixtures and
+independent source review cover those changes. A separate six-child native check
+is prepared; it has not run. The original five probes were not rerun. The
+[v2 pilot proposal](2026-09-23-claude-routing-pilot-proposal-v2.md) remains unlaunched.
 
 The settings migration is not needed for the observed per-child routes on this
 runtime version. Approved temporary user agent definitions were removed with

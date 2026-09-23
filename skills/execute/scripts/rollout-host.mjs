@@ -274,6 +274,9 @@ function validConfig(config, owner) {
     Number.isSafeInteger(config.maxConcurrent) && config.maxConcurrent > 0,
     "maxConcurrent must be positive",
   );
+  if (config.claudeReviewProtocol !== undefined)
+    demand(owner.harness === "claude" && config.routingPolicy && config.claudeReviewProtocol === "claude-fork-v1",
+      "claudeReviewProtocol requires the prepared Claude routing policy");
   for (const tier of config.routingPolicy ? [] : ["opus", "fable"]) {
     const b = config.models?.[tier];
     demand(
@@ -311,6 +314,41 @@ function bindVerifierInputs(repository) {
     demand(fs.statSync(filename).isFile(), "verifier input must be a file");
     return { path: filename, realPath: fs.realpathSync(filename), sha256: bytes(fs.readFileSync(filename)) };
   });
+}
+function validateVerifierContract(repository, tasks) {
+  const contract = repository.verifierContract;
+  const modes = (value) => Array.isArray(value) && value.length > 0 &&
+    value.every(v => typeof v === "string" && /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(v)) &&
+    new Set(value).size === value.length;
+  if (contract === undefined) {
+    demand(tasks.every(t => t.verifierModes === undefined), "task.verifierModes requires repository.verifierContract");
+    return;
+  }
+  demand(contract && contract.version === 1 &&
+    Object.keys(contract).every(k => ["version", "baselineModes", "rollbackModes"].includes(k)) && modes(contract.baselineModes) &&
+    (contract.rollbackModes === undefined || modes(contract.rollbackModes)),
+    "verifierContract requires version 1 and nonempty unique baselineModes");
+  for (const task of tasks) demand(modes(task.verifierModes), `task ${task.id} requires nonempty unique verifierModes`);
+}
+function reportResult(repository, commit, result) {
+  if (!repository.verifierContract || result.exitCode !== 0) return result;
+  try {
+    const report = JSON.parse(result.stdout);
+    demand(report && !Array.isArray(report) && Object.keys(report).every(k => ["mode", "head"].includes(k)) &&
+      typeof report.mode === "string" && report.mode.trim(), "verifier JSON report requires mode and head only");
+    demand(report.head === commit, "verifier report head differs from verified commit");
+    return { ...result, report };
+  } catch (error) {
+    return { ...result, processExitCode: result.exitCode, exitCode: 1,
+      stderr: `${result.stderr || ""}\nInvalid verifier JSON report: ${error.message}` };
+  }
+}
+function verificationAccepted(s, t, result) {
+  if (result.exitCode !== 0) return false;
+  if (!s.repository.verifierContract) return true;
+  const modes = !t ? s.repository.verifierContract.baselineModes
+    : t.attempt?.purpose === "rollback" ? s.repository.verifierContract.rollbackModes : t.verifierModes;
+  return result.report?.head === result.commit && modes.includes(result.report.mode);
 }
 function checkVerifierInputs(repository) {
   for (const input of repository.verifierInputs || [])
@@ -411,6 +449,24 @@ function checkRelease(s) {
       if (evidence) demand(fs.existsSync(evidence.path) && bytes(fs.readFileSync(evidence.path)) === evidence.sha256,
         "captured native review evidence changed");
     }
+  for (const run of Object.values(s.host.runs || {}))
+    for (const evidence of Object.values(run.reviewForkEvidence || {}))
+      demand(fs.existsSync(evidence.path) && bytes(fs.readFileSync(evidence.path)) === evidence.sha256,
+        "captured native fork evidence changed");
+}
+const forkReview = (request) => request.options?.reviewContract?.protocol === "claude-fork-v1";
+const requestCalls = (request) => forkReview(request) ? 2 : 1;
+const reservedNativeSlots = (s) => Object.values(s.execution.requests)
+  .filter(r => ["claimed", "dispatched"].includes(r.status)).reduce((sum, r) => sum + (r.calls || 1), 0);
+function assertNativeIdentity(s, requestId, values, { wrapper = false } = {}) {
+  demand(values.every(v => typeof v === "string" && v.trim()) && new Set(values).size === values.length,
+    "distinct native identities required");
+  for (const r of Object.values(s.execution.requests)) {
+    const occupied = [r.childId, r.reviewFork?.childId, r.reviewFork?.invocationId].filter(Boolean);
+    for (const v of values) demand(!occupied.includes(v) ||
+      (r.id === requestId && (wrapper ? r.childId === v : [r.reviewFork?.childId, r.reviewFork?.invocationId].includes(v))),
+      "independent native identities required across task runs");
+  }
 }
 async function adapter(s) {
   checkRelease(s);
@@ -583,7 +639,7 @@ async function verify(
       purpose,
       commit,
       command: repository.verifier,
-      ...result,
+      ...reportResult(repository, commit, result),
       finishedAt: new Date().toISOString(),
     };
   } finally {
@@ -677,6 +733,7 @@ function view(s) {
         taskId: r.taskId,
         requestId: r.id,
         childId: r.childId || null,
+        ...(r.reviewFork ? { reviewFork: r.reviewFork } : {}),
       })),
   };
   result.continuation = continuation(s, result);
@@ -699,7 +756,8 @@ function continuation(s, v) {
     inflight = requests.filter((r) =>
       ["claimed", "dispatched"].includes(r.status),
     );
-  const capacity = inflight.length < s.host.config.maxConcurrent;
+  const freeSlots = s.host.config.maxConcurrent - reservedNativeSlots(s);
+  const capacity = freeSlots > 0;
   const ambiguous = inflight.some((r) => r.status === "claimed" && !r.childId);
   const unresolved = Object.values(s.host.merges).filter(
     (m) => !m.queueResolved,
@@ -734,7 +792,7 @@ function continuation(s, v) {
       drain ||
       immediateMerge ||
       (capacity &&
-        (v.requests.some((r) => r.claimable) || eligible(s).length > 0)) ||
+        (v.requests.some((r) => r.claimable && requestCalls(r) <= freeSlots) || eligible(s).length > 0)) ||
       (!inflight.length &&
         !Object.values(s.tasks).some((t) =>
           ["active", "review", "waiting", "draining"].includes(t.status),
@@ -799,6 +857,15 @@ export async function initialise(directory, spec, owner, config) {
           `task ${task.id} model/effort overrides are legacy-only; preserve requested author/effort in the prepared native policy`);
       const routing = await import(pathToFileURL(path.join(path.dirname(config.nativeAdapter), "native_routing.mjs")).href);
       config = { ...config, routingPolicy: routing.normaliseRoutingPolicy(config.routingPolicy, { harness: owner.harness }) };
+      if (owner.harness === "claude") {
+        demand(config.claudeReviewProtocol === undefined || config.claudeReviewProtocol === "claude-fork-v1",
+          "new Claude policy executions require claude-fork-v1 review protocol");
+        demand(config.maxConcurrent >= 2, "Claude fork review requires two reserved native capacity slots");
+        const native = await import(pathToFileURL(config.nativeAdapter).href);
+        demand(typeof native.bindReviewFork === "function" && typeof native.recordReviewFork === "function",
+          "native adapter lacks durable Claude review fork support");
+        config = { ...config, claudeReviewProtocol: "claude-fork-v1" };
+      }
       const rounds = config.routingPolicy.recovery ? 3 : 2;
       for (const key of ["maxIterations", "maxReviewRounds", ...(spec.tasks.some(t => t.planGate ?? t.scope === "cross-cutting") ? ["maxPlanRounds"] : [])])
         demand(config.engine[key] >= rounds, `engine.${key} lacks headroom for the prepared effort/recovery path`);
@@ -808,9 +875,12 @@ export async function initialise(directory, spec, owner, config) {
       repository: await resolveRepository(spec.repository),
     };
     resolved.repository.verifierInputs = bindVerifierInputs(resolved.repository);
-    resolved.evidenceContractVersion = 1;
+    validateVerifierContract(resolved.repository, resolved.tasks);
+    resolved.evidenceContractVersion = config.claudeReviewProtocol ? 2 : 1;
     if (config.routingPolicy) resolved.routingPolicy = config.routingPolicy;
     let s = createRollout(resolved, owner);
+    if (s.repository.verifierContract && s.authority.allowedActions.includes("revert-run-owned"))
+      demand(s.repository.verifierContract.rollbackModes, "authorised rollback requires prepared verifierContract.rollbackModes");
     for (const t of Object.values(s.tasks)) {
       demand(path.isAbsolute(t.sourcePath), "sourcePath must be absolute");
       demand(
@@ -827,8 +897,9 @@ export async function initialise(directory, spec, owner, config) {
       const rollback = s.authority.allowedActions.includes("revert-run-owned");
       for (const task of Object.values(s.tasks)) {
         const gated = task.planGate ?? task.scope === "cross-cutting";
-        const minimumCalls = 2 * candidates + (gated ? 2 : 0) + (rollback ? 2 : 0);
-        const minimumVerifiers = candidates + (gated ? 1 : 0) + 2 + (rollback ? 3 : 0);
+        const perCandidate = config.claudeReviewProtocol ? 3 : 2;
+        const minimumCalls = perCandidate * candidates + (gated ? 2 : 0) + (rollback ? perCandidate : 0);
+        const minimumVerifiers = candidates * (s.repository.verifierContract ? 2 : 1) + (gated ? 1 : 0) + 2 + (rollback ? 3 + (s.repository.verifierContract ? 1 : 0) : 0);
         const pool = s.execution.pools[task.pool];
         demand(pool.limit.calls >= minimumCalls && pool.limit.verifierRuns >= minimumVerifiers,
           `task ${task.id} allowance lacks prepared correction/review/merge headroom (${minimumCalls} calls, ${minimumVerifiers} verifiers)`);
@@ -844,8 +915,8 @@ export async function initialise(directory, spec, owner, config) {
       config.verifierTimeoutMs,
     );
     demand(
-      baseline.exitCode === 0,
-      `baseline verifier failed: ${baseline.stderr || baseline.stdout || baseline.exitCode}`,
+      verificationAccepted(s, null, baseline),
+      `baseline verifier report or mode failed: ${baseline.stderr || baseline.stdout || baseline.exitCode}`,
     );
     if (s.authority.allowedActions.includes("revert-run-owned"))
       for (const pool of Object.values(s.execution.pools))
@@ -855,10 +926,10 @@ export async function initialise(directory, spec, owner, config) {
         );
     s.host = {
       version: 1,
-      evidenceContractVersion: 1,
+      evidenceContractVersion: resolved.evidenceContractVersion,
       statePath: path.join(directory, "state.json"),
       rollbackReserve: s.authority.allowedActions.includes("revert-run-owned")
-        ? { calls: 2, verifierRuns: 3 }
+        ? { calls: config.claudeReviewProtocol ? 3 : 2, verifierRuns: s.repository.verifierContract ? 4 : 3 }
         : { calls: 0, verifierRuns: 0 },
       config: clone(config),
       release: pinRelease(directory, s, config),
@@ -956,6 +1027,7 @@ function engineTask(s, t) {
       ...(t.effort ? { effort: t.effort } : {}),
     } : {}),
     ...(t.difficulty ? { difficulty: t.difficulty } : {}),
+    ...(t.verifierModes ? { verifierModes: t.attempt.purpose === "rollback" ? s.repository.verifierContract.rollbackModes : t.verifierModes } : {}),
     ...(t.routingState ? { routingState: t.routingState } : {}),
     approvedGates: [
       ...new Set([
@@ -973,9 +1045,11 @@ function engineArgs(s, t) {
     protocolVersion: 4,
     ...(s.host.evidenceContractVersion ? { evidenceContractVersion: s.host.evidenceContractVersion, harness: s.execution.owner.harness } : {}),
     ...(s.host.config.routingPolicy ? { routingPolicy: s.host.config.routingPolicy } : {}),
+    ...(s.host.config.claudeReviewProtocol ? { claudeReviewProtocol: s.host.config.claudeReviewProtocol } : {}),
     rolloutSlug: s.rolloutId,
     repoPath: s.repository.path,
     verifier: s.repository.verifier,
+    ...(s.repository.verifierContract ? { verifierContract: s.repository.verifierContract } : {}),
     baseBranch: s.repository.baseBranch,
     baseRef: t.attempt.baseRef,
     date: new Date().toISOString().slice(0, 10),
@@ -1170,6 +1244,18 @@ async function consumeComplete(tx, t, run) {
     actual.headRefOid === r.reviewedHead,
     "GitHub PR head differs from independently reviewed head",
   );
+  if (tx.state.repository.verifierContract) {
+    await git(tx.state.repository.path, "fetch", "--quiet", "origin", `refs/pull/${actual.number}/head`);
+    demand(await git(tx.state.repository.path, "rev-parse", "FETCH_HEAD^{commit}") === actual.headRefOid,
+      "candidate verification fetched a different PR head");
+    const operation = await verifyTaskLocked(tx, t.id, {
+      operationId: `candidate-${t.attempt.id}-${actual.headRefOid}`,
+      commit: actual.headRefOid,
+      purpose: "Host candidate task acceptance before approval",
+    }, tx.state.execution.owner);
+    demand(operation.status === "complete" && verificationAccepted(tx.state, t, operation.result),
+      `candidate task acceptance mode failed: ${operation.result?.stderr || operation.result?.stdout || operation.status}`);
+  }
   tx.apply({
     type: "converged",
     taskId: t.id,
@@ -1269,7 +1355,7 @@ async function reconcileSupersededQueues(tx, owner) {
         taskId: t.id,
         attemptId: attempt.id,
         approval: approval.digest,
-        verified: verification.exitCode === 0,
+        verified: verificationAccepted(s, t, verification),
         observation: {
           repository: s.repository.identity,
           baseBranch: s.repository.baseBranch,
@@ -1364,8 +1450,8 @@ export async function advance(directory, owner) {
           .reverse();
       if (
         reverts.length &&
-        pool.limit.calls - pool.spent.calls >= 2 &&
-        pool.limit.verifierRuns - pool.spent.verifierRuns >= 3
+        pool.limit.calls - pool.spent.calls >= tx.state.host.rollbackReserve.calls &&
+        pool.limit.verifierRuns - pool.spent.verifierRuns >= tx.state.host.rollbackReserve.verifierRuns
       ) {
         tx.apply({ type: "retry", taskId: held.id });
         tx.state.host.rollbackPending ??= {};
@@ -1437,16 +1523,13 @@ export async function claim(directory, taskId, requestId, owner) {
       !tx.state.execution.requests[requestId],
       "request already reserved or claimed; reconcile instead of redispatch",
     );
-    demand(
-      Object.values(tx.state.execution.requests).filter((r) =>
-        ["claimed", "dispatched"].includes(r.status),
-      ).length < tx.state.host.config.maxConcurrent,
-      "global native capacity reached",
-    );
     const native = await adapter(tx.state);
     run.snapshot = native.inspect(run.directory, nativeContext(owner, run));
     const request = run.snapshot.requests.find((r) => r.id === requestId);
     demand(request?.status === "pending", "native request is not pending");
+    const calls = requestCalls(request);
+    demand(reservedNativeSlots(tx.state) + calls <= tx.state.host.config.maxConcurrent,
+      "global native capacity reached (including reserved review forks)");
     const cost = verifierCost(tx.state, request, run),
       pool = tx.state.execution.pools[t.pool],
       reserve =
@@ -1454,7 +1537,7 @@ export async function claim(directory, taskId, requestId, owner) {
           ? { calls: 0, verifierRuns: 0 }
           : tx.state.host.rollbackReserve;
     if (
-      pool.spent.calls + 1 > pool.limit.calls - reserve.calls ||
+      pool.spent.calls + calls > pool.limit.calls - reserve.calls ||
       pool.spent.verifierRuns + cost >
         pool.limit.verifierRuns - reserve.verifierRuns
     ) {
@@ -1465,7 +1548,7 @@ export async function claim(directory, taskId, requestId, owner) {
       return { status: "blocked", taskId, reason };
     }
     try {
-      tx.apply({ type: "claim", taskId, requestId, verifierRuns: cost });
+      tx.apply({ type: "claim", taskId, requestId, calls, verifierRuns: cost });
     } catch (e) {
       if (/allowance/.test(e.message)) {
         block(tx, t, e.message);
@@ -1475,6 +1558,7 @@ export async function claim(directory, taskId, requestId, owner) {
     }
     tx.state.execution.requests[requestId].reservation =
       "conservative maximum requested verifier work";
+    if (calls === 2) tx.state.execution.requests[requestId].reviewFork = { status: "reserved" };
     run = tx.state.host.runs[t.attempt.id];
     tx.save();
     let claimed;
@@ -1516,6 +1600,7 @@ export async function bind(
     let { run } = runFor(tx.state, taskId);
     const r = tx.state.execution.requests[requestId];
     demand(r && r.claimToken === token, "host claim token mismatch");
+    assertNativeIdentity(tx.state, requestId, [childId], { wrapper: true });
     tx.apply({
       type: "request-state",
       taskId,
@@ -1534,6 +1619,40 @@ export async function bind(
       nativeContext(owner, run),
     );
     run.snapshot = native.inspect(run.directory, nativeContext(owner, run));
+    return result;
+  });
+}
+export async function bindReviewFork(directory, taskId, requestId, token, binding, owner) {
+  return transaction(directory, owner, async tx => {
+    const { run } = runFor(tx.state, taskId), r = tx.state.execution.requests[requestId];
+    demand(r?.taskId === taskId && r.claimToken === token && r.calls === 2 && r.reviewFork,
+      "host fork reservation and claim required");
+    assertNativeIdentity(tx.state, requestId, [binding.childId, binding.invocationId]);
+    const native = await adapter(tx.state);
+    const result = native.bindReviewFork(run.directory, requestId, token, binding, nativeContext(owner, run));
+    run.snapshot = native.inspect(run.directory, nativeContext(owner, run));
+    r.reviewFork = clone(run.snapshot.requests.find(q => q.id === requestId).reviewFork);
+    return result;
+  });
+}
+export async function recordReviewFork(directory, taskId, requestId, token, proof, owner, nativeEvidence) {
+  return transaction(directory, owner, async tx => {
+    const { run } = runFor(tx.state, taskId), r = tx.state.execution.requests[requestId];
+    demand(r?.taskId === taskId && r.claimToken === token && r.calls === 2 && r.reviewFork,
+      "host fork reservation and claim required");
+    const source = nativeEvidence?.path;
+    demand(path.isAbsolute(source || "") && fs.statSync(source).isFile(), "native fork evidence file required");
+    const content = fs.readFileSync(source);
+    demand(content.length > 0 && (!nativeEvidence.sha256 || nativeEvidence.sha256 === bytes(content)),
+      "native fork evidence digest mismatch or empty evidence");
+    const proofHash = digest(proof), prior = run.reviewForkEvidence?.[requestId];
+    demand(!prior || (prior.proofHash === proofHash && prior.sha256 === bytes(content)), "conflicting fork evidence replay");
+    const captured = immutable(path.join(directory, "review-evidence", `${bytes(requestId)}-fork-${bytes(content)}.json`), content);
+    const native = await adapter(tx.state);
+    const result = native.recordReviewFork(run.directory, requestId, token, proof, nativeContext(owner, run));
+    run.snapshot = native.inspect(run.directory, nativeContext(owner, run));
+    r.reviewFork = clone(run.snapshot.requests.find(q => q.id === requestId).reviewFork);
+    (run.reviewForkEvidence ??= {})[requestId] = { ...captured, proofHash, source };
     return result;
   });
 }
@@ -1556,7 +1675,8 @@ export async function recordUnavailable(directory, taskId, requestId, claimToken
   });
 }
 function captureReviewReceipt(directory, run, request, envelope, receipt, owner) {
-  demand(receipt?.version === 1, "built-in review receipt required");
+  const compound = forkReview(request);
+  demand(receipt?.version === (compound ? 2 : 1), "built-in review receipt required for dispatched protocol");
   demand(receipt.requestId === envelope.requestId && receipt.childId === envelope.childId &&
     receipt.harness === owner.harness && receipt.reviewedHead === envelope.output?.reviewedHead &&
     /^[a-f0-9]{40,64}$/.test(receipt.reviewedHead || ""), "review receipt identity or head mismatch");
@@ -1569,6 +1689,15 @@ function captureReviewReceipt(directory, run, request, envelope, receipt, owner)
       "review receipt differs from dispatched review contract");
   }
   demand(typeof receipt.invocationId === "string" && receipt.invocationId.trim(), "review receipt native invocation id required");
+  if (compound) {
+    const fork = request.reviewFork;
+    demand(fork?.status === "complete" && run.reviewForkEvidence?.[request.id], "completed native review fork evidence required");
+    demand(fork.reviewedHead === receipt.reviewedHead && receipt.fork?.childId === fork.childId && receipt.fork?.resultHash === fork.resultHash &&
+      receipt.invocationId === fork.invocationId, "review fork receipt identity or result mismatch");
+    demand(receipt.relay?.childId === envelope.childId && receipt.relay?.outputHash === bytes(fork.output) &&
+      typeof receipt.relay.evidence === "string" && receipt.relay.evidence.trim(),
+      "verbatim review findings relay to the same wrapper requires native evidence");
+  }
   const previous = run.accepted[envelope.requestId];
   if (previous?.reviewReceipt) {
     demand(previous.reviewReceiptInputHash === digest(receipt), "conflicting review receipt replay");
@@ -1639,7 +1768,10 @@ export async function accept(directory, taskId, envelope, owner, reviewReceipt) 
 
 /** Supplementary evidence only: never substitutes for native implementation/review approval. */
 export async function verifyTask(directory, taskId, operation, owner) {
-  return transaction(directory, owner, async (tx) => {
+  return transaction(directory, owner, (tx) => verifyTaskLocked(tx, taskId, operation, owner));
+}
+async function verifyTaskLocked(tx, taskId, operation, owner) {
+    const directory = tx.directory;
     const t = tx.state.tasks[taskId];
     demand(t?.attempt, "supplementary verification requires a task attempt");
     demand(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(operation.operationId || ""), "verification operationId required");
@@ -1647,14 +1779,15 @@ export async function verifyTask(directory, taskId, operation, owner) {
     demand(typeof operation.purpose === "string" && operation.purpose.trim(), "verification purpose required");
     const key = tx.state.execution.id + ":" + operation.operationId;
     const basis = { taskId, attemptId: t.attempt.id, revision: t.revision.hash, commit: operation.commit,
-      purpose: operation.purpose, verifier: digest({ command: tx.state.repository.verifier, inputs: tx.state.repository.verifierInputs || [] }) };
+      purpose: operation.purpose, verifier: digest({ command: tx.state.repository.verifier, inputs: tx.state.repository.verifierInputs || [],
+        ...(tx.state.repository.verifierContract ? { contract: tx.state.repository.verifierContract, modes: t.verifierModes } : {}) }) };
     const hash = digest(basis), previous = tx.state.host.verifications?.[key];
     if (previous) {
       demand(previous.inputHash === hash, "conflicting supplementary verification operation");
       demand(["complete", "interrupted"].includes(previous.status), "supplementary verification interrupted; reconcile owner before retrying with a new operation id");
       return clone(previous);
     }
-    const pool = tx.state.execution.pools[t.pool], reserve = tx.state.host.rollbackReserve?.verifierRuns || 0;
+    const pool = tx.state.execution.pools[t.pool], reserve = t.attempt.purpose === "rollback" ? 0 : tx.state.host.rollbackReserve?.verifierRuns || 0;
     demand(pool.spent.verifierRuns + 1 <= pool.limit.verifierRuns - reserve, "supplementary verifier allowance exhausted or reserved for rollback");
     demand(await git(tx.state.repository.path, "rev-parse", `${operation.commit}^{commit}`) === operation.commit, "verification commit unavailable");
     tx.apply({ type: "reserve-verifier", taskId, verifierRuns: 1, purpose: operation.purpose });
@@ -1668,13 +1801,13 @@ export async function verifyTask(directory, taskId, operation, owner) {
     try {
       record.status = "running"; tx.save();
       record.result = await verify(directory, tx.state.repository, operation.commit, operation.purpose, tx.state.host.config.verifierTimeoutMs, lease);
+      record.accepted = verificationAccepted(tx.state, t, record.result);
       record.status = "complete";
     } catch (error) {
       record.status = "interrupted"; record.error = error.message;
       throw error;
     } finally { tx.save(); lease(); }
     return clone(record);
-  });
 }
 
 async function expectedRevertTree(directory, s, t) {
@@ -1933,7 +2066,7 @@ async function mergeLocked(tx, taskId, lease) {
     operation.verification = verification;
     tx.save();
   }
-  if (verification.exitCode !== 0) {
+  if (!verificationAccepted(s, t, verification)) {
     tx.apply({
       type: "regression",
       taskId,
@@ -2053,6 +2186,8 @@ export async function transition(directory, change, owner) {
         "revision must match actual source requirements",
       );
     }
+    if (change.type === "prerequisite")
+      validateVerifierContract(tx.state.repository, [change.task]);
     if (change.type === "prerequisite")
       demand(
         fs.readFileSync(change.task.sourcePath, "utf8") ===
@@ -2213,6 +2348,7 @@ export async function recover(directory, owner, evidence) {
         operation.status = "interrupted";
         operation.error = "Prior owner stopped before verification was durably completed; reservation retained";
         delete operation.result;
+        delete operation.accepted;
         tx.save();
       }
       demand(
@@ -2233,6 +2369,10 @@ export async function recover(directory, owner, evidence) {
           "partial recovery must resume the exact recorded transfer",
         );
       const resolutions = {};
+      const activeRequests = Object.values(tx.state.execution.requests).filter(r => ["claimed", "dispatched"].includes(r.status));
+      demand(Object.keys(evidence.requests || {}).length === activeRequests.length &&
+        Object.keys(evidence.requests || {}).every(id => activeRequests.some(r => r.id === id)),
+        "recovery evidence must cover exactly the outstanding host requests");
       for (const r of Object.values(tx.state.execution.requests).filter((r) =>
         ["claimed", "dispatched"].includes(r.status),
       )) {
@@ -2262,6 +2402,39 @@ export async function recover(directory, owner, evidence) {
           };
         }
       }
+      const native = await adapter(tx.state);
+      // Validate every native journal before pinning a recovery intent. A missing
+      // fork observation must be correctable without locking in that bad input.
+      const identities = new Set();
+      for (const [runId, run] of Object.entries(tx.state.host.runs)) {
+        if (!fs.existsSync(path.join(run.directory, "run.json"))) continue;
+        releaseProvenDeadLock(path.join(run.directory, ".lock"));
+        let journal = read(path.join(run.directory, "run.json"));
+        const priorEpoch = pending?.adapterEpochs[runId] ?? run.snapshot?.ownershipEpoch ?? 1;
+        let requests = Array.isArray(journal.requests) ? journal.requests : Object.values(journal.requests);
+        for (const request of requests) {
+          const proof = evidence.requests?.[request.id];
+          const values = [proof?.childId || request.childId,
+            proof?.reviewFork?.childId || request.reviewFork?.childId,
+            proof?.reviewFork?.invocationId || request.reviewFork?.invocationId].filter(Boolean);
+          for (const id of values) {
+            demand(!identities.has(id), "recovery repeats a native identity across task runs");
+            identities.add(id);
+          }
+        }
+        if (journal.caller.session === owner.session && (journal.ownershipEpoch ?? 1) === priorEpoch + 1) continue;
+        for (const request of requests.filter(r => r.status === "pending" && evidence.requests?.[r.id]?.status === "not-started"))
+          native.claim(run.directory, request.id, { ...context(previous), epoch: priorEpoch });
+        journal = read(path.join(run.directory, "run.json"));
+        requests = Array.isArray(journal.requests) ? journal.requests : Object.values(journal.requests);
+        if (tx.state.host.config.claudeReviewProtocol)
+          demand(typeof native.validateRecovery === "function", "fork recovery requires native prevalidation");
+        if (typeof native.validateRecovery === "function") native.validateRecovery(run.directory,
+          { ...context(owner), epoch: priorEpoch + 1 }, {
+            ...evidence, previousCaller: journal.caller, previousEpoch: priorEpoch,
+            requests: Object.fromEntries(requests.filter(r => ["claimed", "dispatched"].includes(r.status)).map(r => [r.id, evidence.requests[r.id]])),
+          });
+      }
       const next = apply(
         tx.state,
         {
@@ -2285,7 +2458,6 @@ export async function recover(directory, owner, evidence) {
       };
       tx.state.host.recoveryIntent = intent;
       tx.save();
-      const native = await adapter(tx.state);
       demand(
         typeof native.recover === "function",
         "pinned adapter lacks ownership recovery; execution remains held",
@@ -2352,6 +2524,7 @@ export async function recover(directory, owner, evidence) {
           const recorded = next.execution.requests[request.id];
           if (recorded && request.claimToken)
             recorded.claimToken = request.claimToken;
+          if (recorded && request.reviewFork) recorded.reviewFork = clone(request.reviewFork);
         }
       next.host.recoveries.push({
         owner: context(owner),
@@ -2394,6 +2567,12 @@ async function main() {
         p.childId,
         p.owner,
       );
+      break;
+    case "bind-review-fork":
+      out = await bindReviewFork(directory, p.taskId, p.requestId, p.claimToken, p.binding, p.owner);
+      break;
+    case "record-review-fork":
+      out = await recordReviewFork(directory, p.taskId, p.requestId, p.claimToken, p.proof, p.owner, p.nativeEvidence);
       break;
     case "accept":
       out = await accept(directory, p.taskId, p.envelope, p.owner, p.reviewReceipt);

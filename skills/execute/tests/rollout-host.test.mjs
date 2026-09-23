@@ -205,6 +205,99 @@ async function converge(f) {
   return host.advance(f.record, owner);
 }
 
+function verifierModes(f, modes = ["complete"]) {
+  f.spec.repository.verifierContract = { version: 1, baselineModes: ["partial"] };
+  f.spec.repository.verifier = `printf '{"mode":"partial","head":"%s"}\\n' "$(git rev-parse HEAD)"`;
+  for (const task of f.spec.tasks) task.verifierModes = modes;
+}
+test("exit-zero partial content cannot approve a task requiring complete content", async (t) => {
+  const f = setup(t, { tasks: 2 });
+  verifierModes(f);
+  f.spec.tasks[1].dependsOn = ["task0"];
+  await host.initialise(f.record, f.spec, owner, f.config);
+  const result = await converge(f);
+  assert.equal(result.readyToMerge.length, 0);
+  assert.equal(state(f).tasks.task0.status, "blocked");
+  assert.equal(state(f).tasks.task1.status, "open");
+  assert.match(state(f).tasks.task0.reason, /mode|acceptance/);
+  assert.equal(state(f).execution.pools.task0.spent.verifierRuns, 4);
+  assert.equal(fs.existsSync(process.env.HOST_TEST_MERGED), false);
+});
+test("task modes are pinned, checked before approval and idempotently reserved", async (t) => {
+  const f = setup(t);
+  verifierModes(f, ["partial", "complete"]);
+  await host.initialise(f.record, f.spec, owner, f.config);
+  await converge(f);
+  assert.equal(state(f).tasks.task0.status, "review");
+  assert.equal(state(f).execution.pools.task0.spent.verifierRuns, 4);
+  await host.advance(f.record, owner);
+  assert.equal(state(f).execution.pools.task0.spent.verifierRuns, 4);
+  const operations = Object.values(state(f).host.verifications);
+  assert.equal(operations.length, 1);
+  assert.equal(operations[0].status, "complete");
+  assert.equal(operations[0].result.report.mode, "partial");
+  await host.merge(f.record, "task0", owner);
+  assert.equal(state(f).tasks.task0.status, "complete");
+});
+test("malformed or wrongly bound baseline reports and missing task modes reject preparation", async (t) => {
+  const f = setup(t);
+  verifierModes(f);
+  delete f.spec.tasks[0].verifierModes;
+  await assert.rejects(host.initialise(f.record, f.spec, owner, f.config), /verifierModes/);
+  f.spec.tasks[0].verifierModes = ["complete"];
+  f.spec.repository.verifier = "true";
+  await assert.rejects(host.initialise(f.record, f.spec, owner, f.config), /report|JSON/);
+  f.spec.repository.verifier = `printf '{"mode":"partial","head":"${"a".repeat(40)}"}'`;
+  await assert.rejects(host.initialise(f.record, f.spec, owner, f.config), /head|commit/);
+});
+test("an integrated report outside task modes records regression without unlocking its dependent", async (t) => {
+  const f = setup(t, { tasks: 2 });
+  verifierModes(f, ["partial"]);
+  f.spec.tasks[1].dependsOn = ["task0"];
+  // This deterministic fixture switches the integrated mode after its mock merge.
+  f.spec.repository.verifier = `if test -f '${process.env.HOST_TEST_MERGED}'; then mode=baseline; else mode=partial; fi; printf '{"mode":"%s","head":"%s"}\\n' "$mode" "$(git rev-parse HEAD)"`;
+  await host.initialise(f.record, f.spec, owner, f.config);
+  await converge(f);
+  await host.merge(f.record, "task0", owner);
+  assert.equal(state(f).tasks.task0.status, "draining");
+  assert.equal(state(f).tasks.task1.status, "open");
+  assert.ok(state(f).execution.mergeHold);
+  assert.equal(state(f).tasks.task0.outcome?.satisfied, undefined);
+});
+test("candidate acceptance never runs beyond the remaining verifier allowance", async (t) => {
+  const f = setup(t, { allowance: { calls: 8, verifierRuns: 3, recoveries: 1 } });
+  verifierModes(f, ["partial"]);
+  await host.initialise(f.record, f.spec, owner, f.config);
+  await converge(f);
+  assert.equal(state(f).tasks.task0.status, "blocked");
+  assert.equal(state(f).execution.pools.task0.spent.verifierRuns, 3);
+  assert.deepEqual(state(f).host.verifications, {});
+  assert.equal(fs.existsSync(process.env.HOST_TEST_MERGED), false);
+});
+test("rollback uses prepared restoration modes and can spend its reserved verifier allowance", async (t) => {
+  const f = setup(t, { allowance: { calls: 4, verifierRuns: 9, recoveries: 1 } });
+  verifierModes(f, ["complete"]);
+  f.spec.repository.verifierContract = { version: 1, baselineModes: ["baseline"], rollbackModes: ["baseline", "partial"] };
+  f.spec.repository.verifier = `case "\${HOST_TEST_FAIL:-}" in candidate) mode=complete;; 1) mode=invalid;; *) mode=baseline;; esac; printf '{"mode":"%s","head":"%s"}\\n' "$mode" "$(git rev-parse HEAD)"`;
+  f.spec.authority.allowedActions.push("revert-run-owned");
+  await host.initialise(f.record, f.spec, owner, f.config);
+  process.env.HOST_TEST_FAIL = "candidate";
+  await converge(f);
+  process.env.HOST_TEST_FAIL = "1";
+  await host.merge(f.record, "task0", owner);
+  delete process.env.HOST_TEST_FAIL;
+  const view = await host.advance(f.record, owner);
+  const repair = view.requests.find(r => r.claimable);
+  assert.equal((await host.claim(f.record, "task0", repair.id, owner)).status, "blocked");
+  await host.advance(f.record, owner);
+  const s = state(f), task = s.tasks.task0;
+  assert.equal(task.attempt.purpose, "rollback");
+  assert.deepEqual(s.host.runs[task.attempt.id].args.waves[0].tasks[0].verifierModes, ["baseline", "partial"]);
+  const result = await host.verifyTask(f.record, "task0", { operationId: "rollback-check", commit: f.head, purpose: "Check reserved rollback outcome" }, owner);
+  assert.equal(result.accepted, true);
+  assert.equal(state(f).execution.pools.task0.spent.verifierRuns, s.execution.pools.task0.spent.verifierRuns + 1);
+});
+
 test("initialisation verifies detached base and pins immutable runtime and task inputs", async (t) => {
   const f = await initialise(t);
   const s = state(f);

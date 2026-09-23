@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import crypto from "node:crypto";
 import * as host from "../scripts/rollout-host.mjs";
 const adapter = process.env.THREAD_TEST_NATIVE_ADAPTER;
 const git = (...args) =>
@@ -184,6 +185,23 @@ async function accept(
     receipt = { version: 1, requestId: request.id, childId, harness: owner.harness,
       engine: owner.harness === "claude" ? "code-review" : "review-agent", reviewLevel: "xhigh",
       reviewedHead: f.head, invocationId: `fixture-${request.id}`, nativeEvidence: { path: evidencePath } };
+    if (claim.options.reviewContract?.protocol === "claude-fork-v1" && !f.skipForkFixture) {
+      const forkId = `${childId}-builtin`, invocationId = receipt.invocationId;
+      const binding = { childId: forkId, invocationId };
+      await f.host.bindReviewFork(f.record, request.taskId, request.id, claim.claimToken, binding, owner);
+      const text = JSON.stringify(result.feedback);
+      const proof = { ...binding, status: "complete", output: text, reviewedHead: f.head,
+        routing: { requestId: request.id, childId: forkId, policyDigest: claim.native.routing.resolved.policyDigest,
+          requested: claim.native.routing.requested, resolved: claim.native.routing.resolved,
+          observed: { model: claim.native.routing.resolved.model, effort: claim.native.routing.resolved.effort,
+            source: "native-runtime", evidence: "TEST FIXTURE fork runtime observation" } },
+        evidence: "TEST FIXTURE built-in completion receipt" };
+      await f.host.recordReviewFork(f.record, request.taskId, request.id, claim.claimToken, proof, owner, { path: evidencePath });
+      const fork = f.host.status(f.record).requests.find(r => r.id === request.id).reviewFork;
+      receipt.version = 2;
+      receipt.fork = { childId: forkId, resultHash: fork.resultHash };
+      receipt.relay = { childId, outputHash: crypto.createHash("sha256").update(text).digest("hex"), evidence: "TEST FIXTURE same-child native relay" };
+    }
   }
   const envelope = {
       version: 1,
@@ -330,6 +348,68 @@ async function routedRig(t, harness, difficulty = "easy") {
   return { ...f, normalModel, recoveryModel, verifierInput };
 }
 
+test("Claude review reserves wrapper and fork and refuses success without native fork evidence", { skip: !adapter }, async t => {
+  const f = await routedRig(t, "claude");
+  await host.initialise(f.record, f.spec, f.owner, f.config);
+  f.host = await import(pathToFileURL(host.status(f.record).pinnedHost).href);
+  let request, pair;
+  for (let i = 0; i < 6; i++) {
+    request = (await f.host.advance(f.record, f.owner)).requests.find(r => r.claimable);
+    assert.ok(request);
+    const before = f.host.status(f.record).allowances.first.spent.calls;
+    pair = await dispatch(f, request);
+    if (request.label.startsWith("review:")) {
+      assert.equal(f.host.status(f.record).allowances.first.spent.calls, before + 2);
+      assert.equal(pair.claim.reviewFork.status, "reserved");
+      f.skipForkFixture = true;
+      await assert.rejects(accept(f, request, pair.claim, pair.childId), /fork|protocol/);
+      break;
+    }
+    await accept(f, request, pair.claim, pair.childId);
+  }
+  assert.ok(request.label.startsWith("review:"));
+  f.skipForkFixture = false;
+  const spent = f.host.status(f.record).allowances.first.spent.calls;
+  await accept(f, request, pair.claim, pair.childId, f.owner, 1, output(request.label, f), async (envelope, receipt) => {
+    await assert.rejects(f.host.accept(f.record, request.taskId, envelope, f.owner,
+      { ...receipt, fork: { ...receipt.fork, childId: "different-fork" } }), /fork.*mismatch/);
+    await assert.rejects(f.host.accept(f.record, request.taskId, envelope, f.owner,
+      { ...receipt, relay: { ...receipt.relay, outputHash: "0".repeat(64) } }), /relay/);
+  });
+  assert.equal(f.host.status(f.record).allowances.first.spent.calls, spent);
+});
+
+test("missing fork recovery evidence cannot poison a later proven transfer", { skip: !adapter }, async t => {
+  const f = await routedRig(t, "claude");
+  await host.initialise(f.record, f.spec, f.owner, f.config);
+  f.host = await import(pathToFileURL(host.status(f.record).pinnedHost).href);
+  let request, pair;
+  for (let i = 0; i < 6; i++) {
+    request = (await f.host.advance(f.record, f.owner)).requests.find(r => r.claimable);
+    pair = await dispatch(f, request);
+    if (request.label.startsWith("review:")) break;
+    await accept(f, request, pair.claim, pair.childId);
+  }
+  const binding = { childId: `${pair.childId}-builtin`, invocationId: `fixture-${request.id}` };
+  await f.host.bindReviewFork(f.record, request.taskId, request.id, pair.claim.claimToken, binding, f.owner);
+  const before = f.host.status(f.record).allowances.first.spent;
+  const next = { ...f.owner, session: "recovered-fork-owner", epoch: 2 };
+  const evidence = { previousCaller: { harness: f.owner.harness, account: f.owner.account, session: f.owner.session },
+    previousEpoch: 1, previousOwnerStopped: true, reason: "TEST FIXTURE old native owner stopped",
+    requests: { [request.id]: { childId: pair.childId, status: "running", evidence: "TEST FIXTURE wrapper remains attached" } } };
+  await assert.rejects(f.host.recover(f.record, next, evidence), /fork/);
+  assert.equal(f.host.status(f.record).recoveryPending, false);
+  assert.deepEqual(f.host.status(f.record).allowances.first.spent, before);
+  evidence.requests[request.id].reviewFork = { ...binding, status: "terminal", evidence: "TEST FIXTURE fork terminal with collected output" };
+  await f.host.recover(f.record, next, evidence);
+  f.owner = next;
+  await accept(f, request, pair.claim, pair.childId, next, 2);
+  assert.equal(f.host.status(f.record).allowances.first.spent.calls, before.calls);
+  assert.equal(f.host.status(f.record).allowances.first.spent.recoveries, before.recoveries + 1);
+  const done = await f.host.advance(f.record, next);
+  assert.ok(done.readyToMerge.includes("first"));
+});
+
 for (const [harness, difficulty] of [["claude", "easy"], ["codex", "hard"]])
   test(`real policy/engine/adapter/host ${harness} ${difficulty} fixture preserves the full ladder and evidence`,
     { skip: !adapter && "set THREAD_TEST_NATIVE_ADAPTER" }, async t => {
@@ -396,7 +476,7 @@ for (const [harness, difficulty] of [["claude", "easy"], ["codex", "hard"]])
       const reviews = accepted.filter(r => r.label.startsWith("review:"));
       assert.equal(reviews.length, 3);
       assert.ok(reviews.every(r => r.reviewReceipt?.reviewedHead === f.head && fs.existsSync(r.reviewReceipt.nativeEvidence.path)));
-      assert.equal(beforeMerge.execution.pools.first.spent.calls, 8);
+      assert.equal(beforeMerge.execution.pools.first.spent.calls, harness === "claude" ? 11 : 8);
       assert.equal(beforeMerge.execution.pools.first.spent.verifierRuns, 4);
       assert.equal(beforeMerge.execution.pools.first.spent.recoveries, 1);
       const verifierBytes = fs.readFileSync(f.verifierInput);
@@ -528,7 +608,7 @@ for (const maxIterations of [3, 4])
       assert.equal(completed.tasks.first.routingState.stage, "maximum-unavailable");
       assert.equal(completed.tasks.first.routingState.qualityFailures, 2);
       assert.deepEqual(completed.tasks.first.routingState.recoveryUnavailable, unavailable);
-      assert.equal(completed.execution.pools.first.spent.calls, 5);
+      assert.equal(completed.execution.pools.first.spent.calls, 6);
       assert.equal(completed.execution.pools.first.spent.verifierRuns, 4);
       assert.equal(completed.execution.pools.first.spent.recoveries, 1);
       assert.ok(!completed.execution.requests[refused.id].childId);

@@ -270,11 +270,32 @@ verified=true requires a full commit SHA identifying the sources actually invest
 Require a clean worktree, capture \`git rev-parse HEAD\`, run the verifier, then confirm HEAD and the
 worktree are unchanged. Return that full SHA as verifiedHead. Push only that verified commit; any
 later code or commit change invalidates verification and needs another run WITHIN the existing budget.
-Never claim verified=true without this evidence. When not verified, return verifiedHead="".`
+Never claim verified=true without this evidence. When not verified, return verifiedHead="".${verifierModeEvidence(task, a)}`
+}
+
+function verifierModeEvidence(task, a, review = false) {
+  if (!a.verifierContract) return ''
+  return `\n\nTask verification report contract v1: the existing single verifier (${task.verifier || a.verifier})
+must emit JSON {"mode":"<actual verified mode>","head":"<full verified commit SHA>"}.
+Its head must match the exact candidate commit, and its mode must be one of the task completion modes:
+${JSON.stringify(task.verifierModes)}.
+Allowed baseline modes are ${JSON.stringify(a.verifierContract.baselineModes)}; repository baseline
+validity alone does not complete this task. A baseline mode counts only if it is also an allowed task mode.
+Exit 0 alone is insufficient: missing/malformed reports, a wrong mode or stale head cannot establish
+verified=true or review approval. Keep the verifier command unchanged; no substitute or extra verifier.
+${review ? 'Inspect the captured candidate report; do not run an additional verifier in this review. The host\nindependently enforces task modes before approval and again after merge.'
+    : 'Capture the actual report from the already-budgeted verifier run. Do not invent its mode or copy an\nexpected head. A valid partial mode is not task completion; report the unmet task requirement. The host\nindependently enforces candidate acceptance and postmerge completion.'}`
 }
 
 function reviewEvidence(prevImpl, a) {
   if (a.protocolVersion !== 4) return ''
+  if (a.claudeReviewProtocol === 'claude-fork-v1') return `\n\nCommit-bound fork review: the implementation verified commit ${prevImpl.verifiedHead}.
+Read the actual PR head with \`gh pr view ${prevImpl.prUrl} --json headRefOid -q .headRefOid\` before
+invocation and again after the fork's findings arrive. The built-in must inspect that exact verified
+commit. Return the full SHA actually inspected by the fork as reviewedHead; never copy the expected
+SHA without native evidence. Missing evidence or head movement is a native blocked outcome, not a
+fabricated review verdict. The host binds and checks wrapper, invocation, fork and reviewed commit.
+${a.dependencyFingerprint ? `Dependency fingerprint for this attempt: ${a.dependencyFingerprint}\n` : ''}${a.authorisationFingerprint ? `Authorisation fingerprint for this attempt: ${a.authorisationFingerprint}\n` : ''}`
   return `\n\nCommit-bound review: the implementation verified commit ${prevImpl.verifiedHead}.
 Read the actual PR head with \`gh pr view ${prevImpl.prUrl} --json headRefOid -q .headRefOid\` before
 inspection. Review that exact commit's diff and sources, and read headRefOid again before returning.
@@ -287,6 +308,25 @@ ${a.dependencyFingerprint ? `Dependency fingerprint for this attempt: ${a.depend
 // This is a native execution requirement, not a suggestion to imitate a review style.
 // The coordinator attests invocation separately; the child verdict schema stays unchanged.
 function nativeReviewContract(prevImpl, a) {
+  if (a.claudeReviewProtocol === 'claude-fork-v1') return `\n\nREQUIRED NATIVE REVIEW — claude-fork-v1:
+You are the review wrapper. The host reserves this wrapper and its one built-in fork from the existing
+allowance before claim; this is not permission for extra children or another attempt.
+Invoke the unmodified native built-in /code-review xhigh EXACTLY ONCE for commit ${prevImpl.verifiedHead}.
+Review command level is xhigh; reasoning effort is separate and supplied in the resolved native binding.
+Report actual launch and invocation details to the lead outside the verdict so it can bind the distinct
+fork, invocation and exact reviewed head. "Launched" is not completion and is never an approval.
+The actual fork binding is separately observed by the host; a mismatch remains held, not silently accepted.
+When the fork is asynchronous or pending, wait for the lead to deliver its VERBATIM findings through
+native same-child messaging to YOU, this same wrapper. Remain available for that relay.
+Do not terminate the review with a fabricated verdict while findings or their provenance are pending.
+Do not re-review, perform a custom review, invoke the built-in again, or create an extra child. Do not
+substitute another harness, a model CLI, or a billed cloud review. If invocation is unavailable, report
+a native blocked outcome to the lead; do not turn infrastructure failure into quality findings.
+Only after the fork has completed and its verbatim findings and evidence have arrived, return the existing
+{verdict, feedback, reviewedHead} result. Preserve ALL findings verbatim in feedback, including caveats;
+do not select a subset, paraphrase, drop or soften any finding. A complete findings text may be one array
+entry. Derive approve/changes solely from those completed findings, never the launch acknowledgement.
+Invocation, fork-completion and routing evidence stay OUTSIDE this unchanged verdict schema.`
   if (!a.routingPolicy && a.evidenceContractVersion !== 1) return ''
   const harness = a.routingPolicy ? a.routingPolicy.harness : a.harness
   const invocation = harness === 'claude'
@@ -740,6 +780,15 @@ Do not update the task's \`status:\` yourself — the lead session reconciles th
 }
 
 function reviewJudgePrompt(task, prevImpl, a, priorFeedback) {
+  if (a.claudeReviewProtocol === 'claude-fork-v1') return `You are the native review wrapper for the OPEN PR for [[${task.slug}]] from rollout [[${a.rolloutSlug}]].
+
+PR: ${prevImpl.prUrl}
+Task note (the brief): ${task.taskPath}
+Project root: ${a.repoPath}
+
+Provide the adopted brief, exact candidate and accumulated feedback as context to the unmodified built-in.
+The built-in fork performs the independent review; your job is its single invocation and faithful result relay.
+${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}\n\n${gatedInputsCheck(task, a, 'review')}${authorityBlock(task, a)}${reviewEvidence(prevImpl, a)}${verifierModeEvidence(task, a, true)}${nativeReviewContract(prevImpl, a)}`
   const depth = task.scope === 'cross-cutting'
     ? `This is a CROSS-CUTTING change — review it structurally and rigorously. Apply the discipline of the
 superpowers:requesting-code-review skill: correctness, brief adherence, missed sibling sites, dead code,
@@ -755,7 +804,7 @@ Project root: ${a.repoPath}
 ${depth}
 
 Read \`gh pr diff ${prevImpl.prUrl}\` and the task brief. Decide: verdict "approve" if the PR is sound, else
-"changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}${a.protocolVersion === 4 ? '\n\n' + gatedInputsCheck(task, a, 'review') : ''}${authorityBlock(task, a)}${reviewEvidence(prevImpl, a)}${nativeReviewContract(prevImpl, a)}`
+"changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}${a.protocolVersion === 4 ? '\n\n' + gatedInputsCheck(task, a, 'review') : ''}${authorityBlock(task, a)}${reviewEvidence(prevImpl, a)}${verifierModeEvidence(task, a, true)}${nativeReviewContract(prevImpl, a)}`
 }
 
 // priorFeedback is the FULL accumulated [{ round, feedback }] history (latest round last) — the latest
@@ -1057,9 +1106,21 @@ function validateArgs(a) {
   if (a.protocolVersion === 4 && (typeof a.authorisation !== 'string' || !a.authorisation.trim())) {
     throw new Error('authorisation must be the durable adopted authority text for protocolVersion 4')
   }
-  if (a.evidenceContractVersion !== undefined && a.evidenceContractVersion !== 1) throw new Error('unsupported evidenceContractVersion')
-  if ((a.routingPolicy !== undefined || a.evidenceContractVersion === 1) && a.protocolVersion !== 4) {
+  if (a.claudeReviewProtocol !== undefined && (a.claudeReviewProtocol !== 'claude-fork-v1'
+    || a.harness !== 'claude' || !a.routingPolicy || a.routingPolicy.harness !== 'claude'
+    || !Number.isSafeInteger(a.evidenceContractVersion) || a.evidenceContractVersion < 2)) {
+    throw new Error('claudeReviewProtocol requires claude-fork-v1, the Claude harness, routingPolicy and evidenceContractVersion >= 2')
+  }
+  if (a.evidenceContractVersion !== undefined && a.evidenceContractVersion !== 1
+    && a.claudeReviewProtocol !== 'claude-fork-v1') throw new Error('unsupported evidenceContractVersion')
+  if ((a.routingPolicy !== undefined || a.evidenceContractVersion !== undefined || a.verifierContract !== undefined) && a.protocolVersion !== 4) {
     throw new Error('routingPolicy and native evidence contracts require protocolVersion 4')
+  }
+  const nonemptyModes = modes => Array.isArray(modes) && modes.length > 0
+    && modes.every(mode => typeof mode === 'string' && mode.trim())
+  if (a.verifierContract !== undefined && (!a.verifierContract || a.verifierContract.version !== 1
+    || !nonemptyModes(a.verifierContract.baselineModes))) {
+    throw new Error('verifierContract requires version 1 and non-empty baselineModes strings')
   }
   if (a.routingPolicy !== undefined) {
     if (typeof normaliseRoutingPolicy !== 'function' || typeof resolveRouting !== 'function') {
@@ -1083,6 +1144,10 @@ function validateArgs(a) {
       if (a.protocolVersion === 4 && task.ignoreGate) throw new Error('ignoreGate is not allowed in protocolVersion 4')
       if (task.approvedGates !== undefined && (!Array.isArray(task.approvedGates) || task.approvedGates.some(g => typeof g !== 'string' || !g.trim()))) {
         throw new Error('approvedGates must contain non-empty gate strings from durable approval state')
+      }
+      if ((a.verifierContract !== undefined || task.verifierModes !== undefined)
+        && (a.verifierContract === undefined || !nonemptyModes(task.verifierModes))) {
+        throw new Error('task.verifierModes requires non-empty mode strings and a verifierContract')
       }
       if (a.routingPolicy) {
         for (const field of ['model', 'effort']) {
@@ -1165,9 +1230,14 @@ async function routedAgent(task, st, a, prompt, options, role = 'work', verifier
     ? `\n\nDurable quality diagnosis (evidence only; it grants no new scope or allowance):\n${st.routingState.lastFailure.feedback.join('\n')}` : ''
   const previousHistory = task.priorResult && (task.priorResult.reviewHistory || task.priorResult.planHistory)
     ? `\n\nPrior attempt feedback, retained as anti-regression constraints:\n${JSON.stringify({ reviewHistory: task.priorResult.reviewHistory || [], planHistory: task.priorResult.planHistory || [] })}` : ''
+  const forkBinding = options.reviewContract && options.reviewContract.protocol === 'claude-fork-v1'
+    ? `\n\nExact wrapper AND built-in fork binding: model=${resolved.model}; reasoning effort=${resolved.effort}.
+Use the Skill-capable native definition for this exact resolved binding, including maximum-effort and
+recovery routes. Do not inherit an unobserved default or replace the binding with a model alias. If the
+definition or built-in cannot honour this binding, report a native blocked outcome to the lead.` : ''
   let result
   try {
-    result = await agent(prompt + durableFeedback + previousHistory + (role === 'work' ? `\n\nFailure classification: report failureKind only for an actual failure.
+    result = await agent(prompt + durableFeedback + previousHistory + forkBinding + (role === 'work' ? `\n\nFailure classification: report failureKind only for an actual failure.
 Use quality only for substantive incorrect work; infrastructure, authority, quota and schema failures
 do not justify a reasoning escalation. Preserve partial work and provide the concrete diagnosis.` : ''),
     { ...options, model: resolved.model, effort: resolved.effort, routing })
@@ -1290,7 +1360,8 @@ function reviewContractOptions(current, a) {
   if (!a.routingPolicy && a.evidenceContractVersion !== 1) return {}
   const harness = a.routingPolicy ? a.routingPolicy.harness : a.harness
   return { reviewContract: { engine: harness === 'claude' ? 'claude-code-review' : 'codex-review-agent',
-    level: 'xhigh', reviewedHead: current.verifiedHead || null } }
+    level: 'xhigh', reviewedHead: current.verifiedHead || null,
+    ...(a.claudeReviewProtocol === 'claude-fork-v1' ? { protocol: 'claude-fork-v1' } : {}) } }
 }
 
 async function routedReview(task, st, initial, a, planText) {

@@ -83,6 +83,19 @@ function finish(s, id) {
   return land(approve(start(s, id), id), id);
 }
 
+test("a compound native review spends both calls atomically without renewing the pool", () => {
+  const s = start(fresh(), "a");
+  const next = run(s, { type: "claim", taskId: "a", requestId: "review", calls: 2 });
+  assert.equal(next.execution.pools.a.spent.calls, 2);
+  assert.equal(next.execution.requests.review.calls, 2);
+  const tight = structuredClone(s);
+  tight.execution.pools.a.spent.calls = 7;
+  assert.throws(() => run(tight, { type: "claim", taskId: "a", requestId: "review", calls: 2 }), /allowance/);
+  assert.equal(tight.execution.pools.a.spent.calls, 7);
+  for (const calls of [0, -1, 1.5, NaN])
+    assert.throws(() => run(s, { type: "claim", taskId: "a", requestId: "bad", calls }), /call/);
+});
+
 test("superseded queued landing records original revision without completing current outcome", () => {
   let s = approve(start(fresh(), "a"), "a");
   const prior = structuredClone(s.tasks.a);

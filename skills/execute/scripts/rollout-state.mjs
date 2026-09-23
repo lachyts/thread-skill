@@ -420,23 +420,26 @@ export function apply(previous, command, context) {
         text(c.requestId, "requestId");
         requireThat(!e.requests[c.requestId], "request already claimed");
         const cost = c.verifierRuns ?? 0;
+        const calls = c.calls ?? 1;
+        positive(calls, "calls");
         requireThat(
           Number.isSafeInteger(cost) && cost >= 0,
           "invalid verifier reservation",
         );
         const p = e.pools[t.pool];
         requireThat(
-          p.spent.calls + 1 <= p.limit.calls &&
+          p.spent.calls + calls <= p.limit.calls &&
             p.spent.verifierRuns + cost <= p.limit.verifierRuns,
           "allowance exhausted",
         );
-        p.spent.calls++;
+        p.spent.calls += calls;
         p.spent.verifierRuns += cost;
         e.requests[c.requestId] = {
           id: c.requestId,
           taskId: t.id,
           attemptId: t.attempt.id,
           status: "claimed",
+          calls,
           verifierRuns: cost,
         };
         break;
