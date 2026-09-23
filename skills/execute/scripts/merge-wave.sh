@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# merge-wave.sh — deterministically merge ONE wave's approved PRs into a strict-protected main.
+# merge-wave.sh — deterministically merge ONE wave's approved PRs into their strict-protected base
+# branch (the branch the PRs target — `main`, `master`, whatever the repo's default is).
 #
 # Usage:  merge-wave.sh <repoPath> <pr> [<pr> ...]
 #   <repoPath>  absolute path to the target repo (origin must be a GitHub remote)
@@ -82,6 +83,63 @@ classify_failed_steps() {  # stdin: failed step names; stdout: "infra" | "genuin
   printf '%s' "$verdict"
 }
 
+# ---- local base refresh (cosmetic; correctness rides on origin/<base>) ------------------------------
+# After a wave lands, fast-forward the root checkout's base branch so a human sees the merges locally.
+# ONLY when the root is actually on that branch: a root parked on any other branch (a release hold, a
+# feature branch) is left exactly as it is — that skip is what lets a self-rollout of a plugin that is
+# loaded from its own working tree keep merged waves out of live sessions until release. Never fails the
+# script (a false halt after a successful merge). Defined before the self-test hooks so
+# --self-test-base can exercise it against a temp repo.
+refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
+  local repo="$1" base="$2" cur
+  if [ -z "$base" ]; then
+    echo "  WARN: could not resolve the wave's base branch — skipped local fast-forward (non-fatal)."
+    return 0
+  fi
+  echo "== all wave PRs merged — refreshing local $base =="
+  git -C "$repo" fetch origin "$base" >/dev/null 2>&1 || echo "  WARN: git fetch origin $base failed (non-fatal)."
+  cur=$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)
+  if [ "$cur" = "$base" ]; then
+    if git -C "$repo" merge --ff-only "origin/$base" >/dev/null 2>&1; then
+      echo "  local $base fast-forwarded to origin/$base."
+    else
+      echo "  WARN: local $base did not fast-forward (root checkout diverged). origin/$base holds the merges;"
+      echo "        next wave's worktrees branch from origin/$base regardless. Tidy the root when convenient."
+    fi
+  else
+    echo "  NOTE: root checkout is on '$cur', not $base — skipped local fast-forward (harmless)."
+  fi
+}
+
+# Self-test hook: `merge-wave.sh --self-test-base` drives refresh_local_base against a throwaway repo
+# whose origin default branch is `master` (no `main` anywhere): root on master ⇒ fast-forwarded; root on
+# a hold branch ⇒ untouched; unresolved base ⇒ skipped. Needs git only — no GitHub.
+if [ "${1:-}" = "--self-test-base" ]; then
+  st_fail=0
+  sb_ok() { if [ "$1" = "$2" ]; then echo "ok   - $3"; else echo "FAIL - $3: expected $2 got $1"; st_fail=1; fi; }
+  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+  g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master "$@"; }
+  g init -q --bare "$tmp/origin.git"
+  g clone -q "$tmp/origin.git" "$tmp/root" 2>/dev/null
+  g -C "$tmp/root" commit -q --allow-empty -m base && g -C "$tmp/root" push -q origin master
+  g clone -q "$tmp/origin.git" "$tmp/other" 2>/dev/null
+  g -C "$tmp/other" commit -q --allow-empty -m wave1 && g -C "$tmp/other" push -q origin master
+  landed=$(git -C "$tmp/other" rev-parse HEAD)
+  out=$(refresh_local_base "$tmp/root" master)
+  sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$landed" "root on master: fast-forwarded to origin/master"
+  case "$out" in *"local master fast-forwarded to origin/master."*) sb_ok y y "reports the master fast-forward";; *) sb_ok n y "reports the master fast-forward";; esac
+  g -C "$tmp/root" switch -q -c hold/test
+  held=$(git -C "$tmp/root" rev-parse HEAD)
+  g -C "$tmp/other" commit -q --allow-empty -m wave2 && g -C "$tmp/other" push -q origin master
+  out=$(refresh_local_base "$tmp/root" master)
+  sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "root on a hold branch: left untouched"
+  case "$out" in *"skipped local fast-forward"*) sb_ok y y "reports the hold skip";; *) sb_ok n y "reports the hold skip";; esac
+  out=$(refresh_local_base "$tmp/root" "")
+  case "$out" in *"could not resolve"*) sb_ok y y "unresolved base: skipped, non-fatal";; *) sb_ok n y "unresolved base: skipped, non-fatal";; esac
+  echo; [ "$st_fail" -eq 0 ] && echo "base: ALL PASS" || echo "base: SOME FAILED"
+  exit "$st_fail"
+fi
+
 # Self-test hook: `merge-wave.sh --self-test-classify` runs the classifier assertions and exits. Keeps the
 # fail-closed heart covered without a live repo (this script otherwise has no unit test — see the UNSTABLE
 # guard comment below). Must precede the arg-count check; uses ${1:-} for `set -u` safety.
@@ -143,6 +201,12 @@ fi
 
 echo "== merge-wave.sh: $OWNER/$REPO — ${#PRS[@]} PR(s): ${PRS[*]} =="
 
+# The base branch is READ from the PRs (gh merges each into its own base), never assumed. Fallback when
+# every PR is already merged: the repo's default branch from GitHub. Used for messages, the
+# branch-delete guard and the local refresh.
+BASE=""
+pr_number() { printf '%s' "$1" | grep -oE '[0-9]+' | tail -1; }
+
 # ---- per-PR primitives -----------------------------------------------------
 
 prfield() { gh pr view "$1" -R "$OWNER/$REPO" --json "$2" -q ".$2" 2>/dev/null; }
@@ -169,13 +233,13 @@ ci_runs_in_flight() {  # $1=PR — success (0) when ≥1 workflow run on the PR'
 
 update_branch() {  # $1=PR  $2=pre-update head SHA
   local PR="$1" PRE="$2" out rc i now
-  echo "  PR #$PR is BEHIND main — updating branch (REST update-branch)…"
+  echo "  PR #$PR is BEHIND $BASE — updating branch (REST update-branch)…"
   out=$(gh api --method PUT "repos/$OWNER/$REPO/pulls/$PR/update-branch" -H "Accept: application/vnd.github+json" 2>&1); rc=$?
   if [ $rc -ne 0 ]; then
     if printf '%s' "$out" | grep -qiE 'conflict|not mergeable'; then
-      echo "ERROR: PR #$PR cannot update — MERGE CONFLICT with main." >&2
+      echo "ERROR: PR #$PR cannot update — MERGE CONFLICT with $BASE." >&2
       echo "  The wave's file-overlap analysis was too coarse, or a hub file changed under it." >&2
-      echo "  Next: rebase the branch onto origin/main in its worktree and resolve, OR pull this task" >&2
+      echo "  Next: rebase the branch onto origin/$BASE in its worktree and resolve, OR pull this task" >&2
       echo "        out of the wave and re-plan. Do NOT force. Re-run merge-wave.sh after fixing." >&2
     else
       echo "ERROR: PR #$PR update-branch failed: $out" >&2
@@ -288,7 +352,7 @@ merge_pr() {  # $1=PR
   fi
   echo "  PR #$PR merged (squash)."
   # Best-effort REMOTE branch cleanup (non-fatal). Local branch + worktree are the reaper's job.
-  if [ -n "$br" ] && [ "$br" != "main" ] && [ "$br" != "master" ]; then
+  if [ -n "$br" ] && [ "$br" != "$BASE" ] && [ "$br" != "main" ] && [ "$br" != "master" ]; then
     if gh api --method DELETE "repos/$OWNER/$REPO/git/refs/heads/$br" >/dev/null 2>&1; then
       echo "  remote branch '$br' deleted."
     else
@@ -304,8 +368,8 @@ process_pr() {  # $1=PR — run the state machine until merged or halt
     mss=$(prfield "$PR" mergeStateStatus)
     case "$mss" in
       DIRTY)
-        echo "ERROR: PR #$PR has a MERGE CONFLICT with main (mergeStateStatus=DIRTY)." >&2
-        echo "  Resolve in the worktree (rebase onto origin/main) or pull this task from the wave." >&2
+        echo "ERROR: PR #$PR has a MERGE CONFLICT with $BASE (mergeStateStatus=DIRTY)." >&2
+        echo "  Resolve in the worktree (rebase onto origin/$BASE) or pull this task from the wave." >&2
         echo "  Do NOT force. Re-run merge-wave.sh after fixing." >&2
         return 1 ;;
       BEHIND)
@@ -350,9 +414,28 @@ process_pr() {  # $1=PR — run the state machine until merged or halt
   done
 }
 
-# ---- merge each PR in order (serial: each merge advances main, flipping the next to BEHIND) -------
+# ---- one base per wave -------------------------------------------------------------------------------
+# Every open PR in a wave must target the same branch — the one the engine cut the wave's worktrees from
+# (args.defaultBranch, `main` when unset). A PR aimed anywhere else would land its work on a branch the
+# next wave never branches from (the #30/#31 squash-drop exposure), so a mixed wave halts before
+# anything merges.
 for raw in "${PRS[@]}"; do
-  PR=$(printf '%s' "$raw" | grep -oE '[0-9]+' | tail -1)
+  PR=$(pr_number "$raw")
+  [ -z "${PR:-}" ] && { echo "ERROR: cannot parse a PR number from '$raw'" >&2; exit 1; }
+  [ "$(prfield "$PR" state)" = "OPEN" ] || continue
+  b=$(prfield "$PR" baseRefName)
+  [ -z "$b" ] && { echo "ERROR: cannot read the base branch of PR #$PR" >&2; exit 1; }
+  if [ -z "$BASE" ]; then BASE="$b"
+  elif [ "$b" != "$BASE" ]; then
+    echo "ERROR: PR #$PR targets '$b' but this wave's other PRs target '$BASE' — refusing to merge a mixed wave." >&2
+    echo "  Retarget it (gh pr edit $PR --base $BASE) or pull the task from the wave. Nothing was merged." >&2
+    exit 1
+  fi
+done
+
+# ---- merge each PR in order (serial: each merge advances the base, flipping the next to BEHIND) -------
+for raw in "${PRS[@]}"; do
+  PR=$(pr_number "$raw")
   [ -z "${PR:-}" ] && { echo "ERROR: cannot parse a PR number from '$raw'" >&2; exit 1; }
   st=$(prfield "$PR" state) || { echo "ERROR: cannot read PR #$PR in $OWNER/$REPO" >&2; exit 1; }
   case "$st" in
@@ -360,25 +443,11 @@ for raw in "${PRS[@]}"; do
     OPEN) ;;
     *) echo "ERROR: PR #$PR is '$st' (not OPEN/MERGED) — refusing to merge. Resolve manually." >&2; exit 1 ;;
   esac
-  echo "== PR #$PR =="
+  echo "== PR #$PR (into $BASE) =="
   process_pr "$PR" || exit 1
 done
 
-# ---- advance the local root checkout's main (cosmetic; correctness rides on origin/main) ----------
-# The wave is ALREADY landed on origin/main by here, and the next wave's worktrees branch from a
-# freshly-fetched origin/main — so a stale LOCAL main is not a safety issue. Keep it tidy when easy,
-# but NEVER fail the script for it (that would be a false halt after a successful merge).
-echo "== all wave PRs merged — refreshing local main =="
-git -C "$REPO_PATH" fetch origin main >/dev/null 2>&1 || echo "  WARN: git fetch origin main failed (non-fatal)."
-cur_branch=$(git -C "$REPO_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null)
-if [ "$cur_branch" = "main" ]; then
-  if git -C "$REPO_PATH" merge --ff-only origin/main >/dev/null 2>&1; then
-    echo "  local main fast-forwarded to origin/main."
-  else
-    echo "  WARN: local main did not fast-forward (root checkout diverged). origin/main holds the merges;"
-    echo "        next wave's worktrees branch from origin/main regardless. Tidy the root when convenient."
-  fi
-else
-  echo "  NOTE: root checkout is on '$cur_branch', not main — skipped local fast-forward (harmless)."
-fi
+# ---- advance the local root checkout's base (cosmetic; correctness rides on origin/<base>) ---------
+[ -z "$BASE" ] && BASE=$(gh repo view "$OWNER/$REPO" --json defaultBranchRef -q .defaultBranchRef.name 2>/dev/null)
+refresh_local_base "$REPO_PATH" "$BASE"
 echo "== merge-wave.sh: wave complete. =="

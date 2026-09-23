@@ -65,7 +65,7 @@ Cross-check cheaply and flag **drift**:
 
 - **Worktrees** — one `git -C <repoPath> worktree list --porcelain`. For each non-landed task, its
   worktree is `<repoPath>/.claude/worktrees/<slug>`. A blocked task whose worktree is **gone** (reaped
-  by the 11am sweep) → note it (re-dispatch will branch fresh from `origin/main` — fine, not an error).
+  by the 11am sweep) → note it (re-dispatch will branch fresh from the base branch (`origin/main`, or `origin/<defaultBranch>`) — fine, not an error).
 - **PRs** — for each task with a `pr:`, one `gh pr view <pr> --json state,mergedAt,statusCheckRollup`.
   Flag drift:
   - note `review`/`review-blocked` but PR **MERGED** → *out-of-band merge*. (`review` → resolves on the

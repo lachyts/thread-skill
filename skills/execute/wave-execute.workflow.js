@@ -40,6 +40,9 @@ export const meta = {
 //   envBootstrap : string,           // optional; shell command run ONCE per worktree right after the agent
 //                                    //   cd's in (env-bootstrap), e.g. "poetry env use 3.11 && poetry install".
 //                                    //   Absent/empty ⇒ worktree setup renders byte-identical to pre-feature.
+//   defaultBranch : string,          // optional; the target repo's origin default branch when it is NOT
+//                                    //   'main' (e.g. "master"). Fresh worktrees branch from origin/<it>.
+//                                    //   Absent/'main' ⇒ worktree setup renders byte-identical to pre-fix.
 //   progress    : string,            // optional; a precomputed progress line — "wave 2/4 dispatched — 42m
 //                                    //   elapsed, ~50m remaining (rough)" — from reconcile-wave.py
 //                                    //   mark-dispatched (skill §4.5 step 1). This sandbox has no clock
@@ -454,7 +457,7 @@ Steps:
    superpowers:test-driven-development skill if applicable.
 3. If the task is investigation-first, produce findings, propose a fix in the task note, then implement.
 4. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
-5. If the verifier passed: open a PR titled \`audit-fix: <task subject>\`. The body must link the task
+5. If the verifier passed: open a PR${prBase(a)} titled \`audit-fix: <task subject>\`. The body must link the task
    note and explain what changed and why.
 6. Return your structured result: verified, blocked, escalate (as your verification block instructs;
    false otherwise), prUrl, branch, worktreePath (from \`git rev-parse --show-toplevel\`),
@@ -607,7 +610,7 @@ blockerDiagnosis="plan-divergence: <one line>" instead of forging ahead.
 Steps:
 1. Implement the plan (test-first where the plan says so). ${PRIOR_FEEDBACK_NOTE}
 2. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
-3. On verifier pass: open a PR titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
+3. On verifier pass: open a PR${prBase(a)} titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
 4. Return your structured result: verified, blocked, escalate (as your verification block instructs; false
    otherwise), prUrl, branch, worktreePath (git rev-parse --show-toplevel), blockerDiagnosis, summary.
 
@@ -708,22 +711,47 @@ function envBootstrapStep(a) {
   ${a.envBootstrap}   # one-time env bootstrap from the rollout (env_bootstrap): establish interpreter + deps`
 }
 
+// The branch the rollout builds on (args.defaultBranch): fresh worktrees are cut from origin/<it> and
+// PRs target it. The skill resolves it from the remote and passes it only when it is not 'main'.
+// Unset/'main' renders every prompt BYTE-IDENTICAL to the pre-fix engine (resume-cache invariant), so
+// each rollout that predates this argument replays from cache. The name is interpolated into bash, so
+// it must be a plain ref name git would accept — a safe charset plus git's check-ref-format rules (no
+// empty or dot-led component, no '..', no '.lock' component end, no trailing '/' or '.') — refused
+// rather than quoted, so a bad value fails the run once instead of every task's worktree setup.
+// Not named `baseBranch`: protocol 4 owns that name.
+const BRANCH_NAME = /^(?!-)(?!\/)(?!.*\/\/)(?!.*\.\.)(?!\.)(?!.*\/\.)(?!.*\.lock(?:\/|$))(?!.*[/.]$)[A-Za-z0-9._\/-]+$/
+function defaultBranch(a) {
+  const b = a.defaultBranch || 'main'
+  if (typeof b !== 'string' || !BRANCH_NAME.test(b)) {
+    throw new Error(`defaultBranch: refusing ${JSON.stringify(b)} — not a valid branch name`)
+  }
+  return b
+}
+
+// The PR-base clause: '' for main (byte-identical prompts), otherwise the explicit --base, so the PR
+// targets the same branch the worktree was cut from instead of gh's implicit repo default.
+function prBase(a) {
+  const b = defaultBranch(a)
+  return b === 'main' ? '' : ` against \`${b}\` (\`gh pr create --base ${b}\`)`
+}
+
 // Bash the code-writing agents run as their FIRST action to enter an isolated worktree of the
 // target repo. Resume-safe: reuse the dir if it exists, attach an existing branch, else create.
 function worktreeSetup(a, task) {
   const wt = worktreeDir(a.repoPath, task.slug)
   const br = `audit-fix/${shortAlias(task.slug)}`
+  const base = `origin/${defaultBranch(a)}`
   return `First, set up your ISOLATED worktree of the TARGET repo (NOT the session repo). Run exactly:
   WT="${wt}"; BR="${br}"
   if [ -d "$WT" ]; then cd "$WT";
   elif git -C "${a.repoPath}" show-ref --verify --quiet "refs/heads/$BR"; then git -C "${a.repoPath}" worktree add "$WT" "$BR" && cd "$WT";
-  else git -C "${a.repoPath}" fetch origin --quiet && git -C "${a.repoPath}" worktree add "$WT" -b "$BR" origin/main && cd "$WT"; fi
+  else git -C "${a.repoPath}" fetch origin --quiet && git -C "${a.repoPath}" worktree add "$WT" -b "$BR" ${base} && cd "$WT"; fi
   git rev-parse --show-toplevel   # MUST print "$WT" (your worktree), NOT ${a.repoPath} (the main checkout) — STOP if it doesn't${envBootstrapStep(a)}
 Work only inside this worktree: every git / edit / verifier / PR command runs from here. ALL file-tool
 paths (Read/Edit/Write) must be under "$WT" — e.g. "$WT/src/foo.py". NEVER edit a "${a.repoPath}/…" path:
 that is the MAIN checkout, and an edit there lands outside your branch, invisible to your PR — the failure
 that looks like a "silent Edit no-op" but is really a wrong-tree edit. After any edit, confirm \`git -C "$WT" diff\` shows it.
-A FRESH worktree is branched from a freshly-fetched origin/main (NOT local HEAD) so it includes every
+A FRESH worktree is branched from a freshly-fetched ${base} (NOT local HEAD) so it includes every
 prior wave that has already merged. The two reuse arms above are unchanged — they must NOT re-fetch or
 rebase an in-flight branch on resume.`
 }
@@ -1154,6 +1182,7 @@ async function converge(task, a) {
 // object (confirmed empirically: the script sees `typeof args === 'string'`). Parse defensively
 // so the engine works whether args arrives as a string or an object.
 const a = typeof args === 'string' ? JSON.parse(args) : args
+defaultBranch(a)   // fail the run before any dispatch on an unusable args.defaultBranch
 const ceiling = a.concurrency || 4
 const allResults = []
 

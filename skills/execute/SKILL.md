@@ -48,7 +48,7 @@ execute [[giflab-rollout]]                 # full rollout, CONTINUOUS AUTO-MERGE
 ```
 
 Bare `execute [[rollout]]` is **continuous auto-merge**: the lead session runs each wave, merges that
-wave's approved PRs to `main`, then launches the next — no per-PR confirmation. `--gated` is the same
+wave's approved PRs to the base branch (`main` unless §4's `defaultBranch` says otherwise), then launches the next — no per-PR confirmation. `--gated` is the same
 per-wave loop with a human merge pause instead, for when you want to eyeball PRs before they land.
 Single-wave mode opens PRs and leaves merging to you.
 
@@ -137,6 +137,9 @@ Build the `args` object the workflow expects:
 {
   "rolloutSlug": "giflab-rollout",
   "repoPath": "/abs/path/to/repo",      // from the rollout's "Project root" line
+  "defaultBranch": "<branch>",           // ONLY when the resolver below prints something other than
+                                          //   "main" (e.g. "master"); OMIT for main repos — this giflab
+                                          //   example omits it (byte-identical prompts)
   "verifier": "make test",               // resolved rollout-level verifier
   "date": "2026-05-29",                  // pass it in — Date.now() is unavailable in the script
   "concurrency": 4,                       // parallel_ceiling
@@ -166,13 +169,26 @@ Build the `args` object the workflow expects:
 }
 ```
 
+**Resolve `defaultBranch` before the first wave** — fresh worktrees branch from `origin/<it>`, the engine's PRs target it (`gh pr create --base`), and `merge-wave.sh` halts a wave whose PRs disagree. Ask the **remote**, the same source `gh` uses for its default: the local `refs/remotes/origin/HEAD` is often unset and can be stale (it survives a default-branch rename and even the deletion of the branch it names). **Stop** when the remote does not answer — never assume `main`, which fails at the first worktree of a `master` repo:
+
+```bash
+# thread:default-branch-resolver (extracted and tested by tests/default-branch.test.sh)
+R="<repoPath>"
+b=$(git -C "$R" ls-remote --symref origin HEAD 2>/dev/null | awk '/^ref:/ { sub("refs/heads/", "", $2); print $2; exit }')
+[ -n "$b" ] || { echo "cannot resolve origin's default branch for $R" >&2; exit 1; }
+echo "$b"
+# end thread:default-branch-resolver
+```
+
+Pass the printed name as `defaultBranch` only when it is not `main`. A repo whose mainline is not its GitHub default (e.g. `develop` while `main` is production) passes that branch instead — worktrees, PRs and merges all follow it. A resume (`resumeFromRunId`) re-passes the run's ORIGINAL args unchanged — adding `defaultBranch` to a run that started without it changes prompt bytes and re-runs cached agents.
+
 Also read the rollout note's **`## Known baseline failures`** block (`/thread:schedule` step 2.6): when it lists tests (not `none`/empty), pass them as `knownBaselineFailures: ["<test_id> — <reason>", …]`. The engine threads the manifest into every agent and shifts the Ralph green criterion to "no NEW failures beyond this set" — it keeps running the full verifier and never `--deselect`s the listed reds (per the project's `CLAUDE.md`: a comparison reference, not a mute button). Omit the key when the block is absent or `none` — the engine then behaves exactly as before (`verifier` exit 0 = pass).
 
 - **Single-wave mode** (`execute Wave N of [[rollout]]`) → include only wave N in `waves`. Opens PRs; the user merges. No auto-merge. The tasks therefore end the session at `status: review` — once the user confirms the merges (or a later invocation finds the PRs merged in pre-flight), run `reconcile-wave.py mark-done` on them so they don't linger as false "awaiting acceptance" items.
 - **Continuous auto-merge mode** (`execute [[rollout]]`, no wave number, no flag — the DEFAULT) → do **not** pass all waves at once. Drive the rollout **one wave per Workflow call** across turns, auto-merging each wave before launching the next. This is the zero-touch path — see §4.5.
 - **`--gated`** → the **same** one-wave-per-call loop as continuous, but the between-wave step is a **human merge pause** instead of the auto-merge: run wave N, present its report, wait for the user to merge + re-invoke, then call wave N+1. The escape hatch for eyeballing PRs before they land.
 
-> Correctness between waves comes from the **auto-merge + `origin/main` worktree base** (§4.5), not from a completion barrier. The old engine ran all waves against one frozen `main`, which silently re-created the #30/#31 squash-drop exposure for any rollout whose same-file tasks span waves. The per-wave loop fixes that.
+> Correctness between waves comes from the **auto-merge + `origin/<default branch>` worktree base** (§4.5; `origin/main` unless `defaultBranch` says otherwise), not from a completion barrier. The old engine ran all waves against one frozen `main`, which silently re-created the #30/#31 squash-drop exposure for any rollout whose same-file tasks span waves. The per-wave loop fixes that.
 
 ### 4.5. Continuous auto-merge — the per-wave loop
 
@@ -323,9 +339,9 @@ WAVE-STATUS: <rollout-slug> cursor=<K>/<N> state=<running|waiting|halted|done>[ 
 
 This line is the contract the automatic driver (§8) keys off — the Stop hook parses it with a strict regex, so keep the format byte-stable.
 
-**Merging:** in `--gated` / single-wave mode, do NOT merge — the user decides. In continuous auto-merge mode the lead session merges this wave via `scripts/merge-wave.sh` (§4.5) — never an inline `gh pr merge`. Within a wave the approved PRs are file-disjoint (the wave invariant), so they don't conflict with each other; the merge script brings each up to date with `main` in turn before squash-merging.
+**Merging:** in `--gated` / single-wave mode, do NOT merge — the user decides. In continuous auto-merge mode the lead session merges this wave via `scripts/merge-wave.sh` (§4.5) — never an inline `gh pr merge`. Within a wave the approved PRs are file-disjoint (the wave invariant), so they don't conflict with each other; the merge script brings each up to date with the base branch in turn before squash-merging.
 
-The merge gate is the repo's **required** checks — branch-protection's own definition of mergeable — **not** GitHub's cosmetic `CLEAN` (which also waits on non-required checks). A `main` that legitimately carries red *non-required* checks reports every PR as `UNSTABLE`, never `CLEAN`; gating on `CLEAN` would merge no wave at all. `merge-wave.sh`'s `UNSTABLE)` case handles this by waiting on `--required` checks only — a genuinely-failing required check surfaces as `BLOCKED`, not `UNSTABLE`, so it stays safe. Don't "tidy" it back to `CLEAN`-only (see `giflab-rollout-merge-wave-unstable-fix`).
+The merge gate is the repo's **required** checks — branch-protection's own definition of mergeable — **not** GitHub's cosmetic `CLEAN` (which also waits on non-required checks). A base branch that legitimately carries red *non-required* checks reports every PR as `UNSTABLE`, never `CLEAN`; gating on `CLEAN` would merge no wave at all. `merge-wave.sh`'s `UNSTABLE)` case handles this by waiting on `--required` checks only — a genuinely-failing required check surfaces as `BLOCKED`, not `UNSTABLE`, so it stays safe. Don't "tidy" it back to `CLEAN`-only (see `giflab-rollout-merge-wave-unstable-fix`).
 
 ### 7. Continuous-mode stop conditions
 
@@ -393,7 +409,9 @@ A paused rollout is **intentional**, not stalled: `/thread:status` reports it as
 
 ## Worktree lifecycle (how the engine isolates + reuses worktrees)
 
-Each **code-writing** agent (implementer / approved-plan implementer) creates its own worktree explicitly as its first action — fetching origin and branching a **fresh** worktree from `origin/main` (`git -C <repoPath> fetch origin && git -C <repoPath> worktree add <repoPath>/.claude/worktrees/<slug> -b audit-fix/<alias> origin/main`) so it includes every prior wave that has already merged — and returns its absolute path (`git rev-parse --show-toplevel`) in the structured result. Downstream revisers `cd` into that threaded `worktreePath` to reuse the same worktree (push to the existing branch, the PR auto-updates). The setup step is resume-safe: it reuses the dir if it already exists and attaches an existing branch rather than failing.
+Each **code-writing** agent (implementer / approved-plan implementer) creates its own worktree explicitly as its first action — fetching origin and branching a **fresh** worktree from `origin/<default branch>` (`git -C <repoPath> fetch origin && git -C <repoPath> worktree add <repoPath>/.claude/worktrees/<slug> -b audit-fix/<alias> origin/<default branch>` — `main` unless §4's `defaultBranch` is passed) so it includes every prior wave that has already merged — and returns its absolute path (`git rev-parse --show-toplevel`) in the structured result. Downstream revisers `cd` into that threaded `worktreePath` to reuse the same worktree (push to the existing branch, the PR auto-updates). The setup step is resume-safe: it reuses the dir if it already exists and attaches an existing branch rather than failing.
+
+After each wave `merge-wave.sh` fast-forwards the **root checkout** only when it is on the base branch; parked on any other branch, the root is left alone. That is the lever for holding merges out of a checkout that something reads live — a self-rollout of this plugin, whose skill text loads from its own working tree, parks the root on a hold branch (`git switch -c hold/<version>`) before `/thread:execute` and returns to the base at release.
 
 **Why explicit, not `isolation: "worktree"`:** the harness's `isolation: "worktree"` worktrees the *session's* git root, not the target repo — from an ops/vault session it would grab `~/repos/workspaces` (the wrong repo) and ignore `repoPath` (verified empirically). Anchoring on `repoPath` makes the engine correct **from any launch location** (vault, ops, or the repo itself) and places worktrees under the target repo where the daily reaper finds them. The plan-gate's planner and the read-only investigator write no code, so they investigate read-only against the main checkout and open no worktree.
 
