@@ -4,8 +4,7 @@
 # Hermetic: every repo lives under mktemp; git identity is passed per command.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-fail=0
-ok() { if [ "$1" = "$2" ]; then echo "ok   - $3"; else echo "FAIL - $3: expected [$2] got [$1]"; fail=1; fi; }
+. tests/lib/assert.sh
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch="${GB:-master}" "$@"; }
@@ -56,16 +55,17 @@ setup=$(node --input-type=module -e "
   const out = T.worktreeSetup({ repoPath: process.argv[1], defaultBranch: 'master' }, { slug: 'e2e-task' })
   process.stdout.write(out.split('\n').slice(1, 6).join('\n') + '\n')
 " "$tmp/seed")
-case "$setup" in *'origin/master && cd "$WT"; fi'*) ok y y "rendered setup branches from origin/master";; *) ok n y "rendered setup branches from origin/master";; esac
+has "$setup" 'origin/master && cd "$WT"; fi' "rendered setup branches from origin/master"
 g -C "$tmp/clone" commit -q --allow-empty -m wave1 && g -C "$tmp/clone" push -q origin master
 top=$(cd "$tmp" && GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t bash -c "$setup" 2>/dev/null | tail -1)
 wt="$tmp/seed/.claude/worktrees/e2e-task"
-[ -d "$wt" ] && ok y y "setup created the task worktree" || ok n y "setup created the task worktree"
+ok "$([ -d "$wt" ] && echo y)" y "setup created the task worktree"
 ok "${top:-<empty>}" "$(cd "$wt" 2>/dev/null && pwd -P || echo '<no worktree>')" "setup lands in the task worktree"
 ok "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" "$(git -C "$tmp/clone" rev-parse HEAD)" "fresh worktree is at the freshly-fetched origin/master"
 
-# ---- merge-wave.sh no longer assumes main --------------------------------------------------------------
+# ---- nothing shipped assumes main ----------------------------------------------------------------------
 ok "$(grep -c 'origin/main' skills/execute/scripts/merge-wave.sh)" 0 "merge-wave.sh has no origin/main"
+ok "$(grep -c 'origin/main' skills/execute/diagnostics/edit-noop-repro.workflow.js)" 0 "edit-noop-repro diagnostic has no origin/main"
 
 echo; [ "$fail" -eq 0 ] && echo "default-branch: ALL PASS" || echo "default-branch: SOME FAILED"
 exit "$fail"

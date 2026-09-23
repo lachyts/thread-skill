@@ -6,8 +6,9 @@
 # temp instead of the real vault or ~/.claude. PYTHONDONTWRITEBYTECODE keeps __pycache__ out of the tree.
 #
 # Discovery is by explicit globs, not bare `node --test` (which walks the whole tree): node:test files
-# and plain exit-code scripts both run under `node --test`, shell suites run one by one. New suites
-# join by filename — including the protocol 4 branch's, unchanged.
+# and plain exit-code scripts both run under `node --test`; shell suites and the merge-wave self-tests
+# run concurrently; output is printed grouped per suite in the original order. New suites join by
+# filename — including the protocol 4 branch's, unchanged.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
@@ -28,8 +29,10 @@ git config --global user.name "thread-tests"; git config --global user.email "th
 git config --global init.defaultBranch main
 
 # Every file the run creates or modifies anywhere in the checkout (untracked dirs and already-dirty files
-# included) is newer than this stamp. Finder's .DS_Store churn is the one exemption.
-stamp="$scratch/stamp"; : > "$stamp"; sleep 1
+# included) is newer than this stamp. Finder's .DS_Store churn is the one exemption. The sleep only
+# matters where mtimes are whole seconds (APFS and ext4 store nanoseconds, so it is skipped there).
+stamp="$scratch/stamp"; : > "$stamp"
+python3 -c 'import os,sys; sys.exit(os.stat(sys.argv[1]).st_mtime_ns % 10**9 == 0)' "$stamp" || sleep 1
 
 fail=0
 failed=""
@@ -38,6 +41,22 @@ step() {  # step <label> <cmd...>
   echo "== $label"
   if "$@"; then :; else fail=1; failed="$failed
   - $label"; fi
+}
+
+n=0; labels=()
+spawn() {  # spawn <label> <cmd...> — run in background, capture output + exit code by index
+  local label="$1"; shift
+  labels[$n]=$label
+  { "$@" > "$scratch/$n.out" 2>&1; echo $? > "$scratch/$n.rc"; } &
+  n=$((n+1))
+}
+report() {  # report <i> — print that suite's block; a non-zero or missing rc fails the run
+  local i="$1" rc
+  echo "== ${labels[$i]}"
+  cat "$scratch/$i.out" 2>/dev/null
+  rc=$(cat "$scratch/$i.rc" 2>/dev/null || echo missing)
+  [ "$rc" = 0 ] || { fail=1; failed="$failed
+  - ${labels[$i]}"; }
 }
 
 sh_files=(skills/*/scripts/*.sh hooks/*.sh tests/*.sh tests/lib/*.sh)
@@ -54,12 +73,14 @@ for p in sys.argv[1:]:
 step "bash syntax (${#sh_files[@]} files)"     syntax_sh "${sh_files[@]}"
 step "python syntax (${#py_files[@]} files)"   syntax_py "${py_files[@]}"
 step "workflow parse (${#wf_files[@]} files)"  bash tests/lib/check-workflow-parse.sh "${wf_files[@]}"
-step "merge-wave classifier self-test"         bash skills/execute/scripts/merge-wave.sh --self-test-classify
-step "merge-wave base self-test"               bash skills/execute/scripts/merge-wave.sh --self-test-base
+# Independent suites run concurrently (each builds under its own mktemp); node runs once they finish.
+spawn "merge-wave classifier self-test"        bash skills/execute/scripts/merge-wave.sh --self-test-classify
+spawn "merge-wave base self-test"              bash skills/execute/scripts/merge-wave.sh --self-test-base
+for t in "${sh_tests[@]}"; do spawn "$t" bash "$t"; done
+wait
+report 0; report 1
 step "node tests (${#node_tests[@]} files)"    node --test "${node_tests[@]}"
-for t in "${sh_tests[@]}"; do
-  step "$t" bash "$t"
-done
+i=2; while [ "$i" -lt "$n" ]; do report "$i"; i=$((i+1)); done
 
 # A run must leave the checkout exactly as it found it (no bytecode, no stray state files).
 tree_unchanged() {
