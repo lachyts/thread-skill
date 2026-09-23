@@ -27,7 +27,7 @@ and nothing else outside the vault, ever.
 ```
 /thread:gather GifLab               # all loose open tasks linked to [[GifLab]]
 /thread:gather [[GifLab]]           # explicit wikilink form
-/thread:gather GifLab --light       # clustering-only: no interview, task bodies untouched
+/thread:gather GifLab --light       # clustering-only: no interview, task bodies untouched except backlink rewrites
 ```
 
 The argument resolves to a project-note slug exactly as `/thread:schedule` does (strip `[[...]]`,
@@ -49,7 +49,8 @@ Walk `~/repos/obsidian/Work/Tasks/*.md`. Filter:
 Then read the existing roadmap: `Work/Phases/<project-slug>-p*` (and `Work/Phases/Archive/`) →
 the max phase number `N_max` and, per existing phase, the max task ordinal `M` (from
 `Work/Tasks/<project-slug>-p<N>-<M>-*` filenames, archived included). Fractional phases keep the
-dot (`p3.5`), per the writer spec. New phases continue from `N_max`; existing numbering is
+dot (`p3.5`), per the writer spec. New phases number from `N_max + 1` (P1 when the project has none)
+(a fractional `N_max` such as `p3.5` rounds up to the next whole phase, P4); existing numbering is
 **never** changed.
 
 Report the loose count and the roadmap shape found, and confirm before proceeding.
@@ -97,7 +98,7 @@ edits to those skills propagate here for free. Resolve the project's repo from t
   each branch until shared understanding.
 
 `--light` **skips this step entirely** — clustering-only, no interview, no docs discipline, and
-step 4 leaves every task body byte-untouched.
+step 4 leaves every task body untouched except backlink rewrites.
 
 ### 4. Write (the mechanical half) — gate first
 
@@ -112,19 +113,19 @@ schema**: `~/repos/workspaces/_shared/knowledge/add-writers/add-phase.md` (phase
 `add-task.md` § Step 4 (its *Phased task* bullet) for renamed tasks.
 
 1. **Phase notes** — `Work/Phases/<project-slug>-p<N>-<kebab-desc>.md` (`tags: [phase, <area>]`,
-   `phase: N`, embedded name-prefix task base, `## Build sequence` listing the members), numbering
-   continuing from `N_max`. An existing phase gaining members is **edited** (its
+   `phase: N`, embedded name-prefix task base, `## Build sequence` listing the members), numbered
+   from `N_max + 1`. An existing phase gaining members is **edited** (its
    `## Build sequence` extended), never duplicated.
 2. **Task renames + stamps** — each phased task becomes
    `Work/Tasks/<project-slug>-p<N>-<M>-<kebab-desc>.md` with `phase: N` added to frontmatter.
    Before each rename: check the target basename is free, then grep the vault for `[[old-slug]]`
    and rewrite every backlink to the new slug (wikilinks don't follow filesystem renames). In full
-   mode the body gets the grilled spec; under `--light` the body stays byte-identical — rename +
-   `phase:` stamp only.
+   mode the body gets the grilled spec; under `--light` the body stays byte-identical except backlink
+   rewrites — rename + `phase:` stamp only.
 3. **Two-block surfacing** — ensure the project note carries the two always-visible base blocks
    (open-tasks list + stacked Phases table — shape from `_System/Templates/Project.md`; copy from
    a sibling like `[[GifLab]]`). **Only if absent** — idempotent, never clobber existing blocks.
-4. **Misfits stay loose** — untouched, listed in the report.
+4. **Misfits stay loose** — untouched apart from backlink rewrites, listed in the report.
 
 ### 5. Hand off — run the execution-fit test before naming a next step
 
@@ -147,10 +148,11 @@ Phases order meaning, waves order merges — gather never writes `wave:` either 
 
 - **Don't invent phases silently.** Every phase name, ordering, and membership call is the
   human's — via the step-3 interview or the step-4 gate.
-- **Don't renumber.** Existing phases and task ordinals are immutable; new phases continue from
-  `N_max`, joins take the next free `M`.
+- **Don't renumber.** Existing phases and task ordinals are immutable; new phases number from
+  `N_max + 1`, joins take the next free `M`.
 - **Don't stamp `wave:`, `rollout:`, or `scope:`** — those belong to `/thread:schedule`.
-- **Don't touch bodies under `--light`** — rename + `phase:` stamp only, byte-identical otherwise.
+- **Don't respec bodies under `--light`** — rename + `phase:` stamp only; the body stays
+  byte-identical except backlink rewrites.
 - **Don't force-phase a misfit.** Loose is a valid end state.
 - **Don't write before the step-4 gate.**
 - **Don't rename without the backlink rewrite** (and the basename-free check).
@@ -170,9 +172,10 @@ End-to-end against a fixture project with 6+ loose tasks (including empty brain-
    clusters + misfits.
 2. Full run: interview resolves phases + specs; gate table approved; produces phase notes with
    correct naming/frontmatter/embedded base, renamed `pN-M` tasks with real bodies, surfacing
-   blocks on the project note; misfits untouched. Grep old slugs → zero stale backlinks.
+   blocks on the project note; misfits untouched apart from backlink rewrites. Grep old slugs →
+   zero stale backlinks.
 3. `--light` run on a second fixture: clusters confirmed at the gate, tasks renamed + stamped,
-   bodies byte-identical (diff), no interview.
+   bodies byte-identical except backlink rewrites (diff), no interview.
 4. Docs-gate spot checks: project whose repo has `CONTEXT.md` → `grill-with-docs` invoked and doc
    writes land in that repo (not the session CWD); repo without → the one-time ask; vault-only
    project → `grill-me`.
