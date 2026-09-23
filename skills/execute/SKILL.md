@@ -263,7 +263,15 @@ Workflow({
 
 Pass `args` as an actual JSON object in the tool call. (Note: the Workflow tool delivers `args` to a `scriptPath` workflow JSON-**stringified** — confirmed by smoke test — so the engine parses it defensively with `typeof args === 'string' ? JSON.parse(args) : args`. Don't remove that parse thinking it's redundant.)
 
-Tell the user the run launched, which waves/tasks it covers, and that they can watch live with `/workflows`. Record the returned `runId` — if the run dies, resume with `Workflow({ scriptPath, args, resumeFromRunId: <runId> })` (unchanged `agent()` calls replay from cache).
+**If the Workflow tool refuses the engine path.** Some harnesses refuse the `${CLAUDE_PLUGIN_ROOT}` path with "scriptPath must be a script path this tool returned, or a file you can already read"; a prior `Read` of the file does not help. Fall back to a scratchpad copy:
+
+1. `mkdir -p "<scratchpad>/wave" && cp "${CLAUDE_PLUGIN_ROOT}/skills/execute/wave-execute.workflow.js" "<scratchpad>/wave/wave-execute.workflow.js"`, where `<scratchpad>` is this session's scratchpad directory.
+2. `cmp` the copy against the source. If `cmp` reports any difference, stop.
+3. Pass `<scratchpad>/wave/wave-execute.workflow.js` as `scriptPath`.
+
+The engine has no relative imports, so the copy runs unchanged. A `resumeFromRunId` resume re-passes the same `scriptPath` the run started with, exactly like its args. A later session (a new scratchpad) re-copies the same bytes, and per-task resume (`resume-filter`) still keeps the tasks that already landed. Never edit the copy. This is a fallback only: the cache path is the default (the 2026-09-23 E2E ran it unrefused).
+
+Tell the user the run launched, which waves/tasks it covers, and that they can watch live with `/workflows`. Record the returned `runId` — if the run dies, resume with `Workflow({ scriptPath, args, resumeFromRunId: <runId> })`, passing the `scriptPath` the run started with (unchanged `agent()` calls replay from cache).
 
 **Register the heartbeat (continuous mode, once per rollout).** In the same turn as the first wave launch, check `CronList` for an existing `WAVE-HEARTBEAT <rollout-slug>` task; if none, register one via `CronCreate` (schedule `*/20 * * * *`) with this prompt:
 

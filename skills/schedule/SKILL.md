@@ -11,7 +11,7 @@ This skill is the **planner**. The rollout note it produces is a data artefact �
 
 ## Scope
 
-**Obsidian only.** Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
+**Obsidian only**, plus § 0's read-only remote probe of the target repo. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
 
 ## Invocation forms
 
@@ -40,6 +40,15 @@ block) instead of forcing a rollout: the engine's parallelism is forbidden by is
 windows, every externally-publishing task pauses at the human gate (ADR 0008; execute § 3.7), and
 file-overlap wave computation cannot see window/calendar constraints. A mixed set is fine if
 the wave-shaped subset can roll out while the misfits stay unstamped — name them in the gate.
+
+After the misfit scan, check the dispatch blockers for the target repo, i.e. the project root the
+rollout note will carry. Resolve it from the project note's `Local:` line; if there is none, ask
+the user for the path (step 6 writes this resolved path as `{{REPO_PATH}}`). Then run the remote
+check in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers against it (point at
+it; never copy the snippet here), followed by its `gh repo view` confirmation. On either failure
+**stop before step 1**: no task stamped, no rollout note, no heartbeat. Print the snippet's
+remedy line verbatim (or gh's error). The cluster is still wave-shaped; don't re-route it to the
+session lane.
 
 There is no minimum size: shape decides, not count. A wave-shaped cluster of one still rolls
 out — the plan gate, verifier retry, master review, and auto-merge are the point. For N ≤ 2,
@@ -236,7 +245,7 @@ Use the template at `${CLAUDE_PLUGIN_ROOT}/skills/schedule/rollout-template.md`.
 - `{{ROLLOUT_SLUG}}` — the resolved dated rollout slug, no extension (e.g. `giflab-rollout-2026-07-18`)
 - `{{DATE}}` — today's date (YYYY-MM-DD)
 - `{{VERIFIER}}` — the verifier command detected in step 2.5 (or user-provided)
-- `{{REPO_PATH}}` — the project's local repo path from the project note's `Local:` line, if discoverable; otherwise leave a `<TODO>` marker
+- `{{REPO_PATH}}` — the repo path § 0 resolved and checked (the project note's `Local:` line, or the path the user gave)
 - `{{THREAD_LINE}}` — the whole line `` Thread: `<path to the thread file>` ``, naming the project's THREAD.md or its shared thread file when one exists (e.g. `` Thread: `~/repos/tools/chorus/THREAD.md` ``); otherwise delete the line entirely — no blank placeholder line
 - `{{WAVE_TABLE}}` — rendered wave structure table (see template). A merged unit (step 4.5) renders as a normal row with **Mode = `sequential-merged (one agent/PR)`**, signalling that one agent does the folded sub-tasks in sequence
 - `{{WAVE_RATIONALE}}` — short prose explaining the ordering
@@ -308,7 +317,7 @@ This skill does not execute anything. The rollout note it produces is read by th
 - Don't overwrite an existing rollout without prompting.
 - Don't touch tasks outside the target project (the `projects:` filter is strict).
 - Don't fill in `touches:` on tasks where you regex-detected files — that promotes a guess into authoritative metadata. Only the user does that. The **one** exception is the combined note authored in step 4.5: its `touches:` is the *union of file-sets the user already confirmed* for the members, so it's a derivation, not a fresh guess. (Separately, the `## File-sets` block in the **rollout note** — step 6 — also records confirmed file-sets, but that's rollout-note data the executor reads, never task frontmatter, so it doesn't touch this rule.)
-- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files.
+- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's read-only remote check (`git remote get-url`, `gh repo view`).
 
 ## Verification
 
