@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-09-22
+last_touched: 2026-09-23
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
 ---
@@ -9,6 +9,21 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-09-23 — audit done; 2.5.2 and 2.5.3 shipped; a live E2E baseline and a self-rollout are
+next.** A `/thread:orient` audit (`docs/audits/2026-09-23-thread-audit.md`) found the plugin carrying
+two eras (master protocol 3 and the paused protocol 4 redesign), 33 open tasks with no phases, and a
+test floor that was partly vacuous. Shipped hands-on as the enabler:
+- **2.5.2:** `make test` (`tests/run.sh`, a real workflow parse, a contract floor, hermetic).
+- **`args.defaultBranch`:** the engine can now roll out repos whose default is not `main`, this one
+  included. There is one source for the base, the repo's GitHub default; merge-wave checks every PR
+  against it.
+- **2.5.3:** `execute` names the read-only agents that read `repoPath`.
+
+Engine work is held for protocol 4. Three clean-room rounds ran plus one simplify pass. The ledger
+fired STOP at round 2, so the fix reverted to one source instead of patching a third time. Next: the
+pending handoff (a live E2E of every verb, then `/thread:gather` → schedule → execute of this plugin
+from a separate clone).
 
 **2026-09-22 — thread 2 closed; rollout redesign remains open.** Lachy designated
 **thread 1** as the main project conversation. **thread 3** and Claude's
@@ -241,6 +256,17 @@ scheduled 2026-07-15.
   human-facing surface (goal, terminology, wave-sibling framing); its
   `repos:` frontmatter auto-routes tasks captured from this repo's CWD.
 - Build lineage: `docs/build-plan.md` (the approved plan, copied in at close).
+- **2026-09-23:**
+  - **Tests:** `make test` is the one test entrypoint and the self-rollout verifier. New suites join by
+    filename. `make release-check` verifies the version-keyed cache after a release.
+  - **Base branch:** the rollout base is the repo's GitHub default. The argument is
+    `defaultBranch`, never `baseBranch`, which protocol 4 owns. The resolver stops rather than assume
+    `main`.
+  - **Engine work:** held for protocol 4 except that enabler.
+  - **Self-rollouts:** a self-rollout of this plugin runs from a GitHub-origin clone under `~/repos`,
+    never the live checkout.
+  - **Three test layers:** contract tests, `claude plugin eval` behaviour evals, and a live E2E checklist
+    (`docs/e2e/`).
 - Notion handoff destination deleted from close (2026-07-14), not re-routed:
   Notion is a read-only legacy archive (personal → Obsidian migration
   pending); THREAD.md, git-committed by the close flow, is the cold-pickup
@@ -248,7 +274,18 @@ scheduled 2026-07-15.
 
 ## Open questions / decisions pending
 
-- **Two tier-ceiling gaps deferred from the 2026-09-21 round-3 review**
+- **The stale `thread@thread` 2.3.4 project-scope record at `~`** is still installed. Uninstalling it is
+  unsafe as written: all three profiles' `settings.json` are symlinks to `~/.claude/settings.json`, which
+  is also the project settings file for `~`. Vault task `thread-skill-stale-project-scope-install`.
+- **Protocol 4 intake** from the 2026-09-23 audit:
+  - port `defaultBranch` to the redesign's protocol 3 path
+  - gate the release on the zero-rounds fail-open bug
+  - the pilot requirement notes never close
+  - read-only agents read a mutable checkout
+
+  Vault task `thread-rollout-v4-intake-2026-09-23-audit`, owned by thread 1.
+- **Two tier-ceiling gaps deferred from the 2026-09-21 round-3 review** (held for protocol 4 since the
+  2026-09-23 audit; the redesign already carries most of gap 1)
   (`docs/reviews/2026-09-21-c9f09dd-df669e.md`, findings 12 and 14). Both are
   pre-existing — neither was introduced by that chain — and both were left
   alone deliberately because `review-ledger.py` fired STOP on that round
@@ -295,6 +332,14 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **A `cd` in a Bash call moves the session's primary working directory.** Background clean-room
+  reviewers resolve `git diff` against that directory. So while a review runs, the lead uses `git -C`
+  and absolute paths only. (2026-09-23: one `cd` into the root checkout mid-review would have pointed a
+  worktree review at a clean tree. Caught and reverted before the fork started.)
+- **`plugin update` at one version is not enough.** The cache follows the version number. A content
+  change needs both manifests bumped, then `claude plugin update thread@thread`, then `make
+  release-check`. The check compares the cache's `skills/` and `hooks/` with the tree, and it
+  resolves the cache via `CLAUDE_CONFIG_DIR`.
 - **Two sessions can share one checkout** (a handoff consumer opened in the
   same directory). Every delete-at-close lifecycle here — handoff docs, review
   docs — assumes one writer; a `git rm -f` or a restore in one session lands in
@@ -395,6 +440,10 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Read `/Users/lachlants/repos/tools/thread-skill/docs/handoffs/2026-09-23-thread-e2e-baseline.md` first**
+(pending): live E2E baseline S1. The shared brief `docs/audits/2026-09-23-rollout-brief.md` carries S2
+and the gather draft.
+
 **Rollout redesign, 22 September 2026:** coordination now belongs to **thread 1**.
 Read the [thread 2 handback](/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/docs/implementation/2026-09-22-thread-2-closeout.md)
 and the current records owned by thread 3 and the native Claude pilot before
@@ -427,6 +476,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-23: /thread:orient audit. Shipped 2.5.2 (make test, the contract floor, args.defaultBranch; one source for the base after the ledger STOP) and 2.5.3 (execute names the read-only agents). Wrote the E2E checklist, the rollout brief and the S1 handoff. Engine defects held for protocol 4. Stale 2.3.4 install left pending (settings symlink hazard).
 - 2026-09-22: Closed only thread 2 and saved its Claude-pilot agreement/status/evidence handback; thread 1 now leads, thread 3 and Claude continue independently, rollout redesign remains open.
 - 2026-09-21 (latest): consumed the stale 2026-09-17 tier-ceiling review and two further clean-room rounds (12 + 15 findings); round 1 lost to a CLI restart; round 3 hit the ledger's STOP at 60% regressions, so no round 4 — reverted to the root instead (retry budget is now a constant, not arithmetic over max_iterations). Two real engine defects fixed (effort keyed off a lagging event flag; a 1-iteration retry loop at the template default), ADR 0016 §2 amended, Scenarios F and G added, 191 assertions. Shipped 2.5.1 and verified the cache byte-identical — the version-keyed cache is still live and a same-version content change does NOT refresh it. Two findings deferred to § Open questions + vault tasks.
 - 2026-09-21 (later): handed the leftovers off via the first ADR 0017 doc; the consumer consumed the 2026-09-17 round-2 review (af0094f) and left its four-file fix batch uncommitted, no close; this close deleted the consumed handoff doc + the two consumed 2026-09-21 review docs; concurrent-checkout hazard logged (open question + estate METHOD row); ship still pending the cache dance.
