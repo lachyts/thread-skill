@@ -71,20 +71,22 @@ A **handoff doc** is a file in `<home>/docs/handoffs/`, written by `thread:hando
 
 **The test is on disk, never in memory** — run the scan in step 2 and again before step 6, so it survives a context compaction. One directory, no recursion (`<home>/docs/handoffs/` is where handoff writes); `find`, not a glob, because the Bash tool is zsh, where an unmatched glob aborts the command before it runs.
 
-```
+```bash
+# thread:handoff-scan (extracted and run by tests/handoff-scan.test.sh)
 case "$PWD" in
   "$HOME"/Projects/*/*)        home="$(printf '%s' "$PWD" | sed -E "s#^($HOME/Projects/[^/]+/[^/]+).*#\1#")" ;;
   "$HOME"/repos/workspaces/*)  home="$(printf '%s' "$PWD" | sed -E "s#^($HOME/repos/workspaces/[^/]+).*#\1#")" ;;
   *)                           home="$(git rev-parse --show-toplevel 2>/dev/null || echo "$HOME/repos/workspaces/_shared")" ;;
 esac
 find "$home/docs/handoffs" -maxdepth 1 -name '*.md' 2>/dev/null | while IFS= read -r f; do
-  s="$(awk 'NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} /^status:/{print $2; exit}' "$f" | tr -d "\"'" | tr '[:upper:]' '[:lower:]')"
+  s="$(awk '{ sub(/\r$/, "") } NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} /^status:/{print $2; exit}' "$f" | tr -d "\"'\r" | tr '[:upper:]' '[:lower:]')"
   case "$s" in pending|consumed) ;; "") s=legacy ;; *) s="unknown($s)" ;; esac
   echo "$s $f"
 done
+# end thread:handoff-scan
 ```
 
-`pending` → this thread's continuation (the rules below). `consumed` → deleted in step 7, **whoever marked it**: consumed means the thread it briefed went live, and git history keeps the pending version — nothing about that decision lives in this conversation. `legacy` and `unknown(…)` → one counted report line, untouched. The status is read from the front-matter block only (quotes stripped, case-folded), so a body that mentions `status: pending` does not count.
+`pending` → this thread's continuation (the rules below). `consumed` → deleted in step 7, **whoever marked it**: consumed means the thread it briefed went live, and git history keeps the pending version — nothing about that decision lives in this conversation. `legacy` and `unknown(…)` → one counted report line, untouched. The status is read from the front-matter block only (quotes stripped, case-folded, CRLF tolerated), so a body that mentions `status: pending` does not count.
 
 Three rules, for this thread's pending doc:
 

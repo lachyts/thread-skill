@@ -25,6 +25,11 @@ export PATH="$(dirname "$node_bin"):$(dirname "$py_bin"):$PATH"
 
 export HOME="$scratch/home"; mkdir -p "$HOME"
 export GIT_CONFIG_GLOBAL="$scratch/gitconfig"
+# A git hook running `make test` exports GIT_DIR & co. (and `git -c ...` exports GIT_CONFIG_PARAMETERS);
+# left set, every git call below and every suite's temp-repo git call (commits, pushes included) would land
+# on this checkout's repo and its real remote instead. git's own list of repo-local vars, so none is missed;
+# it prints even under a bogus GIT_DIR. Scrubbed before the first git call so the whole runner runs clean.
+unset $(git rev-parse --local-env-vars)
 git config --global user.name "thread-tests"; git config --global user.email "thread-tests@example.invalid"
 git config --global init.defaultBranch main
 
