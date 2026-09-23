@@ -112,18 +112,31 @@ Cut a versioned release with `claude plugin tag` once `plugin.json` +
 ## Tests
 
 ```sh
-node --check          skills/execute/wave-execute.workflow.js
-bash -n               skills/execute/scripts/merge-wave.sh
-bash                  skills/execute/scripts/merge-wave.sh --self-test-classify
-python3 -m py_compile skills/execute/scripts/reconcile-wave.py
-bash                  skills/execute/tests/reconcile-wave.test.sh
-node                  skills/execute/tests/prompt-invariants.test.mjs
-bash                  skills/execute/tests/wave-stop-driver.test.sh
+make test            # = bash tests/run.sh — the one entrypoint, and the self-rollout verifier
 ```
 
-`prompt-invariants.test.mjs` guards the **resume-cache invariant**: optional
-engine features must render byte-identical Workflow `agent()` prompts when
-unset, or in-flight rollouts can't resume.
+`tests/run.sh` runs everything hermetically (temp `HOME` and global git config, no bytecode, and a
+final check that the run wrote nothing into the tree):
+
+- **Syntax** — `bash -n` on every shell script, `ast.parse` on every Python script, and a real parse
+  of every `*.workflow.js` (`tests/lib/check-workflow-parse.sh`: the body wrapped the way the Workflow
+  runtime wraps it; `node --check` silently passes broken ESM on Node 23, so it is not used).
+- **Engine** — `skills/execute/tests/`: `prompt-invariants.test.mjs` guards the **resume-cache
+  invariant** (optional engine features must render byte-identical Workflow `agent()` prompts when
+  unset, or in-flight rollouts can't resume); `reconcile-wave.test.sh`; `wave-stop-driver.test.sh`;
+  `merge-wave.sh --self-test-classify` / `--self-test-base`.
+- **Contracts** — `tests/contracts/*.test.mjs`: manifests agree, skill names and description budgets,
+  `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files.
+- **Default branch** — `tests/default-branch.test.{mjs,sh}`: `defaultBranch` keeps pre-fix bytes when
+  unset, refuses unsafe names, and the resolver in `execute/SKILL.md` § 4 works against fixture remotes.
+
+New suites join by filename: `tests/*.test.mjs`, `tests/contracts/*.test.mjs` and
+`skills/execute/tests/*.test.mjs` run under `node --test`; `tests/*.test.sh` and
+`skills/execute/tests/*.test.sh` run one by one. `skills/execute/diagnostics/` holds paid live
+diagnostics (Workflow runtime + real agents) — parse-checked, never run by `make test`.
+
+After a release, `make release-check` confirms both manifests agree and the version-keyed plugin
+cache (what `${CLAUDE_PLUGIN_ROOT}` — the engine, scripts and hook — runs from) matches the tree.
 
 ## Coexistence with Orca
 
