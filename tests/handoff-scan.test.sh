@@ -45,12 +45,14 @@ printf -- '# A doc\nbody\n'                                           > "$d/no-f
 printf -- '---\ntitle: x\n---\nbody\n'                                > "$d/fm-no-status.md"
 printf -- '---\nstatus: draft\n---\nbody\n'                           > "$d/draft.md"
 printf -- '---\r\ntitle: x\r\n---\r\nstatus: pending\r\n'             > "$d/fm-no-status-body-pending.md"
+printf -- '---\ntitle: x\n---\nstatus: pending\n'                     > "$d/fm-no-status-body-lf.md"
 printf -- '# A doc\nstatus: pending\n'                                > "$d/no-fm-body-pending.md"
 printf -- '---\nstatus: pending\r\r\n---\nbody\n'                     > "$d/crcr-pending.md"   # awk strips one CR, tr the other
 printf -- '---\nstatus: pending\n---\n'                               > "$d/notes.txt"
 printf -- '---\nstatus: pending\n---\n'                               > "$d/sub/nested.md"
 expected="consumed crlf-consumed.md
 consumed lf-consumed.md
+legacy fm-no-status-body-lf.md
 legacy fm-no-status-body-pending.md
 legacy fm-no-status.md
 legacy no-fm-body-pending.md
@@ -90,11 +92,11 @@ for sh in "${shells[@]}"; do
   for want in "pending lf-pending.md" "pending crlf-pending.md" "consumed lf-consumed.md" \
               "consumed crlf-consumed.md" "pending quoted-pending.md" "legacy no-fm.md" \
               "legacy fm-no-status.md" "unknown(draft) draft.md" "legacy fm-no-status-body-pending.md" \
-              "legacy no-fm-body-pending.md" "pending crcr-pending.md"; do
+              "legacy fm-no-status-body-lf.md" "legacy no-fm-body-pending.md" "pending crcr-pending.md"; do
     f="${want#* }"
     ok "$(printf '%s\n' "$got" | awk -v f="$f" '$2==f' )" "$want" "$L $f reads ${want%% *}"
   done
-  ok "$got" "$expected" "$L the whole list: 11 docs, no notes.txt, no sub/nested.md"
+  ok "$got" "$expected" "$L the whole list: 12 docs, no notes.txt, no sub/nested.md"
 
   # missing docs/handoffs/ → nothing printed, exit 0
   scan "$sh" "$tmp/plain" "$tmp/home2"
