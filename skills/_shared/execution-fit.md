@@ -39,3 +39,42 @@ unstamped in the session lane. Name the split when reporting.
 **Count is never a criterion.** There is no minimum rollout size — shape
 decides, not size. (Decided 2026-08-12, ADR 0009; supersedes schedule's old
 "<3 tasks" floor.)
+
+## Dispatch blockers — wave-shaped but not yet runnable
+
+A cluster that fails a blocker is **still wave-shaped**: do not route it to the
+session lane. The gate stops before anything is written (no task stamped, no
+rollout note, no heartbeat) and names the remedy. Fix the blocker, then schedule
+again. Two blockers:
+
+**GitHub `origin`.** The engine branches every worktree from
+`origin/<default branch>` and lands each task as a GitHub PR that merge-wave
+merges, so the target repo needs an `origin` on GitHub. A repo with no `origin`
+(a `git filter-repo` seed, a fresh `git init`) fails, and so does one whose
+`origin` is a local path (a clone of the live checkout) or another host. Run this
+against the target repo:
+
+```bash
+# thread:remote-check (extracted and tested by tests/execution-fit-remote.test.sh)
+R="<repoPath>"
+u=$(git -C "$R" remote get-url origin 2>/dev/null) || {
+  echo "no origin remote in $R: create one with: gh repo create <owner>/<name> --private --source \"$R\" --remote origin --push" >&2; exit 1; }
+case "$u" in
+  https://github.com/*|git@github.com:*|ssh://git@github.com/*) echo "$u" ;;
+  *) echo "origin for $R is not a GitHub remote ($u): a rollout lands GitHub PRs, so point origin at GitHub (a path or other-host origin breaks gh pr create and merge-wave)" >&2; exit 1 ;;
+esac
+# end thread:remote-check
+```
+
+On exit 1, stop and print its stderr line verbatim: that line is the remedy. On
+success it prints the URL. Derive `<owner>/<name>` from it the way merge-wave
+does (strip everything through `github.com:` or `github.com/`, then a trailing
+`.git`), then confirm GitHub can see the repo with
+`gh repo view <owner>/<name> --json nameWithOwner`. That call uses the network,
+so it stays outside the markers and the test. If it fails (gh not
+authenticated, repo not visible, offline), the gate also stops and prints gh's
+error.
+
+**Engine path.** The Workflow tool may refuse the plugin-cache `scriptPath`. That
+depends on the harness and cannot be checked at schedule time; execute § 5
+carries the scratchpad fallback.
