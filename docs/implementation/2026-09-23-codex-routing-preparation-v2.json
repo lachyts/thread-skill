@@ -1,0 +1,459 @@
+{
+  "version": 2,
+  "status": "one-task alternative prepared; original two-task shape blocked; launch not authorised",
+  "nativeChildren": 0,
+  "modelProbes": 0,
+  "runtimeChanged": false,
+  "networkUsed": false,
+  "rolloutInitialised": false,
+  "mergesPerformed": false,
+  "verifier": {
+    "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/preparations/2026-09-23-codex-routing-v2/pilot-verify-v2.py",
+    "sha256": "70535c8ac06464741a773df5f8fe1acfd63cecaaa58114db225e8fa12f2c535f"
+  },
+  "invocationAllowance": 10,
+  "invocationsSpent": 10,
+  "cases": [
+    {
+      "number": 1,
+      "case": "old-baseline-defect",
+      "kind": "deterministic-local-fixture; no rollout host initialisation",
+      "command": [
+        "/usr/local/bin/python3",
+        "-I",
+        "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/pilot-verify.py"
+      ],
+      "cwd": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-preparation-v2-2026-09-23/cases/old-baseline-defect",
+      "head": "89a7ff1d409554f5442b548c967408f24bfa27a4",
+      "tree": "68e356ce59b46d39fd28c1e5211151a2ccfe7b18",
+      "verifierSha256": "bfab12f1d3106bba2d9547bb5fad5c33a4279e23027dd6d2ee8b7249841b01b3",
+      "expectedExit": 1,
+      "expectedMode": null,
+      "status": "complete",
+      "exitCode": 1,
+      "stdout": "no pilot document present\n",
+      "stderr": "",
+      "matchedExpectation": true
+    },
+    {
+      "number": 2,
+      "case": "v2-exact-pinned-baseline",
+      "kind": "deterministic-local-fixture; no rollout host initialisation",
+      "command": [
+        "/usr/local/bin/python3",
+        "-I",
+        "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/preparations/2026-09-23-codex-routing-v2/pilot-verify-v2.py"
+      ],
+      "cwd": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-preparation-v2-2026-09-23/cases/v2-exact-pinned-baseline",
+      "head": "89a7ff1d409554f5442b548c967408f24bfa27a4",
+      "tree": "68e356ce59b46d39fd28c1e5211151a2ccfe7b18",
+      "verifierSha256": "70535c8ac06464741a773df5f8fe1acfd63cecaaa58114db225e8fa12f2c535f",
+      "expectedExit": 0,
+      "expectedMode": "baseline",
+      "status": "complete",
+      "exitCode": 0,
+      "stdout": "{\"head\": \"89a7ff1d409554f5442b548c967408f24bfa27a4\", \"mode\": \"baseline\", \"status\": \"pass\"}\n",
+      "stderr": "",
+      "matchedExpectation": true
+    },
+    {
+      "number": 3,
+      "case": "v2-descendant-same-empty-tree",
+      "kind": "deterministic-local-fixture; no rollout host initialisation",
+      "command": [
+        "/usr/local/bin/python3",
+        "-I",
+        "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/preparations/2026-09-23-codex-routing-v2/pilot-verify-v2.py"
+      ],
+      "cwd": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-preparation-v2-2026-09-23/cases/v2-descendant-same-empty-tree",
+      "head": "10919621d836a011753038f2ac36e0c98cb75991",
+      "tree": "68e356ce59b46d39fd28c1e5211151a2ccfe7b18",
+      "verifierSha256": "70535c8ac06464741a773df5f8fe1acfd63cecaaa58114db225e8fa12f2c535f",
+      "expectedExit": 1,
+      "expectedMode": null,
+      "status": "complete",
+      "exitCode": 1,
+      "stdout": "{\"error\": \"docs/pilots/codex-routing/work-policy.md: required ordinary file missing; docs/pilots/codex-routing/review-policy.md: required ordinary file missing\", \"status\": \"fail\"}\n",
+      "stderr": "",
+      "matchedExpectation": true
+    },
+    {
+      "number": 4,
+      "case": "v2-work-only-outcome-rejected",
+      "kind": "deterministic-local-fixture; no rollout host initialisation",
+      "command": [
+        "/usr/local/bin/python3",
+        "-I",
+        "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/preparations/2026-09-23-codex-routing-v2/pilot-verify-v2.py"
+      ],
+      "cwd": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-preparation-v2-2026-09-23/cases/v2-work-only-outcome-rejected",
+      "head": "ae6e1d8ec09376b8dc03f5e6af8f2e67a193b48c",
+      "tree": "101cae5a3b6b369680521d35380b8b15f5974c19",
+      "verifierSha256": "70535c8ac06464741a773df5f8fe1acfd63cecaaa58114db225e8fa12f2c535f",
+      "expectedExit": 1,
+      "expectedMode": null,
+      "status": "complete",
+      "exitCode": 1,
+      "stdout": "{\"error\": \"docs/pilots/codex-routing/review-policy.md: required ordinary file missing\", \"status\": \"fail\"}\n",
+      "stderr": "",
+      "matchedExpectation": true
+    },
+    {
+      "number": 5,
+      "case": "v2-review-only-outcome-rejected",
+      "kind": "deterministic-local-fixture; no rollout host initialisation",
+      "command": [
+        "/usr/local/bin/python3",
+        "-I",
+        "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/preparations/2026-09-23-codex-routing-v2/pilot-verify-v2.py"
+      ],
+      "cwd": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-preparation-v2-2026-09-23/cases/v2-review-only-outcome-rejected",
+      "head": "1d128282a651a514a7e22e0423d543ae0c260403",
+      "tree": "d0aefc4d4bdb33935b6d5f6ed2ae5afc5ff1bcf6",
+      "verifierSha256": "70535c8ac06464741a773df5f8fe1acfd63cecaaa58114db225e8fa12f2c535f",
+      "expectedExit": 1,
+      "expectedMode": null,
+      "status": "complete",
+      "exitCode": 1,
+      "stdout": "{\"error\": \"docs/pilots/codex-routing/work-policy.md: required ordinary file missing\", \"status\": \"fail\"}\n",
+      "stderr": "",
+      "matchedExpectation": true
+    },
+    {
+      "number": 6,
+      "case": "v2-complete-document-outcome",
+      "kind": "deterministic-local-fixture; no rollout host initialisation",
+      "command": [
+        "/usr/local/bin/python3",
+        "-I",
+        "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/preparations/2026-09-23-codex-routing-v2/pilot-verify-v2.py"
+      ],
+      "cwd": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-preparation-v2-2026-09-23/cases/v2-complete-document-outcome",
+      "head": "cc25585239f80174e690a62a304693fd65325b15",
+      "tree": "0deb9b8db260aa0f00d4d5f436393ce6b8c00c83",
+      "verifierSha256": "70535c8ac06464741a773df5f8fe1acfd63cecaaa58114db225e8fa12f2c535f",
+      "expectedExit": 0,
+      "expectedMode": "documents",
+      "status": "complete",
+      "exitCode": 0,
+      "stdout": "{\"head\": \"cc25585239f80174e690a62a304693fd65325b15\", \"mode\": \"documents\", \"status\": \"pass\", \"validatedPaths\": [\"docs/pilots/codex-routing/work-policy.md\", \"docs/pilots/codex-routing/review-policy.md\"]}\n",
+      "stderr": "",
+      "matchedExpectation": true
+    },
+    {
+      "number": 7,
+      "case": "v2-missing-work-contract-line",
+      "kind": "deterministic-local-fixture; no rollout host initialisation",
+      "command": [
+        "/usr/local/bin/python3",
+        "-I",
+        "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/preparations/2026-09-23-codex-routing-v2/pilot-verify-v2.py"
+      ],
+      "cwd": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-preparation-v2-2026-09-23/cases/v2-missing-work-contract-line",
+      "head": "de8ef1b778655644d745a3855902ddf7771855cd",
+      "tree": "c309a81f05650f6dae0dca16847c66b197ba7587",
+      "verifierSha256": "70535c8ac06464741a773df5f8fe1acfd63cecaaa58114db225e8fa12f2c535f",
+      "expectedExit": 1,
+      "expectedMode": null,
+      "status": "complete",
+      "exitCode": 1,
+      "stdout": "{\"error\": \"docs/pilots/codex-routing/work-policy.md: missing contract line: Requested, resolved and observed settings are recorded separately.\", \"status\": \"fail\"}\n",
+      "stderr": "",
+      "matchedExpectation": true
+    },
+    {
+      "number": 8,
+      "case": "v2-missing-review-contract-line",
+      "kind": "deterministic-local-fixture; no rollout host initialisation",
+      "command": [
+        "/usr/local/bin/python3",
+        "-I",
+        "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/preparations/2026-09-23-codex-routing-v2/pilot-verify-v2.py"
+      ],
+      "cwd": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-preparation-v2-2026-09-23/cases/v2-missing-review-contract-line",
+      "head": "651928f78ea43c6f7f4f34117bce2851473add78",
+      "tree": "62db6cea21d620e86fe8e8119f2d815eccf315a4",
+      "verifierSha256": "70535c8ac06464741a773df5f8fe1acfd63cecaaa58114db225e8fa12f2c535f",
+      "expectedExit": 1,
+      "expectedMode": null,
+      "status": "complete",
+      "exitCode": 1,
+      "stdout": "{\"error\": \"docs/pilots/codex-routing/review-policy.md: missing contract line: Native evidence must bind the request, independent child, exact reviewed commit and actual invocation.\", \"status\": \"fail\"}\n",
+      "stderr": "",
+      "matchedExpectation": true
+    },
+    {
+      "number": 9,
+      "case": "v2-deletion-after-completion",
+      "kind": "deterministic-local-fixture; no rollout host initialisation",
+      "command": [
+        "/usr/local/bin/python3",
+        "-I",
+        "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/preparations/2026-09-23-codex-routing-v2/pilot-verify-v2.py"
+      ],
+      "cwd": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-preparation-v2-2026-09-23/cases/v2-deletion-after-completion",
+      "head": "f5c7031076242e824f8d878c06b79c02c2158357",
+      "tree": "101cae5a3b6b369680521d35380b8b15f5974c19",
+      "verifierSha256": "70535c8ac06464741a773df5f8fe1acfd63cecaaa58114db225e8fa12f2c535f",
+      "expectedExit": 1,
+      "expectedMode": null,
+      "status": "complete",
+      "exitCode": 1,
+      "stdout": "{\"error\": \"docs/pilots/codex-routing/review-policy.md: required ordinary file missing\", \"status\": \"fail\"}\n",
+      "stderr": "",
+      "matchedExpectation": true
+    },
+    {
+      "number": 10,
+      "case": "v2-final-strict-same-command",
+      "kind": "deterministic-local-fixture; no rollout host initialisation",
+      "command": [
+        "/usr/local/bin/python3",
+        "-I",
+        "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/preparations/2026-09-23-codex-routing-v2/pilot-verify-v2.py"
+      ],
+      "cwd": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-preparation-v2-2026-09-23/cases/v2-final-strict-same-command",
+      "head": "2acd7c9584724d490c06b2bea6c41cb4aeef7b9d",
+      "tree": "d29dee5ae1b52733d41dbdc10df298978c2bf797",
+      "verifierSha256": "70535c8ac06464741a773df5f8fe1acfd63cecaaa58114db225e8fa12f2c535f",
+      "expectedExit": 0,
+      "expectedMode": "documents",
+      "status": "complete",
+      "exitCode": 0,
+      "stdout": "{\"head\": \"2acd7c9584724d490c06b2bea6c41cb4aeef7b9d\", \"mode\": \"documents\", \"status\": \"pass\", \"validatedPaths\": [\"docs/pilots/codex-routing/work-policy.md\", \"docs/pilots/codex-routing/review-policy.md\"]}\n",
+      "stderr": "",
+      "matchedExpectation": true
+    }
+  ],
+  "preservation": {
+    "originalPrivateFilesUnchanged": 49,
+    "originalPublicFilesUnchanged": 2,
+    "files": [
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/native-preflight.json",
+        "sha256": "26d4388efdb22fb18241677de65829cdeef5db0722605f7fd82f70622702b262"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/native-account.json",
+        "sha256": "efeefaba78125c138ba978d34d6cdf171f601b5a06d6b7935ea87c50c4457677"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/source-manifest.json",
+        "sha256": "933e286e77c3987da62db88ed00164e0ba2b09edd4531bd325e4155dd912aab0"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/routing-policy.json",
+        "sha256": "9bb12203c08d3fd9b3c9f35ab6d000ce4bfb02729aed0f96d5c3b66883c7a69d"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/prepared-requests.json",
+        "sha256": "281fd8ad34b560ec7e31fe6ddb4875823f6a45ecf8abfe6f77ecd5607bbf916e"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/local-conflict-fixture.json",
+        "sha256": "700fdb1be049df77d72bca1bd08c942dd38fd4e4a6f49a968c0bf301d203eaae"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/fixture.json",
+        "sha256": "05e35ff33e9f2f820f0c6766f0296d93d90177e8d8c53480c864520a256e4088"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/review-engine.json",
+        "sha256": "924efd24f2f6d0334e624e263e6c8622a463f67df6fdbb49370bcde64c0eb889"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/probe-spending.json",
+        "sha256": "b5c52a9a6b4b63171f6a4ad6351f4869a20b378669bc886b3744e74911c2e724"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/review-invocation-evidence.json",
+        "sha256": "f2332a44e53c42f52a5af4ee2b60ecf4a1092f355b94adddcbd430cacf58b4df"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/review-receipt.json",
+        "sha256": "5ec462181408e0d5bc2e8a675c9082a2d5c47fab042604e4606698bc0a435280"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/evidence-summary.json",
+        "sha256": "7e1a4687e69ad791bc48dd37ecbb25159c2e99d921f02a7624501ec72afcf39e"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/native-child-inventory.json",
+        "sha256": "f6f4ab7a66895a781883a42f173308c1f10e77d1641601f3aa91e9cf4461c5cf"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/resolver-tests.tap",
+        "sha256": "ca87f7e16bc14b9d7c36f65f15dd000dbd9e586a7992157e779e2b0291d0adfe"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/pilot-verify.py",
+        "sha256": "bfab12f1d3106bba2d9547bb5fad5c33a4279e23027dd6d2ee8b7249841b01b3"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/pilot-verifier-checks.json",
+        "sha256": "f83a1e13e3be3a99d6cf755d22c11d8223acd43e1a31205ab772f39898d14d55"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/probe-definitions.json",
+        "sha256": "c3fb985a529fe89bac6b18c49ef62174a9aee7a6fbcfd1ef48b4b52a0c417fd1"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/probe.workflow.js",
+        "sha256": "56c98bc90d3809234536b86e46d8a933c01414f6fa935cea517aa381ffd8c396"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/prepare.py",
+        "sha256": "75359b770a5123c44bc7c88f734afb2e302646d4dd557482f706921058790e8b"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/drive.mjs",
+        "sha256": "7a9c51c07b29a00c6fd4bb4cfc4485bce3032bfcf0b897a3e73deef1289e5dd4"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/collect.py",
+        "sha256": "6674c5a95d836e9e3029f91fa9696d0fa8744be57b85bf3ef485715a58246274"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/finalise-evidence.py",
+        "sha256": "71a6c4986732373c231366a9aa54f35c61f2cd0786da9a8f8b3c65bba51c6a47"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/publish-index.py",
+        "sha256": "69f38f16ff2e6db77c00954d5f88e151bc1f6e87a31b81013f446d704d89e11b"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/latest-status.json",
+        "sha256": "e27e7a38aa90840bb520ecdb759a4c784f970f62585976ee573d63de896247ec"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/easy-claim.json",
+        "sha256": "a0ef9522935c922af14455142fc56f8899d4f21d847e6a60d9d61d2823fa28cd"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/easy-native-receipt.json",
+        "sha256": "019298d47b0d4f907f6bd38ed789f31302a0bfa0b9a0fbde134ee3626046a690"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/easy-observation.json",
+        "sha256": "6750038fd44444bc660ee812be6ea44ee14458f48257a6f07a37f9363aa59a6f"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/easy-envelope.json",
+        "sha256": "6ccfc5aea9900bd0072fdf6a3ff6e2b8a2d99a1ecd68d68ee46ccc7320724f0a"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/easy-accepted.json",
+        "sha256": "4f33437fcea87619f7ca8dd0b1b4c943c971e5f490adcf3d14966bb550dca525"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/hard-claim.json",
+        "sha256": "a84f751aa0d8705d6614be34be9eecfc90278ae7ff66cf5f6777a08c1d68632c"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/hard-native-receipt.json",
+        "sha256": "fe2c96c30b5cde90abc46bdb12f617886d7d267c916b8e1e371df66e25307827"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/hard-observation.json",
+        "sha256": "cdc20e21f5c5912203e21353b94dd3ecb16ca023eeee51e0ab94a49fef89611e"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/hard-envelope.json",
+        "sha256": "7672e0a91de1b0864e5682032e13cd9e02de341bbb0681ec77550a9edc8b3cf8"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/hard-accepted.json",
+        "sha256": "d4188e17d8967cd611679f0ecec019c79b4644b8a7ee9db12497b7e75e725f19"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/review-claim.json",
+        "sha256": "daf43f466dfaa644c180fe56c6d0838fa01e6d00f43a981bcb3533c4d5d55198"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/review-native-receipt.json",
+        "sha256": "e290c99a048f4ba70fc04b7091b332f844f34288a3419e81561706a89cdabcda"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/review-observation.json",
+        "sha256": "98fdb0031827a6c8713f9a207cc758f702a5dcb4c23b27473e6458e7273d3d35"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/review-envelope.json",
+        "sha256": "c125274b8287caf6013dedd93195b48d74f642756e28809a11df32e06239e077"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/review-accepted.json",
+        "sha256": "958fb8db6c7e77b6737eff4fbed2ae55387e6327b28d43418b6e8c029ac83ce7"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/maximum-claim.json",
+        "sha256": "409bd23057f2c0d65371e57bba7dd8d56b089034b5267cb9f34d46b6b39e7288"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/maximum-native-receipt.json",
+        "sha256": "4b5f09c7ebae6e88b164c78cdb9cabc65b39ea3d283996aecbd2d142b08986f3"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/maximum-observation.json",
+        "sha256": "7731624df5ce73683704d005dd5caf9f0f15536e9673e061e8027ef3ef75a8ee"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/maximum-envelope.json",
+        "sha256": "6d15a9ac8dfdbf9f75fab50535bb3cc21a05e2cd5d018af8ddfc769eacbfcafe"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/maximum-accepted.json",
+        "sha256": "f632c10b1f8233d453ed5b2a904223f8a2f25c03ecbfbc212aeb2e76a5cc7cda"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/same_maximum-claim.json",
+        "sha256": "71bcc7fe16e24b09197bbbc4503e53638d4edcf038a3bb8765521ac8d030d549"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/same_maximum-native-receipt.json",
+        "sha256": "ab8ef67b85d93ed20e9ffa2a4919f33a8cba6a99e78a02ae4c6e20e425a553d4"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/same_maximum-observation.json",
+        "sha256": "bfbf66a1509b8132e548cea2da9f77759b11e0f0888b6531c83a4441c1a8f820"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/same_maximum-envelope.json",
+        "sha256": "0e486a16b0b2f458301e0ed964d0bbbfff5f564f6839bf5e359d30999c57785d"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/same_maximum-accepted.json",
+        "sha256": "0fed7f058c0b1f2380adb0c38b6a2a7afd12791515b0fee93493d5c28cd67c8d"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/implementation/2026-09-23-codex-routing-evidence.json",
+        "sha256": "e5a895ddc9c9547b16e60214f80ce50ec242b171eb3d1ff0e213bac022fb389f"
+      },
+      {
+        "path": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/implementation/2026-09-23-codex-routing-capability-report.md",
+        "sha256": "c12d9eb6ab72ae99273c5d3384c62bba1dca4b5e9ce99888c85091961bf062b7"
+      }
+    ]
+  },
+  "privatePreparationRoot": "/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-preparation-v2-2026-09-23",
+  "privatePreparationInputs": [
+    {
+      "path": "preservation-before.json",
+      "sha256": "4f28ba56ceb7193e0863d9dc72454da9a6520a6e91b7ef56a6c279a20e0f82f0"
+    },
+    {
+      "path": "invocations.json",
+      "sha256": "6a25f365d06c5548297bb6c24b0db8a18cb58a384a4fdf46f8b5683df9273d85"
+    },
+    {
+      "path": "check-cases.py",
+      "sha256": "d39f7af4b7eea7ef12419f0deeb0840f020a71de91f9eec58d732f8d769b3718"
+    }
+  ],
+  "limits": [
+    "No actual host verifyTask or idempotent replay run; source contract inspected only.",
+    "One task with both documents does not prove two-task dependency release.",
+    "Symlink guards were not separately exercised within the allowance.",
+    "Independent review of this correction is assigned to the coordinator existing reviewer."
+  ]
+}

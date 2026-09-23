@@ -1,139 +1,174 @@
-# Proposed two-task Codex routing pilot
+# Revised Codex routing pilot preparation
 
-Prepared 23 September 2026 after the
-[bounded native capability check](2026-09-23-codex-routing-capability-report.md).
-**Proposal only: no rollout, pilot branch, PR, schedule or merge has been
-initialised.** A separate launch agreement must cover the concrete terms below.
-This does not reuse historical pilot approvals or any remaining probe allowance.
+Revised 23 September 2026 after independent review of the original proposal.
+**The original two-task split is withdrawn.** The supported alternative below
+uses **one task that delivers both documents**. It is prepared for independent
+review, not authorised to launch. If a two-task rollout remains mandatory, this
+preparation is incomplete; do not present the alternative as a two-task pilot.
+
+No rollout, pilot branch, PR, automation or merge has been initialised. The
+[completed capability report](2026-09-23-codex-routing-capability-report.md),
+[original evidence index](2026-09-23-codex-routing-evidence.json) and all 49
+private evidence files are unchanged. The separate correction has its own
+[preparation evidence](2026-09-23-codex-routing-preparation-v2.md).
+
+## Why the task shape changes
+
+The canonical host runs one immutable `repository.verifier` command for baseline,
+candidate, integrated and supplementary verification. It passes no task ID,
+verification purpose or stage to that command. `verifyTask` accepts an operation
+ID, exact commit and purpose; it cannot append `--require work/all` or substitute
+a different verifier. The original baseline also lacked both documents, so its
+default verifier failed before task A could start.
+
+A work-only commit must be valid after the original task A, yet invalid as the
+claimed final result if task B is missing. Running the same command against that
+same repository state cannot produce both answers without an additional trusted
+stage input. A mutable marker, branch-name convention or missing-file exemption
+does not establish the intended stage. No such runtime capability is added here.
+
+Instead, the exact pristine seed commit is the valid pre-work baseline. Every
+other commit must contain both complete document contracts. The original work-only
+intermediate state is deliberately rejected. Combining the outcomes into one
+task removes the need for task-specific commands while preserving strict final
+verification. This alternative does not exercise dependency release between two
+tasks; that acceptance promise remains open.
 
 ## Repository, base and effects
 
-Use `github.com/lachyts/thread-skill` with a new isolated checkout. Create the
-remote pilot target branch `codex/routing-pilot-2026-09-23` from exactly
-`89a7ff1d409554f5442b548c967408f24bfa27a4`. That branch does not yet exist as a
-result of this proposal. The launch agreement must explicitly permit publishing
-that pinned candidate history to the pilot branch, creating two PRs and merging
-them automatically into that branch. Do not target the default branch.
+Use `github.com/lachyts/thread-skill` in a new isolated checkout. The proposed
+remote target branch remains `codex/routing-pilot-2026-09-23`, created from exactly
+`89a7ff1d409554f5442b548c967408f24bfa27a4`. No such branch was created here.
+The separate launch agreement must cover publishing that pinned candidate
+history, opening **one** PR and automatically merging it only into that pilot
+branch. Do not target the default branch or force an existing divergent branch.
 
-The two PRs add only the two documentation files listed below. No runtime source,
-installed skill, profile, vault task schema or application is changed by their
-merges. The pinned base has no tracked `.github` workflow. Repository rules,
-current remote refs and external integrations still require read-only launch
-preflight; an unexpected deployment or publication effect stops launch. Nothing
-may be force-pushed, reset or deleted to obtain this base. An existing divergent
-target branch requires a revised agreement.
+The PR may add only:
 
-Use the source-local candidate runtime and shared adapter/resolver/policy commits
-from the capability report. Pin them into a new private execution directory;
-do not globally install them. Preserve the original source worktrees and all
-historical execution directories.
+- `docs/pilots/codex-routing/work-policy.md`
+- `docs/pilots/codex-routing/review-policy.md`
 
-## Two outcomes
+Its merge changes no runtime, installed skill, profile or application. The pinned
+base has no tracked `.github` workflow. Read-only launch preflight must still
+check remote refs, account, repository rules and external effects; unexpected
+deployment or publication effects stop preparation. No network preflight was
+performed during this bounded correction.
 
-| Task | Exact writable path | Required outcome | Dependency |
-| --- | --- | --- | --- |
-| A — work policy | `docs/pilots/codex-routing/work-policy.md` | Explain the verified `gpt-6-astra` bindings: easy high, difficult xhigh and maximum ultra; distinguish requested, resolved and observed settings; state that no recovery alternative is configured and maximum probes did not prove a failed correction ladder. Cite the capability report by its committed source reference. | None |
-| B — review policy | `docs/pilots/codex-routing/review-policy.md` | Explain `review-agent` at the xhigh floor, clean child context, exact reviewed commit, host-observed invocation and evidence, and its single pass. State that model self-report is insufficient and that Thread host receipt capture is a separate gate. Cite the capability report by its committed source reference. | A merged and integrated verification passed |
+Pin the source-local runtime, shared adapter, resolver and policy commits from
+the capability report into a new execution directory. Do not install them
+globally or change the source worktrees or historical execution records.
 
-Both are narrow documentation tasks, difficulty easy, with `planGate: false`.
-Only their named file is writable by each implementer. An independent native
-built-in reviewer checks each exact head against its complete required outcome.
-The reviewer must not approve solely because a phrase checker passes.
+## One complete outcome
 
-## Exact verification
+Task `routing-policy-documents` owns both named paths, is a narrow documentation
+task, has difficulty easy and `planGate: false`. It must deliver both documents
+in its candidate head. Its writable scope is exactly those two files.
 
-The prepared external verifier is
-`/Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/pilot-verify.py`.
-Its SHA-256 is recorded in the public evidence index. It imports Python standard
-library modules only, reads the two target paths relative to the checked-out
-repository and writes no files. It rejects missing required files, symlinks and
-missing contract phrases. It is a mechanical check, not a truth or prose-quality
-assessment.
+The work document explains Astra's verified high/xhigh/ultra bindings, separates
+requested/resolved/observed settings, records the absent recovery alternative
+and states that direct maximum probes do not establish a correction ladder.
+The review document explains the xhigh floor, clean independent child, exact
+reviewed commit and invocation evidence, single-pass engine, insufficiency of
+model self-report and separate Thread host receipt-capture gate.
 
-Repository verifier, with its working directory set to the exact candidate or
-integrated repository checkout:
+Both documents must contain the exact contract lines in `REQUIRED_LINES` in the
+candidate verifier. Those lines include the immutable capability report reference
+at commit `8c5980bb0339310f537488bf4cfde599da1e6e07`. Explanatory prose may be added.
+The independent native built-in reviewer checks the complete required outcome,
+the prose's factual accuracy and absence of contradiction at the exact head;
+passing mechanical line checks is not a substitute for review.
+
+## One fixed verifier, including the final check
+
+The separately versioned candidate is
+[pilot-verify-v2.py](../preparations/2026-09-23-codex-routing-v2/pilot-verify-v2.py).
+Use this exact command at every host verification point, with cwd set to the
+candidate or integrated repository root:
 
 ```text
-python3 -I /Users/lachlants/.codex/worktrees/5c5a/thread-skill/.thread/codex-routing-capability-2026-09-23/pilot-verify.py
+python3 -I /Users/lachlants/.codex/worktrees/5c5a/thread-skill/docs/preparations/2026-09-23-codex-routing-v2/pilot-verify-v2.py
 ```
 
-Declare that absolute script as the sole external `repository.verifierInputs`
-entry; hash and realpath-bind it before launch and before/after every verifier.
-The repository inputs are the two Markdown files at the exact verified commit.
-No live home/session files, Reader paths, network calls or metered model helpers
-are verifier inputs. Use the installed Python 3 executable resolved at launch
-and record its version/path with the verifier command.
+Declare that absolute file as the sole external `repository.verifierInputs`
+entry. Its exact SHA-256 is in the new preparation evidence and results index.
+The host must bind its realpath and bytes before launch and check drift before
+and after each verification. Pin the resolved Python and Git executable paths
+and versions in launch evidence. The script uses Python's standard library and
+local Git only, reads the candidate checkout, and writes no files. No stage
+argument, environment flag or mutable helper selects its acceptance rule.
 
-Task A additionally runs the same command with `--require work`; task B uses
-`--require all`. The independent reviewer checks those exact acceptance results.
-After both merges, reserve one supplementary check from B's existing pool and
-run `--require all` at the final integrated commit. Use the stable operation ID
-`codex-routing-pilot-final-documents-v1`; exact redelivery must reuse its stored
-result. Each distinct command invocation consumes a verifier reservation,
-including supplementary checks and repeats not covered by idempotent replay.
+The verifier requires a clean repository rooted at cwd and descended from the
+pinned baseline. At the exact baseline commit it requires the pilot directory
+to be absent and emits `mode: baseline`. At every other commit it requires both
+ordinary Markdown files and every contract line, and emits `mode: documents`.
+The same tree in a new empty commit does not acquire the baseline exemption.
+Missing documents, removed clauses and later deletion fail. Symlink directory
+components or document files are rejected; that guard was source-inspected,
+not separately exercised within the ten-invocation allowance.
 
-The default verifier accepts A alone and checks every pilot file present, so A
-can merge before B exists. It fails when neither document exists. B's complete
-acceptance requires both documents, independently of that incremental mode.
-Local scratch cases verify these modes; no pilot task has executed.
+After the one PR merges, obtain the exact integrated commit from its merge
+receipt. Use the supported `verifyTask` operation under the **same task's** pool:
 
-## Native routing and finite allowance
+```json
+{
+  "operationId": "codex-routing-pilot-final-documents-v2",
+  "commit": "<exact integrated commit from the run-owned merge receipt>",
+  "purpose": "Confirm both complete routing policy documents at the final integrated commit"
+}
+```
 
-Reconfirm the actual pilot session retains `gpt-6-astra`; do not change the model
-silently. Prepare its native capability snapshot again at launch. Work starts
-high; independent review starts xhigh. A substantive correction uses supported
-maximum ultra. Set recovery to null because no alternative is configured.
-Preserve all observations and built-in receipts through host acceptance.
+The launch driver must substitute that observed full commit SHA, not the seed
+commit or a guessed ref. The host reserves one verifier run and executes the
+unchanged configured command. Require exit 0, output `mode: documents`, output
+head equal to the operation commit, and the operation commit equal to the
+run-owned integrated merge receipt. The initial baseline's green result cannot
+satisfy those conditions. Exact redelivery of this operation returns the stored
+result without another reservation; a changed commit or purpose is a conflict.
+No `--require` command, extra unreserved check or runtime modification is used.
+This is a supported future host path, not a claim that live host idempotency or
+merging was tested during preparation.
 
-| Pool | Calls | Verifier runs | Ownership recoveries |
-| --- | ---: | ---: | ---: |
-| A | 8 | 8 | 1 |
-| B | 8 | 8 | 1 |
-| Total | 16 | 16 | 2 |
+## Routing, spending and recovery
 
-Use at most two live children. Set `maxIterations: 2` and `maxReviewRounds: 2`;
-no plan round is needed. These pools exceed the candidate host's no-recovery,
-ungated minimum of four calls and four verifier reservations per task. They are
-finite headroom, not permission to exceed round limits. Every attempted child
-dispatch spends a call, including refusal; every reserved verification remains
-spent on failure or interruption. Permit at most one same-child formatting
-correction per stage. No delegation from review or work children and no added
-budget, alternative model, paid external API or account switch.
+Reconfirm the launch session's actual `gpt-6-astra` selection and supported
+efforts. Work begins high, independent review xhigh, and a substantive correction
+uses maximum ultra. Set recovery to null; do not invent another model binding.
+Record actual native observations and built-in receipts through host acceptance.
 
-A correct first implementation does not prove a correction ladder. Do not plant
-a new defect or relabel interruption as a quality failure merely to obtain that
-claim. An actual substantive failure, if one occurs within these pools, must
-follow the pinned maximum-first policy.
+The single task has **8 calls, 8 verifier runs and 1 ownership recovery**. These
+replace the withdrawn two-task pools rather than adding to them. Set
+`maxIterations: 2`, `maxReviewRounds: 2`, at most two live children and no plan
+round. The pool exceeds the candidate host's ungated no-recovery minimum of four
+calls and four verifications. All attempted dispatches and reserved verifications
+remain spent on failure or interruption; the final supplementary check uses
+this same pool. Permit at most one same-child formatting correction per stage.
+No descendants, account switching, external model processes or added allowance.
 
-## Required ownership recovery and continuation
+Bind a verified non-secret native account label at execution creation. During
+the task, perform exactly one controlled transfer while a real child is
+dispatched. Establish that the prior owner stopped, observe the child's identity
+and state, then recover the same execution on the same account with a new
+ownership epoch. Preserve requests, receipts and spending. Missing stop/child
+evidence leaves recovery incomplete and does not authorise replacement work.
 
-Bind the new execution to a verified non-secret native account label at initial
-creation. During task A, perform exactly one controlled owner transfer while an
-actual native child is dispatched. Obtain native evidence that the old owner
-has stopped and establish the child's real identity and running/terminal state.
-Recover the same execution in a fresh native task on the same account, increasing
-the ownership epoch and preserving every request, result, review receipt and
-spent reservation. A timeout or missing transcript is not stopped-owner proof.
-If the native interface cannot establish the required state, stop and report
-that slice incomplete; do not launch replacement work.
+The separate agreement may include a replacement native task and a quiet
+five-minute heartbeat, notifying only on meaningful progress, completion,
+failure or required user action. Rebind continuation on transfer without
+duplicate dispatch and end it on completion or exhaustion. None is created now.
 
-The separate agreement should include creation of the replacement native task
-and a quiet five-minute thread heartbeat for session continuation. Notify only
-on meaningful progress, completion, failure or required user action. Any owner
-transfer must rebind continuation to the new owner without duplicate dispatch.
-End the heartbeat when complete or exhausted. No automation is created now.
+Success for this reduced pilot requires one exact-head built-in review accepted
+by Thread, one pilot-branch merge, integrated and reserved final strict
+verification, one evidence-backed ownership recovery and preserved spending.
+It makes no claim about two-task prerequisite release or a genuine correction
+ladder unless separately observed. Task 1 remains coordinator; historical task 3
+and all old allowances stay untouched.
 
-Success requires both exact-head built-in review receipts accepted by the
-Thread host, two merges only to the named pilot branch, integrated verification,
-one evidence-backed ownership recovery, cumulative spending preserved, and a
-final report separating actual continuation from ordinary in-turn progress.
-The coordinator remains task 1; historical task 3 and its allowances stay closed.
+## Remaining agreement boundary
 
-## Launch agreement still needed
-
-Before requesting launch approval, the coordinator must present this proposal
-with the immutable capability-report commit reference, recheck the remote
-branch/account/effects and confirm the verifier bytes. The user's exact response,
-the proposal it covers and its native message reference become the new
-authorisation record. Until then, this proposal authorises no external changes,
-live rollout initialisation, task filing, scheduling or merges.
+The coordinator must independently review this correction and explicitly retain
+or reject the one-task shape. If the intended acceptance check requires two
+independently merged tasks, the original verifier-stage constraint remains
+unresolved; do not launch the original split or count this as satisfying it.
+Before any launch request, recheck remote/account/effects and verifier bytes,
+then present the revised outcome, one-PR merge effects and finite pool. Preserve
+the user's exact new authorisation, covered proposal and native message source.
