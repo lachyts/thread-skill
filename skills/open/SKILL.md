@@ -43,7 +43,7 @@ State comes from each file's frontmatter `state:` field. Skip threads with `stat
 1. Look for existing thread:
    - `~/repos/workspaces/_shared/threads/<slug>.md`
    - `find ~/Projects -name THREAD.md` and grep frontmatter `slug: <slug>` matches.
-2. If found → read the file, present a 4–6 line briefing (scope, state, where-we-are headline, top open question), and continue the conversation with that context loaded. If its Resume instructions point at a handoff doc (`Read <home>/docs/handoffs/<doc> first`), read that too and **mark it consumed** — set `status: consumed` in its front matter, no commit — exactly as the handoff-doc pickup below does; the thread is live again and `thread:close` will delete the doc. If the file is gone (its consumer's close deleted it and the pointer was never rewritten), say so in one line and brief from THREAD.md alone — `git log --all -- '<path>'` recovers the text if it matters.
+2. If found → read the file, present a 4–6 line briefing (scope, state, where-we-are headline, top open question), and continue the conversation with that context loaded. If its Resume instructions point at a handoff doc (`Read <home>/docs/handoffs/<doc> first`), read that too and, when it is pending, **mark it consumed** — set `status: consumed` in its front matter, no commit — exactly as the handoff-doc pickup below does (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Pickup), then apply `handoff-lifecycle.md` § Thread state's pickup row; the thread is live again and `thread:close` will delete the doc. If the file is gone (its consumer's close deleted it and the pointer was never rewritten), say so in one line and brief from THREAD.md alone — `git log --all -- '<path>'` recovers the text if it matters.
 3. If not found → confirm with the user, ask for the scope (one line), then create the file from the canonical template with frontmatter populated. New shared threads also get appended to `INDEX.md`.
 
 ### `/thread:open [[<task>]]` — pick up a stashed/deferred capture
@@ -51,17 +51,17 @@ State comes from each file's frontmatter `state:` field. Skip threads with `stat
 The pickup half of the stash/defer loop (see `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md`). Accepts a wiki-link, a slug, or a path under `~/repos/obsidian/Work/Tasks/`.
 
 1. Read the task file. Prime from its `## Notes` summary and `## Resume prompt` — treat the prompt's context/read-first/next-move as the working brief.
-2. Read the linked `THREAD.md` if the task has one; brief from both.
+2. Read the linked `THREAD.md` if the task has one; brief from both, and apply `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state's pickup row to it (a `parked` or `paused` thread goes `active`).
 3. **Complete the capture**: set `status: done`, add `completed: <today>` in the task file. The capture's job ended the moment this thread went live — if the work gets set down again later, a fresh capture is written (dedup finds no open task).
 4. Confirm in one line: `Picked up [[<slug>]] — capture closed. Next move: <from the prompt>.` Then get on with the work.
 
 ### `/thread:open <path-to-handoff-doc>` — pick up a handed-off thread
 
-The pickup half of the handoff loop (`${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` § Lifecycle). Accepts a path under a `docs/handoffs/` directory.
+The pickup half of the handoff loop (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md`). Accepts a path under a `docs/handoffs/` directory.
 
 1. Read the doc. Prime from its § What remains, § Decisions settled and § Gotchas; its § Paste-ready prompt is the working brief.
-2. Read the linked `THREAD.md` if the doc's `thread:` names one; brief from both.
-3. **Consume it**: set `status: consumed` in the doc's front matter, in place, with no commit. The consuming session's `thread:close` deletes the file in its close-out commit; git history keeps it. A doc with no `status:` line is legacy — brief from it, but leave it untouched.
+2. Read the linked `THREAD.md` if the doc's `thread:` names one; brief from both, and — for a pending doc — apply `handoff-lifecycle.md` § Thread state's pickup row to it.
+3. **Consume it**: set `status: consumed` in the doc's front matter, in place, with no commit. Deletion is the consuming session's close (`handoff-lifecycle.md` § Close-out); a legacy doc is briefed from but left untouched (`handoff-lifecycle.md` § States).
 4. Confirm in one line: `Picked up <doc> — marked consumed. Next move: <from the prompt>.` Then get on with the work.
 
 ### `/thread:open save` — checkpoint without closing
@@ -95,13 +95,13 @@ Body sections from the template; mostly empty placeholders that fill in over tim
 
 ## Index updates (shared threads only)
 
-When a shared thread is created or its state changes, update `_shared/threads/INDEX.md`:
+On a shared thread's creation and on every `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state transition (including one that leaves `state:` unchanged), update `_shared/threads/INDEX.md`:
 
 ```markdown
 - [<slug>](<slug>.md) — <one-line scope>  · state: <active|paused|parked|done> · last: <YYYY-MM-DD>
 ```
 
-Group by state in the index — Active first, then Paused, then Done at the bottom. Project threads are NOT indexed in `_shared/threads/INDEX.md` — they're discovered by walking `~/Projects/`.
+Group by state in the index — Active, Paused, Parked, Done, in that order; which route moves a line where is `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state. Project threads are NOT indexed in `_shared/threads/INDEX.md` — they're discovered by walking `~/Projects/`.
 
 ## Don't
 
