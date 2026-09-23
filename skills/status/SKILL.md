@@ -72,9 +72,16 @@ Cross-check cheaply and flag **drift**:
     next execute via `mark-done`; `review-blocked` → genuine drift, needs `/thread:repair` to reconcile → done.)
   - note `review-blocked` but PR **OPEN with checks now green** → may already be fixed; flag for a retry.
   - note `blocked`/`plan-blocked` carrying an open PR → unusual; surface it.
+  - note `in_progress`/`open` but PR **MERGED** → *stranded merge*. `resume-filter` still counts it as
+    to-dispatch, so any resume would re-run merged work. `/thread:repair` escalates it; protocol 3 has
+    no sanctioned path to done. The flag reads `state` from the per-task `gh pr view` above (no extra
+    call). Only tasks carrying `pr:` can be flagged: a stranded task with no `pr:` is invisible here,
+    because a `gh pr list --head` search would break the one-call budget.
 
 Keep it to one `worktree list` + one `gh` call per PR'd task. On `--offline`, skip this step entirely and
-say the report is vault-only.
+say the report is vault-only. Offline, stranded merges are invisible: `mark-done` never clears `owner:`
+(only `defer` does), so a reverted or clobbered done note still carries `owner:` + `pr:` and reads as
+in flight. Any resume or reinstate recommendation made offline must say so (§ 4).
 
 ### 4. Render the situational report
 
@@ -92,8 +99,13 @@ Wave 3  ◦ not started
 
 Drift:
   ⚠ [[task-d]] PR #43 is MERGED on origin but note says review-blocked → /thread:repair reconciles to done
+  ⚠ [[task-x]] PR #44 is MERGED but note says in_progress → stranded merge; /thread:repair escalates
 
 Recommended next action: <one line>
+
+(a wave whose run is live renders instead as:)
+Wave 2  ~ in flight (owner execute-2026-09-23-95fc34e2)
+  [[task-c]]   in_progress  owner execute-2026-09-23-95fc34e2
 ```
 
 Group by wave; within a wave list each task with status, PR (+ live state), and — for any blocker — the
@@ -113,14 +125,58 @@ a rollout*), so unlanded tasks behind it are "waiting for reinstate", not blocke
 `pause_requested` is true (stamp not yet written), report "pause pending — the in-flight wave finishes +
 merges, then the rollout pauses at the wave boundary."
 
+**A wave in flight renders as in flight, not stalled.** The base condition: wave K has at least one task
+that is `in_progress`, carries an `owner:`, and is not flagged as a stranded merge (§ 3). The status JSON
+doesn't carry `owner:`, so read it from the note itself:
+`grep -m1 '^owner:' ~/repos/obsidian/Work/Tasks/<slug>.md`. On `--offline` the stranded-merge exclusion
+can't run (§ 3 is skipped), so an offline "in flight" may be a stranded merge: say so.
+
+- **Confirmed** — `Wave K  ~ in flight (owner <tag>)`: the base condition holds, and `timeline.waves[]`
+  entry K has `dispatched` set and `merged` null.
+- **Hedged** — `Wave K  ~ possibly in flight (owner <tag>)`: the base condition holds and either (a)
+  `timeline` is null, or (b) `timeline` is non-null but wave K's `dispatched` is null. (b) is the race
+  window: execute § 4.5 step 1 stamps `in_progress` and `owner:` before `mark-dispatched` writes
+  `wave_K_dispatched`.
+
+List each such task as `in_progress  owner <tag>`, and render the tag verbatim — it is free-form
+(`execute-<date>-<id>`, `cc-…`, older prose tags), never parsed. When wave-K tasks carry more than one
+distinct tag, list every one.
+
+**Owner-session qualifier.** A Workflow run is listed in `/workflows` only in the session that launched
+it, and the `owner:` tag names that session. "No run in `/workflows`" counts as evidence of a stall only
+when it was checked **in that owner session**, or that session is known to have ended (every owner
+session, when there are several tags). From any other session, status cannot tell live from stalled: say
+so, and recommend checking the owner session first. In continuous mode, while the owner session is
+alive, its heartbeat cron re-enters the resume on a genuine stall (`--gated` and single-wave runs have no
+heartbeat, and a closed terminal stops it — execute § 8); another session resumes only once the owner
+session has ended.
+
 Then **one** recommended next action:
 
 - `paused` stamped → "reinstate with `/thread:execute [[<rollout>]]`" (never `/thread:repair` — a pause
-  needs no repair; only recommend repair for drift that is independent of the pause, and say so).
+  needs no repair; only recommend repair for drift that is independent of the pause, and say so). If the
+  Drift block flags a stranded merge, recommend `/thread:repair [[<rollout>]]` instead: reinstate is a
+  cold resume, and its `resume-filter` would re-dispatch the merged task. Repair escalates it; reinstate
+  only once it is cleared.
 - all tasks `done` → "rollout complete — run the completion ceremony" (or "already archived").
+- wave K in flight or possibly in flight (tasks `in_progress` with an owner, wave not merged) → "wait for
+  the run; don't resume from here." Check `/workflows` **in the owner session** (`<owner tag>`). If a run
+  is visible there, wait. If no run shows there, or that session is known to have ended,
+  `/thread:execute [[<rollout>]]` resumes from the cursor, unless the Drift block flags a stranded merge:
+  then recommend `/thread:repair [[<rollout>]]`, never the resume. Checked from any other session, "no
+  run" proves nothing — check the owner session first. On `--offline`, add: "stranded merges are
+  invisible offline; re-run with the live check before resuming".
+- any stranded merge (Drift block) → "run `/thread:repair [[<rollout>]]`: it stops and escalates the task
+  for your decision. Never resume, because `resume-filter` would re-dispatch the merged task."
 - approved PRs awaiting merge / cursor behind → "re-run `/thread:execute [[<rollout>]]` to merge & continue".
 - any blocker or drift → "run `/thread:repair [[<rollout>]]`".
 - nothing dispatched yet → "run `/thread:execute [[<rollout>]]` to start".
+
+The list is first-match, with one precedence rule: a stranded merge in the Drift block overrides every
+item that would recommend `/thread:execute` (reinstate, resume or start) — the recommendation becomes
+`/thread:repair [[<rollout>]]`. While a wave is in flight, any flag in the Drift block, stranded merges
+included, still goes to `/thread:repair` once the run has ended. Any resume or reinstate recommended from
+an `--offline` report carries the offline caveat above.
 
 Keep the whole report scannable — it's a glance, not a wall of text.
 
@@ -142,3 +198,7 @@ polling a finished rollout. The loop watches and recommends; it never triggers `
 - **Don't parse the rollout's markdown wave table** for the task list — use the `status` subcommand's
   glob-by-backlink (it catches read-only tasks the table/`## File-sets` block omit).
 - **Don't make more than one `gh` call per PR'd task.** Status is a glance; keep it cheap.
+- **Don't recommend a resume against a wave that is in flight or possibly in flight** unless the owner
+  session, checked there, shows no run or has ended, and no stranded merge is flagged. Otherwise point at the owner
+  session's `/workflows`, or at `/thread:repair`. Offline, qualify any resume: stranded merges are
+  invisible there.

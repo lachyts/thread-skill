@@ -11,9 +11,11 @@ mechanics, and asks you only the decisions no agent can make.
 
 It is a **conductor**, not an engine (see `docs/adr/0004-repair-is-a-conductor-not-an-engine.md`). The
 execute engine's worktree setup is already idempotent on re-dispatch and `resume-filter` already
-re-attempts blocked tasks — so repair **reuses execute's resume** and adds only the three things
-re-running execute can't do: reconcile **drift**, inject an **input-gated** decision, and **defer** a
-wedged task. It never re-implements merge or convergence, and **the engine keeps sole merge authority**.
+re-attempts blocked tasks — so repair **reuses execute's resume** and adds only what re-running execute
+can't do: reconcile **drift**, inject an **input-gated** decision, **defer** a wedged task, and **stop and
+escalate** a stranded merge (a task whose PR merged while its note says `in_progress`/`open`, which a
+resume would re-dispatch). It never re-implements merge or convergence, and **the engine keeps sole merge
+authority**.
 
 ## Native runtime binding
 
@@ -53,15 +55,31 @@ repairing.
 a rollout*) — do not conflate them:
 
 - `paused:` stamp → the rollout is deliberately paused; its unlanded tasks are waiting for reinstate,
-  not wedged. Say so, point at `/thread:execute [[<rollout>]]` to reinstate, and stop.
+  not wedged. Say so, point at `/thread:execute [[<rollout>]]` to reinstate, and stop — unless a
+  stranded-merged task exists: reinstate is a cold resume whose `resume-filter` would re-dispatch it, so
+  escalate it (3c) and don't point at reinstate until it is cleared.
 - `pause_requested:` only (no stamp) → the rollout is still **live and mid-wave**; the pause takes
   effect at the next wave boundary. Report "pause pending — takes effect at the next wave boundary,
   nothing to do" (matching status's rendering) and stop. There is nothing to reinstate, and **never
   recommend re-invoking `/thread:execute` against a live run** — the running loop honours the flag itself.
 
-In either case, continue into repair only for something genuinely independent of the pause (e.g. drift —
-a PR merged out-of-band before the pause) and the user confirms; even then, **never clear the pause
-stamp or the pending flag, and never resume** — reinstate belongs to `/thread:execute`.
+**A wave in flight is not stuck either.** When status reports wave K in flight or possibly in flight
+(tasks `in_progress` with an `owner:`, wave not merged), report it with the owner tag(s) and stop — never
+hand a live wave to execute's resume. Workflow runs are listed in `/workflows` only in the launching
+session, which the `owner:` tag names. An empty `/workflows` means a stall only when checked **in that
+owner session**, or when that session is known to have ended; only then does the resume belong to
+`/thread:execute [[<rollout>]]` (execute § 4.5), and only if no stranded-merged task exists. From any
+other session, report "possibly live — check session `<owner tag>` first" and stop without resuming.
+
+**Stranded merges come first.** While any stranded-merged task remains (§ 2), repair escalates it (3c)
+and points at neither reinstate nor resume until it is cleared — whatever the pause or in-flight state,
+and whichever wave the task sits in: a stranded task in a wave past the cursor would be re-dispatched by
+either.
+
+In any of these cases, continue into repair only for something genuinely independent of the pause or the
+running wave (e.g. drift — a PR merged out-of-band before the pause) and the user confirms; even then,
+**never clear the pause stamp or the pending flag, and never resume** — reinstate belongs to
+`/thread:execute`. A stranded merge found in that state is still only escalated (3c).
 
 ### 2. Classify each non-landed task
 
@@ -71,6 +89,7 @@ For every task whose note status is not `done`, classify from its `blockerSummar
 |---|---|---|
 | **landed-unconfirmed** | `review` with an open PR | none here — execute's resume merges + `mark-done`s it |
 | **drift** | `review-blocked`/`blocked` whose PR is verified **MERGED** | reconcile to done now (step 3a); never re-dispatch |
+| **stranded-merged** | `in_progress`/`open` whose PR is verified **MERGED** | **STOP and escalate (step 3c).** Never `resolve` (it refuses). Never `mark-done` (review only). Never defer (it would return merged work to the backlog as `open`). Never hand the task to execute's resume (`resume-filter` would re-dispatch it on top of the merged result). |
 | **agent-fixable** | `blocked`/`plan-blocked`/`review-blocked`, PR not merged, feedback an agent can act on (test failure, missed case, concrete review note) | auto-retry via execute (step 4), no user input |
 | **input-gated** | feedback signals a human decision — "human-decided", "supplied out-of-band", "needs a value", "ambiguous", "design choice" | ask you + inject (step 3b) |
 
@@ -93,13 +112,36 @@ the placeholder in place, or append/update a `## Repair input` section with the 
 lead session owns this edit; keep it deterministic (Edit the note directly — it's body content, not a
 status transition).
 
+**3c — stranded-merged → escalate with evidence (interim guard, E2E 2026-09-23 verb 7).** A task at
+`in_progress`/`open` whose PR already merged has no sanctioned transition in protocol 3: `resolve` accepts
+only blocked states, `mark-done` only `review`, and `resume-filter` would re-dispatch it. For each one,
+show the user:
+
+1. the slug, the note's `status:` and `owner:`, and `pr:`;
+2. `gh pr view <pr> --json state,mergedAt,mergeCommit,baseRefName`;
+3. whether the merge commit is on origin's default branch — `git -C <repoPath> fetch origin`, then
+   `git -C <repoPath> merge-base --is-ancestor <mergeCommit.oid> origin/<default branch>` (resolve the
+   default branch with execute § 4's resolver);
+4. `git -C ~/repos/obsidian log -p -n 3 -- Work/Tasks/<slug>.md` — a committed `status: done` version
+   means the note was reverted or clobbered, and restoring it is the clean fix (say so if there is none).
+
+Then append a dated one-line record to the rollout note's `## Notes` section (create it if missing),
+e.g. `- <YYYY-MM-DD> repair: [[<slug>]] PR #<n> stranded merge (MERGED, note in_progress) escalated;
+evidence shown; decision left to the user.` It is body content, not a status transition — the same class
+of edit as 3b — and it is what the completion log later carries (§ 6). Then offer only: *you restore or
+set the note yourself, then re-run repair* / *leave it*. Repair never writes that task's status. 3a/3b
+may still run for other tasks, but steps 4 and 6 do not run while any stranded-merged task remains. The
+real fix is held for protocol 4 — `resolve` accepting a verified-merged `in_progress` task (e.g. behind a
+`--merged-pr` guard); lift this guard when that lands.
+
 ### 4. Auto-retry the agent-fixable + just-injected tasks (hand off to execute)
 
-These re-dispatch through the **existing** engine — do **not** write a new loop. Follow
-`/thread:execute` §4.5 (the continuous per-wave resume): compute the still-to-dispatch set with
-`reconcile-wave.py resume-filter`, run the Workflow one wave at a time, merge each wave with
-`merge-wave.sh`, advance the cursor, `mark-done`. The re-dispatched agent reads the prior
-`## Review-blocked feedback` / `## Blocker diagnosis` / `## Repair input` from the note.
+Not while any stranded-merged task remains (3c): stop there instead. These re-dispatch through the
+**existing** engine — do **not** write a new loop. Follow `/thread:execute` §4.5 (the continuous
+per-wave resume): compute the still-to-dispatch set with `reconcile-wave.py resume-filter`, run the
+Workflow one wave at a time, merge each wave with `merge-wave.sh`, advance the cursor, `mark-done`. The
+re-dispatched agent reads the prior `## Review-blocked feedback` / `## Blocker diagnosis` /
+`## Repair input` from the note.
 
 **Leash (Decision: auto-retry, cap one):** retry each agent-fixable/just-injected task **once** per
 repair run. If a task blocks **again** after its retry, **stop retrying it** — surface it to the user
@@ -128,11 +170,15 @@ When the user opts to defer a task (or declines further retries on a re-blocked 
 
 ### 6. Resume to completion + log
 
+Not while any stranded-merged task remains (3c): the completion loop runs execute's resume, which would
+re-dispatch it. Stop and escalate instead.
+
 Continue execute's per-wave resume until the last wave merges (or it legitimately halts on a red
 required check / smart-halt — same stop conditions as execute). Execute's **completion ceremony** then
 runs on the (possibly reduced) task set. Ensure the rollout's `## Completion log` records every repair
 action: decisions injected (task + value), drift reconciled (task + PR), tasks deferred (task + reason +
-any dependents moved with it).
+any dependents moved with it), stranded merges escalated (copied from the 3c records in `## Notes`, which
+earlier runs wrote while the task was still stranded).
 
 ## Don'ts
 
@@ -140,8 +186,12 @@ any dependents moved with it).
   — repair never clears the stamp or the pending flag, never resumes the loop, and never points a
   pending-only rollout (still live, mid-wave) at a re-invocation of execute; reinstate — for a stamped
   pause only — is `/thread:execute [[<rollout>]]`.
-- **Don't re-implement merge or convergence.** Drift → `resolve`; everything else → execute's §4.5
-  resume. If you're writing a dispatch/merge loop, you've turned the conductor into an engine — stop.
+- **Don't hand a stranded-merged task, or a live wave, to execute's resume.** That covers §§ 4 and 6
+  alike, and pointing at reinstate or resume in § 1 while a stranded-merged task remains; a live wave
+  counts even when an empty `/workflows` was seen from a non-owner session.
+- **Don't re-implement merge or convergence.** Drift → `resolve`; stranded-merged → escalate (3c);
+  everything else → execute's §4.5 resume. If you're writing a dispatch/merge loop, you've turned the
+  conductor into an engine — stop.
 - **Don't merge anywhere but `merge-wave.sh`.** No inline `gh pr merge`, no `--admin`, no force-push.
   The engine keeps sole merge authority (README → *Coexistence with Orca*).
 - **Don't ask the user about agent-fixable blocks.** Retry them silently (cap one); ping only for
