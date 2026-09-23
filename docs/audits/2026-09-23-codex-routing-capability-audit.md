@@ -64,3 +64,22 @@ alerts establish a task-resolution failure, not that the work had not run.
 Lachy's identification of the renamed thread 4, then native list/read/wait and
 its committed report, resolved the identity. No duplicate task was created.
 The private monitor record now retains the actual task ID and completion result.
+
+## Preparation correction accepted for later preflight
+
+Thread 4 delivered correction `150504dfddd247ecedef0c69152d7798562be1e2`.
+The [independent recheck](../reviews/2026-09-23-codex-pilot-preparation-v2.md)
+returned no findings and confirms both verifier defects are addressed. The new
+proposal explicitly uses one task producing both documents; it does not fulfil
+the original two-task dependency-release scenario. Retain it as a narrower
+candidate for built-in receipt capture, merge accounting and ownership recovery.
+The broader dependency-release promise stays open.
+
+All ten allowed local verification invocations are spent, with expected results;
+the five completed native probes and their evidence are unchanged. The proposed
+verifier hash is
+`70535c8ac06464741a773df5f8fe1acfd63cecaaa58114db225e8fa12f2c535f`.
+Source preparation is complete. Remote/account/effect preflight and a concrete
+launch agreement remain required before any pilot starts. The already-prepared
+Claude capability check can proceed as its separate native-harness step.
+The coordinator monitor is paused after this completed correction/recheck.

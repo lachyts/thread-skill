@@ -35,8 +35,12 @@ The five bounded probes in task **thread 4**, commit `8c5980b`, passed. The
 the 49 saved file hashes and original native turn settings. Maximum selectors
 were synthetic; no real failed correction ladder or owner transfer was tested.
 There was no configured alternative model. This supports proceeding to the
-separate Claude capability check. The proposed Codex rollout has two preparation
-findings and is being corrected; it has not been launched or approved.
+separate Claude capability check. The Codex proposal's two preparation findings
+are resolved in `150504df`, with a clean
+[independent recheck](../reviews/2026-09-23-codex-pilot-preparation-v2.md).
+Its explicit one-task alternative delivers both documents; it leaves two-task
+dependency release unproven. Remote/effect preflight and a concrete launch
+agreement remain pending. No pilot has been launched or approved.
 
 Independent native source review is complete with no remaining findings. The
 reviewer was reused after fresh creation hit the harness thread limit; it had no
