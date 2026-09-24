@@ -1,5 +1,5 @@
-# thread plugin — test and release checks. `make test` is also the self-rollout verifier.
-.PHONY: test release-check
+# thread plugin — test and release checks, and behaviour evals (a human step). `make test` is also the self-rollout verifier.
+.PHONY: test release-check evals
 
 test:
 	@bash tests/run.sh
@@ -28,3 +28,19 @@ release-check:
 	s=$$({ git -c core.quotePath=false ls-files; cd "$$c" && find . -name __pycache__ -prune -o ! -type d ! -name .DS_Store -print; } | awk '!/^\.\//{t[$$0]=1; next} !(substr($$0,3) in t){print substr($$0,3)}' | LC_ALL=C sort); \
 	[ -z "$$s" ] || { echo "FAIL - cache $$v holds files this tree does not track:"; echo "$$s"; exit 1; }; \
 	echo "release-check: $$v — manifests agree, cache $$c matches skills/ and hooks/ and holds nothing untracked"
+
+# Behaviour evals: `claude plugin eval .` scores the evals/ suite. Every run makes real model calls on
+# Lachy's account, is nondeterministic and spawns nested claude sessions, so it is a human step, never
+# part of `make test` (the self-rollout verifier) or of a bare `make` (this target stays last, and test
+# is the default goal). tests/contracts/evals-structure.test.mjs checks the suite's shape there for free.
+# - --ablation none: a no-plugin arm can never fire a thread skill, so its delta means nothing here and
+#   it would double the cost. Every Skill grader sets `arm: both`.
+# - Record a scored baseline in docs/evals/ before changing any skill description.
+# - Results land in the git-ignored evals/results/<timestamp>/. Clear it before `claude plugin update`:
+#   the `./` directory source can copy ignored files into the version cache, which then fails
+#   `make release-check`'s stray check.
+# - Override e.g. `make evals EVAL_ARGS="--runs 3 --no-publish"`. An override replaces the whole
+#   default, so repeat `--ablation none --max-cost-usd 5` to keep them.
+EVAL_ARGS ?= --ablation none --runs 1 --max-cost-usd 5 --no-publish --threshold 0
+evals:
+	claude plugin eval . $(EVAL_ARGS)

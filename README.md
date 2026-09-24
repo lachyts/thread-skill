@@ -113,6 +113,7 @@ Cut a versioned release with `claude plugin tag` once `plugin.json` +
 
 ```sh
 make test            # = bash tests/run.sh — the one entrypoint, and the self-rollout verifier
+make evals           # behaviour evals: real model calls, a human step, never part of make test
 ```
 
 `tests/run.sh` runs everything hermetically (temp `HOME` and global git config, no bytecode, and a
@@ -131,6 +132,11 @@ final check that the run wrote nothing into the tree):
   unset, refuses unsafe names, and the resolver in `execute/SKILL.md` § 4 works against fixture remotes.
 - **Release check** — `tests/release-check.test.sh`: the real `make release-check` recipe against a temp
   tree and a fake config dir (matching, stray, noise-only, differing, missing and mismatched caches).
+- **Evals structure** — `tests/contracts/evals-structure.test.mjs` checks the `evals/` suite's shape for
+  free and never runs it (case discovery, frontmatter keys and types, read-only tool grants, graders, and
+  `make evals` kept out of `make test` and off the default goal). The suite itself is scored by
+  `claude plugin eval` via `make evals`, a human step outside `make test`; its baseline is recorded in
+  `docs/evals/`.
 
 New suites join by filename: `tests/*.test.mjs`, `tests/contracts/*.test.mjs` and
 `skills/execute/tests/*.test.mjs` run under `node --test`; `tests/*.test.sh` and
