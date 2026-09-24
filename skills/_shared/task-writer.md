@@ -15,7 +15,7 @@ The task is never orphaned and never lands in `_Inbox/`. Resolve `projects:`
 in this order:
 
 1. **CWD inside a code repo** → grep `repos:` frontmatter across
-   `~/repos/obsidian/Work/Projects/*/*.md` for an entry matching the current
+   `~/repos/obsidian/Work/Projects/**` for an entry matching the current
    path (expand `~` to `$HOME` before comparing). Exactly one match → use
    that project note. **More than one match** (a sibling project sharing the
    repo, or a monorepo with sub-project notes) → fall through to § 1.2–1.4
@@ -185,28 +185,30 @@ keeps `/thread:schedule` from sweeping it into an autonomous rollout.
   captures, and close's proposed follow-ups.
 - **Ceiling.** `## Notes` holds at most **10 non-empty lines**, counting every
   non-empty body line up to the next heading, the `**Thread:**` and
-  `**Set down:**` lines included — the same ceiling as the vault's
-  `check-research-landing` guard.
+  `**Set down:**` lines included — the same 10-line limit the vault's
+  `check-research-landing` guard applies to research-family sections; the
+  hook does not police `## Notes`, this spec does.
   - The ceiling counts only the `## Notes` body lines this spec writes
     (capture and § 2 re-capture). Handoff's `Superseded by handoff` Notes
-    line is a lifecycle marker on a closed capture, so it is exempt; the
-    vault guard targets research-family sections, not `## Notes`.
+    line is a lifecycle marker on a closed capture, so it is exempt.
   - A re-capture under § 2 rewrites Notes in place and never appends past the
     ceiling.
-  - A capture written before this rule, with Notes over 10 lines or a
-    `## Findings`/`## Research` section: a re-capture rewrites Notes down to
-    the ceiling and replaces any research-family section with a single
-    pointer line — a landed digest if one exists, else `earlier findings:
-    vault git history before <YYYY-MM-DD>`. The route's confirmation then
-    offers to land them, as in the research pointer below.
+  - A capture may already carry a `## Findings` or `## Research` section from
+    before this rule. A § 2 re-capture leaves any pre-existing
+    research-family section untouched — never deleted, moved or condensed,
+    since it holds no line this spec writes — and the route's confirmation
+    offers to land it, as for an unlanded research pointer below.
 - **Resume prompt.** Its `Context:` stays at 2–4 lines.
 - **No research on the note.** No research-family section goes on the task
   note: no `## Findings` or `## Research` heading, no tables of results, no
   logs, no transcripts.
 - **Research pointer.** Research worth keeping gets at most one pointer line:
   an already-landed digest under `Library/Research/Digests/`, a THREAD.md
-  section, or `left in conversation`. The route's own confirmation then
-  offers, in one line, to land it per
+  section, or `left in conversation`. Only research not yet landed earns the
+  landing offer: a THREAD.md section or `left in conversation` pointer, or a
+  pre-existing research-family section left untouched above — never for an
+  already-landed digest. The route's own confirmation then offers, in one
+  line, to land it per
   `~/repos/workspaces/_shared/knowledge/add-writers/research-landing.md` (its
   Step 0 asks first) — for stash and defer that confirmation is § 7, for
   close it is close's "What landed" report. The offer never blocks the exit:
@@ -240,6 +242,8 @@ One compact confirmation, always echoing the concrete outcome:
 - stash: `→ [[<slug>]] stashed (no date) — resurfaces in /weekly's Stashed threads. <Project>.`
 
 Render the task link clickable (`obsidian://open?...` per the global link
-rules). When a Lean capture research pointer was written (§ 5), add the
+rules). When § 5 **Lean capture** leaves unlanded research — a THREAD.md
+section or `left in conversation` pointer, or an untouched pre-existing
+research-family section, never for an already-landed digest — add the
 one-line research-landing offer after the confirmation; it never delays the
 safe-to-end line. Then it is safe to end the session — say so.

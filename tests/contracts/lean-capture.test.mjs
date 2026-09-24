@@ -20,6 +20,8 @@ const walk = (d) => fs.readdirSync(path.join(root, d), { withFileTypes: true })
 const WRITER = 'skills/_shared/task-writer.md'
 const SCAN = 'skills/_shared/process-scan.md'
 const CLOSE = 'skills/close/SKILL.md'
+const STASH = 'skills/stash/SKILL.md'
+const DEFER = 'skills/defer/SKILL.md'
 
 // The slice of `text` from the line matching `start` to the next line matching `stop` (exclusive), or
 // null. A null `stop` runs to the end of the text.
@@ -42,17 +44,26 @@ function assertHas(section, name, patterns) {
 }
 
 test('task-writer § 5 carries the Lean capture rule', () => {
-  const s5 = slice(readIf(WRITER), /^## 5\./, /^## 6\./)
-  assertHas(s5, `${WRITER} § 5`, [
-    /^\*\*Lean capture\.\*\*/m,
+  // Sliced from the rule's own paragraph, so a clause elsewhere in § 5 cannot stand in for it.
+  const lean = slice(readIf(WRITER), /^\*\*Lean capture\.\*\*/, /^## 6\./)
+  assertHas(lean, `${WRITER} § 5 Lean capture`, [
     '10 non-empty lines',
     'add-writers/research-landing.md',
-    '## Findings',
+    /No research-family section goes on the task\s+note/,
+    /no tables of results, no\s+logs, no transcripts/,
     /never blocks the exit/,
     /Superseded by handoff/,
     /What landed/,
-    /written before this rule/,
+    // The ceiling names the vault hook's scope without claiming it polices Notes.
+    /the\s+hook does not police `## Notes`, this spec does/,
+    // A re-capture never destroys a pre-existing research section; it offers the landing instead.
+    /leaves any pre-existing\s+research-family section untouched/,
+    /never deleted, moved\s+or\s+condensed/,
+    // The landing offer fires only for research not yet landed.
+    /Only research not yet landed earns the\s+landing offer/,
+    /never for an\s+already-landed digest/,
   ])
+  assert.doesNotMatch(lean, /git history/, `${WRITER} § 5 Lean capture must not point research at vault git history`)
 })
 
 test('the "10 non-empty lines" ceiling has one home under skills/', () => {
@@ -71,6 +82,8 @@ test('task-writer § 1 item 1 handles more than one repos: match', () => {
     /§ 1\.2–1\.4/,
     /among the matches/,
     /no match → § 1\.2/i,
+    // The same project-note set as process-scan rung 2, so nested sub-project notes are seen.
+    '`~/repos/obsidian/Work/Projects/**`',
   ])
 })
 
@@ -95,10 +108,23 @@ test('every exit route carries the rule and the offer channel', () => {
   assertHas(row, `${CLOSE} § Destinations "Concrete follow-up actions" row`, [
     'task-writer.md', /§§ 1 & 4/, /§ 5\b/, 'Lean capture',
   ])
-  // (b) close step 8 carries the research-landing offer.
+  // (b) close step 8 carries the research-landing offer, for unlanded research only.
   const step8 = close == null ? null : (close.split('\n').find((l) => /^8\. \*\*Print the "What landed" report/.test(l)) ?? null)
-  assertHas(step8, `${CLOSE} step 8`, ['research-landing offer', /`task-writer\.md` § 5/])
-  // (c) task-writer § 7 is the offer channel for stash and defer.
+  assertHas(step8, `${CLOSE} step 8`, [
+    'research-landing offer', /`task-writer\.md` § 5/, 'unlanded', /never for an already-landed digest/,
+  ])
+  // (c) task-writer § 7 is the offer channel for stash and defer, for unlanded research only.
   const s7 = slice(readIf(WRITER), /^## 7\./, null)
-  assertHas(s7, `${WRITER} § 7`, [/research-landing offer/, /§ 5/])
+  assertHas(s7, `${WRITER} § 7`, [/research-landing offer/, /§ 5/, /unlanded/, /never\s+for\s+an\s+already-landed digest/])
+  // (d) stash and defer inherit the rule by citing task-writer § 5 (the body) and § 7 (the confirmation).
+  for (const [file, body, confirm] of [
+    [STASH, /^1\. \*\*Write the capture task\*\*/, /^3\. \*\*Confirm\*\* per § 7/],
+    [DEFER, /^2\. \*\*Write the capture task\*\*/, /^4\. \*\*Confirm\*\* per § 7/],
+  ]) {
+    const text = readIf(file)
+    const write = slice(text, body, /^\d+\. /)
+    assertHas(write, `${file} "Write the capture task" step`, ['skills/_shared/task-writer.md', /§ 5\b/])
+    const conf = text == null ? null : (text.split('\n').find((l) => confirm.test(l)) ?? null)
+    assert.ok(conf != null, `${file} has no "Confirm per § 7" step`)
+  }
 })
