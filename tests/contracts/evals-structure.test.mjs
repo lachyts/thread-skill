@@ -172,14 +172,14 @@ function checkDiscovery(files, errors) {
   for (const [name, dirs] of byName) {
     if (dirs.length > 1) err(`${dirs[1]}/prompt.md`, 'a', `duplicate case name ${name}: ${dirs.join(' and ')}`)
   }
-  const caseSet = new Set(cases)
+  // An orphan grader is a file directly in a graders/ directory that no case contains. Keying on the
+  // direct parent (not the first `graders` segment) keeps a group directory named graders legal.
   for (const p of paths) {
     if (baseOf(p) === 'case.yaml') err(p, 'a', 'case.yaml is not used by this suite (fixtures go inline in the prompt)')
     if (isMock(p)) continue
-    const segs = p.split('/')
-    const g = segs.indexOf('graders')
-    if (g > 0 && !caseSet.has(segs.slice(0, g).join('/'))) {
-      err(p, 'a', `orphan grader: ${segs.slice(0, g).join('/')}/ has no prompt.md, so this is never checked or run`)
+    const dir = dirOf(p)
+    if (baseOf(dir) === 'graders' && !cases.some((c) => p.startsWith(c + '/'))) {
+      err(p, 'a', `orphan grader: ${dirOf(dir)}/ has no prompt.md, so this is never checked or run`)
     }
   }
   return cases
@@ -205,21 +205,26 @@ function checkPrompt(file, text, errors) {
     const v = take(int(fm, key, file))
     if (v !== undefined && (v < lo || v > hi)) err(file, 'c', `${key} ${v} is outside ${lo}-${hi}`)
   }
-  if (!fm.has('allowed_tools')) { err(file, 'd', 'allowed_tools is missing (it must list Skill)'); return }
+  if (!fm.has('allowed_tools')) { err(file, 'd', 'allowed_tools is missing (it must list Skill)'); return undefined }
   const tools = take(list(fm, 'allowed_tools', file))
-  if (tools === undefined) return
+  if (tools === undefined) return undefined
+  const before = errors.length
   for (const t of tools) {
     if (WRITE_TOOLS.includes(t) || t.startsWith(MCP_PREFIX)) err(file, 'd', `allowed_tools lists ${t} (write/network-capable tools are never granted)`)
     else if (!ALLOWED_TOOLS.has(t)) err(file, 'd', `allowed_tools lists unknown tool ${t} (allowed: ${[...ALLOWED_TOOLS].join(', ')})`)
   }
   if (!tools.includes('Skill')) err(file, 'd', 'allowed_tools is missing Skill')
+  // The grant graders are checked against; a bad grant is already a (d) error, so it grants nothing
+  // here rather than cascading an (e) error onto every grader.
+  return errors.length === before ? tools : undefined
 }
 
 function compiles(p, flags) {
   try { new RegExp(p, flags); return true } catch { return false }
 }
 
-function checkGrader(file, text, errors) {
+// `granted` is the case's parsed allowed_tools, or undefined when the grant is itself an error.
+function checkGrader(file, text, errors, granted) {
   const { err, take } = reporter(errors)
   if (text.includes('TODO:')) err(file, 'e', 'contains "TODO:"')
   if (text.split('\n')[0].replace(/\r$/, '') !== '---') { err(file, 'e', 'no frontmatter, the CLI would silently skip this grader'); return null }
@@ -247,6 +252,11 @@ function checkGrader(file, text, errors) {
   if (min !== undefined && max !== undefined && min > max) err(file, 'e', `min ${min} is greater than max ${max}`)
   const tool = take(str(fm, 'tool', file))
   if (type === 'tool_used' && !fm.has('tool')) err(file, 'e', 'a tool_used grader needs tool')
+  // A tool the case never grants (or a misspelling such as `skill`) can never fire, so a max: 0 grader
+  // would pass every run without testing anything.
+  if (type === 'tool_used' && tool !== undefined && granted !== undefined && !granted.includes(tool)) {
+    err(file, 'e', `tool ${tool} is not granted by this case's allowed_tools; the grader can never fire`)
+  }
   const pattern = take(str(fm, 'pattern', file))
   if (pattern !== undefined && !compiles(pattern, flags || '')) err(file, 'e', `pattern does not compile as a RegExp with flags "${flags || ''}"`)
   const inputMatch = take(str(fm, 'input_match', file))
@@ -305,9 +315,9 @@ function validateSuite(input, skills) {
       }
       err(p, 'a', 'a case directory holds only prompt.md and graders/')
     }
-    checkPrompt(`${c}/prompt.md`, files[`${c}/prompt.md`], errors)
+    const granted = checkPrompt(`${c}/prompt.md`, files[`${c}/prompt.md`], errors)
     if (graders.length === 0) err(`${c}/graders/`, 'e', 'the case has no .md graders')
-    for (const g of graders) checkSkillGrader(g, checkGrader(g, files[g], errors), skills, errors)
+    for (const g of graders) checkSkillGrader(g, checkGrader(g, files[g], errors, granted), skills, errors)
   }
   checkPaths(files, errors)
   return errors
@@ -368,6 +378,7 @@ function checkMakefile(text, file = 'Makefile') {
   const rules = new Map()   // target -> { prereqs: [], recipes: [] }
   const order = []          // each rule's targets, in file order
   const parseTimeShell = [] // `!=` values and $(shell ...) in assignments: they run for every goal
+  const recipeShell = []    // every SHELL / .SHELLFLAGS value: they wrap every recipe on the test path
   let current = null
   for (const { no, line: raw } of logical) {
     if (raw.startsWith('\t')) {
@@ -391,6 +402,7 @@ function checkMakefile(text, file = 'Makefile') {
       if (name === '.RECIPEPREFIX') { err(`line ${no}: .RECIPEPREFIX is not supported`); continue }
       if (op === '!=') parseTimeShell.push(value)
       if (/\$[({]shell\b/.test(value)) parseTimeShell.push(value)
+      if (name === 'SHELL' || name === '.SHELLFLAGS') recipeShell.push({ name, value })
       if (op === '+=') vars.set(name, vars.has(name) ? `${vars.get(name)} ${value}` : value)
       else if (op === '?=') { if (!vars.has(name)) vars.set(name, value) } else vars.set(name, value)
       continue
@@ -403,6 +415,7 @@ function checkMakefile(text, file = 'Makefile') {
     const semi = rest.indexOf(';')
     const inline = semi === -1 ? null : rest.slice(semi + 1).trim()
     const prereqText = semi === -1 ? rest : rest.slice(0, semi)
+    if (targets.some((t) => t.includes('&'))) { err(`line ${no}: grouped targets (&:) are not supported`); current = null; continue }
     if (targets.some((t) => t.includes('%'))) { err(`line ${no}: pattern rules are not supported`); current = null; continue }
     if (targets.some((t) => t.includes('$'))) { err(`line ${no}: computed targets are not supported`); current = null; continue }
     if (targets.includes('.DEFAULT')) { err(`line ${no}: .DEFAULT is not supported`); current = null; continue }
@@ -429,6 +442,14 @@ function checkMakefile(text, file = 'Makefile') {
     const u = []
     const x = expandMake(v, vars, u)
     if (REACHES_EVALS.some((re) => re.test(x))) err(`a parse-time shell assignment (${v}) mentions claude, evals or make; it runs for every goal`)
+  }
+  // Each assignment is checked, not just the last: a `:=` is expanded where it stands, so an earlier
+  // value can still be the one a recipe runs under.
+  for (const { name, value } of recipeShell) {
+    const u = []
+    const x = expandMake(value, vars, u)
+    for (const r of u) err(`${name} references ${r}, which this check cannot resolve`)
+    if (REACHES_EVALS.some((re) => re.test(x))) err(`${name} (${value}) mentions claude, evals or make; it wraps every recipe make test runs`)
   }
 
   // Walk everything `make test` can reach.
@@ -457,7 +478,7 @@ function checkMakefile(text, file = 'Makefile') {
   const recipe = ev.recipes.map((l) => expandMake(l, vars, unresolved)).join('\n')
   for (const u of unresolved) err(`the evals recipe references ${u}, which this check cannot resolve`)
   if (!recipe.includes('claude plugin eval')) err('the evals recipe does not run claude plugin eval')
-  if (!ev.recipes.some((l) => l.includes('$(EVAL_ARGS)') || l.includes('${EVAL_ARGS}'))) err('the evals recipe does not reference $(EVAL_ARGS)')
+  if (!ev.recipes.some((l) => /claude plugin eval \.\s+\$(\(EVAL_ARGS\)|\{EVAL_ARGS\})/.test(l))) err('no evals recipe line runs claude plugin eval . $(EVAL_ARGS)')
   let args = ''
   if (!vars.has('EVAL_ARGS')) err('EVAL_ARGS is not assigned')
   else {
@@ -473,9 +494,16 @@ function checkMakefile(text, file = 'Makefile') {
   return errors
 }
 
+// The literal strings, plus the spellings they miss: `claude  plugin`, and any line that names make
+// ($MAKE, ${MAKE} and $(MAKE) included) together with evals (`make -C . evals`, `make X=y evals`).
+const RUNSH_MAKE = /\bmake\b|\$\{?MAKE\b|\$\(MAKE\)/
 function checkRunSh(text, file = 'tests/run.sh') {
   const errors = []
   for (const s of ['claude plugin', 'make evals']) if (text.includes(s)) errors.push(`${file}: (h) mentions "${s}"; make test must never run the evals`)
+  if (/\bclaude\s+plugin\b/.test(text)) errors.push(`${file}: (h) runs claude plugin; make test must never run the evals`)
+  text.split('\n').forEach((line, i) => {
+    if (RUNSH_MAKE.test(line) && /\bevals\b/.test(line)) errors.push(`${file}: (h) line ${i + 1} names make and evals; make test must never run the evals`)
+  })
   return errors
 }
 
@@ -533,6 +561,15 @@ test('the real Makefile keeps evals off make test and the default goal, with saf
 
 test('tests/run.sh never runs claude plugin eval or make evals', () => {
   assert.deepEqual(checkRunSh(read('tests/run.sh')), [])
+})
+
+test('run.sh control: every spelling of make evals or claude plugin is an (h) error', () => {
+  const rows = ['make -C . evals', '$(MAKE) evals', '"$MAKE" evals', '${MAKE} evals', 'make EVAL_ARGS=x evals', 'claude  plugin eval .']
+  for (const line of rows) {
+    const errors = checkRunSh(`#!/usr/bin/env bash\nset -e\n${line}\n`, 'R')
+    assert.ok(errors.length > 0, `${line}: expected errors, got none`)
+  }
+  assert.deepEqual(checkRunSh(read('tests/run.sh'), 'R'), [], 'the real run.sh')
 })
 
 test('.gitignore ignores evals/results/', () => {
@@ -601,6 +638,9 @@ const withGrader = (name, text) => ({ [`${C}/graders/${name}`]: text })
 
 test('positive control: a clean synthetic suite has no errors', () => {
   assert.deepEqual(validateSuite(cleanSuite(), SKILLS), [])
+  // A group directory named graders is not a graders/ directory.
+  const grouped = { 'evals/graders/c1/prompt.md': PROMPT, 'evals/graders/c1/graders/g.md': skillGrader('open') }
+  assert.deepEqual(validateSuite({ ...cleanSuite(), ...grouped }, SKILLS), [], 'a case under evals/graders/')
 })
 
 test('negative control: each known-bad change gives its own named error', () => {
@@ -637,6 +677,8 @@ test('negative control: each known-bad change gives its own named error', () => 
     ['a non-empty tool_used body', withGrader('routes.md', skillGrader('open') + 'extra\n'), G('routes.md'), 'e', ['empty body']],
     ['graders/x.txt', withGrader('x.txt', 'notes\n'), G('x.txt'), 'e', ['.md']],
     ['a regex pattern in frontmatter and body', withGrader('says.md', REGEX_GRADER + 'palette\n'), G('says.md'), 'e', ['exactly one']],
+    ['tool: skill (lowercase), max: 0', withGrader('not-next.md', skillGrader('next', 'min: 0\nmax: 0\n').replace('tool: Skill', 'tool: skill')), G('not-next.md'), 'e', ['tool skill is not granted', 'never fire']],
+    ['tool: Bash not granted, max: 0', withGrader('not-next.md', skillGrader('next', 'min: 0\nmax: 0\n').replace('tool: Skill', 'tool: Bash')), G('not-next.md'), 'e', ['tool Bash is not granted', 'never fire']],
   ]
   for (const [name, patch, file, rule, keywords] of rows) {
     const errors = validateSuite({ ...cleanSuite(), ...patch }, SKILLS)
@@ -687,16 +729,24 @@ test('Makefile control: every way to reach or weaken evals is a named (h) error'
     ['evals before test', mk({ pre: MK_EVALS, evals: '' }), 'default goal is evals'],
     ['evals test: first', mk({ test: '', evals: '', pre: 'evals test:\n\tclaude plugin eval . $(EVAL_ARGS)\n' }), 'default goal is evals'],
     ['.DEFAULT_GOAL', mk({ pre: '.DEFAULT_GOAL := evals\n' }), '.DEFAULT_GOAL'],
+    ['SHELL := claude', mk({ pre: 'SHELL := claude\n' }), 'SHELL (claude) mentions claude'],
+    ['.SHELLFLAGS naming make evals', mk({ pre: '.SHELLFLAGS := -c make evals;\n' }), '.SHELLFLAGS (-c make evals;) mentions'],
+    ['SHELL through a variable', mk({ pre: 'C = claude\nSHELL = $(C)\n' }), 'SHELL ($(C)) mentions claude'],
+    ['grouped targets test evals &:', mk({ post: 'test evals &:\n' }), 'grouped targets'],
+    ['claude plugin eval without .', mk({ evals: 'evals:\n\tclaude plugin eval $(EVAL_ARGS)\n' }), 'claude plugin eval . $(EVAL_ARGS)'],
   ]
+  // The clean baseline has no errors, so every error a row reports comes from that row's change.
+  const base = checkMakefile(mk(), 'M')
+  assert.deepEqual(base, [], 'the clean baseline')
   for (const [name, text, keyword] of rows) {
     const errors = checkMakefile(text, 'M')
-    assert.ok(errors.length > 0, `${name}: expected errors, got none`)
-    for (const e of errors) assert.ok(e.startsWith('M: (h) '), `${name}: not an (h) error: ${e}`)
-    assert.ok(errors.some((e) => e.includes(keyword)), `${name}: no error mentions ${keyword}: ${errors.join(' | ')}`)
+    assert.ok(errors.some((e) => e.includes(keyword) && !base.includes(e)), `${name}: no new error mentions ${keyword}: ${errors.join(' | ')}`)
   }
   const positive = [
     ['X ::= a:b', mk({ pre: 'X ::= a:b\n' })],
     ['.PHONY: evals test, test first, evals last', mk({ phony: '.PHONY: evals test\n' })],
+    ['SHELL := /bin/bash, .SHELLFLAGS := -ec', mk({ pre: 'SHELL := /bin/bash\n.SHELLFLAGS := -ec\n' })],
+    ['${EVAL_ARGS}', mk({ evals: 'evals:\n\t@claude plugin eval . ${EVAL_ARGS}\n' })],
   ]
   for (const [name, text] of positive) assert.deepEqual(checkMakefile(text, 'M'), [], name)
 })
