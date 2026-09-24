@@ -43,7 +43,7 @@ State comes from each file's frontmatter `state:` field. Skip threads with `stat
 1. Look for existing thread:
    - `~/repos/workspaces/_shared/threads/<slug>.md`
    - `find ~/Projects -name THREAD.md` and grep frontmatter `slug: <slug>` matches.
-2. If found → read the file, present a 4–6 line briefing (scope, state, where-we-are headline, top open question), and continue the conversation with that context loaded. If its Resume instructions point at a handoff doc (`Read <home>/docs/handoffs/<doc> first`), read that too and, when it is pending, **mark it consumed** — set `status: consumed` in its front matter, no commit — exactly as the handoff-doc pickup below does (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Pickup), then apply `handoff-lifecycle.md` § Thread state's pickup row; the thread is live again and `thread:close` will delete the doc. If the file is gone (its consumer's close deleted it and the pointer was never rewritten), say so in one line and brief from THREAD.md alone — `git log --all -- '<path>'` recovers the text if it matters.
+2. If found → read the file, present a 4–6 line briefing (scope, state, where-we-are headline, top open question), and continue the conversation with that context loaded. If its Resume instructions point at a handoff doc (`Read <home>/docs/handoffs/<doc> first`), read that too, apply the `Run from:` check below (the handoff-doc pickup's step 2), and, when it is pending, **mark it consumed** — set `status: consumed` in its front matter, no commit — exactly as the handoff-doc pickup below does (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Pickup), then apply `handoff-lifecycle.md` § Thread state's pickup row; the thread is live again and `thread:close` will delete the doc. If the file is gone (its consumer's close deleted it and the pointer was never rewritten), say so in one line and brief from THREAD.md alone — `git log --all -- '<path>'` recovers the text if it matters.
 3. If not found → confirm with the user, ask for the scope (one line), then create the file from the canonical template with frontmatter populated. New shared threads also get appended to `INDEX.md`.
 
 ### `/thread:open [[<task>]]` — pick up a stashed/deferred capture
@@ -60,9 +60,10 @@ The pickup half of the stash/defer loop (see `${CLAUDE_PLUGIN_ROOT}/skills/_shar
 The pickup half of the handoff loop (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md`). Accepts a path under a `docs/handoffs/` directory.
 
 1. Read the doc. Prime from its § What remains, § Decisions settled and § Gotchas; its § Paste-ready prompt is the working brief.
-2. Read the linked `THREAD.md` if the doc's `thread:` names one; brief from both, and — for a pending doc — apply `handoff-lifecycle.md` § Thread state's pickup row to it.
-3. **Consume it**: set `status: consumed` in the doc's front matter, in place, with no commit. Deletion is the consuming session's close (`handoff-lifecycle.md` § Close-out); a legacy doc is briefed from but left untouched (`handoff-lifecycle.md` § States).
-4. Confirm in one line: `Picked up <doc> — marked consumed. Next move: <from the prompt>.` Then get on with the work.
+2. **Check `Run from:`.** Read the doc's ``**Run from:** `<abs dir>` `` line and compare it with `pwd -P`. If they differ, say so in one line — `Run from: <dir>, but this session launched in <pwd>; close, stash and defer resolve their homes from the launch directory` — and continue. Never block; a doc without the line (written before it existed) is checked for nothing.
+3. Read the linked `THREAD.md` if the doc's `thread:` names one; brief from both, and — for a pending doc — apply `handoff-lifecycle.md` § Thread state's pickup row to it.
+4. **Consume it**: set `status: consumed` in the doc's front matter, in place, with no commit. Deletion is the consuming session's close (`handoff-lifecycle.md` § Close-out); a legacy doc is briefed from but left untouched (`handoff-lifecycle.md` § States).
+5. Confirm in one line: `Picked up <doc> — marked consumed. Next move: <from the prompt>.` Then get on with the work.
 
 ### `/thread:open save` — checkpoint without closing
 

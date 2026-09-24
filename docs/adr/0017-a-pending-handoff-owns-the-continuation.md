@@ -2,6 +2,13 @@
 
 Date: 2026-09-21
 Status: accepted
+*(Amended 2026-09-25 by thread-skill-p2-2: `<home>` resolves through
+`skills/_shared/scripts/handoff-home.sh`, the one resolver handoff and close both call
+(`handoff-lifecycle.md` § Home); a unit outside git or one whose repo ignores
+`docs/handoffs/` falls back to `_shared`; close also scans a shared thread's `_shared` docs,
+owned there by `thread:`, and the doc its Resume pointer names; every doc carries a
+`Run from:` line; and a handoff closes the thread's open captures as superseded, which a
+withdrawal reopens.)*
 
 ## Context
 
