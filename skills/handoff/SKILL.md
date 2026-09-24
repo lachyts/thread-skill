@@ -54,16 +54,19 @@ This strict failure behaviour matters because a technically persistent session t
 
 ## Handoff document — durable, committed, self-cleaning
 
-**Where.** `<home>/docs/handoffs/<YYYY-MM-DD>-<slug>.md`. `<home>` is the **unit directory** — the smallest directory that owns the work, not the git toplevel, because two monorepos hold many units each:
+**Where.** `<home>/docs/handoffs/<YYYY-MM-DD>-<slug>.md`, where `<home>` is what the resolver prints:
 
-- CWD under `~/Projects/<Area>/<Project>/` → that project directory (the `~/Projects` monorepo's toplevel would pool every project's handoffs).
-- CWD under `~/repos/workspaces/<workspace>/` → that workspace directory (`_shared/` for a shared thread).
-- Otherwise → `git rev-parse --show-toplevel` (a tool repo such as `~/repos/tools/<name>/`).
-- CWD in no git repo at all → the session's workspace directory under `~/repos/workspaces/`.
+```
+bash "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/handoff-home.sh"            # add --shared when the active thread is a _shared/threads/<slug>.md
+```
 
-Never the OS temp directory (macOS clears it on reboot; a handoff must survive reboots and account switches) and never the vault. Slug: ≤5 words naming the work. Create `docs/handoffs/` if absent. If `<home>`'s repo ignores the path (`git check-ignore -q <path>` — `~/Projects/Tutorials/`, `_archive/`, `TSMS/` are deliberately ignored), do **not** edit `.gitignore`: write the doc under the session's workspace directory instead, which is never ignored, and name that path in the prompt. A doc briefs exactly one consumer (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md`). Every path in this skill, in `thread:close` and in `thread:open` is this same `<home>/docs/handoffs/<doc>`; the prompt carries it **absolute**.
+Its rules — project directory, seat, `_shared`, git toplevel, and `_shared` for a unit outside git or one whose repo ignores `docs/handoffs/` — are `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Home; never resolve `<home>` by hand, and never edit a `.gitignore` to make room. Never the OS temp directory (macOS clears it on reboot; a handoff must survive reboots and account switches) and never the vault. Slug: ≤5 words naming the work. Create `docs/handoffs/` if absent. A doc briefs exactly one consumer (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md`). Every path in this skill, in `thread:close` and in `thread:open` is this same `<home>/docs/handoffs/<doc>`; the prompt carries it **absolute**.
 
-**Shape.** Front matter — the block in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Front matter, written with `status: pending` — then the body.
+**Failure path.** If the resolver exits non-zero, prints nothing, or cannot be run (`CLAUDE_PLUGIN_ROOT` unset, a stale cache), stop before writing: no doc, no commit, no Thread-state row, no captures touched, no task created. Print `handoff: resolver failed (<its stderr, or "not found at <path>">) — no doc written` and ask Lachy for an absolute directory. Only a directory he names is used as `<home>`, never one the agent infers.
+
+**Consumer home.** When the consumer will launch somewhere other than this session's launch directory — the work moves to another repo, or this repo is about to be deleted or moved — resolve with `--dir <consumer launch dir>` (plus `--shared` for a shared thread), then write and commit the doc there, with `git -C` on that home. The prompt names that absolute path, and the producer's later `thread:close` still finds the doc through the THREAD.md Resume pointer.
+
+**Shape.** Front matter — the block in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Front matter, written with `status: pending` — then the body. The body's first line, above § 1, is ``**Run from:** `<abs dir>` ``: the directory the consumer must launch in, because the harness resets a `cd` out of the launch directory. It is this session's launch directory, or the consumer's under **Consumer home.**; for a shared thread written from a seat it is the seat, never `_shared`, which is not a launch directory.
 
 Body sections, in this order — the same list the session-safepoint stop hook mandates, so a hook-forced handoff and a requested one produce the same artefact:
 
@@ -86,7 +89,9 @@ The pathspec keeps a dirty index out of the commit (close § Commit hygiene). An
 
 **Thread state.** If the thread has a THREAD.md, apply `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state's handoff row now, after the doc is committed (or written, when the commit was skipped as `not versioned`).
 
-**Lifecycle.** The doc's states, pickup, close-out and the manual-handoff rule are `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md`. The one lifecycle procedure that runs here is **withdrawal** (`handoff-lifecycle.md` § Withdrawn): if the handoff is called off in the same session, remove the doc at once — `git -C "<home>" rm -f <path> && git -C "<home>" commit -m "🔧 chore(handoff): withdraw <slug>" -- <path>` (plain `rm` if it was never committed; same repo-state guard as above), and undo the handoff row: when the thread has a THREAD.md, rewrite real Resume instructions there in place of the `Read <abs doc path> first` pointer.
+**Open captures.** Before the prompt is printed, close the thread's own open stash/defer captures, because the doc is now the single tracker for its continuation (ADR 0017). Run the query from `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 2, then act on each hit **only** on a deterministic match: its Notes `**Thread:**` link resolves to the active THREAD.md's absolute path, or its filename stem equals the THREAD.md `slug:` (the doc's `thread:` value). Each matched capture gets `status: done`, `completed: <today>` and a Notes line `Superseded by handoff <abs doc path>`; one with `scheduled:` also loses its unchecked day-page line (`task-writer.md` § 3b). A hit that matches only because its resume prompt describes the same work is **left open** — reported, not written. The handoff output lists every write: `capture closed: [[<slug>]] (superseded)`, `day-page line removed: <day-note path>`, and `capture left open (fuzzy match only): [[<slug>]]`. Skipped entirely on the resolver failure path.
+
+**Lifecycle.** The doc's states, pickup, close-out and the manual-handoff rule are `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md`. The one lifecycle procedure that runs here is **withdrawal** (`handoff-lifecycle.md` § Withdrawn): if the handoff is called off in the same session, remove the doc at once — `git -C "<home>" rm -f <path> && git -C "<home>" commit -m "🔧 chore(handoff): withdraw <slug>" -- <path>` (plain `rm` if it was never committed; same repo-state guard as above), and undo the handoff row: when the thread has a THREAD.md, rewrite real Resume instructions there in place of the `Read <abs doc path> first` pointer, and reopen the captures it superseded: every task note carrying `Superseded by handoff <abs doc path>` (`rg` over `~/repos/obsidian/Work/Tasks/`) returns to `status: open`, loses `completed:` and that line, and a scheduled one gets its day-page line back per `task-writer.md` § 3b. The choice is reopen, not "close only once final": a handoff has no later final moment that the producing session observes.
 
 ## Build the handoff prompt
 
@@ -94,6 +99,7 @@ Create this compact payload for the new task. Print it as a fenced block when na
 
 ```
 You're continuing "<task title>" mid-stream — a live handoff, not a cold pickup.
+Run from: <abs dir> — launch the session there; a cd from another launch directory is reset.
 Read first: <home>/docs/handoffs/<YYYY-MM-DD>-<slug>.md (absolute path) — then mark it consumed: set `status: consumed` in its front matter (no commit; your thread:close deletes it).
 Context: <2–5 lines: goal, state of play, what's built/decided, what's blocked.>
 Also read: <key file paths / artefact links>

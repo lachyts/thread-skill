@@ -2,9 +2,26 @@
 
 The one statement of what a handoff doc is, the states it moves through, and the thread-state transitions every continuity route applies. `thread:handoff`, `thread:open`, `thread:close` and the capture writer cite this file; procedures stay with the skill that runs them — close's scan snippet and its step 7.2 git commands, handoff's commit and withdraw commands, open's pickup steps.
 
-A **handoff doc** is a file in `<home>/docs/handoffs/`, written by `thread:handoff` or by the session-safepoint stop hook (`~/repos/workspaces/_shared/scripts/session_safepoint.py`, referenced here by path only, never edited). `<home>` is the *unit directory* defined in handoff § Handoff document (**Where.**). The working tree holds in-flight handoffs only: `ls docs/handoffs/` is the live list.
+A **handoff doc** is a file in `<home>/docs/handoffs/`, written by `thread:handoff` or by the session-safepoint stop hook (`~/repos/workspaces/_shared/scripts/session_safepoint.py`, referenced here by path only, never edited). `<home>` is the directory § Home resolves. The working tree holds in-flight handoffs only: `ls docs/handoffs/` is the live list.
 
 **One doc, one consumer**: a handoff that briefs two sessions is two docs (they may both point at one shared reference file) — § Close-out deletes a doc when its consumer closes, and a second reader would be stranded.
+
+## Home
+
+`<home>` is the smallest directory that owns the work, not always the git toplevel, because two monorepos (`~/Projects` and `~/repos/workspaces`) hold many units each. The rules, on physical paths (`pwd -P`, with `$HOME` resolved the same way), first hit wins:
+
+1. Under `$HOME/Projects/<Area>/<Project>/` → that project directory (the `~/Projects` monorepo's toplevel would pool every project's handoffs).
+2. `$HOME/repos/workspaces` itself, anything under `$HOME/repos/workspaces/_shared/`, or a directory under a workspace seat when the active thread is shared (`--shared`) → `$HOME/repos/workspaces/_shared`.
+3. Under `$HOME/repos/workspaces/<ws>/` → that seat.
+4. Inside a git repo → its toplevel (a tool repo such as `~/repos/tools/<name>/`).
+5. Otherwise → `$HOME/repos/workspaces/_shared`.
+6. Last: when the result's repo ignores `docs/handoffs/` (`git -C <home> check-ignore -q docs/handoffs/x.md` exits 0 — `~/Projects/Tutorials/`, `_archive/` and `TSMS/` are deliberately ignored) → `$HOME/repos/workspaces/_shared`, which is never checked and never ignored. Exit 1 (not ignored) and 128 (outside git) leave `<home>` as it is.
+
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/handoff-home.sh` is the only implementation of these rules (`[--shared] [--dir <path>]`, or `--shared-root` for `_shared` itself); handoff's writer and close's scan both call it, so a doc is always found where it was written. A resolver that exits non-zero or prints nothing means "no `<home>`", never a guessed one: handoff writes no doc and close reports its scan failed.
+
+- **Ownership.** In `_shared`, a doc belongs to a thread only by its front-matter `thread:`, whether `_shared` is reached as `<home>` or scanned for a shared thread, because `_shared` holds every shared thread's docs; a scan with a non-empty slug lists only that thread's docs there, and a legacy doc (no `thread:`) is neither listed nor counted. Elsewhere, ownership is by location: a doc in `<home>/docs/handoffs/` is that `<home>`'s thread's, except in a `<home>` carrying more than one THREAD.md-backed thread, where a doc whose `thread:` names another thread is that thread's.
+- The workspaces repo root `docs/handoffs/` is never a home: rule 2 sends the root itself to `_shared`.
+- **Known oddity.** Rule 3, read literally, makes `$HOME/repos/workspaces/docs/…` a "seat" named `docs`, so a directory under `workspaces/docs` resolves to `$HOME/repos/workspaces/docs`. The rule is kept as stated and pinned by `tests/handoff-home.test.sh`; nothing writes handoffs from there.
 
 ## Front matter
 
@@ -24,7 +41,7 @@ refreshed: <YYYY-MM-DD>  # optional — added by thread:close when it refreshes 
 - **`pending`** — written and committed; the thread's continuation until a session picks it up (§ While pending).
 - **`consumed`** — the picking-up session set it (§ Pickup); the doc's job is over.
 - **deleted** — the consuming session's close removed it (§ Close-out); git history keeps every version.
-- **legacy** — no `status:` line (written before ADR 0017). Counted in close's step-8 report and otherwise left alone: never refreshed, never deleted, never marked consumed, never a reason to suppress. Add the front matter by hand to bring one into the lifecycle.
+- **legacy** — no `status:` line (written before ADR 0017). Counted in close's step-8 report and otherwise left alone: never refreshed, never deleted, never marked consumed, never a reason to suppress — except in a slug-filtered `_shared` (§ Home): a legacy doc has no `thread:`, so it is neither listed nor counted there. Add the front matter by hand to bring one into the lifecycle.
 - **`unknown(…)`** — a `status:` value other than the two above. One counted report line, untouched, like legacy.
 
 `close` § The handoff owns the continuation holds the scan that classifies them, and how it reads the status.
@@ -47,7 +64,7 @@ A consumer that exits by `stash` or `defer` instead leaves the consumed doc for 
 
 ## Withdrawn
 
-A handoff called off in the same session ("never mind, keep going") is no handoff at all: the session removes the doc at once — the command is handoff § Lifecycle — and undoes the handoff row: when the thread has a THREAD.md, it rewrites real Resume instructions there in place of the `Read <abs doc path> first` pointer (the session's own close then carries the file). No pending doc outlives the intent, no pointer names a deleted file, and close finds nothing pending. A doc left by a misfire is the one way the handoff route can silence a later close: a pending doc nobody meant suppresses that thread's continuation tasks.
+A handoff called off in the same session ("never mind, keep going") is no handoff at all: the session removes the doc at once — the command is handoff § Lifecycle — and undoes the handoff row: when the thread has a THREAD.md, it rewrites real Resume instructions there in place of the `Read <abs doc path> first` pointer (the session's own close then carries the file). The undo also **reopens the captures the handoff superseded** (handoff **Open captures.**): every `Work/Tasks` note carrying `Superseded by handoff <abs doc path>` goes back to `status: open`, drops `completed:` and that Notes line, and a scheduled one gets its unchecked day-page line back (`task-writer.md` § 3b, with its dedup). The marker is on disk, so this survives a compaction. No pending doc outlives the intent, no pointer names a deleted file, and close finds nothing pending. A doc left by a misfire is the one way the handoff route can silence a later close: a pending doc nobody meant suppresses that thread's continuation tasks.
 
 ## Thread state
 
@@ -57,7 +74,7 @@ The single definition of the `state:` transitions every continuity route applies
 |---|---|---|
 | `stash` | `parked` | `## Parked` |
 | `defer` | `paused` | `## Paused` |
-| `handoff` | `active`; Resume instructions become the pointer `Read <abs doc path> first` | `## Active` |
+| `handoff` | `active`; Resume instructions become the pointer `Read <abs doc path> first`; open thread captures linked to this thread are closed as superseded (handoff **Open captures.**) | `## Active` |
 | pickup: `/thread:open [[<task>]]`, `/thread:open <handoff doc>`, or `/thread:open <slug>` whose Resume points at a pending doc | `active` when it reads `parked` or `paused`; otherwise unchanged | `## Active` |
 | `close`, `/thread:open save` | unchanged; `done` only when Lachy says the thread is finished | `## Done` when set |
 | creation | `active` | `## Active` |

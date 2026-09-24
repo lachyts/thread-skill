@@ -11,7 +11,7 @@ End-of-thread capture. The thread is about to end — make sure nothing valuable
 
 **Everything saves autonomously except vault tasks.**
 
-- **Auto-execute, no asking**: git commits in `~/repos/workspaces/` and the Obsidian vault (session-changed files only) plus one more file, by pathspec, in whatever repo holds the handoff doc (§ The handoff owns the continuation), the thread update, auto-memory entries (via the save-time triage below), and workspace knowledge edits. The safety net that replaced per-item approval sits downstream, not in a menu: auto-memory lands `provisional` with provenance, nothing is ever hard-deleted, and the weekly memory curator archives what turns out to be junk (ADR 0011).
+- **Auto-execute, no asking**: git commits in `~/repos/workspaces/` and the Obsidian vault (session-changed files only) plus the handoff docs, each by pathspec in its own repo (§ The handoff owns the continuation), the thread update, auto-memory entries (via the save-time triage below), and workspace knowledge edits. The safety net that replaced per-item approval sits downstream, not in a menu: auto-memory lands `provisional` with provenance, nothing is ever hard-deleted, and the weekly memory curator archives what turns out to be junk (ADR 0011).
 - **Propose first, then wait**: vault tasks only. Tasks surface on Lachy's daily agenda, so a junk task has ongoing attention cost — "don't create tasks unsolicited" survives as the sole approval gate.
 
 **Wrong route?** If the conversation reveals the work is *not* finished — it's being parked or continued — dispatch to the right sibling instead: `thread:stash` / `thread:defer` (set down, capture task per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md`) or `thread:handoff` (fork to a fresh agent now).
@@ -57,36 +57,64 @@ Each candidate lands in exactly one of these. When in doubt, prefer the destinat
 
 ## The handoff owns the continuation
 
-A **handoff doc** is a file in `<home>/docs/handoffs/`; what it is, who writes it and the states it moves through are `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § States (its front matter is `handoff-lifecycle.md` § Front matter). `<home>` is the *unit directory* handoff § Handoff document defines — the project directory under `~/Projects/`, the workspace directory under `~/repos/workspaces/`, else the CWD's git toplevel — so the scan below resolves it the same way. A pending doc in `<home>/docs/handoffs/` is *this thread's* by construction; the one exception is a `<home>` that carries more than one THREAD.md-backed thread, where a doc whose `thread:` names a thread other than the active one is that thread's and is left alone. Lachy tracks the doc as a **single object**: he acts on it, or he converts it into a task himself. A close that proposes vault tasks restating it is a second tracker for work he is already tracking, and reads as though the handoff did not count (ruled 2026-09-19; ADR 0017).
+A **handoff doc** is a file in `<home>/docs/handoffs/`; what it is, who writes it and the states it moves through are `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § States (its front matter is `handoff-lifecycle.md` § Front matter). `<home>` is resolved by the rules in `handoff-lifecycle.md` § Home, whose only implementation is `${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/handoff-home.sh` — handoff's writer calls the same script, so the scan below looks exactly where the doc was written. Outside `_shared`, a pending doc in `<home>/docs/handoffs/` is *this thread's* by construction; the one exception is a `<home>` that carries more than one THREAD.md-backed thread, where a doc whose `thread:` names a thread other than the active one is that thread's and is left alone. In `_shared`, ownership is by `thread:` only, because `_shared` holds every shared thread's docs: with a non-empty `slug` the scan lists only this thread's docs there, so step 7.2 can never delete another thread's consumed doc, and a legacy doc in a slug-filtered `_shared` (it has no `thread:`) is neither listed nor counted. Lachy tracks the doc as a **single object**: he acts on it, or he converts it into a task himself. A close that proposes vault tasks restating it is a second tracker for work he is already tracking, and reads as though the handoff did not count (ruled 2026-09-19; ADR 0017).
 
-**The test is on disk, never in memory** — run the scan in step 2 and again before step 6, so it survives a context compaction. One directory, no recursion (`<home>/docs/handoffs/` is where handoff writes); `find`, not a glob, because the Bash tool is zsh, where an unmatched glob aborts the command before it runs.
+**The test is on disk, never in memory** — run the scan in step 2 and again before step 6, so it survives a context compaction. Each scanned directory, no recursion (`<home>/docs/handoffs/` is where handoff writes); `find`, not a glob, because the Bash tool is zsh, where an unmatched glob aborts the command before it runs. The scan takes three inputs, set on a line of their own before the snippet (`slug=… shared=… pointer=…`; the snippet only defaults them, so values already in the environment survive):
+
+- `slug` — the active THREAD.md's `slug:` (empty when no thread is active).
+- `shared` — `1` when the active thread is a `_shared/threads/<slug>.md`, else empty. With a slug, the scan then also covers `_shared/docs/handoffs/` (filtered by `thread:`) when `<home>` is somewhere else.
+- `pointer` — the path in the THREAD.md Resume instructions (`Read <path> first`), else empty. The doc it names is classified even when it lies outside the scanned directories — a doc written at a consumer home in another repo (handoff **Consumer home.**) stays visible here — and is never printed twice.
 
 ```bash
 # thread:handoff-scan (extracted and run by tests/handoff-scan.test.sh)
-case "$PWD" in
-  "$HOME"/Projects/*/*)        home="$(printf '%s' "$PWD" | sed -E "s#^($HOME/Projects/[^/]+/[^/]+).*#\1#")" ;;
-  "$HOME"/repos/workspaces/*)  home="$(printf '%s' "$PWD" | sed -E "s#^($HOME/repos/workspaces/[^/]+).*#\1#")" ;;
-  *)                           home="$(git rev-parse --show-toplevel 2>/dev/null || echo "$HOME/repos/workspaces/_shared")" ;;
-esac
-find "$home/docs/handoffs" -maxdepth 1 -name '*.md' 2>/dev/null | while IFS= read -r f; do
-  s="$(awk '{ sub(/\r$/, "") } NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} /^status:/{print $2; exit}' "$f" | tr -d "\"'\r" | tr '[:upper:]' '[:lower:]')"
+: "${slug:=}" "${shared:=}" "${pointer:=}"
+hh="${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/handoff-home.sh"
+if [ ! -f "$hh" ]; then echo "handoff-scan: resolver not found at $hh (is CLAUDE_PLUGIN_ROOT set?)" >&2; exit 2; fi
+if [ -n "$shared" ]; then home="$(bash "$hh" --shared)" || home=''; else home="$(bash "$hh")" || home=''; fi
+shd="$(bash "$hh" --shared-root)" || shd=''
+if [ -z "$home" ] || [ -z "$shd" ]; then echo "handoff-scan: no <home> (resolver failed)" >&2; exit 2; fi
+thr() { awk '{ sub(/\r$/, "") } NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} /^thread:/{sub(/^thread:[ \t]*/, ""); print; exit}' "$1" | tr -d "\"'\r" | sed 's/[[:space:]]*$//'; }
+mine() { if [ -n "$slug" ] && [ "$(dirname "$1")" = "$shd/docs/handoffs" ] && [ "$(thr "$1")" != "$slug" ]; then return 1; fi; }
+cls() {
+  s="$(awk '{ sub(/\r$/, "") } NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} /^status:/{print $2; exit}' "$1" | tr -d "\"'\r" | tr '[:upper:]' '[:lower:]')"
   case "$s" in pending|consumed) ;; "") s=legacy ;; *) s="unknown($s)" ;; esac
-  echo "$s $f"
-done
+  echo "$s $1"
+}
+scan_one() {
+  echo "# scanned $1" >&2
+  find "$1" -maxdepth 1 -name '*.md' 2>/dev/null | while IFS= read -r f; do
+    if mine "$f"; then cls "$f"; fi
+  done
+}
+scan_one "$home/docs/handoffs"
+sd=''
+if [ -n "$shared" ] && [ -n "$slug" ] && [ "$home" != "$shd" ]; then sd="$shd/docs/handoffs"; scan_one "$sd"; fi
+if [ -n "$pointer" ]; then
+  p="$pointer"
+  if [ "${p%"${p#??}"}" = '~/' ]; then p="$HOME/${p#??}"; fi
+  if [ "${p#/}" = "$p" ]; then echo "handoff-scan: pointer not absolute ($p) — not classified" >&2
+  elif [ ! -f "$p" ]; then echo "handoff-scan: pointer missing ($p)" >&2
+  else
+    pf="$(cd "$(dirname "$p")" && pwd -P)/$(basename "$p")"
+    if { [ "$(dirname "$pf")" = "$home/docs/handoffs" ] || [ "$(dirname "$pf")" = "$sd" ]; } && [ "${pf%.md}" != "$pf" ] && mine "$pf"; then :; else cls "$pf"; fi
+  fi
+fi
 # end thread:handoff-scan
 ```
+
+The snippet announces each directory it scanned as a `# scanned <dir>` line on stderr, and a pointer it could not classify as `handoff-scan: pointer not absolute (<p>)` or `handoff-scan: pointer missing (<p>)`; stdout stays `<status> <path>` lines only. When the resolver cannot be run (`CLAUDE_PLUGIN_ROOT` unset, a stale cache, a host without the plugin) or prints nothing, the scan exits 2 with a `handoff-scan:` line on stderr and prints nothing — it never guesses a directory (step 2's failure path).
 
 `pending` → this thread's continuation (the rules below). `consumed` → deleted in step 7 per `handoff-lifecycle.md` § Close-out. `legacy` and `unknown(…)` → one counted report line, untouched. The status is read from the front-matter block only (quotes stripped, case-folded, CRLF tolerated), so a body that mentions `status: pending` does not count.
 
 Three rules, for this thread's pending doc:
 
 1. **Scope is the line.** For each vault-task candidate ask one question: *would the next session, working from this doc, do it?* Yes → it is **continuation**, and the doc is its only destination. No → it is a **loose end** — a malformed vault note to rename, a supplier to chase, anything the thread's `scope:` line does not cover — and it reaches the task menu exactly as before. The doc's own title and § What remains decide the question, not who asked for the handoff: a hook-forced handoff counts exactly like a requested one.
-2. **Refresh, don't restate — continuation only.** Re-read the doc's § What remains and § Paste-ready prompt against **category 3** of the scan. A remaining item this session completed moves to § Done and verified; a next step the doc lacks is added; a next move that has moved on is rewritten; add `refreshed: <today>` to the front matter (the optional key handoff's contract reserves for this) and commit the file by pathspec in `<home>`'s repo (step 7). Categories 1, 2, 4 and 5 land in THREAD.md exactly as before — the doc is refreshed for continuation, never as a second state record, so every candidate still has one destination. This is the whole handling for a handoff written mid-session and then overtaken by hours of further work: the doc stays the one true object instead of the menu quietly growing a second one. A doc the scan finds nothing to change is left byte-identical and reported `unchanged`.
+2. **Refresh, don't restate — continuation only.** Re-read the doc's § What remains and § Paste-ready prompt against **category 3** of the scan. A remaining item this session completed moves to § Done and verified; a next step the doc lacks is added; a next move that has moved on is rewritten; add `refreshed: <today>` to the front matter (the optional key handoff's contract reserves for this) and commit the file by pathspec in its own repo (step 7.2). Categories 1, 2, 4 and 5 land in THREAD.md exactly as before — the doc is refreshed for continuation, never as a second state record, so every candidate still has one destination. This is the whole handling for a handoff written mid-session and then overtaken by hours of further work: the doc stays the one true object instead of the menu quietly growing a second one. A doc the scan finds nothing to change is left byte-identical and reported `unchanged`.
 3. **No annotation, no asking.** Never label a candidate "already in the handoff", never ask whether he has done it. Both hand back a decision the rule has already made. The report row in step 8 is the visibility — it carries the doc's `written:` date, so a handoff that has sat pending for weeks is visible at every close without a TTL deciding for him.
 
 A **manual handoff** is a complete handoff for this rule (`handoff-lifecycle.md` § While pending); a handoff **withdrawn in the same session** is no handoff at all, and close finds nothing pending (`handoff-lifecycle.md` § Withdrawn).
 
-THREAD.md is updated as normal — state, decisions, quirks, session log — but its *Resume instructions* point at the pending doc (`Read <home>/docs/handoffs/<doc> first`) rather than restating it: the doc is the single copy of the continuation. When this session **consumed** the doc, the pointer goes with it — step 4 writes real resume instructions again, because step 7 deletes the file.
+THREAD.md is updated as normal — state, decisions, quirks, session log — but its *Resume instructions* point at the pending doc (`Read <home>/docs/handoffs/<doc> first`) rather than restating it: the doc is the single copy of the continuation. When the doc the pointer names is **consumed** — by any session, since step 7.2 deletes it — or is **missing** (the scan's `pointer missing` note), the pointer goes with it: step 4 writes real resume instructions again.
 
 ## Memory scope discipline
 
@@ -141,7 +169,8 @@ Close-inferred saves land `status: provisional` — the curator promotes them to
 2. **Check git state**:
    - `git -C ~/repos/workspaces status --short` — identify which modified files were actually touched in this session vs stale from prior threads. Only session-changed files are in scope.
    - If session is in `ops-workspace`, also `git -C "<vault-path>" status --short` — same filter: only files this thread touched.
-   - Run the handoff scan from § The handoff owns the continuation. Record: pending doc(s) for this thread, consumed doc(s), the legacy/unknown count.
+   - Run the handoff scan from § The handoff owns the continuation, with its `slug`, `shared` and `pointer` inputs set. Record: pending doc(s) for this thread, consumed doc(s), the legacy/unknown count per scanned directory, the directories scanned (the `# scanned` stderr lines), and any `handoff-scan:` stderr note.
+   - **Failure path.** If the scan exits non-zero, record `scan failed` and its stderr, and then: no `<home>` is guessed; step 7.2 does nothing for handoff docs; § The handoff owns the continuation is not applied, so vault-task candidates reach the menu as they would with no doc pending; and step 8's `handoff: scan failed` line makes the gap visible.
 
 3. **Scan the conversation** for the seven categories above.
 
@@ -150,7 +179,7 @@ Close-inferred saves land `status: provisional` — the curator promotes them to
    - What's-built/decided: append new items.
    - Open questions: resolve answered ones (move to "decided"), add new ones.
    - Known quirks: append discoveries from this session.
-   - Resume instructions: update if next-session entry-point shifted; when a handoff doc is pending, the entry point is `Read <home>/docs/handoffs/<doc> first` — a pointer, never a copy. When this session consumed a doc, replace that pointer with real instructions — the file is deleted in step 7.
+   - Resume instructions: update if next-session entry-point shifted; when a handoff doc is pending, the entry point is `Read <home>/docs/handoffs/<doc> first` — a pointer, never a copy. When the doc the Resume instructions point at is consumed, by any session (step 7.2 deletes it), or is missing (the scan's `pointer missing` note), replace the pointer with real instructions, written from the doc before it is deleted.
    - Session log: prepend `- YYYY-MM-DD: <one-line of what shifted>` (newest first).
    - Thread state: apply `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state's close row — `last_touched:` and, for a shared thread, the INDEX line's `last:` set to today; `state: done` and the INDEX line's move to `## Done` only on Lachy's explicit word that the thread is finished. `/thread:open save` runs this same step.
 
@@ -160,7 +189,7 @@ Close-inferred saves land `status: provisional` — the curator promotes them to
 
 7. **Execute.** Order:
    1. Thread update — write THREAD.md (the most important file).
-   2. Handoff lifecycle, in `<home>`'s repo (`$home` from step 2; `git -C "$home"` works from a subdirectory), by pathspec per "Commit hygiene" below — one file, on the branch the work is on, and nothing else in that repo. A pending doc for this thread: apply the refresh diff, then `git -C "$home" commit -m "📝 docs(handoff): refresh <slug> at close" -- <abs path>`; skip when `unchanged`. A consumed doc, deleted per `handoff-lifecycle.md` § Close-out: `git -C "$home" rm -f <abs path>` (`-f` — the consumed mark is an uncommitted local modification, and plain `git rm` refuses it) then `git -C "$home" commit -m "🔧 chore(handoff): <slug> consumed — delete (history keeps it)" -- <abs path>`; a consumed doc that was never committed (handoff wrote it on a detached HEAD) is plain-`rm`'d and reported `not versioned: <path> (never committed)`. If `<home>`'s repo has a half-applied git operation (`rebase-merge`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `BISECT_LOG` under `.git/`) or a detached HEAD, do not commit: leave the edit in place and report `not versioned: <path> (<reason>)`. When `<home>` is under `~/repos/workspaces`, sub-step 7's auto-commit carries the file instead.
+   2. Handoff lifecycle, each doc in **its own** repo — every git command is `git -C "$(dirname <doc>)"` (it resolves the containing repo from any subdirectory), by pathspec per "Commit hygiene" below: one file per commit, on the branch the work is on, and nothing else in that repo. That covers a doc outside `<home>`, such as the Resume-pointer doc at a consumer home in another repo. A pending doc for this thread: apply the refresh diff, then `git -C "$(dirname <doc>)" commit -m "📝 docs(handoff): refresh <slug> at close" -- <abs path>`; skip when `unchanged`. A consumed doc is deleted in its own repo, whichever session marked it (`handoff-lifecycle.md` § Close-out) — the pointer doc a producer-side close finds consumed included: `git -C "$(dirname <doc>)" rm -f <abs path>` (`-f` — the consumed mark is an uncommitted local modification, and plain `git rm` refuses it) then `git -C "$(dirname <doc>)" commit -m "🔧 chore(handoff): <slug> consumed — delete (history keeps it)" -- <abs path>`; a consumed doc that was never committed (handoff wrote it on a detached HEAD) is plain-`rm`'d and reported `not versioned: <path> (never committed)`. If that doc's repo has a half-applied git operation (`rebase-merge`, `MERGE_HEAD`, `CHERRY_PICK_HEAD`, `BISECT_LOG` under `.git/`) or a detached HEAD, do not commit: leave the edit in place and report `not versioned: <path> (<reason>)`. When the doc's path is under `~/repos/workspaces`, sub-step 7's auto-commit carries the file instead. After a failed scan (step 2) this sub-step does nothing for handoff docs.
    3. Workspace knowledge edits.
    4. Process-observation candidates — append to the `METHOD.md` the routing test resolved, per the Destinations row. Skip when category 7 resolved to NOOP. Commit the append immediately per `${CLAUDE_PLUGIN_ROOT}/skills/_shared/process-scan.md` § One commit rule, with the add-then-pathspec form in "Commit hygiene" below. Sub-step 7's workspaces auto-commit then finds a seat or estate ledger already committed.
    5. Auto-memory via the four verbs + MEMORY.md index updates. Honour the scope hook per "Memory scope discipline" — redirect or NOOP, autonomously.
@@ -188,7 +217,7 @@ git -C <repo> add <path> && git -C <repo> commit -m "<message>" -- <path>
 
 If `git add` fails — an ignored path such as `~/Projects/Tutorials/`, `_archive/` or `TSMS/` — **do not commit**. Report `not versioned: <path> (<reason>)` in the What landed report instead of a SHA.
 
-8. **Print the "What landed" report** (≤12 lines): thread-state pointer (e.g. `THREAD.md updated · state: active · open questions: 2`), memory verbs with paths (`ADD feedback_x.md (provisional)` / `UPDATE reference_y.md` / `SUPERSEDE a.md → b.md` / `NOOP: <reason>`), knowledge edits, any METHOD.md candidate append, at any altitude (file path + the observation in one line — the project ledger lands outside the workspace and vault, and the seat/estate ledgers are doctrine surfaces; neither is ever silent), handoff rows — never silent when a doc exists — `handoff pending: <path> · written <date> · written this session | refreshed (<what changed>) | unchanged · continuation: <N> candidate(s) kept in the doc (<K> added this close), none proposed`, `handoff consumed: <path> · deleted in <sha>`, and one `handoff legacy: <N> doc(s) in <home>/docs/handoffs/ (no or unknown front matter — untouched)` line when the count is non-zero, vault task files as clickable `[[wiki-links]]`, commit SHAs for all repos touched, any `not versioned: <path> (<reason>)` line from a failed stage (see Commit hygiene), any `redirected:` or `Needs your call:` lines, and a one-line discard note.
+8. **Print the "What landed" report** (≤12 lines): thread-state pointer (e.g. `THREAD.md updated · state: active · open questions: 2`), memory verbs with paths (`ADD feedback_x.md (provisional)` / `UPDATE reference_y.md` / `SUPERSEDE a.md → b.md` / `NOOP: <reason>`), knowledge edits, any METHOD.md candidate append, at any altitude (file path + the observation in one line — the project ledger lands outside the workspace and vault, and the seat/estate ledgers are doctrine surfaces; neither is ever silent), handoff rows — never silent when a doc exists — `handoff pending: <path> · written <date> · written this session | refreshed (<what changed>) | unchanged · continuation: <N> candidate(s) kept in the doc (<K> added this close), none proposed`, `handoff consumed: <path> · deleted in <sha>`, one `handoff legacy: <N> doc(s) in <dir> (no or unknown front matter — untouched)` line per scanned directory whose count is non-zero, `handoff: none in <dirs scanned>` when the scan printed nothing and exited 0 (so a scan that ran reads differently from one that did not), `handoff pointer: <p> missing | not absolute` for a pointer note, and — when the scan failed — `handoff: scan failed (<stderr>) — lifecycle not run, no <home> guessed` in place of every other handoff row, never `handoff: none in …`, vault task files as clickable `[[wiki-links]]`, commit SHAs for all repos touched, any `not versioned: <path> (<reason>)` line from a failed stage (see Commit hygiene), any `redirected:` or `Needs your call:` lines, and a one-line discard note.
 
 9. **End with the closing banner.** After the report, add a blank line, a horizontal rule (`---`), another blank line, then this exact line as the final line of the response:
 
@@ -209,7 +238,8 @@ If `git add` fails — an ignored path such as `~/Projects/Tutorials/`, `_archiv
 - **A handoff doc is pending but this session's work was unrelated to it.** The refresh finds nothing to add; the doc is left byte-identical and reported `unchanged`; loose ends reach the menu as normal.
 - **A consumed handoff doc left by a session that died before its close** → deleted all the same (consumed is decided on disk; the dead session's own uncommitted work, not the doc, is where its state sits, and SessionStart flags that as stale).
 - **A legacy handoff doc** (no `status:` front matter — written before ADR 0017) → counted on the `handoff legacy:` line; never refreshed, deleted or used to suppress. If it is plainly this thread's continuation and Lachy wants it in the lifecycle, he adds the front matter; close never guesses.
-- **`<home>`'s repo mid-rebase / mid-merge / detached HEAD** → the handoff-lifecycle commit is skipped with a `not versioned:` line; the edit stays in the tree for the next close.
+- **A handoff doc's repo mid-rebase / mid-merge / detached HEAD** → that doc's handoff-lifecycle commit is skipped with a `not versioned:` line; the edit stays in the tree for the next close.
+- **The resolver cannot run** (`CLAUDE_PLUGIN_ROOT` unset, a stale plugin cache, another host) → the scan exits 2; step 2's failure path applies and step 8 prints `handoff: scan failed (…)`. Close never falls back to a hand-resolved `<home>`.
 - **Not inside `~/repos/workspaces/`.** Skip the workspaces-commit step; everything else still applies.
 - **No active thread, no project context.** That's fine — skip thread-update, still run the rest of the triage. Offer to create a thread if the conversation looks worth one.
 
