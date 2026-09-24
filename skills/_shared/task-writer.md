@@ -16,7 +16,12 @@ in this order:
 
 1. **CWD inside a code repo** → grep `repos:` frontmatter across
    `~/repos/obsidian/Work/Projects/*/*.md` for an entry matching the current
-   path (expand `~` to `$HOME` before comparing). Use that project note.
+   path (expand `~` to `$HOME` before comparing). Exactly one match → use
+   that project note. **More than one match** (a sibling project sharing the
+   repo, or a monorepo with sub-project notes) → fall through to § 1.2–1.4
+   among the matches: the one the active THREAD.md names, else the one the
+   conversation is scoped to, else `AskUserQuestion` offering those matches.
+   No match → § 1.2.
 2. **Active THREAD.md** names/implies a project → use it.
 3. **Conversation clearly scoped** to a known project → use it.
 4. **Still ambiguous** → ask via `AskUserQuestion` (offer the 2–3 most likely
@@ -174,6 +179,41 @@ even when pasted into a non-Claude harness. If the work is conversation-gated (n
 before an agent can act), say so explicitly in the Notes line — this is what
 keeps `/thread:schedule` from sweeping it into an autonomous rollout.
 
+**Lean capture.** The task note is a pointer to the work, not a store for it.
+
+- **Scope.** The rule binds every task this spec shapes: stash and defer
+  captures, and close's proposed follow-ups.
+- **Ceiling.** `## Notes` holds at most **10 non-empty lines**, counting every
+  non-empty body line up to the next heading, the `**Thread:**` and
+  `**Set down:**` lines included — the same ceiling as the vault's
+  `check-research-landing` guard.
+  - The ceiling counts only the `## Notes` body lines this spec writes
+    (capture and § 2 re-capture). Handoff's `Superseded by handoff` Notes
+    line is a lifecycle marker on a closed capture, so it is exempt; the
+    vault guard targets research-family sections, not `## Notes`.
+  - A re-capture under § 2 rewrites Notes in place and never appends past the
+    ceiling.
+  - A capture written before this rule, with Notes over 10 lines or a
+    `## Findings`/`## Research` section: a re-capture rewrites Notes down to
+    the ceiling and replaces any research-family section with a single
+    pointer line — a landed digest if one exists, else `earlier findings:
+    vault git history before <YYYY-MM-DD>`. The route's confirmation then
+    offers to land them, as in the research pointer below.
+- **Resume prompt.** Its `Context:` stays at 2–4 lines.
+- **No research on the note.** No research-family section goes on the task
+  note: no `## Findings` or `## Research` heading, no tables of results, no
+  logs, no transcripts.
+- **Research pointer.** Research worth keeping gets at most one pointer line:
+  an already-landed digest under `Library/Research/Digests/`, a THREAD.md
+  section, or `left in conversation`. The route's own confirmation then
+  offers, in one line, to land it per
+  `~/repos/workspaces/_shared/knowledge/add-writers/research-landing.md` (its
+  Step 0 asks first) — for stash and defer that confirmation is § 7, for
+  close it is close's "What landed" report. The offer never blocks the exit:
+  stash, defer and close never land research themselves.
+- **Other homes.** Long state belongs in THREAD.md, per § 6. A live
+  continuation belongs in a handoff doc (`thread:handoff`).
+
 ## 6. THREAD.md — optional upgrade, never manufactured
 
 - Thread already exists → update it: set `state:` per
@@ -200,4 +240,6 @@ One compact confirmation, always echoing the concrete outcome:
 - stash: `→ [[<slug>]] stashed (no date) — resurfaces in /weekly's Stashed threads. <Project>.`
 
 Render the task link clickable (`obsidian://open?...` per the global link
-rules). Then it is safe to end the session — say so.
+rules). When a Lean capture research pointer was written (§ 5), add the
+one-line research-landing offer after the confirmation; it never delays the
+safe-to-end line. Then it is safe to end the session — say so.
