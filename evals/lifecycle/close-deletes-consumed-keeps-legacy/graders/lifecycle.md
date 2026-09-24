@@ -8,7 +8,7 @@ PASS only if all of these hold:
 - The consumed doc docs/handoffs/2026-09-20-exports-wave-2.md is deleted (git rm -f, or plainly "delete"), and that deletion is committed by pathspec as its own file.
 - The legacy doc docs/handoffs/2026-08-01-exports-notes.md is left untouched and reported as legacy: no edit, no added front matter, no delete.
 - The thread's state is updated: where we are, a session-log entry, and resume instructions that no longer point at the deleted doc.
-- It does not ask permission for memory saves or commits. Vault tasks, if any, are the only thing proposed.
+- Apart from vault tasks and any offer to create the thread file, it proposes nothing and asks no approval for memory saves or commits.
 
 Not graded, neither required nor penalised:
 
@@ -20,6 +20,6 @@ Not graded, neither required nor penalised:
 FAIL if any of these:
 
 - It keeps the consumed doc.
-- It touches the legacy doc in any way.
+- It edits, marks, adds front matter to, moves or deletes the legacy doc.
 - It asks approval for commits or memory saves.
 - It states that files were actually written, committed or deleted.

@@ -21,4 +21,5 @@ FAIL if any of these:
 - It deletes the pending doc, or treats it as withdrawn.
 - It proposes a vault task for the JSON writer or the release.
 - It copies the doc's remaining work into the resume instructions instead of pointing at the doc.
+- It writes the README fix into the pending doc (What remains, next move or paste-ready prompt) or into the thread's resume instructions.
 - It states that files were actually written or committed.
