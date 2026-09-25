@@ -13,6 +13,14 @@ machine-verifiable in-run) rolls out; everything else runs as scoped sessions.
 > (`lachyts/wave-skill`, now archived). "Wave" lives on as the domain term —
 > rollouts still have waves — but the namespace is `/thread:*` throughout.
 
+> **Built for one setup.** This is a working reference implementation, published as-is, not a
+> general-purpose plugin. The skills assume the author's machine: an Obsidian vault at
+> `~/repos/obsidian` (TaskNotes tasks under `Work/Tasks/`, phases under `Work/Phases/`), a
+> workspaces repo at `~/repos/workspaces` whose `_shared/` holds the note-writer specs, shared threads
+> and the native-workflow exchange, and a Melbourne clock. Read it for the ideas (the execution-fit
+> test, the convergence engine, the handoff lifecycle); expect to adapt paths before running it
+> anywhere else. `make test` is hermetic and runs on any machine with bash, `python3` and `node`.
+
 ## Continuity verbs
 
 | Member | Moment | What it does |
@@ -107,7 +115,9 @@ claude --plugin-dir ~/repos/tools/thread-skill
 ```
 
 Cut a versioned release with `claude plugin tag` once `plugin.json` +
-`marketplace.json` agree (bump BOTH, always).
+`marketplace.json` agree (bump BOTH, always). `master` is protected (ADR 0025): the release bump, like
+every other change, lands through a pull request with a green `make test` check. Nobody pushes to
+`master` directly, the owner included.
 
 ## Tests
 
