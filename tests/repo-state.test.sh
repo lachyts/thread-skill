@@ -242,7 +242,7 @@ for phrase in 'Merge or retire' '§ The handoff owns the continuation' 'rule 1' 
   has "$step6" "$phrase" "step 6 says: $phrase"
 done
 step8=$(grep -E '^8\. \*\*Print the "What landed" report' "$CLOSE")
-has "$step8" '— no `origin` remote, check skipped' "step 8 says: the no-origin row drops the set-head hint"
+has "$step8" '— no origin remote, check skipped' "step 8 says: the no-origin row drops the set-head hint"
 for phrase in 'Repo state: check failed (' '— tracked by [[' '— not tracked by any open task' 'continuation in' \
               '— tracking unknown (' 'git remote set-head origin --auto'; do
   has "$step8" "$phrase" "step 8 says: $phrase"
