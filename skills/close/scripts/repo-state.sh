@@ -44,10 +44,13 @@ if [ $? -ne 0 ]; then
 fi
 [ "$inside" = true ] || exit 0   # a bare repo prints false
 
-# 2. The branch. rc 1 = detached HEAD.
-br=$(git -C "$dir" symbolic-ref -q --short HEAD 2>/dev/null); rc=$?
+# 2. The branch. rc 1 = detached HEAD. Full refnames throughout, stripped here: `--short` prints
+#    heads/<br> when a tag shares the branch's name, and remotes/origin/<x> when a local branch is named
+#    origin/<x>.
+head=$(git -C "$dir" symbolic-ref -q HEAD 2>/dev/null); rc=$?
 [ "$rc" -eq 1 ] && exit 0
 [ "$rc" -eq 0 ] || fail "symbolic-ref HEAD failed (rc $rc)"
+case $head in refs/heads/?*) br=${head#refs/heads/} ;; *) exit 0 ;; esac
 
 # 3. Unborn branch (no commit yet): rc 1.
 git -C "$dir" rev-parse -q --verify HEAD >/dev/null 2>&1; rc=$?
@@ -56,9 +59,9 @@ git -C "$dir" rev-parse -q --verify HEAD >/dev/null 2>&1; rc=$?
 
 # 4. The default branch, from the local origin/HEAD symref only. rc 1 = missing or not a symref.
 def=''
-ref=$(git -C "$dir" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null); rc=$?
+ref=$(git -C "$dir" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null); rc=$?
 if [ "$rc" -eq 0 ]; then
-  case $ref in origin/?*) def=${ref#origin/} ;; esac
+  case $ref in refs/remotes/origin/?*) def=${ref#refs/remotes/origin/} ;; esac
 elif [ "$rc" -ne 1 ]; then
   fail "symbolic-ref origin/HEAD failed (rc $rc)"
 fi
