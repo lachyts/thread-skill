@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-09-23
+last_touched: 2026-09-25
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
 ---
@@ -9,6 +9,85 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-09-25 (afternoon): the self-rollout is complete and 2.6.0 is released. Nothing is running.**
+- **Landed:** 16 tasks as PRs #1–#16 on `lachyts/thread-skill` master, in 7 waves over 37h 22m (wall
+  clock, including the two halts that waited on Lachy). The last merge is `4a87a15`. `make test` was
+  green after every wave, and everything ran on Opus 5.5 capped at `max_tier: opus`. The source of truth
+  is the archived rollout note `[[thread-skill-rollout-2026-09-23]]`
+  (`~/repos/obsidian/Work/Tasks/Archive/Rollouts/`): § Notes, and § Completion log for waves → PRs,
+  rounds per task and the repair actions.
+- **Released:** 2.6.0 is `3a7b9be` (the manifests bump on `4a87a15`). This checkout pulled `--ff-only`
+  and is level with origin, so the freeze is over. `make release-check` is green at `3a7b9be` (re-run at
+  this close). This close deletes the consumed review doc, which the 2.6.0 cache still holds, so from now
+  on release-check lists that file as stray. That is expected (the Makefile's note on deleted tracked
+  files).
+- **Not landed:**
+  - **p2-3 was split** after it plan-blocked twice, into
+    `thread-skill-p2-6-close-repo-state-local-only` (local-only repo state plus close's feature-branch
+    check) and `thread-skill-p2-7-tool-repo-threads-and-open-save` (tool-repo threads, `open save`, the
+    CONTEXT.md Repo thread entry). Both run from the rollout clone. Lachy's decisions are in the p2-3
+    note § *Decisions (Lachy, 2026-09-25)*.
+  - **p3-1 and p3-3 are deferred** on design calls:
+    `thread-skill-p3-1-orient-native-children-one-launch-model`,
+    `thread-skill-p3-3-grill-fit-check-in-prompt-composition`.
+  - **p4-5 waits for the eval baseline** (`thread-skill-p4-5-trim-descriptions-700-hard-cap`).
+- **Open follow-ups** (vault tasks, all `open`):
+  - `thread-skill-e2e-rerun-on-2-6-0`
+  - `thread-skill-eval-baseline-then-p4-5` (a spend, USD 5 cap)
+  - `thread-skill-evals-results-vs-release-check`
+  - `thread-skill-orient-nested-project-notes`
+  - `safepoint-uses-handoff-home-resolver`
+  - `thread-skill-protect-master-ci`
+  - `thread-skill-retire-rollout-clone` (only after p2-6 and p2-7 land)
+- **Lessons:** the rollout's five are in § Known quirks (protocol 4 intake items 14–17).
+
+**2026-09-25 (morning), superseded the same day (see above): the self-rollout was ready to resume from
+wave 3. Nothing was running; 8 tasks were left.**
+- **2026-09-24, before the resume:** Lachy rewrote `origin/master` to `c667e9e` by hand, deleted
+  `origin/main`, and added a clone `pre-push` hook that refuses any push to `master`/`main`. He withdrew
+  p1-3's gates and deferred p3-1 and p3-3 out of the rollout (rollout note § *Resolved 2026-09-24*).
+- **The resume lead (`execute-2026-09-24-a91d0c16`, unattended) finished wave 2 and most of wave 3.** Every
+  merge went through `merge-wave.sh`, and `make test` was green on each merged tree:
+  - PR #7, p3-4 → `42e9173`
+  - PR #6, p1-3 → `b52270d`. p1-3 was approved after 2 review rounds. It also landed the test-side
+    `GIT_*` scrub.
+  - PR #8, p3-2 → `a65ddbc`
+  - PR #9, p2-1 → `d85a3c7`
+
+  The cursor is 2/7, because wave 3 is incomplete.
+- **p4-1 did not land.** Its first pass was plan-blocked after 3 rounds on strictness feedback (narrowing,
+  per K87), so the lead re-dispatched it. The re-plan was approved in round 2 but returned
+  `gate-pending` with 23 phantom gates. The plan's `### Gated inputs` read `None`, and then a `---` and a
+  feedback-resolution list followed; the parser reads until the next heading (protocol 4 intake item
+  13). The lead halted at 08:37 and did not approve anything. On 2026-09-25 Lachy withdrew the gates
+  (rollout note § *Resolved 2026-09-25*), and p4-1 is back to `in_progress`.
+- **Left:** p4-1 (the rest of wave 3), then waves 4–7. Wave 4 is p2-2 with p4-2, p4-3 and p4-4, then
+  p2-5, p2-3 and p2-4 run one per wave. That is 8 tasks, not the 6 the 2026-09-25 resolution line
+  says.
+- **Freeze holds:** this THREAD.md edit is uncommitted. Commit it after the 2.6.0 `pull --ff-only`.
+
+**2026-09-24 (small hours), resolved later that day (see above): the self-rollout halted after wave 2.
+A test leaked onto GitHub master, and cleaning it up was Lachy's call.**
+- **Wave 1 merged:** PRs #1–#5 (p3-5, p1-4, p1-2, p1-1, p3-6). The repo has no CI, so the lead re-ran
+  `make test` on the combined tree (`c667e9e`), and it was green. p1-1 consumed the 2.5.2 simplify review doc
+  (it reads `consumed` on master; this checkout still has the pending copy until the pull).
+- **Wave 2 landed nothing:**
+  - p1-3 is `gate-pending`, with PR #6.
+  - p3-1 is `plan-blocked` after 3 rounds.
+  - p3-4 is approved, but its PR #7 is held unmerged.
+
+  The smart-halt fires because p1-3's and p3-1's files return in later waves. The cursor is 1/7.
+- **The leak:** at 23:41 a p1-3 agent ran `tests/default-branch.test.sh` with `GIT_DIR` set to its worktree's
+  gitdir. That reached the clone's shared refs and config, and:
+  - it pushed fixture commits `4c4c44b` and `018a60a` (author `t <t@t>`) to `origin/master`;
+  - it pushed a stray `origin/main`;
+  - it set `core.bare=true` on the clone. The lead reset that to `false`.
+
+  The clone's files and index are still `c667e9e`. The fixture fix is in PR #6.
+- **Waiting on Lachy:** rewrite `origin/master` back to `c667e9e`, or go forward-only. Both routes, with
+  their exact commands, are in the rollout note's `## Notes` → *Halted after wave 2*.
+- **Freeze holds:** this THREAD.md edit is uncommitted. Commit it after the 2.6.0 `pull --ff-only`.
 
 **2026-09-23 (night) — the E2E is recorded; the self-rollout is scheduled and runs unattended from a
 clone.**
@@ -290,6 +369,16 @@ scheduled 2026-07-15.
   human-facing surface (goal, terminology, wave-sibling framing); its
   `repos:` frontmatter auto-routes tasks captured from this repo's CWD.
 - Build lineage: `docs/build-plan.md` (the approved plan, copied in at close).
+- **2026-09-25, the close peer guard (p2-4, PR #16):** a consumed handoff doc is deleted at the
+  marker's own close, or by any later close once its mtime is 24 h old and no listed peer sits in its
+  `<home>` or `Run from:` directory (`skills/_shared/handoff-lifecycle.md` § Close-out). `ListAgents`
+  rows carry no cwd as of 2026-09-25, so on Claude the 24 h floor is the whole guard, and close skips
+  the listing. This resolves the 2026-09-21 open question on deleting from under a live peer.
+- **2026-09-24, the leak cleanup:** it took the rewrite route. `origin/master` was force-pushed back to
+  `c667e9e` with a lease, `origin/main` was deleted, and a clone-local `pre-push` guard refuses
+  `master`/`main` pushes (rollout note § *Resolved 2026-09-24*). A rollout lead never approves gates. It
+  halts on `gate-pending` and parks the decision in the rollout note (p1-3 on 2026-09-24, p4-1 on
+  2026-09-25; both were withdrawn by Lachy, not approved).
 - **2026-09-23:**
   - **Tests:** `make test` is the one test entrypoint and the self-rollout verifier. New suites join by
     filename. `make release-check` verifies the version-keyed cache after a release.
@@ -308,6 +397,8 @@ scheduled 2026-07-15.
 
 ## Open questions / decisions pending
 
+- **`lachyts/thread-skill` has no CI and no branch protection.** The rollout clone's `pre-push` hook is a
+  local guard only. Vault task `thread-skill-protect-master-ci`.
 - **The stale `thread@thread` 2.3.4 project-scope record at `~`** is still installed. Uninstalling it is
   unsafe as written: all three profiles' `settings.json` are symlinks to `~/.claude/settings.json`, which
   is also the project settings file for `~`. Vault task `thread-skill-stale-project-scope-install`.
@@ -316,6 +407,11 @@ scheduled 2026-07-15.
   - gate the release on the zero-rounds fail-open bug
   - the pilot requirement notes never close
   - read-only agents read a mutable checkout
+  - scrub `GIT_*` for the verifier and agents (the 2026-09-23 self-rollout leak; vault task
+    `thread-rollout-v4-scrub-git-env`)
+  - `parseGatedInputs` reads past a thematic break, so p4-1's feedback list became 23 gates on
+    2026-09-24 (intake item 13)
+  - items 14–17 from the rest of the self-rollout: the lessons are in § Known quirks
 
   Vault task `thread-rollout-v4-intake-2026-09-23-audit`, owned by thread 1.
 - **Two tier-ceiling gaps deferred from the 2026-09-21 round-3 review** (held for protocol 4 since the
@@ -344,12 +440,6 @@ scheduled 2026-07-15.
      field (the run was capped) distinct from the existing one (an escalation
      was suppressed), plus a reconcile change: a design decision, not a cleanup.
 
-- `close` § The handoff owns the continuation deletes a *consumed* doc "whoever
-  marked it". When the consumer is a live peer session in the **same checkout**
-  (observed 2026-09-21: the consumer had marked the doc consumed while still
-  running), the originating session's close would pull the file out from under
-  it. Guard on `ListAgents` peers sharing the cwd, or accept (history keeps it,
-  the consumer already read it)? Proposed as a vault task at close.
 - **Chorus Suggestion-card seam (estate METHOD K40, 2026-09-21).** The Stage's
   Suggestion card (chorus ADR 0036) has a **Keep** that writes a vault task
   directly — the Host writes it, so close's ADR 0017 rule never gets a vote —
@@ -384,7 +474,11 @@ scheduled 2026-07-15.
   docs — assumes one writer; a `git rm -f` or a restore in one session lands in
   the other's working tree (the 2026-09-17 review "working-tree incident" is the
   precedent). Check `ListAgents` for a peer in this cwd before deleting or
-  restoring anything another session may hold.
+  restoring anything another session may hold. Since 2.6.0, close's peer guard
+  enforces this for consumed docs (§ What's been built, 2026-09-25). Its 24 h
+  floor reads the file's mtime, so a pull that rewrites the doc resets it: at the
+  2026-09-25 close the 2.6.0 pull made a review doc consumed two days earlier
+  read `keep fresh`.
 - **The plugin cache stays on the old version until the dance is run.** A
   `/thread:handoff` invoked from a session launched with `--plugin-dir` on this
   repo loads the working-tree text (2.5.0 seen 2026-09-21); an installed-plugin
@@ -477,15 +571,106 @@ scheduled 2026-07-15.
   it). A content change that matters therefore needs a version BUMP, not just
   a re-run of the update; `diff -rq <cache>/skills skills` is the check.
 
+- **A `cd` into an additional working directory moves the session's primary working directory**; it is
+  not reset. Seen 2026-09-23 in a rollout lead (`cd ~/repos/obsidian/...`), where the engine's launch
+  tree follows it, and again 2026-09-25 in a plain close session. Any session launched here with the
+  vault as an additional directory uses absolute paths and `git -C` for vault work and never `cd`s
+  there.
+- **Tests that run git must be `GIT_*`-safe.** An exported `GIT_DIR` that points at a linked worktree's
+  gitdir reaches the shared refs and config through commondir. On 2026-09-23 this happened with
+  `tests/default-branch.test.sh`: its `git init --bare` set `core.bare=true` on the main checkout, its
+  commits landed on the shared `master`, and its `git push origin` went to the real GitHub remote. p1-3's
+  PR #6 landed on 2026-09-24 (`b52270d`). `tests/run.sh`, `default-branch.test.sh` and
+  `handoff-scan.test.sh` now run `unset $(git rev-parse --local-env-vars)`, which is git's own list of 15
+  variables. The engine-side scrub for the verifier and agents is still protocol 4.
+- **A plan's `### Gated inputs` must be its last section**, until protocol 4 fixes the parser (intake item
+  13). `parseGatedInputs` ends the section only at a heading. A `---` and a bullet list after `None` are
+  read as declared gates, and the task pauses at `gate-pending` (p4-1, 2026-09-24).
+- **The Workflow tool's task output file is a JSON envelope.** The engine's return value is its `result`
+  field, a JSON string. A lead extracts it (`json.load(f)["result"]`) into a file before
+  `reconcile-wave.py reconcile --result`; the file as a whole is not the result.
+- **Implementers may rebase a reused in-flight branch** onto the new base, even though the worktree
+  prompt says the reuse arms must not. p1-3's PR #6 branch got new hashes on 2026-09-24. This is
+  harmless under squash-merge, and the `pre-push` guard covers only `master`/`main`.
+- **This repo has no required checks.** `merge-wave.sh` reports "no required checks" and squash-merges
+  anyway. Nothing verifies the combined tree unless the lead re-runs `make test` on the merged base, and
+  nothing refuses a stray push to `master`.
+- **`make release-check` (p1-1's recipe) is exact, so it is only meaningful right after a release.** It
+  was green at 2.6.0 (`3a7b9be`). It fails if anything sits under this checkout's `.claude/worktrees/`
+  during the plugin update, or once a file tracked at release time is deleted (the consumed review doc
+  this 2026-09-25 close removed). Run it right after `claude plugin update`, on the released commit.
+  This file's older release-check descriptions predate p1-1's recipe.
+- **Invoking a skill with arguments rewrites `$0`, `$1`, `$2`… in its body.** Claude Code substitutes the
+  whitespace-split arguments, 0-based, into the SKILL.md text before the model sees it, and that includes
+  shell and awk variables. Seen 2026-09-25: `/thread:close` with a one-sentence argument rendered the
+  handoff-scan snippet with `$0` → `Active`, `$1` → `thread:` and `$2` → the THREAD.md path, so
+  `print $2` read `print ~/repos/tools/thread-skill/THREAD.md`. The tests extract the snippets from the
+  source files, so `make test` cannot see it. Until it is fixed, run an embedded snippet from the source
+  (`sed -n '/^# thread:handoff-scan/,/^# end thread:handoff-scan/p' skills/close/SKILL.md`), never the
+  rendered text. `skills/execute/SKILL.md:177` (the default-branch resolver's awk `$2`) is exposed too,
+  but that has not been probed.
+- **Self-rollout lessons, 2026-09-23 to 2026-09-25** (protocol 4 intake items 14–17, vault task
+  `thread-rollout-v4-intake-2026-09-23-audit`):
+  - **`resume-filter` misses archived notes.** The daily sweep moves `done` task notes to
+    `Work/Tasks/Archive/`. `resume-filter` looks only in `Work/Tasks/`, prints "note not found …
+    including for dispatch", and so listed p2-1 and p3-2, both merged, for re-dispatch. `status`
+    resolves the archive. Until it is fixed, check a resume list against `/thread:status` before
+    dispatching.
+  - **A second `plan-blocked` loses its feedback.** `reconcile` appends `## Plan-blocked feedback` once
+    per heading, so a re-dispatched task that blocks again keeps only the first pass (p4-1 on 2026-09-24,
+    p2-3 on 2026-09-25). The lead copies the second pass into the note by hand. Vault task
+    `thread-skill-plan-blocked-feedback-append-once`.
+  - **Attaching the last plan converges a re-dispatch.** A re-dispatch re-plans from scratch. With its
+    approved plan added to the note as a reference (and the resolution list moved above
+    `### Gated inputs`), p4-1 converged in one plan round. The engine does not do this yet.
+  - **The cold-resume flush can merge an unreviewed PR.** Execute § 4.5 *Cold resume* re-runs
+    `merge-wave.sh` on the next wave's open PRs. On 2026-09-25 p2-4's PR #16 was open with its review
+    round 2 failed, and a literal flush would have merged it unreviewed. Flush only PRs whose note is at
+    `status: review`.
+  - **A lapsed account comes back as `blocked`.** When the animately account lapsed mid-review ("Your
+    organization has disabled Claude subscription access for Claude Code"), the engine returned
+    `blocked` with a transient-infrastructure diagnosis. After the move to another account,
+    `resumeFromRunId` on the same run replayed the cached stages and re-ran only the failed review.
+
 ## Resume instructions
 
-**Now (from 2026-09-23 night): the self-rollout is running unattended.**
-- **Check it** with `/thread:status [[thread-skill-rollout-2026-09-23]]` from a session launched in
-  `~/repos/tools/thread-skill-rollout`, never from here.
-- **If it stalls,** run status first. Don't hand-edit a task back to `in_progress`: that is the verb 7
-  gap, and resume would re-dispatch merged work.
-- **When it's done,** release 2.6.0 (brief § S2 step 6). Pull here first (`git pull --ff-only`),
-  then bump, then run the cache dance.
+**Now (from 2026-09-25 afternoon): the self-rollout is complete and 2.6.0 is released. Nothing is running
+and no handoff doc is pending.**
+- **The next work is vault tasks** under `[[Thread Skill]]`, listed in § Where we are. Nothing here
+  continues on its own.
+- **p2-6 and p2-7** are the landable code. Schedule them and run the lead from a session launched in the
+  rollout clone `~/repos/tools/thread-skill-rollout`, never from here. The self-rollout's lead rules
+  still hold (rollout note § *Resolved 2026-09-24* and § *Resolved 2026-09-25*).
+- **p3-1 and p3-3** need Lachy's design calls before anything dispatches. **p4-5** waits for the eval
+  baseline, which is a spend (`thread-skill-eval-baseline-then-p4-5`).
+- **Retire the rollout clone** only after p2-6 and p2-7 land.
+- The instructions below predate this and are kept for history.
+
+**Superseded 2026-09-25 (afternoon): the self-rollout was ready to resume. Nothing was running.**
+- **Resume:** launch a fresh lead in `~/repos/tools/thread-skill-rollout` and run
+  `/thread:execute [[thread-skill-rollout-2026-09-23]]`. With the cursor at 2/7, it re-dispatches p4-1
+  (gates withdrawn), then runs waves 4–7. That is 8 tasks left.
+- **Lead rules** (rollout note § *Resolved 2026-09-24* and § *Resolved 2026-09-25*):
+  - never approve gates;
+  - never push or reset `master`/`main`;
+  - never point `GIT_DIR` at the clone;
+  - make no commits in this checkout;
+  - park anything only Lachy can decide.
+- **When it's done,** release 2.6.0 (brief § S2 step 6). Pull here first (`git pull --ff-only`, and this
+  file's uncommitted edit rides along), then bump, then run the cache dance.
+- The instructions below predate this and are kept for history.
+
+**Superseded 2026-09-24: the self-rollout was HALTED after wave 2, waiting on one decision.**
+- **Read first:** `[[thread-skill-rollout-2026-09-23]]` § Notes → *Halted after wave 2*. It has the leak,
+  the parked tasks and the exact commands for both routes.
+- **Decide:** (a) rewrite `origin/master` to `c667e9e` and delete `origin/main`, or (b) go forward-only.
+  Then re-invoke `/thread:execute [[thread-skill-rollout-2026-09-23]]` from a session launched in
+  `~/repos/tools/thread-skill-rollout`, never from here. The cold resume merges PR #7, re-dispatches p3-1
+  and p1-3, and continues from wave 3.
+- **Don't** approve p1-3's gates once anything has merged on top of `018a60a`. **Don't** hand-edit a task
+  back to `in_progress`: that is the verb 7 gap, and resume would re-dispatch merged work.
+- **When it's done,** release 2.6.0 (brief § S2 step 6). Pull here first (`git pull --ff-only`, and this
+  file's uncommitted edit rides along), then bump, then run the cache dance.
 - The older instructions below predate this and are kept for history.
 
 **The live E2E baseline is running.**
@@ -530,6 +715,10 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-25 (afternoon): close-out after the 2.6.0 release (`3a7b9be`, release-check green). Folded in the uncommitted 2026-09-25 resume edit, rewrote Where we are and Resume to the finished state, moved the peer-guard question to decided (p2-4), added the five rollout lessons (intake items 14–17) and the skill-argument `$N` quirk to Known quirks, and deleted the consumed 2.5.2 simplify review doc. Remaining: p2-6, p2-7, p3-1, p3-3, p4-5 and seven follow-up tasks.
+- 2026-09-25 (morning to midday): self-rollout lead `execute-2026-09-25-a809daf4`. p4-1 converged with its last plan attached (#10). Waves 4–5 merged (#11–#15). p2-3 plan-blocked twice, and Lachy's decisions deferred and split it (p2-6, p2-7), so wave 6 closed empty. Wave 7's p2-4 (#16) survived an account lapse via `resumeFromRunId`. Completed 37h 22m after dispatch.
+- 2026-09-24 (morning): self-rollout resume lead (unattended, `execute-2026-09-24-a91d0c16`). Finished wave 2: #7 (p3-4) and #6 (p1-3, the test-side `GIT_*` scrub). Merged #8 (p3-2) and #9 (p2-1) in wave 3, leaving `master` at `d85a3c7`, green. p4-1 was plan-blocked, re-dispatched, then came back with 23 phantom gates (the parser reads past `---`, intake item 13). The lead halted for Lachy, who withdrew the gates on 2026-09-25. Cursor 2/7, 8 tasks left.
+- 2026-09-24: self-rollout lead (unattended). Step 0 done (zz-thread-e2e removed). Wave 1 merged 5/5 (#1–#5), and the combined tree was green. Wave 2 halted: a p1-3 agent's `GIT_DIR` experiment leaked fixture commits onto GitHub master and pushed a stray `origin/main`. p1-3 is gate-pending on the repair, p3-1 is plan-blocked, and p3-4 is approved and held. The cleanup decision is Lachy's.
 - 2026-09-23 (later): E2E setup. Checklist § 0 is done: fixture repo and GitHub repo, the vault fixture, and the leak baseline. A `cd` outside the launch directory gets reset, so S1 split into this setup session and a verbs session launched in the fixture (Lachy's ruling). § 5 records the stray worktree copy in the plugin caches. The cd quirk is corrected.
 - 2026-09-23: /thread:orient audit. Shipped 2.5.2 (make test, the contract floor, args.defaultBranch; one source for the base after the ledger STOP) and 2.5.3 (execute names the read-only agents). Wrote the E2E checklist, the rollout brief and the S1 handoff. Engine defects held for protocol 4. Stale 2.3.4 install left pending (settings symlink hazard).
 - 2026-09-22: Closed only thread 2 and saved its Claude-pilot agreement/status/evidence handback; thread 1 now leads, thread 3 and Claude continue independently, rollout redesign remains open.
