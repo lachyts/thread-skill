@@ -29,7 +29,7 @@ Every doc opens with this block, then the body sections handoff § Handoff docum
 
 ```yaml
 ---
-thread: <the active THREAD.md's `slug:` front-matter value, whether project-side or shared; else this handoff's slug>
+thread: <the active thread's effective slug — its THREAD.md `slug:`, or a repo thread's directory name when it has none (§ Thread state) — whether project-side, shared or repo; else this handoff's slug>
 written: <YYYY-MM-DD>
 status: pending          # pending -> consumed, set by the session that picks it up
 refreshed: <YYYY-MM-DD>  # optional — added by thread:close when it refreshes a pending doc
@@ -102,8 +102,10 @@ The single definition of the `state:` transitions every continuity route applies
 | creation | `active` | `## Active` |
 
 - Every transition also sets the THREAD.md's `last_touched:` and, for a shared thread, its INDEX line's `last:` to today — including a row that leaves `state:` unchanged. The INDEX is `~/repos/workspaces/_shared/threads/INDEX.md`; its line format is `open` § Index updates.
-- Project threads have no INDEX line: the rows apply to front matter only.
+- Project threads and repo threads have no INDEX line: the rows apply to front matter only.
+- A **repo thread without front matter** (`~/repos/tools/maquette/THREAD.md`) keeps none. Every row's front-matter writes (`state:`, `last_touched:`) are skipped and no front-matter block is added unless Lachy asks. The body writes still happen: close step 4's session-log line and Resume instructions, task-writer § 6's session-log line, and the handoff row's Resume pointer, each appended as a `## Session log` / `## Resume instructions` section at the end when missing. Its effective slug stays its directory's name, the lookup and `list` see it the same before and after, and `list` shows `—` for its state.
+- A thread's **effective slug** is its THREAD.md's front-matter `slug:`, else, for a repo thread, its directory's name (`${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` § Repo-thread lookup). It is the value wherever a THREAD.md's `slug:` is read: the doc's `thread:` (§ Front matter), close's handoff-scan `slug` input, and handoff's capture match (**Open captures.**).
 - A thread **created at stash or defer** takes the creation row and then that route's row in the same step: it lands `parked` or `paused`, never `active`, and a shared thread's new INDEX line goes straight under `## Parked` or `## Paused`.
 - The pickup row never reopens a `done` thread. On the handoff-doc and `<slug>` paths it applies only when a pending doc was actually consumed — a legacy doc, or a pointer to a doc already deleted, applies nothing.
 - The handoff row applies only when the thread has a THREAD.md, after the doc is committed — or, when the commit was skipped (`not versioned:`), after it is written: the continuation is live either way.
-- Applying a row writes the THREAD.md and INDEX only; it adds no commit of its own. They are carried by the same commits that already carry those files (the consumer's close, the workspaces and `~/Projects` sweeps), and handoff's own commit stays the one doc (ADR 0017).
+- Applying a row writes the THREAD.md and INDEX only; it adds no commit of its own. They are carried by the same commits that already carry those files (the consumer's close, close's tool-repo commit (step 7.1), the workspaces and `~/Projects` sweeps), and handoff's own commit stays the one doc (ADR 0017). A repo thread's THREAD.md written by a stash, defer, handoff or pickup row stays uncommitted until the next `thread:close` or `/thread:open save` in that repo.
