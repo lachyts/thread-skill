@@ -111,10 +111,10 @@ t = p.read_text().replace("status: review", "status: done", 1)
 p.write_text(t)
 PY
 OUT=$(python3 "$SCRIPT" resume-filter --tasks "task-approved,task-revised,task-blocked,task-planblocked" --tasks-dir "$TMP")
-echo "$OUT" | grep -qx "task-blocked"      && echo "ok   - blocked re-dispatched"      || { echo "FAIL - blocked missing"; fail=1; }
-echo "$OUT" | grep -qx "task-planblocked"  && echo "ok   - plan-blocked re-dispatched" || { echo "FAIL - plan-blocked missing"; fail=1; }
-if echo "$OUT" | grep -qx "task-approved"; then echo "FAIL - done task re-dispatched"; fail=1; else echo "ok   - done task excluded"; fi
-if echo "$OUT" | grep -qx "task-revised"; then echo "FAIL - review task re-dispatched"; fail=1; else echo "ok   - review task excluded"; fi
+grep -qx "task-blocked" <<<"$OUT"      && echo "ok   - blocked re-dispatched"      || { echo "FAIL - blocked missing"; fail=1; }
+grep -qx "task-planblocked" <<<"$OUT"  && echo "ok   - plan-blocked re-dispatched" || { echo "FAIL - plan-blocked missing"; fail=1; }
+if grep -qx "task-approved" <<<"$OUT"; then echo "FAIL - done task re-dispatched"; fail=1; else echo "ok   - done task excluded"; fi
+if grep -qx "task-revised" <<<"$OUT"; then echo "FAIL - review task re-dispatched"; fail=1; else echo "ok   - review task excluded"; fi
 
 echo "== mark-done (post-merge review->done flip) =="
 # State here: task-approved=done, task-revised=review, task-blocked=blocked.
@@ -174,12 +174,12 @@ nope
 EOF
 
 JSON=$(python3 "$SCRIPT" status --rollout "$TMP/st-rollout.md" --tasks-dir "$TMP")
-echo "$JSON" | grep -q '"merged_through_wave": 1' && echo "ok   - status: cursor read"             || { echo "FAIL - status cursor"; fail=1; }
-echo "$JSON" | grep -q '"slug": "st-ro"'          && echo "ok   - status: read-only task included" || { echo "FAIL - read-only missing"; fail=1; }
-echo "$JSON" | grep -q '"slug": "st-b"'           && echo "ok   - status: blocked task included"   || { echo "FAIL - blocked missing"; fail=1; }
-if echo "$JSON" | grep -q '"slug": "st-foreign"'; then echo "FAIL - foreign rollout leaked"; fail=1; else echo "ok   - status: foreign rollout excluded"; fi
-echo "$JSON" | grep -q 'supplied out-of-band'     && echo "ok   - status: blockerSummary extracted" || { echo "FAIL - blockerSummary missing"; fail=1; }
-echo "$JSON" | grep -q '"total_waves": 2'         && echo "ok   - status: total_waves computed"     || { echo "FAIL - total_waves"; fail=1; }
+grep -q '"merged_through_wave": 1' <<<"$JSON" && echo "ok   - status: cursor read"             || { echo "FAIL - status cursor"; fail=1; }
+grep -q '"slug": "st-ro"' <<<"$JSON"          && echo "ok   - status: read-only task included" || { echo "FAIL - read-only missing"; fail=1; }
+grep -q '"slug": "st-b"' <<<"$JSON"           && echo "ok   - status: blocked task included"   || { echo "FAIL - blocked missing"; fail=1; }
+if grep -q '"slug": "st-foreign"' <<<"$JSON"; then echo "FAIL - foreign rollout leaked"; fail=1; else echo "ok   - status: foreign rollout excluded"; fi
+grep -q 'supplied out-of-band' <<<"$JSON"     && echo "ok   - status: blockerSummary extracted" || { echo "FAIL - blockerSummary missing"; fail=1; }
+grep -q '"total_waves": 2' <<<"$JSON"         && echo "ok   - status: total_waves computed"     || { echo "FAIL - total_waves"; fail=1; }
 
 # resolve: drift gap-closer (blocked -> done), refuses a non-blocked note
 python3 "$SCRIPT" resolve --tasks "st-b" --tasks-dir "$TMP" || { echo "FAIL - resolve exit"; fail=1; }
@@ -215,8 +215,8 @@ refute "gate: no pr written"            "pr:"                                   
 
 # resume-filter must NOT auto-redispatch a task awaiting human sign-off (nothing may bypass the gate)
 OUT=$(python3 "$SCRIPT" resume-filter --tasks "task-gated,task-blocked" --tasks-dir "$TMP" 2>/dev/null)
-if echo "$OUT" | grep -qx "task-gated"; then echo "FAIL - gate-pending re-dispatched"; fail=1; else echo "ok   - gate-pending excluded from resume"; fi
-echo "$OUT" | grep -qx "task-blocked" && echo "ok   - blocked still re-dispatched alongside" || { echo "FAIL - blocked missing (gate arm)"; fail=1; }
+if grep -qx "task-gated" <<<"$OUT"; then echo "FAIL - gate-pending re-dispatched"; fail=1; else echo "ok   - gate-pending excluded from resume"; fi
+grep -qx "task-blocked" <<<"$OUT" && echo "ok   - blocked still re-dispatched alongside" || { echo "FAIL - blocked missing (gate arm)"; fail=1; }
 
 # a refreshed declaration REPLACES the pending section (no duplicates, no stale gates)
 cat > "$TMP/gate-result2.json" <<EOF
@@ -240,7 +240,7 @@ check  "approve: status in_progress"    "status: in_progress"                   
 python3 "$SCRIPT" approve-gates --tasks "task-gated" --tasks-dir "$TMP" >/dev/null \
   && echo "ok   - approve: idempotent re-run (exit 0)" || { echo "FAIL - approve re-run errored"; fail=1; }
 OUT=$(python3 "$SCRIPT" resume-filter --tasks "task-gated" --tasks-dir "$TMP")
-echo "$OUT" | grep -qx "task-gated" && echo "ok   - approved task re-dispatchable" || { echo "FAIL - approved task still excluded"; fail=1; }
+grep -qx "task-gated" <<<"$OUT" && echo "ok   - approved task re-dispatchable" || { echo "FAIL - approved task still excluded"; fail=1; }
 if python3 "$SCRIPT" approve-gates --tasks "task-planblocked" --tasks-dir "$TMP" >/dev/null 2>&1; then
   echo "FAIL - approve-gates accepted a non-gated note"; fail=1
 else echo "ok   - approve-gates refuses non-gate-pending"; fi
@@ -261,7 +261,7 @@ CUROUT=$(python3 "$SCRIPT" cursor --rollout "$TMP/pz-rollout.md" --wave 2) || { 
 check  "pause: cursor still advances"        "merged_through_wave: 2" "$TMP/pz-rollout.md"
 check  "pause: paused stamp written"         "paused: "               "$TMP/pz-rollout.md"
 refute "pause: pause_requested cleared"      "pause_requested"        "$TMP/pz-rollout.md"
-echo "$CUROUT" | grep -q "paused=" && echo "ok   - pause: cursor output signals the pause" \
+grep -q "paused=" <<<"$CUROUT" && echo "ok   - pause: cursor output signals the pause" \
   || { echo "FAIL - pause: no paused= line in cursor output"; fail=1; }
 
 # no pending request → cursor must NOT stamp or signal anything (byte-stable default path)
@@ -276,7 +276,7 @@ merged_through_wave: 0
 EOF
 CUROUT=$(python3 "$SCRIPT" cursor --rollout "$TMP/pz-plain.md" --wave 1) || { echo "FAIL - plain cursor exit"; fail=1; }
 refute "no request: nothing stamped"         "paused"                 "$TMP/pz-plain.md"
-if echo "$CUROUT" | grep -q "paused="; then echo "FAIL - no request: spurious paused= output"; fail=1
+if grep -q "paused=" <<<"$CUROUT"; then echo "FAIL - no request: spurious paused= output"; fail=1
 else echo "ok   - no request: no pause signal"; fi
 
 # status surfaces the honoured pause (timestamp set, no pending request)
@@ -336,7 +336,7 @@ check  "reconcile --wave: task reconciled"         "status: review"         "$TM
 check  "reconcile --wave: cursor advanced"         "merged_through_wave: 3" "$TMP/pz-conv.md"
 check  "reconcile --wave: paused stamp written"    "paused: "               "$TMP/pz-conv.md"
 refute "reconcile --wave: pause_requested cleared" "pause_requested"        "$TMP/pz-conv.md"
-echo "$RECOUT" | grep -q "paused=" && echo "ok   - reconcile --wave: output signals the pause" \
+grep -q "paused=" <<<"$RECOUT" && echo "ok   - reconcile --wave: output signals the pause" \
   || { echo "FAIL - reconcile --wave: no paused= line in output"; fail=1; }
 
 # wave-0 pause honour (SKILL §4.5 step 4: pause pending on a partially-landed wave 1 → cursor
@@ -357,9 +357,9 @@ EOF
 CUROUT=$(python3 "$SCRIPT" cursor --rollout "$TMP/pz-w0.md" --wave 0 --tasks-dir "$TMP") \
   || { echo "FAIL - wave-0 cursor exit"; fail=1; }
 refute "wave-0: no junk wave_0_merged stamp" "wave_0_merged"  "$TMP/pz-w0.md"
-if echo "$CUROUT" | grep -q "progress:"; then echo "FAIL - wave-0: false progress claim: $CUROUT"; fail=1
+if grep -q "progress:" <<<"$CUROUT"; then echo "FAIL - wave-0: false progress claim: $CUROUT"; fail=1
 else echo "ok   - wave-0: no progress line (nothing merged)"; fi
-echo "$CUROUT" | grep -q "paused=" && echo "ok   - wave-0: paused= signal still fires" \
+grep -q "paused=" <<<"$CUROUT" && echo "ok   - wave-0: paused= signal still fires" \
   || { echo "FAIL - wave-0: paused= signal missing: $CUROUT"; fail=1; }
 check  "wave-0: paused stamp written"        "paused: "        "$TMP/pz-w0.md"
 refute "wave-0: pause_requested cleared"     "pause_requested" "$TMP/pz-w0.md"
@@ -394,9 +394,9 @@ mketa eta-t1a 1; mketa eta-t1b 1; mketa eta-t2a 2; mketa eta-t2b 2; mketa eta-t3
 OUT=$(python3 "$SCRIPT" mark-dispatched --rollout "$TMP/eta-rollout.md" --wave 1 --tasks-dir "$TMP") \
   || { echo "FAIL - mark-dispatched exit"; fail=1; }
 check "eta: wave_1_dispatched stamped"  "wave_1_dispatched: "  "$TMP/eta-rollout.md"
-echo "$OUT" | grep -q "wave 1/3 dispatched" && echo "ok   - eta: dispatch progress line (wave 1/3)" \
+grep -q "wave 1/3 dispatched" <<<"$OUT" && echo "ok   - eta: dispatch progress line (wave 1/3)" \
   || { echo "FAIL - eta: dispatch progress line missing: $OUT"; fail=1; }
-if echo "$OUT" | grep -q "remaining"; then echo "FAIL - eta: estimate offered with no completed wave"; fail=1
+if grep -q "remaining" <<<"$OUT"; then echo "FAIL - eta: estimate offered with no completed wave"; fail=1
 else echo "ok   - eta: no estimate before any completed wave (elapsed only)"; fi
 
 # first dispatch wins: a resume re-dispatch must NOT reset the wave clock
@@ -422,20 +422,20 @@ PY
 OUT=$(python3 "$SCRIPT" mark-dispatched --rollout "$TMP/eta-rollout.md" --wave 2 --tasks-dir "$TMP") \
   || { echo "FAIL - mark-dispatched w2 exit"; fail=1; }
 check "eta: wave_2_dispatched stamped"  "wave_2_dispatched: "  "$TMP/eta-rollout.md"
-echo "$OUT" | grep -q "wave 2/3 dispatched" && echo "ok   - eta: w2 dispatch progress line" \
+grep -q "wave 2/3 dispatched" <<<"$OUT" && echo "ok   - eta: w2 dispatch progress line" \
   || { echo "FAIL - eta: w2 dispatch line missing: $OUT"; fail=1; }
-echo "$OUT" | grep -q "elapsed" && echo "ok   - eta: elapsed rendered" \
+grep -q "elapsed" <<<"$OUT" && echo "ok   - eta: elapsed rendered" \
   || { echo "FAIL - eta: no elapsed in: $OUT"; fail=1; }
-echo "$OUT" | grep -q -- "~1h remaining (rough)" && echo "ok   - eta: rough estimate (~1h, labelled rough)" \
+grep -q -- "~1h remaining (rough)" <<<"$OUT" && echo "ok   - eta: rough estimate (~1h, labelled rough)" \
   || { echo "FAIL - eta: estimate missing/unlabelled: $OUT"; fail=1; }
 
 # cursor stamps the merge boundary and prints the merged progress line
 OUT=$(python3 "$SCRIPT" cursor --rollout "$TMP/eta-rollout.md" --wave 2 --tasks-dir "$TMP") \
   || { echo "FAIL - eta cursor exit"; fail=1; }
 check "eta: wave_2_merged stamped"      "wave_2_merged: "      "$TMP/eta-rollout.md"
-echo "$OUT" | grep -q "wave 2/3 merged" && echo "ok   - eta: merged progress line" \
+grep -q "wave 2/3 merged" <<<"$OUT" && echo "ok   - eta: merged progress line" \
   || { echo "FAIL - eta: merged line missing: $OUT"; fail=1; }
-echo "$OUT" | grep -q "remaining (rough)" && echo "ok   - eta: merged line carries the rough estimate" \
+grep -q "remaining (rough)" <<<"$OUT" && echo "ok   - eta: merged line carries the rough estimate" \
   || { echo "FAIL - eta: merged estimate missing: $OUT"; fail=1; }
 # cursor re-run keeps the first merge stamp (no duplicate, no rewrite)
 python3 "$SCRIPT" cursor --rollout "$TMP/eta-rollout.md" --wave 2 --tasks-dir "$TMP" >/dev/null \
@@ -469,7 +469,7 @@ echo "$JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 i
 
 # a stampless cursor stays byte-stable: no progress line without a dispatch anchor
 OUT=$(python3 "$SCRIPT" cursor --rollout "$TMP/rollout.md" --wave 3 --tasks-dir "$TMP") || { echo "FAIL - stampless cursor exit"; fail=1; }
-if echo "$OUT" | grep -q "progress:"; then echo "FAIL - stampless cursor emitted a progress line"; fail=1
+if grep -q "progress:" <<<"$OUT"; then echo "FAIL - stampless cursor emitted a progress line"; fail=1
 else echo "ok   - eta: no progress line without a dispatch stamp"; fi
 
 # the reconcile --wave convenience arm (the OTHER cursor call site) stamps + reports completion
@@ -479,7 +479,7 @@ EOF
 RECOUT=$(python3 "$SCRIPT" reconcile --result "$TMP/eta-result.json" --tasks-dir "$TMP" --rollout "$TMP/eta-rollout.md" --wave 3) \
   || { echo "FAIL - eta reconcile --wave exit"; fail=1; }
 check "eta: wave_3_merged stamped via reconcile --wave" "wave_3_merged: " "$TMP/eta-rollout.md"
-echo "$RECOUT" | grep -q "rollout complete in" && echo "ok   - eta: final wave reports total duration" \
+grep -q "rollout complete in" <<<"$RECOUT" && echo "ok   - eta: final wave reports total duration" \
   || { echo "FAIL - eta: completion line missing: $RECOUT"; fail=1; }
 
 echo "== review-loop memory (ceiling approvals auditable; review-blocked carries full history) =="

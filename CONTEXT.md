@@ -27,8 +27,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   plugin name trades on the overlap, but the two must never be confused in
   skill prose.)
 - **THREAD.md** — the durable state-of-play *file* a thread can be persisted
-  into. Project-side (`~/Projects/<Area>/<Project>/THREAD.md`) or shared
-  (`~/repos/workspaces/_shared/threads/<slug>.md`). Agent-facing.
+  into. Project-side (`~/Projects/<Area>/<Project>/THREAD.md`), shared
+  (`~/repos/workspaces/_shared/threads/<slug>.md`), or a **Repo thread** — a
+  tool repo's own toplevel `THREAD.md` under `~/repos`, found by `open`'s
+  repo-thread lookup; its slug is its front-matter `slug:`, else the repo
+  directory's name. Agent-facing.
 - **Route** — a decisive member (`stash`, `defer`, `handoff`, `close`) that
   disposes of the current thread with known intent.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"

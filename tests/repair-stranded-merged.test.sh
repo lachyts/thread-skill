@@ -138,7 +138,7 @@ r4=$(region "$REPAIR" '^### 4\.' '^### 5\.')
 has "$r4" "stranded" "repair § 4 is gated on stranded merges"
 r6=$(region "$REPAIR" "^### 6\\." "^## Don'ts")
 has "$r6" "stranded" "repair § 6 is gated on stranded merges"
-printf '%s\n' "$r6" | grep -q 'escalat'
+grep -q 'escalat' <<<"$r6"
 ok "$(yn $?)" y "repair § 6 logs escalations"
 has "$r6" "## Notes" "repair § 6 copies escalations from the 3c ## Notes records"
 grep -q 'protocol 4' "$REPAIR"
@@ -161,7 +161,7 @@ items=$(awk '
   {if (cur != "") {print cur; cur=""}; exit}
   END {if (cur != "") print cur}
 ' "$STATUS")
-idx() { printf '%s\n' "$items" | grep -n -m1 -- "$1" | cut -d: -f1; }
+idx() { grep -n -m1 -- "$1" <<<"$items" | cut -d: -f1; }
 P=$(idx '^- `paused`'); F=$(idx 'in flight'); S=$(idx '^- any stranded'); C=$(idx 'cursor behind')
 echo "     (list indexes: paused=$P in-flight=$F stranded=$S cursor-behind=$C)"
 if [ -n "$P" ] && [ -n "$F" ] && [ -n "$S" ] && [ -n "$C" ] && [ "$P" -lt "$F" ] && [ "$F" -lt "$S" ] && [ "$S" -lt "$C" ]; then
@@ -176,9 +176,9 @@ has "$itemF" "owner" "the in-flight item names the owner session"
 has "$itemF" "/workflows" "the in-flight item points at /workflows"
 has "$itemS" "/thread:repair" "the stranded item routes to /thread:repair"
 # Precedence: the earlier paused and in-flight items must not send a stranded merge to execute.
-printf '%s\n' "$itemP" | grep -q 'stranded merge.*/thread:repair'
+grep -q 'stranded merge.*/thread:repair' <<<"$itemP"
 ok "$(yn $?)" y "the paused item routes a stranded merge to /thread:repair, not reinstate"
-printf '%s\n' "$itemF" | grep -q 'stranded merge.*/thread:repair'
+grep -q 'stranded merge.*/thread:repair' <<<"$itemF"
 ok "$(yn $?)" y "the in-flight item's no-run branch routes a stranded merge to /thread:repair"
 has "$itemF" "offline" "the in-flight item carries the offline caveat"
 prec=$(awk '/^The list is first-match/ {on=1} on && /^[[:space:]]*$/ {exit} on {print}' "$STATUS" | tr '\n' ' ')
@@ -186,11 +186,11 @@ has "$prec" "stranded merge" "the first-match note carries the stranded-merge pr
 has "$prec" "/thread:repair" "the precedence rule routes to /thread:repair"
 s4=$(region "$STATUS" '^### 4\.' '^## Loopable')
 has "$s4" "In continuous mode" "the owner-session qualifier scopes the heartbeat to continuous mode"
-printf '%s\n' "$s4" | grep -q 'never needs to'
+grep -q 'never needs to' <<<"$s4"
 ok "$(yn $?)" n "the owner-session qualifier no longer says another session never needs to resume"
-printf '%s\n' "$s4" | grep -q '<tasks-dir>'
+grep -q '<tasks-dir>' <<<"$s4"
 ok "$(yn $?)" n "status § 4 uses no undefined <tasks-dir>"
-printf '%s\n' "$s4" | grep -q 'stranded merge; /thread:repair escalates'
+grep -q 'stranded merge; /thread:repair escalates' <<<"$s4"
 ok "$(yn $?)" y "the example Drift block carries a stranded-merge sample line"
 
 echo

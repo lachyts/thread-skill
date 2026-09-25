@@ -21,6 +21,12 @@ body's claim that the consumed rule is decidable after a compaction "with no hal
 in the conversation" no longer holds exactly: rule (a)'s "this session marked it" is
 judged from the conversation, and a session unsure after a compaction falls back to
 "not its own", so rule (b) decides from disk.)*
+*(Amended 2026-09-25 by thread-skill-p2-7: close also commits a tool repo's own THREAD.md
+by pathspec (close step 7.1), in the repo that holds it
+(`git -C "$(dirname <path>)" rev-parse --show-toplevel`) and on its current branch, whichever
+rung of close § Identify the active thread resolved it — narrowing the Consequence "Nothing
+else in that repo is ever staged or committed by close"; an unchanged file makes no commit,
+and a half-applied operation or detached HEAD skips it with a `not versioned:` line.)*
 
 ## Context
 
