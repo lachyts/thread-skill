@@ -56,7 +56,9 @@ project roots):
   (`~/repos/workspaces/_shared/workspace-registry.md`).
 - **Bare invocation** → infer the area from CWD (workspace dir, project root,
   or a repo matched via `repos:` frontmatter across
-  `~/repos/obsidian/Work/Projects/*/*.md`).
+  `~/repos/obsidian/Work/Projects/**`). A matched note's area is the
+  top-level `Work/Projects/<Area>/` folder it sits in, at any depth, never
+  its parent folder or its `area:` frontmatter.
 - The registry row gives the workspace dir, launcher aliases, and project
   roots. **Areas with no workspace** (Life, 2D, …) get a vault-only audit;
   dispatch is still possible but limited to bare `cc`/project-root launchers
@@ -65,8 +67,8 @@ project roots):
 
 ### 2. Audit (read-only sweep)
 
-- **Vault**: the area note + every sub-project note in
-  `Work/Projects/<Area>/`; `Work/Tasks/` frontmatter sweep (`rg` for
+- **Vault**: the area note + every sub-project note under
+  `Work/Projects/<Area>/`, at any depth; `Work/Tasks/` frontmatter sweep (`rg` for
   `projects:` matching the area or its projects — collect `status`,
   `priority`, `scheduled`, `due`, `dispatched`, `launch`); phase notes in
   `Work/Phases/` for the area's projects.

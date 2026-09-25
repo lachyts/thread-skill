@@ -3,7 +3,9 @@
 // most one research pointer whose landing is offered in the route's own confirmation (task-writer § 7
 // for stash and defer, close's "What landed" report for close). task-writer § 1.1 and process-scan rung 2
 // both handle a `repos:` lookup that matches more than one project note. A lost clause, a restated
-// ceiling or a dropped offer channel fails here. Reads files only; a missing file or section is a named
+// ceiling or a dropped offer channel fails here. The file also pins the one project-note glob shared by
+// the three `repos:` lookup sites (task-writer § 1.1, process-scan rung 2, orient § 1), so a nested
+// sub-project note is seen by all of them. Reads files only; a missing file or section is a named
 // assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -22,6 +24,9 @@ const SCAN = 'skills/_shared/process-scan.md'
 const CLOSE = 'skills/close/SKILL.md'
 const STASH = 'skills/stash/SKILL.md'
 const DEFER = 'skills/defer/SKILL.md'
+const ORIENT = 'skills/orient/SKILL.md'
+// The project-note set every `repos:` lookup greps: every depth, so nested sub-project notes are seen.
+const PROJECT_GLOB = '~/repos/obsidian/Work/Projects/**'
 
 // The slice of `text` from the line matching `start` to the next line matching `stop` (exclusive), or
 // null. A null `stop` runs to the end of the text.
@@ -41,6 +46,12 @@ function assertHas(section, name, patterns) {
     const ok = typeof p === 'string' ? section.includes(p) : p.test(section)
     assert.ok(ok, `${name} does not contain ${p}`)
   }
+}
+
+// The backticked glob after "`repos:` frontmatter across" in `section`, or null.
+function globOf(section) {
+  const m = section == null ? null : section.match(/`repos:` frontmatter across\s+`([^`]+)`/)
+  return m == null ? null : m[1]
 }
 
 test('task-writer § 5 carries the Lean capture rule', () => {
@@ -127,4 +138,27 @@ test('every exit route carries the rule and the offer channel', () => {
     const conf = text == null ? null : (text.split('\n').find((l) => confirm.test(l)) ?? null)
     assert.ok(conf != null, `${file} has no "Confirm per § 7" step`)
   }
+})
+
+test('the three repos: lookup sites share one project-note glob', () => {
+  const sites = [
+    [`${WRITER} § 1 item 1`, slice(slice(readIf(WRITER), /^## 1\./, /^## 2\./), /^1\. /, /^2\. /)],
+    [`${SCAN} § Project directory resolution rung 2`,
+      slice(slice(readIf(SCAN), /^## Project directory resolution/, /^## (?!Project directory resolution)/), /^2\. /, /^3\. /)],
+    [`${ORIENT} § 1 "Bare invocation" bullet`,
+      slice(slice(readIf(ORIENT), /^### 1\. Resolve the target/, /^### 2\./), /^- \*\*Bare invocation\*\*/, /^- /)],
+  ]
+  for (const [name, section] of sites) {
+    assert.ok(section != null, `${name} is missing`)
+    const glob = globOf(section)
+    assert.equal(glob, PROJECT_GLOB, `${name} greps \`repos:\` across ${JSON.stringify(glob)}, expected ${PROJECT_GLOB}`)
+  }
+})
+
+test('no skill greps a depth-limited Work/Projects glob', () => {
+  const hits = walk('skills')
+    .map((file) => ({ file, text: readIf(file) }))
+    .filter(({ text }) => text != null && !text.includes('\0') && /Work\/Projects\/\*\/\*/.test(text))
+    .map(({ file }) => file)
+  assert.deepEqual(hits, [], `depth-limited Work/Projects/*/* glob found in: ${JSON.stringify(hits)}`)
 })
