@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # `make release-check`, the real recipe, run against a temp copy of this tree and a fake config dir whose
-# plugin cache is built from it. Covers the manifest contract, the cache diff over skills/ and hooks/, and
-# the stray check (cache files the tree does not track; .DS_Store and __pycache__/ exempt). Hermetic:
+# plugin cache is built from it. Covers the manifest contract, the cache diff over skills/ and hooks/, the
+# stray check (cache files the tree does not track; .DS_Store and __pycache__/ exempt), and the
+# evals/results/ refusal that runs first (files only, the same exemptions). Hermetic:
 # everything lives under one mktemp, git reads an empty global config and no system config, and
 # CLAUDE_CONFIG_DIR is always passed on the make command line, so the real config dir is never read.
 set -uo pipefail
@@ -85,6 +86,44 @@ has "$out" "unparseable frontmatter" "(g) shows the contract's own assertion"
 ok "$(printf %s "$out" | grep -c 'versions disagree')" 0 "(g) makes no version-mismatch claim"
 ok "$(printf %s "$out" | grep -c 'FAIL - plugin.json')" 0 "(g) no plugin.json != marketplace.json line"
 git -C "$tree" checkout -- skills/status/SKILL.md
+
+# (h) `make evals` output in the tree: refused first, count plus run dirs, never file paths
+ts=20260925T000000Z
+mkdir -p "$tree/evals/results/$ts"; echo '{}' > "$tree/evals/results/$ts/run.json"
+run_rc; ok "$(nz "$rc")" nonzero "(h) a non-empty evals/results/ exits non-zero"
+has "$out" "clear it first" "(h) says clear it first"
+has "$out" "holds 1 file(s)" "(h) gives the file count"
+has "$out" "evals/results/$ts" "(h) names the run dir"
+ok "$(printf %s "$out" | grep -c 'run.json')" 0 "(h) names no file paths"
+has "$out" "same-version update never refreshes the cache" "(h) gives the already-copied remedy"
+ok "$(printf %s "$out" | grep -c 'manifests agree')" 0 "(h) prints no success line"
+
+# (h4a) the refusal runs before the manifest contract (the (h) fixture stays)
+sed -i.bak "s/\"version\": \"$v\"/\"version\": \"0.0.0\"/" "$tree/.claude-plugin/marketplace.json"
+run_rc; ok "$(nz "$rc")" nonzero "(h4a) results plus disagreeing manifests exit non-zero"
+has "$out" "clear it first" "(h4a) shows the evals refusal"
+ok "$(printf %s "$out" | grep -c 'manifest contract (same version) failed')" 0 "(h4a) refuses before the manifest contract"
+git -C "$tree" checkout -- .claude-plugin/marketplace.json; rm -f "$tree/.claude-plugin/marketplace.json.bak"
+
+# (h4b) the refusal runs before the missing-cache check (the (h) fixture stays)
+mv "$cache" "$cache.aside"
+run_rc; ok "$(nz "$rc")" nonzero "(h4b) results plus a missing version dir exit non-zero"
+has "$out" "clear it first" "(h4b) shows the evals refusal"
+ok "$(printf %s "$out" | grep -c 'run the plugin update')" 0 "(h4b) refuses before the missing-cache check"
+mv "$cache.aside" "$cache"; rm -rf "$tree/evals/results"
+
+# (h2) empty run dirs are not refused
+mkdir -p "$tree/evals/results/$ts"
+run_rc; ok "$rc" 0 "(h2) an evals/results/ holding only empty dirs exits 0"
+[ "$rc" -eq 0 ] || printf '%s\n' "$out"
+rm -rf "$tree/evals/results"
+
+# (h3) the stray check's exemptions: .DS_Store and anything under __pycache__/
+mkdir -p "$tree/evals/results/$ts/__pycache__"
+: > "$tree/evals/results/.DS_Store"; : > "$tree/evals/results/$ts/__pycache__/x.pyc"
+run_rc; ok "$rc" 0 "(h3) .DS_Store and __pycache__/ in evals/results/ still exit 0"
+[ "$rc" -eq 0 ] || printf '%s\n' "$out"
+rm -rf "$tree/evals/results"
 
 # every case restored its state
 run_rc; ok "$rc" 0 "(a) matching cache exits 0 again after every case"

@@ -131,7 +131,8 @@ final check that the run wrote nothing into the tree):
 - **Default branch** — `tests/default-branch.test.{mjs,sh}`: `defaultBranch` keeps pre-fix bytes when
   unset, refuses unsafe names, and the resolver in `execute/SKILL.md` § 4 works against fixture remotes.
 - **Release check** — `tests/release-check.test.sh`: the real `make release-check` recipe against a temp
-  tree and a fake config dir (matching, stray, noise-only, differing, missing and mismatched caches).
+  tree and a fake config dir (matching, stray, noise-only, differing, missing and mismatched caches,
+  and a non-empty evals/results/).
 - **Evals structure** — `tests/contracts/evals-structure.test.mjs` checks the `evals/` suite's shape for
   free and never runs it (case discovery, frontmatter keys and types, read-only tool grants, graders, and
   `make evals` kept out of `make test` and off the default goal). The suite itself is scored by
@@ -146,7 +147,9 @@ diagnostics (Workflow runtime + real agents) — parse-checked, never run by `ma
 After a release, `make release-check` confirms both manifests agree and the version-keyed plugin
 cache (what `${CLAUDE_PLUGIN_ROOT}` — the engine, scripts and hook — runs from) matches the tree. It
 also fails on cache files the tree doesn't track (`.DS_Store` and `__pycache__/` exempt), so run it
-on the released commit, right after the plugin update.
+on the released commit, right after the plugin update. It refuses first while `evals/results/` holds
+`make evals` output: clear that before the plugin update, since the `./` source would copy it into the
+cache.
 
 ## Coexistence with Orca
 
