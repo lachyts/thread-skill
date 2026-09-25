@@ -9,6 +9,15 @@ Status: accepted
 owned there by `thread:`, and the doc its Resume pointer names; every doc carries a
 `Run from:` line; and a handoff closes the thread's open captures as superseded, which a
 withdrawal reopens.)*
+*(Amended 2026-09-25 by thread-skill-p2-4: a consumed doc is deleted by the close of the
+session that marked it, or by a later close once it is 24 h old and no harness-listed session
+other than the closer or its subagents has a cwd in its `<home>`; a clean or unavailable
+`ListAgents`/`list_agents` is no evidence (estate METHOD K41 correction), a positive one keeps
+the doc, and a doc already gone is reported, never `git rm`'d — `handoff-lifecycle.md`
+§ Close-out. The body's claim that the consumed rule is decidable after a compaction "with no
+half of it left in the conversation" no longer holds exactly: rule (a)'s "this session marked
+it" is judged from the conversation, and a session unsure after a compaction falls back to
+"not its own", so rule (b) decides from disk.)*
 
 ## Context
 
