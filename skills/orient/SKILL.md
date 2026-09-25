@@ -51,14 +51,20 @@ Accept a fuzzy target and resolve it to (area, vault folder, workspace,
 project roots):
 
 - **A name** (`/thread:orient Animately`) or **wikilink** (`[[Animately]]`, a
-  sub-project note) → match against `~/repos/obsidian/Work/Projects/<Area>/`
-  and the workspace registry
+  sub-project note) → match against the folders and notes under
+  `~/repos/obsidian/Work/Projects/`, at any depth, and the workspace registry
   (`~/repos/workspaces/_shared/workspace-registry.md`).
 - **Bare invocation** → infer the area from CWD (workspace dir, project root,
   or a repo matched via `repos:` frontmatter across
-  `~/repos/obsidian/Work/Projects/**`). A matched note's area is the
-  top-level `Work/Projects/<Area>/` folder it sits in, at any depth, never
-  its parent folder or its `area:` frontmatter.
+  `~/repos/obsidian/Work/Projects/**`).
+- **Vault folder and area**, for a note matched by either route: the vault
+  folder is the top-level `Work/Projects/<Folder>/` the note sits in, at any
+  depth, never its parent folder. The area is the note's `area:` frontmatter,
+  else that folder — the same rule as process-scan rung 3. So
+  `Life (area)/Audio Intake/Audio Intake.md` gives vault folder `Life (area)`
+  and area `Life`. A name that matches a top-level folder takes that folder
+  as the vault folder. § 2 Vault sweeps the vault folder; § 2 Threads sweeps
+  the area.
 - The registry row gives the workspace dir, launcher aliases, and project
   roots. **Areas with no workspace** (Life, 2D, …) get a vault-only audit;
   dispatch is still possible but limited to bare `cc`/project-root launchers
@@ -67,8 +73,10 @@ project roots):
 
 ### 2. Audit (read-only sweep)
 
-- **Vault**: the area note + every sub-project note under
-  `Work/Projects/<Area>/`, at any depth; `Work/Tasks/` frontmatter sweep (`rg` for
+- **Vault**: the area note + every sub-project note (a note whose
+  frontmatter `tags:` includes `project`, never a reference, garden or
+  README note) under the vault folder `Work/Projects/<Folder>/`, at any
+  depth; `Work/Tasks/` frontmatter sweep (`rg` for
   `projects:` matching the area or its projects — collect `status`,
   `priority`, `scheduled`, `due`, `dispatched`, `launch`); phase notes in
   `Work/Phases/` for the area's projects.

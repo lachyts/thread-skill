@@ -5,7 +5,9 @@
 // both handle a `repos:` lookup that matches more than one project note. A lost clause, a restated
 // ceiling or a dropped offer channel fails here. The file also pins the one project-note glob shared by
 // the three `repos:` lookup sites (task-writer § 1.1, process-scan rung 2, orient § 1), so a nested
-// sub-project note is seen by all of them. Reads files only; a missing file or section is a named
+// sub-project note is seen by all of them, rejects any shallower `Work/Projects/` glob under skills/, and
+// pins orient's sweep of project-tagged notes at any depth and its area source (`area:` frontmatter
+// first, as process-scan rung 3). Reads files only; a missing file or section is a named
 // assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -93,8 +95,6 @@ test('task-writer § 1 item 1 handles more than one repos: match', () => {
     /§ 1\.2–1\.4/,
     /among the matches/,
     /no match → § 1\.2/i,
-    // The same project-note set as process-scan rung 2, so nested sub-project notes are seen.
-    '`~/repos/obsidian/Work/Projects/**`',
   ])
 })
 
@@ -155,10 +155,56 @@ test('the three repos: lookup sites share one project-note glob', () => {
   }
 })
 
-test('no skill greps a depth-limited Work/Projects glob', () => {
+// Every `Work/Projects/…` path token in `text` that is a glob (has a `*`) but never descends (no `**`),
+// e.g. `Work/Projects/*.md`, `Work/Projects/<Area>/*.md` or `Work/Projects/*/*.md`. A literal path such
+// as split's write path `Work/Projects/<Area>/<Project>.md` has no `*` and is not a hit.
+function shallowGlobs(text) {
+  return (text.match(/Work\/Projects\/[^\s`'")\]]*/g) ?? []).filter((t) => t.includes('*') && !t.includes('**'))
+}
+
+test('no skill greps a Work/Projects glob that stops short of every depth', () => {
   const hits = walk('skills')
     .map((file) => ({ file, text: readIf(file) }))
-    .filter(({ text }) => text != null && !text.includes('\0') && /Work\/Projects\/\*\/\*/.test(text))
-    .map(({ file }) => file)
-  assert.deepEqual(hits, [], `depth-limited Work/Projects/*/* glob found in: ${JSON.stringify(hits)}`)
+    .filter(({ text }) => text != null && !text.includes('\0'))
+    .flatMap(({ file, text }) => shallowGlobs(text).map((glob) => `${file}: ${glob}`))
+  assert.deepEqual(hits, [], `depth-limited Work/Projects glob (a single-\`*\` segment, no \`**\`) found in: ${JSON.stringify(hits)}`)
+})
+
+test('the glob check rejects every shallow shape and passes literal paths', () => {
+  for (const bad of ['Work/Projects/*.md', 'Work/Projects/<Area>/*.md', '`~/repos/obsidian/Work/Projects/*/*.md`']) {
+    assert.equal(shallowGlobs(bad).length, 1, `${bad} should be flagged`)
+  }
+  for (const ok of ['`~/repos/obsidian/Work/Projects/**`', '`~/repos/obsidian/Work/Projects/<Area>/<Project>.md`']) {
+    assert.deepEqual(shallowGlobs(ok), [], `${ok} should pass`)
+  }
+})
+
+test('orient § 2 Vault sweeps project notes at any depth', () => {
+  const s2 = slice(readIf(ORIENT), /^### 2\./, /^### 3\./)
+  const vault = slice(s2, /^- \*\*Vault\*\*/, /^- /)
+  assertHas(vault, `${ORIENT} § 2 "Vault" bullet`, [
+    /at any\s+depth/,
+    // A sub-project note is a project-tagged note, so the sweep skips reference and garden notes.
+    /frontmatter `tags:` includes `project`/,
+    'the vault folder',
+  ])
+  const threads = slice(s2, /^- \*\*Threads\*\*/, /^- /)
+  assertHas(threads, `${ORIENT} § 2 "Threads" bullet`, ['`~/Projects/<Area>/*/THREAD.md`'])
+})
+
+test('orient § 1 and process-scan rung 3 agree on the area source', () => {
+  const rung3 = slice(slice(readIf(SCAN), /^## Project directory resolution/, /^## (?!Project directory resolution)/),
+    /^3\. /, /^\d+\. |^$/)
+  assertHas(rung3, `${SCAN} § Project directory resolution rung 3`, [
+    /its `area:` frontmatter, else the `Work\/Projects\/<Area>\/` folder it sits in/,
+  ])
+  const s1 = slice(readIf(ORIENT), /^### 1\. Resolve the target/, /^### 2\./)
+  const rule = slice(s1, /^- \*\*Vault folder and area\*\*/, /^- /)
+  assertHas(rule, `${ORIENT} § 1 "Vault folder and area" bullet`, [
+    /for a note matched by either route/,
+    /top-level `Work\/Projects\/<Folder>\/` the note sits in, at any\s+depth, never its parent folder/,
+    /The area is the note's `area:` frontmatter,\s+else that folder/,
+    /process-scan rung 3/,
+  ])
+  assert.doesNotMatch(s1, /never[^.]*`area:` frontmatter/, `${ORIENT} § 1 must not rule out the \`area:\` frontmatter`)
 })
