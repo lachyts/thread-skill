@@ -78,6 +78,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   task. Its complement is a **loose end** — work outside the thread's scope
   line — which reaches the task menu as before (ADR 0017). _Avoid_: next
   steps (ambiguous), remaining work.
+- **Capture** — the self-contained vault task `stash` or `defer` writes to set
+  a thread's next move down, marked as a capture by its writer. Only a capture
+  is superseded when the thread continues elsewhere. A loose end filed at
+  `close` may link the same thread and is still never a capture. _Avoid_:
+  thread task (any task can link a thread), backlog item.
 - **Close** — the work is finished; persist + commit, end-of-thread ritual.
 - **Pickup** — resuming a stashed/deferred thread from its task, or a handed-off
   thread from its handoff doc. Pickup auto-completes the capture — the task is
@@ -240,10 +245,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Escalation** — the run-time, evidence-driven flip of an opus task to
   fable at the first sign of hardness. One-way and sticky (ADR 0006).
   _Avoid_: fallback, retry, promotion.
+- **Top tier** — the highest tier the operator currently permits: one
+  operator-held value, changed in one place, that every rollout's ceiling is
+  taken from. It names which rung is highest, never a model version — the
+  harness resolves the tier to its current model. Unset means no ceiling.
+  _Avoid_: default model, preferred model, best model.
 - **Ceiling** — a run-wide cap on every tier decision (`args.maxTier`), set
-  because the account's quota for the higher tier is exhausted. It names a
-  resource fact, never a judgement about a task, which is why it does not
-  contradict ADR 0006's "no config switch" (ADR 0016). A capped tier is
+  from the operator's top tier or because the account's quota for the higher
+  tier is exhausted. Either way it names an operator or resource fact, never
+  a judgement about a task, which is why it does not contradict ADR 0006's
+  "no config switch" (ADR 0016). A capped tier is
   **terminal**: it runs the full Ralph loop and takes the higher tier's effort
   row, and a block on it is reported `tierCapped` rather than as a wall.
   _Avoid_: downgrade, throttle, cheap mode.
