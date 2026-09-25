@@ -148,8 +148,9 @@ After a release, `make release-check` confirms both manifests agree and the vers
 cache (what `${CLAUDE_PLUGIN_ROOT}` — the engine, scripts and hook — runs from) matches the tree. It
 also fails on cache files the tree doesn't track (`.DS_Store` and `__pycache__/` exempt), so run it
 on the released commit, right after the plugin update. It refuses first while `evals/results/` holds
-`make evals` output: clear that before the plugin update, since the `./` source would copy it into the
-cache.
+`make evals` output: record what you need in `docs/evals/`, then clear it before the plugin update,
+since the `./` source would copy it into the cache. If a copy already reached the cache, the refusal
+names the `evals/results` dir to delete there.
 
 ## Coexistence with Orca
 
