@@ -202,7 +202,8 @@ git config init.defaultBranch" 2>/dev/null)
   ok "$(grep -cE 'ls-remote|fetch|pull|push|set-head|remote update' "$script")" 0 "18. no network verb in the script"
   ok "$(grep -cw main "$script")" 0 "18. the word main appears nowhere in the script"
   ok "$(grep -c '\^{commit}' "$script")" 0 "18. no ^{commit} peel"
-  calls=$(grep -E '(^|[[:space:];|&(])git ' "$script" | grep -vE '^[[:space:]]*#' | grep -vF 'git rev-parse --local-env-vars')
+  # A git invocation is `git ` in command position: at the start of a line, or after `$(`, `;`, `|` or `&`.
+  calls=$(grep -E '(^|[;|&(])[[:space:]]*git ' "$script" | grep -vE '^[[:space:]]*#' | grep -vF 'git rev-parse --local-env-vars')
   ok "$(printf '%s\n' "$calls" | grep -c .)" "$(printf '%s\n' "$calls" | grep -cF 'git -C "$dir"')" "18. every git call is git -C \"\$dir\""
   ok "$(printf '%s\n' "$calls" | grep -F 'git -C "$dir"' | grep -vc '2>')" 0 "18. every git -C \"\$dir\" call redirects git's stderr"
   ok "$(grep -cF 'GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS)' "$script")" 1 "18. the scrub keeps GIT_CONFIG_COUNT and GIT_CONFIG_PARAMETERS"
