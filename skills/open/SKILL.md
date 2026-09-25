@@ -68,7 +68,7 @@ The pickup half of the handoff loop (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/hando
 
 1. Read the doc. Prime from its § What remains, § Decisions settled and § Gotchas; its § Paste-ready prompt is the working brief.
 2. **Check `Run from:`.** Read the doc's ``**Run from:** `<abs dir>` `` line and compare it with `pwd -P`. If they differ, say so in one line — `Run from: <dir>, but this session launched in <pwd>; close, stash and defer resolve their homes from the launch directory` — and continue. Never block; a doc without the line (written before it existed) is checked for nothing.
-3. Read the linked `THREAD.md` if the doc's `thread:` names one; brief from both, and — for a pending doc — apply `handoff-lifecycle.md` § Thread state's pickup row to it.
+3. Read the linked `THREAD.md` if the doc's `thread:` names one: `thread:` is an effective slug (a repo thread with no front matter goes by its directory's name, so a doc written from maquette carries `thread: maquette`), so run § Repo-thread lookup with `slug=<thread:>` and take its first hit, with the same ask rule as `<slug>` step 1 when several paths print. No hit → brief from the doc alone. Brief from both, and — for a pending doc — apply `handoff-lifecycle.md` § Thread state's pickup row to it.
 4. **Consume it**: set `status: consumed` in the doc's front matter, in place, with no commit. Deletion is the consuming session's close (`handoff-lifecycle.md` § Close-out); a legacy doc is briefed from but left untouched (`handoff-lifecycle.md` § States).
 5. Confirm in one line: `Picked up <doc> — marked consumed. Next move: <from the prompt>.` Then get on with the work.
 
@@ -78,7 +78,7 @@ Runs `thread:close`'s flow as written, mid-session, without ending the thread.
 
 - Thread identification comes first and may ask: close § Identify the active thread's rung-2 question (several matches, none in the CWD's repo) and its rung-4 offer to create a thread both happen before the flow starts.
 - Inside the flow every save is autonomous per ADR 0011: the thread update, auto-memory, knowledge and every commit, a repo thread's THREAD.md included (close step 7.1, with `save` in place of `close-out` in its commit message). Step 6's vault-task menu is the only question.
-- `state:` stays unchanged (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state's close row).
+- `state:` stays unchanged, and save never sets `state: done` — the close row it follows (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state) allows `done` when Lachy says the thread is finished, but that is `thread:close`'s to write.
 - In place of close's banner the last line is `Thread saved — session continues.`
 
 ## Repo-thread lookup
@@ -97,7 +97,7 @@ if [ -n "$slug" ] && [ -f "$HOME/repos/workspaces/_shared/threads/$slug.md" ]; t
 fi
 if [ -n "$slug" ] && [ -z "$hits" ] && [ -d "$HOME/Projects" ]; then
   p=$(cd "$HOME/Projects" 2>/dev/null && pwd -P)
-  hits=$(find "$p" -name THREAD.md 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do
+  hits=$(find "$p" -maxdepth 5 \( -name _archive -o -name .claude -o -name .git -o -name node_modules \) -prune -o -name THREAD.md -print 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do
     if [ "$(fms "$f")" = "$slug" ]; then printf '%s\n' "$f"; fi
   done)
 fi
@@ -115,11 +115,11 @@ if [ -n "$hits" ]; then printf '%s\n' "$hits"; fi
 # end thread:repo-thread-lookup
 ```
 
-- **First hit wins.** With a slug the tiers run in order — `~/repos/workspaces/_shared/threads/<slug>.md`, then every `~/Projects` THREAD.md whose front-matter `slug:` matches, then repo threads — and the first tier with a match is the whole answer. A `_shared` or `~/Projects` thread therefore beats a repo thread with the same slug. With `slug=` empty only repo threads are listed.
+- **First hit wins.** With a slug the tiers run in order — `~/repos/workspaces/_shared/threads/<slug>.md`, then every `~/Projects` THREAD.md whose front-matter `slug:` matches (depth 5 or less, never under an `_archive`, `.claude`, `.git` or `node_modules` directory), then repo threads — and the first tier with a match is the whole answer. A `_shared` or `~/Projects` thread therefore beats a repo thread with the same slug — which is why the `~/Projects` walk prunes: an archived or worktree copy would otherwise hide a live repo thread, and the bounded walk keeps close's rung 2 cheap. With `slug=` empty only repo threads are listed.
 - **Repo threads** are the `THREAD.md` files at depth 3 or less under `~/repos`, outside `~/repos/obsidian`, `~/repos/workspaces` and any `.claude` directory. A repo thread's effective slug is its front-matter `slug:` (CR-tolerant, quotes stripped); only when it has no front-matter `slug:` does the directory's name stand in, so a front-matter slug always wins. A `slug:` in the body never counts. A clone whose directory name differs from what Lachy calls it (`overlay-carousel (codex)`) is reached by slug only once its THREAD.md gains `slug:` front matter; add it by hand.
 - **The CWD tiebreak.** When several repo threads match the slug and one is at the toplevel of the CWD's git repo, that one alone is printed (the rollout clone's and the original's THREAD.md share a slug). Outside a git repo the tiebreak is skipped silently.
 - **Several paths printed** → list them as `<label> — <abs path>` and ask. A repo thread's **label** is its path relative to `~/repos` (`tools/overlay-carousel (codex)/THREAD.md`).
-- **Callers.** `list` step 3, `<slug>` step 1, and `${CLAUDE_PLUGIN_ROOT}/skills/close/SKILL.md` § Identify the active thread (rungs 2 and 3) and its Process step 7.1 all run this snippet.
+- **Callers.** `list` step 3, `<slug>` step 1, the handoff-doc pickup's step 3 (`slug=<thread:>`), and `${CLAUDE_PLUGIN_ROOT}/skills/close/SKILL.md` § Identify the active thread (rungs 2 and 3) and its Process step 7.1 all run this snippet.
 - **Worktrees are excluded twice.** A `.claude/worktrees/<w>` toplevel sits deeper than depth 3 below `~/repos` for every realistic repo, and `-not -path '*/.claude/*'` drops it independently, so a later change to the depth limit cannot bring worktree copies in. `tests/repo-threads.test.sh` checks each exclusion with a mutation.
 
 ## Creating a new thread

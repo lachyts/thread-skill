@@ -3,9 +3,10 @@
 # runs it against runtime-generated fixtures under bash and under `zsh -f` when zsh is installed (the Bash
 # tool is zsh): first-hit tier order (_shared, then ~/Projects, then repo threads), the basename slug of a
 # THREAD.md with no front matter, the CWD tiebreak, and every exclusion (obsidian, workspaces, depth > 3,
-# `*/.claude/*`). Two mutation checks prove the worktree exclusion is load-bearing twice over: the
-# `.claude` rule alone excludes a depth-3 fixture, and dropping the depth limit still leaves the worktree
-# copy out. Section B greps the prose that wires the lookup into open, close, handoff-lifecycle.md,
+# `*/.claude/*`), the ~/Projects walk's prunes (`_archive`, `.claude`, `node_modules`, depth > 5), and a CWD
+# repo outside the hits leaving every hit in place. Two mutation checks prove the worktree exclusion is
+# load-bearing twice over: the `.claude` rule alone excludes a depth-3 fixture, and dropping the depth limit
+# still leaves the worktree copy out; a third proves an `_archive` copy would otherwise hide a repo thread. Section B greps the prose that wires the lookup into open, close, handoff-lifecycle.md,
 # CONTEXT.md and ADR 0017.
 # Hermetic: every path lives under mktemp, HOME is a temp dir per case, GIT_CEILING_DIRECTORIES stops git
 # walking above the temp root, git's repo-local vars are unset, and system and global git config are
@@ -45,6 +46,8 @@ ok "$nopen" 1 "exactly one opening lookup marker"
 ok "$nclose" 1 "exactly one closing lookup marker"
 ok "$(occ "$tmp/lk.sh" '-maxdepth 3')" 1 "the snippet limits find to depth 3, once"
 ok "$(occ "$tmp/lk.sh" "-not -path '*/.claude/*'")" 1 "the snippet excludes */.claude/*, once"
+ok "$(occ "$tmp/lk.sh" '-name _archive -o ')" 1 "the ~/Projects walk prunes _archive, once"
+ok "$(occ "$tmp/lk.sh" '-maxdepth 5')" 1 "the ~/Projects walk is bounded at depth 5, once"
 runA=1
 if [ "$paired" != 0 ] || [ "$nopen" != 1 ] || [ "$nclose" != 1 ] || ! grep -q -- '-maxdepth 3' "$tmp/lk.sh"; then
   echo "FAIL - the # thread:repo-thread-lookup … # end pair is not exactly once, in order, in $OPEN; Section A skipped"
@@ -75,6 +78,12 @@ if [ "$runA" = 1 ]; then
   fx "$h2/Projects/A/P/THREAD.md"                    '---\nslug: qux\n---\n'
   h3="$tmp/h3"; mkdir -p "$h3"
   hl="$tmp/hl"; ln -s "$h1" "$hl"
+  h4="$tmp/h4"; cp -R "$h1" "$h4"
+  fx "$h4/Projects/A/_archive/Old/THREAD.md"          '---\nslug: foo\n---\n# archived project\n'
+  fx "$h4/Projects/A/P/.claude/worktrees/w/THREAD.md" '---\nslug: foo\n---\n# project worktree copy\n'
+  fx "$h4/Projects/A/P/node_modules/x/THREAD.md"      '---\nslug: foo\n---\n'
+  fx "$h4/Projects/A/P/a/b/c/THREAD.md"               '---\nslug: foo\n---\n# depth 6\n'
+  fx "$h4/Projects/A/P/S/T/THREAD.md"                 '---\nslug: deep\n---\n# nested project, depth 5\n'
 
   # lk <snippet> <shell> <cwd> <home> <slug> — sets $out, $err, $rc. <shell> is word-split on purpose.
   lk() {
@@ -112,6 +121,17 @@ repos/tools/foo/THREAD.md" "$L slug=foo lists foo-rollout and foo only, C-sorted
     lk "$tmp/lk.sh" "$sh" "$R/tools/foo-rollout/sub" "$h1" foo
     ok "$(rel "$h1")" "repos/tools/foo-rollout/THREAD.md" "$L the CWD's repo wins among repo-thread hits"
     ok "$err" "" "$L the CWD tiebreak writes nothing to stderr"
+    # 5b: a CWD repo that is not among the hits leaves every hit in place
+    lk "$tmp/lk.sh" "$sh" "$R/tools/bar" "$h1" foo
+    ok "$(rel "$h1")" "repos/tools/foo-rollout/THREAD.md
+repos/tools/foo/THREAD.md" "$L CWD in tools/bar, slug=foo: the tiebreak keeps both foo hits"
+    ok "$err" "" "$L CWD in a non-matching repo: empty stderr"
+    # 5c: an _archive, .claude, node_modules or depth-6 copy under ~/Projects never beats a repo thread
+    lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h4" foo
+    ok "$(rel "$h4")" "repos/tools/foo-rollout/THREAD.md
+repos/tools/foo/THREAD.md" "$L pruned ~/Projects copies do not hide the repo threads"
+    lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h4" deep
+    ok "$(rel "$h4")" "Projects/A/P/S/T/THREAD.md" "$L a nested project THREAD.md at depth 5 is still found"
     # 6
     lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h1" baz
     ok "$(rel "$h1")" "repos/tools/baz/THREAD.md" "$L a CRLF, quoted slug: matches"
@@ -156,12 +176,19 @@ repos/tools/renamed/THREAD.md" "$L an empty slug lists exactly the six repo thre
   # 12: mutation M2 — without the depth limit, depth 4 appears but the worktree copy stays out.
   sed 's#-maxdepth 3 ##' "$tmp/lk.sh" > "$tmp/m2.sh"
   ok "$(cmp -s "$tmp/lk.sh" "$tmp/m2.sh" && echo same || echo changed)" changed "M2: the mutation changed the snippet"
-  ok "$(occ "$tmp/m2.sh" '-maxdepth')" 0 "M2: exactly the depth token was removed"
+  ok "$(occ "$tmp/m2.sh" '-maxdepth 3')" 0 "M2: exactly the repo-tier depth token was removed"
   ok "$(diff "$tmp/lk.sh" "$tmp/m2.sh" | grep -c '^[<>]')" 2 "M2: exactly one line differs"
   lk "$tmp/m2.sh" bash "$tmp/plain" "$h1" ""
   ok "$(inl "$R/a/b/c/THREAD.md")" y "M2: without the depth limit the depth-4 fixture is listed (the fixture is sensitive)"
   ok "$(inl "$R/tools/foo/.claude/worktrees/w/THREAD.md")" n "M2: the worktree copy stays excluded by the .claude rule alone"
   ok "$(inl "$R/x/.claude/THREAD.md")" n "M2: x/.claude/THREAD.md stays excluded"
+
+  # 13: mutation M3 — without the _archive prune, the archived project copy wins the ~/Projects tier.
+  sed 's#-name _archive -o ##' "$tmp/lk.sh" > "$tmp/m3.sh"
+  ok "$(occ "$tmp/m3.sh" '_archive')" 0 "M3: exactly the _archive token was removed"
+  ok "$(diff "$tmp/lk.sh" "$tmp/m3.sh" | grep -c '^[<>]')" 2 "M3: exactly one line differs"
+  lk "$tmp/m3.sh" bash "$tmp/plain" "$h4" foo
+  ok "$(rel "$h4")" "Projects/A/_archive/Old/THREAD.md" "M3: without the prune the _archive copy hides the repo threads (the fixture is sensitive)"
 fi
 
 # ==== Section B: the prose =============================================================================
@@ -175,6 +202,10 @@ done
 ok "$(grep -c '^## Repo-thread lookup$' "$OPEN")" 1 "open has a ## Repo-thread lookup heading"
 has "$(sec "$OPEN" '^# /thread:open' '^## Modes')" 'effective slug' "open's intro defines the effective slug"
 has "$(sec "$OPEN" '^### `/thread:open <slug>`' '^##')" '§ Repo-thread lookup' "open <slug> runs § Repo-thread lookup"
+hp3=$(first "$(sec "$OPEN" '^### `/thread:open <path-to-handoff-doc>`' '^##')" '3. ')
+has "$hp3" '§ Repo-thread lookup with `slug=<thread:>`' "the handoff-doc pickup's step 3 runs the lookup on thread:"
+has "$(grep -F -- '- **Callers.**' "$OPEN")" "handoff-doc pickup's step 3" "the lookup's Callers names the handoff-doc pickup"
+has "$(sec "$OPEN" '^### `/thread:open save`' '^##')" 'save never sets `state: done`' "open save never sets state: done"
 
 # close
 ident=$(sec "$CLOSE" '^## Identify the active thread' '^## ')
@@ -187,7 +218,7 @@ has "$r2" 'never rung 3' "close rung 2 never falls to rung 3"
 slugin=$(first "$(cat "$CLOSE")" '- `slug` ')
 has "$slugin" 'effective slug' "close's handoff-scan slug input is the effective slug"
 s71=$(grep -F 'Thread update — write THREAD.md' "$CLOSE" | head -n 1)
-for s in 'rev-parse --show-toplevel' 'diff --cached --quiet --' 'check-ignore -q --' '(add failed:' 'whichever rung resolved it'; do
+for s in 'rev-parse --show-toplevel' '--path-format=absolute --git-path' 'stricter form of sub-step 2' 'diff --cached --quiet --' 'check-ignore -q --' '(add failed:' 'whichever rung resolved it'; do
   has "$s71" "$s" "close step 7.1 carries: $s"
 done
 has "$(grep -F -- '- **Auto-execute, no asking**' "$CLOSE")" 'step 7.1' "close's Auto-execute line names the step-7.1 commit"
@@ -202,6 +233,8 @@ for s in 'repo thread without front matter' 'keeps none' 'effective slug' 'Proje
 done
 has "$(first "$(sec "$LIFE" '^## Front matter' '^## ')" 'thread:')" 'effective slug' "handoff-lifecycle § Front matter's thread: is the effective slug"
 has "$(cat "$LIFE")" "close's tool-repo commit (step 7.1)" "handoff-lifecycle names close's tool-repo commit"
+has "$ts" '`/thread:open save` that resolves that thread, from any CWD' "handoff-lifecycle: a repo thread is committed by the close that resolves it"
+ok "$(occ "$LIFE" 'or `/thread:open save` in that repo')" 0 "handoff-lifecycle: the per-repo wording is gone"
 
 # CONTEXT.md and ADR 0017
 has "$(cat CONTEXT.md)" '**Repo thread**' "CONTEXT.md defines **Repo thread**"
