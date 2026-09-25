@@ -63,19 +63,20 @@ A `thread:close` deletes a consumed doc in its close-out commit, **whoever marke
 **Peer guard.** The snippet below runs for **every** consumed doc, including one this session marked. `keep missing` means another close already removed it: no git command, and the doc is reported as already gone. Under rule (a), only that output matters.
 
 - **Rule (a).** This session marked the doc — the prompt's first instruction, open's handoff-doc pickup, or open's `<slug>` pointer (§ Pickup). It deletes the doc at its own close, with no age check and no listing check.
-- **Rule (b).** Any other close deletes the doc only when both hold: the snippet prints `delete` (last written 24 h ago or more), and no harness-listed session *other than this one or a subagent it spawned* has a cwd inside the doc's `<home>`. The listing is `ListAgents` (Claude) or `list_agents` (Codex). A clean or unavailable listing is **no evidence** either way (estate METHOD K41 correction); a positive listing always keeps the doc.
-- **Listing rows with no cwd.** A listed session whose row shows no cwd is ignored: it is no evidence and does not block the delete. So wherever the harness does not expose cwd, the positive-listing rule is dormant, and the 24 h floor is the only protection. The listing is a best-effort extra, not a working second line of defence.
+- **Rule (b).** Any other close deletes the doc only when both hold: the snippet prints `delete` (last written 24 h ago or more), and no harness-listed session *other than this one or a subagent it spawned* has a cwd inside the doc's `<home>` or inside the directory on the doc's ``**Run from:**`` line (a doc without that line matches on `<home>` alone). The `Run from` directory is what makes a `_shared` doc matchable at all: `_shared` is never a launch directory, so a shared thread's consumer runs from the seat that line names (handoff § Handoff document (**Shape.**)). The listing is `ListAgents` (Claude) or `list_agents` (Codex). A clean or unavailable listing is **no evidence** either way (estate METHOD K41 correction); a positive listing always keeps the doc.
+- **Listing rows with no cwd.** A listed session whose row shows no cwd is ignored: it is no evidence and does not block the delete. Claude Code's `ListAgents` rows carry no cwd as of 2026-09-25 (a row is `name [id] · kind · state · started`), so on Claude the positive-listing rule is dormant and the 24 h floor is the whole guard. A close on Claude therefore **skips the `ListAgents` call**: loading a deferred tool whose rows cannot change the outcome is pure cost. When `ListAgents` rows gain a cwd, this skip is the one line to remove, and the rule takes effect as written. A close on Codex calls `list_agents` and applies the rule to any row that shows a cwd. The listing is a best-effort extra, not a working second line of defence.
 - **Unsure after a compaction** whether this session marked the doc → treat it as not its own.
 - **Why mtime.** The consumed mark is the doc's last write, so its mtime is when the consumer went live. A checkout that resets mtime errs toward keeping.
-- **Three outputs.** The snippet has **three outputs** (`delete`, `keep fresh`, `keep missing`). This deliberately widens the task's two-output spec: without `keep missing`, a doc another close removed would print `delete`, and `git rm -f` would fail with a pathspec error.
+- **Three outputs.** The snippet has **three outputs** (`delete`, `keep fresh`, `keep missing`). Without `keep missing`, a doc another close already removed would print `delete`, and `git rm -f` would fail with a pathspec error.
+- **A failed `find` keeps the doc.** The age test is `find`'s exit status as well as its output: a `find` that errors (not on `PATH`, a broken binary) prints `keep fresh`, never `delete`. An empty result from a failed `find` would otherwise read as "old" and delete a fresh doc, the exact hazard the guard exists to stop.
 
-`f` is read as a shell variable: the agent runs `f='<abs doc path>'` followed by the snippet in one Bash call. Plain `find`, no `stat` (BSD and GNU disagree); zsh-safe — no arrays, no word-split expansions, every expansion quoted.
+`f` is read as a shell variable: the agent runs `f='<abs doc path>'` followed by the snippet in one Bash call. Plain `find`, no `stat` (BSD and GNU disagree), and no GNU-only `find` flags: in the Claude Code tool shell `find` is a function routing to the harness's embedded `bfs`, which gives the same results as BSD `find` for this test; zsh-safe — no arrays, no word-split expansions, every expansion quoted.
 
 ```bash
 # thread:peer-guard (extracted and run by tests/peer-guard.test.sh)
 : "${f:?peer-guard: f=<abs doc path> is required}"
 if [ ! -e "$f" ]; then echo 'keep missing'
-elif [ -n "$(find "$f" -mmin -1440)" ]; then echo 'keep fresh'
+elif ! r=$(find "$f" -mmin -1440) || [ -n "$r" ]; then echo 'keep fresh'
 else echo delete
 fi
 # end thread:peer-guard
