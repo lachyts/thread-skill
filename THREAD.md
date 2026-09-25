@@ -41,6 +41,9 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
   - `thread-skill-protect-master-ci`
   - `thread-skill-retire-rollout-clone` (only after p2-6 and p2-7 land)
 - **Lessons:** the rollout's five are in § Known quirks (protocol 4 intake items 14–17).
+- **Next, prepared later on 2026-09-25:** a four-task 2.7 rollout (p2-6, p2-7 and two small fixes). `d59bcb3`
+  is pushed, the rollout clone is tidied and green, and the model tier is locked to Opus 5.5. The order
+  and the paste-ready lead prompt are in § Resume instructions.
 
 **2026-09-25 (morning), superseded the same day (see above): the self-rollout was ready to resume from
 wave 3. Nothing was running; 8 tasks were left.**
@@ -369,6 +372,11 @@ scheduled 2026-07-15.
   human-facing surface (goal, terminology, wave-sibling framing); its
   `repos:` frontmatter auto-routes tasks captured from this repo's CWD.
 - Build lineage: `docs/build-plan.md` (the approved plan, copied in at close).
+- **2026-09-25, the model tier is locked:** Opus 5.5 is the top tier until Lachy edits
+  `~/.agents/AGENTS.md` § Model tier by hand (`~/.agents` commit `10ceaf6`). Rollouts of this plugin set
+  `max_tier: opus` and stamp no `model: fable`. schedule's text still calls `max_tier` a quota switch
+  ("leave it commented out"); the AGENTS.md section is the explicit operator instruction ADR 0016 asks
+  for. This repo's `fable-first-model-stance` memory is marked overridden.
 - **2026-09-25, the close peer guard (p2-4, PR #16):** a consumed handoff doc is deleted at the
   marker's own close, or by any later close once its mtime is 24 h old and no listed peer sits in its
   `<home>` or `Run from:` directory (`skills/_shared/handoff-lifecycle.md` § Close-out). `ListAgents`
@@ -402,6 +410,9 @@ scheduled 2026-07-15.
 - **The stale `thread@thread` 2.3.4 project-scope record at `~`** is still installed. Uninstalling it is
   unsafe as written: all three profiles' `settings.json` are symlinks to `~/.claude/settings.json`, which
   is also the project settings file for `~`. Vault task `thread-skill-stale-project-scope-install`.
+  Related, not yet investigated: `check-agent-parity.py`'s skill-packages check still takes thread 2.3.4
+  (`e586b19`) as the selected release, so it reports the 2.6.0 cache and this checkout as drift. A release
+  here doesn't update that selection (seen 2026-09-25).
 - **Protocol 4 intake** from the 2026-09-23 audit:
   - port `defaultBranch` to the redesign's protocol 3 path
   - gate the release on the zero-rounds fail-open bug
@@ -604,7 +615,8 @@ scheduled 2026-07-15.
   whitespace-split arguments, 0-based, into the SKILL.md text before the model sees it, and that includes
   shell and awk variables. Seen 2026-09-25: `/thread:close` with a one-sentence argument rendered the
   handoff-scan snippet with `$0` → `Active`, `$1` → `thread:` and `$2` → the THREAD.md path, so
-  `print $2` read `print ~/repos/tools/thread-skill/THREAD.md`. The tests extract the snippets from the
+  `print $2` read `print ~/repos/tools/thread-skill/THREAD.md`. A bare `/thread:close` later that day
+  rendered the same snippet intact, so only an invocation with arguments triggers it. The tests extract the snippets from the
   source files, so `make test` cannot see it. Until it is fixed, run an embedded snippet from the source
   (`sed -n '/^# thread:handoff-scan/,/^# end thread:handoff-scan/p' skills/close/SKILL.md`), never the
   rendered text. `skills/execute/SKILL.md:177` (the default-branch resolver's awk `$2`) is exposed too,
@@ -634,16 +646,75 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**Now (from 2026-09-25 afternoon): the self-rollout is complete and 2.6.0 is released. Nothing is running
-and no handoff doc is pending.**
-- **The next work is vault tasks** under `[[Thread Skill]]`, listed in § Where we are. Nothing here
-  continues on its own.
-- **p2-6 and p2-7** are the landable code. Schedule them and run the lead from a session launched in the
-  rollout clone `~/repos/tools/thread-skill-rollout`, never from here. The self-rollout's lead rules
-  still hold (rollout note § *Resolved 2026-09-24* and § *Resolved 2026-09-25*).
-- **p3-1 and p3-3** need Lachy's design calls before anything dispatches. **p4-5** waits for the eval
-  baseline, which is a spend (`thread-skill-eval-baseline-then-p4-5`).
-- **Retire the rollout clone** only after p2-6 and p2-7 land.
+**Now (from 2026-09-25, later): run the 2.7 rollout. Nothing is running and no handoff doc is pending.**
+- **Order** (recommended 2026-09-25; Lachy asked for the preparation, which is done):
+  1. The 2.7 rollout below: p2-6, p2-7, `thread-skill-evals-results-vs-release-check` and
+     `thread-skill-orient-nested-project-notes`. p2-7 is the one that adds close's missing rule for a
+     tool repo's THREAD.md.
+  2. Release 2.7.0 from this checkout: `pull --ff-only`, bump both manifests, `claude plugin update`,
+     `make release-check`.
+  3. The eval baseline (Lachy's USD 5 spend), then schedule p4-5. Step 1's results fix removes the
+     hand-clear.
+  4. The E2E, once, on 2.7.0. Retarget `thread-skill-e2e-rerun-on-2-6-0` then, so one live pass covers
+     both releases.
+  5. Retire the rollout clone.
+  - Any time alongside: the `$N` snippet fix (hands-on, because it needs a live probe),
+    `thread-skill-protect-master-ci` (Lachy's call), the p3-1 and p3-3 design calls,
+    `safepoint-uses-handoff-home-resolver` (in the workspaces repo), and the stale 2.3.4 install.
+- **Prepared:** `d59bcb3` is pushed. The clone is at `d59bcb3`, clean, with the pre-push guard in place and
+  no worktrees (p2-4's merged one was removed), and `make test` is ALL PASS. The tier is locked to Opus 5.5
+  (§ What's been built, 2026-09-25). This file's later close-out commit must be pushed too, because the
+  prompt's preflight checks that this checkout is level with origin.
+- **Launch** a fresh session in `~/repos/tools/thread-skill-rollout`, never here, and paste:
+
+```
+You're the lead for the thread-skill 2.7 rollout, running in the rollout clone
+~/repos/tools/thread-skill-rollout. The live checkout ~/repos/tools/thread-skill is read-only here.
+
+Preflight (stop and tell me if any fails):
+- `claude plugin list` shows thread@thread 2.6.0 at user scope.
+- The live checkout and the clone are both level with origin/master, and both are clean. The clone has
+  .git/hooks/pre-push and no leftover worktrees.
+- `make test` is green on the clone's master.
+- The engine's `opus` label resolves to claude-opus-5-5 (vault task
+  thread-skill-execute-opus-label-is-opus-55 is still open). If it doesn't, stop.
+
+Read first: ~/repos/tools/thread-skill/THREAD.md (§ Where we are; § Known quirks, especially the
+self-rollout lessons and the `$N` entry) and
+~/repos/obsidian/Work/Tasks/Archive/Rollouts/thread-skill-rollout-2026-09-23.md (§ Completion log).
+
+1. Schedule: /thread:schedule --tasks thread-skill-p2-6-close-repo-state-local-only,thread-skill-p2-7-tool-repo-threads-and-open-save,thread-skill-evals-results-vs-release-check,thread-skill-orient-nested-project-notes
+   - Tier: Opus 5.5 only, per ~/.agents/AGENTS.md § Model tier. Set `max_tier: opus` in the rollout
+     frontmatter, citing that section. Stamp no `model: fable`, and skip the step 4.7 Fable batch.
+     Capped tasks run their full loop at the higher effort, so expect longer waves.
+   - p2-6 and p2-7 share skills/close/SKILL.md, so they go in separate waves.
+   - Show me the wave plan and the confirm batch (gates, effort overrides), then wait for my go.
+2. Execute: after my go, /thread:execute [[<the new rollout note>]] in continuous mode, unattended.
+
+Lead rules:
+- Never approve a gate. On gate-pending, or anything only I can decide: halt, park it in the rollout
+  note § Notes with the options and your recommendation, and tell me.
+- Never push, reset or force master/main; merges go through merge-wave.sh only. Never point GIT_DIR
+  or GIT_WORK_TREE at the clone.
+- No edits, commits or resets in the live checkout (its THREAD.md included).
+- There's no CI: after each wave merges, re-run `make test` on the merged master before the next wave.
+- Never `cd` into the vault; use absolute paths and `git -C`.
+- Run embedded shell snippets (e.g. execute's default-branch resolver) from the source SKILL.md with
+  sed, never from the rendered skill text: invoking a skill with arguments rewrites $0/$1/$2.
+- Never run `make evals` or `claude plugin eval` (real spend).
+- From the last run:
+  - Check resume-filter's list against /thread:status before dispatching; it misses archived notes.
+  - Re-dispatch a plan-blocked task at most once, with its last plan attached to the note as a
+    reference. A second block halts for me; copy that pass's feedback into the note by hand first.
+  - On a cold resume, flush only PRs whose note is at `status: review`.
+  - An account or auth failure that comes back `blocked` resumes with resumeFromRunId on the same run.
+
+3. When every wave has merged: run the completion ceremony (note done, completion log, archive,
+   vault commit by pathspec), then stop. Don't release 2.7.0, run the E2E or the eval baseline, or
+   touch THREAD.md. Report: PRs and merge SHAs, plan/review rounds per task, anything parked, and
+   proposed follow-ups (don't file tasks).
+```
+
 - The instructions below predate this and are kept for history.
 
 **Superseded 2026-09-25 (afternoon): the self-rollout was ready to resume. Nothing was running.**
@@ -715,6 +786,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-25 (later): prepared the 2.7 rollout. Pushed `d59bcb3`. Tidied the clone: removed p2-4's merged worktree and branch, fast-forwarded to `d59bcb3`, and `make test` is ALL PASS. Locked Opus 5.5 as the top tier in `~/.agents/AGENTS.md` (`10ceaf6`); the 2026-09-23 rule had lived only in memories this session never loaded. Wrote the lead prompt into Resume. A bare `/thread:close` confirmed that the `$N` quirk needs arguments.
 - 2026-09-25 (afternoon): close-out after the 2.6.0 release (`3a7b9be`, release-check green). Folded in the uncommitted 2026-09-25 resume edit, rewrote Where we are and Resume to the finished state, moved the peer-guard question to decided (p2-4), added the five rollout lessons (intake items 14–17) and the skill-argument `$N` quirk to Known quirks, and deleted the consumed 2.5.2 simplify review doc. Remaining: p2-6, p2-7, p3-1, p3-3, p4-5 and seven follow-up tasks.
 - 2026-09-25 (morning to midday): self-rollout lead `execute-2026-09-25-a809daf4`. p4-1 converged with its last plan attached (#10). Waves 4–5 merged (#11–#15). p2-3 plan-blocked twice, and Lachy's decisions deferred and split it (p2-6, p2-7), so wave 6 closed empty. Wave 7's p2-4 (#16) survived an account lapse via `resumeFromRunId`. Completed 37h 22m after dispatch.
 - 2026-09-24 (morning): self-rollout resume lead (unattended, `execute-2026-09-24-a91d0c16`). Finished wave 2: #7 (p3-4) and #6 (p1-3, the test-side `GIT_*` scrub). Merged #8 (p3-2) and #9 (p2-1) in wave 3, leaving `master` at `d85a3c7`, green. p4-1 was plan-blocked, re-dispatched, then came back with 23 phantom gates (the parser reads past `---`, intake item 13). The lead halted for Lachy, who withdrew the gates on 2026-09-25. Cursor 2/7, 8 tasks left.
