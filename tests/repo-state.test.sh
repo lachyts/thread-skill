@@ -76,19 +76,19 @@ git config init.defaultBranch" 2>/dev/null)
   g clone -q "$tmp/o.git" "$tmp/seed" 2>/dev/null
   g -C "$tmp/seed" symbolic-ref HEAD refs/heads/master
   commits "$tmp/seed" 1 && g -C "$tmp/seed" push -q origin master 2>/dev/null
-  ok "$(git -C "$tmp/seed" symbolic-ref -q refs/remotes/origin/HEAD || echo unset)" unset "seed has no origin/HEAD (precondition)"
+  ok "$(g -C "$tmp/seed" symbolic-ref -q refs/remotes/origin/HEAD || echo unset)" unset "seed has no origin/HEAD (precondition)"
   g -C "$tmp/seed" branch main
   g -C "$tmp/seed" checkout -q -b feat/y && commits "$tmp/seed" 1
-  ok "$(git -C "$tmp/seed" show-ref --verify -q refs/heads/main && echo y)" y "seed has a stray local main (precondition)"
+  ok "$(g -C "$tmp/seed" show-ref --verify -q refs/heads/main && echo y)" y "seed has a stray local main (precondition)"
 
   g clone -q "$tmp/o.git" "$tmp/work"
-  ok "$(git -C "$tmp/work" symbolic-ref --short refs/remotes/origin/HEAD)" origin/master "work's origin/HEAD → origin/master (precondition)"
+  ok "$(g -C "$tmp/work" symbolic-ref -q refs/remotes/origin/HEAD)" refs/remotes/origin/master "work's origin/HEAD → origin/master (precondition)"
   g -C "$tmp/work" checkout -q -b feat/x && commits "$tmp/work" 2
   mkdir -p "$tmp/work/sub"
-  for c in w1 w4 w6 w7 w13 "my repo"; do g clone -q "$tmp/o.git" "$tmp/$c"; done
+  for c in w1 w4 w6 w7 w13 wa wb wc "my repo"; do g clone -q "$tmp/o.git" "$tmp/$c"; done
   mkdir -p "$tmp/plain"
 
-  snap() { git -C "$1" for-each-ref --format='%(refname) %(objectname) %(symref)'; }
+  snap() { g -C "$1" for-each-ref --format='%(refname) %(objectname) %(symref)'; }
   work_before=$(snap "$tmp/work"); seed_before=$(snap "$tmp/seed")
 
   L2="on feat/x, 2 commit(s) unmerged to master"
@@ -106,25 +106,22 @@ git config init.defaultBranch" 2>/dev/null)
   # 4. a stray local main
   g -C "$tmp/w4" branch main
   g -C "$tmp/w4" checkout -q -b feat/z && commits "$tmp/w4" 1
-  rs "$tmp/w4"; clean0 "on feat/z, 1 commit(s) unmerged to master" "4a. a stray local main still says master"
-  git -C "$tmp/seed" checkout -q feat/y
-  rs "$tmp/seed"; clean0 "$(unres feat/y)" "4b. a stray local main and no origin/HEAD → unresolved, never main"
+  rs "$tmp/w4"; clean0 "on feat/z, 1 commit(s) unmerged to master" "4. a stray local main still says master"
 
-  # 5. no origin/HEAD
-  git -C "$tmp/seed" checkout -q feat/y
-  rs "$tmp/seed"; clean0 "$(unres feat/y)" "5a. no origin/HEAD, on a feature branch → unresolved"
-  git -C "$tmp/seed" checkout -q master
+  # 5. no origin/HEAD (seed, on feat/y since its fixture, also has a stray local main)
+  rs "$tmp/seed"; clean0 "$(unres feat/y)" "5a. no origin/HEAD and a stray local main, on a feature branch → unresolved, never main"
+  g -C "$tmp/seed" checkout -q master
   rs "$tmp/seed"; clean0 "$(unres master)" "5b. no origin/HEAD, on master → unresolved too"
-  git -C "$tmp/seed" checkout -q feat/y
+  g -C "$tmp/seed" checkout -q feat/y
 
   # 6. a dangling origin/HEAD
-  git -C "$tmp/w6" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+  g -C "$tmp/w6" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
   g -C "$tmp/w6" checkout -q -b feat/v && commits "$tmp/w6" 1
   rs "$tmp/w6"; clean0 "$(unres feat/v)" "6. origin/HEAD → a missing origin/trunk → unresolved"
 
   # 7. origin/<default> gone, local <default> present
-  git -C "$tmp/w7" update-ref -d refs/remotes/origin/master
-  ok "$(git -C "$tmp/w7" symbolic-ref --short refs/remotes/origin/HEAD)" origin/master "w7 keeps origin/HEAD (precondition)"
+  g -C "$tmp/w7" update-ref -d refs/remotes/origin/master
+  ok "$(g -C "$tmp/w7" symbolic-ref -q refs/remotes/origin/HEAD)" refs/remotes/origin/master "w7 keeps origin/HEAD (precondition)"
   g -C "$tmp/w7" checkout -q -b feat/w && commits "$tmp/w7" 3
   rs "$tmp/w7"; clean0 "on feat/w, 3 commit(s) unmerged to master" "7. counted against local master"
 
@@ -142,9 +139,9 @@ git config init.defaultBranch" 2>/dev/null)
   rs "$tmp/w8"; clean0 "" "8. feat/m merged and pushed → nothing"
 
   # 9. detached HEAD
-  git -C "$tmp/w1" checkout -q --detach
+  g -C "$tmp/w1" checkout -q --detach
   rs "$tmp/w1"; clean0 "" "9. detached HEAD → nothing"
-  git -C "$tmp/w1" checkout -q master
+  g -C "$tmp/w1" checkout -q master
 
   # 10. nothing to report: outside git, unborn, bare
   rs "$tmp/plain"; clean0 "" "10a. outside git → nothing (git's fatal does not leak)"
@@ -176,16 +173,37 @@ git config init.defaultBranch" 2>/dev/null)
   rs "$tmp/my repo"; clean0 "on feat/s, 1 commit(s) unmerged to master" "14. a repo path with a space"
   rs "$tmp" -- "$tmp/my repo"; clean0 "on feat/s, 1 commit(s) unmerged to master" "14. the same, as the argument"
 
+  # 19. ambiguous short names: `symbolic-ref --short` would print heads/<br> or remotes/origin/<default>
+  g -C "$tmp/wa" tag master && commits "$tmp/wa" 1
+  ok "$(g -C "$tmp/wa" symbolic-ref -q --short HEAD)" heads/master "wa: a tag named master makes the short name ambiguous (precondition)"
+  rs "$tmp/wa"; clean0 "" "19a. on master with a tag named master and a local commit ahead → nothing"
+  g -C "$tmp/wb" checkout -q -b feat/a && commits "$tmp/wb" 1 && g -C "$tmp/wb" tag feat/a
+  rs "$tmp/wb"; clean0 "on feat/a, 1 commit(s) unmerged to master" "19b. feat/a with a same-named tag → no heads/ prefix"
+  g -C "$tmp/wc" branch origin/master 2>/dev/null
+  g -C "$tmp/wc" checkout -q -b feat/x && commits "$tmp/wc" 2
+  ok "$(g -C "$tmp/wc" symbolic-ref -q --short refs/remotes/origin/HEAD)" remotes/origin/master "wc: a local branch origin/master makes origin/HEAD's short name ambiguous (precondition)"
+  rs "$tmp/wc"; clean0 "$L2" "19c. a local branch named origin/master → still resolves master"
+
+  # Can this git fake a dubious-ownership repo? (16c and 17a need it.)
+  dubious=n
+  env "${base_env[@]}" GIT_TEST_ASSUME_DIFFERENT_OWNER=1 git -C "$tmp/work" rev-parse >/dev/null 2>&1 || dubious=y
+
   # 16. the scrub
   rs "$tmp/work" GIT_DIR="$tmp/seed/.git" GIT_WORK_TREE="$tmp/seed"
   clean0 "$L2" "16a. exported GIT_DIR/GIT_WORK_TREE are scrubbed; cwd decides"
   rs "$tmp/seed" GIT_DIR="$tmp/seed/.git" GIT_WORK_TREE="$tmp/seed" -- "$tmp/work"
   clean0 "$L2" "16b. exported GIT_DIR/GIT_WORK_TREE are scrubbed; the argument decides"
-  rs "$tmp/work" GIT_CONFIG_PARAMETERS="'init.defaultbranch'='trunk'"
-  clean0 "$L2" "16c. GIT_CONFIG_PARAMETERS is kept and changes nothing"
+  # 16c. GIT_CONFIG_PARAMETERS is kept: a caller's safe.directory (protected, command-line config) lets the
+  #      script open a repo git would otherwise refuse (17a's dubious ownership). Scrubbed, it would exit 3.
+  if [ "$dubious" = y ]; then
+    rs "$tmp/work" GIT_TEST_ASSUME_DIFFERENT_OWNER=1 GIT_CONFIG_PARAMETERS="'safe.directory'='*'"
+    clean0 "$L2" "16c. a kept GIT_CONFIG_PARAMETERS safe.directory opens a dubious-ownership repo"
+  else
+    echo "SKIP - 16c: this git ignores GIT_TEST_ASSUME_DIFFERENT_OWNER"
+  fi
 
   # 17. real git failures are exit 3, not silence
-  if ! env "${base_env[@]}" GIT_TEST_ASSUME_DIFFERENT_OWNER=1 git -C "$tmp/work" rev-parse >/dev/null 2>&1; then
+  if [ "$dubious" = y ]; then
     rs "$tmp/work" GIT_TEST_ASSUME_DIFFERENT_OWNER=1
     ok "$rc" 3 "17a. a repo git refuses to open (dubious ownership) → rc 3"; ok "$out" "" "17a. stdout empty"
     starts "$err" "repo-state: git cannot open" "17a. stderr says git cannot open it"
@@ -215,7 +233,7 @@ rsline='rs="${CLAUDE_PLUGIN_ROOT}/skills/close/scripts/repo-state.sh"'
 ok "$(grep -cF "$rsline" "$CLOSE")" 1 "close cites the script as $rsline, exactly once"
 has "$closetext" '-f "$rs"' "close guards the script with -f \"\$rs\""
 step2=$(awk '/^2\. \*\*Check git state/{on=1} /^3\. /{on=0} on' "$CLOSE")
-for phrase in 'check failed' 'never read as "no feature branch"' 'tracking unknown' 'grep -rlF' 'in_progress'; do
+for phrase in 'check failed' 'never read as "no feature branch"' 'tracking unknown' 'command grep -rlF' 'in_progress'; do
   has "$step2" "$phrase" "step 2 says: $phrase"
 done
 step6=$(grep -E '^6\. ' "$CLOSE")
@@ -224,6 +242,7 @@ for phrase in 'Merge or retire' '§ The handoff owns the continuation' 'rule 1' 
   has "$step6" "$phrase" "step 6 says: $phrase"
 done
 step8=$(grep -E '^8\. \*\*Print the "What landed" report' "$CLOSE")
+has "$step8" '— no `origin` remote, check skipped' "step 8 says: the no-origin row drops the set-head hint"
 for phrase in 'Repo state: check failed (' '— tracked by [[' '— not tracked by any open task' 'continuation in' \
               '— tracking unknown (' 'git remote set-head origin --auto'; do
   has "$step8" "$phrase" "step 8 says: $phrase"
@@ -231,7 +250,7 @@ done
 guard=$(awk '/^## Guardrails/{on=1; next} /^## /{on=0} on' "$CLOSE")
 has "$guard" 'never merges, pushes, rebases or deletes a branch' "§ Guardrails: close never merges, pushes, rebases or deletes a branch"
 edges=$(awk '/^## Edge cases/{on=1; next} /^## /{on=0} on' "$CLOSE")
-for phrase in 'squash' 'unmerged to <default>' 'dubious ownership' 'tracking unknown'; do
+for phrase in 'squash' 'unmerged to <default>' 'dubious ownership' 'tracking unknown' 'no `origin` remote' "No such remote 'origin'"; do
   has "$edges" "$phrase" "§ Edge cases says: $phrase"
 done
 
@@ -285,6 +304,11 @@ if extract repo-track "$tmp/snip-rt.sh"; then
   task c-done.md done 'Merged feat/x already.'
   task Archive/e.md open 'Nothing about branches here.'
   printf 'No front matter, but it names feat/x.\n' > "$T/f.md"
+  task g-dot.md open 'The work sits on feat/p.'
+  task h-ver.md open 'Release feat/q.1 shipped; see feat/q..'
+  # The Claude Code Bash tool's grep is a shell-snapshot function (ugrep honouring .gitignore): the snippet
+  # must bypass any grep function. A poisoned copy defines one that fails; `command grep` never calls it.
+  { echo 'grep() { echo "poisoned grep" >&2; return 2; }'; cat "$tmp/snip-rt.sh"; } > "$tmp/snip-rt-fn.sh"
   # track <shell> [VAR=value …] → $out, $err, $rc
   track() {
     local sh=$1; shift
@@ -295,6 +319,10 @@ if extract repo-track "$tmp/snip-rt.sh"; then
     track "$sh" br=feat/x;   ok "$out" b-open "[$sh] br=feat/x → b-open (sorted first; done, feat/x-2-only and no-front-matter excluded)"; ok "$rc" 0 "[$sh] br=feat/x → rc 0"
     track "$sh" br=feat/x-2; ok "$out" a-sub "[$sh] br=feat/x-2 → a-sub"; ok "$rc" 0 "[$sh] br=feat/x-2 → rc 0"
     track "$sh" br=feat/zz;  ok "$out" "" "[$sh] br=feat/zz → empty"; ok "$rc" 0 "[$sh] br=feat/zz → rc 0"
+    track "$sh" br=feat/p;   ok "$out" g-dot "[$sh] br=feat/p → g-dot (a sentence-final period is a boundary)"; ok "$rc" 0 "[$sh] br=feat/p → rc 0"
+    track "$sh" br=feat/q;   ok "$out" "" "[$sh] br=feat/q → empty (feat/q.1 and feat/q.. are other tokens)"; ok "$rc" 0 "[$sh] br=feat/q → rc 0"
+    out=$(cd "$tmp" && env HOME="$tmp/h" br=feat/x $sh "$tmp/snip-rt-fn.sh" 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err")
+    clean0 b-open "[$sh] a grep shell function is bypassed"
     track "$sh" HOME="$tmp/h2" br=feat/x
     ok "$rc" 2 "[$sh] no task directory → rc 2"; ok "$out" "" "[$sh] no task directory → stdout empty"
     starts "$err" "repo-track: no task directory" "[$sh] no task directory → stderr says so"
@@ -317,7 +345,7 @@ fi
 if [ -f "$script" ]; then
   ok "$(snap "$tmp/work")" "$work_before" "15. work's refs are unchanged by every run"
   ok "$(snap "$tmp/seed")" "$seed_before" "15. seed's refs are unchanged by every run"
-  ok "$(git -C "$tmp/seed" symbolic-ref -q refs/remotes/origin/HEAD || echo unset)" unset "15. seed still has no origin/HEAD"
+  ok "$(g -C "$tmp/seed" symbolic-ref -q refs/remotes/origin/HEAD || echo unset)" unset "15. seed still has no origin/HEAD"
 fi
 
 echo; [ "$fail" -eq 0 ] && echo "repo-state: ALL PASS" || echo "repo-state: SOME FAILED"
