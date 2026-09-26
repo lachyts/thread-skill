@@ -43,7 +43,7 @@ rg -l '^tags:.*\bthread\b' ~/repos/obsidian/Work/Tasks/ | xargs rg -l '^status: 
 then read the hits: an open task whose slug matches, or whose Notes link the same
 `THREAD.md`, or whose resume prompt describes the same work. Found → **update
 it in place**: refresh the summary + resume prompt, set/move/remove
-`scheduled:`, leave `captured:` as the original date. Never write a second
+`scheduled:`, rewrite § 4b's two fields, leave `captured:` as the original date. Never write a second
 task for the same thread. Re-deferring is a reschedule, not a new capture.
 
 ## 3. Resolve the day (`defer` only)
@@ -112,6 +112,7 @@ priority: normal
 projects: ["[[<Project>]]", "[[<Area>]]"]
 scheduled: <YYYY-MM-DD>        # defer only — OMIT the line entirely for stash
 captured: <YYYY-MM-DD today>
+next_action: <verb-first line> # every stash and defer — 4b below
 launch: <cc-* alias>           # qualifying tasks only — OMIT when no alias applies
 ---
 ```
@@ -130,6 +131,47 @@ launch: <cc-* alias>           # qualifying tasks only — OMIT when no alias ap
   queryable (`/weekly`'s Stashed-threads pass depends on it). Documented in
   `_shared/knowledge/obsidian-schema.md`.
 - Typed values: dates as `YYYY-MM-DD`, wiki-links quoted.
+
+## 4b. Next action — every set-down writes both fields
+
+Estate ADR 0008 (`~/repos/workspaces/_shared/docs/adr/0008-next-action-slot.md`,
+decisions 4 and 6; vocabulary `~/repos/workspaces/_shared/CONTEXT.md`
+§ Next action). A **set-down** — `thread:stash`, `thread:defer`, and
+`thread:close` when it has a next task — writes two fields, overwriting
+whatever is there: **the most recent set-down wins.** Stash runs this
+exactly as defer does; stash is defer without a date, and either way it
+names where the project is picked up.
+
+1. **`next_action:` on the task** — one line, verb-first, one physical
+   action ("Find the council's phone number"), taken from the resume
+   prompt's `Next move:` line (§ 5). A `Next move` that strings several
+   steps together gives its first physical one. Plain scalar; double-quote
+   it when it contains `: ` or ` #` or starts with a YAML indicator
+   character. A re-capture (§ 2) rewrites it with the new `Next move`.
+2. **`next_task:` on each project note** — for every link in the task's
+   `projects:`, find the note under `~/repos/obsidian/Work/Projects/**`
+   (never `Archive/`) and, when its `tags:` include `project`, set
+   `next_task: "[[<task-basename>]]"` — the task file's name without `.md`.
+   Replace the line in place when it exists, else add it inside the
+   frontmatter; touch nothing else in the note. An area landing note
+   (`tags: [area]`) is not a project note and is skipped, as is a link
+   that resolves to no note (name it in the confirmation).
+3. **Order** — the task file first, then the project notes, so the pointer
+   never lands before its target exists.
+
+**Close's form.** `close` writes only when the thread has a concrete next
+task, and never invents one: an open (`open` or `in_progress`) task that
+carries this thread's continuation — found as § 2 finds a capture — or,
+failing that, the one follow-up Lachy approved at close that carries the
+thread's next step (a loose end never qualifies). Its `next_action` comes
+from its resume prompt's `Next move:` when it has one, else from the next
+step in the THREAD.md's Resume instructions. No such task, or more than one
+with nothing to choose between them → write neither field and leave every
+project slot as it is.
+
+This section is the only overwrite. Every other writer fills a blank slot
+only (orient's rule: `orient/SKILL.md` § 5, the slot write), and pickup clears neither field
+(`open/SKILL.md`, the `[[<task>]]` pickup's step 3).
 
 ## 5. Body — everything lives inside
 
@@ -240,6 +282,8 @@ One compact confirmation, always echoing the concrete outcome:
 
 - defer: `→ [[<slug>]] scheduled **Mon 20 Jul** — on that day page's To do list. <Project>.`
 - stash: `→ [[<slug>]] stashed (no date) — resurfaces in /weekly's Stashed threads. <Project>.`
+- then, for both: `Next action: <the § 4b line> — next task on <Project>, …` naming each
+  project note § 4b pointed here, plus any `projects:` link it could not resolve.
 
 Render the task link clickable (`obsidian://open?...` per the global link
 rules). When § 5 **Lean capture** leaves unlanded research — a THREAD.md

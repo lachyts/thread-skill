@@ -88,6 +88,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   thread from its handoff doc. Pickup auto-completes the capture — the task is
   marked done, the handoff doc consumed: the capture's job ends the moment the
   thread is live again.
+- **Set-down** — any route that puts a thread's work down: `stash`, `defer`,
+  or `close` when the thread has a concrete next task. The only writer that
+  overwrites the two next-action fields; the most recent set-down wins.
+  Defined estate-wide in `~/repos/workspaces/_shared/CONTEXT.md` § Next action
+  (estate ADR 0008). _Avoid_: park (a project status), save.
+- **Next action** — a task's `next_action:`: one line, verb-first, one
+  physical action. A set-down takes it from the resume prompt's `Next move`.
+  _Avoid_: next step (vague), todo.
+- **Next task** — a project's `next_task:`: one wikilink naming the task that
+  is up; the project shows that task's next action and holds no text of its
+  own. A set-down points it at its capture; `orient` fills it only when blank.
+  A link to a done or missing task is a **dead link**, blanked by the daily
+  vault sweep — pickup never clears it. _Avoid_: up next, focus task.
 
 ## Memory capture (close-side)
 

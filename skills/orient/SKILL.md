@@ -73,6 +73,11 @@ project roots):
 
 ### 2. Audit (read-only sweep)
 
+- **Next-action slots, first** (estate ADR 0008, decision 7): each project
+  note's `next_task:` and that task's `next_action:` (its title when the
+  line is blank). A link to a task that is done, merged, archived or
+  missing is a **dead link** and reads as a blank slot. The slot is the
+  project's standing answer; the rest of the sweep is weighed against it.
 - **Vault**: the area note + every sub-project note (a note whose
   frontmatter `tags:` includes `project`, never a reference, garden or
   README note) under the vault folder `Work/Projects/<Folder>/`, at any
@@ -93,11 +98,16 @@ project roots):
 A situational report written for Lachy catching up, not a log:
 
 - **Headline** (1–2 sentences): the state of the project as a whole.
-- **Balls in the air**: per-sub-project one-liners — state, blocker,
-  staleness. Group: active / in-flight (dispatched) / stalled / dormant.
+- **Balls in the air**: per-sub-project one-liners — the slot first
+  (`next: <next_action> ([[<task>]])`, or `No next action`), then state,
+  blocker, staleness. Group: active / in-flight (dispatched) / stalled /
+  dormant.
 - **ONE recommended best use of his time**, with a one-line reason — same
   single-recommendation discipline as `next`. Everything else is context, not
-  competing recommendations.
+  competing recommendations. Frame it as a **proposal against the slot** of
+  the project it belongs to, so the two never read as competing answers:
+  the slot's own task → say they agree; a different item → name the slot and
+  say why this beats it; a blank slot → say the recommendation would fill it.
 
 ### 4. Steer
 
@@ -116,7 +126,14 @@ almost nothing is parallel-safe, recommend Hands-on):
 
 ### 5. Route
 
-- **Report-only** → done, no writes.
+- **The slot write** (fill-blank only — estate ADR 0008 decision 4): in every
+  mode but Report-only, when the recommendation is a task note, set
+  `next_task: "[[<task>]]"` on each project note it links whose slot is
+  blank (a dead link counts as blank), and that task's `next_action:` only
+  if it is blank (grain rule: `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md`
+  § 4b). A set slot is never overwritten — only a set-down or Lachy does
+  that; the recommendation stays a proposal against it.
+- **Report-only** → done, no writes (the slot write included).
 - **Hands-on** (and the focus half of Mixed) → if the item has a THREAD.md or
   capture task, run `open`'s pickup logic; else follow the task note's
   `## Launch` / `## Resume prompt`. No ceremony beyond that.

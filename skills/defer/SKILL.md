@@ -14,7 +14,7 @@ The decisive "this is <day>'s problem" route. Same capture as `thread:stash`, pl
    - No argument → tomorrow.
    - Named day → next *future* occurrence, never today (`defer monday` on a Monday = +7).
    - Explicit date → as given; refuse past dates.
-2. **Write the capture task** — follow `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` exactly: § 1 routing, § 2 dedup (re-deferring an open capture = move its `scheduled:`, don't duplicate), § 3b **day-page To do line** (the visible surface), § 4 frontmatter **with `scheduled: <resolved date>`**, § 5 self-contained body, § 6 THREAD.md upgrade only if thread-worthy.
+2. **Write the capture task** — follow `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` exactly: § 1 routing, § 2 dedup (re-deferring an open capture = move its `scheduled:`, don't duplicate), § 3b **day-page To do line** (the visible surface), § 4 frontmatter **with `scheduled: <resolved date>`**, § 4b next action (`next_action:` on the capture, `next_task:` on each project note it links — overwrite, estate ADR 0008), § 5 self-contained body, § 6 THREAD.md upgrade only if thread-worthy.
 3. **Process scan, silent** (ADR 0014, 0015) — run `${CLAUDE_PLUGIN_ROOT}/skills/_shared/process-scan.md` in silent mode on every defer: NOOP prints nothing; a hit adds one line to the confirmation.
 4. **Confirm** per § 7, always echoing the resolver's `Ddd` and date (or the stated hand-computed interpretation when § 3's fallback applied): `→ [[<slug>]] scheduled **Mon 20 Jul** — on that day page's To do list. <Project>.` — clickable task link, then state plainly that the session is safe to end.
 
