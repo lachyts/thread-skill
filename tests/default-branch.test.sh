@@ -60,6 +60,7 @@ out=$(CLAUDE_PLUGIN_ROOT="$tmp/nowhere" bash "$tmp/resolve.sh" "$tmp/clone" 2>"$
 ok "$rc|$out" "2|" "script missing → exit 2, nothing on stdout"
 ok "$(cut -d: -f1 "$tmp/err")" "default-branch" "script missing → stderr starts default-branch:"
 bash skills/execute/scripts/default-branch.sh >/dev/null 2>&1; ok "$?" 2 "no <repoPath> → usage exit 2"
+(cd "$tmp/clone" && bash "$root/skills/execute/scripts/default-branch.sh" "" >/dev/null 2>&1); ok "$?" 2 "empty <repoPath> → usage exit 2, never the CWD's repo"
 
 # ---- the engine's rendered setup, executed ----------------------------------------------------------
 setup=$(node --input-type=module -e "
