@@ -75,8 +75,8 @@ project roots):
 
 - **Next-action slots, first** (estate ADR 0008, decision 7): each project
   note's `next_task:` and that task's `next_action:` (its title when the
-  line is blank). A link to a task that is done, merged, archived or
-  missing is a **dead link** and reads as a blank slot. The slot is the
+  line is blank). A link to a task that is done, merged, dropped, archived
+  or missing is a **dead link** and reads as a blank slot. The slot is the
   project's standing answer; the rest of the sweep is weighed against it.
 - **Vault**: the area note + every sub-project note (a note whose
   frontmatter `tags:` includes `project`, never a reference, garden or

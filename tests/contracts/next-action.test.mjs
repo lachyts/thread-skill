@@ -3,7 +3,7 @@
 // capture's `next_action:` from the resume prompt's `Next move`, and `next_task:` on every project note
 // the capture links, overwriting (most recent set-down wins, stash exactly like defer); close writes only
 // for a concrete next task it never invents. stash, defer and close cite § 4b; open's pickup leaves both
-// fields alone (the daily sweep blanks the dead link); orient reads the slot first, frames its one
+// fields alone (a dead link reads as blank; nothing rewrites it); orient reads the slot first, frames its one
 // recommendation as a proposal against it, and fills it only when blank. Reads files only; a missing
 // file or section is a named assertion failure, never a crash at load.
 import { test } from 'node:test'
@@ -122,8 +122,9 @@ test('open pickup leaves both fields alone', () => {
   assertHas(step3, `${OPEN} pickup step 3`, [
     /Leave the capture's `next_action:` and every project's `next_task:` untouched/,
     /dead link/,
-    /archive-completed-vault-items\.py/,
+    /every reader treats as blank and nothing rewrites/,
   ])
+  assert.doesNotMatch(step3, /sweep/i, `${OPEN} pickup step 3 must not promise a sweep (estate ADR 0008 d5, amended)`)
   assert.doesNotMatch(step3, /\bclear/i, `${OPEN} pickup step 3 must not clear a next-action field`)
 })
 

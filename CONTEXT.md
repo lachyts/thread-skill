@@ -99,8 +99,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Next task** — a project's `next_task:`: one wikilink naming the task that
   is up; the project shows that task's next action and holds no text of its
   own. A set-down points it at its capture; `orient` fills it only when blank.
-  A link to a done or missing task is a **dead link**, blanked by the daily
-  vault sweep — pickup never clears it. _Avoid_: up next, focus task.
+  A link to a done, merged, dropped, archived or missing task is a **dead link**:
+  read as blank everywhere, never rewritten — pickup never clears it. _Avoid_: up next, focus task.
 
 ## Memory capture (close-side)
 

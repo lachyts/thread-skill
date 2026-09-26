@@ -59,7 +59,7 @@ The pickup half of the stash/defer loop (see `${CLAUDE_PLUGIN_ROOT}/skills/_shar
 
 1. Read the task file. Prime from its `## Notes` summary and `## Resume prompt` — treat the prompt's context/read-first/next-move as the working brief.
 2. Read the linked `THREAD.md` if the task has one; brief from both, and apply `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state's pickup row to it (a `parked` or `paused` thread goes `active`).
-3. **Complete the capture**: set `status: done`, add `completed: <today>` in the task file. The capture's job ended the moment this thread went live — if the work gets set down again later, a fresh capture is written (dedup finds no open task). Leave the capture's `next_action:` and every project's `next_task:` untouched: a project pointing at the done capture holds a dead link, which the daily `archive-completed-vault-items.py` sweep blanks (estate ADR 0008 decision 5).
+3. **Complete the capture**: set `status: done`, add `completed: <today>` in the task file. The capture's job ended the moment this thread went live — if the work gets set down again later, a fresh capture is written (dedup finds no open task). Leave the capture's `next_action:` and every project's `next_task:` untouched: a project pointing at the done capture holds a dead link, which every reader treats as blank and nothing rewrites — the next set-down or `/weekly` replaces it (estate ADR 0008 decision 5, amended).
 4. Confirm in one line: `Picked up [[<slug>]] — capture closed. Next move: <from the prompt>.` Then get on with the work.
 
 ### `/thread:open <path-to-handoff-doc>` — pick up a handed-off thread
