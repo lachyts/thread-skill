@@ -732,13 +732,13 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**Now (from 2026-09-27): p5-2 is done on PR #23 (2.7.1).** If #23 is not merged yet, check its CI and
-`gh pr merge 23 --merge`. After the merge: `git fetch origin && git switch --detach origin/master`, delete
-`$CLAUDE_CONFIG_DIR/plugins/cache/thread/thread/2.7.1` (same-version content changed after the update), run
-`claude plugin update thread@thread`, run `make release-check`, then `claude plugin tag --push`. Next: p5-3
-(retire the rollout clone, a session), p5-4 (close and handoff on a protected default branch), then P6.
-Also run `git remote set-head origin --auto` once here: close's repo-state check reports the default
-branch as unresolved.
+**Now (from 2026-09-27): p5-2 is merged (#23, `e5903f5`) and 2.7.1 is live.** The cache was refreshed and
+`make release-check` is green on `e5903f5`. A same-version refresh needs `rm -rf` of the version dir and then
+`claude plugin install thread@thread`; `update` says "already at the latest version" and copies nothing.
+Still to do: tag 2.7.1 (`git fetch origin && git switch --detach origin/master && claude plugin tag --push`),
+and run `git remote set-head origin --auto` once here. Next: p5-3 (retire the rollout clone, a session),
+p5-4 (close and handoff on a protected default branch), then P6. This paragraph is an uncommitted edit on
+master; the next close's PR carries it (the p5-4 problem).
 
 **Now (from 2026-09-26): work the P5–P9 roadmap. Master is protected, and nothing is running.**
 - **Order:** P5: p5-2 (`$N` snippets into scripts, wave-shaped), p5-3 (retire the rollout clone, a session),
