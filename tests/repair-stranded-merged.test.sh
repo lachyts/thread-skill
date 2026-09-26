@@ -114,7 +114,7 @@ has "$res" "owner=absent" "no task entry carries an owner key (status must grep 
 # ── (b) text assertions on the skills ──
 echo "== (b) skill text"
 region() {  # region <file> <start-regex> <end-regex>: lines from start up to (not incl.) end
-  awk -v s="$2" -v e="$3" '$0 ~ s {on=1; print; next} on && $0 ~ e {exit} on {print}' "$1"
+  S="$2" E="$3" awk '$0 ~ ENVIRON["S"] {on=1; print; next} on && $0 ~ ENVIRON["E"] {exit} on {print}' "$1"
 }
 yn() { if [ "$1" -eq 0 ]; then echo y; else echo n; fi; }
 
