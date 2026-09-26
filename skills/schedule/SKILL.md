@@ -133,7 +133,7 @@ Some task notes carry a **human/release gate** in prose — "don't action until 
 
 Distinct from 3.5's release/hold gates: **gated inputs** are human *authorisations* — API spend, credentials, irreversible actions. Scan each task body for spend smell (`credits`, `paid API`, `$`, `budget`, `billable`, `API cost`), credential smell (`API key`, `token`, `secret`, `credential`, `prod access`), and irreversibility smell (`irreversible`, `cannot be undone`, `delete production`, `wipe`). Tasks that match get **`plan_approval: required`** stamped in step 7 (user-confirmed in the same batch as the model step-ups), so they always produce a plan whose required `### Gated inputs` declaration the engine can pause on.
 
-**Advisory only — the plan's declaration is authoritative** (ADR 0008): only the implementer's plan reliably knows the task needs $30 of Replicate credits, so the engine pauses on the *declaration*, never on this sweep. The stamp merely guarantees the gate surfaces predictively at the plan-gate rather than reactively mid-implementation (a missed smell still stops — every code-writing agent carries the same stop rule). List the stamped tasks in step 8's summary as **expected to gate**, so the pause reads as designed when it happens.
+**Advisory only — the plan's declaration is authoritative** (ADR 0008): only the implementer's plan reliably knows the task needs 30 USD of Replicate credits, so the engine pauses on the *declaration*, never on this sweep. The stamp merely guarantees the gate surfaces predictively at the plan-gate rather than reactively mid-implementation (a missed smell still stops — every code-writing agent carries the same stop rule). List the stamped tasks in step 8's summary as **expected to gate**, so the pause reads as designed when it happens.
 
 ### 4. Classify scope per task
 
@@ -303,7 +303,7 @@ Likewise list the §3.6 gated-input step-ups so the eventual pause reads as desi
 
 ```
 Expected to gate (will pause for your sign-off at their plan-gate):
-  - [[task-y]] — smells of API spend ("~$30 of Replicate credits") → plan_approval: required
+  - [[task-y]] — smells of API spend ("~30 USD of Replicate credits") → plan_approval: required
 ```
 
 ## Execution lives in `/thread:execute`

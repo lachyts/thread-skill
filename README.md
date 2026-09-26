@@ -143,7 +143,8 @@ final check that the run wrote nothing into the tree):
   unset, or in-flight rollouts can't resume); `reconcile-wave.test.sh`; `wave-stop-driver.test.sh`;
   `merge-wave.sh --self-test-classify` / `--self-test-base`.
 - **Contracts** — `tests/contracts/*.test.mjs`: manifests agree, skill names and description budgets,
-  `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files.
+  `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files, and no SKILL.md body holds a
+  positional `$N` (Claude Code substitutes skill arguments into them; logic that needs one lives in a script).
 - **Default branch** — `tests/default-branch.test.{mjs,sh}`: `defaultBranch` keeps pre-fix bytes when
   unset, refuses unsafe names, and the resolver in `execute/SKILL.md` § 4 works against fixture remotes.
 - **Release check** — `tests/release-check.test.sh`: the real `make release-check` recipe against a temp

@@ -83,14 +83,16 @@ Runs `thread:close`'s flow as written, mid-session, without ending the thread.
 
 ## Repo-thread lookup
 
-The one implementation of thread lookup by slug, and of the repo-thread list. Set the input on a line of its own before the snippet (`slug=<slug>`, or `slug=` for the list); the snippet only defaults it. It prints one physical absolute path per line, writes nothing to stderr and exits 0, printing nothing when there is no hit. Plain `find`, no globs, no arrays, every expansion quoted, so it runs the same under bash and zsh.
+The one implementation of thread lookup by slug, and of the repo-thread list. Set the input on a line of its own before the snippet (`slug=<slug>`, or `slug=` for the list); the snippet only defaults it. It prints one physical absolute path per line, writes nothing to stderr and exits 0, printing nothing when there is no hit. Plain `find`, no globs, no arrays, every expansion quoted, so it runs the same under bash and zsh. It holds no positional parameter (Claude Code substitutes skill arguments into them, so `fms` reads the loop's `f` and parses with `sed`) and no plugin-root path, so it runs the same whether this skill is rendered or read as a file by a caller such as close.
 
 ```bash
 # thread:repo-thread-lookup (extracted and run by tests/repo-threads.test.sh)
 : "${slug:=}"
 nl='
 '
-fms() { awk '{ sub(/\r$/, "") } NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} /^slug:/{sub(/^slug:[ \t]*/, ""); print; exit}' "$1" | tr -d "\"'\r" | sed 's/[[:space:]]*$//'; }
+# fms: the front-matter slug: of the loop's current file f (CR-tolerant, quotes stripped). sed, not awk,
+# and no function arguments: a SKILL.md body must hold no positional parameter (Claude Code substitutes them).
+fms() { tr -d '\r' < "$f" | sed -n '1{/^---$/!q;d;}; /^---$/q; /^slug:/{s/^slug:[[:space:]]*//;p;q;}' | tr -d "\"'" | sed 's/[[:space:]]*$//'; }
 hits=''
 if [ -n "$slug" ] && [ -f "$HOME/repos/workspaces/_shared/threads/$slug.md" ]; then
   hits="$(cd "$HOME/repos/workspaces/_shared/threads" 2>/dev/null && pwd -P)/$slug.md"
@@ -98,13 +100,13 @@ fi
 if [ -n "$slug" ] && [ -z "$hits" ] && [ -d "$HOME/Projects" ]; then
   p=$(cd "$HOME/Projects" 2>/dev/null && pwd -P)
   hits=$(find "$p" -maxdepth 5 \( -name _archive -o -name .claude -o -name .git -o -name node_modules \) -prune -o -name THREAD.md -print 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do
-    if [ "$(fms "$f")" = "$slug" ]; then printf '%s\n' "$f"; fi
+    if [ "$(fms)" = "$slug" ]; then printf '%s\n' "$f"; fi
   done)
 fi
 if [ -z "$hits" ] && [ -d "$HOME/repos" ]; then
   r=$(cd "$HOME/repos" 2>/dev/null && pwd -P)
   hits=$(find "$r" -maxdepth 3 -name THREAD.md -not -path '*/.claude/*' -not -path "$r/obsidian/*" -not -path "$r/workspaces/*" 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do
-    s=$(fms "$f"); if [ -z "$s" ]; then d=${f%/THREAD.md}; s=${d##*/}; fi
+    s=$(fms); if [ -z "$s" ]; then d=${f%/THREAD.md}; s=${d##*/}; fi
     if [ -z "$slug" ] || [ "$s" = "$slug" ]; then printf '%s\n' "$f"; fi
   done)
   if [ -n "$slug" ] && [ -n "$hits" ] && t=$(git rev-parse --show-toplevel 2>/dev/null); then
