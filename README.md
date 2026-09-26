@@ -33,6 +33,8 @@ machine-verifiable in-run) rolls out; everything else runs as scoped sessions.
 | `/thread:handoff` | fork now | Write and commit a durable `docs/handoffs/` doc + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop also create a fresh visible sidebar task seeded with it; elsewhere label it a manual handoff. |
 | `/thread:close` | done | Persist to THREAD.md + auto-commit; end-of-thread ritual. |
 
+Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspaces/_shared/docs/adr/0008-next-action-slot.md`): each writes the task's `next_action:` and points every linked project's `next_task:` at it, most recent winning — close only when the thread has a concrete next task. `orient` reads that slot first and fills it only when blank (`skills/_shared/task-writer.md` § 4b).
+
 ## Rollout verbs
 
 | Member | Role | What it does |
@@ -143,7 +145,8 @@ final check that the run wrote nothing into the tree):
   unset, or in-flight rollouts can't resume); `reconcile-wave.test.sh`; `wave-stop-driver.test.sh`;
   `merge-wave.sh --self-test-classify` / `--self-test-base`.
 - **Contracts** — `tests/contracts/*.test.mjs`: manifests agree, skill names and description budgets,
-  `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files.
+  `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files, and the next-action set-down
+  write and orient's slot read (`next-action.test.mjs`).
 - **Default branch** — `tests/default-branch.test.{mjs,sh}`: `defaultBranch` keeps pre-fix bytes when
   unset, refuses unsafe names, and the resolver in `execute/SKILL.md` § 4 works against fixture remotes.
 - **Release check** — `tests/release-check.test.sh`: the real `make release-check` recipe against a temp
