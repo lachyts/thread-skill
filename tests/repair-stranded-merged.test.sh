@@ -118,10 +118,10 @@ region() {  # region <file> <start-regex> <end-regex>: lines from start up to (n
 }
 yn() { if [ "$1" -eq 0 ]; then echo y; else echo n; fi; }
 
-r2=$(region "$REPAIR" '^### 2\.' '^### 3\.')
+r2=$(region "$REPAIR" '^### 2[.]' '^### 3[.]')
 printf '%s\n' "$r2" | grep '^|' | grep 'in_progress' | grep 'MERGED' | grep -qi 'stop'
 ok "$(yn $?)" y "repair § 2: a table row classifies in_progress + MERGED with a STOP"
-r1=$(region "$REPAIR" '^### 1\.' '^### 2\.')
+r1=$(region "$REPAIR" '^### 1[.]' '^### 2[.]')
 has "$r1" "/workflows" "repair § 1 mentions /workflows"
 has "$r1" "owner" "repair § 1 names the owner session"
 printf '%s\n' "$r1" | grep -i 'stranded' | grep -q '3c'
@@ -129,14 +129,14 @@ ok "$(yn $?)" y "repair § 1: a stranded-merged task is escalated (3c)"
 printf '%s\n' "$r1" | grep '^- `paused:` stamp' -A3 | tr '\n' ' ' | grep -q 'stranded.*escalate'
 ok "$(yn $?)" y "repair § 1: the paused bullet escalates a stranded merge instead of pointing at reinstate"
 has "$r1" "points at neither reinstate nor resume" "repair § 1: no reinstate or resume while a stranded merge remains"
-r3=$(region "$REPAIR" '^### 3\.' '^### 4\.')
+r3=$(region "$REPAIR" '^### 3[.]' '^### 4[.]')
 has "$r3" "merge-base --is-ancestor" "repair § 3c: checks the merge commit is on the default branch"
 has "$r3" "log -p" "repair § 3c: shows the vault note's git history as evidence"
 has "$r3" "never writes that task's status" "repair § 3c: never writes the stranded task's status"
 has "$r3" "## Notes" "repair § 3c: records the escalation in the rollout note's ## Notes"
-r4=$(region "$REPAIR" '^### 4\.' '^### 5\.')
+r4=$(region "$REPAIR" '^### 4[.]' '^### 5[.]')
 has "$r4" "stranded" "repair § 4 is gated on stranded merges"
-r6=$(region "$REPAIR" "^### 6\\." "^## Don'ts")
+r6=$(region "$REPAIR" "^### 6[.]" "^## Don'ts")
 has "$r6" "stranded" "repair § 6 is gated on stranded merges"
 grep -q 'escalat' <<<"$r6"
 ok "$(yn $?)" y "repair § 6 logs escalations"
@@ -144,7 +144,7 @@ has "$r6" "## Notes" "repair § 6 copies escalations from the 3c ## Notes record
 grep -q 'protocol 4' "$REPAIR"
 ok "$(yn $?)" y "repair names the protocol 4 fix that lifts the guard"
 
-s3=$(region "$STATUS" '^### 3\.' '^### 4\.')
+s3=$(region "$STATUS" '^### 3[.]' '^### 4[.]')
 printf '%s\n' "$s3" | grep 'in_progress' | grep -q 'MERGED'
 ok "$(yn $?)" y "status § 3 flags in_progress + MERGED"
 grep -q 'possibly in flight' "$STATUS"
@@ -184,7 +184,7 @@ has "$itemF" "offline" "the in-flight item carries the offline caveat"
 prec=$(awk '/^The list is first-match/ {on=1} on && /^[[:space:]]*$/ {exit} on {print}' "$STATUS" | tr '\n' ' ')
 has "$prec" "stranded merge" "the first-match note carries the stranded-merge precedence rule"
 has "$prec" "/thread:repair" "the precedence rule routes to /thread:repair"
-s4=$(region "$STATUS" '^### 4\.' '^## Loopable')
+s4=$(region "$STATUS" '^### 4[.]' '^## Loopable')
 has "$s4" "In continuous mode" "the owner-session qualifier scopes the heartbeat to continuous mode"
 grep -q 'never needs to' <<<"$s4"
 ok "$(yn $?)" n "the owner-session qualifier no longer says another session never needs to resume"
