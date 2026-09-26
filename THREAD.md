@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-09-25
+last_touched: 2026-09-26
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
 ---
@@ -9,6 +9,24 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-09-26: the roadmap is regathered as P5–P9, and master is protected. Nothing is running.**
+- **Roadmap:** `/thread:orient` → `/thread:gather` with a grill-with-docs interview phased the 32 loose tasks:
+  P5 Release safety, P6 Protocol 4 lands, P7 Top tier, P8 Planning-lane gaps, P9 Continuity refinements
+  (vault phase notes `thread-skill-p5-…` to `thread-skill-p9-…`). Protocol 4 **lands**: it is integrated
+  opt-in at p6-1, and nothing is released until p6-10. P1 and P2 are marked done, and p4-6 (the eval
+  baseline) joins P4, ahead of p4-5. The GTD next-action idea left the roadmap for its own grill (a handoff
+  in ops-workspace).
+- **Decisions:** ADR 0024: the operator's top tier is one value in `~/.config/thread/top-tier`.
+  Implementation is pending, and its mechanics are p7-1's open questions after two review rounds. ADR
+  0025: master moves only by green PR, owner included. CONTEXT.md gains **Top tier** and **Capture**.
+- **p5-1 done:** the repo is **public** (branch protection needs Pro or public; published as-is, README
+  says so). CI runs `make test` on Ubuntu and macOS (#21). Rulesets `master-green-pr-only` and
+  `no-main-branch` are the enforcement, and live probes are refused. Classic protection was tried and
+  removed (an owner push of #21's green head landed under it). This repo commits as the GitHub noreply
+  address from now on.
+- **Heads-up:** close and handoff commits made on `master` are now **stranded** until a PR carries them
+  (p5-4). Do close-out work on a branch.
 
 **2026-09-25 (evening): 2.7.0 is released. Nothing is running and no handoff doc is pending.**
 - **Landed:** the 2.7 rollout: 4 tasks as PRs #17–#20 on `lachyts/thread-skill` master, 2 waves, 1h 50m,
@@ -428,8 +446,7 @@ scheduled 2026-07-15.
 
 ## Open questions / decisions pending
 
-- **`lachyts/thread-skill` has no CI and no branch protection.** The rollout clone's `pre-push` hook is a
-  local guard only. Vault task `thread-skill-protect-master-ci`.
+- ~~No CI and no branch protection~~: resolved 2026-09-26 (ADR 0025, p5-1): CI plus rulesets.
 - **The stale `thread@thread` 2.3.4 project-scope record at `~`** is still installed. Uninstalling it is
   unsafe as written: all three profiles' `settings.json` are symlinks to `~/.claude/settings.json`, which
   is also the project settings file for `~`. Vault task `thread-skill-stale-project-scope-install`.
@@ -683,6 +700,14 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Now (from 2026-09-26): work the P5–P9 roadmap. Master is protected, and nothing is running.**
+- **Order:** P5: p5-2 (`$N` snippets into scripts, wave-shaped), p5-3 (retire the rollout clone, a session),
+  p5-4 (close and handoff on a protected default branch). Then P6 (p6-1 integrates protocol 4 first,
+  alone), then P7 and P8. P9 can run any time. p4-6 (the eval baseline, your spend) precedes p4-5.
+- **Every change lands by PR** (ADR 0025), including THREAD.md close-outs. A thread-skill self-rollout still
+  runs from a fresh clone of the repo, never this checkout.
+
+**Superseded 2026-09-26 (kept for the record):**
 **Now (from 2026-09-25, evening): 2.7.0 is released. Nothing is running and no handoff doc is pending.**
 - **Order** (the rest of the 2.7 plan, unchanged):
   1. The eval baseline (Lachy's USD 5 spend, `thread-skill-eval-baseline-then-p4-5`), then schedule p4-5.
@@ -772,6 +797,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-26: orient → gather (grill-with-docs) → P5–P9, ADRs 0024/0025, CONTEXT.md Top tier and Capture. The GTD next-action grill was handed off to ops-workspace. p5-1: repo public, CI (#21), rulesets, and two fresh-review rounds (56679f6/ad8453, d2b36d6/b59fd7). Round 2 was mostly round 1's fixes, so the stop rule fired: the ADR 0024 mechanics were reverted to open questions on p7-1 rather than patched a third time (#22).
 - 2026-09-25 (evening): picked up the post-rollout handoff. Rebased this checkout onto `393829c` (`--autostash`; `--ff-only` was impossible with `42360be` unpushed), and `make test` was ALL PASS. Released 2.7.0 (`15638b6`, pushed, plugin updated, release-check green). The close deleted the consumed handoff doc, filed four rollout follow-ups, added two protocol 4 intake items and the render-at-session-start quirk.
 - 2026-09-25 (later): prepared the 2.7 rollout. Pushed `d59bcb3`. Tidied the clone: removed p2-4's merged worktree and branch, fast-forwarded to `d59bcb3`, and `make test` is ALL PASS. Locked Opus 5.5 as the top tier in `~/.agents/AGENTS.md` (`10ceaf6`); the 2026-09-23 rule had lived only in memories this session never loaded. Wrote the lead prompt into Resume. A bare `/thread:close` confirmed that the `$N` quirk needs arguments.
 - 2026-09-25 (afternoon): close-out after the 2.6.0 release (`3a7b9be`, release-check green). Folded in the uncommitted 2026-09-25 resume edit, rewrote Where we are and Resume to the finished state, moved the peer-guard question to decided (p2-4), added the five rollout lessons (intake items 14–17) and the skill-argument `$N` quirk to Known quirks, and deleted the consumed 2.5.2 simplify review doc. Remaining: p2-6, p2-7, p3-1, p3-3, p4-5 and seven follow-up tasks.

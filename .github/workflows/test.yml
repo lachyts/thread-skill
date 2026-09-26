@@ -1,5 +1,10 @@
 # `make test` on every PR and every push to master. ADR 0025 makes both jobs required status checks
 # on master (strict), so a PR re-tests against the updated base before it can merge.
+#
+# The job names ARE the required-check contexts: "make test (ubuntu-latest)" and
+# "make test (macos-latest)". Renaming the job, or changing a matrix value, leaves the old contexts
+# unreported and every PR waiting forever. Change the protection in the same breath (ADR 0025 records
+# the payload and the command).
 name: test
 
 on:
@@ -18,11 +23,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
+          persist-credentials: false
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - run: make test

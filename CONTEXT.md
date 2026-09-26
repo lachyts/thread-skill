@@ -248,7 +248,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Top tier** — the highest tier the operator currently permits: one
   operator-held value, changed in one place, that every rollout's ceiling is
   taken from. It names which rung is highest, never a model version — the
-  harness resolves the tier to its current model. Unset means no ceiling.
+  harness resolves the tier to its current model. Unset means no ceiling. It
+  caps the escalation ladder; it is not the ladder's own internal top (ADR
+  0024, implementation pending).
   _Avoid_: default model, preferred model, best model.
 - **Ceiling** — a run-wide cap on every tier decision (`args.maxTier`), set
   from the operator's top tier or because the account's quota for the higher
@@ -256,5 +258,6 @@ through time, from attention to merged PRs. Terms only — no implementation.
   a judgement about a task, which is why it does not contradict ADR 0006's
   "no config switch" (ADR 0016). A capped tier is
   **terminal**: it runs the full Ralph loop and takes the higher tier's effort
-  row, and a block on it is reported `tierCapped` rather than as a wall.
+  row, and a block on it is reported `tierCapped` rather than as a wall. How
+  that reads under the operator's top tier is open (ADR 0024, p7-1).
   _Avoid_: downgrade, throttle, cheap mode.
