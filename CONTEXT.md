@@ -190,8 +190,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Agent-fixable block** — a block a re-dispatched agent can resolve alone;
   repair retries these without asking the human. _Avoid_: auto-block, soft block.
 - **Drift** — divergence between the vault's recorded state and live
-  GitHub/git reality. `status` flags it; `repair` reconciles it.
-  _Avoid_: desync, staleness, mismatch.
+  GitHub/git reality. Within a rollout, `status` flags it and `repair`
+  reconciles it. Across a project it is finished work still marked open: a
+  phase whose tasks have all landed, or a task whose PR has merged. `orient`
+  flags it and fixes the unambiguous items on any steer but Report-only
+  (ADR 0026). _Avoid_: desync, staleness, mismatch.
 - **Clean defer** — taking a task out of a rollout back to the open backlog
   (clearing `wave:`/`rollout:`/`owner:`), permitted only when nothing in the
   rollout depends on it. _Avoid_: drop, cancel, skip.
