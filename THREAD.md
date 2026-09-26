@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-09-26
+last_touched: 2026-09-27
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
 ---
@@ -9,6 +9,18 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-09-27: p5-2 is done on PR #23 (2.7.1). No positional `$N` is left in any SKILL.md body.**
+- **Shape:** close's handoff scan and repo-track and execute's default-branch resolver moved into scripts
+  behind thin wrappers. Open's repo-thread lookup stays inline, rewritten without a positional. A new
+  contract (`tests/contracts/skill-positional-args.test.mjs`) bans a dollar-digit anywhere in a SKILL.md.
+  Manifests are at 2.7.1, and `.gitattributes` forces LF on `*.sh`.
+- **Verified:** `make test` ALL PASS, CI green on Ubuntu and macOS, `make release-check` green at 2.7.1
+  (before the final lookup refactor). A live headless `/thread:close some words here` rendered clean and
+  its scan ran. A control skill proved the substitution is still live on CLI 2.1.283.
+- **Review:** two xhigh rounds. Round 2 tripped the ledger STOP (10 of 12 classified findings were
+  regressions of round 1's fix `7cee1a5`). Lachy chose revert + inline lookup (`d809c95`, `01c1e91`) and
+  no third round.
 
 **2026-09-26: the roadmap is regathered as P5–P9, and master is protected. Nothing is running.**
 - **Roadmap:** `/thread:orient` → `/thread:gather` with a grill-with-docs interview phased the 32 loose tasks:
@@ -395,6 +407,11 @@ scheduled 2026-07-15.
 
 ## What's been built / decided
 
+- **p5-2 (2026-09-27, PR #23): no SKILL.md body holds a positional `$N`.** The logic lives in scripts where it
+  needs one (close `handoff-scan.sh`, `repo-track.sh`; execute `default-branch.sh`, which refuses an empty
+  `<repoPath>`), behind wrappers that check the script exists (exit 2) and pass inputs through the
+  environment. Open's lookup stays inline, because close reads it as a file: `fms` reads the loop's `f`
+  and parses with `sed`. The contract bans the braced form and the `\$1` escape too (both undocumented).
 - Plugin scaffold mirroring wave: manifests, CONTEXT.md, docs/adr/, README.
 - Decisions live in `docs/adr/` — read the directory, never a remembered
   subset. ADR 0001 (the task is the floor; the thread is the upgrade) and
@@ -446,6 +463,11 @@ scheduled 2026-07-15.
 
 ## Open questions / decisions pending
 
+- **`${CLAUDE_PLUGIN_ROOT}` in read-as-file text stays literal** (review e4fe2a2/a0bb12 #1, #6; predates
+  p5-2). A command in a sibling SKILL.md read by `/thread:open save` or `/thread:next`, or in a `_shared`
+  spec (task-writer.md's `resolve-day.py`, close's handoff-home.sh and repo-state.sh wrappers), runs with an
+  empty root, because the Bash tool leaves it unset. It needs one rule stated once and cited by every
+  caller. Proposed as a vault task at the 2026-09-27 close.
 - ~~No CI and no branch protection~~: resolved 2026-09-26 (ADR 0025, p5-1): CI plus rulesets.
 - **The stale `thread@thread` 2.3.4 project-scope record at `~`** is still installed. Uninstalling it is
   unsafe as written: all three profiles' `settings.json` are symlinks to `~/.claude/settings.json`, which
@@ -667,14 +689,24 @@ scheduled 2026-07-15.
   `claude plugin update` also says "Restart to apply changes".
 - **Invoking a skill with arguments rewrites `$0`, `$1`, `$2`… in its body.** Claude Code substitutes the
   whitespace-split arguments, 0-based, into the SKILL.md text before the model sees it, and that includes
-  shell and awk variables. Seen 2026-09-25: `/thread:close` with a one-sentence argument rendered the
-  handoff-scan snippet with `$0` → `Active`, `$1` → `thread:` and `$2` → the THREAD.md path, so
-  `print $2` read `print ~/repos/tools/thread-skill/THREAD.md`. A bare `/thread:close` later that day
-  rendered the same snippet intact, so only an invocation with arguments triggers it. The tests extract the snippets from the
-  source files, so `make test` cannot see it. Until it is fixed, run an embedded snippet from the source
-  (`sed -n '/^# thread:handoff-scan/,/^# end thread:handoff-scan/p' skills/close/SKILL.md`), never the
-  rendered text. `skills/execute/SKILL.md:177` (the default-branch resolver's awk `$2`) is exposed too,
-  but that has not been probed.
+  shell and awk variables. Seen 2026-09-25 on close's handoff scan (`print $2` read `print <THREAD.md path>`).
+  **Fixed in p5-2 (2.7.1, 2026-09-26):** close's handoff scan and repo-track and execute's default-branch
+  resolver live in scripts (`handoff-scan.sh`, `repo-track.sh`, `default-branch.sh`) behind thin wrappers.
+  Open's repo-thread lookup stays inline, rewritten with no positional parameter, because close reads it
+  as a file and a wrapper there would need the plugin root. `tests/contracts/skill-positional-args.test.mjs` fails on any
+  dollar-digit in a SKILL.md body. The probe on CLI 2.1.283 showed `$0`–`$2` and `$$1` substituted, `\$1` →
+  `$1`, and `${1}` and an out-of-range `$30` left alone. Only the rendered SKILL.md substitutes
+  `${CLAUDE_PLUGIN_ROOT}`. Any wrapper or command read from a file instead (a sibling SKILL.md read by
+  `/thread:open save` or `/thread:next`, a `_shared` spec, a `sed` copy from source) needs
+  `CLAUDE_PLUGIN_ROOT=<root>` in front by hand. That predates p5-2, and review e4fe2a2/a0bb12 #1 and #6
+  scope it as its own task. Under this directory-source marketplace the rendered root is the working
+  tree, not the version cache.
+- **Probing a skill's rendered body headless:** `claude -p "/<skill> <args>" --max-turns 1 --permission-mode
+  plan` in a scratch repo. The expanded skill text is not in `--output-format stream-json`. Read it from
+  the probe's own transcript, `$CLAUDE_CONFIG_DIR/projects/<cwd-slug>/<session>.jsonl`. `claude -p` warns
+  about stdin; add `< /dev/null`.
+- **`gh pr edit` fails** on the Projects (classic) GraphQL deprecation (`repository.pullRequest.projectCards`).
+  Edit a PR body with `gh api -X PATCH repos/lachyts/thread-skill/pulls/<n> -F body=@<file>`.
 - **Self-rollout lessons, 2026-09-23 to 2026-09-25** (protocol 4 intake items 14–17, vault task
   `thread-rollout-v4-intake-2026-09-23-audit`):
   - **`resume-filter` misses archived notes.** The daily sweep moves `done` task notes to
@@ -699,6 +731,14 @@ scheduled 2026-07-15.
     `resumeFromRunId` on the same run replayed the cached stages and re-ran only the failed review.
 
 ## Resume instructions
+
+**Now (from 2026-09-27): p5-2 is done on PR #23 (2.7.1).** If #23 is not merged yet, check its CI and
+`gh pr merge 23 --merge`. After the merge: `git fetch origin && git switch --detach origin/master`, delete
+`$CLAUDE_CONFIG_DIR/plugins/cache/thread/thread/2.7.1` (same-version content changed after the update), run
+`claude plugin update thread@thread`, run `make release-check`, then `claude plugin tag --push`. Next: p5-3
+(retire the rollout clone, a session), p5-4 (close and handoff on a protected default branch), then P6.
+Also run `git remote set-head origin --auto` once here: close's repo-state check reports the default
+branch as unresolved.
 
 **Now (from 2026-09-26): work the P5–P9 roadmap. Master is protected, and nothing is running.**
 - **Order:** P5: p5-2 (`$N` snippets into scripts, wave-shaped), p5-3 (retire the rollout clone, a session),
@@ -797,6 +837,8 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-27 (close): p5-2 on PR #23 (2.7.1). Snippets moved to scripts, the lookup was kept inline without `$N`, and the no-positional contract was added. Live probe clean on CLI 2.1.283. Two fresh-review rounds; the round-2 ledger STOP led to a revert to the root. Consumed handoff doc and four consumed review docs deleted.
+- 2026-09-26 (close): handed p5-2 to a fresh session (consumed and in flight on `p5-2/snippets-to-scripts`). The GTD next-action grill went to ops-workspace. THREAD.md was left uncommitted because this shared checkout sits on the peer's branch; its close carries it.
 - 2026-09-26: orient → gather (grill-with-docs) → P5–P9, ADRs 0024/0025, CONTEXT.md Top tier and Capture. The GTD next-action grill was handed off to ops-workspace. p5-1: repo public, CI (#21), rulesets, and two fresh-review rounds (56679f6/ad8453, d2b36d6/b59fd7). Round 2 was mostly round 1's fixes, so the stop rule fired: the ADR 0024 mechanics were reverted to open questions on p7-1 rather than patched a third time (#22).
 - 2026-09-25 (evening): picked up the post-rollout handoff. Rebased this checkout onto `393829c` (`--autostash`; `--ff-only` was impossible with `42360be` unpushed), and `make test` was ALL PASS. Released 2.7.0 (`15638b6`, pushed, plugin updated, release-check green). The close deleted the consumed handoff doc, filed four rollout follow-ups, added two protocol 4 intake items and the render-at-session-start quirk.
 - 2026-09-25 (later): prepared the 2.7 rollout. Pushed `d59bcb3`. Tidied the clone: removed p2-4's merged worktree and branch, fast-forwarded to `d59bcb3`, and `make test` is ALL PASS. Locked Opus 5.5 as the top tier in `~/.agents/AGENTS.md` (`10ceaf6`); the 2026-09-23 rule had lived only in memories this session never loaded. Wrote the lead prompt into Resume. A bare `/thread:close` confirmed that the `$N` quirk needs arguments.
