@@ -6,8 +6,10 @@
 // nothing is substituted, so only this contract sees it. The fix is structural: logic that needs `$N` lives
 // in a script under skills/**/scripts/ and the SKILL.md calls it (p5-2); prose writes "30 USD", not a
 // dollar-digit amount. Whole body, not code fences only, because the substitution is whole-body too.
-// The braced form is banned as well: whether Claude Code substitutes it is undocumented, and a script
-// never needs it in a SKILL.md. Reads files only.
+// Probed on CLI 2.1.283 (2026-09-26, `/argprobe alpha beta gamma`): `$0` `$1` `$2` → the words, `$$1` →
+// `$beta`, `\$1` → `$1` (the escape is eaten), `${1}` untouched, `$30` untouched (index 30, out of range).
+// The braced form and the escape are banned anyway: neither behaviour is documented, and a script never
+// needs them in a SKILL.md. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
