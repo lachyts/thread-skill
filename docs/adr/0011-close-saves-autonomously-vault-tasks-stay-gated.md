@@ -6,6 +6,9 @@ for thread updates, auto-memory, and workspace knowledge)
 *(Amended by ADR 0017, 2026-09-21: while a handoff doc is pending, the thread's
 continuation is routed to that doc and is not proposed as vault tasks; the
 vault-task gate itself stands.)*
+*(Amended by ADR 0026, 2026-09-27: close marks an existing task `done` without
+asking when the session explicitly worked it, the work is on the default branch, and
+its Verify line ran green; proposing new tasks stays gated.)*
 
 ## Context
 
