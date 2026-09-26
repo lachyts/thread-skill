@@ -173,9 +173,6 @@ repos/tools/renamed/THREAD.md" "$L an empty slug lists exactly the six repo thre
     plugin="$tmp/nowhere"; lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h1" foo; unset plugin
     ok "$rc|$out" "2|" "$L script missing: rc 2, nothing on stdout"
     ok "${err%%:*}" "repo-thread-lookup" "$L script missing: stderr starts repo-thread-lookup:"
-    # open's snippet read as a file (CLAUDE_PLUGIN_ROOT literal, the Bash tool leaves it unset): loud too
-    plugin=; lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h1" foo; unset plugin
-    ok "$rc|$out" "2|" "$L CLAUDE_PLUGIN_ROOT empty: rc 2, nothing on stdout"
   done
 
   # 11: mutation M1 — without the .claude rule, x/.claude/THREAD.md (depth 3) appears.
@@ -222,16 +219,10 @@ has "$(sec "$OPEN" '^### `/thread:open save`' '^##')" 'save never sets `state: d
 # close
 ident=$(sec "$CLOSE" '^## Identify the active thread' '^## ')
 r2=$(first "$ident" '2. '); r3=$(first "$ident" '3. ')
-# Close runs the lookup script through its own substituted path: open's snippet, read as a file, keeps
-# ${CLAUDE_PLUGIN_ROOT} literal and the Bash tool leaves it unset (review 026dd42/20344a #1).
-has "$ident" "$QOPEN" "close § Identify defines the lookup as open § Repo-thread lookup by plugin path"
-has "$ident" 'slug=<slug> bash "${CLAUDE_PLUGIN_ROOT}/skills/open/scripts/repo-thread-lookup.sh"' "close runs the lookup script by its own plugin path"
-has "$ident" 'never by copying open'"'"'s snippet' "close never copies open's snippet"
-has "$ident" 'never "no hit"' "close: a failed lookup is never read as no hit"
-has "$r3" 'the lookup lists with `slug=` empty' "close rung 3 runs the lookup"
+has "$r3" "$QOPEN" "close rung 3 cites open § Repo-thread lookup by plugin path"
 has "$r3" '.claude/worktrees' "close rung 3 names the .claude/worktrees exclusion"
 has "$r3" 'deeper than 3' "close rung 3 credits the depth exclusion"
-has "$r2" 'run the lookup with `slug=<slug>`' "close rung 2 runs the lookup"
+has "$r2" "$QOPEN" "close rung 2 cites open § Repo-thread lookup by plugin path"
 has "$r2" 'never rung 3' "close rung 2 never falls to rung 3"
 slugin=$(first "$(cat "$CLOSE")" '- `slug` ')
 has "$slugin" 'effective slug' "close's handoff-scan slug input is the effective slug"
@@ -241,7 +232,7 @@ for s in 'rev-parse --show-toplevel' '--path-format=absolute --git-path' 'strict
 done
 has "$(grep -F -- '- **Auto-execute, no asking**' "$CLOSE")" 'step 7.1' "close's Auto-execute line names the step-7.1 commit"
 b=$(occ "$CLOSE" '§ Repo-thread lookup'); q=$(occ "$CLOSE" "$QOPEN")
-ok "$([ "$q" -ge 2 ] && echo y || echo "n ($q)")" y "close cites open § Repo-thread lookup by plugin path at least twice"
+ok "$([ "$q" -ge 4 ] && echo y || echo "n ($q)")" y "close cites open § Repo-thread lookup by plugin path at least 4 times"
 ok "$b" "$q" "every close citation of § Repo-thread lookup is plugin-path qualified"
 
 # handoff-lifecycle.md

@@ -180,7 +180,7 @@ bash "$db" "$R"
 # end thread:default-branch-resolver
 ```
 
-Pass the printed name as `defaultBranch` only when it is not `main`. Any non-zero exit stops: 1 means the remote did not answer, 2 means `scripts/default-branch.sh` was not found or was called without exactly one `<repoPath>`. A resume (`resumeFromRunId`) re-passes the run's ORIGINAL args unchanged — adding `defaultBranch` to a run that started without it changes prompt bytes and re-runs cached agents.
+Pass the printed name as `defaultBranch` only when it is not `main`. Exit 1 (the remote did not answer) and exit 2 (`scripts/default-branch.sh` not found) both stop. A resume (`resumeFromRunId`) re-passes the run's ORIGINAL args unchanged — adding `defaultBranch` to a run that started without it changes prompt bytes and re-runs cached agents.
 
 Also read the rollout note's **`## Known baseline failures`** block (`/thread:schedule` step 2.6): when it lists tests (not `none`/empty), pass them as `knownBaselineFailures: ["<test_id> — <reason>", …]`. The engine threads the manifest into every agent and shifts the Ralph green criterion to "no NEW failures beyond this set" — it keeps running the full verifier and never `--deselect`s the listed reds (per the project's `CLAUDE.md`: a comparison reference, not a mute button). Omit the key when the block is absent or `none` — the engine then behaves exactly as before (`verifier` exit 0 = pass).
 
