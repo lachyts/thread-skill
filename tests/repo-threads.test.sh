@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Repo threads (thread-skill-p2-7). Section A extracts open's § Repo-thread lookup snippet (a wrapper round
-# skills/open/scripts/repo-thread-lookup.sh since p5-2) by its marker and runs it against runtime-generated
-# fixtures under bash and under `zsh -f` when zsh is installed (the Bash tool is zsh): first-hit tier order (_shared, then ~/Projects, then repo threads), the basename slug of a
+# Repo threads (thread-skill-p2-7). Section A extracts open's § Repo-thread lookup snippet by its marker and
+# runs it against runtime-generated fixtures under bash and under `zsh -f` when zsh is installed (the Bash
+# tool is zsh): first-hit tier order (_shared, then ~/Projects, then repo threads), the basename slug of a
 # THREAD.md with no front matter, the CWD tiebreak, and every exclusion (obsidian, workspaces, depth > 3,
 # `*/.claude/*`), the ~/Projects walk's prunes (`_archive`, `.claude`, `node_modules`, depth > 5), and a CWD
 # repo outside the hits leaving every hit in place. Two mutation checks prove the worktree exclusion is
@@ -44,15 +44,12 @@ ok "$paired" 0 "the lookup marker pair is closed and in order"
 nopen=$(grep -c '^# thread:repo-thread-lookup' "$OPEN"); nclose=$(grep -c '^# end thread:repo-thread-lookup' "$OPEN")
 ok "$nopen" 1 "exactly one opening lookup marker"
 ok "$nclose" 1 "exactly one closing lookup marker"
-# The snippet is a wrapper; the logic is the script it calls (a SKILL.md body holds no positional $N, p5-2).
-LKS=skills/open/scripts/repo-thread-lookup.sh
-ok "$(occ "$tmp/lk.sh" 'skills/open/scripts/repo-thread-lookup.sh')" 1 "the snippet calls repo-thread-lookup.sh, once"
-ok "$(occ "$LKS" '-maxdepth 3')" 1 "the script limits find to depth 3, once"
-ok "$(occ "$LKS" "-not -path '*/.claude/*'")" 1 "the script excludes */.claude/*, once"
-ok "$(occ "$LKS" '-name _archive -o ')" 1 "the ~/Projects walk prunes _archive, once"
-ok "$(occ "$LKS" '-maxdepth 5')" 1 "the ~/Projects walk is bounded at depth 5, once"
+ok "$(occ "$tmp/lk.sh" '-maxdepth 3')" 1 "the snippet limits find to depth 3, once"
+ok "$(occ "$tmp/lk.sh" "-not -path '*/.claude/*'")" 1 "the snippet excludes */.claude/*, once"
+ok "$(occ "$tmp/lk.sh" '-name _archive -o ')" 1 "the ~/Projects walk prunes _archive, once"
+ok "$(occ "$tmp/lk.sh" '-maxdepth 5')" 1 "the ~/Projects walk is bounded at depth 5, once"
 runA=1
-if [ "$paired" != 0 ] || [ "$nopen" != 1 ] || [ "$nclose" != 1 ] || ! grep -q 'repo-thread-lookup\.sh' "$tmp/lk.sh" || ! grep -q -- '-maxdepth 3' "$LKS"; then
+if [ "$paired" != 0 ] || [ "$nopen" != 1 ] || [ "$nclose" != 1 ] || ! grep -q -- '-maxdepth 3' "$tmp/lk.sh"; then
   echo "FAIL - the # thread:repo-thread-lookup … # end pair is not exactly once, in order, in $OPEN; Section A skipped"
   fail=1; runA=0
 fi
@@ -89,11 +86,9 @@ if [ "$runA" = 1 ]; then
   fx "$h4/Projects/A/P/S/T/THREAD.md"                 '---\nslug: deep\n---\n# nested project, depth 5\n'
 
   # lk <snippet> <shell> <cwd> <home> <slug> — sets $out, $err, $rc. <shell> is word-split on purpose.
-  # <snippet> is the extracted wrapper (CLAUDE_PLUGIN_ROOT → this checkout, or $plugin when set) or a
-  # mutated copy of the script, which reads slug from the environment just the same.
   lk() {
     out=$(cd "$3" && unset XDG_CONFIG_HOME && HOME="$4" GIT_CEILING_DIRECTORIES="$tmp" \
-      GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null CLAUDE_PLUGIN_ROOT="${plugin-$root}" slug="$5" $2 "$1" 2>"$tmp/err"); rc=$?
+      GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null slug="$5" $2 "$1" 2>"$tmp/err"); rc=$?
     err=$(cat "$tmp/err" 2>/dev/null)
   }
   # rel <home> — $out with the physical <home>/ prefix removed, one path per line.
@@ -169,33 +164,29 @@ repos/tools/renamed/THREAD.md" "$L an empty slug lists exactly the six repo thre
     t=$(cd "$R/tools/foo/.claude/worktrees/w" && GIT_CEILING_DIRECTORIES="$tmp" G rev-parse --show-toplevel)
     ok "$t" "$R/tools/foo/.claude/worktrees/w" "$L the worktree fixture is its own git toplevel"
     ok "$(inl "$t/THREAD.md")" n "$L rung 3: a .claude/worktrees toplevel is never listed"
-    # the script unreachable: a loud exit 2, never read as "no hit"
-    plugin="$tmp/nowhere"; lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h1" foo; unset plugin
-    ok "$rc|$out" "2|" "$L script missing: rc 2, nothing on stdout"
-    ok "${err%%:*}" "repo-thread-lookup" "$L script missing: stderr starts repo-thread-lookup:"
   done
 
   # 11: mutation M1 — without the .claude rule, x/.claude/THREAD.md (depth 3) appears.
-  sed "s#-not -path '\*/\.claude/\*' ##" "$LKS" > "$tmp/m1.sh"
-  ok "$(cmp -s "$LKS" "$tmp/m1.sh" && echo same || echo changed)" changed "M1: the mutation changed the script"
+  sed "s#-not -path '\*/\.claude/\*' ##" "$tmp/lk.sh" > "$tmp/m1.sh"
+  ok "$(cmp -s "$tmp/lk.sh" "$tmp/m1.sh" && echo same || echo changed)" changed "M1: the mutation changed the snippet"
   ok "$(occ "$tmp/m1.sh" "-not -path '*/.claude/*'")" 0 "M1: exactly the .claude token was removed"
-  ok "$(diff "$LKS" "$tmp/m1.sh" | grep -c '^[<>]')" 2 "M1: exactly one line differs"
+  ok "$(diff "$tmp/lk.sh" "$tmp/m1.sh" | grep -c '^[<>]')" 2 "M1: exactly one line differs"
   lk "$tmp/m1.sh" bash "$tmp/plain" "$h1" ""
   ok "$(inl "$R/x/.claude/THREAD.md")" y "M1: without the .claude rule the depth-3 x/.claude/THREAD.md is listed"
   # 12: mutation M2 — without the depth limit, depth 4 appears but the worktree copy stays out.
-  sed 's#-maxdepth 3 ##' "$LKS" > "$tmp/m2.sh"
-  ok "$(cmp -s "$LKS" "$tmp/m2.sh" && echo same || echo changed)" changed "M2: the mutation changed the script"
+  sed 's#-maxdepth 3 ##' "$tmp/lk.sh" > "$tmp/m2.sh"
+  ok "$(cmp -s "$tmp/lk.sh" "$tmp/m2.sh" && echo same || echo changed)" changed "M2: the mutation changed the snippet"
   ok "$(occ "$tmp/m2.sh" '-maxdepth 3')" 0 "M2: exactly the repo-tier depth token was removed"
-  ok "$(diff "$LKS" "$tmp/m2.sh" | grep -c '^[<>]')" 2 "M2: exactly one line differs"
+  ok "$(diff "$tmp/lk.sh" "$tmp/m2.sh" | grep -c '^[<>]')" 2 "M2: exactly one line differs"
   lk "$tmp/m2.sh" bash "$tmp/plain" "$h1" ""
   ok "$(inl "$R/a/b/c/THREAD.md")" y "M2: without the depth limit the depth-4 fixture is listed (the fixture is sensitive)"
   ok "$(inl "$R/tools/foo/.claude/worktrees/w/THREAD.md")" n "M2: the worktree copy stays excluded by the .claude rule alone"
   ok "$(inl "$R/x/.claude/THREAD.md")" n "M2: x/.claude/THREAD.md stays excluded"
 
   # 13: mutation M3 — without the _archive prune, the archived project copy wins the ~/Projects tier.
-  sed 's#-name _archive -o ##' "$LKS" > "$tmp/m3.sh"
+  sed 's#-name _archive -o ##' "$tmp/lk.sh" > "$tmp/m3.sh"
   ok "$(occ "$tmp/m3.sh" '_archive')" 0 "M3: exactly the _archive token was removed"
-  ok "$(diff "$LKS" "$tmp/m3.sh" | grep -c '^[<>]')" 2 "M3: exactly one line differs"
+  ok "$(diff "$tmp/lk.sh" "$tmp/m3.sh" | grep -c '^[<>]')" 2 "M3: exactly one line differs"
   lk "$tmp/m3.sh" bash "$tmp/plain" "$h4" foo
   ok "$(rel "$h4")" "Projects/A/_archive/Old/THREAD.md" "M3: without the prune the _archive copy hides the repo threads (the fixture is sensitive)"
 fi
