@@ -25,26 +25,17 @@ before. A standing operator choice is now a valid reason for the ceiling alongsi
 quota. Both are operator or resource facts, never a judgement about a task, so 0006 still
 holds.
 
-How it applies:
+**Left open for p7-1, deliberately.** How the value reaches a run is implementation, and a
+first attempt to decide it here was wrong (review d2b36d6/b59fd7). p7-1 settles, in its own grill:
+whether schedule stamps the value or execute reads the file; how a resumed run keeps its original
+args (execute's resume contract) while the file may have changed; and how a block under an operator
+ceiling is triaged, given that 0016 reads a capped block as "wait for quota" and that a capped block
+may still be a capacity block rather than a wall. Until then, 0016's terminality and effort rules
+apply as written.
 
-1. **The live file governs, at dispatch.** Execute reads the file each time it dispatches. A
-   rollout's `max_tier:` is what schedule saw when it wrote the note; the **lower** of the stamp
-   and the file applies. So changing the file changes every future dispatch, including resumed
-   and paused rollouts, in one place, and a note can still be capped lower than the file on
-   purpose.
-2. **Over-cap tiers are lowered, never refused.** A task stamped `model: fable` by an earlier
-   escalation runs at the ceiling, exactly as 0016 already lowers it. Resume and repair of a
-   previously escalated rollout keep working.
-3. **Under an operator ceiling, a capped block is a wall.** 0016's terminality and effort rules
-   hold: a capped task runs the full Ralph loop and takes the higher tier's effort row. But
-   0016's reading of a capped block as "re-dispatch once quota returns, never read it as a wall"
-   holds only for a quota cap. An operator ceiling does not lift on its own, so its blocks are
-   triaged as real walls (ADR 0006), and `tier_capped:` records which kind of cap it was.
-
-**Not the engine's highest rung.** The engine's internal name for the top of its ladder
-(`fable`) is a different thing: the operator's top tier caps the ladder and never renames or
-shortens it. Wiring this value into that constant would turn escalation into a no-op and cost
-capped tasks their effort uplift.
+**Not the engine's ladder constant.** The engine names the top of its ladder internally; the
+operator's top tier caps that ladder and never replaces the constant. Wiring this value into it
+would turn escalation into a no-op and cost capped tasks their effort uplift.
 
 **Open against protocol 4.** The protocol 4 branch carries a decision on shared effort-first
 routing (numbered 0021 there, `docs/adr/` on `codex/thread-rollout-redesign`) that rejects
