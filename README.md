@@ -96,6 +96,10 @@ per-task resume.
   gone (amends 0006). `0017` — a pending handoff owns the thread's
   continuation: handoff docs are durable and self-cleaning, and close refreshes
   a pending one instead of proposing vault tasks that restate it (amends 0011).
+  `0024` — the operator's top tier sets every rollout's ceiling (amends 0016;
+  implementation pending, task p7-1). `0025` — master moves only by green PR,
+  owner included. (0018–0023 are reserved: 0018–0022 are on the protocol 4
+  branch, and 0023 belongs to orient's native-children task, p3-1.)
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
@@ -114,10 +118,11 @@ claude plugin install thread@thread
 claude --plugin-dir ~/repos/tools/thread-skill
 ```
 
-Cut a versioned release with `claude plugin tag` once `plugin.json` +
-`marketplace.json` agree (bump BOTH, always). `master` is protected (ADR 0025): the release bump, like
-every other change, lands through a pull request with a green `make test` check. Nobody pushes to
-`master` directly, the owner included.
+A release bumps `plugin.json` and `marketplace.json` together (BOTH, always). `master` is protected
+(ADR 0025): the bump, like every other change, lands through a pull request with a green `make test`
+check, and nobody pushes to `master` directly, the owner included. **Tag after the merge, on master's
+merged commit**: `git switch master && git pull --ff-only`, then `claude plugin tag --push`. Tagging the
+branch before a squash merge tags a commit that never reaches master.
 
 ## Tests
 
