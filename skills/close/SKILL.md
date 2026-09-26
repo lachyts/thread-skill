@@ -60,7 +60,7 @@ Each candidate lands in exactly one of these. When in doubt, prefer the destinat
 
 A **handoff doc** is a file in `<home>/docs/handoffs/`; what it is, who writes it and the states it moves through are `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § States (its front matter is `handoff-lifecycle.md` § Front matter). `<home>` is resolved by the rules in `handoff-lifecycle.md` § Home, whose only implementation is `${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/handoff-home.sh` — handoff's writer calls the same script, so the scan below looks exactly where the doc was written. Outside `_shared`, a pending doc in `<home>/docs/handoffs/` is *this thread's* by construction; the one exception is a `<home>` that carries more than one THREAD.md-backed thread, where a doc whose `thread:` names a thread other than the active one is that thread's and is left alone. In `_shared`, ownership is by `thread:` only, because `_shared` holds every shared thread's docs: with a non-empty `slug` the scan lists only this thread's docs there, so step 7.2 can never delete another thread's consumed doc, and a legacy doc in a slug-filtered `_shared` (it has no `thread:`) is neither listed nor counted. Lachy tracks the doc as a **single object**: he acts on it, or he converts it into a task himself. A close that proposes vault tasks restating it is a second tracker for work he is already tracking, and reads as though the handoff did not count (ruled 2026-09-19; ADR 0017).
 
-**The test is on disk, never in memory** — run the scan in step 2 and again before step 6, so it survives a context compaction. Each scanned directory, no recursion (`<home>/docs/handoffs/` is where handoff writes); `find`, not a glob, because the Bash tool is zsh, where an unmatched glob aborts the command before it runs. The scan takes three inputs, set on a line of their own before the snippet (`slug=… shared=… pointer=…`; the snippet only defaults them, so values already in the environment survive):
+**The test is on disk, never in memory** — run the scan in step 2 and again before step 6, so it survives a context compaction. Each scanned directory, no recursion (`<home>/docs/handoffs/` is where handoff writes); `find`, not a glob. The logic is `${CLAUDE_PLUGIN_ROOT}/skills/close/scripts/handoff-scan.sh`, called by the snippet below and never inlined: Claude Code substitutes skill arguments into every positional dollar-digit parameter in a SKILL.md body, awk's field references included, so an inline scan runs corrupted whenever close is invoked with arguments. The scan takes three inputs, set on a line of their own before the snippet (`slug=… shared=… pointer=…`; the snippet only defaults them, so values already in the environment survive):
 
 - `slug` — the active thread's effective slug: its THREAD.md `slug:`, or for a repo thread without one its directory's basename (`${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` § Repo-thread lookup) (empty when no thread is active).
 - `shared` — `1` when the active thread is a `_shared/threads/<slug>.md`, else empty. With a slug, the scan then also covers `_shared/docs/handoffs/` (filtered by `thread:`) when `<home>` is somewhere else.
@@ -68,42 +68,13 @@ A **handoff doc** is a file in `<home>/docs/handoffs/`; what it is, who writes i
 
 ```bash
 # thread:handoff-scan (extracted and run by tests/handoff-scan.test.sh)
-: "${slug:=}" "${shared:=}" "${pointer:=}"
-hh="${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/handoff-home.sh"
-if [ ! -f "$hh" ]; then echo "handoff-scan: resolver not found at $hh (is CLAUDE_PLUGIN_ROOT set?)" >&2; exit 2; fi
-if [ -n "$shared" ]; then home="$(bash "$hh" --shared)" || home=''; else home="$(bash "$hh")" || home=''; fi
-shd="$(bash "$hh" --shared-root)" || shd=''
-if [ -z "$home" ] || [ -z "$shd" ]; then echo "handoff-scan: no <home> (resolver failed)" >&2; exit 2; fi
-thr() { awk '{ sub(/\r$/, "") } NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} /^thread:/{sub(/^thread:[ \t]*/, ""); print; exit}' "$1" | tr -d "\"'\r" | sed 's/[[:space:]]*$//'; }
-mine() { if [ -n "$slug" ] && [ "$(dirname "$1")" = "$shd/docs/handoffs" ] && [ "$(thr "$1")" != "$slug" ]; then return 1; fi; }
-cls() {
-  s="$(awk '{ sub(/\r$/, "") } NR==1 && $0!="---"{exit} NR>1 && $0=="---"{exit} /^status:/{print $2; exit}' "$1" | tr -d "\"'\r" | tr '[:upper:]' '[:lower:]')"
-  case "$s" in pending|consumed) ;; "") s=legacy ;; *) s="unknown($s)" ;; esac
-  echo "$s $1"
-}
-scan_one() {
-  echo "# scanned $1" >&2
-  find "$1" -maxdepth 1 -name '*.md' 2>/dev/null | while IFS= read -r f; do
-    if mine "$f"; then cls "$f"; fi
-  done
-}
-scan_one "$home/docs/handoffs"
-sd=''
-if [ -n "$shared" ] && [ -n "$slug" ] && [ "$home" != "$shd" ]; then sd="$shd/docs/handoffs"; scan_one "$sd"; fi
-if [ -n "$pointer" ]; then
-  p="$pointer"
-  if [ "${p%"${p#??}"}" = '~/' ]; then p="$HOME/${p#??}"; fi
-  if [ "${p#/}" = "$p" ]; then echo "handoff-scan: pointer not absolute ($p) — not classified" >&2
-  elif [ ! -f "$p" ]; then echo "handoff-scan: pointer missing ($p)" >&2
-  else
-    pf="$(cd "$(dirname "$p")" && pwd -P)/$(basename "$p")"
-    if { [ "$(dirname "$pf")" = "$home/docs/handoffs" ] || [ "$(dirname "$pf")" = "$sd" ]; } && [ "${pf%.md}" != "$pf" ] && mine "$pf"; then :; else cls "$pf"; fi
-  fi
-fi
+hs="${CLAUDE_PLUGIN_ROOT}/skills/close/scripts/handoff-scan.sh"
+if [ ! -f "$hs" ]; then echo "handoff-scan: script not found at $hs (is CLAUDE_PLUGIN_ROOT set?)" >&2; exit 2; fi
+slug="${slug:-}" shared="${shared:-}" pointer="${pointer:-}" bash "$hs"
 # end thread:handoff-scan
 ```
 
-The snippet announces each directory it scanned as a `# scanned <dir>` line on stderr, and a pointer it could not classify as `handoff-scan: pointer not absolute (<p>)` or `handoff-scan: pointer missing (<p>)`; stdout stays `<status> <path>` lines only. When the resolver cannot be run (`CLAUDE_PLUGIN_ROOT` unset, a stale cache, a host without the plugin) or prints nothing, the scan exits 2 with a `handoff-scan:` line on stderr and prints nothing — it never guesses a directory (step 2's failure path).
+The snippet announces each directory it scanned as a `# scanned <dir>` line on stderr, and a pointer it could not classify as `handoff-scan: pointer not absolute (<p>)` or `handoff-scan: pointer missing (<p>)`; stdout stays `<status> <path>` lines only. When the script or its resolver cannot be run (`CLAUDE_PLUGIN_ROOT` unset, a stale cache, a host without the plugin) or the resolver prints nothing, the scan exits 2 with a `handoff-scan:` line on stderr and prints nothing — it never guesses a directory (step 2's failure path).
 
 `pending` → this thread's continuation (the rules below). `consumed` → deleted in step 7 once the peer guard (`handoff-lifecycle.md` § Close-out) allows: at this session's close if it marked the doc, otherwise at the first close after 24 h with no listed peer in its `<home>` or `Run from:` directory; until then left for its consumer and reported. `legacy` and `unknown(…)` → one counted report line, untouched. The status is read from the front-matter block only (quotes stripped, case-folded, CRLF tolerated), so a body that mentions `status: pending` does not count.
 
@@ -187,28 +158,9 @@ Close-inferred saves land `status: provisional` — the curator promotes them to
 
      ```bash
      # thread:repo-track (extracted and run by tests/repo-state.test.sh)
-     tasks="$HOME/repos/obsidian/Work/Tasks"
-     if [ -z "${br:-}" ]; then echo "repo-track: br is unset" >&2; exit 2; fi
-     if [ ! -d "$tasks" ]; then echo "repo-track: no task directory at $tasks" >&2; exit 2; fi
-     hits=$(command grep -rlF --include='*.md' -e "$br" -- "$tasks" 2>/dev/null); rc=$?
-     if [ "$rc" -gt 1 ]; then echo "repo-track: grep failed (rc $rc)" >&2; exit 2; fi
-     printf '%s\n' "$hits" | while IFS= read -r f; do
-       [ -n "$f" ] || continue
-       awk -v b="$br" '
-         { sub(/\r$/, "") }
-         NR == 1 { fm = ($0 == "---") ? 1 : -1; if (fm == 1) next }
-         fm == 1 && $0 == "---" { fm = 2; next }
-         fm == 1 && $0 ~ /^status:[ \t]*"?(open|in_progress)"?[ \t]*$/ { st = 1 }
-         { s = $0; off = 0
-           while ((i = index(s, b)) > 0) {
-             p = off + i
-             pre = (p > 1) ? substr($0, p - 1, 1) : ""
-             post = substr($0, p + length(b), 1); nxt = substr($0, p + length(b) + 1, 1)
-             if (pre !~ "[A-Za-z0-9._-]" && (post !~ "[A-Za-z0-9._/-]" || (post == "." && nxt !~ "[A-Za-z0-9._/-]"))) hit = 1
-             s = substr(s, i + 1); off = p
-           } }
-         END { exit !(st && hit) }' "$f" && basename "$f" .md
-     done | LC_ALL=C sort | head -n 1
+     rt="${CLAUDE_PLUGIN_ROOT}/skills/close/scripts/repo-track.sh"
+     if [ ! -f "$rt" ]; then echo "repo-track: script not found at $rt (is CLAUDE_PLUGIN_ROOT set?)" >&2; exit 2; fi
+     br="${br:-}" bash "$rt"
      # end thread:repo-track
      ```
 

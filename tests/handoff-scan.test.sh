@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# The handoff scan in skills/close/SKILL.md § The handoff owns the continuation, extracted by its marker
-# and run against runtime-generated fixtures (LF and CRLF) and the four <home> resolutions, under bash and
+# The handoff scan: the wrapper in skills/close/SKILL.md § The handoff owns the continuation, extracted by
+# its marker, and the script it calls (skills/close/scripts/handoff-scan.sh; p5-2 moved the logic out of the
+# SKILL.md because Claude Code substitutes skill arguments into positional $N there), run against runtime-generated fixtures (LF and CRLF) and the four <home> resolutions, under bash and
 # under `zsh -f` when zsh is installed (the Bash tool is zsh). The snippet resolves <home> through
 # skills/_shared/scripts/handoff-home.sh (CLAUDE_PLUGIN_ROOT points at this checkout), takes its inputs
 # slug / shared / pointer from the environment, scans a shared thread's _shared docs by front-matter
@@ -34,11 +35,14 @@ ok "$paired" 0 "the scan marker pair is closed and in order"
 open=$(grep -c '^# thread:handoff-scan' skills/close/SKILL.md); close=$(grep -c '^# end thread:handoff-scan' skills/close/SKILL.md)
 ok "$open" 1 "exactly one opening scan marker"
 ok "$close" 1 "exactly one closing scan marker"
-ok "$(grep -c 'handoff-home\.sh' "$tmp/scan.sh")" 1 "the scan snippet calls the handoff-home.sh resolver"
-ok "$(grep -c '^ *find "\$1"' "$tmp/scan.sh")" 1 "scan snippet found in close/SKILL.md"
+# The snippet is a wrapper; the logic is the script it calls (a SKILL.md body holds no positional $N, p5-2).
+HS=skills/close/scripts/handoff-scan.sh
+ok "$(grep -c 'skills/close/scripts/handoff-scan\.sh' "$tmp/scan.sh")" 1 "the scan snippet calls handoff-scan.sh"
+ok "$(grep -c 'handoff-home\.sh' "$HS")" 1 "the scan script calls the handoff-home.sh resolver"
+ok "$(grep -c '^ *find "\$1"' "$HS")" 1 "the scan's find is in handoff-scan.sh"
 # Without the closing marker, or with it above the opener, awk would capture the rest of the SKILL and the
 # scans would run prose.
-if [ "$paired" != 0 ] || [ "$open" != 1 ] || [ "$close" != 1 ] || ! grep -q '^ *find "\$1"' "$tmp/scan.sh"; then
+if [ "$paired" != 0 ] || [ "$open" != 1 ] || [ "$close" != 1 ] || ! grep -q 'handoff-scan\.sh' "$tmp/scan.sh"; then
   echo "FAIL - the # thread:handoff-scan … # end thread:handoff-scan pair is not exactly once, in order, in skills/close/SKILL.md; nothing to run"
   exit 1
 fi
@@ -115,6 +119,7 @@ pend "$T"; mv "$T/docs/handoffs/lf-pending.md" "$T/docs/handoffs/tool.md"
 # the Resume-pointer doc, outside every scanned directory (under home2, whose _shared has no docs/handoffs/)
 pd="$tmp/home2/elsewhere/docs/handoffs"; pend "$tmp/home2/elsewhere"; mv "$pd/lf-pending.md" "$pd/p.md"
 mkdir -p "$tmp/emptyplugin"
+mkdir -p "$tmp/partialplugin/skills/close/scripts" && cp skills/close/scripts/handoff-scan.sh "$tmp/partialplugin/skills/close/scripts/"
 # the poison: an outer XDG_CONFIG_HOME and global config that both ignore docs/
 mkdir -p "$tmp/xdg/git"; printf 'docs/\n' > "$tmp/xdg/git/ignore"
 printf '[core]\n\texcludesFile = %s\n' "$tmp/xdg/git/ignore" > "$tmp/poison"
@@ -226,8 +231,13 @@ pending s1-lf.md" "$L a pointer at a legacy doc the _shared filter dropped is cl
   ok "${err%%:*}" "handoff-scan" "$L CLAUDE_PLUGIN_ROOT unset: stderr starts handoff-scan:"
   ok "$out" "" "$L CLAUDE_PLUGIN_ROOT unset: nothing on stdout"
   plugin="$tmp/emptyplugin"; scan "$sh" "$tmp/repo/sub" "$hg"; reset
-  ok "$([ "$rc" != 0 ] && echo nonzero)" "nonzero" "$L resolver missing: the scan exits non-zero"
-  ok "${err%%:*}" "handoff-scan" "$L resolver missing: stderr starts handoff-scan:"
+  ok "$rc" 2 "$L script missing: the scan exits 2"
+  ok "${err%%:*}" "handoff-scan" "$L script missing: stderr starts handoff-scan:"
+  ok "$out" "" "$L script missing: nothing on stdout"
+  # the script present but its resolver missing (a partial plugin copy): the script itself fails loudly
+  plugin="$tmp/partialplugin"; scan "$sh" "$tmp/repo/sub" "$hg"; reset
+  ok "$rc" 2 "$L resolver missing: the scan exits 2"
+  ok "$(printf '%s\n' "$err" | head -n 1)" "handoff-scan: resolver not found at $tmp/partialplugin/skills/_shared/scripts/handoff-home.sh" "$L resolver missing: stderr names the resolver path"
   ok "$out" "" "$L resolver missing: nothing on stdout"
 done
 

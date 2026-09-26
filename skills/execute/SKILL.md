@@ -174,13 +174,13 @@ Build the `args` object the workflow expects:
 ```bash
 # thread:default-branch-resolver (extracted and tested by tests/default-branch.test.sh)
 R="<repoPath>"
-b=$(git -C "$R" ls-remote --symref origin HEAD 2>/dev/null | awk '/^ref:/ { sub("refs/heads/", "", $2); print $2; exit }')
-[ -n "$b" ] || { echo "cannot resolve origin's default branch for $R" >&2; exit 1; }
-echo "$b"
+db="${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/default-branch.sh"
+if [ ! -f "$db" ]; then echo "default-branch: script not found at $db (is CLAUDE_PLUGIN_ROOT set?)" >&2; exit 2; fi
+bash "$db" "$R"
 # end thread:default-branch-resolver
 ```
 
-Pass the printed name as `defaultBranch` only when it is not `main`. A resume (`resumeFromRunId`) re-passes the run's ORIGINAL args unchanged — adding `defaultBranch` to a run that started without it changes prompt bytes and re-runs cached agents.
+Pass the printed name as `defaultBranch` only when it is not `main`. Exit 1 (the remote did not answer) and exit 2 (`scripts/default-branch.sh` not found) both stop. A resume (`resumeFromRunId`) re-passes the run's ORIGINAL args unchanged — adding `defaultBranch` to a run that started without it changes prompt bytes and re-runs cached agents.
 
 Also read the rollout note's **`## Known baseline failures`** block (`/thread:schedule` step 2.6): when it lists tests (not `none`/empty), pass them as `knownBaselineFailures: ["<test_id> — <reason>", …]`. The engine threads the manifest into every agent and shifts the Ralph green criterion to "no NEW failures beyond this set" — it keeps running the full verifier and never `--deselect`s the listed reds (per the project's `CLAUDE.md`: a comparison reference, not a mute button). Omit the key when the block is absent or `none` — the engine then behaves exactly as before (`verifier` exit 0 = pass).
 

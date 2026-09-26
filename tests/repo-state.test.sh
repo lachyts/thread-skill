@@ -306,13 +306,17 @@ if extract repo-track "$tmp/snip-rt.sh"; then
   printf 'No front matter, but it names feat/x.\n' > "$T/f.md"
   task g-dot.md open 'The work sits on feat/p.'
   task h-ver.md open 'Release feat/q.1 shipped; see feat/q..'
-  # The Claude Code Bash tool's grep is a shell-snapshot function (ugrep honouring .gitignore): the snippet
-  # must bypass any grep function. A poisoned copy defines one that fails; `command grep` never calls it.
-  { echo 'grep() { echo "poisoned grep" >&2; return 2; }'; cat "$tmp/snip-rt.sh"; } > "$tmp/snip-rt-fn.sh"
+  # The snippet is a wrapper; the logic is repo-track.sh (a SKILL.md body holds no positional $N, p5-2).
+  ok "$(grep -c 'skills/close/scripts/repo-track\.sh' "$tmp/snip-rt.sh")" 1 "the repo-track snippet calls repo-track.sh"
+  # The Claude Code Bash tool's grep is a shell-snapshot function (ugrep honouring .gitignore): the script
+  # must bypass any grep function. BASH_ENV defines a failing one in the script's own bash (a function in
+  # the wrapper's shell would not reach it); `command grep` never calls it. The probe proves it is live.
+  echo 'grep() { echo "poisoned grep" >&2; return 2; }' > "$tmp/poison-grep.sh"
+  ok "$(BASH_ENV="$tmp/poison-grep.sh" bash -c 'grep -q x /dev/null' 2>&1)" "poisoned grep" "the BASH_ENV grep poison is live (precondition)"
   # track <shell> [VAR=value …] → $out, $err, $rc
   track() {
     local sh=$1; shift
-    out=$(cd "$tmp" && env HOME="$tmp/h" "$@" $sh "$tmp/snip-rt.sh" 2>"$tmp/err"); rc=$?
+    out=$(cd "$tmp" && env HOME="$tmp/h" CLAUDE_PLUGIN_ROOT="$root" "$@" $sh "$tmp/snip-rt.sh" 2>"$tmp/err"); rc=$?
     err=$(cat "$tmp/err")
   }
   for sh in "${shells[@]}"; do
@@ -321,12 +325,15 @@ if extract repo-track "$tmp/snip-rt.sh"; then
     track "$sh" br=feat/zz;  ok "$out" "" "[$sh] br=feat/zz → empty"; ok "$rc" 0 "[$sh] br=feat/zz → rc 0"
     track "$sh" br=feat/p;   ok "$out" g-dot "[$sh] br=feat/p → g-dot (a sentence-final period is a boundary)"; ok "$rc" 0 "[$sh] br=feat/p → rc 0"
     track "$sh" br=feat/q;   ok "$out" "" "[$sh] br=feat/q → empty (feat/q.1 and feat/q.. are other tokens)"; ok "$rc" 0 "[$sh] br=feat/q → rc 0"
-    out=$(cd "$tmp" && env HOME="$tmp/h" br=feat/x $sh "$tmp/snip-rt-fn.sh" 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err")
+    track "$sh" BASH_ENV="$tmp/poison-grep.sh" br=feat/x
     clean0 b-open "[$sh] a grep shell function is bypassed"
     track "$sh" HOME="$tmp/h2" br=feat/x
     ok "$rc" 2 "[$sh] no task directory → rc 2"; ok "$out" "" "[$sh] no task directory → stdout empty"
     starts "$err" "repo-track: no task directory" "[$sh] no task directory → stderr says so"
     track "$sh"; ok "$rc" 2 "[$sh] br unset → rc 2"
+    track "$sh" CLAUDE_PLUGIN_ROOT="$tmp/nowhere" br=feat/x
+    ok "$rc|$out" "2|" "[$sh] script missing → rc 2, stdout empty"
+    starts "$err" "repo-track: script not found" "[$sh] script missing → stderr says so"
     chmod 000 "$T/c-done.md"
     if [ -r "$T/c-done.md" ]; then
       echo "SKIP - [$sh] unreadable task file (running as a user who can read mode 000)"

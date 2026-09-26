@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The default-branch resolver in skills/execute/SKILL.md § 4, extracted by its marker and run against
+# The default-branch resolver in skills/execute/SKILL.md § 4 (a wrapper round
+# skills/execute/scripts/default-branch.sh since p5-2), extracted by its marker and run against
 # fixture remotes, plus the engine's rendered worktree setup executed against a `master`-only origin.
 # Hermetic: every repo lives under mktemp; git identity is passed per command; the caller's GIT_DIR & co.
 # are unset — exported (as inside a git hook), they turn every `git -C "$tmp/..."` below into a commit,
@@ -16,7 +17,10 @@ g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch="${GB:-master}"
 awk '/^# thread:default-branch-resolver/{on=1; next} /^# end thread:default-branch-resolver/{on=0} on' \
   skills/execute/SKILL.md | sed 's#^R="<repoPath>"$#R="$1"#' > "$tmp/resolve.sh"
 ok "$(grep -c 'R="$1"' "$tmp/resolve.sh")" 1 "resolver snippet found in execute/SKILL.md"
-resolve() { bash "$tmp/resolve.sh" "$1" 2>/dev/null; }
+# The snippet is a wrapper; the logic is default-branch.sh (a SKILL.md body holds no positional $N, p5-2).
+ok "$(grep -c 'skills/execute/scripts/default-branch\.sh' "$tmp/resolve.sh")" 1 "the resolver snippet calls default-branch.sh"
+root=$(pwd -P)
+resolve() { CLAUDE_PLUGIN_ROOT="$root" bash "$tmp/resolve.sh" "$1" 2>/dev/null; }
 
 # 1. a clone
 g init -q --bare "$tmp/m.git"
@@ -50,6 +54,12 @@ ok "$(resolve "$tmp/nseed")" main "main origin → main"
 # 4. no remote: the resolver stops rather than assuming main
 g init -q "$tmp/lonely"
 resolve "$tmp/lonely" >/dev/null; ok "$?" 1 "no remote → exit 1, never a guessed main"
+
+# 5. the script unreachable: exit 2, a stop like exit 1
+out=$(CLAUDE_PLUGIN_ROOT="$tmp/nowhere" bash "$tmp/resolve.sh" "$tmp/clone" 2>"$tmp/err"); rc=$?
+ok "$rc|$out" "2|" "script missing → exit 2, nothing on stdout"
+ok "$(cut -d: -f1 "$tmp/err")" "default-branch" "script missing → stderr starts default-branch:"
+bash skills/execute/scripts/default-branch.sh >/dev/null 2>&1; ok "$?" 2 "no <repoPath> → usage exit 2"
 
 # ---- the engine's rendered setup, executed ----------------------------------------------------------
 setup=$(node --input-type=module -e "
