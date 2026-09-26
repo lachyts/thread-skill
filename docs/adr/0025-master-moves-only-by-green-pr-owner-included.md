@@ -18,11 +18,13 @@ deletion are refused, and **the protection applies to admins too**, with no bypa
 and close-out commits ride a PR like everything else. In an emergency the protection is
 lifted by hand and deliberately, then restored.
 
-**Rulesets enforce it; classic protection is only a second layer.** On 2026-09-26, with classic
-branch protection live (`enforce_admins: true`, a PR required, strict checks), a direct push from
-the owner's account still landed (`4c285d2..73bcdd0`); the cause wasn't determined. A repository
-ruleset with no bypass actors refused the same kind of push ("Changes must be made through a
-pull request"). Two rulesets are live:
+**Enforced by repository rulesets, with no bypass actors, and nothing else.** Classic branch
+protection was tried first and removed the same day. While it was live, a direct push from the
+owner's account (`4c285d2..73bcdd0`) landed. That push was exactly PR #21's green head, so it may
+have been accepted as a fast-forward of an approved-by-checks PR rather than a bypass; the cause
+wasn't established. An empty probe commit pushed straight to master under the ruleset was refused
+("Changes must be made through a pull request"). One mechanism means one restore procedure. Two
+rulesets are live:
 
 - `master-green-pr-only` (id 24028790) on `refs/heads/master`: pull request required (0
   approvals, so the owner can merge their own), required status checks `make test
@@ -35,7 +37,8 @@ pull request"). Two rulesets are live:
 **The job names are the check contexts.** Renaming the workflow job or a matrix value leaves
 the old contexts unreported, and every PR then waits forever. Change the ruleset in the same
 change. To lift or restore: `gh api -X PUT repos/lachyts/thread-skill/rulesets/24028790 -f
-enforcement=disabled` (or `=active`). The full payload is the rules listed above.
+enforcement=disabled` (or `=active`); `gh api repos/lachyts/thread-skill/rulesets/24028790`
+prints the full payload.
 
 **Local commits on master are stranded.** `thread:close` and `thread:handoff` commit to
 whatever branch is checked out. On `master` those commits can no longer be pushed: they wait
@@ -54,7 +57,8 @@ stopped the leak that prompted this.
 
 - **Required CI with admin bypass.** Rejected: it keeps direct pushes working, but every
   agent inherits the bypass, so it protects against nothing that runs as Lachy.
-- **Classic branch protection alone.** Tried first; it did not stop an owner push (above).
+- **Classic branch protection.** Tried first and removed: a second mechanism doubles every
+  rename and restore, and its behaviour under an owner push was not established (above).
 - **CI for visibility only.** Rejected: it enforces nothing and leaves leak prevention to
   the test-side `GIT_*` scrub alone. That scrub is the root-cause fix; this protection is
   the independent second layer.

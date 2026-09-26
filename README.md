@@ -121,8 +121,9 @@ claude --plugin-dir ~/repos/tools/thread-skill
 A release bumps `plugin.json` and `marketplace.json` together (BOTH, always). `master` is protected
 (ADR 0025): the bump, like every other change, lands through a pull request with a green `make test`
 check, and nobody pushes to `master` directly, the owner included. **Tag after the merge, on master's
-merged commit**: `git switch master && git pull --ff-only`, then `claude plugin tag --push`. Tagging the
-branch before a squash merge tags a commit that never reaches master.
+merged commit**: `git fetch origin && git switch --detach origin/master`, then `claude plugin tag --push`
+(detached, so it works even while local `master` holds unpushed commits). Tagging the branch before a
+squash merge tags a commit that never reaches master.
 
 ## Tests
 
