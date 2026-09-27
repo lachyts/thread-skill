@@ -23,11 +23,12 @@ in its tags.
 Terms. LANDED = {done, merged, dropped}. A HOLD status is any status other than landed, open,
 in_progress or review (parked, blocked, ...): a deliberate hold, not drift. A task's rollout is LIVE when
 its `rollout:` wikilink resolves to a file in T root, and RETIRED when it resolves into R, into A, or to
-nothing.
+no note. A task with no `rollout:` link has no rollout: neither live nor retired.
 
-Scoping. --phases N,M restricts phase candidates to those N and task candidates to filenames starting
-`<slug>-pN-`; rollout detection ignores it. --kinds (default all three) selects which kinds are listed
-and written; a kind outside --kinds is never written, even as a dependency.
+Scoping. Task candidates are always `<slug>-p<N>-*` (so `--project chorus` never picks up a
+`chorus-cmux-*` task). --phases N,M restricts phase candidates to those N and task candidates to
+filenames starting `<slug>-pN-`; rollout detection ignores it. --kinds (default all three) selects
+which kinds are listed and written; a kind outside --kinds is never written, even as a dependency.
 
 1. FINISHED PHASE. Candidate: a phase note in P named `<slug>-p<N>-*.md` at `status: open`. Its tasks
    are the task notes in T and A whose filename starts with the literal `<slug>-p<N>-` (so `-p1-` never
@@ -37,13 +38,14 @@ and written; a kind outside --kinds is never written, even as a dependency.
      `depends_on: []`. The vault's daily sweep moves it to Phases/Archive.
    - Every non-landed task is a U finished task (rule 2): U with `depends_on: [those slugs]` when `task`
      is in --kinds; otherwise A, `needs task <slug> closed first`, and no task is written.
-   - Any non-landed task that is A, skipped, archived-but-open (in A or tagged `archived`, not landed),
-     or at `review` under a retired rollout (`run /thread:repair`) makes the phase A, naming it. This
-     wins over holds and over open tasks.
-   - Otherwise a task at `review` under a live rollout (status/repair own that step; reconcile-wave's
-     LANDED_STATUSES counts `review` for resume), a hold, or a genuinely open task with no evidence
-     keeps the phase out of both lists.
-2. FINISHED TASK. Candidate: a task note in T root named `<slug>-*` at `open` or `in_progress`.
+   - A QUIET task keeps the phase out of both lists, whatever its other tasks are: a hold, a task at
+     `review` under a live rollout (status/repair own that step; reconcile-wave's LANDED_STATUSES counts
+     `review` for resume) or with no `rollout:` at all (a human review step, nothing to repair), or a
+     genuinely open task with no evidence. Resolving the other tasks could never close such a phase.
+   - Otherwise any non-landed task that is A, skipped, unparseable, archived-but-open (in A or tagged
+     `archived`, not landed), or at `review` under a retired rollout (one resolving into R, into A or
+     to no note: `run /thread:repair`) makes the phase A, naming it.
+2. FINISHED TASK. Candidate: a task note in T root named `<slug>-p<N>-*` at `open` or `in_progress`.
    Evidence precedence:
    - `pr:` a `https://github.com/.../pull/N` URL (quoted or bare): decided by (a) alone.
    - `pr:` present but not a URL (e.g. `pr: 7`): A, `pr: is not a URL; cannot verify`.
@@ -62,13 +64,16 @@ and written; a kind outside --kinds is never written, even as a dependency.
            the next `[[`, `;`, ` · ` or end of line, else `log names it without a PR ref`;
        (3) the line has no negative marker (case-insensitive, word-bounded): deferred, follow-up, filed,
            not landed, partial(ly), held out, dropped, pointer, re-scoped, rewritten, superseded,
-           reverted. Link targets and URLs are not scanned (a task named `...-partial-log` is no
-           disposition); the reason quotes the markers.
+           reverted, not merged, unmerged, abandoned, cancel(l)ed, not dispatched, skipped, withdrawn.
+           Link targets and URLs are not scanned (a task named `...-partial-log` is no disposition);
+           the reason quotes the markers.
        Any failing naming line makes the task A. A rollout in R at `status: done` whose log never names
        the task is A (`its rollout is archived done, but the log does not record it`).
-   A task with evidence is still A when (i) its body (fenced code stripped) reads as a partial landing
-   (`open here`, `still open`, `not yet built/landed/...`, `partially merged/...`, `remaining
-   items/work`, case-insensitive; the reason quotes the match) or has an unchecked `- [ ]`; (ii) it has
+   A task with evidence is still A when (i) its body (fenced code stripped; link targets and URLs not
+   scanned) reads as a partial landing (case-insensitive, deliberately broad: `open here`, `still open`,
+   `not yet <word>`, `partially merged/...`, `remain(s|ing)`, `outstanding`, `still to do/build/...`,
+   `TODO`, `only item/part/step <n>`, a bold `**Open...**` label or a line-leading `Open:`; the reason
+   quotes the match) or has an unchecked `- [ ]`; (ii) it has
    `owner:` and its rollout is live; (iii) the note does not parse. The U write is `status: done`, the
    single write /thread:execute's mark-done makes.
 3. MISFILED SUPERSEDED ROLLOUT. Candidate: a rollout note in T root or A (not R) named
@@ -119,9 +124,14 @@ PR_REF_RE = re.compile(r"/pull/\d+|(?<![\w&])#\d+")
 LINE_SHAPE_RE = re.compile(r"^\s*(\||([-*+]|\d+\.)\s)")
 SEGMENT_END_RE = re.compile(r"\[\[|;| · ")
 NEGATIVE_RE = re.compile(r"\b(deferred|follow-?up|filed|not landed|partial(ly)?|held out|dropped|pointer"
-                         r"|re-?scoped|rewritten|superseded|reverted)\b", re.I)
-PARTIAL_RE = re.compile(r"open here|still open|not yet (built|landed|merged|done|shipped)"
-                        r"|partial(ly)? (landed|merged|built|done|shipped)|remaining (items|work)", re.I)
+                         r"|re-?scoped|rewritten|superseded|reverted|not merged|unmerged|abandoned|cancell?ed"
+                         r"|not dispatched|skipped|withdrawn)\b", re.I)
+# A note that reads as a partial landing. Deliberately broad: a false hit only makes a task ambiguous
+# (a human looks), a miss lets --apply close unfinished work.
+PARTIAL_RE = re.compile(r"\bopen here\b|\bstill open\b|\bnot yet \w+|\bpartial(ly)? (landed|merged|built|done|shipped)"
+                        r"|\bremain(s|ing)?\b|\boutstanding\b|\bstill to (do|build|land|come|ship)\b|\bTODO\b"
+                        r"|\bonly (items?|parts?|steps?) \d|\*\*open\b[^*\n]*\*\*|^[ \t]*([-*+][ \t]+)?open:",
+                        re.I | re.M)
 UNCHECKED_RE = re.compile(r"^\s*[-*+]\s+\[ \]", re.M)
 FENCE_RE = re.compile(r"^(```|~~~)[^\n]*\n.*?^\1[^\n]*$", re.M | re.S)
 WIKILINK_RE = re.compile(r"\[\[([^\]|#\\]+)")
@@ -370,7 +380,7 @@ class Detector:
                 return kind, text
             evidence = text
         body = FENCE_RE.sub("", rec.body)
-        m = PARTIAL_RE.search(body)
+        m = PARTIAL_RE.search(MARKER_BLIND_RE.sub(" ", body))
         if m:
             return "A", f"{evidence}, but the note reads as a partial landing: \"{m.group(0)}\""
         if UNCHECKED_RE.search(body):
@@ -381,15 +391,15 @@ class Detector:
         return "U", evidence
 
     def in_phase_scope(self, stem: str) -> bool:
-        if self.phases is None:
-            return True
-        return any(stem.startswith(f"{self.slug}-p{n}-") for n in self.phases)
+        """A task candidate is `<slug>-p<N>-*` (so `chorus` never reaches `chorus-cmux-*`), N in --phases."""
+        m = re.match(rf"^{re.escape(self.slug)}-p(\d+)-", stem)
+        return bool(m) and (self.phases is None or int(m.group(1)) in self.phases)
 
     # -- the three detectors --
 
     def detect_tasks(self):
         for rec in self.t_recs:
-            if not rec.stem.startswith(f"{self.slug}-") or not self.in_phase_scope(rec.stem):
+            if not self.in_phase_scope(rec.stem):
                 continue
             if rec.fm is not None and not (rec.is_task() and rec.status in ACTIVE):
                 continue
@@ -422,8 +432,9 @@ class Detector:
                 if t.where == "A" or "archived" in t.tags:
                     blockers.append(f"task {t.stem} is archived but {st or 'has no status'}")
                 elif st == "review":
-                    if self.resolve_rollout(t)[0] == "live":
-                        quiet = True
+                    rkind, _, rstem = self.resolve_rollout(t)
+                    if rkind == "live" or not rstem:
+                        quiet = True  # a live rollout's review step, or a human review with no rollout
                     else:
                         blockers.append(f"task {t.stem} at review; run /thread:repair")
                 elif st in ACTIVE:
@@ -438,14 +449,15 @@ class Detector:
                         quiet = True
                 else:
                     quiet = True  # a hold (parked, blocked, ...): deliberate, not drift
+            if quiet:
+                continue  # resolving the ambiguous tasks could never close this phase
             if blockers:
                 self.Amb.append(self.item("phase", rec, "; ".join(blockers)))
-            elif quiet:
-                continue
             elif depends and "task" not in self.kinds:
                 self.Amb.append(self.item("phase", rec, f"needs task {', '.join(depends)} closed first"))
             else:
-                reason = f"all {len(tasks)} tasks landed" + (f" once {', '.join(depends)} closes" if depends else "")
+                noun = "task" if len(tasks) == 1 else "tasks"
+                reason = f"all {len(tasks)} {noun} landed" + (f" once {', '.join(depends)} closes" if depends else "")
                 it = self.item("phase", rec, reason, action=f"status: done + completed: {self.today}",
                                depends_on=depends)
                 it["_tasks"] = [t.path for t in tasks]
@@ -511,14 +523,14 @@ def move_no_clobber(src: Path, dst: Path):
         raise
     except OSError:
         data = src.read_bytes()
-        with open(dst, "xb") as f:  # exclusive create: FileExistsError on a clash, never an overwrite
-            try:
+        f = open(dst, "xb")  # exclusive create: FileExistsError on a clash, never an overwrite
+        try:  # from here on dst is ours: any failure (write, close, copystat) removes it again
+            with f:
                 f.write(data)
-            except OSError:
-                f.close()
-                os.unlink(dst)
-                raise
-        shutil.copystat(src, dst)
+            shutil.copystat(src, dst)
+        except OSError:
+            os.unlink(dst)
+            raise
     try:
         os.unlink(src)
     except OSError as e:
