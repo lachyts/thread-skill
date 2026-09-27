@@ -22,6 +22,9 @@ scratch=$(mktemp -d); trap 'rm -rf "$scratch"' EXIT
 node_bin=$(node -p 'process.execPath' 2>/dev/null) || { echo "make test: node not found"; exit 1; }
 py_bin=$(python3 -c 'import sys; print(sys.executable)' 2>/dev/null) || { echo "make test: python3 not found"; exit 1; }
 export PATH="$(dirname "$node_bin"):$(dirname "$py_bin"):$PATH"
+# Likewise python's user site (a `pip install --user` PyYAML, which next-action.py needs) resolves under
+# $HOME: pin the real one so the swap hides nothing the scripts import. Read-only use; nothing lands there.
+export PYTHONUSERBASE="$(python3 -c 'import site; print(site.getuserbase())')"
 
 export HOME="$scratch/home"; mkdir -p "$HOME"
 export GIT_CONFIG_GLOBAL="$scratch/gitconfig"
