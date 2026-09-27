@@ -7,9 +7,13 @@
 //   - behaviour: the two commands are EXTRACTED from the SKILL.md bullet's fence and run against a temp
 //     vault (fresh per test, removed after), with only test flags appended;
 //   - classify: a test-side model of the bullet's mapping (literal `<slug>-p<N>-` prefix) and outcome
-//     precedence (closed > ambiguous > failed > left open), run on the real stdout;
+//     precedence (closed > ambiguous > failed, incl. a whole-line exit 2 > already closed > left open),
+//     run on the real exit code, stdout and phase notes;
 //   - checkCeremony: a pure function returning the names of the failed doc checks, run on the real
 //     SKILL.md and on one control per check family, so no matcher can pass vacuously.
+// The follow-on note's body rules (append only unlisted failures, `still failing` in place, resolve per
+// line) are agent prose with no script behind them, so they are pinned as doc checks (`append`,
+// `resolve`) rather than run.
 // Nothing is written into the checkout.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -122,9 +126,22 @@ function checkCeremony(text) {
     !['`-p1-` never matches `-p10-`', ': status: done, completed:', 'skipped: dependency', 'not written:']
       .every((k) => para.includes(k))) fails.push('mapping')
 
-  // leftopen: touched minus Written, Ambiguous and Errors, with the fixed reason.
+  // leftopen: touched minus Written, Ambiguous and Errors (and the already closed), with the fixed reason.
   if (!cs.some((c) => /\*\*left open\*\*/.test(c) && /touched minus Written, Ambiguous and Errors/.test(c)) ||
-    !para.includes('`not closed: a task is still open or held, or the phase note is not open`')) fails.push('leftopen')
+    !para.includes('`not closed: a task is still open or held, or the phase note is missing or not open`')) fails.push('leftopen')
+
+  // wholeline: a line that exited non-zero and printed no sections fails every phase on it.
+  if (!cs.some((c) => /\*\*failed\*\*/.test(c) && /printed no sections/.test(c)) ||
+    !para.includes('without its own Written, Ambiguous or Errors entry is failed, never left open')) fails.push('wholeline')
+
+  // already: a phase note already at `status: done` (root or Archive) is already closed, not left open.
+  if (!cs.some((c) => /\*\*already closed\*\*/.test(c) && c.includes('`Work/Phases/<slug>-p<N>-*.md`') &&
+    c.includes('`Work/Phases/Archive/**`') && c.includes('`status: done`'))) fails.push('already')
+
+  // empty: nothing printed is recorded, not treated as a failure.
+  if (!para.includes('If `touched-phases` exits 0 and prints nothing, record "no phased tasks: nothing to close"')) {
+    fails.push('empty')
+  }
 
   // failure: a non-zero exit from EITHER command files a follow-on open task and the ceremony continues.
   if (!para.includes('`touched-phases` exits non-zero') || !para.includes('reconcile-project exits non-zero') ||
@@ -133,10 +150,17 @@ function checkCeremony(text) {
 
   // followup-name: never prefix-matches a rollout name, never looks like a phase task.
   const tpl = followupName(phase.raw)
-  const name = tpl && tpl.replace('<rollout-slug>', ROLLOUT).replace('<slug>', 'demo')
-  const glob = new RegExp(`^${ROLLOUT.replace(/[-]/g, '\\-')}.*\\.md$`)
-  if (!name || name.startsWith('demo-rollout') || glob.test(name) || /^(.+?)-p\d+-/.test(name) ||
-    /^demo-p\d+-/.test(name)) fails.push('followup-name')
+  const name = tpl && tpl.replace('<rollout-slug>', ROLLOUT)
+  if (!name || name.startsWith('demo-rollout') || /^(.+?)-p\d+-/.test(name)) fails.push('followup-name')
+
+  // rerun-path: the recorded re-run command names the rollout note where the move leaves it.
+  if (!para.includes('`--rollout` given the post-move path `Work/Tasks/Archive/Rollouts/<rollout-slug>.md`')) {
+    fails.push('rerun-path')
+  }
+
+  // append: an already-listed failure is annotated in place; only unlisted failures become new lines.
+  if (!cs.some((c) => /already listed/.test(c) && c.includes('gets only the in-place `still failing` annotation')) ||
+    !para.includes('only failures not yet listed are appended as new lines')) fails.push('append')
 
   // followup-fm: same new-task shape as the follow-on bullet's YAML, minus rollout/wave/phase.
   const keys = idx.followon >= 0 ? followonYamlKeys(bs[idx.followon].raw) : []
@@ -148,13 +172,16 @@ function checkCeremony(text) {
   // resolve: a successful re-run appends `resolved`, done once every line is resolved; an archived
   // follow-on is reopened, never duplicated.
   if (!para.includes('`resolved <date>: <outcome>`') ||
+    !para.includes('absent from Errors in a run of its line that printed sections, whatever the exit code') ||
+    !para.includes('no longer exits 2 or crashes') ||
+    !para.includes('`still failing <date>: exited <code>: <message>` in place') ||
     !cs.some((c) => /every line is resolved/.test(c) && c.includes('`status: done`')) ||
     !cs.some((c) => /archived/.test(c) && c.includes('reset `status: open`')) ||
     !/never create a second same-named note/.test(para)) fails.push('resolve')
 
   // log: the Completion log names each outcome.
   const logText = idx.log >= 0 ? collapse(bs[idx.log].raw) : ''
-  if (!['phase closure', 'closed', 'ambiguous', 'failed', 'left open'].every((k) => logText.includes(k))) {
+  if (!['phase closure', 'closed', 'already closed', 'ambiguous', 'failed', 'left open'].every((k) => logText.includes(k))) {
     fails.push('log')
   }
   return fails
@@ -196,13 +223,24 @@ test('controls: each check family rejects its own known-bad shape, and only that
   const cases = [
     ['order', swapBullets(execute, pi, si)],
     ['flags', mutate(execute, '--kinds phase', '')],
+    ['ambiguous', mutate(execute, 'is never applied', 'is applied')],
     ['mapping', mutate(execute, /literal `<slug>-p<N>-` prefix/, 'prefix')],
+    ['leftopen', mutate(execute, 'touched minus Written, Ambiguous and Errors', 'the rest')],
+    ['wholeline', mutate(execute, ' without its own Written, Ambiguous or Errors entry is failed, never left open', ' is left open')],
+    ['already', mutate(execute, '**already closed**: any other', '**done**: any other')],
+    ['empty', mutate(execute, 'record "no phased tasks: nothing to close"', 'treat it as a failure')],
     ['failure', mutate(execute, 'follow-on open task', 'note')],
     ['followup-name', mutate(execute, 'phase-close-followup-<rollout-slug>', '<rollout-slug>-phase-close-followup')],
+    ['rerun-path', mutate(execute, 'post-move path `Work/Tasks/Archive/Rollouts/<rollout-slug>.md`', 'path `Work/Tasks/<rollout-slug>.md`')],
+    ['append', mutate(execute, 'only failures not yet listed are appended as new lines', 'append the failure')],
     ['followup-fm', mutate(execute, followonRaw, followonRaw.replace(/\n\s*priority: normal/, ''))],
     ['resolve', mutate(execute, gSub[0] + '\n', '')],
     ['log', mutate(execute, logRaw, logRaw.replace(/,? left open \([^)]*\)/, ''))],
   ]
+  const covered = new Set(cases.map(([k]) => k))
+  const families = ['order', 'flags', 'ambiguous', 'mapping', 'leftopen', 'wholeline', 'already', 'empty', 'failure',
+    'followup-name', 'rerun-path', 'append', 'followup-fm', 'resolve', 'log']
+  assert.deepEqual(families.filter((f) => !covered.has(f)), [], 'a check family has no control')
   for (const [want, text] of cases) assert.deepEqual(checkCeremony(text), [want], `control ${want}`)
 })
 
@@ -218,6 +256,9 @@ test('rollout template Post-rollout: closing phases comes first, with the same f
   assert.ok(step.includes('phase-close-followup-<rollout-slug>'), 'template names another follow-on')
   assert.ok(/--kinds phase --apply/.test(step), 'template drops --kinds phase --apply')
   assert.ok(/resolved/.test(step) && /set it done/.test(step), 'template drops the resolve-then-done rule')
+  assert.ok(step.includes('already closed'), 'template drops the already closed outcome')
+  assert.ok(step.includes('`Work/Tasks/Archive/Rollouts/<rollout-slug>.md`'), 'template re-run points at the pre-move path')
+  assert.ok(step.includes('`still failing <date>`') && /never a second line/.test(step), 'template drops the in-place still failing rule')
 })
 
 // ---- fixture ------------------------------------------------------------------------------------
@@ -318,10 +359,30 @@ const norm = (s, v) => s.split(v).join('<V>')
 
 // ---- classify: the bullet's mapping + precedence, test-side ------------------------------------
 
-function classify(stdout, slug, touchedNs) {
+// A touched phase's note already at `status: done`: Work/Phases root first, then Work/Phases/Archive/**.
+function phaseNoteDone(vault, slug, n) {
+  if (!vault) return false
+  const prefix = `${slug}-p${n}-`
+  const find = (dir, deep) => {
+    if (!fs.existsSync(dir)) return []
+    return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) return deep ? find(p, true) : []
+      return e.name.startsWith(prefix) && e.name.endsWith('.md') ? [p] : []
+    })
+  }
+  const P = path.join(vault, 'Work/Phases')
+  return [...find(P, false), ...find(path.join(P, 'Archive'), true)].some((f) => {
+    const m = fs.readFileSync(f, 'utf8').match(/^---\n([\s\S]*?)\n---/)
+    return !!m && /^status: done\s*$/m.test(m[1])
+  })
+}
+
+// `r` is one reconcile-project run ({code, stdout}); `vault` is where its phase notes live.
+function classify(r, slug, touchedNs, vault) {
   const sections = {}
   let cur = null
-  for (const l of stdout.split('\n')) {
+  for (const l of r.stdout.split('\n')) {
     const h = l.match(/^(Unambiguous|Ambiguous|Skipped|Written|Errors) \(\d+\)$/)
     if (h) { cur = h[1]; sections[cur] = []; continue }
     const it = l.match(/^ {2}- phase (\S+?)(:| skipped:| not written:)/)
@@ -330,16 +391,18 @@ function classify(stdout, slug, touchedNs) {
   const numOf = (stem) => touchedNs.find((n) => stem.startsWith(`${slug}-p${n}-`))
   const hit = (sec) => new Set((sections[sec] || []).map(numOf).filter((n) => n !== undefined))
   const [W, A, E] = [hit('Written'), hit('Ambiguous'), hit('Errors')]
+  const wholeLine = r.code !== 0 && !('Errors' in sections) // exit 2 or a crash: no sections printed
   const out = {}
   for (const n of touchedNs) {
-    out[n] = W.has(n) ? 'closed' : A.has(n) ? 'ambiguous' : E.has(n) ? 'failed' : 'left open'
+    out[n] = W.has(n) ? 'closed' : A.has(n) ? 'ambiguous' : E.has(n) || wholeLine ? 'failed'
+      : phaseNoteDone(vault, slug, n) ? 'already closed' : 'left open'
   }
   return out
 }
 
 test('classify: the literal <slug>-p<N>- prefix keeps -p10- from closing -p1-', () => {
   const stdout = 'Written (1)\n  - phase demo-p10-delta: status: done, completed: 2026-09-27\nErrors (0)\n'
-  assert.deepEqual(classify(stdout, 'demo', [1]), { 1: 'left open' })
+  assert.deepEqual(classify({ code: 0, stdout }, 'demo', [1]), { 1: 'left open' })
 })
 
 // ---- behaviour ----------------------------------------------------------------------------------
@@ -370,11 +433,11 @@ function assertCeremonyResult(v, before, c) {
   }
   assert.ok(c.runs.other.stdout.split('\n').includes('  - phase other-p4-x: status: done, completed: 2026-09-27'),
     c.runs.other.stdout)
-  assert.deepEqual(classify(c.runs.demo.stdout, 'demo', c.runs.demo.touched), { 1: 'closed', 2: 'left open', 5: 'ambiguous' })
-  assert.deepEqual(classify(c.runs.other.stdout, 'other', c.runs.other.touched), { 4: 'closed' })
+  assert.deepEqual(classify(c.runs.demo, 'demo', c.runs.demo.touched, v), { 1: 'closed', 2: 'left open', 5: 'ambiguous' })
+  assert.deepEqual(classify(c.runs.other, 'other', c.runs.other.touched, v), { 4: 'closed' })
 }
 
-test('ceremony closes exactly the touched finished phases; a re-run is a byte-for-byte no-op', () => {
+test('ceremony closes exactly the touched finished phases; a re-run is a byte-for-byte no-op that reads them already closed', () => {
   const v = buildVault()
   const before = manifest(v)
   const c = ceremony(v)
@@ -384,9 +447,33 @@ test('ceremony closes exactly the touched finished phases; a re-run is a byte-fo
   const again = ceremony(v)
   assert.deepEqual(manifest(v), mid, 'second run wrote something')
   for (const r of Object.values(again.runs)) assert.equal(r.code, 0, r.stdout + r.stderr)
-  assert.deepEqual(classify(again.runs.demo.stdout, 'demo', again.runs.demo.touched),
-    { 1: 'left open', 2: 'left open', 5: 'ambiguous' })
-  assert.deepEqual(classify(again.runs.other.stdout, 'other', again.runs.other.touched), { 4: 'left open' })
+  assert.deepEqual(classify(again.runs.demo, 'demo', again.runs.demo.touched, v),
+    { 1: 'already closed', 2: 'left open', 5: 'ambiguous' })
+  assert.deepEqual(classify(again.runs.other, 'other', again.runs.other.touched, v), { 4: 'already closed' })
+})
+
+test('a resumed ceremony reads a phase swept to Phases/Archive, or closed by hand, as already closed', () => {
+  const v = buildVault()
+  ceremony(v)
+  const P = path.join(v, 'Work/Phases')
+  fs.mkdirSync(path.join(P, 'Archive/2026'), { recursive: true })
+  fs.renameSync(path.join(P, 'demo-p1-alpha.md'), path.join(P, 'Archive/2026/demo-p1-alpha.md'))
+  const p2 = path.join(P, 'demo-p2-beta.md')
+  fs.writeFileSync(p2, fs.readFileSync(p2, 'utf8').replace('status: open', 'status: done'))
+  const again = ceremony(v)
+  for (const r of Object.values(again.runs)) assert.equal(r.code, 0, r.stdout + r.stderr)
+  assert.deepEqual(classify(again.runs.demo, 'demo', again.runs.demo.touched, v),
+    { 1: 'already closed', 2: 'already closed', 5: 'ambiguous' })
+})
+
+test('a whole-line failure (exit 2, no sections printed) reads every phase on the line as failed', () => {
+  const v = fs.mkdtempSync(path.join(os.tmpdir(), 'phase-close-nowork-'))
+  tmps.push(v)
+  const r = close(v, '--project demo --phases 1,2,5')
+  assert.equal(r.code, 2, r.stdout + r.stderr)
+  assert.equal(r.stdout, '')
+  assert.match(r.stderr, /no Work\/ under --vault/)
+  assert.deepEqual(classify(r, 'demo', [1, 2, 5], v), { 1: 'failed', 2: 'failed', 5: 'failed' })
 })
 
 test('positive control: unscoped, the fixture really does close p3 and p10 (so scoping kept them open)', () => {
@@ -394,7 +481,7 @@ test('positive control: unscoped, the fixture really does close p3 and p10 (so s
   const r = run(['python3', path.join(root, 'skills/_shared/scripts/reconcile-project.py'), '--project', 'demo',
     '--vault', v, '--phases', '1,2,3,5,10', '--kinds', 'phase', '--apply', '--today', TODAY, '--no-gh'])
   assert.equal(r.code, 0, r.stdout + r.stderr)
-  assert.deepEqual(classify(r.stdout, 'demo', [1, 2, 3, 5, 10]),
+  assert.deepEqual(classify(r, 'demo', [1, 2, 3, 5, 10], v),
     { 1: 'closed', 2: 'left open', 3: 'closed', 5: 'ambiguous', 10: 'closed' })
 })
 
@@ -408,6 +495,16 @@ test('touched-phases: a rollout with only loose tasks prints nothing and exits 0
   const t = touched(v, loose)
   assert.equal(t.code, 0, t.stderr)
   assert.equal(t.stdout, '')
+})
+
+test('touched-phases: the documented re-run path (rollout already archived) prints the same lines', () => {
+  const v = buildVault()
+  const moved = path.join(v, 'Work/Tasks/Archive/Rollouts', `${ROLLOUT}.md`)
+  fs.mkdirSync(path.dirname(moved), { recursive: true })
+  fs.renameSync(rolloutPath(v), moved)
+  const t = touched(v, moved)
+  assert.equal(t.code, 0, t.stderr)
+  assert.equal(t.stdout, '--project demo --phases 1,2,5\n--project other --phases 4\n')
 })
 
 test('touched-phases: a missing rollout note exits 1 with ERROR on stderr', () => {
@@ -428,7 +525,8 @@ test('a phase write that fails exits 1 with the Errors line shape the bullet map
   fs.chmodSync(p1, 0o644)
   assert.equal(r.code, 1, r.stdout + r.stderr)
   assert.ok(r.stdout.split('\n').some((l) => l.startsWith('  - phase demo-p1-alpha not written: ')), r.stdout)
-  assert.equal(classify(r.stdout, 'demo', [1, 2, 5])[1], 'failed')
+  // exit 1 still printed its sections, so only the phase under Errors fails; its siblings keep their outcome.
+  assert.deepEqual(classify(r, 'demo', [1, 2, 5], v), { 1: 'failed', 2: 'left open', 5: 'ambiguous' })
 })
 
 test('the documented phase-close follow-on note is inert to both commands', () => {
