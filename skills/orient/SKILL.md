@@ -75,9 +75,14 @@ project roots):
 
 - **Next-action slots, first** (estate ADR 0008, decision 7): each project
   note's `next_task:` and that task's `next_action:` (its title when the
-  line is blank). A link to a task that is done, merged, dropped, archived
-  or missing is a **dead link** and reads as a blank slot. The slot is the
-  project's standing answer; the rest of the sweep is weighed against it.
+  line is blank), read with
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py read <project>…`
+  — one `slot <project> live | blank | dead:<reason> <task> <line>` row
+  each. A link to a task that is done, merged, dropped, archived (under an
+  `Archive/` folder or tagged `archived`) or missing is a **dead link** and
+  reads as a blank slot; the script applies that rule, never judge it by
+  eye. The slot is the project's standing answer; the rest of the sweep is
+  weighed against it.
 - **Vault**: the area note + every sub-project note (a note whose
   frontmatter `tags:` includes `project`, never a reference, garden or
   README note) under the vault folder `Work/Projects/<Folder>/`, at any
@@ -127,12 +132,17 @@ almost nothing is parallel-safe, recommend Hands-on):
 ### 5. Route
 
 - **The slot write** (fill-blank only — estate ADR 0008 decision 4): in every
-  mode but Report-only, when the recommendation is a task note, set
-  `next_task: "[[<task>]]"` on each project note it links whose slot is
-  blank (a dead link counts as blank), and that task's `next_action:` only
-  if it is blank (grain rule: `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md`
-  § 4b). A set slot is never overwritten — only a set-down or Lachy does
-  that; the recommendation stays a proposal against it.
+  mode but Report-only or a dry run, when the recommendation is a task note
+  that stays open, run
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py fill <task> [--action '<line>']`.
+  It sets `next_task:` on each project note the task links whose slot is
+  blank (a dead link counts as blank), with task-writer § 4b's targets and
+  skips, and the task's `next_action:` only if it is blank (grain rule:
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 4b). A set slot is
+  never overwritten — only a set-down or Lachy does that; the
+  recommendation stays a proposal against it. Skip the write when Hands-on
+  picks the task up through `open`'s pickup: that completes a capture, so
+  the pointer would be dead the moment it landed.
 - **Report-only** → done, no writes (the slot write included).
 - **Hands-on** (and the focus half of Mixed) → if the item has a THREAD.md or
   capture task, run `open`'s pickup logic; else follow the task note's
@@ -235,7 +245,7 @@ lightweight version of this.
 - **Do not substitute another harness or account.** Native child dispatch is the
   default; absent capabilities are reported instead of shelling out to a model.
 - **Don't re-batch a task with a recent `dispatched:` stamp**, and don't stamp
-  anything in Report-only or dry runs.
+  or write anything — the slot write included — in Report-only or dry runs.
 - **Don't recommend more than one focus item**, and don't pad the audit —
   headline, balls in the air, one recommendation, then the steering menu.
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s

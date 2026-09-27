@@ -78,6 +78,7 @@ Runs `thread:close`'s flow as written, mid-session, without ending the thread.
 
 - Thread identification comes first and may ask: close § Identify the active thread's rung-2 question (several matches, none in the CWD's repo) and its rung-4 offer to create a thread both happen before the flow starts.
 - Inside the flow every save is autonomous per ADR 0011: the thread update, auto-memory, knowledge and every commit, a repo thread's THREAD.md included (close step 7.1, with `save` in place of `close-out` in its commit message). Step 6's vault-task menu is the only question.
+- Close sub-step 7.6's set-down write does not run: a save sets nothing down, so neither next-action field changes (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 4b).
 - `state:` stays unchanged, and save never sets `state: done` — the close row it follows (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state) allows `done` when Lachy says the thread is finished, but that is `thread:close`'s to write.
 - In place of close's banner the last line is `Thread saved — session continues.`
 

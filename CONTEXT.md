@@ -89,18 +89,23 @@ through time, from attention to merged PRs. Terms only — no implementation.
   marked done, the handoff doc consumed: the capture's job ends the moment the
   thread is live again.
 - **Set-down** — any route that puts a thread's work down: `stash`, `defer`,
-  or `close` when the thread has a concrete next task. The only writer that
-  overwrites the two next-action fields; the most recent set-down wins.
+  or `close` when the thread has a concrete next task (`/thread:open save` is
+  not one). The only agent writer that overwrites the two next-action fields;
+  the most recent set-down wins, and Lachy may edit either field any time.
   Defined estate-wide in `~/repos/workspaces/_shared/CONTEXT.md` § Next action
   (estate ADR 0008). _Avoid_: park (a project status), save.
-- **Next action** — a task's `next_action:`: one line, verb-first, one
-  physical action. A set-down takes it from the resume prompt's `Next move`.
+- **Next action** — a task's `next_action:` (estate ADR 0008): one line,
+  verb-first, one physical action. A set-down takes it from the resume
+  prompt's `Next move`, or close from the next step it writes into THREAD.md.
   _Avoid_: next step (vague), todo.
-- **Next task** — a project's `next_task:`: one wikilink naming the task that
-  is up; the project shows that task's next action and holds no text of its
-  own. A set-down points it at its capture; `orient` fills it only when blank.
-  A link to a done, merged, dropped, archived or missing task is a **dead link**:
-  read as blank everywhere, never rewritten — pickup never clears it. _Avoid_: up next, focus task.
+- **Next task** — a project note's `next_task:` (estate ADR 0008): one
+  wikilink naming the task that is up; the project shows that task's next
+  action and holds no text of its own. A set-down points it at its task
+  (stash and defer: the capture; close: its concrete next task); `orient`
+  fills it only when blank. Area notes carry none. A link to a done, merged,
+  dropped, archived or missing task is a **dead link**: read as blank
+  everywhere, and no sweep or pickup clears it — it stays until the next
+  set-down, a fill-blank writer or Lachy replaces it. _Avoid_: up next, focus task.
 
 ## Memory capture (close-side)
 
