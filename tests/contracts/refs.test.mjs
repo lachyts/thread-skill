@@ -23,13 +23,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { root, walk } from '../lib/contract-text.mjs'
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8')
-const walk = (d) => fs.readdirSync(path.join(root, d), { withFileTypes: true })
-  .flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : [`${d}/${e.name}`]))
-  .sort()
 
 // Qualifiers that mark an ADR number as another repo's (compared case-sensitively).
 // 'estate'/'Estate' is the workspaces repo's _shared/docs/adr/ (estate ADR 0008 is not this repo's 0008).
