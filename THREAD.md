@@ -10,6 +10,16 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-09-27 (late evening): the P10 rollout is done. p10-1, p10-2 and p10-5 are merged; phase 10 stays open for p10-3 and p10-4.**
+- **Landed:** `[[thread-skill-rollout-2026-09-27]]` in 2 waves over 2h 9m, continuous auto-merge, all on Opus:
+  - #25: schedule archives a superseded rollout (`4033894`)
+  - #27: the shared reconcile step, `skills/_shared/scripts/reconcile-project.py` (`5ec1e12`)
+  - #28: execute's ceremony closes finished phases (`091d85f`)
+  - No blocks, escalations or gates. Each task took 2–3 plan rounds and 2 review rounds. The source of truth is the archived rollout note's § Completion log (`Work/Tasks/Archive/Rollouts/`).
+- **First live run of the new ceremony step:** the lead ran it from merged master (the loaded plugin text predates #28). `touched-phases` printed `--project thread-skill --phases 10`, and `--apply` wrote nothing. That is correct: p10-3 and p10-4 are open.
+- **Dry run against the real vault:** Chorus shows 2 unambiguous items, phase `chorus-p23` and the misfiled `chorus-rollout-2026-09-21` (p10-5's own incident). Thread Skill is clean. Nothing was applied; checking the result is [[thread-skill-reconcile-step-live-acceptance]].
+- **Not yet live:** `~/repos/tools/thread-skill` is still at `daa1797`, so the plugin is still 2.7.1 without P10. The release is [[thread-skill-release-reconcile-step]].
+
 **2026-09-27 (evening): the safe-point hook is deleted, P9/P10 are regathered, and the P10 rollout is running from the clone.**
 - **Orient → gather → grill-with-docs** on two of Lachy's issues. First, the safe-point tripwire kept forcing handoffs, including right after a close. Second, finished phases and tasks never close: an audit found 11 of 17 Chorus phase notes open with nothing left in them.
 - **The hook is gone** (p9-1, done). Two research passes, one on compaction vs handoff and one on whether a tripwire is worth having at all, led Lachy to delete it outright. Replacing it: a `ctx %` statusline segment, native auto-compact, and loop round caps where the loops run. The three sibling safe-point tasks were dropped. Commits: workspaces `29ca886` (pushed) and `~/.claude` `8bc13eb` (the settings registrations; not pushed). Its fresh-review is still pending (§ Open questions).
@@ -481,6 +491,7 @@ scheduled 2026-07-15.
 - **The fresh-review of workspaces `29ca886` (the hook deletion) hasn't run.** The engine binds to the session's cwd, and this session was in thread-skill. It needs a session launched in `~/repos/workspaces`.
 - **p10-3 (orient and gather) and p10-4 (close) wait for `feat/next-action-set-downs`** (worktree `thread-skill-wt-next-action`). It has no PR yet and its review handoff doc is pending. It edits orient, close and the task writer.
 - **p9-4 is unblocked** (handoff docs have one writer, and `next` recommends compact). It isn't in the running rollout; schedule it with p10-3 and p10-4.
+- **`tier_capped:` means something else under the Opus lock** (seen 2026-09-27). With `max_tier: opus` from the AGENTS.md lock (ADR 0024), every opus task whose first plan is rejected gets `tier_capped: plan`: all three P10 tasks did. ADR 0016 defines the marker as "capped by quota, re-dispatch uncapped once quota returns", but the lock never lifts, so the marker is now permanent noise on most cross-cutting tasks. This joins the deferred tier-ceiling gap 1 below (status and repair ignore the marker). Decide whether a lock-driven cap stamps anything.
 - **`check-agent-parity.py` exits 1** on `~/.codex/hooks.json` ("direct Codex must use native Stop notification"). Seen 2026-09-27 and unrelated to the hook deletion.
 
 - **`${CLAUDE_PLUGIN_ROOT}` in read-as-file text stays literal** (review e4fe2a2/a0bb12 #1, #6; predates
@@ -757,6 +768,18 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+Read /Users/lachlants/repos/tools/thread-skill-rollout/docs/handoffs/2026-09-27-p10-release-and-acceptance.md first (pending handoff, 2026-09-27; on branch `docs/close-2026-09-27-p10-rollout`).
+
+**Superseded by the handoff above (kept for the record):**
+**Now (from 2026-09-27, late evening): the P10 rollout is done and archived. Nothing is running.**
+- **Next:**
+  1. Release P10: [[thread-skill-release-reconcile-step]]. Fast-forward the live checkout, bump the manifests by PR, update the plugin, then run `make release-check`.
+  2. [[thread-skill-reconcile-step-live-acceptance]]: check the Chorus dry run against the drift audit, then decide on `--apply`.
+  3. Land `feat/next-action-set-downs`, then schedule p10-3, p10-4 and p9-4 together.
+  4. Still owed: the fresh-review of workspaces `29ca886`; tag 2.7.1; `git remote set-head origin --auto`.
+- **This close is unpushed branch `docs/close-2026-09-27-p10-rollout`** in `~/repos/tools/thread-skill-rollout` (master is protected; p5-4). Push it and open a PR, or fold it into the release PR.
+
+**Superseded 2026-09-27 (late evening):**
 **Now (from 2026-09-27, evening): P10's first rollout is running from the clone. This checkout has nothing in flight.**
 - **Rollout:** `[[thread-skill-rollout-2026-09-27]]` is conducted from `~/repos/tools/thread-skill-rollout`. Check it with `/thread:status [[thread-skill-rollout-2026-09-27]]`. Its completion ceremony lists the follow-ups (schedule p10-3/p10-4, a live reconcile dry run, a release).
 - **Next:**
@@ -871,6 +894,8 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-27 (late evening, second close): handed off the next pieces (land the close-out branch, P10 release, live acceptance, next rollout) as `docs/handoffs/2026-09-27-p10-release-and-acceptance.md` on `docs/close-2026-09-27-p10-rollout`. The clone was left on that branch so the doc's path resolves.
+- 2026-09-27 (late evening close): rollout lead for `[[thread-skill-rollout-2026-09-27]]`. Wave 1 (#25, #27) and wave 2 (#28) merged in 2h 9m. The ceremony ran #28's new phase-close step (phase 10 left open) and filed two follow-ons, live acceptance and release. The rollout note was archived (vault `b2a6137b`). This close is on branch `docs/close-2026-09-27-p10-rollout`.
 - 2026-09-27 (evening close): `/thread:orient` → research (Chorus drift audit; compact vs handoff; is a tripwire worth it) → `/thread:gather` with grill-with-docs → P9 respec + P10, ADR 0026 (#24) → `/thread:schedule` P10 wave 1–2 → p9-1 done (hook deleted, `ctx %` statusline, memory superseded). Lachy launched the rollout from the clone.
 - 2026-09-27 (close): p5-2 on PR #23 (2.7.1). Snippets moved to scripts, the lookup was kept inline without `$N`, and the no-positional contract was added. Live probe clean on CLI 2.1.283. Two fresh-review rounds; the round-2 ledger STOP led to a revert to the root. Consumed handoff doc and four consumed review docs deleted.
 - 2026-09-26 (close): handed p5-2 to a fresh session (consumed and in flight on `p5-2/snippets-to-scripts`). The GTD next-action grill went to ops-workspace. THREAD.md was left uncommitted because this shared checkout sits on the peer's branch; its close carries it.
