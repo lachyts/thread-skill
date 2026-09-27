@@ -61,11 +61,16 @@ x = json.load(open(sys.argv[1]))[sys.argv[2]]
 print("\n".join(x) if isinstance(x, list) else x)' "$tmp/out" "$1"; }
 lines() { printf '%s\n' "$@"; }
 
-U_ALL=$(lines "phase demo-p1-alpha" "phase demo-p4-merged" "rollout demo-rollout-2025-12-01" "rollout demo-rollout-2025-12-02" \
-  "task demo-p4-2-merged" "task demo-p8-1-merged" "task demo-p8-10-shortid" "task demo-p8-14-escalias" "task demo-p8-3-bullet" | LC_ALL=C sort)
-A_ALL=$(lines "phase demo-p5-partial" "phase demo-p6-archived-open" "phase demo-p9-review" "rollout demo-rollout-2025-10-01" \
-  "task demo-p12-1-log" "task demo-p5-2-partial" "task demo-p8-11-closed" "task demo-p8-12-prose" "task demo-p8-13-pointer" \
-  "task demo-p8-4-followup" "task demo-p8-5-silent" "task demo-p8-6-owner" "task demo-p8-7-nonurl" "task demo-p8-9-partial-log" | LC_ALL=C sort)
+U_ALL=$(lines "phase demo-p1-alpha" "phase demo-p18-single" "phase demo-p4-merged" "rollout demo-rollout-2025-12-01" \
+  "rollout demo-rollout-2025-12-02" "task demo-p4-2-merged" "task demo-p8-1-merged" "task demo-p8-10-shortid" \
+  "task demo-p8-14-escalias" "task demo-p8-23-fenced" "task demo-p8-3-bullet" | LC_ALL=C sort)
+A_ALL=$(lines "phase demo-p17-broken" "phase demo-p5-partial" "phase demo-p6-archived-open" "phase demo-p9-review" \
+  "rollout demo-rollout-2025-10-01" "task demo-p12-1-log" "task demo-p16-2-remain" "task demo-p5-2-partial" \
+  "task demo-p8-11-closed" "task demo-p8-12-prose" "task demo-p8-13-pointer" "task demo-p8-15-notmerged" \
+  "task demo-p8-16-cancelled" "task demo-p8-17-remaining" "task demo-p8-18-outstanding" "task demo-p8-19-todo" \
+  "task demo-p8-20-boldopen" "task demo-p8-21-onlyitem" "task demo-p8-22-unchecked" "task demo-p8-24-broken" \
+  "task demo-p8-4-followup" "task demo-p8-5-silent" "task demo-p8-6-owner" "task demo-p8-7-nonurl" \
+  "task demo-p8-9-partial-log" | LC_ALL=C sort)
 
 
 # ---- 1. dry run --------------------------------------------------------------------------------------
@@ -87,21 +92,41 @@ has "$(field ambiguous demo-p12-1-log reason)" "does not record it" "a -v2 succe
 has "$(field ambiguous demo-p8-7-nonurl reason)" "not a URL" "a bare-number pr: is ambiguous"
 has "$(field ambiguous demo-p6-archived-open reason)" "demo-p6-1-archived-open" "archived-but-open names the task"
 has "$(field ambiguous demo-rollout-2025-10-01 reason)" "destination exists" "a clashing rollout move is ambiguous"
+# Partial-landing wordings beyond "Open here", each on a merged-PR task (and one via a phase's task).
+has "$(field ambiguous demo-p8-17-remaining reason)" '"Remaining"' "partial landing: Remaining: items 1-2"
+has "$(field ambiguous demo-p8-18-outstanding reason)" '"outstanding"' "partial landing: items are outstanding"
+has "$(field ambiguous demo-p8-19-todo reason)" '"TODO"' "partial landing: TODO"
+has "$(field ambiguous demo-p8-20-boldopen reason)" '"**Open:**"' "partial landing: a bold Open: label"
+has "$(field ambiguous demo-p8-21-onlyitem reason)" '"Only item 0"' "partial landing: only item 0 landed"
+has "$(field ambiguous demo-p16-2-remain reason)" '"remain"' "partial landing: items remain"
+has "$(field ambiguous demo-p8-22-unchecked reason)" "unchecked - [ ] item" "an unchecked - [ ] item is ambiguous"
+has "$(field unambiguous demo-p8-23-fenced reason)" "is MERGED" "a partial marker and - [ ] inside a fence are stripped"
+has "$(field ambiguous demo-p8-24-broken reason)" "does not parse" "an unparseable task note is ambiguous"
+has "$(field ambiguous demo-p17-broken reason)" "does not parse" "an unparseable phase note is ambiguous"
+# Completion-log rows whose outcome is a non-landing.
+has "$(field ambiguous demo-p8-15-notmerged reason)" "not merged" "a not-merged log row quotes the marker"
+has "$(field ambiguous demo-p8-16-cancelled reason)" "cancelled" "a cancelled log bullet quotes the marker"
+ok "$(field unambiguous demo-p18-single reason)" "all 1 task landed" "one landed task reads in the singular"
+has "$(field unambiguous demo-p1-alpha reason)" "all 3 tasks landed" "several landed tasks read in the plural"
 ok "$(field unambiguous demo-p4-merged depends_on)" "demo-p4-2-merged" "demo-p4 depends on its merged task"
 ok "$(field unambiguous demo-p1-alpha depends_on)" "" "demo-p1 depends on nothing"
 has "$(strs skipped)" "demo-p8-8-gh404" "a gh error is skipped, not evidence"
 ok "$(strs gh)" "ok" "gh reported ok"
 ok "$(strs applied)" "False" "applied is false"
+# demo-p15-noroll: its task is at review with no rollout: a human step, a hold, never "run /thread:repair".
+# demo-p16-mixed: one parked task and one ambiguous task: the hold wins, resolving p16-2 could never close it.
+# demo-cmux-1-merged: a merged-PR `demo-cmux-*` task shares the slug prefix but is not `demo-p<N>-*`.
 for s in demo-p2-empty demo-p3-openwork demo-p10-trap demo-p11-review-live demo-p13-hold demo-p8-2-open-pr demo-p7-done \
-         demo-p14-archived demo-p8-8-gh404 demo-rollout-2025-11-01 demo-rollout-2025-09-01; do
+         demo-p14-archived demo-p8-8-gh404 demo-rollout-2025-11-01 demo-rollout-2025-09-01 \
+         demo-p15-noroll demo-p15-1-review demo-p16-mixed demo-cmux-1-merged; do
   case "$(items unambiguous; items ambiguous)" in *" $s"*) ok listed absent "$s is in neither list";; *) ok absent absent "$s is in neither list";; esac
 done
 ok "$(manifest "$v")" "$before" "dry run (json) writes nothing"
 rp
 ok "$rc" 0 "text dry run exits 0"
 has "$out" "dry run: nothing written; pass --apply" "text header says dry run"
-has "$out" "Unambiguous (9)" "text lists the unambiguous block"
-has "$out" "Ambiguous (14)" "text lists the ambiguous block"
+has "$out" "Unambiguous (11)" "text lists the unambiguous block"
+has "$out" "Ambiguous (25)" "text lists the ambiguous block"
 ok "$(manifest "$v")" "$before" "dry run (text) writes nothing"
 
 # The short id is bounded: p8-1 never matches a `| p8-10 |` row; the escaped alias and a -v2 successor.
@@ -113,6 +138,19 @@ print(bool(m.find_mentions("demo-p8-1-merged", "demo", row)), bool(m.find_mentio
       bool(m.find_mentions("demo-p12-1-log", "demo", "- [[demo-p12-1-log-v2]] → #20")))' "$script" 2>&1)
 ok "$m" "False True True False" "mention matching: short-id bound, escaped alias, successor stem"
 
+# The partial-landing and negative-marker patterns catch each non-landing wording, and miss plain landed prose.
+m=$(python3 -c 'import importlib.util, sys
+s = importlib.util.spec_from_file_location("rp", sys.argv[1]); m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+part = ["Remaining: items 1-2.", "Items 1\u20132 remain.", "Items 1-2 are outstanding.", "item 1 not yet started",
+        "TODO: items 1-2", "Part 2 still to do.", "Only item 0 landed.", "**Open:** items 1\u20132", "Open here: x", "Open: item 2"]
+neg = ["| 3 | [[t]] | #12 | not merged |", "| abandoned |", "\u2192 #12 (cancelled)", "not dispatched (see #12)",
+       "| skipped |", "unmerged", "| withdrawn |", "canceled"]
+clean = ["Its PR merged; nobody ran mark-done.", "Reopened: then merged as #4.", "Landed as #7, profiled.", "opened the PR"]
+print(" ".join(t for t in part if not m.PARTIAL_RE.search(t)) or "all-partial",
+      "|", " ".join(t for t in neg if not m.NEGATIVE_RE.search(t)) or "all-negative",
+      "|", " ".join(t for t in clean if m.PARTIAL_RE.search(t) or m.NEGATIVE_RE.search(t)) or "all-clean")' "$script" 2>&1)
+ok "$m" "all-partial | all-negative | all-clean" "partial and negative patterns: every wording hits, landed prose does not"
+
 # ---- 2. --apply --------------------------------------------------------------------------------------
 echo "# 2. --apply"
 rp --apply --json
@@ -120,14 +158,14 @@ ok "$rc" 0 "apply exits 0"
 ok "$(strs applied)" "True" "applied is true"
 after=$(manifest "$v")
 changed=$(printf '%s\n%s\n' "$before" "$after" | LC_ALL=C sort | uniq -u | sed 's/^[0-9a-f]*  //' | LC_ALL=C sort -u | tr '\n' ' ')
-exp="./Work/Phases/demo-p1-alpha.md ./Work/Phases/demo-p4-merged.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-01.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-02.md ./Work/Tasks/Archive/demo-rollout-2025-12-01.md ./Work/Tasks/demo-p4-2-merged.md ./Work/Tasks/demo-p8-1-merged.md ./Work/Tasks/demo-p8-10-shortid.md ./Work/Tasks/demo-p8-14-escalias.md ./Work/Tasks/demo-p8-3-bullet.md ./Work/Tasks/demo-rollout-2025-12-02.md "
+exp="./Work/Phases/demo-p1-alpha.md ./Work/Phases/demo-p18-single.md ./Work/Phases/demo-p4-merged.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-01.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-02.md ./Work/Tasks/Archive/demo-rollout-2025-12-01.md ./Work/Tasks/demo-p4-2-merged.md ./Work/Tasks/demo-p8-1-merged.md ./Work/Tasks/demo-p8-10-shortid.md ./Work/Tasks/demo-p8-14-escalias.md ./Work/Tasks/demo-p8-23-fenced.md ./Work/Tasks/demo-p8-3-bullet.md ./Work/Tasks/demo-rollout-2025-12-02.md "
 ok "$changed" "$exp" "apply changed exactly the unambiguous file set"
 F=$fixture/Work
 want=$(awk '/^status: open$/ {print "status: done"; print "completed: 2026-09-27"; next} {print}' "$F/Phases/demo-p1-alpha.md")
 ok "$(cat "$v/Work/Phases/demo-p1-alpha.md")" "$want" "demo-p1: status done, completed inserted directly after status (before owner)"
 want=$(awk '/^status: open$/ {print "status: done"; next} /^completed:[[:space:]]*$/ {print "completed: 2026-09-27"; next} {print}' "$F/Phases/demo-p4-merged.md")
 ok "$(cat "$v/Work/Phases/demo-p4-merged.md")" "$want" "demo-p4: the empty completed: line is filled in place"
-for t in demo-p4-2-merged demo-p8-1-merged demo-p8-3-bullet demo-p8-10-shortid demo-p8-14-escalias; do
+for t in demo-p4-2-merged demo-p8-1-merged demo-p8-3-bullet demo-p8-10-shortid demo-p8-14-escalias demo-p8-23-fenced; do
   want=$(awk '/^status: (open|in_progress)$/ {print "status: done"; next} {print}' "$F/Tasks/$t.md")
   ok "$(cat "$v/Work/Tasks/$t.md")" "$want" "$t: only the status line changed"
 done
@@ -159,11 +197,13 @@ for mode in missing disabled; do
   ok "$(strs gh)" "$mode" "gh $mode: reported"
   has "$(strs skipped)" "PR evidence (gh unavailable)" "gh $mode: skipped names PR evidence"
   u=$(items unambiguous)
-  for t in demo-p4-2-merged demo-p8-1-merged demo-p8-11-closed; do
+  for t in demo-p4-2-merged demo-p8-1-merged demo-p8-11-closed demo-p8-23-fenced; do
     case "$u" in *"task $t"*) ok U not-U "gh $mode: $t is not U (a URL pr: is never decided by the log)";; *) ok not-U not-U "gh $mode: $t is not U (a URL pr: is never decided by the log)";; esac
   done
   for t in demo-p8-3-bullet demo-p8-10-shortid demo-p8-14-escalias; do has "$u" "task $t" "gh $mode: $t is still U"; done
   has "$(items ambiguous)" "phase demo-p4-merged" "gh $mode: demo-p4 is ambiguous"
+  # A phase with other open work stays quiet even though one of its in-flight tasks has a PR URL.
+  case "$(items unambiguous; items ambiguous)" in *"phase demo-p16-mixed"*) ok listed absent "gh $mode: demo-p16 (a hold plus an in-flight PR) is in neither list";; *) ok absent absent "gh $mode: demo-p16 (a hold plus an in-flight PR) is in neither list";; esac
 done
 ok "$(manifest "$v")" "$before" "no-gh dry runs write nothing"
 
@@ -180,6 +220,19 @@ has "$(field ambiguous demo-p4-merged reason)" "needs task demo-p4-2-merged clos
 rp --kinds phase --phases 4 --apply --json
 ok "$rc" 0 "--kinds phase --phases 4 --apply exits 0"
 ok "$(manifest "$v")" "$before" "--kinds phase --apply writes no task and no phase"
+# --phases narrows task candidates too, with the default --kinds; rollout detection ignores it.
+rp --phases 8 --json
+ok "$rc" 0 "--phases 8 exits 0"
+t8=$( (items unambiguous; items ambiguous) | grep '^task ')
+ok "$(printf '%s\n' "$t8" | grep -cv '^task demo-p8-')" 0 "--phases 8: every task candidate is demo-p8-*"
+has "$t8" "task demo-p8-1-merged" "--phases 8: lists p8 tasks"
+has "$(items unambiguous)" "rollout demo-rollout-2025-12-02" "--phases 8: rollouts are still listed"
+case "$(items unambiguous; items ambiguous)" in *"phase "*) ok listed absent "--phases 8: no phase listed (there is no p8 phase note)";; *) ok absent absent "--phases 8: no phase listed (there is no p8 phase note)";; esac
+rp --phases 4 --json
+ok "$rc" 0 "--phases 4 exits 0"
+ok "$( (items unambiguous; items ambiguous) | grep '^task ')" "task demo-p4-2-merged" "--phases 4: the only task candidate is demo-p4-2-merged"
+has "$(items unambiguous)" "phase demo-p4-merged" "--phases 4: demo-p4 is U with its task"
+ok "$(manifest "$v")" "$before" "--phases dry runs write nothing"
 
 # ---- 6. usage and dependency errors ------------------------------------------------------------------
 echo "# 6. usage and dependency errors"
@@ -204,7 +257,7 @@ else
   rp --apply --json
   ok "$rc" 1 "a failed dependency exits 1"
   e=$(strs errors)
-  has "$e" "demo-p4-2-merged" "errors name the failed task write"
+  has "$e" "task demo-p4-2-merged not written" "errors name the failed task write"
   has "$e" "phase demo-p4-merged skipped: dependency demo-p4-2-merged" "errors name the skipped phase"
   ok "$(shasum < "$v/Work/Phases/demo-p4-merged.md")" "$(shasum < "$F/Phases/demo-p4-merged.md")" "the skipped phase is byte-identical"
   ok "$(shasum < "$v/Work/Tasks/demo-p4-2-merged.md")" "$(shasum < "$F/Tasks/demo-p4-2-merged.md")" "the failed task is byte-identical"
@@ -234,6 +287,7 @@ else
   rp --kinds rollout --apply --json
   ok "$rc" 1 "a half-failed move exits 1"
   has "$(strs errors)" "demo-rollout-2025-12-02 not moved" "errors name the unmoved rollout"
+  has "$(strs errors)" "(rolled back)" "the error says the half-move was rolled back"
   ok "$(shasum < "$v/Work/Tasks/demo-rollout-2025-12-02.md")" "$(shasum < "$F/Tasks/demo-rollout-2025-12-02.md")" "the source is byte-identical"
   [ -e "$v/Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-02.md" ] && ok duplicate none "rolled back: no copy in Archive/Rollouts" || ok none none "rolled back: no copy in Archive/Rollouts"
   ok "$(shasum 2>/dev/null < "$v/Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-01.md")" "$(shasum < "$F/Tasks/Archive/demo-rollout-2025-12-01.md")" "a writable source still moves"
