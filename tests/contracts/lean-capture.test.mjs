@@ -11,15 +11,8 @@
 // assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { readIf, slice, assertHas, textFiles, lineOf } from '../lib/contract-text.mjs'
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const readIf = (p) => (fs.existsSync(path.join(root, p)) ? fs.readFileSync(path.join(root, p), 'utf8') : null)
-const walk = (d) => fs.readdirSync(path.join(root, d), { withFileTypes: true })
-  .flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : [`${d}/${e.name}`]))
-  .sort()
 
 const WRITER = 'skills/_shared/task-writer.md'
 const SCAN = 'skills/_shared/process-scan.md'
@@ -29,26 +22,6 @@ const DEFER = 'skills/defer/SKILL.md'
 const ORIENT = 'skills/orient/SKILL.md'
 // The project-note set every `repos:` lookup greps: every depth, so nested sub-project notes are seen.
 const PROJECT_GLOB = '~/repos/obsidian/Work/Projects/**'
-
-// The slice of `text` from the line matching `start` to the next line matching `stop` (exclusive), or
-// null. A null `stop` runs to the end of the text.
-function slice(text, start, stop) {
-  if (text == null) return null
-  const lines = text.split('\n')
-  const i = lines.findIndex((l) => start.test(l))
-  if (i < 0) return null
-  const j = stop == null ? -1 : lines.findIndex((l, k) => k > i && stop.test(l))
-  return lines.slice(i, j < 0 ? undefined : j).join('\n')
-}
-
-// Asserts `section` exists, then that it matches each pattern (a string is a substring check).
-function assertHas(section, name, patterns) {
-  assert.ok(section != null, `${name} is missing`)
-  for (const p of patterns) {
-    const ok = typeof p === 'string' ? section.includes(p) : p.test(section)
-    assert.ok(ok, `${name} does not contain ${p}`)
-  }
-}
 
 // The backticked glob after "`repos:` frontmatter across" in `section`, or null.
 function globOf(section) {
@@ -80,10 +53,7 @@ test('task-writer § 5 carries the Lean capture rule', () => {
 })
 
 test('the "10 non-empty lines" ceiling has one home under skills/', () => {
-  const hits = walk('skills')
-    .map((file) => ({ file, text: readIf(file) }))
-    .filter(({ text }) => text != null && !text.includes('\0') && text.includes('10 non-empty lines'))
-    .map(({ file }) => file)
+  const hits = textFiles('skills').filter(({ text }) => text.includes('10 non-empty lines')).map(({ file }) => file)
   assert.deepEqual(hits, [WRITER], `"10 non-empty lines" should occur only in ${WRITER}, found in: ${JSON.stringify(hits)}`)
 })
 
@@ -115,12 +85,12 @@ test('every exit route carries the rule and the offer channel', () => {
   const close = readIf(CLOSE)
   // (a) close's follow-up task row obeys Lean capture.
   const dest = slice(close, /^## Destinations/, /^## (?!Destinations)/)
-  const row = dest == null ? null : (dest.split('\n').find((l) => l.startsWith('| Concrete follow-up actions')) ?? null)
+  const row = lineOf(dest, '| Concrete follow-up actions')
   assertHas(row, `${CLOSE} § Destinations "Concrete follow-up actions" row`, [
     'task-writer.md', /§§ 1 & 4/, /§ 5\b/, 'Lean capture',
   ])
   // (b) close step 8 carries the research-landing offer, for unlanded research only.
-  const step8 = close == null ? null : (close.split('\n').find((l) => /^8\. \*\*Print the "What landed" report/.test(l)) ?? null)
+  const step8 = lineOf(close, /^8\. \*\*Print the "What landed" report/)
   assertHas(step8, `${CLOSE} step 8`, [
     'research-landing offer', /`task-writer\.md` § 5/, 'unlanded', /never for an already-landed digest/,
   ])
@@ -135,7 +105,7 @@ test('every exit route carries the rule and the offer channel', () => {
     const text = readIf(file)
     const write = slice(text, body, /^\d+\. /)
     assertHas(write, `${file} "Write the capture task" step`, ['skills/_shared/task-writer.md', /§ 5\b/])
-    const conf = text == null ? null : (text.split('\n').find((l) => confirm.test(l)) ?? null)
+    const conf = lineOf(text, confirm)
     assert.ok(conf != null, `${file} has no "Confirm per § 7" step`)
   }
 })
@@ -163,9 +133,7 @@ function shallowGlobs(text) {
 }
 
 test('no skill greps a Work/Projects glob that stops short of every depth', () => {
-  const hits = walk('skills')
-    .map((file) => ({ file, text: readIf(file) }))
-    .filter(({ text }) => text != null && !text.includes('\0'))
+  const hits = textFiles('skills')
     .flatMap(({ file, text }) => shallowGlobs(text).map((glob) => `${file}: ${glob}`))
   assert.deepEqual(hits, [], `depth-limited Work/Projects glob (a single-\`*\` segment, no \`**\`) found in: ${JSON.stringify(hits)}`)
 })

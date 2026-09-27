@@ -73,6 +73,15 @@ project roots):
 
 ### 2. Audit (read-only sweep)
 
+- **Next-action slots, first** (estate ADR 0008, decision 7): each project
+  note's `next_task:` and that task's `next_action:` (its title when the
+  line is blank), read with
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py read <project>…`
+  — one `slot <project> live | blank | dead:<reason> <task> <line>` row
+  each. A **dead link** (CONTEXT.md **Next task**) reads as a blank slot;
+  the script decides which links are dead, never judge it by eye. The slot
+  is the project's standing answer; the rest of the sweep is weighed
+  against it.
 - **Vault**: the area note + every sub-project note (a note whose
   frontmatter `tags:` includes `project`, never a reference, garden or
   README note) under the vault folder `Work/Projects/<Folder>/`, at any
@@ -93,11 +102,16 @@ project roots):
 A situational report written for Lachy catching up, not a log:
 
 - **Headline** (1–2 sentences): the state of the project as a whole.
-- **Balls in the air**: per-sub-project one-liners — state, blocker,
-  staleness. Group: active / in-flight (dispatched) / stalled / dormant.
+- **Balls in the air**: per-sub-project one-liners — the slot first
+  (`next: <next_action> ([[<task>]])`, or `No next action`), then state,
+  blocker, staleness. Group: active / in-flight (dispatched) / stalled /
+  dormant.
 - **ONE recommended best use of his time**, with a one-line reason — same
   single-recommendation discipline as `next`. Everything else is context, not
-  competing recommendations.
+  competing recommendations. Frame it as a **proposal against the slot** of
+  the project it belongs to, so the two never read as competing answers:
+  the slot's own task → say they agree; a different item → name the slot and
+  say why this beats it; a blank slot → say the recommendation would fill it.
 
 ### 4. Steer
 
@@ -116,6 +130,17 @@ almost nothing is parallel-safe, recommend Hands-on):
 
 ### 5. Route
 
+- **The slot write** (fill-blank only — estate ADR 0008 decision 4): in every
+  mode but Report-only or a dry run, when the recommendation is a task note
+  that stays open, run
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py fill <task> [--action -]`
+  (the line on stdin, grain rule and targets as
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 4b). It fills only
+  a blank or dead slot and a blank `next_action:`; a set slot is never
+  overwritten — only a set-down or Lachy does that; the recommendation
+  stays a proposal against it. Skip the write when Hands-on
+  picks the task up through `open`'s pickup: that completes a capture, so
+  the pointer would be dead the moment it landed.
 - **Report-only** → done, no writes.
 - **Hands-on** (and the focus half of Mixed) → if the item has a THREAD.md or
   capture task, run `open`'s pickup logic; else follow the task note's
@@ -218,7 +243,7 @@ lightweight version of this.
 - **Do not substitute another harness or account.** Native child dispatch is the
   default; absent capabilities are reported instead of shelling out to a model.
 - **Don't re-batch a task with a recent `dispatched:` stamp**, and don't stamp
-  anything in Report-only or dry runs.
+  or write anything — the slot write included — in Report-only or dry runs.
 - **Don't recommend more than one focus item**, and don't pad the audit —
   headline, balls in the air, one recommendation, then the steering menu.
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s

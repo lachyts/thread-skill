@@ -23,16 +23,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const read = (p) => fs.readFileSync(path.join(root, p), 'utf8')
-const walk = (d) => fs.readdirSync(path.join(root, d), { withFileTypes: true })
-  .flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : [`${d}/${e.name}`]))
-  .sort()
+import { root, walk, read } from '../lib/contract-text.mjs'
 
 // Qualifiers that mark an ADR number as another repo's (compared case-sensitively).
-const FOREIGN_ADR_QUALIFIERS = ['Chorus', 'workspaces']
+// 'estate'/'Estate' is the workspaces repo's _shared/docs/adr/ (estate ADR 0008 is not this repo's 0008).
+const FOREIGN_ADR_QUALIFIERS = ['Chorus', 'workspaces', 'estate', 'Estate']
 
 // External § citations, hand-verified 2026-09-23. [path as cited (or its trailing segment), section].
 const EXTERNAL = [
@@ -43,6 +38,7 @@ const EXTERNAL = [
   ['triage-batching-protocol.md', '6'],
   ['CLAUDE.md', 'Launch profiles'],
   ['~/.agents/skills/method/SKILL.md', 'Which ledger a row goes to'],
+  ['~/repos/workspaces/_shared/CONTEXT.md', 'Next action'],
 ]
 
 // Citations the checker flags that are really broken but live in a file another task owns. Each entry:
@@ -332,7 +328,7 @@ test('control: the matcher rejects known-bad citations and accepts known-good on
     '`_shared/knowledge/triage-batching-protocol.md` §6.4', '`_shared/knowledge/triage-batching-protocol.md` § 6b']) {
     assert.equal(run(bad).length, 1, `expected exactly one violation for: ${bad} → ${JSON.stringify(run(bad))}`)
   }
-  for (const good of ['Chorus ADR 0047', 'workspaces ADR 0003', 'task-writer § 1.4', 'handoff § Handoff document defines',
+  for (const good of ['Chorus ADR 0047', 'workspaces ADR 0003', 'estate ADR 0099', 'Estate ADR 0099', 'task-writer § 1.4', 'handoff § Handoff document defines',
     'close § The handoff owns the continuation has the scan', 'execute SKILL §4.5 step 5',
     '/thread:schedule §4.7', 'CONTEXT.md § Rollout.', 'execute (§8: x',
     // chained runs stop at a sentence end, a shallower list item, another named target, a code-span colon

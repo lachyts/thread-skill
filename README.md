@@ -19,7 +19,8 @@ machine-verifiable in-run) rolls out; everything else runs as scoped sessions.
 > workspaces repo at `~/repos/workspaces` whose `_shared/` holds the note-writer specs, shared threads
 > and the native-workflow exchange, and a Melbourne clock. Read it for the ideas (the execution-fit
 > test, the convergence engine, the handoff lifecycle); expect to adapt paths before running it
-> anywhere else. `make test` is hermetic and runs on any machine with bash, `python3` and `node`.
+> anywhere else. `make test` is hermetic and runs on any machine with bash, `python3` (with PyYAML, which
+> the next-action script reads frontmatter with: `python3 -m pip install pyyaml`) and `node`.
 
 ## Continuity verbs
 
@@ -32,6 +33,8 @@ machine-verifiable in-run) rolls out; everything else runs as scoped sessions.
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
 | `/thread:handoff` | fork now | Write and commit a durable `docs/handoffs/` doc + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop also create a fresh visible sidebar task seeded with it; elsewhere label it a manual handoff. |
 | `/thread:close` | done | Persist to THREAD.md + auto-commit; end-of-thread ritual. |
+
+Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspaces/_shared/docs/adr/0008-next-action-slot.md`): each writes the task's `next_action:` and points the `next_task:` of every project note the task links (area notes skipped) at it, most recent winning — close only when the thread has a concrete next task. `orient` reads that slot first and fills it only when blank. Both go through `skills/_shared/scripts/next-action.py` (`skills/_shared/task-writer.md` § 4b).
 
 ## Rollout verbs
 
@@ -143,8 +146,12 @@ final check that the run wrote nothing into the tree):
   unset, or in-flight rollouts can't resume); `reconcile-wave.test.sh`; `wave-stop-driver.test.sh`;
   `merge-wave.sh --self-test-classify` / `--self-test-base`.
 - **Contracts** — `tests/contracts/*.test.mjs`: manifests agree, skill names and description budgets,
-  `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files, and no SKILL.md body holds a
-  positional `$N` (Claude Code substitutes skill arguments into them; logic that needs one lives in a script).
+  `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files, no SKILL.md body holds a
+  positional `$N` (Claude Code substitutes skill arguments into them; logic that needs one lives in a
+  script), and the next-action set-down write and orient's slot read (`next-action.test.mjs`).
+- **Next-action script** — `tests/next-action.test.mjs`: `next-action.py`'s set-down, fill, read and
+  captures against throwaway vaults — byte-level one-line edits, YAML-safe quoting, both tag forms, the
+  shared dead-link rule, and refusals that write nothing.
 - **Default branch** — `tests/default-branch.test.{mjs,sh}`: `defaultBranch` keeps pre-fix bytes when
   unset, refuses unsafe names, and the resolver in `execute/SKILL.md` § 4 works against fixture remotes.
 - **Release check** — `tests/release-check.test.sh`: the real `make release-check` recipe against a temp

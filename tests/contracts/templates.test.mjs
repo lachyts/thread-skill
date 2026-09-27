@@ -9,15 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const read = (p) => fs.readFileSync(path.join(root, p), 'utf8')
-
-// Recursive walk, repo-relative paths (no fs.globSync: not in every Node this repo runs on).
-const walk = (d) => fs.readdirSync(path.join(root, d), { withFileTypes: true })
-  .flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : [`${d}/${e.name}`]))
-  .sort()
+import { root, walk, read } from '../lib/contract-text.mjs'
 
 const PLACEHOLDER = /\{\{([A-Z][A-Z0-9_]*)\}\}/g
 const DOCUMENTED = /^- `\{\{([A-Z][A-Z0-9_]*)\}\}`/
