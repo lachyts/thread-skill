@@ -10,6 +10,18 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-09-27 (evening): the safe-point hook is deleted, P9/P10 are regathered, and the P10 rollout is running from the clone.**
+- **Orient → gather → grill-with-docs** on two of Lachy's issues. First, the safe-point tripwire kept forcing handoffs, including right after a close. Second, finished phases and tasks never close: an audit found 11 of 17 Chorus phase notes open with nothing left in them.
+- **The hook is gone** (p9-1, done). Two research passes, one on compaction vs handoff and one on whether a tripwire is worth having at all, led Lachy to delete it outright. Replacing it: a `ctx %` statusline segment, native auto-compact, and loop round caps where the loops run. The three sibling safe-point tasks were dropped. Commits: workspaces `29ca886` (pushed) and `~/.claude` `8bc13eb` (the settings registrations; not pushed). Its fresh-review is still pending (§ Open questions).
+- **ADR 0026, finished work closes itself** (PR #24, `daa1797`). It amends ADR 0011. There is one reconcile step. Execute closes the phases it finishes. Orient fixes unambiguous drift on any steer except Report-only, and gather runs the step first. Close flips a task it provably finished, under a three-condition guard. `CONTEXT.md`'s **Drift** now covers project-level drift.
+- **Roadmap:**
+  - P10 (new): p10-1 to p10-5.
+  - P9: p9-1 respecced and done, p9-4 added.
+  - Joins: p5-5 (plugin-root read as a file) and p8-4 (schedule's unpushed-base check).
+  - `vault-archiver-moves-dropped-tasks` is filed under Agent Stable.
+  - The research digest is at `Library/Research/Digests/Session safe-point compact vs handoff (digest 2026-09-27).md`.
+- **Running:** `[[thread-skill-rollout-2026-09-27]]` (p10-1 and p10-5 in wave 1, p10-2 in wave 2), launched by Lachy from `~/repos/tools/thread-skill-rollout`. This session doesn't touch it.
+
 **2026-09-27: p5-2 is done on PR #23 (2.7.1). No positional `$N` is left in any SKILL.md body.**
 - **Shape:** close's handoff scan and repo-track and execute's default-branch resolver moved into scripts
   behind thin wrappers. Open's repo-thread lookup stays inline, rewritten without a positional. A new
@@ -461,7 +473,15 @@ scheduled 2026-07-15.
   pending); THREAD.md, git-committed by the close flow, is the cold-pickup
   artifact — a Notion page duplicated that guarantee.
 
+- **2026-09-27, the safe-point hook deleted** (vault p9-1): no hook polices session length. The statusline shows `ctx %` (yellow from 40%, red from 70%), native auto-compact stays at its default, and round caps live in the loops (fresh-review's ledger, execute's `max_review_rounds`). Rollout conductors are never interrupted: at a quota ceiling they wait and resume from the cursor. `thread:handoff` runs only on request. The memory `feedback_offer_handoff_long_iteration_sessions` is superseded by `feedback_say_loop_round_count`.
+- **2026-09-27, ADR 0026** (above) and the P10 roadmap.
+
 ## Open questions / decisions pending
+
+- **The fresh-review of workspaces `29ca886` (the hook deletion) hasn't run.** The engine binds to the session's cwd, and this session was in thread-skill. It needs a session launched in `~/repos/workspaces`.
+- **p10-3 (orient and gather) and p10-4 (close) wait for `feat/next-action-set-downs`** (worktree `thread-skill-wt-next-action`). It has no PR yet and its review handoff doc is pending. It edits orient, close and the task writer.
+- **p9-4 is unblocked** (handoff docs have one writer, and `next` recommends compact). It isn't in the running rollout; schedule it with p10-3 and p10-4.
+- **`check-agent-parity.py` exits 1** on `~/.codex/hooks.json` ("direct Codex must use native Stop notification"). Seen 2026-09-27 and unrelated to the hook deletion.
 
 - **`${CLAUDE_PLUGIN_ROOT}` in read-as-file text stays literal** (review e4fe2a2/a0bb12 #1, #6; predates
   p5-2). A command in a sibling SKILL.md read by `/thread:open save` or `/thread:next`, or in a `_shared`
@@ -730,7 +750,21 @@ scheduled 2026-07-15.
     `blocked` with a transient-infrastructure diagnosis. After the move to another account,
     `resumeFromRunId` on the same run replayed the cached stages and re-ran only the failed review.
 
+- **A vault-wide backlink rewrite with plain grep hits Smart Connections' `.smart-env/*.ajson` cache** (and would hit `.obsidian/` and `.trash/`). On 2026-09-27 gather's rename pass rewrote 9 cache files; they were swapped back by exact reverse replacement, but 4 had re-indexed mid-pass. Exclude `.git`, `.obsidian`, `.smart-env` and `.trash`. Gather's step 4 doesn't say so yet.
+- **`rg` (and `grep`) in the Claude Code Bash tool are shell functions** wrapping the claude binary, so a Python `subprocess.run(['rg', ...])` fails with `FileNotFoundError`. Use `/usr/bin/grep -rlF` in scripts.
+- **`tests/contracts/refs.test.mjs` requires every `ADR NNNN` to resolve in this repo** unless a foreign qualifier precedes it (`Chorus ADR 0043`, `workspaces ADR …`). Citing another repo's ADR bare fails `make test`.
+- **fresh-review can only review the session's own repo.** A change made in another repo (for example `~/repos/workspaces`) from a thread-skill session has to be reviewed from a session launched there.
+
 ## Resume instructions
+
+**Now (from 2026-09-27, evening): P10's first rollout is running from the clone. This checkout has nothing in flight.**
+- **Rollout:** `[[thread-skill-rollout-2026-09-27]]` is conducted from `~/repos/tools/thread-skill-rollout`. Check it with `/thread:status [[thread-skill-rollout-2026-09-27]]`. Its completion ceremony lists the follow-ups (schedule p10-3/p10-4, a live reconcile dry run, a release).
+- **Next:**
+  1. The fresh-review of workspaces `29ca886`, from a session in `~/repos/workspaces`.
+  2. Land `feat/next-action-set-downs` (consume its review handoff).
+  3. Schedule p10-3, p10-4 and p9-4 as the next rollout.
+  4. Still owed from p5-2: tag 2.7.1 and run `git remote set-head origin --auto` here.
+- **Close-outs go on a branch** until p5-4 lands (this close is `docs/close-2026-09-27`).
 
 **Now (from 2026-09-27): p5-2 is merged (#23, `e5903f5`) and 2.7.1 is live.** The cache was refreshed and
 `make release-check` is green on `e5903f5`. A same-version refresh needs `rm -rf` of the version dir and then
@@ -837,6 +871,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-27 (evening close): `/thread:orient` → research (Chorus drift audit; compact vs handoff; is a tripwire worth it) → `/thread:gather` with grill-with-docs → P9 respec + P10, ADR 0026 (#24) → `/thread:schedule` P10 wave 1–2 → p9-1 done (hook deleted, `ctx %` statusline, memory superseded). Lachy launched the rollout from the clone.
 - 2026-09-27 (close): p5-2 on PR #23 (2.7.1). Snippets moved to scripts, the lookup was kept inline without `$N`, and the no-positional contract was added. Live probe clean on CLI 2.1.283. Two fresh-review rounds; the round-2 ledger STOP led to a revert to the root. Consumed handoff doc and four consumed review docs deleted.
 - 2026-09-26 (close): handed p5-2 to a fresh session (consumed and in flight on `p5-2/snippets-to-scripts`). The GTD next-action grill went to ops-workspace. THREAD.md was left uncommitted because this shared checkout sits on the peer's branch; its close carries it.
 - 2026-09-26: orient → gather (grill-with-docs) → P5–P9, ADRs 0024/0025, CONTEXT.md Top tier and Capture. The GTD next-action grill was handed off to ops-workspace. p5-1: repo public, CI (#21), rulesets, and two fresh-review rounds (56679f6/ad8453, d2b36d6/b59fd7). Round 2 was mostly round 1's fixes, so the stop rule fired: the ADR 0024 mechanics were reverted to open questions on p7-1 rather than patched a third time (#22).
