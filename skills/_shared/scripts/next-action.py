@@ -13,27 +13,31 @@ Verbs:
   fill <task> [--action <line|->]    Every other writer (orient): the same targets, but `next_task:` only
                                      where the slot is blank or dead, `next_action:` only where blank.
   read <project>...                  Each project's slot: live, blank, or dead (with the reason).
-  captures [--slug S] [--thread-file P]
-                                     Open tasks directly under Work/Tasks that are `thread`-tagged, named
-                                     <S>, or name <P> in their text, with which of the three matched.
+  captures [--slug S] [--thread-file P] [--for-close]
+                                     Thread captures: open, `thread`-tagged tasks directly under
+                                     Work/Tasks, each with whether it is named <S> and whether its text
+                                     names <P>. --for-close keeps only a capture matched by one of those —
+                                     close's concrete match.
 
 `--action -` reads the line from stdin, so any character is safe:
     next-action.py set-down <task> --action - <<'EOF'
     Find the council's phone number
     EOF
 
-<task> and <project> are a basename, or a path inside the vault (absolute, or relative to the vault —
-never to the working directory). A task must sit directly under Work/Tasks.
+<task> and <project> are a name, or — when the argument contains a `/` — a path inside the vault
+(absolute, or relative to the vault; never to the working directory). A task must sit directly under
+Work/Tasks; a project must be a `project`-tagged note under Work/Projects, outside Archive/.
 
-Links resolve as Obsidian resolves them: case-insensitive, an optional `.md`, and a path-qualified
-`[[Work/Tasks/x]]`. A link is dead when its target is missing, lives only under an Archive/ folder,
-carries the `archived` tag, or has status done, merged or dropped. An unreadable target is never dead.
+Links resolve as Obsidian resolves them: an exact-case name first, else any case; an optional `.md`;
+a path-qualified `[[Work/Tasks/x]]`. A link is dead when its target is missing, lives only under an
+Archive/ folder, carries the `archived` tag, or has status done, merged or dropped. An unreadable
+target is never dead.
 
-Writes change one top-level key: its line (and its value's continuation lines) becomes one
-`key: "<value>"` line with JSON escaping, or the line is added before the closing `---`. Before
-anything is saved, every edited frontmatter is re-parsed: the key must hold exactly the new value and
-every other key must be unchanged, else the write is refused. Files are rewritten in place, so a
-note's creation time survives. All targets are checked before the first write.
+Writes change one top-level key, located by the YAML parser itself: the key's lines become one
+`key: "<value>"` line with JSON escaping, or the line is added before the closing `---`. Every edit is
+re-parsed before anything is saved — the key must hold exactly the new value and every other key must
+be unchanged, else the write is refused. Files are rewritten in place, so a note's creation time
+survives. All targets are checked before the first write.
 
 Output: one tab-separated row per outcome (tab, newline and backslash escaped as \\t \\n \\\\), or
 `--json` for a list of objects:
@@ -42,7 +46,7 @@ Output: one tab-separated row per outcome (tab, newline and backslash escaped as
     project   <name>     next_task    written | kept | unchanged    <vault-relative path>
     skip      <name>     <reason>
     slot      <name>     live | blank | dead:<reason>   <task>   <next_action or task name>
-    capture   <task>     <status>     <match,…>
+    capture   <task>     <status>     <match,…>        (thread-tag, plus slug and/or thread-file)
 
 Exit 0 on success (skips included). Exit 2 when the input is refused — stderr then carries one line
 starting `next-action: ` and nothing was written. Exit 3 when the vault or PyYAML is missing.
@@ -56,10 +60,17 @@ import sys
 VAULT_DEFAULT = os.path.expanduser("~/repos/obsidian")
 DEAD_STATUSES = {"done", "merged", "dropped"}
 OPEN_STATUSES = {"open", "in_progress"}  # after normalising `-` to `_`: the vault writes both
-TASKS = ("Work", "Tasks")
-PROJECTS = ("Work", "Projects")
-KEY_RE = re.compile(r"^([^\s#:'\"\-?][^:]*?)\s*:(?:\s|$)")
+TASKS_DIR = os.path.join("Work", "Tasks")
+PROJECTS_DIR = os.path.join("Work", "Projects")
 LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]")
+# Characters YAML counts as line breaks that splitting on "\n" would not: refuse to edit around them.
+ODD_BREAKS = re.compile("\r(?!\n)|[\x85\u2028\u2029]")
+
+try:
+    import yaml
+    LOADER = getattr(yaml, "CSafeLoader", None) or yaml.SafeLoader  # libyaml when present: same result, faster
+except ImportError:
+    yaml = None
 
 
 class Refused(Exception):
@@ -71,12 +82,6 @@ def fail(code, reason):
     sys.exit(code)
 
 
-try:
-    import yaml
-except ImportError:
-    yaml = None
-
-
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         fail(2, message)
@@ -84,30 +89,54 @@ class Parser(argparse.ArgumentParser):
 
 # ---- Frontmatter ------------------------------------------------------------------------------------
 
+def split_lines(text):
+    """Lines with their endings, split on "\\n" only (a CRLF line keeps its "\\r\\n")."""
+    return re.findall(r"[^\n]*\n|[^\n]+$", text)
+
+
+def find_span(lines):
+    """(1, closing) when line 0 opens frontmatter and a later `---` line closes it, else None."""
+    if lines and lines[0].rstrip() == "---":
+        for i in range(1, len(lines)):
+            if lines[i].rstrip() == "---":
+                return (1, i)
+    return None
+
+
+def ending_of(line):
+    return line[len(line.rstrip("\r\n")):]
+
+
 class Note:
-    """A note's lines (endings kept) and its frontmatter, parsed by PyYAML.
+    """A note's text, its lines (endings kept) and its frontmatter parsed by PyYAML.
 
-    `span` is (first, closing) line indexes of the frontmatter body, or None when the note has no
-    closed frontmatter. `fm` is the parsed mapping, or None when there is no span or it does not
-    parse to a mapping (`error` says which)."""
+    `fm` is the parsed mapping, or None — `error` then says why (no closed frontmatter, does not
+    parse, not a mapping, unreadable)."""
 
-    def __init__(self, path):
-        self.path = path
-        with open(path, encoding="utf-8", newline="") as fh:
-            self.lines = fh.read().splitlines(keepends=True)
-        self.span = None
-        if self.lines and self.lines[0].rstrip("\r\n").rstrip() == "---":
-            for i in range(1, len(self.lines)):
-                if self.lines[i].rstrip("\r\n").rstrip() == "---":
-                    self.span = (1, i)
-                    break
+    def __init__(self, path, text):
+        self.path, self.text = path, text
+        self.lines = split_lines(text)
+        self.span = find_span(self.lines)
         self.fm, self.error = self._parse()
+
+    @classmethod
+    def load(cls, path):
+        try:
+            with open(path, encoding="utf-8", newline="") as fh:
+                return cls(path, fh.read())
+        except (OSError, UnicodeDecodeError):
+            note = cls(path, "")
+            note.fm, note.error = None, "unreadable"
+            return note
+
+    def body(self):
+        return "".join(self.lines[self.span[0]:self.span[1]])
 
     def _parse(self):
         if self.span is None:
             return None, "no closed frontmatter"
         try:
-            fm = yaml.safe_load("".join(self.lines[self.span[0]:self.span[1]]))
+            fm = yaml.load(self.body(), Loader=LOADER)
         except yaml.YAMLError:
             return None, "frontmatter does not parse"
         if fm is None:
@@ -119,62 +148,44 @@ class Note:
     def get(self, key):
         return (self.fm or {}).get(key)
 
-    @property
-    def text(self):
-        return "".join(self.lines)
-
-    def _key_lines(self, key):
-        s, e = self.span
-        return [i for i in range(s, e) if (m := KEY_RE.match(self.lines[i])) and m.group(1) == key]
-
-    def _extent(self, i):
-        """Line i plus its value's continuation lines: indented or `- ` lines, blank lines between them."""
-        end, j = i + 1, i + 1
-        while j < self.span[1]:
-            line = self.lines[j]
-            if line.strip() == "":
-                j += 1
-                continue
-            if line[:1] in (" ", "\t") or line.startswith("-"):
-                j += 1
-                end = j
-                continue
-            break
-        return end
-
     def edited(self, key, value):
-        """The note's lines with `key: "<value>"` set, checked by re-parsing. Raises Refused."""
+        """The note's text with `key: "<value>"` set, checked by re-parsing. Raises Refused."""
         if self.fm is None:
             raise Refused("%s: %s" % (self.path, self.error))
-        hits = self._key_lines(key)
+        body = self.body()
+        if ODD_BREAKS.search(body):
+            raise Refused("%s: frontmatter has line breaks other than \\n" % self.path)
+        root = yaml.compose(body, Loader=LOADER)
+        hits = [(k, v) for k, v in (root.value if root is not None else [])
+                if isinstance(k, yaml.ScalarNode) and k.value == key]
         if len(hits) > 1:
             raise Refused("%s carries `%s:` more than once" % (self.path, key))
-        lines = list(self.lines)
+        lines, first = list(self.lines), self.span[0]
         if hits:
-            i = hits[0]
-            ending = lines[i][len(lines[i].rstrip("\r\n")):] or "\n"
-            lines[i:self._extent(i)] = ["%s: %s%s" % (key, json.dumps(value, ensure_ascii=False), ending)]
+            k, v = hits[0]
+            start = first + k.start_mark.line
+            end = first + v.end_mark.line + (1 if v.end_mark.column else 0)
+            while end - 1 > start and lines[end - 1].strip() == "":  # keep blank lines after the value
+                end -= 1
+            end = max(end, start + 1)
+            ending = ending_of(lines[end - 1]) or ending_of(lines[start]) or "\n"
+            lines[start:end] = ["%s: %s%s" % (key, json.dumps(value, ensure_ascii=False), ending)]
         else:
             close = self.span[1]
-            ending = lines[close - 1][len(lines[close - 1].rstrip("\r\n")):] if close > 1 else ""
-            ending = ending or lines[0][len(lines[0].rstrip("\r\n")):] or "\n"
+            ending = ending_of(lines[close - 1]) or ending_of(lines[0]) or "\n"
+            if lines[close - 1] and not ending_of(lines[close - 1]):
+                lines[close - 1] += ending
             lines.insert(close, "%s: %s%s" % (key, json.dumps(value, ensure_ascii=False), ending))
-        check = Note.__new__(Note)
-        check.path, check.lines, check.span = self.path, lines, None
-        for k in range(1, len(lines)):
-            if lines[k].rstrip("\r\n").rstrip() == "---":
-                check.span = (1, k)
-                break
-        check.fm, check.error = check._parse()
+        check = Note(self.path, "".join(lines))
         want = dict(self.fm)
         want[key] = value
         if check.fm != want:
             raise Refused("%s: editing `%s:` would change other frontmatter; left alone" % (self.path, key))
-        return lines
+        return check.text
 
-    def save(self, lines):
+    def save(self, text):
         with open(self.path, "r+", encoding="utf-8", newline="") as fh:  # in place: keep the inode
-            fh.write("".join(lines))
+            fh.write(text)
             fh.truncate()
 
 
@@ -190,6 +201,13 @@ def tags_of(note):
 
 def status_of(note):
     return str(note.get("status") or "").strip().lower().replace("-", "_")
+
+
+def dead_note(note):
+    """Why a readable note is no live target — `archived` or its dead status — else None."""
+    if "archived" in tags_of(note):
+        return "archived"
+    return status_of(note) if status_of(note) in DEAD_STATUSES else None
 
 
 def links_in(value):
@@ -214,97 +232,93 @@ class Vault:
         if not os.path.isdir(root):
             fail(3, "no vault at %s" % root)
         self.root = os.path.realpath(root)
-        self.by_name, self.by_path = {}, {}  # lower basename -> [rel]; lower rel without .md -> rel
-        for d, dirs, files in os.walk(self.root):
-            dirs[:] = [x for x in dirs if not x.startswith(".")]
-            for name in files:
-                if name.lower().endswith(".md"):
-                    rel = os.path.relpath(os.path.join(d, name), self.root)
-                    self.by_name.setdefault(name[:-3].lower(), []).append(rel)
-                    self.by_path[rel[:-3].replace(os.sep, "/").lower()] = rel
+        self._index = None
         self._notes = {}
+
+    def index(self):
+        """(lower name -> [rel], lower rel without .md -> rel), built on first use."""
+        if self._index is None:
+            by_name, by_path = {}, {}
+            for d, dirs, files in os.walk(self.root):
+                dirs[:] = [x for x in dirs if not x.startswith(".")]
+                for name in files:
+                    if name.lower().endswith(".md"):
+                        rel = os.path.relpath(os.path.join(d, name), self.root)
+                        by_name.setdefault(name[:-3].lower(), []).append(rel)
+                        by_path[rel[:-3].replace(os.sep, "/").lower()] = rel
+            self._index = (by_name, by_path)
+        return self._index
 
     @staticmethod
     def archived(rel):
         return "Archive" in rel.split(os.sep)[:-1]
 
-    @staticmethod
-    def under(rel, parts):
-        return tuple(rel.split(os.sep)[:len(parts)]) == parts
-
     def note(self, rel):
-        """The parsed note, or None when it cannot be read at all."""
         if rel not in self._notes:
-            try:
-                self._notes[rel] = Note(os.path.join(self.root, rel))
-            except (OSError, UnicodeDecodeError):
-                self._notes[rel] = None
+            self._notes[rel] = Note.load(os.path.join(self.root, rel))
         return self._notes[rel]
 
     def targets(self, link):
         """Every note a wikilink target can mean, as Obsidian resolves it."""
+        by_name, by_path = self.index()
         t = link.strip()
         t = t[:-3] if t.lower().endswith(".md") else t
         if "/" in t:
-            rel = self.by_path.get(t.strip("/").lower())
+            rel = by_path.get(t.strip("/").lower())
             return [rel] if rel else []
-        hits = self.by_name.get(t.lower(), [])
+        hits = by_name.get(t.lower(), [])
         exact = [p for p in hits if os.path.basename(p)[:-3] == t]
         return exact or list(hits)  # an exact-case name wins, as in Obsidian
 
-    def dead_reason(self, link):
-        """None when some live copy of the target is usable; else why the link is dead."""
+    def live_copy(self, link):
+        """(rel of a live copy, None), or (None, why the link is dead)."""
         paths = self.targets(link)
         if not paths:
-            return "missing"
+            return None, "missing"
         live = [p for p in paths if not self.archived(p)]
         if not live:
-            return "archived"
+            return None, "archived"
         reasons = []
         for rel in live:
             note = self.note(rel)
-            if note is None or note.fm is None:
-                return None  # unreadable: never call a pointer dead on no evidence
-            if "archived" in tags_of(note):
-                reasons.append("archived")
-            elif status_of(note) in DEAD_STATUSES:
-                reasons.append(status_of(note))
-            else:
-                return None
-        return reasons[0]
+            why = dead_note(note) if note.fm is not None else None  # unreadable: never dead on no evidence
+            if why is None:
+                return rel, None
+            reasons.append(why)
+        return None, reasons[0]
 
     def path_arg(self, arg):
-        """A vault-relative path for an argument that names a file, or None for a bare name."""
-        if os.sep not in arg and "/" not in arg and not arg.lower().endswith(".md"):
+        """The vault-relative path an argument containing a `/` names, or None for a name."""
+        if "/" not in arg and os.sep not in arg:
             return None
         raw = os.path.expanduser(arg)
         full = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(self.root, raw))
         if os.path.commonpath([full, self.root]) != self.root:
             raise Refused("%s is outside the vault (%s)" % (arg, self.root))
         if not os.path.isfile(full):
-            if os.sep in arg or "/" in arg:
-                raise Refused("no note at %s" % arg)
-            return None  # `name.md`: a bare name after all, never a file in the working directory
+            raise Refused("no note at %s" % arg)
         return os.path.relpath(full, self.root)
 
     def resolve_task(self, arg):
         rel = self.path_arg(arg)
         if rel is None:
-            hits = [p for p in self.targets(arg) if os.path.dirname(p) == os.path.join(*TASKS)]
+            hits = [p for p in self.targets(arg) if os.path.dirname(p) == TASKS_DIR]
             if not hits:
-                raise Refused("no task note %r directly under %s" % (arg, "/".join(TASKS)))
+                raise Refused("no task note %r directly under %s" % (arg, TASKS_DIR))
             if len(hits) > 1:
                 raise Refused("%r names %d task notes: %s" % (arg, len(hits), ", ".join(hits)))
             rel = hits[0]
-        if os.path.dirname(rel) != os.path.join(*TASKS):
-            raise Refused("%s is not directly under %s" % (rel, "/".join(TASKS)))
+        if os.path.dirname(rel) != TASKS_DIR:
+            raise Refused("%s is not directly under %s" % (rel, TASKS_DIR))
         return rel
 
-    def resolve_project(self, link):
-        """(rel, None) for a project note, or (None, why it is skipped)."""
-        paths = self.targets(link)
+    def resolve_project(self, arg, link=False):
+        """(rel, None) for a project note, or (None, why it is skipped). `arg` is a command-line name
+        or vault path, or — with link=True — a wikilink target from `projects:`, resolved as a link."""
+        rel = None if link else self.path_arg(arg)
+        paths = [rel] if rel else self.targets(arg)
         live = [p for p in paths if not self.archived(p)]
-        inside = [p for p in live if self.under(p, PROJECTS)]
+        inside = [p for p in live if p.startswith(PROJECTS_DIR + os.sep)]
         if not paths:
             return None, "no note"
         if not live:
@@ -314,8 +328,8 @@ class Vault:
         if len(inside) > 1:
             return None, "ambiguous (%s)" % ", ".join(inside)
         note = self.note(inside[0])
-        if note is None or note.fm is None:
-            return None, "%s (%s)" % (note.error if note else "unreadable", inside[0])
+        if note.fm is None:
+            return None, "%s (%s)" % (note.error, inside[0])
         tags = tags_of(note)
         if "project" in tags:
             return inside[0], None
@@ -347,32 +361,28 @@ def write(vault, task_arg, action, overwrite):
         raise Refused("set-down needs --action")
     rel = vault.resolve_task(task_arg)
     task = vault.note(rel)
-    if task is None:
-        raise Refused("cannot read %s" % rel)
     if task.fm is None:
         raise Refused("%s: %s" % (rel, task.error))
-    if status_of(task) in DEAD_STATUSES:
-        raise Refused("%s is %s; a pointer to it would be dead" % (rel, status_of(task)))
-    if "archived" in tags_of(task):
-        raise Refused("%s is archived; a pointer to it would be dead" % rel)
+    why = dead_note(task)
+    if why:
+        raise Refused("%s is %s; a pointer to it would be dead" % (rel, why))
     name = os.path.basename(rel)[:-3]
     pointer = "[[%s]]" % name
 
     # Plan every edit, and check each one re-parses, before the first write.
     plan, rows = [], []
-    if action is not None and (overwrite or not text_of(task.get("next_action"))):
-        if task.get("next_action") == action:
-            head = "unchanged"
-        else:
-            plan.append((task, task.edited("next_action", action)))
-            head = "written"
-    else:
+    if action is None or not (overwrite or not text_of(task.get("next_action"))):
         head = "kept"
+    elif task.get("next_action") == action:
+        head = "unchanged"
+    else:
+        plan.append((task, task.edited("next_action", action)))
+        head = "written"
     rows.append({"kind": "task", "name": name, "field": "next_action", "result": head})
 
     seen = set()
     for link in links_in(task.get("projects")):
-        prel, why = vault.resolve_project(link)
+        prel, why = vault.resolve_project(link, link=True)
         if why:
             rows.append({"kind": "skip", "name": link, "result": why})
             continue
@@ -380,8 +390,7 @@ def write(vault, task_arg, action, overwrite):
             continue
         seen.add(prel)
         note = vault.note(prel)
-        current = links_in(note.get("next_task"))
-        blank = not current or all(vault.dead_reason(t) for t in current)
+        blank = all(vault.live_copy(t)[0] is None for t in links_in(note.get("next_task")))
         if not (overwrite or blank):
             result = "kept"
         elif note.get("next_task") == pointer:
@@ -390,70 +399,59 @@ def write(vault, task_arg, action, overwrite):
             try:
                 plan.append((note, note.edited("next_task", pointer)))
             except Refused as e:
-                rows.append({"kind": "skip", "name": link, "result": "frontmatter not editable (%s)" % str(e)})
+                rows.append({"kind": "skip", "name": link, "result": "frontmatter not editable (%s)" % e})
                 continue
             result = "written"
         rows.append({"kind": "project", "name": link, "field": "next_task", "result": result, "path": prel})
 
-    for note, lines in plan:  # the task file first: the pointer never lands before its target
-        note.save(lines)
+    for note, text in plan:  # the task file first: the pointer never lands before its target
+        note.save(text)
     return rows
 
 
 def read_slots(vault, args):
     rows = []
     for arg in args:
-        rel = vault.path_arg(arg)
-        if rel is not None:
-            name, why = os.path.basename(rel)[:-3], None
-        else:
-            name = arg
-            rel, why = vault.resolve_project(arg)
+        rel, why = vault.resolve_project(arg)
+        name = os.path.basename(rel)[:-3] if rel else arg
         if why:
             rows.append({"kind": "skip", "name": name, "result": why})
             continue
-        note = vault.note(rel)
-        if note is None or note.fm is None:
-            rows.append({"kind": "skip", "name": name, "result": "%s (%s)" % (note.error if note else "unreadable", rel)})
-            continue
-        links = links_in(note.get("next_task"))
+        links = links_in(vault.note(rel).get("next_task"))
         if not links:
             rows.append({"kind": "slot", "name": name, "result": "blank", "task": None, "next_action": None})
             continue
-        dead = {t: vault.dead_reason(t) for t in links}
-        live = [t for t in links if dead[t] is None]
+        copies = [(t,) + vault.live_copy(t) for t in links]
+        live = [(t, r) for t, r, _ in copies if r]
         if not live:
-            reason = "; ".join("%s %s" % (t, r) for t, r in dead.items())
+            reason = "; ".join("%s %s" % (t, why) for t, _, why in copies)
             rows.append({"kind": "slot", "name": name, "result": "dead:" + reason, "task": links[0], "next_action": None})
             continue
-        target = live[0]
-        tnote = next((vault.note(p) for p in vault.targets(target) if not vault.archived(p)), None)
-        line = text_of(tnote.get("next_action")) if tnote and tnote.fm is not None else ""
+        target, trel = live[0]
+        line = text_of(vault.note(trel).get("next_action"))
         rows.append({"kind": "slot", "name": name, "result": "live", "task": target, "next_action": line or target})
     return rows
 
 
-def captures(vault, slug, thread_file):
-    tasks_dir = os.path.join(*TASKS)
+def captures(vault, slug, thread_file, for_close):
     needles = {thread_file, os.path.expanduser(thread_file)} if thread_file else set()
     rows = []
-    for rels in sorted(vault.by_name.values()):
-        for rel in rels:
-            if os.path.dirname(rel) != tasks_dir:
-                continue
-            note = vault.note(rel)
-            if note is None or note.fm is None or status_of(note) not in OPEN_STATUSES or "archived" in tags_of(note):
-                continue
-            base = os.path.basename(rel)[:-3]
-            why = []
-            if slug and base.lower() == slug.lower():
-                why.append("slug")
-            if needles and any(n in note.text for n in needles):
-                why.append("thread-file")
-            if "thread" in tags_of(note):
-                why.append("thread-tag")
-            if why:
-                rows.append({"kind": "capture", "name": base, "result": status_of(note), "match": ",".join(why)})
+    tasks = os.path.join(vault.root, TASKS_DIR)
+    for fname in sorted(os.listdir(tasks)) if os.path.isdir(tasks) else []:
+        if not fname.lower().endswith(".md"):
+            continue
+        note = vault.note(os.path.join(TASKS_DIR, fname))
+        if note.fm is None or "thread" not in tags_of(note) or dead_note(note) or status_of(note) not in OPEN_STATUSES:
+            continue
+        base = fname[:-3]
+        why = ["thread-tag"]
+        if slug and base.lower() == slug.lower():
+            why.append("slug")
+        if needles and any(n in note.text for n in needles):
+            why.append("thread-file")
+        if for_close and len(why) == 1:
+            continue
+        rows.append({"kind": "capture", "name": base, "result": status_of(note), "match": ",".join(why)})
     return rows
 
 
@@ -493,6 +491,7 @@ def main(argv):
     c = sub.add_parser("captures")
     c.add_argument("--slug")
     c.add_argument("--thread-file")
+    c.add_argument("--for-close", action="store_true")
     for sp in (s, f, r, c):  # accept the global flags after the verb too
         sp.add_argument("--vault", default=argparse.SUPPRESS)
         sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
@@ -511,7 +510,7 @@ def main(argv):
         elif args.verb == "read":
             rows = read_slots(vault, args.project)
         else:
-            rows = captures(vault, args.slug, args.thread_file)
+            rows = captures(vault, args.slug, args.thread_file, args.for_close)
     except Refused as e:
         fail(2, str(e))
     emit(rows, args.json)

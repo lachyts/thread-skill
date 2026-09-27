@@ -28,9 +28,8 @@ const read = (dir, rel) => fs.readFileSync(path.join(dir, rel), 'utf8')
 const snapshot = (dir) => Object.fromEntries(
   fs.readdirSync(dir, { recursive: true }).filter((f) => f.endsWith('.md')).map((f) => [f, read(dir, f)]))
 
-function run(dir, args, { cwd, input } = {}) {
-  const r = spawnSync('python3', [SCRIPT, '--vault', dir, ...args], { encoding: 'utf8', cwd, input })
-  return { status: r.status, stdout: r.stdout, stderr: r.stderr }
+function run(dir, args, { cwd, input, pyFlags = [] } = {}) {
+  return spawnSync('python3', [...pyFlags, SCRIPT, '--vault', dir, ...args], { encoding: 'utf8', cwd, input })
 }
 function ok(dir, args, opts) {
   const r = run(dir, args, opts)
@@ -208,23 +207,29 @@ test('read: a slot is live, blank, or dead by the shared rule', () => {
   ])
 })
 
-test('captures: open or in_progress tasks, either tag form, by thread tag, slug or thread file', () => {
+test('captures: open, thread-tagged tasks in either tag form, with their slug and thread-file matches', () => {
   const dir = vault({
     [`${T}/inline.md`]: task('tags: [task, thread]\nstatus: open'),
     [`${T}/block.md`]: task('tags:\n  - task\n  - thread\nstatus: in_progress'),
     [`${T}/rollout.md`]: task('tags: [task]\nstatus: in_progress', '\nThread: /Users/x/Projects/A/THREAD.md\n'),
     [`${T}/named.md`]: task('tags: [task]\nstatus: open'),
+    [`${T}/mine.md`]: task('tags: [task, thread]\nstatus: open', '\n**Thread:** /Users/x/Projects/A/THREAD.md\n'),
     [`${T}/closed.md`]: task('tags: [task, thread]\nstatus: done'),
     [`${T}/shelved.md`]: task('tags: [task, thread, archived]\nstatus: open'),
     [`${T}/Archive/old.md`]: task('tags: [task, thread]\nstatus: open'),
     [`${T}/unrelated.md`]: task('tags: [task]\nstatus: open'),
   })
-  const rows = ok(dir, ['captures', '--slug', 'named', '--thread-file', '/Users/x/Projects/A/THREAD.md'])
-  assert.deepEqual(rows, [
+  const args = ['captures', '--slug', 'inline', '--thread-file', '/Users/x/Projects/A/THREAD.md']
+  // A follow-up or rollout task that merely names the thread (no `thread` tag) is never a capture.
+  assert.deepEqual(ok(dir, args), [
     ['capture', 'block', 'in_progress', 'thread-tag'],
-    ['capture', 'inline', 'open', 'thread-tag'],
-    ['capture', 'named', 'open', 'slug'],
-    ['capture', 'rollout', 'in_progress', 'thread-file'],
+    ['capture', 'inline', 'open', 'thread-tag,slug'],
+    ['capture', 'mine', 'open', 'thread-tag,thread-file'],
+  ])
+  // --for-close: close's concrete match needs the slug or the thread file as well as the tag.
+  assert.deepEqual(ok(dir, [...args, '--for-close']), [
+    ['capture', 'inline', 'open', 'thread-tag,slug'],
+    ['capture', 'mine', 'open', 'thread-tag,thread-file'],
   ])
 })
 
@@ -306,11 +311,11 @@ test('frontmatter is read by YAML: null and plain text are blank, block scalars 
 
 test('captures accepts both spellings of in-progress', () => {
   const dir = vault({
-    [`${T}/hyphen.md`]: task('tags: [task]\nstatus: in-progress'),
-    [`${T}/under.md`]: task('tags: [task]\nstatus: in_progress'),
+    [`${T}/hyphen.md`]: task('tags: [task, thread]\nstatus: in-progress'),
+    [`${T}/under.md`]: task('tags: [task, thread]\nstatus: in_progress'),
   })
-  assert.deepEqual(ok(dir, ['captures', '--slug', 'hyphen']), [['capture', 'hyphen', 'in_progress', 'slug']])
-  assert.deepEqual(ok(dir, ['captures', '--slug', 'under']), [['capture', 'under', 'in_progress', 'slug']])
+  assert.deepEqual(ok(dir, ['captures', '--slug', 'hyphen', '--for-close']), [['capture', 'hyphen', 'in_progress', 'thread-tag,slug']])
+  assert.deepEqual(ok(dir, ['captures', '--slug', 'under', '--for-close']), [['capture', 'under', 'in_progress', 'thread-tag,slug']])
 })
 
 test('read takes a vault-relative path, whatever the working directory', () => {
@@ -357,8 +362,57 @@ test('exit 3 when PyYAML is missing — the set-down reports it, never falls bac
   const dir = estate()
   const before = snapshot(dir)
   // -S drops site-packages (system and user), leaving only the standard library.
-  const r = spawnSync('python3', ['-S', SCRIPT, '--vault', dir, 'set-down', 'cap', '--action', 'Go'], { encoding: 'utf8' })
+  const r = run(dir, ['set-down', 'cap', '--action', 'Go'], { pyFlags: ['-S'] })
   assert.equal(r.status, 3, r.stderr)
   assert.match(r.stderr, /^next-action: PyYAML is required: python3 -m pip install pyyaml\n$/)
   assert.deepEqual(snapshot(dir), before)
+})
+
+// ---- Simplify-round regressions (fresh-review a7c7447/1ca644) ---------------------------------------
+
+test('the key is found by the YAML parser: quoted keys, comments and block scalars are replaced whole', () => {
+  const cases = [
+    ['a double-quoted key', '"next_task": "[[old]]"', 'next_task: "[[cap]]"'],
+    ['a single-quoted key', "'next_task': \"[[old]]\"", 'next_task: "[[cap]]"'],
+    ['a trailing comment', 'next_task: "[[old]]"  # set by stash', 'next_task: "[[cap]]"'],
+    ['a folded block scalar', 'next_task: >-\n  [[old]]', 'next_task: "[[cap]]"'],
+    ['an empty value', 'next_task:', 'next_task: "[[cap]]"'],
+  ]
+  for (const [name, before, after] of cases) {
+    const dir = vault({
+      [`${T}/cap.md`]: task('tags: [task]\nstatus: open\nprojects: ["[[P]]"]'),
+      [`${P}/P.md`]: task(`tags: [project]\n${before}\nstatus: queued`),
+    })
+    ok(dir, ['set-down', 'cap', '--action', 'Go'])
+    assert.equal(read(dir, `${P}/P.md`), task(`tags: [project]\n${after}\nstatus: queued`), name)
+  }
+})
+
+test('a frontmatter line break YAML counts but "\\n" splitting would not is refused, never mis-edited', () => {
+  const odd = task('tags: [project]\nnote: "a\u2028b"\nnext_task: "[[old]]"')
+  const dir = vault({ [`${T}/cap.md`]: task('tags: [task]\nstatus: open\nprojects: ["[[P]]"]'), [`${P}/P.md`]: odd })
+  const rows = ok(dir, ['set-down', 'cap', '--action', 'Go'])
+  assert.equal(rows[1][0], 'skip')
+  assert.match(rows[1][2], /line breaks other than/)
+  assert.equal(read(dir, `${P}/P.md`), odd)
+})
+
+test('read shows the live copy when a link names a done copy and a live one', () => {
+  const dir = vault({
+    [`${T}/dup.md`]: task('tags: [task]\nstatus: open\nnext_action: The live one'),
+    ['Notes/A/dup.md']: task('tags: [task]\nstatus: done\nnext_action: The done one'),
+    [`${P}/P.md`]: task('tags: [project]\nnext_task: "[[dup]]"'),
+  })
+  assert.deepEqual(ok(dir, ['read', 'P']), [['slot', 'P', 'live', 'dup', 'The live one']])
+})
+
+test('read by path applies the same project checks as read by name', () => {
+  const dir = vault({
+    [`${P}/Area.md`]: task('tags: [area]'),
+    [`${P}/Archive/Old.md`]: task('tags: [project]'),
+    ['Notes/Loose.md']: task('tags: [note]'),
+  })
+  assert.deepEqual(ok(dir, ['read', `${P}/Area.md`, `${P}/Archive/Old.md`, 'Notes/Loose.md']).map((r) => [r[0], r[2]]), [
+    ['skip', `area note (${P}/Area.md)`], ['skip', 'archived'], ['skip', 'not a project note (Notes/Loose.md)'],
+  ])
 })
