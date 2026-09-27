@@ -86,8 +86,11 @@ test('task-writer § 4 leaves next_action to the script; § 2 finds captures thr
 test('the overwrite rule and the dead-link rule each have one home under skills/', () => {
   const homes = (re) => textFiles('skills').filter(({ text }) => re.test(text)).map(({ file }) => file)
   assert.deepEqual(homes(/most recent\s+set-down wins/), [WRITER], `"most recent set-down wins" belongs to ${WRITER} only`)
-  // The dead statuses are the script's (its docstring and DEAD_STATUSES); every skill cites it instead.
-  assert.deepEqual(homes(/done,\s+merged/), [SCRIPT], `the dead-status list belongs to ${SCRIPT} only`)
+  // The dead statuses are the script's DEAD_STATUSES; no skill's prose restates them, every one cites it.
+  // (Other scripts may share the statuses for their own rules — reconcile-project.py's LANDED set.)
+  const prose = homes(/done,\s+merged/).filter((f) => f.endsWith('.md'))
+  assert.deepEqual(prose, [], `skill prose restates the dead-status list instead of citing ${SCRIPT}: ${JSON.stringify(prose)}`)
+  assertHas(readIf(SCRIPT), SCRIPT, [/^DEAD_STATUSES = \{"done", "merged", "dropped"\}$/m])
 })
 
 test('stash, defer and close cite task-writer § 4b and its script', () => {

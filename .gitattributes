@@ -1,0 +1,2 @@
+# Shell scripts run under bash on every host; CRLF endings break them in Git Bash.
+*.sh text eol=lf
