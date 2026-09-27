@@ -31,4 +31,10 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      # next-action.py reads frontmatter with PyYAML; neither runner image guarantees it. setup-python
+      # gives a pip that may install (the images' system pythons are externally managed).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install pyyaml
       - run: make test

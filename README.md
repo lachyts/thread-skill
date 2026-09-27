@@ -19,7 +19,8 @@ machine-verifiable in-run) rolls out; everything else runs as scoped sessions.
 > workspaces repo at `~/repos/workspaces` whose `_shared/` holds the note-writer specs, shared threads
 > and the native-workflow exchange, and a Melbourne clock. Read it for the ideas (the execution-fit
 > test, the convergence engine, the handoff lifecycle); expect to adapt paths before running it
-> anywhere else. `make test` is hermetic and runs on any machine with bash, `python3` and `node`.
+> anywhere else. `make test` is hermetic and runs on any machine with bash, `python3` (with PyYAML, which
+> the next-action script reads frontmatter with: `python3 -m pip install pyyaml`) and `node`.
 
 ## Continuity verbs
 
