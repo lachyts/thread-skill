@@ -7,15 +7,8 @@
 // assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { readIf, walk, slice } from '../lib/contract-text.mjs'
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const readIf = (p) => (fs.existsSync(path.join(root, p)) ? fs.readFileSync(path.join(root, p), 'utf8') : null)
-const walk = (d) => fs.readdirSync(path.join(root, d), { withFileTypes: true })
-  .flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : [`${d}/${e.name}`]))
-  .sort()
 
 const SCAN = 'skills/_shared/process-scan.md'
 const LIFECYCLE = 'skills/_shared/handoff-lifecycle.md'
@@ -26,16 +19,6 @@ const LIFECYCLE_CITE = '${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.m
 const skillFiles = walk('skills')
   .map((file) => ({ file, text: readIf(file) }))
   .filter(({ text }) => text != null && !text.includes('\0'))
-
-// The slice of `text` from the line matching `start` to the next line matching `stop` (exclusive), or null.
-function slice(text, start, stop) {
-  if (text == null) return null
-  const lines = text.split('\n')
-  const i = lines.findIndex((l) => start.test(l))
-  if (i < 0) return null
-  const j = lines.findIndex((l, k) => k > i && stop.test(l))
-  return lines.slice(i, j < 0 ? undefined : j).join('\n')
-}
 
 test('both shared continuity specs exist', () => {
   assert.ok(readIf(SCAN) != null, `${SCAN} is missing`)

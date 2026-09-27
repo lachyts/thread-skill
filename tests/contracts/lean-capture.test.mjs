@@ -11,15 +11,8 @@
 // assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { readIf, walk, slice, assertHas } from '../lib/contract-text.mjs'
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
-const readIf = (p) => (fs.existsSync(path.join(root, p)) ? fs.readFileSync(path.join(root, p), 'utf8') : null)
-const walk = (d) => fs.readdirSync(path.join(root, d), { withFileTypes: true })
-  .flatMap((e) => (e.isDirectory() ? walk(`${d}/${e.name}`) : [`${d}/${e.name}`]))
-  .sort()
 
 const WRITER = 'skills/_shared/task-writer.md'
 const SCAN = 'skills/_shared/process-scan.md'
@@ -29,26 +22,6 @@ const DEFER = 'skills/defer/SKILL.md'
 const ORIENT = 'skills/orient/SKILL.md'
 // The project-note set every `repos:` lookup greps: every depth, so nested sub-project notes are seen.
 const PROJECT_GLOB = '~/repos/obsidian/Work/Projects/**'
-
-// The slice of `text` from the line matching `start` to the next line matching `stop` (exclusive), or
-// null. A null `stop` runs to the end of the text.
-function slice(text, start, stop) {
-  if (text == null) return null
-  const lines = text.split('\n')
-  const i = lines.findIndex((l) => start.test(l))
-  if (i < 0) return null
-  const j = stop == null ? -1 : lines.findIndex((l, k) => k > i && stop.test(l))
-  return lines.slice(i, j < 0 ? undefined : j).join('\n')
-}
-
-// Asserts `section` exists, then that it matches each pattern (a string is a substring check).
-function assertHas(section, name, patterns) {
-  assert.ok(section != null, `${name} is missing`)
-  for (const p of patterns) {
-    const ok = typeof p === 'string' ? section.includes(p) : p.test(section)
-    assert.ok(ok, `${name} does not contain ${p}`)
-  }
-}
 
 // The backticked glob after "`repos:` frontmatter across" in `section`, or null.
 function globOf(section) {
