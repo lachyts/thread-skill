@@ -11,7 +11,7 @@
 // assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readIf, walk, slice, assertHas } from '../lib/contract-text.mjs'
+import { readIf, slice, assertHas, textFiles, lineOf } from '../lib/contract-text.mjs'
 
 
 const WRITER = 'skills/_shared/task-writer.md'
@@ -53,10 +53,7 @@ test('task-writer § 5 carries the Lean capture rule', () => {
 })
 
 test('the "10 non-empty lines" ceiling has one home under skills/', () => {
-  const hits = walk('skills')
-    .map((file) => ({ file, text: readIf(file) }))
-    .filter(({ text }) => text != null && !text.includes('\0') && text.includes('10 non-empty lines'))
-    .map(({ file }) => file)
+  const hits = textFiles('skills').filter(({ text }) => text.includes('10 non-empty lines')).map(({ file }) => file)
   assert.deepEqual(hits, [WRITER], `"10 non-empty lines" should occur only in ${WRITER}, found in: ${JSON.stringify(hits)}`)
 })
 
@@ -88,12 +85,12 @@ test('every exit route carries the rule and the offer channel', () => {
   const close = readIf(CLOSE)
   // (a) close's follow-up task row obeys Lean capture.
   const dest = slice(close, /^## Destinations/, /^## (?!Destinations)/)
-  const row = dest == null ? null : (dest.split('\n').find((l) => l.startsWith('| Concrete follow-up actions')) ?? null)
+  const row = lineOf(dest, '| Concrete follow-up actions')
   assertHas(row, `${CLOSE} § Destinations "Concrete follow-up actions" row`, [
     'task-writer.md', /§§ 1 & 4/, /§ 5\b/, 'Lean capture',
   ])
   // (b) close step 8 carries the research-landing offer, for unlanded research only.
-  const step8 = close == null ? null : (close.split('\n').find((l) => /^8\. \*\*Print the "What landed" report/.test(l)) ?? null)
+  const step8 = lineOf(close, /^8\. \*\*Print the "What landed" report/)
   assertHas(step8, `${CLOSE} step 8`, [
     'research-landing offer', /`task-writer\.md` § 5/, 'unlanded', /never for an already-landed digest/,
   ])
@@ -108,7 +105,7 @@ test('every exit route carries the rule and the offer channel', () => {
     const text = readIf(file)
     const write = slice(text, body, /^\d+\. /)
     assertHas(write, `${file} "Write the capture task" step`, ['skills/_shared/task-writer.md', /§ 5\b/])
-    const conf = text == null ? null : (text.split('\n').find((l) => confirm.test(l)) ?? null)
+    const conf = lineOf(text, confirm)
     assert.ok(conf != null, `${file} has no "Confirm per § 7" step`)
   }
 })
@@ -136,9 +133,7 @@ function shallowGlobs(text) {
 }
 
 test('no skill greps a Work/Projects glob that stops short of every depth', () => {
-  const hits = walk('skills')
-    .map((file) => ({ file, text: readIf(file) }))
-    .filter(({ text }) => text != null && !text.includes('\0'))
+  const hits = textFiles('skills')
     .flatMap(({ file, text }) => shallowGlobs(text).map((glob) => `${file}: ${glob}`))
   assert.deepEqual(hits, [], `depth-limited Work/Projects glob (a single-\`*\` segment, no \`**\`) found in: ${JSON.stringify(hits)}`)
 })

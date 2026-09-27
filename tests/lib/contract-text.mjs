@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url'
 
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 
+// The file's text; throws when it does not exist. `p` is repo-relative.
+export const read = (p) => fs.readFileSync(path.join(root, p), 'utf8')
+
 // The file's text, or null when it does not exist. `p` is repo-relative.
 export const readIf = (p) => (fs.existsSync(path.join(root, p)) ? fs.readFileSync(path.join(root, p), 'utf8') : null)
 
@@ -34,3 +37,12 @@ export function assertHas(section, name, patterns) {
     assert.ok(ok, `${name} does not contain ${p}`)
   }
 }
+
+// Every text file under the repo-relative directory `d`, with its text (a NUL byte marks a binary, skipped).
+export const textFiles = (d) => walk(d)
+  .map((file) => ({ file, text: readIf(file) }))
+  .filter(({ text }) => text != null && !text.includes('\0'))
+
+// The first line of `text` matching `re` (a string matches as a prefix), or null — null text included.
+export const lineOf = (text, re) =>
+  text?.split('\n').find((l) => (typeof re === 'string' ? l.startsWith(re) : re.test(l))) ?? null

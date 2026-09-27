@@ -20,11 +20,14 @@ scratch=$(mktemp -d); trap 'rm -rf "$scratch"' EXIT
 # Pin the real interpreters BEFORE swapping HOME: version-manager shims (asdf, mise, pyenv) resolve the
 # global version under $HOME and fail inside the temp one. Their resolved dirs go first on PATH.
 node_bin=$(node -p 'process.execPath' 2>/dev/null) || { echo "make test: node not found"; exit 1; }
-py_bin=$(python3 -c 'import sys; print(sys.executable)' 2>/dev/null) || { echo "make test: python3 not found"; exit 1; }
+# One python start gives both the interpreter and its user site: a `pip install --user` PyYAML (which
+# next-action.py needs) resolves under $HOME too, so pin the real one and the swap hides nothing the
+# scripts import. Read-only use; nothing lands there.
+py_info=$(python3 -c 'import site, sys; print(sys.executable); print(site.getuserbase())' 2>/dev/null) \
+  || { echo "make test: python3 not found"; exit 1; }
+py_bin=${py_info%%$'\n'*}
+export PYTHONUSERBASE=${py_info#*$'\n'}
 export PATH="$(dirname "$node_bin"):$(dirname "$py_bin"):$PATH"
-# Likewise python's user site (a `pip install --user` PyYAML, which next-action.py needs) resolves under
-# $HOME: pin the real one so the swap hides nothing the scripts import. Read-only use; nothing lands there.
-export PYTHONUSERBASE="$(python3 -c 'import site; print(site.getuserbase())')"
 
 export HOME="$scratch/home"; mkdir -p "$HOME"
 export GIT_CONFIG_GLOBAL="$scratch/gitconfig"

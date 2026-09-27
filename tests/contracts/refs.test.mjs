@@ -23,9 +23,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { root, walk } from '../lib/contract-text.mjs'
-
-const read = (p) => fs.readFileSync(path.join(root, p), 'utf8')
+import { root, walk, read } from '../lib/contract-text.mjs'
 
 // Qualifiers that mark an ADR number as another repo's (compared case-sensitively).
 // 'estate'/'Estate' is the workspaces repo's _shared/docs/adr/ (estate ADR 0008 is not this repo's 0008).

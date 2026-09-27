@@ -7,7 +7,7 @@
 // assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readIf, walk, slice } from '../lib/contract-text.mjs'
+import { readIf, slice, textFiles } from '../lib/contract-text.mjs'
 
 
 const SCAN = 'skills/_shared/process-scan.md'
@@ -16,9 +16,7 @@ const SCAN_CITE = '${CLAUDE_PLUGIN_ROOT}/skills/_shared/process-scan.md'
 const LIFECYCLE_CITE = '${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md'
 
 // Every text file under skills/ (a NUL byte marks a binary, skipped).
-const skillFiles = walk('skills')
-  .map((file) => ({ file, text: readIf(file) }))
-  .filter(({ text }) => text != null && !text.includes('\0'))
+const skillFiles = textFiles('skills')
 
 test('both shared continuity specs exist', () => {
   assert.ok(readIf(SCAN) != null, `${SCAN} is missing`)

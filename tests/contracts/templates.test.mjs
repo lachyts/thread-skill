@@ -9,9 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { root, walk } from '../lib/contract-text.mjs'
-
-const read = (p) => fs.readFileSync(path.join(root, p), 'utf8')
+import { root, walk, read } from '../lib/contract-text.mjs'
 
 const PLACEHOLDER = /\{\{([A-Z][A-Z0-9_]*)\}\}/g
 const DOCUMENTED = /^- `\{\{([A-Z][A-Z0-9_]*)\}\}`/
