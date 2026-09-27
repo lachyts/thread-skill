@@ -109,11 +109,12 @@ If a wave has more tasks than the budget allows, the executor dispatches in two 
 
 When every wave's PRs have merged, run the **completion ceremony** (`/thread:execute` performs this as its final step in continuous mode — see its §4.5 step 5; do it manually if the run ended early or in gated/single-wave mode):
 
-1. Mark this rollout `status: done` and stamp `completed: <YYYY-MM-DD>` in the frontmatter.
-2. File any follow-on work (validation re-runs, audits, deferred items) as **new open tasks** in `Work/Tasks/` and rewrite the items below as thin pointers to them. Never leave live work as checklist prose inside a done note — the moment `status: done` lands, every Bases view filters this note out and the work goes invisible.
-3. Append a `## Completion log`: dispatch dates, waves → PRs (links + merge dates), convergence stats (plan/review rounds per task), and the disposition of each post-rollout item.
-4. Close out any associated thread (run `/thread:close`) — or record here why it stays open.
-5. Move this note to `Work/Tasks/Archive/Rollouts/` and commit the vault. Obsidian wikilinks resolve by filename, so `[[<slug>]]` references and the task notes' `rollout:` backlinks survive the move.
+1. Close the phases this rollout finished (ADR 0026): run the `touched-phases` → `reconcile-project.py <line> --kinds phase --apply` commands from execute §4.5 step 5, one reconcile-project run per line `touched-phases` prints, and record each touched phase as closed, ambiguous, failed or left open in the Completion log. On a non-zero exit from either command, file (or append to) the follow-on open task `Work/Tasks/phase-close-followup-<rollout-slug>.md` (`close phase <slug>-pN: <command> exited <code>: <msg>`) and carry on; on a later successful re-run, mark its lines resolved and, once every line is resolved, set it done.
+2. Mark this rollout `status: done` and stamp `completed: <YYYY-MM-DD>` in the frontmatter.
+3. File any follow-on work (validation re-runs, audits, deferred items) as **new open tasks** in `Work/Tasks/` and rewrite the items below as thin pointers to them. Never leave live work as checklist prose inside a done note — the moment `status: done` lands, every Bases view filters this note out and the work goes invisible.
+4. Append a `## Completion log`: dispatch dates, waves → PRs (links + merge dates), convergence stats (plan/review rounds per task), phase closure, and the disposition of each post-rollout item.
+5. Close out any associated thread (run `/thread:close`) — or record here why it stays open.
+6. Move this note to `Work/Tasks/Archive/Rollouts/` and commit the vault. Obsidian wikilinks resolve by filename, so `[[<slug>]]` references and the task notes' `rollout:` backlinks survive the move.
 
 Rollout-specific items (audit re-runs etc.) go here:
 

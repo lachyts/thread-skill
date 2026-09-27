@@ -7,7 +7,7 @@ fumble-prone edits across a rollout. This helper performs ALL of those writes de
 returned task array, and (finding #7) computes the per-task resume set so a partial wave resumes without
 re-dispatching already-landed work.
 
-Ten subcommands:
+Eleven subcommands:
 
   reconcile   Read the workflow result JSON ({rolloutSlug, tasks:[...]}) and write each task note's
               frontmatter + any blocked-feedback body section. Idempotent (safe to re-run on resume).
@@ -46,6 +46,13 @@ Ten subcommands:
               computed from the wave_N_dispatched/wave_N_merged stamps (null when the note has none) —
               durable, so elapsed + the rough estimate render without any workflow run being alive.
               Pure read; no network (the skill owns gh/git).
+
+  touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
+              walk the same backlinked task notes as `status` (archived ones included) and print one
+              `--project <slug> --phases <N,M,...>` line per project slug, slugs and phases sorted, for
+              every task named `<slug>-p<N>-*`. Loose tasks are ignored; nothing linked prints nothing.
+              Each line is the argument list for `reconcile-project.py <line> --kinds phase --apply`,
+              so only phases this rollout touched are ever closed.
 
   resolve     Flip a *blocked* task (review-blocked/blocked/plan-blocked) -> done. The gap-closer for
               the drift case (a blocked note whose PR actually merged out-of-band). Refuses any note
@@ -789,6 +796,28 @@ def cmd_status(args) -> int:
     return 0
 
 
+# ---- touched-phases ---------------------------------------------------------
+
+PHASED_STEM_RE = re.compile(r"^(?P<slug>.+?)-p(?P<n>\d+)-")
+
+
+def cmd_touched_phases(args) -> int:
+    """Print `--project <slug> --phases <N,...>` per slug among the rollout's linked phased tasks."""
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.exists():
+        print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
+        return 1
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    by_slug = {}
+    for path, _note in _linked_task_notes(rollout_path, tasks_dir):
+        m = PHASED_STEM_RE.match(path.stem)
+        if m:  # loose tasks (no `-p<N>-` segment) belong to no phase
+            by_slug.setdefault(m.group("slug"), set()).add(int(m.group("n")))
+    for slug in sorted(by_slug):
+        print(f"--project {slug} --phases {','.join(str(n) for n in sorted(by_slug[slug]))}")
+    return 0
+
+
 # ---- resolve ----------------------------------------------------------------
 
 # Only a *blocked* note is resolvable to done out-of-band (the drift gap-closer). `review` -> done is
@@ -988,6 +1017,11 @@ def main() -> int:
     s.add_argument("--rollout", required=True, help="path to the rollout note")
     s.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
     s.set_defaults(func=cmd_status)
+
+    tp = sub.add_parser("touched-phases", help="print --project/--phases lines for the phases a rollout touched (read-only; ADR 0026)")
+    tp.add_argument("--rollout", required=True, help="path to the rollout note")
+    tp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
+    tp.set_defaults(func=cmd_touched_phases)
 
     rv = sub.add_parser("resolve", help="flip a *blocked* task -> done (drift gap-closer; caller must verify the PR merged)")
     rv.add_argument("--tasks", required=True, help="comma-separated task slugs (must be in a blocked status)")
