@@ -768,6 +768,9 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+Read /Users/lachlants/repos/tools/thread-skill-rollout/docs/handoffs/2026-09-27-p10-release-and-acceptance.md first (pending handoff, 2026-09-27; on branch `docs/close-2026-09-27-p10-rollout`).
+
+**Superseded by the handoff above (kept for the record):**
 **Now (from 2026-09-27, late evening): the P10 rollout is done and archived. Nothing is running.**
 - **Next:**
   1. Release P10: [[thread-skill-release-reconcile-step]]. Fast-forward the live checkout, bump the manifests by PR, update the plugin, then run `make release-check`.
@@ -891,6 +894,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-27 (late evening, second close): handed off the next pieces (land the close-out branch, P10 release, live acceptance, next rollout) as `docs/handoffs/2026-09-27-p10-release-and-acceptance.md` on `docs/close-2026-09-27-p10-rollout`. The clone was left on that branch so the doc's path resolves.
 - 2026-09-27 (late evening close): rollout lead for `[[thread-skill-rollout-2026-09-27]]`. Wave 1 (#25, #27) and wave 2 (#28) merged in 2h 9m. The ceremony ran #28's new phase-close step (phase 10 left open) and filed two follow-ons, live acceptance and release. The rollout note was archived (vault `b2a6137b`). This close is on branch `docs/close-2026-09-27-p10-rollout`.
 - 2026-09-27 (evening close): `/thread:orient` → research (Chorus drift audit; compact vs handoff; is a tripwire worth it) → `/thread:gather` with grill-with-docs → P9 respec + P10, ADR 0026 (#24) → `/thread:schedule` P10 wave 1–2 → p9-1 done (hook deleted, `ctx %` statusline, memory superseded). Lachy launched the rollout from the clone.
 - 2026-09-27 (close): p5-2 on PR #23 (2.7.1). Snippets moved to scripts, the lookup was kept inline without `$N`, and the no-positional contract was added. Live probe clean on CLI 2.1.283. Two fresh-review rounds; the round-2 ledger STOP led to a revert to the root. Consumed handoff doc and four consumed review docs deleted.
