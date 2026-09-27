@@ -10,7 +10,7 @@
 // file or section is a named assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readIf, walk, slice, assertHas } from '../lib/contract-text.mjs'
+import { readIf, slice, assertHas, textFiles, lineOf } from '../lib/contract-text.mjs'
 
 const WRITER = 'skills/_shared/task-writer.md'
 const CLOSE = 'skills/close/SKILL.md'
@@ -18,7 +18,8 @@ const STASH = 'skills/stash/SKILL.md'
 const DEFER = 'skills/defer/SKILL.md'
 const OPEN = 'skills/open/SKILL.md'
 const ORIENT = 'skills/orient/SKILL.md'
-const SCRIPT_CITE = '${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py'
+const SCRIPT = 'skills/_shared/scripts/next-action.py'
+const SCRIPT_CITE = `\${CLAUDE_PLUGIN_ROOT}/${SCRIPT}`
 const ESTATE_ADR = '~/repos/workspaces/_shared/docs/adr/0008-next-action-slot.md'
 
 const s4b = () => slice(readIf(WRITER), /^## 4b\./, /^## 5\./)
@@ -56,12 +57,10 @@ test('task-writer § 4b gives close a no-invention form', () => {
   assertHas(close, `${WRITER} § 4b "Close's form"`, [
     /never invents one/,
     /pending handoff doc owns the thread's continuation/,
-    /captures --slug <thread slug> --thread-file <THREAD\.md>/,
+    /captures --slug <thread slug> --thread-file\s+<THREAD\.md> --for-close/,
     /matched \*\*concretely\*\*/,
-    /before sub-step 6 creates any task/,
-    /includes `thread-tag` and also `slug` or `thread-file`/,
-    /only by `thread-file`[\s\S]*never qualifies by itself/,
-    /a\s+loose end never qualifies/,
+    /before step 7\.6 creates\s+any task/,
+    /A loose end never qualifies/,
     /never an older capture's\s+`Next move:`/,
     /write neither field and leave every\s+project slot as it is/,
   ])
@@ -74,8 +73,8 @@ test('task-writer § 4 leaves next_action to the script; § 2 finds captures thr
   const s2 = slice(readIf(WRITER), /^## 2\./, /^## 3\./)
   assertHas(s2, `${WRITER} § 2`, [
     `${SCRIPT_CITE} captures`, /inline or block-list `tags:`/, /rewrite § 4b's two fields/,
-    // A follow-up or rollout task that merely links the THREAD.md is never overwritten as a capture.
-    /Only a row whose match\s+includes `thread-tag` is a capture/,
+    // A follow-up or rollout task that merely links the THREAD.md is never listed as a capture.
+    /merely links the THREAD\.md is not a capture\s+and is never listed/,
   ])
   assert.doesNotMatch(s2, /rg -l '\^tags:/, `${WRITER} § 2 must not use the inline-only tags grep`)
   const s7 = slice(readIf(WRITER), /^## 7\./, null)
@@ -84,12 +83,11 @@ test('task-writer § 4 leaves next_action to the script; § 2 finds captures thr
   ])
 })
 
-test('the overwrite rule has one home under skills/', () => {
-  const hits = walk('skills')
-    .map((file) => ({ file, text: readIf(file) }))
-    .filter(({ text }) => text != null && !text.includes('\0') && /most recent\s+set-down wins/.test(text))
-    .map(({ file }) => file)
-  assert.deepEqual(hits, [WRITER], `"most recent set-down wins" should occur only in ${WRITER}, found in: ${JSON.stringify(hits)}`)
+test('the overwrite rule and the dead-link rule each have one home under skills/', () => {
+  const homes = (re) => textFiles('skills').filter(({ text }) => re.test(text)).map(({ file }) => file)
+  assert.deepEqual(homes(/most recent\s+set-down wins/), [WRITER], `"most recent set-down wins" belongs to ${WRITER} only`)
+  // The dead statuses are the script's (its docstring and DEAD_STATUSES); every skill cites it instead.
+  assert.deepEqual(homes(/done,\s+merged/), [SCRIPT], `the dead-status list belongs to ${SCRIPT} only`)
 })
 
 test('stash, defer and close cite task-writer § 4b and its script', () => {
@@ -99,20 +97,20 @@ test('stash, defer and close cite task-writer § 4b and its script', () => {
   ]) {
     const write = slice(readIf(file), step, /^\d+\. /)
     assertHas(write, `${file} "Write the capture task" step`, [
-      'skills/_shared/task-writer.md', /§ 4b\b/, /`next-action\.py set-down`/, /`next_action:`/, /`next_task:`/, /estate ADR 0008/,
+      'skills/_shared/task-writer.md', /§ 4b\b/, /`next-action\.py set-down`/, /estate ADR 0008/,
     ])
   }
   const close = readIf(CLOSE)
-  const sub6 = close == null ? null : (close.split('\n').find((l) => /^ {3}6\. Approved vault tasks/.test(l)) ?? null)
+  const sub6 = lineOf(close, /^ {3}6\. Approved vault tasks/)
   assertHas(sub6, `${CLOSE} step 7.6`, [
     'skills/_shared/task-writer.md', /§ 4b, close's form/, /estate ADR 0008/, /`next-action\.py set-down`/,
-    /no concrete next task, or while a pending handoff doc owns the continuation, write nothing and leave every project slot alone/,
+    /the set-down write for the task step 5 matched/, /with no match, nothing/,
     /Not under `\/thread:open save`/,
     /elsewhere the vault's daily sweep does/,
   ])
-  const step5 = close == null ? null : (close.split('\n').find((l) => /^5\. \*\*Compute the full save set silently\*\*/.test(l)) ?? null)
-  assertHas(step5, `${CLOSE} step 5`, [/its `captures` run is here, before sub-step 7\.6 creates any task/])
-  const step8 = close == null ? null : (close.split('\n').find((l) => /^8\. \*\*Print the "What landed" report/.test(l)) ?? null)
+  const step5 = lineOf(close, /^5\. \*\*Compute the full save set silently\*\*/)
+  assertHas(step5, `${CLOSE} step 5`, [/its `captures --for-close` run is here, before sub-step 7\.6 creates any task/])
+  const step8 = lineOf(close, /^8\. \*\*Print the "What landed" report/)
   assertHas(step8, `${CLOSE} step 8`, [/`next task: \[\[<task>\]\] on <Project>/, /`next task: none \(no concrete next task/])
 })
 
@@ -136,11 +134,11 @@ test('open pickup leaves both fields alone', () => {
 test('orient reads the slot first, proposes against it, fills only blanks', () => {
   const orient = readIf(ORIENT)
   const s2 = slice(orient, /^### 2\./, /^### 3\./)
-  const first = s2 == null ? null : (s2.split('\n').find((l) => l.startsWith('- ')) ?? null)
+  const first = lineOf(s2, '- ')
   assertHas(first, `${ORIENT} § 2 first bullet`, [/^- \*\*Next-action slots, first\*\*/])
   assertHas(slice(s2, /^- \*\*Next-action slots/, /^- /), `${ORIENT} § 2 slot bullet`, [
-    /`next_task:`/, /`next_action:`/, `${SCRIPT_CITE} read`, /\*\*dead link\*\*/, /reads as a blank slot/,
-    /`Archive\/` folder or tagged `archived`/,
+    /`next_task:`/, /`next_action:`/, `${SCRIPT_CITE} read`, /\*\*dead link\*\* \(CONTEXT\.md \*\*Next task\*\*\)/,
+    /reads as a blank slot/, /the script decides which links are dead/,
   ])
   assertHas(slice(orient, /^### 3\./, /^### 4\./), `${ORIENT} § 3`, [
     /`No next action`/, /\*\*proposal against the slot\*\*/, /never read as competing answers/,
@@ -148,11 +146,11 @@ test('orient reads the slot first, proposes against it, fills only blanks', () =
   const write = slice(slice(orient, /^### 5\./, /^### 6\./), /^- \*\*The slot write\*\*/, /^- /)
   assertHas(write, `${ORIENT} § 5 slot write`, [
     /fill-blank only/, /estate ADR 0008/, /but Report-only or a dry run/, `${SCRIPT_CITE} fill <task> [--action -]`,
-    /whose slot is\s+blank/, /only if it is blank/, /A set slot is\s+never overwritten/, /task-writer\.md`\s+§ 4b/,
+    /fills only\s+a blank or dead slot and a blank `next_action:`/, /a set slot is never\s+overwritten/, /task-writer\.md`\s+§ 4b/,
     // Hands-on pickup completes a capture: a pointer to it would be dead on arrival.
     /Skip the write when Hands-on\s+picks the task up/,
   ])
-  assertHas(slice(orient, /^### 5\./, /^### 6\./), `${ORIENT} § 5`, [/\*\*Report-only\*\* → done, no writes \(the slot write included\)/])
+  assertHas(slice(orient, /^### 5\./, /^### 6\./), `${ORIENT} § 5`, [/\*\*Report-only\*\* → done, no writes\./])
   assertHas(slice(orient, /^## Don't/, null), `${ORIENT} § Don't`, [/the slot write included — in Report-only or dry runs/])
 })
 

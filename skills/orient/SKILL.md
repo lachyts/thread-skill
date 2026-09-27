@@ -78,11 +78,10 @@ project roots):
   line is blank), read with
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py read <project>…`
   — one `slot <project> live | blank | dead:<reason> <task> <line>` row
-  each. A link to a task that is done, merged, dropped, archived (under an
-  `Archive/` folder or tagged `archived`) or missing is a **dead link** and
-  reads as a blank slot; the script applies that rule, never judge it by
-  eye. The slot is the project's standing answer; the rest of the sweep is
-  weighed against it.
+  each. A **dead link** (CONTEXT.md **Next task**) reads as a blank slot;
+  the script decides which links are dead, never judge it by eye. The slot
+  is the project's standing answer; the rest of the sweep is weighed
+  against it.
 - **Vault**: the area note + every sub-project note (a note whose
   frontmatter `tags:` includes `project`, never a reference, garden or
   README note) under the vault folder `Work/Projects/<Folder>/`, at any
@@ -135,16 +134,14 @@ almost nothing is parallel-safe, recommend Hands-on):
   mode but Report-only or a dry run, when the recommendation is a task note
   that stays open, run
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py fill <task> [--action -]`
-  (the line on stdin, as task-writer § 4b shows).
-  It sets `next_task:` on each project note the task links whose slot is
-  blank (a dead link counts as blank), with task-writer § 4b's targets and
-  skips, and the task's `next_action:` only if it is blank (grain rule:
-  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 4b). A set slot is
-  never overwritten — only a set-down or Lachy does that; the
-  recommendation stays a proposal against it. Skip the write when Hands-on
+  (the line on stdin, grain rule and targets as
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 4b). It fills only
+  a blank or dead slot and a blank `next_action:`; a set slot is never
+  overwritten — only a set-down or Lachy does that; the recommendation
+  stays a proposal against it. Skip the write when Hands-on
   picks the task up through `open`'s pickup: that completes a capture, so
   the pointer would be dead the moment it landed.
-- **Report-only** → done, no writes (the slot write included).
+- **Report-only** → done, no writes.
 - **Hands-on** (and the focus half of Mixed) → if the item has a THREAD.md or
   capture task, run `open`'s pickup logic; else follow the task note's
   `## Launch` / `## Resume prompt`. No ceremony beyond that.

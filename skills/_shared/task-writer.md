@@ -41,15 +41,14 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py captures \
   [--slug <slug>] [--thread-file <abs path of the THREAD.md>]
 ```
 
-It lists every open (`open`, `in_progress` or `in-progress`) task directly
-under `Work/Tasks/` that is `thread`-tagged (inline or block-list `tags:`),
-is named `<slug>`, or names the THREAD.md in its text, one
-`capture <task> <status> <match,…>` row each. Only a row whose match
-includes `thread-tag` is a capture: a `slug`- or `thread-file`-only row is
-another kind of task (a close follow-up, a rollout task) and is never
-updated as one. Then read the captures: one whose slug matches, or whose
-Notes link the same `THREAD.md`, or whose resume prompt describes the same
-work. Found → **update it in place**: refresh the summary + resume prompt, set/move/remove
+It lists the thread captures — open, `thread`-tagged tasks directly under
+`Work/Tasks/` (inline or block-list `tags:`) — one
+`capture <task> <status> <match,…>` row each, the match adding `slug` or
+`thread-file` when the capture is named `<slug>` or names the THREAD.md. A
+follow-up or rollout task that merely links the THREAD.md is not a capture
+and is never listed. Then read the captures: one whose slug matches, or
+whose Notes link the same `THREAD.md`, or whose resume prompt describes the
+same work. Found → **update it in place**: refresh the summary + resume prompt, set/move/remove
 `scheduled:`, rewrite § 4b's two fields, leave `captured:` as the original date. Never write a second
 task for the same thread. Re-deferring is a reschedule, not a new capture.
 
@@ -180,8 +179,8 @@ that no longer parses, is refused. It skips (never guesses at) an area
 landing note (`tags: [area]`), an archived, ambiguous or noteless link, or
 a note it cannot edit safely. Each outcome is one output row
 (`project … written`, `skip <link> <reason>`). Exit 2 refuses the whole
-write and changes nothing: a done, merged, dropped or archived task (the
-pointer would be dead), or an action that is blank or spans lines. Exit 3
+write and changes nothing: a dead task (the pointer would be dead), or an
+action that is blank or spans lines. Exit 3
 means no vault or no PyYAML (`python3 -m pip install pyyaml`). Either way
 the capture stands: say `Next action not written: <stderr>` in the
 confirmation, and never retry the write by hand.
@@ -190,14 +189,13 @@ confirmation, and never retry the write by hand.
 task, and never invents one. It stands down entirely — neither field — while
 a pending handoff doc owns the thread's continuation (ADR 0017). Otherwise
 its task is matched **concretely**, first hit wins: (1) this thread's
-capture — a `captures --slug <thread slug> --thread-file <THREAD.md>` row,
-run in close's step 5 before sub-step 6 creates any task, whose match
-includes `thread-tag` and also `slug` or `thread-file`; (2) the one task
-THREAD.md's Resume instructions name by `[[link]]` as the next step (a
-rollout task, say); (3) the one follow-up Lachy approved at close that
-carries the thread's next step. A row matched only by `thread-file` (a
-follow-up that merely links the THREAD.md) or only by `thread-tag` (similar
-work) never qualifies by itself, and a loose end never qualifies. Its `--action` is the next step this close
+capture — the one row of `captures --slug <thread slug> --thread-file
+<THREAD.md> --for-close`, run in close's step 5, before step 7.6 creates
+any task (the flag keeps only a capture named for the thread or naming its
+THREAD.md; a capture that merely describes similar work never qualifies);
+(2) the one task THREAD.md's Resume instructions name by `[[link]]` as the
+next step (a rollout task, say); (3) the one follow-up Lachy approved at
+close that carries the thread's next step. A loose end never qualifies. Its `--action` is the next step this close
 writes into THREAD.md's Resume instructions — never an older capture's
 `Next move:`, which may be stale. No such task, or more than one with
 nothing to choose between them → write neither field and leave every
