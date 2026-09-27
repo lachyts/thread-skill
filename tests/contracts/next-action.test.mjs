@@ -36,12 +36,16 @@ test('task-writer § 4b is the set-down write, through the script', () => {
     // The write is the script, never a hand edit of YAML.
     /\*\*The write — never by hand\.\*\*/,
     `${SCRIPT_CITE} set-down`,
+    /--action - <<'EOF'/,
+    /never put the line in shell quotes/,
+    /re-parses every edit before saving/,
+    /Exit 3\s+means no vault or no PyYAML/,
     /never retry the write by hand/,
     // The project pointer: every linked project note, never an area note.
     /for every link in the task's\s+`projects:`/,
     'next_task: "[[<task-basename>]]"',
-    /`tags:` include `project`/,
-    /area landing note/,
+    /`tags:` include\s+`project`/,
+    /area\s+landing note/,
     // The pointer never lands before its target.
     /The task\s+file goes first/,
   ])
@@ -52,8 +56,11 @@ test('task-writer § 4b gives close a no-invention form', () => {
   assertHas(close, `${WRITER} § 4b "Close's form"`, [
     /never invents one/,
     /pending handoff doc owns the thread's continuation/,
-    /captures --slug <thread slug>\s+--thread-file <THREAD\.md>/,
+    /captures --slug <thread slug> --thread-file <THREAD\.md>/,
     /matched \*\*concretely\*\*/,
+    /before sub-step 6 creates any task/,
+    /includes `thread-tag` and also `slug` or `thread-file`/,
+    /only by `thread-file`[\s\S]*never qualifies by itself/,
     /a\s+loose end never qualifies/,
     /never an older capture's\s+`Next move:`/,
     /write neither field and leave every\s+project slot as it is/,
@@ -65,10 +72,16 @@ test('task-writer § 4 leaves next_action to the script; § 2 finds captures thr
   assert.doesNotMatch(s4 ?? '', /^next_action:/m, `${WRITER} § 4's template must not hand-write next_action`)
   assertHas(s4, `${WRITER} § 4`, [/`next_action:` is not in this template/])
   const s2 = slice(readIf(WRITER), /^## 2\./, /^## 3\./)
-  assertHas(s2, `${WRITER} § 2`, [`${SCRIPT_CITE} captures`, /inline or block-list `tags:`/, /rewrite § 4b's two fields/])
+  assertHas(s2, `${WRITER} § 2`, [
+    `${SCRIPT_CITE} captures`, /inline or block-list `tags:`/, /rewrite § 4b's two fields/,
+    // A follow-up or rollout task that merely links the THREAD.md is never overwritten as a capture.
+    /Only a row whose match\s+includes `thread-tag` is a capture/,
+  ])
   assert.doesNotMatch(s2, /rg -l '\^tags:/, `${WRITER} § 2 must not use the inline-only tags grep`)
   const s7 = slice(readIf(WRITER), /^## 7\./, null)
-  assertHas(s7, `${WRITER} § 7`, [/Next action: <the § 4b line>/, /next task on <Project>/])
+  assertHas(s7, `${WRITER} § 7`, [
+    /Next action: <the § 4b line>/, /next task on <Project>/, /every `skip` row with its reason/, /Next action not written: <stderr>/,
+  ])
 })
 
 test('the overwrite rule has one home under skills/', () => {
@@ -97,6 +110,8 @@ test('stash, defer and close cite task-writer § 4b and its script', () => {
     /Not under `\/thread:open save`/,
     /elsewhere the vault's daily sweep does/,
   ])
+  const step5 = close == null ? null : (close.split('\n').find((l) => /^5\. \*\*Compute the full save set silently\*\*/.test(l)) ?? null)
+  assertHas(step5, `${CLOSE} step 5`, [/its `captures` run is here, before sub-step 7\.6 creates any task/])
   const step8 = close == null ? null : (close.split('\n').find((l) => /^8\. \*\*Print the "What landed" report/.test(l)) ?? null)
   assertHas(step8, `${CLOSE} step 8`, [/`next task: \[\[<task>\]\] on <Project>/, /`next task: none \(no concrete next task/])
 })
@@ -132,7 +147,7 @@ test('orient reads the slot first, proposes against it, fills only blanks', () =
   ])
   const write = slice(slice(orient, /^### 5\./, /^### 6\./), /^- \*\*The slot write\*\*/, /^- /)
   assertHas(write, `${ORIENT} § 5 slot write`, [
-    /fill-blank only/, /estate ADR 0008/, /but Report-only or a dry run/, `${SCRIPT_CITE} fill`,
+    /fill-blank only/, /estate ADR 0008/, /but Report-only or a dry run/, `${SCRIPT_CITE} fill <task> [--action -]`,
     /whose slot is\s+blank/, /only if it is blank/, /A set slot is\s+never overwritten/, /task-writer\.md`\s+§ 4b/,
     // Hands-on pickup completes a capture: a pointer to it would be dead on arrival.
     /Skip the write when Hands-on\s+picks the task up/,

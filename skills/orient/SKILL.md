@@ -134,7 +134,8 @@ almost nothing is parallel-safe, recommend Hands-on):
 - **The slot write** (fill-blank only — estate ADR 0008 decision 4): in every
   mode but Report-only or a dry run, when the recommendation is a task note
   that stays open, run
-  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py fill <task> [--action '<line>']`.
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py fill <task> [--action -]`
+  (the line on stdin, as task-writer § 4b shows).
   It sets `next_task:` on each project note the task links whose slot is
   blank (a dead link counts as blank), with task-writer § 4b's targets and
   skips, and the task's `next_action:` only if it is blank (grain rule:

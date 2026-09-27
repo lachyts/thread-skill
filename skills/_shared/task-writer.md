@@ -41,12 +41,15 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py captures \
   [--slug <slug>] [--thread-file <abs path of the THREAD.md>]
 ```
 
-It lists every `open` or `in_progress` task under `Work/Tasks/` that is
-`thread`-tagged (inline or block-list `tags:`), is named `<slug>`, or names
-the THREAD.md in its body, one `capture <task> <status> <match,…>` row each.
-Then read the hits: an open task whose slug matches, or whose Notes link the same
-`THREAD.md`, or whose resume prompt describes the same work. Found → **update
-it in place**: refresh the summary + resume prompt, set/move/remove
+It lists every open (`open`, `in_progress` or `in-progress`) task directly
+under `Work/Tasks/` that is `thread`-tagged (inline or block-list `tags:`),
+is named `<slug>`, or names the THREAD.md in its text, one
+`capture <task> <status> <match,…>` row each. Only a row whose match
+includes `thread-tag` is a capture: a `slug`- or `thread-file`-only row is
+another kind of task (a close follow-up, a rollout task) and is never
+updated as one. Then read the captures: one whose slug matches, or whose
+Notes link the same `THREAD.md`, or whose resume prompt describes the same
+work. Found → **update it in place**: refresh the summary + resume prompt, set/move/remove
 `scheduled:`, rewrite § 4b's two fields, leave `captured:` as the original date. Never write a second
 task for the same thread. Re-deferring is a reschedule, not a new capture.
 
@@ -158,33 +161,43 @@ gives its first physical one. A re-capture (§ 2) rewrites it with the new
 
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py set-down \
-  ~/repos/obsidian/Work/Tasks/<slug>.md --action '<the line>'
+  ~/repos/obsidian/Work/Tasks/<slug>.md --action - <<'EOF'
+<the line>
+EOF
 ```
+
+`--action -` takes the line on stdin, so an apostrophe or any other
+character needs no escaping; never put the line in shell quotes.
 
 It sets the task's `next_action:`, then, for every link in the task's
 `projects:`, sets `next_task: "[[<task-basename>]]"` on that project note:
-the one note of that name under `~/repos/obsidian/Work/Projects/**` (never
-`Archive/`) whose `tags:` include `project`, in either list form. The task
-file goes first, so the pointer never lands before its target. It touches
-one frontmatter line per note and nothing else, always double-quotes the
-value, and skips (never guesses at) an area landing note (`tags: [area]`),
-an archived, ambiguous or noteless link, or a note whose frontmatter it
-cannot edit safely. Each outcome is one output row (`project … written`,
-`skip <link> <reason>`). Exit 2 refuses the whole write and changes
-nothing: a done, merged, dropped or archived task (the pointer would be
-dead), or an action that is blank or spans lines. Say so in the
-confirmation; never retry the write by hand.
+the one note the link resolves to (as Obsidian resolves it) under
+`~/repos/obsidian/Work/Projects/**` (never `Archive/`) whose `tags:` include
+`project`. The task file goes first, so the pointer never lands before its
+target. It reads frontmatter with PyYAML, changes one line per note, and
+re-parses every edit before saving: any change to another key, or YAML
+that no longer parses, is refused. It skips (never guesses at) an area
+landing note (`tags: [area]`), an archived, ambiguous or noteless link, or
+a note it cannot edit safely. Each outcome is one output row
+(`project … written`, `skip <link> <reason>`). Exit 2 refuses the whole
+write and changes nothing: a done, merged, dropped or archived task (the
+pointer would be dead), or an action that is blank or spans lines. Exit 3
+means no vault or no PyYAML (`python3 -m pip install pyyaml`). Either way
+the capture stands: say `Next action not written: <stderr>` in the
+confirmation, and never retry the write by hand.
 
 **Close's form.** `close` writes only when the thread has a concrete next
 task, and never invents one. It stands down entirely — neither field — while
 a pending handoff doc owns the thread's continuation (ADR 0017). Otherwise
-its task is an open (`open` or `in_progress`) task that carries this
-thread's continuation, found by `captures --slug <thread slug>
---thread-file <THREAD.md>` and matched **concretely** (a `slug` or
-`thread-file` match — a `thread-tag`-only row whose resume prompt merely
-describes similar work does not qualify), or, failing that, the one
-follow-up Lachy approved at close that carries the thread's next step (a
-loose end never qualifies). Its `--action` is the next step this close
+its task is matched **concretely**, first hit wins: (1) this thread's
+capture — a `captures --slug <thread slug> --thread-file <THREAD.md>` row,
+run in close's step 5 before sub-step 6 creates any task, whose match
+includes `thread-tag` and also `slug` or `thread-file`; (2) the one task
+THREAD.md's Resume instructions name by `[[link]]` as the next step (a
+rollout task, say); (3) the one follow-up Lachy approved at close that
+carries the thread's next step. A row matched only by `thread-file` (a
+follow-up that merely links the THREAD.md) or only by `thread-tag` (similar
+work) never qualifies by itself, and a loose end never qualifies. Its `--action` is the next step this close
 writes into THREAD.md's Resume instructions — never an older capture's
 `Next move:`, which may be stale. No such task, or more than one with
 nothing to choose between them → write neither field and leave every
@@ -305,8 +318,9 @@ One compact confirmation, always echoing the concrete outcome:
 - defer: `→ [[<slug>]] scheduled **Mon 20 Jul** — on that day page's To do list. <Project>.`
 - stash: `→ [[<slug>]] stashed (no date) — resurfaces in /weekly's Stashed threads. <Project>.`
 - then, for both: `Next action: <the § 4b line> — next task on <Project>, …` naming each
-  project note § 4b's `set-down` wrote, plus any `projects:` link it skipped as `no note`
-  or `ambiguous` (§ 1.5's `[[Vault]]` umbrella has no note by design and is not named).
+  project note § 4b's `set-down` wrote, then every `skip` row with its reason, except an
+  `area note` and § 1.5's `[[Vault]]` umbrella (`no note` by design) — or
+  `Next action not written: <stderr>` when the script refused.
 
 Render the task link clickable (`obsidian://open?...` per the global link
 rules). When § 5 **Lean capture** leaves unlanded research — a THREAD.md
