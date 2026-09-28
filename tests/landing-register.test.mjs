@@ -353,7 +353,8 @@ test('an unknown subcommand', () => assertError(run(['frob', '/tmp'])))
 test('--slug that is not owner/name', () => assertError(check(['--slug', 'not-a-slug'])))
 test('--slug with three segments', () => assertError(check(['--slug', 'a/b/c'])))
 for (const slug of ['../..', 'Animately/..', 'Animately/.', '-Animately/imgproxy', '.Animately/imgproxy']) {
-  test(`--slug ${slug} is not a repo: exit 2`, () => assertError(check(['--slug', slug])))
+  // --slug=: a value starting with `-` would otherwise be read as a flag, not reach parse_slug.
+  test(`--slug ${slug} is not a repo: exit 2`, () => assertError(check([`--slug=${slug}`]), /--slug is not/))
 }
 test('an empty repo path is exit 2, never the current directory', () => {
   // Run from inside a listed repo: were "" read as ".", this would print `listed`.
