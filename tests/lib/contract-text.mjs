@@ -46,3 +46,44 @@ export const textFiles = (d) => walk(d)
 // The first line of `text` matching `re` (a string matches as a prefix), or null — null text included.
 export const lineOf = (text, re) =>
   text?.split('\n').find((l) => (typeof re === 'string' ? l.startsWith(re) : re.test(l))) ?? null
+
+// Whitespace collapsed to single spaces, so a reflowed line can neither hide nor fake a match.
+export const collapse = (s) => s.replace(/\s+/g, ' ')
+
+// The fence rule refs.test uses: a line opening with ``` or ~~~ (after whitespace) toggles.
+export const FENCE = /^\s*(```|~~~)/
+
+// Fenced blocks as arrays of their inner lines.
+export function fencedBlocks(text) {
+  const blocks = []
+  let cur = null
+  for (const l of text.split('\n')) {
+    if (FENCE.test(l)) {
+      if (cur) { blocks.push(cur); cur = null } else cur = []
+      continue
+    }
+    if (cur) cur.push(l)
+  }
+  return blocks
+}
+
+// From the first line matching `startRe` up to (not including) the next `##`/`###` heading outside a
+// fence, so a fenced example with a `## …` line inside it can't cut the section short. Null if absent.
+export function section(text, startRe) {
+  if (text == null) return null
+  const lines = text.split('\n')
+  const start = lines.findIndex((l) => startRe.test(l))
+  if (start < 0) return null
+  const out = [lines[start]]
+  let inFence = false
+  for (const l of lines.slice(start + 1)) {
+    if (FENCE.test(l)) inFence = !inFence
+    else if (!inFence && /^#{2,3} /.test(l)) break
+    out.push(l)
+  }
+  return out.join('\n')
+}
+
+// How many skills the plugin ships: directories under skills/ holding a SKILL.md (`_shared` holds none).
+export const skillCount = () => fs.readdirSync(path.join(root, 'skills'), { withFileTypes: true })
+  .filter((e) => e.isDirectory() && fs.existsSync(path.join(root, 'skills', e.name, 'SKILL.md'))).length

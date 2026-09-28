@@ -2,30 +2,40 @@
 
 Orient § 5 runs this after Lachy picks **Reshuffle** (or at once for a scoped target). It takes the
 target's open work, sorts it, grills what is unclear, and writes the result at one gate. It carries
-the machinery of the retired `split` and `gather` verbs (ADR 0027): gather's roadmap forming and
-renames, split's decomposition and task writing.
+the machinery of the retired `split` and `gather` verbs (ADR 0027): roadmap forming and renames,
+decomposition and task writing.
 
 **Write surface.** `~/repos/obsidian/Work/Tasks/`, `~/repos/obsidian/Work/Phases/`, the target
 project note and, for pull-ins, the source project's phase and task notes (the moved notes
 themselves, pointer lines, and retiring a phase the move emptied). When R3 grills **with
-docs**, the interview also writes `CONTEXT.md` + `docs/adr/` in the **resolved project repo**, and
-nothing else outside the vault. Never git/gh. Never stamps `wave:`, `rollout:` or `scope:`: orient
-§ 6 hands wave-shaped phases to schedule, which owns those.
+docs**, the interview also writes `CONTEXT.md` + `docs/adr/` in the **resolved project repo**
+(never committed here: orient § 6 holds scheduling until they land). Nothing else outside the
+vault: out-of-vault backlinks are reported, not rewritten (R5.3). Never git/gh. Never stamps
+`wave:`, `rollout:` or `scope:`: orient § 6 hands wave-shaped phases to schedule, which owns them.
+
+## Scoped targets
+
+A single-note target resolves its project like this, and the gate confirms it:
+
+- A note with `projects:` → that project. A phase note (`tags: [phase]`, or a legacy task-tagged
+  note named `<project>-p<N>-…` or reading "Phase N of [[Project]]") → its **parent** project,
+  and every task inherits phase N, never a nested counter.
+- A note with no `projects:` is its own project: its title is the slug and it becomes the project
+  note (gains `project` in `tags:` and R5.6's surfacing).
+- A plan file or inline prose has no vault node: match it to an existing project where one fits,
+  else derive the slug from its title.
 
 ## R1. The item set
 
-Walk `~/repos/obsidian/Work/Tasks/*.md` and `~/repos/obsidian/Work/Phases/*.md` for the target
-project(s) (`projects:` contains the wikilink; for phase notes, filenames `<slug>-p<N>-…` where
-`<N>` is digits with an optional `.digits`: anchored on `-p<N>-` like `reconcile-project.py`, so a
-sibling project `<slug>-plugin` never matches, though that script only reads whole-number phases). Skip notes tagged `rollout` and landed statuses
-(`done`, `merged`, `dropped`). Give every item its **reach tier** (CONTEXT.md **Reach tiers**);
-this is the one definition of in flight, which orient § 2 reports from:
+Classify from orient § 2's frontmatter sweep; don't walk the folders again. The target project(s)
+are the notes whose `projects:` contains the wikilink and, for phase notes, filenames
+`<slug>-p<N>-…` where `<N>` is digits with an optional `.digits`: anchored on `-p<N>-` like
+`reconcile-project.py`, so a sibling project `<slug>-plugin` never matches, though that script
+only reads whole-number phases. Skip notes tagged `rollout` and landed statuses (`done`, `merged`,
+`dropped`). Give every item its **reach tier** (CONTEXT.md **Reach tiers**):
 
-- **In flight — frozen.** A task stamped `wave:`/`rollout:` whose rollout note is still live (the
-  link resolves to a note in `Work/Tasks/` root), a `dispatched:` stamp ≤ 7 days old, or
-  `status: in-progress` (TaskNotes' own spelling), `in_progress` or `review`; a phase with any
-  such member. Shown for context. Its scope, phase and body never change. New work may still join
-  its phase.
+- **In flight — frozen.** Orient § 2's definition. Shown for context. Its scope, phase and body
+  never change. New work may still join its phase.
 - **Possibly landed — frozen too.** Anything on the reconcile step's AMBIGUOUS list (orient § 2):
   it may already have merged, so it is listed for Lachy and never moved, restamped or scheduled.
 - **Thread captures — frozen too.** A `thread`-tagged task (stash/defer's capture) belongs to its
@@ -43,17 +53,16 @@ decomposes it and R5.5 slims it, as for a scoped design note.
 Add the **related projects** orient § 2 found: their unstarted and loose items that overlap the
 target are candidates to **pull in**. Their in-flight items stay where they are.
 
-**Scoped target** (a single note, plan file or inline prose): the item set is that source alone,
-plus any tasks already written from it. The project's roadmap is read only for numbering.
+**Scoped target**: the item set is that source alone, plus any tasks already written from it. The
+project's roadmap is read only for numbering.
 
-Then read the roadmap numbering: `Work/Phases/<slug>-p<N>-…` (and `Work/Phases/Archive/`), with
-the same numeric anchor → the max phase number `N_max` and, per phase, the max task ordinal `M`
-(from `Work/Tasks/<slug>-p<N>-<M>-*` filenames, archived included, and from the struck-through
-entries R5.2 leaves in a phase's `## Build sequence` when a task moves out: an ordinal is never
-reused). Fractional phases keep the dot (`p3.5`); a fractional `N_max` rounds
-up to the next whole phase, which is the first new one (`p3.5` → P4). Otherwise new phases number
-from `N_max + 1` (P1 when the project has none);
-existing phase numbers are **never** changed.
+**Numbering**, from one listing of `Work/Phases/` (Archive included) and the task filenames:
+`N_max` is the highest phase number; per phase, `M` is the highest ordinal among
+`<slug>-p<N>-<M>-*` filenames (archived included) and the struck-through entries R5.2 leaves in a
+phase's `## Build sequence` when a task moves out, so an ordinal is never reused. New phases
+number from `N_max + 1` (P1 when the project has none); a fractional `N_max` rounds up to the
+next whole phase, which is the first new one (`p3.5` → P4). Fractional naming otherwise follows
+`add-phase.md` § Step 3. Existing phase numbers are **never** changed.
 
 ## R2. Sort and propose
 
@@ -74,30 +83,30 @@ plus lists for everything that is not a plain phase membership:
 - **Re-home** — a loose item that belongs to another project; **pull in** — a related project's
   unstarted or loose item that belongs here.
 - **Misfits** — items that stay loose. Loose is a valid end state; not everything must be phased.
-- **Frozen context** — the in-flight items, read-only, so the proposal can be read against them.
+- **Frozen context** — the frozen items, read-only, so the proposal can be read against them.
 
 A task may join an **existing** phase (in-flight ones included) when it clearly belongs there.
 This is **a proposal, never a decision**: every row is an input to R3's interview or R4's gate.
 
-**Decomposing a plan** (scoped targets and large unbundles). A task is **one independently
-shippable, separately verifiable unit** (about one PR, one coherent change). A distinct artifact is
-one task; "and then" or "depends on the above" is a dependency or a phase boundary, not necessarily
-a new task; a change spanning many files as one coherent edit is still one task. Don't manufacture
-same-file clusters that schedule would re-merge. For each task capture a one-line scope, the
-repo/cwd, the process (Spec Kit or freeform) and the runnable prompt. Record `touches:` only from
-file paths the source actually names; when files aren't inferable, omit it and let schedule
-resolve it. Record dependencies ("needs X", "after X lands") as `[[task]]` links. Phases: if the
-source **states phases**, honour them; otherwise infer them as dependency layers numbered from
-`N_max + 1` (tasks that depend on nothing form the first new phase, tasks depending only on those
-the next, and so on). A phase-note source is a single phase: its tasks inherit its number and its
-**parent** project slug (from `projects:`), never a nested counter.
+**Decomposing a plan** (scoped targets, undecomposed project notes and large unbundles). A task is
+**one independently shippable, separately verifiable unit** (about one PR, one coherent change),
+not a step. A distinct artifact is one task; "and then" or "depends on the above" is a dependency
+or a phase boundary, not necessarily a new task; a change spanning many files as one coherent edit
+is still one task, and two tasks editing the same file as one change are one task. For each task
+capture a one-line scope, the repo/cwd, the process (Spec Kit or freeform) and the runnable prompt.
+Record `touches:` only from file paths the source actually names, never a guess; when files aren't
+inferable, omit it and let schedule resolve it. Record dependencies ("needs X", "after X lands") as
+`[[task]]` links. Phases: if the source **states phases**, honour them; otherwise infer them as
+dependency layers numbered from `N_max + 1` (tasks that depend on nothing form the first new
+phase, tasks depending only on those the next, and so on).
 
 ## R3. Grill the unclear
 
 A full-depth interview, one question at a time, recommended answer first, resolving:
 
 - **(a) roadmap meaning** — phase names, ordering, membership, moves, drops, unbundles, re-homes
-  and pull-ins. The human decides; the reshuffle never invents a phase silently.
+  and pull-ins. The human decides; the reshuffle never invents a phase silently or force-phases a
+  misfit.
 - **(b) per-item speccing** — every unclear item gets its decisions grilled into a real body (goal,
   runnable prompt, verify line, the shape `add-task.md` prescribes). An unbundled task quotes its
   slice of the brain dump verbatim as **His words**.
@@ -134,17 +143,18 @@ granularity is corrected cheaply: nothing exists yet.
 
 ## R5. Write
 
-Note shape belongs to the writer specs; reference them, never duplicate the schema:
-`~/repos/workspaces/_shared/knowledge/add-writers/add-phase.md` (phase notes) and `add-task.md`
+Note shape belongs to the writer specs; reference them, never duplicate the schema, all under
+`~/repos/workspaces/_shared/knowledge/add-writers/`: `add-phase.md` (phase notes, including
+dedupe and project-note surfacing), `add-project.md` (a new project note), and `add-task.md`
 § Step 4 (frontmatter, `## Notes` body, its *Phased task* bullet) plus, for a task with a launch
 signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch context (its
 `## Launch` and `## Resume prompt` blocks).
 
-1. **Phase notes** — `Work/Phases/<slug>-p<N>-<kebab-desc>.md`, numbered from `N_max + 1`. An
-   existing phase gaining members is **edited** (its `## Build sequence` extended), never
-   duplicated. A retired phase gets `status: dropped` and one line naming where its members went.
-2. **Tasks**, each as `Work/Tasks/<slug>-p<N>-<M>-<kebab-desc>.md` (`M` = the phase's next free
-   ordinal) with `phase: N`:
+1. **Phase notes** — `Work/Phases/<slug>-p<N>-<kebab-desc>.md`, numbered from `N_max + 1`; an
+   existing phase gaining members is edited per `add-phase.md` § Step 2. A retired phase gets
+   `status: dropped` and one line naming where its members went.
+2. **Tasks**, each as `Work/Tasks/<slug>-p<N>-<M>-<kebab-desc>.md` (`M` = one past R1's highest
+   ordinal for the phase) with `phase: N`:
    - **New tasks** (unbundles, decomposed plans) add only what the reshuffle knows on top of the
      spec: `work_depth:` (shallow / standard / deep) from size; `touches:` from R2, omitted when
      not inferable; `## Notes` opening `**Phase N · Task M** of [[<Project>]]`, then the process,
@@ -158,58 +168,51 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      `## Build sequence`, struck through with a pointer (`~~p3-2~~ moved to [[<new-slug>]]`), so
      its ordinal stays used.
    - Leave **`wave:` unset**. Don't set `scope:`: schedule infers it from `touches:`.
-3. **Renames rewrite backlinks.** Before each rename check the target basename is free, then find
-   every link to the old slug and rewrite it to the new one (wikilinks don't follow a filesystem
-   rename). A link is `[[old-slug` followed by `]]`, `|`, `\|` or `#`, so aliased and heading
-   links are caught and `[[old-slug-more]]` is not. Rewrite inside the vault only. Links outside
-   it (`~/Projects/**/THREAD.md`, `~/repos/workspaces/_shared/threads/`, the project repo's
-   `THREAD.md` and `docs/handoffs/`) are searched and **listed in the report** for Lachy, never
-   edited: they are committed files in other repos. Find candidates with `/usr/bin/grep -rlF '[[old-slug'` (the
-   Bash tool's `rg`/`grep` are shell functions a script can't call), then rewrite only the
-   terminated forms. Exclude `.git`, `.obsidian`, `.smart-env` and `.trash`: a plain vault-wide
-   rewrite corrupts Smart Connections' `.smart-env/*.ajson` cache.
+3. **Renames rewrite backlinks, in one pass.** First check every target basename is free, in one
+   listing. Then write all the old slugs to a file and find the files that mention any of them
+   with one `/usr/bin/grep -rlF -f <old-slugs-file>` (the Bash tool's `rg`/`grep` are shell
+   functions a script can't call), excluding `.git`, `.obsidian`, `.smart-env` and `.trash`: a
+   plain vault-wide rewrite corrupts Smart Connections' `.smart-env/*.ajson` cache. In each hit,
+   rewrite every old→new pair in one edit. A link is `[[old-slug` followed by `]]`, `|`, `\|` or
+   `#`, so aliased and heading links are caught and `[[old-slug-more]]` is not. Rewrite inside the
+   vault only. Links outside it (`~/Projects/**/THREAD.md`, `~/repos/workspaces/_shared/threads/`,
+   the project repo's `THREAD.md` and `docs/handoffs/`) are found by the same search and **listed
+   in the report** for Lachy, never edited: they are committed files in other repos.
 4. **Other dispositions.** An unbundled brain dump gets an `## Unbundled into` list of its tasks;
    it is marked `status: done` only when every idea in it was unbundled. If the grill stopped
-   first, it stays open with the unreached ideas in its body, for the next reshuffle. A merged-away item gets `status: dropped` and `Merged into [[<survivor>]]`; a
-   dropped item gets `status: dropped` and a one-line reason. A re-homed item's `projects:` is
-   switched. A pulled-in item is renamed into the target's roadmap, its `projects:` switched to
-   the target, and its source phase note gains a pointer line
+   first, it stays open with the unreached ideas in its body, for the next reshuffle. A
+   merged-away item gets `status: dropped` and `Merged into [[<survivor>]]`; a dropped item gets
+   `status: dropped` and a one-line reason. A re-homed item's `projects:` is switched. A
+   pulled-in item is renamed into the target's roadmap, its `projects:` switched to the target,
+   and its source phase note gains a pointer line
    (`Moved to [[<new-slug>]] (orient reshuffle, <date>)`); a source phase the move emptied is
    retired (`status: dropped`, naming where its members went).
 5. **Scoped source disposition.** A vault source note gets a single delimited `## Build sequence`
    section: a numbered, phase-grouped `[[task]]` outline. Replace only that section, idempotently,
    never clobbering the rest. A phase-note source is also brought up to the Phase shape
    (`add-phase.md`): a legacy task-tagged note swaps `task` → `phase` in `tags:`, gains `phase: N`,
-   moves to `Work/Phases/` and carries the embedded task base. A plan-file or inline source that orient
-   § 1 matched to an existing project writes nothing to the project note beyond item 6 (its
-   phase notes carry the outline). Only when no project exists does it create one at
-   `Work/Projects/<Area>/<Project>.md` (project frontmatter, Bases block, the `## Build sequence`
-   outline), after checking the path is free.
-6. **Two-block surfacing** — ensure the project note carries the two always-visible base blocks
-   (open-tasks list + stacked Phases table; shape from `_System/Templates/Project.md`, copy from a
-   sibling like `[[GifLab]]`), **only if absent**.
+   moves to `Work/Phases/` and carries the embedded task base. A plan-file or inline source matched
+   to an existing project writes nothing to the project note beyond item 6 (its phase notes carry
+   the outline). Only when no project exists does it create one, per `add-project.md` (its dedupe
+   and Step 3), then add the `## Build sequence` outline.
+6. **Surfacing** — the project note's base blocks, per `add-phase.md` § Step 4: add whichever
+   are missing, never a second copy.
 7. **Misfits and unresolved items stay loose**, untouched apart from backlink rewrites.
 
 **Report**: phases as clickable `obsidian://` links, renames, the other dispositions, surfacing
-status, misfits, and what the grill left unresolved. Orient § 6 routes from here.
+status, misfits, out-of-vault links to fix, and what the grill left unresolved. Orient § 6 routes
+from here.
 
 ## Don'ts
 
-- **Don't touch in-flight work or thread captures** beyond adding new members to an in-flight
-  phase.
-- **Don't invent phases silently** or force-phase a misfit.
-- **Don't renumber.** Existing phases and ordinals are immutable; new phases number from
-  `N_max + 1`, joins take the next free `M`.
-- **Don't over-split.** Coherent PR-sized units, not steps; two tasks editing the same file as one
-  change are one task.
-- **Don't guess `touches:`.** Only paths the source names.
+The rules above are the contract; these are the ones most easily broken.
+
+- **Don't touch frozen items** (in flight, possibly landed, thread captures) beyond adding new
+  members to an in-flight phase.
+- **Don't renumber.** Existing phases and ordinals are immutable, and an ordinal is never reused.
 - **Don't write before the R4 gate**, and don't rename without the basename check and the
   backlink rewrite.
-- **Don't stamp `wave:`, `rollout:` or `scope:`**: those belong to schedule.
 - **Don't copy the grill skills' instructions inline**: invoke `grill-with-docs` / `grill-me` by
   name; the inline shape is only the no-skills fallback.
-- **Don't write outside the vault**, except `CONTEXT.md` / `docs/adr/` in the resolved project
-  repo via the grill-with-docs surface during R3 (never committed here: orient § 6 holds
-  scheduling until they land). Out-of-vault backlinks are reported, not rewritten.
-- **Don't duplicate the writer-spec schema**: note shape lives in `add-writers/add-task.md` (tasks)
-  and `add-writers/add-phase.md` (phases).
+- **Don't duplicate the writer-spec schema**: note shape lives in `add-writers/add-task.md`,
+  `add-writers/add-phase.md` and `add-writers/add-project.md`.

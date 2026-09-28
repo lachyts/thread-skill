@@ -43,7 +43,7 @@ not supply the detached Wave hook/heartbeat driver.
 ## Invocation forms
 
 ```
-/thread:orient Chorus                     # audit, then Reshuffle / Look only
+/thread:orient Chorus                     # audit, then Reshuffle / Steer only / Look only
 /thread:orient [[Chorus]]                 # explicit wikilink form
 /thread:orient                            # infer the area from CWD
 /thread:orient [[<design, phase or brain-dump note>]]   # scoped reshuffle of that note
@@ -64,12 +64,8 @@ Accept a fuzzy target and resolve it to (area, vault folder, workspace, project 
   (`~/repos/workspaces/_shared/workspace-registry.md`).
 - **A single-note target** → a **scoped reshuffle**: a wikilink or vault path to a note that is not
   a project or area note (a design, phase or brain-dump note), a plan file path, or quoted prose.
-  The project slug is the note's `projects:` entry; for a phase note (`tags: [phase]`, or a legacy
-  task-tagged note named `<project>-p<N>-…` or reading "Phase N of [[Project]]") it is the
-  **parent** project, and phase N is inherited. A note with no `projects:` is its own project,
-  as split treated it: its title is the slug and it becomes the project note (gains `project` in
-  `tags:` and R5.6's base blocks), confirmed at the gate. A plan file or prose has no vault node: match it to an existing
-  project where one fits, else derive the slug from its title; confirm either way. The area and vault folder then follow from that project.
+  Its project comes from `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § Scoped targets; the area and vault folder follow from
+  that project.
 - **Bare invocation** → infer the area from CWD (workspace dir, project root,
   or a repo matched via `repos:` frontmatter across
   `~/repos/obsidian/Work/Projects/**`).
@@ -87,8 +83,7 @@ Accept a fuzzy target and resolve it to (area, vault folder, workspace, project 
   from the registry, with no scoped MCP profiles.
 - Ambiguous → `AskUserQuestion` with the 2–3 most likely areas.
 
-A scoped target narrows § 2 to the resolved project and skips § 4's question: pointing orient at a
-note is already the instruction to shape it.
+A scoped target narrows § 2 to the resolved project.
 
 ### 2. Audit (read-only sweep)
 
@@ -107,11 +102,13 @@ note is already the instruction to shape it.
   depth; `Work/Tasks/` frontmatter sweep (`rg` for
   `projects:` matching the area or its projects — collect `status`,
   `priority`, `scheduled`, `due`, `dispatched`, `launch`, `phase`, `wave`,
-  `rollout`); phase notes in `Work/Phases/` for the area's projects.
+  `rollout`, `tags`, `projects`); phase notes in `Work/Phases/` for the area's projects. The
+  reshuffle classifies from this sweep; it does not walk the folders again.
 - **Threads**: THREAD.md state lines across the area's project dirs
   (`~/Projects/<Area>/*/THREAD.md`) and `_shared/threads/`.
-- **Drift** (ADR 0026): run the shared reconcile step as a dry run for each project in the target,
-  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/reconcile-project.py --project <slug>`,
+- **Drift** (ADR 0026): run the shared reconcile step as a dry run for every project in the target
+  in one Bash call,
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/reconcile-project.py --project <slug> --json`,
   and keep its UNAMBIGUOUS and AMBIGUOUS lists. It writes nothing.
 - **Related projects**: projects the target's notes link or name, and projects linking the
   target, especially ones `status: parked` or being absorbed by it. Read their unstarted phases
@@ -119,9 +116,11 @@ note is already the instruction to shape it.
 - **Recency**: overdue `scheduled:`/`due:` dates; note staleness
   (last-modified); `git status`/`git log -3` in each project root — dirty
   trees also surface aborted-session partial edits worth flagging.
-- **In flight**: anything `reshuffle.md` R1 counts as in flight (the one definition: a live
-  rollout's stamped tasks, a `dispatched:` stamp ≤7 days old, `status: in-progress` /
-  `in_progress` / `review`). Report it as such; never re-batch it (§ 7) and never reshuffle it.
+- **In flight** (the one definition; the reshuffle's reach tiers use it): a task stamped
+  `wave:`/`rollout:` whose rollout note is still live (the link resolves to a note directly in
+  `Work/Tasks/`), a `dispatched:` stamp ≤7 days old, or `status: in-progress` (TaskNotes' own
+  spelling), `in_progress` or `review`; a phase with any such member. Report it as such; never
+  re-batch it (§ 7) and never reshuffle it.
 
 ### 3. Present
 
@@ -143,30 +142,27 @@ A situational report written for Lachy catching up, not a log:
   the slot's own task → say they agree; a different item → name the slot and
   say why this beats it; a blank slot → say the recommendation would fill it.
 
-### 4. Reshuffle or Look only
+### 4. Reshuffle, Steer only or Look only
 
 `AskUserQuestion`, recommended option first:
 
-- **Reshuffle** (the usual choice on pickup) — continue to § 5. This answer authorises the drift
-  fixes; the reshuffle's own writes still wait for its gate.
-- **Steer only** — no reshaping: fix the drift (§ 5.1), then route the open work as it stands
-  (§ 6), e.g. to fan out background batches. Authorises the drift fixes, as any steer did under
-  ADR 0026.
-- **Look only** — the audit was the deliverable. **Look only** → stop: no writes of any kind.
+- **Reshuffle** (the usual choice on pickup) — continue to § 5.
+- **Steer only** — no reshaping: route the open work as it stands (§ 6), e.g. to fan out
+  background batches.
+- **Look only** — the audit was the deliverable; stop, no writes of any kind.
 
-A scoped target skips this question and goes straight to § 5.2: it reshapes one note, so it
-applies no drift fixes (the § 3 Drift line is report-only for it).
+**Drift fixes.** Reshuffle and Steer only authorise them (as any steer did under ADR 0026): re-run
+the reconcile step with `--apply` for each project whose dry run listed unambiguous items, so the
+reshuffle never forms a roadmap on top of finished work. Ambiguous items are listed for Lachy and
+never applied. A scoped target skips this question and applies no drift fixes: it reshapes one
+note, so the § 3 Drift line is report-only for it.
 
 ### 5. Reshuffle
 
-1. **Fix the unambiguous drift first** (Reshuffle and Steer only; never for a scoped target):
-   re-run the reconcile step with `--apply` for each project, so the reshuffle never forms a
-   roadmap on top of finished work. Ambiguous items are listed for Lachy and never applied. Steer
-   only then skips to § 6.
-2. **Run the reshape step** in `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` (R1–R5): the
-   item set by reach tier, the clear/unclear sort and proposal, the grill of what is unclear
-   (which Lachy can stop at any point), the one gate, the writes. With nothing to reshape
-   (Lachy stops the grill at once and the gate is empty), carry straight on to § 6.
+Run the reshape step in `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md`: the item set by reach
+tier, the clear/unclear sort and proposal, the grill of what is unclear (which Lachy can stop at
+any point), the one gate, the writes. With nothing to reshape (Lachy stops the grill at once and
+the gate is empty), carry straight on to § 6.
 
 ### 6. Route
 
@@ -177,18 +173,17 @@ applies no drift fixes (the § 3 Drift line is report-only for it).
   the wave-shaped phases (or clusters) on that repo: never a bare project run, which would also
   sweep up misfits, session-lane phases and whatever the grill left unresolved. A scoped target
   routes only the tasks its own reshuffle wrote. **At most one rollout is live per repo**, so first
-  look for an open rollout note in `Work/Tasks/` whose `Project root:` line is this repo, and read
-  its state with `${CLAUDE_PLUGIN_ROOT}/skills/status/SKILL.md`:
+  look for an open rollout note directly in `Work/Tasks/` whose `Project root:` line is this repo,
+  and read it with
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py status --rollout <note>`
+  (local, no network):
   - **None** → schedule `--tasks <members>`.
-  - **This project's, idle** (not running: paused, halted or finished) **and every unlanded task
-    of it still `status: open`** → schedule `--regenerate --tasks <members + those tasks>`, so the
-    new rollout **supersedes** it.
-  - **This project's, idle but holding tasks in any other state** (`in-progress`, `review`,
-    `gate-pending`, blocked) → schedule nothing: that rollout needs
-    `${CLAUDE_PLUGIN_ROOT}/skills/repair/SKILL.md` first, which orient names as the next move.
-  - **Running, or another project's** → schedule nothing and touch nothing. The phases are
-    written and wait; a later `/thread:orient <project>` (Steer only is enough) schedules them
-    once the repo is free.
+  - **This project's, `paused`, and every unlanded task of it still `status: open`** → schedule
+    `--regenerate --tasks <members + those tasks>`, so the new rollout **supersedes** it.
+  - **Anything else** (running, halted or stuck, holding tasks in another state, or another
+    project's) → schedule nothing and touch nothing. The phases are written and wait; orient
+    names the next move: `/thread:status` (then `repair`) for a stuck rollout, or a later
+    `/thread:orient <project>` (Steer only is enough) once the repo is free.
   - **Uncommitted grill docs.** If R3's grill left `CONTEXT.md` or `docs/adr/` changes
     uncommitted in the target repo, schedule nothing there either: every worktree branches from
     `origin`, which lacks them. Name them as the next move (land them through the repo's PR
@@ -326,16 +321,14 @@ lightweight version of this.
   or write anything — the slot write included — in Look only or dry runs.
 - **Don't reshuffle in-flight work.** Its scope, phase and body are frozen; only new members may
   join its phase (`reshuffle.md` R1).
-- **Don't write before the reshuffle's gate**, drift fixes on a Reshuffle or Steer only answer
-  aside; a scoped target applies none.
-- **Don't manage another rollout's lifecycle.** Supersede only an idle one whose unlanded tasks
-  are all `status: open`; a running one waits, a stuck one goes to `repair`.
+- **Don't write before the reshuffle's gate**, drift fixes (§ 4) aside.
 - **Don't recommend more than one focus item**, and don't pad the audit —
   headline, balls in the air, drift, shape, one recommendation, then the question.
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s
   logic; wave-shaped work goes to schedule (the execution-fit test
   decides, hard); execute runs only through the execute offer; batch clusters never grow a merge
   engine here.
-- **Don't batch a wave-shaped cluster**, don't schedule a bare project run (always `--tasks`), and
-  don't schedule a second rollout beside a live one on the same repo: supersede it.
+- **Don't batch a wave-shaped cluster**, and don't schedule a bare project run (always `--tasks`).
+- **Never a second rollout per repo, and never another rollout's lifecycle.** Supersede only a
+  paused one whose unlanded tasks are all `status: open`; anything else waits (§ 6).
 - **Don't use orient for a single live thread** — that's `next`.

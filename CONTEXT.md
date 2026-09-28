@@ -37,15 +37,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"
   then dispatches to a route. A sibling, not a parent.
 - **Orient** — the one shaping verb, at project altitude: audits a whole
-  project/area (not one thread), reshuffles it (the default pass on pickup; a
-  bare look-around is the exception), recommends the best use of time, asks
-  the steering mode, then routes by the execution-fit test — wave-shaped
-  clusters to the rollout lane (schedules them itself), everything else to
-  `open` or batch dispatch artefacts. Ends with the **execute offer**: run the
-  scheduled rollout in a fresh session (via handoff, the default — the
-  reshuffle has filled this one's context), here, or not yet. Pointed at a single plan, design note or brain
-  dump it runs a **scoped reshuffle** of that note alone. Absorbs the former
-  `split` and `gather` verbs (ADR 0027).
+  project/area (not one thread), then reshuffles it (the default on pickup),
+  steers it as it stands, or just looks. It schedules wave-shaped work itself,
+  routes the rest by the execution-fit test, and ends with the **execute
+  offer** (run the rollout in a fresh session, here, or not yet). Pointed at a
+  single plan, design note or brain dump it runs a **scoped reshuffle** of that
+  note alone. Absorbs the former `split` and `gather` verbs (ADR 0027).
 - **Batch** — a parallel-safe cluster of open work (disjoint files/surfaces)
   matched to the narrowest covering launch profile; the session-lane unit
   orient dispatches. Never contains a wave-shaped cluster.
@@ -190,6 +187,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Brain dump** — a loose task note holding raw, unspecced intent, often
   several ideas at once. A reshuffle **unbundles** it: one task per idea, each
   grilled into a real body. _Avoid_: capture (that is stash/defer's task).
+- **Reach tiers** — what a reshuffle may change, by an item's state: **in
+  flight** and other **frozen** items (possibly landed, thread captures) are
+  context only; **unstarted** phased work is movable; **loose** work is fully
+  open, including re-homing and pull-ins across projects. Defined in
+  `skills/orient/reshuffle.md` R1. _Avoid_: locked, pinned.
+- **Clear / unclear item** — a reshuffle's first sort of every open item.
+  Clear ones (the body already says what to do) go straight to the gate;
+  unclear ones (brain dumps, one-liners) are grilled, cluster by cluster,
+  highest value first. The grill may stop at any point: what is resolved is
+  written, the rest stays loose for the next reshuffle. _Avoid_: triage.
+- **Brain dump** — a loose task note holding raw, unspecced intent, often
+  several ideas at once. A reshuffle **unbundles** it: one task per idea, each
+  grilled into a real body. _Avoid_: capture (that is stash/defer's task).
 - **Reach tiers** — what a reshuffle may change, by a task's state:
   **in flight** (in a live rollout, dispatched, or in progress) is frozen,
   read for context only — its scope, phase and body never change, though
@@ -206,10 +216,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 
 - **Rollout** — a backlog of related tasks landed as one coordinated effort,
   described by one always-dated Obsidian note
-  (`<slug>-rollout-<YYYY-MM-DD>`). At most one is live per repo: new
-  wave-shaped work **supersedes** the live rollout (taking over its unmerged
-  tasks, after a soft pause if it is mid-run) rather than running beside or
-  queueing behind it. _Avoid_: batch, run, campaign.
+  (`<slug>-rollout-<YYYY-MM-DD>`). At most one is live per repo; new
+  wave-shaped work supersedes it rather than running beside it (orient § 6,
+  ADR 0027). _Avoid_: batch, run, campaign.
 - **Wave** — a set of tasks within a rollout that are safe to run in parallel
   because no two of them edit the same file. Waves land in order; a later
   wave branches from the `main` earlier waves merged into. Since ADR 0009 the

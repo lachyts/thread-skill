@@ -7,7 +7,7 @@
 // assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readIf, slice, textFiles } from '../lib/contract-text.mjs'
+import { readIf, skillCount, slice, textFiles } from '../lib/contract-text.mjs'
 
 
 const SCAN = 'skills/_shared/process-scan.md'
@@ -24,8 +24,8 @@ test('both shared continuity specs exist', () => {
 })
 
 test('each continuity phrase lives in exactly one file under skills/, its home', () => {
-  assert.ok(skillFiles.filter(({ file }) => file.endsWith('/SKILL.md')).length >= 11,
-    'walked fewer than 11 SKILL.md files — the scan is vacuous')
+  assert.equal(skillFiles.filter(({ file }) => file.endsWith('/SKILL.md')).length, skillCount(),
+    'the scan missed a SKILL.md — it is vacuous for that skill')
   const phrases = [
     ['never hand-roll a row or a ledger', SCAN],
     ['Which ledger a row goes to', SCAN],

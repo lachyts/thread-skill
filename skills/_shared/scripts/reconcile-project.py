@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """reconcile-project.py — find (and, with --apply, close) project-level Drift: finished work still open.
 
-ADR 0026 § Decision 1: one shared, dry-run-by-default step. Callers are /thread:execute's completion
-ceremony (`--kinds phase --phases <touched> --apply`) and /thread:orient (dry run in its audit,
-`--apply` on a Reshuffle or Steer only answer, ADR 0027). Stdlib only, python >= 3.9. Called as:
+ADR 0026 § Decision 1: one shared step. A dry run (the default) writes nothing; --apply writes the
+unambiguous list, and callers pass it only once the human has authorised the fix. Stdlib only,
+python >= 3.9. Called as:
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/reconcile-project.py --project <slug>
         [--vault ~/repos/obsidian] [--phases N[,M...]] [--kinds phase,task,rollout] [--apply] [--json]

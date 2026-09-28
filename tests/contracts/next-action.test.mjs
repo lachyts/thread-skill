@@ -153,7 +153,7 @@ test('orient reads the slot first, proposes against it, fills only blanks', () =
     // Hands-on pickup completes a capture: a pointer to it would be dead on arrival.
     /Skip the write when Hands-on\s+picks the task up/,
   ])
-  assertHas(slice(orient, /^### 4\./, /^### 5\./), `${ORIENT} § 4`, [/\*\*Look only\*\* → stop: no writes of any kind\./])
+  assertHas(slice(orient, /^### 4\./, /^### 5\./), `${ORIENT} § 4`, [/\*\*Look only\*\*[^.]*no writes of any kind/])
   assertHas(slice(orient, /^## Don't/, null), `${ORIENT} § Don't`, [/the slot write included — in Look only or dry runs/])
 })
 

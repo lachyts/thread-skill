@@ -203,7 +203,7 @@ project slot as it is.
 
 This section is the only overwrite by an agent. Every other writer fills a
 blank slot only, with `next-action.py fill` (orient's rule: `orient/SKILL.md`
-§ 6, the slot write), and pickup clears neither field (`open/SKILL.md`, the
+§ Route, the slot write), and pickup clears neither field (`open/SKILL.md`, the
 `[[<task>]]` pickup's step 3). Lachy edits either field any time.
 
 ## 5. Body — everything lives inside
