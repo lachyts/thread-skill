@@ -195,7 +195,11 @@ any task (the flag keeps only a capture named for the thread or naming its
 THREAD.md; a capture that merely describes similar work never qualifies);
 (2) the one task THREAD.md's Resume instructions name by `[[link]]` as the
 next step (a rollout task, say); (3) the one follow-up Lachy approved at
-close that carries the thread's next step. A loose end never qualifies. Its `--action` is the next step this close
+close that carries the thread's next step. A loose end never qualifies.
+A task this close marks done
+(`close/SKILL.md` § A finished task closes itself) is never the match: the
+rule skips it and the next rule is tried.
+Its `--action` is the next step this close
 writes into THREAD.md's Resume instructions — never an older capture's
 `Next move:`, which may be stale. No such task, or more than one with
 nothing to choose between them → write neither field and leave every

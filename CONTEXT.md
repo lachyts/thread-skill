@@ -89,6 +89,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `close` may link the same thread and is still never a capture. _Avoid_:
   thread task (any task can link a thread), backlog item.
 - **Close** — the work is finished; persist + commit, end-of-thread ritual.
+  For vault tasks close only proposes, with one exception: it marks a task
+  this session explicitly worked `done` without asking when the work is on
+  the default branch (or is not code) and its Verify line ran green; a task
+  short of that becomes a mark-done question (ADR 0026).
 - **Pickup** — resuming a stashed/deferred thread from its task, or a handed-off
   thread from its handoff doc. Pickup auto-completes the capture — the task is
   marked done, the handoff doc consumed: the capture's job ends the moment the
