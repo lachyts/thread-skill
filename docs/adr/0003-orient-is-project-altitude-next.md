@@ -8,6 +8,8 @@ sessions; emitted artefacts are the no-cmux fallback). The **scope** reasoning
 below stands and is explicitly preserved at ADR 0009 § Decision — orient never
 grows a merge engine, and non-PR ops work is still the wrong fit for it. The
 body is left as written: a correct record of what was decided on the day.
+*(Amended by ADR 0027, 2026-09-28: orient is also the one shaping verb. After its audit it asks
+Reshuffle, Steer only or Look only, reshapes the project itself and schedules wave-shaped phases.)*
 
 `thread:orient` joins the family as the *project-altitude* router: where
 `next` reads one live thread and recommends its next move, `orient` reads a

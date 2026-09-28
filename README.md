@@ -28,7 +28,7 @@ machine-verifiable in-run) rolls out; everything else runs as scoped sessions.
 |---|---|---|
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
-| `/thread:orient` | back on a project, balls in the air | Project-altitude router: audit an area's open work, recommend the best use of time, ask the steering mode, then route by the execution-fit test — wave-shaped clusters to `gather`/`schedule`, the rest to `open` or to background batch sessions it launches itself (ADR 0010; the steering answer is the authorisation, dispatch artefacts are the no-cmux fallback). |
+| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): audit an area's open work and recommend the best use of time, then **Reshuffle** (re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate) or **Look only**. Schedules wave-shaped phases itself, steers the rest (background batch sessions it launches itself, ADR 0010, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
 | `/thread:handoff` | fork now | Write and commit a durable `docs/handoffs/` doc + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop also create a fresh visible sidebar task seeded with it; elsewhere label it a manual handoff. |
@@ -40,8 +40,6 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 
 | Member | Role | What it does |
 |---|---|---|
-| `/thread:split` | decomposer | Turns a plan or design into numbered, phased, PR-sized Obsidian task notes. |
-| `/thread:gather` | roadmap-former | Split's inverse: loose, unphased tasks → phased roadmap (cluster proposal → grilled meaning → phase notes + `pN-M` renames). |
 | `/thread:schedule` | planner | Computes wave structure from file-overlap + dependency analysis; writes a thin, always-dated `<slug>-rollout-<YYYY-MM-DD>.md` (data only, `protocol_version: 3`). No minimum size — shape decides, not count. |
 | `/thread:execute` | executor | Runs the rollout on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, converging in parallel within each wave; continuous mode auto-merges each wave (`--gated` = manual merge). |
 | `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. |

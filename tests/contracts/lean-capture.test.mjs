@@ -127,7 +127,7 @@ test('the three repos: lookup sites share one project-note glob', () => {
 
 // Every `Work/Projects/…` path token in `text` that is a glob (has a `*`) but never descends (no `**`),
 // e.g. `Work/Projects/*.md`, `Work/Projects/<Area>/*.md` or `Work/Projects/*/*.md`. A literal path such
-// as split's write path `Work/Projects/<Area>/<Project>.md` has no `*` and is not a hit.
+// as the scoped reshuffle's new-project path (reshuffle.md R5.5) `Work/Projects/<Area>/<Project>.md` has no `*` and is not a hit.
 function shallowGlobs(text) {
   return (text.match(/Work\/Projects\/[^\s`'")\]]*/g) ?? []).filter((t) => t.includes('*') && !t.includes('**'))
 }
