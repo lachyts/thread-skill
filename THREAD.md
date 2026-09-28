@@ -10,6 +10,12 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-09-28 (late afternoon): 2.10.0 is released and live. p10-4, p9-4 and reconcile-apply-binds landed; phase 10 is closed. Nothing is running.**
+- **Rollout** `[[thread-skill-rollout-2026-09-28]]` (archived, § Completion log): 3 waves, 1h 31m, all on Opus. #37 reconcile `--apply --only <dry-run json>` binds the reviewed list, and orient passes its audit's `--json` through (`f49e34c`). #38 handoff docs have one writer, and `next` may recommend a printed `/compact <focus>` line inside keep going (`84240b1`). #39 close flips a finished task within ADR 0026's three-condition guard (`929df02`).
+- **p10-4 plan-blocked in wave 1** (3 plan rounds). The smart-halt fired on `CONTEXT.md`, shared with p9-4. Lachy chose to swap: p9-4 ran as wave 2, and p10-4 was re-dispatched as wave 3 with its plan feedback on the note. It converged (3 plan rounds, 2 review rounds). The re-wave was hand-edited: [[thread-skill-rewave-a-blocked-task-within-its-rollout]].
+- **Phase 10 closed** by the ceremony. Phase 9 stays open (p9-2, p9-3).
+- **Release:** #40 (`2f0d437`, merge commit). Live checkout fast-forwarded, plugin updated in both profiles, `make release-check` green, tag `thread--v2.10.0` pushed at `2f0d437`. Vault `06efef14`, `58dafa3e`. Sessions started before the update still run the 2.9.0 skill text.
+
 **2026-09-28 (evening): orient is the one shaping verb (ADR 0027) and 2.9.0 is live. `split` and `gather` are gone. Nothing is running.**
 - **ADR 0027**, grilled with Lachy from his "fold Fit Snack into Chorus" brain dump: he always runs orient → gather → split → grill-with-docs as one move on pickup. Orient now asks **Reshuffle / Steer only / Look only** after its audit. The reshuffle (`skills/orient/reshuffle.md`) sorts all open work by reach tier, unbundles brain dumps, grills only what's unclear (stoppable), and writes at one gate. Orient schedules wave-shaped phases itself (`--tasks`, members only) and ends with the execute offer (fresh session / here / not yet). One note → a scoped reshuffle (split's old job). New glossary: Reshuffle, Reach tiers, Clear / unclear item, Brain dump, execute offer.
 - **Landed:** #32 (`b1e2cf2`) with p10-3 (orient's drift wiring) and the gather-rename cache exclusion folded in; release #33 (`43ff855`, 2.9.0, carrying #31 too); #34 (`6962967`, the P10 release session's unpushed close-out). Plugin updated in both profiles, `make release-check` green at 2.9.0. **Sessions started before the update still load 2.8.0**, where split and gather exist.
@@ -442,6 +448,7 @@ scheduled 2026-07-15.
 
 ## What's been built / decided
 
+- **2.10.0 (2026-09-28, #37–#40):** close marks a task done without asking only when this session did its work, the work is on the default branch (or it isn't code), and its Verify line ran green this session; otherwise it asks (ADR 0026 § 4). `thread:handoff` is the only handoff-doc writer (ADR 0017 amended). `next` can recommend `/compact` in Claude Code but never runs it. `reconcile-project.py --apply --only <file>` writes only the reviewed items and lists newer ones under `New since review`.
 - **ADR 0027 (2026-09-28, PR #32, 2.9.0): orient is the one shaping verb.** `split` and `gather` are deleted (no alias stubs); their machinery is `skills/orient/reshuffle.md`. Orient asks Reshuffle / Steer only / Look only; in flight, possibly-landed and thread captures are frozen; a live rollout is superseded only when paused with all unlanded tasks open; the pass ends with the execute offer.
 - **p5-2 (2026-09-27, PR #23): no SKILL.md body holds a positional `$N`.** The logic lives in scripts where it
   needs one (close `handoff-scan.sh`, `repo-track.sh`; execute `default-branch.sh`, which refuses an empty
@@ -502,12 +509,11 @@ scheduled 2026-07-15.
 
 ## Open questions / decisions pending
 
+- **The smart-halt treats file overlap as dependency.** A blocked task stops every later wave that shares a file with it, even with no `depends-on:` between them, and the only verb that moves a task (`reconcile-wave.py defer`) drops it from the rollout. Filed 2026-09-28: [[thread-skill-rewave-a-blocked-task-within-its-rollout]].
 - **The fresh-review of workspaces `29ca886` (the hook deletion) hasn't run.** The engine binds to the session's cwd, and this session was in thread-skill. It needs a session launched in `~/repos/workspaces`.
-- **p10-4 (close) is unblocked;** p10-3 landed inside #32 (ADR 0027 folded gather's backstop into the reshuffle).
 - **The one-live-rollout rule is orient-only** (ADR 0027): `/thread:schedule` run directly can still write a second rollout on a repo or `--regenerate` over a running one. [[thread-skill-schedule-owns-one-live-rollout-per-repo]] moves it into schedule's gate; its note lists why round 1's attempt was reverted.
 - **Halted vs running is not locally readable.** `reconcile-wave.py status` shows `paused` and task statuses but not whether a lead is still driving, which is why orient supersedes only a `paused` rollout. A liveness signal would widen that.
 - **`handoff-manual-dry-run` scored 0.83** in the 2026-09-28 eval run (its LLM lifecycle judge voted FAIL ×3; every tool and regex grader passed). Re-run it before treating it as a regression.
-- **p9-4 is unblocked** (handoff docs have one writer, and `next` recommends compact). It isn't in the running rollout; schedule it with p10-3 and p10-4.
 - **`tier_capped:` means something else under the Opus lock** (seen 2026-09-27). With `max_tier: opus` from the AGENTS.md lock (ADR 0024), every opus task whose first plan is rejected gets `tier_capped: plan`: all three P10 tasks did. ADR 0016 defines the marker as "capped by quota, re-dispatch uncapped once quota returns", but the lock never lifts, so the marker is now permanent noise on most cross-cutting tasks. This joins the deferred tier-ceiling gap 1 below (status and repair ignore the marker). Decide whether a lock-driven cap stamps anything.
 - **`check-agent-parity.py` exits 1** on `~/.codex/hooks.json` ("direct Codex must use native Stop notification"). Seen 2026-09-27 and unrelated to the hook deletion.
 
@@ -584,6 +590,8 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **`claude plugin update` reads the live checkout** (2026-09-28). The marketplace is a directory source at `~/repos/tools/thread-skill`, so a release merged from the rollout clone reports "already at the latest version" until that checkout is fast-forwarded to the release commit. Fast-forward it first, then update both profiles.
+- **To move a task to a later wave, edit by hand** (2026-09-28): the task's `wave:`, and the rollout note's wave table, Tasks by wave and File-sets. `reconcile-wave.py defer` clears `wave:`, `rollout:` and `owner:`, which removes the task from the rollout.
 - **A plain `reconcile-project.py --apply` recomputes, and never replays the dry run** (2026-09-28). On a vault a live rollout is writing, it can close more than was reviewed: a reviewed 2 became 5. Any caller that reviews before applying (orient's drift fixes, a hand-run acceptance) saves the dry run's `--json` to a file and passes it to `--apply --only <file>` ([[thread-skill-reconcile-apply-binds-reviewed-list]]): it writes only the reviewed items and lists anything newer under `New since review`, unwritten. Only execute's phase-close ceremony uses a plain `--apply`, with no review in between. The vault then moves closed phase notes into `Phases/Archive/` within minutes, and the daily sweep may commit them before you do, so a pathspec commit of the old paths fails.
 - **Tag a release at the released commit, never at `origin/master`** (2026-09-28). Master can move past a release without changing the manifests: #31 landed on 2.8.0. `claude plugin tag` tags HEAD, so run it from a checkout sitting on the released commit with a clean tree (stash any consumed-handoff mark first).
 - **`gh pr update-branch` doesn't exist in this gh**, and master's protection is strict: a PR behind master shows `mergeStateStatus: BEHIND` and `gh pr merge` refuses with an `--admin` hint. Use `gh api -X PUT repos/lachyts/thread-skill/pulls/<N>/update-branch`, wait for the re-run CI, then merge (2026-09-28, #34).
@@ -791,9 +799,16 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-Read /Users/lachlants/repos/tools/thread-skill-rollout/docs/handoffs/2026-09-28-p10-4-p9-4-rollout.md first (pending handoff, 2026-09-28: schedule and execute the p10-4 + p9-4 rollout from this clone).
+**Now (from 2026-09-28, late afternoon): 2.10.0 is live. Nothing is running, no handoff is pending, and both checkouts are on `master` (after this close-out's PR merges, fast-forward the clone).**
+- **Next** (pick one; nothing is decided):
+  1. [[thread-skill-schedule-owns-one-live-rollout-per-repo]] and [[thread-skill-one-vault-grammar-for-reconcile-and-reshuffle]], the ADR 0027 follow-ups (the second edits `reconcile-project.py`).
+  2. [[thread-skill-p4-5-trim-descriptions-700-hard-cap]] (its p4-6 baseline exists).
+  3. [[thread-skill-rewave-a-blocked-task-within-its-rollout]].
+  4. Phase 9's rest: p9-2 (capture marker), p9-3 (open list prunes, close guard).
+  5. Still owed: the fresh-review of workspaces `29ca886` (a session in `~/repos/workspaces`); tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
+- **Close-outs still go on a branch and a PR.** Run a thread-skill rollout from this clone on a clean `master`.
 
-**Superseded by the handoff above (kept for the record):**
+**Superseded 2026-09-28 (late afternoon; the p10-4-p9-4-rollout handoff it pointed at is consumed and deleted):**
 **Now (from 2026-09-28, evening): 2.9.0 is live (orient's reshuffle, set-down next actions). Nothing is running and no handoff is pending. Both checkouts are on `master`.**
 - **Next:**
   1. The next rollout: `/thread:schedule` on [[thread-skill-p10-4-close-flips-a-finished-task]] and p9-4, from the rollout clone (p10-3 landed in #32). Consider [[thread-skill-reconcile-apply-binds-reviewed-list]] with them. Phase 10 closes itself when p10-4 lands.
@@ -935,6 +950,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-28 (late afternoon close): consumed the p10-4-p9-4-rollout handoff. Scheduled and ran `[[thread-skill-rollout-2026-09-28]]` (p10-4, p9-4, reconcile-apply-binds joined): #37, #38, #39 merged in 1h 31m. p10-4 plan-blocked in wave 1 and was re-waved behind p9-4 (Lachy's call). Phase 10 closed. Released 2.10.0 (#40), tagged. Filed the re-wave follow-up. Handoff doc deleted.
 - 2026-09-28 (evening close): grilled ADR 0027 with Lachy (orient is the one shaping verb; split and gather retired), built it (#32), three clean-room review rounds with a ledger stop and a revert to the root, full eval suite run and recorded, released 2.9.0 (#33), landed the P10 session's close-out (#34), pushed workspaces and ~/.agents, cleaned the merged worktree and branches. Follow-ups filed: schedule owns one-live-rollout-per-repo; one vault grammar.
 - 2026-09-28 (close): consumed the p10-release-and-acceptance handoff. Merged #29 (close-out) and #30 (2.8.0 bump). Plugin updated, release-check green, tag `thread--v2.8.0` at `c5f7522`, set-head done. Reconcile live acceptance: the dry run matched the audit; `--apply` wrote 5 (2 reviewed, plus 3 landed meanwhile by a live Chorus rollout), all kept, and the follow-up was filed. #31 merged meanwhile, unblocking p10-3/p10-4/p9-4. Handoff doc deleted.
 - 2026-09-27 (late evening, second close): handed off the next pieces (land the close-out branch, P10 release, live acceptance, next rollout) as `docs/handoffs/2026-09-27-p10-release-and-acceptance.md` on `docs/close-2026-09-27-p10-rollout`. The clone was left on that branch so the doc's path resolves.
