@@ -2,8 +2,9 @@
 // 2026-09-27 (thread-skill-p9-1), so `thread:handoff` is the only writer of a handoff doc, on explicit
 // fork intent only; no live surface may still describe the hook or a "hook-forced" handoff, and ADR 0017
 // records the deletion as an amendment (its body stays as history, ADR 0015). The same task lets `next`
-// recommend compacting within *keep going*: a ready `/compact <focus>` line Lachy types, never run by
-// `next`, never a route, and never for a correction loop. Reads files only; a missing file or section is a
+// recommend compacting within *keep going* in Claude Code: at a phase boundary with a heavy context whose
+// history is worth keeping, one `/compact <focus>` line Lachy types, printed once before the turn ends,
+// never run by `next`, never a route, and never for a correction loop. Reads files only; a missing file or section is a
 // named assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -26,7 +27,8 @@ test('no live surface names the deleted stop hook or a hook-forced handoff', () 
   const files = [
     ...textFiles('skills'),
     ...textFiles('hooks'),
-    ...textFiles('evals'),
+    // `evals/results/` is the git-ignored output of `make evals`: a run transcript may quote history.
+    ...textFiles('evals').filter(({ file }) => !file.startsWith('evals/results/')),
     ...[CONTEXT, README].map((file) => ({ file, text: readIf(file) })),
   ]
   const hits = []
@@ -64,24 +66,45 @@ test('handoff SKILL.md: the body-section list is the skill\'s own, sections unch
 
 test('ADR 0017 records the hook deletion as an amendment after p2-7', () => {
   const status = slice(readIf(ADR), /^Status:/, /^## Context/)
-  assertHas(status && collapse(status), `${ADR} Status block`, ['thread-skill-p9-4', '2026-09-27', 'deleted', 'only writer'])
-  const p27 = status.indexOf('thread-skill-p2-7')
-  const p94 = status.indexOf('thread-skill-p9-4')
-  assert.ok(p27 >= 0 && p94 > p27, `${ADR} p9-4 amendment must follow the p2-7 one`)
+  assert.ok(status != null, `${ADR} has no Status block`)
+  // The p9-4 amendment alone, so a token an earlier amendment already carries can't satisfy the check.
+  const p94 = slice(status, /thread-skill-p9-4/, /^\*\(Amended/)
+  assertHas(p94 && collapse(p94), `${ADR} p9-4 amendment`,
+    ['2026-09-27', 'thread-skill-p9-1', '29ca886', 'only writer', 'explicit fork intent', 'history'])
+  const at27 = status.indexOf('thread-skill-p2-7')
+  const at94 = status.indexOf('thread-skill-p9-4')
+  assert.ok(at27 >= 0 && at94 > at27, `${ADR} p9-4 amendment must follow the p2-7 one`)
 })
 
 test('next SKILL.md: keep going may carry a /compact line next never runs', () => {
   const text = readIf(NEXT)
   assert.ok(text != null, `${NEXT} is missing`)
   const body = text.replace(/^---\n[\s\S]*?\n---\n/, '')
-  assertHas(collapse(body), `${NEXT} body`, [
+  // The compact paragraph itself: when to compact, who types it, and what gets something else instead.
+  const para = lineOf(body, '   **Compact, within keep going.**')
+  assertHas(para, `${NEXT} compact paragraph`, [
+    'In Claude Code',
+    'the context is heavy',
+    'statusline ctx %',
+    'phase boundary',
+    'history is still worth keeping',
     '`/compact <focus>`',
     /never runs `\/compact`/,
+    'runs only between turns',
     'only Lachy can type',
-    '`/rewind`',
     'correction loop',
+    '`/rewind`',
+    'Summarize from here',
     'fresh start',
+    'unrelated next phase',
+    'spec ready to execute',
+    'is the `handoff` route',
+    'a Codex session',
+    'not a route',
   ])
+  // Step 5 prints the line; step 3 only recommends, so the line prints once.
+  assert.ok(para.includes('which step 5 prints') && para.match(/\bprint/gi).length === 1,
+    `${NEXT} compact paragraph prints the line itself as well as step 5`)
   // Compact is a paragraph inside keep going, never a sixth route bullet in step 3.
   const step3 = slice(body, /^3\. \*\*Recommend ONE move/, /^4\. /)
   assert.ok(step3 != null, `${NEXT} step 3 is missing`)
@@ -89,6 +112,26 @@ test('next SKILL.md: keep going may carry a /compact line next never runs', () =
   assert.ok(routes.length >= 5, `${NEXT} step 3 lost its route bullets`)
   const compactRoute = routes.filter((l) => /^\s*- \*\*`?\/?compact/i.test(l))
   assert.deepEqual(compactRoute, [], `${NEXT} step 3 lists compact as a route`)
+  // The handoff bullet is the fresh-session move; a heavy context alone is compact's case, not handoff's.
+  const handoff = routes.find((l) => l.includes('**`handoff`**'))
+  assertHas(handoff, `${NEXT} step 3 handoff bullet`, ['fresh session', 'unrelated', 'spec is ready to execute', 'fresh head'])
+  assert.ok(!/exhausted/i.test(handoff), `${NEXT} handoff bullet still claims the exhausted-context case`)
+  // Step 5 prints the line once and ends the turn: /compact runs only between turns.
+  const step5 = slice(body, /^5\. \*\*Dispatch/, /^## /)
+  assertHas(step5 && collapse(step5), `${NEXT} step 5`, [
+    'print the `/compact <focus>` line once',
+    'end the turn',
+    'never run it',
+    'work resumes after Lachy compacts',
+  ])
+  assert.ok(!/carry on/i.test(step5), `${NEXT} step 5 still carries on after the compact line`)
+  // § Don't: never run the commands, never work on past the line, never offer compact as a route.
+  const dont = lineOf(body, "- Don't run `/compact`")
+  assertHas(dont, `${NEXT} § Don't compact bullet`, [
+    '`/compact`, `/rewind` or `/clear` yourself',
+    "don't keep working after printing a `/compact` line",
+    "don't offer compact as a route",
+  ])
   // The routing description is untouched: five moves, no compact.
   const desc = lineOf(text, 'description:')
   assertHas(desc, `${NEXT} description`, ['keep going / defer / stash / handoff / close'])
@@ -97,5 +140,7 @@ test('next SKILL.md: keep going may carry a /compact line next never runs', () =
 
 test('CONTEXT.md Router (next): compact is a recommendation, never a route', () => {
   const entry = slice(readIf(CONTEXT), /^- \*\*Router \(`next`\)\*\*/, /^- \*\*/)
-  assertHas(entry && collapse(entry), `${CONTEXT} **Router (\`next\`)**`, ['compact', 'never a route'])
+  assertHas(entry && collapse(entry), `${CONTEXT} **Router (\`next\`)**`, ['compact recommendation', 'never a route'])
+  // CONTEXT.md is terms only: the /rewind and focus-building mechanics live in next's SKILL.md.
+  assert.ok(!/\/rewind|<focus>/.test(entry), `${CONTEXT} **Router (\`next\`)** holds compact mechanics`)
 })

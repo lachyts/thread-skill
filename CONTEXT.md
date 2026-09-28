@@ -36,10 +36,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   disposes of the current thread with known intent.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"
   then dispatches to a route. A sibling, not a parent. Its *keep going* may
-  carry a **compact recommendation**: a ready `/compact <focus>` line built
-  from the thread's state, which only Lachy can type; `next` never runs it, and
-  a correction loop gets `/rewind` (summarise the failed span) or a fresh start
-  instead. Compact is a recommendation, never a route.
+  carry a **compact recommendation**, which only Lachy acts on: compact is a
+  recommendation inside keep going, never a route.
 - **Orient** — the one shaping verb, at project altitude: audits a whole
   project/area (not one thread), then reshuffles it (the default on pickup),
   steers it as it stands, or just looks. It schedules wave-shaped work itself,
