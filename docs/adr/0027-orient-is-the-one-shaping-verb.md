@@ -1,7 +1,7 @@
 # 0027 — orient is the one shaping verb
 
 Date: 2026-09-28
-Status: accepted, implementation pending (amends ADRs 0003, 0009, 0010 and 0026; retires `split` and `gather`)
+Status: accepted (amends ADRs 0003, 0009, 0010 and 0026; retires `split` and `gather`)
 
 ## Context
 
@@ -64,5 +64,6 @@ Grilled 2026-09-28.
   skill-description budget.
 - Everything that names `/thread:split` or `/thread:gather` (schedule, execute, the router skill,
   README, evals, tests) is rewritten to name orient; old names are deleted, never stubbed.
-- ADR 0026's gather backstop becomes part of orient's reshuffle, which already runs the reconcile
-  step on any steer but Look only.
+- ADR 0026's gather backstop becomes part of orient's reshuffle: the audit runs the reconcile step
+  as a dry run and a Reshuffle answer applies its unambiguous list first. This lands task p10-3
+  (orient reports and fixes drift) inside the same change.

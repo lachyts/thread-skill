@@ -35,7 +35,7 @@ function findViolations(text) {
 const skills = walk('skills').filter((p) => path.basename(p) === 'SKILL.md')
 
 test('the scan finds the skills', () => {
-  assert.ok(skills.length >= 13, `expected every skill's SKILL.md, found ${skills.length}`)
+  assert.ok(skills.length >= 11, `expected every skill's SKILL.md, found ${skills.length}`)
 })
 
 test('control: the matcher catches shell, awk, braced and prose positionals, and passes the rest', () => {

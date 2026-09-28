@@ -24,8 +24,8 @@ test('both shared continuity specs exist', () => {
 })
 
 test('each continuity phrase lives in exactly one file under skills/, its home', () => {
-  assert.ok(skillFiles.filter(({ file }) => file.endsWith('/SKILL.md')).length >= 13,
-    'walked fewer than 13 SKILL.md files — the scan is vacuous')
+  assert.ok(skillFiles.filter(({ file }) => file.endsWith('/SKILL.md')).length >= 11,
+    'walked fewer than 11 SKILL.md files — the scan is vacuous')
   const phrases = [
     ['never hand-roll a row or a ledger', SCAN],
     ['Which ledger a row goes to', SCAN],

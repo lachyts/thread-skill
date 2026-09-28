@@ -1,6 +1,6 @@
 {
   "name": "thread",
-  "description": "One system that drives work through time: thread continuity verbs (/thread:open, /thread:next, /thread:orient, /thread:stash, /thread:defer, /thread:handoff, /thread:close) plus the wave rollout engine (/thread:split, /thread:gather, /thread:schedule, /thread:execute, /thread:status, /thread:repair).",
+  "description": "One system that drives work through time: thread continuity verbs (/thread:open, /thread:next, /thread:orient, /thread:stash, /thread:defer, /thread:handoff, /thread:close) plus the wave rollout engine (/thread:schedule, /thread:execute, /thread:status, /thread:repair).",
   "owner": {
     "name": "Lachlan Tetlow-Stuart"
   },
@@ -8,7 +8,7 @@
     {
       "name": "thread",
       "source": "./",
-      "description": "Continuity family (open/next/orient/stash/defer/handoff/close: durable thread state, Obsidian captures, routing) + rollout family (split/gather/schedule/execute/status/repair: phased tasks, parallel-safe waves, three-layer convergence with per-wave auto-merge). The execution-fit test decides which lane owns a cluster.",
+      "description": "Continuity family (open/next/orient/stash/defer/handoff/close: durable thread state, Obsidian captures, routing, orient's reshuffle into phased tasks) + rollout family (schedule/execute/status/repair: parallel-safe waves, three-layer convergence with per-wave auto-merge). The execution-fit test decides which lane owns a cluster.",
       "version": "2.8.0"
     }
   ]

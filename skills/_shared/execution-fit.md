@@ -43,8 +43,9 @@ decides, not size. (Decided 2026-08-12, ADR 0009; supersedes schedule's old
 ## Dispatch blockers — wave-shaped but not yet runnable
 
 A cluster that fails a blocker is **still wave-shaped**: do not route it to the
-session lane. schedule § 0 runs these checks; gather and orient, which read
-this file for the fit test, don't run the check or the stop themselves. The
+session lane. schedule § 0 runs these checks; orient, which reads
+this file for the fit test, doesn't run the check or the stop itself: it
+runs schedule, which does. The
 schedule gate stops before anything is written (no task stamped, no rollout
 note, no heartbeat) and names the remedy. Fix the blocker, then schedule again.
 Two blockers:

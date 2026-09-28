@@ -60,7 +60,7 @@ test('both manifests carry the same version', () => {
 })
 
 test('every skill directory has a SKILL.md whose name is the directory', () => {
-  assert.ok(skills.length >= 13, `expected ≥13 skills, found ${skills.length}`)
+  assert.ok(skills.length >= 11, `expected ≥11 skills, found ${skills.length}`)
   for (const { dir, fm } of skills) assert.equal(fm.name, dir, `skills/${dir}: name "${fm.name}"`)
 })
 

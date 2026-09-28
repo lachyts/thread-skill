@@ -1,5 +1,5 @@
 ---
-description: An approved plan to decompose routes to split, not gather
+description: An approved plan to decompose routes to orient's scoped reshuffle, not straight to schedule
 tags: [routing, rollout]
 max_turns: 8
 timeout_seconds: 180
