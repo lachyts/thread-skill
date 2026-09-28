@@ -2,9 +2,10 @@
 // close § A finished task closes itself marks an existing vault task `done` without asking only when
 // all three conditions hold: the session was explicitly working it, the work is on the default branch
 // (or is not code), and its Verify line ran green. A worked task short of that becomes a mark-done
-// option in step 6's question, never a silent flip; every flip is reported in step 8. The flip set is
-// fixed in step 5 and never becomes the set-down's next task. open's pickup completes only a capture,
-// so an ordinary task stays open until close proves it done. Reads files only; a missing file or
+// option in step 6's question, never a silent flip; every flip is reported in step 8. Candidacy is the
+// task's own work, never bookkeeping. The flip set is fixed at the head of step 4 and never becomes the
+// set-down's next task. open's pickup completes only a capture, so an ordinary task stays open until
+// close proves it done, and task-writer § 5 makes a capture taken mid-task name that task. Reads files only; a missing file or
 // section is a named assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -37,6 +38,7 @@ const REQUIRED = {
   'no-search': /never searches the vault for tasks that look finished/,
   // Condition 1.
   'route-a': /open's `\[\[<task>\]\]` pickup ran on this task/,
+  'pasted-capture': /or its pasted `## Resume prompt`, whose first instruction closes it/,
   'hands-on': /run by orient's Hands-on steer/,
   'either-branch': /picked this task note as its focus item, by either branch/,
   'opened-from': /counts as opened from it/,
@@ -65,12 +67,19 @@ const REQUIRED = {
   'never-auto': /It never flips automatically/,
   // Candidacy.
   'candidacy': /at `status: open`, `in_progress` or `review`/,
+  'worked-def': /Worked means this session did the task's own work/,
+  'mention-not-work': /A bare mention in chat is not work/,
+  'bookkeeping': /Bookkeeping writes \(orient's reshuffle, `\/thread:schedule`'s `wave:` stamps, reconcile writes, slot fills, frontmatter edits\) never make a task a candidate/,
   'not-candidate': /any other status \(`done`, `blocked`, `parked`\) is not a candidate/,
   'first-match': /in this order, and the first that matches decides/,
   'partial-row': /task flip skipped: \[\[<task>\]\] partly landed \(<what remains>\)/,
   'unchecked': /unchecked `- \[ \]`/,
   // Ordering.
-  'fixed-at-5': /The flip set is fixed in step 5, before step 6 asks/,
+  'fixed-at-4': /The flip set is fixed at the head of step 4, before step 4 writes the Resume instructions and before step 6 asks/,
+  'pre-close-judged': /Nothing steps 4–5 compute can change it/,
+  // The write.
+  'set-or-replace': /sets \(or replaces\) `completed: <today>`/,
+  'never-duplicated': /is overwritten in place, as `reconcile-project\.py` does, and never duplicated/,
   'never-next': /A flipped task is never the next task/,
   'match-skips': /step 5's next-task match \(`[^`]*task-writer\.md` § 4b, close's form\) skips it/,
   'resume-skips': /step 4's Resume instructions never name it as the next step/,
@@ -139,6 +148,16 @@ const MUTATIONS = [
   ['m13 flips after the set-down',
     'writes the flips and ticked options first, before the new tasks and before the set-down',
     'writes the flips and ticked options after the set-down', ['missing: flips-first']],
+  ['m14 bookkeeping makes a candidate', 'frontmatter edits) never make a task a candidate',
+    'frontmatter edits) make a task a candidate', ['missing: bookkeeping']],
+  ['m15 pasted Resume prompt dropped from route (c)',
+    ', or its pasted `## Resume prompt`, whose first instruction closes it', '', ['missing: pasted-capture']],
+  ['m16 flip set fixed in step 5', 'fixed at the head of step 4', 'fixed in step 5', ['missing: fixed-at-4']],
+  ['m17 completed always added', 'sets (or replaces) `completed: <today>`', 'adds `completed: <today>`',
+    ['missing: set-or-replace']],
+  ['m18 a chat mention is work', ' A bare mention in chat is not work.', '', ['missing: mention-not-work']],
+  ['m19 worked undefined', "Worked means this session did the task's own work", 'Worked means this session touched the task',
+    ['missing: worked-def']],
 ]
 
 for (const [name, from, to, want] of MUTATIONS) {
@@ -159,6 +178,8 @@ test('T6: step 6 asks the mark-done options beside the new tasks', () => {
     /`Mark <[^>]+> done`/,
     /fails condition/,
     /Skip — leave it open/,
+    /so is a tracked one whose tracking task is in the flip set/,
+    /Any other tracked branch is never a candidate/,
     /Zero task candidates and zero mark-done options/,
     /\*Mark all N done\*/,
     /never merged into the new-task question/,
@@ -174,6 +195,7 @@ test('T7: sub-step 7.6 writes the flips first; step 8 reports them', () => {
     /before the new tasks and before the set-down/,
     /do run under save/,
     '`completed: <today>`',
+    /never duplicated/,
     /elsewhere the vault's daily sweep does/,
   ])
   const step8 = lineOf(close, /^8\. \*\*Print the "What landed" report/)
@@ -182,6 +204,8 @@ test('T7: sub-step 7.6 writes the flips first; step 8 reports them', () => {
     '`task done (ticked): [[<task>]]`',
     '`task left for execute: [[<task>]]`',
     '`task flip skipped: [[<task>]] partly landed (<what remains>)`',
+    '`Repo state: <line> — tracked by [[<task>]] (flipped done this close)`',
+    '`Repo state: <line> — tracked by [[<task>]] (ticked done this close)`',
     /all on one line, rows joined with ` · `/,
   ])
   assert.doesNotMatch(step8, /`task done: \[\[<task>\]\][^`]*·/, 'a task-row reason must not nest the row separator')
@@ -190,7 +214,7 @@ test('T7: sub-step 7.6 writes the flips first; step 8 reports them', () => {
 test('T8: the intro bullets name the guarded flip and the mark-done option', () => {
   const close = readIf(CLOSE)
   assertHas(lineOf(close, '- **Propose first, then wait**'), `${CLOSE} Propose bullet`, [
-    /new vault tasks/, /mark-done option/, /ADR 0026/,
+    /new vault tasks/, /mark-done option/, /ADR 0026/, /except the execute-owned and partly-landed tasks/,
   ])
   assertHas(lineOf(close, '- **Auto-execute, no asking**'), `${CLOSE} Auto-execute bullet`, [/guarded flip/, 'step 7.1'])
 })
@@ -204,7 +228,10 @@ test('T9: open completes only a capture at pickup; save runs the guarded flip', 
     /task-writer\.md` § 4\b/,
     /Any other task stays at its status/,
     /close\/SKILL\.md` § A finished task closes itself/,
+    /marks it done when the work passes its guard and otherwise asks/,
+    /set \(or replace\) `completed: <today>`/,
   ])
+  assert.doesNotMatch(step3, /once the work lands/, `${OPEN} pickup step 3 must not promise an unconditional flip`)
   assert.doesNotMatch(step3, /sweep/i, `${OPEN} pickup step 3 must not promise a sweep`)
   assert.doesNotMatch(step3, /\bclear/i, `${OPEN} pickup step 3 must not clear a next-action field`)
   assertHas(slice(pickup, /^4\. /, /^$/), `${OPEN} pickup step 4`, ['task left open until close'])
@@ -238,6 +265,10 @@ const EDGE_LABELS = [
   'A squash-merged PR',
   'A touched task already done or on hold',
   "The finished task was the thread's next step",
+  "A capture's Resume prompt pasted into a fresh session",
+  'A task this session only did bookkeeping on',
+  'A branch whose tracking task flips this close',
+  'A task that already carries `completed:`',
 ]
 
 test('T13: the flip set is never the next task; edge cases are named', () => {
@@ -245,11 +276,17 @@ test('T13: the flip set is never the next task; edge cases are named', () => {
   assertHas(lineOf(close, /^5\. \*\*Compute the full save set silently\*\*/), `${CLOSE} step 5`, [
     /it skips the flip set/, /the flip set and the mark-done options/,
   ])
-  assertHas(slice(close, /^4\. \*\*Compute the thread-update diff/, /^5\. /), `${CLOSE} step 4`, [
+  const step4 = slice(close, /^4\. \*\*Compute the thread-update diff/, /^5\. /)
+  assertHas(step4, `${CLOSE} step 4`, [
     /never naming a task in the flip set as the next step/,
+    /fix the flip set and the mark-done options first/,
+  ])
+  assert.ok(step4 != null && step4.indexOf('fix the flip set') < step4.indexOf('Resume instructions:'), `${CLOSE} step 4 fixes the flip set before the Resume bullet`)
+  assertHas(lineOf(close, /^5\. \*\*Compute the full save set silently\*\*/), `${CLOSE} step 5 (carry-over)`, [
+    /the flip set and the mark-done options as step 4 fixed them/,
   ])
   const form = slice(slice(readIf(WRITER), /^## 4b\./, /^## 5\./), /^\*\*Close's form\.\*\*/, /^$/)
-  assertHas(form, `${WRITER} § 4b Close's form`, [
+  assertHas(form == null ? null : collapse(form), `${WRITER} § 4b Close's form`, [
     /A task this close marks done\s+\(`close\/SKILL\.md` § A finished task closes itself\) is never the match/,
   ])
   const edge = slice(close, /^## Edge cases/, /^## (?!Edge)/)
@@ -260,4 +297,22 @@ test('T13: the flip set is never the next task; edge cases are named', () => {
   }
   const next = lines.find((l) => l.startsWith("- **The finished task was the thread's next step"))
   assertHas(next, `${CLOSE} edge case "next step"`, [/before the set-down/, /never handed a done task/])
+  const pasted = lines.find((l) => l.startsWith("- **A capture's Resume prompt pasted into a fresh session"))
+  assertHas(pasted, `${CLOSE} edge case "pasted Resume prompt"`, [/`First:` line closes the capture/, /route \(c\)/])
+  const mention = lines.find((l) => l.startsWith('- **A task worked but never opened'))
+  assertHas(mention, `${CLOSE} edge case "worked but never opened"`, [/this session did its work/, /only mentioned in chat[^.]*is not a candidate/])
+  assert.doesNotMatch(mention ?? '', /a bare chat mention[^.]*mark-done/, 'a bare chat mention must not become a mark-done option')
+  const branch = lines.find((l) => l.startsWith('- **A branch whose tracking task flips this close'))
+  assertHas(branch, `${CLOSE} edge case "tracking task flips"`, [/`Merge or retire <branch>` candidate/, /\(ticked done this close\)/])
+})
+
+test('T14: task-writer § 5 makes a capture taken mid-task name the worked task', () => {
+  const body = slice(readIf(WRITER), /^## 5\./, /^## 6\./)
+  assertHas(body, `${WRITER} § 5 template`, [/^Read first: <the worked task's note path, if any;/m])
+  assertHas(body == null ? null : collapse(body), `${WRITER} § 5 The worked task`, [
+    /\*\*The worked task\.\*\*/,
+    /the Resume prompt's `Read first:` line names that task by its absolute path/,
+    /route \(c\)/,
+    /A § 2 re-capture keeps the line/,
+  ])
 })
