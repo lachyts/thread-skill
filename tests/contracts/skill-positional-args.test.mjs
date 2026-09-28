@@ -15,6 +15,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { skillCount } from '../lib/contract-text.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const walk = (d) => fs.readdirSync(path.join(root, d), { withFileTypes: true })
@@ -35,7 +36,7 @@ function findViolations(text) {
 const skills = walk('skills').filter((p) => path.basename(p) === 'SKILL.md')
 
 test('the scan finds the skills', () => {
-  assert.ok(skills.length >= 13, `expected every skill's SKILL.md, found ${skills.length}`)
+  assert.equal(skills.length, skillCount(), `expected every skill's SKILL.md, found ${skills.length}`)
 })
 
 test('control: the matcher catches shell, awk, braced and prose positionals, and passes the rest', () => {

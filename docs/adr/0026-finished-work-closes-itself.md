@@ -2,6 +2,8 @@
 
 Date: 2026-09-27
 Status: accepted (amends ADR 0011's vault-task gate for one case)
+*(Amended by ADR 0027, 2026-09-28: Report-only is now Look only. Orient fixes drift on a Reshuffle
+or Steer only answer, never for a scoped target, and gather's backstop is part of the reshuffle.)*
 
 ## Context
 

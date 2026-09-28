@@ -146,15 +146,15 @@ test('orient reads the slot first, proposes against it, fills only blanks', () =
   assertHas(slice(orient, /^### 3\./, /^### 4\./), `${ORIENT} § 3`, [
     /`No next action`/, /\*\*proposal against the slot\*\*/, /never read as competing answers/,
   ])
-  const write = slice(slice(orient, /^### 5\./, /^### 6\./), /^- \*\*The slot write\*\*/, /^- /)
-  assertHas(write, `${ORIENT} § 5 slot write`, [
-    /fill-blank only/, /estate ADR 0008/, /but Report-only or a dry run/, `${SCRIPT_CITE} fill <task> [--action -]`,
+  const write = slice(slice(orient, /^### 6\./, /^### 7\./), /^- \*\*The slot write\*\*/, /^- /)
+  assertHas(write, `${ORIENT} § 6 slot write`, [
+    /fill-blank only/, /estate ADR 0008/, /but Look only or a dry run/, `${SCRIPT_CITE} fill <task> [--action -]`,
     /fills only\s+a blank or dead slot and a blank `next_action:`/, /a set slot is never\s+overwritten/, /task-writer\.md`\s+§ 4b/,
     // Hands-on pickup completes a capture: a pointer to it would be dead on arrival.
     /Skip the write when Hands-on\s+picks the task up/,
   ])
-  assertHas(slice(orient, /^### 5\./, /^### 6\./), `${ORIENT} § 5`, [/\*\*Report-only\*\* → done, no writes\./])
-  assertHas(slice(orient, /^## Don't/, null), `${ORIENT} § Don't`, [/the slot write included — in Report-only or dry runs/])
+  assertHas(slice(orient, /^### 4\./, /^### 5\./), `${ORIENT} § 4`, [/\*\*Look only\*\*[^.]*no writes of any kind/])
+  assertHas(slice(orient, /^## Don't/, null), `${ORIENT} § Don't`, [/the slot write included — in Look only or dry runs/])
 })
 
 test('CONTEXT.md defines the next-action vocabulary', () => {

@@ -2,6 +2,8 @@
 
 Date: 2026-08-12
 Status: accepted (supersedes the packaging conclusion of ADR 0003)
+*(Amended by ADR 0027, 2026-09-28: `split` and `gather` are retired into orient's reshuffle; the
+rollout verbs are schedule, execute, status and repair.)*
 
 ## Context
 

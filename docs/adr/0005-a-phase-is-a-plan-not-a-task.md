@@ -1,5 +1,8 @@
 # A phase is a plan, not a task
 
+*(Amended by ADR 0027, 2026-09-28: `/thread:split` is retired; everything this record says of
+split now holds for `/thread:orient`'s reshuffle.)*
+
 A project's roadmap phase (P1, P2, …) is its own vault type — `tags: [phase]`, home folder
 `Work/Phases/`, named `<project>-p<N>-<desc>` — never a `task`-tagged note. Tasks inherit their
 phase's number (`phase: N`, filenames `<project>-p<N>-<M>-<desc>`); `/thread:split` never starts a

@@ -33,6 +33,9 @@ const FOREIGN_ADR_QUALIFIERS = ['Chorus', 'workspaces', 'estate', 'Estate']
 const EXTERNAL = [
   ['add-task.md', 'Step 4'],
   ['add-task.md', 'Launch context'],
+  ['add-phase.md', 'Step 2'],
+  ['add-phase.md', 'Step 3'],
+  ['add-phase.md', 'Step 4'],
   ['obsidian-schema.md', 'Task'],
   ['claude-base-instructions.md', 'Claude memory management'],
   ['triage-batching-protocol.md', '6'],
@@ -133,6 +136,8 @@ function classify(target, ctx) {
     return ctx.skills.has(m[1]) ? { file: t } : { missing: `no skill "${m[1]}"` }
   }
   if ((m = t.match(/^(?:skills\/)?(?:_shared\/)?([\w-]+)(?:\.md)?$/)) && ctx.shared.has(m[1])) return { file: `skills/_shared/${m[1]}.md` }
+  // A skill's own reference file (skills/orient/reshuffle.md): in-repo, so rule B resolves it.
+  if (/^skills\/[\w-]+\/[\w.-]+\.md$/.test(t)) return ctx.readTarget(t) != null ? { file: t } : { missing: `no file ${t}` }
   if (t === 'CONTEXT.md') return { file: 'CONTEXT.md' }
   if (t === 'README' || t === 'README.md') return { file: 'README.md' }
   if (/\.md$/.test(t) || /^[~/]/.test(t)) return { ext: t }

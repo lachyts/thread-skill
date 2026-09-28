@@ -22,6 +22,6 @@ The process-observation capture (category 7, thread-skill ADR 0012, 0015) **NOOP
 
 ## Full system (only if Windows use grows)
 
-The rollout engine (`split`/`schedule`/`execute`/`status`/`repair`) additionally requires `python3` (no longer optional), the workspaces clone above, and target repos under `~/repos/`. All path resolution already goes through `expanduser` / Git Bash `~`, so mirroring the Mac's `~/repos` layout needs no skill changes.
+The rollout engine (orient's reshuffle, `schedule`/`execute`/`status`/`repair`) additionally requires `python3` (no longer optional), the workspaces clone above, and target repos under `~/repos/`. All path resolution already goes through `expanduser` / Git Bash `~`, so mirroring the Mac's `~/repos` layout needs no skill changes.
 
 Known risk on native Windows, first run: the Stop hook command references `${CLAUDE_PLUGIN_ROOT}`. If it fails to expand under the Windows hook runner, report it back rather than patching locally; the fix belongs in `hooks/hooks.json` in this repo.

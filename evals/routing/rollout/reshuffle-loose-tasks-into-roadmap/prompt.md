@@ -1,5 +1,5 @@
 ---
-description: Loose existing tasks to phase route to gather, not split
+description: Loose existing tasks to phase route to orient's reshuffle, not straight to schedule
 tags: [routing, rollout]
 max_turns: 8
 timeout_seconds: 180

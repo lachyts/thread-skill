@@ -1,59 +1,71 @@
 ---
 name: orient
-description: 'Project-altitude orientation — audit a whole project/area after time away, recommend the best use of Lachy''s time, ask how he wants to steer (background agents vs hands-on focus), then route. Triggers on "orient me on <project>", "where is <project> at overall", "I haven''t looked at <project> in a while — what''s open?", "audit <project> and tell me where my time should go", "fan out background sessions on <project>", or explicit /thread:orient [target]. Also /thread:orient <target> --debrief to sweep previously dispatched batches. For ONE thread''s next move use thread:next; wave-shaped clusters (one repo, PR-per-task, machine-verifiable in-run) route to the rollout lane — thread:gather / thread:schedule — per the execution-fit test.'
+description: 'Pick a project back up and reshuffle it: audit a project/area after time away, re-sort its open work (bugs, brain dumps, loose tasks, unstarted phases), grill what is unclear, write phases and tasks, schedule the wave-shaped ones and offer to execute. One plan, design note or brain dump becomes phased tasks. Triggers on "orient me on <project>", "where is <project> at overall", "reshuffle <project>", "turn these tasks into a roadmap", "split/break this plan into numbered, phased tasks", "fan out background sessions on <project>", or /thread:orient [target]; --debrief sweeps batches. One thread: thread:next.'
 ---
 
-# /thread:orient — where should my time go on this project?
+# /thread:orient — pick a project up and reshuffle it
 
-The project-altitude sibling of `next` (ADR 0003). `next` answers "what's my
-move?" for the *current thread*; `orient` answers it for a *whole project or
-area* — many sub-projects, tasks, and threads, returned to after time away.
-It audits the balls in the air, recommends ONE best use of Lachy's time, asks
-how he wants to steer, then routes: parallel-safe batches dispatched as
-background scoped sessions, a focus item opened for his own attention, or
-both. A dispatch **launches its batches itself** (ADR 0010): the steering
-answer is the sole authorisation, the prompt file remains the batch's durable
-contract, and missing native capabilities remain explicitly undispatched.
+The project-altitude sibling of `next` (ADR 0003), and the one shaping verb (ADR 0027). `next`
+answers "what's my move?" for the *current thread*; `orient` answers it for a *whole project or
+area* returned to after time away. It audits the balls in the air, recommends ONE best use of
+Lachy's time, then asks **Reshuffle, Steer only or Look only**. A reshuffle re-sorts all the open work, grills
+what is unclear and writes the result at one gate (`reshuffle.md`). Orient then routes by lane:
+it schedules wave-shaped phases itself, steers the session-lane work (background batches, a focus
+item, or both) and ends with the **execute offer**. Pointed at a single plan, design note or brain
+dump, it runs a **scoped reshuffle** of that note alone.
 
-**Contains no route logic of its own** beyond batching/emission: hands-on
-focus dispatches to `${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` (or the
-task's own `## Launch` block); wave-shaped clusters route to the rollout lane
-by running `${CLAUDE_PLUGIN_ROOT}/skills/gather/SKILL.md` or
-`skills/schedule/SKILL.md`, never re-implemented here. The execution-fit test
-(`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`) decides the lane —
-hard, not as a preference.
+**Contains no route logic of its own** beyond batching, emission and the reshuffle: hands-on focus
+dispatches to `${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` (or the task's own `## Launch` block);
+wave-shaped phases go to `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md`; the execute offer runs
+`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` or `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md`.
+None is re-implemented here. The execution-fit test
+(`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`) decides the lane, hard, not as a
+preference.
 
 ## Runtime boundary
 
-The project audit, steering and task-note debrief are shared. Autonomous batches
-use the calling harness's native child tools and current account, never a model
-CLI or a new cmux/Orca model session. The shared exchange at
-`~/repos/workspaces/_shared/scripts/native_workflow.md` supplies journalled
-claims, native child bindings and result validation. Its generic batch engine
-is `native_workflow_batch.workflow.js`; it dispatches already prepared prompts
-and contains no project/domain workflow.
+The project audit, reshuffle, steering and task-note debrief are shared. Autonomous batches use
+the calling harness's native child tools and current account, never a model CLI or a new
+cmux/Orca model session. The shared exchange at
+`~/repos/workspaces/_shared/scripts/native_workflow.md` supplies journalled claims, native child
+bindings and result validation. Its generic batch engine is `native_workflow_batch.workflow.js`;
+it dispatches already prepared prompts and contains no project/domain workflow.
 
-Native children inherit available tools; a target workspace path does not load
-another MCP profile. Before dispatch, check every batch's required capability
-and account against the calling session. If a required scoped capability is
-absent, retain the prompt and report that batch blocked/undispatched. Do not
-silently switch harness, account or launch a broader profile. Other independent
-batches may proceed. Hands-on pickup follows `open`'s contract.
+Native children inherit available tools; a target workspace path does not load another MCP
+profile. Before dispatch, check every batch's required capability and account against the calling
+session. If a required scoped capability is absent, retain the prompt and report that batch
+blocked/undispatched. Do not silently switch harness, account or launch a broader profile. Other
+independent batches may proceed. Hands-on pickup follows `open`'s contract.
 
-Wave-shaped work still routes to gather/schedule and execute's runtime gate.
-The native exchange does not supply the detached Wave hook/heartbeat driver.
+Wave-shaped work still goes through schedule and execute's runtime gate. The native exchange does
+not supply the detached Wave hook/heartbeat driver.
+
+## Invocation forms
+
+```
+/thread:orient Chorus                     # audit, then Reshuffle / Steer only / Look only
+/thread:orient [[Chorus]]                 # explicit wikilink form
+/thread:orient                            # infer the area from CWD
+/thread:orient [[<design, phase or brain-dump note>]]   # scoped reshuffle of that note
+/thread:orient ~/.claude/plans/<plan>.md  # scoped reshuffle of an approved plan file
+/thread:orient "<prose describing the work>"            # scoped reshuffle of inline prose
+/thread:orient Chorus --debrief           # sweep previously dispatched batches (§ 10)
+```
 
 ## Process
 
 ### 1. Resolve the target
 
-Accept a fuzzy target and resolve it to (area, vault folder, workspace,
-project roots):
+Accept a fuzzy target and resolve it to (area, vault folder, workspace, project roots):
 
 - **A name** (`/thread:orient Animately`) or **wikilink** (`[[Animately]]`, a
   sub-project note) → match against the folders and notes under
   `~/repos/obsidian/Work/Projects/`, at any depth, and the workspace registry
   (`~/repos/workspaces/_shared/workspace-registry.md`).
+- **A single-note target** → a **scoped reshuffle**: a wikilink or vault path to a note that is not
+  a project or area note (a design, phase or brain-dump note), a plan file path, or quoted prose.
+  Its project comes from `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § Scoped targets; the area and vault folder follow from
+  that project.
 - **Bare invocation** → infer the area from CWD (workspace dir, project root,
   or a repo matched via `repos:` frontmatter across
   `~/repos/obsidian/Work/Projects/**`).
@@ -71,6 +83,8 @@ project roots):
   from the registry, with no scoped MCP profiles.
 - Ambiguous → `AskUserQuestion` with the 2–3 most likely areas.
 
+A scoped target narrows § 2 to the resolved project.
+
 ### 2. Audit (read-only sweep)
 
 - **Next-action slots, first** (estate ADR 0008, decision 7): each project
@@ -87,15 +101,26 @@ project roots):
   README note) under the vault folder `Work/Projects/<Folder>/`, at any
   depth; `Work/Tasks/` frontmatter sweep (`rg` for
   `projects:` matching the area or its projects — collect `status`,
-  `priority`, `scheduled`, `due`, `dispatched`, `launch`); phase notes in
-  `Work/Phases/` for the area's projects.
+  `priority`, `scheduled`, `due`, `dispatched`, `launch`, `phase`, `wave`,
+  `rollout`, `tags`, `projects`); phase notes in `Work/Phases/` for the area's projects. The
+  reshuffle classifies from this sweep; it does not walk the folders again.
 - **Threads**: THREAD.md state lines across the area's project dirs
   (`~/Projects/<Area>/*/THREAD.md`) and `_shared/threads/`.
-- **Recency + drift**: overdue `scheduled:`/`due:` dates; note staleness
+- **Drift** (ADR 0026): run the shared reconcile step as a dry run for every project in the target
+  in one Bash call,
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/reconcile-project.py --project <slug> --json`,
+  and keep its UNAMBIGUOUS and AMBIGUOUS lists. It writes nothing.
+- **Related projects**: projects the target's notes link or name, and projects linking the
+  target, especially ones `status: parked` or being absorbed by it. Read their unstarted phases
+  and loose tasks for overlap with the target's open work (the reshuffle may pull them in).
+- **Recency**: overdue `scheduled:`/`due:` dates; note staleness
   (last-modified); `git status`/`git log -3` in each project root — dirty
   trees also surface aborted-session partial edits worth flagging.
-- A task with a **recent `dispatched:` stamp** (≤7 days, still `status: open`)
-  is *in flight* — report it as such; never re-batch it (§ 6).
+- **In flight** (the one definition; the reshuffle's reach tiers use it): a task stamped
+  `wave:`/`rollout:` whose rollout note is still live (the link resolves to a note directly in
+  `Work/Tasks/`), a `dispatched:` stamp ≤7 days old, or `status: in-progress` (TaskNotes' own
+  spelling), `in_progress` or `review`; a phase with any such member. Report it as such; never
+  re-batch it (§ 7) and never reshuffle it.
 
 ### 3. Present
 
@@ -106,6 +131,10 @@ A situational report written for Lachy catching up, not a log:
   (`next: <next_action> ([[<task>]])`, or `No next action`), then state,
   blocker, staleness. Group: active / in-flight (dispatched) / stalled /
   dormant.
+- **Drift**: one line, the counts plus names, split into unambiguous (fixed on Reshuffle) and
+  ambiguous (listed for Lachy, never applied). Omit the line when both lists are empty.
+- **Shape**: how much a reshuffle has to work with: loose tasks, brain dumps, unstarted phases,
+  overlaps found in related projects, and any live rollout.
 - **ONE recommended best use of his time**, with a one-line reason — same
   single-recommendation discipline as `next`. Everything else is context, not
   competing recommendations. Frame it as a **proposal against the slot** of
@@ -113,54 +142,83 @@ A situational report written for Lachy catching up, not a log:
   the slot's own task → say they agree; a different item → name the slot and
   say why this beats it; a blank slot → say the recommendation would fill it.
 
-### 4. Steer
+### 4. Reshuffle, Steer only or Look only
 
-`AskUserQuestion`, recommended option first (informed by the audit — e.g. if
-almost nothing is parallel-safe, recommend Hands-on):
+`AskUserQuestion`, recommended option first:
 
-- **Autonomous** — cluster the parallelisable open work into batches and
-  launch them as background scoped sessions; Lachy stays focused elsewhere.
-  This answer IS the launch authorisation — no per-batch confirm follows
-  (ADR 0010).
-- **Hands-on** — he has time for this project: route the best-focus item into
-  `thread:open` / its task's `## Launch` block and work it here.
-- **Mixed** — dispatch the background-safe batches AND hand him the
-  highest-leverage item for his own attention.
-- **Report-only** — the audit summary was the deliverable; stop.
+- **Reshuffle** (the usual choice on pickup) — continue to § 5.
+- **Steer only** — no reshaping: route the open work as it stands (§ 6), e.g. to fan out
+  background batches.
+- **Look only** — the audit was the deliverable; stop, no writes of any kind.
 
-### 5. Route
+**Drift fixes.** Reshuffle and Steer only authorise them (as any steer did under ADR 0026): re-run
+the reconcile step with `--apply` for each project whose dry run listed unambiguous items, so the
+reshuffle never forms a roadmap on top of finished work. Ambiguous items are listed for Lachy and
+never applied. A scoped target skips this question and applies no drift fixes: it reshapes one
+note, so the § 3 Drift line is report-only for it.
 
-- **The slot write** (fill-blank only — estate ADR 0008 decision 4): in every
-  mode but Report-only or a dry run, when the recommendation is a task note
-  that stays open, run
+### 5. Reshuffle
+
+Run the reshape step in `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md`: the item set by reach
+tier, the clear/unclear sort and proposal, the grill of what is unclear (which Lachy can stop at
+any point), the one gate, the writes. With nothing to reshape (Lachy stops the grill at once and
+the gate is empty), carry straight on to § 6.
+
+### 6. Route
+
+- **Run the execution-fit test** on each phase the reshuffle touched and on each other open
+  cluster, and name its lane. Mixed sets split, as the fit-test doc says.
+- **Wave-shaped → the rollout lane, scheduled here.** Run
+  `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md` with `--tasks` naming exactly the members of
+  the wave-shaped phases (or clusters) on that repo: never a bare project run, which would also
+  sweep up misfits, session-lane phases and whatever the grill left unresolved. A scoped target
+  routes only the tasks its own reshuffle wrote. **At most one rollout is live per repo**, so first
+  look for an open rollout note directly in `Work/Tasks/` whose `Project root:` line is this repo,
+  and read it with
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py status --rollout <note>`
+  (local, no network):
+  - **None** → schedule `--tasks <members>`.
+  - **This project's, `paused`, and every unlanded task of it still `status: open`** → schedule
+    `--regenerate --tasks <members + those tasks>`, so the new rollout **supersedes** it.
+  - **Anything else** (running, halted or stuck, holding tasks in another state, or another
+    project's) → schedule nothing and touch nothing. The phases are written and wait; orient
+    names the next move: `/thread:status` (then `repair`) for a stuck rollout, or a later
+    `/thread:orient <project>` (Steer only is enough) once the repo is free.
+  - **Uncommitted grill docs.** If R3's grill left `CONTEXT.md` or `docs/adr/` changes
+    uncommitted in the target repo, schedule nothing there either: every worktree branches from
+    `origin`, which lacks them. Name them as the next move (land them through the repo's PR
+    route), then Steer only schedules.
+
+  Schedule's own § 0 checks can still stop it with a named remedy, which orient reports. cc-*
+  batches are never offered for wave-shaped work; orient never re-implements the merge engine.
+- **Everything else → the session lane.** If any session-lane work is left, steer it with
+  `AskUserQuestion`, recommended option first (informed by the audit — e.g. if almost nothing is
+  parallel-safe, recommend Hands-on):
+  - **Autonomous** — cluster the parallelisable work into batches and launch them as background
+    scoped sessions (§§ 7–8); Lachy stays focused elsewhere. This answer IS the launch
+    authorisation — no per-batch confirm follows (ADR 0010).
+  - **Hands-on** — he has time for this project: if the best-focus item has a THREAD.md or capture
+    task, run `open`'s pickup logic; else follow the task note's `## Launch` / `## Resume prompt`.
+    No ceremony beyond that.
+  - **Mixed** — dispatch the background-safe batches AND hand him the highest-leverage item.
+  - **Not now** — leave the session-lane work where the reshuffle put it.
+- **The slot write** (fill-blank only — estate ADR 0008 decision 4), after the steering answer:
+  in every mode but Look only or a dry run, when the recommendation is a task note that stays
+  open, run
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py fill <task> [--action -]`
   (the line on stdin, grain rule and targets as
-  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 4b). It fills only
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 4b), naming the task by its
+  post-reshuffle filename. It fills only
   a blank or dead slot and a blank `next_action:`; a set slot is never
   overwritten — only a set-down or Lachy does that; the recommendation
   stays a proposal against it. Skip the write when Hands-on
   picks the task up through `open`'s pickup: that completes a capture, so
   the pointer would be dead the moment it landed.
-- **Report-only** → done, no writes.
-- **Hands-on** (and the focus half of Mixed) → if the item has a THREAD.md or
-  capture task, run `open`'s pickup logic; else follow the task note's
-  `## Launch` / `## Resume prompt`. No ceremony beyond that.
-- **Autonomous** (and the batch half of Mixed) → §§ 6–7 for clusters that
-  FAIL the execution-fit test; clusters that pass it go to the rollout lane
-  below, regardless of the steering answer.
-- **Wave-shaped clusters** (pass the execution-fit test:
-  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` — one repo,
-  PR-per-task, machine-verifiable in-run) → **the rollout lane is the default,
-  not a suggestion**: run `${CLAUDE_PLUGIN_ROOT}/skills/gather/SKILL.md`
-  (loose tasks needing a roadmap) or `skills/schedule/SKILL.md` (already
-  phased) for that cluster. cc-* batches are not offered for wave-shaped
-  clusters — the 2026-08-10 GifLab and Smart Slider batches were this leak.
-  Orient never re-implements the merge engine.
 
-### 6. Batch (Autonomous / Mixed)
+### 7. Batch (Autonomous / Mixed)
 
 Batching is the session lane — only work that **fails** the execution-fit test
-is batched here (wave-shaped clusters already routed via § 5). Cluster the
+is batched here (wave-shaped work already went to schedule in § 6). Cluster the
 dispatchable open work into **parallel-safe batches**:
 
 - **Disjoint surfaces**: no two batches may edit the same files, vault notes,
@@ -171,10 +229,10 @@ dispatchable open work into **parallel-safe batches**:
   `cc-animately-seo`). That table + the registry are the only config — orient
   maintains no manifest of its own.
 - **Exclusions**: conversation-gated tasks (need Lachy's input — say so, leave
-  them for Hands-on); tasks with a recent `dispatched:` stamp; work whose
-  playbook demands human sign-off before external effects.
+  them for Hands-on or the next reshuffle's grill); tasks with a recent `dispatched:` stamp; work
+  whose playbook demands human sign-off before external effects.
 
-### 7. Dispatch the batches
+### 8. Dispatch the batches
 
 For each batch:
 
@@ -221,9 +279,26 @@ For each batch:
 Close the dispatch with one line per batch: native child ID, batch title, tasks
 covered, and verified-running, completed or blocked.
 
-### 8. `--debrief`
+### 9. The execute offer
 
-`/thread:orient <target> --debrief` skips steering: sweep the area's
+When § 6 wrote a rollout note, end with `AskUserQuestion`, recommended option first:
+
+- **Fresh session** (recommended after a reshuffle, which has filled this context) — run
+  `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` with its usual home (never a commit on the
+  target repo's default-branch checkout: that would diverge it from `origin` before the first
+  merge) and this continuation: start in the target repo, then `/thread:execute [[<rollout>]]`.
+  Handoff creates the visible task where the harness can, and labels it a manual handoff
+  elsewhere.
+- **Here** — run `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` on the rollout note in this
+  session, when the reshuffle was small and this session was launched in the target repo.
+- **Not yet** — name the rollout note and the `/thread:execute [[<rollout>]]` line, and stop.
+
+Execute's own runtime gate still applies wherever it runs. No rollout written → no offer; § 6
+names why (a running or blocked rollout, uncommitted grill docs, a schedule blocker).
+
+### 10. `--debrief`
+
+`/thread:orient <target> --debrief` skips the reshuffle and steering: sweep the area's
 `dispatched:`-stamped task notes (and, where more detail is needed, the batch
 native run journals and the calling harness's native child status/results), then report per batch —
 completed / stalled / never launched. Clear `dispatched:` from any task whose
@@ -243,12 +318,17 @@ lightweight version of this.
 - **Do not substitute another harness or account.** Native child dispatch is the
   default; absent capabilities are reported instead of shelling out to a model.
 - **Don't re-batch a task with a recent `dispatched:` stamp**, and don't stamp
-  or write anything — the slot write included — in Report-only or dry runs.
+  or write anything — the slot write included — in Look only or dry runs.
+- **Don't reshuffle in-flight work.** Its scope, phase and body are frozen; only new members may
+  join its phase (`reshuffle.md` R1).
+- **Don't write before the reshuffle's gate**, drift fixes (§ 4) aside.
 - **Don't recommend more than one focus item**, and don't pad the audit —
-  headline, balls in the air, one recommendation, then the steering menu.
+  headline, balls in the air, drift, shape, one recommendation, then the question.
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s
-  logic; wave-shaped work goes to the rollout lane (the execution-fit test
-  decides, hard); batch clusters never grow a merge engine here.
-- **Don't batch a wave-shaped cluster.** If it passes the fit test it rolls
-  out — cc-* batches are for work the engine can't take.
+  logic; wave-shaped work goes to schedule (the execution-fit test
+  decides, hard); execute runs only through the execute offer; batch clusters never grow a merge
+  engine here.
+- **Don't batch a wave-shaped cluster**, and don't schedule a bare project run (always `--tasks`).
+- **Never a second rollout per repo, and never another rollout's lifecycle.** Supersede only a
+  paused one whose unlanded tasks are all `status: open`; anything else waits (§ 6).
 - **Don't use orient for a single live thread** — that's `next`.
