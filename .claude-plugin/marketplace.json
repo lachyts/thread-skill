@@ -9,7 +9,7 @@
       "name": "thread",
       "source": "./",
       "description": "Continuity family (open/next/orient/stash/defer/handoff/close: durable thread state, Obsidian captures, routing, orient's reshuffle into phased tasks) + rollout family (schedule/execute/status/repair: parallel-safe waves, three-layer convergence with per-wave auto-merge). The execution-fit test decides which lane owns a cluster.",
-      "version": "2.8.0"
+      "version": "2.9.0"
     }
   ]
 }
