@@ -791,6 +791,9 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+Read /Users/lachlants/repos/tools/thread-skill-rollout/docs/handoffs/2026-09-28-p10-4-p9-4-rollout.md first (pending handoff, 2026-09-28: schedule and execute the p10-4 + p9-4 rollout from this clone).
+
+**Superseded by the handoff above (kept for the record):**
 **Now (from 2026-09-28, evening): 2.9.0 is live (orient's reshuffle, set-down next actions). Nothing is running and no handoff is pending. Both checkouts are on `master`.**
 - **Next:**
   1. The next rollout: `/thread:schedule` on [[thread-skill-p10-4-close-flips-a-finished-task]] and p9-4, from the rollout clone (p10-3 landed in #32). Consider [[thread-skill-reconcile-apply-binds-reviewed-list]] with them. Phase 10 closes itself when p10-4 lands.
