@@ -16,8 +16,8 @@ nothing else outside the vault. Never git/gh. Never stamps `wave:`, `rollout:` o
 
 Walk `~/repos/obsidian/Work/Tasks/*.md` and `~/repos/obsidian/Work/Phases/*.md` for the target
 project(s) (`projects:` contains the wikilink; for phase notes, filenames `<slug>-p<N>-…` where
-`<N>` is digits with an optional `.digits`, the same anchor `reconcile-project.py` uses, so a
-sibling project `<slug>-plugin` never matches). Skip notes tagged `rollout` and landed statuses
+`<N>` is digits with an optional `.digits`: anchored on `-p<N>-` like `reconcile-project.py`, so a
+sibling project `<slug>-plugin` never matches, though that script only reads whole-number phases). Skip notes tagged `rollout` and landed statuses
 (`done`, `merged`, `dropped`). Give every item its **reach tier** (CONTEXT.md **Reach tiers**);
 this is the one definition of in flight, which orient § 2 reports from:
 
@@ -26,6 +26,8 @@ this is the one definition of in flight, which orient § 2 reports from:
   `status: in-progress` (TaskNotes' own spelling), `in_progress` or `review`; a phase with any
   such member. Shown for context. Its scope, phase and body never change. New work may still join
   its phase.
+- **Possibly landed — frozen too.** Anything on the reconcile step's AMBIGUOUS list (orient § 2):
+  it may already have merged, so it is listed for Lachy and never moved, restamped or scheduled.
 - **Thread captures — frozen too.** A `thread`-tagged task (stash/defer's capture) belongs to its
   thread and is picked up by `open`; the reshuffle shows it for context and never unbundles,
   drops, renames or re-homes it.
@@ -46,8 +48,11 @@ plus any tasks already written from it. The project's roadmap is read only for n
 
 Then read the roadmap numbering: `Work/Phases/<slug>-p<N>-…` (and `Work/Phases/Archive/`), with
 the same numeric anchor → the max phase number `N_max` and, per phase, the max task ordinal `M`
-(from `Work/Tasks/<slug>-p<N>-<M>-*` filenames, archived included). Fractional phases keep the dot (`p3.5`); a fractional `N_max` rounds
-up to the next whole phase. New phases number from `N_max + 1` (P1 when the project has none);
+(from `Work/Tasks/<slug>-p<N>-<M>-*` filenames, archived included, and from the struck-through
+entries R5.2 leaves in a phase's `## Build sequence` when a task moves out: an ordinal is never
+reused). Fractional phases keep the dot (`p3.5`); a fractional `N_max` rounds
+up to the next whole phase, which is the first new one (`p3.5` → P4). Otherwise new phases number
+from `N_max + 1` (P1 when the project has none);
 existing phase numbers are **never** changed.
 
 ## R2. Sort and propose
@@ -149,19 +154,23 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
    - **Phased or moved tasks** are renamed and stamped. The body gets the grilled spec when R3
      respecced it; a clear item's body is unchanged apart from backlink rewrites. A `wave:` or
      `rollout:` stamp left by a retired rollout (R1 found it not in flight) is cleared, or
-     schedule would skip the task.
+     schedule would skip the task. A task moving out of a phase leaves its entry in that phase's
+     `## Build sequence`, struck through with a pointer (`~~p3-2~~ moved to [[<new-slug>]]`), so
+     its ordinal stays used.
    - Leave **`wave:` unset**. Don't set `scope:`: schedule infers it from `touches:`.
 3. **Renames rewrite backlinks.** Before each rename check the target basename is free, then find
    every link to the old slug and rewrite it to the new one (wikilinks don't follow a filesystem
    rename). A link is `[[old-slug` followed by `]]`, `|`, `\|` or `#`, so aliased and heading
-   links are caught and `[[old-slug-more]]` is not. Search the vault, every
-   `~/Projects/**/THREAD.md`, `~/repos/workspaces/_shared/threads/` and the project repo's
-   `THREAD.md` and `docs/handoffs/`. Find candidates with `/usr/bin/grep -rlF '[[old-slug'` (the
+   links are caught and `[[old-slug-more]]` is not. Rewrite inside the vault only. Links outside
+   it (`~/Projects/**/THREAD.md`, `~/repos/workspaces/_shared/threads/`, the project repo's
+   `THREAD.md` and `docs/handoffs/`) are searched and **listed in the report** for Lachy, never
+   edited: they are committed files in other repos. Find candidates with `/usr/bin/grep -rlF '[[old-slug'` (the
    Bash tool's `rg`/`grep` are shell functions a script can't call), then rewrite only the
    terminated forms. Exclude `.git`, `.obsidian`, `.smart-env` and `.trash`: a plain vault-wide
    rewrite corrupts Smart Connections' `.smart-env/*.ajson` cache.
-4. **Other dispositions.** An unbundled brain dump gets `status: done` and an `## Unbundled into`
-   list of its tasks. A merged-away item gets `status: dropped` and `Merged into [[<survivor>]]`; a
+4. **Other dispositions.** An unbundled brain dump gets an `## Unbundled into` list of its tasks;
+   it is marked `status: done` only when every idea in it was unbundled. If the grill stopped
+   first, it stays open with the unreached ideas in its body, for the next reshuffle. A merged-away item gets `status: dropped` and `Merged into [[<survivor>]]`; a
    dropped item gets `status: dropped` and a one-line reason. A re-homed item's `projects:` is
    switched. A pulled-in item is renamed into the target's roadmap, its `projects:` switched to
    the target, and its source phase note gains a pointer line
@@ -200,6 +209,7 @@ status, misfits, and what the grill left unresolved. Orient § 6 routes from her
 - **Don't copy the grill skills' instructions inline**: invoke `grill-with-docs` / `grill-me` by
   name; the inline shape is only the no-skills fallback.
 - **Don't write outside the vault**, except `CONTEXT.md` / `docs/adr/` in the resolved project
-  repo via the grill-with-docs surface during R3.
+  repo via the grill-with-docs surface during R3 (never committed here: orient § 6 holds
+  scheduling until they land). Out-of-vault backlinks are reported, not rewritten.
 - **Don't duplicate the writer-spec schema**: note shape lives in `add-writers/add-task.md` (tasks)
   and `add-writers/add-phase.md` (phases).

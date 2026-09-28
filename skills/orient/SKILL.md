@@ -66,8 +66,9 @@ Accept a fuzzy target and resolve it to (area, vault folder, workspace, project 
   a project or area note (a design, phase or brain-dump note), a plan file path, or quoted prose.
   The project slug is the note's `projects:` entry; for a phase note (`tags: [phase]`, or a legacy
   task-tagged note named `<project>-p<N>-…` or reading "Phase N of [[Project]]") it is the
-  **parent** project, and phase N is inherited. A note with no `projects:` takes its own title as
-  the slug, confirmed at the gate. A plan file or prose has no vault node: match it to an existing
+  **parent** project, and phase N is inherited. A note with no `projects:` is its own project,
+  as split treated it: its title is the slug and it becomes the project note (gains `project` in
+  `tags:` and R5.6's base blocks), confirmed at the gate. A plan file or prose has no vault node: match it to an existing
   project where one fits, else derive the slug from its title; confirm either way. The area and vault folder then follow from that project.
 - **Bare invocation** → infer the area from CWD (workspace dir, project root,
   or a repo matched via `repos:` frontmatter across
@@ -174,17 +175,24 @@ applies no drift fixes (the § 3 Drift line is report-only for it).
 - **Wave-shaped → the rollout lane, scheduled here.** Run
   `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md` with `--tasks` naming exactly the members of
   the wave-shaped phases (or clusters) on that repo: never a bare project run, which would also
-  sweep up misfits, session-lane phases and whatever the grill left unresolved. **At most one
-  rollout is live per repo**, so first look for an open rollout note in `Work/Tasks/` whose
-  `Project root:` line is this repo:
+  sweep up misfits, session-lane phases and whatever the grill left unresolved. A scoped target
+  routes only the tasks its own reshuffle wrote. **At most one rollout is live per repo**, so first
+  look for an open rollout note in `Work/Tasks/` whose `Project root:` line is this repo, and read
+  its state with `${CLAUDE_PLUGIN_ROOT}/skills/status/SKILL.md`:
   - **None** → schedule `--tasks <members>`.
-  - **This project's, not running** (paused, or idle per
-    `${CLAUDE_PLUGIN_ROOT}/skills/status/SKILL.md`) → schedule `--regenerate --tasks <members +
-    its unmerged tasks>`, so the new rollout **supersedes** it.
-  - **This project's, mid-run** → schedule nothing and pause nothing here. The supersede waits
-    for the execute offer (§ 9), whose answer is the only consent to pause a running rollout.
-  - **Another project's** → schedule § 0 stops on it (execution-fit § Dispatch blockers); report
-    the remedy and make no execute offer for this repo.
+  - **This project's, idle** (not running: paused, halted or finished) **and every unlanded task
+    of it still `status: open`** → schedule `--regenerate --tasks <members + those tasks>`, so the
+    new rollout **supersedes** it.
+  - **This project's, idle but holding tasks in any other state** (`in-progress`, `review`,
+    `gate-pending`, blocked) → schedule nothing: that rollout needs
+    `${CLAUDE_PLUGIN_ROOT}/skills/repair/SKILL.md` first, which orient names as the next move.
+  - **Running, or another project's** → schedule nothing and touch nothing. The phases are
+    written and wait; a later `/thread:orient <project>` (Steer only is enough) schedules them
+    once the repo is free.
+  - **Uncommitted grill docs.** If R3's grill left `CONTEXT.md` or `docs/adr/` changes
+    uncommitted in the target repo, schedule nothing there either: every worktree branches from
+    `origin`, which lacks them. Name them as the next move (land them through the repo's PR
+    route), then Steer only schedules.
 
   Schedule's own § 0 checks can still stop it with a named remedy, which orient reports. cc-*
   batches are never offered for wave-shaped work; orient never re-implements the merge engine.
@@ -278,31 +286,20 @@ covered, and verified-running, completed or blocked.
 
 ### 9. The execute offer
 
-**When § 6 wrote a rollout note**, end with `AskUserQuestion`, recommended option first:
+When § 6 wrote a rollout note, end with `AskUserQuestion`, recommended option first:
 
 - **Fresh session** (recommended after a reshuffle, which has filled this context) — run
-  `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` with the target repo as the handoff's home, so the
-  new session starts there, and `/thread:execute [[<rollout>]]` as the continuation. Handoff
-  creates the visible task where the harness can, and labels it a manual handoff elsewhere.
+  `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` with its usual home (never a commit on the
+  target repo's default-branch checkout: that would diverge it from `origin` before the first
+  merge) and this continuation: start in the target repo, then `/thread:execute [[<rollout>]]`.
+  Handoff creates the visible task where the harness can, and labels it a manual handoff
+  elsewhere.
 - **Here** — run `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` on the rollout note in this
-  session (sensible when the reshuffle was small).
+  session, when the reshuffle was small and this session was launched in the target repo.
 - **Not yet** — name the rollout note and the `/thread:execute [[<rollout>]]` line, and stop.
 
-**When the supersede is waiting on a mid-run rollout** (§ 6), the offer is different, because
-nothing new is scheduled yet and the old rollout is still running:
-
-- **Pause and hand off** (recommended) — this answer is the consent to pause. Stamp
-  `pause_requested: true` on the live rollout note (a soft pause: the running wave finishes and
-  merges; execute § Pausing + reinstating a rollout), then run the handoff skill as above with this
-  continuation: wait for the rollout's `paused:` stamp, run
-  `/thread:schedule --regenerate --tasks <the § 6 members + its unmerged tasks>`, then execute the
-  new rollout it writes. Never `/thread:execute` the old note: that would reinstate it.
-- **Not yet** — pause nothing; the live rollout runs on. The reshuffled phases are written and
-  wait; a later `/thread:orient <project>` schedules them once the live rollout is done.
-
-There is no **Here** in that case: this session would sit waiting on a wave boundary. Execute's own
-runtime gate still applies wherever it runs. No rollout written and no supersede waiting → no
-offer.
+Execute's own runtime gate still applies wherever it runs. No rollout written → no offer; § 6
+names why (a running or blocked rollout, uncommitted grill docs, a schedule blocker).
 
 ### 10. `--debrief`
 
@@ -331,7 +328,8 @@ lightweight version of this.
   join its phase (`reshuffle.md` R1).
 - **Don't write before the reshuffle's gate**, drift fixes on a Reshuffle or Steer only answer
   aside; a scoped target applies none.
-- **Don't pause a running rollout** except on the execute offer's **Pause and hand off** answer.
+- **Don't manage another rollout's lifecycle.** Supersede only an idle one whose unlanded tasks
+  are all `status: open`; a running one waits, a stuck one goes to `repair`.
 - **Don't recommend more than one focus item**, and don't pad the audit —
   headline, balls in the air, drift, shape, one recommendation, then the question.
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s

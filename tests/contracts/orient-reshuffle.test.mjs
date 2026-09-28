@@ -2,7 +2,7 @@
 // gather verbs' machinery. It numbers phases from one base, defers note shape to the add-writers spec
 // instead of carrying its own copy, never reshuffles in-flight work, rewrites backlinks without touching
 // the vault's caches, and orient wires the drift step (ADR 0026) around it: dry run in the audit, one
-// Drift line in the report, the unambiguous list applied only on a Reshuffle answer.
+// Drift line in the report, the unambiguous list applied only on a Reshuffle or Steer only answer.
 //
 // Every phrase-level check runs on whitespace-collapsed text, so a reflowed line can't hide a match (or
 // a regression). Sections are sliced fence-aware, so a fenced example with a `## …` line inside it can't
@@ -140,18 +140,19 @@ test('in flight has one definition, in TaskNotes spelling, and captures are froz
   assert.match(r1, /`status: in-progress` \(TaskNotes' own spelling\), `in_progress` or `review`/)
   assert.match(r1, /\*\*Thread captures — frozen too\.\*\*/, 'R1 lets a reshuffle touch thread captures')
   assert.match(r1, /`tags:` contains `task` but not `thread`/, 'the loose tier still includes thread captures')
-  assert.match(r1, /same anchor `reconcile-project\.py` uses/, 'phase discovery lost its numeric anchor')
+  assert.match(r1, /anchored on `-p<N>-` like `reconcile-project\.py`/, 'phase discovery lost its numeric anchor')
+  assert.match(r1, /\*\*Possibly landed — frozen too\.\*\*/, 'R1 lets a reshuffle move ambiguous drift')
   assert.match(collapse(section(orient, /^### 2\./)), /anything `reshuffle\.md` R1 counts as in flight/)
 })
 
-test('orient schedules only the wave-shaped members and never pauses silently', () => {
+test("orient schedules only the wave-shaped members and never runs another rollout's lifecycle", () => {
   const s6 = collapse(section(orient, /^### 6\./))
   assert.match(s6, /with `--tasks` naming exactly the members/, 'orient § 6 schedules a bare project run')
-  assert.match(s6, /schedule nothing and pause nothing here/, 'orient § 6 pauses a running rollout')
+  assert.match(s6, /\*\*This project's, idle\*\* \(not running: paused, halted or finished\) \*\*and every unlanded task of it still `status: open`\*\*/)
+  assert.match(s6, /\*\*Running, or another project's\*\* → schedule nothing and touch nothing/)
+  assert.match(s6, /A scoped target routes only the tasks its own reshuffle wrote/)
+  assert.doesNotMatch(collapse(orient), /pause_requested/, 'orient still pauses rollouts')
   assert.ok(s6.indexOf('**The slot write**') > s6.indexOf('**Hands-on**'), 'the slot write runs before the steering answer')
-  const s9 = collapse(section(orient, /^### 9\./))
-  assert.match(s9, /\*\*Pause and hand off\*\* \(recommended\) — this answer is the consent to pause/)
-  assert.match(s9, /Never `\/thread:execute` the old note/)
 })
 
 test('a scoped target applies no drift fixes', () => {
@@ -159,14 +160,9 @@ test('a scoped target applies no drift fixes', () => {
   assert.match(collapse(section(orient, /^### 5\./)), /never for a scoped target/)
 })
 
-test('backlink rewrites catch aliased and heading links and reach threads', () => {
+test('backlink rewrites catch aliased and heading links and report the rest', () => {
   const r5 = collapse(section(reshuffle, /^## R5\./))
   assert.match(r5, /followed by `\]\]`, `\|`, `\\\|` or `#`/, 'R5.3 misses aliased or heading links')
-  assert.match(r5, /`~\/Projects\/\*\*\/THREAD\.md`/, 'R5.3 does not reach THREAD.md files')
-})
-
-test("schedule's gate stops on another project's live rollout on the same repo", () => {
-  const fit = collapse(read('skills/_shared/execution-fit.md'))
-  assert.match(fit, /\*\*Another project's live rollout on the same repo\.\*\*/)
-  assert.match(collapse(read('skills/schedule/SKILL.md')), /live-rollout check for that repo/)
+  assert.match(r5, /Rewrite inside the vault only/, 'R5.3 edits files outside the vault')
+  assert.match(r5, /\*\*listed in the report\*\*/, 'R5.3 no longer reports out-of-vault links')
 })

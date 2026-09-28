@@ -36,11 +36,12 @@ Grilled 2026-09-28.
    dumps are unbundled, one task per idea. The grill can stop at any point; what is resolved is
    written at the one gate and the rest stays loose. Gather's `--light` goes, since stopping the
    grill early does its job.
-5. **Orient schedules and offers execute.** Wave-shaped phases are scheduled by orient itself. At
-   schedules exactly the wave-shaped phases' members (`--tasks`), never a bare project run. At
-   most one rollout is live per repo (schedule's gate stops on another project's), so new work
-   **supersedes** this project's live rollout. A mid-run rollout is never paused silently: the
-   execute offer asks, and **Pause and hand off** is the consent. The pass ends with the **execute offer**: a fresh session via handoff
+5. **Orient schedules and offers execute.** Wave-shaped phases are scheduled by orient itself,
+   exactly their members (`--tasks`), never a bare project run. At most one rollout is live per
+   repo: new work **supersedes** this project's rollout only when it is idle and its unlanded
+   tasks are all still open. A running rollout (or another project's) makes the new phases wait
+   for a later orient; a stuck one goes to `repair`. Orient never pauses or archives a running
+   rollout. The pass ends with the **execute offer**: a fresh session via handoff
    (the default, because the reshuffle has filled this context), here, or not yet. The steering
    question (Autonomous / Hands-on / Mixed) moves after the reshuffle and covers only session-lane
    work.

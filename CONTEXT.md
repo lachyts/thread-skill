@@ -242,8 +242,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   GitHub/git reality. Within a rollout, `status` flags it and `repair`
   reconciles it. Across a project it is finished work still marked open: a
   phase whose tasks have all landed, or a task whose PR has merged. `orient`
-  flags it and fixes the unambiguous items unless Lachy picks Look only
-  (ADR 0026, 0027). _Avoid_: desync, staleness, mismatch.
+  flags it and fixes the unambiguous items on a Reshuffle or Steer only
+  answer (ADR 0026, 0027). _Avoid_: desync, staleness, mismatch.
 - **Clean defer** — taking a task out of a rollout back to the open backlog
   (clearing `wave:`/`rollout:`/`owner:`), permitted only when nothing in the
   rollout depends on it. _Avoid_: drop, cancel, skip.

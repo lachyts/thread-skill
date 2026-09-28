@@ -48,7 +48,7 @@ this file for the fit test, doesn't run the check or the stop itself: it
 runs schedule, which does. The
 schedule gate stops before anything is written (no task stamped, no rollout
 note, no heartbeat) and names the remedy. Fix the blocker, then schedule again.
-Three blockers:
+Two blockers:
 
 **GitHub `origin`.** The engine branches every worktree from
 `origin/<default branch>` and lands each task as a GitHub PR that merge-wave
@@ -77,14 +77,6 @@ does (strip everything through `github.com:` or `github.com/`, then a trailing
 so it stays outside the markers and the test. If it fails (gh not
 authenticated, repo not visible, offline), the gate also stops and prints gh's
 error.
-
-**Another project's live rollout on the same repo.** At most one rollout is live
-per repo (ADR 0027): two would branch and merge against the same `main` with
-nothing guarding file overlap between them. Before writing, look for an open
-rollout note directly in `Work/Tasks/` whose `Project root:` line is the target
-repo. One from this project is superseded (`--regenerate`, schedule § 6); one
-from another project stops the gate, with the remedy: let it finish, or pause it
-and schedule both projects' tasks together with `--tasks`.
 
 **Engine path.** The Workflow tool may refuse the plugin-cache `scriptPath`. That
 depends on the harness and cannot be checked at schedule time; execute § 5
