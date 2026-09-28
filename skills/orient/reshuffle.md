@@ -36,8 +36,10 @@ only reads whole-number phases. Skip notes tagged `rollout` and landed statuses 
 
 - **In flight — frozen.** Orient § 2's definition. Shown for context. Its scope, phase and body
   never change. New work may still join its phase.
-- **Possibly landed — frozen too.** Anything on the reconcile step's AMBIGUOUS list (orient § 2):
-  it may already have merged, so it is listed for Lachy and never moved, restamped or scheduled.
+- **Possibly landed — frozen too.** Anything on the reconcile step's AMBIGUOUS list (orient § 2),
+  and anything orient § 4's bound apply reported as `New since review` or `Reviewed, not applied`:
+  it may already have merged (the § 2 sweep predates the apply, so it can still read as open), so
+  it is listed for Lachy and never moved, restamped, dropped or scheduled.
 - **Thread captures — frozen too.** A `thread`-tagged task (stash/defer's capture) belongs to its
   thread and is picked up by `open`; the reshuffle shows it for context and never unbundles,
   drops, renames or re-homes it.

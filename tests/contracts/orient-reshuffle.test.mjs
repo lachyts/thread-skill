@@ -33,6 +33,10 @@ test('in flight is defined once, in orient § 2, with TaskNotes spelling', () =>
   assertHas(S(2), 'orient § 2', ['`status: in-progress`', '`in_progress`', '`review`', '`dispatched:`'])
   assertHas(R(1), 'R1', [/[Oo]rient § 2's definition/, /never change/, /AMBIGUOUS/, /`thread`-tagged/,
     /contains `task` but not `thread`/, '`-p<N>-`'])
+  // What orient § 4's bound apply left open (landed since the review, or withheld) is frozen with AMBIGUOUS:
+  // the § 2 sweep predates the apply, so without this R1 could re-phase, drop or schedule finished work.
+  assertHas(R(1), 'R1', [/Possibly landed — frozen too\.[^-]*AMBIGUOUS[^-]*`New since review`[^-]*`Reviewed, not applied`[^-]*never moved, restamped, dropped or scheduled/])
+  assertHas(S(4), 'orient § 4', [/`New since review`[^.]*`Reviewed, not applied`[^.]*\. [^.]*join the reshuffle's frozen possibly-landed tier/])
   assert.doesNotMatch(R(1), /`status: in-progress`/, 'R1 restates the in-flight definition')
 })
 
@@ -46,9 +50,12 @@ test('backlinks: one pass, alias and heading forms, cache dirs excluded, out-of-
 })
 
 test('orient runs drift dry, reports it, and applies it only on an authorising answer', () => {
-  assertHas(S(2), 'orient § 2', ['reconcile-project.py --project <slug> --json', /dry run/, /mktemp/])
+  assertHas(S(2), 'orient § 2', ['reconcile-project.py --project <slug> --json', /dry run/, /mktemp -d/,
+    '`<dir>/<slug>.json`', /§ 4 binds the apply to that file/])
   assertHas(S(3), 'orient § 3', ['**Drift**'])
-  assertHas(S(4), 'orient § 4', ['--apply', '--only', /New since review/, /Ambiguous items are listed for Lachy and never applied/,
+  assertHas(S(4), 'orient § 4', [/--apply --only <that project's saved dry-run file>/, /New since review/,
+    /Reviewed, not applied/, /now\s+ambiguous/, /no longer drift/,
+    /Ambiguous items are listed for Lachy and never applied/,
     /scoped target skips this question and applies no drift fixes/])
 })
 

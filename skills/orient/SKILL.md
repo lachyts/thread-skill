@@ -155,13 +155,17 @@ A situational report written for Lachy catching up, not a log:
 
 **Drift fixes.** Reshuffle and Steer only authorise them (as any steer did under ADR 0026): re-run
 the reconcile step with `--apply --only <that project's saved dry-run file>` for each project whose
-dry run listed unambiguous items, so the reshuffle never forms a roadmap on top of finished work.
-`--only` writes just the items Lachy saw: a plain `--apply` recomputes and can close work a live
-rollout landed after his answer. Report any `New since review` items to Lachy as found after his
-answer and not applied (the next orient lists them again), and any `Reviewed, not applied` items
-with their reasons. If the saved file is gone (`--only` exits 2), re-run the dry run and ask again.
-Ambiguous items are listed for Lachy and never applied. A scoped target skips this question and applies no drift fixes: it reshapes one
-note, so the § 3 Drift line is report-only for it.
+dry run listed unambiguous items, so the reshuffle never forms a roadmap on top of work Lachy saw
+finished. `--only` writes just the items the § 2 dry run listed: a plain `--apply` recomputes and
+can close work a live rollout landed between that dry run and the apply, which Lachy never saw.
+Report any `New since review` items to Lachy as landed since the dry run and not applied (the next
+orient lists them again), and any `Reviewed, not applied` items with their reasons:
+`now ambiguous: …` needs his eye; `no longer drift (…)` is benign (closed or moved since, by the
+rollout's ceremony or a mark-done). Neither is written, so both join the reshuffle's frozen
+possibly-landed tier (reshuffle R1). If the saved file is gone (`--only` exits 2), re-run the dry
+run and ask again. Ambiguous items are listed for Lachy and never applied. A scoped target skips
+this question and applies no drift fixes: it reshapes one note, so the § 3 Drift line is
+report-only for it.
 
 ### 5. Reshuffle
 
