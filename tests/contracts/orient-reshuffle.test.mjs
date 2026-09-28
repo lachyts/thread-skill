@@ -46,9 +46,9 @@ test('backlinks: one pass, alias and heading forms, cache dirs excluded, out-of-
 })
 
 test('orient runs drift dry, reports it, and applies it only on an authorising answer', () => {
-  assertHas(S(2), 'orient § 2', ['reconcile-project.py --project <slug> --json', /dry run/])
+  assertHas(S(2), 'orient § 2', ['reconcile-project.py --project <slug> --json', /dry run/, /mktemp/])
   assertHas(S(3), 'orient § 3', ['**Drift**'])
-  assertHas(S(4), 'orient § 4', ['--apply', /Ambiguous items are listed for Lachy and never applied/,
+  assertHas(S(4), 'orient § 4', ['--apply', '--only', /New since review/, /Ambiguous items are listed for Lachy and never applied/,
     /scoped target skips this question and applies no drift fixes/])
 })
 

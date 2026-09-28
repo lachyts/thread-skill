@@ -405,6 +405,14 @@ test('classify: the literal <slug>-p<N>- prefix keeps -p10- from closing -p1-', 
   assert.deepEqual(classify({ code: 0, stdout }, 'demo', [1]), { 1: 'left open' })
 })
 
+// The ceremony has no review between detection and write, so it keeps the plain (recomputing) --apply;
+// --only binds an apply to a human-reviewed dry run (orient's drift fixes), never the ceremony.
+test('the ceremony close command is a plain --apply, never bound with --only', () => {
+  assert.ok(CLOSE_CMD, 'no reconcile-project command in the bullet fence')
+  assert.ok(CLOSE_CMD.includes('--apply'), 'the ceremony close command drops --apply')
+  assert.ok(!CLOSE_CMD.includes('--only'), 'the ceremony close command binds its apply with --only')
+})
+
 // ---- behaviour ----------------------------------------------------------------------------------
 
 test('touched-phases: one line per slug, phases from linked phased tasks only, read-only', () => {

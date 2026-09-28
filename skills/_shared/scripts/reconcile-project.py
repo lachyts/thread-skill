@@ -6,8 +6,8 @@ unambiguous list, and callers pass it only once the human has authorised the fix
 python >= 3.9. Called as:
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/reconcile-project.py --project <slug>
-        [--vault ~/repos/obsidian] [--phases N[,M...]] [--kinds phase,task,rollout] [--apply] [--json]
-        [--today YYYY-MM-DD] [--gh-bin gh | --no-gh]
+        [--vault ~/repos/obsidian] [--phases N[,M...]] [--kinds phase,task,rollout]
+        [--apply [--only <dry-run.json> | -]] [--json] [--today YYYY-MM-DD] [--gh-bin gh | --no-gh]
 
 It prints two lists, UNAMBIGUOUS (U) and AMBIGUOUS (A), each item with a reason. A dry run (the default)
 writes nothing. --apply writes the U list only; A items are never touched. It never commits the vault.
@@ -90,6 +90,19 @@ atomically when the destination exists; that clash is reported and the item recl
 destination is removed again (rollback); a failed rollback names both copies (`two copies left: <src>,
 <dst>`). Per-item failures go to `errors` and never stop independent items.
 
+Bound apply. --apply recomputes U at write time, so on a vault a live rollout is writing, a plain --apply
+can close more than a human reviewed. A caller that dry-runs, asks and then applies passes the reviewed
+dry run's --json to `--apply --only <file>` (`-` reads stdin). It writes only the intersection of the
+recomputed U and the reviewed `unambiguous` list, matched on (kind, slug) alone (never action or reason:
+a phase's action carries today's date). A recomputed U item the review did not list is NEW SINCE REVIEW:
+listed, never written (the next dry run lists it again). A reviewed item that is no longer U is REVIEWED,
+NOT APPLIED with `no longer unambiguous`; so is a reviewed phase whose depends_on names a task outside the
+bound set (`depends on <task>, not in the reviewed list`), withheld before apply. Neither exits 1. The
+reviewed file must be a dry run of the same project: a JSON object with `project` equal to --project,
+`applied: false` and an `unambiguous` list of objects each with a kind in KINDS and a non-empty string
+slug; anything else is a usage error (exit 2) before any write. A plain --apply is unchanged; execute's
+phase-close ceremony uses it, with no review in between.
+
 gh. --no-gh (gh `disabled`), or a --gh-bin that does not resolve (gh `missing`), skips every (a) lookup;
 `skipped` then carries `PR evidence (gh unavailable) for <slugs>`. A per-URL gh error is skipped too.
 
@@ -97,10 +110,14 @@ Output. Text: a header (`dry run: nothing written; pass --apply` or `applied`), 
 `Ambiguous (n)`, `Skipped (n)` and, on apply, `Written (n)` and `Errors (n)`. --json: {project, vault,
 today, kinds, phases, applied, gh: ok|missing|disabled, unambiguous: [{kind, slug, path, action, reason,
 depends_on}], ambiguous: [{kind, slug, path, reason}], skipped: [str], written: [str], errors: [str]};
-paths are vault-relative.
+paths are vault-relative. With --only (and only then): the header reads `applied (bound to the reviewed
+list: <file>)`, `New since review (n)` and `Reviewed, not applied (n)` come before `Written (n)`, and the
+JSON adds new_since_review: [{kind, slug, path, action, reason, depends_on}] and reviewed_not_applied:
+[{kind, slug, reason}]. `unambiguous` stays the full recomputed list; `written` holds only bound writes.
 
 Exit codes. 0: it ran (drift or none). 1: an --apply write or move failed, or a dependent phase was
-skipped. 2: usage error (missing --project, bad --kinds/--phases/--today, no Work/ under --vault) or
+skipped. 2: usage error (missing --project, bad --kinds/--phases/--today, no Work/ under --vault; --only without
+--apply, or an --only file that is unreadable, not JSON or not a dry run of this project) or
 reconcile-wave.py missing or unloadable.
 """
 import argparse
@@ -541,9 +558,11 @@ def move_no_clobber(src: Path, dst: Path):
         raise MoveError(f"{e} (rolled back)")
 
 
-def apply(det: Detector, Note):
+def apply(det: Detector, Note, items=None):
+    """Write `items` (default: all of det.U) in order tasks, phases, rollout moves."""
+    items = det.U if items is None else items
     written, errors, done_tasks = [], [], set()
-    for it in [i for i in det.U if i["kind"] == "task"]:
+    for it in [i for i in items if i["kind"] == "task"]:
         try:
             note = Note(it["_path"])
             note.set("status", "done")
@@ -552,7 +571,7 @@ def apply(det: Detector, Note):
             written.append(f"task {it['slug']}: status: done")
         except Exception as e:  # noqa: BLE001 — a per-item failure never stops independent items
             errors.append(f"task {it['slug']} not written: {e}")
-    for it in [i for i in det.U if i["kind"] == "phase"]:
+    for it in [i for i in items if i["kind"] == "phase"]:
         why = next((f"{d} not written" for d in it["depends_on"] if d not in done_tasks), None)
         if why is None:
             for p in it["_tasks"]:
@@ -571,7 +590,7 @@ def apply(det: Detector, Note):
             written.append(f"phase {it['slug']}: status: done, completed: {det.today}")
         except Exception as e:  # noqa: BLE001
             errors.append(f"phase {it['slug']} not written: {e}")
-    for it in [i for i in det.U if i["kind"] == "rollout"]:
+    for it in [i for i in items if i["kind"] == "rollout"]:
         src = it["_path"]
         dst = det.R / src.name
         try:
@@ -586,6 +605,57 @@ def apply(det: Detector, Note):
     return written, errors
 
 
+# ---- bound apply ---------------------------------------------------------------------------------------
+
+def load_reviewed(src: str, project: str) -> set:
+    """The (kind, slug) set a reviewed dry run's --json listed as unambiguous. Exits 2 on a bad file."""
+    where = "stdin" if src == "-" else src
+    try:
+        text = sys.stdin.read() if src == "-" else Path(os.path.expanduser(src)).read_text()
+    except (OSError, UnicodeDecodeError) as e:
+        die(f"--only: cannot read {where}: {e}")
+    try:
+        d = json.loads(text)
+    except ValueError as e:
+        die(f"--only: {where} is not JSON: {e}")
+    if not isinstance(d, dict):
+        die(f"--only: {where} is not a reconcile-project --json object")
+    if d.get("project") != project:
+        die(f"--only: {where} is a dry run of project {d.get('project')!r}, not {project!r}")
+    if d.get("applied") is not False:
+        die(f"--only: {where} is not a dry run (applied: {d.get('applied')!r}); pass the dry run's --json")
+    u = d.get("unambiguous")
+    if not isinstance(u, list):
+        die(f"--only: {where} has no unambiguous list")
+    reviewed = set()
+    for i in u:
+        if not (isinstance(i, dict) and i.get("kind") in KINDS and isinstance(i.get("slug"), str)
+                and i["slug"].strip()):
+            die(f"--only: {where}: unambiguous item {i!r} needs a kind in {', '.join(KINDS)} and a slug")
+        reviewed.add((i["kind"], i["slug"]))
+    return reviewed
+
+
+def bind(U, reviewed: set):
+    """(bound, new_since_review, reviewed_not_applied): the recomputed U split against the reviewed set."""
+    key = lambda i: (i["kind"], i["slug"])  # noqa: E731
+    new = [i for i in U if key(i) not in reviewed]
+    bound = [i for i in U if key(i) in reviewed]
+    bound_tasks = {i["slug"] for i in bound if i["kind"] == "task"}
+    kept, not_applied = [], []
+    for i in bound:
+        miss = next((d for d in i.get("depends_on") or [] if d not in bound_tasks), None)
+        if miss:
+            not_applied.append({"kind": i["kind"], "slug": i["slug"],
+                                "reason": f"depends on {miss}, not in the reviewed list"})
+        else:
+            kept.append(i)
+    current = {key(i) for i in U}
+    not_applied += [{"kind": k, "slug": s, "reason": "no longer unambiguous"}
+                    for k, s in reviewed if (k, s) not in current]
+    return kept, new, not_applied
+
+
 # ---- CLI ----------------------------------------------------------------------------------------------
 
 def parse_args(argv):
@@ -595,6 +665,8 @@ def parse_args(argv):
     ap.add_argument("--phases", help="N[,M...]: restrict phase and task candidates")
     ap.add_argument("--kinds", default=",".join(KINDS), help="phase,task,rollout (default all)")
     ap.add_argument("--apply", action="store_true", help="write the unambiguous list")
+    ap.add_argument("--only", metavar="FILE", help="with --apply: write only the items this dry run's --json "
+                    "listed as unambiguous (- reads stdin)")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--today", help="YYYY-MM-DD (default: the local date)")
     g = ap.add_mutually_exclusive_group()
@@ -605,6 +677,11 @@ def parse_args(argv):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    reviewed = None
+    if args.only is not None:
+        if not args.apply:
+            die("--only binds an apply to a reviewed dry run; it needs --apply")
+        reviewed = load_reviewed(args.only, args.project)
     Note = load_note_class()
     kinds = [k.strip() for k in args.kinds.split(",") if k.strip()]
     if not kinds or any(k not in KINDS for k in kinds):
@@ -635,26 +712,40 @@ def main(argv=None) -> int:
 
     det = Detector(vault, args.project, kinds, phases, today, gh_mode, gh_path)
     det.run()
-    written, errors = apply(det, Note) if args.apply else ([], [])
+    items, new, not_applied = det.U, [], []
+    if reviewed is not None:
+        items, new, not_applied = bind(det.U, reviewed)
+    written, errors = apply(det, Note, items) if args.apply else ([], [])
     order = lambda i: (KINDS.index(i["kind"]), i["slug"])  # noqa: E731
-    public_u = [{k: i[k] for k in ("kind", "slug", "path", "action", "reason", "depends_on")}
-                for i in sorted(det.U, key=order)]
+    u_keys = ("kind", "slug", "path", "action", "reason", "depends_on")
+    public_u = [{k: i[k] for k in u_keys} for i in sorted(det.U, key=order)]
     public_a = [{k: i[k] for k in ("kind", "slug", "path", "reason")} for i in sorted(det.Amb, key=order)]
+    public_new = [{k: i[k] for k in u_keys} for i in sorted(new, key=order)]
+    public_na = sorted(not_applied, key=order)
 
     if args.json:
-        print(json.dumps({"project": args.project, "vault": str(vault), "today": today, "kinds": kinds,
-                          "phases": phases, "applied": bool(args.apply), "gh": gh_mode,
-                          "unambiguous": public_u, "ambiguous": public_a, "skipped": det.skipped,
-                          "written": written, "errors": errors}, indent=2, ensure_ascii=False))
+        doc = {"project": args.project, "vault": str(vault), "today": today, "kinds": kinds,
+               "phases": phases, "applied": bool(args.apply), "gh": gh_mode,
+               "unambiguous": public_u, "ambiguous": public_a, "skipped": det.skipped}
+        if reviewed is not None:
+            doc |= {"new_since_review": public_new, "reviewed_not_applied": public_na}
+        print(json.dumps(doc | {"written": written, "errors": errors}, indent=2, ensure_ascii=False))
     else:
+        header = "applied" if args.apply else "dry run: nothing written; pass --apply"
+        if reviewed is not None:
+            header = f"applied (bound to the reviewed list: {'stdin' if args.only == '-' else args.only})"
         out = [f"reconcile-project: {args.project} (vault {vault}, today {today}, gh {gh_mode})",
-               "applied" if args.apply else "dry run: nothing written; pass --apply",
-               f"Unambiguous ({len(public_u)})"]
+               header, f"Unambiguous ({len(public_u)})"]
         out += [f"  - {i['kind']} {i['slug']}: {i['action']} ({i['reason']})" for i in public_u]
         out.append(f"Ambiguous ({len(public_a)})")
         out += [f"  - {i['kind']} {i['slug']}: {i['reason']}" for i in public_a]
         out.append(f"Skipped ({len(det.skipped)})")
         out += [f"  - {s}" for s in det.skipped]
+        if reviewed is not None:
+            out.append(f"New since review ({len(public_new)})")
+            out += [f"  - {i['kind']} {i['slug']}: {i['action']} ({i['reason']})" for i in public_new]
+            out.append(f"Reviewed, not applied ({len(public_na)})")
+            out += [f"  - {i['kind']} {i['slug']}: {i['reason']}" for i in public_na]
         if args.apply:
             out.append(f"Written ({len(written)})")
             out += [f"  - {s}" for s in written]

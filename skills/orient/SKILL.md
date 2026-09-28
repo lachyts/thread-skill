@@ -109,7 +109,9 @@ A scoped target narrows § 2 to the resolved project.
 - **Drift** (ADR 0026): run the shared reconcile step as a dry run for every project in the target
   in one Bash call,
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/reconcile-project.py --project <slug> --json`,
-  and keep its UNAMBIGUOUS and AMBIGUOUS lists. It writes nothing.
+  saving each project's output to its own file under one `mktemp -d` directory (`<dir>/<slug>.json`)
+  and printing the path and the JSON. Keep its UNAMBIGUOUS and AMBIGUOUS lists and each saved path:
+  § 4 binds the apply to that file. It writes nothing to the vault.
 - **Related projects**: projects the target's notes link or name, and projects linking the
   target, especially ones `status: parked` or being absorbed by it. Read their unstarted phases
   and loose tasks for overlap with the target's open work (the reshuffle may pull them in).
@@ -152,9 +154,13 @@ A situational report written for Lachy catching up, not a log:
 - **Look only** — the audit was the deliverable; stop, no writes of any kind.
 
 **Drift fixes.** Reshuffle and Steer only authorise them (as any steer did under ADR 0026): re-run
-the reconcile step with `--apply` for each project whose dry run listed unambiguous items, so the
-reshuffle never forms a roadmap on top of finished work. Ambiguous items are listed for Lachy and
-never applied. A scoped target skips this question and applies no drift fixes: it reshapes one
+the reconcile step with `--apply --only <that project's saved dry-run file>` for each project whose
+dry run listed unambiguous items, so the reshuffle never forms a roadmap on top of finished work.
+`--only` writes just the items Lachy saw: a plain `--apply` recomputes and can close work a live
+rollout landed after his answer. Report any `New since review` items to Lachy as found after his
+answer and not applied (the next orient lists them again), and any `Reviewed, not applied` items
+with their reasons. If the saved file is gone (`--only` exits 2), re-run the dry run and ask again.
+Ambiguous items are listed for Lachy and never applied. A scoped target skips this question and applies no drift fixes: it reshapes one
 note, so the § 3 Drift line is report-only for it.
 
 ### 5. Reshuffle
