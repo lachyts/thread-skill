@@ -195,11 +195,13 @@ any task (the flag keeps only a capture named for the thread or naming its
 THREAD.md; a capture that merely describes similar work never qualifies);
 (2) the one task THREAD.md's Resume instructions name by `[[link]]` as the
 next step (a rollout task, say); (3) the one follow-up Lachy approved at
-close that carries the thread's next step. A loose end never qualifies. Its `--action` is the next step this close
-writes into THREAD.md's Resume instructions — never an older capture's
-`Next move:`, which may be stale. No such task, or more than one with
-nothing to choose between them → write neither field and leave every
-project slot as it is.
+close that carries the thread's next step. A loose end never qualifies. A
+task this close marks done (`close/SKILL.md` § A finished task closes
+itself) is never the match: the rule skips it and the next rule is tried.
+Its `--action` is the next step this close writes into THREAD.md's Resume
+instructions — never an older capture's `Next move:`, which may be stale.
+No such task, or more than one with nothing to choose between them →
+write neither field and leave every project slot as it is.
 
 This section is the only overwrite by an agent. Every other writer fills a
 blank slot only, with `next-action.py fill` (orient's rule: `orient/SKILL.md`
@@ -234,9 +236,9 @@ tools loaded (mcp__<ns>__*, …) and make one cheap authenticated      MCP-needi
 call per namespace; if any is missing or unauthenticated: STOP
 and report exactly which — do not proceed without it.
 First: you now own this work — mark the capture done: set `status: done` and
-add `completed: <today>` in ~/repos/obsidian/Work/Tasks/<slug>.md.
+set `completed: <today>` in ~/repos/obsidian/Work/Tasks/<slug>.md.
 Context: <2–4 lines of state — what's built, what's decided, what's blocked.>
-Read first: <THREAD.md path if one exists; 1–3 key file paths>
+Read first: <the worked task's note path, if any; THREAD.md path if one exists; 1–3 key file paths>
 Next move: <the single concrete next step>
 ​```
 ```
@@ -253,6 +255,17 @@ failed pickup never marks the capture done. It's inside the prompt so it works
 even when pasted into a non-Claude harness. If the work is conversation-gated (needs Lachy's input
 before an agent can act), say so explicitly in the Notes line — this is what
 keeps `/thread:schedule` from sweeping it into an autonomous rollout.
+
+**The worked task.** When the session being set down was working an existing
+vault task that is not itself a capture (picked up with `/thread:open
+[[<task>]]`, by orient's Hands-on, or through a capture or handoff that named
+it), the Resume prompt's `Read first:` line names that task by its absolute
+path, `~/repos/obsidian/Work/Tasks/<task>.md`, first. Pickup leaves such a
+task open, so this line is how a later session that picks up this capture and
+finishes the work reaches it: `close/SKILL.md` § A finished task closes
+itself counts a task the capture's Resume prompt links as opened (route (c)).
+Without it the task stays open after its work is done. A § 2 re-capture
+keeps the line.
 
 **Lean capture.** The task note is a pointer to the work, not a store for it.
 

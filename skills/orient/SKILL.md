@@ -222,8 +222,9 @@ the gate is empty), carry straight on to § 6.
   a blank or dead slot and a blank `next_action:`; a set slot is never
   overwritten — only a set-down or Lachy does that; the recommendation
   stays a proposal against it. Skip the write when Hands-on
-  picks the task up through `open`'s pickup: that completes a capture, so
-  the pointer would be dead the moment it landed.
+  picks the task up through `open`'s pickup and it is a capture: that
+  completes the capture, so the pointer would be dead the moment it landed.
+  An ordinary task stays open there and gets the fill like any other.
 
 ### 7. Batch (Autonomous / Mixed)
 
