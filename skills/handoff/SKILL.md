@@ -9,7 +9,7 @@ source: https://github.com/mattpocock/skills (skills/productivity/handoff) — a
 
 # /thread:handoff — fork this thread into a visible fresh task
 
-Compact the current conversation so a fresh agent can continue the work *immediately*.
+Brief a fresh agent so it can continue the work *immediately*.
 
 Every handoff produces two artefacts: a **durable handoff doc**, committed to the repo the session is working in, and a **paste-ready prompt** that points at it. In **Codex Desktop or a Chorus Session**, the primary outcome is additionally a **new visible task** that the user can open and interact with; the prompt is the payload used to create that task. (On the Stage the call raises a Handoff card the listener Starts — an offer, not yet a live Session, which is what the queued `clientThreadId` form of the directive already means; Chorus ADR 0047.) The doc is the object Lachy tracks — it is never optional and never lives in OS temp (ADR 0017).
 
@@ -68,7 +68,7 @@ Its rules — project directory, seat, `_shared`, git toplevel, and `_shared` fo
 
 **Shape.** Front matter — the block in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Front matter, written with `status: pending` — then the body. The body's first line, above § 1, is ``**Run from:** `<abs dir>` ``: the directory the consumer must launch in, because the harness resets a `cd` out of the launch directory. It is this session's launch directory, or the consumer's under **Consumer home.**; for a shared thread written from a seat it is the seat, never `_shared`, which is not a launch directory.
 
-Body sections, in this order — the same list the session-safepoint stop hook mandates, so a hook-forced handoff and a requested one produce the same artefact:
+Body sections, in this order:
 
 1. **Done and verified** — what landed this session, with evidence (paths, SHAs, test output).
 2. **What remains** — the continuation: what the next session does, in order.

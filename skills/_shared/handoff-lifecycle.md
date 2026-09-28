@@ -2,7 +2,7 @@
 
 The one statement of what a handoff doc is, the states it moves through, and the thread-state transitions every continuity route applies. `thread:handoff`, `thread:open`, `thread:close` and the capture writer cite this file; procedures stay with the skill that runs them — close's scan snippet and its step 7.2 git commands, handoff's commit and withdraw commands, open's pickup steps — except the peer guard's age test, which sits beside its rule in § Close-out.
 
-A **handoff doc** is a file in `<home>/docs/handoffs/`, written by `thread:handoff` or by the session-safepoint stop hook (`~/repos/workspaces/_shared/scripts/session_safepoint.py`, referenced here by path only, never edited). `<home>` is the directory § Home resolves. The working tree holds in-flight handoffs only: `ls docs/handoffs/` is the live list.
+A **handoff doc** is a file in `<home>/docs/handoffs/`, written only by `thread:handoff`, on explicit fork intent (handoff **Invocation gate.**). `<home>` is the directory § Home resolves. The working tree holds in-flight handoffs only: `ls docs/handoffs/` is the live list.
 
 **One doc, one consumer**: a handoff that briefs two sessions is two docs (they may both point at one shared reference file) — § Close-out deletes a consumed doc: at its consumer's close, or at a later close once the peer guard allows; a second reader would be stranded either way.
 
