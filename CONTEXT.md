@@ -196,7 +196,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   schedule may still re-derive its wave when a superseding rollout takes it
   over, and new work may join its phase for a later rollout; **unstarted** phased work is movable (re-phase, merge, split, drop,
   retire the phase); **loose** work is fully open, including re-homing to
-  another project. The tiers hold across projects: a reshuffle reads related
+  another project. Thread captures (stash/defer's `thread`-tagged tasks) are frozen like
+  in-flight work. The tiers hold across projects: a reshuffle reads related
   projects (parked or being absorbed ones especially) and may pull their
   unstarted phases or tasks into its target, leaving a pointer behind.
   _Avoid_: locked, pinned.

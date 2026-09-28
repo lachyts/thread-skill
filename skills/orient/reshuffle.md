@@ -6,7 +6,8 @@ the machinery of the retired `split` and `gather` verbs (ADR 0027): gather's roa
 renames, split's decomposition and task writing.
 
 **Write surface.** `~/repos/obsidian/Work/Tasks/`, `~/repos/obsidian/Work/Phases/`, the target
-project note and, for pull-ins, the source project's notes (pointers only). When R3 grills **with
+project note and, for pull-ins, the source project's phase and task notes (the moved notes
+themselves, pointer lines, and retiring a phase the move emptied). When R3 grills **with
 docs**, the interview also writes `CONTEXT.md` + `docs/adr/` in the **resolved project repo**, and
 nothing else outside the vault. Never git/gh. Never stamps `wave:`, `rollout:` or `scope:`: orient
 § 6 hands wave-shaped phases to schedule, which owns those.
@@ -14,18 +15,28 @@ nothing else outside the vault. Never git/gh. Never stamps `wave:`, `rollout:` o
 ## R1. The item set
 
 Walk `~/repos/obsidian/Work/Tasks/*.md` and `~/repos/obsidian/Work/Phases/*.md` for the target
-project(s) (`projects:` contains the wikilink; `<slug>-p*` for phase notes). Skip notes tagged
-`rollout` and landed statuses (`done`, `merged`, `dropped`). Give every item its **reach tier**
-(CONTEXT.md **Reach tiers**):
+project(s) (`projects:` contains the wikilink; for phase notes, filenames `<slug>-p<N>-…` where
+`<N>` is digits with an optional `.digits`, the same anchor `reconcile-project.py` uses, so a
+sibling project `<slug>-plugin` never matches). Skip notes tagged `rollout` and landed statuses
+(`done`, `merged`, `dropped`). Give every item its **reach tier** (CONTEXT.md **Reach tiers**);
+this is the one definition of in flight, which orient § 2 reports from:
 
 - **In flight — frozen.** A task stamped `wave:`/`rollout:` whose rollout note is still live (the
   link resolves to a note in `Work/Tasks/` root), a `dispatched:` stamp ≤ 7 days old, or
-  `status: in_progress` / `review`; a phase with any such member. Shown for context. Its scope,
-  phase and body never change. New work may still join its phase.
+  `status: in-progress` (TaskNotes' own spelling), `in_progress` or `review`; a phase with any
+  such member. Shown for context. Its scope, phase and body never change. New work may still join
+  its phase.
+- **Thread captures — frozen too.** A `thread`-tagged task (stash/defer's capture) belongs to its
+  thread and is picked up by `open`; the reshuffle shows it for context and never unbundles,
+  drops, renames or re-homes it.
 - **Unstarted — movable.** A phased task (`phase:` set) that is not in flight, and phase notes with
   no in-flight member. May be re-phased, merged, unbundled, dropped, or the phase retired.
-- **Loose — open.** `tags:` contains `task`, no `phase:`, not in flight. Anything goes, including a
-  re-home to another project.
+- **Loose — open.** `tags:` contains `task` but not `thread`, no `phase:`, not in flight. Anything
+  goes, including a re-home to another project.
+
+The target project note itself is an item too when its body holds a plan with no
+`## Build sequence` yet (a design section never decomposed): it is unclear by definition, R2
+decomposes it and R5.5 slims it, as for a scoped design note.
 
 Add the **related projects** orient § 2 found: their unstarted and loose items that overlap the
 target are candidates to **pull in**. Their in-flight items stay where they are.
@@ -33,9 +44,9 @@ target are candidates to **pull in**. Their in-flight items stay where they are.
 **Scoped target** (a single note, plan file or inline prose): the item set is that source alone,
 plus any tasks already written from it. The project's roadmap is read only for numbering.
 
-Then read the roadmap numbering: `Work/Phases/<slug>-p*` (and `Work/Phases/Archive/`) → the max
-phase number `N_max` and, per phase, the max task ordinal `M` (from `Work/Tasks/<slug>-p<N>-<M>-*`
-filenames, archived included). Fractional phases keep the dot (`p3.5`); a fractional `N_max` rounds
+Then read the roadmap numbering: `Work/Phases/<slug>-p<N>-…` (and `Work/Phases/Archive/`), with
+the same numeric anchor → the max phase number `N_max` and, per phase, the max task ordinal `M`
+(from `Work/Tasks/<slug>-p<N>-<M>-*` filenames, archived included). Fractional phases keep the dot (`p3.5`); a fractional `N_max` rounds
 up to the next whole phase. New phases number from `N_max + 1` (P1 when the project has none);
 existing phase numbers are **never** changed.
 
@@ -136,25 +147,35 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      `## Resume prompt` block when the task qualifies for launch context, else as a fenced block
      under `## Notes`; and a closing `**Verify:**` line.
    - **Phased or moved tasks** are renamed and stamped. The body gets the grilled spec when R3
-     respecced it; a clear item's body is unchanged apart from backlink rewrites.
+     respecced it; a clear item's body is unchanged apart from backlink rewrites. A `wave:` or
+     `rollout:` stamp left by a retired rollout (R1 found it not in flight) is cleared, or
+     schedule would skip the task.
    - Leave **`wave:` unset**. Don't set `scope:`: schedule infers it from `touches:`.
 3. **Renames rewrite backlinks.** Before each rename check the target basename is free, then find
-   every `[[old-slug]]` in the vault and rewrite it to the new slug (wikilinks don't follow a
-   filesystem rename). Search with `/usr/bin/grep -rlF` (the Bash tool's `rg`/`grep` are shell
-   functions a script can't call) and exclude `.git`, `.obsidian`, `.smart-env` and `.trash`:
-   a plain vault-wide rewrite corrupts Smart Connections' `.smart-env/*.ajson` cache.
+   every link to the old slug and rewrite it to the new one (wikilinks don't follow a filesystem
+   rename). A link is `[[old-slug` followed by `]]`, `|`, `\|` or `#`, so aliased and heading
+   links are caught and `[[old-slug-more]]` is not. Search the vault, every
+   `~/Projects/**/THREAD.md`, `~/repos/workspaces/_shared/threads/` and the project repo's
+   `THREAD.md` and `docs/handoffs/`. Find candidates with `/usr/bin/grep -rlF '[[old-slug'` (the
+   Bash tool's `rg`/`grep` are shell functions a script can't call), then rewrite only the
+   terminated forms. Exclude `.git`, `.obsidian`, `.smart-env` and `.trash`: a plain vault-wide
+   rewrite corrupts Smart Connections' `.smart-env/*.ajson` cache.
 4. **Other dispositions.** An unbundled brain dump gets `status: done` and an `## Unbundled into`
    list of its tasks. A merged-away item gets `status: dropped` and `Merged into [[<survivor>]]`; a
    dropped item gets `status: dropped` and a one-line reason. A re-homed item's `projects:` is
-   switched. A pulled-in item is renamed into the target's roadmap and its source phase note
-   gains a pointer line (`Moved to [[<new-slug>]] (orient reshuffle, <date>)`).
+   switched. A pulled-in item is renamed into the target's roadmap, its `projects:` switched to
+   the target, and its source phase note gains a pointer line
+   (`Moved to [[<new-slug>]] (orient reshuffle, <date>)`); a source phase the move emptied is
+   retired (`status: dropped`, naming where its members went).
 5. **Scoped source disposition.** A vault source note gets a single delimited `## Build sequence`
    section: a numbered, phase-grouped `[[task]]` outline. Replace only that section, idempotently,
    never clobbering the rest. A phase-note source is also brought up to the Phase shape
    (`add-phase.md`): a legacy task-tagged note swaps `task` → `phase` in `tags:`, gains `phase: N`,
-   moves to `Work/Phases/` and carries the embedded task base. A plan-file or inline source creates
-   the project/outline note at `Work/Projects/<Area>/<Project>.md` (project frontmatter, Bases
-   block, the `## Build sequence` outline).
+   moves to `Work/Phases/` and carries the embedded task base. A plan-file or inline source that orient
+   § 1 matched to an existing project writes nothing to the project note beyond item 6 (its
+   phase notes carry the outline). Only when no project exists does it create one at
+   `Work/Projects/<Area>/<Project>.md` (project frontmatter, Bases block, the `## Build sequence`
+   outline), after checking the path is free.
 6. **Two-block surfacing** — ensure the project note carries the two always-visible base blocks
    (open-tasks list + stacked Phases table; shape from `_System/Templates/Project.md`, copy from a
    sibling like `[[GifLab]]`), **only if absent**.
@@ -165,7 +186,8 @@ status, misfits, and what the grill left unresolved. Orient § 6 routes from her
 
 ## Don'ts
 
-- **Don't touch in-flight work** beyond adding new members to its phase.
+- **Don't touch in-flight work or thread captures** beyond adding new members to an in-flight
+  phase.
 - **Don't invent phases silently** or force-phase a misfit.
 - **Don't renumber.** Existing phases and ordinals are immutable; new phases number from
   `N_max + 1`, joins take the next free `M`.

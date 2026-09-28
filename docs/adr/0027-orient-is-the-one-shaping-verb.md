@@ -20,8 +20,9 @@ and unstarted phases all back on the table, next steps rethought.
 Grilled 2026-09-28.
 
 1. **Orient owns the reshuffle.** `/thread:orient <project>` audits, shows the report, then asks
-   once: **Reshuffle** (recommended) or **Look only**. Look only is the former Report-only steer
-   moved up front and stays write-free.
+   once: **Reshuffle** (recommended), **Steer only** (fix drift and route the work as it stands,
+   e.g. to fan out batches) or **Look only**. Look only is the former Report-only steer moved up
+   front and stays write-free.
 2. **`split` and `gather` retire as verbs.** Their machinery becomes orient's reshape step. Pointed
    at a single plan, design note or brain dump, orient runs a **scoped reshuffle** of that note
    alone, which is split's old job. No alias stubs.
@@ -36,8 +37,10 @@ Grilled 2026-09-28.
    written at the one gate and the rest stays loose. Gather's `--light` goes, since stopping the
    grill early does its job.
 5. **Orient schedules and offers execute.** Wave-shaped phases are scheduled by orient itself. At
-   most one rollout is live per repo, so new work **supersedes** a live rollout (soft-pausing it
-   first if it is mid-run). The pass ends with the **execute offer**: a fresh session via handoff
+   schedules exactly the wave-shaped phases' members (`--tasks`), never a bare project run. At
+   most one rollout is live per repo (schedule's gate stops on another project's), so new work
+   **supersedes** this project's live rollout. A mid-run rollout is never paused silently: the
+   execute offer asks, and **Pause and hand off** is the consent. The pass ends with the **execute offer**: a fresh session via handoff
    (the default, because the reshuffle has filled this context), here, or not yet. The steering
    question (Autonomous / Hands-on / Mixed) moves after the reshuffle and covers only session-lane
    work.

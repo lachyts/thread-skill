@@ -47,7 +47,8 @@ the user for the path (step 6 writes this resolved path as `{{REPO_PATH}}`). The
 check in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers against it (point at
 it; never copy the snippet here), followed by its `gh repo view` confirmation. On either failure
 **stop before step 1**: no task stamped, no rollout note, no heartbeat. Print the snippet's
-remedy line verbatim (or gh's error). The cluster is still wave-shaped; don't re-route it to the
+remedy line verbatim (or gh's error). Then run the same file's live-rollout check for that repo:
+another project's open rollout on it stops here too, with its remedy. The cluster is still wave-shaped; don't re-route it to the
 session lane.
 
 There is no minimum size: shape decides, not count. A wave-shaped cluster of one still rolls

@@ -134,3 +134,39 @@ test('orient schedules, supersedes and offers execute', () => {
   const s9 = collapse(section(orient, /^### 9\./))
   for (const opt of ['**Fresh session**', '**Here**', '**Not yet**']) assert.ok(s9.includes(opt), `execute offer lacks ${opt}`)
 })
+
+test('in flight has one definition, in TaskNotes spelling, and captures are frozen', () => {
+  const r1 = collapse(section(reshuffle, /^## R1\./))
+  assert.match(r1, /`status: in-progress` \(TaskNotes' own spelling\), `in_progress` or `review`/)
+  assert.match(r1, /\*\*Thread captures — frozen too\.\*\*/, 'R1 lets a reshuffle touch thread captures')
+  assert.match(r1, /`tags:` contains `task` but not `thread`/, 'the loose tier still includes thread captures')
+  assert.match(r1, /same anchor `reconcile-project\.py` uses/, 'phase discovery lost its numeric anchor')
+  assert.match(collapse(section(orient, /^### 2\./)), /anything `reshuffle\.md` R1 counts as in flight/)
+})
+
+test('orient schedules only the wave-shaped members and never pauses silently', () => {
+  const s6 = collapse(section(orient, /^### 6\./))
+  assert.match(s6, /with `--tasks` naming exactly the members/, 'orient § 6 schedules a bare project run')
+  assert.match(s6, /schedule nothing and pause nothing here/, 'orient § 6 pauses a running rollout')
+  assert.ok(s6.indexOf('**The slot write**') > s6.indexOf('**Hands-on**'), 'the slot write runs before the steering answer')
+  const s9 = collapse(section(orient, /^### 9\./))
+  assert.match(s9, /\*\*Pause and hand off\*\* \(recommended\) — this answer is the consent to pause/)
+  assert.match(s9, /Never `\/thread:execute` the old note/)
+})
+
+test('a scoped target applies no drift fixes', () => {
+  assert.match(collapse(section(orient, /^### 4\./)), /so it applies no drift fixes/)
+  assert.match(collapse(section(orient, /^### 5\./)), /never for a scoped target/)
+})
+
+test('backlink rewrites catch aliased and heading links and reach threads', () => {
+  const r5 = collapse(section(reshuffle, /^## R5\./))
+  assert.match(r5, /followed by `\]\]`, `\|`, `\\\|` or `#`/, 'R5.3 misses aliased or heading links')
+  assert.match(r5, /`~\/Projects\/\*\*\/THREAD\.md`/, 'R5.3 does not reach THREAD.md files')
+})
+
+test("schedule's gate stops on another project's live rollout on the same repo", () => {
+  const fit = collapse(read('skills/_shared/execution-fit.md'))
+  assert.match(fit, /\*\*Another project's live rollout on the same repo\.\*\*/)
+  assert.match(collapse(read('skills/schedule/SKILL.md')), /live-rollout check for that repo/)
+})
