@@ -10,6 +10,13 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-09-28 (evening): orient is the one shaping verb (ADR 0027) and 2.9.0 is live. `split` and `gather` are gone. Nothing is running.**
+- **ADR 0027**, grilled with Lachy from his "fold Fit Snack into Chorus" brain dump: he always runs orient → gather → split → grill-with-docs as one move on pickup. Orient now asks **Reshuffle / Steer only / Look only** after its audit. The reshuffle (`skills/orient/reshuffle.md`) sorts all open work by reach tier, unbundles brain dumps, grills only what's unclear (stoppable), and writes at one gate. Orient schedules wave-shaped phases itself (`--tasks`, members only) and ends with the execute offer (fresh session / here / not yet). One note → a scoped reshuffle (split's old job). New glossary: Reshuffle, Reach tiers, Clear / unclear item, Brain dump, execute offer.
+- **Landed:** #32 (`b1e2cf2`) with p10-3 (orient's drift wiring) and the gather-rename cache exclusion folded in; release #33 (`43ff855`, 2.9.0, carrying #31 too); #34 (`6962967`, the P10 release session's unpushed close-out). Plugin updated in both profiles, `make release-check` green at 2.9.0. **Sessions started before the update still load 2.8.0**, where split and gather exist.
+- **Review:** xhigh ×2 then simplify. Round 2's ledger stopped the chain (10 of 15 findings were round 1's rollout-lifecycle machinery: auto-pause, Pause-and-hand-off, a cross-project schedule gate). Reverted to the root: orient supersedes only a **paused** rollout whose unlanded tasks are all open; anything else waits, a stuck one goes to repair. Deferred: [[thread-skill-schedule-owns-one-live-rollout-per-repo]], [[thread-skill-one-vault-grammar-for-reconcile-and-reshuffle]].
+- **Evals:** the full suite, 18 cases, $3.34, recorded in `docs/evals/2026-09-28-orient-reshuffle.md`. All route correctly; `handoff-manual-dry-run` 0.83 (its LLM lifecycle judge), untouched by this work. This run has the exact shape p4-6 asked for.
+- **Outside this repo:** workspaces `affa997`, `3a57334` (writer specs name orient's reshuffle) and `~/.agents` `22da348` (Codex split/gather adapters deleted, router + orient adapter updated), both pushed.
+
 **2026-09-28: 2.8.0 is released and the reconcile step passed live acceptance. `feat/next-action-set-downs` has merged (#31), so the next rollout is unblocked. Nothing is running.**
 - **Release:** close-out PR #29, then the bump PR #30 (`c5f7522`), both green on both runners. The plugin went from 2.7.1 to 2.8.0, and `make release-check` was green at `c5f7522`. Tag `thread--v2.8.0` is pushed at `c5f7522`, and `origin/HEAD` is set in both checkouts. A fresh session is needed for the 2.8.0 skill text.
 - **Live acceptance of `reconcile-project.py` on Chorus:** the dry run matched the 2026-09-27 drift audit. The audit's 11 empty phases and `p4-3` were cleaned by hand on 2026-09-26, so they correctly don't reappear. An independent tally of all 13 open Chorus phases agreed that only p23 was finished, and nothing was missed. **`--apply` then wrote 5, not the 2 Lachy approved:** the live `[[chorus-rollout-2026-09-26]]` landed the last tasks of p24, p25 and p28 between the dry run and the apply, and `--apply` recomputes its list. All their tasks were done, so Lachy kept all five. Follow-up: [[thread-skill-reconcile-apply-binds-reviewed-list]]. The daily sweep `6e1c06d2` committed the moves, and vault `4ee121fd` closed the release and acceptance tasks.
@@ -435,6 +442,7 @@ scheduled 2026-07-15.
 
 ## What's been built / decided
 
+- **ADR 0027 (2026-09-28, PR #32, 2.9.0): orient is the one shaping verb.** `split` and `gather` are deleted (no alias stubs); their machinery is `skills/orient/reshuffle.md`. Orient asks Reshuffle / Steer only / Look only; in flight, possibly-landed and thread captures are frozen; a live rollout is superseded only when paused with all unlanded tasks open; the pass ends with the execute offer.
 - **p5-2 (2026-09-27, PR #23): no SKILL.md body holds a positional `$N`.** The logic lives in scripts where it
   needs one (close `handoff-scan.sh`, `repo-track.sh`; execute `default-branch.sh`, which refuses an empty
   `<repoPath>`), behind wrappers that check the script exists (exit 2) and pass inputs through the
@@ -495,7 +503,10 @@ scheduled 2026-07-15.
 ## Open questions / decisions pending
 
 - **The fresh-review of workspaces `29ca886` (the hook deletion) hasn't run.** The engine binds to the session's cwd, and this session was in thread-skill. It needs a session launched in `~/repos/workspaces`.
-- **p10-3 (orient and gather) and p10-4 (close) are unblocked:** `feat/next-action-set-downs` merged as #31 (`bccca10`, 2026-09-28). Check whether `feat/orient-reshuffle` (ADR 0027, a live session in the plugin checkout) overlaps p10-3's orient edits before you schedule.
+- **p10-4 (close) is unblocked;** p10-3 landed inside #32 (ADR 0027 folded gather's backstop into the reshuffle).
+- **The one-live-rollout rule is orient-only** (ADR 0027): `/thread:schedule` run directly can still write a second rollout on a repo or `--regenerate` over a running one. [[thread-skill-schedule-owns-one-live-rollout-per-repo]] moves it into schedule's gate; its note lists why round 1's attempt was reverted.
+- **Halted vs running is not locally readable.** `reconcile-wave.py status` shows `paused` and task statuses but not whether a lead is still driving, which is why orient supersedes only a `paused` rollout. A liveness signal would widen that.
+- **`handoff-manual-dry-run` scored 0.83** in the 2026-09-28 eval run (its LLM lifecycle judge voted FAIL ×3; every tool and regex grader passed). Re-run it before treating it as a regression.
 - **p9-4 is unblocked** (handoff docs have one writer, and `next` recommends compact). It isn't in the running rollout; schedule it with p10-3 and p10-4.
 - **`tier_capped:` means something else under the Opus lock** (seen 2026-09-27). With `max_tier: opus` from the AGENTS.md lock (ADR 0024), every opus task whose first plan is rejected gets `tier_capped: plan`: all three P10 tasks did. ADR 0016 defines the marker as "capped by quota, re-dispatch uncapped once quota returns", but the lock never lifts, so the marker is now permanent noise on most cross-cutting tasks. This joins the deferred tier-ceiling gap 1 below (status and repair ignore the marker). Decide whether a lock-driven cap stamps anything.
 - **`check-agent-parity.py` exits 1** on `~/.codex/hooks.json` ("direct Codex must use native Stop notification"). Seen 2026-09-27 and unrelated to the hook deletion.
@@ -575,6 +586,8 @@ scheduled 2026-07-15.
 
 - **`reconcile-project.py --apply` recomputes, and never replays the dry run** (2026-09-28). On a vault a live rollout is writing, it can close more than was reviewed: a reviewed 2 became 5. Until [[thread-skill-reconcile-apply-binds-reviewed-list]] lands, re-run the dry run just before `--apply` when a rollout is live, or pass `--phases`. The vault then moves closed phase notes into `Phases/Archive/` within minutes, and the daily sweep may commit them before you do, so a pathspec commit of the old paths fails.
 - **Tag a release at the released commit, never at `origin/master`** (2026-09-28). Master can move past a release without changing the manifests: #31 landed on 2.8.0. `claude plugin tag` tags HEAD, so run it from a checkout sitting on the released commit with a clean tree (stash any consumed-handoff mark first).
+- **`gh pr update-branch` doesn't exist in this gh**, and master's protection is strict: a PR behind master shows `mergeStateStatus: BEHIND` and `gh pr merge` refuses with an `--admin` hint. Use `gh api -X PUT repos/lachyts/thread-skill/pulls/<N>/update-branch`, wait for the re-run CI, then merge (2026-09-28, #34).
+- **`claude plugin eval` from an agent needs `--trust-plugin`** (its first run in a directory asks otherwise). `make evals` doesn't pass it, and `evals-structure.test.mjs` forbids it in the Makefile, so pass it on the command line only. Delete `evals/results/` before `claude plugin update`, or release-check fails on the copied output (2026-09-28).
 - **The live plugin checkout can be on someone else's branch.** Other sessions work in `~/repos/tools/thread-skill` too (2026-09-28: `feat/orient-reshuffle`). Check `git status -sb` there before any release step, and do release git work from the rollout clone when it isn't on `master`.
 
 - **A `cd` in a Bash call moves the session's working directory, but only inside the launch tree.**
@@ -778,6 +791,15 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Now (from 2026-09-28, evening): 2.9.0 is live (orient's reshuffle, set-down next actions). Nothing is running and no handoff is pending. Both checkouts are on `master`.**
+- **Next:**
+  1. The next rollout: `/thread:schedule` on [[thread-skill-p10-4-close-flips-a-finished-task]] and p9-4, from the rollout clone (p10-3 landed in #32). Consider [[thread-skill-reconcile-apply-binds-reviewed-list]] with them. Phase 10 closes itself when p10-4 lands.
+  2. p4-6's eval baseline now exists (`docs/evals/2026-09-28-orient-reshuffle.md`), so [[thread-skill-p4-5-trim-descriptions-700-hard-cap]] can be scheduled.
+  3. The two ADR 0027 follow-ups: [[thread-skill-schedule-owns-one-live-rollout-per-repo]], [[thread-skill-one-vault-grammar-for-reconcile-and-reshuffle]].
+  4. Still owed: the fresh-review of workspaces `29ca886` (a session in `~/repos/workspaces`); tag 2.7.1 at `e5903f5` and 2.9.0 at `43ff855` (`claude plugin tag` tags HEAD, so from a clean checkout sitting on that commit).
+- **Close-outs still go on a branch and a PR** (master is protected, strict: a PR behind master must be updated before it merges).
+
+**Superseded 2026-09-28 (evening):**
 **Now (from 2026-09-28): 2.8.0 is released and tagged, and the reconcile step is accepted. Nothing is running.**
 - **First:** push this close-out branch, `docs/close-2026-09-28-p10-release`, in `~/repos/tools/thread-skill-rollout`, and open its PR (master is protected; p5-4). After it merges, switch that clone back to `master` and fast-forward it, so the next rollout's `merge-wave.sh` can fast-forward.
 - **Next:**
@@ -910,6 +932,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-28 (evening close): grilled ADR 0027 with Lachy (orient is the one shaping verb; split and gather retired), built it (#32), three clean-room review rounds with a ledger stop and a revert to the root, full eval suite run and recorded, released 2.9.0 (#33), landed the P10 session's close-out (#34), pushed workspaces and ~/.agents, cleaned the merged worktree and branches. Follow-ups filed: schedule owns one-live-rollout-per-repo; one vault grammar.
 - 2026-09-28 (close): consumed the p10-release-and-acceptance handoff. Merged #29 (close-out) and #30 (2.8.0 bump). Plugin updated, release-check green, tag `thread--v2.8.0` at `c5f7522`, set-head done. Reconcile live acceptance: the dry run matched the audit; `--apply` wrote 5 (2 reviewed, plus 3 landed meanwhile by a live Chorus rollout), all kept, and the follow-up was filed. #31 merged meanwhile, unblocking p10-3/p10-4/p9-4. Handoff doc deleted.
 - 2026-09-27 (late evening, second close): handed off the next pieces (land the close-out branch, P10 release, live acceptance, next rollout) as `docs/handoffs/2026-09-27-p10-release-and-acceptance.md` on `docs/close-2026-09-27-p10-rollout`. The clone was left on that branch so the doc's path resolves.
 - 2026-09-27 (late evening close): rollout lead for `[[thread-skill-rollout-2026-09-27]]`. Wave 1 (#25, #27) and wave 2 (#28) merged in 2h 9m. The ceremony ran #28's new phase-close step (phase 10 left open) and filed two follow-ons, live acceptance and release. The rollout note was archived (vault `b2a6137b`). This close is on branch `docs/close-2026-09-27-p10-rollout`.
