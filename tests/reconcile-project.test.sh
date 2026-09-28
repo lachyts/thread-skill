@@ -4,7 +4,8 @@
 # note per case; the fixture itself is never written) with a fake `gh` first on PATH, so no network. Pins
 # every detector, the unambiguous/ambiguous split, dry run writing nothing, --apply writing exactly the
 # unambiguous list, idempotence, the gh-less paths, --kinds/--phases scoping, usage errors, the phase's
-# dependency on its task writes, and the non-clobbering rollout move with its rollback.
+# dependency on its task writes, the non-clobbering rollout move with its rollback, and the bound apply
+# (--apply --only <dry-run json>: work landing between the review and the apply is listed, never written).
 # Hermetic: every case works in its own copy under one mktemp dir; the chmod cases restore modes in the
 # trap. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -60,6 +61,11 @@ strs() { python3 -c 'import json,sys
 x = json.load(open(sys.argv[1]))[sys.argv[2]]
 print("\n".join(x) if isinstance(x, list) else x)' "$tmp/out" "$1"; }
 lines() { printf '%s\n' "$@"; }
+# Plain mode (no --only) is byte-identical to before the bound apply: execute's ceremony parses its text by
+# section header. bound_keys → any --only-only JSON key present in $tmp/out; bound_lines → any such text line.
+bound_keys() { python3 -c 'import json,sys
+d = json.load(open(sys.argv[1])); print(" ".join(k for k in ("new_since_review", "reviewed_not_applied") if k in d))' "$tmp/out"; }
+bound_lines() { printf '%s\n' "$out" | grep -E '^(New since review|Reviewed, not applied) \(|bound to the reviewed list'; }
 
 U_ALL=$(lines "phase demo-p1-alpha" "phase demo-p18-single" "phase demo-p4-merged" "rollout demo-rollout-2025-12-01" \
   "rollout demo-rollout-2025-12-02" "task demo-p4-2-merged" "task demo-p8-1-merged" "task demo-p8-10-shortid" \
@@ -113,6 +119,7 @@ ok "$(field unambiguous demo-p1-alpha depends_on)" "" "demo-p1 depends on nothin
 has "$(strs skipped)" "demo-p8-8-gh404" "a gh error is skipped, not evidence"
 ok "$(strs gh)" "ok" "gh reported ok"
 ok "$(strs applied)" "False" "applied is false"
+ok "$(bound_keys)" "" "plain dry run --json has no new_since_review / reviewed_not_applied keys"
 # demo-p15-noroll: its task is at review with no rollout: a human step, a hold, never "run /thread:repair".
 # demo-p16-mixed: one parked task and one ambiguous task: the hold wins, resolving p16-2 could never close it.
 # demo-cmux-1-merged: a merged-PR `demo-cmux-*` task shares the slug prefix but is not `demo-p<N>-*`.
@@ -127,6 +134,7 @@ ok "$rc" 0 "text dry run exits 0"
 has "$out" "dry run: nothing written; pass --apply" "text header says dry run"
 has "$out" "Unambiguous (11)" "text lists the unambiguous block"
 has "$out" "Ambiguous (25)" "text lists the ambiguous block"
+ok "$(bound_lines)" "" "plain text dry run has no New since review / Reviewed, not applied lines"
 ok "$(manifest "$v")" "$before" "dry run (text) writes nothing"
 
 # The short id is bounded: p8-1 never matches a `| p8-10 |` row; the escaped alias and a -v2 successor.
@@ -156,6 +164,7 @@ echo "# 2. --apply"
 rp --apply --json
 ok "$rc" 0 "apply exits 0"
 ok "$(strs applied)" "True" "applied is true"
+ok "$(bound_keys)" "" "plain --apply --json has no new_since_review / reviewed_not_applied keys"
 after=$(manifest "$v")
 changed=$(printf '%s\n%s\n' "$before" "$after" | LC_ALL=C sort | uniq -u | sed 's/^[0-9a-f]*  //' | LC_ALL=C sort -u | tr '\n' ' ')
 exp="./Work/Phases/demo-p1-alpha.md ./Work/Phases/demo-p18-single.md ./Work/Phases/demo-p4-merged.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-01.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-02.md ./Work/Tasks/Archive/demo-rollout-2025-12-01.md ./Work/Tasks/demo-p4-2-merged.md ./Work/Tasks/demo-p8-1-merged.md ./Work/Tasks/demo-p8-10-shortid.md ./Work/Tasks/demo-p8-14-escalias.md ./Work/Tasks/demo-p8-23-fenced.md ./Work/Tasks/demo-p8-3-bullet.md ./Work/Tasks/demo-rollout-2025-12-02.md "
@@ -186,6 +195,7 @@ rp --apply
 ok "$rc" 0 "second apply exits 0"
 has "$out" "Unambiguous (0)" "second apply finds nothing unambiguous"
 has "$out" "applied" "second apply header says applied"
+ok "$(bound_lines)" "" "plain text --apply has no New since review / Reviewed, not applied lines"
 ok "$(manifest "$v")" "$after" "second apply writes nothing"
 
 # ---- 4. no gh ----------------------------------------------------------------------------------------
@@ -293,5 +303,137 @@ else
   ok "$(shasum 2>/dev/null < "$v/Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-01.md")" "$(shasum < "$F/Tasks/Archive/demo-rollout-2025-12-01.md")" "a writable source still moves"
 fi
 chmod u+w "$v/Work/Tasks"
+
+# ---- 10. bound apply (--only) ------------------------------------------------------------------------
+echo "# 10. bound apply (--only)"
+# landp3: a live rollout lands demo-p3's only task between the dry run and the apply (demo-p3 becomes U).
+landp3() { f="$v/Work/Tasks/demo-p3-1-open.md"; sed 's/^status: open$/status: done/' "$f" > "$f.new" && mv "$f.new" "$f"; }
+# review → $tmp/review.json, the dry run's --json on the current copy $v (what a human reviewed)
+review() { rp --json; cp "$tmp/out" "$tmp/review.json"; }
+# changed_from <manifest> → the sorted, space-joined paths that differ from it now
+changed_from() { printf '%s\n%s\n' "$1" "$(manifest "$v")" | LC_ALL=C sort | uniq -u | sed 's/^[0-9a-f]*  //' | LC_ALL=C sort -u | tr '\n' ' '; }
+written_section() { printf '%s\n' "$out" | sed -n '/^Written (/,/^Errors (/p'; }
+# reasons <list> → the distinct reasons in that list, one per line
+reasons() { python3 -c 'import json,sys
+print("\n".join(sorted({i["reason"] for i in json.load(open(sys.argv[1]))[sys.argv[2]]})))' "$tmp/out" "$1"; }
+NO_LONGER_DRIFT="no longer drift (closed, moved or out of scope since review)"
+exp_p3=$(printf '%s\n' $exp ./Work/Tasks/demo-p3-1-open.md | LC_ALL=C sort | tr '\n' ' ')
+U_P3=$(printf '%s\n%s\n' "$U_ALL" "phase demo-p3-openwork" | LC_ALL=C sort)
+
+# 1. landed between runs
+fresh; before=$(manifest "$v"); v1=$v
+review; cp "$tmp/review.json" "$tmp/review1.json"
+ok "$(items unambiguous)" "$U_ALL" "review: the dry run lists U_ALL"
+landp3
+rp --apply --only "$tmp/review.json" --json
+ok "$rc" 0 "bound apply exits 0"
+ok "$(strs applied)" "True" "bound apply: applied is true"
+ok "$(items unambiguous)" "$U_P3" "bound apply: unambiguous is still the full recomputed list"
+ok "$(items new_since_review)" "phase demo-p3-openwork" "bound apply: the phase that landed since review is new"
+ok "$(items reviewed_not_applied)" "" "bound apply: every reviewed item was applied"
+ok "$(changed_from "$before")" "$exp_p3" "bound apply wrote exactly the reviewed U (plus the test's own landing)"
+ok "$(shasum < "$v/Work/Phases/demo-p3-openwork.md")" "$(shasum < "$F/Phases/demo-p3-openwork.md")" "the new phase is not written"
+case "$(strs written)" in *demo-p3-openwork*) ok written absent "written never names the new phase";; *) ok absent absent "written never names the new phase";; esac
+ok "$(strs errors)" "" "bound apply reports no errors"
+# text mode, same mutation on a fresh copy
+fresh; review; landp3
+rp --apply --only "$tmp/review.json"
+ok "$rc" 0 "text bound apply exits 0"
+has "$out" "applied (bound to the reviewed list: $tmp/review.json)" "text header names the reviewed list"
+has "$out" "New since review (1)" "text lists the new-since-review block"
+has "$out" "  - phase demo-p3-openwork: status: done" "text names the new phase under it"
+has "$out" "Reviewed, not applied (0)" "text lists the reviewed-not-applied block"
+ok "$(written_section | grep -c demo-p3)" 0 "text Written never names p3"
+has "$(written_section)" "Written (11)" "text Written lists the 11 reviewed writes"
+
+# 2. a reviewed item turned ambiguous: `now ambiguous: <its ambiguous reason>`, for a human
+fresh; review
+printf '\nTODO: one more step.\n' >> "$v/Work/Tasks/demo-p8-3-bullet.md"
+mid=$(shasum < "$v/Work/Tasks/demo-p8-3-bullet.md")
+rp --apply --only "$tmp/review.json" --json
+ok "$rc" 0 "a reviewed item gone ambiguous exits 0"
+ok "$(items reviewed_not_applied)" "task demo-p8-3-bullet" "reviewed_not_applied names only it"
+r=$(field reviewed_not_applied demo-p8-3-bullet reason)
+ok "$r" "now ambiguous: $(field ambiguous demo-p8-3-bullet reason)" "the reason is now ambiguous plus its ambiguous reason"
+case "$r" in "now ambiguous: "*) ok y y "the reason leads with now ambiguous";; *) ok "$r" "now ambiguous: …" "the reason leads with now ambiguous";; esac
+has "$r" '"TODO"' "the reason quotes the partial-landing marker"
+ok "$(shasum < "$v/Work/Tasks/demo-p8-3-bullet.md")" "$mid" "it is not written"
+ok "$(items new_since_review)" "" "nothing new since review"
+
+# 2b. a reviewed task that lands on its own between the review and the apply is benign, not ambiguous
+fresh; review
+f="$v/Work/Tasks/demo-p8-1-merged.md"; sed 's/^status: in_progress$/status: done/' "$f" > "$f.new" && mv "$f.new" "$f"
+mid=$(shasum < "$f")
+rp --apply --only "$tmp/review.json" --json
+ok "$rc" 0 "a reviewed task landed on its own exits 0"
+ok "$(items reviewed_not_applied)" "task demo-p8-1-merged" "reviewed_not_applied names only it"
+ok "$(field reviewed_not_applied demo-p8-1-merged reason)" "$NO_LONGER_DRIFT" "its reason is benign: no longer drift"
+case "$(items ambiguous)" in *demo-p8-1-merged*) ok ambiguous absent "it is not ambiguous";; *) ok absent absent "it is not ambiguous";; esac
+ok "$(shasum < "$f")" "$mid" "it is not written again"
+ok "$(items new_since_review)" "" "nothing new since review"
+ok "$(strs errors)" "" "no errors"
+rp --apply --only "$tmp/review.json"
+has "$out" "  - task demo-p8-1-merged: $NO_LONGER_DRIFT" "text: Reviewed, not applied names it with the benign reason"
+
+# 3. a reviewed phase whose dependency task was not reviewed
+fresh; review
+python3 -c 'import json,sys
+d = json.load(open(sys.argv[1])); d["unambiguous"] = [i for i in d["unambiguous"] if i["slug"] != "demo-p4-2-merged"]
+json.dump(d, open(sys.argv[2], "w"))' "$tmp/review.json" "$tmp/review-nop4.json"
+rp --apply --only "$tmp/review-nop4.json" --json
+ok "$rc" 0 "a withheld dependent phase exits 0 (withheld before apply, not skipped in it)"
+ok "$(shasum < "$v/Work/Phases/demo-p4-merged.md")" "$(shasum < "$F/Phases/demo-p4-merged.md")" "the withheld phase is byte-identical"
+ok "$(shasum < "$v/Work/Tasks/demo-p4-2-merged.md")" "$(shasum < "$F/Tasks/demo-p4-2-merged.md")" "the unreviewed task is byte-identical"
+has "$(items new_since_review)" "task demo-p4-2-merged" "the unreviewed task is new since review"
+has "$(items reviewed_not_applied)" "phase demo-p4-merged" "the phase is reviewed, not applied"
+has "$(field reviewed_not_applied demo-p4-merged reason)" "demo-p4-2-merged" "the reason names the missing dependency"
+ok "$(strs errors)" "" "no errors"
+
+# 4. an empty reviewed list
+fresh; before=$(manifest "$v")
+printf '{"project":"demo","vault":"%s","applied":false,"unambiguous":[]}' "$v" > "$tmp/empty.json"
+rp --apply --only "$tmp/empty.json" --json
+ok "$rc" 0 "an empty reviewed list exits 0"
+ok "$(manifest "$v")" "$before" "an empty reviewed list writes nothing"
+ok "$(items new_since_review)" "$U_ALL" "everything is new since review"
+
+# 5. usage errors (@V is the current copy's vault)
+rp --only "$tmp/review.json"; ok "$rc" 2 "--only without --apply exits 2"
+has "$err" "--only" "names --only"
+rp --apply --only "$tmp/nope.json"; ok "$rc" 2 "a missing --only file exits 2"
+bad() {
+  printf '%s' "$1" | sed "s#@V#$v#g" > "$tmp/bad.json"; rp --apply --only "$tmp/bad.json"; ok "$rc" 2 "$2 exits 2"
+  [ -z "${3:-}" ] || has "$err" "$3" "$2: the error says why"
+}
+bad 'not json' "invalid JSON" "not JSON"
+bad '[1]' "a non-object JSON"
+bad '{"project":"other","vault":"@V","applied":false,"unambiguous":[]}' "another project's dry run" "'other'"
+bad '{"project":"demo","vault":"/elsewhere/vault","applied":false,"unambiguous":[]}' "another vault's dry run" "vault '/elsewhere/vault'"
+bad '{"project":"demo","applied":false,"unambiguous":[]}' "a dry run with no vault" "vault None"
+bad '{"project":"demo","vault":"@V","applied":true,"unambiguous":[]}' "an apply's output (applied: true)" "not a dry run"
+bad '{"project":"demo","vault":"@V","applied":false}' "a missing unambiguous" "no unambiguous list"
+bad '{"project":"demo","vault":"@V","applied":false,"unambiguous":{}}' "a non-list unambiguous" "no unambiguous list"
+bad '{"project":"demo","vault":"@V","applied":false,"unambiguous":["x"]}' "a non-object item" "unambiguous item"
+bad '{"project":"demo","vault":"@V","applied":false,"unambiguous":[{"kind":"bogus","slug":"x"}]}' "an item with a kind outside KINDS" "unambiguous item"
+bad '{"project":"demo","vault":"@V","applied":false,"unambiguous":[{"kind":"task","slug":7}]}' "an item with a non-string slug" "unambiguous item"
+bad '{"project":"demo","vault":"@V","applied":false,"unambiguous":[{"kind":"task","slug":""}]}' "an item with an empty slug" "unambiguous item"
+ok "$(manifest "$v")" "$before" "usage errors write nothing"
+
+# 6. stdin
+fresh; before=$(manifest "$v"); review; landp3
+rp --apply --only - --json < "$tmp/review.json"
+ok "$rc" 0 "--only - exits 0"
+ok "$(items new_since_review)" "phase demo-p3-openwork" "--only -: the new phase is listed"
+ok "$(changed_from "$before")" "$exp_p3" "--only -: wrote exactly the reviewed U"
+
+# 7. idempotence of the bound apply (on case 1's vault, with case 1's review)
+v=$v1; after=$(manifest "$v")
+rp --apply --only "$tmp/review1.json" --json
+ok "$rc" 0 "a second bound apply exits 0"
+ok "$(manifest "$v")" "$after" "a second bound apply writes nothing"
+ok "$(strs written)" "" "a second bound apply lists no writes"
+ok "$(items new_since_review)" "phase demo-p3-openwork" "the new phase is still listed, still unwritten"
+ok "$(items reviewed_not_applied)" "$U_ALL" "the 11 items the first run wrote are reviewed, not applied"
+ok "$(reasons reviewed_not_applied)" "$NO_LONGER_DRIFT" "each with the benign no-longer-drift reason, never now ambiguous"
 
 exit $fail
