@@ -22,31 +22,39 @@ stdout is exactly one line on exit 0, 3 or 4. stderr carries warnings and errors
 output is the origin-derived (or --slug) spelling, a trailing `.git` dropped; matching is
 case-insensitive, as GitHub slugs are.
 
-Origin. The fetch URL of `origin` (as execute's merge-wave reads it), accepted only in the shapes
-execution-fit's remote-check admits: `https://github.com/` (optional userinfo), `git@github.com:`,
-`ssh://git@github.com[:port]/`. The rest must be exactly `<owner>/<name>` (segments of
-[A-Za-z0-9._-]), one trailing `/` and then a trailing `.git` tolerated. Anything else is `no-origin`.
-Repo-local git env inherited from a caller (a hook's GIT_DIR) is dropped first, so the path argument
-always wins.
+Origin. The fetch URL of `origin` (as execute's merge-wave reads it), accepted only with the prefixes
+execution-fit's remote-check admits, so the two classify an origin the same way: `https://github.com/`,
+`git@github.com:`, `ssh://git@github.com/` (no userinfo on https, no port on ssh). The rest must be
+exactly `<owner>/<name>`, one trailing `/` and then a trailing `.git` tolerated. Segments are
+[A-Za-z0-9._-]; an owner starts with a letter or digit (as GitHub's do), and neither segment is all
+dots. Anything else is `no-origin`. The same slug rules bind --slug (a bad one is exit 2). Repo-local
+git env inherited from a caller (a hook's GIT_DIR) is dropped first, so the path argument always wins;
+an empty <repo-path> (an unset variable) is exit 2, never the current directory.
 
-Register. `$LANDING_REGISTER` if set and non-empty, else
-`~/repos/workspaces/_shared/knowledge/landing-register.md`. A deny-list: an unlisted repo lands. The
-format is one bullet per listed repo:
+Register. `$LANDING_REGISTER` (`~` expanded) if set and non-empty, else
+`~/repos/workspaces/_shared/knowledge/landing-register.md`. Only a path where nothing exists, not even
+a symlink, is "no register" (warn, land); a path that exists but will not open, a dangling symlink
+included, is exit 2. A deny-list: an unlisted repo lands. The format is one bullet per listed repo:
 
     - <owner>/<name> — <reason>
 
 Optional front matter (line 1 `---`, closed by `---` or `...`) is never parsed for entries. A prose
-header line is fine; headings, prose and blank lines are not entries. The grammar is relaxed: the
-bullet marker may be `-`, `*`, `+` or `1.`/`1)` at any indent; the slug may be wrapped in backticks,
-`**`, `_` or `[[ ]]`, and may end `.git`; the separator may be an em or en dash, `-`, `:`, `,`, `;` or
-nothing; an empty reason reads `no reason given`. `<owner>/*` lists every repo of that owner. The first
-matching entry wins (an exact entry before an owner-wide one).
+header line is fine if it does not open with a bullet marker; headings, prose and blank lines are not
+entries. The grammar is relaxed: the bullet marker may be `-`, `*`, `+` or `1.`/`1)` at any indent,
+then whitespace; the slug may be wrapped in backticks, `**`, `_` or `[[ ]]`, and may end `.git`; the
+separator may be an em or en dash, `-`, `:`, `,`, `;` or nothing; an empty reason reads `no reason
+given`. `<owner>/*` lists every repo of that owner. An exact entry beats an owner-wide one wherever
+each sits; among entries of one kind the first wins.
 
-The reader fails closed. A bullet that is not an entry warns on stderr (`<path>:<line>: malformed
-entry`) on every run, whatever the repo. A repo with no entry is still listed (`malformed register
-entry at line N`) when any line of the file, front matter included, names its `<owner>/<name>` or
-`<owner>/*`, or when a malformed bullet names its bare <name>. So for the register's author: an
-owner/name written anywhere in this file lists that repo; name allowed repos by bare name only.
+The reader fails closed. A bullet that is not an entry, and a bullet marker glued to its text
+(`-Animately/x`, `1.Animately/x`; thematic breaks such as `---` and `* * *` excepted), warns on stderr
+(`<path>:<line>: malformed entry`) on every run, whatever the repo. A repo with no entry is still
+listed (`malformed register entry at line N`) when any line of the file, front matter included, names
+its `<owner>/<name>` or `<owner>/*`, or when a malformed bullet names its bare <name>. A name counts as
+written unless the run of slug characters touching it on the left holds a letter or digit (then it is
+part of a longer word: `x-Animately/y`, `v1.Animately/y`); `-Animately/y` and `_Animately/y_` count.
+So for the register's author: an owner/name written anywhere in this file lists that repo; name
+allowed repos by bare name only. Help flags are not accepted: `-h` is an argument error (exit 2).
 """
 import argparse
 import os
@@ -56,19 +64,23 @@ import sys
 from pathlib import Path
 
 DEFAULT_REGISTER = Path("repos", "workspaces", "_shared", "knowledge", "landing-register.md")
+OWNER = r"[A-Za-z0-9][A-Za-z0-9._-]*"  # GitHub owners never start with `-` or `.`
 SEG = r"[A-Za-z0-9._-]+"
-SLUG_RE = re.compile(r"(%s)/(%s)" % (SEG, SEG))
-ORIGIN_RE = re.compile(r"(?:https://(?:[^@/]+@)?github\.com/|git@github\.com:|ssh://git@github\.com(?::\d+)?/)(.*)")
+SLUG_RE = re.compile(r"(%s)/(%s)" % (OWNER, SEG))
+# Exactly execution-fit's remote-check prefixes (its `case`), so both classify an origin alike.
+ORIGIN_RE = re.compile(r"(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)(.*)")
 BULLET_RE = re.compile(r"\s*(?:[-*+]|\d+[.)])\s+(.*)")
+GLUED_RE = re.compile(r"\s*(?:[-*+]|\d+[.)])\S.*")  # a bullet marker with no space after it
+THEMATIC_RE = re.compile(r"\s*(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,})")  # `---`, `* * *`: not bullets
 # Decoration, slug (owner/name or owner/*), closing decoration, then not a slug character.
 ENTRY_RE = re.compile(r"(?P<open>[`*_\[]*)(?P<slug>%s/(?:%s|\*))(?P<close>[`*_\]]*)(?![A-Za-z0-9._/-])(?P<rest>.*)"
-                      % (SEG, SEG))
+                      % (OWNER, SEG))
 SEPARATORS = "—–-:,;"
-# Word bounds for the mention sweep. A slug character on either side extends the word, except that a
-# `_` next to a non-word character is emphasis (`_Animately/x_`), and a `.` not followed by a slug
-# character ends a sentence.
-BEFORE = r"(?<![A-Za-z0-9.-])(?<![A-Za-z0-9.-]_)"
+# Right-hand word bound for the mention sweep: a slug character extends the word, except that a `.` not
+# followed by a slug character ends a sentence and trailing `_` next to a non-word character is emphasis
+# (`_Animately/x_`). The left-hand bound is `extends_left`.
 AFTER = r"(?:\.git)?(?![A-Za-z0-9-]|\.[A-Za-z0-9]|_+(?:[A-Za-z0-9-]|\.[A-Za-z0-9]))"
+LEFT_RUN_RE = re.compile(r"[A-Za-z0-9._-]*\Z")
 
 
 def fail(reason):
@@ -86,6 +98,11 @@ def done(line, code):
 
 
 class Parser(argparse.ArgumentParser):
+    # No -h/--help: argparse's help exits 0 with usage on stdout, which would read as `land`.
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("add_help", False)
+        super().__init__(*args, **kwargs)
+
     def error(self, message):  # argparse's default prints multi-line usage; keep failures to one line
         fail(message)
 
@@ -95,7 +112,9 @@ def parse_slug(text):
     if text.endswith(".git"):
         text = text[:-4]
     m = SLUG_RE.fullmatch(text)
-    return (m.group(1), m.group(2)) if m else None
+    if not m or any(set(seg) == {"."} for seg in m.groups()):  # `..` is a path, never a repo
+        return None
+    return m.group(1), m.group(2)
 
 
 def git_env():
@@ -132,17 +151,19 @@ def origin_slug(repo):
 
 def register_path():
     env = os.environ.get("LANDING_REGISTER", "")
-    return Path(env) if env else Path.home() / DEFAULT_REGISTER
+    return Path(os.path.expanduser(env)) if env else Path.home() / DEFAULT_REGISTER
 
 
 def read_lines(path):
-    """The register's lines, or None when there is no file. Any other read failure is exit 2."""
+    """The register's lines, or None when nothing exists at the path (not even a dangling symlink, in
+    the path or any of its parents). Any other read failure is exit 2."""
     try:
         with open(path, encoding="utf-8-sig", newline="") as f:
             text = f.read()
-    except FileNotFoundError:
-        return None
     except (OSError, UnicodeDecodeError) as e:
+        if isinstance(e, FileNotFoundError) and not any(
+                os.path.lexists(p) and not os.path.exists(p) for p in (path,) + tuple(path.parents)):
+            return None
         fail("cannot read register %s: %s" % (path, e))
     lines = re.split(r"\r\n|\r|\n", text)
     if lines and lines[-1] == "":
@@ -177,8 +198,16 @@ def parse_entry(body):
     return slug, reason or "no reason given"
 
 
-def mentions(word):
-    return re.compile(BEFORE + word + AFTER, re.IGNORECASE)
+def extends_left(line, start):
+    """True when the slug characters touching `start` on the left hold a letter or digit, so the match
+    is the tail of a longer word (`x-Animately/y`). `-`, `.` and `_` alone never extend it: an owner or
+    name cannot be made of them, so `-Animately/y` and `_Animately/y_` name Animately/y."""
+    return re.search(r"[A-Za-z0-9]", LEFT_RUN_RE.search(line, 0, start).group()) is not None
+
+
+def mentioned(word, line):
+    return any(not extends_left(line, m.start())
+               for m in re.finditer(word + AFTER, line, re.IGNORECASE))
 
 
 def check(owner, name):
@@ -191,10 +220,12 @@ def check(owner, name):
 
     entries, malformed = [], []  # (lineno, slug, reason) / (lineno, line)
     for i in range(body_start, len(lines)):
-        m = BULLET_RE.fullmatch(lines[i])
-        if not m:
+        if THEMATIC_RE.fullmatch(lines[i]):
             continue
-        entry = parse_entry(m.group(1))
+        m = BULLET_RE.fullmatch(lines[i])
+        if not m and not GLUED_RE.fullmatch(lines[i]):
+            continue
+        entry = parse_entry(m.group(1)) if m else None
         if entry:
             entries.append((i + 1,) + entry)
         else:
@@ -209,13 +240,12 @@ def check(owner, name):
         if entry_slug.lower() == ("%s/*" % owner).lower():
             done("listed %s: %s" % (slug, reason), 3)
 
-    named = mentions(r"%s/(?:%s|\*)" % (re.escape(owner), re.escape(name)))
+    named = r"%s/(?:%s|\*)" % (re.escape(owner), re.escape(name))
     for i, line in enumerate(lines):
-        if named.search(line):
+        if mentioned(named, line):
             done("listed %s: malformed register entry at line %d" % (slug, i + 1), 3)
-    bare = mentions(re.escape(name))
     for lineno, line in malformed:
-        if bare.search(line):
+        if mentioned(re.escape(name), line):
             done("listed %s: malformed register entry at line %d" % (slug, lineno), 3)
     done("land", 0)
 
@@ -230,6 +260,8 @@ def main():
     args = parser.parse_args()
     if (args.repo is None) == (args.slug is None):
         fail("check takes exactly one of <repo-path> and --slug <owner/name>")
+    if args.repo == "":
+        fail("empty <repo-path> (an unset variable?); refusing to check the current directory")
     if args.slug is not None:
         slug = parse_slug(args.slug)
         if slug is None:

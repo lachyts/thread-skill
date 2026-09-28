@@ -100,6 +100,11 @@ for (const [label, origin] of [
   ['another host (listed-looking slug)', 'https://gitlab.com/Animately/imgproxy.git'],
   ['GitHub with three path segments', 'https://github.com/Animately/imgproxy/extra'],
   ['www.github.com', 'https://www.github.com/Animately/imgproxy.git'],
+  // remote-check's `case` admits neither, so the reader must not either (p11-3/p11-6 agree on origins).
+  ['https with userinfo', 'https://lachy@github.com/Animately/imgproxy.git'],
+  ['ssh with a port', 'ssh://git@github.com:22/Animately/imgproxy.git'],
+  ['an owner starting with -', 'https://github.com/-Animately/imgproxy.git'],
+  ['an all-dot name', 'https://github.com/Animately/...git'],
 ]) {
   test(`no-origin: ${label}`, () => {
     // The register is never read: a directory register (exit 2 when read) proves it.
@@ -113,10 +118,8 @@ for (const [label, origin] of [
 for (const origin of [
   'https://github.com/Animately/imgproxy.git',
   'https://github.com/Animately/imgproxy',
-  'https://lachy@github.com/Animately/imgproxy.git',
   'git@github.com:Animately/imgproxy',
   'ssh://git@github.com/Animately/imgproxy.git',
-  'ssh://git@github.com:22/Animately/imgproxy.git',
   'https://github.com/Animately/imgproxy/',
 ]) {
   test(`origin shape resolves: ${origin}`, () => {
@@ -178,6 +181,49 @@ test('malformed: a longer name is not hit by a shorter bare name', () => {
   assertMalformed('Animately/imgproxy-benchmark-script', 0, 'land\n')
 })
 
+// A bullet marker glued to its text is a malformed bullet: it warns and gets the bare-name sweep, and
+// a leading `-` or `.` never makes a different owner (GitHub owners cannot start with either).
+for (const [label, line] of [
+  ['dash glued to the slug', '-Animately/imgproxy — reason'],
+  ['number glued to the slug', '1.Animately/imgproxy — reason'],
+  ['a dash inside the bullet', '- -Animately/imgproxy'],
+  ['glued, bare name only', '-imgproxy — reason'],
+]) {
+  test(`malformed: ${label} lists the repo and warns`, () => {
+    const reg = path.join(tmp, 'glued.md')
+    fs.writeFileSync(reg, `Header.\n${line}\n`)
+    const warning = `landing-register: ${reg}:2: malformed entry: ${line}\n`
+    const listed = check(repo('git@github.com:Animately/imgproxy.git'), { reg })
+    assert.equal(listed.stdout, 'listed Animately/imgproxy: malformed register entry at line 2\n', label)
+    assert.equal(listed.status, 3, label)
+    assert.equal(listed.stderr, warning, label)
+    const other = check(['--slug', 'Animately/giflab'], { reg })
+    assert.equal(other.stdout, 'land\n', `${label}: another repo lands`)
+    assert.equal(other.stderr, warning, `${label}: with the same warning`)
+  })
+}
+
+test('thematic breaks are neither bullets nor malformed', () => {
+  const reg = path.join(tmp, 'breaks.md')
+  fs.writeFileSync(reg, 'Header.\n\n---\n* * *\n- - -\n___\n- Animately/imgproxy — after breaks\n')
+  assertResult(check(['--slug', 'Animately/imgproxy'], { reg }), 3, 'listed Animately/imgproxy: after breaks\n')
+  assertResult(check(['--slug', 'Animately/giflab'], { reg }), 0, 'land\n')
+})
+
+test('an exact entry beats an earlier owner-wide one', () => {
+  const reg = path.join(tmp, 'exact.md')
+  fs.writeFileSync(reg, '- Wild/* — owner\n- Wild/specific — exact\n')
+  assertResult(check(['--slug', 'Wild/specific'], { reg }), 3, 'listed Wild/specific: exact\n')
+  assertResult(check(['--slug', 'Wild/other'], { reg }), 3, 'listed Wild/other: owner\n')
+})
+
+test('front matter closed by ... is skipped, and the body after it is read', () => {
+  const reg = path.join(tmp, 'dots.md')
+  fs.writeFileSync(reg, '---\ntags: x\n- not an entry\n...\n- Animately/imgproxy — after dots\n')
+  assertResult(check(['--slug', 'Animately/imgproxy'], { reg }), 3, 'listed Animately/imgproxy: after dots\n')
+  assertResult(check(['--slug', 'Animately/giflab'], { reg }), 0, 'land\n', 'front-matter bullet never warns')
+})
+
 test('unterminated front matter: exit 2 for every repo', () => {
   for (const slug of ['Animately/imgproxy', 'Animately/giflab']) {
     assertError(check(repo(`https://github.com/${slug}`), { reg: UNTERMINATED }), /unterminated front matter/)
@@ -219,6 +265,27 @@ test('a slug mentioned in front matter or a sentence still lists (mention sweep)
   assertResult(check(repo('https://github.com/Animately/url'), { reg }), 0, 'land\n', 'prefix is not a hit')
 })
 
+test('owner/* in prose or front matter lists every repo of that owner (mention sweep)', () => {
+  const reg = path.join(tmp, 'owner-mentions.md')
+  fs.writeFileSync(reg, '---\nnote: Front/*\n---\nNothing from Prose/* lands.\n')
+  assertResult(check(['--slug', 'Front/anything'], { reg }), 3,
+    'listed Front/anything: malformed register entry at line 2\n')
+  assertResult(check(['--slug', 'Prose/anything'], { reg }), 3,
+    'listed Prose/anything: malformed register entry at line 4\n')
+  assertResult(check(['--slug', 'Other/anything'], { reg }), 0, 'land\n')
+})
+
+test('mention sweep, left bound: a leading - or . names the repo; a longer word does not', () => {
+  const reg = path.join(tmp, 'left-bound.md')
+  fs.writeFileSync(reg, 'Held: -Animately/dashed and .Animately/dotted.\nNot: my-Animately/imgproxy, v1.Animately/giflab.\n')
+  for (const [slug, line] of [['Animately/dashed', 1], ['Animately/dotted', 1]]) {
+    assertResult(check(['--slug', slug], { reg }), 3, `listed ${slug}: malformed register entry at line ${line}\n`, slug)
+  }
+  for (const slug of ['Animately/imgproxy', 'Animately/giflab']) {
+    assertResult(check(['--slug', slug], { reg }), 0, 'land\n', slug)
+  }
+})
+
 // ---- The default register path.
 
 test('default path: LANDING_REGISTER unset or empty reads ~/repos/workspaces/_shared/knowledge', () => {
@@ -229,6 +296,23 @@ test('default path: LANDING_REGISTER unset or empty reads ~/repos/workspaces/_sh
   const r = repo('git@github.com:Animately/imgproxy.git')
   assertResult(check(r, { reg: undefined, home }), 3, 'listed Animately/imgproxy: reason A\n', 'unset')
   assertResult(check(r, { reg: '', home }), 3, 'listed Animately/imgproxy: reason A\n', 'empty')
+})
+
+test('LANDING_REGISTER with a leading ~ is expanded against HOME', () => {
+  const home = path.join(tmp, 'home-tilde')
+  fs.mkdirSync(path.join(home, 'regs'), { recursive: true })
+  fs.copyFileSync(REGISTER, path.join(home, 'regs', 'landing.md'))
+  assertResult(check(['--slug', 'Animately/imgproxy'], { reg: '~/regs/landing.md', home }), 3,
+    'listed Animately/imgproxy: reason A\n')
+})
+
+test('a dangling symlink at the register path, or above it, is exit 2, not "no register"', () => {
+  const link = path.join(tmp, 'dangling.md')
+  fs.symlinkSync(path.join(tmp, 'gone.md'), link)
+  assertError(check(['--slug', 'Animately/imgproxy'], { reg: link }), /cannot read register/)
+  const dir = path.join(tmp, 'dangling-dir')
+  fs.symlinkSync(path.join(tmp, 'gone-dir'), dir)
+  assertError(check(['--slug', 'Animately/imgproxy'], { reg: path.join(dir, 'landing.md') }), /cannot read register/)
 })
 
 test('default path: no file there lands with the one warning', () => {
@@ -268,6 +352,25 @@ test('no subcommand', () => assertError(run([])))
 test('an unknown subcommand', () => assertError(run(['frob', '/tmp'])))
 test('--slug that is not owner/name', () => assertError(check(['--slug', 'not-a-slug'])))
 test('--slug with three segments', () => assertError(check(['--slug', 'a/b/c'])))
+for (const slug of ['../..', 'Animately/..', 'Animately/.', '-Animately/imgproxy', '.Animately/imgproxy']) {
+  test(`--slug ${slug} is not a repo: exit 2`, () => assertError(check(['--slug', slug])))
+}
+test('an empty repo path is exit 2, never the current directory', () => {
+  // Run from inside a listed repo: were "" read as ".", this would print `listed`.
+  const cwdRepo = repo('git@github.com:Animately/imgproxy.git')
+  const e = { ...base, HOME: tmpHome, LANDING_REGISTER: REGISTER }
+  const r = spawnSync('python3', [SCRIPT, 'check', ''], { env: e, cwd: cwdRepo, encoding: 'utf8' })
+  assertError({ status: r.status, stdout: r.stdout, stderr: r.stderr }, /empty <repo-path>/)
+})
+
+// Help would exit 0 with usage on stdout; exit 0 is the permission to push, so help is an error.
+for (const args of [['-h'], ['--help'], ['check', '-h'], ['check', '--help'], ['check', '--slug', 'a/b', '-h']]) {
+  test(`${args.join(' ')} is exit 2 and never prints land`, () => {
+    const r = run(args)
+    assertError(r)
+    assert.doesNotMatch(r.stdout + r.stderr, /\bland\b/)
+  })
+}
 
 // ---- --slug: owner/name without a checkout (the daily lander's form).
 
