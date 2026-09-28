@@ -36,11 +36,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   disposes of the current thread with known intent.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"
   then dispatches to a route. A sibling, not a parent.
-- **Orient** — the project-altitude router: audits a whole project/area (not
-  one thread), recommends the best use of time, asks the steering mode, then
-  routes by the execution-fit test — wave-shaped clusters to the rollout lane
-  (`gather`/`schedule`), everything else to `open` or batch dispatch
-  artefacts.
+- **Orient** — the one shaping verb, at project altitude: audits a whole
+  project/area (not one thread), reshuffles it (the default pass on pickup; a
+  bare look-around is the exception), recommends the best use of time, asks
+  the steering mode, then routes by the execution-fit test — wave-shaped
+  clusters to the rollout lane (schedules them itself), everything else to
+  `open` or batch dispatch artefacts. Ends with the **execute offer**: run the
+  scheduled rollout in a fresh session (via handoff, the default — the
+  reshuffle has filled this one's context), here, or not yet. Pointed at a single plan, design note or brain
+  dump it runs a **scoped reshuffle** of that note alone. Absorbs the former
+  `split` and `gather` verbs (ADR 0027).
 - **Batch** — a parallel-safe cluster of open work (disjoint files/surfaces)
   matched to the narrowest covering launch profile; the session-lane unit
   orient dispatches. Never contains a wave-shaped cluster.
@@ -169,16 +174,41 @@ through time, from attention to merged PRs. Terms only — no implementation.
   waves order merges, and the engine never reads `phase:`. One phase = one
   rollout by convention. A phase is a plan, never a task (ADR 0005).
   _Avoid_: stage, iteration, wave.
-- **Gather** — the roadmap-forming pass: loose, unphased open tasks → phases
-  (cluster proposal → grilled meaning → mechanical writes). The inverse of
-  split (plan → tasks); both converge on `schedule` when the work is
-  wave-shaped. _Avoid_: triage, backlog grooming, auto-roadmap, sort.
+- **Reshuffle** — the usual reason a project is picked up after time away:
+  re-examine *all* its open work (stray bugs, brain dumps, loose tasks and
+  unstarted phases alike), rethink what the next steps are, and leave it
+  shaped for the lanes (cluster proposal → grilled meaning → mechanical
+  writes). Scoped to one note, it turns a single plan or design into tasks.
+  A bare look-around with no reshaping is the rarer case. Replaces the former
+  gather (loose tasks → phases, existing roadmap fixed) and split (plan →
+  tasks) passes. _Avoid_: gather, split, re-plan, re-triage, backlog grooming.
+- **Clear / unclear item** — a reshuffle's first sort of every open item.
+  Clear ones (the body already says what to do) go straight to the gate;
+  unclear ones (brain dumps, one-liners) are grilled, cluster by cluster,
+  highest value first. The grill may stop at any point: what is resolved is
+  written, the rest stays loose for the next reshuffle. _Avoid_: triage.
+- **Brain dump** — a loose task note holding raw, unspecced intent, often
+  several ideas at once. A reshuffle **unbundles** it: one task per idea, each
+  grilled into a real body. _Avoid_: capture (that is stash/defer's task).
+- **Reach tiers** — what a reshuffle may change, by a task's state:
+  **in flight** (in a live rollout, dispatched, or in progress) is frozen,
+  read for context only — its scope, phase and body never change, though
+  schedule may still re-derive its wave when a superseding rollout takes it
+  over, and new work may join its phase for a later rollout; **unstarted** phased work is movable (re-phase, merge, split, drop,
+  retire the phase); **loose** work is fully open, including re-homing to
+  another project. The tiers hold across projects: a reshuffle reads related
+  projects (parked or being absorbed ones especially) and may pull their
+  unstarted phases or tasks into its target, leaving a pointer behind.
+  _Avoid_: locked, pinned.
 
 ## Rollout structure
 
 - **Rollout** — a backlog of related tasks landed as one coordinated effort,
   described by one always-dated Obsidian note
-  (`<slug>-rollout-<YYYY-MM-DD>`). _Avoid_: batch, run, campaign.
+  (`<slug>-rollout-<YYYY-MM-DD>`). At most one is live per repo: new
+  wave-shaped work **supersedes** the live rollout (taking over its unmerged
+  tasks, after a soft pause if it is mid-run) rather than running beside or
+  queueing behind it. _Avoid_: batch, run, campaign.
 - **Wave** — a set of tasks within a rollout that are safe to run in parallel
   because no two of them edit the same file. Waves land in order; a later
   wave branches from the `main` earlier waves merged into. Since ADR 0009 the
@@ -211,8 +241,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   GitHub/git reality. Within a rollout, `status` flags it and `repair`
   reconciles it. Across a project it is finished work still marked open: a
   phase whose tasks have all landed, or a task whose PR has merged. `orient`
-  flags it and fixes the unambiguous items on any steer but Report-only
-  (ADR 0026). _Avoid_: desync, staleness, mismatch.
+  flags it and fixes the unambiguous items unless Lachy picks Look only
+  (ADR 0026, 0027). _Avoid_: desync, staleness, mismatch.
 - **Clean defer** — taking a task out of a rollout back to the open backlog
   (clearing `wave:`/`rollout:`/`owner:`), permitted only when nothing in the
   rollout depends on it. _Avoid_: drop, cancel, skip.
