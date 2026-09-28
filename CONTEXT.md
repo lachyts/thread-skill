@@ -35,7 +35,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Route** — a decisive member (`stash`, `defer`, `handoff`, `close`) that
   disposes of the current thread with known intent.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"
-  then dispatches to a route. A sibling, not a parent.
+  then dispatches to a route. A sibling, not a parent. Its *keep going* may
+  carry a **compact recommendation**: a ready `/compact <focus>` line built
+  from the thread's state, which only Lachy can type; `next` never runs it, and
+  a correction loop gets `/rewind` (summarise the failed span) or a fresh start
+  instead. Compact is a recommendation, never a route.
 - **Orient** — the one shaping verb, at project altitude: audits a whole
   project/area (not one thread), then reshuffles it (the default on pickup),
   steers it as it stands, or just looks. It schedules wave-shaped work itself,
@@ -64,8 +68,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   a paste-ready prompt; in Codex Desktop also a visible native task. Model-invocable
   on explicit fork intent (or router dispatch) only — never self-initiated because
   the context feels long; that recommendation belongs to `next`.
-- **Handoff doc** — the durable brief `thread:handoff` (or the session-safepoint
-  stop hook) writes to `<home>/docs/handoffs/<date>-<slug>.md` and commits —
+- **Handoff doc** — the durable brief `thread:handoff`, its only writer, writes
+  on explicit fork intent only (Lachy's ask, or his pick from a router's menu;
+  never self-initiated) to `<home>/docs/handoffs/<date>-<slug>.md` and commits —
   `<home>` the unit directory: the project dir under `~/Projects/`, the
   workspace dir under `~/repos/workspaces/`, else the git toplevel.
   Lifecycle `pending → consumed → deleted`: marked `status: consumed` at

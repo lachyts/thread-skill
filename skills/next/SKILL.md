@@ -25,13 +25,16 @@ The router for the undecided moment. A sibling of the decisive routes, not their
    - **`handoff`** — the work continues *right now* but this context is exhausted or the task deserves a fresh head. "New thread / new prompt" = this route.
    - **`close`** — the work is genuinely done for now; persist and commit.
 
+   **Compact, within keep going.** When the work continues now, in this session, and its in-conversation state matters, the keep-going recommendation may add compacting and print one ready line, `/compact <focus>`. Build `<focus>` from the thread's state: the active THREAD.md's scope and next step, else the conversation's goal, the next step and the files in play; one line, no shell quoting. `next` never runs `/compact` itself: it is a user-typed command, so only Lachy can type it, and `next` never dispatches, schedules or simulates it. A **correction loop** (the same fix corrected twice or more) gets `/rewind` (summarise the failed span) or a fresh start instead, never compact, because compacting carries the failed attempts forward in the summary. Work that continues now but needs a fresh head or has exhausted this context stays the `handoff` route. Compact is a recommendation inside keep going, not a route: the step-4 menu gains no compact option.
+
 4. **Offer the routes via `AskUserQuestion`** — recommended option first with "(Recommended)", the other viable routes after (drop any that plainly don't apply; keep ≤4). Option descriptions say what each route would *do to this specific thread* ("task on tomorrow's page", "committed handoff doc + prompt to paste into a fresh session"), not generic definitions.
 
-5. **Dispatch.** Run the chosen sibling's logic in full — task-writer capture for stash/defer, the committed `docs/handoffs/` doc + paste-ready prompt for handoff (plus the native task in Codex Desktop), the complete persist-and-commit ritual for close. "Keep going" means exactly that: state the next step and continue working, no ceremony.
+5. **Dispatch.** Run the chosen sibling's logic in full — task-writer capture for stash/defer, the committed `docs/handoffs/` doc + paste-ready prompt for handoff (plus the native task in Codex Desktop), the complete persist-and-commit ritual for close. "Keep going" means exactly that: state the next step and continue working, no ceremony; when compact was recommended, print the `/compact <focus>` line for Lachy and carry on, never run it.
 
 ## Don't
 
 - Don't recommend more than one move. The whole point is answering the question, not restating the options.
 - Don't pad the summary — headline + top open question, then the menu.
 - Don't re-implement any route inline. Dispatch means running the sibling skill's logic as written.
+- Don't run `/compact`, `/rewind` or `/clear` yourself, and don't offer compact as a route.
 - Don't invoke this router when the user was already decisive — "stash this" is `thread:stash`, not a `next` conversation.

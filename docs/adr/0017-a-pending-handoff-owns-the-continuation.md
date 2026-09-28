@@ -27,6 +27,11 @@ by pathspec (close step 7.1), in the repo that holds it
 rung of close § Identify the active thread resolved it — narrowing the Consequence "Nothing
 else in that repo is ever staged or committed by close"; an unchanged file makes no commit,
 and a half-applied operation or detached HEAD skips it with a `not versioned:` line.)*
+*(Amended 2026-09-28 by thread-skill-p9-4: the session-safepoint stop hook was deleted on
+2026-09-27 (thread-skill-p9-1, `~/repos/workspaces` `29ca886`); `thread:handoff` is now the
+only writer of a handoff doc, on explicit fork intent only. The hook references in § Context,
+§ Decision, § Rejected and § Consequences are history — no hook-forced handoff exists any
+more — and the body-section list is the skill's own.)*
 
 ## Context
 

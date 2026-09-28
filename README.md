@@ -146,7 +146,9 @@ final check that the run wrote nothing into the tree):
 - **Contracts** — `tests/contracts/*.test.mjs`: manifests agree, skill names and description budgets,
   `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files, no SKILL.md body holds a
   positional `$N` (Claude Code substitutes skill arguments into them; logic that needs one lives in a
-  script), and the next-action set-down write and orient's slot read (`next-action.test.mjs`).
+  script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), and
+  `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
+  (`handoff-one-writer.test.mjs`).
 - **Next-action script** — `tests/next-action.test.mjs`: `next-action.py`'s set-down, fill, read and
   captures against throwaway vaults — byte-level one-line edits, YAML-safe quoting, both tag forms, the
   shared dead-link rule, and refusals that write nothing.
