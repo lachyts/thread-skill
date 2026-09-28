@@ -96,12 +96,15 @@ dry run's --json to `--apply --only <file>` (`-` reads stdin). It writes only th
 recomputed U and the reviewed `unambiguous` list, matched on (kind, slug) alone (never action or reason:
 a phase's action carries today's date). A recomputed U item the review did not list is NEW SINCE REVIEW:
 listed, never written (the next dry run lists it again). A reviewed item that is no longer U is REVIEWED,
-NOT APPLIED with `no longer unambiguous`; so is a reviewed phase whose depends_on names a task outside the
-bound set (`depends on <task>, not in the reviewed list`), withheld before apply. Neither exits 1. The
-reviewed file must be a dry run of the same project: a JSON object with `project` equal to --project,
-`applied: false` and an `unambiguous` list of objects each with a kind in KINDS and a non-empty string
-slug; anything else is a usage error (exit 2) before any write. A plain --apply is unchanged; execute's
-phase-close ceremony uses it, with no review in between.
+NOT APPLIED, with one of two reasons. `now ambiguous: <its ambiguous reason>` when it is on the recomputed
+AMBIGUOUS list, which needs a human; `no longer drift (closed, moved or out of scope since review)`
+otherwise, which is benign: the ceremony, a mark-done or an earlier bound apply closed or moved it, or
+--kinds/--phases no longer reach it. A reviewed phase whose depends_on names a task outside the bound set
+is withheld before apply (`depends on <task>, not in the reviewed list`). None of these exits 1. The
+reviewed file must be a dry run of the same project and vault: a JSON object with `project` equal to
+--project, a `vault` that resolves to --vault, `applied: false` and an `unambiguous` list of objects each
+with a kind in KINDS and a non-empty string slug; anything else is a usage error (exit 2) before any
+write. A plain --apply is unchanged; execute's phase-close ceremony uses it, with no review in between.
 
 gh. --no-gh (gh `disabled`), or a --gh-bin that does not resolve (gh `missing`), skips every (a) lookup;
 `skipped` then carries `PR evidence (gh unavailable) for <slugs>`. A per-URL gh error is skipped too.
@@ -116,9 +119,9 @@ JSON adds new_since_review: [{kind, slug, path, action, reason, depends_on}] and
 [{kind, slug, reason}]. `unambiguous` stays the full recomputed list; `written` holds only bound writes.
 
 Exit codes. 0: it ran (drift or none). 1: an --apply write or move failed, or a dependent phase was
-skipped. 2: usage error (missing --project, bad --kinds/--phases/--today, no Work/ under --vault; --only without
---apply, or an --only file that is unreadable, not JSON or not a dry run of this project) or
-reconcile-wave.py missing or unloadable.
+skipped. 2: usage error (missing --project, bad --kinds/--phases/--today, no Work/ under --vault; --only
+without --apply, or an --only file that is unreadable, not JSON or not a dry run of this project and
+vault) or reconcile-wave.py missing or unloadable.
 """
 import argparse
 import importlib.util
@@ -607,7 +610,7 @@ def apply(det: Detector, Note, items=None):
 
 # ---- bound apply ---------------------------------------------------------------------------------------
 
-def load_reviewed(src: str, project: str) -> set:
+def load_reviewed(src: str, project: str, vault: Path) -> set:
     """The (kind, slug) set a reviewed dry run's --json listed as unambiguous. Exits 2 on a bad file."""
     where = "stdin" if src == "-" else src
     try:
@@ -622,6 +625,10 @@ def load_reviewed(src: str, project: str) -> set:
         die(f"--only: {where} is not a reconcile-project --json object")
     if d.get("project") != project:
         die(f"--only: {where} is a dry run of project {d.get('project')!r}, not {project!r}")
+    rv = d.get("vault")
+    if not (isinstance(rv, str) and rv.strip()
+            and Path(os.path.expanduser(rv)).resolve() == vault.resolve()):
+        die(f"--only: {where} is a dry run of vault {rv!r}, not {str(vault)!r}")
     if d.get("applied") is not False:
         die(f"--only: {where} is not a dry run (applied: {d.get('applied')!r}); pass the dry run's --json")
     u = d.get("unambiguous")
@@ -636,9 +643,14 @@ def load_reviewed(src: str, project: str) -> set:
     return reviewed
 
 
-def bind(U, reviewed: set):
-    """(bound, new_since_review, reviewed_not_applied): the recomputed U split against the reviewed set."""
+NO_LONGER_DRIFT = "no longer drift (closed, moved or out of scope since review)"
+
+
+def bind(U, Amb, reviewed: set):
+    """(bound, new_since_review, reviewed_not_applied): the recomputed U split against the reviewed set.
+    A reviewed item gone from U is `now ambiguous: <reason>` when it is in Amb, else NO_LONGER_DRIFT."""
     key = lambda i: (i["kind"], i["slug"])  # noqa: E731
+    amb = {key(i): i["reason"] for i in Amb}
     new = [i for i in U if key(i) not in reviewed]
     bound = [i for i in U if key(i) in reviewed]
     bound_tasks = {i["slug"] for i in bound if i["kind"] == "task"}
@@ -651,7 +663,8 @@ def bind(U, reviewed: set):
         else:
             kept.append(i)
     current = {key(i) for i in U}
-    not_applied += [{"kind": k, "slug": s, "reason": "no longer unambiguous"}
+    not_applied += [{"kind": k, "slug": s,
+                     "reason": f"now ambiguous: {amb[(k, s)]}" if (k, s) in amb else NO_LONGER_DRIFT}
                     for k, s in reviewed if (k, s) not in current]
     return kept, new, not_applied
 
@@ -677,11 +690,8 @@ def parse_args(argv):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    reviewed = None
-    if args.only is not None:
-        if not args.apply:
-            die("--only binds an apply to a reviewed dry run; it needs --apply")
-        reviewed = load_reviewed(args.only, args.project)
+    if args.only is not None and not args.apply:
+        die("--only binds an apply to a reviewed dry run; it needs --apply")
     Note = load_note_class()
     kinds = [k.strip() for k in args.kinds.split(",") if k.strip()]
     if not kinds or any(k not in KINDS for k in kinds):
@@ -704,6 +714,7 @@ def main(argv=None) -> int:
     vault = Path(os.path.expanduser(args.vault))
     if not (vault / "Work").is_dir():
         die(f"no Work/ under --vault {vault}")
+    reviewed = None if args.only is None else load_reviewed(args.only, args.project, vault)
     if args.no_gh:
         gh_mode, gh_path = "disabled", None
     else:
@@ -714,7 +725,7 @@ def main(argv=None) -> int:
     det.run()
     items, new, not_applied = det.U, [], []
     if reviewed is not None:
-        items, new, not_applied = bind(det.U, reviewed)
+        items, new, not_applied = bind(det.U, det.Amb, reviewed)
     written, errors = apply(det, Note, items) if args.apply else ([], [])
     order = lambda i: (KINDS.index(i["kind"]), i["slug"])  # noqa: E731
     u_keys = ("kind", "slug", "path", "action", "reason", "depends_on")
