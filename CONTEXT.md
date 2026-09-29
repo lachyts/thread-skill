@@ -93,8 +93,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   this session explicitly worked `done` without asking when the work is on
   the default branch (or is not code) and its Verify line ran green; a task
   short of that becomes a mark-done question (ADR 0026). Close also lands
-  what it can: it pushes and merges the close-out PR, and reviews and merges
-  the session's own branch when the review is clean.
+  what it can: it pushes the close-out and queues its merge, and reviews the
+  session's own branch before queuing its merge.
 - **Landing** — taking a session's committed work all the way to a merged
   default branch and a clean checkout: push, PR, review, fixes, CI retries,
   merge, cleanup. Agents own it end to end and take as long as it needs;
@@ -107,8 +107,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   push, review and merge it; a branch close can't prove is its own is only
   reported. _Avoid_: current branch (it may be another session's), my branch.
 - **Close-out PR** — the pull request carrying close's own bookkeeping
-  (THREAD.md, handoff-doc refreshes and deletions). It merges on green with
-  no review. _Avoid_: docs PR, thread PR.
+  (THREAD.md, handoff-doc refreshes and deletions). Its merge is queued at
+  close and happens on green, with no review. _Avoid_: docs PR, thread PR.
 - **Pickup** — resuming a stashed/deferred thread from its task, or a handed-off
   thread from its handoff doc. Pickup auto-completes the capture — the task is
   marked done, the handoff doc consumed: the capture's job ends the moment the

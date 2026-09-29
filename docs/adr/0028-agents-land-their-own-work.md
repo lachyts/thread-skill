@@ -2,6 +2,7 @@
 
 Date: 2026-09-29
 Status: proposed (amends ADR 0011's close guardrail "never touch a branch"; absorbs task p5-4)
+*(Amended 2026-09-29, after p11-3's plan failed review twice: landing queues the merge and finishes; nothing waits for it. §§ 5–7 below are the amended text.)*
 
 ## Context
 
@@ -30,13 +31,19 @@ cleanup. Lachy is asked only for a decision no agent can make.
 4. **The repo's rules decide the route.** Protected default branch → a close-out branch, PR and
    GitHub auto-merge. Unprotected GitHub repo → push straight to the default branch. No GitHub
    origin → commit locally and report.
-5. **Clean checkout.** After pushing, close switches back to the default branch and deletes its local
-   close-out branch; the repo's delete-branch-on-merge removes the remote one.
-6. **Handoff lands too,** by the same route, but waits for the merge and fast-forwards before it ends,
-   so the doc is on disk for the consumer. `/thread:open save` stays commit-only.
-7. **Durability.** Landing runs in-session and the "safe to end" banner waits for it. A nightly
-   headless lander (launchd), plus the next open or close in that repo, resumes any landing left
-   unfinished.
+5. **Queue and finish; the checkout never goes back.** Close commits the close-out on the default
+   branch as before, pushes that commit to a `close/<date>-<slug>` branch (protected repos), opens
+   the PR, labels it `landing` and queues GitHub auto-merge with a **merge commit**. It does not
+   wait. The local default keeps the commit, so the tree is current; once GitHub merges, the next
+   pull or rollout fast-forwards over it. Waiting inside the session was dropped: CI plus a strict
+   update-branch can outlast one tool call, and a detached waiter needed lock and recovery
+   machinery that did not converge in review.
+6. **Handoff lands the same way,** with no wait: the doc is on disk the moment it is committed.
+   `/thread:open save` stays commit-only.
+7. **Durability.** A queued merge that fails (red CI, a PR left behind master, auto-merge refused)
+   is retried by the daily lander (p11-7, run once a day whenever the laptop is awake) and by the
+   next close in that repo. The "safe to end" banner means pushed and queued, not merged. The own
+   branch's review (§ 2) still runs inline; only the CI wait moved out of the session.
 8. **The landing register** is one estate-wide deny-list of repos agents never push to on their own.
    Any repo Lachy can push to lands unless it is listed. It gates close, handoff, the nightly lander
    and rollouts alike (schedule's dispatch gate refuses a listed repo). Initial entries: every
