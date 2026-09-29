@@ -162,7 +162,10 @@ When the user opts to defer a task (or declines further retries on a re-blocked 
    python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py defer --tasks <slug> --rollout <rollout-note>
    ```
    (`defer` clears `wave:`/`rollout:`/`owner:` and sets `status: open`, so a future `/thread:schedule`
-   re-plans it.) For any file-overlap successor, give a one-line confirm: *"[[B]] edits the same file and
+   re-plans it.) The `gh pr close --delete-branch` is **not gated on the landing register**, on
+   purpose: it only removes the rollout's own branch and PR from a task the user chose to defer, and
+   lands nothing on the default branch, so it is cleanup like a pause (`execution-fit.md` § Dispatch
+   blockers, *Landing register*). For any file-overlap successor, give a one-line confirm: *"[[B]] edits the same file and
    will now branch without this change — OK?"*
 3. **Has true dependents** → **STOP**: surface the chain and `AskUserQuestion`: *"[[B]], [[C]] depend on
    [[A]] — defer the whole chain, or keep & fix [[A]]?"* If *defer the chain* → defer A + its closure
