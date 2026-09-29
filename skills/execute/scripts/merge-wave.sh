@@ -95,7 +95,7 @@ classify_failed_steps() {  # stdin: failed step names; stdout: "infra" | "genuin
 # --self-test-base can exercise it against a temp repo.
 REPO_STATE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../../close/scripts/repo-state.sh"
 refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
-  local repo="$1" base="$2" cur ff=0 line='' why n
+  local repo="$1" base="$2" cur ff=0 line='' raw='' why='' n before oh
   if [ -z "$base" ]; then
     echo "  WARN: could not resolve the wave's base branch — skipped local fast-forward (non-fatal)."
     return 0
@@ -107,16 +107,23 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
     echo "  NOTE: checkout is on '$cur', not $base — left as it is; read-only agents read it un-advanced."
     return 0
   fi
+  before=$(git -C "$repo" rev-parse -q --verify HEAD 2>/dev/null)
   if git -C "$repo" merge --ff-only "origin/$base" >/dev/null 2>&1; then
-    ff=1; echo "  local $base fast-forwarded to origin/$base."
+    ff=1
+    # A no-op fast-forward (the fetch failed, or origin/$base is behind) moved nothing: never claim it did.
+    if [ "$(git -C "$repo" rev-parse -q --verify HEAD 2>/dev/null)" = "$before" ]; then
+      echo "  local $base already at or ahead of origin/$base."
+    else
+      echo "  local $base fast-forwarded to origin/$base."
+    fi
   fi
   # repo-state.sh's line for commits on $base that origin/$base lacks; anything else is no usable line.
   if [ -f "$REPO_STATE" ]; then
-    line=$(bash "$REPO_STATE" "$repo" 2>/dev/null) || { line=''; why='the repo-state check failed'; }
+    raw=$(bash "$REPO_STATE" "$repo" 2>/dev/null) || { raw=''; why='the repo-state check failed'; }
   else
     why='repo-state.sh not found'
   fi
-  case "$line" in "on $base, "*" not on origin/$base"*) ;; *) line='' ;; esac
+  case "$raw" in "on $base, "*" not on origin/$base"*) line=$raw ;; esac
   if [ "$ff" = 1 ]; then
     # A no-op fast-forward (the fetch failed, or origin/$base is behind): the checkout can still be ahead.
     [ -n "$line" ] && echo "  NOTE: $line."
@@ -125,19 +132,31 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
   if [ -n "$line" ]; then
     echo "  WARN: local $base did not fast-forward: $line."
     case "$line" in
-      *"queued in"*", "*" stranded") echo "        The queued ones fast-forward once GitHub merges that PR; no close-out branch carries the stranded ones." ;;
-      *"queued in"*) echo "        It fast-forwards once GitHub merges that PR." ;;
+      *"queued in"*", "*" stranded") echo "        No close-out branch carries the stranded ones, so the checkout stays blocked until they are landed or dropped, even once GitHub merges that PR." ;;
+      *"queued in"*) echo "        It fast-forwards once GitHub merges the landing PR (every one, if several are open)." ;;
       *) echo "        No close-out branch carries them." ;;
     esac
     echo "        origin/$base holds the merges and the next wave's worktrees branch from it; read-only agents read this checkout un-advanced."
     return 0
   fi
-  # No usable line (origin/HEAD unset or stale, the script missing or failing): count them here.
+  # No usable line (origin/HEAD unset or stale, the script missing or failing): count them here. $base comes
+  # from GitHub, repo-state's default from the local origin/HEAD: a stale one (a master → main rename)
+  # names another branch, so "unset" is said only when it is unset.
+  if [ -z "$why" ]; then
+    oh=$(git -C "$repo" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null); oh=${oh#refs/remotes/origin/}
+    if [ -n "$oh" ] && [ "$oh" != "$base" ]; then
+      why="origin/HEAD points at origin/$oh, not $base: git remote set-head origin --auto"
+    elif [ -z "$oh" ] && [ "$raw" = "on $base, default branch unresolved — unmerged check skipped" ]; then
+      why='origin/HEAD unset: git remote set-head origin --auto'
+    else
+      why="repo-state gave no line for $base"
+    fi
+  fi
   n=$(git -C "$repo" rev-list --count "origin/$base..HEAD" 2>/dev/null)
   case "$n" in
     ''|*[!0-9]*) echo "  WARN: local $base did not fast-forward (checkout dirty or diverged)." ;;
     0) echo "  WARN: local $base did not fast-forward (no local-only commits: local changes in the checkout block it)." ;;
-    *) echo "  WARN: local $base did not fast-forward: $n commit(s) not on origin/$base — not named (${why:-origin/HEAD unset: git remote set-head origin --auto})." ;;
+    *) echo "  WARN: local $base did not fast-forward: $n commit(s) not on origin/$base — not named ($why)." ;;
   esac
   echo "        origin/$base holds the merges and the next wave's worktrees branch from it; read-only agents read this checkout un-advanced."
   return 0
@@ -146,8 +165,9 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
 # Self-test hook: `merge-wave.sh --self-test-base` drives refresh_local_base against a throwaway repo
 # whose origin default branch is `master` (no `main` anywhere): checkout on master ⇒ fast-forwarded;
 # checkout on another branch ⇒ untouched; unresolved base ⇒ skipped; a local-only commit ⇒ named stranded,
-# then queued once a close/… branch carries it; a dirty overlap ⇒ says so; origin/HEAD unset ⇒ counted
-# with the set-head hint. Needs git only — no GitHub.
+# then queued once a close/… branch carries it, then split once a stranded one sits on top; a dirty
+# overlap ⇒ says so; origin/HEAD unset or stale ⇒ counted, with a hint that tells the two apart; a no-op
+# fast-forward ⇒ "already at or ahead", never "fast-forwarded". Needs git only — no GitHub.
 if [ "${1:-}" = "--self-test-base" ]; then
   st_fail=0
   sb_ok() { if [ "$1" = "$2" ]; then echo "ok   - $3"; else echo "FAIL - $3: expected $2 got $1"; st_fail=1; fi; }
@@ -186,7 +206,14 @@ if [ "${1:-}" = "--self-test-base" ]; then
   out=$(refresh_local_base "$tmp/root" master); rc=$?
   sb_ok "$rc" 0 "queued close-out: returns 0"
   sb_has "$out" "did not fast-forward: on master, 1 commit(s) not on origin/master — queued in $qb" "local-only commit pushed to close/…: named queued in it"
-  sb_has "$out" "fast-forwards once GitHub merges that PR" "queued: says when it fast-forwards"
+  sb_has "$out" "fast-forwards once GitHub merges the landing PR" "queued: says when it fast-forwards"
+  # A second local-only commit on top of the queued one: split, and the stranded one keeps it blocked.
+  g -C "$tmp/root" commit -q --allow-empty -m local-only-b
+  out=$(refresh_local_base "$tmp/root" master); rc=$?
+  sb_ok "$rc" 0 "queued + stranded: returns 0"
+  sb_has "$out" "did not fast-forward: on master, 2 commit(s) not on origin/master — 1 queued in $qb, 1 stranded" "queued + stranded: named split"
+  sb_has "$out" "stays blocked until they are landed or dropped, even once GitHub merges that PR" "queued + stranded: never promises a fast-forward"
+  case "$out" in *"fast-forwards once"*) sb_ok "[$out]" "no fast-forward promise" "queued + stranded: no queued-only wording";; *) sb_ok y y "queued + stranded: no queued-only wording";; esac
   # A dirty file that overlaps origin's change, no local commits: the local changes are what block it.
   g -C "$tmp/root" reset -q --hard origin/master
   echo a > "$tmp/other/f" && g -C "$tmp/other" add f && g -C "$tmp/other" commit -q -m f1 && g -C "$tmp/other" push -q origin master
@@ -203,7 +230,23 @@ if [ "${1:-}" = "--self-test-base" ]; then
   g -C "$tmp/other" commit -q --allow-empty -m wave4 && g -C "$tmp/other" push -q origin master
   out=$(refresh_local_base "$tmp/root" master); rc=$?
   sb_ok "$rc" 0 "origin/HEAD unset: returns 0"
-  sb_has "$out" "1 commit(s) not on origin/master — not named (origin/HEAD unset" "origin/HEAD unset: counted, with the set-head hint"
+  sb_has "$out" "1 commit(s) not on origin/master — not named (origin/HEAD unset: git remote set-head origin --auto)" "origin/HEAD unset: counted, with the set-head hint"
+  # origin/HEAD stale (set, but at another branch — a default rename): never called unset.
+  g -C "$tmp/root" update-ref refs/remotes/origin/trunk refs/remotes/origin/master
+  g -C "$tmp/root" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+  out=$(refresh_local_base "$tmp/root" master); rc=$?
+  sb_ok "$rc" 0 "origin/HEAD stale: returns 0"
+  sb_has "$out" "not named (origin/HEAD points at origin/trunk, not master: git remote set-head origin --auto)" "origin/HEAD stale: names where it points"
+  case "$out" in *"unset"*) sb_ok "[$out]" "no 'unset'" "origin/HEAD stale: never says unset";; *) sb_ok y y "origin/HEAD stale: never says unset";; esac
+  # A no-op fast-forward (origin/master behind the checkout): never claims it fast-forwarded.
+  g -C "$tmp/root" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master
+  g -C "$tmp/root" reset -q --hard origin/master
+  g -C "$tmp/root" commit -q --allow-empty -m local-only-3
+  out=$(refresh_local_base "$tmp/root" master); rc=$?
+  sb_ok "$rc" 0 "no-op fast-forward: returns 0"
+  sb_has "$out" "local master already at or ahead of origin/master." "no-op fast-forward: says already at or ahead"
+  case "$out" in *"fast-forwarded"*) sb_ok "[$out]" "no 'fast-forwarded'" "no-op fast-forward: never says fast-forwarded";; *) sb_ok y y "no-op fast-forward: never says fast-forwarded";; esac
+  sb_has "$out" "NOTE: on master, 1 commit(s) not on origin/master — stranded." "no-op fast-forward: names the local-only commit"
   echo; [ "$st_fail" -eq 0 ] && echo "base: ALL PASS" || echo "base: SOME FAILED"
   exit "$st_fail"
 fi

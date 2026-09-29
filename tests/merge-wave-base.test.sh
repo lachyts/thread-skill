@@ -94,7 +94,17 @@ gc update-ref refs/remotes/origin/master HEAD~1
 pr 73 OPEN master
 out=$(run 73); rc=$?
 ok "$rc" 0 "7c. checkout ahead of a stale origin/master: exits 0"
+has "$out" "local master already at or ahead of origin/master." "7c. a no-op fast-forward says already at or ahead"
+case "$out" in *"fast-forwarded"*) ok "[$out]" "no 'fast-forwarded'" "7c. a no-op fast-forward never says fast-forwarded";; *) ok y y "7c. a no-op fast-forward never says fast-forwarded";; esac
 has "$out" "NOTE: on master, 1 commit(s) not on origin/master — queued in $q." "7c. a no-op fast-forward still names the local-only commit"
+# 7d. a stranded commit on top of the queued one: split, and the checkout stays blocked.
+gc update-ref refs/remotes/origin/master "$(gc commit-tree -p HEAD~1 -m sibling2 "$tree")"
+gc commit -q --allow-empty -m local-only-2
+pr 74 OPEN master
+out=$(run 74); rc=$?
+ok "$rc" 0 "7d. queued + stranded: exits 0"
+has "$out" "did not fast-forward: on master, 2 commit(s) not on origin/master — 1 queued in $q, 1 stranded" "7d. names the split"
+has "$out" "stays blocked until they are landed or dropped" "7d. says the stranded ones keep it blocked"
 
 echo; [ "$fail" -eq 0 ] && echo "merge-wave base: ALL PASS" || echo "merge-wave base: SOME FAILED"
 exit "$fail"
