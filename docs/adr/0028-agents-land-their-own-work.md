@@ -64,3 +64,7 @@ cleanup. Lachy is asked only for a decision no agent can make.
   is the one inline review, because the merge waits on its result.
 - GitHub auto-merge and delete-branch-on-merge are switched on for `lachyts/thread-skill`
   (2026-09-29); other repos need the same settings, or close waits on CI itself.
+- Own-branch landing (p11-4) points `<B>`'s upstream at `origin/<default>` while close's review loop
+  runs, so `/fresh-review`'s `@{upstream}...HEAD` leg covers the whole branch; land.sh restores
+  `origin/<B>` when it queues or holds (and on every other result but a preflight stop). A session that
+  ends mid-loop leaves that residue; `git branch --set-upstream-to origin/<B> <B>` restores it.

@@ -2,7 +2,8 @@
 // paths (7.1's THREAD.md, 7.2's refreshed and deleted handoff docs) to one land.sh call per repo, at the end
 // of sub-step 7.2, through the `# thread:land` snippet (tests/land.test.sh runs it). The guardrail is the
 // own-work rule, step 8 prints a landing row per call and takes every close-out SHA from land.sh's stderr,
-// and step 9 picks one of three banners by the landing rows. Reads files only; a missing file or section
+// and step 9 picks one of four banners by the landing rows (the fourth is the own-branch hold's,
+// tests/contracts/close-lands-own-branch.test.mjs). Reads files only; a missing file or section
 // is a named assertion failure, never a crash at load.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -19,8 +20,9 @@ const EDGES = () => section(text(), /^## Edge cases/)
 const GUARD = () => section(text(), /^## Guardrails/)
 
 const BANNER_A = '**Thread closed. Safe to end this session — nothing valuable left in conversation state.**'
-const BANNER_B = '**Thread closed. Safe to end this session — close-out pushed where the landing rows say; any close-out PR is queued for merge, not merged yet.**'
-const BANNER_C = '**Thread closed. Safe to end this session, but the close-out is NOT queued to land in <repo>[, <repo>…]: see its landing row.**'
+const BANNER_B = '**Thread closed. Safe to end this session — pushed where the landing rows say; any own-branch review ran clean here; queued PRs are not merged yet, and nothing here waits for CI.**'
+const BANNER_C = '**Thread closed. Safe to end this session, but work is NOT queued to land in <repo>[, <repo>…]: see its landing row.**'
+const BANNER_D = '**Thread closed. Safe to end this session, but the review loop stopped on <branch>[, <branch>…]: its PR stays open with the diagnosis, see its landing row.**'
 
 test('description and Auto-execute name the landing; Auto-execute keeps step 7.1', () => {
   assertHas(lineOf(text(), 'description:'), 'the description', ['lands its own close-out commits', '`landing` PR', 'auto-merge', 'never waiting', 'ADR 0028'])
@@ -118,10 +120,10 @@ test('step 8: landing rows, the SHA source, and the stuck and dropped mappings',
   ])
 })
 
-test('step 9: three banners byte for byte, C beats B beats A', () => {
+test('step 9: four banners byte for byte, C beats D, D beats B, and B beats A', () => {
   const s = STEP9()
-  assertHas(s, 'step 9', [BANNER_A, BANNER_B, BANNER_C, 'C beats B, and B beats A', 'Thread NOT closed'])
-  assert.ok(s.indexOf(BANNER_A) < s.indexOf(BANNER_B) && s.indexOf(BANNER_B) < s.indexOf(BANNER_C), 'banners out of order')
+  assertHas(s, 'step 9', [BANNER_A, BANNER_B, BANNER_C, BANNER_D, 'C beats D, D beats B, and B beats A', 'Thread NOT closed'])
+  assert.ok(s.indexOf(BANNER_A) < s.indexOf(BANNER_B) && s.indexOf(BANNER_B) < s.indexOf(BANNER_C) && s.indexOf(BANNER_C) < s.indexOf(BANNER_D), 'banners out of order')
   assertHas(s, 'step 9 selection', ['No landing row is landed, queued or stuck', 'Some landing row is `landed` or `queued`', 'Any landing row is `stuck:`'])
 })
 
