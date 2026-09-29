@@ -26,6 +26,11 @@ const FENCE = () => fencedBlocks(SEC() ?? '').find((b) => b.some((l) => l.starts
 const CALL = 'bash "$ld" --own-branch --branch "$br" ${act:+"$act"} ${rev:+--reviewed} ${rev:+"$rev"} ${note:+-F} ${note:+"$note"} -- "$top"'
 const QUEUE_READS = 'land.sh reads failures from the clean round\'s `head:` (`--reviewed`), whose CI ran while the round reviewed it, and from the pushed HEAD; HEAD\'s own result for a check supersedes; the merge decision reads HEAD alone, and no checks on HEAD in a repo with CI is pending, never green'
 const ADR_STOP = 'the review ledger\'s regression stop, the same check failing the same way twice after effort has risen to `max`, or a finding that needs Lachy\'s decision'
+// The two routes out of a red Verify loop (loop step 7): a same-key red at max reaches the stop, and a red
+// whose cause is not in <B> holds for Lachy instead of forcing a fix commit.
+const VERIFY_MAX = 'Once a key has raised effort to `max` and § The stop rule\'s `max` precondition has passed, each later red run with that key counts as a failure at `max`, so two more same-key red runs are the stop (`verify <command> failed twice at max`).'
+const VERIFY_HOLD = 'A red run whose failure also happens on `origin/<default>`, or whose output shows no cause in `<B>` (a pre-existing or environment failure), gets no fix commit: it is a decision for Lachy, `--hold` with the diagnosis and a `Needs your call:` row.'
+const STOP_VERIFY_MAX = 'A red Verify run re-runs inside its round (loop step 7), so it cannot wait for a `max` round: once its key has raised effort to `max` and the `max` precondition has passed, each later red Verify run with that key counts at `max`, and two of them are the stop.'
 const DIRTY_FIX = 'commit them, ignore them (.gitignore, or .git/info/exclude for local scratch), or remove them'
 const BANNERS = {
   A: '**Thread closed. Safe to end this session — nothing valuable left in conversation state.**',
@@ -156,8 +161,9 @@ test('the loop re-runs Verify after fixes, before the next dispatch; ci failed g
   assertHas(c, 'loop step 7', [
     "7. **Verify.** After the round's fix commits and before the next dispatch, re-run the task's `**Verify:**` line",
     "the repo's own test command",
-    'Every commit outside `docs/reviews/` since the last green run needs it, a `ci failed` fix included',
-    'A red run is handled like `ci failed`: count its key (§ The stop rule), fix the cause in a new commit, and run this step again.',
+    'Every commit outside `docs/reviews/` since the last green run needs it, a `ci failed` fix included, and so do the session\'s own commits before the first `--queue` (**Queue**)',
+    'A red run is handled like `ci failed`: count its key (§ The stop rule), fix the cause in a new commit, and run this step again, until it is green or § The stop rule stops the loop.',
+    VERIFY_MAX, VERIFY_HOLD,
     'Only a green run goes on to the ledger.',
     'in a repo with no CI, `--queue` merges on no checks',
     '8. **Ledger.**', 'runs before every re-dispatch, after step 7',
@@ -166,6 +172,18 @@ test('the loop re-runs Verify after fixes, before the next dispatch; ci failed g
   const fix = pos(sec, /^6\. \*\*Fix\.\*\*/), ver = pos(sec, /^7\. \*\*Verify\.\*\*/), led = pos(sec, /^8\. \*\*Ledger\.\*\*/)
   assert.ok(fix >= 0 && fix < ver && ver < led, 'the loop is not Fix → Verify → Ledger')
   assert.ok(!c.includes('Then the next round, from step 1'), 'ci failed skips the Verify and Ledger steps')
+  // A red Verify re-runs inside its round, so "run this step again" must always carry its route to the stop.
+  const step7 = collapse(lineOf(sec, /^7\. \*\*Verify\.\*\*/) ?? '')
+  const again = step7.split('run this step again').length - 1
+  const routed = step7.split('run this step again, until it is green or § The stop rule stops the loop').length - 1
+  assert.ok(again >= 1 && again === routed, 'step 7 says "run this step again" with no route to the stop')
+  // The first --queue needs a green Verify run over the session's own commits, even after a clean first round.
+  assertHas(c, 'the queue step', [
+    'When a commit outside `docs/reviews/` has had no green Verify run yet (a clean first round leaves the session\'s own commits unrun), run loop step 7 first',
+    'its fix commits then through step 8 to the next round, never to `--queue`',
+  ])
+  const qv = pos(sec, /^\*\*Queue\.\*\*/)
+  assert.ok(qv >= 0 && qv === pos(sec, /run loop step 7 first/), 'the queue-time Verify is not in the Queue paragraph')
 })
 
 test('#### The stop rule: the three ADR conditions, keys, infra, max, and the hold', () => {
@@ -176,8 +194,11 @@ test('#### The stop rule: the three ADR conditions, keys, infra, max, and the ho
     'The key is the `ci failed:` line without its URL: check name, conclusion and title.',
     'Only `failure` conclusions reach the key: `cancelled`, `timed_out`, `startup_failure`, `action_required`, `stale` and a status `error` are infrastructure, which never count and never raise effort.',
     'The second failure with one key raises effort to `max`, and effort never lowers.',
-    'The stop is two failures with one key, both counted on rounds that really ran at `max`',
-    'failures from rounds below `max` never count towards it',
+    'The stop is two failures with one key, both counted at `max`',
+    'A `ci failed` counts at `max` only on a round that really ran at `max`, and failures from rounds below `max` never count towards it.',
+    STOP_VERIFY_MAX,
+    'Before a `max` dispatch, and when a red Verify run raises effort to `max`, run `printenv CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`.',
+    '**A decision for Lachy.** A finding that needs a product or design call, an ADR change or work outside the task; a red Verify run whose failure also happens on `origin/<default>` or shows no cause in `<B>`;',
     'A `ci failed` belongs to the round whose clean `head:` it read, and a red Verify run to the round whose fixes it ran.',
     'A check with no title prints `(failure)`, so its key is the name and conclusion alone.',
     'A red Verify run (loop step 7) counts the same way, keyed `verify <command>: <first failing test or error line>`.',
