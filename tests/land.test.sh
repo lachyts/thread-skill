@@ -811,41 +811,47 @@ fill41() {
       -e "s|doc='<abs doc path>'|doc='$W/docs/handoffs/2026-01-01-x.md'|" -e "s|<message>|$1|" "$tmp/hsnip.sh" > "$tmp/run.sh"
 }
 mkdoc() { D="$W/docs/handoffs/2026-01-01-x.md"; mkdir -p "$W/docs/handoffs"; echo "pending" > "$D"; }
-nomsg() { ok "$(ls -A "$TMPDIR" | grep -c '^land-msg\.')" 0 "$1: no land-msg.* file left"; }
 isuntracked() { git -C "$W" ls-files --error-unmatch docs/handoffs/2026-01-01-x.md >/dev/null 2>&1 && echo tracked || echo untracked; }
 for sh in "$BASH32" "${shells[@]}"; do
   L="case 41 [$sh]"
   # Protected: committed on master, pushed to a close/ branch, merge queued, never waited on.
   ghreset; mkrepo "c41p${#sh}"; mkdoc; fill41 "📝 docs(handoff): x"
-  snip "$sh"; res "$L protected" 0 "queued https://github.com/o/c41p${#sh}/pull/1"; nomsg "$L protected"
+  snip "$sh"; res "$L protected" 0 "queued https://github.com/o/c41p${#sh}/pull/1"
   ok "$(git -C "$W" symbolic-ref HEAD)" refs/heads/master "$L: the checkout stays on master"
   ok "$([ -f "$D" ] && echo y)" y "$L: the doc is still on disk"
   ok "$(git -C "$W" log -1 --format=%s)" "📝 docs(handoff): x" "$L: HEAD is the doc's commit"
   ok "$(git -C "$W" show --name-only --format= HEAD | tr '\n' ' ')" "docs/handoffs/2026-01-01-x.md " "$L: the commit holds the doc only"
   ok "$(cnt "$(ghlog)" "pr merge 1 ")" 1 "$L: one pr merge"
   has "$(ghlog | grep -F 'pr merge 1 ')" "--auto" "$L: the merge is queued with --auto"
+  has "$(ghlog | grep -F '/pulls ')" "title=📝 docs(handoff): x -f head=close/" "$L: the PR is titled with the doc's commit subject"
   hasnt "$(ghlog)" "pr checks" "$L: no pr checks"; hasnt "$(ghlog)" "--watch" "$L: no --watch"
   # Unprotected: pushed.
   ghreset; mkrepo "c41u${#sh}"; mkdoc; fill41 "📝 docs(handoff): x"
-  snip "$sh" GH_PROT=false; res "$L unprotected" 0 landed; nomsg "$L unprotected"
+  snip "$sh" GH_PROT=false; res "$L unprotected" 0 landed
   ok "$(srvref "c41u${#sh}" master)" "$(git -C "$W" rev-parse HEAD)" "$L unprotected: landed on the server"
   # Withdrawal: rm -f, then the same snippet lands the removal.
   rm -f "$D"; fill41 "🔧 chore(handoff): withdraw x"
-  snip "$sh" GH_PROT=false; res "$L withdrawal" 0 landed; nomsg "$L withdrawal"
+  snip "$sh" GH_PROT=false; res "$L withdrawal" 0 landed
   ok "$(git -C "$W" show --name-status --format= HEAD | tr '\t\n' ' |')" "D docs/handoffs/2026-01-01-x.md|" "$L withdrawal: the deletion is committed"
   ok "$(git -C "$W" symbolic-ref HEAD)" refs/heads/master "$L withdrawal: still on master"
   ok "$(srvref "c41u${#sh}" master)" "$(git -C "$W" rev-parse HEAD)" "$L withdrawal: landed on the server"
+  # Withdrawing a doc that is already gone commits nothing: `landed` with `land: nothing to land` and a
+  # `dropped` line, which handoff § Commit it reads as no landing row and `not versioned: <path> (not on disk)`.
+  H=$(git -C "$W" rev-parse HEAD); snip "$sh" GH_PROT=false; res "$L withdrawal of a gone doc" 0 landed
+  has "$err" "land: nothing to land" "$L withdrawal of a gone doc: nothing to land"
+  has "$err" "land: dropped docs/handoffs/2026-01-01-x.md (not on disk, never tracked)" "$L withdrawal of a gone doc: the path is dropped"
+  ok "$(git -C "$W" rev-parse HEAD)" "$H" "$L withdrawal of a gone doc: no commit"
   # Refresh: origin moved on; the default is fast-forwarded first, an untracked scratch file untouched.
   ghreset; mkrepo "c41r${#sh}"; srvcommit "c41r${#sh}" other.txt theirs; S=$(srvref "c41r${#sh}" master)
   echo mine > "$W/scratch.txt"; mkdoc; fill41 "📝 docs(handoff): x"
-  snip "$sh" GH_PROT=false; res "$L refresh" 0 landed; nomsg "$L refresh"
+  snip "$sh" GH_PROT=false; res "$L refresh" 0 landed
   ok "$(cat "$W/other.txt" 2>/dev/null)" theirs "$L refresh: origin's file is in the working tree"
   ok "$(git -C "$W" merge-base --is-ancestor "$S" HEAD && echo y)" y "$L refresh: origin's commit is in HEAD's ancestry"
   ok "$(git -C "$W" rev-parse HEAD^)" "$S" "$L refresh: the doc commit sits on top of origin's"
   ok "$(git -C "$W" status --porcelain -- scratch.txt)/$(cat "$W/scratch.txt")" "?? scratch.txt/mine" "$L refresh: the scratch file is untouched"
   # Not versioned: a detached HEAD commits nothing; the doc is on disk only.
   ghreset; mkrepo "c41n${#sh}"; git -C "$W" checkout -q --detach; mkdoc; fill41 "📝 docs(handoff): x"
-  snip "$sh"; res "$L detached" 1 "stuck: detached HEAD"; nomsg "$L detached"
+  snip "$sh"; res "$L detached" 1 "stuck: detached HEAD"
   has "$err" "land: nothing committed" "$L detached: nothing committed"
   ok "$([ -f "$D" ] && echo y)/$(isuntracked)" y/untracked "$L detached: the doc is on disk, untracked"
   # A bogus CLAUDE_PLUGIN_ROOT: the guard exits 2 before anything is created; no fallback commit.

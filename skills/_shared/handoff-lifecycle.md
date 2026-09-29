@@ -38,7 +38,7 @@ refreshed: <YYYY-MM-DD>  # optional — added by thread:close when it refreshes 
 
 ## States
 
-- **`pending`** — written and handed to landing: committed, then pushed or its merge queued, or on disk only when `not versioned` (handoff § Commit it); the thread's continuation until a session picks it up (§ While pending).
+- **`pending`** — written and handed to landing: committed, then pushed or its merge queued; committed only when `not landed:` (a register-listed or swept repo, no GitHub origin, a checkout off the default branch); or on disk only when `not versioned` (handoff § Commit it); the thread's continuation until a session picks it up (§ While pending).
 - **`consumed`** — the picking-up session set it (§ Pickup); the doc's job is over.
 - **deleted** — a close removed it once the peer guard allowed (§ Close-out); git history keeps every version.
 - **legacy** — no `status:` line (written before ADR 0017). Counted in close's step-8 report and otherwise left alone: never refreshed, never deleted, never marked consumed, never a reason to suppress — except in a slug-filtered `_shared` (§ Home): a legacy doc has no `thread:`, so it is neither listed nor counted there. Add the front matter by hand to bring one into the lifecycle.
