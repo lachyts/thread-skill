@@ -85,11 +85,6 @@ if args[:2] == ["pr", "merge"]:
         die("GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)")
     if mode == "clean":
         die("GraphQL: Pull request Pull request is in clean status (enablePullRequestAutoMerge)")
-    prs = load()
-    for p in prs:
-        if p["number"] == n:
-            p["autoMergeRequest"] = {"mergeMethod": "MERGE"}
-    save(prs)
     sys.exit(0)
 
 if args[:2] == ["pr", "edit"]:
@@ -153,7 +148,7 @@ if method == "POST" and rest == ["pulls"]:
     n = max([p["number"] for p in prs] + [0]) + 1
     url = "https://github.com/%s/%s/pull/%d" % (owner, name, n)
     prs.insert(0, {"number": n, "url": url, "state": "OPEN", "headRefName": head, "headRefOid": oid,
-                   "isCrossRepository": False, "autoMergeRequest": None, "title": fields.get("title"),
+                   "isCrossRepository": False, "title": fields.get("title"),
                    "base": fields.get("base")})
     save(prs)
     if mode == "hang-after-create":

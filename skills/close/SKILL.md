@@ -361,8 +361,8 @@ bash "$ld" ${mode:+"$mode"} --slug "$slug" -F "$msg" -- "$top" <paths>
 - **`queued: needs merge`** (auto-merge refused, or not enabled on the repo) → the PR is open and labelled `landing`; the daily lander or the next close merges it. Banner B.
 - **`/thread:open save`** → every landing call is `--commit-only`: committed, never pushed.
 - **An older close-out PR still queued** → the next close in that repo carries its commit (`carried <N>`) and reuses the open PR for the same head, or opens a new one for the new head; nothing is waited on.
-- **A repo that refuses direct pushes to its default branch** without reading as protected → `stuck: push refused`, banner C.
-- **Origin moved with local changes** → landed unless a local change overlaps origin's, then stuck until that file is committed or stashed. Non-overlapping dirty and pre-staged files are kept exactly.
+- **A repo that refuses direct pushes to its default branch** without reading as protected → `stuck: push refused: <why>`, where the why is the server's `remote: error:` line or git's `! [remote rejected] … (<reason>)`, banner C.
+- **Origin moved with local changes** → landed unless a local change overlaps origin's, then stuck until that file is committed or stashed. Non-overlapping dirty and pre-staged files are kept exactly, and a `merge.autoStash` setting never stashes them.
 
 ## Why this exists
 

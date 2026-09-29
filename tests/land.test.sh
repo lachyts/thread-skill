@@ -132,7 +132,7 @@ except FileNotFoundError:
     prs = []
 n = max([p["number"] for p in prs] + [0]) + 1
 prs.insert(0, {"number": n, "url": "https://github.com/o/x/pull/%d" % n, "state": state, "headRefName": name,
-               "headRefOid": oid, "isCrossRepository": cross, "autoMergeRequest": None})
+               "headRefOid": oid, "isCrossRepository": cross})
 json.dump(prs, open(f, "w"))
 PY
 }
@@ -199,9 +199,11 @@ ok "$(cnt "$(ghlog)" "pr list")" 1 "case 5: only the open list is called"
 nopush "case 5"; hasnt "$(ghlog)" "POST repos/o/c5/pulls" "case 5: no second create"
 has "$err" "land: nothing committed" "case 5: nothing committed"
 land TZ=Etc/GMT+12 -- --slug c5 -- "$W"
-res "case 5b (null autoMergeRequest upgraded)" 0 "queued https://github.com/o/c5/pull/1"
+res "case 5b (the reused PR's merge queued)" 0 "queued https://github.com/o/c5/pull/1"
 ok "$(srvclose c5)" "$closes" "case 5b: no new branch"
 has "$(ghlog)" "issues/1/labels" "case 5b: the reused PR is labelled"
+has "$(ghlog)" "pr merge 1 -R o/c5 --auto --merge" "case 5b: the reused PR's merge is queued again"
+hasnt "$(ghlog)" "autoMergeRequest" "case 5b: the PR list never asks for autoMergeRequest"
 
 echo "== 6. PR create hangs after creating"
 ghreset; mkrepo c6; edit
@@ -413,6 +415,17 @@ rm -f "$W/.git/MERGE_HEAD"
 git -C "$W" checkout -q --detach
 stuck0 "detached HEAD" "stuck: detached HEAD" "$W" "$W/THREAD.md"
 git -C "$W" checkout -q master
+# The repo's nearest existing ancestor cannot be entered: stuck, never a fall-through to the caller's CWD
+# repo (this test runs inside the thread-skill checkout, a GitHub repo, so a fall-through would show).
+mkdir -p "$tmp/w/locked"; chmod 000 "$tmp/w/locked"
+if (cd "$tmp/w/locked" 2>/dev/null); then
+  echo "SKIP - case 18 unresolvable repo (a mode-000 dir can still be entered here)"
+else
+  stuck0 "unresolvable repo" "stuck: cannot resolve $tmp/w/locked/sub" "$tmp/w/locked/sub"
+  nossh "case 18 unresolvable repo"; nogh "case 18 unresolvable repo"
+  land -- --origin-slug "$tmp/w/locked/sub"; ok "$out/$rc" "/4" "case 18 unresolvable repo: --origin-slug exits 4, stdout empty"
+fi
+chmod 755 "$tmp/w/locked"
 
 echo "== 19. swept repos"
 sw() { mkdir -p "$1"; git init -q -b master "$1"; git -C "$1" remote add origin git@github.com:o/sw.git; echo t > "$1/THREAD.md"; }
@@ -429,6 +442,12 @@ git -C "$HOME/repos/concepts/wt-main" worktree add -q "$HOME/repos/concepts/gf" 
 echo t > "$HOME/repos/concepts/gf/THREAD.md"
 land GH_PROT=false -- "$HOME/repos/concepts/gf" "$HOME/repos/concepts/gf/THREAD.md"
 hasnt "$out" "swept" "case 19: a concepts child with a .git file takes the normal route"
+rm -rf "$HOME/Projects/Narcissus/narcissus-echo"
+git -C "$HOME/repos/concepts/wt-main" worktree add -q "$HOME/Projects/Narcissus/narcissus-echo" -b ne 2>/dev/null
+ok "$([ -f "$HOME/Projects/Narcissus/narcissus-echo/.git" ] && echo file)" file "case 19: the in-tree entry's .git is a file (precondition)"
+echo t > "$HOME/Projects/Narcissus/narcissus-echo/THREAD.md"
+land GH_PROT=false -- "$HOME/Projects/Narcissus/narcissus-echo" "$HOME/Projects/Narcissus/narcissus-echo/THREAD.md"
+hasnt "$out" "swept" "case 19: an in-tree entry with a .git file takes the normal route"
 sw "$HOME/repos/other"
 land GH_PROT=false -- "$HOME/repos/other" "$HOME/repos/other/THREAD.md"
 hasnt "$out" "swept" "case 19: ~/repos/other takes the normal route"
@@ -467,6 +486,8 @@ land FAKE_SSH=hang -- "$W" "$W/THREAD.md"
 res "case 22" 1 "stuck: cannot fetch origin/master: timed out"
 ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 22: committed first"
 ok "$([ "$el" -lt 15 ] && echo y)" y "case 22: bounded (${el}s < 15s)"
+edit; land FAKE_SSH=fail -- "$W" "$W/THREAD.md"
+res "case 22b (fetch refused)" 1 "stuck: cannot fetch origin/master: fake-ssh: connect to host github.com port 22: Connection refused"
 
 # ==== Other behaviours ====================================================================================
 echo "== 23. --commit-only"
@@ -629,6 +650,17 @@ ok "$(cnt "$(ghlog)" update-branch)" 1 "case 32: update-branch once"
 ok "$(git -C "$W" status --porcelain -- a.txt)" " M a.txt" "case 32: a.txt is still dirty"
 ok "$(git -C "$W" show --name-only --format= HEAD | tr '\n' ' ')" "THREAD.md " "case 32: a.txt is not in C"
 
+echo "== 32b. FF refused under merge.autoStash=true"
+ghreset; mkrepo c32b; git -C "$W" config merge.autoStash true; B0=$(git -C "$W" rev-parse HEAD)
+srvcommit c32b a.txt "origin a"; echo mine >> "$W/a.txt"; edit
+land -- "$W" "$W/THREAD.md"
+res "case 32b" 0 "queued https://github.com/o/c32b/pull/1"
+has "$err" "land: ff refused: " "case 32b: the ff refused note"
+ok "$(git -C "$W" rev-parse HEAD^)" "$B0" "case 32b: C's parent is the old base (no fast-forward)"
+ok "$(git -C "$W" status --porcelain -- a.txt)" " M a.txt" "case 32b: a.txt is still just dirty"
+ok "$(cat "$W/a.txt" | tr '\n' '|')" "base|mine|" "case 32b: a.txt is exactly the local change, no conflict markers"
+ok "$(git -C "$W" stash list | grep -c .)" 0 "case 32b: no autostash entry left behind"
+
 echo "== 33. push access"
 ghreset; mkrepo c33; c0
 land GH_ACCESS=false -- "$W"; res "case 33 false" 0 "not landed: no push access"
@@ -685,7 +717,7 @@ f = sys.argv[1]; prs = json.load(open(f))
 for k in range(250):
     prs.insert(0, {"number": 1000 + k, "url": "https://github.com/o/x/pull/%d" % (1000 + k), "state": "MERGED",
                    "headRefName": "close/2020-01-01-n-%012d" % k, "headRefOid": "%040d" % k,
-                   "isCrossRepository": False, "autoMergeRequest": None})
+                   "isCrossRepository": False})
 json.dump(prs, open(f, "w"))
 PY
 land -- "$W"; res "case 37" 0 "queued https://github.com/o/x/pull/1"
@@ -739,7 +771,7 @@ for k in 1 2 3 4 5; do [ -s "$tmp/holder.pid" ] && break; sleep 1; done
 hp=$(cat "$tmp/holder.pid" 2>/dev/null); [ -n "$hp" ] && holders+=("$hp")
 ok "$([ -n "$hp" ] && kill -0 "$hp" 2>/dev/null && echo alive)" alive "case 39: the holder was alive (precondition)"
 if command -v lsof >/dev/null 2>&1 && [ -n "$hp" ]; then
-  ok "$(lsof -p "$hp" 2>/dev/null | awk '$4 ~ /^1/' | grep -c PIPE)" 0 "case 39: the holder holds no pipe on fd 1"
+  ok "$(lsof -p "$hp" 2>/dev/null | awk '$4 ~ /^1[rwu]?$/' | grep -c PIPE)" 0 "case 39: the holder holds no pipe on fd 1"
 else
   echo "SKIP - case 39 lsof control (no lsof)"
 fi
@@ -750,6 +782,18 @@ snip bash GH_PROT=false; res "case 39 snippet" 0 landed
 ok "$([ "$el" -lt 15 ] && echo y)" y "case 39 snippet: returned while the holder lives (${el}s < 15s)"
 for k in 1 2 3 4 5; do [ -s "$tmp/holder.pid" ] && break; sleep 1; done
 hp=$(cat "$tmp/holder.pid" 2>/dev/null); [ -n "$hp" ] && { holders+=("$hp"); kill -9 "$hp" 2>/dev/null; }
+
+echo "== 40. a refused push says why"
+ghreset; mkrepo c40; edit
+land GH_PROT=false FAKE_SSH=move -- "$W" "$W/THREAD.md"
+res "case 40 (non-fast-forward)" 1 "stuck: push refused: ! [rejected] HEAD -> master (fetch first)"
+ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 40: committed first"
+ghreset; mkrepo c40b
+printf '#!/bin/sh\necho "error: GH006: Protected branch update failed for refs/heads/master." >&2\nexit 1\n' > "$SRV/o/c40b.git/hooks/pre-receive"
+chmod +x "$SRV/o/c40b.git/hooks/pre-receive"; S=$(srvref c40b master); edit
+land GH_PROT=false -- "$W" "$W/THREAD.md"
+res "case 40b (declined by the server)" 1 "stuck: push refused: remote: error: GH006: Protected branch update failed for refs/heads/master."
+ok "$(srvref c40b master)" "$S" "case 40b: server untouched"
 
 echo
 [ "$fail" = 0 ] && echo "land.test.sh: ALL PASS" || echo "land.test.sh: FAILED"

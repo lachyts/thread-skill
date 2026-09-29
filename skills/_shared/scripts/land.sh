@@ -74,10 +74,12 @@ bounded() {
   perl -e "$LAND_BOUNDED_PL" "$t" "$@" </dev/null
 }
 
-# net_rc <rc> <step> required|optional <errfile> — classify a bounded call's rc. 0 ok; 124 the deadline
-# (an optional step prints its skip note); 1 a failure, with NET_ERR its first line (`timed out` on 142).
+# net_rc <rc> <step> required|optional <errfile> [git] — classify a bounded call's rc. 0 ok; 124 the
+# deadline (an optional step prints its skip note); 1 a failure, with NET_ERR its first line (`timed out`
+# on 142), or with `git` its git_line.
 net_rc() {
-  local rc=$1 step=$2 kind=$3 ef=$4
+  local rc=$1 step=$2 kind=$3 ef=$4 pick=first_line
+  [ "${5:-}" = git ] && pick=git_line
   NET_ERR=
   [ "$rc" = 0 ] && return 0
   if [ "$rc" = 124 ]; then
@@ -86,11 +88,23 @@ net_rc() {
     return 124
   fi
   [ -n "$ef" ] && [ -s "$ef" ] && cat "$ef"
-  if [ "$rc" = 142 ]; then NET_ERR="timed out"; else NET_ERR=$(first_line "$ef"); [ -n "$NET_ERR" ] || NET_ERR="rc $rc"; fi
+  if [ "$rc" = 142 ]; then NET_ERR="timed out"; else NET_ERR=$($pick "$ef"); [ -n "$NET_ERR" ] || NET_ERR="rc $rc"; fi
   return 1
 }
 
 first_line() { [ -f "$1" ] && sed -n '/[^[:space:]]/{s/^[[:space:]]*//;p;q;}' "$1" | cut -c1-200; }
+
+# git_line <errfile>: the line of a git network call's stderr that says why — the first ` ! [<status>]`
+# ref line, `remote: error…` or `error:` line, trimmed (git pads sideband lines) and squeezed — else
+# first_line. A push's first line is its `To <url>` header, and a transport failure's own first line
+# beats git's generic `fatal:`.
+git_line() {
+  local l
+  [ -f "$1" ] || return 0
+  l=$(grep -m 1 -E '^ ! \[|^remote: error|^error:' "$1" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/[[:space:]][[:space:]]*/ /g' | cut -c1-200)
+  [ -n "$l" ] && { printf '%s\n' "$l"; return 0; }
+  first_line "$1"
+}
 
 result() { printf '%s\n' "$1" > "$LAND_RES"; }
 
@@ -142,14 +156,15 @@ closeout_shaped() {
   return 0
 }
 
-# The fixed swept list mirrors daily-sweep.sh; every $HOME/repos/concepts/<c>/ with a .git directory joins.
+# The fixed swept list mirrors daily-sweep.sh, test included: the sweep commits and pushes an entry only
+# when it holds a .git directory (a .git file, a linked worktree, is skipped there and so here). Every
+# $HOME/repos/concepts/<c>/ with a .git directory joins.
 swept() {
   local t=$1 e p
   for e in "$HOME/repos/workspaces" "$HOME/repos/obsidian" "$HOME/.claude" "$HOME/.agents" "$HOME/Projects" \
            "$HOME/Projects/Life/audio-archive" "$HOME/Projects/Life/grandma-shirleys-book" \
            "$HOME/Projects/Narcissus/narcissus-echo" "$HOME"/repos/concepts/*/; do
-    case $e in "$HOME"/repos/concepts/*/) [ -d "${e}.git" ] || continue ;; esac
-    [ -d "$e" ] || continue
+    [ -d "${e%/}/.git" ] || continue
     p=$(cd "$e" 2>/dev/null && pwd -P) || continue
     [ "$p" = "$t" ] && return 0
   done
@@ -168,7 +183,7 @@ main() {
 
   if [ "${1:-}" = --origin-slug ]; then
     [ $# -eq 2 ] && [ -n "$2" ] || usage
-    phys "$2"; [ $? -le 2 ] || exit 4
+    phys "$2"; [ $? = 1 ] && exit 4
     slug=$(origin_slug "$(git -C "$PHYS_ANC" remote get-url origin 2>/dev/null)") || exit 4
     result "$slug"; exit 0
   fi
@@ -201,7 +216,7 @@ main() {
   }
 
   # ---- S1. Local preflight ----------------------------------------------------------------------------
-  phys "$repo"
+  phys "$repo"; [ $? = 1 ] && stuck_early "cannot resolve $repo"
   top=$(git -C "$PHYS_ANC" rev-parse --show-toplevel 2>"$tmpd/top.err") && [ -n "$top" ] \
     || stuck_early "not a git work tree: $(first_line "$tmpd/top.err")"
   top=$(cd "$top" && pwd -P) || stuck_early "cannot enter $top"
@@ -246,7 +261,7 @@ main() {
     d=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) && d=${d#refs/remotes/origin/}
     if [ -z "$d" ]; then
       out=$(bounded git ls-remote --symref origin HEAD 2>"$tmpd/lsr.err"); rc=$?
-      net_rc "$rc" ls-remote required "$tmpd/lsr.err"; rc=$?
+      net_rc "$rc" ls-remote required "$tmpd/lsr.err" git; rc=$?
       if [ "$rc" = 0 ]; then
         d=$(printf '%s\n' "$out" | awk '/^ref:/ { sub("refs/heads/", "", $2); print $2; exit }')
         [ -n "$d" ] || { class=pending; pending="default branch unresolved: origin sent no HEAD symref"; }
@@ -260,7 +275,7 @@ main() {
   # ---- S4. Refresh: only a landable repo on its default branch ------------------------------------------
   if [ "$class" = landable ] && [ "$b" = "$d" ]; then
     bounded git fetch --no-tags --no-write-fetch-head origin "+refs/heads/$d:refs/remotes/origin/$d" 2>"$tmpd/fetch.err"; rc=$?
-    net_rc "$rc" fetch required "$tmpd/fetch.err"; rc=$?
+    net_rc "$rc" fetch required "$tmpd/fetch.err" git; rc=$?
     if [ "$rc" = 124 ]; then class=pending; pending=$NET_ERR
     elif [ "$rc" != 0 ]; then class=pending; pending="cannot fetch origin/$d: $NET_ERR"
     elif ! git rev-parse -q --verify HEAD >/dev/null; then
@@ -268,7 +283,7 @@ main() {
         && stuck_early "local branch has no common history with origin/$d"
     elif [ "$(git rev-parse HEAD)" != "$(git rev-parse "refs/remotes/origin/$d")" ] \
          && git merge-base --is-ancestor HEAD "refs/remotes/origin/$d"; then
-      if ! git merge --ff-only -q "refs/remotes/origin/$d" >"$tmpd/ff.err" 2>&1; then
+      if ! git merge --ff-only --no-autostash -q "refs/remotes/origin/$d" >"$tmpd/ff.err" 2>&1; then
         echo "land: ff refused: $(first_line "$tmpd/ff.err")"
       fi
     fi
@@ -376,7 +391,7 @@ land_unprotected() {
   local od="refs/remotes/origin/$d" old N rc
   if git merge-base --is-ancestor "$od" HEAD; then
     bounded git push origin "HEAD:refs/heads/$d" 2>"$tmpd/push.err"; rc=$?
-    net_rc "$rc" push required "$tmpd/push.err"; rc=$?
+    net_rc "$rc" push required "$tmpd/push.err" git; rc=$?
     [ "$rc" = 124 ] && finish "stuck: $NET_ERR" 1
     [ "$rc" = 0 ] || finish "stuck: push refused: $NET_ERR" 1
     finish landed 0
@@ -406,7 +421,7 @@ land_unprotected() {
     finish landed 0
   fi
   bounded git push origin "$N:refs/heads/$d" 2>"$tmpd/push.err"; rc=$?
-  net_rc "$rc" push required "$tmpd/push.err"; rc=$?
+  net_rc "$rc" push required "$tmpd/push.err" git; rc=$?
   [ "$rc" = 124 ] && finish "stuck: $NET_ERR" 1
   [ "$rc" = 0 ] || finish "stuck: push refused: $NET_ERR" 1
   finish landed 0
@@ -452,7 +467,7 @@ for s in order:
 # pr_lookup open|all → PR_HIT "<STATE>\t<n>\t<url>" or empty; 1 on any failure (message in NET_ERR).
 pr_lookup() {
   local out rc
-  out=$(bounded gh pr list -R "$slug" --state "$1" --limit 200 --json number,url,state,headRefName,headRefOid,isCrossRepository,autoMergeRequest 2>"$tmpd/list.err"); rc=$?
+  out=$(bounded gh pr list -R "$slug" --state "$1" --limit 200 --json number,url,state,headRefName,headRefOid,isCrossRepository 2>"$tmpd/list.err"); rc=$?
   net_rc "$rc" "PR lookup" required "$tmpd/list.err"; rc=$?
   [ "$rc" = 124 ] && return 124
   [ "$rc" = 0 ] || return 1
@@ -484,7 +499,7 @@ EOF
     CLOSED) finish "stuck: close-out PR $url was closed unmerged" 1 ;;
     *)
       bounded git push origin "HEAD:refs/heads/$branch" 2>"$tmpd/push.err"; rc=$?
-      net_rc "$rc" push required "$tmpd/push.err"; rc=$?
+      net_rc "$rc" push required "$tmpd/push.err" git; rc=$?
       [ "$rc" = 124 ] && finish "stuck: $NET_ERR" 1
       [ "$rc" = 0 ] || finish "stuck: push refused: $NET_ERR" 1
       title=$(git log -1 --format=%s HEAD)
