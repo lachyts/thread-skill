@@ -85,7 +85,7 @@ git config init.defaultBranch" 2>/dev/null)
   ok "$(g -C "$tmp/work" symbolic-ref -q refs/remotes/origin/HEAD)" refs/remotes/origin/master "work's origin/HEAD → origin/master (precondition)"
   g -C "$tmp/work" checkout -q -b feat/x && commits "$tmp/work" 2
   mkdir -p "$tmp/work/sub"
-  for c in w1 w4 w6 w7 w13 wa wb wc "my repo" wd1 wd2 wd3 wd4 wd5 wd7; do g clone -q "$tmp/o.git" "$tmp/$c"; done
+  for c in w1 w4 w6 w7 w13 wa wb wc "my repo" wd1 wd2 wd3 wd4 wd5 wd7 wd8 wd9; do g clone -q "$tmp/o.git" "$tmp/$c"; done
   mkdir -p "$tmp/plain"
 
   # 20's fixtures: the default branch ahead of origin/master. A `refs/remotes/origin/close/*` ref stands in
@@ -210,10 +210,12 @@ git config init.defaultBranch" 2>/dev/null)
   mrg=$(g -C "$tmp/wd4" commit-tree -p HEAD -p "$sib" -m 'merge master' "$tree")
   q4="close/2026-09-29-t-$(sha12 "$tmp/wd4")"
   g -C "$tmp/wd4" update-ref "refs/remotes/origin/$q4" "$mrg"
+  wd4_before=$(snap "$tmp/wd4")
   rs "$tmp/wd4"; clean0 "$A2 — queued in $q4" "20d. a carrier whose tip is a merge containing HEAD → queued (containment, not equality)"
   # 20e. stale close refs (merged PRs, never pruned) carry nothing ahead.
   g -C "$tmp/wd5" update-ref refs/remotes/origin/close/2026-09-01-old-000000000000 refs/remotes/origin/master
   commits "$tmp/wd5" 1
+  wd5_before=$(snap "$tmp/wd5")
   rs "$tmp/wd5"; clean0 "on master, 1 commit(s) not on origin/master — stranded" "20e. only a stale close ref → stranded, never queued"
   # 20f. the real path: a push to close/… on origin creates the tracking ref (its own origin, like 8).
   g init -q --bare -b master "$tmp/o20.git"
@@ -225,11 +227,38 @@ git config init.defaultBranch" 2>/dev/null)
   q20="close/x-$(sha12 "$tmp/w20")"
   g -C "$tmp/w20" push -q origin "HEAD:refs/heads/$q20" 2>/dev/null
   ok "$(g -C "$tmp/w20" rev-parse -q --verify "refs/remotes/origin/$q20" >/dev/null && echo y)" y "20f. the close/… push left a tracking ref (precondition)"
+  w20_before=$(snap "$tmp/w20")
   rs "$tmp/w20"; clean0 "on master, 1 commit(s) not on origin/master — queued in $q20" "20f. after a real close/… push → queued in that branch"
   # 20g. origin/HEAD dangling, on that (missing) default
   g -C "$tmp/wd7" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
   g -C "$tmp/wd7" checkout -q -b trunk && commits "$tmp/wd7" 1
+  wd7_before=$(snap "$tmp/wd7")
   rs "$tmp/wd7"; clean0 "$(unres trunk)" "20g. on trunk with origin/HEAD → a missing origin/trunk → unresolved, not nothing"
+  # 20i. two live carriers: close/…-a holds A only, close/…-b holds A+B. The daily lander's update-branch
+  #      (then a fetch) moves -a's tip to a later-dated merge, so -a sorts newest; -b still carries more.
+  commits "$tmp/wd8" 1
+  qa="close/2026-09-28-a-$(sha12 "$tmp/wd8")"; ca=$(g -C "$tmp/wd8" rev-parse HEAD)
+  commits "$tmp/wd8" 1
+  qb="close/2026-09-29-b-$(sha12 "$tmp/wd8")"
+  g -C "$tmp/wd8" update-ref "refs/remotes/origin/$qb" HEAD
+  tree=$(g -C "$tmp/wd8" rev-parse 'HEAD^{tree}')
+  sib=$(GIT_COMMITTER_DATE='2099-01-01T00:00:00Z' g -C "$tmp/wd8" commit-tree -p refs/remotes/origin/master -m sibling "$tree")
+  mrg=$(GIT_COMMITTER_DATE='2099-01-02T00:00:00Z' g -C "$tmp/wd8" commit-tree -p "$ca" -p "$sib" -m 'merge master' "$tree")
+  g -C "$tmp/wd8" update-ref "refs/remotes/origin/$qa" "$mrg"
+  ok "$(g -C "$tmp/wd8" for-each-ref --sort=-committerdate --count=1 --format='%(refname)' refs/remotes/origin/close/)" "refs/remotes/origin/$qa" "20i. close/…-a has the newer tip date (precondition)"
+  wd8_before=$(snap "$tmp/wd8")
+  rs "$tmp/wd8"; clean0 "$A2 — queued in $qb" "20i. two carriers, the smaller one newer-dated → names the one carrying the most"
+  # 20j. a tie: two close refs each carry both commits → the newer tip is named.
+  commits "$tmp/wd9" 2
+  tree=$(g -C "$tmp/wd9" rev-parse 'HEAD^{tree}')
+  qo="close/2026-09-28-o-$(sha12 "$tmp/wd9")"; qn="close/2026-09-29-n-$(sha12 "$tmp/wd9")"
+  sib=$(GIT_COMMITTER_DATE='2099-01-01T00:00:00Z' g -C "$tmp/wd9" commit-tree -p refs/remotes/origin/master -m sibling "$tree")
+  mo=$(GIT_COMMITTER_DATE='2099-01-02T00:00:00Z' g -C "$tmp/wd9" commit-tree -p HEAD -p "$sib" -m 'merge master (old)' "$tree")
+  mn=$(GIT_COMMITTER_DATE='2099-01-03T00:00:00Z' g -C "$tmp/wd9" commit-tree -p HEAD -p "$sib" -m 'merge master (new)' "$tree")
+  g -C "$tmp/wd9" update-ref "refs/remotes/origin/$qo" "$mo"
+  g -C "$tmp/wd9" update-ref "refs/remotes/origin/$qn" "$mn"
+  wd9_before=$(snap "$tmp/wd9")
+  rs "$tmp/wd9"; clean0 "$A2 — queued in $qn" "20j. two carriers of every commit → the newer tip is named"
   # 20h. a path with a space
   g -C "$tmp/my repo" checkout -q master && commits "$tmp/my repo" 1
   rs "$tmp/my repo"; clean0 "on master, 1 commit(s) not on origin/master — stranded" "20h. a repo path with a space, on master and ahead"
@@ -415,6 +444,12 @@ if [ -f "$script" ]; then
   ok "$(snap "$tmp/wd1")" "$wd1_before" "15. wd1's refs are unchanged by every run"
   ok "$(snap "$tmp/wd2")" "$wd2_before" "15. wd2's refs are unchanged by every run"
   ok "$(snap "$tmp/wd3")" "$wd3_before" "15. wd3's refs are unchanged by every run"
+  ok "$(snap "$tmp/wd4")" "$wd4_before" "15. wd4's refs are unchanged by every run"
+  ok "$(snap "$tmp/wd5")" "$wd5_before" "15. wd5's refs are unchanged by every run"
+  ok "$(snap "$tmp/w20")" "$w20_before" "15. w20's refs are unchanged by every run"
+  ok "$(snap "$tmp/wd7")" "$wd7_before" "15. wd7's refs are unchanged by every run"
+  ok "$(snap "$tmp/wd8")" "$wd8_before" "15. wd8's refs are unchanged by every run"
+  ok "$(snap "$tmp/wd9")" "$wd9_before" "15. wd9's refs are unchanged by every run"
 fi
 
 echo; [ "$fail" -eq 0 ] && echo "repo-state: ALL PASS" || echo "repo-state: SOME FAILED"

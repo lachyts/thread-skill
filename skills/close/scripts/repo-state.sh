@@ -15,7 +15,8 @@
 # Queued vs stranded is local evidence only. Landing (land.sh) sends a protected repo's close-outs to a
 # close/<cdate>-<slug>-<sha12> branch on origin, which leaves a refs/remotes/origin/close/<…> tracking
 # ref in this clone; that branch is the head of the `landing` PR. A commit reachable from such a ref is
-# queued, any other is stranded. The newest close ref that carries at least one of them is the one named.
+# queued, any other is stranded: the queued count is what the union of every close ref reaches. The one
+# ref named is the close ref that carries the most of them, the newest tip breaking a tie.
 # A ref from a merged PR carries nothing ahead and is ignored; one whose PR closed unmerged still reads
 # queued (close's § Edge cases).
 #
@@ -96,14 +97,18 @@ if [ "$br" = "$def" ]; then
   s=$(git -C "$dir" rev-list --count HEAD --not "$up" --glob='refs/remotes/origin/close/*' 2>/dev/null) \
     || fail "rev-list failed (refs/remotes/origin/close/*)"
   if [ "$s" -ge "$n" ]; then echo "$line — stranded"; exit 0; fi
-  # Name the carrier: the newest close ref that reaches at least one ahead commit. Refnames hold no
-  # whitespace or glob characters, so the unquoted list splits safely.
+  # Name the carrier: the close ref that reaches the most ahead commits (the smallest m, the ahead
+  # commits it does not reach), ties to the newest tip. A tip's date alone is no guide: the daily
+  # lander's update-branch merge re-dates an older, smaller close branch. Stop once one ref reaches
+  # every queued commit (m == s). Refnames hold no whitespace or glob characters, so the unquoted list
+  # splits safely.
   refs=$(git -C "$dir" for-each-ref --sort=-committerdate --format='%(refname)' refs/remotes/origin/close/ 2>/dev/null) \
     || fail "for-each-ref failed (refs/remotes/origin/close/)"
-  carrier=''
+  carrier='' best=$n
   for r in $refs; do
     m=$(git -C "$dir" rev-list --count HEAD --not "$up" "$r" 2>/dev/null) || fail "rev-list failed ($r)"
-    if [ "$m" -lt "$n" ]; then carrier=${r#refs/remotes/origin/}; break; fi
+    if [ "$m" -lt "$best" ]; then best=$m; carrier=${r#refs/remotes/origin/}; fi
+    [ "$best" -eq "$s" ] && break
   done
   [ -n "$carrier" ] || fail "no close ref carries the $((n - s)) queued commit(s)"
   if [ "$s" -eq 0 ]; then echo "$line — queued in $carrier"
