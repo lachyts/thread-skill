@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # skills/_shared/scripts/land.sh — the shared landing route (ADR 0028, queue and finish) — close's
-# `# thread:land` snippet and handoff's `# thread:handoff-land` snippet. Fixture repos talk to bare "servers" under $tmp/srv through a fake ssh that maps
-# git@github.com:<o>/<r>.git and ssh://git@github.com/<o>/<r>.git there; a fake `gh`
-# (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
-# labels and update-branch. Every handed path goes through a symlinked alias of the temp dir, so the
+# `# thread:land` snippet and handoff's `# thread:handoff-land` snippet (cases 1–41), and its own-branch mode
+# with close's `# thread:land-own` snippet (cases 42–69). Fixture repos talk to bare "servers" under $tmp/srv
+# through a fake ssh that maps git@github.com:<o>/<r>.git and ssh://git@github.com/<o>/<r>.git there; a fake
+# `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
+# labels, update-branch, the user, hold comments and per-SHA check-runs and status. Every handed path goes through a symlinked alias of the temp dir, so the
 # physical-path handling is exercised on every run. Hang stubs run a non-exec `sleep 40 | cat`; hang cases
 # assert elapsed time. Hermetic: HOME, the global git config and TMPDIR are temp, and the caller's GIT_DIR
 # & co. are unset. bash 3.2-compatible (macOS).
@@ -545,11 +546,14 @@ has "$(srvclose c28)" "-c28-$(sha12) " "case 28: an empty slug → the repo's ba
 echo "== 29. structural"
 src=$(cat "$LAND")
 code=$(grep -v '^[[:space:]]*#' "$LAND")
-for w in nohup disown setsid '--watch' 'sleep ' default-branch.sh 'gh pr edit' 'gh pr create' 'gh label' '--search' \
-         '3>&1' '>&3' 'exec 3' 'set -u' 'nounset' 'set -e' 'reset --keep' 'reset --hard' ' checkout' \
-         'commit -a' ' --all' ' -am' 'budget()'; do
+for w in nohup disown setsid '--watch' 'sleep ' default-branch.sh 'gh pr edit' 'gh pr create' 'gh pr checks' 'gh label' '--search' \
+         '3>&1' '>&3' 'exec 3' 'set -u' 'nounset' 'set -e' 'reset --keep' 'reset --hard' \
+         'commit -a' ' --all' ' -am' 'budget()' 'push -u' '--set-upstream' 'branch -D' 'branch -d' ' --delete'; do
   hasnt "$code" "$w" "structural: no [$w]"
 done
+# ` checkout` is never a git command here; the two own-branch result lines that name the checkout are exempt.
+ok "$(printf '%s\n' "$code" | grep ' checkout' | grep -v 'stuck: checkout moved: on' | grep -vc 'commits this checkout lacks')" 0 \
+   "structural: no [ checkout] (bar the two own-branch results that name the checkout)"
 ok "$(printf '%s\n' "$code" | grep -cE '(^|[^&])&[[:space:]]*$')" 0 "structural: no trailing &"
 ok "$(printf '%s\n' "$code" | grep -E 'git push' | grep -cE -- '--force|-f |[[:space:]]"?\+')" 0 "structural: no force push"
 ok "$(head -n 1 "$LAND")" "#!/usr/bin/env bash" "structural: the shebang has no -u"
@@ -588,7 +592,18 @@ has "$(printf '%s\n' "$code" | grep "trap '")" 'git worktree prune' "structural:
 s4=$(awk '/---- S4\./{on=1} /---- S5\./{on=0} on' "$LAND")
 has "$(printf '%s\n' "$s4" | sed -n 2p)" 'if [ "$class" = landable ] && [ "$b" = "$d" ]; then' "structural: S4 sits inside the landable-and-on-<d> guard"
 has "$s4" 'git fetch' "structural: …holding the fetch"; has "$s4" 'merge --ff-only' "structural: …and the fast-forward"
-ok "$(printf '%s\n' "$code" | grep -cE 'git fetch|merge --ff-only')" 2 "structural: no fetch or fast-forward elsewhere"
+# The own-branch mode is one delimited block; the close-out route outside it fetches and fast-forwards only in S4.
+ownb=$(awk '/^# ==== own-branch mode/{on=1} on{print} /^# ==== end own-branch mode/{exit}' "$LAND" | grep -v '^[[:space:]]*#')
+closeout=$(awk '/^# ==== own-branch mode/{on=1} !on{print} /^# ==== end own-branch mode/{on=0}' "$LAND" | grep -v '^[[:space:]]*#')
+ok "$(printf '%s\n' "$closeout" | grep -cE 'git fetch|merge --ff-only')" 2 "structural: the close-out route fetches and fast-forwards only in S4"
+ok "$(printf '%s\n' "$ownb" | grep -cE 'git fetch')" 3 "structural: own-branch fetches origin/<d>, origin/<B> and a merged PR's head only"
+ok "$(printf '%s\n' "$ownb" | grep -c 'merge --ff-only')" 1 "structural: own-branch fast-forwards once (O9)"
+ok "$(printf '%s\n' "$ownb" | grep -c 'git push')" 1 "structural: own-branch pushes once"
+has "$ownb" 'bounded git push origin "refs/heads/$B:refs/heads/$B"' "structural: …<B> to itself, no -u, no force"
+ok "$(printf '%s\n' "$ownb" | grep -c 'gh pr checks')" 0 "structural: own-branch reads checks over REST only"
+has "$ownb" 'commits/$1/check-runs?per_page=100' "structural: …check-runs"; has "$ownb" 'commits/$1/status' "structural: …and the combined status"
+ok "$(printf '%s\n' "$ownb" | grep -c 'git commit')" 0 "structural: own-branch never commits (merge commits come from git merge in the scratch worktree)"
+ok "$(grep -c '^  if \[ "${1:-}" = --own-branch \]; then shift; own_main "$@"; exit 1; fi$' "$LAND")" 1 "structural: --own-branch dispatches at the top of main"
 
 # ==== The snippet =========================================================================================
 echo "== 30. close's # thread:land snippet"
@@ -861,6 +876,495 @@ for sh in "$BASH32" "${shells[@]}"; do
   ok "$([ -f "$D" ] && echo y)/$(isuntracked)" y/untracked "$L: the doc stays on disk, uncommitted"
   tmpempty "$L bogus root"
 done
+
+# ==== Own-branch mode (ADR 0028 §§ 1–3, 5; close § Land the own branch) =====================================
+OB=feat/x
+# mkbranch <name>: mkrepo, then the own branch $OB checked out with one work commit on it.
+mkbranch() { mkrepo "$1"; git -C "$W" checkout -q -b "$OB"; work "first work"; }
+# work <subject>: a code commit on the checkout.
+work() { echo "$1" >> "$W/src/c.txt"; git -C "$W" commit -qam "✨ feat: $1"; }
+# docscommit <file> <content> [<subject>]: a docs/reviews/-only commit (a review doc added or edited).
+docscommit() {
+  mkdir -p "$W/docs/reviews"; printf '%s\n' "$2" > "$W/docs/reviews/$1"
+  git -C "$W" add "docs/reviews/$1"; git -C "$W" commit -qm "${3:-📝 docs(review): $1}" -- "docs/reviews/$1"
+}
+# docsdelete: the one deletion commit for every review doc on the checkout.
+docsdelete() { git -C "$W" rm -rq docs/reviews; git -C "$W" commit -qm "🔧 chore(review): delete this loop's review docs"; }
+# srvbranchcommit <name> <branch> <file> <content>: a commit on the server's <branch> from a second clone.
+srvbranchcommit() {
+  local n=$1 br=$2 f=$3 c=$4 O
+  O=$(mktemp -d "$tmp/oc.XXXXXX")
+  git clone -q -b "$br" "$SRV/o/$n.git" "$O/c" 2>/dev/null
+  printf '%s\n' "$c" > "$O/c/$f"
+  git -C "$O/c" add -A && git -C "$O/c" commit -qm "origin: $f" && git -C "$O/c" push -q origin "HEAD:$br" 2>/dev/null
+  rm -rf "$O"
+}
+# srvmergepr <name> <n>: GitHub merges PR <n> — its head merged into the server's master with a merge commit.
+srvmergepr() {
+  local n=$1 pr=$2 O head
+  head=$(python3 -c 'import json, sys; print([p for p in json.load(open(sys.argv[1])) if p["number"] == int(sys.argv[2])][0]["headRefName"])' "$GH_STATE/prs.json" "$pr")
+  O=$(mktemp -d "$tmp/oc.XXXXXX")
+  git clone -q "$SRV/o/$n.git" "$O/c" 2>/dev/null
+  git -C "$O/c" merge -q --no-ff --no-edit "origin/$head" && git -C "$O/c" push -q origin HEAD:master 2>/dev/null
+  rm -rf "$O"
+  git --git-dir "$SRV/o/$n.git" update-ref "refs/pull/$pr/head" "$(srvref "$n" "$head")"
+  setpr "$pr" state MERGED
+}
+# setpr <n> <key> <json-ish value>: edit one field of PR <n> in the fake's state (null, {} or a string).
+setpr() {
+  python3 - "$GH_STATE/prs.json" "$@" <<'PY'
+import json, sys
+f, n, k, v = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+prs = json.load(open(f))
+for p in prs:
+    if p["number"] == n:
+        p[k] = None if v == "null" else {"mergeMethod": "MERGE"} if v == "{}" else v
+json.dump(prs, open(f, "w"))
+PY
+}
+# seedown <state> <head> <oid> <login> [cross]: prepend a PR with an author (newest first).
+seedown() {
+  python3 - "$GH_STATE/prs.json" "$@" <<'PY'
+import json, sys
+f, state, name, oid, login = sys.argv[1:6]
+try:
+    prs = json.load(open(f))
+except FileNotFoundError:
+    prs = []
+n = max([p["number"] for p in prs] + [0]) + 1
+prs.insert(0, {"number": n, "url": "https://github.com/o/x/pull/%d" % n, "state": state, "headRefName": name,
+               "headRefOid": oid, "isCrossRepository": len(sys.argv) > 6, "author": {"login": login},
+               "autoMergeRequest": None})
+json.dump(prs, open(f, "w"))
+PY
+}
+# addworkflow: commit a GitHub Actions workflow on the checkout, so the repo has CI.
+addworkflow() {
+  mkdir -p "$W/.github/workflows"; printf 'on: pull_request\njobs: {}\n' > "$W/.github/workflows/ci.yml"
+  git -C "$W" add .github && git -C "$W" commit -qm "🔧 chore(ci): workflow" -- .github
+}
+# fr_digest: a verbatim copy of fresh-review's Step 1 diff6 pipeline (~/.agents/skills/fresh-review/SKILL.md
+# § Step 1 — Resolve the scope mechanically), run in $W. land.sh's `land: digest` must equal it.
+fr_digest() (
+  cd "$W" || exit 1
+top="$(git rev-parse --show-toplevel)"
+up="$(git rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)"
+# GNU stat first: on GNU, `-f` is --file-system and succeeds with the wrong output.
+fmt=(-c '%n %s %Y'); stat -c %n -- "$top" >/dev/null 2>&1 || fmt=(-f '%N %z %m')
+{ git -C "$top" diff HEAD -- . ':!docs/reviews'
+  [ -n "$up" ] && git -C "$top" diff "$up...HEAD" -- . ':!docs/reviews'
+  git -C "$top" ls-files --others --exclude-standard -z -- . ':!docs/reviews' \
+    | (cd "$top" && xargs -0 -r stat "${fmt[@]}" --) \
+    | LC_ALL=C sort
+} | shasum -a 1 | cut -c1-6
+)
+digest() { printf '%s\n' "$err" | sed -n 's/^land: digest //p'; }
+upstream() { git -C "$W" rev-parse --abbrev-ref "$OB@{upstream}" 2>/dev/null; }
+tip() { git -C "$W" rev-parse HEAD; }
+h7() { printf '%s' "$1" | cut -c1-7; }
+merges() { ghlog | grep -F 'pr merge' | grep -vF -- '--disable-auto'; }
+direct() { merges | grep -vF -- '--auto'; }
+checkreads() { ghlog | grep -oE 'commits/[0-9a-f]{40}/' | sort -u | grep -c .; }
+# own [VAR=value …] -- [<own-branch args>…]: land.sh --own-branch --branch $OB … -- $W.
+own() {
+  local extra=()
+  while [ $# -gt 0 ] && [ "$1" != -- ]; do extra+=("$1"); shift; done
+  [ $# -gt 0 ] && shift
+  land ${extra[@]+"${extra[@]}"} -- --own-branch --branch "$OB" "$@" -- "$W"
+}
+# ores <label> <rc> <stdout>: res, plus no refs/land/* left behind.
+ores() { res "$@"; ok "$(git -C "$W" for-each-ref refs/land/ | grep -c .)" 0 "$1: no refs/land/* left"; }
+# qsetup <name> [plain-call VAR=value …]: the own branch pushed by a plain call (PR 1), R its reviewed HEAD,
+# then a review doc's add, consumed and deletion commits (docs/reviews/ only), H the new HEAD.
+qsetup() {
+  local n=$1; shift
+  ghreset; mkbranch "$n"; own "$@" --; R=$(tip)
+  docscommit r1.md "status: pending"; docscommit r1.md "status: consumed"; docsdelete; H=$(tip)
+}
+
+echo "== 42. own branch: plain, protected, fresh <B>"
+ghreset; mkbranch c42; F=$(tip)
+own --
+ores "case 42" 0 "pr open https://github.com/o/c42/pull/1"
+ok "$(srvref c42 "$OB")" "$F" "case 42: <B> pushed unchanged"
+ok "$(ghlog | awk '{print $1" "$2" "$3" "$4}' | tr '\n' '|')" \
+   "api repos/o/c42 --jq .permissions.push|pr list -R o/c42|api --method POST repos/o/c42/pulls|api --method POST repos/o/c42/issues/1/labels|" \
+   "case 42: gh calls: access, lookup, create, label"
+has "$(ghlog)" "pr list -R o/c42 --state all --head $OB --limit 30 --json number,url,state,headRefName,headRefOid,isCrossRepository,author,autoMergeRequest" "case 42: one lookup by --head, every state"
+has "$(ghlog)" "-f title=✨ feat: first work -f head=$OB -f base=master" "case 42: base master, head <B>, the oldest subject"
+ok "$(merges | grep -c .)" 0 "case 42: no pr merge"
+has "$err" "land: base $(srvref c42 master)" "case 42: land: base"; has "$err" "land: head $F" "case 42: land: head"
+ok "$(upstream)" origin/master "case 42: @{upstream} is origin/master"
+has "$err" "land: upstream origin/master (was none)" "case 42: the upstream line"
+ok "$(digest)" "$(fr_digest)" "case 42: land: digest equals fresh-review's diff6"
+ok "$([ -n "$(digest)" ] && [ "$(digest)" != da39a3 ] && echo y)" y "case 42: the digest is not the empty da39a3"
+has "$(git -C "$W" config branch.$OB.remote)" origin "case 42: branch.<B>.remote is origin"
+
+echo "== 43. own branch: a second plain call reuses the PR"
+work "a fix"
+own --
+ores "case 43" 0 "pr open https://github.com/o/c42/pull/1"
+ok "$(srvref c42 "$OB")" "$(tip)" "case 43: the fix is pushed"
+hasnt "$(ghlog)" "POST repos/o/c42/pulls" "case 43: no second create"
+has "$(ghlog)" "api user --jq .login" "case 43: the open PR's author is checked"
+has "$err" "land: upstream origin/master (was origin/master)" "case 43: the upstream stays origin/master"
+
+echo "== 44. own branch: push.default and a prior upstream"
+ghreset; mkbranch c44; git -C "$W" config push.default upstream
+own --
+ores "case 44" 1 "stuck: push.default=upstream would push $OB to master"
+nopush "case 44"; ok "$(git -C "$W" config push.default)" upstream "case 44: push.default untouched"
+ok "$(git -C "$W" config "branch.$OB.merge")" "" "case 44: no upstream set"
+git -C "$W" config --unset push.default
+git -C "$W" push -q "$SRV/o/c44.git" "$OB"; git -C "$W" fetch -q "$SRV/o/c44.git" "+refs/heads/$OB:refs/remotes/origin/$OB"
+git -C "$W" branch -q --set-upstream-to "origin/$OB" "$OB"
+own --
+ores "case 44b" 0 "pr open https://github.com/o/c44/pull/1"
+has "$err" "land: upstream origin/master (was origin/$OB)" "case 44b: a prior origin/<B> upstream is replaced"
+ok "$(upstream)" origin/master "case 44b: now origin/master"
+
+echo "== 45. own branch: protected --queue"
+qsetup c45a
+own GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 45 pending" 0 "queued https://github.com/o/c45a/pull/1"
+has "$(ghlog)" "pr merge 1 -R o/c45a --auto --merge" "case 45 pending: auto-merge queued"
+ok "$(direct | grep -c .)" 0 "case 45 pending: no direct merge"
+ok "$(srvref c45a "$OB")" "$H" "case 45: the deletion commit is pushed"
+qsetup c45b
+own GH_MERGE=notallowed GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 45 notallowed + pending" 0 "queued: needs merge https://github.com/o/c45b/pull/1"
+ok "$(direct | grep -c .)" 0 "case 45 notallowed + pending: no direct merge"
+qsetup c45c
+own GH_MERGE=notallowed GH_CHECKS_MAP="$R=pass,$H=pass" -- --queue --reviewed "$R"
+ores "case 45 notallowed + pass" 0 landed
+ok "$(direct)" "pr merge 1 -R o/c45c --merge" "case 45 notallowed + pass: one direct merge"
+qsetup c45d
+own GH_MERGE=notallowed GH_CHECKS_MAP="$R=pass" -- --queue --reviewed "$R"
+ores "case 45 notallowed + none, no CI" 0 landed
+has "$err" "land: checks none (no ci)" "case 45 none: no CI at all"
+qsetup c45e
+own GH_MERGE=notallowed GH_DIRECT=fail GH_CHECKS_MAP="$R=pass,$H=pass" -- --queue --reviewed "$R"
+ores "case 45 direct fails" 0 "queued: needs merge https://github.com/o/c45e/pull/1"
+has "$err" "land: merge failed: GraphQL: Base branch was modified" "case 45 direct fails: says why"
+
+echo "== 46. own branch: where failures come from"
+qsetup c46
+U="https://github.com/o/c46/pull/1"
+own GH_CHECKS_MAP="$R=fail,$H=pending" -- --queue --reviewed "$R"
+ores "case 46 R fail" 0 "ci failed: build (failure: Tests failed) https://github.com/o/c46/actions/runs/1"
+ok "$(merges | grep -c .)" 0 "case 46 R fail: zero merges"
+has "$err" "land: checks read R $(h7 "$R") H $(h7 "$H")" "case 46 R fail: stderr names R and H"
+ok "$(checkreads)" 2 "case 46: both SHAs read"
+has "$(ghlog)" "commits/$R/check-runs?per_page=100" "case 46: R's check-runs"; has "$(ghlog)" "commits/$R/status" "case 46: R's status"
+own GH_CHECKS_MAP="$R=status-fail,$H=none" -- --queue --reviewed "$R"
+ores "case 46 R status-fail" 0 "ci failed: ci/legacy (failure: 2 tests failed) https://ci.example/1"
+own GH_CHECKS_MAP="$R=pass,$H=fail" -- --queue --reviewed "$R"
+ores "case 46 H fail" 0 "ci failed: build (failure: Tests failed) https://github.com/o/c46/actions/runs/1"
+own GH_CHECKS_MAP="$R=fail,$H=pass" -- --queue --reviewed "$R"
+ores "case 46 H supersedes" 0 "queued $U"
+hasnt "$out$err" "ci failed" "case 46 H supersedes: R's failure is superseded by HEAD's pass"
+own GH_CHECKS_MAP="$R=neutral,$H=pass" -- --queue --reviewed "$R"
+ores "case 46 R neutral" 0 "queued $U"
+for k in cancelled timed_out startup_failure status-error stale; do
+  own GH_CHECKS_MAP="$R=pass,$H=$k" -- --queue --reviewed "$R"
+  ores "case 46 H $k" 0 "queued $U"
+  has "$err" "land: checks infra: " "case 46 H $k: infra noted"
+  hasnt "$out" "ci failed" "case 46 H $k: never ci failed"
+done
+has "$err" "land: checks infra: build (stale)" "case 46: the infra line names the check and conclusion"
+own GH_CHECKS_MAP="$R=cancelled,$H=pending" -- --queue --reviewed "$R"
+ores "case 46 R infra" 0 "queued $U"
+own GH_CHECKS_MAP="$R=404,$H=pending" -- --queue --reviewed "$R"
+ores "case 46 R 404" 1 "stuck: cannot read checks: gh: Not Found (HTTP 404)"
+own GH_CHECKS_MAP="$R=pass,$H=404" -- --queue --reviewed "$R"
+ores "case 46 H 404" 1 "stuck: cannot read checks: gh: Not Found (HTTP 404)"
+own GH_CHECKS_MAP="$R=pass,$H=hang" -- --queue --reviewed "$R"
+ores "case 46 H hang" 1 "stuck: cannot read checks: timed out"
+ok "$([ "$el" -lt 15 ] && echo y)" y "case 46 hang: bounded (${el}s < 15s)"
+own GH_CHECKS_MAP="$H=pass" -- --queue --reviewed "$H"
+ores "case 46 R = H" 0 "queued $U"
+ok "$(checkreads)" 1 "case 46 R = H: one SHA read"
+ok "$(ghlog | grep -c "commits/$H/")" 2 "case 46 R = H: one check-runs and one status GET"
+
+echo "== 47. own branch: unprotected"
+qsetup c47a GH_PROT=false
+own GH_PROT=false GH_CHECKS_MAP="$R=pass" -- --queue --reviewed "$R"
+ores "case 47 none, no CI" 0 landed
+ok "$(merges)" "pr merge 1 -R o/c47a --merge" "case 47 none: one direct merge, no --auto"
+qsetup c47b GH_PROT=false
+own GH_PROT=false GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 47 pending" 0 "queued: needs merge https://github.com/o/c47b/pull/1"
+has "$err" "land: checks pending" "case 47 pending: says so"; ok "$(merges | grep -c .)" 0 "case 47 pending: no merge call"
+own GH_PROT=false GH_CHECKS_MAP="$R=pass,$H=cancelled" -- --queue --reviewed "$R"
+ores "case 47 cancelled" 0 "queued: needs merge https://github.com/o/c47b/pull/1"
+has "$err" "land: checks infra" "case 47 cancelled: infra"; ok "$(merges | grep -c .)" 0 "case 47 cancelled: no merge call"
+own GH_PROT=false GH_CHECKS_MAP="$R=fail,$H=pending" -- --queue --reviewed "$R"
+ores "case 47 R fail" 0 "ci failed: build (failure: Tests failed) https://github.com/o/c47b/actions/runs/1"
+
+echo "== 48. own branch: update-branch only when queued and behind"
+qsetup c48; srvcommit c48 x.txt X
+own GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 48 queued" 0 "queued https://github.com/o/c48/pull/1"
+ok "$(cnt "$(ghlog)" update-branch)" 1 "case 48 queued: update-branch once"
+qsetup c48b; srvcommit c48b x.txt X
+own GH_MERGE=notallowed GH_CHECKS_MAP="$R=pass,$H=pass" -- --queue --reviewed "$R"
+ores "case 48 landed" 0 landed
+ok "$(cnt "$(ghlog)" update-branch)" 0 "case 48 landed: no update-branch"
+
+echo "== 49. own branch: the --reviewed guard"
+qsetup c49; work "after the review"; S=$(srvref c49 "$OB")
+own -- --queue --reviewed "$R"
+ores "case 49 code after R" 1 "stuck: unreviewed commits after $(h7 "$R"): ✨ feat: after the review"
+nopush "case 49"; ok "$(srvref c49 "$OB")" "$S" "case 49: server <B> unchanged"
+qsetup c49b
+own GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 49 docs only" 0 "queued https://github.com/o/c49b/pull/1"
+git -C "$W" checkout -q -b other master; echo o > "$W/o.txt"; git -C "$W" add o.txt; git -C "$W" commit -qm other; X=$(tip); git -C "$W" checkout -q "$OB"
+own -- --queue --reviewed "$X"
+ores "case 49 another branch's commit" 1 "stuck: reviewed commit $(h7 "$X") is not on $OB"
+own -- --queue --reviewed nosuchrev
+ores "case 49 unknown" 1 "stuck: reviewed commit nosuchrev not found"
+
+echo "== 50. own branch: --hold"
+qsetup c50; printf '%s\n' "ledger regression: round 4 reviewed round 3's fixes — Lachy's call" > "$tmp/diag50"
+own -- --hold -F "$tmp/diag50"
+ores "case 50" 0 "held https://github.com/o/c50/pull/1"
+ok "$(sed -n 1p "$GH_STATE/comment.txt")" "Landing held (thread:close, ADR 0028 § 3)" "case 50: the comment's first line"
+ok "$(sed -n 2p "$GH_STATE/comment.txt")" "" "case 50: then a blank line"
+ok "$(sed -n 3p "$GH_STATE/comment.txt")" "ledger regression: round 4 reviewed round 3's fixes — Lachy's call" "case 50: then the diagnosis"
+ok "$(merges | grep -c .)" 0 "case 50: no merge"
+ok "$(srvref c50 "$OB")" "$H" "case 50: the local deletion commit is pushed"
+own GH_COMMENT=fail -- --hold -F "$tmp/diag50"
+ores "case 50 comment fails" 0 "held https://github.com/o/c50/pull/1"
+has "$err" "land: comment failed: gh: Resource not accessible by integration (HTTP 403)" "case 50: comment failed"
+
+echo "== 51. own branch: auto-merge off on every call but --queue"
+ghreset; mkbranch c51; own --; setpr 1 autoMergeRequest '{}'; work "next"
+own --
+ores "case 51 plain" 0 "pr open https://github.com/o/c51/pull/1"
+dis=$(ghlog | grep -n -- '--disable-auto' | cut -d: -f1); lab=$(ghlog | grep -n 'issues/1/labels' | cut -d: -f1)
+ok "$dis" 4 "case 51: --disable-auto is the 4th gh call (after access, lookup, user)"
+ok "$([ -n "$dis" ] && [ -n "$lab" ] && [ "$dis" -lt "$lab" ] && echo y)" y "case 51: …before the push and label"
+has "$err" "land: auto-merge off" "case 51: says so"
+setpr 1 autoMergeRequest '{}'; work "another"; S=$(srvref c51 "$OB")
+own GH_DISABLE=fail --
+ores "case 51 disable fails" 1 "stuck: cannot switch auto-merge off on https://github.com/o/c51/pull/1: GraphQL: Could not disable auto-merge (disablePullRequestAutoMerge)"
+nopush "case 51 disable fails"; ok "$(srvref c51 "$OB")" "$S" "case 51 disable fails: server unchanged"
+printf 'why\n' > "$tmp/diag51"
+own -- --hold -F "$tmp/diag51"
+ores "case 51 hold" 0 "held https://github.com/o/c51/pull/1"
+has "$(ghlog)" "pr merge 1 -R o/c51 --disable-auto" "case 51 hold: disables it"
+setpr 1 autoMergeRequest '{}'; R=$(tip)
+own GH_CHECKS_MAP="$R=pending" -- --queue --reviewed "$R"
+ores "case 51 queue" 0 "queued https://github.com/o/c51/pull/1"
+hasnt "$(ghlog)" "--disable-auto" "case 51 queue: leaves it on"
+
+echo "== 52. own branch: preflight"
+ghreset; mkbranch c52; git -C "$W" checkout -q -b feat/y
+own --; ores "case 52 moved" 1 "stuck: checkout moved: on feat/y, not $OB"; nossh "case 52 moved"; nogh "case 52 moved"
+git -C "$W" checkout -q master
+land -- --own-branch --branch master -- "$W"
+ores "case 52 on master" 0 "not landed: on master, the default branch"; nossh "case 52 on master"; nogh "case 52 on master"
+git -C "$W" checkout -q --detach "$OB"
+own --; ores "case 52 detached" 1 "stuck: detached HEAD"; nossh "case 52 detached"; nogh "case 52 detached"
+git -C "$W" checkout -q "$OB"; touch "$W/.git/MERGE_HEAD"
+own --; ores "case 52 half-applied" 1 "stuck: half-applied operation (MERGE_HEAD)"; nossh "case 52 half-applied"
+rm -f "$W/.git/MERGE_HEAD"
+
+echo "== 53. own branch: route classes"
+ghreset; mkbranch c53; printf -- '- o/c53 — team repo\n' > "$LANDING_REGISTER"
+own --; ores "case 53 listed" 0 "not landed: listed o/c53: team repo"; nossh "case 53 listed"; nogh "case 53 listed"
+: > "$LANDING_REGISTER"; git -C "$W" remote remove origin
+own --; ores "case 53 no origin" 0 "not landed: no GitHub origin"; nossh "case 53 no origin"; nogh "case 53 no origin"
+sw "$HOME/repos/concepts/own53"; W="$HOME/repos/concepts/own53"; git -C "$W" add THREAD.md; git -C "$W" commit -qm t
+git -C "$W" checkout -q -b "$OB"; echo w >> "$W/THREAD.md"; git -C "$W" commit -qam "✨ feat: swept work"
+own --; ores "case 53 swept" 0 "not landed: swept by the daily sweep"; nossh "case 53 swept"; nogh "case 53 swept"
+
+echo "== 54. own branch: no push access"
+ghreset; mkbranch c54
+own GH_ACCESS=false --; ores "case 54" 0 "not landed: no push access"; nopush "case 54"
+
+echo "== 55. own branch: another author's PR"
+ghreset; mkbranch c55; seedown OPEN "$OB" 0000 someone
+own --; ores "case 55" 0 "not landed: PR https://github.com/o/x/pull/1 belongs to someone"
+nopush "case 55"; hasnt "$(ghlog)" "POST" "case 55: nothing created"
+ghreset; seedown OPEN "$OB" 0000 someone cross
+own --; ores "case 55 cross-repo" 0 "pr open https://github.com/o/c55/pull/2"
+has "$(ghlog)" "POST repos/o/c55/pulls" "case 55 cross-repo: ignored, a new PR is created"
+
+echo "== 56. own branch: the newest PR's state"
+ghreset; mkbranch c56; seedown CLOSED "$OB" 0000 me
+own --; ores "case 56 closed" 1 "stuck: PR https://github.com/o/x/pull/1 for $OB was closed unmerged"; nopush "case 56 closed"
+ghreset; git -C "$W" push -q "$SRV/o/c56.git" "$OB"; seedown MERGED "$OB" "$(tip)" me
+git --git-dir "$SRV/o/c56.git" update-ref refs/pull/1/head "$(tip)"
+own --; ores "case 56 merged at HEAD" 0 landed
+nopush "case 56 merged"; hasnt "$(ghlog)" "POST" "case 56 merged: no create"; has "$err" "land: merged in https://github.com/o/x/pull/1" "case 56 merged: says where"
+work "after the merge"
+own --; ores "case 56 merged, then new work" 0 "pr open https://github.com/o/c56/pull/2"
+has "$(ghlog)" "POST repos/o/c56/pulls" "case 56 new work: a new PR"
+
+echo "== 57. own branch: update-branch, then GitHub merges"
+ghreset; mkbranch c57; own --; R=$(tip); srvcommit c57 x.txt X
+own GH_UPDATE=merge GH_CHECKS_MAP="$R=pending" -- --queue --reviewed "$R"
+ores "case 57 queued" 0 "queued https://github.com/o/c57/pull/1"
+ok "$(git --git-dir "$SRV/o/c57.git" rev-list --parents -n 1 "refs/heads/$OB" | wc -w | tr -d ' ')" 3 "case 57: update-branch made a merge commit on the server"
+srvmergepr c57 1
+own --; ores "case 57 after the merge" 0 landed
+has "$err" "land: nothing to land" "case 57: nothing to land"; nopush "case 57"; hasnt "$(ghlog)" "POST" "case 57: no create"
+
+echo "== 58. own branch: after update-branch, a plain call fast-forwards"
+ghreset; mkbranch c58; own --; R=$(tip); srvcommit c58 x.txt X
+own GH_UPDATE=merge GH_CHECKS_MAP="$R=pending" -- --queue --reviewed "$R"
+echo mine >> "$W/a.txt"; A=$(cat "$W/a.txt")
+own --; ores "case 58" 0 "pr open https://github.com/o/c58/pull/1"
+ok "$(tip)" "$(srvref c58 "$OB")" "case 58: fast-forwarded to origin/<B>"
+ok "$(cat "$W/a.txt")" "$A" "case 58: the unrelated dirty file is byte-identical"
+has "$err" "land: tree dirty: a.txt" "case 58: …and the tree line names it"
+
+echo "== 59. own branch: update-branch plus a local fix"
+ghreset; mkbranch c59; own --; R=$(tip); srvcommit c59 x.txt X
+own GH_UPDATE=merge GH_CHECKS_MAP="$R=pending" -- --queue --reviewed "$R"
+work "local fix"; echo mine >> "$W/a.txt"; wt0=$(wtcount)
+own --; ores "case 59" 0 "pr open https://github.com/o/c59/pull/1"
+ok "$(srvref c59 "$OB")" "$(tip)" "case 59: the server tip is local HEAD"
+ok "$(git -C "$W" rev-list --parents -n 1 HEAD | wc -w | tr -d ' ')" 3 "case 59: HEAD is a merge commit (2 parents)"
+ok "$(wtcount)" "$wt0" "case 59: the scratch worktree is gone"
+ok "$(git -C "$W" status --porcelain -- a.txt)" " M a.txt" "case 59: the dirty file is kept"
+ghreset; mkbranch c59c; own --; R=$(tip); srvcommit c59c q.txt theirs
+own GH_UPDATE=merge GH_CHECKS_MAP="$R=pending" -- --queue --reviewed "$R"
+echo mine > "$W/q.txt"; git -C "$W" add q.txt; git -C "$W" commit -qm "✨ feat: q"; L=$(tip); S=$(srvref c59c "$OB")
+own --; ores "case 59 conflict" 1 "stuck: merge conflict with origin/$OB"
+ok "$(tip)" "$L" "case 59 conflict: local unchanged"; nopush "case 59 conflict"; ok "$(srvref c59c "$OB")" "$S" "case 59 conflict: server unchanged"
+ok "$(git -C "$W" status --porcelain)" "" "case 59 conflict: the tree is clean"
+
+echo "== 60. own branch: a foreign commit on origin/<B>"
+ghreset; mkbranch c60; own --; srvbranchcommit c60 "$OB" f.txt foreign; S=$(srvref c60 "$OB"); work "mine"
+own --; ores "case 60" 1 "stuck: origin/$OB has commits this checkout lacks: origin: f.txt"
+ok "$(srvref c60 "$OB")" "$S" "case 60: server ref unchanged"; nopush "case 60"
+
+echo "== 61. own branch: nothing ahead"
+ghreset; mkrepo c61; git -C "$W" checkout -q -b "$OB"
+own --; ores "case 61" 0 landed; has "$err" "land: nothing to land" "case 61: nothing to land"; nogh "case 61"
+
+echo "== 62. own branch: usage errors"
+printf 'x\n' > "$tmp/f62"
+for argv in "--own-branch -- $W" "--own-branch --branch -- $W" "--own-branch --branch $OB -- $W $W/THREAD.md" \
+            "--own-branch --branch $OB --commit-only -- $W" "--own-branch --branch $OB --queue -- $W" \
+            "--own-branch --branch $OB --reviewed abc -- $W" "--own-branch --branch $OB --queue --reviewed abc --hold -F $tmp/f62 -- $W" \
+            "--own-branch --branch $OB --hold -- $W" "--own-branch --branch $OB -F $tmp/f62 -- $W" \
+            "--own-branch --branch $OB --queue --hold -- $W" "--own-branch --branch $OB --hold -F $tmp/nope -- $W" \
+            "--own-branch --branch $OB --queue --reviewed abc -F $tmp/f62 -- $W" "--own-branch --branch $OB"; do
+  land -- $argv
+  ok "$rc/$out" "2/" "case 62: [$argv] → exit 2, stdout empty"
+  tmpempty "case 62 [$argv]"
+done
+
+echo "== 63. close's # thread:land-own snippet"
+o=$(grep -cE '^[[:space:]]*# thread:land-own( |$)' "$CLOSE"); c=$(grep -cE '^[[:space:]]*# end thread:land-own$' "$CLOSE")
+ok "$o/$c" "1/1" "one # thread:land-own marker pair"
+awk '{ l=$0; sub(/^[ \t]+/, "", l) }
+     l ~ /^# thread:land-own( |$)/ { on=1; ind=substr($0, 1, length($0)-length(l)); next }
+     l == "# end thread:land-own" { on=0 }
+     on { if (index($0, ind) == 1) print substr($0, length(ind)+1); else print $0 }' "$CLOSE" > "$tmp/osnip.sh"
+ok "$(grep -c 'bash "$ld"' "$tmp/osnip.sh")" 1 "the own snippet has exactly one bash \"\$ld\" line"
+ok "$(tail -n 1 "$tmp/osnip.sh")" 'bash "$ld" --own-branch --branch "$br" ${act:+"$act"} ${rev:+--reviewed} ${rev:+"$rev"} ${note:+-F} ${note:+"$note"} --slug "$slug" -- "$top"' \
+   "the land.sh call is the own snippet's last line"
+# ofill <act> <rev> → $tmp/run.sh, the own snippet filled as close fills it (the diagnosis carries an apostrophe).
+ofill() {
+  sed -e "s|top='<top>'|top='$W'|" -e "s|br='<branch>'|br='$OB'|" -e "s|slug='<slug>'|slug='x'|" \
+      -e "s|act=''|act='$1'|" -e "s|rev=''|rev='$2'|" \
+      -e "s|<diagnosis>|needs your call: the product question is Lachy's|" "$tmp/osnip.sh" > "$tmp/run.sh"
+}
+for sh in "${shells[@]}"; do
+  qsetup "c63${#sh}"
+  ofill "" ""; snip "$sh"; ores "case 63 [$sh] plain" 0 "pr open https://github.com/o/c63${#sh}/pull/1"
+  ok "$(upstream)" origin/master "case 63 [$sh] plain: the review base is set"
+  ofill "--queue" "$R"; snip "$sh" GH_CHECKS_MAP="$R=pass,$H=pending"; ores "case 63 [$sh] queue" 0 "queued https://github.com/o/c63${#sh}/pull/1"
+  has "$err" "land: checks read R $(h7 "$R") H $(h7 "$H")" "case 63 [$sh] queue: --reviewed arrived intact"
+  ofill "--hold" ""; snip "$sh"; ores "case 63 [$sh] hold" 0 "held https://github.com/o/c63${#sh}/pull/1"
+  ok "$(sed -n 3p "$GH_STATE/comment.txt")" "needs your call: the product question is Lachy's" "case 63 [$sh] hold: the diagnosis arrived intact"
+  ofill "" ""; snip "$sh" CLAUDE_PLUGIN_ROOT="$tmp/nowhere"; ok "$rc/$out" "2/" "case 63 [$sh]: a bogus CLAUDE_PLUGIN_ROOT → rc 2, stdout empty"
+  has "$err" "land: script not found" "case 63 [$sh]: …and says so"
+  tmpempty "case 63 [$sh] bogus root"
+done
+
+echo "== 64. own branch: case 42 under $BASH32"
+LAND_SHELL=$BASH32
+ghreset; mkbranch c64
+own --; ores "case 64" 0 "pr open https://github.com/o/c64/pull/1"
+ok "$(digest)" "$(fr_digest)" "case 64: the digest matches under $BASH32"
+ok "$(upstream)" origin/master "case 64: the upstream is origin/master"
+qsetup c64q; own GH_CHECKS_MAP="$R=fail" -- --queue --reviewed "$R"
+ores "case 64 queue" 0 "ci failed: build (failure: Tests failed) https://github.com/o/c64q/actions/runs/1"
+LAND_SHELL=bash
+
+echo "== 65. own branch: the tree line"
+ghreset; mkbranch c65
+echo dirty >> "$W/a.txt"
+own --; ores "case 65 modified" 0 "pr open https://github.com/o/c65/pull/1"
+has "$err" "land: tree dirty: a.txt" "case 65 modified: named"; hasnt "$err" "land: digest" "case 65 modified: no digest"
+git -C "$W" checkout -q -- a.txt; echo new > "$W/new.txt"
+own --; ores "case 65 untracked" 0 "pr open https://github.com/o/c65/pull/1"
+has "$err" "land: tree dirty: new.txt" "case 65 untracked: named"; hasnt "$err" "land: digest" "case 65 untracked: no digest"
+rm "$W/new.txt"; for k in 1 2 3 4 5 6; do echo "$k" > "$W/u$k.txt"; done
+own --; has "$err" "land: tree dirty: u1.txt, u2.txt, u3.txt, u4.txt, u5.txt (+1 more)" "case 65: at most five paths"
+rm "$W"/u?.txt; echo scratch.tmp >> "$W/.git/info/exclude"; echo s > "$W/scratch.tmp"
+own --; ores "case 65 excluded" 0 "pr open https://github.com/o/c65/pull/1"
+ok "$(digest)" "$(fr_digest)" "case 65 excluded: an ignored scratch file never counts"
+mkdir -p "$W/docs/reviews"; echo pending > "$W/docs/reviews/2026-01-01-abc-def.md"
+own --; ores "case 65 docs/reviews" 0 "pr open https://github.com/o/c65/pull/1"
+ok "$(digest)" "$(fr_digest)" "case 65 docs/reviews: a review doc never counts and the digest matches"
+
+echo "== 66. own branch: the upstream is restored"
+qsetup c66
+own GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
+ores "case 66 queued" 0 "queued https://github.com/o/c66/pull/1"
+ok "$(upstream)" "origin/$OB" "case 66 queued: upstream origin/<B>"
+has "$err" "land: upstream origin/$OB (was origin/master)" "case 66 queued: says so"
+own --; ok "$(upstream)" origin/master "case 66: the next plain call sets origin/master again"
+printf 'held\n' > "$tmp/diag66"
+own -- --hold -F "$tmp/diag66"; ores "case 66 hold" 0 "held https://github.com/o/c66/pull/1"
+ok "$(upstream)" "origin/$OB" "case 66 hold: upstream origin/<B>"
+has "$err" "land: upstream origin/$OB (was origin/master)" "case 66 hold: says so"
+own --; own GH_CHECKS_MAP="$R=fail" -- --queue --reviewed "$R"
+ores "case 66 ci failed" 0 "ci failed: build (failure: Tests failed) https://github.com/o/c66/actions/runs/1"
+ok "$(upstream)" "origin/$OB" "case 66 ci failed: upstream origin/<B>"
+own --; git -C "$W" checkout -q -b elsewhere
+own --; ores "case 66 preflight" 1 "stuck: checkout moved: on elsewhere, not $OB"
+ok "$(upstream)" origin/master "case 66 preflight: a preflight stuck leaves the review base (the residue)"
+git -C "$W" checkout -q "$OB"
+
+echo "== 67. own branch: no checks yet on a repo with CI"
+ghreset; mkbranch c67; addworkflow; own GH_PROT=false --; R=$(tip); docscommit r.md x; docsdelete; H=$(tip)
+own GH_PROT=false -- --queue --reviewed "$R"
+ores "case 67 unprotected" 0 "queued: needs merge https://github.com/o/c67/pull/1"
+has "$err" "land: checks none yet (ci: workflows)" "case 67 unprotected: CI from the workflow file"
+ok "$(merges | grep -c .)" 0 "case 67 unprotected: zero pr merge calls"
+ok "$(checkreads)" 2 "case 67: no base read when a workflow file exists"
+ghreset; mkbranch c67p; addworkflow; own --; R=$(tip); docscommit r.md x; docsdelete
+own GH_MERGE=notallowed -- --queue --reviewed "$R"
+ores "case 67 protected" 0 "queued: needs merge https://github.com/o/c67p/pull/1"
+ok "$(direct | grep -c .)" 0 "case 67 protected: no direct merge"
+
+echo "== 68. own branch: CI detected from the base"
+qsetup c68 GH_PROT=false; BS=$(srvref c68 master)
+own GH_PROT=false GH_CHECKS_MAP="$BS=pass" -- --queue --reviewed "$R"
+ores "case 68" 0 "queued: needs merge https://github.com/o/c68/pull/1"
+has "$err" "land: checks none yet (ci: base)" "case 68: CI from the base tip"
+ok "$(merges | grep -c .)" 0 "case 68: no merge"
+has "$(ghlog)" "commits/$BS/check-runs" "case 68: the base tip is read"
+own GH_PROT=false GH_CHECKS_MAP="$BS=404" -- --queue --reviewed "$R"
+ores "case 68 base 404" 1 "stuck: cannot read checks: gh: Not Found (HTTP 404)"
+
+echo "== 69. own branch: a fresh R after ci failed"
+ghreset; mkbranch c69; own --; R1=$(tip); docscommit r1.md pending; docscommit r1.md consumed; docsdelete; D1=$(tip)
+own GH_CHECKS_MAP="$R1=fail" -- --queue --reviewed "$R1"
+ores "case 69 first" 0 "ci failed: build (failure: Tests failed) https://github.com/o/c69/actions/runs/1"
+own --; docscommit r2.md pending; docscommit r2.md consumed; docsdelete; D2=$(tip)
+own GH_CHECKS_MAP="$R1=fail,$D1=pass,$D2=pending" -- --queue --reviewed "$D1"
+ores "case 69 second" 0 "queued https://github.com/o/c69/pull/1"
+has "$(ghlog)" "commits/$D1/check-runs" "case 69: the previous deletion commit's CI is read"
+hasnt "$(ghlog)" "commits/$R1/" "case 69: the first round's R is not read again"
 
 echo
 [ "$fail" = 0 ] && echo "land.test.sh: ALL PASS" || echo "land.test.sh: FAILED"
