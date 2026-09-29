@@ -1,12 +1,24 @@
 #!/usr/bin/env bash
 # repo-state.sh [<dir>] — thread:close step 2's branch check: is the repo at <dir> (default: the CWD)
-# sitting on a feature branch with commits its default branch does not have?
+# sitting on a feature branch with commits its default branch does not have, or on its default branch
+# with commits origin/<default> does not have?
 #
 # Prints nothing, or exactly one line on stdout:
 #   on <branch>, <N> commit(s) unmerged to <default>
+#   on <default>, <N> commit(s) not on origin/<default> — queued in close/<…>
+#   on <default>, <N> commit(s) not on origin/<default> — stranded
+#   on <default>, <N> commit(s) not on origin/<default> — <Q> queued in close/<…>, <S> stranded
 #   on <branch>, default branch unresolved — unmerged check skipped
-# Nothing on a detached HEAD, an unborn branch, a bare repo, outside git, on the default branch, or with
-# 0 unmerged commits.
+# Nothing on a detached HEAD, an unborn branch, a bare repo, outside git, on the default branch when it
+# is not ahead, or with 0 unmerged commits.
+#
+# Queued vs stranded is local evidence only. Landing (land.sh) sends a protected repo's close-outs to a
+# close/<cdate>-<slug>-<sha12> branch on origin, which leaves a refs/remotes/origin/close/<…> tracking
+# ref in this clone; that branch is the head of the `landing` PR. A commit reachable from such a ref is
+# queued, any other is stranded: the queued count is what the union of every close ref reaches. The one
+# ref named is the close ref that carries the most of them, the newest tip breaking a tie.
+# A ref from a merged PR carries nothing ahead and is ignored; one whose PR closed unmerged still reads
+# queued (close's § Edge cases).
 #
 # The default branch comes from the local refs/remotes/origin/HEAD symref only: no remote is contacted,
 # no configured init default is read and no branch name is ever assumed. When that symref is unset or
@@ -70,10 +82,41 @@ unresolved() { echo "on $br, default branch unresolved — unmerged check skippe
 
 # 5. Unresolved applies on the default branch too.
 [ -n "$def" ] || unresolved
-# 6. On the default branch: nothing to flag.
-[ "$br" = "$def" ] && exit 0
 
-# 7. The base: the remote-tracking ref, else the local branch. Full refnames, no guessing.
+# 6. On the default branch: commits origin/<default> does not have, queued in a close/… ref or stranded.
+#    Without origin/<default> (a dangling origin/HEAD) the line is the unresolved one.
+if [ "$br" = "$def" ]; then
+  up="refs/remotes/origin/$def"
+  git -C "$dir" rev-parse -q --verify "$up" >/dev/null 2>&1; rc=$?
+  [ "$rc" -eq 1 ] && unresolved
+  [ "$rc" -eq 0 ] || fail "rev-parse $up failed (rc $rc)"
+  n=$(git -C "$dir" rev-list --count "$up..HEAD" 2>/dev/null) || fail "rev-list failed ($up)"
+  [ "$n" -gt 0 ] 2>/dev/null || exit 0
+  line="on $def, $n commit(s) not on origin/$def"
+  # One call counts the stranded ones: ahead commits no close ref reaches.
+  s=$(git -C "$dir" rev-list --count HEAD --not "$up" --glob='refs/remotes/origin/close/*' 2>/dev/null) \
+    || fail "rev-list failed (refs/remotes/origin/close/*)"
+  if [ "$s" -ge "$n" ]; then echo "$line — stranded"; exit 0; fi
+  # Name the carrier: the close ref that reaches the most ahead commits (the smallest m, the ahead
+  # commits it does not reach), ties to the newest tip. A tip's date alone is no guide: the daily
+  # lander's update-branch merge re-dates an older, smaller close branch. Stop once one ref reaches
+  # every queued commit (m == s). Refnames hold no whitespace or glob characters, so the unquoted list
+  # splits safely.
+  refs=$(git -C "$dir" for-each-ref --sort=-committerdate --format='%(refname)' refs/remotes/origin/close/ 2>/dev/null) \
+    || fail "for-each-ref failed (refs/remotes/origin/close/)"
+  carrier='' best=$n
+  for r in $refs; do
+    m=$(git -C "$dir" rev-list --count HEAD --not "$up" "$r" 2>/dev/null) || fail "rev-list failed ($r)"
+    if [ "$m" -lt "$best" ]; then best=$m; carrier=${r#refs/remotes/origin/}; fi
+    [ "$best" -eq "$s" ] && break
+  done
+  [ -n "$carrier" ] || fail "no close ref carries the $((n - s)) queued commit(s)"
+  if [ "$s" -eq 0 ]; then echo "$line — queued in $carrier"
+  else echo "$line — $((n - s)) queued in $carrier, $s stranded"; fi
+  exit 0
+fi
+
+# 7. On a feature branch. The base: the remote-tracking ref, else the local branch. Full refnames, no guessing.
 base=''
 for cand in "refs/remotes/origin/$def" "refs/heads/$def"; do
   git -C "$dir" rev-parse -q --verify "$cand" >/dev/null 2>&1; rc=$?
