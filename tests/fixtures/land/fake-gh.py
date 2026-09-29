@@ -19,9 +19,11 @@ Behaviour per call is chosen by environment variables (default in brackets):
   GH_CHECKS  [none]  the checks kind for any SHA GH_CHECKS_MAP does not name
   GH_CHECKS_MAP      "<sha>=<kind>[,<sha>=<kind>…]", a full SHA or a prefix of one
                                                                      GET …/commits/<sha>/check-runs, …/status
-Checks kinds: none | pending | pass | neutral | fail | status-fail | cancelled | timed_out |
-startup_failure | status-error | stale | 404 | hang, served as REST JSON (a check run named `build`, a
-status context `ci/legacy`); 404 exits 1 with gh's `gh: Not Found (HTTP 404)`.
+Checks kinds: none | pending | pass | neutral | fail | fail-notitle | status-fail | status-fail-nodesc |
+cancelled | timed_out | startup_failure | status-error | stale | 404 | hang, served as REST JSON (a check
+run named `build`, a status context `ci/legacy`); 404 exits 1 with gh's `gh: Not Found (HTTP 404)`.
+fail-notitle is a failed run with `output.title: null`, as GitHub Actions reports one; status-fail-nodesc
+is a failed status with `description: null`.
 `pr list --head <b>` keeps PRs whose headRefName is <b>. A create writes refs/pull/<n>/head on the bare
 server; GH_UPDATE=merge really merges server master into the PR's head branch and moves refs/pull/<n>/head;
 `--auto` ok sets autoMergeRequest, `--disable-auto` ok clears it, a direct ok marks the PR MERGED.
@@ -166,11 +168,13 @@ KINDS = {
     "pass": ({"status": "completed", "conclusion": "success", "output": {"title": "All good"}}, None),
     "neutral": ({"status": "completed", "conclusion": "neutral", "output": {"title": "Nothing to do"}}, None),
     "fail": ({"status": "completed", "conclusion": "failure", "output": {"title": "Tests failed"}}, None),
+    "fail-notitle": ({"status": "completed", "conclusion": "failure", "output": {"title": None}}, None),
     "cancelled": ({"status": "completed", "conclusion": "cancelled", "output": {"title": "Cancelled"}}, None),
     "timed_out": ({"status": "completed", "conclusion": "timed_out", "output": {"title": "Timed out"}}, None),
     "startup_failure": ({"status": "completed", "conclusion": "startup_failure", "output": {"title": None}}, None),
     "stale": ({"status": "completed", "conclusion": "stale", "output": {"title": None}}, None),
     "status-fail": (None, {"state": "failure", "description": "2 tests failed"}),
+    "status-fail-nodesc": (None, {"state": "failure", "description": None}),
     "status-error": (None, {"state": "error", "description": "runner lost"}),
     "none": (None, None),
 }

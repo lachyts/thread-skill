@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # skills/_shared/scripts/land.sh — the shared landing route (ADR 0028, queue and finish) — close's
 # `# thread:land` snippet and handoff's `# thread:handoff-land` snippet (cases 1–41), and its own-branch mode
-# with close's `# thread:land-own` snippet (cases 42–69). Fixture repos talk to bare "servers" under $tmp/srv
+# with close's `# thread:land-own` snippet (cases 42–70). Fixture repos talk to bare "servers" under $tmp/srv
 # through a fake ssh that maps git@github.com:<o>/<r>.git and ssh://git@github.com/<o>/<r>.git there; a fake
 # `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
 # labels, update-branch, the user, hold comments and per-SHA check-runs and status. Every handed path goes through a symlinked alias of the temp dir, so the
@@ -1249,7 +1249,8 @@ own --; ores "case 61" 0 landed; has "$err" "land: nothing to land" "case 61: no
 echo "== 62. own branch: usage errors"
 printf 'x\n' > "$tmp/f62"
 for argv in "--own-branch -- $W" "--own-branch --branch -- $W" "--own-branch --branch $OB -- $W $W/THREAD.md" \
-            "--own-branch --branch $OB --commit-only -- $W" "--own-branch --branch $OB --queue -- $W" \
+            "--own-branch --branch $OB --commit-only -- $W" "--own-branch --branch $OB --slug x -- $W" \
+            "--own-branch --branch $OB --queue -- $W" \
             "--own-branch --branch $OB --reviewed abc -- $W" "--own-branch --branch $OB --queue --reviewed abc --hold -F $tmp/f62 -- $W" \
             "--own-branch --branch $OB --hold -- $W" "--own-branch --branch $OB -F $tmp/f62 -- $W" \
             "--own-branch --branch $OB --queue --hold -- $W" "--own-branch --branch $OB --hold -F $tmp/nope -- $W" \
@@ -1267,11 +1268,11 @@ awk '{ l=$0; sub(/^[ \t]+/, "", l) }
      l == "# end thread:land-own" { on=0 }
      on { if (index($0, ind) == 1) print substr($0, length(ind)+1); else print $0 }' "$CLOSE" > "$tmp/osnip.sh"
 ok "$(grep -c 'bash "$ld"' "$tmp/osnip.sh")" 1 "the own snippet has exactly one bash \"\$ld\" line"
-ok "$(tail -n 1 "$tmp/osnip.sh")" 'bash "$ld" --own-branch --branch "$br" ${act:+"$act"} ${rev:+--reviewed} ${rev:+"$rev"} ${note:+-F} ${note:+"$note"} --slug "$slug" -- "$top"' \
+ok "$(tail -n 1 "$tmp/osnip.sh")" 'bash "$ld" --own-branch --branch "$br" ${act:+"$act"} ${rev:+--reviewed} ${rev:+"$rev"} ${note:+-F} ${note:+"$note"} -- "$top"' \
    "the land.sh call is the own snippet's last line"
 # ofill <act> <rev> → $tmp/run.sh, the own snippet filled as close fills it (the diagnosis carries an apostrophe).
 ofill() {
-  sed -e "s|top='<top>'|top='$W'|" -e "s|br='<branch>'|br='$OB'|" -e "s|slug='<slug>'|slug='x'|" \
+  sed -e "s|top='<top>'|top='$W'|" -e "s|br='<branch>'|br='$OB'|" \
       -e "s|act=''|act='$1'|" -e "s|rev=''|rev='$2'|" \
       -e "s|<diagnosis>|needs your call: the product question is Lachy's|" "$tmp/osnip.sh" > "$tmp/run.sh"
 }
@@ -1365,6 +1366,26 @@ own GH_CHECKS_MAP="$R1=fail,$D1=pass,$D2=pending" -- --queue --reviewed "$D1"
 ores "case 69 second" 0 "queued https://github.com/o/c69/pull/1"
 has "$(ghlog)" "commits/$D1/check-runs" "case 69: the previous deletion commit's CI is read"
 hasnt "$(ghlog)" "commits/$R1/" "case 69: the first round's R is not read again"
+
+echo "== 70. own branch: empty fields never shift the result line"
+# GitHub Actions check runs carry `output.title: null`, a status may have no description, and a deleted
+# author has no login. Each field must stay in its own slot, and the stop rule's key (the ci failed line
+# without its URL) must hold no URL, so the same failure twice gives the same key.
+key() { printf '%s\n' "${out% http*}"; }
+qsetup c70
+own GH_CHECKS_MAP="$R=fail-notitle,$H=pending" -- --queue --reviewed "$R"
+ores "case 70 R null title" 0 "ci failed: build (failure) https://github.com/o/c70/actions/runs/1"
+ok "$(key)" "ci failed: build (failure)" "case 70 R null title: the key is name and conclusion, no URL"
+own GH_CHECKS_MAP="$R=pass,$H=fail-notitle" -- --queue --reviewed "$R"
+ores "case 70 H null title" 0 "ci failed: build (failure) https://github.com/o/c70/actions/runs/1"
+own GH_CHECKS_MAP="$R=status-fail-nodesc,$H=none" -- --queue --reviewed "$R"
+ores "case 70 null description" 0 "ci failed: ci/legacy (failure) https://ci.example/1"
+ok "$(key)" "ci failed: ci/legacy (failure)" "case 70 null description: the key holds no URL"
+own GH_CHECKS_MAP="$R=pass,$H=cancelled" -- --queue --reviewed "$R"
+has "$err" "land: checks infra: build (cancelled)" "case 70 infra: the INFRA field is read whole"
+ghreset; mkbranch c70b; seedown OPEN "$OB" 0000 ""
+own --; ores "case 70 empty login" 0 "not landed: PR https://github.com/o/x/pull/1 belongs to an unknown author"
+nopush "case 70 empty login"
 
 echo
 [ "$fail" = 0 ] && echo "land.test.sh: ALL PASS" || echo "land.test.sh: FAILED"

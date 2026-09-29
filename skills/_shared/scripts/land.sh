@@ -29,7 +29,7 @@
 #
 # Own-branch mode (ADR 0028 §§ 1–3, 5; close's § Land the own branch) lands the session's own branch <B>:
 #
-#   land.sh --own-branch --branch <B> [--queue --reviewed <sha> | --hold -F <diagnosis>] [--slug <s>] [--] <repo>
+#   land.sh --own-branch --branch <B> [--queue --reviewed <sha> | --hold -F <diagnosis>] [--] <repo>
 #
 # It never commits, never forces, never rebases and never deletes <B>; <B> moves only forward (a fast-forward
 # to origin/<B>, or a merge commit over update-branch's merges, made in a scratch worktree). One call:
@@ -138,7 +138,7 @@ git_line() {
 
 result() { printf '%s\n' "$1" > "$LAND_RES"; }
 
-usage() { echo "land: usage: land.sh [--slug <s>] [-F <msgfile>] [--commit-only] [--] <repo> [<path>…] | land.sh --origin-slug <repo> | land.sh --own-branch --branch <B> [--queue --reviewed <sha> | --hold -F <diagnosis>] [--slug <s>] [--] <repo>"; exit 2; }
+usage() { echo "land: usage: land.sh [--slug <s>] [-F <msgfile>] [--commit-only] [--] <repo> [<path>…] | land.sh --origin-slug <repo> | land.sh --own-branch --branch <B> [--queue --reviewed <sha> | --hold -F <diagnosis>] [--] <repo>"; exit 2; }
 
 # phys <path>: PHYS_ANC is the nearest existing directory, physical; PHYS_TAIL the missing rest ('' or
 # /a/b). PHYS is both joined. A `.` or `..` in the missing tail cannot be resolved, so it fails.
@@ -614,7 +614,11 @@ EOF
 # Everything from here to `end own-branch mode` serves `--own-branch` only; the close-out route above never
 # calls into it. It shares bounded, net_rc, the route helpers, move_branch and label_landing.
 
-# The newest same-repo PR whose head is exactly $B: "<STATE>\t<n>\t<url>\t<author>\t<auto 0|1>", or nothing.
+# Own-branch mode's python helpers print their fields joined by US (\x1f), never a tab: bash's `read` folds
+# a run of whitespace IFS characters into one, so an empty field (a null check title, a status with no
+# description, a deleted author's login) would shift every later field left. US is not whitespace, so
+# `IFS=$'\x1f' read` keeps an empty field empty.
+# The newest same-repo PR whose head is exactly $B: "<STATE>US<n>US<url>US<author>US<auto 0|1>", or nothing.
 LAND_OWN_PR_FILTER='import json, sys
 b = sys.argv[1]
 try:
@@ -627,12 +631,12 @@ hits = [p for p in prs if isinstance(p, dict) and p.get("isCrossRepository") is 
 if hits:
     p = max(hits, key=lambda p: p.get("number") or 0)
     a = (p.get("author") or {}).get("login") or ""
-    print("%s\t%s\t%s\t%s\t%s" % (p.get("state"), p.get("number"), p.get("url"), a, 1 if p.get("autoMergeRequest") else 0))'
+    print("\x1f".join(str(x) for x in (p.get("state"), p.get("number"), p.get("url"), a, 1 if p.get("autoMergeRequest") else 0)))'
 
 # The CI snapshot: argv is HEAD check-runs, HEAD status, then R check-runs, R status ("" "" when R is HEAD).
-# Prints `FAIL\t<name>\t<title>\t<url>` for the first failure by name (R's failure superseded by HEAD's own
+# Prints `FAIL US <name> US <title> US <url>` (US-joined; <title> and <url> may be empty) for the first failure by name (R's failure superseded by HEAD's own
 # completed success, neutral or skipped for that name; HEAD's failed entry preferred), else an optional
-# `INFRA\t<name> (<conclusion>)[, …]` and `STATE\t<empty|pending|infra|green>`, read from HEAD alone.
+# `INFRA US <name> (<conclusion>)[, …]` and `STATE US <empty|pending|infra|green>`, read from HEAD alone.
 LAND_CHECKS_PY='import json, sys
 INFRA = ("cancelled", "timed_out", "startup_failure", "action_required", "stale", "error")
 PASS = ("success", "neutral", "skipped")
@@ -672,13 +676,13 @@ for n, e in r.items():
     fails[n] = e
 if fails:
     n = sorted(fails)[0]
-    print("FAIL\t%s\t%s\t%s" % (n, fails[n]["t"], fails[n]["u"]))
+    print("\x1f".join(("FAIL", n, fails[n]["t"], fails[n]["u"])))
     sys.exit(0)
 infra = ["%s (%s)" % (n, e["c"]) for n, e in sorted(h.items()) if e["done"] and e["c"] in INFRA]
 if infra:
-    print("INFRA\t" + ", ".join(infra))
+    print("INFRA\x1f" + ", ".join(infra))
 state = "empty" if not h else "pending" if [n for n, e in h.items() if not e["done"]] else "infra" if infra else "green"
-print("STATE\t" + state)'
+print("STATE\x1f" + state)'
 
 # Does the base tip carry any check at all? argv: its check-runs and status files. Prints 1 or 0.
 LAND_BASE_PY='import json, sys
@@ -798,7 +802,6 @@ own_main() {
       --queue|--hold) [ -z "$act" ] || usage; act=$1; shift ;;
       --reviewed) [ $# -ge 2 ] && [ -n "$2" ] || usage; rev=$2; shift 2 ;;
       -F) [ $# -ge 2 ] && [ -n "$2" ] || usage; note=$2; shift 2 ;;
-      --slug) [ $# -ge 2 ] || usage; shift 2 ;;
       --) shift; break ;;
       -*) usage ;;
       *) break ;;
@@ -908,7 +911,7 @@ own_main() {
   own_pr_list all; rc=$?
   [ "$rc" = 124 ] && own_finish "stuck: $NET_ERR" 1
   [ "$rc" = 0 ] || own_finish "stuck: cannot look up the PR for $B: $NET_ERR" 1
-  IFS=$'\t' read -r state n url login auto <<EOF
+  IFS=$'\x1f' read -r state n url login auto <<EOF
 $OWN_HIT
 EOF
   case $state in
@@ -999,7 +1002,7 @@ EOF
     else
       cerr=$NET_ERR; OWN_HIT=
       own_pr_list open; rc=$?
-      IFS=$'\t' read -r state n url login auto <<EOF
+      IFS=$'\x1f' read -r state n url login auto <<EOF
 $OWN_HIT
 EOF
       [ "$rc" = 0 ] && [ "$state" = OPEN ] || own_finish "stuck: pr create failed: $cerr" 1
@@ -1050,7 +1053,7 @@ EOF
   out=$(python3 -c "$LAND_CHECKS_PY" "$tmpd/h.cr" "$tmpd/h.st" "$rf" "$rs") || own_finish "stuck: cannot read checks: bad JSON" 1
   st=; infra=
   local k v1 v2 v3
-  while IFS=$'\t' read -r k v1 v2 v3; do
+  while IFS=$'\x1f' read -r k v1 v2 v3; do
     case $k in
       FAIL) own_finish "ci failed: $v1 (failure${v2:+: $v2})${v3:+ $v3}" 0 ;;
       INFRA) infra=$v1 ;;
