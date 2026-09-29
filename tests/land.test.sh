@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# skills/_shared/scripts/land.sh — the shared landing route (ADR 0028, queue and finish) — and close's
-# `# thread:land` snippet. Fixture repos talk to bare "servers" under $tmp/srv through a fake ssh that maps
+# skills/_shared/scripts/land.sh — the shared landing route (ADR 0028, queue and finish) — close's
+# `# thread:land` snippet and handoff's `# thread:handoff-land` snippet. Fixture repos talk to bare "servers" under $tmp/srv through a fake ssh that maps
 # git@github.com:<o>/<r>.git and ssh://git@github.com/<o>/<r>.git there; a fake `gh`
 # (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
 # labels and update-branch. Every handed path goes through a symlinked alias of the temp dir, so the
@@ -794,6 +794,73 @@ chmod +x "$SRV/o/c40b.git/hooks/pre-receive"; S=$(srvref c40b master); edit
 land GH_PROT=false -- "$W" "$W/THREAD.md"
 res "case 40b (declined by the server)" 1 "stuck: push refused: remote: error: GH006: Protected branch update failed for refs/heads/master."
 ok "$(srvref c40b master)" "$S" "case 40b: server untouched"
+
+echo "== 41. handoff's # thread:handoff-land snippet"
+HANDOFF=$root/skills/handoff/SKILL.md
+o=$(grep -cE '^[[:space:]]*# thread:handoff-land( |$)' "$HANDOFF"); c=$(grep -cE '^[[:space:]]*# end thread:handoff-land$' "$HANDOFF")
+ok "$o/$c" "1/1" "one # thread:handoff-land marker pair"
+awk '{ l=$0; sub(/^[ \t]+/, "", l) }
+     l ~ /^# thread:handoff-land( |$)/ { on=1; ind=substr($0, 1, length($0)-length(l)); next }
+     l == "# end thread:handoff-land" { on=0 }
+     on { if (index($0, ind) == 1) print substr($0, length(ind)+1); else print $0 }' "$HANDOFF" > "$tmp/hsnip.sh"
+ok "$(grep -c 'bash "$ld"' "$tmp/hsnip.sh")" 1 "the handoff snippet has exactly one bash \"\$ld\" line"
+ok "$(tail -n 1 "$tmp/hsnip.sh")" 'bash "$ld" --slug "$slug" -F "$msg" -- "$home" "$doc"' "the land.sh call is the handoff snippet's last line"
+# fill41 <message> → $tmp/run.sh, handoff's snippet filled for the doc $W/docs/handoffs/2026-01-01-x.md.
+fill41() {
+  sed -e "s|home='<home>'|home='$W'|" -e "s|slug='<slug>'|slug='x'|" \
+      -e "s|doc='<abs doc path>'|doc='$W/docs/handoffs/2026-01-01-x.md'|" -e "s|<message>|$1|" "$tmp/hsnip.sh" > "$tmp/run.sh"
+}
+mkdoc() { D="$W/docs/handoffs/2026-01-01-x.md"; mkdir -p "$W/docs/handoffs"; echo "pending" > "$D"; }
+isuntracked() { git -C "$W" ls-files --error-unmatch docs/handoffs/2026-01-01-x.md >/dev/null 2>&1 && echo tracked || echo untracked; }
+for sh in "$BASH32" "${shells[@]}"; do
+  L="case 41 [$sh]"
+  # Protected: committed on master, pushed to a close/ branch, merge queued, never waited on.
+  ghreset; mkrepo "c41p${#sh}"; mkdoc; fill41 "📝 docs(handoff): x"
+  snip "$sh"; res "$L protected" 0 "queued https://github.com/o/c41p${#sh}/pull/1"
+  ok "$(git -C "$W" symbolic-ref HEAD)" refs/heads/master "$L: the checkout stays on master"
+  ok "$([ -f "$D" ] && echo y)" y "$L: the doc is still on disk"
+  ok "$(git -C "$W" log -1 --format=%s)" "📝 docs(handoff): x" "$L: HEAD is the doc's commit"
+  ok "$(git -C "$W" show --name-only --format= HEAD | tr '\n' ' ')" "docs/handoffs/2026-01-01-x.md " "$L: the commit holds the doc only"
+  ok "$(cnt "$(ghlog)" "pr merge 1 ")" 1 "$L: one pr merge"
+  has "$(ghlog | grep -F 'pr merge 1 ')" "--auto" "$L: the merge is queued with --auto"
+  has "$(ghlog | grep -F '/pulls ')" "title=📝 docs(handoff): x -f head=close/" "$L: the PR is titled with the doc's commit subject"
+  hasnt "$(ghlog)" "pr checks" "$L: no pr checks"; hasnt "$(ghlog)" "--watch" "$L: no --watch"
+  # Unprotected: pushed.
+  ghreset; mkrepo "c41u${#sh}"; mkdoc; fill41 "📝 docs(handoff): x"
+  snip "$sh" GH_PROT=false; res "$L unprotected" 0 landed
+  ok "$(srvref "c41u${#sh}" master)" "$(git -C "$W" rev-parse HEAD)" "$L unprotected: landed on the server"
+  # Withdrawal: rm -f, then the same snippet lands the removal.
+  rm -f "$D"; fill41 "🔧 chore(handoff): withdraw x"
+  snip "$sh" GH_PROT=false; res "$L withdrawal" 0 landed
+  ok "$(git -C "$W" show --name-status --format= HEAD | tr '\t\n' ' |')" "D docs/handoffs/2026-01-01-x.md|" "$L withdrawal: the deletion is committed"
+  ok "$(git -C "$W" symbolic-ref HEAD)" refs/heads/master "$L withdrawal: still on master"
+  ok "$(srvref "c41u${#sh}" master)" "$(git -C "$W" rev-parse HEAD)" "$L withdrawal: landed on the server"
+  # Withdrawing a doc that is already gone commits nothing: `landed` with `land: nothing to land` and a
+  # `dropped` line, which handoff § Commit it reads as no landing row and `not versioned: <path> (not on disk)`.
+  H=$(git -C "$W" rev-parse HEAD); snip "$sh" GH_PROT=false; res "$L withdrawal of a gone doc" 0 landed
+  has "$err" "land: nothing to land" "$L withdrawal of a gone doc: nothing to land"
+  has "$err" "land: dropped docs/handoffs/2026-01-01-x.md (not on disk, never tracked)" "$L withdrawal of a gone doc: the path is dropped"
+  ok "$(git -C "$W" rev-parse HEAD)" "$H" "$L withdrawal of a gone doc: no commit"
+  # Refresh: origin moved on; the default is fast-forwarded first, an untracked scratch file untouched.
+  ghreset; mkrepo "c41r${#sh}"; srvcommit "c41r${#sh}" other.txt theirs; S=$(srvref "c41r${#sh}" master)
+  echo mine > "$W/scratch.txt"; mkdoc; fill41 "📝 docs(handoff): x"
+  snip "$sh" GH_PROT=false; res "$L refresh" 0 landed
+  ok "$(cat "$W/other.txt" 2>/dev/null)" theirs "$L refresh: origin's file is in the working tree"
+  ok "$(git -C "$W" merge-base --is-ancestor "$S" HEAD && echo y)" y "$L refresh: origin's commit is in HEAD's ancestry"
+  ok "$(git -C "$W" rev-parse HEAD^)" "$S" "$L refresh: the doc commit sits on top of origin's"
+  ok "$(git -C "$W" status --porcelain -- scratch.txt)/$(cat "$W/scratch.txt")" "?? scratch.txt/mine" "$L refresh: the scratch file is untouched"
+  # Not versioned: a detached HEAD commits nothing; the doc is on disk only.
+  ghreset; mkrepo "c41n${#sh}"; git -C "$W" checkout -q --detach; mkdoc; fill41 "📝 docs(handoff): x"
+  snip "$sh"; res "$L detached" 1 "stuck: detached HEAD"
+  has "$err" "land: nothing committed" "$L detached: nothing committed"
+  ok "$([ -f "$D" ] && echo y)/$(isuntracked)" y/untracked "$L detached: the doc is on disk, untracked"
+  # A bogus CLAUDE_PLUGIN_ROOT: the guard exits 2 before anything is created; no fallback commit.
+  git -C "$W" checkout -q master
+  snip "$sh" CLAUDE_PLUGIN_ROOT="$tmp/nowhere"; ok "$rc/$out" "2/" "$L: a bogus CLAUDE_PLUGIN_ROOT → rc 2, stdout empty"
+  has "$err" "land: script not found" "$L: …and says so"
+  ok "$([ -f "$D" ] && echo y)/$(isuntracked)" y/untracked "$L: the doc stays on disk, uncommitted"
+  tmpempty "$L bogus root"
+done
 
 echo
 [ "$fail" = 0 ] && echo "land.test.sh: ALL PASS" || echo "land.test.sh: FAILED"

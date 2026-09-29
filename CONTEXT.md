@@ -68,7 +68,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the context feels long; that recommendation belongs to `next`.
 - **Handoff doc** — the durable brief `thread:handoff`, its only writer, writes
   on explicit fork intent only (Lachy's ask, or his pick from a router's menu;
-  never self-initiated) to `<home>/docs/handoffs/<date>-<slug>.md` and commits —
+  never self-initiated) to `<home>/docs/handoffs/<date>-<slug>.md` and commits
+  and lands (pushed, merge queued, never waited on) —
   `<home>` the unit directory: the project dir under `~/Projects/`, the
   workspace dir under `~/repos/workspaces/`, else the git toplevel.
   Lifecycle `pending → consumed → deleted`: marked `status: consumed` at

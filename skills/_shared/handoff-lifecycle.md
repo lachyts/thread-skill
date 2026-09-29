@@ -1,6 +1,6 @@
 # Handoff lifecycle — the handoff-doc contract
 
-The one statement of what a handoff doc is, the states it moves through, and the thread-state transitions every continuity route applies. `thread:handoff`, `thread:open`, `thread:close` and the capture writer cite this file; procedures stay with the skill that runs them — close's scan snippet and its step 7.2 git commands, handoff's commit and withdraw commands, open's pickup steps — except the peer guard's age test, which sits beside its rule in § Close-out.
+The one statement of what a handoff doc is, the states it moves through, and the thread-state transitions every continuity route applies. `thread:handoff`, `thread:open`, `thread:close` and the capture writer cite this file; procedures stay with the skill that runs them — close's scan snippet and its step 7.2 git commands, handoff's landing call and withdraw commands, open's pickup steps — except the peer guard's age test, which sits beside its rule in § Close-out.
 
 A **handoff doc** is a file in `<home>/docs/handoffs/`, written only by `thread:handoff`, on explicit fork intent (handoff **Invocation gate.**). `<home>` is the directory § Home resolves. The working tree holds in-flight handoffs only: `ls docs/handoffs/` is the live list.
 
@@ -38,7 +38,7 @@ refreshed: <YYYY-MM-DD>  # optional — added by thread:close when it refreshes 
 
 ## States
 
-- **`pending`** — written and committed; the thread's continuation until a session picks it up (§ While pending).
+- **`pending`** — written and handed to landing: committed, then pushed or its merge queued; committed only when `not landed:` (a register-listed or swept repo, no GitHub origin, a checkout off the default branch); or on disk only when `not versioned` (handoff § Commit it); the thread's continuation until a session picks it up (§ While pending).
 - **`consumed`** — the picking-up session set it (§ Pickup); the doc's job is over.
 - **deleted** — a close removed it once the peer guard allowed (§ Close-out); git history keeps every version.
 - **legacy** — no `status:` line (written before ADR 0017). Counted in close's step-8 report and otherwise left alone: never refreshed, never deleted, never marked consumed, never a reason to suppress — except in a slug-filtered `_shared` (§ Home): a legacy doc has no `thread:`, so it is neither listed nor counted there. Add the front matter by hand to bring one into the lifecycle.
@@ -86,7 +86,7 @@ A consumer that exits by `stash` or `defer` instead leaves the consumed doc for 
 
 ## Withdrawn
 
-A handoff called off in the same session ("never mind, keep going") is no handoff at all: the session removes the doc at once — the command is handoff § Lifecycle — and undoes the handoff row: when the thread has a THREAD.md, it rewrites real Resume instructions there in place of the `Read <abs doc path> first` pointer (the session's own close then carries the file). The undo also **reopens the captures the handoff superseded** (handoff **Open captures.**): every `Work/Tasks` note carrying `Superseded by handoff <abs doc path>` goes back to `status: open`, drops `completed:` and that Notes line, and a scheduled one gets its unchecked day-page line back (`task-writer.md` § 3b, with its dedup). The marker is on disk, so this survives a compaction. No pending doc outlives the intent, no pointer names a deleted file, and close finds nothing pending. A doc left by a misfire is the one way the handoff route can silence a later close: a pending doc nobody meant suppresses that thread's continuation tasks.
+A handoff called off in the same session ("never mind, keep going") is no handoff at all: the session removes the doc at once and lands the removal the same way — the commands are handoff § Lifecycle — and undoes the handoff row: when the thread has a THREAD.md, it rewrites real Resume instructions there in place of the `Read <abs doc path> first` pointer (the session's own close then carries the file). The undo also **reopens the captures the handoff superseded** (handoff **Open captures.**): every `Work/Tasks` note carrying `Superseded by handoff <abs doc path>` goes back to `status: open`, drops `completed:` and that Notes line, and a scheduled one gets its unchecked day-page line back (`task-writer.md` § 3b, with its dedup). The marker is on disk, so this survives a compaction. No pending doc outlives the intent, no pointer names a deleted file, and close finds nothing pending. A doc left by a misfire is the one way the handoff route can silence a later close: a pending doc nobody meant suppresses that thread's continuation tasks.
 
 ## Thread state
 
@@ -107,5 +107,6 @@ The single definition of the `state:` transitions every continuity route applies
 - A thread's **effective slug** is its THREAD.md's front-matter `slug:`, else, for a repo thread, its directory's name (`${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` § Repo-thread lookup). It is the value wherever a THREAD.md's `slug:` is read: the doc's `thread:` (§ Front matter), close's handoff-scan `slug` input, and handoff's capture match (**Open captures.**).
 - A thread **created at stash or defer** takes the creation row and then that route's row in the same step: it lands `parked` or `paused`, never `active`, and a shared thread's new INDEX line goes straight under `## Parked` or `## Paused`.
 - The pickup row never reopens a `done` thread. On the handoff-doc and `<slug>` paths it applies only when a pending doc was actually consumed — a legacy doc, or a pointer to a doc already deleted, applies nothing.
-- The handoff row applies only when the thread has a THREAD.md, after the doc is committed — or, when the commit was skipped (`not versioned:`), after it is written: the continuation is live either way.
+- The handoff row applies only when the thread has a THREAD.md, after the landing call — whatever its result, `not versioned:` included: the continuation is live either way.
+- `/thread:open save` stays commit-only (`--commit-only`, close § Land the close-outs); handoff never is: its doc is landed (handoff § Commit it).
 - Applying a row writes the THREAD.md and INDEX only; it adds no commit of its own. They are carried by the same commits that already carry those files (the consumer's close, close's tool-repo commit (step 7.1), the workspaces and `~/Projects` sweeps), and handoff's own commit stays the one doc (ADR 0017). A repo thread's THREAD.md written by a stash, defer, handoff or pickup row stays uncommitted until the next `thread:close` or `/thread:open save` that resolves that thread, from any CWD (close step 7.1 commits whichever rung resolved it). A close in that repo that resolves a different thread — rung 2 to a `_shared` slug, say — does not commit it.
