@@ -1,6 +1,6 @@
 // Close lands the session's own branch (ADR 0028 §§ 1–3, 5, 7; task p11-4). close SKILL.md judges the own
 // branch by exact name (§ The own branch, ADR 0026 condition 1's test), then sub-step 7.9 runs § Land the own
-// branch: land.sh's own-branch mode through the `# thread:land-own` snippet (tests/land.test.sh cases 42–69
+// branch: land.sh's own-branch mode through the `# thread:land-own` snippet (tests/land.test.sh cases 42–70
 // run it), an inline /fresh-review loop at the xhigh floor with no round cap, and the merge queued only after
 // a clean round. The loop stops only on ADR 0028 § 3's three conditions and then holds the PR open with the
 // diagnosis; nothing waits for CI or the merge, and the banner waits for the review loop only. Reads files
@@ -23,7 +23,7 @@ const EDGES = () => section(text(), /^## Edge cases/)
 const GUARD = () => section(text(), /^## Guardrails/)
 const FENCE = () => fencedBlocks(SEC() ?? '').find((b) => b.some((l) => l.startsWith('# thread:land-own')))
 
-const CALL = 'bash "$ld" --own-branch --branch "$br" ${act:+"$act"} ${rev:+--reviewed} ${rev:+"$rev"} ${note:+-F} ${note:+"$note"} --slug "$slug" -- "$top"'
+const CALL = 'bash "$ld" --own-branch --branch "$br" ${act:+"$act"} ${rev:+--reviewed} ${rev:+"$rev"} ${note:+-F} ${note:+"$note"} -- "$top"'
 const QUEUE_READS = 'land.sh reads failures from the clean round\'s `head:` (`--reviewed`), whose CI ran while the round reviewed it, and from the pushed HEAD; HEAD\'s own result for a check supersedes; the merge decision reads HEAD alone, and no checks on HEAD in a repo with CI is pending, never green'
 const ADR_STOP = 'the review ledger\'s regression stop, the same check failing the same way twice after effort has risen to `max`, or a finding that needs Lachy\'s decision'
 const DIRTY_FIX = 'commit them, ignore them (.gitignore, or .git/info/exclude for local scratch), or remove them'
@@ -50,9 +50,14 @@ test('§ The own branch: detection by exact name, evidence in context, report-on
     "Close's own close-out commit never makes a branch its own",
     'A branch matched by topic or similarity never counts',
     '`/thread:execute`', 'is never own',
+    'every task branch `/thread:execute` makes is `audit-fix/<alias>`', 'an `audit-fix/…` branch is never own',
+    'known by its name, never by where it is checked out', 'The checkout path decides nothing',
+    'EnterWorktree also puts its worktrees under `.claude/worktrees/`, and a branch this session made there is own by route (a)',
     "Another session's branch keeps today's report-only handling",
     '`not landed: not the cwd checkout`',
   ])
+  // Route (a) accepts EnterWorktree, whose worktrees live under .claude/worktrees/, so that path never rules a branch out.
+  assert.ok(!(o ?? '').includes('`.claude/worktrees/` checkouts'), '§ The own branch rules out `.claude/worktrees/` checkouts, which contradicts route (a)')
   const t = text()
   const a = t.indexOf('\n## A finished task closes itself'), b = t.indexOf('\n## The own branch\n'), c = t.indexOf('\n## Memory scope discipline')
   assert.ok(a > 0 && a < b && b < c, '§ The own branch is not between § A finished task closes itself and § Memory scope discipline')
@@ -145,6 +150,24 @@ test('what --queue reads: one snapshot of the reviewed commit and HEAD, never gr
   ])
 })
 
+test('the loop re-runs Verify after fixes, before the next dispatch; ci failed goes through it and the ledger', () => {
+  const sec = SEC() ?? ''
+  const c = collapse(sec)
+  assertHas(c, 'loop step 7', [
+    "7. **Verify.** After the round's fix commits and before the next dispatch, re-run the task's `**Verify:**` line",
+    "the repo's own test command",
+    'Every commit outside `docs/reviews/` since the last green run needs it, a `ci failed` fix included',
+    'A red run is handled like `ci failed`: count its key (§ The stop rule), fix the cause in a new commit, and run this step again.',
+    'Only a green run goes on to the ledger.',
+    'in a repo with no CI, `--queue` merges on no checks',
+    '8. **Ledger.**', 'runs before every re-dispatch, after step 7',
+    "Then loop steps 7 and 8 (Verify, Ledger), as after any round's fixes, which lead to the next round.",
+  ])
+  const fix = pos(sec, /^6\. \*\*Fix\.\*\*/), ver = pos(sec, /^7\. \*\*Verify\.\*\*/), led = pos(sec, /^8\. \*\*Ledger\.\*\*/)
+  assert.ok(fix >= 0 && fix < ver && ver < led, 'the loop is not Fix → Verify → Ledger')
+  assert.ok(!c.includes('Then the next round, from step 1'), 'ci failed skips the Verify and Ledger steps')
+})
+
 test('#### The stop rule: the three ADR conditions, keys, infra, max, and the hold', () => {
   const stop = STOP()
   const c = collapse(stop ?? '')
@@ -153,7 +176,11 @@ test('#### The stop rule: the three ADR conditions, keys, infra, max, and the ho
     'The key is the `ci failed:` line without its URL: check name, conclusion and title.',
     'Only `failure` conclusions reach the key: `cancelled`, `timed_out`, `startup_failure`, `action_required`, `stale` and a status `error` are infrastructure, which never count and never raise effort.',
     'The second failure with one key raises effort to `max`, and effort never lowers.',
-    'The second same-key failure on a round that really ran at `max` is the stop',
+    'The stop is two failures with one key, both counted on rounds that really ran at `max`',
+    'failures from rounds below `max` never count towards it',
+    'A `ci failed` belongs to the round whose clean `head:` it read, and a red Verify run to the round whose fixes it ran.',
+    'A check with no title prints `(failure)`, so its key is the name and conclusion alone.',
+    'A red Verify run (loop step 7) counts the same way, keyed `verify <command>: <first failing test or error line>`.',
     'A round counts as `max` only when its doc says `effort: max` and the wrapper reports a finder fan-out.',
     '`printenv CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`',
     /`max unavailable`[^.]*is a decision for Lachy: `--hold`/,
@@ -189,7 +216,9 @@ test('the # thread:land-own fence: one land.sh call, last, and no push, gh, forc
   assert.equal(fence.filter((l) => l.startsWith('bash "$ld"')).length, 1, 'exactly one bash "$ld" line')
   assert.equal(fence.at(-2), CALL)
   assert.equal(fence.at(-1), '# end thread:land-own')
-  assert.ok(fence.includes("top='<top>' br='<branch>' slug='<slug>' act='' rev='' note=''"), 'the placeholders line has changed')
+  assert.ok(fence.includes("top='<top>' br='<branch>' act='' rev='' note=''"), 'the placeholders line has changed')
+  assert.ok(!fence.join('\n').includes('slug'), 'the own snippet carries a slug land.sh does not read')
+  assertHas(collapse(SEC() ?? ''), '§ Land the own branch', ['land.sh reads the GitHub slug from `origin` itself, so there is no `slug` to fill'])
   assert.ok(fence.join('\n').includes("<<'DIAG'"), 'the diagnosis is not a quoted heredoc')
   const body = fence.join('\n')
   for (const bad of ['git push', '--force', '-f ', '-f"', '-f\'']) assert.ok(!body.includes(bad), `the fence holds ${bad}`)
@@ -207,7 +236,8 @@ test('step 8: the own-branch rows, verbatim', () => {
     '`landing <top> <branch>: <not landed:|landed|stuck:> …` when the first call ends 7.9 before any review, with no review suffix',
     "` · rides <B>'s PR`",
     '`ci failed:` is never a final row',
-    '`Repo state: <line> — own branch, landed in 7.9`',
+    "`Repo state: <line> — own branch, see its landing row (7.9)` for an own branch (§ The own branch), whatever 7.9's outcome",
+    '`verify <command> failed twice at max`',
   ])
 })
 
