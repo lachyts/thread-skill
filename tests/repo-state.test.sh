@@ -248,7 +248,8 @@ for phrase in 'Repo state: check failed (' '— tracked by [[' '— not tracked 
   has "$step8" "$phrase" "step 8 says: $phrase"
 done
 guard=$(awk '/^## Guardrails/{on=1; next} /^## /{on=0} on' "$CLOSE")
-has "$guard" 'never merges, pushes, rebases or deletes a branch' "§ Guardrails: close never merges, pushes, rebases or deletes a branch"
+has "$guard" "Another session's branch is still only reported" "§ Guardrails: another session's branch is still only reported"
+has "$guard" 'land.sh' "§ Guardrails: close pushes its own close-out only through land.sh"
 edges=$(awk '/^## Edge cases/{on=1; next} /^## /{on=0} on' "$CLOSE")
 for phrase in 'squash' 'unmerged to <default>' 'dubious ownership' 'tracking unknown' 'no `origin` remote' "No such remote 'origin'"; do
   has "$edges" "$phrase" "§ Edge cases says: $phrase"
