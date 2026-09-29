@@ -68,5 +68,33 @@ has "$out" "== PR #21 (into master) ==" "names the base per PR"
 has "$out" "PR #23 already merged — skipping." "reports the skip"
 ok "$(cat "$tmp/repo/.claude/merge-wave.status")" "ok" "sentinel records success"
 
+# 7. the checkout's master holds a local-only commit and origin/master has moved on (a diverged sibling):
+#    the fetch fails (ssh disabled), the fast-forward fails, and the local-only commit is named.
+gc() { git -c user.name=t -c user.email=t@t -C "$tmp/repo" "$@"; }
+gc commit -q --allow-empty -m base
+tree=$(gc rev-parse 'HEAD^{tree}')
+gc update-ref refs/remotes/origin/master "$(gc commit-tree -p HEAD -m sibling "$tree")"
+gc symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master
+gc commit -q --allow-empty -m local-only
+held=$(gc rev-parse HEAD)
+pr 71 OPEN master
+out=$(run 71); rc=$?
+ok "$rc" 0 "7. diverged checkout: the wave still exits 0"
+ok "$(cat "$tmp/repo/.claude/merge-wave.status")" "ok" "7. sentinel records success"
+ok "$(gc rev-parse HEAD)" "$held" "7. the checkout is left where it was"
+has "$out" "did not fast-forward: on master, 1 commit(s) not on origin/master — stranded" "7. names the local-only commit as stranded"
+q="close/2026-09-29-t-$(printf '%s' "$held" | cut -c1-12)"
+gc update-ref "refs/remotes/origin/$q" HEAD
+pr 72 OPEN master
+out=$(run 72); rc=$?
+ok "$rc" 0 "7. with a (stubbed) queued close ref: exits 0"
+has "$out" "did not fast-forward: on master, 1 commit(s) not on origin/master — queued in $q" "7. names the queued close/… branch"
+# 7c. origin/master behind the checkout (the fetch failed): the fast-forward is a no-op, still named.
+gc update-ref refs/remotes/origin/master HEAD~1
+pr 73 OPEN master
+out=$(run 73); rc=$?
+ok "$rc" 0 "7c. checkout ahead of a stale origin/master: exits 0"
+has "$out" "NOTE: on master, 1 commit(s) not on origin/master — queued in $q." "7c. a no-op fast-forward still names the local-only commit"
+
 echo; [ "$fail" -eq 0 ] && echo "merge-wave base: ALL PASS" || echo "merge-wave base: SOME FAILED"
 exit "$fail"

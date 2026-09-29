@@ -85,11 +85,25 @@ git config init.defaultBranch" 2>/dev/null)
   ok "$(g -C "$tmp/work" symbolic-ref -q refs/remotes/origin/HEAD)" refs/remotes/origin/master "work's origin/HEAD → origin/master (precondition)"
   g -C "$tmp/work" checkout -q -b feat/x && commits "$tmp/work" 2
   mkdir -p "$tmp/work/sub"
-  for c in w1 w4 w6 w7 w13 wa wb wc "my repo"; do g clone -q "$tmp/o.git" "$tmp/$c"; done
+  for c in w1 w4 w6 w7 w13 wa wb wc "my repo" wd1 wd2 wd3 wd4 wd5 wd7; do g clone -q "$tmp/o.git" "$tmp/$c"; done
   mkdir -p "$tmp/plain"
+
+  # 20's fixtures: the default branch ahead of origin/master. A `refs/remotes/origin/close/*` ref stands in
+  # for the queued landing PR: it is the tracking ref land.sh's close-out branch leaves in the clone.
+  sha12() { g -C "$1" rev-parse HEAD | cut -c1-12; }
+  commits "$tmp/wd1" 2
+  commits "$tmp/wd2" 2
+  q2="close/2026-09-29-t-$(sha12 "$tmp/wd2")"
+  g -C "$tmp/wd2" update-ref "refs/remotes/origin/$q2" HEAD
+  commits "$tmp/wd3" 1
+  q3="close/2026-09-29-t-$(sha12 "$tmp/wd3")"
+  g -C "$tmp/wd3" update-ref "refs/remotes/origin/$q3" HEAD
+  g -C "$tmp/wd3" update-ref refs/remotes/origin/close/2026-09-28-old-000000000000 refs/remotes/origin/master
+  commits "$tmp/wd3" 1
 
   snap() { g -C "$1" for-each-ref --format='%(refname) %(objectname) %(symref)'; }
   work_before=$(snap "$tmp/work"); seed_before=$(snap "$tmp/seed")
+  wd1_before=$(snap "$tmp/wd1"); wd2_before=$(snap "$tmp/wd2"); wd3_before=$(snap "$tmp/wd3")
 
   L2="on feat/x, 2 commit(s) unmerged to master"
 
@@ -176,13 +190,49 @@ git config init.defaultBranch" 2>/dev/null)
   # 19. ambiguous short names: `symbolic-ref --short` would print heads/<br> or remotes/origin/<default>
   g -C "$tmp/wa" tag master && commits "$tmp/wa" 1
   ok "$(g -C "$tmp/wa" symbolic-ref -q --short HEAD)" heads/master "wa: a tag named master makes the short name ambiguous (precondition)"
-  rs "$tmp/wa"; clean0 "" "19a. on master with a tag named master and a local commit ahead → nothing"
+  rs "$tmp/wa"; clean0 "on master, 1 commit(s) not on origin/master — stranded" "19a. on master with a tag named master and a local commit ahead → master, no heads/ prefix"
   g -C "$tmp/wb" checkout -q -b feat/a && commits "$tmp/wb" 1 && g -C "$tmp/wb" tag feat/a
   rs "$tmp/wb"; clean0 "on feat/a, 1 commit(s) unmerged to master" "19b. feat/a with a same-named tag → no heads/ prefix"
   g -C "$tmp/wc" branch origin/master 2>/dev/null
   g -C "$tmp/wc" checkout -q -b feat/x && commits "$tmp/wc" 2
   ok "$(g -C "$tmp/wc" symbolic-ref -q --short refs/remotes/origin/HEAD)" remotes/origin/master "wc: a local branch origin/master makes origin/HEAD's short name ambiguous (precondition)"
   rs "$tmp/wc"; clean0 "$L2" "19c. a local branch named origin/master → still resolves master"
+
+  # 20. the default branch ahead of origin/<default>: queued in a close/… branch, or stranded
+  A2="on master, 2 commit(s) not on origin/master"
+  rs "$tmp/wd1"; clean0 "$A2 — stranded" "20a. on master, 2 local-only commits, no close ref → stranded"
+  rs "$tmp/wd2"; clean0 "$A2 — queued in $q2" "20b. on master, 2 commits carried by a (stubbed) queued close/… ref → queued"
+  rs "$tmp/wd3"; clean0 "$A2 — 1 queued in $q3, 1 stranded" "20c. an older close-out queued, a newer one not (and a stale close ref) → split"
+  # 20d. the carrier's tip is an update-branch merge: HEAD is its first parent, a sibling its second.
+  commits "$tmp/wd4" 2
+  tree=$(g -C "$tmp/wd4" rev-parse 'HEAD^{tree}')
+  sib=$(g -C "$tmp/wd4" commit-tree -p refs/remotes/origin/master -m sibling "$tree")
+  mrg=$(g -C "$tmp/wd4" commit-tree -p HEAD -p "$sib" -m 'merge master' "$tree")
+  q4="close/2026-09-29-t-$(sha12 "$tmp/wd4")"
+  g -C "$tmp/wd4" update-ref "refs/remotes/origin/$q4" "$mrg"
+  rs "$tmp/wd4"; clean0 "$A2 — queued in $q4" "20d. a carrier whose tip is a merge containing HEAD → queued (containment, not equality)"
+  # 20e. stale close refs (merged PRs, never pruned) carry nothing ahead.
+  g -C "$tmp/wd5" update-ref refs/remotes/origin/close/2026-09-01-old-000000000000 refs/remotes/origin/master
+  commits "$tmp/wd5" 1
+  rs "$tmp/wd5"; clean0 "on master, 1 commit(s) not on origin/master — stranded" "20e. only a stale close ref → stranded, never queued"
+  # 20f. the real path: a push to close/… on origin creates the tracking ref (its own origin, like 8).
+  g init -q --bare -b master "$tmp/o20.git"
+  g clone -q "$tmp/o20.git" "$tmp/s20" 2>/dev/null
+  g -C "$tmp/s20" symbolic-ref HEAD refs/heads/master
+  commits "$tmp/s20" 1 && g -C "$tmp/s20" push -q origin master 2>/dev/null
+  g clone -q "$tmp/o20.git" "$tmp/w20"
+  commits "$tmp/w20" 1
+  q20="close/x-$(sha12 "$tmp/w20")"
+  g -C "$tmp/w20" push -q origin "HEAD:refs/heads/$q20" 2>/dev/null
+  ok "$(g -C "$tmp/w20" rev-parse -q --verify "refs/remotes/origin/$q20" >/dev/null && echo y)" y "20f. the close/… push left a tracking ref (precondition)"
+  rs "$tmp/w20"; clean0 "on master, 1 commit(s) not on origin/master — queued in $q20" "20f. after a real close/… push → queued in that branch"
+  # 20g. origin/HEAD dangling, on that (missing) default
+  g -C "$tmp/wd7" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/trunk
+  g -C "$tmp/wd7" checkout -q -b trunk && commits "$tmp/wd7" 1
+  rs "$tmp/wd7"; clean0 "$(unres trunk)" "20g. on trunk with origin/HEAD → a missing origin/trunk → unresolved, not nothing"
+  # 20h. a path with a space
+  g -C "$tmp/my repo" checkout -q master && commits "$tmp/my repo" 1
+  rs "$tmp/my repo"; clean0 "on master, 1 commit(s) not on origin/master — stranded" "20h. a repo path with a space, on master and ahead"
 
   # Can this git fake a dubious-ownership repo? (16c and 17a need it.)
   dubious=n
@@ -225,6 +275,7 @@ git config init.defaultBranch" 2>/dev/null)
   ok "$(printf '%s\n' "$calls" | grep -c .)" "$(printf '%s\n' "$calls" | grep -cF 'git -C "$dir"')" "18. every git call is git -C \"\$dir\""
   ok "$(printf '%s\n' "$calls" | grep -F 'git -C "$dir"' | grep -vc '2>')" 0 "18. every git -C \"\$dir\" call redirects git's stderr"
   ok "$(grep -cF 'GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS)' "$script")" 1 "18. the scrub keeps GIT_CONFIG_COUNT and GIT_CONFIG_PARAMETERS"
+  ok "$(grep -cw gh "$script")" 0 "18. the script never calls gh (queued is read from local close/… refs)"
 fi
 
 # ==== Section B: close SKILL.md ==========================================================================
@@ -233,25 +284,29 @@ rsline='rs="${CLAUDE_PLUGIN_ROOT}/skills/close/scripts/repo-state.sh"'
 ok "$(grep -cF "$rsline" "$CLOSE")" 1 "close cites the script as $rsline, exactly once"
 has "$closetext" '-f "$rs"' "close guards the script with -f \"\$rs\""
 step2=$(awk '/^2\. \*\*Check git state/{on=1} /^3\. /{on=0} on' "$CLOSE")
-for phrase in 'check failed' 'never read as "no feature branch"' 'tracking unknown' 'command grep -rlF' 'in_progress'; do
+for phrase in 'check failed' 'never read as "no feature branch"' 'tracking unknown' 'command grep -rlF' 'in_progress' \
+              'not on origin/<default>' 'queued in close/' 'stranded' 'report-only'; do
   has "$step2" "$phrase" "step 2 says: $phrase"
 done
 step6=$(grep -E '^6\. ' "$CLOSE")
 for phrase in 'Merge or retire' '§ The handoff owns the continuation' 'rule 1' '§ What remains' 'continuation' 'loose end' \
-              'the unresolved line, `check failed` and `tracking unknown` are report-only and never a candidate'; do
+              'the unresolved line, `check failed` and `tracking unknown` are report-only and never a candidate' \
+              '`not on origin/<default>` line is report-only'; do
   has "$step6" "$phrase" "step 6 says: $phrase"
 done
 step8=$(grep -E '^8\. \*\*Print the "What landed" report' "$CLOSE")
 has "$step8" '— no origin remote, check skipped' "step 8 says: the no-origin row drops the set-head hint"
 for phrase in 'Repo state: check failed (' '— tracked by [[' '— not tracked by any open task' 'continuation in' \
-              '— tracking unknown (' 'git remote set-head origin --auto'; do
+              '— tracking unknown (' 'git remote set-head origin --auto' \
+              '`Repo state: <line>` for the `not on origin/<default>` line'; do
   has "$step8" "$phrase" "step 8 says: $phrase"
 done
 guard=$(awk '/^## Guardrails/{on=1; next} /^## /{on=0} on' "$CLOSE")
 has "$guard" "Another session's branch is still only reported" "§ Guardrails: another session's branch is still only reported"
 has "$guard" 'land.sh' "§ Guardrails: close pushes its own close-out only through land.sh"
 edges=$(awk '/^## Edge cases/{on=1; next} /^## /{on=0} on' "$CLOSE")
-for phrase in 'squash' 'unmerged to <default>' 'dubious ownership' 'tracking unknown' 'no `origin` remote' "No such remote 'origin'"; do
+for phrase in 'squash' 'unmerged to <default>' 'dubious ownership' 'tracking unknown' 'no `origin` remote' "No such remote 'origin'" \
+              'not on origin/<default>' 'closed unmerged' 'single-branch'; do
   has "$edges" "$phrase" "§ Edge cases says: $phrase"
 done
 
@@ -277,6 +332,7 @@ shells=("bash")
 command -v zsh >/dev/null 2>&1 && shells+=("zsh -f")
 
 if extract repo-state "$tmp/snip-rs.sh" && [ -f "$script" ]; then
+  cp -R "$tmp/wd1" "$tmp/c20"
   # snip <shell> <cwd> [VAR=value …] → $out, $err, $rc; $1 is unquoted so "zsh -f" splits.
   snip() {
     local sh=$1 cwd=$2; shift 2
@@ -285,6 +341,8 @@ if extract repo-state "$tmp/snip-rs.sh" && [ -f "$script" ]; then
   }
   for sh in "${shells[@]}"; do
     snip "$sh" "$tmp/work" CLAUDE_PLUGIN_ROOT="$root"; clean0 "$L2" "[$sh] repo-state snippet from work"
+    snip "$sh" "$tmp/c20" CLAUDE_PLUGIN_ROOT="$root"
+    clean0 "on master, 2 commit(s) not on origin/master — stranded" "[$sh] repo-state snippet from a wd1 copy (master ahead)"
     snip "$sh" "$tmp/work" CLAUDE_PLUGIN_ROOT="$tmp/nowhere"
     ok "$rc" 2 "[$sh] repo-state snippet, script missing → rc 2"; ok "$out" "" "[$sh] script missing → stdout empty"
     starts "$err" "repo-state: script not found" "[$sh] script missing → stderr says so"
@@ -354,6 +412,9 @@ if [ -f "$script" ]; then
   ok "$(snap "$tmp/work")" "$work_before" "15. work's refs are unchanged by every run"
   ok "$(snap "$tmp/seed")" "$seed_before" "15. seed's refs are unchanged by every run"
   ok "$(g -C "$tmp/seed" symbolic-ref -q refs/remotes/origin/HEAD || echo unset)" unset "15. seed still has no origin/HEAD"
+  ok "$(snap "$tmp/wd1")" "$wd1_before" "15. wd1's refs are unchanged by every run"
+  ok "$(snap "$tmp/wd2")" "$wd2_before" "15. wd2's refs are unchanged by every run"
+  ok "$(snap "$tmp/wd3")" "$wd3_before" "15. wd3's refs are unchanged by every run"
 fi
 
 echo; [ "$fail" -eq 0 ] && echo "repo-state: ALL PASS" || echo "repo-state: SOME FAILED"
