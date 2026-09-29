@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-09-28
+last_touched: 2026-09-30
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
 ---
@@ -9,6 +9,13 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-09-29/30: 2.11.0 is released and live. Agents now land their own work (ADR 0028, P11). Nothing is running.**
+- **Grill → ADR 0028** (#42, amended #45): landing (push, PR, review, fixes, CI retries, merge, cleanup) is the agents' job. Close lands its close-out and the session's own branch (reviewed first); handoff lands its doc; one estate-wide **landing register** (a deny-list) gates every agent push, rollouts included. Amended mid-rollout to **queue and finish**: commit on the default branch, push that commit to a `close/…` branch, queue auto-merge with a merge commit, never wait. Waiting needed a detached waiter whose lock and race findings grew every review round.
+- **Rollout** `[[thread-skill-rollout-2026-09-29]]` (archived, § Completion log): 4 waves, 8h 17m, all on Opus. #43 register reader, #44 register gates rollouts, #46 `land.sh` and close's close-out landing (4 dispatches; the 4th ran with `max_plan_rounds: 6`), #47 stranded commits reported, #48 handoff lands its doc, #49 close lands its own branch (started at 6 plan rounds, converged in 4).
+- **Release:** #50 (`7f43b9c`), plugin updated in both profiles, `make release-check` green, tag `thread--v2.11.0`. Repo settings: auto-merge and delete-branch-on-merge on for `lachyts/thread-skill`.
+- **Register seeded (p11-2):** `~/repos/workspaces/_shared/knowledge/landing-register.md` (workspaces `adf83c5`) lists 11 Animately repos; giflab, gifsicle and optimizer land. P11 stays open for p11-7 (the daily lander) and p11-8 (AGENTS.md wording).
+- **Earlier the same session (2026-09-28):** the p10-4 + p9-4 rollout and 2.10.0 (below). The 2026-09-28 close-out went out as #41, merged by hand, which prompted the grill.
 
 **2026-09-28 (late afternoon): 2.10.0 is released and live. p10-4, p9-4 and reconcile-apply-binds landed; phase 10 is closed. Nothing is running.**
 - **Rollout** `[[thread-skill-rollout-2026-09-28]]` (archived, § Completion log): 3 waves, 1h 31m, all on Opus. #37 reconcile `--apply --only <dry-run json>` binds the reviewed list, and orient passes its audit's `--json` through (`f49e34c`). #38 handoff docs have one writer, and `next` may recommend a printed `/compact <focus>` line inside keep going (`84240b1`). #39 close flips a finished task within ADR 0026's three-condition guard (`929df02`).
@@ -448,6 +455,7 @@ scheduled 2026-07-15.
 
 ## What's been built / decided
 
+- **ADR 0028 (2026-09-29, #42/#45, 2.11.0): agents land their own work.** `skills/_shared/scripts/land.sh` is the one landing route (register → no origin → swept → unprotected push → protected `close/…` branch + `landing` PR + queued merge-commit auto-merge; never waits). `landing-register.py check` is the only permission to push (exit 0). Close's own-branch loop reviews with `/fresh-review` at the xhigh floor, has no round cap, and stops only on the ledger's regression stop, the same check failing twice at `max`, or a decision for Lachy (`--hold`).
 - **2.10.0 (2026-09-28, #37–#40):** close marks a task done without asking only when this session did its work, the work is on the default branch (or it isn't code), and its Verify line ran green this session; otherwise it asks (ADR 0026 § 4). `thread:handoff` is the only handoff-doc writer (ADR 0017 amended). `next` can recommend `/compact` in Claude Code but never runs it. `reconcile-project.py --apply --only <file>` writes only the reviewed items and lists newer ones under `New since review`.
 - **ADR 0027 (2026-09-28, PR #32, 2.9.0): orient is the one shaping verb.** `split` and `gather` are deleted (no alias stubs); their machinery is `skills/orient/reshuffle.md`. Orient asks Reshuffle / Steer only / Look only; in flight, possibly-landed and thread captures are frozen; a live rollout is superseded only when paused with all unlanded tasks open; the pass ends with the execute offer.
 - **p5-2 (2026-09-27, PR #23): no SKILL.md body holds a positional `$N`.** The logic lives in scripts where it
@@ -509,6 +517,9 @@ scheduled 2026-07-15.
 
 ## Open questions / decisions pending
 
+- **The daily lander (p11-7) doesn't exist yet.** Until it does, a queued merge that fails (red CI, a PR left behind master, `queued: needs merge`) waits for the next close in that repo. It has to catch up on wake: the laptop is often off overnight until the Mac mini arrives.
+- **Loose ends from P11:** [[thread-skill-land-pr-body-names-its-caller]] (a handoff's landing PR body says `thread:close`), [[thread-skill-merge-wave-no-autostash]] (merge-wave's checkout fast-forward lacks `--no-autostash`, the bug #46 fixed in `land.sh`).
+- **AGENTS.md still says reviews never block** (p11-8): landing's review runs inline. Lachy's file, so the wording needs his approval.
 - **The smart-halt treats file overlap as dependency.** A blocked task stops every later wave that shares a file with it, even with no `depends-on:` between them, and the only verb that moves a task (`reconcile-wave.py defer`) drops it from the rollout. Filed 2026-09-28: [[thread-skill-rewave-a-blocked-task-within-its-rollout]].
 - **The fresh-review of workspaces `29ca886` (the hook deletion) hasn't run.** The engine binds to the session's cwd, and this session was in thread-skill. It needs a session launched in `~/repos/workspaces`.
 - **The one-live-rollout rule is orient-only** (ADR 0027): `/thread:schedule` run directly can still write a second rollout on a repo or `--regenerate` over a running one. [[thread-skill-schedule-owns-one-live-rollout-per-repo]] moves it into schedule's gate; its note lists why round 1's attempt was reverted.
@@ -590,6 +601,8 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **Design-heavy tasks need a bigger plan budget** (2026-09-29). With 3 plan rounds, p11-3 plan-blocked on breadth three times; with `max_plan_rounds: 6` it converged, and p11-4, started at 6, converged in 4. Stamp `max_plan_rounds: 6` on a deep cross-cutting task up front. When each round instead finds a new race in machinery a requirement forced, reshape the requirement (estate METHOD, the plan-gate move).
+- **`merge-wave.sh` now leaves a merged PR's remote branch "for the reaper"**, and the repo's delete-branch-on-merge removes it. A close-out landed through `land.sh` shows as `on master, N commit(s) not on origin/master — queued in close/…` until GitHub merges it; that's normal, not stranded.
 - **`claude plugin update` reads the live checkout** (2026-09-28). The marketplace is a directory source at `~/repos/tools/thread-skill`, so a release merged from the rollout clone reports "already at the latest version" until that checkout is fast-forwarded to the release commit. Fast-forward it first, then update both profiles.
 - **To move a task to a later wave, edit by hand** (2026-09-28): the task's `wave:`, and the rollout note's wave table, Tasks by wave and File-sets. `reconcile-wave.py defer` clears `wave:`, `rollout:` and `owner:`, which removes the task from the rollout.
 - **A plain `reconcile-project.py --apply` recomputes, and never replays the dry run** (2026-09-28). On a vault a live rollout is writing, it can close more than was reviewed: a reviewed 2 became 5. Any caller that reviews before applying (orient's drift fixes, a hand-run acceptance) saves the dry run's `--json` to a file and passes it to `--apply --only <file>` ([[thread-skill-reconcile-apply-binds-reviewed-list]]): it writes only the reviewed items and lists anything newer under `New since review`, unwritten. Only execute's phase-close ceremony uses a plain `--apply`, with no review in between. The vault then moves closed phase notes into `Phases/Archive/` within minutes, and the daily sweep may commit them before you do, so a pathspec commit of the old paths fails.
@@ -799,6 +812,13 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Now (from 2026-09-30): 2.11.0 is live: close and handoff land their own work (ADR 0028). Nothing is running, no handoff is pending, and both checkouts are on `master`.**
+- **Next:** [[thread-skill-p11-7-the-daily-lander]], the last structural piece of P11. Build it as a session (launchd plus a live headless probe), and design it to catch up on wake.
+- **Then, any order:** [[thread-skill-p11-8-agents-md-landing-review]] (show Lachy the wording first); [[thread-skill-merge-wave-no-autostash]] and [[thread-skill-land-pr-body-names-its-caller]] (small, wave-shaped); the ADR 0027 follow-ups ([[thread-skill-schedule-owns-one-live-rollout-per-repo]], [[thread-skill-one-vault-grammar-for-reconcile-and-reshuffle]]); [[thread-skill-p4-5-trim-descriptions-700-hard-cap]]; [[thread-skill-rewave-a-blocked-task-within-its-rollout]]; phase 9's p9-2 and p9-3.
+- **Still owed:** the fresh-review of workspaces `29ca886`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
+- **Close-outs now land themselves** (queued `landing` PR, auto-merge). Run a thread-skill rollout from this clone on a clean `master`.
+
+**Superseded 2026-09-30:**
 **Now (from 2026-09-28, late afternoon): 2.10.0 is live. Nothing is running, no handoff is pending, and both checkouts are on `master` (after this close-out's PR merges, fast-forward the clone).**
 - **Next** (pick one; nothing is decided):
   1. [[thread-skill-schedule-owns-one-live-rollout-per-repo]] and [[thread-skill-one-vault-grammar-for-reconcile-and-reshuffle]], the ADR 0027 follow-ups (the second edits `reconcile-project.py`).
@@ -950,6 +970,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-29/30 (close): grilled landing with Lachy → ADR 0028 (agents land their own work; landing register), amended to queue-and-finish after p11-3's waiting design didn't converge. Orient-reshuffled it into P11; rollout `thread-skill-rollout-2026-09-29` merged #43, #44, #46–#49 in 8h 17m. Released 2.11.0 (#50), tagged. Seeded the landing register (p11-2). Memories: admin happens autonomously; laptop sleeps overnight. First close to land its own close-out via `land.sh`.
 - 2026-09-28 (late afternoon close): consumed the p10-4-p9-4-rollout handoff. Scheduled and ran `[[thread-skill-rollout-2026-09-28]]` (p10-4, p9-4, reconcile-apply-binds joined): #37, #38, #39 merged in 1h 31m. p10-4 plan-blocked in wave 1 and was re-waved behind p9-4 (Lachy's call). Phase 10 closed. Released 2.10.0 (#40), tagged. Filed the re-wave follow-up. Handoff doc deleted.
 - 2026-09-28 (evening close): grilled ADR 0027 with Lachy (orient is the one shaping verb; split and gather retired), built it (#32), three clean-room review rounds with a ledger stop and a revert to the root, full eval suite run and recorded, released 2.9.0 (#33), landed the P10 session's close-out (#34), pushed workspaces and ~/.agents, cleaned the merged worktree and branches. Follow-ups filed: schedule owns one-live-rollout-per-repo; one vault grammar.
 - 2026-09-28 (close): consumed the p10-release-and-acceptance handoff. Merged #29 (close-out) and #30 (2.8.0 bump). Plugin updated, release-check green, tag `thread--v2.8.0` at `c5f7522`, set-head done. Reconcile live acceptance: the dry run matched the audit; `--apply` wrote 5 (2 reviewed, plus 3 landed meanwhile by a live Chorus rollout), all kept, and the follow-up was filed. #31 merged meanwhile, unblocking p10-3/p10-4/p9-4. Handoff doc deleted.
