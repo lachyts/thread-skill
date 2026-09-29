@@ -73,6 +73,14 @@ run "$tmp/no remote here"
 ok "$rc" 1 "spaced path, no origin → exit 1"
 has "$err" "--source \"$tmp/no remote here\"" "spaced path, no origin → remedy quotes the whole path"
 
+# 9b. a ~/-relative path (rollout notes and project `Local:` lines carry them) is expanded, not read as no origin
+mkdir -p "$tmp/rh"
+repo "$tmp/rh/tilde" "https://github.com/o/r.git"
+out=$(HOME="$tmp/rh" bash "$tmp/check.sh" "~/tilde" 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err")
+ok "$rc" 0 "~/ path with a GitHub origin → exit 0"
+ok "$out" "https://github.com/o/r.git" "~/ path → prints the URL"
+ok "${err:-<empty>}" "<empty>" "~/ path → no 'no origin remote' remedy"
+
 # ---- the register check, verbatim from execution-fit.md ----------------------------------------------------
 awk '/^# thread:register-check/{on=1; next} /^# end thread:register-check/{on=0} on' \
   skills/_shared/execution-fit.md | sed 's#^R="<repoPath>"$#R="$1"#' > "$tmp/register.sh"
@@ -123,7 +131,7 @@ has "$err" "landing-register:" "unterminated register → the reader's error lin
 rrun "$tmp/lonely"
 ok "$rc" 4 "no origin → exit 4"
 ok "${out:-<empty>}" "<empty>" "no origin → nothing on stdout"
-has "$err" "no GitHub origin" "no origin → the remedy"
+has "$err" "run the remote check in skills/_shared/execution-fit.md § Dispatch blockers" "no origin → the remedy names the remote check by location"
 
 # 16. the reader is missing (CLAUDE_PLUGIN_ROOT unset or wrong): exit 2
 CLAUDE_PLUGIN_ROOT="$tmp/nowhere" rrun "$tmp/unlisted"
@@ -148,7 +156,8 @@ repo "$tmp/h/listed" "https://github.com/Animately/imgproxy.git"
 HOME="$tmp/h" rrun "~/listed"
 ok "$rc" 3 "~/ path to a listed repo → exit 3"
 
-# 20-22. schedule § 0's order: remote check, then register check, then (and only then) the first write
+# 20-22. composition of the two snippets (remote check, then register check, then the first write); the
+# order schedule § 0's prose gives them is pinned in the wiring section below
 gate() { rm -f "$tmp/stamped"; bash "$tmp/check.sh" "$1" >/dev/null 2>&1 && bash "$tmp/register.sh" "$1" >/dev/null 2>&1 && touch "$tmp/stamped"; }
 gate "$tmp/listed"; rc=$?
 ok "$rc" 3 "schedule gate, listed repo → exit 3"
@@ -188,6 +197,11 @@ has "$ef" "any stderr already printed" "execution-fit: a failed check keeps what
 
 has "$s0" "landing register" "schedule § 0 runs the landing-register check"
 has "$s0" "listed <owner/name>: <reason>" "schedule § 0 prints the listed line"
+s0flat=$(printf '%s\n' "$s0" | tr '\n' ' ')
+has "$s0flat" "landing register check" "schedule § 0 names the landing register check"
+has "${s0flat%%landing register check*}" "gh repo view" "schedule § 0 runs the remote check and gh repo view before the register check"
+has "${s0flat#*landing register check}" "On any failure" "schedule § 0: any failure, register check included, stops"
+has "${s0flat#*landing register check}" "stop before step 1" "schedule § 0 stops before step 1 after the register check"
 ok "$(grep -c '# thread:register-check' skills/schedule/SKILL.md)" 0 "schedule does not copy the register snippet"
 
 s25=$(awk '/^### 2\.5\./{on=1} /^### 3\./{on=0} on' skills/execute/SKILL.md | tr '\n' ' ')
@@ -196,6 +210,20 @@ has "$s25" "execution-fit.md\` § Dispatch blockers" "execute § 2.5 points at e
 for w in "state=halted" "before anything" "verbatim" "above the WAVE-STATUS"; do
   has "$s25" "$w" "execute § 2.5 mentions $w"
 done
+
+has "$s25" "**Pausing is exempt.**" "execute § 2.5 exempts pausing"
+exempt="${s25#*"**Pausing is exempt.**"}"
+for w in "pause_requested: true" "TaskStop" "\`paused:\` stamp" "CronDelete" "never blocks stopping work"; do
+  has "$exempt" "$w" "execute § 2.5 pause exemption covers $w"
+done
+has "$s25" "hard pause" "execute § 2.5 names hard pause for an urgent mid-wave listing"
+has "$s25" "keep pushing task branches" "execute § 2.5 documents the in-flight-wave limit"
+dont=$(grep '^- Never dispatch a wave' skills/execute/SKILL.md)
+has "$dont" "never blocks stopping work" "execute Don'ts: the register check never blocks a pause"
+pz=$(awk '/^## Pausing \+ reinstating/{on=1} /^\*\*Soft pause/{on=0} on' skills/execute/SKILL.md | tr '\n' ' ')
+has "$pz" "Neither pause runs the § 2.5" "execute Pausing: neither pause runs the register gate"
+has "$ef" "keep pushing task branches" "execution-fit documents the in-flight-wave limit"
+has "$ef" "hard pause the rollout" "execution-fit names hard pause as the mid-wave remedy"
 
 s45raw=$(awk '/^### 4\.5\./{on=1} /^### 5\./{on=0} on' skills/execute/SKILL.md)
 s45=$(printf '%s\n' "$s45raw" | tr '\n' ' ')
@@ -236,6 +264,9 @@ ok "$(grep -c '# thread:register-check' skills/execute/SKILL.md)" 0 "execute doe
 ok "$(grep -c 'skills/execute/scripts/merge-wave.sh' skills/repair/SKILL.md)" 0 "repair never invokes merge-wave.sh directly"
 ok "$(grep -c 'resumeFromRunId' skills/repair/SKILL.md)" 0 "repair never resumes a Workflow directly"
 has "$(tr '\n' ' ' < skills/repair/SKILL.md)" "§4.5 resume" "repair hands off to execute's §4.5 resume"
+s5r=$(awk '/^### 5\./{on=1} /^### 6\./{on=0} on' skills/repair/SKILL.md | tr '\n' ' ')
+has "$s5r" "not gated on the landing register" "repair § 5 records its ungated clean-defer PR close as deliberate"
+has "$ef" "clean defer runs" "execution-fit records repair § 5's clean defer as a register exception"
 
 echo; [ "$fail" -eq 0 ] && echo "execution-fit-remote: ALL PASS" || echo "execution-fit-remote: SOME FAILED"
 exit "$fail"

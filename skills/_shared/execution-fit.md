@@ -59,6 +59,7 @@ against the target repo:
 ```bash
 # thread:remote-check (extracted and tested by tests/execution-fit-remote.test.sh)
 R="<repoPath>"
+case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
 u=$(git -C "$R" remote get-url origin 2>/dev/null) || {
   echo "no origin remote in $R: create one with: gh repo create <owner>/<name> --private --source \"$R\" --remote origin --push" >&2; exit 1; }
 case "$u" in
@@ -78,9 +79,10 @@ authenticated, repo not visible, offline), the gate also stops and prints gh's
 error.
 
 **Landing register.** A rollout pushes a branch and merges a PR into the target
-repo for every task, so it never runs against a repo on the landing register: the
-repos agents must not push to on their own (ADR 0028 § Decision). Run this after the
-GitHub-origin check above, against the same repo path:
+repo for every task, so it is never scheduled, dispatched or merged against a repo
+on the landing register: the repos agents must not push to on their own (ADR 0028
+§ Decision). Run this after the GitHub-origin check above, against the same repo
+path:
 
 ```bash
 # thread:register-check (extracted and tested by tests/execution-fit-remote.test.sh)
@@ -92,7 +94,7 @@ v=$(python3 "$lr" check "$R"); rc=$?
 case "$rc" in
   0) echo "$v" ;;
   3) echo "$v: a rollout pushes a branch and merges a PR per task; unlisting is Lachy's call" >&2; exit 3 ;;
-  4) echo "no GitHub origin in $R: run the remote check above first" >&2; exit 4 ;;
+  4) echo "no GitHub origin in $R: run the remote check in skills/_shared/execution-fit.md § Dispatch blockers" >&2; exit 4 ;;
   *) exit 2 ;;  # any stderr already printed stands
 esac
 # end thread:register-check
@@ -100,8 +102,8 @@ esac
 
 It captures the reader's stdout only and never redirects its stderr, so the
 reader's own warnings (no register file, a malformed entry) and its
-`landing-register:` errors always show. The `~/` expansion is there because rollout
-notes carry `Project root: ~/...`. On exit 0 it prints `land` (any warning the
+`landing-register:` errors always show. Both snippets expand `~/` because rollout
+notes carry `Project root: ~/...` and project notes a `Local: ~/...` line. On exit 0 it prints `land` (any warning the
 reader wrote still shows): the repo may land. On any non-zero exit, stop and print
 its stderr verbatim: that stderr is the remedy, or the reader's error. Exit 3 is a
 listed repo (`listed <owner/name>: <reason>` plus the remedy), 4 is no GitHub
@@ -111,6 +113,16 @@ Never read 2 or 4 as "not listed": only exit 0 permits a rollout. This is a bloc
 not a re-route: the session lane can't push to a listed repo either. A repo can be
 listed after scheduling, so execute § 2.5 re-runs this check at every launch, and
 execute § 4.5 re-runs it before every wave dispatch, Workflow call and merge.
+
+The check is lead-side, so it has limits. A repo listed while a wave's Workflow is
+in flight is caught only when that wave returns: until then the engine's agents keep
+pushing task branches and opening PRs on it, and only the merge is stopped. For an
+urgent mid-wave listing, hard pause the rollout (execute § Pausing + reinstating a
+rollout): pausing is exempt from the check, so it never blocks stopping work. One
+repair step is deliberately ungated too: `/thread:repair` § 5's clean defer runs
+`gh pr close --delete-branch` on a task the user chose to defer. That removes the
+rollout's own branch and PR and lands nothing on the default branch, so, like a
+pause, it is cleanup that the register never blocks.
 
 **Engine path.** The Workflow tool may refuse the plugin-cache `scriptPath`. That
 depends on the harness and cannot be checked at schedule time; execute § 5

@@ -70,12 +70,25 @@ If the frontmatter carries a `paused:` stamp, this invocation is a **reinstate**
 
 ### 2.5. Landing-register gate
 
-A rollout never pushes to, or merges into, a repo on the landing register (ADR 0028 § Decision). Run
-the register check in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers (point at
-it; never copy the snippet here) against the rollout's `Project root`. `/thread:schedule` § 0 already ran
-it, but a repo can be listed after scheduling, so run it again at **every** invocation (fresh, cold
-resume, reinstate, single-wave, `--gated`), before anything writes or merges: before the §3/§4 stamps,
-and before §4.5 *Reinstate*'s `clear-pause`.
+The lead session never dispatches a wave, calls or resumes a Workflow, or merges into a repo on the
+landing register (ADR 0028 § Decision). Run the register check in
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers (point at it; never copy the
+snippet here) against the rollout's `Project root`. `/thread:schedule` § 0 already ran it, but a repo can
+be listed after scheduling, so run it again at **every** invocation that starts or continues work (fresh,
+cold resume, reinstate, single-wave, `--gated`), before anything writes or merges: before the §3/§4
+stamps, and before §4.5 *Reinstate*'s `clear-pause`.
+
+**Pausing is exempt.** A pause invocation (*Pausing + reinstating a rollout* below) skips this gate
+entirely: the soft pause's `pause_requested: true` stamp, and every hard-pause step (the **TaskStop**, the
+`paused:` stamp and its `## Pause log` entry, the heartbeat `CronDelete`). The gate never blocks stopping
+work: a listed repo, or an exit-2 failure such as a malformed or unterminated register, still lets the
+user pause.
+
+**What the gate cannot catch.** It runs lead-side, between engine calls. A repo listed while a wave's
+Workflow is in flight is only caught at the next re-check: until that wave returns, its agents keep
+pushing task branches and opening PRs on the repo. The step-3 re-check still stops the merge, so nothing
+lands on the default branch. For an urgent mid-wave listing, **hard pause** the rollout (TaskStop kills
+the in-flight agents now); the exemption above means the gate never stands in the way of that.
 
 - **Exit 0** (`land`): proceed. Any warning the reader printed on stderr (no register file, a malformed
   entry) still shows; pass it on to the user.
@@ -443,7 +456,7 @@ Division of labour: **Stop hook** = "don't stop while there's driving work"; **h
 
 ## Pausing + reinstating a rollout
 
-"Pause the rollout" means **soft pause** by default; **hard pause** only when it must stop *now*. Either way the pause is recorded on the rollout note, and reinstating is plain `/thread:execute [[rollout]]` — no separate resume command, no new state machine. (Terms: `CONTEXT.md` → *Pause*, *Reinstate*.)
+"Pause the rollout" means **soft pause** by default; **hard pause** only when it must stop *now*. Either way the pause is recorded on the rollout note, and reinstating is plain `/thread:execute [[rollout]]` — no separate resume command, no new state machine. Neither pause runs the § 2.5 landing-register gate: stopping work is never blocked, even for a listed repo or a register the check can't read. (Terms: `CONTEXT.md` → *Pause*, *Reinstate*.)
 
 **Soft pause (default).** Stamp `pause_requested: true` on the rollout note's frontmatter (a lead-session edit — it's rollout config, not task status). Nothing is interrupted: the in-flight wave finishes, merges, and advances the cursor as normal; the end-of-wave `cursor` helper then honours the flag — stamps `paused: <timestamp>`, clears `pause_requested` — and the loop exits with `state=halted reason="paused at user request"` instead of launching the next wave (§4.5 step 3, *Soft-pause check*; a partially-landed wave skips step 3's cursor advance, so step 4 honours the still-pending flag before any K+1 launch instead). Zero extra agent calls; the pause lands on a clean wave boundary. To cancel a pending request before it takes effect, remove the `pause_requested:` line (or run `clear-pause`).
 
@@ -462,7 +475,7 @@ A paused rollout is **intentional**, not stalled: `/thread:status` reports it as
 ## Don'ts
 
 - Merge ONLY via `scripts/merge-wave.sh`, ONLY in continuous auto-merge mode, ONLY from the lead session. In `--gated` / single-wave mode the user merges. Never an inline `gh pr merge`, never `--admin` (it would bypass branch protection and merge a red branch), never a force-push — ever. The engine (`wave-execute.workflow.js`) never merges.
-- Never dispatch a wave, call or resume a Workflow, or call `merge-wave.sh` for a repo the landing register lists. § 2.5 runs first, every time (and §4.5 re-runs it before each of those).
+- Never dispatch a wave, call or resume a Workflow, or call `merge-wave.sh` for a repo the landing register lists. § 2.5 runs first, every time (and §4.5 re-runs it before each of those). Never gate a pause on it: soft and hard pause (TaskStop, the `paused:` stamp, the heartbeat `CronDelete`) are exempt, so the register check never blocks stopping work.
 - Don't skip the protocol-version gate. Legacy (v2 / absent) rollouts must be regenerated, not retrofitted.
 - Don't update a task's `status:` from inside a subagent — the lead session reconciles after the workflow returns.
 - Don't hand-roll the convergence loop in the conversation — that engine moved into `wave-execute.workflow.js`. If the loop needs changing, edit the script and (for an interrupted run) re-invoke with `resumeFromRunId`.
