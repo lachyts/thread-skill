@@ -68,6 +68,28 @@ If the frontmatter carries a `paused:` stamp, this invocation is a **reinstate**
 - `protocol_version` other than `3` → print "unsupported protocol version <N>; this executor supports protocol_version: 3" and stop.
 - `protocol_version: 3` → proceed.
 
+### 2.5. Landing-register gate
+
+A rollout never pushes to, or merges into, a repo on the landing register (ADR 0028 § Decision). Run
+the register check in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers (point at
+it; never copy the snippet here) against the rollout's `Project root`. `/thread:schedule` § 0 already ran
+it, but a repo can be listed after scheduling, so run it again at **every** invocation (fresh, cold
+resume, reinstate, single-wave, `--gated`), before anything writes or merges: before the §3/§4 stamps,
+and before §4.5 *Reinstate*'s `clear-pause`.
+
+- **Exit 0** (`land`): proceed. Any warning the reader printed on stderr (no register file, a malformed
+  entry) still shows; pass it on to the user.
+- **Any non-zero exit**: write nothing (no stamp, no cursor, no `mark-dispatched`, no merge, no Workflow
+  call). Print the snippet's stderr verbatim above the WAVE-STATUS line (the `listed <owner/name>:
+  <reason>` line with its remedy, the reader's `landing-register:` error, or the no-origin remedy), then
+  end the turn with
+  `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="<owner/name> is on the landing register"`
+  (exit 3), or `reason="landing-register check failed"` (exit 2 or 4). The reason stays short and
+  quote-free for the Stop-hook regex; the verbatim stderr above it says where to go. Unlisting is Lachy's
+  call, so this is a designed stop (§7), not something to route around.
+
+"Re-run § 2.5" elsewhere in this skill means exactly this: the same check with the same halt.
+
 ### 3. Resolve effective config per task
 
 For each task in the target wave (or all waves in continuous mode), resolve, in order **task frontmatter → rollout frontmatter → hardcoded default**:
@@ -194,17 +216,19 @@ Also read the rollout note's **`## Known baseline failures`** block (`/thread:sc
 
 In continuous mode the lead session is the conductor: run ONE wave on the engine, merge that wave, then launch the next. The merge — not a human, not a completion barrier — is what makes "earlier same-file work lands before the next wave branches" real. The loop is driven across turns by Workflow-completion notifications and is resumable via a durable cursor.
 
+**Landing-register re-check.** Every entry into this loop (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry, `/thread:repair`'s hand-off) re-runs § 2.5 before anything else it does, and the loop re-runs § 2.5 before every wave dispatch, every Workflow call (a `resumeFromRunId` resume included) and every `merge-wave.sh` call. A halt leaves open PRs open, the cursor unadvanced and any `paused:` stamp in place.
+
 **Durable cursor.** Track progress in the rollout note frontmatter: `merged_through_wave: <N>` (`0` or absent = nothing merged yet). This is the single source of truth for "where was I" — a fresh session resumes from it, never from a GitHub/vault re-scan. New rollouts seed it at `0`; an older rollout without the field is treated as `0` (start at wave 1).
 
 **Per wave K** (K = `merged_through_wave` + 1):
 
-1. Resolve config + stamp `status: in_progress` for wave K's tasks (step 4). Stamp the wave's **dispatch boundary** on the rollout note — the engine's sandbox has no clock, so wall-clock enters here:
+1. Re-run § 2.5; then resolve config + stamp `status: in_progress` for wave K's tasks (step 4). Stamp the wave's **dispatch boundary** on the rollout note — the engine's sandbox has no clock, so wall-clock enters here:
    ```
    python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py mark-dispatched --rollout <rollout-note> --wave K
    ```
    (writes `wave_K_dispatched: <timestamp>`; idempotent — **first dispatch wins**, so a resume re-dispatch never resets the wave clock). It prints a `progress:` line — "wave K/N dispatched — 42m elapsed, ~50m remaining (rough)" — surface it to the user and pass its text as the args `progress` string so the engine `log()`s it live in `/workflows`. Then build args with `waves: [waveK]` only; call the Workflow (step 5).
 2. On completion → reconcile vault frontmatter (step 6).
-3. **Auto-merge wave K.** Collect the wave's tasks that returned `status: review` **and** have a non-empty `pr` (read-only tasks have none; **never** merge `review-blocked` / `blocked` / `plan-blocked` / `gate-pending`), in the report's recommended order. Run:
+3. **Auto-merge wave K.** Re-run § 2.5 before `merge-wave.sh`: a repo listed during the wave halts here with the wave's approved PRs left open (merging puts commits on the listed repo's default branch). On that halt there is no merge, no cursor advance and no `mark-done`; the tasks stay at `review`, and once the repo is unlisted, re-invocation's *Cold resume* flush merges them. Collect the wave's tasks that returned `status: review` **and** have a non-empty `pr` (read-only tasks have none; **never** merge `review-blocked` / `blocked` / `plan-blocked` / `gate-pending`), in the report's recommended order. Run:
    ```
    ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-wave.sh <repoPath> <pr> <pr> …
    ```
@@ -256,9 +280,9 @@ In continuous mode the lead session is the conductor: run ONE wave on the engine
 
    A done rollout left sitting in `Work/Tasks/` is invisible-but-present — every Bases view filters `status != done`, so it vanishes from view with no record of what happened. The ceremony is what makes completion legible weeks later.
 
-**Cold resume.** Re-invoking `execute [[rollout]]` when `merged_through_wave: N` is set: first re-run `merge-wave.sh` against wave N+1's already-open PRs (idempotent — merged PRs are skipped, so this flushes any half-merged wave), `mark-done` the tasks whose PRs are now confirmed merged, then continue the loop.
+**Cold resume.** Re-invoking `execute [[rollout]]` when `merged_through_wave: N` is set: first re-run § 2.5; then re-run `merge-wave.sh` against wave N+1's already-open PRs (idempotent — merged PRs are skipped, so this flushes any half-merged wave), `mark-done` the tasks whose PRs are now confirmed merged, then continue the loop.
 
-**Reinstate (resuming a paused rollout).** If the rollout note carries a `paused:` stamp, this invocation IS the reinstate — clear the stamp first, deterministically:
+**Reinstate (resuming a paused rollout).** If the rollout note carries a `paused:` stamp, this invocation IS the reinstate — re-run § 2.5 first (a halt there leaves the `paused:` stamp in place, so the heartbeat's paused-stamp check and `/thread:status` still read it as paused); then clear the stamp, deterministically:
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py clear-pause --rollout <rollout-note>
@@ -298,7 +322,7 @@ Pass `args` as an actual JSON object in the tool call. (Note: the Workflow tool 
 
 The engine has no relative imports, so the copy runs unchanged. A `resumeFromRunId` resume re-passes the same `scriptPath` the run started with, exactly like its args. A later session (a new scratchpad) re-copies the same bytes, and per-task resume (`resume-filter`) still keeps the tasks that already landed. Never edit the copy. This is a fallback only: the cache path is the default (the 2026-09-23 E2E ran it unrefused).
 
-Tell the user the run launched, which waves/tasks it covers, and that they can watch live with `/workflows`. Record the returned `runId` — if the run dies, resume with `Workflow({ scriptPath, args, resumeFromRunId: <runId> })`, passing the `scriptPath` the run started with (unchanged `agent()` calls replay from cache).
+Tell the user the run launched, which waves/tasks it covers, and that they can watch live with `/workflows`. Record the returned `runId`. If the run dies, re-run § 2.5 first (a listed repo halts instead of replaying agents that push branches), then resume with `Workflow({ scriptPath, args, resumeFromRunId: <runId> })`, passing the `scriptPath` the run started with (unchanged `agent()` calls replay from cache). The check is lead-side only, so the resume's args and prompt bytes are unchanged and the replay cache stays valid.
 
 **Register the heartbeat (continuous mode, once per rollout).** In the same turn as the first wave launch, check `CronList` for an existing `WAVE-HEARTBEAT <rollout-slug>` task; if none, register one via `CronCreate` (schedule `*/20 * * * *`) with this prompt:
 
@@ -385,6 +409,7 @@ Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS au
 - a wave produces **zero** approved (`status: review`) PRs (nothing to merge; downstream presumptively unsafe), or
 - `merge-wave.sh` exits non-zero (a real merge conflict or red required check), or
 - the smart-halt check fires (an unlanded task's file reappears in a later wave), or
+- § 2.5, or a §4.5 re-check of it, reports the repo on the landing register, or the check itself fails (`reason="<owner/name> is on the landing register"` or `reason="landing-register check failed"` — a **designed** stop: unlisting is Lachy's call; open PRs stay open and re-invocation after unlisting flushes them), or
 - a wave leaves `gate-pending` tasks and nobody is present to sign off (`reason="gated inputs await sign-off: …"` — a **designed** pause, ADR 0008, not a failure: the user signs off, `approve-gates` runs, and re-invocation resumes; when the user IS present, ask for the sign-off in-conversation instead of halting — §3.7).
 
 A **soft pause** (*Pausing + reinstating a rollout* below) exits through the same `state=halted` mechanics but is **deliberate**, not a failure — there is no cause to fix, and reinstating is plain re-invocation.
@@ -430,13 +455,14 @@ Division of labour: **Stop hook** = "don't stop while there's driving work"; **h
 
 The killed wave's tasks simply didn't land: their notes still read `in_progress`, so `resume-filter` re-dispatches them on reinstate, and the engine's worktree setup reuses each task's existing worktree + branch (resume-safe by design). Losses are bounded to in-flight agent context — committed work, and uncommitted files sitting in the worktrees, survive.
 
-**Reinstate.** `/thread:execute [[rollout]]`. The resume path (§4.5 *Reinstate*) sees the `paused:` stamp, clears it via `reconcile-wave.py clear-pause`, and continues from the cursor — flush any half-merged wave, re-dispatch whatever didn't land. The heartbeat cron re-registers at the next wave launch (§5; the paused rollout's old one is already gone — self-deleted on the soft pause's `halted` line or on its prompt's paused-stamp check, or deleted directly by hard-pause step 3 — so a pause is never auto-resumed by a leftover tick).
+**Reinstate.** `/thread:execute [[rollout]]`. The resume path (§4.5 *Reinstate*) re-runs § 2.5, then sees the `paused:` stamp, clears it via `reconcile-wave.py clear-pause`, and continues from the cursor — flush any half-merged wave, re-dispatch whatever didn't land. The heartbeat cron re-registers at the next wave launch (§5; the paused rollout's old one is already gone — self-deleted on the soft pause's `halted` line or on its prompt's paused-stamp check, or deleted directly by hard-pause step 3 — so a pause is never auto-resumed by a leftover tick).
 
 A paused rollout is **intentional**, not stalled: `/thread:status` reports it as paused (stamp + since-when + what's left), and `/thread:repair` treats it as nothing-to-fix.
 
 ## Don'ts
 
 - Merge ONLY via `scripts/merge-wave.sh`, ONLY in continuous auto-merge mode, ONLY from the lead session. In `--gated` / single-wave mode the user merges. Never an inline `gh pr merge`, never `--admin` (it would bypass branch protection and merge a red branch), never a force-push — ever. The engine (`wave-execute.workflow.js`) never merges.
+- Never dispatch a wave, call or resume a Workflow, or call `merge-wave.sh` for a repo the landing register lists. § 2.5 runs first, every time (and §4.5 re-runs it before each of those).
 - Don't skip the protocol-version gate. Legacy (v2 / absent) rollouts must be regenerated, not retrofitted.
 - Don't update a task's `status:` from inside a subagent — the lead session reconciles after the workflow returns.
 - Don't hand-roll the convergence loop in the conversation — that engine moved into `wave-execute.workflow.js`. If the loop needs changing, edit the script and (for an interrupted run) re-invoke with `resumeFromRunId`.

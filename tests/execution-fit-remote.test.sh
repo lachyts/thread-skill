@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# The remote-check snippet in skills/_shared/execution-fit.md § Dispatch blockers, extracted by its markers
-# and run against fixture remotes, plus the pointers that wire it in: schedule § 0 runs it (without copying
-# it) and stops before any write; execute § 5 carries the scratchpad fallback for a refused engine path.
+# The remote-check and register-check snippets in skills/_shared/execution-fit.md § Dispatch blockers,
+# extracted by their markers and run against fixture remotes (the register check against the read-only
+# fixture register, never the real one), plus the pointers that wire them in: schedule § 0 runs both
+# (without copying them) and stops before any write; execute § 2.5 runs the register check at every
+# invocation and § 4.5 re-runs it before every dispatch, Workflow call and merge-wave.sh call (ADR 0028
+# § Decision); execute § 5 carries the scratchpad fallback for a refused engine path.
 # Hermetic: every repo lives under mktemp; no commits (so no identity); never gh, never the network. The
 # caller's GIT_DIR & co. are unset, and global/system git config is ignored so a user `url.*.insteadOf`
 # rule can't rewrite what `git remote get-url` prints when this runs standalone.
@@ -70,6 +73,91 @@ run "$tmp/no remote here"
 ok "$rc" 1 "spaced path, no origin → exit 1"
 has "$err" "--source \"$tmp/no remote here\"" "spaced path, no origin → remedy quotes the whole path"
 
+# ---- the register check, verbatim from execution-fit.md ----------------------------------------------------
+awk '/^# thread:register-check/{on=1; next} /^# end thread:register-check/{on=0} on' \
+  skills/_shared/execution-fit.md | sed 's#^R="<repoPath>"$#R="$1"#' > "$tmp/register.sh"
+ok "$(grep -c 'R="$1"' "$tmp/register.sh")" 1 "register-check snippet found in execution-fit.md"
+ok "$(grep -c 'skills/_shared/scripts/landing-register.py' "$tmp/register.sh")" 1 "register-check calls landing-register.py"
+ok "$(grep -c '2>&1' "$tmp/register.sh")" 0 "register-check never folds the reader's stderr into stdout"
+ok "$(grep -c '2>/dev/null' "$tmp/register.sh")" 0 "register-check never drops the reader's stderr"
+
+export CLAUDE_PLUGIN_ROOT LANDING_REGISTER
+CLAUDE_PLUGIN_ROOT=$(pwd -P)
+LANDING_REGISTER=$(pwd -P)/tests/fixtures/landing-register/register.md   # never the real register
+# rrun <repo> → sets out (stdout), err (stderr), rc (exit code)
+rrun() { out=$(bash "$tmp/register.sh" "$1" 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err"); }
+
+# 10. a listed repo: exit 3, the listed line + remedy on stderr, nothing on stdout
+repo "$tmp/listed" "https://github.com/Animately/imgproxy.git"
+rrun "$tmp/listed"
+ok "$rc" 3 "listed repo → exit 3"
+ok "${out:-<empty>}" "<empty>" "listed repo → nothing on stdout"
+has "$err" "listed Animately/imgproxy: reason A" "listed repo → the listed line verbatim"
+has "$err" "unlisting is Lachy's call" "listed repo → the remedy"
+
+# 11. an owner-wide entry lists every repo of that owner
+repo "$tmp/wild" "git@github.com:Wild/x.git"
+rrun "$tmp/wild"
+ok "$rc" 3 "owner-wide Wild/* → exit 3"
+
+# 12. an unlisted repo lands
+repo "$tmp/unlisted" "https://github.com/o/r.git"
+rrun "$tmp/unlisted"
+ok "$rc" 0 "unlisted repo → exit 0"
+ok "$out" "land" "unlisted repo → prints land"
+
+# 13. no register file: lands, and the reader's warning passes through
+LANDING_REGISTER="$tmp/none.md" rrun "$tmp/unlisted"
+ok "$rc" 0 "no register → exit 0"
+ok "$out" "land" "no register → prints land"
+ok "$([ -n "$err" ] && echo y || echo n)" y "no register → stderr is not swallowed"
+has "$err" "no register at" "no register → the reader's warning passes through"
+
+# 14. an unreadable register fails closed (exit 2), never read as unlisted
+LANDING_REGISTER="$(pwd -P)/tests/fixtures/landing-register/unterminated.md" rrun "$tmp/unlisted"
+ok "$rc" 2 "unterminated register → exit 2"
+ok "${out:-<empty>}" "<empty>" "unterminated register → nothing on stdout"
+has "$err" "landing-register:" "unterminated register → the reader's error line"
+
+# 15. no origin: exit 4 with the remedy
+rrun "$tmp/lonely"
+ok "$rc" 4 "no origin → exit 4"
+ok "${out:-<empty>}" "<empty>" "no origin → nothing on stdout"
+has "$err" "no GitHub origin" "no origin → the remedy"
+
+# 16. the reader is missing (CLAUDE_PLUGIN_ROOT unset or wrong): exit 2
+CLAUDE_PLUGIN_ROOT="$tmp/nowhere" rrun "$tmp/unlisted"
+ok "$rc" 2 "reader missing → exit 2"
+ok "${out:-<empty>}" "<empty>" "reader missing → nothing on stdout"
+has "$err" "not found" "reader missing → says not found"
+
+# 17. python3 missing (127) fails closed: exit 2, never land
+mkdir -p "$tmp/empty"
+out=$(PATH="$tmp/empty" /bin/bash "$tmp/register.sh" "$tmp/listed" 2>/dev/null); rc=$?
+ok "$rc" 2 "python3 missing → exit 2"
+ok "$([ "$out" != land ] && echo y || echo n)" y "python3 missing → never prints land"
+
+# 18. a listed repo at a path with a space
+repo "$tmp/listed here" "https://github.com/Animately/imgproxy.git"
+rrun "$tmp/listed here"
+ok "$rc" 3 "listed repo at a spaced path → exit 3"
+
+# 19. a ~/-relative Project root is expanded before the reader sees it
+mkdir -p "$tmp/h"
+repo "$tmp/h/listed" "https://github.com/Animately/imgproxy.git"
+HOME="$tmp/h" rrun "~/listed"
+ok "$rc" 3 "~/ path to a listed repo → exit 3"
+
+# 20-22. schedule § 0's order: remote check, then register check, then (and only then) the first write
+gate() { rm -f "$tmp/stamped"; bash "$tmp/check.sh" "$1" >/dev/null 2>&1 && bash "$tmp/register.sh" "$1" >/dev/null 2>&1 && touch "$tmp/stamped"; }
+gate "$tmp/listed"; rc=$?
+ok "$rc" 3 "schedule gate, listed repo → exit 3"
+ok "$([ -e "$tmp/stamped" ] && echo y || echo n)" n "schedule gate, listed repo → nothing written"
+gate "$tmp/unlisted"
+ok "$([ -e "$tmp/stamped" ] && echo y || echo n)" y "schedule gate, unlisted repo → proceeds"
+gate "$tmp/lonely"
+ok "$([ -e "$tmp/stamped" ] && echo y || echo n)" n "schedule gate, no origin → the remote check stops it first"
+
 # ---- the wiring --------------------------------------------------------------------------------------------
 # Every phrase below is one only this change's text carries, so each check fails on the docs before it.
 ef=$(tr '\n' ' ' < skills/_shared/execution-fit.md)   # one line, so a phrase may wrap
@@ -91,6 +179,63 @@ for w in scratchpad cmp "Never edit"; do
   has "$s5" "$w" "execute § 5 fallback mentions $w"
 done
 has "$s5" "scriptPath\` the run started with" "execute § 5 resume re-passes the scriptPath the run started with"
+
+# ---- the register-check wiring -------------------------------------------------------------------------------
+has "$ef" "Three blockers" "execution-fit names three blockers"
+has "$ef" "**Landing register.**" "execution-fit names the landing-register blocker"
+has "$ef" "execute § 2.5" "execution-fit cites execute § 2.5 for the re-checks"
+has "$ef" "any stderr already printed" "execution-fit: a failed check keeps whatever stderr it printed"
+
+has "$s0" "landing register" "schedule § 0 runs the landing-register check"
+has "$s0" "listed <owner/name>: <reason>" "schedule § 0 prints the listed line"
+ok "$(grep -c '# thread:register-check' skills/schedule/SKILL.md)" 0 "schedule does not copy the register snippet"
+
+s25=$(awk '/^### 2\.5\./{on=1} /^### 3\./{on=0} on' skills/execute/SKILL.md | tr '\n' ' ')
+has "$s25" "### 2.5. Landing-register gate" "execute § 2.5 exists"
+has "$s25" "execution-fit.md\` § Dispatch blockers" "execute § 2.5 points at execution-fit.md § Dispatch blockers"
+for w in "state=halted" "before anything" "verbatim" "above the WAVE-STATUS"; do
+  has "$s25" "$w" "execute § 2.5 mentions $w"
+done
+
+s45raw=$(awk '/^### 4\.5\./{on=1} /^### 5\./{on=0} on' skills/execute/SKILL.md)
+s45=$(printf '%s\n' "$s45raw" | tr '\n' ' ')
+intro="${s45%%"**Per wave K**"*}"
+has "$s45" "**Per wave K**" "execute § 4.5 still has its per-wave steps"
+for w in "§ 2.5" "Every entry into this loop" "every Workflow call" "\`resumeFromRunId\`" "every \`merge-wave.sh\` call"; do
+  has "$intro" "$w" "execute § 4.5 entry rule mentions $w"
+done
+step1=$(printf '%s\n' "$s45raw" | awk '/^1\. /{on=1} /^2\. /{on=0} on' | tr '\n' ' ')
+has "$step1" "mark-dispatched" "execute § 4.5 step 1 still stamps the dispatch boundary"
+has "${step1%%stamp*}" "§ 2.5" "execute § 4.5 step 1 re-checks before the first stamp"
+has "${step1%%mark-dispatched*}" "§ 2.5" "execute § 4.5 step 1 re-checks before mark-dispatched"
+step3=$(printf '%s\n' "$s45raw" | awk '/^3\. \*\*Auto-merge/{on=1} /^4\. /{on=0} on' | tr '\n' ' ')
+has "$step3" "merge-wave.sh" "execute § 4.5 step 3 still merges via merge-wave.sh"
+has "${step3%%merge-wave.sh*}" "§ 2.5" "execute § 4.5 step 3 re-checks before merge-wave.sh"
+cold=$(printf '%s\n' "$s45raw" | awk '/^\*\*Cold resume\.\*\*/{on=1} on && /^$/{on=0} on' | tr '\n' ' ')
+has "$cold" "merge-wave.sh" "execute § 4.5 cold resume still flushes via merge-wave.sh"
+has "${cold%%merge-wave.sh*}" "§ 2.5" "execute § 4.5 cold resume re-checks before merge-wave.sh"
+rein=$(printf '%s\n' "$s45raw" | awk '/^\*\*Reinstate \(/{on=1} /^\*\*Per-task resume/{on=0} on' | tr '\n' ' ')
+has "$rein" "clear-pause" "execute § 4.5 reinstate still clears the pause"
+has "${rein%%clear-pause*}" "§ 2.5" "execute § 4.5 reinstate re-checks before clear-pause"
+has "$rein" "cold resume" "execute § 4.5 reinstate still continues the cold resume"
+
+resume=$(grep 'resumeFromRunId: <runId>' skills/execute/SKILL.md)
+has "$resume" "resumeFromRunId" "execute § 5 still carries the dead-run resume"
+has "${resume%%resumeFromRunId*}" "§ 2.5" "execute § 5 re-checks before a resumeFromRunId resume"
+hb=$(grep '^> WAVE-HEARTBEAT' skills/execute/SKILL.md)
+has "$hb" "§4.5" "execute § 5 heartbeat re-enters through § 4.5 (and so its entry rule)"
+preins=$(grep '^\*\*Reinstate\.\*\*' skills/execute/SKILL.md)
+has "$preins" "clears it" "execute Pausing: the Reinstate line still clears the stamp"
+has "${preins%%"clears it"*}" "§ 2.5" "execute Pausing: the Reinstate line re-checks before clearing the stamp"
+
+s7=$(awk '/^### 7\./{on=1} /^### 8\./{on=0} on' skills/execute/SKILL.md | tr '\n' ' ')
+has "$s7" "landing register" "execute § 7 halts on a landing-register listing"
+ok "$(grep -c '# thread:register-check' skills/execute/SKILL.md)" 0 "execute does not copy the register snippet"
+
+# repair never merges or resumes a Workflow itself: both stay routed through execute § 4.5 and its re-checks
+ok "$(grep -c 'skills/execute/scripts/merge-wave.sh' skills/repair/SKILL.md)" 0 "repair never invokes merge-wave.sh directly"
+ok "$(grep -c 'resumeFromRunId' skills/repair/SKILL.md)" 0 "repair never resumes a Workflow directly"
+has "$(tr '\n' ' ' < skills/repair/SKILL.md)" "§4.5 resume" "repair hands off to execute's §4.5 resume"
 
 echo; [ "$fail" -eq 0 ] && echo "execution-fit-remote: ALL PASS" || echo "execution-fit-remote: SOME FAILED"
 exit "$fail"

@@ -11,7 +11,7 @@ This skill is the **planner**. The rollout note it produces is a data artefact �
 
 ## Scope
 
-**Obsidian only**, plus § 0's read-only remote probe of the target repo. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
+**Obsidian only**, plus § 0's read-only remote and landing-register probes of the target repo. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
 
 ## Invocation forms
 
@@ -45,10 +45,13 @@ After the misfit scan, check the dispatch blockers for the target repo, i.e. the
 rollout note will carry. Resolve it from the project note's `Local:` line; if there is none, ask
 the user for the path (step 6 writes this resolved path as `{{REPO_PATH}}`). Then run the remote
 check in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers against it (point at
-it; never copy the snippet here), followed by its `gh repo view` confirmation. On either failure
-**stop before step 1**: no task stamped, no rollout note, no heartbeat. Print the snippet's
-remedy line verbatim (or gh's error). The cluster is still wave-shaped; don't re-route it to the
-session lane.
+it; never copy the snippet here), followed by its `gh repo view` confirmation. Then run the
+landing register check from the same § Dispatch blockers against the same resolved path (again a
+pointer, never a copy): a rollout never pushes to or merges into a repo on the landing register
+(ADR 0028 § Decision). On any failure **stop before step 1**: no task stamped, no rollout note,
+no heartbeat. Print the snippet's remedy line verbatim (or gh's error); for a listed repo that is
+the `listed <owner/name>: <reason>` line with its remedy, since unlisting is Lachy's call. The
+cluster is still wave-shaped; don't re-route it to the session lane.
 
 There is no minimum size: shape decides, not count. A wave-shaped cluster of one still rolls
 out — the plan gate, verifier retry, master review, and auto-merge are the point. For N ≤ 2,
@@ -317,7 +320,7 @@ This skill does not execute anything. The rollout note it produces is read by th
 - Don't overwrite an existing rollout without prompting.
 - Don't touch tasks outside the target project (the `projects:` filter is strict).
 - Don't fill in `touches:` on tasks where you regex-detected files — that promotes a guess into authoritative metadata. Only the user does that. The **one** exception is the combined note authored in step 4.5: its `touches:` is the *union of file-sets the user already confirmed* for the members, so it's a derivation, not a fresh guess. (Separately, the `## File-sets` block in the **rollout note** — step 6 — also records confirmed file-sets, but that's rollout-note data the executor reads, never task frontmatter, so it doesn't touch this rule.)
-- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's read-only remote check (`git remote get-url`, `gh repo view`).
+- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's read-only remote and register checks (`git remote get-url`, `gh repo view`, `landing-register.py check`).
 
 ## Verification
 

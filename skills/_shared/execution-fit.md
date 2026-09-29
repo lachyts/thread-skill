@@ -47,7 +47,7 @@ session lane. schedule § 0 runs these checks; callers that read this file
 for the fit test route through schedule rather than checking themselves. The
 schedule gate stops before anything is written (no task stamped, no rollout
 note, no heartbeat) and names the remedy. Fix the blocker, then schedule again.
-Two blockers:
+Three blockers:
 
 **GitHub `origin`.** The engine branches every worktree from
 `origin/<default branch>` and lands each task as a GitHub PR that merge-wave
@@ -76,6 +76,41 @@ does (strip everything through `github.com:` or `github.com/`, then a trailing
 so it stays outside the markers and the test. If it fails (gh not
 authenticated, repo not visible, offline), the gate also stops and prints gh's
 error.
+
+**Landing register.** A rollout pushes a branch and merges a PR into the target
+repo for every task, so it never runs against a repo on the landing register: the
+repos agents must not push to on their own (ADR 0028 § Decision). Run this after the
+GitHub-origin check above, against the same repo path:
+
+```bash
+# thread:register-check (extracted and tested by tests/execution-fit-remote.test.sh)
+R="<repoPath>"
+case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
+lr="${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/landing-register.py"
+[ -f "$lr" ] || { echo "landing-register.py not found at $lr: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }
+v=$(python3 "$lr" check "$R"); rc=$?
+case "$rc" in
+  0) echo "$v" ;;
+  3) echo "$v: a rollout pushes a branch and merges a PR per task; unlisting is Lachy's call" >&2; exit 3 ;;
+  4) echo "no GitHub origin in $R: run the remote check above first" >&2; exit 4 ;;
+  *) exit 2 ;;  # any stderr already printed stands
+esac
+# end thread:register-check
+```
+
+It captures the reader's stdout only and never redirects its stderr, so the
+reader's own warnings (no register file, a malformed entry) and its
+`landing-register:` errors always show. The `~/` expansion is there because rollout
+notes carry `Project root: ~/...`. On exit 0 it prints `land` (any warning the
+reader wrote still shows): the repo may land. On any non-zero exit, stop and print
+its stderr verbatim: that stderr is the remedy, or the reader's error. Exit 3 is a
+listed repo (`listed <owner/name>: <reason>` plus the remedy), 4 is no GitHub
+origin, and 2 is any failure of the check itself, where any stderr already printed
+stands (python3 missing, exit 127, or a crash prints no `landing-register:` line).
+Never read 2 or 4 as "not listed": only exit 0 permits a rollout. This is a blocker,
+not a re-route: the session lane can't push to a listed repo either. A repo can be
+listed after scheduling, so execute § 2.5 re-runs this check at every launch, and
+execute § 4.5 re-runs it before every wave dispatch, Workflow call and merge.
 
 **Engine path.** The Workflow tool may refuse the plugin-cache `scriptPath`. That
 depends on the harness and cannot be checked at schedule time; execute § 5
