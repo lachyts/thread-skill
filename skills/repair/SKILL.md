@@ -157,7 +157,7 @@ When the user opts to defer a task (or declines further retries on a re-blocked 
    note **file-overlap successors** — later-wave tasks sharing a file (the rollout's `## File-sets` block).
 2. **No true dependents** → **clean defer**:
    ```
-   git -C <repoPath> worktree remove --force <repoPath>/.claude/worktrees/<slug>   # if it exists
+   git -C <repoPath> worktree remove -f -f <repoPath>/.claude/worktrees/<slug>   # if it exists; -f -f: execute locks task trees against the reaper
    gh pr close <pr> --delete-branch --comment "deferred out of [[<rollout>]] — back to backlog"   # if a PR exists
    python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py defer --tasks <slug> --rollout <rollout-note>
    ```

@@ -172,7 +172,7 @@ function scrubbed(cmd) {
 }
 
 // The agents' side of the scrub: only rendered commands carry the prefix mechanically, so every agent
-// prompt (all 8 builders, main-checkout agents and judges included) carries this rule. Static text.
+// prompt (all 8 builders, task-tree agents and judges included) carries this rule. Static text.
 const GIT_ENV_RULE = `Git environment (hard rule, the 2026-09-23 leak): every Bash call starts from the inherited
 environment, so an \`unset\` in one call never carries into the next. Start EVERY Bash command that runs git
 or the verifier, in a worktree OR in the main checkout, with \`${GIT_ENV_SCRUB}\`. The commands
@@ -182,6 +182,27 @@ worktree's gitdir. The main checkout and every linked worktree share ONE reposit
 through commondir, so a run that way commits, flips core.bare and pushes against the shared repo and its
 real remote. To test behaviour under an exported GIT_* variable, build a throwaway repo under
 \`mktemp -d\` whose only remote is a local bare repo, and point the variable there.`
+
+// The read-only agents' side of the pinned task tree (ADR 0030, p12-4). The planner, plan judge, plan
+// reviser and investigator all work in the task's ONE worktree (taskTreeSetup below), which the
+// implementer then builds in — so what they may touch there is narrow: read under the tree, map the
+// note's checkout paths onto it, and tidy ONLY what their own verifier run added (a before/after
+// status diff), never the env bootstrap's output or anything else already present. Static text; its
+// one git span is scrubbed like every other.
+const TASK_TREE_RULE = `Task tree (hard rule, ADR 0030): this task has ONE worktree, the \`Task tree:\` path above, shared by
+every agent on the task; the implementer builds in it after you, so you edit nothing in it.
+(i) Read every repo file under the task tree, never the project's shared checkout (it may be stale, dirty
+    or on another branch).
+(ii) The task note may cite paths in some checkout of this repo (e.g. \`~/repos/<repo>/skills/x.md\`): map
+    each to the same repo-relative path under the task tree.
+(iii) If you run the verifier, tidy only after your own run: take
+    \`${GIT_ENV_SCRUB} git -C "<task tree>" status --porcelain\` immediately before and immediately after it,
+    then revert only the tracked changes, and delete only the untracked paths,
+    that appear in the after list but not the before list.
+(iv) Never delete or revert anything that was present before your run, including the env bootstrap's
+    output (an in-project venv or node_modules): the implementer reuses this tree.
+(v) If the tree disappears mid-run (a "cannot change to" or "not a git repository" error on
+    it), re-run the setup command above once, say so in your output, and continue.`
 
 // The bug classes reviewers caught in the giflab rollout — every code-writing
 // agent gets these as explicit preflight checks before opening/updating a PR.
@@ -393,7 +414,7 @@ function escalationContext(prior, st, kind) {
 
 SECOND PASS: a first attempt at this investigation did not complete, and you own it from here. No
 stronger tier is available in this run, so there is no hand-over — finish the investigation yourself.
-The read-only contract above still holds in full: no source edits, no worktree, no PR.
+The read-only contract above still holds in full: no source edits, no commits, no PR.
 The prior attempt's diagnosis (verbatim):
 ${prior}`
     return `
@@ -509,20 +530,25 @@ function readOnlyPrompt(task, a, st, prior) {
 READ-ONLY task (scope: read-only) — investigation / audit, NO source edits, NO PR.
 
 Task note: ${task.taskPath}
-Project root: ${a.repoPath}
+Task tree: ${worktreeDir(a.repoPath, task.slug)}
 
-Investigate READ-ONLY directly against the project repo at ${a.repoPath} — do NOT create a worktree,
-do NOT modify any source files.
+${taskTreeSetup(a, task, true)}
+
+Investigate READ-ONLY in this task tree — do NOT modify any source files, do NOT commit, do NOT open a PR.
+
+${TASK_TREE_RULE}
 
 ${GIT_ENV_RULE}
 
 Steps:
-1. Read the task note in full + every file it references.
+1. Read the task note in full + every file it references (under the task tree).
 2. Run the read-only investigation it asks for (greps, reading tests, and a baseline verifier run to OBSERVE:
-   run it as \`${scrubbed(task.verifier || a.verifier)}\` from ${a.repoPath}).
-3. Append your findings to the task note under a "## Findings" heading — concrete, with file:line refs.
+   run it as \`${scrubbed(task.verifier || a.verifier)}\` from the task tree).
+3. Append your findings to the task note under a "## Findings" heading, starting with
+   \`Investigated on: <sha from the setup's tree base: line>\` followed verbatim by any \`tree NOT refreshed:\`
+   line the setup printed — concrete, with file:line refs.
 4. Return your structured result: verified=true (findings produced) or blocked=true (could not complete),
-   escalate=false, prUrl="", branch="", worktreePath="" (read-only tasks open no worktree),
+   escalate=false, prUrl="", branch="", worktreePath="${worktreeDir(a.repoPath, task.slug)}" (the task tree),
    blockerDiagnosis (empty unless blocked), and a one-paragraph summary of what you found.${baselineManifest(a)}${escalationContext(prior, st, 'readonly')}`
 }
 
@@ -534,10 +560,14 @@ any code, DO NOT open a PR, DO NOT modify source files. A judge will review your
 (you'll be re-dispatched to implement) or send it back for revision.
 
 Task note: ${task.taskPath}
-Project root: ${a.repoPath}
+Task tree: ${worktreeDir(a.repoPath, task.slug)}
 
-Investigate READ-ONLY directly against the project repo at ${a.repoPath} (no worktree, no source edits) —
-you are producing a plan only; the implementer opens the worktree later.
+${taskTreeSetup(a, task, true)}
+
+Investigate READ-ONLY in this task tree (no source edits, no commits) — you are producing a plan only; the
+implementer builds in this same tree later, so the plan is made on the base the code is built on.
+
+${TASK_TREE_RULE}
 
 ${GIT_ENV_RULE}
 
@@ -546,9 +576,11 @@ Steps:
 2. Read-only investigation to back the plan:
    - grep for sibling sites of the same anti-pattern across the file + codebase
    - identify callers of any function you intend to change/add
-   - run the verifier ONCE to capture the baseline (\`${scrubbed(a.verifier)}\`) — observe only, write no fix code
+   - run the verifier ONCE from the task tree to capture the baseline (\`${scrubbed(a.verifier)}\`) — observe only, write no fix code
    - skim related tests
-3. Produce a plan with EXACTLY these sub-sections, concrete not abstract:
+3. Produce a plan whose FIRST line is \`Planned on: <sha from the setup's tree base: line>\`, followed verbatim
+   by any \`tree NOT refreshed:\` or \`tree NOT attached\` line the setup printed, then EXACTLY these
+   sub-sections, concrete not abstract:
    ### Files to modify  (repo-relative path: one-line rationale)
    ### Test strategy    (test-first? which failing test first? which existing tests assert this?)
    ### Sibling-site check (the anti-pattern; verbatim greps run + counts; all sibling occurrences in scope)
@@ -577,12 +609,19 @@ rollout [[${a.rolloutSlug}]]. Apply rigorous judgement — your job is to catch 
 is written.
 
 Task note (the brief to judge against): ${task.taskPath}
-Project root: ${a.repoPath}
+Task tree: ${worktreeDir(a.repoPath, task.slug)}
+
+${taskTreeSetup(a, task, false)}
 
 The plan to review:
 ---
 ${planText}
 ---
+
+Base check first: your setup printed \`tree base: <sha>\`. Compare it with the plan's \`Planned on:\` line. If
+they differ, or the plan has none, the tree was recreated or moved since planning: say so as the first line
+of your feedback, re-check the plan's claims against this tree, and return "changes" if any no longer holds.
+If the plan quotes a \`tree NOT refreshed:\` or \`tree NOT attached\` line, surface it in your feedback.
 
 Check, against the task brief:
 - Does the plan actually address the brief?
@@ -597,9 +636,11 @@ Check, against the task brief:
   lines — a gate written as prose is rejected, and commentary does not belong there) is an
   automatic "changes" (ADR 0008). Also flag a gate the brief implies but the plan omits.
 
+${TASK_TREE_RULE}
+
 ${GIT_ENV_RULE}
 
-Read the brief and grep the repo as needed to verify the plan's claims — do not approve on faith.
+Read the brief and grep the task tree as needed to verify the plan's claims — do not approve on faith.
 Decide: verdict "approve" if the plan is sound (clean or trivially nitpicky), else "changes" with 3–8
 specific, actionable feedback bullets.`
 }
@@ -610,7 +651,9 @@ function planReviserPrompt(task, priorPlan, priorFeedback, round, a) {
 (rollout [[${a.rolloutSlug}]]). Still plan-only — NO code, NO PR, NO source edits.
 
 Task note: ${task.taskPath}
-Project root: ${a.repoPath}
+Task tree: ${worktreeDir(a.repoPath, task.slug)}
+
+${taskTreeSetup(a, task, false)}
 
 Your prior plan:
 ---
@@ -621,9 +664,13 @@ Feedback to address — ACCUMULATED across every prior review round. Every bulle
 revision demonstrably resolves it; do not drop an earlier round's concern to satisfy a later one:
 ${grouped}
 
+${TASK_TREE_RULE}
+
 ${GIT_ENV_RULE}
 
-Run additional READ-ONLY investigation as needed. Rewrite the plan with the SAME required sub-sections
+Run additional READ-ONLY investigation in the task tree as needed. Rewrite the plan so that its
+FIRST line is \`Planned on: <sha from your setup's tree base: line>\`, followed verbatim by any \`tree NOT
+attached\` line the setup printed and any \`tree NOT refreshed:\` line your prior plan quoted, with the SAME required sub-sections
 (Files to modify / Test strategy / Sibling-site check / Caller-wiring / Edge cases / Risks /
 Gated inputs — bullets only: declare spend with a hard cap, credentials, irreversible actions, or
 exactly "None").
@@ -677,11 +724,19 @@ edge cases.`
 
 PR: ${prevImpl.prUrl}
 Task note (the brief): ${task.taskPath}
-Project root: ${a.repoPath}
+Task tree: ${worktreeDir(a.repoPath, task.slug)}
 
 ${depth}
 
 ${GIT_ENV_RULE}
+
+The PR is authoritative: judge \`gh pr diff ${prevImpl.prUrl}\` at the PR head. The task tree is context only
+(the rest of the repo at that commit): read files there only when
+\`${GIT_ENV_SCRUB} git -C "${worktreeDir(a.repoPath, task.slug)}" rev-parse HEAD\` equals
+\`gh pr view ${prevImpl.prUrl} --json headRefOid -q .headRefOid\` AND
+\`${GIT_ENV_SCRUB} git -C "${worktreeDir(a.repoPath, task.slug)}" status --porcelain\` prints nothing.
+On a mismatch, a non-empty status or a missing tree, use \`gh pr diff\` / \`gh pr view\` only — never the
+project's shared checkout. You are read-only: no edit, commit or push, in the tree or anywhere else.
 
 Read \`gh pr diff ${prevImpl.prUrl}\` and the task brief. Decide: verdict "approve" if the PR is sound, else
 "changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}`
@@ -744,6 +799,11 @@ function shortAlias(slug) {
 // ignores repoPath). Anchoring the worktree on a.repoPath makes the engine correct from ANY
 // launch location and places worktrees under <repoPath>/.claude/worktrees/ (where the daily
 // reaper finds them). Cleanup is the reaper's job, not the harness's.
+// ONE tree per task (ADR 0030, p12-4): this path is the task's tree for EVERY agent on it. The task's
+// first agent creates it — the planner of a plan-gated task (taskTreeSetup), else the investigator of
+// a read-only task (taskTreeSetup) or the implementer (worktreeSetup) — and every later agent reuses it;
+// the review judge is handed the same path as context. taskTreeSetup locks it with the session's pid,
+// which the reaper's live-pid check honours, so it is never reaped mid-run.
 function worktreeDir(repoPath, slug) {
   return `${repoPath}/.claude/worktrees/${slug}`
 }
@@ -780,6 +840,10 @@ function defaultBranch(a) {
 
 // Bash the code-writing agents run as their FIRST action to enter an isolated worktree of the
 // target repo. Resume-safe: reuse the dir if it exists, attach an existing branch, else create.
+// On a plan-gated task the planner has usually created this tree already (taskTreeSetup), so arm 1
+// reuses it; on an ungated one the implementer is the task's first agent and creates it. The bytes
+// are GOLDEN-pinned (tests/default-branch.test.mjs): the lock, attach and refresh steps live in
+// taskTreeSetup, never here.
 function worktreeSetup(a, task) {
   const wt = worktreeDir(a.repoPath, task.slug)
   const br = `audit-fix/${shortAlias(task.slug)}`
@@ -797,6 +861,75 @@ that looks like a "silent Edit no-op" but is really a wrong-tree edit. After any
 A FRESH worktree is branched from a freshly-fetched ${base} (NOT local HEAD) so it includes every
 prior wave that has already merged. The two reuse arms above are unchanged — they must NOT re-fetch or
 rebase an in-flight branch on resume.`
+}
+
+// Bash the READ-ONLY agents (planner, plan judge, plan reviser, investigator) run as their FIRST action to
+// enter the task's tree (ADR 0030, p12-4) — the same worktreeDir path worktreeSetup uses, so every agent on
+// a task shares one tree and the plan is made on the base the code is built on. A code-writing task's tree
+// is its audit-fix/<alias> branch (the same WT/BR lines and arms as worktreeSetup); a read-only task's is
+// detached at origin/<base>. After the arms, guarded so nothing touches the main checkout when "$WT" is a
+// stale plain directory (the toplevel must BE "$WT"):
+// - lock: unlock + lock with `pid $PPID` — the Bash tool's shell's parent is the long-lived claude session,
+//   and the daily reaper skips a tree whose lock names a live pid (unlocking stale ones). Re-locking each
+//   render refreshes the pid; `lock` on a locked tree exits 128, hence the unlock first.
+// - attach (code-writing only): a detached tree (a read-only → code-writing scope flip) is put on $BR —
+//   the existing branch, else a new one at HEAD — so no commit is lost.
+// - refresh (refresh=true: planner, investigator): fetch first (a failure skips every later check), then
+//   fast-forward to origin/<base> only when the tree has no tracked changes and HEAD is an ancestor (no
+//   commits of its own); the command is picked at run time — `merge --ff-only` on a branch, `checkout
+//   --detach` only when already detached — so a branch tree is never detached. Untracked files (a verifier
+//   artefact, an in-project venv) do not block it; one in the way makes git refuse, and that is reported.
+//   Any skip prints `tree NOT refreshed: <why>; N behind origin/<base> as last fetched` for the agent to
+//   quote. The judge and reviser (refresh=false) never move the tree to a new commit.
+// - `tree base: <sha>`: the commit the agent is reading — the planner's `Planned on:`, which the plan judge
+//   compares with its own to catch a tree recreated or moved since planning.
+// The implementer prompts do not call this (their worktreeSetup bytes are GOLDEN-pinned). With no
+// a.repoPath (the cap sweep's call shape) it still renders; a bad defaultBranch throws, as there.
+function taskTreeSetup(a, task, refresh) {
+  const wt = worktreeDir(a.repoPath, task.slug)
+  const br = `audit-fix/${shortAlias(task.slug)}`
+  const base = `origin/${defaultBranch(a)}`
+  const code = task.scope !== 'read-only'
+  const g = 'git -C "$WT"'
+  const skip = 'why="fast-forward refused (untracked file in the way?)"'
+  const cmd = [
+    code ? `${GIT_ENV_SCRUB} WT="${wt}"; BR="${br}"` : `${GIT_ENV_SCRUB} WT="${wt}"`,
+    'if [ -d "$WT" ]; then cd "$WT";',
+    ...(code ? [`elif git -C "${a.repoPath}" show-ref --verify --quiet "refs/heads/$BR"; then git -C "${a.repoPath}" worktree add "$WT" "$BR" && cd "$WT";`] : []),
+    code
+      ? `else git -C "${a.repoPath}" fetch origin --quiet && git -C "${a.repoPath}" worktree add "$WT" -b "$BR" ${base} && cd "$WT"; fi`
+      : `else git -C "${a.repoPath}" fetch origin --quiet && git -C "${a.repoPath}" worktree add --detach "$WT" ${base} && cd "$WT"; fi`,
+    `if [ -d "$WT" ] && [ "$(${g} rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$WT" 2>/dev/null && pwd -P)" ]; then`,
+    `  ${g} worktree unlock "$WT" 2>/dev/null`,
+    `  ${g} worktree lock --reason "pid $PPID thread:execute task tree" "$WT" 2>/dev/null || echo "tree NOT locked against the daily reaper"`,
+    ...(code ? [`  if ! ${g} symbolic-ref -q HEAD >/dev/null; then { if ${g} show-ref --verify --quiet "refs/heads/$BR"; then ${g} checkout --quiet "$BR"; else ${g} checkout --quiet -b "$BR"; fi; } || echo "tree NOT attached to $BR: checkout failed"; fi`] : []),
+    ...(refresh ? [
+      '  why=""',
+      `  if ! ${g} fetch origin --quiet; then why="fetch failed"`,
+      `  elif [ -n "$(${g} status --porcelain --untracked-files=no)" ]; then why="dirty (tracked changes)"`,
+      `  elif ! ${g} merge-base --is-ancestor HEAD ${base}; then why="own commits"`,
+      `  elif ${g} symbolic-ref -q HEAD >/dev/null; then ${g} merge --ff-only --quiet ${base} || ${skip}`,
+      `  else ${g} checkout --quiet --detach ${base} || ${skip}; fi`,
+      `  [ -z "$why" ] || echo "tree NOT refreshed: $why; $(${g} rev-list --count HEAD..${base}) behind ${base} as last fetched"`,
+    ] : []),
+    `  echo "tree base: $(${g} rev-parse HEAD)"`,
+    'fi',
+    `git rev-parse --show-toplevel   # MUST print "$WT" (the task tree), NOT ${a.repoPath} (the main checkout) — STOP if it doesn't${refresh ? envBootstrapStep(a) : ''}`,
+  ]
+  const kind = code
+    ? `on branch ${br} (the implementer builds on it later)`
+    : 'detached for this read-only task (a tree an earlier code-writing scope left on its branch stays there)'
+  const moves = refresh
+    ? `fast-forwards it to ${base} only when it has no tracked changes and no commits of its own, and otherwise
+prints a \`tree NOT refreshed: <why>; N behind ${base} as last fetched\` line — quote that line verbatim
+where your instructions below say so`
+    : `never moves it to a new commit`
+  return `First, enter this task's tree (ADR 0030). Run exactly, as ONE Bash command (the \`unset\` on its first line covers only that command):
+${cmd.map((l) => '  ' + l).join('\n')}
+This is the ONE worktree every agent on this task shares, ${kind}, first cut from a freshly fetched ${base}.
+The setup reuses an existing tree and ${moves}. It locks the tree against the daily worktree reaper and
+ends by printing \`tree base: <sha>\`, the commit you are reading. Every repo read and command runs in this
+tree, never in the project's shared checkout at "${a.repoPath}", which may be stale.`
 }
 
 function chunk(arr, n) {
