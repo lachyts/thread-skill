@@ -70,9 +70,12 @@ ladder (two ways to say one thing, which can disagree); the first draft's capped
 - **Rung** replaces **Tier** in the glossary; Top tier and Ceiling become the top rung.
   `tierCapped` goes: a climb at the top is a recorded no-op.
 - p7-1 is absorbed: the file is read at each task's start, and a resume keeps its args. Its third
-  question (how a block at the top rung is triaged, 0016's "wait for quota" reading) stays open for
-  it. Re-check against protocol 4's effort-first routing (0021 on `codex/thread-rollout-redesign`)
-  when p6-1 integrates it.
+  question (how a block at the top rung is triaged, 0016's "wait for quota" reading) stays open.
+- Supersedes protocol 4's ADR 0021 (on `codex/thread-rollout-redesign`, never landed on master),
+  which routed by a shared workspace policy and climbed to maximum effort before changing model.
+  Lachy's stance is the reverse (`max` is weak on Opus 5.5), and the ladder is a thread-owned file.
+  Its sound parts carry over: settings are fixed for a task's run, and the record keeps what was
+  asked for apart from what ran. The shared policy (a workspaces ADR) never landed either.
 - AGENTS.md § Model tier is locked to Lachy's hand edits. The pointer text to the ladder file is
   proposed to him, never written.
 - Schedule stops offering `model: fable` and `effort:` stamps; it offers a starting rung for a task

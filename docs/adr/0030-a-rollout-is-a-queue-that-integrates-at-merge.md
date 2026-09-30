@@ -3,7 +3,7 @@
 Date: 2026-09-30
 Status: proposed, implementation pending (amends ADR 0009's wave and cursor, schedule § 5's
 same-file invariant, and merge-wave's halt-on-conflict; grilled with Lachy while scheduling
-chorus-rollout-2026-09-30)
+chorus-rollout-2026-09-30; supersedes protocol 4's ADR 0019, never landed on master)
 
 ## Context
 
@@ -69,8 +69,9 @@ about if we're working in worktrees and we're just merging them after we've done
    merge. (Re-grilled 2026-09-30. Rejected: one long Workflow for the whole rollout, integrating and
    merging inside it. A script cannot touch the vault, so status would be blind until the run ended,
    the landing register and pause checks could not run per merge, merges would pass to an agent inside the script,
-   and a ten-hour run is one failure domain. Unverified: that one session holds several Workflow
-   calls in flight at once. The build's first step proves it.)
+   and a ten-hour run is one failure domain. Verified by spike on 2026-09-30: one session held three
+   Workflow calls in flight at once, one of them in a worktree passed in args,
+   `docs/spikes/2026-09-30-concurrent-workflow-calls.md`.)
 5. **A stuck task is set aside, not a halt.** A conflict it cannot resolve, or a suite still red
    after its fix loop, marks the task `blocked` with the reason. Its dependants wait, and the queue
    runs on. The rollout halts only when nothing left in the queue can start.
@@ -116,3 +117,8 @@ fifty tasks for one).
   since 2026-09-23) and chorus-rollout-2026-09-30 (parked for this) are the two to migrate.
   (Re-grilled 2026-09-30. Rejected: wave rollouts finishing on the old engine beside the queue, and
   holding the queue until GifLab finishes on waves.)
+- Protocol 4's ADR 0019 (on `codex/thread-rollout-redesign`, accepted 2026-09-22, never built)
+  reached for the same thing: readiness, not a wave cursor, governs progress, and a pause drains.
+  This decision supersedes it and goes further (a shared file never holds a task back). The queue is
+  built on master's engine; the branch is not landed whole (orient reshuffle, 2026-09-30). Its
+  standalone fixes that also hold on master are carried into the build.
