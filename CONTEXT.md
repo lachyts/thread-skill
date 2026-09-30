@@ -18,7 +18,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Task floor** — the invariant: every stash/defer writes a self-contained
   vault task routed to the right project. The guarantee that makes shutting an
   agent down feel safe. The Task is also the shared atom of both ladders:
-  planning (project → phase → task) and execution (rollout → wave → task).
+  planning (project → phase → task) and execution (rollout → task, run as a
+  Queue since ADR 0030).
 
 ## Continuity (threads and attention)
 
@@ -192,7 +193,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `tags: [task, …]`). _Avoid_: ticket, item, story, step.
 - **Phase** — a project's roadmap tier: an ordered milestone (P1, P2, …) whose
   tasks carry `phase: N`. A human planning concept only: phases order meaning,
-  waves order merges, and the engine never reads `phase:`. One phase = one
+  the queue orders runs, and the engine never reads `phase:`. One phase = one
   rollout by convention. A phase is a plan, never a task (ADR 0005).
   _Avoid_: stage, iteration, wave.
 - **Reshuffle** — the usual reason a project is picked up after time away:
@@ -227,7 +228,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Reach tiers** — what a reshuffle may change, by a task's state:
   **in flight** (in a live rollout, dispatched, or in progress) is frozen,
   read for context only — its scope, phase and body never change, though
-  schedule may still re-derive its wave when a superseding rollout takes it
+  schedule may still re-queue it when a superseding rollout takes it
   over, and new work may join its phase for a later rollout; **unstarted** phased work is movable (re-phase, merge, split, drop,
   retire the phase); **loose** work is fully open, including re-homing to
   another project. Thread captures (stash/defer's `thread`-tagged tasks) are frozen like
@@ -254,8 +255,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the next starts. Only dependencies and a **Solo** task hold a task back,
   never a shared file. _Avoid_: wave (the old grouping), batch (the session
   lane's).
-- **Solo** — a task in a Queue that runs alone: it starts only when nothing
-  else is running, and nothing starts until it merges. For a sweeping change
+- **Solo** — a task in a Queue that runs alone: once it is next free to
+  start, nothing new starts, the running tasks finish, it runs, and the queue
+  resumes when it merges or is set aside. For a sweeping change
   that every concurrent task would otherwise have to redo its work around
   (ADR 0030). _Avoid_: barrier, exclusive, wave of one.
 - **Integration** — the serial step between a task's approval and its merge,
@@ -272,13 +274,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rollouts kept `merged_through_wave: N` on the rollout note.)
   _Avoid_: checkpoint, pointer, progress marker.
 - **Dependent closure** — the set of tasks transitively depending on a task
-  via `depends-on:` / `blocked-by:` / body wikilinks — the blast radius that
-  must move together if it's deferred. _Avoid_: dependency tree, downstream.
+  via `depends-on:` / `blocked-by:` (a body phrase counts only once confirmed
+  into frontmatter) — the blast radius that must move together if it's
+  deferred, and the tasks a set-aside task holds back in a Queue. _Avoid_: dependency tree, downstream.
 
 ## Task lifecycle (rollout lane)
 
-- **Landed** — work final on `main` (`status: done`, or `review`/`merged`
-  awaiting confirmation). Never re-dispatched on resume.
+- **Landed** — work final on `main` (`status: done`, or a `review`/`merged`
+  task whose PR has merged, awaiting confirmation). Never re-dispatched on
+  resume. Under a Queue a `review` task with an open PR is not landed: it
+  awaits Integration (ADR 0030).
   _Avoid_: finished, complete, shipped.
 - **Blocked** — the umbrella for a task that did not land: `blocked` (verifier
   never green), `plan-blocked` (plan never approved), or `review-blocked`
@@ -299,7 +304,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   flags it and fixes the unambiguous items on a Reshuffle or Steer only
   answer (ADR 0026, 0027). _Avoid_: desync, staleness, mismatch.
 - **Clean defer** — taking a task out of a rollout back to the open backlog
-  (clearing `wave:`/`rollout:`/`owner:`), permitted only when nothing in the
+  (clearing `rollout:`/`owner:`, and a legacy `wave:`), permitted only when nothing in the
   rollout depends on it. _Avoid_: drop, cancel, skip.
 
 ## Convergence engine
@@ -328,7 +333,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   drift, hands off to the engine's resume — never merges or converges
   (ADR 0004). _Avoid_: orchestrator, controller, wrapper.
 - **Situational report** — the read-only output of `status`: cursor, per-task
-  state by wave, blockers, drift flags, one recommended next action.
+  state (running, integrating, queued, merged, set aside), blockers, drift flags, one recommended next action.
   _Avoid_: dashboard, summary, snapshot.
 - **Repair bridge** — the path by which a blocked task is fixed and re-landed
   while the engine keeps sole merge authority. _Avoid_: handoff, recovery.

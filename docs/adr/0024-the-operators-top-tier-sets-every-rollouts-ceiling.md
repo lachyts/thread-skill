@@ -4,6 +4,7 @@ Date: 2026-09-26
 Status: accepted, implementation pending (task p7-1). Until it lands, schedule and execute still
 carry 0016's quota-only wording, and the ceiling reaches rollouts only through the operator's
 own instruction (AGENTS.md § Model tier).
+*(Superseded by ADR 0029, 2026-09-30, proposed: the `top-tier` file becomes the ladder file; task p7-1 is merged into p13-1.)*
 
 ## Context
 

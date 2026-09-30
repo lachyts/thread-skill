@@ -540,7 +540,7 @@ scheduled 2026-07-15.
 - **AGENTS.md still says reviews never block** (p11-8): landing's review runs inline. Lachy's file, so the wording needs his approval.
 - **Decided in task specs, not grilled** (2026-09-30, flag if wrong):
   - `--gated` becomes a human pause before each merge, and single-wave mode goes (p12-9).
-  - A rebase or merge-from-main is the integrator's plan-time choice (p12-6).
+  - Integration rebases and pushes the task's own branch with `--force-with-lease`, amending merge-wave's never-force-push rule for task branches only (ADR 0030, fixed after review round 1).
   - `protocol_version: 5` (p12-10).
 - **Open from ADR 0029:** how a block at the top rung is triaged. This is p7-1's third question, carried into [[thread-skill-p13-1-ladder-file]].
 - **Untested:** five Workflow calls at once (the ceiling of 4 plus integration). The spike ran three; p12-13 should confirm five.

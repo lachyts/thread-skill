@@ -40,19 +40,30 @@ have some sort of settings file."*
    rejection, a red one-shot verifier or a first-pass block, the first review rejection. A gate
    stop (ADR 0008) and a dead agent are not evidence, as today. On a task already at the top rung
    a climb is a no-op, recorded as such. ADR 0006's shape holds per stage: a first pass below the
-   top rung verifies one-shot, and the retry after its climb, like every pass on the top rung, runs
-   the full Ralph loop (a top-rung retry keeps today's short `CAPPED_RETRY_ITERATIONS` budget).
+   top rung verifies one-shot, and every pass on the top rung runs the full Ralph loop. The budget
+   keys on whether the climb moved: a retry after a climb that moved (onto the top rung or not)
+   gets the full `max_iterations`, and a retry after a no-op climb (already on the top rung) keeps
+   today's short `CAPPED_RETRY_ITERATIONS`.
 4. **A task may start higher, never elsewhere.** Per-task `rung: N` is the planning-time step-up,
-   replacing `model: fable`. The per-task `effort:` hatch is retired: every setting a task holds is
-   a position on the operator's ladder, so none can leave it. Stray `effort:` and `model:` stamps are
-   ignored, and stripped when a rollout is regenerated.
+   replacing `model: fable`. N counts from 1 at the bottom rung, and a value past the top means the
+   top. Escalation stays sticky across dispatches as `model: fable` made it: reconcile stamps the
+   rung a task reached as its `rung:`, so a re-dispatch after repair starts there. A rung inserted
+   below shifts what every stamp points at; the operator re-stamps or accepts the shift. The
+   per-task `effort:` hatch is retired, and so is the run-level `judgeModel` pin: judges run on
+   the task's current rung. Every setting a task holds is a position on the operator's ladder, so
+   none can leave it. Stray `effort:` and `model:` stamps are ignored, and stripped when a rollout
+   is regenerated.
 5. **Integration runs on the top rung** (ADR 0030), whatever rung the task reached.
 6. **The ladder is read at each task's start.** Under the Queue (ADR 0030) each task is its own
-   Workflow call, and its args carry the ladder as it stood when it started. A resume re-passes
-   those args unchanged (execute's resume contract). An edit to the file reaches every task that
-   starts after it, never one in flight.
+   Workflow call, and its args carry the ladder as it stood when it started. An edit can only
+   narrow a task in flight: on a resume, and before every Integration call, the lead clamps the
+   task's snapshot to the current file's top rung, so removing a rung (ADR 0016's exhausted quota)
+   reaches running and resumed tasks. Adding or raising a rung reaches only tasks started after
+   the edit. Integration uses the task's clamped snapshot. Apart from that clamp, a resume
+   re-passes a task's args unchanged (execute's resume contract).
 7. **The record.** A task's result carries `startRung`, `rung` (where it ended) and `climbs` (the
-   stages that climbed, a no-op climb included). The report reads the ladder to name each rung.
+   stages that climbed, a no-op climb included), with the model and efforts of each rung named
+   from the task's own snapshot, so the report says what actually ran even after the file changes.
 
 Considered: two separate lists, models and efforts, with a rule for which to climb first (an extra
 ordering rule, and the judge efforts need a home); climbing once per task, as 0006 does today (a
@@ -76,6 +87,11 @@ ladder (two ways to say one thing, which can disagree); the first draft's capped
   Lachy's stance is the reverse (`max` is weak on Opus 5.5), and the ladder is a thread-owned file.
   Its sound parts carry over: settings are fixed for a task's run, and the record keeps what was
   asked for apart from what ran. The shared policy (a workspaces ADR) never landed either.
+- The Opus lock moves from `max_tier: opus`, stamped on each synced rollout note, to the ladder
+  file on each machine that runs rollouts. With the file absent, the built-in ladder climbs to
+  fable, so p13-1 writes Lachy's file on every machine he runs rollouts on, and execute prints the
+  ladder it resolved (the file's path, or `built-in`) at every launch, where a missing file shows.
+  Until P13 lands, `max_tier: opus` remains the lock.
 - AGENTS.md § Model tier is locked to Lachy's hand edits. The pointer text to the ladder file is
   proposed to him, never written.
 - Schedule stops offering `model: fable` and `effort:` stamps; it offers a starting rung for a task

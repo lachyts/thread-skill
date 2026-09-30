@@ -1,7 +1,7 @@
 # 0030 — a rollout is a queue that integrates at merge
 
 Date: 2026-09-30
-Status: proposed, implementation pending (amends ADR 0009's wave and cursor, schedule § 5's
+Status: proposed, implementation pending (amends ADR 0009's wave and cursor, merge-wave's never-force-push rule for a task's own branch, schedule § 5's
 same-file invariant, and merge-wave's halt-on-conflict; grilled with Lachy while scheduling
 chorus-rollout-2026-09-30; supersedes protocol 4's ADR 0019, never landed on master)
 
@@ -21,22 +21,30 @@ about if we're working in worktrees and we're just merging them after we've done
 1. **File overlap no longer serialises tasks.** Only dependencies (`depends-on:`, `blocked-by:`, a
    named "after"), a **solo** task and the parallel ceiling decide what runs at once. A solo task is a
    sweeping change (a rename, a restructure of a hub file) that would make every concurrent task
-   redo its work: it starts only when nothing else is running, and nothing starts until it merges.
+   redo its work. It runs alone: once it is the next task free to start (its own dependencies merged,
+   like any task's), nothing new starts; the tasks already running finish, integrate and merge or
+   are set aside; then the solo task runs, and the queue resumes when it merges or is set aside. A
+   set-aside solo task releases the queue like any other.
    Shared files still shape queue order softly: of the tasks free to start, the one overlapping least
    with what is running goes first. Overlap never holds a task back. Waves are dropped outright, not
    kept as an opt-in mode (re-grilled 2026-09-30): nothing a wave did is a wave's job once merging
    integrates.
 2. **A rollout is a rolling queue, not waves.** Up to the parallel ceiling's worth of tasks run at any moment,
-   each in its own worktree from the `main` of the moment it starts. When one merges, the next in
-   **queue order** starts: highest `priority:` first, then the fewest files shared with what is
+   each in its own worktree from the `main` of the moment it starts. A slot is a task in its own
+   Workflow call (plan, implement, review): it frees when that call returns, whatever the result,
+   so a task waiting for or in Integration holds no slot, and neither does a set-aside one. When a
+   slot frees, the next in **queue order** starts: highest `priority:` first, then the fewest files shared with what is
    running, then the order schedule wrote. The lead re-reads the task notes before every start, so
    changing a task's `priority:` in the vault reorders a live queue; there is no other queue to
    edit. (Re-grilled 2026-09-30. Rejected: an ordered `## Queue` list in the rollout note, which
    either overrides the overlap preference or loses it; order frozen at schedule time.) A task whose dependency has not
    merged waits in the queue.
 3. **Merging is integration.** A task that passes its own verifier and review is integrated before
-   it merges: its branch is rebased onto the latest `main` in its own worktree, and its implementer
-   resolves any conflict from its own diff and the PRs that landed ahead of it. The full verifier
+   it merges: its branch is rebased onto the latest `main` in its own worktree (the task's own PR branch is
+   then pushed with `--force-with-lease`: this amends merge-wave's never-force-push rule for a
+   task's own branch only, and the default branch is never force-pushed), and a fresh
+   implementer-role agent resolves any conflict from the task's own diff and the PRs that landed
+   ahead of it. The full verifier
    then runs again. It then gets one short **re-review** when the integrator wrote code (resolved a
    conflict or added a commit) **or** a PR that landed since its base shares a file with it. The
    judge reads only the integration delta and those overlapping PRs, and asks one thing: was
@@ -46,16 +54,21 @@ about if we're working in worktrees and we're just merging them after we've done
    between two changes that each merged cleanly to the verifier alone, the no-CI hole again; and
    always, which pays for reviews with nothing to read.) A rejection runs the task's full review
    loop, up to its `max_review_rounds`, the integrator revising on the top rung against the accumulated
-   feedback; the ceiling sets the task aside. `main` cannot move while it runs, so no round
-   re-rebases. The cost is accepted with open eyes: a hard integration holds every finished task
+   feedback; the ceiling sets the task aside. Integration is serial within the rollout, but other
+   merges can still move `main` meanwhile (a close's landing PR, a hand merge, another session).
+   The merge step therefore refuses a base that has moved, and the task re-integrates onto the new
+   `main`: a rebase, the full verifier, and a re-review only when the newly landed PRs share a file
+   with it or the rebase needed code. Its review loop is not re-run from the start. The cost is accepted with open eyes: a hard integration holds every finished task
    behind it, while implementation carries on. (Rejected: one fix round then set aside, and set
    aside at once, both of which trade a likely landing for a repair trip.) Only then does it merge. Tasks merge in the order they finish integrating, one
    at a time. The integrate-verify-merge step is serial; implementation is not. Integration replaces
    update-branch for every repo, CI or none, so the stale-base squash cannot happen: nothing merges
    from a base older than the `main` it lands on. The integrating agent is a fresh one in the
-   implementer role, on the task's model, given its own diff, its approved plan, and the PRs and
-   briefs that landed since its base. It always runs on the **top rung** of the operator's ladder
-   (ADR 0029; today Opus at `xhigh`), whatever rung the task reached: folding someone else's landed
+   implementer role, given the task's own diff, its approved plan, and the PRs and briefs that
+   landed since its base. It always runs on the **top rung** of the task's ladder (ADR 0029),
+   model and effort both, whatever rung the task reached; the re-review judge runs on the top rung
+   too, at its `review` effort. Until ADR 0029 is built, the top rung is the run's ceiling tier
+   with `xhigh` for the integrator (Opus at `xhigh` under the operator's Opus lock): folding someone else's landed
    work into yours is the step where a silent drop happens, so it never runs on a first-pass rung.
    (Re-grilled 2026-09-30. Rejected: the task's own rung, which can put the riskiest step on the
    bottom rung; a dedicated integrator role, another role on every rung for the same code-writing
@@ -72,9 +85,13 @@ about if we're working in worktrees and we're just merging them after we've done
    and a ten-hour run is one failure domain. Verified by spike on 2026-09-30: one session held three
    Workflow calls in flight at once, one of them in a worktree passed in args,
    `docs/spikes/2026-09-30-concurrent-workflow-calls.md`.)
-5. **A stuck task is set aside, not a halt.** A conflict it cannot resolve, or a suite still red
-   after its fix loop, marks the task `blocked` with the reason. Its dependants wait, and the queue
-   runs on. The rollout halts only when nothing left in the queue can start.
+5. **A stuck task is set aside, not a halt.** Any task that stops short of merging is set aside:
+   one whose own call returns `plan-blocked`, `review-blocked` or `blocked`, and one whose
+   Integration fails (a conflict it cannot resolve, a suite still red after its fix loop, or a
+   re-review that reaches its ceiling), which is marked `blocked` with the reason. Its slot is
+   free, its dependants wait, and the queue runs on. A `gate-pending` task (ADR 0008) is set aside
+   the same way until Lachy signs its gates; the queue runs whatever does not depend on it. The
+   rollout halts only when nothing left in the queue can start.
 
 Considered: keeping waves as an opt-in mode beside the queue (two engines to keep, and every reason
 a wave existed has a better home: same-file safety in integration, order in dependencies, the one
@@ -86,8 +103,10 @@ fifty tasks for one).
 
 ## Consequences
 
-- There is no stored cursor. A rollout's progress is its task notes: `status: done` means merged,
-  and each task carries its own `dispatched:` and `merged:` stamps, which feed elapsed time and
+- There is no stored cursor. A rollout's progress is its task notes: `status: done` means merged.
+  An affine-merge member's `status: merged` tombstone does not: a dependency on a folded member is
+  satisfied only when the combined unit it was folded into is done. Each task carries its own
+  `dispatched:` and `merged:` stamps, which feed elapsed time and
   the rough estimate. A resume checks GitHub for a merge whose note was never marked, as the cold
   resume does today. (Re-grilled 2026-09-30. Rejected: a `merged: [slugs]` list on the rollout
   note, a second copy for `/thread:status` to reconcile.) `/thread:status` reports running,
@@ -112,7 +131,10 @@ fifty tasks for one).
   what integration already fixes.
 - There is one engine. A wave rollout in flight migrates onto the queue by `--regenerate`: a task
   at `review` with an open PR is a task awaiting Integration, an open task is queued, and a merged
-  one counts toward the cursor. The wave engine, `merged_through_wave` and the `WAVE-STATUS` line
+  one counts toward the cursor. A wave rollout's `review` PRs never merged, so for them this
+  overrides schedule's supersede rule and the old **Landed** reading (`review` as landed): the
+  migration carries them into the new rollout, never leaves them behind in the archived one. The
+  wave engine, `merged_through_wave` and the `WAVE-STATUS` line
   are deleted outright, with no alias. giflab-rollout-2026-09-23 (wave 1's four PRs at `review`
   since 2026-09-23) and chorus-rollout-2026-09-30 (parked for this) are the two to migrate.
   (Re-grilled 2026-09-30. Rejected: wave rollouts finishing on the old engine beside the queue, and
