@@ -58,6 +58,11 @@ const PROBE = {
   required: ['index', 'worktreeToplevel', 'armA', 'armB', 'armC', 'notes'],
 }
 
+// The engine's GIT_ENV_SCRUB (wave-execute.workflow.js, p12-3), repeated here because a Workflow script
+// cannot import; tests/git-env-scrub.test.mjs pins the two as equal. Every git command the probe runs
+// starts with it, so an inherited GIT_DIR & co. never turns the probe's git calls onto another repo.
+const GIT_ENV_SCRUB = 'unset $(git rev-parse --local-env-vars 2>/dev/null);'
+
 function buildPrompt(i, repoPath, base) {
   return `You are a reproduction PROBE for a suspected "Edit tool silently no-ops inside a git worktree" bug.
 Follow these steps EXACTLY and report precisely what you observe. Do NOT try to fix anything — OBSERVE and REPORT.
@@ -65,8 +70,8 @@ Follow these steps EXACTLY and report precisely what you observe. Do NOT try to 
 Scratch repo (the "main checkout"): ${repoPath}
 Your index: ${i}
 
-STEP 1 — create an isolated worktree of the scratch repo (mirrors the wave-execute engine verbatim). Run exactly:
-  RP="${repoPath}"; WT="$RP/.claude/worktrees/repro-${i}"; BR="audit-fix/repro-${i}"
+STEP 1 — create an isolated worktree of the scratch repo (mirrors the wave-execute engine verbatim). Run exactly, as ONE Bash command (the \`unset\` on its first line covers only that command):
+  ${GIT_ENV_SCRUB} RP="${repoPath}"; WT="$RP/.claude/worktrees/repro-${i}"; BR="audit-fix/repro-${i}"
   if [ -d "$WT" ]; then cd "$WT";
   elif git -C "$RP" show-ref --verify --quiet "refs/heads/$BR"; then git -C "$RP" worktree add "$WT" "$BR" && cd "$WT";
   else git -C "$RP" fetch origin --quiet && git -C "$RP" worktree add "$WT" -b "$BR" ${base} && cd "$WT"; fi
@@ -76,18 +81,18 @@ Record the printed toplevel as worktreeToplevel — it MUST be "$WT".
 STEP 2 — ARM A (Edit via the WORKTREE absolute path):
   a. Read the file at $WT/src/target_${i}.py (the absolute WORKTREE path).
   b. Edit that SAME absolute path: replace the exact string "ANCHOR_${i}_ALPHA" with "ANCHOR_${i}_BRAVO". Note whether the Edit tool REPORTS success.
-  c. Run: git -C "$WT" diff --stat -- src/target_${i}.py   and   grep -c "ANCHOR_${i}_BRAVO" "$WT/src/target_${i}.py" || true
+  c. Run: ${GIT_ENV_SCRUB} git -C "$WT" diff --stat -- src/target_${i}.py   and   grep -c "ANCHOR_${i}_BRAVO" "$WT/src/target_${i}.py" || true
   d. Record armA.editReportedSuccess, armA.gitDiffShows (file listed as changed), armA.grepFound (grep count > 0).
 
 STEP 3 — ARM B (Edit via the MAIN-CHECKOUT absolute path — the H1 hypothesis):
   a. Read the file at ${repoPath}/src/sentinel_${i}.py (the MAIN-checkout path, NOT the worktree).
   b. Edit that MAIN-checkout absolute path: replace "ANCHOR_${i}_MAIN" with "ANCHOR_${i}_MAINEDIT". Note whether Edit reports success.
-  c. Run: git -C "$WT" diff --stat   ;   git -C "${repoPath}" diff --stat   ;   grep -c "ANCHOR_${i}_MAINEDIT" "${repoPath}/src/sentinel_${i}.py" || true
+  c. Run: ${GIT_ENV_SCRUB} git -C "$WT" diff --stat   ;   ${GIT_ENV_SCRUB} git -C "${repoPath}" diff --stat   ;   grep -c "ANCHOR_${i}_MAINEDIT" "${repoPath}/src/sentinel_${i}.py" || true
   d. Record armB.editReportedSuccess, armB.landedInWorktreeDiff (does the WORKTREE diff show any sentinel change), armB.landedInMainDiff (does the MAIN-checkout diff show it), armB.grepFoundMain.
 
 STEP 4 — ARM C (Write a new file via the WORKTREE path):
   a. Write the file $WT/src/written_${i}.py with contents:  print('written_${i}')
-  b. Run: test -f "$WT/src/written_${i}.py" && echo EXISTS ; git -C "$WT" status --porcelain -- src/written_${i}.py
+  b. Run: test -f "$WT/src/written_${i}.py" && echo EXISTS ; ${GIT_ENV_SCRUB} git -C "$WT" status --porcelain -- src/written_${i}.py
   c. Record armC.writeReportedSuccess, armC.onDiskInWorktree.
 
 STEP 5 — return the structured result with index=${i}, worktreeToplevel, armA, armB, armC, and a notes string capturing anything surprising (an Edit that reported success while git diff stayed empty, any Edit error text, any path note). Be literal.`

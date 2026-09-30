@@ -45,6 +45,12 @@
 
 set -uo pipefail
 
+# A caller's GIT_DIR, GIT_WORK_TREE & co. (a git hook exports them) would override -C: the fetch and the
+# fast-forward would move another repo's refs, and the self-test's pushes would reach its remote (p12-3).
+# Unset git's own list of repo-local vars, except the two config channels, which cannot move the repo.
+# Before both --self-test-* hooks, so they run scrubbed too.
+for v in $(git rev-parse --local-env-vars 2>/dev/null); do case $v in GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS) ;; *) unset "$v" ;; esac; done
+
 # ---- tuning ----------------------------------------------------------------
 SHA_POLL_MAX=60        # update-branch is async; poll up to 60 * 5s = 5 min for the new head to land
 SHA_POLL_INTERVAL=5

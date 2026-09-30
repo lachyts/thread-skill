@@ -154,6 +154,35 @@ const REVIEW_VERDICT = {
 
 // ---- Shared prompt fragments ------------------------------------------------
 
+// Git environment scrub (p12-3, the 2026-09-23 leak). Agents and verifiers inherit the Claude Code
+// process env; an exported GIT_DIR, GIT_WORK_TREE & co. overrides `git -C` and every cwd, so a command
+// "in the worktree" runs against whatever repo the variable names. Pointed at a worktree's gitdir, that is
+// the SHARED repository (commondir): on 2026-09-23 a test fixture's commits, `core.bare=true` and
+// `git push origin` all landed on the real repo and its GitHub remote. Every engine-rendered command that
+// runs git or the verifier starts with GIT_ENV_SCRUB (the form land.sh uses; `2>/dev/null` keeps zsh's
+// "unset: not enough arguments" quiet when git is missing, and `;` still runs the command). Each Bash call
+// starts from the inherited env, so the prefix covers only its own command. Declared before
+// BUG_PREFLIGHTS, which interpolates it at module load. Adding it changed every agent prompt's bytes, so a
+// resumeFromRunId resume of a pre-p12-3 run re-runs its agents (tests/default-branch.test.mjs).
+const GIT_ENV_SCRUB = 'unset $(git rev-parse --local-env-vars 2>/dev/null);'
+
+// A command with GIT_ENV_SCRUB in front, unless it already starts with it (never double-prefixed).
+function scrubbed(cmd) {
+  return String(cmd).trimStart().startsWith(GIT_ENV_SCRUB) ? cmd : `${GIT_ENV_SCRUB} ${cmd}`
+}
+
+// The agents' side of the scrub: only rendered commands carry the prefix mechanically, so every agent
+// prompt (all 8 builders, main-checkout agents and judges included) carries this rule. Static text.
+const GIT_ENV_RULE = `Git environment (hard rule, the 2026-09-23 leak): every Bash call starts from the inherited
+environment, so an \`unset\` in one call never carries into the next. Start EVERY Bash command that runs git
+or the verifier, in a worktree OR in the main checkout, with \`${GIT_ENV_SCRUB}\`. The commands
+rendered in this prompt already carry it. NEVER set or export GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE,
+GIT_COMMON_DIR (or any GIT_* location variable) to point at the project repo, its .git, a worktree or a
+worktree's gitdir. The main checkout and every linked worktree share ONE repository (refs, config, remote)
+through commondir, so a run that way commits, flips core.bare and pushes against the shared repo and its
+real remote. To test behaviour under an exported GIT_* variable, build a throwaway repo under
+\`mktemp -d\` whose only remote is a local bare repo, and point the variable there.`
+
 // The bug classes reviewers caught in the giflab rollout — every code-writing
 // agent gets these as explicit preflight checks before opening/updating a PR.
 const BUG_PREFLIGHTS = `
@@ -161,8 +190,8 @@ Before you open or update a PR, run these preflight checks:
 - Dead code: if you add a new function/helper, verify it has at least one PRODUCTION caller, not just tests.
 - No-op assertions: if you write a bounded assertion, check whether upstream code already clamps to the same bounds — if so your assertion tests nothing.
 - Sibling-site blindness: after a fix, grep the whole file AND codebase for the same code shape; fix every sibling occurrence in this PR (or justify leaving them).
-- Worktree safety: run \`git rev-parse --show-toplevel\` and confirm it is NOT the project's main checkout. Run \`git diff --stat\` and confirm every modified path is in your task's scope — if you see unrelated files, STOP and report instead of committing.
-- Worktree path discipline: your worktree root is the absolute path \`git rev-parse --show-toplevel\` prints — call it $WT. Every Read/Edit/Write MUST target a path UNDER $WT (e.g. \`$WT/src/foo.py\`). Edit requires an absolute path — do NOT absolutize against the project root you were handed (that is the MAIN checkout): an edit to a \`<project-root>/…\` path lands in the main checkout, OUTSIDE your branch and invisible to your PR — which looks exactly like a "silent Edit no-op" but is really a wrong-tree edit. After editing, \`git -C $WT diff\` MUST show your change; if it does not, you edited the wrong tree — redo it against the \`$WT/…\` path.`.trim()
+- Worktree safety: run \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\` and confirm it is NOT the project's main checkout. Run \`${GIT_ENV_SCRUB} git diff --stat\` and confirm every modified path is in your task's scope — if you see unrelated files, STOP and report instead of committing.
+- Worktree path discipline: your worktree root is the absolute path \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\` prints — call it $WT. Every Read/Edit/Write MUST target a path UNDER $WT (e.g. \`$WT/src/foo.py\`). Edit requires an absolute path — do NOT absolutize against the project root you were handed (that is the MAIN checkout): an edit to a \`<project-root>/…\` path lands in the main checkout, OUTSIDE your branch and invisible to your PR — which looks exactly like a "silent Edit no-op" but is really a wrong-tree edit. After editing, \`${GIT_ENV_SCRUB} git -C $WT diff\` MUST show your change; if it does not, you edited the wrong tree — redo it against the \`$WT/…\` path.`.trim()
 
 // Re-dispatch awareness. A resumed blocked task carries the prior attempt's diagnosis in its note —
 // reconcile-wave.py appends `## Review-blocked feedback` / `## Blocker diagnosis` / `## Plan-blocked
@@ -288,7 +317,7 @@ function ralphLoop(verifier, maxIterations, baseline) {
   if (baseline && baseline.length) {
     return `
 Verification loop (Ralph-style):
-- Verifier: ${verifier}
+- Verifier: ${scrubbed(verifier)}
 - Max iterations: ${maxIterations}
 - KNOWN BASELINE FAILURES (pre-existing, environmental — NOT yours; keep running the full verifier, do NOT
   \`--deselect\`/skip them — that hides real regressions):
@@ -308,7 +337,7 @@ ${baseline.map((b) => '  - ' + b).join('\n')}
   }
   return `
 Verification loop (Ralph-style):
-- Verifier: ${verifier}
+- Verifier: ${scrubbed(verifier)}
 - Max iterations: ${maxIterations}
 - For i = 1 .. ${maxIterations}:
   a. Run the verifier.
@@ -334,7 +363,7 @@ ${baseline.map((b) => '  - ' + b).join('\n')}
 - GREEN CRITERION: the verifier exits 0 — the work is verified.`
   return `
 Verification (ONE-SHOT first pass — you do NOT iterate):
-- Verifier: ${verifier}
+- Verifier: ${scrubbed(verifier)}
 - Run the verifier EXACTLY ONCE.${green}
 - If green: the work is verified — proceed.
 - If red (any failure outside the green criterion): do NOT attempt a fix, do NOT run the verifier again,
@@ -454,6 +483,8 @@ Project root: ${a.repoPath}
 
 ${worktreeSetup(a, task)}
 
+${GIT_ENV_RULE}
+
 Steps:
 1. Read the task note in full + every source file it references. Do not skim. ${PRIOR_FEEDBACK_NOTE}
 2. If the fix is well-defined, work test-first (write the failing test before the fix). Use the
@@ -463,7 +494,7 @@ Steps:
 5. If the verifier passed: open a PR titled \`audit-fix: <task subject>\`. The body must link the task
    note and explain what changed and why.
 6. Return your structured result: verified, blocked, escalate (as your verification block instructs;
-   false otherwise), prUrl, branch, worktreePath (from \`git rev-parse --show-toplevel\`),
+   false otherwise), prUrl, branch, worktreePath (from \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\`),
    blockerDiagnosis (empty if not blocked), and a one-paragraph summary.
 
 ${BUG_PREFLIGHTS}
@@ -483,9 +514,12 @@ Project root: ${a.repoPath}
 Investigate READ-ONLY directly against the project repo at ${a.repoPath} — do NOT create a worktree,
 do NOT modify any source files.
 
+${GIT_ENV_RULE}
+
 Steps:
 1. Read the task note in full + every file it references.
-2. Run the read-only investigation it asks for (greps, baseline verifier run to OBSERVE, reading tests).
+2. Run the read-only investigation it asks for (greps, reading tests, and a baseline verifier run to OBSERVE:
+   run it as \`${scrubbed(task.verifier || a.verifier)}\` from ${a.repoPath}).
 3. Append your findings to the task note under a "## Findings" heading — concrete, with file:line refs.
 4. Return your structured result: verified=true (findings produced) or blocked=true (could not complete),
    escalate=false, prUrl="", branch="", worktreePath="" (read-only tasks open no worktree),
@@ -505,12 +539,14 @@ Project root: ${a.repoPath}
 Investigate READ-ONLY directly against the project repo at ${a.repoPath} (no worktree, no source edits) —
 you are producing a plan only; the implementer opens the worktree later.
 
+${GIT_ENV_RULE}
+
 Steps:
 1. Read the task note in full + every source file it references. Do not skim. ${PRIOR_FEEDBACK_NOTE}
 2. Read-only investigation to back the plan:
    - grep for sibling sites of the same anti-pattern across the file + codebase
    - identify callers of any function you intend to change/add
-   - run the verifier ONCE to capture the baseline (\`${a.verifier}\`) — observe only, write no fix code
+   - run the verifier ONCE to capture the baseline (\`${scrubbed(a.verifier)}\`) — observe only, write no fix code
    - skim related tests
 3. Produce a plan with EXACTLY these sub-sections, concrete not abstract:
    ### Files to modify  (repo-relative path: one-line rationale)
@@ -561,6 +597,8 @@ Check, against the task brief:
   lines — a gate written as prose is rejected, and commentary does not belong there) is an
   automatic "changes" (ADR 0008). Also flag a gate the brief implies but the plan omits.
 
+${GIT_ENV_RULE}
+
 Read the brief and grep the repo as needed to verify the plan's claims — do not approve on faith.
 Decide: verdict "approve" if the plan is sound (clean or trivially nitpicky), else "changes" with 3–8
 specific, actionable feedback bullets.`
@@ -583,6 +621,8 @@ Feedback to address — ACCUMULATED across every prior review round. Every bulle
 revision demonstrably resolves it; do not drop an earlier round's concern to satisfy a later one:
 ${grouped}
 
+${GIT_ENV_RULE}
+
 Run additional READ-ONLY investigation as needed. Rewrite the plan with the SAME required sub-sections
 (Files to modify / Test strategy / Sibling-site check / Caller-wiring / Edge cases / Risks /
 Gated inputs — bullets only: declare spend with a hard cap, credentials, irreversible actions, or
@@ -598,6 +638,8 @@ Task note: ${task.taskPath}
 Project root: ${a.repoPath}
 
 ${worktreeSetup(a, task)}
+
+${GIT_ENV_RULE}
 
 The approved plan:
 ---
@@ -615,7 +657,7 @@ Steps:
 2. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
 3. On verifier pass: open a PR titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
 4. Return your structured result: verified, blocked, escalate (as your verification block instructs; false
-   otherwise), prUrl, branch, worktreePath (git rev-parse --show-toplevel), blockerDiagnosis, summary.
+   otherwise), prUrl, branch, worktreePath (\`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\`), blockerDiagnosis, summary.
 
 ${BUG_PREFLIGHTS}
 
@@ -638,6 +680,8 @@ Task note (the brief): ${task.taskPath}
 Project root: ${a.repoPath}
 
 ${depth}
+
+${GIT_ENV_RULE}
 
 Read \`gh pr diff ${prevImpl.prUrl}\` and the task brief. Decide: verdict "approve" if the PR is sound, else
 "changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}`
@@ -664,8 +708,10 @@ Worktree path: ${prevImpl.worktreePath}
 Branch: ${prevImpl.branch}
 PR: ${prevImpl.prUrl}
 
-First action: \`cd ${prevImpl.worktreePath}\` and confirm via \`git rev-parse --show-toplevel\` that you are
+First action: \`cd ${prevImpl.worktreePath}\` and confirm via \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\` that you are
 in that worktree (NOT the project's main checkout) and on branch ${prevImpl.branch}.
+
+${GIT_ENV_RULE}
 
 Review feedback — ROUND ${latest.round} (your work order; apply every bullet, verbatim below):
 ${latest.feedback.map((f) => '- ' + f).join('\n')}${guard}${stepBackBlock(priorFeedback, planText)}
@@ -738,8 +784,8 @@ function worktreeSetup(a, task) {
   const wt = worktreeDir(a.repoPath, task.slug)
   const br = `audit-fix/${shortAlias(task.slug)}`
   const base = `origin/${defaultBranch(a)}`
-  return `First, set up your ISOLATED worktree of the TARGET repo (NOT the session repo). Run exactly:
-  WT="${wt}"; BR="${br}"
+  return `First, set up your ISOLATED worktree of the TARGET repo (NOT the session repo). Run exactly, as ONE Bash command (the \`unset\` on its first line covers only that command):
+  ${GIT_ENV_SCRUB} WT="${wt}"; BR="${br}"
   if [ -d "$WT" ]; then cd "$WT";
   elif git -C "${a.repoPath}" show-ref --verify --quiet "refs/heads/$BR"; then git -C "${a.repoPath}" worktree add "$WT" "$BR" && cd "$WT";
   else git -C "${a.repoPath}" fetch origin --quiet && git -C "${a.repoPath}" worktree add "$WT" -b "$BR" ${base} && cd "$WT"; fi
@@ -747,7 +793,7 @@ function worktreeSetup(a, task) {
 Work only inside this worktree: every git / edit / verifier / PR command runs from here. ALL file-tool
 paths (Read/Edit/Write) must be under "$WT" — e.g. "$WT/src/foo.py". NEVER edit a "${a.repoPath}/…" path:
 that is the MAIN checkout, and an edit there lands outside your branch, invisible to your PR — the failure
-that looks like a "silent Edit no-op" but is really a wrong-tree edit. After any edit, confirm \`git -C "$WT" diff\` shows it.
+that looks like a "silent Edit no-op" but is really a wrong-tree edit. After any edit, confirm \`${GIT_ENV_SCRUB} git -C "$WT" diff\` shows it.
 A FRESH worktree is branched from a freshly-fetched ${base} (NOT local HEAD) so it includes every
 prior wave that has already merged. The two reuse arms above are unchanged — they must NOT re-fetch or
 rebase an in-flight branch on resume.`

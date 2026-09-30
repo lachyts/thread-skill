@@ -16,11 +16,15 @@ const T = loadEngine(['worktreeSetup', 'implementerPrompt', 'approvedPlanImpleme
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex')
 const task = { slug: 'proj-fix-x' }
 
-// Recorded from the 2.5.1 engine (HEAD 1c87bd4) before the defaultBranch edit.
-const GOLDEN_PLAIN = '623ceaf663b70f8bcd3bd9e85fd0aa49aeb07266a6cd07baae58c0a88464c09d'
-const GOLDEN_ENV = '9e47745288ced6df16c231be1c0e847ed0fa555a27cbce17c24e04bf6f1a3baf'
+// Originally recorded from the 2.5.1 engine (HEAD 1c87bd4) before the defaultBranch edit. Re-pinned ON
+// PURPOSE by p12-3: the GIT_* scrub prefixes the setup's first line (and its `git -C "$WT" diff` span) with
+// GIT_ENV_SCRUB, and GIT_ENV_RULE joins every agent prompt, so the p12-3 engine deliberately breaks the
+// resume-cache invariant for every agent prompt: a resumeFromRunId resume of a pre-p12-3 run re-runs its
+// agents, judges included. From here on the pins guard the scrubbed bytes the same way.
+const GOLDEN_PLAIN = '5d4a4a1726402d5e295ba9508e19beaf21ef4e3ca0a8b1d5548ed532c74cc639'
+const GOLDEN_ENV = '388f0de04e6036cdcfa0554aff808cc7b71ab8d3d90a517bdce25d9d7808e474'
 
-test('unset renders the pre-fix bytes (resume-cache invariant)', () => {
+test('unset renders the pinned bytes (resume-cache invariant, re-pinned by p12-3)', () => {
   assert.equal(sha(T.worktreeSetup({ repoPath: '/repo' }, task)), GOLDEN_PLAIN)
   assert.equal(sha(T.worktreeSetup({ repoPath: '/repo', envBootstrap: 'poetry install' }, task)), GOLDEN_ENV)
 })

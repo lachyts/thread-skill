@@ -166,6 +166,23 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py approve-g
 
 ### 4. Stamp in-progress + build args
 
+**Git-env check (before any stamp).** Agents and verifiers inherit this session's environment. A `GIT_DIR`, `GIT_WORK_TREE` & co. exported here (a git hook or a `git -c` wrapper launched Claude Code) overrides every `git -C` the engine renders and every scrub an agent forgets: its git commands, the verifier's and `merge-wave.sh`'s run against whatever repository the variable names (the 2026-09-23 leak, p12-3). The engine prefixes each rendered command with `unset $(git rev-parse --local-env-vars 2>/dev/null);`, but only this session can check the environment it hands down. Run this first, in every mode (§4.5 step 1, single-wave, and § 5's resume):
+
+```bash
+# thread:git-env-check (extracted and tested by tests/git-env-scrub.test.sh)
+vars=$(git rev-parse --local-env-vars) && [ -n "$vars" ] || { echo "git-env: git rev-parse --local-env-vars failed" >&2; exit 2; }
+hits=$(for v in $(git rev-parse --local-env-vars); do printenv "$v" >/dev/null && printf '%s ' "$v"; done)
+if [ -n "$hits" ]; then
+  echo "git-env: exported in the lead session: ${hits% }" >&2
+  case " $hits" in *" GIT_CONFIG_PARAMETERS "*|*" GIT_CONFIG_COUNT "*) echo "git-env: GIT_CONFIG_PARAMETERS/GIT_CONFIG_COUNT usually mean the wrapper that launched Claude Code ran 'git -c …'" >&2 ;; esac
+  echo "git-env: relaunch Claude Code from a shell without them (never from inside a git hook), then re-invoke" >&2
+  exit 1
+fi
+# end thread:git-env-check
+```
+
+`$vars` only proves the list is readable; the loop iterates the command substitution itself, because zsh (the Bash tool's shell on macOS) never word-splits a parameter expansion. On **any non-zero exit, write nothing**: no stamp, no `mark-dispatched`, no Workflow call. Print its stderr verbatim above the WAVE-STATUS line and end the turn with `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="git env set in the lead session"` (exit 1) or `reason="git-env check failed"` (exit 2).
+
 Before launching, for each task in scope: stamp `status: in_progress` and `owner: <session-tag>` on the task's frontmatter (blocks duplicate dispatches). Keep this in the lead session — subagents never write task `status:`. In the launch message, **flag any task expected to gate** (a `plan_approval: required` stamped by `/thread:schedule`'s gated-input sweep, or a note that smells of spend/credentials) so the eventual `gate-pending` pause is expected, not a surprise (§3.7).
 
 Build the `args` object the workflow expects:
@@ -337,7 +354,7 @@ Pass `args` as an actual JSON object in the tool call. (Note: the Workflow tool 
 
 The engine has no relative imports, so the copy runs unchanged. A `resumeFromRunId` resume re-passes the same `scriptPath` the run started with, exactly like its args. A later session (a new scratchpad) re-copies the same bytes, and per-task resume (`resume-filter`) still keeps the tasks that already landed. Never edit the copy. This is a fallback only: the cache path is the default (the 2026-09-23 E2E ran it unrefused).
 
-Tell the user the run launched, which waves/tasks it covers, and that they can watch live with `/workflows`. Record the returned `runId`. If the run dies, re-run § 2.5 first (a listed repo halts instead of replaying agents that push branches), then resume with `Workflow({ scriptPath, args, resumeFromRunId: <runId> })`, passing the `scriptPath` the run started with (unchanged `agent()` calls replay from cache). The check is lead-side only, so the resume's args and prompt bytes are unchanged and the replay cache stays valid.
+Tell the user the run launched, which waves/tasks it covers, and that they can watch live with `/workflows`. Record the returned `runId`. If the run dies, re-run § 2.5 first (a listed repo halts instead of replaying agents that push branches) and § 4's git-env check (a halt there writes nothing), then resume with `Workflow({ scriptPath, args, resumeFromRunId: <runId> })`, passing the `scriptPath` the run started with (unchanged `agent()` calls replay from cache). The check is lead-side only, so the resume's args and prompt bytes are unchanged and the replay cache stays valid.
 
 **Register the heartbeat (continuous mode, once per rollout).** In the same turn as the first wave launch, check `CronList` for an existing `WAVE-HEARTBEAT <rollout-slug>` task; if none, register one via `CronCreate` (schedule `*/20 * * * *`) with this prompt:
 
@@ -425,6 +442,7 @@ Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS au
 - `merge-wave.sh` exits non-zero (a real merge conflict or red required check), or
 - the smart-halt check fires (an unlanded task's file reappears in a later wave), or
 - § 2.5, or a §4.5 re-check of it, reports the repo on the landing register, or the check itself fails (`reason="<owner/name> is on the landing register"` or `reason="landing-register check failed"` — a **designed** stop: unlisting is Lachy's call; open PRs stay open and re-invocation after unlisting flushes them), or
+- § 4's git-env check finds a repo-local `GIT_*` variable exported in the lead session, or the check itself fails (`reason="git env set in the lead session"` or `reason="git-env check failed"` — nothing is stamped or dispatched; relaunch Claude Code from a shell without them, or put a working `git` on PATH, then re-invoke), or
 - §3's round-budget validation finds a `max_iterations`, `max_review_rounds` or `max_plan_rounds` that is not an integer >= 1 (`reason="invalid round budget: <field> on [[task]]"` — nothing is stamped or dispatched; fix the frontmatter and re-invoke), or
 - a wave leaves `gate-pending` tasks and nobody is present to sign off (`reason="gated inputs await sign-off: …"` — a **designed** pause, ADR 0008, not a failure: the user signs off, `approve-gates` runs, and re-invocation resumes; when the user IS present, ask for the sign-off in-conversation instead of halting — §3.7).
 
