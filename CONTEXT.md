@@ -239,6 +239,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 
 ## Rollout structure
 
+_ADR 0030 is decided but not yet built: until 3.0.0 the engine still runs Waves._
+
 - **Rollout** — a backlog of related tasks landed as one coordinated effort,
   described by one always-dated Obsidian note
   (`<slug>-rollout-<YYYY-MM-DD>`). At most one is live per repo; new
@@ -251,12 +253,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   is a **Queue**, with no wave mode to opt back into, and a wave rollout in
   flight migrates onto it. _Avoid_: round, phase, stage.
 - **Queue** — how a rollout runs since ADR 0030: up to the parallel ceiling's worth of
-  tasks at once, each started from the `main` of its moment; when one merges
-  the next starts. Only dependencies and a **Solo** task hold a task back,
+  tasks at once, each started from the `main` of its moment; a slot frees
+  when a task's own run returns, so one waiting for **Integration** holds
+  none. Only dependencies and a **Solo** task hold a task back,
   never a shared file. _Avoid_: wave (the old grouping), batch (the session
   lane's).
 - **Solo** — a task in a Queue that runs alone: once it is next free to
-  start, nothing new starts, the running tasks finish, it runs, and the queue
+  start, nothing new starts, every task already started merges or is set
+  aside, it runs, and the queue
   resumes when it merges or is set aside. For a sweeping change
   that every concurrent task would otherwise have to redo its work around
   (ADR 0030). _Avoid_: barrier, exclusive, wave of one.
@@ -346,9 +350,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
 
 ## Model ladder
 
+_ADR 0029 is decided but not yet built: until 3.0.0 the engine still runs Tiers, and
+`max_tier:` still holds the Opus lock._
+
 - **Ladder** — the operator's ordered list of **Rungs**, bottom first, held in
-  one place outside any rollout. Absent, a built-in ladder applies (opus,
-  then fable). Changing models or efforts is an edit to it, never a release
+  one place outside any rollout. Absent, a built-in ladder applies (two
+  Opus rungs, never Fable). Changing models or efforts is an edit to it, never a release
   (ADR 0029). _Avoid_: matrix, tier list, config (alone).
 - **Rung** — one step of the Ladder: a model plus the efforts its roles run
   at (the code-writing roles, the plan judge, the master review). Two rungs

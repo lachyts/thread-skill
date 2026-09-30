@@ -18,12 +18,13 @@ about if we're working in worktrees and we're just merging them after we've done
 
 ## Decision
 
-1. **File overlap no longer serialises tasks.** Only dependencies (`depends-on:`, `blocked-by:`, a
-   named "after"), a **solo** task and the parallel ceiling decide what runs at once. A solo task is a
+1. **File overlap no longer serialises tasks.** Only dependencies (`depends-on:` or `blocked-by:`; a
+   body phrase such as "after X lands" counts once schedule has confirmed it into them), a **solo**
+   task and the parallel ceiling decide what runs at once. A solo task is a
    sweeping change (a rename, a restructure of a hub file) that would make every concurrent task
    redo its work. It runs alone: once it is the next task free to start (its own dependencies merged,
-   like any task's), nothing new starts; the tasks already running finish, integrate and merge or
-   are set aside; then the solo task runs, and the queue resumes when it merges or is set aside. A
+   like any task's), nothing new starts; every task already started, whether running or waiting for
+   Integration, merges or is set aside; then the solo task runs, and the queue resumes when it merges or is set aside. A
    set-aside solo task releases the queue like any other.
    Shared files still shape queue order softly: of the tasks free to start, the one overlapping least
    with what is running goes first. Overlap never holds a task back. Waves are dropped outright, not
@@ -89,24 +90,31 @@ about if we're working in worktrees and we're just merging them after we've done
    one whose own call returns `plan-blocked`, `review-blocked` or `blocked`, and one whose
    Integration fails (a conflict it cannot resolve, a suite still red after its fix loop, or a
    re-review that reaches its ceiling), which is marked `blocked` with the reason. Its slot is
-   free, its dependants wait, and the queue runs on. A `gate-pending` task (ADR 0008) is set aside
-   the same way until Lachy signs its gates; the queue runs whatever does not depend on it. The
-   rollout halts only when nothing left in the queue can start.
+   free, its dependants wait, and the queue runs on. A task set aside at Integration re-enters at
+   Integration: its approved plan, branch and review stand, and repair or a resume retries only the
+   Integration. A `gate-pending` task (ADR 0008) is set aside
+   the same way until Lachy signs its gates, then resumes its own call on the plan he signed, never
+   re-planned; the queue runs whatever does not depend on it. The
+   rollout halts only when nothing left in the queue can start and nothing is running, waiting for
+   Integration or integrating.
 
 Considered: keeping waves as an opt-in mode beside the queue (two engines to keep, and every reason
 a wave existed has a better home: same-file safety in integration, order in dependencies, the one
 genuine barrier in a solo task); parallel only when the shared file is a hub and the plans touch different functions (a
 function-level overlap check at plan time, more machinery for a partial gain); keeping the file
 rule (safest, slowest); waves of the parallel ceiling's size (the old cursor, but every wave waits on its
-slowest task); and halting the rollout on a stuck integration (today's behaviour, which stops
-fifty tasks for one).
+slowest task); halting the rollout on a stuck integration (today's behaviour, which stops
+fifty tasks for one); and a merge train, integrating several finished tasks as one (faster on a
+hub file, but a bad combination is harder to attribute; deferred until the first queue runs
+measure how long tasks wait for Integration).
 
 ## Consequences
 
 - There is no stored cursor. A rollout's progress is its task notes: `status: done` means merged.
+  A read-only task opens no PR: it is done when its review approves, and never enters Integration.
   An affine-merge member's `status: merged` tombstone does not: a dependency on a folded member is
   satisfied only when the combined unit it was folded into is done. Each task carries its own
-  `dispatched:` and `merged:` stamps, which feed elapsed time and
+  start and merge stamps, which feed elapsed time and
   the rough estimate. A resume checks GitHub for a merge whose note was never marked, as the cold
   resume does today. (Re-grilled 2026-09-30. Rejected: a `merged: [slugs]` list on the rollout
   note, a second copy for `/thread:status` to reconcile.) `/thread:status` reports running,
@@ -124,12 +132,15 @@ fifty tasks for one).
   file-overlap successors. Its one remaining reader is the queue-order tiebreak, which needs the
   planned file lists of tasks that have not started. The re-review trigger reads real diffs (the
   files the landed PRs changed against the task's own), never the planned lists.
-- The plan-gate still plans against the `main` of the task's start, and a queued task has not
+- A task's planner and judges read its own worktree, never a shared checkout, so the plan-gate
+  plans against the `main` of the task's start, and a queued task has not
   started, so only a running task's plan can go stale. It is reconciled at integration, never by
   re-planning mid-run: the integrator already holds the approved plan and the landed briefs on
   the top rung, and the re-review checks the result. Re-planning would throw away work in flight to fix
   what integration already fixes.
-- There is one engine. A wave rollout in flight migrates onto the queue by `--regenerate`: a task
+- There is one engine. A wave rollout in flight migrates onto the queue by `/thread:schedule
+  --regenerate`, run directly rather than through orient's supersede check (ADR 0027), which stays
+  as it is. In the migration, a task
   at `review` with an open PR is a task awaiting Integration, an open task is queued, and a merged
   one counts toward the cursor. A wave rollout's `review` PRs never merged, so for them this
   overrides schedule's supersede rule and the old **Landed** reading (`review` as landed): the
