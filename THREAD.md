@@ -756,7 +756,8 @@ scheduled 2026-07-15.
   commits landed on the shared `master`, and its `git push origin` went to the real GitHub remote. p1-3's
   PR #6 landed on 2026-09-24 (`b52270d`). `tests/run.sh`, `default-branch.test.sh` and
   `handoff-scan.test.sh` now run `unset $(git rev-parse --local-env-vars)`, which is git's own list of 15
-  variables. The engine-side scrub for the verifier and agents is still protocol 4.
+  variables. p12-3 scrubs the engine (every rendered git/verifier command, plus a rule in every agent
+  prompt), `merge-wave.sh`, `default-branch.sh` and the lead (§ 4's git-env check halts before dispatch).
 - **A plan's `### Gated inputs` must be its last section**, until protocol 4 fixes the parser (intake item
   13). `parseGatedInputs` ends the section only at a heading. A `---` and a bullet list after `None` are
   read as declared gates, and the task pauses at `gate-pending` (p4-1, 2026-09-24).
