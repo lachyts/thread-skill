@@ -32,7 +32,7 @@ const marker = '// ---- Orchestration'
 const idx = src.indexOf(marker)
 if (idx === -1) { console.error('FAIL - orchestration marker not found'); process.exit(1) }
 let head = src.slice(0, idx).replace('export const meta', 'const meta')
-head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort, tierCap, clampTier, taskModel, judgeFor, terminalTier, escalate, effortTier, readOnlyPrompt, normaliseTier };\n'
+head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort, tierCap, clampTier, taskModel, judgeFor, terminalTier, escalate, effortTier, readOnlyPrompt, normaliseTier, roundBudgetDiagnosis };\n'
 
 // `agent` and `log` are Workflow globals the engine expects at run time. The layer functions resolve them
 // against the sandbox global at CALL time, so the transient-death tests below swap `ctx.agent` per case to
@@ -697,6 +697,130 @@ try { roRes = await T.converge(taskRO, aT) } catch (e) { roThrew = true }
 ok(!roThrew, 'converge: dead read-only investigator does not throw')
 ok(roRes && roRes.status === 'blocked', 'converge: dead read-only investigator → blocked, not spurious review')
 ok(roRes && /transient infrastructure/i.test(roRes.blockerDiagnosis), 'converge: dead read-only investigator → transient-infra diagnosis')
+
+// ---- Round budgets fail closed (p12-2) ----------------------------------------
+// planLoop / reviewLoop are bounded `while (round <= budget)` loops whose only returns sit inside the
+// body. A budget of 0, a negative, NaN, undefined/null (an omitted or empty YAML key), a fraction or a
+// numeric string used to fall off the end and return undefined. For planLoop that is a fail-OPEN on
+// ADR 0008: implement() read `prev === undefined` as "no gate", so the task was implemented with no plan,
+// no judge and no gated-inputs parse. Every one of those values must now block, before any dispatch.
+{
+  const BAD = [0, NaN, undefined, null, -1, 2.5, '2', Infinity]
+  const show = (v) => (typeof v === 'string' ? `'${v}'` : String(v))
+  const spendPlan = 'PLAN\n### Gated inputs\n- spend: x — cap $5'
+  const approveAll = recordingAgent(async (prompt, opts) => {
+    if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
+    if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: spendPlan }
+    if (opts.phase === 'Implement') return greenImpl
+    return { verdict: 'approve', feedback: [] }
+  })
+  const dispatched = () => effortCalls.map((c) => c.label)
+
+  // The helper: integer >= 1 or a diagnosis naming the field and the bad value, quote-free (the lead
+  // copies it into a WAVE-STATUS reason, and the Stop-hook regex needs quote-free reasons).
+  ok(T.roundBudgetDiagnosis({ maxPlanRounds: 1, maxReviewRounds: 6 }, ['maxPlanRounds', 'maxReviewRounds']) === '',
+    'round budgets: valid integers >= 1 (incl. a large 6) produce no diagnosis')
+  for (const v of BAD) {
+    const d = T.roundBudgetDiagnosis({ maxPlanRounds: v }, ['maxPlanRounds'])
+    ok(/max_plan_rounds/.test(d) && d.includes(show(v)) && !d.includes('"'),
+      `round budgets: maxPlanRounds=${show(v)} → quote-free diagnosis naming the field and value`)
+  }
+  ok(!T.roundBudgetDiagnosis({ maxReviewRounds: 'a"b' }, ['maxReviewRounds']).includes('"'),
+    'round budgets: a double quote inside a string value never reaches the diagnosis')
+
+  // 1. The ADR 0008 fail-open: a plan-gated task whose plan WOULD declare a spend gate. Each bad plan
+  //    budget must stop at plan-blocked with ZERO dispatches (no planner, no implementer, no review).
+  for (const v of BAD) {
+    effortCalls.length = 0
+    ctx.agent = approveAll
+    const r = await T.converge({ ...baseEff, slug: 'proj-rb-plan', scope: 'cross-cutting', planGate: true, maxPlanRounds: v }, aEff)
+    ok(r && r.status === 'plan-blocked' && r.blocked === true && /max_plan_rounds/.test(r.blockerDiagnosis),
+      `round budgets: plan-gated maxPlanRounds=${show(v)} → plan-blocked naming max_plan_rounds (was ${r && r.status})`)
+    ok(effortCalls.length === 0, `round budgets: plan-gated maxPlanRounds=${show(v)} → zero dispatches (got ${dispatched().join(', ')})`)
+  }
+
+  // 2. planLoop called directly never returns undefined.
+  {
+    effortCalls.length = 0
+    ctx.agent = approveAll
+    const st = { tier: 'opus', cap: 'fable', escalated: false, escalatedAt: '', capSuppressed: false, capSuppressedAt: '' }
+    const r = await T.planLoop({ ...baseEff, slug: 'proj-rb-pl', scope: 'cross-cutting', planGate: true, maxPlanRounds: 0 }, st, aEff)
+    ok(r !== undefined && r.status === 'plan-blocked' && r.planRoundsUsed === 0, 'round budgets: planLoop(maxPlanRounds=0) returns a defined plan-blocked result, planRoundsUsed 0')
+    ok(effortCalls.length === 0, 'round budgets: planLoop(maxPlanRounds=0) dispatches nothing')
+  }
+
+  // 3. A bad review budget: converge's pre-flight blocks BEFORE any implementer/PR is spent. The
+  //    diagnosis rides reviewFeedback too — reconcile writes bullets(reviewFeedback) for review-blocked
+  //    when reviewHistory is empty.
+  for (const v of BAD) {
+    effortCalls.length = 0
+    ctx.agent = approveAll
+    const r = await T.converge({ ...baseEff, slug: 'proj-rb-rev', scope: 'single-file', planGate: false, maxReviewRounds: v }, aEff)
+    ok(r && r.status === 'review-blocked' && /max_review_rounds/.test(r.blockerDiagnosis)
+      && Array.isArray(r.reviewFeedback) && /max_review_rounds/.test(r.reviewFeedback[0] || '')
+      && Array.isArray(r.reviewHistory) && r.reviewHistory.length === 0 && r.reviewRoundsUsed === 0,
+      `round budgets: maxReviewRounds=${show(v)} → review-blocked, diagnosis in blockerDiagnosis + reviewFeedback (was ${r && r.status})`)
+    ok(effortCalls.length === 0, `round budgets: maxReviewRounds=${show(v)} → zero dispatches, no implementer or PR spent (got ${dispatched().join(', ')})`)
+  }
+  {
+    effortCalls.length = 0
+    ctx.agent = approveAll
+    const r = await T.converge({ ...baseEff, slug: 'proj-rb-both', scope: 'cross-cutting', planGate: true, maxReviewRounds: 0 }, aEff)
+    ok(r && r.status === 'review-blocked' && effortCalls.length === 0, 'round budgets: plan-gated task with a bad review budget → review-blocked, no plan: dispatch either')
+    ok(r && typeof r.model === 'string' && r.escalated === false && r.tierCapped === false, 'round budgets: the pre-flight result carries the normal model/escalated/tierCapped wrap')
+    effortCalls.length = 0
+    const both = await T.converge({ ...baseEff, slug: 'proj-rb-both', scope: 'cross-cutting', planGate: true, maxReviewRounds: 0, maxPlanRounds: NaN }, aEff)
+    ok(both && both.status === 'review-blocked' && /max_review_rounds/.test(both.blockerDiagnosis) && /max_plan_rounds/.test(both.blockerDiagnosis),
+      'round budgets: both budgets bad → one diagnosis names every invalid field, so one fix pass covers both')
+  }
+
+  // 4. reviewLoop called directly with a green PR and a 0 budget never returns undefined.
+  {
+    effortCalls.length = 0
+    ctx.agent = approveAll
+    const st = { tier: 'opus', cap: 'fable', escalated: false, escalatedAt: '', capSuppressed: false, capSuppressedAt: '' }
+    const r = await T.reviewLoop({ ...baseEff, slug: 'proj-rb-rl', scope: 'single-file', maxReviewRounds: 0 }, st, greenImpl, aEff, '')
+    ok(r !== undefined && r.status === 'review-blocked' && r.reviewRoundsUsed === 0 && r.prUrl === greenImpl.prUrl && /max_review_rounds/.test(r.reviewFeedback[0] || ''),
+      'round budgets: reviewLoop(maxReviewRounds=0) returns review-blocked (PR preserved), not undefined')
+    ok(effortCalls.length === 0, 'round budgets: reviewLoop(maxReviewRounds=0) dispatches no judge')
+  }
+
+  // 5. Non-regression controls.
+  {
+    effortCalls.length = 0
+    ctx.agent = recordingAgent(async (prompt, opts) => {
+      if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
+      if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'PLAN\n### Gated inputs\nNone' }
+      if (opts.phase === 'Implement') return greenImpl
+      return { verdict: 'approve', feedback: [] }
+    })
+    const min = await T.converge({ ...baseEff, slug: 'proj-rb-min', scope: 'cross-cutting', planGate: true, maxPlanRounds: 1, maxReviewRounds: 1 }, aEff)
+    ok(min && min.status === 'review' && min.planRoundsUsed === 1, 'round budgets: the valid minimum (1) still converges to review')
+
+    effortCalls.length = 0
+    ctx.agent = recordingAgent(async () => greenImpl)
+    const ro = await T.converge({ ...baseEff, slug: 'proj-rb-ro', scope: 'read-only', planGate: false, maxReviewRounds: 0 }, aEff)
+    ok(ro && ro.status === 'review' && ro.reviewRoundsUsed === 0, 'round budgets: read-only task ignores its review budget (no review layer runs)')
+
+    effortCalls.length = 0
+    ctx.agent = approveAll
+    const np = await T.converge({ ...baseEff, slug: 'proj-rb-np', scope: 'single-file', planGate: false, maxPlanRounds: 0 }, aEff)
+    ok(np && np.status === 'review', 'round budgets: a non-plan-gated task is not blocked by a plan budget the engine never uses')
+  }
+
+  // 6. The upstream refusal: SKILL.md § 3 validates all three budgets before any stamp or dispatch,
+  //    and § 7 names the halt.
+  const skill = fs.readFileSync(path.join(here, '..', 'SKILL.md'), 'utf8')
+  const sect = (from, to) => { const i = skill.indexOf(from); const j = skill.indexOf(to, i + 1); return i === -1 || j === -1 ? '' : skill.slice(i, j) }
+  const s3 = sect('### 3. Resolve effective config per task', '### 3.5.')
+  const rule = s3.split('\n\n').find((p) => p.includes('integer >= 1')) || ''
+  ok(['max_iterations', 'max_review_rounds', 'max_plan_rounds'].every((f) => rule.includes(f)),
+    'SKILL.md § 3: one "integer >= 1" rule covers max_iterations, max_review_rounds and max_plan_rounds')
+  ok(/in_progress/.test(rule) && /mark-dispatched/.test(rule) && rule.includes('reason="invalid round budget:'),
+    'SKILL.md § 3: the rule writes nothing (no stamp, no mark-dispatched) and halts with the named reason')
+  ok(sect('### 7. Continuous-mode stop conditions', '### 8.').includes('reason="invalid round budget:'),
+    'SKILL.md § 7: the stop-conditions list carries the invalid-round-budget halt')
+}
 
 // ---- Progress / ETA (wave-boundary timestamps — the engine has no clock) ------
 // The Workflow sandbox cannot read clocks (Date.now() throws), so wave-boundary timestamps are stamped

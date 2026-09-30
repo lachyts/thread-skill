@@ -121,6 +121,8 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 | `model` | `opus` | `task.model` (per-task; `opus` \| `fable`) |
 | `effort` | none (omit) | `task.effort` (per-task ONLY — the ADR 0007 escape hatch; it has no rollout-level form) |
 
+**Validate the round budgets before anything else.** Each resolved `max_iterations`, `max_review_rounds` and `max_plan_rounds` must be an **integer >= 1** — a YAML int, never `0`, negative, fractional, a string, empty or `null` (a hardcoded default applies only when the key is absent at every level; an empty `max_plan_rounds:` is null, not absent). On any violation the lead writes nothing: no `status: in_progress` stamp, no `mark-dispatched`, no Workflow call. Name the field, the bad value and its source (task or rollout frontmatter), then end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="invalid round budget: <field> on [[task]]"` — for a rollout-level value, name the rollout instead of the task. This is the upstream refusal; the engine also fails closed per task (`plan-blocked` / `review-blocked` naming the field) so a bad budget can never silently disable a plan or review layer (ADR 0008).
+
 `scope:` is read directly from each task's frontmatter (set by `/thread:schedule`). `completion_sentinel` is no longer used — the Workflow returns validated structured output instead of parsing sentinel strings.
 
 `env_bootstrap` (rollout-level) is an optional shell command the engine runs once per worktree so agents start from a working interpreter + deps (e.g. `poetry env use 3.11 && poetry install`) — read it from the rollout frontmatter and pass it as `envBootstrap`; **omit the key when absent** so the worktree-setup prompt stays byte-identical (resume-cache invariant). `ignore_gate` (per-task) is an explicit override for a task note that carries a human/release gate in prose ("don't action until a release ships"); when `true`, pass `ignoreGate: true` on that task so the engine tells the agent the gate is overridden for this run — **omit/false** otherwise.
@@ -192,7 +194,7 @@ Build the `args` object the workflow expects:
     { "wave": 1, "tasks": [
       { "slug": "giflab-fix-x", "taskPath": "/abs/.../giflab-fix-x.md",
         "scope": "single-file", "planGate": false,
-        "maxIterations": 3, "maxReviewRounds": 4, "maxPlanRounds": 2,
+        "maxIterations": 3, "maxReviewRounds": 4, "maxPlanRounds": 2,  // positive integers only (§3)
         "ignoreGate": false,                 // per-task; omit/false unless overriding a human/release gate
         "model": "opus",                     // per-task STARTING tier; "fable" when thread:schedule stepped a
                                              //   hard task up. The engine may escalate opus→fable mid-run.
@@ -423,6 +425,7 @@ Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS au
 - `merge-wave.sh` exits non-zero (a real merge conflict or red required check), or
 - the smart-halt check fires (an unlanded task's file reappears in a later wave), or
 - § 2.5, or a §4.5 re-check of it, reports the repo on the landing register, or the check itself fails (`reason="<owner/name> is on the landing register"` or `reason="landing-register check failed"` — a **designed** stop: unlisting is Lachy's call; open PRs stay open and re-invocation after unlisting flushes them), or
+- §3's round-budget validation finds a `max_iterations`, `max_review_rounds` or `max_plan_rounds` that is not an integer >= 1 (`reason="invalid round budget: <field> on [[task]]"` — nothing is stamped or dispatched; fix the frontmatter and re-invoke), or
 - a wave leaves `gate-pending` tasks and nobody is present to sign off (`reason="gated inputs await sign-off: …"` — a **designed** pause, ADR 0008, not a failure: the user signs off, `approve-gates` runs, and re-invocation resumes; when the user IS present, ask for the sign-off in-conversation instead of halting — §3.7).
 
 A **soft pause** (*Pausing + reinstating a rollout* below) exits through the same `state=halted` mechanics but is **deliberate**, not a failure — there is no cause to fix, and reinstating is plain re-invocation.

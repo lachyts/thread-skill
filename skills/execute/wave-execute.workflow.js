@@ -58,8 +58,11 @@ export const meta = {
 //       scope           : "single-file" | "cross-cutting" | "read-only",
 //       planGate        : boolean,   // resolved by the skill from plan_approval + scope
 //       maxIterations   : number,    // Ralph verifier-retry budget
-//       maxReviewRounds : number,    // master-review budget
-//       maxPlanRounds   : number,    // plan-gate budget
+//       maxReviewRounds : number,    // master-review budget; an integer >= 1
+//       maxPlanRounds   : number,    // plan-gate budget; an integer >= 1. Anything else (0, negative,
+//                                    //   NaN, absent/null, fractional, a string) fails CLOSED per task:
+//                                    //   plan-blocked / review-blocked naming the field, before dispatch
+//                                    //   of the layer it would disable (roundBudgetDiagnosis, p12-2).
 //       ignoreGate      : boolean,   // optional; true ⇒ inject an operator override of any human/release
 //                                    //   gate in the note (per-task-override-channel). Absent/false ⇒ byte-identical.
 //       model           : "opus" | "fable",
@@ -950,9 +953,35 @@ function transientImplBlock(extra) {
   return { blocked: true, blockerDiagnosis: TRANSIENT_DIAGNOSIS, ...(extra || {}) }
 }
 
+// Round budgets (p12-2). planLoop and reviewLoop are bounded `while (round <= budget)` loops whose only
+// returns sit inside the body, so a budget that is 0, negative, NaN, undefined/null (an omitted or empty
+// YAML key), fractional or a numeric string would either never enter the loop or never hit the strict
+// `round === budget` ceiling, and fall off the end returning undefined. For planLoop that is a fail-OPEN
+// on ADR 0008 (implement() reads an undefined plan result as "no gate"). Only an integer >= 1 is a budget;
+// anything else fails CLOSED with a diagnosis naming the frontmatter field. Strings are rejected rather
+// than coerced: args built from YAML ints are numbers, so a string is itself a config error. The text is
+// kept free of double quotes because the lead copies it into a WAVE-STATUS reason (Stop-hook regex).
+const ROUND_BUDGET_FIELDS = { maxPlanRounds: 'max_plan_rounds', maxReviewRounds: 'max_review_rounds' }
+function roundBudgetDiagnosis(task, keys) {
+  const show = (v) => (typeof v === 'string' ? `'${v.replace(/"/g, '')}' (a string)` : String(v))
+  const bad = keys.filter((k) => !(Number.isInteger(task[k]) && task[k] >= 1))
+  if (!bad.length) return ''
+  return 'invalid round budget: ' + bad.map((k) => `${ROUND_BUDGET_FIELDS[k]} = ${show(task[k])}`).join(', ') +
+    ' — each must be an integer >= 1. Fix the task (or rollout) frontmatter and re-dispatch; the engine ' +
+    'fails closed rather than skip a plan or review layer (ADR 0008).'
+}
+// The review-blocked shape for a bad review budget. The diagnosis goes in reviewFeedback as well as
+// blockerDiagnosis: reconcile writes bullets(reviewFeedback) for review-blocked when reviewHistory is empty.
+function reviewBudgetBlock(prev, diag) {
+  return { ...(prev || {}), blocked: true, status: 'review-blocked', blockerDiagnosis: diag, reviewFeedback: [diag], reviewHistory: [], reviewRoundsUsed: 0 }
+}
+
 // ---- The three convergence layers -------------------------------------------
 
 async function planLoop(task, st, a) {
+  // Entry guard BEFORE the planner dispatch: an unusable budget must never reach implement() as "no gate".
+  const badBudget = roundBudgetDiagnosis(task, ['maxPlanRounds'])
+  if (badBudget) return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: badBudget, planRoundsUsed: 0 }
   let plan = await runAgent(plannerPrompt(task, a, st, ''), {
     label: `plan:${task.slug}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier, effort: implEffort(st, task),
   })
@@ -1023,6 +1052,11 @@ async function planLoop(task, st, a) {
       return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: plan.blockerCause || 'plan-reviser returned no plan', planRoundsUsed: round + 1 }
     }
     round += 1
+  }
+  // Unreachable once the entry guard holds; kept so the function can never end in undefined (fail-closed).
+  return {
+    task, blocked: true, status: 'plan-blocked', planRoundsUsed: round - 1,
+    blockerDiagnosis: `plan round budget exhausted without a verdict (max_plan_rounds = ${String(task.maxPlanRounds)}) — fail-closed, ADR 0008`,
   }
 }
 
@@ -1104,6 +1138,10 @@ async function reviewLoop(task, st, prev, a, planText) {
   // Ralph-blocked OR transient-dead implement result (both carry blocked=true)
   if (prev && prev.blocked) return { ...prev, status: 'blocked' }
   if (task.scope === 'read-only') return { ...prev, status: 'review', reviewRoundsUsed: 0 }
+  // Entry guard (converge's pre-flight normally catches this first): an unusable review budget blocks
+  // with the diagnosis where reconcile looks for it — reviewFeedback, since the history is empty.
+  const badBudget = roundBudgetDiagnosis(task, ['maxReviewRounds'])
+  if (badBudget) return reviewBudgetBlock(prev, badBudget)
 
   let current = prev
   // Accumulate every round's rejection rationale (review-loop-memory), mirroring planLoop: the judge
@@ -1152,6 +1190,9 @@ async function reviewLoop(task, st, prev, a, planText) {
     current = { ...current, ...revised }
     round += 1
   }
+  // Unreachable once the entry guard holds; kept so the function can never end in undefined (fail-closed).
+  const diag = `review round budget exhausted without a verdict (max_review_rounds = ${String(task.maxReviewRounds)}) — fail-closed, ADR 0008`
+  return { ...current, status: 'review-blocked', reviewRoundsUsed: round - 1, blockerDiagnosis: diag, reviewFeedback: [diag], reviewHistory: priorFeedback }
 }
 
 // One task, end to end: plan-gate → implement → review, sharing a single mutable tier state so an
@@ -1160,14 +1201,22 @@ async function reviewLoop(task, st, prev, a, planText) {
 async function converge(task, a) {
   const cap = tierCap(a)
   const st = { tier: taskModel(task, cap), cap, escalated: false, escalatedAt: '', capSuppressed: false, capSuppressedAt: '' }
+  const wrap = (r) => r
+    ? { ...r, model: st.tier, escalated: st.escalated, escalatedAt: st.escalatedAt, tierCapped: !!st.capSuppressed, tierCappedAt: st.capSuppressedAt || '' }
+    : r
+  // Pre-flight: a code-writing task whose review layer cannot run must not spend a planner, an
+  // implementer and a PR first. The diagnosis lists every invalid budget the task would use, so one
+  // frontmatter fix covers both. (Read-only tasks never run the review layer, so their budget is moot.)
+  if (task.scope !== 'read-only' && roundBudgetDiagnosis(task, ['maxReviewRounds'])) {
+    const keys = task.planGate ? ['maxPlanRounds', 'maxReviewRounds'] : ['maxReviewRounds']
+    return wrap({ task, ...reviewBudgetBlock(null, roundBudgetDiagnosis(task, keys)) })
+  }
   const planned = task.planGate ? await planLoop(task, st, a) : { task, plan: null, blocked: false }
   const impl = await implement(task, st, planned, a)
   // The approved plan rides into the review loop for the step-back round's reference ('' when the
   // task was not plan-gated — the step-back licence then runs against the brief alone).
   const reviewed = await reviewLoop(task, st, impl, a, (task.planGate && planned && planned.plan) || '')
-  return reviewed
-    ? { ...reviewed, model: st.tier, escalated: st.escalated, escalatedAt: st.escalatedAt, tierCapped: !!st.capSuppressed, tierCappedAt: st.capSuppressedAt || '' }
-    : reviewed
+  return wrap(reviewed)
 }
 
 // ---- Orchestration: waves are barriers, tasks within a wave pipeline ---------
