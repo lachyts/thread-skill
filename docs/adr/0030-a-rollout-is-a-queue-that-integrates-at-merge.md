@@ -3,7 +3,7 @@
 Date: 2026-09-30
 Status: proposed, implementation pending (amends ADR 0009's wave and cursor, merge-wave's never-force-push rule for a task's own branch, schedule § 5's
 same-file invariant, and merge-wave's halt-on-conflict; grilled with Lachy while scheduling
-chorus-rollout-2026-09-30; supersedes protocol 4's ADR 0019, never landed on master)
+chorus-rollout-2026-09-30; supersedes protocol 4's `0019-task-readiness-governs-progress.md`, never landed on master)
 
 ## Context
 
@@ -139,7 +139,7 @@ fifty tasks for one).
   since 2026-09-23) and chorus-rollout-2026-09-30 (parked for this) are the two to migrate.
   (Re-grilled 2026-09-30. Rejected: wave rollouts finishing on the old engine beside the queue, and
   holding the queue until GifLab finishes on waves.)
-- Protocol 4's ADR 0019 (on `codex/thread-rollout-redesign`, accepted 2026-09-22, never built)
+- Protocol 4's `0019-task-readiness-governs-progress.md` (on `codex/thread-rollout-redesign`, accepted 2026-09-22, never built)
   reached for the same thing: readiness, not a wave cursor, governs progress, and a pause drains.
   This decision supersedes it and goes further (a shared file never holds a task back). The queue is
   built on master's engine; the branch is not landed whole (orient reshuffle, 2026-09-30). Its

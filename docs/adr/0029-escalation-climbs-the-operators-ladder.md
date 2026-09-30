@@ -82,7 +82,7 @@ ladder (two ways to say one thing, which can disagree); the first draft's capped
   `tierCapped` goes: a climb at the top is a recorded no-op.
 - p7-1 is absorbed: the file is read at each task's start, and a resume keeps its args. Its third
   question (how a block at the top rung is triaged, 0016's "wait for quota" reading) stays open.
-- Supersedes protocol 4's ADR 0021 (on `codex/thread-rollout-redesign`, never landed on master),
+- Supersedes protocol 4's `0021-shared-effort-first-routing.md` (on `codex/thread-rollout-redesign`, never landed on master),
   which routed by a shared workspace policy and climbed to maximum effort before changing model.
   Lachy's stance is the reverse (`max` is weak on Opus 5.5), and the ladder is a thread-owned file.
   Its sound parts carry over: settings are fixed for a task's run, and the record keeps what was
