@@ -7,6 +7,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
 . tests/lib/assert.sh
+unset $(git rev-parse --local-env-vars)   # git's own list of repo-local vars (GIT_DIR, GIT_CONFIG_PARAMETERS, …)
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin" "$tmp/prs"
@@ -105,6 +106,52 @@ out=$(run 74); rc=$?
 ok "$rc" 0 "7d. queued + stranded: exits 0"
 has "$out" "did not fast-forward: on master, 2 commit(s) not on origin/master — 1 queued in $q, 1 stranded" "7d. names the split"
 has "$out" "stays blocked until they are landed or dropped" "7d. says the stranded ones keep it blocked"
+
+# 8. GIT_DIR / GIT_WORK_TREE set on the ONE merge-wave.sh invocation (a git hook exports them; p12-3), never
+#    exported in this shell, so the fixture setup above and the snapshots below stay on their own repos. The
+#    decoy is a normal repo whose only remote is a LOCAL bare repo under a github.com/o/r.git path: the
+#    script's owner/repo derivation passes, so an unscrubbed script reaches its fetch and ff-merge — against
+#    the decoy and its remote instead of $tmp/repo. The decoy and its remote must come out byte-unchanged.
+d="$tmp/decoy"; dr="$tmp/gh/github.com/o/r.git"
+mkdecoy() {  # a fresh decoy per case, so one case's leak never masks the next case's
+  rm -rf "$d" "$dr" "$tmp/scratch"
+  git -c init.defaultBranch=master init -q --bare "$dr"
+  git -c init.defaultBranch=master init -q "$d"
+  git -c user.name=t -c user.email=t@t -C "$d" commit -q --allow-empty -m decoy-base
+  git -C "$d" remote add origin "$dr"
+  git -C "$d" push -q origin master 2>/dev/null
+  git -C "$d" fetch -q origin
+}
+mkdecoy
+snap() {  # the decoy's refs, its core.bare, its config bytes, and its remote's refs
+  git -C "$d" for-each-ref; echo "bare=$(git -C "$d" config --get core.bare)"
+  cat "$d/.git/config"; echo "-- remote"; git -C "$dr" for-each-ref
+}
+before=$(snap)
+out=$(GIT_DIR="$d/.git" bash "$root/skills/execute/scripts/merge-wave.sh" --self-test-base 2>&1); rc=$?
+ok "$rc" 0 "8a. --self-test-base under an inherited GIT_DIR exits 0"
+has "$out" "base: ALL PASS" "8a. --self-test-base under an inherited GIT_DIR: ALL PASS"
+ok "$(snap)" "$before" "8a. the decoy and its remote are unchanged"
+mkdecoy; before=$(snap)
+out=$(GIT_DIR="$d/.git" GIT_WORK_TREE="$d" bash "$root/skills/execute/scripts/merge-wave.sh" --self-test-base 2>&1); rc=$?
+ok "$rc" 0 "8b. --self-test-base under GIT_DIR + GIT_WORK_TREE exits 0"
+has "$out" "base: ALL PASS" "8b. --self-test-base under GIT_DIR + GIT_WORK_TREE: ALL PASS"
+ok "$(snap)" "$before" "8b. the decoy and its remote are unchanged"
+# 8c. a clean one-PR wave while the decoy's remote holds a commit the decoy lacks: an unscrubbed script
+#     fetches it and fast-forwards the decoy's master (rc 0 and sentinel ok either way, so rc is not the signal).
+mkdecoy
+git -c init.defaultBranch=master clone -q "$dr" "$tmp/scratch" 2>/dev/null
+git -c user.name=t -c user.email=t@t -C "$tmp/scratch" commit -q --allow-empty -m remote-only
+git -C "$tmp/scratch" push -q origin master
+before=$(snap); held=$(gc rev-parse HEAD)
+pr 81 OPEN master
+out=$(rm -f "$tmp/merges"; GIT_DIR="$d/.git" PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$root/skills/execute/scripts/merge-wave.sh" "$tmp/repo" 81 2>&1); rc=$?
+ok "$(snap)" "$before" "8c. a wave under an inherited GIT_DIR leaves the decoy and its remote unchanged"
+case "$out" in *"fast-forwarded"*) ok "[$out]" "no 'fast-forwarded'" "8c. nothing is fast-forwarded";; *) ok y y "8c. nothing is fast-forwarded";; esac
+# Regression guards (green before and after the scrub):
+ok "$rc" 0 "8c. (guard) the wave exits 0"
+ok "$(cat "$tmp/repo/.claude/merge-wave.status")" "ok" "8c. (guard) sentinel records success"
+ok "$(gc rev-parse HEAD)" "$held" "8c. (guard) \$tmp/repo is left where it was"
 
 echo; [ "$fail" -eq 0 ] && echo "merge-wave base: ALL PASS" || echo "merge-wave base: SOME FAILED"
 exit "$fail"
