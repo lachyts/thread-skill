@@ -246,10 +246,31 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Wave** — a set of tasks within a rollout that are safe to run in parallel
   because no two of them edit the same file. Waves land in order; a later
   wave branches from the `main` earlier waves merged into. Since ADR 0009 the
-  wave is a glossary object, not a namespace. _Avoid_: round, phase, stage.
-- **Cursor** — the durable record of rollout progress:
-  `merged_through_wave: N` in the rollout note. The single source of truth
-  for "where was I". _Avoid_: checkpoint, pointer, progress marker.
+  wave is a glossary object, not a namespace. Retired (ADR 0030): a rollout
+  is a **Queue**, with no wave mode to opt back into, and a wave rollout in
+  flight migrates onto it. _Avoid_: round, phase, stage.
+- **Queue** — how a rollout runs since ADR 0030: up to the parallel ceiling's worth of
+  tasks at once, each started from the `main` of its moment; when one merges
+  the next starts. Only dependencies and a **Solo** task hold a task back,
+  never a shared file. _Avoid_: wave (the old grouping), batch (the session
+  lane's).
+- **Solo** — a task in a Queue that runs alone: it starts only when nothing
+  else is running, and nothing starts until it merges. For a sweeping change
+  that every concurrent task would otherwise have to redo its work around
+  (ADR 0030). _Avoid_: barrier, exclusive, wave of one.
+- **Integration** — the serial step between a task's approval and its merge,
+  one task at a time: rebase onto the latest `main` in its own worktree, an
+  implementer on the Top rung resolves any conflict, the full verifier runs
+  again, and a short re-review follows when the integrator wrote code or a
+  PR landed since the task's start shares a file with it. A task that cannot
+  be integrated is **set aside** (blocked, its dependants waiting) and the
+  queue runs on (ADR 0030). _Avoid_: update-branch (GitHub's merge-in, which
+  re-verifies nothing without CI), rebase (only its first step).
+- **Cursor** — the durable record of rollout progress, the single source of
+  truth for "where was I". Under a Queue (ADR 0030) it is not stored: it is
+  the rollout's task notes, a task marked done being a task merged. (Wave
+  rollouts kept `merged_through_wave: N` on the rollout note.)
+  _Avoid_: checkpoint, pointer, progress marker.
 - **Dependent closure** — the set of tasks transitively depending on a task
   via `depends-on:` / `blocked-by:` / body wikilinks — the blast radius that
   must move together if it's deferred. _Avoid_: dependency tree, downstream.
@@ -312,37 +333,33 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Repair bridge** — the path by which a blocked task is fixed and re-landed
   while the engine keeps sole merge authority. _Avoid_: handoff, recovery.
 - **Pause** — stopping a rollout run without losing its place. Soft: a
-  `pause_requested` flag (finish + merge the current wave, exit paused).
+  `pause_requested` flag (start nothing new, let what is running integrate
+  and merge, exit paused; ADR 0030).
   Hard: stop now; worktrees keep the work. _Avoid_: suspend, halt, abort.
 - **Reinstate** — resuming a paused rollout: plain `execute` on the rollout
   note. No separate resume command. _Avoid_: restart, relaunch, unpause.
 
-## Model tiering
+## Model ladder
 
-- **Tier** — the model **and effort** bundle a task's agents run on: `opus`
-  (first-pass, mechanical) or `fable` (escalation, anything that must be
-  thought through). One tier per task at any moment; judges follow it; moving
-  tier moves effort with it (ADR 0007). Per-task `effort:` frontmatter is the
-  escape hatch, never a second ladder. _Avoid_: model level, grade, model
+- **Ladder** — the operator's ordered list of **Rungs**, bottom first, held in
+  one place outside any rollout. Absent, a built-in ladder applies (opus,
+  then fable). Changing models or efforts is an edit to it, never a release
+  (ADR 0029). _Avoid_: matrix, tier list, config (alone).
+- **Rung** — one step of the Ladder: a model plus the efforts its roles run
+  at (the code-writing roles, the plan judge, the master review). Two rungs
+  may share a model, so an effort step and a model step are the same move.
+  A task is on one rung at any moment; its judges run on it too. Replaces
+  **Tier** (ADR 0007), retired. _Avoid_: tier, model level, grade, model
   (alone).
-- **Step-up** — the planning-time, predictive assignment of the fable tier
-  from the task's shape alone. _Avoid_: escalation (that's run-time), upgrade.
-- **Escalation** — the run-time, evidence-driven flip of an opus task to
-  fable at the first sign of hardness. One-way and sticky (ADR 0006).
-  _Avoid_: fallback, retry, promotion.
-- **Top tier** — the highest tier the operator currently permits: one
-  operator-held value, changed in one place, that every rollout's ceiling is
-  taken from. It names which rung is highest, never a model version — the
-  harness resolves the tier to its current model. Unset means no ceiling. It
-  caps the escalation ladder; it is not the ladder's own internal top (ADR
-  0024, implementation pending).
-  _Avoid_: default model, preferred model, best model.
-- **Ceiling** — a run-wide cap on every tier decision (`args.maxTier`), set
-  from the operator's top tier or because the account's quota for the higher
-  tier is exhausted. Either way it names an operator or resource fact, never
-  a judgement about a task, which is why it does not contradict ADR 0006's
-  "no config switch" (ADR 0016). A capped tier is
-  **terminal**: it runs the full Ralph loop and takes the higher tier's effort
-  row, and a block on it is reported `tierCapped` rather than as a wall. How
-  that reads under the operator's top tier is open (ADR 0024, p7-1).
-  _Avoid_: downgrade, throttle, cheap mode.
+- **Top rung** — the Ladder's last rung: the ceiling every task and every
+  Integration is capped at. Replaces **Top tier** and **Ceiling** (ADR 0024,
+  ADR 0016), retired. A task on it cannot climb. _Avoid_: top tier, ceiling,
+  max tier, default model.
+- **Starting rung** — the planning-time, predictive choice to start a hard
+  task above the bottom rung, from its shape alone. Replaces **Step-up**'s
+  `model: fable`; the only per-task position a task may hold (ADR 0029).
+  _Avoid_: escalation (that's run-time), upgrade, effort override.
+- **Escalation** — the run-time, evidence-driven climb of one rung, at most
+  once per stage (plan, implement, review), at that stage's first sign of
+  hardness. One-way and sticky, never past the Top rung (ADR 0006, ADR
+  0029). _Avoid_: fallback, retry, promotion.
