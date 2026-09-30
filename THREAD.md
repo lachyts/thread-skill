@@ -10,21 +10,13 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
-**2026-09-30: waves are being retired. ADR 0030 (a rollout is a queue that integrates at merge) and ADR 0029 (escalation climbs the operator's ladder) are written, and the build is phased as P12 and P13. Protocol 4 (P6) and P7 are retired. Docs PR #53 is landing; nothing is running.**
-- **Grill** (handoff from the Chorus orient, then Lachy's "can't we just run tasks in parallel in worktrees and merge after?"):
-  - **Waves dropped outright.** Order comes from `depends-on:` plus a **Solo** flag; shared files only shape queue order.
-  - **Integration.** One task at a time: rebase, a top-rung integrator, the full verifier, a re-review when the integrator wrote code or a landed PR shares a file, the full review loop, set aside when stuck.
-  - **The lead runs the queue.** Execute's lead runs it as per-task Workflow calls and stays the only merger.
-  - **Order and state.** Order is priority, then least overlap. The cursor is the task notes. A soft pause drains. GifLab's and Chorus's wave rollouts migrate.
-  - **ADR 0029 rewritten** at Lachy's ask ("a settings file for the effort step-up and the model tree; max isn't effective on Opus 5.5"). One `~/.config/thread/ladder.toml` of rungs (model plus efforts). Escalation climbs one rung per stage; a task may start on a higher rung (`rung: N`). It replaces the EFFORT matrix, ADR 0024's `top-tier` file and per-task `effort:`. Lachy's ladder is Opus high, then Opus xhigh, with no max.
-- **Orient (scoped) found protocol 4** (`codex/thread-rollout-redesign`, 36 ahead and 171 behind, idle since 09-23). Its ADRs 0019 and 0021 cover the same ground; 0021 climbs to max before changing model. Lachy chose to **build on master and retire P6**. Its standalone fixes moved into P12. P7 merged into P13.
-- **Spike p12-1 passed.** Three Workflow calls ran at once in one session, one of them in a worktree passed in args (`docs/spikes/2026-09-30-concurrent-workflow-calls.md`). ADR 0030 decision 4 is verified.
-- **PR #53** (`docs/adr-0029-0030-queue-and-ladder`): ADRs 0029 and 0030, CONTEXT.md (Queue, Solo, Integration, Ladder, Rung, Top rung, Starting rung; Tier, Top tier, Ceiling, Step-up and Wave retired) and the spike doc. **HELD, not merged.**
-  - **Review round 1** (xhigh) found 15 gaps, all fixed in `a3ddd47` (plus `e2dadd9` for a refs-test citation).
-  - **Round 2** found 15 more, and 9 of them cite `a3ddd47` itself. The ledger fired STOP (regressions outnumber originals), so close held the PR.
-  - **Round 2's findings** are in `docs/reviews/2026-09-30-e2dadd9-b5741c.md` at commit `f72463a`; the deletion commit removed it from the tree.
-  - **Lesson:** round 1's fixes turned the ADRs into implementation specs, and every added detail grew new edges.
-- **Parked until the queue lands:** `[[chorus-rollout-2026-09-30]]` (53 tasks, all stamped `effort: high`) and `[[giflab-rollout-2026-09-23]]` (wave 1's PRs #111–#114 at `review` since 09-23).
+**2026-09-30 (night): waves are being retired. ADR 0030 (a rollout is a queue) and ADR 0029 (escalation climbs the operator's ladder) are decided and slimmed to decision level in PR #53, which is landing with no further review round. P12 and P13 hold the build. Nothing is running.**
+- **Two grills.** The evening grill (from the Chorus orient and Lachy's "can't we just run tasks in parallel in worktrees and merge after?") wrote both ADRs. The night's `/thread:orient` reshuffle, with grill-with-docs, answered review round 2 and then round 3's nine design calls. The ADRs hold the decisions; the P12 and P13 task notes hold the mechanics.
+- **The night's calls** (all in the ADRs): Integration merges `main` in and never force-pushes; the lead runs a clean Integration itself and a Workflow call only for trouble; a rejected task releases the Integration lane; the verifier is skipped only when `main` hasn't moved; a set-aside task resumes where it stopped. The built-in ladder names no model above Opus, rungs have names, and the file is read at the start of each Workflow call.
+- **Fable research** (2026-09-30, Anthropic docs plus a web sweep, several sources vendor-published): since Opus 5.5 it ties or trails on most published coding results at 2.5x the token price, and nothing has measured it on these tasks. The ladder stays two Opus rungs; [[ab-fable-vs-opus-planning]] (after p13-2) replays hard tasks blind, and a win is one line in the ladder file.
+- **PR #53's reviews:** round 1 (15 findings) fixed in `a3ddd47`; round 2 (15, 9 of them regressions of round 1) tripped the ledger STOP; round 2 answered at decision level in `5d4404e`; round 3 ran `simplify` (28 findings, `ef71896`), which led to the slimming. **Lesson:** answer a review at the document's altitude; a finding about mechanics moves the mechanics out of the ADR.
+- **Protocol 4** (`codex/thread-rollout-redesign`) is retired unlanded; its standalone fixes are in P12.
+- **Parked until the queue lands:** `[[chorus-rollout-2026-09-30]]` (53 tasks) and `[[giflab-rollout-2026-09-23]]` (PRs #111–#114, `UNSTABLE`, a week stale).
 
 **2026-09-29/30: 2.11.0 is released and live. Agents now land their own work (ADR 0028, P11). Nothing is running.**
 - **Grill → ADR 0028** (#42, amended #45): landing (push, PR, review, fixes, CI retries, merge, cleanup) is the agents' job. Close lands its close-out and the session's own branch (reviewed first); handoff lands its doc; one estate-wide **landing register** (a deny-list) gates every agent push, rollouts included. Amended mid-rollout to **queue and finish**: commit on the default branch, push that commit to a `close/…` branch, queue auto-merge with a merge commit, never wait. Waiting needed a detached waiter whose lock and race findings grew every review round.
@@ -471,8 +463,8 @@ scheduled 2026-07-15.
 
 ## What's been built / decided
 
-- **ADR 0030 (2026-09-30, PR #53, proposed, build = P12): a rollout is a queue that integrates at merge.** Waves are dropped with no opt-in mode. Same-file tasks run in parallel. Integration runs serially before each merge; every re-review uses real diffs. Solo tasks run alone. The lead runs per-task Workflow calls plus one integration call, and the Workflow script never merges. The cursor is the task notes; `ROLLOUT-STATUS` replaces `WAVE-STATUS`; `protocol_version` goes to 5 (4 was protocol 4's). Supersedes protocol 4's 0019.
-- **ADR 0029 (2026-09-30, PR #53, proposed, build = P13): escalation climbs the operator's ladder.** `~/.config/thread/ladder.toml` rungs (model, effort, judge, review); climb once per stage; `rung: N` start; integration on the top rung; the ladder is read at each task's start. The built-in default is today's behaviour. Supersedes ADR 0024's `top-tier` file and protocol 4's 0021; absorbs p7-1's first two questions.
+- **ADR 0030 (proposed, PR #53, build = P12): a rollout is a queue that integrates at merge.** Supersedes protocol 4's 0019.
+- **ADR 0029 (proposed, PR #53, build = P13): escalation climbs the operator's ladder.** Supersedes ADR 0024's `top-tier` file and protocol 4's 0021.
 - **Roadmap (orient scoped reshuffle, 2026-09-30):**
   - **New phases:** [[thread-skill-p12-a-rollout-is-a-queue]] (13 tasks) and [[thread-skill-p13-the-ladder]] (4 tasks, ending with the 3.0.0 release and the E2E).
   - **P6 and P7 retired:** p6-2, p6-3 and p6-5 renamed into P12; p6-4, p6-6, p6-7, p6-8, p7-1, p7-2 and p7-3 merged into new tasks; p6-1, p6-9 and p7-4 dropped.
@@ -542,12 +534,7 @@ scheduled 2026-07-15.
 - **The daily lander (p11-7) doesn't exist yet.** Until it does, a queued merge that fails (red CI, a PR left behind master, `queued: needs merge`) waits for the next close in that repo. It has to catch up on wake: the laptop is often off overnight until the Mac mini arrives.
 - **Loose end from P11:** [[thread-skill-land-pr-body-names-its-caller]] (a handoff's landing PR body says `thread:close`). The autostash fix is now in [[thread-skill-p12-7-merge-one-integrated-pr]].
 - **AGENTS.md still says reviews never block** (p11-8): landing's review runs inline. Lachy's file, so the wording needs his approval.
-- **Decided in task specs, not grilled** (2026-09-30, flag if wrong):
-  - `--gated` becomes a human pause before each merge, and single-wave mode goes (p12-9).
-  - Integration rebases and pushes the task's own branch with `--force-with-lease`, amending merge-wave's never-force-push rule for task branches only (ADR 0030, fixed after review round 1).
-  - `protocol_version: 5` (p12-10).
 - **Open from ADR 0029:** how a block at the top rung is triaged. This is p7-1's third question, carried into [[thread-skill-p13-1-ladder-file]].
-- **Untested:** five Workflow calls at once (the ceiling of 4 plus integration). The spike ran three; p12-13 should confirm five.
 - **The fresh-review of workspaces `29ca886` (the hook deletion) hasn't run.** The engine binds to the session's cwd, and this session was in thread-skill. It needs a session launched in `~/repos/workspaces`.
 - **The one-live-rollout rule is orient-only** (ADR 0027): `/thread:schedule` run directly can still write a second rollout on a repo or `--regenerate` over a running one. [[thread-skill-schedule-owns-one-live-rollout-per-repo]] moves it into schedule's gate; its note lists why round 1's attempt was reverted.
 - **Halted vs running is not locally readable.** `reconcile-wave.py status` shows `paused` and task statuses but not whether a lead is still driving, which is why orient supersedes only a `paused` rollout. A liveness signal would widen that.
@@ -628,12 +615,11 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
-- **One session can hold several Workflow calls in flight** (spike 2026-09-30). Each completion is its own notification, and an agent can work in a worktree path passed in `args`. The floor is about 36k subagent tokens per call. Workflow scripts can't touch files or the clock, so anything vault-side (reconcile, pause, landing-register checks) must stay in the lead.
-- **Schedule reads dependencies from frontmatter `depends-on:`/`blocked-by:` only;** body phrases are surfaced for confirmation. A task can link a merged-away note in its body ("Carries [[…]]") without creating a dependency.
+- **One session can hold several Workflow calls in flight:** `docs/spikes/2026-09-30-concurrent-workflow-calls.md`.
+- **Dependencies are frontmatter only** (`skills/schedule/SKILL.md` § 3): a body link such as "Carries [[…]]" never creates one.
 - **`land.sh` accepts only THREAD.md and `docs/handoffs/` paths.** ADRs and other docs land on a feature branch with a PR, reviewed by close's own-branch loop.
 - **A vault-wide `/usr/bin/grep -rlF` for backlinks takes more than 2 minutes** (the vault is large). Run it in the background.
 - **Protocol 4's branch is not landed and won't be as a whole** (retired 2026-09-30). Mine it for ideas, never merge it.
-
 - **Design-heavy tasks need a bigger plan budget** (2026-09-29). With 3 plan rounds, p11-3 plan-blocked on breadth three times; with `max_plan_rounds: 6` it converged, and p11-4, started at 6, converged in 4. Stamp `max_plan_rounds: 6` on a deep cross-cutting task up front. When each round instead finds a new race in machinery a requirement forced, reshape the requirement (estate METHOD, the plan-gate move).
 - **`merge-wave.sh` now leaves a merged PR's remote branch "for the reaper"**, and the repo's delete-branch-on-merge removes it. A close-out landed through `land.sh` shows as `on master, N commit(s) not on origin/master — queued in close/…` until GitHub merges it; that's normal, not stranded.
 - **`claude plugin update` reads the live checkout** (2026-09-28). The marketplace is a directory source at `~/repos/tools/thread-skill`, so a release merged from the rollout clone reports "already at the latest version" until that checkout is fast-forwarded to the release commit. Fast-forward it first, then update both profiles.
@@ -845,26 +831,12 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**Now (from 2026-09-30, late evening): settle PR #53, then build the queue.**
-1. **PR #53 is held** (review-ledger STOP at round 2).
-   - **Read first:** round 2's 15 findings, `git show f72463a:docs/reviews/2026-09-30-e2dadd9-b5741c.md`.
-   - **Revert to the root, don't patch a third time.** Pull `a3ddd47`'s implementation-level detail out of the ADRs: slots, the Solo drain, stamp names, lease and atomic merge, pinned trees, retry budgets. Keep the ADRs at decision level and put that detail into the P12/P13 task specs, where the plan-gates own it.
-   - **Lachy decides first:**
-     - (#9) whether the Opus lock can fail open to fable on a machine with no ladder file; the alternative is schedule stamping a ladder snapshot on the synced rollout note;
-     - (#6) what an exhausted-quota edit means for effort;
-     - (#8) how a legacy `model: fable` maps to a rung;
-     - (#3) the retry budget at the top rung;
-     - (#10) an atomic merge onto an unmoved base, against ADR 0025.
-   - **Then** one `/fresh-review` round and the landing (`land.sh --own-branch`, `--queue` after a clean round).
-2. **Schedule P12.** From a session in this repo on a clean `master`, run a Steer-only `/thread:orient Thread Skill`. It schedules P12's wave-shaped tasks (p12-2 to p12-12) with `--tasks`; then `/thread:execute`. They run on the old wave engine, which serialises them on `wave-execute.workflow.js` and `execute/SKILL.md`; that's expected.
+**Now (from 2026-09-30, night): land PR #53, then build the queue.**
+1. **PR #53** carries the slimmed ADRs 0029 and 0030, CONTEXT.md and this file. It merges on green CI with no further review round: the ledger stopped at round 2, round 3 ran `simplify`, and Lachy chose grill, slim, merge (2026-09-30).
+2. **Schedule P12.** From a session in this repo on a clean `master`, run a Steer-only `/thread:orient Thread Skill`. It schedules P12's wave-shaped tasks (p12-2 to p12-12, p12-14 and p12-15) with `--tasks`; then `/thread:execute`. They run on the old wave engine, which serialises them on `wave-execute.workflow.js` and `execute/SKILL.md`; that's expected.
 3. **Then:** p12-13 (the GifLab run on the queue, session lane), P13, and the 3.0.0 release (p13-4), which unparks Chorus.
 4. **The next-action slot** still names p11-7 (the daily lander): close only overwrites it with a concrete next task, and this thread's next move is a phase. The queue build is the recommendation; p11-7 is next after it.
-
-**Superseded (2026-09-30 evening) by the block above. Its Next list is kept for history; merge-wave-no-autostash, schedule-owns-one-live-rollout-per-repo and rewave-a-blocked-task were merged into P12 or dropped.** ~~Now (from 2026-09-30): 2.11.0 is live: close and handoff land their own work (ADR 0028). Nothing is running, no handoff is pending, and both checkouts are on `master`.~~
-- **Next:** [[thread-skill-p11-7-the-daily-lander]], the last structural piece of P11. Build it as a session (launchd plus a live headless probe), and design it to catch up on wake.
-- **Then, any order:** [[thread-skill-p11-8-agents-md-landing-review]] (show Lachy the wording first); [[thread-skill-merge-wave-no-autostash]] and [[thread-skill-land-pr-body-names-its-caller]] (small, wave-shaped); the ADR 0027 follow-ups ([[thread-skill-schedule-owns-one-live-rollout-per-repo]], [[thread-skill-one-vault-grammar-for-reconcile-and-reshuffle]]); [[thread-skill-p4-5-trim-descriptions-700-hard-cap]]; [[thread-skill-rewave-a-blocked-task-within-its-rollout]]; phase 9's p9-2 and p9-3.
-- **Still owed:** the fresh-review of workspaces `29ca886`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
-- **Close-outs now land themselves** (queued `landing` PR, auto-merge). Run a thread-skill rollout from this clone on a clean `master`.
+5. **Still owed:** the fresh-review of workspaces `29ca886`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`. Close-outs land themselves (queued `landing` PR, auto-merge).
 
 **Superseded 2026-09-30:**
 **Now (from 2026-09-28, late afternoon): 2.10.0 is live. Nothing is running, no handoff is pending, and both checkouts are on `master` (after this close-out's PR merges, fast-forward the clone).**

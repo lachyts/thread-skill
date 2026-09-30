@@ -1,9 +1,9 @@
 # 0030 — a rollout is a queue that integrates at merge
 
 Date: 2026-09-30
-Status: proposed, implementation pending (amends ADR 0009's wave and cursor, merge-wave's never-force-push rule for a task's own branch, schedule § 5's
-same-file invariant, and merge-wave's halt-on-conflict; grilled with Lachy while scheduling
-chorus-rollout-2026-09-30; supersedes protocol 4's `0019-task-readiness-governs-progress.md`, never landed on master)
+Status: proposed, implementation pending (amends ADR 0009's wave and cursor, schedule § 5's
+same-file invariant and merge-wave's halt-on-conflict; grilled with Lachy 2026-09-30; supersedes
+protocol 4's `0019-task-readiness-governs-progress.md`, never landed on master)
 
 ## Context
 
@@ -18,140 +18,89 @@ about if we're working in worktrees and we're just merging them after we've done
 
 ## Decision
 
-1. **File overlap no longer serialises tasks.** Only dependencies (`depends-on:` or `blocked-by:`; a
-   body phrase such as "after X lands" counts once schedule has confirmed it into them), a **solo**
-   task and the parallel ceiling decide what runs at once. A solo task is a
-   sweeping change (a rename, a restructure of a hub file) that would make every concurrent task
-   redo its work. It runs alone: once it is the next task free to start (its own dependencies merged,
-   like any task's), nothing new starts; every task already started, whether running or waiting for
-   Integration, merges or is set aside; then the solo task runs, and the queue resumes when it merges or is set aside. A
-   set-aside solo task releases the queue like any other.
-   Shared files still shape queue order softly: of the tasks free to start, the one overlapping least
-   with what is running goes first. Overlap never holds a task back. Waves are dropped outright, not
-   kept as an opt-in mode (re-grilled 2026-09-30): nothing a wave did is a wave's job once merging
-   integrates.
-2. **A rollout is a rolling queue, not waves.** Up to the parallel ceiling's worth of tasks run at any moment,
-   each in its own worktree from the `main` of the moment it starts. A slot is a task in its own
-   Workflow call (plan, implement, review): it frees when that call returns, whatever the result,
-   so a task waiting for or in Integration holds no slot, and neither does a set-aside one. When a
-   slot frees, the next in **queue order** starts: highest `priority:` first, then the fewest files shared with what is
-   running, then the order schedule wrote. The lead re-reads the task notes before every start, so
-   changing a task's `priority:` in the vault reorders a live queue; there is no other queue to
-   edit. (Re-grilled 2026-09-30. Rejected: an ordered `## Queue` list in the rollout note, which
-   either overrides the overlap preference or loses it; order frozen at schedule time.) A task whose dependency has not
-   merged waits in the queue.
-3. **Merging is integration.** A task that passes its own verifier and review is integrated before
-   it merges: its branch is rebased onto the latest `main` in its own worktree (the task's own PR branch is
-   then pushed with `--force-with-lease`: this amends merge-wave's never-force-push rule for a
-   task's own branch only, and the default branch is never force-pushed), and a fresh
-   implementer-role agent resolves any conflict from the task's own diff and the PRs that landed
-   ahead of it. The full verifier
-   then runs again. It then gets one short **re-review** when the integrator wrote code (resolved a
-   conflict or added a commit) **or** a PR that landed since its base shares a file with it. The
-   judge reads only the integration delta and those overlapping PRs, and asks one thing: was
-   anything of theirs dropped or contradicted, or anything of ours lost. A clean rebase onto a
-   `main` whose new PRs touched none of its files merges on the green verifier alone. (Re-grilled
-   2026-09-30. Rejected: re-review only when the integrator wrote code, which leaves a clash
-   between two changes that each merged cleanly to the verifier alone, the no-CI hole again; and
-   always, which pays for reviews with nothing to read.) A rejection runs the task's full review
-   loop, up to its `max_review_rounds`, the integrator revising on the top rung against the accumulated
-   feedback; the ceiling sets the task aside. Integration is serial within the rollout, but other
-   merges can still move `main` meanwhile (a close's landing PR, a hand merge, another session).
-   The merge step therefore refuses a base that has moved, and the task re-integrates onto the new
-   `main`: a rebase, the full verifier, and a re-review only when the newly landed PRs share a file
-   with it or the rebase needed code. Its review loop is not re-run from the start. The cost is accepted with open eyes: a hard integration holds every finished task
-   behind it, while implementation carries on. (Rejected: one fix round then set aside, and set
-   aside at once, both of which trade a likely landing for a repair trip.) Only then does it merge. Tasks merge in the order they finish integrating, one
-   at a time. The integrate-verify-merge step is serial; implementation is not. Integration replaces
-   update-branch for every repo, CI or none, so the stale-base squash cannot happen: nothing merges
-   from a base older than the `main` it lands on. The integrating agent is a fresh one in the
-   implementer role, given the task's own diff, its approved plan, and the PRs and briefs that
-   landed since its base. It always runs on the **top rung** of the task's ladder (ADR 0029),
-   model and effort both, whatever rung the task reached; the re-review judge runs on the top rung
-   too, at its `review` effort. Until ADR 0029 is built, the top rung is the run's ceiling tier
-   with `xhigh` for the integrator (Opus at `xhigh` under the operator's Opus lock): folding someone else's landed
-   work into yours is the step where a silent drop happens, so it never runs on a first-pass rung.
-   (Re-grilled 2026-09-30. Rejected: the task's own rung, which can put the riskiest step on the
-   bottom rung; a dedicated integrator role, another role on every rung for the same code-writing
-   job.)
-4. **Execute's lead session runs the queue; the Workflow script never merges.** Each task is its own Workflow
-   call (plan-gate, implement, review), up to the parallel ceiling's worth in flight. When one returns, the
-   lead launches that task's integration as a second, small Workflow call in its worktree, and only
-   one integration is in flight at a time. On a clean integration the lead merges through the
-   merge script, reconciles the vault and starts the next task. Every lead-side check (the landing
-   register, a pause, the cursor) therefore runs per task, and the vault is current after every
-   merge. (Re-grilled 2026-09-30. Rejected: one long Workflow for the whole rollout, integrating and
-   merging inside it. A script cannot touch the vault, so status would be blind until the run ended,
-   the landing register and pause checks could not run per merge, merges would pass to an agent inside the script,
-   and a ten-hour run is one failure domain. Verified by spike on 2026-09-30: one session held three
-   Workflow calls in flight at once, one of them in a worktree passed in args,
-   `docs/spikes/2026-09-30-concurrent-workflow-calls.md`.)
-5. **A stuck task is set aside, not a halt.** Any task that stops short of merging is set aside:
-   one whose own call returns `plan-blocked`, `review-blocked` or `blocked`, and one whose
-   Integration fails (a conflict it cannot resolve, a suite still red after its fix loop, or a
-   re-review that reaches its ceiling), which is marked `blocked` with the reason. Its slot is
-   free, its dependants wait, and the queue runs on. A task set aside at Integration re-enters at
-   Integration: its approved plan, branch and review stand, and repair or a resume retries only the
-   Integration. A `gate-pending` task (ADR 0008) is set aside
-   the same way until Lachy signs its gates, then resumes its own call on the plan he signed, never
-   re-planned; the queue runs whatever does not depend on it. The
-   rollout halts only when nothing left in the queue can start and nothing is running, waiting for
-   Integration or integrating.
+1. **A rollout is a queue, not waves.** Tasks run in parallel in their own worktrees, each from the
+   `main` of its start, up to the parallel ceiling. Only dependencies (`depends-on:`, `blocked-by:`)
+   and a **solo** task hold a task back; a shared file never does. A solo task is a sweeping change
+   (a rename, a hub-file restructure): when it is next to start, nothing new starts until every
+   started task has merged or been set aside, and the queue resumes once the solo task merges or is
+   set aside. Queue order is highest `priority:`, then least file overlap with what is running, then
+   schedule's order, recomputed from the task notes before every start, so a `priority:` edit in the
+   vault reorders a live queue.
+2. **Execute's lead runs the queue and is the only merger.** Each task's own run (plan-gate,
+   implement, review) is one Workflow call holding one slot until it returns. The Workflow script
+   never merges. Every lead-side check (the landing register, a pause, the cursor) runs per task,
+   and the vault is current after every merge.
+3. **Merging is Integration, one task at a time.** Before an approved task merges, the latest `main`
+   is merged into its branch in its worktree and pushed normally: no branch is ever force-pushed.
+   The full verifier runs again unless `main` has not moved since the task's base. A short
+   re-review follows when the integration wrote code or a PR landed since the task's base shares a
+   file with it; the judge asks only whether anything of theirs was dropped or contradicted, or
+   anything of ours lost. The lead runs a clean Integration itself; a fresh implementer-role agent
+   on the top rung (ADR 0029 decision 5) runs only for a conflict, a red verifier or a rejection. A
+   rejection releases the Integration lane: the task revises in its own call, holding a slot, and
+   rejoins the Integration queue until its `max_review_rounds` sets it aside. If `main` moves before
+   the merge, the task integrates again under the same rule. Integration replaces update-branch for
+   every repo, CI or none, so nothing merges from a base older than the `main` it lands on.
+4. **A stuck task is set aside, not a halt.** A task that stops short of merging (plan-blocked,
+   review-blocked, blocked, gate-pending, or failed at Integration) is set aside: its slot frees,
+   its dependants wait, and the queue runs on. A set-aside task resumes at the stage it stopped, and
+   nothing already approved is redone. The rollout halts only when nothing can start and nothing is
+   running or integrating.
+5. **A soft pause drains.** Nothing new starts, what is running integrates and merges, then the
+   rollout stops paused. A hard pause still stops now. `--gated` becomes a human pause before each
+   merge, and single-wave mode goes.
 
-Considered: keeping waves as an opt-in mode beside the queue (two engines to keep, and every reason
-a wave existed has a better home: same-file safety in integration, order in dependencies, the one
-genuine barrier in a solo task); parallel only when the shared file is a hub and the plans touch different functions (a
-function-level overlap check at plan time, more machinery for a partial gain); keeping the file
-rule (safest, slowest); waves of the parallel ceiling's size (the old cursor, but every wave waits on its
-slowest task); halting the rollout on a stuck integration (today's behaviour, which stops
-fifty tasks for one); and a merge train, integrating several finished tasks as one (faster on a
-hub file, but a bad combination is harder to attribute; deferred until the first queue runs
-measure how long tasks wait for Integration).
+Considered:
+- *Decision 1:* keeping waves as an opt-in mode (two engines, and every reason a wave existed has a
+  better home: same-file safety in Integration, order in dependencies, the one real barrier in a
+  solo task); a function-level overlap check at plan time (more machinery for a partial gain);
+  keeping the file rule (safest, slowest); waves of the ceiling's size (each waits on its slowest
+  task); an ordered `## Queue` list in the rollout note (it overrides the overlap preference or
+  loses it); order frozen at schedule time.
+- *Decision 2:* one long Workflow for the whole rollout. A script cannot touch the vault, so status
+  would be blind until the end, the register and pause checks could not run per merge, merges would
+  pass to an agent, and a ten-hour run is one failure domain. The spike
+  (`docs/spikes/2026-09-30-concurrent-workflow-calls.md`) showed one session holding several
+  Workflow calls at once.
+- *Decision 3:* rebasing with a force-push (an exception to the engine's never-force-push rule, and
+  it can overwrite a fix pushed during repair); re-reviewing only when the integrator wrote code (two
+  changes that each merge cleanly but clash then land on the verifier alone, the no-CI hole again);
+  always re-reviewing (it pays for reviews with nothing to read); skipping the re-verify on CI repos
+  or when the landed commits are docs only (CI and the task's verifier check different things, and
+  tests can read docs); an agent for every Integration (a top-rung agent only to run a verifier);
+  the integrator on the task's own rung (the riskiest step could run on the bottom rung); a
+  dedicated integrator role (another role on every rung for the same job); holding the Integration
+  lane through a rejection's review loop (one hard task stalls every finished one); one fix round
+  then set aside, or set aside at once (both trade a likely landing for a repair trip); a merge
+  train, integrating several finished tasks as one (faster on a hub file, but a bad combination is
+  harder to attribute; deferred until the first queue runs measure how long tasks wait).
+- *Decision 4:* halting the rollout on a stuck task (today's behaviour, which stops fifty tasks for
+  one).
+- *Decision 5:* parking running tasks at an open PR (they go stale while paused).
 
 ## Consequences
 
-- There is no stored cursor. A rollout's progress is its task notes: `status: done` means merged.
-  A read-only task opens no PR: it is done when its review approves, and never enters Integration.
-  An affine-merge member's `status: merged` tombstone does not: a dependency on a folded member is
-  satisfied only when the combined unit it was folded into is done. Each task carries its own
-  start and merge stamps, which feed elapsed time and
-  the rough estimate. A resume checks GitHub for a merge whose note was never marked, as the cold
-  resume does today. (Re-grilled 2026-09-30. Rejected: a `merged: [slugs]` list on the rollout
-  note, a second copy for `/thread:status` to reconcile.) `/thread:status` reports running,
-  integrating, queued, merged and set aside.
-- A soft pause drains: nothing new starts, what is running integrates and merges, then the rollout
-  stops paused. A hard pause still stops now. (Re-grilled 2026-09-30. Rejected: parking running
-  tasks at an open PR, which leaves them going stale while paused.)
-- The Stop-hook line becomes `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=<running|waiting|halted|done>`,
-  keeping the four states and their meaning; the heartbeat's stall test becomes "no Workflow call
-  for this rollout in flight and work remains".
-- Schedule stops colouring. It orders the queue and records dependencies; its affine merge (one
-  change split across tasks, folded into one unit) stays, since it saves integrations. The
-  `## File-sets` block stops being a gate anywhere: execute's smart-halt and schedule's conflict
-  graph go, and `/thread:repair` defers a set-aside task's dependants only, no longer its
-  file-overlap successors. Its one remaining reader is the queue-order tiebreak, which needs the
-  planned file lists of tasks that have not started. The re-review trigger reads real diffs (the
-  files the landed PRs changed against the task's own), never the planned lists.
-- A task's planner and judges read its own worktree, never a shared checkout, so the plan-gate
-  plans against the `main` of the task's start, and a queued task has not
-  started, so only a running task's plan can go stale. It is reconciled at integration, never by
-  re-planning mid-run: the integrator already holds the approved plan and the landed briefs on
-  the top rung, and the re-review checks the result. Re-planning would throw away work in flight to fix
-  what integration already fixes.
-- There is one engine. A wave rollout in flight migrates onto the queue by `/thread:schedule
-  --regenerate`, run directly rather than through orient's supersede check (ADR 0027), which stays
-  as it is. In the migration, a task
-  at `review` with an open PR is a task awaiting Integration, an open task is queued, and a merged
-  one counts toward the cursor. A wave rollout's `review` PRs never merged, so for them this
-  overrides schedule's supersede rule and the old **Landed** reading (`review` as landed): the
-  migration carries them into the new rollout, never leaves them behind in the archived one. The
-  wave engine, `merged_through_wave` and the `WAVE-STATUS` line
-  are deleted outright, with no alias. giflab-rollout-2026-09-23 (wave 1's four PRs at `review`
-  since 2026-09-23) and chorus-rollout-2026-09-30 (parked for this) are the two to migrate.
-  (Re-grilled 2026-09-30. Rejected: wave rollouts finishing on the old engine beside the queue, and
-  holding the queue until GifLab finishes on waves.)
-- Protocol 4's `0019-task-readiness-governs-progress.md` (on `codex/thread-rollout-redesign`, accepted 2026-09-22, never built)
-  reached for the same thing: readiness, not a wave cursor, governs progress, and a pause drains.
-  This decision supersedes it and goes further (a shared file never holds a task back). The queue is
-  built on master's engine; the branch is not landed whole (orient reshuffle, 2026-09-30). Its
-  standalone fixes that also hold on master are carried into the build.
+- There is no stored cursor. A rollout's progress is its task notes: `status: done` means merged,
+  and a resume checks GitHub for a merge whose note was never marked. (Rejected: a `merged:` list on
+  the rollout note, a second copy to reconcile.) `/thread:status` reports running, integrating,
+  queued, merged and set aside.
+- The Stop-hook status line and the heartbeat report merged and running counts in place of the
+  wave cursor; the four run states keep their meaning.
+- Schedule stops colouring. It orders the queue, records dependencies and keeps its affine merge
+  (one change split across tasks, folded into one unit), which saves Integrations. Planned file
+  lists now only break ties in queue order and feed the affine merge, so they are best-effort, with
+  no agent sweep and no confirmation turn. The `## File-sets` gate goes everywhere (execute's
+  smart-halt, schedule's conflict graph, repair's file-overlap successors); the re-review trigger
+  reads real diffs.
+- A task plans against the `main` of its own start: its planner and judges read its worktree. A
+  plan a landed PR makes stale is reconciled at Integration, not by re-planning.
+- There is one engine. A wave rollout in flight migrates by `/thread:schedule --regenerate`, whose
+  supersede carries every unlanded task: a `review` task with an open PR awaits Integration, an
+  open task is queued, a merged one is done. (Rejected: wave rollouts finishing on the old engine
+  beside the queue.) The wave engine, `merged_through_wave` and the `WAVE-STATUS` line are deleted
+  with no alias.
+- Protocol 4's `0019-task-readiness-governs-progress.md` (on `codex/thread-rollout-redesign`,
+  accepted 2026-09-22, never built) reached for the same thing: readiness, not a wave cursor,
+  governs progress, and a pause drains. This decision supersedes it and goes further (a shared file
+  never holds a task back). The queue is built on master's engine; the branch's standalone fixes
+  that also hold on master are carried into the build.

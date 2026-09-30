@@ -214,84 +214,51 @@ through time, from attention to merged PRs. Terms only — no implementation.
   grilled into a real body. _Avoid_: capture (that is stash/defer's task).
 - **Reach tiers** — what a reshuffle may change, by an item's state: **in
   flight** and other **frozen** items (possibly landed, thread captures) are
-  context only; **unstarted** phased work is movable; **loose** work is fully
+  context only (schedule may still re-queue an in-flight task when a
+  superseding rollout takes it over); **unstarted** phased work is movable; **loose** work is fully
   open, including re-homing and pull-ins across projects. Defined in
   `skills/orient/reshuffle.md` R1. _Avoid_: locked, pinned.
-- **Clear / unclear item** — a reshuffle's first sort of every open item.
-  Clear ones (the body already says what to do) go straight to the gate;
-  unclear ones (brain dumps, one-liners) are grilled, cluster by cluster,
-  highest value first. The grill may stop at any point: what is resolved is
-  written, the rest stays loose for the next reshuffle. _Avoid_: triage.
-- **Brain dump** — a loose task note holding raw, unspecced intent, often
-  several ideas at once. A reshuffle **unbundles** it: one task per idea, each
-  grilled into a real body. _Avoid_: capture (that is stash/defer's task).
-- **Reach tiers** — what a reshuffle may change, by a task's state:
-  **in flight** (in a live rollout, dispatched, or in progress) is frozen,
-  read for context only — its scope, phase and body never change, though
-  schedule may still re-queue it when a superseding rollout takes it
-  over, and new work may join its phase for a later rollout; **unstarted** phased work is movable (re-phase, merge, split, drop,
-  retire the phase); **loose** work is fully open, including re-homing to
-  another project. Thread captures (stash/defer's `thread`-tagged tasks) are frozen like
-  in-flight work. The tiers hold across projects: a reshuffle reads related
-  projects (parked or being absorbed ones especially) and may pull their
-  unstarted phases or tasks into its target, leaving a pointer behind.
-  _Avoid_: locked, pinned.
 
 ## Rollout structure
-
-_ADR 0030 is decided but not yet built: until 3.0.0 the engine still runs Waves._
 
 - **Rollout** — a backlog of related tasks landed as one coordinated effort,
   described by one always-dated Obsidian note
   (`<slug>-rollout-<YYYY-MM-DD>`). At most one is live per repo; new
   wave-shaped work supersedes it rather than running beside it (orient § 6,
   ADR 0027). _Avoid_: batch, run, campaign.
-- **Wave** — a set of tasks within a rollout that are safe to run in parallel
-  because no two of them edit the same file. Waves land in order; a later
-  wave branches from the `main` earlier waves merged into. Since ADR 0009 the
-  wave is a glossary object, not a namespace. Retired (ADR 0030): a rollout
-  is a **Queue**, with no wave mode to opt back into, and a wave rollout in
-  flight migrates onto it. _Avoid_: round, phase, stage.
-- **Queue** — how a rollout runs since ADR 0030: up to the parallel ceiling's worth of
-  tasks at once, each started from the `main` of its moment; a slot frees
-  when a task's own run returns, so one waiting for **Integration** holds
-  none. Only dependencies and a **Solo** task hold a task back,
-  never a shared file. _Avoid_: wave (the old grouping), batch (the session
-  lane's).
-- **Solo** — a task in a Queue that runs alone: once it is next free to
-  start, nothing new starts, every task already started merges or is set
-  aside, it runs, and the queue
-  resumes when it merges or is set aside. For a sweeping change
-  that every concurrent task would otherwise have to redo its work around
+- **Wave** — a set of tasks safe to run together because none shares a file
+  (ADR 0009). Retired by ADR 0030: see **Queue**. _Avoid_: round, phase, stage.
+- **Queue** — how a rollout runs: tasks in parallel, each from the `main` of
+  its start, up to the parallel ceiling, held back only by dependencies or a
+  **Solo** task, never a shared file (ADR 0030). _Avoid_: wave (the old
+  grouping), batch (the session lane's).
+- **Solo** — a task in a Queue that runs with nothing else in flight: a
+  sweeping change every concurrent task would otherwise redo its work around
   (ADR 0030). _Avoid_: barrier, exclusive, wave of one.
-- **Integration** — the serial step between a task's approval and its merge,
-  one task at a time: rebase onto the latest `main` in its own worktree, an
-  implementer on the Top rung resolves any conflict, the full verifier runs
-  again, and a short re-review follows when the integrator wrote code or a
-  PR landed since the task's start shares a file with it. A task that cannot
-  be integrated is **set aside** (blocked, its dependants waiting) and the
-  queue runs on (ADR 0030). _Avoid_: update-branch (GitHub's merge-in, which
-  re-verifies nothing without CI), rebase (only its first step).
+- **Integration** — the serial step between a task's approval and its merge:
+  the latest `main` merged in, the verifier re-run and, when needed, a short
+  re-review (ADR 0030). _Avoid_: update-branch (GitHub's merge-in, which
+  re-verifies nothing without CI), rebase.
 - **Cursor** — the durable record of rollout progress, the single source of
-  truth for "where was I". Under a Queue (ADR 0030) it is not stored: it is
-  the rollout's task notes, a task marked done being a task merged. (Wave
-  rollouts kept `merged_through_wave: N` on the rollout note.)
+  truth for "where was I": in a Queue, the rollout's task notes, a task
+  marked done being a task merged (ADR 0030).
   _Avoid_: checkpoint, pointer, progress marker.
 - **Dependent closure** — the set of tasks transitively depending on a task
-  via `depends-on:` / `blocked-by:` (a body phrase counts only once confirmed
-  into frontmatter) — the blast radius that must move together if it's
-  deferred, and the tasks a set-aside task holds back in a Queue. _Avoid_: dependency tree, downstream.
+  via `depends-on:` / `blocked-by:` (schedule § 3) — the blast radius that
+  must move together if it's deferred, and the tasks a set-aside task holds
+  back in a Queue. _Avoid_: dependency tree, downstream.
 
 ## Task lifecycle (rollout lane)
 
 - **Landed** — work final on `main` (`status: done`, or a `review`/`merged`
   task whose PR has merged, awaiting confirmation). Never re-dispatched on
-  resume. Under a Queue a `review` task with an open PR is not landed: it
-  awaits Integration (ADR 0030).
+  resume.
   _Avoid_: finished, complete, shipped.
 - **Blocked** — the umbrella for a task that did not land: `blocked` (verifier
   never green), `plan-blocked` (plan never approved), or `review-blocked`
-  (open PR, review rejected). _Avoid_: failed, stuck, errored.
+  (open PR, review rejected). In a Queue a blocked task is **set aside**: its
+  slot frees, its dependants wait, and the queue runs on (ADR 0030).
+  _Avoid_: failed, stuck, errored.
 - **Input-gated block** — a block needing a human decision no agent can
   supply; the decision must be written into the note before re-dispatch.
   _Avoid_: manual block, human block.
@@ -337,7 +304,7 @@ _ADR 0030 is decided but not yet built: until 3.0.0 the engine still runs Waves.
   drift, hands off to the engine's resume — never merges or converges
   (ADR 0004). _Avoid_: orchestrator, controller, wrapper.
 - **Situational report** — the read-only output of `status`: cursor, per-task
-  state (running, integrating, queued, merged, set aside), blockers, drift flags, one recommended next action.
+  queue state (ADR 0030), blockers, drift flags, one recommended next action.
   _Avoid_: dashboard, summary, snapshot.
 - **Repair bridge** — the path by which a blocked task is fixed and re-landed
   while the engine keeps sole merge authority. _Avoid_: handoff, recovery.
@@ -350,28 +317,23 @@ _ADR 0030 is decided but not yet built: until 3.0.0 the engine still runs Waves.
 
 ## Model ladder
 
-_ADR 0029 is decided but not yet built: until 3.0.0 the engine still runs Tiers, and
-`max_tier:` still holds the Opus lock._
-
-- **Ladder** — the operator's ordered list of **Rungs**, bottom first, held in
-  one place outside any rollout. Absent, a built-in ladder applies (two
-  Opus rungs, never Fable). Changing models or efforts is an edit to it, never a release
-  (ADR 0029). _Avoid_: matrix, tier list, config (alone).
+- **Ladder** — the operator's ordered list of named **Rungs**, bottom first, in
+  one file outside any rollout; absent, the built-in ladder applies. Changing
+  models or efforts is an edit to it, never a release (ADR 0029). _Avoid_:
+  matrix, tier list, config (alone).
 - **Rung** — one step of the Ladder: a model plus the efforts its roles run
-  at (the code-writing roles, the plan judge, the master review). Two rungs
-  may share a model, so an effort step and a model step are the same move.
-  A task is on one rung at any moment; its judges run on it too. Replaces
-  **Tier** (ADR 0007), retired. _Avoid_: tier, model level, grade, model
-  (alone).
-- **Top rung** — the Ladder's last rung: the ceiling every task and every
-  Integration is capped at. Replaces **Top tier** and **Ceiling** (ADR 0024,
-  ADR 0016), retired. A task on it cannot climb. _Avoid_: top tier, ceiling,
-  max tier, default model.
-- **Starting rung** — the planning-time, predictive choice to start a hard
-  task above the bottom rung, from its shape alone. Replaces **Step-up**'s
-  `model: fable`; the only per-task position a task may hold (ADR 0029).
-  _Avoid_: escalation (that's run-time), upgrade, effort override.
+  at. A task is on one rung at any moment, and its judges run on it too
+  (ADR 0029). _Avoid_: tier, model level, grade, model (alone).
+- **Top rung** — the Ladder's last rung, the ceiling for every task and every
+  Integration (ADR 0029). _Avoid_: top tier, ceiling, max tier, default model.
+- **Starting rung** — the planning-time choice to start a hard task above the
+  bottom rung, from its shape alone (ADR 0029). _Avoid_: escalation (that's
+  run-time), upgrade, effort override.
 - **Escalation** — the run-time, evidence-driven climb of one rung, at most
   once per stage (plan, implement, review), at that stage's first sign of
   hardness. One-way and sticky, never past the Top rung (ADR 0006, ADR
   0029). _Avoid_: fallback, retry, promotion.
+- **Tier**, **Top tier**, **Ceiling**, **Step-up** — the (model + effort)
+  bundle a task ran on, the operator's cap on it and its planning-time
+  assignment (ADR 0007, 0016, 0024). Retired by ADR 0029: see **Rung**,
+  **Top rung** and **Starting rung**.

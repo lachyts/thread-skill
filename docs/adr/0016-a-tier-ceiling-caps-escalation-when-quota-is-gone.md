@@ -4,7 +4,7 @@ Date: 2026-09-17
 Status: accepted
 *(Amended by ADR 0024, 2026-09-26: a standing operator top tier is a second ceiling source, and
 under it a capped block is a wall, not a wait for quota.)*
-*(Amended by ADR 0029, 2026-09-30, proposed: the ceiling is the ladder's top rung; exhausted quota is an edit that removes a rung, and it reaches runs in flight.)*
+*(Amended by ADR 0029, proposed.)*
 
 ## Context
 

@@ -4,7 +4,7 @@ Date: 2026-08-12
 Status: accepted (supersedes the packaging conclusion of ADR 0003)
 *(Amended by ADR 0027, 2026-09-28: `split` and `gather` are retired into orient's reshuffle; the
 rollout verbs are schedule, execute, status and repair.)*
-*(Amended by ADR 0030, 2026-09-30, proposed: a rollout is a queue, not waves; the wave and `merged_through_wave` are retired.)*
+*(Amended by ADR 0030, proposed.)*
 
 ## Context
 
