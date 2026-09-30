@@ -19,7 +19,11 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
   - **ADR 0029 rewritten** at Lachy's ask ("a settings file for the effort step-up and the model tree; max isn't effective on Opus 5.5"). One `~/.config/thread/ladder.toml` of rungs (model plus efforts). Escalation climbs one rung per stage; a task may start on a higher rung (`rung: N`). It replaces the EFFORT matrix, ADR 0024's `top-tier` file and per-task `effort:`. Lachy's ladder is Opus high, then Opus xhigh, with no max.
 - **Orient (scoped) found protocol 4** (`codex/thread-rollout-redesign`, 36 ahead and 171 behind, idle since 09-23). Its ADRs 0019 and 0021 cover the same ground; 0021 climbs to max before changing model. Lachy chose to **build on master and retire P6**. Its standalone fixes moved into P12. P7 merged into P13.
 - **Spike p12-1 passed.** Three Workflow calls ran at once in one session, one of them in a worktree passed in args (`docs/spikes/2026-09-30-concurrent-workflow-calls.md`). ADR 0030 decision 4 is verified.
-- **PR #53** (`docs/adr-0029-0030-queue-and-ladder`): ADRs 0029 and 0030, CONTEXT.md (Queue, Solo, Integration, Ladder, Rung, Top rung, Starting rung; Tier, Top tier, Ceiling, Step-up and Wave retired) and the spike doc. Landed by this close.
+- **PR #53** (`docs/adr-0029-0030-queue-and-ladder`): ADRs 0029 and 0030, CONTEXT.md (Queue, Solo, Integration, Ladder, Rung, Top rung, Starting rung; Tier, Top tier, Ceiling, Step-up and Wave retired) and the spike doc. **HELD, not merged.**
+  - **Review round 1** (xhigh) found 15 gaps, all fixed in `a3ddd47` (plus `e2dadd9` for a refs-test citation).
+  - **Round 2** found 15 more, and 9 of them cite `a3ddd47` itself. The ledger fired STOP (regressions outnumber originals), so close held the PR.
+  - **Round 2's findings** are in `docs/reviews/2026-09-30-e2dadd9-b5741c.md` at commit `f72463a`; the deletion commit removed it from the tree.
+  - **Lesson:** round 1's fixes turned the ADRs into implementation specs, and every added detail grew new edges.
 - **Parked until the queue lands:** `[[chorus-rollout-2026-09-30]]` (53 tasks, all stamped `effort: high`) and `[[giflab-rollout-2026-09-23]]` (wave 1's PRs #111–#114 at `review` since 09-23).
 
 **2026-09-29/30: 2.11.0 is released and live. Agents now land their own work (ADR 0028, P11). Nothing is running.**
@@ -841,13 +845,22 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**Now (from 2026-09-30, evening): build the queue.**
-1. **Land the docs.** PR #53 (ADRs 0029 and 0030, CONTEXT, spike) is landed by this close's own-branch loop; check it merged.
+**Now (from 2026-09-30, late evening): settle PR #53, then build the queue.**
+1. **PR #53 is held** (review-ledger STOP at round 2).
+   - **Read first:** round 2's 15 findings, `git show f72463a:docs/reviews/2026-09-30-e2dadd9-b5741c.md`.
+   - **Revert to the root, don't patch a third time.** Pull `a3ddd47`'s implementation-level detail out of the ADRs: slots, the Solo drain, stamp names, lease and atomic merge, pinned trees, retry budgets. Keep the ADRs at decision level and put that detail into the P12/P13 task specs, where the plan-gates own it.
+   - **Lachy decides first:**
+     - (#9) whether the Opus lock can fail open to fable on a machine with no ladder file; the alternative is schedule stamping a ladder snapshot on the synced rollout note;
+     - (#6) what an exhausted-quota edit means for effort;
+     - (#8) how a legacy `model: fable` maps to a rung;
+     - (#3) the retry budget at the top rung;
+     - (#10) an atomic merge onto an unmoved base, against ADR 0025.
+   - **Then** one `/fresh-review` round and the landing (`land.sh --own-branch`, `--queue` after a clean round).
 2. **Schedule P12.** From a session in this repo on a clean `master`, run a Steer-only `/thread:orient Thread Skill`. It schedules P12's wave-shaped tasks (p12-2 to p12-12) with `--tasks`; then `/thread:execute`. They run on the old wave engine, which serialises them on `wave-execute.workflow.js` and `execute/SKILL.md`; that's expected.
 3. **Then:** p12-13 (the GifLab run on the queue, session lane), P13, and the 3.0.0 release (p13-4), which unparks Chorus.
-4. **The p11-7 slot** (the daily lander) still stands as the project's next action; the queue build is the higher-value proposal against it.
+4. **The next-action slot** still names p11-7 (the daily lander): close only overwrites it with a concrete next task, and this thread's next move is a phase. The queue build is the recommendation; p11-7 is next after it.
 
-**Now (from 2026-09-30): 2.11.0 is live: close and handoff land their own work (ADR 0028). Nothing is running, no handoff is pending, and both checkouts are on `master`.**
+**Superseded (2026-09-30 evening) by the block above. Its Next list is kept for history; merge-wave-no-autostash, schedule-owns-one-live-rollout-per-repo and rewave-a-blocked-task were merged into P12 or dropped.** ~~Now (from 2026-09-30): 2.11.0 is live: close and handoff land their own work (ADR 0028). Nothing is running, no handoff is pending, and both checkouts are on `master`.~~
 - **Next:** [[thread-skill-p11-7-the-daily-lander]], the last structural piece of P11. Build it as a session (launchd plus a live headless probe), and design it to catch up on wake.
 - **Then, any order:** [[thread-skill-p11-8-agents-md-landing-review]] (show Lachy the wording first); [[thread-skill-merge-wave-no-autostash]] and [[thread-skill-land-pr-body-names-its-caller]] (small, wave-shaped); the ADR 0027 follow-ups ([[thread-skill-schedule-owns-one-live-rollout-per-repo]], [[thread-skill-one-vault-grammar-for-reconcile-and-reshuffle]]); [[thread-skill-p4-5-trim-descriptions-700-hard-cap]]; [[thread-skill-rewave-a-blocked-task-within-its-rollout]]; phase 9's p9-2 and p9-3.
 - **Still owed:** the fresh-review of workspaces `29ca886`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
@@ -1005,7 +1018,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
-- 2026-09-30 (evening close): consumed the Chorus-orient handoff. Grilled ADR 0030 (queue, integration, lead-run merge queue, Solo, order, cursor, soft pause, migrate and delete waves) and rewrote ADR 0029 as the operator's ladder file. A scoped orient phased the build as P12 and P13 and retired P6 (protocol 4) and P7. Spike p12-1 proved concurrent Workflow calls. PR #53. My slip: during the spike I typed a fake completion notification and flagged it at once. The write-up uses only real results.
+- 2026-09-30 (evening close): PR #53 held after review round 2 (ledger STOP, 9 of 15 findings cite round 1's fixes). Before that: consumed the Chorus-orient handoff. Grilled ADR 0030 (queue, integration, lead-run merge queue, Solo, order, cursor, soft pause, migrate and delete waves) and rewrote ADR 0029 as the operator's ladder file. A scoped orient phased the build as P12 and P13 and retired P6 (protocol 4) and P7. Spike p12-1 proved concurrent Workflow calls. PR #53. My slip: during the spike I typed a fake completion notification and flagged it at once. The write-up uses only real results.
 - 2026-09-29/30 (close): grilled landing with Lachy → ADR 0028 (agents land their own work; landing register), amended to queue-and-finish after p11-3's waiting design didn't converge. Orient-reshuffled it into P11; rollout `thread-skill-rollout-2026-09-29` merged #43, #44, #46–#49 in 8h 17m. Released 2.11.0 (#50), tagged. Seeded the landing register (p11-2). Memories: admin happens autonomously; laptop sleeps overnight. First close to land its own close-out via `land.sh`.
 - 2026-09-28 (late afternoon close): consumed the p10-4-p9-4-rollout handoff. Scheduled and ran `[[thread-skill-rollout-2026-09-28]]` (p10-4, p9-4, reconcile-apply-binds joined): #37, #38, #39 merged in 1h 31m. p10-4 plan-blocked in wave 1 and was re-waved behind p9-4 (Lachy's call). Phase 10 closed. Released 2.10.0 (#40), tagged. Filed the re-wave follow-up. Handoff doc deleted.
 - 2026-09-28 (evening close): grilled ADR 0027 with Lachy (orient is the one shaping verb; split and gather retired), built it (#32), three clean-room review rounds with a ledger stop and a revert to the root, full eval suite run and recorded, released 2.9.0 (#33), landed the P10 session's close-out (#34), pushed workspaces and ~/.agents, cleaned the merged worktree and branches. Follow-ups filed: schedule owns one-live-rollout-per-repo; one vault grammar.
