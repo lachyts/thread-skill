@@ -10,6 +10,14 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the wave roll
 
 ## Where we are
 
+**2026-09-30 (night): waves are being retired. ADR 0030 (a rollout is a queue) and ADR 0029 (escalation climbs the operator's ladder) are decided and slimmed to decision level in PR #53, which is landing with no further review round. P12 and P13 hold the build. Nothing is running.**
+- **Two grills.** The evening grill (from the Chorus orient and Lachy's "can't we just run tasks in parallel in worktrees and merge after?") wrote both ADRs. The night's `/thread:orient` reshuffle, with grill-with-docs, answered review round 2 and then round 3's nine design calls. The ADRs hold the decisions; the P12 and P13 task notes hold the mechanics.
+- **The night's calls** (all in the ADRs): Integration merges `main` in and never force-pushes; the lead runs a clean Integration itself and a Workflow call only for trouble; a rejected task releases the Integration lane; the verifier is skipped only when `main` hasn't moved; a set-aside task resumes where it stopped. The built-in ladder names no model above Opus, rungs have names, and the file is read at the start of each Workflow call.
+- **Fable research** (2026-09-30, Anthropic docs plus a web sweep, several sources vendor-published): since Opus 5.5 it ties or trails on most published coding results at 2.5x the token price, and nothing has measured it on these tasks. The ladder stays two Opus rungs; [[ab-fable-vs-opus-planning]] (after p13-2) replays hard tasks blind, and a win is one line in the ladder file.
+- **PR #53's reviews:** round 1 (15 findings) fixed in `a3ddd47`; round 2 (15, 9 of them regressions of round 1) tripped the ledger STOP; round 2 answered at decision level in `5d4404e`; round 3 ran `simplify` (28 findings, `ef71896`), which led to the slimming. **Lesson:** answer a review at the document's altitude; a finding about mechanics moves the mechanics out of the ADR.
+- **Protocol 4** (`codex/thread-rollout-redesign`) is retired unlanded; its standalone fixes are in P12.
+- **Parked until the queue lands:** `[[chorus-rollout-2026-09-30]]` (53 tasks) and `[[giflab-rollout-2026-09-23]]` (PRs #111–#114, `UNSTABLE`, a week stale).
+
 **2026-09-29/30: 2.11.0 is released and live. Agents now land their own work (ADR 0028, P11). Nothing is running.**
 - **Grill → ADR 0028** (#42, amended #45): landing (push, PR, review, fixes, CI retries, merge, cleanup) is the agents' job. Close lands its close-out and the session's own branch (reviewed first); handoff lands its doc; one estate-wide **landing register** (a deny-list) gates every agent push, rollouts included. Amended mid-rollout to **queue and finish**: commit on the default branch, push that commit to a `close/…` branch, queue auto-merge with a merge commit, never wait. Waiting needed a detached waiter whose lock and race findings grew every review round.
 - **Rollout** `[[thread-skill-rollout-2026-09-29]]` (archived, § Completion log): 4 waves, 8h 17m, all on Opus. #43 register reader, #44 register gates rollouts, #46 `land.sh` and close's close-out landing (4 dispatches; the 4th ran with `max_plan_rounds: 6`), #47 stranded commits reported, #48 handoff lands its doc, #49 close lands its own branch (started at 6 plan rounds, converged in 4).
@@ -455,6 +463,12 @@ scheduled 2026-07-15.
 
 ## What's been built / decided
 
+- **ADR 0030 (proposed, PR #53, build = P12): a rollout is a queue that integrates at merge.** Supersedes protocol 4's 0019.
+- **ADR 0029 (proposed, PR #53, build = P13): escalation climbs the operator's ladder.** Supersedes ADR 0024's `top-tier` file and protocol 4's 0021.
+- **Roadmap (orient scoped reshuffle, 2026-09-30):**
+  - **New phases:** [[thread-skill-p12-a-rollout-is-a-queue]] (13 tasks) and [[thread-skill-p13-the-ladder]] (4 tasks, ending with the 3.0.0 release and the E2E).
+  - **P6 and P7 retired:** p6-2, p6-3 and p6-5 renamed into P12; p6-4, p6-6, p6-7, p6-8, p7-1, p7-2 and p7-3 merged into new tasks; p6-1, p6-9 and p7-4 dropped.
+  - **Loose tasks:** p8-3 and `rewave-a-blocked-task` dropped; `merge-wave-no-autostash` and `schedule-owns-one-live-rollout-per-repo` merged.
 - **ADR 0028 (2026-09-29, #42/#45, 2.11.0): agents land their own work.** `skills/_shared/scripts/land.sh` is the one landing route (register → no origin → swept → unprotected push → protected `close/…` branch + `landing` PR + queued merge-commit auto-merge; never waits). `landing-register.py check` is the only permission to push (exit 0). Close's own-branch loop reviews with `/fresh-review` at the xhigh floor, has no round cap, and stops only on the ledger's regression stop, the same check failing twice at `max`, or a decision for Lachy (`--hold`).
 - **2.10.0 (2026-09-28, #37–#40):** close marks a task done without asking only when this session did its work, the work is on the default branch (or it isn't code), and its Verify line ran green this session; otherwise it asks (ADR 0026 § 4). `thread:handoff` is the only handoff-doc writer (ADR 0017 amended). `next` can recommend `/compact` in Claude Code but never runs it. `reconcile-project.py --apply --only <file>` writes only the reviewed items and lists newer ones under `New since review`.
 - **ADR 0027 (2026-09-28, PR #32, 2.9.0): orient is the one shaping verb.** `split` and `gather` are deleted (no alias stubs); their machinery is `skills/orient/reshuffle.md`. Orient asks Reshuffle / Steer only / Look only; in flight, possibly-landed and thread captures are frozen; a live rollout is superseded only when paused with all unlanded tasks open; the pass ends with the execute offer.
@@ -518,9 +532,9 @@ scheduled 2026-07-15.
 ## Open questions / decisions pending
 
 - **The daily lander (p11-7) doesn't exist yet.** Until it does, a queued merge that fails (red CI, a PR left behind master, `queued: needs merge`) waits for the next close in that repo. It has to catch up on wake: the laptop is often off overnight until the Mac mini arrives.
-- **Loose ends from P11:** [[thread-skill-land-pr-body-names-its-caller]] (a handoff's landing PR body says `thread:close`), [[thread-skill-merge-wave-no-autostash]] (merge-wave's checkout fast-forward lacks `--no-autostash`, the bug #46 fixed in `land.sh`).
+- **Loose end from P11:** [[thread-skill-land-pr-body-names-its-caller]] (a handoff's landing PR body says `thread:close`). The autostash fix is now in [[thread-skill-p12-7-merge-one-integrated-pr]].
 - **AGENTS.md still says reviews never block** (p11-8): landing's review runs inline. Lachy's file, so the wording needs his approval.
-- **The smart-halt treats file overlap as dependency.** A blocked task stops every later wave that shares a file with it, even with no `depends-on:` between them, and the only verb that moves a task (`reconcile-wave.py defer`) drops it from the rollout. Filed 2026-09-28: [[thread-skill-rewave-a-blocked-task-within-its-rollout]].
+- **Open from ADR 0029:** how a block at the top rung is triaged. This is p7-1's third question, carried into [[thread-skill-p13-1-ladder-file]].
 - **The fresh-review of workspaces `29ca886` (the hook deletion) hasn't run.** The engine binds to the session's cwd, and this session was in thread-skill. It needs a session launched in `~/repos/workspaces`.
 - **The one-live-rollout rule is orient-only** (ADR 0027): `/thread:schedule` run directly can still write a second rollout on a repo or `--regenerate` over a running one. [[thread-skill-schedule-owns-one-live-rollout-per-repo]] moves it into schedule's gate; its note lists why round 1's attempt was reverted.
 - **Halted vs running is not locally readable.** `reconcile-wave.py status` shows `paused` and task statuses but not whether a lead is still driving, which is why orient supersedes only a `paused` rollout. A liveness signal would widen that.
@@ -601,6 +615,11 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **One session can hold several Workflow calls in flight:** `docs/spikes/2026-09-30-concurrent-workflow-calls.md`.
+- **Dependencies are frontmatter only** (`skills/schedule/SKILL.md` § 3): a body link such as "Carries [[…]]" never creates one.
+- **`land.sh` accepts only THREAD.md and `docs/handoffs/` paths.** ADRs and other docs land on a feature branch with a PR, reviewed by close's own-branch loop.
+- **A vault-wide `/usr/bin/grep -rlF` for backlinks takes more than 2 minutes** (the vault is large). Run it in the background.
+- **Protocol 4's branch is not landed and won't be as a whole** (retired 2026-09-30). Mine it for ideas, never merge it.
 - **Design-heavy tasks need a bigger plan budget** (2026-09-29). With 3 plan rounds, p11-3 plan-blocked on breadth three times; with `max_plan_rounds: 6` it converged, and p11-4, started at 6, converged in 4. Stamp `max_plan_rounds: 6` on a deep cross-cutting task up front. When each round instead finds a new race in machinery a requirement forced, reshape the requirement (estate METHOD, the plan-gate move).
 - **`merge-wave.sh` now leaves a merged PR's remote branch "for the reaper"**, and the repo's delete-branch-on-merge removes it. A close-out landed through `land.sh` shows as `on master, N commit(s) not on origin/master — queued in close/…` until GitHub merges it; that's normal, not stranded.
 - **`claude plugin update` reads the live checkout** (2026-09-28). The marketplace is a directory source at `~/repos/tools/thread-skill`, so a release merged from the rollout clone reports "already at the latest version" until that checkout is fast-forwarded to the release commit. Fast-forward it first, then update both profiles.
@@ -812,11 +831,12 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**Now (from 2026-09-30): 2.11.0 is live: close and handoff land their own work (ADR 0028). Nothing is running, no handoff is pending, and both checkouts are on `master`.**
-- **Next:** [[thread-skill-p11-7-the-daily-lander]], the last structural piece of P11. Build it as a session (launchd plus a live headless probe), and design it to catch up on wake.
-- **Then, any order:** [[thread-skill-p11-8-agents-md-landing-review]] (show Lachy the wording first); [[thread-skill-merge-wave-no-autostash]] and [[thread-skill-land-pr-body-names-its-caller]] (small, wave-shaped); the ADR 0027 follow-ups ([[thread-skill-schedule-owns-one-live-rollout-per-repo]], [[thread-skill-one-vault-grammar-for-reconcile-and-reshuffle]]); [[thread-skill-p4-5-trim-descriptions-700-hard-cap]]; [[thread-skill-rewave-a-blocked-task-within-its-rollout]]; phase 9's p9-2 and p9-3.
-- **Still owed:** the fresh-review of workspaces `29ca886`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
-- **Close-outs now land themselves** (queued `landing` PR, auto-merge). Run a thread-skill rollout from this clone on a clean `master`.
+**Now (from 2026-09-30, night): land PR #53, then build the queue.**
+1. **PR #53** carries the slimmed ADRs 0029 and 0030, CONTEXT.md and this file. It merges on green CI with no further review round: the ledger stopped at round 2, round 3 ran `simplify`, and Lachy chose grill, slim, merge (2026-09-30).
+2. **Schedule P12.** From a session in this repo on a clean `master`, run a Steer-only `/thread:orient Thread Skill`. It schedules P12's wave-shaped tasks (p12-2 to p12-12, p12-14 and p12-15) with `--tasks`; then `/thread:execute`. They run on the old wave engine, which serialises them on `wave-execute.workflow.js` and `execute/SKILL.md`; that's expected.
+3. **Then:** p12-13 (the GifLab run on the queue, session lane), P13, and the 3.0.0 release (p13-4), which unparks Chorus.
+4. **The next-action slot** still names p11-7 (the daily lander): close only overwrites it with a concrete next task, and this thread's next move is a phase. The queue build is the recommendation; p11-7 is next after it.
+5. **Still owed:** the fresh-review of workspaces `29ca886`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`. Close-outs land themselves (queued `landing` PR, auto-merge).
 
 **Superseded 2026-09-30:**
 **Now (from 2026-09-28, late afternoon): 2.10.0 is live. Nothing is running, no handoff is pending, and both checkouts are on `master` (after this close-out's PR merges, fast-forward the clone).**
@@ -970,6 +990,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-09-30 (evening close): PR #53 held after review round 2 (ledger STOP, 9 of 15 findings cite round 1's fixes). Before that: consumed the Chorus-orient handoff. Grilled ADR 0030 (queue, integration, lead-run merge queue, Solo, order, cursor, soft pause, migrate and delete waves) and rewrote ADR 0029 as the operator's ladder file. A scoped orient phased the build as P12 and P13 and retired P6 (protocol 4) and P7. Spike p12-1 proved concurrent Workflow calls. PR #53. My slip: during the spike I typed a fake completion notification and flagged it at once. The write-up uses only real results.
 - 2026-09-29/30 (close): grilled landing with Lachy → ADR 0028 (agents land their own work; landing register), amended to queue-and-finish after p11-3's waiting design didn't converge. Orient-reshuffled it into P11; rollout `thread-skill-rollout-2026-09-29` merged #43, #44, #46–#49 in 8h 17m. Released 2.11.0 (#50), tagged. Seeded the landing register (p11-2). Memories: admin happens autonomously; laptop sleeps overnight. First close to land its own close-out via `land.sh`.
 - 2026-09-28 (late afternoon close): consumed the p10-4-p9-4-rollout handoff. Scheduled and ran `[[thread-skill-rollout-2026-09-28]]` (p10-4, p9-4, reconcile-apply-binds joined): #37, #38, #39 merged in 1h 31m. p10-4 plan-blocked in wave 1 and was re-waved behind p9-4 (Lachy's call). Phase 10 closed. Released 2.10.0 (#40), tagged. Filed the re-wave follow-up. Handoff doc deleted.
 - 2026-09-28 (evening close): grilled ADR 0027 with Lachy (orient is the one shaping verb; split and gather retired), built it (#32), three clean-room review rounds with a ledger stop and a revert to the root, full eval suite run and recorded, released 2.9.0 (#33), landed the P10 session's close-out (#34), pushed workspaces and ~/.agents, cleaned the merged worktree and branches. Follow-ups filed: schedule owns one-live-rollout-per-repo; one vault grammar.

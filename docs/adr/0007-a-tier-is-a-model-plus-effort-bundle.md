@@ -1,5 +1,7 @@
 # A tier is a model + effort bundle, not two knobs
 
+*(Amended by ADR 0029, proposed.)*
+
 Reasoning effort joins the tier ladder instead of becoming an independent config axis. Each tier is a
 (model, per-role effort) bundle with the matrix fixed in the engine: `opus` runs planner/implementer
 at **medium** and judges at **high**; `fable` runs planner/implementer at **high**, judges at

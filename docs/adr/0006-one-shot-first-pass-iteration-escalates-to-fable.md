@@ -1,5 +1,7 @@
 # One-shot first pass; iteration escalates to Fable
 
+*(Amended by ADR 0029, proposed.)*
+
 An `opus` task gets exactly one un-iterated pass at each convergence layer — one plan, one
 implementation with a single verifier run, one judged PR round. The first evidence of hardness
 anywhere (a plan-judge `changes`, a first-pass planner/investigator block, a red one-shot verifier
