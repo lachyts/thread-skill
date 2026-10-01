@@ -24,6 +24,8 @@ import fs from 'node:fs'
 import vm from 'node:vm'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import crypto from 'node:crypto'
+import { runTask } from '../../../tests/lib/engine.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const src = fs.readFileSync(path.join(here, '..', 'task.workflow.js'), 'utf8')
@@ -32,7 +34,7 @@ const marker = '// ---- Orchestration'
 const idx = src.indexOf(marker)
 if (idx === -1) { console.error('FAIL - orchestration marker not found'); process.exit(1) }
 let head = src.slice(0, idx).replace('export const meta', 'const meta')
-head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort, tierCap, clampTier, taskModel, judgeFor, terminalTier, escalate, effortTier, readOnlyPrompt, normaliseTier, roundBudgetDiagnosis };\n'
+head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort, tierCap, clampTier, taskModel, judgeFor, terminalTier, escalate, effortTier, readOnlyPrompt, normaliseTier, roundBudgetDiagnosis, taskTreeSetup };\n'
 
 // `agent` and `log` are Workflow globals the engine expects at run time. The layer functions resolve them
 // against the sandbox global at CALL time, so the transient-death tests below swap `ctx.agent` per case to
@@ -875,6 +877,59 @@ ok(roRes && /transient infrastructure/i.test(roRes.blockerDiagnosis), 'converge:
 const codeOnly = src.replace(/\/\/[^\n]*/g, '')
 ok(!/\bDate\s*\.\s*now\b|\bnew\s+Date\b/.test(codeOnly), 'engine: no clock reads — Date is unavailable in the Workflow sandbox')
 ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precomputed progress line (absent ⇒ byte-identical logs)')
+
+// ---- Byte pins (p12-6): task mode renders exactly what it did before Integration existed ----------
+// Recorded on 3c396eb (the p12-5 engine) BEFORE the p12-6 edit. p12-6 factored taskTreeSetup's self-heal
+// and lock lines out (treeSelfHeal/treeLockLines, shared with branchTreeSetup), gave reviserPrompt a 7th
+// `seeded` argument and moved the review loop's revise step into reviseRound: none of that may move a byte
+// of an unseeded, mode-less call. Re-pin only on a deliberate prompt change, never to make a refactor pass.
+{
+  const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
+  const variants = []
+  for (const scope of ['cross-cutting', 'read-only']) for (const refresh of [true, false]) {
+    for (const envBootstrap of [undefined, 'poetry install']) for (const defaultBranch of [undefined, 'master']) {
+      const a = { repoPath: '/repo', ...(envBootstrap ? { envBootstrap } : {}), ...(defaultBranch ? { defaultBranch } : {}) }
+      variants.push(T.taskTreeSetup(a, { slug: 'proj-fix-x', scope }, refresh))
+    }
+  }
+  ok(variants.length === 16 && sha(variants.join('\n\0\n')) === '9ebeb0bde77b5741b7461f56cc3abe12e3ead5f12a4f5bb3c5cd1f56e66557f5',
+    'byte pin: taskTreeSetup, 16 variants (scope × refresh × envBootstrap × defaultBranch)')
+  const tR = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
+  const iR = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
+  const aR = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
+  const h2 = [{ round: 1, feedback: ['a'] }, { round: 2, feedback: ['b'] }]
+  ok(sha(T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')) === 'd60f35ecce95011ed906c3e2fba5f7fe049c176d929893cee9a1b3281c0a455a',
+    'byte pin: unseeded reviserPrompt, round 2')
+  ok(sha(T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')) === '8ddf40aee481dfd36a70716b0e153ef87bccc897373826046ad70a6cb7e1268e',
+    'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back)')
+  ok(T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN', null) === T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN'),
+    'byte pin: a null seeded argument renders the unseeded reviser')
+  // Every label, prompt and row of three whole task-mode calls (plan-gated opus with a plan revise and two
+  // review rounds; capped on master with env bootstrap and a baseline; plan-gated read-only).
+  const PLAN_TEXT = 'Planned on: abc\n### Files to modify\n- x\n### Gated inputs\nNone'
+  const mkT = (slug, over = {}) => ({ slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: false, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, model: 'fable', ...over })
+  const mkA = (task, over = {}) => ({ rolloutSlug: 'proj-rollout-2026-10-01', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', task, ...over })
+  const scripted = async (prompt, opts) => {
+    const label = opts.label
+    const kind = label.split(':')[0]
+    const s = label.split(':')[1].split(/[ @]/)[0]
+    if (kind === 'plan' || kind === 'plan-revise') return { ready: true, blocked: false, blockerCause: '', plan: PLAN_TEXT }
+    if (kind === 'plan-judge') return { verdict: label.endsWith(' r1') ? 'changes' : 'approve', feedback: label.endsWith(' r1') ? ['fix ' + label] : [] }
+    if (kind === 'review') return { verdict: /r[12]$/.test(label) ? 'changes' : 'approve', feedback: /r[12]$/.test(label) ? ['fix ' + label] : [] }
+    return { verified: true, blocked: false, escalate: false, prUrl: kind === 'investigate' ? '' : `https://github.com/o/r/pull/${s}`, branch: kind === 'investigate' ? '' : `audit-fix/${s}`, worktreePath: `/repo/.claude/worktrees/${s}`, blockerDiagnosis: '', summary: `${label} done` }
+  }
+  const parts = []
+  for (const args of [
+    mkA(mkT('proj-fix-p', { model: 'opus', planGate: true })),
+    mkA(mkT('proj-fix-a'), { maxTier: 'opus', defaultBranch: 'master', envBootstrap: 'poetry install', knownBaselineFailures: ['t — env'] }),
+    mkA(mkT('proj-audit-x', { scope: 'read-only', planGate: true })),
+  ]) {
+    const r = await runTask(args, scripted)
+    parts.push(JSON.stringify({ calls: r.calls, result: r.result, err: r.error && String(r.error) }))
+  }
+  ok(sha(parts.join('\n')) === '087856db0e8d0ef228050dce344abaa0dc2578eb8bbf9fa10fdc97cff3bd5334',
+    'byte pin: three whole task-mode calls — every label, prompt and row unchanged')
+}
 
 console.log()
 console.log(fail === 0 ? 'ALL PASS' : 'SOME FAILED')

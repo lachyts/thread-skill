@@ -2032,8 +2032,8 @@ Before you push, run these preflight checks:
 - Dead code: a helper you add has a PRODUCTION caller, not just tests.
 - No force: push plainly. A rejected push is a STOP (return blocked) — never force-push, never rewrite the branch.`.trim()
 
-function landedBlock(a, I) {
-  const wt = worktreeDir(a.repoPath, a.task.slug)
+function landedBlock(a, task, I) {
+  const wt = worktreeDir(a.repoPath, task.slug)
   if (!I.landed.length) {
     return `No landed PRs were passed (origin/${defaultBranch(a)} may have moved by direct push): read
 \`${GIT_ENV_SCRUB} git -C "${wt}" log --first-parent ${I.taskBase}..origin/${defaultBranch(a)}\` instead, after the merge step's fetch.`
@@ -2073,7 +2073,7 @@ ${I.plan || '(no plan: the task was not plan-gated — the brief is the contract
 ---${history}
 
 PRs that landed on origin/${def} since the task's base ${I.taskBase}:
-${landedBlock(a, I)}
+${landedBlock(a, task, I)}
 
 Step 1 — the merge step. Run exactly, as ONE Bash command (exit 3 is a STOP):
 ${integrationMergeStep(a, task, I).split('\n').map((l) => '  ' + l).join('\n')}
@@ -2240,11 +2240,12 @@ async function integrate(task, a, trace) {
   const cap = tierCap(a)
   const R = I.reviewRoundsUsed
   const lm = I.leadMerge
-  const dispatch = async (role, label, prompt, schema) => {
-    const r = await runAgent(prompt, { label, phase: 'Integration', schema, model: cap, effort: INTEGRATION_EFFORT })
+  const opts = (label, schema) => ({ label, phase: 'Integration', schema, model: cap, effort: INTEGRATION_EFFORT })
+  const record = (role, label, r) => {
     trace.agents.push({ role, label, model: cap, effort: INTEGRATION_EFFORT, finishedAt: !r.__dead && typeof r.finishedAt === 'string' ? r.finishedAt : '' })
-    return r
   }
+  const ilabel = `integrate:${task.slug}`
+  const jlabel = `integration-review:${task.slug} r${R + 1}`
   let j
   if (lm && lm.verified && I.trouble.length === 1 && I.trouble[0] === 'shared-file' && lm.headSha === lm.mergeCommit && lm.baseSha !== I.taskBase) {
     // P1: the lead merged cleanly and its verifier went green — no top-rung agent only to re-run it.
@@ -2252,13 +2253,15 @@ async function integrate(task, a, trace) {
     j = { mergeCommit: lm.mergeCommit, headSha: lm.headSha, baseSha: lm.baseSha, triggers: ['shared-file'], path: trace.path }
   } else {
     trace.path = 'integrator'
-    const r = await dispatch('integrator', `integrate:${task.slug}`, integratorPrompt(task, a, I), INTEGRATE_RESULT)
+    const r = await runAgent(integratorPrompt(task, a, I), opts(ilabel, INTEGRATE_RESULT))
+    record('integrator', ilabel, r)
     const bad = integrationCheck(I, r, task.approvedGates)
     if (bad) return { outcome: 'set-aside', reason: bad.reason, gates: bad.gates || [] }
     j = { mergeCommit: r.mergeState === 'up-to-date' ? '' : r.mergeCommit, headSha: r.headSha, baseSha: r.baseSha, triggers: integrationTriggers(I, r), path: trace.path }
     if (!j.triggers.length) return { outcome: 'integrated', ...j, reReviewed: false }
   }
-  const v = await dispatch('judge', `integration-review:${task.slug} r${R + 1}`, integrationReviewPrompt(task, a, I, j), INTEGRATION_REVIEW)
+  const v = await runAgent(integrationReviewPrompt(task, a, I, j), opts(jlabel, INTEGRATION_REVIEW))
+  record('judge', jlabel, v)
   if (v.__dead) return { outcome: 'set-aside', reason: TRANSIENT_DIAGNOSIS, ...j, reReviewed: false }
   const feedback = (v.feedback || []).map(flattenLine).filter((f) => f)
   if (v.unreadable) return { outcome: 'set-aside', reason: `judge could not read the integration — ${feedback[0] || 'no reason given'}`, ...j, reReviewed: true, feedback }
