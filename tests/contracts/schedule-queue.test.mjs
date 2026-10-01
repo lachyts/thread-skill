@@ -16,7 +16,8 @@ const real = {
   schedule: read('skills/schedule/SKILL.md'),
   template: read('skills/schedule/rollout-template.md'),
   orient: read('skills/orient/SKILL.md'),
-  manifests: [read('.claude-plugin/plugin.json'), read('.claude-plugin/marketplace.json')],
+  manifests: [read('.claude-plugin/plugin.json'), read('.claude-plugin/marketplace.json'),
+    read('README.md').split('\n').find((l) => l.startsWith('| `/thread:schedule`')) ?? ''],
 }
 const others = walk('skills/schedule').filter((f) => !/\/(SKILL|rollout-template)\.md$/.test(f)).map(read)
 
@@ -91,9 +92,10 @@ function checkSchedule({ schedule, template, orient, manifests = [], extra = [] 
   const d = description(schedule)
   if (!d.includes('queue') || !d.includes('`protocol_version: 5`') || /stamps wave/i.test(d)) fails.push('description')
 
-  // The plugin manifests describe schedule as ordering a queue, not clustering waves (execute's
-  // per-wave auto-merge and the wave-shaped term are p12-12's to rename).
-  if (manifests.some((m) => /parallel-safe waves|clusters tasks into/i.test(m))) fails.push('manifests')
+  // The plugin manifests and README's schedule row describe schedule as ordering a queue, not
+  // clustering or computing waves (execute's per-wave auto-merge and the wave-shaped term are p12-12's).
+  if (manifests.some((m) => /parallel-safe waves|clusters tasks into|wave structure/i.test(m)) ||
+    !(manifests[2] ?? '').includes('`protocol_version: 5`')) fails.push('manifests')
 
   // Orient leaves the one-per-repo rule to schedule § 0: it reads no rollout state itself.
   const o6 = s(orient, /^### 6\./)
@@ -201,11 +203,15 @@ test('control: a description that drops the queue fails', () => {
   only({ schedule: real.schedule.replace(d, d.replaceAll('queue', 'plan')) }, ['description'], 'no queue')
 })
 
-test('control: a manifest that still has schedule cluster parallel-safe waves fails', () => {
+test('control: a manifest or README row that still has schedule build waves fails', () => {
   only({ manifests: [real.manifests[0].replace('orders tasks into a queue', 'clusters tasks into parallel-safe waves'),
-    real.manifests[1]] }, ['manifests'], 'plugin.json')
-  only({ manifests: [real.manifests[0], real.manifests[1].replace('a queue of tasks', 'parallel-safe waves')] },
-    ['manifests'], 'marketplace.json')
+    ...real.manifests.slice(1)] }, ['manifests'], 'plugin.json')
+  only({ manifests: [real.manifests[0], real.manifests[1].replace('a queue of tasks', 'parallel-safe waves'),
+    real.manifests[2]] }, ['manifests'], 'marketplace.json')
+  only({ manifests: [real.manifests[0], real.manifests[1], real.manifests[2].replace('Orders the backlog into a queue',
+    'Computes wave structure from file-overlap')] }, ['manifests'], 'README wave structure')
+  only({ manifests: [...real.manifests.slice(0, 2), real.manifests[2].replace('`protocol_version: 5`', '`protocol_version: 3`')] },
+    ['manifests'], 'README protocol 3')
 })
 
 test('control: orient reading rollout state itself fails', () => {
