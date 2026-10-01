@@ -121,10 +121,10 @@ function checkSupersede(raw) {
   if (!coll.some((c) => /\bskip\b/i.test(c.text) && /\bcontinue\b/i.test(c.text)) ||
     coll.some((c) => /\b(stop|halt|abort)\b/i.test(c.text))) fails.push('collision')
 
-  // overwrite-excluded: the same-day **Overwrite** path (same slug) stamps and moves nothing, or the
-  // vault ends up with two same-named notes and the filename-based wikilinks break.
-  if (!cs.some((c) => c.text.includes('**Overwrite**') && /stamp nothing/i.test(c.text) &&
-    /move nothing/i.test(c.text))) fails.push('overwrite-excluded')
+  // no-overwrite-path: step 6 never offers **Overwrite** (an unfinished same-day note is § 0's to supersede
+  // or refuse, and a finished one's slug is never reused), so no clause may describe an Overwrite path: a
+  // clause naming **Overwrite** must say it never happens.
+  if (cs.some((c) => c.text.includes('**Overwrite**') && !/\bnever\b/i.test(c.text))) fails.push('no-overwrite-path')
   return fails
 }
 
@@ -153,8 +153,8 @@ test('schedule, execute and the rollout template agree on the rollout archive fo
 const GOOD = [
   `${LABEL} When \`--regenerate\` replaces an earlier rollout, stamp \`supersedes: "[[<prior>]]"\` in this note's ` +
     'frontmatter, and close out the prior rollout, stamps first and then the move.',
-  'None of this applies on the same-day **Overwrite** path: when the prior rollout is the note being overwritten ' +
-    '(same slug), stamp nothing and move nothing.',
+  'This note is always a new file (step 6 never offers **Overwrite**), so the prior note is never the note this ' +
+    'run wrote.',
   'Set `status: done` + `superseded_by: "[[<this>]]"` on the prior note.',
   'Then move it with a plain `mv` into `~/repos/obsidian/Work/Tasks/Archive/Rollouts/`, running `mkdir -p` on ' +
     'that folder first if it is absent.',
@@ -231,8 +231,10 @@ test('control J: a collision that halts the run fails collision', () => {
     'collision instead.'), ['collision'], 'control J')
 })
 
-test('control K: a supersede on the same-day Overwrite path fails overwrite-excluded', () => {
-  onlyFails(drop(1), ['overwrite-excluded'], 'control K')
+test('control K: an Overwrite path in the close-out paragraph fails no-overwrite-path', () => {
+  onlyFails(swap(1, 'None of this applies on the same-day **Overwrite** path: when the prior rollout is the note ' +
+    'being overwritten (same slug), stamp nothing and move nothing.'), ['no-overwrite-path'], 'control K')
+  onlyFails(drop(1), [], 'control K: a paragraph that never names Overwrite holds')
 })
 
 // ---- order: write, carry, stamp, then close out (p12-10) -----------------------------------------
