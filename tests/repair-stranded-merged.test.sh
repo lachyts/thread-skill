@@ -3,8 +3,8 @@
 # it (E2E 2026-09-23 verbs 6 + 7):
 #   (a) a task at in_progress/open whose PR already merged has no sanctioned path to done — `resolve`
 #       and `mark-done` refuse it, while `resume-filter` would re-dispatch it;
-#   (c) in the race window (task in_progress + owner, wave not yet stamped dispatched) the status JSON
-#       carries the wave with dispatched/merged null and no `owner` key — status must grep the note;
+#   (c) in the race window (task in_progress + owner, not yet stamped `started:`) the status JSON carries
+#       the task with started null, no timeline entry and no `owner` key — status must grep the note;
 #   (b) status renders an in-flight wave and routes stranded merges to repair, and repair stops and
 #       escalates a stranded merge instead of handing it to execute's resume.
 # When protocol 4 lets resolve accept a verified-merged in_progress task this fails — lift the interim
@@ -13,7 +13,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 export PYTHONDONTWRITEBYTECODE=1
-SCRIPT=skills/execute/scripts/reconcile-wave.py
+SCRIPT=skills/execute/scripts/reconcile-rollout.py
 STATUS=skills/status/SKILL.md
 REPAIR=skills/repair/SKILL.md
 fail=0
@@ -68,9 +68,6 @@ cat > "$tmp/ro.md" <<EOF
 tags: [task, rollout]
 status: open
 protocol_version: 3
-merged_through_wave: 1
-wave_1_dispatched: 2026-09-23T10:00:00+10:00
-wave_1_merged: 2026-09-23T10:30:00+10:00
 ---
 
 ## Notes
@@ -81,6 +78,8 @@ tags: [task, Demo]
 status: done
 wave: 1
 rollout: "[[ro]]"
+started: 2026-09-23T10:00+10:00
+merged: 2026-09-23T10:30+10:00
 ---
 
 body rw1
@@ -100,15 +99,14 @@ json=$(python3 "$SCRIPT" status --rollout "$tmp/ro.md" --tasks-dir "$tmp")
 res=$(printf '%s' "$json" | python3 -c '
 import json, sys
 d = json.load(sys.stdin)
-tl = d.get("timeline") or {}
-w2 = [w for w in tl.get("waves", []) if w.get("wave") == 2]
-print("w2=" + ("null-null" if w2 and w2[0].get("dispatched") is None and w2[0].get("merged") is None else "other"))
+tl = d.get("timeline")
+print("timeline=" + ("rw1-only" if tl and [x["slug"] for x in tl["tasks"]] == ["rw1"] else "other"))
 t = [x for x in d["tasks"] if x["slug"] == "rw2"]
-print("rw2=" + (t[0]["status"] if t else "missing"))
+print("rw2=" + (t[0]["status"] + "/" + str(t[0]["started"]) if t else "missing"))
 print("owner=" + ("absent" if all("owner" not in x for x in d["tasks"]) else "present"))
 ')
-has "$res" "w2=null-null" "timeline has a wave-2 entry with dispatched and merged null"
-has "$res" "rw2=in_progress" "the race-window task reports in_progress"
+has "$res" "timeline=rw1-only" "the timeline has an entry for the started task and none for the race-window task"
+has "$res" "rw2=in_progress/None" "the race-window task reports in_progress with started null"
 has "$res" "owner=absent" "no task entry carries an owner key (status must grep the note)"
 
 # ── (b) text assertions on the skills ──
