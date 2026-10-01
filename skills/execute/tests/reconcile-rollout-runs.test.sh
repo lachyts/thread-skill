@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Accumulated feedback (p6-4): reconcile keeps every run's feedback under one heading as numbered runs,
 # a re-reconcile of the same result is a no-op (headings or run markers inside the content included), an
-# agent's same-run copy is adopted in place, and nothing already written is deleted or rewritten. Temp
+# agent's same-run copy is adopted in place, and nothing already written is deleted or rewritten. Also the
+# `## Integration log` (p12-16): one line per Integration row, its dedupe and its place in the body. Temp
 # notes only.
 # Usage: bash reconcile-rollout-runs.test.sh   (exit 0 = pass)
 set -uo pipefail
@@ -44,7 +45,10 @@ out, slug, status, *kv = sys.argv[1:]
 row = {"slug": slug, "status": status, "prUrl": "", "reviewRoundsUsed": 1, "planRoundsUsed": 0}
 for item in kv:
     k, v = item.split("=", 1)
-    row[k] = json.loads(v)
+    if v == "DEL":
+        row.pop(k, None)      # a key the row omits
+    else:
+        row[k] = json.loads(v)
 json.dump({"rolloutSlug": "ro", "tasks": [row]}, open(out, "w"))
 PY
 }
@@ -207,6 +211,169 @@ res gp gate-pending "blockerDiagnosis=$(json "$HD")"; rec >/dev/null
 c=$(cksum < "$D/gp.md"); rec >/dev/null
 ok "$(cksum < "$D/gp.md")" "$c" "gate-pending: a ## line in the fallback diagnosis, re-upserted, changes no byte"
 ok "$(cntx gp '## Gated inputs (awaiting sign-off)')|$(cnt gp 'env mismatch')" "1|1" "… one section, the content once"
+
+echo "== the Integration log (p12-16)"
+# One line per Integration call, from the row's `integration` field: 10 space-separated tokens, `-` for
+# a missing value. A line with a startedAt is skipped when it appears anywhere in the section; a `-` line
+# only when it equals the section's last line.
+A40=$(printf 'a%.0s' {1..40}); C40=$(printf 'c%.0s' {1..40}); D40=$(printf 'd%.0s' {1..40}); X40=$(printf 'e%.0s' {1..40})
+T1=2026-10-02T13:30+00:00; T2=2026-10-02T15:00+00:00; T3=2026-10-02T16:30+00:00
+PR7='prUrl="https://github.com/o/r/pull/7"'
+integ() {  # integ [path=<json>|path=DEL]...: an integration object (default: integrated at $T1) as JSON
+  python3 - "$A40" "$C40" "$D40" "$T1" "$@" <<'PY2'
+import json, sys
+a, c, d, t1, *kv = sys.argv[1:]
+I = {"outcome": "integrated", "path": "integrator", "anchor": {"headSha": a, "taskBase": "b" * 40},
+     "headSha": d, "baseSha": c, "mergeCommit": d, "triggers": ["conflict"], "reReviewed": True,
+     "feedback": [], "reason": "", "agents": [],
+     "metrics": {"readyAt": "2026-10-02T13:00+00:00", "startedAt": t1, "finishedAt": "2026-10-02T13:45:00Z",
+                 "waitMinutes": 30, "durationMinutes": 15}}
+for item in kv:
+    k, v = item.split("=", 1)
+    *parents, leaf = k.split(".")
+    node = I
+    for p in parents:
+        node = node[p]
+    if v == "DEL":
+        node.pop(leaf, None)
+    else:
+        node[leaf] = json.loads(v)
+print(json.dumps(I))
+PY2
+}
+SA=(outcome='"set-aside"' headSha='""' baseSha='""' mergeCommit='""' triggers='[]' metrics.durationMinutes=null)
+logsec() { awk '$0=="## Integration log"{on=1; next} on && /^## /{exit} on && NF {print}' "$D/$1.md"; }   # the section's non-blank lines
+nlog() { logsec "$1" | grep -c .; }
+
+mkt il1
+res il1 review "$PR7" "integration=$(integ)"; rec >/dev/null
+ok "$(nlog il1)|$(cntx il1 "$T1 integrated path=integrator pr=7 anchor=$A40 head=$D40 base=$C40 wait=30 duration=15 triggers=conflict")" "1|1" \
+  "integrated: one line, every field"
+mkt il2
+res il2 blocked "$PR7" "integration=$(integ outcome='"rejected"')"; rec >/dev/null
+ok "$(nlog il2)|$(cntx il2 "$T1 rejected path=integrator pr=7 anchor=$A40 head=$D40 base=$C40 wait=30 duration=15 triggers=conflict")" "1|1" \
+  "rejected: one line, every field"
+mkt il3
+res il3 blocked "$PR7" "integration=$(integ "${SA[@]}" metrics.waitMinutes=null)"; rec >/dev/null
+ok "$(nlog il3)|$(cntx il3 "$T1 set-aside path=integrator pr=7 anchor=$A40 head=- base=- wait=- duration=- triggers=-")" "1|1" \
+  "set-aside before the merge: empty head/base, null minutes and no triggers write -"
+ok "$(before il3 '## Notes' '## Integration log')" y "… the section is appended to the body"
+
+mkt il4
+res il4 review 'prUrl="#7"' "integration=$(integ metrics.waitMinutes=0 metrics.durationMinutes=0 triggers='["shared-file","committed"]' metrics.startedAt=DEL)"; rec >/dev/null
+ok "$(logsec il4)" "- integrated path=integrator pr=7 anchor=$A40 head=$D40 base=$C40 wait=0 duration=0 triggers=shared-file,committed" \
+  "zero minutes write 0, triggers keep their order, a missing startedAt leads with -, prUrl #7 is pr=7"
+mkt il5
+res il5 review 'prUrl="7"' "integration=$(integ metrics.waitMinutes=true metrics.durationMinutes='"15"')"; rec >/dev/null
+ok "$(logsec il5)" "$T1 integrated path=integrator pr=7 anchor=$A40 head=$D40 base=$C40 wait=- duration=- triggers=conflict" \
+  "prUrl 7 is pr=7; a bool or string metric writes -"
+for v in '"not-a-pr"' '""' DEL; do
+  mkt il6
+  res il6 review "prUrl=$v" "integration=$(integ)"; rec >/dev/null
+  ok "$(logsec il6 | cut -d' ' -f4)" "pr=-" "prUrl $v writes pr=-"
+done
+mkt il7
+res il7 review "$PR7" "integration=$(integ path='"judge only"' triggers='["a b","c\td"]' metrics.startedAt='"## evil\nx"')"; rec >/dev/null
+ok "$(logsec il7)" "- integrated path=judge_only pr=7 anchor=$A40 head=$D40 base=$C40 wait=30 duration=15 triggers=a_b,c_d" \
+  "whitespace inside a value becomes _; a startedAt that is not an ISO stamp writes -"
+ok "$(logsec il7 | awk '{print NF}')|$(cnt il7 'evil')" "10|0" "… so the line has 10 tokens and the bad startedAt is dropped"
+
+# startedAt is the one token with no `key=` prefix, so it alone decides how the line starts: only the
+# engine's ISO_STAMP shape is written, anything else is `-`, so the line can never open a section, an H1,
+# a code fence or a quote (and a second row still lands as the section's last line).
+hd() { grep -cE '^(#|```|~~~|>)' "$D/$1.md"; }   # lines that open a heading, fence or quote
+for v in '"##"' '"#"' '"```"' '">"' '"~~~"' '"2026-10-02"' '"2026-10-02T13:30"' '"x2026-10-02T13:30+00:00"'; do
+  mkt il9
+  h0=$(hd il9)
+  res il9 review "$PR7" "integration=$(integ metrics.startedAt=$v)"; rec >/dev/null
+  ok "$(nlog il9)|$(logsec il9 | awk '{print NF}')|$(logsec il9 | cut -d' ' -f1)|$(hd il9)" "1|10|-|$((h0 + 1))" \
+    "startedAt $v: one 10-token line led by -, no heading but the log's own"
+  res il9 blocked "$PR7" "integration=$(integ outcome='"rejected"' metrics.startedAt="\"$T2\"")"; rec >/dev/null
+  ok "$(nlog il9)|$(logsec il9 | tail -1 | cut -d' ' -f1,2)|$(hd il9)" "2|$T2 rejected|$((h0 + 1))" \
+    "… a second row still lands as the section's last line"
+done
+for v in 2026-10-02T13:30:00Z 2026-10-02T13:30:00.250+1000 2026-10-02T13:30-0230; do
+  mkt il10
+  res il10 review "$PR7" "integration=$(integ metrics.startedAt="\" $v \"")"; rec >/dev/null
+  ok "$(logsec il10 | cut -d' ' -f1)" "$v" "startedAt $v (ISO_STAMP's other forms) is written, trimmed"
+done
+
+mkt il8
+res il8 review "$PR7" "integration=$(integ)"; rec >/dev/null
+res il8 blocked "$PR7" "integration=$(integ outcome='"rejected"' metrics.startedAt="\"$T2\"")"; rec >/dev/null
+res il8 blocked "$PR7" "integration=$(integ "${SA[@]}" metrics.startedAt="\"$T3\"")"; rec >/dev/null
+ok "$(cnt il8 '## Integration log')|$(nlog il8)|$(logsec il8 | cut -d' ' -f1,2 | tr '\n' ';')" \
+  "1|3|$T1 integrated;$T2 rejected;$T3 set-aside;" "three rows: three lines, in order, under one heading"
+
+mkt d1
+res d1 blocked "$PR7" "integration=$(integ outcome='"rejected"')"; rec >/dev/null
+cp "$D/d1.md" "$D/d1.before"
+python3 "$SCRIPT" reconcile --result "$D/res.json" --tasks-dir "$D" --now 2026-10-03T09:00:00Z >/dev/null
+cmp -s "$D/d1.md" "$D/d1.before"; ok "$?" 0 "D1: the same row re-reconciled at another --now is byte-identical"
+
+mkt d2
+res d2 blocked "$PR7" "integration=$(integ outcome='"rejected"')"; rec >/dev/null
+RA=$(cat "$D/res.json")
+res d2 blocked "$PR7" "integration=$(integ "${SA[@]}" metrics.startedAt="\"$T2\"")"; rec >/dev/null
+cp "$D/d2.md" "$D/d2.before"
+printf '%s' "$RA" > "$D/res.json"; rec >/dev/null
+cmp -s "$D/d2.md" "$D/d2.before"; ok "$?" 0 "D2: an older row replayed after a newer one is byte-identical"
+ok "$(nlog d2)|$(logsec d2 | tail -1 | cut -d' ' -f1,2)" "2|$T2 set-aside" "… two lines, the newer one last"
+
+NOSTART=(metrics.startedAt=DEL metrics.waitMinutes=null metrics.durationMinutes=null)   # today's default: no startedAt
+S=$(integ "${SA[@]}" "${NOSTART[@]}")
+mkt d3
+res d3 blocked "$PR7" "integration=$S"; rec >/dev/null
+res d3 review "$PR7" "integration=$(integ "${NOSTART[@]}" headSha="\"$X40\"")"; rec >/dev/null
+res d3 blocked "$PR7" "integration=$S"; rec >/dev/null
+ok "$(nlog d3)|$(logsec d3 | sed -n 2p | cut -d' ' -f1,2)|$(logsec d3 | tail -1 | cut -d' ' -f1,2)" "3|- integrated|- set-aside" \
+  "D3: S, I, S' with no startedAt: three lines, the latest truthful"
+cp "$D/d3.md" "$D/d3.before"; rec >/dev/null
+cmp -s "$D/d3.md" "$D/d3.before"; ok "$?" 0 "… and S' re-reconciled is byte-identical"
+
+mkt d4
+res d4 blocked "$PR7" "integration=$S"; rec >/dev/null
+res d4 blocked "$PR7" 'reviewRoundsUsed=2' "integration=$S"; rec >/dev/null
+ok "$(nlog d4)" 1 "D4: back-to-back identical - lines collapse to one (the interim trade-off)"
+
+mkt d5
+for ts in "$T1" "$T2" "$T1"; do
+  res d5 blocked "$PR7" "integration=$(integ "${SA[@]}" metrics.startedAt="\"$ts\"")"; rec >/dev/null
+done
+ok "$(nlog d5)|$(logsec d5 | cut -d' ' -f1 | tr '\n' ';')" "2|$T1;$T2;" \
+  "D5: lines differing only by startedAt are kept; a non-adjacent repeat is skipped"
+
+mkt ls $'\n## Integration log\n\nhand-written note\n\n## Blocker diagnosis\n\nold diagnosis\n'
+res ls review "$PR7" "integration=$(integ "${NOSTART[@]}")"; rec >/dev/null
+res ls blocked "$PR7" 'blockerDiagnosis="integration: conflict in a.py"' "integration=$S"; rec >/dev/null
+ok "$(logsec ls | cut -d' ' -f1,2 | tr '\n' ';')" "hand-written note;- integrated;- set-aside;" \
+  "a mid-body section keeps hand-written text and appends after it"
+ok "$(awk '/^## Blocker diagnosis$/{print prev2 "|" prev; exit} {prev2=prev; prev=$0}' "$D/ls.md" | cut -c1-14)" "- set-aside pa" \
+  "… one blank line before the next section"
+ok "$(awk '/^## Blocker diagnosis$/{print prev; exit} {prev=$0}' "$D/ls.md")|$(before ls '## Blocker diagnosis' '### Run 1 (')|$(before ls 'old diagnosis' '### Run 1 (')" \
+  "|y|y" "… and the next run still lands in its own section"
+c=$(cksum < "$D/ls.md"); rec >/dev/null
+ok "$(cksum < "$D/ls.md")" "$c" "… a re-reconcile is a no-op"
+
+mkt le $'\n## Integration log\n\nhand-written last line\n'
+res le blocked "$PR7" "integration=$S"; rec >/dev/null
+ok "$(logsec le | cut -d' ' -f1,2 | tr '\n' ';')|$(tail -c1 "$D/le.md" | od -An -c | tr -d ' ')" "hand-written last;- set-aside;|\\n" \
+  "a section at EOF: the line is appended, the file still ends in a newline"
+
+mkt ln
+res ln review "$PR7"; rec >/dev/null
+res ln review "$PR7" 'integration=null'; rec >/dev/null
+ok "$(cnt ln '## Integration log')" 0 "a row with no integration, or integration null, writes no log"
+mkt lx
+res lx review "$PR7" 'integration="x"'
+python3 "$SCRIPT" reconcile --result "$D/res.json" --tasks-dir "$D" --now "$NOW" >/dev/null 2>"$D/err"; rc=$?
+ok "$rc|$(grep -c 'lx' "$D/err")|$(cnt lx '## Integration log')|$(cnt lx 'status: review')" "1|1|0|1" \
+  "integration not an object: exit 1 naming the slug, no log, the rest of the row written"
+mkt ld
+res ld review "$PR7" "integration=$(integ)"
+c=$(cksum < "$D/ld.md")
+python3 "$SCRIPT" reconcile --result "$D/res.json" --tasks-dir "$D" --now "$NOW" --dry-run >/dev/null
+ok "$(cksum < "$D/ld.md")" "$c" "--dry-run writes no log"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-runs: ALL PASS"; else echo "reconcile-rollout-runs: FAILED"; fi

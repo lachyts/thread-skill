@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The queue side of reconcile-rollout.py (ADR 0030 decisions 1 and 4, and its no-cursor consequence):
-# `next` (which tasks start), the per-task `started:` / `merged:` / `integrating:` stamps, `status`
+# `next` (which tasks start), the per-task `started:` / `merged:` / `integrating:` / `ready:` stamps, `status`
 # (queue states, the timeline and the progress line) and `resume` (a merged PR whose note was never
 # marked, p6-8) against a stub gh. Temp notes only; no vault, no network.
 # Usage: bash reconcile-rollout-queue.test.sh   (exit 0 = pass)
@@ -320,7 +320,7 @@ scen stamps
 mkro $'- [[a]]\n- [[b]]\n- [[c]]\n- [[g]]'
 mkt a in_progress 'integrating: 2026-10-01T09:00+00:00'
 mkt b done
-mkt c review 'pr: https://github.com/o/r/pull/3'
+mkt c review 'pr: https://github.com/o/r/pull/3' 'ready: 2026-10-02T12:00+00:00'
 mkt g open
 out=$(python3 "$SCRIPT" mark-started --tasks a,b,g --tasks-dir "$D" --now "$NOW" --rollout "$D/ro.md" 2>"$D/err"); rc=$?
 ok "$rc" 1 "mark-started: refusing a done note exits 1"
@@ -349,7 +349,56 @@ ok "$(fm c merged)" "merged: 2026-10-02T15:45+00:00" "mark-done: exact merged st
 ok "$(fm c integrating)" "<none>" "mark-done: removes integrating:"
 has "$out" "progress: 2/4 merged" "mark-done --rollout prints the progress line"
 python3 "$SCRIPT" defer --tasks a,c --tasks-dir "$D" >/dev/null
-ok "$(fm a started)|$(fm c merged)|$(fm c integrating)" "<none>|<none>|<none>" "defer clears started:, merged: and integrating:"
+ok "$(fm a started)|$(fm c merged)|$(fm c integrating)|$(fm c ready)" "<none>|<none>|<none>|<none>" "defer clears started:, merged:, integrating: and ready:"
+
+# ── ready: when a task joined the Integration queue (p12-16) ─────────────────────────────────────
+# Stamped on a move to review from another status, for a non-read-only row that carries no
+# `integration` (readyAt is when the approving own or seeded revise call returned); a re-reconcile and
+# an Integration row never move it.
+scen ready-stamp
+mkro $'- [[a]]\n- [[n]]\n- [[r1]]\n- [[r2]]\n- [[r3]]'
+mkt a in_progress 'scope: cross-cutting'
+mkt n -
+mkt r1 in_progress 'scope: read-only'
+mkt r2 in_progress
+mkt r3 in_progress 'scope: read-only'
+rrow() { printf '{"rolloutSlug":"ro","tasks":[%s]}' "$1" > "$D/res.json"; }   # rrow <row json>
+rrec() { python3 "$SCRIPT" reconcile --result "$D/res.json" --tasks-dir "$D" --now "$1" >/dev/null; }   # rrec <now>
+IJ='"integration":{"outcome":"%s","path":"integrator","anchor":{"headSha":"a","taskBase":"b"},"headSha":"d","baseSha":"c","triggers":[],"metrics":{"startedAt":"%s"}}'
+PRA='"prUrl":"https://github.com/o/r/pull/1"'
+rrow "{\"slug\":\"a\",\"status\":\"review\",\"scope\":\"cross-cutting\",$PRA,\"reviewRoundsUsed\":1,\"planRoundsUsed\":0}"
+rrec 2026-10-02T14:05:00Z
+ok "$(fm a status)|$(fm a ready)" "status: review|ready: 2026-10-02T14:05+00:00" "reconcile: in_progress -> review stamps ready:"
+fm a ready | grep -Eq '^ready: [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$'
+ok "$?" 0 "reconcile: ready: has the offset-bearing minute format"
+cp "$D/a.md" "$D/a.before"
+rrec 2026-10-02T16:00:00Z
+cmp -s "$D/a.md" "$D/a.before"; ok "$?" 0 "reconcile: review -> review at a later --now is byte-identical"
+rrow "{\"slug\":\"a\",\"status\":\"blocked\",\"scope\":\"cross-cutting\",$PRA,$(printf "$IJ" rejected 2026-10-02T16:10+00:00)}"
+rrec 2026-10-02T16:30:00Z
+ok "$(fm a status)|$(fm a ready)" "status: blocked|ready: 2026-10-02T14:05+00:00" "reconcile: an Integration rejection leaves ready: alone"
+rrow "{\"slug\":\"a\",\"status\":\"review\",\"scope\":\"cross-cutting\",$PRA,\"reviewRoundsUsed\":2,\"planRoundsUsed\":0}"
+rrec 2026-10-02T17:00:00Z
+ok "$(fm a status)|$(fm a ready)" "status: review|ready: 2026-10-02T17:00+00:00" "reconcile: the seeded revise's approval overwrites ready:"
+rrow "{\"slug\":\"a\",\"status\":\"blocked\",\"scope\":\"cross-cutting\",$PRA,$(printf "$IJ" set-aside 2026-10-02T17:10+00:00)}"
+rrec 2026-10-02T17:30:00Z
+rrow "{\"slug\":\"a\",\"status\":\"review\",\"scope\":\"cross-cutting\",$PRA,\"reviewRoundsUsed\":2,\"planRoundsUsed\":0,$(printf "$IJ" integrated 2026-10-02T18:00+00:00)}"
+rrec 2026-10-02T19:00:00Z
+ok "$(fm a status)|$(fm a ready)" "status: review|ready: 2026-10-02T17:00+00:00" "reconcile: an integrated row re-entering review from a set-aside does not stamp ready:"
+rrow '{"slug":"n","status":"review","prUrl":"https://github.com/o/r/pull/2","reviewRoundsUsed":1,"planRoundsUsed":0}'
+rrec 2026-10-02T14:05:00Z
+ok "$(fm n status)|$(fm n ready)" "status: review|ready: 2026-10-02T14:05+00:00" "reconcile: a note with no status: line moving to review is stamped"
+rrow '{"slug":"r1","status":"review","scope":"read-only","prUrl":"","reviewRoundsUsed":1,"planRoundsUsed":0}'
+rrec 2026-10-02T14:05:00Z
+ok "$(fm r1 status)|$(fm r1 ready)" "status: done|<none>" "reconcile: read-only with no PR is done, never stamped ready:"
+rrow '{"slug":"r2","status":"review","scope":"read-only","prUrl":"https://github.com/o/r/pull/4","reviewRoundsUsed":1,"planRoundsUsed":0}'
+rrec 2026-10-02T14:05:00Z
+ok "$(fm r2 status)|$(fm r2 ready)" "status: review|<none>" "reconcile: read-only with a PR stays review, never stamped ready:"
+rrow '{"slug":"r3","status":"review","prUrl":"https://github.com/o/r/pull/5","reviewRoundsUsed":1,"planRoundsUsed":0}'
+rrec 2026-10-02T14:05:00Z
+ok "$(fm r3 status)|$(fm r3 ready)" "status: review|<none>" "reconcile: a row with no scope on a read-only note is never stamped"
+python3 "$SCRIPT" defer --tasks a,n --tasks-dir "$D" >/dev/null
+ok "$(fm a ready)|$(fm n ready)" "<none>|<none>" "defer clears ready:"
 
 # ── status: queue states, timeline and progress line ─────────────────────────────────────────────
 scen status
