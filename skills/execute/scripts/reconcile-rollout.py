@@ -25,7 +25,8 @@ Subcommands:
               live queue. Schedule order is each task's first wikilink on a list-item or table-row line
               of the rollout body; prose and fenced code never rank. Honours a soft pause: once nothing
               runs, awaits or integrates, it stamps `paused:` and removes `pause_requested` (the drain,
-              ADR 0030 decision 5).
+              ADR 0030 decision 5). Refuses an incomplete rollout (below): exit 1, no stdout, one ERROR
+              line naming why and the remedy, `/thread:schedule <its first project> --regenerate`.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here.
@@ -51,7 +52,8 @@ Subcommands:
   status      Read-only situational scan for /thread:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
-              pause_requested, ceiling, counts, progress, timeline, tasks}. Pure read; no network.
+              pause_requested, incomplete, ceiling, counts, progress, timeline, tasks}; `incomplete` is
+              why the rollout must not run as written (below), or null. Pure read; no network.
 
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
@@ -123,6 +125,17 @@ session has run the rollout. Only execute's own marks count. On the rollout note
 `merged_through_wave:` above 0, or a `## Pause log` / `## Completion log` heading line. On a linked task note:
 a non-empty `owner:` or `integrating:`. A task's status and its `started:` / `ready:` / `merged:` stamps never
 count, because a carry keeps them.
+
+Incomplete (incomplete, read by `next`, `status` and unfinished-rollout.py): a never-started rollout that must
+not run as written, because the /thread:schedule run that wrote it never finished. The first that applies:
+  - it carries `incomplete: true`: schedule § 0 stamps it when it finishes an interrupted supersede, and only
+    a later supersede of this note (which closes it) ends it;
+  - its `supersedes:` names a rollout still unfinished beside it (not done or dropped): the run died before
+    step 7.5 closed that one out, so this note's tasks may be unstamped;
+  - a `## Queue` table row (its first wikilink) names a task whose note is missing or whose `rollout:` does
+    not name this rollout: step 7 never stamped it, so `next` and `status` would never see it.
+A rollout that has started is never judged: once it runs, a task taken out of it (repair's `defer`) is
+legitimate.
 
 Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
   review         -> status: review;        pr: <url>; review_rounds_used: <n>; plan_rounds_used: <n> (if >0);
@@ -901,6 +914,57 @@ def never_started(rollout_note, linked):
     return True, ""
 
 
+QUEUE_HEADING = "## Queue"
+
+
+def _queue_rows(rollout_note):
+    """The task slugs the `## Queue` table names, in row order: each `|` row's first wikilink, outside
+    fenced code (the header and separator rows name none). [] when the note has no `## Queue`."""
+    found = rollout_note._section_bounds(QUEUE_HEADING)
+    if found is None:
+        return []
+    lines, start, end = found
+    out, seen, fenced = [], set(), False
+    for line in lines[start + 1:end]:
+        if FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced or not line.lstrip().startswith("|"):
+            continue
+        m = WIKILINK_OPEN_RE.search(line)
+        slug = _wikilink_slug(m.group(1)) if m else None
+        if slug and slug.lower() not in seen:
+            seen.add(slug.lower())
+            out.append(slug)
+    return out
+
+
+def incomplete(rollout_path: Path, rollout_note, linked, index) -> str:
+    """'' when the rollout can run as written, else why not (the module docstring's "Incomplete"). Only a
+    never-started rollout is judged; `linked` and `index` are _scan's."""
+    if not never_started(rollout_note, linked)[0]:
+        return ""
+    if _truthy_flag(rollout_note.get("incomplete")):
+        return ("it carries incomplete: true (schedule § 0 finished the interrupted supersede that wrote it, "
+                "and nothing has superseded it since)")
+    prior = (_wikilink_slug(_scalar(rollout_note.get("supersedes"))) or "").lower()
+    entry = index.get(prior) if prior else None
+    if entry is not None and entry[0].parent == rollout_path.parent and "rollout" in _tags(entry[1]) and \
+            _status(entry[1]) not in CLOSED_ROLLOUT_STATUSES:
+        return (f"its supersedes: names [[{entry[0].stem}]], still unfinished beside it (the run that wrote it "
+                "died before closing that rollout out)")
+    me = rollout_path.stem.lower()
+    unlinked = []
+    for slug in _queue_rows(rollout_note):
+        hit = index.get(slug.lower())
+        if hit is None or (_wikilink_slug(_scalar(hit[1].get("rollout"))) or "").lower() != me:
+            unlinked.append(slug)
+    if unlinked:
+        return (f"its {QUEUE_HEADING} names {', '.join(f'[[{s}]]' for s in unlinked)}, whose rollout: does not "
+                "link back (the run that wrote it died or was cancelled before stamping them)")
+    return ""
+
+
 def _priority(note) -> str:
     v = _scalar(note.get("priority")).lower()
     return v if v in PRIORITY_WEIGHTS else "normal"
@@ -1006,7 +1070,7 @@ def _rows(rollout_path: Path, rollout_note, tasks_dir: Path):
         rank = (0, pos, "") if pos is not None else (1, wave if wave is not None else 10 ** 9, slug.lower())
         priority = _priority(note)
         rows.append({
-            "slug": slug, "note": note, "state": state, "setAsideAt": set_aside_at,
+            "slug": slug, "path": path, "note": note, "state": state, "setAsideAt": set_aside_at,
             "status": _scalar(note.get("status")) or None, "pr": _pr(note) or None, "wave": wave,
             "priority": priority, "weight": PRIORITY_WEIGHTS[priority], "solo": _truthy_flag(note.get("solo")),
             "files": file_sets.get(slug.lower(), []), "rank": rank, "deps": _dep_entries(note),
@@ -1293,6 +1357,12 @@ def cmd_next(args) -> int:
         return 1
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     rows, index = _rows(rollout_path, rollout_note, tasks_dir)
+    why = incomplete(rollout_path, rollout_note, [(r["path"], r["note"]) for r in rows], index)
+    if why:
+        project = next((s for s in (_wikilink_slug(v) for v in rollout_note.get_list("projects")) if s), "<project>")
+        print(f"ERROR: {rollout_path.stem} is incomplete: {why}: never run it as written; supersede it with "
+              f"/thread:schedule {project} --regenerate", file=sys.stderr)
+        return 1
     by_state = {}
     for r in sorted(rows, key=_rank):
         by_state.setdefault(r["state"], []).append(r)
@@ -1658,6 +1728,8 @@ def cmd_status(args) -> int:
         # (render as PAUSED, not stalled); `pause_requested` = a soft pause is pending and drains.
         "paused": _scalar(paused) or None,
         "pause_requested": _truthy_flag(rollout_note.get("pause_requested")),
+        # Why the rollout must not run as written (`next` refuses it), or null: see "Incomplete".
+        "incomplete": incomplete(rollout_path, rollout_note, [(r["path"], r["note"]) for r in rows], index) or None,
         "ceiling": ceiling,
         "counts": counts,
         "progress": _progress_line(counts, timeline),

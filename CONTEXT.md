@@ -245,6 +245,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rollout's tasks are stamped, with `superseded_by:`, and is filed in
   `Archive/Rollouts/`. A protocol-3 rollout in flight migrates this way, once
   hard-paused (ADR 0030). _Avoid_: migrate (alone), replace.
+- **Incomplete rollout** — a never-started rollout that must not run as
+  written, because the schedule run that wrote it never finished: it carries
+  `incomplete: true` (schedule § 0 finished the interrupted supersede that
+  wrote it), its `supersedes:` names a rollout still unfinished, or its queue
+  names a task not stamped to it. The queue refuses to start it; only a
+  supersede ends it. _Avoid_: half-written, broken.
 - **Wave** — a set of tasks safe to run together because none shares a file
   (ADR 0009). Retired by ADR 0030: see **Queue**. _Avoid_: round, phase, stage.
 - **Queue** — how a rollout runs: tasks in parallel, each from the `main` of

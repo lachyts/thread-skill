@@ -31,7 +31,12 @@ Rules.
 - Never started: reconcile-rollout.py's never_started (only execute's own marks).
 - Eligible: this project's, and paused (`paused:`) or never started.
 - Interrupted pair (P, N): both candidates, N's `supersedes:` names P, N never started, P paused or never
-  started. N is the note an interrupted /thread:schedule wrote before its step 7 stamped N's tasks.
+  started. N is the note an interrupted /thread:schedule wrote and died before closing P out (step 7.5), so
+  N's tasks may be unstamped.
+- Incomplete: reconcile-rollout.py's incomplete (a never-started note that must not run as written: it
+  carries `incomplete: true`, its `supersedes:` names a rollout still unfinished beside it, or a `## Queue`
+  row names a task whose `rollout:` does not link back). It never changes stdout or the exit code; it names
+  the note as incomplete on stderr (a WARN beside `supersede`, a line of the refusal otherwise).
 - Misfiled superseded note: tagged `rollout`, directly in the tasks dir or directly in Archive/ (where the
   daily sweep files it; never Archive/Rollouts/), `status: done`, a `superseded_by:` naming a note that
   exists under the tasks dir, same repo (any project: filing is housekeeping, as reconcile-project.py's
@@ -46,14 +51,15 @@ Outcomes, the first that applies:
      rest is U. U empty -> `none`, exit 0.
   3. U is exactly one interrupted pair {P, N} and N is this project's: with --regenerate `interrupted P N`,
      exit 0; without, `refuse P,N` (sorted), exit 3, and stderr says N is incomplete.
-  4. U is one note X: eligible with --regenerate -> `supersede X`, exit 0. Otherwise `refuse X`, exit 3,
-     with the remedy for its case (eligible: re-run with --regenerate; this project's, has run, not paused:
-     let it finish, pause it, or hard-pause it, then --regenerate, or /thread:status then /thread:repair;
-     another project's: wait, or /thread:status then /thread:repair).
+  4. U is one note X: eligible with --regenerate -> `supersede X`, exit 0 (an incomplete X WARNs that this
+     run finishes it). Otherwise `refuse X`, exit 3, with the remedy for its case (incomplete: the
+     incomplete line; eligible: re-run with --regenerate; this project's, has run, not paused: let it
+     finish, pause it, or hard-pause it, then --regenerate, or /thread:status then /thread:repair; another
+     project's: wait, or /thread:status then /thread:repair).
   5. Two or more -> `refuse <a>,<b>,…` (sorted), exit 3; stderr lists each with its project and state, the
-     incomplete line for each pair among them (a pair whose N is another project's: finish it with
-     /thread:schedule <N's project> --regenerate), and /thread:repair for a candidate named by the
-     `supersedes:` of a note that has run.
+     incomplete line for each pair among them and for each other incomplete note (another project's note:
+     finish it with /thread:schedule <its project> --regenerate), and /thread:repair for a candidate named
+     by the `supersedes:` of a note that has run.
 
 Output. stdout is exactly one line on exit 0 and 3: `none` | `supersede <slug>` | `interrupted <prior-slug>
 <new-slug>` | `file <slug> <relpath>` | `refuse <slug>[,<slug>…]`. Slugs are filename stems; an unfinished
@@ -73,7 +79,7 @@ from pathlib import Path
 DEFAULT_TASKS_DIR = Path(os.path.expanduser("~/repos/obsidian/Work/Tasks"))
 RR_SRC = Path(__file__).resolve().parent.parent.parent / "execute/scripts/reconcile-rollout.py"
 RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikilink_slug", "_scalar", "_status",
-            "_valued", "never_started")
+            "_valued", "never_started", "incomplete")
 CLOSED = {"done", "dropped"}
 GITHUB_PREFIXES = ("https://github.com/", "git@github.com:", "ssh://git@github.com/")
 
@@ -285,7 +291,7 @@ def cmd_check(args, rr) -> int:
     for path, note, where in notes:
         if where != "root" or rr._status(note) in CLOSED or not same_repo(path.stem, note):
             continue
-        linked = rr._scan(path, tasks_dir)[0]
+        linked, index = rr._scan(path, tasks_dir)
         fresh, why = rr.never_started(note, linked)
         counts = rr._counts([dict(zip(("state", "setAsideAt"), rr._queue_state(t))) for _, t in linked])
         paused = rr._scalar(note.get("paused")) if rr._valued(note.get("paused")) else ""
@@ -293,7 +299,7 @@ def cmd_check(args, rr) -> int:
             "slug": path.stem, "mine": bool(projects_of(rr, note) & mine), "label": project_label(rr, note),
             "paused": paused, "fresh": fresh, "why": why, "status": rr._status(note) or "no status",
             "complete": counts["total"] >= 1 and counts["merged"] == counts["total"],
-            "supersedes": link_slug(rr, note, "supersedes"),
+            "supersedes": link_slug(rr, note, "supersedes"), "incomplete": rr.incomplete(path, note, linked, index),
         }
     for c in cands.values():
         c["eligible"] = c["mine"] and (bool(c["paused"]) or c["fresh"])
@@ -326,12 +332,15 @@ def cmd_check(args, rr) -> int:
         p, n = (cands[k] for k in pairs[0])
         if args.regenerate:
             return finish(warns, f"interrupted {p['slug']} {n['slug']}", 0)
-        return finish(warns, f"refuse {slugs_of(u)}", 3, [incomplete(p, n)])
+        return finish(warns, f"refuse {slugs_of(u)}", 3, [pair_incomplete(p, n)])
 
     # 4. One unfinished rollout.
     if len(u) == 1:
         x = cands[u[0]]
         if x["eligible"] and args.regenerate:
+            if x["incomplete"]:
+                warns.append(f"WARN: {x['slug']} is incomplete ({x['incomplete']}): this run supersedes it, "
+                             "which finishes it")
             return finish(warns, f"supersede {x['slug']}", 0)
         return finish(warns, f"refuse {x['slug']}", 3, [remedy(x)])
 
@@ -340,12 +349,11 @@ def cmd_check(args, rr) -> int:
     lines += [f"  - [[{cands[k]['slug']}]] ({cands[k]['label']}; {cands[k]['state']})" for k in u]
     for pk, nk in pairs:
         p, n = cands[pk], cands[nk]
-        if n["mine"]:
-            lines.append(incomplete(p, n))
-        else:
-            lines.append(f"{n['slug']} is incomplete: an interrupted /thread:schedule wrote it to supersede "
-                         f"{p['slug']} and died before stamping its tasks: finish it with /thread:schedule "
-                         f"{n['label'].split(', ')[0]} --regenerate; never /thread:execute [[{n['slug']}]] as written")
+        lines.append(pair_incomplete(p, n))
+    for k in u:
+        c = cands[k]
+        if c["incomplete"] and k not in paired:
+            lines.append(lone_incomplete(c))
     for k in u:
         c = cands[k]
         if not c["fresh"] and c["supersedes"] in cands and (c["supersedes"], k) not in pairs:
@@ -355,14 +363,28 @@ def cmd_check(args, rr) -> int:
     return finish(warns, f"refuse {slugs_of(u)}", 3, lines)
 
 
-def incomplete(p, n) -> str:
+def finish_with(x) -> str:
+    """The re-run that supersedes x: --regenerate, or another project's own schedule run."""
+    if x["mine"]:
+        return "re-run with --regenerate to supersede it"
+    return f"finish it with /thread:schedule {x['label'].split(', ')[0]} --regenerate"
+
+
+def pair_incomplete(p, n) -> str:
     return (f"{n['slug']} is incomplete: an interrupted /thread:schedule wrote it to supersede {p['slug']} and "
-            f"died before stamping its tasks: re-run with --regenerate to finish and supersede it; never "
+            f"died before closing {p['slug']} out, so its tasks may be unstamped: {finish_with(n)}; never "
             f"/thread:execute [[{n['slug']}]] as written")
+
+
+def lone_incomplete(x) -> str:
+    return (f"{x['slug']} is incomplete: {x['incomplete']}: {finish_with(x)}; never /thread:execute "
+            f"[[{x['slug']}]] as written")
 
 
 def remedy(x) -> str:
     s = x["slug"]
+    if x["incomplete"]:
+        return f"unfinished rollout [[{s}]] ({x['label']}; {x['state']}) is on this repo, and {lone_incomplete(x)}"
     if x["eligible"]:
         return (f"unfinished rollout [[{s}]] ({x['label']}; {x['state']}) is on this repo: re-run with "
                 "--regenerate to supersede it (its unlanded tasks carry into the new rollout)")
