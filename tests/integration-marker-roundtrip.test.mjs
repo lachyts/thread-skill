@@ -1,6 +1,6 @@
-// p12-6 (R2-1, R2-5): the engine's stage markers survive the trip through reconcile onto a task note, and
-// the queue reads them back. This is the lead action L3 made mechanical: the engine side of the markers is
-// pinned in skills/execute/tests/integrate.test.mjs; this file asserts the NOTE side against the real
+// p12-6 (ADR 0030 decision 4: a set-aside task resumes at the stage it stopped): the engine's stage markers
+// survive the trip through reconcile onto a task note, and the queue reads them back. The engine side of the
+// markers is pinned in skills/execute/tests/integrate.test.mjs; this file asserts the NOTE side against the real
 // reconcile — p12-8's skills/execute/scripts/reconcile-rollout.py, whose per-run accumulation appends the
 // engine's diagnosis as the latest `### Run` after any agent-written text, and whose `status` reads
 // `setAsideAt` (any latest run starting `integration:` → integration) and `blockerSummary` (that latest run).
@@ -158,5 +158,27 @@ test('x5: re-reconciling the same row leaves the note byte-identical', async (t)
     const once = fs.readFileSync(note, 'utf8')
     reconcile(d, res)
     assert.equal(fs.readFileSync(note, 'utf8'), once)
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+test('x6: a rejection on the last round reads back as review-blocked, its history parseable for the seeded resume', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault('')
+  try {
+    const res = await row({ ...base, mode: 'integrate', task: mkTask({ maxReviewRounds: 2 }), integration: mkI() }, {
+      [`integrate:${SLUG}`]: merged, [`integration-review:${SLUG} r2`]: { verdict: 'changes', feedback: ['keep their rename'], unreadable: false, finishedAt: NOW },
+    })
+    const r = res.tasks[0]
+    assert.equal(r.status, 'review-blocked')
+    assert.equal(r.integration.outcome, 'rejected', 'the live row says Integration; the note alone does not (the Integration log does)')
+    reconcile(d, res)
+    const note = fs.readFileSync(path.join(d, `${SLUG}.md`), 'utf8')
+    const sec = note.slice(note.indexOf('## Review-blocked feedback'))
+    const run = sec.slice(sec.lastIndexOf('### Run'))
+    assert.ok(!run.includes('(Integration)'), 'reconcile writes plain Round N: groups (the stage is dropped)')
+    const parsed = T.parseIntegrationMarker(run)
+    assert.deepEqual(JSON.parse(JSON.stringify(parsed.history)), r.reviewHistory.map(({ round, feedback }) => ({ round, feedback })))
+    const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: parsed.history, reviewRoundsUsed: 2, plan: 'PLAN' }
+    assert.equal(T.resumeArgsError({ ...base, task: mkTask({ resume }) }), '')
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
 })

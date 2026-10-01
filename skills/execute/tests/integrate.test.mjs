@@ -14,7 +14,7 @@ const T = loadEngine([
   'parseIntegrationMarker', 'REVISE_MARKER', 'INTEGRATION_PREFIX', 'ANCHOR_RECIPE', 'TRANSIENT_DIAGNOSIS',
   'resumeArgsError', 'integrationArgsError', 'isoMinutes', 'integratorPrompt', 'integrationReviewPrompt',
   'reviserPrompt', 'coldEntryBlock', 'branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck',
-  'integrationVerify', 'markerHistory', 'GIT_ENV_SCRUB', 'ralphLoop',
+  'integrationVerify', 'markerHistory', 'GIT_ENV_SCRUB', 'ralphLoop', 'integrationMergeReads',
 ])
 
 const ROW_KEYS = [
@@ -31,6 +31,9 @@ const M = sha('d') // the Integration merge commit
 const F1 = sha('e') // a fix commit after the merge
 const RH = sha('f') // a repair / revise head
 const P = sha('1') // the commit before an own-run merge
+const B2 = sha('2') // origin/<default> after it moved again, past the lead's read (mainSha = B1)
+const M1 = sha('3') // an earlier Integration's merge, pushed but never judged
+const M2 = sha('4') // the merge a re-entry makes on top of M1
 const SLUG = 'proj-fix-a'
 const PR = 'https://github.com/o/r/pull/7'
 const BR = 'audit-fix/fix-a'
@@ -184,7 +187,10 @@ test('b4: the integrator prompt carries the landed PRs, the plan, the merge step
   for (const s of [
     'https://github.com/o/r/pull/5 — theirs: rename', 'files: a.js, b.js', 'task brief: /vault/Tasks/proj-theirs.md',
     'Read EVERY brief above', 'THE APPROVED PLAN', 'Round 1 rejection:\n- own fix', 'ANTI-REGRESSION',
-    "the lead's trouble: conflict", 'keeping BOTH intents', 'merge --abort', 'Copy its stdout VERBATIM into mergeLog',
+    "the lead's trouble: conflict", 'keeping BOTH intents', 'merge --abort', 'VERBATIM into mergeLog',
+    'stash push --quiet -m "$L"', 'echo "stashed: $L"', 'L="integration leftovers $(git -C "$WT" rev-parse HEAD)"',
+    'never pop or apply it', `This list ends at ${B1}, origin/main as the lead read it`,
+    `git -C "${WT}" log --first-parent ${B1}..<integration base>\` after the merge step`,
     'merge_stop() { echo "merge step STOP: $1"; exit 3; }',
     'merge_stop "stale anchor ref $X is not on $BR (branch recut or rewritten) — delete it: git update-ref -d $REF $X"',
     'merge_stop "anchor mismatch: recorded $X, passed $A — pass the recorded anchor"',
@@ -197,15 +203,22 @@ test('b4: the integrator prompt carries the landed PRs, the plan, the merge step
   ]) assert.ok(p.includes(s), `integrator prompt: ${s}`)
   assert.ok(!p.includes('Also append that diagnosis'), 'integrator prompt: no note write')
   assert.ok(!p.includes('ONE-SHOT'), 'integrator prompt: the full loop, never the one-shot')
+  assert.ok(!p.includes('tracked changes in $WT — commit or discard them'), 'integrator prompt: leftovers are stashed, not a STOP')
+  assert.ok(!p.includes('tree NOT fast-forwarded'), 'integrator prompt: its setup never fast-forwards (the merge step does, after the stash)')
   const empty = await run(mkArgs(mkI()), { [ILABEL]: ir() })
   assert.match(promptOf(empty, ILABEL), new RegExp(`git -C "${WT}" log --first-parent ${TB}\\.\\.origin/main`))
   assert.match(promptOf(empty, ILABEL), /none reported \(a re-entry/)
+  assert.ok(!promptOf(empty, ILABEL).includes('This list ends at'), 'no landed list: the taskBase..origin read already covers it')
   const j = promptOf(r, JLABEL(2))
   for (const s of [
-    `show --cc ${M}`, `merge-tree --write-tree "${M}^1" "${M}^2"`, `diff "${M}^1" ${M}`, `diff "${M}^2" ${M}`,
+    T.integrationMergeReads(mkArgs(I), mkTask(), I, { headSha: M }).split('\n').map((l) => '    ' + l).join('\n'),
+    `A="${H0}"; HD="${M}"`, 'for C in $(git -C "$WT" log --first-parent --merges --format=%H "$A..$HD"); do',
+    'show --cc "$C"', 'merge-tree --write-tree "$C^1" "$C^2"', 'not only the newest',
+    `diff "${M}^1" ${M}`, `diff "${M}^2" ${M}`,
     `log -p --first-parent --no-merges ${H0}..${M}`, 'gh pr diff https://github.com/o/r/pull/5',
     'was anything of theirs (the landed PRs)', 'dropped or contradicted', 'anything of ours', 'Why you are here: conflict',
   ]) assert.ok(j.includes(s), `judge prompt: ${s}`)
+  assert.ok(!j.includes(`log --first-parent ${B1}..`), 'judge prompt: base = mainSha, so no late-landed read')
 })
 
 test('b5: an already-merged M integrates with that M', async () => {
@@ -240,7 +253,7 @@ test('c3: branch-moved — repair commits send it to the judge, whose range star
   clean(r)
   assert.deepEqual(r.row.integration.triggers, ['branch-moved'])
   assert.ok(promptOf(r, JLABEL(2)).includes(`log -p --first-parent --no-merges ${H0}..${RH}`))
-  assert.ok(promptOf(r, JLABEL(2)).includes('No merge commit'))
+  assert.ok(promptOf(r, JLABEL(2)).includes('No new merge commit'))
 })
 
 test('c4: committed — head past the merge commit with fixCommits [] still gets the judge', async () => {
@@ -274,7 +287,8 @@ test('c6: P1 — a verified, clean, shared-file-only lead merge runs the judge o
   assert.equal(r.row.integration.metrics.durationMinutes, 12)
   const j = promptOf(r, JLABEL(2))
   assert.ok(j.includes('the lead merged and verified; no integrator ran'))
-  assert.ok(j.includes(`show --cc ${LM}`))
+  assert.ok(j.includes(`A="${H0}"; HD="${LM}"`) && j.includes('show --cc "$C"'), 'P1: every merge under the lead merge is read')
+  assert.ok(j.includes(`diff "${LM}^1" ${LM}`))
 })
 
 test('c7: a lead merge with red (or unverified, or with fixes) goes to the integrator', async () => {
@@ -297,6 +311,41 @@ test('c8: a merge log with no task file: line is set aside', async () => {
   clean(r)
   setAside(r, 'c8')
   assert.match(r.row.blockerDiagnosis, /no `task file:` line/)
+})
+
+test('c9: PRs that landed after the lead read main reach the judge; a base equal to mainSha adds nothing', async () => {
+  const late = await run(mkArgs(mkI({ landed: LANDED, mainSha: B1 })), { [ILABEL]: ir({ state: 'merged', base: B2, files: ['a.js'] }), [JLABEL(2)]: jv() })
+  clean(late)
+  const j = promptOf(late, JLABEL(2))
+  assert.ok(j.includes(`git -C "${WT}" log --first-parent ${B1}..${B2}\` — PRs that landed after the lead read origin/main at ${B1}`), 'judge: mainSha..base')
+  assert.ok(j.includes("read each one's `gh pr diff` and brief too"))
+  assert.ok(promptOf(late, ILABEL).includes(`log --first-parent ${B1}..<integration base>`), 'integrator: the same range, after its fetch')
+  const same = await run(mkArgs(mkI({ landed: LANDED, mainSha: B1 })), { [ILABEL]: ir({ state: 'merged', base: B1, files: ['a.js'] }), [JLABEL(2)]: jv() })
+  assert.ok(!promptOf(same, JLABEL(2)).includes(`log --first-parent ${B1}..`), 'base = mainSha: nothing landed past the list')
+  const none = await run(mkArgs(mkI({ mainSha: B1 })), { [ILABEL]: ir({ state: 'merged', base: B2, files: ['a.js'], mainFiles: ['a.js'] }), [JLABEL(2)]: jv() })
+  const jn = promptOf(none, JLABEL(2))
+  assert.ok(jn.includes(`log --first-parent ${TB}..${B2}\` for what landed`) && !jn.includes(`${B1}..${B2}`), 'no landed list: taskBase..base already covers it')
+})
+
+test('c10: two merges — a judge that died after M1 was pushed, then a re-entry that merges M2: the judge reads both', async () => {
+  const I = mkI({ landed: LANDED })
+  const first = await run(mkArgs(I), { [ILABEL]: ir({ state: 'merged', merge: M1, conflicts: ['a.js'] }), [JLABEL(2)]: null })
+  setAside(first, 'c10')
+  const again = await run(mkArgs(I), {
+    [ILABEL]: ir({ state: 'merged', taskHead: M1, merge: M2, head: M2, base: B2, files: ['a.js'] }), [JLABEL(2)]: jv(),
+  })
+  clean(again)
+  assert.deepEqual(again.row.integration.mergeCommit, M2)
+  const j = promptOf(again, JLABEL(2))
+  // the loop over H0..M2 lists M1 as well as M2 (tests/integration-tree.test.sh runs it on a real two-merge branch)
+  assert.ok(j.includes(T.integrationMergeReads(mkArgs(I), mkTask(), I, { headSha: M2 }).split('\n').map((l) => '    ' + l).join('\n')))
+  assert.ok(j.includes(`A="${H0}"; HD="${M2}"`) && j.includes('--merges --format=%H "$A..$HD"'))
+  assert.ok(j.includes('a merge an earlier\n  Integration pushed but never had judged is part of what you judge now'))
+  assert.ok(j.includes(`diff "${M2}^1" ${M2}`), 'the newest merge as each side sees it')
+  // P1: a lead merge on top of the unjudged M1 — the range runs from the anchor, so M1 is read too
+  const LM = sha('9')
+  const p1 = await run(mkArgs(mkI({ trouble: ['shared-file'], landed: LANDED, leadMerge: { mergeCommit: LM, headSha: LM, baseSha: B2, verified: true } })), { [JLABEL(2)]: jv() })
+  assert.ok(promptOf(p1, JLABEL(2)).includes(`A="${H0}"; HD="${LM}"`))
 })
 
 // ---- (d) a rejection -----------------------------------------------------------------------------------
@@ -610,7 +659,8 @@ test('arg validation: every bad field throws before any dispatch', async () => {
     ['landed', mkI({ landed: [{ prUrl: 'x', title: 't', files: [], taskPath: '' }] })], ['landed', mkI({ landed: [{ ...LANDED[0], files: 'a.js' }] })],
     ['plan', mkI({ plan: null })],
     ['reviewHistory', mkI({ reviewHistory: [{ round: 2, feedback: ['x'] }, { round: 1, feedback: ['y'] }], reviewRoundsUsed: 2 })],
-    ['reviewHistory', mkI({ reviewHistory: [{ round: 1, feedback: [] }] })], ['reviewHistory', mkI({ reviewHistory: [{ round: 1, feedback: ['x'], stage: 'run' }] })],
+    ['reviewHistory', mkI({ reviewHistory: [{ round: 1, feedback: [3] }] })], ['reviewHistory', mkI({ reviewHistory: [{ round: 1, feedback: 'x' }] })],
+    ['reviewHistory', mkI({ reviewHistory: [{ round: 1, feedback: ['x'], stage: 'run' }] })],
     ['reviewRoundsUsed', mkI({ reviewRoundsUsed: 0 })], ['reviewRoundsUsed', mkI({ reviewHistory: HIST2, reviewRoundsUsed: 1 })],
     ['rung', mkI({ rung: undefined })], ['rung', mkI({ rung: { model: 'haiku', escalated: false, escalatedAt: '', tierCapped: false, tierCappedAt: '' } })],
     ['leadMerge', mkI({ leadMerge: { mergeCommit: 'x', headSha: LM, baseSha: B1, verified: true } })],
@@ -684,6 +734,12 @@ test('S2: the seeded prompt re-enters the tree; the unseeded prompt is byte-unch
     'Do not write the task note in this call — this overrides the verification loop\'s last step',
     "The latest round below is the Integration re-review's", 'never merge\norigin/main yourself — the lead re-integrates',
     'COLD ENTRY', '(round 2)',
+    // the fast-forward to origin/$BR, STOPping on a divergence, and the no-force rule
+    'if ! git -C "$WT" fetch origin --quiet; then echo "tree NOT fast-forwarded: fetch origin failed — STOP"',
+    'elif ! git -C "$WT" merge-base --is-ancestor HEAD "origin/$BR" && ! git -C "$WT" merge-base --is-ancestor "origin/$BR" HEAD; then echo "tree NOT fast-forwarded: $BR has diverged from origin/$BR — never rebase or force-push; STOP"',
+    'elif ! git -C "$WT" merge --ff-only --quiet "origin/$BR"; then',
+    ', fast-forwards it to origin/audit-fix/fix-a (never past a divergence)',
+    '\npush plainly; never rebase or force-push; a rejected push returns blocked.\n',
   ]
   for (const s of lines) assert.ok(seeded.includes(s), `seeded: ${s}`)
   const prev = { prUrl: PR, branch: BR, worktreePath: WT }
@@ -770,6 +826,73 @@ test('S7: a seeded opus task escalates uncapped and reports tierCapped: review w
   assert.deepEqual([up.row.model, up.row.escalated, up.row.escalatedAt, up.row.tierCapped], ['fable', true, 'review', false])
   const capped = await run(resumeArgs(mkResume(), { model: 'opus' }, { maxTier: 'opus' }), script)
   assert.deepEqual([capped.row.model, capped.row.escalated, capped.row.tierCapped, capped.row.tierCappedAt], ['opus', false, true, 'review'])
+})
+
+// ---- empty-feedback rounds (a `changes` verdict with [] is valid; the live row passes verbatim) ---------
+
+test('h1: a live own-run history with an empty round passes verbatim into args.integration and is dropped', async () => {
+  // the engine's own run: review r1 says changes with [], the revise lands, review r2 approves
+  const own = await run({ rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', task: mkTask({ planGate: false }) }, {
+    [`implement:${SLUG}`]: { verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: '' },
+    [`review:${SLUG} r1`]: { verdict: 'changes', feedback: [] },
+    [`revise:${SLUG} r2`]: { verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: '' },
+    [`review:${SLUG} r2`]: { verdict: 'approve', feedback: [] },
+  })
+  clean(own)
+  assert.deepEqual(own.row.reviewHistory, [{ round: 1, feedback: [] }], 'the engine records the empty round')
+  const I = mkI({ reviewHistory: own.row.reviewHistory, reviewRoundsUsed: own.row.reviewRoundsUsed, landed: LANDED })
+  const ok = await run(mkArgs(I), { [ILABEL]: ir({ state: 'merged', files: ['a.js'] }), [JLABEL(3)]: jv() })
+  clean(ok)
+  assert.equal(ok.row.status, 'review')
+  assert.deepEqual(ok.row.reviewHistory, [], 'the empty round is dropped')
+  assert.ok(!promptOf(ok, ILABEL).includes('Round 1 rejection'), 'no empty round in the integrator prompt')
+  const rej = await run(mkArgs(I, {}, { maxReviewRounds: 4 }), { [ILABEL]: ir({ state: 'merged', files: ['a.js'] }), [JLABEL(3)]: jv('changes', ['keep theirs']) })
+  clean(rej)
+  assert.equal(rej.row.status, 'blocked')
+  assert.deepEqual(rej.row.reviewHistory, [{ round: 3, feedback: ['keep theirs'], stage: 'integration' }])
+  assert.deepEqual(JSON.parse(JSON.stringify(T.parseIntegrationMarker(rej.row.blockerDiagnosis).history)), rej.row.reviewHistory)
+  for (const [h, n] of [[[{ round: 1, feedback: ['  ', ''] }], 0], [[{ round: 1, feedback: ['x', ' '] }], 1]]) {
+    const r = await run(mkArgs(mkI({ reviewHistory: h, reviewRoundsUsed: 1 })), { [ILABEL]: ir() })
+    clean(r)
+    assert.equal(r.row.reviewHistory.length, n, JSON.stringify(h))
+  }
+})
+
+test('h2: a seeded revise whose live history ends in an empty round passes and revises the latest real round', async () => {
+  const hist = [...HIST2, { round: 3, feedback: [] }]
+  const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: hist, reviewRoundsUsed: 3, plan: 'P' }
+  const args = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', task: mkTask({ resume, maxReviewRounds: 5 }) }
+  assert.equal(T.resumeArgsError(args), '')
+  const r = await run(args, {
+    [`revise:${SLUG} r4`]: { verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: '' },
+    [`review:${SLUG} r4`]: { verdict: 'approve', feedback: [] },
+  })
+  clean(r)
+  assert.deepEqual(r.labels, [`revise:${SLUG} r4`, `review:${SLUG} r4`])
+  assert.ok(promptOf(r, `revise:${SLUG} r4`).includes('Review feedback — ROUND 2 (your work order'))
+  assert.deepEqual(r.row.reviewHistory, HIST2)
+  const dead = await run(args, { [`revise:${SLUG} r4`]: null })
+  assert.equal(dead.row.reviewRoundsUsed, 3, 'a stop keeps the seed\'s rounds used')
+  assert.equal(dead.row.blockerDiagnosis.split('\n')[0], T.REVISE_MARKER)
+  // an in-call judge's `changes` with [] is recorded on the row but never written as a bare marker header
+  const implOk4 = { verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: '' }
+  const later = await run(args, { [`revise:${SLUG} r4`]: implOk4, [`review:${SLUG} r4`]: { verdict: 'changes', feedback: [] }, [`revise:${SLUG} r5`]: null })
+  clean(later)
+  assert.equal(later.row.reviewRoundsUsed, 4)
+  assert.ok(!/^Round 4/m.test(later.row.blockerDiagnosis), later.row.blockerDiagnosis)
+  assert.deepEqual(JSON.parse(JSON.stringify(T.parseIntegrationMarker(later.row.blockerDiagnosis).history)), HIST2)
+  const empty = await run({ ...args, task: mkTask({ resume: { ...resume, reviewHistory: [{ round: 1, feedback: [] }], reviewRoundsUsed: 1 } }) })
+  assert.match(String(empty.error && empty.error.message), /^args\.task\.resume: reviewHistory must carry at least one round with feedback/)
+  assert.equal(empty.calls.length, 0)
+})
+
+test('h3: a review-blocked run (`Round N:` from its first line) parses whole, for the seeded resume after the ceiling', () => {
+  const run = 'Round 1:\n- own fix\n\nRound 2:\n- keep their rename\n- restore b.js'
+  const p = T.parseIntegrationMarker(run)
+  assert.equal(p.stage, 'own')
+  assert.deepEqual(JSON.parse(JSON.stringify(p.history)), [{ round: 1, feedback: ['own fix'] }, { round: 2, feedback: ['keep their rename', 'restore b.js'] }])
+  const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: p.history, reviewRoundsUsed: 2, plan: '' }
+  assert.equal(T.resumeArgsError({ rolloutSlug: 'r', repoPath: '/repo', task: mkTask({ resume }) }), '')
 })
 
 // ---- static ----------------------------------------------------------------------------------------

@@ -88,12 +88,16 @@ export const meta = {
 //                                    //   reviewRoundsUsed, plan }. Plan and implement are skipped; the
 //                                    //   review loop starts at round reviewRoundsUsed + 1 with one seeded
 //                                    //   `revise:<slug> r<R+1>` (COLD ENTRY: it re-enters the tree with
-//                                    //   branchTreeSetup and writes no note), then the unchanged judge loop.
+//                                    //   branchTreeSetup, fast-forwards it to origin/<branch> and writes no
+//                                    //   note), then the unchanged judge loop.
 //                                    //   No round left ⇒ review-blocked with no dispatch. A seeded call that
 //                                    //   stops blocked writes REVISE_MARKER + `revise stopped: <why>` + the
 //                                    //   history. Validated (resumeArgsError) before any dispatch: the history
-//                                    //   non-empty and strictly ascending, its last round = reviewRoundsUsed,
-//                                    //   branch/worktreePath the computed ones, never a read-only task.
+//                                    //   strictly ascending with at least one round that has feedback, its
+//                                    //   last round = reviewRoundsUsed, branch/worktreePath the computed ones,
+//                                    //   never a read-only task. A round with empty feedback (reviewLoop
+//                                    //   records one for a `changes` verdict with no bullets) is accepted and
+//                                    //   dropped (liveHistory), so the live row's history passes verbatim.
 //   }
 //   mode        : string,            // optional (p12-6); absent or 'task' ⇒ the task's own call, unchanged
 //                                    //   (byte-identical prompts, labels and row). 'integrate' ⇒ Integration's
@@ -105,12 +109,16 @@ export const meta = {
 //       headSha         : string,    // the ANCHOR (40-hex) — always ANCHOR_RECIPE's output, never "the
 //                                    //   approved head" by assumption (see the lead contract below).
 //       taskBase        : string,    // git merge-base <anchor> origin/<default> (40-hex).
-//       mainSha         : string,    // origin/<default> as the lead last read it (40-hex); the integrator
-//                                    //   integrates onto whatever the fresh fetch gives and reports it.
+//       mainSha         : string,    // origin/<default> as the lead last read it (40-hex), the end of the
+//                                    //   range `landed` covers. The integrator integrates onto whatever its
+//                                    //   fresh fetch gives; when that base is not mainSha, the integrator
+//                                    //   (after its fetch) and the judge read `log --first-parent
+//                                    //   mainSha..<base>` for the PRs that landed after the lead's read.
 //       trouble         : string[],  // ⊆ conflict | red | shared-file, deduplicated; [] on a cold re-entry.
-//       landed          : [{ prUrl, title, files: string[], taskPath }], // EVERY PR merged since taskBase.
+//       landed          : [{ prUrl, title, files: string[], taskPath }], // EVERY PR merged in taskBase..mainSha.
 //       plan            : string,    // the approved plan ('' when the task was not plan-gated).
-//       reviewHistory   : [{ round, feedback: string[], stage?: 'integration' }], // rounds strictly ascending; [] ok.
+//       reviewHistory   : [{ round, feedback: string[], stage?: 'integration' }], // rounds strictly ascending; [] ok;
+//                                    //   a round with empty feedback is accepted and dropped (liveHistory).
 //       reviewRoundsUsed: number,    // >= 1 and >= the history's last round.
 //       rung            : { model, escalated, escalatedAt, tierCapped, tierCappedAt }, // the task's, passed through.
 //       leadMerge       : object,    // optional: { mergeCommit, headSha, baseSha, verified } — ONLY in a
@@ -120,47 +128,69 @@ export const meta = {
 // }
 //
 // ---- The lead contract for Integration (p12-9 owns the lead's side) ----
-// The anchor (R2-2). Every Integration of a task pins one anchor: integration.headSha, with taskBase =
-// merge-base(anchor, origin/<default>). The anchor is ALWAYS ANCHOR_RECIPE's output on the PR head (render
-// the constant verbatim and pin the copy): `anchor <X>` (the recorded ref), `anchor <sha>` (no ref: the
-// commit before the oldest first-parent merge of main, or the PR head), or `stale-ref <X>` — delete it with
+// The Integration log. A reconcile follow-up (filed by the lead, depends on p12-8) stamps `ready:` when a
+// task's status changes to review, and appends one line per Integration call under the note's
+// `## Integration log`, from this row's `integration` field: `<startedAt> <outcome> path=<p> pr=<n>
+// anchor=<sha> head=<sha> base=<sha> wait=<n|-> duration=<n|-> triggers=<list|->`. It is the durable record
+// the clean path and the review-blocked rule below read; until it lands, only the live session's own
+// record counts.
+// The anchor (ADR 0030 decision 3: a merge already in the branch is still judged). Every Integration of a
+// task pins one anchor: integration.headSha, with taskBase = merge-base(anchor, origin/<default>). The
+// anchor is ALWAYS ANCHOR_RECIPE's output on the PR head (render the constant verbatim and pin the copy):
+// `anchor <X>` (the recorded ref), `anchor <sha>` (no ref: the commit before the oldest first-parent merge
+// of main, or the PR head), or `stale-ref <X>` — delete it with
 // `git update-ref -d refs/integration-anchor/<branch> <X>` and run the recipe again. The anchor equals the
 // approved head only when the own run never merged main and no Integration has run; passing the approved
 // head of a task whose own run merged main STOPs naming the recipe's value. Every Integration call for the
 // task (set-aside re-entries, the re-integration after a rejection and revise, every base-moved retry)
 // passes the SAME anchor/taskBase pair; only mainSha, trouble, landed, leadMerge, reviewHistory /
-// reviewRoundsUsed and the metric stamps are refreshed.
-// The ref's lifecycle (R2-4). The merge step creates refs/integration-anchor/<branch> on the task's first
+// reviewRoundsUsed and the metric stamps are refreshed. The judge reads EVERY first-parent merge in
+// anchor..head, so a merge an earlier Integration pushed but never had judged is judged by the next one.
+// The ref's lifecycle. The merge step creates refs/integration-anchor/<branch> on the task's first
 // Integration, create-only, never moved (local refs are shared by every worktree and survive the session).
 // The lead deletes it, guarded by its old value, whenever the branch stops being this PR's: after the PR
 // merges (p12-7), when the PR is closed, when the task is re-dispatched from scratch or its branch recut
 // (p12-9, p12-11), and on a set-aside whose reason starts `integration: merge step STOP: stale anchor ref`.
-// The clean path (R2-3) is the lead's, never this call's, in two cases only: (i) the PR head equals the
-// anchor; (ii) the task's latest Integration record is a completed Integration whose head equals the
-// current PR head (a base-moved retry then checks shared files against that record's base). The durable
-// record is the last `integrated` line of the note's `## Integration log`, written by reconcile from this
-// row's `integration` field (L5); until then only the live session's own record counts. Anything else —
-// a rejection and revise, a set-aside, a session that died mid-Integration, a cold resume before L5 —
-// takes the trouble path, where `branch-moved` sends it to the judge. Before L5, an integrated-but-unmerged
-// task whose session died re-pays one integrator and one judge on each cold resume.
-// Inputs. `landed` lists every PR merged since taskBase, so a task back from a rejection still lists the
-// PRs behind it. `reviewHistory` comes from the live session, or cold from the latest `## Blocker
-// diagnosis` run (parseIntegrationMarker: every engine-written rejected or set-aside marker carries it),
-// else []. `reviewRoundsUsed` is the larger of the note's `review_rounds_used` and the history's last round.
-// `readyAt` is when the approving own (or seeded revise) call returned — durable as reconcile's `ready:`
-// stamp (L5); none ⇒ waitMinutes null. `startedAt` is when the lead launches this call. Never integrate a
-// read-only task; run one Integration at a time.
+// Leftovers. A dead integrator (or a verifier that rewrites tracked files, or the env bootstrap) can leave
+// tracked changes in the task tree. The merge step stashes them, never discards them (`stashed:
+// integration leftovers <head>` in the merge log), so neither the in-run retry nor a re-entry wedges on
+// them. Nobody pops that stash automatically: it stays in the repo's stash list for a human to inspect.
+// The clean path is the lead's, never this call's, in two cases only: (i) the PR head equals the anchor;
+// (ii) the task's latest Integration record is a completed Integration whose head equals the current PR
+// head (a base-moved retry then checks shared files against that record's base). The durable record is the
+// last `integrated` line of the Integration log. Anything else — a rejection and revise, a set-aside, a
+// session that died mid-Integration, a cold resume before the Integration log exists — takes the trouble
+// path, where `branch-moved` sends it to the judge. Until then, an integrated-but-unmerged task whose
+// session died re-pays one integrator and one judge on each cold resume.
+// Inputs. `landed` lists every PR merged in taskBase..mainSha, so a task back from a rejection still lists
+// the PRs behind it; the integrator and the judge read mainSha..<base> themselves for anything later.
+// `reviewHistory` comes from the live session (passed verbatim: rounds with empty feedback are dropped
+// here), or cold from the latest `## Blocker diagnosis` run (parseIntegrationMarker: every engine-written
+// rejected or set-aside marker carries it), else []. `reviewRoundsUsed` is the larger of the note's
+// `review_rounds_used` and the history's last round. `readyAt` is when the approving own (or seeded
+// revise) call returned — durable as the Integration log follow-up's `ready:` stamp; none ⇒ waitMinutes
+// null. `startedAt` is when the lead launches this call. Never integrate a read-only task; run one
+// Integration at a time.
 // Outcomes. `integrated` ⇒ row status review: hand integration.headSha and baseSha to p12-7. `rejected` ⇒
 // blocked with REVISE_MARKER (review-blocked when no review round is left): launch the seeded revise
 // (task.resume, it holds a slot — ADR 0030 decision 3), then re-integrate on the same anchor. `set-aside` ⇒
 // blocked with `integration: <reason>` (gate-pending for a gate): re-enter at Integration on the same anchor.
-// Stage markers (R2-1): the FIRST line of the latest `## Blocker diagnosis` run decides —
+// Stage markers (ADR 0030 decision 4: a set-aside task resumes at the stage it stopped, and nothing already
+// approved is redone). For a blocked task the FIRST line of the latest `## Blocker diagnosis` run decides —
 // REVISE_MARKER ⇒ a seeded revise (p12-8 reports it `setAsideAt: run`, the task's own lane), any other
 // `integration: ` line ⇒ Integration, anything else ⇒ the own run (a task-mode diagnosis that would parse
-// as a marker is written `own run: …`).
-// "Committed" (Do 4) is a non-merge commit beyond the merge commit, or a conflict resolution; a clean,
-// conflict-free merge commit alone is not code written (a clean merge touching a landed PR's files is
-// caught by `shared-file`).
+// as a marker is written `own run: …`). A review-blocked task has no such run: reconcile writes its
+// history under `## Review-blocked feedback` as plain `Round N:` groups, which drop the Integration stage.
+// So a review-blocked task whose latest Integration log line is `rejected` — an Integration rejection on
+// the last round, or a seeded revise that then ran out of rounds (a seeded revise writes no log line) —
+// resumes, once max_review_rounds is raised, as a seeded `task.resume` revise: the PR, branch
+// and tree from the note, the history from that section's latest run (parseIntegrationMarker reads the
+// `Round N:` form), reviewRoundsUsed its last round; never a fresh plan or implement. No such line ⇒ the
+// own run. Before the Integration log exists, only the live session's record (this row's
+// `integration.outcome`, or the seeded call it launched) tells the two apart.
+// "Committed" (the `committed` trigger) is a non-merge commit beyond the merge commit, or a conflict
+// resolution; a clean, conflict-free merge commit alone is not code written (a clean merge touching a
+// landed PR's files is caught by `shared-file`).
 //
 // Returns { rolloutSlug, tasks: [ONE row: { slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
@@ -180,7 +210,7 @@ export const meta = {
 // path: integrator | judge-only, anchor: { headSha, taskBase }, headSha, baseSha, mergeCommit, triggers
 // (conflict | committed | branch-moved | shared-file), reReviewed, feedback, reason, agents: [{ role,
 // label, model, effort, finishedAt }], metrics: { readyAt, startedAt, finishedAt, waitMinutes,
-// durationMinutes } } — the payload L5's `## Integration log` line records. Its status is one of the
+// durationMinutes } } — the payload the Integration log line records. Its status is one of the
 // five above; model/escalated/tierCapped come from integration.rung.
 // =============================================================================
 
@@ -872,9 +902,12 @@ prUrl (unchanged), branch (unchanged), worktreePath, blockerDiagnosis, summary.`
 
 // The seeded reviser's COLD ENTRY (p12-6): its own leading "\n\n", like the other empty-when-unused
 // fragments. A revise after an Integration rejection is a separate call, possibly long after the tree
-// was last used, so it re-enters the tree with branchTreeSetup (self-heal, re-attach, lock) instead of
-// the in-run reviser's bare `cd`. The note-write override keeps the engine's stage marker the only
-// diagnosis a stopped revise leaves (ADR 0030 decision 4).
+// was last used, so it re-enters the tree with branchTreeSetup (self-heal, re-attach, lock, and the
+// fast-forward to origin/<branch> that STOPs on a divergence) instead of the in-run reviser's bare `cd`.
+// The no-force line matters here: a rebase plus force-push of a branch holding an Integration merge
+// breaks ADR 0030's never-force rule and strands refs/integration-anchor/<branch>, so the next
+// Integration STOPs. The note-write override keeps the engine's stage marker the only diagnosis a
+// stopped revise leaves (ADR 0030 decision 4).
 function coldEntryBlock(a, task, history) {
   const last = history[history.length - 1]
   const integ = history.filter((r) => r.stage === 'integration').map((r) => r.round)
@@ -882,9 +915,11 @@ function coldEntryBlock(a, task, history) {
 
 COLD ENTRY (ADR 0030 decision 3): this revise is its own call, launched after the Integration re-review
 rejected this approved branch${integ.length ? ` (round ${integ.join(', ')})` : ''}, possibly long after the tree was last used.
-${branchTreeSetup(a, task, true)}
+${branchTreeSetup(a, task, true, true)}
 The latest round below ${last && last.stage === 'integration' ? "is the Integration re-review's" : 'follows an Integration re-review rejection'}: fix it on the branch and push; never merge
 origin/${defaultBranch(a)} yourself — the lead re-integrates.
+The branch may carry an Integration merge, and every later Integration pins its anchor on this history:
+push plainly; never rebase or force-push; a rejected push returns blocked.
 Do not write the task note in this call — this overrides the verification loop's last step; return the
 diagnosis, and the engine records it with its stage marker.`
 }
@@ -1070,7 +1105,12 @@ function treeLockLines(g) {
 // $BR, or track origin/$BR after a fetch, and otherwise print a STOP. Inside the same guard as
 // taskTreeSetup: the pid lock, the tree put on $BR (a detached or wrong-branch tree), `tree head:`, and
 // the env bootstrap last (bootstrap=true: the code-writing agents; the judge only reads).
-function branchTreeSetup(a, task, bootstrap) {
+// ff=true (the seeded reviser only): after the checkout, fetch and fast-forward $BR to origin/$BR, so a
+// tree reused as it was (or a local $BR left behind) never misses commits an Integration pushed since. A
+// divergence is a STOP, never a rebase or a force; local commits origin lacks (a dead reviser's unpushed
+// work) stay, and the plain push carries them. The integrator gets no fast-forward here: its merge step
+// stashes leftovers first, then fast-forwards under the same divergence STOP.
+function branchTreeSetup(a, task, bootstrap, ff) {
   const wt = worktreeDir(a.repoPath, task.slug)
   const br = `audit-fix/${shortAlias(task.slug)}`
   const g = 'git -C "$WT"'
@@ -1084,6 +1124,14 @@ function branchTreeSetup(a, task, bootstrap) {
     `if [ -d "$WT" ] && [ "$(${g} rev-parse --show-toplevel 2>/dev/null)" = "$(pwd -P)" ]; then`,
     ...treeLockLines(g),
     `  if [ "$(${g} symbolic-ref -q --short HEAD)" != "$BR" ]; then { if ${g} show-ref --verify --quiet "refs/heads/$BR"; then ${g} checkout --quiet "$BR"; else ${g} checkout --quiet --track -b "$BR" "origin/$BR"; fi; } || echo "tree NOT on $BR: checkout failed — STOP"; fi`,
+    ...(ff ? [
+      `  if [ "$(${g} symbolic-ref -q --short HEAD)" = "$BR" ]; then`,
+      `    if ! ${g} fetch origin --quiet; then echo "tree NOT fast-forwarded: fetch origin failed — STOP"`,
+      `    elif ! ${g} show-ref --verify --quiet "refs/remotes/origin/$BR"; then echo "tree NOT fast-forwarded: origin/$BR does not exist — STOP"`,
+      `    elif ! ${g} merge-base --is-ancestor HEAD "origin/$BR" && ! ${g} merge-base --is-ancestor "origin/$BR" HEAD; then echo "tree NOT fast-forwarded: $BR has diverged from origin/$BR — never rebase or force-push; STOP"`,
+      `    elif ! ${g} merge --ff-only --quiet "origin/$BR"; then echo "tree NOT fast-forwarded to origin/$BR: local changes in the way — STOP"; fi`,
+      '  fi',
+    ] : []),
     `  echo "tree head: $(${g} rev-parse HEAD)"`,
     ...(bootstrap && a.envBootstrap ? ['  ' + envBootstrapStep(a).trimStart()] : []),
     'fi',
@@ -1093,7 +1141,7 @@ function branchTreeSetup(a, task, bootstrap) {
 ${cmd.map((l) => '  ' + l).join('\n')}
 This is the task's ONE worktree, on its PR branch ${br}. The setup reuses it, re-attaches the local branch,
 or tracks origin/${br} after a fetch; it never cuts a new branch from the default branch. It locks the tree
-against the daily worktree reaper, puts it on ${br} and prints \`tree head: <sha>\`. Any printed line that
+against the daily worktree reaper, puts it on ${br}${ff ? `, fast-forwards it to origin/${br} (never past a divergence)` : ''} and prints \`tree head: <sha>\`. Any printed line that
 ends in STOP (or a toplevel that is not the task tree) means: change nothing, and return blocked with that
 line as your diagnosis. Every repo read and command runs in this tree, never in the project's shared
 checkout at "${a.repoPath}".`
@@ -1516,8 +1564,9 @@ async function reviewLoop(task, st, prev, a, planText, seed) {
   let round = seed ? seed.roundsUsed + 1 : 1
   // A seeded call that stops blocked carries its history, so taskResult can write the revise marker
   // (ADR 0030 decision 4: it resumes at revise, never at a fresh plan). Unseeded rows are untouched.
+  // Its rounds used never drop below the seed's: the seed's last round may have had no feedback (liveHistory).
   const stopped = (x) => (seed && x.status === 'blocked'
-    ? { ...x, reviewHistory: priorFeedback, reviewRoundsUsed: priorFeedback[priorFeedback.length - 1].round }
+    ? { ...x, reviewHistory: priorFeedback, reviewRoundsUsed: Math.max(seed.roundsUsed, priorFeedback[priorFeedback.length - 1].round) }
     : x)
   if (seed) {
     if (round > task.maxReviewRounds) {
@@ -1649,7 +1698,8 @@ const INTEGRATION_THREW = 'workflow stage threw — see /workflows'
 const SHA40 = /^[0-9a-f]{40}$/
 const PR_URL = /^https:\/\/\S+\/pull\/\d+$/
 
-// The task's anchor (R2-2): the ONE commit every Integration of the task pins. It prints exactly one line:
+// The task's anchor (ADR 0030 decision 3): the ONE commit every Integration of the task pins. It prints
+// exactly one line:
 //   anchor <X>     refs/integration-anchor/<branch> exists and X is an ancestor of the PR head;
 //   stale-ref <X>  the ref exists but is NOT on the branch (recut or rewritten): delete it with
 //                  `git update-ref -d <ref> <X>` and run the recipe again;
@@ -1711,11 +1761,15 @@ function normHistory(history) {
 }
 
 // The history as a marker carries it: `Round N rejection:` / `Round N (Integration) rejection:`, then
-// one-line bullets. Reconcile writes it verbatim, so a cold lead rebuilds the history from the note.
+// one-line bullets. Reconcile writes it verbatim, so a cold lead rebuilds the history from the note. A round
+// with no feedback (a later in-call judge's `changes` with []) is left out, as parseIntegrationMarker and
+// reconcile's history_block leave it out, rather than written as a header with no bullets.
 function markerHistory(history) {
   return (history || [])
+    .map((r) => ({ ...r, feedback: (r.feedback || []).map(flattenLine).filter((f) => f) }))
+    .filter((r) => r.feedback.length)
     .map((r) => `Round ${r.round}${r.stage === 'integration' ? ' (Integration)' : ''} rejection:\n` +
-      (r.feedback || []).map((f) => '- ' + flattenLine(f)).join('\n'))
+      r.feedback.map((f) => '- ' + f).join('\n'))
     .join('\n\n')
 }
 
@@ -1730,7 +1784,8 @@ function integrationMarker(kind, reason, history) {
 }
 
 // The reference parser for one run's text (p12-8's latest_run_text / status's blockerSummary). The first
-// non-blank line decides the stage; the history accepts both the marker form and reconcile's `Round N:`.
+// non-blank line decides the stage; the history accepts both the marker form and reconcile's `Round N:`,
+// from the first line on, so a `## Review-blocked feedback` run (which opens with `Round 1:`) parses whole.
 function parseIntegrationMarker(text) {
   const lines = String(text == null ? '' : text).split('\n')
   const at = lines.findIndex((l) => l.trim())
@@ -1746,7 +1801,7 @@ function parseIntegrationMarker(text) {
   }
   const history = []
   let cur = null
-  for (const raw of lines.slice(at + 1)) {
+  for (const raw of lines.slice(Math.max(at, 0))) {
     const l = raw.trim()
     const m = l.match(/^Round (\d+)( \(Integration\))?(?: rejection)?:$/i)
     if (m) {
@@ -1777,6 +1832,11 @@ function stageDiagnosis(t, norm, status) {
 
 // ---- Integration: args ----
 
+// A review history as the engine itself records it. reviewLoop pushes `{ round, feedback: verdict.feedback }`
+// for every `changes` verdict, and REVIEW_VERDICT lets that feedback be [] — so a round with empty (or
+// blank) feedback is valid input here, and the live row's history passes verbatim. liveHistory drops such
+// rounds before use, as reconcile's history_block and parseIntegrationMarker already do, so the live and
+// the cold (note-rebuilt) histories agree.
 function historyError(h, allowEmpty) {
   if (!Array.isArray(h)) return 'must be an array'
   if (!allowEmpty && !h.length) return 'must be non-empty'
@@ -1785,13 +1845,19 @@ function historyError(h, allowEmpty) {
     if (!r || typeof r !== 'object' || Array.isArray(r)) return 'entries must be { round, feedback, stage? } objects'
     if (!(Number.isInteger(r.round) && r.round >= 1)) return 'round must be an integer >= 1'
     if (r.round <= prev) return 'rounds must be strictly ascending'
-    if (!Array.isArray(r.feedback) || !r.feedback.length || r.feedback.some((f) => typeof f !== 'string' || !f.trim())) {
-      return `round ${r.round}: feedback must be a non-empty array of non-empty strings`
+    if (!Array.isArray(r.feedback) || r.feedback.some((f) => typeof f !== 'string')) {
+      return `round ${r.round}: feedback must be an array of strings`
     }
     if (r.stage !== undefined && r.stage !== 'integration') return `round ${r.round}: stage must be 'integration' when present`
     prev = r.round
   }
+  if (!allowEmpty && !liveHistory(h).length) return 'must carry at least one round with feedback'
   return ''
+}
+
+// A validated history with blank bullets and empty rounds dropped (see historyError).
+function liveHistory(h) {
+  return h.map((r) => ({ ...r, feedback: r.feedback.filter((f) => f.trim()) })).filter((r) => r.feedback.length)
 }
 
 const isSha = (s) => typeof s === 'string' && SHA40.test(s)
@@ -1852,7 +1918,7 @@ function integrationArgsError(a) {
       return 'leadMerge must be { mergeCommit, headSha, baseSha (40-hex), verified: boolean }'
     }
     // The lead's merge commit is never the anchor: an anchor refreshed to the post-merge head would let
-    // the merge it holds skip the judge (R2-2). The recipe gives the commit before that merge.
+    // the merge it holds skip the judge. The recipe gives the commit before that merge.
     if (m.mergeCommit === I.headSha) return 'leadMerge.mergeCommit is the passed anchor headSha — pass ANCHOR_RECIPE\'s anchor, never the merged head'
   }
   for (const k of ['readyAt', 'startedAt']) if (I[k] !== undefined && typeof I[k] !== 'string') return `${k} must be a string when present`
@@ -1934,10 +2000,13 @@ function integrationMetrics(I, agents) {
 
 // The integrator's merge step: ONE Bash command that runs under bash and `zsh -f` (the Bash tool's
 // shell). A STOP prints `merge step STOP: <why>` and exits 3; the engine records it as
-// `integration: merge step STOP: <why>`. In order: abort a merge left in progress; refuse tracked
-// changes; fetch (retried once); fast-forward ONLY to origin/$BR (a divergence is a STOP, never a force);
-// the anchor checks (R2-2, R2-4) — a stale ref, a mismatched ref, an anchor that carries a merge, a base
-// that is not merge-base(anchor, main), an anchor not on the branch — then the create-only anchor ref;
+// `integration: merge step STOP: <why>`. In order: abort a merge left in progress; stash the tracked
+// changes left behind (a dead integrator mid-fix, a verifier or env bootstrap that rewrites tracked files),
+// never discarding them, printing `stashed: integration leftovers <head>`, so neither the in-run retry nor
+// a re-entry wedges on them; fetch (retried once); fast-forward ONLY to origin/$BR (a divergence is a
+// STOP, never a force); the anchor checks (the pinned anchor and its ref's lifecycle, see the lead
+// contract) — a stale ref, a mismatched ref, an anchor that carries a merge, a base that is not
+// merge-base(anchor, main), an anchor not on the branch — then the create-only anchor ref;
 // the `task head:`, `integration base:`, `task file:` (B...H) and `main file:` (TB..B) lines; and exactly
 // one `merge:` line. `already-merged <M>` is the newest first-parent merge in TB..H whose second parent
 // is an ancestor of (or is) B; a conflict lists its `conflict:` paths before anything is resolved and
@@ -1953,7 +2022,8 @@ function integrationMergeStep(a, task, I) {
     'merge_stop() { echo "merge step STOP: $1"; exit 3; }',
     `[ "$(${g} symbolic-ref -q --short HEAD)" = "$BR" ] || merge_stop "the task tree $WT is not on $BR — re-run the setup"`,
     `if ${g} rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then ${g} merge --abort || merge_stop "could not abort the merge left in progress"; echo "aborted: a merge left in progress"; fi`,
-    `[ -z "$(${g} status --porcelain --untracked-files=no)" ] || merge_stop "tracked changes in $WT — commit or discard them, then re-run"`,
+    `if [ -n "$(${g} status --porcelain --untracked-files=no)" ]; then L="integration leftovers $(${g} rev-parse HEAD)"; ${g} stash push --quiet -m "$L" || merge_stop "tracked changes in $WT could not be stashed — commit or discard them, then re-run"; echo "stashed: $L"; fi`,
+    `[ -z "$(${g} status --porcelain --untracked-files=no)" ] || merge_stop "tracked changes in $WT survived the stash — commit or discard them, then re-run"`,
     `${g} fetch origin --quiet || ${g} fetch origin --quiet || merge_stop "fetch origin failed twice"`,
     `${g} show-ref --verify --quiet "refs/remotes/origin/$BR" || merge_stop "origin/$BR does not exist — the PR branch is gone"`,
     `${g} merge --ff-only --quiet "origin/$BR" >/dev/null 2>&1 || merge_stop "$BR has diverged from origin/$BR — never force; reconcile it by hand"`,
@@ -1979,6 +2049,27 @@ function integrationMergeStep(a, task, I) {
     `elif ${g} rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then echo "merge: conflict"; ${g} diff --name-only --diff-filter=U | sed 's/^/conflict: /'`,
     'else merge_stop "git merge failed with no conflict (an untracked file in the way?)"; fi',
     ')',
+  ].join('\n')
+}
+
+// The Integration judge's merge reads: EVERY first-parent merge in anchor..head, newest first, not only the
+// merge this call made. An earlier Integration can push its merge and then lose its judge (a death, an
+// unreadable check), and a lead merge (P1) can sit on top of such a merge; the next judge is the only one
+// left to read it. For each merge it prints `show --cc` (the merge's own resolution) and the remerge diff
+// (the committed merge against git's automatic merge of the same parents; skipped on git < 2.38, which has
+// no `merge-tree --write-tree`), then a count line. Read-only; runs under bash and `zsh -f`.
+function integrationMergeReads(a, task, I, j) {
+  const wt = worktreeDir(a.repoPath, task.slug)
+  const g = 'git -C "$WT"'
+  return [
+    `${GIT_ENV_SCRUB} WT="${wt}"; A="${I.headSha}"; HD="${j.headSha}"; n=0`,
+    `for C in $(${g} log --first-parent --merges --format=%H "$A..$HD"); do`,
+    '  n=$((n+1)); echo "=== merge $C"',
+    `  ${g} show --cc "$C"`,
+    `  T=$(${g} merge-tree --write-tree "$C^1" "$C^2" 2>/dev/null | head -n 1)`,
+    `  if [ -n "$T" ]; then echo "=== remerge diff $C"; ${g} diff "$T" "$C"; else echo "=== no remerge diff for $C (git < 2.38)"; fi`,
+    'done',
+    'echo "=== $n first-parent merge(s) in $A..$HD"',
   ].join('\n')
 }
 
@@ -2041,7 +2132,11 @@ function landedBlock(a, task, I) {
   return I.landed.map((p) => `- ${p.prUrl} — ${p.title}
   files: ${p.files.length ? p.files.join(', ') : '(none listed)'}
   task brief: ${p.taskPath || '(none)'}`).join('\n') +
-    '\nRead EVERY brief above and each PR\'s `gh pr diff <url>` before you resolve anything: their intent is half the contract.'
+    '\nRead EVERY brief above and each PR\'s `gh pr diff <url>` before you resolve anything: their intent is half the contract.' +
+    `\nThis list ends at ${I.mainSha}, origin/${defaultBranch(a)} as the lead read it. When the merge step's \`integration base:\` sha
+is not ${I.mainSha}, more PRs landed after that read: run
+\`${GIT_ENV_SCRUB} git -C "${wt}" log --first-parent ${I.mainSha}..<integration base>\` after the merge step and read
+each PR there (its brief and \`gh pr diff\`) the same way, before you resolve anything.`
 }
 
 function integratorPrompt(task, a, I) {
@@ -2077,12 +2172,13 @@ ${landedBlock(a, task, I)}
 
 Step 1 — the merge step. Run exactly, as ONE Bash command (exit 3 is a STOP):
 ${integrationMergeStep(a, task, I).split('\n').map((l) => '  ' + l).join('\n')}
-It aborts a merge left in progress, refuses tracked changes, fetches, fast-forwards ${I.branch} to its origin
-copy (never past a divergence), checks the task's anchor ${I.headSha} (recorded once as
-refs/integration-anchor/${I.branch}) and prints \`anchor:\`, \`task head:\`, \`integration base:\`, \`task file:\` and
-\`main file:\` lines and exactly one \`merge:\` line. Copy its stdout VERBATIM into mergeLog. On a
-\`merge step STOP: <why>\` line: change nothing, and return blocked=true with that line verbatim as
-blockerDiagnosis and mergeState "none".
+It aborts a merge left in progress, stashes any tracked changes an earlier attempt left behind (a
+\`stashed: integration leftovers <head>\` line: leave that stash alone, never pop or apply it, and name it in your
+summary), fetches, fast-forwards ${I.branch} to its origin copy (never past a divergence), checks the task's
+anchor ${I.headSha} (recorded once as refs/integration-anchor/${I.branch}) and prints \`anchor:\`, \`task head:\`,
+\`integration base:\`, \`task file:\` and \`main file:\` lines and exactly one \`merge:\` line. Copy its stdout
+VERBATIM into mergeLog. On a \`merge step STOP: <why>\` line: change nothing, and return blocked=true with that
+line verbatim as blockerDiagnosis and mergeState "none".
 
 Step 2 — resolve. On \`merge: conflict\`: resolve every \`conflict:\` path keeping BOTH intents — what the
 landed PRs did (theirs) and what this task did (ours); never drop a side to make the merge go through. Then
@@ -2115,16 +2211,25 @@ function integrationReviewPrompt(task, a, I, j) {
   const def = defaultBranch(a)
   const S = `${GIT_ENV_SCRUB} git -C "${wt}"`
   const M = j.mergeCommit
+  // `landed` covers taskBase..mainSha (the lead's read). A base past mainSha means PRs landed after that
+  // read, invisible to the list; with no list the taskBase..base read already covers them.
+  const late = I.landed.length && j.baseSha !== I.mainSha
   const reads = [
+    `- EVERY first-parent merge on the branch since the anchor, not only the newest: a merge an earlier
+  Integration pushed but never had judged is part of what you judge now. Run exactly, as ONE Bash command
+  (per merge: its own resolution, \`show --cc\`, then its remerge diff, how the committed merge differs from
+  git's automatic one):
+${integrationMergeReads(a, task, I, j).split('\n').map((l) => '    ' + l).join('\n')}`,
     ...(M ? [
-      `- \`${S} show --cc ${M}\` — the merge commit's own resolution.`,
-      `- \`${GIT_ENV_SCRUB} T=$(git -C "${wt}" merge-tree --write-tree "${M}^1" "${M}^2" | head -n 1) && git -C "${wt}" diff "$T" ${M}\` — how the committed merge differs from git's automatic one (skip this on git < 2.38).`,
-      `- \`${S} diff "${M}^1" ${M}\` and \`${S} diff "${M}^2" ${M}\` — the merge as each side sees it.`,
-    ] : [`- No merge commit: origin/${def} was not merged in this integration.`]),
+      `- \`${S} diff "${M}^1" ${M}\` and \`${S} diff "${M}^2" ${M}\` — the newest merge as each side sees it.`,
+    ] : [`- No new merge commit: origin/${def} was not merged in this integration (the merges above, if any, are earlier ones).`]),
     `- \`${S} log -p --first-parent --no-merges ${I.headSha}..${j.headSha}\` — every commit on the branch since the anchor (repair, revise and fix commits).`,
     ...(I.landed.length
       ? I.landed.map((p) => `- ${p.prUrl} (${p.title}): \`gh pr diff ${p.prUrl}\` and its brief ${p.taskPath || '(none)'}.`)
       : [`- No landed PRs were passed: read \`${S} log --first-parent ${I.taskBase}..${j.baseSha}\` for what landed.`]),
+    ...(late ? [
+      `- \`${S} log --first-parent ${I.mainSha}..${j.baseSha}\` — PRs that landed after the lead read origin/${def} at ${I.mainSha}, so not listed above: read each one's \`gh pr diff\` and brief too.`,
+    ] : []),
   ]
   const last = I.reviewHistory[I.reviewHistory.length - 1]
   const history = I.reviewHistory.length ? `
@@ -2269,7 +2374,7 @@ async function integrate(task, a, trace) {
   return { outcome: 'rejected', ...j, reReviewed: true, feedback: feedback.length ? feedback : ['the Integration re-review returned changes with no feedback'] }
 }
 
-// The integrate call's ONE row: today's 19 keys plus `integration` (the payload L5's log line records).
+// The integrate call's ONE row: today's 19 keys plus `integration` (the payload the Integration log line records).
 // Every status is one of reconcile's five: integrated → review; rejected → blocked with the revise
 // marker (review-blocked when no review round is left); set-aside → blocked with `integration: <reason>`
 // (gate-pending for a gate). A rejected task's note therefore never reads as approved.
@@ -2365,16 +2470,18 @@ if (mode === 'task' && a.task.resume !== undefined) {
 if (mode === 'integrate') {
   log(`integrate: ${a.rolloutSlug} — ${a.task.slug} (${a.task.scope})`)
   if (a.progress) log(a.progress)
+  // The validated history with its empty rounds dropped (liveHistory) is the one every prompt and the row use.
+  const ia = { ...a, integration: { ...a.integration, reviewHistory: liveHistory(a.integration.reviewHistory) } }
   // A stage that throws becomes a set-aside at Integration, never a lost result.
   const trace = { agents: [], path: '' }
   let out
   try {
-    out = await integrate(a.task, a, trace)
+    out = await integrate(ia.task, ia, trace)
   } catch (e) {
     log(`integrate threw on ${a.task.slug}: ${(e && e.message) || e}`)
     out = null
   }
-  const irow = integrationResult(a.task, out, a, trace)
+  const irow = integrationResult(ia.task, out, ia, trace)
   log(`${irow.slug} → ${irow.status} (integration: ${irow.integration.outcome})`)
   return { rolloutSlug: a.rolloutSlug, tasks: [irow] }
 }
@@ -2385,16 +2492,21 @@ if (tierCap(a) !== TOP_TIER) log(`maxTier=${tierCap(a)} — escalation is capped
 // mark-dispatched) from the rollout note's wave-boundary stamps and the engine just surfaces it.
 if (a.progress) log(a.progress)
 
+// A seeded revise uses its validated history with the empty rounds dropped (liveHistory); any other task
+// object passes through untouched.
+const callTask = a.task.resume
+  ? { ...a.task, resume: { ...a.task.resume, reviewHistory: liveHistory(a.task.resume.reviewHistory) } }
+  : a.task
 // A stage that throws drops the task to null, which taskResult() turns into a blocked row — the same
 // mapping the old per-wave orchestration had, so one bad stage never loses the call's result.
 let r
 try {
-  r = await converge(a.task, a)
+  r = await converge(callTask, a)
 } catch (e) {
   log(`converge threw on ${a.task.slug}: ${(e && e.message) || e}`)
   r = null
 }
-const row = taskResult(a.task, r, a)
+const row = taskResult(callTask, r, a)
 log(`${row.slug} → ${row.status}`)
 
 return { rolloutSlug: a.rolloutSlug, tasks: [row] }

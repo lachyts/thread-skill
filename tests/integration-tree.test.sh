@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # p12-6 (ADR 0030 decision 3), executed: the steps the Integration call renders — branchTreeSetup (the
-# integrator's, the judge's and the seeded reviser's tree entry), integrationMergeStep (the integrator's
-# merge step), integrationJudgeCheck (the judge's first step) and ANCHOR_RECIPE (the lead's anchor) — run
-# under bash AND zsh -f (the Bash tool's shell on macOS) against fixture origins.
+# integrator's, the judge's and the seeded reviser's tree entry, the last with its fast-forward),
+# integrationMergeStep (the integrator's merge step), integrationJudgeCheck (the judge's first step),
+# integrationMergeReads (the judge's read of every merge since the anchor) and ANCHOR_RECIPE (the lead's
+# anchor) — run under bash AND zsh -f (the Bash tool's shell on macOS) against fixture origins.
 # skills/execute/tests/integrate.test.mjs pins the prompt text and the engine's handling of the results;
 # this runs the commands. Hermetic: every repo lives under mktemp, the global git config is /dev/null, the
 # identity comes from env vars, and the caller's GIT_DIR & co. are unset first.
@@ -30,20 +31,22 @@ else echo "SKIP - zsh arm: zsh not installed on this $(uname) runner"; fi
 
 # render <what> <repo> [A TB [M HD BS]]: one rendered step, as the engine renders it for task $SLUG on a
 # `master` repo. what: setup (with the env bootstrap ENVB when set), setup-nb (the judge's: no bootstrap),
-# merge, judge, recipe. A setup block is its indented command lines, as an agent runs them.
+# setup-ff (the seeded reviser's: bootstrap and the fast-forward to origin/$BR), merge, judge, reads (A..HD),
+# recipe. A setup block is its indented command lines, as an agent runs them.
 render() {
   node --input-type=module -e "
     import { loadEngine } from './tests/lib/engine.mjs'
-    const T = loadEngine(['branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck', 'ANCHOR_RECIPE'])
+    const T = loadEngine(['branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck', 'integrationMergeReads', 'ANCHOR_RECIPE'])
     const [what, repo, A, TB, M, HD, BS] = process.argv.slice(1)
     const a = { repoPath: repo, defaultBranch: 'master', ...(process.env.ENVB ? { envBootstrap: process.env.ENVB } : {}) }
     const task = { slug: '$SLUG', scope: 'cross-cutting' }
     let out
-    if (what === 'setup' || what === 'setup-nb') {
-      const l = T.branchTreeSetup(a, task, what === 'setup').split('\n').slice(1)
+    if (what === 'setup' || what === 'setup-nb' || what === 'setup-ff') {
+      const l = T.branchTreeSetup(a, task, what !== 'setup-nb', what === 'setup-ff').split('\n').slice(1)
       out = l.slice(0, l.findIndex((x) => !x.startsWith('  '))).join('\n')
     } else if (what === 'merge') out = T.integrationMergeStep(a, task, { headSha: A, taskBase: TB })
     else if (what === 'judge') out = T.integrationJudgeCheck(a, task, { headSha: A, taskBase: TB }, { mergeCommit: M || '', headSha: HD, baseSha: BS })
+    else if (what === 'reads') out = T.integrationMergeReads(a, task, { headSha: A }, { headSha: HD })
     else out = T.ANCHOR_RECIPE
     process.stdout.write(out + '\n')
   " "$@"
@@ -52,7 +55,7 @@ render() {
 suite() {
   local sh="$1" n base
   n=$(basename "${sh%% *}"); base="$tmp/$n"; mkdir -p "$base"
-  local F R wt TB H0 B out rc M M2 RH LH JR XS A17 A18 P Bm MOWN HA NH before
+  local F R wt TB H0 B out rc M M1 M2 RH LH JR XS A17 A18 P Bm MOWN HA NH OH before
 
   # mk <name>: a fresh fixture — origin o.git (master: base.txt, a.txt), a pusher clone p, the task branch
   # $BR (one commit on a.txt) pushed, and the project's checkout R with no local $BR. TB is the task's base,
@@ -79,6 +82,8 @@ suite() {
   # test's live pid); stdout+stderr in $out, exit status in $rc.
   run() { local s="$1"; shift; cd "$base" && env "$@" $sh -c "$s" > "$base/out" 2>&1; rc=$?; cd "$root"; out=$(cat "$base/out"); }
   setup() { run "$(render setup "$R")"; }
+  setupff() { run "$(render setup-ff "$R")"; }
+  reads() { run "$(render reads "$R" "$1" "" "" "$2")"; }
   merge() { run "$(render merge "$R" "$1" "$2")"; }
   recipe() { run "WT=\"$1\"; BR=\"$BR\"; D=origin/master; git -C \"$1\" fetch -q origin; H=\$(git -C \"$1\" rev-parse \"origin/$BR\"); $(render recipe)"; }
   lockpid() { grep -oE 'pid [0-9]+' "$R/.git/worktrees/$SLUG/locked" 2>/dev/null | grep -oE '[0-9]+' | head -1; }
@@ -212,12 +217,18 @@ l3'; merge "$H0" "$TB"
   has "$out" "aborted: a merge left in progress" "$n 10: a merge left in progress is aborted"
   has "$out" "merge: conflict" "$n 10: … and the step runs on"
 
-  # 11. tracked changes: STOP, HEAD unchanged
+  # 11. tracked changes a dead integrator left behind: stashed (never discarded), and the step runs on — so
+  #     neither the in-run retry nor a re-entry wedges on them
   git -C "$wt" merge --abort; echo dirty >> "$wt/base.txt"
   merge "$H0" "$TB"
-  ok "$rc|$(hd)" "3|$H0" "$n 11: tracked changes → exit 3, HEAD unchanged"
-  has "$out" "merge step STOP: tracked changes in $wt" "$n 11: … and the STOP line"
-  git -C "$wt" checkout -q -- base.txt
+  ok "$rc|$(hd)" "0|$H0" "$n 11: tracked leftovers → exit 0, HEAD unchanged"
+  has "$out" "stashed: integration leftovers $H0" "$n 11: … the stashed: line names the head"
+  has "$out" "merge: conflict" "$n 11: … and the step runs on to its merge line"
+  lacks "$out" "merge step STOP" "$n 11: … with no STOP"
+  ok "$(git -C "$wt" stash list -n 1 --format=%s)" "On $BR: integration leftovers $H0" "$n 11: … the leftovers are in the stash"
+  has "$(git -C "$wt" stash show -p 'stash@{0}')" "+dirty" "$n 11: … with their content"
+  ok "$(grep -c dirty "$wt/base.txt")" 0 "$n 11: … and gone from the tree"
+  git -C "$wt" merge --abort
 
   # 13. a diverged branch: STOP, never a force
   g -C "$wt" commit -q --allow-empty -m local; LH=$(hd)
@@ -282,6 +293,44 @@ l3'; merge "$H0" "$TB"
   ok "$rc" 0 "$n 23: … and the merge step passes"
   ok "$(hasref)" "$NH" "$n 23: … recording the new anchor"
 
+  # 24. two merges: Integration 1 resolves a conflict and pushes M1 (its judge then dies); main moves and the
+  #     re-entry merges M2 on top. The judge's reads list BOTH merges from the anchor, each with its own
+  #     resolution (show --cc) and its remerge diff, not only the newest
+  mk r24; setup; main a.txt 'l1
+l2 main
+l3'; merge "$H0" "$TB"
+  printf 'l1\nl2 task main\nl3\n' > "$wt/a.txt"; git -C "$wt" add a.txt; git -C "$wt" commit -q --no-edit
+  M1=$(hd); git -C "$wt" push -q origin "$BR"
+  main m.txt m1; merge "$H0" "$TB"; M2=$(hd); git -C "$wt" push -q origin "$BR"
+  has "$out" "merge: merged $M2" "$n 24: (the re-entry merges M2 on top of M1)"
+  reads "$H0" "$M2"
+  has "$out" "=== merge $M2" "$n 24: the reads list the newest merge M2"
+  has "$out" "=== merge $M1" "$n 24: … and the earlier, unjudged M1"
+  has "$out" "=== 2 first-parent merge(s) in $H0..$M2" "$n 24: … two merges in all"
+  has "$out" "diff --cc a.txt" "$n 24: … M1's own resolution (show --cc)"
+  has "$out" "=== remerge diff $M1" "$n 24: … and its remerge diff"
+  has "$out" "-<<<<<<<" "$n 24: … against git's automatic merge, conflict markers and all"
+  reads "$H0" "$M1"
+  ok "$(printf '%s\n' "$out" | grep -c '^=== merge ')|$(printf '%s\n' "$out" | tail -1)" "1|=== 1 first-parent merge(s) in $H0..$M1" "$n 24: a range ending at M1 lists M1 alone"
+  reads "$TB" "$H0"
+  ok "$out" "=== 0 first-parent merge(s) in $TB..$H0" "$n 24: no merge in the range → the count line only"
+
+  # 25. the seeded reviser's setup fast-forwards to origin/$BR; a divergence STOPs; the integrator's never moves
+  mk r25; setup; bcommit int.txt integrated; OH=$(git -C "$F/o.git" rev-parse "$BR")
+  setup
+  ok "$(hd)" "$H0" "$n 25: the integrator's setup leaves a reused tree where it was (its merge step fast-forwards)"
+  lacks "$out" "fast-forwarded" "$n 25: … and prints no fast-forward line"
+  setupff
+  ok "$(hd)" "$OH" "$n 25: the seeded reviser's setup fast-forwards to origin/$BR"
+  has "$out" "tree head: $OH" "$n 25: … and tree head: is the new head"
+  lacks "$out" "STOP" "$n 25: … with no STOP"
+  g -C "$wt" commit -q --allow-empty -m unpushed; LH=$(hd); setupff
+  ok "$(hd)" "$LH" "$n 25: local commits origin lacks (a dead reviser's unpushed work) stay"
+  lacks "$out" "STOP" "$n 25: … with no STOP"
+  bcommit d.txt other; setupff
+  ok "$(hd)" "$LH" "$n 25: a diverged branch is left as it was"
+  has "$out" "tree NOT fast-forwarded: $BR has diverged from origin/$BR — never rebase or force-push; STOP" "$n 25: … and the STOP line"
+
   # GIT_DIR inherited: the merge step's scrub keeps a decoy untouched
   mk e1; setup; g init -q "$F/decoy"; g -C "$F/decoy" commit -q --allow-empty -m decoy
   before=$(git -C "$F/decoy" for-each-ref; git -C "$F/decoy" config --get core.bare)
@@ -293,7 +342,7 @@ l3'; merge "$H0" "$TB"
 for sh in "${shells[@]}"; do suite "$sh"; done
 
 # The rendered steps never force anything.
-all=$(render setup /r; render merge /r "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))"; render judge /r "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" "$(printf 'c%.0s' $(seq 40))" "$(printf 'c%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))"; render recipe)
+all=$(render setup /r; render setup-ff /r; render reads /r "$(printf 'a%.0s' $(seq 40))" "" "" "$(printf 'c%.0s' $(seq 40))"; render merge /r "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))"; render judge /r "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" "$(printf 'c%.0s' $(seq 40))" "$(printf 'c%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))"; render recipe)
 ok "$(printf '%s\n' "$all" | grep -cE -- '--force|force-with-lease|push +-f\b|\+refs/|\+HEAD')" 0 "no force flag in any rendered step"
 
 echo; [ "$fail" -eq 0 ] && echo "integration-tree: ALL PASS" || echo "integration-tree: SOME FAILED"

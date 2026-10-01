@@ -18,7 +18,7 @@ const T = loadEngine([
   'GIT_ENV_SCRUB', 'GIT_ENV_RULE', 'scrubbed', 'worktreeSetup', 'ralphLoop', 'oneShotVerify',
   'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt', 'plannerPrompt',
   'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt',
-  'branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck', 'ANCHOR_RECIPE',
+  'branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck', 'integrationMergeReads', 'ANCHOR_RECIPE',
 ])
 const SCRUB = 'unset $(git rev-parse --local-env-vars 2>/dev/null);'
 
@@ -132,12 +132,14 @@ test('(f) every inline code span that runs git starts with the scrub', () => {
   }
 })
 
-test('(b2) the three Integration steps start with the scrub on their first command line', () => {
+test('(b2) the four Integration steps start with the scrub on their first command line', () => {
   for (const a of [{ repoPath: '/repo' }, { repoPath: '/repo', defaultBranch: 'master', envBootstrap: 'poetry install' }]) {
-    const setup = T.branchTreeSetup(a, task, true).split('\n')
-    assert.match(setup[0], /Run exactly, as ONE Bash command/)
-    assert.ok(setup[1].startsWith(`  ${SCRUB} WT="`), setup[1])
-    for (const step of [T.integrationMergeStep(a, task, I), T.integrationJudgeCheck(a, task, I, J)]) {
+    for (const [bootstrap, ff] of [[true, false], [false, false], [true, true]]) {
+      const setup = T.branchTreeSetup(a, task, bootstrap, ff).split('\n')
+      assert.match(setup[0], /Run exactly, as ONE Bash command/)
+      assert.ok(setup[1].startsWith(`  ${SCRUB} WT="`), setup[1])
+    }
+    for (const step of [T.integrationMergeStep(a, task, I), T.integrationJudgeCheck(a, task, I, J), T.integrationMergeReads(a, task, I, J)]) {
       assert.ok(step.split('\n')[0].startsWith(`${SCRUB} WT="`), step.split('\n')[0])
     }
   }
