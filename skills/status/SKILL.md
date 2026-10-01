@@ -46,7 +46,8 @@ Returns JSON: `{ rollout, rolloutPath, rolloutStatus, paused, pause_requested, c
 timeline, tasks: [{ slug, wave, status, queueState, setAsideAt, pr, priority, solo, started, merged,
 integrating, waitingOn, blockerSummary }] }` — **every** task carrying `rollout: [[<slug>]]`
 (glob-by-backlink, so read-only tasks the `## File-sets` block omits are still included), sorted by
-schedule order (the order the rollout body lists them; unlisted tasks after, by legacy `wave:` then
+schedule order (the order the rollout body lists them: each task's first wikilink on a list-item or
+table-row line, so a prose mention never reorders it; unlisted tasks after, by legacy `wave:` then
 slug). Pure read, no network. `paused` is the pause stamp's timestamp (null when not paused);
 `pause_requested` is true when a soft pause is pending: it drains, then takes effect (execute →
 *Pausing + reinstating a rollout*). `ceiling` is the rollout's `parallel_ceiling` (null when invalid).

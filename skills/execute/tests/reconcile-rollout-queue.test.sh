@@ -109,6 +109,17 @@ J=$(nxt)
 ok "$(q "$J" 'd["start"]')" '["b"]' "next: a dependency on an archived done note outside the rollout is satisfied"
 ok "$(q "$J" "$holds")" '{"c":"depends on [[y]] (open)","e":"depends on [[y]] (open)"}' "next: the root copy wins over an archived one (a mixed inline list too)"
 
+# ── a dependency link with a heading or block anchor names its note ──────────────────────────────
+scen dep-anchor
+mkro $'- [[a]]\n- [[b]]\n- [[c]]\n- [[d]]\n- [[e]]'
+mkt a done; mkt e open
+mkt b open 'depends-on:' '  - "[[a#Notes]]"'
+mkt c open 'blocked-by: "[[a#^blk|alias]]"'
+mkt d open 'depends-on: [[e#Plan (round 1)]]'
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["b","c","e"]' "next: [[a#Notes]] and [[a#^blk|alias]] resolve to a (done)"
+ok "$(q "$J" "$holds")" '{"d":"depends on [[e]] (open)"}' "next: [[e#Plan (round 1)]] waits on e, not on a missing note"
+
 # ── affine tombstones ────────────────────────────────────────────────────────────────────────────
 scen tombstone
 mkro $'- [[u]]\n- [[b]]\n- [[b2]]\n- [[b3]]'
@@ -156,6 +167,17 @@ ok "$(q "$J" 'd["start"]')" '["q"]' "next: q edited to priority high starts firs
 setkey q priority medium
 J=$(nxt)
 ok "$(q "$J" 'd["start"]')" '["p"]' "next: medium reads as normal"
+
+# ── schedule rank: list items and table rows rank, prose never does ──────────────────────────────
+# The template's wave table escapes its alias pipe (`[[slug\|alias]]`), and a lead's note can mention a
+# later task above the list. Neither may reorder the queue.
+scen rank
+mkro $'**Wave 5 re-run:** [[c]] was re-planned, see [[c#Notes]].\n\n| Wave | Task |\n|---|---|\n| 1 | [[a\\|A]] |\n| 2 | [[b#Plan\\|B]] |\n\n```\n- [[d]]\n```\n\n- [[c]]\n1. [[d]]' 'parallel_ceiling: 1'
+mkt a open; mkt b open; mkt c open; mkt d open
+J=$(st)
+ok "$(q "$J" '[t["slug"] for t in d["tasks"]]')" '["a","b","c","d"]' "status: rank from table rows and list items, never prose or a code block"
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["a"]' "next: the first table row starts first"
 
 # ── overlap tiebreak (in flight and within one call) ─────────────────────────────────────────────
 scen overlap

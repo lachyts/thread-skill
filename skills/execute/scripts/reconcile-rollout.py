@@ -19,8 +19,10 @@ Subcommands:
               and restart within the parallel ceiling, every held task with its reason, the running,
               awaiting-Integration, integrating and set-aside tasks, the pause state, the halt verdict
               and the progress line. Notes are re-read on every call, so a `priority:` edit reorders a
-              live queue. Honours a soft pause: once nothing runs, awaits or integrates, it stamps
-              `paused:` and removes `pause_requested` (the drain, ADR 0030 decision 5).
+              live queue. Schedule order is each task's first wikilink on a list-item or table-row line
+              of the rollout body; prose and fenced code never rank. Honours a soft pause: once nothing
+              runs, awaits or integrates, it stamps `paused:` and removes `pause_requested` (the drain,
+              ADR 0030 decision 5).
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here.
@@ -180,7 +182,12 @@ RUN_HEAD_RE = re.compile(r"^### Run (\d+) \(([^)]*)\)\s*$")
 RUN_END_RE = re.compile(r"^<!-- run (\d+) end sha=([0-9a-f]{12}) -->\s*$")
 FILESET_RE = re.compile(r"^\s*[-*]\s+(?P<slug>[^\s:]+?)(?:\s+\(wave\s+\d+\))?\s*:\s*(?P<files>.*)$")
 WIKILINK_RE = re.compile(r"\[\[([^\]]+?)\]\]")
-WIKILINK_OPEN_RE = re.compile(r"\[\[([^\]|#]+)")
+# A wikilink's target up to its alias, heading or block anchor. A table cell escapes the alias pipe
+# (`[[slug\|alias]]`), so the backslash ends the target too (as in reconcile-project.py).
+WIKILINK_OPEN_RE = re.compile(r"\[\[([^\]|#^\\]+)")
+# The rollout-body lines whose wikilinks rank a task: list items (`-`, `*`, `+`, `1.`) and table rows.
+RANKED_LINE_RE = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s|\|)")
+FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
 PROJECT_ROOT_RE = re.compile(r"^Project root:\s*`?([^`\n]+?)`?\s*$", re.M)
 PR_URL_RE = re.compile(r"^https://github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)/?$")
 PR_NUM_RE = re.compile(r"^#?(\d+)$")
@@ -215,12 +222,15 @@ def _int_field(value, default):
 
 
 def _wikilink_slug(value):
-    """Normalise a frontmatter wikilink/string (`"[[Area/Foo|alias]]"`) to a bare slug for comparison."""
+    """Normalise a wikilink or string (`"[[Area/Foo#Heading|alias]]"`) to a bare slug for comparison:
+    the alias, a `#heading` or `^block` anchor, a table's alias-escaping backslash (`[[foo\\|alias]]`)
+    and any path are dropped, keeping the leaf. Obsidian note names cannot hold `|`, `#` or `^`."""
     if value is None:
         return None
     s = value.strip().strip('"').strip("'").strip()
     s = s.replace("[[", "").replace("]]", "").strip()
-    s = s.split("|")[0].split("/")[-1].strip()  # drop any alias, then any path, keep the leaf
+    s = re.split(r"[|#^]", s, maxsplit=1)[0].rstrip().rstrip("\\")
+    s = s.split("/")[-1].strip()
     if s.endswith(".md"):
         s = s[:-3]
     return s or None
@@ -748,12 +758,21 @@ def _file_sets(rollout_note):
 
 
 def _schedule_positions(rollout_note):
-    """slug (lowercased) -> the ordinal of its first `[[slug` wikilink in the rollout body."""
-    pos = {}
-    for i, m in enumerate(WIKILINK_OPEN_RE.finditer(rollout_note._body)):
-        slug = (_wikilink_slug(m.group(1)) or "").lower()
-        if slug and slug not in pos:
-            pos[slug] = i
+    """slug (lowercased) -> the ordinal of its first wikilink on a list-item or table-row line of the
+    rollout body (the wave table, Tasks by wave, a queue list), outside fenced code. Prose never ranks,
+    so a note the lead adds above the list mid-rollout cannot reorder the queue."""
+    pos, i, fenced = {}, 0, False
+    for line in rollout_note._body.split("\n"):
+        if FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced or not RANKED_LINE_RE.match(line):
+            continue
+        for m in WIKILINK_OPEN_RE.finditer(line):
+            slug = (_wikilink_slug(m.group(1)) or "").lower()
+            if slug and slug not in pos:
+                pos[slug] = i
+            i += 1
     return pos
 
 
