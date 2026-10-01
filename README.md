@@ -143,7 +143,8 @@ final check that the run wrote nothing into the tree):
   invariant** (optional engine features must render byte-identical Workflow `agent()` prompts when
   unset, or in-flight rollouts can't resume); `reconcile-rollout.test.sh`, `reconcile-rollout-queue.test.sh`
   (the queue verbs) and `reconcile-rollout-runs.test.sh` (accumulated feedback runs); `wave-stop-driver.test.sh`;
-  `merge-task.sh --self-test-classify` / `--self-test-base`.
+  `merge-task.sh --self-test-classify` / `--self-test-base`, and `tests/merge-task-base.test.sh` /
+  `tests/merge-task-integrated.test.sh` (one integrated PR per call, against a fake `gh` and a real bare repo).
 - **Contracts** — `tests/contracts/*.test.mjs`: manifests agree, skill names and description budgets,
   `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files, no SKILL.md body holds a
   positional `$N` (Claude Code substitutes skill arguments into them; logic that needs one lives in a

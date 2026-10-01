@@ -294,7 +294,7 @@ Build the args object for each task call:
 }
 ```
 
-**Resolve `defaultBranch` when building each task call's args** — it is the repo's GitHub default branch, the one source the whole rollout shares: fresh worktrees branch from `origin/<it>`, `gh pr create` targets the same default on its own, and `merge-task.sh` refuses a wave whose PRs target anything else. Ask the **remote**: the local `refs/remotes/origin/HEAD` is often unset and can be stale (it survives a default-branch rename and even the deletion of the branch it names). The answer is deterministic, so a resume re-passes the same value. **Stop** when the remote does not answer — never assume `main`, which fails at the first worktree of a `master` repo:
+**Resolve `defaultBranch` when building each task call's args** — it is the repo's GitHub default branch, the one source the whole rollout shares: fresh worktrees branch from `origin/<it>`, `gh pr create` targets the same default on its own, and `merge-task.sh` refuses a PR that targets anything else. Ask the **remote**: the local `refs/remotes/origin/HEAD` is often unset and can be stale (it survives a default-branch rename and even the deletion of the branch it names). The answer is deterministic, so a resume re-passes the same value. **Stop** when the remote does not answer — never assume `main`, which fails at the first worktree of a `master` repo:
 
 ```bash
 # thread:default-branch-resolver (extracted and tested by tests/default-branch.test.sh)
@@ -333,7 +333,7 @@ In continuous mode the lead session is the conductor: run ONE wave's tasks on th
 2. On each call's completion → reconcile its result with §6's `reconcile-rollout.py reconcile` helper only, and print a short per-task line (e.g. "[[task-a]] → review, PR <url>"), not the full Wave N report. Then launch the wave's next task call (§ 2.5 re-check first, per the entry rule) and end the turn `state=waiting`. After the wave's last call is reconciled, print §6's **Wave N report** (with its *Recommended merge order*) once, for the whole wave, and go to step 3.
 3. **Auto-merge wave K.** Re-run § 2.5 before `merge-task.sh`: a repo listed during the wave halts here with the wave's approved PRs left open (merging puts commits on the listed repo's default branch). On that halt there is no merge, no cursor advance and no `mark-done`; the tasks stay at `review`, and once the repo is unlisted, re-invocation's *Cold resume* flush merges them. Collect the wave's tasks that returned `status: review` **and** have a non-empty `pr` (read-only tasks have none; **never** merge `review-blocked` / `blocked` / `plan-blocked` / `gate-pending`), in the report's recommended order. Run:
    ```
-   ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-task.sh <repoPath> <pr> <pr> …
+   ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-task.sh <repoPath> <pr> <integrated-head> <integrated-base>   # one PR per call (the row's PR URL or number); exit codes and lead routes in the script header
    ```
    - **The sentinel is authoritative, not the reported exit.** On exit the script writes `<repoPath>/.claude/merge-task.status` — `ok` only on a clean merge, `failed:<code>` on any halt. If the run is backgrounded, a trailing-command wrapper (`… & wait; echo done`) can mask the script's real exit — so **read the sentinel file**, not the reported exit code. Treat anything other than a file containing exactly `ok` — **including a missing file** — as a halt.
    - **sentinel ≠ `ok` → HALT the rollout.** Surface the script's message verbatim (which PR, why, the exact next step) and stop. Do **not** advance the cursor or launch the next wave.
@@ -509,7 +509,7 @@ WAVE-STATUS: <rollout-slug> cursor=<K>/<N> state=<running|waiting|halted|done>[ 
 
 This line is the contract the automatic driver (§8) keys off — the Stop hook parses it with a strict regex, so keep the format byte-stable.
 
-**Merging:** in `--gated` / single-wave mode, do NOT merge — the user decides. In continuous auto-merge mode the lead session merges this wave via `scripts/merge-task.sh` (§4.5) — never an inline `gh pr merge`. Within a wave the approved PRs are file-disjoint (the wave invariant), so they don't conflict with each other; the merge script brings each up to date with the base branch in turn before squash-merging.
+**Merging:** in `--gated` / single-wave mode, do NOT merge — the user decides. In continuous auto-merge mode the lead session merges this wave via `scripts/merge-task.sh` (§4.5) — never an inline `gh pr merge`. Within a wave the approved PRs are file-disjoint (the wave invariant), so they don't conflict with each other; merge-task.sh never updates a branch: it merges a PR only onto the base its Integration used (exit 3 otherwise).
 
 The merge gate is the repo's **required** checks — branch-protection's own definition of mergeable — **not** GitHub's cosmetic `CLEAN` (which also waits on non-required checks). A base branch that legitimately carries red *non-required* checks reports every PR as `UNSTABLE`, never `CLEAN`; gating on `CLEAN` would merge no wave at all. `merge-task.sh`'s `UNSTABLE)` case handles this by waiting on `--required` checks only — a genuinely-failing required check surfaces as `BLOCKED`, not `UNSTABLE`, so it stays safe. Don't "tidy" it back to `CLEAN`-only (see `giflab-rollout-merge-wave-unstable-fix`).
 

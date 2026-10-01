@@ -95,7 +95,7 @@ i=2; while [ "$i" -lt "$n" ]; do report "$i"; i=$((i+1)); done
 
 # A run must leave the checkout exactly as it found it (no bytecode, no stray state files).
 tree_unchanged() {
-  # .git is git's; .claude holds other sessions' worktrees and merge-task's sentinel, not this run's output.
+  # .git is git's; .claude holds other sessions' worktrees and merge-task's sentinel and cap state, not this run's output.
   local w; w=$(find "$root" \( -path "$root/.git" -o -path "$root/.claude" \) -prune -o -newer "$stamp" -type f ! -name .DS_Store -print)
   [ -z "$w" ] || { echo "written during the run:"; echo "$w"; return 1; }
 }

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# merge-task.sh's base contract, driven end to end against a fake `gh` on PATH (no GitHub): every open
-# PR in a wave must target the repo's default branch, and anything wrong — a PR off the base, a mixed
-# wave, an unreadable or CLOSED PR, an unreadable default — halts BEFORE the first merge. A clean wave
-# merges in order into the default and names it. Hermetic: temp repo, PATH shim, ssh disabled.
+# merge-task.sh's base contract, driven end to end against the shared fake `gh` (no GitHub) and a real bare
+# "GitHub" repo the checkout clones: the PR must target the repo's default branch, and anything wrong — a PR
+# off the base, an unreadable, missing or CLOSED PR, an unreadable default — halts before the merge (1 when
+# definitive, 8 when transient). A clean PR merges into the default and a re-run takes the already-merged
+# path; the local refresh names stranded and queued close-outs through a working fetch; an inherited GIT_DIR
+# never reaches another repo (8a–8c); a SIGTERM never reads `ok` (9). Hermetic: temp repos, PATH shim,
+# ssh disabled.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
@@ -10,103 +13,88 @@ root=$(pwd)
 unset $(git rev-parse --local-env-vars)   # git's own list of repo-local vars (GIT_DIR, GIT_CONFIG_PARAMETERS, …)
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-mkdir -p "$tmp/bin" "$tmp/prs"
-git -c init.defaultBranch=master init -q "$tmp/repo"
-git -C "$tmp/repo" remote add origin git@github.com:o/r.git
+. tests/lib/merge-task-env.sh
 
-# Fake gh. `repo view` prints $tmp/default (empty file ⇒ unreadable). `pr view N … --json F[,G]` prints
-# the stored field(s) — "STATE BASE" for the combined pre-pass read. `pr merge N` logs and marks MERGED.
-cat > "$tmp/bin/gh" <<EOF
-#!/usr/bin/env bash
-case "\$1 \$2" in
-  "repo view") cat "$tmp/default" ;;
-  "pr view")
-    n=\$3; f=\$(printf '%s\n' "\$@" | grep -A1 -- '--json' | tail -1)
-    [ -f "$tmp/prs/\$n.state" ] || exit 1
-    if [ "\$f" = "state,baseRefName" ]; then echo "\$(cat "$tmp/prs/\$n.state") \$(cat "$tmp/prs/\$n.baseRefName")"
-    else cat "$tmp/prs/\$n.\$f" 2>/dev/null; fi ;;
-  "pr merge") echo "merge \$3" >> "$tmp/merges"; echo "MERGED" > "$tmp/prs/\$3.state" ;;
-  "pr checks") echo "pr checks \$3" >> "$tmp/gh.log"; sleep 2; exit 1 ;;
-  *) : ;;
-esac
-EOF
-chmod +x "$tmp/bin/gh"
-pr() { printf '%s\n' "$2" > "$tmp/prs/$1.state"; printf '%s\n' "$3" > "$tmp/prs/$1.baseRefName"
-       printf 'CLEAN\n' > "$tmp/prs/$1.mergeStateStatus"; printf 'audit-fix/t%s\n' "$1" > "$tmp/prs/$1.headRefName"; }
-run() { rm -f "$tmp/merges"; PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$root/skills/execute/scripts/merge-task.sh" "$tmp/repo" "$@" 2>&1; }
-merges() { cat "$tmp/merges" 2>/dev/null | tr '\n' ' '; }
-echo master > "$tmp/default"
+# 2. a PR off the default (every agent skipped the default) → halt, nothing merged
+fresh; pair; mkpr 31 "$I"; echo main > "$MT_STATE/pr/31/baseRefName"
+run 31 "$I" "$B"
+ok "$rc" 1 "2. off-default PR exits 1"; ok "$(nmerge)" 0 "2. off-default PR: nothing merged"
+has "$out" "PR #31 targets 'main', not the default branch 'master'" "2. names the off-base PR and the default"
+ok "$(sent)" "failed:1" "2. sentinel records the halt"
 
-# 1. mixed bases → halt, nothing merged
-pr 11 OPEN master; pr 12 OPEN main
-out=$(run 11 12); rc=$?
-ok "$rc" 1 "mixed wave exits 1"; ok "$(merges)" "" "mixed wave merges nothing"
-has "$out" "PR #12 targets 'main', not the default branch 'master'" "names the off-base PR and the default"
-ok "$(cat "$tmp/repo/.claude/merge-task.status")" "failed:1" "sentinel records the halt"
+# 3. an unreadable PR (transient) → 8, nothing merged, the counter untouched
+fresh; pair; mkpr 41 "$I"; echo "error connecting to api.github.com" > "$MT_STATE/err.prview"; seed 41 "$B"
+run 41 "$I" "$B"
+ok "$rc" 8 "3. transiently unreadable PR exits 8"; ok "$(nmerge)" 0 "3. unreadable PR: nothing merged"
+has "$out" "retryable: cannot read PR #41" "3. says it is retryable"
+ok "$(ctr 41)" "$B" "3. the counter is untouched"; ok "$(sent)" "failed:8" "3. sentinel records failed:8"
+# 3b. a PR GitHub cannot resolve → 1
+fresh; pair
+run 49 "$I" "$B"
+ok "$rc" 1 "3b. a missing PR exits 1"
+has "$out" "Could not resolve to a PullRequest with the number of 49" "3b. names gh's not-found"
 
-# 2. a single PR off the default (every agent skipped the default) → halt, nothing merged
-pr 31 OPEN main
-out=$(run 31); ok "$?" 1 "single off-base PR exits 1"; ok "$(merges)" "" "single off-base PR merges nothing"
+# 4. a CLOSED PR → halt, nothing merged
+fresh; pair; mkpr 53 "$I" CLEAN CLOSED
+run 53 "$I" "$B"
+ok "$rc" 1 "4. CLOSED PR exits 1"; ok "$(nmerge)" 0 "4. CLOSED PR: nothing merged"
+has "$out" "PR #53 is 'CLOSED'" "4. names the state"
 
-# 3. an unreadable PR after a good one → halt before the good one merges
-pr 41 OPEN master
-out=$(run 41 49); ok "$?" 1 "unreadable PR exits 1"; ok "$(merges)" "" "unreadable PR: nothing merged (fails closed)"
-has "$out" "cannot read PR #49" "names the unreadable PR"
+# 5. unreadable default branch: transient → 8; 5b. HTTP 404 → 1
+fresh; pair; mkpr 61 "$I"; echo "error connecting to api.github.com" > "$MT_STATE/err.repo"
+run 61 "$I" "$B"
+ok "$rc" 8 "5. transiently unreadable default exits 8"; ok "$(nmerge)" 0 "5. unreadable default: nothing merged"
+echo "gh: Not Found (HTTP 404)" > "$MT_STATE/err.repo"
+run 61 "$I" "$B"
+ok "$rc" 1 "5b. a 404 on the default branch exits 1"; ok "$(nmerge)" 0 "5b. nothing merged"
 
-# 4. a CLOSED PR last in the list → halt before the earlier ones merge
-pr 51 OPEN master; pr 52 OPEN master; pr 53 CLOSED master
-out=$(run 51 52 53); ok "$?" 1 "CLOSED PR exits 1"; ok "$(merges)" "" "CLOSED PR: nothing merged"
+# 6. a clean PR → merges into the default; the same args again → the already-merged path, no second merge
+fresh; pair; mkpr 21 "$I"
+run 21 "$I" "$B"
+ok "$rc" 0 "6. clean PR exits 0"; ok "$(nmerge)" 1 "6. merged once"
+has "$out" "on the integrated base $B at the integrated head $I (verified)" "6. names the verified pair"
+ok "$(sent)" "ok" "6. sentinel records success"
+ok "$(gc rev-parse HEAD)" "$(srvtip)" "6. the checkout fast-forwarded to the merge"
+has "$out" "local master fast-forwarded to origin/master." "6. reports the fast-forward"
+run 21 "$I" "$B"
+ok "$rc" 0 "6. re-run exits 0"; ok "$(nmerge)" 0 "6. re-run: no second merge"
+has "$out" "PR #21 already merged" "6. re-run reports the already-merged path"; ok "$(sent)" "ok" "6. re-run: ok"
 
-# 5. unreadable default branch → halt
-: > "$tmp/default"; pr 61 OPEN master
-out=$(run 61); ok "$?" 1 "unreadable default exits 1"; ok "$(merges)" "" "unreadable default: nothing merged"
-echo master > "$tmp/default"
-
-# 6. a clean wave → merges in order into the default; an already-MERGED PR is skipped
-pr 21 OPEN master; pr 22 OPEN master; pr 23 MERGED main
-out=$(run 21 22 23); rc=$?
-ok "$rc" 0 "clean wave exits 0"; ok "$(merges)" "merge 21 merge 22 " "merges in the given order, skips the merged one"
-has "$out" "== PR #21 (into master) ==" "names the base per PR"
-has "$out" "PR #23 already merged — skipping." "reports the skip"
-ok "$(cat "$tmp/repo/.claude/merge-task.status")" "ok" "sentinel records success"
-
-# 7. the checkout's master holds a local-only commit and origin/master has moved on (a diverged sibling):
-#    the fetch fails (ssh disabled), the fast-forward fails, and the local-only commit is named.
-gc() { git -c user.name=t -c user.email=t@t -C "$tmp/repo" "$@"; }
-gc commit -q --allow-empty -m base
-tree=$(gc rev-parse 'HEAD^{tree}')
-gc update-ref refs/remotes/origin/master "$(gc commit-tree -p HEAD -m sibling "$tree")"
-gc symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master
+# 7. the checkout's master holds a local-only commit and origin/master moves on to the integrated base (a
+#    diverged sibling): the fetch works, the fast-forward fails, and the local-only commit is named.
 gc commit -q --allow-empty -m local-only
 held=$(gc rev-parse HEAD)
-pr 71 OPEN master
-out=$(run 71); rc=$?
-ok "$rc" 0 "7. diverged checkout: the wave still exits 0"
-ok "$(cat "$tmp/repo/.claude/merge-task.status")" "ok" "7. sentinel records success"
+fresh; pair; mkpr 71 "$I"
+run 71 "$I" "$B"
+ok "$rc" 0 "7. diverged checkout: still exits 0"
+ok "$(sent)" "ok" "7. sentinel records success"
 ok "$(gc rev-parse HEAD)" "$held" "7. the checkout is left where it was"
 has "$out" "did not fast-forward: on master, 1 commit(s) not on origin/master — stranded" "7. names the local-only commit as stranded"
 q="close/2026-09-29-t-$(printf '%s' "$held" | cut -c1-12)"
 gc update-ref "refs/remotes/origin/$q" HEAD
-pr 72 OPEN master
-out=$(run 72); rc=$?
+fresh; pair; mkpr 72 "$I"
+run 72 "$I" "$B"
 ok "$rc" 0 "7. with a (stubbed) queued close ref: exits 0"
 has "$out" "did not fast-forward: on master, 1 commit(s) not on origin/master — queued in $q" "7. names the queued close/… branch"
-# 7c. origin/master behind the checkout (the fetch failed): the fast-forward is a no-op, still named.
-gc update-ref refs/remotes/origin/master HEAD~1
-pr 73 OPEN master
-out=$(run 73); rc=$?
-ok "$rc" 0 "7c. checkout ahead of a stale origin/master: exits 0"
+# 7c. the already-merged path with the checkout ahead of the merge: a no-op fast-forward, still named.
+gc reset -q --hard "$(srvtip)"
+gc commit -q --allow-empty -m local-only-c
+q2="close/2026-09-29-t-$(gc rev-parse HEAD | cut -c1-12)"
+gc update-ref "refs/remotes/origin/$q2" HEAD
+run 72 "$I" "$B"
+ok "$rc" 0 "7c. checkout ahead of the merge: exits 0"
+has "$out" "PR #72 already merged" "7c. takes the already-merged path"
 has "$out" "local master already at or ahead of origin/master." "7c. a no-op fast-forward says already at or ahead"
-case "$out" in *"fast-forwarded"*) ok "[$out]" "no 'fast-forwarded'" "7c. a no-op fast-forward never says fast-forwarded";; *) ok y y "7c. a no-op fast-forward never says fast-forwarded";; esac
-has "$out" "NOTE: on master, 1 commit(s) not on origin/master — queued in $q." "7c. a no-op fast-forward still names the local-only commit"
-# 7d. a stranded commit on top of the queued one: split, and the checkout stays blocked.
-gc update-ref refs/remotes/origin/master "$(gc commit-tree -p HEAD~1 -m sibling2 "$tree")"
-gc commit -q --allow-empty -m local-only-2
-pr 74 OPEN master
-out=$(run 74); rc=$?
+lacks "$out" "fast-forwarded" "7c. a no-op fast-forward never says fast-forwarded"
+has "$out" "NOTE: on master, 1 commit(s) not on origin/master — queued in $q2." "7c. a no-op fast-forward still names the local-only commit"
+# 7d. a stranded commit on top of the queued one, and origin/master moved on (sibling2): split, still blocked.
+gc commit -q --allow-empty -m local-only-d
+fresh; pair; mkpr 74 "$I"
+run 74 "$I" "$B"
 ok "$rc" 0 "7d. queued + stranded: exits 0"
-has "$out" "did not fast-forward: on master, 2 commit(s) not on origin/master — 1 queued in $q, 1 stranded" "7d. names the split"
+has "$out" "did not fast-forward: on master, 2 commit(s) not on origin/master — 1 queued in $q2, 1 stranded" "7d. names the split"
 has "$out" "stays blocked until they are landed or dropped" "7d. says the stranded ones keep it blocked"
+gc reset -q --hard "$(srvtip)"
 
 # 8. GIT_DIR / GIT_WORK_TREE set on the ONE merge-task.sh invocation (a git hook exports them; p12-3), never
 #    exported in this shell, so the fixture setup above and the snapshots below stay on their own repos. The
@@ -129,39 +117,47 @@ snap() {  # the decoy's refs, its core.bare, its config bytes, and its remote's 
   cat "$d/.git/config"; echo "-- remote"; git -C "$dr" for-each-ref
 }
 before=$(snap)
-out=$(GIT_DIR="$d/.git" bash "$root/skills/execute/scripts/merge-task.sh" --self-test-base 2>&1); rc=$?
+out=$(GIT_DIR="$d/.git" bash "$MT" --self-test-base 2>&1); rc=$?
 ok "$rc" 0 "8a. --self-test-base under an inherited GIT_DIR exits 0"
 has "$out" "base: ALL PASS" "8a. --self-test-base under an inherited GIT_DIR: ALL PASS"
 ok "$(snap)" "$before" "8a. the decoy and its remote are unchanged"
 mkdecoy; before=$(snap)
-out=$(GIT_DIR="$d/.git" GIT_WORK_TREE="$d" bash "$root/skills/execute/scripts/merge-task.sh" --self-test-base 2>&1); rc=$?
+out=$(GIT_DIR="$d/.git" GIT_WORK_TREE="$d" bash "$MT" --self-test-base 2>&1); rc=$?
 ok "$rc" 0 "8b. --self-test-base under GIT_DIR + GIT_WORK_TREE exits 0"
 has "$out" "base: ALL PASS" "8b. --self-test-base under GIT_DIR + GIT_WORK_TREE: ALL PASS"
 ok "$(snap)" "$before" "8b. the decoy and its remote are unchanged"
-# 8c. a clean one-PR wave while the decoy's remote holds a commit the decoy lacks: an unscrubbed script
-#     fetches it and fast-forwards the decoy's master (rc 0 and sentinel ok either way, so rc is not the signal).
+# 8c. a clean merge while the decoy's remote holds a commit the decoy lacks: an unscrubbed script fetches it
+#     (and fast-forwards the decoy's master). $tmp/repo sits on a side branch, so its own refresh fetches but
+#     fast-forwards nothing (rc 0 and sentinel ok either way, so rc is not the signal).
 mkdecoy
 git -c init.defaultBranch=master clone -q "$dr" "$tmp/scratch" 2>/dev/null
 git -c user.name=t -c user.email=t@t -C "$tmp/scratch" commit -q --allow-empty -m remote-only
 git -C "$tmp/scratch" push -q origin master
+gc switch -q -c side
 before=$(snap); held=$(gc rev-parse HEAD)
-pr 81 OPEN master
-out=$(rm -f "$tmp/merges"; GIT_DIR="$d/.git" PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$root/skills/execute/scripts/merge-task.sh" "$tmp/repo" 81 2>&1); rc=$?
-ok "$(snap)" "$before" "8c. a wave under an inherited GIT_DIR leaves the decoy and its remote unchanged"
-case "$out" in *"fast-forwarded"*) ok "[$out]" "no 'fast-forwarded'" "8c. nothing is fast-forwarded";; *) ok y y "8c. nothing is fast-forwarded";; esac
+fresh; pair; mkpr 81 "$I"
+: > "$MT_STATE/gh.log"
+out=$(GIT_DIR="$d/.git" PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$tmp/repo" 81 "$I" "$B" 2>&1); rc=$?
+ok "$(snap)" "$before" "8c. a merge under an inherited GIT_DIR leaves the decoy and its remote unchanged"
+lacks "$out" "fast-forwarded" "8c. nothing is fast-forwarded"
 # Regression guards (green before and after the scrub):
-ok "$rc" 0 "8c. (guard) the wave exits 0"
-ok "$(cat "$tmp/repo/.claude/merge-task.status")" "ok" "8c. (guard) sentinel records success"
+ok "$rc" 0 "8c. (guard) the merge exits 0"
+ok "$(sent)" "ok" "8c. (guard) sentinel records success"
 ok "$(gc rev-parse HEAD)" "$held" "8c. (guard) \$tmp/repo is left where it was"
+gc switch -q master
 
-# 9. SIGTERM during a required-checks wait: the sentinel must not read ok, and the exit is 143.
-pr 91 OPEN master; printf 'BLOCKED\n' > "$tmp/prs/91.mergeStateStatus"; rm -f "$tmp/gh.log"
-PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$root/skills/execute/scripts/merge-task.sh" "$tmp/repo" 91 > "$tmp/9.out" 2>&1 &
+# 9. SIGTERM during a required-checks wait: exit 143, the sentinel never reads ok, the counter untouched.
+fresh; pair; mkpr 91 "$I" BLOCKED; seed 91 "$B"
+printf '%s\n' '{"rc":0,"out":"ci\tpass\t1s\thttps://github.com/o/r/actions/runs/1/job/1\t\n","err":"","sleep":2}' > "$MT_STATE/checks.seq"
+: > "$MT_STATE/gh.log"
+PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$tmp/repo" 91 "$I" "$B" > "$tmp/9.out" 2>&1 &
 pid=$!
-i=0; while [ "$i" -lt 100 ] && ! grep -q 'pr checks' "$tmp/gh.log" 2>/dev/null; do sleep 0.1; i=$((i+1)); done
+i=0; while [ "$i" -lt 300 ] && ! grep -q '^pr checks' "$MT_STATE/gh.log" 2>/dev/null; do sleep 0.1; i=$((i+1)); done
 kill -TERM "$pid"; wait "$pid"; rc=$?
 ok "$rc" 143 "9. SIGTERM in a checks wait exits 143"
-ok "$(cat "$tmp/repo/.claude/merge-task.status")" "failed:143" "9. SIGTERM: the sentinel reads failed:143, never ok"
+ok "$(sent)" "failed:143" "9. SIGTERM: the sentinel reads failed:143, never ok"
+ok "$(ctr 91)" "$B" "9. SIGTERM: the counter is byte-unchanged"
+ok "$(nmerge)" 0 "9. SIGTERM: nothing merged"
 
 echo; [ "$fail" -eq 0 ] && echo "merge-task base: ALL PASS" || echo "merge-task base: SOME FAILED"
 exit "$fail"
