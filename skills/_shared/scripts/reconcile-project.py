@@ -39,7 +39,7 @@ which kinds are listed and written; a kind outside --kinds is never written, eve
    - Every non-landed task is a U finished task (rule 2): U with `depends_on: [those slugs]` when `task`
      is in --kinds; otherwise A, `needs task <slug> closed first`, and no task is written.
    - A QUIET task keeps the phase out of both lists, whatever its other tasks are: a hold, a task at
-     `review` under a live rollout (status/repair own that step; reconcile-wave's LANDED_STATUSES counts
+     `review` under a live rollout (status/repair own that step; reconcile-rollout's LANDED_STATUSES counts
      `review` for resume) or with no `rollout:` at all (a human review step, nothing to repair), or a
      genuinely open task with no evidence. Resolving the other tasks could never close such a phase.
    - Otherwise any non-landed task that is A, skipped, unparseable, archived-but-open (in A or tagged
@@ -80,7 +80,7 @@ which kinds are listed and written; a kind outside --kinds is never written, eve
    `<slug>-rollout*` with a non-empty `superseded_by:`. U, action `move to Archive/Rollouts/<name>`;
    A when that destination already exists.
 
-Apply. Order: tasks, then phases, then rollout moves. Writes go through reconcile-wave.py's `Note`
+Apply. Order: tasks, then phases, then rollout moves. Writes go through reconcile-rollout.py's `Note`
 (line-surgical frontmatter edits), loaded before any vault read; if it cannot be loaded the script exits
 2. A phase is written only if every slug in its depends_on was written in this run and every one of its
 task files re-reads from disk as landed; otherwise it is skipped with `phase <slug> skipped: dependency
@@ -121,7 +121,7 @@ JSON adds new_since_review: [{kind, slug, path, action, reason, depends_on}] and
 Exit codes. 0: it ran (drift or none). 1: an --apply write or move failed, or a dependent phase was
 skipped. 2: usage error (missing --project, bad --kinds/--phases/--today, no Work/ under --vault; --only
 without --apply, or an --only file that is unreadable, not JSON or not a dry run of this project and
-vault) or reconcile-wave.py missing or unloadable.
+vault) or reconcile-rollout.py missing or unloadable.
 """
 import argparse
 import importlib.util
@@ -137,7 +137,7 @@ from pathlib import Path
 KINDS = ("phase", "task", "rollout")
 LANDED = {"done", "merged", "dropped"}
 ACTIVE = {"open", "in_progress"}
-NOTE_SRC = Path(__file__).resolve().parent.parent.parent / "execute/scripts/reconcile-wave.py"
+NOTE_SRC = Path(__file__).resolve().parent.parent.parent / "execute/scripts/reconcile-rollout.py"
 
 PR_URL_RE = re.compile(r"^https://github\.com/[^/\s]+/[^/\s]+/pull/\d+/?$")
 PR_REF_RE = re.compile(r"/pull/\d+|(?<![\w&])#\d+")
@@ -166,17 +166,17 @@ def die(msg: str, code: int = 2):
 
 
 def load_note_class():
-    """reconcile-wave.py's Note, the one sanctioned frontmatter writer (side-effect-free on import)."""
+    """reconcile-rollout.py's Note, the one sanctioned frontmatter writer (side-effect-free on import)."""
     sys.dont_write_bytecode = True
     try:
-        spec = importlib.util.spec_from_file_location("reconcile_wave", NOTE_SRC)
+        spec = importlib.util.spec_from_file_location("reconcile_rollout", NOTE_SRC)
         if spec is None or spec.loader is None:
             raise ImportError("no loader for this path")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return mod.Note
     except Exception as e:  # noqa: BLE001 — any failure to load is the same exit-2 condition
-        die(f"cannot load Note from {NOTE_SRC} (skills/execute/scripts/reconcile-wave.py): {e}")
+        die(f"cannot load Note from {NOTE_SRC} (skills/execute/scripts/reconcile-rollout.py): {e}")
 
 
 # ---- read-only frontmatter ----------------------------------------------------------------------------

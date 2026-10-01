@@ -93,7 +93,7 @@ the in-flight agents now); the exemption above means the gate never stands in th
 
 - **Exit 0** (`land`): proceed. Any warning the reader printed on stderr (no register file, a malformed
   entry) still shows; pass it on to the user.
-- **Any non-zero exit**: write nothing (no stamp, no cursor, no `mark-dispatched`, no merge, no Workflow
+- **Any non-zero exit**: write nothing (no stamp, no cursor, no `mark-dispatched` or `mark-started`, no merge, no Workflow
   call). Print the snippet's stderr verbatim above the WAVE-STATUS line (the `listed <owner/name>:
   <reason>` line with its remedy, the reader's `landing-register:` error, or the no-origin remedy), then
   end the turn with
@@ -131,7 +131,7 @@ nested inside it (`<repoPath>/…`, a monorepo with the marketplace in a subdire
 warning (the registry format is Claude Code's, so the check fails open).
 
 - **Exit 0**: proceed; pass any warning on to the user.
-- **Exit 3**: write nothing (no stamp, no cursor, no `mark-dispatched`, no merge, no Workflow call). Print
+- **Exit 3**: write nothing (no stamp, no cursor, no `mark-dispatched` or `mark-started`, no merge, no Workflow call). Print
   the stderr verbatim above the WAVE-STATUS line and end the turn with
   `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="repoPath is a live plugin marketplace checkout"`.
   The remedy: clone the repo to a separate path (e.g. `~/repos/<repo>-rollout`), set the rollout's
@@ -169,7 +169,7 @@ next entry at § 1 halts on it with the queued-aware remedy.
 exactly as for § 2.5.
 
 - **Exit 0** (`pushed`): proceed; pass any `pushed-base: note:` line on to the user.
-- **Exit 3**: write nothing (no stamp, no `clear-pause`, no cursor, no `mark-dispatched`, no merge, no
+- **Exit 3**: write nothing (no stamp, no `clear-pause`, no cursor, no `mark-dispatched` or `mark-started`, no merge, no
   Workflow call). Print the stderr verbatim (the ahead commits per clone, and the remedy: land them by PR,
   or wait for the queued `close/…` landing PR) above the WAVE-STATUS line and end the turn with
   `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="local default branch is ahead of origin"`.
@@ -196,7 +196,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 | `model` | `opus` | `task.model` (per-task; `opus` \| `fable`) |
 | `effort` | none (omit) | `task.effort` (per-task ONLY — the ADR 0007 escape hatch; it has no rollout-level form) |
 
-**Validate the round budgets before anything else.** Each resolved `max_iterations`, `max_review_rounds` and `max_plan_rounds` must be an **integer >= 1** — a YAML int, never `0`, negative, fractional, a string, empty or `null` (a hardcoded default applies only when the key is absent at every level; an empty `max_plan_rounds:` is null, not absent). On any violation the lead writes nothing: no `status: in_progress` stamp, no `mark-dispatched`, no Workflow call. Name the field, the bad value and its source (task or rollout frontmatter), then end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="invalid round budget: <field> on [[task]]"` — for a rollout-level value, name the rollout instead of the task. This is the upstream refusal; the engine also fails closed per task (`plan-blocked` / `review-blocked` naming the field) so a bad budget can never silently disable a plan or review layer (ADR 0008).
+**Validate the round budgets before anything else.** Each resolved `max_iterations`, `max_review_rounds` and `max_plan_rounds` must be an **integer >= 1** — a YAML int, never `0`, negative, fractional, a string, empty or `null` (a hardcoded default applies only when the key is absent at every level; an empty `max_plan_rounds:` is null, not absent). On any violation the lead writes nothing: no `status: in_progress` stamp, no `mark-dispatched` or `mark-started`, no Workflow call. Name the field, the bad value and its source (task or rollout frontmatter), then end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="invalid round budget: <field> on [[task]]"` — for a rollout-level value, name the rollout instead of the task. This is the upstream refusal; the engine also fails closed per task (`plan-blocked` / `review-blocked` naming the field) so a bad budget can never silently disable a plan or review layer (ADR 0008).
 
 `scope:` is read directly from each task's frontmatter (set by `/thread:schedule`). `completion_sentinel` is no longer used — the Workflow returns validated structured output instead of parsing sentinel strings.
 
@@ -213,7 +213,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 | master review (the PR-review judge — refines the judges row) | high | xhigh |
 | mechanical reconcile stages | low | low |
 
-Every `agent()` spawn site sets `effort` from the task's **live** tier + the agent's role, so escalation carries effort automatically — flipping a task to fable is one move that upgrades model AND effort, and judges follow (judges pinned via `judgeModel` take the pinned tier's row — model and effort always travel together). The **single escape hatch** is per-task `effort:` frontmatter (`low` \| `medium` \| `high` \| `xhigh` \| `max`): resolve it from the task note and pass it as `task.effort` — it overrides the planner/implementer effort for that task only, judges always keep the matrix, and it holds across an escalation (a monster task at fable/max stays at max). There is deliberately **no rollout-level effort config** (see ADR 0007's rejected options) — tuning the matrix means editing the engine, because the matrix encodes a stance (where effort is worth paying), not a per-rollout preference. The reconcile row is documented stance only today: reconcile is deterministic Python (`reconcile-wave.py`), so no agent consumes it.
+Every `agent()` spawn site sets `effort` from the task's **live** tier + the agent's role, so escalation carries effort automatically — flipping a task to fable is one move that upgrades model AND effort, and judges follow (judges pinned via `judgeModel` take the pinned tier's row — model and effort always travel together). The **single escape hatch** is per-task `effort:` frontmatter (`low` \| `medium` \| `high` \| `xhigh` \| `max`): resolve it from the task note and pass it as `task.effort` — it overrides the planner/implementer effort for that task only, judges always keep the matrix, and it holds across an escalation (a monster task at fable/max stays at max). There is deliberately **no rollout-level effort config** (see ADR 0007's rejected options) — tuning the matrix means editing the engine, because the matrix encodes a stance (where effort is worth paying), not a per-rollout preference. The reconcile row is documented stance only today: reconcile is deterministic Python (`reconcile-rollout.py`), so no agent consumes it.
 
 **Model escalation (one-shot first pass).** An `opus` task gets exactly one un-iterated pass at each layer: one plan, one implementation with a **single** verifier run (the Ralph `max_iterations` budget does not apply to the first pass), one judged PR round. The first evidence of hardness anywhere — a plan-judge `changes` verdict, a first-pass planner/investigator block, a red one-shot verifier run, an implementer block, or a review-judge `changes` verdict — **escalates the task to `fable` for all remaining work**, judges included. Escalation is one-way, sticky, and happens inside the engine (no re-invocation): the fable agent inherits the prior attempt's worktree, committed work, and note diagnosis, and runs the full Ralph loop. A `fable` task (stepped up by `/thread:schedule` §4.7 or a rollout-level `model: fable`) never escalates — there is nothing above fable — and runs the full loop from the start, exactly as before. Escalation is **durable**: reconcile (§6) stamps `model: fable` on the task note, so resume / `/thread:repair` re-dispatches start at fable and never re-pay the opus toll. There is no config switch — escalation is always on for opus tasks.
 
@@ -234,7 +234,7 @@ Every plan the engine's planner produces must carry a **`### Gated inputs`** sec
 **Sign-off flow (the pause continuous mode makes for gated tasks):** reconcile (§6) writes the declared gates under `## Gated inputs (awaiting sign-off)` and sets `status: gate-pending`. Present each gate **verbatim** to the user and ask for sign-off — this pause is **designed** (ADR 0008), not a failure. On sign-off run:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py approve-gates --tasks <slugA,slugB>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <slugA,slugB>
 ```
 
 (moves the pending gates to `## Approved gates` with the sign-off date — gate + cap + sign-off — and flips the note to `in_progress`), then re-dispatch exactly those tasks (per-task resume within the wave). If the user declines a gate, defer the task or leave it — the wave then follows the normal incomplete-wave rules. If nobody is present to sign off, end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="gated inputs await sign-off: [[task]]"`. `resume-filter` **excludes** `gate-pending` notes, so no unattended re-entry (heartbeat included) can bypass or spam a pending gate — only `approve-gates`, run after an explicit human sign-off, makes the task dispatchable again. The approved cap is a **ceiling** the implementer must respect; blowing it is a verifier/review failure, not a re-ask.
@@ -256,7 +256,7 @@ fi
 # end thread:git-env-check
 ```
 
-`$vars` only proves the list is readable; the loop iterates the command substitution itself, because zsh (the Bash tool's shell on macOS) never word-splits a parameter expansion. On **any non-zero exit, write nothing**: no stamp, no `mark-dispatched`, no Workflow call. Print its stderr verbatim above the WAVE-STATUS line and end the turn with `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="git env set in the lead session"` (exit 1) or `reason="git-env check failed"` (exit 2).
+`$vars` only proves the list is readable; the loop iterates the command substitution itself, because zsh (the Bash tool's shell on macOS) never word-splits a parameter expansion. On **any non-zero exit, write nothing**: no stamp, no `mark-dispatched`, no Workflow call, no `mark-started`. Print its stderr verbatim above the WAVE-STATUS line and end the turn with `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="git env set in the lead session"` (exit 1) or `reason="git-env check failed"` (exit 2).
 
 Before launching, for each task in scope: stamp `status: in_progress` and `owner: <session-tag>` on the task's frontmatter (blocks duplicate dispatches). Keep this in the lead session — subagents never write task `status:`. In the launch message, **flag any task expected to gate** (a `plan_approval: required` stamped by `/thread:schedule`'s gated-input sweep, or a note that smells of spend/credentials) so the eventual `gate-pending` pause is expected, not a surprise (§3.7).
 
@@ -278,9 +278,10 @@ Build the args object for each task call:
   "maxTier": "opus",                      // from rollout `max_tier:` (ADR 0016); OMIT when absent —
                                           //   a quota ceiling, never a cost knob. Check the account's
                                           //   quota before setting it, and say so in the launch message.
-  "progress": "wave 1/4 dispatched — 0m elapsed",  // optional; mark-dispatched's progress line (§4.5 step 1) —
-                                                   //   the engine log()s it verbatim (its sandbox has no clock);
-                                                   //   OMIT when mark-dispatched printed none
+  "progress": "progress: 2/6 merged, 1 running, 3 queued — 42m elapsed, ~50m remaining (rough)",
+                                          // optional; the progress line `mark-started --rollout` or
+                                          //   `next` prints (reconcile-rollout.py) — the engine log()s it
+                                          //   verbatim (its sandbox has no clock); OMIT when none was printed
   "task": { "slug": "giflab-fix-x", "taskPath": "/abs/.../giflab-fix-x.md",   // ONE task per call
     "scope": "single-file", "planGate": false,
     "maxIterations": 3, "maxReviewRounds": 4, "maxPlanRounds": 2,  // positive integers only (§3)
@@ -308,7 +309,7 @@ Pass the printed name as `defaultBranch` only when it is not `main`. Any non-zer
 
 Also read the rollout note's **`## Known baseline failures`** block (`/thread:schedule` step 2.6): when it lists tests (not `none`/empty), pass them as `knownBaselineFailures: ["<test_id> — <reason>", …]`. The engine threads the manifest into every agent and shifts the Ralph green criterion to "no NEW failures beyond this set" — it keeps running the full verifier and never `--deselect`s the listed reds (per the project's `CLAUDE.md`: a comparison reference, not a mute button). Omit the key when the block is absent or `none` — the engine then behaves exactly as before (`verifier` exit 0 = pass).
 
-- **Single-wave mode** (`execute Wave N of [[rollout]]`) → dispatch wave N's tasks one Workflow call per task, in order. Opens PRs; the user merges. No auto-merge. The tasks therefore end the session at `status: review` — once the user confirms the merges (or a later invocation finds the PRs merged in pre-flight), run `reconcile-wave.py mark-done` on them so they don't linger as false "awaiting acceptance" items.
+- **Single-wave mode** (`execute Wave N of [[rollout]]`) → dispatch wave N's tasks one Workflow call per task, in order. Opens PRs; the user merges. No auto-merge. The tasks therefore end the session at `status: review` — once the user confirms the merges (or a later invocation finds the PRs merged in pre-flight), run `reconcile-rollout.py mark-done` on them so they don't linger as false "awaiting acceptance" items.
 - **Continuous auto-merge mode** (`execute [[rollout]]`, no wave number, no flag — the DEFAULT) → do **not** pass all waves at once. Drive the rollout **one wave at a time: one Workflow call per task, sequential within the wave (at most one call in flight)** across turns, auto-merging each wave before launching the next. This is the zero-touch path — see §4.5.
 - **`--gated`** → the **same** per-wave loop as continuous, but the between-wave step is a **human merge pause** instead of the auto-merge: run wave N, present its report, wait for the user to merge + re-invoke, then call wave N+1. The escape hatch for eyeballing PRs before they land.
 
@@ -326,10 +327,10 @@ In continuous mode the lead session is the conductor: run ONE wave's tasks on th
 
 1. Re-run § 2.5; then resolve config + stamp `status: in_progress` for wave K's tasks (step 4). Stamp the wave's **dispatch boundary** on the rollout note — the engine's sandbox has no clock, so wall-clock enters here:
    ```
-   python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py mark-dispatched --rollout <rollout-note> --wave K
+   python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py mark-dispatched --rollout <rollout-note> --wave K
    ```
    (writes `wave_K_dispatched: <timestamp>`; idempotent — **first dispatch wins**, so a resume re-dispatch never resets the wave clock). It prints a `progress:` line — "wave K/N dispatched — 42m elapsed, ~50m remaining (rough)" — surface it to the user and pass its text as the args `progress` string so the engine `log()`s it live in `/workflows`. Then, for each wave-K task in turn (the rollout note's order), build that task's args (`task: <its row>`, the wave's `progress` text) and call the Workflow (step 5). Launch the next task's call only once the previous call has returned and been reconciled (step 2).
-2. On each call's completion → reconcile its result with §6's `reconcile-wave.py reconcile` helper only, and print a short per-task line (e.g. "[[task-a]] → review, PR <url>"), not the full Wave N report. Then launch the wave's next task call (§ 2.5 re-check first, per the entry rule) and end the turn `state=waiting`. After the wave's last call is reconciled, print §6's **Wave N report** (with its *Recommended merge order*) once, for the whole wave, and go to step 3.
+2. On each call's completion → reconcile its result with §6's `reconcile-rollout.py reconcile` helper only, and print a short per-task line (e.g. "[[task-a]] → review, PR <url>"), not the full Wave N report. Then launch the wave's next task call (§ 2.5 re-check first, per the entry rule) and end the turn `state=waiting`. After the wave's last call is reconciled, print §6's **Wave N report** (with its *Recommended merge order*) once, for the whole wave, and go to step 3.
 3. **Auto-merge wave K.** Re-run § 2.5 before `merge-wave.sh`: a repo listed during the wave halts here with the wave's approved PRs left open (merging puts commits on the listed repo's default branch). On that halt there is no merge, no cursor advance and no `mark-done`; the tasks stay at `review`, and once the repo is unlisted, re-invocation's *Cold resume* flush merges them. Collect the wave's tasks that returned `status: review` **and** have a non-empty `pr` (read-only tasks have none; **never** merge `review-blocked` / `blocked` / `plan-blocked` / `gate-pending`), in the report's recommended order. Run:
    ```
    ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-wave.sh <repoPath> <pr> <pr> …
@@ -337,18 +338,18 @@ In continuous mode the lead session is the conductor: run ONE wave's tasks on th
    - **The sentinel is authoritative, not the reported exit.** On exit the script writes `<repoPath>/.claude/merge-wave.status` — `ok` only on a clean merge, `failed:<code>` on any halt. If the run is backgrounded, a trailing-command wrapper (`… & wait; echo done`) can mask the script's real exit — so **read the sentinel file**, not the reported exit code. Treat anything other than a file containing exactly `ok` — **including a missing file** — as a halt.
    - **sentinel ≠ `ok` → HALT the rollout.** Surface the script's message verbatim (which PR, why, the exact next step) and stop. Do **not** advance the cursor or launch the next wave.
    - **sentinel `ok` → advance the cursor to `merged_through_wave: K`** via the helper (not a hand-edit):
-     `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py cursor --rollout <rollout-note> --wave K`
+     `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py cursor --rollout <rollout-note> --wave K`
      The cursor step also stamps the **merge boundary** (`wave_K_merged: <timestamp>`, first merge wins) and prints a `progress:` line — "wave K/N merged — 1h 24m elapsed, ~50m remaining (rough)" — include it in the wave report. The estimate is in-rollout arithmetic only (average task convergence from this rollout's completed waves × remaining ÷ ceiling), **always labelled rough (~)** — never restate it with false precision; before any wave completes it shows elapsed only (no basis yet), and on the final wave it prints the total instead ("rollout complete in 2h 10m").
    - **…then flip the wave's landed tasks to `done`** (same helper):
-     `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py mark-done --tasks <slugA,slugB,…>`
-     Pass **every wave-K task that ended at `status: review`** — both the just-merged PR tasks (the merge IS the confirmation a `review` note was waiting for) and the wave's read-only tasks (no PR to merge; their master-review approval was their confirmation, and the wave completing is when that becomes final). Idempotent; the helper refuses any note not at `review`/`done`, so a blocked task can never be swept along. Without this flip, landed tasks pile up at `review` as false "awaiting acceptance" items — seven had accumulated by 2026-06-12.
+     `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py mark-done --tasks <slugA,slugB,…>`
+     Pass **every wave-K task that ended at `status: review`** — the just-merged PR tasks (the merge IS the confirmation a `review` note was waiting for). Reconcile marks a read-only task done on approval, so passing one to `mark-done` is a no-op. Idempotent; the helper refuses any note not at `review`/`done`, so a blocked task can never be swept along. Without this flip, landed tasks pile up at `review` as false "awaiting acceptance" items — seven had accumulated by 2026-06-12.
    - **Soft-pause check (rides the cursor step — zero extra calls).** The `cursor` helper honours a `pause_requested: true` flag on the rollout note: it stamps `paused: <timestamp>`, clears the flag, and prints a `paused=` line alongside the cursor advance. When that line appears, the user asked for a soft pause — do **NOT** launch wave K+1. Print a short paused report (what merged this wave, what's left) and end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="paused at user request"`. The Stop-hook driver releases on `halted`, and the heartbeat cron deletes itself on its next tick — on this `halted` line, or on the `paused:` stamp its prompt checks ahead of the stall diagnosis (§5), which is what keeps "nothing auto-resumes a paused rollout" true for a hard pause too (a hard pause never emits `halted`; its runbook also deletes the cron outright). Reinstate is plain `/thread:execute [[rollout]]` — see *Pausing + reinstating a rollout* below.
-4. **Smart-halt check** before launching K+1: if any wave-K task did **not** land (`blocked` / `review-blocked` / `plan-blocked` / `gate-pending`) **and** its file-set (from the rollout note's `## File-sets` block) intersects the union of any later wave's file-sets → **HALT** with a clear report (e.g. "wave K left [[task]] unlanded; wave M edits the same file `<f>` — continuing would branch it from a main missing the fix"). The user fixes the blocker and re-invokes. Otherwise, **honour any pending pause before launching K+1**: a partially-landed wave never runs step 3's cursor advance (*Per-task resume within a wave* below), so a `pause_requested: true` still sitting on the rollout note has NOT been honoured yet — check the note, and if the flag is pending, re-run `reconcile-wave.py cursor --rollout <rollout-note> --wave <current merged_through_wave>` (cursor-idempotent — re-setting the same value changes nothing — while performing the stamp + clear + `paused=` signal) and exit exactly as the step-3 *Soft-pause check* does: no wave K+1, paused report, `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="paused at user request"`. With no pending pause, launch wave K+1 (its worktrees branch from the freshly-merged `origin/main`).
+4. **Smart-halt check** before launching K+1: if any wave-K task did **not** land (`blocked` / `review-blocked` / `plan-blocked` / `gate-pending`) **and** its file-set (from the rollout note's `## File-sets` block) intersects the union of any later wave's file-sets → **HALT** with a clear report (e.g. "wave K left [[task]] unlanded; wave M edits the same file `<f>` — continuing would branch it from a main missing the fix"). The user fixes the blocker and re-invokes. Otherwise, **honour any pending pause before launching K+1**: a partially-landed wave never runs step 3's cursor advance (*Per-task resume within a wave* below), so a `pause_requested: true` still sitting on the rollout note has NOT been honoured yet — check the note, and if the flag is pending, re-run `reconcile-rollout.py cursor --rollout <rollout-note> --wave <current merged_through_wave>` (cursor-idempotent — re-setting the same value changes nothing — while performing the stamp + clear + `paused=` signal) and exit exactly as the step-3 *Soft-pause check* does: no wave K+1, paused report, `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="paused at user request"`. With no pending pause, launch wave K+1 (its worktrees branch from the freshly-merged `origin/main`).
 5. Repeat until the last wave merges, then **perform the completion ceremony** (don't just point the user at the checklist):
    - Sweep the rollout's task notes: every task should already read `status: done` (step 3's `mark-done` flips them wave by wave). Flip any straggler still at `review` whose PR is verifiably merged (`mark-done` again); a straggler at any *other* status means the rollout isn't actually complete — stop and say so.
    - **Close the phases this rollout finished (ADR 0026).** Without this step a phase closes only when a lead remembers to. Run it here, before the rollout stamp, never after:
      ```
-     python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py touched-phases --rollout <rollout-note>
+     python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py touched-phases --rollout <rollout-note>
      python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/reconcile-project.py <line> --kinds phase --apply
      ```
      The first prints one `--project <slug> --phases <N,M,...>` line per project slug among the rollout's linked task notes named `<slug>-p<N>-*` (archived ones included, loose tasks ignored); run the second once for each line it prints, with `<line>` as that line verbatim.
@@ -375,7 +376,7 @@ In continuous mode the lead session is the conductor: run ONE wave's tasks on th
      due:
      captured: <today>
      ```
-   - Append a `## Completion log` to the rollout note: dispatch dates, waves → PRs (links + merge dates), convergence stats per task, **total duration + a per-wave duration breakdown** (read the `timeline` block from `reconcile-wave.py status --rollout <rollout-note>` — it's computed from the `wave_N_dispatched`/`wave_N_merged` stamps), phase closure: phases closed, already closed, ambiguous (with the tool's reason), failed (with the follow-on task link), left open (with the fixed reason), and the disposition of each post-rollout item.
+   - Append a `## Completion log` to the rollout note: dispatch dates, waves → PRs (links + merge dates), convergence stats per task, **total duration + a per-task duration breakdown** (read the `timeline` block from `reconcile-rollout.py status --rollout <rollout-note>` — it's computed from each task note's `started:`/`merged:` stamps, ADR 0030), phase closure: phases closed, already closed, ambiguous (with the tool's reason), failed (with the follow-on task link), left open (with the fixed reason), and the disposition of each post-rollout item.
    - Close out the associated thread (run `/thread:close` — a sibling: `${CLAUDE_PLUGIN_ROOT}/skills/close/SKILL.md`) — or record in the log why it stays open.
    - Delete the rollout's `WAVE-HEARTBEAT` cron if one is registered (`CronList` → `CronDelete`); the heartbeat also self-deletes on its next tick, but don't leave it ticking for up to 20 minutes against a finished rollout.
    - Move the rollout note to `Work/Tasks/Archive/Rollouts/` (`git mv` in the vault) and commit the vault (task, phase, follow-on and rollout notes). Wikilinks resolve by filename, so `[[<slug>]]` references and task `rollout:` backlinks survive the move.
@@ -387,7 +388,7 @@ In continuous mode the lead session is the conductor: run ONE wave's tasks on th
 **Reinstate (resuming a paused rollout).** If the rollout note carries a `paused:` stamp, this invocation IS the reinstate — re-run § 2.5 and § 2.7 first (a halt in either leaves the `paused:` stamp in place, so the heartbeat's paused-stamp check and `/thread:status` still read it as paused); then clear the stamp, deterministically:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py clear-pause --rollout <rollout-note>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py clear-pause --rollout <rollout-note>
 ```
 
 then continue the normal cold resume above (flush any half-merged wave, `resume-filter`, re-dispatch whatever didn't land). There is no separate resume command. `clear-pause` also removes any still-pending `pause_requested` (the hard-pause-before-honour edge) so a freshly reinstated rollout doesn't immediately re-pause. **Only trigger it on a `paused:` stamp** — a pending `pause_requested` with no stamp is a live user request that must survive resumes (including the heartbeat cron's re-entry) and takes effect at the next wave boundary.
@@ -395,7 +396,7 @@ then continue the normal cold resume above (flush any half-merged wave, `resume-
 **Per-task resume within a wave (finding #7).** A wave that returned one approved + one blocked task merges the approved PR but can't advance the cursor (the wave is incomplete). On resume, dispatch only the tasks in that wave whose note status is **not already landed/approved** — the task-note `status:` is the source of truth, not the cursor. Compute the still-to-dispatch set deterministically rather than re-dispatching the whole wave (which would re-run already-merged work):
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py resume-filter --tasks slugA,slugB,slugC
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume-filter --tasks slugA,slugB,slugC
 #   prints the subset whose status ∉ {done, review, merged} — dispatch exactly those, one call per printed slug, in order.
 #   gate-pending notes are ALSO excluded (with a stderr WARN): they await a human sign-off, not a
 #   dispatch — approve-gates makes them dispatchable again (§3.7).
@@ -439,18 +440,26 @@ The workflow returns `{ rolloutSlug, tasks: [{ slug, scope, status, prUrl, branc
 **Reconcile with the deterministic helper — do NOT hand-edit frontmatter.** Write the returned object to a temp file (or pipe it on stdin) and run:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py reconcile --result /tmp/wave-result.json
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py reconcile --result /tmp/wave-result.json
 #   --result -   reads the JSON from stdin instead
 ```
 
 The helper resolves each task note by slug under `~/repos/obsidian/Work/Tasks/` and performs every per-task write the old hand-edit loop did — **idempotently**, so it's safe to re-run on resume. Per returned `status`:
 - any status with `tierCapped: true` → reconcile stamps **`tier_capped: <layer>`** on the task note (never `model: fable` — the run could not use that tier, and stamping it would send the next dispatch back into the exhausted quota). An uncapped re-run that gets further retires the marker. The run was capped by `maxTier` (ADR 0016): a block on that task is **not** evidence of a genuine wall, and it is re-dispatchable uncapped once the higher tier's quota returns. Say so in the report; never let `/thread:repair` read it as input-gated.
-- `review` → `status: review`, `pr: <url>`, `review_rounds_used: <n>` (and `plan_rounds_used: <n>` when the task was plan-gated); a ceiling approval (`approvedAtCeiling`) additionally appends the grouped `reviewHistory` under `## Review history (approved at ceiling)` — an audit record, never re-dispatch input
-- `review-blocked` → `status: review-blocked`, `pr: <url>`; appends the grouped `reviewHistory` (every round, latest last; legacy results without it fall back to final-round `reviewFeedback`) under `## Review-blocked feedback`
-- `blocked` → `status: blocked`; appends `blockerDiagnosis` under `## Blocker diagnosis` (skipped if the agent already wrote it)
-- `plan-blocked` → `status: plan-blocked`; appends the accumulated plan feedback under `## Plan-blocked feedback`
-- `gate-pending` → `status: gate-pending`; **upserts** the declared gates under `## Gated inputs (awaiting sign-off)` (upsert, not append — the pending list always reflects the latest declaration)
+- `review` → `status: review`, `pr: <url>`, `review_rounds_used: <n>` (and `plan_rounds_used: <n>` when the task was plan-gated). A **read-only** task (the row's `scope`, else the note's) with no PR is written **`status: done`** instead: it is done when its review approves, has nothing to merge and never enters Integration (ADR 0030); its approval is its completion, so it is stamped `merged:` then (the first stamp wins) and its duration counts in the `status` timeline. A ceiling approval (`approvedAtCeiling`) additionally records the grouped `reviewHistory` as a run under `## Review history (approved at ceiling)` — an audit record, never re-dispatch input. A later ceiling approval of the same task (an Integration rejection can produce one) is a new run.
+- `review-blocked` → `status: review-blocked`, `pr: <url>`; records the grouped `reviewHistory` (every round, latest last; legacy results without it fall back to final-round `reviewFeedback`) as a run under `## Review-blocked feedback`
+- `blocked` → `status: blocked`; records `blockerDiagnosis` as a run under `## Blocker diagnosis`. A diagnosis that starts `integration:` (any case) marks the task **set aside at Integration**, where it re-enters (`status` and `next` report `setAsideAt: integration`); any other blocked task is set aside at its run.
+- `plan-blocked` → `status: plan-blocked`; records the accumulated plan feedback as a run under `## Plan-blocked feedback`
+- `gate-pending` → `status: gate-pending`; **upserts** the declared gates under `## Gated inputs (awaiting sign-off)` (upsert, not a run — the pending list always reflects the latest declaration)
+- every row → removes `integrating:`: the run that produced the row ended any Integration the task was in
 - any status with `escalated: true` → additionally stamps `model: fable` (durable escalation — later re-dispatches start at fable)
+
+**Feedback accumulates per run (p6-4).** The three blocked sections and the ceiling history keep every run's feedback, never only the first. Each run is a block: `### Run <n> (<stamp>)`, a blank line, the content, a blank line, then `<!-- run <n> end sha=<12 hex> -->`, where sha is the sha256 of the content normalised (lines right-stripped, outer blank lines dropped, runs of blank lines collapsed) and n is the highest existing run + 1.
+- **The content can never break the note's structure.** Diagnoses are free LLM text, so a heading at level 1–3 in the content is written three levels down (`## Root cause` becomes `##### Root cause`) and a line shaped like a run end marker is indented one space. A `## ` line can then never end the section, and no line can open or close a run. The sha stays over the content as given. A gate-pending section's content is written the same way.
+- **A re-reconcile is a no-op** when the new content hashes equal to the **highest** run (a run whose end marker was removed by hand is compared by its extent). Earlier runs are never compared, so a finding that recurs after a different run is recorded again.
+- **The agent's copy is adopted, not duplicated.** The engine tells the implementer to write its diagnosis into the note itself. When the text after the last end marker (or the whole section, when it has no runs yet) normalises equal to the new content, and that content has no heading or marker line to rewrite, reconcile makes it the run in place: the heading goes before it and the marker after it, its bytes unchanged. Otherwise the run is appended at the section's end, after any differing agent text.
+- **Nothing is deleted or rewritten.** Earlier runs stay byte-identical, and legacy text with no run heading (a section written before runs existed, or an orphan from an escalated-then-approved run) stays where it is, unnumbered.
+- **The latest diagnosis** of a section is the content of its highest run, or the whole section when it has no runs. It is what `status` reports as `blockerSummary` (the section matching the note's own status first) and what the `integration:` marker is read from.
 
 (This replaces ~5 fumble-prone frontmatter edits per wave — finding #6. The lead session still owns the call; subagents never write task `status:`.)
 
@@ -482,7 +491,7 @@ Ralph-blocked (no PR opened):
 
 Gate-pending (awaiting YOUR sign-off — a declared gate always pauses, ADR 0008):
 - [[task-j]] — declared: spend: Replicate API — cap USD 30
-  → sign off, then: reconcile-wave.py approve-gates --tasks task-j; re-dispatch via resume-filter
+  → sign off, then: reconcile-rollout.py approve-gates --tasks task-j; re-dispatch via resume-filter
 
 Recommended merge order: <list>
 ```
@@ -561,7 +570,7 @@ Division of labour: **Stop hook** = "don't stop while there's driving work"; **h
 
 The killed wave's tasks simply didn't land: their notes still read `in_progress`, so `resume-filter` re-dispatches them on reinstate, and the engine's worktree setup reuses each task's existing worktree + branch (resume-safe by design). Losses are bounded to in-flight agent context — committed work, and uncommitted files sitting in the worktrees, survive.
 
-**Reinstate.** `/thread:execute [[rollout]]`. The resume path (§4.5 *Reinstate*) re-runs § 2.5 and § 2.7, then sees the `paused:` stamp, clears it via `reconcile-wave.py clear-pause`, and continues from the cursor — flush any half-merged wave, re-dispatch whatever didn't land. The heartbeat cron re-registers at the next wave launch (§5; the paused rollout's old one is already gone — self-deleted on the soft pause's `halted` line or on its prompt's paused-stamp check, or deleted directly by hard-pause step 3 — so a pause is never auto-resumed by a leftover tick).
+**Reinstate.** `/thread:execute [[rollout]]`. The resume path (§4.5 *Reinstate*) re-runs § 2.5 and § 2.7, then sees the `paused:` stamp, clears it via `reconcile-rollout.py clear-pause`, and continues from the cursor — flush any half-merged wave, re-dispatch whatever didn't land. The heartbeat cron re-registers at the next wave launch (§5; the paused rollout's old one is already gone — self-deleted on the soft pause's `halted` line or on its prompt's paused-stamp check, or deleted directly by hard-pause step 3 — so a pause is never auto-resumed by a leftover tick).
 
 A paused rollout is **intentional**, not stalled: `/thread:status` reports it as paused (stamp + since-when + what's left), and `/thread:repair` treats it as nothing-to-fix.
 
