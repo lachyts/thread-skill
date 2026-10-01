@@ -140,6 +140,43 @@ warning (the registry format is Claude Code's, so the check fails open).
 - **Any other non-zero exit** (1, 127, …: bash or the script crashing): the same write-nothing halt with
   `reason="self-rollout check failed"`. The gate fails closed on any status it does not define.
 
+### 2.7. Pushed-base gate
+
+Every task worktree branches from a freshly fetched `origin/<default>`, so commits that exist only on a
+local default branch (a close-out, an ADR a task cites) are invisible to the agents. Run the pushed-base
+check in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers (point at it; never
+copy the snippet here) against the rollout's `Project root`, with no cited paths. For `<localPath>`, take
+the rollout's first `projects:` wikilink and resolve it with
+`find ~/repos/obsidian/Work/Projects -name '<Name>.md'`: with exactly one match carrying a `Local:` line,
+use its backticked path; otherwise leave it empty (the marketplace registry still covers the primary
+checkout of a self-rollout's separate clone).
+
+**Entry points only.** § 2.7 runs only when this invocation **entered at § 1**: a user turn naming
+`/thread:execute` or `execute [[…]]` (fresh, cold resume, reinstate, single-wave, `--gated` and its
+re-invocations), or a router such as `/thread:orient` dispatching this skill. It does **not** run on a turn
+whose prompt begins `WAVE-HEARTBEAT` (even when that turn loads this skill), on the Stop-hook `WAVE-DRIVER`
+continuation or a Workflow-completion notification (both continue the current invocation's loop), on
+§ 5's `resumeFromRunId` resume, or on `/thread:repair` §§ 4 and 6 (they follow §4.5 directly). When it
+runs, it runs directly after § 2.6, before the § 3/§ 4 stamps and before §4.5 *Reinstate*'s `clear-pause`.
+
+It runs at entry points and never per wave: `origin/<default>` moves with every merge, and a close-out
+committed on the local default branch mid-rollout must not halt an unattended run. Only one in `repoPath`
+itself is named per wave (`merge-wave.sh`'s local refresh reads `repoPath` alone); one committed in another
+clone of the set, such as the primary checkout of a self-rollout's separate clone, is named first when the
+next entry at § 1 halts on it with the queued-aware remedy.
+"Re-run § 2.5" keeps its meaning (§ 2.5 then § 2.6); it does not include this gate. **Pausing is exempt**,
+exactly as for § 2.5.
+
+- **Exit 0** (`pushed`): proceed; pass any `pushed-base: note:` line on to the user.
+- **Exit 3**: write nothing (no stamp, no `clear-pause`, no cursor, no `mark-dispatched`, no merge, no
+  Workflow call). Print the stderr verbatim (the ahead commits per clone, and the remedy: land them by PR,
+  or wait for the queued `close/…` landing PR) above the WAVE-STATUS line and end the turn with
+  `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="local default branch is ahead of origin"`.
+- **Exit 2** (a fetch or the default-branch lookup failed, a script not found): the same write-nothing
+  halt with `reason="pushed-base check failed"`.
+- **Any other non-zero exit** (1, 127, …): the same write-nothing halt with
+  `reason="pushed-base check failed"`. The gate fails closed on any status it does not define.
+
 ### 3. Resolve effective config per task
 
 For each task in the target wave (or all waves in continuous mode), resolve, in order **task frontmatter → rollout frontmatter → hardcoded default**:
@@ -349,9 +386,9 @@ In continuous mode the lead session is the conductor: run ONE wave on the engine
 
    A done rollout left sitting in `Work/Tasks/` is invisible-but-present — every Bases view filters `status != done`, so it vanishes from view with no record of what happened. The ceremony is what makes completion legible weeks later.
 
-**Cold resume.** Re-invoking `execute [[rollout]]` when `merged_through_wave: N` is set: first re-run § 2.5; then re-run `merge-wave.sh` against wave N+1's already-open PRs (idempotent — merged PRs are skipped, so this flushes any half-merged wave), `mark-done` the tasks whose PRs are now confirmed merged, then continue the loop.
+**Cold resume.** Re-invoking `execute [[rollout]]` when `merged_through_wave: N` is set: first re-run § 2.5, and § 2.7 when this invocation entered at § 1 (§ 2.7's entry rule; the heartbeat re-entry does not); then re-run `merge-wave.sh` against wave N+1's already-open PRs (idempotent — merged PRs are skipped, so this flushes any half-merged wave), `mark-done` the tasks whose PRs are now confirmed merged, then continue the loop.
 
-**Reinstate (resuming a paused rollout).** If the rollout note carries a `paused:` stamp, this invocation IS the reinstate — re-run § 2.5 first (a halt there leaves the `paused:` stamp in place, so the heartbeat's paused-stamp check and `/thread:status` still read it as paused); then clear the stamp, deterministically:
+**Reinstate (resuming a paused rollout).** If the rollout note carries a `paused:` stamp, this invocation IS the reinstate — re-run § 2.5 and § 2.7 first (a halt in either leaves the `paused:` stamp in place, so the heartbeat's paused-stamp check and `/thread:status` still read it as paused); then clear the stamp, deterministically:
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py clear-pause --rollout <rollout-note>
@@ -395,7 +432,7 @@ Tell the user the run launched, which waves/tasks it covers, and that they can w
 
 **Register the heartbeat (continuous mode, once per rollout).** In the same turn as the first wave launch, check `CronList` for an existing `WAVE-HEARTBEAT <rollout-slug>` task; if none, register one via `CronCreate` (schedule `*/20 * * * *`) with this prompt:
 
-> WAVE-HEARTBEAT <rollout-slug>: Read the last WAVE-STATUS line for this rollout in the conversation. If state=done or state=halted (or the rollout note is archived), find this cron via CronList and CronDelete it, then stop. If the rollout note's frontmatter carries a `paused:` stamp, the rollout is deliberately paused — a hard pause emits no halted line, so check the note BEFORE any stall diagnosis: CronDelete this cron and stop; never resume a paused rollout. If a Workflow run for the rollout is still visibly running in /workflows, do nothing — end the turn silently. Otherwise the rollout has stalled (no run in flight, waves remain): re-enter /thread:execute [[<rollout-slug>]] §4.5 resume from the cursor.
+> WAVE-HEARTBEAT <rollout-slug>: Read the last WAVE-STATUS line for this rollout in the conversation. If state=done or state=halted (or the rollout note is archived), find this cron via CronList and CronDelete it, then stop. If the rollout note's frontmatter carries a `paused:` stamp, the rollout is deliberately paused — a hard pause emits no halted line, so check the note BEFORE any stall diagnosis: CronDelete this cron and stop; never resume a paused rollout. If a Workflow run for the rollout is still visibly running in /workflows, do nothing — end the turn silently. Otherwise the rollout has stalled (no run in flight, waves remain): re-enter /thread:execute [[<rollout-slug>]] §4.5 resume from the cursor (this re-entry skips § 2.7, execute's entry-point-only pushed-base gate).
 
 This is the backstop for a hung Workflow run or a missed completion notification — the stall mode nothing else catches. Then **end the launch turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=waiting`** so the Stop-hook driver (§8) lets the session idle until the notification arrives.
 
@@ -480,6 +517,7 @@ Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS au
 - the smart-halt check fires (an unlanded task's file reappears in a later wave), or
 - § 2.5, or a §4.5 re-check of it, reports the repo on the landing register, or the check itself fails (`reason="<owner/name> is on the landing register"` or `reason="landing-register check failed"` — a **designed** stop: unlisting is Lachy's call; open PRs stay open and re-invocation after unlisting flushes them), or
 - § 2.6, or its run after a §4.5 re-check, finds `repoPath` is a directory-source plugin marketplace checkout, or the check itself fails (`reason="repoPath is a live plugin marketplace checkout"` or `reason="self-rollout check failed"` — nothing is stamped, dispatched or merged; clone the repo to a separate path such as `~/repos/<repo>-rollout`, point the rollout's `Project root` at it and re-invoke), or
+- § 2.7, at an entry point, finds a known clone's local `<default>` ahead of `origin/<default>` beyond THREAD.md, or the check itself fails (`reason="local default branch is ahead of origin"` or `reason="pushed-base check failed"` — nothing is stamped, cleared or dispatched; land those commits by PR, or wait for the queued `close/…` landing PR to merge, then re-invoke), or
 - § 4's git-env check finds a repo-local `GIT_*` variable exported in the lead session, or the check itself fails (`reason="git env set in the lead session"` or `reason="git-env check failed"` — nothing is stamped or dispatched; relaunch Claude Code from a shell without them, or put a working `git` on PATH, then re-invoke), or
 - §3's round-budget validation finds a `max_iterations`, `max_review_rounds` or `max_plan_rounds` that is not an integer >= 1 (`reason="invalid round budget: <field> on [[task]]"` — nothing is stamped or dispatched; fix the frontmatter and re-invoke), or
 - a wave leaves `gate-pending` tasks and nobody is present to sign off (`reason="gated inputs await sign-off: …"` — a **designed** pause, ADR 0008, not a failure: the user signs off, `approve-gates` runs, and re-invocation resumes; when the user IS present, ask for the sign-off in-conversation instead of halting — §3.7).
@@ -515,7 +553,7 @@ Division of labour: **Stop hook** = "don't stop while there's driving work"; **h
 
 ## Pausing + reinstating a rollout
 
-"Pause the rollout" means **soft pause** by default; **hard pause** only when it must stop *now*. Either way the pause is recorded on the rollout note, and reinstating is plain `/thread:execute [[rollout]]` — no separate resume command, no new state machine. Neither pause runs the § 2.5 landing-register gate: stopping work is never blocked, even for a listed repo or a register the check can't read. (Terms: `CONTEXT.md` → *Pause*, *Reinstate*.)
+"Pause the rollout" means **soft pause** by default; **hard pause** only when it must stop *now*. Either way the pause is recorded on the rollout note, and reinstating is plain `/thread:execute [[rollout]]` — no separate resume command, no new state machine. Neither pause runs the § 2.5, § 2.6 or § 2.7 gates: stopping work is never blocked, even for a listed repo or a register the check can't read. (Terms: `CONTEXT.md` → *Pause*, *Reinstate*.)
 
 **Soft pause (default).** Stamp `pause_requested: true` on the rollout note's frontmatter (a lead-session edit — it's rollout config, not task status). Nothing is interrupted: the in-flight wave finishes, merges, and advances the cursor as normal; the end-of-wave `cursor` helper then honours the flag — stamps `paused: <timestamp>`, clears `pause_requested` — and the loop exits with `state=halted reason="paused at user request"` instead of launching the next wave (§4.5 step 3, *Soft-pause check*; a partially-landed wave skips step 3's cursor advance, so step 4 honours the still-pending flag before any K+1 launch instead). Zero extra agent calls; the pause lands on a clean wave boundary. To cancel a pending request before it takes effect, remove the `pause_requested:` line (or run `clear-pause`).
 
@@ -527,7 +565,7 @@ Division of labour: **Stop hook** = "don't stop while there's driving work"; **h
 
 The killed wave's tasks simply didn't land: their notes still read `in_progress`, so `resume-filter` re-dispatches them on reinstate, and the engine's worktree setup reuses each task's existing worktree + branch (resume-safe by design). Losses are bounded to in-flight agent context — committed work, and uncommitted files sitting in the worktrees, survive.
 
-**Reinstate.** `/thread:execute [[rollout]]`. The resume path (§4.5 *Reinstate*) re-runs § 2.5, then sees the `paused:` stamp, clears it via `reconcile-wave.py clear-pause`, and continues from the cursor — flush any half-merged wave, re-dispatch whatever didn't land. The heartbeat cron re-registers at the next wave launch (§5; the paused rollout's old one is already gone — self-deleted on the soft pause's `halted` line or on its prompt's paused-stamp check, or deleted directly by hard-pause step 3 — so a pause is never auto-resumed by a leftover tick).
+**Reinstate.** `/thread:execute [[rollout]]`. The resume path (§4.5 *Reinstate*) re-runs § 2.5 and § 2.7, then sees the `paused:` stamp, clears it via `reconcile-wave.py clear-pause`, and continues from the cursor — flush any half-merged wave, re-dispatch whatever didn't land. The heartbeat cron re-registers at the next wave launch (§5; the paused rollout's old one is already gone — self-deleted on the soft pause's `halted` line or on its prompt's paused-stamp check, or deleted directly by hard-pause step 3 — so a pause is never auto-resumed by a leftover tick).
 
 A paused rollout is **intentional**, not stalled: `/thread:status` reports it as paused (stamp + since-when + what's left), and `/thread:repair` treats it as nothing-to-fix.
 

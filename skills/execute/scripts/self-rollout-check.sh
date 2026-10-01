@@ -17,8 +17,19 @@
 #         warning (fail open: the registry format belongs to Claude Code, not this plugin).
 # Exit 3: a match — the marketplace, the path and the remedy on stderr.
 # Exit 2: usage error (no or empty <repoPath>), or python3 missing.
+#
+# self-rollout-check.sh --list-dirs — the same registry read, as a list: every directory source's path and
+# installLocation, canonicalised as above, one per line, de-duplicated; exit 0. A missing registry prints
+# nothing; a malformed one prints nothing plus the stderr warning. Exit 2 on python3 missing or an extra
+# argument. Its caller is skills/_shared/scripts/pushed-base.sh (p12-15), which reads it to find the other
+# local clones of a rollout's repo, so this file stays the one parser of the registry.
 # Always run as `bash "<path>"`. bash 3.2-compatible (macOS).
-[ $# -eq 1 ] && [ -n "$1" ] || { echo "self-rollout-check: usage: self-rollout-check.sh <repoPath>" >&2; exit 2; }
+list=0
+if [ "${1:-}" = --list-dirs ]; then
+  [ $# -eq 1 ] || { echo "self-rollout-check: usage: self-rollout-check.sh --list-dirs" >&2; exit 2; }
+  list=1
+fi
+[ "$list" = 1 ] || { [ $# -eq 1 ] && [ -n "$1" ]; } || { echo "self-rollout-check: usage: self-rollout-check.sh <repoPath>" >&2; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "self-rollout-check: python3 not found" >&2; exit 2; }
 reg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json"
 [ -f "$reg" ] || exit 0
@@ -30,7 +41,6 @@ canon() {  # canon <path>: ~/ expanded, trailing slashes stripped, symlinks reso
   if [ -d "$p" ]; then (cd "$p" 2>/dev/null && pwd -P) || printf '%s\n' "$p"; else printf '%s\n' "$p"; fi
 }
 
-want=$(canon "$1")
 # One "<name><TAB><path>" line per directory-source path; warnings go to stderr, never a non-zero exit.
 entries=$(python3 - "$reg" <<'PY'
 import json, sys
@@ -59,6 +69,15 @@ for name, entry in data.items():
 PY
 )
 [ -n "$entries" ] || exit 0
+if [ "$list" = 1 ]; then
+  while IFS="$(printf '\t')" read -r name p; do
+    [ -n "$p" ] && canon "$p"
+  done <<EOF | awk '!seen[$0]++'
+$entries
+EOF
+  exit 0
+fi
+want=$(canon "$1")
 while IFS="$(printf '\t')" read -r name p; do
   [ -n "$p" ] || continue
   c=$(canon "$p")

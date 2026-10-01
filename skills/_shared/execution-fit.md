@@ -47,7 +47,7 @@ session lane. schedule § 0 runs these checks; callers that read this file
 for the fit test route through schedule rather than checking themselves. The
 schedule gate stops before anything is written (no task stamped, no rollout
 note, no heartbeat) and names the remedy. Fix the blocker, then schedule again.
-Three blockers:
+Four blockers:
 
 **GitHub `origin`.** The engine branches every worktree from
 `origin/<default branch>` and lands each task as a GitHub PR that merge-wave
@@ -102,7 +102,7 @@ esac
 
 It captures the reader's stdout only and never redirects its stderr, so the
 reader's own warnings (no register file, a malformed entry) and its
-`landing-register:` errors always show. Both snippets expand `~/` because rollout
+`landing-register:` errors always show. Every snippet expands `~/` because rollout
 notes carry `Project root: ~/...` and project notes a `Local: ~/...` line. On exit 0 it prints `land` (any warning the
 reader wrote still shows): the repo may land. On any non-zero exit, stop and print
 its stderr verbatim: that stderr is the remedy, or the reader's error. Exit 3 is a
@@ -123,6 +123,70 @@ repair step is deliberately ungated too: `/thread:repair` § 5's clean defer run
 `gh pr close --delete-branch` on a task the user chose to defer. That removes the
 rollout's own branch and PR and lands nothing on the default branch, so, like a
 pause, it is cleanup that the register never blocks.
+
+**Pushed base.** Rollout worktrees branch from a freshly fetched `origin/<default>`, and the agents
+read only their task note, the rollout note and the repo: never THREAD.md, and never anything that exists
+only in a local clone. So before launch, everything the tasks cite must be on GitHub. Run this against the
+same resolved path, after the landing register check:
+
+```bash
+# thread:pushed-base-check (extracted and tested by tests/pushed-base.test.sh)
+R="<repoPath>"
+L="<localPath>"
+case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
+db="${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/default-branch.sh"
+pb="${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/pushed-base.sh"
+for f in "$db" "$pb"; do [ -f "$f" ] || { echo "pushed-base: $f not found: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }; done
+b=$(bash "$db" "$R") || exit 2
+bash "$pb" --also "$L" "$R" "$b" <citedPaths>
+# end thread:pushed-base-check
+```
+
+`<localPath>` is the project note's `Local:` path, or empty. `<citedPaths>` is each cited path
+single-quoted, or nothing. The check runs over a **clone set**, not one checkout: the repo path's own
+clone, plus `<localPath>`, plus every directory-source plugin marketplace path in
+`known_marketplaces.json` (read through `self-rollout-check.sh --list-dirs`, the one registry parser),
+each kept only when its raw `origin` URL names the same `<owner>/<name>` and de-duplicated by real path. The
+registry source matters here: execute § 2.6 forces a separate rollout clone exactly when the repo path is a
+directory-source marketplace checkout, so the registry names the primary checkout exactly when a rollout
+clone exists, and a close-out committed in the primary is still seen.
+
+- **Exit 0** prints `pushed`; any notes and WARN lines on stderr pass through to the user.
+- **Exit 3**: some known clone's local `<default>` is ahead of `origin/<default>` with content that
+  `origin/<default>` lacks. Stop, and print the stderr verbatim: it lists the commits
+  (`git log --oneline origin/<default>..<default>`) and the remedy. The remedy is to land them on
+  `origin/<default>` by PR first (the default branch is PR-only, ADR 0025), then drop the local copies
+  with `git reset --keep origin/<default>` (that clone on the default branch) or
+  `git branch -f <default> origin/<default>` (not checked out). When that clone's HEAD is the default
+  branch, close's `repo-state.sh` line is reused with merge-wave's wording: commits **queued** in a
+  `close/…` landing PR mean wait for GitHub to merge it (never a second PR); **stranded** ones must be
+  landed; a split names both. Otherwise the remedy is the generic one.
+  Ahead by ancestry alone is not a block: commits whose content already reached `origin/<default>` by a
+  squash or cherry-picked PR (every one marked `-` by `git cherry`, or no file they touch differs from
+  `origin/<default>`) are a note naming that reset. An ahead set that touches no file still blocks.
+- **Exit 2**: the check itself failed (a fetch, the default-branch lookup, a missing script). Stop, and
+  print the stderr verbatim.
+
+Each cited path is compared on its own, never batched: a relative path in every clone of the set, an
+absolute or `~/` path in the clone that contains it (anything else, such as a vault note, is a note and is
+never compared). For each pair it warns on an **uncommitted change** (`git diff HEAD` plus
+`git diff --cached`), a file **committed on the checked-out branch** and still different on
+`origin/<default>` (in `git diff origin/<default>...HEAD`, three-dot, so a checkout that is merely behind
+stays silent, and in `git diff origin/<default> HEAD`, so a branch whose PR was squash-merged stays
+silent too) and an **untracked** file (`git ls-files --others --exclude-standard`). Other local branches
+that are not checked out are never read; the local `<default>` is covered by the block. A git failure on
+one pair is a WARN for that pair only. THREAD.md is out of scope both ways: a cited THREAD.md is dropped, and ahead commits that
+touch only THREAD.md are a note, not a block, since agents never read it.
+
+The check runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in every known clone, so it
+moves remote-tracking refs only: no working tree, branch or HEAD changes. The prune drops the tracking ref
+of a `close/…` branch deleted on origin, so its commits read stranded, never queued for ever. It runs
+from schedule § 0 with no cited paths, again after schedule's step-2 confirm with the cited paths, and
+from execute § 2.7 at entry points only, never per wave: `origin/<default>` moves with every merge, and a close-out committed
+mid-rollout must not halt an unattended run. Nothing names such a commit per wave in the general case:
+merge-wave's local refresh reads only the rollout's repo path, so it names one committed there, but one
+committed in another clone of the set (the primary checkout of a self-rollout's separate clone) first
+surfaces when the next entry halts on it.
 
 **Engine path.** The Workflow tool may refuse the plugin-cache `scriptPath`. That
 depends on the harness and cannot be checked at schedule time; execute § 5
