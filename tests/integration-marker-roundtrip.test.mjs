@@ -4,6 +4,8 @@
 // reconcile — p12-8's skills/execute/scripts/reconcile-rollout.py, whose per-run accumulation appends the
 // engine's diagnosis as the latest `### Run` after any agent-written text, and whose `status` reads
 // `setAsideAt` (any latest run starting `integration:` → integration) and `blockerSummary` (that latest run).
+// p12-16: reconcile also writes the Integration log — one `## Integration log` line per integrate row and the
+// `ready:` stamp the lead passes back as integration.readyAt. x7–x12 read both back from engine-built rows.
 //
 // Until p12-8 is on the base, every case SKIPs visibly. Whichever of p12-6 and p12-8 lands second runs it
 // against the other's real code; if p12-8's CLI changes (`reconcile --result --tasks-dir --now`, or the
@@ -72,10 +74,10 @@ function vault(agentParagraph) {
   return d
 }
 const py = (args) => execFileSync('python3', [RECONCILE, ...args], { encoding: 'utf8', env: { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1' } })
-function reconcile(d, result) {
+function reconcile(d, result, now = NOW) {
   const f = path.join(d, 'result.json')
   fs.writeFileSync(f, JSON.stringify(result))
-  py(['reconcile', '--result', f, '--tasks-dir', d, '--now', NOW])
+  py(['reconcile', '--result', f, '--tasks-dir', d, '--now', now])
   fs.rmSync(f)
 }
 function status(d) {
@@ -180,5 +182,120 @@ test('x6: a rejection on the last round reads back as review-blocked, its histor
     assert.deepEqual(JSON.parse(JSON.stringify(parsed.history)), r.reviewHistory.map(({ round, feedback }) => ({ round, feedback })))
     const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: parsed.history, reviewRoundsUsed: 2, plan: 'PLAN' }
     assert.equal(T.resumeArgsError({ ...base, task: mkTask({ resume }) }), '')
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+// ---- the Integration log (p12-16) ----
+const integrated = (I = mkI()) => row({ ...base, mode: 'integrate', task: mkTask(), integration: I }, {
+  [`integrate:${SLUG}`]: merged, [`integration-review:${SLUG} r2`]: { verdict: 'approve', feedback: [], unreadable: false, finishedAt: NOW },
+})
+const rejectedI = (I) => row({ ...base, mode: 'integrate', task: mkTask(), integration: I }, {
+  [`integrate:${SLUG}`]: merged, [`integration-review:${SLUG} r2`]: { verdict: 'changes', feedback: ['keep their rename', 'restore b.js'], unreadable: false, finishedAt: NOW },
+})
+const setAsideI = (I, extra = {}) => row({ ...base, mode: 'integrate', task: mkTask(), integration: I }, {
+  [`integrate:${SLUG}`]: { ...merged, blocked: true, mergeState: 'none', mergeLog: '', blockerDiagnosis: 'conflict in a.js cannot be resolved', ...extra },
+})
+const noteText = (d) => fs.readFileSync(path.join(d, `${SLUG}.md`), 'utf8')
+function logLines(d) {
+  const text = noteText(d)
+  const i = text.indexOf('\n## Integration log\n')
+  if (i < 0) return []
+  const rest = text.slice(i + '\n## Integration log\n'.length)
+  const j = rest.search(/^## /m)
+  return (j < 0 ? rest : rest.slice(0, j)).split('\n').filter((l) => l.trim())
+}
+const fm = (d, key) => (noteText(d).match(new RegExp(`^${key}: (.*)$`, 'm')) || [])[1]
+const LINE = (start, outcome, rest) => `${start} ${outcome} path=integrator pr=7 anchor=${sha('a')} ${rest}`
+const T1 = '2026-10-02T13:20+00:00'
+const T2 = '2026-10-02T13:40+00:00'
+
+test('x7: an integrated row writes its exact log line; readyAt round-trips from the ready: stamp', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault('')
+  try {
+    reconcile(d, await integrated(mkI({ readyAt: '2026-10-02T13:00+00:00', startedAt: T1 })))
+    assert.deepEqual(logLines(d), [LINE(T1, 'integrated', `head=${sha('d')} base=${sha('c')} wait=20 duration=45 triggers=conflict`)])
+    assert.equal(fm(d, 'status'), 'review')
+    assert.equal(fm(d, 'ready'), undefined, 'an Integration row never stamps ready:')
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+  const d2 = vault('')
+  try {
+    reconcile(d2, { rolloutSlug: ROLLOUT, tasks: [{ slug: SLUG, scope: 'cross-cutting', status: 'review', prUrl: PR, reviewRoundsUsed: 1, planRoundsUsed: 0 }] }, '2026-10-02T13:00:00Z')
+    const readyAt = fm(d2, 'ready')
+    assert.equal(readyAt, '2026-10-02T13:00+00:00')
+    const res = await integrated(mkI({ readyAt, startedAt: T1 }))
+    assert.equal(typeof res.tasks[0].integration.metrics.waitMinutes, 'number', "isoMinutes parses _stamp's form")
+    assert.equal(res.tasks[0].integration.metrics.waitMinutes, 20)
+    reconcile(d2, res)
+    assert.match(logLines(d2)[0], / wait=20 duration=45 /)
+    assert.equal(fm(d2, 'ready'), readyAt, 'the integrated row leaves ready: alone')
+  } finally { fs.rmSync(d2, { recursive: true, force: true }) }
+})
+
+test('x8: a rejected and a set-aside row each append one line; the x2 sequence ends set-aside', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault('')
+  try {
+    reconcile(d, await rejected())
+    assert.deepEqual(logLines(d), [LINE('-', 'rejected', `head=${sha('d')} base=${sha('c')} wait=- duration=- triggers=conflict`)])
+    reconcile(d, await setAside())
+    const lines = logLines(d)
+    assert.equal(lines.length, 2)
+    assert.equal(lines[1], LINE('-', 'set-aside', 'head=- base=- wait=- duration=- triggers=-'))
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+test('x9: a gate-pending set-aside reads back as gate-pending with a latest set-aside line', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault('')
+  try {
+    const res = await setAsideI(mkI({ startedAt: T1 }), { blockerDiagnosis: 'needs a paid API', gatedInputs: ['spend: a paid API — cap $5'] })
+    assert.equal(res.tasks[0].status, 'gate-pending')
+    reconcile(d, res)
+    assert.equal(fm(d, 'status'), 'gate-pending')
+    const lines = logLines(d)
+    assert.ok(lines[lines.length - 1].startsWith(`${T1} set-aside `), lines.join('\n'))
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+test('x10: re-reconciling an integrated row leaves the note byte-identical, one line', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault(AGENT)
+  try {
+    const res = await integrated(mkI({ startedAt: T1 }))
+    reconcile(d, res)
+    const once = noteText(d)
+    reconcile(d, res, '2026-10-03T09:00:00Z')
+    assert.equal(noteText(d), once)
+    assert.equal(logLines(d).length, 1)
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+test("x11: with no startedAt (today's default) set-aside, integrated, set-aside keeps three lines", async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault('')
+  try {
+    reconcile(d, await setAside())
+    reconcile(d, await integrated())
+    reconcile(d, await setAside())
+    const lines = logLines(d)
+    assert.deepEqual(lines.map((l) => l.split(' ').slice(0, 2).join(' ')), ['- set-aside', '- integrated', '- set-aside'])
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+test('x12: with startedAt, an older row replayed after a newer one adds no log line', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault('')
+  try {
+    const rej = await rejectedI(mkI({ startedAt: T1 }))
+    reconcile(d, rej)
+    reconcile(d, await setAsideI(mkI({ startedAt: T2 })))
+    const before = logLines(d)
+    assert.equal(before.length, 2)
+    reconcile(d, rej)
+    // The log is byte-identical. The note as a whole is not: `## Blocker diagnosis` keeps p6-4's A/B/A rule
+    // (a replayed marker is appended again as the latest run) — the reason p12-9's lead reconciles in order.
+    assert.deepEqual(logLines(d), before)
+    assert.ok(logLines(d)[1].startsWith(`${T2} set-aside `))
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
 })

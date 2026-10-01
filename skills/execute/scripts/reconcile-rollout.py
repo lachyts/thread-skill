@@ -5,7 +5,8 @@ The Workflow engine (`task.workflow.js`) returns a structured result per task ca
 used to hand-edit the frontmatter transitions (status + pr + *_rounds_used). This helper performs every
 one of those writes deterministically, and reads the rollout's progress back from the task notes: there
 is no stored cursor (ADR 0030). A task note's `status:` plus its `started:` / `merged:` / `integrating:`
-stamps ARE the rollout's state.
+stamps ARE the rollout's state; its `ready:` stamp and `## Integration log` are the durable record of the
+task's Integrations (p12-16).
 
 Subcommands:
 
@@ -14,7 +15,8 @@ Subcommands:
               whose scope is read-only and that carries no PR is written `status: done` and stamped
               `merged:` (the first stamp wins): a read-only task is done when its review approves and
               never enters Integration. Every row removes `integrating:` (the run that produced the row
-              ended any Integration).
+              ended any Integration). It also stamps `ready:` and appends the `## Integration log` line
+              (see the Status mapping below).
 
   next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start
               and restart within the parallel ceiling, every held task with its reason, the running,
@@ -64,7 +66,7 @@ Subcommands:
               the work truly landed (e.g. `gh pr view` shows MERGED) before invoking. Idempotent.
 
   defer       Pop task(s) out of a rollout, back to open backlog: clears `wave:`/`rollout:`/`owner:` and
-              the `started:`/`merged:`/`integrating:` stamps (first-start-wins would otherwise carry a
+              the `started:`/`merged:`/`integrating:`/`ready:` stamps (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
               re-plans them. The dependent-closure safety check lives in the /thread:repair skill.
 
@@ -102,6 +104,11 @@ Queue states (one per linked task, re-read on every call):
 Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
   review         -> status: review;        pr: <url>; review_rounds_used: <n>; plan_rounds_used: <n> (if >0);
                     read-only with no PR -> status: done instead;
+                    `ready: <stamp>` (overwriting any earlier one) on a move to review from another status,
+                    non-read-only, and NOT for a row carrying `integration`: readyAt is when the approving
+                    own (or seeded revise) call returned, per the engine header. A set-aside re-entry is
+                    leaving Integration, not joining the queue. A re-reconcile (review -> review) never
+                    re-stamps;
                     when approvedAtCeiling: a run of reviewHistory (grouped by round) under
                     "## Review history (approved at ceiling)" — ceiling approvals stay auditable
   review-blocked -> status: review-blocked; pr: <url>; a run of reviewHistory (grouped by round; legacy
@@ -110,6 +117,22 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
   plan-blocked   -> status: plan-blocked;   a run of blockerDiagnosis under "## Plan-blocked feedback"
   gate-pending   -> status: gate-pending;   UPSERT gatedInputs under "## Gated inputs (awaiting sign-off)"
                     (upsert, not append: a refreshed declaration replaces the pending list, never stales)
+  integration    -> (any status; a mode-'integrate' row's `integration` object) one bare line under
+                    "## Integration log", exactly 10 space-separated tokens:
+                      <startedAt> <outcome> path=<p> pr=<n> anchor=<sha> head=<sha> base=<sha> wait=<n|->
+                      duration=<n|-> triggers=<list|->
+                    from metrics.startedAt (verbatim), outcome, path, the row's prUrl (its PR number; `pr=-`
+                    when missing, empty or neither a GitHub PR URL nor `#7`/`7`), anchor.headSha, headSha,
+                    baseSha (full SHAs), metrics.waitMinutes / durationMinutes (ints) and triggers
+                    (comma-joined, in order). `-` stands for a missing value (None, '', [], a non-int minute
+                    count); whitespace inside a value becomes `_`. Dedupe: a line whose startedAt is set is
+                    skipped if an identical line appears anywhere in the section; a line whose startedAt is
+                    `-` is skipped only if it equals the section's last non-blank line. So a re-reconcile is
+                    byte-identical, and with startedAt so is a replay of an older row (two Integrations of
+                    one task started in the same minute with identical fields would collapse: negligible).
+                    Until the lead passes startedAt, lines are told apart only by position: S, I, S' keeps
+                    three lines, back-to-back identical lines collapse to one. Readers take the LAST line.
+                    `integration: null` counts as absent; a non-object is an error (exit 1, no line).
 
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
 
@@ -166,6 +189,10 @@ APPROVED_GATES_SECTION = "## Approved gates"
 # Accumulated per run, like the blocked sections: an Integration rejection can produce a second
 # ceiling approval for the same task.
 REVIEW_HISTORY_SECTION = "## Review history (approved at ceiling)"
+
+# The durable record of every Integration call (p12-16): one line per mode-'integrate' row, read by the
+# lead's clean path, the review-blocked resume and the gate-stop stage rule (see _integration_log_line).
+INTEGRATION_LOG_SECTION = "## Integration log"
 
 # Every workflow status with a body section to write (reconcile) or scan (status).
 SECTION_BY_STATUS = {**BLOCKED_SECTIONS, GATE_PENDING_STATUS: GATE_PENDING_SECTION}
@@ -623,6 +650,36 @@ class Note:
         block = ["", head, "", *written.split("\n"), "", _run_end(n, sha), ""]
         self._set_body_lines(lines[:j] + block + lines[end:] if end < len(lines) else lines[:j] + block)
 
+    def append_line(self, heading: str, line: str):
+        """Record one bare line under `heading` (the Integration log), creating the section when absent.
+
+        Dedupe, keyed on the line's first token (its startedAt): a line whose startedAt is set is skipped
+        when an identical line (right-stripped) appears ANYWHERE in the section, so a re-reconcile and a
+        replay of an older row are both no-ops; a line whose startedAt is `-` is skipped only when it
+        equals the section's LAST non-blank line, so S, I, S' keeps three lines and the latest stays
+        truthful (back-to-back identical `-` lines collapse). Otherwise the line goes right after the
+        section's last non-blank line, keeping one blank line after the heading and before any following
+        `## ` section. Nothing already written is deleted or rewritten."""
+        found = self._section_bounds(heading)
+        if found is None:
+            self.append_section(heading, line)
+            return
+        lines, start, end = found
+        filled = [i for i in range(start + 1, end) if lines[i].strip()]
+        kept = [lines[i].rstrip() for i in filled]
+        if line.split(" ", 1)[0] != "-":
+            if line in kept:
+                return
+        elif kept and kept[-1] == line:
+            return
+        if not filled:
+            # An empty section: its blank lines become one either side of the new line.
+            self._set_body_lines(lines[:start + 1] + ["", line, ""] + lines[end:])
+            return
+        j = filled[-1] + 1
+        tail = [""] if j == len(lines) or lines[j].strip() else []
+        self._set_body_lines(lines[:j] + [line] + tail + lines[j:])
+
     def render(self) -> str:
         return "---\n" + "\n".join(self._fm) + "\n---\n" + self._body
 
@@ -644,6 +701,51 @@ def history_block(history):
         if body:
             rounds.append(f"Round {entry.get('round', '?')}:\n{body}")
     return "\n\n".join(rounds)
+
+
+def _log_field(value, minutes=False) -> str:
+    """One Integration log value. None, '', [] (or a non-int, or bool, minute count) -> `-`; a list is
+    comma-joined in order; whitespace inside becomes `_`, so a line always has exactly 10 tokens and can
+    never read as a `## ` heading."""
+    if minutes:
+        return str(value) if isinstance(value, int) and not isinstance(value, bool) else "-"
+    if isinstance(value, (list, tuple)):
+        value = ",".join(str(v).strip() for v in value if v is not None and str(v).strip())
+    s = "" if value is None else str(value).strip()
+    return re.sub(r"\s", "_", s) if s else "-"
+
+
+def _log_pr(pr_url) -> str:
+    """The PR number of a row's prUrl (a GitHub PR URL, `#7` or `7`), else `-`: no arbitrary string ever
+    reaches the `pr=` token, and an unparseable PR never fails the row (the line is a record)."""
+    s = pr_url.strip() if isinstance(pr_url, str) else ""
+    m = PR_URL_RE.match(s)
+    if m:
+        return m.group(2)
+    m = PR_NUM_RE.match(s)
+    return m.group(1) if m else "-"
+
+
+def _integration_log_line(task) -> str:
+    """The `## Integration log` line for a row carrying a dict `integration` (the engine's
+    integrationResult): `<startedAt> <outcome> path=<p> pr=<n> anchor=<sha> head=<sha> base=<sha>
+    wait=<n|-> duration=<n|-> triggers=<list|->`. startedAt is written verbatim, SHAs in full. The line
+    carries no `now`, so a re-reconcile at another time writes the same line."""
+    integ = task["integration"]
+    metrics = integ.get("metrics") if isinstance(integ.get("metrics"), dict) else {}
+    anchor = integ.get("anchor") if isinstance(integ.get("anchor"), dict) else {}
+    return " ".join([
+        _log_field(metrics.get("startedAt")),
+        _log_field(integ.get("outcome")),
+        "path=" + _log_field(integ.get("path")),
+        "pr=" + _log_pr(task.get("prUrl")),
+        "anchor=" + _log_field(anchor.get("headSha")),
+        "head=" + _log_field(integ.get("headSha")),
+        "base=" + _log_field(integ.get("baseSha")),
+        "wait=" + _log_field(metrics.get("waitMinutes"), minutes=True),
+        "duration=" + _log_field(metrics.get("durationMinutes"), minutes=True),
+        "triggers=" + _log_field(integ.get("triggers")),
+    ])
 
 
 def _status(note) -> str:
@@ -1002,6 +1104,14 @@ def cmd_reconcile(args) -> int:
         # Integration (ADR 0030). The row's scope wins; the note's own is the fallback.
         scope = _scalar(task.get("scope")).lower() or _scope(note)
         note_status = "done" if (status == "review" and not pr and scope == "read-only") else status
+        # `ready:` is when the task joined the Integration queue: the approving own (or seeded revise)
+        # call returned (the engine's readyAt). Stamped on a move to review from another status,
+        # overwriting any earlier value; never on a read-only task (it never enters Integration) and
+        # never on an Integration row (an integrated set-aside re-entering review is leaving Integration,
+        # not joining the queue).
+        if (note_status == "review" and _status(note) != "review" and scope != "read-only"
+                and task.get("integration") is None):
+            note.set("ready", _stamp(now))
         note.set("status", note_status)
         # Its approval is its completion, so it is stamped `merged:` as a PR task is at its merge (the
         # first stamp wins): its duration then counts in the timeline, and a read-only task finishing
@@ -1065,6 +1175,15 @@ def cmd_reconcile(args) -> int:
                 else:
                     # p6-4: every run's feedback is kept as its own numbered run, never only the first.
                     note.append_run(heading, content, now)
+
+        # p12-16: an Integration row leaves one line in the note's `## Integration log` (the durable
+        # record a cold lead, repair and the gate resume read). `integration: null` counts as absent.
+        integration = task.get("integration")
+        if isinstance(integration, dict):
+            note.append_line(INTEGRATION_LOG_SECTION, _integration_log_line(task))
+        elif integration is not None:
+            errors.append(f"{slug}: integration is not an object ({type(integration).__name__}) — "
+                          "no Integration log line written")
 
         note.save(dry_run=args.dry_run)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
@@ -1555,10 +1674,10 @@ def cmd_defer(args) -> int:
                 errors.append(f"{slug}: belongs to rollout {cur!r}, not {expected!r} — refusing to defer")
                 continue
         note.set("status", "open")
-        for key in ("wave", "rollout", "owner", "started", "merged", "integrating"):
+        for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready"):
             note.remove(key)
         note.save(dry_run=args.dry_run)
-        print(f"{slug}: deferred->open (wave/rollout/owner and started/merged/integrating cleared)" +
+        print(f"{slug}: deferred->open (wave/rollout/owner and started/merged/integrating/ready cleared)" +
               (" (dry-run)" if args.dry_run else " [written]"))
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
