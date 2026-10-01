@@ -190,7 +190,7 @@ done
 has "$s5" "scriptPath\` the run started with" "execute § 5 resume re-passes the scriptPath the run started with"
 
 # ---- the register-check wiring -------------------------------------------------------------------------------
-has "$ef" "Three blockers" "execution-fit names three blockers"
+has "$ef" "Four blockers" "execution-fit names four blockers"
 has "$ef" "**Landing register.**" "execution-fit names the landing-register blocker"
 has "$ef" "execute § 2.5" "execution-fit cites execute § 2.5 for the re-checks"
 has "$ef" "any stderr already printed" "execution-fit: a failed check keeps whatever stderr it printed"

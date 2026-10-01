@@ -84,9 +84,25 @@ for sh in "${shells[@]}"; do
   has "$err" "self-rollout-check.sh not found at $tmp/noplugin/" "$n: … with the not-found line"
 done
 
+# ---- --list-dirs: the registry's directory sources, for skills/_shared/scripts/pushed-base.sh (p12-15) -----
+sc="$root/skills/execute/scripts/self-rollout-check.sh"
+# ld [VAR=val …]: rc in $rc, stdout in $out, stderr in $err
+ld() { out=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" "$@" bash "$sc" --list-dirs 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err"); }
+rm -f "$reg"
+ld; ok "$rc|$out|$err" "0||" "--list-dirs: no registry → nothing, exit 0"
+write_reg "$tmp/link/" "$tmp/other"
+ld; ok "$rc|$out|$err" "0|$home/repos/plug|" "--list-dirs: a directory and a github source → only the directory path, canonicalised and deduplicated"
+write_reg "~/repos/plugin2" "$tmp/other"
+ld; ok "$rc|$out" "0|$home/repos/plugin2" "--list-dirs: a ~/ path is expanded"
+echo '{ not json' > "$reg"
+ld; ok "$rc|$out" "0|" "--list-dirs: a malformed registry → nothing, exit 0"
+has "$err" "WARN" "--list-dirs: … with the warning"
+ld_extra=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" bash "$sc" --list-dirs extra >/dev/null 2>&1; echo $?)
+ok "$ld_extra" 2 "--list-dirs with an extra argument → usage error 2"
+
 # ---- wiring: § 2.6 and § 7 name both reasons; the halt line parses for the Stop hook --------------------
 sect() { awk -v a="$1" -v b="$2" 'index($0, a) == 1 {on=1} index($0, b) == 1 && on && index($0, a) != 1 {exit} on' "$skill"; }
-s26=$(sect '### 2.6. Self-rollout gate' '### 3.')
+s26=$(sect '### 2.6. Self-rollout gate' '### 2.7.')
 s7=$(sect '### 7. Continuous-mode stop conditions' '### 8.')
 for r in 'reason="repoPath is a live plugin marketplace checkout"' 'reason="self-rollout check failed"'; do
   has "$s26" "$r" "§ 2.6 names $r"
