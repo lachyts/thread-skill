@@ -822,6 +822,51 @@ ok(roRes && /transient infrastructure/i.test(roRes.blockerDiagnosis), 'converge:
     'SKILL.md § 7: the stop-conditions list carries the invalid-round-budget halt')
 }
 
+// ---- Pinned task tree (ADR 0030, p12-4): CLASS closer through converge() ----------
+// Every read-only agent (planner, plan judge, plan reviser, investigator, review judge) is handed the
+// task's own tree, never `Project root: <repoPath>` — checked on the prompts converge() actually
+// dispatches, so a builder or call site that slips back to the shared checkout fails here. repoPath is a
+// sentinel, so any bare read of it shows. Implementer prompts keep `Project root:` (byte-frozen).
+{
+  const aTree = { repoPath: '/REPOROOT', rolloutSlug: 'proj-rollout', verifier: 'make test' }
+  const seen = {}
+  effortCalls.length = 0
+  ctx.agent = recordingAgent(async (prompt, opts) => {
+    const k = opts.label.replace(/ r\d+$/, '')
+    seen[k] = (seen[k] || 0) + 1
+    if (opts.label.startsWith('plan-judge:')) return seen[k] === 1 ? { verdict: 'changes', feedback: ['tighten it'] } : { verdict: 'approve', feedback: [] }
+    if (opts.label.startsWith('plan:') || opts.label.startsWith('plan-revise:')) return { ready: true, blocked: false, blockerCause: '', plan: 'Planned on: abc\nPLAN\n### Gated inputs\nNone' }
+    if (opts.label.startsWith('review:')) return seen[k] === 1 ? { verdict: 'changes', feedback: ['fix it'] } : { verdict: 'approve', feedback: [] }
+    return greenImpl // implement: / investigate: / revise:
+  })
+  const tasks = [
+    { ...baseEff, slug: 'proj-tree-code', scope: 'cross-cutting', planGate: true },
+    { ...baseEff, slug: 'proj-tree-ro-gated', scope: 'read-only', planGate: true },
+    { ...baseEff, slug: 'proj-tree-ro', scope: 'read-only', planGate: false },
+  ]
+  const res = []
+  for (const t of tasks) res.push(await T.converge(t, aTree))
+  ok(res.every((r) => r && r.status === 'review'), 'pinned tree: all three tasks converge to review')
+  const by = (prefix) => effortCalls.filter((c) => c.label.startsWith(prefix))
+  const treeOf = (label) => `Task tree: /REPOROOT/.claude/worktrees/${label.split(':')[1].split(/[ @]/)[0]}`
+  const readers = [...by('plan:'), ...by('plan-judge:'), ...by('plan-revise:'), ...by('investigate:'), ...by('review:')]
+  for (const want of ['plan:proj-tree-code', 'plan-judge:proj-tree-code', 'plan-revise:proj-tree-code', 'review:proj-tree-code',
+    'plan:proj-tree-ro-gated', 'plan-judge:proj-tree-ro-gated', 'plan-revise:proj-tree-ro-gated', 'investigate:proj-tree-ro-gated',
+    'investigate:proj-tree-ro']) {
+    ok(readers.some((c) => c.label.startsWith(want)), `pinned tree: converge dispatched ${want}`)
+  }
+  ok(readers.length >= 11 && readers.every((c) => c.prompt.includes(treeOf(c.label)) && !c.prompt.includes('Project root: /REPOROOT')),
+    'pinned tree: every plan / plan-judge / plan-revise / investigate / review prompt carries its Task tree:, never Project root:')
+  const roFirst = effortCalls.filter((c) => ['plan:proj-tree-ro-gated', 'investigate:proj-tree-ro-gated', 'investigate:proj-tree-ro'].includes(c.label))
+  ok(roFirst.length === 3 && roFirst.every((c) => c.prompt.includes('worktree add --detach "$WT"') && !c.prompt.includes('-b "$BR"')),
+    'pinned tree: the read-only tasks\' plan: and investigate: prompts create a detached tree')
+  ok(by('plan:proj-tree-code')[0].prompt.includes('worktree add "$WT" -b "$BR"'), 'pinned tree: the code-writing planner creates the branch tree')
+  ok(by('implement:').length === 1 && by('implement:')[0].prompt.includes('Project root: /REPOROOT') && !by('implement:')[0].prompt.includes('Task tree:'),
+    'pinned tree: the implementer keeps Project root: (byte-frozen builder)')
+  ok(by('revise:').length === 1 && !by('revise:')[0].prompt.includes('Task tree:') && by('revise:')[0].prompt.includes('Worktree path: /wt'),
+    'pinned tree: the reviser keeps its threaded Worktree path (byte-frozen builder)')
+}
+
 // ---- Progress / ETA (wave-boundary timestamps — the engine has no clock) ------
 // The Workflow sandbox cannot read clocks (Date.now() throws), so wave-boundary timestamps are stamped
 // on the ROLLOUT NOTE by reconcile-wave.py (mark-dispatched at wave launch, cursor post-merge) and the

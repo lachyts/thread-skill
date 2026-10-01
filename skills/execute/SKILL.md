@@ -101,7 +101,44 @@ the in-flight agents now); the exemption above means the gate never stands in th
   quote-free for the Stop-hook regex; the verbatim stderr above it says where to go. Unlisting is Lachy's
   call, so this is a designed stop (§7), not something to route around.
 
-"Re-run § 2.5" elsewhere in this skill means exactly this: the same check with the same halt.
+"Re-run § 2.5" elsewhere in this skill means exactly this: the same check with the same halt, followed
+at once by § 2.6.
+
+### 2.6. Self-rollout gate
+
+A rollout must never run against the checkout the plugin itself runs from. When `repoPath` is a
+**directory-source** plugin marketplace path (`claude plugin marketplace add <dir>`), `${CLAUDE_PLUGIN_ROOT}`
+IS that checkout, so every engine or skill change a wave merges there becomes the next wave's engine
+mid-rollout (p12-4, ADR 0030). Run this wherever § 2.5 runs: directly after it at every invocation that
+starts or continues work, and after every §4.5 re-check of it. **Pausing is exempt**, exactly as for § 2.5.
+
+```bash
+# thread:self-rollout-check (extracted and tested by tests/self-rollout-check.test.sh)
+R="<repoPath>"
+case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
+sc="${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh"
+[ -f "$sc" ] || { echo "self-rollout-check.sh not found at $sc: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }
+bash "$sc" "$R"
+# end thread:self-rollout-check
+```
+
+`scripts/self-rollout-check.sh` reads `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json`
+and compares every directory source's `path` and `installLocation` with `repoPath` (`~/` expanded,
+trailing slashes stripped, symlinks resolved) by **containment**: a marketplace path equal to `repoPath` or
+nested inside it (`<repoPath>/…`, a monorepo with the marketplace in a subdirectory) matches, since
+`merge-wave.sh` fast-forwards the whole checkout. A missing registry passes; a malformed one passes with a
+warning (the registry format is Claude Code's, so the check fails open).
+
+- **Exit 0**: proceed; pass any warning on to the user.
+- **Exit 3**: write nothing (no stamp, no cursor, no `mark-dispatched`, no merge, no Workflow call). Print
+  the stderr verbatim above the WAVE-STATUS line and end the turn with
+  `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="repoPath is a live plugin marketplace checkout"`.
+  The remedy: clone the repo to a separate path (e.g. `~/repos/<repo>-rollout`), set the rollout's
+  `Project root` to that clone, and re-invoke.
+- **Exit 2** (the script not found, an empty `repoPath`, no python3): the same write-nothing halt with
+  `reason="self-rollout check failed"`.
+- **Any other non-zero exit** (1, 127, …: bash or the script crashing): the same write-nothing halt with
+  `reason="self-rollout check failed"`. The gate fails closed on any status it does not define.
 
 ### 3. Resolve effective config per task
 
@@ -248,7 +285,7 @@ Also read the rollout note's **`## Known baseline failures`** block (`/thread:sc
 
 In continuous mode the lead session is the conductor: run ONE wave on the engine, merge that wave, then launch the next. The merge — not a human, not a completion barrier — is what makes "earlier same-file work lands before the next wave branches" real. The loop is driven across turns by Workflow-completion notifications and is resumable via a durable cursor.
 
-**Landing-register re-check.** Every entry into this loop (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry, `/thread:repair`'s hand-off) re-runs § 2.5 before anything else it does, and the loop re-runs § 2.5 before every wave dispatch, every Workflow call (a `resumeFromRunId` resume included) and every `merge-wave.sh` call. A halt leaves open PRs open, the cursor unadvanced and any `paused:` stamp in place.
+**Landing-register re-check.** Every entry into this loop (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry, `/thread:repair`'s hand-off) re-runs § 2.5 before anything else it does, and the loop re-runs § 2.5 before every wave dispatch, every Workflow call (a `resumeFromRunId` resume included) and every `merge-wave.sh` call; each of those re-runs is followed at once by § 2.6's self-rollout gate. A halt leaves open PRs open, the cursor unadvanced and any `paused:` stamp in place.
 
 **Durable cursor.** Track progress in the rollout note frontmatter: `merged_through_wave: <N>` (`0` or absent = nothing merged yet). This is the single source of truth for "where was I" — a fresh session resumes from it, never from a GitHub/vault re-scan. New rollouts seed it at `0`; an older rollout without the field is treated as `0` (start at wave 1).
 
@@ -442,6 +479,7 @@ Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS au
 - `merge-wave.sh` exits non-zero (a real merge conflict or red required check), or
 - the smart-halt check fires (an unlanded task's file reappears in a later wave), or
 - § 2.5, or a §4.5 re-check of it, reports the repo on the landing register, or the check itself fails (`reason="<owner/name> is on the landing register"` or `reason="landing-register check failed"` — a **designed** stop: unlisting is Lachy's call; open PRs stay open and re-invocation after unlisting flushes them), or
+- § 2.6, or its run after a §4.5 re-check, finds `repoPath` is a directory-source plugin marketplace checkout, or the check itself fails (`reason="repoPath is a live plugin marketplace checkout"` or `reason="self-rollout check failed"` — nothing is stamped, dispatched or merged; clone the repo to a separate path such as `~/repos/<repo>-rollout`, point the rollout's `Project root` at it and re-invoke), or
 - § 4's git-env check finds a repo-local `GIT_*` variable exported in the lead session, or the check itself fails (`reason="git env set in the lead session"` or `reason="git-env check failed"` — nothing is stamped or dispatched; relaunch Claude Code from a shell without them, or put a working `git` on PATH, then re-invoke), or
 - §3's round-budget validation finds a `max_iterations`, `max_review_rounds` or `max_plan_rounds` that is not an integer >= 1 (`reason="invalid round budget: <field> on [[task]]"` — nothing is stamped or dispatched; fix the frontmatter and re-invoke), or
 - a wave leaves `gate-pending` tasks and nobody is present to sign off (`reason="gated inputs await sign-off: …"` — a **designed** pause, ADR 0008, not a failure: the user signs off, `approve-gates` runs, and re-invocation resumes; when the user IS present, ask for the sign-off in-conversation instead of halting — §3.7).
@@ -504,13 +542,27 @@ A paused rollout is **intentional**, not stalled: `/thread:status` reports it as
 
 ## Worktree lifecycle (how the engine isolates + reuses worktrees)
 
-Each **code-writing** agent (implementer / approved-plan implementer) creates its own worktree explicitly as its first action — fetching origin and branching a **fresh** worktree from `origin/<default branch>` (`git -C <repoPath> fetch origin && git -C <repoPath> worktree add <repoPath>/.claude/worktrees/<slug> -b audit-fix/<alias> origin/<default branch>` — `main` unless §4's `defaultBranch` is passed) so it includes every prior wave that has already merged — and returns its absolute path (`git rev-parse --show-toplevel`) in the structured result. Downstream revisers `cd` into that threaded `worktreePath` to reuse the same worktree (push to the existing branch, the PR auto-updates). The setup step is resume-safe: it reuses the dir if it already exists and attaches an existing branch rather than failing.
+**Every task gets ONE worktree, created by its first agent** (ADR 0030, p12-4), at `<repoPath>/.claude/worktrees/<slug>`; every later agent on the task reuses it. A **code-writing** task's tree is its branch `audit-fix/<alias>`, cut from a **freshly fetched** `origin/<default branch>` (`git -C <repoPath> fetch origin && git -C <repoPath> worktree add <repoPath>/.claude/worktrees/<slug> -b audit-fix/<alias> origin/<default branch>` — `main` unless §4's `defaultBranch` is passed) so it includes every prior wave that has already merged. On a plan-gated task the planner creates it (`taskTreeSetup`), so the plan and the code share one base; otherwise the implementer creates it (`worktreeSetup`), exactly as before. A **read-only** task's tree is a detached worktree at the same path, created by its planner when it is plan-gated (`plan_approval: required` gates read-only tasks too, §3.5), else by its investigator. Implementers return the tree's absolute path (`git rev-parse --show-toplevel`) in the structured result; downstream revisers `cd` into that threaded `worktreePath` to reuse it (push to the existing branch, the PR auto-updates). Every setup is resume-safe: it reuses the dir if it already exists and attaches an existing branch rather than failing.
 
-**The checkout at `repoPath` is read, not just branched from.** The agents that open no worktree — the plan-gate planner, plan judge and plan reviser, the read-only investigator, and the review judge — are handed `Project root: <repoPath>` and read that checkout directly. After each wave in continuous mode `merge-wave.sh` fast-forwards it, but only when it is on the base branch and can fast-forward; otherwise it leaves it and says so. In `--gated` / single-wave mode nothing advances it. A checkout that has not advanced has those agents working against a tree without the earlier waves' merges.
+**The five read-only agents read the task tree, never `repoPath`.** The planner, plan judge, plan reviser and investigator are handed `Task tree: <tree>` and enter it with `taskTreeSetup`; the review judge is handed the same path as context only (the PR is authoritative: it reads the tree only when its HEAD equals the PR head and its status is clean, else `gh pr diff` / `gh pr view` alone). The planner and investigator **refresh** a reused tree: after a fetch they fast-forward it to `origin/<default branch>` only when it has no tracked changes and no commits of its own (`merge --ff-only` on a branch, `checkout --detach` only when already detached, so a branch tree is never detached); any skip prints `tree NOT refreshed: <why>; N behind origin/<base> as last fetched` for the agent to quote. The plan judge and reviser never move it. The planner and investigator also run the rollout's `env_bootstrap`, last and only once the shell is inside a tree that is its own toplevel, so a failed fetch or a stale plain directory at the tree path never runs it in (or under) the main checkout. Every `taskTreeSetup` prints `tree base: <sha>`; the plan's first line is `Planned on: <sha>`, and the plan judge compares the two and returns `changes` when a tree recreated or moved since planning no longer backs the plan. A detached tree met by a code-writing task's planner or judge (a read-only → code-writing scope flip on the same slug) is attached to `audit-fix/<alias>`: the existing branch, else a new one at HEAD, so no commit is lost. Agents tidy only what their own verifier run added (a before/after `status --porcelain` diff), never the env bootstrap's output. **`repoPath` is only the anchor and the branch source**; no agent reads its files. `merge-wave.sh` still fast-forwards it after each wave in continuous mode (when it is on the base branch), because the reaper measures task branches against it (Cleanup, below).
 
-**Why explicit, not `isolation: "worktree"`:** the harness's `isolation: "worktree"` worktrees the *session's* git root, not the target repo — from an ops/vault session it would grab `~/repos/workspaces` (the wrong repo) and ignore `repoPath` (verified empirically). Anchoring on `repoPath` makes the engine correct **from any launch location** (vault, ops, or the repo itself) and places worktrees under the target repo where the daily reaper finds them. The plan-gate's planner and the read-only investigator write no code, so they investigate read-only against the main checkout and open no worktree.
+**Why explicit, not `isolation: "worktree"`:** the harness's `isolation: "worktree"` worktrees the *session's* git root, not the target repo — from an ops/vault session it would grab `~/repos/workspaces` (the wrong repo) and ignore `repoPath` (verified empirically). Anchoring on `repoPath` makes the engine correct **from any launch location** (vault, ops, or the repo itself) and places worktrees under the target repo where the daily reaper finds them. The Workflow script has no shell, so the task's first agent creates the tree, not the engine.
 
-**Cleanup** is the daily sweep's worktree reaper (`_shared/scripts/daily-sweep.sh` → `prune_worktrees`), which removes orphaned worktrees + branches under any `~/repos/**/.claude/worktrees/` once they're clean and merged. The engine does not clean up after itself. (If a target repo ever lives outside `~/repos`, widen the reaper's `find` root.)
+**Cleanup** is the daily sweep's worktree reaper (`_shared/scripts/daily-sweep.sh` → `prune_worktrees`); the engine does not clean up after itself. Its rules, per worktree under `.claude/worktrees/`:
+
+- It never reaps a tree whose `status --porcelain` is non-empty; untracked files count.
+- `ahead` is `rev-list <main checkout's current branch>..<branch>`, measured against the **local** branch, not origin. A branch that reads as ahead is kept unless a merged PR exists for it. A detached tree resolves to `HEAD`, reads 0 ahead, and is reaped once clean.
+- It skips a tree whose lock file names a live `pid N`, and unlocks and reaps stale locks.
+
+Every `taskTreeSetup` locks the tree with `pid $PPID` (the Bash tool's parent is the long-lived Claude Code session), re-locking on each render, so **while a rollout session is alive its plan-gated and read-only task trees cannot be reaped**, detached read-only trees included. Only trees that went through `taskTreeSetup` are locked: an **ungated code-writing** task's tree is created by the implementer's GOLDEN-pinned `worktreeSetup`, which never locks it, so it is reapable as before (once clean and merged). A locked tree deleted by hand (`rm -rf`, no `worktree remove`) stays registered and `git worktree prune` skips it, so `taskTreeSetup` unlocks and prunes a missing tree's registration before its arms; re-running the setup recovers it. The consequences:
+
+- Merged-task cleanup waits for the first sweep after the session ends (the lock is then stale).
+- A zero-commit `audit-fix/*` tree of a plan-blocked, gate-pending or deferred task reads as ahead while the local checkout lags, and persists until the local base branch advances: `merge-wave.sh` advances it in continuous mode, only the user does in `--gated` mode. Accepted and harmless: re-dispatch fast-forwards the tree.
+- In `--gated` mode the session usually ends between waves, so a plan-approved tree can be reaped before its implementer runs; the implementer's setup then recreates it from a newer `origin/<base>` (its verifier and the master review are the backstop). If a future harness makes `$PPID` short-lived, the lock reads as stale at once and a clean tree becomes reapable mid-run; `TASK_TREE_RULE` tells an agent whose tree vanishes to re-run the setup once and say so.
+- An **ungated** task that flips from read-only to code-writing on a reused slug has no `taskTreeSetup` before its (GOLDEN-pinned) implementer, which reuses the detached tree without attaching it; its PR step fails and the task blocks with no PR, never silently. It relies on the reaper (after the earlier session ended) or `/thread:repair`'s clean defer removing the tree first.
+- Removing a task tree by hand, or in repair's clean defer, needs `git worktree remove -f -f` because of the lock.
+
+(If a target repo ever lives outside `~/repos`, widen the reaper's `find` root.)
 
 ## Protocol versions
 

@@ -91,10 +91,12 @@ classify_failed_steps() {  # stdin: failed step names; stdout: "infra" | "genuin
 
 # ---- local base refresh --------------------------------------------------------------------------------
 # After a wave lands, fast-forward the checkout at repoPath — only when it is on the base branch; a
-# checkout on any other branch is left exactly as it is. Worktrees branch from origin/<base>, so this is
-# not what the next wave's implementers build on, but the read-only agents (planner, plan judge and
-# reviser, investigator, review judge) read this checkout directly (execute SKILL.md § Worktree
-# lifecycle), so a checkout left behind is reported, never called harmless. Local-only commits on the
+# checkout on any other branch is left exactly as it is. No agent reads this checkout any more: every
+# task has its own tree cut from a freshly fetched origin/<base> (ADR 0030, p12-4; execute SKILL.md
+# § Worktree lifecycle). The refresh stays for three reasons: operator convenience; it is where stranded
+# close-outs get named; and the worktree reaper depends on it — prune_worktrees measures `ahead` against
+# this LOCAL base branch, so a zero-commit task branch (a plan-blocked or gate-pending task's tree) is
+# reaped only after it advances. A checkout left behind is therefore still reported. Local-only commits on the
 # base (a close-out whose landing PR is queued, or one no close/… branch carries) are named with close's
 # own repo-state.sh line — one source for the wording — so they are never stranded silently. Never fails
 # the script (a false halt after a successful merge). Defined before the self-test hooks so
@@ -110,7 +112,7 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
   git -C "$repo" fetch origin "$base" >/dev/null 2>&1 || echo "  WARN: git fetch origin $base failed (non-fatal)."
   cur=$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)
   if [ "$cur" != "$base" ]; then
-    echo "  NOTE: checkout is on '$cur', not $base — left as it is; read-only agents read it un-advanced."
+    echo "  NOTE: checkout is on '$cur', not $base — left as it is; the worktree reaper keeps zero-commit task branches until it advances."
     return 0
   fi
   before=$(git -C "$repo" rev-parse -q --verify HEAD 2>/dev/null)
@@ -142,7 +144,7 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
       *"queued in"*) echo "        It fast-forwards once GitHub merges the landing PR (every one, if several are open)." ;;
       *) echo "        No close-out branch carries them." ;;
     esac
-    echo "        origin/$base holds the merges and the next wave's worktrees branch from it; read-only agents read this checkout un-advanced."
+    echo "        origin/$base holds the merges and the next wave's worktrees branch from it; the worktree reaper keeps zero-commit task branches until it advances."
     return 0
   fi
   # No usable line (origin/HEAD unset or stale, the script missing or failing): count them here. $base comes
@@ -164,7 +166,7 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
     0) echo "  WARN: local $base did not fast-forward (no local-only commits: local changes in the checkout block it)." ;;
     *) echo "  WARN: local $base did not fast-forward: $n commit(s) not on origin/$base — not named ($why)." ;;
   esac
-  echo "        origin/$base holds the merges and the next wave's worktrees branch from it; read-only agents read this checkout un-advanced."
+  echo "        origin/$base holds the merges and the next wave's worktrees branch from it; the worktree reaper keeps zero-commit task branches until it advances."
   return 0
 }
 
@@ -562,6 +564,6 @@ for PR in "${NUMS[@]}"; do
   process_pr "$PR" || exit 1
 done
 
-# ---- advance the checkout at repoPath (read by the read-only agents; see refresh_local_base) ---------
+# ---- advance the checkout at repoPath (the reaper's base for task branches; see refresh_local_base) ---
 refresh_local_base "$REPO_PATH" "$BASE"
 echo "== merge-wave.sh: wave complete. =="
