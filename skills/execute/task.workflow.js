@@ -1,6 +1,6 @@
 export const meta = {
-  name: 'wave-execute',
-  description: 'Run a wave-schedule rollout: per-task plan-gate → Ralph verify → master review, converging in parallel within each wave',
+  name: 'task',
+  description: 'Converge one rollout task: plan-gate → Ralph verify → master review',
   phases: [
     { title: 'Plan-gate' },
     { title: 'Implement' },
@@ -9,22 +9,22 @@ export const meta = {
 }
 
 // =============================================================================
-// wave-execute convergence engine (protocol_version: 3)
+// task.workflow.js — the per-task convergence engine (protocol_version: 3)
 //
-// Invoked by the wave-execute skill via Workflow({ scriptPath, args }). The skill
-// owns vault I/O, the protocol gate, config resolution, status reconciliation,
-// reporting, the --gated between-wave pause, and the soft-pause check (a
-// `pause_requested: true` flag on the rollout note, honoured by reconcile-wave.py's
-// end-of-wave cursor step — the engine never sees a pause because continuous mode
-// passes it ONE wave per call, and the skill simply doesn't launch the next one).
-// This script owns ONLY the three-layer convergence engine.
+// Invoked by the thread:execute lead via Workflow({ scriptPath, args }), ONE call per task: the
+// engine converges exactly ONE task per call, and the lead holds the calls (ADR 0030, p12-5). Until
+// the queue lands, the lead runs a wave's tasks one call at a time, in order, and merges the wave
+// once its last call is reconciled. The lead owns vault I/O, the protocol gate, config resolution,
+// status reconciliation, reporting, the wave merge barrier, the --gated between-wave pause, and the
+// soft-pause check (a `pause_requested: true` flag on the rollout note, honoured by
+// reconcile-wave.py's end-of-wave cursor step — the engine never sees a pause, because the lead
+// simply doesn't launch the next call). This script owns ONLY the three-layer convergence engine.
 //
 // args = {
 //   rolloutSlug : string,            // e.g. "giflab-rollout"
 //   repoPath    : string,            // absolute path to the project repo
 //   verifier    : string,            // shell command that decides pass/fail in a worktree
 //   date        : string,            // YYYY-MM-DD (passed in; Date.now() is unavailable here)
-//   concurrency : number,            // per-wave parallel ceiling (memory safety; default 4)
 //   maxTier     : string,            // optional; 'opus' | 'fable'. Tier CEILING for the whole run — use
 //                                    //   when the account's fable quota is exhausted. Clamps the seed,
 //                                    //   suppresses opus→fable escalation (recorded as tierCapped), and
@@ -50,9 +50,9 @@ export const meta = {
 //                                    //   rollout note, the arithmetic lives in reconcile-wave.py, and the
 //                                    //   engine only RELAYS the line via log() for live /workflows
 //                                    //   visibility. Absent/empty ⇒ no extra log line (byte-identical).
-//   waves       : [{
-//     wave  : number,
-//     tasks : [{
+//   task        : {                  // exactly ONE task object (the old waves[].tasks[] row). An args
+//                                    //   object carrying `waves` (the pre-p12-5 shape) is refused before
+//                                    //   any dispatch, as is a missing, null or array `task`.
 //       slug            : string,    // task note basename, e.g. "giflab-fix-coalesce"
 //       taskPath        : string,    // absolute path to the task note
 //       scope           : "single-file" | "cross-cutting" | "read-only",
@@ -82,13 +82,13 @@ export const meta = {
 //                                    //   "(approved …)" annotations stripped). The engine pauses a task
 //                                    //   ONLY for declared gates NOT in this list (ADR 0008) — so
 //                                    //   re-dispatches and resumes never re-ask. Omit/empty when none.
-//     }]
-//   }]
+//   }
 // }
 //
-// Returns { rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath,
+// Returns { rolloutSlug, tasks: [ONE row: { slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
 //   approvedAtCeiling, summary, model, escalated, escalatedAt, tierCapped, tierCappedAt, gatedInputs }] }
+// — the pre-p12-5 envelope with exactly one row, the called task's, so reconcile-wave.py is unchanged —
 // where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending, model is the FINAL tier
 // the task ran on, escalated/escalatedAt ('plan' | 'implement' | 'review') record an opus→fable
 // escalation. tierCapped is true when maxTier suppressed an escalation this task would otherwise have
@@ -945,13 +945,6 @@ ends by printing \`tree base: <sha>\`, the commit you are reading. Every repo re
 tree, never in the project's shared checkout at "${a.repoPath}", which may be stale.`
 }
 
-function chunk(arr, n) {
-  const out = []
-  const size = Math.max(1, n || 1)
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
-  return out
-}
-
 // ---- Model tiering -----------------------------------------------------------
 // task.model seeds the task's STARTING tier (task → rollout → 'opus'; thread:schedule pre-stamps
 // structural/deep tasks 'fable' — the predictive step-up). At run time the tier is per-task MUTABLE
@@ -1388,8 +1381,8 @@ async function reviewLoop(task, st, prev, a, planText) {
 }
 
 // One task, end to end: plan-gate → implement → review, sharing a single mutable tier state so an
-// escalation in any layer carries into every later agent AND judge. Tasks converge independently —
-// the orchestration below runs converge() per item with no cross-task barrier inside a chunk.
+// escalation in any layer carries into every later agent AND judge. The orchestration below runs
+// converge() once, for the one task this call carries; tasks converge independently across calls.
 async function converge(task, a) {
   const cap = tierCap(a)
   const st = { tier: taskModel(task, cap), cap, escalated: false, escalatedAt: '', capSuppressed: false, capSuppressedAt: '' }
@@ -1411,57 +1404,61 @@ async function converge(task, a) {
   return wrap(reviewed)
 }
 
-// ---- Orchestration: waves are barriers, tasks within a wave pipeline ---------
+// One result row per task, the shape reconcile-wave.py reads. A converge() that threw (r === null)
+// becomes a blocked row with the same diagnosis the old per-wave orchestration gave a dropped item.
+function taskResult(t, r, a) {
+  const norm = r || { blocked: true, status: 'blocked', blockerDiagnosis: 'workflow stage threw — see /workflows' }
+  return {
+    slug: t.slug,
+    scope: t.scope,
+    status: norm.status || (norm.blocked ? 'blocked' : 'review'),
+    prUrl: norm.prUrl || '',
+    branch: norm.branch || '',
+    worktreePath: norm.worktreePath || '',
+    reviewRoundsUsed: norm.reviewRoundsUsed || 0,
+    planRoundsUsed: norm.planRoundsUsed || 0,
+    blockerDiagnosis: norm.blockerDiagnosis || '',
+    reviewFeedback: norm.reviewFeedback || [],
+    reviewHistory: norm.reviewHistory || [],
+    approvedAtCeiling: !!norm.approvedAtCeiling,
+    gatedInputs: norm.gatedInputs || [],
+    summary: norm.summary || '',
+    model: norm.model || taskModel(t, tierCap(a)),
+    escalated: !!norm.escalated,
+    escalatedAt: norm.escalatedAt || '',
+    tierCapped: !!norm.tierCapped,
+    tierCappedAt: norm.tierCappedAt || '',
+  }
+}
+
+// ---- Orchestration: one task per call; the lead holds the calls (ADR 0030) ---
 
 // The Workflow tool passes `args` to a scriptPath workflow JSON-stringified, not as a live
 // object (confirmed empirically: the script sees `typeof args === 'string'`). Parse defensively
 // so the engine works whether args arrives as a string or an object.
 const a = typeof args === 'string' ? JSON.parse(args) : args
 defaultBranch(a)   // fail the run before any dispatch on an unusable args.defaultBranch
-const ceiling = a.concurrency || 4
-const allResults = []
+// Refuse the pre-p12-5 wave shape before any dispatch: a lead on a stale SKILL.md, or a resume of a
+// pre-rename run, must fail loudly here rather than converge nothing. Recovery is a re-dispatch.
+if (a.waves !== undefined) throw new Error('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')
+if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw new Error('args.task must be one task object')
 
-log(`wave-execute: ${a.rolloutSlug} — ${a.waves.length} wave(s), parallel ceiling ${ceiling}/wave`)
+log(`task: ${a.rolloutSlug} — ${a.task.slug} (${a.task.scope})`)
 if (tierCap(a) !== TOP_TIER) log(`maxTier=${tierCap(a)} — escalation is capped; capped tasks run the full loop at the higher tier's effort`)
 // Progress/ETA relay: the sandbox has no clock, so the skill precomputes this line (reconcile-wave.py
 // mark-dispatched) from the rollout note's wave-boundary stamps and the engine just surfaces it.
 if (a.progress) log(a.progress)
 
-for (const wave of a.waves) {
-  log(`Wave ${wave.wave}: ${wave.tasks.length} task(s)`)
-  // Memory-safety: chunk heavy waves so no more than `ceiling` worktrees run at once.
-  // Within a chunk, converge() runs per task with no barrier — task A can be in Review while
-  // task B is still Implementing, exactly as the old three-stage pipeline allowed.
-  for (const group of chunk(wave.tasks, ceiling)) {
-    const out = await pipeline(group, (t) => converge(t, a))
-    out.forEach((r, i) => {
-      const t = group[i]
-      const norm = r || { blocked: true, status: 'blocked', blockerDiagnosis: 'workflow stage threw — see /workflows' }
-      allResults.push({
-        slug: t.slug,
-        scope: t.scope,
-        status: norm.status || (norm.blocked ? 'blocked' : 'review'),
-        prUrl: norm.prUrl || '',
-        branch: norm.branch || '',
-        worktreePath: norm.worktreePath || '',
-        reviewRoundsUsed: norm.reviewRoundsUsed || 0,
-        planRoundsUsed: norm.planRoundsUsed || 0,
-        blockerDiagnosis: norm.blockerDiagnosis || '',
-        reviewFeedback: norm.reviewFeedback || [],
-        reviewHistory: norm.reviewHistory || [],
-        approvedAtCeiling: !!norm.approvedAtCeiling,
-        gatedInputs: norm.gatedInputs || [],
-        summary: norm.summary || '',
-        model: norm.model || taskModel(t, tierCap(a)),
-        escalated: !!norm.escalated,
-        escalatedAt: norm.escalatedAt || '',
-        tierCapped: !!norm.tierCapped,
-        tierCappedAt: norm.tierCappedAt || '',
-      })
-    })
-  }
-  const blockedThisWave = allResults.filter((r) => r.status === 'blocked' || r.status === 'plan-blocked' || r.status === 'review-blocked' || r.status === 'gate-pending')
-  log(`Wave ${wave.wave} done — ${allResults.filter((r) => r.status === 'review').length} clean, ${blockedThisWave.length} blocked so far`)
+// A stage that throws drops the task to null, which taskResult() turns into a blocked row — the same
+// mapping the old per-wave orchestration had, so one bad stage never loses the call's result.
+let r
+try {
+  r = await converge(a.task, a)
+} catch (e) {
+  log(`converge threw on ${a.task.slug}: ${(e && e.message) || e}`)
+  r = null
 }
+const row = taskResult(a.task, r, a)
+log(`${row.slug} → ${row.status}`)
 
-return { rolloutSlug: a.rolloutSlug, tasks: allResults }
+return { rolloutSlug: a.rolloutSlug, tasks: [row] }

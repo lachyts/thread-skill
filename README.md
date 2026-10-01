@@ -41,7 +41,7 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 | Member | Role | What it does |
 |---|---|---|
 | `/thread:schedule` | planner | Computes wave structure from file-overlap + dependency analysis; writes a thin, always-dated `<slug>-rollout-<YYYY-MM-DD>.md` (data only, `protocol_version: 3`). No minimum size — shape decides, not count. |
-| `/thread:execute` | executor | Runs the rollout on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, converging in parallel within each wave; continuous mode auto-merges each wave (`--gated` = manual merge). |
+| `/thread:execute` | executor | Runs the rollout on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call; the lead runs a wave's tasks in order; continuous mode auto-merges each wave (`--gated` = manual merge). |
 | `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. |
 | `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. |
 
@@ -55,8 +55,8 @@ shared source and skill discovery do not provide that runtime.
 
 ## The convergence engine
 
-`skills/execute/wave-execute.workflow.js` runs **three layers per task**,
-converging tasks **in parallel within each wave**:
+`skills/execute/task.workflow.js` runs **three layers per task**,
+**one task per Workflow call**; the lead runs a wave's tasks in order:
 
 1. **Plan-gate** — an autonomous judge approves the implementation plan before
    code is written (skippable per rollout; a plan's declared gated inputs

@@ -333,7 +333,7 @@ Expected to gate (will pause for your sign-off at their plan-gate):
 
 ## Execution lives in `/thread:execute`
 
-This skill does not execute anything. The rollout note it produces is read by the sibling **`/thread:execute`** skill (`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`), which resolves per-task config and calls the **Workflow** tool with `wave-execute.workflow.js` — the convergence engine (plan-gate → Ralph retry → master review). The engine is not duplicated into individual rollout notes; improvements to the script reach every rollout immediately.
+This skill does not execute anything. The rollout note it produces is read by the sibling **`/thread:execute`** skill (`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`), which resolves per-task config and calls the **Workflow** tool with `task.workflow.js` — the convergence engine (plan-gate → Ralph retry → master review). The engine is not duplicated into individual rollout notes; improvements to the script reach every rollout immediately.
 
 ## Don'ts
 
@@ -357,7 +357,7 @@ End-to-end test against an existing backlog (e.g. GifLab):
 7. Stamps `wave: N`, `rollout: "[[...]]"`, and `scope:` on each task
 8. Prints summary pointing the user toward `/thread:execute`
 
-Then from a fresh session: paste `execute Wave 1 of [[giflab-rollout-<YYYY-MM-DD>]]` (the dated note just written) — the `/thread:execute` skill should pick it up, gate on `protocol_version: 3`, resolve per-task config, and call the Workflow tool with `wave-execute.workflow.js` to run the three-layer convergence engine per task (visible live via `/workflows`).
+Then from a fresh session: paste `execute Wave 1 of [[giflab-rollout-<YYYY-MM-DD>]]` (the dated note just written) — the `/thread:execute` skill should pick it up, gate on `protocol_version: 3`, resolve per-task config, and call the Workflow tool with `task.workflow.js` to run the three-layer convergence engine per task (visible live via `/workflows`).
 
 ### Merge regression (step 4.5)
 

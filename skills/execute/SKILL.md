@@ -1,13 +1,13 @@
 ---
 name: execute
-description: 'Use to execute a wave rollout — reads the rollout note, resolves per-task config, and runs the convergence engine on the Workflow tool (plan-gate → verifier retry → master review, parallel within each wave). Continuous mode (bare "execute [[rollout]]") auto-merges each wave; --gated pauses for manual merges; a plan-declared gated input always pauses for human sign-off. Triggers on "execute [[rollout-slug]]", "execute Wave N of [[rollout]]", "pause the rollout", "reinstate [[rollout]]", or explicit /thread:execute. Only runs protocol_version: 3 rollouts; older notes are refused with a /thread:schedule --regenerate prompt.'
+description: 'Use to execute a wave rollout — reads the rollout note, resolves per-task config, and runs the convergence engine on the Workflow tool (plan-gate → verifier retry → master review, one task per call). Continuous mode (bare "execute [[rollout]]") auto-merges each wave; --gated pauses for manual merges; a plan-declared gated input always pauses for human sign-off. Triggers on "execute [[rollout-slug]]", "execute Wave N of [[rollout]]", "pause the rollout", "reinstate [[rollout]]", or explicit /thread:execute. Only runs protocol_version: 3 rollouts; older notes are refused with a /thread:schedule --regenerate prompt.'
 ---
 
 # /thread:execute — run a wave rollout on the Workflow engine
 
-`/thread:execute` is the executor half of the wave split. Where `/thread:schedule` writes the rollout note (data), this skill reads it, resolves config, and hands the convergence work to a **dynamic Workflow** script. This skill is a thin shim; the engine lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/wave-execute.workflow.js`.
+`/thread:execute` is the executor half of the wave split. Where `/thread:schedule` writes the rollout note (data), this skill reads it, resolves config, and hands the convergence work to a **dynamic Workflow** script. This skill is a thin shim; the engine lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/task.workflow.js`.
 
-The engine runs three layers per task — optional plan-gate (autonomous judge) → Ralph-style agent-side verifier retry → master-side review-and-revise loop — and converges tasks **in parallel within each wave** (a task can be in master-review while a wave-mate is still implementing). The skill itself stays in the conversation to do vault I/O, the protocol gate, status reconciliation, reporting, and the `--gated` between-wave pause (which an autonomous background workflow cannot do).
+The engine runs three layers per task — optional plan-gate (autonomous judge) → Ralph-style agent-side verifier retry → master-side review-and-revise loop — and converges **one task per Workflow call**; the lead runs a wave's tasks one call at a time, in order, until ADR 0030's queue lands. The skill itself stays in the conversation to do vault I/O, the protocol gate, status reconciliation, reporting, and the `--gated` between-wave pause (which an autonomous background workflow cannot do).
 
 ## Native runtime binding
 
@@ -188,7 +188,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 | `max_review_rounds` | `4` | `task.maxReviewRounds` |
 | `max_plan_rounds` | `3` | `task.maxPlanRounds` |
 | `plan_approval` | `scope-gated` | drives `task.planGate` (see 3.5) |
-| `parallel_ceiling` | `4` | `concurrency` (rollout-level) |
+| `parallel_ceiling` | `4` | not passed to the engine. The lead's limit on task calls in flight; at most one until the queue (ADR 0030) lands. |
 | `max_tier` | none (omit) | `maxTier` (rollout-level; **`opus` is the only value that caps anything** — `fable` is the uncapped default, so `max_tier: fable` is a no-op, and an empty `max_tier:` parses as null and also runs uncapped, with no log line) — the ADR 0016 tier **ceiling**. Set it ONLY when the account's fable quota is exhausted, never as a cost preference: it clamps the seed, suppresses escalation (reported as `tierCapped`), and clamps a `judgeModel` pin. A capped tier is terminal, so it runs the full Ralph loop at the higher tier's effort. Omit ⇒ byte-identical to pre-ceiling. |
 | `env_bootstrap` | none (omit) | `envBootstrap` (rollout-level) |
 | `ignore_gate` | `false` (omit) | `task.ignoreGate` (per-task) |
@@ -203,7 +203,7 @@ For each task in the target wave (or all waves in continuous mode), resolve, in 
 
 `model` resolves task frontmatter → rollout frontmatter → `opus` and sets the task's **starting tier**. Judges **follow the task's live tier**, so a `fable` task gets Fable review end-to-end. (A run can still pin all judges to one model via the `judgeModel` arg — it wins when set.)
 
-**Effort bundles (ADR 0007).** A tier is a **(model, per-role effort) bundle**, not two knobs — reasoning effort rides the same ladder as the model. The per-role matrix is fixed in ONE place in the engine (`wave-execute.workflow.js`, the `EFFORT` constant), restated below for reading only — **the constant is canonical; if the two ever disagree, this table is the bug**:
+**Effort bundles (ADR 0007).** A tier is a **(model, per-role effort) bundle**, not two knobs — reasoning effort rides the same ladder as the model. The per-role matrix is fixed in ONE place in the engine (`task.workflow.js`, the `EFFORT` constant), restated below for reading only — **the constant is canonical; if the two ever disagree, this table is the bug**:
 
 | Role | `opus` tier | `fable` tier |
 |---|---|---|
@@ -259,7 +259,7 @@ fi
 
 Before launching, for each task in scope: stamp `status: in_progress` and `owner: <session-tag>` on the task's frontmatter (blocks duplicate dispatches). Keep this in the lead session — subagents never write task `status:`. In the launch message, **flag any task expected to gate** (a `plan_approval: required` stamped by `/thread:schedule`'s gated-input sweep, or a note that smells of spend/credentials) so the eventual `gate-pending` pause is expected, not a surprise (§3.7).
 
-Build the `args` object the workflow expects:
+Build the args object for each task call:
 
 ```jsonc
 {
@@ -270,7 +270,6 @@ Build the `args` object the workflow expects:
                                           //   (byte-identical prompts)
   "verifier": "make test",               // resolved rollout-level verifier
   "date": "2026-05-29",                  // pass it in — Date.now() is unavailable in the script
-  "concurrency": 4,                       // parallel_ceiling
   "knownBaselineFailures": [              // from the "## Known baseline failures" block; omit when none
     "test_color_reducer_functionality — ImageMagick 0-byte output (pre-existing, env)"
   ],
@@ -281,23 +280,19 @@ Build the `args` object the workflow expects:
   "progress": "wave 1/4 dispatched — 0m elapsed",  // optional; mark-dispatched's progress line (§4.5 step 1) —
                                                    //   the engine log()s it verbatim (its sandbox has no clock);
                                                    //   OMIT when mark-dispatched printed none
-  "waves": [
-    { "wave": 1, "tasks": [
-      { "slug": "giflab-fix-x", "taskPath": "/abs/.../giflab-fix-x.md",
-        "scope": "single-file", "planGate": false,
-        "maxIterations": 3, "maxReviewRounds": 4, "maxPlanRounds": 2,  // positive integers only (§3)
-        "ignoreGate": false,                 // per-task; omit/false unless overriding a human/release gate
-        "model": "opus",                     // per-task STARTING tier; "fable" when thread:schedule stepped a
-                                             //   hard task up. The engine may escalate opus→fable mid-run.
-        "effort": "max" }                    // per-task ONLY, from the task note's `effort:` frontmatter —
-                                             //   OMIT when absent. Overrides the tier bundle's planner/
-                                             //   implementer effort; judges keep the matrix (ADR 0007).
-    ]}
-  ]
+  "task": { "slug": "giflab-fix-x", "taskPath": "/abs/.../giflab-fix-x.md",   // ONE task per call
+    "scope": "single-file", "planGate": false,
+    "maxIterations": 3, "maxReviewRounds": 4, "maxPlanRounds": 2,  // positive integers only (§3)
+    "ignoreGate": false,                 // per-task; omit/false unless overriding a human/release gate
+    "model": "opus",                     // per-task STARTING tier; "fable" when thread:schedule stepped a
+                                         //   hard task up. The engine may escalate opus→fable mid-run.
+    "effort": "max" }                    // per-task ONLY, from the task note's `effort:` frontmatter —
+                                         //   OMIT when absent. Overrides the tier bundle's planner/
+                                         //   implementer effort; judges keep the matrix (ADR 0007).
 }
 ```
 
-**Resolve `defaultBranch` when building each wave's args** — it is the repo's GitHub default branch, the one source the whole rollout shares: fresh worktrees branch from `origin/<it>`, `gh pr create` targets the same default on its own, and `merge-wave.sh` refuses a wave whose PRs target anything else. Ask the **remote**: the local `refs/remotes/origin/HEAD` is often unset and can be stale (it survives a default-branch rename and even the deletion of the branch it names). The answer is deterministic, so a resume re-passes the same value. **Stop** when the remote does not answer — never assume `main`, which fails at the first worktree of a `master` repo:
+**Resolve `defaultBranch` when building each task call's args** — it is the repo's GitHub default branch, the one source the whole rollout shares: fresh worktrees branch from `origin/<it>`, `gh pr create` targets the same default on its own, and `merge-wave.sh` refuses a wave whose PRs target anything else. Ask the **remote**: the local `refs/remotes/origin/HEAD` is often unset and can be stale (it survives a default-branch rename and even the deletion of the branch it names). The answer is deterministic, so a resume re-passes the same value. **Stop** when the remote does not answer — never assume `main`, which fails at the first worktree of a `master` repo:
 
 ```bash
 # thread:default-branch-resolver (extracted and tested by tests/default-branch.test.sh)
@@ -312,15 +307,15 @@ Pass the printed name as `defaultBranch` only when it is not `main`. Any non-zer
 
 Also read the rollout note's **`## Known baseline failures`** block (`/thread:schedule` step 2.6): when it lists tests (not `none`/empty), pass them as `knownBaselineFailures: ["<test_id> — <reason>", …]`. The engine threads the manifest into every agent and shifts the Ralph green criterion to "no NEW failures beyond this set" — it keeps running the full verifier and never `--deselect`s the listed reds (per the project's `CLAUDE.md`: a comparison reference, not a mute button). Omit the key when the block is absent or `none` — the engine then behaves exactly as before (`verifier` exit 0 = pass).
 
-- **Single-wave mode** (`execute Wave N of [[rollout]]`) → include only wave N in `waves`. Opens PRs; the user merges. No auto-merge. The tasks therefore end the session at `status: review` — once the user confirms the merges (or a later invocation finds the PRs merged in pre-flight), run `reconcile-wave.py mark-done` on them so they don't linger as false "awaiting acceptance" items.
-- **Continuous auto-merge mode** (`execute [[rollout]]`, no wave number, no flag — the DEFAULT) → do **not** pass all waves at once. Drive the rollout **one wave per Workflow call** across turns, auto-merging each wave before launching the next. This is the zero-touch path — see §4.5.
-- **`--gated`** → the **same** one-wave-per-call loop as continuous, but the between-wave step is a **human merge pause** instead of the auto-merge: run wave N, present its report, wait for the user to merge + re-invoke, then call wave N+1. The escape hatch for eyeballing PRs before they land.
+- **Single-wave mode** (`execute Wave N of [[rollout]]`) → dispatch wave N's tasks one Workflow call per task, in order. Opens PRs; the user merges. No auto-merge. The tasks therefore end the session at `status: review` — once the user confirms the merges (or a later invocation finds the PRs merged in pre-flight), run `reconcile-wave.py mark-done` on them so they don't linger as false "awaiting acceptance" items.
+- **Continuous auto-merge mode** (`execute [[rollout]]`, no wave number, no flag — the DEFAULT) → do **not** pass all waves at once. Drive the rollout **one wave at a time: one Workflow call per task, sequential within the wave (at most one call in flight)** across turns, auto-merging each wave before launching the next. This is the zero-touch path — see §4.5.
+- **`--gated`** → the **same** per-wave loop as continuous, but the between-wave step is a **human merge pause** instead of the auto-merge: run wave N, present its report, wait for the user to merge + re-invoke, then call wave N+1. The escape hatch for eyeballing PRs before they land.
 
 > Correctness between waves comes from the **auto-merge + `origin/<default branch>` worktree base** (§4.5; `origin/main` unless `defaultBranch` says otherwise), not from a completion barrier. The old engine ran all waves against one frozen `main`, which silently re-created the #30/#31 squash-drop exposure for any rollout whose same-file tasks span waves. The per-wave loop fixes that.
 
 ### 4.5. Continuous auto-merge — the per-wave loop
 
-In continuous mode the lead session is the conductor: run ONE wave on the engine, merge that wave, then launch the next. The merge — not a human, not a completion barrier — is what makes "earlier same-file work lands before the next wave branches" real. The loop is driven across turns by Workflow-completion notifications and is resumable via a durable cursor.
+In continuous mode the lead session is the conductor: run ONE wave's tasks on the engine, one call per task in order, merge that wave, then launch the next. The merge — not a human, not a completion barrier — is what makes "earlier same-file work lands before the next wave branches" real. The loop is driven across turns by Workflow-completion notifications and is resumable via a durable cursor.
 
 **Landing-register re-check.** Every entry into this loop (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry, `/thread:repair`'s hand-off) re-runs § 2.5 before anything else it does, and the loop re-runs § 2.5 before every wave dispatch, every Workflow call (a `resumeFromRunId` resume included) and every `merge-wave.sh` call; each of those re-runs is followed at once by § 2.6's self-rollout gate. A halt leaves open PRs open, the cursor unadvanced and any `paused:` stamp in place.
 
@@ -332,8 +327,8 @@ In continuous mode the lead session is the conductor: run ONE wave on the engine
    ```
    python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py mark-dispatched --rollout <rollout-note> --wave K
    ```
-   (writes `wave_K_dispatched: <timestamp>`; idempotent — **first dispatch wins**, so a resume re-dispatch never resets the wave clock). It prints a `progress:` line — "wave K/N dispatched — 42m elapsed, ~50m remaining (rough)" — surface it to the user and pass its text as the args `progress` string so the engine `log()`s it live in `/workflows`. Then build args with `waves: [waveK]` only; call the Workflow (step 5).
-2. On completion → reconcile vault frontmatter (step 6).
+   (writes `wave_K_dispatched: <timestamp>`; idempotent — **first dispatch wins**, so a resume re-dispatch never resets the wave clock). It prints a `progress:` line — "wave K/N dispatched — 42m elapsed, ~50m remaining (rough)" — surface it to the user and pass its text as the args `progress` string so the engine `log()`s it live in `/workflows`. Then, for each wave-K task in turn (the rollout note's order), build that task's args (`task: <its row>`, the wave's `progress` text) and call the Workflow (step 5). Launch the next task's call only once the previous call has returned and been reconciled (step 2).
+2. On each call's completion → reconcile its result (step 6), then launch the wave's next task call (§ 2.5 re-check first, per the entry rule) and end the turn `state=waiting`. After the wave's last call is reconciled, go to step 3.
 3. **Auto-merge wave K.** Re-run § 2.5 before `merge-wave.sh`: a repo listed during the wave halts here with the wave's approved PRs left open (merging puts commits on the listed repo's default branch). On that halt there is no merge, no cursor advance and no `mark-done`; the tasks stay at `review`, and once the repo is unlisted, re-invocation's *Cold resume* flush merges them. Collect the wave's tasks that returned `status: review` **and** have a non-empty `pr` (read-only tasks have none; **never** merge `review-blocked` / `blocked` / `plan-blocked` / `gate-pending`), in the report's recommended order. Run:
    ```
    ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-wave.sh <repoPath> <pr> <pr> …
@@ -400,7 +395,7 @@ then continue the normal cold resume above (flush any half-merged wave, `resume-
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py resume-filter --tasks slugA,slugB,slugC
-#   prints the subset whose status ∉ {done, review, merged} — build args from exactly those.
+#   prints the subset whose status ∉ {done, review, merged} — dispatch exactly those, one call per printed slug, in order.
 #   gate-pending notes are ALSO excluded (with a stderr WARN): they await a human sign-off, not a
 #   dispatch — approve-gates makes them dispatchable again (§3.7).
 ```
@@ -413,7 +408,7 @@ This skill instruction is the sanctioned opt-in for the Workflow tool — call i
 
 ```
 Workflow({
-  scriptPath: "${CLAUDE_PLUGIN_ROOT}/skills/execute/wave-execute.workflow.js",
+  scriptPath: "${CLAUDE_PLUGIN_ROOT}/skills/execute/task.workflow.js",
   args: <the args object above>,
 })
 ```
@@ -422,13 +417,13 @@ Pass `args` as an actual JSON object in the tool call. (Note: the Workflow tool 
 
 **If the Workflow tool refuses the engine path.** Some harnesses refuse the `${CLAUDE_PLUGIN_ROOT}` path with "scriptPath must be a script path this tool returned, or a file you can already read"; a prior `Read` of the file does not help. Fall back to a scratchpad copy:
 
-1. `mkdir -p "<scratchpad>/wave" && cp "${CLAUDE_PLUGIN_ROOT}/skills/execute/wave-execute.workflow.js" "<scratchpad>/wave/wave-execute.workflow.js"`, where `<scratchpad>` is this session's scratchpad directory.
+1. `mkdir -p "<scratchpad>/task" && cp "${CLAUDE_PLUGIN_ROOT}/skills/execute/task.workflow.js" "<scratchpad>/task/task.workflow.js"`, where `<scratchpad>` is this session's scratchpad directory.
 2. `cmp` the copy against the source. If `cmp` reports any difference, stop.
-3. Pass `<scratchpad>/wave/wave-execute.workflow.js` as `scriptPath`.
+3. Pass `<scratchpad>/task/task.workflow.js` as `scriptPath`.
 
 The engine has no relative imports, so the copy runs unchanged. A `resumeFromRunId` resume re-passes the same `scriptPath` the run started with, exactly like its args. A later session (a new scratchpad) re-copies the same bytes, and per-task resume (`resume-filter`) still keeps the tasks that already landed. Never edit the copy. This is a fallback only: the cache path is the default (the 2026-09-23 E2E ran it unrefused).
 
-Tell the user the run launched, which waves/tasks it covers, and that they can watch live with `/workflows`. Record the returned `runId`. If the run dies, re-run § 2.5 first (a listed repo halts instead of replaying agents that push branches) and § 4's git-env check (a halt there writes nothing), then resume with `Workflow({ scriptPath, args, resumeFromRunId: <runId> })`, passing the `scriptPath` the run started with (unchanged `agent()` calls replay from cache). The check is lead-side only, so the resume's args and prompt bytes are unchanged and the replay cache stays valid.
+Tell the user the run launched, which task it covers (and where it sits in its wave), and that they can watch live with `/workflows`. Record the returned `runId`. If the run dies, re-run § 2.5 first (a listed repo halts instead of replaying agents that push branches) and § 4's git-env check (a halt there writes nothing), then resume with `Workflow({ scriptPath, args, resumeFromRunId: <runId> })`, passing the `scriptPath` the run started with (unchanged `agent()` calls replay from cache). The check is lead-side only, so the resume's args and prompt bytes are unchanged and the replay cache stays valid.
 
 **Register the heartbeat (continuous mode, once per rollout).** In the same turn as the first wave launch, check `CronList` for an existing `WAVE-HEARTBEAT <rollout-slug>` task; if none, register one via `CronCreate` (schedule `*/20 * * * *`) with this prompt:
 
@@ -438,7 +433,7 @@ This is the backstop for a hung Workflow run or a missed completion notification
 
 ### 6. Reconcile + report
 
-The workflow returns `{ rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath, reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory, approvedAtCeiling, summary, model, escalated, escalatedAt, gatedInputs }] }` where `status ∈ review | review-blocked | blocked | plan-blocked | gate-pending`, `model` is the FINAL tier the task ran on, `escalated`/`escalatedAt` (`plan` | `implement` | `review`) record an opus→fable escalation, `gatedInputs` lists the declared-but-unapproved gates when the task paused at `gate-pending` (§3.7), `reviewHistory` is the accumulated by-round review-judge rejection rationale, and `approvedAtCeiling` marks an approval on the final review round with real rejection history (a ceiling approval).
+The workflow returns `{ rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath, reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory, approvedAtCeiling, summary, model, escalated, escalatedAt, gatedInputs }] }` — `tasks` holds exactly one row, the called task's — where `status ∈ review | review-blocked | blocked | plan-blocked | gate-pending`, `model` is the FINAL tier the task ran on, `escalated`/`escalatedAt` (`plan` | `implement` | `review`) record an opus→fable escalation, `gatedInputs` lists the declared-but-unapproved gates when the task paused at `gate-pending` (§3.7), `reviewHistory` is the accumulated by-round review-judge rejection rationale, and `approvedAtCeiling` marks an approval on the final review round with real rejection history (a ceiling approval).
 
 **Reconcile with the deterministic helper — do NOT hand-edit frontmatter.** Write the returned object to a temp file (or pipe it on stdin) and run:
 
@@ -497,8 +492,8 @@ Recommended merge order: <list>
 WAVE-STATUS: <rollout-slug> cursor=<K>/<N> state=<running|waiting|halted|done>[ reason="<short halt reason>"]
 ```
 
-- `running` — in-session driving work remains **right now** (a wave returned and needs reconcile/merge; the next wave needs launching). The plugin's Stop-hook driver (§8) refuses to let the session stop on this state — so never end a turn on `running` unless you genuinely stopped mid-work.
-- `waiting` — a wave's Workflow call is in flight; nothing to do until its completion notification (the heartbeat cron is the backstop). Emit this after launching a wave.
+- `running` — in-session driving work remains **right now** (a task call returned and needs reconcile, the wave needs merging, or the next task/wave needs launching). The plugin's Stop-hook driver (§8) refuses to let the session stop on this state — so never end a turn on `running` unless you genuinely stopped mid-work.
+- `waiting` — a task's Workflow call is in flight; nothing to do until its completion notification (the heartbeat cron is the backstop). Emit this after launching a wave.
 - `halted` — a §7 stop condition fired, `--gated` is waiting on the user, or a requested pause took effect (*Pausing + reinstating a rollout*) — always include `reason=`.
 - `done` — completion ceremony performed.
 
@@ -571,12 +566,12 @@ A paused rollout is **intentional**, not stalled: `/thread:status` reports it as
 
 ## Don'ts
 
-- Merge ONLY via `scripts/merge-wave.sh`, ONLY in continuous auto-merge mode, ONLY from the lead session. In `--gated` / single-wave mode the user merges. Never an inline `gh pr merge`, never `--admin` (it would bypass branch protection and merge a red branch), never a force-push — ever. The engine (`wave-execute.workflow.js`) never merges.
+- Merge ONLY via `scripts/merge-wave.sh`, ONLY in continuous auto-merge mode, ONLY from the lead session. In `--gated` / single-wave mode the user merges. Never an inline `gh pr merge`, never `--admin` (it would bypass branch protection and merge a red branch), never a force-push — ever. The engine (`task.workflow.js`) never merges.
 - Never dispatch a wave, call or resume a Workflow, or call `merge-wave.sh` for a repo the landing register lists. § 2.5 runs first, every time (and §4.5 re-runs it before each of those). Never gate a pause on it: soft and hard pause (TaskStop, the `paused:` stamp, the heartbeat `CronDelete`) are exempt, so the register check never blocks stopping work.
 - Don't skip the protocol-version gate. Legacy (v2 / absent) rollouts must be regenerated, not retrofitted.
 - Don't update a task's `status:` from inside a subagent — the lead session reconciles after the workflow returns.
-- Don't hand-roll the convergence loop in the conversation — that engine moved into `wave-execute.workflow.js`. If the loop needs changing, edit the script and (for an interrupted run) re-invoke with `resumeFromRunId`.
-- Don't raise `concurrency` blindly. The Workflow's own cap is CPU-core-based (~14 on the M3) — higher than the memory-safe ceiling for heavy-model tasks (LPIPS ≈ 500 MB/process). `parallel_ceiling: 4` exists to chunk heavy waves so no more than 4 worktrees run at once. Raise it only for light waves.
+- Don't hand-roll the convergence loop in the conversation — that engine moved into `task.workflow.js`. If the loop needs changing, edit the script and (for an interrupted run) re-invoke with `resumeFromRunId`.
+- Don't raise `parallel_ceiling` blindly. The Workflow's own cap is CPU-core-based (~14 on the M3) — higher than the memory-safe ceiling for heavy-model tasks (LPIPS ≈ 500 MB/process). `parallel_ceiling: 4` caps how many task calls (worktrees) the lead runs at once. Raise it only for light waves.
 
 ## Worktree lifecycle (how the engine isolates + reuses worktrees)
 
@@ -607,13 +602,13 @@ Every `taskTreeSetup` locks the tree with `pid $PPID` (the Bash tool's parent is
 | Version | Contract | Status |
 |---|---|---|
 | (absent) / 2 | Legacy in-conversation playbook (prose-driven dispatch + sentinel parsing) | Retired — regenerate via `/thread:schedule --regenerate` |
-| 3 | Workflow-engine convergence (`wave-execute.workflow.js`): structured output, in-pipeline parallel review, autonomous plan-gate judge, journaled resume | Current |
+| 3 | Workflow-engine convergence (`task.workflow.js`): structured output, in-pipeline parallel review, autonomous plan-gate judge, journaled resume | Current |
 
 Future protocol bumps follow the same rule: a new executor refuses older versions and asks the user to regenerate.
 
 ## Resource budget
 
-The engine chunks each wave by `parallel_ceiling` (default 4) so heavy-model waves never run more than that many worktrees concurrently. Convergence multiplies wall-clock, not memory: worst-case per task is roughly `max_iterations × verifier-time × max_review_rounds`. With defaults (3 × 5 min × 4) one stubborn task can occupy a worktree ~an hour. For waves dominated by cross-cutting long-verifier tasks, lower `max_review_rounds` in the rollout frontmatter.
+The lead caps task calls in flight at `parallel_ceiling` (default 4; today one at a time) so heavy-model waves never run more than that many worktrees concurrently. Convergence multiplies wall-clock, not memory: worst-case per task is roughly `max_iterations × verifier-time × max_review_rounds`. With defaults (3 × 5 min × 4) one stubborn task can occupy a worktree ~an hour. For waves dominated by cross-cutting long-verifier tasks, lower `max_review_rounds` in the rollout frontmatter.
 
 Escalation shifts that arithmetic for `opus` tasks: the opus first pass costs at most one implementation + **one** verifier run, and only an escalated task pays the full fable convergence bill on top (`1 × verifier` + fable's `max_iterations × verifier × max_review_rounds`). Mechanical tasks that land first-shot get cheaper than the old always-iterate profile; proven-hard tasks cost one extra opus pass over pre-stamping them fable.
 
