@@ -17,7 +17,8 @@ import { loadEngine, enginePath } from './lib/engine.mjs'
 const T = loadEngine([
   'GIT_ENV_SCRUB', 'GIT_ENV_RULE', 'scrubbed', 'worktreeSetup', 'ralphLoop', 'oneShotVerify',
   'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt', 'plannerPrompt',
-  'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt',
+  'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt',
+  'branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck', 'integrationMergeReads', 'ANCHOR_RECIPE',
 ])
 const SCRUB = 'unset $(git rev-parse --local-env-vars 2>/dev/null);'
 
@@ -27,6 +28,15 @@ const ST_CAPPED = { tier: 'opus', cap: 'opus', escalated: false, capSuppressed: 
 const task = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
 const impl = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
 const feedback = [{ round: 1, feedback: ['fix it'] }]
+// p12-6: the Integration call's inputs (a cross-cutting task with an open PR on audit-fix/fix-x).
+const H = (c) => c.repeat(40)
+const I = {
+  prUrl: impl.prUrl, branch: impl.branch, worktreePath: impl.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'),
+  trouble: ['conflict'], landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }],
+  plan: 'PLAN', reviewHistory: [{ round: 1, feedback: ['fix it'] }, { round: 2, feedback: ['keep theirs'], stage: 'integration' }],
+  reviewRoundsUsed: 2, rung: { model: 'fable', escalated: false, escalatedAt: '', tierCapped: false, tierCappedAt: '' },
+}
+const J = { mergeCommit: H('d'), headSha: H('e'), baseSha: H('c'), triggers: ['conflict'], path: 'integrator' }
 
 // Every builder, keyed by name, each as a list of rendered prompts (the implementers at every tier).
 function builders(a) {
@@ -34,15 +44,17 @@ function builders(a) {
   return {
     implementerPrompt: tiers.map((st) => T.implementerPrompt(task, a, st, '')),
     approvedPlanImplementerPrompt: tiers.map((st) => T.approvedPlanImplementerPrompt(task, 'PLAN', a, st, '')),
-    reviserPrompt: [T.reviserPrompt(task, impl, feedback, 2, a, '')],
+    reviserPrompt: [T.reviserPrompt(task, impl, feedback, 2, a, ''), T.reviserPrompt(task, impl, I.reviewHistory, 3, a, '', { history: I.reviewHistory, roundsUsed: 2 })],
     readOnlyPrompt: [T.readOnlyPrompt(task, a, ST_OPUS, '')],
     plannerPrompt: [T.plannerPrompt(task, a, ST_OPUS, '')],
     planReviserPrompt: [T.planReviserPrompt(task, 'PLAN', feedback, 2, a)],
     planJudgePrompt: [T.planJudgePrompt(task, 'PLAN', a)],
     reviewJudgePrompt: [T.reviewJudgePrompt(task, impl, a, [])],
+    integratorPrompt: [T.integratorPrompt(task, a, I), T.integratorPrompt(task, a, { ...I, landed: [], reviewHistory: [], trouble: [] })],
+    integrationReviewPrompt: [T.integrationReviewPrompt(task, a, I, J), T.integrationReviewPrompt(task, a, { ...I, landed: [] }, { ...J, mergeCommit: '', path: 'judge-only' })],
   }
 }
-const VERIFYING = ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt', 'plannerPrompt']
+const VERIFYING = ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt', 'plannerPrompt', 'integratorPrompt']
 const count = (s, sub) => s.split(sub).length - 1
 
 test('(a) GIT_ENV_SCRUB is the land.sh form, exactly', () => {
@@ -78,7 +90,7 @@ test('(e) every agent prompt carries GIT_ENV_RULE once, ahead of any verifier co
   assert.ok(T.GIT_ENV_RULE.includes(SCRUB) && /NEVER set or export GIT_DIR/.test(T.GIT_ENV_RULE) && /mktemp -d/.test(T.GIT_ENV_RULE))
   for (const a of [{ repoPath: '/repo', verifier: 'make test' }, { repoPath: '/repo', verifier: 'make test', knownBaselineFailures: ['t — env'] }]) {
     const all = builders(a)
-    assert.equal(Object.keys(all).length, 8)
+    assert.equal(Object.keys(all).length, 10)
     for (const [name, prompts] of Object.entries(all)) {
       for (const p of prompts) {
         assert.equal(count(p, T.GIT_ENV_RULE), 1, `${name}: GIT_ENV_RULE once`)
@@ -92,12 +104,12 @@ test('(e) every agent prompt carries GIT_ENV_RULE once, ahead of any verifier co
   }
 })
 
-test('(e2) every runAgent call site uses one of the 8 covered builders', () => {
+test('(e2) every runAgent call site uses one of the 10 covered builders', () => {
   const orch = fs.readFileSync(enginePath, 'utf8')
   const covered = Object.keys(builders({ repoPath: '/repo', verifier: 'make test' }))
   // The implementer arm passes a `prompt` closure; its builders are chosen just above it.
   const calls = [...orch.matchAll(/runAgent\((\w+)\(/g)]
-  assert.ok(calls.length >= 8, `found ${calls.length} runAgent call sites`)
+  assert.ok(calls.length >= 12, `found ${calls.length} runAgent call sites`)
   for (const m of calls) {
     assert.ok(m[1] === 'prompt' || covered.includes(m[1]), `runAgent(${m[1]}(…)) is a covered builder`)
   }
@@ -118,6 +130,21 @@ test('(f) every inline code span that runs git starts with the scrub', () => {
   for (const name of ['readOnlyPrompt', 'plannerPrompt']) {
     assert.ok(all[name][0].includes(`${SCRUB} git status && make test`), `${name} renders the scrubbed verifier`)
   }
+})
+
+test('(b2) the four Integration steps start with the scrub on their first command line', () => {
+  for (const a of [{ repoPath: '/repo' }, { repoPath: '/repo', defaultBranch: 'master', envBootstrap: 'poetry install' }]) {
+    for (const [bootstrap, ff] of [[true, false], [false, false], [true, true]]) {
+      const setup = T.branchTreeSetup(a, task, bootstrap, ff).split('\n')
+      assert.match(setup[0], /Run exactly, as ONE Bash command/)
+      assert.ok(setup[1].startsWith(`  ${SCRUB} WT="`), setup[1])
+    }
+    for (const step of [T.integrationMergeStep(a, task, I), T.integrationJudgeCheck(a, task, I, J), T.integrationMergeReads(a, task, I, J)]) {
+      assert.ok(step.split('\n')[0].startsWith(`${SCRUB} WT="`), step.split('\n')[0])
+    }
+  }
+  // the recipe is embedded in the scrubbed merge step and run by the lead after its own scrub
+  assert.ok(T.integrationMergeStep({ repoPath: '/repo' }, task, I).includes(T.ANCHOR_RECIPE))
 })
 
 test('(g) the edit-noop-repro diagnostic scrubs every git command its probe runs', () => {
