@@ -1,10 +1,11 @@
 export const meta = {
   name: 'task',
-  description: 'Converge one rollout task: plan-gate → Ralph verify → master review',
+  description: "Converge one rollout task: plan-gate → Ralph verify → master review; mode 'integrate' runs its Integration trouble path",
   phases: [
     { title: 'Plan-gate' },
     { title: 'Implement' },
     { title: 'Review' },
+    { title: 'Integration' },
   ],
 }
 
@@ -82,8 +83,84 @@ export const meta = {
 //                                    //   "(approved …)" annotations stripped). The engine pauses a task
 //                                    //   ONLY for declared gates NOT in this list (ADR 0008) — so
 //                                    //   re-dispatches and resumes never re-ask. Omit/empty when none.
+//       resume          : object,    // optional (p12-6); the SEEDED REVISE after an Integration rejection:
+//                                    //   { stage: 'revise', prUrl, branch, worktreePath, reviewHistory,
+//                                    //   reviewRoundsUsed, plan }. Plan and implement are skipped; the
+//                                    //   review loop starts at round reviewRoundsUsed + 1 with one seeded
+//                                    //   `revise:<slug> r<R+1>` (COLD ENTRY: it re-enters the tree with
+//                                    //   branchTreeSetup and writes no note), then the unchanged judge loop.
+//                                    //   No round left ⇒ review-blocked with no dispatch. A seeded call that
+//                                    //   stops blocked writes REVISE_MARKER + `revise stopped: <why>` + the
+//                                    //   history. Validated (resumeArgsError) before any dispatch: the history
+//                                    //   non-empty and strictly ascending, its last round = reviewRoundsUsed,
+//                                    //   branch/worktreePath the computed ones, never a read-only task.
+//   }
+//   mode        : string,            // optional (p12-6); absent or 'task' ⇒ the task's own call, unchanged
+//                                    //   (byte-identical prompts, labels and row). 'integrate' ⇒ Integration's
+//                                    //   trouble path (ADR 0030 decision 3) with args.integration. Any other
+//                                    //   value throws before dispatch.
+//   integration : object,            // mode 'integrate' only; validated (integrationArgsError) before any
+//                                    //   dispatch — a bad value is a lead bug, not a task block:
+//       prUrl, branch, worktreePath  //   the task's PR; branch = audit-fix/<alias>, worktreePath = the task tree.
+//       headSha         : string,    // the ANCHOR (40-hex) — always ANCHOR_RECIPE's output, never "the
+//                                    //   approved head" by assumption (see the lead contract below).
+//       taskBase        : string,    // git merge-base <anchor> origin/<default> (40-hex).
+//       mainSha         : string,    // origin/<default> as the lead last read it (40-hex); the integrator
+//                                    //   integrates onto whatever the fresh fetch gives and reports it.
+//       trouble         : string[],  // ⊆ conflict | red | shared-file, deduplicated; [] on a cold re-entry.
+//       landed          : [{ prUrl, title, files: string[], taskPath }], // EVERY PR merged since taskBase.
+//       plan            : string,    // the approved plan ('' when the task was not plan-gated).
+//       reviewHistory   : [{ round, feedback: string[], stage?: 'integration' }], // rounds strictly ascending; [] ok.
+//       reviewRoundsUsed: number,    // >= 1 and >= the history's last round.
+//       rung            : { model, escalated, escalatedAt, tierCapped, tierCappedAt }, // the task's, passed through.
+//       leadMerge       : object,    // optional: { mergeCommit, headSha, baseSha, verified } — ONLY in a
+//                                    //   shared-file-only case where the lead merged and verified green itself.
+//       readyAt, startedAt : string, // optional ISO stamps for the merge-line metrics.
 //   }
 // }
+//
+// ---- The lead contract for Integration (p12-9 owns the lead's side) ----
+// The anchor (R2-2). Every Integration of a task pins one anchor: integration.headSha, with taskBase =
+// merge-base(anchor, origin/<default>). The anchor is ALWAYS ANCHOR_RECIPE's output on the PR head (render
+// the constant verbatim and pin the copy): `anchor <X>` (the recorded ref), `anchor <sha>` (no ref: the
+// commit before the oldest first-parent merge of main, or the PR head), or `stale-ref <X>` — delete it with
+// `git update-ref -d refs/integration-anchor/<branch> <X>` and run the recipe again. The anchor equals the
+// approved head only when the own run never merged main and no Integration has run; passing the approved
+// head of a task whose own run merged main STOPs naming the recipe's value. Every Integration call for the
+// task (set-aside re-entries, the re-integration after a rejection and revise, every base-moved retry)
+// passes the SAME anchor/taskBase pair; only mainSha, trouble, landed, leadMerge, reviewHistory /
+// reviewRoundsUsed and the metric stamps are refreshed.
+// The ref's lifecycle (R2-4). The merge step creates refs/integration-anchor/<branch> on the task's first
+// Integration, create-only, never moved (local refs are shared by every worktree and survive the session).
+// The lead deletes it, guarded by its old value, whenever the branch stops being this PR's: after the PR
+// merges (p12-7), when the PR is closed, when the task is re-dispatched from scratch or its branch recut
+// (p12-9, p12-11), and on a set-aside whose reason starts `integration: merge step STOP: stale anchor ref`.
+// The clean path (R2-3) is the lead's, never this call's, in two cases only: (i) the PR head equals the
+// anchor; (ii) the task's latest Integration record is a completed Integration whose head equals the
+// current PR head (a base-moved retry then checks shared files against that record's base). The durable
+// record is the last `integrated` line of the note's `## Integration log`, written by reconcile from this
+// row's `integration` field (L5); until then only the live session's own record counts. Anything else —
+// a rejection and revise, a set-aside, a session that died mid-Integration, a cold resume before L5 —
+// takes the trouble path, where `branch-moved` sends it to the judge. Before L5, an integrated-but-unmerged
+// task whose session died re-pays one integrator and one judge on each cold resume.
+// Inputs. `landed` lists every PR merged since taskBase, so a task back from a rejection still lists the
+// PRs behind it. `reviewHistory` comes from the live session, or cold from the latest `## Blocker
+// diagnosis` run (parseIntegrationMarker: every engine-written rejected or set-aside marker carries it),
+// else []. `reviewRoundsUsed` is the larger of the note's `review_rounds_used` and the history's last round.
+// `readyAt` is when the approving own (or seeded revise) call returned — durable as reconcile's `ready:`
+// stamp (L5); none ⇒ waitMinutes null. `startedAt` is when the lead launches this call. Never integrate a
+// read-only task; run one Integration at a time.
+// Outcomes. `integrated` ⇒ row status review: hand integration.headSha and baseSha to p12-7. `rejected` ⇒
+// blocked with REVISE_MARKER (review-blocked when no review round is left): launch the seeded revise
+// (task.resume, it holds a slot — ADR 0030 decision 3), then re-integrate on the same anchor. `set-aside` ⇒
+// blocked with `integration: <reason>` (gate-pending for a gate): re-enter at Integration on the same anchor.
+// Stage markers (R2-1): the FIRST line of the latest `## Blocker diagnosis` run decides —
+// REVISE_MARKER ⇒ a seeded revise (p12-8 reports it `setAsideAt: run`, the task's own lane), any other
+// `integration: ` line ⇒ Integration, anything else ⇒ the own run (a task-mode diagnosis that would parse
+// as a marker is written `own run: …`).
+// "Committed" (Do 4) is a non-merge commit beyond the merge commit, or a conflict resolution; a clean,
+// conflict-free merge commit alone is not code written (a clean merge touching a landed PR's files is
+// caught by `shared-file`).
 //
 // Returns { rolloutSlug, tasks: [ONE row: { slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
@@ -99,6 +176,12 @@ export const meta = {
 // review-judge rejection rationale ([{ round, feedback: [] }], empty when the PR approved first try);
 // approvedAtCeiling marks an approval on the FINAL review round with actual rejection history —
 // reconcile persists that history to the task note so ceiling approvals stay auditable.
+// A mode 'integrate' row carries one more key, `integration`: { outcome: integrated | rejected | set-aside,
+// path: integrator | judge-only, anchor: { headSha, taskBase }, headSha, baseSha, mergeCommit, triggers
+// (conflict | committed | branch-moved | shared-file), reReviewed, feedback, reason, agents: [{ role,
+// label, model, effort, finishedAt }], metrics: { readyAt, startedAt, finishedAt, waitMinutes,
+// durationMinutes } } — the payload L5's `## Integration log` line records. Its status is one of the
+// five above; model/escalated/tierCapped come from integration.rung.
 // =============================================================================
 
 // ---- Structured schemas (replace the old sentinel strings) ------------------
@@ -172,7 +255,7 @@ function scrubbed(cmd) {
 }
 
 // The agents' side of the scrub: only rendered commands carry the prefix mechanically, so every agent
-// prompt (all 8 builders, task-tree agents and judges included) carries this rule. Static text.
+// prompt (all 10 builders, task-tree agents and judges included) carries this rule. Static text.
 const GIT_ENV_RULE = `Git environment (hard rule, the 2026-09-23 leak): every Bash call starts from the inherited
 environment, so an \`unset\` in one call never carries into the next. Start EVERY Bash command that runs git
 or the verifier, in a worktree OR in the main checkout, with \`${GIT_ENV_SCRUB}\`. The commands
@@ -745,8 +828,10 @@ Read \`gh pr diff ${prevImpl.prUrl}\` and the task brief. Decide: verdict "appro
 // priorFeedback is the FULL accumulated [{ round, feedback }] history (latest round last) — the latest
 // round is the work order, earlier rounds render as anti-regression constraints (their fixes are already
 // committed on the branch; "fix B, regress A" is the failure this guards). planText: original approved
-// plan for the step-back round ('' otherwise).
-function reviserPrompt(task, prevImpl, priorFeedback, round, a, planText) {
+// plan for the step-back round ('' otherwise). seeded (p12-6): set only on a `task.resume` revise call
+// (its own Workflow call after an Integration rejection) — it adds the COLD ENTRY block after the PR:
+// line; unset, the bytes are the pre-p12-6 reviser's (pinned in prompt-invariants).
+function reviserPrompt(task, prevImpl, priorFeedback, round, a, planText, seeded) {
   const latest = priorFeedback[priorFeedback.length - 1]
   const earlier = priorFeedback.slice(0, -1)
   const guard = earlier.length ? `
@@ -761,7 +846,7 @@ ${groupedRounds(earlier)}` : ''
 You are working in an EXISTING worktree on an EXISTING branch with an OPEN PR — NOT a fresh one.
 Worktree path: ${prevImpl.worktreePath}
 Branch: ${prevImpl.branch}
-PR: ${prevImpl.prUrl}
+PR: ${prevImpl.prUrl}${seeded ? coldEntryBlock(a, task, priorFeedback) : ''}
 
 First action: \`cd ${prevImpl.worktreePath}\` and confirm via \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\` that you are
 in that worktree (NOT the project's main checkout) and on branch ${prevImpl.branch}.
@@ -783,6 +868,25 @@ Do not update the task's \`status:\` yourself — the lead session reconciles th
 
 Return your structured result: verified, blocked, escalate=false (you run the full verification loop),
 prUrl (unchanged), branch (unchanged), worktreePath, blockerDiagnosis, summary.`
+}
+
+// The seeded reviser's COLD ENTRY (p12-6): its own leading "\n\n", like the other empty-when-unused
+// fragments. A revise after an Integration rejection is a separate call, possibly long after the tree
+// was last used, so it re-enters the tree with branchTreeSetup (self-heal, re-attach, lock) instead of
+// the in-run reviser's bare `cd`. The note-write override keeps the engine's stage marker the only
+// diagnosis a stopped revise leaves (ADR 0030 decision 4).
+function coldEntryBlock(a, task, history) {
+  const last = history[history.length - 1]
+  const integ = history.filter((r) => r.stage === 'integration').map((r) => r.round)
+  return `
+
+COLD ENTRY (ADR 0030 decision 3): this revise is its own call, launched after the Integration re-review
+rejected this approved branch${integ.length ? ` (round ${integ.join(', ')})` : ''}, possibly long after the tree was last used.
+${branchTreeSetup(a, task, true)}
+The latest round below ${last && last.stage === 'integration' ? "is the Integration re-review's" : 'follows an Integration re-review rejection'}: fix it on the branch and push; never merge
+origin/${defaultBranch(a)} yourself — the lead re-integrates.
+Do not write the task note in this call — this overrides the verification loop's last step; return the
+diagnosis, and the engine records it with its stage marker.`
 }
 
 // ---- Helpers ----------------------------------------------------------------
@@ -896,6 +1000,8 @@ rebase an in-flight branch on resume.`
 //   install` would walk up to the main checkout's project.
 // The implementer prompts do not call this (their worktreeSetup bytes are GOLDEN-pinned). With no
 // a.repoPath (the cap sweep's call shape) it still renders; a bad defaultBranch throws, as there.
+// The self-heal and lock lines are shared with branchTreeSetup (p12-6) through treeSelfHeal and
+// treeLockLines; this setup's bytes are pinned (prompt-invariants), so the refactor moved no byte.
 function taskTreeSetup(a, task, refresh) {
   const wt = worktreeDir(a.repoPath, task.slug)
   const br = `audit-fix/${shortAlias(task.slug)}`
@@ -905,15 +1011,14 @@ function taskTreeSetup(a, task, refresh) {
   const skip = 'why="fast-forward refused (untracked file in the way?)"'
   const cmd = [
     code ? `${GIT_ENV_SCRUB} WT="${wt}"; BR="${br}"` : `${GIT_ENV_SCRUB} WT="${wt}"`,
-    `[ -d "$WT" ] || { git -C "${a.repoPath}" worktree unlock "$WT" 2>/dev/null; git -C "${a.repoPath}" worktree prune; }`,
+    treeSelfHeal(a),
     'if [ -d "$WT" ]; then cd "$WT";',
     ...(code ? [`elif git -C "${a.repoPath}" show-ref --verify --quiet "refs/heads/$BR"; then git -C "${a.repoPath}" worktree add "$WT" "$BR" && cd "$WT";`] : []),
     code
       ? `else git -C "${a.repoPath}" fetch origin --quiet && git -C "${a.repoPath}" worktree add "$WT" -b "$BR" ${base} && cd "$WT"; fi`
       : `else git -C "${a.repoPath}" fetch origin --quiet && git -C "${a.repoPath}" worktree add --detach "$WT" ${base} && cd "$WT"; fi`,
     `if [ -d "$WT" ] && [ "$(${g} rev-parse --show-toplevel 2>/dev/null)" = "$(pwd -P)" ]; then`,
-    `  ${g} worktree unlock "$WT" 2>/dev/null`,
-    `  ${g} worktree lock --reason "pid $PPID thread:execute task tree" "$WT" 2>/dev/null || echo "tree NOT locked against the daily reaper"`,
+    ...treeLockLines(g),
     ...(code ? [`  if ! ${g} symbolic-ref -q HEAD >/dev/null; then { if ${g} show-ref --verify --quiet "refs/heads/$BR"; then ${g} checkout --quiet "$BR"; else ${g} checkout --quiet -b "$BR"; fi; } || echo "tree NOT attached to $BR: checkout failed"; fi`] : []),
     ...(refresh ? [
       '  why=""',
@@ -943,6 +1048,55 @@ This is the ONE worktree every agent on this task shares, ${kind}, first cut fro
 The setup reuses an existing tree and ${moves}. It locks the tree against the daily worktree reaper and
 ends by printing \`tree base: <sha>\`, the commit you are reading. Every repo read and command runs in this
 tree, never in the project's shared checkout at "${a.repoPath}", which may be stale.`
+}
+
+// The self-heal both tree setups run before their arms (see taskTreeSetup): a locked tree someone
+// `rm -rf`'d stays registered, and every later `worktree add` for the slug fails "missing but locked".
+function treeSelfHeal(a) {
+  return `[ -d "$WT" ] || { git -C "${a.repoPath}" worktree unlock "$WT" 2>/dev/null; git -C "${a.repoPath}" worktree prune; }`
+}
+
+// The reaper lock both tree setups take inside their guard (see taskTreeSetup), indented for it.
+function treeLockLines(g) {
+  return [
+    `  ${g} worktree unlock "$WT" 2>/dev/null`,
+    `  ${g} worktree lock --reason "pid $PPID thread:execute task tree" "$WT" 2>/dev/null || echo "tree NOT locked against the daily reaper"`,
+  ]
+}
+
+// Bash the agents that work on an APPROVED task's existing PR branch run first (p12-6): the integrator
+// and the Integration judge, and the seeded (cold-entry) reviser. Unlike taskTreeSetup it never cuts a
+// branch from origin/<default>: the branch is the PR's, so the arms reuse "$WT", re-attach the local
+// $BR, or track origin/$BR after a fetch, and otherwise print a STOP. Inside the same guard as
+// taskTreeSetup: the pid lock, the tree put on $BR (a detached or wrong-branch tree), `tree head:`, and
+// the env bootstrap last (bootstrap=true: the code-writing agents; the judge only reads).
+function branchTreeSetup(a, task, bootstrap) {
+  const wt = worktreeDir(a.repoPath, task.slug)
+  const br = `audit-fix/${shortAlias(task.slug)}`
+  const g = 'git -C "$WT"'
+  const cmd = [
+    `${GIT_ENV_SCRUB} WT="${wt}"; BR="${br}"`,
+    treeSelfHeal(a),
+    'if [ -d "$WT" ]; then cd "$WT";',
+    `elif git -C "${a.repoPath}" show-ref --verify --quiet "refs/heads/$BR"; then git -C "${a.repoPath}" worktree add "$WT" "$BR" && cd "$WT";`,
+    `elif git -C "${a.repoPath}" fetch origin --quiet && git -C "${a.repoPath}" show-ref --verify --quiet "refs/remotes/origin/$BR"; then git -C "${a.repoPath}" worktree add --track -b "$BR" "$WT" "origin/$BR" && cd "$WT";`,
+    'else echo "tree NOT attached: neither $BR nor origin/$BR exists — STOP"; fi',
+    `if [ -d "$WT" ] && [ "$(${g} rev-parse --show-toplevel 2>/dev/null)" = "$(pwd -P)" ]; then`,
+    ...treeLockLines(g),
+    `  if [ "$(${g} symbolic-ref -q --short HEAD)" != "$BR" ]; then { if ${g} show-ref --verify --quiet "refs/heads/$BR"; then ${g} checkout --quiet "$BR"; else ${g} checkout --quiet --track -b "$BR" "origin/$BR"; fi; } || echo "tree NOT on $BR: checkout failed — STOP"; fi`,
+    `  echo "tree head: $(${g} rev-parse HEAD)"`,
+    ...(bootstrap && a.envBootstrap ? ['  ' + envBootstrapStep(a).trimStart()] : []),
+    'fi',
+    `git rev-parse --show-toplevel   # MUST print "$WT" (the task tree), NOT ${a.repoPath} (the main checkout) — STOP if it doesn't`,
+  ]
+  return `Enter this task's tree (ADR 0030) first. Run exactly, as ONE Bash command (the \`unset\` on its first line covers only that command):
+${cmd.map((l) => '  ' + l).join('\n')}
+This is the task's ONE worktree, on its PR branch ${br}. The setup reuses it, re-attaches the local branch,
+or tracks origin/${br} after a fetch; it never cuts a new branch from the default branch. It locks the tree
+against the daily worktree reaper, puts it on ${br} and prints \`tree head: <sha>\`. Any printed line that
+ends in STOP (or a toplevel that is not the task tree) means: change nothing, and return blocked with that
+line as your diagnosis. Every repo read and command runs in this tree, never in the project's shared
+checkout at "${a.repoPath}".`
 }
 
 // ---- Model tiering -----------------------------------------------------------
@@ -1317,7 +1471,32 @@ async function implement(task, st, prev, a) {
   return planExtra ? { ...r, ...planExtra } : r
 }
 
-async function reviewLoop(task, st, prev, a, planText) {
+// One reviser dispatch (the review loop's revise step, moved here verbatim by p12-6 so the seeded
+// entry reuses it). Returns { stop } — the row to return — or { current } to judge next. `round` is the
+// round being revised for; `seeded` is the task.resume seed (the reviser's COLD ENTRY) or null.
+async function reviseRound(task, st, current, priorFeedback, round, a, planText, seeded) {
+  // Opus got its one judged PR round; revision is iteration, and iteration runs at fable.
+  if (st.tier === 'opus') escalate(st, task.slug, 'review')
+  const revised = await runAgent(reviserPrompt(task, current, priorFeedback, round, a, planText, seeded), {
+    label: `revise:${task.slug} r${round}`, phase: 'Review', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
+  })
+  if (revised.__dead) return { stop: { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS } }
+  if (revised.blocked) {
+    // A reviser can DISCOVER a gated input the earlier passes never hit (ADR 0008) — same human
+    // stop, never a plain block.
+    const gates = unapprovedGates(revised.gatedInputs, task.approvedGates)
+    if (gates.length) {
+      return { stop: { ...current, ...revised, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates) } }
+    }
+    return { stop: { ...current, status: 'blocked', blockerDiagnosis: revised.blockerDiagnosis } }
+  }
+  return { current: { ...current, ...revised } }
+}
+
+// seed (p12-6, the `task.resume` revise after an Integration rejection): { history, roundsUsed }. The
+// loop starts at round roundsUsed + 1 with the seeded history, runs ONE seeded revise, then the unchanged
+// judge loop (its revises get the same COLD ENTRY). Unseeded, every label, prompt and row is unchanged.
+async function reviewLoop(task, st, prev, a, planText, seed) {
   // plan-blocked / gate-pending passthrough (already carry their own status — never remap to 'blocked')
   if (prev && prev.blocked && (prev.status === 'plan-blocked' || prev.status === 'gate-pending')) return prev
   // Ralph-blocked OR transient-dead implement result (both carry blocked=true)
@@ -1333,14 +1512,29 @@ async function reviewLoop(task, st, prev, a, planText) {
   // sees the full history (anti-goalpost discipline), each reviser gets the latest round as its work
   // order plus earlier rounds as anti-regression constraints, and the history is RETURNED on both
   // ceiling outcomes so reconcile can persist it (a ceiling approval previously left no record at all).
-  const priorFeedback = []
-  let round = 1
+  const priorFeedback = seed ? seed.history.map((r) => ({ ...r, feedback: [...r.feedback] })) : []
+  let round = seed ? seed.roundsUsed + 1 : 1
+  // A seeded call that stops blocked carries its history, so taskResult can write the revise marker
+  // (ADR 0030 decision 4: it resumes at revise, never at a fresh plan). Unseeded rows are untouched.
+  const stopped = (x) => (seed && x.status === 'blocked'
+    ? { ...x, reviewHistory: priorFeedback, reviewRoundsUsed: priorFeedback[priorFeedback.length - 1].round }
+    : x)
+  if (seed) {
+    if (round > task.maxReviewRounds) {
+      // No round left for the revise: the Integration rejection was the last one. No dispatch.
+      const last = priorFeedback[priorFeedback.length - 1]
+      return { ...current, status: 'review-blocked', reviewRoundsUsed: seed.roundsUsed, reviewFeedback: last.feedback, reviewHistory: priorFeedback }
+    }
+    const step = await reviseRound(task, st, current, priorFeedback, round, a, planText, seed)
+    if (step.stop) return stopped(step.stop)
+    current = step.current
+  }
   while (round <= task.maxReviewRounds) {
     const verdict = await runAgent(reviewJudgePrompt(task, current, a, priorFeedback), {
       label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: judgeFor(a, st), effort: judgeEffort(a, st, 'masterReview'),
     })
     // Dead review-judge: the PR is real and stands — block on transient infra so the lead re-judges it.
-    if (verdict.__dead) return { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS }
+    if (verdict.__dead) return stopped({ ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS })
     if (verdict.verdict === 'approve') {
       // approvedAtCeiling: an approval on the LAST possible round with real rejection history — the
       // unauditable case the audit flagged (giflab p6-2). A clean first-round approve at a 1-round
@@ -1357,22 +1551,9 @@ async function reviewLoop(task, st, prev, a, planText) {
     if (round === task.maxReviewRounds) {
       return { ...current, status: 'review-blocked', reviewRoundsUsed: round, reviewFeedback: verdict.feedback, reviewHistory: priorFeedback }
     }
-    // Opus got its one judged PR round; revision is iteration, and iteration runs at fable.
-    if (st.tier === 'opus') escalate(st, task.slug, 'review')
-    const revised = await runAgent(reviserPrompt(task, current, priorFeedback, round + 1, a, planText), {
-      label: `revise:${task.slug} r${round + 1}`, phase: 'Review', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
-    })
-    if (revised.__dead) return { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS }
-    if (revised.blocked) {
-      // A reviser can DISCOVER a gated input the earlier passes never hit (ADR 0008) — same human
-      // stop, never a plain block.
-      const gates = unapprovedGates(revised.gatedInputs, task.approvedGates)
-      if (gates.length) {
-        return { ...current, ...revised, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates) }
-      }
-      return { ...current, status: 'blocked', blockerDiagnosis: revised.blockerDiagnosis }
-    }
-    current = { ...current, ...revised }
+    const step = await reviseRound(task, st, current, priorFeedback, round + 1, a, planText, seed || null)
+    if (step.stop) return stopped(step.stop)
+    current = step.current
     round += 1
   }
   // Unreachable once the entry guard holds; kept so the function can never end in undefined (fail-closed).
@@ -1396,6 +1577,13 @@ async function converge(task, a) {
     const keys = task.planGate ? ['maxPlanRounds', 'maxReviewRounds'] : ['maxReviewRounds']
     return wrap({ task, ...reviewBudgetBlock(null, roundBudgetDiagnosis(task, keys)) })
   }
+  // A seeded revise (task.resume, validated before dispatch): the approved PR stands, so plan and
+  // implement are skipped and the review loop starts from the seeded history (p12-6).
+  if (task.resume) {
+    const R = task.resume
+    const pr = { prUrl: R.prUrl, branch: R.branch, worktreePath: R.worktreePath, verified: true, blocked: false, blockerDiagnosis: '', summary: '' }
+    return wrap(await reviewLoop(task, st, pr, a, R.plan, { history: R.reviewHistory, roundsUsed: R.reviewRoundsUsed }))
+  }
   const planned = task.planGate ? await planLoop(task, st, a) : { task, plan: null, blocked: false }
   const impl = await implement(task, st, planned, a)
   // The approved plan rides into the review loop for the step-back round's reference ('' when the
@@ -1406,20 +1594,23 @@ async function converge(task, a) {
 
 // One result row per task, the shape reconcile-wave.py reads. A converge() that threw (r === null)
 // becomes a blocked row with the same diagnosis the old per-wave orchestration gave a dropped item.
+// The diagnosis passes through stageDiagnosis (p12-6): a seeded revise that stopped blocked gets the
+// revise marker, and an own-run diagnosis that would read as a stage marker gets `own run: `.
 function taskResult(t, r, a) {
   const norm = r || { blocked: true, status: 'blocked', blockerDiagnosis: 'workflow stage threw — see /workflows' }
+  const status = norm.status || (norm.blocked ? 'blocked' : 'review')
   return {
     slug: t.slug,
     scope: t.scope,
-    status: norm.status || (norm.blocked ? 'blocked' : 'review'),
-    prUrl: norm.prUrl || '',
-    branch: norm.branch || '',
-    worktreePath: norm.worktreePath || '',
-    reviewRoundsUsed: norm.reviewRoundsUsed || 0,
+    status,
+    prUrl: norm.prUrl || (t.resume && t.resume.prUrl) || '',
+    branch: norm.branch || (t.resume && t.resume.branch) || '',
+    worktreePath: norm.worktreePath || (t.resume && t.resume.worktreePath) || '',
+    reviewRoundsUsed: norm.reviewRoundsUsed || (t.resume && t.resume.reviewRoundsUsed) || 0,
     planRoundsUsed: norm.planRoundsUsed || 0,
-    blockerDiagnosis: norm.blockerDiagnosis || '',
+    blockerDiagnosis: stageDiagnosis(t, norm, status),
     reviewFeedback: norm.reviewFeedback || [],
-    reviewHistory: norm.reviewHistory || [],
+    reviewHistory: norm.reviewHistory || (t.resume && t.resume.reviewHistory) || [],
     approvedAtCeiling: !!norm.approvedAtCeiling,
     gatedInputs: norm.gatedInputs || [],
     summary: norm.summary || '',
@@ -1428,6 +1619,716 @@ function taskResult(t, r, a) {
     escalatedAt: norm.escalatedAt || '',
     tierCapped: !!norm.tierCapped,
     tierCappedAt: norm.tierCappedAt || '',
+  }
+}
+
+// ---- Integration (ADR 0030 decision 3, p12-6) --------------------------------
+// The trouble path of Integration as its own small Workflow call (args.mode: 'integrate'). The lead runs
+// the clean path itself (p12-9); this call runs only for a conflict, a red verifier, a shared file or a
+// re-entry. It never merges the PR and never returns `integrated` without an agent that read git.
+
+// The stage markers (ADR 0030 decision 4). The FIRST line of a task note's latest `## Blocker diagnosis`
+// run decides where a set-aside task resumes:
+// - INTEGRATION_PREFIX: set aside AT Integration — it re-enters at Integration on the same anchor. p12-8's
+//   reconcile reads any latest run starting `integration:` (any case) as `setAsideAt: integration`, so
+//   INTEGRATION_PREFIX is the engine's ONLY producer of that prefix.
+// - REVISE_MARKER: an Integration re-review rejected the branch — the task revises in its own lane as a
+//   seeded `task.resume` call, never a fresh plan. It deliberately does NOT start `integration:`, so p12-8
+//   reports it `setAsideAt: run` (the task's own lane).
+// - anything else is the task's own run. A task-mode diagnosis that would parse as either marker is
+//   written as OWN_RUN_PREFIX + itself (stageDiagnosis).
+const INTEGRATION_PREFIX = 'integration: '
+const REVISE_MARKER = 'revise: rejected at Integration re-review — revise on the branch, then re-integrate'
+const OWN_RUN_PREFIX = 'own run: '
+// The integrator and the Integration judge run on the run's top tier — tierCap(a): opus under
+// `max_tier: opus`, else fable — at this effort. P13 swaps in the ladder's top rung (ADR 0029 decision 5).
+// judgeModel and the task's `effort:` do not apply: Integration is not the task's own run.
+const INTEGRATION_EFFORT = 'xhigh'
+const INTEGRATION_TROUBLE = ['conflict', 'red', 'shared-file']
+const INTEGRATION_THREW = 'workflow stage threw — see /workflows'
+const SHA40 = /^[0-9a-f]{40}$/
+const PR_URL = /^https:\/\/\S+\/pull\/\d+$/
+
+// The task's anchor (R2-2): the ONE commit every Integration of the task pins. It prints exactly one line:
+//   anchor <X>     refs/integration-anchor/<branch> exists and X is an ancestor of the PR head;
+//   stale-ref <X>  the ref exists but is NOT on the branch (recut or rewritten): delete it with
+//                  `git update-ref -d <ref> <X>` and run the recipe again;
+//   anchor <sha>   no ref: the first parent of the OLDEST first-parent merge in origin/<default>..<head>
+//                  (the commit before the task's own run, or an earlier Integration, merged main in), or
+//                  the PR head itself when the branch carries no such merge.
+// Inputs, as shell variables: WT (any checkout of the repo, freshly fetched), BR (audit-fix/<alias>),
+// D (origin/<default>), H (the PR head). The lead renders this constant verbatim (p12-9 pins its copy);
+// the merge step and the judge check embed it, and tests/integration-tree.test.sh runs it.
+const ANCHOR_RECIPE = 'X=$(git -C "$WT" rev-parse -q --verify "refs/integration-anchor/$BR" 2>/dev/null); ' +
+  'if [ -n "$X" ]; then if git -C "$WT" merge-base --is-ancestor "$X" "$H"; then echo "anchor $X"; else echo "stale-ref $X"; fi; ' +
+  'else M=$(git -C "$WT" rev-list --first-parent --merges "$D..$H" | tail -n 1); ' +
+  'if [ -n "$M" ]; then echo "anchor $(git -C "$WT" rev-parse "$M^1")"; else echo "anchor $(git -C "$WT" rev-parse "$H")"; fi; fi'
+
+const INTEGRATE_RESULT = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    blocked: { type: 'boolean', description: 'true on a merge-step STOP, an unresolvable conflict, a red verifier at the ceiling, a rejected push or an unsafe tree' },
+    blockerDiagnosis: { type: 'string', description: 'one paragraph when blocked (a merge-step STOP line verbatim), else empty string' },
+    verified: { type: 'boolean', description: 'true ONLY if the full verifier reached the accepted green state in THIS call' },
+    mergeLog: { type: 'string', description: 'the merge step stdout, verbatim' },
+    mergeState: { type: 'string', enum: ['up-to-date', 'already-merged', 'merged', 'none'], description: 'the merge line: up-to-date, already-merged, merged (also after a resolved conflict), or none when blocked before a merge line' },
+    mergeCommit: { type: 'string', description: 'the 40-hex merge commit when mergeState is merged or already-merged (after a conflict: your resolution commit), else empty string' },
+    taskHead: { type: 'string', description: 'the sha on the merge step task head: line' },
+    baseSha: { type: 'string', description: 'the sha on the merge step integration base: line' },
+    headSha: { type: 'string', description: 'the branch head after your last commit (rev-parse HEAD)' },
+    pushedSha: { type: 'string', description: 'the sha ls-remote reports for the branch on origin after your push' },
+    conflictFiles: { type: 'array', items: { type: 'string' }, description: 'the conflict: paths, recorded before resolving; [] when none' },
+    fixCommits: { type: 'array', items: { type: 'string' }, description: 'shas of the non-merge commits you made after the merge; [] when none' },
+    summary: { type: 'string', description: 'one paragraph: what the merge brought in, how you resolved it, what the verifier said' },
+    gatedInputs: { type: 'array', items: { type: 'string' }, description: 'ONLY when you stopped before a gated action (ADR 0008): one line per human authorisation the note\'s "## Approved gates" does not cover. Omit or empty otherwise.' },
+    finishedAt: { type: 'string', description: 'the output of date -u +%Y-%m-%dT%H:%M:%SZ, run as your last action' },
+  },
+  required: ['blocked', 'blockerDiagnosis', 'verified', 'mergeLog', 'mergeState', 'mergeCommit', 'taskHead', 'baseSha', 'headSha', 'pushedSha', 'conflictFiles', 'fixCommits', 'summary', 'finishedAt'],
+}
+
+const INTEGRATION_REVIEW = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    verdict: { type: 'string', enum: ['approve', 'changes'] },
+    feedback: { type: 'array', items: { type: 'string' }, description: '1–8 specific bullets when verdict is changes (or unreadable); empty when approve' },
+    unreadable: { type: 'boolean', description: 'true ONLY when the judge check printed FAIL — you could not read the integration' },
+    finishedAt: { type: 'string', description: 'the output of date -u +%Y-%m-%dT%H:%M:%SZ, run as your last action' },
+  },
+  required: ['verdict', 'feedback', 'unreadable', 'finishedAt'],
+}
+
+// ---- Integration: markers and history ----
+
+function flattenLine(s) {
+  return String(s == null ? '' : s).replace(/\s*\n\s*/g, ' ').trim()
+}
+
+// A history with every bullet on one line (the form markers carry, so a parsed marker round-trips).
+function normHistory(history) {
+  return (history || []).map((r) => ({ ...r, feedback: (r.feedback || []).map(flattenLine) }))
+}
+
+// The history as a marker carries it: `Round N rejection:` / `Round N (Integration) rejection:`, then
+// one-line bullets. Reconcile writes it verbatim, so a cold lead rebuilds the history from the note.
+function markerHistory(history) {
+  return (history || [])
+    .map((r) => `Round ${r.round}${r.stage === 'integration' ? ' (Integration)' : ''} rejection:\n` +
+      (r.feedback || []).map((f) => '- ' + flattenLine(f)).join('\n'))
+    .join('\n\n')
+}
+
+// kind: 'rejected' → REVISE_MARKER + history; 'revise-stopped' → REVISE_MARKER, a `revise stopped:` line,
+// history; 'set-aside' → INTEGRATION_PREFIX + the reason on one line (+ history when non-empty).
+function integrationMarker(kind, reason, history) {
+  const h = markerHistory(history)
+  const tail = h ? '\n\n' + h : ''
+  if (kind === 'rejected') return REVISE_MARKER + tail
+  if (kind === 'revise-stopped') return REVISE_MARKER + '\nrevise stopped: ' + flattenLine(reason) + tail
+  return INTEGRATION_PREFIX + flattenLine(String(reason || '').replace(/^\s*integration:\s*/i, '')) + tail
+}
+
+// The reference parser for one run's text (p12-8's latest_run_text / status's blockerSummary). The first
+// non-blank line decides the stage; the history accepts both the marker form and reconcile's `Round N:`.
+function parseIntegrationMarker(text) {
+  const lines = String(text == null ? '' : text).split('\n')
+  const at = lines.findIndex((l) => l.trim())
+  const first = at === -1 ? '' : lines[at].trim()
+  const low = first.toLowerCase()
+  const stage = low.startsWith(REVISE_MARKER.split(' — ')[0].toLowerCase()) ? 'revise'
+    : low.startsWith('integration:') ? 'integrate' : 'own'
+  let reason = String(text == null ? '' : text).trim()
+  if (stage === 'integrate') reason = first.replace(/^integration:\s*/i, '')
+  if (stage === 'revise') {
+    const s = lines.find((l) => /^revise stopped:/i.test(l.trim()))
+    reason = s ? s.trim().replace(/^revise stopped:\s*/i, '') : ''
+  }
+  const history = []
+  let cur = null
+  for (const raw of lines.slice(at + 1)) {
+    const l = raw.trim()
+    const m = l.match(/^Round (\d+)( \(Integration\))?(?: rejection)?:$/i)
+    if (m) {
+      cur = { round: Number(m[1]), feedback: [] }
+      if (m[2]) cur.stage = 'integration'
+      history.push(cur)
+      continue
+    }
+    const b = l.match(/^- (.+)$/)
+    if (b && cur) { cur.feedback.push(b[1].trim()); continue }
+    cur = null
+  }
+  return { stage, reason, history: history.filter((r) => r.feedback.length) }
+}
+
+// The row's blockerDiagnosis (taskResult). A seeded revise that stopped blocked (a dead or blocked
+// reviser, a dead judge, a throw) resumes at revise, so it gets the revise-stopped marker with its
+// history. Any other diagnosis that would parse as a stage marker is escaped as the task's own run.
+function stageDiagnosis(t, norm, status) {
+  const d = norm.blockerDiagnosis || ''
+  if (t.resume && status === 'blocked') {
+    if (parseIntegrationMarker(d).stage === 'revise') return d
+    const h = norm.reviewHistory && norm.reviewHistory.length ? norm.reviewHistory : t.resume.reviewHistory
+    return integrationMarker('revise-stopped', d || 'the revise call stopped with no diagnosis', h)
+  }
+  return d && parseIntegrationMarker(d).stage !== 'own' ? OWN_RUN_PREFIX + d : d
+}
+
+// ---- Integration: args ----
+
+function historyError(h, allowEmpty) {
+  if (!Array.isArray(h)) return 'must be an array'
+  if (!allowEmpty && !h.length) return 'must be non-empty'
+  let prev = 0
+  for (const r of h) {
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return 'entries must be { round, feedback, stage? } objects'
+    if (!(Number.isInteger(r.round) && r.round >= 1)) return 'round must be an integer >= 1'
+    if (r.round <= prev) return 'rounds must be strictly ascending'
+    if (!Array.isArray(r.feedback) || !r.feedback.length || r.feedback.some((f) => typeof f !== 'string' || !f.trim())) {
+      return `round ${r.round}: feedback must be a non-empty array of non-empty strings`
+    }
+    if (r.stage !== undefined && r.stage !== 'integration') return `round ${r.round}: stage must be 'integration' when present`
+    prev = r.round
+  }
+  return ''
+}
+
+const isSha = (s) => typeof s === 'string' && SHA40.test(s)
+const isObj = (o) => !!o && typeof o === 'object' && !Array.isArray(o)
+
+// The PR identity both entries check: the branch and tree are the deterministic task ones, never any
+// valid name (the integrator pushes to it).
+function prIdentityError(a, o) {
+  const t = a.task
+  if (typeof t.slug !== 'string' || !t.slug) return 'task.slug must be a non-empty string'
+  if (typeof a.repoPath !== 'string' || !a.repoPath) return 'repoPath must be a non-empty string'
+  if (t.scope === 'read-only') return 'a read-only task has no PR to integrate or revise'
+  if (typeof o.prUrl !== 'string' || !PR_URL.test(o.prUrl)) return `prUrl must be a PR URL (…/pull/<n>), got ${JSON.stringify(o.prUrl)}`
+  const br = `audit-fix/${shortAlias(t.slug)}`
+  if (o.branch !== br) return `branch must be ${br}, got ${JSON.stringify(o.branch)}`
+  const wt = worktreeDir(a.repoPath, t.slug)
+  if (o.worktreePath !== wt) return `worktreePath must be ${wt}, got ${JSON.stringify(o.worktreePath)}`
+  return ''
+}
+
+// args.integration (mode 'integrate'). A bad value is a lead bug, not a task block: the caller throws
+// before any agent() call. The SHAs are interpolated into bash, so they are validated, never quoted.
+function integrationArgsError(a) {
+  const I = a.integration
+  const t = a.task
+  if (!isObj(I)) return 'must be one object'
+  const id = prIdentityError(a, I)
+  if (id) return id
+  if (!(Number.isInteger(t.maxIterations) && t.maxIterations >= 1)) return `task.maxIterations must be an integer >= 1, got ${JSON.stringify(t.maxIterations)}`
+  const budget = roundBudgetDiagnosis(t, ['maxReviewRounds'])
+  if (budget) return budget
+  for (const k of ['headSha', 'taskBase', 'mainSha']) if (!isSha(I[k])) return `${k} must be a 40-hex commit sha, got ${JSON.stringify(I[k])}`
+  if (!Array.isArray(I.trouble) || I.trouble.some((x) => !INTEGRATION_TROUBLE.includes(x)) || new Set(I.trouble).size !== I.trouble.length) {
+    return `trouble must be a deduplicated subset of ${INTEGRATION_TROUBLE.join('|')}, got ${JSON.stringify(I.trouble)}`
+  }
+  if (!Array.isArray(I.landed)) return 'landed must be an array'
+  for (const p of I.landed) {
+    if (!isObj(p) || typeof p.prUrl !== 'string' || !PR_URL.test(p.prUrl) || typeof p.title !== 'string' ||
+      typeof p.taskPath !== 'string' || !Array.isArray(p.files) || p.files.some((f) => typeof f !== 'string')) {
+      return `landed entries must be { prUrl, title, files: string[], taskPath }, got ${JSON.stringify(p)}`
+    }
+  }
+  if (typeof I.plan !== 'string') return 'plan must be a string'
+  const he = historyError(I.reviewHistory, true)
+  if (he) return 'reviewHistory ' + he
+  const last = I.reviewHistory.length ? I.reviewHistory[I.reviewHistory.length - 1].round : 0
+  if (!(Number.isInteger(I.reviewRoundsUsed) && I.reviewRoundsUsed >= 1 && I.reviewRoundsUsed >= last)) {
+    return `reviewRoundsUsed must be an integer >= 1 and >= the history's last round (${last}), got ${JSON.stringify(I.reviewRoundsUsed)}`
+  }
+  const g = I.rung
+  if (!isObj(g) || !knownTier(g.model) || typeof g.escalated !== 'boolean' || typeof g.escalatedAt !== 'string' ||
+    typeof g.tierCapped !== 'boolean' || typeof g.tierCappedAt !== 'string') {
+    return `rung must be { model: opus|fable, escalated: boolean, escalatedAt: string, tierCapped: boolean, tierCappedAt: string }, got ${JSON.stringify(g)}`
+  }
+  if (I.leadMerge !== undefined) {
+    const m = I.leadMerge
+    if (!isObj(m) || !isSha(m.mergeCommit) || !isSha(m.headSha) || !isSha(m.baseSha) || typeof m.verified !== 'boolean') {
+      return 'leadMerge must be { mergeCommit, headSha, baseSha (40-hex), verified: boolean }'
+    }
+    // The lead's merge commit is never the anchor: an anchor refreshed to the post-merge head would let
+    // the merge it holds skip the judge (R2-2). The recipe gives the commit before that merge.
+    if (m.mergeCommit === I.headSha) return 'leadMerge.mergeCommit is the passed anchor headSha — pass ANCHOR_RECIPE\'s anchor, never the merged head'
+  }
+  for (const k of ['readyAt', 'startedAt']) if (I[k] !== undefined && typeof I[k] !== 'string') return `${k} must be a string when present`
+  return ''
+}
+
+// args.task.resume: the seeded revise after an Integration rejection (stage 'revise').
+function resumeArgsError(a) {
+  const R = a.task.resume
+  if (!isObj(R)) return 'must be one object'
+  if (R.stage !== 'revise') return `stage must be 'revise', got ${JSON.stringify(R.stage)}`
+  const id = prIdentityError(a, R)
+  if (id) return id
+  const he = historyError(R.reviewHistory, false)
+  if (he) return 'reviewHistory ' + he
+  const last = R.reviewHistory[R.reviewHistory.length - 1].round
+  if (R.reviewRoundsUsed !== last) return `reviewRoundsUsed must equal the history's last round (${last}), got ${JSON.stringify(R.reviewRoundsUsed)}`
+  if (typeof R.plan !== 'string') return 'plan must be a string'
+  return ''
+}
+
+// ---- Integration: metrics (no clock: the stamps come in, and agents stamp their own finish) ----
+
+const ISO_STAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/
+function daysFromCivil(y, m, d) {
+  const yy = m <= 2 ? y - 1 : y
+  const era = Math.floor(yy / 400)
+  const yoe = yy - era * 400
+  const doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1
+  return era * 146097 + yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy - 719468
+}
+// An ISO stamp (`YYYY-MM-DDTHH:MM[:SS[.f]]` with `Z` or a `±HH[:]MM` offset, p12-8's offset-minute form
+// included) as minutes since the epoch, or null. Zoneless or malformed stamps are null, never a guess.
+function isoMinutes(s) {
+  if (typeof s !== 'string') return null
+  const m = s.trim().match(ISO_STAMP)
+  if (!m) return null
+  const [y, mo, d, h, mi] = [1, 2, 3, 4, 5].map((i) => Number(m[i]))
+  const se = m[6] === undefined ? 0 : Number(m[6])
+  const mdays = [31, (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  if (mo < 1 || mo > 12 || d < 1 || d > mdays[mo - 1] || h > 23 || mi > 59 || se > 59) return null
+  let off = 0
+  if (m[7] !== 'Z') {
+    const digits = m[7].slice(1).replace(':', '')
+    const oh = Number(digits.slice(0, 2))
+    const om = Number(digits.slice(2))
+    if (oh > 23 || om > 59) return null
+    off = (m[7][0] === '-' ? -1 : 1) * (oh * 60 + om)
+  }
+  return daysFromCivil(y, mo, d) * 1440 + h * 60 + mi + se / 60 - off
+}
+// Whole minutes from one stamp to another; null when either is missing/unparseable or the span is negative.
+function wholeMinutes(from, to) {
+  const f = isoMinutes(from)
+  const t = isoMinutes(to)
+  if (f === null || t === null) return null
+  const secs = Math.round((t - f) * 60)
+  return secs < 0 ? null : Math.floor(secs / 60)
+}
+// waitMinutes = startedAt − readyAt; durationMinutes = the latest agent finishedAt − startedAt (null when
+// no agent stamped a parseable finish).
+function integrationMetrics(I, agents) {
+  const readyAt = typeof I.readyAt === 'string' ? I.readyAt : null
+  const startedAt = typeof I.startedAt === 'string' ? I.startedAt : null
+  let finishedAt = null
+  let fin = null
+  for (const ag of agents || []) {
+    const v = isoMinutes(ag.finishedAt)
+    if (v !== null && (fin === null || v > fin)) { fin = v; finishedAt = ag.finishedAt }
+  }
+  return {
+    readyAt, startedAt, finishedAt,
+    waitMinutes: wholeMinutes(readyAt, startedAt),
+    durationMinutes: finishedAt === null ? null : wholeMinutes(startedAt, finishedAt),
+  }
+}
+
+// ---- Integration: rendered steps ----
+
+// The integrator's merge step: ONE Bash command that runs under bash and `zsh -f` (the Bash tool's
+// shell). A STOP prints `merge step STOP: <why>` and exits 3; the engine records it as
+// `integration: merge step STOP: <why>`. In order: abort a merge left in progress; refuse tracked
+// changes; fetch (retried once); fast-forward ONLY to origin/$BR (a divergence is a STOP, never a force);
+// the anchor checks (R2-2, R2-4) — a stale ref, a mismatched ref, an anchor that carries a merge, a base
+// that is not merge-base(anchor, main), an anchor not on the branch — then the create-only anchor ref;
+// the `task head:`, `integration base:`, `task file:` (B...H) and `main file:` (TB..B) lines; and exactly
+// one `merge:` line. `already-merged <M>` is the newest first-parent merge in TB..H whose second parent
+// is an ancestor of (or is) B; a conflict lists its `conflict:` paths before anything is resolved and
+// keeps MERGE_HEAD.
+function integrationMergeStep(a, task, I) {
+  const wt = worktreeDir(a.repoPath, task.slug)
+  const br = `audit-fix/${shortAlias(task.slug)}`
+  const def = defaultBranch(a)
+  const g = 'git -C "$WT"'
+  return [
+    `${GIT_ENV_SCRUB} WT="${wt}"; BR="${br}"; D="origin/${def}"; A="${I.headSha}"; TB="${I.taskBase}"; REF="refs/integration-anchor/$BR"`,
+    '(',
+    'merge_stop() { echo "merge step STOP: $1"; exit 3; }',
+    `[ "$(${g} symbolic-ref -q --short HEAD)" = "$BR" ] || merge_stop "the task tree $WT is not on $BR — re-run the setup"`,
+    `if ${g} rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then ${g} merge --abort || merge_stop "could not abort the merge left in progress"; echo "aborted: a merge left in progress"; fi`,
+    `[ -z "$(${g} status --porcelain --untracked-files=no)" ] || merge_stop "tracked changes in $WT — commit or discard them, then re-run"`,
+    `${g} fetch origin --quiet || ${g} fetch origin --quiet || merge_stop "fetch origin failed twice"`,
+    `${g} show-ref --verify --quiet "refs/remotes/origin/$BR" || merge_stop "origin/$BR does not exist — the PR branch is gone"`,
+    `${g} merge --ff-only --quiet "origin/$BR" >/dev/null 2>&1 || merge_stop "$BR has diverged from origin/$BR — never force; reconcile it by hand"`,
+    `for s in "$A" "$TB"; do ${g} cat-file -e "$s^{commit}" 2>/dev/null || merge_stop "unknown commit $s"; done`,
+    `H=$(${g} rev-parse HEAD); B=$(${g} rev-parse "$D"); X=$(${g} rev-parse -q --verify "$REF" 2>/dev/null)`,
+    'if [ -n "$X" ]; then',
+    `  ${g} merge-base --is-ancestor "$X" "$H" || merge_stop "stale anchor ref $X is not on $BR (branch recut or rewritten) — delete it: git update-ref -d $REF $X"`,
+    '  [ "$X" = "$A" ] || merge_stop "anchor mismatch: recorded $X, passed $A — pass the recorded anchor"',
+    'fi',
+    `if [ -n "$(${g} rev-list --first-parent --merges "$TB..$A")" ]; then R=$(${ANCHOR_RECIPE}); R=$(echo "$R" | cut -d' ' -f2); merge_stop "anchor $A carries a merge — ANCHOR_RECIPE gives $R"; fi`,
+    `MB=$(${g} merge-base "$A" "$B"); [ "$MB" = "$TB" ] || merge_stop "taskBase $TB is not merge-base($A, $D) = $MB — pass the task's own base"`,
+    `${g} merge-base --is-ancestor "$A" "$H" || merge_stop "anchor $A is not an ancestor of $BR's head $H (rewritten?)"`,
+    `[ -n "$X" ] || ${g} update-ref "$REF" "$A" "" || merge_stop "could not record the anchor ref $REF"`,
+    'echo "anchor: $A base $TB"; echo "task head: $H"; echo "integration base: $B"',
+    `${g} diff --name-only "$B...$H" | sed 's/^/task file: /'`,
+    `${g} diff --name-only "$TB" "$B" | sed 's/^/main file: /'`,
+    'if [ "$B" = "$TB" ]; then echo "merge: up-to-date"',
+    `elif ${g} merge-base --is-ancestor "$B" "$H"; then`,
+    `  M=""; for c in $(${g} rev-list --first-parent --merges "$TB..$H"); do if ${g} merge-base --is-ancestor "$c^2" "$B"; then M=$c; break; fi; done`,
+    `  [ -n "$M" ] || merge_stop "$D is already in $BR but no first-parent merge brought it in"`,
+    '  echo "merge: already-merged $M"',
+    `elif ${g} merge --no-ff --no-edit -m "Merge origin/${def} into $BR (Integration)" "$B" >/dev/null 2>&1; then echo "merge: merged $(${g} rev-parse HEAD)"`,
+    `elif ${g} rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then echo "merge: conflict"; ${g} diff --name-only --diff-filter=U | sed 's/^/conflict: /'`,
+    'else merge_stop "git merge failed with no conflict (an untracked file in the way?)"; fi',
+    ')',
+  ].join('\n')
+}
+
+// The Integration judge's first step: can it read what it judges? Every SHA it reads is checked with
+// `cat-file -e`, fetched on a miss and re-checked; then the anchor checks, read-only (it never writes the
+// ref). Prints `judge check: ok` or `judge check: FAIL <why>` (exit 3).
+function integrationJudgeCheck(a, task, I, j) {
+  const wt = worktreeDir(a.repoPath, task.slug)
+  const br = `audit-fix/${shortAlias(task.slug)}`
+  const g = 'git -C "$WT"'
+  const shas = [j.mergeCommit, j.headSha, I.headSha, j.baseSha].filter((s) => s).join(' ')
+  const probe = `miss=""; for s in ${shas}; do ${g} cat-file -e "$s^{commit}" 2>/dev/null || miss="$miss $s"; done`
+  return [
+    `${GIT_ENV_SCRUB} WT="${wt}"; BR="${br}"; A="${I.headSha}"; TB="${I.taskBase}"; HD="${j.headSha}"; REF="refs/integration-anchor/$BR"`,
+    '(',
+    'check_fail() { echo "judge check: FAIL $1"; exit 3; }',
+    probe,
+    `if [ -n "$miss" ]; then ${g} fetch origin --quiet; ${g} fetch origin "$BR" --quiet; ${probe}; fi`,
+    '[ -z "$miss" ] || check_fail "cannot read the integration commits:$miss"',
+    `X=$(${g} rev-parse -q --verify "$REF" 2>/dev/null)`,
+    'if [ -n "$X" ]; then',
+    `  ${g} merge-base --is-ancestor "$X" "$HD" || check_fail "stale anchor ref $X is not on $BR (branch recut or rewritten)"`,
+    '  [ "$X" = "$A" ] || check_fail "anchor mismatch: recorded $X, passed $A"',
+    `elif [ -n "$(${g} rev-list --first-parent --merges "$TB..$A")" ]; then check_fail "anchor $A carries a merge"`,
+    'fi',
+    `${g} merge-base --is-ancestor "$A" "$HD" || check_fail "anchor $A is not an ancestor of head $HD"`,
+    'echo "judge check: ok"',
+    ')',
+  ].join('\n')
+}
+
+// The integrator's verification: the full Ralph loop (Integration runs on the top rung, so there is no
+// one-shot hand-over) with the note write replaced — the engine records the diagnosis with its marker.
+function integrationVerify(task, a) {
+  const noteWrite = 'Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.'
+  return ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)
+    .replace(noteWrite, 'Write nothing to the task note (the engine records the diagnosis), and push nothing.')
+}
+
+const INTEGRATION_PRIOR_NOTE = `The task note may carry "## Blocker diagnosis" runs from an earlier Integration or revise (a latest run
+starting \`integration:\` or \`revise:\`): read them as context. The approved plan and the review history
+below are the contract. Write NOTHING to the task note in this call — the engine records your result.`
+
+// The integrator's preflights. The scope check diffs against the INTEGRATION base, never the task's base:
+// once origin/<default> is merged in, everything it brought sits in the task-base range.
+const INTEGRATION_PREFLIGHTS = `
+Before you push, run these preflight checks:
+- Worktree safety: \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\` prints the task tree, NOT the project's main checkout.
+- Scope: \`${GIT_ENV_SCRUB} git diff --stat <integration base>...HEAD\` (the sha on the merge step's \`integration base:\` line) lists only the task's own files plus your resolution and fixes. A file outside that set: STOP and return blocked.
+- Sibling-site blindness: when a resolution or fix changes a code shape, grep the file AND the codebase for the same shape and fix every sibling the landed PRs or this task touched.
+- Dead code: a helper you add has a PRODUCTION caller, not just tests.
+- No force: push plainly. A rejected push is a STOP (return blocked) — never force-push, never rewrite the branch.`.trim()
+
+function landedBlock(a, I) {
+  const wt = worktreeDir(a.repoPath, a.task.slug)
+  if (!I.landed.length) {
+    return `No landed PRs were passed (origin/${defaultBranch(a)} may have moved by direct push): read
+\`${GIT_ENV_SCRUB} git -C "${wt}" log --first-parent ${I.taskBase}..origin/${defaultBranch(a)}\` instead, after the merge step's fetch.`
+  }
+  return I.landed.map((p) => `- ${p.prUrl} — ${p.title}
+  files: ${p.files.length ? p.files.join(', ') : '(none listed)'}
+  task brief: ${p.taskPath || '(none)'}`).join('\n') +
+    '\nRead EVERY brief above and each PR\'s `gh pr diff <url>` before you resolve anything: their intent is half the contract.'
+}
+
+function integratorPrompt(task, a, I) {
+  const wt = worktreeDir(a.repoPath, task.slug)
+  const def = defaultBranch(a)
+  const trouble = I.trouble.length ? I.trouble.join(', ') : 'none reported (a re-entry: find it from the merge step and the verifier)'
+  const history = I.reviewHistory.length ? `
+
+The review history — ANTI-REGRESSION constraints: every point stays resolved through your resolution:
+${markerHistory(I.reviewHistory)}` : ''
+  return `INTEGRATION (trouble path, ADR 0030 decision 3) for [[${task.slug}]] (rollout [[${a.rolloutSlug}]]). The task's PR
+is approved: bring the latest origin/${def} into its branch, resolve, re-verify and push. You never merge the PR.
+
+Task note (the brief): ${task.taskPath}
+PR: ${I.prUrl}
+Branch: ${I.branch}
+Task tree: ${wt}
+
+${branchTreeSetup(a, task, true)}
+
+${GIT_ENV_RULE}
+
+Why you are here — the lead's trouble: ${trouble}.
+${INTEGRATION_PRIOR_NOTE}
+
+The approved plan (the task's contract — your resolution keeps it):
+---
+${I.plan || '(no plan: the task was not plan-gated — the brief is the contract)'}
+---${history}
+
+PRs that landed on origin/${def} since the task's base ${I.taskBase}:
+${landedBlock(a, I)}
+
+Step 1 — the merge step. Run exactly, as ONE Bash command (exit 3 is a STOP):
+${integrationMergeStep(a, task, I).split('\n').map((l) => '  ' + l).join('\n')}
+It aborts a merge left in progress, refuses tracked changes, fetches, fast-forwards ${I.branch} to its origin
+copy (never past a divergence), checks the task's anchor ${I.headSha} (recorded once as
+refs/integration-anchor/${I.branch}) and prints \`anchor:\`, \`task head:\`, \`integration base:\`, \`task file:\` and
+\`main file:\` lines and exactly one \`merge:\` line. Copy its stdout VERBATIM into mergeLog. On a
+\`merge step STOP: <why>\` line: change nothing, and return blocked=true with that line verbatim as
+blockerDiagnosis and mergeState "none".
+
+Step 2 — resolve. On \`merge: conflict\`: resolve every \`conflict:\` path keeping BOTH intents — what the
+landed PRs did (theirs) and what this task did (ours); never drop a side to make the merge go through. Then
+stage the paths and complete the merge with \`${GIT_ENV_SCRUB} git -C "${wt}" commit --no-edit\`. A conflict you
+cannot resolve without dropping an intent: \`${GIT_ENV_SCRUB} git -C "${wt}" merge --abort\`, push nothing, and
+return blocked=true naming the files.
+
+Step 3 — verify. Required unless ALL of these hold: the merge step printed \`merge: up-to-date\`, the lead's
+trouble has no \`red\`, \`task head:\` equals the anchor ${I.headSha}, and you committed nothing. When required:
+${integrationVerify(task, a)}
+
+Step 4 — push and read back. Push plainly with \`${GIT_ENV_SCRUB} git -C "${wt}" push origin "${I.branch}"\`, then
+read \`${GIT_ENV_SCRUB} git -C "${wt}" ls-remote origin "refs/heads/${I.branch}"\`: its sha is pushedSha, and
+\`${GIT_ENV_SCRUB} git -C "${wt}" rev-parse HEAD\` is headSha. A rejected push is a STOP: return blocked.
+
+${INTEGRATION_PREFLIGHTS}
+
+${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}
+
+Rules: never edit the PR (title, body, labels, comments), never merge it, never write the task note. Return
+blocked, blockerDiagnosis, verified (true only if the verifier went green in THIS call), mergeLog, mergeState,
+mergeCommit (after a conflict: your resolution commit), taskHead, baseSha, headSha, pushedSha, conflictFiles
+(the \`conflict:\` paths), fixCommits (your non-merge commits after the merge), summary, and as your LAST action
+run \`date -u +%Y-%m-%dT%H:%M:%SZ\` and return its output as finishedAt.`
+}
+
+// j: { mergeCommit ('' when nothing was merged), headSha, baseSha, triggers, path }.
+function integrationReviewPrompt(task, a, I, j) {
+  const wt = worktreeDir(a.repoPath, task.slug)
+  const def = defaultBranch(a)
+  const S = `${GIT_ENV_SCRUB} git -C "${wt}"`
+  const M = j.mergeCommit
+  const reads = [
+    ...(M ? [
+      `- \`${S} show --cc ${M}\` — the merge commit's own resolution.`,
+      `- \`${GIT_ENV_SCRUB} T=$(git -C "${wt}" merge-tree --write-tree "${M}^1" "${M}^2" | head -n 1) && git -C "${wt}" diff "$T" ${M}\` — how the committed merge differs from git's automatic one (skip this on git < 2.38).`,
+      `- \`${S} diff "${M}^1" ${M}\` and \`${S} diff "${M}^2" ${M}\` — the merge as each side sees it.`,
+    ] : [`- No merge commit: origin/${def} was not merged in this integration.`]),
+    `- \`${S} log -p --first-parent --no-merges ${I.headSha}..${j.headSha}\` — every commit on the branch since the anchor (repair, revise and fix commits).`,
+    ...(I.landed.length
+      ? I.landed.map((p) => `- ${p.prUrl} (${p.title}): \`gh pr diff ${p.prUrl}\` and its brief ${p.taskPath || '(none)'}.`)
+      : [`- No landed PRs were passed: read \`${S} log --first-parent ${I.taskBase}..${j.baseSha}\` for what landed.`]),
+  ]
+  const last = I.reviewHistory[I.reviewHistory.length - 1]
+  const history = I.reviewHistory.length ? `
+
+The PR's review history (context):
+${markerHistory(I.reviewHistory)}${last.stage === 'integration' ? `
+
+The latest round is an earlier Integration re-review's rejection, since revised: confirm each point is
+resolved; an open point is grounds for \`changes\`.` : ''}` : ''
+  return `You are the Integration RE-REVIEW judge for [[${task.slug}]] (rollout [[${a.rolloutSlug}]]), ADR 0030 decision 3.
+The task's PR was approved; origin/${def} has since been brought into its branch. You judge ONLY that
+integration, read-only: no edit, commit or push, in the tree or anywhere else.
+
+PR: ${I.prUrl}
+Task note (the brief): ${task.taskPath}
+Task tree: ${wt}
+Path: ${j.path === 'judge-only' ? 'the lead merged and verified; no integrator ran' : 'an integrator merged, resolved and verified'}.
+Why you are here: ${j.triggers.join(', ')}.
+
+${branchTreeSetup(a, task, false)}
+
+${GIT_ENV_RULE}
+
+Step 1 — the judge check. Run exactly, as ONE Bash command:
+${integrationJudgeCheck(a, task, I, j).split('\n').map((l) => '  ' + l).join('\n')}
+On \`judge check: FAIL <why>\`: read nothing else, and return verdict "changes", unreadable=true and one
+bullet "cannot read the integration: <why>". Never approve what you could not read.
+
+Step 2 — read the integration (merge ${M || '(none)'}, head ${j.headSha}, base ${j.baseSha}, anchor ${I.headSha}):
+${reads.join('\n')}${history}
+
+Step 3 — decide ONE question, not a fresh review of the task: was anything of theirs (the landed PRs)
+dropped or contradicted, or anything of ours (this task's approved change) lost? Verdict "approve" if
+nothing was, else "changes" with 1–8 specific bullets (they become the revise call's work order);
+unreadable=false. As your LAST action run \`date -u +%Y-%m-%dT%H:%M:%SZ\` and return its output as finishedAt.`
+}
+
+// ---- Integration: the call ----
+
+// The integrator's merge-step log, line by line (only the step's own prefixes are read).
+function parseMergeLog(text) {
+  const lines = String(text == null ? '' : text).split('\n').map((l) => l.replace(/\s+$/, ''))
+  const one = (p) => {
+    const l = lines.find((x) => x.startsWith(p))
+    return l === undefined ? null : l.slice(p.length).trim()
+  }
+  const all = (p) => lines.filter((x) => x.startsWith(p)).map((x) => x.slice(p.length).trim()).filter((x) => x)
+  return {
+    anchor: one('anchor: '),
+    taskHead: one('task head: '),
+    base: one('integration base: '),
+    merge: lines.filter((x) => x.startsWith('merge: ')),
+    taskFiles: all('task file: '),
+    mainFiles: all('main file: '),
+    conflicts: all('conflict: '),
+  }
+}
+
+// Checks the integrator's result (pure). null when it is usable, else { reason, gates? } — a set-aside.
+// A verify is required unless the base is unmoved, nothing is red, the branch has not moved and nothing
+// was committed: then (the race case) the result integrates with no verifier run.
+function integrationCheck(I, r, approved) {
+  if (!r || r.__dead) return { reason: TRANSIENT_DIAGNOSIS }
+  const gates = unapprovedGates(r.gatedInputs, approved)
+  if (gates.length) return { reason: gateDiagnosis(gates), gates }
+  if (r.blocked) return { reason: r.blockerDiagnosis || 'the integrator returned blocked with no diagnosis' }
+  const log = parseMergeLog(r.mergeLog)
+  if (log.anchor === null) return { reason: 'the merge log has no `anchor:` line — the merge step did not run as rendered' }
+  if (log.anchor !== `${I.headSha} base ${I.taskBase}`) return { reason: `the merge log's anchor line (${log.anchor}) is not the passed anchor ${I.headSha} base ${I.taskBase}` }
+  if (log.merge.length !== 1) return { reason: `the merge log has ${log.merge.length} \`merge:\` lines, not one` }
+  if (!log.taskFiles.length) return { reason: 'the merge log has no `task file:` line' }
+  if (r.mergeState === 'none') return { reason: 'mergeState is none but the integrator did not report blocked' }
+  if (!['up-to-date', 'already-merged', 'merged'].includes(r.mergeState)) return { reason: `unknown mergeState ${JSON.stringify(r.mergeState)}` }
+  const merged = r.mergeState !== 'up-to-date'
+  for (const k of ['taskHead', 'baseSha', 'headSha', 'pushedSha', ...(merged ? ['mergeCommit'] : [])]) {
+    if (!isSha(r[k])) return { reason: `${k} is not a 40-hex sha: ${JSON.stringify(r[k])}` }
+  }
+  const line = log.merge[0]
+  const lm = line.match(/^merge: (up-to-date|already-merged|merged|conflict)(?: ([0-9a-f]{40}))?$/)
+  const agrees = lm && (
+    (lm[1] === 'up-to-date' && !lm[2] && r.mergeState === 'up-to-date') ||
+    (lm[1] === 'conflict' && !lm[2] && r.mergeState === 'merged') ||
+    ((lm[1] === 'merged' || lm[1] === 'already-merged') && lm[1] === r.mergeState && lm[2] === r.mergeCommit))
+  if (!agrees) return { reason: `the merge log's \`${line}\` disagrees with mergeState ${r.mergeState} / mergeCommit ${r.mergeCommit || '(none)'}` }
+  if (log.taskHead !== r.taskHead) return { reason: `taskHead ${r.taskHead} is not the merge log's task head ${log.taskHead}` }
+  if (log.base !== r.baseSha) return { reason: `baseSha ${r.baseSha} is not the merge log's integration base ${log.base}` }
+  if (r.mergeState === 'up-to-date' && r.baseSha !== I.taskBase) return { reason: `merge: up-to-date onto ${r.baseSha}, which is not the task's base ${I.taskBase}` }
+  if (r.pushedSha !== r.headSha) return { reason: `origin has ${r.pushedSha}, not the integrated head ${r.headSha} — the push did not land` }
+  const verifyRequired = merged || I.trouble.includes('red') || r.taskHead !== I.headSha || r.headSha !== r.taskHead
+  if (verifyRequired && !r.verified) return { reason: 'the full verifier was required but did not go green in this call' }
+  return null
+}
+
+// The re-review triggers, computed here and failing closed — the agent reports no trigger flag.
+function integrationTriggers(I, r) {
+  const log = parseMergeLog(r.mergeLog)
+  const text = String(r.mergeLog || '')
+  const out = []
+  if (I.trouble.includes('conflict') || (r.conflictFiles || []).length || /^merge: conflict$/m.test(text) || /^conflict: /m.test(text)) out.push('conflict')
+  const merged = r.mergeState === 'merged' || r.mergeState === 'already-merged'
+  if ((r.fixCommits || []).length || (merged && r.headSha !== r.mergeCommit) || (r.mergeState === 'up-to-date' && r.headSha !== r.taskHead)) out.push('committed')
+  if (r.taskHead !== I.headSha) out.push('branch-moved')
+  const theirs = new Set(log.mainFiles)
+  for (const p of I.landed) for (const f of p.files) theirs.add(f)
+  if (I.trouble.includes('shared-file') || log.taskFiles.some((f) => theirs.has(f))) out.push('shared-file')
+  return out
+}
+
+// One Integration: P1 (judge only) or P2 (integrator, then the judge when any trigger is set). trace
+// collects the path and every agent dispatched, so a throw still reports what ran.
+async function integrate(task, a, trace) {
+  const I = a.integration
+  const cap = tierCap(a)
+  const R = I.reviewRoundsUsed
+  const lm = I.leadMerge
+  const dispatch = async (role, label, prompt, schema) => {
+    const r = await runAgent(prompt, { label, phase: 'Integration', schema, model: cap, effort: INTEGRATION_EFFORT })
+    trace.agents.push({ role, label, model: cap, effort: INTEGRATION_EFFORT, finishedAt: !r.__dead && typeof r.finishedAt === 'string' ? r.finishedAt : '' })
+    return r
+  }
+  let j
+  if (lm && lm.verified && I.trouble.length === 1 && I.trouble[0] === 'shared-file' && lm.headSha === lm.mergeCommit && lm.baseSha !== I.taskBase) {
+    // P1: the lead merged cleanly and its verifier went green — no top-rung agent only to re-run it.
+    trace.path = 'judge-only'
+    j = { mergeCommit: lm.mergeCommit, headSha: lm.headSha, baseSha: lm.baseSha, triggers: ['shared-file'], path: trace.path }
+  } else {
+    trace.path = 'integrator'
+    const r = await dispatch('integrator', `integrate:${task.slug}`, integratorPrompt(task, a, I), INTEGRATE_RESULT)
+    const bad = integrationCheck(I, r, task.approvedGates)
+    if (bad) return { outcome: 'set-aside', reason: bad.reason, gates: bad.gates || [] }
+    j = { mergeCommit: r.mergeState === 'up-to-date' ? '' : r.mergeCommit, headSha: r.headSha, baseSha: r.baseSha, triggers: integrationTriggers(I, r), path: trace.path }
+    if (!j.triggers.length) return { outcome: 'integrated', ...j, reReviewed: false }
+  }
+  const v = await dispatch('judge', `integration-review:${task.slug} r${R + 1}`, integrationReviewPrompt(task, a, I, j), INTEGRATION_REVIEW)
+  if (v.__dead) return { outcome: 'set-aside', reason: TRANSIENT_DIAGNOSIS, ...j, reReviewed: false }
+  const feedback = (v.feedback || []).map(flattenLine).filter((f) => f)
+  if (v.unreadable) return { outcome: 'set-aside', reason: `judge could not read the integration — ${feedback[0] || 'no reason given'}`, ...j, reReviewed: true, feedback }
+  if (v.verdict === 'approve') return { outcome: 'integrated', ...j, reReviewed: true }
+  return { outcome: 'rejected', ...j, reReviewed: true, feedback: feedback.length ? feedback : ['the Integration re-review returned changes with no feedback'] }
+}
+
+// The integrate call's ONE row: today's 19 keys plus `integration` (the payload L5's log line records).
+// Every status is one of reconcile's five: integrated → review; rejected → blocked with the revise
+// marker (review-blocked when no review round is left); set-aside → blocked with `integration: <reason>`
+// (gate-pending for a gate). A rejected task's note therefore never reads as approved.
+function integrationResult(task, out, a, trace) {
+  const I = a.integration
+  const o = out || { outcome: 'set-aside', reason: INTEGRATION_THREW }
+  const history = normHistory(I.reviewHistory)
+  let status = 'review'
+  let blockerDiagnosis = ''
+  let reviewFeedback = []
+  let reviewHistory = history
+  let reviewRoundsUsed = I.reviewRoundsUsed
+  let gatedInputs = []
+  if (o.outcome === 'rejected') {
+    reviewFeedback = o.feedback
+    reviewRoundsUsed = I.reviewRoundsUsed + 1
+    reviewHistory = [...history, { round: reviewRoundsUsed, feedback: o.feedback, stage: 'integration' }]
+    if (reviewRoundsUsed >= task.maxReviewRounds) status = 'review-blocked'
+    else { status = 'blocked'; blockerDiagnosis = integrationMarker('rejected', '', reviewHistory) }
+  } else if (o.outcome === 'set-aside') {
+    gatedInputs = o.gates || []
+    status = gatedInputs.length ? 'gate-pending' : 'blocked'
+    blockerDiagnosis = integrationMarker('set-aside', o.reason, history)
+  }
+  const head = o.headSha || ''
+  const g = I.rung
+  return {
+    slug: task.slug,
+    scope: task.scope,
+    status,
+    prUrl: I.prUrl,
+    branch: I.branch,
+    worktreePath: I.worktreePath,
+    reviewRoundsUsed,
+    planRoundsUsed: 0,
+    blockerDiagnosis,
+    reviewFeedback,
+    reviewHistory,
+    approvedAtCeiling: false,
+    gatedInputs,
+    summary: o.outcome === 'integrated'
+      ? `integrated ${head} onto ${o.baseSha} (${trace.path}${o.reReviewed ? ', re-reviewed' : ', no re-review'})`
+      : o.outcome === 'rejected' ? `Integration re-review rejected ${head}` : `set aside at Integration: ${flattenLine(o.reason)}`,
+    model: g.model,
+    escalated: g.escalated,
+    escalatedAt: g.escalatedAt,
+    tierCapped: g.tierCapped,
+    tierCappedAt: g.tierCappedAt,
+    integration: {
+      outcome: o.outcome,
+      path: trace.path,
+      anchor: { headSha: I.headSha, taskBase: I.taskBase },
+      headSha: head,
+      baseSha: o.baseSha || '',
+      mergeCommit: o.mergeCommit || '',
+      triggers: o.triggers || [],
+      reReviewed: !!o.reReviewed,
+      feedback: o.feedback || [],
+      reason: o.outcome === 'set-aside' ? flattenLine(o.reason) : '',
+      agents: trace.agents,
+      metrics: integrationMetrics(I, trace.agents),
+    },
   }
 }
 
@@ -1442,6 +2343,38 @@ defaultBranch(a)   // fail the run before any dispatch on an unusable args.defau
 // pre-rename run, must fail loudly here rather than converge nothing. Recovery is a re-dispatch.
 if (a.waves !== undefined) throw new Error('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')
 if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw new Error('args.task must be one task object')
+// args.mode (p12-6): absent or 'task' runs the task's own call; 'integrate' runs Integration's trouble
+// path. Bad Integration or seeded-revise args are lead bugs, refused before any dispatch.
+const mode = a.mode === undefined ? 'task' : a.mode
+if (mode !== 'task' && mode !== 'integrate') throw new Error(`args.mode: refusing ${JSON.stringify(a.mode)} — 'task' (the default) or 'integrate'`)
+if (mode === 'integrate') {
+  const bad = integrationArgsError(a)
+  if (bad) throw new Error('args.integration: ' + bad)
+  if (a.task.resume !== undefined) throw new Error("args.task.resume: a seeded revise is its own call, never mode 'integrate'")
+} else if (a.integration !== undefined) {
+  throw new Error("args.integration: only with args.mode 'integrate'")
+}
+if (mode === 'task' && a.task.resume !== undefined) {
+  const bad = resumeArgsError(a)
+  if (bad) throw new Error('args.task.resume: ' + bad)
+}
+
+if (mode === 'integrate') {
+  log(`integrate: ${a.rolloutSlug} — ${a.task.slug} (${a.task.scope})`)
+  if (a.progress) log(a.progress)
+  // A stage that throws becomes a set-aside at Integration, never a lost result.
+  const trace = { agents: [], path: '' }
+  let out
+  try {
+    out = await integrate(a.task, a, trace)
+  } catch (e) {
+    log(`integrate threw on ${a.task.slug}: ${(e && e.message) || e}`)
+    out = null
+  }
+  const irow = integrationResult(a.task, out, a, trace)
+  log(`${irow.slug} → ${irow.status} (integration: ${irow.integration.outcome})`)
+  return { rolloutSlug: a.rolloutSlug, tasks: [irow] }
+}
 
 log(`task: ${a.rolloutSlug} — ${a.task.slug} (${a.task.scope})`)
 if (tierCap(a) !== TOP_TIER) log(`maxTier=${tierCap(a)} — escalation is capped; capped tasks run the full loop at the higher tier's effort`)
