@@ -274,9 +274,29 @@ for v in '"not-a-pr"' '""' DEL; do
 done
 mkt il7
 res il7 review "$PR7" "integration=$(integ path='"judge only"' triggers='["a b","c\td"]' metrics.startedAt='"## evil\nx"')"; rec >/dev/null
-ok "$(logsec il7)" "##_evil_x integrated path=judge_only pr=7 anchor=$A40 head=$D40 base=$C40 wait=30 duration=15 triggers=a_b,c_d" \
-  "whitespace inside a value becomes _"
-ok "$(logsec il7 | awk '{print NF}')|$(cntx il7 '## evil')" "10|0" "… so the line has 10 tokens and never opens a section"
+ok "$(logsec il7)" "- integrated path=judge_only pr=7 anchor=$A40 head=$D40 base=$C40 wait=30 duration=15 triggers=a_b,c_d" \
+  "whitespace inside a value becomes _; a startedAt that is not an ISO stamp writes -"
+ok "$(logsec il7 | awk '{print NF}')|$(cnt il7 'evil')" "10|0" "… so the line has 10 tokens and the bad startedAt is dropped"
+
+# startedAt is the one token with no `key=` prefix, so it alone decides how the line starts: only the
+# engine's ISO_STAMP shape is written, anything else is `-`, so the line can never open a section, an H1,
+# a code fence or a quote (and a second row still lands as the section's last line).
+hd() { grep -cE '^(#|```|~~~|>)' "$D/$1.md"; }   # lines that open a heading, fence or quote
+for v in '"##"' '"#"' '"```"' '">"' '"~~~"' '"2026-10-02"' '"2026-10-02T13:30"' '"x2026-10-02T13:30+00:00"'; do
+  mkt il9
+  h0=$(hd il9)
+  res il9 review "$PR7" "integration=$(integ metrics.startedAt=$v)"; rec >/dev/null
+  ok "$(nlog il9)|$(logsec il9 | awk '{print NF}')|$(logsec il9 | cut -d' ' -f1)|$(hd il9)" "1|10|-|$((h0 + 1))" \
+    "startedAt $v: one 10-token line led by -, no heading but the log's own"
+  res il9 blocked "$PR7" "integration=$(integ outcome='"rejected"' metrics.startedAt="\"$T2\"")"; rec >/dev/null
+  ok "$(nlog il9)|$(logsec il9 | tail -1 | cut -d' ' -f1,2)|$(hd il9)" "2|$T2 rejected|$((h0 + 1))" \
+    "… a second row still lands as the section's last line"
+done
+for v in 2026-10-02T13:30:00Z 2026-10-02T13:30:00.250+1000 2026-10-02T13:30-0230; do
+  mkt il10
+  res il10 review "$PR7" "integration=$(integ metrics.startedAt="\" $v \"")"; rec >/dev/null
+  ok "$(logsec il10 | cut -d' ' -f1)" "$v" "startedAt $v (ISO_STAMP's other forms) is written, trimmed"
+done
 
 mkt il8
 res il8 review "$PR7" "integration=$(integ)"; rec >/dev/null

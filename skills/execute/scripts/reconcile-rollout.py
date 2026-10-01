@@ -227,6 +227,10 @@ FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
 PROJECT_ROOT_RE = re.compile(r"^Project root:\s*`?([^`\n]+?)`?\s*$", re.M)
 PR_URL_RE = re.compile(r"^https://github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)/?$")
 PR_NUM_RE = re.compile(r"^#?(\d+)$")
+# The engine's ISO_STAMP (task.workflow.js), the only startedAt shape the Integration log writes: `_stamp`'s
+# offset-minute form, or seconds/fraction with `Z` or a `±HH[:]MM` offset. ASCII digits only.
+ISO_STAMP_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})",
+                          re.ASCII)
 
 
 # ---- small value helpers ----------------------------------------------------
@@ -705,14 +709,25 @@ def history_block(history):
 
 def _log_field(value, minutes=False) -> str:
     """One Integration log value. None, '', [] (or a non-int, or bool, minute count) -> `-`; a list is
-    comma-joined in order; whitespace inside becomes `_`, so a line always has exactly 10 tokens and can
-    never read as a `## ` heading."""
+    comma-joined in order; whitespace inside becomes `_`, so a line always has exactly 10 tokens. This
+    guards the token count only: a value may still start with `#`, a backtick or `>`, which is why the
+    line's one unprefixed token (startedAt) goes through _log_started instead."""
     if minutes:
         return str(value) if isinstance(value, int) and not isinstance(value, bool) else "-"
     if isinstance(value, (list, tuple)):
         value = ",".join(str(v).strip() for v in value if v is not None and str(v).strip())
     s = "" if value is None else str(value).strip()
     return re.sub(r"\s", "_", s) if s else "-"
+
+
+def _log_started(value) -> str:
+    """The line's leading token: startedAt when it is an ISO stamp (ISO_STAMP_RE, the engine's shape),
+    else `-`. The lead supplies startedAt and the engine only checks it is a string, and it is the one
+    token with no `key=` prefix, so it alone decides how the line starts; holding it to a digit or `-`
+    means the line can never open a `## ` section (ending `## Integration log` above it), an H1, a code
+    fence or a quote."""
+    s = value.strip() if isinstance(value, str) else ""
+    return s if ISO_STAMP_RE.fullmatch(s) else "-"
 
 
 def _log_pr(pr_url) -> str:
@@ -729,13 +744,14 @@ def _log_pr(pr_url) -> str:
 def _integration_log_line(task) -> str:
     """The `## Integration log` line for a row carrying a dict `integration` (the engine's
     integrationResult): `<startedAt> <outcome> path=<p> pr=<n> anchor=<sha> head=<sha> base=<sha>
-    wait=<n|-> duration=<n|-> triggers=<list|->`. startedAt is written verbatim, SHAs in full. The line
-    carries no `now`, so a re-reconcile at another time writes the same line."""
+    wait=<n|-> duration=<n|-> triggers=<list|->`. startedAt is written verbatim when it is an ISO stamp
+    (else `-`, see _log_started), SHAs in full. The line carries no `now`, so a re-reconcile at another
+    time writes the same line."""
     integ = task["integration"]
     metrics = integ.get("metrics") if isinstance(integ.get("metrics"), dict) else {}
     anchor = integ.get("anchor") if isinstance(integ.get("anchor"), dict) else {}
     return " ".join([
-        _log_field(metrics.get("startedAt")),
+        _log_started(metrics.get("startedAt")),
         _log_field(integ.get("outcome")),
         "path=" + _log_field(integ.get("path")),
         "pr=" + _log_pr(task.get("prUrl")),
