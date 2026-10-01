@@ -16,11 +16,21 @@ anchor() { gc update-ref "refs/integration-anchor/audit-fix/t$1" "$(gc rev-parse
 has_anchor() { gc rev-parse -q --verify "refs/integration-anchor/audit-fix/t$1" >/dev/null 2>&1 && echo yes || echo no; }
 cdir="$tmp/repo/.claude/merge-task"
 
-# 1. usage and PR normalisation: exit 2 with zero gh calls; a pre-seeded counter is byte-unchanged
+# 1. usage and PR normalisation: exit 2 with zero gh calls; a pre-seeded counter is byte-unchanged. The previous
+#    call's `ok` (PR 5 merged) never survives a malformed next call: the sentinel is cleared before the arg count.
 fresh; pair; mkpr 5 "$I"
+mkdir -p "$tmp/repo/.claude"; printf 'ok\n' > "$tmp/repo/.claude/merge-task.status"
 : > "$MT_STATE/gh.log"
-out=$(PATH="$tmp/bin:$PATH" bash "$MT" "$tmp/repo" 5 "$I" 2>&1); rc=$?
+out=$(PATH="$tmp/bin:$PATH" bash "$MT" "$tmp/repo" 6 "$I" 2>&1); rc=$?
 ok "$rc" 2 "1. three args exits 2"; ok "$(glog)" "" "1. three args: zero gh calls"
+ok "$(sent)" "failed:2" "1. three args after an ok: the previous call's ok is replaced by failed:2"
+printf 'ok\n' > "$tmp/repo/.claude/merge-task.status"
+out=$(PATH="$tmp/bin:$PATH" bash "$MT" "$tmp/repo" 6 "$I" "$B" extra 2>&1); rc=$?
+ok "$rc" 2 "1. five args exits 2"; ok "$(sent)" "failed:2" "1. five args after an ok: failed:2"
+mkdir -p "$tmp/plain/.claude"; printf 'ok\n' > "$tmp/plain/.claude/merge-task.status"
+out=$(PATH="$tmp/bin:$PATH" bash "$MT" "$tmp/plain" 6 "$I" "$B" 2>&1); rc=$?
+ok "$rc" 2 "1. not a repo exits 2"; has "$out" "is not a git repo" "1. says it is not a git repo"
+ok "$(cat "$tmp/plain/.claude/merge-task.status")" "failed:2" "1. not a repo: an earlier ok there is replaced by failed:2"
 run 5 "zz${I#??}" "$B"; ok "$rc" 2 "1. a non-hex head exits 2"; ok "$(glog)" "" "1. non-hex head: zero gh calls"
 run 5 "$I" "${B:0:12}"; ok "$rc" 2 "1. a short base exits 2"; ok "$(glog)" "" "1. short base: zero gh calls"
 ok "$(sent)" "failed:2" "1. a SHA exit 2 writes failed:2"
@@ -330,6 +340,38 @@ held=$(gc rev-parse HEAD)
 run 5 "$I" "$B"
 ok "$rc" 6 "21. origin/master lacking the merge exits 6"; has "$out" "lacks merge" "21. says origin/master lacks it"
 lacks "$out" "fast-forwarded" "21. never says fast-forwarded"; ok "$(gc rev-parse HEAD)" "$held" "21. no fast-forward"
+
+# 22. a bad MERGE_TASK_* override exits 2 before any GitHub call: the cap never fails open. The first case is
+#     the review's repro (a non-numeric cap and a moved base once aborted in `$((…))` and exited 0).
+fresh; pair; mkpr 5 "$I"; X=$(mk "$B" moved); echo "$X" > "$MT_STATE/base.seq"; seed 5 "$(b 1)"
+MERGE_TASK_REINTEGRATE_MAX=three run 5 "$I" "$B"
+ok "$rc" 2 "22. MERGE_TASK_REINTEGRATE_MAX=three exits 2"; ok "$(glog)" "" "22. three: zero gh calls"
+has "$out" "MERGE_TASK_REINTEGRATE_MAX='three' is not a non-negative integer" "22. names the override"
+ok "$(sent)" "failed:2" "22. three: failed:2"; ok "$(ctr 5)" "$(b 1)" "22. three: the counter is byte-unchanged"
+for v in -1 08 1.5 ' 3' 9999999999 99999999999999999999; do
+  MERGE_TASK_REINTEGRATE_MAX="$v" run 5 "$I" "$B"
+  ok "$rc" 2 "22. MERGE_TASK_REINTEGRATE_MAX='$v' exits 2"; ok "$(glog)" "" "22. '$v': zero gh calls"
+done
+for e in CHECK_INTERVAL STATE_INTERVAL CONFIRM_INTERVAL READ_TRIES READ_INTERVAL HEAD_LAG_INTERVAL; do
+  out=$(env "MERGE_TASK_$e=x" PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$tmp/repo" 5 "$I" "$B" 2>&1); rc=$?
+  ok "$rc" 2 "22. MERGE_TASK_$e=x exits 2"; has "$out" "MERGE_TASK_$e='x'" "22. names MERGE_TASK_$e"
+done
+ok "$(ctr 5)" "$(b 1)" "22. the counter is still byte-unchanged"
+MERGE_TASK_REINTEGRATE_MAX=0 run 5 "$I" "$B"
+ok "$rc" 4 "22. a valid MERGE_TASK_REINTEGRATE_MAX=0 sets aside on the first new refusal"
+
+# 23. an abort never exits 0 and never reads ok. A gh that dies in a `set -u` abort, injected through BASH_ENV:
+#     the arithmetic form keeps $? (0 here: bash 3.2 then exited 0), the plain form exits 1 (read as a halt).
+printf 'gh() { : $((MT_ABORT_UNSET + 1)); }\n' > "$tmp/abort-arith.sh"
+printf 'gh() { : "$MT_ABORT_UNSET"; }\n' > "$tmp/abort-plain.sh"
+unset MT_ABORT_UNSET
+for f in arith plain; do
+  fresh; pair; mkpr 5 "$I"; seed 5 "$(b 1)"; printf 'ok\n' > "$tmp/repo/.claude/merge-task.status"
+  : > "$MT_STATE/gh.log"
+  out=$(BASH_ENV="$tmp/abort-$f.sh" PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$tmp/repo" 5 "$I" "$B" 2>&1); rc=$?
+  ok "$rc" 70 "23. a $f abort exits 70, never 0"; ok "$(sent)" "failed:abort" "23. $f abort: failed:abort, never ok"
+  ok "$(ctr 5)" "$(b 1)" "23. $f abort: the counter is byte-unchanged"; ok "$(nmerge)" 0 "23. $f abort: nothing merged"
+done
 
 echo; [ "$fail" -eq 0 ] && echo "merge-task integrated: ALL PASS" || echo "merge-task integrated: SOME FAILED"
 exit "$fail"

@@ -28,7 +28,9 @@
 #                                                                                          (own run or human)
 #   2  Usage or environment: bad arg count; a SHA not 40-hex; <pr> neither a positive number nor a
 #      github.com/<o>/<r>/pull/<N> URL; a URL whose <o>/<r> is not origin's; gh, git or python3 missing;
-#      not a repo; no origin; the counter cannot be persisted.          counter UNTOUCHED  lead: halt the
+#      not a repo; no origin; a MERGE_TASK_* override that is not a non-negative integer (at most 9
+#      digits); the counter cannot be persisted. Every one is before any GitHub call.
+#                                                                        counter UNTOUCHED  lead: halt the
 #                                                                                          rollout for a human
 #   3  BASE MOVED: origin/<default> ≠ the integrated base. Nothing merged.
 #                                                                        counter appended   lead: re-integrate
@@ -64,8 +66,14 @@
 #                                                                                          same args after a
 #                                                                                          backoff, bounded
 #                                                                                          by p12-9, then pause
-#   other  A signal (143 TERM, 130 INT, 129 HUP), a `set -u` abort (127 on bash 3.2), or anything that did
-#      not go through `finish`. Sentinel `failed:<rc>`, or `failed:abort` when $? is 0 without `finish`.
+#   70  Abort: the run ended outside `finish` and the signal traps, i.e. a defect such as a `set -u` abort.
+#      bash 3.2 exits those with 1, or (an unset name inside `$((…))`) with the last command's status, often
+#      0, which would read as "merged"; the EXIT trap turns every such exit into 70. Sentinel `failed:abort`.
+#                                                                        counter UNTOUCHED  lead: halt the
+#                                                                                          rollout for a human
+#                                                                                          (a re-run aborts
+#                                                                                          again)
+#   143 130 129  A signal: TERM, INT, HUP (their traps). Sentinel `failed:<rc>`.
 #                                                                        counter UNTOUCHED  lead: re-run
 #                                                                                          (idempotent)
 #
@@ -136,10 +144,13 @@
 #
 # Sentinel `<repoPath>/.claude/merge-task.status` (finding #5): a backgrounded `merge-task.sh … & wait; echo
 # done` wrapper reports the trailing command's exit, not the script's, masking a real halt as success. The
-# file is cleared right after the repo check and written by the EXIT trap: `ok` only when $? is 0 AND the
-# exit went through `finish 0`, `failed:<code>` otherwise (a URL or SHA exit 2 included). TERM, INT and HUP
-# traps exit 143, 130 and 129, so a killed run never reads `ok` (bash 3.2 reaches the EXIT trap with $?=0
-# after a SIGTERM during a foreground child).
+# lead calls once per PR, so the previous call's `ok` is always on disk: the file is cleared as soon as $1
+# resolves to a git repo, before the arg count is checked (a $1 that no longer resolves, git missing or a
+# broken checkout, has an existing sentinel there cleared too). It is written by the EXIT trap: `ok` only
+# when $? is 0 AND the exit went through `finish 0`; `failed:<code>` for every other finish (every exit 2
+# included) and for a signal; `failed:abort` for 70. TERM, INT and HUP traps exit 143, 130 and 129, so a
+# killed run never reads `ok` (bash 3.2 reaches the EXIT trap with $?=0 after a SIGTERM during a foreground
+# child).
 #
 # Kept from merge-wave.sh: required checks are the gate (UNSTABLE handling, infra reruns, an absent check
 # read as pending while CI is in flight, the CLEAN re-poll); the squash merge; the best-effort REMOTE branch
@@ -155,7 +166,7 @@ set -uo pipefail
 # Before both --self-test-* hooks and the main path (so ls-remote reads <repoPath>'s origin).
 for v in $(git rev-parse --local-env-vars 2>/dev/null); do case $v in GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS) ;; *) unset "$v" ;; esac; done
 
-# ---- tuning (the MERGE_TASK_* overrides exist for the hermetic tests) -------
+# ---- tuning (the MERGE_TASK_* overrides exist for the hermetic tests; validated before any GitHub call) ----
 CHECK_RETRY_MAX=10     # consecutive "no required checks AND no CI in flight" polls before halting
 CHECK_INTERVAL=${MERGE_TASK_CHECK_INTERVAL:-15}          # gh pr checks --watch refresh
 STATE_GUARD_MAX=8      # bound the state machine (checks -> CLEAN is ~2 hops)
@@ -451,39 +462,35 @@ if [ "${1:-}" = "--self-test-classify" ]; then
 fi
 
 # ---- args, environment, sentinel (no gh call precedes the end of this block) ----------------------------
-if [ "$#" -ne 4 ]; then
-  echo "usage: merge-task.sh <repoPath> <pr> <integrated-head-sha> <integrated-base-sha>" >&2
-  exit 2
-fi
-REPO_PATH="$1"; PR_ARG="$2"; IHEAD="$3"; IBASE="$4"
-if ! git -C "$REPO_PATH" rev-parse --git-dir >/dev/null 2>&1; then
-  command -v git >/dev/null 2>&1 || { echo "ERROR: git not found on PATH" >&2; exit 2; }
-  echo "ERROR: $REPO_PATH is not a git repo" >&2; exit 2
-fi
-
-# The result sentinel (see the header). FINAL_RC is set only by finish; PR and COUNTER only once known.
-SENTINEL="$REPO_PATH/.claude/merge-task.status"
-mkdir -p "$REPO_PATH/.claude" 2>/dev/null || true
-rm -f "$SENTINEL" 2>/dev/null || true
-FINAL_RC=''; PR=''; COUNTER=''; tmp=''
+# The EXIT trap and finish come first, so every exit below, the usage ones included, goes through them.
+# FINAL_RC is set only by finish, SIG_RC only by a signal trap; SENTINEL, PR and COUNTER only once known.
+SENTINEL=''; FINAL_RC=''; SIG_RC=''; PR=''; COUNTER=''; tmp=''
+ABORT_RC=70   # an exit outside finish and the signal traps: a defect, never 0 and never a table code
 on_exit() {  # EXIT trap — $? MUST be captured first, before any other command overwrites it
-  local code=$?
-  if [ "$code" -eq 0 ] && [ "$FINAL_RC" = 0 ]; then printf 'ok\n' > "$SENTINEL" 2>/dev/null || true
-  elif [ "$code" -eq 0 ]; then printf 'failed:abort\n' > "$SENTINEL" 2>/dev/null || true
-  else printf 'failed:%s\n' "$code" > "$SENTINEL" 2>/dev/null || true; fi
+  local code=$? out
+  if [ -n "$FINAL_RC" ] && [ "$FINAL_RC" = "$code" ]; then out=$code   # a deliberate exit, through finish
+  elif [ -n "$SIG_RC" ]; then out=$SIG_RC                               # TERM, INT or HUP
+  else out=$ABORT_RC; fi   # a `set -u` abort: bash 3.2 exits it with 1, or with the last status (often 0)
+  if [ -n "$SENTINEL" ]; then
+    case "$out" in
+      0) printf 'ok\n' > "$SENTINEL" 2>/dev/null || true ;;
+      "$ABORT_RC") printf 'failed:abort\n' > "$SENTINEL" 2>/dev/null || true ;;
+      *) printf 'failed:%s\n' "$out" > "$SENTINEL" 2>/dev/null || true ;;
+    esac
+  fi
   # The counter rule: only an exit that went through finish (FINAL_RC = $?) with a parsed PR touches it.
-  if [ -n "$FINAL_RC" ] && [ "$FINAL_RC" = "$code" ] && [ -n "$PR" ] && [ -n "$COUNTER" ]; then
-    case "$code" in
+  if [ "$out" = "$FINAL_RC" ] && [ "$out" = "$code" ] && [ -n "$PR" ] && [ -n "$COUNTER" ]; then
+    case "$out" in
       0|1|4|5|6|7)
         rm -f "$COUNTER" 2>/dev/null
         [ -e "$COUNTER" ] && echo "WARN: could not delete $COUNTER (a stale counter only sets the task aside sooner)." >&2 ;;
     esac
   fi
   [ -n "$tmp" ] && rm -rf "$tmp"
-  return 0
+  exit "$out"
 }
 trap on_exit EXIT
-trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP
+trap 'SIG_RC=143; exit 143' TERM; trap 'SIG_RC=130; exit 130' INT; trap 'SIG_RC=129; exit 129' HUP
 
 finish() {  # finish <rc> [message…] — every deliberate exit; never call it inside $(…) or a pipeline
   FINAL_RC="$1"; shift
@@ -493,11 +500,40 @@ finish() {  # finish <rc> [message…] — every deliberate exit; never call it 
   exit "$FINAL_RC"
 }
 
+# The result sentinel (see the header), cleared before the arg count: one call per PR means the previous
+# call's `ok` is always sitting there, so no exit may leave it standing. A $1 that is no longer a repo (git
+# missing, a broken checkout) still has an existing sentinel there replaced.
+REPO_PATH=${1:-}; IS_REPO=0
+if [ -n "$REPO_PATH" ] && git -C "$REPO_PATH" rev-parse --git-dir >/dev/null 2>&1; then
+  IS_REPO=1; SENTINEL="$REPO_PATH/.claude/merge-task.status"
+  mkdir -p "$REPO_PATH/.claude" 2>/dev/null || true
+elif [ -n "$REPO_PATH" ] && [ -f "$REPO_PATH/.claude/merge-task.status" ]; then
+  SENTINEL="$REPO_PATH/.claude/merge-task.status"
+fi
+[ -z "$SENTINEL" ] || rm -f "$SENTINEL" 2>/dev/null || true
+
+[ "$#" -eq 4 ] || finish 2 "usage: merge-task.sh <repoPath> <pr> <integrated-head-sha> <integrated-base-sha>"
+PR_ARG="$2"; IHEAD="$3"; IBASE="$4"
+if [ "$IS_REPO" != 1 ]; then
+  command -v git >/dev/null 2>&1 || finish 2 "ERROR: git not found on PATH"
+  finish 2 "ERROR: $REPO_PATH is not a git repo"
+fi
+
 sha_re='^[0-9a-f]{40}$'
 [[ $IHEAD =~ $sha_re ]] || finish 2 "ERROR: integrated head '$IHEAD' is not a 40-hex SHA"
 [[ $IBASE =~ $sha_re ]] || finish 2 "ERROR: integrated base '$IBASE' is not a 40-hex SHA"
 for t in gh git python3; do
   command -v "$t" >/dev/null 2>&1 || finish 2 "ERROR: $t not found on PATH"
+done
+# Every MERGE_TASK_* override must be a plain non-negative integer of at most 9 digits. Anything else would
+# make a bound's `[ -gt ]` error out as false (a non-numeric or overflowing cap never reaches 4: an endless 3)
+# or abort an `$((…))` (a leading 0 reads as octal), so it is a 2 before any GitHub call.
+int_re='^(0|[1-9][0-9]{0,8})$'
+for v in MERGE_TASK_CHECK_INTERVAL MERGE_TASK_STATE_INTERVAL MERGE_TASK_CONFIRM_INTERVAL MERGE_TASK_READ_TRIES \
+         MERGE_TASK_READ_INTERVAL MERGE_TASK_HEAD_LAG_INTERVAL MERGE_TASK_REINTEGRATE_MAX; do
+  val=${!v:-}
+  [ -z "$val" ] || [[ $val =~ $int_re ]] \
+    || finish 2 "ERROR: $v='$val' is not a non-negative integer (at most 9 digits) — nothing was read or merged."
 done
 
 ORIGIN_URL=$(git -C "$REPO_PATH" remote get-url origin 2>/dev/null) || finish 2 "ERROR: no 'origin' remote in $REPO_PATH"
