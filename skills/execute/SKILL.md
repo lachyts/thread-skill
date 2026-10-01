@@ -160,8 +160,10 @@ continuation or a Workflow-completion notification (both continue the current in
 runs, it runs directly after § 2.6, before the § 3/§ 4 stamps and before §4.5 *Reinstate*'s `clear-pause`.
 
 It runs at entry points and never per wave: `origin/<default>` moves with every merge, and a close-out
-committed on the local default branch mid-rollout must not halt an unattended run. `merge-wave.sh` names
-such commits after each wave, and the next entry at § 1 halts on them with the queued-aware remedy.
+committed on the local default branch mid-rollout must not halt an unattended run. Only one in `repoPath`
+itself is named per wave (`merge-wave.sh`'s local refresh reads `repoPath` alone); one committed in another
+clone of the set, such as the primary checkout of a self-rollout's separate clone, is named first when the
+next entry at § 1 halts on it with the queued-aware remedy.
 "Re-run § 2.5" keeps its meaning (§ 2.5 then § 2.6); it does not include this gate. **Pausing is exempt**,
 exactly as for § 2.5.
 

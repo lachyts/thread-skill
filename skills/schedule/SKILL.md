@@ -11,7 +11,7 @@ This skill is the **planner**. The rollout note it produces is a data artefact �
 
 ## Scope
 
-**Obsidian only**, plus § 0's remote, landing-register and pushed-base probes of the target repo; the pushed-base probe runs `git fetch` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving only remote-tracking refs. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
+**Obsidian only**, plus § 0's remote, landing-register and pushed-base probes of the target repo; the pushed-base probe runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving or pruning only remote-tracking refs. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
 
 ## Invocation forms
 
@@ -342,7 +342,7 @@ This skill does not execute anything. The rollout note it produces is read by th
 - Don't overwrite an existing rollout without prompting.
 - Don't touch tasks outside the target project (the `projects:` filter is strict).
 - Don't fill in `touches:` on tasks where you regex-detected files — that promotes a guess into authoritative metadata. Only the user does that. The **one** exception is the combined note authored in step 4.5: its `touches:` is the *union of file-sets the user already confirmed* for the members, so it's a derivation, not a fresh guess. (Separately, the `## File-sets` block in the **rollout note** — step 6 — also records confirmed file-sets, but that's rollout-note data the executor reads, never task frontmatter, so it doesn't touch this rule.)
-- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's remote, register and pushed-base checks (`git remote get-url`, `gh repo view`, `landing-register.py check`, and `git fetch` of `origin/<default>` and `origin/close/*` (pushed-base check), which moves only remote-tracking refs).
+- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's remote, register and pushed-base checks (`git remote get-url`, `gh repo view`, `landing-register.py check`, and `git fetch --prune` of `origin/<default>` and `origin/close/*` (pushed-base check), which moves or prunes only remote-tracking refs).
 
 ## Verification
 

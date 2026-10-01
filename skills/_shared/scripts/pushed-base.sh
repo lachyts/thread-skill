@@ -15,14 +15,18 @@
 # registry entry for another repo is skipped silently). execute § 2.6 forces a separate rollout clone exactly
 # when repoPath is a directory-source marketplace, so the registry names the primary checkout exactly then.
 #
-# Every member is fetched (`origin/<b>` and `origin/close/*`, remote-tracking refs only; any failure is exit
-# 2), then:
-#   Block — a member whose local <b> is ahead of origin/<b> blocks (exit 3), with its `log --oneline` and a
-#     remedy built from close's repo-state.sh line when that member's HEAD is <b> (queued / stranded / split,
-#     merge-wave's three patterns), else a generic one. Ahead commits touching only THREAD.md are a note.
+# Every member is fetched with --prune (`origin/<b>` and `origin/close/*`, remote-tracking refs only; any
+# failure is exit 2), then:
+#   Block — a member whose local <b> is ahead of origin/<b> blocks (exit 3) when some of that content is not
+#     on origin/<b>, with its `log --oneline` and a remedy built from close's repo-state.sh line when that
+#     member's HEAD is <b> (queued / stranded / split, merge-wave's three patterns), else a generic one; both
+#     name the reset that drops the local copies once landed. Ahead commits whose content is already on
+#     origin/<b> (`git cherry` all `-`, or no touched file differs: a squash or cherry-picked PR) are a note
+#     naming that reset; ahead commits touching only THREAD.md are a note. An ahead set touching no file blocks.
 #   Warn — each cited path on its own (never batched): a relative path in every member, an absolute or ~/
 #     one in the member containing it (else a note). Per (member, path): `diff HEAD` + `diff --cached`
-#     (uncommitted), `diff origin/<b>...HEAD` three-dot (committed on the checked-out branch) and
+#     (uncommitted), `diff origin/<b>...HEAD` three-dot AND `diff origin/<b> HEAD` two-dot (committed on the
+#     checked-out branch and still different from origin, so a squash-merged branch is silent) and
 #     `ls-files --others --exclude-standard` (untracked). The work tree is never diffed against origin/<b>,
 #     so a checkout behind origin stays silent. A git failure marks only that (member, path) pair. Branches
 #     that are not checked out are not read (local <b> is covered by the block). THREAD.md is dropped.
@@ -99,33 +103,69 @@ EOF
 fi
 
 # ---- fetch every member: origin/<b> and origin/close/* (remote-tracking refs only) ---------------------
+# --prune with explicit refspecs touches only those destinations: a close/… branch deleted on origin (its
+# landing PR merged or closed) drops its tracking ref, so repo-state never reads its commits as queued.
 for c in "${members[@]}"; do
-  if ! e=$(git -C "$c" fetch -q origin "+refs/heads/$b:refs/remotes/origin/$b" "+refs/heads/close/*:refs/remotes/origin/close/*" 2>&1); then
+  if ! e=$(git -C "$c" fetch -q --prune origin "+refs/heads/$b:refs/remotes/origin/$b" "+refs/heads/close/*:refs/remotes/origin/close/*" 2>&1); then
     echo "pushed-base: fetch failed in $c: $(printf '%s\n' "$e" | head -n 1)" >&2
     exit 2
   fi
 done
 
 # ---- block: a member's local <b> ahead of origin/<b> --------------------------------------------------
+# Ancestry alone over-counts: a commit landed by a squash or cherry-picked PR stays "ahead" for ever. So an
+# ahead member blocks only when some of its content is not on origin/<b>: `git cherry` marks every ahead
+# commit `-` (patch-equivalent upstream), or no file the ahead commits touch differs between origin/<b> and
+# local <b> (a multi-commit squash). THREAD.md is set aside first. An ahead set that touches no file (empty
+# commits, net-zero changes) still blocks: there is no content to compare, so the gate stays conservative.
 blocked=0 broken=0
 up="refs/remotes/origin/$b"
+reset_hint() {  # reset_hint <member>: the command that drops local <b>'s landed commits
+  if [ "$(git -C "$1" symbolic-ref -q HEAD 2>/dev/null)" = "refs/heads/$b" ]; then
+    printf 'git -C %q reset --keep origin/%s' "$1" "$b"
+  else
+    printf 'git -C %q branch -f %s origin/%s' "$1" "$b" "$b"
+  fi
+}
 for c in "${members[@]}"; do
   git -C "$c" rev-parse -q --verify "refs/heads/$b" >/dev/null 2>&1 || continue
   n=$(git -C "$c" rev-list --count "$up..refs/heads/$b" 2>&1) || {
     echo "pushed-base: cannot count $b against origin/$b in $c: $(printf '%s\n' "$n" | head -n 1)" >&2; broken=1; continue; }
   [ "$n" -gt 0 ] 2>/dev/null || continue
-  only_thread=0
-  if files=$(git -C "$c" -c core.quotePath=false diff --no-renames --name-only "$up...refs/heads/$b" 2>/dev/null) && [ -n "$files" ]; then
-    only_thread=1
-    while IFS= read -r f; do [ "${f##*/}" = THREAD.md ] || only_thread=0; done <<EOF
-$files
-EOF
+  # Every ahead commit patch-equivalent to one on origin/<b>: landed by a cherry-pick or one-commit squash.
+  if ch=$(git -C "$c" cherry "$up" "refs/heads/$b" 2>/dev/null) && [ -n "$ch" ] \
+     && ! printf '%s\n' "$ch" | grep -q '^+'; then
+    note "local $b in $c is $n commit(s) ahead of origin/$b, but each is already on origin/$b by content (landed by a squash or cherry-picked PR): not a blocker; drop them with \`$(reset_hint "$c")\`"
+    continue
   fi
-  if [ "$only_thread" = 1 ]; then
-    note "local $b in $c is $n commit(s) ahead of origin/$b, touching only THREAD.md: not a blocker (agents never read THREAD.md)"
+  # The files the ahead commits touch (merge-base..<b>), and which of them differ from origin/<b> now.
+  touched=() differ=() other=0
+  while IFS= read -r -d '' f; do touched+=("$f"); done < <(git -C "$c" diff --no-renames --name-only -z "$up...refs/heads/$b" 2>/dev/null)
+  if [ ${#touched[@]} -gt 0 ]; then
+    # --quiet first: its exit status is the answer (0 same, 1 differs, else a failure, which blocks).
+    git -C "$c" --literal-pathspecs diff --quiet --no-renames "$up" "refs/heads/$b" -- "${touched[@]}" >/dev/null 2>&1; drc=$?
+    if [ "$drc" = 1 ]; then
+      while IFS= read -r -d '' f; do differ+=("$f"); done < <(git -C "$c" --literal-pathspecs diff --no-renames --name-only -z "$up" "refs/heads/$b" -- "${touched[@]}" 2>/dev/null)
+      [ ${#differ[@]} -gt 0 ] || other=1
+      for f in ${differ[@]+"${differ[@]}"}; do [ "${f##*/}" = THREAD.md ] || other=1; done
+    elif [ "$drc" != 0 ]; then
+      other=1
+    fi
+  fi
+  if [ ${#touched[@]} -gt 0 ] && [ "$other" = 0 ]; then
+    only_thread=1
+    for f in "${touched[@]}"; do [ "${f##*/}" = THREAD.md ] || only_thread=0; done
+    if [ "$only_thread" = 1 ]; then
+      note "local $b in $c is $n commit(s) ahead of origin/$b, touching only THREAD.md: not a blocker (agents never read THREAD.md)"
+    elif [ ${#differ[@]} -gt 0 ]; then
+      note "local $b in $c is $n commit(s) ahead of origin/$b, but beyond THREAD.md their content is already on origin/$b (landed by a squash or cherry-picked PR): not a blocker (agents never read THREAD.md)"
+    else
+      note "local $b in $c is $n commit(s) ahead of origin/$b, but their content is already on origin/$b (landed by a squash or cherry-picked PR): not a blocker; drop them with \`$(reset_hint "$c")\`"
+    fi
     continue
   fi
   blocked=1
+  rh=$(reset_hint "$c")
   echo "pushed-base: local $b in $c is $n commit(s) ahead of origin/$b: rollout worktrees branch from origin/$b, so agents will not see them:" >&2
   git -C "$c" log --oneline --no-decorate "$up..refs/heads/$b" 2>&1 | sed 's/^/  /' >&2
   line=''
@@ -136,12 +176,12 @@ EOF
   if [ -n "$line" ]; then
     echo "pushed-base: $line" >&2
     case "$line" in
-      *"queued in"*", "*" stranded") echo "pushed-base: remedy: wait for the landing PR for the queued ones; land the stranded ones on origin/$b by PR (ADR 0025), then re-run" >&2 ;;
+      *"queued in"*", "*" stranded") echo "pushed-base: remedy: wait for the landing PR for the queued ones; land the stranded ones on origin/$b by PR (ADR 0025), then re-run; once their content is on origin/$b (a squash merge included), \`$rh\` drops the local copies" >&2 ;;
       *"queued in"*) echo "pushed-base: remedy: a close/… landing PR already carries them: wait for GitHub to merge it, then re-run; do not open a second PR" >&2 ;;
-      *) echo "pushed-base: remedy: land them on origin/$b by PR first ($b is PR-only, ADR 0025), then re-run" >&2 ;;
+      *) echo "pushed-base: remedy: land them on origin/$b by PR first ($b is PR-only, ADR 0025), then re-run; once their content is on origin/$b (a squash merge included), \`$rh\` drops the local copies" >&2 ;;
     esac
   else
-    echo "pushed-base: remedy: land them on origin/$b by PR first (ADR 0025); if a close/… landing PR already carries them (git branch -r --contains <sha>), wait for it to merge and re-run instead" >&2
+    echo "pushed-base: remedy: land them on origin/$b by PR first (ADR 0025); if a close/… landing PR already carries them (git branch -r --contains <sha>), wait for it to merge and re-run instead; once their content is on origin/$b (a squash merge included), \`$rh\` drops the local copies" >&2
   fi
 done
 [ "$blocked" = 0 ] || exit 3
@@ -169,15 +209,26 @@ cant() {  # cant <path> <loc> <git output>: that (member, path) pair only
   warns="$warns
 pushed-base: WARN: $1$2: could not compare ($(printf '%s\n' "$3" | head -n 1))"
 }
+keep_in() {  # keep_in <lines> <allowed lines>: the non-empty lines of the first that appear in the second
+  K="$2" awk 'BEGIN { n = split(ENVIRON["K"], a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") k[a[i]] = 1 }
+              $0 != "" && ($0 in k)' <<EOF
+$1
+EOF
+}
 compare() {  # compare <member> <relpath>
-  local m="$1" p="$2" loc='' o br f kind what
+  local m="$1" p="$2" loc='' o o2 br f kind what
   [ "$m" = "$top" ] || loc=" in $m"
   br=$(git -C "$m" symbolic-ref -q --short HEAD 2>/dev/null) || br='(detached HEAD)'
   for kind in head cached branch untracked; do
     case $kind in
       head)      o=$(git -C "$m" -c core.quotePath=false diff --no-renames --name-only HEAD -- "$p" 2>&1) ;;
       cached)    o=$(git -C "$m" -c core.quotePath=false diff --no-renames --name-only --cached -- "$p" 2>&1) ;;
-      branch)    o=$(git -C "$m" -c core.quotePath=false diff --no-renames --name-only "$up...HEAD" -- "$p" 2>&1) ;;
+      branch)    # committed on the branch (three-dot) AND still different from origin/<b> (two-dot): a branch
+                 # whose PR was squash-merged, like a checkout merely behind, stays silent
+                 o2=''
+                 o=$(git -C "$m" -c core.quotePath=false diff --no-renames --name-only "$up...HEAD" -- "$p" 2>&1) \
+                   && { o2=$(git -C "$m" -c core.quotePath=false diff --no-renames --name-only "$up" HEAD -- "$p" 2>&1) || { o=$o2; false; }; } \
+                   && o=$(keep_in "$o" "$o2") ;;
       untracked) o=$(git -C "$m" -c core.quotePath=false ls-files --others --exclude-standard -- "$p" 2>&1) ;;
     esac || { cant "$p" "$loc" "$o"; return 0; }
     [ -n "$o" ] || continue

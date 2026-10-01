@@ -109,6 +109,7 @@ has "$err" "local master in $C is 2 commit(s) ahead of origin/master" "2. … th
 has "$err" "stranded" "2. … repo-state's stranded line"
 has "$err" "land them on origin/master by PR" "2. … the land-by-PR remedy"
 has "$err" "ADR 0025" "2. … citing ADR 0025"
+has "$err" "git -C $C reset --keep origin/master\` drops the local copies" "2. … naming the reset for once they land (master checked out)"
 
 # 3. stale tracking ref: the fetch refreshes it
 fresh
@@ -164,6 +165,16 @@ has "$err" "1 queued in close/2026-10-01-x-abc, 1 stranded" "7. … repo-state's
 has "$err" "wait for" "7. … wait for the queued ones"
 has "$err" "land the stranded ones on origin/master by PR" "7. … land the stranded ones"
 
+# 7b. the close/… branch deleted on origin (its PR closed unmerged): the fetch prunes the stale tracking ref
+g -C "$S" push -q origin --delete close/2026-10-01-x-abc
+ok "$(git -C "$C" rev-parse -q --verify refs/remotes/origin/close/2026-10-01-x-abc >/dev/null && echo stale)" stale "7b. the clone still holds the deleted close ref (precondition)"
+run "$C" ""
+ok "$rc" 3 "7b. close/… deleted on origin → still 3"
+has "$err" "2 commit(s) not on origin/master — stranded" "7b. … the line flips to stranded (the fetch pruned the close ref)"
+lacks "$err" "queued in" "7b. … nothing reads as queued"
+lacks "$err" "do not open a second PR" "7b. … no wait-for-the-landing-PR remedy"
+ok "$(git -C "$C" rev-parse -q --verify refs/remotes/origin/close/2026-10-01-x-abc || echo gone)" gone "7b. … the stale tracking ref is gone"
+
 # 8. HEAD on a feature branch, master ahead → generic remedy
 fresh
 commit "$C" "adr on master" docs/adr/0018-x.md
@@ -173,6 +184,7 @@ ok "$rc" 3 "8. HEAD on feat, master ahead → 3"
 has "$err" "adr on master" "8. … lists master's commit"
 has "$err" "git branch -r --contains" "8. … the generic remedy"
 has "$err" "close/" "8. … naming close/"
+has "$err" "git -C $C branch -f master origin/master\` drops the local copies" "8. … naming the branch -f reset (master not checked out)"
 
 # 9. HEAD on a feature branch, master in sync → 0
 fresh
@@ -216,6 +228,55 @@ commit "$C" "adr" docs/adr/0018-x.md
 run "$C" ""
 ok "$rc" 3 "13. origin/HEAD dangling (gone), ahead → 3"
 has "$err" "git branch -r --contains" "13. … the generic remedy"
+
+# 13b. landed by a separate commit with identical content (a one-commit squash): a note naming the reset
+fresh
+commit "$C" "add adr 0031" docs/adr/0031-x.md
+mkdir -p "$S/docs/adr"; cp "$C/docs/adr/0031-x.md" "$S/docs/adr/0031-x.md"
+g -C "$S" add -A; g -C "$S" commit -q -m "add adr 0031 (#99)"; g -C "$S" push -q origin master
+run "$C" ""
+ok "$(git -C "$C" rev-list --count origin/master..master)" 1 "13b. local master still ahead by ancestry (precondition)"
+ok "$rc|$out" "0|pushed" "13b. landed by squash (cherry -) → 0"
+has "$err" "pushed-base: note: local master in $C is 1 commit(s) ahead of origin/master, but each is already on origin/master by content" "13b. … a note, not a block"
+has "$err" "git -C $C reset --keep origin/master" "13b. … naming reset --keep (master checked out)"
+lacks "$err" "stranded" "13b. … no stranded line"
+
+# 13c. two local commits landed as one squash commit (cherry +, but no touched file differs); HEAD on feat
+fresh
+commit "$C" "adr part 1" docs/adr/0031-x.md
+commit "$C" "adr part 2" docs/adr/0031-x.md notes.md
+mkdir -p "$S/docs/adr"; cp "$C/docs/adr/0031-x.md" "$S/docs/adr/0031-x.md"; cp "$C/notes.md" "$S/notes.md"
+g -C "$S" add -A; g -C "$S" commit -q -m "adr 0031 (#100)"; g -C "$S" push -q origin master
+commit "$S" "later upstream work" up.md; g -C "$S" push -q origin master
+g -C "$C" checkout -q -b feat
+run "$C" ""
+ok "$(git -C "$C" fetch -q origin; git -C "$C" cherry origin/master master | grep -c '^+')" 2 "13c. git cherry still marks both + (precondition)"
+ok "$rc|$out" "0|pushed" "13c. multi-commit squash → 0"
+has "$err" "local master in $C is 2 commit(s) ahead of origin/master, but their content is already on origin/master" "13c. … a note"
+has "$err" "git -C $C branch -f master origin/master" "13c. … naming branch -f (master not checked out)"
+
+# 13d. one landed by squash, one not → 3; landed content plus a THREAD.md-only change → a note
+g -C "$C" checkout -q master
+commit "$C" "stranded adr" docs/adr/0032-z.md
+run "$C" ""
+ok "$rc" 3 "13d. squash-landed plus a stranded ADR → 3"
+has "$err" "3 commit(s) ahead" "13d. … the header counts every ahead commit"
+g -C "$C" reset -q --hard HEAD~1
+commit "$C" "thread close-out" THREAD.md
+run "$C" ""
+ok "$rc|$out" "0|pushed" "13d. squash-landed plus a THREAD.md-only commit → 0"
+has "$err" "beyond THREAD.md their content is already on origin/master" "13d. … the mixed note"
+lacks "$err" "reset --keep" "13d. … with no reset hint (it would drop the THREAD.md commit)"
+
+# 13e. landed, then changed again upstream: the touched file differs now → still 3 (conservative)
+fresh
+commit "$C" "adr part 1" docs/adr/0031-x.md
+commit "$C" "adr part 2" docs/adr/0031-x.md
+mkdir -p "$S/docs/adr"; cp "$C/docs/adr/0031-x.md" "$S/docs/adr/0031-x.md"
+g -C "$S" add -A; g -C "$S" commit -q -m "adr 0031 (#101)"; commit "$S" "amend adr upstream" docs/adr/0031-x.md
+g -C "$S" push -q origin master
+run "$C" ""
+ok "$rc" 3 "13e. squash-landed then edited upstream → 3 (content differs, conservative)"
 
 # ======== the clone set ==================================================================================
 # 14. rollout clone in sync, primary (same origin) ahead with an ADR, given via --also
@@ -262,15 +323,19 @@ for a in "$tmp/plain" "$tmp/nope" "$Q"; do
   has "$err" "pushed-base: note: $a is not a clone of o/r: skipped" "17. … noted as not a clone of o/r"
 done
 
-# 18. de-duplication: repoPath again, a symlink to it, and the primary via --also AND the registry
+# 18. de-duplication: repoPath again, a symlink to it, and the primary via --also AND the registry. C1's master
+# carries a THREAD.md-only commit, so each member prints one note: a duplicate member would print two.
+commit "$C1" "c1 thread note" THREAD.md
 ln -s "$C1" "$tmp/c1link"
-run "$C1" "$C1"; ok "$rc|$out|$err" "0|pushed|" "18. --also repoPath itself → deduplicated, silent"
-run "$C1" "$tmp/c1link"; ok "$rc|$out|$err" "0|pushed|" "18. --also a symlink to repoPath → deduplicated, silent"
-P="$tmp/p18"; mkclone "$O1" "$P"; commit "$P" "thread note" THREAD.md
-ln -s "$P" "$tmp/p18link"; write_reg "$P"
-run "$C1" "$tmp/p18link"
+run "$C1" "$C1"; ok "$rc|$out" "0|pushed" "18. --also repoPath itself → 0"
+ok "$(count "$err" "local master in $C1 is 1 commit(s) ahead of origin/master, touching only THREAD.md")" 1 "18. … deduplicated: its note printed once"
+run "$C1" "$tmp/c1link"; ok "$rc|$out" "0|pushed" "18. --also a symlink to repoPath → 0"
+ok "$(count "$err" "local master in $C1 is 1 commit(s) ahead of origin/master, touching only THREAD.md")" 1 "18. … deduplicated: its note printed once"
+P="$tmp/pdedup"; mkclone "$O1" "$P"; commit "$P" "thread note" THREAD.md
+ln -s "$P" "$tmp/pdeduplink"; write_reg "$P"
+run "$C1" "$tmp/pdeduplink"
 ok "$rc" 0 "18. primary via --also (symlink) and the registry → 0"
-ok "$(count "$err" "touching only THREAD.md")" 1 "18. … its note printed once"
+ok "$(count "$err" "local master in $P is 1 commit(s) ahead of origin/master, touching only THREAD.md")" 1 "18. … its note printed once"
 rm -f "$reg"
 
 # 19. the primary's fetch fails while repoPath's works → 2 naming the primary
@@ -281,7 +346,7 @@ ok "$rc|${out:-<empty>}" "2|<empty>" "19. the primary's fetch fails → 2"
 has "$err" "pushed-base: fetch failed in $P" "19. … naming the primary"
 
 # 20. a malformed registry: the reader's warning, and the run continues on the remaining members
-P="$tmp/p20"; mkclone "$O1" "$P"; commit "$P" "primary adr" docs/adr/0018-x.md
+P="$tmp/pmalformed"; mkclone "$O1" "$P"; commit "$P" "primary adr" docs/adr/0018-x.md
 echo '{ not json' > "$reg"
 run "$C1" "$P"
 ok "$rc" 3 "20. malformed registry, primary via --also ahead → 3"
@@ -337,6 +402,19 @@ fresh
 g -C "$C" checkout -q -b feat; commit "$C" "feature adr edit" docs/adr/0026-y.md
 run "$C" "" docs/adr/0026-y.md
 has "$err" "WARN: docs/adr/0026-y.md: committed on the checked-out branch feat but not on origin/master" "27. committed on the checked-out branch → WARN"
+
+# 27b. the feature branch's PR squash-merged upstream, the branch still checked out → silent
+fresh
+g -C "$C" checkout -q -b feat; commit "$C" "add adr 0031" docs/adr/0031-x.md; commit "$C" "tweak adr 0026" docs/adr/0026-y.md
+cp "$C/docs/adr/0031-x.md" "$S/docs/adr/0031-x.md"; cp "$C/docs/adr/0026-y.md" "$S/docs/adr/0026-y.md"
+g -C "$S" add -A; g -C "$S" commit -q -m "adr 0031 (#102)"; g -C "$S" push -q origin master
+run "$C" "" docs/adr/0031-x.md docs/adr/0026-y.md
+ok "$(git -C "$C" diff --name-only origin/master...HEAD -- docs/adr | wc -l | tr -d ' ')" 2 "27b. the three-dot diff still lists both (precondition)"
+ok "$rc|$out|$err" "0|pushed|" "27b. a squash-merged branch still checked out → silent"
+commit "$C" "post-merge edit" docs/adr/0031-x.md
+run "$C" "" docs/adr/0031-x.md docs/adr/0026-y.md
+has "$err" "WARN: docs/adr/0031-x.md: committed on the checked-out branch feat but not on origin/master" "27b. … a later edit on the branch warns"
+lacks "$err" "0026-y.md" "27b. … the landed file stays silent"
 
 # 28. committed on a branch that is not checked out → silent (the documented limit)
 fresh

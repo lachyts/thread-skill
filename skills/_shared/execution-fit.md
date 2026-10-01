@@ -152,31 +152,41 @@ directory-source marketplace checkout, so the registry names the primary checkou
 clone exists, and a close-out committed in the primary is still seen.
 
 - **Exit 0** prints `pushed`; any notes and WARN lines on stderr pass through to the user.
-- **Exit 3**: some known clone's local `<default>` is ahead of `origin/<default>`. Stop, and print the
-  stderr verbatim: it lists the commits (`git log --oneline origin/<default>..<default>`) and the remedy.
-  The remedy is to land them on `origin/<default>` by PR first (the default branch is PR-only, ADR 0025).
-  When that clone's HEAD is the default branch, close's `repo-state.sh` line is reused with merge-wave's
-  wording: commits **queued** in a `close/…` landing PR mean wait for GitHub to merge it (never a second
-  PR); **stranded** ones must be landed; a split names both. Otherwise the remedy is the generic one.
+- **Exit 3**: some known clone's local `<default>` is ahead of `origin/<default>` with content that
+  `origin/<default>` lacks. Stop, and print the stderr verbatim: it lists the commits
+  (`git log --oneline origin/<default>..<default>`) and the remedy. The remedy is to land them on
+  `origin/<default>` by PR first (the default branch is PR-only, ADR 0025), then drop the local copies
+  with `git reset --keep origin/<default>` (that clone on the default branch) or
+  `git branch -f <default> origin/<default>` (not checked out). When that clone's HEAD is the default
+  branch, close's `repo-state.sh` line is reused with merge-wave's wording: commits **queued** in a
+  `close/…` landing PR mean wait for GitHub to merge it (never a second PR); **stranded** ones must be
+  landed; a split names both. Otherwise the remedy is the generic one.
+  Ahead by ancestry alone is not a block: commits whose content already reached `origin/<default>` by a
+  squash or cherry-picked PR (every one marked `-` by `git cherry`, or no file they touch differs from
+  `origin/<default>`) are a note naming that reset. An ahead set that touches no file still blocks.
 - **Exit 2**: the check itself failed (a fetch, the default-branch lookup, a missing script). Stop, and
   print the stderr verbatim.
 
 Each cited path is compared on its own, never batched: a relative path in every clone of the set, an
 absolute or `~/` path in the clone that contains it (anything else, such as a vault note, is a note and is
 never compared). For each pair it warns on an **uncommitted change** (`git diff HEAD` plus
-`git diff --cached`), a file **committed on the checked-out branch** but not on `origin/<default>`
-(`git diff origin/<default>...HEAD`, three-dot, so a checkout that is merely behind stays silent) and an
-**untracked** file (`git ls-files --others --exclude-standard`). Other local branches that are not checked
-out are never read; the local `<default>` is covered by the block. A git failure on one pair is a WARN for
-that pair only. THREAD.md is out of scope both ways: a cited THREAD.md is dropped, and ahead commits that
+`git diff --cached`), a file **committed on the checked-out branch** and still different on
+`origin/<default>` (in `git diff origin/<default>...HEAD`, three-dot, so a checkout that is merely behind
+stays silent, and in `git diff origin/<default> HEAD`, so a branch whose PR was squash-merged stays
+silent too) and an **untracked** file (`git ls-files --others --exclude-standard`). Other local branches
+that are not checked out are never read; the local `<default>` is covered by the block. A git failure on
+one pair is a WARN for that pair only. THREAD.md is out of scope both ways: a cited THREAD.md is dropped, and ahead commits that
 touch only THREAD.md are a note, not a block, since agents never read it.
 
-The check runs `git fetch` of `origin/<default>` and `origin/close/*` in every known clone, so it moves
-remote-tracking refs only: no working tree, branch or HEAD changes. It runs from schedule § 0 with no
-cited paths, again after schedule's step-2 confirm with the cited paths, and from execute § 2.7 at entry
-points only, never per wave: `origin/<default>` moves with every merge, and a close-out committed
-mid-rollout must not halt an unattended run (merge-wave names those commits after each wave, and the next
-entry halts on them).
+The check runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in every known clone, so it
+moves remote-tracking refs only: no working tree, branch or HEAD changes. The prune drops the tracking ref
+of a `close/…` branch deleted on origin, so its commits read stranded, never queued for ever. It runs
+from schedule § 0 with no cited paths, again after schedule's step-2 confirm with the cited paths, and
+from execute § 2.7 at entry points only, never per wave: `origin/<default>` moves with every merge, and a close-out committed
+mid-rollout must not halt an unattended run. Nothing names such a commit per wave in the general case:
+merge-wave's local refresh reads only the rollout's repo path, so it names one committed there, but one
+committed in another clone of the set (the primary checkout of a self-rollout's separate clone) first
+surfaces when the next entry halts on it.
 
 **Engine path.** The Workflow tool may refuse the plugin-cache `scriptPath`. That
 depends on the harness and cannot be checked at schedule time; execute § 5
