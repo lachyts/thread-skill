@@ -189,9 +189,13 @@ the gate is empty), carry straight on to § 6.
   § 0 finishes an interrupted supersede on its own.
   - **Schedule stopped at § 0** (one of its checks refused; for this check, another project's
     rollout on the repo, one that has run and is not paused, or two at once) → schedule stamped
-    no task and wrote no note, so orient must schedule nothing and touch nothing else. The phases
-    are written and wait; orient reports schedule's remedy and names the next move:
-    `/thread:status` (then `repair`) for a stuck rollout, or a later `/thread:orient <project>`
+    no task and wrote no new rollout note, so orient must schedule nothing and touch nothing else.
+    The one exception is schedule's own: a `file` move or an `interrupted` finish that § 0 made
+    before the refusal stays, since it completes a supersede an earlier run confirmed (an
+    `interrupted` finish stamps the incomplete note, re-points task notes to it and closes out the
+    prior rollout). Orient reports any such finish from schedule's output, never as "nothing
+    written". The phases are written and wait; orient reports schedule's remedy and names the next
+    move: `/thread:status` (then `repair`) for a stuck rollout, or a later `/thread:orient <project>`
     (Steer only is enough) once the repo is free.
   - **Uncommitted grill docs.** If R3's grill left `CONTEXT.md` or `docs/adr/` changes
     uncommitted in the target repo, schedule nothing there either: every worktree branches from

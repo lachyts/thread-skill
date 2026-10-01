@@ -80,6 +80,16 @@ function scheduleCall(s6) {
   return [...sentence.matchAll(/`([^`]+)`/g)].some((m) => m[1].includes('--regenerate') && m[1].includes('--tasks'))
 }
 
+// Schedule § 0 names one exception to "stop before step 1, nothing written": a `file` move or an
+// `interrupted` finish made before a later refusal stays (the finish re-points task notes and closes out
+// the prior rollout). Orient's stop branch must mirror it, not claim nothing was written.
+test('orient\'s § 0-stop branch mirrors schedule\'s file/interrupted exception', () => {
+  const stop = S(6).slice(S(6).indexOf('**Schedule stopped at § 0**'), S(6).indexOf('**Uncommitted grill docs.**'))
+  assertHas(stop, 'orient § 6 stop branch', [/`file` move or an `interrupted` finish/, /re-points task notes/,
+    /reports any such finish/])
+  assert.doesNotMatch(stop, /wrote no note\b/, 'orient § 6 says schedule wrote no note at all')
+})
+
 test('orient calls schedule with --regenerate --tasks in the same span', () => {
   assert.ok(scheduleCall(S(6)), 'orient § 6 does not call schedule with `--regenerate --tasks <members>`')
 })
