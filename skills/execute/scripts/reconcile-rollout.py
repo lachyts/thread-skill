@@ -11,9 +11,10 @@ Subcommands:
 
   reconcile   Read the workflow result JSON ({rolloutSlug, tasks:[...]}) and write each task note's
               frontmatter + its feedback section. Idempotent (safe to re-run on resume). A `review` row
-              whose scope is read-only and that carries no PR is written `status: done`: a read-only task
-              is done when its review approves and never enters Integration. Every row removes
-              `integrating:` (the run that produced the row ended any Integration).
+              whose scope is read-only and that carries no PR is written `status: done` and stamped
+              `merged:` (the first stamp wins): a read-only task is done when its review approves and
+              never enters Integration. Every row removes `integrating:` (the run that produced the row
+              ended any Integration).
 
   next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start
               and restart within the parallel ceiling, every held task with its reason, the running,
@@ -34,7 +35,7 @@ Subcommands:
               Stamps `merged: <time>` on a PR task with no stamp yet and removes `integrating:`. Refuses
               any note at another status — a blocked/unmerged task can never be swept to done.
               Idempotent (already-done = no-op). Read-only tasks never need it: reconcile writes them done
-              on approval.
+              (and stamps `merged:`) on approval.
 
   resume      A task whose PR merged but whose note was never marked (p6-8): for each linked note that
               is not done, merged or dropped and carries `pr:`, ask gh for the PR's state and base. A PR
@@ -1002,6 +1003,11 @@ def cmd_reconcile(args) -> int:
         scope = _scalar(task.get("scope")).lower() or _scope(note)
         note_status = "done" if (status == "review" and not pr and scope == "read-only") else status
         note.set("status", note_status)
+        # Its approval is its completion, so it is stamped `merged:` as a PR task is at its merge (the
+        # first stamp wins): its duration then counts in the timeline, and a read-only task finishing
+        # last ends the rollout's elapsed time.
+        if note_status == "done" and not _scalar(note.get("merged")):
+            note.set("merged", _stamp(now))
         # Whatever Integration this task was in, the run that produced this row ended it.
         note.remove("integrating")
 

@@ -296,19 +296,24 @@ ok "$(q "$J" '[d["halt"], d["progress"]]')" '["empty","progress: 0/0 merged"]' "
 # ── a read-only task is done on approval ─────────────────────────────────────────────────────────
 scen read-only
 mkro $'- [[r]]\n- [[b]]\n- [[w]]\n- [[z]]'
-mkt r in_progress 'scope: read-only'
+mkt r in_progress 'scope: read-only' 'started: 2026-10-02T13:05+00:00'
 mkt b open 'depends-on: [[r]]'
 mkt w review 'scope: read-only'
 mkt z review 'scope: cross-cutting'
 printf '{"rolloutSlug":"ro","tasks":[{"slug":"r","status":"review","prUrl":"","reviewRoundsUsed":0,"planRoundsUsed":0}]}' > "$D/res.json"
-python3 "$SCRIPT" reconcile --result "$D/res.json" --tasks-dir "$D" >/dev/null || { echo "FAIL - reconcile exit"; fail=1; }
+python3 "$SCRIPT" reconcile --result "$D/res.json" --tasks-dir "$D" --now "$NOW" >/dev/null || { echo "FAIL - reconcile exit"; fail=1; }
 ok "$(fm r status)" "status: done" "reconcile: a read-only review row with no PR is written done"
-ok "$(fm r merged)" "<none>" "reconcile: … with no merged: stamp"
+ok "$(fm r merged)" "merged: 2026-10-02T14:05+00:00" "reconcile: … stamped merged: at its approval (its completion time)"
+python3 "$SCRIPT" reconcile --result "$D/res.json" --tasks-dir "$D" --now 2026-10-02T16:00:00Z >/dev/null
+ok "$(fm r merged)" "merged: 2026-10-02T14:05+00:00" "reconcile: … a re-reconcile keeps the first stamp"
 J=$(nxt)
 ok "$(q "$J" 'd["start"]')" '["b"]' "next: its dependant starts"
 ok "$(q "$J" 'd["setAside"]')" '[{"setAsideAt":"run","slug":"z","status":"review"}]' "next: review without a PR on another scope is set aside"
 J=$(st)
 ok "$(q "$J" '{t["slug"]: t["queueState"] for t in d["tasks"]}')" '{"b":"queued","r":"merged","w":"merged","z":"set-aside"}' "status: a legacy read-only review counts as merged"
+ok "$(q "$J" '[d["timeline"]["tasks"], d["timeline"]["avgTaskMinutes"], d["timeline"]["lastMerged"]]')" \
+  '[[{"durationMinutes":60,"merged":"2026-10-02T14:05+00:00","slug":"r","started":"2026-10-02T13:05+00:00"}],60.0,"2026-10-02T14:05+00:00"]' \
+  "status: the read-only task's duration counts in the timeline"
 
 # ── stamps ───────────────────────────────────────────────────────────────────────────────────────
 scen stamps

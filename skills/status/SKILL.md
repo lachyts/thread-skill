@@ -63,7 +63,8 @@ too; a `review` + `pr:` note without the stamp is awaiting Integration. A set-as
 feedback section matching the note's status (the whole section when it has no runs).
 
 `timeline` is the progress/ETA block, computed from the per-task `started:` / `merged:` stamps
-(`mark-started` as each task starts; `mark-done` or `resume` as its PR merges): per-task `{ slug,
+(`mark-started` as each task starts; `mark-done` or `resume` as its PR merges; `reconcile` as a
+read-only task's review approves, its completion): per-task `{ slug,
 started, merged, durationMinutes }` sorted by start, plus `firstStarted`, `lastMerged`,
 `elapsedMinutes`/`elapsedLabel`, `avgTaskMinutes` (the mean task duration, over `durationsUsed` tasks),
 `remainingEstimateMinutes`/`remainingLabel` (always a `~… (rough)` figure — the mean × the ceiling-sized
