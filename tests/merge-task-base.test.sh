@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# merge-wave.sh's base contract, driven end to end against a fake `gh` on PATH (no GitHub): every open
+# merge-task.sh's base contract, driven end to end against a fake `gh` on PATH (no GitHub): every open
 # PR in a wave must target the repo's default branch, and anything wrong — a PR off the base, a mixed
 # wave, an unreadable or CLOSED PR, an unreadable default — halts BEFORE the first merge. A clean wave
 # merges in order into the default and names it. Hermetic: temp repo, PATH shim, ssh disabled.
@@ -32,7 +32,7 @@ EOF
 chmod +x "$tmp/bin/gh"
 pr() { printf '%s\n' "$2" > "$tmp/prs/$1.state"; printf '%s\n' "$3" > "$tmp/prs/$1.baseRefName"
        printf 'CLEAN\n' > "$tmp/prs/$1.mergeStateStatus"; printf 'audit-fix/t%s\n' "$1" > "$tmp/prs/$1.headRefName"; }
-run() { rm -f "$tmp/merges"; PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$root/skills/execute/scripts/merge-wave.sh" "$tmp/repo" "$@" 2>&1; }
+run() { rm -f "$tmp/merges"; PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$root/skills/execute/scripts/merge-task.sh" "$tmp/repo" "$@" 2>&1; }
 merges() { cat "$tmp/merges" 2>/dev/null | tr '\n' ' '; }
 echo master > "$tmp/default"
 
@@ -41,7 +41,7 @@ pr 11 OPEN master; pr 12 OPEN main
 out=$(run 11 12); rc=$?
 ok "$rc" 1 "mixed wave exits 1"; ok "$(merges)" "" "mixed wave merges nothing"
 has "$out" "PR #12 targets 'main', not the default branch 'master'" "names the off-base PR and the default"
-ok "$(cat "$tmp/repo/.claude/merge-wave.status")" "failed:1" "sentinel records the halt"
+ok "$(cat "$tmp/repo/.claude/merge-task.status")" "failed:1" "sentinel records the halt"
 
 # 2. a single PR off the default (every agent skipped the default) → halt, nothing merged
 pr 31 OPEN main
@@ -67,7 +67,7 @@ out=$(run 21 22 23); rc=$?
 ok "$rc" 0 "clean wave exits 0"; ok "$(merges)" "merge 21 merge 22 " "merges in the given order, skips the merged one"
 has "$out" "== PR #21 (into master) ==" "names the base per PR"
 has "$out" "PR #23 already merged — skipping." "reports the skip"
-ok "$(cat "$tmp/repo/.claude/merge-wave.status")" "ok" "sentinel records success"
+ok "$(cat "$tmp/repo/.claude/merge-task.status")" "ok" "sentinel records success"
 
 # 7. the checkout's master holds a local-only commit and origin/master has moved on (a diverged sibling):
 #    the fetch fails (ssh disabled), the fast-forward fails, and the local-only commit is named.
@@ -81,7 +81,7 @@ held=$(gc rev-parse HEAD)
 pr 71 OPEN master
 out=$(run 71); rc=$?
 ok "$rc" 0 "7. diverged checkout: the wave still exits 0"
-ok "$(cat "$tmp/repo/.claude/merge-wave.status")" "ok" "7. sentinel records success"
+ok "$(cat "$tmp/repo/.claude/merge-task.status")" "ok" "7. sentinel records success"
 ok "$(gc rev-parse HEAD)" "$held" "7. the checkout is left where it was"
 has "$out" "did not fast-forward: on master, 1 commit(s) not on origin/master — stranded" "7. names the local-only commit as stranded"
 q="close/2026-09-29-t-$(printf '%s' "$held" | cut -c1-12)"
@@ -107,7 +107,7 @@ ok "$rc" 0 "7d. queued + stranded: exits 0"
 has "$out" "did not fast-forward: on master, 2 commit(s) not on origin/master — 1 queued in $q, 1 stranded" "7d. names the split"
 has "$out" "stays blocked until they are landed or dropped" "7d. says the stranded ones keep it blocked"
 
-# 8. GIT_DIR / GIT_WORK_TREE set on the ONE merge-wave.sh invocation (a git hook exports them; p12-3), never
+# 8. GIT_DIR / GIT_WORK_TREE set on the ONE merge-task.sh invocation (a git hook exports them; p12-3), never
 #    exported in this shell, so the fixture setup above and the snapshots below stay on their own repos. The
 #    decoy is a normal repo whose only remote is a LOCAL bare repo under a github.com/o/r.git path: the
 #    script's owner/repo derivation passes, so an unscrubbed script reaches its fetch and ff-merge — against
@@ -128,12 +128,12 @@ snap() {  # the decoy's refs, its core.bare, its config bytes, and its remote's 
   cat "$d/.git/config"; echo "-- remote"; git -C "$dr" for-each-ref
 }
 before=$(snap)
-out=$(GIT_DIR="$d/.git" bash "$root/skills/execute/scripts/merge-wave.sh" --self-test-base 2>&1); rc=$?
+out=$(GIT_DIR="$d/.git" bash "$root/skills/execute/scripts/merge-task.sh" --self-test-base 2>&1); rc=$?
 ok "$rc" 0 "8a. --self-test-base under an inherited GIT_DIR exits 0"
 has "$out" "base: ALL PASS" "8a. --self-test-base under an inherited GIT_DIR: ALL PASS"
 ok "$(snap)" "$before" "8a. the decoy and its remote are unchanged"
 mkdecoy; before=$(snap)
-out=$(GIT_DIR="$d/.git" GIT_WORK_TREE="$d" bash "$root/skills/execute/scripts/merge-wave.sh" --self-test-base 2>&1); rc=$?
+out=$(GIT_DIR="$d/.git" GIT_WORK_TREE="$d" bash "$root/skills/execute/scripts/merge-task.sh" --self-test-base 2>&1); rc=$?
 ok "$rc" 0 "8b. --self-test-base under GIT_DIR + GIT_WORK_TREE exits 0"
 has "$out" "base: ALL PASS" "8b. --self-test-base under GIT_DIR + GIT_WORK_TREE: ALL PASS"
 ok "$(snap)" "$before" "8b. the decoy and its remote are unchanged"
@@ -145,13 +145,13 @@ git -c user.name=t -c user.email=t@t -C "$tmp/scratch" commit -q --allow-empty -
 git -C "$tmp/scratch" push -q origin master
 before=$(snap); held=$(gc rev-parse HEAD)
 pr 81 OPEN master
-out=$(rm -f "$tmp/merges"; GIT_DIR="$d/.git" PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$root/skills/execute/scripts/merge-wave.sh" "$tmp/repo" 81 2>&1); rc=$?
+out=$(rm -f "$tmp/merges"; GIT_DIR="$d/.git" PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$root/skills/execute/scripts/merge-task.sh" "$tmp/repo" 81 2>&1); rc=$?
 ok "$(snap)" "$before" "8c. a wave under an inherited GIT_DIR leaves the decoy and its remote unchanged"
 case "$out" in *"fast-forwarded"*) ok "[$out]" "no 'fast-forwarded'" "8c. nothing is fast-forwarded";; *) ok y y "8c. nothing is fast-forwarded";; esac
 # Regression guards (green before and after the scrub):
 ok "$rc" 0 "8c. (guard) the wave exits 0"
-ok "$(cat "$tmp/repo/.claude/merge-wave.status")" "ok" "8c. (guard) sentinel records success"
+ok "$(cat "$tmp/repo/.claude/merge-task.status")" "ok" "8c. (guard) sentinel records success"
 ok "$(gc rev-parse HEAD)" "$held" "8c. (guard) \$tmp/repo is left where it was"
 
-echo; [ "$fail" -eq 0 ] && echo "merge-wave base: ALL PASS" || echo "merge-wave base: SOME FAILED"
+echo; [ "$fail" -eq 0 ] && echo "merge-task base: ALL PASS" || echo "merge-task base: SOME FAILED"
 exit "$fail"

@@ -50,7 +50,7 @@ note, no heartbeat) and names the remedy. Fix the blocker, then schedule again.
 Four blockers:
 
 **GitHub `origin`.** The engine branches every worktree from
-`origin/<default branch>` and lands each task as a GitHub PR that merge-wave
+`origin/<default branch>` and lands each task as a GitHub PR that merge-task
 merges, so the target repo needs an `origin` on GitHub. A repo with no `origin`
 (a `git filter-repo` seed, a fresh `git init`) fails, and so does one whose
 `origin` is a local path (a clone of the live checkout) or another host. Run this
@@ -64,13 +64,13 @@ u=$(git -C "$R" remote get-url origin 2>/dev/null) || {
   echo "no origin remote in $R: create one with: gh repo create <owner>/<name> --private --source \"$R\" --remote origin --push" >&2; exit 1; }
 case "$u" in
   https://github.com/*|git@github.com:*|ssh://git@github.com/*) echo "$u" ;;
-  *) echo "origin for $R is not a GitHub remote ($u): a rollout lands GitHub PRs, so point origin at GitHub (a path or other-host origin breaks gh pr create and merge-wave)" >&2; exit 1 ;;
+  *) echo "origin for $R is not a GitHub remote ($u): a rollout lands GitHub PRs, so point origin at GitHub (a path or other-host origin breaks gh pr create and merge-task)" >&2; exit 1 ;;
 esac
 # end thread:remote-check
 ```
 
 On exit 1, stop and print its stderr line verbatim: that line is the remedy. On
-success it prints the URL. Derive `<owner>/<name>` from it the way merge-wave
+success it prints the URL. Derive `<owner>/<name>` from it the way merge-task
 does (strip everything through `github.com:` or `github.com/`, then a trailing
 `.git`), then confirm GitHub can see the repo with
 `gh repo view <owner>/<name> --json nameWithOwner`. That call uses the network,
@@ -159,7 +159,7 @@ clone exists, and a close-out committed in the primary is still seen.
   `origin/<default>` by PR first (the default branch is PR-only, ADR 0025), then drop the local copies
   with `git reset --keep origin/<default>` (that clone on the default branch) or
   `git branch -f <default> origin/<default>` (not checked out). When that clone's HEAD is the default
-  branch, close's `repo-state.sh` line is reused with merge-wave's wording: commits **queued** in a
+  branch, close's `repo-state.sh` line is reused with merge-task's wording: commits **queued** in a
   `close/…` landing PR mean wait for GitHub to merge it (never a second PR); **stranded** ones must be
   landed; a split names both. Otherwise the remedy is the generic one.
   Ahead by ancestry alone is not a block: commits whose content already reached `origin/<default>` by a
@@ -185,7 +185,7 @@ of a `close/…` branch deleted on origin, so its commits read stranded, never q
 from schedule § 0 with no cited paths, again after schedule's step-2 confirm with the cited paths, and
 from execute § 2.7 at entry points only, never per wave: `origin/<default>` moves with every merge, and a close-out committed
 mid-rollout must not halt an unattended run. Nothing names such a commit per wave in the general case:
-merge-wave's local refresh reads only the rollout's repo path, so it names one committed there, but one
+merge-task's local refresh reads only the rollout's repo path, so it names one committed there, but one
 committed in another clone of the set (the primary checkout of a self-rollout's separate clone) first
 surfaces when the next entry halts on it.
 

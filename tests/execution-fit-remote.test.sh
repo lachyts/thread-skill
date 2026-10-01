@@ -3,7 +3,7 @@
 # extracted by their markers and run against fixture remotes (the register check against the read-only
 # fixture register, never the real one), plus the pointers that wire them in: schedule § 0 runs both
 # (without copying them) and stops before any write; execute § 2.5 runs the register check at every
-# invocation and § 4.5 re-runs it before every dispatch, Workflow call and merge-wave.sh call (ADR 0028
+# invocation and § 4.5 re-runs it before every dispatch, Workflow call and merge-task.sh call (ADR 0028
 # § Decision); execute § 5 carries the scratchpad fallback for a refused engine path.
 # Hermetic: every repo lives under mktemp; no commits (so no identity); never gh, never the network. The
 # caller's GIT_DIR & co. are unset, and global/system git config is ignored so a user `url.*.insteadOf`
@@ -230,7 +230,7 @@ s45raw=$(awk '/^### 4\.5\./{on=1} /^### 5\./{on=0} on' skills/execute/SKILL.md)
 s45=$(printf '%s\n' "$s45raw" | tr '\n' ' ')
 intro="${s45%%"**Per wave K**"*}"
 has "$s45" "**Per wave K**" "execute § 4.5 still has its per-wave steps"
-for w in "§ 2.5" "Every entry into this loop" "every Workflow call" "\`resumeFromRunId\`" "every \`merge-wave.sh\` call"; do
+for w in "§ 2.5" "Every entry into this loop" "every Workflow call" "\`resumeFromRunId\`" "every \`merge-task.sh\` call"; do
   has "$intro" "$w" "execute § 4.5 entry rule mentions $w"
 done
 step1=$(printf '%s\n' "$s45raw" | awk '/^1\. /{on=1} /^2\. /{on=0} on' | tr '\n' ' ')
@@ -238,11 +238,11 @@ has "$step1" "mark-dispatched" "execute § 4.5 step 1 still stamps the dispatch 
 has "${step1%%stamp*}" "§ 2.5" "execute § 4.5 step 1 re-checks before the first stamp"
 has "${step1%%mark-dispatched*}" "§ 2.5" "execute § 4.5 step 1 re-checks before mark-dispatched"
 step3=$(printf '%s\n' "$s45raw" | awk '/^3\. \*\*Auto-merge/{on=1} /^4\. /{on=0} on' | tr '\n' ' ')
-has "$step3" "merge-wave.sh" "execute § 4.5 step 3 still merges via merge-wave.sh"
-has "${step3%%merge-wave.sh*}" "§ 2.5" "execute § 4.5 step 3 re-checks before merge-wave.sh"
+has "$step3" "merge-task.sh" "execute § 4.5 step 3 still merges via merge-task.sh"
+has "${step3%%merge-task.sh*}" "§ 2.5" "execute § 4.5 step 3 re-checks before merge-task.sh"
 cold=$(printf '%s\n' "$s45raw" | awk '/^\*\*Cold resume\.\*\*/{on=1} on && /^$/{on=0} on' | tr '\n' ' ')
-has "$cold" "merge-wave.sh" "execute § 4.5 cold resume still flushes via merge-wave.sh"
-has "${cold%%merge-wave.sh*}" "§ 2.5" "execute § 4.5 cold resume re-checks before merge-wave.sh"
+has "$cold" "merge-task.sh" "execute § 4.5 cold resume still flushes via merge-task.sh"
+has "${cold%%merge-task.sh*}" "§ 2.5" "execute § 4.5 cold resume re-checks before merge-task.sh"
 rein=$(printf '%s\n' "$s45raw" | awk '/^\*\*Reinstate \(/{on=1} /^\*\*Per-task resume/{on=0} on' | tr '\n' ' ')
 has "$rein" "clear-pause" "execute § 4.5 reinstate still clears the pause"
 has "${rein%%clear-pause*}" "§ 2.5" "execute § 4.5 reinstate re-checks before clear-pause"
@@ -262,7 +262,7 @@ has "$s7" "landing register" "execute § 7 halts on a landing-register listing"
 ok "$(grep -c '# thread:register-check' skills/execute/SKILL.md)" 0 "execute does not copy the register snippet"
 
 # repair never merges or resumes a Workflow itself: both stay routed through execute § 4.5 and its re-checks
-ok "$(grep -c 'skills/execute/scripts/merge-wave.sh' skills/repair/SKILL.md)" 0 "repair never invokes merge-wave.sh directly"
+ok "$(grep -c 'skills/execute/scripts/merge-task.sh' skills/repair/SKILL.md)" 0 "repair never invokes merge-task.sh directly"
 ok "$(grep -c 'resumeFromRunId' skills/repair/SKILL.md)" 0 "repair never resumes a Workflow directly"
 has "$(tr '\n' ' ' < skills/repair/SKILL.md)" "§4.5 resume" "repair hands off to execute's §4.5 resume"
 s5r=$(awk '/^### 5\./{on=1} /^### 6\./{on=0} on' skills/repair/SKILL.md | tr '\n' ' ')

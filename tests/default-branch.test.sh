@@ -119,7 +119,7 @@ out=$(GIT_DIR="$tmp/clone/.git" CLAUDE_PLUGIN_ROOT="$root" bash "$tmp/resolve.sh
 ok "$out" main "resolver under an inherited GIT_DIR still answers for <repoPath> (main)"
 
 # ---- nothing shipped assumes main ----------------------------------------------------------------------
-ok "$(grep -c 'origin/main' skills/execute/scripts/merge-wave.sh)" 0 "merge-wave.sh has no origin/main"
+ok "$(grep -c 'origin/main' skills/execute/scripts/merge-task.sh)" 0 "merge-task.sh has no origin/main"
 ok "$(grep -c 'origin/main' skills/execute/diagnostics/edit-noop-repro.workflow.js)" 0 "edit-noop-repro diagnostic has no origin/main"
 
 echo; [ "$fail" -eq 0 ] && echo "default-branch: ALL PASS" || echo "default-branch: SOME FAILED"

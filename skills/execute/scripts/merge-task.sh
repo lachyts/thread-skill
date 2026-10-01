@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# merge-wave.sh — deterministically merge ONE wave's approved PRs into their strict-protected base
+# merge-task.sh — deterministically merge ONE wave's approved PRs into their strict-protected base
 # branch (the branch the PRs target — `main`, `master`, whatever the repo's default is).
 #
-# Usage:  merge-wave.sh <repoPath> <pr> [<pr> ...]
+# Usage:  merge-task.sh <repoPath> <pr> [<pr> ...]
 #   <repoPath>  absolute path to the target repo (origin must be a GitHub remote)
 #   <pr>...     PR numbers or URLs, in the wave's recommended merge order
 #
@@ -31,7 +31,7 @@
 #     each pass and returns as soon as it goes CLEAN (narcissus-avp 2026-07-18 false-halt fix).
 #   * Idempotent: already-MERGED PRs are skipped, so a re-run after a partial merge resumes cleanly
 #     (this is how a cold-resumed session flushes a half-merged wave).
-#   * Writes a result sentinel `<repoPath>/.claude/merge-wave.status` (`ok` / `failed:<code>`) on exit, so a
+#   * Writes a result sentinel `<repoPath>/.claude/merge-task.status` (`ok` / `failed:<code>`) on exit, so a
 #     BACKGROUNDED caller reads the TRUE outcome instead of a trailing-command-masked exit code (finding #5).
 #
 # Why the REST update-branch (not `gh pr update-branch`): the installed gh (2.43.1) predates that
@@ -170,7 +170,7 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
   return 0
 }
 
-# Self-test hook: `merge-wave.sh --self-test-base` drives refresh_local_base against a throwaway repo
+# Self-test hook: `merge-task.sh --self-test-base` drives refresh_local_base against a throwaway repo
 # whose origin default branch is `master` (no `main` anywhere): checkout on master ⇒ fast-forwarded;
 # checkout on another branch ⇒ untouched; unresolved base ⇒ skipped; a local-only commit ⇒ named stranded,
 # then queued once a close/… branch carries it, then split once a stranded one sits on top; a dirty
@@ -231,7 +231,7 @@ if [ "${1:-}" = "--self-test-base" ]; then
   out=$(refresh_local_base "$tmp/root" master); rc=$?
   sb_ok "$rc" 0 "dirty overlap: returns 0"
   sb_has "$out" "no local-only commits" "dirty overlap, no local commits: says local changes block it"
-  # origin/HEAD unset: repo-state cannot name them, so merge-wave counts them itself.
+  # origin/HEAD unset: repo-state cannot name them, so merge-task counts them itself.
   g -C "$tmp/root" checkout -q -- f && g -C "$tmp/root" merge -q --ff-only origin/master
   g -C "$tmp/root" symbolic-ref --delete refs/remotes/origin/HEAD
   g -C "$tmp/root" commit -q --allow-empty -m local-only-2
@@ -259,7 +259,7 @@ if [ "${1:-}" = "--self-test-base" ]; then
   exit "$st_fail"
 fi
 
-# Self-test hook: `merge-wave.sh --self-test-classify` runs the classifier assertions and exits. Keeps the
+# Self-test hook: `merge-task.sh --self-test-classify` runs the classifier assertions and exits. Keeps the
 # fail-closed heart covered without a live repo (this script otherwise has no unit test — see the UNSTABLE
 # guard comment below). Must precede the arg-count check; uses ${1:-} for `set -u` safety.
 if [ "${1:-}" = "--self-test-classify" ]; then
@@ -286,7 +286,7 @@ fi
 
 # ---- args ------------------------------------------------------------------
 if [ "$#" -lt 2 ]; then
-  echo "usage: merge-wave.sh <repoPath> <pr> [<pr> ...]" >&2
+  echo "usage: merge-task.sh <repoPath> <pr> [<pr> ...]" >&2
   exit 2
 fi
 REPO_PATH="$1"; shift
@@ -296,12 +296,12 @@ command -v gh >/dev/null 2>&1 || { echo "ERROR: gh not found on PATH" >&2; exit 
 git -C "$REPO_PATH" rev-parse --git-dir >/dev/null 2>&1 || { echo "ERROR: $REPO_PATH is not a git repo" >&2; exit 2; }
 
 # ---- result sentinel (finding #5) ------------------------------------------
-# A backgrounded `merge-wave.sh … & wait; echo done` wrapper reports the trailing command's exit, not the
+# A backgrounded `merge-task.sh … & wait; echo done` wrapper reports the trailing command's exit, not the
 # script's — masking a real halt as success (the documented background-exit-masking gotcha). Write an
 # unambiguous status file the caller reads instead of trusting a possibly-masked exit code: `ok` ONLY on a
 # clean exit 0, `failed:<code>` on any non-zero (including a trap/abort). Cleared at start so a stale file
 # from a prior run can never read as success.
-SENTINEL="$REPO_PATH/.claude/merge-wave.status"
+SENTINEL="$REPO_PATH/.claude/merge-task.status"
 mkdir -p "$REPO_PATH/.claude" 2>/dev/null || true
 rm -f "$SENTINEL" 2>/dev/null || true
 write_sentinel() {  # EXIT trap — $? MUST be captured first, before any other command overwrites it
@@ -318,7 +318,7 @@ if [ -z "$OWNER" ] || [ -z "$REPO" ] || [ "$OWNER" = "$SLUG" ]; then
   echo "ERROR: could not derive owner/repo from origin url '$ORIGIN_URL'" >&2; exit 2
 fi
 
-echo "== merge-wave.sh: $OWNER/$REPO — ${#PRS[@]} PR(s): ${PRS[*]} =="
+echo "== merge-task.sh: $OWNER/$REPO — ${#PRS[@]} PR(s): ${PRS[*]} =="
 
 # ---- per-PR primitives -----------------------------------------------------
 
@@ -353,7 +353,7 @@ update_branch() {  # $1=PR  $2=pre-update head SHA
       echo "ERROR: PR #$PR cannot update — MERGE CONFLICT with $BASE." >&2
       echo "  The wave's file-overlap analysis was too coarse, or a hub file changed under it." >&2
       echo "  Next: rebase the branch onto origin/$BASE in its worktree and resolve, OR pull this task" >&2
-      echo "        out of the wave and re-plan. Do NOT force. Re-run merge-wave.sh after fixing." >&2
+      echo "        out of the wave and re-plan. Do NOT force. Re-run merge-task.sh after fixing." >&2
     else
       echo "ERROR: PR #$PR update-branch failed: $out" >&2
     fi
@@ -450,7 +450,7 @@ wait_required_checks() {  # $1=PR
       sleep "$CHECK_INTERVAL"
       continue
     fi
-    echo "  Diagnose: gh pr checks $PR -R $OWNER/$REPO — push a fix to the branch, then re-run merge-wave.sh." >&2
+    echo "  Diagnose: gh pr checks $PR -R $OWNER/$REPO — push a fix to the branch, then re-run merge-task.sh." >&2
     return 1
   done
 }
@@ -483,7 +483,7 @@ process_pr() {  # $1=PR — run the state machine until merged or halt
       DIRTY)
         echo "ERROR: PR #$PR has a MERGE CONFLICT with $BASE (mergeStateStatus=DIRTY)." >&2
         echo "  Resolve in the worktree (rebase onto origin/$BASE) or pull this task from the wave." >&2
-        echo "  Do NOT force. Re-run merge-wave.sh after fixing." >&2
+        echo "  Do NOT force. Re-run merge-task.sh after fixing." >&2
         return 1 ;;
       BEHIND)
         headoid=$(prfield "$PR" headRefOid)
@@ -566,4 +566,4 @@ done
 
 # ---- advance the checkout at repoPath (the reaper's base for task branches; see refresh_local_base) ---
 refresh_local_base "$REPO_PATH" "$BASE"
-echo "== merge-wave.sh: wave complete. =="
+echo "== merge-task.sh: wave complete. =="

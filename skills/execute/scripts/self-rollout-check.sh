@@ -11,7 +11,7 @@
 # with `~/` expanded, trailing slashes stripped and, when the directory exists, `pwd -P` applied (so a
 # symlink matches its target); a path that does not exist yet compares as a string. The comparison is by
 # CONTAINMENT: a marketplace path equal to <repoPath> or nested inside it (`<repoPath>/…`, a monorepo with
-# the marketplace in a subdirectory) matches, because merge-wave.sh fast-forwards the whole checkout.
+# the marketplace in a subdirectory) matches, because merge-task.sh fast-forwards the whole checkout.
 #
 # Exit 0: no match. A missing registry is 0; a malformed one or an unknown shape is 0 with a stderr
 #         warning (fail open: the registry format belongs to Claude Code, not this plugin).
