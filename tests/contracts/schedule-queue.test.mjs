@@ -2,7 +2,8 @@
 // schedule skill or its template, protocol 5, the queue's stamps (`solo: true`, `depends-on:`), and the
 // one-unfinished-rollout-per-repo rule wired into § 0 (the check, the supersede's `resume`, the `file`
 // and `interrupted` finishes, the `incomplete: true` stamp and the pinned "is incomplete" report), the
-// carry preview in step 1, Solo and dependency proposals for queued tasks only (step 5), step 6's Advance/Cancel-only naming,
+// carry preview in step 1, a release gate's drop decided before step 6 (or, at step 8, taken out with its
+// row), Solo and dependency proposals for queued tasks only (step 5), step 6's Advance/Cancel-only naming,
 // a note born `incomplete: true` (the template) that only step 7's last write clears, and orient leaving
 // the rule to schedule.
 //
@@ -25,6 +26,7 @@ const others = walk('skills/schedule').filter((f) => !/\/(SKILL|rollout-template
 const s = (text, re) => collapse(section(text, re) ?? '')
 const S0 = /^### 0\./
 const S1 = /^### 1\. /
+const S35 = /^### 3\.5\. /
 const S5 = /^### 5\. /
 const S6 = /^### 6\. /
 const S7 = /^### 7\. /
@@ -86,6 +88,12 @@ function checkSchedule({ schedule, template, orient, manifests = [], extra = [] 
   if (!sentences(s(schedule, S7)).some((x) => /\bremove\b/i.test(x) && x.includes('`incomplete: true`') &&
     x.includes('last write'))) fails.push('step7-clears-stamp')
 
+  // A release gate's drop is decided before step 6, so a dropped task never gets a row; a drop at step 8
+  // takes the task out whole (its `rollout:`, its `## Queue` row and its `## File-sets` line).
+  if (!sentences(s(schedule, S35)).some((x) => /drop/i.test(x) && x.includes('before step 6') &&
+    x.includes('no `## Queue` row'))) fails.push('gate-drop-before-write')
+  if (!sentences(s(schedule, S8)).some((x) => /drop/i.test(x) && x.includes('`rollout:`') &&
+    x.includes('`## Queue` row') && x.includes('`## File-sets` line'))) fails.push('gate-drop-whole')
 
   // Step 6 offers Advance or Cancel only, every time: each **Overwrite** it names is a "never".
   const s6 = s(schedule, S6)
@@ -208,6 +216,13 @@ test('control: step 7 that never clears the stamp, or clears it in step 7.5, fai
   const moved = edit(real.schedule.replace(para, ''), /^### 7\.5\. /, '### 7.5. Close out a superseded rollout\n',
     `### 7.5. Close out a superseded rollout\n\n${para}\n`)
   only({ schedule: moved }, ['step7-clears-stamp'], 'moved to step 7.5')
+})
+
+test('control: a gate dropped only at step 8, or dropped without its row, fails', () => {
+  only({ schedule: edit(real.schedule, S35, 'leaves the candidate set before step 6', 'is dropped at step 8') },
+    ['gate-drop-before-write'], 'dropped at step 8')
+  only({ schedule: edit(real.schedule, S8, 'delete its `## Queue` row and its `## File-sets` line', 'leave the rest') },
+    ['gate-drop-whole'], 'row left behind')
 })
 
 test('control: step 1 without the carry preview fails', () => {

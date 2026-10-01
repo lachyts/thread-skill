@@ -187,7 +187,7 @@ Look for:
 
 ### 3.5. Detect human/release gates
 
-Some task notes carry a **human/release gate** in prose — "don't action until a release ships", "hold for sign-off", "gated on the next deploy". A `/thread:execute` agent reads the note and may refuse mid-dispatch when it hits one, so a buried gate is unreliable either way. Scan each task body for gate language (`don't action until`, `do not action until`, `hold for`, `until a release`, `until the next release`, `gated on a release`, `human sign-off`, `wait for sign-off`). Collect any matches — they become the **pre-flight decision** surfaced in step 8: the user either clears each gate (set `ignore_gate: true` on the task to override it for the run, or remove the gate text) or drops the task from this rollout. Don't bury the gate in the body and hope the agent honours it.
+Some task notes carry a **human/release gate** in prose — "don't action until a release ships", "hold for sign-off", "gated on the next deploy". A `/thread:execute` agent reads the note and may refuse mid-dispatch when it hits one, so a buried gate is unreliable either way. Scan each task body for gate language (`don't action until`, `do not action until`, `hold for`, `until a release`, `until the next release`, `gated on a release`, `human sign-off`, `wait for sign-off`). Collect any matches and put each to the user in the same y/n batch as § 4.7's step-ups: keep the task (and clear the gate before executing: `ignore_gate: true` on the task overrides it for the run, or remove the gate text) or drop it from this rollout. A task dropped here leaves the candidate set before step 6, so it gets no `## Queue` row, no `## File-sets` line and no `rollout:` stamp. A carried task (step 1) is the exception: step 6's carry takes every unlanded task of the prior rollout, so its drop waits for step 8's pre-flight, which takes it out whole. Each kept gate becomes step 8's pre-flight. Don't bury the gate in the body and hope the agent honours it.
 
 ### 3.6. Sweep for gated-input smell (advisory — ADR 0008)
 
@@ -360,12 +360,12 @@ Open in Obsidian to review. To execute:
 The thread:execute skill at ${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md reads this note and runs the three-layer convergence engine (plan-gate → Ralph retry → master review) via the Workflow tool.
 ```
 
-**Pre-flight — gated tasks.** If step 3.5 found any human/release-gated tasks, list them above the summary so the user clears them before executing (an unaddressed gate makes the agent refuse mid-run):
+**Pre-flight — gated tasks.** If the user kept any of step 3.5's human/release-gated tasks, list them above the summary so the user clears them before executing (an unaddressed gate makes the agent refuse mid-run):
 
 ```
 ⚠️ Pre-flight — these tasks carry a human/release gate. Clear each before executing, or they'll refuse mid-dispatch:
   - [[task-x]] — "don't action until the v0.5 release ships"
-To run one anyway, set `ignore_gate: true` on its task note (overrides the gate for the run); or drop it from the rollout.
+To run one anyway, set `ignore_gate: true` on its task note (overrides the gate for the run). To drop one after all, take it out whole: clear its `rollout:` and delete its `## Queue` row and its `## File-sets` line from this note.
 ```
 
 **Pre-flight — local copies agents won't see.** If step 2's pushed-base re-run printed any WARN
