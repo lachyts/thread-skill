@@ -227,18 +227,20 @@ def _wikilink_slug(value):
 
 
 def _list_items(value: str):
-    """The entries of a frontmatter value: every [[wikilink]] in it, else an inline `[a, b]` list's
-    items, else the scalar itself. Quotes stripped; `null`/`~` and empty entries dropped."""
-    links = WIKILINK_RE.findall(value)
-    if links:
-        return links
+    """The entries of a frontmatter value: an inline `[a, "[[b]]"]` list's items or the scalar itself
+    (a lone unquoted `[[a]]` is a wikilink, not a list). Each entry is a wikilink's inner text or a bare
+    value; quotes stripped; `null`/`~` and empty entries dropped. Commas inside a wikilink never split."""
     v = value.strip()
-    parts = v[1:-1].split(",") if (v.startswith("[") and v.endswith("]")) else [v]
+    if v.startswith("[") and v.endswith("]") and not v.startswith("[["):
+        v = v[1:-1]
     out = []
-    for p in parts:
-        p = p.strip().strip('"').strip("'").strip()
-        if p and p.lower() not in ("null", "~"):
-            out.append(p)
+    for part in re.split(r",(?![^\[]*\]\])", v):
+        part = part.strip().strip('"').strip("'").strip()
+        links = WIKILINK_RE.findall(part)
+        if links:
+            out.extend(links)
+        elif part and part.lower() not in ("null", "~"):
+            out.append(part)
     return out
 
 

@@ -97,16 +97,17 @@ ok "$(q "$J" 'd["slotsInUse"]')" '0' "next: a set-aside task holds no slot"
 
 # ── dependencies outside the rollout, archived notes and the root-copy preference ────────────────
 scen outside
-mkro $'- [[b]]\n- [[c]]'
+mkro $'- [[b]]\n- [[c]]\n- [[e]]'
 mkdir -p "$D/Archive/2026"
 printf -- '---\ntags: [task]\nstatus: done\n---\n\nx\n' > "$D/Archive/2026/x.md"
 printf -- '---\ntags: [task]\nstatus: open\n---\n\ny root\n' > "$D/y.md"
 printf -- '---\ntags: [task]\nstatus: done\n---\n\ny archived\n' > "$D/Archive/2026/y.md"
 mkt b open 'blocked-by: x'
 mkt c open 'blocked-by: "[[y]]"'
+mkt e open 'depends-on: [x, "[[y]]"]'
 J=$(nxt)
 ok "$(q "$J" 'd["start"]')" '["b"]' "next: a dependency on an archived done note outside the rollout is satisfied"
-ok "$(q "$J" "$holds")" '{"c":"depends on [[y]] (open)"}' "next: the root copy wins over an archived one"
+ok "$(q "$J" "$holds")" '{"c":"depends on [[y]] (open)","e":"depends on [[y]] (open)"}' "next: the root copy wins over an archived one (a mixed inline list too)"
 
 # ── affine tombstones ────────────────────────────────────────────────────────────────────────────
 scen tombstone
