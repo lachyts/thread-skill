@@ -373,5 +373,14 @@ for f in arith plain; do
   ok "$(ctr 5)" "$(b 1)" "23. $f abort: the counter is byte-unchanged"; ok "$(nmerge)" 0 "23. $f abort: nothing merged"
 done
 
+# 24. a permanent merge refusal is definitive (1), never a retryable 8 the lead re-runs to its bound
+for t in "GraphQL: Squash merges are not allowed on this repository. (mergePullRequest)" \
+         "GraphQL: Repository rule violations found (mergePullRequest)"; do
+  fresh; pair; mkpr 5 "$I"; seed 5 "$(b 1)"; printf '%s\n' "$t" > "$MT_STATE/merge.refuse"
+  run 5 "$I" "$B"
+  ok "$rc" 1 "24. '$t' exits 1"; ok "$(sent)" "failed:1" "24. failed:1"; ok "$(nmerge)" 1 "24. exactly one merge call"
+  has "$out" "GitHub refused to merge PR #5" "24. says GitHub refused"; lacks "$out" "nothing changed" "24. never the retryable text"
+done
+
 echo; [ "$fail" -eq 0 ] && echo "merge-task integrated: ALL PASS" || echo "merge-task integrated: SOME FAILED"
 exit "$fail"

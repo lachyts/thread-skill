@@ -84,8 +84,9 @@
 # bounded re-poll, on an unmoved base; a red required check on a genuine step; a non-check gate (checks
 # green, still BLOCKED, no review pending); a merge queue is required, or `isMergeQueueEnabled` is absent
 # from the schema; GitHub refused the merge with a known text (`is not mergeable|HTTP 405|HTTP 409|HTTP 422|
-# Required status check|protected branch`; `Head branch was modified` is NOT in this list: origin's branch
-# decides it); gh returned 0 but the PR was not confirmed MERGED.
+# Required status check|protected branch|merges are not allowed|Repository rule violations found`: a repo
+# that disallows squash merges, or a ruleset, refuses every re-run alike; `Head branch was modified` is NOT
+# in this list: origin's branch decides it); gh returned 0 but the PR was not confirmed MERGED.
 #
 # 8 vs 1. A read is retried MERGE_TASK_READ_TRIES times; it is definitive (1) only when its last attempt
 # failed with `HTTP 404`, `HTTP 422`, `Could not resolve to a` or `doesn't exist on type` on stderr (on a
@@ -983,7 +984,7 @@ merge_pr() {  # base re-check, the head-pinned squash merge, then confirmation o
     finish 8 "retryable: GitHub refused PR #$PR with \"Head branch was modified\", but PR head and origin $S_HEADREF both read the integrated head $IHEAD: GitHub was behind; nothing merged; re-run"
   fi
   case "$S_MSS" in BLOCKED) review_gate ;; esac
-  if grep -qE 'is not mergeable|HTTP 405|HTTP 409|HTTP 422|Required status check|protected branch' "$tmp/merge.err" 2>/dev/null; then
+  if grep -qE 'is not mergeable|HTTP 405|HTTP 409|HTTP 422|Required status check|protected branch|merges are not allowed|Repository rule violations found' "$tmp/merge.err" 2>/dev/null; then
     finish 1 "ERROR: GitHub refused to merge PR #$PR: $err — nothing was merged."
   fi
   finish 8 "retryable: gh pr merge failed for PR #$PR ($err) and nothing changed (state $S_STATE, base and head unmoved); re-run"
