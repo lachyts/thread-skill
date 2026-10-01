@@ -39,7 +39,7 @@ status is read-only and reports whatever it finds, noting if a note predates `pr
 ### 2. Gather the vault state (deterministic)
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py status --rollout <rollout-note>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py status --rollout <rollout-note>
 ```
 
 Returns JSON: `{ rollout, rolloutStatus, paused, pause_requested, merged_through_wave, total_waves,

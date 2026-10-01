@@ -101,7 +101,7 @@ looping on the same wall.
 **3a — drift → done.** For each drift task, confirm the merge with `gh pr view <pr> --json state` ==
 `MERGED`, then:
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py resolve --tasks <slug>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resolve --tasks <slug>
 ```
 (`resolve` refuses any note that isn't in a blocked state — the merge verification is *your* contract.)
 
@@ -138,7 +138,7 @@ real fix is held for protocol 4 — `resolve` accepting a verified-merged `in_pr
 
 Not while any stranded-merged task remains (3c): stop there instead. These re-dispatch through the
 **existing** engine — do **not** write a new loop. Follow `/thread:execute` §4.5 (the continuous
-per-wave resume): compute the still-to-dispatch set with `reconcile-wave.py resume-filter`, run the
+per-wave resume): compute the still-to-dispatch set with `reconcile-rollout.py resume-filter`, run the
 Workflow one wave at a time, merge each wave with `merge-wave.sh`, advance the cursor, `mark-done`. The
 re-dispatched agent reads the prior `## Review-blocked feedback` / `## Blocker diagnosis` /
 `## Repair input` from the note. This hand-off enters §4.5 directly, so execute's § 2.7 pushed-base
@@ -160,7 +160,7 @@ When the user opts to defer a task (or declines further retries on a re-blocked 
    ```
    git -C <repoPath> worktree remove -f -f <repoPath>/.claude/worktrees/<slug>   # if it exists; -f -f: execute locks task trees against the reaper
    gh pr close <pr> --delete-branch --comment "deferred out of [[<rollout>]] — back to backlog"   # if a PR exists
-   python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py defer --tasks <slug> --rollout <rollout-note>
+   python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py defer --tasks <slug> --rollout <rollout-note>
    ```
    (`defer` clears `wave:`/`rollout:`/`owner:` and sets `status: open`, so a future `/thread:schedule`
    re-plans it.) The `gh pr close --delete-branch` is **not gated on the landing register**, on

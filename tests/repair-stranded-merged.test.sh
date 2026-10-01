@@ -13,7 +13,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 export PYTHONDONTWRITEBYTECODE=1
-SCRIPT=skills/execute/scripts/reconcile-wave.py
+SCRIPT=skills/execute/scripts/reconcile-rollout.py
 STATUS=skills/status/SKILL.md
 REPAIR=skills/repair/SKILL.md
 fail=0

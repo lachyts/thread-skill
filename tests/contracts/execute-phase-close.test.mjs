@@ -1,5 +1,5 @@
 // Execute closes the phases it finishes (ADR 0026): the completion ceremony (execute §4.5 step 5) runs
-// `reconcile-wave.py touched-phases` and, for each line it prints, `reconcile-project.py <line> --kinds
+// `reconcile-rollout.py touched-phases` and, for each line it prints, `reconcile-project.py <line> --kinds
 // phase --apply`. A phase whose every task landed and that this rollout touched closes; an untouched
 // finished phase is left alone; a failure is filed as a follow-on open task and the ceremony continues.
 //
@@ -114,7 +114,7 @@ function checkCeremony(text) {
   // flags: phase kind only, applied, phases only from touched-phases.
   const cmds = fenceLines(phase.raw).filter((l) => l.startsWith('python3 ${CLAUDE_PLUGIN_ROOT}/'))
   const rp = cmds.find((l) => l.includes('reconcile-project.py'))
-  if (!cmds.some((l) => l.includes('reconcile-wave.py touched-phases')) || !rp ||
+  if (!cmds.some((l) => l.includes('reconcile-rollout.py touched-phases')) || !rp ||
     !rp.includes('--kinds phase') || !rp.includes('--apply') ||
     !/Phases come only from `touched-phases`/.test(para)) fails.push('flags')
 

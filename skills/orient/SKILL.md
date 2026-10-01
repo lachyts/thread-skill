@@ -185,7 +185,7 @@ the gate is empty), carry straight on to § 6.
   routes only the tasks its own reshuffle wrote. **At most one rollout is live per repo**, so first
   look for an open rollout note directly in `Work/Tasks/` whose `Project root:` line is this repo,
   and read it with
-  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py status --rollout <note>`
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py status --rollout <note>`
   (local, no network):
   - **None** → schedule `--tasks <members>`.
   - **This project's, `paused`, and every unlanded task of it still `status: open`** → schedule

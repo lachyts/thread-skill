@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""reconcile-wave.py — deterministic vault bookkeeping for wave-execute (findings #6 + #7).
+"""reconcile-rollout.py — deterministic vault bookkeeping for wave-execute (findings #6 + #7).
 
 The Workflow engine (`task.workflow.js`) returns a structured result; the lead session used to
 hand-edit ~5 frontmatter transitions per wave (status + pr + *_rounds_used) plus the cursor advance — 50+

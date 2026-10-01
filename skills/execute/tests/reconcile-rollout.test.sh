@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Unit test for reconcile-wave.py — runs against temp task notes, no vault/GitHub needed.
-# Usage: bash reconcile-wave.test.sh   (exit 0 = pass)
+# Unit test for reconcile-rollout.py — runs against temp task notes, no vault/GitHub needed.
+# Usage: bash reconcile-rollout.test.sh   (exit 0 = pass)
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-SCRIPT="$HERE/../scripts/reconcile-wave.py"
+SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 

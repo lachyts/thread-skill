@@ -253,9 +253,9 @@ rp --kinds phase,nope; ok "$rc" 2 "a bad --kinds exits 2"
 rp --phases x; ok "$rc" 2 "a bad --phases exits 2"
 mkdir -p "$tmp/plug/skills/_shared/scripts"; cp "$script" "$tmp/plug/skills/_shared/scripts/"
 PATH="$tmp/bin:$PATH" python3 "$tmp/plug/skills/_shared/scripts/reconcile-project.py" --project demo --vault "$v" --apply > "$tmp/out" 2> "$tmp/err"
-ok "$?" 2 "a missing reconcile-wave.py exits 2"
+ok "$?" 2 "a missing reconcile-rollout.py exits 2"
 has "$(cat "$tmp/err")" "cannot load Note" "names the load failure"
-has "$(cat "$tmp/err")" "reconcile-wave.py" "names reconcile-wave.py"
+has "$(cat "$tmp/err")" "reconcile-rollout.py" "names reconcile-rollout.py"
 ok "$(manifest "$v")" "$before" "a load failure writes nothing"
 
 # ---- 7. a phase depends on its task writes -----------------------------------------------------------

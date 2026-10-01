@@ -64,7 +64,7 @@ test('Look only writes nothing; Steer only exists', () => {
 })
 
 test('orient schedules only wave-shaped members and never runs another rollout', () => {
-  assertHas(S(6), 'orient § 6', ['--tasks', '--regenerate', 'reconcile-wave.py status', '`paused`',
+  assertHas(S(6), 'orient § 6', ['--tasks', '--regenerate', 'reconcile-rollout.py status', '`paused`',
     '`status: open`', /At most one rollout is live per repo/, /scoped target routes only the tasks its own reshuffle wrote/,
     /schedule nothing and touch nothing/, 'repair', /Uncommitted grill docs/])
   assert.doesNotMatch(collapse(orient), /pause_requested/, 'orient pauses rollouts')
