@@ -141,7 +141,8 @@ Not while any stranded-merged task remains (3c): stop there instead. These re-di
 per-wave resume): compute the still-to-dispatch set with `reconcile-wave.py resume-filter`, run the
 Workflow one wave at a time, merge each wave with `merge-wave.sh`, advance the cursor, `mark-done`. The
 re-dispatched agent reads the prior `## Review-blocked feedback` / `## Blocker diagnosis` /
-`## Repair input` from the note.
+`## Repair input` from the note. This hand-off enters §4.5 directly, so execute's § 2.7 pushed-base
+gate (entry points only) does not run; the next `/thread:execute [[<rollout>]]` runs it.
 
 **Leash (Decision: auto-retry, cap one):** retry each agent-fixable/just-injected task **once** per
 repair run. If a task blocks **again** after its retry, **stop retrying it** — surface it to the user
@@ -177,8 +178,9 @@ Not while any stranded-merged task remains (3c): the completion loop runs execut
 re-dispatch it. Stop and escalate instead.
 
 Continue execute's per-wave resume until the last wave merges (or it legitimately halts on a red
-required check / smart-halt — same stop conditions as execute). Execute's **completion ceremony** then
-runs on the (possibly reduced) task set. Ensure the rollout's `## Completion log` records every repair
+required check / smart-halt — same stop conditions as execute). This hand-off enters §4.5 directly,
+so execute's § 2.7 pushed-base gate (entry points only) does not run; the next
+`/thread:execute [[<rollout>]]` runs it. Execute's **completion ceremony** then runs on the (possibly reduced) task set. Ensure the rollout's `## Completion log` records every repair
 action: decisions injected (task + value), drift reconciled (task + PR), tasks deferred (task + reason +
 any dependents moved with it), stranded merges escalated (copied from the 3c records in `## Notes`, which
 earlier runs wrote while the task was still stranded).
