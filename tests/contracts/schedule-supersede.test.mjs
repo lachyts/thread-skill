@@ -1,4 +1,4 @@
-// Schedule supersede contract: when `--regenerate` replaces an earlier rollout, schedule step 6 stamps
+// Schedule supersede contract: when `--regenerate` replaces an earlier rollout, schedule step 7.5 stamps
 // the prior note (`status: done` + `superseded_by:`) and then moves it into Work/Tasks/Archive/Rollouts/
 // itself. Left in the Work/Tasks/ root at `status: done`, the daily sweep's archiver files it into
 // Work/Tasks/Archive/ (TaskNotes auto-archives only `merged`, never `done`), the wrong folder for a
@@ -130,7 +130,7 @@ function checkSupersede(raw) {
 
 const real = paragraph(schedule, LABEL)
 
-test('schedule step 6: the supersede paragraph stamps, then moves the prior note into Archive/Rollouts/', () => {
+test('schedule step 7.5: the supersede paragraph stamps, then moves the prior note into Archive/Rollouts/', () => {
   assert.deepEqual(checkSupersede(real), [])
 })
 
@@ -233,4 +233,75 @@ test('control J: a collision that halts the run fails collision', () => {
 
 test('control K: a supersede on the same-day Overwrite path fails overwrite-excluded', () => {
   onlyFails(drop(1), ['overwrite-excluded'], 'control K')
+})
+
+// ---- order: write, carry, stamp, then close out (p12-10) -----------------------------------------
+// A supersede writes the new note in step 6 and only then carries the prior note's unlanded tasks
+// into it (`reconcile-rollout.py carry`), so no task ever points at a missing rollout; step 7 stamps the
+// tasks; the prior note closes out last (step 7.5, the LABEL paragraph), so an interrupted run always
+// leaves it open for § 0's unfinished-rollout check to pair with the new one. Pure, like checkSupersede.
+
+// The lines of the `###`-headed section whose heading line matches `re`, up to the next `##`/`###`
+// heading outside a fence ('' when absent).
+function sectionOf(text, re) {
+  const lines = text.split('\n')
+  const start = lines.findIndex((l) => re.test(l))
+  if (start < 0) return ''
+  const out = [lines[start]]
+  let inFence = false
+  for (const l of lines.slice(start + 1)) {
+    if (FENCE.test(l)) inFence = !inFence
+    else if (!inFence && /^#{2,3} /.test(l)) break
+    out.push(l)
+  }
+  return out.join('\n')
+}
+
+function checkSupersedeOrder(text) {
+  const fails = []
+  // carry-in-6: one step-6 sentence runs the carry (not the --dry-run preview) once the note is written.
+  const six = collapse(sectionOf(text, /^### 6\. /))
+  if (!six.split(/(?<=[.!?])\s+/).some((x) => /reconcile-rollout\.py carry --from/.test(x) && !/--dry-run/.test(x) &&
+    /\bwritten\b/.test(x))) fails.push('carry-in-6')
+  // close-out-last: the LABEL paragraph sits after the step-7 heading and says it runs after step 7.
+  const lines = text.split('\n')
+  const seven = lines.findIndex((l) => /^### 7\. /.test(l))
+  const label = lines.findIndex((l) => l.includes(LABEL))
+  if (seven < 0 || label < seven || !/after step 7\b/.test(collapse(paragraph(text, LABEL)))) fails.push('close-out-last')
+  return fails
+}
+
+test('schedule writes the new note, carries into it, stamps, then closes out the prior rollout last', () => {
+  assert.deepEqual(checkSupersedeOrder(schedule), [])
+})
+
+const ORDER_GOOD = [
+  '### 6. Write the rollout note', '',
+  'Once this note is written, run `python3 x/reconcile-rollout.py carry --from <prior>.md --to <this>.md`. It re-points the tasks.', '',
+  '### 7. Update each task\'s frontmatter', '', 'Stamp every task.', '',
+  '### 7.5. Close out a superseded rollout', '',
+  `${LABEL} Close out the prior rollout last, after step 7 has stamped this rollout's tasks.`, '',
+  '### 8. Print summary', '',
+].join('\n')
+
+test('control baseline: the synthetic order holds every rule', () => {
+  assert.deepEqual(checkSupersedeOrder(ORDER_GOOD), [])
+})
+
+test('control: no carry in step 6 fails carry-in-6', () => {
+  assert.deepEqual(checkSupersedeOrder(ORDER_GOOD.replace(/Once this note is written, run `[^`]*`\./, 'Write it.')), ['carry-in-6'])
+})
+
+test('control: a carry that does not wait for the written note fails carry-in-6', () => {
+  assert.deepEqual(checkSupersedeOrder(ORDER_GOOD.replace('Once this note is written, run', 'Run')), ['carry-in-6'])
+})
+
+test('control: the close-out paragraph inside step 6 fails close-out-last', () => {
+  const para = `${LABEL} Close out the prior rollout last, after step 7 has stamped this rollout's tasks.`
+  const moved = ORDER_GOOD.replace(`${para}\n`, '').replace('It re-points the tasks.\n', `It re-points the tasks.\n\n${para}\n`)
+  assert.deepEqual(checkSupersedeOrder(moved), ['close-out-last'])
+})
+
+test('control: a close-out paragraph that does not say "after step 7" fails close-out-last', () => {
+  assert.deepEqual(checkSupersedeOrder(ORDER_GOOD.replace(', after step 7 has stamped this rollout\'s tasks', '')), ['close-out-last'])
 })

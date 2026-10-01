@@ -179,21 +179,20 @@ the gate is empty), carry straight on to § 6.
 - **Run the execution-fit test** on each phase the reshuffle touched and on each other open
   cluster, and name its lane. Mixed sets split, as the fit-test doc says.
 - **Wave-shaped → the rollout lane, scheduled here.** Run
-  `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md` with `--tasks` naming exactly the members of
-  the wave-shaped phases (or clusters) on that repo: never a bare project run, which would also
-  sweep up misfits, session-lane phases and whatever the grill left unresolved. A scoped target
-  routes only the tasks its own reshuffle wrote. **At most one rollout is live per repo**, so first
-  look for an open rollout note directly in `Work/Tasks/` whose `Project root:` line is this repo,
-  and read it with
-  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py status --rollout <note>`
-  (local, no network):
-  - **None** → schedule `--tasks <members>`.
-  - **This project's, `paused`, and every unlanded task of it still `status: open`** → schedule
-    `--regenerate --tasks <members + those tasks>`, so the new rollout **supersedes** it.
-  - **Anything else** (running, halted or stuck, holding tasks in another state, or another
-    project's) → schedule nothing and touch nothing. The phases are written and wait; orient
-    names the next move: `/thread:status` (then `repair`) for a stuck rollout, or a later
-    `/thread:orient <project>` (Steer only is enough) once the repo is free.
+  `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md` with `--regenerate --tasks <members>`, naming
+  exactly the members of the wave-shaped phases (or clusters) on that repo: never a bare project
+  run, which would also sweep up misfits, session-lane phases and whatever the grill left
+  unresolved. A scoped target routes only the tasks its own reshuffle wrote. **At most one
+  unfinished rollout per repo**, and schedule § 0's unfinished-rollout check enforces it.
+  `--regenerate` is orient's supersede policy: the check allows a supersede only for a paused or
+  never-started rollout of this project (its unlanded tasks carry into the new one), and schedule
+  § 0 finishes an interrupted supersede on its own.
+  - **Schedule stopped at § 0** (one of its checks refused; for this check, another project's
+    rollout on the repo, one that has run and is not paused, or two at once) → schedule stamped
+    no task and wrote no note, so orient must schedule nothing and touch nothing else. The phases
+    are written and wait; orient reports schedule's remedy and names the next move:
+    `/thread:status` (then `repair`) for a stuck rollout, or a later `/thread:orient <project>`
+    (Steer only is enough) once the repo is free.
   - **Uncommitted grill docs.** If R3's grill left `CONTEXT.md` or `docs/adr/` changes
     uncommitted in the target repo, schedule nothing there either: every worktree branches from
     `origin`, which lacks them. Name them as the next move (land them through the repo's PR
@@ -340,6 +339,7 @@ lightweight version of this.
   decides, hard); execute runs only through the execute offer; batch clusters never grow a merge
   engine here.
 - **Don't batch a wave-shaped cluster**, and don't schedule a bare project run (always `--tasks`).
-- **Never a second rollout per repo, and never another rollout's lifecycle.** Supersede only a
-  paused one whose unlanded tasks are all `status: open`; anything else waits (§ 6).
+- **Never a second unfinished rollout per repo, and never another rollout's lifecycle**: schedule
+  § 0 supersedes only what its unfinished-rollout check allows (this project's, paused or never
+  started); anything else waits (§ 6).
 - **Don't use orient for a single live thread** — that's `next`.
