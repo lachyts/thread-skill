@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Accumulated feedback (p6-4): reconcile keeps every run's feedback under one heading as numbered runs,
-# a re-reconcile of the same result is a no-op, an agent's same-run copy is adopted in place, and nothing
-# already written is deleted or rewritten. Temp notes only.
+# a re-reconcile of the same result is a no-op (headings or run markers inside the content included), an
+# agent's same-run copy is adopted in place, and nothing already written is deleted or rewritten. Temp
+# notes only.
 # Usage: bash reconcile-rollout-runs.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -22,6 +23,7 @@ runblock() {  # runblock <slug> <n>: the Run n block, heading through its end ma
   awk -v n="$2" 'index($0, "### Run " n " (") == 1 {on=1} on {print} on && index($0, "<!-- run " n " end") == 1 {exit}' "$D/$1.md"
 }
 sha12() { python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:12])' "$1"; }
+json() { python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"; }   # json <text>: a JSON string
 
 cat > "$D/ro.md" <<'EOF'
 ---
@@ -168,6 +170,43 @@ c=$(cksum < "$D/hm.md"); rec >/dev/null
 ok "$(cksum < "$D/hm.md")" "$c" "the extent hash still sees an equal latest run"
 res hm blocked 'blockerDiagnosis="second"'; rec >/dev/null
 ok "$(cnt hm '### Run 2 (')|$(cntx hm 'first')|$(cntx hm 'second')" "1|1|1" "a different result appends Run 2"
+
+echo "== headings in the content never end the section"
+# Implementer diagnoses are free LLM text: a `## ` line in a run would end its section for every reader,
+# so the next reconcile would insert Run 2 inside Run 1 and duplicate it.
+mkt hd
+HD=$'summary line\n\n## Root cause\n\nenv mismatch'
+res hd blocked "blockerDiagnosis=$(json "$HD")"; rec >/dev/null
+c=$(cksum < "$D/hd.md"); out=$(rec)
+ok "$(cksum < "$D/hd.md")" "$c" "a ## line in the content: a same-result re-reconcile changes no byte"
+case "$out" in *"[no-change]"*) ok y y "… and reports [no-change]";; *) ok n y "… and reports [no-change]";; esac
+ok "$(cnt hd '### Run 2 (')|$(cntx hd '## Root cause')|$(cntx hd '##### Root cause')" "0|0|1" \
+  "… one run, its ## heading written three levels down"
+ok "$(runblock hd 1 | tail -1)" "<!-- run 1 end sha=$(sha12 "$HD") -->" "… the sha is over the content as given"
+res hd blocked 'blockerDiagnosis="second diagnosis"'; rec >/dev/null
+ok "$(cnt hd '### Run 2 (')|$(before hd '##### Root cause' '### Run 2 (')|$(before hd '### Run 2 (' 'second diagnosis')" "1|y|y" \
+  "… and a later run follows the whole of Run 1"
+
+mkt qr
+QR=$'retrying after\n# Earlier attempt\n### Run 1 (2026-10-01T09:00+00:00)\n<!-- run 1 end sha=0123456789ab -->\nstill red'
+res qr blocked "blockerDiagnosis=$(json "$QR")"; rec >/dev/null
+c=$(cksum < "$D/qr.md"); rec >/dev/null
+ok "$(cksum < "$D/qr.md")" "$c" "a quoted run heading and end marker: a re-reconcile changes no byte"
+ok "$(grep -c '^### Run' "$D/qr.md")|$(grep -c '^<!-- run' "$D/qr.md")|$(cntx qr '#### Earlier attempt')" "1|1|1" \
+  "… one run heading, one end marker, an H1 pushed down to H4"
+
+mkt ah $'\n## Blocker diagnosis\n\n# Verifier\nred on main\n'
+res ah blocked "blockerDiagnosis=$(json $'# Verifier\nred on main')"; rec >/dev/null
+ok "$(cntx ah '# Verifier')|$(cntx ah '#### Verifier')|$(before ah '# Verifier' '### Run 1 (')" "1|1|y" \
+  "an equal agent copy holding a heading is kept and Run 1 appended, never adopted with the heading"
+c=$(cksum < "$D/ah.md"); rec >/dev/null
+ok "$(cksum < "$D/ah.md")" "$c" "… and a re-reconcile is a no-op"
+
+mkt gp
+res gp gate-pending "blockerDiagnosis=$(json "$HD")"; rec >/dev/null
+c=$(cksum < "$D/gp.md"); rec >/dev/null
+ok "$(cksum < "$D/gp.md")" "$c" "gate-pending: a ## line in the fallback diagnosis, re-upserted, changes no byte"
+ok "$(cntx gp '## Gated inputs (awaiting sign-off)')|$(cnt gp 'env mismatch')" "1|1" "… one section, the content once"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-runs: ALL PASS"; else echo "reconcile-rollout-runs: FAILED"; fi

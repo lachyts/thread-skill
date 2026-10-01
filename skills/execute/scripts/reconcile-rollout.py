@@ -119,7 +119,10 @@ Accumulated feedback (p6-4): the run sections keep every run, never only the fir
   <!-- run <n> end sha=<12 hex> -->
 
 where sha is the sha256 of the normalised content (lines right-stripped, outer blank lines dropped, runs
-of blank lines collapsed). See Note.append_run for the rules; nothing already written is ever deleted.
+of blank lines collapsed). The content is written neutralised: a heading at level 1-3 in it is pushed
+three levels down and a run-end-shaped line is indented, so feedback text can never end its section or
+open or close a run (the sha stays over the content as given). See Note.append_run for the rules; nothing
+already written is ever deleted.
 """
 
 import argparse
@@ -180,6 +183,11 @@ INTEGRATION_PREFIX = "integration:"                 # a blocked task's latest di
 
 RUN_HEAD_RE = re.compile(r"^### Run (\d+) \(([^)]*)\)\s*$")
 RUN_END_RE = re.compile(r"^<!-- run (\d+) end sha=([0-9a-f]{12}) -->\s*$")
+# Lines of written content the note's structure would misread (see _neutralise): an ATX heading at level
+# 1-3, whatever its indentation (`## ` ends a section, `### Run <n> (…)` opens a run, and section lookups
+# match a heading on its stripped text), and anything shaped like a run end marker.
+STRUCTURAL_HEADING_RE = re.compile(r"^([ \t]*)(#{1,3})(?=[ \t]|$)")
+RUN_END_LIKE_RE = re.compile(r"^<!-- run \d+ end\b")
 FILESET_RE = re.compile(r"^\s*[-*]\s+(?P<slug>[^\s:]+?)(?:\s+\(wave\s+\d+\))?\s*:\s*(?P<files>.*)$")
 WIKILINK_RE = re.compile(r"\[\[([^\]]+?)\]\]")
 # A wikilink's target up to its alias, heading or block anchor. A table cell escapes the alias pipe
@@ -325,6 +333,22 @@ def _normalise(text: str) -> str:
 
 def _sha12(normalised: str) -> str:
     return hashlib.sha256(normalised.encode("utf-8")).hexdigest()[:12]
+
+
+def _neutralise(text: str) -> str:
+    """Content as written into a section. Feedback is free LLM text, so a line of it can look like note
+    structure: a `## ` line would end the section for every reader (the next reconcile would put Run 2
+    inside Run 1), a `### Run <n> (…)` line would open a run and an end marker would close one. A heading
+    at level 1-3 is pushed three levels down (`## Root cause` -> `##### Root cause`, keeping the
+    hierarchy under its `### Run` heading) and a run-end-shaped line is indented one space (still a
+    comment). Every other line is unchanged. Hashes are over the content as given, never this form."""
+    out = []
+    for line in text.split("\n"):
+        line = STRUCTURAL_HEADING_RE.sub(r"\1###\2", line)
+        if RUN_END_LIKE_RE.match(line):
+            line = " " + line
+        out.append(line)
+    return "\n".join(out)
 
 
 def _run_end(n: int, sha: str) -> str:
@@ -488,7 +512,10 @@ class Note:
     def upsert_section(self, heading: str, content: str):
         """Create `## heading` with content, or REPLACE the existing section's content in place
         (unlike append_section's heading-idempotence — for sections whose content must track the
-        latest state, e.g. a refreshed gated-inputs declaration). Idempotent on identical content."""
+        latest state, e.g. a refreshed gated-inputs declaration). Idempotent on identical content: the
+        content is written neutralised, so a `## ` line in it can never end the section (which would
+        make the next upsert duplicate everything after that line)."""
+        content = _neutralise(content.rstrip())
         found = self._section_bounds(heading)
         if found is None:
             self.append_section(heading, content)
@@ -539,32 +566,38 @@ class Note:
     def append_run(self, heading: str, content: str, now):
         """Record one run of feedback under `heading` (p6-4: every run is kept, not only the first).
 
-        Rules, in order (content is normalised; empty content writes nothing):
+        Rules, in order (content is normalised, the sha is over that, and it is written neutralised —
+        see _neutralise; empty content writes nothing):
           1. No section: create it holding Run 1.
           2. The highest run's recorded sha equals the new sha: do nothing (a re-reconcile of the same
-             result). A run whose end marker is gone is hashed over its normalised extent instead.
-             Earlier runs are never compared, so A/B/A appends A again.
+             result). A run whose end marker is gone is compared by its normalised extent against the
+             neutralised content instead. Earlier runs are never compared, so A/B/A appends A again.
           3. The foreign tail — the text after the last end marker, or the whole section when it has no
-             runs — normalises equal to the new content: adopt it in place, inserting the heading before
-             its first non-blank line and the marker after its last, changing none of its bytes. This is
-             the same-run copy an implementer agent writes into the note itself.
+             runs — normalises equal to the new content, and that content has no line _neutralise would
+             change: adopt it in place, inserting the heading before its first non-blank line and the
+             marker after its last, changing none of its bytes. This is the same-run copy an implementer
+             agent writes into the note itself. (Content with such a line is appended instead: adopting
+             it would keep a structural line inside the run.)
           4. Otherwise append the block at the end of the section.
         Nothing already written is deleted or rewritten; legacy text with no run heading stays as it is."""
         body = _normalise(content)
         if not body:
             return
         sha = _sha12(body)
+        written = _neutralise(body)
         found = self._section_bounds(heading)
         if found is None:
-            self.append_section(heading, f"### Run 1 ({_stamp(now)})\n\n{body}\n\n{_run_end(1, sha)}")
+            self.append_section(heading, f"### Run 1 ({_stamp(now)})\n\n{written}\n\n{_run_end(1, sha)}")
             return
         lines, start, end = found
         runs = _parse_runs(lines, start + 1, end)
         if runs:
             top = _top_run(runs)
-            top_sha = top["sha"] if top["end"] is not None else \
-                _sha12(_normalise("\n".join(lines[top["head"] + 1:top["stop"]])))
-            if top_sha == sha:
+            if top["end"] is not None:
+                same = top["sha"] == sha
+            else:
+                same = _normalise("\n".join(lines[top["head"] + 1:top["stop"]])) == written
+            if same:
                 return
         n = max((r["n"] for r in runs), default=0) + 1
         head = f"### Run {n} ({_stamp(now)})"
@@ -574,8 +607,8 @@ class Note:
         else:
             marked = [r["end"] for r in runs if r["end"] is not None]
             tail_lo = max(marked) + 1 if marked else None
-        if tail_lo is not None and not any(RUN_HEAD_RE.match(line) for line in lines[tail_lo:end]) \
-                and _normalise("\n".join(lines[tail_lo:end])) == body:
+        # written == body also rules out a `### Run` line in the tail (it would equal a body line).
+        if tail_lo is not None and written == body and _normalise("\n".join(lines[tail_lo:end])) == body:
             filled = [i for i in range(tail_lo, end) if lines[i].strip()]
             first, last = filled[0], filled[-1]
             pre = ([""] if lines[first - 1].strip() else []) + [head, ""]
@@ -586,7 +619,7 @@ class Note:
         j = end
         while j > start + 1 and not lines[j - 1].strip():
             j -= 1
-        block = ["", head, "", *body.split("\n"), "", _run_end(n, sha), ""]
+        block = ["", head, "", *written.split("\n"), "", _run_end(n, sha), ""]
         self._set_body_lines(lines[:j] + block + lines[end:] if end < len(lines) else lines[:j] + block)
 
     def render(self) -> str:
