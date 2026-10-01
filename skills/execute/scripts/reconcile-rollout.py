@@ -1,51 +1,52 @@
 #!/usr/bin/env python3
-"""reconcile-rollout.py — deterministic vault bookkeeping for wave-execute (findings #6 + #7).
+"""reconcile-rollout.py — deterministic vault bookkeeping for a rollout's queue (ADR 0030).
 
-The Workflow engine (`task.workflow.js`) returns a structured result; the lead session used to
-hand-edit ~5 frontmatter transitions per wave (status + pr + *_rounds_used) plus the cursor advance — 50+
-fumble-prone edits across a rollout. This helper performs ALL of those writes deterministically from the
-returned task array, and (finding #7) computes the per-task resume set so a partial wave resumes without
-re-dispatching already-landed work.
+The Workflow engine (`task.workflow.js`) returns a structured result per task call, and the lead session
+used to hand-edit the frontmatter transitions (status + pr + *_rounds_used). This helper performs every
+one of those writes deterministically, and reads the rollout's progress back from the task notes: there
+is no stored cursor (ADR 0030). A task note's `status:` plus its `started:` / `merged:` / `integrating:`
+stamps ARE the rollout's state.
 
-Eleven subcommands:
+Subcommands:
 
   reconcile   Read the workflow result JSON ({rolloutSlug, tasks:[...]}) and write each task note's
-              frontmatter + any blocked-feedback body section. Idempotent (safe to re-run on resume).
+              frontmatter + its feedback section. Idempotent (safe to re-run on resume). A `review` row
+              whose scope is read-only and that carries no PR is written `status: done`: a read-only task
+              is done when its review approves and never enters Integration. Every row removes
+              `integrating:` (the run that produced the row ended any Integration).
 
-  cursor      Set `merged_through_wave: N` on a rollout note (the durable continuous-mode cursor),
-              run AFTER merge-wave.sh reports `ok` for wave N. Also the SOFT-PAUSE honour point:
-              when the rollout note carries `pause_requested: true`, it stamps `paused: <timestamp>`,
-              clears the flag, and prints a `paused=` line — the caller (execute §4.5) must then end
-              the wave loop instead of launching the next wave. Riding the cursor step means the
-              pause lands on a clean wave boundary with zero extra agent calls. Also the MERGE-side
-              wave-boundary timestamp (progress/ETA): stamps `wave_N_merged: <timestamp>` (first
-              merge wins) and prints a `progress:` line with elapsed + the rough (~) remaining
-              estimate when the rollout carries dispatch stamps.
+  next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start
+              and restart within the parallel ceiling, every held task with its reason, the running,
+              awaiting-Integration, integrating and set-aside tasks, the pause state, the halt verdict
+              and the progress line. Notes are re-read on every call, so a `priority:` edit reorders a
+              live queue. Honours a soft pause: once nothing runs, awaits or integrates, it stamps
+              `paused:` and removes `pause_requested` (the drain, ADR 0030 decision 5).
 
-  mark-dispatched  Stamp `wave_N_dispatched: <timestamp>` on a rollout note at wave launch — the
-              DISPATCH-side wave boundary (progress/ETA). First dispatch wins (a resume re-dispatch
-              of a partially-landed wave never resets the wave clock); prints the same `progress:`
-              line as cursor. The Workflow sandbox has no clock (Date.now() throws), so both wave
-              boundaries enter through this script, never the engine.
+  mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
+              `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here.
 
-  mark-done   Flip task notes `status: review` -> `status: done`, run AFTER the wave's merge is
-              confirmed (merge-wave.sh `ok` sentinel). `review` means "landed, awaiting confirmation";
-              the merge IS that confirmation for PR tasks, and the wave completing is it for read-only
-              tasks (master-review approval, nothing to merge). Refuses any note at another status —
-              a blocked/unmerged task can never be swept to done. Idempotent (already-done = no-op).
+  mark-integrating Stamp `integrating: <time>` on a `review` note with a `pr:` as its Integration begins
+              (the first wins): the durable signal /thread:status reads.
 
-  resume-filter  Given a wave's task slugs, print (one per line) the slugs that still need dispatch —
-              i.e. whose current note status is NOT already landed/approved ({done, review, merged}).
-              This is the per-task resume rule: the task-note status is the source of truth, so a wave
-              that returned one approved + one blocked resumes by re-dispatching only the blocked one.
+  mark-done   Flip task notes `status: review` -> `status: done`, run AFTER the task's merge is confirmed.
+              Stamps `merged: <time>` on a PR task with no stamp yet and removes `integrating:`. Refuses
+              any note at another status — a blocked/unmerged task can never be swept to done.
+              Idempotent (already-done = no-op). Read-only tasks never need it: reconcile writes them done
+              on approval.
+
+  resume      A task whose PR merged but whose note was never marked (p6-8): for each linked note that
+              is not done, merged or dropped and carries `pr:`, ask gh for the PR's state and base. A PR
+              MERGED into the repo's default branch flips the note to done with `merged:` from mergedAt.
+              Anything else (merged into another base, OPEN, CLOSED) is reported and left alone.
+
+  resume-filter  Given task slugs, print (one per line) the slugs that still need dispatch — i.e. whose
+              current note status is NOT already landed/approved ({done, review, merged}). gate-pending
+              notes are excluded too (they await a human sign-off).
 
   status      Read-only situational scan for /thread:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
-              `## File-sets` block omits) and emit JSON {rollout, merged_through_wave, status, timeline,
-              tasks: [{slug, wave, status, pr, blockerSummary}]}. `timeline` is the progress/ETA block
-              computed from the wave_N_dispatched/wave_N_merged stamps (null when the note has none) —
-              durable, so elapsed + the rough estimate render without any workflow run being alive.
-              Pure read; no network (the skill owns gh/git).
+              `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
+              pause_requested, ceiling, counts, progress, timeline, tasks}. Pure read; no network.
 
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
@@ -59,9 +60,10 @@ Eleven subcommands:
               that isn't in a blocked state — the CALLER (the /thread:repair skill) must have verified
               the work truly landed (e.g. `gh pr view` shows MERGED) before invoking. Idempotent.
 
-  defer       Pop task(s) out of a rollout, back to open backlog: clears `wave:`/`rollout:`/`owner:`
-              and sets `status: open` so a future /thread:schedule re-plans them. The dependent-closure
-              safety check lives in the /thread:repair skill; this only does the frontmatter surgery.
+  defer       Pop task(s) out of a rollout, back to open backlog: clears `wave:`/`rollout:`/`owner:` and
+              the `started:`/`merged:`/`integrating:` stamps (first-start-wins would otherwise carry a
+              stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
+              re-plans them. The dependent-closure safety check lives in the /thread:repair skill.
 
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
               `pause_requested`) from the rollout note. Run by /thread:execute's resume path when it
@@ -76,26 +78,56 @@ Eleven subcommands:
               isn't gate-pending; idempotent once approved (already-approved note = no-op). Run by
               the lead session ONLY after the human explicitly signs off — never unattended.
 
-Stdlib only (the claude-config repo has no dependency manager). Frontmatter is edited line-surgically
-(not via a YAML round-trip) to preserve field order, comments, and spacing exactly — matching how the
-rest of the vault tooling treats frontmatter.
+Stdlib only. Frontmatter is edited line-surgically (not via a YAML round-trip) to preserve field order,
+comments, and spacing exactly — matching how the rest of the vault tooling treats frontmatter. Importing
+this module has no side effects: reconcile-project.py loads `Note` from it.
 
-Status mapping (workflow status -> note writes), per wave-execute/SKILL.md §6:
+Queue states (one per linked task, re-read on every call):
+  done                                        -> merged
+  review + pr:                                -> integrating (with `integrating:`), else awaiting-integration
+  review, no pr:, scope read-only             -> merged (a legacy read-only approval)
+  review, no pr:, any other scope             -> set-aside ("approved without a PR")
+  in_progress                                 -> running
+  open / no status                            -> queued
+  review-blocked, blocked, plan-blocked,
+  gate-pending                                -> set-aside; setAsideAt `integration` when blocked and the
+                                                 latest `## Blocker diagnosis` run starts `integration:`,
+                                                 `gate` for gate-pending, otherwise `run`
+  merged (an affine tombstone)                -> folded, outside N
+  anything else (dropped, parked)             -> other, outside N
+
+Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
   review         -> status: review;        pr: <url>; review_rounds_used: <n>; plan_rounds_used: <n> (if >0);
-                    when approvedAtCeiling: append reviewHistory (grouped by round) under
+                    read-only with no PR -> status: done instead;
+                    when approvedAtCeiling: a run of reviewHistory (grouped by round) under
                     "## Review history (approved at ceiling)" — ceiling approvals stay auditable
-  review-blocked -> status: review-blocked; pr: <url>; append reviewHistory (grouped by round; legacy
+  review-blocked -> status: review-blocked; pr: <url>; a run of reviewHistory (grouped by round; legacy
                     results without it fall back to final-round reviewFeedback) under "## Review-blocked feedback"
-  blocked        -> status: blocked;        append blockerDiagnosis under "## Blocker diagnosis" (if absent)
-  plan-blocked   -> status: plan-blocked;   append blockerDiagnosis under "## Plan-blocked feedback"
+  blocked        -> status: blocked;        a run of blockerDiagnosis under "## Blocker diagnosis"
+  plan-blocked   -> status: plan-blocked;   a run of blockerDiagnosis under "## Plan-blocked feedback"
   gate-pending   -> status: gate-pending;   UPSERT gatedInputs under "## Gated inputs (awaiting sign-off)"
                     (upsert, not append: a refreshed declaration replaces the pending list, never stales)
+
+Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
+
+  ### Run <n> (<stamp>)
+
+  <content>
+
+  <!-- run <n> end sha=<12 hex> -->
+
+where sha is the sha256 of the normalised content (lines right-stripped, outer blank lines dropped, runs
+of blank lines collapsed). See Note.append_run for the rules; nothing already written is ever deleted.
 """
 
 import argparse
+import fnmatch
+import hashlib
 import json
+import math
 import os
 import re
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -108,7 +140,7 @@ LANDED_STATUSES = {"done", "review", "merged"}
 # Which workflow statuses carry a PR to record.
 STATUS_WITH_PR = {"review", "review-blocked"}
 
-# Per-status body section to append when the engine reports blocked feedback.
+# Per-status body section a run of feedback is written under.
 BLOCKED_SECTIONS = {
     "review-blocked": "## Review-blocked feedback",
     "blocked": "## Blocker diagnosis",
@@ -123,10 +155,10 @@ GATE_PENDING_SECTION = "## Gated inputs (awaiting sign-off)"
 APPROVED_GATES_SECTION = "## Approved gates"
 
 # Review-loop memory (2026-08-14): an approval on the FINAL review round with real rejection history
-# (engine flag approvedAtCeiling) persists the accumulated by-round rationale — previously only
-# blocked outcomes wrote anything, so ceiling approvals were unauditable. An AUDIT RECORD, not an
-# instruction: deliberately absent from the engine's PRIOR_FEEDBACK_NOTE authoritative-sections list
-# (a landed task is never re-dispatched).
+# (engine flag approvedAtCeiling) persists the accumulated by-round rationale. An AUDIT RECORD, not an
+# instruction: deliberately absent from the engine's PRIOR_FEEDBACK_NOTE authoritative-sections list.
+# Accumulated per run, like the blocked sections: an Integration rejection can produce a second
+# ceiling approval for the same task.
 REVIEW_HISTORY_SECTION = "## Review history (approved at ceiling)"
 
 # Every workflow status with a body section to write (reconcile) or scan (status).
@@ -135,11 +167,184 @@ SECTION_BY_STATUS = {**BLOCKED_SECTIONS, GATE_PENDING_STATUS: GATE_PENDING_SECTI
 # Matches the "(approved <date>)" sign-off annotation approve-gates appends to a gate line.
 GATE_ANNOT_RE = re.compile(r"\s*\(approved [^)]*\)\s*$", re.I)
 
-# Wave-boundary timestamp fields (progress/ETA). Deliberately FLAT per-wave frontmatter keys —
-# the human-decided shape (task note "## Repair input", 2026-07-18): matches this script's
-# line-surgical editing (no nested-YAML surgery), individually queryable, trivially greppable.
-# Never a nested `timeline:` map.
-WAVE_STAMP_RE = re.compile(r"^wave_(\d+)_(dispatched|merged):\s*(.*)$")
+# ---- the queue (ADR 0030) ----
+DEFAULT_CEILING = 4
+SET_ASIDE_STATUSES = {"review-blocked", "blocked", "plan-blocked", GATE_PENDING_STATUS}
+FINISHED_STATUSES = {"done", "merged", "dropped"}   # mark-started refuses these; resume skips them
+OUTSIDE_N = {"folded", "other"}                     # queue states that are not part of the rollout's N
+# The vault's TaskNotes priority scale. `medium`, missing or unknown read as normal.
+PRIORITY_WEIGHTS = {"high": 3, "normal": 2, "low": 1, "none": 0}
+INTEGRATION_PREFIX = "integration:"                 # a blocked task's latest diagnosis -> set aside at Integration
+
+RUN_HEAD_RE = re.compile(r"^### Run (\d+) \(([^)]*)\)\s*$")
+RUN_END_RE = re.compile(r"^<!-- run (\d+) end sha=([0-9a-f]{12}) -->\s*$")
+FILESET_RE = re.compile(r"^\s*[-*]\s+(?P<slug>[^\s:]+?)(?:\s+\(wave\s+\d+\))?\s*:\s*(?P<files>.*)$")
+WIKILINK_RE = re.compile(r"\[\[([^\]]+?)\]\]")
+WIKILINK_OPEN_RE = re.compile(r"\[\[([^\]|#]+)")
+PROJECT_ROOT_RE = re.compile(r"^Project root:\s*`?([^`\n]+?)`?\s*$", re.M)
+PR_URL_RE = re.compile(r"^https://github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)/?$")
+PR_NUM_RE = re.compile(r"^#?(\d+)$")
+
+
+# ---- small value helpers ----------------------------------------------------
+
+def _scalar(value) -> str:
+    """A frontmatter scalar: inline ` # comment` dropped, quotes and whitespace stripped ('' for None)."""
+    if value is None:
+        return ""
+    s = re.sub(r"\s+#.*$", "", str(value)).strip()
+    return s.strip('"').strip("'").strip()
+
+
+def _truthy_flag(value) -> bool:
+    """Frontmatter boolean-ish: true/yes/1 (any case, quoted or bare) counts as set."""
+    if value is None:
+        return False
+    return _scalar(value).lower() in {"true", "yes", "1"}
+
+
+def _int_field(value, default):
+    """Parse an int-ish frontmatter value, tolerating quotes and inline `# comments`."""
+    if value is None:
+        return default
+    s = str(value).split("#", 1)[0].strip().strip('"').strip("'")
+    try:
+        return int(s)
+    except ValueError:
+        return default
+
+
+def _wikilink_slug(value):
+    """Normalise a frontmatter wikilink/string (`"[[Area/Foo|alias]]"`) to a bare slug for comparison."""
+    if value is None:
+        return None
+    s = value.strip().strip('"').strip("'").strip()
+    s = s.replace("[[", "").replace("]]", "").strip()
+    s = s.split("|")[0].split("/")[-1].strip()  # drop any alias, then any path, keep the leaf
+    if s.endswith(".md"):
+        s = s[:-3]
+    return s or None
+
+
+def _list_items(value: str):
+    """The entries of a frontmatter value: every [[wikilink]] in it, else an inline `[a, b]` list's
+    items, else the scalar itself. Quotes stripped; `null`/`~` and empty entries dropped."""
+    links = WIKILINK_RE.findall(value)
+    if links:
+        return links
+    v = value.strip()
+    parts = v[1:-1].split(",") if (v.startswith("[") and v.endswith("]")) else [v]
+    out = []
+    for p in parts:
+        p = p.strip().strip('"').strip("'").strip()
+        if p and p.lower() not in ("null", "~"):
+            out.append(p)
+    return out
+
+
+# ---- time ---------------------------------------------------------------------
+# The Workflow sandbox cannot read clocks (Date.now() throws), so wall-clock enters here. Every stamp
+# this script writes comes from one helper, so durations never mix forms.
+
+def _stamp(dt) -> str:
+    """The one stamp format: local time, minute precision, with its offset (2026-10-02T14:05+10:00)."""
+    return dt.astimezone().isoformat(timespec="minutes")
+
+
+def _parse_ts(value):
+    """ISO timestamp from a frontmatter value or gh's mergedAt, or None. A trailing Z is parsed (Python
+    3.9's fromisoformat refuses it); naive values are assumed local time."""
+    s = _scalar(value)
+    if not s:
+        return None
+    if s[-1] in "Zz":
+        s = s[:-1] + "+00:00"
+    try:
+        ts = datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    return ts if ts.tzinfo else ts.astimezone()
+
+
+def _iso_arg(value):
+    """argparse type for --now."""
+    ts = _parse_ts(value)
+    if ts is None:
+        raise argparse.ArgumentTypeError(f"not an ISO timestamp: {value!r}")
+    return ts
+
+
+def _now(args):
+    return getattr(args, "now", None) or datetime.now().astimezone()
+
+
+def _fmt_min(minutes) -> str:
+    """42 -> '42m', 84 -> '1h 24m', 120 -> '2h'."""
+    m = max(0, int(round(minutes)))
+    if m < 60:
+        return f"{m}m"
+    h, r = divmod(m, 60)
+    return f"{h}h {r}m" if r else f"{h}h"
+
+
+def _rough_label(minutes, infix: str = "") -> str:
+    """The single rendering of the remaining estimate — always '~<duration>[infix] (rough)'. Both
+    `remainingLabel` and the progress line derive from here so the 'always labelled rough' invariant has
+    one source and the two renderings can never drift."""
+    return f"~{_fmt_min(minutes)}{infix} (rough)"
+
+
+# ---- accumulated runs (p6-4) ------------------------------------------------------
+
+def _normalise(text: str) -> str:
+    """Lines right-stripped, outer blank lines dropped, runs of blank lines collapsed."""
+    lines = [line.rstrip() for line in str(text).split("\n")]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    out = []
+    for line in lines:
+        if not line and out and not out[-1]:
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def _sha12(normalised: str) -> str:
+    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()[:12]
+
+
+def _run_end(n: int, sha: str) -> str:
+    return f"<!-- run {n} end sha={sha} -->"
+
+
+def _parse_runs(lines, lo: int, hi: int):
+    """The run blocks among lines[lo:hi]: [{n, head, end, sha, stop}]. `end` is the end marker's index
+    (None when it is gone) and `stop` the exclusive end of the run's content: its marker, or — for a run
+    whose marker was removed — the next run heading or the section end."""
+    runs, cur = [], None
+    for i in range(lo, hi):
+        mh = RUN_HEAD_RE.match(lines[i])
+        if mh:
+            if cur is not None:
+                cur["stop"] = i
+                runs.append(cur)
+            cur = {"n": int(mh.group(1)), "head": i, "end": None, "sha": None, "stop": hi}
+            continue
+        me = RUN_END_RE.match(lines[i])
+        if me and cur is not None and int(me.group(1)) == cur["n"]:
+            cur.update(end=i, sha=me.group(2), stop=i)
+            runs.append(cur)
+            cur = None
+    if cur is not None:
+        runs.append(cur)
+    return runs
+
+
+def _top_run(runs):
+    """The highest-numbered run (the later one on a duplicate number)."""
+    return max(enumerate(runs), key=lambda e: (e[1]["n"], e[0]))[1]
 
 
 # ---- frontmatter surgery (order/format preserving) --------------------------
@@ -164,6 +369,28 @@ class Note:
             if mm:
                 return mm.group(1).strip()
         return None
+
+    def get_list(self, key: str):
+        """`key:` as a list: a block list (`key:` then `  - item` lines), an inline `[a, b]` list or a
+        scalar. Each entry is a wikilink's inner text or a bare value (callers normalise slugs with
+        _wikilink_slug). [] when the key is absent or empty."""
+        pat = re.compile(rf"^{re.escape(key)}:(.*)$")
+        for i, line in enumerate(self._fm):
+            mm = pat.match(line)
+            if not mm:
+                continue
+            value = re.sub(r"\s+#.*$", "", mm.group(1)).strip()
+            if value:
+                return _list_items(value)
+            out = []
+            for item in self._fm[i + 1:]:
+                mi = re.match(r"^\s*-\s*(.*)$", item)
+                if mi:
+                    out.extend(_list_items(re.sub(r"\s+#.*$", "", mi.group(1)).strip()))
+                elif item.strip():
+                    break
+            return out
+        return []
 
     def unset(self, key: str):
         """Remove `key:` from the frontmatter entirely. Idempotent; used to retire a marker that a
@@ -240,6 +467,12 @@ class Note:
                 return lines, i, end
         return None
 
+    def _set_body_lines(self, lines):
+        new_body = "\n".join(lines)
+        if new_body != self._body:
+            self._body = new_body
+            self.dirty = True
+
     def upsert_section(self, heading: str, content: str):
         """Create `## heading` with content, or REPLACE the existing section's content in place
         (unlike append_section's heading-idempotence — for sections whose content must track the
@@ -249,11 +482,7 @@ class Note:
             self.append_section(heading, content)
             return
         lines, start, end = found
-        new_lines = lines[:start + 1] + [""] + content.rstrip().split("\n") + [""] + lines[end:]
-        new_body = "\n".join(new_lines)
-        if new_body != self._body:
-            self._body = new_body
-            self.dirty = True
+        self._set_body_lines(lines[:start + 1] + [""] + content.rstrip().split("\n") + [""] + lines[end:])
 
     def remove_section(self, heading: str):
         """Delete `## heading` and its content from the body (idempotent — no-op if absent)."""
@@ -270,6 +499,83 @@ class Note:
             head.append("")  # section was last — preserve the trailing newline
         self._body = "\n".join(head + tail)
         self.dirty = True
+
+    def run_blocks(self, heading: str):
+        """The `### Run <n>` blocks of the first `heading` section ([] when absent or legacy), each
+        {n, head, end, sha, stop, content} with content normalised."""
+        found = self._section_bounds(heading)
+        if found is None:
+            return []
+        lines, start, end = found
+        runs = _parse_runs(lines, start + 1, end)
+        for r in runs:
+            r["content"] = _normalise("\n".join(lines[r["head"] + 1:r["stop"]]))
+        return runs
+
+    def latest_run_text(self, heading: str) -> str:
+        """The section's latest diagnosis: the content of its highest run, or the whole section
+        (normalised) when it has no runs. '' when the section is absent."""
+        found = self._section_bounds(heading)
+        if found is None:
+            return ""
+        runs = self.run_blocks(heading)
+        if runs:
+            return _top_run(runs)["content"]
+        lines, start, end = found
+        return _normalise("\n".join(lines[start + 1:end]))
+
+    def append_run(self, heading: str, content: str, now):
+        """Record one run of feedback under `heading` (p6-4: every run is kept, not only the first).
+
+        Rules, in order (content is normalised; empty content writes nothing):
+          1. No section: create it holding Run 1.
+          2. The highest run's recorded sha equals the new sha: do nothing (a re-reconcile of the same
+             result). A run whose end marker is gone is hashed over its normalised extent instead.
+             Earlier runs are never compared, so A/B/A appends A again.
+          3. The foreign tail — the text after the last end marker, or the whole section when it has no
+             runs — normalises equal to the new content: adopt it in place, inserting the heading before
+             its first non-blank line and the marker after its last, changing none of its bytes. This is
+             the same-run copy an implementer agent writes into the note itself.
+          4. Otherwise append the block at the end of the section.
+        Nothing already written is deleted or rewritten; legacy text with no run heading stays as it is."""
+        body = _normalise(content)
+        if not body:
+            return
+        sha = _sha12(body)
+        found = self._section_bounds(heading)
+        if found is None:
+            self.append_section(heading, f"### Run 1 ({_stamp(now)})\n\n{body}\n\n{_run_end(1, sha)}")
+            return
+        lines, start, end = found
+        runs = _parse_runs(lines, start + 1, end)
+        if runs:
+            top = _top_run(runs)
+            top_sha = top["sha"] if top["end"] is not None else \
+                _sha12(_normalise("\n".join(lines[top["head"] + 1:top["stop"]])))
+            if top_sha == sha:
+                return
+        n = max((r["n"] for r in runs), default=0) + 1
+        head = f"### Run {n} ({_stamp(now)})"
+
+        if not runs:
+            tail_lo = start + 1
+        else:
+            marked = [r["end"] for r in runs if r["end"] is not None]
+            tail_lo = max(marked) + 1 if marked else None
+        if tail_lo is not None and not any(RUN_HEAD_RE.match(line) for line in lines[tail_lo:end]) \
+                and _normalise("\n".join(lines[tail_lo:end])) == body:
+            filled = [i for i in range(tail_lo, end) if lines[i].strip()]
+            first, last = filled[0], filled[-1]
+            pre = ([""] if lines[first - 1].strip() else []) + [head, ""]
+            post = ["", _run_end(n, sha)] + ([""] if last + 1 < len(lines) and lines[last + 1].strip() else [])
+            self._set_body_lines(lines[:first] + pre + lines[first:last + 1] + post + lines[last + 1:])
+            return
+
+        j = end
+        while j > start + 1 and not lines[j - 1].strip():
+            j -= 1
+        block = ["", head, "", *body.split("\n"), "", _run_end(n, sha), ""]
+        self._set_body_lines(lines[:j] + block + lines[end:] if end < len(lines) else lines[:j] + block)
 
     def render(self) -> str:
         return "---\n" + "\n".join(self._fm) + "\n---\n" + self._body
@@ -294,191 +600,319 @@ def history_block(history):
     return "\n\n".join(rounds)
 
 
-def _truthy_flag(value) -> bool:
-    """Frontmatter boolean-ish: true/yes/1 (any case, quoted or bare) counts as set."""
-    if value is None:
-        return False
-    return value.strip().strip('"').strip("'").lower() in {"true", "yes", "1"}
+def _status(note) -> str:
+    return _scalar(note.get("status")).lower()
 
 
-def _int_field(value, default):
-    """Parse an int-ish frontmatter value, tolerating quotes and inline `# comments`."""
-    if value is None:
-        return default
-    s = str(value).split("#", 1)[0].strip().strip('"').strip("'")
-    try:
-        return int(s)
-    except ValueError:
-        return default
+def _pr(note) -> str:
+    return _scalar(note.get("pr"))
 
 
-# ---- progress / ETA (wave-boundary timestamps) ------------------------------
-# The Workflow engine cannot read clocks (Date.now() throws in its sandbox), so wall-clock enters
-# here: mark-dispatched stamps `wave_N_dispatched:` at wave launch, the cursor step stamps
-# `wave_N_merged:` post-merge, and everything below is IN-ROLLOUT arithmetic over those stamps —
-# average task convergence time from this rollout's completed waves x remaining dispatch chunks at
-# the parallel ceiling. Deliberately rough (always rendered with `~` + "rough"): no cross-rollout
-# stats file, no calibration — the task-note spec forbids false precision.
-
-def _parse_ts(value):
-    """ISO timestamp from a frontmatter value, or None. Naive values are assumed local time."""
-    s = (value or "").strip().strip('"').strip("'")
-    if not s:
-        return None
-    try:
-        ts = datetime.fromisoformat(s)
-    except ValueError:
-        return None
-    return ts if ts.tzinfo else ts.astimezone()
+def _scope(note) -> str:
+    return _scalar(note.get("scope")).lower()
 
 
-def _now_stamp() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
+def _landed(note) -> bool:
+    """Merged for the queue: done, or a read-only task approved with nothing to merge."""
+    st = _status(note)
+    return st == "done" or (st == "review" and not _pr(note) and _scope(note) == "read-only")
 
 
-def _fmt_min(minutes) -> str:
-    """42 -> '42m', 84 -> '1h 24m', 120 -> '2h'."""
-    m = max(0, int(round(minutes)))
-    if m < 60:
-        return f"{m}m"
-    h, r = divmod(m, 60)
-    return f"{h}h {r}m" if r else f"{h}h"
+# ---- the rollout's linked tasks ----------------------------------------------
 
-
-def _rough_label(minutes, infix: str = "") -> str:
-    """The single rendering of the remaining estimate — always '~<duration>[infix] (rough)'.
-    Both `remainingLabel` and the progress line derive from here so the 'always labelled
-    rough' invariant has one source and the two renderings can never drift."""
-    return f"~{_fmt_min(minutes)}{infix} (rough)"
-
-
-def _wave_stamps(note) -> dict:
-    """{(wave:int, 'dispatched'|'merged'): datetime} for every parseable wave-boundary stamp."""
-    out = {}
-    for line in note._fm:
-        m = WAVE_STAMP_RE.match(line)
-        if m:
-            ts = _parse_ts(m.group(3))
-            if ts is not None:
-                out[(int(m.group(1)), m.group(2))] = ts
-    return out
-
-
-def _linked_task_notes(rollout_path: Path, tasks_dir: Path):
-    """(path, Note) for every task note carrying `rollout: [[<slug>]]` for this rollout
-    (glob-by-backlink — captures read-only tasks the `## File-sets` block omits). Shared by
-    `status` and the timeline computation."""
-    rollout_slug = rollout_path.stem
-    out = []
+def _scan(rollout_path: Path, tasks_dir: Path):
+    """(linked, index): linked = (path, Note) for every task note carrying `rollout: [[<slug>]]` for this
+    rollout (glob-by-backlink — captures read-only tasks the `## File-sets` block omits); index = stem
+    (lowercased) -> (path, Note) for every note under tasks_dir, Archive included, preferring a root
+    copy over an archived one (dependency lookups)."""
+    rollout_slug = rollout_path.stem.lower()
+    rollout_real = rollout_path.resolve()
+    linked, index = [], {}
     for path in sorted(tasks_dir.rglob("*.md")):  # rglob to catch already-archived done tasks too
-        if path == rollout_path:
+        if path.resolve() == rollout_real:
             continue
         try:
             note = Note(path)
         except ValueError:
-            continue  # not a frontmatter note
-        if (_wikilink_slug(note.get("rollout")) or "").lower() != rollout_slug.lower():
-            continue
-        out.append((path, note))
+            continue  # not a frontmatter note (or not UTF-8)
+        key = path.stem.lower()
+        prev = index.get(key)
+        if prev is None or (prev[0].parent != tasks_dir and path.parent == tasks_dir):
+            index[key] = (path, note)
+        if (_wikilink_slug(note.get("rollout")) or "").lower() == rollout_slug:
+            linked.append((path, note))
+    return linked, index
+
+
+def _linked_task_notes(rollout_path: Path, tasks_dir: Path):
+    return _scan(rollout_path, tasks_dir)[0]
+
+
+def _queue_state(note):
+    """(queue state, setAsideAt) for one task note — the table in the module docstring."""
+    st = _status(note)
+    if st == "done":
+        return "merged", None
+    if st == "review":
+        if _pr(note):
+            return ("integrating" if _scalar(note.get("integrating")) else "awaiting-integration"), None
+        if _scope(note) == "read-only":
+            return "merged", None
+        return "set-aside", "run"  # approved without a PR: nothing for Integration to merge
+    if st == "in_progress":
+        return "running", None
+    if st in ("", "open"):
+        return "queued", None
+    if st in SET_ASIDE_STATUSES:
+        if st == GATE_PENDING_STATUS:
+            return "set-aside", "gate"
+        if st == "blocked" and \
+                note.latest_run_text(BLOCKED_SECTIONS["blocked"]).lower().startswith(INTEGRATION_PREFIX):
+            return "set-aside", "integration"
+        return "set-aside", "run"
+    if st == "merged":
+        return "folded", None
+    return "other", None
+
+
+def _priority(note) -> str:
+    v = _scalar(note.get("priority")).lower()
+    return v if v in PRIORITY_WEIGHTS else "normal"
+
+
+def _dep_entries(note):
+    """`depends-on:` plus `blocked-by:`, as slugs, in declared order, without duplicates."""
+    out, seen = [], set()
+    for key in ("depends-on", "blocked-by"):
+        for entry in note.get_list(key):
+            slug = _wikilink_slug(entry)
+            if slug and slug.lower() not in seen:
+                seen.add(slug.lower())
+                out.append(slug)
     return out
 
 
-def _compute_timeline(note, tasks_dir: Path, now=None):
-    """The progress/ETA block for a rollout note, or None when it has no wave-boundary stamps
-    (pre-timestamps rollouts stay renderable — callers omit timing rather than guessing).
+def _dep_status(slug: str, index):
+    """(satisfied, why): a dependency is satisfied only when its note is landed. A tombstone
+    (`status: merged`) resolves through `merged_into:` to the combined unit (cycle-guarded). `why` is
+    the parenthesised part of a hold reason."""
+    entry = index.get(slug.lower())
+    if entry is None:
+        return False, "note not found"
+    if _status(entry[1]) != "merged":
+        return _landed(entry[1]), _status(entry[1]) or "no status"
+    cur, seen = slug, {slug.lower()}
+    while True:
+        target = _wikilink_slug(entry[1].get("merged_into"))
+        if not target:
+            return False, "merged" if cur == slug else f"folded into [[{cur}]] (merged)"
+        if target.lower() in seen:
+            return False, f"folded into [[{target}]] (merged)"
+        seen.add(target.lower())
+        entry = index.get(target.lower())
+        if entry is None:
+            return False, f"folded into [[{target}]] (note not found)"
+        cur = target
+        if _status(entry[1]) != "merged":
+            return _landed(entry[1]), f"folded into [[{target}]] ({_status(entry[1]) or 'no status'})"
 
-    A wave counts toward the average only when BOTH stamps are present; the per-task time is
-    approximated as wave duration / dispatch chunks (ceil(tasks/ceiling) — parallel tasks share
-    wall-clock), and the remaining estimate is that average x the chunks still ahead of the
-    cursor. Rough by design."""
-    stamps = _wave_stamps(note)
-    if not stamps:
-        return None
-    now = now or datetime.now().astimezone()
 
-    counts = {}
-    for _path, tn in _linked_task_notes(note.path, tasks_dir):
-        w = _int_field(tn.get("wave"), None)
-        if w is not None:
-            counts[w] = counts.get(w, 0) + 1
-    ceiling = max(1, _int_field(note.get("parallel_ceiling"), 4) or 4)
-    cursor = _int_field(note.get("merged_through_wave"), 0) or 0
-    total = max([*counts, *(w for w, _kind in stamps)], default=0)
+def _unsatisfied(row, index):
+    """Hold-reason fragments for a task's unsatisfied dependencies ([] when it is free to start)."""
+    out = []
+    for dep in row["deps"]:
+        ok, why = _dep_status(dep, index)
+        if not ok:
+            out.append(f"depends on [[{dep}]] ({why})")
+    return out
 
-    def chunks(w):  # dispatch chunks a wave needs at this ceiling (unknown task count => 1)
-        return max(1, -(-counts.get(w, 1) // ceiling))
 
-    waves, completed_min, completed_chunks = [], 0.0, 0
-    for w in range(1, total + 1):
-        d, m = stamps.get((w, "dispatched")), stamps.get((w, "merged"))
-        dur = (m - d).total_seconds() / 60.0 if d and m else None
-        if dur is not None and dur >= 0:
-            completed_min += dur
-            completed_chunks += chunks(w)
-        else:
-            dur = None  # negative (hand-edited/clock-skewed) stamps carry no signal
-        waves.append({
-            "wave": w,
-            "tasks": counts.get(w),
-            "dispatched": d.isoformat(timespec="seconds") if d else None,
-            "merged": m.isoformat(timespec="seconds") if m else None,
-            "durationMinutes": int(round(dur)) if dur is not None else None,
+def _file_sets(rollout_note):
+    """slug (lowercased) -> planned files, from the rollout's `## File-sets` lines
+    (`- <slug>[ (wave N)]: a, b`). A task with no line plans no files (overlap 0)."""
+    found = rollout_note._section_bounds("## File-sets")
+    out = {}
+    if found is None:
+        return out
+    lines, start, end = found
+    for line in lines[start + 1:end]:
+        m = FILESET_RE.match(line)
+        if not m:
+            continue
+        slug = (_wikilink_slug(m.group("slug")) or "").lower()
+        files = [f.strip().strip("`").strip() for f in m.group("files").split(",")]
+        out[slug] = [f for f in files if f]
+    return out
+
+
+def _schedule_positions(rollout_note):
+    """slug (lowercased) -> the ordinal of its first `[[slug` wikilink in the rollout body."""
+    pos = {}
+    for i, m in enumerate(WIKILINK_OPEN_RE.finditer(rollout_note._body)):
+        slug = (_wikilink_slug(m.group(1)) or "").lower()
+        if slug and slug not in pos:
+            pos[slug] = i
+    return pos
+
+
+def _rows(rollout_path: Path, rollout_note, tasks_dir: Path):
+    """(rows, index): one dict per linked task note with everything the queue reads from it."""
+    linked, index = _scan(rollout_path, tasks_dir)
+    file_sets = _file_sets(rollout_note)
+    positions = _schedule_positions(rollout_note)
+    rows = []
+    for path, note in linked:
+        slug = path.stem
+        state, set_aside_at = _queue_state(note)
+        wave = _int_field(note.get("wave"), None)
+        pos = positions.get(slug.lower())
+        # Schedule rank: listed tasks by position, then unlisted ones by legacy wave, then slug.
+        rank = (0, pos, "") if pos is not None else (1, wave if wave is not None else 10 ** 9, slug.lower())
+        priority = _priority(note)
+        rows.append({
+            "slug": slug, "note": note, "state": state, "setAsideAt": set_aside_at,
+            "status": _scalar(note.get("status")) or None, "pr": _pr(note) or None, "wave": wave,
+            "priority": priority, "weight": PRIORITY_WEIGHTS[priority], "solo": _truthy_flag(note.get("solo")),
+            "files": file_sets.get(slug.lower(), []), "rank": rank, "deps": _dep_entries(note),
+            "started": _scalar(note.get("started")) or None, "merged": _scalar(note.get("merged")) or None,
+            "integrating": _scalar(note.get("integrating")) or None,
         })
+    return rows, index
 
-    first_dispatch = min((ts for (_w, k), ts in stamps.items() if k == "dispatched"), default=None)
-    last_merged = max((ts for (_w, k), ts in stamps.items() if k == "merged"), default=None)
-    complete = total > 0 and cursor >= total
-    elapsed = None
-    if first_dispatch is not None:
-        end = last_merged if (complete and last_merged) else now
-        elapsed = max(0.0, (end - first_dispatch).total_seconds() / 60.0)
 
-    avg_task = (completed_min / completed_chunks) if completed_chunks else None
-    remaining_chunks = sum(chunks(w) for w in range(cursor + 1, total + 1))
-    remaining = avg_task * remaining_chunks if (avg_task is not None and remaining_chunks and not complete) else None
+def _rank(row):
+    return row["rank"]
 
+
+def _ceiling(rollout_note):
+    """(ceiling, error): `parallel_ceiling`, an integer >= 1; absent -> 4; anything else -> error."""
+    raw = rollout_note.get("parallel_ceiling")
+    if raw is None:
+        return DEFAULT_CEILING, None
+    s = _scalar(raw)
+    if re.fullmatch(r"[0-9]+", s) and int(s) >= 1:
+        return int(s), None
+    return None, f"parallel_ceiling must be an integer >= 1, got {raw!r}"
+
+
+def _overlap(files, in_flight) -> int:
+    """How many of a task's planned files match an in-flight file, exactly or by fnmatch either way."""
+    return sum(1 for f in files
+               if any(f == g or fnmatch.fnmatchcase(f, g) or fnmatch.fnmatchcase(g, f) for g in in_flight))
+
+
+# ---- counts, timeline, progress ----------------------------------------------
+
+COUNT_KEY = {"merged": "merged", "running": "running", "integrating": "integrating",
+             "awaiting-integration": "awaitingIntegration", "queued": "queued", "set-aside": "setAside",
+             "folded": "folded", "other": "other"}
+
+
+def _counts(rows):
+    c = {k: 0 for k in ("merged", "running", "integrating", "awaitingIntegration", "queued", "setAside",
+                        "setAsideAtIntegration", "folded", "other")}
+    for r in rows:
+        c[COUNT_KEY[r["state"]]] += 1
+        if r["setAsideAt"] == "integration":
+            c["setAsideAtIntegration"] += 1
+    c["total"] = sum(c[k] for k in ("merged", "running", "integrating", "awaitingIntegration", "queued", "setAside"))
+    return c
+
+
+def _timeline(rows, counts, ceiling, now):
+    """The per-task progress/ETA block, or None when no task has a parseable `started:`. In-rollout
+    arithmetic only, deliberately rough (always labelled `~… (rough)`): the mean per-task duration
+    (started -> merged) x the chunks still ahead at the ceiling."""
+    in_n = [r for r in rows if r["state"] not in OUTSIDE_N]
+    entries = []
+    for r in in_n:
+        started = _parse_ts(r["started"])
+        if started is None:
+            continue
+        merged = _parse_ts(r["merged"])
+        duration = int(round((merged - started).total_seconds() / 60.0)) if merged else None
+        entries.append((started, r["slug"], {
+            "slug": r["slug"], "started": r["started"], "merged": r["merged"] if merged else None,
+            "durationMinutes": duration,
+        }))
+    if not entries:
+        return None
+    entries.sort(key=lambda e: (e[0], e[1]))
+    first_started = entries[0][0]
+    merges = [(m, r["merged"]) for r in in_n for m in [_parse_ts(r["merged"])] if m is not None]
+    last_merged = max(merges, key=lambda e: e[0]) if merges else None
+    complete = counts["total"] > 0 and counts["merged"] == counts["total"]
+    end = last_merged[0] if (complete and last_merged) else now
+    elapsed = max(0.0, (end - first_started).total_seconds() / 60.0)
+    durations = [e[2]["durationMinutes"] for e in entries
+                 if e[2]["durationMinutes"] is not None and e[2]["durationMinutes"] >= 0]
+    avg = sum(durations) / len(durations) if durations else None
+    pending = counts["running"] + counts["queued"]
+    remaining = int(round(avg * math.ceil(pending / ceiling))) if (avg is not None and pending and ceiling) else None
     return {
-        "waves": waves,
-        "totalWaves": total,
-        "mergedThroughWave": cursor,
-        "elapsedMinutes": int(round(elapsed)) if elapsed is not None else None,
-        "elapsedLabel": _fmt_min(elapsed) if elapsed is not None else None,
-        "avgTaskMinutes": round(avg_task, 1) if avg_task is not None else None,
-        "remainingEstimateMinutes": int(round(remaining)) if remaining is not None else None,
+        "tasks": [e[2] for e in entries],
+        "firstStarted": entries[0][2]["started"],
+        "lastMerged": last_merged[1] if last_merged else None,
+        "elapsedMinutes": int(round(elapsed)),
+        "elapsedLabel": _fmt_min(elapsed),
+        "avgTaskMinutes": round(avg, 1) if avg is not None else None,
+        "durationsUsed": len(durations),
+        "remainingEstimateMinutes": remaining,
         "remainingLabel": _rough_label(remaining) if remaining is not None else None,
         "complete": complete,
     }
 
 
-def _progress_line(note, tasks_dir: Path, event: str, wave: int):
-    """One `progress:` line for a wave boundary ('dispatched' | 'merged'), or None when the rollout
-    has no dispatch stamp yet (pre-timestamps rollouts: output stays byte-stable). The skill relays
-    this line to the user and threads it into the engine's `progress` arg for a live log()."""
-    if wave < 1:
-        # Wave 0 is the pre-wave-1 cursor position (pause-honour on a partially-landed wave 1) —
-        # no wave 0 was ever dispatched or merged, so any progress claim about it would be false.
-        return None
-    if not any(kind == "dispatched" for _w, kind in _wave_stamps(note)):
-        # No dispatch anchor -> elapsed can never render. Return BEFORE _compute_timeline so the
-        # stampless path never rglob-scans tasks_dir (byte-stable in behaviour, not just bytes).
-        return None
-    tl = _compute_timeline(note, tasks_dir)
-    if tl is None or tl["elapsedLabel"] is None:
-        return None
-    total = tl["totalWaves"] or "?"
-    if event == "merged" and tl["complete"]:
-        return f"progress: wave {wave}/{total} merged — rollout complete in {tl['elapsedLabel']}"
-    line = f"progress: wave {wave}/{total} {event} — {tl['elapsedLabel']} elapsed"
-    if tl["remainingEstimateMinutes"] is not None:
-        line += ", " + _rough_label(tl["remainingEstimateMinutes"], infix=" remaining")
+def _progress_line(counts, timeline) -> str:
+    """`progress: <M>/<N> merged[, <n> running][, <n> integrating][, <n> awaiting integration][, <n>
+    queued][, <n> set aside[ (<k> at Integration)]][ — <elapsed> elapsed[, ~<d> remaining (rough)]]`;
+    complete: `progress: <N>/<N> merged — rollout complete[ in <elapsed>]`; empty: `progress: 0/0 merged`."""
+    n, m = counts["total"], counts["merged"]
+    if n == 0:
+        return "progress: 0/0 merged"
+    if m == n:
+        return f"progress: {n}/{n} merged — rollout complete" + (f" in {timeline['elapsedLabel']}" if timeline else "")
+    line = f"progress: {m}/{n} merged"
+    for key, label in (("running", "running"), ("integrating", "integrating"),
+                       ("awaitingIntegration", "awaiting integration"), ("queued", "queued")):
+        if counts[key]:
+            line += f", {counts[key]} {label}"
+    if counts["setAside"]:
+        line += f", {counts['setAside']} set aside"
+        if counts["setAsideAtIntegration"]:
+            line += f" ({counts['setAsideAtIntegration']} at Integration)"
+    if timeline:
+        line += f" — {timeline['elapsedLabel']} elapsed"
+        if timeline["remainingEstimateMinutes"] is not None:
+            line += ", " + _rough_label(timeline["remainingEstimateMinutes"], infix=" remaining")
     return line
+
+
+def _progress_for(rollout_path: Path, tasks_dir: Path, now) -> str:
+    """The progress line for a rollout, read fresh from its notes (after any writes this call made)."""
+    rollout_note = Note(rollout_path)
+    rows, _index = _rows(rollout_path, rollout_note, tasks_dir)
+    counts = _counts(rows)
+    ceiling, _err = _ceiling(rollout_note)
+    return _progress_line(counts, _timeline(rows, counts, ceiling, now))
+
+
+def _print_progress(args, now):
+    """Print the progress line when the verb was given --rollout (the lead relays it, ADR 0030)."""
+    if not getattr(args, "rollout", None):
+        return
+    path = Path(os.path.expanduser(args.rollout))
+    if not path.exists():
+        print(f"WARN: rollout note not found at {path} — no progress line", file=sys.stderr)
+        return
+    print(_progress_for(path, Path(os.path.expanduser(args.tasks_dir)), now))
 
 
 # ---- reconcile --------------------------------------------------------------
 
 def resolve_task_path(task, tasks_dir: Path) -> Path:
     # Prefer an explicit taskPath if the result carries one; else resolve <tasks-dir>/<slug>.md
-    # (exactly how wave-execute builds taskPath in the args it dispatched).
+    # (exactly how execute builds taskPath in the args it dispatched).
     tp = task.get("taskPath")
     if tp:
         return Path(os.path.expanduser(tp))
@@ -490,6 +924,7 @@ def cmd_reconcile(args) -> int:
     data = json.loads(raw)
     tasks = data.get("tasks", [])
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    now = _now(args)
     errors = []
     for task in tasks:
         slug = task.get("slug", "<no-slug>")
@@ -507,7 +942,14 @@ def cmd_reconcile(args) -> int:
             errors.append(str(e))
             continue
 
-        note.set("status", status)
+        pr = (task.get("prUrl") or "").strip()
+        # A read-only task is done when its review approves: nothing to merge, so it never enters
+        # Integration (ADR 0030). The row's scope wins; the note's own is the fallback.
+        scope = _scalar(task.get("scope")).lower() or _scope(note)
+        note_status = "done" if (status == "review" and not pr and scope == "read-only") else status
+        note.set("status", note_status)
+        # Whatever Integration this task was in, the run that produced this row ended it.
+        note.remove("integrating")
 
         # Escalation is durable: a task that flipped opus→fable mid-run has proven non-mechanical,
         # so every later re-dispatch (resume, /thread:repair) must start at fable, not re-pay the
@@ -529,7 +971,6 @@ def cmd_reconcile(args) -> int:
             # stale one to be triaged against.
             note.unset("tier_capped")
 
-        pr = (task.get("prUrl") or "").strip()
         if status in STATUS_WITH_PR and pr:
             note.set("pr", pr)
         if status == "review":
@@ -537,13 +978,13 @@ def cmd_reconcile(args) -> int:
             plan_rounds = int(task.get("planRoundsUsed") or 0)
             if plan_rounds > 0:
                 note.set("plan_rounds_used", plan_rounds)
-            # Ceiling approval: persist the accumulated rejection rationale (audit record; the engine
-            # sets the flag only when there IS history — a clean first-try approve records nothing).
-            # append_section is heading-idempotent, so a re-reconcile never duplicates it.
+            # Ceiling approval: persist the accumulated rejection rationale as a run (audit record; the
+            # engine sets the flag only when there IS history — a clean first-try approve records
+            # nothing). A re-reconcile of the same result is a no-op.
             if task.get("approvedAtCeiling"):
                 history = history_block(task.get("reviewHistory"))
                 if history:
-                    note.append_section(REVIEW_HISTORY_SECTION, history)
+                    note.append_run(REVIEW_HISTORY_SECTION, history, now)
 
         if status in SECTION_BY_STATUS:
             heading = SECTION_BY_STATUS[status]
@@ -562,134 +1003,321 @@ def cmd_reconcile(args) -> int:
                     # revised cap) — the pending list must always be the latest declaration, never stale.
                     note.upsert_section(heading, content)
                 else:
-                    note.append_section(heading, content)
+                    # p6-4: every run's feedback is kept as its own numbered run, never only the first.
+                    note.append_run(heading, content, now)
 
         note.save(dry_run=args.dry_run)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
         esc = " model=fable(escalated)" if task.get("escalated") else ""
         esc += f" tier_capped={task.get('tierCappedAt') or 'true'}" if task.get("tierCapped") else ""
-        print(f"{slug}: status={status}{(' pr=' + pr) if pr else ''}{esc}{flag}")
-
-    if args.wave is not None and args.rollout and not errors:
-        # Optional convenience: advance the cursor in the same call (only when the caller asserts the
-        # wave fully merged — normally `cursor` is a separate post-merge step gated on merge-wave.sh ok).
-        rollout_note, paused_at = _set_cursor(Path(os.path.expanduser(args.rollout)), args.wave, args.dry_run)
-        print(f"cursor: merged_through_wave={args.wave}" + (" (dry-run)" if args.dry_run else ""))
-        line = _progress_line(rollout_note, tasks_dir, "merged", args.wave)
-        if line:
-            print(line)
-        _print_pause_honoured(paused_at, args.dry_run)
+        ro = " (read-only, approved)" if note_status != status else ""
+        print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{esc}{flag}")
 
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
     return 1 if errors else 0
 
 
-# ---- cursor -----------------------------------------------------------------
+# ---- next -------------------------------------------------------------------
 
-def _set_cursor(rollout_path: Path, wave: int, dry_run=False):
-    """Advance the cursor; honour a pending soft-pause request in the same write.
-
-    Returns (note, paused_at): paused_at is the timestamp stamped when `pause_requested: true`
-    was honoured this call, else None. The honour deliberately rides the cursor step — it runs at
-    exactly the end-of-wave moment (post-merge), so a soft pause lands on a clean wave boundary
-    with zero extra agent calls (execute SKILL.md §Pausing + reinstating a rollout).
-    """
-    note = Note(rollout_path)
-    note.set("merged_through_wave", int(wave), after=("merged_through_wave", "parallel_ceiling", "status"))
-    # Merge-side wave-boundary timestamp (progress/ETA). First merge wins: an idempotent cursor
-    # re-run (cold resume, pause-honour re-set) must never shift a recorded boundary. Wave 0 is
-    # the pre-wave-1 cursor position (pause-honour re-set on a partially-landed wave 1) — nothing
-    # merged, so a `wave_0_merged` stamp would be junk the engine loop never owns; skip it.
-    if int(wave) >= 1:
-        stamp_key = f"wave_{int(wave)}_merged"
-        if note.get(stamp_key) is None:
-            note.set(stamp_key, _now_stamp(),
-                     after=(f"wave_{int(wave)}_dispatched", "merged_through_wave", "parallel_ceiling", "status"))
-    paused_at = None
-    if _truthy_flag(note.get("pause_requested")):
-        paused_at = _now_stamp()
-        note.set("paused", paused_at, after=("pause_requested", "merged_through_wave", "status"))
-        note.remove("pause_requested")
-    note.save(dry_run=dry_run)
-    return note, paused_at
-
-
-def _print_pause_honoured(paused_at, dry_run=False):
-    if paused_at:
-        print(f"paused={paused_at} (pause_requested honoured — end the wave loop; "
-              f"do NOT launch the next wave)" + (" (dry-run)" if dry_run else ""))
-
-
-def cmd_cursor(args) -> int:
-    path = Path(os.path.expanduser(args.rollout))
-    if not path.exists():
-        print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
+def cmd_next(args) -> int:
+    """Which tasks start now (ADR 0030 decision 1). Pure function of the notes, except that a drained
+    soft pause is stamped (`paused:`) here."""
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.exists():
+        print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
         return 1
-    note, paused_at = _set_cursor(path, args.wave, args.dry_run)
-    print(f"merged_through_wave={args.wave}" + (" (dry-run)" if args.dry_run else ""))
-    line = _progress_line(note, Path(os.path.expanduser(args.tasks_dir)), "merged", args.wave)
-    if line:
-        print(line)
-    _print_pause_honoured(paused_at, args.dry_run)
-    return 0
-
-
-# ---- mark-dispatched --------------------------------------------------------
-
-def cmd_mark_dispatched(args) -> int:
-    """Stamp the dispatch-side wave boundary (`wave_N_dispatched:`) at wave launch (execute §4.5
-    step 1). First dispatch wins — a resume re-dispatch of a partially-landed wave must NOT reset
-    the wave clock, or completed-wave durations would drift under the estimate's feet."""
-    path = Path(os.path.expanduser(args.rollout))
-    if not path.exists():
-        print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
+    now = _now(args)
+    rollout_note = Note(rollout_path)
+    ceiling, err = _ceiling(rollout_note)
+    if err:
+        print(f"ERROR: {rollout_path.stem}: {err}", file=sys.stderr)
         return 1
-    note = Note(path)
-    key = f"wave_{args.wave}_dispatched"
-    existing = note.get(key)
-    if existing is not None:
-        print(f"{key}={existing} [no-change]")
-    else:
-        ts = _now_stamp()
-        note.set(key, ts, after=(f"wave_{args.wave - 1}_merged", f"wave_{args.wave - 1}_dispatched",
-                                 "merged_through_wave", "parallel_ceiling", "status"))
-        note.save(dry_run=args.dry_run)
-        print(f"{key}={ts}" + (" (dry-run)" if args.dry_run else " [written]"))
-    line = _progress_line(note, Path(os.path.expanduser(args.tasks_dir)), "dispatched", args.wave)
-    if line:
-        print(line)
-    return 0
-
-
-# ---- mark-done ---------------------------------------------------------------
-
-def cmd_mark_done(args) -> int:
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
-    slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
-    errors = []
-    for slug in slugs:
+    rows, index = _rows(rollout_path, rollout_note, tasks_dir)
+    by_state = {}
+    for r in sorted(rows, key=_rank):
+        by_state.setdefault(r["state"], []).append(r)
+    in_progress = by_state.get("running", [])
+    awaiting = by_state.get("awaiting-integration", [])
+    integrating = by_state.get("integrating", [])
+    queued = by_state.get("queued", [])
+
+    # Live vs stalled. With no --running, every in_progress note is running: it holds a slot and is
+    # never restarted, so a live lead and /thread:status agree. With --running, only the listed slugs
+    # are live; every other in_progress note is stalled and restarts ahead of new starts.
+    if args.running is None:
+        live, stalled = in_progress, []
+    else:
+        want = {(_wikilink_slug(s) or "").lower() for s in args.running.split(",") if s.strip()}
+        live = [r for r in in_progress if r["slug"].lower() in want]
+        stalled = [r for r in in_progress if r["slug"].lower() not in want]
+        known = {r["slug"].lower() for r in in_progress}
+        for s in sorted(want - known):
+            print(f"WARN: --running {s}: not an in_progress task of this rollout — ignored", file=sys.stderr)
+
+    paused = _scalar(rollout_note.get("paused")) or None
+    pause_requested = _truthy_flag(rollout_note.get("pause_requested"))
+    paused_now = False
+    start, restart, holds, ceiling_held = [], [], [], []
+    used = len(live)
+
+    if paused or pause_requested:
+        # A soft pause drains (ADR 0030 decision 5): nothing new starts or restarts; once nothing runs,
+        # awaits Integration or integrates, the pause is stamped and the request removed.
+        if not paused and not live and not awaiting and not integrating:
+            paused = _stamp(now)
+            rollout_note.set("paused", paused, after=("pause_requested", "parallel_ceiling", "status"))
+            rollout_note.remove("pause_requested")
+            rollout_note.save(dry_run=args.dry_run)
+            paused_now = True
+        reason = "paused" if paused else "pause requested: draining"
+        holds += [(r, reason) for r in stalled + queued]
+    else:
+        for r in sorted(stalled, key=lambda r: (-r["weight"], r["rank"])):
+            if used < ceiling:
+                restart.append(r)
+                used += 1
+            else:
+                ceiling_held.append(r)
+        started = live + restart + awaiting + integrating
+        candidates = []
+        for r in queued:
+            unsat = _unsatisfied(r, index)
+            if unsat:
+                holds.append((r, "; ".join(unsat)))
+            else:
+                candidates.append(r)
+        solo_started = next((r for r in sorted(started, key=_rank) if r["solo"]), None)
+        if solo_started:
+            holds += [(r, f"behind solo [[{solo_started['slug']}]]") for r in candidates]
+        else:
+            in_flight = {f for r in started for f in r["files"]}
+            remaining = list(candidates)
+            while remaining:
+                best = min(remaining, key=lambda r: (-r["weight"], _overlap(r["files"], in_flight), r["rank"]))
+                if best["solo"]:
+                    remaining.remove(best)
+                    if not started and not start:
+                        start.append(best)
+                    else:
+                        holds.append((best, f"solo: waits for {len(started) + len(start)} started task(s) "
+                                            f"to merge or be set aside"))
+                    holds += [(r, f"behind solo [[{best['slug']}]]") for r in remaining]
+                    break
+                if used + len(start) >= ceiling:
+                    ceiling_held += remaining
+                    break
+                start.append(best)
+                remaining.remove(best)
+                in_flight.update(best["files"])
+    in_use = used + len(start)
+    holds += [(r, f"ceiling: {in_use}/{ceiling} slots in use") for r in ceiling_held]
+
+    in_n = [r for r in rows if r["state"] not in OUTSIDE_N]
+    counts = _counts(rows)
+    halt = None
+    if not start and not restart and not live and not awaiting and not integrating:
+        if paused:
+            halt = "paused"
+        elif not in_n:
+            halt = "empty"
+        elif counts["merged"] == counts["total"]:
+            halt = "complete"
+        else:
+            halt = "stuck"
+    slugs = lambda rs: [r["slug"] for r in rs]  # noqa: E731
+    out = {
+        "rollout": rollout_path.stem,
+        "ceiling": ceiling,
+        "slotsInUse": used,
+        "start": slugs(start),
+        "restart": slugs(restart),
+        "hold": [{"slug": r["slug"], "reason": why} for r, why in sorted(holds, key=lambda h: _rank(h[0]))],
+        "running": slugs(live),
+        "awaitingIntegration": slugs(awaiting),
+        "integrating": slugs(integrating),
+        "setAside": [{"slug": r["slug"], "status": r["status"], "setAsideAt": r["setAsideAt"]}
+                     for r in by_state.get("set-aside", [])],
+        "paused": paused,
+        "pauseRequested": pause_requested,
+        "pausedNow": paused_now,
+        "halt": halt,
+        "progress": _progress_line(counts, _timeline(rows, counts, ceiling, now)),
+    }
+    print(json.dumps(out, indent=2))
+    return 0
+
+
+# ---- per-task stamps ----------------------------------------------------------
+
+def _each_note(args):
+    """Yield (slug, path, Note) for --tasks, collecting not-found / unparseable errors in args._errors."""
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    args._errors = []
+    for slug in [s.strip() for s in args.tasks.split(",") if s.strip()]:
         path = tasks_dir / f"{slug}.md"
         if not path.exists():
-            errors.append(f"{slug}: task note not found at {path}")
+            args._errors.append(f"{slug}: task note not found at {path}")
             continue
         try:
-            note = Note(path)
+            yield slug, path, Note(path)
         except ValueError as e:
-            errors.append(str(e))
+            args._errors.append(str(e))
+
+
+def _finish(args, now) -> int:
+    _print_progress(args, now)
+    for e in args._errors:
+        print(f"ERROR: {e}", file=sys.stderr)
+    return 1 if args._errors else 0
+
+
+def _flag(args, note) -> str:
+    return " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
+
+
+def cmd_mark_started(args) -> int:
+    """Stamp `started:` as a task starts (first start wins: a restart keeps the first clock) and
+    remove `integrating:`. Refuses a done, merged or dropped note."""
+    now = _now(args)
+    for slug, _path, note in _each_note(args):
+        status = _status(note)
+        if status in FINISHED_STATUSES:
+            args._errors.append(f"{slug}: status is {status!r} — refusing to mark started")
             continue
+        existing = _scalar(note.get("started"))
+        if not existing:
+            note.set("started", _stamp(now))
+        note.remove("integrating")
+        note.save(dry_run=args.dry_run)
+        print(f"{slug}: started={existing or _stamp(now)}{' (kept)' if existing else ''}{_flag(args, note)}")
+    return _finish(args, now)
+
+
+def cmd_mark_integrating(args) -> int:
+    """Stamp `integrating:` as a task's Integration begins (the first wins). Only a `review` note
+    with a `pr:` can be integrating; anything else is refused."""
+    now = _now(args)
+    for slug, _path, note in _each_note(args):
+        status = _status(note)
+        if status != "review" or not _pr(note):
+            args._errors.append(f"{slug}: status is {status!r}{'' if _pr(note) else ' with no pr:'}, "
+                                f"not 'review' with a PR — refusing to mark integrating")
+            continue
+        existing = _scalar(note.get("integrating"))
+        if not existing:
+            note.set("integrating", _stamp(now))
+        note.save(dry_run=args.dry_run)
+        print(f"{slug}: integrating={existing or _stamp(now)}{' (kept)' if existing else ''}{_flag(args, note)}")
+    return _finish(args, now)
+
+
+def cmd_mark_done(args) -> int:
+    """review -> done once the task's merge is confirmed; stamps `merged:` on a PR task (first wins)
+    and removes `integrating:`. Read-only tasks never need it: reconcile writes them done on approval
+    (a legacy read-only note still at review is flipped like any other)."""
+    now = _now(args)
+    for slug, _path, note in _each_note(args):
         status = note.get("status")
-        if status == "done":
+        if _status(note) == "done":
             print(f"{slug}: already done [no-change]")
             continue
-        if status != "review":
+        if _status(note) != "review":
             # Only a `review` note is "landed, awaiting confirmation". Anything else means the
-            # caller's picture of the wave is stale — refuse rather than mask a blocked/unmerged task.
-            errors.append(f"{slug}: status is {status!r}, not 'review' — refusing to mark done")
+            # caller's picture of the rollout is stale — refuse rather than mask a blocked/unmerged task.
+            args._errors.append(f"{slug}: status is {status!r}, not 'review' — refusing to mark done")
             continue
         note.set("status", "done")
+        if _pr(note) and not _scalar(note.get("merged")):
+            note.set("merged", _stamp(now))
+        note.remove("integrating")
         note.save(dry_run=args.dry_run)
         print(f"{slug}: status=done" + (" (dry-run)" if args.dry_run else " [written]"))
+    return _finish(args, now)
+
+
+# ---- resume (p6-8) ------------------------------------------------------------------
+
+def _gh(gh_bin, argv, cwd):
+    """(stdout, error) for one gh call; error is None on success."""
+    try:
+        p = subprocess.run([gh_bin, *argv], cwd=cwd, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:
+        return "", f"{gh_bin}: {e}"
+    if p.returncode != 0:
+        return "", (p.stderr.strip() or p.stdout.strip() or f"exit {p.returncode}").splitlines()[-1]
+    return p.stdout, None
+
+
+def _project_root(rollout_note):
+    m = PROJECT_ROOT_RE.search(rollout_note._body)
+    return Path(os.path.expanduser(m.group(1).strip())) if m else None
+
+
+def cmd_resume(args) -> int:
+    """Mark done every linked task whose PR MERGED into the repo's default branch but whose note was
+    never marked (an in_progress, review or set-aside note). Checks state AND base: a PR merged into a
+    stacked or other branch is not landed."""
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.exists():
+        print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
+        return 1
+    now = _now(args)
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    root = _project_root(Note(rollout_path))
+    defaults, errors = {}, []
+    for path, note in _linked_task_notes(rollout_path, tasks_dir):
+        slug, status, pr = path.stem, _status(note), _pr(note)
+        if status in FINISHED_STATUSES or not pr:
+            continue
+        url, num = PR_URL_RE.match(pr), PR_NUM_RE.match(pr)
+        if url:
+            ref, repo, cwd = pr, url.group(1), None
+        elif num:
+            if root is None or not root.is_dir():
+                errors.append(f"{slug}: pr: {pr!r} is a bare number and the rollout's Project root "
+                              f"({root or 'none'}) is not a directory — cannot resolve its repo")
+                continue
+            ref, repo, cwd = num.group(1), None, str(root)
+        else:
+            errors.append(f"{slug}: pr: {pr!r} is neither a GitHub PR URL nor a PR number")
+            continue
+        raw, err = _gh(args.gh_bin, ["pr", "view", ref, "--json", "state,mergedAt,baseRefName,url"], cwd)
+        if err is None:
+            try:
+                info = json.loads(raw)
+            except ValueError:
+                err = "gh pr view printed no JSON"
+        if err is not None:
+            errors.append(f"{slug}: gh pr view {ref} failed: {err}")
+            continue
+        state = str(info.get("state") or "").upper()
+        if state != "MERGED":
+            print(f"{slug}: PR {ref} is {state or 'in an unknown state'} [no-change]")
+            continue
+        key = repo or cwd
+        if key not in defaults:
+            out, derr = _gh(args.gh_bin, ["repo", "view", *([repo] if repo else []), "--json", "defaultBranchRef",
+                                          "--jq", ".defaultBranchRef.name"], cwd)
+            defaults[key] = (out.strip() or None, derr or ("empty answer" if not out.strip() else None))
+        default, derr = defaults[key]
+        if default is None:
+            errors.append(f"{slug}: cannot resolve the default branch of {repo or cwd}: {derr}")
+            continue
+        base = str(info.get("baseRefName") or "")
+        if base != default:
+            print(f"{slug}: PR {ref} merged into {base!r}, not the default branch {default!r} [no-change]")
+            continue
+        note.set("status", "done")
+        if not _scalar(note.get("merged")):
+            merged_at = _parse_ts(info.get("mergedAt"))
+            if merged_at is not None:
+                note.set("merged", _stamp(merged_at))
+        note.remove("integrating")
+        note.save(dry_run=args.dry_run)
+        print(f"{slug}: status={status or 'none'}->done (PR {ref} merged into {default})" + _flag(args, note))
+    print(_progress_for(rollout_path, tasks_dir, now))
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
     return 1 if errors else 0
@@ -724,16 +1352,16 @@ def cmd_resume_filter(args) -> int:
 
 # ---- status -----------------------------------------------------------------
 
-def _wikilink_slug(value):
-    """Normalise a frontmatter wikilink/string (`"[[Area/Foo|alias]]"`) to a bare slug for comparison."""
-    if value is None:
-        return None
-    s = value.strip().strip('"').strip("'").strip()
-    s = s.replace("[[", "").replace("]]", "").strip()
-    s = s.split("|")[0].split("/")[-1].strip()  # drop any alias, then any path, keep the leaf
-    if s.endswith(".md"):
-        s = s[:-3]
-    return s or None
+def _blocker_summary(note) -> str:
+    """The latest run of the section matching the note's own status, then the fixed order. A section
+    with no runs is read whole."""
+    own = SECTION_BY_STATUS.get(_status(note))
+    order = ([own] if own else []) + [h for h in SECTION_BY_STATUS.values() if h != own]
+    for heading in order:
+        text = note.latest_run_text(heading)
+        if text:
+            return text
+    return ""
 
 
 def cmd_status(args) -> int:
@@ -741,56 +1369,44 @@ def cmd_status(args) -> int:
     if not rollout_path.exists():
         print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
         return 1
-    rollout_slug = rollout_path.stem
+    now = _now(args)
     rollout_note = Note(rollout_path)
-    cursor = rollout_note.get("merged_through_wave")
-    try:
-        cursor = int(cursor) if cursor is not None else 0
-    except (TypeError, ValueError):
-        cursor = 0
-
+    ceiling, _err = _ceiling(rollout_note)  # null when invalid: status still reports
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
-    found = []
-    for path, note in _linked_task_notes(rollout_path, tasks_dir):
-        wave = note.get("wave")
-        try:
-            wave = int(wave) if wave is not None else None
-        except (TypeError, ValueError):
-            wave = None
-        pr = note.get("pr")
-        blocker = ""
-        for heading in SECTION_BY_STATUS.values():  # includes the pending-gates section (gate-pending)
-            t = note.section_text(heading)
-            if t:
-                blocker = t
-                break
-        found.append({
-            "slug": path.stem,
-            "wave": wave,
-            "status": note.get("status"),
-            "pr": (pr.strip().strip('"') if pr else None),
-            "blockerSummary": blocker,
-        })
-
-    found.sort(key=lambda t: (t["wave"] if t["wave"] is not None else 9999, t["slug"]))
-    total_waves = max((t["wave"] for t in found if t["wave"] is not None), default=0)
+    rows, index = _rows(rollout_path, rollout_note, tasks_dir)
+    counts = _counts(rows)
+    timeline = _timeline(rows, counts, ceiling, now)
+    tasks = [{
+        "slug": r["slug"],
+        "wave": r["wave"],
+        "status": r["status"],
+        "queueState": r["state"],
+        "setAsideAt": r["setAsideAt"],
+        "pr": r["pr"],
+        "priority": r["priority"],
+        "solo": r["solo"],
+        "started": r["started"],
+        "merged": r["merged"],
+        "integrating": r["integrating"],
+        "waitingOn": _unsatisfied(r, index) if r["state"] == "queued" else [],
+        "blockerSummary": _blocker_summary(r["note"]),
+    } for r in sorted(rows, key=_rank)]
     paused = rollout_note.get("paused")
     out = {
-        "rollout": rollout_slug,
+        "rollout": rollout_path.stem,
         "rolloutPath": str(rollout_path),
         "rolloutStatus": rollout_note.get("status"),
-        # Pause state (execute §Pausing): `paused` = the stamp's timestamp when the rollout is
-        # paused (render as PAUSED, not stalled); `pause_requested` = a soft pause is pending and
-        # takes effect at the next wave boundary.
-        "paused": (paused.strip().strip('"').strip("'") or None) if paused else None,
+        # Pause state (execute §Pausing): `paused` = the stamp's timestamp when the rollout is paused
+        # (render as PAUSED, not stalled); `pause_requested` = a soft pause is pending and drains.
+        "paused": _scalar(paused) or None,
         "pause_requested": _truthy_flag(rollout_note.get("pause_requested")),
-        "merged_through_wave": cursor,
-        "total_waves": total_waves,
-        # Progress/ETA from the wave_N_dispatched/merged stamps — durable on the note, so elapsed
-        # + the rough (~) remaining estimate render with no workflow run alive. null when the
-        # rollout predates the stamps (callers omit timing rather than guessing).
-        "timeline": _compute_timeline(rollout_note, tasks_dir),
-        "tasks": found,
+        "ceiling": ceiling,
+        "counts": counts,
+        "progress": _progress_line(counts, timeline),
+        # Per-task started:/merged: stamps — durable on the notes, so elapsed + the rough (~) remaining
+        # estimate render with no workflow run alive. null when no task has a started: stamp.
+        "timeline": timeline,
+        "tasks": tasks,
     }
     print(json.dumps(out, indent=2))
     return 0
@@ -879,11 +1495,10 @@ def cmd_defer(args) -> int:
                 errors.append(f"{slug}: belongs to rollout {cur!r}, not {expected!r} — refusing to defer")
                 continue
         note.set("status", "open")
-        note.remove("wave")
-        note.remove("rollout")
-        note.remove("owner")
+        for key in ("wave", "rollout", "owner", "started", "merged", "integrating"):
+            note.remove(key)
         note.save(dry_run=args.dry_run)
-        print(f"{slug}: deferred->open (wave/rollout/owner cleared)" +
+        print(f"{slug}: deferred->open (wave/rollout/owner and started/merged/integrating cleared)" +
               (" (dry-run)" if args.dry_run else " [written]"))
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -977,62 +1592,75 @@ def cmd_clear_pause(args) -> int:
 # ---- CLI --------------------------------------------------------------------
 
 def main() -> int:
-    p = argparse.ArgumentParser(description="Deterministic vault reconcile for wave-execute.")
+    p = argparse.ArgumentParser(description="Deterministic vault reconcile for a rollout's queue (ADR 0030).")
     sub = p.add_subparsers(dest="cmd", required=True)
+    tasks_dir_help = "task-note dir (default: the vault's Work/Tasks)"
+    now_help = "the time to stamp or measure against, ISO (default: now)"
 
-    r = sub.add_parser("reconcile", help="write task frontmatter + blocked feedback from a workflow result")
+    r = sub.add_parser("reconcile", help="write task frontmatter + feedback runs from a workflow result")
     r.add_argument("--result", default="-", help="path to the workflow result JSON, or '-' for stdin (default)")
-    r.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
-    r.add_argument("--rollout", default=None, help="rollout note path (only with --wave, to advance the cursor)")
-    r.add_argument("--wave", type=int, default=None, help="advance merged_through_wave to N in the same call")
+    r.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    r.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the run headings' stamp)")
     r.add_argument("--dry-run", action="store_true")
     r.set_defaults(func=cmd_reconcile)
 
-    c = sub.add_parser("cursor", help="set merged_through_wave:N + stamp wave_N_merged on a rollout note (post-merge)")
-    c.add_argument("--rollout", required=True)
-    c.add_argument("--wave", type=int, required=True)
-    c.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir for the progress line's per-wave task counts")
-    c.add_argument("--dry-run", action="store_true")
-    c.set_defaults(func=cmd_cursor)
+    nx = sub.add_parser("next", help="print the queue's next moves as JSON (start/restart/hold/halt)")
+    nx.add_argument("--rollout", required=True, help="path to the rollout note")
+    nx.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    nx.add_argument("--running", default=None,
+                    help="comma-separated slugs whose task calls are live (default: every in_progress note); "
+                         "any other in_progress note is stalled and restarts")
+    nx.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    nx.add_argument("--dry-run", action="store_true", help="write nothing (a drained pause is reported, not stamped)")
+    nx.set_defaults(func=cmd_next)
 
-    mdp = sub.add_parser("mark-dispatched", help="stamp wave_N_dispatched on a rollout note at wave launch (first dispatch wins)")
-    mdp.add_argument("--rollout", required=True)
-    mdp.add_argument("--wave", type=int, required=True)
-    mdp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir for the progress line's per-wave task counts")
-    mdp.add_argument("--dry-run", action="store_true")
-    mdp.set_defaults(func=cmd_mark_dispatched)
+    for name, func, help_ in (
+        ("mark-started", cmd_mark_started, "stamp started: on task notes as they start (first start wins)"),
+        ("mark-integrating", cmd_mark_integrating, "stamp integrating: on review notes with a PR (first wins)"),
+        ("mark-done", cmd_mark_done, "flip task notes review->done after their merge is confirmed (stamps merged:)"),
+    ):
+        m = sub.add_parser(name, help=help_)
+        m.add_argument("--tasks", required=True, help="comma-separated task slugs")
+        m.add_argument("--rollout", default=None, help="rollout note path: also print the progress line")
+        m.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+        m.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+        m.add_argument("--dry-run", action="store_true")
+        m.set_defaults(func=func)
 
-    d = sub.add_parser("mark-done", help="flip task notes review->done after their wave's merge is confirmed")
-    d.add_argument("--tasks", required=True, help="comma-separated task slugs (every wave task that ended at review)")
-    d.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
-    d.add_argument("--dry-run", action="store_true")
-    d.set_defaults(func=cmd_mark_done)
+    rs = sub.add_parser("resume", help="mark done every linked task whose PR merged into the default branch (p6-8)")
+    rs.add_argument("--rollout", required=True, help="path to the rollout note")
+    rs.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    rs.add_argument("--gh-bin", default="gh", help="the gh executable (tests pass a stub)")
+    rs.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    rs.add_argument("--dry-run", action="store_true")
+    rs.set_defaults(func=cmd_resume)
 
-    f = sub.add_parser("resume-filter", help="print the slugs in a wave that still need dispatch")
-    f.add_argument("--tasks", required=True, help="comma-separated task slugs for the target wave")
-    f.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
+    f = sub.add_parser("resume-filter", help="print the slugs that still need dispatch")
+    f.add_argument("--tasks", required=True, help="comma-separated task slugs")
+    f.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     f.set_defaults(func=cmd_resume_filter)
 
     s = sub.add_parser("status", help="emit JSON situational report for a rollout (read-only; /thread:status)")
     s.add_argument("--rollout", required=True, help="path to the rollout note")
-    s.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
+    s.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    s.add_argument("--now", type=_iso_arg, default=None, help=now_help)
     s.set_defaults(func=cmd_status)
 
     tp = sub.add_parser("touched-phases", help="print --project/--phases lines for the phases a rollout touched (read-only; ADR 0026)")
     tp.add_argument("--rollout", required=True, help="path to the rollout note")
-    tp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
+    tp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     tp.set_defaults(func=cmd_touched_phases)
 
     rv = sub.add_parser("resolve", help="flip a *blocked* task -> done (drift gap-closer; caller must verify the PR merged)")
     rv.add_argument("--tasks", required=True, help="comma-separated task slugs (must be in a blocked status)")
-    rv.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
+    rv.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     rv.add_argument("--dry-run", action="store_true")
     rv.set_defaults(func=cmd_resolve)
 
     df = sub.add_parser("defer", help="pop task(s) out of a rollout back to open backlog (/thread:repair)")
     df.add_argument("--tasks", required=True, help="comma-separated task slugs to defer")
     df.add_argument("--rollout", default=None, help="rollout note path (optional; asserts membership before deferring)")
-    df.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
+    df.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     df.add_argument("--dry-run", action="store_true")
     df.set_defaults(func=cmd_defer)
 
@@ -1043,7 +1671,7 @@ def main() -> int:
 
     ag = sub.add_parser("approve-gates", help="record the human sign-off for a gate-pending task's gated inputs (ADR 0008)")
     ag.add_argument("--tasks", required=True, help="comma-separated task slugs (must be at status gate-pending)")
-    ag.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR))
+    ag.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     ag.add_argument("--date", default=None, help="sign-off date stamped on each gate (default: today)")
     ag.add_argument("--dry-run", action="store_true")
     ag.set_defaults(func=cmd_approve_gates)

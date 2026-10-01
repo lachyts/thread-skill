@@ -67,7 +67,7 @@ fm() { grep -m1 "^$2:" "$D/$1.md" || echo "<none>"; }   # fm <slug> <key> — th
 nxt() { python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@"; }
 st() { python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" --now "${2:-$NOW}"; }
 # q <json> <python-expr over d> — compact JSON of the expression
-q() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(eval(sys.argv[1]), separators=(",", ":"), sort_keys=True))' "$2"; }
+q() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(eval(sys.argv[1]), separators=(",", ":"), sort_keys=True, ensure_ascii=False))' "$2"; }
 holds='{h["slug"]: h["reason"] for h in d["hold"]}'
 
 # ── dependency wait ──────────────────────────────────────────────────────────────────────────────
