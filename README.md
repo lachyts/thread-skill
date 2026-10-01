@@ -141,7 +141,8 @@ final check that the run wrote nothing into the tree):
   runtime wraps it; `node --check` silently passes broken ESM on Node 23, so it is not used).
 - **Engine** — `skills/execute/tests/`: `prompt-invariants.test.mjs` guards the **resume-cache
   invariant** (optional engine features must render byte-identical Workflow `agent()` prompts when
-  unset, or in-flight rollouts can't resume); `reconcile-rollout.test.sh`; `wave-stop-driver.test.sh`;
+  unset, or in-flight rollouts can't resume); `reconcile-rollout.test.sh`, `reconcile-rollout-queue.test.sh`
+  (the queue verbs) and `reconcile-rollout-runs.test.sh` (accumulated feedback runs); `wave-stop-driver.test.sh`;
   `merge-wave.sh --self-test-classify` / `--self-test-base`.
 - **Contracts** — `tests/contracts/*.test.mjs`: manifests agree, skill names and description budgets,
   `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files, no SKILL.md body holds a

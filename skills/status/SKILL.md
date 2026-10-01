@@ -42,21 +42,35 @@ status is read-only and reports whatever it finds, noting if a note predates `pr
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py status --rollout <rollout-note>
 ```
 
-Returns JSON: `{ rollout, rolloutStatus, paused, pause_requested, merged_through_wave, total_waves,
-timeline, tasks: [{ slug, wave, status, pr, blockerSummary }] }` — **every** task carrying
-`rollout: [[<slug>]]` (glob-by-backlink, so read-only tasks the `## File-sets` block omits are still
-included), sorted by wave then slug. Pure read, no network. `paused` is the pause stamp's timestamp
-(null when not paused); `pause_requested` is true when a soft pause is pending and will take effect at
-the next wave boundary (execute → *Pausing + reinstating a rollout*).
+Returns JSON: `{ rollout, rolloutPath, rolloutStatus, paused, pause_requested, ceiling, counts, progress,
+timeline, tasks: [{ slug, wave, status, queueState, setAsideAt, pr, priority, solo, started, merged,
+integrating, waitingOn, blockerSummary }] }` — **every** task carrying `rollout: [[<slug>]]`
+(glob-by-backlink, so read-only tasks the `## File-sets` block omits are still included), sorted by
+schedule order (the order the rollout body lists them; unlisted tasks after, by legacy `wave:` then
+slug). Pure read, no network. `paused` is the pause stamp's timestamp (null when not paused);
+`pause_requested` is true when a soft pause is pending: it drains, then takes effect (execute →
+*Pausing + reinstating a rollout*). `ceiling` is the rollout's `parallel_ceiling` (null when invalid).
 
-`timeline` is the progress/ETA block, computed from the `wave_N_dispatched:` / `wave_N_merged:`
-wave-boundary stamps execute writes on the rollout note (`mark-dispatched` at each wave launch, the
-`cursor` step post-merge): per-wave `{ wave, tasks, dispatched, merged, durationMinutes }`, plus
-`elapsedMinutes`/`elapsedLabel`, `avgTaskMinutes`, `remainingEstimateMinutes`/`remainingLabel` (always
-a `~… (rough)` figure — in-rollout arithmetic only, no calibration), `totalWaves`, `complete`. The
-stamps are durable frontmatter, so elapsed + estimate render **without any workflow run being alive**
-— exactly what a kill/resume needs. `null` when the rollout has no stamps (predates the feature):
-omit the timing line rather than guessing.
+Each task's `queueState` is `merged`, `running`, `integrating`, `awaiting-integration`, `queued`,
+`set-aside`, `folded` (an affine tombstone, outside the count) or `other` (dropped, parked; also outside
+it). `counts` tallies them, with `setAsideAtIntegration` counted apart: a task set aside at Integration
+re-enters there. **Integrating is a durable stamp**: execute's `mark-integrating` writes `integrating:` on
+a `review` note with a `pr:` when its Integration begins, so a separate /thread:status session reads it
+too; a `review` + `pr:` note without the stamp is awaiting Integration. A set-aside task's `setAsideAt` is
+`integration` (its latest `## Blocker diagnosis` run starts `integration:`), `gate` (gate-pending) or
+`run`. `waitingOn` lists a queued task's unmet dependencies; `blockerSummary` is the latest run of the
+feedback section matching the note's status (the whole section when it has no runs).
+
+`timeline` is the progress/ETA block, computed from the per-task `started:` / `merged:` stamps
+(`mark-started` as each task starts; `mark-done` or `resume` as its PR merges): per-task `{ slug,
+started, merged, durationMinutes }` sorted by start, plus `firstStarted`, `lastMerged`,
+`elapsedMinutes`/`elapsedLabel`, `avgTaskMinutes` (the mean task duration, over `durationsUsed` tasks),
+`remainingEstimateMinutes`/`remainingLabel` (always a `~… (rough)` figure — the mean × the ceiling-sized
+chunks of running + queued tasks, in-rollout arithmetic only, no calibration) and `complete`. The stamps
+are durable frontmatter, so elapsed + estimate render **without any workflow run being alive** —
+exactly what a kill/resume needs. `null` when no task has a `started:` stamp: omit the timing line
+rather than guessing. `progress` is the one-line summary the lead relays, e.g. `progress: 2/6 merged, 1
+running, 1 awaiting integration, 1 queued, 1 set aside — 2h elapsed, ~45m remaining (rough)`.
 
 ### 3. Live cross-check (default; `--offline` skips)
 

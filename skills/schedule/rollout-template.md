@@ -29,11 +29,7 @@ model: opus  # opus | fable — default (mechanical execution). thread:schedule 
 #             byte-identical to an uncapped run. ADR 0016; execute SKILL.md § "3. Resolve effective
 #             config per task".
 # env_bootstrap:   # optional: shell cmd thread:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — thread:schedule step 2.7
-merged_through_wave: 0  # thread:execute continuous-mode cursor: highest wave merged to main (0 = none yet)
-# wave_N_dispatched: / wave_N_merged:   # engine-stamped wave-boundary timestamps (flat per-wave keys, ISO):
-#   reconcile-rollout.py mark-dispatched writes the first at wave launch (first dispatch wins), cursor writes the
-#   second post-merge. They feed the per-wave progress lines and /thread:status's elapsed + rough (~) remaining
-#   estimate. Never hand-edit or pre-seed them — the engine loop owns these stamps.
+# No rollout cursor: progress lives on the task notes' started:/merged: stamps (ADR 0030; reconcile-rollout.py).
 # supersedes: "[[<prior-rollout-slug>]]"   # add only when --regenerate replaces an earlier rollout (see SKILL.md step 6)
 ---
 
