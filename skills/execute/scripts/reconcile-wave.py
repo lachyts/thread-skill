@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """reconcile-wave.py — deterministic vault bookkeeping for wave-execute (findings #6 + #7).
 
-The Workflow engine (`wave-execute.workflow.js`) returns a structured result; the lead session used to
+The Workflow engine (`task.workflow.js`) returns a structured result; the lead session used to
 hand-edit ~5 frontmatter transitions per wave (status + pr + *_rounds_used) plus the cursor advance — 50+
 fumble-prone edits across a rollout. This helper performs ALL of those writes deterministically from the
 returned task array, and (finding #7) computes the per-task resume set so a partial wave resumes without

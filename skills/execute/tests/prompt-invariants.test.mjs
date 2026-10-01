@@ -1,4 +1,4 @@
-// Verifies the resume-cache invariant for the optional features in wave-execute.workflow.js:
+// Verifies the resume-cache invariant for the optional features in task.workflow.js:
 //   - gateOverride(task)      → '' when ignoreGate is unset (byte-identical prompts), text when set
 //   - envBootstrapStep(a)     → '' when envBootstrap is unset, a command line when set
 //   - worktreeSetup(a, task)  → identical to its pre-feature output when envBootstrap is unset; when set,
@@ -26,7 +26,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const src = fs.readFileSync(path.join(here, '..', 'wave-execute.workflow.js'), 'utf8')
+const src = fs.readFileSync(path.join(here, '..', 'task.workflow.js'), 'utf8')
 
 const marker = '// ---- Orchestration'
 const idx = src.indexOf(marker)

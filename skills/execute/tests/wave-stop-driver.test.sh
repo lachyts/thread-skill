@@ -49,6 +49,10 @@ assistant_line "WAVE-STATUS: demo cursor=1/3 state=running" > "$T"
 run_driver "$T" s3
 echo "$OUT" | grep -q '"decision": "block"' && ok "running: blocks stop" || fail "running: expected block, got: $OUT"
 echo "$OUT" | grep -q 'demo' && ok "running: reason names the rollout" || fail "running: reason missing slug"
+# Per-task dispatch (p12-5): a mid-wave `running` stop must be told to launch the
+# wave's next task call, and to merge only after the wave's last call reconciles.
+echo "$OUT" | grep -q "launch the wave's next task call" && ok "running: reason names the next task call" || fail "running: reason lacks next-task-call step: $OUT"
+echo "$OUT" | grep -q "Only after the wave's last task call is reconciled" && ok "running: reason gates merge on the wave's last call" || fail "running: reason lacks last-call merge gate: $OUT"
 
 # --- 4. cap: 3 blocks without progress, then release with systemMessage ---
 for i in 2 3; do run_driver "$T" s3; done

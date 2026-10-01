@@ -1,6 +1,6 @@
 export const meta = {
   name: 'edit-noop-repro',
-  description: 'Reproduce the suspected "Edit tool silently no-ops inside a git worktree" bug in the exact failing context (a Workflow-engine agent() subagent operating in an explicit worktree, as wave-execute.workflow.js worktreeSetup() creates).',
+  description: 'Reproduce the suspected "Edit tool silently no-ops inside a git worktree" bug in the exact failing context (a Workflow-engine agent() subagent operating in an explicit worktree, as task.workflow.js worktreeSetup() creates).',
   phases: [{ title: 'Probe' }],
 }
 
@@ -8,7 +8,7 @@ export const meta = {
 // One-off diagnostic harness for task: wave-execute-agent-edit-tool-noop-in-worktree
 //
 // Each probe agent runs three arms in its OWN worktree of a scratch repo, mirroring
-// the wave-execute worktree setup verbatim, then REPORTS (does not fix):
+// the task.workflow.js worktree setup verbatim, then REPORTS (does not fix):
 //   Arm A — Edit via the WORKTREE absolute path ($WT/...): the normal happy path.
 //   Arm B — Edit via the MAIN-CHECKOUT absolute path (<repoPath>/...): the H1 hypothesis —
 //           does an edit aimed at the repoPath-prefixed path land in the MAIN tree (invisible
@@ -58,7 +58,7 @@ const PROBE = {
   required: ['index', 'worktreeToplevel', 'armA', 'armB', 'armC', 'notes'],
 }
 
-// The engine's GIT_ENV_SCRUB (wave-execute.workflow.js, p12-3), repeated here because a Workflow script
+// The engine's GIT_ENV_SCRUB (task.workflow.js, p12-3), repeated here because a Workflow script
 // cannot import; tests/git-env-scrub.test.mjs pins the two as equal. Every git command the probe runs
 // starts with it, so an inherited GIT_DIR & co. never turns the probe's git calls onto another repo.
 const GIT_ENV_SCRUB = 'unset $(git rev-parse --local-env-vars 2>/dev/null);'
@@ -70,7 +70,7 @@ Follow these steps EXACTLY and report precisely what you observe. Do NOT try to 
 Scratch repo (the "main checkout"): ${repoPath}
 Your index: ${i}
 
-STEP 1 — create an isolated worktree of the scratch repo (mirrors the wave-execute engine verbatim). Run exactly, as ONE Bash command (the \`unset\` on its first line covers only that command):
+STEP 1 — create an isolated worktree of the scratch repo (mirrors the task.workflow.js engine verbatim). Run exactly, as ONE Bash command (the \`unset\` on its first line covers only that command):
   ${GIT_ENV_SCRUB} RP="${repoPath}"; WT="$RP/.claude/worktrees/repro-${i}"; BR="audit-fix/repro-${i}"
   if [ -d "$WT" ]; then cd "$WT";
   elif git -C "$RP" show-ref --verify --quiet "refs/heads/$BR"; then git -C "$RP" worktree add "$WT" "$BR" && cd "$WT";

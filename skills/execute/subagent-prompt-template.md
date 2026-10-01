@@ -3,12 +3,12 @@
 As of `protocol_version: 3`, the dispatched-subagent prompts are **no longer read from this file at runtime**. Workflow scripts have no filesystem access, so the eight prompt variants now live as inlined template-builder functions in:
 
 ```
-${CLAUDE_PLUGIN_ROOT}/skills/execute/wave-execute.workflow.js
+${CLAUDE_PLUGIN_ROOT}/skills/execute/task.workflow.js
 ```
 
 The variants and the functions that build them:
 
-| Variant | Builder in `wave-execute.workflow.js` | Returns (schema) |
+| Variant | Builder in `task.workflow.js` | Returns (schema) |
 |---|---|---|
 | Implementer (gate off) | `implementerPrompt` | `IMPL_RESULT` |
 | Read-only investigator | `readOnlyPrompt` | `IMPL_RESULT` (no PR) |

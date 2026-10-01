@@ -114,9 +114,10 @@ not a re-route: the session lane can't push to a listed repo either. A repo can 
 listed after scheduling, so execute § 2.5 re-runs this check at every launch, and
 execute § 4.5 re-runs it before every wave dispatch, Workflow call and merge.
 
-The check is lead-side, so it has limits. A repo listed while a wave's Workflow is
-in flight is caught only when that wave returns: until then the engine's agents keep
-pushing task branches and opening PRs on it, and only the merge is stopped. For an
+The check is lead-side, so it has limits. It re-runs before every task call, so a
+repo listed while a task's Workflow call is in flight is caught only when that call
+returns: until then the engine's agents keep pushing that task's branch and opening
+its PR on it, and only the merge is stopped. For an
 urgent mid-wave listing, hard pause the rollout (execute § Pausing + reinstating a
 rollout): pausing is exempt from the check, so it never blocks stopping work. One
 repair step is deliberately ungated too: `/thread:repair` § 5's clean defer runs
