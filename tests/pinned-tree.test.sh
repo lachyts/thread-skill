@@ -22,20 +22,21 @@ if [ -n "$zsh_bin" ]; then shells+=("$zsh_bin -f")
 elif [ "$(uname)" = Darwin ]; then ok "missing" "present" "zsh is installed (mandatory on macOS: it is the Bash tool's shell)"
 else echo "SKIP - zsh arm: zsh not installed on this $(uname) runner"; fi
 
-# render <repo> <kind> <scope> <slug>: the command lines of one setup block, as the engine renders them.
-# kind: refresh (planner, investigator), judge (plan judge, plan reviser), impl (the implementer's
-# worktreeSetup). The block runs from its first line (the scrub) to the MUST-print toplevel line.
+# render <repo> <kind> <scope> <slug> [envBootstrap]: the command lines of one setup block, as the engine
+# renders them. kind: refresh (planner, investigator), judge (plan judge, plan reviser), impl (the
+# implementer's worktreeSetup). The block is every indented line from the first (the scrub) on: the
+# MUST-print toplevel line, and the env bootstrap wherever the engine puts it.
 render() {
   node --input-type=module -e "
     import { loadEngine } from './tests/lib/engine.mjs'
     const T = loadEngine(['taskTreeSetup', 'worktreeSetup'])
-    const [repo, kind, scope, slug] = process.argv.slice(1)
-    const a = { repoPath: repo, defaultBranch: 'master' }
+    const [repo, kind, scope, slug, envBootstrap] = process.argv.slice(1)
+    const a = { repoPath: repo, defaultBranch: 'master', ...(envBootstrap ? { envBootstrap } : {}) }
     const task = { slug, scope }
     const out = kind === 'impl' ? T.worktreeSetup(a, task) : T.taskTreeSetup(a, task, kind === 'refresh')
-    const l = out.split('\n')
-    const end = l.findIndex((x) => x.startsWith('  git rev-parse --show-toplevel'))
-    process.stdout.write(l.slice(1, end + 1).join('\n') + '\n')
+    const l = out.split('\n').slice(1)
+    const end = l.findIndex((x) => !x.startsWith('  '))
+    process.stdout.write(l.slice(0, end).join('\n') + '\n')
   " "$@"
 }
 
@@ -43,7 +44,8 @@ suite() {
   local sh="$1" n d R out tip wt head before pid
   n=$(basename "${sh%% *}"); d="$tmp/$n"; mkdir -p "$d"
   # run <script> [VAR=val …]: run a rendered setup from outside the repo, as a direct child of this
-  # shell (so its $PPID is this test's live pid); output in $out.
+  # shell (so its $PPID is this test's live pid); output in $out. runat <dir> <script> runs it from <dir>.
+  runat() { local at="$1" s="$2"; cd "$at" && $sh -c "$s" > "$d/out" 2>&1; cd "$root"; out=$(cat "$d/out"); }
   run() { local s="$1"; shift; cd "$d" && env "$@" $sh -c "$s" > "$d/out" 2>&1; cd "$root"; out=$(cat "$d/out"); }
   advance() { echo "$1" > "$d/pusher/$1.txt"; g -C "$d/pusher" add "$1.txt"; g -C "$d/pusher" commit -q -m "$1"; g -C "$d/pusher" push -q origin master; tip=$(git -C "$d/pusher" rev-parse HEAD); }
   toplevel() { printf '%s\n' "$out" | tail -1; }
@@ -200,6 +202,41 @@ suite() {
   git -C "$R" worktree unlock "$wt"; git -C "$R" worktree lock --reason "pid 999999 stale" "$wt"
   run "$(render "$R" refresh cross-cutting proj-task-a)"
   ok "$(lockpid proj-task-a)" "$$" "$n 10: re-running the setup replaces a stale lock with the live pid"
+
+  # 12. the env bootstrap runs in the task tree, last, after tree base:
+  local bs="$R/.claude/worktrees/proj-task-bs"
+  runat "$R" "$(render "$R" refresh read-only proj-task-bs 'touch BOOTSTRAP')"
+  ok "$([ -e "$bs/BOOTSTRAP" ] && echo yes)|$([ -e "$R/BOOTSTRAP" ] && echo leaked)" "yes|" "$n 12: a created tree runs the bootstrap inside it"
+  rm -f "$bs/BOOTSTRAP"
+
+  # 12b. a stale plain directory at $WT: the bootstrap never runs (not in it, not in the main checkout)
+  local bp="$R/.claude/worktrees/proj-task-bsplain"
+  mkdir -p "$bp"
+  run "$(render "$R" refresh cross-cutting proj-task-bsplain 'touch BOOTSTRAP')"
+  ok "$(find "$d" -name BOOTSTRAP | sed "s|^$d/||")" "" "$n 12b: plain dir → no bootstrap side effect anywhere"
+  rm -rf "$bp"
+
+  # 12c. the create arm's fetch fails, run from the main checkout: the bootstrap does not land there
+  git -C "$R" remote set-url origin "$d/missing.git"
+  for sc in read-only cross-cutting; do
+    runat "$R" "$(render "$R" refresh "$sc" "proj-task-bsfail-$sc" 'touch BOOTSTRAP')"
+    ok "$(find "$d" -name BOOTSTRAP | sed "s|^$d/||")|$([ -e "$R/.claude/worktrees/proj-task-bsfail-$sc" ] && echo tree)" "|" "$n 12c ($sc): fetch failure → no tree, no bootstrap side effect anywhere"
+    case "$out" in *"tree base:"*) ok "$out" "no tree base" "$n 12c ($sc): no tree base line" ;; *) ok y y "$n 12c ($sc): no tree base line" ;; esac
+  done
+  git -C "$R" remote set-url origin "$d/o.git"
+
+  # 13. a locked tree deleted by hand (rm -rf, no worktree remove) is recovered by re-running the setup
+  for sc in read-only cross-cutting; do
+    local hw="$R/.claude/worktrees/proj-task-rm-$sc"
+    run "$(render "$R" refresh "$sc" "proj-task-rm-$sc")"
+    ok "$(lockpid "proj-task-rm-$sc")" "$$" "$n 13 ($sc): the tree is locked"
+    rm -rf "$hw"
+    out=$(git -C "$R" worktree add --detach "$hw" origin/master 2>&1); has "$out" "missing but locked" "$n 13 ($sc): … a bare worktree add now fails (the hazard)"
+    run "$(render "$R" refresh "$sc" "proj-task-rm-$sc")"
+    ok "$(toplevel)|$(git -C "$hw" rev-parse HEAD)" "$hw|$tip" "$n 13 ($sc): re-running the setup recreates it at the tip"
+    ok "$(lockpid "proj-task-rm-$sc")" "$$" "$n 13 ($sc): … locked again"
+  done
+  ok "$(git -C "$R/.claude/worktrees/proj-task-rm-cross-cutting" symbolic-ref -q HEAD)" refs/heads/audit-fix/task-rm-cross-cutting "$n 13: … the code-writing tree back on its branch"
 }
 
 for sh in "${shells[@]}"; do suite "$sh"; done

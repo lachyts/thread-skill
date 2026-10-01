@@ -109,7 +109,13 @@ test('(c) refresh: the planner and investigator fast-forward; the judge and revi
     const refreshing = task === code ? ['plannerPrompt'] : ['plannerPrompt', 'readOnlyPrompt']
     for (const name of refreshing) {
       for (const s of refreshBits) assert.ok(b[name][0].includes(s), `${name}: ${s}`)
-      assert.ok(b[name][0].includes(T.envBootstrapStep(env)), `${name}: env bootstrap`)
+      // inside the guard, last: after `tree base:`, before its `fi`, never after the toplevel check
+      const l = b[name][1].split('\n')
+      const at = l.indexOf('    ' + T.envBootstrapStep(env).trimStart())
+      assert.ok(at > 0, `${name}: env bootstrap line`)
+      assert.ok(l[at - 1].startsWith('    echo "tree base:') && l[at + 1] === '  fi', `${name}: bootstrap inside the guard, after tree base:`)
+      assert.ok(l[at + 2].startsWith('  git rev-parse --show-toplevel') && !l[at + 2].includes('poetry'), `${name}: nothing after the toplevel check`)
+      assert.ok(b[name][0].includes(b[name][1]), `${name}: renders that setup`)
     }
     for (const name of ['planJudgePrompt', 'planReviserPrompt']) {
       for (const s of refreshBits) assert.ok(!b[name][0].includes(s), `${name}: no ${s}`)
@@ -133,14 +139,28 @@ test('(c2) base pinning: Planned on: / Investigated on:, and the judge compares'
 })
 
 test('(d) the WT/BR lines and code-writing arms are worktreeSetup\'s; the base follows defaultBranch', () => {
-  const lines = (s) => s.split('\n').slice(1, 5)
+  // taskTreeSetup: [1] WT/BR, [2] the self-heal, [3..5] the arms; worktreeSetup: [1] WT/BR, [2..4] the arms
+  const tt = (s) => { const l = s.split('\n'); return [l[1], ...l.slice(3, 6)] }
+  const ws = (s) => s.split('\n').slice(1, 5)
   for (const args of [a, { ...a, defaultBranch: 'master' }]) {
-    assert.deepEqual(lines(T.taskTreeSetup(args, code, true)), lines(T.worktreeSetup(args, code)))
+    assert.deepEqual(tt(T.taskTreeSetup(args, code, true)), ws(T.worktreeSetup(args, code)))
   }
   const m = T.taskTreeSetup({ ...a, defaultBranch: 'master' }, ro, true)
   assert.ok(m.includes('--detach "$WT" origin/master') && !m.includes('origin/main'))
   assert.throws(() => T.taskTreeSetup({ ...a, defaultBranch: 'a b' }, code, true), /defaultBranch/)
   assert.doesNotThrow(() => T.taskTreeSetup({ verifier: 'make test' }, code, true), 'no repoPath (the cap sweep) still renders')
+})
+
+test('(d2) a missing tree is unlocked and pruned before the arms; the guard needs the shell in the tree', () => {
+  const heal = `  [ -d "$WT" ] || { git -C "${R}" worktree unlock "$WT" 2>/dev/null; git -C "${R}" worktree prune; }`
+  for (const task of [code, ro]) {
+    for (const refresh of [true, false]) {
+      const l = T.taskTreeSetup(a, task, refresh).split('\n')
+      assert.equal(l[2], heal, 'self-heal is line 2')
+      assert.equal(l[3], '  if [ -d "$WT" ]; then cd "$WT";', 'the arms follow it')
+      assert.ok(l.includes('  if [ -d "$WT" ] && [ "$(git -C "$WT" rev-parse --show-toplevel 2>/dev/null)" = "$(pwd -P)" ]; then'), 'guard')
+    }
+  }
 })
 
 test('(e) the first command line starts with the scrub', () => {

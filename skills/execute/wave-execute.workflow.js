@@ -803,7 +803,8 @@ function shortAlias(slug) {
 // first agent creates it — the planner of a plan-gated task (taskTreeSetup), else the investigator of
 // a read-only task (taskTreeSetup) or the implementer (worktreeSetup) — and every later agent reuses it;
 // the review judge is handed the same path as context. taskTreeSetup locks it with the session's pid,
-// which the reaper's live-pid check honours, so it is never reaped mid-run.
+// which the reaper's live-pid check honours, so a plan-gated or read-only task's tree is never reaped
+// mid-run. An ungated code-writing task's tree is created by worktreeSetup, which never locks it.
 function worktreeDir(repoPath, slug) {
   return `${repoPath}/.claude/worktrees/${slug}`
 }
@@ -814,6 +815,8 @@ function worktreeDir(repoPath, slug) {
 // worktreeSetup renders BYTE-IDENTICAL to pre-feature behaviour (resume-cache invariant), exactly like
 // baselineManifest / gateOverride. It runs in every arm (fresh OR reused worktree) — it's idempotent env
 // setup, not a git op, so it does not touch the "reuse arms must not re-fetch/rebase" invariant below.
+// taskTreeSetup renders the same command line inside its guarded block (it runs in the task tree or not
+// at all); worktreeSetup keeps it after the toplevel check, where its GOLDEN bytes put it.
 function envBootstrapStep(a) {
   if (!a.envBootstrap) return ''
   return `
@@ -867,8 +870,13 @@ rebase an in-flight branch on resume.`
 // enter the task's tree (ADR 0030, p12-4) — the same worktreeDir path worktreeSetup uses, so every agent on
 // a task shares one tree and the plan is made on the base the code is built on. A code-writing task's tree
 // is its audit-fix/<alias> branch (the same WT/BR lines and arms as worktreeSetup); a read-only task's is
-// detached at origin/<base>. After the arms, guarded so nothing touches the main checkout when "$WT" is a
-// stale plain directory (the toplevel must BE "$WT"):
+// detached at origin/<base>.
+// - self-heal (before the arms): when "$WT" is missing, unlock + prune its registration. A tree this setup
+//   locked and someone then `rm -rf`'d stays registered, `worktree prune` skips locked entries, and every
+//   later `worktree add` for the slug fails "missing but locked" — so without this, TASK_TREE_RULE (v)'s
+//   re-run could never recover it.
+// After the arms, guarded so nothing touches the main checkout when "$WT" is a stale plain directory or
+// an arm failed (the shell must be IN "$WT" and "$WT" must be its own toplevel):
 // - lock: unlock + lock with `pid $PPID` — the Bash tool's shell's parent is the long-lived claude session,
 //   and the daily reaper skips a tree whose lock names a live pid (unlocking stale ones). Re-locking each
 //   render refreshes the pid; `lock` on a locked tree exits 128, hence the unlock first.
@@ -883,6 +891,9 @@ rebase an in-flight branch on resume.`
 //   quote. The judge and reviser (refresh=false) never move the tree to a new commit.
 // - `tree base: <sha>`: the commit the agent is reading — the planner's `Planned on:`, which the plan judge
 //   compares with its own to catch a tree recreated or moved since planning.
+// - env bootstrap (refresh=true only): last inside the guard, so it runs in "$WT" or not at all — never in
+//   the caller's cwd after a failed fetch/add, nor in a stale plain dir where `poetry install` / `npm
+//   install` would walk up to the main checkout's project.
 // The implementer prompts do not call this (their worktreeSetup bytes are GOLDEN-pinned). With no
 // a.repoPath (the cap sweep's call shape) it still renders; a bad defaultBranch throws, as there.
 function taskTreeSetup(a, task, refresh) {
@@ -894,12 +905,13 @@ function taskTreeSetup(a, task, refresh) {
   const skip = 'why="fast-forward refused (untracked file in the way?)"'
   const cmd = [
     code ? `${GIT_ENV_SCRUB} WT="${wt}"; BR="${br}"` : `${GIT_ENV_SCRUB} WT="${wt}"`,
+    `[ -d "$WT" ] || { git -C "${a.repoPath}" worktree unlock "$WT" 2>/dev/null; git -C "${a.repoPath}" worktree prune; }`,
     'if [ -d "$WT" ]; then cd "$WT";',
     ...(code ? [`elif git -C "${a.repoPath}" show-ref --verify --quiet "refs/heads/$BR"; then git -C "${a.repoPath}" worktree add "$WT" "$BR" && cd "$WT";`] : []),
     code
       ? `else git -C "${a.repoPath}" fetch origin --quiet && git -C "${a.repoPath}" worktree add "$WT" -b "$BR" ${base} && cd "$WT"; fi`
       : `else git -C "${a.repoPath}" fetch origin --quiet && git -C "${a.repoPath}" worktree add --detach "$WT" ${base} && cd "$WT"; fi`,
-    `if [ -d "$WT" ] && [ "$(${g} rev-parse --show-toplevel 2>/dev/null)" = "$(cd "$WT" 2>/dev/null && pwd -P)" ]; then`,
+    `if [ -d "$WT" ] && [ "$(${g} rev-parse --show-toplevel 2>/dev/null)" = "$(pwd -P)" ]; then`,
     `  ${g} worktree unlock "$WT" 2>/dev/null`,
     `  ${g} worktree lock --reason "pid $PPID thread:execute task tree" "$WT" 2>/dev/null || echo "tree NOT locked against the daily reaper"`,
     ...(code ? [`  if ! ${g} symbolic-ref -q HEAD >/dev/null; then { if ${g} show-ref --verify --quiet "refs/heads/$BR"; then ${g} checkout --quiet "$BR"; else ${g} checkout --quiet -b "$BR"; fi; } || echo "tree NOT attached to $BR: checkout failed"; fi`] : []),
@@ -913,8 +925,9 @@ function taskTreeSetup(a, task, refresh) {
       `  [ -z "$why" ] || echo "tree NOT refreshed: $why; $(${g} rev-list --count HEAD..${base}) behind ${base} as last fetched"`,
     ] : []),
     `  echo "tree base: $(${g} rev-parse HEAD)"`,
+    ...(refresh && a.envBootstrap ? ['  ' + envBootstrapStep(a).trimStart()] : []),
     'fi',
-    `git rev-parse --show-toplevel   # MUST print "$WT" (the task tree), NOT ${a.repoPath} (the main checkout) — STOP if it doesn't${refresh ? envBootstrapStep(a) : ''}`,
+    `git rev-parse --show-toplevel   # MUST print "$WT" (the task tree), NOT ${a.repoPath} (the main checkout) — STOP if it doesn't`,
   ]
   const kind = code
     ? `on branch ${br} (the implementer builds on it later)`
