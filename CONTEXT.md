@@ -246,11 +246,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `Archive/Rollouts/`. A protocol-3 rollout in flight migrates this way, once
   hard-paused (ADR 0030). _Avoid_: migrate (alone), replace.
 - **Incomplete rollout** — a never-started rollout that must not run as
-  written, because the schedule run that wrote it never finished: it carries
-  `incomplete: true` (schedule § 0 finished the interrupted supersede that
-  wrote it), its `supersedes:` names a rollout still unfinished, or its queue
-  names a task not stamped to it. The queue refuses to start it; only a
-  supersede ends it. _Avoid_: half-written, broken.
+  written. Either it carries `incomplete: true`, which every rollout note is
+  born with (schedule step 6) until step 7's last write removes it once every
+  task is stamped, and which schedule § 0 stamps on the note an interrupted
+  supersede wrote; or its `supersedes:` names a rollout still unfinished beside
+  it. The queue refuses to start it. Only the stamp needs a supersede to end it
+  once its run has stopped; closing out the `supersedes:` target ends the other
+  reason. A task taken out of a rollout never makes it incomplete. _Avoid_:
+  half-written, broken.
 - **Wave** — a set of tasks safe to run together because none shares a file
   (ADR 0009). Retired by ADR 0030: see **Queue**. _Avoid_: round, phase, stage.
 - **Queue** — how a rollout runs: tasks in parallel, each from the `main` of

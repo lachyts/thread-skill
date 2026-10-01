@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Schedule orders a queue (ADR 0030 decision 1): skills/schedule/rollout-template.md rendered with a fixed
-# placeholder map (Q1: protocol 5, a `## Queue` table, no `wave` anywhere), then fed to reconcile-rollout.py
-# `next` / `status`, which read the `## Queue` rows as the schedule rank: three tasks on one file give one
-# queue, no waves (Q2); a Solo task ranked first holds the rest (Q3); a frontmatter dependency holds its
-# dependant (Q4). Temp notes only; no vault, no network. bash 3.2-compatible (macOS).
+# placeholder map (Q1: protocol 5, a `## Queue` table, no `wave` anywhere, and born `incomplete: true`, which
+# `next` refuses until schedule step 7's last write removes it), then fed to reconcile-rollout.py `next` /
+# `status`, which read the `## Queue` rows as the schedule rank: three tasks on one file give one queue, no
+# waves (Q2); a Solo task ranked first holds the rest (Q3); a frontmatter dependency holds its dependant
+# (Q4). Temp notes only; no vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.."
@@ -19,6 +20,7 @@ NOW=2026-10-02T14:05:00Z
 D=""
 scen() { D="$TMP/$1"; mkdir -p "$D"; echo "== $1"; }
 # render <slug> <queue rows> <file-set lines> — the template, every placeholder substituted, as $D/<slug>.md
+# (schedule step 6: the note is born `incomplete: true`)
 render() {
   python3 - "$TPL" "$D/$1.md" "$D" "$2" "$3" <<'PY'
 import sys
@@ -36,6 +38,8 @@ for k, v in vals.items():
 open(out, "w").write(text)
 PY
 }
+# step7end <slug> — schedule step 7's last write, once every task is stamped: the `incomplete: true` line removed
+step7end() { grep -v '^incomplete:' "$D/$1.md" > "$D/$1.tmp" && mv "$D/$1.tmp" "$D/$1.md"; }
 # mkt <slug> <status> [frontmatter lines...] — a task note linked to the rollout `ro`
 mkt() {
   local s="$1" st="$2"; shift 2
@@ -57,6 +61,14 @@ ok "$(grep -c '^parallel_ceiling: 4$' "$D/ro.md")" 1 "Q1: parallel_ceiling: 4"
 ok "$(grep -c '^## Queue$' "$D/ro.md")" 1 "Q1: a ## Queue heading"
 ok "$(grep -ci 'wave' "$D/ro.md")" 0 "Q1: no wave anywhere, Post-rollout included"
 ok "$(grep -c '^## File-sets$' "$D/ro.md")" 1 "Q1: the ## File-sets block stays (the overlap tiebreak)"
+ok "$(grep -c '^incomplete: true' "$D/ro.md")" 1 "Q1: the note is born incomplete: true"
+mkt a open
+nxt > "$D/out" 2> "$D/err"; rc=$?
+ok "$rc|$(cat "$D/out")" "1|" "Q1: next refuses the note until step 7 ends"
+has "$(cat "$D/err")" "is incomplete: it carries incomplete: true" "Q1: … naming the stamp"
+step7end ro
+ok "$(grep -c '^incomplete:' "$D/ro.md")" 0 "Q1: step 7's last write removes the stamp"
+ok "$(q "$(nxt)" 'd["start"]')" '["a"]' "Q1: … and next then runs the queue"
 
 # ── Q2: three tasks on one file give one queue, no waves ─────────────────────────────────────────────
 scen q2
@@ -65,7 +77,7 @@ $(row 2 a —)
 $(row 3 b —)" "- c: src/hub.py
 - a: src/hub.py
 - b: src/hub.py"
-mkt a open; mkt b open; mkt c open
+mkt a open; mkt b open; mkt c open; step7end ro
 J=$(nxt)
 ok "$(q "$J" 'd["start"]')" '["c","a","b"]' "Q2: all three on src/hub.py start in one call, in the table's order"
 ok "$(q "$J" 'd["hold"]')" '[]' "Q2: a shared file holds nothing back"
@@ -81,7 +93,7 @@ $(row 2 a —)
 $(row 3 b —)" "- s: src/hub.py
 - a: src/hub.py
 - b: src/hub.py"
-mkt s open 'solo: true'; mkt a open; mkt b open
+mkt s open 'solo: true'; mkt a open; mkt b open; step7end ro
 J=$(nxt)
 ok "$(q "$J" 'd["start"]')" '["s"]' "Q3: the Solo task starts alone"
 ok "$(q "$J" '{h["slug"]: h["reason"] for h in d["hold"]}')" '{"a":"behind solo [[s]]","b":"behind solo [[s]]"}' "Q3: the others wait behind it"
@@ -94,7 +106,7 @@ scen q4
 render ro "$(row 1 a —)
 $(row 2 b —)
 $(row 3 c —)" "- a: src/x.py"
-mkt a open; mkt b open 'depends-on:' '  - "[[a]]"'; mkt c open
+mkt a open; mkt b open 'depends-on:' '  - "[[a]]"'; mkt c open; step7end ro
 J=$(nxt)
 ok "$(q "$J" 'd["start"]')" '["a","c"]' "Q4: a and c start"
 ok "$(q "$J" '{h["slug"]: h["reason"] for h in d["hold"]}')" '{"b":"depends on [[a]] (open)"}' "Q4: b waits on its dependency"

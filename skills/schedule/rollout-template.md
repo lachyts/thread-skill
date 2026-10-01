@@ -3,6 +3,7 @@ tags:
   - task
   - rollout
 status: open
+incomplete: true  # every rollout note is born with this; /thread:schedule step 7 removes it as its last write, once every task is stamped. Until then reconcile-rollout.py next refuses the note (SKILL.md steps 6-7).
 priority: high
 work_depth: shallow
 projects:

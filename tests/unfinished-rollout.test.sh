@@ -4,9 +4,11 @@
 #   C1-C27  skills/_shared/scripts/unfinished-rollout.py check: none / supersede / interrupted / file / refuse
 #   K1-K4   skills/execute/scripts/reconcile-rollout.py carry: preview, refusals, per-field writes, re-runs
 #   M1-M12  a protocol-3 wave rollout in flight with `review` PRs migrates: check -> resume -> carry preview ->
-#           write -> carry -> close-out (stamps, then the move), crash windows included.
+#           write -> carry -> step 7 -> close-out (stamps, then the move), crash windows included.
 #   I1-I7   § 0's interrupted finish, then a cancel: the incomplete note (reconcile-rollout.py incomplete) is
 #           refused by `next`, reported by `status` and the check, until a completed supersede closes it.
+#   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
+#           without its `## Queue` row) never wedges the queue, started or not.
 # Temp vaults, temp git repos with literal origin URLs (only `git remote get-url` reads them) and a stub gh.
 # No vault, no network. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -105,6 +107,10 @@ nx() { python3 "$RR" next --rollout "$T/$1.md" --tasks-dir "$T" --dry-run > "$S.
 # inc <rollout slug> — status's `incomplete` field
 inc() { python3 "$RR" status --rollout "$T/$1.md" --tasks-dir "$T" | python3 -c 'import json,sys; print(json.load(sys.stdin)["incomplete"])'; }
 sums() { (cd "$T" && find . -name '*.md' -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(cksum < "$f")"; done); }
+# step7end <rollout slug> — schedule step 7's last write: the `incomplete: true` the note was born with (step 6) removed
+step7end() { fmset "$1.md" incomplete -; }
+# starts — the `start` list of the last nx call's JSON
+starts() { printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["start"])'; }
 sum1() { cksum < "$T/$1"; }
 
 # ── C1-C2: nothing unfinished on this repo ───────────────────────────────────────────────────────────
@@ -379,19 +385,28 @@ ok "$out|$rc" "refuse $P,$N|3" "C26: a complete P named by a started N is never 
 hasnt "$err" "completion ceremony" "C26: … gets no ceremony WARN"
 has "$err" "/thread:repair" "C26: … and routes to /thread:repair"
 
-# ── C27: a lone never-started rollout whose queue names an unstamped task is incomplete ─────────────────
+# ── C27: a note is born incomplete (step 6) and stays so until step 7's last write ─────────────────────
 scen c27
 render ro-q - "$(row 1 q1 —)
 $(row 2 q2 —)"
+ok "$(fm ro-q.md incomplete | sed 's/ *#.*//')" "incomplete: true" "C27: step 6 writes the note born incomplete (the template's stamp)"
 mkt q1.md ro-q open
 mkt q2.md - open "$DEMO"
 chk --repo "$R" --project Demo
 ok "$out|$rc" "refuse ro-q|3" "C27: a run that died inside step 7 (q2 unstamped) leaves a note refused without --regenerate"
-has "$err" "ro-q is incomplete: its ## Queue names [[q2]], whose rollout: does not link back" "C27: … stderr names the unstamped task"
+has "$err" "ro-q is incomplete: it carries incomplete: true" "C27: … stderr names the stamp"
 has "$err" "re-run with --regenerate to supersede it; never /thread:execute [[ro-q]] as written" "C27: … and the remedy"
+nx ro-q
+ok "$rc|$out" "1|" "C27: next refuses it (no JSON)"
 chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "supersede ro-q|0" "C27: with --regenerate it is superseded"
-has "$err" "WARN: ro-q is incomplete (its ## Queue names [[q2]]" "C27: … with a WARN that the supersede finishes it"
+has "$err" "WARN: ro-q is incomplete (it carries incomplete: true" "C27: … with a WARN that the supersede finishes it"
+fmset q2.md rollout '"[[ro-q]]"'; step7end ro-q
+nx ro-q
+ok "$rc|$(starts)" "0|['q1', 'q2']" "C27: once step 7 stamps q2 and ends, next runs the note"
+chk --repo "$R" --project Demo
+ok "$out|$rc" "refuse ro-q|3" "C27: … and the check refuses it without --regenerate only as an unfinished rollout"
+hasnt "$err" "is incomplete" "C27: … never as incomplete"
 mkt q1.md ro-q in_progress 'owner: execute-x'
 chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "refuse ro-q|3" "C27 control: once it has run it is an ordinary running rollout"
@@ -538,6 +553,7 @@ $(row 3 e 'carried (running)')
 $(row 4 f 'carried (set-aside)')
 $(row 5 d 'carried (queued)')"
 ok "$(grep -c '{{' "$T/$N.md")|$(fm $N.md supersedes | sed 's/ *#.*//')" "0|supersedes: \"[[$P]]\"" "M5: N is rendered, stamped supersedes: P"
+ok "$(fm $N.md incomplete | sed 's/ *#.*//')" "incomplete: true" "M5: … and born incomplete"
 
 chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "interrupted $P $N|0" "M6: a crash right after N is written -> interrupted"
@@ -547,7 +563,7 @@ has "$err" "$N is incomplete" "M6: … saying N is incomplete"
 has "$err" "died before closing $P out, so its tasks may be unstamped" "M6: … because the run died before closing P out"
 nx $N
 ok "$rc|$out" "1|" "M6: next refuses N (no JSON)"
-has "$err" "ERROR: $N is incomplete: its supersedes: names [[$P]], still unfinished beside it" "M6: … because P is still open beside it"
+has "$err" "ERROR: $N is incomplete: it carries incomplete: true" "M6: … by the stamp it was born with (step 7 never ended)"
 
 pa=$(sum1 a.md); pc=$(sum1 c.md); pg=$(sum1 g.md); ph=$(sum1 h.md); pp=$(sum1 $P.md)
 carry --from "$T/$P.md" --to "$T/$N.md"
@@ -563,8 +579,21 @@ chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "interrupted $P $N|0" "M8: a crash after the carry (or step 7), before close-out -> still interrupted"
 hasnt "$err" "completion ceremony" "M8: the paired P, now all merged, gets no ceremony WARN"
 nx $N
-ok "$rc" 1 "M8: next still refuses N once every queue row links back (step 7 may not have run)"
+ok "$rc" 1 "M8: next still refuses N once every queue row links back (step 7 never ended)"
+has "$err" "ERROR: $N is incomplete: it carries incomplete: true" "M8: … by its stamp"
+step7end $N
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "interrupted $P $N|0" "M8: a crash after step 7's end, before close-out -> still interrupted"
+nx $N
+ok "$rc" 1 "M8: next refuses N after step 7's end while P is open"
 has "$err" "ERROR: $N is incomplete: its supersedes: names [[$P]], still unfinished beside it" "M8: … because P is still open beside it"
+has "$err" "step 7.5" "M8: … naming the close-out that ends it"
+hasnt "$err" "died" "M8: … and no cause it cannot know"
+ln -s "$S/vault" "$S/vlink"
+python3 "$RR" next --rollout "$S/vlink/Work/Tasks/$N.md" --tasks-dir "$T" --dry-run > "$S.out" 2> "$S.err"; rc=$?
+ok "$rc" 1 "M8: … also when --rollout reaches N through a symlinked vault path"
+python3 "$RR" next --rollout "$T/$N.md" --tasks-dir "$S/vlink/Work/Tasks" --dry-run > "$S.out" 2> "$S.err"; rc=$?
+ok "$rc" 1 "M8: … or --tasks-dir does"
 
 st() { python3 "$RR" status --rollout "$T/$1.md" --tasks-dir "$T" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(" ".join(t["slug"] + "=" + t["queueState"] for t in sorted(d["tasks"], key=lambda t: t["slug"])))'; }
 ok "$(st $N)" "b=awaiting-integration d=queued e=running f=set-aside i=awaiting-integration" "M9: status on N reads the carried queue"
@@ -602,8 +631,10 @@ ok "$out|$rc" "interrupted $P $N|0" "I1: P paused + N never started naming it ->
 nx $N
 ok "$rc" 1 "I1: next refuses N before the finish"
 
-# § 0's finish: stamp N incomplete, carry, close P out. Then the user cancels at step 1.
+# § 0's finish: stamp N incomplete (it still carries the stamp it was born with), carry, close P out. Then
+# the user cancels at step 1.
 fmset $N.md incomplete true
+ok "$(grep -c '^incomplete:' "$T/$N.md")" 1 "I2: the finish's stamp on a note born incomplete stays one line"
 carry --from "$T/$P.md" --to "$T/$N.md"
 ok "$rc" 0 "I2: the finish's carry exits 0"
 closeout $P $N
@@ -621,34 +652,82 @@ has "$err" "ERROR: $N is incomplete: it carries incomplete: true" "I3: … namin
 has "$err" "never run it as written; supersede it with /thread:schedule Demo --regenerate" "I3: … and the remedy, naming its project"
 has "$(inc $N)" "it carries incomplete: true" "I3: status reports it incomplete"
 
-fmset $N.md incomplete -
-nx $N
-ok "$rc" 1 "I4: without the stamp, next still refuses N (n1 unstamped)"
-has "$err" "its ## Queue names [[n1]], whose rollout: does not link back" "I4: … naming the unstamped task"
-has "$(inc $N)" "[[n1]]" "I4: status names it too"
-
 fmset n1.md rollout "\"[[$N]]\""
 nx $N
-ok "$rc|$(printf '%s' "$out" | python3 -c 'import json,sys; print(sorted(json.load(sys.stdin)["start"]))')" "0|['d', 'n1']" \
-  "I5 control: every row linked back, no stamp, P closed -> next runs N"
+ok "$rc" 1 "I4: the stamp alone holds back a note whose every row links back (an all-carried queue)"
+has "$(inc $N)" "it carries incomplete: true" "I4: status still reports it"
+
+# A run that reached step 7's end removed the stamp: N's rows are never judged after that.
+step7end $N
+nx $N
+ok "$rc|$(starts)" "0|['d', 'n1']" "I5 control: no stamp, P closed -> next runs N"
 ok "$(inc $N)" "None" "I5 control: status reports nothing incomplete"
 
-fmset $N.md incomplete true
+python3 "$RR" defer --tasks d --tasks-dir "$T" > /dev/null
 nx $N
-ok "$rc" 1 "I6: the stamp alone holds back a note whose every row links back (an all-carried queue)"
+ok "$rc|$(starts)" "0|['n1']" "I6: a task taken out after step 7 (its row left in place) never wedges N"
+ok "$(inc $N)" "None" "I6: … and status reports nothing incomplete"
+fmset d.md rollout "\"[[$N]]\""
 
+fmset $N.md incomplete true
 N2=demo-rollout-2026-10-01-2
 render $N2 $N "$(row 1 b 'carried (awaiting-integration)')
 $(row 2 d 'carried (queued)')
 $(row 3 n1 'carried (queued)')"
 carry --from "$T/$N.md" --to "$T/$N2.md"
 ok "$rc" 0 "I7: a later --regenerate carries N's tasks into N2"
+nx $N2
+ok "$rc" 1 "I7: N2 is refused until its own step 7 ends"
+step7end $N2
 closeout $N $N2
 chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "supersede $N2|0" "I7: once N is closed out, only N2 is unfinished"
 hasnt "$err" "incomplete" "I7: … and nothing is incomplete"
 nx $N2
 ok "$rc" 0 "I7: next runs N2"
+
+# ── D1-D3: a task taken out of a rollout whose step 7 ended never wedges its queue ──────────────────
+# D1: the queue has run (a started), then repair defers the started task, so the note reads never started again.
+scen d1
+render ro-d - "$(row 1 a —)
+$(row 2 e —)
+$(row 3 g —)"
+mkt a.md ro-d in_progress 'owner: execute-d' 'started: 2026-10-01T10:00+00:00'
+mkt e.md ro-d open
+mkt g.md ro-d open
+step7end ro-d
+nx ro-d
+ok "$rc|$(starts)" "0|['e', 'g']" "D1: the started queue runs (a holds a slot)"
+python3 "$RR" defer --tasks a --rollout "$T/ro-d.md" --tasks-dir "$T" > /dev/null
+ok "$(fm a.md rollout)|$(fm a.md owner)|$(grep -c '\[\[a\\|' "$T/ro-d.md")" "<none>|<none>|1" \
+  "D1: defer clears a's rollout: and owner:, and leaves its ## Queue row"
+nx ro-d
+ok "$rc|$(starts)" "0|['e', 'g']" "D1: started, then deferred: next still runs the queue"
+ok "$(inc ro-d)" "None" "D1: … and status reports nothing incomplete"
+
+# D2: three stamped rows, never started; a gate dropped after step 7 by clearing g's rollout: (its row left).
+scen d2
+render ro-g - "$(row 1 e —)
+$(row 2 f —)
+$(row 3 g —)"
+mkt e.md ro-g open; mkt f.md ro-g open; mkt g.md ro-g open
+step7end ro-g
+python3 "$RR" defer --tasks g --tasks-dir "$T" > /dev/null
+nx ro-g
+ok "$rc|$(starts)" "0|['e', 'f']" "D2: a dropped task's leftover row never wedges a never-started queue"
+chk --repo "$R" --project Demo
+hasnt "$err" "is incomplete" "D2: … and the check never calls it incomplete"
+
+# D3: the drop as schedule step 8 spells it: rollout: cleared, then its ## Queue row and ## File-sets line removed.
+python3 - "$T/ro-g.md" <<'PY'
+import sys
+p = sys.argv[1]
+lines = open(p).read().split("\n")
+open(p, "w").write("\n".join(l for l in lines if "[[g\\|" not in l and not l.startswith("- g:")))
+PY
+ok "$(grep -c '\[\[g' "$T/ro-g.md")" 0 "D3: g's row is gone"
+nx ro-g
+ok "$rc|$(starts)" "0|['e', 'f']" "D3: … and next runs the rest"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

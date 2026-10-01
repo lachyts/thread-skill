@@ -34,9 +34,10 @@ Rules.
   started. N is the note an interrupted /thread:schedule wrote and died before closing P out (step 7.5), so
   N's tasks may be unstamped.
 - Incomplete: reconcile-rollout.py's incomplete (a never-started note that must not run as written: it
-  carries `incomplete: true`, its `supersedes:` names a rollout still unfinished beside it, or a `## Queue`
-  row names a task whose `rollout:` does not link back). It never changes stdout or the exit code; it names
-  the note as incomplete on stderr (a WARN beside `supersede`, a line of the refusal otherwise).
+  carries `incomplete: true`, which every rollout note is born with until schedule step 7's last write
+  removes it, and which § 0 stamps on an interrupted supersede's note; or its `supersedes:` names a rollout
+  still unfinished beside it). It never changes stdout or the exit code; it names the note as incomplete on
+  stderr (a WARN beside `supersede`, a line of the refusal otherwise).
 - Misfiled superseded note: tagged `rollout`, directly in the tasks dir or directly in Archive/ (where the
   daily sweep files it; never Archive/Rollouts/), `status: done`, a `superseded_by:` naming a note that
   exists under the tasks dir, same repo (any project: filing is housekeeping, as reconcile-project.py's

@@ -127,15 +127,19 @@ a non-empty `owner:` or `integrating:`. A task's status and its `started:` / `re
 count, because a carry keeps them.
 
 Incomplete (incomplete, read by `next`, `status` and unfinished-rollout.py): a never-started rollout that must
-not run as written, because the /thread:schedule run that wrote it never finished. The first that applies:
-  - it carries `incomplete: true`: schedule § 0 stamps it when it finishes an interrupted supersede, and only
-    a later supersede of this note (which closes it) ends it;
-  - its `supersedes:` names a rollout still unfinished beside it (not done or dropped): the run died before
-    step 7.5 closed that one out, so this note's tasks may be unstamped;
-  - a `## Queue` table row (its first wikilink) names a task whose note is missing or whose `rollout:` does
-    not name this rollout: step 7 never stamped it, so `next` and `status` would never see it.
-A rollout that has started is never judged: once it runs, a task taken out of it (repair's `defer`) is
-legitimate.
+not run as written. The first that applies:
+  - it carries `incomplete: true`. Every rollout note is born with it (the schedule template, written at
+    step 6), and step 7's last write removes it once every task is stamped, so a /thread:schedule run that
+    stopped anywhere in between leaves it. Schedule § 0 also stamps it on the note an interrupted supersede
+    wrote; that stamp ends only when a later supersede closes the note;
+  - its `supersedes:` names a rollout still unfinished beside it (not done or dropped): the supersede has
+    not closed that one out (schedule step 7.5), which is what ends this reason.
+Neither reason reads the task notes' links, so a task taken out of a rollout (repair's `defer`, a gate
+dropped after step 7, with or without its `## Queue` row) never makes it incomplete. And neither can newly
+apply to a rollout that has run, even once every task that marked it started is deferred and it reads as
+never started again: `next` never started it while it carried the stamp or while its `supersedes:` target
+was open (a closed target stays closed: step 7.5 files it in Archive/Rollouts/), and § 0 stamps only a note
+it pairs with an open prior.
 
 Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
   review         -> status: review;        pr: <url>; review_rounds_used: <n>; plan_rounds_used: <n> (if >0);
@@ -914,54 +918,22 @@ def never_started(rollout_note, linked):
     return True, ""
 
 
-QUEUE_HEADING = "## Queue"
-
-
-def _queue_rows(rollout_note):
-    """The task slugs the `## Queue` table names, in row order: each `|` row's first wikilink, outside
-    fenced code (the header and separator rows name none). [] when the note has no `## Queue`."""
-    found = rollout_note._section_bounds(QUEUE_HEADING)
-    if found is None:
-        return []
-    lines, start, end = found
-    out, seen, fenced = [], set(), False
-    for line in lines[start + 1:end]:
-        if FENCE_RE.match(line):
-            fenced = not fenced
-            continue
-        if fenced or not line.lstrip().startswith("|"):
-            continue
-        m = WIKILINK_OPEN_RE.search(line)
-        slug = _wikilink_slug(m.group(1)) if m else None
-        if slug and slug.lower() not in seen:
-            seen.add(slug.lower())
-            out.append(slug)
-    return out
-
-
 def incomplete(rollout_path: Path, rollout_note, linked, index) -> str:
     """'' when the rollout can run as written, else why not (the module docstring's "Incomplete"). Only a
-    never-started rollout is judged; `linked` and `index` are _scan's."""
+    never-started rollout is judged; `linked` and `index` are _scan's. The same-folder test compares
+    resolved paths, as `_scan` does, so a symlinked or differently spelt vault path never skips it."""
     if not never_started(rollout_note, linked)[0]:
         return ""
     if _truthy_flag(rollout_note.get("incomplete")):
-        return ("it carries incomplete: true (schedule § 0 finished the interrupted supersede that wrote it, "
-                "and nothing has superseded it since)")
+        return ("it carries incomplete: true (the /thread:schedule run that wrote it never reached step 7's last "
+                "write, which removes it once every task is stamped, or § 0 stamped it finishing an interrupted "
+                "supersede), so its queue may name tasks never stamped to it")
     prior = (_wikilink_slug(_scalar(rollout_note.get("supersedes"))) or "").lower()
     entry = index.get(prior) if prior else None
-    if entry is not None and entry[0].parent == rollout_path.parent and "rollout" in _tags(entry[1]) and \
-            _status(entry[1]) not in CLOSED_ROLLOUT_STATUSES:
-        return (f"its supersedes: names [[{entry[0].stem}]], still unfinished beside it (the run that wrote it "
-                "died before closing that rollout out)")
-    me = rollout_path.stem.lower()
-    unlinked = []
-    for slug in _queue_rows(rollout_note):
-        hit = index.get(slug.lower())
-        if hit is None or (_wikilink_slug(_scalar(hit[1].get("rollout"))) or "").lower() != me:
-            unlinked.append(slug)
-    if unlinked:
-        return (f"its {QUEUE_HEADING} names {', '.join(f'[[{s}]]' for s in unlinked)}, whose rollout: does not "
-                "link back (the run that wrote it died or was cancelled before stamping them)")
+    if entry is not None and entry[0].parent.resolve() == rollout_path.parent.resolve() and \
+            "rollout" in _tags(entry[1]) and _status(entry[1]) not in CLOSED_ROLLOUT_STATUSES:
+        return (f"its supersedes: names [[{entry[0].stem}]], still unfinished beside it: the supersede has not "
+                "closed that rollout out (schedule step 7.5)")
     return ""
 
 

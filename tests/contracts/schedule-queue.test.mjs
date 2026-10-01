@@ -2,8 +2,9 @@
 // schedule skill or its template, protocol 5, the queue's stamps (`solo: true`, `depends-on:`), and the
 // one-unfinished-rollout-per-repo rule wired into § 0 (the check, the supersede's `resume`, the `file`
 // and `interrupted` finishes, the `incomplete: true` stamp and the pinned "is incomplete" report), the
-// carry preview in step 1, Solo and dependency proposals for queued tasks only (step 5), step 6's
-// Advance/Cancel-only naming, and orient leaving the rule to schedule.
+// carry preview in step 1, Solo and dependency proposals for queued tasks only (step 5), step 6's Advance/Cancel-only naming,
+// a note born `incomplete: true` (the template) that only step 7's last write clears, and orient leaving
+// the rule to schedule.
 //
 // Every rule lives in one pure function, checkSchedule, that returns named failures, so the real files
 // and the control cases run through identical logic and the matcher can't pass vacuously. Each control
@@ -36,6 +37,7 @@ const spans = (text) => [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1])
 const waveLines = (text) => text.replace(/wave-shaped/gi, '').replace(/`wave:`/g, '').split('\n')
   .filter((l) => /wave/i.test(l))
 const description = (text) => (text.match(/^description: (.*)$/m) ?? [])[1] ?? ''
+const frontmatter = (text) => (text.match(/^---\n([\s\S]*?)\n---\n/) ?? [])[1] ?? ''
 
 // Named failures for the schedule skill, its template and orient; [] means every rule holds.
 function checkSchedule({ schedule, template, orient, manifests = [], extra = [] }) {
@@ -76,6 +78,14 @@ function checkSchedule({ schedule, template, orient, manifests = [], extra = [] 
   if (!spans(s(schedule, S1)).some((x) => x.includes('carry --from') && x.includes('--dry-run'))) {
     fails.push('step1-carry-preview')
   }
+
+  // Every rollout note is born incomplete: the template's frontmatter carries `incomplete: true`, and
+  // step 7's last write (after every task stamp, before step 7.5) removes it. A run that stops anywhere
+  // in between leaves a note `next` refuses (p12-10 round 3: the stamp replaces the link-back rule).
+  if (!/^incomplete: true\b/m.test(frontmatter(template))) fails.push('born-incomplete')
+  if (!sentences(s(schedule, S7)).some((x) => /\bremove\b/i.test(x) && x.includes('`incomplete: true`') &&
+    x.includes('last write'))) fails.push('step7-clears-stamp')
+
 
   // Step 6 offers Advance or Cancel only, every time: each **Overwrite** it names is a "never".
   const s6 = s(schedule, S6)
@@ -184,6 +194,20 @@ test('control: the pinned report without "never", without "is incomplete", or mo
   const moved = edit(real.schedule.replace(line, '  3. Print the pinned report.'), S8, '### 8. Print summary\n',
     `### 8. Print summary\n\n${line.trim()}\n`)
   only({ schedule: moved }, ['interrupted-incomplete'], 'moved to step 8')
+})
+
+test('control: a template not born incomplete fails', () => {
+  only({ template: real.template.replace(/^incomplete: true/m, '# incomplete: true') }, ['born-incomplete'], 'commented out')
+})
+
+test('control: step 7 that never clears the stamp, or clears it in step 7.5, fails', () => {
+  const s7 = section(real.schedule, S7)
+  const para = s7.split('\n').find((l) => l.includes('`incomplete: true`') && l.includes('last write'))
+  assert.ok(para, 'control setup: the step-7 clear paragraph')
+  only({ schedule: real.schedule.replace(para, '') }, ['step7-clears-stamp'], 'never cleared')
+  const moved = edit(real.schedule.replace(para, ''), /^### 7\.5\. /, '### 7.5. Close out a superseded rollout\n',
+    `### 7.5. Close out a superseded rollout\n\n${para}\n`)
+  only({ schedule: moved }, ['step7-clears-stamp'], 'moved to step 7.5')
 })
 
 test('control: step 1 without the carry preview fails', () => {
