@@ -2094,11 +2094,11 @@ Step 3 — verify. Required unless ALL of these hold: the merge step printed \`m
 trouble has no \`red\`, \`task head:\` equals the anchor ${I.headSha}, and you committed nothing. When required:
 ${integrationVerify(task, a)}
 
+${INTEGRATION_PREFLIGHTS}
+
 Step 4 — push and read back. Push plainly with \`${GIT_ENV_SCRUB} git -C "${wt}" push origin "${I.branch}"\`, then
 read \`${GIT_ENV_SCRUB} git -C "${wt}" ls-remote origin "refs/heads/${I.branch}"\`: its sha is pushedSha, and
 \`${GIT_ENV_SCRUB} git -C "${wt}" rev-parse HEAD\` is headSha. A rejected push is a STOP: return blocked.
-
-${INTEGRATION_PREFLIGHTS}
 
 ${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}
 
@@ -2276,23 +2276,23 @@ async function integrate(task, a, trace) {
 function integrationResult(task, out, a, trace) {
   const I = a.integration
   const o = out || { outcome: 'set-aside', reason: INTEGRATION_THREW }
-  const history = normHistory(I.reviewHistory)
   let status = 'review'
   let blockerDiagnosis = ''
   let reviewFeedback = []
-  let reviewHistory = history
+  let reviewHistory = I.reviewHistory
   let reviewRoundsUsed = I.reviewRoundsUsed
   let gatedInputs = []
   if (o.outcome === 'rejected') {
     reviewFeedback = o.feedback
     reviewRoundsUsed = I.reviewRoundsUsed + 1
-    reviewHistory = [...history, { round: reviewRoundsUsed, feedback: o.feedback, stage: 'integration' }]
+    // one-line bullets throughout, so the history parsed back from the marker equals this one
+    reviewHistory = [...normHistory(I.reviewHistory), { round: reviewRoundsUsed, feedback: o.feedback, stage: 'integration' }]
     if (reviewRoundsUsed >= task.maxReviewRounds) status = 'review-blocked'
     else { status = 'blocked'; blockerDiagnosis = integrationMarker('rejected', '', reviewHistory) }
   } else if (o.outcome === 'set-aside') {
     gatedInputs = o.gates || []
     status = gatedInputs.length ? 'gate-pending' : 'blocked'
-    blockerDiagnosis = integrationMarker('set-aside', o.reason, history)
+    blockerDiagnosis = integrationMarker('set-aside', o.reason, I.reviewHistory)
   }
   const head = o.headSha || ''
   const g = I.rung
