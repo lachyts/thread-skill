@@ -90,7 +90,7 @@ classify_failed_steps() {  # stdin: failed step names; stdout: "infra" | "genuin
 }
 
 # ---- local base refresh --------------------------------------------------------------------------------
-# After a wave lands, fast-forward the checkout at repoPath — only when it is on the base branch; a
+# After the PR lands, fast-forward the checkout at repoPath — only when it is on the base branch; a
 # checkout on any other branch is left exactly as it is. No agent reads this checkout any more: every
 # task has its own tree cut from a freshly fetched origin/<base> (ADR 0030, p12-4; execute SKILL.md
 # § Worktree lifecycle). The refresh stays for three reasons: operator convenience; it is where stranded
@@ -98,27 +98,45 @@ classify_failed_steps() {  # stdin: failed step names; stdout: "infra" | "genuin
 # this LOCAL base branch, so a zero-commit task branch (a plan-blocked or gate-pending task's tree) is
 # reaped only after it advances. A checkout left behind is therefore still reported. Local-only commits on the
 # base (a close-out whose landing PR is queued, or one no close/… branch carries) are named with close's
-# own repo-state.sh line — one source for the wording — so they are never stranded silently. Never fails
-# the script (a false halt after a successful merge). Defined before the self-test hooks so
+# own repo-state.sh line — one source for the wording — so they are never stranded silently.
+# One refresh attempt is `git fetch origin <base>` succeeding AND, when a SHA is given (the merge commit),
+# origin/<base> containing it; two attempts. Both failing returns 6 with `NOT refreshed` and moves nothing:
+# a fast-forward after a failed fetch would land the checkout on a stale ref and still claim a refresh
+# (p6-7). The fast-forward never autostashes: with `merge.autoStash true` a dirty overlap would be stashed,
+# applied and popped into conflict markers (or left in the stash list), so it is refused like any dirty
+# overlap. Every other refusal (a non-base checkout, local-only commits, a dirty tree) is a non-fatal WARN
+# and returns 0 (a false halt after a successful merge). Defined before the self-test hooks so
 # --self-test-base can exercise it against a temp repo.
 REPO_STATE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../../close/scripts/repo-state.sh"
-refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
-  local repo="$1" base="$2" cur ff=0 line='' raw='' why='' n before oh
+refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)  [$3=a SHA origin/<base> must contain]
+  local repo="$1" base="$2" must="${3:-}" cur ff=0 line='' raw='' why='' n before oh try fwhy=''
   if [ -z "$base" ]; then
-    echo "  WARN: could not resolve the wave's base branch — skipped local fast-forward (non-fatal)."
+    echo "  WARN: could not resolve the base branch — skipped local fast-forward (non-fatal)."
     return 0
   fi
-  echo "== all wave PRs merged — refreshing local $base =="
-  git -C "$repo" fetch origin "$base" >/dev/null 2>&1 || echo "  WARN: git fetch origin $base failed (non-fatal)."
+  echo "== refreshing local $base =="
+  for try in 1 2; do
+    if ! git -C "$repo" fetch origin "$base" >/dev/null 2>&1; then
+      fwhy="git fetch origin $base failed"; continue
+    fi
+    if [ -n "$must" ] && ! git -C "$repo" merge-base --is-ancestor "$must" "refs/remotes/origin/$base" >/dev/null 2>&1; then
+      fwhy="origin/$base lacks merge $must"; continue
+    fi
+    fwhy=''; break
+  done
+  if [ -n "$fwhy" ]; then
+    echo "  WARN: local $base NOT refreshed: $fwhy (twice); the checkout was not moved."
+    return 6
+  fi
   cur=$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null)
   if [ "$cur" != "$base" ]; then
     echo "  NOTE: checkout is on '$cur', not $base — left as it is; the worktree reaper keeps zero-commit task branches until it advances."
     return 0
   fi
   before=$(git -C "$repo" rev-parse -q --verify HEAD 2>/dev/null)
-  if git -C "$repo" merge --ff-only "origin/$base" >/dev/null 2>&1; then
+  if git -C "$repo" merge --ff-only --no-autostash "origin/$base" >/dev/null 2>&1; then
     ff=1
-    # A no-op fast-forward (the fetch failed, or origin/$base is behind) moved nothing: never claim it did.
+    # A no-op fast-forward (origin/$base is behind the checkout) moved nothing: never claim it did.
     if [ "$(git -C "$repo" rev-parse -q --verify HEAD 2>/dev/null)" = "$before" ]; then
       echo "  local $base already at or ahead of origin/$base."
     else
@@ -133,7 +151,7 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
   fi
   case "$raw" in "on $base, "*" not on origin/$base"*) line=$raw ;; esac
   if [ "$ff" = 1 ]; then
-    # A no-op fast-forward (the fetch failed, or origin/$base is behind): the checkout can still be ahead.
+    # A no-op fast-forward (origin/$base is behind): the checkout can still be ahead.
     [ -n "$line" ] && echo "  NOTE: $line."
     return 0
   fi
@@ -144,7 +162,7 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
       *"queued in"*) echo "        It fast-forwards once GitHub merges the landing PR (every one, if several are open)." ;;
       *) echo "        No close-out branch carries them." ;;
     esac
-    echo "        origin/$base holds the merges and the next wave's worktrees branch from it; the worktree reaper keeps zero-commit task branches until it advances."
+    echo "        origin/$base holds the merges and later tasks' worktrees branch from it; the worktree reaper keeps zero-commit task branches until it advances."
     return 0
   fi
   # No usable line (origin/HEAD unset or stale, the script missing or failing): count them here. $base comes
@@ -166,7 +184,7 @@ refresh_local_base() {  # $1=repoPath  $2=base branch ('' ⇒ unresolved)
     0) echo "  WARN: local $base did not fast-forward (no local-only commits: local changes in the checkout block it)." ;;
     *) echo "  WARN: local $base did not fast-forward: $n commit(s) not on origin/$base — not named ($why)." ;;
   esac
-  echo "        origin/$base holds the merges and the next wave's worktrees branch from it; the worktree reaper keeps zero-commit task branches until it advances."
+  echo "        origin/$base holds the merges and later tasks' worktrees branch from it; the worktree reaper keeps zero-commit task branches until it advances."
   return 0
 }
 
@@ -255,6 +273,41 @@ if [ "${1:-}" = "--self-test-base" ]; then
   sb_has "$out" "local master already at or ahead of origin/master." "no-op fast-forward: says already at or ahead"
   case "$out" in *"fast-forwarded"*) sb_ok "[$out]" "no 'fast-forwarded'" "no-op fast-forward: never says fast-forwarded";; *) sb_ok y y "no-op fast-forward: never says fast-forwarded";; esac
   sb_has "$out" "NOTE: on master, 1 commit(s) not on origin/master — stranded." "no-op fast-forward: names the local-only commit"
+  # (a) merge.autoStash true with a dirty overlap: the fast-forward is refused (--no-autostash), never
+  #     stashed, applied and popped into conflict markers; the file and the stash list stay as they were.
+  g -C "$tmp/root" reset -q --hard origin/master
+  g -C "$tmp/root" config merge.autoStash true
+  printf 'dirty\n' > "$tmp/root/f"
+  echo c > "$tmp/other/f" && g -C "$tmp/other" commit -q -am f3 && g -C "$tmp/other" push -q origin master
+  held=$(git -C "$tmp/root" rev-parse HEAD)
+  out=$(refresh_local_base "$tmp/root" master); rc=$?
+  sb_ok "$rc" 0 "autoStash + dirty overlap: returns 0"
+  sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "autoStash + dirty overlap: HEAD left where it was"
+  sb_ok "$(cat "$tmp/root/f")" "dirty" "autoStash + dirty overlap: the dirty file is byte-unchanged (no markers)"
+  sb_ok "$(git -C "$tmp/root" stash list)" "" "autoStash + dirty overlap: nothing left in the stash list"
+  sb_has "$out" "no local-only commits" "autoStash + dirty overlap: says local changes block it"
+  g -C "$tmp/root" checkout -q -- f
+  g -C "$tmp/root" config --unset merge.autoStash
+  # (b) the fetch fails while a stale origin/master is ahead (the p6-7 defect): no fast-forward to the
+  #     stale ref, never "fast-forwarded", rc 6.
+  g -C "$tmp/root" fetch -q origin
+  held=$(git -C "$tmp/root" rev-parse HEAD)
+  ou=$(git -C "$tmp/root" remote get-url origin)
+  g -C "$tmp/root" remote set-url origin "$tmp/missing.git"
+  out=$(refresh_local_base "$tmp/root" master 2>&1); rc=$?
+  sb_ok "$rc" 6 "failed fetch, stale origin/master ahead: returns 6"
+  sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "failed fetch: HEAD left where it was"
+  sb_has "$out" "WARN: local master NOT refreshed: git fetch origin master failed (twice)" "failed fetch: says NOT refreshed"
+  case "$out" in *"fast-forwarded"*) sb_ok "[$out]" "no 'fast-forwarded'" "failed fetch: never says fast-forwarded";; *) sb_ok y y "failed fetch: never says fast-forwarded";; esac
+  g -C "$tmp/root" remote set-url origin "$ou"
+  # (c) the fetch works but origin/master lacks the merge commit it was handed: no fast-forward, rc 6.
+  g -C "$tmp/other" commit -q --allow-empty -m wave5 && g -C "$tmp/other" push -q origin master
+  phantom=$(g -C "$tmp/root" commit-tree -p HEAD -m phantom "$(git -C "$tmp/root" rev-parse 'HEAD^{tree}')")
+  out=$(refresh_local_base "$tmp/root" master "$phantom" 2>&1); rc=$?
+  sb_ok "$rc" 6 "origin/master lacks the merge: returns 6"
+  sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "origin/master lacks the merge: HEAD left where it was"
+  sb_has "$out" "WARN: local master NOT refreshed: origin/master lacks merge $phantom (twice)" "origin/master lacks the merge: names it"
+  case "$out" in *"fast-forwarded"*) sb_ok "[$out]" "no 'fast-forwarded'" "lacks the merge: never says fast-forwarded";; *) sb_ok y y "lacks the merge: never says fast-forwarded";; esac
   echo; [ "$st_fail" -eq 0 ] && echo "base: ALL PASS" || echo "base: SOME FAILED"
   exit "$st_fail"
 fi
@@ -310,6 +363,7 @@ write_sentinel() {  # EXIT trap — $? MUST be captured first, before any other 
   else printf 'failed:%s\n' "$code" > "$SENTINEL" 2>/dev/null || true; fi
 }
 trap write_sentinel EXIT
+trap 'exit 143' TERM; trap 'exit 130' INT; trap 'exit 129' HUP
 
 ORIGIN_URL=$(git -C "$REPO_PATH" remote get-url origin 2>/dev/null) || { echo "ERROR: no 'origin' remote in $REPO_PATH" >&2; exit 2; }
 SLUG=$(printf '%s' "$ORIGIN_URL" | sed -E 's#^.*github\.com[:/]+##; s#\.git$##')

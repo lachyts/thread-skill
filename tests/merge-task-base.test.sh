@@ -26,6 +26,7 @@ case "\$1 \$2" in
     if [ "\$f" = "state,baseRefName" ]; then echo "\$(cat "$tmp/prs/\$n.state") \$(cat "$tmp/prs/\$n.baseRefName")"
     else cat "$tmp/prs/\$n.\$f" 2>/dev/null; fi ;;
   "pr merge") echo "merge \$3" >> "$tmp/merges"; echo "MERGED" > "$tmp/prs/\$3.state" ;;
+  "pr checks") echo "pr checks \$3" >> "$tmp/gh.log"; sleep 2; exit 1 ;;
   *) : ;;
 esac
 EOF
@@ -152,6 +153,15 @@ case "$out" in *"fast-forwarded"*) ok "[$out]" "no 'fast-forwarded'" "8c. nothin
 ok "$rc" 0 "8c. (guard) the wave exits 0"
 ok "$(cat "$tmp/repo/.claude/merge-task.status")" "ok" "8c. (guard) sentinel records success"
 ok "$(gc rev-parse HEAD)" "$held" "8c. (guard) \$tmp/repo is left where it was"
+
+# 9. SIGTERM during a required-checks wait: the sentinel must not read ok, and the exit is 143.
+pr 91 OPEN master; printf 'BLOCKED\n' > "$tmp/prs/91.mergeStateStatus"; rm -f "$tmp/gh.log"
+PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$root/skills/execute/scripts/merge-task.sh" "$tmp/repo" 91 > "$tmp/9.out" 2>&1 &
+pid=$!
+i=0; while [ "$i" -lt 100 ] && ! grep -q 'pr checks' "$tmp/gh.log" 2>/dev/null; do sleep 0.1; i=$((i+1)); done
+kill -TERM "$pid"; wait "$pid"; rc=$?
+ok "$rc" 143 "9. SIGTERM in a checks wait exits 143"
+ok "$(cat "$tmp/repo/.claude/merge-task.status")" "failed:143" "9. SIGTERM: the sentinel reads failed:143, never ok"
 
 echo; [ "$fail" -eq 0 ] && echo "merge-task base: ALL PASS" || echo "merge-task base: SOME FAILED"
 exit "$fail"
