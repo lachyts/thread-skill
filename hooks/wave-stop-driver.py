@@ -178,9 +178,11 @@ def main():
         "reason": (
             f"WAVE-DRIVER: [[{slug}]] is mid-rollout (cursor {cursor}/{total}, state=running) — "
             "the turn ended with driving work outstanding. Continue the §4.5 per-wave loop now: "
-            "reconcile the finished wave if one returned, merge via merge-wave.sh, advance the "
-            "cursor, and launch the next wave. Then end the turn with the correct line: "
-            f"`WAVE-STATUS: {slug} cursor=<K>/{total} state=waiting` after launching a wave, "
+            "reconcile the returned task call if one returned (reconcile-wave.py reconcile), then "
+            "launch the wave's next task call. Only after the wave's last task call is reconciled: "
+            "merge via merge-wave.sh, advance the cursor, and launch the next wave's first task "
+            "call. Then end the turn with the correct line: "
+            f"`WAVE-STATUS: {slug} cursor=<K>/{total} state=waiting` after launching any task call, "
             "state=halted with reason=\"…\" if a §7 stop condition fired, or state=done after the "
             "completion ceremony. Do not end the turn while state=running."
         ),

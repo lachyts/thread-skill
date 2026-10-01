@@ -84,9 +84,10 @@ entirely: the soft pause's `pause_requested: true` stamp, and every hard-pause s
 work: a listed repo, or an exit-2 failure such as a malformed or unterminated register, still lets the
 user pause.
 
-**What the gate cannot catch.** It runs lead-side, between engine calls. A repo listed while a wave's
-Workflow is in flight is only caught at the next re-check: until that wave returns, its agents keep
-pushing task branches and opening PRs on the repo. The step-3 re-check still stops the merge, so nothing
+**What the gate cannot catch.** It runs lead-side, between engine calls. The re-check runs before every
+task call, so a repo listed while a task's Workflow call is in flight is only caught at the next
+re-check: until that call returns, its agents keep pushing the task's branch and opening its PR on the
+repo. Exposure is bounded to the in-flight call; the wave's later task calls are never launched. The step-3 re-check still stops the merge, so nothing
 lands on the default branch. For an urgent mid-wave listing, **hard pause** the rollout (TaskStop kills
 the in-flight agents now); the exemption above means the gate never stands in the way of that.
 
@@ -328,7 +329,7 @@ In continuous mode the lead session is the conductor: run ONE wave's tasks on th
    python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-wave.py mark-dispatched --rollout <rollout-note> --wave K
    ```
    (writes `wave_K_dispatched: <timestamp>`; idempotent — **first dispatch wins**, so a resume re-dispatch never resets the wave clock). It prints a `progress:` line — "wave K/N dispatched — 42m elapsed, ~50m remaining (rough)" — surface it to the user and pass its text as the args `progress` string so the engine `log()`s it live in `/workflows`. Then, for each wave-K task in turn (the rollout note's order), build that task's args (`task: <its row>`, the wave's `progress` text) and call the Workflow (step 5). Launch the next task's call only once the previous call has returned and been reconciled (step 2).
-2. On each call's completion → reconcile its result (step 6), then launch the wave's next task call (§ 2.5 re-check first, per the entry rule) and end the turn `state=waiting`. After the wave's last call is reconciled, go to step 3.
+2. On each call's completion → reconcile its result with §6's `reconcile-wave.py reconcile` helper only, and print a short per-task line (e.g. "[[task-a]] → review, PR <url>"), not the full Wave N report. Then launch the wave's next task call (§ 2.5 re-check first, per the entry rule) and end the turn `state=waiting`. After the wave's last call is reconciled, print §6's **Wave N report** (with its *Recommended merge order*) once, for the whole wave, and go to step 3.
 3. **Auto-merge wave K.** Re-run § 2.5 before `merge-wave.sh`: a repo listed during the wave halts here with the wave's approved PRs left open (merging puts commits on the listed repo's default branch). On that halt there is no merge, no cursor advance and no `mark-done`; the tasks stay at `review`, and once the repo is unlisted, re-invocation's *Cold resume* flush merges them. Collect the wave's tasks that returned `status: review` **and** have a non-empty `pr` (read-only tasks have none; **never** merge `review-blocked` / `blocked` / `plan-blocked` / `gate-pending`), in the report's recommended order. Run:
    ```
    ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-wave.sh <repoPath> <pr> <pr> …
@@ -453,7 +454,7 @@ The helper resolves each task note by slug under `~/repos/obsidian/Work/Tasks/` 
 
 (This replaces ~5 fumble-prone frontmatter edits per wave — finding #6. The lead session still owns the call; subagents never write task `status:`.)
 
-Then print the finalisation report:
+Then, once the wave's last task call is reconciled (§4.5 step 2; earlier calls get a one-line per-task note only), print the finalisation report:
 
 ```
 Wave N report for [[<rollout-slug>]]
@@ -493,7 +494,7 @@ WAVE-STATUS: <rollout-slug> cursor=<K>/<N> state=<running|waiting|halted|done>[ 
 ```
 
 - `running` — in-session driving work remains **right now** (a task call returned and needs reconcile, the wave needs merging, or the next task/wave needs launching). The plugin's Stop-hook driver (§8) refuses to let the session stop on this state — so never end a turn on `running` unless you genuinely stopped mid-work.
-- `waiting` — a task's Workflow call is in flight; nothing to do until its completion notification (the heartbeat cron is the backstop). Emit this after launching a wave.
+- `waiting` — a task's Workflow call is in flight; nothing to do until its completion notification (the heartbeat cron is the backstop). Emit this after launching any task call (the wave's first, and each step-2 launch).
 - `halted` — a §7 stop condition fired, `--gated` is waiting on the user, or a requested pause took effect (*Pausing + reinstating a rollout*) — always include `reason=`.
 - `done` — completion ceremony performed.
 
@@ -525,7 +526,7 @@ In every halt case the work merged so far stays on the base branch; the user fix
 
 The §4.5 loop is driven across turns by Workflow-completion notifications — nothing in the notifications themselves *enforces* that it keeps going. The plugin closes that gap with two self-managing pieces; **the user types nothing**:
 
-**The Stop-hook driver** (`hooks/wave-stop-driver.py`, wired via the plugin's `hooks.json`). On every session stop it reads the last `WAVE-STATUS` line (§6) and, while `state=running`, **blocks the stop** and hands back the exact next step (reconcile → merge → advance cursor → launch next wave). It releases on `waiting` (a Workflow run is legitimately in flight), `halted` (§7 — human's turn), and `done`. It is progress-aware: three consecutive blocks without the cursor advancing release the stop and surface "likely wedged — run /thread:status or /thread:repair" instead of spinning forever. This is the programmatic twin of a `/goal` condition, shipped so nobody has to remember to set one.
+**The Stop-hook driver** (`hooks/wave-stop-driver.py`, wired via the plugin's `hooks.json`). On every session stop it reads the last `WAVE-STATUS` line (§6) and, while `state=running`, **blocks the stop** and hands back the exact next step (reconcile the returned task call → launch the wave's next task call; only after the wave's last call is reconciled: merge → advance cursor → launch the next wave's first task call). It releases on `waiting` (a Workflow run is legitimately in flight), `halted` (§7 — human's turn), and `done`. It is progress-aware: three consecutive blocks without the cursor advancing release the stop and surface "likely wedged — run /thread:status or /thread:repair" instead of spinning forever. This is the programmatic twin of a `/goal` condition, shipped so nobody has to remember to set one.
 
 **The heartbeat cron** (registered by step 5 at first wave launch, `*/20 * * * *`). Catches the one stall the Stop hook can't see: a hung Workflow run or missed completion notification while the session idles at `state=waiting`. Each tick checks; if nothing needs doing it ends silently; if the rollout stalled it re-enters §4.5 cold resume (idempotent — cursor + `resume-filter` + merge-wave.sh's merged-PR skip make re-entry duplicate-free); it deletes itself once the rollout is done, halted, or paused (its prompt checks the rollout note's `paused:` stamp before diagnosing a stall — a hard pause emits no `halted` line, and "stalled" must never re-dispatch a wave the user deliberately stopped).
 
@@ -571,7 +572,7 @@ A paused rollout is **intentional**, not stalled: `/thread:status` reports it as
 - Don't skip the protocol-version gate. Legacy (v2 / absent) rollouts must be regenerated, not retrofitted.
 - Don't update a task's `status:` from inside a subagent — the lead session reconciles after the workflow returns.
 - Don't hand-roll the convergence loop in the conversation — that engine moved into `task.workflow.js`. If the loop needs changing, edit the script and (for an interrupted run) re-invoke with `resumeFromRunId`.
-- Don't raise `parallel_ceiling` blindly. The Workflow's own cap is CPU-core-based (~14 on the M3) — higher than the memory-safe ceiling for heavy-model tasks (LPIPS ≈ 500 MB/process). `parallel_ceiling: 4` caps how many task calls (worktrees) the lead runs at once. Raise it only for light waves.
+- Don't raise `parallel_ceiling` blindly. The Workflow's own cap is CPU-core-based (~14 on the M3) — higher than the memory-safe ceiling for heavy-model tasks (LPIPS ≈ 500 MB/process). `parallel_ceiling: 4` caps how many task calls (worktrees) the lead runs at once once p12-9's queue (ADR 0030) lands; today the lead runs one call at a time. Raise it only for light waves.
 
 ## Worktree lifecycle (how the engine isolates + reuses worktrees)
 
@@ -602,7 +603,7 @@ Every `taskTreeSetup` locks the tree with `pid $PPID` (the Bash tool's parent is
 | Version | Contract | Status |
 |---|---|---|
 | (absent) / 2 | Legacy in-conversation playbook (prose-driven dispatch + sentinel parsing) | Retired — regenerate via `/thread:schedule --regenerate` |
-| 3 | Workflow-engine convergence (`task.workflow.js`): structured output, in-pipeline parallel review, autonomous plan-gate judge, journaled resume | Current |
+| 3 | Workflow-engine convergence (`task.workflow.js`): structured output, per-task review loop, autonomous plan-gate judge, journaled resume | Current |
 
 Future protocol bumps follow the same rule: a new executor refuses older versions and asks the user to regenerate.
 

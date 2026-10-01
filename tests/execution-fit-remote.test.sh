@@ -217,12 +217,13 @@ for w in "pause_requested: true" "TaskStop" "\`paused:\` stamp" "CronDelete" "ne
   has "$exempt" "$w" "execute § 2.5 pause exemption covers $w"
 done
 has "$s25" "hard pause" "execute § 2.5 names hard pause for an urgent mid-wave listing"
-has "$s25" "keep pushing task branches" "execute § 2.5 documents the in-flight-wave limit"
+has "$s25" "until that call returns, its agents keep pushing" "execute § 2.5 documents the in-flight-call limit"
+has "$s25" "Exposure is bounded to the in-flight call" "execute § 2.5 bounds exposure to the in-flight call"
 dont=$(grep '^- Never dispatch a wave' skills/execute/SKILL.md)
 has "$dont" "never blocks stopping work" "execute Don'ts: the register check never blocks a pause"
 pz=$(awk '/^## Pausing \+ reinstating/{on=1} /^\*\*Soft pause/{on=0} on' skills/execute/SKILL.md | tr '\n' ' ')
 has "$pz" "Neither pause runs the § 2.5" "execute Pausing: neither pause runs the register gate"
-has "$ef" "keep pushing task branches" "execution-fit documents the in-flight-wave limit"
+has "$ef" "caught only when that call returns" "execution-fit documents the in-flight-call limit"
 has "$ef" "hard pause the rollout" "execution-fit names hard pause as the mid-wave remedy"
 
 s45raw=$(awk '/^### 4\.5\./{on=1} /^### 5\./{on=0} on' skills/execute/SKILL.md)
