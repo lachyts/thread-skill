@@ -27,7 +27,7 @@ ok "$(grep -cE '\$[0-9]' "$tmp/raw.sh")" 0 "the snippet holds no positional \$N 
 snip=$(sed 's/^R="<repoPath>"$/R="$1"/' "$tmp/raw.sh")
 
 # ---- fixtures -------------------------------------------------------------------------------------------
-home="$tmp/home"; cfg="$tmp/cfg"; mkdir -p "$home/repos/plug" "$tmp/other" "$cfg/plugins" "$tmp/noplugin"
+home="$tmp/home"; cfg="$tmp/cfg"; mkdir -p "$home/repos/plug" "$home/repos/mono/tools/plug" "$home/repos/plugin2" "$tmp/other" "$cfg/plugins" "$tmp/noplugin"
 ln -s "$home/repos/plug" "$tmp/link"
 reg="$cfg/plugins/known_marketplaces.json"
 write_reg() {  # write_reg <directory path> <github installLocation>
@@ -55,6 +55,15 @@ for sh in "${shells[@]}"; do
   run "$home/repos/plug"; ok "$rc" 3 "$n: a registry path written as ~/…/ → 3"
   write_reg "$home/repos/not-yet" "$tmp/other"
   run "$home/repos/not-yet"; ok "$rc" 3 "$n: a path that does not exist yet compares as a string → 3"
+
+  # containment: a marketplace nested inside repoPath (a monorepo) is just as live
+  write_reg "$home/repos/mono/tools/plug" "$tmp/other"
+  run "$home/repos/mono"; ok "$rc" 3 "$n: a marketplace nested inside repoPath → 3"
+  has "$err" "'thread'" "$n: … naming the marketplace"
+  run "$home/repos/mono/"; ok "$rc" 3 "$n: … with a trailing / on repoPath → 3"
+  run "$home/repos/mono/tools/plug/sub"; ok "$rc|$err" "0|" "$n: repoPath nested inside the marketplace, not containing it → 0"
+  write_reg "$home/repos/plugin2" "$tmp/other"
+  run "$home/repos/plug"; ok "$rc|$err" "0|" "$n: a sibling sharing a name prefix (plug vs plugin2) → 0"
 
   write_reg "$home/repos/plug" "$tmp/other"
   run "$tmp/other"; ok "$rc|$err" "0|" "$n: a github source whose installLocation matches → 0, silent"
@@ -84,6 +93,7 @@ for r in 'reason="repoPath is a live plugin marketplace checkout"' 'reason="self
   has "$s7" "$r" "§ 7 names $r"
 done
 has "$s26" "Pausing is exempt" "§ 2.6: pausing is exempt"
+has "$s26" "**Any other non-zero exit**" "§ 2.6: an undefined non-zero exit halts too (fails closed)"
 ok "$(printf '%s\n%s\n' "$s26" "$s7" | python3 -c '
 import re, sys
 vals = re.findall(r"reason=\"([^`]*)\"", sys.stdin.read())

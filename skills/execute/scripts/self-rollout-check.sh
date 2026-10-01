@@ -9,7 +9,9 @@
 # Reads ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json. For every entry whose
 # source.source is "directory", source.path and installLocation are compared with <repoPath>, each side
 # with `~/` expanded, trailing slashes stripped and, when the directory exists, `pwd -P` applied (so a
-# symlink matches its target); a path that does not exist yet compares as a string.
+# symlink matches its target); a path that does not exist yet compares as a string. The comparison is by
+# CONTAINMENT: a marketplace path equal to <repoPath> or nested inside it (`<repoPath>/…`, a monorepo with
+# the marketplace in a subdirectory) matches, because merge-wave.sh fast-forwards the whole checkout.
 #
 # Exit 0: no match. A missing registry is 0; a malformed one or an unknown shape is 0 with a stderr
 #         warning (fail open: the registry format belongs to Claude Code, not this plugin).
@@ -59,8 +61,10 @@ PY
 [ -n "$entries" ] || exit 0
 while IFS="$(printf '\t')" read -r name p; do
   [ -n "$p" ] || continue
-  if [ "$(canon "$p")" = "$want" ]; then
-    echo "self-rollout-check: $1 is the directory-source checkout of plugin marketplace '$name' ($p)." >&2
+  c=$(canon "$p")
+  case "$c" in "$want"|"${want%/}/"*) hit=1 ;; *) hit=0 ;; esac
+  if [ "$hit" = 1 ]; then
+    echo "self-rollout-check: $1 is, or contains, the directory-source checkout of plugin marketplace '$name' ($p)." >&2
     echo "self-rollout-check: the plugin runs live from it, so every engine change a wave merges would become the next wave's engine mid-rollout." >&2
     echo "self-rollout-check: clone the repo to a separate path (e.g. ~/repos/<repo>-rollout), set the rollout's Project root to that clone, then re-invoke." >&2
     exit 3

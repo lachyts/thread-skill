@@ -124,7 +124,9 @@ bash "$sc" "$R"
 
 `scripts/self-rollout-check.sh` reads `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json`
 and compares every directory source's `path` and `installLocation` with `repoPath` (`~/` expanded,
-trailing slashes stripped, symlinks resolved). A missing registry passes; a malformed one passes with a
+trailing slashes stripped, symlinks resolved) by **containment**: a marketplace path equal to `repoPath` or
+nested inside it (`<repoPath>/…`, a monorepo with the marketplace in a subdirectory) matches, since
+`merge-wave.sh` fast-forwards the whole checkout. A missing registry passes; a malformed one passes with a
 warning (the registry format is Claude Code's, so the check fails open).
 
 - **Exit 0**: proceed; pass any warning on to the user.
@@ -135,6 +137,8 @@ warning (the registry format is Claude Code's, so the check fails open).
   `Project root` to that clone, and re-invoke.
 - **Exit 2** (the script not found, an empty `repoPath`, no python3): the same write-nothing halt with
   `reason="self-rollout check failed"`.
+- **Any other non-zero exit** (1, 127, …: bash or the script crashing): the same write-nothing halt with
+  `reason="self-rollout check failed"`. The gate fails closed on any status it does not define.
 
 ### 3. Resolve effective config per task
 
