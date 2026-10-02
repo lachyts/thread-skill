@@ -818,8 +818,8 @@ ok(roRes && /transient infrastructure/i.test(roRes.blockerDiagnosis), 'converge:
   const rule = s3.split('\n\n').find((p) => p.includes('integer >= 1')) || ''
   ok(['max_iterations', 'max_review_rounds', 'max_plan_rounds'].every((f) => rule.includes(f)),
     'SKILL.md § 3: one "integer >= 1" rule covers max_iterations, max_review_rounds and max_plan_rounds')
-  ok(/in_progress/.test(rule) && /mark-dispatched/.test(rule) && rule.includes('reason="invalid round budget:'),
-    'SKILL.md § 3: the rule writes nothing (no stamp, no mark-dispatched) and halts with the named reason')
+  ok(/in_progress/.test(rule) && /mark-started/.test(rule) && rule.includes('reason="invalid round budget:'),
+    'SKILL.md § 3: the rule writes nothing (no stamp, no mark-started) and halts with the named reason')
   ok(sect('### 7. Continuous-mode stop conditions', '### 8.').includes('reason="invalid round budget:'),
     'SKILL.md § 7: the stop-conditions list carries the invalid-round-budget halt')
 }

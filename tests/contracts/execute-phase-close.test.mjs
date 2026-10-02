@@ -36,11 +36,11 @@ const TODAY = '2026-09-27'
 
 // ---- slicing §4.5 step 5 ------------------------------------------------------------------------
 
-// The step-5 bullet list: from the line after `5. Repeat until the last wave merges` up to the first
+// The step-5 bullet list: from the line after `5. **Completion.**` up to the first
 // blank line outside a fence. Bullets open at exactly three spaces of indent (`   - `) outside a fence.
 function stepFive(text) {
   const lines = text.split('\n')
-  const head = lines.findIndex((l) => /^5\. Repeat until the last wave merges/.test(l))
+  const head = lines.findIndex((l) => /^5\. \*\*Completion\.\*\*/.test(l))
   if (head < 0) return null
   let end = head + 1
   let inFence = false

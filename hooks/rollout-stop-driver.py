@@ -19,8 +19,8 @@ falling back to a transcript scan for history, and:
   done     -> allow + clear driver state (completion ceremony performed)
   (none)   -> allow (not a rollout-driving session)
 
-An old `WAVE-STATUS … cursor=` line no longer matches (the wave loop is gone,
-ADR 0030), and neither does a line without `running=`.
+The wave loop's old status line (`cursor=<K>/<N>`) no longer matches (that loop is
+gone, ADR 0030), and neither does a line without `running=`.
 
 Blocking is bounded by a progress-aware cap: consecutive blocks without
 `merged` advancing release the stop and surface the stall to the user instead

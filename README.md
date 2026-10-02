@@ -71,7 +71,9 @@ Worktree isolation is explicit: each task runs in
 `skills/execute/scripts/merge-task.sh` — gated on *required* status checks,
 never `--admin`, never force. `skills/execute/scripts/reconcile-rollout.py`
 writes all per-task vault frontmatter transitions deterministically and drives
-per-task resume.
+per-task resume; `skills/execute/scripts/lead-integrate.py` is the lead's side
+of Integration (the clean-path merge and its bounded verify, the trouble-path
+inputs and the lead's own set-aside rows).
 
 ## Design
 
@@ -142,7 +144,9 @@ final check that the run wrote nothing into the tree):
 - **Engine** — `skills/execute/tests/`: `prompt-invariants.test.mjs` guards the **resume-cache
   invariant** (optional engine features must render byte-identical Workflow `agent()` prompts when
   unset, or in-flight rollouts can't resume); `reconcile-rollout.test.sh`, `reconcile-rollout-queue.test.sh`
-  (the queue verbs) and `reconcile-rollout-runs.test.sh` (accumulated feedback runs); `wave-stop-driver.test.sh`;
+  (the queue verbs), `reconcile-rollout-runs.test.sh` (accumulated feedback runs) and `reconcile-rollout-lead.test.sh`
+  (`hand-back`, `log-integration`); `rollout-stop-driver.test.sh`; `tests/lead-integrate.test.sh` (the lead's
+  Integration against a fake `gh` and real repos) and `tests/contracts/execute-queue.test.mjs` (the queue loop's prose);
   `merge-task.sh --self-test-classify` / `--self-test-base`, and `tests/merge-task-base.test.sh` /
   `tests/merge-task-integrated.test.sh` (one integrated PR per call, against a fake `gh` and a real bare repo).
 - **Contracts** — `tests/contracts/*.test.mjs`: manifests agree, skill names and description budgets,

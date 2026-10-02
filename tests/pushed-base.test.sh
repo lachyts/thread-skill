@@ -525,13 +525,13 @@ ln_() { grep -nF -- "$1" "$ex" | head -1 | cut -d: -f1; }
 a=$(ln_ '### 2.6. '); b=$(ln_ '### 2.7. Pushed-base gate'); c=$(ln_ '### 3. ')
 ok "$([ -n "$a" ] && [ -n "$b" ] && [ -n "$c" ] && [ "$a" -lt "$b" ] && [ "$b" -lt "$c" ] && echo y)" y "execute § 2.7 sits between § 2.6 and § 3"
 s27=$(awk '/^### 2\.7\. /{on=1} /^### 3\. /{on=0} on' "$ex" | tr '\n' ' ')
-for w in "execution-fit.md\` § Dispatch blockers" "entered at § 1" "WAVE-HEARTBEAT" "resumeFromRunId" "/thread:repair" \
+for w in "execution-fit.md\` § Dispatch blockers" "entered at § 1" "ROLLOUT-HEARTBEAT" "resumeFromRunId" "/thread:repair" \
          "before §4.5 *Reinstate*'s \`clear-pause\`" "**Pausing is exempt**" "**Any other non-zero exit**" \
          'reason="local default branch is ahead of origin"' 'reason="pushed-base check failed"' "Local:" "never per wave"; do
   has "$s27" "$w" "execute § 2.7 names $w"
 done
 s45raw=$(awk '/^### 4\.5\./{on=1} /^### 5\./{on=0} on' "$ex")
-rein=$(printf '%s\n' "$s45raw" | awk '/^\*\*Reinstate \(/{on=1} /^\*\*Per-task resume/{on=0} on' | tr '\n' ' ')
+rein=$(printf '%s\n' "$s45raw" | awk '/^\*\*Reinstate \(/{on=1} on' | tr '\n' ' ')
 has "${rein%%clear-pause*}" "§ 2.7" "execute § 4.5 Reinstate runs § 2.7 before clear-pause"
 preins=$(grep '^\*\*Reinstate\.\*\*' "$ex")
 has "${preins%%"clears it"*}" "§ 2.7" "execute Pausing: Reinstate runs § 2.7 before clearing the stamp"
@@ -543,7 +543,7 @@ lacks "$lrc" "2.7" "execute § 4.5 Landing-register re-check does not run § 2.7
 rr=$(grep '^"Re-run § 2.5"' "$ex")
 ok "$([ -n "$rr" ] && echo y)" y "execute keeps the Re-run § 2.5 definition"
 lacks "$rr" "2.7" "the Re-run § 2.5 definition does not include § 2.7"
-hb=$(grep '^> WAVE-HEARTBEAT' "$ex")
+hb=$(grep '^> ROLLOUT-HEARTBEAT' "$ex")
 has "$hb" "§4.5" "the heartbeat still re-enters through §4.5"
 has "$hb" "skips § 2.7" "the heartbeat says its re-entry skips § 2.7"
 pz=$(awk '/^## Pausing \+ reinstating/{on=1} /^\*\*Soft pause/{on=0} on' "$ex" | tr '\n' ' ')
@@ -556,12 +556,12 @@ ok "$(printf '%s\n%s\n' "$s27" "$s7" | python3 -c '
 import re, sys
 vals = re.findall(r"reason=\"([^`]*?)\"", sys.stdin.read())
 print("ok" if vals and all("\"" not in v for v in vals) else "bad: %r" % vals)')" ok "every § 2.7 / § 7 reason value is quote-free"
-ok "$(python3 - "$root/hooks/wave-stop-driver.py" <<'PY'
+ok "$(python3 - "$root/hooks/rollout-stop-driver.py" <<'PY'
 import importlib.util, sys
-spec = importlib.util.spec_from_file_location("wsd", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+spec = importlib.util.spec_from_file_location("rsd", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 ok = True
 for r in ("local default branch is ahead of origin", "pushed-base check failed"):
-    hit = m.STATUS_RE.search('WAVE-STATUS: proj-rollout cursor=0/3 state=halted reason="%s"' % r)
+    hit = m.STATUS_RE.search('ROLLOUT-STATUS: proj-rollout merged=0/3 running=0 state=halted reason="%s"' % r)
     ok = ok and bool(hit) and hit.group("state") == "halted"
 print("ok" if ok else "no match")
 PY
