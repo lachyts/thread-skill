@@ -20,9 +20,11 @@ const task = { slug: 'proj-fix-x' }
 // PURPOSE by p12-3: the GIT_* scrub prefixes the setup's first line (and its `git -C "$WT" diff` span) with
 // GIT_ENV_SCRUB, and GIT_ENV_RULE joins every agent prompt, so the p12-3 engine deliberately breaks the
 // resume-cache invariant for every agent prompt: a resumeFromRunId resume of a pre-p12-3 run re-runs its
-// agents, judges included. From here on the pins guard the scrubbed bytes the same way.
-const GOLDEN_PLAIN = '5d4a4a1726402d5e295ba9508e19beaf21ef4e3ca0a8b1d5548ed532c74cc639'
-const GOLDEN_ENV = '388f0de04e6036cdcfa0554aff808cc7b71ab8d3d90a517bdce25d9d7808e474'
+// agents, judges included. From here on the pins guard the scrubbed bytes the same way. Re-pinned ON PURPOSE
+// by p12-12: the fresh-worktree sentence now reads "every task that has already merged" (an old-vs-new render
+// diff showed that one line and nothing else).
+const GOLDEN_PLAIN = '9eb595aa7877dff24e996710b01024de1a56bdb7537c74fe246d2a746b828143'
+const GOLDEN_ENV = '0cf14921edb400ab40dc593da053944d1e16c5c9fc1a04a0877115d78a0c72dd'
 
 test('unset renders the pinned bytes (resume-cache invariant, re-pinned by p12-3)', () => {
   assert.equal(sha(T.worktreeSetup({ repoPath: '/repo' }, task)), GOLDEN_PLAIN)

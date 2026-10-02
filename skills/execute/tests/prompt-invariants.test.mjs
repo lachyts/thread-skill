@@ -25,7 +25,7 @@ import vm from 'node:vm'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import crypto from 'node:crypto'
-import { runTask } from '../../../tests/lib/engine.mjs'
+import { loadEngine, runTask } from '../../../tests/lib/engine.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const src = fs.readFileSync(path.join(here, '..', 'task.workflow.js'), 'utf8')
@@ -719,7 +719,7 @@ ok(roRes && /transient infrastructure/i.test(roRes.blockerDiagnosis), 'converge:
   const dispatched = () => effortCalls.map((c) => c.label)
 
   // The helper: integer >= 1 or a diagnosis naming the field and the bad value, quote-free (the lead
-  // copies it into a WAVE-STATUS reason, and the Stop-hook regex needs quote-free reasons).
+  // copies it into a ROLLOUT-STATUS reason, and the Stop-hook regex needs quote-free reasons).
   ok(T.roundBudgetDiagnosis({ maxPlanRounds: 1, maxReviewRounds: 6 }, ['maxPlanRounds', 'maxReviewRounds']) === '',
     'round budgets: valid integers >= 1 (incl. a large 6) produce no diagnosis')
   for (const v of BAD) {
@@ -869,20 +869,83 @@ ok(roRes && /transient infrastructure/i.test(roRes.blockerDiagnosis), 'converge:
     'pinned tree: the reviser keeps its threaded Worktree path (byte-frozen builder)')
 }
 
-// ---- Progress / ETA (wave-boundary timestamps — the engine has no clock) ------
-// The Workflow sandbox cannot read clocks (Date.now() throws), so wave-boundary timestamps are stamped
-// on the ROLLOUT NOTE by reconcile-wave.py (mark-dispatched at wave launch, cursor post-merge) and the
-// skill threads a precomputed `progress` line into args for the engine to relay via log(). Comments may
+// ---- Progress / ETA (task-note stamps — the engine has no clock) ------
+// The Workflow sandbox cannot read clocks (Date.now() throws), so the started:/merged: stamps live on the
+// TASK NOTES, written by reconcile-rollout.py (mark-started as a task starts, mark-done after its merge),
+// and the skill threads the precomputed `progress` line `next` / `mark-started` prints into args for the
+// engine to relay via log(). Comments may
 // NAME Date.now(); code must never CALL it — strip line comments before scanning.
 const codeOnly = src.replace(/\/\/[^\n]*/g, '')
 ok(!/\bDate\s*\.\s*now\b|\bnew\s+Date\b/.test(codeOnly), 'engine: no clock reads — Date is unavailable in the Workflow sandbox')
 ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precomputed progress line (absent ⇒ byte-identical logs)')
+
+// ---- Removing files (p12-12, the 2026-10-01 stall): RM_RULE in every agent prompt ----------
+// An agent's `cd /tmp/x && rm -rf ./*` stalled an unattended rollout 13 h on Claude Code's bypass-immune
+// removal ask. RM_RULE names the safe forms, and every builder renders it once, right after GIT_ENV_RULE.
+// The ten builders are git-env-scrub's (its (e2) proves every runAgent site is one of them).
+{
+  const E = loadEngine(['GIT_ENV_RULE', 'RM_RULE', 'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt',
+    'plannerPrompt', 'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt'])
+  const H = (c) => c.repeat(40)
+  const tk = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
+  const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
+  const ar = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
+  const I = {
+    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
+    landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }], plan: 'PLAN',
+    reviewHistory: [{ round: 1, feedback: ['fix it'] }, { round: 2, feedback: ['keep theirs'], stage: 'integration' }], reviewRoundsUsed: 2,
+    rung: { model: 'fable', escalated: false, escalatedAt: '', tierCapped: false, tierCappedAt: '' },
+  }
+  const J = { mergeCommit: H('d'), headSha: H('e'), baseSha: H('c'), triggers: ['conflict'], path: 'integrator' }
+  const tiers = [
+    { tier: 'opus', cap: 'fable', escalated: false, capSuppressed: false },
+    { tier: 'fable', cap: 'fable', escalated: true, capSuppressed: false },
+  ]
+  const prompts = {
+    implementerPrompt: tiers.map((st) => E.implementerPrompt(tk, ar, st, '')),
+    approvedPlanImplementerPrompt: tiers.map((st) => E.approvedPlanImplementerPrompt(tk, 'PLAN', ar, st, '')),
+    reviserPrompt: [E.reviserPrompt(tk, im, [{ round: 1, feedback: ['fix it'] }], 2, ar, ''), E.reviserPrompt(tk, im, I.reviewHistory, 3, ar, '', { history: I.reviewHistory, roundsUsed: 2 })],
+    readOnlyPrompt: [E.readOnlyPrompt(tk, ar, tiers[0], '')],
+    plannerPrompt: [E.plannerPrompt(tk, ar, tiers[0], '')],
+    planReviserPrompt: [E.planReviserPrompt(tk, 'PLAN', [{ round: 1, feedback: ['fix it'] }], 2, ar)],
+    planJudgePrompt: [E.planJudgePrompt(tk, 'PLAN', ar)],
+    reviewJudgePrompt: [E.reviewJudgePrompt(tk, im, ar, [])],
+    integratorPrompt: [E.integratorPrompt(tk, ar, I), E.integratorPrompt(tk, ar, { ...I, landed: [], reviewHistory: [], trouble: [] })],
+    integrationReviewPrompt: [E.integrationReviewPrompt(tk, ar, I, J), E.integrationReviewPrompt(tk, ar, { ...I, landed: [] }, { ...J, mergeCommit: '', path: 'judge-only' })],
+  }
+  const FORMS = ['`rm -rf /tmp/x && mkdir -p /tmp/x`', '`mktemp -d`', '`rm -rf "$T"`', '${T:?}', '`rm -rf ./*`', '`$VAR/`', 'command substitution', 'bypass mode']
+  const times = (hay, needle) => hay.split(needle).length - 1
+  // [] when the rule and every prompt hold; else what failed.
+  const rmRuleFails = (rule, gitRule, byName) => {
+    const out = []
+    if (typeof rule !== 'string' || !rule || rule.includes('\n')) out.push('rule: one line')
+    for (const f of FORMS) if (!String(rule).includes(f)) out.push(`rule: names ${f}`)
+    if (String(rule).includes('"$T"/')) out.push('rule: the "$T" form takes no trailing slash')
+    for (const [name, ps] of Object.entries(byName)) {
+      for (const p of ps) {
+        if (times(p, rule) !== 1) out.push(`${name}: RM_RULE once`)
+        if (!p.includes(gitRule + '\n\n' + rule)) out.push(`${name}: RM_RULE right after GIT_ENV_RULE`)
+      }
+    }
+    return out
+  }
+  ok(Object.keys(prompts).length === 10, 'RM_RULE: the ten agent builders are covered')
+  ok(JSON.stringify(rmRuleFails(E.RM_RULE, E.GIT_ENV_RULE, prompts)) === '[]', 'RM_RULE: one line naming every safe and refused form, once in every prompt, right after GIT_ENV_RULE')
+  const stripped = { ...prompts, plannerPrompt: prompts.plannerPrompt.map((p) => p.replace('\n\n' + E.RM_RULE, '')) }
+  ok(rmRuleFails(E.RM_RULE, E.GIT_ENV_RULE, stripped).length > 0, 'RM_RULE control: a prompt with RM_RULE stripped fails')
+  const slashed = E.RM_RULE.replace('`rm -rf "$T"`', '`rm -rf "$T"/*`')
+  const reslashed = Object.fromEntries(Object.entries(prompts).map(([k, ps]) => [k, ps.map((p) => p.replace(E.RM_RULE, slashed))]))
+  ok(slashed !== E.RM_RULE && rmRuleFails(slashed, E.GIT_ENV_RULE, reslashed).length > 0, 'RM_RULE control: a "$T" form that gains /* fails')
+}
 
 // ---- Byte pins (p12-6): task mode renders exactly what it did before Integration existed ----------
 // Recorded on 3c396eb (the p12-5 engine) BEFORE the p12-6 edit. p12-6 factored taskTreeSetup's self-heal
 // and lock lines out (treeSelfHeal/treeLockLines, shared with branchTreeSetup), gave reviserPrompt a 7th
 // `seeded` argument and moved the review loop's revise step into reviseRound: none of that may move a byte
 // of an unseeded, mode-less call. Re-pin only on a deliberate prompt change, never to make a refactor pass.
+// Re-pinned on purpose by p12-12 (the reviser pins and the whole-call pin): RM_RULE joins every agent prompt
+// right after GIT_ENV_RULE, and the implementer's worktree setup now says "every task that has already
+// merged". An old-vs-new render diff showed exactly those two changes; the taskTreeSetup pin did not move.
 {
   const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
   const variants = []
@@ -898,9 +961,9 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
   const iR = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
   const aR = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
   const h2 = [{ round: 1, feedback: ['a'] }, { round: 2, feedback: ['b'] }]
-  ok(sha(T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')) === 'd60f35ecce95011ed906c3e2fba5f7fe049c176d929893cee9a1b3281c0a455a',
+  ok(sha(T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')) === '0f7eca821281f140a718ea5bf84cec5c0a134a7924e8b2ff9d3abfe5ea9db585',
     'byte pin: unseeded reviserPrompt, round 2')
-  ok(sha(T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')) === '8ddf40aee481dfd36a70716b0e153ef87bccc897373826046ad70a6cb7e1268e',
+  ok(sha(T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')) === '00eb424a53642e113f76ea70fc78644762f75c0a40d2edcee36429f760fed660',
     'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back)')
   ok(T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN', null) === T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN'),
     'byte pin: a null seeded argument renders the unseeded reviser')
@@ -927,7 +990,7 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
     const r = await runTask(args, scripted)
     parts.push(JSON.stringify({ calls: r.calls, result: r.result, err: r.error && String(r.error) }))
   }
-  ok(sha(parts.join('\n')) === '087856db0e8d0ef228050dce344abaa0dc2578eb8bbf9fa10fdc97cff3bd5334',
+  ok(sha(parts.join('\n')) === 'c647ab859edc08ca62dcb4e1a1fcb59d9f57fcf54488b477663faadb4a04e912',
     'byte pin: three whole task-mode calls — every label, prompt and row unchanged')
 }
 
