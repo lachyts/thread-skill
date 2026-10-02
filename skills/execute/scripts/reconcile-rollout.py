@@ -56,9 +56,9 @@ Subcommands:
               (40 hex each). wait = --started - `ready:`, duration = --now - --started, both in whole
               minutes (_whole_minutes, the engine's wholeMinutes); triggers `-`. A re-run of the same
               Integration (same --started and SHAs) is a no-op, even at a later --now. Changes no status,
-              rounds, `tier_capped`,
-              `integrating:` or `ready:`. Refuses (exit 1, nothing written) a note that is not `review`
-              with a `pr:`, a SHA that is not 40 hex and a --started that is not an ISO stamp.
+              rounds, `tier_capped`, `integrating:` or `ready:`. Refuses (exit 1, nothing written) a note
+              that is not `review` with a `pr:`, a SHA that is not 40 hex and a --started that is not an
+              ISO stamp.
 
   resume      A task whose PR merged but whose note was never marked (p6-8): for each linked note that
               is not done, merged or dropped and carries `pr:`, ask gh for the PR's state and base. A PR
