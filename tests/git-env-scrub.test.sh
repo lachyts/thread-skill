@@ -37,7 +37,7 @@ has "$s7" 'reason="git env set in the lead session"' "§ 7 names the exit-1 reas
 has "$s7" 'reason="git-env check failed"' "§ 7 names the exit-2 reason"
 s4t=$(sect '### 4. Stamp in-progress' '### 4.5.')
 has "$s4t" 'reason="git env set in the lead session"' "§ 4 names the exit-1 reason"
-has "$s4t" 'no stamp, no `mark-dispatched`, no Workflow call' "§ 4: a halt writes nothing"
+has "$s4t" 'no stamp, no `mark-started`, no Workflow call' "§ 4: a halt writes nothing"
 
 # ---- the snippet, executed ------------------------------------------------------------------------------
 mkdir -p "$tmp/nogit"

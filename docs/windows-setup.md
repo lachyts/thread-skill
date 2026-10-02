@@ -11,7 +11,7 @@ Minimal footprint for running the continuity verbs (chiefly `/thread:next`, `/th
 
    1. **Sync other file types**: in Obsidian **Settings → Sync → Selective sync**, turn on syncing of all other file types (the toggle label varies by Obsidian version). Obsidian Sync skips `.js` by default, so `_System/views/*.js` never arrive and every `dv.view()` widget in the daily notes fails with `Dataview: custom view not found for '_System/views/day-tracking.js'`, even though the plugins are installed and DataviewJS is on. Check: `ls ~/repos/obsidian/_System/views/*.js` lists files.
 3. **Plugin**: `claude plugin marketplace add lachyts/thread-skill` (or `/plugin marketplace add lachyts/thread-skill` in-app), then install the `thread` plugin. Update later via `claude plugin marketplace update thread` plus a plugin update.
-4. **Optional, python3**: the plugin's Stop hook runs `python3 .../wave-stop-driver.py` at every session end. Without `python3` on PATH the hook errors harmlessly but noisily. To quiet it: install Python, then in the Python install dir run `mklink python3.exe python.exe` (Windows installers ship only `python.exe`).
+4. **Optional, python3**: the plugin's Stop hook runs `python3 .../rollout-stop-driver.py` at every session end. Without `python3` on PATH the hook errors harmlessly but noisily. To quiet it: install Python, then in the Python install dir run `mklink python3.exe python.exe` (Windows installers ship only `python.exe`).
 5. **Optional, Defender**: exclude the vault directory from real-time scanning if Obsidian Sync or vault indexing feels slow. Your admin shell, your call.
 
 ### What degrades, deliberately

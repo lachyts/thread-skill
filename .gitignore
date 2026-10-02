@@ -13,6 +13,7 @@ __pycache__/
 .claude/worktrees/
 .claude/merge-task.status
 .claude/merge-task/
+.claude/integration/
 
 # claude plugin eval run output (make evals); never committed
 evals/results/

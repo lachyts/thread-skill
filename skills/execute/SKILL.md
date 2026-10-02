@@ -1,13 +1,13 @@
 ---
 name: execute
-description: 'Use to execute a wave rollout — reads the rollout note, resolves per-task config, and runs the convergence engine on the Workflow tool (plan-gate → verifier retry → master review, one task per call). Continuous mode (bare "execute [[rollout]]") auto-merges each wave; --gated pauses for manual merges; a plan-declared gated input always pauses for human sign-off. Triggers on "execute [[rollout-slug]]", "execute Wave N of [[rollout]]", "pause the rollout", "reinstate [[rollout]]", or explicit /thread:execute. Only runs protocol_version: 3 rollouts; older notes are refused with a /thread:schedule --regenerate prompt.'
+description: 'Use to execute a rollout queue — reads the rollout note, resolves per-task config, and runs the convergence engine on the Workflow tool (plan-gate → verifier retry → master review), one task per call up to the parallel ceiling; the lead integrates each approved task with the latest main and is its only merger. Continuous by default; --gated pauses before each merge; a plan-declared gated input always pauses for human sign-off. Triggers on "execute [[rollout-slug]]", "pause the rollout", "reinstate [[rollout]]", or explicit /thread:execute. Only runs `protocol_version: 5` rollouts; older notes are refused with a /thread:schedule --regenerate prompt.'
 ---
 
-# /thread:execute — run a wave rollout on the Workflow engine
+# /thread:execute — run a rollout's queue on the Workflow engine
 
-`/thread:execute` is the executor half of the wave split. Where `/thread:schedule` writes the rollout note (data), this skill reads it, resolves config, and hands the convergence work to a **dynamic Workflow** script. This skill is a thin shim; the engine lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/task.workflow.js`.
+`/thread:execute` is the executor half of the rollout split. Where `/thread:schedule` writes the rollout note (data), this skill reads it, resolves config, and hands the convergence work to a **dynamic Workflow** script. This skill is a thin shim; the engine lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/task.workflow.js`.
 
-The engine runs three layers per task — optional plan-gate (autonomous judge) → Ralph-style agent-side verifier retry → master-side review-and-revise loop — and converges **one task per Workflow call**; the lead runs a wave's tasks one call at a time, in order, until ADR 0030's queue lands. The skill itself stays in the conversation to do vault I/O, the protocol gate, status reconciliation, reporting, and the `--gated` between-wave pause (which an autonomous background workflow cannot do).
+The engine runs three layers per task — optional plan-gate (autonomous judge) → Ralph-style agent-side verifier retry → master-side review-and-revise loop — and converges **one task per Workflow call**. The lead session **runs the queue** (ADR 0030): it keeps up to `parallel_ceiling` task calls in flight, integrates each approved task with the latest `main` one at a time, and is the rollout's **only merger**. The skill itself stays in the conversation to do vault I/O, the protocol gate, status reconciliation, Integration, merging, reporting and the `--gated` merge hold (which an autonomous background workflow cannot do).
 
 ## Native runtime binding
 
@@ -21,18 +21,21 @@ native model bindings; do not silently downgrade escalation to one inherited mod
 
 **Preflight before any task status or owner stamp:** select a supported execution
 mode and verify native children, role/model bindings and required project tools.
-A session-driven single wave can use the exchange. Use one stable private run
+A session-driven `--gated` run can use the exchange. Use one stable private run
 directory; recover claims and bound native IDs on interruption, never dispatch
 again because an `advance` call was repeated. The canonical engine still owns
-convergence, budgets and gates; the lead still owns reconciliation and merging.
+convergence, budgets and gates; the lead still owns reconciliation, Integration and merging.
 
 The continuous detached lifecycle in §8 (Stop hook, heartbeat and cold-resume
 notifications) is still a Claude runtime integration. It is **not ported to Codex**
 by the exchange adapter. In Codex, a default invocation requiring that lifecycle
 must stop at this preflight and report the unsupported driver; do not stamp tasks,
-register a substitute cron, or silently reinterpret the invocation as single-wave.
-Only a specifically requested session-driven single wave bypasses the detached
-driver requirement. Existing scheduled jobs and journals retain their runtime.
+register a substitute cron, or silently reinterpret the invocation as a `--gated` run.
+Only a specifically requested session-driven `--gated` run bypasses the detached
+driver requirement. Codex has no heartbeat: its session drives. There the verify
+command and `merge-task.sh` run in the foreground (`verify --timeout` still bounds the
+verifier), and the exit-8 backoff is a foreground `sleep N; merge-task.sh …`.
+Existing scheduled jobs and journals retain their runtime.
 
 ## Scope
 
@@ -41,16 +44,19 @@ Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` produced by `
 ## Invocation forms
 
 ```
-execute Wave 1 of [[giflab-rollout]]       # single wave — opens PRs, you merge
-execute [[giflab-rollout]]                 # full rollout, CONTINUOUS AUTO-MERGE (zero-touch — the default)
-/thread:execute Wave 1 of [[giflab-rollout]] # explicit, single wave
-/thread:execute [[giflab-rollout]] --gated   # full rollout, MANUAL merge: pause between waves for you to merge
+execute [[giflab-rollout]]                   # run the queue, CONTINUOUS AUTO-MERGE (zero-touch — the default)
+/thread:execute [[giflab-rollout]]           # explicit, the same
+/thread:execute [[giflab-rollout]] --gated   # the same queue, with a MERGE HOLD before each merge for your go-ahead
 ```
 
-Bare `execute [[rollout]]` is **continuous auto-merge**: the lead session runs each wave, merges that
-wave's approved PRs to the base branch (`main` unless §4's `defaultBranch` says otherwise), then launches the next — no per-PR confirmation. `--gated` is the same
-per-wave loop with a human merge pause instead, for when you want to eyeball PRs before they land.
-Single-wave mode opens PRs and leaves merging to you.
+Bare `execute [[rollout]]` is **continuous**: the lead fills the slots up to `parallel_ceiling`, integrates each
+approved task with the latest base branch (`main` unless §4's `defaultBranch` says otherwise) one at a time, and
+merges it — no per-PR confirmation. `--gated` is the same queue with a **merge hold** before each merge (§4.5
+*Merge hold*): task calls keep running while the lane waits for your go-ahead.
+
+**A wave number is refused.** `execute Wave N of [[rollout]]` prints "single-wave mode is gone (ADR 0030): run `execute [[rollout]]`, or add `--gated` to approve each merge" and stops.
+
+In a live session, "retry [[task]]" re-enters a set-aside task: run `reconcile-rollout.py hand-back --tasks <slug>` (§4.5 *Set aside*), then §4.5 step 1.
 
 ## Skill flow
 
@@ -64,18 +70,20 @@ If the frontmatter carries a `paused:` stamp, this invocation is a **reinstate**
 
 ### 2. Protocol-version gate
 
-- Missing `protocol_version` **or** `protocol_version: 2` → print: "This rollout predates the Workflow engine. Regenerate it to run under the current contract: `/thread:schedule <project> --regenerate`." Stop. (The legacy prose executor has been retired — there is no in-conversation engine to fall back to.)
-- `protocol_version` other than `3` → print "unsupported protocol version <N>; this executor supports protocol_version: 3" and stop.
-- `protocol_version: 3` → proceed.
+- `protocol_version: 5` → proceed.
+- Missing `protocol_version`, or `protocol_version: 2` or `3` → print: "This rollout predates the queue (ADR 0030). If a session is running it, hard-pause it (*Pausing + reinstating a rollout*), then `/thread:schedule <project> --regenerate`: the supersede carries every unlanded task into a `protocol_version: 5` queue." Stop. (The legacy prose executor and the stored-cursor engine are retired — there is no engine to fall back to.)
+- `protocol_version` other than `5` → print "unsupported protocol version <N>; this executor supports protocol_version: 5" and stop.
+
+**Incomplete check (once, after § 2.7).** Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py status --rollout <rollout-note>` (read-only). A non-null `incomplete` is printed with its remedy, `/thread:schedule <project> --regenerate`, before the first `next` (which refuses the same rollout, exit 1, on its own: § 7).
 
 ### 2.5. Landing-register gate
 
-The lead session never dispatches a wave, calls or resumes a Workflow, or merges into a repo on the
-landing register (ADR 0028 § Decision). Run the register check in
+The lead session never starts a task, calls or resumes a Workflow, pushes an Integration, or merges into a
+repo on the landing register (ADR 0028 § Decision). Run the register check in
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers (point at it; never copy the
 snippet here) against the rollout's `Project root`. `/thread:schedule` § 0 already ran it, but a repo can
 be listed after scheduling, so run it again at **every** invocation that starts or continues work (fresh,
-cold resume, reinstate, single-wave, `--gated`), before anything writes or merges: before the §3/§4
+cold resume, reinstate, `--gated`), before anything writes or merges: before the §3/§4
 stamps, and before §4.5 *Reinstate*'s `clear-pause`.
 
 **Pausing is exempt.** A pause invocation (*Pausing + reinstating a rollout* below) skips this gate
@@ -85,19 +93,20 @@ work: a listed repo, or an exit-2 failure such as a malformed or unterminated re
 user pause.
 
 **What the gate cannot catch.** It runs lead-side, between engine calls. The re-check runs before every
-task call, so a repo listed while a task's Workflow call is in flight is only caught at the next
+Workflow call, so a repo listed while a task's Workflow call is in flight is only caught at the next
 re-check: until that call returns, its agents keep pushing the task's branch and opening its PR on the
-repo. Exposure is bounded to the in-flight call; the wave's later task calls are never launched. The step-3 re-check still stops the merge, so nothing
-lands on the default branch. For an urgent mid-wave listing, **hard pause** the rollout (TaskStop kills
-the in-flight agents now); the exemption above means the gate never stands in the way of that.
+repo. Exposure is bounded to the in-flight calls; no later task call is launched. § 4.5 step 4's re-check
+still stops the merge, so nothing lands on the default branch. For an urgent listing mid-rollout, **hard
+pause** the rollout (TaskStop kills the in-flight agents now); the exemption above means the gate never
+stands in the way of that.
 
 - **Exit 0** (`land`): proceed. Any warning the reader printed on stderr (no register file, a malformed
   entry) still shows; pass it on to the user.
-- **Any non-zero exit**: write nothing (no stamp, no cursor, no `mark-dispatched` or `mark-started`, no merge, no Workflow
-  call). Print the snippet's stderr verbatim above the WAVE-STATUS line (the `listed <owner/name>:
-  <reason>` line with its remedy, the reader's `landing-register:` error, or the no-origin remedy), then
-  end the turn with
-  `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="<owner/name> is on the landing register"`
+- **Any non-zero exit**: write nothing (no stamp, no `mark-started`, `mark-integrating` or `log-integration`, no
+  push, no merge, no Workflow call). Print the snippet's stderr verbatim above the ROLLOUT-STATUS line (the
+  `listed <owner/name>: <reason>` line with its remedy, the reader's `landing-register:` error, or the
+  no-origin remedy), then end the turn with
+  `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=halted reason="<owner/name> is on the landing register"`
   (exit 3), or `reason="landing-register check failed"` (exit 2 or 4). The reason stays short and
   quote-free for the Stop-hook regex; the verbatim stderr above it says where to go. Unlisting is Lachy's
   call, so this is a designed stop (§7), not something to route around.
@@ -131,9 +140,9 @@ nested inside it (`<repoPath>/…`, a monorepo with the marketplace in a subdire
 warning (the registry format is Claude Code's, so the check fails open).
 
 - **Exit 0**: proceed; pass any warning on to the user.
-- **Exit 3**: write nothing (no stamp, no cursor, no `mark-dispatched` or `mark-started`, no merge, no Workflow call). Print
-  the stderr verbatim above the WAVE-STATUS line and end the turn with
-  `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="repoPath is a live plugin marketplace checkout"`.
+- **Exit 3**: write nothing (no stamp, no `mark-started`, `mark-integrating` or `log-integration`, no push, no
+  merge, no Workflow call). Print the stderr verbatim above the ROLLOUT-STATUS line and end the turn with
+  `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=halted reason="repoPath is a live plugin marketplace checkout"`.
   The remedy: clone the repo to a separate path (e.g. `~/repos/<repo>-rollout`), set the rollout's
   `Project root` to that clone, and re-invoke.
 - **Exit 2** (the script not found, an empty `repoPath`, no python3): the same write-nothing halt with
@@ -153,11 +162,12 @@ use its backticked path; otherwise leave it empty (the marketplace registry stil
 checkout of a self-rollout's separate clone).
 
 **Entry points only.** § 2.7 runs only when this invocation **entered at § 1**: a user turn naming
-`/thread:execute` or `execute [[…]]` (fresh, cold resume, reinstate, single-wave, `--gated` and its
+`/thread:execute` or `execute [[…]]` (fresh, cold resume, reinstate, `--gated` and its
 re-invocations), or a router such as `/thread:orient` dispatching this skill. It does **not** run on a turn
-whose prompt begins `WAVE-HEARTBEAT` (even when that turn loads this skill), on the Stop-hook `WAVE-DRIVER`
-continuation or a Workflow-completion notification (both continue the current invocation's loop), on
-§ 5's `resumeFromRunId` resume, or on `/thread:repair` §§ 4 and 6 (they follow §4.5 directly). When it
+whose prompt begins `ROLLOUT-HEARTBEAT` (even when that turn loads this skill), on the Stop-hook
+`ROLLOUT-DRIVER` continuation or a Workflow-completion or background-command notification (they continue
+the current invocation's loop), on § 5's `resumeFromRunId` resume, or on `/thread:repair` §§ 4 and 6 (they
+follow §4.5 directly). When it
 runs, it runs directly after § 2.6, before the § 3/§ 4 stamps and before §4.5 *Reinstate*'s `clear-pause`.
 
 It runs at entry points and never per wave: `origin/<default>` moves with every merge, and a close-out
@@ -169,10 +179,11 @@ next entry at § 1 halts on it with the queued-aware remedy.
 exactly as for § 2.5.
 
 - **Exit 0** (`pushed`): proceed; pass any `pushed-base: note:` line on to the user.
-- **Exit 3**: write nothing (no stamp, no `clear-pause`, no cursor, no `mark-dispatched` or `mark-started`, no merge, no
-  Workflow call). Print the stderr verbatim (the ahead commits per clone, and the remedy: land them by PR,
-  or wait for the queued `close/…` landing PR) above the WAVE-STATUS line and end the turn with
-  `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="local default branch is ahead of origin"`.
+- **Exit 3**: write nothing (no stamp, no `clear-pause`, no `mark-started`, `mark-integrating` or
+  `log-integration`, no push, no merge, no Workflow call). Print the stderr verbatim (the ahead commits per
+  clone, and the remedy: land them by PR, or wait for the queued `close/…` landing PR) above the
+  ROLLOUT-STATUS line and end the turn with
+  `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=halted reason="local default branch is ahead of origin"`.
 - **Exit 2** (a fetch or the default-branch lookup failed, a script not found): the same write-nothing
   halt with `reason="pushed-base check failed"`.
 - **Any other non-zero exit** (1, 127, …): the same write-nothing halt with
@@ -180,23 +191,23 @@ exactly as for § 2.5.
 
 ### 3. Resolve effective config per task
 
-For each task in the target wave (or all waves in continuous mode), resolve, in order **task frontmatter → rollout frontmatter → hardcoded default**:
+For each task as it starts, resolve, in order **task frontmatter → rollout frontmatter → hardcoded default**:
 
 | Field | Default | Becomes (in args) |
 |---|---|---|
 | `verifier` | fail with a message asking the user to provide one | `verifier` (rollout-level) |
 | `max_iterations` | `3` (or `1` if `scope: read-only`) | `task.maxIterations` |
-| `max_review_rounds` | `4` | `task.maxReviewRounds` |
+| `max_review_rounds` | `4` | `task.maxReviewRounds`; also passed to `lead-integrate.py inputs --max-review-rounds` (§4.5 step 1.2, *Restart routing*) |
 | `max_plan_rounds` | `3` | `task.maxPlanRounds` |
 | `plan_approval` | `scope-gated` | drives `task.planGate` (see 3.5) |
-| `parallel_ceiling` | `4` | not passed to the engine. The lead's limit on task calls in flight; at most one until the queue (ADR 0030) lands. |
+| `parallel_ceiling` | `4` | not passed to the engine. `reconcile-rollout.py next` reads it from the rollout note: it must be an integer ≥ 1, or `next` exits 1. The lead's limit on task calls in flight, seeded revises included (Integration holds none, §4.5). |
 | `max_tier` | none (omit) | `maxTier` (rollout-level; **`opus` is the only value that caps anything** — `fable` is the uncapped default, so `max_tier: fable` is a no-op, and an empty `max_tier:` parses as null and also runs uncapped, with no log line) — the ADR 0016 tier **ceiling**. Set it ONLY when the account's fable quota is exhausted, never as a cost preference: it clamps the seed, suppresses escalation (reported as `tierCapped`), and clamps a `judgeModel` pin. A capped tier is terminal, so it runs the full Ralph loop at the higher tier's effort. Omit ⇒ byte-identical to pre-ceiling. |
 | `env_bootstrap` | none (omit) | `envBootstrap` (rollout-level) |
 | `ignore_gate` | `false` (omit) | `task.ignoreGate` (per-task) |
 | `model` | `opus` | `task.model` (per-task; `opus` \| `fable`) |
 | `effort` | none (omit) | `task.effort` (per-task ONLY — the ADR 0007 escape hatch; it has no rollout-level form) |
 
-**Validate the round budgets before anything else.** Each resolved `max_iterations`, `max_review_rounds` and `max_plan_rounds` must be an **integer >= 1** — a YAML int, never `0`, negative, fractional, a string, empty or `null` (a hardcoded default applies only when the key is absent at every level; an empty `max_plan_rounds:` is null, not absent). On any violation the lead writes nothing: no `status: in_progress` stamp, no `mark-dispatched` or `mark-started`, no Workflow call. Name the field, the bad value and its source (task or rollout frontmatter), then end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="invalid round budget: <field> on [[task]]"` — for a rollout-level value, name the rollout instead of the task. This is the upstream refusal; the engine also fails closed per task (`plan-blocked` / `review-blocked` naming the field) so a bad budget can never silently disable a plan or review layer (ADR 0008).
+**Validate the round budgets before anything else.** Each resolved `max_iterations`, `max_review_rounds` and `max_plan_rounds` must be an **integer >= 1** — a YAML int, never `0`, negative, fractional, a string, empty or `null` (a hardcoded default applies only when the key is absent at every level; an empty `max_plan_rounds:` is null, not absent). On any violation the lead writes nothing: no `status: in_progress` stamp, no `mark-started`, no Workflow call. Name the field, the bad value and its source (task or rollout frontmatter), then end the turn with `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=halted reason="invalid round budget: <field> on [[task]]"` — for a rollout-level value, name the rollout instead of the task. This is the upstream refusal; the engine also fails closed per task (`plan-blocked` / `review-blocked` naming the field) so a bad budget can never silently disable a plan or review layer (ADR 0008).
 
 `scope:` is read directly from each task's frontmatter (set by `/thread:schedule`). `completion_sentinel` is no longer used — the Workflow returns validated structured output instead of parsing sentinel strings.
 
@@ -237,11 +248,11 @@ Every plan the engine's planner produces must carry a **`### Gated inputs`** sec
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <slugA,slugB>
 ```
 
-(moves the pending gates to `## Approved gates` with the sign-off date — gate + cap + sign-off — and flips the note to `in_progress`), then re-dispatch exactly those tasks (per-task resume within the wave). If the user declines a gate, defer the task or leave it — the wave then follows the normal incomplete-wave rules. If nobody is present to sign off, end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="gated inputs await sign-off: [[task]]"`. `resume-filter` **excludes** `gate-pending` notes, so no unattended re-entry (heartbeat included) can bypass or spam a pending gate — only `approve-gates`, run after an explicit human sign-off, makes the task dispatchable again. The approved cap is a **ceiling** the implementer must respect; blowing it is a verifier/review failure, not a re-ask.
+(moves the pending gates to `## Approved gates` with the sign-off date — gate + cap + sign-off — and flips the note to `in_progress`). Until then the task is **set aside** (§4.5 *Set aside*): its slot frees, its dependants wait and the queue runs on. After `approve-gates`, the next `next --running` lists it in `restart`, and §4.5 *Restart routing* starts it. (Resuming a gate stop at the stage it stopped — its signed plan, or Integration — is p12-14's change; until it lands, *Restart routing* takes the task's own call.) If the user declines a gate, defer the task or leave it set aside. If nobody is present to sign off, the task stays set aside: the queue runs on, and § 7's stuck halt names it once nothing else can start (`reason="gated inputs await sign-off: [[task]]"`). `next` never starts or restarts a `gate-pending` note, so no unattended re-entry (heartbeat included) can bypass or spam a pending gate — only `approve-gates`, run after an explicit human sign-off, makes the task startable again. The approved cap is a **ceiling** the implementer must respect; blowing it is a verifier/review failure, not a re-ask.
 
 ### 4. Stamp in-progress + build args
 
-**Git-env check (before any stamp).** Agents and verifiers inherit this session's environment. A `GIT_DIR`, `GIT_WORK_TREE` & co. exported here (a git hook or a `git -c` wrapper launched Claude Code) overrides every `git -C` the engine renders and every scrub an agent forgets: its git commands, the verifier's and `merge-task.sh`'s run against whatever repository the variable names (the 2026-09-23 leak, p12-3). The engine prefixes each rendered command with `unset $(git rev-parse --local-env-vars 2>/dev/null);`, but only this session can check the environment it hands down. Run this first, in every mode (§4.5 step 1, single-wave, and § 5's resume):
+**Git-env check (before any stamp).** Agents and verifiers inherit this session's environment. A `GIT_DIR`, `GIT_WORK_TREE` & co. exported here (a git hook or a `git -c` wrapper launched Claude Code) overrides every `git -C` the engine renders and every scrub an agent forgets: its git commands, the verifier's and `merge-task.sh`'s run against whatever repository the variable names (the 2026-09-23 leak, p12-3). The engine prefixes each rendered command with `unset $(git rev-parse --local-env-vars 2>/dev/null);`, but only this session can check the environment it hands down. Run this first, before every stamp (§4.5 step 1, *Lost call*, and § 5's resume):
 
 ```bash
 # thread:git-env-check (extracted and tested by tests/git-env-scrub.test.sh)
@@ -256,9 +267,9 @@ fi
 # end thread:git-env-check
 ```
 
-`$vars` only proves the list is readable; the loop iterates the command substitution itself, because zsh (the Bash tool's shell on macOS) never word-splits a parameter expansion. On **any non-zero exit, write nothing**: no stamp, no `mark-dispatched`, no Workflow call, no `mark-started`. Print its stderr verbatim above the WAVE-STATUS line and end the turn with `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="git env set in the lead session"` (exit 1) or `reason="git-env check failed"` (exit 2).
+`$vars` only proves the list is readable; the loop iterates the command substitution itself, because zsh (the Bash tool's shell on macOS) never word-splits a parameter expansion. On **any non-zero exit, write nothing**: no stamp, no `mark-started`, no Workflow call. Print its stderr verbatim above the ROLLOUT-STATUS line and end the turn with `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=halted reason="git env set in the lead session"` (exit 1) or `reason="git-env check failed"` (exit 2).
 
-Before launching, for each task in scope: stamp `status: in_progress` and `owner: <session-tag>` on the task's frontmatter (blocks duplicate dispatches). Keep this in the lead session — subagents never write task `status:`. In the launch message, **flag any task expected to gate** (a `plan_approval: required` stamped by `/thread:schedule`'s gated-input sweep, or a note that smells of spend/credentials) so the eventual `gate-pending` pause is expected, not a surprise (§3.7).
+Before every task call — a start, a restart and a seeded revise alike — stamp `status: in_progress` and `owner: <session-tag>` on the task's frontmatter (it blocks duplicate starts). Keep this in the lead session — subagents never write task `status:`. In the launch message, **flag any task expected to gate** (a `plan_approval: required` stamped by `/thread:schedule`'s gated-input sweep, or a note that smells of spend/credentials) so the eventual `gate-pending` pause is expected, not a surprise (§3.7).
 
 Build the args object for each task call:
 
@@ -309,44 +320,69 @@ Pass the printed name as `defaultBranch` only when it is not `main`. Any non-zer
 
 Also read the rollout note's **`## Known baseline failures`** block (`/thread:schedule` step 2.6): when it lists tests (not `none`/empty), pass them as `knownBaselineFailures: ["<test_id> — <reason>", …]`. The engine threads the manifest into every agent and shifts the Ralph green criterion to "no NEW failures beyond this set" — it keeps running the full verifier and never `--deselect`s the listed reds (per the project's `CLAUDE.md`: a comparison reference, not a mute button). Omit the key when the block is absent or `none` — the engine then behaves exactly as before (`verifier` exit 0 = pass).
 
-- **Single-wave mode** (`execute Wave N of [[rollout]]`) → dispatch wave N's tasks one Workflow call per task, in order. Opens PRs; the user merges. No auto-merge. The tasks therefore end the session at `status: review` — once the user confirms the merges (or a later invocation finds the PRs merged in pre-flight), run `reconcile-rollout.py mark-done` on them so they don't linger as false "awaiting acceptance" items.
-- **Continuous auto-merge mode** (`execute [[rollout]]`, no wave number, no flag — the DEFAULT) → do **not** pass all waves at once. Drive the rollout **one wave at a time: one Workflow call per task, sequential within the wave (at most one call in flight)** across turns, auto-merging each wave before launching the next. This is the zero-touch path — see §4.5.
-- **`--gated`** → the **same** per-wave loop as continuous, but the between-wave step is a **human merge pause** instead of the auto-merge: run wave N, present its report, wait for the user to merge + re-invoke, then call wave N+1. The escape hatch for eyeballing PRs before they land.
+- **Continuous** (`execute [[rollout]]`, no flag — the DEFAULT) → the §4.5 queue: up to `parallel_ceiling` task calls in flight, one Integration at a time, and each approved task merged as soon as it integrates. This is the zero-touch path.
+- **`--gated`** → the **same** queue with a **merge hold** before each merge (§4.5 *Merge hold*): the lane waits for your go-ahead while task calls keep running. The escape hatch for eyeballing PRs before they land.
+- A wave number is refused (*Invocation forms*).
 
-> Correctness between waves comes from the **auto-merge + `origin/<default branch>` worktree base** (§4.5; `origin/main` unless `defaultBranch` says otherwise), not from a completion barrier. The old engine ran all waves against one frozen `main`, which silently re-created the #30/#31 squash-drop exposure for any rollout whose same-file tasks span waves. The per-wave loop fixes that.
+> Correctness comes from **Integration** (§4.5 step 3), not from a barrier: before an approved task merges, the latest `origin/<default branch>` (`origin/main` unless `defaultBranch` says otherwise) is merged into its branch and verified, so nothing merges from a base older than the `main` it lands on (ADR 0030 decision 3). A frozen base silently re-created the #30/#31 squash-drop exposure; Integration replaces it, and GitHub's update-branch, for every repo, CI or none.
 
-### 4.5. Continuous auto-merge — the per-wave loop
+### 4.5. The queue — the lead's loop (ADR 0030)
 
-In continuous mode the lead session is the conductor: run ONE wave's tasks on the engine, one call per task in order, merge that wave, then launch the next. The merge — not a human, not a completion barrier — is what makes "earlier same-file work lands before the next wave branches" real. The loop is driven across turns by Workflow-completion notifications and is resumable via a durable cursor.
+The lead session is the conductor: it starts tasks up to the parallel ceiling, integrates each approved task with the latest `main` one at a time, and merges it. The loop is driven across turns by Workflow-completion notifications, background-command notifications and the heartbeat (§ 5). The task notes are its only state (there is no cursor), so any entry resumes it.
 
-**Landing-register re-check.** Every entry into this loop (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry, `/thread:repair`'s hand-off) re-runs § 2.5 before anything else it does, and the loop re-runs § 2.5 before every wave dispatch, every Workflow call (a `resumeFromRunId` resume included) and every `merge-task.sh` call; each of those re-runs is followed at once by § 2.6's self-rollout gate. A halt leaves open PRs open, the cursor unadvanced and any `paused:` stamp in place.
+**Landing-register re-check.** Every entry into this loop (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry, `/thread:repair`'s hand-off) re-runs § 2.5 before anything else it does, and the loop re-runs § 2.5 before every Workflow call (a task call, a seeded revise, an integrate call, a *Lost call* `resumeFromRunId` resume, a restart), before every Integration push and before every `merge-task.sh` call (a merge-hold release and a backoff included); each of those re-runs is followed at once by § 2.6's self-rollout gate. A halt leaves open PRs open and any `paused:` stamp in place.
 
-**Durable cursor.** Track progress in the rollout note frontmatter: `merged_through_wave: <N>` (`0` or absent = nothing merged yet). This is the single source of truth for "where was I" — a fresh session resumes from it, never from a GitHub/vault re-scan. New rollouts seed it at `0`; an older rollout without the field is treated as `0` (start at wave 1).
+**Slots and the lane.** A **slot** is one task's own Workflow call — a start, a restart or a seeded revise — held from its launch until its row is reconciled; at most `parallel_ceiling` run at once (`next` reports `ceiling` and `slotsInUse`). Integration holds **no slot**. One Integration runs at a time, in **the lane**: it is held from step 3's `mark-integrating` until step 4 resolves (a merge, a set-aside or a halt), and a merge hold, a backoff and the RACE procedure keep it held.
 
-**Per wave K** (K = `merged_through_wave` + 1):
+**The loop**
 
-1. Re-run § 2.5; then resolve config + stamp `status: in_progress` for wave K's tasks (step 4). Stamp the wave's **dispatch boundary** on the rollout note — the engine's sandbox has no clock, so wall-clock enters here:
+1. **Fill the slots.**
+   1. Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py next --rollout <rollout-note> --running <this session's live task-call slugs, comma-separated; "" when none>`. On exit 1, print its ERROR line verbatim and halt (§ 7). Do not act on its `halt` yet.
+   2. **Seeded revises (automatic), before any halt verdict.** Skip this when `paused` or `pauseRequested` is set. For each `setAside` entry with `setAsideAt: run` and status `blocked`, in `next` order, run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py inputs --note <task note> --max-review-rounds <§ 3's max_review_rounds> --repo <repoPath>`. Launch one only when it reports `autoRevise: true`, and only while `slotsInUse` (live plus restarts) plus the revises already launched in this step is below `ceiling`; otherwise it waits, blocked, for a later step 1. A launch is: § 2.5, § 3's config, stamp `status: in_progress` and `owner:` (§ 4), `mark-started --tasks <slug> --rollout <rollout-note>`, then the Workflow call with § 4's task object plus `resume: {stage: 'revise', prUrl: <inputs.pr>, branch: <inputs.branch>, worktreePath: <inputs.worktreePath>, reviewHistory: <inputs.history>, reviewRoundsUsed: <inputs.lastRound>, plan: ''}`. A `revise stopped:`, review-blocked or out-of-rounds note is never launched here: it waits for `hand-back` (*Set aside*). If any revise launched, re-run `next --running <the live slugs, them included>` and use that output from here on.
+   3. For each slug in `restart`, then each in `start`: § 2.5, § 3's config, stamp `status: in_progress` and `owner:` (§ 4), `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py mark-started --tasks <slug> --rollout <rollout-note>` (its `progress:` line becomes the args `progress`), then the call *Restart routing* chooses for a restart; a start is always the task's own call (§ 5).
+   4. If the lane is free, take `next`'s first `integrating` task, else its first `awaitingIntegration` task, through step 3 (and step 4 when step 3 reaches it in this turn), then come back here. A soft pause still drains here: what has a PR integrates and merges.
+   5. **Halt guard (last).** Act on the current output's `halt` only when the lane is free, no task call is live and sub-step 2 launched nothing; otherwise end the turn `waiting`. `complete` → step 5; `stuck` → § 7; `paused` → halt with `reason="paused at user request"`; `empty` → report that the rollout links no task and halt with `reason="the rollout links no task"`.
+   6. End the turn `waiting` while anything is in flight or a merge hold stands. At each loop entry, the first such turn registers the heartbeat (§ 5 *Heartbeat*).
+2. **A task call returns.** Reconcile its row (§ 6), print one line (e.g. "[[task-a]] → review, PR <url>"), and drop its runId from this session's record. `review` with a PR joins the Integration queue (reconcile stamps `ready:`); a read-only task is done on approval. `blocked`, `plan-blocked`, `review-blocked` or `gate-pending` is set aside by that row itself: the lead writes no row of its own, and only *Set aside*'s re-entry rules apply. An error, or no row: *Lost call*. Then step 1.
+3. **Integrate one task.** Re-run § 2.5, then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py mark-integrating --tasks <slug>`, `S=$(python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py stamp)` and `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py prepare --repo <repoPath> --slug <slug> --default <defaultBranch> --note <task note>`. Route on its JSON (`route`, `case`, `prHead`, `anchor`, `taskBase`, `mainSha`, `record`, `trouble`, `landed`, `mergeCommit`, `sharedFiles`):
+   - **`merge`** — main has not moved since the task's base (case i) or since its recorded Integration (case ii): nothing is merged and no verifier runs. Case (i) first records the lead's Integration: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py log-integration --tasks <slug> --started "$S" --anchor <anchor> --head <prHead> --base <taskBase>`; case (ii) writes nothing. Then step 4 with (`prHead`, `taskBase`), or (`prHead`, `record.base`) in case (ii).
+   - **`verify`** — `prepare` merged `mainSha` into the branch as `mergeCommit` M (unpushed). Run *The background verify command* on the task tree, then:
+     - green (rc 0) and no shared file: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py push --repo <repoPath> --slug <slug> --head M`, then `log-integration --tasks <slug> --started "$S" --anchor <anchor> --head M --base <mainSha>`, then step 4 with (M, `mainSha`);
+     - green with a shared file: push, then the integrate call with `trouble ["shared-file"]` and `leadMerge: {mergeCommit: M, headSha: M, baseSha: <mainSha>, verified: true}` (the judge reads it alone);
+     - red, rc 124, a failed bootstrap or a missing rc: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py undo --repo <repoPath> --slug <slug> --merge M --to <prHead>`, then the integrate call with `trouble ["red"]` (plus `"shared-file"` when there was one);
+     - push refused (exit 1): `undo`, then the integrate call with `trouble []`.
+   - **`trouble`** — the integrate call with `prepare`'s `trouble` (`["conflict"]` or `[]`).
+   - **`set-aside`** — the lead's own *Set aside* row at Integration (`--kind integration`) with `prepare`'s `reason`.
+   - **exit 8** (origin unreachable) — *Backoff* (60 s, then 120 s), re-running `prepare`; a third failure halts with `reason="origin unreachable while integrating [[slug]]"`.
+   - **exit 2** — halt (§ 7).
+
+   **The integrate call** is § 5's Workflow call with § 4's args and task object (never `task.resume`), `mode: 'integrate'` and `integration: {prUrl, branch, worktreePath, headSha: <anchor>, taskBase, mainSha, trouble, landed, plan: "", reviewHistory, reviewRoundsUsed, rung, readyAt, startedAt}`: `reviewHistory` and `reviewRoundsUsed` from the approving row when this session holds it, else from `lead-integrate.py inputs`; `rung` from that row (`model`, `escalated`, `escalatedAt`, `tierCapped`, `tierCappedAt`), else `{model: <§ 3's resolved model>, escalated: false, escalatedAt: "", tierCapped: <inputs.tierCapped>, tierCappedAt: <inputs.tierCappedAt>}`, with `tierCapped` (a boolean) and `tierCappedAt` (a string) from `lead-integrate.py inputs`, which prints both, never the note's raw `tier_capped` (a string where the engine needs a boolean fails its args check before dispatch, which reads as a *Lost call*); `readyAt` the note's `ready:`; `startedAt` a fresh `lead-integrate.py stamp` taken at launch; `leadMerge` only on a green shared file, as above. `plan` is `""`: the brief is the contract. It holds no slot. When it returns, reconcile it (that writes its `## Integration log` line and removes `integrating:`) and drop its runId. An error, or no row: *Lost call*, which keeps the lane held until a row is reconciled. Otherwise, by `integration.outcome`:
+   - `integrated` → step 4 with `integration.headSha` and `integration.baseSha`;
+   - `rejected` → the lane frees, step 1.2 launches the seeded revise, and on approval the task rejoins the Integration queue (`max_review_rounds` across those rounds sets it aside review-blocked);
+   - review-blocked or `set-aside` → reconcile has already written the engine's row (the note reads `review-blocked`, or `blocked` set aside at Integration), so the lead writes **no** set-aside row of its own: the lane frees, and only *Set aside*'s re-entry rules apply (`hand-back`; for review-blocked, once `max_review_rounds` is raised). A `set-aside` reason starting `merge step STOP: stale anchor ref <X>` also means: delete the ref, guarded (*Anchor ref lifecycle*).
+4. **Merge it.** Re-run § 2.5. Under `--gated`, enter a *Merge hold* with `reason="gated: awaiting merge approval for [[slug]] (PR #N)"`. Otherwise run, in the background with `run_in_background` and `timeout: 7200000`:
    ```
-   python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py mark-dispatched --rollout <rollout-note> --wave K
+   ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-task.sh <repoPath> <pr> <head> <base>   # the pair from step 3; exit codes and lead routes in the script header
    ```
-   (writes `wave_K_dispatched: <timestamp>`; idempotent — **first dispatch wins**, so a resume re-dispatch never resets the wave clock). It prints a `progress:` line — "wave K/N dispatched — 42m elapsed, ~50m remaining (rough)" — surface it to the user and pass its text as the args `progress` string so the engine `log()`s it live in `/workflows`. Then, for each wave-K task in turn (the rollout note's order), build that task's args (`task: <its row>`, the wave's `progress` text) and call the Workflow (step 5). Launch the next task's call only once the previous call has returned and been reconciled (step 2).
-2. On each call's completion → reconcile its result with §6's `reconcile-rollout.py reconcile` helper only, and print a short per-task line (e.g. "[[task-a]] → review, PR <url>"), not the full Wave N report. Then launch the wave's next task call (§ 2.5 re-check first, per the entry rule) and end the turn `state=waiting`. After the wave's last call is reconciled, print §6's **Wave N report** (with its *Recommended merge order*) once, for the whole wave, and go to step 3.
-3. **Auto-merge wave K.** Re-run § 2.5 before `merge-task.sh`: a repo listed during the wave halts here with the wave's approved PRs left open (merging puts commits on the listed repo's default branch). On that halt there is no merge, no cursor advance and no `mark-done`; the tasks stay at `review`, and once the repo is unlisted, re-invocation's *Cold resume* flush merges them. Collect the wave's tasks that returned `status: review` **and** have a non-empty `pr` (read-only tasks have none; **never** merge `review-blocked` / `blocked` / `plan-blocked` / `gate-pending`), in the report's recommended order. Run:
-   ```
-   ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-task.sh <repoPath> <pr> <integrated-head> <integrated-base>   # one PR per call (the row's PR URL or number); exit codes and lead routes in the script header
-   ```
-   - **The sentinel is authoritative, not the reported exit.** On exit the script writes `<repoPath>/.claude/merge-task.status` — `ok` only on a clean merge, `failed:<code>` on any halt. If the run is backgrounded, a trailing-command wrapper (`… & wait; echo done`) can mask the script's real exit — so **read the sentinel file**, not the reported exit code. Treat anything other than a file containing exactly `ok` — **including a missing file** — as a halt.
-   - **sentinel ≠ `ok` → HALT the rollout.** Surface the script's message verbatim (which PR, why, the exact next step) and stop. Do **not** advance the cursor or launch the next wave.
-   - **sentinel `ok` → advance the cursor to `merged_through_wave: K`** via the helper (not a hand-edit):
-     `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py cursor --rollout <rollout-note> --wave K`
-     The cursor step also stamps the **merge boundary** (`wave_K_merged: <timestamp>`, first merge wins) and prints a `progress:` line — "wave K/N merged — 1h 24m elapsed, ~50m remaining (rough)" — include it in the wave report. The estimate is in-rollout arithmetic only (average task convergence from this rollout's completed waves × remaining ÷ ceiling), **always labelled rough (~)** — never restate it with false precision; before any wave completes it shows elapsed only (no basis yet), and on the final wave it prints the total instead ("rollout complete in 2h 10m").
-   - **…then flip the wave's landed tasks to `done`** (same helper):
-     `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py mark-done --tasks <slugA,slugB,…>`
-     Pass **every wave-K task that ended at `status: review`** — the just-merged PR tasks (the merge IS the confirmation a `review` note was waiting for). Reconcile marks a read-only task done on approval, so passing one to `mark-done` is a no-op. Idempotent; the helper refuses any note not at `review`/`done`, so a blocked task can never be swept along. Without this flip, landed tasks pile up at `review` as false "awaiting acceptance" items — seven had accumulated by 2026-06-12.
-   - **Soft-pause check (rides the cursor step — zero extra calls).** The `cursor` helper honours a `pause_requested: true` flag on the rollout note: it stamps `paused: <timestamp>`, clears the flag, and prints a `paused=` line alongside the cursor advance. When that line appears, the user asked for a soft pause — do **NOT** launch wave K+1. Print a short paused report (what merged this wave, what's left) and end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="paused at user request"`. The Stop-hook driver releases on `halted`, and the heartbeat cron deletes itself on its next tick — on this `halted` line, or on the `paused:` stamp its prompt checks ahead of the stall diagnosis (§5), which is what keeps "nothing auto-resumes a paused rollout" true for a hard pause too (a hard pause never emits `halted`; its runbook also deletes the cron outright). Reinstate is plain `/thread:execute [[rollout]]` — see *Pausing + reinstating a rollout* below.
-4. **Smart-halt check** before launching K+1: if any wave-K task did **not** land (`blocked` / `review-blocked` / `plan-blocked` / `gate-pending`) **and** its file-set (from the rollout note's `## File-sets` block) intersects the union of any later wave's file-sets → **HALT** with a clear report (e.g. "wave K left [[task]] unlanded; wave M edits the same file `<f>` — continuing would branch it from a main missing the fix"). The user fixes the blocker and re-invokes. Otherwise, **honour any pending pause before launching K+1**: a partially-landed wave never runs step 3's cursor advance (*Per-task resume within a wave* below), so a `pause_requested: true` still sitting on the rollout note has NOT been honoured yet — check the note, and if the flag is pending, re-run `reconcile-rollout.py cursor --rollout <rollout-note> --wave <current merged_through_wave>` (cursor-idempotent — re-setting the same value changes nothing — while performing the stamp + clear + `paused=` signal) and exit exactly as the step-3 *Soft-pause check* does: no wave K+1, paused report, `WAVE-STATUS: <slug> cursor=<merged_through_wave>/<N> state=halted reason="paused at user request"`. With no pending pause, launch wave K+1 (its worktrees branch from the freshly-merged `origin/main`).
-5. Repeat until the last wave merges, then **perform the completion ceremony** (don't just point the user at the checklist):
-   - Sweep the rollout's task notes: every task should already read `status: done` (step 3's `mark-done` flips them wave by wave). Flip any straggler still at `review` whose PR is verifiably merged (`mark-done` again); a straggler at any *other* status means the rollout isn't actually complete — stop and say so.
+   **The sentinel is authoritative, not the reported exit.** The script writes `<repoPath>/.claude/merge-task.status` on exit — `ok` only on a clean merge, `failed:<code>` otherwise; a backgrounded wrapper can mask its exit, so read the file. A missing file is a signal. Route by its code:
+
+   | Exit | Lead action |
+   |---|---|
+   | 0 (`ok`) | `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py mark-done --tasks <slug> --rollout <rollout-note>`. On a WARN that the anchor ref survived, delete it, guarded. The lane frees; step 1 |
+   | 1 | *Set aside* at its own run (`--kind own`), reason `merge-task: <its message>` |
+   | 2 | Halt |
+   | 3 | Base moved: step 3 again for the same task (case (ii) holds through the log); merge-task caps this with exit 4 |
+   | 4 | *Set aside* at Integration (`--kind integration`). The reason on stdin is merge-task's text after `set-aside reason: `, verbatim (it already starts `integration: `, and the renderer strips that one prefix, so the first line equals it) |
+   | 5 | RACE procedure (below). Never re-call merge-task for this PR |
+   | 6 | Re-run once. A second 6: `mark-done`, and report "merged and verified; local refresh failed: <message>" |
+   | 7 | *Merge hold* with `reason="review required: approve PR #N (<url>)"`. Never set aside, never re-integrated |
+   | 8 | *Backoff* (60 s, then 120 s). A third 8 sets aside at Integration with reason `merge-task exit 8 three times: <merge-task's last message>` |
+   | 70 | Halt |
+   | 143 / 130 / 129, or a missing sentinel | Re-run once, unless the rollout note carries `paused:`; a second one halts |
+
+   **RACE procedure** (exit 5: merged, but as an unverified combination). Append the script's RACE line to the rollout note's `## Race log`; run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py verify --repo <repoPath> --detach-at <the merge commit> --tree <repoPath>/.claude/worktrees/race-<slug> --out <repoPath>/.claude/integration/race-<slug> --timeout 1800 --bootstrap '<env_bootstrap>' --verifier '<verifier>'` in the background with `timeout: 2400000` (no `--bootstrap` when there is none; both single-quoted as in *The background verify command*); green → `mark-done` (the RACE line stays); red, rc 124 or a missing rc → halt with `reason="RACE: origin/<default> fails the verifier"`. The lane stays held until then.
+5. **Completion.** When the halt guard allows `halt: complete`, **perform the completion ceremony** (don't just point the user at the checklist):
+   - Sweep the rollout's task notes: every task should already read `status: done` (step 4's `mark-done` flips each as it merges). Flip any straggler still at `review` whose PR is verifiably merged (`mark-done` again); a straggler at any *other* status means the rollout isn't actually complete — stop and say so.
    - **Close the phases this rollout finished (ADR 0026).** Without this step a phase closes only when a lead remembers to. Run it here, before the rollout stamp, never after:
      ```
      python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py touched-phases --rollout <rollout-note>
@@ -376,14 +412,52 @@ In continuous mode the lead session is the conductor: run ONE wave's tasks on th
      due:
      captured: <today>
      ```
-   - Append a `## Completion log` to the rollout note: dispatch dates, waves → PRs (links + merge dates), convergence stats per task, **total duration + a per-task duration breakdown** (read the `timeline` block from `reconcile-rollout.py status --rollout <rollout-note>` — it's computed from each task note's `started:`/`merged:` stamps, ADR 0030), phase closure: phases closed, already closed, ambiguous (with the tool's reason), failed (with the follow-on task link), left open (with the fixed reason), and the disposition of each post-rollout item.
+   - Append a `## Completion log` to the rollout note: dispatch dates, waves → PRs (links + merge dates), convergence stats per task, **total duration + a per-task duration breakdown** (read the `timeline` block from `reconcile-rollout.py status --rollout <rollout-note>` — it's computed from each task note's `started:`/`merged:` stamps, ADR 0030), the rollout note's `## Race log` copied (when it has one), phase closure: phases closed, already closed, ambiguous (with the tool's reason), failed (with the follow-on task link), left open (with the fixed reason), and the disposition of each post-rollout item.
    - Close out the associated thread (run `/thread:close` — a sibling: `${CLAUDE_PLUGIN_ROOT}/skills/close/SKILL.md`) — or record in the log why it stays open.
-   - Delete the rollout's `WAVE-HEARTBEAT` cron if one is registered (`CronList` → `CronDelete`); the heartbeat also self-deletes on its next tick, but don't leave it ticking for up to 20 minutes against a finished rollout.
+   - Delete the rollout's `ROLLOUT-HEARTBEAT` cron if one is registered (`CronList` → `CronDelete`); the heartbeat also self-deletes on its next tick, but don't leave it ticking for up to 20 minutes against a finished rollout.
    - Move the rollout note to `Work/Tasks/Archive/Rollouts/` (`git mv` in the vault) and commit the vault (task, phase, follow-on and rollout notes). Wikilinks resolve by filename, so `[[<slug>]]` references and task `rollout:` backlinks survive the move.
 
    A done rollout left sitting in `Work/Tasks/` is invisible-but-present — every Bases view filters `status != done`, so it vanishes from view with no record of what happened. The ceremony is what makes completion legible weeks later.
 
-**Cold resume.** Re-invoking `execute [[rollout]]` when `merged_through_wave: N` is set: first re-run § 2.5, and § 2.7 when this invocation entered at § 1 (§ 2.7's entry rule; the heartbeat re-entry does not); then re-run `merge-task.sh` against wave N+1's already-open PRs (idempotent — merged PRs are skipped, so this flushes any half-merged wave), `mark-done` the tasks whose PRs are now confirmed merged, then continue the loop.
+**Lost call.** A Workflow call — a task call, a seeded revise or an integrate call — whose notification is an error or carries no row, or which the heartbeat finds no longer in flight with no reconciled row.
+- If the rollout note carries `paused:`, or this lead stopped the call for a hard pause, write nothing: the note stays `in_progress` (or keeps `integrating:`), and *Reinstate* restarts it.
+- Otherwise, once: § 2.5, § 4's git-env check, then `resumeFromRunId` with the same `scriptPath` and args (§ 5); a finished call replays its row from cache. Reconcile the row it returns.
+- If the resume errors or returns no row too, the call is dead. Write its row and reconcile it: `printf '%s' "workflow call failed: <its first error line, or: no result row>" | python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py set-aside --note <task note> --kind <own | revise-stopped | integration> | python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py reconcile --result -` — `own` for a task call, `revise-stopped` for a seeded revise, `integration` for an integrate call.
+- The row removes `integrating:`, so a dead integrate call frees the lane. The task is set aside at its stage and re-enters only through `hand-back`; `prepare` then cleans its tree (it aborts a merge left in progress, stashes tracked leftovers, and routes a pushed half-Integration to `trouble []`).
+- A runId is dropped from this session's record once any row for it is reconciled, so a later restart never resumes a dead call.
+
+**Restart routing** (a stalled `in_progress` note `next` lists in `restart`):
+- this session holds an unreconciled runId for its last call → *Lost call*;
+- else `lead-integrate.py inputs --note <task note> --max-review-rounds <N> --repo <repoPath>` reports `resumeAt: revise` → step 1.2's seeded revise, without the `autoRevise` test;
+- else the task's own call.
+
+Each completion leaves `in_progress`, and a dead call gets a lead-written row, so restarts are bounded.
+
+**The background verify command.** The lead runs it with `run_in_background` and `timeout: 2400000` on the task tree (`<repoPath>/.claude/worktrees/<slug>`), reading only `<out>.rc` and `tail -n 20 <out>.log`, never the command's reported exit:
+
+```bash
+# thread:integration-verify (extracted and run by tests/lead-integrate.test.sh)
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py verify --tree "<tree>" --out "<repoPath>/.claude/integration/<slug>" --timeout 1800 --bootstrap '<env_bootstrap>' --verifier '<verifier>'
+# end thread:integration-verify
+```
+
+Omit `--bootstrap` when the rollout has no `env_bootstrap`. `<verifier>` and `<env_bootstrap>` go inside **single quotes**, with each `'` in them written as `'\''`, so no `$`, `$(…)`, backtick or backslash expands in the lead's shell (in the lead's cwd): `verify` hands them, byte for byte, to `bash -c` in the task tree. `env_bootstrap` re-runs after the merge, so a `main` that changed dependencies is installed before the verifier. At the `--timeout` deadline the verifier's process group is killed and the rc is 124. A TERM (the harness backstop, or a hard pause's TaskStop) makes `verify` kill the group too and write rc 143; only a SIGKILL leaves no rc, which reads as red. Any rc but 0 is red.
+
+**Merge hold** (`--gated`, and merge-task's exit 7). The lane stays held, and each turn ends `ROLLOUT-STATUS: <rollout-slug> merged=<K>/<N> running=<R> state=waiting reason="<hold reason>"`, never `halted`. Task calls keep going: completions reconcile, approved tasks queue behind the lane, and step 1 keeps filling slots and launching seeded revises. The heartbeat stays registered (no `CronDelete`). **Release:** the user's go-ahead (`gated:`), or the user or a heartbeat tick (`review required:`), re-runs § 2.5 and then step 4's `merge-task.sh` with the same pair — this session's, else the `## Integration log`'s last line; exit 3 re-integrates as usual. Under `--gated`, a decline sets the task aside at Integration with reason `merge declined at the --gated hold` (*Set aside*).
+
+**Backoff** (merge-task's exit 8, and `prepare`'s exit 8). One background command with `timeout: 7200000`: `rm -f "<repoPath>/.claude/merge-task.status"; sleep 60; ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-task.sh <the same four args>`, then the same with `sleep 120`; `prepare`'s backoff re-runs `prepare` instead. The turn ends `waiting`, and the lead counts the tries. Removing the sentinel first means a command stopped during the sleep reads as a signal, never as the last run's result.
+
+**Set aside.** A task that stops short of merging frees its slot (or the lane); its dependants wait, and the queue runs on (ADR 0030 decision 4). An engine row that sets a task aside (`blocked`, `plan-blocked`, `review-blocked`, `gate-pending`, or an integrate call's `set-aside`) is already reconciled (§ 6): the lead writes no row for it, and only the re-entry rules below apply. The lead's own set-asides (a `prepare` or merge-task route, a decline, a dead call) are written as rows: `printf '%s' "<reason>" | python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py set-aside --note <task note> --kind <integration | revise-stopped | own> | python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py reconcile --result -`. The reason goes on stdin with no `integration: ` prefix — the renderer writes it — except merge-task's exit-4 text, which is passed verbatim. Lead-written rows carry no `integration` key, so they add no `## Integration log` line: an `integrated` record survives an exit-4 (b), exit-8 or decline set-aside, and a later `hand-back` merges through case (ii) with no re-integration. Where a task resumes:
+- a plain rejection: automatically (step 1.2);
+- `revise stopped:` or review-blocked: only after `hand-back` (`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hand-back --tasks <slug>`; for review-blocked, once `max_review_rounds` is raised), then it restarts as a seeded revise through *Restart routing*;
+- at Integration: `hand-back` sets `review`, and it rejoins the Integration queue;
+- at its own run: `hand-back` (or `/thread:repair`, p12-11) sets `in_progress`, then *Restart routing*. That includes a code-writing `review` note with no `pr:` (approved without a PR: `next` reports it set aside at its run, since Integration has nothing to merge): `hand-back` sets it `in_progress` too, and its own call re-runs on the task's existing tree and branch (*Worktree lifecycle*) and ends at a PR or a set-aside;
+- a signed gate: § 3.7 (p12-14);
+- merge-task's exit 3 is not a set-aside: the task integrates again.
+
+**Anchor ref lifecycle.** `refs/integration-anchor/<branch>` (the engine's, created by an integrator) is deleted, guarded by its old value (`git -C <repoPath> update-ref -d refs/integration-anchor/<branch> <X>`): after the merge (merge-task deletes it; the lead does on its WARN that it survived), on a closed PR, on a recut or a from-scratch re-dispatch, and on a `stale anchor ref` reason (`prepare` deletes a stale one itself). Old Integration-log lines survive all of these; their head never equals a recut PR head, so case (ii) cannot misfire.
+
+**Cold resume.** Re-invoking `execute [[rollout]]` on a rollout that has run: first re-run § 2.5, and § 2.7 when this invocation entered at § 1 (§ 2.7's entry rule; the heartbeat re-entry does not); then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume --rollout <rollout-note>` (a PR that merged is flipped done, so it is never re-sent to `merge-task.sh`); then the loop, an `integrating` task first, with `--running` = this session's live task-call slugs (a re-invocation in the session that launched them, after a § 7 halt say, still has calls in flight: they are running, never stalled, and are never sent to *Restart routing* or *Lost call*). Pass `--running ""` only when this session holds no live task call (a new session, or every call it launched has reconciled). `prepare` reads the `## Integration log`'s last line, so an integrated-but-unmerged task merges through case (ii).
 
 **Reinstate (resuming a paused rollout).** If the rollout note carries a `paused:` stamp, this invocation IS the reinstate — re-run § 2.5 and § 2.7 first (a halt in either leaves the `paused:` stamp in place, so the heartbeat's paused-stamp check and `/thread:status` still read it as paused); then clear the stamp, deterministically:
 
@@ -391,18 +465,7 @@ In continuous mode the lead session is the conductor: run ONE wave's tasks on th
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py clear-pause --rollout <rollout-note>
 ```
 
-then continue the normal cold resume above (flush any half-merged wave, `resume-filter`, re-dispatch whatever didn't land). There is no separate resume command. `clear-pause` also removes any still-pending `pause_requested` (the hard-pause-before-honour edge) so a freshly reinstated rollout doesn't immediately re-pause. **Only trigger it on a `paused:` stamp** — a pending `pause_requested` with no stamp is a live user request that must survive resumes (including the heartbeat cron's re-entry) and takes effect at the next wave boundary.
-
-**Per-task resume within a wave (finding #7).** A wave that returned one approved + one blocked task merges the approved PR but can't advance the cursor (the wave is incomplete). On resume, dispatch only the tasks in that wave whose note status is **not already landed/approved** — the task-note `status:` is the source of truth, not the cursor. Compute the still-to-dispatch set deterministically rather than re-dispatching the whole wave (which would re-run already-merged work):
-
-```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume-filter --tasks slugA,slugB,slugC
-#   prints the subset whose status ∉ {done, review, merged} — dispatch exactly those, one call per printed slug, in order.
-#   gate-pending notes are ALSO excluded (with a stderr WARN): they await a human sign-off, not a
-#   dispatch — approve-gates makes them dispatchable again (§3.7).
-```
-
-**No `## File-sets` block?** (an older rollout) the precise smart-halt can't run — fall back to the **coarse** rule: any unlanded task + any later wave ⇒ HALT. Tell the user to `/thread:schedule --regenerate` for precise halting.
+then continue the normal cold resume above (`resume`, then the loop with `--running` = this session's live task-call slugs, exactly as there: a hard pause's TaskStop ended its calls, so what it stopped is `in_progress`, absent from `--running`, and restarts through *Restart routing*). There is no separate resume command. `clear-pause` also removes any still-pending `pause_requested` (the hard-pause-before-honour edge) so a freshly reinstated rollout doesn't immediately re-pause. **Only trigger it on a `paused:` stamp** — a pending `pause_requested` with no stamp is a live user request that must survive resumes (including the heartbeat cron's re-entry); `next` drains it.
 
 ### 5. Call the Workflow
 
@@ -423,24 +486,24 @@ Pass `args` as an actual JSON object in the tool call. (Note: the Workflow tool 
 2. `cmp` the copy against the source. If `cmp` reports any difference, stop.
 3. Pass `<scratchpad>/task/task.workflow.js` as `scriptPath`.
 
-The engine has no relative imports, so the copy runs unchanged. A `resumeFromRunId` resume re-passes the same `scriptPath` the run started with, exactly like its args. A later session (a new scratchpad) re-copies the same bytes, and per-task resume (`resume-filter`) still keeps the tasks that already landed. Never edit the copy. This is a fallback only: the cache path is the default (the 2026-09-23 E2E ran it unrefused).
+The engine has no relative imports, so the copy runs unchanged. A `resumeFromRunId` resume re-passes the same `scriptPath` the run started with, exactly like its args. A later session (a new scratchpad) re-copies the same bytes, and the task notes still keep the tasks that already landed. Never edit the copy. This is a fallback only: the cache path is the default (the 2026-09-23 E2E ran it unrefused).
 
-Tell the user the run launched, which task it covers (and where it sits in its wave), and that they can watch live with `/workflows`. Record the returned `runId`. If the run dies, re-run § 2.5 first (a listed repo halts instead of replaying agents that push branches) and § 4's git-env check (a halt there writes nothing), then resume with `Workflow({ scriptPath, args, resumeFromRunId: <runId> })`, passing the `scriptPath` the run started with (unchanged `agent()` calls replay from cache). The check is lead-side only, so the resume's args and prompt bytes are unchanged and the replay cache stays valid.
+Tell the user the call launched, which task it covers, and the progress line; they can watch live with `/workflows`. Record the returned `runId` against the task. If a call dies or its notification never arrives (§ 4.5 *Lost call*), re-run § 2.5 first (a listed repo halts instead of replaying agents that push branches) and § 4's git-env check (a halt there writes nothing), then resume once with `Workflow({ scriptPath, args, resumeFromRunId: <runId> })`, passing the `scriptPath` the run started with (unchanged `agent()` calls replay from cache). The check is lead-side only, so the resume's args and prompt bytes are unchanged and the replay cache stays valid.
 
-**Register the heartbeat (continuous mode, once per rollout).** In the same turn as the first wave launch, check `CronList` for an existing `WAVE-HEARTBEAT <rollout-slug>` task; if none, register one via `CronCreate` (schedule `*/20 * * * *`) with this prompt:
+**Heartbeat (idempotent).** At each loop entry (top-down, *Cold resume*, *Reinstate*, `/thread:repair`'s hand-off), the first turn that ends `state=waiting` runs `CronList` before `CronCreate`, and creates `ROLLOUT-HEARTBEAT <rollout-slug>` (schedule `*/20 * * * *`) only if it is absent. That covers whatever the turn launched: a task call, a seeded revise, an integrate call, a background Integration command (the verifier, `merge-task.sh`, a backoff), or a merge hold. Its prompt:
 
-> WAVE-HEARTBEAT <rollout-slug>: Read the last WAVE-STATUS line for this rollout in the conversation. If state=done or state=halted (or the rollout note is archived), find this cron via CronList and CronDelete it, then stop. If the rollout note's frontmatter carries a `paused:` stamp, the rollout is deliberately paused — a hard pause emits no halted line, so check the note BEFORE any stall diagnosis: CronDelete this cron and stop; never resume a paused rollout. If a Workflow run for the rollout is still visibly running in /workflows, do nothing — end the turn silently. Otherwise the rollout has stalled (no run in flight, waves remain): re-enter /thread:execute [[<rollout-slug>]] §4.5 resume from the cursor (this re-entry skips § 2.7, execute's entry-point-only pushed-base gate).
+> ROLLOUT-HEARTBEAT <rollout-slug>: Run these clauses in order. (1) Read the last ROLLOUT-STATUS line for this rollout in the conversation; if state=done or state=halted (or the rollout note is archived), find this cron via CronList, CronDelete it and stop. (2) If the rollout note's frontmatter carries a `paused:` stamp, the rollout is deliberately paused — a hard pause emits no halted line, so check the note BEFORE any stall diagnosis: CronDelete this cron and stop; never resume a paused rollout. (3) Lost calls (always run this clause, under a merge hold too): if a Workflow call this session launched and has not reconciled is no longer in flight in /workflows, or a task of this rollout reads `in_progress` with no call in flight for it, apply §4.5 *Lost call* to each call this session launched that is no longer in flight in /workflows with no reconciled row (never to a call still in flight: *Lost call* resumes without re-checking), then §4.5 step 1 with `--running` = the calls still in flight. (4) If a background Integration command this session launched (the verifier, merge-task.sh, a backoff) has not reported: when its result file exists (`<out>.rc`, or `.claude/merge-task.status`), act on it as §4.5 would; otherwise do nothing more. (5) If the reason starts `gated:`, take no merge action — the user decides. (6) If the reason starts `review required:`, re-run §4.5 step 4 for that task (it re-checks the approval). (7) Otherwise, with no hold standing: if no Workflow call for this rollout is in flight and work remains, the rollout has stalled — re-enter /thread:execute [[<rollout-slug>]] §4.5 *Cold resume* (this re-entry skips § 2.7, execute's entry-point-only pushed-base gate); else end the turn silently.
 
-This is the backstop for a hung Workflow run or a missed completion notification — the stall mode nothing else catches. Then **end the launch turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=waiting`** so the Stop-hook driver (§8) lets the session idle until the notification arrives.
+This is the backstop for a hung or lost Workflow call, a lost background-command notification and a missed completion — the stall modes nothing else catches. End a launch turn with `ROLLOUT-STATUS: <rollout-slug> merged=<K>/<N> running=<R> state=waiting` so the Stop-hook driver (§8) lets the session idle until the notification arrives.
 
 ### 6. Reconcile + report
 
-The workflow returns `{ rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath, reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory, approvedAtCeiling, summary, model, escalated, escalatedAt, gatedInputs }] }` — `tasks` holds exactly one row, the called task's — where `status ∈ review | review-blocked | blocked | plan-blocked | gate-pending`, `model` is the FINAL tier the task ran on, `escalated`/`escalatedAt` (`plan` | `implement` | `review`) record an opus→fable escalation, `gatedInputs` lists the declared-but-unapproved gates when the task paused at `gate-pending` (§3.7), `reviewHistory` is the accumulated by-round review-judge rejection rationale, and `approvedAtCeiling` marks an approval on the final review round with real rejection history (a ceiling approval).
+The workflow returns `{ rolloutSlug, tasks: [{ slug, scope, status, prUrl, branch, worktreePath, reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory, approvedAtCeiling, summary, model, escalated, escalatedAt, gatedInputs }] }` — `tasks` holds exactly one row, the called task's; a mode-`integrate` row carries one more key, `integration` — where `status ∈ review | review-blocked | blocked | plan-blocked | gate-pending`, `model` is the FINAL tier the task ran on, `escalated`/`escalatedAt` (`plan` | `implement` | `review`) record an opus→fable escalation, `gatedInputs` lists the declared-but-unapproved gates when the task paused at `gate-pending` (§3.7), `reviewHistory` is the accumulated by-round review-judge rejection rationale, and `approvedAtCeiling` marks an approval on the final review round with real rejection history (a ceiling approval).
 
 **Reconcile with the deterministic helper — do NOT hand-edit frontmatter.** Write the returned object to a temp file (or pipe it on stdin) and run:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py reconcile --result /tmp/wave-result.json
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py reconcile --result /tmp/task-result.json
 #   --result -   reads the JSON from stdin instead
 ```
 
@@ -452,6 +515,8 @@ The helper resolves each task note by slug under `~/repos/obsidian/Work/Tasks/` 
 - `plan-blocked` → `status: plan-blocked`; records the accumulated plan feedback as a run under `## Plan-blocked feedback`
 - `gate-pending` → `status: gate-pending`; **upserts** the declared gates under `## Gated inputs (awaiting sign-off)` (upsert, not a run — the pending list always reflects the latest declaration)
 - every row → removes `integrating:`: the run that produced the row ended any Integration the task was in
+- a mode-`integrate` row's `integration` key → one `## Integration log` line (its outcome, path, anchor, head, base and metrics); the lead's own clean-path record is `log-integration`'s `path=lead` line (§4.5 step 3)
+- a lead-written set-aside row (`lead-integrate.py set-aside`, §4.5 *Set aside*) → `status: blocked` and its diagnosis run; it carries no `integration` key, so it adds no log line
 - any status with `escalated: true` → additionally stamps `model: fable` (durable escalation — later re-dispatches start at fable)
 
 **Feedback accumulates per run (p6-4).** The three blocked sections and the ceiling history keep every run's feedback, never only the first. Each run is a block: `### Run <n> (<stamp>)`, a blank line, the content, a blank line, then `<!-- run <n> end sha=<12 hex> -->`, where sha is the sha256 of the content normalised (lines right-stripped, outer blank lines dropped, runs of blank lines collapsed) and n is the highest existing run + 1.
@@ -461,98 +526,93 @@ The helper resolves each task note by slug under `~/repos/obsidian/Work/Tasks/` 
 - **Nothing is deleted or rewritten.** Earlier runs stay byte-identical, and legacy text with no run heading (a section written before runs existed, or an orphan from an escalated-then-approved run) stays where it is, unnumbered.
 - **The latest diagnosis** of a section is the content of its highest run, or the whole section when it has no runs. It is what `status` reports as `blockerSummary` (the section matching the note's own status first) and what the `integration:` marker is read from.
 
-(This replaces ~5 fumble-prone frontmatter edits per wave — finding #6. The lead session still owns the call; subagents never write task `status:`.)
+(This replaces ~5 fumble-prone frontmatter edits per task — finding #6. The lead session still owns the call; subagents never write task `status:`.)
 
-Then, once the wave's last task call is reconciled (§4.5 step 2; earlier calls get a one-line per-task note only), print the finalisation report:
+**One line per event.** Print one short line per reconciled call ("[[task-a]] → review, PR <url>"; "[[task-b]] → set aside at its run (see its Blocker diagnosis)"), per Integration ("[[task-a]] integrated by the lead, no merge needed"; "[[task-c]] → integrate call: conflict") and per merge ("[[task-a]] merged, PR #5").
+
+**Rollout report** (at a halt, a merge hold or completion):
 
 ```
-Wave N report for [[<rollout-slug>]]
+Rollout report for [[<rollout-slug>]] — progress: 3/6 merged, 1 running, 1 awaiting integration, 1 set aside
 
-Approved clean (1 round):
-- [[task-a]] — PR <url>
-
-Approved after revision:
-- [[task-c]] — 2 rounds — PR <url>
-
-Approved after plan revision:
-- [[task-g]] — plan_rounds_used = 2 — PR <url>
-
-Approved after escalation (opus → fable):
-- [[task-i]] — escalated at implement — PR <url>
-
-Review-blocked (max rounds reached):
-- [[task-e]] — PR <url> — see "## Review-blocked feedback"
-
-Plan-blocked (no PR opened):
-- [[task-h]] — see "## Plan-blocked feedback"
-
-Ralph-blocked (no PR opened):
-- [[task-f]] — see "## Blocker diagnosis"
-
+Merged:
+- [[task-a]] — PR <url> (approved clean, 1 round)
+- [[task-c]] — PR <url> (2 rounds; escalated at implement)
+Running:
+- [[task-d]] — own call
+- [[task-e]] — seeded revise r3
+Awaiting Integration: [[task-f]]
+Lane: [[task-g]] — merge hold: gated: awaiting merge approval for [[task-g]] (PR #9)
+Set aside:
+- at its run: [[task-h]] — blocked, see "## Blocker diagnosis"
+- at Integration: [[task-i]] — integration: head moved after Integration (…)
+- review-blocked: [[task-j]] — see "## Review-blocked feedback"
 Gate-pending (awaiting YOUR sign-off — a declared gate always pauses, ADR 0008):
-- [[task-j]] — declared: spend: Replicate API — cap USD 30
-  → sign off, then: reconcile-rollout.py approve-gates --tasks task-j; re-dispatch via resume-filter
-
-Recommended merge order: <list>
+- [[task-k]] — declared: spend: Replicate API — cap USD 30
+  → sign off, then: reconcile-rollout.py approve-gates --tasks task-k (the next `next` restarts it)
+Held: [[task-l]] — depends on [[task-h]] (blocked)
 ```
 
-**End every execute turn with the machine-readable status line** (after the report, or alone on turns that only reconcile/merge/resume):
+**End every execute turn with the machine-readable status line** (after the report, or alone on turns that only reconcile, integrate or merge):
 
 ```
-WAVE-STATUS: <rollout-slug> cursor=<K>/<N> state=<running|waiting|halted|done>[ reason="<short halt reason>"]
+ROLLOUT-STATUS: <rollout-slug> merged=<K>/<N> running=<R> state=<running|waiting|halted|done>[ reason="<short reason>"]
 ```
 
-- `running` — in-session driving work remains **right now** (a task call returned and needs reconcile, the wave needs merging, or the next task/wave needs launching). The plugin's Stop-hook driver (§8) refuses to let the session stop on this state — so never end a turn on `running` unless you genuinely stopped mid-work.
-- `waiting` — a task's Workflow call is in flight; nothing to do until its completion notification (the heartbeat cron is the backstop). Emit this after launching any task call (the wave's first, and each step-2 launch).
-- `halted` — a §7 stop condition fired, `--gated` is waiting on the user, or a requested pause took effect (*Pausing + reinstating a rollout*) — always include `reason=`.
+- `K/N` come from the latest `progress:` line (`next`, `mark-started` or `resume`: merged of total). `R` counts task calls in flight, seeded revises included and integrate calls excluded.
+- `running` — in-session driving work remains **right now** (a call returned and needs reconcile, a task needs integrating or merging, a slot is free). The plugin's Stop-hook driver (§8) refuses to let the session stop on this state — so never end a turn on `running` unless you genuinely stopped mid-work.
+- `waiting` — a task call, an integrate call, a background Integration command or a merge hold is in flight; nothing to do until its notification (the heartbeat cron is the backstop). A hold's `waiting` carries its `reason=` (`gated: …` or `review required: …`).
+- `halted` — a §7 stop condition fired, or a requested pause took effect (*Pausing + reinstating a rollout*) — always include `reason=`.
 - `done` — completion ceremony performed.
 
-This line is the contract the automatic driver (§8) keys off — the Stop hook parses it with a strict regex, so keep the format byte-stable.
+`reason` appears only on `halted` and on a hold. Keep it short and quote-free. This line is the contract the automatic driver (§8) keys off — the Stop hook parses it with a strict regex, so keep the format byte-stable.
 
-**Merging:** in `--gated` / single-wave mode, do NOT merge — the user decides. In continuous auto-merge mode the lead session merges this wave via `scripts/merge-task.sh` (§4.5) — never an inline `gh pr merge`. Within a wave the approved PRs are file-disjoint (the wave invariant), so they don't conflict with each other; merge-task.sh never updates a branch: it merges a PR only onto the base its Integration used (exit 3 otherwise).
+**Merging:** the lead merges only after Integration (§4.5 steps 3-4), through `scripts/merge-task.sh` — never an inline `gh pr merge`; under `--gated` it first waits at a merge hold for your go-ahead. merge-task.sh never updates a branch: it merges a PR only onto the base its Integration used (exit 3 otherwise).
 
-The merge gate is the repo's **required** checks — branch-protection's own definition of mergeable — **not** GitHub's cosmetic `CLEAN` (which also waits on non-required checks). A base branch that legitimately carries red *non-required* checks reports every PR as `UNSTABLE`, never `CLEAN`; gating on `CLEAN` would merge no wave at all. `merge-task.sh`'s `UNSTABLE)` case handles this by waiting on `--required` checks only — a genuinely-failing required check surfaces as `BLOCKED`, not `UNSTABLE`, so it stays safe. Don't "tidy" it back to `CLEAN`-only (see `giflab-rollout-merge-wave-unstable-fix`).
+The merge gate is the repo's **required** checks — branch-protection's own definition of mergeable — **not** GitHub's cosmetic `CLEAN` (which also waits on non-required checks). A base branch that legitimately carries red *non-required* checks reports every PR as `UNSTABLE`, never `CLEAN`; gating on `CLEAN` would merge nothing at all. `merge-task.sh`'s `UNSTABLE)` case handles this by waiting on `--required` checks only — a genuinely-failing required check surfaces as `BLOCKED`, not `UNSTABLE`, so it stays safe. Don't "tidy" it back to `CLEAN`-only (see `giflab-rollout-merge-wave-unstable-fix`).
 
 ### 7. Continuous-mode stop conditions
 
-Continuous mode is the per-wave loop (§4.5), not one engine call. It **HALTS automatically** — surface the reason prominently, leave everything merged-so-far landed, end the turn with `WAVE-STATUS: <slug> cursor=<K>/<N> state=halted reason="…"` (§6) so the automatic driver releases (§8), and stop — when:
+The queue (§4.5) halts only when nothing can start and nothing is running or integrating — a stuck task is set aside, not a halt (ADR 0030 decision 4) — or on a designed stop below. Every halt passes the halt guard (§4.5 step 1.5): surface the reason prominently, leave everything merged so far landed, end the turn with `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=halted reason="…"` (§6) so the automatic driver releases (§8), and stop — when:
 
-- a wave produces **zero** approved (`status: review`) PRs (nothing to merge; downstream presumptively unsafe), or
-- `merge-task.sh` exits non-zero (a real merge conflict or red required check), or
-- the smart-halt check fires (an unlanded task's file reappears in a later wave), or
+- `next` reports `halt: stuck` (`reason="nothing can start: <n> set aside"`; with a gate-pending task among them, `reason="gated inputs await sign-off: …"` — a **designed** pause, ADR 0008, not a failure: the user signs off, `approve-gates` runs, and re-invocation resumes; when the user IS present, ask for the sign-off in-conversation instead of halting — §3.7), or
+- `next` exits 1 (an invalid `parallel_ceiling`, or an incomplete rollout: its ERROR line verbatim, `reason="next refused the rollout"`), or
+- `merge-task.sh` exits 2 or 70, or a signal recurs on its re-run (`reason="merge-task.sh exited <code> on [[task]]"`), or
+- `lead-integrate.py` exits 2, or `prepare`'s backoff runs out (`reason="lead-integrate.py failed on [[task]]"`, or `reason="origin unreachable while integrating [[task]]"`), or
+- a RACE re-verify is red, timed out or left no rc (`reason="RACE: origin/<default> fails the verifier"`), or
 - § 2.5, or a §4.5 re-check of it, reports the repo on the landing register, or the check itself fails (`reason="<owner/name> is on the landing register"` or `reason="landing-register check failed"` — a **designed** stop: unlisting is Lachy's call; open PRs stay open and re-invocation after unlisting flushes them), or
 - § 2.6, or its run after a §4.5 re-check, finds `repoPath` is a directory-source plugin marketplace checkout, or the check itself fails (`reason="repoPath is a live plugin marketplace checkout"` or `reason="self-rollout check failed"` — nothing is stamped, dispatched or merged; clone the repo to a separate path such as `~/repos/<repo>-rollout`, point the rollout's `Project root` at it and re-invoke), or
 - § 2.7, at an entry point, finds a known clone's local `<default>` ahead of `origin/<default>` beyond THREAD.md, or the check itself fails (`reason="local default branch is ahead of origin"` or `reason="pushed-base check failed"` — nothing is stamped, cleared or dispatched; land those commits by PR, or wait for the queued `close/…` landing PR to merge, then re-invoke), or
 - § 4's git-env check finds a repo-local `GIT_*` variable exported in the lead session, or the check itself fails (`reason="git env set in the lead session"` or `reason="git-env check failed"` — nothing is stamped or dispatched; relaunch Claude Code from a shell without them, or put a working `git` on PATH, then re-invoke), or
-- §3's round-budget validation finds a `max_iterations`, `max_review_rounds` or `max_plan_rounds` that is not an integer >= 1 (`reason="invalid round budget: <field> on [[task]]"` — nothing is stamped or dispatched; fix the frontmatter and re-invoke), or
-- a wave leaves `gate-pending` tasks and nobody is present to sign off (`reason="gated inputs await sign-off: …"` — a **designed** pause, ADR 0008, not a failure: the user signs off, `approve-gates` runs, and re-invocation resumes; when the user IS present, ask for the sign-off in-conversation instead of halting — §3.7).
+- §3's round-budget validation finds a `max_iterations`, `max_review_rounds` or `max_plan_rounds` that is not an integer >= 1 (`reason="invalid round budget: <field> on [[task]]"` — nothing is stamped or dispatched; fix the frontmatter and re-invoke).
 
-A **soft pause** (*Pausing + reinstating a rollout* below) exits through the same `state=halted` mechanics but is **deliberate**, not a failure — there is no cause to fix, and reinstating is plain re-invocation.
+A **merge hold** (`--gated`, or merge-task's exit 7) is not a halt: it ends `waiting` (§4.5 *Merge hold*). A **soft pause** (*Pausing + reinstating a rollout* below) exits through `state=halted reason="paused at user request"` once it drains, but is **deliberate**, not a failure — there is no cause to fix, and reinstating is plain re-invocation. After a halt, completions of calls still in flight are only reconciled: nothing new starts, integrates or merges.
 
-In every halt case the work merged so far stays on the base branch; the user fixes the cause and re-invokes `execute [[rollout]]` to resume from the `merged_through_wave` cursor. To see *why* a rollout halted, run `/thread:status [[rollout]]` (read-only situational report). To **sort out** a stalled rollout without ceding merge authority, run `/thread:repair [[rollout]]` — it reconciles drift, re-dispatches agent-fixable blocks, captures input-gated decisions, defers wedged tasks, and resumes via this skill's §4.5 loop (`merge-task.sh` stays the sole merger). `/thread:repair` is the systematised replacement for hand-repairing a worktree in an external cockpit (README → *Coexistence with Orca*).
+In every halt case the work merged so far stays on the base branch; the user fixes the cause and re-invokes `execute [[rollout]]`, which resumes from the task notes (§4.5 *Cold resume*). To see *why* a rollout halted, run `/thread:status [[rollout]]` (read-only situational report). To **sort out** a stalled rollout without ceding merge authority, run `/thread:repair [[rollout]]` — it reconciles drift, re-dispatches agent-fixable blocks, captures input-gated decisions, defers wedged tasks, and resumes via this skill's §4.5 loop (`merge-task.sh` stays the sole merger). `/thread:repair` is the systematised replacement for hand-repairing a worktree in an external cockpit (README → *Coexistence with Orca*).
 
 ### 8. Unattended driving — the automatic driver
 
-The §4.5 loop is driven across turns by Workflow-completion notifications — nothing in the notifications themselves *enforces* that it keeps going. The plugin closes that gap with two self-managing pieces; **the user types nothing**:
+The §4.5 loop is driven across turns by Workflow-completion and background-command notifications — nothing in the notifications themselves *enforces* that it keeps going. The plugin closes that gap with two self-managing pieces; **the user types nothing**:
 
-**The Stop-hook driver** (`hooks/wave-stop-driver.py`, wired via the plugin's `hooks.json`). On every session stop it reads the last `WAVE-STATUS` line (§6) and, while `state=running`, **blocks the stop** and hands back the exact next step (reconcile the returned task call → launch the wave's next task call; only after the wave's last call is reconciled: merge → advance cursor → launch the next wave's first task call). It releases on `waiting` (a Workflow run is legitimately in flight), `halted` (§7 — human's turn), and `done`. It is progress-aware: three consecutive blocks without the cursor advancing release the stop and surface "likely wedged — run /thread:status or /thread:repair" instead of spinning forever. This is the programmatic twin of a `/goal` condition, shipped so nobody has to remember to set one.
+**The Stop-hook driver** (`hooks/rollout-stop-driver.py`, wired via the plugin's `hooks.json`). On every session stop it reads the last `ROLLOUT-STATUS` line (§6) and, while `state=running`, **blocks the stop** and hands back the next step (reconcile every returned call → integrate and merge one task at a time → `next`, filling the free slots). It releases on `waiting` (a call, a background Integration command or a merge hold is in flight), `halted` (§7 — human's turn), and `done`. It is progress-aware: three consecutive blocks without `merged` advancing release the stop and surface "likely wedged — run /thread:status or /thread:repair" instead of spinning forever. This is the programmatic twin of a `/goal` condition, shipped so nobody has to remember to set one.
 
-**The heartbeat cron** (registered by step 5 at first wave launch, `*/20 * * * *`). Catches the one stall the Stop hook can't see: a hung Workflow run or missed completion notification while the session idles at `state=waiting`. Each tick checks; if nothing needs doing it ends silently; if the rollout stalled it re-enters §4.5 cold resume (idempotent — cursor + `resume-filter` + merge-task.sh's merged-PR skip make re-entry duplicate-free); it deletes itself once the rollout is done, halted, or paused (its prompt checks the rollout note's `paused:` stamp before diagnosing a stall — a hard pause emits no `halted` line, and "stalled" must never re-dispatch a wave the user deliberately stopped).
+**The heartbeat cron** (§ 5 *Heartbeat*: registered at the first `waiting` turn of each loop entry, `*/20 * * * *`). Catches the stalls the Stop hook can't see: a hung or lost Workflow call, a lost background-command notification, or a missed completion while the session idles at `state=waiting`. Each tick first recovers lost calls (§4.5 *Lost call*, under a merge hold too) and reads any unreported background command's result file; if the rollout stalled it re-enters §4.5 *Cold resume*. Re-entry is duplicate-free: `resume` flips merged PRs done (so a merged PR is never re-sent to `merge-task.sh`, and a PR whose last exit was 5 is never re-called), `next --running` restarts only stalled notes, and `prepare` reads the Integration log. It deletes itself once the rollout is done, halted, or paused (its prompt checks the rollout note's `paused:` stamp before diagnosing a stall — a hard pause emits no `halted` line, and "stalled" must never restart work the user deliberately stopped).
 
 Division of labour: **Stop hook** = "don't stop while there's driving work"; **heartbeat** = "wake up if the thing you were waiting for never arrives"; **§7 HALTs** = the deliberate exits both respect.
 
 **Manual fallbacks** (when the plugin's hooks are disabled, or driving from an environment without them):
 
-- `/goal The WAVE-STATUS line for <rollout-slug> reports state=done or state=halted, or stop after 4 hours` — transcript-only evaluator, auto-continues a stopped session; always include the time/turn bound and the `state=halted` release clause. Note it will also bounce `state=waiting` turns, so expect some no-op continuations while a wave runs.
+- `/goal The ROLLOUT-STATUS line for <rollout-slug> reports state=done or state=halted, or stop after 4 hours` — transcript-only evaluator, auto-continues a stopped session; always include the time/turn bound and the `state=halted` release clause. Note it will also bounce `state=waiting` turns, so expect some no-op continuations while calls run.
 - `/loop 45m /thread:status [[<rollout>]]` — read-only watchdog for drift and stranded-`review` tasks (the failure mode that let seven landed tasks sit unnoticed in the giflab rollout); stop it (`/loop stop`) once the rollout archives.
 
 **Guardrails + limits:**
 
-- **Everything here is session-scoped.** The Stop hook and heartbeat cron only act while the session is alive; a closed terminal stops them all (they resume with `claude --resume`). True detachment is a `/schedule` cloud routine — out of wave's scope.
+- **Everything here is session-scoped.** The Stop hook and heartbeat cron only act while the session is alive; a closed terminal stops them all (they resume with `claude --resume`). True detachment is a `/schedule` cloud routine — out of scope here.
 - **Never automate `/thread:repair`** — it is input-gated by design (it asks the user decisions no agent can make); the driver, the heartbeat, and any loop must route a wedged rollout *to* repair, never *through* it.
-- **`--gated` mode is exempt from unattended driving** — the per-wave human merge pause is the point. In gated mode end merge-pause turns with `state=halted reason="gated: awaiting user merge"` so the Stop hook releases.
+- **`--gated` holds end `waiting`, never `halted`.** A merge hold keeps the lane and the heartbeat; task calls keep running while it waits for your go-ahead, and the Stop hook releases on `waiting`.
 - **A §7 HALT ends unattended driving.** Emit `state=halted` with the reason — the Stop hook releases, the heartbeat self-deletes on its next tick, and a well-worded `/goal` fallback releases on the clause.
-- **What none of this fixes:** the blocking waits *inside* single tool calls — the Workflow call (~1h worst case per stubborn task, §Resource budget) and `merge-task.sh`'s serial required-checks watching — are untouched by any driver.
+- **Every background command names its `timeout:`.** The verify command and a RACE re-verify run with `timeout: 2400000` (their own `--timeout 1800` bounds the verifier); `merge-task.sh` and a backoff run with `timeout: 7200000`, the harness maximum (merge-task's required-check wait is bounded only by GitHub's job timeouts). A harness TERM leaves rc 143 for a verify (red) and the sentinel `failed:143` for merge-task (a signal); only a SIGKILL leaves no result file, which reads as red for a verify and as a signal for merge-task.
+- **What none of this fixes:** the blocking wait *inside* one Workflow call (~1h worst case per stubborn task, §Resource budget) is untouched by any driver.
 - **Skill invocation under /loop (fallbacks):** slash-command payloads are invoked normally (`/loop 5m /babysit-prs` is the built-in's own example). The only frontmatter that breaks this is `disable-model-invocation: true` — never add it to `execute` or `status`. (There is no `autonomous:` frontmatter key; that's a myth — verified against the 2.1.199 binary.)
 - Cloud providers (Bedrock/Vertex) downgrade dynamic `/loop` to a fixed ~10-minute cadence.
 
@@ -560,28 +620,36 @@ Division of labour: **Stop hook** = "don't stop while there's driving work"; **h
 
 "Pause the rollout" means **soft pause** by default; **hard pause** only when it must stop *now*. Either way the pause is recorded on the rollout note, and reinstating is plain `/thread:execute [[rollout]]` — no separate resume command, no new state machine. Neither pause runs the § 2.5, § 2.6 or § 2.7 gates: stopping work is never blocked, even for a listed repo or a register the check can't read. (Terms: `CONTEXT.md` → *Pause*, *Reinstate*.)
 
-**Soft pause (default).** Stamp `pause_requested: true` on the rollout note's frontmatter (a lead-session edit — it's rollout config, not task status). Nothing is interrupted: the in-flight wave finishes, merges, and advances the cursor as normal; the end-of-wave `cursor` helper then honours the flag — stamps `paused: <timestamp>`, clears `pause_requested` — and the loop exits with `state=halted reason="paused at user request"` instead of launching the next wave (§4.5 step 3, *Soft-pause check*; a partially-landed wave skips step 3's cursor advance, so step 4 honours the still-pending flag before any K+1 launch instead). Zero extra agent calls; the pause lands on a clean wave boundary. To cancel a pending request before it takes effect, remove the `pause_requested:` line (or run `clear-pause`).
+**Soft pause (default).** Stamp `pause_requested: true` on the rollout note's frontmatter (a lead-session edit — it's rollout config, not task status). Nothing is interrupted, and **the queue drains** (ADR 0030 decision 5): `next` starts and restarts nothing new, step 1.2 launches no seeded revise, and every running task call finishes while every approved task integrates and merges. Once nothing runs, awaits Integration or integrates, `next` stamps `paused: <timestamp>`, removes `pause_requested` and reports `halt: paused`; the loop exits with `state=halted reason="paused at user request"`. A plain rejection during the drain waits, set aside, for the reinstate. Zero extra agent calls. To cancel a pending request before it takes effect, remove the `pause_requested:` line (or run `clear-pause`).
 
-**Hard pause (urgent).** Stop the run now — in-flight agents die, but their worktrees keep all committed (and any uncommitted) work. This is a documented protocol, not engine code:
+**Hard pause (urgent).** Stop now — in-flight agents die, but their worktrees keep all committed (and any uncommitted) work. This is a documented protocol, not engine code, and its order matters:
 
-1. Find the rollout's active Workflow run (`/workflows`, or the task list) and **TaskStop** it.
-2. Stamp the rollout note by hand: `paused: <timestamp>` in frontmatter, plus a short `## Pause log` body entry with the `runId` and which wave/tasks were in flight — the context the stamp alone can't carry.
-3. Delete the rollout's `WAVE-HEARTBEAT` cron (`CronList` → `CronDelete`), mirroring the completion-ceremony step (§4.5). A hard pause emits no `state=halted` line, so the last WAVE-STATUS still reads `waiting` — a live heartbeat would diagnose "stalled" on its next ≤20-min tick and re-dispatch the wave you just killed. The heartbeat prompt's own paused-stamp check (§5) is the backstop if this step is missed, but delete the cron anyway rather than leaning on it.
+1. Stamp the rollout note by hand FIRST: `paused: <timestamp>` in frontmatter, plus a `## Pause log` body entry with every in-flight call's `runId` and the lane holder — so every later completion of a stopped call sees `paused:`, and *Lost call* writes nothing.
+2. **TaskStop** every Workflow call of the rollout (`/workflows`, or the task list) and every background Integration command (a verify, `merge-task.sh`, a backoff). `verify`'s TERM handler kills its verifier's process group.
+3. Delete the rollout's `ROLLOUT-HEARTBEAT` cron (`CronList` → `CronDelete`), mirroring the completion-ceremony step (§4.5). A hard pause emits no `state=halted` line, so the last ROLLOUT-STATUS still reads `waiting` — a live heartbeat would diagnose "stalled" on its next ≤20-min tick and restart the work you just stopped. The heartbeat prompt's own paused-stamp check (§5) is the backstop if this step is missed, but delete the cron anyway rather than leaning on it.
 
-The killed wave's tasks simply didn't land: their notes still read `in_progress`, so `resume-filter` re-dispatches them on reinstate, and the engine's worktree setup reuses each task's existing worktree + branch (resume-safe by design). Losses are bounded to in-flight agent context — committed work, and uncommitted files sitting in the worktrees, survive.
+While `paused:` stands, nothing is launched, undone, set aside or re-run: a stopped call's error is not a *Lost call*, and a stopped verify's rc 143 is not acted on (no `undo`, no integrate call). The stopped tasks simply didn't land: their notes still read `in_progress` (or keep `integrating:`), so the reinstate's `next` (its `--running` lists only calls still live, never a stopped one) restarts them through *Restart routing*, and the engine's worktree setup reuses each task's existing worktree + branch (resume-safe by design). A task stopped mid-verify keeps the lead's unpushed merge in its tree; `prepare` routes it to `trouble []`. Losses are bounded to in-flight agent context — committed work, and uncommitted files sitting in the worktrees, survive.
 
-**Reinstate.** `/thread:execute [[rollout]]`. The resume path (§4.5 *Reinstate*) re-runs § 2.5 and § 2.7, then sees the `paused:` stamp, clears it via `reconcile-rollout.py clear-pause`, and continues from the cursor — flush any half-merged wave, re-dispatch whatever didn't land. The heartbeat cron re-registers at the next wave launch (§5; the paused rollout's old one is already gone — self-deleted on the soft pause's `halted` line or on its prompt's paused-stamp check, or deleted directly by hard-pause step 3 — so a pause is never auto-resumed by a leftover tick).
+**Reinstate.** `/thread:execute [[rollout]]`. The resume path (§4.5 *Reinstate*) re-runs § 2.5 and § 2.7, then sees the `paused:` stamp, clears it via `reconcile-rollout.py clear-pause`, and continues the cold resume — restarting what the pause stopped and integrating what awaits. The heartbeat re-registers at the first `waiting` turn (§5; the paused rollout's old one is already gone — self-deleted on the soft pause's `halted` line or on its prompt's paused-stamp check, or deleted directly by hard-pause step 3 — so a pause is never auto-resumed by a leftover tick).
 
 A paused rollout is **intentional**, not stalled: `/thread:status` reports it as paused (stamp + since-when + what's left), and `/thread:repair` treats it as nothing-to-fix.
 
 ## Don'ts
 
-- Merge ONLY via `scripts/merge-task.sh`, ONLY in continuous auto-merge mode, ONLY from the lead session. In `--gated` / single-wave mode the user merges. Never an inline `gh pr merge`, never `--admin` (it would bypass branch protection and merge a red branch), never a force-push — ever. The engine (`task.workflow.js`) never merges.
-- Never dispatch a wave, call or resume a Workflow, or call `merge-task.sh` for a repo the landing register lists. § 2.5 runs first, every time (and §4.5 re-runs it before each of those). Never gate a pause on it: soft and hard pause (TaskStop, the `paused:` stamp, the heartbeat `CronDelete`) are exempt, so the register check never blocks stopping work.
-- Don't skip the protocol-version gate. Legacy (v2 / absent) rollouts must be regenerated, not retrofitted.
+- Merge ONLY via `scripts/merge-task.sh`, ONLY after Integration (§4.5 steps 3-4), ONLY from the lead session — under `--gated`, only after your go-ahead at the merge hold. Never an inline `gh pr merge`, never `--admin` (it would bypass branch protection and merge a red branch), never a force-push — ever. The engine (`task.workflow.js`) never merges.
+- Never start a task, call or resume a Workflow, push an Integration, or call `merge-task.sh` for a repo the landing register lists. § 2.5 runs first, every time (and §4.5 re-runs it before each of those). Never gate a pause on it: soft and hard pause (TaskStop, the `paused:` stamp, the heartbeat `CronDelete`) are exempt, so the register check never blocks stopping work.
+- Never run two Integrations at once: one task holds the lane from `mark-integrating` until its merge, set-aside or halt.
+- Never exceed `parallel_ceiling` task calls in flight, seeded revises included.
+- Never auto-launch a seeded revise unless `lead-integrate.py inputs` reports `autoRevise: true`.
+- Never read `next`'s `halt` before step 1.2 has launched its revises, or while the lane is held or a task call is live.
+- Never write the `integration: ` prefix into a set-aside reason yourself: `lead-integrate.py set-aside` renders it (merge-task's exit-4 text passes through verbatim).
+- Never resume a runId whose row was reconciled.
+- Never re-call `merge-task.sh` for a PR whose last exit was 5.
+- Never launch a background command without a `timeout`.
+- Don't skip the protocol-version gate. Legacy (absent, 2 or 3) rollouts must be regenerated, not retrofitted.
 - Don't update a task's `status:` from inside a subagent — the lead session reconciles after the workflow returns.
 - Don't hand-roll the convergence loop in the conversation — that engine moved into `task.workflow.js`. If the loop needs changing, edit the script and (for an interrupted run) re-invoke with `resumeFromRunId`.
-- Don't raise `parallel_ceiling` blindly. The Workflow's own cap is CPU-core-based (~14 on the M3) — higher than the memory-safe ceiling for heavy-model tasks (LPIPS ≈ 500 MB/process). `parallel_ceiling: 4` caps how many task calls (worktrees) the lead runs at once once p12-9's queue (ADR 0030) lands; today the lead runs one call at a time. Raise it only for light waves.
+- Don't raise `parallel_ceiling` blindly. The Workflow's own cap is CPU-core-based (~14 on the M3) — higher than the memory-safe ceiling for heavy-model tasks (LPIPS ≈ 500 MB/process). `parallel_ceiling: 4` caps how many task calls (worktrees) the lead runs at once. Raise it only for light rollouts.
 
 ## Worktree lifecycle (how the engine isolates + reuses worktrees)
 
@@ -612,13 +680,15 @@ Every `taskTreeSetup` locks the tree with `pid $PPID` (the Bash tool's parent is
 | Version | Contract | Status |
 |---|---|---|
 | (absent) / 2 | Legacy in-conversation playbook (prose-driven dispatch + sentinel parsing) | Retired — regenerate via `/thread:schedule --regenerate` |
-| 3 | Workflow-engine convergence (`task.workflow.js`): structured output, per-task review loop, autonomous plan-gate judge, journaled resume | Current |
+| 3 | Per-task Workflow convergence driven by a stored cursor, merged batch by batch | Retired — `/thread:schedule --regenerate` supersedes it into a queue |
+| 4 | The readiness redesign on `codex/thread-rollout-redesign` | Never landed |
+| 5 | The queue (ADR 0030): one task per Workflow call up to the parallel ceiling, the lead's Integration, `merge-task.sh` merging one integrated PR at a time | Current |
 
 Future protocol bumps follow the same rule: a new executor refuses older versions and asks the user to regenerate.
 
 ## Resource budget
 
-The lead caps task calls in flight at `parallel_ceiling` (default 4; today one at a time) so heavy-model waves never run more than that many worktrees concurrently. Convergence multiplies wall-clock, not memory: worst-case per task is roughly `max_iterations × verifier-time × max_review_rounds`. With defaults (3 × 5 min × 4) one stubborn task can occupy a worktree ~an hour. For waves dominated by cross-cutting long-verifier tasks, lower `max_review_rounds` in the rollout frontmatter.
+The lead caps task calls in flight at `parallel_ceiling` (default 4) so heavy-model rollouts never run more than that many worktrees concurrently. Convergence multiplies wall-clock, not memory: worst-case per task is roughly `max_iterations × verifier-time × max_review_rounds`. With defaults (3 × 5 min × 4) one stubborn task can occupy a worktree ~an hour. For rollouts dominated by cross-cutting long-verifier tasks, lower `max_review_rounds` in the rollout frontmatter.
 
 Escalation shifts that arithmetic for `opus` tasks: the opus first pass costs at most one implementation + **one** verifier run, and only an escalated task pays the full fable convergence bill on top (`1 × verifier` + fable's `max_iterations × verifier × max_review_rounds`). Mechanical tasks that land first-shot get cheaper than the old always-iterate profile; proven-hard tasks cost one extra opus pass over pre-stamping them fable.
 

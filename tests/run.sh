@@ -2,7 +2,7 @@
 # The one test entrypoint (`make test`, and the self-rollout's verifier). bash 3.2-compatible (macOS).
 #
 # Hermetic by construction: HOME and the global git config point into a temp dir, so any stray default
-# (reconcile-wave.py's vault Tasks dir, the Stop hook's ~/.claude/wave-driver, a git identity) lands in
+# (reconcile-rollout.py's vault Tasks dir, the Stop hook's ~/.claude/rollout-driver, a git identity) lands in
 # temp instead of the real vault or ~/.claude. PYTHONDONTWRITEBYTECODE keeps __pycache__ out of the tree.
 #
 # Discovery is by explicit globs, not bare `node --test` (which walks the whole tree): node:test files

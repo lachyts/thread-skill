@@ -114,10 +114,10 @@ ok "$(printf '%s\n%s\n' "$s26" "$s7" | python3 -c '
 import re, sys
 vals = re.findall(r"reason=\"([^`]*)\"", sys.stdin.read())
 print("ok" if vals and all("\"" not in v for v in vals) else "bad: %r" % vals)')" ok "every § 2.6 / § 7 reason value is quote-free"
-ok "$(python3 - "$root/hooks/wave-stop-driver.py" <<'PY'
+ok "$(python3 - "$root/hooks/rollout-stop-driver.py" <<'PY'
 import importlib.util, sys
-spec = importlib.util.spec_from_file_location("wsd", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-line = 'WAVE-STATUS: proj-rollout cursor=0/3 state=halted reason="repoPath is a live plugin marketplace checkout"'
+spec = importlib.util.spec_from_file_location("rsd", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+line = 'ROLLOUT-STATUS: proj-rollout merged=0/3 running=0 state=halted reason="repoPath is a live plugin marketplace checkout"'
 hit = m.STATUS_RE.search(line)
 print("ok" if hit and hit.group("state") == "halted" else "no match")
 PY
