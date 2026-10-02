@@ -118,10 +118,16 @@ Subcommands:
   approve-gates  Sign off a gate-pending task's declared gated inputs (ADR 0008): move the bullets
               under "## Gated inputs (awaiting sign-off)" into "## Approved gates" with a sign-off
               date (gate + cap + sign-off — the durable record the engine reads via task.approvedGates
-              so re-dispatches never re-ask those exact gates), remove the pending section, and flip
-              the note back to in_progress so resume-filter re-dispatches it. Refuses a note that
-              isn't gate-pending; idempotent once approved (already-approved note = no-op). Run by
-              the lead session ONLY after the human explicitly signs off — never unattended.
+              so re-dispatches and resumes never re-ask those exact gates), remove the pending section,
+              and flip the note by the stage it stopped (p12-14), read before the flip from the
+              `## Integration log`'s last line paired with the gate-pending status (p12-16): `set-aside`
+              with a `pr:` is a stop at Integration -> `status: review`, `ready:` restamped from --now and
+              `integrating:` removed (it rejoins the Integration queue, as hand-back's Integration arm
+              does); anything else (a seeded revise's `rejected`, no log) -> `in_progress`, where the
+              lead's Restart routing resumes its gate-pending call (execute § 3.7). A `set-aside` last
+              line with no `pr:` goes to in_progress with a WARN. Refuses a note that isn't
+              gate-pending; idempotent once approved (already-approved note = no-op). Run by the lead
+              session ONLY after the human explicitly signs off — never unattended.
 
 Stdlib only. Frontmatter is edited line-surgically (not via a YAML round-trip) to preserve field order,
 comments, and spacing exactly — matching how the rest of the vault tooling treats frontmatter. Importing
@@ -2063,8 +2069,28 @@ def _norm_gate(line: str) -> str:
     return re.sub(r"\s+", " ", s).strip().lower()
 
 
+def _last_log_outcome(note):
+    """The outcome token of the `## Integration log`'s LAST non-blank line, or None (the p12-16 contract:
+    read the last line, never a search — old lines survive a defer or a recut)."""
+    lines = [l.rstrip() for l in note.section_text(INTEGRATION_LOG_SECTION).split("\n") if l.strip()]
+    toks = lines[-1].split(" ") if lines else []
+    return toks[1] if len(toks) > 1 else None
+
+
+def _gate_stage(note) -> str:
+    """Where a gate-pending note stopped (p12-14): 'integration' when the Integration log's last line is
+    `set-aside` and the note has a `pr:` (its integrate call stopped for a gate: the pairing
+    `lead-integrate.py inputs` reads as resumeAt: integration), else 'run' (its own call, or a seeded
+    revise after a `rejected` line)."""
+    return "integration" if _last_log_outcome(note) == "set-aside" and _pr(note) else "run"
+
+
 def cmd_approve_gates(args) -> int:
-    """Record the human sign-off for a gate-pending task's declared gated inputs (ADR 0008).
+    """Record the human sign-off for a gate-pending task's declared gated inputs (ADR 0008), and send
+    the task back by the stage it stopped (p12-14): a stop at Integration -> `review` with `ready:`
+    restamped and `integrating:` removed (it rejoins the Integration queue, and a fresh integrate call
+    re-reads the latest main); any other stop -> `in_progress` (Restart routing resumes its gate-pending
+    call on the signed plan, execute § 3.7). The stage is read before the status flips.
 
     The CALLER's contract: run this only after the user explicitly signed off the gates in
     conversation — the sign-off itself is the one decision no agent may make.
@@ -2072,6 +2098,7 @@ def cmd_approve_gates(args) -> int:
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
     date = args.date or datetime.now().astimezone().date().isoformat()
+    now = _now(args)
     errors = []
     for slug in slugs:
         path = tasks_dir / f"{slug}.md"
@@ -2098,11 +2125,22 @@ def cmd_approve_gates(args) -> int:
         existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
         have = {_norm_gate(l) for l in existing}
         merged = existing + [f"- {g} (approved {date})" for g in gates if _norm_gate(g) not in have]
+        stage = _gate_stage(note)  # before the flip: the pairing reads status gate-pending
+        if stage == "run" and _last_log_outcome(note) == "set-aside":
+            print(f"WARN: {slug}: the Integration log's last line is set-aside but the note has no pr: — "
+                  "it cannot rejoin the Integration queue, so it goes to in_progress (its own call)", file=sys.stderr)
         note.upsert_section(APPROVED_GATES_SECTION, "\n".join(merged))
         note.remove_section(GATE_PENDING_SECTION)
-        note.set("status", "in_progress")
+        if stage == "integration":
+            note.set("status", "review")
+            note.set("ready", _stamp(now))
+            note.remove("integrating")
+            route = f"status review (stopped at Integration: rejoins the Integration queue; ready: {_stamp(now)})"
+        else:
+            note.set("status", "in_progress")
+            route = "status in_progress"
         note.save(dry_run=args.dry_run)
-        print(f"{slug}: {len(gates)} gate(s) approved (signed off {date}) -> status in_progress"
+        print(f"{slug}: {len(gates)} gate(s) approved (signed off {date}) -> {route}"
               + (" (dry-run)" if args.dry_run else " [written]"))
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -2245,6 +2283,7 @@ def main() -> int:
     ag.add_argument("--tasks", required=True, help="comma-separated task slugs (must be at status gate-pending)")
     ag.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     ag.add_argument("--date", default=None, help="sign-off date stamped on each gate (default: today)")
+    ag.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the ready: restamp of a stop at Integration)")
     ag.add_argument("--dry-run", action="store_true")
     ag.set_defaults(func=cmd_approve_gates)
 
