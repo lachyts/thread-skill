@@ -6,7 +6,7 @@
 # temp instead of the real vault or ~/.claude. PYTHONDONTWRITEBYTECODE keeps __pycache__ out of the tree.
 #
 # Discovery is by explicit globs, not bare `node --test` (which walks the whole tree): node:test files
-# and plain exit-code scripts both run under `node --test`; shell suites and the merge-wave self-tests
+# and plain exit-code scripts both run under `node --test`; shell suites and the merge-task self-tests
 # run concurrently; output is printed grouped per suite in the original order. New suites join by
 # filename — including the protocol 4 branch's, unchanged.
 set -uo pipefail
@@ -85,8 +85,8 @@ step "bash syntax (${#sh_files[@]} files)"     syntax_sh "${sh_files[@]}"
 step "python syntax (${#py_files[@]} files)"   syntax_py "${py_files[@]}"
 step "workflow parse (${#wf_files[@]} files)"  bash tests/lib/check-workflow-parse.sh "${wf_files[@]}"
 # Independent suites run concurrently (each builds under its own mktemp); node runs once they finish.
-spawn "merge-wave classifier self-test"        bash skills/execute/scripts/merge-wave.sh --self-test-classify
-spawn "merge-wave base self-test"              bash skills/execute/scripts/merge-wave.sh --self-test-base
+spawn "merge-task classifier self-test"        bash skills/execute/scripts/merge-task.sh --self-test-classify
+spawn "merge-task base self-test"              bash skills/execute/scripts/merge-task.sh --self-test-base
 for t in "${sh_tests[@]}"; do spawn "$t" bash "$t"; done
 wait
 report 0; report 1
@@ -95,7 +95,7 @@ i=2; while [ "$i" -lt "$n" ]; do report "$i"; i=$((i+1)); done
 
 # A run must leave the checkout exactly as it found it (no bytecode, no stray state files).
 tree_unchanged() {
-  # .git is git's; .claude holds other sessions' worktrees and merge-wave's sentinel, not this run's output.
+  # .git is git's; .claude holds other sessions' worktrees and merge-task's sentinel and cap state, not this run's output.
   local w; w=$(find "$root" \( -path "$root/.git" -o -path "$root/.claude" \) -prune -o -newer "$stamp" -type f ! -name .DS_Store -print)
   [ -z "$w" ] || { echo "written during the run:"; echo "$w"; return 1; }
 }
