@@ -174,7 +174,9 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hand-b
 Set aside at Integration → `review` with `ready:` restamped: it rejoins the Integration queue, and when its
 `## Integration log`'s last line is `integrated` it merges through case (ii) with nothing redone. Set aside at
 its run → `in_progress` with `owner:` cleared: the next `next` restarts it through execute's
-*Restart routing* (`resumeAt: revise` → a seeded revise, else its own call). Per stage:
+*Restart routing* (`resumeAt: revise` → a seeded revise, else its own call). A `stashed: integration
+leftovers <head>` line in a merge log is informational: the merge step already moved the leftovers aside, so
+there is nothing to clear. Per stage:
 
 - **Stale anchor ref** (a reason starting `merge step STOP: stale anchor ref <X>`): delete it first, guarded,
   `git -C <repoPath> update-ref -d refs/integration-anchor/<inputs.branch> <X>` (an absent ref is a no-op), then
