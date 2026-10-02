@@ -130,8 +130,9 @@ default branch to done (stamping `merged:`), and reports anything else unchanged
 base is escalated, never flipped. Under a pause or a live queue, report it and leave it: the reinstate's or
 the lead's next *Cold resume* runs `resume` first.
 
-**3b — input-gated → capture + inject.** This is the **only** time you ping the user. For each input-gated
-task, `AskUserQuestion` with the specific decision its feedback needs (quote the feedback). Then write the
+**3b — input-gated → capture + inject.** Ping the user only here and for the other decisions no agent can
+make (a gate, a PR-less merge, a defer chain, a second block or a second raise). For each input-gated task,
+`AskUserQuestion` with the specific decision its feedback needs (quote the feedback). Then write the
 answer into the **task note body** so the next agent reads it: replace the placeholder in place, or append or
 update a `## Repair input` section with the decision verbatim. It is body content, not a status transition,
 so it is allowed under a pause. A gate is presented verbatim; on Lachy's sign-off run
