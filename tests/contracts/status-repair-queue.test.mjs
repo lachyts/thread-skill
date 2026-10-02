@@ -342,6 +342,10 @@ function check({ status, repair, fx }) {
   // gh pr list matched on inputs.branch; D4 the offline caveat; D5 the example Drift block.
   const flag = (label) => labelled(s3raw, label, { item: true })
   const pl = flag('Possible PR-less merge:')
+  // The example's Drift block: the lines after `Drift:` up to the next blank line.
+  const afterDrift = example.includes('Drift:') ? example.slice(example.indexOf('Drift:') + 1) : []
+  const blank = afterDrift.findIndex((l) => !l.trim())
+  const driftLines = blank < 0 ? afterDrift : afterDrift.slice(0, blank)
   const D = [
     flag('Merged, never marked:').includes('`resume` is the sanctioned path'),
     s2.includes('lead-integrate.py inputs --note') && s2.includes('`running`') && s2.includes('plus any other unmerged task that has `started` and no `pr`'),
@@ -349,8 +353,7 @@ function check({ status, repair, fx }) {
       pl.includes('`headRefName`') && pl.includes('`inputs.branch`') && pl.includes('`started:`'),
     s3.includes(CAVEAT) && s3.includes('every resume or reinstate recommendation') &&
       labelled(s4raw, 'Precedence.').includes('Offline, every resume or reinstate recommendation carries'),
-    example.slice(example.indexOf('Drift:')).some((l) => l.includes('merged, never marked')) &&
-      example.slice(example.indexOf('Drift:')).some((l) => l.includes('possible PR-less merge')),
+    driftLines.some((l) => l.includes('merged, never marked')) && driftLines.some((l) => l.includes('possible PR-less merge')),
   ]
   if (!D.every(Boolean)) fails.push('drift')
 
@@ -509,9 +512,15 @@ const RULES = ['states', 'set-aside', 'log-line', 'owner', 'drift', 'actions', '
   'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off', 'no-wave']
 const CONTROLLED = new Set()
 
+// Replaces the first match of `from`. Whitespace inside it matches any run of whitespace, so a reflowed line still
+// matches; its leading and trailing whitespace match literally.
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 function edit(text, from, to) {
-  assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
-  return text.replace(from, to)
+  const core = from.trim()
+  const at = from.indexOf(core)
+  const re = new RegExp(esc(from.slice(0, at)) + core.split(/\s+/).map(esc).join('\\s+') + esc(from.slice(at + core.length)))
+  assert.ok(core && re.test(text), `control setup: ${from.slice(0, 80)} not found`)
+  return text.replace(re, () => to)
 }
 const only = (mut, rule, label) => {
   CONTROLLED.add(rule)
@@ -533,7 +542,7 @@ test('control: a folded row fails states', () => {
   only(st(q, q + '\n| `folded` | **Folded** | the task it was folded into |'), 'states', 'folded row')
 })
 test('control: other dropped from the footer fails states', () => {
-  only(st('`folded` (an affine tombstone) and `other` (dropped, parked)', '`folded` (an affine tombstone)'), 'states', 'no other')
+  only(st('**Outside the count.** `folded` (an affine tombstone) and `other` (dropped, parked)', '**Outside the count.** `folded` (an affine tombstone)'), 'states', 'no other')
 })
 test('control: an autoRevise row that says false fails set-aside', () => {
   const l = lineWith(real.status, '| `run` | `revise` | `true` |')
@@ -642,7 +651,7 @@ test('control: a recut without the ask fails recut', () => {
   only(rp("- **Recut, only on Lachy's explicit ask:**", '- **Recut, when the branch is missing:**'), 'recut', 'no ask')
 })
 test('control: a hand-off under a pause fails hand-off', () => {
-  only(rp('no lead is live and no pause stands', 'no lead is live'), 'hand-off', 'pause')
+  only(rp('- **Hand-off, when no lead is live and no pause stands:**', '- **Hand-off, when no lead is live:**'), 'hand-off', 'pause')
 })
 test('control: a wave in status fails no-wave', () => {
   only(st('**Outside the count.**', 'Group by wave.\n\n**Outside the count.**'), 'no-wave', 'status wave')
