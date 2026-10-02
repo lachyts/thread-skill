@@ -1,14 +1,22 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-09-30
+last_touched: 2026-10-03
 state: active
-scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
+scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
 
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-10-03: P12 has landed and the queue is live. 14 tasks merged in 10 waves (#56–#69) over 53h 19m; the live checkout was fast-forwarded to `36f09c1`, so new sessions run the queue engine. No version bump: 3.0.0 is p13-4. Nothing is running.**
+- **Rollout** `[[thread-skill-rollout-2026-09-30]]` (archived, § Completion log), the last on the wave engine, run from the clone, all on Opus. The queue: one task per Workflow call (`task.workflow.js`), Integration's trouble path as its own call, `merge-task.sh` (one integrated PR), `reconcile-rollout.py` (`next`, stamps, the `## Integration log`), the lead's loop in execute § 4.5 with `lead-integrate.py`, schedule writing protocol 5, status and repair reading the queue, gate sign-off resuming the signed run, and no wave left. Plus P6's carried fixes: zero round budgets fail closed, `GIT_*` scrubbed, read-only agents on a pinned tree, and schedule's unpushed-base check.
+- **Six first dispatches plan-blocked.** Two causes, two fixes (Lachy's calls, 2026-10-01): judges held each PR to standalone coherence on master, fixed by the **P12 interim rule** (a task may leave a consumer a later P12 task owns out of step, named in its PR body; p12-12 restores coherence); and deep tasks planned at the default rung, fixed by re-running at `effort: xhigh` with 6 plan rounds. Every re-run landed; from wave 8 on, deep tasks started at `xhigh` and none blocked. Scope cuts on the way: p12-3's canary moved to [[thread-skill-git-env-canary-on-the-queue]]; p12-5 held to a sequential interim lead.
+- **Lead actions:** each PR body ended with the vault edits it needed (contracts for later tasks, file-sets, follow-ups); the lead applied them, appending `## Contracts from landed P12 tasks` on downstream notes. p12-16 (`ready:` and the Integration log) was filed that way mid-run and joined wave 7.
+- **Wave 7 stalled 13 h overnight** on a Chorus "Allow Bash?" a review agent raised with `cd /tmp/x && rm -rf ./*`: Claude Code's dangerous-removal check asks even in bypass mode. Fixed estate-wide by the PreToolUse hook `check-dangerous-rm.sh` (workspaces `eb136df`, registered in `~/.claude/settings.json`, proven live); Chorus's fallback is [[chorus-an-unanswered-agent-ask-times-out]].
+- **Wave 9's merge halted once** on an Ubuntu flake (`pushed-base.test.sh` case 2); merged on the re-run, filed as [[thread-skill-pushed-base-case-2-flake]].
+- **Still on protocol 3:** `[[chorus-rollout-2026-09-30]]` (paused, migrates after 3.0.0, p13-4) and `[[giflab-rollout-2026-09-23]]` (open, nothing merged; p12-13 hard-pauses and regenerates it). The new execute refuses both until then.
 
 **2026-09-30 (night): waves are being retired. ADR 0030 (a rollout is a queue) and ADR 0029 (escalation climbs the operator's ladder) are decided and slimmed to decision level in PR #53, merged at `df32531` with no further review round. P12 and P13 hold the build. P12's scheduling went to a fresh session through a handoff, consumed the same night; the handoff doc's landing PR #54 is queued.**
 - **Two grills.** The evening grill (from the Chorus orient and Lachy's "can't we just run tasks in parallel in worktrees and merge after?") wrote both ADRs. The night's `/thread:orient` reshuffle, with grill-with-docs, answered review round 2 and then round 3's nine design calls. The ADRs hold the decisions; the P12 and P13 task notes hold the mechanics.
@@ -529,6 +537,9 @@ scheduled 2026-07-15.
 - **2026-09-27, the safe-point hook deleted** (vault p9-1): no hook polices session length. The statusline shows `ctx %` (yellow from 40%, red from 70%), native auto-compact stays at its default, and round caps live in the loops (fresh-review's ledger, execute's `max_review_rounds`). Rollout conductors are never interrupted: at a quota ceiling they wait and resume from the cursor. `thread:handoff` runs only on request. The memory `feedback_offer_handoff_long_iteration_sessions` is superseded by `feedback_say_loop_round_count`.
 - **2026-09-27, ADR 0026** (above) and the P10 roadmap.
 
+- **P12 landed (2026-10-03, #56–#69): the queue replaces waves.** Protocol 5 rollout notes; `task.workflow.js` (one task per call); `merge-task.sh`; `reconcile-rollout.py`; `lead-integrate.py`; `rollout-stop-driver.py` and the `ROLLOUT-STATUS` line. `merge-wave.sh`, `reconcile-wave.py`, `wave-execute.workflow.js` and `WAVE-STATUS` are deleted with no alias. Phase 12 stays open for p12-13.
+- **Hard rollout tasks start at the higher rung** (2026-10-01/02 evidence): a deep task stamped `effort: xhigh` with `max_plan_rounds: 6` converges; at the default rung it plan-blocks. ADR 0029's ladder makes this the rung-2 start; until P13, it's per-task frontmatter.
+
 ## Open questions / decisions pending
 
 - **The daily lander (p11-7) doesn't exist yet.** Until it does, a queued merge that fails (red CI, a PR left behind master, `queued: needs merge`) waits for the next close in that repo. It has to catch up on wake: the laptop is often off overnight until the Mac mini arrives.
@@ -613,8 +624,16 @@ scheduled 2026-07-15.
   `/thread:next` (vault path resolution), Stop-hook noise (python3 shim is
   the optional quieting fix).
 
+- **Review-gate-only repos** (no required checks): `merge-task.sh` halts with exit 7 ("review required"). A per-rollout `--admin` opt-in is Lachy's call: [[thread-skill-merge-task-followups]].
+- **The queue is live without a release.** The plugin version still reads 2.11.0 while the skills are P12's (the directory source loads the working tree). p13-4 releases 3.0.0; sessions started before 2026-10-03 still run the wave-era skill text until restarted.
+- **The fresh-review of workspaces `eb136df` (the dangerous-rm hook) hasn't run either**: same cwd binding as `29ca886`; run both from one session in `~/repos/workspaces`.
+
 ## Known quirks (don't re-derive)
 
+- **Claude Code asks about some `rm` shapes even in bypass mode** (2.1.285 `dangerousRemoval` is `bypassImmune`; allow rules can't cover it; no ask timeout, in the CLI or Chorus): `cd <dir> && rm -rf ./*`, a bare `rm -rf ./*`, `rm` on a `$VAR/` or command-substitution target. The PreToolUse hook `~/repos/workspaces/_shared/hooks/check-dangerous-rm.sh` refuses them with the literal-path rewrite. A `settings.json` hook change reaches a running session (sentinel-tested 2026-10-02).
+- **A Workflow task-notification's `<result>` can be truncated**; the full JSON is the output file's `result` field (`json.load(f)['result']`, a string to parse again). Reconcile from that, never from the inline text.
+- **zsh does not word-split `$L`**: a `touched-phases` line stored in a variable must be passed split (`${=L}`, or the args typed out), or reconcile-project sees one argument.
+- **Self-rollouts still run from the clone** `~/repos/tools/thread-skill-rollout`: p12-4's self-rollout check refuses a repo path that is, or contains, the directory-source marketplace.
 - **One session can hold several Workflow calls in flight:** `docs/spikes/2026-09-30-concurrent-workflow-calls.md`.
 - **`gh` 2.43 has no `gh pr update-branch`** (2026-09-30): use `gh api -X PUT repos/lachyts/thread-skill/pulls/<n>/update-branch -f expected_head_sha=<sha>`.
 - **`land.sh --own-branch --queue --reviewed <sha>` refuses a head with non-`docs/reviews/` commits after the reviewed SHA**, by design. When Lachy chooses to merge an unreviewed commit (as for #53's slimming), queue `gh pr merge <n> --merge --auto`, which still waits for green CI.
@@ -835,6 +854,14 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Now (from 2026-10-03): P12 is live; next is p12-13, GifLab's first queue run.** Nothing is running.
+1. **[[thread-skill-p12-13-giflab-first-queue-run]]** (session lane, in a fresh session launched in `~/repos/animately/giflab`): hard-pause `[[giflab-rollout-2026-09-23]]` (`paused:` plus a `## Pause log` line), `/thread:schedule GifLab --regenerate`, then `/thread:execute`. Its note lists what to watch (`ROLLOUT-STATUS`, `ROLLOUT-HEARTBEAT`, `path=lead` Integration-log lines, a signed-gate resume).
+2. **Then P13** ([[thread-skill-p13-the-ladder]]): p13-1 to p13-3 as the first queue rollout from the clone (Known quirks), then p13-4, the 3.0.0 release (run `make evals` first), which unparks Chorus's rollout. Then [[ab-fable-vs-opus-planning]].
+3. **Fix before relying on queue merges:** [[thread-skill-pushed-base-case-2-flake]].
+4. **Follow-ups filed in the run:** [[thread-skill-git-env-canary-on-the-queue]], [[thread-skill-merge-task-followups]] (Lachy's `--admin` call), [[thread-skill-queue-followups]], [[thread-skill-post-p12-cleanups]].
+5. **Still owed:** the fresh-reviews of workspaces `29ca886` and `eb136df` (one session in `~/repos/workspaces`); tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
+
+**Superseded 2026-10-03:**
 **Now (from 2026-09-30, night): P12 is being scheduled in a fresh session** (the handoff `docs/handoffs/2026-09-30-schedule-p12-queue-build.md`, consumed; its close deletes it).
 1. **Check the rollout first.** `/thread:status` on the P12 rollout, if one exists under `Work/Tasks/`. If none, run a Steer-only `/thread:orient Thread Skill` from this repo on a clean `master`: it schedules P12's wave-shaped tasks (p12-2 to p12-12, p12-14, p12-15) with `--tasks`, then offers execute. Past self-rollouts ran from the clone `~/repos/tools/thread-skill-rollout` (Known quirks).
 2. **Then:** p12-13 (GifLab's first queue run, session lane), P13 (p13-1 to p13-3 as a rollout, then p13-4, the 3.0.0 release, which unparks Chorus), then [[ab-fable-vs-opus-planning]].
@@ -993,6 +1020,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-10-03 (close): consumed the P12 handoff; Steer-only orient scheduled P12 as a 10-wave rollout and executed it to completion (#56–#69, 53h 19m). Plan-blocks fixed by the interim rule and the `xhigh` start rung; a 13 h overnight stall on a bypass-immune `rm` ask fixed estate-wide by `check-dangerous-rm.sh`; an Ubuntu CI flake filed. Live checkout fast-forwarded: the queue is live. Memory: bypass-immune `rm`.
 - 2026-09-30 (night close): `/thread:orient Thread Skill` reshuffle with grill-with-docs. Answered PR #53's round-2 findings at decision level (`5d4404e`), ran round 3 as `/fresh-review simplify` (28 findings), grilled its nine design calls (merge `main` in, never force-push; lead-run clean Integration; a rejection releases the lane; re-verify only when `main` moved; named rungs; best-effort file lists), slimmed both ADRs and the glossary (`6bac013`), and merged #53 at `df32531`. Researched Fable 5.1 vs Opus 5.5 (no clear step-up; blind A/B filed). Vault: p8-2 and p8-4 moved into P12, P12 and P13 notes respecced. Handed P12's scheduling to a fresh session.
 - 2026-09-30 (evening close): PR #53 held after review round 2 (ledger STOP, 9 of 15 findings cite round 1's fixes). Before that: consumed the Chorus-orient handoff. Grilled ADR 0030 (queue, integration, lead-run merge queue, Solo, order, cursor, soft pause, migrate and delete waves) and rewrote ADR 0029 as the operator's ladder file. A scoped orient phased the build as P12 and P13 and retired P6 (protocol 4) and P7. Spike p12-1 proved concurrent Workflow calls. PR #53. My slip: during the spike I typed a fake completion notification and flagged it at once. The write-up uses only real results.
 - 2026-09-29/30 (close): grilled landing with Lachy → ADR 0028 (agents land their own work; landing register), amended to queue-and-finish after p11-3's waiting design didn't converge. Orient-reshuffled it into P11; rollout `thread-skill-rollout-2026-09-29` merged #43, #44, #46–#49 in 8h 17m. Released 2.11.0 (#50), tagged. Seeded the landing register (p11-2). Memories: admin happens autonomously; laptop sleeps overnight. First close to land its own close-out via `land.sh`.
