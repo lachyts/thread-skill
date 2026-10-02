@@ -190,7 +190,12 @@ done
 has "$s5" "scriptPath\` the run started with" "execute § 5 resume re-passes the scriptPath the run started with"
 
 # ---- the register-check wiring -------------------------------------------------------------------------------
-has "$ef" "Four blockers" "execution-fit names four blockers"
+has "$ef" "Five blockers" "execution-fit names five blockers"
+ur=$(awk '/^\*\*Unfinished rollout\.\*\*/{on=1} /^\*\*Engine path\.\*\*/{on=0} on' skills/_shared/execution-fit.md | tr '\n' ' ')
+has "$ur" "**Unfinished rollout.**" "execution-fit has the Unfinished rollout blocker, ahead of Engine path"
+has "$ur" "unfinished-rollout.py check" "the Unfinished rollout blocker names unfinished-rollout.py check"
+has "$ur" "schedule § 0" "the Unfinished rollout blocker points at schedule § 0 for its outcomes"
+has "$ur" "Uncommitted grill docs" "orient's Uncommitted grill docs hold sits beside it"
 has "$ef" "**Landing register.**" "execution-fit names the landing-register blocker"
 has "$ef" "execute § 2.5" "execution-fit cites execute § 2.5 for the re-checks"
 has "$ef" "any stderr already printed" "execution-fit: a failed check keeps whatever stderr it printed"
@@ -216,7 +221,7 @@ exempt="${s25#*"**Pausing is exempt.**"}"
 for w in "pause_requested: true" "TaskStop" "\`paused:\` stamp" "CronDelete" "never blocks stopping work"; do
   has "$exempt" "$w" "execute § 2.5 pause exemption covers $w"
 done
-has "$s25" "hard pause" "execute § 2.5 names hard pause for an urgent mid-wave listing"
+has "$s25" "hard pause" "execute § 2.5 names hard pause for an urgent mid-rollout listing"
 has "$s25" "until that call returns, its agents keep pushing" "execute § 2.5 documents the in-flight-call limit"
 has "$s25" "Exposure is bounded to the in-flight call" "execute § 2.5 bounds exposure to the in-flight call"
 dont=$(grep '^- Never start a task' skills/execute/SKILL.md)
@@ -224,7 +229,7 @@ has "$dont" "never blocks stopping work" "execute Don'ts: the register check nev
 pz=$(awk '/^## Pausing \+ reinstating/{on=1} /^\*\*Soft pause/{on=0} on' skills/execute/SKILL.md | tr '\n' ' ')
 has "$pz" "Neither pause runs the § 2.5" "execute Pausing: neither pause runs the register gate"
 has "$ef" "caught only when that call returns" "execution-fit documents the in-flight-call limit"
-has "$ef" "hard pause the rollout" "execution-fit names hard pause as the mid-wave remedy"
+has "$ef" "hard pause the rollout" "execution-fit names hard pause as the mid-rollout remedy"
 
 s45raw=$(awk '/^### 4\.5\./{on=1} /^### 5\./{on=0} on' skills/execute/SKILL.md)
 s45=$(printf '%s\n' "$s45raw" | tr '\n' ' ')

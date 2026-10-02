@@ -52,7 +52,7 @@ execute [[{{ROLLOUT_SLUG}}]] --gated        # pause for a human before each merg
 
 The contract lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` — three-layer convergence (plan-gate → Ralph-style agent-side verifier retry → master-side review-and-revise loop). The rollout-level defaults in this note's frontmatter (`verifier`, `max_iterations`, `max_review_rounds`, `plan_approval`, `max_plan_rounds`, `parallel_ceiling`, `model`) are inherited by every task; per-task overrides go in the task's own frontmatter.
 
-`plan_approval: scope-gated` (the default) makes the plan-gate fire only for `scope: cross-cutting` tasks — single-file + read-only tasks skip it. Set to `off` for legacy behaviour (no plan-gate); `required` to gate every task. The plan-gate inserts one review round before Ralph: the subagent posts a structured plan under `## Plan (round N)` in the task note, the lead session reviews, and only after approval does the implementer phase begin.
+`plan_approval: scope-gated` (the default) makes the plan-gate fire only for `scope: cross-cutting` tasks — single-file + read-only tasks skip it. Set to `off` for legacy behaviour (no plan-gate); `required` to gate every task. The plan-gate inserts one review round before Ralph: the planner returns a structured plan and an autonomous plan judge approves it or sends it back, up to `max_plan_rounds`; only an approved plan reaches the implementer.
 
 ## Queue
 
@@ -74,7 +74,7 @@ On Lachy's M3 96GB, the safe parallel ceiling is **3-4 agents at once (`parallel
 
 **Two costs the per-task budget above does NOT model — add them for deep cross-cutting tasks:**
 - **Plan-block re-dispatch.** A `scope: cross-cutting` task that exhausts `max_plan_rounds` is set aside and re-dispatches with the judge's feedback — a *full extra* plan→implement→review cycle. On the 2026-06-02 giflab run 3/3 cross-cutting tasks plan-blocked once each, then converged on the next round; budget those as elevated re-dispatch risk (this is why `max_plan_rounds` defaults to 3 for cross-cutting).
-- **Serial Integration (continuous mode).** Integrations run one at a time: each merges the latest `main` in, re-runs the verifier unless `main` has not moved, and re-reviews when needed. Budget ≈ (merge-in + verifier + any re-review + squash) per approved task, **sequentially**, on top of the convergence time above.
+- **Serial Integration (continuous mode).** Integrations run one at a time: each merges the latest `main` in, re-runs the verifier unless `main` has not moved, re-reviews when needed, and waits on the PR's required checks before the squash. Budget ≈ (merge-in + verifier + any re-review + required checks + squash) per approved task, **sequentially**, on top of the convergence time above.
 
 ## File-sets
 

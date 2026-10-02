@@ -3,51 +3,51 @@
 One system, two dispatch lanes. Every cluster of open tasks gets exactly one:
 
 - **The rollout lane** (`/thread:schedule` → `/thread:execute`): worktrees, PRs,
-  the three-layer convergence engine, per-wave auto-merge.
+  the three-layer convergence engine, Integration and auto-merge.
 - **The session lane**: scoped sessions dispatched by calendar and attention —
   `defer` (`scheduled:` dates do the dispatch), a task's `## Launch` block via
   `open`, or orient's parallel-safe cc-* batches.
 
 **The test decides, hard.** It is not a preference and not a count. A cluster is
-**wave-shaped** when all three hold:
+**rollout-shaped** when all three hold:
 
 1. **One repo** — the tasks converge on ONE code repository.
 2. **PR-per-task** — each task lands as an independently-shippable PR.
 3. **In-run verification** — success is machine-checkable inside the run
    (tests / build / greps), not days later.
 
-Wave-shaped → the rollout lane, even for a single task: a one-task rollout still
+Rollout-shaped → the rollout lane, even for a single task: a one-task rollout still
 buys the plan gate, the verifier retry loop, the master review, and auto-merge —
-autonomous convergence on one PR. Not wave-shaped → the session lane; a rollout
+autonomous convergence on one PR. Not rollout-shaped → the session lane; a rollout
 buys nothing there.
 
-**Signs a task is NOT wave-shaped** (any one disqualifies it):
+**Signs a task is NOT rollout-shaped** (any one disqualifies it):
 
 - Its core action is an external publish — CMS, live site, DNS, config console.
   (These always pause at the human gate regardless — ADR 0008; execute § 3.7.)
 - Its ordering constraint is a measurement window or calendar date, not file
   overlap. The engine's parallelism is forbidden by isolation windows, and
-  file-overlap wave computation cannot see window/calendar constraints.
+  the queue cannot see a window or calendar constraint.
 - Its verification only arrives days or weeks later (impact measures) — the
   verifier loop has nothing to verify inside the run.
 - It is conversation-gated: it needs Lachy's input before an agent can act
   (task-writer § 5 notes this in the body).
 
-**Mixed sets split.** The wave-shaped subset rolls out; the misfits stay
+**Mixed sets split.** The rollout-shaped subset rolls out; the misfits stay
 unstamped in the session lane. Name the split when reporting.
 
 **Count is never a criterion.** There is no minimum rollout size — shape
 decides, not size. (Decided 2026-08-12, ADR 0009; supersedes schedule's old
 "<3 tasks" floor.)
 
-## Dispatch blockers — wave-shaped but not yet runnable
+## Dispatch blockers — rollout-shaped but not yet runnable
 
-A cluster that fails a blocker is **still wave-shaped**: do not route it to the
+A cluster that fails a blocker is **still rollout-shaped**: do not route it to the
 session lane. schedule § 0 runs these checks; callers that read this file
 for the fit test route through schedule rather than checking themselves. The
 schedule gate stops before anything is written (no task stamped, no rollout
 note, no heartbeat) and names the remedy. Fix the blocker, then schedule again.
-Four blockers:
+Five blockers:
 
 **GitHub `origin`.** The engine branches every worktree from
 `origin/<default branch>` and lands each task as a GitHub PR that merge-task
@@ -112,13 +112,13 @@ stands (python3 missing, exit 127, or a crash prints no `landing-register:` line
 Never read 2 or 4 as "not listed": only exit 0 permits a rollout. This is a blocker,
 not a re-route: the session lane can't push to a listed repo either. A repo can be
 listed after scheduling, so execute § 2.5 re-runs this check at every launch, and
-execute § 4.5 re-runs it before every wave dispatch, Workflow call and merge.
+execute § 4.5 re-runs it before every task call, Integration push and merge.
 
 The check is lead-side, so it has limits. It re-runs before every task call, so a
 repo listed while a task's Workflow call is in flight is caught only when that call
 returns: until then the engine's agents keep pushing that task's branch and opening
 its PR on it, and only the merge is stopped. For an
-urgent mid-wave listing, hard pause the rollout (execute § Pausing + reinstating a
+urgent mid-rollout listing, hard pause the rollout (execute § Pausing + reinstating a
 rollout): pausing is exempt from the check, so it never blocks stopping work. One
 repair step is deliberately ungated too: `/thread:repair` § 5's clean defer runs
 `gh pr close --delete-branch` on a task the user chose to defer. That removes the
@@ -182,12 +182,21 @@ touch only THREAD.md are a note, not a block, since agents never read it.
 The check runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in every known clone, so it
 moves remote-tracking refs only: no working tree, branch or HEAD changes. The prune drops the tracking ref
 of a `close/…` branch deleted on origin, so its commits read stranded, never queued for ever. It runs
-from schedule § 0 with no cited paths, again after schedule's step-2 confirm with the cited paths, and
-from execute § 2.7 at entry points only, never per wave: `origin/<default>` moves with every merge, and a close-out committed
-mid-rollout must not halt an unattended run. Nothing names such a commit per wave in the general case:
+from schedule § 0 with no cited paths, again after schedule's step-2 detection with the cited paths, and
+from execute § 2.7 at entry points only, never per merge: `origin/<default>` moves with every merge, and a close-out committed
+mid-rollout must not halt an unattended run. Nothing names such a commit at each merge in the general case:
 merge-task's local refresh reads only the rollout's repo path, so it names one committed there, but one
 committed in another clone of the set (the primary checkout of a self-rollout's separate clone) first
 surfaces when the next entry halts on it.
+
+**Unfinished rollout.** A repo holds at most one unfinished rollout: one directly in `Work/Tasks/`, neither
+`done` nor `dropped`, with a task not yet merged. schedule § 0 runs
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check` against the resolved repo path last,
+after the pushed-base check, and its one stdout line decides: see schedule § 0 for each outcome (`none`,
+`supersede`, `file`, `interrupted`, `refuse`) and its remedy. A running or never-superseded rollout on the
+repo is a stop, never a second rollout beside it. Beside it sits orient § 6's *Uncommitted grill docs* hold:
+`CONTEXT.md` or `docs/adr/` changes a grill left uncommitted in the target repo hold scheduling there too,
+because every worktree branches from `origin`, which lacks them.
 
 **Engine path.** The Workflow tool may refuse the plugin-cache `scriptPath`. That
 depends on the harness and cannot be checked at schedule time; execute § 5

@@ -162,12 +162,12 @@ function checkCeremony(text) {
   if (!cs.some((c) => /already listed/.test(c) && c.includes('gets only the in-place `still failing` annotation')) ||
     !para.includes('only failures not yet listed are appended as new lines')) fails.push('append')
 
-  // followup-fm: same new-task shape as the follow-on bullet's YAML, minus rollout/wave/phase.
+  // followup-fm: same new-task shape as the follow-on bullet's YAML, minus `rollout:` and `phase:`.
   const keys = idx.followon >= 0 ? followonYamlKeys(bs[idx.followon].raw) : []
   if (!cs.some((c) => /\bsame new-task shape\b/.test(c) && /follow-on/.test(c)) ||
-    !cs.some((c) => /\bminus\b/.test(c) && ['`rollout:`', '`wave:`', '`phase:`'].every((k) => c.includes(k))) ||
+    !cs.some((c) => /\bminus\b/.test(c) && ['`rollout:`', '`phase:`'].every((k) => c.includes(k))) ||
     !['priority', 'captured', 'contexts', 'scheduled', 'due', 'projects'].every((k) => keys.includes(k)) ||
-    ['rollout', 'wave', 'phase', 'owner'].some((k) => keys.includes(k))) fails.push('followup-fm')
+    ['rollout', 'phase', 'owner'].some((k) => keys.includes(k))) fails.push('followup-fm')
 
   // resolve: a successful re-run appends `resolved`, done once every line is resolved; an archived
   // follow-on is reopened, never duplicated.
@@ -547,7 +547,7 @@ test('the documented phase-close follow-on note is inert to both commands', () =
     .replace(/^captured:.*$/, `captured: ${TODAY}`))
   const keys = yaml.map((l) => (l.match(/^([a-z_]+):/) || [])[1]).filter(Boolean)
   for (const k of ['priority', 'captured', 'contexts', 'scheduled', 'due', 'projects']) assert.ok(keys.includes(k), k)
-  for (const k of ['rollout', 'wave', 'phase']) assert.ok(!keys.includes(k), k)
+  for (const k of ['rollout', 'phase']) assert.ok(!keys.includes(k), k)
   const body = `---\n${yaml.join('\n')}\n---\n\nclose phase demo-p1: reconcile-project exited 1: boom\n`
 
   const plain = buildVault()
