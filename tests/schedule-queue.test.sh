@@ -83,7 +83,6 @@ ok "$(q "$J" 'd["start"]')" '["c","a","b"]' "Q2: all three on src/hub.py start i
 ok "$(q "$J" 'd["hold"]')" '[]' "Q2: a shared file holds nothing back"
 J=$(st)
 ok "$(q "$J" '[t["slug"] for t in d["tasks"]]')" '["c","a","b"]' "Q2: status lists them in queue order"
-ok "$(q "$J" '[t["wave"] for t in d["tasks"]]')" '[null,null,null]' "Q2: no task carries a wave"
 ok "$(cat "$D"/a.md "$D"/b.md "$D"/c.md | grep -ci 'wave')" 0 "Q2: no task note mentions a wave"
 
 # ── Q3: a Solo task ranked first holds the rest ──────────────────────────────────────────────────────

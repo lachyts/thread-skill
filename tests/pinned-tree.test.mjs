@@ -1,7 +1,7 @@
 // p12-4 (ADR 0030): the read-only agents read the task's own pinned tree, never the shared checkout.
 //
 // The planner, plan judge, plan reviser, read-only investigator and review judge used to get
-// `Project root: <repoPath>` and read that mutable checkout directly, so in --gated mode, before wave 1,
+// `Project root: <repoPath>` and read that mutable checkout directly, so in --gated mode, before the first task call,
 // or with a dirty/diverged checkout they planned and judged against a stale tree. Each task now has ONE
 // worktree at worktreeDir(repoPath, slug), created by its first agent from a freshly fetched
 // origin/<base> (detached for a read-only task, on audit-fix/<alias> for a code-writing one), and every

@@ -70,7 +70,7 @@ setup=$(node --input-type=module -e "
   process.stdout.write(out.split('\n').slice(1, 6).join('\n') + '\n')
 " "$tmp/seed")
 has "$setup" 'origin/master && cd "$WT"; fi' "rendered setup branches from origin/master"
-g -C "$tmp/clone" commit -q --allow-empty -m wave1 && g -C "$tmp/clone" push -q origin master
+g -C "$tmp/clone" commit -q --allow-empty -m landed1 && g -C "$tmp/clone" push -q origin master
 top=$(cd "$tmp" && GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t bash -c "$setup" 2>/dev/null | tail -1)
 wt="$tmp/seed/.claude/worktrees/e2e-task"
 ok "$([ -d "$wt" ] && echo y)" y "setup created the task worktree"

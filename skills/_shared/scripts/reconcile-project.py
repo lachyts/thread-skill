@@ -39,8 +39,8 @@ which kinds are listed and written; a kind outside --kinds is never written, eve
    - Every non-landed task is a U finished task (rule 2): U with `depends_on: [those slugs]` when `task`
      is in --kinds; otherwise A, `needs task <slug> closed first`, and no task is written.
    - A QUIET task keeps the phase out of both lists, whatever its other tasks are: a hold, a task at
-     `review` under a live rollout (status/repair own that step; reconcile-rollout's LANDED_STATUSES counts
-     `review` for resume) or with no `rollout:` at all (a human review step, nothing to repair), or a
+     `review` under a live rollout (status/repair own that step: the queue integrates it and `resume` flips it
+     once its PR merges) or with no `rollout:` at all (a human review step, nothing to repair), or a
      genuinely open task with no evidence. Resolving the other tasks could never close such a phase.
    - Otherwise any non-landed task that is A, skipped, unparseable, archived-but-open (in A or tagged
      `archived`, not landed), or at `review` under a retired rollout (one resolving into R, into A or
@@ -307,7 +307,8 @@ class Detector:
             return str(p)
 
     def resolve_rollout(self, rec: Rec):
-        """('live'|'R'|'A'|'none', path-or-None, stem) for a task's `rollout:` wikilink."""
+        """('live'|'R'|'A'|'none', path-or-None, stem) for a task's `rollout:` wikilink. 'live' is CONTEXT.md's
+        **Live rollout**: a rollout note directly in `Work/Tasks/` (R is Archive/Rollouts, A the rest of Archive)."""
         m = WIKILINK_RE.search(rec.scalar("rollout"))
         stem = m.group(1).strip() if m else ""
         if not stem:

@@ -2,7 +2,7 @@
 tags:
   - rollout
 status: in_progress
-protocol_version: 3
+protocol_version: 5
 ---
 
 # Demo rollout 2026-09-01 (live)

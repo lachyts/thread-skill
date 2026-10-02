@@ -68,7 +68,7 @@ const seededStop = () => row({
 // agent-written `## Blocker diagnosis` paragraph, as the Ralph-loop and planner prompts leave one).
 function vault(agentParagraph) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'p126-roundtrip-'))
-  fs.writeFileSync(path.join(d, `${ROLLOUT}.md`), '---\ntags: [task, rollout]\nstatus: in_progress\nprotocol_version: 3\n---\n\n## Notes\n')
+  fs.writeFileSync(path.join(d, `${ROLLOUT}.md`), '---\ntags: [task, rollout]\nstatus: in_progress\nprotocol_version: 5\n---\n\n## Notes\n')
   fs.writeFileSync(path.join(d, `${SLUG}.md`), '---\ntags: [task]\nstatus: in_progress\nscope: cross-cutting\n' +
     `rollout: "[[${ROLLOUT}]]"\n---\n\n## Notes\n\nbody\n` + (agentParagraph ? `\n## Blocker diagnosis\n\n${agentParagraph}\n` : ''))
   return d

@@ -5,7 +5,8 @@ export const meta = {
 }
 
 // =============================================================================
-// One-off diagnostic harness for task: wave-execute-agent-edit-tool-noop-in-worktree
+// One-off diagnostic harness for the investigation into an engine agent's Edit tool silently no-op-ing
+// inside its explicit worktree (a wrong-tree edit, or a real tool bug?)
 //
 // Each probe agent runs three arms in its OWN worktree of a scratch repo, mirroring
 // the task.workflow.js worktree setup verbatim, then REPORTS (does not fix):
