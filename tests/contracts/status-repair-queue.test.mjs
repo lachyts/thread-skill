@@ -2,13 +2,14 @@
 // tasks by queue state and re-entry stage, and the conductor hands a set-aside task back at the stage it stopped
 // (at Integration: Integration only), defers only its dependent closure, and never writes under a pause.
 //
-// Four fixtures run the landed scripts (reconcile-rollout.py, lead-integrate.py, unfinished-rollout.py) on temp
+// Five fixtures run the landed scripts (reconcile-rollout.py, lead-integrate.py, unfinished-rollout.py) on temp
 // vaults, the set-aside notes written through the real writers (engine rows from task.workflow.js via
 // tests/lib/engine.mjs, the lead's set-aside rows, reconcile): A is a status fixture with every queue state and
 // every set-aside stage; B is an at-Integration set-aside handed back (Integration retried, nothing else); C is B
 // under a draining soft pause, the reason repair never hands back during a pause; D is a legacy rollout another
-// rollout's supersedes: names, the reason the lineage is read before the version. The fixtures pin data; the
-// rules tie the prose to it.
+// rollout's supersedes: names, the reason the lineage is read before the version; E is a RACE under the lead and
+// an UNVERIFIED set-aside, the reason no `resume` runs on either until Lachy has decided. The fixtures pin data;
+// the rules tie the prose to it.
 //
 // Every rule lives in one function, check({ status, repair, fx }), that returns named failures, so the real text
 // and the controls run through identical logic: each control mutates the real text (or the fixture verdict) in one
@@ -18,8 +19,10 @@
 // and `resume` works on the whole rollout, so the class order and the hold on every `resume` until Lachy's RACE
 // decision is recorded are pinned (first-match), as are a merge into another base (another-base), a CLOSED PR
 // (closed-pr) and a rollout another rollout's `supersedes:` names (reverse-lineage). An undecided RACE holds every
-// reinstate and resume on both sides, and its record is allowed in every mode (race-hold). Status's read-only
-// rule is positive: it may invoke only its two script reads, § 3's gh/git reads and the default-branch read.
+// reinstate and resume on both sides, and its record is allowed in every mode (race-hold). A RACE whose re-verify
+// the lead still runs (integrating under a live owner) is no escalation: both sides wait on it, and its fallback
+// is repair, never a resume (race-in-flight). Status's read-only rule is positive: it may invoke only its two
+// script reads, § 3's gh/git reads and the default-branch read.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -293,10 +296,57 @@ function buildD() {
   return { fails, dir: d, successor: path.join(d, `${RN}.md`) }
 }
 
+// ---- fixture E: a RACE under the lead, and an UNVERIFIED set-aside (why no resume runs until Lachy decides) ------
+
+// R hit merge-task's exit 5: the lead appended its `## Race log` line and holds the lane while it re-verifies, so
+// R reads `review` + `pr:` + `owner:` + `integrating:`, exactly as it still reads after a red re-verify halts the
+// lead (no writer runs on a halt): only the owner session tells the two apart. U's merge-task exit 8 ran out
+// (`UNVERIFIED:`), and the lead set it aside at Integration. Both PRs read MERGED into the default branch, so
+// `resume`, which a reinstate and every *Cold resume* run first, flips both done (a gh stub answers it).
+const RE = 'proj-rollout-2026-10-03'
+const E = { race: 'proj-e-race', unverified: 'proj-e-unverified' }
+const UNVERIFIED = `merge-task exit 8 three times: UNVERIFIED: PR #41 merged as ${sha('e')}; not verifiable yet; re-run to verify`
+
+function buildE() {
+  const fails = []
+  const d = path.join(tmp, 'E')
+  fs.mkdirSync(d)
+  const link = `rollout: "[[${RE}]]"`
+  const S = 'scope: cross-cutting'
+  writeRollout(d, RE, Object.values(E))
+  const rollout = path.join(d, `${RE}.md`)
+  fs.appendFileSync(rollout, `\n## Race log\n\n- 2026-10-02T13:55+00:00 [[${E.race}]] RACE: PR #40 merged as ${sha('f')} on parent ${sha('c')} at head ${sha('a')}, not the integrated pair; re-verify it\n`)
+  writeTask(d, E.race, ['status: review', S, link, `pr: ${prOf(40)}`, OWNER, 'started: 2026-10-02T09:00+00:00', 'ready: 2026-10-02T13:00+00:00',
+    'integrating: 2026-10-02T13:30+00:00'])
+  writeTask(d, E.unverified, ['status: review', S, link, `pr: ${prOf(41)}`, OWNER, 'started: 2026-10-02T09:30+00:00', 'ready: 2026-10-02T12:00+00:00'])
+  reconcileIn(d, JSON.parse(must(LEAD, ['set-aside', '--note', path.join(d, `${E.unverified}.md`), '--kind', 'integration'], UNVERIFIED)), '2026-10-02T13:40:00Z')
+
+  const s = statusOf(d, RE)
+  const t = Object.fromEntries(s.tasks.map((x) => [x.slug, x]))
+  if (t[E.race]?.queueState !== 'integrating' || !t[E.race]?.integrating) fails.push(`the RACE task reads ${t[E.race]?.queueState}`)
+  if (!/^owner: /m.test(fmOf(fs.readFileSync(path.join(d, `${E.race}.md`), 'utf8')))) fails.push('the RACE task lost its owner:')
+  if (t[E.unverified]?.queueState !== 'set-aside' || t[E.unverified]?.setAsideAt !== 'integration' || !(t[E.unverified]?.blockerSummary ?? '').includes('UNVERIFIED:')) {
+    fails.push(`the UNVERIFIED task reads ${t[E.unverified]?.queueState}/${t[E.unverified]?.setAsideAt}`)
+  }
+
+  // resume (on a copy) flips both: the hold on every resume until a `RACE decided:` line is what stops it.
+  const c = copyDir(d, path.join(tmp, 'E-resumed'))
+  const gh = path.join(tmp, 'E-gh')
+  fs.writeFileSync(gh, '#!/usr/bin/env bash\ncase "$1 $2" in\n  "pr view") printf \'{"state":"MERGED","mergedAt":"2026-10-02T13:55:00Z","baseRefName":"main","url":"%s"}\\n\' "$3" ;;\n  "repo view") echo main ;;\n  *) exit 2 ;;\nesac\n')
+  fs.chmodSync(gh, 0o755)
+  const r = py(RECONCILE, ['resume', '--rollout', path.join(c, `${RE}.md`), '--tasks-dir', c, '--gh-bin', gh, '--now', NOW])
+  if (r.rc !== 0) fails.push(`resume exited ${r.rc}: ${r.err}`)
+  for (const slug of Object.values(E)) {
+    const st = fmKey(fs.readFileSync(path.join(c, `${slug}.md`), 'utf8'), 'status')
+    if (st !== 'done') fails.push(`resume left ${slug} ${st}`)
+  }
+  return { fails }
+}
+
 const fxA = await buildA()
 const dB0 = buildBBase()
 const dBC = copyDir(dB0, path.join(tmp, 'B-pristine'))
-const fx = { A: fxA, B: buildB(dB0), C: buildC(dBC), D: buildD() }
+const fx = { A: fxA, B: buildB(dB0), C: buildC(dBC), D: buildD(), E: buildE() }
 
 // ---- the prose ------------------------------------------------------------------------------------------------
 
@@ -304,9 +354,10 @@ const real = { status: read('skills/status/SKILL.md'), repair: read('skills/repa
 
 const IN_COUNT = ['merged', 'integrating', 'awaiting-integration', 'running', 'queued', 'set-aside']
 const COUNT_KEY = { merged: 'merged', integrating: 'integrating', 'awaiting-integration': 'awaitingIntegration', running: 'running', queued: 'queued', 'set-aside': 'setAside' }
-// Repair § 2's classes, first-match in this order: RACE and a PR-less merge ahead of merged-never-marked and at
-// Integration (both also match a RACE / UNVERIFIED task), PR CLOSED ahead of awaiting Integration.
-const LABELS = ['RACE', 'PR-less merge', 'merged into another base', 'merged, never marked', 'merge hold', 'live', 'PR CLOSED / branch missing',
+// Repair § 2's classes, first-match in this order: a RACE re-verify in flight first (the lead's own procedure), then
+// RACE and a PR-less merge ahead of merged-never-marked and at Integration (both also match a RACE / UNVERIFIED
+// task), PR CLOSED ahead of awaiting Integration.
+const LABELS = ['RACE re-verify in flight', 'RACE', 'PR-less merge', 'merged into another base', 'merged, never marked', 'merge hold', 'live', 'PR CLOSED / branch missing',
   'awaiting Integration', 'queued', 'at Integration', 'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'own run', 'gate']
 const ROUTES = ['Stale anchor ref', 'The raise', 'A `merge-task:` own-run set-aside', 'A CLOSED PR or a missing branch', 'Recut', 'Leash', 'Hand-off']
 // Status's recommended actions, first-match in this order: the lineage before the version (a legacy note can be
@@ -521,7 +572,7 @@ function check({ status, repair, fx }) {
     !labelled(r4raw, 'A `merge-task:` own-run set-aside', { item: true }).includes('it merges through case (ii) when main has not moved') ||
     fx.B.fails.length) fails.push('integration-only')
 
-  // stages: the 15 classes, each once, and § 4's per-stage routes.
+  // stages: the 16 classes, each once, and § 4's per-stage routes.
   if (JSON.stringify(clsRows.map((c) => c[0].slice(2, -2)).sort()) !== JSON.stringify([...LABELS].sort()) ||
     !ROUTES.every((l) => r4raw.split('\n').some((x) => x.startsWith(`- **${l}`))) ||
     !r4.includes('lead-integrate.py set-aside --note <task note> --kind integration')) fails.push('stages')
@@ -573,6 +624,44 @@ function check({ status, repair, fx }) {
     !labelled(r1raw, 'Pause, drained or stamped.').includes('only once every RACE / UNVERIFIED task has its `RACE decided:` line') ||
     !held.includes('defer of a RACE / UNVERIFIED task') || !held.includes('or under a stamped pause') ||
     !raceC3.includes('repair writes it in every mode (§ 1)') || !raceC3.includes('never as `RACE decided:`')) fails.push('race-hold')
+
+  // race-in-flight: execute's RACE procedure appends the Race log line, then re-verifies with the lane held, so a
+  // RACE that still reads integrating under an owner not known to have ended (no pause, its verdict not red) is
+  // the lead's, not an escalation. Status: § 3 orders the three states (decided, in flight, undecided) and flags
+  // only an undecided one; action 7 excludes it, and the live queue (and the drain) wait on it; the owner-session
+  // qualifier's RACE exception sends it to repair, never to /thread:execute, once its session shows the halt or no
+  // run, or has ended. Repair: an in-flight class does nothing and never asks; the RACE class excludes it; the
+  // live-queue mode waits on it; § 3c shows the re-verify verdict. Fixture E: the RACE reads integrating, and
+  // resume flips both it and an UNVERIFIED set-aside done.
+  const three = labelledRaw(s3raw, 'A RACE has three states.')
+  const inFlight = labelled(s3raw, 'In flight:', { item: true })
+  const fallback = `the next step is \`/thread:repair [[<rollout>]]\` (action ${RUN.escalation}), never \`/thread:execute\``
+  const rif = cls['RACE re-verify in flight'] ?? ''
+  // The live-queue and drain items by their lead words, not their place (the order is actions').
+  const itemBy = (k) => items.find((i) => i.toLowerCase().startsWith(k.toLowerCase())) ?? ''
+  const liveByName = itemBy('a live queue')
+  const drainByName = itemBy('`pause_requested`')
+  if (!collapse(three).includes('`<repoPath>/.claude/integration/race-<slug>.rc`') ||
+    !before(three, '- **Decided:**', '- **In flight:**') || !before(three, '- **In flight:**', '- **Undecided:**') ||
+    !['still reads `integrating` with an `owner:` whose session is not known to have ended', 'no `paused:` stamp stands',
+      'its verdict file is absent or reads `0`', 'not drift', 'flag nothing', 'treat it as the live queue',
+      'once that session shows the `RACE: …` halt or no run, or has ended'].every((k) => inFlight.includes(k)) ||
+    !flag('RACE / UNVERIFIED:').startsWith('- **RACE / UNVERIFIED:** a RACE that is undecided (above)') ||
+    !s3.includes('and a RACE in flight takes none of them') ||
+    !escItem.includes('A RACE re-verify in flight (§ 3) is not an open escalation') ||
+    !qual.includes('**The RACE exception:** with a RACE re-verify in flight (§ 3), the owner session\'s answer never leads to `/thread:execute`') ||
+    !qual.includes(fallback.replace('the next step is', 'and the next step is')) ||
+    !liveByName.includes('A RACE re-verify in flight (§ 3) waits here too') || !liveByName.includes(fallback) ||
+    !drainByName.includes('if a RACE re-verify was in flight, the same answer makes it undecided') || !drainByName.includes(fallback) ||
+    !rif.startsWith("status's in-flight RACE (status § 3)") ||
+    !['still reads `integrating` with an `owner:` whose session is not known to have ended', 'no `paused:` stamp stands',
+      "nothing: execute's RACE procedure owns it", 'never escalate it or ask Lachy mid-re-verify',
+      'Once its owner session shows the `RACE: …` halt or no run, or has ended, it is **RACE**'].every((k) => rif.includes(k)) ||
+    !(cls.RACE ?? '').includes('(a `## Race log` line names it) and not in flight') ||
+    !labelled(r1raw, 'Live queue, not paused.').includes("A RACE re-verify in flight (§ 2) is the lead's: report it and wait") ||
+    !c3.includes('for a RACE only, the lead\'s re-verify verdict, so Lachy decides with it on screen') ||
+    !c3.includes('`<repoPath>/.claude/integration/race-<slug>.rc`') || !c3.includes('`RACE: origin/<default> fails the verifier`') ||
+    fx.E.fails.length) fails.push('race-in-flight')
 
   // closed-pr: a CLOSED PR (or a missing branch) on an awaiting-Integration, integrating or at-Integration task is
   // input-gated, never left to the loop; it keeps its pr:, so hand-back follows a restore only when it is set aside.
@@ -693,6 +782,10 @@ test('fixture C: a hand-back during a drain would undo it (pausedNow true, then 
   assert.deepEqual(fx.C.fails, [])
 })
 
+test('fixture E: a RACE under the lead reads integrating, and resume flips it and an UNVERIFIED set-aside done', () => {
+  assert.deepEqual(fx.E.fails, [])
+})
+
 // ---- the rules -------------------------------------------------------------------------------------------------
 
 test('status and repair hold every queue rule', () => {
@@ -702,7 +795,7 @@ test('status and repair hold every queue rule', () => {
 // ---- controls: each mutates the real text (or a fixture verdict) in one place and must fail with exactly its rule ----
 
 const RULES = ['states', 'set-aside', 'log-line', 'owner', 'drift', 'actions', 'lineage', 'read-only', 'reverse-lineage', 'integration-only',
-  'stages', 'first-match', 'another-base', 'race-hold', 'closed-pr', 'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off', 'no-wave']
+  'stages', 'first-match', 'another-base', 'race-hold', 'race-in-flight', 'closed-pr', 'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off', 'no-wave']
 const CONTROLLED = new Set()
 
 // Replaces the first match of `from`. Whitespace inside it matches any run of whitespace, so a reflowed line still
@@ -887,6 +980,11 @@ test('control: RACE classed after merged, never marked fails first-match', () =>
   const merged = lineWith(real.repair, '| **merged, never marked** |')
   only({ repair: real.repair.replace(race + '\n', '').replace(merged, merged + '\n' + race) }, 'first-match', 'RACE late')
 })
+test('control: the in-flight RACE classed after RACE fails first-match', () => {
+  const inFlight = lineWith(real.repair, '| **RACE re-verify in flight** |')
+  const race = lineWith(real.repair, '| **RACE** |')
+  only({ repair: real.repair.replace(inFlight + '\n', '').replace(race, race + '\n' + inFlight) }, 'first-match', 'in flight late')
+})
 test('control: PR CLOSED classed after awaiting Integration fails first-match', () => {
   const closed = lineWith(real.repair, '| **PR CLOSED / branch missing** |')
   const awaiting = lineWith(real.repair, '| **awaiting Integration** |')
@@ -942,6 +1040,38 @@ test('control: repair advising a reinstate before the RACE decision fails race-h
 })
 test('control: a does-not-stand decision recorded as decided while a lead is live fails race-hold', () => {
   only(rp('(never as `RACE decided:`)', '(as `RACE decided:`)'), 'race-hold', 'pending')
+})
+test('control: a RACE flag that fires during the re-verify fails race-in-flight', () => {
+  only(st('a RACE that is undecided (above)', 'a `## Race log` line names a task that is not done'), 'race-in-flight', 'status flag')
+})
+test('control: an in-flight RACE flagged as drift fails race-in-flight', () => {
+  only(st('flag\nnothing, and treat it as the live queue', 'flag it as an open escalation'), 'race-in-flight', 'status in flight')
+})
+test('control: an open escalation that takes an in-flight RACE fails race-in-flight', () => {
+  only(st(' A RACE re-verify in flight (§ 3) is not an open escalation: the lead decides it itself, so it waits under 9 or 10, and nobody asks Lachy mid-re-verify.', ''),
+    'race-in-flight', 'action 7')
+})
+test('control: an owner-session fallback that resumes an in-flight RACE fails race-in-flight', () => {
+  const q = labelledRaw(raw(real.status, /^### 4\. /), 'Owner-session qualifier.')
+  const i = q.indexOf('**The RACE exception:**')
+  assert.ok(i > 0, 'control setup: the RACE exception')
+  only({ status: real.status.replace(q, q.slice(0, i).trimEnd()) }, 'race-in-flight', 'qualifier')
+})
+test('control: a live queue that resumes an in-flight RACE fails race-in-flight', () => {
+  only(st('applies to it: once the owner session shows the `RACE: …` halt or no run, or has ended, the next step is `/thread:repair [[<rollout>]]` (action 7), never `/thread:execute`.',
+    'applies to it: once the owner session shows the `RACE: …` halt or no run, or has ended, `/thread:execute [[<rollout>]]` resumes.'), 'race-in-flight', 'action 10')
+})
+test('control: a RACE class that takes the re-verify in flight fails race-in-flight', () => {
+  only(rp('(a `## Race log` line names it) and not in flight,', '(a `## Race log` line names it),'), 'race-in-flight', 'repair RACE class')
+})
+test('control: an in-flight class that escalates fails race-in-flight', () => {
+  only(rp("nothing: execute's RACE procedure owns it", 'escalate (§ 3c) at once'), 'race-in-flight', 'repair in-flight class')
+})
+test('control: § 3c without the re-verify verdict fails race-in-flight', () => {
+  only(rp("5. for a RACE only, the lead's re-verify verdict, so Lachy decides with it on screen:", '5. for a RACE only:'), 'race-in-flight', 'verdict')
+})
+test('control: fixture E failing fails race-in-flight', () => {
+  only({ fx: { ...real.fx, E: { fails: ['resume left the RACE task review'] } } }, 'race-in-flight', 'fixture E')
 })
 test('control: a restore that hands back unconditionally fails closed-pr', () => {
   only(rp('then `hand-back` **only when the task is set aside**', 'then `hand-back`'), 'closed-pr', 'restore')
@@ -1014,7 +1144,7 @@ test('control: a wave in repair fails no-wave', () => {
   only(rp('### 5. ', 'Defer it out of the wave.\n\n### 5. '), 'no-wave', 'repair wave')
 })
 
-test('the rules are all named (23) and each has a control', () => {
-  assert.equal(RULES.length, 23)
+test('the rules are all named (24) and each has a control', () => {
+  assert.equal(RULES.length, 24)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
