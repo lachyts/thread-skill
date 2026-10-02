@@ -246,6 +246,22 @@ J=$(nxt)
 ok "$(q "$J" 'd["awaitingIntegration"]')" '["a"]' "approve-gates a: next lists it awaiting Integration"
 ok "$(q "$J" 'sorted(d["restart"])')" '["b","c"]' "approve-gates b, c: next --running '' restarts them, never a"
 ok "$(q "$(inp b)" 'd["resumeAt"]')" '"revise"' "approve-gates b: Restart routing still reads a seeded revise"
+# the gates_signed: marker: approve-gates writes it on the in_progress route only; the restart's mark-started
+# consumes it (says so once), so only the restart that directly follows a sign-off prints § 3.7's warning.
+ok "$(fm a gates_signed)" "<none>" "approve-gates a: no gates_signed: on the Integration route"
+ok "$(fm b gates_signed)|$(fm c gates_signed)" "gates_signed: 2026-10-03T09:00+00:00|gates_signed: 2026-10-03T09:00+00:00" \
+  "approve-gates b, c: gates_signed: stamped from --now"
+ms() { out=$(python3 "$SCRIPT" mark-started --tasks "$1" --tasks-dir "$D" --now "$NOW" 2>&1); rc=$?; }
+ms b
+ok "$rc|$(fm b gates_signed)" "0|<none>" "mark-started b: consumes gates_signed:"
+has "$out" "b: signed-gate restart (gates signed 2026-10-03T09:00+00:00; gates_signed: cleared)" "mark-started b: names the signed-gate restart"
+ms b
+ok "$rc" 0 "mark-started b: a later restart exits 0"
+hasnt "$out" "signed-gate restart" "mark-started b: a later restart is not a signed-gate restart"
+ms a
+hasnt "$out" "signed-gate restart" "mark-started: a note with no marker never says signed-gate restart"
+python3 "$SCRIPT" defer --tasks c --tasks-dir "$D" >/dev/null
+ok "$(fm c status)|$(fm c gates_signed)" "status: open|<none>" "defer c: clears gates_signed: with the other run stamps"
 # the stage is read before the flip, so the approve message names it
 scen gate-stage-msg
 mkro
@@ -256,7 +272,7 @@ has "$out" "a: 1 gate(s) approved (signed off 2026-10-02) -> status review (stop
 mkt b in_progress
 rec "$(own_gate b)"
 ag b
-has "$out" "b: 1 gate(s) approved (signed off 2026-10-02) -> status in_progress" "approve-gates: the own-run route keeps today's message"
+has "$out" "b: 1 gate(s) approved (signed off 2026-10-02) -> status in_progress (gates_signed: 2026-10-03T09:00+00:00, consumed by the restart's mark-started)" "approve-gates: the own-run route names its marker"
 # (d) a set-aside last line but no pr: it cannot integrate without a PR -> in_progress, with a WARN
 scen gate-nopr
 mkro
