@@ -86,7 +86,8 @@ export const meta = {
 //                                    //   Never rendered into a prompt — the one arg the lead may ADD on a
 //                                    //   resume (execute § 3.7: a signed gate resumes its gate-pending
 //                                    //   call, and a replayed implementer/reviser stop for gates now all
-//                                    //   approved gets one continuation, SIGNED_GATES_RESUME).
+//                                    //   approved gets a continuation per gate not yet passed there,
+//                                    //   SIGNED_GATES_RESUME).
 //       resume          : object,    // optional (p12-6); the SEEDED REVISE after an Integration rejection:
 //                                    //   { stage: 'revise', prUrl, branch, worktreePath, reviewHistory,
 //                                    //   reviewRoundsUsed, plan }. Plan and implement are skipped; the
@@ -420,11 +421,15 @@ function gateDiagnosis(gates) {
 // gate-pending call with resumeFromRunId and task.approvedGates added, so every agent() up to the stop
 // replays from cache — the stopped implementer or reviser included, with its cached
 // { blocked: true, gatedInputs: [G] }. Every G is now approved, so that block is neither a gate stop nor
-// hardness (a gate stop never escalates, §3.7): the stopped prompt is re-dispatched ONCE, at the same tier,
+// hardness (a gate stop never escalates, §3.7): the stopped prompt is re-dispatched, at the same tier,
 // effort, schema and phase, with this STATIC block appended. It carries no gate text, so approvedGates
 // still never reaches a prompt (pinned by approved-gates-resume.test.mjs). The same continuation answers a
-// fresh run whose agent stops for gates the note already approved (ADR 0008's agent-fixable slip). Bounded
-// to one per site: a second signed stop takes the old path (escalate on opus, else block).
+// fresh run whose agent stops for gates the note already approved (ADR 0008's agent-fixable slip).
+// Bounded per site by the gates already continued past there, not by a count: an agent can find gates one
+// after another (A stops for G; G signed; B's continuation stops for G2; G2 signed; C replays both stops
+// from cache), so a signed stop that names a gate not yet passed at this site gets one more continuation —
+// at most one per distinct approved gate. A signed stop that repeats only gates already passed takes the
+// old path (escalate on opus, else block).
 const SIGNED_GATES_RESUME = `RESUMED AFTER SIGN-OFF (ADR 0008): an earlier dispatch of this same prompt stopped before a gated
 action. A human has since signed those gates off: re-read the task note's "## Approved gates" section, then
 do the work. Each approved cap is a ceiling, never a target. A gate that section does not cover still stops
@@ -436,11 +441,17 @@ function signedStop(task, r) {
     unapprovedGates(r.gatedInputs, task.approvedGates).length === 0
 }
 
-// r unchanged, unless it is a signedStop: then the one continuation past the sign-off (see above).
+// r unchanged, unless it is a signedStop: then continuations past the sign-off while each stop names a gate
+// not yet passed at this site (see above). The n-th is labelled `<label> signed` (n = 1) or
+// `<label> signed <n>`; each carries the same bytes, the stopped prompt plus SIGNED_GATES_RESUME.
 async function pastSignedGates(task, r, prompt, opts) {
-  if (!signedStop(task, r)) return r
-  log(`${opts.label}: stopped for gates already signed off — one continuation past the sign-off (ADR 0008)`)
-  return runAgent(prompt + '\n\n' + SIGNED_GATES_RESUME, { ...opts, label: opts.label + ' signed' })
+  const passed = new Set()
+  for (let n = 1; signedStop(task, r) && r.gatedInputs.some((g) => !passed.has(normalizeGate(g))); n++) {
+    for (const g of r.gatedInputs) passed.add(normalizeGate(g))
+    log(`${opts.label}: stopped for gates already signed off — continuation ${n} past the sign-off (ADR 0008)`)
+    r = await runAgent(prompt + '\n\n' + SIGNED_GATES_RESUME, { ...opts, label: opts.label + (n === 1 ? ' signed' : ` signed ${n}`) })
+  }
+  return r
 }
 
 // Known-baseline-failures manifest (item 2). When the rollout declares tests that already fail on a clean
@@ -1505,7 +1516,7 @@ async function implement(task, st, prev, a) {
   // clean gate-pending block and never escalate on it. Checked before the escalation branch on both
   // passes. Approved gates are filtered out defensively (the prompt already tells the agent to proceed
   // past them), so an already-signed gate can never be re-asked; a stop for ONLY approved gates has already
-  // had its one continuation (pastSignedGates) by the time this runs.
+  // had its continuations (pastSignedGates) by the time this runs, so it repeats gates already passed.
   const gatePending = (r) => {
     const gates = unapprovedGates(r.gatedInputs, task.approvedGates)
     if (!gates.length) return null
@@ -1516,7 +1527,7 @@ async function implement(task, st, prev, a) {
   // is unchanged. Each runAgent() keeps a builder call as its first argument (git-env-scrub's e2 guard).
   const firstOpts = { label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task) }
   let r = await runAgent(prompt(''), firstOpts)
-  if (!r.__dead) r = await pastSignedGates(task, r, prompt(''), firstOpts)
+  r = await pastSignedGates(task, r, prompt(''), firstOpts)
   // A dead agent is transient infra, NOT evidence of hardness — do NOT escalate; report a clean block.
   if (r.__dead) return transientImplBlock(planExtra)
   const gatedFirst = gatePending(r)
@@ -1541,7 +1552,7 @@ async function implement(task, st, prev, a) {
     const retryTask = moved ? task : { ...task, maxIterations: CAPPED_RETRY_ITERATIONS }
     const retryOpts = { label: `implement:${task.slug}@${st.tier}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task) }
     r = await runAgent(prompt(prior, retryTask), retryOpts)
-    if (!r.__dead) r = await pastSignedGates(task, r, prompt(prior, retryTask), retryOpts)
+    r = await pastSignedGates(task, r, prompt(prior, retryTask), retryOpts)
     if (r.__dead) return transientImplBlock(planExtra)
     const gatedRetry = gatePending(r)
     if (gatedRetry) return gatedRetry
@@ -1562,11 +1573,9 @@ async function reviseRound(task, st, current, priorFeedback, round, a, planText,
   if (st.tier === 'opus') escalate(st, task.slug, 'review')
   const reviseOpts = { label: `revise:${task.slug} r${round}`, phase: 'Review', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task) }
   let revised = await runAgent(reviserPrompt(task, current, priorFeedback, round, a, planText, seeded), reviseOpts)
-  // A replayed (or fresh) stop for gates the note has since approved: one continuation (pastSignedGates), on
-  // the same reviser prompt re-rendered from the same inputs.
-  if (!revised.__dead) {
-    revised = await pastSignedGates(task, revised, reviserPrompt(task, current, priorFeedback, round, a, planText, seeded), reviseOpts)
-  }
+  // A replayed (or fresh) stop for gates the note has since approved: continuations (pastSignedGates), on the
+  // same reviser prompt re-rendered from the same inputs. A dead result passes through (signedStop is false).
+  revised = await pastSignedGates(task, revised, reviserPrompt(task, current, priorFeedback, round, a, planText, seeded), reviseOpts)
   if (revised.__dead) return { stop: { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS } }
   if (revised.blocked) {
     // A reviser can DISCOVER a gated input the earlier passes never hit (ADR 0008) — same human
