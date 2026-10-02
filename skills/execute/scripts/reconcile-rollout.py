@@ -29,7 +29,10 @@ Subcommands:
               line naming why and the remedy, `/thread:schedule <its first project> --regenerate`.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
-              `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here.
+              `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
+              approve-gates' `gates_signed:` marker (p12-14): when the note carries one, it is removed and a
+              second line `<slug>: signed-gate restart (gates signed <stamp>) ...` is printed, so the lead
+              prints execute § 3.7's fresh-call warning only on the restart that directly follows a sign-off.
 
   mark-integrating Stamp `integrating: <time>` on a `review` note with a `pr:` as its Integration begins
               (the first wins): the durable signal /thread:status reads.
@@ -90,7 +93,7 @@ Subcommands:
               the work truly landed (e.g. `gh pr view` shows MERGED) before invoking. Idempotent.
 
   defer       Pop task(s) out of a rollout, back to open backlog: clears `wave:`/`rollout:`/`owner:` and
-              the `started:`/`merged:`/`integrating:`/`ready:` stamps (first-start-wins would otherwise carry a
+              the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:` stamps (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
               re-plans them. The dependent-closure safety check lives in the /thread:repair skill.
 
@@ -118,10 +121,17 @@ Subcommands:
   approve-gates  Sign off a gate-pending task's declared gated inputs (ADR 0008): move the bullets
               under "## Gated inputs (awaiting sign-off)" into "## Approved gates" with a sign-off
               date (gate + cap + sign-off — the durable record the engine reads via task.approvedGates
-              so re-dispatches never re-ask those exact gates), remove the pending section, and flip
-              the note back to in_progress so resume-filter re-dispatches it. Refuses a note that
-              isn't gate-pending; idempotent once approved (already-approved note = no-op). Run by
-              the lead session ONLY after the human explicitly signs off — never unattended.
+              so re-dispatches and resumes never re-ask those exact gates), remove the pending section,
+              and flip the note by the stage it stopped (p12-14), read before the flip from the
+              `## Integration log`'s last line paired with the gate-pending status (p12-16): `set-aside`
+              with a `pr:` is a stop at Integration -> `status: review`, `ready:` restamped from --now and
+              `integrating:` removed (it rejoins the Integration queue, as hand-back's Integration arm
+              does); anything else (a seeded revise's `rejected`, no log) -> `in_progress` with a
+              `gates_signed: <now>` marker, where the lead's Restart routing resumes its gate-pending call
+              (execute § 3.7) and the restart's mark-started consumes the marker. A `set-aside` last
+              line with no `pr:` goes to in_progress with a WARN. Refuses a note that isn't
+              gate-pending; idempotent once approved (already-approved note = no-op). Run by the lead
+              session ONLY after the human explicitly signs off — never unattended.
 
 Stdlib only. Frontmatter is edited line-surgically (not via a YAML round-trip) to preserve field order,
 comments, and spacing exactly — matching how the rest of the vault tooling treats frontmatter. Importing
@@ -244,6 +254,9 @@ BLOCKED_SECTIONS = {
 GATE_PENDING_STATUS = "gate-pending"
 GATE_PENDING_SECTION = "## Gated inputs (awaiting sign-off)"
 APPROVED_GATES_SECTION = "## Approved gates"
+# approve-gates' marker on a signed task sent back to in_progress (p12-14): the restart that directly follows
+# the sign-off reads it through mark-started, which removes it (execute § 3.7's fresh-call warning).
+GATES_SIGNED_KEY = "gates_signed"
 
 # Review-loop memory (2026-08-14): an approval on the FINAL review round with real rejection history
 # (engine flag approvedAtCeiling) persists the accumulated by-round rationale. An AUDIT RECORD, not an
@@ -872,6 +885,19 @@ def _integration_log_line(task) -> str:
         "duration=" + _log_field(metrics.get("durationMinutes"), minutes=True),
         "triggers=" + _log_field(integ.get("triggers")),
     ])
+
+
+def _log_lines(note) -> list:
+    """The `## Integration log`'s non-blank lines, oldest first."""
+    return [l.rstrip() for l in note.section_text(INTEGRATION_LOG_SECTION).split("\n") if l.strip()]
+
+
+def _last_log_line(note):
+    """The `## Integration log`'s LAST non-blank line, or None. The p12-16 contract has this one reader
+    (approve-gates here, `lead-integrate.py`'s prepare and inputs through last_integration): read the last
+    line, never a search, since old lines survive a defer or a recut."""
+    lines = _log_lines(note)
+    return lines[-1] if lines else None
 
 
 def _status(note) -> str:
@@ -1549,7 +1575,9 @@ def _flag(args, note) -> str:
 
 def cmd_mark_started(args) -> int:
     """Stamp `started:` as a task starts (first start wins: a restart keeps the first clock) and
-    remove `integrating:`. Refuses a done, merged or dropped note."""
+    remove `integrating:`. Consumes approve-gates' `gates_signed:` marker (p12-14): the restart that
+    directly follows a sign-off says so, once, and no later restart does. Refuses a done, merged or
+    dropped note."""
     now = _now(args)
     for slug, _path, note in _each_note(args):
         status = _status(note)
@@ -1560,8 +1588,13 @@ def cmd_mark_started(args) -> int:
         if not existing:
             note.set("started", _stamp(now))
         note.remove("integrating")
+        signed = _scalar(note.get(GATES_SIGNED_KEY))
+        note.remove(GATES_SIGNED_KEY)
         note.save(dry_run=args.dry_run)
         print(f"{slug}: started={existing or _stamp(now)}{' (kept)' if existing else ''}{_flag(args, note)}")
+        if signed:
+            print(f"{slug}: signed-gate restart (gates signed {signed}; {GATES_SIGNED_KEY}: cleared) — "
+                  "a fresh call, not a resume of its gate-pending call, prints execute § 3.7's warning first")
     return _finish(args, now)
 
 
@@ -1675,7 +1708,7 @@ def cmd_log_integration(args) -> int:
         # A re-run of the same Integration (same --started, same record) is a no-op even at a later --now:
         # every token but the measured duration must match. append_line's own dedupe covers the rest.
         key = line.split(" ")[:8]
-        logged = [l.rstrip().split(" ") for l in note.section_text(INTEGRATION_LOG_SECTION).split("\n") if l.strip()]
+        logged = [l.split(" ") for l in _log_lines(note)]
         if not any(t[:8] == key for t in logged):
             note.append_line(INTEGRATION_LOG_SECTION, line)
         note.save(dry_run=args.dry_run)
@@ -1943,10 +1976,10 @@ def cmd_defer(args) -> int:
                 errors.append(f"{slug}: belongs to rollout {cur!r}, not {expected!r} — refusing to defer")
                 continue
         note.set("status", "open")
-        for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready"):
+        for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready", GATES_SIGNED_KEY):
             note.remove(key)
         note.save(dry_run=args.dry_run)
-        print(f"{slug}: deferred->open (wave/rollout/owner and started/merged/integrating/ready cleared)" +
+        print(f"{slug}: deferred->open (wave/rollout/owner and started/merged/integrating/ready/{GATES_SIGNED_KEY} cleared)" +
               (" (dry-run)" if args.dry_run else " [written]"))
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -2063,8 +2096,27 @@ def _norm_gate(line: str) -> str:
     return re.sub(r"\s+", " ", s).strip().lower()
 
 
+def _last_log_outcome(note):
+    """The outcome token of the Integration log's last line (_last_log_line), or None."""
+    toks = (_last_log_line(note) or "").split(" ")
+    return toks[1] if len(toks) > 1 else None
+
+
+def _gate_stage(note) -> str:
+    """Where a gate-pending note stopped (p12-14): 'integration' when the Integration log's last line is
+    `set-aside` and the note has a `pr:` (its integrate call stopped for a gate: the pairing
+    `lead-integrate.py inputs` reads as resumeAt: integration), else 'run' (its own call, or a seeded
+    revise after a `rejected` line)."""
+    return "integration" if _last_log_outcome(note) == "set-aside" and _pr(note) else "run"
+
+
 def cmd_approve_gates(args) -> int:
-    """Record the human sign-off for a gate-pending task's declared gated inputs (ADR 0008).
+    """Record the human sign-off for a gate-pending task's declared gated inputs (ADR 0008), and send
+    the task back by the stage it stopped (p12-14): a stop at Integration -> `review` with `ready:`
+    restamped and `integrating:` removed (it rejoins the Integration queue, and a fresh integrate call
+    re-reads the latest main); any other stop -> `in_progress` with a `gates_signed:` marker (Restart
+    routing resumes its gate-pending call on the signed plan, execute § 3.7, and the restart's
+    mark-started consumes the marker). The stage is read before the status flips.
 
     The CALLER's contract: run this only after the user explicitly signed off the gates in
     conversation — the sign-off itself is the one decision no agent may make.
@@ -2072,6 +2124,7 @@ def cmd_approve_gates(args) -> int:
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
     date = args.date or datetime.now().astimezone().date().isoformat()
+    now = _now(args)
     errors = []
     for slug in slugs:
         path = tasks_dir / f"{slug}.md"
@@ -2098,11 +2151,23 @@ def cmd_approve_gates(args) -> int:
         existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
         have = {_norm_gate(l) for l in existing}
         merged = existing + [f"- {g} (approved {date})" for g in gates if _norm_gate(g) not in have]
+        stage = _gate_stage(note)  # before the flip: the pairing reads status gate-pending
+        if stage == "run" and _last_log_outcome(note) == "set-aside":
+            print(f"WARN: {slug}: the Integration log's last line is set-aside but the note has no pr: — "
+                  "it cannot rejoin the Integration queue, so it goes to in_progress (its own call)", file=sys.stderr)
         note.upsert_section(APPROVED_GATES_SECTION, "\n".join(merged))
         note.remove_section(GATE_PENDING_SECTION)
-        note.set("status", "in_progress")
+        if stage == "integration":
+            note.set("status", "review")
+            note.set("ready", _stamp(now))
+            note.remove("integrating")
+            route = f"status review (stopped at Integration: rejoins the Integration queue; ready: {_stamp(now)})"
+        else:
+            note.set("status", "in_progress")
+            note.set(GATES_SIGNED_KEY, _stamp(now))
+            route = f"status in_progress ({GATES_SIGNED_KEY}: {_stamp(now)}, consumed by the restart's mark-started)"
         note.save(dry_run=args.dry_run)
-        print(f"{slug}: {len(gates)} gate(s) approved (signed off {date}) -> status in_progress"
+        print(f"{slug}: {len(gates)} gate(s) approved (signed off {date}) -> {route}"
               + (" (dry-run)" if args.dry_run else " [written]"))
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -2245,6 +2310,7 @@ def main() -> int:
     ag.add_argument("--tasks", required=True, help="comma-separated task slugs (must be at status gate-pending)")
     ag.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     ag.add_argument("--date", default=None, help="sign-off date stamped on each gate (default: today)")
+    ag.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the ready: restamp of a stop at Integration)")
     ag.add_argument("--dry-run", action="store_true")
     ag.set_defaults(func=cmd_approve_gates)
 

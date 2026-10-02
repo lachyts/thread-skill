@@ -267,10 +267,6 @@ def _load_note(path):
         raise EnvError(str(e))
 
 
-def _log_lines(note):
-    return [l.rstrip() for l in note.section_text(rr.INTEGRATION_LOG_SECTION).split("\n") if l.strip()]
-
-
 def log_fields(line):
     """One Integration log line as fields ('-' -> None), or None."""
     if not line:
@@ -287,8 +283,8 @@ def log_fields(line):
 
 
 def last_integration(note):
-    lines = _log_lines(note)
-    return log_fields(lines[-1]) if lines else None
+    """The Integration log's last line as fields, or None (rr._last_log_line: the one p12-16 reader)."""
+    return log_fields(rr._last_log_line(note))
 
 
 # ---- prepare -------------------------------------------------------------------------------------------
