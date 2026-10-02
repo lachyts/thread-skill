@@ -14,8 +14,8 @@ Subcommands:
       exist — the PR branch is gone`); the anchor A = the engine's ANCHOR_RECIPE (pinned copy) with
       WT=<repo> (a `stale-ref X` is deleted with `update-ref -d <ref> X`, guarded by X, and the recipe
       re-run: `staleRefDeleted`); TB = merge-base(A, origin/<default>); the record = the note's
-      `## Integration log` LAST line when it is `integrated`; case (i) is H == A, case (ii) is
-      record.head == H, anything else routes `trouble []`. In the task tree it aborts a merge left in
+      `## Integration log` LAST line when it is `integrated` with a full head and base; case (i) is H == A,
+      case (ii) is record.head == H, anything else routes `trouble []`. In the task tree it aborts a merge left in
       progress and stashes tracked leftovers (`stashed: integration leftovers <head>`, never discarded);
       a missing tree, a tree off its branch or one ahead of origin routes `trouble []`, else it
       fast-forwards only. When B = origin/<default> equals TB (case i) or record.base (case ii) the route
@@ -436,7 +436,9 @@ def cmd_prepare(args):
     out.update(landed=landed, note=note_why)
 
     last = last_integration(note)
-    record = last if last and last.get("outcome") == "integrated" else None
+    # Only a complete `integrated` record can back case (ii): its head and base are the pair merge-task needs.
+    record = last if (last and last.get("outcome") == "integrated" and re.fullmatch(r"[0-9a-f]{40}", last.get("head") or "")
+                      and re.fullmatch(r"[0-9a-f]{40}", last.get("base") or "")) else None
     out["record"] = record
     if h == a:
         out["case"] = "i"

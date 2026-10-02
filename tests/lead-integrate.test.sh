@@ -277,6 +277,10 @@ prep
 ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')|$(j "$J" 'd["sharedFiles"]')|$(j "$J" 'd["trouble"]')" "verify|ii|[]|[]" "C6: main moved → verify; shared files over B0..B1 only (a.txt was integrated already)"
 ok "$(git -C "$WT" rev-list --parents -n 1 HEAD | cut -d' ' -f2-)" "$M1 $B1" "C6: the lead's merge has parents (M1, B1)"
 ok "$(j "$J" 'd["taskBase"]')" "$TB" "C6: the task base stays merge-base(anchor, main)"
+sed -i.bak "s/ base=$B0 wait=5 / base=- wait=5 /" "$V/$SLUG.md"
+prep
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')" "trouble|null" "C6: an integrated line with no base never backs case (ii)"
+sed -i.bak "s/ base=- wait=5 / base=$B0 wait=5 /" "$V/$SLUG.md"
 for o in rejected set-aside; do
   sed -i.bak "s/ integrated path=integrator / $o path=integrator /" "$V/$SLUG.md"
   prep
