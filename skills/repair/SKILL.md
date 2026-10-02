@@ -32,7 +32,7 @@ by preparing a single-wave input. Never create a second convergence engine.
 ## Scope
 
 Reads/writes `~/repos/obsidian/Work/Tasks/`, makes `gh`/`git` calls against the target repo, and drives
-`/thread:execute`'s resume. Merges only ever happen via execute's `merge-wave.sh`.
+`/thread:execute`'s resume. Merges only ever happen via execute's `merge-task.sh`.
 
 ## Invocation forms
 
@@ -139,7 +139,7 @@ real fix is held for protocol 4 — `resolve` accepting a verified-merged `in_pr
 Not while any stranded-merged task remains (3c): stop there instead. These re-dispatch through the
 **existing** engine — do **not** write a new loop. Follow `/thread:execute` §4.5 (the continuous
 per-wave resume): compute the still-to-dispatch set with `reconcile-rollout.py resume-filter`, run the
-Workflow one wave at a time, merge each wave with `merge-wave.sh`, advance the cursor, `mark-done`. The
+Workflow one wave at a time, merge each wave with `merge-task.sh`, advance the cursor, `mark-done`. The
 re-dispatched agent reads the prior `## Review-blocked feedback` / `## Blocker diagnosis` /
 `## Repair input` from the note. This hand-off enters §4.5 directly, so execute's § 2.7 pushed-base
 gate (entry points only) does not run; the next `/thread:execute [[<rollout>]]` runs it.
@@ -197,7 +197,7 @@ earlier runs wrote while the task was still stranded).
 - **Don't re-implement merge or convergence.** Drift → `resolve`; stranded-merged → escalate (3c);
   everything else → execute's §4.5 resume. If you're writing a dispatch/merge loop, you've turned the
   conductor into an engine — stop.
-- **Don't merge anywhere but `merge-wave.sh`.** No inline `gh pr merge`, no `--admin`, no force-push.
+- **Don't merge anywhere but `merge-task.sh`.** No inline `gh pr merge`, no `--admin`, no force-push.
   The engine keeps sole merge authority (README → *Coexistence with Orca*).
 - **Don't ask the user about agent-fixable blocks.** Retry them silently (cap one); ping only for
   input-gated decisions or a second block.

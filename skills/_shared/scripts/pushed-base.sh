@@ -8,7 +8,7 @@
 #
 # The clone set: <repoPath>'s toplevel first, then every candidate that is a work tree whose raw
 # remote.origin.url (not `remote get-url`, which applies insteadOf) normalises to the same owner/name the
-# merge-wave way, de-duplicated by `pwd -P` toplevel. Candidates come from each `--also <dir>` (the project
+# merge-task way, de-duplicated by `pwd -P` toplevel. Candidates come from each `--also <dir>` (the project
 # note's `Local:` path; an empty <dir> is a no-op, a non-clone is noted and skipped) and from every
 # directory-source plugin marketplace in known_marketplaces.json, read through
 # skills/execute/scripts/self-rollout-check.sh --list-dirs so that file stays the one registry parser (a
@@ -19,7 +19,7 @@
 # failure is exit 2), then:
 #   Block — a member whose local <b> is ahead of origin/<b> blocks (exit 3) when some of that content is not
 #     on origin/<b>, with its `log --oneline` and a remedy built from close's repo-state.sh line when that
-#     member's HEAD is <b> (queued / stranded / split, merge-wave's three patterns), else a generic one; both
+#     member's HEAD is <b> (queued / stranded / split, merge-task's three patterns), else a generic one; both
 #     name the reset that drops the local copies once landed. Ahead commits whose content is already on
 #     origin/<b> (`git cherry` all `-`, or no touched file differs: a squash or cherry-picked PR) are a note
 #     naming that reset; ahead commits touching only THREAD.md are a note. An ahead set touching no file blocks.
