@@ -17,7 +17,8 @@ the diagnosis; those are the treatment.
 
 Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` (older undated `<slug>-rollout` notes
 still resolve, see step 1) + its linked task notes, and makes **read-only** `gh`/`git` calls against the
-target repo. Writes nothing. Obsidian + GitHub read access only.
+target repo (plus, for a RACE task, a plain read of its local verdict file, § 3). Writes nothing. Obsidian +
+GitHub read access only.
 
 ## Invocation forms
 
@@ -137,14 +138,32 @@ nothing more:
 - at most one `gh pr list --repo <owner/name> --state merged --limit 200 --json number,url,headRefName,baseRefName,mergedAt`,
   and only when a task with `started` has no `pr`.
 
-Flag **drift**, one line each in the Drift block. The first three flags are first-match, in this order: a RACE
-or UNVERIFIED task's PR is MERGED too, so it is never also flagged merged, never marked.
+**A RACE has three states.** Merge-task's exit 5 means the PR merged, but as a combination nobody
+verified. Execute's RACE procedure (execute § 4.5) appends the `## Race log` line first, then re-verifies the
+merge commit in the background for up to 40 minutes with the lane held: green → `mark-done`; red, rc 124 or a
+missing rc → a halt with `reason="RACE: origin/<default> fails the verifier"`. Its verdict file is
+`<repoPath>/.claude/integration/race-<slug>.rc`, written last, so an absent one means unfinished. A task that a
+`## Race log` line names and that is not done is in the first of these states that matches:
 
-- **RACE / UNVERIFIED:** a `## Race log` line on the rollout note names a task that is not done, or a
-  set-aside reason (`blockerSummary`) carries `UNVERIFIED:`, and no dated `## Notes` line on the rollout note
-  records `repair: [[<slug>]] RACE decided: …`. Main's state is Lachy's call, and until it is recorded no
-  `resume` may run: it would flip the task done on an unverified main. Once it is, the task reads as merged,
-  never marked. The flag reads only the vault, so it holds offline too.
+- **Decided:** a dated `## Notes` line on the rollout note records `repair: [[<slug>]] RACE decided: …`. If
+  the merge stands, the task reads as merged, never marked; if it does not, repair defers it.
+- **In flight:** it still reads `integrating` with an `owner:` whose session is not known to have ended, no
+  `paused:` stamp stands (a hard pause stops the re-verify), and its verdict file is absent or reads `0`. That
+  is the lead's own procedure, not drift. Render `RACE re-verify in flight` on its Integrating line, flag
+  nothing, and treat it as the live queue (§ 4's actions 9 and 10: wait, and check the owner session). It
+  turns undecided once that session shows the `RACE: …` halt or no run, or has ended. From any other session,
+  status cannot tell which, so say so.
+- **Undecided:** anything else. That is an open escalation, the flag below.
+
+Flag **drift**, one line each in the Drift block. The first three flags are first-match, in this order: a RACE
+or UNVERIFIED task's PR is MERGED too, so it is never also flagged merged, never marked, and a RACE in flight
+takes none of them.
+
+- **RACE / UNVERIFIED:** a RACE that is undecided (above), or a set-aside task whose reason
+  (`blockerSummary`) carries `UNVERIFIED:` and has no `repair: [[<slug>]] RACE decided: …` line (a
+  set-aside is never in flight). Main's state is Lachy's call, and until it is recorded no `resume` may run:
+  it would flip the task done on an unverified main. The flag reads only the vault and that local verdict
+  file, so it holds offline too.
 - **Merged into another base:** a MERGED PR whose `baseRefName` is not the default branch (the resolver's
   answer). That is the test `resume` applies: it leaves such a task alone, so it is escalated, never flipped:
   `/thread:repair` shows the evidence and leaves the call to Lachy.
@@ -180,7 +199,7 @@ resuming".
 | `queueState` | Group | Each task shows |
 |---|---|---|
 | `merged` | **Merged** | its PR and `durationMinutes` from `timeline` |
-| `integrating` | **Integrating** | the lane: its PR and live state, the time since `integrating:`, and the outcome of `lastIntegration` |
+| `integrating` | **Integrating** | the lane: its PR and live state, the time since `integrating:`, and the outcome of `lastIntegration`, or `RACE re-verify in flight` (§ 3) |
 | `awaiting-integration` | **Awaiting Integration** | its PR and `ready:` (`inputs.readyAt`) |
 | `running` | **Running** | the `owner:` tag; no `owner:` means it was handed back and restarts at the lead's next step; no `started` means it is starting |
 | `queued` | **Queued** | `waitingOn`, else "behind solo [[x]]" when a started task carries `solo`, else "next free slot" |
@@ -218,11 +237,17 @@ integrates, the lead's next step stamps `paused:`.
 
 **Owner-session qualifier.** It applies to a live queue: a running or integrating task with an `owner:`. A
 Workflow run is listed in `/workflows` only in the session that launched it, and the `owner:` tag names that
-session. "No run in `/workflows`" counts as evidence of a stall only when it was checked **in that owner
-session**, or that session is known to have ended (every owner session, when there are several tags). From
-any other session, status cannot tell live from stalled: say so, and recommend checking the owner session
-first. While the owner session is alive, its heartbeat re-enters *Cold resume* on a genuine stall
-(execute § 8); a closed terminal stops it, and another session resumes only once the owner session has ended.
+session. The lead's background Integration commands (a verify, a RACE re-verify, the merge step, a backoff)
+are not Workflow runs, so there a run means either. While one is in flight, that session's last
+`ROLLOUT-STATUS` line reads `state=waiting`. "No run in `/workflows`" counts as evidence of a stall only when
+it was checked **in that owner session**, or that session is known to have ended (every owner session, when
+there are several tags). From any other session, status cannot tell live from stalled: say so, and recommend
+checking the owner session first. While the owner session is alive, its heartbeat re-enters *Cold resume* on a
+genuine stall (execute § 8); a closed terminal stops it, and another session resumes only once the owner
+session has ended. **The RACE exception:** with a RACE re-verify in flight (§ 3), the owner session's answer
+never leads to `/thread:execute`. If that session shows the `RACE: …` halt or no run, or has ended, the RACE
+is undecided, and the next step is `/thread:repair [[<rollout>]]` (action 7), never `/thread:execute`. A
+*Cold resume* runs `resume` first, and `resume` would flip the task done on a main nobody verified.
 
 **Example report** (the live check on):
 
@@ -276,7 +301,8 @@ Keep the whole report scannable: it's a glance, not a wall of text.
    mode (its § 1). Never reinstate or resume with `/thread:execute` until each RACE / UNVERIFIED task has its
    `RACE decided:` line: a reinstate and a *Cold resume* run `resume` first, and it would flip that task done
    on an unverified main. A possible PR-less merge gets a confirmed `pr:` only when no lead is live or under a
-   stamped pause; while a lead is live repair records it only.
+   stamped pause; while a lead is live repair records it only. A RACE re-verify in flight (§ 3) is not an
+   open escalation: the lead decides it itself, so it waits under 9 or 10, and nobody asks Lachy mid-re-verify.
 8. `paused` → "reinstate with `/thread:execute [[<rollout>]]`". For drift independent of the pause, add
    `/thread:repair [[<rollout>]]`, which under a pause only records escalations and decisions and defers: it
    never hands back.
@@ -284,10 +310,15 @@ Keep the whole report scannable: it's a glance, not a wall of text.
    decisions, or defer. Check `/workflows` in the owner session (`<owner tag>`): if no run shows there, that
    session has ended, or no task carries an `owner:`, nothing is draining it, and
    `/thread:execute [[<rollout>]]` resumes the drain (*Cold resume*: its `next` integrates what awaits,
-   starts nothing and stamps `paused:`).
+   starts nothing and stamps `paused:`). The RACE exception (the owner-session qualifier): if a RACE
+   re-verify was in flight, the same answer makes it undecided, so the next step is
+   `/thread:repair [[<rollout>]]` (action 7), never `/thread:execute`.
 10. A live queue → "wait for the run; don't resume from here." Check `/workflows` in the owner session
     (`<owner tag>`): if no run shows there, or that session has ended, `/thread:execute [[<rollout>]]` resumes
-    (*Cold resume*). Checked from any other session, "no run" proves nothing. A merge hold (the Review
+    (*Cold resume*). Checked from any other session, "no run" proves nothing. A RACE re-verify in flight
+    (§ 3) waits here too, as the lead's own procedure. The RACE exception (the owner-session qualifier)
+    applies to it: once the owner session shows the `RACE: …` halt or no run, or has ended, the next step is
+    `/thread:repair [[<rollout>]]` (action 7), never `/thread:execute`. A merge hold (the Review
     required flag) waits on you, not the run: "approve PR #N", and the lead merges on its next tick.
     Meanwhile, a set-aside task other than an `autoRevise: true` one is never re-entered by the live lead
     itself (a revise stopped, a rejected review-blocked task, an own run, an at-Integration one or a gate), so
@@ -302,7 +333,9 @@ Keep the whole report scannable: it's a glance, not a wall of text.
 version (3, 4): a supersede is how a legacy rollout migrates, so a legacy note that a successor's `supersedes:`
 names needs its close-out, and `--regenerate` would only meet schedule's refusal again. An open escalation (7)
 comes before every reinstate, wait and resume (8 to 13), so status never sends an undecided RACE to
-`/thread:execute`. Offline, every resume or reinstate recommendation carries § 3's caveat.
+`/thread:execute`. A RACE re-verify in flight is not yet undecided, so it waits (9, 10) instead of escalating.
+The RACE exception routes it to repair, never to a resume, once it turns undecided. Offline, every resume or
+reinstate recommendation carries § 3's caveat.
 
 ## Loopable
 
@@ -333,3 +366,5 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
   has ended. Offline, qualify any resume with § 3's caveat.
 - **Don't send an undecided RACE / UNVERIFIED to `/thread:execute`.** No reinstate and no resume until its
   `RACE decided:` line is recorded: § 4's action 7 comes first, and repair records the decision in any mode.
+  Don't escalate a RACE re-verify in flight either: it is the lead's own procedure until its owner session
+  shows the `RACE: …` halt or no run, or has ended (§ 3).

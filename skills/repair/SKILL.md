@@ -115,6 +115,8 @@ check session `<owner tag>` first".
   `approve-gates` on sign-off.
 - It never runs `resume`, never enters the loop, and never writes a running or integrating note, because a
   live call's reconcile would overwrite it: the lead-held notes wait for the lead's end.
+- A RACE re-verify in flight (§ 2) is the lead's: report it and wait. It becomes a § 3c escalation only once
+  its owner session shows the `RACE: …` halt or no run, or has ended.
 - The live lead's next `next` restarts an `in_progress` hand-back and integrates a `review` one.
 
 **No lead live.** No pause, and every owner session has ended (or shows no run there): the full flow, § 3 to
@@ -131,11 +133,13 @@ From its queue state, its `lead-integrate.py inputs` (`resumeAt`, `autoRevise`, 
 live PR state. Each unmerged task takes the **first** class in table order whose signal it matches. The order
 matters: a RACE task's PR is MERGED, and so is an UNVERIFIED one's, which is also set aside at Integration, so
 they match **merged, never marked** and **at Integration** further down too; only the order keeps them out of
-`resume` and `hand-back` until Lachy has decided.
+`resume` and `hand-back` until Lachy has decided. A RACE re-verify in flight comes first of all: it is the
+lead's own procedure, so repair neither escalates it nor asks Lachy while the lead decides it.
 
 | Class | Signal | Action |
 |---|---|---|
-| **RACE** | merge-task exit 5 (a `## Race log` line names it), or `UNVERIFIED:` in its set-aside reason, with no decision recorded (§ 3c) | escalate (§ 3c); never re-call merge-task; while it is undecided no `resume` runs at all (§ 3a, § 4's hand-off) |
+| **RACE re-verify in flight** | status's in-flight RACE (status § 3): a `## Race log` line names it, it still reads `integrating` with an `owner:` whose session is not known to have ended, no `paused:` stamp stands, and its verdict file is absent or reads `0` | nothing: execute's RACE procedure owns it (green → `mark-done`, red → its `RACE: …` halt); never escalate it or ask Lachy mid-re-verify. Once its owner session shows the `RACE: …` halt or no run, or has ended, it is **RACE** |
+| **RACE** | merge-task exit 5 (a `## Race log` line names it) and not in flight, or `UNVERIFIED:` in its set-aside reason, with no decision recorded (§ 3c) | escalate (§ 3c); never re-call merge-task; while it is undecided no `resume` runs at all (§ 3a, § 4's hand-off) |
 | **PR-less merge** | status's "possible PR-less merge" flag | escalate with evidence (§ 3c) |
 | **merged into another base** | its PR is MERGED into a branch other than the default (status's flag) | escalate with evidence (§ 3c); never hand it back or defer it, and `resume` leaves it unchanged (it checks the base) |
 | **merged, never marked** | not done; its PR is MERGED into the default branch | `reconcile-rollout.py resume` (§ 3a) flips it done; never hand it back or defer it |
@@ -193,7 +197,12 @@ evidence.** For each one, show:
    `git -C <repoPath> merge-base --is-ancestor <mergeCommit.oid> origin/<default branch>` (resolve the default
    branch with execute § 4's resolver);
 4. `git -C ~/repos/obsidian log -p -n 3 -- Work/Tasks/<slug>.md`: a committed version carrying `pr:` or
-   `status: done` means the note was reverted or clobbered (say so if there is none).
+   `status: done` means the note was reverted or clobbered (say so if there is none);
+5. for a RACE only, the lead's re-verify verdict, so Lachy decides with it on screen: the owner session's halt
+   reason (`RACE: origin/<default> fails the verifier`), and the verdict file
+   `<repoPath>/.claude/integration/race-<slug>.rc` (`0` green; any other rc red, `124` a timeout; absent: it
+   never finished, which reads as red) with the tail of `race-<slug>.log` beside it. An UNVERIFIED task was
+   never re-verified: say so.
 
 Then append a dated `## Notes` line to the rollout note (create the section if missing), e.g.
 `- <YYYY-MM-DD> repair: [[<slug>]] possible PR-less merge (PR #<n>, head audit-fix/<alias>, MERGED) escalated;
@@ -217,7 +226,9 @@ evidence shown; decision left to Lachy.` Repair never writes that task's `status
   PR is merged, so the retire block's `gh pr close` is skipped) before recording it, so `resume` never reads
   it as landed. That defer is a lead-held note (§ 1): while a lead is live, append his decision to the
   escalation line as `defer pending` (never as `RACE decided:`), and the defer, its `RACE decided:` line and
-  the hold all wait for the lead's end.
+  the hold all wait for the lead's end. A later repair run with no lead live, or under a stamped pause,
+  applies the recorded `defer pending` decision without asking again: the § 5 defer, then the `RACE decided:`
+  line. Until then no `RACE decided:` line exists, so status still reads it as an open escalation.
 - **Merged into another base.** `resume` leaves it unchanged, and repair never hands it back, defers it or
   re-calls merge-task for it: whether the work reached the default branch (the ancestry check above shows it)
   and what becomes of the task are Lachy's call. Escalate, record, and leave it.
@@ -319,8 +330,8 @@ every repair action, copied from the dated `## Notes` records this and earlier r
 stage), decisions injected (task + value), gates signed, raises (task + new budget), merged-never-marked tasks
 flipped by `resume` (task + PR), tasks deferred (task + reason + dependants moved with it), a CLOSED PR or
 missing branch (task + restore, recut, defer or leave), and the escalations of § 3c with Lachy's decisions:
-possible PR-less merges, RACE / UNVERIFIED (task + PR + the recorded decision), and merges into another base
-(task + PR + base).
+possible PR-less merges, RACE / UNVERIFIED (task + PR + the re-verify verdict + the recorded decision), and
+merges into another base (task + PR + base).
 
 ## Don'ts
 
@@ -344,6 +355,8 @@ possible PR-less merges, RACE / UNVERIFIED (task + PR + the recorded decision), 
   hand-off, and never send Lachy to a reinstate or a `/thread:execute` resume before its `RACE decided:` line:
   `resume` works on the whole rollout and would flip that task done on an unverified main (§ 3c). The line
   itself is a rollout-note record, so no pause or live lead holds it back (§ 1).
+- **Don't escalate a RACE re-verify in flight.** The lead decides it itself (§ 2). Asking Lachy before its
+  verdict exists invites a "stands" that a red re-verify then contradicts.
 - **Don't reinstate a rollout another rollout's `supersedes:` names.** Its unlanded tasks were carried there;
   finish its close-out instead (§ 1).
 - **Don't defer a task with dependants alone.** Compute the closure first; defer the chain or fix it.
