@@ -40,6 +40,26 @@ Subcommands:
               Idempotent (already-done = no-op). Read-only tasks never need it: reconcile writes them done
               (and stamps `merged:`) on approval.
 
+  hand-back   A set-aside task re-enters the queue at the stage it stopped (ADR 0030 decision 4; the lead's
+              *Set aside* and "retry [[task]]", and /thread:repair's hand-off, p12-11). A `blocked` note set
+              aside at Integration (its latest `## Blocker diagnosis` run starts `integration:`) with a `pr:`
+              goes back to `status: review` with `ready:` restamped (it rejoins the Integration queue); a
+              `blocked`, `review-blocked` or `plan-blocked` note set aside at its run goes to
+              `status: in_progress` with `owner:` removed (the next `next --running` restarts it). Refuses
+              (exit 1, nothing written) every other note: gate-pending (approve-gates' job), done, review
+              (with or without a PR), in_progress, open, and a note set aside at Integration with no `pr:`.
+              Feedback runs and the Integration log are never touched.
+
+  log-integration  The lead's own clean-path Integration record (p12-9): append one `integrated path=lead`
+              line to a `review` note with a `pr:` through _integration_log_line, from --started (the
+              lead's `lead-integrate.py stamp` at the Integration's start), --anchor, --head and --base
+              (40 hex each). wait = --started - `ready:`, duration = --now - --started, both in whole
+              minutes (_whole_minutes, the engine's wholeMinutes); triggers `-`. A re-run of the same
+              Integration (same --started and SHAs) is a no-op, even at a later --now. Changes no status,
+              rounds, `tier_capped`,
+              `integrating:` or `ready:`. Refuses (exit 1, nothing written) a note that is not `review`
+              with a `pr:`, a SHA that is not 40 hex and a --started that is not an ISO stamp.
+
   resume      A task whose PR merged but whose note was never marked (p6-8): for each linked note that
               is not done, merged or dropped and carries `pr:`, ask gh for the PR's state and base. A PR
               MERGED into the repo's default branch flips the note to done with `merged:` from mergedAt.
@@ -356,6 +376,54 @@ def _parse_ts(value):
     except ValueError:
         return None
     return ts if ts.tzinfo else ts.astimezone()
+
+
+# The engine's isoMinutes / wholeMinutes (task.workflow.js), ported byte for byte so the lead's own log
+# line measures wait and duration exactly as an integrate row's metrics do (tests/lead-integrate.test.sh
+# pins the two against each other). JS's String.prototype.trim strips this set.
+_JS_WS = "\t\n\v\f\r              " \
+         "    　﻿"
+
+
+def _days_from_civil(y, m, d):
+    yy = y - 1 if m <= 2 else y
+    era = yy // 400
+    yoe = yy - era * 400
+    doy = (153 * (m + (-3 if m > 2 else 9)) + 2) // 5 + d - 1
+    return era * 146097 + yoe * 365 + yoe // 4 - yoe // 100 + doy - 719468
+
+
+def _iso_minutes(s):
+    """An ISO stamp as minutes since the epoch, or None (the engine's isoMinutes)."""
+    if not isinstance(s, str):
+        return None
+    m = ISO_STAMP_RE.fullmatch(s.strip(_JS_WS))
+    if not m:
+        return None
+    y, mo, d, h, mi = (int(m.group(i)) for i in range(1, 6))
+    se = 0 if m.group(6) is None else int(m.group(6))
+    leap = (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
+    mdays = [31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if mo < 1 or mo > 12 or d < 1 or d > mdays[mo - 1] or h > 23 or mi > 59 or se > 59:
+        return None
+    off = 0
+    if m.group(7) != "Z":
+        digits = m.group(7)[1:].replace(":", "")
+        oh, om = int(digits[:2]), int(digits[2:])
+        if oh > 23 or om > 59:
+            return None
+        off = (-1 if m.group(7)[0] == "-" else 1) * (oh * 60 + om)
+    return _days_from_civil(y, mo, d) * 1440 + h * 60 + mi + se / 60 - off
+
+
+def _whole_minutes(start, end):
+    """Whole minutes from one stamp to another; None when either is missing or unparseable, or the span is
+    negative (the engine's wholeMinutes; JS Math.round is floor(x + 0.5))."""
+    f, t = _iso_minutes(start), _iso_minutes(end)
+    if f is None or t is None:
+        return None
+    secs = math.floor((t - f) * 60 + 0.5)
+    return None if secs < 0 else secs // 60
 
 
 def _iso_arg(value):
@@ -1537,6 +1605,78 @@ def cmd_mark_done(args) -> int:
     return _finish(args, now)
 
 
+# ---- hand-back and log-integration (the lead's, p12-9) -------------------------------------------
+
+HAND_BACK_RUN_STATUSES = set(BLOCKED_SECTIONS)   # review-blocked, blocked, plan-blocked
+SHA40_RE = re.compile(r"[0-9a-f]{40}")
+
+
+def cmd_hand_back(args) -> int:
+    """A set-aside task re-enters at the stage it stopped (ADR 0030 decision 4): set aside at Integration
+    -> review (ready: restamped, it rejoins the Integration queue); set aside at its run -> in_progress
+    (owner: removed, the next `next --running` restarts it). Everything else is refused, nothing written."""
+    now = _now(args)
+    for slug, _path, note in _each_note(args):
+        status = _status(note)
+        state, at = _queue_state(note)
+        if state == "set-aside" and at == "integration" and _pr(note):
+            note.set("status", "review")
+            note.set("ready", _stamp(now))
+            note.remove("integrating")
+            note.save(dry_run=args.dry_run)
+            print(f"{slug}: blocked->review (set aside at Integration; ready: {_stamp(now)}){_flag(args, note)}")
+            continue
+        if state == "set-aside" and at == "run" and status in HAND_BACK_RUN_STATUSES:
+            note.set("status", "in_progress")
+            note.remove("owner")
+            note.save(dry_run=args.dry_run)
+            print(f"{slug}: {status}->in_progress (set aside at its run; owner: cleared){_flag(args, note)}")
+            continue
+        why = ("set aside at Integration with no pr:" if at == "integration"
+               else f"status is {status or 'none'!r} (queue state {state}{'' if at is None else ' at ' + at})")
+        args._errors.append(f"{slug}: {why} — refusing to hand back: only a blocked note set aside at Integration "
+                            "(with a pr:) or a blocked, review-blocked or plan-blocked note set aside at its run "
+                            "re-enters (a gate-pending note goes through approve-gates)")
+    return _finish(args, now)
+
+
+def cmd_log_integration(args) -> int:
+    """Append the lead's clean-path Integration line (`integrated path=lead`) to a `review` note with a
+    `pr:`, through _integration_log_line; nothing else on the note changes."""
+    now = _now(args)
+    bad = [f"--{k} {v!r} is not a 40-hex commit sha" for k, v in
+           (("anchor", args.anchor), ("head", args.head), ("base", args.base)) if not SHA40_RE.fullmatch(v or "")]
+    if not ISO_STAMP_RE.fullmatch((args.started or "").strip()):
+        bad.append(f"--started {args.started!r} is not an ISO stamp (lead-integrate.py stamp prints one)")
+    if bad:
+        for e in bad:
+            print(f"ERROR: log-integration: {e}", file=sys.stderr)
+        return 1
+    started = args.started.strip()
+    for slug, _path, note in _each_note(args):
+        if _status(note) != "review" or not _pr(note):
+            args._errors.append(f"{slug}: status is {_status(note) or 'none'!r}{'' if _pr(note) else ' with no pr:'}, "
+                                "not 'review' with a PR — refusing to log an Integration")
+            continue
+        row = {"prUrl": _pr(note), "integration": {
+            "outcome": "integrated", "path": "lead", "anchor": {"headSha": args.anchor}, "headSha": args.head,
+            "baseSha": args.base, "triggers": [],
+            "metrics": {"startedAt": started,
+                        "waitMinutes": _whole_minutes(_scalar(note.get("ready")), started),
+                        "durationMinutes": _whole_minutes(started, now.astimezone().isoformat(timespec="seconds"))},
+        }}
+        line = _integration_log_line(row)
+        # A re-run of the same Integration (same --started, same record) is a no-op even at a later --now:
+        # every token but the measured duration must match. append_line's own dedupe covers the rest.
+        key = line.split(" ")[:8]
+        logged = [l.rstrip().split(" ") for l in note.section_text(INTEGRATION_LOG_SECTION).split("\n") if l.strip()]
+        if not any(t[:8] == key for t in logged):
+            note.append_line(INTEGRATION_LOG_SECTION, line)
+        note.save(dry_run=args.dry_run)
+        print(f"{slug}: integration log += {line}{_flag(args, note)}")
+    return _finish(args, now)
+
+
 # ---- resume (p6-8) ------------------------------------------------------------------
 
 def _gh(gh_bin, argv, cwd):
@@ -2027,6 +2167,24 @@ def main() -> int:
         m.add_argument("--now", type=_iso_arg, default=None, help=now_help)
         m.add_argument("--dry-run", action="store_true")
         m.set_defaults(func=func)
+
+    hb = sub.add_parser("hand-back", help="a set-aside task re-enters at its stage: Integration -> review, its run -> in_progress")
+    hb.add_argument("--tasks", required=True, help="comma-separated task slugs")
+    hb.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    hb.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the ready: restamp)")
+    hb.add_argument("--dry-run", action="store_true")
+    hb.set_defaults(func=cmd_hand_back)
+
+    li = sub.add_parser("log-integration", help="append the lead's clean-path Integration line (path=lead) to a review note")
+    li.add_argument("--tasks", required=True, help="the task slug")
+    li.add_argument("--started", required=True, help="the Integration's start (lead-integrate.py stamp)")
+    li.add_argument("--anchor", required=True, help="the anchor (40 hex)")
+    li.add_argument("--head", required=True, help="the integrated head (40 hex)")
+    li.add_argument("--base", required=True, help="the integrated base (40 hex)")
+    li.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    li.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the duration's end)")
+    li.add_argument("--dry-run", action="store_true")
+    li.set_defaults(func=cmd_log_integration)
 
     rs = sub.add_parser("resume", help="mark done every linked task whose PR merged into the default branch (p6-8)")
     rs.add_argument("--rollout", required=True, help="path to the rollout note")
