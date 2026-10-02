@@ -307,8 +307,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   flags it and fixes the unambiguous items on a Reshuffle or Steer only
   answer (ADR 0026, 0027). _Avoid_: desync, staleness, mismatch.
 - **Clean defer** — taking a task out of a rollout back to the open backlog
-  (clearing `rollout:`/`owner:`, and a legacy `wave:`), permitted only when nothing in the
-  rollout depends on it. _Avoid_: drop, cancel, skip.
+  (clearing `rollout:`/`owner:`), permitted only when nothing in the rollout
+  depends on it. _Avoid_: drop, cancel, skip.
 
 ## Convergence engine
 

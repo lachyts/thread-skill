@@ -41,11 +41,10 @@ const PRODUCT = [
   { id: 'P8', file: 'skills/orient/reshuffle.md', re: /legacy `wave:`/, max: 1, why: 'migration (R5)' },
   { id: 'P9', file: 'CONTEXT.md', re: /^- \*\*Wave\*\* — /, max: 1, why: 'history (the retired entry)' },
   { id: 'P10', file: 'CONTEXT.md', re: /\*\*Wave-shaped\*\* is now \*\*Rollout-shaped\*\*/, max: 1, why: 'history (the renamed term)' },
-  { id: 'P11', file: 'CONTEXT.md', re: /a legacy `wave:`/, max: 1, why: 'migration (Clean defer)' },
-  { id: 'P12', file: 'README.md', re: /the separate `wave` plugin/, max: 1, why: 'history' },
-  { id: 'P13', file: 'README.md', re: /`lachyts\/wave-skill`/, max: 1, why: 'history' },
-  { id: 'P14', file: 'README.md', re: /`0009` — thread absorbs wave|`docs\/wave-THREAD-archive\.md`/, max: 2, why: 'history (ADR 0009, the archive)' },
-  { id: 'P15', file: 'README.md', re: /were the `wave` plugin|8 waves, 14 PRs/, max: 2, why: 'history (Lineage)' },
+  { id: 'P11', file: 'README.md', re: /the separate `wave` plugin/, max: 1, why: 'history' },
+  { id: 'P12', file: 'README.md', re: /`lachyts\/wave-skill`/, max: 1, why: 'history' },
+  { id: 'P13', file: 'README.md', re: /`0009` — thread absorbs wave|`docs\/wave-THREAD-archive\.md`/, max: 2, why: 'history (ADR 0009, the archive)' },
+  { id: 'P14', file: 'README.md', re: /were the `wave` plugin|8 waves, 14 PRs/, max: 2, why: 'history (Lineage)' },
 ]
 
 // Test files: the exact /wave/i line count of each; any test file not listed must have none.
