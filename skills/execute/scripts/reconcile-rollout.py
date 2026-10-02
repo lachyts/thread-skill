@@ -880,6 +880,19 @@ def _integration_log_line(task) -> str:
     ])
 
 
+def _log_lines(note) -> list:
+    """The `## Integration log`'s non-blank lines, oldest first."""
+    return [l.rstrip() for l in note.section_text(INTEGRATION_LOG_SECTION).split("\n") if l.strip()]
+
+
+def _last_log_line(note):
+    """The `## Integration log`'s LAST non-blank line, or None. The p12-16 contract has this one reader
+    (approve-gates here, `lead-integrate.py`'s prepare and inputs through last_integration): read the last
+    line, never a search, since old lines survive a defer or a recut."""
+    lines = _log_lines(note)
+    return lines[-1] if lines else None
+
+
 def _status(note) -> str:
     return _scalar(note.get("status")).lower()
 
@@ -1681,7 +1694,7 @@ def cmd_log_integration(args) -> int:
         # A re-run of the same Integration (same --started, same record) is a no-op even at a later --now:
         # every token but the measured duration must match. append_line's own dedupe covers the rest.
         key = line.split(" ")[:8]
-        logged = [l.rstrip().split(" ") for l in note.section_text(INTEGRATION_LOG_SECTION).split("\n") if l.strip()]
+        logged = [l.split(" ") for l in _log_lines(note)]
         if not any(t[:8] == key for t in logged):
             note.append_line(INTEGRATION_LOG_SECTION, line)
         note.save(dry_run=args.dry_run)
@@ -2070,10 +2083,8 @@ def _norm_gate(line: str) -> str:
 
 
 def _last_log_outcome(note):
-    """The outcome token of the `## Integration log`'s LAST non-blank line, or None (the p12-16 contract:
-    read the last line, never a search — old lines survive a defer or a recut)."""
-    lines = [l.rstrip() for l in note.section_text(INTEGRATION_LOG_SECTION).split("\n") if l.strip()]
-    toks = lines[-1].split(" ") if lines else []
+    """The outcome token of the Integration log's last line (_last_log_line), or None."""
+    toks = (_last_log_line(note) or "").split(" ")
     return toks[1] if len(toks) > 1 else None
 
 
