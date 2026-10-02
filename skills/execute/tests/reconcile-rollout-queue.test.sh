@@ -2,8 +2,8 @@
 # The queue side of reconcile-rollout.py (ADR 0030 decisions 1 and 4, and its no-cursor consequence):
 # `next` (which tasks start), the per-task `started:` / `merged:` / `integrating:` / `ready:` stamps, `status`
 # (queue states, the timeline and the progress line), `resume` (a merged PR whose note was never
-# marked, p6-8) against a stub gh, and the RACE / UNVERIFIED hold on `resume` and `next` (p12-12). Temp
-# notes only; no vault, no network.
+# marked, p6-8) against a stub gh, and the RACE / UNVERIFIED hold on `resume`, `next` and `hand-back`
+# (p12-12). Temp notes only; no vault, no network.
 # Usage: bash reconcile-rollout-queue.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -494,7 +494,7 @@ ok "$(grep -c 'repo view o/r ' "$GHLOG")" 1 "resume: the default branch is looke
 hasnt "$(cat "$GHLOG")" "pull/10" "resume: a done note is not queried"
 has "$out" "progress: " "resume prints the progress line"
 
-# ── race-hold: an undecided RACE or UNVERIFIED holds `resume` and `next` (status § 3's definitions) ──────
+# ── race-hold: an undecided RACE or UNVERIFIED holds `resume`, `next` and `hand-back` (status § 3's definitions)
 # h-race hit merge-task's exit 5: the Race log names it (aliased and in another case) and it still reads
 # review + pr: + integrating:. h-unv's merge-task exit 8 ran out and it is set aside at Integration with an
 # UNVERIFIED: reason. Every PR reads MERGED on main (stub gh), so only the hold keeps `resume` off them.
@@ -544,16 +544,55 @@ ok "$(q "$J" '[d["integrating"], d["awaitingIntegration"], d["start"], d["restar
 ok "$(q "$J" 'd["setAside"]')" '[{"setAsideAt":"race","slug":"h-race","status":"review"},{"setAsideAt":"race","slug":"h-unv","status":"blocked"},{"setAsideAt":"integration","slug":"h-old","status":"blocked"}]' "next: both held tasks are set aside at race; an older UNVERIFIED stays at integration"
 ok "$(q "$J" 'd["raceHold"]')" '[{"kind":"RACE","slug":"h-race"},{"kind":"UNVERIFIED","slug":"h-unv"}]' "next: raceHold in rank order with its kind"
 ok "$(q "$J" "$holds")" '{"h-dep":"depends on [[h-race]] (review)"}' "next: the dependant waits on the held task"
-ok "$(q "$J" 'd["halt"]')" '"stuck"' "next: nothing can start -> stuck"
+ok "$(q "$J" 'd["halt"]')" 'null' "next: no halt while the held RACE's integrating: stands (its re-verify holds the lane)"
 J=$(st)
 ok "$(q "$J" '{t["slug"]: [t["queueState"], t["setAsideAt"]] for t in d["tasks"] if t["slug"] in ("h-race", "h-unv")}')" '{"h-race":["integrating",null],"h-unv":["set-aside","integration"]}' "status: reports the stored state (status § 3 renders the RACE)"
+# The held RACE whose integrating: stands is still in flight: the lead's re-verify holds the lane on it. A soft
+# pause never drains past it (status § 3's in-flight RACE reads no paused: stamp, and the heartbeat ends on one),
+# and a solo waits for it; nothing else is in flight here.
+setkey ro pause_requested true
+J=$(nxt --running "")
+ok "$(q "$J" '[d["pausedNow"], d["paused"], d["pauseRequested"], d["halt"]]')" '[false,null,true,null]' "next: a soft pause does not drain past a held RACE that carries integrating:"
+ok "$(fm ro paused)|$(fm ro pause_requested)" "<none>|pause_requested: true" "next: … and writes no paused: stamp"
+delkey h-race integrating
+J=$(nxt --running "" --dry-run)
+ok "$(q "$J" '[d["pausedNow"], d["halt"]]')" '[true,"paused"]' "next: once its integrating: is gone, the drain completes (dry-run)"
+setkey h-race integrating 2026-10-02T13:30+00:00
+delkey ro pause_requested
+mkt h-solo open 'solo: true'
+J=$(nxt --running "")
+ok "$(q "$J" '[d["start"], [h["reason"] for h in d["hold"] if h["slug"] == "h-solo"]]')" '[[],["solo: waits for 1 started task(s) to merge or be set aside"]]' "next: a solo waits for the held RACE that carries integrating:"
+rm "$D/h-solo.md"
+# hand-back refuses a held task as carry does (exit 2, one ERROR naming it and repair, nothing written), so a
+# "retry [[task]]" never slips it into the Integration queue ahead of Lachy's decision.
+hb() { local s="$1"; shift; python3 "$SCRIPT" hand-back --tasks "$s" --tasks-dir "$D" --now "$NOW" "$@" 2>"$D/err"; }
+before=$(held)
+out=$(hb h-unv); rc=$?
+ok "$rc|$(grep -c '^ERROR: ' "$D/err")" "2|1" "hand-back: an undecided UNVERIFIED is refused, exit 2, one ERROR"
+has "$(cat "$D/err")" "ERROR: hand-back: [[h-unv]] UNVERIFIED undecided: no \"repair: [[h-unv]] RACE decided:\" line on ro: record Lachy's decision first with /thread:repair [[ro]]" "hand-back: the ERROR names the task and /thread:repair"
+out=$(hb h-race --dry-run); rc=$?
+ok "$rc|$(grep -c '^ERROR: ' "$D/err")" "2|1" "hand-back --dry-run: a held RACE is refused too"
+ok "$(held)" "$before" "hand-back: both held notes are byte-identical"
+setkey h-unv rollout '"[[gone]]"'
+out=$(hb h-unv); rc=$?
+ok "$rc" 2 "hand-back: a rollout: naming no note leaves no decision to read, so the UNVERIFIED still holds"
+has "$(cat "$D/err")" "/thread:repair [[gone]]" "hand-back: … and the ERROR names that rollout"
+setkey h-unv rollout '"[[ro]]"'
+ok "$(held)" "$before" "hand-back: … (the fixture is restored byte for byte)"
 # One decided (the aliased form, in ## Notes): it flips; the other is still held.
 notes_line '- 2026-10-02 repair: [[H-RACE|R]] RACE decided: the merge stands'
 out=$(rsm); rc=$?
 ok "$rc" 3 "resume: one decided, one not -> still exit 3"
 ok "$(grep -c '^HOLD: ' "$D/err")|$(grep -c 'h-unv' "$D/err")" "1|1" "resume: … naming only the undecided one"
 ok "$(fm h-race status)" "status: done" "resume: the decided RACE flips done"
+out=$(hb h-unv); rc=$?
+ok "$rc" 2 "hand-back: the UNVERIFIED is still refused while only the RACE is decided"
 notes_line '- 2026-10-02 repair: [[h-unv]] RACE decided: re-verified by hand, the merge stands'
+out=$(hb h-unv); rc=$?
+ok "$rc" 0 "hand-back: once decided, the UNVERIFIED task re-enters"
+has "$out" "h-unv: blocked->review" "hand-back: … at Integration"
+J=$(nxt --running "")
+ok "$(q "$J" '[d["awaitingIntegration"], d["raceHold"]]')" '[["h-unv"],[]]' "next: … it awaits Integration, no longer held"
 out=$(rsm); rc=$?
 ok "$rc" 0 "resume: both decided -> exit 0"
 ok "$(fm h-unv status)" "status: done" "resume: the decided UNVERIFIED flips done"

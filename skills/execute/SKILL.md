@@ -56,7 +56,7 @@ merges it — no per-PR confirmation. `--gated` is the same queue with a **merge
 
 **A wave number is refused.** `execute Wave N of [[rollout]]` prints "single-wave mode is gone (ADR 0030): run `execute [[rollout]]`, or add `--gated` to approve each merge" and stops.
 
-In a live session, "retry [[task]]" re-enters a set-aside task: run `reconcile-rollout.py hand-back --tasks <slug>` (§4.5 *Set aside*), then §4.5 step 1.
+In a live session, "retry [[task]]" re-enters a set-aside task: run `reconcile-rollout.py hand-back --tasks <slug>` (§4.5 *Set aside*), then §4.5 step 1. Its exit 2 means an undecided RACE or UNVERIFIED holds the task: print its ERROR line and stop there, since only Lachy's `RACE decided:` line (through `/thread:repair`) releases it.
 
 ## Skill flow
 
@@ -480,6 +480,7 @@ Omit `--bootstrap` when the rollout has no `env_bootstrap`. `<verifier>` and `<e
 - at Integration: `hand-back` sets `review`, and it rejoins the Integration queue;
 - at its own run: `hand-back` (or `/thread:repair` § 4) sets `in_progress`, then *Restart routing*. That includes a code-writing `review` note with no `pr:` (approved without a PR: `next` reports it set aside at its run, since Integration has nothing to merge): `hand-back` sets it `in_progress` too, and its own call re-runs on the task's existing tree and branch (*Worktree lifecycle*) and ends at a PR or a set-aside;
 - a signed gate: `approve-gates`, never `hand-back` (§ 3.7): at Integration it rejoins the Integration queue; otherwise *Restart routing* resumes its gate-pending call while this session holds the handle, else takes a fresh call behind the warning;
+- an undecided RACE or UNVERIFIED (`next`'s `raceHold`): only after its `RACE decided:` line (through `/thread:repair`); until then `hand-back` refuses it (exit 2, nothing written);
 - merge-task's exit 3 is not a set-aside: the task integrates again.
 
 **Anchor ref lifecycle.** `refs/integration-anchor/<branch>` (the engine's, created by an integrator) is deleted, guarded by its old value (`git -C <repoPath> update-ref -d refs/integration-anchor/<branch> <X>`): after the merge (merge-task deletes it; the lead does on its WARN that it survived), on a closed PR, on a recut or a from-scratch re-dispatch, and on a `stale anchor ref` reason (`prepare` deletes a stale one itself). Old Integration-log lines survive all of these; their head never equals a recut PR head, so case (ii) cannot misfire.

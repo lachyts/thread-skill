@@ -24,9 +24,10 @@ Subcommands:
               and the progress line. Notes are re-read on every call, so a `priority:` edit reorders a
               live queue. Schedule order is each task's first wikilink on a list-item or table-row line
               of the rollout body; prose and fenced code never rank. Honours a soft pause: once nothing
-              runs, awaits or integrates, it stamps `paused:` and removes `pause_requested` (the drain,
-              ADR 0030 decision 5). Refuses an incomplete rollout (below): exit 1, no stdout, one ERROR
-              line naming why and the remedy, `/thread:schedule <its first project> --regenerate`.
+              runs, awaits or integrates (a held RACE whose `integrating:` stands included, Race holds
+              below), it stamps `paused:` and removes `pause_requested` (the drain, ADR 0030 decision 5).
+              Refuses an incomplete rollout (below): exit 1, no stdout, one ERROR line naming why and the
+              remedy, `/thread:schedule <its first project> --regenerate`.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -53,6 +54,9 @@ Subcommands:
               its own call re-runs on the existing tree and branch). Refuses (exit 1, nothing written) every
               other note: gate-pending (approve-gates' job), done, review with a PR (awaiting Integration),
               a read-only review note, in_progress, open, and a note set aside at Integration with no `pr:`.
+              A task an undecided RACE or UNVERIFIED holds (Race holds, below; read on the rollout its
+              `rollout:` names) is refused first, --dry-run included: exit 2, one ERROR line per held task
+              naming it and `/thread:repair [[<rollout>]]`, and nothing written for any listed task.
               Feedback runs and the Integration log are never touched.
 
   log-integration  The lead's own clean-path Integration record (p12-9): append one `integrated path=lead`
@@ -148,14 +152,17 @@ Queue states (one per linked task, re-read on every call):
   anything else (dropped, parked)             -> other, outside N
   an undecided RACE / UNVERIFIED (next only)  -> set-aside at race (Race holds, below)
 
-Race holds (_race_holds, read by `resume`, `next` and `carry`; status § 3's definitions): RACE is a linked
-note not done, merged or dropped whose slug a wikilink names on a line of the rollout's `## Race log` (any
-alias, heading or escaped pipe; any case). UNVERIFIED is a set-aside note whose latest run (`blockerSummary`)
-carries `UNVERIFIED:`. RACE wins when both apply. Either is lifted only by a line in the rollout's `## Notes`
-section matching `repair: [[<slug>]] RACE decided:` (an alias allowed, any case): main holds a combination
-nobody verified, and only Lachy's recorded decision releases it. `next` re-reads a held task that has not
-landed as set-aside at `race` (so it never starts, restarts or integrates, and its dependants wait) and lists
-it under `raceHold`; `status` reports the stored state, which status § 3 renders as a RACE itself.
+Race holds (_race_holds, read by `resume`, `next`, `carry` and `hand-back`; status § 3's definitions): RACE
+is a linked note not done, merged or dropped whose slug a wikilink names on a line of the rollout's
+`## Race log` (any alias, heading or escaped pipe; any case). UNVERIFIED is a set-aside note whose latest run
+(`blockerSummary`) carries `UNVERIFIED:`. RACE wins when both apply. Either is lifted only by a line in the
+rollout's `## Notes` section matching `repair: [[<slug>]] RACE decided:` (an alias allowed, any case): main
+holds a combination nobody verified, and only Lachy's recorded decision releases it. `next` re-reads a held
+task that has not landed as set-aside at `race` (so it never starts, restarts or integrates, and its
+dependants wait) and lists it under `raceHold`; one whose `integrating:` stamp stands (the lead's RACE
+re-verify holds the lane) still counts as integrating for the pause drain, the solo rule, the overlap and the
+halt verdict. `hand-back` refuses a held task (exit 2, nothing written). `status` reports the stored state,
+which status § 3 renders as a RACE itself.
 
 Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
 session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
@@ -1162,15 +1169,17 @@ def _race_holds(rollout_note, linked):
     of the rollout's `## Race log`. UNVERIFIED: a set-aside note whose latest run (_blocker_summary) carries
     `UNVERIFIED:`. RACE wins when both apply. A `repair: [[<slug>]] RACE decided:` line in the rollout's
     `## Notes` lifts either; a decision recorded anywhere else never does. `linked` is _scan's (path, Note)
-    list. Read by `resume`, `next` and `carry`."""
+    list. Read by `resume`, `next`, `carry` and `hand-back`. `rollout_note` None (hand-back's `rollout:`
+    names no readable note) has no Race log and no decision, so only an UNVERIFIED holds there."""
+    race_log = rollout_note.section_text(RACE_LOG_SECTION) if rollout_note is not None else ""
+    notes = rollout_note.section_text(NOTES_SECTION) if rollout_note is not None else ""
     raced = set()
-    for line in rollout_note.section_text(RACE_LOG_SECTION).split("\n"):
+    for line in race_log.split("\n"):
         for m in WIKILINK_OPEN_RE.finditer(line):
             slug = (_wikilink_slug(m.group(1)) or "").lower()
             if slug:
                 raced.add(slug)
-    decided = {(_wikilink_slug(m.group(1)) or "").lower()
-               for m in RACE_DECIDED_RE.finditer(rollout_note.section_text(NOTES_SECTION))}
+    decided = {(_wikilink_slug(m.group(1)) or "").lower() for m in RACE_DECIDED_RE.finditer(notes)}
     holds = {}
     for path, note in linked:
         key = path.stem.lower()
@@ -1445,8 +1454,11 @@ def cmd_next(args) -> int:
     """Which tasks start now (ADR 0030 decision 1). Pure function of the notes, except that a drained
     soft pause is stamped (`paused:`) here. A task an undecided RACE or UNVERIFIED holds (_race_holds) and
     that has not landed is re-read as set-aside at `race`: it never starts, restarts or integrates, is never
-    a seeded revise (those are set aside at `run`), and its dependants wait. `raceHold` lists each, in rank
-    order, with its kind; the counts and the progress line are the re-read rows'."""
+    a seeded revise (those are set aside at `run`), and its dependants wait. One whose `integrating:` stamp
+    stands (the lead's RACE re-verify holds the lane on it) still counts as integrating everywhere else: a
+    soft pause is not stamped past it, a solo waits for it, its files count as in flight, and no halt is
+    reported while it stands. `raceHold` lists each, in rank order, with its kind; the counts and the
+    progress line are the re-read rows'."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.exists():
         print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
@@ -1466,10 +1478,15 @@ def cmd_next(args) -> int:
               f"/thread:schedule {project} --regenerate", file=sys.stderr)
         return 1
     race = _race_holds(rollout_note, [(r["path"], r["note"]) for r in rows])
-    race_hold = []
+    # race_held_lane: a held task whose `integrating:` stamp stands. The lead's RACE re-verify still holds the
+    # lane on it, so it stays in flight for the drain, the solo rule, the overlap and the halt verdict; the
+    # re-read only keeps it out of `integrating` (never integrated again) and out of every start.
+    race_hold, race_held_lane = [], []
     for r in sorted(rows, key=_rank):
         held = race.get(r["slug"].lower())
         if held and not _landed(r["note"]):
+            if r["state"] == "integrating":
+                race_held_lane.append(r)
             r["state"], r["setAsideAt"] = "set-aside", "race"
             race_hold.append({"slug": r["slug"], "kind": held[1]})
     by_state = {}
@@ -1501,8 +1518,9 @@ def cmd_next(args) -> int:
 
     if paused or pause_requested:
         # A soft pause drains (ADR 0030 decision 5): nothing new starts or restarts; once nothing runs,
-        # awaits Integration or integrates, the pause is stamped and the request removed.
-        if not paused and not live and not awaiting and not integrating:
+        # awaits Integration or integrates (a held RACE re-verify included), the pause is stamped and the
+        # request removed.
+        if not paused and not live and not awaiting and not integrating and not race_held_lane:
             paused = _stamp(now)
             rollout_note.set("paused", paused, after=("pause_requested", "parallel_ceiling", "status"))
             rollout_note.remove("pause_requested")
@@ -1517,7 +1535,7 @@ def cmd_next(args) -> int:
                 used += 1
             else:
                 ceiling_held.append(r)
-        started = live + restart + awaiting + integrating
+        started = live + restart + awaiting + integrating + race_held_lane
         candidates = []
         for r in queued:
             unsat = _unsatisfied(r, index)
@@ -1554,7 +1572,7 @@ def cmd_next(args) -> int:
     in_n = [r for r in rows if r["state"] not in OUTSIDE_N]
     counts = _counts(rows)
     halt = None
-    if not start and not restart and not live and not awaiting and not integrating:
+    if not start and not restart and not live and not awaiting and not integrating and not race_held_lane:
         if paused:
             halt = "paused"
         elif not in_n:
@@ -1695,9 +1713,34 @@ def cmd_hand_back(args) -> int:
     -> review (ready: restamped, it rejoins the Integration queue); set aside at its run (a blocked,
     review-blocked or plan-blocked note, or a code-writing review note approved without a pr:) ->
     in_progress (owner: removed, the next `next --running` restarts it, and its own call re-runs on the
-    existing tree and branch). Everything else is refused, nothing written."""
+    existing tree and branch). Everything else is refused, nothing written. A task an undecided RACE or
+    UNVERIFIED holds (_race_holds, on the rollout its `rollout:` names) is refused before anything is
+    written, as `carry` refuses: exit 2, one ERROR line per held task naming it and `/thread:repair`, and
+    no listed task written. Handing it back would let it integrate and later `resume` with no `RACE decided:`
+    line."""
     now = _now(args)
-    for slug, _path, note in _each_note(args):
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    notes = list(_each_note(args))
+    rollouts, held = {}, []
+    for slug, path, note in notes:
+        ro = _wikilink_slug(note.get("rollout"))
+        if not ro:
+            continue  # in no rollout: no Race log or decision to read
+        if ro.lower() not in rollouts:
+            ro_path = tasks_dir / f"{ro}.md"
+            try:
+                rollouts[ro.lower()] = Note(ro_path) if ro_path.is_file() else None
+            except ValueError:
+                rollouts[ro.lower()] = None
+        hold = _race_holds(rollouts[ro.lower()], [(path, note)]).get(path.stem.lower())
+        if hold:
+            held.append(f"hand-back: [[{slug}]] {hold[1]} undecided: no \"repair: [[{slug}]] RACE decided:\" line on "
+                        f"{ro}: record Lachy's decision first with /thread:repair [[{ro}]]; nothing written")
+    if held:
+        for line in held + args._errors:
+            print(f"ERROR: {line}", file=sys.stderr)
+        return 2
+    for slug, _path, note in notes:
         status = _status(note)
         state, at = _queue_state(note)
         if state == "set-aside" and at == "integration" and _pr(note):
@@ -2233,7 +2276,8 @@ def main() -> int:
         m.add_argument("--dry-run", action="store_true")
         m.set_defaults(func=func)
 
-    hb = sub.add_parser("hand-back", help="a set-aside task re-enters at its stage: Integration -> review, its run -> in_progress")
+    hb = sub.add_parser("hand-back", help="a set-aside task re-enters at its stage: Integration -> review, its run -> in_progress; "
+                                          "refuses a held RACE / UNVERIFIED (exit 2)")
     hb.add_argument("--tasks", required=True, help="comma-separated task slugs")
     hb.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     hb.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the ready: restamp)")
