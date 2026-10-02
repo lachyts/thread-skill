@@ -11,13 +11,19 @@
 // Every rule lives in one function, check({ status, repair, fx }), that returns named failures, so the real text
 // and the controls run through identical logic: each control mutates the real text (or the fixture verdict) in one
 // place and must fail with exactly its rule. Writes only under os.tmpdir().
+//
+// Repair's classes are first-match: a RACE / UNVERIFIED task also matches merged-never-marked and at Integration,
+// and `resume` works on the whole rollout, so the class order and the hold on every `resume` until Lachy's RACE
+// decision is recorded are pinned (first-match), as are a merge into another base (another-base), a CLOSED PR
+// (closed-pr) and a rollout another rollout's `supersedes:` names (reverse-lineage). Status's read-only rule is
+// positive: it may invoke only its two script reads and § 3's gh/git reads.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { collapse, fencedBlocks, read, root, section } from '../lib/contract-text.mjs'
+import { FENCE, collapse, fencedBlocks, read, root, section } from '../lib/contract-text.mjs'
 import { runTask } from '../lib/engine.mjs'
 
 // ---- the scripts ------------------------------------------------------------------------------------------------
@@ -245,14 +251,17 @@ const real = { status: read('skills/status/SKILL.md'), repair: read('skills/repa
 
 const IN_COUNT = ['merged', 'integrating', 'awaiting-integration', 'running', 'queued', 'set-aside']
 const COUNT_KEY = { merged: 'merged', integrating: 'integrating', 'awaiting-integration': 'awaitingIntegration', running: 'running', queued: 'queued', 'set-aside': 'setAside' }
-const LABELS = ['merged, never marked', 'PR-less merge', 'RACE', 'merge hold', 'live', 'awaiting Integration', 'queued', 'at Integration',
-  'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'own run', 'gate']
-const ROUTES = ['Stale anchor ref', 'The raise', 'A `merge-task:` own-run set-aside', 'Missing branch or CLOSED PR', 'Recut', 'Leash', 'Hand-off']
-const ACTIONS = ['predates the queue', 'unsupported protocol version', '`incomplete`', '`superseded_by:`', 'every task merged', '`paused`',
-  '`pause_requested`', 'a live queue', 'any drift flag', 'awaiting integration', 'nothing started']
+// Repair § 2's classes, first-match in this order: RACE and a PR-less merge ahead of merged-never-marked and at
+// Integration (both also match a RACE / UNVERIFIED task), PR CLOSED ahead of awaiting Integration.
+const LABELS = ['RACE', 'PR-less merge', 'merged into another base', 'merged, never marked', 'merge hold', 'live', 'PR CLOSED / branch missing',
+  'awaiting Integration', 'queued', 'at Integration', 'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'own run', 'gate']
+const ROUTES = ['Stale anchor ref', 'The raise', 'A `merge-task:` own-run set-aside', 'A CLOSED PR or a missing branch', 'Recut', 'Leash', 'Hand-off']
+const ACTIONS = ['predates the queue', 'unsupported protocol version', '`incomplete`', '`superseded_by:`', "named by another rollout's `supersedes:`",
+  'every task merged', '`paused`', '`pause_requested`', 'a live queue', 'any drift flag', 'awaiting integration', 'nothing started']
 const CAVEAT = 'drift is invisible offline; re-run with the live check before resuming'
 const ANCHOR = 'update-ref -d refs/integration-anchor/<inputs.branch> <X>'
-const WRITER = /reconcile-rollout\.py (next|resume|hand-back|defer|reconcile|mark-|approve-gates|clear-pause|carry)/
+// The only commands status may invoke: its two script reads and § 3's gh/git reads (the grep reads are no command).
+const READS = ['reconcile-rollout.py status', 'lead-integrate.py inputs', 'gh pr view', 'gh pr list', 'git worktree list', 'git remote get-url']
 const BAN = /\bwaves?\b|merged_through_wave|resume-filter|mark-dispatched|cursor behind|advance the cursor|smart-halt|single-wave|re-?wave|protocol 4/i
 
 const bodyOf = (t) => { const m = t.match(/^---\n[\s\S]*?\n---\n/); return m ? t.slice(m[0].length) : t }
@@ -284,6 +293,29 @@ function numbered(text) {
   return out
 }
 const before = (hay, a, b) => hay.indexOf(a) >= 0 && hay.indexOf(b) >= 0 && hay.indexOf(a) < hay.indexOf(b)
+// Every command the text invokes, read from its fenced blocks (shell comments dropped) and inline code spans (an
+// escaped \` is a literal, never a delimiter; prose invokes nothing): a script verb (`<x>.py <verb>`), a `.sh`
+// script, a `gh` or `git` subcommand, and a file writer (mv, rm, …).
+function invocations(text) {
+  const fenced = []
+  const prose = []
+  let inFence = false
+  for (const l of (text ?? '').split('\n')) {
+    if (FENCE.test(l)) { inFence = !inFence; continue }
+    if (inFence) fenced.push(l.replace(/\s#\s.*$/, ''))
+    else prose.push(l)
+  }
+  const spans = [...fenced, ...[...prose.join('\n').replace(/\\`/g, "'").matchAll(/`([^`]+)`/g)].map((m) => m[1])]
+  const out = []
+  for (const s of spans) {
+    for (const m of s.matchAll(/([\w-]+\.py)\s+([a-z][\w-]*)/g)) out.push(`${m[1]} ${m[2]}`)
+    for (const m of s.matchAll(/([\w-]+\.sh)\b/g)) out.push(m[1])
+    for (const m of s.matchAll(/\bgh\s+([a-z]+)\s+([a-z-]+)/g)) out.push(`gh ${m[1]} ${m[2]}`)
+    for (const m of s.matchAll(/\bgit\s+(?:-C\s+\S+\s+)?([a-z-]+)(?:\s+([a-z-]+))?/g)) out.push(`git ${m[1]}${m[2] ? ' ' + m[2] : ''}`)
+    for (const m of s.matchAll(/(?:^|[|;&]\s*)(mv|rm|mkdir|cp|touch|tee|sed\s+-i)\b/gm)) out.push(m[1])
+  }
+  return out
+}
 
 // Named failures for both skills against the fixtures; [] means every rule holds.
 function check({ status, repair, fx }) {
@@ -339,7 +371,8 @@ function check({ status, repair, fx }) {
     !qual.includes('`/workflows`') || !qual.includes('**in that owner session**') || !qual.includes('known to have ended')) fails.push('owner')
 
   // drift: D1 merged-never-marked names resume; D2 inputs covers running and started PR-less tasks; D3 one guarded
-  // gh pr list matched on inputs.branch; D4 the offline caveat; D5 the example Drift block.
+  // gh pr list matched on inputs.branch; D4 the offline caveat; D5 the example Drift block; D6 review required
+  // reads both review decisions merge-task's exit 7 fires on.
   const flag = (label) => labelled(s3raw, label, { item: true })
   const pl = flag('Possible PR-less merge:')
   // The example's Drift block: the lines after `Drift:` up to the next blank line.
@@ -354,13 +387,19 @@ function check({ status, repair, fx }) {
     s3.includes(CAVEAT) && s3.includes('every resume or reinstate recommendation') &&
       labelled(s4raw, 'Precedence.').includes('Offline, every resume or reinstate recommendation carries'),
     driftLines.some((l) => l.includes('merged, never marked')) && driftLines.some((l) => l.includes('possible PR-less merge')),
+    flag('Review required:').includes('`reviewDecision: REVIEW_REQUIRED` or `CHANGES_REQUESTED`'),
   ]
   if (!D.every(Boolean)) fails.push('drift')
 
-  // actions: the first-match order, and a possible PR-less merge overriding every wait, reinstate and resume.
+  // actions: the first-match order; a possible PR-less merge overriding every wait (the drain's included),
+  // reinstate and resume; and a live queue pointing at repair's live-queue mode for the set-asides the lead
+  // never re-enters by itself.
   const items = numbered(labelledRaw(s4raw, 'Recommended action'))
+  const liveItem = items[ACTIONS.indexOf('a live queue')] ?? ''
   if (items.length !== ACTIONS.length || !ACTIONS.every((k, i) => (items[i] ?? '').toLowerCase().startsWith(k.toLowerCase())) ||
-    !labelled(s4raw, 'Precedence.').includes('A possible PR-less merge overrides 6, 8, 10 and 11')) fails.push('actions')
+    !labelled(s4raw, 'Precedence.').includes('A possible PR-less merge overrides 7, 8, 9, 11 and 12') ||
+    !liveItem.includes('other than an `autoRevise: true` one is never re-entered by the live lead itself') ||
+    !liveItem.includes('its live-queue mode hands those back')) fails.push('actions')
 
   // lineage (status § 1 and repair § 1): a legacy note gets execute § 2's remedy; any other non-5 version is
   // unsupported; incomplete and supersede are stops.
@@ -371,26 +410,85 @@ function check({ status, repair, fx }) {
     !stops.includes('absent, `2` or `3`') || !stops.includes("execute § 2's remedy") || !stops.includes('"unsupported protocol version <N>') ||
     !stops.includes('`incomplete`') || !stops.includes('/thread:schedule <project> --regenerate') || !stops.includes('`superseded_by:`')) fails.push('lineage')
 
-  // read-only: status invokes no writer verb outside its Don'ts, and the Don'ts name next.
-  if (WRITER.test(sb.replace(sDonts, '')) || !collapse(sDonts).includes('`reconcile-rollout.py next`')) fails.push('read-only')
+  // read-only, pinned positively: outside its Don'ts, status invokes its two script reads and § 3's gh/git reads,
+  // and nothing else (no other script verb, no .sh, no gh or git writer, no file writer); the Don'ts name next.
+  const calls = invocations(sb.replace(sDonts, ''))
+  if (!calls.includes('reconcile-rollout.py status') || !calls.includes('lead-integrate.py inputs') || calls.some((c) => !READS.includes(c)) ||
+    !collapse(sDonts).includes('`reconcile-rollout.py next`')) fails.push('read-only')
+
+  // reverse-lineage: status § 1 finds a rollout whose supersedes: names this one and splits it on that successor's
+  // incomplete; the headline names the interrupted close-out; repair's stop finishes schedule step 7.5's close-out
+  // on Lachy's confirmation (the stamps, then the move); schedule's refusal line routes to that stop.
+  const actionRL = items[ACTIONS.indexOf("named by another rollout's `supersedes:`")] ?? ''
+  const rl = (stops.match(/- \*\*Close-out interrupted\*\*.*/) ?? [''])[0]
+  const sent = labelled(r1raw, "Sent here by schedule's unfinished-rollout refusal.")
+  if (!s1.includes("look for a rollout whose `supersedes:` names this one") || !s1.includes('`grep -rlE \'^supersedes:') ||
+    !s1.includes('headline `superseded by [[N]], close-out interrupted`') || !s1.includes("Read N's `incomplete`") ||
+    !s1.includes('must never be reinstated or resumed') || !actionRL.includes('never reinstate or resume it') ||
+    !actionRL.includes("`/thread:repair [[<rollout>]]`, which finishes schedule step 7.5's close-out") ||
+    !rl.includes("finish step 7.5's close-out, **on Lachy's confirmation**") ||
+    !['`status: done`', '`superseded_by: "[[N]]"`', 'Archive/Rollouts/', 'plain `mv`', 'skip the move', 'Never reinstate, resume or hand back here']
+      .every((k) => rl.includes(k)) ||
+    !sent.includes('`<P> is named by the supersedes: of <N>, which has since run`') || !sent.includes('**Close-out interrupted** stop')) {
+    fails.push('reverse-lineage')
+  }
 
   // ---- repair ----
   const clsRows = tableRows(r2raw).filter((c) => /^\*\*[^*]+\*\*$/.test(c[0]))
   const cls = Object.fromEntries(clsRows.map((c) => [c[0].slice(2, -2), c.slice(1).join(' | ')]))
+  const r3a = labelled(r3raw, '3a')
+  const c3 = labelled(r3raw, '3c')
+  const r4 = collapse(r4raw)
 
   // integration-only: at Integration hands back to Integration alone, and fixture B shows that is all it does.
+  // Case (ii) is conditional: it holds only when main has not moved since the recorded Integration.
   const atI = cls['at Integration'] ?? ''
-  if (!atI.includes('`reconcile-rollout.py hand-back --tasks <slug>`') || !atI.includes('Integration only') || !atI.includes('nothing redone') ||
+  if (!atI.includes('`reconcile-rollout.py hand-back --tasks <slug>`') || !atI.includes('Integration only') ||
+    !atI.includes('nothing before Integration is redone') || /case \(ii\) with nothing redone/.test(collapse(rb)) ||
+    !r4.includes('it merges through case (ii) when main has not moved since that Integration; otherwise `prepare` integrates it again') ||
+    !labelled(r4raw, 'A `merge-task:` own-run set-aside', { item: true }).includes('it merges through case (ii) when main has not moved') ||
     fx.B.fails.length) fails.push('integration-only')
 
-  // stages: the 13 classes, in order, and § 4's per-stage routes.
-  if (JSON.stringify(clsRows.map((c) => c[0].slice(2, -2))) !== JSON.stringify(LABELS) ||
+  // stages: the 15 classes, each once, and § 4's per-stage routes.
+  if (JSON.stringify(clsRows.map((c) => c[0].slice(2, -2)).sort()) !== JSON.stringify([...LABELS].sort()) ||
     !ROUTES.every((l) => r4raw.split('\n').some((x) => x.startsWith(`- **${l}`))) ||
-    !collapse(r4raw).includes('lead-integrate.py set-aside --note <task note> --kind integration')) fails.push('stages')
+    !r4.includes('lead-integrate.py set-aside --note <task note> --kind integration')) fails.push('stages')
+
+  // first-match: the classes are first-match in LABELS' order, and every resume (§ 3a, the hand-off) is held while
+  // a RACE / UNVERIFIED escalation is undecided, i.e. until a dated `RACE decided:` line records Lachy's call;
+  // status flags a RACE first, so it never also reads as merged, never marked.
+  // The order is read over the known classes present (a missing or extra one is stages').
+  const ho = labelled(r4raw, 'Hand-off', { item: true })
+  const order = clsRows.map((c) => c[0].slice(2, -2)).filter((l) => LABELS.includes(l))
+  if (JSON.stringify(order) !== JSON.stringify(LABELS.filter((l) => order.includes(l))) ||
+    !collapse(r2raw).includes('Each unmerged task takes the **first** class in table order whose signal it matches') ||
+    !(cls.RACE ?? '').includes('with no decision recorded (§ 3c)') || !(cls.RACE ?? '').includes('no `resume` runs at all') ||
+    !r3a.includes('no RACE / UNVERIFIED escalation is undecided') || !ho.includes('never while a RACE / UNVERIFIED escalation is undecided') ||
+    !c3.includes('`- <YYYY-MM-DD> repair: [[<slug>]] RACE decided: <his decision, verbatim>`') ||
+    !c3.includes('neither § 3a nor § 4\'s hand-off runs') ||
+    !collapse(raw(repair, /^## Don'ts/)).includes("Don't run `resume` while a RACE / UNVERIFIED escalation is undecided.") ||
+    !s3.includes('The first three flags are first-match') || !before(s3raw, '- **RACE / UNVERIFIED:**', '- **Merged, never marked:**') ||
+    !flag('RACE / UNVERIFIED:').includes('`repair: [[<slug>]] RACE decided: …`')) fails.push('first-match')
+
+  // another-base: a PR merged into another base is its own class, escalated with § 3c's evidence and never handed
+  // back, deferred or flipped; § 6 copies it to the Completion log; status's flag says the same.
+  const ab = cls['merged into another base'] ?? ''
+  if (!ab.includes('escalate with evidence (§ 3c); never hand it back or defer it') || !ab.includes('`resume` leaves it unchanged') ||
+    !c3.includes('**Merged into another base.** `resume` leaves it unchanged, and repair never hands it back, defers it or re-calls merge-task') ||
+    !r6.includes('and merges into another base (task + PR + base)') ||
+    !flag('Merged into another base:').includes('escalated, never flipped')) fails.push('another-base')
+
+  // closed-pr: a CLOSED PR (or a missing branch) on an awaiting-Integration, integrating or at-Integration task is
+  // input-gated, never left to the loop; it keeps its pr:, so hand-back follows a restore only when it is set aside.
+  const cp = cls['PR CLOSED / branch missing'] ?? ''
+  const cpr = labelled(r4raw, 'A CLOSED PR or a missing branch', { item: true })
+  if (!cp.includes("input-gated: § 4's restore, recut, defer or leave; never left to the loop") || !cp.includes('awaiting Integration, integrating') ||
+    !cpr.includes('A CLOSED PR keeps its `pr:`') || !cpr.includes('then `hand-back` **only when the task is set aside**') ||
+    !cpr.includes('`prepare` never reads the PR state') || /refuses an at-Integration note with no `pr:`/.test(collapse(rb)) ||
+    !flag('PR CLOSED:').includes('`prepare` never reads the PR state')) fails.push('closed-pr')
 
   // merged: M1 resume, never resolve; M2 the ancestry check; M3 the vault history; M4 never the status; M5 a dated
   // ## Notes record; M6 copied to the Completion log; M7 pr: only on Lachy's word.
-  const c3 = labelled(r3raw, '3c')
   const M = [
     (cls['merged, never marked'] ?? '').includes('`reconcile-rollout.py resume`') && !/reconcile-rollout\.py resolve/.test(repair) &&
       !/reconcile-rollout\.py resolve/.test(status),
@@ -435,7 +533,6 @@ function check({ status, repair, fx }) {
     !['landing-register check', "§ 5's retire block", 'branch -D', '--kind own', '`hand-back`'].every((k) => rc.includes(k))) fails.push('recut')
 
   // hand-off: no live lead and no pause; execute § 2.5, then resume, then the loop with --running ""; no § 2.7.
-  const ho = labelled(r4raw, 'Hand-off', { item: true })
   if (!ho.includes('no lead is live and no pause stands') || !before(ho, 'execute § 2.5', '`reconcile-rollout.py resume`') ||
     !before(ho, '`reconcile-rollout.py resume`', '`--running ""`') || !ho.includes('§4.5 resume') || !ho.includes('§ 2.7') ||
     !ho.includes('does not run')) fails.push('hand-off')
@@ -508,8 +605,8 @@ test('status and repair hold every queue rule', () => {
 
 // ---- controls: each mutates the real text (or a fixture verdict) in one place and must fail with exactly its rule ----
 
-const RULES = ['states', 'set-aside', 'log-line', 'owner', 'drift', 'actions', 'lineage', 'read-only', 'integration-only', 'stages',
-  'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off', 'no-wave']
+const RULES = ['states', 'set-aside', 'log-line', 'owner', 'drift', 'actions', 'lineage', 'read-only', 'reverse-lineage', 'integration-only',
+  'stages', 'first-match', 'another-base', 'closed-pr', 'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off', 'no-wave']
 const CONTROLLED = new Set()
 
 // Replaces the first match of `from`. Whitespace inside it matches any run of whitespace, so a reflowed line still
@@ -572,8 +669,17 @@ test('control D4: no offline caveat fails drift', () => {
 test('control D5: no PR-less line in the example Drift block fails drift', () => {
   only(st(lineWith(real.status, 'possible PR-less merge: PR') + '\n', ''), 'drift', 'D5')
 })
+test('control D6: review required on REVIEW_REQUIRED alone fails drift', () => {
+  only(st('`reviewDecision: REVIEW_REQUIRED` or `CHANGES_REQUESTED`', '`reviewDecision: REVIEW_REQUIRED`'), 'drift', 'D6')
+})
 test('control: the PR-less precedence dropped fails actions', () => {
-  only(st('A possible PR-less merge overrides 6, 8, 10 and 11', 'A possible PR-less merge overrides 10 and 11'), 'actions', 'precedence')
+  only(st('A possible PR-less merge overrides 7, 8, 9, 11 and 12', 'A possible PR-less merge overrides 11 and 12'), 'actions', 'precedence')
+})
+test('control: the PR-less precedence without the drain fails actions', () => {
+  only(st('A possible PR-less merge overrides 7, 8, 9, 11 and 12', 'A possible PR-less merge overrides 7, 9, 11 and 12'), 'actions', 'no drain')
+})
+test("control: a live queue that never points at repair's live-queue mode fails actions", () => {
+  only(st('its live-queue mode hands those back', 'it waits for the run, which hands those back'), 'actions', 'live-queue mode')
 })
 test('control: two recommended actions swapped fails actions', () => {
   const two = lineWith(real.status, '2. Unsupported protocol version')
@@ -586,8 +692,37 @@ test('control: no unsupported-version stop in status fails lineage', () => {
 test('control: no unsupported-version stop in repair fails lineage', () => {
   only(rp('"unsupported protocol version <N>', '"unknown version <N>'), 'lineage', 'repair')
 })
+// Each injects one invocation into status's § 4, outside its Don'ts.
+const inject = (cmd) => st('**Outside the count.**', `Run \`${cmd}\` first.\n\n**Outside the count.**`)
 test('control: a hand-back invoked by status fails read-only', () => {
-  only(st('**Outside the count.**', 'Run `reconcile-rollout.py hand-back --tasks <slug>` first.\n\n**Outside the count.**'), 'read-only', 'writer')
+  only(inject('reconcile-rollout.py hand-back --tasks <slug>'), 'read-only', 'hand-back')
+})
+test('control: a lead-integrate.py prepare invoked by status fails read-only', () => {
+  only(inject('python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py prepare --repo <repoPath> --slug <slug> --default main --note <task note>'), 'read-only', 'prepare')
+})
+test('control: merge-task.sh invoked by status fails read-only', () => {
+  only(inject('${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/merge-task.sh <repoPath> <pr> <head> <base>'), 'read-only', 'merge-task')
+})
+test('control: a gh pr reopen invoked by status fails read-only', () => {
+  only(inject('gh pr reopen <pr>'), 'read-only', 'gh pr reopen')
+})
+test('control: a git update-ref -d invoked by status fails read-only', () => {
+  only(inject(`git -C <repoPath> ${ANCHOR}`), 'read-only', 'update-ref')
+})
+test('control: a status that no longer runs its status read fails read-only', () => {
+  only({ status: real.status.replaceAll('reconcile-rollout.py status', 'reconcile-rollout.py') }, 'read-only', 'no status read')
+})
+test('control: no close-out headline in status § 1 fails reverse-lineage', () => {
+  only(st('headline `superseded by [[N]], close-out interrupted`', 'headline `superseded by [[N]]`'), 'reverse-lineage', 'headline')
+})
+test("control: a close-out without Lachy's confirmation fails reverse-lineage", () => {
+  only(rp("finish step 7.5's close-out, **on Lachy's confirmation**", "finish step 7.5's close-out"), 'reverse-lineage', 'no confirmation')
+})
+test("control: no route from schedule's refusal line fails reverse-lineage", () => {
+  only(rp('`<P> is named by the supersedes: of <N>, which has since run`', '`refuse <P>`'), 'reverse-lineage', 'refusal line')
+})
+test('control: a reverse-lineage action that reinstates fails reverse-lineage', () => {
+  only(st("(§ 1's reverse lineage) → never reinstate or resume it.", "(§ 1's reverse lineage) → reinstate it."), 'reverse-lineage', 'reinstate')
 })
 test('control: at Integration re-dispatched fails integration-only', () => {
   only(rp('`reconcile-rollout.py hand-back --tasks <slug>` → `review`', 'a fresh dispatch'), 'integration-only', 'redispatch')
@@ -595,8 +730,60 @@ test('control: at Integration re-dispatched fails integration-only', () => {
 test('control: fixture B failing fails integration-only', () => {
   only({ fx: { ...real.fx, B: { ...real.fx.B, fails: ['the body changed'] } } }, 'integration-only', 'fixture B')
 })
+test('control: an unconditional case (ii) on hand-back fails integration-only', () => {
+  only(rp('it merges through case (ii) when main has not moved since that Integration; otherwise `prepare` integrates it again (verify or trouble)',
+    'it merges through case (ii) with nothing redone'), 'integration-only', 'hand-back case (ii)')
+})
+test('control: an unconditional case (ii) on the merge-task relabel fails integration-only', () => {
+  only(rp('it merges through case (ii) when main has not moved. A code', 'it merges through case (ii) with nothing redone. A code'), 'integration-only', 'relabel case (ii)')
+})
 test('control: no queued class fails stages', () => {
   only(rp(lineWith(real.repair, '| **queued** |') + '\n', ''), 'stages', 'no queued class')
+})
+test('control: RACE classed after merged, never marked fails first-match', () => {
+  const race = lineWith(real.repair, '| **RACE** |')
+  const merged = lineWith(real.repair, '| **merged, never marked** |')
+  only({ repair: real.repair.replace(race + '\n', '').replace(merged, merged + '\n' + race) }, 'first-match', 'RACE late')
+})
+test('control: PR CLOSED classed after awaiting Integration fails first-match', () => {
+  const closed = lineWith(real.repair, '| **PR CLOSED / branch missing** |')
+  const awaiting = lineWith(real.repair, '| **awaiting Integration** |')
+  only({ repair: real.repair.replace(closed + '\n', '').replace(awaiting, awaiting + '\n' + closed) }, 'first-match', 'CLOSED late')
+})
+test('control: no first-match declaration fails first-match', () => {
+  only(rp('Each unmerged task takes the **first** class in table order whose signal it matches', 'Each unmerged task takes a class'), 'first-match', 'declaration')
+})
+test('control: § 3a resume not held behind an undecided RACE fails first-match', () => {
+  only(rp(', and **no RACE / UNVERIFIED escalation is undecided** (§ 3c)', ''), 'first-match', '3a')
+})
+test('control: the hand-off not held behind an undecided RACE fails first-match', () => {
+  only(rp(', and never while a RACE / UNVERIFIED escalation is undecided', ''), 'first-match', 'hand-off')
+})
+test('control: no recorded RACE decision fails first-match', () => {
+  only(rp('`- <YYYY-MM-DD> repair: [[<slug>]] RACE decided: <his decision, verbatim>`', 'his decision'), 'first-match', 'record')
+})
+test('control: status flagging merged-never-marked before RACE fails first-match', () => {
+  const race = labelledRaw(raw(real.status, /^### 3\. /), 'RACE / UNVERIFIED:', { item: true })
+  const merged = labelledRaw(raw(real.status, /^### 3\. /), 'Merged, never marked:', { item: true })
+  only({ status: real.status.replace(race + '\n', '').replace(merged, merged + '\n' + race) }, 'first-match', 'status order')
+})
+test('control: a merge into another base handed back fails another-base', () => {
+  only(rp('escalate with evidence (§ 3c); never hand it back or defer it', 'hand it back (§ 4)'), 'another-base', 'hand-back')
+})
+test('control: no Completion-log record of a merge into another base fails another-base', () => {
+  only(rp('and merges into another base (task + PR + base)', 'and the rest'), 'another-base', 'completion log')
+})
+test('control: no § 3c route for a merge into another base fails another-base', () => {
+  only(rp('- **Merged into another base.** `resume` leaves it unchanged', '- **Other.** `resume` leaves it unchanged'), 'another-base', '3c')
+})
+test('control: a restore that hands back unconditionally fails closed-pr', () => {
+  only(rp('then `hand-back` **only when the task is set aside**', 'then `hand-back`'), 'closed-pr', 'restore')
+})
+test('control: the old hand-back parenthetical fails closed-pr', () => {
+  only(rp('A CLOSED PR keeps its `pr:`', '`hand-back` refuses an at-Integration note with no `pr:`; a CLOSED PR'), 'closed-pr', 'parenthetical')
+})
+test('control: a CLOSED PR left to the loop fails closed-pr', () => {
+  only(rp('never left to the loop, which would integrate it', 'or left to the loop, which integrates it'), 'closed-pr', 'loop')
 })
 test('control M1: merged-never-marked resolved fails merged', () => {
   only(rp('`reconcile-rollout.py resume` (§ 3a)', '`reconcile-rollout.py resolve` (§ 3a)'), 'merged', 'M1')
@@ -651,7 +838,7 @@ test('control: a recut without the ask fails recut', () => {
   only(rp("- **Recut, only on Lachy's explicit ask:**", '- **Recut, when the branch is missing:**'), 'recut', 'no ask')
 })
 test('control: a hand-off under a pause fails hand-off', () => {
-  only(rp('- **Hand-off, when no lead is live and no pause stands:**', '- **Hand-off, when no lead is live:**'), 'hand-off', 'pause')
+  only(rp('- **Hand-off, when no lead is live and no pause stands**', '- **Hand-off, when no lead is live**'), 'hand-off', 'pause')
 })
 test('control: a wave in status fails no-wave', () => {
   only(st('**Outside the count.**', 'Group by wave.\n\n**Outside the count.**'), 'no-wave', 'status wave')
@@ -660,7 +847,7 @@ test('control: a wave in repair fails no-wave', () => {
   only(rp('### 5. ', 'Defer it out of the wave.\n\n### 5. '), 'no-wave', 'repair wave')
 })
 
-test('the rules are all named (18) and each has a control', () => {
-  assert.equal(RULES.length, 18)
+test('the rules are all named (22) and each has a control', () => {
+  assert.equal(RULES.length, 22)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

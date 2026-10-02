@@ -14,7 +14,8 @@ It is a **conductor** over execute's queue loop, not an engine (see
 launches an automatic seeded revise, integrates each approved task and merges it. Repair adds only what the
 loop can't do by itself: hand a set-aside task back at the **stage it stopped** (ADR 0030 decision 4), capture
 an **input-gated** decision, record a gate sign-off, raise a review budget **once**, **defer** a wedged task
-with its dependants, flip a **merged, never marked** task, and **escalate** a merge the notes never recorded.
+with its dependants, flip a **merged, never marked** task, **escalate** a merge the notes never recorded (or a
+RACE, or one into another base), and finish an interrupted supersede's **close-out**.
 It never re-implements Integration, merge or convergence, and **the engine keeps sole merge authority**.
 
 ## Native runtime binding
@@ -50,13 +51,26 @@ Resolve `[[<slug>]]` (ask if ambiguous). Run the **`/thread:status` scan with th
 `lead-integrate.py inputs`, the drift flags and the repo path. Show the user the situational report first:
 they should see what they're repairing.
 
-**Stops.** Before anything else, and before anything is written:
+**Stops.** Before anything else, and before anything is written (the close-out below writes only on Lachy's
+confirmation):
 
 - `protocol_version` absent, `2` or `3` → execute § 2's remedy: hard-pause it if a session is running it, then
   `/thread:schedule <project> --regenerate`. Stop.
 - any other value except `5` → "unsupported protocol version <N>; the queue reads protocol_version: 5". Stop.
 - `incomplete` → `/thread:schedule <project> --regenerate`. Stop.
 - `superseded_by:` → point at the successor (`/thread:repair [[<successor>]]`). Stop.
+- **Close-out interrupted** (status § 1's reverse lineage: another rollout `[[N]]`'s `supersedes:` names this
+  one, and this note has no `superseded_by:`). A supersede carried this rollout's unlanded tasks to N and died
+  before schedule step 7.5 closed this note out. Never reinstate, resume or hand back here: the carried tasks
+  are N's.
+  - N never ran (its `incomplete` is non-null) → `/thread:schedule <project> --regenerate`: schedule § 0's
+    `interrupted` line finishes that supersede. Stop.
+  - N has run → finish step 7.5's close-out, **on Lachy's confirmation**, and only when status counts no
+    running, integrating, awaiting-Integration, queued or set-aside task here (`carry` moved every such task;
+    one still here would be stranded, so show it and stop). Stamp `status: done` and
+    `superseded_by: "[[N]]"` on this rollout note, then `mkdir -p ~/repos/obsidian/Work/Tasks/Archive/Rollouts/`
+    and a plain `mv` of the note into it. A same-named file already there → skip the move and report the
+    collision. Write nothing else. Stop, and point at `/thread:status [[N]]`.
 
 Then one of three modes holds. Each is evaluated before anything is written.
 
@@ -86,26 +100,33 @@ check session `<owner tag>` first".
 - The live lead's next `next` restarts an `in_progress` hand-back and integrates a `review` one.
 
 **No lead live.** No pause, and every owner session has ended (or shows no run there): the full flow, § 3 to
-§ 6.
+§ 6, except that an undecided RACE / UNVERIFIED escalation holds every `resume` and the hand-off (§ 3c).
 
 **Sent here by schedule's unfinished-rollout refusal.** Repair sorts out what is stuck; superseding stays
-schedule's `--regenerate`.
+schedule's `--regenerate`. A refusal line `<P> is named by the supersedes: of <N>, which has since run` is
+the **Close-out interrupted** stop above: run `/thread:repair [[<P>]]`, and on Lachy's confirmation it closes
+P out, so schedule's check no longer counts P.
 
 ### 2. Classify each unmerged task
 
 From its queue state, its `lead-integrate.py inputs` (`resumeAt`, `autoRevise`, `lastIntegration`) and the
-live PR state:
+live PR state. Each unmerged task takes the **first** class in table order whose signal it matches. The order
+matters: a RACE task's PR is MERGED, and so is an UNVERIFIED one's, which is also set aside at Integration, so
+they match **merged, never marked** and **at Integration** further down too; only the order keeps them out of
+`resume` and `hand-back` until Lachy has decided.
 
 | Class | Signal | Action |
 |---|---|---|
-| **merged, never marked** | not done; its PR is MERGED into the default branch | `reconcile-rollout.py resume` (§ 3a) flips it done; never hand it back or defer it |
+| **RACE** | merge-task exit 5 (a `## Race log` line names it), or `UNVERIFIED:` in its set-aside reason, with no decision recorded (§ 3c) | escalate (§ 3c); never re-call merge-task; while it is undecided no `resume` runs at all (§ 3a, § 4's hand-off) |
 | **PR-less merge** | status's "possible PR-less merge" flag | escalate with evidence (§ 3c) |
-| **RACE** | merge-task exit 5 (a `## Race log` line), or `UNVERIFIED:` in its set-aside reason | escalate (§ 3c); never re-call merge-task |
+| **merged into another base** | its PR is MERGED into a branch other than the default (status's flag) | escalate with evidence (§ 3c); never hand it back or defer it, and `resume` leaves it unchanged (it checks the base) |
+| **merged, never marked** | not done; its PR is MERGED into the default branch | `reconcile-rollout.py resume` (§ 3a) flips it done; never hand it back or defer it |
 | **merge hold** | merge-task exit 7: review required on the integrating PR | "approve PR #N": Lachy's; never re-integrated, never set aside |
 | **live** | running or integrating under a live lead | nothing: the lead owns it (§ 1) |
+| **PR CLOSED / branch missing** | awaiting Integration, integrating (no lead live) or set aside at Integration, and its PR is CLOSED unmerged (status's flag) or `git -C <repoPath> ls-remote --exit-code --heads origin <inputs.branch>` finds no branch | input-gated: § 4's restore, recut, defer or leave; never left to the loop, which would integrate it only for merge-task to set it aside at its own run |
 | **awaiting Integration** | `review` with a `pr:` | nothing: the loop integrates it |
 | **queued** | `open`, its `waitingOn` unmet | nothing: it starts when its dependencies land (or defer it with its blocker, § 5) |
-| **at Integration** | `setAsideAt: integration` (`resumeAt: integration`) | `reconcile-rollout.py hand-back --tasks <slug>` → `review`: it rejoins the Integration queue and retries Integration only; its branch, plan and review stand, nothing redone (§ 4) |
+| **at Integration** | `setAsideAt: integration` (`resumeAt: integration`) | `reconcile-rollout.py hand-back --tasks <slug>` → `review`: it rejoins the Integration queue and retries Integration only; its branch, plan and review stand, and nothing before Integration is redone (§ 4) |
 | **revise (automatic)** | `autoRevise: true` | nothing: the lead (or § 4's hand-off) launches the seeded revise itself |
 | **revise stopped** | `revise stopped:` in the marker, `resumeAt: revise` | hand back (§ 4) → a seeded revise |
 | **review-blocked, rejected** | `review-blocked`, `lastIntegration.outcome: rejected` | the raise (§ 4), then hand back → a seeded revise |
@@ -119,20 +140,25 @@ is never input-gated: its block is the quota ceiling, so hand it back once the h
 
 ### 3. Act on what doesn't need a task call
 
-**3a — merged, never marked → `resume`.** Only when no lead is live and no pause stands or drains:
+**3a — merged, never marked → `resume`.** Only when no lead is live, no pause stands or drains, and **no RACE /
+UNVERIFIED escalation is undecided** (§ 3c):
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume --rollout <rollout-note>
 ```
 
-For every unmarked note with a `pr:`, it asks gh for the PR's state and base, flips one merged into the
-default branch to done (stamping `merged:`), and reports anything else unchanged: a PR merged into another
-base is escalated, never flipped. Under a pause or a live queue, report it and leave it: the reinstate's or
-the lead's next *Cold resume* runs `resume` first.
+`resume` works on the whole rollout, not one task: for every unmarked note with a `pr:`, it asks gh for the
+PR's state and base, flips one merged into the default branch to done (stamping `merged:`), and reports
+anything else unchanged. A PR merged into another base is left alone, so it is escalated (§ 3c), never
+flipped. An undecided RACE / UNVERIFIED task is merged into the default branch too, so `resume` would flip it
+done on an unverified main and its dependants would start there: hold `resume` until § 3c records Lachy's
+decision. Under a pause or a live queue, report it and leave it: the reinstate's or the lead's next *Cold
+resume* runs `resume` first.
 
 **3b — input-gated → capture + inject.** Ping the user only here and for the other decisions no agent can
-make (a gate, a PR-less merge, a defer chain, a second block or a second raise). For each input-gated task,
-`AskUserQuestion` with the specific decision its feedback needs (quote the feedback). Then write the
+make (a gate, a § 3c escalation, a CLOSED PR or missing branch, a close-out, a defer chain, a second block or
+a second raise). For each input-gated task, `AskUserQuestion` with the specific decision its feedback needs
+(quote the feedback). Then write the
 answer into the **task note body** so the next agent reads it: replace the placeholder in place, or append or
 update a `## Repair input` section with the decision verbatim. It is body content, not a status transition,
 so it is allowed under a pause. A gate is presented verbatim; on Lachy's sign-off run
@@ -140,7 +166,8 @@ so it is allowed under a pause. A gate is presented verbatim; on Lachy's sign-of
 (execute § 3.7), never under a pause: the next `next` restarts it. A declined gate is deferred (§ 5) or left
 set aside.
 
-**3c — a possible PR-less merge, and RACE / UNVERIFIED → escalate with evidence.** For each one, show:
+**3c — a possible PR-less merge, RACE / UNVERIFIED, and a merge into another base → escalate with
+evidence.** For each one, show:
 
 1. the slug, the note's `status:`, `owner:` and `started:`;
 2. `gh pr view <n> --json state,mergedAt,mergeCommit,baseRefName,headRefName`;
@@ -152,17 +179,24 @@ set aside.
 
 Then append a dated `## Notes` line to the rollout note (create the section if missing), e.g.
 `- <YYYY-MM-DD> repair: [[<slug>]] possible PR-less merge (PR #<n>, head audit-fix/<alias>, MERGED) escalated;
-evidence shown; decision left to Lachy.` On Lachy's confirmation that the PR is this task's, write
-`pr: <url>` on the task note:
+evidence shown; decision left to Lachy.` Repair never writes that task's `status:`. Then, per class:
 
-- with no lead live and no pause: run `resume` (§ 3a), which re-checks the state and the base and flips it
-  done;
-- under a stamped pause: leave `resume` to the reinstate's *Cold resume*;
-- under a drain or a live queue: escalate and record only; the `pr:` write waits for the pause stamp or the
-  lead's end (advise: hard-pause, or wait for the stamp, then repair).
-
-Repair never writes that task's `status:`. For RACE, never re-call merge-task: main's state is Lachy's call,
-and once he has made it, `resume` flips the merged task done.
+- **A possible PR-less merge.** On Lachy's confirmation that the PR is this task's, write `pr: <url>` on the
+  task note:
+  - with no lead live and no pause: run `resume` (§ 3a), which re-checks the state and the base and flips it
+    done;
+  - under a stamped pause: leave `resume` to the reinstate's *Cold resume*;
+  - under a drain or a live queue: escalate and record only; the `pr:` write waits for the pause stamp or the
+    lead's end (advise: hard-pause, or wait for the stamp, then repair).
+- **RACE / UNVERIFIED.** Never re-call merge-task: main's state is Lachy's call. Until a dated
+  `- <YYYY-MM-DD> repair: [[<slug>]] RACE decided: <his decision, verbatim>` line on the rollout note's
+  `## Notes` records it, the escalation is **undecided**: neither § 3a nor § 4's hand-off runs, because each
+  runs `resume` over the whole rollout, and it would flip this task done. Once that line is written, `resume`
+  flips the merged task done. If he decides the merge does not stand, defer the task (§ 5; its PR is merged,
+  so the retire block's `gh pr close` is skipped) before recording it, so `resume` never reads it as landed.
+- **Merged into another base.** `resume` leaves it unchanged, and repair never hands it back, defers it or
+  re-calls merge-task for it: whether the work reached the default branch (the ancestry check above shows it)
+  and what becomes of the task are Lachy's call. Escalate, record, and leave it.
 
 ### 4. Hand back: re-enter at the stage it stopped
 
@@ -172,10 +206,11 @@ Every route uses execute's own re-entry verb, and never under a pause (§ 1):
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hand-back --tasks <slug>
 ```
 
-Set aside at Integration → `review` with `ready:` restamped: it rejoins the Integration queue, and when its
-`## Integration log`'s last line is `integrated` it merges through case (ii) with nothing redone. Set aside at
-its run → `in_progress` with `owner:` cleared: the next `next` restarts it through execute's
-*Restart routing* (`resumeAt: revise` → a seeded revise, else its own call). A `stashed: integration
+Set aside at Integration → `review` with `ready:` restamped: it rejoins the Integration queue, and nothing
+before Integration is redone. When its `## Integration log`'s last line is `integrated`, it merges through
+case (ii) when main has not moved since that Integration; otherwise `prepare` integrates it again (verify or
+trouble). Set aside at its run → `in_progress` with `owner:` cleared: the next `next` restarts it through
+execute's *Restart routing* (`resumeAt: revise` → a seeded revise, else its own call). A `stashed: integration
 leftovers <head>` line in a merge log is informational: the merge step already moved the leftovers aside, so
 there is nothing to clear. Per stage:
 
@@ -189,14 +224,24 @@ there is nothing to clear. Per stage:
   then hand back. If the task re-blocks after that raise (in this run, or a raise for it is already recorded
   in `## Notes`), ask Lachy instead of raising again. With no `rejected` line it is its own run: no raise.
 - **A `merge-task:` own-run set-aside whose cause Lachy cleared on GitHub** (its last log line `integrated`):
-  relabel it at Integration, then hand back, and it merges through case (ii) with nothing redone. A code
-  cause stays its own call.
+  relabel it at Integration, then hand back: nothing before Integration is redone; it merges through case
+  (ii) when main has not moved. A code cause stays its own call.
   ```
   printf '%s' "<the cleared cause>" | python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py set-aside --note <task note> --kind integration | python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py reconcile --result -
   ```
-- **Missing branch or CLOSED PR at Integration** (input-gated; `hand-back` refuses an at-Integration note
-  with no `pr:`). Offer: restore (the landing-register check, a plain push of the local branch if it exists,
-  never forced, `gh pr reopen`, then hand back), recut (below), defer it (§ 5) or leave it.
+- **A CLOSED PR or a missing branch** (§ 2's **PR CLOSED / branch missing**: awaiting Integration,
+  integrating or set aside at Integration; input-gated). A CLOSED PR keeps its `pr:`, so `hand-back` accepts
+  a set-aside note and the loop would integrate it (`prepare` never reads the PR state), only for merge-task to
+  set it aside at its own run: never leave it to the loop. Offer:
+  - restore: the landing-register check, a plain push of the local branch if it exists (never forced),
+    `gh pr reopen`, then `hand-back` **only when the task is set aside**: an awaiting-Integration or
+    integrating note is already in the Integration queue, and `hand-back` refuses it;
+  - recut (below);
+  - defer it (§ 5);
+  - leave it.
+
+  Under a live queue act only on a set-aside one: an awaiting-Integration task may enter the lane at any
+  moment.
 - **Recut, only on Lachy's explicit ask:** a fresh start from the queue's current base.
   1. Run the landing-register check (execute § 2.5).
   2. Retire the branch with § 5's retire block plus `git -C <repoPath> branch -D <inputs.branch>`.
@@ -205,7 +250,9 @@ there is nothing to clear. Per stage:
 - **Leash:** once per task per repair run. If a task blocks again after its one retry in this run, stop
   retrying it: surface it with its new diagnosis and offer *more guidance and one more retry* / *defer it*
   (§ 5) / *leave it set aside*. Don't loop.
-- **Hand-off, when no lead is live and no pause stands:** execute's queue loop, entered at its §4.5 resume
+- **Hand-off, when no lead is live and no pause stands**, and never while a RACE / UNVERIFIED escalation is
+  undecided (§ 3c: its `resume` would flip that task done on an unverified main; report the hold and stop
+  there): execute's queue loop, entered at its §4.5 resume
   (*Cold resume*): execute § 2.5 first (then § 2.6), then `reconcile-rollout.py resume`, then the loop with
   `--running ""` (this session holds no task call). Execute's § 2.7 pushed-base gate (entry points only)
   does not run on this hand-off; the next `/thread:execute [[<rollout>]]` runs it. Under a live queue the
@@ -246,8 +293,10 @@ points only) does not run; the next `/thread:execute [[<rollout>]]` runs it. Exe
 ceremony** then runs on the (possibly reduced) task set. Ensure the rollout's `## Completion log` records
 every repair action, copied from the dated `## Notes` records this and earlier runs wrote: hand-backs (task +
 stage), decisions injected (task + value), gates signed, raises (task + new budget), merged-never-marked tasks
-flipped by `resume` (task + PR), tasks deferred (task + reason + dependants moved with it), and the
-escalations of § 3c.
+flipped by `resume` (task + PR), tasks deferred (task + reason + dependants moved with it), a CLOSED PR or
+missing branch (task + restore, recut, defer or leave), and the escalations of § 3c with Lachy's decisions:
+possible PR-less merges, RACE / UNVERIFIED (task + PR + the recorded decision), and merges into another base
+(task + PR + base).
 
 ## Don'ts
 
@@ -265,7 +314,12 @@ escalations of § 3c.
   only on Lachy's explicit ask.
 - **Don't ask the user about agent-fixable blocks.** Hand them back silently (once); ping only for
   input-gated decisions, gates, a second block or a second raise.
-- **Don't write a PR-less or RACE task's `status:`**, and never re-call merge-task for a RACE.
+- **Don't write a PR-less, RACE / UNVERIFIED or other-base task's `status:`**, and never re-call merge-task
+  for a RACE.
+- **Don't run `resume` while a RACE / UNVERIFIED escalation is undecided.** Not in § 3a, not through § 4's
+  hand-off: it works on the whole rollout and would flip that task done on an unverified main (§ 3c).
+- **Don't reinstate a rollout another rollout's `supersedes:` names.** Its unlanded tasks were carried there;
+  finish its close-out instead (§ 1).
 - **Don't defer a task with dependants alone.** Compute the closure first; defer the chain or fix it.
 - **Don't loop.** One retry per task per run; then surface and let the user decide.
 - **Don't run repair under the built-in `/loop` (and never suggest it).** Repair is input-gated by design: it
