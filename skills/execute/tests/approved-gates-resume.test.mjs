@@ -1,6 +1,7 @@
 // p12-14 (ADR 0008, ADR 0030 decision 4): a gate-pending task, once its gates are signed, resumes its OWN
-// Workflow call with `resumeFromRunId` and `task.approvedGates` added, so the plan the human signed replays
-// from cache and is never re-planned (execute § 3.7). Two halves are pinned here:
+// Workflow call with `resumeFromRunId` and `task.approvedGates` added while the lead holds its handle, so the
+// plan the human signed replays from cache and that resume makes no plan call (execute § 3.7). Two halves are
+// pinned here:
 //
 // 1. The Verify test: every prompt the engine renders is byte-identical with and without
 //    task.approvedGates, so adding it to a resumed call's args changes no agent()'s prompt and the replay

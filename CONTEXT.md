@@ -293,8 +293,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Gated input** — a human authorisation a task's plan declares up front
   (API spend with a cap, credentials, an irreversible action). Always pauses
   for sign-off, even in continuous mode (ADR 0008). Once signed, the task
-  resumes its gate-pending call on the plan the human signed, never
-  re-planned (execute § 3.7).
+  resumes its gate-pending call on the signed plan while the lead holds its
+  handle; a stop at Integration rejoins the Integration queue; otherwise it
+  takes a fresh call behind a warning (execute § 3.7).
   _Avoid_: approval item, spend gate, pre-approval.
 - **Agent-fixable block** — a block a re-dispatched agent can resolve alone;
   repair retries these without asking the human. _Avoid_: auto-block, soft block.
