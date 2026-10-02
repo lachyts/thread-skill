@@ -1,4 +1,4 @@
-// Verifies the resume-cache invariant for the optional features in wave-execute.workflow.js:
+// Verifies the resume-cache invariant for the optional features in task.workflow.js:
 //   - gateOverride(task)      → '' when ignoreGate is unset (byte-identical prompts), text when set
 //   - envBootstrapStep(a)     → '' when envBootstrap is unset, a command line when set
 //   - worktreeSetup(a, task)  → identical to its pre-feature output when envBootstrap is unset; when set,
@@ -24,15 +24,17 @@ import fs from 'node:fs'
 import vm from 'node:vm'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import crypto from 'node:crypto'
+import { loadEngine, runTask } from '../../../tests/lib/engine.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const src = fs.readFileSync(path.join(here, '..', 'wave-execute.workflow.js'), 'utf8')
+const src = fs.readFileSync(path.join(here, '..', 'task.workflow.js'), 'utf8')
 
 const marker = '// ---- Orchestration'
 const idx = src.indexOf(marker)
 if (idx === -1) { console.error('FAIL - orchestration marker not found'); process.exit(1) }
 let head = src.slice(0, idx).replace('export const meta', 'const meta')
-head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort, tierCap, clampTier, taskModel, judgeFor, terminalTier, escalate, effortTier, readOnlyPrompt, normaliseTier };\n'
+head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort, tierCap, clampTier, taskModel, judgeFor, terminalTier, escalate, effortTier, readOnlyPrompt, normaliseTier, roundBudgetDiagnosis, taskTreeSetup };\n'
 
 // `agent` and `log` are Workflow globals the engine expects at run time. The layer functions resolve them
 // against the sandbox global at CALL time, so the transient-death tests below swap `ctx.agent` per case to
@@ -698,14 +700,299 @@ ok(!roThrew, 'converge: dead read-only investigator does not throw')
 ok(roRes && roRes.status === 'blocked', 'converge: dead read-only investigator → blocked, not spurious review')
 ok(roRes && /transient infrastructure/i.test(roRes.blockerDiagnosis), 'converge: dead read-only investigator → transient-infra diagnosis')
 
-// ---- Progress / ETA (wave-boundary timestamps — the engine has no clock) ------
-// The Workflow sandbox cannot read clocks (Date.now() throws), so wave-boundary timestamps are stamped
-// on the ROLLOUT NOTE by reconcile-wave.py (mark-dispatched at wave launch, cursor post-merge) and the
-// skill threads a precomputed `progress` line into args for the engine to relay via log(). Comments may
+// ---- Round budgets fail closed (p12-2) ----------------------------------------
+// planLoop / reviewLoop are bounded `while (round <= budget)` loops whose only returns sit inside the
+// body. A budget of 0, a negative, NaN, undefined/null (an omitted or empty YAML key), a fraction or a
+// numeric string used to fall off the end and return undefined. For planLoop that is a fail-OPEN on
+// ADR 0008: implement() read `prev === undefined` as "no gate", so the task was implemented with no plan,
+// no judge and no gated-inputs parse. Every one of those values must now block, before any dispatch.
+{
+  const BAD = [0, NaN, undefined, null, -1, 2.5, '2', Infinity]
+  const show = (v) => (typeof v === 'string' ? `'${v}'` : String(v))
+  const spendPlan = 'PLAN\n### Gated inputs\n- spend: x — cap $5'
+  const approveAll = recordingAgent(async (prompt, opts) => {
+    if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
+    if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: spendPlan }
+    if (opts.phase === 'Implement') return greenImpl
+    return { verdict: 'approve', feedback: [] }
+  })
+  const dispatched = () => effortCalls.map((c) => c.label)
+
+  // The helper: integer >= 1 or a diagnosis naming the field and the bad value, quote-free (the lead
+  // copies it into a ROLLOUT-STATUS reason, and the Stop-hook regex needs quote-free reasons).
+  ok(T.roundBudgetDiagnosis({ maxPlanRounds: 1, maxReviewRounds: 6 }, ['maxPlanRounds', 'maxReviewRounds']) === '',
+    'round budgets: valid integers >= 1 (incl. a large 6) produce no diagnosis')
+  for (const v of BAD) {
+    const d = T.roundBudgetDiagnosis({ maxPlanRounds: v }, ['maxPlanRounds'])
+    ok(/max_plan_rounds/.test(d) && d.includes(show(v)) && !d.includes('"'),
+      `round budgets: maxPlanRounds=${show(v)} → quote-free diagnosis naming the field and value`)
+  }
+  ok(!T.roundBudgetDiagnosis({ maxReviewRounds: 'a"b' }, ['maxReviewRounds']).includes('"'),
+    'round budgets: a double quote inside a string value never reaches the diagnosis')
+
+  // 1. The ADR 0008 fail-open: a plan-gated task whose plan WOULD declare a spend gate. Each bad plan
+  //    budget must stop at plan-blocked with ZERO dispatches (no planner, no implementer, no review).
+  for (const v of BAD) {
+    effortCalls.length = 0
+    ctx.agent = approveAll
+    const r = await T.converge({ ...baseEff, slug: 'proj-rb-plan', scope: 'cross-cutting', planGate: true, maxPlanRounds: v }, aEff)
+    ok(r && r.status === 'plan-blocked' && r.blocked === true && /max_plan_rounds/.test(r.blockerDiagnosis),
+      `round budgets: plan-gated maxPlanRounds=${show(v)} → plan-blocked naming max_plan_rounds (was ${r && r.status})`)
+    ok(effortCalls.length === 0, `round budgets: plan-gated maxPlanRounds=${show(v)} → zero dispatches (got ${dispatched().join(', ')})`)
+  }
+
+  // 2. planLoop called directly never returns undefined.
+  {
+    effortCalls.length = 0
+    ctx.agent = approveAll
+    const st = { tier: 'opus', cap: 'fable', escalated: false, escalatedAt: '', capSuppressed: false, capSuppressedAt: '' }
+    const r = await T.planLoop({ ...baseEff, slug: 'proj-rb-pl', scope: 'cross-cutting', planGate: true, maxPlanRounds: 0 }, st, aEff)
+    ok(r !== undefined && r.status === 'plan-blocked' && r.planRoundsUsed === 0, 'round budgets: planLoop(maxPlanRounds=0) returns a defined plan-blocked result, planRoundsUsed 0')
+    ok(effortCalls.length === 0, 'round budgets: planLoop(maxPlanRounds=0) dispatches nothing')
+  }
+
+  // 3. A bad review budget: converge's pre-flight blocks BEFORE any implementer/PR is spent. The
+  //    diagnosis rides reviewFeedback too — reconcile writes bullets(reviewFeedback) for review-blocked
+  //    when reviewHistory is empty.
+  for (const v of BAD) {
+    effortCalls.length = 0
+    ctx.agent = approveAll
+    const r = await T.converge({ ...baseEff, slug: 'proj-rb-rev', scope: 'single-file', planGate: false, maxReviewRounds: v }, aEff)
+    ok(r && r.status === 'review-blocked' && /max_review_rounds/.test(r.blockerDiagnosis)
+      && Array.isArray(r.reviewFeedback) && /max_review_rounds/.test(r.reviewFeedback[0] || '')
+      && Array.isArray(r.reviewHistory) && r.reviewHistory.length === 0 && r.reviewRoundsUsed === 0,
+      `round budgets: maxReviewRounds=${show(v)} → review-blocked, diagnosis in blockerDiagnosis + reviewFeedback (was ${r && r.status})`)
+    ok(effortCalls.length === 0, `round budgets: maxReviewRounds=${show(v)} → zero dispatches, no implementer or PR spent (got ${dispatched().join(', ')})`)
+  }
+  {
+    effortCalls.length = 0
+    ctx.agent = approveAll
+    const r = await T.converge({ ...baseEff, slug: 'proj-rb-both', scope: 'cross-cutting', planGate: true, maxReviewRounds: 0 }, aEff)
+    ok(r && r.status === 'review-blocked' && effortCalls.length === 0, 'round budgets: plan-gated task with a bad review budget → review-blocked, no plan: dispatch either')
+    ok(r && typeof r.model === 'string' && r.escalated === false && r.tierCapped === false, 'round budgets: the pre-flight result carries the normal model/escalated/tierCapped wrap')
+    effortCalls.length = 0
+    const both = await T.converge({ ...baseEff, slug: 'proj-rb-both', scope: 'cross-cutting', planGate: true, maxReviewRounds: 0, maxPlanRounds: NaN }, aEff)
+    ok(both && both.status === 'review-blocked' && /max_review_rounds/.test(both.blockerDiagnosis) && /max_plan_rounds/.test(both.blockerDiagnosis),
+      'round budgets: both budgets bad → one diagnosis names every invalid field, so one fix pass covers both')
+  }
+
+  // 4. reviewLoop called directly with a green PR and a 0 budget never returns undefined.
+  {
+    effortCalls.length = 0
+    ctx.agent = approveAll
+    const st = { tier: 'opus', cap: 'fable', escalated: false, escalatedAt: '', capSuppressed: false, capSuppressedAt: '' }
+    const r = await T.reviewLoop({ ...baseEff, slug: 'proj-rb-rl', scope: 'single-file', maxReviewRounds: 0 }, st, greenImpl, aEff, '')
+    ok(r !== undefined && r.status === 'review-blocked' && r.reviewRoundsUsed === 0 && r.prUrl === greenImpl.prUrl && /max_review_rounds/.test(r.reviewFeedback[0] || ''),
+      'round budgets: reviewLoop(maxReviewRounds=0) returns review-blocked (PR preserved), not undefined')
+    ok(effortCalls.length === 0, 'round budgets: reviewLoop(maxReviewRounds=0) dispatches no judge')
+  }
+
+  // 5. Non-regression controls.
+  {
+    effortCalls.length = 0
+    ctx.agent = recordingAgent(async (prompt, opts) => {
+      if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
+      if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'PLAN\n### Gated inputs\nNone' }
+      if (opts.phase === 'Implement') return greenImpl
+      return { verdict: 'approve', feedback: [] }
+    })
+    const min = await T.converge({ ...baseEff, slug: 'proj-rb-min', scope: 'cross-cutting', planGate: true, maxPlanRounds: 1, maxReviewRounds: 1 }, aEff)
+    ok(min && min.status === 'review' && min.planRoundsUsed === 1, 'round budgets: the valid minimum (1) still converges to review')
+
+    effortCalls.length = 0
+    ctx.agent = recordingAgent(async () => greenImpl)
+    const ro = await T.converge({ ...baseEff, slug: 'proj-rb-ro', scope: 'read-only', planGate: false, maxReviewRounds: 0 }, aEff)
+    ok(ro && ro.status === 'review' && ro.reviewRoundsUsed === 0, 'round budgets: read-only task ignores its review budget (no review layer runs)')
+
+    effortCalls.length = 0
+    ctx.agent = approveAll
+    const np = await T.converge({ ...baseEff, slug: 'proj-rb-np', scope: 'single-file', planGate: false, maxPlanRounds: 0 }, aEff)
+    ok(np && np.status === 'review', 'round budgets: a non-plan-gated task is not blocked by a plan budget the engine never uses')
+  }
+
+  // 6. The upstream refusal: SKILL.md § 3 validates all three budgets before any stamp or dispatch,
+  //    and § 7 names the halt.
+  const skill = fs.readFileSync(path.join(here, '..', 'SKILL.md'), 'utf8')
+  const sect = (from, to) => { const i = skill.indexOf(from); const j = skill.indexOf(to, i + 1); return i === -1 || j === -1 ? '' : skill.slice(i, j) }
+  const s3 = sect('### 3. Resolve effective config per task', '### 3.5.')
+  const rule = s3.split('\n\n').find((p) => p.includes('integer >= 1')) || ''
+  ok(['max_iterations', 'max_review_rounds', 'max_plan_rounds'].every((f) => rule.includes(f)),
+    'SKILL.md § 3: one "integer >= 1" rule covers max_iterations, max_review_rounds and max_plan_rounds')
+  ok(/in_progress/.test(rule) && /mark-started/.test(rule) && rule.includes('reason="invalid round budget:'),
+    'SKILL.md § 3: the rule writes nothing (no stamp, no mark-started) and halts with the named reason')
+  ok(sect('### 7. Continuous-mode stop conditions', '### 8.').includes('reason="invalid round budget:'),
+    'SKILL.md § 7: the stop-conditions list carries the invalid-round-budget halt')
+}
+
+// ---- Pinned task tree (ADR 0030, p12-4): CLASS closer through converge() ----------
+// Every read-only agent (planner, plan judge, plan reviser, investigator, review judge) is handed the
+// task's own tree, never `Project root: <repoPath>` — checked on the prompts converge() actually
+// dispatches, so a builder or call site that slips back to the shared checkout fails here. repoPath is a
+// sentinel, so any bare read of it shows. Implementer prompts keep `Project root:` (byte-frozen).
+{
+  const aTree = { repoPath: '/REPOROOT', rolloutSlug: 'proj-rollout', verifier: 'make test' }
+  const seen = {}
+  effortCalls.length = 0
+  ctx.agent = recordingAgent(async (prompt, opts) => {
+    const k = opts.label.replace(/ r\d+$/, '')
+    seen[k] = (seen[k] || 0) + 1
+    if (opts.label.startsWith('plan-judge:')) return seen[k] === 1 ? { verdict: 'changes', feedback: ['tighten it'] } : { verdict: 'approve', feedback: [] }
+    if (opts.label.startsWith('plan:') || opts.label.startsWith('plan-revise:')) return { ready: true, blocked: false, blockerCause: '', plan: 'Planned on: abc\nPLAN\n### Gated inputs\nNone' }
+    if (opts.label.startsWith('review:')) return seen[k] === 1 ? { verdict: 'changes', feedback: ['fix it'] } : { verdict: 'approve', feedback: [] }
+    return greenImpl // implement: / investigate: / revise:
+  })
+  const tasks = [
+    { ...baseEff, slug: 'proj-tree-code', scope: 'cross-cutting', planGate: true },
+    { ...baseEff, slug: 'proj-tree-ro-gated', scope: 'read-only', planGate: true },
+    { ...baseEff, slug: 'proj-tree-ro', scope: 'read-only', planGate: false },
+  ]
+  const res = []
+  for (const t of tasks) res.push(await T.converge(t, aTree))
+  ok(res.every((r) => r && r.status === 'review'), 'pinned tree: all three tasks converge to review')
+  const by = (prefix) => effortCalls.filter((c) => c.label.startsWith(prefix))
+  const treeOf = (label) => `Task tree: /REPOROOT/.claude/worktrees/${label.split(':')[1].split(/[ @]/)[0]}`
+  const readers = [...by('plan:'), ...by('plan-judge:'), ...by('plan-revise:'), ...by('investigate:'), ...by('review:')]
+  for (const want of ['plan:proj-tree-code', 'plan-judge:proj-tree-code', 'plan-revise:proj-tree-code', 'review:proj-tree-code',
+    'plan:proj-tree-ro-gated', 'plan-judge:proj-tree-ro-gated', 'plan-revise:proj-tree-ro-gated', 'investigate:proj-tree-ro-gated',
+    'investigate:proj-tree-ro']) {
+    ok(readers.some((c) => c.label.startsWith(want)), `pinned tree: converge dispatched ${want}`)
+  }
+  ok(readers.length >= 11 && readers.every((c) => c.prompt.includes(treeOf(c.label)) && !c.prompt.includes('Project root: /REPOROOT')),
+    'pinned tree: every plan / plan-judge / plan-revise / investigate / review prompt carries its Task tree:, never Project root:')
+  const roFirst = effortCalls.filter((c) => ['plan:proj-tree-ro-gated', 'investigate:proj-tree-ro-gated', 'investigate:proj-tree-ro'].includes(c.label))
+  ok(roFirst.length === 3 && roFirst.every((c) => c.prompt.includes('worktree add --detach "$WT"') && !c.prompt.includes('-b "$BR"')),
+    'pinned tree: the read-only tasks\' plan: and investigate: prompts create a detached tree')
+  ok(by('plan:proj-tree-code')[0].prompt.includes('worktree add "$WT" -b "$BR"'), 'pinned tree: the code-writing planner creates the branch tree')
+  ok(by('implement:').length === 1 && by('implement:')[0].prompt.includes('Project root: /REPOROOT') && !by('implement:')[0].prompt.includes('Task tree:'),
+    'pinned tree: the implementer keeps Project root: (byte-frozen builder)')
+  ok(by('revise:').length === 1 && !by('revise:')[0].prompt.includes('Task tree:') && by('revise:')[0].prompt.includes('Worktree path: /wt'),
+    'pinned tree: the reviser keeps its threaded Worktree path (byte-frozen builder)')
+}
+
+// ---- Progress / ETA (task-note stamps — the engine has no clock) ------
+// The Workflow sandbox cannot read clocks (Date.now() throws), so the started:/merged: stamps live on the
+// TASK NOTES, written by reconcile-rollout.py (mark-started as a task starts, mark-done after its merge),
+// and the skill threads the precomputed `progress` line `next` / `mark-started` prints into args for the
+// engine to relay via log(). Comments may
 // NAME Date.now(); code must never CALL it — strip line comments before scanning.
 const codeOnly = src.replace(/\/\/[^\n]*/g, '')
 ok(!/\bDate\s*\.\s*now\b|\bnew\s+Date\b/.test(codeOnly), 'engine: no clock reads — Date is unavailable in the Workflow sandbox')
 ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precomputed progress line (absent ⇒ byte-identical logs)')
+
+// ---- Removing files (p12-12, the 2026-10-01 stall): RM_RULE in every agent prompt ----------
+// An agent's `cd /tmp/x && rm -rf ./*` stalled an unattended rollout 13 h on Claude Code's bypass-immune
+// removal ask. RM_RULE names the safe forms, and every builder renders it once, right after GIT_ENV_RULE.
+// The ten builders are git-env-scrub's (its (e2) proves every runAgent site is one of them).
+{
+  const E = loadEngine(['GIT_ENV_RULE', 'RM_RULE', 'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt',
+    'plannerPrompt', 'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt'])
+  const H = (c) => c.repeat(40)
+  const tk = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
+  const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
+  const ar = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
+  const I = {
+    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
+    landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }], plan: 'PLAN',
+    reviewHistory: [{ round: 1, feedback: ['fix it'] }, { round: 2, feedback: ['keep theirs'], stage: 'integration' }], reviewRoundsUsed: 2,
+    rung: { model: 'fable', escalated: false, escalatedAt: '', tierCapped: false, tierCappedAt: '' },
+  }
+  const J = { mergeCommit: H('d'), headSha: H('e'), baseSha: H('c'), triggers: ['conflict'], path: 'integrator' }
+  const tiers = [
+    { tier: 'opus', cap: 'fable', escalated: false, capSuppressed: false },
+    { tier: 'fable', cap: 'fable', escalated: true, capSuppressed: false },
+  ]
+  const prompts = {
+    implementerPrompt: tiers.map((st) => E.implementerPrompt(tk, ar, st, '')),
+    approvedPlanImplementerPrompt: tiers.map((st) => E.approvedPlanImplementerPrompt(tk, 'PLAN', ar, st, '')),
+    reviserPrompt: [E.reviserPrompt(tk, im, [{ round: 1, feedback: ['fix it'] }], 2, ar, ''), E.reviserPrompt(tk, im, I.reviewHistory, 3, ar, '', { history: I.reviewHistory, roundsUsed: 2 })],
+    readOnlyPrompt: [E.readOnlyPrompt(tk, ar, tiers[0], '')],
+    plannerPrompt: [E.plannerPrompt(tk, ar, tiers[0], '')],
+    planReviserPrompt: [E.planReviserPrompt(tk, 'PLAN', [{ round: 1, feedback: ['fix it'] }], 2, ar)],
+    planJudgePrompt: [E.planJudgePrompt(tk, 'PLAN', ar)],
+    reviewJudgePrompt: [E.reviewJudgePrompt(tk, im, ar, [])],
+    integratorPrompt: [E.integratorPrompt(tk, ar, I), E.integratorPrompt(tk, ar, { ...I, landed: [], reviewHistory: [], trouble: [] })],
+    integrationReviewPrompt: [E.integrationReviewPrompt(tk, ar, I, J), E.integrationReviewPrompt(tk, ar, { ...I, landed: [] }, { ...J, mergeCommit: '', path: 'judge-only' })],
+  }
+  const FORMS = ['`rm -rf /tmp/x && mkdir -p /tmp/x`', '`mktemp -d`', '`rm -rf "$T"`', '${T:?}', '`rm -rf ./*`', '`$VAR/`', 'command substitution', 'bypass mode']
+  const times = (hay, needle) => hay.split(needle).length - 1
+  // [] when the rule and every prompt hold; else what failed.
+  const rmRuleFails = (rule, gitRule, byName) => {
+    const out = []
+    if (typeof rule !== 'string' || !rule || rule.includes('\n')) out.push('rule: one line')
+    for (const f of FORMS) if (!String(rule).includes(f)) out.push(`rule: names ${f}`)
+    if (String(rule).includes('"$T"/')) out.push('rule: the "$T" form takes no trailing slash')
+    for (const [name, ps] of Object.entries(byName)) {
+      for (const p of ps) {
+        if (times(p, rule) !== 1) out.push(`${name}: RM_RULE once`)
+        if (!p.includes(gitRule + '\n\n' + rule)) out.push(`${name}: RM_RULE right after GIT_ENV_RULE`)
+      }
+    }
+    return out
+  }
+  ok(Object.keys(prompts).length === 10, 'RM_RULE: the ten agent builders are covered')
+  ok(JSON.stringify(rmRuleFails(E.RM_RULE, E.GIT_ENV_RULE, prompts)) === '[]', 'RM_RULE: one line naming every safe and refused form, once in every prompt, right after GIT_ENV_RULE')
+  const stripped = { ...prompts, plannerPrompt: prompts.plannerPrompt.map((p) => p.replace('\n\n' + E.RM_RULE, '')) }
+  ok(rmRuleFails(E.RM_RULE, E.GIT_ENV_RULE, stripped).length > 0, 'RM_RULE control: a prompt with RM_RULE stripped fails')
+  const slashed = E.RM_RULE.replace('`rm -rf "$T"`', '`rm -rf "$T"/*`')
+  const reslashed = Object.fromEntries(Object.entries(prompts).map(([k, ps]) => [k, ps.map((p) => p.replace(E.RM_RULE, slashed))]))
+  ok(slashed !== E.RM_RULE && rmRuleFails(slashed, E.GIT_ENV_RULE, reslashed).length > 0, 'RM_RULE control: a "$T" form that gains /* fails')
+}
+
+// ---- Byte pins (p12-6): task mode renders exactly what it did before Integration existed ----------
+// Recorded on 3c396eb (the p12-5 engine) BEFORE the p12-6 edit. p12-6 factored taskTreeSetup's self-heal
+// and lock lines out (treeSelfHeal/treeLockLines, shared with branchTreeSetup), gave reviserPrompt a 7th
+// `seeded` argument and moved the review loop's revise step into reviseRound: none of that may move a byte
+// of an unseeded, mode-less call. Re-pin only on a deliberate prompt change, never to make a refactor pass.
+// Re-pinned on purpose by p12-12 (the reviser pins and the whole-call pin): RM_RULE joins every agent prompt
+// right after GIT_ENV_RULE, and the implementer's worktree setup now says "every task that has already
+// merged". An old-vs-new render diff showed exactly those two changes; the taskTreeSetup pin did not move.
+{
+  const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
+  const variants = []
+  for (const scope of ['cross-cutting', 'read-only']) for (const refresh of [true, false]) {
+    for (const envBootstrap of [undefined, 'poetry install']) for (const defaultBranch of [undefined, 'master']) {
+      const a = { repoPath: '/repo', ...(envBootstrap ? { envBootstrap } : {}), ...(defaultBranch ? { defaultBranch } : {}) }
+      variants.push(T.taskTreeSetup(a, { slug: 'proj-fix-x', scope }, refresh))
+    }
+  }
+  ok(variants.length === 16 && sha(variants.join('\n\0\n')) === '9ebeb0bde77b5741b7461f56cc3abe12e3ead5f12a4f5bb3c5cd1f56e66557f5',
+    'byte pin: taskTreeSetup, 16 variants (scope × refresh × envBootstrap × defaultBranch)')
+  const tR = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
+  const iR = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
+  const aR = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
+  const h2 = [{ round: 1, feedback: ['a'] }, { round: 2, feedback: ['b'] }]
+  ok(sha(T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')) === '0f7eca821281f140a718ea5bf84cec5c0a134a7924e8b2ff9d3abfe5ea9db585',
+    'byte pin: unseeded reviserPrompt, round 2')
+  ok(sha(T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')) === '00eb424a53642e113f76ea70fc78644762f75c0a40d2edcee36429f760fed660',
+    'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back)')
+  ok(T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN', null) === T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN'),
+    'byte pin: a null seeded argument renders the unseeded reviser')
+  // Every label, prompt and row of three whole task-mode calls (plan-gated opus with a plan revise and two
+  // review rounds; capped on master with env bootstrap and a baseline; plan-gated read-only).
+  const PLAN_TEXT = 'Planned on: abc\n### Files to modify\n- x\n### Gated inputs\nNone'
+  const mkT = (slug, over = {}) => ({ slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: false, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, model: 'fable', ...over })
+  const mkA = (task, over = {}) => ({ rolloutSlug: 'proj-rollout-2026-10-01', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', task, ...over })
+  const scripted = async (prompt, opts) => {
+    const label = opts.label
+    const kind = label.split(':')[0]
+    const s = label.split(':')[1].split(/[ @]/)[0]
+    if (kind === 'plan' || kind === 'plan-revise') return { ready: true, blocked: false, blockerCause: '', plan: PLAN_TEXT }
+    if (kind === 'plan-judge') return { verdict: label.endsWith(' r1') ? 'changes' : 'approve', feedback: label.endsWith(' r1') ? ['fix ' + label] : [] }
+    if (kind === 'review') return { verdict: /r[12]$/.test(label) ? 'changes' : 'approve', feedback: /r[12]$/.test(label) ? ['fix ' + label] : [] }
+    return { verified: true, blocked: false, escalate: false, prUrl: kind === 'investigate' ? '' : `https://github.com/o/r/pull/${s}`, branch: kind === 'investigate' ? '' : `audit-fix/${s}`, worktreePath: `/repo/.claude/worktrees/${s}`, blockerDiagnosis: '', summary: `${label} done` }
+  }
+  const parts = []
+  for (const args of [
+    mkA(mkT('proj-fix-p', { model: 'opus', planGate: true })),
+    mkA(mkT('proj-fix-a'), { maxTier: 'opus', defaultBranch: 'master', envBootstrap: 'poetry install', knownBaselineFailures: ['t — env'] }),
+    mkA(mkT('proj-audit-x', { scope: 'read-only', planGate: true })),
+  ]) {
+    const r = await runTask(args, scripted)
+    parts.push(JSON.stringify({ calls: r.calls, result: r.result, err: r.error && String(r.error) }))
+  }
+  ok(sha(parts.join('\n')) === 'c647ab859edc08ca62dcb4e1a1fcb59d9f57fcf54488b477663faadb4a04e912',
+    'byte pin: three whole task-mode calls — every label, prompt and row unchanged')
+}
 
 console.log()
 console.log(fail === 0 ? 'ALL PASS' : 'SOME FAILED')

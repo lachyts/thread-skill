@@ -11,7 +11,9 @@ __pycache__/
 
 # Local plugin/worktree scratch (never belongs in the repo)
 .claude/worktrees/
-.claude/merge-wave.status
+.claude/merge-task.status
+.claude/merge-task/
+.claude/integration/
 
 # claude plugin eval run output (make evals); never committed
 evals/results/

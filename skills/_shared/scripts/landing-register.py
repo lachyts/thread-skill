@@ -22,7 +22,7 @@ stdout is exactly one line on exit 0, 3 or 4. stderr carries warnings and errors
 output is the origin-derived (or --slug) spelling, a trailing `.git` dropped; matching is
 case-insensitive, as GitHub slugs are.
 
-Origin. The fetch URL of `origin` (as execute's merge-wave reads it), accepted only with the prefixes
+Origin. The fetch URL of `origin` (as execute's merge-task reads it), accepted only with the prefixes
 execution-fit's remote-check admits, so the two classify an origin the same way: `https://github.com/`,
 `git@github.com:`, `ssh://git@github.com/` (no userinfo on https, no port on ssh). The rest must be
 exactly `<owner>/<name>`, one trailing `/` and then a trailing `.git` tolerated. Segments are

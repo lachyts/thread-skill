@@ -9,6 +9,9 @@
 # An empty <repoPath> is a usage error: `git -C ""` would quietly answer for the CWD's repo.
 [ $# -eq 1 ] && [ -n "$1" ] || { echo "default-branch: usage: default-branch.sh <repoPath>" >&2; exit 2; }
 R=$1
+# A caller's GIT_DIR & co. (a git hook exports them) would override -C and answer for another repo (p12-3).
+# Unset git's own list of repo-local vars, except the two config channels, which cannot move the repo.
+for v in $(git rev-parse --local-env-vars 2>/dev/null); do case $v in GIT_CONFIG_COUNT|GIT_CONFIG_PARAMETERS) ;; *) unset "$v" ;; esac; done
 b=$(git -C "$R" ls-remote --symref origin HEAD 2>/dev/null | awk '/^ref:/ { sub("refs/heads/", "", $2); print $2; exit }')
 [ -n "$b" ] || { echo "cannot resolve origin's default branch for $R" >&2; exit 1; }
 echo "$b"

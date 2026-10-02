@@ -1,5 +1,5 @@
 // Execute closes the phases it finishes (ADR 0026): the completion ceremony (execute §4.5 step 5) runs
-// `reconcile-wave.py touched-phases` and, for each line it prints, `reconcile-project.py <line> --kinds
+// `reconcile-rollout.py touched-phases` and, for each line it prints, `reconcile-project.py <line> --kinds
 // phase --apply`. A phase whose every task landed and that this rollout touched closes; an untouched
 // finished phase is left alone; a failure is filed as a follow-on open task and the ceremony continues.
 //
@@ -36,11 +36,11 @@ const TODAY = '2026-09-27'
 
 // ---- slicing §4.5 step 5 ------------------------------------------------------------------------
 
-// The step-5 bullet list: from the line after `5. Repeat until the last wave merges` up to the first
+// The step-5 bullet list: from the line after `5. **Completion.**` up to the first
 // blank line outside a fence. Bullets open at exactly three spaces of indent (`   - `) outside a fence.
 function stepFive(text) {
   const lines = text.split('\n')
-  const head = lines.findIndex((l) => /^5\. Repeat until the last wave merges/.test(l))
+  const head = lines.findIndex((l) => /^5\. \*\*Completion\.\*\*/.test(l))
   if (head < 0) return null
   let end = head + 1
   let inFence = false
@@ -114,7 +114,7 @@ function checkCeremony(text) {
   // flags: phase kind only, applied, phases only from touched-phases.
   const cmds = fenceLines(phase.raw).filter((l) => l.startsWith('python3 ${CLAUDE_PLUGIN_ROOT}/'))
   const rp = cmds.find((l) => l.includes('reconcile-project.py'))
-  if (!cmds.some((l) => l.includes('reconcile-wave.py touched-phases')) || !rp ||
+  if (!cmds.some((l) => l.includes('reconcile-rollout.py touched-phases')) || !rp ||
     !rp.includes('--kinds phase') || !rp.includes('--apply') ||
     !/Phases come only from `touched-phases`/.test(para)) fails.push('flags')
 
@@ -162,12 +162,12 @@ function checkCeremony(text) {
   if (!cs.some((c) => /already listed/.test(c) && c.includes('gets only the in-place `still failing` annotation')) ||
     !para.includes('only failures not yet listed are appended as new lines')) fails.push('append')
 
-  // followup-fm: same new-task shape as the follow-on bullet's YAML, minus rollout/wave/phase.
+  // followup-fm: same new-task shape as the follow-on bullet's YAML, minus `rollout:` and `phase:`.
   const keys = idx.followon >= 0 ? followonYamlKeys(bs[idx.followon].raw) : []
   if (!cs.some((c) => /\bsame new-task shape\b/.test(c) && /follow-on/.test(c)) ||
-    !cs.some((c) => /\bminus\b/.test(c) && ['`rollout:`', '`wave:`', '`phase:`'].every((k) => c.includes(k))) ||
+    !cs.some((c) => /\bminus\b/.test(c) && ['`rollout:`', '`phase:`'].every((k) => c.includes(k))) ||
     !['priority', 'captured', 'contexts', 'scheduled', 'due', 'projects'].every((k) => keys.includes(k)) ||
-    ['rollout', 'wave', 'phase', 'owner'].some((k) => keys.includes(k))) fails.push('followup-fm')
+    ['rollout', 'phase', 'owner'].some((k) => keys.includes(k))) fails.push('followup-fm')
 
   // resolve: a successful re-run appends `resolved`, done once every line is resolved; an archived
   // follow-on is reopened, never duplicated.
@@ -547,7 +547,7 @@ test('the documented phase-close follow-on note is inert to both commands', () =
     .replace(/^captured:.*$/, `captured: ${TODAY}`))
   const keys = yaml.map((l) => (l.match(/^([a-z_]+):/) || [])[1]).filter(Boolean)
   for (const k of ['priority', 'captured', 'contexts', 'scheduled', 'due', 'projects']) assert.ok(keys.includes(k), k)
-  for (const k of ['rollout', 'wave', 'phase']) assert.ok(!keys.includes(k), k)
+  for (const k of ['rollout', 'phase']) assert.ok(!keys.includes(k), k)
   const body = `---\n${yaml.join('\n')}\n---\n\nclose phase demo-p1: reconcile-project exited 1: boom\n`
 
   const plain = buildVault()

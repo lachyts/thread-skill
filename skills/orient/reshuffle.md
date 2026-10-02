@@ -11,7 +11,7 @@ themselves, pointer lines, and retiring a phase the move emptied). When R3 grill
 docs**, the interview also writes `CONTEXT.md` + `docs/adr/` in the **resolved project repo**
 (never committed here: orient § 6 holds scheduling until they land). Nothing else outside the
 vault: out-of-vault backlinks are reported, not rewritten (R5.3). Never git/gh. Never stamps
-`wave:`, `rollout:` or `scope:`: orient § 6 hands wave-shaped phases to schedule, which owns them.
+`rollout:` or `scope:`: orient § 6 hands rollout-shaped phases to schedule, which owns them.
 
 ## Scoped targets
 
@@ -164,12 +164,12 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      `## Resume prompt` block when the task qualifies for launch context, else as a fenced block
      under `## Notes`; and a closing `**Verify:**` line.
    - **Phased or moved tasks** are renamed and stamped. The body gets the grilled spec when R3
-     respecced it; a clear item's body is unchanged apart from backlink rewrites. A `wave:` or
-     `rollout:` stamp left by a retired rollout (R1 found it not in flight) is cleared, or
-     schedule would skip the task. A task moving out of a phase leaves its entry in that phase's
+     respecced it; a clear item's body is unchanged apart from backlink rewrites. A legacy `wave:` is
+     removed, and a `rollout:` stamp left by a retired rollout (R1 found it not in flight) is
+     cleared, so the task belongs to no rollout until schedule stamps it. A task moving out of a phase leaves its entry in that phase's
      `## Build sequence`, struck through with a pointer (`~~p3-2~~ moved to [[<new-slug>]]`), so
      its ordinal stays used.
-   - Leave **`wave:` unset**. Don't set `scope:`: schedule infers it from `touches:`.
+   - Don't set `rollout:` or `scope:`: schedule stamps them (`scope:` inferred from `touches:`).
 3. **Renames rewrite backlinks, in one pass.** First check every target basename is free, in one
    listing. Then write all the old slugs to a file and find the files that mention any of them
    with one `/usr/bin/grep -rlF -f <old-slugs-file>` (the Bash tool's `rg`/`grep` are shell

@@ -1,24 +1,35 @@
 #!/usr/bin/env python3
-"""Stop-hook driver: keeps a wave rollout moving without user re-prompting.
+"""Stop-hook driver: keeps a queued rollout moving without user re-prompting (ADR 0030, p12-9).
 
 The programmatic twin of a /goal condition, shipped with the plugin so the
 user never has to type one (execute SKILL.md §8). On every session stop it
-finds the last WAVE-STATUS line the assistant emitted — primarily from the
-hook payload's `last_assistant_message` (race-free), falling back to a
-transcript scan for history — and:
+finds the last ROLLOUT-STATUS line the assistant emitted —
 
-  running  -> block the stop (driving work remains: reconcile/merge/launch)
-  waiting  -> allow (a wave's Workflow call is in flight; the completion
-              notification or the heartbeat cron is the wake signal)
+  ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=<running|waiting|halted|done>[ reason="…"]
+
+— primarily from the hook payload's `last_assistant_message` (race-free),
+falling back to a transcript scan for history, and:
+
+  running  -> block the stop (driving work remains: reconcile a returned call,
+              integrate and merge one task, fill the free slots via `next`)
+  waiting  -> allow (a task call, an integrate call, a background Integration
+              command or a merge hold is in flight; its notification or the
+              heartbeat cron is the wake signal)
   halted   -> allow + clear driver state (a §7 stop condition; human's turn)
   done     -> allow + clear driver state (completion ceremony performed)
-  (none)   -> allow (not a wave-driving session)
+  (none)   -> allow (not a rollout-driving session)
 
-Blocking is bounded by a progress-aware cap: consecutive blocks without the
-cursor advancing release the stop and surface the stall to the user instead
-of spinning forever (the harness's own CLAUDE_CODE_STOP_HOOK_BLOCK_CAP is a
-second, coarser floor). State lives per-session under
-~/.claude/wave-driver/<session_id>.json (override dir with WAVE_DRIVER_STATE_DIR).
+A line without `merged=` and `running=` (a cursor-shaped one included) never
+matches (ADR 0030: a rollout is a queue with no stored cursor).
+
+Blocking is bounded by a progress-aware cap: consecutive blocks without
+`merged` advancing release the stop and surface the stall to the user instead
+of spinning forever (`running` alone never counts as progress; the harness's own
+CLAUDE_CODE_STOP_HOOK_BLOCK_CAP is a second, coarser floor). State lives
+per-session under ~/.claude/rollout-driver/<session_id>.json as
+{<slug>: {"merged": K, "blocks": n}} (override the dir with
+ROLLOUT_DRIVER_STATE_DIR; ROLLOUT_DRIVER_DEBUG names a file to append a debug
+line to).
 """
 
 import json
@@ -30,15 +41,15 @@ MAX_BLOCKS_WITHOUT_PROGRESS = 3
 TAIL_BYTES = 5_000_000  # only scan the transcript's last ~5MB
 
 STATUS_RE = re.compile(
-    r"WAVE-STATUS:\s+(?P<slug>\S+)\s+cursor=(?P<k>\d+)/(?P<n>\d+)"
+    r"ROLLOUT-STATUS:\s+(?P<slug>\S+)\s+merged=(?P<k>\d+)/(?P<n>\d+)\s+running=(?P<r>\d+)"
     r"\s+state=(?P<state>running|waiting|halted|done)"
 )
 
 
 def state_dir():
     return os.environ.get(
-        "WAVE_DRIVER_STATE_DIR",
-        os.path.expanduser("~/.claude/wave-driver"),
+        "ROLLOUT_DRIVER_STATE_DIR",
+        os.path.expanduser("~/.claude/rollout-driver"),
     )
 
 
@@ -60,8 +71,8 @@ def save_state(session_id, state):
         json.dump(state, f)
 
 
-def last_wave_status(transcript_path):
-    """Latest WAVE-STATUS match from an *assistant* text block, or None.
+def last_rollout_status(transcript_path):
+    """Latest ROLLOUT-STATUS match from an *assistant* text block, or None.
 
     Only assistant-authored text counts — tool results and user messages can
     quote the line (docs, THREAD, status reports) without meaning it.
@@ -77,7 +88,7 @@ def last_wave_status(transcript_path):
         return None
 
     for line in reversed(lines):
-        if "WAVE-STATUS:" not in line:
+        if "ROLLOUT-STATUS:" not in line:
             continue
         try:
             obj = json.loads(line)
@@ -103,7 +114,7 @@ def last_wave_status(transcript_path):
 
 
 def debug(msg):
-    path = os.environ.get("WAVE_DRIVER_DEBUG")
+    path = os.environ.get("ROLLOUT_DRIVER_DEBUG")
     if path:
         with open(path, "a") as f:
             f.write(msg + "\n")
@@ -131,7 +142,7 @@ def main():
     # turn forgot the status line (an older `running` still blocks, bounded
     # by the progress cap) and harness versions without the payload field.
     if m is None and transcript_path:
-        m = last_wave_status(transcript_path)
+        m = last_rollout_status(transcript_path)
 
     debug(
         f"session={session_id} "
@@ -141,7 +152,7 @@ def main():
     if m is None:
         return
 
-    slug, cursor, total, state = m["slug"], int(m["k"]), int(m["n"]), m["state"]
+    slug, merged, total, running, state = m["slug"], int(m["k"]), int(m["n"]), int(m["r"]), m["state"]
 
     if state == "waiting":
         return
@@ -153,18 +164,22 @@ def main():
             save_state(session_id, driver)
         return
 
-    # state == running
+    # state == running. Progress is `merged` alone: a task call starting or returning changes `running`
+    # without landing anything, so it never resets the count.
     driver = load_state(session_id)
-    entry = driver.get(slug, {"cursor": -1, "blocks": 0})
-    if cursor > entry.get("cursor", -1):
-        entry = {"cursor": cursor, "blocks": 0}
+    entry = driver.get(slug)
+    if not isinstance(entry, dict) or "merged" not in entry:
+        entry = {"merged": -1, "blocks": 0}
+    if merged > entry.get("merged", -1):
+        entry = {"merged": merged, "blocks": 0}
 
     if entry["blocks"] >= MAX_BLOCKS_WITHOUT_PROGRESS:
         print(json.dumps({
             "systemMessage": (
-                f"wave-driver: released the stop after {entry['blocks']} continuations "
-                f"without cursor progress — [[{slug}]] still reports state=running at "
-                f"cursor {cursor}/{total}. Likely wedged: run /thread:status or /thread:repair."
+                f"rollout-driver: released the stop after {entry['blocks']} continuations "
+                f"without merge progress — [[{slug}]] still reports state=running at "
+                f"merged {merged}/{total} ({running} running). Likely wedged: run /thread:status or "
+                "/thread:repair."
             )
         }))
         return
@@ -176,13 +191,16 @@ def main():
     print(json.dumps({
         "decision": "block",
         "reason": (
-            f"WAVE-DRIVER: [[{slug}]] is mid-rollout (cursor {cursor}/{total}, state=running) — "
-            "the turn ended with driving work outstanding. Continue the §4.5 per-wave loop now: "
-            "reconcile the finished wave if one returned, merge via merge-wave.sh, advance the "
-            "cursor, and launch the next wave. Then end the turn with the correct line: "
-            f"`WAVE-STATUS: {slug} cursor=<K>/{total} state=waiting` after launching a wave, "
-            "state=halted with reason=\"…\" if a §7 stop condition fired, or state=done after the "
-            "completion ceremony. Do not end the turn while state=running."
+            f"ROLLOUT-DRIVER: [[{slug}]] is mid-rollout (merged {merged}/{total}, {running} running, "
+            "state=running) — the turn ended with driving work outstanding. Continue the §4.5 queue loop "
+            "now: reconcile every returned call (reconcile-rollout.py reconcile), then integrate and merge "
+            "one task at a time (Integration via lead-integrate.py prepare, then merge-task.sh, then "
+            "mark-done), then run reconcile-rollout.py next and fill the free slots. Then end the turn "
+            "with the correct line: "
+            f"`ROLLOUT-STATUS: {slug} merged=<K>/{total} running=<R> state=waiting` while a call, a "
+            "background Integration command or a merge hold is in flight, state=halted with reason=\"…\" "
+            "if a §7 stop condition fired, or state=done after the completion ceremony. Do not end the "
+            "turn while state=running."
         ),
     }))
 

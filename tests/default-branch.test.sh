@@ -70,15 +70,56 @@ setup=$(node --input-type=module -e "
   process.stdout.write(out.split('\n').slice(1, 6).join('\n') + '\n')
 " "$tmp/seed")
 has "$setup" 'origin/master && cd "$WT"; fi' "rendered setup branches from origin/master"
-g -C "$tmp/clone" commit -q --allow-empty -m wave1 && g -C "$tmp/clone" push -q origin master
+g -C "$tmp/clone" commit -q --allow-empty -m landed1 && g -C "$tmp/clone" push -q origin master
 top=$(cd "$tmp" && GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t bash -c "$setup" 2>/dev/null | tail -1)
 wt="$tmp/seed/.claude/worktrees/e2e-task"
 ok "$([ -d "$wt" ] && echo y)" y "setup created the task worktree"
 ok "${top:-<empty>}" "$(cd "$wt" 2>/dev/null && pwd -P || echo '<no worktree>')" "setup lands in the task worktree"
 ok "$(git -C "$wt" rev-parse HEAD 2>/dev/null)" "$(git -C "$tmp/clone" rev-parse HEAD)" "fresh worktree is at the freshly-fetched origin/master"
 
+# ---- the same setup under an inherited GIT_DIR (p12-3) -----------------------------------------------
+# A git hook, or an agent's experiment, exports GIT_DIR & co.; unscrubbed, the setup's `git -C "$tmp/seed"`
+# fetch and worktree add run against the decoy instead. GIT_* is set on the one invocation only, never
+# exported here. The decoy's only remote is a local bare repo holding a commit the decoy lacks.
+g init -q --bare "$tmp/decoy-remote.git"
+g clone -q "$tmp/decoy-remote.git" "$tmp/decoy" 2>/dev/null
+g -C "$tmp/decoy" commit -q --allow-empty -m decoy && g -C "$tmp/decoy" push -q origin master
+g clone -q "$tmp/decoy-remote.git" "$tmp/decoy-pusher" 2>/dev/null
+g -C "$tmp/decoy-pusher" commit -q --allow-empty -m remote-only && g -C "$tmp/decoy-pusher" push -q origin master
+snap() {  # the decoy's refs, core.bare, config bytes and worktrees, and its remote's refs
+  git -C "$tmp/decoy" for-each-ref; echo "bare=$(git -C "$tmp/decoy" config --get core.bare)"
+  cat "$tmp/decoy/.git/config"; git -C "$tmp/decoy" worktree list --porcelain; echo "-- remote"; git -C "$tmp/decoy-remote.git" for-each-ref
+}
+render() {  # render <slug> — the setup block for that task slug, as the engine renders it
+  node --input-type=module -e "
+    import { loadEngine } from './tests/lib/engine.mjs'
+    const T = loadEngine(['worktreeSetup'])
+    const out = T.worktreeSetup({ repoPath: process.argv[1], defaultBranch: 'master' }, { slug: process.argv[2] })
+    process.stdout.write(out.split('\n').slice(1, 6).join('\n') + '\n')
+  " "$tmp/seed" "$1"
+}
+ids='GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t'
+for arm in dir dirwt; do
+  slug="e2e-env-$arm"; s=$(render "$slug"); before=$(snap)
+  if [ "$arm" = dir ]; then
+    (cd "$tmp" && env $ids GIT_DIR="$tmp/decoy/.git" bash -c "$s" >/dev/null 2>&1)
+  else
+    (cd "$tmp" && env $ids GIT_DIR="$tmp/decoy/.git" GIT_WORK_TREE="$tmp/decoy" bash -c "$s" >/dev/null 2>&1)
+  fi
+  w="$tmp/seed/.claude/worktrees/$slug"
+  ok "$([ -d "$w" ] && echo y)" y "GIT_$arm: setup created the task worktree under the seed"
+  cd_=$(git -C "$w" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+  ok "$(cd "$cd_" 2>/dev/null && pwd -P)" "$(cd "$tmp/seed/.git" && pwd -P)" "GIT_$arm: the worktree belongs to the seed's repository"
+  ok "$(git -C "$w" rev-parse HEAD 2>/dev/null)" "$(git -C "$tmp/clone" rev-parse HEAD)" "GIT_$arm: the worktree is at the freshly-fetched origin/master"
+  ok "$(snap)" "$before" "GIT_$arm: the decoy and its remote are unchanged"
+done
+
+# default-branch.sh under an inherited GIT_DIR answers for <repoPath>, not the decoy (a master clone).
+out=$(GIT_DIR="$tmp/clone/.git" CLAUDE_PLUGIN_ROOT="$root" bash "$tmp/resolve.sh" "$tmp/nseed" 2>/dev/null)
+ok "$out" main "resolver under an inherited GIT_DIR still answers for <repoPath> (main)"
+
 # ---- nothing shipped assumes main ----------------------------------------------------------------------
-ok "$(grep -c 'origin/main' skills/execute/scripts/merge-wave.sh)" 0 "merge-wave.sh has no origin/main"
+ok "$(grep -c 'origin/main' skills/execute/scripts/merge-task.sh)" 0 "merge-task.sh has no origin/main"
 ok "$(grep -c 'origin/main' skills/execute/diagnostics/edit-noop-repro.workflow.js)" 0 "edit-noop-repro diagnostic has no origin/main"
 
 echo; [ "$fail" -eq 0 ] && echo "default-branch: ALL PASS" || echo "default-branch: SOME FAILED"

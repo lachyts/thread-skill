@@ -69,7 +69,7 @@ const REQUIRED = {
   'candidacy': /at `status: open`, `in_progress` or `review`/,
   'worked-def': /Worked means this session did the task's own work/,
   'mention-not-work': /A bare mention in chat is not work/,
-  'bookkeeping': /Bookkeeping writes \(orient's reshuffle, `\/thread:schedule`'s `wave:` stamps, reconcile writes, slot fills, frontmatter edits\) never make a task a candidate/,
+  'bookkeeping': /Bookkeeping writes \(orient's reshuffle, `\/thread:schedule`'s `rollout:` and `scope:` stamps, reconcile writes, slot fills, frontmatter edits\) never make a task a candidate/,
   'not-candidate': /any other status \(`done`, `blocked`, `parked`\) is not a candidate/,
   'first-match': /in this order, and the first that matches decides/,
   'partial-row': /task flip skipped: \[\[<task>\]\] partly landed \(<what remains>\)/,
