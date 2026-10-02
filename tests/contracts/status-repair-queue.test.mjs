@@ -8,18 +8,19 @@
 // every set-aside stage; B is an at-Integration set-aside handed back (Integration retried, nothing else); C is B
 // under a draining soft pause, the reason repair never hands back during a pause; D is a legacy rollout another
 // rollout's supersedes: names, the reason the lineage is read before the version; E is a RACE under the lead and
-// an UNVERIFIED set-aside, the reason no `resume` runs on either until Lachy has decided. The fixtures pin data;
-// the rules tie the prose to it.
+// an UNVERIFIED set-aside, which `resume` holds (exit 3, both notes untouched) until Lachy's `RACE decided:`
+// lines are recorded (p12-12). The fixtures pin data; the rules tie the prose to it.
 //
 // Every rule lives in one function, check({ status, repair, fx }), that returns named failures, so the real text
 // and the controls run through identical logic: each control mutates the real text (or the fixture verdict) in one
 // place and must fail with exactly its rule. Writes only under os.tmpdir().
 //
 // Repair's classes are first-match: a RACE / UNVERIFIED task also matches merged-never-marked and at Integration,
-// and `resume` works on the whole rollout, so the class order and the hold on every `resume` until Lachy's RACE
-// decision is recorded are pinned (first-match), as are a merge into another base (another-base), a CLOSED PR
-// (closed-pr) and a rollout another rollout's `supersedes:` names (reverse-lineage). An undecided RACE holds every
-// reinstate and resume on both sides, and its record is allowed in every mode (race-hold). A RACE whose re-verify
+// so the class order and the hold on every `resume` until Lachy's RACE decision is recorded are pinned
+// (first-match), as are a merge into another base (another-base), a CLOSED PR (closed-pr) and a rollout another
+// rollout's `supersedes:` names (reverse-lineage). An undecided RACE holds every reinstate and resume on both
+// sides (`resume` itself skips it, exit 3), and its record is allowed in every mode (race-hold). A signed task is
+// the lead's while its session holds the signed-gate handle (signed-gate). A RACE whose re-verify
 // the lead still runs (integrating under a live owner) is no escalation: both sides wait on it, and its fallback
 // is repair, never a resume (race-in-flight). Status's read-only rule is positive: it may invoke only its two
 // script reads, § 3's gh/git reads and the default-branch read.
@@ -301,8 +302,10 @@ function buildD() {
 // R hit merge-task's exit 5: the lead appended its `## Race log` line and holds the lane while it re-verifies, so
 // R reads `review` + `pr:` + `owner:` + `integrating:`, exactly as it still reads after a red re-verify halts the
 // lead (no writer runs on a halt): only the owner session tells the two apart. U's merge-task exit 8 ran out
-// (`UNVERIFIED:`), and the lead set it aside at Integration. Both PRs read MERGED into the default branch, so
-// `resume`, which a reinstate and every *Cold resume* run first, flips both done (a gh stub answers it).
+// (`UNVERIFIED:`), and the lead set it aside at Integration. Both PRs read MERGED into the default branch (a gh
+// stub answers it), yet `resume`, which a reinstate and every *Cold resume* run first, holds both: exit 3, one
+// `HOLD:` line each, both notes byte-identical. Once Lachy's two `RACE decided:` lines are in `## Notes`, it
+// exits 0 and flips both done.
 const RE = 'proj-rollout-2026-10-03'
 const E = { race: 'proj-e-race', unverified: 'proj-e-unverified' }
 const UNVERIFIED = `merge-task exit 8 three times: UNVERIFIED: PR #41 merged as ${sha('e')}; not verifiable yet; re-run to verify`
@@ -329,16 +332,29 @@ function buildE() {
     fails.push(`the UNVERIFIED task reads ${t[E.unverified]?.queueState}/${t[E.unverified]?.setAsideAt}`)
   }
 
-  // resume (on a copy) flips both: the hold on every resume until a `RACE decided:` line is what stops it.
+  // resume (on a copy) holds both until Lachy's `RACE decided:` lines are recorded, then flips both done.
   const c = copyDir(d, path.join(tmp, 'E-resumed'))
   const gh = path.join(tmp, 'E-gh')
   fs.writeFileSync(gh, '#!/usr/bin/env bash\ncase "$1 $2" in\n  "pr view") printf \'{"state":"MERGED","mergedAt":"2026-10-02T13:55:00Z","baseRefName":"main","url":"%s"}\\n\' "$3" ;;\n  "repo view") echo main ;;\n  *) exit 2 ;;\nesac\n')
   fs.chmodSync(gh, 0o755)
-  const r = py(RECONCILE, ['resume', '--rollout', path.join(c, `${RE}.md`), '--tasks-dir', c, '--gh-bin', gh, '--now', NOW])
-  if (r.rc !== 0) fails.push(`resume exited ${r.rc}: ${r.err}`)
+  const resume = () => py(RECONCILE, ['resume', '--rollout', path.join(c, `${RE}.md`), '--tasks-dir', c, '--gh-bin', gh, '--now', NOW])
+  const notes = Object.fromEntries(Object.values(E).map((slug) => [slug, fs.readFileSync(path.join(c, `${slug}.md`), 'utf8')]))
+  const r = resume()
+  const hold = r.err.split('\n').filter((l) => l.startsWith('HOLD: '))
+  if (r.rc !== 3) fails.push(`resume exited ${r.rc}, not 3: ${r.err}`)
+  if (hold.length !== 2 || !hold.some((l) => l.startsWith(`HOLD: [[${E.race}]] RACE undecided`)) ||
+    !hold.some((l) => l.startsWith(`HOLD: [[${E.unverified}]] UNVERIFIED undecided`))) fails.push(`resume's HOLD lines: ${JSON.stringify(hold)}`)
+  for (const slug of Object.values(E)) {
+    if (fs.readFileSync(path.join(c, `${slug}.md`), 'utf8') !== notes[slug]) fails.push(`resume wrote the held ${slug}`)
+  }
+  const ro = path.join(c, `${RE}.md`)
+  fs.writeFileSync(ro, fs.readFileSync(ro, 'utf8').replace('## Notes\n\n', `## Notes\n\n- 2026-10-02 repair: [[${E.race}]] RACE decided: the merge stands\n` +
+    `- 2026-10-02 repair: [[${E.unverified}]] RACE decided: re-verified by hand, the merge stands\n`))
+  const r2 = resume()
+  if (r2.rc !== 0) fails.push(`resume with both decided exited ${r2.rc}: ${r2.err}`)
   for (const slug of Object.values(E)) {
     const st = fmKey(fs.readFileSync(path.join(c, `${slug}.md`), 'utf8'), 'status')
-    if (st !== 'done') fails.push(`resume left ${slug} ${st}`)
+    if (st !== 'done') fails.push(`resume with both decided left ${slug} ${st}`)
   }
   return { fails }
 }
@@ -722,9 +738,18 @@ function check({ status, repair, fx }) {
     !before(ho, '`reconcile-rollout.py resume`', '`--running ""`') || !ho.includes('§4.5 resume') || !ho.includes('§ 2.7') ||
     !ho.includes('does not run')) fails.push('hand-off')
 
+  // signed-gate: a task approve-gates signed is the lead's while its session holds the signed-gate handle (execute
+  // § 3.7): right after § 2's table, repair never hands it back, recuts, defers or re-plans it and writes it no
+  // `## Repair input`; with no lead live it takes a fresh call behind § 3.7's warning; a Don't says the same.
+  const signed = labelled(r2raw, "A signed task is the lead's.")
+  if (!before(r2raw, '| **gate** |', "**A signed task is the lead's.**") ||
+    !['`approve-gates`', '`gates_signed:`', 'signed-gate handle (execute § 3.7)', 'Repair never hands it back, recuts, defers or re-plans it',
+      'writes no `## Repair input` to it', "takes a fresh call behind § 3.7's warning"].every((k) => signed.includes(k)) ||
+    !collapse(raw(repair, /^## Don'ts/)).includes("Don't touch a signed task while its lead is live.")) fails.push('signed-gate')
+
   // ---- both ----
-  // no-wave: neither body reads the wave rollout (the frontmatter descriptions are p12-12's).
-  if (BAN.test(sb) || BAN.test(rb)) fails.push('no-wave')
+  // no-wave: neither file reads the wave rollout, its frontmatter description included.
+  if (BAN.test(status) || BAN.test(repair)) fails.push('no-wave')
   return [...new Set(fails)]
 }
 
@@ -782,7 +807,7 @@ test('fixture C: a hand-back during a drain would undo it (pausedNow true, then 
   assert.deepEqual(fx.C.fails, [])
 })
 
-test('fixture E: a RACE under the lead reads integrating, and resume flips it and an UNVERIFIED set-aside done', () => {
+test('fixture E: a RACE under the lead reads integrating, and resume holds it and an UNVERIFIED set-aside until both are decided', () => {
   assert.deepEqual(fx.E.fails, [])
 })
 
@@ -795,7 +820,8 @@ test('status and repair hold every queue rule', () => {
 // ---- controls: each mutates the real text (or a fixture verdict) in one place and must fail with exactly its rule ----
 
 const RULES = ['states', 'set-aside', 'log-line', 'owner', 'drift', 'actions', 'lineage', 'read-only', 'reverse-lineage', 'integration-only',
-  'stages', 'first-match', 'another-base', 'race-hold', 'race-in-flight', 'closed-pr', 'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off', 'no-wave']
+  'stages', 'first-match', 'another-base', 'race-hold', 'race-in-flight', 'closed-pr', 'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off',
+  'signed-gate', 'no-wave']
 const CONTROLLED = new Set()
 
 // Replaces the first match of `from`. Whitespace inside it matches any run of whitespace, so a reflowed line still
@@ -1071,7 +1097,7 @@ test('control: § 3c without the re-verify verdict fails race-in-flight', () => 
   only(rp("5. for a RACE only, the lead's re-verify verdict, so Lachy decides with it on screen:", '5. for a RACE only:'), 'race-in-flight', 'verdict')
 })
 test('control: fixture E failing fails race-in-flight', () => {
-  only({ fx: { ...real.fx, E: { fails: ['resume left the RACE task review'] } } }, 'race-in-flight', 'fixture E')
+  only({ fx: { ...real.fx, E: { fails: ['resume wrote the held proj-e-race'] } } }, 'race-in-flight', 'fixture E')
 })
 test('control: a restore that hands back unconditionally fails closed-pr', () => {
   only(rp('then `hand-back` **only when the task is set aside**', 'then `hand-back`'), 'closed-pr', 'restore')
@@ -1143,8 +1169,17 @@ test('control: a wave in status fails no-wave', () => {
 test('control: a wave in repair fails no-wave', () => {
   only(rp('### 5. ', 'Defer it out of the wave.\n\n### 5. '), 'no-wave', 'repair wave')
 })
+test('control: a wave in a description fails no-wave', () => {
+  only(st("description: 'Use to see the present situation of a rollout queue", "description: 'Use to see the present situation of a wave rollout"), 'no-wave', 'description')
+})
+test('control: a signed task repair may hand back fails signed-gate', () => {
+  only(rp('Repair never hands it back, recuts, defers or re-plans it', 'Repair may hand it back once'), 'signed-gate', 'hand-back')
+})
+test("control: no signed-gate Don't fails signed-gate", () => {
+  only(rp("- **Don't touch a signed task while its lead is live.**", '- **Mind signed tasks.**'), 'signed-gate', 'donts')
+})
 
-test('the rules are all named (24) and each has a control', () => {
-  assert.equal(RULES.length, 24)
+test('the rules are all named (25) and each has a control', () => {
+  assert.equal(RULES.length, 25)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

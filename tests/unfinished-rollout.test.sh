@@ -2,7 +2,8 @@
 # At most one unfinished rollout per repo (schedule § 0; ADR 0027, ADR 0030 decision 1 and its migration
 # consequence), and the supersede that carries a rollout's unlanded tasks into its successor:
 #   C1-C27  skills/_shared/scripts/unfinished-rollout.py check: none / supersede / interrupted / file / refuse
-#   K1-K4   skills/execute/scripts/reconcile-rollout.py carry: preview, refusals, per-field writes, re-runs
+#   K1-K5   skills/execute/scripts/reconcile-rollout.py carry: preview, refusals, per-field writes, re-runs, and
+#           the refusal of a prior that holds an undecided RACE or UNVERIFIED
 #   M1-M12  a protocol-3 wave rollout in flight with `review` PRs migrates: check -> resume -> carry preview ->
 #           write -> carry -> step 7 -> close-out (stamps, then the move), crash windows included.
 #   I1-I7   § 0's interrupted finish, then a cancel: the incomplete note (reconcile-rollout.py incomplete) is
@@ -193,24 +194,28 @@ mkt t1.md ro-p review 'pr: https://github.com/demo/repo/pull/1' 'started: 2026-0
 mkt t2.md ro-p done 'merged: 2026-09-30T12:00+00:00'
 chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "supersede ro-p|0" "C11: task status and started:/ready:/merged: never count as started"
-for v in "task owner:" "task integrating:" "wave_1_dispatched:" "merged_through_wave: 2" "## Pause log" "pause_requested: true"; do
+for v in "task owner:" "task integrating:" "## Pause log" "pause_requested: true"; do
   mkro ro-p.md "$R" "$DEMO"
   mkt t1.md ro-p review 'pr: https://github.com/demo/repo/pull/1'
   case "$v" in
     "task owner:") mkt t1.md ro-p review 'pr: https://github.com/demo/repo/pull/1' 'owner: execute-x' ;;
     "task integrating:") mkt t1.md ro-p review 'pr: https://github.com/demo/repo/pull/1' 'integrating: 2026-09-30T13:00+00:00' ;;
-    "wave_1_dispatched:") mkro ro-p.md "$R" "$DEMO" 'wave_1_dispatched: 2026-09-29' ;;
-    "merged_through_wave: 2") mkro ro-p.md "$R" "$DEMO" 'merged_through_wave: 2' ;;
     "## Pause log") BODY=$'## Pause log\n\n- 2026-09-30 paused' mkro ro-p.md "$R" "$DEMO" ;;
     "pause_requested: true") mkro ro-p.md "$R" "$DEMO" 'pause_requested: true' ;;
   esac
   chk --repo "$R" --project Demo --regenerate
   ok "$out|$rc" "refuse ro-p|3" "C11: $v marks the rollout as run (not paused: refused)"
 done
-mkro ro-p.md "$R" "$DEMO" 'merged_through_wave: 0'
-mkt t1.md ro-p open
+# A protocol-3 note: its engine stamped owner: on each task at dispatch, and that alone marks it as run (as
+# giflab's real note reads); the rollout note's own stamps from that engine never count.
+PV=3 mkro ro-p.md "$R" "$DEMO" 'wave_1_dispatched: 2026-09-29' 'merged_through_wave: 2'
+mkt t1.md ro-p review 'pr: https://github.com/demo/repo/pull/1' 'owner: execute-x'
 chk --repo "$R" --project Demo --regenerate
-ok "$out|$rc" "supersede ro-p|0" "C11 control: merged_through_wave: 0 alone is never started"
+ok "$out|$rc" "refuse ro-p|3" "C11 legacy: a protocol-3 note whose task carries owner: has run (refused)"
+PV=3 mkro ro-p.md "$R" "$DEMO" 'wave_1_dispatched: 2026-09-29' 'merged_through_wave: 2'
+mkt t1.md ro-p review 'pr: https://github.com/demo/repo/pull/1'
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "supersede ro-p|0" "C11 legacy: the same note with no task owner: is never started"
 
 # ── C12-C13: a complete rollout, and two unfinished ──────────────────────────────────────────────────
 scen c12
@@ -493,6 +498,32 @@ before=$(sums)
 carry --from "$T/$P.md" --to "$T/$N.md"
 ok "$rc|$(printf '%s\n' "$out" | tail -1)" "0|[no-change]" "K4: a done --from superseded by --to re-runs as a no-op"
 ok "$(sums)" "$before" "K4: … writing nothing"
+
+# ── K5: carry refuses a prior that holds an undecided RACE or UNVERIFIED ─────────────────────────────
+scen k5
+BODY=$'## Race log\n\n- 2026-09-30T09:55+00:00 [[r1]] RACE: PR #5 merged as fff on parent ccc; re-verify it' \
+  mkro $P.md "$R" "$DEMO" "$PAUSED"
+mkt r1.md $P review 'pr: https://github.com/demo/repo/pull/5'
+mkt q1.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc" 2 "K5: carry --dry-run refuses a prior holding an undecided RACE"
+has "$err" "[[r1]] (RACE)" "K5: … naming the held task"
+has "$err" "/thread:repair [[$P]]" "K5: … and /thread:repair"
+ok "$(sums)" "$before" "K5: … writing nothing"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc" 2 "K5: carry refuses it for real too"
+ok "$(sums)" "$before" "K5: … writing nothing"
+python3 - "$T/$P.md" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+open(p, "w").write(t.replace("## Notes\n\n", "## Notes\n\n- 2026-09-30 repair: [[r1]] RACE decided: the merge stands\n", 1))
+PY
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc" 0 "K5: with the RACE decided: line in ## Notes, it carries"
+ok "$(fm r1.md rollout)|$(fm q1.md rollout)" "rollout: \"[[$N]]\"|rollout: \"[[$N]]\"" "K5: … both unlanded tasks"
 
 # ── M1-M12: a protocol-3 wave rollout in flight, with review PRs, migrates ────────────────────────────
 scen m

@@ -1,6 +1,6 @@
 ---
 name: repair
-description: 'Use to unstick a wave rollout that has stalled — run it whenever there''s an issue with the whole rollout, not a single task. Triggers on "repair [[rollout]]", "fix this rollout", "[[rollout]] is stuck", "sort out [[rollout]]", "unblock the rollout", or after /thread:status shows blockers/drift. A thin CONDUCTOR over /thread:execute (never a second engine): it diagnoses (runs /thread:status), reconciles drift, asks YOU only the decisions no agent can make and writes them into the notes, auto-retries agent-fixable blocks, dependency-aware-defers wedged tasks, then hands off to execute''s resume — the engine keeps sole merge authority. Scope: Obsidian + gh/git + the execute engine.'
+description: 'Use to unstick a rollout that has stalled — run it whenever there''s an issue with the whole rollout, not a single task. Triggers on "repair [[rollout]]", "fix this rollout", "[[rollout]] is stuck", "sort out [[rollout]]", "unblock the rollout", or after /thread:status shows blockers/drift. A thin CONDUCTOR over /thread:execute (never a second engine): it diagnoses (runs /thread:status), reconciles drift, asks YOU only the decisions no agent can make and writes them into the notes, auto-retries agent-fixable blocks, dependency-aware-defers wedged tasks, then hands off to execute''s resume — the engine keeps sole merge authority. Scope: Obsidian + gh/git + the execute engine.'
 ---
 
 # /thread:repair — sort out a stuck rollout (conductor, not an engine)
@@ -155,6 +155,12 @@ lead's own procedure, so repair neither escalates it nor asks Lachy while the le
 | **own run** | `resumeAt: own`: `blocked`, `plan-blocked`, `review-blocked` with no `rejected` line, a code-writing `review` with no `pr:`, a `merge-task:` set-aside | agent-fixable → hand back (§ 4) → its own call; input-gated → § 3b first |
 | **gate** | `gate-pending` | present the gates verbatim; on sign-off `approve-gates` (§ 3b); never hand back |
 
+**A signed task is the lead's.** After `approve-gates` the task reads `in_progress` with `gates_signed:`, or
+`review` from an Integration stop. While its owner session is live, that session holds the signed-gate
+handle (execute § 3.7): it resumes the gate-pending call on the plan Lachy signed. Repair never hands it back,
+recuts, defers or re-plans it, and writes no `## Repair input` to it. With no lead live, the next *Restart
+routing* takes a fresh call behind § 3.7's warning.
+
 Agent-fixable versus input-gated is judged from the feedback: a test failure, a missed case or a concrete
 review note is agent-fixable; "human-decided", "supplied out-of-band", "needs a value", "ambiguous" or
 "design choice" is input-gated. When torn, ask: cheaper than looping on the same wall. A `tier_capped:` note
@@ -172,9 +178,10 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume
 `resume` works on the whole rollout, not one task: for every unmarked note with a `pr:`, it asks gh for the
 PR's state and base, flips one merged into the default branch to done (stamping `merged:`), and reports
 anything else unchanged. A PR merged into another base is left alone, so it is escalated (§ 3c), never
-flipped. An undecided RACE / UNVERIFIED task is merged into the default branch too, so `resume` would flip it
-done on an unverified main and its dependants would start there: hold `resume` until § 3c records Lachy's
-decision. Under a pause or a live queue, report it and leave it: the reinstate's or the lead's next *Cold
+flipped. An undecided RACE / UNVERIFIED task is merged into the default branch too, but `resume` would only
+skip it (exit 3) and execute would halt on it or hold it set aside, so the decision is what moves it: hold
+`resume` until § 3c records Lachy's decision. `resume` skips a held task itself (exit 3). An exit 3 here
+means § 2 missed an undecided RACE / UNVERIFIED: escalate it (§ 3c). Under a pause or a live queue, report it and leave it: the reinstate's or the lead's next *Cold
 resume* runs `resume` first, and § 1 sends Lachy there only once every RACE decision is recorded.
 
 **3b — input-gated → capture + inject.** Ping the user only here and for the other decisions no agent can
@@ -219,8 +226,9 @@ evidence shown; decision left to Lachy.` Repair never writes that task's `status
     the stamp, then repair).
 - **RACE / UNVERIFIED.** Never re-call merge-task: main's state is Lachy's call. Until a dated
   `- <YYYY-MM-DD> repair: [[<slug>]] RACE decided: <his decision, verbatim>` line on the rollout note's
-  `## Notes` records it, the escalation is **undecided**: neither § 3a nor § 4's hand-off runs, because each
-  runs `resume` over the whole rollout, and it would flip this task done. Once that line is written, `resume`
+  `## Notes` records it, the escalation is **undecided**: neither § 3a nor § 4's hand-off runs: `resume` would
+  only skip it (exit 3) and execute would halt on it or hold it set aside, so the decision is what moves it.
+  Once that line is written, `resume`
   flips the merged task done. The line is a rollout-note record, so repair writes it in every mode (§ 1),
   and a reinstate or a resume waits for it. If he decides the merge does not stand, defer the task (§ 5; its
   PR is merged, so the retire block's `gh pr close` is skipped) before recording it, so `resume` never reads
@@ -286,8 +294,8 @@ there is nothing to clear. Per stage:
   retrying it: surface it with its new diagnosis and offer *more guidance and one more retry* / *defer it*
   (§ 5) / *leave it set aside*. Don't loop.
 - **Hand-off, when no lead is live and no pause stands**, and never while a RACE / UNVERIFIED escalation is
-  undecided (§ 3c: its `resume` would flip that task done on an unverified main; report the hold and stop
-  there): execute's queue loop, entered at its §4.5 resume
+  undecided (§ 3c: `resume` would only skip it (exit 3) and execute would halt on it or hold it set aside, so
+  the decision is what moves it; report the hold and stop there): execute's queue loop, entered at its §4.5 resume
   (*Cold resume*): execute § 2.5 first (then § 2.6), then `reconcile-rollout.py resume`, then the loop with
   `--running ""` (this session holds no task call). Execute's § 2.7 pushed-base gate (entry points only)
   does not run on this hand-off; the next `/thread:execute [[<rollout>]]` runs it. Under a live queue the
@@ -353,8 +361,11 @@ merges into another base (task + PR + base).
   for a RACE.
 - **Don't run `resume` while a RACE / UNVERIFIED escalation is undecided.** Not in § 3a, not through § 4's
   hand-off, and never send Lachy to a reinstate or a `/thread:execute` resume before its `RACE decided:` line:
-  `resume` works on the whole rollout and would flip that task done on an unverified main (§ 3c). The line
+  `resume` would only skip it (exit 3) and execute would halt on it or hold it set aside, so the decision is
+  what moves it (§ 3c). The line
   itself is a rollout-note record, so no pause or live lead holds it back (§ 1).
+- **Don't touch a signed task while its lead is live.** After `approve-gates`, its owner session holds the
+  signed-gate handle (execute § 3.7): no hand-back, recut, defer, re-plan or `## Repair input` (§ 2).
 - **Don't escalate a RACE re-verify in flight.** The lead decides it itself (§ 2). Asking Lachy before its
   verdict exists invites a "stands" that a red re-verify then contradicts.
 - **Don't reinstate a rollout another rollout's `supersedes:` names.** Its unlanded tasks were carried there;
