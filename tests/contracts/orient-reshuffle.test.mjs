@@ -64,11 +64,41 @@ test('Look only writes nothing; Steer only exists', () => {
 })
 
 test('orient schedules only wave-shaped members and never runs another rollout', () => {
-  assertHas(S(6), 'orient § 6', ['--tasks', '--regenerate', 'reconcile-rollout.py status', '`paused`',
-    '`status: open`', /At most one rollout is live per repo/, /scoped target routes only the tasks its own reshuffle wrote/,
+  assertHas(S(6), 'orient § 6', ['--tasks', '--regenerate', /At most one unfinished rollout per repo/,
+    'unfinished-rollout check', /scoped target routes only the tasks its own reshuffle wrote/,
     /schedule nothing and touch nothing/, 'repair', /Uncommitted grill docs/])
   assert.doesNotMatch(collapse(orient), /pause_requested/, 'orient pauses rollouts')
   assert.ok(S(6).indexOf('**The slot write**') > S(6).indexOf('**Hands-on**'), 'the slot write precedes the steering answer')
+})
+
+// The sentence of § 6 that names schedule's SKILL.md must pass `--regenerate` and `--tasks` in one backtick
+// span: superseding is orient's policy, and a `--regenerate` elsewhere in § 6 would pass a bare token check
+// while orient called schedule without it (schedule § 0's check then refuses every supersede).
+function scheduleCall(s6) {
+  const sentence = s6.split(/(?<=[.!?])\s+/).find((x) => x.includes('skills/schedule/SKILL.md'))
+  if (!sentence) return false
+  return [...sentence.matchAll(/`([^`]+)`/g)].some((m) => m[1].includes('--regenerate') && m[1].includes('--tasks'))
+}
+
+// Schedule § 0 names one exception to "stop before step 1, nothing written": a `file` move or an
+// `interrupted` finish made before a later refusal stays (the finish re-points task notes and closes out
+// the prior rollout). Orient's stop branch must mirror it, not claim nothing was written.
+test('orient\'s § 0-stop branch mirrors schedule\'s file/interrupted exception', () => {
+  const stop = S(6).slice(S(6).indexOf('**Schedule stopped at § 0**'), S(6).indexOf('**Uncommitted grill docs.**'))
+  assertHas(stop, 'orient § 6 stop branch', [/`file` move or an `interrupted` finish/, /re-points task notes/,
+    /reports any such finish/])
+  assert.doesNotMatch(stop, /wrote no note\b/, 'orient § 6 says schedule wrote no note at all')
+})
+
+test('orient calls schedule with --regenerate --tasks in the same span', () => {
+  assert.ok(scheduleCall(S(6)), 'orient § 6 does not call schedule with `--regenerate --tasks <members>`')
+})
+
+test('control: --regenerate only in a later sentence fails scheduleCall', () => {
+  const s6 = 'Run `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md` with `--tasks <members>`, naming the members. ' +
+    'Pass `--regenerate` when superseding.'
+  assert.equal(scheduleCall(s6), false)
+  assert.equal(scheduleCall(s6.replace('`--tasks <members>`', '`--regenerate --tasks <members>`')), true)
 })
 
 test('the execute offer has three answers and never homes a commit on the target default branch', () => {

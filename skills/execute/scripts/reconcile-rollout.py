@@ -25,7 +25,8 @@ Subcommands:
               live queue. Schedule order is each task's first wikilink on a list-item or table-row line
               of the rollout body; prose and fenced code never rank. Honours a soft pause: once nothing
               runs, awaits or integrates, it stamps `paused:` and removes `pause_requested` (the drain,
-              ADR 0030 decision 5).
+              ADR 0030 decision 5). Refuses an incomplete rollout (below): exit 1, no stdout, one ERROR
+              line naming why and the remedy, `/thread:schedule <its first project> --regenerate`.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here.
@@ -51,7 +52,8 @@ Subcommands:
   status      Read-only situational scan for /thread:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
-              pause_requested, ceiling, counts, progress, timeline, tasks}. Pure read; no network.
+              pause_requested, incomplete, ceiling, counts, progress, timeline, tasks}; `incomplete` is
+              why the rollout must not run as written (below), or null. Pure read; no network.
 
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
@@ -69,6 +71,22 @@ Subcommands:
               the `started:`/`merged:`/`integrating:`/`ready:` stamps (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
               re-plans them. The dependent-closure safety check lives in the /thread:repair skill.
+
+  carry       A supersede's carry (ADR 0030; /thread:schedule step 6, and § 0 finishing an interrupted
+              supersede): re-point every unlanded task of the prior rollout (--from, a path) to the rollout
+              that supersedes it (--to, a path). Each linked note (the notes `status` reads, root and Archive)
+              is classified by its queue state: queued, running, awaiting-integration, integrating and
+              set-aside ones are carried (`rollout: "[[<to>]]"` in place; `owner:`, `integrating:` and a
+              legacy `wave:` removed; nothing else changes), merged, folded and other ones are kept. It never
+              writes the prior note: closing it out is schedule step 7.5's. Prints one `carry <slug> <state>`
+              or `keep <slug> <state>` line per linked note, sorted by slug, then `[no-change]`,
+              `[written: <n>]` or `(dry-run)`. --dry-run previews and needs no --to. Refuses (exit 2,
+              nothing written, one ERROR line): a --from that is missing, unparseable, not tagged `rollout`,
+              done or dropped (unless done with `superseded_by:` naming --to: a re-run), or neither paused
+              nor never started; a --to that is missing, not directly in the tasks dir, untagged, done or
+              dropped, whose `supersedes:` does not name --from, that is --from, or that is not never
+              started; no --to without --dry-run. A failed save is exit 1 at once: the prior note is still
+              open, so the next unfinished-rollout check pairs the two notes as interrupted.
 
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
               `pause_requested`) from the rollout note. Run by /thread:execute's resume path when it
@@ -100,6 +118,28 @@ Queue states (one per linked task, re-read on every call):
                                                  `gate` for gate-pending, otherwise `run`
   merged (an affine tombstone)                -> folded, outside N
   anything else (dropped, parked)             -> other, outside N
+
+Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
+session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
+`pause_requested`, `completed:`, any valued `wave_<n>_dispatched:` / `wave_<n>_merged:`,
+`merged_through_wave:` above 0, or a `## Pause log` / `## Completion log` heading line. On a linked task note:
+a non-empty `owner:` or `integrating:`. A task's status and its `started:` / `ready:` / `merged:` stamps never
+count, because a carry keeps them.
+
+Incomplete (incomplete, read by `next`, `status` and unfinished-rollout.py): a never-started rollout that must
+not run as written. The first that applies:
+  - it carries `incomplete: true`. Every rollout note is born with it (the schedule template, written at
+    step 6), and step 7's last write removes it once every task is stamped, so a /thread:schedule run that
+    stopped anywhere in between leaves it. Schedule § 0 also stamps it on the note an interrupted supersede
+    wrote; that stamp ends only when a later supersede closes the note;
+  - its `supersedes:` names a rollout still unfinished beside it (not done or dropped): the supersede has
+    not closed that one out (schedule step 7.5), which is what ends this reason.
+Neither reason reads the task notes' links, so a task taken out of a rollout (repair's `defer`, a gate
+dropped after step 7, with or without its `## Queue` row) never makes it incomplete. And neither can newly
+apply to a rollout that has run, even once every task that marked it started is deferred and it reads as
+never started again: `next` never started it while it carried the stamp or while its `supersedes:` target
+was open (a closed target stays closed: step 7.5 files it in Archive/Rollouts/), and § 0 stamps only a note
+it pairs with an open prior.
 
 Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
   review         -> status: review;        pr: <url>; review_rounds_used: <n>; plan_rounds_used: <n> (if >0);
@@ -839,6 +879,64 @@ def _queue_state(note):
     return "other", None
 
 
+WAVE_MARK_RE = re.compile(r"^(wave_\d+_(?:dispatched|merged)):(.*)$")
+STARTED_HEADINGS = ("## Pause log", "## Completion log")
+
+
+def _valued(value) -> bool:
+    """A frontmatter value that says something: non-empty once quotes and an inline comment are dropped,
+    and not YAML's null."""
+    return _scalar(value).lower() not in ("", "null", "~")
+
+
+def never_started(rollout_note, linked):
+    """(True, '') when no execute session has run this rollout, else (False, reason). Only execute's own
+    marks count (the module docstring's "Never started"): the rollout note's `paused:`, truthy
+    `pause_requested`, `completed:`, valued `wave_<n>_dispatched:` / `wave_<n>_merged:`, a
+    `merged_through_wave:` above 0, a `## Pause log` or `## Completion log` heading; a linked task note's
+    non-empty `owner:` or `integrating:` (`linked` is `_scan`'s list of (path, Note)). A task's status and
+    its started:/ready:/merged: stamps never count, so a freshly carried rollout is still never started."""
+    if _valued(rollout_note.get("paused")):
+        return False, f"it carries paused: {_scalar(rollout_note.get('paused'))}"
+    if _truthy_flag(rollout_note.get("pause_requested")):
+        return False, "it carries pause_requested"
+    if _valued(rollout_note.get("completed")):
+        return False, f"it carries completed: {_scalar(rollout_note.get('completed'))}"
+    for line in rollout_note._fm:
+        m = WAVE_MARK_RE.match(line)
+        if m and _valued(m.group(2)):
+            return False, f"it carries {m.group(1)}: {_scalar(m.group(2))}"
+    if (_int_field(rollout_note.get("merged_through_wave"), 0) or 0) > 0:
+        return False, f"it carries merged_through_wave: {_scalar(rollout_note.get('merged_through_wave'))}"
+    for heading in STARTED_HEADINGS:
+        if rollout_note.has_heading(heading):
+            return False, f"it has a {heading} section"
+    for path, note in sorted(linked, key=lambda pn: (pn[0].stem.lower(), str(pn[0]))):
+        for key in ("owner", "integrating"):
+            if _valued(note.get(key)):
+                return False, f"its task {path.stem} carries {key}: {_scalar(note.get(key))}"
+    return True, ""
+
+
+def incomplete(rollout_path: Path, rollout_note, linked, index) -> str:
+    """'' when the rollout can run as written, else why not (the module docstring's "Incomplete"). Only a
+    never-started rollout is judged; `linked` and `index` are _scan's. The same-folder test compares
+    resolved paths, as `_scan` does, so a symlinked or differently spelt vault path never skips it."""
+    if not never_started(rollout_note, linked)[0]:
+        return ""
+    if _truthy_flag(rollout_note.get("incomplete")):
+        return ("it carries incomplete: true (the /thread:schedule run that wrote it never reached step 7's last "
+                "write, which removes it once every task is stamped, or § 0 stamped it finishing an interrupted "
+                "supersede), so its queue may name tasks never stamped to it")
+    prior = (_wikilink_slug(_scalar(rollout_note.get("supersedes"))) or "").lower()
+    entry = index.get(prior) if prior else None
+    if entry is not None and entry[0].parent.resolve() == rollout_path.parent.resolve() and \
+            "rollout" in _tags(entry[1]) and _status(entry[1]) not in CLOSED_ROLLOUT_STATUSES:
+        return (f"its supersedes: names [[{entry[0].stem}]], still unfinished beside it: the supersede has not "
+                "closed that rollout out (schedule step 7.5)")
+    return ""
+
+
 def _priority(note) -> str:
     v = _scalar(note.get("priority")).lower()
     return v if v in PRIORITY_WEIGHTS else "normal"
@@ -911,7 +1009,8 @@ def _file_sets(rollout_note):
 
 def _schedule_positions(rollout_note):
     """slug (lowercased) -> the ordinal of its first wikilink on a list-item or table-row line of the
-    rollout body (the wave table, Tasks by wave, a queue list), outside fenced code. Prose never ranks,
+    rollout body (the `## Queue` table, a legacy wave table or Tasks by wave, a queue list), outside
+    fenced code. Prose never ranks,
     so a note the lead adds above the list mid-rollout cannot reorder the queue."""
     pos, i, fenced = {}, 0, False
     for line in rollout_note._body.split("\n"):
@@ -943,7 +1042,7 @@ def _rows(rollout_path: Path, rollout_note, tasks_dir: Path):
         rank = (0, pos, "") if pos is not None else (1, wave if wave is not None else 10 ** 9, slug.lower())
         priority = _priority(note)
         rows.append({
-            "slug": slug, "note": note, "state": state, "setAsideAt": set_aside_at,
+            "slug": slug, "path": path, "note": note, "state": state, "setAsideAt": set_aside_at,
             "status": _scalar(note.get("status")) or None, "pr": _pr(note) or None, "wave": wave,
             "priority": priority, "weight": PRIORITY_WEIGHTS[priority], "solo": _truthy_flag(note.get("solo")),
             "files": file_sets.get(slug.lower(), []), "rank": rank, "deps": _dep_entries(note),
@@ -1230,6 +1329,12 @@ def cmd_next(args) -> int:
         return 1
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     rows, index = _rows(rollout_path, rollout_note, tasks_dir)
+    why = incomplete(rollout_path, rollout_note, [(r["path"], r["note"]) for r in rows], index)
+    if why:
+        project = next((s for s in (_wikilink_slug(v) for v in rollout_note.get_list("projects")) if s), "<project>")
+        print(f"ERROR: {rollout_path.stem} is incomplete: {why}: never run it as written; supersede it with "
+              f"/thread:schedule {project} --regenerate", file=sys.stderr)
+        return 1
     by_state = {}
     for r in sorted(rows, key=_rank):
         by_state.setdefault(r["state"], []).append(r)
@@ -1595,6 +1700,8 @@ def cmd_status(args) -> int:
         # (render as PAUSED, not stalled); `pause_requested` = a soft pause is pending and drains.
         "paused": _scalar(paused) or None,
         "pause_requested": _truthy_flag(rollout_note.get("pause_requested")),
+        # Why the rollout must not run as written (`next` refuses it), or null: see "Incomplete".
+        "incomplete": incomplete(rollout_path, rollout_note, [(r["path"], r["note"]) for r in rows], index) or None,
         "ceiling": ceiling,
         "counts": counts,
         "progress": _progress_line(counts, timeline),
@@ -1698,6 +1805,105 @@ def cmd_defer(args) -> int:
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
     return 1 if errors else 0
+
+
+# ---- carry (a supersede, ADR 0030) -------------------------------------------
+
+# _queue_state's exact strings: what a supersede carries into the new rollout, and what stays behind.
+CARRIED_STATES = {"queued", "running", "awaiting-integration", "integrating", "set-aside"}
+CLOSED_ROLLOUT_STATUSES = {"done", "dropped"}
+
+
+def _tags(note):
+    return {_scalar(t).lower() for t in note.get_list("tags")}
+
+
+def _link_slug(note, key) -> str:
+    """The lowercased note name a wikilink-valued key points at ('' when absent); an inline `# comment`
+    is dropped first, as the template's commented `supersedes:` line may carry one."""
+    return (_wikilink_slug(_scalar(note.get(key))) or "").lower()
+
+
+def _carry_note(path: Path, role: str):
+    """(Note, None) for an existing, parseable rollout note, else (None, why)."""
+    if not path.is_file():
+        return None, f"{role} {path}: no such note"
+    try:
+        note = Note(path)
+    except ValueError as e:
+        return None, f"{role} {path}: {e}"
+    if "rollout" not in _tags(note):
+        return None, f"{role} {path.stem}: not a rollout note (its tags lack `rollout`)"
+    return note, None
+
+
+def cmd_carry(args) -> int:
+    def refuse(msg):
+        print(f"ERROR: carry: {msg}", file=sys.stderr)
+        return 2
+
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    if not tasks_dir.is_dir():
+        return refuse(f"tasks dir {tasks_dir} not found")
+    src = Path(os.path.expanduser(args.from_))
+    src_note, why = _carry_note(src, "--from")
+    if why:
+        return refuse(why)
+    dst = Path(os.path.expanduser(args.to)) if args.to else None
+    if dst is None and not args.dry_run:
+        return refuse("--to is required (only --dry-run previews without it)")
+    src_status = _status(src_note)
+    if src_status in CLOSED_ROLLOUT_STATUSES:
+        rerun = src_status == "done" and dst is not None and _link_slug(src_note, "superseded_by") == dst.stem.lower()
+        if not rerun:
+            return refuse(f"--from {src.stem} is {src_status}: a closed rollout carries nothing")
+    linked = _scan(src, tasks_dir)[0]
+    fresh, why = never_started(src_note, linked)
+    if not fresh and not _valued(src_note.get("paused")):
+        return refuse(f"--from {src.stem} has run and is not paused ({why}): only a paused or never-started "
+                      "rollout is superseded")
+    if dst is not None:
+        if dst.stem.lower() == src.stem.lower() or (dst.exists() and dst.resolve() == src.resolve()):
+            return refuse(f"--to is --from ({src.stem}): a rollout never carries into itself")
+        dst_note, why = _carry_note(dst, "--to")
+        if why:
+            return refuse(why)
+        if dst.parent.resolve() != tasks_dir.resolve():
+            return refuse(f"--to {dst} is not directly in the tasks dir {tasks_dir}")
+        if _status(dst_note) in CLOSED_ROLLOUT_STATUSES:
+            return refuse(f"--to {dst.stem} is {_status(dst_note)}: carry only into an open rollout")
+        if _link_slug(dst_note, "supersedes") != src.stem.lower():
+            return refuse(f"--to {dst.stem}: its supersedes: does not name {src.stem}")
+        fresh, why = never_started(dst_note, _scan(dst, tasks_dir)[0])
+        if not fresh:
+            return refuse(f"--to {dst.stem} has run ({why}): never carry into a running queue")
+
+    rows = []
+    for path, note in sorted(linked, key=lambda pn: (pn[0].stem.lower(), str(pn[0]))):
+        state = _queue_state(note)[0]
+        rows.append((path, note, state, state in CARRIED_STATES))
+        print(f"{'carry' if state in CARRIED_STATES else 'keep'} {path.stem} {state}")
+    if args.dry_run:
+        print("(dry-run)")
+        return 0
+    written = 0
+    for path, note, _state, carried in rows:
+        if not carried:
+            continue
+        note.set("rollout", f'"[[{dst.stem}]]"')
+        for key in ("owner", "integrating", "wave"):
+            note.remove(key)
+        if not note.dirty:
+            continue
+        try:
+            note.save()
+        except OSError as e:
+            print(f"ERROR: carry: {path.stem}: cannot write {path}: {e} ({written} note(s) already carried)",
+                  file=sys.stderr)
+            return 1
+        written += 1
+    print(f"[written: {written}]" if written else "[no-change]")
+    return 0
 
 
 # ---- approve-gates ----------------------------------------------------------
@@ -1858,6 +2064,13 @@ def main() -> int:
     df.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     df.add_argument("--dry-run", action="store_true")
     df.set_defaults(func=cmd_defer)
+
+    ca = sub.add_parser("carry", help="re-point a superseded rollout's unlanded tasks to its successor (/thread:schedule)")
+    ca.add_argument("--from", dest="from_", required=True, help="path to the prior (superseded) rollout note")
+    ca.add_argument("--to", default=None, help="path to the new rollout note (required unless --dry-run)")
+    ca.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    ca.add_argument("--dry-run", action="store_true", help="print the carry/keep lines and write nothing")
+    ca.set_defaults(func=cmd_carry)
 
     cp = sub.add_parser("clear-pause", help="reinstate a paused rollout: remove paused/pause_requested (/thread:execute resume)")
     cp.add_argument("--rollout", required=True, help="path to the rollout note")
