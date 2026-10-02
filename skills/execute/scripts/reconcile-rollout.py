@@ -44,10 +44,12 @@ Subcommands:
               *Set aside* and "retry [[task]]", and /thread:repair's hand-off, p12-11). A `blocked` note set
               aside at Integration (its latest `## Blocker diagnosis` run starts `integration:`) with a `pr:`
               goes back to `status: review` with `ready:` restamped (it rejoins the Integration queue); a
-              `blocked`, `review-blocked` or `plan-blocked` note set aside at its run goes to
-              `status: in_progress` with `owner:` removed (the next `next --running` restarts it). Refuses
-              (exit 1, nothing written) every other note: gate-pending (approve-gates' job), done, review
-              (with or without a PR), in_progress, open, and a note set aside at Integration with no `pr:`.
+              `blocked`, `review-blocked` or `plan-blocked` note set aside at its run, and a code-writing
+              `review` note with no `pr:` (approved without a PR, which the queue sets aside at its run),
+              go to `status: in_progress` with `owner:` removed (the next `next --running` restarts it, and
+              its own call re-runs on the existing tree and branch). Refuses (exit 1, nothing written) every
+              other note: gate-pending (approve-gates' job), done, review with a PR (awaiting Integration),
+              a read-only review note, in_progress, open, and a note set aside at Integration with no `pr:`.
               Feedback runs and the Integration log are never touched.
 
   log-integration  The lead's own clean-path Integration record (p12-9): append one `integrated path=lead`
@@ -1607,14 +1609,18 @@ def cmd_mark_done(args) -> int:
 
 # ---- hand-back and log-integration (the lead's, p12-9) -------------------------------------------
 
-HAND_BACK_RUN_STATUSES = set(BLOCKED_SECTIONS)   # review-blocked, blocked, plan-blocked
+# review-blocked, blocked, plan-blocked; and review, which _queue_state sets aside at its run only for a
+# code-writing note approved without a pr: (a review note with a PR awaits Integration; a read-only one is done).
+HAND_BACK_RUN_STATUSES = set(BLOCKED_SECTIONS) | {"review"}
 SHA40_RE = re.compile(r"[0-9a-f]{40}")
 
 
 def cmd_hand_back(args) -> int:
     """A set-aside task re-enters at the stage it stopped (ADR 0030 decision 4): set aside at Integration
-    -> review (ready: restamped, it rejoins the Integration queue); set aside at its run -> in_progress
-    (owner: removed, the next `next --running` restarts it). Everything else is refused, nothing written."""
+    -> review (ready: restamped, it rejoins the Integration queue); set aside at its run (a blocked,
+    review-blocked or plan-blocked note, or a code-writing review note approved without a pr:) ->
+    in_progress (owner: removed, the next `next --running` restarts it, and its own call re-runs on the
+    existing tree and branch). Everything else is refused, nothing written."""
     now = _now(args)
     for slug, _path, note in _each_note(args):
         status = _status(note)
@@ -1635,8 +1641,8 @@ def cmd_hand_back(args) -> int:
         why = ("set aside at Integration with no pr:" if at == "integration"
                else f"status is {status or 'none'!r} (queue state {state}{'' if at is None else ' at ' + at})")
         args._errors.append(f"{slug}: {why} — refusing to hand back: only a blocked note set aside at Integration "
-                            "(with a pr:) or a blocked, review-blocked or plan-blocked note set aside at its run "
-                            "re-enters (a gate-pending note goes through approve-gates)")
+                            "(with a pr:), or a blocked, review-blocked, plan-blocked or PR-less code-writing review "
+                            "note set aside at its run, re-enters (a gate-pending note goes through approve-gates)")
     return _finish(args, now)
 
 

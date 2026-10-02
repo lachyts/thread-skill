@@ -98,6 +98,20 @@ rec "$(row a plan-blocked 'the plan judge never approved')"
 hb a
 ok "$rc|$(fm a status)|$(fm a owner)" "0|status: in_progress|<none>" "hand-back: plan-blocked -> in_progress, owner: removed"
 
+# ── hand-back: a code-writing review note approved without a PR (set aside at its run) -> in_progress ──
+scen nopr
+mkro
+mkt a review
+ok "$(q "$(nxt)" '[[x["setAsideAt"], x["status"]] for x in d["setAside"] if x["slug"]=="a"]')" '[["run","review"]]' "fixture: a PR-less code-writing review note is set aside at its run"
+before=$(body a)
+hb a
+ok "$rc" 0 "hand-back: a PR-less code-writing review note exits 0"
+has "$out" "a: review->in_progress" "hand-back: says review->in_progress"
+ok "$(fm a status)|$(fm a owner)|$(fm a pr)" "status: in_progress|<none>|<none>" "hand-back: -> in_progress, owner: removed, still no pr:"
+ok "$(body a)" "$before" "hand-back: the body is byte-identical"
+J=$(nxt)
+ok "$(q "$J" '[d["restart"], d["setAside"]]')" '[["a"],[]]' "hand-back: next --running '' restarts it; nothing set aside"
+
 # ── hand-back refusals: exit 1, nothing written ─────────────────────────────────────────────────────
 scen refuse
 mkro
@@ -106,7 +120,7 @@ mkt d done "pr: $PR"
 mkt r review "pr: $PR"
 mkt i in_progress
 mkt o open
-mkt n review
+printf -- '---\ntags: [task]\nstatus: review\nscope: read-only\nrollout: "[[ro]]"\n---\n\n## Notes\n\nbody n\n' > "$D/n.md"
 mkt x blocked
 printf '\n## Blocker diagnosis\n\nintegration: set aside with no PR\n' >> "$D/x.md"
 for s in g d r i o n x; do

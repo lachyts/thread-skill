@@ -7,10 +7,11 @@
 #   C1  main unmoved: merge route, the lead's log line, merge-task 0, mark-done.
 #   C2  main moved: the lead merges, verifies (the SKILL.md verify line), pushes, logs and merges — no agent.
 #   C3  a shared file   C4  a conflict   C5  red, undo   C6  case (ii) from an engine line   C7  the own run merged
-#   main; a stale anchor ref   C8  a missing or unpushed tree, leftovers, a gone branch   C9  push refused
-#   C10 landed   C11 engine pins   C12 inputs parity   C13a exit-4 plumbing   C13b a dead integrate call
-#   C13c lead-written own and revise-stopped rows   C14 a rejection frees the lane while another integrates
-#   C15 the verify line under bash and zsh -f   C16 stamp, usage, an unreachable origin   C17 timeouts, signals,
+#   main; a stale anchor ref   C8  a missing, detached or unpushed tree (merge while main is unmoved, trouble once
+#   it moved), leftovers, a gone branch   C9  push refused   C10 landed   C11 engine pins   C12 inputs parity (and
+#   the rung from inputs)   C13a exit-4 plumbing   C13b a dead integrate call   C13c lead-written own and
+#   revise-stopped rows   C14 a rejection frees the lane while another integrates   C15 the verify line under bash
+#   and zsh -f ($, $(…), backticks, \ and ' single-quoted)   C16 stamp, usage, an unreachable origin   C17 timeouts, signals,
 #   the bootstrap, the race tree   C18 no relaunch loop   C19 an Integration set-aside re-enters   C20 the last
 #   task rejected.
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0.
@@ -112,10 +113,12 @@ print(m.Note(__import__("pathlib").Path(sys.argv[1])).latest_run_text("## Blocke
 PY
 }
 setaside_at() { python3 "$RR" status --rollout "$V/ro.md" --tasks-dir "$V" | python3 -c 'import json,sys; d=json.load(sys.stdin); print([t["setAsideAt"] for t in d["tasks"] if t["slug"]==sys.argv[1]][0])' "$1"; }
-# The SKILL.md verify line (between its markers), filled in: verify_line <tree> <slug> <verifier> [bootstrap]
+# The SKILL.md verify line (between its markers), filled in as the skill says (each ' in the verifier and the
+# bootstrap written as '\''): verify_line <tree> <slug> <verifier> [bootstrap]. VERIFY_FILL=dq fills them the
+# old way instead (double quotes, only " escaped): C15's control.
 verify_line() {
   python3 - "$SKILL" "$R" "$@" <<'PY'
-import re, sys
+import os, re, sys
 skill, repo, tree, slug, verifier = sys.argv[1:6]
 boot = sys.argv[6] if len(sys.argv) > 6 else ""
 text = open(skill).read()
@@ -123,10 +126,15 @@ m = re.search(r"^# thread:integration-verify[^\n]*\n(.*?)^# end thread:integrati
 if not m:
     print("NO-VERIFY-BLOCK"); sys.exit(0)
 line = m.group(1).strip()
+if os.environ.get("VERIFY_FILL") == "dq":
+    line = line.replace("'<env_bootstrap>'", '"<env_bootstrap>"').replace("'<verifier>'", '"<verifier>"')
+    esc = lambda s: s.replace('"', '\\"')
+else:
+    esc = lambda s: s.replace("'", "'\\''")
 if not boot:
-    line = line.replace(' --bootstrap "<env_bootstrap>"', "")
+    line = re.sub(r""" --bootstrap (['"])<env_bootstrap>\1""", "", line)
 line = (line.replace("<tree>", tree).replace("<repoPath>", repo).replace("<slug>", slug)
-        .replace("<env_bootstrap>", boot).replace("<verifier>", verifier))
+        .replace("<env_bootstrap>", esc(boot)).replace("<verifier>", esc(verifier)))
 print(line)
 PY
 }
@@ -307,12 +315,30 @@ prep
 ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["stashed"]')" "merge|integration leftovers $H0" "C8: tracked leftovers are stashed (main unmoved → merge)"
 has "$(git -C "$WT" stash list)" "integration leftovers $H0" "C8: … into the stash list"
 g -C "$WT" commit -q --allow-empty -m unpushed
+UNP=$(git -C "$WT" rev-parse HEAD)
 prep
-ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["trouble"]')" "trouble|[]" "C8: an unpushed commit in the tree → trouble []"
-has "$(j "$J" 'd["reason"]')" "commit(s) origin/$BR lacks" "C8: … naming it"
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')|$(j "$J" 'd["prHead"]')" "merge|i|$H0" "C8: an unpushed commit in the tree, main unmoved → merge on origin's head (the merge route needs no tree)"
+ok "$(git -C "$WT" rev-parse HEAD)" "$UNP" "C8: … and the tree's commit is left alone"
+g -C "$WT" checkout -q --detach
+prep
+ok "$(j "$J" 'd["route"]')" "merge" "C8: a tree off its branch, main unmoved → merge"
+g -C "$WT" checkout -q "$BR"
 g -C "$R" worktree remove --force "$WT"
 prep
-ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["trouble"]')" "trouble|[]" "C8: a missing tree → trouble []"
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')" "merge|i" "C8: a missing tree, main unmoved → merge"
+g -C "$R" worktree add -q "$WT" "$BR" >/dev/null 2>&1
+main m.txt "theirs"
+prep
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["trouble"]')" "trouble|[]" "C8: an unpushed commit in the tree, main moved → trouble []"
+has "$(j "$J" 'd["reason"]')" "commit(s) origin/$BR lacks" "C8: … naming it"
+g -C "$WT" reset -q --keep "$H0"; g -C "$WT" checkout -q --detach
+prep
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["trouble"]')" "trouble|[]" "C8: a tree off its branch, main moved → trouble []"
+has "$(j "$J" 'd["reason"]')" "detached HEAD" "C8: … naming it"
+g -C "$R" worktree remove --force "$WT"
+prep
+ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["trouble"]')" "trouble|[]" "C8: a missing tree, main moved → trouble []"
+has "$(j "$J" 'd["reason"]')" "no task tree of its own" "C8: … naming it"
 git --git-dir "$MT_SRV" update-ref -d "refs/heads/$BR"
 prep
 ok "$prc|$(j "$J" 'd["route"]')" "0|set-aside" "C8: origin/<branch> gone → set-aside"
@@ -424,6 +450,16 @@ ok "$(j "$I" '[d["markerStage"], d["markerReason"], d["history"]]')" "$(j "$EP" 
 ok "$(j "$I" '[d["source"], d["lastRound"], d["reviewRoundsUsed"], d["readyAt"], d["tierCapped"], d["tierCappedAt"], d["model"], d["resumeAt"]]')" \
   '["blocker",2,2,"2026-10-02T11:00+00:00",true,"review","fable","revise"]' "C12: source, rounds, readyAt, tier_capped, model, resumeAt revise"
 ok "$(j "$I" 'd["lastIntegration"]["outcome"]')|$(j "$I" 'd["lastIntegration"]["path"]')" "rejected|judge-only" "C12: lastIntegration is the log's last line, as fields"
+# the integrate call's rung fallback (SKILL.md § 4.5 step 3): tierCapped/tierCappedAt from inputs pass the engine's
+# args check; the note's raw tier_capped string in tierCapped fails it before dispatch (the control).
+RUNG=$(node --input-type=module -e "
+  import { loadEngine } from './tests/lib/engine.mjs'
+  const T = loadEngine(['integrationArgsError'])
+  const [a, i] = [JSON.parse(process.argv[1]), JSON.parse(process.argv[2])]
+  const err = (tc) => { a.integration.rung = { model: 'fable', escalated: false, escalatedAt: '', tierCapped: tc, tierCappedAt: i.tierCappedAt }; return T.integrationArgsError(a) }
+  process.stdout.write(JSON.stringify([err(i.tierCapped), err('review').startsWith('rung must be')]))
+" "$(p1args proj-a 3)" "$I")
+ok "$RUNG" '["",true]' "C12: a rung from inputs' tierCapped/tierCappedAt passes integrationArgsError; the raw tier_capped string fails it"
 # a review-blocked run parses whole; the newer run wins; a tie goes to review-blocked
 ntask proj-b review-blocked "pr: $(p1pr proj-b)" 'review_rounds_used: 2'
 printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-02T10:00+00:00)\n\nintegration: old set-aside\n\n<!-- run 1 end sha=000000000000 -->\n\n## Review-blocked feedback\n\n### Run 1 (2026-10-02T11:00+00:00)\n\nRound 1:\n- x\n\nRound 2:\n- y\n\n<!-- run 1 end sha=000000000000 -->\n\n## Integration log\n\n2026-10-02T10:30+00:00 rejected path=integrator pr=1 anchor=- head=- base=- wait=- duration=- triggers=-\n' >> "$V/proj-b.md"
@@ -565,6 +601,24 @@ for sh in "${shells[@]}"; do
   CLAUDE_PLUGIN_ROOT="$root" $sh -c "$cmd" >/dev/null 2>&1
   ok "$(cat "$R/.claude/integration/$SLUG.rc" 2>/dev/null)" 0 "C15 $n: the verify line runs (a verifier with spaces and &&, a bootstrap) → rc 0"
   has "$(cat "$R/.claude/integration/$SLUG.log")" "== verifier: test -f t.txt && test -f .boot" "C15 $n: the log names the verifier"
+done
+# $, $(…), backticks, a backslash and a ' must reach bash -c in the task tree unexpanded: in the lead's shell (cwd
+# $root, no t.txt, another basename) any of them expands to something else and the run goes red.
+SV='test "$(cat t.txt)" = task && b=`basename "$PWD"` && test "$b" = proj-t5 && printf '"'"'%s\n'"'"' "it'"'"'s \$5 in $b" > .v-out'
+SB='test "$(basename "$PWD")" = proj-t5 && touch .boot2'
+cmd=$(verify_line "$WT" "$SLUG" "$SV" "$SB")
+dq=$(VERIFY_FILL=dq verify_line "$WT" "$SLUG" "$SV" "$SB")
+for sh in "${shells[@]}"; do
+  n=$(basename "${sh%% *}")
+  rm -f "$WT/.boot2" "$WT/.v-out" "$R/.claude/integration/$SLUG.rc"
+  CLAUDE_PLUGIN_ROOT="$root" $sh -c "$cmd" >/dev/null 2>&1
+  ok "$(cat "$R/.claude/integration/$SLUG.rc" 2>/dev/null)" 0 "C15 $n: a verifier and a bootstrap with \$, \$(…), backticks, \\ and ' → rc 0"
+  ok "$(cat "$WT/.v-out" 2>/dev/null)" "it's \$5 in proj-t5" "C15 $n: … expanded by bash -c in the task tree only"
+  has "$(cat "$R/.claude/integration/$SLUG.log")" "== verifier: $SV" "C15 $n: … and the log names the verifier byte for byte"
+  has "$(cat "$R/.claude/integration/$SLUG.log")" "== env_bootstrap: $SB" "C15 $n: … and the bootstrap"
+  rm -f "$WT/.boot2" "$WT/.v-out" "$R/.claude/integration/$SLUG.rc"
+  CLAUDE_PLUGIN_ROOT="$root" $sh -c "$dq" >/dev/null 2>&1
+  ok "$(r=$(cat "$R/.claude/integration/$SLUG.rc" 2>/dev/null); [ "$r" = 0 ] && echo green || echo "red")" red "C15 $n control: the old double-quoted form expands them in the lead's shell → red"
 done
 
 # ======== C16: stamp, usage, an unreachable origin ======================================================

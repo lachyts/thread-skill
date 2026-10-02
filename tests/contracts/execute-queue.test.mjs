@@ -182,12 +182,20 @@ function checkExecute({ skill, hooksJson, exists }) {
     fails.push('clean-path')
   }
 
-  // verify-bound: --timeout in the command; run_in_background with timeout:; rc 124 and a missing rc are red;
-  // env_bootstrap re-runs after the merge.
+  // verify-bound: --timeout in the command; run_in_background with timeout:; rc 124, a TERM's rc 143 and a
+  // missing rc (only a SIGKILL) are red; env_bootstrap re-runs after the merge. The verifier and the bootstrap are
+  // single-quoted (' written '\'') in the verify line and the RACE re-verify alike, so nothing expands in the
+  // lead's shell: a double-quoted form anywhere fails.
   const vline = (skill.match(/^# thread:integration-verify[^\n]*\n([^\n]*)\n# end thread:integration-verify/m) ?? [])[1] ?? ''
+  const raceLine = st4.slice(st4.indexOf('**RACE procedure**'))
+  const sq = (l) => l.includes("--bootstrap '<env_bootstrap>' --verifier '<verifier>'")
   if (!vline.includes('lead-integrate.py verify') || !vline.includes('--timeout 1800') ||
     !verifyP.includes('`run_in_background`') || !verifyP.includes('`timeout: 2400000`') ||
     !verifyP.includes('the rc is 124') || !verifyP.includes('leaves no rc, which reads as red') ||
+    !verifyP.includes('write rc 143; only a SIGKILL leaves no rc') ||
+    !verifyP.includes("**single quotes**, with each `'` in them written as `'\\''`") ||
+    !verifyP.includes('no `$`, `$(…)`, backtick or backslash expands in the lead\'s shell') ||
+    !sq(vline) || !sq(raceLine) || /--(verifier|bootstrap) "</.test(skill) ||
     !verifyP.includes('`env_bootstrap` re-runs after the merge') ||
     !(st3.includes('red, rc 124, a failed bootstrap or a missing rc'))) fails.push('verify-bound')
 
@@ -200,16 +208,29 @@ function checkExecute({ skill, hooksJson, exists }) {
     !st3.includes('`integrated` → step 4') || !st3.includes('`rejected` → the lane frees, step 1.2 launches the seeded revise') ||
     !st3.includes('`max_review_rounds` across those rounds sets it aside')) fails.push('trouble-path')
 
-  // integrate-args: startedAt from stamp at launch; readyAt from ready:; history live, else inputs.
+  // integrate-args: startedAt from stamp at launch; readyAt from ready:; history live, else inputs; the rung's
+  // fallback names a source for each of its five fields, the tier cap from inputs (boolean + string), never the
+  // note's raw tier_capped string.
   if (!st3.includes('`startedAt` a fresh `lead-integrate.py stamp` taken at launch') ||
     !st3.includes("`readyAt` the note's `ready:`") ||
-    !st3.includes('from the approving row when this session holds it, else from `lead-integrate.py inputs`')) {
+    !st3.includes('from the approving row when this session holds it, else from `lead-integrate.py inputs`') ||
+    !st3.includes('else `{model: <§ 3\'s resolved model>, escalated: false, escalatedAt: "", tierCapped: <inputs.tierCapped>, tierCappedAt: <inputs.tierCappedAt>}`') ||
+    !st3.includes('`tierCapped` (a boolean) and `tierCappedAt` (a string) from `lead-integrate.py inputs`') ||
+    !st3.includes("never the note's raw `tier_capped`")) {
     fails.push('integrate-args')
   }
 
-  // set-aside: dependants wait; hand-back for Integration, revise and own; exit 3 integrates again; the exit-4
-  // reason verbatim; no prefix written by hand; lead rows add no log line.
+  // set-aside: dependants wait; hand-back for Integration, revise and own (a PR-less code-writing review note
+  // included); exit 3 integrates again; the exit-4 reason verbatim; no prefix written by hand; lead rows add no
+  // log line; an engine row that sets a task aside (a task call's, an integrate call's review-blocked or
+  // set-aside) gets no lead row.
+  const engineAside = st3.slice(st3.indexOf('review-blocked or `set-aside` →'))
   if (!aside.includes('its dependants wait') || !aside.includes('at Integration: `hand-back` sets `review`') ||
+    !aside.includes('is already reconciled (§ 6): the lead writes no row for it') ||
+    !engineAside.includes('reconcile has already written the engine\'s row') ||
+    !engineAside.includes('the lead writes **no** set-aside row of its own') ||
+    !st2.includes('the lead writes no row of its own') ||
+    !aside.includes('a code-writing `review` note with no `pr:`') ||
     !aside.includes('`revise stopped:` or review-blocked: only after `hand-back`') ||
     !aside.includes('at its own run: `hand-back`') || !aside.includes('exit 3 is not a set-aside: the task integrates again') ||
     !aside.includes('add no `## Integration log` line') ||
@@ -274,8 +295,22 @@ function checkExecute({ skill, hooksJson, exists }) {
       at('background Integration command') < at('starts `gated:`') && at('starts `gated:`') < at('starts `review required:`') &&
       at('starts `review required:`') < at('no Workflow call for this rollout is in flight')) ||
     !hb.includes('BEFORE any stall diagnosis') || !hb.includes('under a merge hold too') || !hb.includes('§4.5 *Lost call*') ||
+    // *Lost call* resumes without re-checking liveness, so clause (3) applies it only to calls no longer in flight.
+    !hb.includes('apply §4.5 *Lost call* to each call this session launched that is no longer in flight in /workflows with no reconciled row (never to a call still in flight') ||
     !hb.includes('`--running`') || !hb.includes('`<out>.rc`') || !hb.includes('merge-task.status') ||
     !hb.includes('work remains') || !hb.includes('§4.5 *Cold resume*') || !hb.includes('skips § 2.7')) fails.push('heartbeat')
+
+  // resume-running: a cold resume and a reinstate pass --running = this session's live task-call slugs, so a
+  // re-invocation in the launching session never reports its own live calls as stalled (Restart routing would send
+  // each to *Lost call*, resuming a running call). `--running ""` appears only with its condition.
+  const cold = labelled(skill, 'Cold resume.')
+  const reinstate = labelled(skill, 'Reinstate (resuming a paused rollout).')
+  const emptyRunning = skill.match(/--running ""/g) ?? []
+  const guardedEmpty = skill.match(/--running ""` only when this session holds no live task call/g) ?? []
+  if (!cold.includes("with `--running` = this session's live task-call slugs") ||
+    !cold.includes('they are running, never stalled, and are never sent to *Restart routing* or *Lost call*') ||
+    !reinstate.includes("the loop with `--running` = this session's live task-call slugs, exactly as there") ||
+    emptyRunning.length !== guardedEmpty.length) fails.push('resume-running')
 
   // heartbeat-register: idempotent, at each loop entry's first waiting turn, whatever the turn launched.
   if (!before(hbPara, '`CronList`', '`CronCreate`') || !/(each|every) loop entry/.test(hbPara) || !hbPara.includes('`state=waiting`') ||
@@ -302,7 +337,7 @@ test('execute § 4.5, its neighbours, the heartbeat and the hook hold every queu
 
 const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lost-call', 'clean-path', 'verify-bound',
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
-  'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver']
+  'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -422,7 +457,47 @@ test('control: the old hook name, or an alias left behind, fails driver', () => 
   only({ exists: (p) => p === 'hooks/wave-stop-driver.py' || real.exists(p) }, 'driver', 'alias')
 })
 
-test('the rules are all named (21) and each has a control', () => {
-  assert.equal(RULES.length, 21)
+test('control: a cold resume with an unconditional empty --running fails resume-running', () => {
+  only(sk("then the loop, an `integrating` task first, with `--running` = this session's live task-call slugs",
+    'then the loop with `--running ""`, an `integrating` task first'), 'resume-running', 'cold resume --running ""')
+})
+
+test('control: a reinstate with an unconditional empty --running fails resume-running', () => {
+  only(sk("the loop with `--running` = this session's live task-call slugs, exactly as there:", 'the loop with `--running ""`:'),
+    'resume-running', 'reinstate --running ""')
+})
+
+test('control: a heartbeat that applies Lost call to every launched call fails heartbeat', () => {
+  only(sk('to each call this session launched that is no longer in flight in /workflows with no reconciled row (never to a call still in flight: *Lost call* resumes without re-checking),',
+    'to each call this session launched,'), 'heartbeat', 'live calls resumed')
+})
+
+test('control: a double-quoted verifier on the verify line fails verify-bound', () => {
+  const v = real.skill.split('\n').find((l) => l.includes('lead-integrate.py verify --tree "<tree>"'))
+  only(sk(v, v.replace("--verifier '<verifier>'", '--verifier "<verifier>"')), 'verify-bound', 'dq verifier')
+})
+
+test('control: a double-quoted RACE re-verify fails verify-bound', () => {
+  only(sk("--bootstrap '<env_bootstrap>' --verifier '<verifier>'` in the background", '--bootstrap "<env_bootstrap>" --verifier "<verifier>"` in the background'),
+    'verify-bound', 'dq race')
+})
+
+test("control: the rung fallback taking the note's tier_capped fails integrate-args", () => {
+  const p = real.skill.split('\n').find((l) => l.startsWith('   **The integrate call**'))
+  const from = p.slice(p.indexOf('else `{model:'), p.indexOf('; `readyAt`'))
+  only(sk(from, 'else the resolved model, `false`, `""` and the note\'s `tier_capped`'), 'integrate-args', 'raw tier_capped')
+})
+
+test('control: a lead row written for an integrate call\'s review-blocked fails set-aside', () => {
+  only(sk('so the lead writes **no** set-aside row of its own', 'so the lead writes its set-aside row'), 'set-aside', 'lead row')
+})
+
+test('control: hand-back with no remedy for a PR-less review note fails set-aside', () => {
+  const l = real.skill.split('\n').find((x) => x.startsWith('- at its own run: `hand-back`'))
+  only(sk(l, '- at its own run: `hand-back` (or `/thread:repair`, p12-11) sets `in_progress`, then *Restart routing*;'), 'set-aside', 'no PR-less remedy')
+})
+
+test('the rules are all named (22) and each has a control', () => {
+  assert.equal(RULES.length, 22)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

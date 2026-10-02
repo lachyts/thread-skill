@@ -15,11 +15,12 @@ Subcommands:
       WT=<repo> (a `stale-ref X` is deleted with `update-ref -d <ref> X`, guarded by X, and the recipe
       re-run: `staleRefDeleted`); TB = merge-base(A, origin/<default>); the record = the note's
       `## Integration log` LAST line when it is `integrated` with a full head and base; case (i) is H == A,
-      case (ii) is record.head == H, anything else routes `trouble []`. In the task tree it aborts a merge left in
-      progress and stashes tracked leftovers (`stashed: integration leftovers <head>`, never discarded);
-      a missing tree, a tree off its branch or one ahead of origin routes `trouble []`, else it
-      fast-forwards only. When B = origin/<default> equals TB (case i) or record.base (case ii) the route
-      is `merge` (no merge commit, no verifier: merge H onto that base). Otherwise it merges B into the
+      case (ii) is record.head == H, anything else routes `trouble []`. When the task tree exists it aborts a
+      merge left in progress and stashes tracked leftovers (`stashed: integration leftovers <head>`, never
+      discarded). When B = origin/<default> equals TB (case i) or record.base (case ii) the route is
+      `merge` (no merge commit, no verifier, no tree needed: merge H onto that base), whatever the tree's
+      state. Otherwise a missing tree, a tree off its branch or one ahead of origin routes `trouble []`;
+      else it fast-forwards the tree only, then merges B into the
       branch (`git merge --no-ff --no-edit -m "Merge origin/<default> into <branch> (Integration)"`, the
       engine's message): a conflict records `conflictFiles`, aborts and routes `trouble ["conflict"]`; any
       other failure aborts and routes `trouble []`; success routes `verify` with `mergeCommit` (unpushed),
@@ -452,13 +453,15 @@ def cmd_prepare(args):
                    + (f"the last Integration record is {last['outcome']}" if last else "no Integration is recorded")
                    + ("" if not record else f" at head {record.get('head')}"))
         return out
+    base = tb if out["case"] == "i" else (record.get("base") or "")
+    # The merge route touches no tree (merge-task merges origin's H onto `base`), so the tree's state is read
+    # only when the lead must merge main into it: an agent runs only for real trouble (ADR 0030 decision 3).
+    if b == base:
+        out.update(route="merge", reason=f"origin/{args.default} has not moved since {'the task base' if out['case'] == 'i' else 'the recorded Integration'}")
+        return out
     bad = _tree_trouble(tree, br)
     if bad:
         out.update(route="trouble", reason=bad)
-        return out
-    base = tb if out["case"] == "i" else (record.get("base") or "")
-    if b == base:
-        out.update(route="merge", reason=f"origin/{args.default} has not moved since {'the task base' if out['case'] == 'i' else 'the recorded Integration'}")
         return out
     p = git(tree, "merge", "--no-ff", "--no-edit", "-m", merge_message(args.default, br), b)
     if p.returncode != 0:
