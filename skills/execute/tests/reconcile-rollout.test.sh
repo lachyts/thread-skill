@@ -22,7 +22,7 @@ mknote() {  # mknote <slug> <status>
 tags:
   - task
 status: $2
-owner: wave-execute-test
+owner: execute-test
 priority: normal
 captured: 2026-06-04
 ---
@@ -56,7 +56,7 @@ check "approved: status review"         "status: review"                        
 check "approved: pr unquoted"           "pr: https://github.com/o/r/pull/1"            "$TMP/task-approved.md"
 check "approved: review_rounds_used"    "review_rounds_used: 1"                        "$TMP/task-approved.md"
 refute "approved: no plan_rounds (0)"   "plan_rounds_used"                             "$TMP/task-approved.md"
-check "approved: pr after owner"        "owner: wave-execute-test"                     "$TMP/task-approved.md"
+check "approved: pr after owner"        "owner: execute-test"                          "$TMP/task-approved.md"
 
 check "revised: status review"          "status: review"                              "$TMP/task-revised.md"
 check "revised: review_rounds_used 3"   "review_rounds_used: 3"                        "$TMP/task-revised.md"
@@ -85,21 +85,14 @@ if [ "$n" -eq 1 ]; then echo "ok   - section not duplicated"; else echo "FAIL - 
 refute "same result: no second run"     "### Run 2 ("                                  "$TMP/task-reviewblocked.md"
 refute "same result: no second run (blocked)" "### Run 2 ("                            "$TMP/task-blocked.md"
 
-echo "== resume-filter (#7: landed tasks excluded) =="
-# task-approved is now status: review (landed); mark one done; the blocked ones must come back.
+echo "== mark-done (post-merge review->done flip) =="
+# task-approved is marked done first (its merge confirmed elsewhere); mark-done on it is then a no-op.
 python3 - "$TMP" <<'PY'
 import sys, pathlib, re
 p = pathlib.Path(sys.argv[1]) / "task-approved.md"
 t = p.read_text().replace("status: review", "status: done", 1)
 p.write_text(t)
 PY
-OUT=$(python3 "$SCRIPT" resume-filter --tasks "task-approved,task-revised,task-blocked,task-planblocked" --tasks-dir "$TMP")
-grep -qx "task-blocked" <<<"$OUT"      && echo "ok   - blocked re-dispatched"      || { echo "FAIL - blocked missing"; fail=1; }
-grep -qx "task-planblocked" <<<"$OUT"  && echo "ok   - plan-blocked re-dispatched" || { echo "FAIL - plan-blocked missing"; fail=1; }
-if grep -qx "task-approved" <<<"$OUT"; then echo "FAIL - done task re-dispatched"; fail=1; else echo "ok   - done task excluded"; fi
-if grep -qx "task-revised" <<<"$OUT"; then echo "FAIL - review task re-dispatched"; fail=1; else echo "ok   - review task excluded"; fi
-
-echo "== mark-done (post-merge review->done flip) =="
 # State here: task-approved=done, task-revised=review, task-blocked=blocked.
 python3 "$SCRIPT" mark-done --tasks "task-revised" --tasks-dir "$TMP" || { echo "FAIL - mark-done exit"; fail=1; }
 check "review task flipped to done"     "status: done"                                 "$TMP/task-revised.md"
@@ -118,32 +111,33 @@ else echo "ok   - mixed call reports the error (exit 1)"; fi
 check "read-only flipped despite mixed" "status: done"                                 "$TMP/task-readonly.md"
 check "plan-blocked untouched"          "status: plan-blocked"                         "$TMP/task-planblocked.md"
 
-echo "== status / resolve / defer (rollout-scoped, /thread:status + /thread:repair) =="
+echo "== status / defer (rollout-scoped, /thread:status + /thread:repair) =="
 cat > "$TMP/st-rollout.md" <<EOF
 ---
 tags: [task, rollout]
 status: open
-protocol_version: 3
+protocol_version: 5
 ---
 
 ## Notes
 EOF
-mklinked() {  # mklinked <slug> <status> <wave> <pr-or-empty>
+mklinked() {  # mklinked <slug> <status> <pr-or-empty> [frontmatter line]
   cat > "$TMP/$1.md" <<EOF
 ---
 tags: [task, Demo]
 status: $2
-wave: $3
 rollout: "[[st-rollout]]"
-$( [ -n "$4" ] && echo "pr: \"$4\"" )
+$( [ -n "$3" ] && echo "pr: \"$3\"" )
+$( [ -n "${4:-}" ] && echo "$4" )
 ---
 
 body $1
 EOF
 }
-mklinked st-a  review         1 "https://github.com/o/r/pull/10"
-mklinked st-ro review         1 ""                                  # read-only style, no pr
-mklinked st-b  review-blocked 2 "https://github.com/o/r/pull/11"
+mklinked st-a  review         "https://github.com/o/r/pull/10"
+# st-ro: read-only style (no pr), and it still carries a legacy wave: line that defer strips.
+mklinked st-ro review         ""                                  'wave: 1'
+mklinked st-b  review-blocked "https://github.com/o/r/pull/11"
 printf '\n## Review-blocked feedback\n\n- needs the value supplied out-of-band\n' >> "$TMP/st-b.md"
 cat > "$TMP/st-foreign.md" <<EOF
 ---
@@ -156,7 +150,6 @@ nope
 EOF
 
 JSON=$(python3 "$SCRIPT" status --rollout "$TMP/st-rollout.md" --tasks-dir "$TMP")
-if grep -q '"merged_through_wave"' <<<"$JSON"; then echo "FAIL - status still reports a wave cursor"; fail=1; else echo "ok   - status: no wave cursor (ADR 0030)"; fi
 grep -q '"slug": "st-ro"' <<<"$JSON"          && echo "ok   - status: read-only task included" || { echo "FAIL - read-only missing"; fail=1; }
 grep -q '"slug": "st-b"' <<<"$JSON"           && echo "ok   - status: blocked task included"   || { echo "FAIL - blocked missing"; fail=1; }
 if grep -q '"slug": "st-foreign"' <<<"$JSON"; then echo "FAIL - foreign rollout leaked"; fail=1; else echo "ok   - status: foreign rollout excluded"; fi
@@ -165,21 +158,12 @@ echo "$JSON" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 assert d['counts']['total'] == 3 and d['counts']['awaitingIntegration'] == 1 and d['counts']['setAside'] == 2, d['counts']
-assert [t['wave'] for t in d['tasks']] == [1, 1, 2], d['tasks']
-" && echo "ok   - status: counts and legacy waves" || { echo "FAIL - status: counts or waves"; fail=1; }
+" && echo "ok   - status: counts" || { echo "FAIL - status: counts"; fail=1; }
 
-# resolve: drift gap-closer (blocked -> done), refuses a non-blocked note
-python3 "$SCRIPT" resolve --tasks "st-b" --tasks-dir "$TMP" || { echo "FAIL - resolve exit"; fail=1; }
-check  "resolve: review-blocked -> done" "status: done"   "$TMP/st-b.md"
-if python3 "$SCRIPT" resolve --tasks "st-a" --tasks-dir "$TMP" >/dev/null 2>&1; then
-  echo "FAIL - resolve accepted a review task"; fail=1
-else echo "ok   - resolve refuses non-blocked (review)"; fi
-check  "resolve: review task untouched"  "status: review" "$TMP/st-a.md"
-
-# defer: pop to backlog (clears wave/rollout), refuses a cross-rollout note
+# defer: pop to backlog (clears rollout:), refuses a cross-rollout note
 python3 "$SCRIPT" defer --tasks "st-ro" --rollout "$TMP/st-rollout.md" --tasks-dir "$TMP" || { echo "FAIL - defer exit"; fail=1; }
 check  "defer: status open"   "status: open" "$TMP/st-ro.md"
-refute "defer: wave cleared"    "wave:"      "$TMP/st-ro.md"
+refute "defer: a legacy wave: cleared" "wave:" "$TMP/st-ro.md"
 refute "defer: rollout cleared" "rollout:"   "$TMP/st-ro.md"
 if python3 "$SCRIPT" defer --tasks "st-foreign" --rollout "$TMP/st-rollout.md" --tasks-dir "$TMP" >/dev/null 2>&1; then
   echo "FAIL - defer accepted a foreign-rollout task"; fail=1
@@ -199,11 +183,6 @@ check  "gate: status gate-pending"      "status: gate-pending"                  
 check  "gate: pending section written"  "## Gated inputs (awaiting sign-off)"        "$TMP/task-gated.md"
 check  "gate: gate bullet carries cap"  "- spend: Replicate API — cap USD 30"        "$TMP/task-gated.md"
 refute "gate: no pr written"            "pr:"                                        "$TMP/task-gated.md"
-
-# resume-filter must NOT auto-redispatch a task awaiting human sign-off (nothing may bypass the gate)
-OUT=$(python3 "$SCRIPT" resume-filter --tasks "task-gated,task-blocked" --tasks-dir "$TMP" 2>/dev/null)
-if grep -qx "task-gated" <<<"$OUT"; then echo "FAIL - gate-pending re-dispatched"; fail=1; else echo "ok   - gate-pending excluded from resume"; fi
-grep -qx "task-blocked" <<<"$OUT" && echo "ok   - blocked still re-dispatched alongside" || { echo "FAIL - blocked missing (gate arm)"; fail=1; }
 
 # a refreshed declaration REPLACES the pending section (no duplicates, no stale gates)
 cat > "$TMP/gate-result2.json" <<EOF
@@ -226,8 +205,6 @@ refute "approve: pending section gone"  "awaiting sign-off"                     
 check  "approve: status in_progress"    "status: in_progress"                        "$TMP/task-gated.md"
 python3 "$SCRIPT" approve-gates --tasks "task-gated" --tasks-dir "$TMP" >/dev/null \
   && echo "ok   - approve: idempotent re-run (exit 0)" || { echo "FAIL - approve re-run errored"; fail=1; }
-OUT=$(python3 "$SCRIPT" resume-filter --tasks "task-gated" --tasks-dir "$TMP")
-grep -qx "task-gated" <<<"$OUT" && echo "ok   - approved task re-dispatchable" || { echo "FAIL - approved task still excluded"; fail=1; }
 if python3 "$SCRIPT" approve-gates --tasks "task-planblocked" --tasks-dir "$TMP" >/dev/null 2>&1; then
   echo "FAIL - approve-gates accepted a non-gated note"; fail=1
 else echo "ok   - approve-gates refuses non-gate-pending"; fi
@@ -239,7 +216,7 @@ cat > "$TMP/pz-rollout.md" <<EOF
 ---
 tags: [task, rollout]
 status: open
-protocol_version: 3
+protocol_version: 5
 paused: 2026-07-18T10:00+10:00
 ---
 
@@ -270,22 +247,20 @@ echo "$JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 i
 # clear-pause: reinstate removes the stamp; idempotent on re-run
 python3 "$SCRIPT" clear-pause --rollout "$TMP/pz-rollout.md" || { echo "FAIL - clear-pause exit"; fail=1; }
 refute "reinstate: paused cleared"           "paused"                 "$TMP/pz-rollout.md"
-check  "reinstate: the rest of the note kept" "protocol_version: 3"   "$TMP/pz-rollout.md"
+check  "reinstate: the rest of the note kept" "protocol_version: 5"   "$TMP/pz-rollout.md"
 python3 "$SCRIPT" clear-pause --rollout "$TMP/pz-rollout.md" >/dev/null \
   && echo "ok   - reinstate: idempotent (exit 0)" || { echo "FAIL - reinstate: second run errored"; fail=1; }
 # clear-pause also clears a pending request (hard-pause-before-honour edge)
 python3 "$SCRIPT" clear-pause --rollout "$TMP/pz-pending.md" >/dev/null || { echo "FAIL - clear-pause pending exit"; fail=1; }
 refute "reinstate: pending request cleared"  "pause_requested"        "$TMP/pz-pending.md"
 
-# the wave verbs are gone with no alias (ADR 0030: no stored cursor)
-for verb in cursor mark-dispatched; do
-  if python3 "$SCRIPT" "$verb" --rollout "$TMP/pz-rollout.md" --wave 1 >/dev/null 2>&1; then
-    echo "FAIL - the $verb verb still exists"; fail=1
-  else echo "ok   - no $verb verb"; fi
+# the retired verbs are gone with no alias (ADR 0030: no stored cursor; resolve and resume-filter lost their
+# last skill reader with the queue)
+for verb in cursor mark-dispatched resolve resume-filter; do
+  out=$(python3 "$SCRIPT" "$verb" --tasks task-blocked --tasks-dir "$TMP" 2>&1); rc=$?
+  if [ "$rc" -ne 0 ] && grep -q "invalid choice" <<<"$out"; then echo "ok   - no $verb verb"
+  else echo "FAIL - the $verb verb still exists (rc $rc)"; fail=1; fi
 done
-if python3 "$SCRIPT" reconcile --result "$TMP/result.json" --tasks-dir "$TMP" --rollout "$TMP/pz-rollout.md" --wave 1 >/dev/null 2>&1; then
-  echo "FAIL - reconcile still takes --wave"; fail=1
-else echo "ok   - no reconcile --wave"; fi
 
 echo "== review-loop memory (ceiling approvals auditable; review-blocked carries full history) =="
 # (the task-reviewblocked case above, whose result has NO reviewHistory, already proves the legacy

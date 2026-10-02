@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # The queue side of reconcile-rollout.py (ADR 0030 decisions 1 and 4, and its no-cursor consequence):
 # `next` (which tasks start), the per-task `started:` / `merged:` / `integrating:` / `ready:` stamps, `status`
-# (queue states, the timeline and the progress line) and `resume` (a merged PR whose note was never
-# marked, p6-8) against a stub gh. Temp notes only; no vault, no network.
+# (queue states, the timeline and the progress line), `resume` (a merged PR whose note was never
+# marked, p6-8) against a stub gh, and the RACE / UNVERIFIED hold on `resume` and `next` (p12-12). Temp
+# notes only; no vault, no network.
 # Usage: bash reconcile-rollout-queue.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -23,7 +24,7 @@ scen() { D="$TMP/$1"; mkdir -p "$D/repo"; echo "== $1"; }
 # mkro <body> [frontmatter lines...] — the rollout note $D/ro.md; <body> is its schedule order and blocks.
 mkro() {
   local body="$1"; shift
-  { printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 3\n'
+  { printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n'
     for l in "$@"; do printf '%s\n' "$l"; done
     printf -- '---\n\n## Notes\n\nProject root: `%s`\n\n%s\n' "$D/repo" "$body"; } > "$D/ro.md"
 }
@@ -169,10 +170,10 @@ J=$(nxt)
 ok "$(q "$J" 'd["start"]')" '["p"]' "next: medium reads as normal"
 
 # ── schedule rank: list items and table rows rank, prose never does ──────────────────────────────
-# The template's wave table escapes its alias pipe (`[[slug\|alias]]`), and a lead's note can mention a
+# The `## Queue` table escapes its alias pipe (`[[slug\|alias]]`), and a lead's note can mention a
 # later task above the list. Neither may reorder the queue.
 scen rank
-mkro $'**Wave 5 re-run:** [[c]] was re-planned, see [[c#Notes]].\n\n| Wave | Task |\n|---|---|\n| 1 | [[a\\|A]] |\n| 2 | [[b#Plan\\|B]] |\n\n```\n- [[d]]\n```\n\n- [[c]]\n1. [[d]]' 'parallel_ceiling: 1'
+mkro $'**Re-run:** [[c]] was re-planned, see [[c#Notes]].\n\n| # | Task |\n|---|---|\n| 1 | [[a\\|A]] |\n| 2 | [[b#Plan\\|B]] |\n\n```\n- [[d]]\n```\n\n- [[c]]\n1. [[d]]' 'parallel_ceiling: 1'
 mkt a open; mkt b open; mkt c open; mkt d open
 J=$(st)
 ok "$(q "$J" '[t["slug"] for t in d["tasks"]]')" '["a","b","c","d"]' "status: rank from table rows and list items, never prose or a code block"
@@ -181,7 +182,7 @@ ok "$(q "$J" 'd["start"]')" '["a"]' "next: the first table row starts first"
 
 # ── overlap tiebreak (in flight and within one call) ─────────────────────────────────────────────
 scen overlap
-mkro $'- [[r]]\n- [[x]]\n- [[y]]\n\n## File-sets\n\n- r (wave 1): src/f1.py\n- x (wave 2): src/f1.py\n- y: src/f2.py' 'parallel_ceiling: 2'
+mkro $'- [[r]]\n- [[x]]\n- [[y]]\n\n## File-sets\n\n- r: src/f1.py\n- x: src/f1.py\n- y: src/f2.py' 'parallel_ceiling: 2'
 mkt r in_progress; mkt x open; mkt y open
 J=$(nxt)
 ok "$(q "$J" 'd["start"]')" '["y"]' "next: y (no overlap with running r) beats earlier-ranked x"
@@ -418,10 +419,12 @@ ok "$(q "$J" 'd["progress"]')" '"progress: 2/6 merged, 1 running, 1 awaiting int
 ok "$(q "$J" 'd["timeline"]')" '{"avgTaskMinutes":45.0,"complete":false,"durationsUsed":2,"elapsedLabel":"2h","elapsedMinutes":120,"firstStarted":"2026-10-02T10:00+00:00","lastMerged":"2026-10-02T11:15+00:00","remainingEstimateMinutes":45,"remainingLabel":"~45m (rough)","tasks":[{"durationMinutes":30,"merged":"2026-10-02T10:30+00:00","slug":"s-a","started":"2026-10-02T10:00+00:00"},{"durationMinutes":60,"merged":"2026-10-02T11:15+00:00","slug":"s-b","started":"2026-10-02T10:15+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-d","started":"2026-10-02T10:20+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-e","started":"2026-10-02T10:40+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-c","started":"2026-10-02T11:00+00:00"}]}' "status: exact timeline"
 ok "$(q "$J" '[t["slug"] for t in d["tasks"]]')" '["s-a","s-b","s-c","s-d","s-e","s-f","s-t","s-x"]' "status: tasks sorted by schedule rank"
 ok "$(q "$J" '{t["slug"]: [t["queueState"], t["setAsideAt"]] for t in d["tasks"]}')" '{"s-a":["merged",null],"s-b":["merged",null],"s-c":["running",null],"s-d":["awaiting-integration",null],"s-e":["set-aside","run"],"s-f":["queued",null],"s-t":["folded",null],"s-x":["other",null]}' "status: queue states"
-ok "$(q "$J" '[t for t in d["tasks"] if t["slug"] == "s-f"][0]')" '{"blockerSummary":"","integrating":null,"merged":null,"pr":null,"priority":"normal","queueState":"queued","setAsideAt":null,"slug":"s-f","solo":true,"started":null,"status":"open","waitingOn":["depends on [[s-e]] (blocked)"],"wave":null}' "status: a queued task's row"
+ok "$(q "$J" '[t for t in d["tasks"] if t["slug"] == "s-f"][0]')" '{"blockerSummary":"","integrating":null,"merged":null,"pr":null,"priority":"normal","queueState":"queued","setAsideAt":null,"slug":"s-f","solo":true,"started":null,"status":"open","waitingOn":["depends on [[s-e]] (blocked)"]}' "status: a queued task's row"
 ok "$(q "$J" '[[t["blockerSummary"], t["priority"]] for t in d["tasks"] if t["slug"] == "s-e"][0]')" '["verifier red: flaky fixture","high"]' "status: blockerSummary is the latest run"
-ok "$(q "$J" 'sorted(set(k for t in d["tasks"] for k in t)) + sorted(k for k in d if k in ("merged_through_wave", "total_waves"))')" \
-  '["blockerSummary","integrating","merged","pr","priority","queueState","setAsideAt","slug","solo","started","status","waitingOn","wave"]' "status: no owner key, no wave cursor"
+ok "$(q "$J" 'sorted(set(k for t in d["tasks"] for k in t))')" \
+  '["blockerSummary","integrating","merged","pr","priority","queueState","setAsideAt","slug","solo","started","status","waitingOn"]' "status: the exact row keys (no owner key)"
+ok "$(q "$J" 'sorted(d)')" \
+  '["ceiling","counts","incomplete","pause_requested","paused","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline"]' "status: the exact top-level keys (no stored cursor)"
 setkey s-d integrating 2026-10-02T11:50+00:00
 printf '\n### Run 2 (2026-10-02T11:30+00:00)\n\nIntegration: conflict in a.py\n\n<!-- run 2 end sha=111111111111 -->\n' >> "$D/s-e.md"
 J=$(st "" 2026-10-02T12:00:00Z)
@@ -490,6 +493,72 @@ ok "$(grep -c "^$D/repo|pr view 7 " "$GHLOG")|$(grep -c "^$D/repo|repo view --js
 ok "$(grep -c 'repo view o/r ' "$GHLOG")" 1 "resume: the default branch is looked up once per repo"
 hasnt "$(cat "$GHLOG")" "pull/10" "resume: a done note is not queried"
 has "$out" "progress: " "resume prints the progress line"
+
+# ── race-hold: an undecided RACE or UNVERIFIED holds `resume` and `next` (status § 3's definitions) ──────
+# h-race hit merge-task's exit 5: the Race log names it (aliased and in another case) and it still reads
+# review + pr: + integrating:. h-unv's merge-task exit 8 ran out and it is set aside at Integration with an
+# UNVERIFIED: reason. Every PR reads MERGED on main (stub gh), so only the hold keeps `resume` off them.
+scen race-hold
+mkdir -p "$D/bin"
+cat > "$D/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr view") printf '{"state":"MERGED","mergedAt":"2026-10-02T13:55:00Z","baseRefName":"main","url":"%s"}\n' "$3" ;;
+  "repo view") echo main ;;
+  *) exit 2 ;;
+esac
+EOF
+chmod +x "$D/bin/gh"
+U=https://github.com/o/r/pull
+mkro $'- [[h-race]]\n- [[h-unv]]\n- [[h-plain]]\n- [[h-done]]\n- [[h-old]]\n- [[h-dep]]\n\n## Race log\n\n- 2026-10-02T13:55+00:00 [[H-Race|the RACE task]] RACE: PR #40 merged as fff on parent ccc at head aaa, not the integrated pair; re-verify it\n- 2026-10-02T09:10+00:00 [[h-done]] RACE: PR #43 merged as ddd; re-verify it\n- 2026-10-02T14:00+00:00 repair: [[h-race]] RACE decided: the merge stands (a decision outside ## Notes)'
+mkt h-race review "pr: $U/40" 'owner: execute-test' 'integrating: 2026-10-02T13:30+00:00'
+mkt h-unv blocked "pr: $U/41" 'owner: execute-test'
+printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-02T13:40+00:00)\n\nintegration: merge-task exit 8 three times: UNVERIFIED: PR #41 merged as eee; not verifiable yet; re-run to verify\n\n<!-- run 1 end sha=000000000000 -->\n' >> "$D/h-unv.md"
+mkt h-plain review "pr: $U/42"
+mkt h-done done "pr: $U/43" 'merged: 2026-10-02T09:30+00:00'
+mkt h-old blocked
+printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-02T10:00+00:00)\n\nintegration: merge-task exit 8 three times: UNVERIFIED: PR #44 merged as 444; re-run to verify\n\n<!-- run 1 end sha=000000000000 -->\n\n### Run 2 (2026-10-02T11:00+00:00)\n\nintegration: merge declined at the --gated hold\n\n<!-- run 2 end sha=111111111111 -->\n' >> "$D/h-old.md"
+mkt h-dep open 'depends-on:' '  - "[[h-race]]"'
+held() { cksum < "$D/h-race.md"; cksum < "$D/h-unv.md"; }
+before=$(held)
+rsm() { python3 "$SCRIPT" resume --rollout "$D/ro.md" --tasks-dir "$D" --gh-bin "$D/bin/gh" --now "$NOW" 2>"$D/err"; }
+notes_line() {  # notes_line <line> — add a line at the top of the rollout's ## Notes
+  python3 - "$D/ro.md" "$1" <<'PY'
+import sys
+p, line = sys.argv[1:]
+t = open(p).read()
+open(p, "w").write(t.replace("## Notes\n\n", "## Notes\n\n" + line + "\n", 1))
+PY
+}
+out=$(rsm); rc=$?
+ok "$rc" 3 "resume: an undecided RACE or UNVERIFIED exits 3"
+ok "$(grep -c '^HOLD: ' "$D/err")" 2 "resume: one HOLD line per held task"
+has "$(cat "$D/err")" 'HOLD: [[h-race]] RACE undecided: no "repair: [[h-race]] RACE decided:" line on ro; /thread:repair [[ro]]' "resume: the RACE HOLD line names the decision and repair"
+has "$(cat "$D/err")" 'HOLD: [[h-unv]] UNVERIFIED undecided:' "resume: the UNVERIFIED HOLD line"
+ok "$(held)" "$before" "resume: both held notes are byte-identical"
+ok "$(fm h-plain status)" "status: done" "resume: the plain merged PR is flipped done"
+hasnt "$(cat "$D/err")" "h-done" "resume: a done Race-log task is no hold"
+hasnt "$(cat "$D/err")" "h-old" "resume: UNVERIFIED only in an older run is no hold"
+J=$(nxt --running "")
+ok "$(q "$J" '[d["integrating"], d["awaitingIntegration"], d["start"], d["restart"]]')" '[[],[],[],[]]' "next: neither held task integrates, and nothing starts"
+ok "$(q "$J" 'd["setAside"]')" '[{"setAsideAt":"race","slug":"h-race","status":"review"},{"setAsideAt":"race","slug":"h-unv","status":"blocked"},{"setAsideAt":"integration","slug":"h-old","status":"blocked"}]' "next: both held tasks are set aside at race; an older UNVERIFIED stays at integration"
+ok "$(q "$J" 'd["raceHold"]')" '[{"kind":"RACE","slug":"h-race"},{"kind":"UNVERIFIED","slug":"h-unv"}]' "next: raceHold in rank order with its kind"
+ok "$(q "$J" "$holds")" '{"h-dep":"depends on [[h-race]] (review)"}' "next: the dependant waits on the held task"
+ok "$(q "$J" 'd["halt"]')" '"stuck"' "next: nothing can start -> stuck"
+J=$(st)
+ok "$(q "$J" '{t["slug"]: [t["queueState"], t["setAsideAt"]] for t in d["tasks"] if t["slug"] in ("h-race", "h-unv")}')" '{"h-race":["integrating",null],"h-unv":["set-aside","integration"]}' "status: reports the stored state (status § 3 renders the RACE)"
+# One decided (the aliased form, in ## Notes): it flips; the other is still held.
+notes_line '- 2026-10-02 repair: [[H-RACE|R]] RACE decided: the merge stands'
+out=$(rsm); rc=$?
+ok "$rc" 3 "resume: one decided, one not -> still exit 3"
+ok "$(grep -c '^HOLD: ' "$D/err")|$(grep -c 'h-unv' "$D/err")" "1|1" "resume: … naming only the undecided one"
+ok "$(fm h-race status)" "status: done" "resume: the decided RACE flips done"
+notes_line '- 2026-10-02 repair: [[h-unv]] RACE decided: re-verified by hand, the merge stands'
+out=$(rsm); rc=$?
+ok "$rc" 0 "resume: both decided -> exit 0"
+ok "$(fm h-unv status)" "status: done" "resume: the decided UNVERIFIED flips done"
+J=$(nxt --running "")
+ok "$(q "$J" 'd["raceHold"]')" '[]' "next: no raceHold once both are decided"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-queue: ALL PASS"; else echo "reconcile-rollout-queue: FAILED"; fi

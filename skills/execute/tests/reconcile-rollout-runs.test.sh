@@ -30,7 +30,7 @@ cat > "$D/ro.md" <<'EOF'
 ---
 tags: [task, rollout]
 status: open
-protocol_version: 3
+protocol_version: 5
 ---
 
 ## Notes

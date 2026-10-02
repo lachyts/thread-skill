@@ -44,7 +44,7 @@ Subcommands:
               (and stamps `merged:`) on approval.
 
   hand-back   A set-aside task re-enters the queue at the stage it stopped (ADR 0030 decision 4; the lead's
-              *Set aside* and "retry [[task]]", and /thread:repair's hand-off, p12-11). A `blocked` note set
+              *Set aside* and "retry [[task]]", and /thread:repair § 4's hand-off). A `blocked` note set
               aside at Integration (its latest `## Blocker diagnosis` run starts `integration:`) with a `pr:`
               goes back to `status: review` with `ready:` restamped (it rejoins the Integration queue); a
               `blocked`, `review-blocked` or `plan-blocked` note set aside at its run, and a code-writing
@@ -68,11 +68,10 @@ Subcommands:
   resume      A task whose PR merged but whose note was never marked (p6-8): for each linked note that
               is not done, merged or dropped and carries `pr:`, ask gh for the PR's state and base. A PR
               MERGED into the repo's default branch flips the note to done with `merged:` from mergedAt.
-              Anything else (merged into another base, OPEN, CLOSED) is reported and left alone.
-
-  resume-filter  Given task slugs, print (one per line) the slugs that still need dispatch — i.e. whose
-              current note status is NOT already landed/approved ({done, review, merged}). gate-pending
-              notes are excluded too (they await a human sign-off).
+              Anything else (merged into another base, OPEN, CLOSED) is reported and left alone. A task an
+              undecided RACE or UNVERIFIED holds (Race holds, below) is skipped before any gh call: one
+              stderr `HOLD:` line names it and `/thread:repair`, the note is untouched, and the verb exits
+              3 (which takes precedence over 1; ERROR lines still print).
 
   status      Read-only situational scan for /thread:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
@@ -87,13 +86,8 @@ Subcommands:
               Each line is the argument list for `reconcile-project.py <line> --kinds phase --apply`,
               so only phases this rollout touched are ever closed.
 
-  resolve     Flip a *blocked* task (review-blocked/blocked/plan-blocked) -> done. The gap-closer for
-              the drift case (a blocked note whose PR actually merged out-of-band). Refuses any note
-              that isn't in a blocked state — the CALLER (the /thread:repair skill) must have verified
-              the work truly landed (e.g. `gh pr view` shows MERGED) before invoking. Idempotent.
-
-  defer       Pop task(s) out of a rollout, back to open backlog: clears `wave:`/`rollout:`/`owner:` and
-              the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:` stamps (first-start-wins would otherwise carry a
+  defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
+              and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:` stamps (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
               re-plans them. The dependent-closure safety check lives in the /thread:repair skill.
 
@@ -108,7 +102,9 @@ Subcommands:
               `[written: <n>]` or `(dry-run)`. --dry-run previews and needs no --to. Refuses (exit 2,
               nothing written, one ERROR line): a --from that is missing, unparseable, not tagged `rollout`,
               done or dropped (unless done with `superseded_by:` naming --to: a re-run), or neither paused
-              nor never started; a --to that is missing, not directly in the tasks dir, untagged, done or
+              nor never started; a --from with a task an undecided RACE or UNVERIFIED holds (--dry-run
+              included; the line names each held slug and `/thread:repair [[<from>]]`); a --to that is
+              missing, not directly in the tasks dir, untagged, done or
               dropped, whose `supersedes:` does not name --from, that is --from, or that is not never
               started; no --to without --dry-run. A failed save is exit 1 at once: the prior note is still
               open, so the next unfinished-rollout check pairs the two notes as interrupted.
@@ -150,13 +146,23 @@ Queue states (one per linked task, re-read on every call):
                                                  `gate` for gate-pending, otherwise `run`
   merged (an affine tombstone)                -> folded, outside N
   anything else (dropped, parked)             -> other, outside N
+  an undecided RACE / UNVERIFIED (next only)  -> set-aside at race (Race holds, below)
+
+Race holds (_race_holds, read by `resume`, `next` and `carry`; status § 3's definitions): RACE is a linked
+note not done, merged or dropped whose slug a wikilink names on a line of the rollout's `## Race log` (any
+alias, heading or escaped pipe; any case). UNVERIFIED is a set-aside note whose latest run (`blockerSummary`)
+carries `UNVERIFIED:`. RACE wins when both apply. Either is lifted only by a line in the rollout's `## Notes`
+section matching `repair: [[<slug>]] RACE decided:` (an alias allowed, any case): main holds a combination
+nobody verified, and only Lachy's recorded decision releases it. `next` re-reads a held task that has not
+landed as set-aside at `race` (so it never starts, restarts or integrates, and its dependants wait) and lists
+it under `raceHold`; `status` reports the stored state, which status § 3 renders as a RACE itself.
 
 Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
 session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
-`pause_requested`, `completed:`, any valued `wave_<n>_dispatched:` / `wave_<n>_merged:`,
-`merged_through_wave:` above 0, or a `## Pause log` / `## Completion log` heading line. On a linked task note:
+`pause_requested`, `completed:`, or a `## Pause log` / `## Completion log` heading line. On a linked task note:
 a non-empty `owner:` or `integrating:`. A task's status and its `started:` / `ready:` / `merged:` stamps never
-count, because a carry keeps them.
+count, because a carry keeps them. A protocol-3 run shows through the `owner:` its engine stamped on each task
+at dispatch.
 
 Incomplete (incomplete, read by `next`, `status` and unfinished-rollout.py): a never-started rollout that must
 not run as written. The first that applies:
@@ -235,9 +241,6 @@ from pathlib import Path
 
 DEFAULT_TASKS_DIR = Path(os.path.expanduser("~/repos/obsidian/Work/Tasks"))
 
-# Statuses that count as "already landed/approved" — never re-dispatched on resume (finding #7).
-LANDED_STATUSES = {"done", "review", "merged"}
-
 # Which workflow statuses carry a PR to record.
 STATUS_WITH_PR = {"review", "review-blocked"}
 
@@ -249,8 +252,8 @@ BLOCKED_SECTIONS = {
 }
 
 # Gated inputs (ADR 0008): a task the engine paused for human sign-off of declared gates. Deliberately
-# NOT in BLOCKED_SECTIONS — `resolve` must never flip an unsigned gate to done, and resume-filter must
-# never auto-redispatch one (only approve-gates makes it dispatchable again).
+# NOT in BLOCKED_SECTIONS: `next` never starts or restarts one, and only approve-gates makes it startable
+# again.
 GATE_PENDING_STATUS = "gate-pending"
 GATE_PENDING_SECTION = "## Gated inputs (awaiting sign-off)"
 APPROVED_GATES_SECTION = "## Approved gates"
@@ -291,7 +294,7 @@ RUN_END_RE = re.compile(r"^<!-- run (\d+) end sha=([0-9a-f]{12}) -->\s*$")
 # match a heading on its stripped text), and anything shaped like a run end marker.
 STRUCTURAL_HEADING_RE = re.compile(r"^([ \t]*)(#{1,3})(?=[ \t]|$)")
 RUN_END_LIKE_RE = re.compile(r"^<!-- run \d+ end\b")
-FILESET_RE = re.compile(r"^\s*[-*]\s+(?P<slug>[^\s:]+?)(?:\s+\(wave\s+\d+\))?\s*:\s*(?P<files>.*)$")
+FILESET_RE = re.compile(r"^\s*[-*]\s+(?P<slug>[^\s:]+?)\s*:\s*(?P<files>.*)$")
 WIKILINK_RE = re.compile(r"\[\[([^\]]+?)\]\]")
 # A wikilink's target up to its alias, heading or block anchor. A table cell escapes the alias pipe
 # (`[[slug\|alias]]`), so the backslash ends the target too (as in reconcile-project.py).
@@ -975,7 +978,6 @@ def _queue_state(note):
     return "other", None
 
 
-WAVE_MARK_RE = re.compile(r"^(wave_\d+_(?:dispatched|merged)):(.*)$")
 STARTED_HEADINGS = ("## Pause log", "## Completion log")
 
 
@@ -988,22 +990,16 @@ def _valued(value) -> bool:
 def never_started(rollout_note, linked):
     """(True, '') when no execute session has run this rollout, else (False, reason). Only execute's own
     marks count (the module docstring's "Never started"): the rollout note's `paused:`, truthy
-    `pause_requested`, `completed:`, valued `wave_<n>_dispatched:` / `wave_<n>_merged:`, a
-    `merged_through_wave:` above 0, a `## Pause log` or `## Completion log` heading; a linked task note's
+    `pause_requested`, `completed:`, a `## Pause log` or `## Completion log` heading; a linked task note's
     non-empty `owner:` or `integrating:` (`linked` is `_scan`'s list of (path, Note)). A task's status and
-    its started:/ready:/merged: stamps never count, so a freshly carried rollout is still never started."""
+    its started:/ready:/merged: stamps never count, so a freshly carried rollout is still never started. A
+    protocol-3 run shows through the `owner:` its engine stamped on each task at dispatch."""
     if _valued(rollout_note.get("paused")):
         return False, f"it carries paused: {_scalar(rollout_note.get('paused'))}"
     if _truthy_flag(rollout_note.get("pause_requested")):
         return False, "it carries pause_requested"
     if _valued(rollout_note.get("completed")):
         return False, f"it carries completed: {_scalar(rollout_note.get('completed'))}"
-    for line in rollout_note._fm:
-        m = WAVE_MARK_RE.match(line)
-        if m and _valued(m.group(2)):
-            return False, f"it carries {m.group(1)}: {_scalar(m.group(2))}"
-    if (_int_field(rollout_note.get("merged_through_wave"), 0) or 0) > 0:
-        return False, f"it carries merged_through_wave: {_scalar(rollout_note.get('merged_through_wave'))}"
     for heading in STARTED_HEADINGS:
         if rollout_note.has_heading(heading):
             return False, f"it has a {heading} section"
@@ -1087,7 +1083,7 @@ def _unsatisfied(row, index):
 
 def _file_sets(rollout_note):
     """slug (lowercased) -> planned files, from the rollout's `## File-sets` lines
-    (`- <slug>[ (wave N)]: a, b`). A task with no line plans no files (overlap 0)."""
+    (`- <slug>: a, b`). A task with no line plans no files (overlap 0)."""
     found = rollout_note._section_bounds("## File-sets")
     out = {}
     if found is None:
@@ -1105,8 +1101,7 @@ def _file_sets(rollout_note):
 
 def _schedule_positions(rollout_note):
     """slug (lowercased) -> the ordinal of its first wikilink on a list-item or table-row line of the
-    rollout body (the `## Queue` table, a legacy wave table or Tasks by wave, a queue list), outside
-    fenced code. Prose never ranks,
+    rollout body (the `## Queue` table or a queue list), outside fenced code. Prose never ranks,
     so a note the lead adds above the list mid-rollout cannot reorder the queue."""
     pos, i, fenced = {}, 0, False
     for line in rollout_note._body.split("\n"):
@@ -1132,14 +1127,13 @@ def _rows(rollout_path: Path, rollout_note, tasks_dir: Path):
     for path, note in linked:
         slug = path.stem
         state, set_aside_at = _queue_state(note)
-        wave = _int_field(note.get("wave"), None)
         pos = positions.get(slug.lower())
-        # Schedule rank: listed tasks by position, then unlisted ones by legacy wave, then slug.
-        rank = (0, pos, "") if pos is not None else (1, wave if wave is not None else 10 ** 9, slug.lower())
+        # Schedule rank: listed tasks by position, then unlisted ones by slug.
+        rank = (0, pos, "") if pos is not None else (1, 0, slug.lower())
         priority = _priority(note)
         rows.append({
             "slug": slug, "path": path, "note": note, "state": state, "setAsideAt": set_aside_at,
-            "status": _scalar(note.get("status")) or None, "pr": _pr(note) or None, "wave": wave,
+            "status": _scalar(note.get("status")) or None, "pr": _pr(note) or None,
             "priority": priority, "weight": PRIORITY_WEIGHTS[priority], "solo": _truthy_flag(note.get("solo")),
             "files": file_sets.get(slug.lower(), []), "rank": rank, "deps": _dep_entries(note),
             "started": _scalar(note.get("started")) or None, "merged": _scalar(note.get("merged")) or None,
@@ -1150,6 +1144,43 @@ def _rows(rollout_path: Path, rollout_note, tasks_dir: Path):
 
 def _rank(row):
     return row["rank"]
+
+
+# ---- race holds (status § 3's definitions) -------------------------------------
+
+RACE_LOG_SECTION = "## Race log"
+NOTES_SECTION = "## Notes"
+# Lachy's recorded decision: `repair: [[<slug>]] RACE decided:`, matched on the link's target (an alias, a
+# heading or a table-escaped pipe after it is allowed).
+RACE_DECIDED_RE = re.compile(r"repair:\s*\[\[([^\]|#^\\]+)[^\]]*\]\]\s*RACE decided:", re.I)
+UNVERIFIED_MARK = "UNVERIFIED:"
+
+
+def _race_holds(rollout_note, linked):
+    """{slug_lower: (slug, kind)} for every linked task an undecided RACE or UNVERIFIED holds (the module
+    docstring's "Race holds"). RACE: a note not done, merged or dropped whose slug a wikilink names on a line
+    of the rollout's `## Race log`. UNVERIFIED: a set-aside note whose latest run (_blocker_summary) carries
+    `UNVERIFIED:`. RACE wins when both apply. A `repair: [[<slug>]] RACE decided:` line in the rollout's
+    `## Notes` lifts either; a decision recorded anywhere else never does. `linked` is _scan's (path, Note)
+    list. Read by `resume`, `next` and `carry`."""
+    raced = set()
+    for line in rollout_note.section_text(RACE_LOG_SECTION).split("\n"):
+        for m in WIKILINK_OPEN_RE.finditer(line):
+            slug = (_wikilink_slug(m.group(1)) or "").lower()
+            if slug:
+                raced.add(slug)
+    decided = {(_wikilink_slug(m.group(1)) or "").lower()
+               for m in RACE_DECIDED_RE.finditer(rollout_note.section_text(NOTES_SECTION))}
+    holds = {}
+    for path, note in linked:
+        key = path.stem.lower()
+        if key in decided:
+            continue
+        if key in raced and _status(note) not in FINISHED_STATUSES:
+            holds[key] = (path.stem, "RACE")
+        elif _queue_state(note)[0] == "set-aside" and UNVERIFIED_MARK in _blocker_summary(note):
+            holds[key] = (path.stem, "UNVERIFIED")
+    return holds
 
 
 def _ceiling(rollout_note):
@@ -1412,7 +1443,10 @@ def cmd_reconcile(args) -> int:
 
 def cmd_next(args) -> int:
     """Which tasks start now (ADR 0030 decision 1). Pure function of the notes, except that a drained
-    soft pause is stamped (`paused:`) here."""
+    soft pause is stamped (`paused:`) here. A task an undecided RACE or UNVERIFIED holds (_race_holds) and
+    that has not landed is re-read as set-aside at `race`: it never starts, restarts or integrates, is never
+    a seeded revise (those are set aside at `run`), and its dependants wait. `raceHold` lists each, in rank
+    order, with its kind; the counts and the progress line are the re-read rows'."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.exists():
         print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
@@ -1431,6 +1465,13 @@ def cmd_next(args) -> int:
         print(f"ERROR: {rollout_path.stem} is incomplete: {why}: never run it as written; supersede it with "
               f"/thread:schedule {project} --regenerate", file=sys.stderr)
         return 1
+    race = _race_holds(rollout_note, [(r["path"], r["note"]) for r in rows])
+    race_hold = []
+    for r in sorted(rows, key=_rank):
+        held = race.get(r["slug"].lower())
+        if held and not _landed(r["note"]):
+            r["state"], r["setAsideAt"] = "set-aside", "race"
+            race_hold.append({"slug": r["slug"], "kind": held[1]})
     by_state = {}
     for r in sorted(rows, key=_rank):
         by_state.setdefault(r["state"], []).append(r)
@@ -1535,6 +1576,7 @@ def cmd_next(args) -> int:
         "integrating": slugs(integrating),
         "setAside": [{"slug": r["slug"], "status": r["status"], "setAsideAt": r["setAsideAt"]}
                      for r in by_state.get("set-aside", [])],
+        "raceHold": race_hold,
         "paused": paused,
         "pauseRequested": pause_requested,
         "pausedNow": paused_now,
@@ -1737,18 +1779,28 @@ def _project_root(rollout_note):
 def cmd_resume(args) -> int:
     """Mark done every linked task whose PR MERGED into the repo's default branch but whose note was
     never marked (an in_progress, review or set-aside note). Checks state AND base: a PR merged into a
-    stacked or other branch is not landed."""
+    stacked or other branch is not landed. A task an undecided RACE or UNVERIFIED holds (_race_holds) is
+    skipped before any gh call, with one stderr `HOLD:` line naming it and `/thread:repair`: main holds a
+    combination nobody verified, and only Lachy's `RACE decided:` line releases it. Exit 3 when any task
+    was held (ahead of exit 1 for an error; ERROR lines still print), else 1 on an error, else 0."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.exists():
         print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
         return 1
     now = _now(args)
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
-    root = _project_root(Note(rollout_path))
-    defaults, errors = {}, []
-    for path, note in _linked_task_notes(rollout_path, tasks_dir):
+    rollout_note = Note(rollout_path)
+    root = _project_root(rollout_note)
+    linked = _linked_task_notes(rollout_path, tasks_dir)
+    race = _race_holds(rollout_note, linked)
+    defaults, errors, held = {}, [], []
+    for path, note in linked:
         slug, status, pr = path.stem, _status(note), _pr(note)
         if status in FINISHED_STATUSES or not pr:
+            continue
+        if slug.lower() in race:
+            held.append(f"HOLD: [[{slug}]] {race[slug.lower()][1]} undecided: no \"repair: [[{slug}]] RACE decided:\" "
+                        f"line on {rollout_path.stem}; /thread:repair [[{rollout_path.stem}]]")
             continue
         url, num = PR_URL_RE.match(pr), PR_NUM_RE.match(pr)
         if url:
@@ -1797,36 +1849,11 @@ def cmd_resume(args) -> int:
         note.save(dry_run=args.dry_run)
         print(f"{slug}: status={status or 'none'}->done (PR {ref} merged into {default})" + _flag(args, note))
     print(_progress_for(rollout_path, tasks_dir, now))
+    for line in held:
+        print(line, file=sys.stderr)
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
-    return 1 if errors else 0
-
-
-# ---- resume-filter ----------------------------------------------------------
-
-def cmd_resume_filter(args) -> int:
-    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
-    slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
-    to_dispatch = []
-    for slug in slugs:
-        path = tasks_dir / f"{slug}.md"
-        if not path.exists():
-            # A slug with no note can't be resumed from status — surface it but still re-dispatch.
-            print(f"WARN: {slug}: note not found at {path} — including for dispatch", file=sys.stderr)
-            to_dispatch.append(slug)
-            continue
-        status = Note(path).get("status")
-        if status == GATE_PENDING_STATUS:
-            # Awaiting a human sign-off (ADR 0008) — auto-resume (heartbeat included) must never burn a
-            # dispatch on, or bypass, a pending gate. approve-gates flips it back to dispatchable.
-            print(f"WARN: {slug}: gate-pending (gated inputs await human sign-off) — excluded from "
-                  f"dispatch; run approve-gates after the sign-off", file=sys.stderr)
-            continue
-        if status not in LANDED_STATUSES:
-            to_dispatch.append(slug)
-    for slug in to_dispatch:
-        print(slug)
-    return 0
+    return 3 if held else 1 if errors else 0
 
 
 # ---- status -----------------------------------------------------------------
@@ -1857,7 +1884,6 @@ def cmd_status(args) -> int:
     timeline = _timeline(rows, counts, ceiling, now)
     tasks = [{
         "slug": r["slug"],
-        "wave": r["wave"],
         "status": r["status"],
         "queueState": r["state"],
         "setAsideAt": r["setAsideAt"],
@@ -1915,44 +1941,6 @@ def cmd_touched_phases(args) -> int:
     return 0
 
 
-# ---- resolve ----------------------------------------------------------------
-
-# Only a *blocked* note is resolvable to done out-of-band (the drift gap-closer). `review` -> done is
-# mark-done's job; open/in_progress means the task never landed and must not be masked.
-RESOLVABLE_STATUSES = set(BLOCKED_SECTIONS.keys())  # review-blocked, blocked, plan-blocked
-
-
-def cmd_resolve(args) -> int:
-    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
-    slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
-    errors = []
-    for slug in slugs:
-        path = tasks_dir / f"{slug}.md"
-        if not path.exists():
-            errors.append(f"{slug}: task note not found at {path}")
-            continue
-        try:
-            note = Note(path)
-        except ValueError as e:
-            errors.append(str(e))
-            continue
-        status = note.get("status")
-        if status == "done":
-            print(f"{slug}: already done [no-change]")
-            continue
-        if status not in RESOLVABLE_STATUSES:
-            errors.append(
-                f"{slug}: status is {status!r}, not a blocked status "
-                f"({'/'.join(sorted(RESOLVABLE_STATUSES))}) — refusing to resolve")
-            continue
-        note.set("status", "done")
-        note.save(dry_run=args.dry_run)
-        print(f"{slug}: status={status}->done" + (" (dry-run)" if args.dry_run else " [written]"))
-    for e in errors:
-        print(f"ERROR: {e}", file=sys.stderr)
-    return 1 if errors else 0
-
-
 # ---- defer ------------------------------------------------------------------
 
 def cmd_defer(args) -> int:
@@ -1979,7 +1967,8 @@ def cmd_defer(args) -> int:
         for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready", GATES_SIGNED_KEY):
             note.remove(key)
         note.save(dry_run=args.dry_run)
-        print(f"{slug}: deferred->open (wave/rollout/owner and started/merged/integrating/ready/{GATES_SIGNED_KEY} cleared)" +
+        print(f"{slug}: deferred->open (rollout/owner and started/merged/integrating/ready/{GATES_SIGNED_KEY} cleared, "
+              "a legacy `wave:` included)" +
               (" (dry-run)" if args.dry_run else " [written]"))
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
@@ -2041,6 +2030,11 @@ def cmd_carry(args) -> int:
     if not fresh and not _valued(src_note.get("paused")):
         return refuse(f"--from {src.stem} has run and is not paused ({why}): only a paused or never-started "
                       "rollout is superseded")
+    held = _race_holds(src_note, linked)
+    if held:
+        names = ", ".join(f"[[{slug}]] ({kind})" for slug, kind in sorted(held.values(), key=lambda h: h[0].lower()))
+        return refuse(f"--from {src.stem} holds an undecided RACE or UNVERIFIED: {names}: record Lachy's decision "
+                      f"first with /thread:repair [[{src.stem}]]")
     if dst is not None:
         if dst.stem.lower() == src.stem.lower() or (dst.exists() and dst.resolve() == src.resolve()):
             return refuse(f"--to is --from ({src.stem}): a rollout never carries into itself")
@@ -2257,18 +2251,14 @@ def main() -> int:
     li.add_argument("--dry-run", action="store_true")
     li.set_defaults(func=cmd_log_integration)
 
-    rs = sub.add_parser("resume", help="mark done every linked task whose PR merged into the default branch (p6-8)")
+    rs = sub.add_parser("resume", help="mark done every linked task whose PR merged into the default branch (p6-8); "
+                                       "skip and report a held RACE / UNVERIFIED (exit 3)")
     rs.add_argument("--rollout", required=True, help="path to the rollout note")
     rs.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     rs.add_argument("--gh-bin", default="gh", help="the gh executable (tests pass a stub)")
     rs.add_argument("--now", type=_iso_arg, default=None, help=now_help)
     rs.add_argument("--dry-run", action="store_true")
     rs.set_defaults(func=cmd_resume)
-
-    f = sub.add_parser("resume-filter", help="print the slugs that still need dispatch")
-    f.add_argument("--tasks", required=True, help="comma-separated task slugs")
-    f.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
-    f.set_defaults(func=cmd_resume_filter)
 
     s = sub.add_parser("status", help="emit JSON situational report for a rollout (read-only; /thread:status)")
     s.add_argument("--rollout", required=True, help="path to the rollout note")
@@ -2280,12 +2270,6 @@ def main() -> int:
     tp.add_argument("--rollout", required=True, help="path to the rollout note")
     tp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     tp.set_defaults(func=cmd_touched_phases)
-
-    rv = sub.add_parser("resolve", help="flip a *blocked* task -> done (drift gap-closer; caller must verify the PR merged)")
-    rv.add_argument("--tasks", required=True, help="comma-separated task slugs (must be in a blocked status)")
-    rv.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
-    rv.add_argument("--dry-run", action="store_true")
-    rv.set_defaults(func=cmd_resolve)
 
     df = sub.add_parser("defer", help="pop task(s) out of a rollout back to open backlog (/thread:repair)")
     df.add_argument("--tasks", required=True, help="comma-separated task slugs to defer")
