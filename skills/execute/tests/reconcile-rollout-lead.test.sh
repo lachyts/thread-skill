@@ -184,6 +184,107 @@ li c 2026-10-02T12:30+00:00 "${A:0:39}" "$H" "$B"; ok "$rc|$(cat "$D/c.md")" "1|
 li c 2026-10-02T12:30+00:00 "$A" "$(printf 'G%.0s' $(seq 40))" "$B"; ok "$rc|$(cat "$D/c.md")" "1|$before" "log-integration refuses a non-hex head"
 li c "yesterday" "$A" "$H" "$B"; ok "$rc|$(cat "$D/c.md")" "1|$before" "log-integration refuses a non-ISO --started"
 
+# ── approve-gates routes by the stage the gate stopped (p12-14; the p12-16 pairing rule) ─────────────
+# A gate-pending note's stage is the `## Integration log`'s LAST line paired with its status: `set-aside`
+# (with a pr:) is a stop at Integration -> review, ready: restamped, rejoining the Integration queue; anything
+# else (a seeded revise's `rejected`, no log) -> in_progress, then Restart routing. `lead-integrate.py inputs`
+# reads the same pair, so its resumeAt must agree with where approve-gates sends the note.
+LI="$HERE/../scripts/lead-integrate.py"
+G='spend: Replicate API — cap USD 30'
+ag() { out=$(python3 "$SCRIPT" approve-gates --tasks "$1" --tasks-dir "$D" --date 2026-10-02 --now "${2:-2026-10-03T09:00:00Z}" 2>&1); rc=$?; }
+inp() { python3 "$LI" inputs --note "$D/$1.md" --max-review-rounds 4 --repo "$D/repo"; }
+# An integrate call's gate-pending row: the integrator stopped for G (outcome set-aside, gatedInputs).
+grow() {  # grow <slug> <outcome> <status> [gates json]
+  python3 -c 'import json,sys; s,o,st,g=sys.argv[1:5]; a="a"*40
+print(json.dumps({"rolloutSlug":"ro","tasks":[{"slug":s,"scope":"cross-cutting","status":st,"prUrl":"https://github.com/o/r/pull/7",
+  "blockerDiagnosis":("integration: gated inputs await human sign-off" if o=="set-aside" else "revise: rejected at Integration re-review — revise on the branch, then re-integrate"),
+  "reviewHistory":[{"round":1,"feedback":["fix it"]}],"gatedInputs":json.loads(g),
+  "integration":{"outcome":o,"path":"integrator","anchor":{"headSha":a},"headSha":"b"*40,"baseSha":"c"*40,"triggers":[],
+  "metrics":{"startedAt":"2026-10-02T10:00+00:00","waitMinutes":1,"durationMinutes":2}}}]}))' "$1" "$2" "$3" "${4:-[]}"
+}
+own_gate() {  # own_gate <slug>: a task call (own or seeded revise) that stopped for G, no integration key
+  python3 -c 'import json,sys; print(json.dumps({"rolloutSlug":"ro","tasks":[{"slug":sys.argv[1],"scope":"cross-cutting","status":"gate-pending","prUrl":"","gatedInputs":[sys.argv[2]],"blockerDiagnosis":"gated inputs await human sign-off"}]}))' "$1" "$G"
+}
+
+scen gate-stage
+mkro
+# (a) stopped at Integration: a review note with a PR, its integrate call gate-pending (log line set-aside)
+mkt a review "pr: $PR" 'ready: 2026-10-01T08:00+00:00' 'integrating: 2026-10-02T10:00+00:00'
+rec "$(grow a set-aside gate-pending "[\"$G\"]")"
+# (b) stopped in a seeded revise: an Integration rejection (log line rejected), then the revise gate-pending
+mkt b review "pr: $PR" 'ready: 2026-10-01T08:00+00:00'
+rec "$(grow b rejected blocked)"
+rec "$(own_gate b)"
+# (c) stopped in its own call: no Integration log
+mkt c in_progress
+rec "$(own_gate c)"
+for s in a b c; do ok "$(fm "$s" status)" "status: gate-pending" "fixture: $s is gate-pending"; done
+ok "$(awk '/^## Integration log/{on=1; next} /^## /{on=0} on && NF' "$D/a.md" | cut -d' ' -f2)" "set-aside" "fixture: a's last log line is set-aside"
+ok "$(awk '/^## Integration log/{on=1; next} /^## /{on=0} on && NF' "$D/b.md" | tail -n 1 | cut -d' ' -f2)" "rejected" "fixture: b's last log line is rejected"
+ok "$(fm a integrating)" "<none>" "fixture: reconcile removed a's integrating:"
+# parity, before approval: inputs says Integration exactly where approve-gates will write review
+ok "$(q "$(inp a)" '[d["resumeAt"], bool(d["pr"])]')" '["integration",true]' "parity: inputs reads a as stopped at Integration (with a pr)"
+ok "$(q "$(inp b)" 'd["resumeAt"]')" '"revise"' "parity: inputs reads b as a seeded revise"
+ok "$(q "$(inp c)" 'd["resumeAt"]')" '"own"' "parity: inputs reads c as its own call"
+for s in a b c; do
+  P=$(q "$(inp "$s")" 'd["resumeAt"] == "integration" and bool(d["pr"])')
+  ag "$s"
+  ok "$rc" 0 "approve-gates $s: exits 0"
+  ok "$P|$(fm "$s" status)" "$([ "$P" = true ] && echo 'true|status: review' || echo "false|status: in_progress")" \
+    "parity $s: approve-gates writes review exactly when inputs reads Integration"
+  has "$(body "$s")" "- $G (approved 2026-10-02)" "approve-gates $s: the gate is under ## Approved gates"
+  hasnt "$(body "$s")" "awaiting sign-off" "approve-gates $s: the pending section is gone"
+done
+ok "$(fm a ready)" "ready: 2026-10-03T09:00+00:00" "approve-gates a: ready: restamped from --now"
+ok "$(fm a pr)|$(fm a integrating)" "pr: $PR|<none>" "approve-gates a: pr: kept, no integrating:"
+snap=$(cat "$D/a.md")
+ag a 2026-10-04T09:00:00Z
+ok "$rc|$(cat "$D/a.md")" "0|$snap" "approve-gates a: a re-run (a later --now) is a no-op, ready: not restamped"
+has "$out" "already approved" "approve-gates a: a re-run says already approved"
+ok "$(fm b ready)|$(fm c ready)" "ready: 2026-10-01T08:00+00:00|<none>" "approve-gates b, c: ready: untouched"
+J=$(nxt)
+ok "$(q "$J" 'd["awaitingIntegration"]')" '["a"]' "approve-gates a: next lists it awaiting Integration"
+ok "$(q "$J" 'sorted(d["restart"])')" '["b","c"]' "approve-gates b, c: next --running '' restarts them, never a"
+ok "$(q "$(inp b)" 'd["resumeAt"]')" '"revise"' "approve-gates b: Restart routing still reads a seeded revise"
+# the gates_signed: marker: approve-gates writes it on the in_progress route only; the restart's mark-started
+# consumes it (says so once), so only the restart that directly follows a sign-off prints § 3.7's warning.
+ok "$(fm a gates_signed)" "<none>" "approve-gates a: no gates_signed: on the Integration route"
+ok "$(fm b gates_signed)|$(fm c gates_signed)" "gates_signed: 2026-10-03T09:00+00:00|gates_signed: 2026-10-03T09:00+00:00" \
+  "approve-gates b, c: gates_signed: stamped from --now"
+ms() { out=$(python3 "$SCRIPT" mark-started --tasks "$1" --tasks-dir "$D" --now "$NOW" 2>&1); rc=$?; }
+ms b
+ok "$rc|$(fm b gates_signed)" "0|<none>" "mark-started b: consumes gates_signed:"
+has "$out" "b: signed-gate restart (gates signed 2026-10-03T09:00+00:00; gates_signed: cleared)" "mark-started b: names the signed-gate restart"
+ms b
+ok "$rc" 0 "mark-started b: a later restart exits 0"
+hasnt "$out" "signed-gate restart" "mark-started b: a later restart is not a signed-gate restart"
+ms a
+hasnt "$out" "signed-gate restart" "mark-started: a note with no marker never says signed-gate restart"
+python3 "$SCRIPT" defer --tasks c --tasks-dir "$D" >/dev/null
+ok "$(fm c status)|$(fm c gates_signed)" "status: open|<none>" "defer c: clears gates_signed: with the other run stamps"
+# the stage is read before the flip, so the approve message names it
+scen gate-stage-msg
+mkro
+mkt a review "pr: $PR"
+rec "$(grow a set-aside gate-pending "[\"$G\"]")"
+ag a
+has "$out" "a: 1 gate(s) approved (signed off 2026-10-02) -> status review (stopped at Integration: rejoins the Integration queue; ready: 2026-10-03T09:00+00:00)" "approve-gates: names the Integration route"
+mkt b in_progress
+rec "$(own_gate b)"
+ag b
+has "$out" "b: 1 gate(s) approved (signed off 2026-10-02) -> status in_progress (gates_signed: 2026-10-03T09:00+00:00, consumed by the restart's mark-started)" "approve-gates: the own-run route names its marker"
+# (d) a set-aside last line but no pr: it cannot integrate without a PR -> in_progress, with a WARN
+scen gate-nopr
+mkro
+mkt a in_progress
+rec "$(own_gate a)"
+printf '\n## Integration log\n\n2026-10-02T10:00+00:00 set-aside path=integrator pr=- anchor=%s head=- base=- wait=- duration=- triggers=-\n' "$(printf 'a%.0s' $(seq 40))" >> "$D/a.md"
+ok "$(q "$(inp a)" '[d["resumeAt"], d["pr"]]')" '["integration",null]' "fixture: inputs reads the bare set-aside line as Integration, with no pr"
+ag a
+ok "$rc|$(fm a status)" "0|status: in_progress" "approve-gates: a set-aside line with no pr: -> in_progress"
+has "$out" "WARN: a: the Integration log's last line is set-aside but the note has no pr:" "approve-gates: warns that it cannot integrate"
+ok "$(fm a ready)" "<none>" "approve-gates: no ready: without a PR"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-lead: ALL PASS"; else echo "reconcile-rollout-lead: SOME FAILED"; fi
 exit "$fail"
