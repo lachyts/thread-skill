@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # self-rollout-check.sh <repoPath> — refuse a rollout whose repoPath is a DIRECTORY-source plugin
 # marketplace checkout (skills/execute/SKILL.md § 2.6, p12-4). With a directory source Claude Code runs
-# the plugin live from that checkout (${CLAUDE_PLUGIN_ROOT} is it), so every engine change a wave merges
-# there becomes the next wave's engine mid-rollout. Execute calls it through the
+# the plugin live from that checkout (${CLAUDE_PLUGIN_ROOT} is it), so every engine change merged there
+# becomes the engine of the rollout's next task call. Execute calls it through the
 # `# thread:self-rollout-check` wrapper; it lives in a script because Claude Code substitutes skill
 # arguments into every positional `$N` in a SKILL.md body (p5-2).
 #
@@ -84,7 +84,7 @@ while IFS="$(printf '\t')" read -r name p; do
   case "$c" in "$want"|"${want%/}/"*) hit=1 ;; *) hit=0 ;; esac
   if [ "$hit" = 1 ]; then
     echo "self-rollout-check: $1 is, or contains, the directory-source checkout of plugin marketplace '$name' ($p)." >&2
-    echo "self-rollout-check: the plugin runs live from it, so every engine change a wave merges would become the next wave's engine mid-rollout." >&2
+    echo "self-rollout-check: the plugin runs live from it, so every engine change merged there becomes the engine of the rollout's next task call." >&2
     echo "self-rollout-check: clone the repo to a separate path (e.g. ~/repos/<repo>-rollout), set the rollout's Project root to that clone, then re-invoke." >&2
     exit 3
   fi

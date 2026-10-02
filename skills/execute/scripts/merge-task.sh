@@ -153,7 +153,7 @@
 # killed run never reads `ok` (bash 3.2 reaches the EXIT trap with $?=0 after a SIGTERM during a foreground
 # child).
 #
-# Kept from merge-wave.sh: required checks are the gate (UNSTABLE handling, infra reruns, an absent check
+# Carried over from the earlier merger: required checks are the gate (UNSTABLE handling, infra reruns, an absent check
 # read as pending while CI is in flight, the CLEAN re-poll); the squash merge; the best-effort REMOTE branch
 # delete (`gh pr merge --delete-branch` would `git branch -d` a branch checked out in the task's worktree,
 # which git refuses, turning a successful merge into a non-zero exit; local cleanup is the reaper's). Never
@@ -328,14 +328,14 @@ if [ "${1:-}" = "--self-test-base" ]; then
   g clone -q "$tmp/origin.git" "$tmp/root" 2>/dev/null
   g -C "$tmp/root" commit -q --allow-empty -m base && g -C "$tmp/root" push -q origin master
   g clone -q "$tmp/origin.git" "$tmp/other" 2>/dev/null
-  g -C "$tmp/other" commit -q --allow-empty -m wave1 && g -C "$tmp/other" push -q origin master
+  g -C "$tmp/other" commit -q --allow-empty -m landed1 && g -C "$tmp/other" push -q origin master
   landed=$(git -C "$tmp/other" rev-parse HEAD)
   out=$(refresh_local_base "$tmp/root" master)
   sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$landed" "root on master: fast-forwarded to origin/master"
   case "$out" in *"local master fast-forwarded to origin/master."*) sb_ok y y "reports the master fast-forward";; *) sb_ok n y "reports the master fast-forward";; esac
   g -C "$tmp/root" switch -q -c feature/test
   held=$(git -C "$tmp/root" rev-parse HEAD)
-  g -C "$tmp/other" commit -q --allow-empty -m wave2 && g -C "$tmp/other" push -q origin master
+  g -C "$tmp/other" commit -q --allow-empty -m landed2 && g -C "$tmp/other" push -q origin master
   out=$(refresh_local_base "$tmp/root" master)
   sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "checkout on another branch: left untouched"
   case "$out" in *"left as it is"*) sb_ok y y "reports the non-base skip";; *) sb_ok n y "reports the non-base skip";; esac
@@ -347,7 +347,7 @@ if [ "${1:-}" = "--self-test-base" ]; then
   g -C "$tmp/root" switch -q master
   g -C "$tmp/root" commit -q --allow-empty -m local-only
   held=$(git -C "$tmp/root" rev-parse HEAD)
-  g -C "$tmp/other" commit -q --allow-empty -m wave3 && g -C "$tmp/other" push -q origin master
+  g -C "$tmp/other" commit -q --allow-empty -m landed3 && g -C "$tmp/other" push -q origin master
   out=$(refresh_local_base "$tmp/root" master); rc=$?
   sb_ok "$rc" 0 "local-only commit: returns 0"
   sb_ok "$(git -C "$tmp/root" rev-parse HEAD)" "$held" "local-only commit: HEAD left where it was"
@@ -378,7 +378,7 @@ if [ "${1:-}" = "--self-test-base" ]; then
   g -C "$tmp/root" checkout -q -- f && g -C "$tmp/root" merge -q --ff-only origin/master
   g -C "$tmp/root" symbolic-ref --delete refs/remotes/origin/HEAD
   g -C "$tmp/root" commit -q --allow-empty -m local-only-2
-  g -C "$tmp/other" commit -q --allow-empty -m wave4 && g -C "$tmp/other" push -q origin master
+  g -C "$tmp/other" commit -q --allow-empty -m landed4 && g -C "$tmp/other" push -q origin master
   out=$(refresh_local_base "$tmp/root" master); rc=$?
   sb_ok "$rc" 0 "origin/HEAD unset: returns 0"
   sb_has "$out" "1 commit(s) not on origin/master — not named (origin/HEAD unset: git remote set-head origin --auto)" "origin/HEAD unset: counted, with the set-head hint"
@@ -426,7 +426,7 @@ if [ "${1:-}" = "--self-test-base" ]; then
   case "$out" in *"fast-forwarded"*) sb_ok "[$out]" "no 'fast-forwarded'" "failed fetch: never says fast-forwarded";; *) sb_ok y y "failed fetch: never says fast-forwarded";; esac
   g -C "$tmp/root" remote set-url origin "$ou"
   # (c) the fetch works but origin/master lacks the merge commit it was handed: no fast-forward, rc 6.
-  g -C "$tmp/other" commit -q --allow-empty -m wave5 && g -C "$tmp/other" push -q origin master
+  g -C "$tmp/other" commit -q --allow-empty -m landed5 && g -C "$tmp/other" push -q origin master
   phantom=$(g -C "$tmp/root" commit-tree -p HEAD -m phantom "$(git -C "$tmp/root" rev-parse 'HEAD^{tree}')")
   out=$(refresh_local_base "$tmp/root" master "$phantom" 2>&1); rc=$?
   sb_ok "$rc" 6 "origin/master lacks the merge: returns 6"
@@ -1068,9 +1068,9 @@ while : ; do
       # checks only — exactly what branch protection enforces — then squash-merge. A genuinely
       # failing REQUIRED check surfaces as BLOCKED, not UNSTABLE, so this never merges a red gate.
       # ⚠️ DO NOT "tidy" this back to CLEAN-only. CLEAN requires EVERY check green (required AND
-      # non-required); a repo whose main carries red non-required checks would then merge NO wave of
-      # any rollout — the exact failure from the 2026-06-02 giflab run (see giflab-rollout-merge-wave-
-      # unstable-fix). Gating on `--required` is branch protection's own definition of mergeable.
+      # non-required); a repo whose main carries red non-required checks would then merge NOTHING in
+      # any rollout — the exact failure from the 2026-06-02 giflab run. Gating on `--required` is branch
+      # protection's own definition of mergeable.
       # The fake-gh suites cannot prove GitHub's semantics, so this comment IS the guard.
       if [ "$checks_done" -eq 0 ]; then
         wait_required_checks; rc=$?

@@ -3,7 +3,7 @@
 // calls are executed elsewhere (tests/lead-integrate.test.sh, skills/execute/tests/reconcile-rollout-lead.test.sh,
 // skills/execute/tests/rollout-stop-driver.test.sh); this pins the prose an LLM lead follows.
 //
-// Every rule lives in one function, checkExecute({ skill, hooksJson, exists }), that returns named failures, so the
+// Every rule lives in one function, checkExecute({ skill, hooksJson, exists, template }), that returns named failures, so the
 // real files and the controls run through identical logic and no matcher can pass vacuously: each control mutates
 // the real text in one place and must fail with exactly its rule. The status-line rule parses § 6's spec with the
 // driver's own STATUS_RE (python, via spawnSync). Reads files only.
@@ -18,6 +18,7 @@ const real = {
   skill: read('skills/execute/SKILL.md'),
   hooksJson: read('hooks/hooks.json'),
   exists: (p) => fs.existsSync(path.join(root, p)),
+  template: read('skills/schedule/rollout-template.md'),
 }
 const DRIVER = path.join(root, 'hooks', 'rollout-stop-driver.py')
 
@@ -26,6 +27,8 @@ const S2 = /^### 2\. /
 const S45 = /^### 4\.5\. /
 const S5 = /^### 5\. /
 const S6 = /^### 6\. /
+const S7 = /^### 7\. /
+const S8 = /^### 8\. /
 const INV = /^## Invocation forms/
 const PAUSE = /^## Pausing \+ reinstating/
 const DONTS = /^## Don'ts/
@@ -87,8 +90,14 @@ function driverStates(lines) {
 const REFUSAL = /^\*\*A wave number is refused\.\*\*/
 const BANNED = /merged_through_wave|mark-dispatched|cursor --rollout|resume-filter|WAVE-STATUS|WAVE-HEARTBEAT|WAVE-DRIVER|wave-stop-driver|wave-driver|single-wave|[Ss]mart-halt|Wave [N1] of/
 
+// The serial-Integration budget, one sentence shared word for word by execute's Resource budget and the rollout
+// template's (p12-7's budget, made one by p12-12).
+const BUDGET = 'Integrations run one at a time: each merges the latest `main` in, re-runs the verifier unless `main` has not moved, ' +
+  "re-reviews when needed, and waits on the PR's required checks before the squash. Budget ≈ (merge-in + verifier + any re-review + " +
+  'required checks + squash) per approved task, **sequentially**'
+
 // Named failures for execute's queue prose, its hook wiring and the driver path; [] means every rule holds.
-function checkExecute({ skill, hooksJson, exists }) {
+function checkExecute({ skill, hooksJson, exists, template }) {
   const fails = []
   const s2 = S(skill, S2)
   const s45 = S(skill, S45)
@@ -234,6 +243,7 @@ function checkExecute({ skill, hooksJson, exists }) {
     !aside.includes('`revise stopped:` or review-blocked: only after `hand-back`') ||
     !aside.includes('at its own run: `hand-back`') || !aside.includes('exit 3 is not a set-aside: the task integrates again') ||
     !aside.includes('add no `## Integration log` line') ||
+    !aside.includes('a later `hand-back` merges through case (ii) when main has not moved since that Integration; otherwise `prepare` integrates it again') ||
     !(rows['4'] ?? '').includes("merge-task's text after `set-aside reason: `, verbatim") ||
     !donts.includes('Never write the `integration: ` prefix into a set-aside reason yourself')) fails.push('set-aside')
 
@@ -265,6 +275,8 @@ function checkExecute({ skill, hooksJson, exists }) {
   const iStamp = hard.findIndex((l) => l.includes('`paused: <timestamp>`'))
   const iStop = hard.findIndex((l) => l.includes('**TaskStop**'))
   if (!pz.includes('**the queue drains**') || !(iStamp >= 0 && iStamp < iStop) ||
+    !pz.includes('`/thread:repair` only records escalations and decisions (a `RACE decided:` line included) and defers a set-aside task') ||
+    !pz.includes('It never hands back') || pz.includes('nothing-to-fix') ||
     !(hard[iStop] ?? '').includes('every Workflow call') || !(hard[iStop] ?? '').includes('every background Integration command')) {
     fails.push('pauses')
   }
@@ -317,6 +329,35 @@ function checkExecute({ skill, hooksJson, exists }) {
     !['an integrate call', 'a background Integration command', 'a merge hold'].every((k) => hbPara.includes(k)) ||
     /first task call|first wave launch/i.test(skill)) fails.push('heartbeat-register')
 
+  // lineage: § 2 reads the lineage first, whatever the version (as status § 1 and repair § 1 do): superseded_by:,
+  // then the reverse lineage with both N cases, before the version bullets.
+  const s2raw = section(skill, S2) ?? ''
+  const vAt = s2raw.search(/^- (`protocol_version|Missing `protocol_version`)/m)
+  const ahead = (k) => s2raw.indexOf(k) >= 0 && vAt >= 0 && s2raw.indexOf(k) < vAt
+  if (!ahead('**Lineage first, whatever the version**') || !ahead('`superseded_by:` → print "superseded by [[N]]') ||
+    !ahead("status § 1's reverse-lineage grep") ||
+    !s2.includes('print "supersede interrupted: `/thread:schedule <project> --regenerate`"') ||
+    !s2.includes('print "close-out interrupted: `/thread:repair [[this]]`"')) fails.push('lineage')
+
+  // race-hold: step 1.1 halts on a RACE in raceHold once the lane is free; a cold resume's exit 3 is printed and
+  // the loop goes on (step 1.1 holds the task); § 7 names both stops; § 8's duplicate-free re-entry rests on it.
+  const s1 = subs[0]?.text ?? ''
+  const coldR = labelled(skill, 'Cold resume.')
+  const s7 = S(skill, S7)
+  const s8 = S(skill, S8)
+  if (!s1.includes('`raceHold`') || !s1.includes('the lane is free') || !s1.includes('`reason="RACE undecided: [[<slug>]]"`') ||
+    !s1.includes('An `UNVERIFIED` entry stays set aside like any other') ||
+    !coldR.includes('Exit 3 means `resume` held back an undecided RACE or UNVERIFIED') || !coldR.includes('print the lines and go on') ||
+    !s7.includes('`next` reports a `RACE` in `raceHold` while the lane is free') || !s7.includes('`reason="RACE undecided: [[task]]"`') ||
+    !before(s7, '`reason="UNVERIFIED undecided: [[task]]"`', '`reason="gated inputs await sign-off: …"`') ||
+    !s8.includes('`resume` flips merged PRs done and skips a held RACE or UNVERIFIED task, and `next` keeps a held task out of Integration')) {
+    fails.push('race-hold')
+  }
+
+  // budget: the serial-Integration budget is the same sentence in execute and in the rollout template.
+  if (!collapse(skill).includes('**Continuous auto-merge adds serial Integration time.** ' + BUDGET) ||
+    !collapse(template ?? '').includes(BUDGET + ', on top of the convergence time above.')) fails.push('budget')
+
   // no-wave-mechanics: none of the wave loop's names survive (the one refusal line excepted).
   if (skill.split('\n').some((l) => !REFUSAL.test(l) && BANNED.test(l))) fails.push('no-wave-mechanics')
 
@@ -337,7 +378,7 @@ test('execute § 4.5, its neighbours, the heartbeat and the hook hold every queu
 
 const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lost-call', 'clean-path', 'verify-bound',
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
-  'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running']
+  'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -494,10 +535,50 @@ test('control: a lead row written for an integrate call\'s review-blocked fails 
 
 test('control: hand-back with no remedy for a PR-less review note fails set-aside', () => {
   const l = real.skill.split('\n').find((x) => x.startsWith('- at its own run: `hand-back`'))
-  only(sk(l, '- at its own run: `hand-back` (or `/thread:repair`, p12-11) sets `in_progress`, then *Restart routing*;'), 'set-aside', 'no PR-less remedy')
+  only(sk(l, '- at its own run: `hand-back` (or `/thread:repair` § 4) sets `in_progress`, then *Restart routing*;'), 'set-aside', 'no PR-less remedy')
 })
 
-test('the rules are all named (22) and each has a control', () => {
-  assert.equal(RULES.length, 22)
+test('control: an unconditional case (ii) after a hand-back fails set-aside', () => {
+  only(sk('merges through case (ii) when main has not moved since that Integration; otherwise `prepare` integrates it again.',
+    'merges through case (ii) with no re-integration.'), 'set-aside', 'case (ii)')
+})
+
+test('control: repair treating a pause as nothing-to-fix fails pauses', () => {
+  const p = real.skill.split('\n').find((l) => l.startsWith('A paused rollout is **intentional**'))
+  only(sk(p, p.slice(0, p.indexOf(' Under a pause')) + ' `/thread:repair` treats it as nothing-to-fix.'), 'pauses', 'nothing-to-fix')
+})
+
+test('control: the version gate read before the lineage fails lineage', () => {
+  const s2 = section(real.skill, S2)
+  const lin = s2.slice(s2.indexOf('**Lineage first'), s2.indexOf('Then the version:'))
+  const moved = edit(edit(real.skill, lin, ''), '**Incomplete check', lin + '**Incomplete check')
+  only({ skill: moved }, 'lineage', 'version first')
+})
+
+test('control: no close-out case in § 2 fails lineage', () => {
+  only(sk('otherwise → print "close-out interrupted: `/thread:repair [[this]]`"', 'otherwise → proceed'), 'lineage', 'no close-out')
+})
+
+test('control: step 1.1 without the RACE halt fails race-hold', () => {
+  only(sk(' Its `raceHold` is read now: if it names a `RACE` task and the lane is free, halt (§ 7) with `reason="RACE undecided: [[<slug>]]"`.', ''),
+    'race-hold', 'no step 1.1 halt')
+})
+
+test('control: a cold resume that halts on exit 3 fails race-hold', () => {
+  only(sk('print the lines and go on, since the loop\'s step 1.1 holds them', 'halt with its lines'), 'race-hold', 'cold resume halts')
+})
+
+test('control: the gate-pending reason checked before UNVERIFIED fails race-hold', () => {
+  const l = real.skill.split('\n').find((x) => x.startsWith('- `next` reports `halt: stuck`'))
+  const u = 'with an UNVERIFIED hold among them, `reason="UNVERIFIED undecided: [[task]]"`, checked first; '
+  only(sk(l, l.replace(u, '').replace(' — a **designed** pause', `; ${u.replace(', checked first; ', '')} — a **designed** pause`)), 'race-hold', 'UNVERIFIED late')
+})
+
+test('control: a template budget that drifts from execute fails budget', () => {
+  only({ template: real.template.replace('any re-review + required checks + squash', 'any re-review + squash') }, 'budget', 'template drift')
+})
+
+test('the rules are all named (25) and each has a control', () => {
+  assert.equal(RULES.length, 25)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

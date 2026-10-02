@@ -34,9 +34,9 @@ const S8 = /^### 8\. /
 // Sentences of a collapsed text: split after `.`/`!`/`?` (and a closing quote) before whitespace.
 const sentences = (text) => text.split(/(?<=[.!?]["”]?)\s+/)
 const spans = (text) => [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1])
-// The text with `wave-shaped` (the CONTEXT term, p12-12's to rename) and backticked legacy `wave:`
-// mentions stripped: what is left must name no wave.
-const waveLines = (text) => text.replace(/wave-shaped/gi, '').replace(/`wave:`/g, '').split('\n')
+// The text with backticked legacy `wave:` mentions stripped (the ADR 0030 migration strip): what is left
+// must name no wave.
+const waveLines = (text) => text.replace(/`wave:`/g, '').split('\n')
   .filter((l) => /wave/i.test(l))
 const description = (text) => (text.match(/^description: (.*)$/m) ?? [])[1] ?? ''
 const frontmatter = (text) => (text.match(/^---\n([\s\S]*?)\n---\n/) ?? [])[1] ?? ''
@@ -59,8 +59,13 @@ function checkSchedule({ schedule, template, orient, manifests = [], extra = [] 
   // § 0 runs the check (with --regenerate in the same call) and then the supersede's resume.
   const check = spans(s0).find((x) => x.includes('unfinished-rollout.py check'))
   const at = (needle) => s0.indexOf(needle)
+  // The supersede's resume holds an undecided RACE or UNVERIFIED on the prior (exit 3): § 0 stops there, before
+  // step 1, prints its HOLD lines and names repair; any other non-zero exit is still no stop.
+  const prep = sentences(s0).find((x) => x.includes('Exit 3 (an undecided RACE or UNVERIFIED on the prior)')) ?? ''
   if (!check || !check.includes('--regenerate') || at('reconcile-rollout.py resume --rollout') < 0 ||
-    at('reconcile-rollout.py resume --rollout') < at('unfinished-rollout.py check')) fails.push('s0-check')
+    at('reconcile-rollout.py resume --rollout') < at('unfinished-rollout.py check') ||
+    !['is a stop: before step 1', '`HOLD:` lines', '`/thread:repair [[<prior>]]`'].every((k) => prep.includes(k)) ||
+    !s0.includes('Any other non-zero exit (a gh failure) is no stop') || s0.includes('no § 0 stop follows it')) fails.push('s0-check')
 
   if (!s0.includes('`file <slug> <path>`') || !s0.includes('`interrupted <prior> <new>`') ||
     !/reconcile-rollout\.py carry --from/.test(s0)) fails.push('s0-outcomes')
@@ -111,7 +116,7 @@ function checkSchedule({ schedule, template, orient, manifests = [], extra = [] 
   if (!d.includes('queue') || !d.includes('`protocol_version: 5`') || /stamps wave/i.test(d)) fails.push('description')
 
   // The plugin manifests and README's schedule row describe schedule as ordering a queue, not
-  // clustering or computing waves (execute's per-wave auto-merge and the wave-shaped term are p12-12's).
+  // clustering or computing waves.
   if (manifests.some((m) => /parallel-safe waves|clusters tasks into|wave structure/i.test(m)) ||
     !(manifests[2] ?? '').includes('`protocol_version: 5`')) fails.push('manifests')
 
@@ -148,9 +153,10 @@ test('control: a conflict graph is colouring', () => {
   only({ schedule: `${real.schedule}\nBuild a conflict graph over every editing task.\n` }, ['no-colouring'], 'colouring')
 })
 
-test('control: a wave anywhere in the template fails, wave-shaped and `wave:` do not', () => {
+test('control: a wave anywhere in the template fails, a legacy `wave:` does not', () => {
   only({ template: `${real.template}\nEach wave fans out across subagents.\n` }, ['no-wave'], 'template wave')
-  only({ template: `${real.template}\nA **wave-shaped** cluster clears any legacy \`wave:\`.\n` }, [], 'allowed forms')
+  only({ template: `${real.template}\nA **wave-shaped** cluster rolls out.\n` }, ['no-wave'], 'the retired term')
+  only({ template: `${real.template}\nStep 7 clears any legacy \`wave:\`.\n` }, [], 'a legacy wave: strip')
 })
 
 test('control: step 7 without solo: true, or stamping wave:, fails', () => {
@@ -161,6 +167,10 @@ test('control: step 7 without solo: true, or stamping wave:, fails', () => {
 
 test('control: a protocol 3 template fails', () => {
   only({ template: real.template.replace('protocol_version: 5', 'protocol_version: 3') }, ['protocol-5'], 'protocol 3')
+})
+
+test('control: a supersede prep that goes on past an undecided RACE fails s0-check', () => {
+  only({ schedule: edit(real.schedule, S0, 'is a stop: before step 1 and\nbefore this run writes anything,', 'is no stop either:') }, ['s0-check'], 'RACE not a stop')
 })
 
 test('control: § 0 without --regenerate on the check, or without resume, fails', () => {

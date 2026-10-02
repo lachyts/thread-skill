@@ -17,7 +17,7 @@ test('the reshape step carries no inline task template and defers to the writer 
   assert.equal(templated.length, 0, 'a fenced block in reshuffle.md spells out task frontmatter')
   assertHas(R(5), 'R5', ['add-task.md', 'Step 4', 'Launch context', 'add-phase.md', 'add-project.md',
     'phase: N', 'touches:', 'work_depth:', 'Phase N · Task M', '**Verify:**', 'Resume prompt',
-    /`wave:` unset/, /Don't set `scope:`/])
+    /Don't set `rollout:` or `scope:`/])
   assertHas(donts, "reshuffle Don'ts", ['add-task.md', 'add-phase.md', 'add-project.md'])
 })
 
@@ -63,7 +63,7 @@ test('Look only writes nothing; Steer only exists', () => {
   assertHas(S(4), 'orient § 4', ['**Reshuffle**', '**Steer only**', /\*\*Look only\*\*[^.]*no writes of any kind/])
 })
 
-test('orient schedules only wave-shaped members and never runs another rollout', () => {
+test('orient schedules only rollout-shaped members and never runs another rollout', () => {
   assertHas(S(6), 'orient § 6', ['--tasks', '--regenerate', /At most one unfinished rollout per repo/,
     'unfinished-rollout check', /scoped target routes only the tasks its own reshuffle wrote/,
     /schedule nothing and touch nothing/, 'repair', /Uncommitted grill docs/])

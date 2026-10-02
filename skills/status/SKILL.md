@@ -1,6 +1,6 @@
 ---
 name: status
-description: 'Use to see the present situation of a wave rollout — a read-only situational report. Triggers on "wave status of [[rollout]]", "where is [[rollout]] / this rollout", "what state is the rollout in", "what''s left on [[rollout]]", "is [[rollout]] done", or pointing at a rollout note and asking what''s happening. Reads the rollout note + every linked task note and cross-checks live GitHub PRs + git worktrees, flags drift, and recommends the next action. NEVER writes the vault or merges anything. Read-only sibling of /thread:repair. Scope: Obsidian + read-only gh/git.'
+description: 'Use to see the present situation of a rollout queue — a read-only situational report. Triggers on "rollout status of [[rollout]]", "where is [[rollout]] / this rollout", "what state is the rollout in", "what''s left on [[rollout]]", "is [[rollout]] done", or pointing at a rollout note and asking what''s happening. Reads the rollout note + every linked task note (merged, integrating, running, queued or set aside), cross-checks live GitHub PRs + git worktrees, flags drift, and recommends the next action. NEVER writes the vault or merges anything. Read-only sibling of /thread:repair. Scope: Obsidian + read-only gh/git.'
 ---
 
 # /thread:status — the present situation of a rollout
@@ -161,9 +161,10 @@ takes none of them.
 
 - **RACE / UNVERIFIED:** a RACE that is undecided (above), or a set-aside task whose reason
   (`blockerSummary`) carries `UNVERIFIED:` and has no `repair: [[<slug>]] RACE decided: …` line (a
-  set-aside is never in flight). Main's state is Lachy's call, and until it is recorded no `resume` may run:
-  it would flip the task done on an unverified main. The flag reads only the vault and that local verdict
-  file, so it holds offline too.
+  set-aside is never in flight). Main's state is Lachy's call, and until it is recorded the task cannot land:
+  `resume` skips it (a `HOLD:` line, exit 3), `hand-back` refuses it (exit 2), and execute halts on a RACE
+  once its lane is free and holds an UNVERIFIED task set aside (execute § 4.5). The flag reads only the vault
+  and that local verdict file, so it holds offline too.
 - **Merged into another base:** a MERGED PR whose `baseRefName` is not the default branch (the resolver's
   answer). That is the test `resume` applies: it leaves such a task alone, so it is escalated, never flipped:
   `/thread:repair` shows the evidence and leaves the call to Lachy.
@@ -246,8 +247,8 @@ checking the owner session first. While the owner session is alive, its heartbea
 genuine stall (execute § 8); a closed terminal stops it, and another session resumes only once the owner
 session has ended. **The RACE exception:** with a RACE re-verify in flight (§ 3), the owner session's answer
 never leads to `/thread:execute`. If that session shows the `RACE: …` halt or no run, or has ended, the RACE
-is undecided, and the next step is `/thread:repair [[<rollout>]]` (action 7), never `/thread:execute`. A
-*Cold resume* runs `resume` first, and `resume` would flip the task done on a main nobody verified.
+is undecided, and the next step is `/thread:repair [[<rollout>]]` (action 7), never `/thread:execute`:
+`/thread:execute`'s *Cold resume* would only halt on the RACE (`RACE undecided`) once its lane is free.
 
 **Example report** (the live check on):
 
@@ -299,8 +300,8 @@ Keep the whole report scannable: it's a glance, not a wall of text.
 7. An open escalation, an undecided RACE / UNVERIFIED or a possible PR-less merge →
    `/thread:repair [[<rollout>]]`, whatever the pause or the queue: repair records Lachy's decision in every
    mode (its § 1). Never reinstate or resume with `/thread:execute` until each RACE / UNVERIFIED task has its
-   `RACE decided:` line: a reinstate and a *Cold resume* run `resume` first, and it would flip that task done
-   on an unverified main. A possible PR-less merge gets a confirmed `pr:` only when no lead is live or under a
+   `RACE decided:` line: main holds a combination nobody verified, and the queue would only run around the
+   held task. A possible PR-less merge gets a confirmed `pr:` only when no lead is live or under a
    stamped pause; while a lead is live repair records it only. A RACE re-verify in flight (§ 3) is not an
    open escalation: the lead decides it itself, so it waits under 9 or 10, and nobody asks Lachy mid-re-verify.
 8. `paused` → "reinstate with `/thread:execute [[<rollout>]]`". For drift independent of the pause, add

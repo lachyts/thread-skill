@@ -29,7 +29,7 @@ The argument resolves to a project-note slug (the thing the task's `projects:` f
 ### 0. Execution-fit gate
 
 Run the execution-fit test (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` — the
-canonical definition). Rollouts are for **wave-shaped** work: tasks that converge on ONE
+canonical definition). Rollouts are for **rollout-shaped** work: tasks that converge on ONE
 code repo, land as a PR each, and verify machine-checkably inside the run (tests / build /
 greps). Before computing anything, scan the candidate set for misfits — tasks whose core action
 is an external publish (CMS / live site / DNS / config console), whose ordering constraint is a
@@ -39,7 +39,7 @@ session lane** (`defer` for `scheduled:`-date dispatch, `open` via the task's `#
 block) instead of forcing a rollout: the engine's parallelism is forbidden by isolation
 windows, every externally-publishing task pauses at the human gate (ADR 0008; execute § 3.7), and
 the queue cannot see a window or calendar constraint. A mixed set is fine if
-the wave-shaped subset can roll out while the misfits stay unstamped — name them in the gate.
+the rollout-shaped subset can roll out while the misfits stay unstamped — name them in the gate.
 
 After the misfit scan, check the dispatch blockers for the target repo, i.e. the project root the
 rollout note will carry. Resolve it from the project note's `Local:` line; if there is none, ask
@@ -90,18 +90,20 @@ since it completes a supersede an earlier run confirmed. Print the snippet's rem
 since unlisting is Lachy's call, for the pushed-base check's exit 3 it is the whole stderr (the
 ahead commits and the land-by-PR or wait-for-the-landing-PR remedy), and for the unfinished-rollout
 check's refusal or exit 2 it is the whole stderr (each unfinished rollout with its remedy). The
-cluster is still wave-shaped; don't re-route it to the session lane.
+cluster is still rollout-shaped; don't re-route it to the session lane.
 
 **Supersede prep.** Only once every § 0 check has passed and the unfinished-rollout check printed
 `supersede <prior>` (directly, or on the re-run after an `interrupted` finish), run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume --rollout ~/repos/obsidian/Work/Tasks/<prior>.md`
 before step 1 (an unfinished note always sits directly in `Work/Tasks/`, so the path is exact). It
 flips done any prior task whose PR already merged, so step 1's preview and step 6's carry never take
-a landed task; no § 0 stop follows it. A non-zero exit (a gh failure) is no stop either: carry its
-`ERROR:` lines into step 1's confirm and go on. A task it could not resolve carries at its recorded
-status, and execute's resume asks GitHub again.
+a landed task. Exit 3 (an undecided RACE or UNVERIFIED on the prior) is a stop: before step 1 and
+before this run writes anything, print its `HOLD:` lines and point at `/thread:repair [[<prior>]]`,
+which records Lachy's decision (step 6's carry would refuse the prior anyway). Any other non-zero exit
+(a gh failure) is no stop: carry its `ERROR:` lines into step 1's confirm and go on. A task it could
+not resolve carries at its recorded status, and execute's resume asks GitHub again.
 
-There is no minimum size: shape decides, not count. A wave-shaped cluster of one still rolls
+There is no minimum size: shape decides, not count. A rollout-shaped cluster of one still rolls
 out — the plan gate, verifier retry, master review, and auto-merge are the point. For N ≤ 2,
 note that the ceremony is thin and proceed.
 
@@ -114,7 +116,7 @@ Walk `~/repos/obsidian/Work/Tasks/*.md`. Filter:
 - `tags:` **contains** `task` — phase notes (`tags: [phase]`, see ADR 0005) and any other non-task
   note linked to the project are never dispatched
 - `tags:` does **not** contain `rollout` (rollouts aren't tasks)
-- Skip a task whose `rollout:` links a rollout note directly in `Work/Tasks/` that is neither `done` nor `dropped`: it belongs to that rollout, and only a supersede may take it. Name each skipped task and its rollout in the count report. A legacy `wave:` no longer skips anything.
+- Skip a task whose `rollout:` links a rollout note directly in `Work/Tasks/` that is neither `done` nor `dropped`: it belongs to that rollout, and only a supersede may take it. Name each skipped task and its rollout in the count report.
 - Skip tasks with `status: merged` — step 4.5 folded these into a combined note; their `merged_into:` target carries the work and gets dispatched in their place
 
 On `supersede <prior>` (§ 0), preview the carry: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py carry --from ~/repos/obsidian/Work/Tasks/<prior>.md --dry-run`. It writes nothing and prints one line per task linked to the prior rollout. Its `carry <slug> <state>` lines join the candidate set (deduplicated, whatever their status: a carried `review`, `in_progress` or set-aside task keeps its place in the queue). Its `keep <slug> <state>` lines (merged, folded, or another status such as `dropped` or `parked`) stay with the prior rollout.
@@ -394,14 +396,13 @@ This skill does not execute anything. The rollout note it produces is read by th
 
 ## Don'ts
 
-- Don't refuse small rollouts — shape decides, not count (`skills/_shared/execution-fit.md`). A one-task wave-shaped rollout is valid; note the ceremony is thin and proceed.
+- Don't refuse small rollouts — shape decides, not count (`skills/_shared/execution-fit.md`). A one-task rollout-shaped rollout is valid; note the ceremony is thin and proceed.
 - Don't auto-merge dependency cycles silently — if A depends on B and B depends on A, surface and ask. (This is about *dependency* cycles — distinct from the affinity-cluster consolidation in step 4.5, which is a sanctioned auto-merge of same-*change* tasks.)
 - Never overwrite or reuse an existing rollout note: step 6's naming prompt offers only Advance or Cancel.
 - Never remove `incomplete: true` from a rollout note except as step 7's last write on the note this run wrote: a stamp on any other note (§ 0's on an interrupted supersede's note, or one a stopped run left) ends only when a supersede closes that note out.
 - Don't touch tasks outside the target project (the `projects:` filter is strict).
 - Don't fill in `touches:` on tasks where you regex-detected files — that promotes a guess into authoritative metadata. Only the user does that. The **one** exception is the combined note authored in step 4.5: when every member has its own `touches:`, its `touches:` is their union, so it's a derivation, not a fresh guess. (Separately, the `## File-sets` block in the **rollout note** — step 6 — records the best-effort file-sets, but that's rollout-note data the executor reads, never task frontmatter, so it doesn't touch this rule.)
 - Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's remote, register, pushed-base and unfinished-rollout checks (`git remote get-url`, `gh repo view`, `landing-register.py check`, `git fetch --prune` of `origin/<default>` and `origin/close/*` (pushed-base check), which moves or prunes only remote-tracking refs, and `unfinished-rollout.py check`'s `git rev-parse --local-env-vars` and `git remote get-url`), and a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only.
-- Never add a `wave:` stamp: a queue has no groups to stamp.
 - Never write a second unfinished rollout on a repo, and never supersede one that § 0 did not print as `supersede`.
 - Never move a rollout note except by step 7.5's move (which § 0 also runs for `file` and `interrupted`).
 
@@ -415,7 +416,7 @@ End-to-end test against an existing backlog (e.g. GifLab):
 4. Orders the queue (dependencies first, Solo proposals in the step-up batch)
 5. Writes the always-dated note `giflab-rollout-<YYYY-MM-DD>.md` (advancing to the next `-N` ordinal if today's already exists), its `## Queue` table in schedule order.
 6. Rollout note carries no `incomplete:` line (step 7's last write removed the one it was born with), and carries `protocol_version: 5`, `verifier:`, `max_iterations: 3`, `max_review_rounds: 4`, `max_plan_rounds: 3`, `plan_approval: scope-gated`, `parallel_ceiling: 4`, `model: opus` in frontmatter, plus commented-out `max_tier:` / `env_bootstrap:` lines (set only when the run needs them). No inline execution playbook — the rollout body is data only.
-7. Stamps `rollout: "[[...]]"` and `scope:` on each task, and no `wave:`
+7. Stamps `rollout: "[[...]]"` and `scope:` on each task, and removes any legacy `wave:`
 8. Prints summary pointing the user toward `/thread:execute`
 
 Then from a fresh session: paste `execute [[giflab-rollout-<YYYY-MM-DD>]]` (the dated note just written) — the `/thread:execute` skill should pick it up, gate on `protocol_version: 5`, resolve per-task config, and call the Workflow tool with `task.workflow.js` to run the three-layer convergence engine per task (visible live via `/workflows`).
@@ -427,5 +428,5 @@ The GifLab backlog is a good fixture because it exercises both a merge and a del
 - **MERGE → "metrics.py sentinel → NaN hardening":** `giflab-dry-ssimulacra2-fallback-dict` + `giflab-lpips-fallback-nan-sentinel` + `giflab-per-frame-exception-nan-sentinel`. All replace fabricated sentinels with `float("nan")` + NaN-aware aggregation in `metrics.py` error paths, and the LPIPS task literally says *"consider folding LPIPS into the same DRY-up… shared `_nan_fallback_dict(keys)`"* (strong signal). 3 Integrations → 1.
 - **MERGE → "content-classifier lossy ceiling":** `giflab-data-viz-animation-lossy-guard` + `giflab-photographic-content-lossy-ceiling`. Both build the same pre-compression classifier + `lossy_max` machinery; only the heuristic differs. 2 → 1.
 - **KEEP SEPARATE (guard fires):** the `composite_quality` trio `giflab-composite-quality-bare-vs-mean-key-mismatch` + `giflab-composite-quality-nan-guard` + `giflab-temporal-consistency-composite-quality-fix`. They share `enhanced_metrics.py`, but the nan-guard task calls the per-frame task *"independent changes to different callsites"* and scopes the temporal task out — explicit-independence hard block. Kept apart; Integration serialises their merges.
-- Members of the two merges end up `status: merged` + `merged_into:`, with **no `wave:`**; a second `--regenerate` skips them (step 1).
+- Members of the two merges end up `status: merged` + `merged_into:`, any legacy `wave:` cleared; a second `--regenerate` skips them (step 1).
 - The queue drops from ~9 entries to ~6 (the two merges save three Integrations).

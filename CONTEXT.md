@@ -12,7 +12,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   block via `open`, orient's cc-* batches).
 - **Execution-fit test** — the single rule deciding a cluster's lane
   (`skills/_shared/execution-fit.md`). Decides hard, never as a preference.
-- **Wave-shaped** — passes the fit test: converges on ONE code repo, lands as
+- **Rollout-shaped** — passes the fit test: converges on ONE code repo, lands as
   a PR per task, verifies machine-checkably inside the run. Shape only —
   count is never a criterion (ADR 0009).
 - **Task floor** — the invariant: every stash/defer writes a self-contained
@@ -41,14 +41,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   recommendation inside keep going, never a route.
 - **Orient** — the one shaping verb, at project altitude: audits a whole
   project/area (not one thread), then reshuffles it (the default on pickup),
-  steers it as it stands, or just looks. It schedules wave-shaped work itself,
+  steers it as it stands, or just looks. It schedules rollout-shaped work itself,
   routes the rest by the execution-fit test, and ends with the **execute
   offer** (run the rollout in a fresh session, here, or not yet). Pointed at a
   single plan, design note or brain dump it runs a **scoped reshuffle** of that
   note alone. Absorbs the former `split` and `gather` verbs (ADR 0027).
 - **Batch** — a parallel-safe cluster of open work (disjoint files/surfaces)
   matched to the narrowest covering launch profile; the session-lane unit
-  orient dispatches. Never contains a wave-shaped cluster.
+  orient dispatches. Never contains a rollout-shaped cluster.
 - **Dispatch artefact** — a batch's durable contract: the prompt file under
   `<workspace>/.scratch/orient/`. Since ADR 0010 orient launches the batch
   session from it itself — the steering answer is the sole authorisation —
@@ -195,7 +195,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   tasks carry `phase: N`. A human planning concept only: phases order meaning,
   the queue orders runs, and the engine never reads `phase:`. One phase = one
   rollout by convention. A phase is a plan, never a task (ADR 0005).
-  _Avoid_: stage, iteration, wave.
+  _Avoid_: stage, iteration.
 - **Reshuffle** — the usual reason a project is picked up after time away:
   re-examine *all* its open work (stray bugs, brain dumps, loose tasks and
   unstarted phases alike), rethink what the next steps are, and leave it
@@ -224,7 +224,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Rollout** — a backlog of related tasks landed as one coordinated effort,
   described by one always-dated Obsidian note
   (`<slug>-rollout-<YYYY-MM-DD>`). At most one is **unfinished** per repo; new
-  wave-shaped work supersedes it rather than running beside it (schedule § 0,
+  rollout-shaped work supersedes it rather than running beside it (schedule § 0,
   ADR 0027, ADR 0030). _Avoid_: batch, run, campaign.
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
@@ -255,14 +255,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   reason. A task taken out of a rollout never makes it incomplete. _Avoid_:
   half-written, broken.
 - **Wave** — a set of tasks safe to run together because none shares a file
-  (ADR 0009). Retired by ADR 0030: see **Queue**. _Avoid_: round, phase, stage.
+  (ADR 0009). Retired by ADR 0030: see **Queue**. Its fit-test adjective
+  **Wave-shaped** is now **Rollout-shaped**. _Avoid_: round, phase, stage.
 - **Queue** — how a rollout runs: tasks in parallel, each from the `main` of
   its start, up to the parallel ceiling, held back only by dependencies or a
-  **Solo** task, never a shared file (ADR 0030). _Avoid_: wave (the old
-  grouping), batch (the session lane's).
+  **Solo** task, never a shared file (ADR 0030). _Avoid_: batch (the
+  session lane's).
 - **Solo** — a task in a Queue that runs with nothing else in flight: a
   sweeping change every concurrent task would otherwise redo its work around
-  (ADR 0030). _Avoid_: barrier, exclusive, wave of one.
+  (ADR 0030). _Avoid_: barrier, exclusive.
 - **Integration** — the serial step between a task's approval and its merge:
   the latest `main` merged in, the verifier re-run and, when needed, a short
   re-review (ADR 0030). _Avoid_: update-branch (GitHub's merge-in, which
@@ -306,8 +307,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   flags it and fixes the unambiguous items on a Reshuffle or Steer only
   answer (ADR 0026, 0027). _Avoid_: desync, staleness, mismatch.
 - **Clean defer** — taking a task out of a rollout back to the open backlog
-  (clearing `rollout:`/`owner:`, and a legacy `wave:`), permitted only when nothing in the
-  rollout depends on it. _Avoid_: drop, cancel, skip.
+  (clearing `rollout:`/`owner:`), permitted only when nothing in the rollout
+  depends on it. _Avoid_: drop, cancel, skip.
 
 ## Convergence engine
 

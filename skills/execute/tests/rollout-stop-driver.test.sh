@@ -35,7 +35,6 @@ run_driver_msg() {
 
 # --- 0. the hook exists under its new name, with no alias ---
 [ -f "$DRIVER" ] && ok "hooks/rollout-stop-driver.py exists" || fail "hooks/rollout-stop-driver.py is missing"
-[ ! -e "$HERE/../../../hooks/wave-stop-driver.py" ] && ok "no wave-stop-driver.py alias" || fail "hooks/wave-stop-driver.py still exists"
 
 # --- 1. no ROLLOUT-STATUS anywhere → allow (empty output) ---
 T="$TMP/t1.jsonl"
@@ -62,7 +61,7 @@ echo "$OUT" | grep -q 'ROLLOUT-DRIVER: \[\[demo\]\]' && ok "running: reason name
 for w in "merged 1/3" "reconcile" "Integration" "merge-task.sh" "next" "Do not end the turn while state=running"; do
   echo "$OUT" | grep -qF "$w" && ok "running: reason names $w" || fail "running: reason lacks [$w]: $OUT"
 done
-echo "$OUT" | grep -q "cursor\|wave" && fail "running: reason still names a cursor or wave: $OUT" || ok "running: no cursor or wave in the reason"
+echo "$OUT" | grep -q "cursor" && fail "running: reason still names a cursor: $OUT" || ok "running: no cursor in the reason"
 
 # --- 4. cap: 3 blocks without merge progress, then release with systemMessage ---
 for i in 2 3; do run_driver "$T" s3; done
@@ -109,7 +108,6 @@ import json,sys
 d=json.load(open('$ROLLOUT_DRIVER_STATE_DIR/s3.json'))
 sys.exit(1 if 'demo' in d else 0)
 " && ok "done: driver state cleared" || fail "done: state entry not cleared"
-[ ! -e "$HOME/.claude/wave-driver/s3.json" ] && ok "nothing written to the old wave-driver dir" || fail "state written under ~/.claude/wave-driver"
 
 # --- 7. ROLLOUT-STATUS only in a user/tool-result line → ignored ---
 T="$TMP/t7.jsonl"
@@ -136,11 +134,11 @@ assistant_line 'template: ROLLOUT-STATUS: <rollout-slug> merged=<K>/<N> running=
 run_driver "$T" s10
 [ -z "$OUT" ] && ok "template placeholders: ignored" || fail "template placeholders: matched, got: $OUT"
 
-# --- 11. the old wave line, and a line with no running=, are ignored ---
+# --- 11. a cursor-shaped line, and a line with no running=, are ignored ---
 T="$TMP/t11.jsonl"
-assistant_line "WAVE-STATUS: demo cursor=1/3 state=running" > "$T"
+assistant_line "ROLLOUT-STATUS: demo cursor=1/3 state=running" > "$T"
 run_driver "$T" s11
-[ -z "$OUT" ] && ok "an old WAVE-STATUS line: ignored" || fail "old WAVE-STATUS: matched, got: $OUT"
+[ -z "$OUT" ] && ok "a cursor-shaped line: ignored" || fail "cursor-shaped line: matched, got: $OUT"
 T="$TMP/t11b.jsonl"
 assistant_line "ROLLOUT-STATUS: demo merged=1/3 state=running" > "$T"
 run_driver "$T" s11b

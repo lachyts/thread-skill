@@ -492,10 +492,10 @@ ok "$(git -C "$tmp/decoy" for-each-ref)" "$before" "38. … the decoy's refs are
 
 # ======== wiring ========================================================================================
 eff=$(tr '\n' ' ' < "$ef")
-pbpara=$(awk '/^\*\*Pushed base\.\*\*/{on=1} /^\*\*Engine path\.\*\*/{on=0} on' "$ef" | tr '\n' ' ')
-has "$eff" "Four blockers" "execution-fit names four blockers"
+pbpara=$(awk '/^\*\*Pushed base\.\*\*/{on=1} /^\*\*Unfinished rollout\.\*\*/{on=0} on' "$ef" | tr '\n' ' ')
+has "$eff" "Five blockers" "execution-fit names five blockers"
 has "$pbpara" "**Pushed base.**" "execution-fit has the Pushed base blocker"
-for w in "ADR 0025" "THREAD.md" "known_marketplaces" "\`Local:\`" "never per wave" "execute § 2.7" "origin/close/*" "queued" "stranded"; do
+for w in "ADR 0025" "THREAD.md" "known_marketplaces" "\`Local:\`" "never per merge" "execute § 2.7" "origin/close/*" "queued" "stranded"; do
   has "$pbpara" "$w" "the Pushed base blocker names $w"
 done
 lr=$(grep -n '^\*\*Landing register\.\*\*' "$ef" | cut -d: -f1); pbl=$(grep -n '^\*\*Pushed base\.\*\*' "$ef" | cut -d: -f1); epl=$(grep -n '^\*\*Engine path\.\*\*' "$ef" | cut -d: -f1)
@@ -527,7 +527,7 @@ ok "$([ -n "$a" ] && [ -n "$b" ] && [ -n "$c" ] && [ "$a" -lt "$b" ] && [ "$b" -
 s27=$(awk '/^### 2\.7\. /{on=1} /^### 3\. /{on=0} on' "$ex" | tr '\n' ' ')
 for w in "execution-fit.md\` § Dispatch blockers" "entered at § 1" "ROLLOUT-HEARTBEAT" "resumeFromRunId" "/thread:repair" \
          "before §4.5 *Reinstate*'s \`clear-pause\`" "**Pausing is exempt**" "**Any other non-zero exit**" \
-         'reason="local default branch is ahead of origin"' 'reason="pushed-base check failed"' "Local:" "never per wave"; do
+         'reason="local default branch is ahead of origin"' 'reason="pushed-base check failed"' "Local:" "never per merge"; do
   has "$s27" "$w" "execute § 2.7 names $w"
 done
 s45raw=$(awk '/^### 4\.5\./{on=1} /^### 5\./{on=0} on' "$ex")
@@ -539,7 +539,7 @@ cold=$(printf '%s\n' "$s45raw" | awk '/^\*\*Cold resume\.\*\*/{on=1} on && /^$/{
 has "$cold" "§ 2.7" "execute Cold resume names § 2.7"
 has "$cold" "entered at § 1" "execute Cold resume gates § 2.7 on entry at § 1"
 lrc=$(grep '^\*\*Landing-register re-check\.\*\*' "$ex")
-lacks "$lrc" "2.7" "execute § 4.5 Landing-register re-check does not run § 2.7 per wave"
+lacks "$lrc" "2.7" "execute § 4.5 Landing-register re-check does not run § 2.7 at each merge"
 rr=$(grep '^"Re-run § 2.5"' "$ex")
 ok "$([ -n "$rr" ] && echo y)" y "execute keeps the Re-run § 2.5 definition"
 lacks "$rr" "2.7" "the Re-run § 2.5 definition does not include § 2.7"

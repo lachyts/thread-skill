@@ -3,15 +3,16 @@
 Claude Code plugin, thirteen skills, two lanes. The **continuity verbs** solve
 "too many live agent threads, and shutting one down feels like losing context"
 — every route out of a thread captures its state somewhere durable. The
-**rollout verbs** run large multi-PR changes as a wave-by-wave convergence
-rollout on a Workflow engine. One rule connects them: the **execution-fit
-test** (`skills/_shared/execution-fit.md`) decides which lane owns a cluster —
-hard, never as a preference. Wave-shaped work (one repo, PR-per-task,
-machine-verifiable in-run) rolls out; everything else runs as scoped sessions.
+**rollout verbs** run large multi-PR changes as a queue of tasks on a
+convergence engine, each integrated with the latest main before it merges. One
+rule connects them: the **execution-fit test** (`skills/_shared/execution-fit.md`)
+decides which lane owns a cluster — hard, never as a preference. Rollout-shaped
+work (one repo, PR-per-task, machine-verifiable in-run) rolls out; everything
+else runs as scoped sessions.
 
 > Until v2.0.0 the rollout verbs shipped as the separate `wave` plugin
-> (`lachyts/wave-skill`, now archived). "Wave" lives on as the domain term —
-> rollouts still have waves — but the namespace is `/thread:*` throughout.
+> (`lachyts/wave-skill`, now archived). The namespace is `/thread:*`
+> throughout, and since ADR 0030 a rollout is a queue.
 
 > **Built for one setup.** This is a working reference implementation, published as-is, not a
 > general-purpose plugin. The skills assume the author's machine: an Obsidian vault at
@@ -28,7 +29,7 @@ machine-verifiable in-run) rolls out; everything else runs as scoped sessions.
 |---|---|---|
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
-| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): audit an area's open work and recommend the best use of time, then **Reshuffle** (re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate) or **Look only**. Schedules wave-shaped phases itself, steers the rest (background batch sessions it launches itself, ADR 0010, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
+| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): audit an area's open work and recommend the best use of time, then **Reshuffle** (re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate) or **Look only**. Schedules rollout-shaped phases itself, steers the rest (background batch sessions it launches itself, ADR 0010, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
 | `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop also create a fresh visible sidebar task seeded with it; elsewhere label it a manual handoff. |
@@ -41,7 +42,7 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 | Member | Role | What it does |
 |---|---|---|
 | `/thread:schedule` | planner | Orders the backlog into a queue (dependencies recorded in frontmatter, Solo for sweeping changes, affine same-file clusters folded into one unit) and refuses a second unfinished rollout on a repo (`--regenerate` supersedes it, carrying its unlanded tasks); writes a thin, always-dated `<slug>-rollout-<YYYY-MM-DD>.md` (data only, `protocol_version: 5`). No minimum size — shape decides, not count. |
-| `/thread:execute` | executor | Runs the rollout on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call; the lead runs a wave's tasks in order; continuous mode auto-merges each wave (`--gated` = manual merge). |
+| `/thread:execute` | executor | Runs the rollout's queue on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call up to `parallel_ceiling`; the lead integrates each approved task with the latest main and auto-merges it (`--gated` = a merge hold before each merge). |
 | `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. |
 | `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. |
 
@@ -50,13 +51,14 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 Orient's local read/audit and task-note debrief are portable; its automatic
 batch dispatch requires a Claude Code session, a scoped `cc-*` profile and
 cmux. Other harnesses can prepare manual launch prompts without marking tasks
-dispatched. The Wave executor still requires its canonical Workflow runtime;
+dispatched. The rollout executor still requires its canonical Workflow runtime;
 shared source and skill discovery do not provide that runtime.
 
 ## The convergence engine
 
 `skills/execute/task.workflow.js` runs **three layers per task**,
-**one task per Workflow call**; the lead runs a wave's tasks in order:
+**one task per Workflow call**; the lead fills slots up to `parallel_ceiling`,
+integrates each approved task and merges it:
 
 1. **Plan-gate** — an autonomous judge approves the implementation plan before
    code is written (skippable per rollout; a plan's declared gated inputs
@@ -77,7 +79,7 @@ inputs and the lead's own set-aside rows).
 
 ## Design
 
-- `CONTEXT.md` — the domain glossary (lane, wave-shaped, Task floor, Router,
+- `CONTEXT.md` — the domain glossary (lane, rollout-shaped, Task floor, Router,
   rollout, cursor, conductor, drift, tier, …).
 - `skills/_shared/execution-fit.md` — the canonical lane rule.
 - `skills/_shared/task-writer.md` — the single spec for writing + routing the
@@ -102,7 +104,8 @@ inputs and the lead's own set-aside rows).
   `0024` — the operator's top tier sets every rollout's ceiling (amends 0016;
   implementation pending, task p7-1). `0025` — master moves only by green PR,
   owner included. (0018–0023 are reserved: 0018–0022 are on the protocol 4
-  branch, and 0023 belongs to orient's native-children task, p3-1.)
+  branch, and 0023 belongs to orient's native-children task, p3-1.) `0030` — a
+  rollout is a queue that integrates at merge (one engine, no alias).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
@@ -154,7 +157,8 @@ final check that the run wrote nothing into the tree):
   positional `$N` (Claude Code substitutes skill arguments into them; logic that needs one lives in a
   script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
-  (`handoff-one-writer.test.mjs`).
+  (`handoff-one-writer.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
+  and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
 - **Next-action script** — `tests/next-action.test.mjs`: `next-action.py`'s set-down, fill, read and
   captures against throwaway vaults — byte-level one-line edits, YAML-safe quoting, both tag forms, the
   shared dead-link rule, and refusals that write nothing.

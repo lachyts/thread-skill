@@ -579,7 +579,7 @@ test('f6: the own run merged main — the approved head STOPs naming the recipe\
   assert.equal(again.row.status, 'review')
 })
 
-test('f7: a stale anchor ref sets the task aside with the prefix p12-11 routes on', async () => {
+test('f7: a stale anchor ref sets the task aside with the prefix repair routes on', async () => {
   const stop = `merge step STOP: stale anchor ref ${M} is not on ${BR} (branch recut or rewritten) — delete it: git update-ref -d refs/integration-anchor/${BR} ${M}`
   const r = await run(mkArgs(mkI()), { [ILABEL]: blockedIr(stop) })
   clean(r)

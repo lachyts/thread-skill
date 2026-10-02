@@ -1,16 +1,13 @@
 // p12-5 (ADR 0030): the engine converges exactly ONE task per Workflow call.
 //
-// task.workflow.js used to take `args.waves` and run each wave's tasks in parallel chunks of
-// `concurrency`. It now takes one `args.task` (the same fields as the old waves[].tasks[] row) and
-// returns the same envelope with exactly one row, { rolloutSlug, tasks: [row] }, so reconcile-wave.py
-// is unchanged. The lead holds the calls: a wave's tasks run one call at a time, in order, until the
-// queue lands. These tests run the WHOLE script through tests/lib/engine.mjs runTask(), the way the
+// task.workflow.js takes one `args.task` and returns an envelope with exactly one row,
+// { rolloutSlug, tasks: [row] }, the shape reconcile-rollout.py reads. The lead holds the calls and runs
+// the queue (execute § 4.5). These tests run the WHOLE script through tests/lib/engine.mjs runTask(), the way the
 // runtime does, with a scripted `agent` stub; the prompt builders and the three convergence layers keep
 // their own suites (prompt-invariants, pinned-tree, default-branch, git-env-scrub).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import path from 'node:path'
 import { runTask, loadEngine, enginePath } from '../../../tests/lib/engine.mjs'
 
 const ROW_KEYS = [
@@ -124,7 +121,7 @@ test('two tasks\' args give independent one-row results', async () => {
   assert.deepEqual(a2.logs, a1.logs)
 })
 
-test('the old wave shape and a malformed task are refused before any dispatch', async () => {
+test('the pre-p12-5 `waves` shape and a malformed task are refused before any dispatch', async () => {
   const task = mkTask('proj-fix-a')
   const old = await run({ rolloutSlug: 'r', repoPath: '/repo', concurrency: 4, waves: [{ wave: 1, tasks: [task] }] })
   assert.match(String(old.error && old.error.message), /args\.task, not args\.waves/)
@@ -194,14 +191,14 @@ test('a stage that throws drops the task to a blocked row and the result still r
   assert.ok(r.logs.some((l) => l.includes('converge threw on proj-fix-a')), r.logs.join('\n'))
 })
 
-test('progress is relayed verbatim once and is the only log line naming a wave', async () => {
-  const progress = 'wave 2/4 dispatched — 42m elapsed, ~50m remaining (rough)'
+test('progress is relayed verbatim once and is the only log line starting progress:', async () => {
+  const progress = 'progress: 2/6 merged, 1 running, 3 queued — 42m elapsed, ~50m remaining (rough)'
   const withP = await run(mkArgs(mkTask('proj-fix-a'), { progress }))
   assert.deepEqual(withP.unknown, [])
   assert.equal(withP.logs.filter((l) => l === progress).length, 1)
-  assert.deepEqual(withP.logs.filter((l) => /\bwave\b/i.test(l)), [progress])
+  assert.deepEqual(withP.logs.filter((l) => l.startsWith('progress:')), [progress])
   const without = await run(mkArgs(mkTask('proj-fix-a')))
-  assert.deepEqual(without.logs.filter((l) => /\bwave\b/i.test(l)), [])
+  assert.deepEqual(without.logs.filter((l) => l.startsWith('progress:')), [])
   assert.ok(without.logs.some((l) => l.startsWith('task: proj-rollout-2026-10-01 — proj-fix-a (cross-cutting)')))
 })
 
@@ -220,7 +217,7 @@ test('an invalid review budget fails closed per task with no dispatch', async ()
   assert.match(row.blockerDiagnosis, /max_review_rounds = 0/)
 })
 
-test('static: the engine is task-shaped and the old script is gone with no alias', () => {
+test('static: the engine is task-shaped (the retired script is queue-only.test.mjs (d))', () => {
   const src = fs.readFileSync(enginePath, 'utf8')
   // The only a.waves read is the refusal guard.
   assert.deepEqual(src.match(/\ba\.waves\b[^\n]*/g), ["a.waves !== undefined) throw new Error('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')"])
@@ -228,6 +225,4 @@ test('static: the engine is task-shaped and the old script is gone with no alias
   assert.ok(!/\bchunk\(/.test(src), 'no chunk(')
   assert.ok(!/\bpipeline\(/.test(src), 'no pipeline(')
   assert.match(src, /name: 'task',/)
-  // The old name is assembled so the repo's no-live-reference grep for it stays empty.
-  assert.ok(!fs.existsSync(path.join(path.dirname(enginePath), ['wave-execute', 'workflow', 'js'].join('.'))))
 })

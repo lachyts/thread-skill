@@ -19,8 +19,8 @@ falling back to a transcript scan for history, and:
   done     -> allow + clear driver state (completion ceremony performed)
   (none)   -> allow (not a rollout-driving session)
 
-The wave loop's old status line (`cursor=<K>/<N>`) no longer matches (that loop is
-gone, ADR 0030), and neither does a line without `running=`.
+A line without `merged=` and `running=` (a cursor-shaped one included) never
+matches (ADR 0030: a rollout is a queue with no stored cursor).
 
 Blocking is bounded by a progress-aware cap: consecutive blocks without
 `merged` advancing release the stop and surface the stall to the user instead

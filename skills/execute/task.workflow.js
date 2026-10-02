@@ -10,16 +10,16 @@ export const meta = {
 }
 
 // =============================================================================
-// task.workflow.js — the per-task convergence engine (protocol_version: 3)
+// task.workflow.js — the per-task convergence engine (protocol_version: 5)
 //
 // Invoked by the thread:execute lead via Workflow({ scriptPath, args }), ONE call per task: the
-// engine converges exactly ONE task per call, and the lead holds the calls (ADR 0030, p12-5). Until
-// the queue lands, the lead runs a wave's tasks one call at a time, in order, and merges the wave
-// once its last call is reconciled. The lead owns vault I/O, the protocol gate, config resolution,
-// status reconciliation, reporting, the wave merge barrier, the --gated between-wave pause, and the
-// soft-pause check (a `pause_requested: true` flag on the rollout note, honoured by
-// reconcile-wave.py's end-of-wave cursor step — the engine never sees a pause, because the lead
-// simply doesn't launch the next call). This script owns ONLY the three-layer convergence engine.
+// engine converges exactly ONE task per call, and the lead holds the calls (ADR 0030, p12-5). The
+// lead runs the queue: it fills slots up to `parallel_ceiling`, integrates each approved task with the
+// latest main one at a time, and is the rollout's only merger. The lead owns vault I/O, the protocol
+// gate, config resolution, status reconciliation, reporting, Integration, merging, the --gated merge
+// hold, and the pause (a `pause_requested: true` flag on the rollout note is `reconcile-rollout.py
+// next`'s drain — the engine never sees a pause, because the lead simply doesn't launch the next
+// call). This script owns ONLY the three-layer convergence engine.
 //
 // args = {
 //   rolloutSlug : string,            // e.g. "giflab-rollout"
@@ -44,15 +44,16 @@ export const meta = {
 //   defaultBranch : string,          // optional; the target repo's origin default branch when it is NOT
 //                                    //   'main' (e.g. "master"). Fresh worktrees branch from origin/<it>.
 //                                    //   Absent/'main' ⇒ worktree setup renders byte-identical to pre-fix.
-//   progress    : string,            // optional; a precomputed progress line — "wave 2/4 dispatched — 42m
-//                                    //   elapsed, ~50m remaining (rough)" — from reconcile-wave.py
-//                                    //   mark-dispatched (skill §4.5 step 1). This sandbox has no clock
-//                                    //   (Date.now() throws): the wave-boundary timestamps live on the
-//                                    //   rollout note, the arithmetic lives in reconcile-wave.py, and the
-//                                    //   engine only RELAYS the line via log() for live /workflows
-//                                    //   visibility. Absent/empty ⇒ no extra log line (byte-identical).
-//   task        : {                  // exactly ONE task object (the old waves[].tasks[] row). An args
-//                                    //   object carrying `waves` (the pre-p12-5 shape) is refused before
+//   progress    : string,            // optional; a precomputed progress line — "progress: 2/6 merged,
+//                                    //   1 running, 3 queued — 42m elapsed, ~50m remaining (rough)" — from
+//                                    //   reconcile-rollout.py next / mark-started (skill §4.5 step 1). This
+//                                    //   sandbox has no clock (Date.now() throws): the started:/merged:
+//                                    //   stamps live on the task notes, the arithmetic lives in
+//                                    //   reconcile-rollout.py, and the engine only RELAYS the line via
+//                                    //   log() for live /workflows visibility. Absent/empty ⇒ no extra log
+//                                    //   line (byte-identical).
+//   task        : {                  // exactly ONE task object. An args object carrying
+//                                    //   `waves` (the pre-p12-5 shape) is refused before
 //                                    //   any dispatch, as is a missing, null or array `task`.
 //       slug            : string,    // task note basename, e.g. "giflab-fix-coalesce"
 //       taskPath        : string,    // absolute path to the task note
@@ -132,13 +133,12 @@ export const meta = {
 //   }
 // }
 //
-// ---- The lead contract for Integration (p12-9 owns the lead's side) ----
-// The Integration log. A reconcile follow-up (filed by the lead, depends on p12-8) stamps `ready:` when a
-// task's status changes to review, and appends one line per Integration call under the note's
-// `## Integration log`, from this row's `integration` field: `<startedAt> <outcome> path=<p> pr=<n>
-// anchor=<sha> head=<sha> base=<sha> wait=<n|-> duration=<n|-> triggers=<list|->`. It is the durable record
-// the clean path and the review-blocked rule below read; until it lands, only the live session's own
-// record counts.
+// ---- The lead contract for Integration (execute § 4.5 is the lead's side) ----
+// The Integration log. reconcile-rollout.py stamps `ready:` when a task's status changes to review, and
+// appends one line per Integration call under the note's `## Integration log`, from this row's
+// `integration` field: `<startedAt> <outcome> path=<p> pr=<n> anchor=<sha> head=<sha> base=<sha>
+// wait=<n|-> duration=<n|-> triggers=<list|->`. It is the durable record the clean path and the
+// review-blocked rule below read.
 // The anchor (ADR 0030 decision 3: a merge already in the branch is still judged). Every Integration of a
 // task pins one anchor: integration.headSha, with taskBase = merge-base(anchor, origin/<default>). The
 // anchor is ALWAYS ANCHOR_RECIPE's output on the PR head (render the constant verbatim and pin the copy):
@@ -154,8 +154,8 @@ export const meta = {
 // The ref's lifecycle. The merge step creates refs/integration-anchor/<branch> on the task's first
 // Integration, create-only, never moved (local refs are shared by every worktree and survive the session).
 // The lead deletes it, guarded by its old value, whenever the branch stops being this PR's: after the PR
-// merges (p12-7), when the PR is closed, when the task is re-dispatched from scratch or its branch recut
-// (p12-9, p12-11), and on a set-aside whose reason starts `integration: merge step STOP: stale anchor ref`.
+// merges (merge-task.sh), when the PR is closed, when the task is re-dispatched from scratch or its branch
+// recut (repair § 4), and on a set-aside whose reason starts `integration: merge step STOP: stale anchor ref`.
 // Leftovers. A dead integrator (or a verifier that rewrites tracked files, or the env bootstrap) can leave
 // tracked changes in the task tree. The merge step stashes them, never discards them (`stashed:
 // integration leftovers <head>` in the merge log), so neither the in-run retry nor a re-entry wedges on
@@ -164,25 +164,24 @@ export const meta = {
 // (ii) the task's latest Integration record is a completed Integration whose head equals the current PR
 // head (a base-moved retry then checks shared files against that record's base). The durable record is the
 // last `integrated` line of the Integration log. Anything else — a rejection and revise, a set-aside, a
-// session that died mid-Integration, a cold resume before the Integration log exists — takes the trouble
-// path, where `branch-moved` sends it to the judge. Until then, an integrated-but-unmerged task whose
-// session died re-pays one integrator and one judge on each cold resume.
+// session that died mid-Integration — takes the trouble path, where `branch-moved` sends it to the judge.
 // Inputs. `landed` lists every PR merged in taskBase..mainSha, so a task back from a rejection still lists
 // the PRs behind it; the integrator and the judge read mainSha..<base> themselves for anything later.
 // `reviewHistory` comes from the live session (passed verbatim: rounds with empty feedback are dropped
 // here), or cold from the latest `## Blocker diagnosis` run (parseIntegrationMarker: every engine-written
 // rejected or set-aside marker carries it), else []. `reviewRoundsUsed` is the larger of the note's
 // `review_rounds_used` and the history's last round. `readyAt` is when the approving own (or seeded
-// revise) call returned — durable as the Integration log follow-up's `ready:` stamp; none ⇒ waitMinutes
+// revise) call returned — durable as the note's `ready:` stamp; none ⇒ waitMinutes
 // null. `startedAt` is when the lead launches this call. Never integrate a read-only task; run one
 // Integration at a time.
-// Outcomes. `integrated` ⇒ row status review: hand integration.headSha and baseSha to p12-7. `rejected` ⇒
+// Outcomes. `integrated` ⇒ row status review: hand integration.headSha and baseSha to merge-task.sh
+// (execute § 4.5 step 4). `rejected` ⇒
 // blocked with REVISE_MARKER (review-blocked when no review round is left): launch the seeded revise
 // (task.resume, it holds a slot — ADR 0030 decision 3), then re-integrate on the same anchor. `set-aside` ⇒
 // blocked with `integration: <reason>` (gate-pending for a gate): re-enter at Integration on the same anchor.
 // Stage markers (ADR 0030 decision 4: a set-aside task resumes at the stage it stopped, and nothing already
 // approved is redone). For a blocked task the FIRST line of the latest `## Blocker diagnosis` run decides —
-// REVISE_MARKER ⇒ a seeded revise (p12-8 reports it `setAsideAt: run`, the task's own lane), any other
+// REVISE_MARKER ⇒ a seeded revise (reconcile-rollout.py reports it `setAsideAt: run`, the task's own lane), any other
 // `integration: ` line ⇒ Integration, anything else ⇒ the own run (a task-mode diagnosis that would parse
 // as a marker is written `own run: …`). A review-blocked task has no such run: reconcile writes its
 // history under `## Review-blocked feedback` as plain `Round N:` groups, which drop the Integration stage.
@@ -191,8 +190,7 @@ export const meta = {
 // resumes, once max_review_rounds is raised, as a seeded `task.resume` revise: the PR, branch
 // and tree from the note, the history from that section's latest run (parseIntegrationMarker reads the
 // `Round N:` form), reviewRoundsUsed its last round; never a fresh plan or implement. No such line ⇒ the
-// own run. Before the Integration log exists, only the live session's record (this row's
-// `integration.outcome`, or the seeded call it launched) tells the two apart.
+// own run.
 // "Committed" (the `committed` trigger) is a non-merge commit beyond the merge commit, or a conflict
 // resolution; a clean, conflict-free merge commit alone is not code written (a clean merge touching a
 // landed PR's files is caught by `shared-file`).
@@ -200,7 +198,7 @@ export const meta = {
 // Returns { rolloutSlug, tasks: [ONE row: { slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
 //   approvedAtCeiling, summary, model, escalated, escalatedAt, tierCapped, tierCappedAt, gatedInputs }] }
-// — the pre-p12-5 envelope with exactly one row, the called task's, so reconcile-wave.py is unchanged —
+// — the pre-p12-5 envelope with exactly one row, the called task's, the shape reconcile-rollout.py reads —
 // where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending, model is the FINAL tier
 // the task ran on, escalated/escalatedAt ('plan' | 'implement' | 'review') record an opus→fable
 // escalation. tierCapped is true when maxTier suppressed an escalation this task would otherwise have
@@ -301,6 +299,17 @@ through commondir, so a run that way commits, flips core.bare and pushes against
 real remote. To test behaviour under an exported GIT_* variable, build a throwaway repo under
 \`mktemp -d\` whose only remote is a local bare repo, and point the variable there.`
 
+// Removing files (the 2026-10-01 stall). Claude Code's dangerous-removal check is bypass-immune: it asks a
+// person about an `rm` whose target it cannot resolve statically even in bypass mode, and nothing times the
+// ask out. An unattended agent ran `mkdir -p /tmp/x && cd /tmp/x && rm -rf ./* && …` and its rollout waited
+// 13 h on the ask. The estate's PreToolUse hook (`_shared/hooks/check-dangerous-rm.sh`, fixtures in
+// `_shared/hooks/tests/run-dangerous-rm-fixtures.sh`) refuses those shapes; this rule saves the agent the
+// round trip. Both forms it names for a `mktemp -d` directory pass that hook: `"$T"` with no trailing slash
+// leaves it no slash shape to flag, and `${T:?}` is a guard. Every agent prompt (all 10 builders) renders it
+// right after GIT_ENV_RULE. A single-quoted one-line string, so nothing in it is interpolated; it has no git
+// span, so the scrub rule's span check is unaffected.
+const RM_RULE = 'Removing files (hard rule, the 2026-10-01 stall): remove a scratch directory by its literal absolute path (`rm -rf /tmp/x && mkdir -p /tmp/x`); for a `mktemp -d` directory, whose path is not known when you write the command, remove the directory itself by its variable with no trailing slash (`rm -rf "$T"`) or guard the variable (`rm -rf "${T:?}"/*`). Never `cd` into a directory and then remove a relative glob (`rm -rf ./*`), and never remove a path that starts with an unguarded `$VAR/` or a command substitution: Claude Code asks a person about those even in bypass mode, and an unattended run stalls on the ask.'
+
 // The read-only agents' side of the pinned task tree (ADR 0030, p12-4). The planner, plan judge, plan
 // reviser and investigator all work in the task's ONE worktree (taskTreeSetup below), which the
 // implementer then builds in — so what they may touch there is narrow: read under the tree, map the
@@ -333,7 +342,7 @@ Before you open or update a PR, run these preflight checks:
 - Worktree path discipline: your worktree root is the absolute path \`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\` prints — call it $WT. Every Read/Edit/Write MUST target a path UNDER $WT (e.g. \`$WT/src/foo.py\`). Edit requires an absolute path — do NOT absolutize against the project root you were handed (that is the MAIN checkout): an edit to a \`<project-root>/…\` path lands in the main checkout, OUTSIDE your branch and invisible to your PR — which looks exactly like a "silent Edit no-op" but is really a wrong-tree edit. After editing, \`${GIT_ENV_SCRUB} git -C $WT diff\` MUST show your change; if it does not, you edited the wrong tree — redo it against the \`$WT/…\` path.`.trim()
 
 // Re-dispatch awareness. A resumed blocked task carries the prior attempt's diagnosis in its note —
-// reconcile-wave.py appends `## Review-blocked feedback` / `## Blocker diagnosis` / `## Plan-blocked
+// reconcile-rollout.py appends `## Review-blocked feedback` / `## Blocker diagnosis` / `## Plan-blocked
 // feedback`, and /thread:repair may inject a `## Repair input` with a human decision. Without an explicit
 // nudge the agent can re-read the note and silently repeat the rejected work. This line is static (always
 // in the prompt) and harmless on a fresh task where no such section exists.
@@ -661,6 +670,8 @@ ${worktreeSetup(a, task)}
 
 ${GIT_ENV_RULE}
 
+${RM_RULE}
+
 Steps:
 1. Read the task note in full + every source file it references. Do not skim. ${PRIOR_FEEDBACK_NOTE}
 2. If the fix is well-defined, work test-first (write the failing test before the fix). Use the
@@ -695,6 +706,8 @@ ${TASK_TREE_RULE}
 
 ${GIT_ENV_RULE}
 
+${RM_RULE}
+
 Steps:
 1. Read the task note in full + every file it references (under the task tree).
 2. Run the read-only investigation it asks for (greps, reading tests, and a baseline verifier run to OBSERVE:
@@ -725,6 +738,8 @@ implementer builds in this same tree later, so the plan is made on the base the 
 ${TASK_TREE_RULE}
 
 ${GIT_ENV_RULE}
+
+${RM_RULE}
 
 Steps:
 1. Read the task note in full + every source file it references. Do not skim. ${PRIOR_FEEDBACK_NOTE}
@@ -795,6 +810,8 @@ ${TASK_TREE_RULE}
 
 ${GIT_ENV_RULE}
 
+${RM_RULE}
+
 Read the brief and grep the task tree as needed to verify the plan's claims — do not approve on faith.
 Decide: verdict "approve" if the plan is sound (clean or trivially nitpicky), else "changes" with 3–8
 specific, actionable feedback bullets.`
@@ -823,6 +840,8 @@ ${TASK_TREE_RULE}
 
 ${GIT_ENV_RULE}
 
+${RM_RULE}
+
 Run additional READ-ONLY investigation in the task tree as needed. Rewrite the plan so that its
 FIRST line is \`Planned on: <sha from your setup's tree base: line>\`, followed verbatim by any \`tree NOT
 attached\` line the setup printed and any \`tree NOT refreshed:\` line your prior plan quoted, with the SAME required sub-sections
@@ -842,6 +861,8 @@ Project root: ${a.repoPath}
 ${worktreeSetup(a, task)}
 
 ${GIT_ENV_RULE}
+
+${RM_RULE}
 
 The approved plan:
 ---
@@ -885,6 +906,8 @@ ${depth}
 
 ${GIT_ENV_RULE}
 
+${RM_RULE}
+
 The PR is authoritative: judge \`gh pr diff ${prevImpl.prUrl}\` at the PR head. The task tree is context only
 (the rest of the repo at that commit): read files there only when
 \`${GIT_ENV_SCRUB} git -C "${worktreeDir(a.repoPath, task.slug)}" rev-parse HEAD\` equals
@@ -924,6 +947,8 @@ First action: \`cd ${prevImpl.worktreePath}\` and confirm via \`${GIT_ENV_SCRUB}
 in that worktree (NOT the project's main checkout) and on branch ${prevImpl.branch}.
 
 ${GIT_ENV_RULE}
+
+${RM_RULE}
 
 Review feedback — ROUND ${latest.round} (your work order; apply every bullet, verbatim below):
 ${latest.feedback.map((f) => '- ' + f).join('\n')}${guard}${stepBackBlock(priorFeedback, planText)}
@@ -1043,7 +1068,7 @@ paths (Read/Edit/Write) must be under "$WT" — e.g. "$WT/src/foo.py". NEVER edi
 that is the MAIN checkout, and an edit there lands outside your branch, invisible to your PR — the failure
 that looks like a "silent Edit no-op" but is really a wrong-tree edit. After any edit, confirm \`${GIT_ENV_SCRUB} git -C "$WT" diff\` shows it.
 A FRESH worktree is branched from a freshly-fetched ${base} (NOT local HEAD) so it includes every
-prior wave that has already merged. The two reuse arms above are unchanged — they must NOT re-fetch or
+task that has already merged. The two reuse arms above are unchanged — they must NOT re-fetch or
 rebase an in-flight branch on resume.`
 }
 
@@ -1307,7 +1332,7 @@ function escalate(st, slug, at) {
 //   judge        — the plan-gate judge
 //   masterReview — the PR-review judge (the master-side review layer)
 //   reconcile    — mechanical reconcile stages. Documented stance only today: reconcile is
-//                  deterministic Python (scripts/reconcile-wave.py), so no agent() consumes this
+//                  deterministic Python (scripts/reconcile-rollout.py), so no agent() consumes this
 //                  row — it fixes the effort for any future mechanical agent stage.
 const EFFORT = {
   opus:  { implementer: 'medium', judge: 'high', masterReview: 'high',  reconcile: 'low' },
@@ -1389,7 +1414,7 @@ function transientImplBlock(extra) {
 // on ADR 0008 (implement() reads an undefined plan result as "no gate"). Only an integer >= 1 is a budget;
 // anything else fails CLOSED with a diagnosis naming the frontmatter field. Strings are rejected rather
 // than coerced: args built from YAML ints are numbers, so a string is itself a config error. The text is
-// kept free of double quotes because the lead copies it into a WAVE-STATUS reason (Stop-hook regex).
+// kept free of double quotes because the lead copies it into a ROLLOUT-STATUS reason (Stop-hook regex).
 const ROUND_BUDGET_FIELDS = { maxPlanRounds: 'max_plan_rounds', maxReviewRounds: 'max_review_rounds' }
 function roundBudgetDiagnosis(task, keys) {
   const show = (v) => (typeof v === 'string' ? `'${v.replace(/"/g, '')}' (a string)` : String(v))
@@ -1689,8 +1714,8 @@ async function converge(task, a) {
   return wrap(reviewed)
 }
 
-// One result row per task, the shape reconcile-wave.py reads. A converge() that threw (r === null)
-// becomes a blocked row with the same diagnosis the old per-wave orchestration gave a dropped item.
+// One result row per task, the shape reconcile-rollout.py reads. A converge() that threw (r === null)
+// becomes a blocked row with the same diagnosis the engine has always given a dropped item.
 // The diagnosis passes through stageDiagnosis (p12-6): a seeded revise that stopped blocked gets the
 // revise marker, and an own-run diagnosis that would read as a stage marker gets `own run: `.
 function taskResult(t, r, a) {
@@ -2207,6 +2232,8 @@ ${branchTreeSetup(a, task, true)}
 
 ${GIT_ENV_RULE}
 
+${RM_RULE}
+
 Why you are here — the lead's trouble: ${trouble}.
 ${INTEGRATION_PRIOR_NOTE}
 
@@ -2300,6 +2327,8 @@ Why you are here: ${j.triggers.join(', ')}.
 ${branchTreeSetup(a, task, false)}
 
 ${GIT_ENV_RULE}
+
+${RM_RULE}
 
 Step 1 — the judge check. Run exactly, as ONE Bash command:
 ${integrationJudgeCheck(a, task, I, j).split('\n').map((l) => '  ' + l).join('\n')}
@@ -2498,7 +2527,7 @@ function integrationResult(task, out, a, trace) {
 // so the engine works whether args arrives as a string or an object.
 const a = typeof args === 'string' ? JSON.parse(args) : args
 defaultBranch(a)   // fail the run before any dispatch on an unusable args.defaultBranch
-// Refuse the pre-p12-5 wave shape before any dispatch: a lead on a stale SKILL.md, or a resume of a
+// Refuse the pre-p12-5 `waves` args shape before any dispatch: a lead on a stale SKILL.md, or a resume of a
 // pre-rename run, must fail loudly here rather than converge nothing. Recovery is a re-dispatch.
 if (a.waves !== undefined) throw new Error('task.workflow.js takes one args.task, not args.waves (ADR 0030, p12-5)')
 if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw new Error('args.task must be one task object')
@@ -2539,8 +2568,8 @@ if (mode === 'integrate') {
 
 log(`task: ${a.rolloutSlug} — ${a.task.slug} (${a.task.scope})`)
 if (tierCap(a) !== TOP_TIER) log(`maxTier=${tierCap(a)} — escalation is capped; capped tasks run the full loop at the higher tier's effort`)
-// Progress/ETA relay: the sandbox has no clock, so the skill precomputes this line (reconcile-wave.py
-// mark-dispatched) from the rollout note's wave-boundary stamps and the engine just surfaces it.
+// Progress/ETA relay: the sandbox has no clock, so the skill precomputes this line (reconcile-rollout.py
+// next / mark-started) from the task notes' started:/merged: stamps and the engine just surfaces it.
 if (a.progress) log(a.progress)
 
 // A seeded revise uses its validated history with the empty rounds dropped (liveHistory); any other task
@@ -2549,7 +2578,7 @@ const callTask = a.task.resume
   ? { ...a.task, resume: { ...a.task.resume, reviewHistory: liveHistory(a.task.resume.reviewHistory) } }
   : a.task
 // A stage that throws drops the task to null, which taskResult() turns into a blocked row — the same
-// mapping the old per-wave orchestration had, so one bad stage never loses the call's result.
+// mapping the engine has always had, so one bad stage never loses the call's result.
 let r
 try {
   r = await converge(callTask, a)
