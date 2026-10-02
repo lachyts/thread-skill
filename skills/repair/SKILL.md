@@ -132,9 +132,10 @@ P out, so schedule's check no longer counts P.
 From its queue state, its `lead-integrate.py inputs` (`resumeAt`, `autoRevise`, `lastIntegration`) and the
 live PR state. Each unmerged task takes the **first** class in table order whose signal it matches. The order
 matters: a RACE task's PR is MERGED, and so is an UNVERIFIED one's, which is also set aside at Integration, so
-they match **merged, never marked** and **at Integration** further down too; only the order keeps them out of
-`resume` and `hand-back` until Lachy has decided. A RACE re-verify in flight comes first of all: it is the
-lead's own procedure, so repair neither escalates it nor asks Lachy while the lead decides it.
+they match **merged, never marked** and **at Integration** further down too; the order escalates them before
+repair reaches for `resume` or `hand-back`, both of which hold back a held task themselves (§ 3c). A RACE
+re-verify in flight comes first of all: it is the lead's own procedure, so repair neither escalates it nor
+asks Lachy while the lead decides it.
 
 | Class | Signal | Action |
 |---|---|---|
@@ -178,11 +179,10 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume
 `resume` works on the whole rollout, not one task: for every unmarked note with a `pr:`, it asks gh for the
 PR's state and base, flips one merged into the default branch to done (stamping `merged:`), and reports
 anything else unchanged. A PR merged into another base is left alone, so it is escalated (§ 3c), never
-flipped. An undecided RACE / UNVERIFIED task is merged into the default branch too, but `resume` would only
-skip it (exit 3) and execute would halt on it or hold it set aside, so the decision is what moves it: hold
-`resume` until § 3c records Lachy's decision. `resume` skips a held task itself (exit 3). An exit 3 here
-means § 2 missed an undecided RACE / UNVERIFIED: escalate it (§ 3c). Under a pause or a live queue, report it and leave it: the reinstate's or the lead's next *Cold
-resume* runs `resume` first, and § 1 sends Lachy there only once every RACE decision is recorded.
+flipped. An undecided RACE / UNVERIFIED task is merged into the default branch too, and only Lachy's
+decision moves it: hold `resume` until § 3c records it. An exit 3 here (a `HOLD:` line) means § 2 missed one:
+escalate it (§ 3c). Under a pause or a live queue, report it and leave it: the reinstate's or the lead's next
+*Cold resume* runs `resume` first, and § 1 sends Lachy there only once every RACE decision is recorded.
 
 **3b — input-gated → capture + inject.** Ping the user only here and for the other decisions no agent can
 make (a gate, a § 3c escalation, a CLOSED PR or missing branch, a close-out, a defer chain, a second block or
@@ -226,9 +226,9 @@ evidence shown; decision left to Lachy.` Repair never writes that task's `status
     the stamp, then repair).
 - **RACE / UNVERIFIED.** Never re-call merge-task: main's state is Lachy's call. Until a dated
   `- <YYYY-MM-DD> repair: [[<slug>]] RACE decided: <his decision, verbatim>` line on the rollout note's
-  `## Notes` records it, the escalation is **undecided**: neither § 3a nor § 4's hand-off runs: `resume` would
-  only skip it (exit 3) and execute would halt on it or hold it set aside, so the decision is what moves it.
-  Once that line is written, `resume`
+  `## Notes` records it, the escalation is **undecided**: neither § 3a nor § 4's hand-off runs. Nothing but
+  the decision moves the task: `resume` skips it (exit 3), `hand-back` refuses it (exit 2), and execute halts
+  on a RACE once its lane is free and holds an UNVERIFIED task set aside. Once that line is written, `resume`
   flips the merged task done. The line is a rollout-note record, so repair writes it in every mode (§ 1),
   and a reinstate or a resume waits for it. If he decides the merge does not stand, defer the task (§ 5; its
   PR is merged, so the retire block's `gh pr close` is skipped) before recording it, so `resume` never reads
@@ -294,8 +294,7 @@ there is nothing to clear. Per stage:
   retrying it: surface it with its new diagnosis and offer *more guidance and one more retry* / *defer it*
   (§ 5) / *leave it set aside*. Don't loop.
 - **Hand-off, when no lead is live and no pause stands**, and never while a RACE / UNVERIFIED escalation is
-  undecided (§ 3c: `resume` would only skip it (exit 3) and execute would halt on it or hold it set aside, so
-  the decision is what moves it; report the hold and stop there): execute's queue loop, entered at its §4.5 resume
+  undecided (§ 3c; report the hold and stop there): execute's queue loop, entered at its §4.5 resume
   (*Cold resume*): execute § 2.5 first (then § 2.6), then `reconcile-rollout.py resume`, then the loop with
   `--running ""` (this session holds no task call). Execute's § 2.7 pushed-base gate (entry points only)
   does not run on this hand-off; the next `/thread:execute [[<rollout>]]` runs it. Under a live queue the
@@ -360,10 +359,8 @@ merges into another base (task + PR + base).
 - **Don't write a PR-less, RACE / UNVERIFIED or other-base task's `status:`**, and never re-call merge-task
   for a RACE.
 - **Don't run `resume` while a RACE / UNVERIFIED escalation is undecided.** Not in § 3a, not through § 4's
-  hand-off, and never send Lachy to a reinstate or a `/thread:execute` resume before its `RACE decided:` line:
-  `resume` would only skip it (exit 3) and execute would halt on it or hold it set aside, so the decision is
-  what moves it (§ 3c). The line
-  itself is a rollout-note record, so no pause or live lead holds it back (§ 1).
+  hand-off, and never send Lachy to a reinstate or a `/thread:execute` resume before its `RACE decided:` line
+  (§ 3c). The line itself is a rollout-note record, so no pause or live lead holds it back (§ 1).
 - **Don't touch a signed task while its lead is live.** After `approve-gates`, its owner session holds the
   signed-gate handle (execute § 3.7): no hand-back, recut, defer, re-plan or `## Repair input` (§ 2).
 - **Don't escalate a RACE re-verify in flight.** The lead decides it itself (§ 2). Asking Lachy before its

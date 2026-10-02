@@ -162,9 +162,9 @@ takes none of them.
 - **RACE / UNVERIFIED:** a RACE that is undecided (above), or a set-aside task whose reason
   (`blockerSummary`) carries `UNVERIFIED:` and has no `repair: [[<slug>]] RACE decided: …` line (a
   set-aside is never in flight). Main's state is Lachy's call, and until it is recorded the task cannot land:
-  `resume` skips it (a `HOLD:` line, exit 3), and execute halts on a RACE once its lane is free and holds an
-  UNVERIFIED task set aside (execute § 4.5). The flag reads only the vault and that local verdict
-  file, so it holds offline too.
+  `resume` skips it (a `HOLD:` line, exit 3), `hand-back` refuses it (exit 2), and execute halts on a RACE
+  once its lane is free and holds an UNVERIFIED task set aside (execute § 4.5). The flag reads only the vault
+  and that local verdict file, so it holds offline too.
 - **Merged into another base:** a MERGED PR whose `baseRefName` is not the default branch (the resolver's
   answer). That is the test `resume` applies: it leaves such a task alone, so it is escalated, never flipped:
   `/thread:repair` shows the evidence and leaves the call to Lachy.
@@ -247,8 +247,8 @@ checking the owner session first. While the owner session is alive, its heartbea
 genuine stall (execute § 8); a closed terminal stops it, and another session resumes only once the owner
 session has ended. **The RACE exception:** with a RACE re-verify in flight (§ 3), the owner session's answer
 never leads to `/thread:execute`. If that session shows the `RACE: …` halt or no run, or has ended, the RACE
-is undecided, and the next step is `/thread:repair [[<rollout>]]` (action 7), never `/thread:execute`. A
-Its *Cold resume* would halt on the RACE (`RACE undecided`) once its lane is free.
+is undecided, and the next step is `/thread:repair [[<rollout>]]` (action 7), never `/thread:execute`:
+`/thread:execute`'s *Cold resume* would only halt on the RACE (`RACE undecided`) once its lane is free.
 
 **Example report** (the live check on):
 
