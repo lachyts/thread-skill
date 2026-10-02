@@ -35,7 +35,31 @@ Resolve `[[<slug>]]` → `~/repos/obsidian/Work/Tasks/<slug>.md`. If several dat
 ambiguous name (e.g. "today's giflab rollout"), **list the matches and ask which**: don't assume. Read the
 body's `Project root: \`<repoPath>\`` line: it's the repo for the live checks.
 
-**Protocol version.** The status JSON does not carry it, so read it from the note:
+**Lineage first, then the version.** A supersede carries a rollout's unlanded tasks to its successor whatever
+the prior's `protocol_version` (a legacy rollout is exactly what a supersede migrates), so status reads the
+lineage before the version, and a lineage match decides the recommendation (§ 4, actions 1 and 2) before any
+version check can. Under a `superseded_by:` or a reverse-lineage match the report is the headline and § 2's
+`progress` line, whatever the version, and no queue: the successor holds the unlanded tasks.
+
+**Lineage.** Read `supersedes:` and `superseded_by:` from the rollout frontmatter. A `superseded_by:` means a
+supersede carried this rollout's unlanded tasks to the successor: headline it and point at the successor's
+status. A `supersedes:` goes in the headline.
+
+**Reverse lineage.** With no `superseded_by:` here, look for a rollout whose `supersedes:` names this one, read
+as `unfinished-rollout.py` reads the link (case-insensitive, an aliased `[[<slug>|…]]` included):
+`grep -rliE '^supersedes: *"?\[\[<slug>([|][^]]*)?\]\]' ~/repos/obsidian/Work/Tasks/ --include='*.md'`. A
+match `[[N]]` means a supersede carried this rollout's unlanded tasks to N and died before schedule step 7.5
+closed this note out, so this rollout must never be reinstated or resumed: its tasks are N's. Read N's
+`incomplete` from `reconcile-rollout.py status --rollout <N's path>` (the same pure read as § 2):
+
+- non-null → N never ran: headline `superseded by [[N]], supersede interrupted`. Schedule's § 0 pairs the two
+  as `interrupted`, and `/thread:schedule <project> --regenerate` finishes it.
+- null → N has run: headline `superseded by [[N]], close-out interrupted`. This note, still open, is why
+  schedule refuses the repo (`<this> is named by the supersedes: of <N>, which has since run`), and
+  `/thread:repair [[<this>]]` finishes step 7.5's close-out on Lachy's confirmation. That holds for a legacy
+  note too: `--regenerate` would only meet the same refusal.
+
+**Protocol version.** With no lineage match, read it from the note (the status JSON does not carry it):
 `grep -m1 '^protocol_version:' ~/repos/obsidian/Work/Tasks/<slug>.md`.
 
 - `protocol_version: 5` → § 2.
@@ -46,23 +70,8 @@ body's `Project root: \`<repoPath>\`` line: it's the repo for the live checks.
 - Any other value → report "unsupported protocol version <N>; the queue reads protocol_version: 5", render no
   queue, and recommend nothing runnable.
 
-**Lineage.** Read `supersedes:` and `superseded_by:` from the rollout frontmatter. A `superseded_by:` means a
-supersede carried this rollout's unlanded tasks to the successor: headline it and point at the successor's
-status. A `supersedes:` goes in the headline. After § 2, read the JSON's `incomplete`: non-null means the
-rollout must not run as written (`next` refuses it), so headline it with its reason and the remedy,
-`/thread:schedule <project> --regenerate`.
-
-**Reverse lineage.** With no `superseded_by:` here, look for a rollout whose `supersedes:` names this one:
-`grep -rlE '^supersedes: *"?\[\[<slug>\]\]' ~/repos/obsidian/Work/Tasks/ --include='*.md'`. A match `[[N]]`
-means a supersede carried this rollout's unlanded tasks to N and died before schedule step 7.5 closed this
-note out, so this rollout must never be reinstated or resumed: its tasks are N's. Read N's `incomplete` from
-`reconcile-rollout.py status --rollout <N's path>` (the same pure read as § 2):
-
-- non-null → N never ran: headline `superseded by [[N]], supersede interrupted`. Schedule's § 0 pairs the two
-  as `interrupted`, and `/thread:schedule <project> --regenerate` finishes it.
-- null → N has run: headline `superseded by [[N]], close-out interrupted`. This note, still open, is why
-  schedule refuses the repo (`<this> is named by the supersedes: of <N>, which has since run`), and
-  `/thread:repair [[<this>]]` finishes step 7.5's close-out on Lachy's confirmation.
+**Incomplete.** After § 2, read the JSON's `incomplete`: non-null means the rollout must not run as written
+(`next` refuses it), so headline it with its reason and the remedy, `/thread:schedule <project> --regenerate`.
 
 ### 2. Gather the vault state (deterministic)
 
@@ -121,6 +130,10 @@ nothing more:
 - one local `git -C <repoPath> remote get-url origin` (for its `<owner/name>`);
 - one `gh pr view <pr> --json state,mergedAt,mergeCommit,baseRefName,reviewDecision,statusCheckRollup` per
   PR'd task that has not landed;
+- at most one default-branch read, and only when one of those PRs reads MERGED: execute § 4's resolver,
+  `bash ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/default-branch.sh <repoPath>` (a read-only
+  `ls-remote` of origin's HEAD; when it exits non-zero, render "default branch unresolved" and flag each
+  MERGED PR as merged, never marked with "base unchecked": `resume` checks the base itself);
 - at most one `gh pr list --repo <owner/name> --state merged --limit 200 --json number,url,headRefName,baseRefName,mergedAt`,
   and only when a task with `started` has no `pr`.
 
@@ -131,13 +144,13 @@ or UNVERIFIED task's PR is MERGED too, so it is never also flagged merged, never
   set-aside reason (`blockerSummary`) carries `UNVERIFIED:`, and no dated `## Notes` line on the rollout note
   records `repair: [[<slug>]] RACE decided: …`. Main's state is Lachy's call, and until it is recorded no
   `resume` may run: it would flip the task done on an unverified main. Once it is, the task reads as merged,
-  never marked.
-- **Merged into another base:** a MERGED PR whose `baseRefName` is not the base the rollout's other PRs
-  target. `resume` checks the base itself and leaves such a task alone, so it is escalated, never flipped:
+  never marked. The flag reads only the vault, so it holds offline too.
+- **Merged into another base:** a MERGED PR whose `baseRefName` is not the default branch (the resolver's
+  answer). That is the test `resume` applies: it leaves such a task alone, so it is escalated, never flipped:
   `/thread:repair` shows the evidence and leaves the call to Lachy.
-- **Merged, never marked:** a note that is not done whose PR is MERGED. `resume` is the sanctioned path: it
-  checks the state and the default base and flips the note done, and execute's *Cold resume* runs it first.
-  `/thread:repair` runs it when no lead is live.
+- **Merged, never marked:** a note that is not done whose PR is MERGED into the default branch. `resume` is
+  the sanctioned path: it checks the state and the default base and flips the note done, and execute's
+  *Cold resume* runs it first. `/thread:repair` runs it when no lead is live.
 - **PR CLOSED:** an awaiting-Integration, integrating or set-aside-at-Integration task whose PR is CLOSED
   unmerged. `prepare` never reads the PR state, so the loop would integrate it only for merge-task to set it
   aside at its own run. Input-gated: repair offers restore, recut, defer or leave.
@@ -240,43 +253,56 @@ Drift:
   ⚠ [[proj-awaiting]] PR #4 is MERGED but the note says review → merged, never marked; /thread:repair runs resume
   ⚠ [[proj-running]] possible PR-less merge: PR #12 (head audit-fix/running) merged after its started: → /thread:repair escalates it
 
-Recommended next action: /thread:repair [[proj-rollout-2026-10-01]] (a possible PR-less merge overrides waiting on the live queue)
+Recommended next action: /thread:repair [[proj-rollout-2026-10-01]] (an open escalation, the possible PR-less merge, comes before waiting on the live queue)
 ```
 
 Keep the whole report scannable: it's a glance, not a wall of text.
 
 **Recommended action** — exactly one, the first that matches:
 
-1. Predates the queue (`protocol_version` absent, `2` or `3`) → execute § 2's remedy: hard-pause it if a
-   session is running it, then `/thread:schedule <project> --regenerate`.
-2. Unsupported protocol version → report it; nothing runnable to recommend.
-3. `incomplete` → `/thread:schedule <project> --regenerate`.
-4. `superseded_by:` → `/thread:status [[<successor>]]`: the successor holds the unlanded tasks.
-5. Named by another rollout's `supersedes:` (§ 1's reverse lineage) → never reinstate or resume it. The
+1. `superseded_by:` → `/thread:status [[<successor>]]`: the successor holds the unlanded tasks.
+2. Named by another rollout's `supersedes:` (§ 1's reverse lineage) → never reinstate or resume it. The
    successor never ran: `/thread:schedule <project> --regenerate` finishes the supersede. It has run:
-   `/thread:repair [[<rollout>]]`, which finishes schedule step 7.5's close-out on your confirmation.
+   `/thread:repair [[<rollout>]]`, which finishes schedule step 7.5's close-out on your confirmation. Both
+   hold whatever this note's `protocol_version`.
+3. Predates the queue (`protocol_version` absent, `2` or `3`) → execute § 2's remedy: hard-pause it if a
+   session is running it, then `/thread:schedule <project> --regenerate`.
+4. Unsupported protocol version → report it; nothing runnable to recommend.
+5. `incomplete` → `/thread:schedule <project> --regenerate`.
 6. Every task merged → "rollout complete: run the completion ceremony through `/thread:execute [[<rollout>]]`"
    (or "already archived").
-7. `paused` → "reinstate with `/thread:execute [[<rollout>]]`". For drift independent of the pause, add
-   `/thread:repair [[<rollout>]]`, which under a pause only captures decisions, defers, and writes a confirmed
-   `pr:`: it never hands back.
-8. `pause_requested` → "it drains; nothing to do." Repair may only capture decisions or defer.
-9. A live queue → "wait for the run; don't resume from here." Check `/workflows` in the owner session
-   (`<owner tag>`): if no run shows there, or that session has ended, `/thread:execute [[<rollout>]]` resumes
-   (*Cold resume*). Checked from any other session, "no run" proves nothing. Meanwhile, a set-aside task other
-   than an `autoRevise: true` one is never re-entered by the live lead itself (a revise stopped, a rejected
-   review-blocked task, an own run, an at-Integration one or a gate), so add `/thread:repair [[<rollout>]]`:
-   its live-queue mode hands those back, applies the raise or records a gate sign-off without touching the
-   run.
-10. Any drift flag, or a set-aside task other than an `autoRevise: true` one → `/thread:repair [[<rollout>]]`.
-11. Awaiting Integration, a handed-back running task (no `owner:`), an `autoRevise: true` set-aside, or a free
+7. An open escalation, an undecided RACE / UNVERIFIED or a possible PR-less merge →
+   `/thread:repair [[<rollout>]]`, whatever the pause or the queue: repair records Lachy's decision in every
+   mode (its § 1). Never reinstate or resume with `/thread:execute` until each RACE / UNVERIFIED task has its
+   `RACE decided:` line: a reinstate and a *Cold resume* run `resume` first, and it would flip that task done
+   on an unverified main. A possible PR-less merge gets a confirmed `pr:` only when no lead is live or under a
+   stamped pause; while a lead is live repair records it only.
+8. `paused` → "reinstate with `/thread:execute [[<rollout>]]`". For drift independent of the pause, add
+   `/thread:repair [[<rollout>]]`, which under a pause only records escalations and decisions and defers: it
+   never hands back.
+9. `pause_requested` → "the live lead drains it; nothing to do." Repair may only record escalations and
+   decisions, or defer. Check `/workflows` in the owner session (`<owner tag>`): if no run shows there, that
+   session has ended, or no task carries an `owner:`, nothing is draining it, and
+   `/thread:execute [[<rollout>]]` resumes the drain (*Cold resume*: its `next` integrates what awaits,
+   starts nothing and stamps `paused:`).
+10. A live queue → "wait for the run; don't resume from here." Check `/workflows` in the owner session
+    (`<owner tag>`): if no run shows there, or that session has ended, `/thread:execute [[<rollout>]]` resumes
+    (*Cold resume*). Checked from any other session, "no run" proves nothing. A merge hold (the Review
+    required flag) waits on you, not the run: "approve PR #N", and the lead merges on its next tick.
+    Meanwhile, a set-aside task other than an `autoRevise: true` one is never re-entered by the live lead
+    itself (a revise stopped, a rejected review-blocked task, an own run, an at-Integration one or a gate), so
+    add `/thread:repair [[<rollout>]]`: its live-queue mode hands those back, applies the raise or records a
+    gate sign-off without touching the run.
+11. Any drift flag, or a set-aside task other than an `autoRevise: true` one → `/thread:repair [[<rollout>]]`.
+12. Awaiting Integration, a handed-back running task (no `owner:`), an `autoRevise: true` set-aside, or a free
     slot, with no lead live → `/thread:execute [[<rollout>]]`.
-12. Nothing started → `/thread:execute [[<rollout>]]` to start.
+13. Nothing started → `/thread:execute [[<rollout>]]` to start.
 
-**Precedence.** A possible PR-less merge overrides 7, 8, 9, 11 and 12: the recommendation becomes
-`/thread:repair [[<rollout>]]`, which escalates it (under a stamped pause it writes only a confirmed `pr:`;
-under a drain or a live queue it records only). Offline, every resume or reinstate recommendation carries
-§ 3's caveat.
+**Precedence.** The order is the precedence, with no override on top of it. Lineage (1, 2) comes before the
+version (3, 4): a supersede is how a legacy rollout migrates, so a legacy note that a successor's `supersedes:`
+names needs its close-out, and `--regenerate` would only meet schedule's refusal again. An open escalation (7)
+comes before every reinstate, wait and resume (8 to 13), so status never sends an undecided RACE to
+`/thread:execute`. Offline, every resume or reinstate recommendation carries § 3's caveat.
 
 ## Loopable
 
@@ -294,13 +320,16 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
 - **There is no cursor: the task notes are the progress.** Don't re-scan GitHub for progress; the live PR
   check is only for drift flags.
 - **Never call a writer.** Not `reconcile-rollout.py next` (it stamps `paused:` on a drained pause), `resume`,
-  `hand-back` or any other; `reconcile-rollout.py status` and `lead-integrate.py inputs` are the only scripts
-  status runs. Never `lead-integrate.py prepare`, `set-aside`, `push` or `undo`, `merge-task.sh`, a
-  `gh pr close`, `merge` or `reopen`, a `git push`, `fetch` or `update-ref`: of `gh` and `git`, only § 3's
-  reads.
+  `hand-back` or any other; `reconcile-rollout.py status` and `lead-integrate.py inputs` are the only Python
+  scripts status runs, and `default-branch.sh` the only shell one. Never `lead-integrate.py prepare`,
+  `set-aside`, `push` or `undo`, `merge-task.sh`, a `gh pr close`, `merge` or `reopen`, a `git push`, `fetch`
+  or `update-ref`: of `gh` and `git`, only § 3's reads.
 - **Respect the § 3 budget.** One `worktree list`, one local `remote get-url`, one `gh pr view` per PR'd task
-  that has not landed, and at most one guarded `gh pr list`. Status is a glance; keep it cheap.
+  that has not landed, at most one guarded default-branch read and at most one guarded `gh pr list`. Status is
+  a glance; keep it cheap.
 - **Don't parse the `## Queue` table** for the task list: use the `status` subcommand's glob-by-backlink (it
   catches tasks the table omits).
 - **Don't recommend a resume against a live queue** unless its owner session, checked there, shows no run or
   has ended. Offline, qualify any resume with § 3's caveat.
+- **Don't send an undecided RACE / UNVERIFIED to `/thread:execute`.** No reinstate and no resume until its
+  `RACE decided:` line is recorded: § 4's action 7 comes first, and repair records the decision in any mode.

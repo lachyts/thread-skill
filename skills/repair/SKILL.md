@@ -51,18 +51,16 @@ Resolve `[[<slug>]]` (ask if ambiguous). Run the **`/thread:status` scan with th
 `lead-integrate.py inputs`, the drift flags and the repo path. Show the user the situational report first:
 they should see what they're repairing.
 
-**Stops.** Before anything else, and before anything is written (the close-out below writes only on Lachy's
-confirmation):
+**Stops**, first match in this order, before anything else and before anything is written (the close-out
+below writes only on Lachy's confirmation). The lineage stops come first, whatever the note's
+`protocol_version`: a supersede is how a legacy rollout migrates, so a legacy note can be a close-out, and the
+version stop's `--regenerate` would only meet schedule's refusal again.
 
-- `protocol_version` absent, `2` or `3` → execute § 2's remedy: hard-pause it if a session is running it, then
-  `/thread:schedule <project> --regenerate`. Stop.
-- any other value except `5` → "unsupported protocol version <N>; the queue reads protocol_version: 5". Stop.
-- `incomplete` → `/thread:schedule <project> --regenerate`. Stop.
 - `superseded_by:` → point at the successor (`/thread:repair [[<successor>]]`). Stop.
 - **Close-out interrupted** (status § 1's reverse lineage: another rollout `[[N]]`'s `supersedes:` names this
-  one, and this note has no `superseded_by:`). A supersede carried this rollout's unlanded tasks to N and died
-  before schedule step 7.5 closed this note out. Never reinstate, resume or hand back here: the carried tasks
-  are N's.
+  one, and this note has no `superseded_by:`), at any `protocol_version`. A supersede carried this rollout's
+  unlanded tasks to N and died before schedule step 7.5 closed this note out. Never reinstate, resume or hand
+  back here: the carried tasks are N's.
   - N never ran (its `incomplete` is non-null) → `/thread:schedule <project> --regenerate`: schedule § 0's
     `interrupted` line finishes that supersede. Stop.
   - N has run → finish step 7.5's close-out, **on Lachy's confirmation**, and only when status counts no
@@ -71,32 +69,52 @@ confirmation):
     `superseded_by: "[[N]]"` on this rollout note, then `mkdir -p ~/repos/obsidian/Work/Tasks/Archive/Rollouts/`
     and a plain `mv` of the note into it. A same-named file already there → skip the move and report the
     collision. Write nothing else. Stop, and point at `/thread:status [[N]]`.
+- `protocol_version` absent, `2` or `3` → execute § 2's remedy: hard-pause it if a session is running it, then
+  `/thread:schedule <project> --regenerate`. Stop.
+- any other value except `5` → "unsupported protocol version <N>; the queue reads protocol_version: 5". Stop.
+- `incomplete` → `/thread:schedule <project> --regenerate`. Stop.
 
-Then one of three modes holds. Each is evaluated before anything is written.
+Then one of three modes holds, each evaluated before anything is written: a pause, a live queue, or no lead
+live. Two rules cut across them.
+
+**In every mode**, on Lachy's confirmation where § 3 asks for it, repair may write what no live call reads or
+overwrites, because each is independent of the pause and the lead:
+
+- § 3c's escalation and its record: the evidence, the dated `## Notes` line on the rollout note, and, once
+  Lachy decides a RACE / UNVERIFIED, its `RACE decided:` line. That line is what lifts the hold on `resume`
+  (§ 3c), so neither a pause nor a live lead holds it back; only a decision that the merge does not stand
+  waits, for its defer (a lead-held note, below).
+- § 3b: a decision into a set-aside task's `## Repair input`.
+- § 5: a defer of a set-aside task with its queued dependants.
+
+**Lead-held notes.** § 3c's `pr:` write and its defer of a RACE / UNVERIFIED task whose merge Lachy decides
+does not stand write a task note a live call's reconcile would overwrite. They run only when no lead is live
+(every owner session has ended or shows no run there, a drain nothing is draining included) or under a
+stamped pause, where no call is live; otherwise they wait for the stamp or the lead's end.
 
 **Pause, drained or stamped.** While `pause_requested` drains, or `paused:` stands:
 
-- Repair reports the pause: stamped → "reinstate with `/thread:execute [[<rollout>]]`"; pending → "it drains;
-  nothing to do".
-- On Lachy's confirmation, and only for something independent of the pause, it may capture a decision (§ 3b)
-  or defer a set-aside task with its queued dependants (§ 5).
-- It never runs `hand-back`, `approve-gates`, the raise, `resume` or the loop, and it never clears the stamp or
-  the flag.
+- Repair reports the pause. Stamped → "reinstate with `/thread:execute [[<rollout>]]`". Pending → "it drains;
+  nothing to do" while a lead is live (the owner check below); with none, nothing is draining it, so
+  `/thread:execute [[<rollout>]]` resumes the drain. Either way, point at `/thread:execute` only once every
+  RACE / UNVERIFIED task has its `RACE decided:` line: its *Cold resume* runs `resume` first.
+- Beyond the every-mode writes it never runs `hand-back`, `approve-gates`, the raise, `resume` or the loop,
+  and it never clears the stamp or the flag.
 - Why: `next` stamps `paused:` only once nothing runs, awaits Integration or integrates. A hand-back during the
   drain would put a task back into exactly those states, and the live lead would integrate and merge it after
   Lachy asked to pause. Under a stamped pause, the reinstate decides what restarts.
-- The one extra under a stamped pause: § 3c's `pr:` write on Lachy's confirmation, leaving `resume` to the
-  reinstate's *Cold resume*.
+- The lead-held notes above run under a stamped pause (and under a drain nothing is draining), each leaving
+  `resume` to the next *Cold resume*.
 
 **Live queue, not paused.** A running or integrating task carries an `owner:` whose session is not known to
 have ended. A Workflow run is listed only in the session that launched it, which the tag names, so check
 `/workflows` in that owner session; from any other session "no run" proves nothing, so report "possibly live:
 check session `<owner tag>` first".
 
-- Repair may hand back, apply the raise, capture decisions, run `approve-gates` on sign-off, and defer
-  set-aside tasks with their queued dependants.
+- Beyond the every-mode writes, repair may hand back a set-aside task, apply the raise and run
+  `approve-gates` on sign-off.
 - It never runs `resume`, never enters the loop, and never writes a running or integrating note, because a
-  live call's reconcile would overwrite it.
+  live call's reconcile would overwrite it: the lead-held notes wait for the lead's end.
 - The live lead's next `next` restarts an `in_progress` hand-back and integrates a `review` one.
 
 **No lead live.** No pause, and every owner session has ended (or shows no run there): the full flow, § 3 to
@@ -153,7 +171,7 @@ anything else unchanged. A PR merged into another base is left alone, so it is e
 flipped. An undecided RACE / UNVERIFIED task is merged into the default branch too, so `resume` would flip it
 done on an unverified main and its dependants would start there: hold `resume` until § 3c records Lachy's
 decision. Under a pause or a live queue, report it and leave it: the reinstate's or the lead's next *Cold
-resume* runs `resume` first.
+resume* runs `resume` first, and § 1 sends Lachy there only once every RACE decision is recorded.
 
 **3b — input-gated → capture + inject.** Ping the user only here and for the other decisions no agent can
 make (a gate, a § 3c escalation, a CLOSED PR or missing branch, a close-out, a defer chain, a second block or
@@ -185,15 +203,21 @@ evidence shown; decision left to Lachy.` Repair never writes that task's `status
   task note:
   - with no lead live and no pause: run `resume` (§ 3a), which re-checks the state and the base and flips it
     done;
-  - under a stamped pause: leave `resume` to the reinstate's *Cold resume*;
-  - under a drain or a live queue: escalate and record only; the `pr:` write waits for the pause stamp or the
-    lead's end (advise: hard-pause, or wait for the stamp, then repair).
+  - under a stamped pause, or a drain nothing is draining: leave `resume` to the next *Cold resume* (the
+    reinstate's, or the one that resumes the drain);
+  - while a lead is live (a live queue, or a drain it is draining): escalate and record only; the `pr:` write
+    is a lead-held note (§ 1) and waits for the pause stamp or the lead's end (advise: hard-pause, or wait for
+    the stamp, then repair).
 - **RACE / UNVERIFIED.** Never re-call merge-task: main's state is Lachy's call. Until a dated
   `- <YYYY-MM-DD> repair: [[<slug>]] RACE decided: <his decision, verbatim>` line on the rollout note's
   `## Notes` records it, the escalation is **undecided**: neither § 3a nor § 4's hand-off runs, because each
   runs `resume` over the whole rollout, and it would flip this task done. Once that line is written, `resume`
-  flips the merged task done. If he decides the merge does not stand, defer the task (§ 5; its PR is merged,
-  so the retire block's `gh pr close` is skipped) before recording it, so `resume` never reads it as landed.
+  flips the merged task done. The line is a rollout-note record, so repair writes it in every mode (§ 1),
+  and a reinstate or a resume waits for it. If he decides the merge does not stand, defer the task (§ 5; its
+  PR is merged, so the retire block's `gh pr close` is skipped) before recording it, so `resume` never reads
+  it as landed. That defer is a lead-held note (§ 1): while a lead is live, append his decision to the
+  escalation line as `defer pending` (never as `RACE decided:`), and the defer, its `RACE decided:` line and
+  the hold all wait for the lead's end.
 - **Merged into another base.** `resume` leaves it unchanged, and repair never hands it back, defers it or
   re-calls merge-task for it: whether the work reached the default branch (the ancestry check above shows it)
   and what becomes of the task are Lachy's call. Escalate, record, and leave it.
@@ -317,7 +341,9 @@ possible PR-less merges, RACE / UNVERIFIED (task + PR + the recorded decision), 
 - **Don't write a PR-less, RACE / UNVERIFIED or other-base task's `status:`**, and never re-call merge-task
   for a RACE.
 - **Don't run `resume` while a RACE / UNVERIFIED escalation is undecided.** Not in § 3a, not through § 4's
-  hand-off: it works on the whole rollout and would flip that task done on an unverified main (§ 3c).
+  hand-off, and never send Lachy to a reinstate or a `/thread:execute` resume before its `RACE decided:` line:
+  `resume` works on the whole rollout and would flip that task done on an unverified main (§ 3c). The line
+  itself is a rollout-note record, so no pause or live lead holds it back (§ 1).
 - **Don't reinstate a rollout another rollout's `supersedes:` names.** Its unlanded tasks were carried there;
   finish its close-out instead (§ 1).
 - **Don't defer a task with dependants alone.** Compute the closure first; defer the chain or fix it.
