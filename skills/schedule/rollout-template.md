@@ -20,15 +20,6 @@ max_review_rounds: 4
 max_plan_rounds: 3  # 2 was insufficient for cross-cutting plan-gates; 3-with-accumulated-feedback converges (thread:execute item 1)
 plan_approval: scope-gated  # off | scope-gated | required
 parallel_ceiling: 4
-model: opus  # opus | fable — default (mechanical execution). thread:schedule stamps `model: fable` on structural (cross-cutting) or deep tasks; a fable task runs end-to-end incl. its judges.
-# max_tier: opus   # optional CEILING. `opus` is the ONLY value that caps anything — `fable` is the
-#             uncapped default, so `max_tier: fable` is a no-op. Set it ONLY when the fable quota is
-#             exhausted, never as a cost preference. It clamps the seed, suppresses escalation (a capped
-#             tier is terminal, so it runs the FULL loop at the higher tier's effort) and clamps a
-#             judgeModel pin. Uncomment the line AS WRITTEN, with the value: a bare `max_tier:` parses
-#             as null, which reads as ABSENT and runs UNCAPPED with no warning line. Omit ⇒
-#             byte-identical to an uncapped run. ADR 0016; execute SKILL.md § "3. Resolve effective
-#             config per task".
 # env_bootstrap:   # optional: shell cmd thread:execute runs once per worktree before the verifier (e.g. poetry env use 3.11 && poetry install). Uncomment when the env needs setup — thread:schedule step 2.7
 # No rollout cursor: progress lives on the task notes' started:/merged: stamps (ADR 0030; reconcile-rollout.py).
 # supersedes: "[[<prior-rollout-slug>]]"   # add only when § 0 printed `supersede` (see SKILL.md steps 6 and 7.5)
@@ -50,7 +41,7 @@ execute [[{{ROLLOUT_SLUG}}]]                # continuous: the queue runs and mer
 execute [[{{ROLLOUT_SLUG}}]] --gated        # pause for a human before each merge
 ```
 
-The contract lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` — three-layer convergence (plan-gate → Ralph-style agent-side verifier retry → master-side review-and-revise loop). The rollout-level defaults in this note's frontmatter (`verifier`, `max_iterations`, `max_review_rounds`, `plan_approval`, `max_plan_rounds`, `parallel_ceiling`, `model`) are inherited by every task; per-task overrides go in the task's own frontmatter.
+The contract lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` — three-layer convergence (plan-gate → Ralph-style agent-side verifier retry → master-side review-and-revise loop). The rollout-level defaults in this note's frontmatter (`verifier`, `max_iterations`, `max_review_rounds`, `plan_approval`, `max_plan_rounds`, `parallel_ceiling`) are inherited by every task; per-task overrides go in the task's own frontmatter.
 
 `plan_approval: scope-gated` (the default) makes the plan-gate fire only for `scope: cross-cutting` tasks — single-file + read-only tasks skip it. Set to `off` for legacy behaviour (no plan-gate); `required` to gate every task. The plan-gate inserts one review round before Ralph: the planner returns a structured plan and an autonomous plan judge approves it or sends it back, up to `max_plan_rounds`; only an approved plan reaches the implementer.
 
@@ -70,7 +61,7 @@ The table's **Mode** column reads `solo` for a Solo task (nothing new starts bes
 
 On Lachy's M3 96GB, the safe parallel ceiling is **3-4 agents at once (`parallel_ceiling`)** when tasks load large models (e.g. LPIPS ≈ 500 MB / 30s startup). Light tasks (config edits, validation, small fixes) can fan wider.
 
-**Two-layer convergence multiplies wall-clock, not memory.** Worst-case per task is `max_iterations × verifier-time × max_review_rounds`. With this rollout's defaults (3 × verifier × 4 review rounds), a 5-minute verifier means up to ~60 min per task in the worst case. Lower `max_review_rounds` per-rollout (here in frontmatter) or per-task if the queue is dominated by cross-cutting long-verifier work. **Under `max_tier` the implement layer costs more, not less**: the capped first pass is terminal so it spends the full `max_iterations`, and the same-tier retry then spends a fixed 2 more — exactly `max_iterations + 2` against an uncapped run's `1 + max_iterations`, i.e. one extra iteration at every setting. Note this covers the IMPLEMENT layer only: each review-loop reviser renders its own full `max_iterations` Ralph loop regardless of the cap, so a capped task that only converges at the review ceiling costs `max_iterations + 2 + (max_review_rounds − 1) × max_iterations`. Budget a capped task from that, not from the headline formula.
+**Two-layer convergence multiplies wall-clock, not memory.** Worst-case per task is `max_iterations × verifier-time × max_review_rounds`. With this rollout's defaults (3 × verifier × 4 review rounds), a 5-minute verifier means up to ~60 min per task in the worst case. Lower `max_review_rounds` per-rollout (here in frontmatter) or per-task if the queue is dominated by cross-cutting long-verifier work. **A task whose implement stage starts on the ladder's top rung costs more there, not less**: its first pass on the top rung is terminal, so it runs the full `max_iterations`, and the same-rung retry then adds a fixed 2 (the engine's `CAPPED_RETRY_ITERATIONS`). That task (one stamped `rung:` at the top, or one whose plan stage already climbed it there) spends `max_iterations + 2` on implement, against `1 + max_iterations` for a task that climbs to the top during implement (one one-shot pass below, then the full loop). Note this covers the IMPLEMENT layer only: each review-loop reviser runs its own full `max_iterations` Ralph loop on any rung, so a top-rung-start task that only converges at the review ceiling costs `max_iterations + 2 + (max_review_rounds − 1) × max_iterations`. Budget such a task from that, not from the headline formula.
 
 **Two costs the per-task budget above does NOT model — add them for deep cross-cutting tasks:**
 - **Plan-block re-dispatch.** A `scope: cross-cutting` task that exhausts `max_plan_rounds` is set aside and re-dispatches with the judge's feedback — a *full extra* plan→implement→review cycle. On the 2026-06-02 giflab run 3/3 cross-cutting tasks plan-blocked once each, then converged on the next round; budget those as elevated re-dispatch risk (this is why `max_plan_rounds` defaults to 3 for cross-cutting).

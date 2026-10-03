@@ -89,7 +89,7 @@ check "blocked: content"                "env mismatch"                          
 refute "blocked: no pr written (empty)" "pr:"                                          "$TMP/task-blocked.md"
 check "blocked: the drifted rung: is overwritten with the reached rung" "rung: opus-xhigh" "$TMP/task-blocked.md"
 refute "blocked: the drifted name is gone"       "rung: gone"                         "$TMP/task-blocked.md"
-check "blocked: a stale model: stamp is left alone (p13-3 regenerates it)" "model: fable" "$TMP/task-blocked.md"
+check "blocked: a stale model: stamp is left alone (a supersede's carry maps it)" "model: fable" "$TMP/task-blocked.md"
 check "blocked: a stale tier_capped: stamp is left alone"  "tier_capped: review"      "$TMP/task-blocked.md"
 case "$out" in *"task-blocked: status=blocked rung=opus-xhigh climbs=implement:opus-xhigh->opus-xhigh rung-drift=gone [written]"*) echo "ok   - blocked: the line shows the no-op climb and the drift, no from= when the call never left its rung" ;;
   *) echo "FAIL - blocked: reconcile line (got: $out)"; fail=1 ;; esac
@@ -168,7 +168,7 @@ mknote task-legacy-esc in_progress
 if berr=$(HOME="$LH" python3 "$SCRIPT" reconcile --result "$TMP/legacy.json" --tasks-dir "$TMP" 2>&1 >/dev/null); then
   echo "FAIL - legacy (refused ladder): reconcile exited 0"; fail=1
 else
-  case "$berr" in *"ERROR: task-legacy-esc: a pre-3.0.0 row (escalated, no rung) — the ladder could not be read"*) echo "ok   - legacy (refused ladder): an ERROR naming the slug, exit 1" ;;
+  case "$berr" in *"ERROR: task-legacy-esc: a pre-3.0.0 row (escalated, no rung) — the ladder could not be read ($LH/.config/thread/ladder.toml:1: rung 1: "*) echo "ok   - legacy (refused ladder): an ERROR naming the slug and the file's <path>:<line>: <reason>, exit 1" ;;
     *) echo "FAIL - legacy (refused ladder): stderr (got: $berr)"; fail=1 ;; esac
 fi
 refute "legacy (refused ladder): no rung: stamped" "rung:" "$TMP/task-legacy-esc.md"

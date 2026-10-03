@@ -66,7 +66,10 @@ PY
 }
 fm() { grep -m1 "^$2:" "$D/$1.md" || echo "<none>"; }   # fm <slug> <key> — the frontmatter line
 nxt() { python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@"; }
-st() { python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" --now "${2:-$NOW}"; }
+# status reads the operator's ladder file (its `ladder` key, each task's rungDrift): HOME is pinned to an empty
+# dir (the built-in ladder) unless $SH names another, so the operator's file never reaches the assertions.
+SH="$TMP/status-home"; mkdir -p "$SH"
+st() { HOME="$SH" python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" --now "${2:-$NOW}"; }
 # q <json> <python-expr over d> — compact JSON of the expression
 q() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(eval(sys.argv[1]), separators=(",", ":"), sort_keys=True, ensure_ascii=False))' "$2"; }
 holds='{h["slug"]: h["reason"] for h in d["hold"]}'
@@ -419,12 +422,12 @@ ok "$(q "$J" 'd["progress"]')" '"progress: 2/6 merged, 1 running, 1 awaiting int
 ok "$(q "$J" 'd["timeline"]')" '{"avgTaskMinutes":45.0,"complete":false,"durationsUsed":2,"elapsedLabel":"2h","elapsedMinutes":120,"firstStarted":"2026-10-02T10:00+00:00","lastMerged":"2026-10-02T11:15+00:00","remainingEstimateMinutes":45,"remainingLabel":"~45m (rough)","tasks":[{"durationMinutes":30,"merged":"2026-10-02T10:30+00:00","slug":"s-a","started":"2026-10-02T10:00+00:00"},{"durationMinutes":60,"merged":"2026-10-02T11:15+00:00","slug":"s-b","started":"2026-10-02T10:15+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-d","started":"2026-10-02T10:20+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-e","started":"2026-10-02T10:40+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-c","started":"2026-10-02T11:00+00:00"}]}' "status: exact timeline"
 ok "$(q "$J" '[t["slug"] for t in d["tasks"]]')" '["s-a","s-b","s-c","s-d","s-e","s-f","s-t","s-x"]' "status: tasks sorted by schedule rank"
 ok "$(q "$J" '{t["slug"]: [t["queueState"], t["setAsideAt"]] for t in d["tasks"]}')" '{"s-a":["merged",null],"s-b":["merged",null],"s-c":["running",null],"s-d":["awaiting-integration",null],"s-e":["set-aside","run"],"s-f":["queued",null],"s-t":["folded",null],"s-x":["other",null]}' "status: queue states"
-ok "$(q "$J" '[t for t in d["tasks"] if t["slug"] == "s-f"][0]')" '{"blockerSummary":"","integrating":null,"merged":null,"pr":null,"priority":"normal","queueState":"queued","setAsideAt":null,"slug":"s-f","solo":true,"started":null,"status":"open","waitingOn":["depends on [[s-e]] (blocked)"]}' "status: a queued task's row"
+ok "$(q "$J" '[t for t in d["tasks"] if t["slug"] == "s-f"][0]')" '{"blockerSummary":"","integrating":null,"merged":null,"pr":null,"priority":"normal","queueState":"queued","rung":null,"rungDrift":"","setAsideAt":null,"slug":"s-f","solo":true,"started":null,"status":"open","waitingOn":["depends on [[s-e]] (blocked)"]}' "status: a queued task's row"
 ok "$(q "$J" '[[t["blockerSummary"], t["priority"]] for t in d["tasks"] if t["slug"] == "s-e"][0]')" '["verifier red: flaky fixture","high"]' "status: blockerSummary is the latest run"
 ok "$(q "$J" 'sorted(set(k for t in d["tasks"] for k in t))')" \
-  '["blockerSummary","integrating","merged","pr","priority","queueState","setAsideAt","slug","solo","started","status","waitingOn"]' "status: the exact row keys (no owner key)"
+  '["blockerSummary","integrating","merged","pr","priority","queueState","rung","rungDrift","setAsideAt","slug","solo","started","status","waitingOn"]' "status: the exact row keys (no owner key)"
 ok "$(q "$J" 'sorted(d)')" \
-  '["ceiling","counts","incomplete","pause_requested","paused","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline"]' "status: the exact top-level keys (no stored cursor)"
+  '["ceiling","counts","incomplete","ladder","pause_requested","paused","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline"]' "status: the exact top-level keys (no stored cursor)"
 setkey s-d integrating 2026-10-02T11:50+00:00
 printf '\n### Run 2 (2026-10-02T11:30+00:00)\n\nIntegration: conflict in a.py\n\n<!-- run 2 end sha=111111111111 -->\n' >> "$D/s-e.md"
 J=$(st "" 2026-10-02T12:00:00Z)
@@ -443,7 +446,34 @@ ok "$(q "$J" '[d["progress"], d["timeline"]["complete"], d["timeline"]["elapsedM
 delkey a started; delkey a merged; delkey b started; delkey b merged
 J=$(st "" 2026-10-02T12:00:00Z)
 ok "$(q "$J" '[d["progress"], d["timeline"]]')" '["progress: 2/2 merged — rollout complete",null]' "status: no stamps -> timeline null"
-python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" > "$D/st.json"; ok "$?" 0 "status runs without --now"
+HOME="$SH" python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" > "$D/st.json"; ok "$?" 0 "status runs without --now"
+
+# ── status: each task's rung, and rung drift on the unlanded rows only (ADR 0029) ─────────────────
+scen status-rung
+mkro $'- [[on]]\n- [[gone]]\n- [[bad]]\n- [[landed]]\n- [[none]]'
+mkt on open 'rung: opus-xhigh'
+mkt gone open 'rung: gone'
+mkt bad open 'rung: Opus-X'
+mkt landed done 'rung: gone' 'pr: https://github.com/o/r/pull/7'
+mkt none open 'rung:'
+J=$(st)
+ok "$(q "$J" 'd["ladder"]')" '{"error":null,"rungs":["opus-high","opus-xhigh"],"source":"built-in"}' "status: the built-in ladder, as status read it"
+ok "$(q "$J" '{t["slug"]: [t["queueState"], t["rung"], t["rungDrift"]] for t in d["tasks"]}')" \
+  '{"bad":["queued","Opus-X","Opus-X"],"gone":["queued","gone","gone"],"landed":["merged","gone",""],"none":["queued",null,""],"on":["queued","opus-xhigh",""]}' \
+  "status: a rung on the ladder is no drift; an off-ladder or malformed one drifts while unlanded; a merged one never; an empty rung: is none"
+mkdir -p "$TMP/status-home-file/.config/thread"
+printf '[[rung]]\nname = "r-low"\nmodel = "opus"\neffort = "high"\njudge = "high"\nreview = "xhigh"\n\n[[rung]]\nname = "gone"\nmodel = "opus"\neffort = "xhigh"\njudge = "high"\nreview = "xhigh"\n' \
+  > "$TMP/status-home-file/.config/thread/ladder.toml"
+J=$(SH="$TMP/status-home-file" st)
+ok "$(q "$J" '[d["ladder"]["rungs"], d["ladder"]["source"].endswith("/.config/thread/ladder.toml"), d["ladder"]["error"]]')" '[["r-low","gone"],true,null]' "status: the operator's file decides the ladder"
+ok "$(q "$J" '{t["slug"]: t["rungDrift"] for t in d["tasks"]}')" '{"bad":"Opus-X","gone":"","landed":"","none":"","on":"opus-xhigh"}' "status: drift follows the file"
+mkdir -p "$TMP/status-home-bad/.config/thread"
+printf '[[rung]]\nname = "Opus"\n' > "$TMP/status-home-bad/.config/thread/ladder.toml"
+J=$(SH="$TMP/status-home-bad" st); rc=$?
+ok "$rc" 0 "status: a refused ladder file still exits 0"
+ok "$(q "$J" '[d["ladder"]["rungs"], d["ladder"]["source"].endswith("/.config/thread/ladder.toml"), bool(d["ladder"]["error"])]')" '[[],true,true]' "status: a refused ladder: no rungs, its path, an error"
+has "$(q "$J" 'd["ladder"]["error"]')" "$TMP/status-home-bad/.config/thread/ladder.toml:1: rung 1: " "status: … the error names the file and its line (<path>:<line>: <reason>)"
+ok "$(q "$J" 'sorted(set(t["rungDrift"] for t in d["tasks"]))')" '[""]' "status: … and no row drifts"
 
 # ── resume: a merged PR whose note was never marked (p6-8), against a stub gh ────────────────────
 scen resume

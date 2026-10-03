@@ -17,8 +17,9 @@ the diagnosis; those are the treatment.
 
 Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` (older undated `<slug>-rollout` notes
 still resolve, see step 1) + its linked task notes, and makes **read-only** `gh`/`git` calls against the
-target repo (plus, for a RACE task, a plain read of its local verdict file, § 3). Writes nothing. Obsidian +
-GitHub read access only.
+target repo (plus, for a RACE task, a plain read of its local verdict file, § 3). § 2's status read also
+reads the operator's local ladder file (`~/.config/thread/ladder.toml`); status itself invokes nothing new for
+it. Writes nothing. Obsidian + GitHub read access only.
 
 ## Invocation forms
 
@@ -86,9 +87,9 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
 
 - top level: `paused` (the pause stamp; null when not paused), `pause_requested` (a soft pause is draining:
   execute → *Pausing + reinstating a rollout*), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
-  included), `progress` and `timeline`;
+  included), `progress`, `timeline` and `ladder`;
 - per task: `slug`, `status`, `queueState`, `setAsideAt`, `pr`, `solo`, `started`, `merged`, `integrating`,
-  `waitingOn` and `blockerSummary`.
+  `waitingOn`, `blockerSummary`, `rung` and `rungDrift`.
 
 Each task's `queueState` is one of the six in the count (`merged`, `running`, `integrating`,
 `awaiting-integration`, `queued`, `set-aside`) or one of two outside it: `folded` (an affine tombstone) and
@@ -98,6 +99,14 @@ Each task's `queueState` is one of the six in the count (`merged`, `running`, `i
 `## Blocker diagnosis` run starts `integration:`), `gate` (gate-pending) or `run`. `waitingOn` lists a queued
 task's unmet dependencies; `blockerSummary` is the latest run of the feedback section matching the note's
 status.
+
+**Rungs (ADR 0029).** `ladder` is `{source, rungs, error}`: the operator's ladder as the status read found it,
+`source` the file's path or `built-in`, `rungs` its rung names bottom first. A refused file gives `rungs: []`,
+`source` the path it read and `error` the reason (`<path>:<line>: <reason>`), and status still exits 0. Each
+task's `rung` is its `rung:` stamp (null when it has none). Its `rungDrift` is that stamp when a readable ladder
+lacks it and the task is unlanded (`queueState` queued, running, awaiting-integration, integrating or
+set-aside), else empty: a merged, folded or other task keeps the rung it reached as a record, so a ladder edit
+since is no drift, and under a refused file no task drifts.
 
 `timeline` is the progress/ETA block, computed from the per-task `started:` / `merged:` stamps: per-task
 `{ slug, started, merged, durationMinutes }` sorted by start, plus `elapsedLabel`, `avgTaskMinutes`,
@@ -183,10 +192,21 @@ takes none of them.
 - **Two `integrating:` stamps:** more than one task reads `integrating`, but the lane holds one.
 - **A missing tree:** a running task with an `owner:` whose `inputs.worktreePath` is not in the worktree list.
   (A set-aside task's reaped tree is not drift: its re-entry recreates the tree from its branch.)
+- **Rung drift:** only for a task whose `queueState` is queued, running, awaiting-integration, integrating or
+  set-aside, with a non-empty `rungDrift`: "`rung: <x>` is not on the ladder (<ladder.source>): its next call
+  starts on the top rung <top>, and reconcile overwrites the stamp". It needs no write: the engine reads it as the
+  top rung. A re-stamp to a listed rung, or restoring that rung in `~/.config/thread/ladder.toml`, clears it; a
+  re-stamp or a ladder edit is Lachy's choice, and no route sends it to repair (repair § 2). A merged, folded or
+  other task is never flagged. The flag reads only the
+  vault and a local file, so it holds offline too.
+- **Ladder refused:** `ladder.error` is set. Execute halts `ladder file refused` at each call's start until the
+  file reads, and the fix is Lachy's edit to `<ladder.source>` (<ladder.error>). The flag reads only the vault
+  and a local file, so it holds offline too.
 
 **Offline.** `--offline` skips this step: say the report is vault-only, and every resume or reinstate
 recommendation it makes carries the caveat "drift is invisible offline; re-run with the live check before
-resuming".
+resuming". It skips the live reads only: the RACE / UNVERIFIED, Rung drift and Ladder refused flags still
+render, from § 2's data and the local files.
 
 ### 4. Render the situational report
 
@@ -205,6 +225,8 @@ resuming".
 | `running` | **Running** | the `owner:` tag; no `owner:` means it was handed back and restarts at the lead's next step; no `started` means it is starting |
 | `queued` | **Queued** | `waitingOn`, else "behind solo [[x]]" when a started task carries `solo`, else "next free slot" |
 | `set-aside` | **Set aside** | where it re-enters (below) and the first line of `blockerSummary` |
+
+**Rungs.** Every task line also shows `rung <name>` when its note has one (§ 2's `rung`).
 
 **Outside the count.** `folded` (an affine tombstone) and `other` (dropped, parked) get no group and no row:
 they render as one footer sentence below the groups, outside the count, e.g.
@@ -256,15 +278,15 @@ is undecided, and the next step is `/thread:repair [[<rollout>]]` (action 7), ne
 [[proj-rollout-2026-10-01]] — progress: 1/12 merged, 1 running, 1 integrating, 1 awaiting integration, 1 queued, 7 set aside (1 at Integration) — 5h 5m elapsed, ~32m remaining (rough)
 
 Merged (1)
-  [[proj-merged]]           PR #1 (32m)
+  [[proj-merged]]           PR #1 (32m) · rung gone
 Integrating (1)
   [[proj-integrating]]      PR #3 (open) · 15m in the lane · no Integration logged yet
 Awaiting Integration (1)
-  [[proj-awaiting]]         PR #4 · ready 2026-10-02T13:30+00:00
+  [[proj-awaiting]]         PR #4 · ready 2026-10-02T13:30+00:00 · rung opus-xhigh
 Running (1)
   [[proj-running]]          owner execute-2026-10-02-ab12cd34
 Queued (1)
-  [[proj-queued]]           depends on [[proj-at-integration]] (blocked)
+  [[proj-queued]]           depends on [[proj-at-integration]] (blocked) · rung gone
 Set aside (7)
   [[proj-at-integration]]   at Integration → hand-back retries Integration only · integration: conflict in a.js cannot be resolved
   [[proj-rejected]]         revise (automatic) → the lead launches it · revise: rejected at Integration re-review
@@ -278,6 +300,7 @@ Outside the count: 1 folded, 1 other.
 Drift:
   ⚠ [[proj-awaiting]] PR #4 is MERGED but the note says review → merged, never marked; /thread:repair runs resume
   ⚠ [[proj-running]] possible PR-less merge: PR #12 (head audit-fix/running) merged after its started: → /thread:repair escalates it
+  ⚠ [[proj-queued]] rung drift: `rung: gone` is not on the ladder (built-in): its next call starts on the top rung opus-xhigh, and reconcile overwrites the stamp
 
 Recommended next action: /thread:repair [[proj-rollout-2026-10-01]] (an open escalation, the possible PR-less merge, comes before waiting on the live queue)
 ```
@@ -325,18 +348,25 @@ Keep the whole report scannable: it's a glance, not a wall of text.
     itself (a revise stopped, a rejected review-blocked task, an own run, an at-Integration one or a gate), so
     add `/thread:repair [[<rollout>]]`: its live-queue mode hands those back, applies the raise or records a
     gate sign-off without touching the run.
-11. Any drift flag, or a set-aside task other than an `autoRevise: true` one → `/thread:repair [[<rollout>]]`.
+11. Any drift flag but a Rung drift or a refused ladder, or a set-aside task other than an `autoRevise: true`
+    one → `/thread:repair [[<rollout>]]`.
 12. Awaiting Integration, a handed-back running task (no `owner:`), an `autoRevise: true` set-aside, or a free
     slot, with no lead live → `/thread:execute [[<rollout>]]`.
 13. Nothing started → `/thread:execute [[<rollout>]]` to start.
+
+**A refused ladder.** The Ladder refused flag reorders nothing: whichever action matches, from 7 to 13, gets
+the fix first: "fix `<ladder.source>` (<ladder.error>) first: execute halts `ladder file refused` at each call's
+start until it reads". Status never routes a refused ladder to `/thread:repair` on its own account, because
+repair never edits the file; another flag still sends the rollout there under action 11, carrying the fix.
 
 **Precedence.** The order is the precedence, with no override on top of it. Lineage (1, 2) comes before the
 version (3, 4): a supersede is how a legacy rollout migrates, so a legacy note that a successor's `supersedes:`
 names needs its close-out, and `--regenerate` would only meet schedule's refusal again. An open escalation (7)
 comes before every reinstate, wait and resume (8 to 13), so status never sends an undecided RACE to
 `/thread:execute`. A RACE re-verify in flight is not yet undecided, so it waits (9, 10) instead of escalating.
-The RACE exception routes it to repair, never to a resume, once it turns undecided. Offline, every resume or
-reinstate recommendation carries § 3's caveat.
+The RACE exception routes it to repair, never to a resume, once it turns undecided. A refused ladder adds its
+fix ahead of whichever action matches and moves none of them. Offline, every resume or reinstate
+recommendation carries § 3's caveat.
 
 ## Loopable
 
