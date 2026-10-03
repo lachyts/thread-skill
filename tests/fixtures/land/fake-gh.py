@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fake `gh` for tests/land.test.sh. Logs each argv as one line to $LOG_GH and serves only the calls
 land.sh makes, from state under $GH_STATE (prs.json newest first, a label marker, a PR counter, the last
-hold comment's first three lines in comment.txt).
+hold comment's first three lines in comment.txt, the last created PR's body in body.txt).
 
 Behaviour per call is chosen by environment variables (default in brackets):
   GH_ACCESS  [true]  true | false | null | empty | 404 | hang        GET repos/<o>/<r>
@@ -242,6 +242,11 @@ if method == "POST" and rest == ["pulls"]:
     mode = E("GH_CREATE", "ok")
     if mode == "fail":
         die("gh: Validation Failed (HTTP 422)")
+    body = fields.get("body", "")
+    if body.startswith("@"):
+        body = open(body[1:]).read()
+    with open(os.path.join(st, "body.txt"), "w") as fh:
+        fh.write(body)
     head = fields["head"]
     oid = srvgit("rev-parse", "refs/heads/" + head).stdout.strip()
     prs = load()
