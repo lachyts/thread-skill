@@ -67,7 +67,7 @@ base() {
   mkt "$A" in_progress "$BRIEF" "$@"
   mkt "$B" open "$OWNER_BODY"
   mkt "$C" open "body c"
-  rec "$(row "$A" plan-blocked 'Round 1: the canary pulls in resume, repair and single-wave machinery')"
+  rec "$(row "$A" plan-blocked 'Round 1: the canary pulls in resume, repair and integration machinery')"
 }
 # asks <label>: exit 3, one ASK line, and the whole vault dir byte-identical to $before.
 asks() {
@@ -265,7 +265,7 @@ rec "$(row "$A" plan-blocked 'the canary')"
 before=$(snap); opt; asks "F3 a clause that cites an ADR"
 scen f3-feedback-only
 base
-before=$(snap); opt "single-wave machinery" wave; asks "F3 a part found only in the feedback"
+before=$(snap); opt "integration machinery" machinery; asks "F3 a part found only in the feedback"
 
 # ── F4: a second block after an automatic descope asks Lachy ──────────────────────────────────────
 scen f4-new-run
@@ -281,7 +281,7 @@ base
 opt
 python3 "$SCRIPT" hand-back --tasks "$A" --tasks-dir "$D" --now "$NOW" >/dev/null 2>&1
 python3 "$SCRIPT" mark-started --tasks "$A" --tasks-dir "$D" --now "$NOW" >/dev/null 2>&1
-rec "$(row "$A" plan-blocked 'Round 1: the canary pulls in resume, repair and single-wave machinery')" 2026-10-03T10:00:00Z
+rec "$(row "$A" plan-blocked 'Round 1: the canary pulls in resume, repair and integration machinery')" 2026-10-03T10:00:00Z
 ok "$(grep -c '^### Run ' "$D/$A.md")|$(fm "$A" status)|$(fm "$A" descope_armed)" "1|status: plan-blocked|<none>" "fixture F4 (ii): byte-identical feedback adds no run; the stamp is gone"
 before=$(snap); opt; asks "F4 (ii) a byte-identical second block"
 scen f4-armed

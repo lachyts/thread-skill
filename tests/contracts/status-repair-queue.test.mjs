@@ -378,9 +378,10 @@ const IN_COUNT = ['merged', 'integrating', 'awaiting-integration', 'running', 'q
 const COUNT_KEY = { merged: 'merged', integrating: 'integrating', 'awaiting-integration': 'awaitingIntegration', running: 'running', queued: 'queued', 'set-aside': 'setAside' }
 // Repair § 2's classes, first-match in this order: a RACE re-verify in flight first (the lead's own procedure), then
 // RACE and a PR-less merge ahead of merged-never-marked and at Integration (both also match a RACE / UNVERIFIED
-// task), PR CLOSED ahead of awaiting Integration.
+// task), PR CLOSED ahead of awaiting Integration, and a descopable plan-block ahead of the own run it also matches.
 const LABELS = ['RACE re-verify in flight', 'RACE', 'PR-less merge', 'merged into another base', 'merged, never marked', 'merge hold', 'live', 'PR CLOSED / branch missing',
-  'awaiting Integration', 'queued', 'at Integration', 'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'own run', 'gate']
+  'awaiting Integration', 'queued', 'at Integration', 'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'plan-blocked, descopable',
+  'own run', 'gate']
 const ROUTES = ['Stale anchor ref', 'The raise', 'A `merge-task:` own-run set-aside', 'A CLOSED PR or a missing branch', 'Recut', 'Leash', 'Hand-off']
 // Status's recommended actions, first-match in this order: the lineage before the version (a legacy note can be
 // a close-out), and an open escalation before every reinstate, wait and resume.
@@ -537,7 +538,7 @@ function check({ status, repair, fx }) {
     !prec.includes('The order is the precedence, with no override on top of it') || !prec.includes('Lineage (1, 2) comes before the version (3, 4)') ||
     !prec.includes(`An open escalation (${RUN.escalation}) comes before every reinstate, wait and resume (${RUN.escalation + 1} to ${RUN.nothing})`) ||
     !drainItem.includes('nothing is draining it, and `/thread:execute [[<rollout>]]` resumes the drain') ||
-    !liveItem.includes('other than an `autoRevise: true` one is never re-entered by the live lead itself') ||
+    !liveItem.includes('other than an `autoRevise: true` one or a descopable `plan-blocked` one is never re-entered by the live lead itself') ||
     !liveItem.includes('its live-queue mode hands those back')) fails.push('actions')
 
   // lineage (status § 1 and repair § 1): a legacy note gets execute § 2's remedy; any other non-5 version is
@@ -596,7 +597,7 @@ function check({ status, repair, fx }) {
     !labelled(r4raw, 'A `merge-task:` own-run set-aside', { item: true }).includes('it merges through case (ii) when main has not moved') ||
     fx.B.fails.length) fails.push('integration-only')
 
-  // stages: the 16 classes, each once, and § 4's per-stage routes.
+  // stages: the 17 classes, each once, and § 4's per-stage routes.
   if (JSON.stringify(clsRows.map((c) => c[0].slice(2, -2)).sort()) !== JSON.stringify([...LABELS].sort()) ||
     !ROUTES.every((l) => r4raw.split('\n').some((x) => x.startsWith(`- **${l}`))) ||
     !r4.includes('lead-integrate.py set-aside --note <task note> --kind integration')) fails.push('stages')
@@ -758,6 +759,26 @@ function check({ status, repair, fx }) {
       'writes no `## Repair input` to it', "takes a fresh call behind § 3.7's warning"].every((k) => signed.includes(k)) ||
     !collapse(raw(repair, /^## Don'ts/)).includes("Don't touch a signed task while its lead is live.")) fails.push('signed-gate')
 
+  // descope (p14-4): a plan-block the notes settle is descoped without asking. Repair: its class names the verb (§ 3d)
+  // and routes a refusal to § 3b; § 3d runs the verb, hands back on exit 0 (§ 4), asks on exit 3 (§ 3b), never under
+  // a pause, tells Lachy afterwards and names the rollout's `## Notes` line; § 6 copies automatic descopes; a Don't.
+  // Status: the plan-blocked re-entry row names `descope`; a **Descoped.** paragraph shows the first entry by grep;
+  // action 10 leaves the descope the verb refused to repair.
+  const dCls = cls['plan-blocked, descopable'] ?? ''
+  const d3 = labelled(r3raw, '3d')
+  const dRow = reRows.find((c) => c[3] === '`plan-blocked`')
+  const descoped = labelled(s4raw, 'Descoped.')
+  if (!dCls.includes('`reconcile-rollout.py descope` (§ 3d)') || !dCls.includes('exit 3 → § 3b') ||
+    !d3.includes('reconcile-rollout.py descope --tasks <slug> --rollout <rollout-note>') || !d3.includes('Exit 0 → § 4\'s `hand-back`') ||
+    !d3.includes('Exit 3 → § 3b') || !d3.includes('never under a pause') || !d3.includes('tell Lachy afterwards') ||
+    !d3.includes("the rollout's `## Notes` line") ||
+    !dRow || !ticks(dRow[4]).includes('descope') || !dRow[4].includes('then `hand-back`, then its own call') ||
+    !descoped.includes("`grep -m1 '^- descoped (automatic)' ~/repos/obsidian/Work/Tasks/<slug>.md`") ||
+    !descoped.includes('every automatic descope, and any wrong owner') ||
+    !liveByName.includes('a `plan-blocked` one it leaves set aside (the verb asked) is repair\'s') ||
+    !r6.includes('automatic descopes (task + part + follow-up or owner)') ||
+    !collapse(raw(repair, /^## Don'ts/)).includes("Don't descope by hand, or twice.")) fails.push('descope')
+
   // ---- both ----
   // no-wave: neither file reads the wave rollout, its frontmatter description included.
   if (BAN.test(status) || BAN.test(repair)) fails.push('no-wave')
@@ -869,7 +890,7 @@ test('status and repair hold every queue rule', () => {
 
 const RULES = ['states', 'set-aside', 'log-line', 'owner', 'drift', 'actions', 'lineage', 'read-only', 'reverse-lineage', 'integration-only',
   'stages', 'first-match', 'another-base', 'race-hold', 'race-in-flight', 'closed-pr', 'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off',
-  'signed-gate', 'no-wave', 'rung']
+  'signed-gate', 'no-wave', 'rung', 'descope']
 const CONTROLLED = new Set()
 
 // Replaces the first match of `from`. Whitespace inside it matches any run of whitespace, so a reflowed line still
@@ -1263,7 +1284,21 @@ test('control: tier vocabulary in status fails rung', () => {
   only(st('**Outside the count.**', `A ${TIER_WORDS[0]} rollout is capped.\n\n**Outside the count.**`), 'rung', 'tier word')
 })
 
-test('the rules are all named (26) and each has a control', () => {
-  assert.equal(RULES.length, 26)
+// descope (p14-4)
+test('control: § 3d handing back on exit 3 fails descope', () => {
+  only(rp('Exit 3 → § 3b', "Exit 3 → § 4's `hand-back` anyway"), 'descope', 'exit 3 handed back')
+})
+test('control: the plan-blocked re-entry row without descope fails descope', () => {
+  const l = lineWith(real.status, '| `plan-blocked` |')
+  only(st(l, '| `run` | `own` | `false` | `plan-blocked` | `hand-back`, then its own call |'), 'descope', 'no descope in the row')
+})
+test('control: the descopable class after own run fails first-match', () => {
+  const row = lineWith(real.repair, '| **plan-blocked, descopable** |')
+  const ownRow = lineWith(real.repair, '| **own run** |')
+  only({ repair: real.repair.replace(row + '\n', '').replace(ownRow, ownRow + '\n' + row) }, 'first-match', 'descopable after own run')
+})
+
+test('the rules are all named (27) and each has a control', () => {
+  assert.equal(RULES.length, 27)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

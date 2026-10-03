@@ -441,6 +441,29 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     fails.push('approved-plan')
   }
 
+  // descope (p14-4): step 1.2's **Automatic descope** shares sub-step 2's line, so it runs before the halt guard
+  // (halt-guard pins that order). Skipped under a pause; a `plan-blocked` set-aside judged once per session key (its
+  // highest Plan-blocked run and that run's sha), never again on a heartbeat or another loop entry; the guarded verb
+  // writes; exit 0 → `hand-back`, then `next` again; exit 3 leaves it set aside for `/thread:repair`, never a
+  // hand-back. § 8 says the lead runs this one verb itself and its refusal routes to repair; *Set aside* names the
+  // re-entry; a Don't forbids a hand-written or second descope.
+  const s2t = s2sub?.text ?? ''
+  const dsc = s2t.slice(Math.max(0, s2t.indexOf('**Automatic descope')))
+  const never = collapse((section(skill, S8) ?? '').split('\n').find((l) => l.startsWith('- **Never automate `/thread:repair`**')) ?? '')
+  if (!s2t.includes('**Automatic descope') || !dsc.includes('`plan-blocked`') ||
+    !dsc.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py descope --tasks <slug>') ||
+    !dsc.includes('Skip it when `paused` or `pauseRequested` is set') ||
+    !dsc.includes('whose key this session has not judged') || !dsc.includes('held for the session\'s life') ||
+    !dsc.includes('never re-judges it') ||
+    !dsc.includes('exit 0 → `hand-back --tasks <slug>`') || !dsc.includes('then re-run `next --running') ||
+    !dsc.includes('exit 3 → leave it set aside') || !dsc.includes('`/thread:repair` asks Lachy') ||
+    !never.includes('The lead runs `reconcile-rollout.py descope` itself (§ 4.5 step 1.2)') ||
+    !never.includes('its refusal (exit 3) routes the task to repair') ||
+    !aside.includes('- a `plan-blocked` task the notes settle: automatically (step 1.2\'s *Automatic descope*: `descope`, then `hand-back`)') ||
+    !donts.includes('Never write a descope by hand') || !donts.includes('its exit 3 goes to `/thread:repair`, never to `hand-back`')) {
+    fails.push('descope')
+  }
+
   // s5 (the dead-run resume keeps its shape for its consumers) is part of lost-call's routing: § 5 names *Lost call*.
   if (!s5.includes('(§ 4.5 *Lost call*)') || !before(s5, '(§ 4.5 *Lost call*)', 'resumeFromRunId: <runId>')) fails.push('lost-call')
   return [...new Set(fails)]
@@ -455,7 +478,7 @@ test('execute § 4.5, its neighbours, the heartbeat and the hook hold every queu
 const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lost-call', 'clean-path', 'verify-bound',
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
-  'ladder', 'verify-timeout', 'approved-plan']
+  'ladder', 'verify-timeout', 'approved-plan', 'descope']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -720,7 +743,21 @@ test("control: § 6 without the '' removal fails approved-plan", () => {
   only(sk('`""` removes that section', '`""` leaves it too'), 'approved-plan', 'no removal')
 })
 
-test('the rules are all named (28) and each has a control', () => {
-  assert.equal(RULES.length, 28)
+// descope (p14-4)
+test('control: an Automatic descope that re-judges on every loop entry fails descope', () => {
+  only(sk('whose key this session has not judged', 'on each loop entry'), 'descope', 'no session key')
+})
+
+test('control: an Automatic descope that hands back on exit 3 fails descope', () => {
+  only(sk('exit 3 → leave it set aside', 'exit 3 → `hand-back` it anyway'), 'descope', 'exit 3 handed back')
+})
+
+test('control: § 8 without the descope sentence fails descope', () => {
+  const l = real.skill.split('\n').find((x) => x.startsWith('- **Never automate `/thread:repair`**'))
+  only(sk(l, l.slice(0, l.indexOf(" One verb is the lead's as well as repair's"))), 'descope', 'no § 8 sentence')
+})
+
+test('the rules are all named (29) and each has a control', () => {
+  assert.equal(RULES.length, 29)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

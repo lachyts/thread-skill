@@ -312,6 +312,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: approval item, spend gate, pre-approval.
 - **Agent-fixable block** — a block a re-dispatched agent can resolve alone;
   repair retries these without asking the human. _Avoid_: auto-block, soft block.
+- **Automatic descope** — a plan-block the notes already settle, dropped from
+  the task without asking: the feedback centres on a part the note marks
+  optional (a follow-up task is filed) or on work a later task in the same
+  rollout owns. The live lead (execute § 4.5) and repair run one guarded
+  verb, `reconcile-rollout.py descope`, which records the scope decision and
+  re-dispatches the task through `hand-back`; Lachy is told afterwards. It
+  asks instead when the part is required scope, touches an ADR or a recorded
+  decision, or the task plan-blocks again after one. _Avoid_: auto-drop,
+  scope cut.
 - **Drift** — divergence between the vault's recorded state and live
   GitHub/git reality. Within a rollout, `status` flags it and `repair`
   reconciles it. Across a project it is finished work still marked open: a
