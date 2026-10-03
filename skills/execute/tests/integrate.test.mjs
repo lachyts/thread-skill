@@ -774,7 +774,7 @@ test('S2: the seeded prompt re-enters the tree; the unseeded prompt is byte-unch
     // the fast-forward to origin/$BR, STOPping on a divergence, and the no-force rule
     'if ! git -C "$WT" fetch origin --quiet; then echo "tree NOT fast-forwarded: fetch origin failed — STOP"',
     'elif ! git -C "$WT" merge-base --is-ancestor HEAD "origin/$BR" && ! git -C "$WT" merge-base --is-ancestor "origin/$BR" HEAD; then echo "tree NOT fast-forwarded: $BR has diverged from origin/$BR — never rebase or force-push; STOP"',
-    'elif ! git -C "$WT" merge --ff-only --quiet "origin/$BR"; then',
+    'elif ! git -C "$WT" merge --ff-only --no-autostash --quiet "origin/$BR"; then',
     ', fast-forwards it to origin/audit-fix/fix-a (never past a divergence)',
     '\npush plainly; never rebase or force-push; a rejected push returns blocked.\n',
   ]

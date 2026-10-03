@@ -1202,8 +1202,12 @@ function treeLockLines(g) {
 // ff=true (the seeded reviser only): after the checkout, fetch and fast-forward $BR to origin/$BR, so a
 // tree reused as it was (or a local $BR left behind) never misses commits an Integration pushed since. A
 // divergence is a STOP, never a rebase or a force; local commits origin lacks (a dead reviser's unpushed
-// work) stay, and the plain push carries them. The integrator gets no fast-forward here: its merge step
-// stashes leftovers first, then fast-forwards under the same divergence STOP.
+// work) stay, and the plain push carries them. `--no-autostash` (p14-3, as merge-task.sh's): under
+// `merge.autoStash=true` a modified tracked file the fast-forward touches would be stashed, the tree moved
+// and the edit re-applied on top, so the reviser would build on a change silently carried across; with it
+// git refuses and the STOP line prints, the tree and the edit left as they were. A modified file the
+// fast-forward does not touch stays in place, as on any checkout. The integrator gets no fast-forward
+// here: its merge step stashes leftovers first, then fast-forwards under the same divergence STOP.
 function branchTreeSetup(a, task, bootstrap, ff) {
   const wt = worktreeDir(a.repoPath, task.slug)
   const br = `audit-fix/${shortAlias(task.slug)}`
@@ -1223,7 +1227,7 @@ function branchTreeSetup(a, task, bootstrap, ff) {
       `    if ! ${g} fetch origin --quiet; then echo "tree NOT fast-forwarded: fetch origin failed — STOP"`,
       `    elif ! ${g} show-ref --verify --quiet "refs/remotes/origin/$BR"; then echo "tree NOT fast-forwarded: origin/$BR does not exist — STOP"`,
       `    elif ! ${g} merge-base --is-ancestor HEAD "origin/$BR" && ! ${g} merge-base --is-ancestor "origin/$BR" HEAD; then echo "tree NOT fast-forwarded: $BR has diverged from origin/$BR — never rebase or force-push; STOP"`,
-      `    elif ! ${g} merge --ff-only --quiet "origin/$BR"; then echo "tree NOT fast-forwarded to origin/$BR: local changes in the way — STOP"; fi`,
+      `    elif ! ${g} merge --ff-only --no-autostash --quiet "origin/$BR"; then echo "tree NOT fast-forwarded to origin/$BR: local changes in the way — STOP"; fi`,
       '  fi',
     ] : []),
     `  echo "tree head: $(${g} rev-parse HEAD)"`,
