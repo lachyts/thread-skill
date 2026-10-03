@@ -284,6 +284,26 @@ through time, from attention to merged PRs. Terms only — no implementation.
   paused, never-started and protocol-3 rollouts, and keeps one whose every
   task merged but whose completion ceremony has not run. _Avoid_: active, in
   flight.
+- **Git-env canary** — the lead's check that the shared checkout (a rollout's
+  `Project root`) kept its `refs/heads/<default>` and its bareness across each
+  **Window** (execute § 4.5, ADR 0030). A local commit not on
+  `origin/<default>` is benign only when every one is a non-merge commit
+  touching only close-out paths (land.sh's `closeout_shaped`), stricter than
+  land.sh S9: a merge or an empty commit trips. Anything else trips. _Avoid_:
+  verifier wrapper, git guard.
+- **Window** — the span from a launch's canary `arm` to its `check`: a
+  Workflow call, a resume, the lead's Integration verify or a RACE re-verify.
+  A window can only be open while its vault owner holds (`in_progress` for a
+  task call, `integrating:` for the rest); an orphan is compared once and
+  closed. _Avoid_: watch, session.
+- **Git-env hold** — the unacked trip lines on a rollout note's
+  `## Git-env log`: while one stands, `next` halts `git-env`, nothing starts,
+  integrates or merges, and `carry` refuses the rollout. Only a **Git-env ack**
+  lifts it. _Avoid_: git-env halt (the lead's stop, not the hold).
+- **Git-env ack** — Lachy's recorded acceptance of the tripped windows, written
+  only by `/thread:repair` (its git-env step, 3e) through the canary's `ack`, naming exactly the
+  set shown and the ref shown (`--ref`), after an optional `restore`. Never
+  written by execute. _Avoid_: clear, reset.
 - **Dependent closure** — the set of tasks transitively depending on a task
   via `depends-on:` / `blocked-by:` (schedule § 3) — the blast radius that
   must move together if it's deferred, and the tasks a set-aside task holds
@@ -312,6 +332,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: approval item, spend gate, pre-approval.
 - **Agent-fixable block** — a block a re-dispatched agent can resolve alone;
   repair retries these without asking the human. _Avoid_: auto-block, soft block.
+- **Automatic descope** — a plan-block the notes already settle, dropped from
+  the task without asking: the feedback centres on a part the note marks
+  optional (a follow-up task is filed) or on work a later task in the same
+  rollout owns. The live lead (execute § 4.5) and repair run one guarded
+  verb, `reconcile-rollout.py descope`, which records the scope decision and
+  re-dispatches the task through `hand-back`; Lachy is told afterwards. It
+  asks instead when the part is required scope, touches an ADR or a recorded
+  decision, or the task plan-blocks again after one. _Avoid_: auto-drop,
+  scope cut.
 - **Drift** — divergence between the vault's recorded state and live
   GitHub/git reality. Within a rollout, `status` flags it and `repair`
   reconciles it. Across a project it is finished work still marked open: a

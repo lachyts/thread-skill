@@ -76,6 +76,9 @@ writes all per-task vault frontmatter transitions deterministically and drives
 per-task resume; `skills/execute/scripts/lead-integrate.py` is the lead's side
 of Integration (the clean-path merge and its bounded verify, the trouble-path
 inputs and the lead's own set-aside rows).
+`skills/execute/scripts/git-env-canary.py` is the lead's git-env canary: it
+watches the shared checkout's default branch and bareness around every launch
+and halts the queue on a change that is not a close-out (execute § 4.5).
 
 ## Design
 
@@ -147,8 +150,8 @@ final check that the run wrote nothing into the tree):
 - **Engine** — `skills/execute/tests/`: `prompt-invariants.test.mjs` guards the **resume-cache
   invariant** (optional engine features must render byte-identical Workflow `agent()` prompts when
   unset, or in-flight rollouts can't resume); `reconcile-rollout.test.sh`, `reconcile-rollout-queue.test.sh`
-  (the queue verbs), `reconcile-rollout-runs.test.sh` (accumulated feedback runs) and `reconcile-rollout-lead.test.sh`
-  (`hand-back`, `log-integration`); `rollout-stop-driver.test.sh`; `tests/lead-integrate.test.sh` (the lead's
+  (the queue verbs), `reconcile-rollout-runs.test.sh` (accumulated feedback runs), `reconcile-rollout-lead.test.sh`
+  (`hand-back`, `log-integration`) and `reconcile-rollout-descope.test.sh` (the automatic-descope verb); `rollout-stop-driver.test.sh`; `tests/lead-integrate.test.sh` (the lead's
   Integration against a fake `gh` and real repos) and `tests/contracts/execute-queue.test.mjs` (the queue loop's prose);
   `merge-task.sh --self-test-classify` / `--self-test-base`, and `tests/merge-task-base.test.sh` /
   `tests/merge-task-integrated.test.sh` (one integrated PR per call, against a fake `gh` and a real bare repo).

@@ -48,8 +48,11 @@ Subcommands:
       branch is not M. Stashes tracked leftovers, then `git reset --keep H`. Exit 1 otherwise.
 
   inputs --note N [--max-review-rounds K] [--repo R]
-      What the lead needs to (re-)enter a set-aside or restarted task: status, scope, pr, readyAt, model,
-      tierCapped/tierCappedAt, branch (and worktreePath with --repo); the source run (the newer, by its
+      What the lead needs to (re-)enter a set-aside or restarted task: status, scope, pr, readyAt, rung (the
+      integrate call's rung record when no approving row is at hand: {startRung: "", rung: <the note's
+      `rung:` when it is a rung name, else "">, climbs: []}, so a note with no `rung:`, or only stale
+      legacy stamps, gives the neutral record), branch (and worktreePath with --repo);
+      the source run (the newer, by its
       `### Run N (<stamp>)` heading, of the latest `## Blocker diagnosis` and `## Review-blocked feedback`
       runs; a tie goes to review-blocked) parsed through a parseIntegrationMarker port (markerStage,
       markerReason, history, lastRound); reviewRoundsUsed = max(1, the note's, lastRound);
@@ -59,14 +62,22 @@ Subcommands:
       blocked, the source is the Blocker run, stage revise, markerReason empty, the last line `rejected`,
       a non-empty history and lastRound < K (false without --max-review-rounds).
 
+  plan --note N
+      The task's approved plan, for the two launches that pass it (execute § 4.5 step 1.2's seeded revise,
+      as `resume.plan`, and step 3's integrate call, as `integration.plan`): {slug, plan}, where plan is
+      the note's `## Approved plan` quote unquoted (reconcile-rollout.py approved_plan), or "" when the note
+      has none (its last own call was not plan-gated, or it predates p14-2). Kept out of `inputs`, which
+      every status and repair read prints. Read-only.
+
   set-aside --note N --kind integration|revise-stopped|own     (the reason on stdin)
       The lead's own set-aside row, for `reconcile-rollout.py reconcile --result -`: {rolloutSlug,
-      tasks:[{slug, taskPath, scope, status: blocked, prUrl, blockerDiagnosis, reviewHistory, tierCapped,
-      tierCappedAt}]}, with no `integration` key (so no Integration-log line). blockerDiagnosis is the
+      tasks:[{slug, taskPath, scope, status: blocked, prUrl, blockerDiagnosis, reviewHistory}]}, with no
+      `integration` key (so no Integration-log line) and no rung (so reconcile keeps the note's `rung:`).
+      blockerDiagnosis is the
       engine's own rendering: integrationMarker('set-aside', reason, history) for `integration` (it strips
       one leading `integration:`, so merge-task's exit-4 text passes through unchanged),
       integrationMarker('revise-stopped', …) for `revise-stopped`, and stageDiagnosis's `own run: `
-      escape for `own`; the history is `inputs`' history. tier_capped is carried, so reconcile keeps it.
+      escape for `own`; the history is `inputs`' history.
 
   stamp
       Now, in reconcile's `_stamp` form (the integrate call's startedAt, log-integration's --started).
@@ -688,11 +699,15 @@ def task_inputs(path, note, max_rounds=None, repo=None):
         resume_at = "integration"
     else:
         resume_at = "own"
-    tier = rr._scalar(note.get("tier_capped"))
+    # The note's rung (ADR 0029) as the integrate call's rung record: Integration runs on the ladder's top rung
+    # whatever this says, so a note with no valid `rung:` gives the neutral record, never a guess.
+    rung = rr._scalar(note.get("rung"))
+    if not rr.is_rung_name(rung):
+        rung = ""
     out = {
         "slug": path.stem, "status": status or None, "scope": rr._scope(note) or None, "pr": rr._pr(note) or None,
-        "readyAt": rr._scalar(note.get("ready")) or None, "model": rr._scalar(note.get("model")) or None,
-        "tierCapped": bool(tier), "tierCappedAt": tier, "branch": branch_of(path.stem),
+        "readyAt": rr._scalar(note.get("ready")) or None,
+        "rung": {"startRung": "", "rung": rung, "climbs": []}, "branch": branch_of(path.stem),
         "source": source or None, "markerStage": parsed["stage"] if run else None,
         "markerReason": parsed["reason"] if run else "", "history": history, "lastRound": last_round,
         "reviewRoundsUsed": max(1, rr._int_field(note.get("review_rounds_used"), 0) or 0, last_round),
@@ -713,6 +728,11 @@ def cmd_inputs(args):
     return task_inputs(path, note, args.max_review_rounds, args.repo)
 
 
+def cmd_plan(args):
+    path, note = _load_note(args.note)
+    return {"slug": path.stem, "plan": rr.approved_plan(note)}
+
+
 def cmd_set_aside(args):
     path, note = _load_note(args.note)
     reason = sys.stdin.read().rstrip("\r\n")
@@ -729,7 +749,6 @@ def cmd_set_aside(args):
     return {"rolloutSlug": rollout, "tasks": [{
         "slug": path.stem, "taskPath": str(path), "scope": inp["scope"] or "", "status": "blocked",
         "prUrl": inp["pr"] or "", "blockerDiagnosis": diag, "reviewHistory": inp["history"],
-        "tierCapped": inp["tierCapped"], "tierCappedAt": inp["tierCappedAt"],
     }]}
 
 
@@ -777,6 +796,9 @@ def main(argv=None):
     ip.add_argument("--max-review-rounds", type=int, default=None)
     ip.add_argument("--repo", default=None, help="also print the task tree's worktreePath")
 
+    pl = sub.add_parser("plan", help="the task note's approved plan, for a seeded revise's resume.plan or an integrate call's plan")
+    pl.add_argument("--note", required=True)
+
     sa = sub.add_parser("set-aside", help="the lead's own set-aside row (reason on stdin) for reconcile --result -")
     sa.add_argument("--note", required=True)
     sa.add_argument("--kind", required=True, choices=["integration", "revise-stopped", "own"])
@@ -791,7 +813,7 @@ def main(argv=None):
         if args.cmd == "verify":
             return cmd_verify(args)
         handler = {"prepare": cmd_prepare, "push": cmd_push, "undo": cmd_undo, "inputs": cmd_inputs,
-                   "set-aside": cmd_set_aside}[args.cmd]
+                   "plan": cmd_plan, "set-aside": cmd_set_aside}[args.cmd]
         emit(handler(args))
         return 0
     except Refused as e:

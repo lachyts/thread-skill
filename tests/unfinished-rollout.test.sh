@@ -4,6 +4,9 @@
 #   C1-C27  skills/_shared/scripts/unfinished-rollout.py check: none / supersede / interrupted / file / refuse
 #   K1-K5   skills/execute/scripts/reconcile-rollout.py carry: preview, refusals, per-field writes, re-runs, and
 #           the refusal of a prior that holds an undecided RACE or UNVERIFIED
+#   K5b     carry refuses a prior that holds an unacked git-env trip until its ack line (p14-6)
+#   K6      carry maps each carried task's legacy stamps to a rung (ADR 0029 consequences): the `restamp`
+#           lines, the ladder's top rung, a refused ladder file, and a re-run
 #   M1-M12  a protocol-3 wave rollout in flight with `review` PRs migrates: check -> resume -> carry preview ->
 #           write -> carry -> step 7 -> close-out (stamps, then the move), crash windows included.
 #   I1-I7   § 0's interrupted finish, then a cancel: the incomplete note (reconcile-rollout.py incomplete) is
@@ -64,8 +67,9 @@ mkt() {
 }
 # chk [args...] -> $out (stdout), $err (stderr), $rc
 chk() { python3 "$CHECK" check --tasks-dir "$T" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
-# carry [args...] -> $out, $err, $rc
-carry() { python3 "$RR" carry --tasks-dir "$T" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
+# carry [args...] -> $out, $err, $rc. HOME is pinned to $CH (default: $S/carry-home, empty: the built-in ladder),
+# so the operator's ladder file never reaches a carry that maps a legacy stamp to the top rung.
+carry() { HOME="${CH:-$S/carry-home}" python3 "$RR" carry --tasks-dir "$T" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
 fm() { grep -m1 "^$2:" "$T/$1" || echo "<none>"; }   # fm <path under $T> <key> — the frontmatter line
 # fmset <path under $T> <key> <value | -> — reconcile-rollout.py's Note.set (or, for "-", Note.remove), as
 # schedule's frontmatter stamps
@@ -525,6 +529,115 @@ PY
 carry --from "$T/$P.md" --to "$T/$N.md"
 ok "$rc" 0 "K5: with the RACE decided: line in ## Notes, it carries"
 ok "$(fm r1.md rollout)|$(fm q1.md rollout)" "rollout: \"[[$N]]\"|rollout: \"[[$N]]\"" "K5: … both unlanded tasks"
+
+# ── K5b: carry refuses a prior that holds an unacked git-env trip (p14-6) ───────────────────────────────
+scen k5b
+BODY=$'## Git-env log\n\n- 2026-09-30T09:50:00+00:00 git-env trip [[g1]] task: refs/heads/main aaa→bbb; repo /r' \
+  mkro $P.md "$R" "$DEMO" "$PAUSED"
+mkt g1.md $P in_progress
+mkt q1.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc" 2 "K5b: carry --dry-run refuses a prior holding an unacked git-env trip"
+has "$err" "holds an unacked git-env trip: [[g1]]" "K5b: … naming the tripped window's task"
+has "$err" "/thread:repair [[$P]]" "K5b: … and /thread:repair"
+ok "$(sums)" "$before" "K5b: … writing nothing"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(sums)" "2|$before" "K5b: carry refuses it for real too, writing nothing"
+printf -- '- 2026-09-30T10:05:00+00:00 git-env ack [[g1]]: refs/heads/main at bbb, core.bare false\n' >> "$T/$P.md"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc" 0 "K5b: with the git-env ack line, it carries"
+ok "$(fm g1.md rollout)|$(fm q1.md rollout)" "rollout: \"[[$N]]\"|rollout: \"[[$N]]\"" "K5b: … both unlanded tasks"
+
+# ── K6: carry maps the legacy stamps of each carried task to a rung ──────────────────────────────────
+TIER_KEY=tier_"capped"   # the stale cap stamp's key, quoted in two parts so this file stays out of the Verify grep
+scen k6
+CH="$S/carry-home"
+mkro $P.md "$R" "$DEMO" "$PAUSED"
+mkt f1.md $P open 'model: fable' "$TIER_KEY: review"
+mkt f2.md $P open 'effort: xhigh'
+mkt f3.md $P open 'effort: MAX'
+mkt f4.md $P open 'effort: high'
+mkt f5.md $P in_progress 'model: opus' 'effort: medium' 'owner: execute-old'
+mkt f6.md $P open 'rung: opus-high' 'model: fable' 'effort: xhigh'
+mkt f7.md $P open 'effort: banana'
+mkt f8.md $P open 'owner: execute-old'
+mkt k.md $P done 'model: fable'
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+RESTAMP="restamp f1 rung=opus-xhigh drop=model,$TIER_KEY
+restamp f2 rung=opus-xhigh drop=effort
+restamp f3 rung=opus-xhigh drop=effort
+restamp f4 rung=- drop=effort
+restamp f5 rung=- drop=model,effort
+restamp f6 rung=kept drop=model,effort"
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc" 0 "K6: the preview exits 0"
+ok "$(printf '%s\n' "$out" | grep '^restamp ')" "$RESTAMP" "K6: … one restamp line per carried note the mapping changes, after its carry line"
+ok "$(printf '%s\n' "$out" | grep -A1 '^carry f1 ' | tail -1)" "restamp f1 rung=opus-xhigh drop=model,$TIER_KEY" "K6: … each right after its carry line"
+ok "$(printf '%s\n' "$out" | grep -E '^(carry|keep) ' | tr '\n' ' ')" "carry f1 queued carry f2 queued carry f3 queued carry f4 queued carry f5 running carry f6 queued carry f7 queued carry f8 queued keep k merged " "K6: … the carry/keep lines unchanged"
+ok "$err" "WARN: carry: f7: effort: banana unrecognised, left in place" "K6: … an unrecognised value is a WARN"
+ok "$(sums)" "$before" "K6: … and the preview writes nothing"
+f8_expected=$(sed "s/^rollout: \"\[\[$P\]\]\"\$/rollout: \"[[$N]]\"/; /^owner:/d" "$T/f8.md")
+pk=$(sum1 k.md)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)" "0|[written: 8]" "K6: carry exits 0, every carried note written"
+ok "$(printf '%s\n' "$out" | grep '^restamp ')" "$RESTAMP" "K6: … printing the same restamp lines"
+ok "$(fm f1.md rung)|$(fm f1.md model)|$(fm f1.md $TIER_KEY)" "rung: opus-xhigh|<none>|<none>" "K6: f1 model: fable -> the top rung; model and the cap stamp removed"
+ok "$(fm f2.md rung)|$(fm f2.md effort)" "rung: opus-xhigh|<none>" "K6: f2 effort: xhigh -> the top rung; effort removed"
+ok "$(fm f3.md rung)|$(fm f3.md effort)" "rung: opus-xhigh|<none>" "K6: f3 effort: MAX (any case) -> the top rung"
+ok "$(fm f4.md rung)|$(fm f4.md effort)" "<none>|<none>" "K6: f4 effort: high is stripped, no rung"
+ok "$(fm f5.md rung)|$(fm f5.md model)|$(fm f5.md effort)|$(fm f5.md owner)" "<none>|<none>|<none>|<none>" "K6: f5 (started) model: opus and effort: medium are stripped, no rung"
+ok "$(fm f6.md rung)|$(fm f6.md model)|$(fm f6.md effort)" "rung: opus-high|<none>|<none>" "K6: f6 keeps its own rung:, never lowered or raised; the legacy keys go"
+ok "$(fm f7.md effort)|$(fm f7.md rung)" "effort: banana|<none>" "K6: f7 an unrecognised value is left in place"
+ok "$(cat "$T/f8.md")" "$f8_expected" "K6: f8 with no legacy keys is exactly K3's re-point"
+ok "$(sum1 k.md)" "$pk" "K6: the kept task is untouched, its model: fable included"
+ok "$(sed -n '1,5p' "$T/f2.md")" "---
+tags: [task]
+status: open
+rung: opus-xhigh
+rollout: \"[[$N]]\"" "K6: rung: goes just below status:"
+before=$(sums)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$(printf '%s\n' "$out" | grep -c '^restamp ')" "0|[no-change]|0" "K6: a re-run is a no-op with no restamp line"
+ok "$(sums)" "$before" "K6: … writing nothing"
+
+scen k6-rollout
+CH="$S/carry-home"
+mkro $P.md "$R" "$DEMO" "$PAUSED" 'model: fable'
+mkt g1.md $P open
+mkt g2.md $P open 'model: opus'
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | grep '^restamp ' | tr '\n' ' ')" "0|restamp g1 rung=opus-xhigh drop=- restamp g2 rung=- drop=model " \
+  "K6: the prior rollout's model: fable is inherited by a task with none (drop=-), never by one with its own"
+ok "$(fm g1.md rung)|$(fm g2.md rung)|$(fm g2.md model)" "rung: opus-xhigh|<none>|<none>" "K6: … stamped and stripped"
+
+scen k6-ladder
+CH="$S/carry-home"; mkdir -p "$CH/.config/thread"
+for r in r-low r-mid r-top; do printf '[[rung]]\nname = "%s"\nmodel = "opus"\neffort = "high"\njudge = "high"\nreview = "xhigh"\n\n' "$r"; done > "$CH/.config/thread/ladder.toml"
+mkro $P.md "$R" "$DEMO" "$PAUSED"
+mkt h1.md $P open 'model: fable'
+mkt h2.md $P open 'effort: high'
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+carry --from "$T/$P.md" --dry-run
+ok "$rc|$(printf '%s\n' "$out" | grep '^restamp ' | tr '\n' ' ')" "0|restamp h1 rung=r-top drop=model restamp h2 rung=- drop=effort " "K6: the operator's ladder file decides the top rung"
+printf '[[rung]]\nname = "Opus"\n' > "$CH/.config/thread/ladder.toml"
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc|$out" "2|" "K6: a refused ladder file and a task that needs the top rung: the preview refuses, exit 2, no stdout"
+has "$err" "ERROR: carry: ladder file refused: $CH/.config/thread/ladder.toml:1: rung 1: " "K6: … one ERROR naming the file and its line (<path>:<line>: <reason>)"
+ok "$(printf '%s\n' "$err" | wc -l | tr -d ' ')" 1 "K6: … one line"
+ok "$(sums)" "$before" "K6: … writing nothing"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$out" "2|" "K6: … and the write refuses too"
+ok "$(sums)" "$before" "K6: … writing nothing"
+fmset h1.md model opus
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | grep '^restamp ' | tr '\n' ' ')" "0|restamp h1 rung=- drop=model restamp h2 rung=- drop=effort " "K6: with no task needing the top rung, the refused file is never read: the drops still apply"
+ok "$(fm h1.md model)|$(fm h2.md effort)|$(fm h1.md rollout)" "<none>|<none>|rollout: \"[[$N]]\"" "K6: … written"
+CH=""
 
 # ── M1-M12: a protocol-3 wave rollout in flight, with review PRs, migrates ────────────────────────────
 scen m

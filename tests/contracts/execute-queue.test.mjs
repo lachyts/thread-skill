@@ -24,6 +24,9 @@ const DRIVER = path.join(root, 'hooks', 'rollout-stop-driver.py')
 
 const S = (text, re) => collapse(section(text, re) ?? '')
 const S2 = /^### 2\. /
+const S3 = /^### 3\. /
+const S37 = /^### 3\.7\. /
+const S4 = /^### 4\. /
 const S45 = /^### 4\.5\. /
 const S5 = /^### 5\. /
 const S6 = /^### 6\. /
@@ -198,8 +201,8 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   const vline = (skill.match(/^# thread:integration-verify[^\n]*\n([^\n]*)\n# end thread:integration-verify/m) ?? [])[1] ?? ''
   const raceLine = st4.slice(st4.indexOf('**RACE procedure**'))
   const sq = (l) => l.includes("--bootstrap '<env_bootstrap>' --verifier '<verifier>'")
-  if (!vline.includes('lead-integrate.py verify') || !vline.includes('--timeout 1800') ||
-    !verifyP.includes('`run_in_background`') || !verifyP.includes('`timeout: 2400000`') ||
+  if (!vline.includes('lead-integrate.py verify') || !vline.includes('--timeout <verify_timeout>') ||
+    !verifyP.includes('`run_in_background` and `timeout: <harnessTimeoutMs>`') ||
     !verifyP.includes('the rc is 124') || !verifyP.includes('leaves no rc, which reads as red') ||
     !verifyP.includes('write rc 143; only a SIGKILL leaves no rc') ||
     !verifyP.includes("**single quotes**, with each `'` in them written as `'\\''`") ||
@@ -217,16 +220,43 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !st3.includes('`integrated` → step 4') || !st3.includes('`rejected` → the lane frees, step 1.2 launches the seeded revise') ||
     !st3.includes('`max_review_rounds` across those rounds sets it aside')) fails.push('trouble-path')
 
-  // integrate-args: startedAt from stamp at launch; readyAt from ready:; history live, else inputs; the rung's
-  // fallback names a source for each of its five fields, the tier cap from inputs (boolean + string), never the
-  // note's raw tier_capped string.
+  // integrate-args: startedAt from stamp at launch; readyAt from ready:; history live, else inputs; the rung is the
+  // task's own record (ADR 0029 decision 7): the approving row's three keys, else inputs' record verbatim (neutral
+  // when the note has no rung:), never the ladder's top rung, and no tier vocabulary left.
   if (!st3.includes('`startedAt` a fresh `lead-integrate.py stamp` taken at launch') ||
     !st3.includes("`readyAt` the note's `ready:`") ||
     !st3.includes('from the approving row when this session holds it, else from `lead-integrate.py inputs`') ||
-    !st3.includes('else `{model: <§ 3\'s resolved model>, escalated: false, escalatedAt: "", tierCapped: <inputs.tierCapped>, tierCappedAt: <inputs.tierCappedAt>}`') ||
-    !st3.includes('`tierCapped` (a boolean) and `tierCappedAt` (a string) from `lead-integrate.py inputs`') ||
-    !st3.includes("never the note's raw `tier_capped`")) {
+    !st3.includes("`rung` is the task's own rung record, from that row (`startRung`, `rung`, `climbs`), else `lead-integrate.py inputs`' `rung` record, verbatim") ||
+    !st3.includes('(neutral, `{startRung: "", rung: "", climbs: []}`, when the note has no `rung:`)') ||
+    !st3.includes("never the ladder's top rung: Integration runs on the top rung whatever the record says") ||
+    /tierCapped|tier_capped|escalated/.test(st3)) {
     fails.push('integrate-args')
+  }
+
+  // ladder (ADR 0029 decision 6, p13-2): § 3 reads ladder.py at each call's start — a start or restart, a seeded
+  // revise and each integrate call — before any stamp, and passes it as args.ladder; prepare and push need none;
+  // both resumes re-pass their call's own ladder; a refusal writes nothing and halts `ladder file refused`, which
+  // § 7 lists; the skill warns about `max_tier:` exactly once and passes nothing for it; § 4's args carry `ladder`
+  // and the task's `rung`; the integrate call carries a freshly resolved ladder; § 5's launch names it.
+  const ladderP = collapse((section(skill, S3) ?? '').split('\n\n').find((x) => x.startsWith("**The ladder, at each call's start (ADR 0029 decision 6).**")) ?? '')
+  const tierLines = skill.split('\n').filter((l) => /max_tier|maxTier/.test(l))
+  const s4 = section(skill, S4) ?? ''
+  const resume37 = collapse(section(skill, S37) ?? '')
+  if (!ladderP.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py` at the start of each Workflow call that starts agents') ||
+    !ladderP.includes("a start or restart (the task's own call), a seeded revise, and each integrate call") ||
+    !ladderP.includes('as `args.ladder`') || !ladderP.includes('It runs before any stamp for that call') ||
+    !ladderP.includes('(`lead-integrate.py prepare` and `push`) starts no agent and needs none') ||
+    !ladderP.includes("*Lost call*'s `resumeFromRunId`, or § 3.7's signed-gate resume — re-passes its call's own ladder") ||
+    !ladderP.includes('write nothing for that call') || !ladderP.includes('reason="ladder file refused"') ||
+    tierLines.length !== 1 || !tierLines[0].includes("\"`max_tier:` ignored; the ceiling is the ladder's top rung\"") ||
+    !tierLines[0].includes('nothing is passed to the engine') ||
+    !s4.includes('"ladder": {') || !s4.includes('"rung": "opus-high" }') ||
+    !st3.includes("a freshly resolved `ladder` (§ 3: read at this call's start)") ||
+    !lost.includes('the same `scriptPath` and args, the ladder included') ||
+    !resume37.includes("The resume keeps its call's own `ladder`.") ||
+    !s5.includes("the ladder it runs on (its `source`: the file's path, or `built-in`)") ||
+    !S(skill, S7).includes('`ladder.py` exits non-zero at a call\'s start (§ 3: `reason="ladder file refused"`')) {
+    fails.push('ladder')
   }
 
   // set-aside: dependants wait; hand-back for Integration, revise and own (a PR-less code-writing review note
@@ -365,6 +395,80 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   if (!hooksJson.includes('${CLAUDE_PLUGIN_ROOT}/hooks/rollout-stop-driver.py') || hooksJson.includes('wave-stop-driver') ||
     !exists('hooks/rollout-stop-driver.py') || exists('hooks/wave-stop-driver.py')) fails.push('driver')
 
+  // verify-timeout (p14-2, L3): the rollout key's default and its use. § 3's table row (default 1800, not passed to
+  // the engine, read by `reconcile-rollout.py verify-timeout`); § 3's once-per-entry check, before anything the
+  // entry writes, with its write-nothing halt; the verify line and the RACE re-verify bound by it, with no literal
+  // 1800 left; the harness bound (2400000 at the default) on the verify paragraph and § 8's timeout guardrail;
+  // every entry description runs the check before its first write (§ 4.5's entry paragraph, Cold resume, both
+  // Reinstates); § 7 lists the halt.
+  const s3raw = section(skill, S3) ?? ''
+  const vtRow = s3raw.split('\n').find((l) => l.startsWith('| `verify_timeout` |')) ?? ''
+  const vtP = collapse(s3raw.split('\n\n').find((x) => x.startsWith('**Validate `verify_timeout` once per loop entry, before anything the entry writes.**')) ?? '')
+  const VT = "§ 3's `verify_timeout` check"
+  const coldVT = labelled(skill, 'Cold resume.')
+  const reinstateVT = labelled(skill, 'Reinstate (resuming a paused rollout).')
+  const pzReinstate = collapse((section(skill, PAUSE) ?? '').split('\n').find((l) => l.startsWith('**Reinstate.**')) ?? '')
+  const timeoutGuard = collapse((section(skill, S8) ?? '').split('\n').find((l) => l.startsWith('- **Every background command names its `timeout:`.**')) ?? '')
+  if (!vtRow.startsWith('| `verify_timeout` | `1800` | not passed to the engine.') || !vtRow.includes('`reconcile-rollout.py verify-timeout`') ||
+    !vtRow.includes('`harnessTimeoutMs`') ||
+    !vtP.includes("Every entry into §4.5's loop (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry and `/thread:repair`'s hand-off)") ||
+    !vtP.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py verify-timeout --rollout <rollout-note>` once') ||
+    !vtP.includes('before `resume`, `clear-pause`, `next` and any stamp') || !vtP.includes('never at the verify line') ||
+    !vtP.includes('the lead writes nothing') || !vtP.includes('reason="invalid verify_timeout on [[rollout]]"') ||
+    !vline.includes('--timeout <verify_timeout>') || !raceLine.includes('--timeout <verify_timeout>') ||
+    !raceLine.includes('`timeout: <harnessTimeoutMs>`') || /--timeout 1800\b/.test(skill) ||
+    !verifyP.includes('(<verify_timeout> + 600) × 1000') || !verifyP.includes('`timeout: 2400000` at the default') ||
+    !timeoutGuard.includes('`timeout: <harnessTimeoutMs>` (their own `--timeout <verify_timeout>` bounds the verifier; `timeout: 2400000` at the default)') ||
+    !recheck.includes("Every entry then runs § 3's `verify_timeout` check once, before anything it writes") ||
+    !before(coldVT, VT, 'reconcile-rollout.py resume') || !before(reinstateVT, VT, 'clear-pause') || !before(pzReinstate, VT, 'clear-pause') ||
+    !S(skill, S7).includes('`reconcile-rollout.py verify-timeout` exits 1 at an entry (`reason="invalid verify_timeout on [[rollout]]"`')) {
+    fails.push('verify-timeout')
+  }
+
+  // approved-plan (p14-2, L2): the approved plan reaches the seeded revise (step 1.2) and the integrate call (step 3)
+  // from `lead-integrate.py plan`, read at those two launches only (Restart routing's revise reuses step 1.2's) and
+  // passed verbatim; no empty-plan literal is left; § 6 lists the row's `plan` and reconcile's three outcomes.
+  const planHits = (section(skill, S45) ?? '').split('lead-integrate.py plan').length - 1
+  const s6 = S(skill, S6)
+  const VERBATIM = 'passed verbatim as the same JSON string, never retyped, summarised or truncated'
+  if (!s2sub || !s2sub.text.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py plan --note <task note>`, then the Workflow call') ||
+    !s2sub.text.includes('plan: <plan.plan>}') || !s2sub.text.includes(VERBATIM) ||
+    !st3.includes('trouble, landed, plan, reviewHistory') ||
+    !st3.includes("`plan` is `lead-integrate.py plan --note <task note>`'s `plan`, read at this launch (after the approving row is reconciled) and " + VERBATIM) ||
+    planHits !== 2 || /plan: ''|plan: ""|`plan` is `""`/.test(s45) ||
+    !s6.includes('gatedInputs, plan }] }') || !s6.includes('upserts it, quoted, under `## Approved plan`') ||
+    !s6.includes('`""` removes that section') || !s6.includes('`null` or absent leaves it')) {
+    fails.push('approved-plan')
+  }
+
+  // descope (p14-4): step 1.2's **Automatic descope** shares sub-step 2's line, so it runs before the halt guard
+  // (halt-guard pins that order). Skipped under a pause; a `plan-blocked` set-aside judged once per session key (its
+  // highest Plan-blocked run and that run's sha), never again on a heartbeat or another loop entry; the guarded verb
+  // writes; exit 0 → `hand-back`, then `next` again; exit 3 leaves it set aside for `/thread:repair`, never a
+  // hand-back. § 8 says the lead runs this one verb itself and its refusal routes to repair; *Set aside* names the
+  // re-entry; a Don't forbids a hand-written or second descope. A block after the restart routes to repair's
+  // **plan-blocked after a descope**, never a silent hand-back; § 6's undo lists every record (the marker, the
+  // follow-up set `status: dropped`, the `## Notes` line).
+  const s2t = s2sub?.text ?? ''
+  const undo6 = collapse(s6raw.split('\n').find((l) => l.startsWith('The `Descoped:` line lists')) ?? '')
+  const dsc = s2t.slice(Math.max(0, s2t.indexOf('**Automatic descope')))
+  const never = collapse((section(skill, S8) ?? '').split('\n').find((l) => l.startsWith('- **Never automate `/thread:repair`**')) ?? '')
+  if (!s2t.includes('**Automatic descope') || !dsc.includes('`plan-blocked`') ||
+    !dsc.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py descope --tasks <slug>') ||
+    !dsc.includes('Skip it when `paused` or `pauseRequested` is set') ||
+    !dsc.includes('whose key this session has not judged') || !dsc.includes('held for the session\'s life') ||
+    !dsc.includes('never re-judges it') ||
+    !dsc.includes('exit 0 → `hand-back --tasks <slug>`') || !dsc.includes('then re-run `next --running') ||
+    !dsc.includes('exit 3 → leave it set aside') || !dsc.includes('`/thread:repair` asks Lachy') ||
+    !never.includes('The lead runs `reconcile-rollout.py descope` itself (§ 4.5 step 1.2)') ||
+    !never.includes('its refusal (exit 3) routes the task to repair') ||
+    !dsc.includes("a block after the restart always asks (repair § 2's **plan-blocked after a descope**, never a silent hand-back)") ||
+    !['`<!-- descope run=… -->` marker', '`descope_armed:`', '`status: dropped`', '`descope undone:`', 'a second one'].every((k) => undo6.includes(k)) ||
+    !aside.includes('- a `plan-blocked` task the notes settle: automatically (step 1.2\'s *Automatic descope*: `descope`, then `hand-back`)') ||
+    !donts.includes('Never write a descope by hand') || !donts.includes('its exit 3 goes to `/thread:repair`, never to `hand-back`')) {
+    fails.push('descope')
+  }
+
   // s5 (the dead-run resume keeps its shape for its consumers) is part of lost-call's routing: § 5 names *Lost call*.
   if (!s5.includes('(§ 4.5 *Lost call*)') || !before(s5, '(§ 4.5 *Lost call*)', 'resumeFromRunId: <runId>')) fails.push('lost-call')
   return [...new Set(fails)]
@@ -378,7 +482,8 @@ test('execute § 4.5, its neighbours, the heartbeat and the hook hold every queu
 
 const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lost-call', 'clean-path', 'verify-bound',
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
-  'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget']
+  'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
+  'ladder', 'verify-timeout', 'approved-plan', 'descope']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -425,7 +530,7 @@ test('control: a merge route that verifies fails clean-path', () => {
 
 test('control: an unbounded verify command fails verify-bound', () => {
   const p = real.skill.split('\n').find((l) => l.startsWith('**The background verify command.**'))
-  only(sk(p, p.replace('`run_in_background` and `timeout: 2400000`', '`run_in_background`')), 'verify-bound', 'no timeout')
+  only(sk(p, p.replace('`run_in_background` and `timeout: <harnessTimeoutMs>`', '`run_in_background`')), 'verify-bound', 'no timeout')
 })
 
 test('control: leadMerge on a red verify fails trouble-path', () => {
@@ -523,10 +628,18 @@ test('control: a double-quoted RACE re-verify fails verify-bound', () => {
     'verify-bound', 'dq race')
 })
 
-test("control: the rung fallback taking the note's tier_capped fails integrate-args", () => {
+test("control: a rung fallback naming the ladder's top rung fails integrate-args", () => {
   const p = real.skill.split('\n').find((l) => l.startsWith('   **The integrate call**'))
-  const from = p.slice(p.indexOf('else `{model:'), p.indexOf('; `readyAt`'))
-  only(sk(from, 'else the resolved model, `false`, `""` and the note\'s `tier_capped`'), 'integrate-args', 'raw tier_capped')
+  const from = p.slice(p.indexOf("else `lead-integrate.py inputs`' `rung` record"), p.indexOf('; `readyAt`'))
+  only(sk(from, "else `{startRung: \"\", rung: <the ladder's top rung>, climbs: []}`"), 'integrate-args', 'top-rung fallback')
+})
+
+test("control: an integrate call without a freshly resolved ladder fails ladder", () => {
+  only(sk(", a freshly resolved `ladder` (§ 3: read at this call's start), `mode: 'integrate'`", ", `mode: 'integrate'`"), 'ladder', 'no fresh ladder')
+})
+
+test('control: a second max_tier: line fails ladder', () => {
+  only(sk('| `env_bootstrap` | none (omit) |', '| `max_tier` | none (omit) | ignored |\n| `env_bootstrap` | none (omit) |'), 'ladder', 'second max_tier line')
 })
 
 test('control: a lead row written for an integrate call\'s review-blocked fails set-aside', () => {
@@ -578,7 +691,82 @@ test('control: a template budget that drifts from execute fails budget', () => {
   only({ template: real.template.replace('any re-review + required checks + squash', 'any re-review + squash') }, 'budget', 'template drift')
 })
 
-test('the rules are all named (25) and each has a control', () => {
-  assert.equal(RULES.length, 25)
+// verify-timeout (p14-2)
+test('control: a verify_timeout default of 3600 fails verify-timeout', () => {
+  only(sk('| `verify_timeout` | `1800` |', '| `verify_timeout` | `3600` |'), 'verify-timeout', 'default 3600')
+})
+
+test('control: a RACE re-verify back on --timeout 1800 fails verify-timeout', () => {
+  only(sk('race-<slug> --timeout <verify_timeout> --bootstrap', 'race-<slug> --timeout 1800 --bootstrap'), 'verify-timeout', 'race 1800')
+})
+
+test('control: a verify_timeout check read as each task starts fails verify-timeout', () => {
+  only(sk('**Validate `verify_timeout` once per loop entry, before anything the entry writes.**', '**Validate `verify_timeout` as each task starts.**'),
+    'verify-timeout', 'per task')
+})
+
+test("control: § 4.5's entry paragraph without the check fails verify-timeout", () => {
+  only(sk(" Every entry then runs § 3's `verify_timeout` check once, before anything it writes; the lane uses that value until the next entry.", ''),
+    'verify-timeout', 'no entry sentence')
+})
+
+test('control: a cold resume that checks after resume fails verify-timeout', () => {
+  only(sk("then § 3's `verify_timeout` check; then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume --rollout <rollout-note>`",
+    "then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume --rollout <rollout-note>`, then § 3's `verify_timeout` check"),
+  'verify-timeout', 'check after resume')
+})
+
+test("control: the Pausing Reinstate without the check fails verify-timeout", () => {
+  only(sk("re-runs § 2.5 and § 2.7, then § 3's `verify_timeout` check, then sees the `paused:` stamp", 're-runs § 2.5 and § 2.7, then sees the `paused:` stamp'),
+    'verify-timeout', 'pausing reinstate')
+})
+
+test('control: § 7 without the verify_timeout halt fails verify-timeout', () => {
+  const l = real.skill.split('\n').find((x) => x.startsWith('- `reconcile-rollout.py verify-timeout` exits 1 at an entry'))
+  only(sk(l + '\n', ''), 'verify-timeout', 'no § 7 bullet')
+})
+
+// approved-plan (p14-2)
+test("control: step 1.2 back on plan: '' fails approved-plan", () => {
+  only(sk('plan: <plan.plan>}', "plan: ''}"), 'approved-plan', "plan ''")
+})
+
+test('control: step 3 back on plan: "" fails approved-plan', () => {
+  only(sk('trouble, landed, plan, reviewHistory', 'trouble, landed, plan: "", reviewHistory'), 'approved-plan', 'plan ""')
+})
+
+test('control: step 3 without "verbatim" fails approved-plan', () => {
+  only(sk('read at this launch (after the approving row is reconciled) and passed verbatim as the same JSON string, never retyped, summarised or truncated;',
+    'read at this launch (after the approving row is reconciled);'), 'approved-plan', 'no verbatim')
+})
+
+test('control: a third lead-integrate.py plan read in Restart routing fails approved-plan', () => {
+  only(sk("- else the task's own call.", "- else `lead-integrate.py plan --note <task note>`, then the task's own call."), 'approved-plan', 'third read')
+})
+
+test("control: § 6 without the '' removal fails approved-plan", () => {
+  only(sk('`""` removes that section', '`""` leaves it too'), 'approved-plan', 'no removal')
+})
+
+// descope (p14-4)
+test('control: an Automatic descope that re-judges on every loop entry fails descope', () => {
+  only(sk('whose key this session has not judged', 'on each loop entry'), 'descope', 'no session key')
+})
+
+test('control: an Automatic descope that hands back on exit 3 fails descope', () => {
+  only(sk('exit 3 → leave it set aside', 'exit 3 → `hand-back` it anyway'), 'descope', 'exit 3 handed back')
+})
+
+test('control: § 8 without the descope sentence fails descope', () => {
+  const l = real.skill.split('\n').find((x) => x.startsWith('- **Never automate `/thread:repair`**'))
+  only(sk(l, l.slice(0, l.indexOf(" One verb is the lead's as well as repair's"))), 'descope', 'no § 8 sentence')
+})
+
+test("control: § 6's undo that leaves the follow-up open fails descope", () => {
+  only(sk('the follow-up note set to `status: dropped`', 'the follow-up note left as it is'), 'descope', 'follow-up left open')
+})
+
+test('the rules are all named (29) and each has a control', () => {
+  assert.equal(RULES.length, 29)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

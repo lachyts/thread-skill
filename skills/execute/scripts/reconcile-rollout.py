@@ -27,13 +27,17 @@ Subcommands:
               runs, awaits or integrates (a held RACE whose `integrating:` stands included, Race holds
               below), it stamps `paused:` and removes `pause_requested` (the drain, ADR 0030 decision 5).
               Refuses an incomplete rollout (below): exit 1, no stdout, one ERROR line naming why and the
-              remedy, `/thread:schedule <its first project> --regenerate`.
+              remedy, `/thread:schedule <its first project> --regenerate`. An unacked git-env trip (Git-env
+              hold, below) is listed as `gitEnvHold` and makes `halt` "git-env", ahead of every other verdict.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
               approve-gates' `gates_signed:` marker (p12-14): when the note carries one, it is removed and a
               second line `<slug>: signed-gate restart (gates signed <stamp>) ...` is printed, so the lead
               prints execute § 3.7's fresh-call warning only on the restart that directly follows a sign-off.
+              It consumes descope's `descope_armed:` stamp the same way (p14-4): removed, with a line
+              `<slug>: descope restart (descoped <stamp>; descope_armed: cleared) ...`, so a block after that
+              restart reads as a second block and descope asks.
 
   mark-integrating Stamp `integrating: <time>` on a `review` note with a `pr:` as its Integration begins
               (the first wins): the durable signal /thread:status reads.
@@ -65,7 +69,7 @@ Subcommands:
               (40 hex each). wait = --started - `ready:`, duration = --now - --started, both in whole
               minutes (_whole_minutes, the engine's wholeMinutes); triggers `-`. A re-run of the same
               Integration (same --started and SHAs) is a no-op, even at a later --now. Changes no status,
-              rounds, `tier_capped`, `integrating:` or `ready:`. Refuses (exit 1, nothing written) a note
+              rounds, `rung:`, `integrating:` or `ready:`. Refuses (exit 1, nothing written) a note
               that is not `review` with a `pr:`, a SHA that is not 40 hex and a --started that is not an
               ISO stamp.
 
@@ -80,8 +84,14 @@ Subcommands:
   status      Read-only situational scan for /thread:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
-              pause_requested, incomplete, ceiling, counts, progress, timeline, tasks}; `incomplete` is
-              why the rollout must not run as written (below), or null. Pure read; no network.
+              pause_requested, incomplete, ceiling, counts, progress, timeline, ladder, gitEnvHold, tasks};
+              `gitEnvHold` is the unacked git-env trips (Git-env hold, below), [] when none; `incomplete`
+              is why the rollout must not run as written (below), or null. `ladder` is {source, rungs (names,
+              bottom first), error}: the local ladder file through ladder.py's load(); a refused file gives
+              rungs [], source ladder.py's default_path() and error its reason, and status still exits 0.
+              Each task carries `rung` (its `rung:` stamp, or null) and `rungDrift`: the stamp when a
+              readable ladder lacks it and the task is unlanded (queued, running, awaiting-integration,
+              integrating, set-aside), else "". Pure read; no network.
 
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
@@ -91,27 +101,81 @@ Subcommands:
               so only phases this rollout touched are ever closed.
 
   defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
-              and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:` stamps (first-start-wins would otherwise carry a
+              and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:` stamps
+              (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
               re-plans them. The dependent-closure safety check lives in the /thread:repair skill.
+
+  descope     An automatic descope of a plan-blocked task (p14-4), the one verb the live lead (execute § 4.5 step
+              1.2) and /thread:repair § 3d share: `--tasks <slug> --rollout <note> --part "<verbatim quote>"
+              (--optional --short <kebab> | --owner <slug> --owner-quote "<verbatim quote>") --reason "<line>"`.
+              The caller judges that the plan-block feedback centres on the part; the verb checks it. Exit 3 is an
+              ASK (one `ASK: [[slug]] <why>; nothing written: ...` line, nothing written) when: the part, or a clause
+              holding it, cites an ADR; a recorded decision (`## Decisions…`, a human `## Scope decision…`, a
+              `## Repair input` line without `(automatic)`, `## Approved gates`, `## Gated inputs`) holds the part
+              (or, for --owner, the quote); the part sits in a fenced code block of the brief (the body minus the
+              record sections; a fence is never a brief item, so no pointer lands inside one); --optional and an
+              occurrence of the part in the brief has no marker word (consider, considering, optional, optionally,
+              nice to have) at or before it in its own clause, or the part is not in the brief (clauses split at
+              `.`, `;`, `:`, `!`, `?`, a dash and `, and` / `, but` / `, then`; a marker that not / never / no
+              negates is none; a clause that is only a marker ended by `:` or `.` marks the next one); --owner and
+              the part is in an unmarked brief clause, or is in neither the latest Plan-blocked feedback run nor
+              the brief (verbatim only: a paraphrase the feedback itself uses still passes, so the caller's
+              judgement stays the guard there), or the owner is the task, not a task of this rollout, not unlanded
+              and active (its queue state carried), held by a RACE or UNVERIFIED, upstream of the task, or its note
+              lacks the quote; the task was descoped automatically before and restarted since (no `descope_armed:`,
+              even when the new block's feedback added no run); or another part or mode at the same run. Exit 0 writes, each
+              record checked and written on its own so a re-run finishes a partial one: the follow-up note
+              (--optional: `<project>-followup-<short>.md`, loose, `descoped_from:`; one at that path without it is
+              exit 1), then the task note in one save (a `## Scope decision (automatic)` entry and its
+              `<!-- descope run=<n> part=<sha12> mode=<m> -->` marker, ` (descoped: see ## Scope decision
+              (automatic))` on each brief item holding the part, or one pointer line for a part the brief lacks, a
+              `## Repair input` `(automatic)` line naming the superseded Plan-blocked feedback runs, and
+              `descope_armed: <now>`), then a `- <date> descope: [[slug]] ...` line in the rollout's `## Notes`.
+              `[no-change]` when all are present. `status:` is never written: the caller's `hand-back` re-enters
+              the task. Exit 1 (nothing written): a missing note, a note not plan-blocked at its run or without a
+              Plan-blocked run, a --rollout its `rollout:` does not name, a bad --short or a follow-up name that
+              reads as a phase member, a colliding follow-up, a failed save. Exit 2: usage.
 
   carry       A supersede's carry (ADR 0030; /thread:schedule step 6, and § 0 finishing an interrupted
               supersede): re-point every unlanded task of the prior rollout (--from, a path) to the rollout
               that supersedes it (--to, a path). Each linked note (the notes `status` reads, root and Archive)
               is classified by its queue state: queued, running, awaiting-integration, integrating and
               set-aside ones are carried (`rollout: "[[<to>]]"` in place; `owner:`, `integrating:` and a
-              legacy `wave:` removed; nothing else changes), merged, folded and other ones are kept. It never
-              writes the prior note: closing it out is schedule step 7.5's. Prints one `carry <slug> <state>`
-              or `keep <slug> <state>` line per linked note, sorted by slug, then `[no-change]`,
-              `[written: <n>]` or `(dry-run)`. --dry-run previews and needs no --to. Refuses (exit 2,
+              legacy `wave:` removed; its legacy stamps mapped, below; nothing else changes), merged, folded
+              and other ones are kept. It never writes the prior note: closing it out is schedule step 7.5's.
+              Legacy stamps (ADR 0029 consequences; LEGACY_KEYS: the old model, effort and cap keys): a
+              carried note's non-empty `rung:` is kept, drifted or not; otherwise it gets `rung: <the
+              ladder's top rung>` when its model (failing that, the --from rollout's) is `fable` or its effort
+              is `xhigh` or `max` (trimmed, any case: the engine's startRung predicate). A recognised key is
+              then removed: the model at fable/opus/empty, the effort at low..max/empty, the cap key at any
+              value. An unrecognised value stays, with a `WARN: carry: <slug>: <key>: <value> unrecognised,
+              left in place` line on stderr. The ladder (ladder.py's load()) is read only when a carried note
+              needs its top rung; a refused file is a refusal (below). Prints one `carry <slug> <state>` or
+              `keep <slug> <state>` line per linked note, sorted by slug, each carry line followed by
+              `restamp <slug> rung=<name|kept|-> drop=<k1,k2|->` when the mapping changes the note (a rung
+              added or a key removed; `kept`: its own `rung:` stays; `-`: none written and it has none; drop=
+              in LEGACY_KEYS order, `-` for none), then `[no-change]`, `[written: <n>]` or `(dry-run)`.
+              --dry-run previews and needs no --to. Refuses (exit 2,
               nothing written, one ERROR line): a --from that is missing, unparseable, not tagged `rollout`,
               done or dropped (unless done with `superseded_by:` naming --to: a re-run), or neither paused
               nor never started; a --from with a task an undecided RACE or UNVERIFIED holds (--dry-run
-              included; the line names each held slug and `/thread:repair [[<from>]]`); a --to that is
+              included; the line names each held slug and `/thread:repair [[<from>]]`); a --from with an
+              unacked git-env trip (Git-env hold, below; --dry-run included; `ERROR: carry: --from <stem> holds
+              an unacked git-env trip: [[a]], [[b]]: record Lachy's ack first with /thread:repair [[<stem>]]`,
+              checked after the RACE hold); a carried note that
+              needs the top rung when the ladder file is refused (--dry-run included; `ERROR: carry: ladder
+              file refused: <path>:<line>: <reason>`, no stdout); a --to that is
               missing, not directly in the tasks dir, untagged, done or
               dropped, whose `supersedes:` does not name --from, that is --from, or that is not never
               started; no --to without --dry-run. A failed save is exit 1 at once: the prior note is still
               open, so the next unfinished-rollout check pairs the two notes as interrupted.
+
+  verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2): given a rollout note,
+              print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": (N + 600) * 1000} from its
+              `verify_timeout` frontmatter (an integer from 1 to 6600; absent -> 1800; a quoted value or a
+              trailing ` # comment` is read as `parallel_ceiling` is). Anything else, or no note: one ERROR
+              line on stderr, exit 1, no stdout. Only the rollout note is read.
 
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
               `pause_requested`) from the rollout note. Run by /thread:execute's resume path when it
@@ -163,6 +227,19 @@ dependants wait) and lists it under `raceHold`; one whose `integrating:` stamp s
 re-verify holds the lane) still counts as integrating for the pause drain, the solo rule, the overlap and the
 halt verdict. `hand-back` refuses a held task (exit 2, nothing written). `status` reports the stored state,
 which status § 3 renders as a RACE itself.
+
+Git-env hold (_git_env_hold, read by `next`, `status`, `carry` and skills/execute/scripts/git-env-canary.py;
+execute § 4.5 *Git-env canary*): the rollout note's `## Git-env log` (GIT_ENV_LOG_SECTION) holds one line per
+tripped window, `- <stamp> git-env trip [[<slug>]] <kind>: <what changed>; repo <R>` (GIT_ENV_TRIP_MARK), written
+by the canary when the shared checkout's `refs/heads/<default>` or its bareness changed during a window, and one
+line per human ack, `- <stamp> git-env ack [[a]], [[b]]: refs/heads/<B> at <sha|absent>, core.bare false`
+(GIT_ENV_ACK_MARK), written only by the canary's `ack` (through /thread:repair). The hold is every trip line that
+no later ack line names (its wikilinks, read with WIKILINK_OPEN_RE), in log order, as {slug, kind, line}. While it
+is non-empty `next` starts and restarts nothing, holds every stalled or queued task with the reason
+`git-env hold: /thread:repair` and reports `halt: "git-env"` ahead of every other verdict; `status` reports it as
+`gitEnvHold`; and `carry` refuses the prior (exit 2, --dry-run included) with an ERROR line naming each held slug
+and `/thread:repair [[<from>]]`. A `## Race log` line carrying `git-env halt` names its slug like any Race log line,
+so once the hold is acked the RACE hold applies unchanged.
 
 Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
 session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
@@ -218,6 +295,24 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     Until the lead passes startedAt, lines are told apart only by position: S, I, S' keeps
                     three lines, back-to-back identical lines collapse to one. Readers take the LAST line.
                     `integration: null` counts as absent; a non-object is an error (exit 1, no line).
+  rung           -> (any status; ADR 0029 decision 7) `rung: <name>`, the rung the task reached, when the row's
+                    `rung` is a non-empty rung name ([a-z][a-z0-9._-]*, never a YAML word), so a re-dispatch
+                    starts there. A malformed name is an error (exit 1) and stamps nothing. An empty `rung`
+                    (an integrate row passing a neutral record through, a lead-written row with none)
+                    stamps nothing. Reconcile never writes a legacy stamp and never removes `rung:`; stale
+                    legacy stamps (the old model, effort and cap keys) are left for a supersede's `carry`,
+                    which maps them to a rung (schedule § 0).
+                    A pre-3.0.0 row (no `rung`; a call started on the tier engine that finished there, e.g.
+                    a Lost-call resume of its old scriptPath) with `escalated` or `tierCapped` true proved
+                    the task non-mechanical: it stamps `rung: <the ladder's top rung>` (ladder.py's load(),
+                    the file each call reads) and prints a WARNING naming the slug. When the ladder cannot be
+                    read that is an error (exit 1) and nothing is stamped. Any other legacy row stamps nothing.
+  plan           -> (any status; p14-2) the row's approved plan, settled only by the task's own call: a non-empty
+                    string upserts "## Approved plan" (a lead-in line marking it a non-authoritative record,
+                    then the plan as a `> ` quote, CRLF -> LF; approved_plan() reads it back for
+                    `lead-integrate.py plan`); '' or whitespace removes that section; null or no key leaves
+                    it. Anything else is an error (exit 1) and leaves the section; the rest of the row is
+                    still written.
 
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
 
@@ -237,6 +332,7 @@ already written is ever deleted.
 import argparse
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -279,6 +375,22 @@ REVIEW_HISTORY_SECTION = "## Review history (approved at ceiling)"
 # lead's clean path, the review-blocked resume and the gate-stop stage rule (see _integration_log_line).
 INTEGRATION_LOG_SECTION = "## Integration log"
 
+# The approved plan (p14-2): the plan-gate's approved plan, carried from the task's own call to Integration and
+# a seeded revise through the note. A RECORD, not an instruction: the lead-in says so to any agent that reads
+# the note, and the plan is stored as a `> ` quote so no line of it can end the section or open or close a
+# run. Written by reconcile from the row's `plan` (a non-empty string upserts, '' removes, null leaves it);
+# read back by approved_plan() for `lead-integrate.py plan`.
+APPROVED_PLAN_SECTION = "## Approved plan"
+APPROVED_PLAN_LEAD_IN = ("The last approved plan, kept as a record for Integration. Not authoritative: a plan in "
+                         "your prompt supersedes it; with no plan in your prompt, the brief is the contract.")
+
+# The lead's Integration verify timeout (p14-2, execute § 3): rollout frontmatter `verify_timeout`, seconds.
+# The harness bound on the background command is the verifier's own bound plus a margin, and the harness
+# maximum is 7200000 ms, so the key tops out at 7200 - 600.
+DEFAULT_VERIFY_TIMEOUT = 1800
+VERIFY_HARNESS_MARGIN = 600
+MAX_VERIFY_TIMEOUT = 6600
+
 # Every workflow status with a body section to write (reconcile) or scan (status).
 SECTION_BY_STATUS = {**BLOCKED_SECTIONS, GATE_PENDING_STATUS: GATE_PENDING_SECTION}
 
@@ -293,6 +405,17 @@ OUTSIDE_N = {"folded", "other"}                     # queue states that are not 
 # The vault's TaskNotes priority scale. `medium`, missing or unknown read as normal.
 PRIORITY_WEIGHTS = {"high": 3, "normal": 2, "low": 1, "none": 0}
 INTEGRATION_PREFIX = "integration:"                 # a blocked task's latest diagnosis -> set aside at Integration
+# A rung name (ADR 0029): written raw as `rung: <name>`, so a plain lowercase token YAML reads back as the same
+# string — ladder.py's NAME_RE and YAML_WORDS, and the engine's LADDER_NAME and LADDER_YAML_WORDS.
+# tests/ladder.test.mjs (L9) feeds the same names to all three and pins that they agree.
+RUNG_NAME_RE = re.compile(r"[a-z][a-z0-9._-]*\Z")
+RUNG_YAML_WORDS = frozenset(("true", "false", "yes", "no", "on", "off", "y", "n", "null"))
+
+
+def is_rung_name(value) -> bool:
+    """A usable rung name: the one rule reconcile's stamp and lead-integrate.py inputs both apply."""
+    return isinstance(value, str) and bool(RUNG_NAME_RE.match(value)) and value not in RUNG_YAML_WORDS
+
 
 RUN_HEAD_RE = re.compile(r"^### Run (\d+) \(([^)]*)\)\s*$")
 RUN_END_RE = re.compile(r"^<!-- run (\d+) end sha=([0-9a-f]{12}) -->\s*$")
@@ -514,6 +637,36 @@ def _neutralise(text: str) -> str:
             line = " " + line
         out.append(line)
     return "\n".join(out)
+
+
+def quote_block(text: str) -> str:
+    """A text stored as a markdown quote (the approved plan, p14-2): CRLF (and a lone CR) normalised to LF,
+    trailing whitespace dropped, each line written `> <line>` and a blank line `>`. No stored line can read as
+    note structure: it starts with `>`, never `## `, `#`, `### Run` or `<!-- run`."""
+    lines = str(text).replace("\r\n", "\n").replace("\r", "\n").rstrip().split("\n")
+    return "\n".join(("> " + line) if line else ">" for line in lines)
+
+
+def unquote_block(lines) -> str:
+    """quote_block's inverse over a section's lines: only the `>` lines are kept, each with one `> ` (or a bare
+    `>`) stripped, so a lead-in or blank line around the quote is not part of the text."""
+    out = []
+    for line in lines:
+        if line.startswith("> "):
+            out.append(line[2:])
+        elif line.startswith(">"):
+            out.append(line[1:])
+    return "\n".join(out)
+
+
+def approved_plan(note) -> str:
+    """The note's approved plan (p14-2): the `> ` quote under `## Approved plan`, unquoted; '' when the note
+    has no such section (never plan-gated, or the last own call was not)."""
+    found = note._section_bounds(APPROVED_PLAN_SECTION)
+    if found is None:
+        return ""
+    lines, start, end = found
+    return unquote_block(lines[start + 1:end])
 
 
 def _run_end(n: int, sha: str) -> str:
@@ -1192,6 +1345,39 @@ def _race_holds(rollout_note, linked):
     return holds
 
 
+# ---- the git-env hold (execute § 4.5 *Git-env canary*) ------------------------------------------------------
+
+GIT_ENV_LOG_SECTION = "## Git-env log"
+GIT_ENV_TRIP_MARK = "git-env trip"
+GIT_ENV_ACK_MARK = "git-env ack"
+
+
+def _git_env_hold(rollout_note):
+    """The unacked git-env trips (the module docstring's "Git-env hold"): an ordered [{slug, kind, line}] of the
+    `## Git-env log` trip lines that no later ack line names. A trip line's slug is the first wikilink after the
+    mark and its kind the word before the next `:`; an ack line names every wikilink it carries. A line with
+    neither mark is ignored. `rollout_note` None has no log, so no hold."""
+    if rollout_note is None:
+        return []
+    trips = []
+    for line in rollout_note.section_text(GIT_ENV_LOG_SECTION).split("\n"):
+        line = line.rstrip()
+        if GIT_ENV_TRIP_MARK in line:
+            rest = line[line.index(GIT_ENV_TRIP_MARK) + len(GIT_ENV_TRIP_MARK):]
+            m = WIKILINK_OPEN_RE.search(rest)
+            slug = (_wikilink_slug(m.group(1)) or "") if m else ""
+            if not slug:
+                continue
+            tail = rest[m.end():]
+            tail = tail[tail.index("]]") + 2:] if "]]" in tail else tail
+            km = re.match(r"\s*([A-Za-z-]+)\s*:", tail)
+            trips.append({"slug": slug, "kind": km.group(1) if km else "", "line": line})
+        elif GIT_ENV_ACK_MARK in line:
+            acked = {(_wikilink_slug(m.group(1)) or "").lower() for m in WIKILINK_OPEN_RE.finditer(line)}
+            trips = [t for t in trips if t["slug"].lower() not in acked]
+    return trips
+
+
 def _ceiling(rollout_note):
     """(ceiling, error): `parallel_ceiling`, an integer >= 1; absent -> 4; anything else -> error."""
     raw = rollout_note.get("parallel_ceiling")
@@ -1201,6 +1387,19 @@ def _ceiling(rollout_note):
     if re.fullmatch(r"[0-9]+", s) and int(s) >= 1:
         return int(s), None
     return None, f"parallel_ceiling must be an integer >= 1, got {raw!r}"
+
+
+def _verify_timeout(rollout_note):
+    """(seconds, error): `verify_timeout`, an integer from 1 to MAX_VERIFY_TIMEOUT; absent -> 1800; anything
+    else -> error. Read like `parallel_ceiling` (_scalar: a quoted value or a trailing ` # comment` is fine).
+    Only the rollout note is read, so a task-level key never applies."""
+    raw = rollout_note.get("verify_timeout")
+    if raw is None:
+        return DEFAULT_VERIFY_TIMEOUT, None
+    s = _scalar(raw)
+    if re.fullmatch(r"[0-9]+", s) and 1 <= int(s) <= MAX_VERIFY_TIMEOUT:
+        return int(s), None
+    return None, f"verify_timeout must be an integer from 1 to {MAX_VERIFY_TIMEOUT}, got {raw!r}"
 
 
 def _overlap(files, in_flight) -> int:
@@ -1327,6 +1526,75 @@ def resolve_task_path(task, tasks_dir: Path) -> Path:
     return tasks_dir / f"{task['slug']}.md"
 
 
+def _rung_note(task) -> str:
+    """The reconcile line's rung part: ` rung=<name>`, then ` from=<start>` when the call climbed off it,
+    ` climbs=<stage:from->to,…>` and ` rung-drift=<name>` when they apply; '' for a row with no rung."""
+    rung = task.get("rung")
+    if not isinstance(rung, str) or not rung:
+        return ""
+    out = f" rung={rung}"
+    start = task.get("startRung")
+    if isinstance(start, str) and start and start != rung:
+        out += f" from={start}"
+    climbs = task.get("climbs")
+    if isinstance(climbs, list) and climbs:
+        out += " climbs=" + ",".join(
+            f"{c.get('stage')}:{c.get('from')}->{c.get('to')}" if isinstance(c, dict) else str(c) for c in climbs)
+    drift = task.get("rungDrift")
+    if isinstance(drift, str) and drift:
+        out += f" rung-drift={drift}"
+    return out
+
+
+# ladder.py, shared with every skill: the operator's ladder, as the lead reads it at each Workflow call's start.
+LADDER_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "ladder.py"
+
+
+def _ladder():
+    """The operator's ladder, read through ladder.py's load(): {source, rungs: [names, bottom first], error}.
+    `error` is None when it reads. When it cannot be read (a refused file: LadderError, exit 2 or 3 from the
+    CLI; or a ladder.py that will not load) `rungs` is [], `source` the path load() reads (ladder.py's
+    default_path(), '' when ladder.py itself will not load) and `error` the CLI's own words without its
+    `ladder: ` prefix: `<path>:<line>: <reason>`, or `<path>: <reason>` when no line applies."""
+    mod = None
+    try:
+        spec = importlib.util.spec_from_file_location("thread_ladder", LADDER_PY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        ladder = mod.load()
+        return {"source": ladder["source"], "rungs": [r["name"] for r in ladder["rungs"]], "error": None}
+    except Exception as e:  # any failure is the caller's ERROR or flag, never a guessed rung
+        path = ""
+        try:
+            path = mod.default_path() if mod is not None else ""
+        except Exception:
+            pass
+        reason = str(getattr(e, "reason", "") or e) or type(e).__name__
+        line = getattr(e, "line", None)
+        where = path if line is None else f"{path}:{line}"
+        return {"source": path, "rungs": [], "error": f"{where}: {reason}" if where else reason}
+
+
+def _ladder_top():
+    """(top rung name, source) of the operator's ladder (_ladder()); (None, why) when it cannot be read."""
+    ladder = _ladder()
+    if ladder["error"]:
+        return None, ladder["error"]
+    return ladder["rungs"][-1], ladder["source"]
+
+
+def _legacy_climb(task) -> str:
+    """A pre-3.0.0 row's evidence of hardness (ADR 0029 compat): 'escalated' or 'tier-capped', '' for none.
+    Only a row with no `rung` qualifies; every 3.0.0 row carries one (possibly '')."""
+    if task.get("rung") is not None:
+        return ""
+    if task.get("escalated"):
+        return "escalated"
+    if task.get("tierCapped"):
+        return "tier-capped"
+    return ""
+
+
 def cmd_reconcile(args) -> int:
     raw = sys.stdin.read() if args.result == "-" else Path(os.path.expanduser(args.result)).read_text()
     data = json.loads(raw)
@@ -1334,6 +1602,8 @@ def cmd_reconcile(args) -> int:
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     now = _now(args)
     errors = []
+    warnings = []
+    top = None  # (name, source) of the ladder's top rung, read once, only for a pre-3.0.0 row
     for task in tasks:
         slug = task.get("slug", "<no-slug>")
         status = task.get("status")
@@ -1372,25 +1642,38 @@ def cmd_reconcile(args) -> int:
         # Whatever Integration this task was in, the run that produced this row ended it.
         note.remove("integrating")
 
-        # Escalation is durable: a task that flipped opus→fable mid-run has proven non-mechanical,
-        # so every later re-dispatch (resume, /thread:repair) must start at fable, not re-pay the
-        # opus one-shot toll. Stamped for every status — including landed ones, as the record of
-        # what it took. Idempotent via Note.set.
-        if task.get("escalated"):
-            note.set("model", "fable")
-
-        # A tier ceiling (args.maxTier, ADR 0016) suppressed an escalation this task would otherwise
-        # have taken. That has to be DURABLE: /thread:status and /thread:repair build their triage
-        # entirely from note frontmatter, so without a stamp a capped block reads as a genuine wall
-        # and is never re-dispatched once the higher tier's quota returns. Deliberately NOT `model:
-        # fable` — the run could not use that tier, and stamping it would send the next dispatch
-        # straight back into the exhausted quota.
-        if task.get("tierCapped"):
-            note.set("tier_capped", (task.get("tierCappedAt") or "true"))
-        elif note.get("tier_capped"):
-            # An uncapped re-run that got further supersedes the old marker rather than leaving a
-            # stale one to be triaged against.
-            note.unset("tier_capped")
+        # The rung is durable (ADR 0029 decision 4): a task that climbed has proven non-mechanical, so
+        # every later re-dispatch (resume, /thread:repair) starts on the rung it reached, not back at the
+        # bottom. Stamped for every status, landed ones included, as the record of what it took; an
+        # integrate row passes the task's own record through, and a neutral one (or a lead-written row)
+        # carries no rung and stamps nothing. A drifted `rung:` (one the ladder lacks) is overwritten by
+        # the rung the call reached. Idempotent via Note.set. Never a legacy stamp.
+        rung = task.get("rung")
+        legacy = _legacy_climb(task)
+        legacy_note = ""
+        if rung not in (None, ""):
+            if is_rung_name(rung):
+                note.set("rung", rung)
+            else:
+                errors.append(f"{slug}: rung {rung!r} is not a rung name ([a-z][a-z0-9._-]*, never a YAML word) — "
+                              "no rung: stamped")
+        elif legacy:
+            # A call started before 3.0.0 finished on the tier engine (a Lost-call resume re-passes its old
+            # scriptPath): its row has no rung record, only the tier flags. The old reconcile made that climb
+            # durable (a legacy model or cap stamp); left unstamped, the re-dispatch would restart on the
+            # bottom rung and re-pay it. The top rung is that climb's equivalent on the ladder.
+            if top is None:
+                top = _ladder_top()
+            name, source = top
+            if name:  # ladder.py's load() only returns rung names (tests/ladder.test.mjs L9)
+                note.set("rung", name)
+                legacy_note = f" rung={name} (pre-3.0.0 row, {legacy})"
+                warnings.append(f"{slug}: a pre-3.0.0 row ({legacy}, no rung) — stamped rung: {name}, the top rung "
+                                f"of the ladder ({source}), so its re-dispatch does not restart on the bottom rung")
+            else:
+                errors.append(f"{slug}: a pre-3.0.0 row ({legacy}, no rung) — the ladder could not be read ({source}), "
+                              "so no rung: was stamped and its re-dispatch would restart on the bottom rung; fix "
+                              "~/.config/thread/ladder.toml and re-run this reconcile")
 
         if status in STATUS_WITH_PR and pr:
             note.set("pr", pr)
@@ -1436,13 +1719,26 @@ def cmd_reconcile(args) -> int:
             errors.append(f"{slug}: integration is not an object ({type(integration).__name__}) — "
                           "no Integration log line written")
 
+        # p14-2: the approved plan, settled only by the task's own call. A non-empty string is the plan its
+        # own call ran with (upserted, quoted, below the lead-in); '' (or whitespace) is an own call with no
+        # plan-gate, so an older plan is stale and removed; null or an absent key (a call that reached no plan
+        # outcome, a seeded revise, an Integration row, a lead-written row) leaves the section as it is.
+        plan = task.get("plan")
+        if isinstance(plan, str) and plan.strip():
+            note.upsert_section(APPROVED_PLAN_SECTION, APPROVED_PLAN_LEAD_IN + "\n\n" + quote_block(plan))
+        elif isinstance(plan, str):
+            note.remove_section(APPROVED_PLAN_SECTION)
+        elif plan is not None:
+            errors.append(f"{slug}: plan is not a string or null ({type(plan).__name__}) — "
+                          f"{APPROVED_PLAN_SECTION} left untouched")
+
         note.save(dry_run=args.dry_run)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
-        esc = " model=fable(escalated)" if task.get("escalated") else ""
-        esc += f" tier_capped={task.get('tierCappedAt') or 'true'}" if task.get("tierCapped") else ""
         ro = " (read-only, approved)" if note_status != status else ""
-        print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{esc}{flag}")
+        print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{_rung_note(task)}{legacy_note}{flag}")
 
+    for w in warnings:
+        print(f"WARNING: {w}", file=sys.stderr)
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
     return 1 if errors else 0
@@ -1458,7 +1754,9 @@ def cmd_next(args) -> int:
     stands (the lead's RACE re-verify holds the lane on it) still counts as integrating everywhere else: a
     soft pause is not stamped past it, a solo waits for it, its files count as in flight, and no halt is
     reported while it stands. `raceHold` lists each, in rank order, with its kind; the counts and the
-    progress line are the re-read rows'."""
+    progress line are the re-read rows'. An unacked git-env trip (_git_env_hold) is listed under `gitEnvHold`, and
+    while it stands nothing starts or restarts, every stalled or queued task is held (`git-env hold:
+    /thread:repair`) and `halt` is "git-env", ahead of every other verdict."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.exists():
         print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
@@ -1569,10 +1867,20 @@ def cmd_next(args) -> int:
     in_use = used + len(start)
     holds += [(r, f"ceiling: {in_use}/{ceiling} slots in use") for r in ceiling_held]
 
+    # An unacked git-env trip (execute § 4.5 *Git-env canary*) holds the whole queue until /thread:repair records
+    # Lachy's ack: nothing starts or restarts, every stalled or queued task is held, and the halt is "git-env",
+    # ahead of every other verdict (a live call or a held lane included: the lead halts at once).
+    git_env = _git_env_hold(rollout_note)
+    if git_env:
+        start, restart = [], []
+        used = len(live)
+        holds = [(r, "git-env hold: /thread:repair") for r in stalled + queued]
     in_n = [r for r in rows if r["state"] not in OUTSIDE_N]
     counts = _counts(rows)
     halt = None
-    if not start and not restart and not live and not awaiting and not integrating and not race_held_lane:
+    if git_env:
+        halt = "git-env"
+    elif not start and not restart and not live and not awaiting and not integrating and not race_held_lane:
         if paused:
             halt = "paused"
         elif not in_n:
@@ -1595,6 +1903,7 @@ def cmd_next(args) -> int:
         "setAside": [{"slug": r["slug"], "status": r["status"], "setAsideAt": r["setAsideAt"]}
                      for r in by_state.get("set-aside", [])],
         "raceHold": race_hold,
+        "gitEnvHold": git_env,
         "paused": paused,
         "pauseRequested": pause_requested,
         "pausedNow": paused_now,
@@ -1650,11 +1959,16 @@ def cmd_mark_started(args) -> int:
         note.remove("integrating")
         signed = _scalar(note.get(GATES_SIGNED_KEY))
         note.remove(GATES_SIGNED_KEY)
+        descoped = _scalar(note.get(DESCOPE_ARMED_KEY))
+        note.remove(DESCOPE_ARMED_KEY)
         note.save(dry_run=args.dry_run)
         print(f"{slug}: started={existing or _stamp(now)}{' (kept)' if existing else ''}{_flag(args, note)}")
         if signed:
             print(f"{slug}: signed-gate restart (gates signed {signed}; {GATES_SIGNED_KEY}: cleared) — "
                   "a fresh call, not a resume of its gate-pending call, prints execute § 3.7's warning first")
+        if descoped:
+            print(f"{slug}: descope restart (descoped {descoped}; {DESCOPE_ARMED_KEY}: cleared) — a block after this "
+                  "restart asks Lachy")
     return _finish(args, now)
 
 
@@ -1925,6 +2239,18 @@ def cmd_status(args) -> int:
     rows, index = _rows(rollout_path, rollout_note, tasks_dir)
     counts = _counts(rows)
     timeline = _timeline(rows, counts, ceiling, now)
+    # The operator's ladder (one local file read, no network): each task's `rung:` stamp, and its drift when a
+    # readable ladder lacks it. Drift is scoped to the unlanded rows (CARRIED_STATES): a merged, folded or other
+    # row keeps the rung it reached as a record, and an edit to the ladder since is no drift. A refused ladder
+    # gives no drift anywhere; its `error` is the flag.
+    ladder = _ladder()
+
+    def rung_drift(r):
+        stamp = _scalar(r["note"].get("rung"))
+        if not stamp or ladder["error"] or r["state"] not in CARRIED_STATES or stamp in ladder["rungs"]:
+            return ""
+        return stamp
+
     tasks = [{
         "slug": r["slug"],
         "status": r["status"],
@@ -1938,6 +2264,8 @@ def cmd_status(args) -> int:
         "integrating": r["integrating"],
         "waitingOn": _unsatisfied(r, index) if r["state"] == "queued" else [],
         "blockerSummary": _blocker_summary(r["note"]),
+        "rung": _scalar(r["note"].get("rung")) or None,
+        "rungDrift": rung_drift(r),
     } for r in sorted(rows, key=_rank)]
     paused = rollout_note.get("paused")
     out = {
@@ -1956,6 +2284,12 @@ def cmd_status(args) -> int:
         # Per-task started:/merged: stamps — durable on the notes, so elapsed + the rough (~) remaining
         # estimate render with no workflow run alive. null when no task has a started: stamp.
         "timeline": timeline,
+        # {source, rungs, error}: the ladder status read (built-in, or the file's path); error non-null when the
+        # file is refused, and then rungs is [] (execute halts `ladder file refused` at each call's start).
+        "ladder": ladder,
+        # The unacked git-env trips (_git_env_hold; execute § 4.5 *Git-env canary*): [] when none. Vault-only, so
+        # status § 3's Git-env trip flag holds offline too.
+        "gitEnvHold": _git_env_hold(rollout_note),
         "tasks": tasks,
     }
     print(json.dumps(out, indent=2))
@@ -2007,10 +2341,12 @@ def cmd_defer(args) -> int:
                 errors.append(f"{slug}: belongs to rollout {cur!r}, not {expected!r} — refusing to defer")
                 continue
         note.set("status", "open")
-        for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready", GATES_SIGNED_KEY):
+        for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready", GATES_SIGNED_KEY,
+                    DESCOPE_ARMED_KEY):
             note.remove(key)
         note.save(dry_run=args.dry_run)
-        print(f"{slug}: deferred->open (rollout/owner and started/merged/integrating/ready/{GATES_SIGNED_KEY} cleared, "
+        print(f"{slug}: deferred->open (rollout/owner and started/merged/integrating/ready/{GATES_SIGNED_KEY}/"
+              f"{DESCOPE_ARMED_KEY} cleared, "
               "a legacy `wave:` included)" +
               (" (dry-run)" if args.dry_run else " [written]"))
     for e in errors:
@@ -2018,11 +2354,432 @@ def cmd_defer(args) -> int:
     return 1 if errors else 0
 
 
+# ---- descope (p14-4) ----------------------------------------------------------------
+
+DESCOPE_ARMED_KEY = "descope_armed"
+SCOPE_AUTO_SECTION = "## Scope decision (automatic)"
+REPAIR_INPUT_SECTION = "## Repair input"
+DESCOPE_POINTER = "(descoped: see ## Scope decision (automatic))"
+DESCOPE_ENTRY = "- descoped (automatic) "     # the entry line status greps (status § 4 **Descoped.**)
+DESCOPE_MARK_RE = re.compile(
+    r"^<!-- descope run=(\d+) part=([0-9a-f]{12}) mode=(optional|owner)(?: owner=([^\s>]+))? -->\s*$")
+# Record sections: never part of the brief the plan judge judges against.
+BRIEF_EXCLUDE = ("## Plan-blocked feedback", "## Review-blocked feedback", "## Blocker diagnosis",
+                 "## Review history", REPAIR_INPUT_SECTION, "## Scope decision", APPROVED_PLAN_SECTION,
+                 INTEGRATION_LOG_SECTION, APPROVED_GATES_SECTION, GATE_PENDING_SECTION, "## Decisions",
+                 "## Resume prompt")
+MARKER_WORDS = r"(?:consider|considering|optional|optionally|nice to have|nice-to-have)"
+OPTIONAL_MARK_RE = re.compile(rf"\b{MARKER_WORDS}\b")
+# A marker negated by not / never / no (or an n't) up to two words before it is no marker: "not optional".
+NEGATED_RE = re.compile(r"(?:\b(?:not|never|no)|n['’]t)\s+(?:[\w-]+\s+){0,2}$")
+# A clause that is only a marker word ended by `:` or `.` ("Nice to have:", "Optional.") marks the next clause.
+MARKER_ONLY_RE = re.compile(rf"[*_\s]*{MARKER_WORDS}[*_\s]*[:.][*_\s]*")
+# Clauses split at `.`, `;`, `:`, `!` or `?` followed by whitespace, at ` — ` / ` – `, and at the coordinators
+# `, and` / `, but` / `, then`, so a marker never reaches past a coordinated second instruction.
+CLAUSE_SPLIT_RE = re.compile(r"(?<=[.;:!?])\s+| [—–] |,\s+(?:and|but|then)\s+")
+ADR_RE = re.compile(r"\bADR[ -]?\d{1,4}\b|docs/adr/", re.I)
+KEBAB_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+
+
+def _fold(text) -> str:
+    """Whitespace collapsed and case-folded: how a part, a quote and the brief are compared."""
+    return " ".join(str(text).split()).casefold()
+
+
+def _find_all(hay: str, needle: str):
+    out, i = [], hay.find(needle)
+    while needle and i >= 0:
+        out.append(i)
+        i = hay.find(needle, i + 1)
+    return out
+
+
+def _body_sections(note):
+    """(lines, sections): the body's lines and [(heading, [line indices])], the preamble first (heading '')."""
+    lines = note._body.split("\n")
+    sections = [("", [])]
+    for i, line in enumerate(lines):
+        if line.startswith("## "):
+            sections.append((line.strip(), []))
+        else:
+            sections[-1][1].append(i)
+    return lines, sections
+
+
+def _is_brief(heading: str) -> bool:
+    return heading == "" or not heading.startswith(BRIEF_EXCLUDE)
+
+
+def _brief_items(note):
+    """(lines, items, fenced): the brief is the body minus the record sections (BRIEF_EXCLUDE); an item is a list item
+    with its continuation lines, a paragraph, or a heading line, each [heading, first, last, text]. A fenced code
+    block is never an item, so no pointer is ever appended inside one (a fence line ends the item before it):
+    `fenced` holds each brief fenced block's folded text instead, an unclosed one running to its section's end."""
+    lines, sections = _body_sections(note)
+    items, fenced = [], []
+    for heading, idxs in sections:
+        if not _is_brief(heading):
+            continue
+        cur, fence = None, None
+        for i in idxs:
+            line = lines[i]
+            if fence is not None:
+                if FENCE_RE.match(line):
+                    fenced.append(_fold(" ".join(fence)))
+                    fence = None
+                else:
+                    fence.append(line)
+                continue
+            if FENCE_RE.match(line):
+                cur, fence = None, []
+                continue
+            if not line.strip():
+                cur = None
+                continue
+            if cur is None or LIST_ITEM_RE.match(line) or line.lstrip().startswith("#"):
+                cur = [heading, i, i, line.strip()]
+                items.append(cur)
+                if line.lstrip().startswith("#"):
+                    cur = None
+            else:
+                cur[2] = i
+                cur[3] += " " + line.strip()
+        if fence is not None:
+            fenced.append(_fold(" ".join(fence)))
+    return lines, items, fenced
+
+
+def _clauses(text: str):
+    """A folded item split into clauses (CLAUSE_SPLIT_RE): at `.`, `;`, `:`, `!` or `?` followed by whitespace, at
+    ` — ` / ` – `, and at `, and` / `, but` / `, then`."""
+    return CLAUSE_SPLIT_RE.split(text)
+
+
+def _marks(clause: str):
+    """The start of every optional marker word in a clause that no not / never / no (or n't) negates."""
+    return [m.start() for m in OPTIONAL_MARK_RE.finditer(clause) if not NEGATED_RE.search(clause[:m.start()])]
+
+
+def _part_hits(items, part_f):
+    """[(item, total, marked, clauses)] for every brief item holding the folded part: how many occurrences, how many
+    are marked optional, and the clauses that hold it. An occurrence is marked when an un-negated marker word starts
+    at or before it in its own clause, or when the clause before is only a marker word ended by `:` or `.`
+    ("Nice to have: a canary", "Optional. A canary"). An occurrence that crosses a clause boundary is never marked."""
+    hits = []
+    for item in items:
+        text = _fold(LIST_ITEM_RE.sub("", item[3], count=1))
+        total = len(_find_all(text, part_f))
+        if not total:
+            continue
+        marked, holding, carry = 0, [], False
+        for clause in _clauses(text):
+            lead, carry = carry, bool(MARKER_ONLY_RE.fullmatch(clause))
+            found = _find_all(clause, part_f)
+            if not found:
+                continue
+            holding.append(clause)
+            marks = _marks(clause)
+            marked += len(found) if lead else sum(1 for pos in found if marks and marks[0] <= pos)
+        hits.append((item, total, marked, holding))
+    return hits
+
+
+def _optional_in_brief(hits) -> bool:
+    """Optional in the note: the part is in the brief, and every occurrence carries its own in-clause marker."""
+    return bool(hits) and all(marked == total for _item, total, marked, _c in hits)
+
+
+def _recorded_decision(note, needles) -> str:
+    """The recorded human decision holding one of the folded needles, as its heading, or '': a `## Decisions…`
+    section, a `## Scope decision…` other than the automatic one, a `## Repair input` line without `(automatic)`,
+    `## Approved gates` and `## Gated inputs (awaiting sign-off)`."""
+    lines, sections = _body_sections(note)
+    for heading, idxs in sections:
+        if heading.startswith("## Decisions") or heading in (APPROVED_GATES_SECTION, GATE_PENDING_SECTION) or \
+                (heading.startswith("## Scope decision") and heading != SCOPE_AUTO_SECTION):
+            text = [lines[i] for i in idxs]
+        elif heading == REPAIR_INPUT_SECTION:
+            text = [lines[i] for i in idxs if "(automatic)" not in lines[i]]
+        else:
+            continue
+        folded = _fold("\n".join(text))
+        if any(n and n in folded for n in needles):
+            return heading
+    return ""
+
+
+def _upstream(slug: str, index) -> set:
+    """Lowercased slugs in a task's transitive `depends-on:` / `blocked-by:` closure, a tombstone's `merged_into:`
+    target included."""
+    seen, stack = set(), [slug]
+    while stack:
+        entry = index.get(stack.pop().lower())
+        if entry is None:
+            continue
+        nexts = _dep_entries(entry[1])
+        if _status(entry[1]) == "merged" and _wikilink_slug(entry[1].get("merged_into")):
+            nexts.append(_wikilink_slug(entry[1].get("merged_into")))
+        for dep in nexts:
+            if dep.lower() not in seen:
+                seen.add(dep.lower())
+                stack.append(dep)
+    return seen
+
+
+def _owner_check(slug, owner, quote_f, rollout_path, rollout_note, tasks_dir) -> str:
+    """'' when [[owner]] may take the part over, else why not (an ASK): it is not the task itself; it is linked to
+    the same rollout, unlanded and active (its queue state carried, so done, merged, dropped and parked are out);
+    no undecided RACE or UNVERIFIED holds it; it is not upstream of the task; and its note holds --owner-quote.
+    Nothing proves the owner owns the part: that judgement is the caller's."""
+    if owner.lower() == slug.lower():
+        return "--owner names the task itself"
+    linked, index = _scan(rollout_path, tasks_dir)
+    entry = index.get(owner.lower())
+    if entry is None or (_wikilink_slug(entry[1].get("rollout")) or "").lower() != rollout_path.stem.lower():
+        return f"[[{owner}]] is not a task of [[{rollout_path.stem}]]"
+    state = _queue_state(entry[1])[0]
+    if state not in CARRIED_STATES:
+        return f"[[{owner}]] is {_status(entry[1]) or 'no status'} ({state}): it will not land the part"
+    if owner.lower() in _race_holds(rollout_note, linked):
+        return f"[[{owner}]] is held by an undecided RACE or UNVERIFIED"
+    if owner.lower() in _upstream(slug, index):
+        return f"[[{owner}]] is upstream of [[{slug}]] (its depends-on / blocked-by closure)"
+    if quote_f not in _fold(entry[1]._body):
+        return f"--owner-quote is not in [[{owner}]]'s note"
+    return ""
+
+
+def _followup_name(slug: str, short: str) -> str:
+    """`<project-slug>-followup-<short>`: the project slug is a phased task's `<slug>` (PHASED_STEM_RE), else the
+    loose task's own slug."""
+    m = PHASED_STEM_RE.match(slug)
+    return f"{m.group('slug') if m else slug}-followup-{short}"
+
+
+def _fm_block(note, key) -> list:
+    """The frontmatter lines of `key:` verbatim: its line, plus the block list under it when the value is empty."""
+    for i, line in enumerate(note._fm):
+        if re.match(rf"^{re.escape(key)}:", line):
+            out = [line]
+            if not re.sub(r"\s+#.*$", "", line.split(":", 1)[1]).strip():
+                for item in note._fm[i + 1:]:
+                    if not re.match(r"^\s+-", item):
+                        break
+                    out.append(item)
+            return out
+    return [f"{key}: []"]
+
+
+def _write_followup(path: Path, note, slug, part, reason, run_n, now, clause):
+    """File the follow-up: the vault's new-task shape (execute's completion ceremony), never `rollout:`, `phase:` or
+    `owner:` (a loose task, never a phase member), `projects:` copied, `descoped_from:` naming the task."""
+    lines = ["---", "tags: [task]", "status: open", "priority: normal", "work_depth: shallow",
+             *_fm_block(note, "projects"), "contexts: []", "scheduled:", "due:",
+             f"captured: {now.astimezone().date().isoformat()}", f'descoped_from: "[[{slug}]]"', "---", "",
+             "## Notes", "",
+             f"Descoped from [[{slug}]] by an automatic descope at its Plan-blocked feedback run {run_n}: {reason}", "",
+             f"- {part}"]
+    if clause:
+        lines += ["", f"Its item in [[{slug}]]'s brief: {clause}"]
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _and_list(nums) -> str:
+    s = [str(n) for n in nums]
+    return s[0] if len(s) == 1 else ", ".join(s[:-1]) + " and " + s[-1]
+
+
+def cmd_descope(args) -> int:
+    """Record an automatic descope of a plan-blocked task (p14-4), the one verb the live lead (execute § 4.5 step 1.2)
+    and /thread:repair § 3d share. The caller judged that the plan-block feedback centres on a part of the task that
+    is optional in the note (--optional) or that a later task in the same rollout owns (--owner); this verb checks
+    that judgement mechanically and writes the records. Exit 0: descoped ([written], or [no-change] for a complete
+    re-run), and the caller runs `hand-back`. Exit 3: ASK, nothing written, and repair asks Lachy. Exit 1: an ERROR,
+    nothing written. Exit 2: usage."""
+    def usage(msg):
+        print(f"ERROR: descope: usage: {msg}", file=sys.stderr)
+        return 2
+
+    def error(msg, tail="nothing written"):
+        print(f"ERROR: descope: {msg}; {tail}", file=sys.stderr)
+        return 1
+
+    slug = args.tasks.strip()
+    part = " ".join(args.part.split())
+    reason = " ".join(args.reason.split())
+    mode = "optional" if args.optional else "owner"
+    owner = (_wikilink_slug(args.owner) or "") if args.owner else ""
+    quote = " ".join((args.owner_quote or "").split())
+    if not slug or "," in slug:
+        return usage("--tasks takes one task slug")
+    if not part or not reason:
+        return usage("--part and --reason must not be empty")
+    if mode == "optional" and (not args.short or args.owner_quote):
+        return usage("--optional takes --short <kebab> and no --owner-quote")
+    if mode == "owner" and (not owner or not quote or args.short):
+        return usage("--owner takes --owner-quote \"<verbatim quote from the owner's note>\" and no --short")
+
+    now = _now(args)
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    path = tasks_dir / f"{slug}.md"
+    if not path.is_file():
+        return error(f"{slug}: task note not found at {path}")
+    if not rollout_path.is_file():
+        return error(f"rollout note not found at {rollout_path}")
+    try:
+        note, rollout_note = Note(path), Note(rollout_path)
+    except ValueError as e:
+        return error(str(e))
+    ro = rollout_path.stem
+    if (_wikilink_slug(note.get("rollout")) or "").lower() != ro.lower():
+        return error(f"{slug}: its rollout: is {note.get('rollout') or 'none'}, not [[{ro}]]")
+    if _status(note) != "plan-blocked" or _queue_state(note) != ("set-aside", "run"):
+        return error(f"{slug}: status is {_status(note) or 'none'!r}: only a plan-blocked note set aside at its run "
+                     "is descoped")
+    runs = note.run_blocks(BLOCKED_SECTIONS["plan-blocked"])
+    if not runs:
+        return error(f"{slug}: no run under {BLOCKED_SECTIONS['plan-blocked']}")
+    run_n = _top_run(runs)["n"]
+    fu_name = fu_path = None
+    if mode == "optional":
+        if not KEBAB_RE.match(args.short):
+            return error(f"--short {args.short!r} is not kebab-case ([a-z0-9] words joined by -)")
+        fu_name = _followup_name(slug, args.short)
+        if PHASED_STEM_RE.match(fu_name) or "-rollout-" in fu_name:
+            return error(f"the follow-up name {fu_name} would read as a phase member or a rollout note")
+        fu_path = tasks_dir / f"{fu_name}.md"
+        if fu_path.exists():
+            try:
+                theirs = _wikilink_slug(Note(fu_path).get("descoped_from")) or ""
+            except ValueError:
+                theirs = ""
+            if theirs.lower() != slug.lower():
+                return error(f"{fu_path} exists and is not this task's follow-up (no descoped_from: \"[[{slug}]]\")")
+
+    def ask(why):
+        print(f"ASK: [[{slug}]] {why}; nothing written: /thread:repair [[{ro}]] asks Lachy")
+        return 3
+
+    part_f, quote_f = _fold(part), _fold(quote)
+    part_sha = _sha12(part_f)
+    marks = [m for m in (DESCOPE_MARK_RE.match(l.strip()) for l in note.section_text(SCOPE_AUTO_SECTION).split("\n")) if m]
+    armed = _scalar(note.get(DESCOPE_ARMED_KEY))
+    lines, items, fenced = _brief_items(note)
+    hits = _part_hits(items, part_f)
+    if marks:
+        # Once per task: the stamp is the "not restarted since" signal (mark-started consumes it), so a block after a
+        # restart asks, even when its feedback is byte-identical and no run was added.
+        if not armed:
+            return ask(f"plan-blocked again after an automatic descope (run {marks[-1].group(1)}): a second block "
+                       "asks Lachy")
+        same = [m for m in marks if int(m.group(1)) == run_n and m.group(2) == part_sha and m.group(3) == mode and
+                (mode == "optional" or (m.group(4) or "").lower() == owner.lower())]
+        if not same:
+            return ask(f"already descoped automatically at Plan-blocked feedback run {marks[-1].group(1)}: one "
+                       "automatic descope per block, so another part or mode asks Lachy")
+    else:
+        if ADR_RE.search(part) or any(ADR_RE.search(c) for _i, _t, _m, cl in hits for c in cl):
+            return ask("the part touches an ADR decision")
+        held = _recorded_decision(note, [part_f, quote_f] if mode == "owner" else [part_f])
+        if held:
+            return ask(f"a recorded decision ({held}) names the part")
+        if any(part_f in block for block in fenced):
+            return ask(f'"{part}" sits in a fenced code block in the brief: only prose marks a part optional, and an '
+                       "owner never takes it")
+        if mode == "optional":
+            if not hits:
+                return ask(f'"{part}" is not in the brief: only a part the note marks optional descopes as optional')
+            if not _optional_in_brief(hits):
+                return ask(f'"{part}" is required scope: an occurrence has no optional marker (consider, optional, '
+                           "nice to have) in its own clause")
+        else:
+            # Tied to the block: an owned part is quoted verbatim from the latest feedback run or the brief, so a
+            # paraphrase of required scope cannot pass for an emergent part. The match is verbatim only.
+            if not hits and part_f not in _fold(_top_run(runs)["content"]):
+                return ask(f'"{part}" is in neither the latest Plan-blocked feedback run nor the brief: an owned part '
+                           "is quoted verbatim from the block")
+            if hits and not _optional_in_brief(hits):
+                return ask(f'"{part}" is required scope in the brief: an owner never takes required scope')
+            why = _owner_check(slug, owner, quote_f, rollout_path, rollout_note, tasks_dir)
+            if why:
+                return ask(why)
+
+    # The records, each checked and written on its own so a re-run finishes a partial one: the follow-up first, then
+    # the task note (Scope decision, brief pointer, Repair input, the stamp) in one save, then the rollout's Notes line.
+    stamp, date = _stamp(now), now.astimezone().date().isoformat()
+    target = f"follow-up [[{fu_name}]]" if mode == "optional" else f"owned by [[{owner}]]"
+    wrote = False
+    if fu_path is not None and not fu_path.exists():
+        wrote = True
+        if not args.dry_run:
+            try:
+                _write_followup(fu_path, note, slug, part, reason, run_n, now, hits[0][0][3] if hits else "")
+            except OSError as e:
+                return error(f"cannot write {fu_path}: {e}", "a re-run finishes the records")
+    # the brief pointer: on every item holding the part, else (an emergent part) one line in the first brief section
+    if hits:
+        for item, *_rest in hits:
+            if _fold(DESCOPE_POINTER) not in _fold(item[3]):
+                lines[item[2]] = lines[item[2]].rstrip() + " " + DESCOPE_POINTER
+    else:
+        _lines, sections = _body_sections(note)
+        first = next((s for s in sections if s[0] and _is_brief(s[0])), sections[0])
+        filled = [i for i in first[1] if lines[i].strip()]
+        at = (filled[-1] + 1) if filled else (first[1][0] if first[1] else len(lines))
+        lines.insert(at, f'- out of scope (automatic descope, Plan-blocked feedback run {run_n}): "{part}", '
+                         f"{'owned by [[' + owner + ']]' if owner else 'filed as [[' + fu_name + ']]'} {DESCOPE_POINTER}")
+        if filled and at < len(lines) - 1 and lines[at + 1].strip():
+            lines.insert(at + 1, "")
+    note._set_body_lines(lines)
+    if not marks:
+        why = "is optional in the brief" if mode == "optional" else f'is owned by [[{owner}]] ("{quote}")'
+        note.append_line(SCOPE_AUTO_SECTION, f'{DESCOPE_ENTRY}{stamp}, Plan-blocked feedback run {run_n}: "{part}" {why}; '
+                                             f"{target if mode == 'optional' else 'no follow-up'}. {reason}")
+        note.append_line(SCOPE_AUTO_SECTION, f"<!-- descope run={run_n} part={part_sha} mode={mode}"
+                                             f"{' owner=' + owner if mode == 'owner' else ''} -->")
+    ri = [l for l in note.section_text(REPAIR_INPUT_SECTION).split("\n") if "(automatic)" in l]
+    if not any(_fold(f'"{part}"') in _fold(l) for l in ri):
+        superseded = sorted({r["n"] for r in runs if r["n"] <= run_n})
+        runs_said = (f"runs {_and_list(superseded)} are superseded where they concern" if len(superseded) > 1 else
+                     f"run {superseded[0]} is superseded where it concerns")
+        note.append_line(REPAIR_INPUT_SECTION,
+                         f'- (automatic) {date}: "{part}" is out of this task\'s scope; see {SCOPE_AUTO_SECTION}. '
+                         f"Plan-blocked feedback {runs_said} the part; every other point stands.")
+    if not armed:
+        note.set(DESCOPE_ARMED_KEY, stamp)
+    if note.dirty:
+        wrote = True
+        try:
+            note.save(dry_run=args.dry_run)
+        except OSError as e:
+            return error(f"cannot write {path}: {e}", "a re-run finishes the records")
+    link_re = re.compile(rf"descope:\s*\[\[{re.escape(slug)}(?:[|#\\][^\]]*)?\]\].*\brun {run_n}\b", re.I)
+    if not any(link_re.search(l) and part_f in _fold(l) for l in rollout_note.section_text(NOTES_SECTION).split("\n")):
+        rollout_note.append_line(NOTES_SECTION, f'- {date} descope: [[{slug}]] "{part}" → {target}; Plan-blocked feedback '
+                                                f"run {run_n}; {reason}")
+        wrote = True
+        try:
+            rollout_note.save(dry_run=args.dry_run)
+        except OSError as e:
+            return error(f"cannot write {rollout_path}: {e}", "a re-run finishes the records")
+    flag = " (dry-run)" if args.dry_run else (" [written]" if wrote else " [no-change]")
+    print(f'{slug}: descoped "{part}" ({mode}) at Plan-blocked feedback run {run_n} → {target}{flag}')
+    return 0
+
+
 # ---- carry (a supersede, ADR 0030) -------------------------------------------
 
 # _queue_state's exact strings: what a supersede carries into the new rollout, and what stays behind.
 CARRIED_STATES = {"queued", "running", "awaiting-integration", "integrating", "set-aside"}
 CLOSED_ROLLOUT_STATUSES = {"done", "dropped"}
+
+# Legacy stamps a supersede's carry maps to a rung (ADR 0029 consequences): the old model, effort and cap keys,
+# in the order a `restamp` line's drop= lists them. The only line in the skills that spells the cap key's name.
+LEGACY_KEYS = ("model", "effort", "tier_capped")
+LEGACY_MODELS = ("", "fable", "opus")                          # recognised model values (trimmed, any case)
+LEGACY_EFFORTS = ("", "low", "medium", "high", "xhigh", "max")  # recognised effort values; the cap key: any
 
 
 def _tags(note):
@@ -2046,6 +2803,32 @@ def _carry_note(path: Path, role: str):
     if "rollout" not in _tags(note):
         return None, f"{role} {path.stem}: not a rollout note (its tags lack `rollout`)"
     return note, None
+
+
+def _legacy_plan(note, rollout_model) -> dict:
+    """What a supersede's carry does to one carried note's legacy stamps: {rung, drop, warn}. rung is 'top'
+    (it gets the ladder's top rung), 'kept' (its own non-empty `rung:` stays, drifted or not) or '-' (none
+    written, and it has none); drop the recognised keys present, in LEGACY_KEYS order; warn one (key, value)
+    per unrecognised value, left in place. The top-rung test is the engine's startRung predicate: the note's
+    model (failing that, the rollout's) is `fable`, or its effort is `xhigh` or `max`, trimmed, any case."""
+    model_key, effort_key, _cap_key = LEGACY_KEYS
+    known = {model_key: LEGACY_MODELS, effort_key: LEGACY_EFFORTS}
+    drop, warn, vals = [], [], {}
+    for key in LEGACY_KEYS:
+        value = note.get(key)
+        if value is None:
+            continue
+        vals[key] = _scalar(value).lower()
+        if key not in known or vals[key] in known[key]:
+            drop.append(key)
+        else:
+            warn.append((key, _scalar(value)))
+    if _scalar(note.get("rung")):
+        rung = "kept"
+    else:
+        model = vals.get(model_key) or rollout_model
+        rung = "top" if model == "fable" or vals.get(effort_key) in ("xhigh", "max") else "-"
+    return {"rung": rung, "drop": drop, "warn": warn}
 
 
 def cmd_carry(args) -> int:
@@ -2078,6 +2861,11 @@ def cmd_carry(args) -> int:
         names = ", ".join(f"[[{slug}]] ({kind})" for slug, kind in sorted(held.values(), key=lambda h: h[0].lower()))
         return refuse(f"--from {src.stem} holds an undecided RACE or UNVERIFIED: {names}: record Lachy's decision "
                       f"first with /thread:repair [[{src.stem}]]")
+    git_env = _git_env_hold(src_note)
+    if git_env:
+        names = ", ".join(dict.fromkeys(f"[[{t['slug']}]]" for t in git_env))
+        return refuse(f"--from {src.stem} holds an unacked git-env trip: {names}: record Lachy's ack first with "
+                      f"/thread:repair [[{src.stem}]]")
     if dst is not None:
         if dst.stem.lower() == src.stem.lower() or (dst.exists() and dst.resolve() == src.resolve()):
             return refuse(f"--to is --from ({src.stem}): a rollout never carries into itself")
@@ -2094,20 +2882,41 @@ def cmd_carry(args) -> int:
         if not fresh:
             return refuse(f"--to {dst.stem} has run ({why}): never carry into a running queue")
 
+    # Each carried note's legacy stamps, mapped before any line prints: a refused ladder is a refusal, and the
+    # ladder is read only when some carried note needs its top rung (so an unrelated bad file blocks nothing).
+    rollout_model = _scalar(src_note.get(LEGACY_KEYS[0])).lower()
     rows = []
     for path, note in sorted(linked, key=lambda pn: (pn[0].stem.lower(), str(pn[0]))):
         state = _queue_state(note)[0]
-        rows.append((path, note, state, state in CARRIED_STATES))
-        print(f"{'carry' if state in CARRIED_STATES else 'keep'} {path.stem} {state}")
+        carried = state in CARRIED_STATES
+        rows.append((path, note, state, carried, _legacy_plan(note, rollout_model) if carried else None))
+    top = None
+    if any(plan and plan["rung"] == "top" for *_rest, plan in rows):
+        ladder = _ladder()
+        if ladder["error"]:
+            return refuse(f"ladder file refused: {ladder['error']}")
+        top = ladder["rungs"][-1]
+    for path, _note, _state, _carried, plan in rows:
+        for key, value in (plan["warn"] if plan else []):
+            print(f"WARN: carry: {path.stem}: {key}: {value} unrecognised, left in place", file=sys.stderr)
+    for path, _note, state, carried, plan in rows:
+        print(f"{'carry' if carried else 'keep'} {path.stem} {state}")
+        if carried and (plan["rung"] == "top" or plan["drop"]):
+            rung = top if plan["rung"] == "top" else plan["rung"]
+            print(f"restamp {path.stem} rung={rung} drop={','.join(plan['drop']) or '-'}")
     if args.dry_run:
         print("(dry-run)")
         return 0
     written = 0
-    for path, note, _state, carried in rows:
+    for path, note, _state, carried, plan in rows:
         if not carried:
             continue
         note.set("rollout", f'"[[{dst.stem}]]"')
         for key in ("owner", "integrating", "wave"):
+            note.remove(key)
+        if plan["rung"] == "top":
+            note.set("rung", top)
+        for key in plan["drop"]:
             note.remove(key)
         if not note.dirty:
             continue
@@ -2238,6 +3047,29 @@ def cmd_clear_pause(args) -> int:
     return 0
 
 
+# ---- verify-timeout -----------------------------------------------------------
+
+def cmd_verify_timeout(args) -> int:
+    """The lead's per-entry check of the rollout's `verify_timeout` (execute § 3, p14-2). Read-only. Valid:
+    one JSON line {"verifyTimeout": N, "harnessTimeoutMs": (N + 600) * 1000}, exit 0. Invalid or no note:
+    one ERROR line on stderr, exit 1, and the lead's entry writes nothing."""
+    path = Path(os.path.expanduser(args.rollout))
+    if not path.exists():
+        print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
+        return 1
+    try:
+        note = Note(path)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    seconds, err = _verify_timeout(note)
+    if err:
+        print(f"ERROR: {err}", file=sys.stderr)
+        return 1
+    print(json.dumps({"verifyTimeout": seconds, "harnessTimeoutMs": (seconds + VERIFY_HARNESS_MARGIN) * 1000}))
+    return 0
+
+
 # ---- CLI --------------------------------------------------------------------
 
 def main() -> int:
@@ -2322,6 +3154,23 @@ def main() -> int:
     df.add_argument("--dry-run", action="store_true")
     df.set_defaults(func=cmd_defer)
 
+    de = sub.add_parser("descope", help="record an automatic descope of a plan-blocked task (p14-4): exit 0 descoped "
+                                         "(then hand-back), exit 3 ASK (nothing written; /thread:repair asks Lachy)")
+    de.add_argument("--tasks", required=True, help="the plan-blocked task's slug")
+    de.add_argument("--rollout", required=True, help="path to the rollout note the task's rollout: names")
+    de.add_argument("--part", required=True, help="the descoped part, a verbatim quote (of the brief, for --optional)")
+    dm = de.add_mutually_exclusive_group(required=True)
+    dm.add_argument("--optional", action="store_true", help="the part is optional in the note (files a follow-up)")
+    dm.add_argument("--owner", default=None, help="the slug of the later task in the same rollout that owns the part")
+    de.add_argument("--short", default=None, help="with --optional: the follow-up's kebab name, <project>-followup-<short>")
+    de.add_argument("--owner-quote", dest="owner_quote", default=None,
+                    help="with --owner: a verbatim quote from the owner's note")
+    de.add_argument("--reason", required=True, help="one line: why the feedback centres on the part")
+    de.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    de.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the stamps)")
+    de.add_argument("--dry-run", action="store_true", help="print the outcome and write nothing")
+    de.set_defaults(func=cmd_descope)
+
     ca = sub.add_parser("carry", help="re-point a superseded rollout's unlanded tasks to its successor (/thread:schedule)")
     ca.add_argument("--from", dest="from_", required=True, help="path to the prior (superseded) rollout note")
     ca.add_argument("--to", default=None, help="path to the new rollout note (required unless --dry-run)")
@@ -2333,6 +3182,11 @@ def main() -> int:
     cp.add_argument("--rollout", required=True, help="path to the rollout note")
     cp.add_argument("--dry-run", action="store_true")
     cp.set_defaults(func=cmd_clear_pause)
+
+    vt = sub.add_parser("verify-timeout", help="print the rollout's verify_timeout and its harness timeout as JSON, "
+                                               "or exit 1 when invalid (read-only; execute § 3)")
+    vt.add_argument("--rollout", required=True, help="path to the rollout note")
+    vt.set_defaults(func=cmd_verify_timeout)
 
     ag = sub.add_parser("approve-gates", help="record the human sign-off for a gate-pending task's gated inputs (ADR 0008)")
     ag.add_argument("--tasks", required=True, help="comma-separated task slugs (must be at status gate-pending)")

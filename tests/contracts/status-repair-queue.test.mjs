@@ -23,7 +23,9 @@
 // the lead's while its session holds the signed-gate handle (signed-gate). A RACE whose re-verify
 // the lead still runs (integrating under a live owner) is no escalation: both sides wait on it, and its fallback
 // is repair, never a resume (race-in-flight). Status's read-only rule is positive: it may invoke only its two
-// script reads, § 3's gh/git reads and the default-branch read.
+// script reads, § 3's gh/git reads and the default-branch read. Both speak rungs, never tiers (ADR 0029, p13-3):
+// status shows each task's rung and flags a Rung drift on unlanded tasks only and a refused ladder file, which
+// reorders no action; repair never edits the file and stops short of the hand-off under it (rung).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -41,12 +43,12 @@ const LEAD = path.join(SCRIPTS, 'lead-integrate.py')
 const UNFINISHED = path.join(root, 'skills', '_shared', 'scripts', 'unfinished-rollout.py')
 const ENV = { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1' }
 
-function py(script, args, input) {
-  const r = spawnSync('python3', [script, ...args], { encoding: 'utf8', env: ENV, input })
+function py(script, args, input, env = ENV) {
+  const r = spawnSync('python3', [script, ...args], { encoding: 'utf8', env, input })
   return { rc: r.status, out: r.stdout, err: r.stderr }
 }
-function must(script, args, input) {
-  const r = py(script, args, input)
+function must(script, args, input, env = ENV) {
+  const r = py(script, args, input, env)
   if (r.rc !== 0) throw new Error(`${path.basename(script)} ${args[0]} exited ${r.rc}: ${r.err}`)
   return r.out
 }
@@ -57,11 +59,11 @@ const NOW = '2026-10-02T14:05:00Z'
 const sha = (c) => c.repeat(40)
 const prOf = (n) => `https://github.com/o/r/pull/${n}`
 const alias = (slug) => slug.slice(slug.indexOf('-') + 1)
-const mkTask = (slug, over = {}) => ({ slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 4, maxPlanRounds: 3, model: 'fable', ...over })
+const mkTask = (slug, over = {}) => ({ slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 4, maxPlanRounds: 3, rung: 'opus-xhigh', ...over })
 const mkI = (slug, n) => ({
   prUrl: prOf(n), branch: `audit-fix/${alias(slug)}`, worktreePath: `/repo/.claude/worktrees/${slug}`, headSha: sha('a'), taskBase: sha('b'),
   mainSha: sha('c'), trouble: [], landed: [], plan: 'PLAN', reviewHistory: [{ round: 1, feedback: ['own-run fix'] }], reviewRoundsUsed: 1,
-  rung: { model: 'fable', escalated: false, escalatedAt: '', tierCapped: false, tierCappedAt: '' },
+  rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] },
 })
 const base = (rolloutSlug) => ({ rolloutSlug, repoPath: '/repo', verifier: 'make test', date: '2026-10-01' })
 const integrateStep = {
@@ -99,6 +101,9 @@ const seededStopRow = (R, slug, n) => {
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'p12-11-status-repair-'))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
+// status reads the operator's ladder file (its `ladder` key and each task's rungDrift): HOME is an empty dir here,
+// so it reads the built-in ladder and the operator's file never reaches the assertions.
+const STATUS_ENV = { ...ENV, HOME: path.join(tmp, 'status-home') }
 
 function writeTask(dir, slug, fm, body = '') {
   fs.writeFileSync(path.join(dir, `${slug}.md`), ['---', 'tags: [task]', ...fm, '---', '', '## Notes', '', `body ${slug}`, ''].join('\n') + body)
@@ -114,7 +119,7 @@ const bodyOfNote = (text) => text.slice(text.indexOf('\n---\n') + 5)
 const fmKey = (text, key) => (fmOf(text).match(new RegExp(`^${key}: (.*)$`, 'm')) || [])[1]
 const copyDir = (from, to) => { fs.cpSync(from, to, { recursive: true }); return to }
 const reconcileIn = (d, result, now = NOW) => must(RECONCILE, ['reconcile', '--result', '-', '--tasks-dir', d, '--now', now], JSON.stringify(result))
-const statusOf = (d, R) => JSON.parse(must(RECONCILE, ['status', '--rollout', path.join(d, `${R}.md`), '--tasks-dir', d, '--now', NOW]))
+const statusOf = (d, R) => JSON.parse(must(RECONCILE, ['status', '--rollout', path.join(d, `${R}.md`), '--tasks-dir', d, '--now', NOW], undefined, STATUS_ENV))
 const nextOf = (d, R) => JSON.parse(must(RECONCILE, ['next', '--rollout', path.join(d, `${R}.md`), '--tasks-dir', d, '--running', '', '--dry-run', '--now', NOW]))
 const inputsOf = (d, slug) => JSON.parse(must(LEAD, ['inputs', '--note', path.join(d, `${slug}.md`), '--max-review-rounds', '4', '--repo', '/repo']))
 const handBack = (d, slugs, now = '2026-10-02T13:00:00Z') => py(RECONCILE, ['hand-back', '--tasks', slugs, '--tasks-dir', d, '--now', now])
@@ -136,11 +141,12 @@ async function buildA() {
   const S = 'scope: cross-cutting'
   const st = (hm) => `started: 2026-10-02T${hm}+00:00`
   writeRollout(d, RA, Object.values(A))
-  writeTask(d, A.merged, ['status: done', S, link, `pr: ${prOf(1)}`, st('09:00'), 'merged: 2026-10-02T09:32+00:00'])
+  // Rungs: an off-ladder `rung:` drifts on the queued task only, never on the merged one; an on-ladder one never.
+  writeTask(d, A.merged, ['status: done', S, link, `pr: ${prOf(1)}`, st('09:00'), 'merged: 2026-10-02T09:32+00:00', 'rung: gone'])
   writeTask(d, A.running, ['status: in_progress', S, link, OWNER, st('12:00')])
   writeTask(d, A.integrating, ['status: review', S, link, `pr: ${prOf(3)}`, OWNER, st('10:00'), 'ready: 2026-10-02T13:00+00:00', 'integrating: 2026-10-02T13:50+00:00'])
-  writeTask(d, A.awaiting, ['status: review', S, link, `pr: ${prOf(4)}`, st('10:30'), 'ready: 2026-10-02T13:30+00:00'])
-  writeTask(d, A.queued, ['status: open', S, link, 'depends-on:', `  - "[[${A.atIntegration}]]"`])
+  writeTask(d, A.awaiting, ['status: review', S, link, `pr: ${prOf(4)}`, st('10:30'), 'ready: 2026-10-02T13:30+00:00', 'rung: opus-xhigh'])
+  writeTask(d, A.queued, ['status: open', S, link, 'rung: gone', 'depends-on:', `  - "[[${A.atIntegration}]]"`])
   writeTask(d, A.folded, ['status: merged', S, link, `merged_into: "[[${A.merged}]]"`])
   writeTask(d, A.other, ['status: dropped', S, link])
   for (const [k, n] of [['atIntegration', 8], ['rejected', 9], ['reviseStopped', 10], ['reviewBlocked', 11]]) {
@@ -194,7 +200,7 @@ function buildBBase() {
   const S = 'scope: cross-cutting'
   writeRollout(d, RB, Object.values(B))
   writeTask(d, B.merged, ['status: done', S, link, `pr: ${prOf(20)}`, 'started: 2026-10-02T08:00+00:00', 'merged: 2026-10-02T08:40+00:00'])
-  writeTask(d, B.target, ['status: review', S, link, `pr: ${prOf(21)}`, OWNER, 'model: fable', 'review_rounds_used: 2', 'plan_rounds_used: 1',
+  writeTask(d, B.target, ['status: review', S, link, `pr: ${prOf(21)}`, OWNER, 'rung: opus-xhigh', 'review_rounds_used: 2', 'plan_rounds_used: 1',
     'started: 2026-10-02T09:00+00:00', 'ready: 2026-10-02T10:40+00:00'], B_BODY)
   writeTask(d, B.dep, ['status: open', S, link, 'depends-on:', `  - "[[${B.target}]]"`])
   const note = path.join(d, `${B.target}.md`)
@@ -217,7 +223,7 @@ function buildB(d) {
   if (hb.rc !== 0) fails.push(`hand-back exited ${hb.rc}: ${hb.err}`)
   const after = fs.readFileSync(note, 'utf8')
   if (fmKey(after, 'status') !== 'review') fails.push(`status ${fmKey(after, 'status')}`)
-  for (const k of ['pr', 'review_rounds_used', 'plan_rounds_used', 'model', 'started']) {
+  for (const k of ['pr', 'review_rounds_used', 'plan_rounds_used', 'rung', 'started']) {
     if (fmKey(after, k) !== fmKey(before, k)) fails.push(`${k} changed`)
   }
   if (fmKey(after, 'ready') !== '2026-10-02T13:00+00:00') fails.push(`ready ${fmKey(after, 'ready')}`)
@@ -372,9 +378,11 @@ const IN_COUNT = ['merged', 'integrating', 'awaiting-integration', 'running', 'q
 const COUNT_KEY = { merged: 'merged', integrating: 'integrating', 'awaiting-integration': 'awaitingIntegration', running: 'running', queued: 'queued', 'set-aside': 'setAside' }
 // Repair § 2's classes, first-match in this order: a RACE re-verify in flight first (the lead's own procedure), then
 // RACE and a PR-less merge ahead of merged-never-marked and at Integration (both also match a RACE / UNVERIFIED
-// task), PR CLOSED ahead of awaiting Integration.
+// task), PR CLOSED ahead of awaiting Integration, and a plan-block after a descope ahead of the descopable one and
+// both ahead of the own run they also match.
 const LABELS = ['RACE re-verify in flight', 'RACE', 'PR-less merge', 'merged into another base', 'merged, never marked', 'merge hold', 'live', 'PR CLOSED / branch missing',
-  'awaiting Integration', 'queued', 'at Integration', 'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'own run', 'gate']
+  'awaiting Integration', 'queued', 'at Integration', 'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'plan-blocked after a descope', 'plan-blocked, descopable',
+  'own run', 'gate']
 const ROUTES = ['Stale anchor ref', 'The raise', 'A `merge-task:` own-run set-aside', 'A CLOSED PR or a missing branch', 'Recut', 'Leash', 'Hand-off']
 // Status's recommended actions, first-match in this order: the lineage before the version (a legacy note can be
 // a close-out), and an open escalation before every reinstate, wait and resume.
@@ -388,6 +396,8 @@ const ANCHOR = 'update-ref -d refs/integration-anchor/<inputs.branch> <X>'
 const READS = ['reconcile-rollout.py status', 'lead-integrate.py inputs', 'gh pr view', 'gh pr list', 'git worktree list', 'git remote get-url',
   'default-branch.sh']
 const BAN = /\bwaves?\b|merged_through_wave|resume-filter|mark-dispatched|cursor behind|advance the cursor|smart-halt|single-wave|re-?wave|protocol 4/i
+const TIER_WORDS = [['max', 'tier'].join('_'), ['tier', 'capped'].join('_'), ['Opus', '4.8'].join(' '), ['err toward', 'fable'].join(' ')]   // the tier vocabulary (ADR 0029), built from parts so this file stays out of the Verify grep
+const UNLANDED = 'queued, running, awaiting-integration, integrating or set-aside'
 
 const bodyOf = (t) => { const m = t.match(/^---\n[\s\S]*?\n---\n/); return m ? t.slice(m[0].length) : t }
 const raw = (text, re) => section(text, re) ?? ''
@@ -529,7 +539,7 @@ function check({ status, repair, fx }) {
     !prec.includes('The order is the precedence, with no override on top of it') || !prec.includes('Lineage (1, 2) comes before the version (3, 4)') ||
     !prec.includes(`An open escalation (${RUN.escalation}) comes before every reinstate, wait and resume (${RUN.escalation + 1} to ${RUN.nothing})`) ||
     !drainItem.includes('nothing is draining it, and `/thread:execute [[<rollout>]]` resumes the drain') ||
-    !liveItem.includes('other than an `autoRevise: true` one is never re-entered by the live lead itself') ||
+    !liveItem.includes('other than an `autoRevise: true` one or a descopable `plan-blocked` one is never re-entered by the live lead itself') ||
     !liveItem.includes('its live-queue mode hands those back')) fails.push('actions')
 
   // lineage (status § 1 and repair § 1): a legacy note gets execute § 2's remedy; any other non-5 version is
@@ -588,7 +598,7 @@ function check({ status, repair, fx }) {
     !labelled(r4raw, 'A `merge-task:` own-run set-aside', { item: true }).includes('it merges through case (ii) when main has not moved') ||
     fx.B.fails.length) fails.push('integration-only')
 
-  // stages: the 16 classes, each once, and § 4's per-stage routes.
+  // stages: the 18 classes, each once, and § 4's per-stage routes.
   if (JSON.stringify(clsRows.map((c) => c[0].slice(2, -2)).sort()) !== JSON.stringify([...LABELS].sort()) ||
     !ROUTES.every((l) => r4raw.split('\n').some((x) => x.startsWith(`- **${l}`))) ||
     !r4.includes('lead-integrate.py set-aside --note <task note> --kind integration')) fails.push('stages')
@@ -733,8 +743,11 @@ function check({ status, repair, fx }) {
   if (!rc.startsWith("- **Recut, only on Lachy's explicit ask:**") ||
     !['landing-register check', "§ 5's retire block", 'branch -D', '--kind own', '`hand-back`'].every((k) => rc.includes(k))) fails.push('recut')
 
-  // hand-off: no live lead and no pause; execute § 2.5, then resume, then the loop with --running ""; no § 2.7.
+  // hand-off: no live lead and no pause; execute § 2.5, then execute § 3's verify_timeout check (p14-2: the hand-off
+  // enters § 4.5 directly, past execute's § 3), then resume, then the loop with --running ""; no § 2.7.
   if (!ho.includes('no lead is live and no pause stands') || !before(ho, 'execute § 2.5', '`reconcile-rollout.py resume`') ||
+    !before(ho, 'execute § 2.5', "execute § 3's `verify_timeout` check") ||
+    !before(ho, "execute § 3's `verify_timeout` check", '`reconcile-rollout.py resume`') ||
     !before(ho, '`reconcile-rollout.py resume`', '`--running ""`') || !ho.includes('§4.5 resume') || !ho.includes('§ 2.7') ||
     !ho.includes('does not run')) fails.push('hand-off')
 
@@ -747,9 +760,82 @@ function check({ status, repair, fx }) {
       'writes no `## Repair input` to it', "takes a fresh call behind § 3.7's warning"].every((k) => signed.includes(k)) ||
     !collapse(raw(repair, /^## Don'ts/)).includes("Don't touch a signed task while its lead is live.")) fails.push('signed-gate')
 
+  // descope (p14-4): a plan-block the notes settle is descoped without asking. Repair: its class names the verb (§ 3d)
+  // and routes a refusal to § 3b; § 3d runs the verb, hands back on exit 0 (§ 4), asks on exit 3 (§ 3b), never under
+  // a pause, tells Lachy afterwards and names the rollout's `## Notes` line; § 6 copies automatic descopes; a Don't.
+  // Status: the plan-blocked re-entry row names `descope`; a **Descoped.** paragraph shows the first entry by grep;
+  // action 10 leaves the descope the verb refused to repair. The undo lists every record (repair § 3d, status's
+  // **Descoped.**): the marker, the follow-up set `status: dropped` and the `## Notes` line.
+  const dCls = cls['plan-blocked, descopable'] ?? ''
+  const d3 = labelled(r3raw, '3d')
+  const dRow = reRows.find((c) => c[3].startsWith('`plan-blocked`, no `## Scope decision (automatic)`'))
+  const undo = (t) => ['`<!-- descope run=… -->` marker', '`descope_armed:`', '`status: dropped`', '`descope undone:`', 'a second one'].every((k) => t.includes(k))
+  const descoped = labelled(s4raw, 'Descoped.')
+  if (!dCls.includes('`reconcile-rollout.py descope` (§ 3d)') || !dCls.includes('exit 3 → § 3b') ||
+    !d3.includes('reconcile-rollout.py descope --tasks <slug> --rollout <rollout-note>') || !d3.includes('Exit 0 → § 4\'s `hand-back`') ||
+    !d3.includes('Exit 3 → § 3b') || !d3.includes('never under a pause') || !d3.includes('tell Lachy afterwards') ||
+    !d3.includes("the rollout's `## Notes` line") ||
+    !dRow || !ticks(dRow[4]).includes('descope') || !dRow[4].includes('then `hand-back`, then its own call') ||
+    !descoped.includes("`grep -m1 '^- descoped (automatic)' ~/repos/obsidian/Work/Tasks/<slug>.md`") ||
+    !descoped.includes('every automatic descope, and any wrong owner') ||
+    !liveByName.includes('a `plan-blocked` one it leaves set aside (the verb asked, or the notes do not settle it) is repair\'s') ||
+    !undo(d3) || !undo(descoped) || !d3.includes('verbatim only') || !d3.includes('only the caller\'s judgement guards that case') ||
+    !r6.includes('automatic descopes (task + part + follow-up or owner)') ||
+    !collapse(raw(repair, /^## Don'ts/)).includes("Don't descope by hand, or twice.")) fails.push('descope')
+
+  // second-block (p14-4): a plan-block after an automatic descope (a `## Scope decision (automatic)`, no
+  // `descope_armed:`) is its own class, input-gated (§ 3b), never a silent own-run hand-back; the descopable class
+  // excludes it; status's re-entry rows and action 10 say the same, and a Don't.
+  const sbCls = cls['plan-blocked after a descope'] ?? ''
+  const sbRow = reRows.find((c) => c[3].includes('with a `## Scope decision (automatic)` and no `descope_armed:`'))
+  if (!sbCls.includes('`## Scope decision (automatic)` section and no `descope_armed:`') || !sbCls.includes('input-gated: § 3b') ||
+    !sbCls.includes('never a silent hand-back') ||
+    !dCls.includes('with no `## Scope decision (automatic)` section, or one whose `descope_armed:` still stands') ||
+    !sbRow || !sbRow[4].includes("Lachy's decision (repair § 3), then `hand-back`") || !sbRow[4].includes('never a silent hand-back') ||
+    !dRow || !dRow[4].includes('agent-fixable → `hand-back`, then its own call; input-gated → Lachy\'s decision (repair § 3) first') ||
+    !liveByName.includes("is always Lachy's decision, never a silent hand-back") ||
+    !collapse(raw(repair, /^## Don'ts/)).includes('never an own run handed back silently')) fails.push('second-block')
+
   // ---- both ----
   // no-wave: neither file reads the wave rollout, its frontmatter description included.
   if (BAN.test(status) || BAN.test(repair)) fails.push('no-wave')
+
+  // rung (ADR 0029, p13-3): (1) fixture A's JSON: the queued task's off-ladder rung drifts, the merged task's never,
+  // an on-ladder one never, on the built-in ladder; (2) § 2 names the three keys; (3) § 3's Rung drift flag is
+  // scoped to the five unlanded states, the Ladder refused flag names execute's halt, and both hold offline;
+  // (4) the Offline paragraph keeps them rendering; (5) action 11 sends neither to repair; (6) a refused ladder
+  // reorders no action and never routes to repair on its own account; (7) repair: a Rung drift is never
+  // input-gated, a refused ladder leaves § 3, § 4's hand-backs and § 5 running and stops at the Hand-off;
+  // (8) neither skill speaks tiers.
+  const by = fx.A.bySlug
+  const rd = flag('Rung drift:')
+  const lr = flag('Ladder refused:')
+  const action11 = items[ACTIONS.indexOf('any drift flag')] ?? ''
+  const refusedP = labelled(s4raw, 'A refused ladder.')
+  const rRung = labelled(r2raw, 'Rungs (ADR 0029).')
+  const rRefused = labelled(r2raw, 'A refused ladder** (status')
+  const lower = (status + repair).toLowerCase()
+  const R = [
+    by[A.queued]?.rung === 'gone' && by[A.queued]?.rungDrift === 'gone' && by[A.merged]?.rung === 'gone' && by[A.merged]?.rungDrift === '' &&
+      by[A.awaiting]?.rung === 'opus-xhigh' && by[A.awaiting]?.rungDrift === '' && fx.A.status.ladder?.source === 'built-in' &&
+      fx.A.status.ladder?.error === null && fx.A.status.tasks.every((x) => x.rungDrift === '' || ['queued', 'running', 'awaiting-integration', 'integrating', 'set-aside'].includes(x.queueState)),
+    s2.includes('`progress`, `timeline` and `ladder`') && s2.includes('`blockerSummary`, `rung` and `rungDrift`') &&
+      s2.includes(`the task is unlanded (\`queueState\` ${UNLANDED})`),
+    rd.includes(`only for a task whose \`queueState\` is ${UNLANDED}`) && rd.includes('A merged, folded or other task is never flagged') &&
+      rd.includes('It needs no write: the engine reads it as the top rung') && rd.includes("a re-stamp or a ladder edit is Lachy's choice") &&
+      rd.includes('so it holds offline too') && lr.includes('Execute halts `ladder file refused`') && lr.includes('so it holds offline too'),
+    labelled(s3raw, 'Offline.').includes('the RACE / UNVERIFIED, Rung drift and Ladder refused flags still render'),
+    action11.startsWith('Any drift flag but a Rung drift or a refused ladder,'),
+    refusedP.includes('reorders nothing') && refusedP.includes(`from ${RUN.escalation} to ${RUN.nothing}`) && refusedP.includes('`ladder file refused`') &&
+      refusedP.includes('Status never routes a refused ladder to `/thread:repair` on its own account, because repair never edits the file') &&
+      prec.includes('A refused ladder adds its fix ahead of whichever action matches and moves none of them'),
+    rRung.includes('A Rung drift (status § 3) is never input-gated and needs no write') &&
+      rRefused.includes('Repair never edits `~/.config/thread/ladder.toml`') &&
+      rRefused.includes("§ 3's vault work, § 4's hand-back routes") && rRefused.includes("§ 5's defers (on Lachy's choice) still run") &&
+      rRefused.includes("Repair stops at § 4's **Hand-off**: no execute loop and no § 6") && ho.includes('or the ladder file is refused'),
+    !TIER_WORDS.some((w) => lower.includes(w.toLowerCase())),
+  ]
+  if (!R.every(Boolean)) fails.push('rung')
   return [...new Set(fails)]
 }
 
@@ -821,7 +907,7 @@ test('status and repair hold every queue rule', () => {
 
 const RULES = ['states', 'set-aside', 'log-line', 'owner', 'drift', 'actions', 'lineage', 'read-only', 'reverse-lineage', 'integration-only',
   'stages', 'first-match', 'another-base', 'race-hold', 'race-in-flight', 'closed-pr', 'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off',
-  'signed-gate', 'no-wave']
+  'signed-gate', 'no-wave', 'rung', 'descope', 'second-block']
 const CONTROLLED = new Set()
 
 // Replaces the first match of `from`. Whitespace inside it matches any run of whitespace, so a reflowed line still
@@ -1160,6 +1246,10 @@ test('control: an unguarded anchor-ref delete fails anchor', () => {
 test('control: a recut without the ask fails recut', () => {
   only(rp("- **Recut, only on Lachy's explicit ask:**", '- **Recut, when the branch is missing:**'), 'recut', 'no ask')
 })
+test("control: a hand-off without execute § 3's verify_timeout check fails hand-off", () => {
+  only(rp("then execute § 3's `verify_timeout` check (a halt there\n  writes nothing), then", 'then'), 'hand-off', 'no verify_timeout check')
+})
+
 test('control: a hand-off under a pause fails hand-off', () => {
   only(rp('- **Hand-off, when no lead is live and no pause stands**', '- **Hand-off, when no lead is live**'), 'hand-off', 'pause')
 })
@@ -1179,7 +1269,74 @@ test("control: no signed-gate Don't fails signed-gate", () => {
   only(rp("- **Don't touch a signed task while its lead is live.**", '- **Mind signed tasks.**'), 'signed-gate', 'donts')
 })
 
-test('the rules are all named (25) and each has a control', () => {
-  assert.equal(RULES.length, 25)
+test('control: a merged row with a rung drift fails rung', () => {
+  const merged = { ...fx.A.bySlug[A.merged], rungDrift: 'gone' }
+  only({ fx: { ...fx, A: { ...fx.A, bySlug: { ...fx.A.bySlug, [A.merged]: merged } } } }, 'rung', 'merged drift')
+})
+test('control: § 2 without rungDrift fails rung', () => {
+  only(st('`blockerSummary`, `rung` and `rungDrift`.', '`blockerSummary` and `rung`.'), 'rung', 'no rungDrift key')
+})
+test('control: a Rung drift flag without its state scope fails rung', () => {
+  only(st('only for a task whose `queueState` is queued, running, awaiting-integration, integrating or set-aside, with a non-empty `rungDrift`',
+    'for any task with a non-empty `rungDrift`'), 'rung', 'unscoped')
+})
+test('control: a Rung drift flag that says no write fixes it fails rung', () => {
+  only(st("It needs no write: the engine reads it as the top rung. A re-stamp to a listed rung, or restoring that rung in `~/.config/thread/ladder.toml`, clears it; a re-stamp or a ladder edit is Lachy's choice, and",
+    'Advisory: no write fixes it and'), 'rung', 'advisory wording')
+})
+test('control: an Offline paragraph that drops the local flags fails rung', () => {
+  only(st(' It skips the live reads only: the RACE / UNVERIFIED, Rung drift and Ladder refused flags still render, from § 2\'s data and the local files.', ''), 'rung', 'offline')
+})
+test('control: action 11 routing a refused ladder to repair fails rung', () => {
+  only(st('Any drift flag but a Rung drift or a refused ladder,', 'Any drift flag (a refused ladder included),'), 'rung', 'action 11')
+})
+test('control: a refused ladder routed to repair on its own fails rung', () => {
+  only(st('Status never routes a refused ladder to `/thread:repair` on its own account, because repair never edits the file;',
+    'Status routes a refused ladder to `/thread:repair`, which fixes the file;'), 'rung', 'routing paragraph')
+})
+test('control: repair handing off to execute under a refused ladder fails rung', () => {
+  only(rp("Repair stops at § 4's **Hand-off**: no execute loop and no § 6.", "Then § 4's **Hand-off** runs execute's loop as usual."), 'rung', 'hand-off')
+})
+test('control: tier vocabulary in status fails rung', () => {
+  only(st('**Outside the count.**', `A ${TIER_WORDS[0]} rollout is capped.\n\n**Outside the count.**`), 'rung', 'tier word')
+})
+
+// descope (p14-4)
+test('control: § 3d handing back on exit 3 fails descope', () => {
+  only(rp('Exit 3 → § 3b', "Exit 3 → § 4's `hand-back` anyway"), 'descope', 'exit 3 handed back')
+})
+test('control: the plan-blocked re-entry row without descope fails descope', () => {
+  const l = lineWith(real.status, '| `plan-blocked`, no `## Scope decision (automatic)`')
+  const cells = l.split(' | ')
+  only(st(l, [...cells.slice(0, 4), 'otherwise as an own run (repair § 2): agent-fixable → `hand-back`, then its own call; input-gated → Lachy\'s decision (repair § 3) first |'].join(' | ')),
+    'descope', 'no descope in the row')
+})
+test('control: the descopable class after own run fails first-match', () => {
+  const row = lineWith(real.repair, '| **plan-blocked, descopable** |')
+  const ownRow = lineWith(real.repair, '| **own run** |')
+  only({ repair: real.repair.replace(row + '\n', '').replace(ownRow, ownRow + '\n' + row) }, 'first-match', 'descopable after own run')
+})
+
+test('control: an undo that leaves the follow-up open fails descope', () => {
+  only(rp('the follow-up note set to `status: dropped`', 'the follow-up note left as it is'), 'descope', 'follow-up left open')
+})
+
+// second-block (p14-4)
+test('control: a plan-block after a descope handed back silently fails second-block', () => {
+  only(rp('input-gated: § 3b, quoting the new feedback and the automatic descope; never a silent hand-back',
+    'agent-fixable → hand back (§ 4) → its own call'), 'second-block', 'silent hand-back')
+})
+test("control: status's after-descope row without Lachy's decision fails second-block", () => {
+  only(st("Lachy's decision (repair § 3), then `hand-back`, then its own call; never a silent hand-back", '`hand-back`, then its own call'),
+    'second-block', 'status row')
+})
+test('control: the after-descope class after the descopable one fails first-match', () => {
+  const row = lineWith(real.repair, '| **plan-blocked after a descope** |')
+  const dRow = lineWith(real.repair, '| **plan-blocked, descopable** |')
+  only({ repair: real.repair.replace(row + '\n', '').replace(dRow, dRow + '\n' + row) }, 'first-match', 'after-descope late')
+})
+
+test('the rules are all named (28) and each has a control', () => {
+  assert.equal(RULES.length, 28)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

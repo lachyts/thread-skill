@@ -137,7 +137,7 @@ A=$(printf '1%.0s' $(seq 40)); H=$(printf '2%.0s' $(seq 40)); B=$(printf '3%.0s'
 li() { out=$(python3 "$SCRIPT" log-integration --tasks "$1" --tasks-dir "$D" --started "$2" --anchor "$3" --head "$4" --base "$5" --now "${6:-2026-10-02T12:47:30+00:00}" 2>&1); rc=$?; }
 scen log
 mkro
-mkt a review "pr: $PR" 'ready: 2026-10-02T12:00+00:00' 'review_rounds_used: 2' 'tier_capped: review'
+mkt a review "pr: $PR" 'ready: 2026-10-02T12:00+00:00' 'review_rounds_used: 2' 'rung: opus-xhigh'
 fmb=$(awk '/^---$/{n++; print; next} n<2{print}' "$D/a.md")
 li a 2026-10-02T12:30+00:00 "$A" "$H" "$B"
 ok "$rc" 0 "log-integration: exits 0"

@@ -5,7 +5,11 @@
 // carry preview in step 1, a release gate's drop decided before step 6 (or, at step 8, taken out with its
 // row), Solo and dependency proposals for queued tasks only (step 5), step 6's Advance/Cancel-only naming,
 // a note born `incomplete: true` (the template) that only step 7's last write clears, and orient leaving
-// the rule to schedule.
+// the rule to schedule. Schedule speaks rungs, never tiers (ADR 0029, p13-3): § 4.7 offers a starting rung read
+// from ladder.py and never lowers one, step 1's carry preview lists its `restamp` lines and stops on a refusal
+// (a refused ladder included), step 7 stamps `rung:` and leaves a top-mapping legacy stamp under a refused
+// ladder for step 8 to list (and an unrecognised legacy value for step 8's own block), and the template's budget
+// prices a top-rung start.
 //
 // Every rule lives in one pure function, checkSchedule, that returns named failures, so the real files
 // and the control cases run through identical logic and the matcher can't pass vacuously. Each control
@@ -25,6 +29,7 @@ const others = walk('skills/schedule').filter((f) => !/\/(SKILL|rollout-template
 
 const s = (text, re) => collapse(section(text, re) ?? '')
 const S0 = /^### 0\./
+const S47 = /^### 4\.7\. /
 const S1 = /^### 1\. /
 const S35 = /^### 3\.5\. /
 const S5 = /^### 5\. /
@@ -38,6 +43,7 @@ const spans = (text) => [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1])
 // must name no wave.
 const waveLines = (text) => text.replace(/`wave:`/g, '').split('\n')
   .filter((l) => /wave/i.test(l))
+const TIER_WORDS = [['max', 'tier'].join('_'), ['tier', 'capped'].join('_'), ['Opus', '4.8'].join(' '), ['err toward', 'fable'].join(' ')]   // the tier vocabulary (ADR 0029), built from parts so this file stays out of the Verify grep
 const description = (text) => (text.match(/^description: (.*)$/m) ?? [])[1] ?? ''
 const frontmatter = (text) => (text.match(/^---\n([\s\S]*?)\n---\n/) ?? [])[1] ?? ''
 
@@ -119,6 +125,55 @@ function checkSchedule({ schedule, template, orient, manifests = [], extra = [] 
   // clustering or computing waves.
   if (manifests.some((m) => /parallel-safe waves|clusters tasks into|wave structure/i.test(m)) ||
     !(manifests[2] ?? '').includes('`protocol_version: 5`')) fails.push('manifests')
+
+  // starting-rung: § 4.7 reads the rung names from ladder.py and offers `rung: <name>`; step 7 stamps `rung:` and
+  // has no bullet adding a `model: fable` or an `effort:`.
+  const s47 = s(schedule, S47)
+  if (!s47.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py`') || !s47.includes('Offer `rung: <name>` only for a task in the `queued` state') ||
+    !s47.includes('The default offer is the rung just above the bottom') || !s7.includes('add `rung: <name>`') ||
+    /add `model: fable`|add `effort:/.test(s7)) fails.push('starting-rung')
+
+  // rung-no-lower: no offer for a task with a `rung:` or a `restamp … rung=<name>` preview line; it shows as kept and
+  // changes only on Lachy's explicit naming.
+  const noLower = sentences(s47).find((x) => x.includes('It makes no offer for a task that already has a non-empty `rung:`')) ?? ''
+  if (!s47.includes('**§ 4.7 never lowers a rung.**') || !noLower.includes('`restamp <slug> rung=<name>`') ||
+    !s47.includes('`<slug>: rung <name> (kept)`') || !s47.includes('Only Lachy explicitly naming a different listed rung changes it') ||
+    !s47.includes('no default and no batch "y" ever writes a lower rung over it')) fails.push('rung-no-lower')
+
+  // ladder-refused-preflight: under a refused ladder, step 7 still drops the drop-only keys but leaves a top-mapping
+  // legacy stamp for execute's compat read; step 8's block shows ladder.py's stderr and the left-in-place tasks.
+  const s8 = section(schedule, S8) ?? ''
+  const pre = s8.slice(s8.indexOf('**Pre-flight — ladder refused.**'))
+  if (!s7.includes('When `ladder.py` refused at schedule time, still remove the drop-only keys') ||
+    !s7.includes('leave a top-mapping legacy stamp in place, unmapped') || !s7.includes("execute's compat read") ||
+    s8.indexOf('**Pre-flight — ladder refused.**') < 0 || !collapse(pre).includes('show its stderr line verbatim') ||
+    !pre.includes("— model: fable left for execute's compat read")) fails.push('ladder-refused-preflight')
+
+  // legacy-left-preflight: an unrecognised legacy value step 7 leaves on a non-carried candidate is listed in step 8's
+  // own block, one line per value in carry's `WARN:` format.
+  const left = s8.slice(s8.indexOf('**Pre-flight — legacy values left in place.**'))
+  if (!s7.includes('leave an unrecognised value in place, listing it in step 8\'s "Pre-flight — legacy values left in place" block') ||
+    s8.indexOf('**Pre-flight — legacy values left in place.**') < 0 ||
+    !left.includes('WARN: schedule: task-w: effort: banana unrecognised, left in place')) fails.push('legacy-left-preflight')
+
+  // no-tier: the skill and the template speak no tier: none of the tier words, no "step-up", no `model:` in the
+  // template's frontmatter.
+  if ([schedule, template].some((x) => TIER_WORDS.some((w) => x.toLowerCase().includes(w.toLowerCase()))) ||
+    /step-ups?\b/i.test(schedule + template) || /^model:/m.test(frontmatter(template))) fails.push('no-tier')
+
+  // step1-carry-refusal: a non-zero preview exit stops the run with its stderr, naming the refused ladder and its
+  // remedy; the confirm lists the `restamp` lines with the carried list.
+  const s1 = s(schedule, S1)
+  if (!s1.includes('A non-zero preview exit stops the run before this run writes a rollout note or a task stamp: print its stderr verbatim') ||
+    !s1.includes('a refused ladder file when a carried task needs the top rung') || !s1.includes('`~/.config/thread/ladder.toml` at the line named') ||
+    !s1.includes('the carried list with its `restamp` lines')) fails.push('step1-carry-refusal')
+
+  // rung-budget: the template prices a task whose implement stage starts on the top rung at max_iterations + 2,
+  // one that climbs there during implement at 1 + max_iterations, with the review-loop caveat.
+  const tb = collapse(template)
+  if (!tb.includes("A task whose implement stage starts on the ladder's top rung costs more there") ||
+    !tb.includes('spends `max_iterations + 2` on implement, against `1 + max_iterations` for a task that climbs to the top during implement') ||
+    !tb.includes('`max_iterations + 2 + (max_review_rounds − 1) × max_iterations`')) fails.push('rung-budget')
 
   // Orient leaves the one-per-repo rule to schedule § 0: it reads no rollout state itself.
   const o6 = s(orient, /^### 6\./)
@@ -261,6 +316,42 @@ test('control: a manifest or README row that still has schedule build waves fail
     'Computes wave structure from file-overlap')] }, ['manifests'], 'README wave structure')
   only({ manifests: [...real.manifests.slice(0, 2), real.manifests[2].replace('`protocol_version: 5`', '`protocol_version: 3`')] },
     ['manifests'], 'README protocol 3')
+})
+
+test('control: step 7 that stamps model: fable again fails starting-rung', () => {
+  only({ schedule: edit(real.schedule, S7, 'For each task in the rollout:\n',
+    'For each task in the rollout:\n\n- For tasks the user confirmed as hard in step 4.7, add `model: fable`\n') }, ['starting-rung'], 'model: fable bullet')
+})
+
+test('control: § 4.7 without its never-lower sentence fails rung-no-lower', () => {
+  only({ schedule: edit(real.schedule, S47, "It makes no offer for a task that already has a non-empty `rung:`, for one step 1's preview lists as " +
+    '`restamp <slug> rung=<name>` (a name, not `-` or `kept`: carry writes that rung), or for a non-carried candidate whose legacy stamps map ' +
+    'to the top rung (step 7). ', '') }, ['rung-no-lower'], 'no sentence')
+})
+
+test('control: step 8 without the ladder-refused block fails ladder-refused-preflight', () => {
+  only({ schedule: edit(real.schedule, S8, '**Pre-flight — ladder refused.**', '**Pre-flight — other.**') }, ['ladder-refused-preflight'], 'no block')
+})
+
+test('control: step 7 naming no block for an unrecognised value fails legacy-left-preflight', () => {
+  only({ schedule: edit(real.schedule, S7, 'listing it in step 8\'s "Pre-flight — legacy values left in place" block', "naming it in step 8's summary") },
+    ['legacy-left-preflight'], 'dangling reference')
+  only({ schedule: edit(real.schedule, S8, '**Pre-flight — legacy values left in place.**', '**Pre-flight — other values.**') },
+    ['legacy-left-preflight'], 'no block')
+})
+
+test('control: a tier word in § 4.7 fails no-tier', () => {
+  only({ schedule: edit(real.schedule, S47, 'Every task starts on', `${TIER_WORDS[2]} runs by default. Every task starts on`) }, ['no-tier'], 'tier word')
+})
+
+test('control: step 1 without its refusal sentence fails step1-carry-refusal', () => {
+  only({ schedule: edit(real.schedule, S1, 'A non-zero preview exit stops the run before this run writes a rollout note or a task stamp: print its stderr verbatim.', '') },
+    ['step1-carry-refusal'], 'no refusal')
+})
+
+test("control: the template's round-2 budget wording fails rung-budget", () => {
+  only({ template: real.template.replace("A task whose implement stage starts on the ladder's top rung costs more there, not less",
+    'A task on the top rung (stamped there, or climbed there) costs more there, not less') }, ['rung-budget'], 'round 2 wording')
 })
 
 test('control: orient reading rollout state itself fails', () => {

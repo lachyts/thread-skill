@@ -41,16 +41,24 @@ mknote task-planblocked in_progress
 
 cat > "$TMP/result.json" <<EOF
 { "rolloutSlug": "test-rollout", "tasks": [
-  { "slug": "task-approved",     "scope": "single-file",  "status": "review",         "prUrl": "https://github.com/o/r/pull/1", "reviewRoundsUsed": 1, "planRoundsUsed": 0 },
-  { "slug": "task-revised",      "scope": "cross-cutting","status": "review",         "prUrl": "https://github.com/o/r/pull/2", "reviewRoundsUsed": 3, "planRoundsUsed": 2, "model": "fable", "escalated": true, "escalatedAt": "review" },
+  { "slug": "task-approved",     "scope": "single-file",  "status": "review",         "prUrl": "https://github.com/o/r/pull/1", "reviewRoundsUsed": 1, "planRoundsUsed": 0, "startRung": "", "rung": "", "climbs": [], "rungDrift": "", "ran": [] },
+  { "slug": "task-revised",      "scope": "cross-cutting","status": "review",         "prUrl": "https://github.com/o/r/pull/2", "reviewRoundsUsed": 3, "planRoundsUsed": 2, "startRung": "opus-high", "rung": "opus-xhigh", "climbs": [{ "stage": "review", "from": "opus-high", "to": "opus-xhigh" }], "rungDrift": "", "ran": [] },
   { "slug": "task-reviewblocked","scope": "single-file",  "status": "review-blocked", "prUrl": "https://github.com/o/r/pull/3", "reviewRoundsUsed": 4, "reviewFeedback": ["bound assertion is a no-op", "missed sibling site in foo.py"] },
-  { "slug": "task-blocked",      "scope": "single-file",  "status": "blocked",        "prUrl": "", "blockerDiagnosis": "verifier never went green after 3 tries; root cause is an env mismatch.", "model": "fable", "escalated": true, "escalatedAt": "implement" },
+  { "slug": "task-blocked",      "scope": "single-file",  "status": "blocked",        "prUrl": "", "blockerDiagnosis": "verifier never went green after 3 tries; root cause is an env mismatch.", "startRung": "opus-xhigh", "rung": "opus-xhigh", "climbs": [{ "stage": "implement", "from": "opus-xhigh", "to": "opus-xhigh" }], "rungDrift": "gone" },
   { "slug": "task-planblocked",  "scope": "cross-cutting","status": "plan-blocked",   "prUrl": "", "blockerDiagnosis": "plan not approved after 3 rounds. Accumulated feedback: ..." }
 ] }
 EOF
 
+# task-blocked carries a drifted rung: from an earlier stamp the ladder no longer has
+python3 - "$TMP/task-blocked.md" <<'PY2'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1])
+p.write_text(p.read_text().replace("priority: normal\n", "priority: normal\nrung: gone\nmodel: fable\ntier_capped: review\n", 1))
+PY2
+
 echo "== reconcile =="
-python3 "$SCRIPT" reconcile --result "$TMP/result.json" --tasks-dir "$TMP" || { echo "FAIL - reconcile exited non-zero"; fail=1; }
+out=$(python3 "$SCRIPT" reconcile --result "$TMP/result.json" --tasks-dir "$TMP" 2>&1) || { echo "FAIL - reconcile exited non-zero"; fail=1; }
+printf '%s\n' "$out"
 
 check "approved: status review"         "status: review"                              "$TMP/task-approved.md"
 check "approved: pr unquoted"           "pr: https://github.com/o/r/pull/1"            "$TMP/task-approved.md"
@@ -61,8 +69,14 @@ check "approved: pr after owner"        "owner: execute-test"                   
 check "revised: status review"          "status: review"                              "$TMP/task-revised.md"
 check "revised: review_rounds_used 3"   "review_rounds_used: 3"                        "$TMP/task-revised.md"
 check "revised: plan_rounds_used 2"     "plan_rounds_used: 2"                          "$TMP/task-revised.md"
-check "revised: escalation stamped on landed task" "model: fable"                     "$TMP/task-revised.md"
-refute "approved: no model stamp (not escalated)"  "model:"                           "$TMP/task-approved.md"
+check "revised: the reached rung stamped on a landed task" "rung: opus-xhigh"          "$TMP/task-revised.md"
+refute "revised: never a model stamp"            "model:"                             "$TMP/task-revised.md"
+refute "approved: an empty rung stamps nothing"  "rung:"                              "$TMP/task-approved.md"
+refute "approved: no model stamp"                "model:"                             "$TMP/task-approved.md"
+case "$out" in *"task-revised: status=review pr=https://github.com/o/r/pull/2 rung=opus-xhigh from=opus-high climbs=review:opus-high->opus-xhigh [written]"*) echo "ok   - revised: the line shows the rung, where it started and the climb" ;;
+  *) echo "FAIL - revised: reconcile line (got: $out)"; fail=1 ;; esac
+case "$out" in *"task-approved: status=review pr=https://github.com/o/r/pull/1 [written]"*) echo "ok   - approved: no rung on the line" ;;
+  *) echo "FAIL - approved: reconcile line (got: $out)"; fail=1 ;; esac
 
 check "review-blocked: status"          "status: review-blocked"                       "$TMP/task-reviewblocked.md"
 check "review-blocked: pr"              "pr: https://github.com/o/r/pull/3"            "$TMP/task-reviewblocked.md"
@@ -73,10 +87,92 @@ check "blocked: status"                 "status: blocked"                       
 check "blocked: heading"                "## Blocker diagnosis"                         "$TMP/task-blocked.md"
 check "blocked: content"                "env mismatch"                                 "$TMP/task-blocked.md"
 refute "blocked: no pr written (empty)" "pr:"                                          "$TMP/task-blocked.md"
-check "blocked: escalation stamped (re-dispatch starts at fable)" "model: fable"      "$TMP/task-blocked.md"
+check "blocked: the drifted rung: is overwritten with the reached rung" "rung: opus-xhigh" "$TMP/task-blocked.md"
+refute "blocked: the drifted name is gone"       "rung: gone"                         "$TMP/task-blocked.md"
+check "blocked: a stale model: stamp is left alone (a supersede's carry maps it)" "model: fable" "$TMP/task-blocked.md"
+check "blocked: a stale tier_capped: stamp is left alone"  "tier_capped: review"      "$TMP/task-blocked.md"
+case "$out" in *"task-blocked: status=blocked rung=opus-xhigh climbs=implement:opus-xhigh->opus-xhigh rung-drift=gone [written]"*) echo "ok   - blocked: the line shows the no-op climb and the drift, no from= when the call never left its rung" ;;
+  *) echo "FAIL - blocked: reconcile line (got: $out)"; fail=1 ;; esac
 
 check "plan-blocked: status"            "status: plan-blocked"                         "$TMP/task-planblocked.md"
 check "plan-blocked: heading"           "## Plan-blocked feedback"                     "$TMP/task-planblocked.md"
+
+echo "== a malformed rung name is an ERROR and stamps nothing =="
+mknote task-badrung in_progress
+for bad in '"Opus-XHigh"' '"yes"' '["opus-high"]' '"opus high"'; do
+  printf '{"rolloutSlug":"t","tasks":[{"slug":"task-badrung","scope":"single-file","status":"blocked","prUrl":"","blockerDiagnosis":"x","rung":%s}]}' "$bad" > "$TMP/bad.json"
+  if berr=$(python3 "$SCRIPT" reconcile --result "$TMP/bad.json" --tasks-dir "$TMP" 2>&1 >/dev/null); then
+    echo "FAIL - bad rung $bad: reconcile exited 0"; fail=1
+  else
+    case "$berr" in *"ERROR: task-badrung: rung "*"is not a rung name"*) echo "ok   - bad rung $bad: an ERROR naming it, exit 1" ;;
+      *) echo "FAIL - bad rung $bad: stderr (got: $berr)"; fail=1 ;; esac
+  fi
+  refute "bad rung $bad: no rung: stamped" "rung:" "$TMP/task-badrung.md"
+done
+check "bad rung: the rest of the row is still written" "status: blocked" "$TMP/task-badrung.md"
+
+echo "== a pre-3.0.0 row (tier flags, no rung) maps an escalation to the ladder's top rung =="
+# A call started on the tier engine can finish there (a Lost-call resume re-passes its old scriptPath). Its
+# row carries model/escalated/tierCapped and no rung record. HOME is pinned so ladder.py reads this test's
+# ladder file, never the operator's.
+LH="$TMP/legacy-home"; mkdir -p "$LH"
+mknote task-legacy-esc in_progress
+mknote task-legacy-cap in_progress
+mknote task-legacy-flat in_progress
+cat > "$TMP/legacy.json" <<'EOF'
+{ "rolloutSlug": "t", "tasks": [
+  { "slug": "task-legacy-esc",  "scope": "single-file", "status": "blocked", "prUrl": "", "blockerDiagnosis": "red after the fable takeover", "model": "fable", "escalated": true, "escalatedAt": "implement", "tierCapped": false, "tierCappedAt": "" },
+  { "slug": "task-legacy-cap",  "scope": "single-file", "status": "review", "prUrl": "https://github.com/o/r/pull/9", "reviewRoundsUsed": 1, "model": "opus", "escalated": false, "escalatedAt": "", "tierCapped": true, "tierCappedAt": "implement" },
+  { "slug": "task-legacy-flat", "scope": "single-file", "status": "review", "prUrl": "https://github.com/o/r/pull/8", "reviewRoundsUsed": 1, "model": "opus", "escalated": false, "escalatedAt": "", "tierCapped": false, "tierCappedAt": "" }
+] }
+EOF
+lout=$(HOME="$LH" python3 "$SCRIPT" reconcile --result "$TMP/legacy.json" --tasks-dir "$TMP" 2>"$TMP/legacy.err"); lrc=$?
+lerr=$(cat "$TMP/legacy.err")
+[ "$lrc" -eq 0 ] && echo "ok   - legacy: a mappable legacy row is a warning, exit 0" || { echo "FAIL - legacy: exit $lrc ($lerr)"; fail=1; }
+check  "legacy escalated: stamped the built-in ladder's top rung" "rung: opus-xhigh"   "$TMP/task-legacy-esc.md"
+check  "legacy tier-capped: stamped the top rung too"             "rung: opus-xhigh"   "$TMP/task-legacy-cap.md"
+refute "legacy, no climb: nothing stamped"                        "rung:"              "$TMP/task-legacy-flat.md"
+refute "legacy: never a model stamp"                              "model:"             "$TMP/task-legacy-esc.md"
+refute "legacy: never a tier_capped stamp"                        "tier_capped:"       "$TMP/task-legacy-cap.md"
+check  "legacy: the rest of the row is written"                   "status: blocked"    "$TMP/task-legacy-esc.md"
+case "$lerr" in *"WARNING: task-legacy-esc: a pre-3.0.0 row (escalated, no rung) — stamped rung: opus-xhigh, the top rung of the ladder (built-in)"*) echo "ok   - legacy escalated: a WARNING naming the slug and the rung" ;;
+  *) echo "FAIL - legacy escalated: WARNING (got: $lerr)"; fail=1 ;; esac
+case "$lerr" in *"WARNING: task-legacy-cap: a pre-3.0.0 row (tier-capped, no rung)"*) echo "ok   - legacy tier-capped: a WARNING naming the slug" ;;
+  *) echo "FAIL - legacy tier-capped: WARNING (got: $lerr)"; fail=1 ;; esac
+case "$lerr" in *task-legacy-flat*) echo "FAIL - legacy, no climb: warned (got: $lerr)"; fail=1 ;; *) echo "ok   - legacy, no climb: no warning" ;; esac
+case "$lout" in *"task-legacy-esc: status=blocked rung=opus-xhigh (pre-3.0.0 row, escalated) [written]"*) echo "ok   - legacy escalated: the line shows the mapped rung" ;;
+  *) echo "FAIL - legacy escalated: reconcile line (got: $lout)"; fail=1 ;; esac
+# The operator's ladder file decides the top rung.
+mkdir -p "$LH/.config/thread"
+cat > "$LH/.config/thread/ladder.toml" <<'EOF'
+[[rung]]
+name = "opus-high"
+model = "opus"
+effort = "high"
+judge = "high"
+review = "xhigh"
+
+[[rung]]
+name = "fable-high"
+model = "fable"
+effort = "high"
+judge = "xhigh"
+review = "max"
+EOF
+mknote task-legacy-esc in_progress
+HOME="$LH" python3 "$SCRIPT" reconcile --result "$TMP/legacy.json" --tasks-dir "$TMP" >/dev/null 2>&1 || { echo "FAIL - legacy (file): exit"; fail=1; }
+check "legacy escalated: the ladder file's top rung" "rung: fable-high" "$TMP/task-legacy-esc.md"
+# A refused ladder file: an ERROR naming the slug, exit 1, nothing stamped.
+printf '[[rung]]\nname = "Opus"\n' > "$LH/.config/thread/ladder.toml"
+mknote task-legacy-esc in_progress
+if berr=$(HOME="$LH" python3 "$SCRIPT" reconcile --result "$TMP/legacy.json" --tasks-dir "$TMP" 2>&1 >/dev/null); then
+  echo "FAIL - legacy (refused ladder): reconcile exited 0"; fail=1
+else
+  case "$berr" in *"ERROR: task-legacy-esc: a pre-3.0.0 row (escalated, no rung) — the ladder could not be read ($LH/.config/thread/ladder.toml:1: rung 1: "*) echo "ok   - legacy (refused ladder): an ERROR naming the slug and the file's <path>:<line>: <reason>, exit 1" ;;
+    *) echo "FAIL - legacy (refused ladder): stderr (got: $berr)"; fail=1 ;; esac
+fi
+refute "legacy (refused ladder): no rung: stamped" "rung:" "$TMP/task-legacy-esc.md"
+check  "legacy (refused ladder): the rest of the row is written" "status: blocked" "$TMP/task-legacy-esc.md"
 
 echo "== idempotency (re-run must not duplicate sections) =="
 python3 "$SCRIPT" reconcile --result "$TMP/result.json" --tasks-dir "$TMP" >/dev/null
@@ -294,6 +390,157 @@ check  "hist-blocked: grouped by round"     "Round 2:"                          
 python3 "$SCRIPT" reconcile --result "$TMP/mem-result.json" --tasks-dir "$TMP" >/dev/null || { echo "FAIL - memory re-reconcile exit"; fail=1; }
 n=$(grep -c "## Review history (approved at ceiling)" "$TMP/task-ceiling.md")
 [ "$n" -eq 1 ] && echo "ok   - ceiling: history section not duplicated on re-run" || { echo "FAIL - ceiling section duplicated ($n)"; fail=1; }
+
+echo "== approved plan (p14-2: the row's plan upserts / removes / leaves ## Approved plan) =="
+LEAD="$HERE/../scripts/lead-integrate.py"
+LEAD_IN='The last approved plan, kept as a record for Integration. Not authoritative: a plan in your prompt supersedes it; with no plan in your prompt, the brief is the contract.'
+planrow() {  # planrow <slug> <status> <plan-json> -> a one-row result on stdout
+  printf '{ "rolloutSlug": "test-rollout", "tasks": [ { "slug": "%s", "scope": "cross-cutting", "status": "%s", "prUrl": "https://github.com/o/r/pull/30", "reviewRoundsUsed": 1, "blockerDiagnosis": "d", "gatedInputs": ["spend: x — cap $1"], "plan": %s } ] }\n' "$1" "$2" "$3"
+}
+nplan() { python3 "$LEAD" plan --note "$TMP/$1.md" | python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["plan"])'; }
+shaof() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"; }
+pcheck() {  # pcheck <label> <python-condition over t (the note text)> <slug>
+  if python3 -c "import sys; t=open(sys.argv[1]).read(); sys.exit(0 if ($2) else 1)" "$TMP/$3.md"; then echo "ok   - $1"; else echo "FAIL - $1"; fail=1; fi
+}
+mknote task-plan in_progress
+planrow task-plan review '"Planned on: abc\n### Files to modify\n- x\n\n### Gated inputs\nNone"' > "$TMP/plan1.json"
+python3 "$SCRIPT" reconcile --result "$TMP/plan1.json" --tasks-dir "$TMP" >/dev/null || { echo "FAIL - plan reconcile exit"; fail=1; }
+pcheck "plan: heading, blank, the pinned lead-in, blank, the quote" \
+  "'\n## Approved plan\n\n$LEAD_IN\n\n> Planned on: abc\n> ### Files to modify\n> - x\n>\n> ### Gated inputs\n> None\n' in t" task-plan
+[ "$(nplan task-plan)" = "$(printf 'Planned on: abc\n### Files to modify\n- x\n\n### Gated inputs\nNone')" ] \
+  && echo "ok   - plan: lead-integrate plan reads it back exactly" || { echo "FAIL - plan: read-back differs"; fail=1; }
+s1=$(shaof "$TMP/task-plan.md")
+out=$(python3 "$SCRIPT" reconcile --result "$TMP/plan1.json" --tasks-dir "$TMP" 2>&1)
+case "$out" in *"[no-change]"*) echo "ok   - plan: a re-reconcile is [no-change]" ;; *) echo "FAIL - plan: re-reconcile wrote ($out)"; fail=1 ;; esac
+[ "$(shaof "$TMP/task-plan.md")" = "$s1" ] && echo "ok   - plan: re-reconcile byte-identical" || { echo "FAIL - plan: re-reconcile changed bytes"; fail=1; }
+planrow task-plan review '"PLAN TWO"' > "$TMP/plan2.json"
+python3 "$SCRIPT" reconcile --result "$TMP/plan2.json" --tasks-dir "$TMP" >/dev/null
+pcheck "plan: a new plan replaces the old under one heading" \
+  "t.count('## Approved plan') == 1 and '> PLAN TWO' in t and 'Planned on: abc' not in t" task-plan
+s2=$(shaof "$TMP/task-plan.md")
+for v in null; do
+  planrow task-plan review "$v" > "$TMP/plan-null.json"
+  python3 "$SCRIPT" reconcile --result "$TMP/plan-null.json" --tasks-dir "$TMP" >/dev/null
+  [ "$(shaof "$TMP/task-plan.md")" = "$s2" ] && echo "ok   - plan: null leaves the note byte-identical" || { echo "FAIL - plan: null changed it"; fail=1; }
+done
+python3 - "$TMP/plan-null.json" "$TMP/plan-absent.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); del d["tasks"][0]["plan"]; json.dump(d, open(sys.argv[2], "w"))
+PY
+python3 "$SCRIPT" reconcile --result "$TMP/plan-absent.json" --tasks-dir "$TMP" >/dev/null
+[ "$(shaof "$TMP/task-plan.md")" = "$s2" ] && echo "ok   - plan: an absent key leaves the note byte-identical" || { echo "FAIL - plan: absent key changed it"; fail=1; }
+# a blocked, plan-blocked or gate-pending row with a string plan follows the same rule
+for st in blocked plan-blocked gate-pending; do
+  planrow task-plan "$st" "\"PLAN $st\"" > "$TMP/plan-st.json"
+  python3 "$SCRIPT" reconcile --result "$TMP/plan-st.json" --tasks-dir "$TMP" >/dev/null
+  pcheck "plan: a $st row upserts too" "t.count('## Approved plan') == 1 and '> PLAN $st\n' in t" task-plan
+done
+# a non-string, non-null plan: ERROR, exit 1, the section untouched, the rest of the row written
+s3=$(shaof "$TMP/task-plan.md")
+for bad in 5 '{}'; do
+  planrow task-plan review "$bad" > "$TMP/plan-bad.json"
+  python3 - "$TMP/task-plan.md" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]); p.write_text(p.read_text().replace("status: gate-pending", "status: in_progress", 1))
+PY
+  err=$(python3 "$SCRIPT" reconcile --result "$TMP/plan-bad.json" --tasks-dir "$TMP" 2>&1 >/dev/null); rc=$?
+  [ "$rc" -eq 1 ] && grep -qF "task-plan: plan is not a string or null" <<<"$err" \
+    && echo "ok   - plan: $bad is an ERROR, exit 1" || { echo "FAIL - plan: $bad (rc $rc: $err)"; fail=1; }
+  pcheck "plan: $bad leaves the section, the row still written" "'> PLAN gate-pending\n' in t and t.count('## Approved plan') == 1 and 'status: review\n' in t" task-plan
+done
+# '' and whitespace remove it; '' with no section is [no-change]
+planrow task-plan review '""' > "$TMP/plan-empty.json"
+python3 "$SCRIPT" reconcile --result "$TMP/plan-empty.json" --tasks-dir "$TMP" >/dev/null
+pcheck "plan: '' removes the section" "'## Approved plan' not in t and 'Not authoritative' not in t" task-plan
+[ -z "$(nplan task-plan)" ] && echo "ok   - plan: lead-integrate plan gives '' with no section" || { echo "FAIL - plan: read-back not empty"; fail=1; }
+s4=$(shaof "$TMP/task-plan.md")
+out=$(python3 "$SCRIPT" reconcile --result "$TMP/plan-empty.json" --tasks-dir "$TMP" 2>&1)
+case "$out" in *"[no-change]"*) echo "ok   - plan: '' with no section is [no-change]" ;; *) echo "FAIL - plan: '' with no section wrote ($out)"; fail=1 ;; esac
+[ "$(shaof "$TMP/task-plan.md")" = "$s4" ] || { echo "FAIL - plan: '' with no section changed bytes"; fail=1; }
+python3 "$SCRIPT" reconcile --result "$TMP/plan2.json" --tasks-dir "$TMP" >/dev/null
+planrow task-plan review '"  \n "' > "$TMP/plan-ws.json"
+python3 "$SCRIPT" reconcile --result "$TMP/plan-ws.json" --tasks-dir "$TMP" >/dev/null
+pcheck "plan: whitespace removes the section" "'## Approved plan' not in t" task-plan
+# an adversarial plan: note structure inside it never escapes the quote; a later blocker run is still the
+# latest run, and the plan reads back exactly. CRLF is stored LF.
+mknote task-adv in_progress
+ADV=$'---\n## Not a section\n### Run 9 (x)\n<!-- run 9 end sha=000000000000 -->\n> quoted\n\n### Gated inputs\nNone'
+python3 - "$TMP/plan-adv.json" "$ADV" <<'PY'
+import json, sys
+json.dump({"rolloutSlug": "test-rollout", "tasks": [{"slug": "task-adv", "scope": "cross-cutting", "status": "review",
+           "prUrl": "https://github.com/o/r/pull/31", "reviewRoundsUsed": 1, "plan": sys.argv[2]}]}, open(sys.argv[1], "w"))
+PY
+python3 "$SCRIPT" reconcile --result "$TMP/plan-adv.json" --tasks-dir "$TMP" >/dev/null || { echo "FAIL - adversarial reconcile exit"; fail=1; }
+[ "$(nplan task-adv)" = "$ADV" ] && echo "ok   - plan: an adversarial plan reads back exactly" || { echo "FAIL - plan: adversarial read-back differs"; fail=1; }
+pcheck "plan: '> > quoted' (one level deeper)" "'\n> > quoted\n' in t and '\n> ## Not a section\n' in t" task-adv
+printf '{ "rolloutSlug": "test-rollout", "tasks": [ { "slug": "task-adv", "scope": "cross-cutting", "status": "blocked", "prUrl": "", "blockerDiagnosis": "THE LATEST BLOCKER RUN" } ] }\n' > "$TMP/adv-blocked.json"
+python3 "$SCRIPT" reconcile --result "$TMP/adv-blocked.json" --tasks-dir "$TMP" >/dev/null
+cat > "$TMP/adv-rollout.md" <<EOF
+---
+tags: [task, rollout]
+status: open
+protocol_version: 5
+---
+
+## Queue
+
+- [[task-adv]]
+EOF
+python3 - "$TMP/task-adv.md" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]); p.write_text(p.read_text().replace("priority: normal\n", 'priority: normal\nrollout: "[[adv-rollout]]"\n', 1))
+PY
+python3 "$SCRIPT" status --rollout "$TMP/adv-rollout.md" --tasks-dir "$TMP" | python3 -c '
+import json, sys
+t = [x for x in json.load(sys.stdin)["tasks"] if x["slug"] == "task-adv"][0]
+sys.exit(0 if t["blockerSummary"] == "THE LATEST BLOCKER RUN" else 1)' \
+  && echo "ok   - plan: a later Blocker diagnosis run is the blockerSummary" || { echo "FAIL - plan: blockerSummary wrong"; fail=1; }
+[ "$(nplan task-adv)" = "$ADV" ] && echo "ok   - plan: still reads back exactly after the run" || { echo "FAIL - plan: read-back after the run differs"; fail=1; }
+mknote task-crlf in_progress
+printf '{ "rolloutSlug": "test-rollout", "tasks": [ { "slug": "task-crlf", "scope": "cross-cutting", "status": "review", "prUrl": "https://github.com/o/r/pull/32", "reviewRoundsUsed": 1, "plan": "line one\\r\\nline two\\r\\n" } ] }\n' > "$TMP/plan-crlf.json"
+python3 "$SCRIPT" reconcile --result "$TMP/plan-crlf.json" --tasks-dir "$TMP" >/dev/null
+pcheck "plan: CRLF stored as LF" "'> line one\n> line two\n' in t and '\r' not in t" task-crlf
+[ "$(nplan task-crlf)" = "$(printf 'line one\nline two')" ] && echo "ok   - plan: CRLF reads back LF" || { echo "FAIL - plan: CRLF read-back"; fail=1; }
+python3 "$LEAD" plan --note "$TMP/no-such-note.md" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 2 ] && echo "ok   - plan: a missing note exits 2" || { echo "FAIL - plan: missing note rc $rc"; fail=1; }
+
+echo "== verify-timeout (p14-2: the rollout's Integration verify timeout, read-only) =="
+mkvt() {  # mkvt <frontmatter line or ''> -> $TMP/vt-rollout.md
+  { printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n'; [ -n "$1" ] && printf '%s\n' "$1"; printf -- '---\n\n## Notes\n'; } > "$TMP/vt-rollout.md"
+}
+vt_ok() {  # vt_ok <label> <frontmatter line> <expected stdout>
+  mkvt "$2"; local before after got rc; before=$(shaof "$TMP/vt-rollout.md")
+  got=$(python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>/dev/null); rc=$?
+  after=$(shaof "$TMP/vt-rollout.md")
+  if [ "$rc" -eq 0 ] && [ "$got" = "$3" ] && [ "$before" = "$after" ]; then echo "ok   - verify-timeout: $1"
+  else echo "FAIL - verify-timeout: $1 (rc $rc, got $got)"; fail=1; fi
+}
+vt_bad() {  # vt_bad <label> <frontmatter line> <raw repr in the message>
+  mkvt "$2"; local before after got err rc; before=$(shaof "$TMP/vt-rollout.md")
+  got=$(python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>"$TMP/vt.err"); rc=$?
+  err=$(cat "$TMP/vt.err"); after=$(shaof "$TMP/vt-rollout.md")
+  if [ "$rc" -eq 1 ] && [ -z "$got" ] && [ "$before" = "$after" ] \
+     && [ "$err" = "ERROR: verify_timeout must be an integer from 1 to 6600, got $3" ]; then echo "ok   - verify-timeout: $1"
+  else echo "FAIL - verify-timeout: $1 (rc $rc, out '$got', err '$err')"; fail=1; fi
+}
+vt_ok "absent -> 1800" '' '{"verifyTimeout": 1800, "harnessTimeoutMs": 2400000}'
+vt_ok "3600 -> 4200000" 'verify_timeout: 3600' '{"verifyTimeout": 3600, "harnessTimeoutMs": 4200000}'
+vt_ok "6600 -> 7200000 (the harness maximum)" 'verify_timeout: 6600' '{"verifyTimeout": 6600, "harnessTimeoutMs": 7200000}'
+vt_ok "1 is the floor" 'verify_timeout: 1' '{"verifyTimeout": 1, "harnessTimeoutMs": 601000}'
+vt_ok 'a quoted "1800"' 'verify_timeout: "1800"' '{"verifyTimeout": 1800, "harnessTimeoutMs": 2400000}'
+vt_ok "a trailing comment" 'verify_timeout: 1800 # note' '{"verifyTimeout": 1800, "harnessTimeoutMs": 2400000}'
+vt_ok "a commented-out key is absent" '# verify_timeout: 99' '{"verifyTimeout": 1800, "harnessTimeoutMs": 2400000}'
+vt_bad "0" 'verify_timeout: 0' "'0'"
+vt_bad "-1" 'verify_timeout: -1' "'-1'"
+vt_bad "6601" 'verify_timeout: 6601' "'6601'"
+vt_bad "2.5" 'verify_timeout: 2.5' "'2.5'"
+vt_bad "true" 'verify_timeout: true' "'true'"
+vt_bad "null" 'verify_timeout: null' "'null'"
+vt_bad "empty" 'verify_timeout:' "''"
+vt_bad "abc" 'verify_timeout: abc' "'abc'"
+got=$(python3 "$SCRIPT" verify-timeout --rollout "$TMP/no-such-rollout.md" 2>"$TMP/vt.err"); rc=$?
+[ "$rc" -eq 1 ] && [ -z "$got" ] && grep -qF "ERROR: rollout note not found" "$TMP/vt.err" \
+  && echo "ok   - verify-timeout: a missing note exits 1" || { echo "FAIL - verify-timeout: missing note (rc $rc)"; fail=1; }
 
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fail=1; fi

@@ -66,7 +66,10 @@ PY
 }
 fm() { grep -m1 "^$2:" "$D/$1.md" || echo "<none>"; }   # fm <slug> <key> — the frontmatter line
 nxt() { python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@"; }
-st() { python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" --now "${2:-$NOW}"; }
+# status reads the operator's ladder file (its `ladder` key, each task's rungDrift): HOME is pinned to an empty
+# dir (the built-in ladder) unless $SH names another, so the operator's file never reaches the assertions.
+SH="$TMP/status-home"; mkdir -p "$SH"
+st() { HOME="$SH" python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" --now "${2:-$NOW}"; }
 # q <json> <python-expr over d> — compact JSON of the expression
 q() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(eval(sys.argv[1]), separators=(",", ":"), sort_keys=True, ensure_ascii=False))' "$2"; }
 holds='{h["slug"]: h["reason"] for h in d["hold"]}'
@@ -419,12 +422,12 @@ ok "$(q "$J" 'd["progress"]')" '"progress: 2/6 merged, 1 running, 1 awaiting int
 ok "$(q "$J" 'd["timeline"]')" '{"avgTaskMinutes":45.0,"complete":false,"durationsUsed":2,"elapsedLabel":"2h","elapsedMinutes":120,"firstStarted":"2026-10-02T10:00+00:00","lastMerged":"2026-10-02T11:15+00:00","remainingEstimateMinutes":45,"remainingLabel":"~45m (rough)","tasks":[{"durationMinutes":30,"merged":"2026-10-02T10:30+00:00","slug":"s-a","started":"2026-10-02T10:00+00:00"},{"durationMinutes":60,"merged":"2026-10-02T11:15+00:00","slug":"s-b","started":"2026-10-02T10:15+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-d","started":"2026-10-02T10:20+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-e","started":"2026-10-02T10:40+00:00"},{"durationMinutes":null,"merged":null,"slug":"s-c","started":"2026-10-02T11:00+00:00"}]}' "status: exact timeline"
 ok "$(q "$J" '[t["slug"] for t in d["tasks"]]')" '["s-a","s-b","s-c","s-d","s-e","s-f","s-t","s-x"]' "status: tasks sorted by schedule rank"
 ok "$(q "$J" '{t["slug"]: [t["queueState"], t["setAsideAt"]] for t in d["tasks"]}')" '{"s-a":["merged",null],"s-b":["merged",null],"s-c":["running",null],"s-d":["awaiting-integration",null],"s-e":["set-aside","run"],"s-f":["queued",null],"s-t":["folded",null],"s-x":["other",null]}' "status: queue states"
-ok "$(q "$J" '[t for t in d["tasks"] if t["slug"] == "s-f"][0]')" '{"blockerSummary":"","integrating":null,"merged":null,"pr":null,"priority":"normal","queueState":"queued","setAsideAt":null,"slug":"s-f","solo":true,"started":null,"status":"open","waitingOn":["depends on [[s-e]] (blocked)"]}' "status: a queued task's row"
+ok "$(q "$J" '[t for t in d["tasks"] if t["slug"] == "s-f"][0]')" '{"blockerSummary":"","integrating":null,"merged":null,"pr":null,"priority":"normal","queueState":"queued","rung":null,"rungDrift":"","setAsideAt":null,"slug":"s-f","solo":true,"started":null,"status":"open","waitingOn":["depends on [[s-e]] (blocked)"]}' "status: a queued task's row"
 ok "$(q "$J" '[[t["blockerSummary"], t["priority"]] for t in d["tasks"] if t["slug"] == "s-e"][0]')" '["verifier red: flaky fixture","high"]' "status: blockerSummary is the latest run"
 ok "$(q "$J" 'sorted(set(k for t in d["tasks"] for k in t))')" \
-  '["blockerSummary","integrating","merged","pr","priority","queueState","setAsideAt","slug","solo","started","status","waitingOn"]' "status: the exact row keys (no owner key)"
+  '["blockerSummary","integrating","merged","pr","priority","queueState","rung","rungDrift","setAsideAt","slug","solo","started","status","waitingOn"]' "status: the exact row keys (no owner key)"
 ok "$(q "$J" 'sorted(d)')" \
-  '["ceiling","counts","incomplete","pause_requested","paused","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline"]' "status: the exact top-level keys (no stored cursor)"
+  '["ceiling","counts","gitEnvHold","incomplete","ladder","pause_requested","paused","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline"]' "status: the exact top-level keys (no stored cursor; gitEnvHold, p14-6)"
 setkey s-d integrating 2026-10-02T11:50+00:00
 printf '\n### Run 2 (2026-10-02T11:30+00:00)\n\nIntegration: conflict in a.py\n\n<!-- run 2 end sha=111111111111 -->\n' >> "$D/s-e.md"
 J=$(st "" 2026-10-02T12:00:00Z)
@@ -443,7 +446,34 @@ ok "$(q "$J" '[d["progress"], d["timeline"]["complete"], d["timeline"]["elapsedM
 delkey a started; delkey a merged; delkey b started; delkey b merged
 J=$(st "" 2026-10-02T12:00:00Z)
 ok "$(q "$J" '[d["progress"], d["timeline"]]')" '["progress: 2/2 merged — rollout complete",null]' "status: no stamps -> timeline null"
-python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" > "$D/st.json"; ok "$?" 0 "status runs without --now"
+HOME="$SH" python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" > "$D/st.json"; ok "$?" 0 "status runs without --now"
+
+# ── status: each task's rung, and rung drift on the unlanded rows only (ADR 0029) ─────────────────
+scen status-rung
+mkro $'- [[on]]\n- [[gone]]\n- [[bad]]\n- [[landed]]\n- [[none]]'
+mkt on open 'rung: opus-xhigh'
+mkt gone open 'rung: gone'
+mkt bad open 'rung: Opus-X'
+mkt landed done 'rung: gone' 'pr: https://github.com/o/r/pull/7'
+mkt none open 'rung:'
+J=$(st)
+ok "$(q "$J" 'd["ladder"]')" '{"error":null,"rungs":["opus-high","opus-xhigh"],"source":"built-in"}' "status: the built-in ladder, as status read it"
+ok "$(q "$J" '{t["slug"]: [t["queueState"], t["rung"], t["rungDrift"]] for t in d["tasks"]}')" \
+  '{"bad":["queued","Opus-X","Opus-X"],"gone":["queued","gone","gone"],"landed":["merged","gone",""],"none":["queued",null,""],"on":["queued","opus-xhigh",""]}' \
+  "status: a rung on the ladder is no drift; an off-ladder or malformed one drifts while unlanded; a merged one never; an empty rung: is none"
+mkdir -p "$TMP/status-home-file/.config/thread"
+printf '[[rung]]\nname = "r-low"\nmodel = "opus"\neffort = "high"\njudge = "high"\nreview = "xhigh"\n\n[[rung]]\nname = "gone"\nmodel = "opus"\neffort = "xhigh"\njudge = "high"\nreview = "xhigh"\n' \
+  > "$TMP/status-home-file/.config/thread/ladder.toml"
+J=$(SH="$TMP/status-home-file" st)
+ok "$(q "$J" '[d["ladder"]["rungs"], d["ladder"]["source"].endswith("/.config/thread/ladder.toml"), d["ladder"]["error"]]')" '[["r-low","gone"],true,null]' "status: the operator's file decides the ladder"
+ok "$(q "$J" '{t["slug"]: t["rungDrift"] for t in d["tasks"]}')" '{"bad":"Opus-X","gone":"","landed":"","none":"","on":"opus-xhigh"}' "status: drift follows the file"
+mkdir -p "$TMP/status-home-bad/.config/thread"
+printf '[[rung]]\nname = "Opus"\n' > "$TMP/status-home-bad/.config/thread/ladder.toml"
+J=$(SH="$TMP/status-home-bad" st); rc=$?
+ok "$rc" 0 "status: a refused ladder file still exits 0"
+ok "$(q "$J" '[d["ladder"]["rungs"], d["ladder"]["source"].endswith("/.config/thread/ladder.toml"), bool(d["ladder"]["error"])]')" '[[],true,true]' "status: a refused ladder: no rungs, its path, an error"
+has "$(q "$J" 'd["ladder"]["error"]')" "$TMP/status-home-bad/.config/thread/ladder.toml:1: rung 1: " "status: … the error names the file and its line (<path>:<line>: <reason>)"
+ok "$(q "$J" 'sorted(set(t["rungDrift"] for t in d["tasks"]))')" '[""]' "status: … and no row drifts"
 
 # ── resume: a merged PR whose note was never marked (p6-8), against a stub gh ────────────────────
 scen resume
@@ -598,6 +628,75 @@ ok "$rc" 0 "resume: both decided -> exit 0"
 ok "$(fm h-unv status)" "status: done" "resume: the decided UNVERIFIED flips done"
 J=$(nxt --running "")
 ok "$(q "$J" 'd["raceHold"]')" '[]' "next: no raceHold once both are decided"
+
+# ── the git-env hold (p14-6; execute § 4.5 *Git-env canary*) ─────────────────────────────────────────────────────
+# An unacked `git-env trip` line on the rollout's `## Git-env log` holds the whole queue: nothing starts or restarts,
+# every stalled or queued task is held, and `halt` is "git-env" ahead of every other verdict, an integrating lane
+# and an awaiting task included. A later `git-env ack` line naming the slug lifts it; a subset ack leaves the rest.
+gelog() {  # gelog <line> — append one line under ## Git-env log (created when absent)
+  python3 - "$D/ro.md" "$1" <<'PY2'
+import sys
+p, line = sys.argv[1:]
+t = open(p).read()
+if "\n## Git-env log\n" not in t:
+    t = t.rstrip("\n") + "\n\n## Git-env log\n\n"
+open(p, "w").write(t.rstrip("\n") + "\n" + line + "\n")
+PY2
+}
+TRIP() { printf -- '- 2026-10-02T13:%s:00+00:00 git-env trip [[%s]] %s: refs/heads/master %s→%s; repo %s' "$1" "$2" "$3" "$(printf 'a%.0s' {1..40})" "$(printf 'b%.0s' {1..40})" "$D/repo"; }
+scen git-env-hold
+mkro $'- [[g-int]]\n- [[g-await]]\n- [[g-q]]\n- [[g-run]]\n- [[g-stall]]'
+mkt g-int review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-02T13:00+00:00'
+mkt g-await review 'pr: https://github.com/o/r/pull/2'
+mkt g-q open
+mkt g-run in_progress
+mkt g-stall in_progress
+gelog "$(TRIP 30 g-int integrate)"
+J=$(nxt --running g-run)
+ok "$(q "$J" '[d["halt"], d["start"], d["restart"], [h["slug"] for h in d["gitEnvHold"]], [h["kind"] for h in d["gitEnvHold"]]]')" '["git-env",[],[],["g-int"],["integrate"]]' \
+  "git-env: an unacked trip with an integrating lane and an awaiting task → halt git-env, nothing starts or restarts"
+ok "$(q "$J" "$holds")" '{"g-q":"git-env hold: /thread:repair","g-stall":"git-env hold: /thread:repair"}' "git-env: … every stalled or queued task held with the git-env reason"
+ok "$(q "$(st)" '[h["slug"] for h in d["gitEnvHold"]]')" '["g-int"]' "git-env: status carries gitEnvHold"
+gelog "$(TRIP 31 g-run task)"
+gelog '- 2026-10-02T13:40:00+00:00 git-env ack [[g-int]]: refs/heads/master at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, core.bare false'
+J=$(nxt --running g-run)
+ok "$(q "$J" '[d["halt"], [h["slug"] for h in d["gitEnvHold"]]]')" '["git-env",["g-run"]]' "git-env: a subset ack → the rest still held"
+gelog '- 2026-10-02T13:41:00+00:00 git-env ack [[G-Run|alias]]: refs/heads/master at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, core.bare false'
+J=$(nxt --running g-run)
+ok "$(q "$J" '[d["halt"], d["gitEnvHold"], d["start"], d["restart"]]')" '[null,[],["g-q"],["g-stall"]]' "git-env: acked (an alias, any case) → no hold, and the queue starts again"
+ok "$(q "$(st)" 'd["gitEnvHold"]')" '[]' "git-env: … status gitEnvHold []"
+gelog "$(TRIP 50 g-int verify)"
+ok "$(q "$(nxt --running g-run)" '[d["halt"], [h["slug"] for h in d["gitEnvHold"]]]')" '["git-env",["g-int"]]' "git-env: a trip after an ack naming the slug holds again"
+
+# The RACE path: a git-env halt at a RACE site writes a `git-env halt` Race log line beside the RACE line. Under
+# the trip, the halt is git-env; once acked, the task is an undecided RACE (named once), out of integrating and start.
+scen git-env-race
+mkro $'- [[x]]\n- [[y]]\n\n## Race log\n\n- 2026-10-02T13:20+00:00 [[x]] RACE: PR #9 merged as fff on parent ccc; re-verify it\n- 2026-10-02T13:25+00:00 [[x]] re-verify stopped: git-env halt (rc absent)'
+mkt x review 'pr: https://github.com/o/r/pull/9' 'integrating: 2026-10-02T13:10+00:00'
+mkt y open
+gelog "$(TRIP 24 x race-verify)"
+J=$(nxt --running "")
+ok "$(q "$J" '[d["halt"], [h["kind"] for h in d["gitEnvHold"]]]')" '["git-env",["race-verify"]]' "git-env RACE: an unacked race-verify trip → halt git-env"
+gelog '- 2026-10-02T13:45:00+00:00 git-env ack [[x]]: refs/heads/master at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, core.bare false'
+J=$(nxt --running "")
+ok "$(q "$J" '[d["gitEnvHold"], d["raceHold"], "x" in d["integrating"], "x" in d["start"], d["halt"] == "git-env"]')" \
+  '[[],[{"kind":"RACE","slug":"x"}],false,false,false]' "git-env RACE: acked → gitEnvHold [], raceHold names x once (RACE), x neither integrating nor started"
+
+# The integrate-call path: its row is reconciled under an unacked trip (the Integration log line written,
+# integrating: removed); next still halts git-env; after the ack the task awaits Integration.
+scen git-env-integrate
+mkro $'- [[gi]]'
+mkt gi review 'pr: https://github.com/o/r/pull/7' 'ready: 2026-10-02T09:00+00:00' 'integrating: 2026-10-02T10:00+00:00'
+gelog "$(TRIP 05 gi integrate)"
+python3 -c 'import json; a="a"*40
+print(json.dumps({"rolloutSlug":"ro","tasks":[{"slug":"gi","scope":"cross-cutting","status":"review","prUrl":"https://github.com/o/r/pull/7",
+  "integration":{"outcome":"integrated","path":"integrator","anchor":{"headSha":a},"headSha":"b"*40,"baseSha":"c"*40,"triggers":["conflict"],
+  "metrics":{"startedAt":"2026-10-02T10:00+00:00","waitMinutes":60,"durationMinutes":5}}}]}))' \
+  | python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "$NOW" > /dev/null
+ok "$(fm gi integrating)|$(grep -c ' integrated path=integrator ' "$D/gi.md")" "<none>|1" "git-env integrate: the row reconciles under the trip (integrating: removed, its Integration log line written)"
+ok "$(q "$(nxt --running "")" 'd["halt"]')" '"git-env"' "git-env integrate: … next still halts git-env"
+gelog '- 2026-10-02T13:45:00+00:00 git-env ack [[gi]]: refs/heads/master at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, core.bare false'
+ok "$(q "$(nxt --running "")" '[d["halt"], d["awaitingIntegration"]]')" '[null,["gi"]]' "git-env integrate: after the ack it awaits Integration"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-queue: ALL PASS"; else echo "reconcile-rollout-queue: FAILED"; fi

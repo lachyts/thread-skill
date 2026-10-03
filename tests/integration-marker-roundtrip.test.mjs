@@ -4,6 +4,8 @@
 // reconcile — p12-8's skills/execute/scripts/reconcile-rollout.py, whose per-run accumulation appends the
 // engine's diagnosis as the latest `### Run` after any agent-written text, and whose `status` reads
 // `setAsideAt` (any latest run starting `integration:` → integration) and `blockerSummary` (that latest run).
+// p14-2: x13–x15 carry the approved plan from the plan-gate to Integration and a seeded revise through the note's
+// `## Approved plan` (reconcile writes it from the own call's row; `lead-integrate.py plan` reads it back).
 // p12-16: reconcile also writes the Integration log — one `## Integration log` line per integrate row and the
 // `ready:` stamp the lead passes back as integration.readyAt. x7–x12 read both back from engine-built rows.
 //
@@ -21,6 +23,7 @@ import { runTask, loadEngine } from './lib/engine.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const RECONCILE = path.join(root, 'skills', 'execute', 'scripts', 'reconcile-rollout.py')
+const LEAD_INTEGRATE = path.join(root, 'skills', 'execute', 'scripts', 'lead-integrate.py')
 const PRESENT = fs.existsSync(RECONCILE)
 const SKIP = 'p12-8 reconcile-rollout.py not on this base'
 const T = loadEngine(['parseIntegrationMarker', 'resumeArgsError', 'REVISE_MARKER'])
@@ -33,11 +36,11 @@ const BR = 'audit-fix/fix-a'
 const WT = '/repo/.claude/worktrees/proj-fix-a'
 const NOW = '2026-10-02T14:05:00Z'
 const HIST2 = [{ round: 1, feedback: ['own-run fix'] }, { round: 2, feedback: ['keep their rename'], stage: 'integration' }]
-const mkTask = (over = {}) => ({ slug: SLUG, taskPath: `/vault/Tasks/${SLUG}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 4, maxPlanRounds: 3, model: 'fable', ...over })
+const mkTask = (over = {}) => ({ slug: SLUG, taskPath: `/vault/Tasks/${SLUG}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 4, maxPlanRounds: 3, rung: 'opus-xhigh', ...over })
 const mkI = (over = {}) => ({
   prUrl: PR, branch: BR, worktreePath: WT, headSha: sha('a'), taskBase: sha('b'), mainSha: sha('c'), trouble: [], landed: [],
   plan: 'PLAN', reviewHistory: [{ round: 1, feedback: ['own-run fix'] }], reviewRoundsUsed: 1,
-  rung: { model: 'fable', escalated: false, escalatedAt: '', tierCapped: false, tierCappedAt: '' }, ...over,
+  rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] }, ...over,
 })
 const base = { rolloutSlug: ROLLOUT, repoPath: '/repo', verifier: 'make test', date: '2026-10-01' }
 const merged = {
@@ -302,5 +305,132 @@ test('x12: with startedAt, an older row replayed after a newer one adds no log l
     // (a replayed marker is appended again as the latest run) — the reason p12-9's lead reconciles in order.
     assert.deepEqual(logLines(d), before)
     assert.ok(logLines(d)[1].startsWith(`${T2} set-aside `))
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+// ---- the approved plan (p14-2) ----
+// A plan whose lines look like note structure: none may escape the quote, end the section or open a run.
+const PLAN = '---\n### Files to modify\n- a.js\n## Not a section\n### Run 9 (x)\n<!-- run 9 end sha=000000000000 -->\n> quoted\n\n### Gated inputs\nNone'
+const LEAD_IN = 'The last approved plan, kept as a record for Integration. Not authoritative: a plan in your prompt supersedes it; with no plan in your prompt, the brief is the contract.'
+const implOk = { verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: 'done' }
+// The task's own call: plan-gated (a planner returning `plan`, a judge approving) unless planGate is false.
+const ownCall = (over = {}, script = {}) => row({ ...base, task: mkTask(over) }, {
+  [`plan:${SLUG}`]: { ready: true, blocked: false, blockerCause: '', plan: PLAN },
+  [`plan-judge:${SLUG} r1`]: { verdict: 'approve', feedback: [] },
+  [`implement:${SLUG}`]: implOk, [`review:${SLUG} r1`]: { verdict: 'approve', feedback: [] }, ...script,
+})
+const leadJson = (args) => JSON.parse(execFileSync('python3', [LEAD_INTEGRATE, ...args], { encoding: 'utf8', env: { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1' } }))
+const planOf = (d) => leadJson(['plan', '--note', path.join(d, `${SLUG}.md`)])
+function planSection(d) {
+  const text = noteText(d)
+  const i = text.indexOf('\n## Approved plan\n')
+  if (i < 0) return null
+  const rest = text.slice(i + 1)
+  const j = rest.slice(1).search(/^## /m)
+  // the section's own bytes: the blank gap a later section opens below it is that section's, not this one's
+  return (j < 0 ? rest : rest.slice(0, j + 1)).trimEnd()
+}
+
+test('x13: a plan-gated own call carries its plan through the note into the integrate call', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault('')
+  try {
+    const own = await ownCall()
+    assert.equal(own.tasks[0].status, 'review')
+    assert.equal(own.tasks[0].plan, PLAN)
+    reconcile(d, own)
+    assert.ok(planSection(d).startsWith(`## Approved plan\n\n${LEAD_IN}\n\n> ---\n> ### Files to modify\n`), planSection(d))
+    const out = planOf(d)
+    assert.deepEqual(Object.keys(out).sort(), ['plan', 'slug'])
+    assert.equal(out.plan, PLAN, 'lead-integrate.py plan reads back the exact plan')
+    const section = planSection(d)
+    const I = mkI({ plan: out.plan })
+    const r = await runTask({ ...base, mode: 'integrate', task: mkTask(), integration: I }, async (prompt, o) => {
+      if (o.label === `integrate:${SLUG}`) return merged
+      if (o.label === `integration-review:${SLUG} r2`) return { verdict: 'changes', feedback: ['keep their rename'], unreadable: false, finishedAt: NOW }
+      throw new Error('stub: unknown agent label ' + o.label)
+    })
+    assert.equal(r.error, undefined, String(r.error))
+    const p = r.calls.find((c) => c.label === `integrate:${SLUG}`).prompt
+    assert.ok(p.includes(`---\n${PLAN}\n---`), 'the integrate prompt renders the approved plan')
+    assert.ok(p.includes('The approved plan, for reference only'))
+    assert.ok(!p.includes('(no plan:'), 'not the no-plan placeholder')
+    const ir = JSON.parse(JSON.stringify(r.result))
+    assert.equal(ir.tasks[0].plan, null)
+    reconcile(d, ir)
+    assert.equal(planSection(d), section, 'an integrate row leaves the section byte-identical')
+    const s = status(d)
+    assert.equal(s.queueState, 'set-aside')
+    assert.equal(s.setAsideAt, 'run')
+    assert.equal(s.blockerSummary.split('\n')[0], T.REVISE_MARKER, 'the plan never reads as the latest run')
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+test('x14: a seeded revise takes resume.plan from the note; its step-back renders it; its row leaves it', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault('')
+  try {
+    reconcile(d, await ownCall())
+    reconcile(d, await rejected())
+    const section = planSection(d)
+    assert.ok(section && section.includes('> ## Not a section'))
+    const inputs = leadJson(['inputs', '--note', path.join(d, `${SLUG}.md`), '--repo', '/repo'])
+    const resume = {
+      stage: 'revise', prUrl: inputs.pr, branch: inputs.branch, worktreePath: inputs.worktreePath,
+      reviewHistory: inputs.history, reviewRoundsUsed: inputs.lastRound, plan: planOf(d).plan,
+    }
+    assert.equal(resume.plan, PLAN)
+    assert.equal(T.resumeArgsError({ ...base, task: mkTask({ resume }) }), '')
+    assert.ok(resume.reviewRoundsUsed >= 2, 'the revise runs at round >= 3: the step-back round')
+    const r = await runTask({ ...base, task: mkTask({ resume }) }, async (prompt, o) => {
+      if (o.label === `revise:${SLUG} r3`) return implOk
+      if (o.label === `review:${SLUG} r3`) return { verdict: 'approve', feedback: [] }
+      throw new Error('stub: unknown agent label ' + o.label)
+    })
+    assert.equal(r.error, undefined, String(r.error))
+    const p = r.calls.find((c) => c.label === `revise:${SLUG} r3`).prompt
+    assert.ok(p.includes('STEP-BACK ROUND'))
+    assert.ok(p.includes(`The ORIGINAL APPROVED PLAN, for reference:\n---\n${PLAN}\n---`), 'the step-back carries the plan')
+    const res = JSON.parse(JSON.stringify(r.result))
+    assert.equal(res.tasks[0].status, 'review')
+    assert.equal(res.tasks[0].plan, null)
+    reconcile(d, res)
+    assert.equal(planSection(d), section, 'a seeded-revise row leaves the section byte-identical')
+  } finally { fs.rmSync(d, { recursive: true, force: true }) }
+})
+
+test('x15: only a later own call settles the plan — no-outcome rows keep it, a non-gated call removes it', async (t) => {
+  if (!PRESENT) return t.skip(SKIP)
+  const d = vault('')
+  try {
+    reconcile(d, await ownCall())
+    const section = planSection(d)
+    assert.ok(section)
+    const planBlocked = await ownCall({ maxPlanRounds: 1 }, { [`plan-judge:${SLUG} r1`]: { verdict: 'changes', feedback: ['no'] } })
+    assert.equal(planBlocked.tasks[0].status, 'plan-blocked')
+    assert.equal(planBlocked.tasks[0].plan, null)
+    reconcile(d, planBlocked)
+    assert.equal(planSection(d), section, 'a plan-blocked row keeps the last approved plan')
+    const gated = await ownCall({}, { [`plan:${SLUG}`]: { ready: true, blocked: false, blockerCause: '', plan: 'P2\n### Gated inputs\n- spend: an API — cap $5' } })
+    assert.equal(gated.tasks[0].status, 'gate-pending')
+    assert.equal(gated.tasks[0].plan, null)
+    reconcile(d, gated)
+    assert.equal(planSection(d), section, 'a plan-gate gate-pending row keeps it')
+    const plain = await ownCall({ planGate: false })
+    assert.equal(plain.tasks[0].status, 'review')
+    assert.equal(plain.tasks[0].plan, '')
+    reconcile(d, plain)
+    assert.equal(planSection(d), null, "a non-gated own call's '' removes the stale plan")
+    assert.ok(!noteText(d).includes(LEAD_IN))
+    const out = planOf(d)
+    assert.equal(out.plan, '')
+    const I = mkI({ plan: out.plan })
+    const r = await runTask({ ...base, mode: 'integrate', task: mkTask({ planGate: false }), integration: I }, async (prompt, o) => {
+      if (o.label === `integrate:${SLUG}`) return merged
+      if (o.label === `integration-review:${SLUG} r2`) return { verdict: 'approve', feedback: [], unreadable: false, finishedAt: NOW }
+      throw new Error('stub: unknown agent label ' + o.label)
+    })
+    assert.equal(r.error, undefined, String(r.error))
+    assert.ok(r.calls[0].prompt.includes('---\n(no plan: the task was not plan-gated — the brief is the contract)\n---'))
   } finally { fs.rmSync(d, { recursive: true, force: true }) }
 })
