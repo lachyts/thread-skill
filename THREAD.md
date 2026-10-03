@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-03
+last_touched: 2026-10-04
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,13 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-10-04 (early): P13's rollout tasks and P14's queue hardening have landed. `[[thread-skill-rollout-2026-10-03]]` (archived, § Completion log): 9/9 merged (#77 to #85) in 8h 10m from the clone, all on Opus, on the held primary checkout's engine at `0b60690`. Nothing of thread-skill's is running; the Chorus rollout still runs on the primary.**
+- **Landed:** p13-1 ladder loader (#79), p13-2 the engine climbs rungs, execute feeds the ladder, `max_tier:` removed (#80), p13-3 schedule, status and repair speak rungs (#83; its Integration resolved a conflict with #81/#82 through the integrator). p14-2 the approved plan reaches Integration plus `verify_timeout` (#82), p14-3 seeded revise never autostashes (#81), p14-4 the lead descopes a settled plan-block (#84), p14-5 landing PR bodies name their caller (#78), p14-6 the git-env canary (#85), p14-8 infra classifier word match (#77).
+- **Two plan-blocks, one fix.** p14-4 and p14-6 plan-blocked at 3 rounds with feedback narrowing each round and no undecided seam. Lachy raised both to `max_plan_rounds: 6` through `/thread:repair`; p14-4 converged on its first new round, p14-6 on round 5. p14-6's reviser rebased its own PR branch onto #84 with `--force-with-lease` to clear a conflict (its task branch only; the lead never force-pushed).
+- **Not live yet:** `origin/master` carries the ladder engine, but the primary checkout stays at `0b60690` until Chorus ends; p13-4 (3.0.0) updates it.
+- **Peer close-outs:** PRs #75/#76 (the primary checkout's close-outs) sat `BEHIND` after the rollout merged past them; this close ran `update-branch` on #76 (land.sh's own retry) and both merged (`c7feef6`).
+- **Left over:** six consumed review docs in `docs/reviews/`. land.sh refuses `docs/reviews/` close-out paths, so no close can delete them: [[thread-skill-land-takes-review-doc-deletions]].
 
 **2026-10-03 (late afternoon): two rollouts at once.** The Chorus rollout `[[chorus-rollout-2026-10-03]]` (the first queue run, [[thread-skill-p12-13-chorus-first-queue-run]]) runs on this checkout at `0b60690`, so this checkout is **held** (ADR 0031): no pull, switch or plugin update here until Chorus ends. Thread Skill's own P13/P14 rollout is being scheduled from the clone (session `thread-skill-rollout`, started 2026-10-03). Landed today: the orient reshuffle (P13 respecced, P14 filed), PR #73 (p14-1, CI flakes: pushed-base judges "landed" by content alone) and PR #72 (p14-7, the primary checkout holds while a rollout runs), then the cut-over (Chorus soft-paused, checkout `04d1739` → `0b60690`, reinstated).
 
@@ -638,6 +645,10 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **A Workflow task-notification's output file is one JSON object** (`summary`, `logs`, `result`, `agents`): pipe `json.load(f)['result']` into `reconcile-rollout.py reconcile --result -`; the file has no `<result>` tag to cut.
+- **land.sh's close-out paths are `THREAD.md` and `docs/handoffs/` only** (`closeout_shaped`): a consumed `docs/reviews/` doc can't be deleted by a close-out landing, though fresh-review expects its docs deleted at close ([[thread-skill-land-takes-review-doc-deletions]]).
+- **A queued landing PR falls `BEHIND` when a rollout merges past it** (the repo requires up-to-date branches). land.sh's `update-branch` runs only inside its own call, so a peer's close-out waits for the next close in that repo or the daily lander.
+
 - **This checkout is the engine for every rollout lead.** While one runs, close from here still lands (a protected repo queues a `close/…` PR) but skips the fast-forward (`land: held the primary checkout`), so local `master` sits ahead until `git reset --keep origin/master` once nothing runs (ADR 0031 Consequences).
 - **`CLAUDE_PLUGIN_ROOT` is unset in the Bash tool** when a skill is followed through a router (next → handoff): the snippet guards exit 2. Export it to the plugin root and re-run ([[thread-skill-p5-5-plugin-root-read-as-file]]).
 - **gh 2.43: `gh pr edit` fails** (Projects-classic GraphQL); `gh api -X PATCH repos/lachyts/thread-skill/pulls/<n>` works, and `gh pr merge --merge` works.
@@ -868,6 +879,13 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Now (from 2026-10-04): the P13/P14 rollout is done; Chorus still runs on the primary checkout, which stays held.**
+1. **When Chorus ends:** `git reset --keep origin/master` in `~/repos/tools/thread-skill`, then p13-4 (3.0.0, `make evals` first) in the session lane: it updates the live checkout, so the ladder engine goes live. Then [[ab-fable-vs-opus-planning]].
+2. **p14-7's last Verify line** (a landing from the primary prints `land: held the primary checkout` while Chorus runs) is still unobserved; then mark [[thread-skill-p14-7-primary-checkout-holds]] done.
+3. **[[thread-skill-land-takes-review-doc-deletions]]**: fix the gap, then delete the six consumed review docs.
+4. **Still owed:** the fresh-reviews of workspaces `29ca886` and `eb136df`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
+
+**Superseded 2026-10-04:**
 **Now (from 2026-10-03, evening): the P13/P14 rollout is being scheduled in the clone; Chorus runs on this checkout.** The handoff `2026-10-03-schedule-p13-p14-rollout.md` was picked up by a session in `~/repos/tools/thread-skill-rollout` (consumed; its close deletes it).
 1. **Check progress there:** `/thread:status` on the Thread Skill rollout (from any session) and on `[[chorus-rollout-2026-10-03]]`. Never pull, switch, update the plugin or own-branch-land in this checkout while Chorus runs.
 2. **p14-7's last Verify line** (a landing from this checkout prints `land: held the primary checkout`) is still open: the 2026-10-03 close here had nothing to fast-forward (origin/master had not moved), so the hold was never consulted. The first landing here after origin moves (PR #74 or #75 merging) answers it; then mark [[thread-skill-p14-7-primary-checkout-holds]] done.
@@ -1041,6 +1059,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-10-04 (close, from the clone): consumed the schedule handoff; Steer-only orient scheduled p13-1..3 + p14-2..6, p14-8 as one queue rollout and executed it to 9/9 (#77 to #85, 8h 10m, Opus lock). p14-4 and p14-6 plan-blocked at 3; Lachy raised both to 6 rounds through repair, and both converged. Updated peer PR #76 so #75/#76 merged. Filed the land.sh review-doc gap.
 - 2026-10-03 (third close): `/thread:orient Thread Skill` reshuffle with Lachy (Chorus first, P13 after it, P14 filed). Built and merged PR #73 (CI flakes; ledger STOP → root rethink: content-only landed check; 20/20 Ubuntu) and PR #72 (ADR 0031 primary-checkout hold; ledger STOP → Verify). Cut-over: Chorus soft-paused, checkout `04d1739` → `0b60690`, reinstated; the guard holds live. Handed off scheduling to the clone.
 - 2026-10-03 (second close): Lachy's plan: he re-orients GifLab himself (restructure, new queue rollout) as p12-13's acceptance; Thread's next is a Thread Skill reshuffle that refreshes P13 against what P12 landed and sorts the follow-ups, flake first.
 - 2026-10-03 (close): consumed the P12 handoff; Steer-only orient scheduled P12 as a 10-wave rollout and executed it to completion (#56–#69, 53h 19m). Plan-blocks fixed by the interim rule and the `xhigh` start rung; a 13 h overnight stall on a bypass-immune `rm` ask fixed estate-wide by `check-dangerous-rm.sh`; an Ubuntu CI flake filed. Live checkout fast-forwarded: the queue is live. Memory: bypass-immune `rm`.
