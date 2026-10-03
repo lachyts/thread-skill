@@ -154,7 +154,8 @@ asks Lachy while the lead decides it.
 | **revise (automatic)** | `autoRevise: true` | nothing: the lead (or § 4's hand-off) launches the seeded revise itself |
 | **revise stopped** | `revise stopped:` in the marker, `resumeAt: revise` | hand back (§ 4) → a seeded revise |
 | **review-blocked, rejected** | `review-blocked`, `lastIntegration.outcome: rejected` | the raise (§ 4), then hand back → a seeded revise |
-| **plan-blocked, descopable** | `plan-blocked` (`resumeAt: own`), its feedback centring on one part of the task that the note marks optional or that a later task in this rollout owns, and no automatic descope since its last restart | `reconcile-rollout.py descope` (§ 3d): exit 0 → hand back (§ 4) → its own call, and tell Lachy afterwards; exit 3 → § 3b |
+| **plan-blocked after a descope** | `plan-blocked` with a `## Scope decision (automatic)` section and no `descope_armed:`: it restarted after an automatic descope and blocked again | input-gated: § 3b, quoting the new feedback and the automatic descope; never a silent hand-back, never a second descope (the verb refuses one, exit 3) |
+| **plan-blocked, descopable** | `plan-blocked` (`resumeAt: own`) with no `## Scope decision (automatic)` section, or one whose `descope_armed:` still stands (a descope whose hand-back never ran), its feedback centring on one part of the task that the note marks optional or that a later task in this rollout owns | `reconcile-rollout.py descope` (§ 3d): exit 0 → hand back (§ 4) → its own call, and tell Lachy afterwards; exit 3 → § 3b |
 | **own run** | `resumeAt: own`: `blocked`, `plan-blocked`, `review-blocked` with no `rejected` line, a code-writing `review` with no `pr:`, a `merge-task:` set-aside | agent-fixable → hand back (§ 4) → its own call; input-gated → § 3b first |
 | **gate** | `gate-pending` | present the gates verbatim; on sign-off `approve-gates` (§ 3b); never hand back |
 
@@ -264,14 +265,26 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py descop
 ```
 
 Exit 0 → § 4's `hand-back` → its own call. The verb wrote every record: the follow-up note (an optional part, a
-loose `<project>-followup-<short>` task with `descoped_from:`), the task's `## Scope decision (automatic)` entry,
-a pointer on the brief item, an `(automatic)` `## Repair input` line naming the superseded Plan-blocked feedback
-runs, `descope_armed:` (consumed by the restart's `mark-started`) and the rollout's `## Notes` line
+loose `<project>-followup-<short>` task with `descoped_from:`), the task's `## Scope decision (automatic)` entry
+and its `<!-- descope run=… -->` marker, a pointer on the brief item (or a pointer line for a part the brief
+lacks), an `(automatic)` `## Repair input` line naming the superseded Plan-blocked feedback runs,
+`descope_armed:` (consumed by the restart's `mark-started`) and the rollout's `## Notes` line
 (`- <YYYY-MM-DD> descope: [[<slug>]] …`). So tell Lachy afterwards, in the report, never before: the part, the
-follow-up or the owner, and the undo (remove the three automatic records on the task note, or write a human
-`## Scope decision`, then hand back). Exit 3 → § 3b: its `ASK:` line says why (required scope, an ADR decision, a
-recorded decision, an owner that cannot take it, or a second block after an automatic descope) and nothing was
-written. Exit 1 → report its ERROR line and leave the task set aside.
+follow-up or the owner, and the undo. **Undo**, on his word, removes every one of those records: on the task
+note the `## Scope decision (automatic)` section (entry and marker: a marker left behind makes the next block
+read as a second one), the brief pointer or pointer line, the `(automatic)` `## Repair input` line and
+`descope_armed:` if it still stands; the follow-up note set to `status: dropped`, so nobody picks up the
+descoped work twice; and the rollout's `## Notes` `descope:` line removed (or rewritten as `descope undone:`),
+so no report's `Descoped:` line or the Completion log lists it. Then hand back. Exit 3 → § 3b: its `ASK:` line
+says why (required scope, an ADR decision, a recorded decision, an owner that cannot take it, a part tied to
+neither the feedback nor the brief, or a second block after an automatic descope) and nothing was written.
+Exit 1 → report its ERROR line and leave the task set aside.
+
+The verb checks the judgement mechanically, verbatim only. An `--owner` part must appear word for word in the
+latest `## Plan-blocked feedback` run or in the brief, so a paraphrase of required scope asks; but a paraphrase
+the feedback itself uses still passes, and only the caller's judgement guards that case. A brief's marker words
+count only in their own clause (split at `.`, `;`, `:`, a dash and `, and` / `, but` / `, then`), a negated
+one ("not optional") is none, and a part in a fenced code block always asks.
 
 ### 4. Hand back: re-enter at the stage it stopped
 
@@ -390,7 +403,9 @@ merges into another base (task + PR + base).
 - **Don't redo what a set-aside task already finished.** At Integration, retry Integration only; a recut is
   only on Lachy's explicit ask.
 - **Don't descope by hand, or twice.** `reconcile-rollout.py descope` (§ 3d) writes every record and refuses a
-  second block after a restart (exit 3): ask Lachy then (§ 3b), and never hand the task back on a refusal.
+  second block after a restart (exit 3): ask Lachy then (§ 3b), and never hand the task back on a refusal. A
+  task plan-blocked again after an automatic descope is § 2's **plan-blocked after a descope**, never an own
+  run handed back silently.
 - **Don't ask the user about agent-fixable blocks.** Hand them back silently (once); ping only for
   input-gated decisions, gates, a second block or a second raise.
 - **Don't write a PR-less, RACE / UNVERIFIED or other-base task's `status:`**, and never re-call merge-task

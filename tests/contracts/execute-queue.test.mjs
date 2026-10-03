@@ -446,8 +446,11 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   // highest Plan-blocked run and that run's sha), never again on a heartbeat or another loop entry; the guarded verb
   // writes; exit 0 → `hand-back`, then `next` again; exit 3 leaves it set aside for `/thread:repair`, never a
   // hand-back. § 8 says the lead runs this one verb itself and its refusal routes to repair; *Set aside* names the
-  // re-entry; a Don't forbids a hand-written or second descope.
+  // re-entry; a Don't forbids a hand-written or second descope. A block after the restart routes to repair's
+  // **plan-blocked after a descope**, never a silent hand-back; § 6's undo lists every record (the marker, the
+  // follow-up set `status: dropped`, the `## Notes` line).
   const s2t = s2sub?.text ?? ''
+  const undo6 = collapse(s6raw.split('\n').find((l) => l.startsWith('The `Descoped:` line lists')) ?? '')
   const dsc = s2t.slice(Math.max(0, s2t.indexOf('**Automatic descope')))
   const never = collapse((section(skill, S8) ?? '').split('\n').find((l) => l.startsWith('- **Never automate `/thread:repair`**')) ?? '')
   if (!s2t.includes('**Automatic descope') || !dsc.includes('`plan-blocked`') ||
@@ -459,6 +462,8 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !dsc.includes('exit 3 → leave it set aside') || !dsc.includes('`/thread:repair` asks Lachy') ||
     !never.includes('The lead runs `reconcile-rollout.py descope` itself (§ 4.5 step 1.2)') ||
     !never.includes('its refusal (exit 3) routes the task to repair') ||
+    !dsc.includes("a block after the restart always asks (repair § 2's **plan-blocked after a descope**, never a silent hand-back)") ||
+    !['`<!-- descope run=… -->` marker', '`descope_armed:`', '`status: dropped`', '`descope undone:`', 'a second one'].every((k) => undo6.includes(k)) ||
     !aside.includes('- a `plan-blocked` task the notes settle: automatically (step 1.2\'s *Automatic descope*: `descope`, then `hand-back`)') ||
     !donts.includes('Never write a descope by hand') || !donts.includes('its exit 3 goes to `/thread:repair`, never to `hand-back`')) {
     fails.push('descope')
@@ -755,6 +760,10 @@ test('control: an Automatic descope that hands back on exit 3 fails descope', ()
 test('control: § 8 without the descope sentence fails descope', () => {
   const l = real.skill.split('\n').find((x) => x.startsWith('- **Never automate `/thread:repair`**'))
   only(sk(l, l.slice(0, l.indexOf(" One verb is the lead's as well as repair's"))), 'descope', 'no § 8 sentence')
+})
+
+test("control: § 6's undo that leaves the follow-up open fails descope", () => {
+  only(sk('the follow-up note set to `status: dropped`', 'the follow-up note left as it is'), 'descope', 'follow-up left open')
 })
 
 test('the rules are all named (29) and each has a control', () => {
