@@ -23,8 +23,8 @@
 #     name the reset that drops the local copies once landed. Ahead commits whose content is already on
 #     origin/<b> (`git cherry` all `-`, or no touched file differs: a squash or cherry-picked PR) are a note
 #     naming that reset; ahead commits touching only THREAD.md are a note. An ahead set touching no file blocks.
-#     A reset that would move the primary checkout (a directory-source marketplace member) while
-#     unfinished-rollout.py counts a rollout as running says to wait for it (ADR 0031).
+#     A reset that would move the primary checkout while a rollout runs on it says to wait
+#     (primary-hold.sh, ADR 0031).
 #   Warn — each cited path on its own (never batched): a relative path in every member, an absolute or ~/
 #     one in the member containing it (else a note). Per (member, path): `diff HEAD` + `diff --cached`
 #     (uncommitted), `diff origin/<b>...HEAD` three-dot AND `diff origin/<b> HEAD` two-dot (committed on the
@@ -130,12 +130,9 @@ reset_hint() {  # reset_hint <member>: the command that drops local <b>'s landed
   fi
 }
 held_hint() {  # held_hint <member>: the wait a reset of the primary checkout needs (ADR 0031), else nothing
-  local r
-  [ -f "$SELF_CHECK" ] || return 0
-  bash "$SELF_CHECK" "$1" >/dev/null 2>&1
-  [ $? = 3 ] || return 0
-  r=$(python3 "$here/unfinished-rollout.py" running 2>/dev/null) || r='(the running-rollout check failed)'
-  [ "$r" = none ] || printf ' once no rollout runs on this primary checkout (ADR 0031; now: %s)' "$(printf '%s\n' "$r" | sed 's/^running //' | paste -sd ' ' -)"
+  local h
+  h=$(bash "$here/primary-hold.sh" "$1" 2>/dev/null)
+  [ -z "$h" ] || printf ' once no rollout runs on this primary checkout (ADR 0031; now: %s)' "$h"
 }
 for c in "${members[@]}"; do
   git -C "$c" rev-parse -q --verify "refs/heads/$b" >/dev/null 2>&1 || continue

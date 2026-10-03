@@ -64,13 +64,15 @@ Outcomes, the first that applies:
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py running [--tasks-dir <dir>]
 
-`running` answers land.sh's hold (ADR 0031): which rollouts may have a lead running on the primary checkout
-right now, in any repo, since every lead runs its engine from it. A RUNNING rollout is a live rollout note at
-the current protocol (`protocol_version: 5`, the only one execute runs), tagged `rollout`, neither `done` nor
-`dropped`, and not hard-paused (`paused:` valued). It counts a note whose every task merged but whose
-completion ceremony has not run (its lead is still at work), and a never-started one (cheap to hold for, and a
-hard pause takes it out); a protocol-3 note is never counted, since this engine refuses to run it. stdout:
-`running <slug>` per rollout, sorted, or `none`; exit 0. A missing tasks dir is exit 2.
+`running` answers ADR 0031's hold (skills/_shared/scripts/primary-hold.sh): which rollouts may have a lead
+running on the primary checkout, in any repo, since every lead runs its engine from it. A RUNNING rollout is
+a live rollout note at the current protocol (`protocol_version: 5`, the only one execute runs), tagged
+`rollout`, neither `done` nor `dropped`, not hard-paused (`paused:`) and started (reconcile-rollout.py's
+never_started is false). It counts one whose every task merged but whose completion ceremony has not run
+(its lead is still at work); it never counts a never-started or incomplete note (no lead runs it yet, and
+the first dispatch's gates must not wait on themselves) or a protocol-3 one (this engine refuses it).
+stdout: `running <slug>` per rollout, sorted, or `none`; exit 0. A missing tasks dir is `none`: with no
+vault, no rollout can run here.
 
 Output (check). stdout is exactly one line on exit 0 and 3: `none` | `supersede <slug>` | `interrupted <prior-slug>
 <new-slug>` | `file <slug> <relpath>` | `refuse <slug>[,<slug>…]`. Slugs are filename stems; an unfinished
@@ -413,9 +415,10 @@ RUNNING_PROTOCOL = "5"
 
 def cmd_running(args, rr) -> int:
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
-    if not tasks_dir.is_dir():
-        die(f"tasks dir {tasks_dir} not found")
     running = []
+    if not tasks_dir.is_dir():
+        print("none")
+        return 0
     for path in sorted(tasks_dir.glob("*.md")):
         try:
             note = rr.Note(path)
@@ -424,6 +427,8 @@ def cmd_running(args, rr) -> int:
         if "rollout" not in tags_of(rr, note) or rr._status(note) in CLOSED:
             continue
         if rr._scalar(note.get("protocol_version")) != RUNNING_PROTOCOL or rr._valued(note.get("paused")):
+            continue
+        if rr.never_started(note, rr._scan(path, tasks_dir)[0])[0]:
             continue
         running.append(path.stem)
     for slug in running:

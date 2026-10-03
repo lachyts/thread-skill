@@ -761,29 +761,30 @@ ok "$(grep -c '\[\[g' "$T/ro-g.md")" 0 "D3: g's row is gone"
 nx ro-g
 ok "$rc|$(starts)" "0|['e', 'f']" "D3: … and next runs the rest"
 
-# ---- running: the rollouts that may have a lead on the primary checkout (land.sh's hold, ADR 0031) ----
+# ---- running: the rollouts that may have a lead on the primary checkout (ADR 0031's hold) ----------------
 # run [args...] -> $out, $err, $rc
 run() { python3 "$CHECK" running --tasks-dir "$T" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
 scen r1
 run
 ok "$rc|$out" "0|none" "R1: no rollout note → none"
-mkro ro-live.md "$R"
-mkro ro-other.md /elsewhere/repo   # any repo counts: every lead runs from the one primary checkout
-ST=open PV=3 mkro ro-proto3.md "$R"
-mkro ro-paused.md "$R" "$PAUSED"
-ST=done mkro ro-done.md "$R"
+# started = a lead mark (an owner: on a linked task); every note below is started unless it says otherwise
+mkro ro-live.md "$R"; mkt t-live.md ro-live open "owner: lead"
+mkro ro-other.md /elsewhere/repo; mkt t-other.md ro-other open "owner: lead"   # any repo: one primary checkout
+PV=3 mkro ro-proto3.md "$R"; mkt t-proto3.md ro-proto3 open "owner: lead"
+mkro ro-paused.md "$R" "$PAUSED"; mkt t-paused.md ro-paused open "owner: lead"
+ST=done mkro ro-done.md "$R"; mkt t-done.md ro-done done "owner: lead"
 ST=dropped mkro ro-dropped.md "$R"
-mkdir -p "$T/Archive"; mkro Archive/ro-filed.md "$R"
-mkt task.md ro-live open
+mkdir -p "$T/Archive"; mkro Archive/ro-filed.md "$R"; mkt t-filed.md ro-filed open "owner: lead"
+mkro ro-fresh.md "$R"; mkt t-fresh.md ro-fresh open                            # never started
+mkro ro-incomplete.md "$R" "incomplete: true"; mkt t-inc.md ro-incomplete open  # never started either
 run
 ok "$rc|$out" "0|running ro-live
-running ro-other" "R2: protocol 5, open, unpaused, live, in any repo; never protocol 3, paused, done, dropped or archived"
-mkt done-task.md ro-done merged
-mkro ro-ceremony.md "$R"; mkt t2.md ro-ceremony merged
+running ro-other" "R2: started, protocol 5, open, unpaused, live, any repo; never protocol 3, paused, done, dropped, archived, never-started or incomplete"
+mkro ro-ceremony.md "$R"; mkt t-c1.md ro-ceremony done "owner: lead"; mkt t-c2.md ro-ceremony done "owner: lead"
 run
-has "$out" "running ro-ceremony" "R3: every task merged but its completion ceremony not run: still running"
+has "$out" "running ro-ceremony" "R3: every task done but its completion ceremony not run: still running"
 python3 "$CHECK" running --tasks-dir "$S/nowhere" > "$S.out" 2> "$S.err"; rc=$?
-ok "$rc|$(cat "$S.out")" "2|" "R4: a missing tasks dir is exit 2 with no stdout"
+ok "$rc|$(cat "$S.out")" "0|none" "R4: a missing tasks dir (no vault) → none"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

@@ -1389,39 +1389,59 @@ own --; ores "case 70 empty login" 0 "not landed: PR https://github.com/o/x/pull
 nopush "case 70 empty login"
 
 # ==== The primary checkout holds while a rollout runs (ADR 0031) ===========================================
-# preg <dir>: a plugin registry naming <dir> as a directory source; $PCFG is its CLAUDE_CONFIG_DIR.
-# prollout [<extra frontmatter line>]: a running rollout note in the default tasks dir under $HOME.
-PCFG="$tmp/pcfg"; PTASKS="$HOME/repos/obsidian/Work/Tasks"
-preg() { mkdir -p "$PCFG/plugins"; printf '{"thread": {"source": {"source": "directory", "path": "%s"}, "installLocation": "%s"}}\n' "$1" "$1" > "$PCFG/plugins/known_marketplaces.json"; }
-prollout() { mkdir -p "$PTASKS"; printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n%s\n---\n' "${1:-}" > "$PTASKS/demo-rollout-2026-10-03.md"; }
+# pplugin: commit a copy of this tree's skills/ into $W and push it, so $W is a primary checkout when land.sh
+# runs from $W's own copy ($PLAND). prollout [<line>]: a started rollout note (a task carries owner:) in the
+# default tasks dir under $HOME.
+PTASKS="$HOME/repos/obsidian/Work/Tasks"
+pplugin() {
+  cp -R "$root/skills" "$W/skills"; git -C "$W" add skills && git -C "$W" commit -qm plugin
+  git -C "$W" push -q "$SRV/o/$1.git" master; git -C "$W" update-ref refs/remotes/origin/master HEAD
+  PLAND="$W/skills/_shared/scripts/land.sh"
+}
+prollout() {
+  mkdir -p "$PTASKS"
+  printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n%s\n---\n' "${1:-}" > "$PTASKS/demo-rollout-2026-10-03.md"
+  printf -- '---\ntags: [task]\nstatus: open\nrollout: "[[demo-rollout-2026-10-03]]"\nowner: lead\n---\n' > "$PTASKS/demo-task.md"
+}
 
 echo "== 71. protected, local behind, the primary checkout while a rollout runs"
-ghreset; mkrepo c71; srvcommit c71 x.txt X; X=$(srvref c71 master); B0=$(git -C "$W" rev-parse HEAD); edit
-preg "$W"; prollout
-land CLAUDE_CONFIG_DIR="$PCFG" -- --slug c71 -- "$W" "$W/THREAD.md"
+ghreset; mkrepo c71; pplugin c71; srvcommit c71 x.txt X; X=$(srvref c71 master); B0=$(git -C "$W" rev-parse HEAD); edit
+prollout
+LAND0=$LAND; LAND=$PLAND
+land -- --slug c71 -- "$W" "$W/THREAD.md"
 res "case 71" 0 "queued https://github.com/o/c71/pull/1"
 ok "$(git -C "$W" rev-parse HEAD^)" "$B0" "case 71: not fast-forwarded (C's parent is the old base)"
 has "$err" "land: held the primary checkout at ${B0:0:7}, not fast-forwarded: [[demo-rollout-2026-10-03]] running on it" "case 71: the held note names the rollout"
-ghreset; mkrepo c71b; srvcommit c71b x.txt X; X=$(srvref c71b master); edit
-preg "$W"; prollout "paused: 2026-10-03T10:00+10:00"
-land CLAUDE_CONFIG_DIR="$PCFG" -- --slug c71b -- "$W" "$W/THREAD.md"
+ghreset; mkrepo c71b; pplugin c71b; srvcommit c71b x.txt X; X=$(srvref c71b master); edit
+LAND=$PLAND; prollout "paused: 2026-10-03T10:00+10:00"
+land -- --slug c71b -- "$W" "$W/THREAD.md"
 res "case 71b" 0 "queued https://github.com/o/c71b/pull/1"
 ok "$(git -C "$W" rev-parse HEAD^)" "$X" "case 71b: a hard-paused rollout releases it: fast-forwarded to X"
 hasnt "$err" "held the primary checkout" "case 71b: no held note"
-ghreset; mkrepo c71c; srvcommit c71c x.txt X; X=$(srvref c71c master); edit
-prollout
+ghreset; mkrepo c71c; pplugin c71c; srvcommit c71c x.txt X; X=$(srvref c71c master); edit
+prollout; LAND=$LAND0
 land -- --slug c71c -- "$W" "$W/THREAD.md"
-ok "$(git -C "$W" rev-parse HEAD^)" "$X" "case 71c: a repo that is no directory source is never held"
+ok "$(git -C "$W" rev-parse HEAD^)" "$X" "case 71c: land.sh run from another checkout never holds this one"
+ghreset; mkrepo c71d; pplugin c71d; srvcommit c71d x.txt X; B0=$(git -C "$W" rev-parse HEAD); edit
+printf 'import sys\nsys.exit(5)\n' > "$W/skills/_shared/scripts/unfinished-rollout.py"
+LAND=$PLAND
+land -- --slug c71d -- "$W" "$W/THREAD.md"
+ok "$(git -C "$W" rev-parse HEAD^)" "$B0" "case 71d: a failed running check holds"
+has "$err" "not fast-forwarded: the running-rollout check failed (rc 5)" "case 71d: … and says so"
+git -C "$W" checkout -q -- skills
 
 echo "== 72. unprotected, origin moved, the primary checkout while a rollout runs"
-ghreset; mkrepo c72; c0; srvcommit c72 x.txt X; S=$(srvref c72 master); edit
-preg "$W"; prollout
-land CLAUDE_CONFIG_DIR="$PCFG" GH_PROT=false -- "$W" "$W/THREAD.md"
-res "case 72" 0 "not landed: the primary checkout holds ([[demo-rollout-2026-10-03]] running on it); land once it has finished"
-ok "$(srvref c72 master)" "$S" "case 72: server untouched"
-ok "$(git -C "$W" rev-parse HEAD)" "$(made)" "case 72: local HEAD is this run's commit, never rebased or moved"
-ok "$(wtcount)" 1 "case 72: no scratch worktree"
-rm -rf "$PCFG" "$PTASKS"
+ghreset; mkrepo c72; pplugin c72; c0; srvcommit c72 x.txt X; X=$(srvref c72 master); edit
+prollout; LAND=$PLAND
+OLD=$(git -C "$W" rev-parse HEAD)
+land GH_PROT=false -- "$W" "$W/THREAD.md"
+res "case 72" 0 landed
+ok "$(made)" "$(srvref c72 master)" "case 72: land: commit is the pushed, rebased tip"
+ok "$(git -C "$W" rev-parse "$(srvref c72 master)~2")" "$X" "case 72: C0 and C rebased onto origin's tip on the server"
+ok "$(git -C "$W" rev-parse HEAD^)" "$OLD" "case 72: the local branch never moved (C sits on its old base)"
+has "$err" "pushed the rebased tip without moving it: [[demo-rollout-2026-10-03]] running on it" "case 72: the held note"
+ok "$(wtcount)" 1 "case 72: the scratch worktree is gone"
+LAND=$LAND0; rm -rf "$HOME/repos"
 
 echo
 [ "$fail" = 0 ] && echo "land.test.sh: ALL PASS" || echo "land.test.sh: FAILED"
