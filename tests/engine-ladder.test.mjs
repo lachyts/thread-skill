@@ -92,6 +92,15 @@ const callOf = (r, label) => r.calls.find((c) => c.label === label)
 const me = (r, label) => { const c = callOf(r, label); return c && [c.model, c.effort] }
 const ranOf = (r) => r.calls.map((c) => ({ label: c.label, model: c.model, effort: c.effort }))
 const oneShot = (p) => p.includes('ONE-SHOT') && p.includes('EXACTLY ONCE') && !p.includes('Max iterations')
+// The planner and the read-only investigator work in the task tree with no source edits, no commits and no PR.
+// Their retry framing (a same-rung second pass, or a takeover one rung up) must never hand them the
+// code-writing roles' verification loop or a branch with committed work on it.
+const READ_ONLY_CONTRACT = 'no source edits, no commits, no PR'
+function assertNoCodeFraming(p, what) {
+  assert.ok(!p.includes('FULL verification loop'), `${what}: no FULL verification loop`)
+  assert.ok(!p.includes('on your branch'), `${what}: no committed work on a branch`)
+  assert.ok(p.includes(READ_ONLY_CONTRACT), `${what}: keeps the "${READ_ONLY_CONTRACT}" contract`)
+}
 
 // ---- Lachy's two-rung ladder (the built-in one, no file) ----------------------------------------------
 
@@ -225,6 +234,8 @@ test('top start: the planner and the investigator each get one same-rung retry',
   clean(p)
   const retry = callOf(p, `plan:${P}@opus-xhigh`).prompt
   assert.ok(retry.includes('SECOND PASS') && retry.includes('first planner produced no plan') && !retry.includes('ONE RUNG UP'))
+  assertNoCodeFraming(retry, 'the top-rung planner retry')
+  assert.ok(retry.includes('SECOND PASS: a first attempt at this plan') && retry.includes('plan-only contract above still holds'), 'the planner second pass asks for a plan')
   assert.deepEqual(p.row.climbs, [{ stage: 'plan', from: 'opus-xhigh', to: 'opus-xhigh' }])
   const R = 'proj-topro'
   const ro = await run(mkArgs(mkTask(R, { rung: 'opus-xhigh', scope: 'read-only', maxIterations: 1 }), { ladder }), {
@@ -234,7 +245,42 @@ test('top start: the planner and the investigator each get one same-rung retry',
   clean(ro)
   const second = callOf(ro, `investigate:${R}@opus-xhigh`).prompt
   assert.ok(second.includes('SECOND PASS') && second.includes('read-only contract above still holds') && !second.includes('FULL verification loop'))
+  assertNoCodeFraming(second, 'the top-rung investigator retry')
   assert.deepEqual([ro.row.status, ro.row.climbs], ['review', [{ stage: 'implement', from: 'opus-xhigh', to: 'opus-xhigh' }]])
+})
+
+test('bottom start: the planner and the investigator climb one rung and take over with no branch or verification wording', async (t) => {
+  const ladder = ladderFrom(t, null)
+  const P = 'proj-upplan'
+  const p = await run(mkArgs(mkTask(P, { scope: 'cross-cutting', planGate: true }), { ladder }), {
+    [`plan:${P}`]: noPlan,
+    [`plan:${P}@opus-xhigh`]: plan,
+    [`plan-judge:${P} r1`]: approve,
+    [`implement:${P}`]: green(`implement:${P}`),
+    [`review:${P} r1`]: approve,
+  })
+  clean(p)
+  assert.deepEqual(me(p, `plan:${P}`), ['opus', 'high'])
+  assert.deepEqual(me(p, `plan:${P}@opus-xhigh`), ['opus', 'xhigh'], 'the planner retry runs one rung up')
+  const takeover = callOf(p, `plan:${P}@opus-xhigh`).prompt
+  assert.ok(takeover.includes('ESCALATION: you take this plan over ONE RUNG UP') && !takeover.includes('SECOND PASS'), 'a real plan climb is a planner takeover')
+  assert.ok(takeover.includes('first planner produced no plan') && takeover.includes('plan-only contract above still holds'))
+  assertNoCodeFraming(takeover, 'the planner takeover after a real plan climb')
+  assert.deepEqual(p.row.climbs, [{ stage: 'plan', from: 'opus-high', to: 'opus-xhigh' }])
+
+  const R = 'proj-upro'
+  const ro = await run(mkArgs(mkTask(R, { scope: 'read-only' }), { ladder }), {
+    [`investigate:${R}`]: { ...ralphBlocked, prUrl: '', branch: '', blockerDiagnosis: 'could not reach the logs' },
+    [`investigate:${R}@opus-xhigh`]: { ...green(`investigate:${R}@opus-xhigh`), prUrl: '', branch: '' },
+  })
+  clean(ro)
+  assert.deepEqual(ro.calls.map((c) => [c.label, c.model, c.effort]), [[`investigate:${R}`, 'opus', 'high'], [`investigate:${R}@opus-xhigh`, 'opus', 'xhigh']], 'the investigator retry runs one rung up')
+  const up = callOf(ro, `investigate:${R}@opus-xhigh`).prompt
+  assert.ok(up.includes('ESCALATION: you take this investigation over ONE RUNG UP') && !up.includes('SECOND PASS'), 'a real climb is an investigator takeover')
+  assert.ok(up.includes('could not reach the logs') && up.includes('read-only contract above still holds'))
+  assert.ok(up.includes('READ-ONLY task (scope: read-only)'), 'the read-only prompt itself, not the implementer\'s')
+  assertNoCodeFraming(up, 'the investigator takeover after a real bottom-to-top climb')
+  assert.deepEqual([ro.row.status, ro.row.startRung, ro.row.rung, ro.row.climbs], ['review', 'opus-high', 'opus-xhigh', [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }]])
 })
 
 test('one rung: the bottom is the top, so every pass runs the full loop and every climb is a recorded no-op', async (t) => {

@@ -247,6 +247,18 @@ for (let i = 0; i < 3; i++) {
   ok(T.escalationContext('', ST_TOP, 'implement') === '', 'framing: no prior ⇒ still empty (byte-identical)')
   const ro = T.escalationContext('diag', ST_TOP, 'implement', 'readonly')
   ok(ro.includes('SECOND PASS') && !ro.includes('FULL verification loop') && !ro.includes('on your branch'), 'framing: the read-only second pass keeps its read-only contract')
+  // The planner and the investigator write no code: in BOTH arms (the top rung's second pass, the takeover
+  // after a real climb) their framing restates the no-edit contract and never names a verification loop or
+  // a branch. Checked on the rendered builders, so a call site passing the wrong kind fails here too.
+  const noCode = (p) => !p.includes('FULL verification loop') && !p.includes('on your branch') && p.includes('no source edits, no commits, no PR')
+  const readers = (b) => ({ planner: b.planner, readOnly: b.readOnly })
+  ok(Object.values(readers(top)).every(noCode), 'framing: the planner and the investigator second pass (top rung) carry no verification-loop or branch wording, and keep the no-edit contract')
+  ok(Object.values(readers(up)).every(noCode), 'framing: the planner and the investigator takeover (after a real climb) carry no verification-loop or branch wording, and keep the no-edit contract')
+  ok(up.planner.includes('ONE RUNG UP') && up.planner.includes('plan-only contract') && top.planner.includes('plan-only contract'), 'framing: the planner\'s arms ask for a plan')
+  ok(up.readOnly.includes('ONE RUNG UP') && up.readOnly.includes('read-only contract') && top.readOnly.includes('read-only contract'), 'framing: the investigator\'s arms keep the read-only contract')
+  const coders = { implementer: up.implementer, approvedPlan: up.approvedPlan, implementerTop: top.implementer, approvedPlanTop: top.approvedPlan }
+  ok(Object.values(coders).every((p) => p.includes('on your branch')), 'framing: the code-writing roles keep the committed-work-on-your-branch wording in both arms')
+  ok(top.implementer.includes('FULL verification loop') && top.approvedPlan.includes('FULL verification loop'), 'framing: the code-writing second pass runs the FULL verification loop')
 }
 // A rung: the ladder lacks is read as the top rung — prototype keys included, never an inherited answer.
 for (const bad of ['gone', 'constructor', 'toString', '__proto__']) {

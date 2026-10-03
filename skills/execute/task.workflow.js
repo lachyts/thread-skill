@@ -579,20 +579,37 @@ function verifyBlock(st, verifier, maxIterations, baseline) {
 // attempt's diagnosis/feedback verbatim.
 // `st` and the builder's own `stage` decide the framing, so no caller can pick the wrong one: when that
 // stage's climb MOVED the task, this is a takeover one rung up; anything else with a prior is the stage's
-// climb recorded as a no-op on the top rung, so a same-rung second pass. `kind` distinguishes the
-// read-only investigator, whose contract forbids the branch/verification wording the code path uses.
+// climb recorded as a no-op on the top rung, so a same-rung second pass. `kind` picks the body: the
+// code-writing roles (none given) get the verification loop and the committed work on their branch; the
+// read-only investigator ('readonly') and the planner ('planner') work in the task tree with no source
+// edits, no commits and no PR, so their two arms restate that contract and never mention verification or
+// a branch. Both arms keep their marker (SECOND PASS, ONE RUNG UP) whatever the kind.
 function escalationContext(prior, st, stage, kind) {
   if (!prior) return ''
   const c = climbOf(st, stage)
-  if (!(c && c.from !== c.to)) {
-    if (kind === 'readonly') return `
+  const moved = !!(c && c.from !== c.to)
+  if (kind === 'readonly' || kind === 'planner') {
+    const work = kind === 'planner' ? 'plan' : 'investigation'
+    const contract = kind === 'planner'
+      ? 'The plan-only contract above still holds in full: produce the plan, write no code — no source edits, no commits, no PR.'
+      : 'The read-only contract above still holds in full: no source edits, no commits, no PR.'
+    if (!moved) return `
 
-SECOND PASS: a first attempt at this investigation did not complete, and you own it from here. This
-task is on the ladder's top rung, so there is no hand-over — finish the investigation yourself.
-The read-only contract above still holds in full: no source edits, no commits, no PR.
+SECOND PASS: a first attempt at this ${work} did not complete, and you own it from here. This
+task is on the ladder's top rung, so there is no hand-over — finish the ${work} yourself.
+${contract}
 The prior attempt's diagnosis (verbatim):
 ${prior}`
     return `
+
+ESCALATION: you take this ${work} over ONE RUNG UP (a stronger model or more effort) — a first-pass attempt
+one rung down did not complete it, and you own it from here.
+${contract}
+The prior attempt's diagnosis (verbatim):
+${prior}
+Do not blindly repeat the failed approach.`
+  }
+  if (!moved) return `
 
 SECOND PASS: a first attempt did not land this task, and you own it from here. This task is on
 the ladder's top rung, so there is no hand-over: run the FULL verification loop and finish the work.
@@ -600,7 +617,6 @@ The prior attempt's diagnosis (verbatim):
 ${prior}
 Any committed work from that attempt is already on your branch — build on or replace it as the diagnosis
 warrants.`
-  }
   return `
 
 ESCALATION: you take this task over ONE RUNG UP (a stronger model or more effort) — a first-pass attempt
@@ -781,7 +797,7 @@ Steps:
 
 If during investigation you find the task is fundamentally malformed (impossible, contradicts a committed
 change, etc.), append a one-paragraph diagnosis to the task note under "## Blocker diagnosis" and return
-ready=false, blocked=true, blockerCause="<one line>", plan="".${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, st, 'plan')}`
+ready=false, blocked=true, blockerCause="<one line>", plan="".${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, st, 'plan', 'planner')}`
 }
 
 function planJudgePrompt(task, planText, a) {
