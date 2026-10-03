@@ -155,7 +155,12 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !before(integ, 'When it returns, run the canary `check`', 'reconcile the row') ||
     !before(verifyB, 'run the canary `check` first, before `push` or `undo`', 'Otherwise:') ||
     !before(race, 'run the canary `check` first', 'green → `mark-done`') ||
-    !before(lost, 'Run the canary `check` for that call\'s window first', 'workflow call failed:')) fails.push('check-sites')
+    !before(lost, 'Run the canary `check` for that call\'s window first', 'workflow call failed:') ||
+    // A Lost call resume that returns a row checks its own window (task or integrate) before the reconcile.
+    !before(lost, 'When the resume returns a row, run the canary `check` for the resume\'s window first', 'Then reconcile the row it returns') ||
+    !lost.includes('the row is still reconciled whatever the exit') || !lost.includes('act on no `integration.outcome`') ||
+    !bullet(canRaw, 'Check sites:').includes('a *Lost call* resume that returns a row') ||
+    !bullet(canRaw, 'Check sites:').includes('trips `record not armed`')) fails.push('check-sites')
 
   // check-all-sites: every entry after verify_timeout; step 3 before mark-integrating; before every merge-task
   // launch (step 4, the hold release, the backoff, the two re-runs); completion before the sweep, retire before the move.
@@ -170,7 +175,7 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !before(st3, "the canary's `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py check-all", 'mark-integrating --tasks') ||
     !before(st4, "the canary's `check-all` (*Git-env canary*: before EVERY `merge-task.sh` launch", '`run_in_background`') ||
     !before(hold, "the canary's `check-all`", '`merge-task.sh` with the same pair') ||
-    !before(bo, 'check-all', 'merge-task.sh <the same four args>') || !bo.includes("failed:git-env") ||
+    !before(bo, 'check-all', 'merge-task.sh <the same four args>') || !bo.includes("failed:git-env:%s") ||
     !(rows['6'] ?? '').includes("check-all") || !(rows['143 / 130 / 129, or a missing sentinel'] ?? '').includes('check-all') ||
     !(iCA >= 0 && iCA < iSweep) || !(iRetire >= 0 && iRetire < iMove) ||
     !bullet(canRaw, 'check-all sites:').includes('before EVERY `merge-task.sh` launch') ||
@@ -215,7 +220,11 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
 
   // drop-guard: § 3e's restore drops nothing unseen.
   const optA = bullet(d3raw, '(a) Restore and ack')
+  const optB = bullet(d3raw, '(b) Keep the commit and ack')
   if (!optA.includes('--drop-local <the B sha shown>') || !optA.includes('close-out') || !optA.includes('`git-env-rescue`') ||
+    // (b) clears a bare flip first (ack refuses while bare), and a refused restore never leaves R bare.
+    !before(optB, 'Whenever evidence item 2 reads `true`, first run', 'Then `ack --rollout') || !optB.includes('--default B --bare-only') ||
+    !d3.includes('restore clears core.bare before that guard, so a refused restore never leaves R bare') ||
     !optA.includes('only when no Workflow call or background Integration command of the rollout is in flight') ||
     !rDonts.includes('never pass `--drop-local` for commits Lachy was not shown')) fails.push('drop-guard')
 
@@ -225,9 +234,11 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
   if (!mr.includes('Before routing ANY merge-task result') || !mr.includes('run `check-all`') ||
     !mr.includes('§ 5 heartbeat clause (4)\'s "act on it as §4.5 would"') || !hb.includes(HB4) ||
     !sentinel.includes('Before routing ANY merge-task result, run the canary\'s `check-all`') ||
-    !(rows['`failed:git-env`'] ?? '').includes('reason="git-env trip: the shared checkout changed"') ||
+    !(rows['`failed:git-env:3`'] ?? '').includes('reason="git-env trip: the shared checkout changed"') ||
+    !(rows['`failed:git-env:<any other rc>`'] ?? '').includes('reason="git-env canary failed"') ||
+    /git-env trip/.test(rows['`failed:git-env:<any other rc>`'] ?? '') ||
     !backoff.includes('`# thread:git-env-backoff` snippet') ||
-    !['0 → `mark-done`', '5 → the `## Race log` line only', '2/70 → halt', '`failed:git-env` → halt', 'anything else does nothing'].every((k) => mr.includes(k)) ||
+    !['0 → `mark-done`', '5 → the `## Race log` line only', '2/70 → halt', '`failed:git-env:<rc>` → halt by the exit rule', 'anything else does nothing'].every((k) => mr.includes(k)) ||
     !donts.includes('never take a route under a git-env hold but 0/5/2/70')) fails.push('merge-result')
 
   // exit-rule: any non-zero exit halts with one of two reasons, in the paragraph and in § 7; never ack from execute.
@@ -312,6 +323,12 @@ test('control: each arm site without its arm fails arm-sites', () => {
   only('execute', 'then the canary arm (*Git-env canary*: `--kind race-verify`;', 'then (', 'arm-sites', 'RACE')
 })
 
+test('control: a Lost call resume reconciled with no check, or a lenient re-check, fails check-sites', () => {
+  only('execute', ' When the resume returns a row, run the canary `check` for the resume\'s window first (*Git-env canary*: the kind it armed, `task` or `integrate`); a non-zero exit halts, but the row is still reconciled whatever the exit. Then reconcile the row it returns,',
+    ' Reconcile the row it returns,', 'check-sites', 'lost call resume')
+  only('execute', ' Check each window once: `check` on a closed window (a tombstone an earlier window of the same slug and kind left) trips `record not armed`, because the owner holds at its own check, so that window was never armed.', '', 'check-sites', 'record not armed')
+})
+
 test('control: step 2 reconciling before its check fails check-sites', () => {
   only('execute', '2. **A task call returns.** Run the canary `check` for its window first (*Git-env canary*: `--kind task`); a non-zero exit halts, but the row is still reconciled whatever the exit. Reconcile its row (§ 6),',
     '2. **A task call returns.** Reconcile its row (§ 6),', 'check-sites', 'step 2')
@@ -356,13 +373,16 @@ test('control: the follow-on reading moved into § 3c fails race-followon', () =
   assert.deepEqual(check({ ...real, repair: moved }), ['race-followon'], 'moved into § 3c')
 })
 
-test('control: § 3e option (a) without --drop-local fails drop-guard', () => {
+test('control: § 3e option (a) without --drop-local, or (b) without --bare-only, fails drop-guard', () => {
   only('repair', '  `--drop-local <the B sha shown>` only when that range was shown non-empty.', '  nothing more.', 'drop-guard', 'no drop-local')
+  only('repair', ' --default B --bare-only`:', ' --default B`:', 'drop-guard', '(b) a full restore')
 })
 
 test('control: no failed:git-env row, or heartbeat clause (4) reworded, fails merge-result', () => {
-  const row = real.execute.split('\n').find((l) => l.startsWith('   | `failed:git-env` |'))
+  const row = real.execute.split('\n').find((l) => l.startsWith('   | `failed:git-env:3` |'))
   only('execute', row + '\n', '', 'merge-result', 'no row')
+  only('execute', '   | `failed:git-env:<any other rc>` | Halt with `reason="git-env canary failed"`', '   | `failed:git-env:<any other rc>` | Halt with `reason="git-env trip: the shared checkout changed"`', 'merge-result', 'a canary failure misreported as a trip')
+  only('execute', "printf 'failed:git-env:%s\\n' \"$c\"", "printf 'failed:git-env\\n'", 'check-all-sites', 'the backoff dropping the exit')
   only('execute', 'act on it as §4.5 would; otherwise do nothing more.', 'act on it; otherwise do nothing more.', 'merge-result', 'heartbeat bytes')
 })
 

@@ -19,8 +19,11 @@ reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
         no record). Under a hold it exits 3 and writes no record. A retired rollout: exit 2, nothing created.
   check --repo R --default B --slug S --kind K
         Runs the pass, then closes this window's record: `armed` and clean -> a `checked` tombstone; tripped
-        (now or by an earlier verb) -> `closed: true`, no second trip line; already closed -> unchanged. A missing
-        record trips `record missing`, an unreadable one `record unreadable`.
+        (now or by an earlier verb) -> `closed: true`, no second trip line; a closed tripped record -> unchanged.
+        A missing record trips `record missing`, an unreadable one `record unreadable`, and a closed `checked` or
+        `acked` tombstone `record not armed`: the owner holds at its own check, so a tombstone left by an earlier
+        window with the same slug and kind (a revise, a restart or a resume) means this window was never armed,
+        and a check that passed it as clean would let a commit made with no window open go unseen.
   check-all
         The pass alone (R and B from the records). No records: 0, or 3 under a hold.
   ack --repo R --default B --slugs a,b --ref <sha|absent>
@@ -32,14 +35,17 @@ reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
   retire
         check-all (a non-zero exit is returned, nothing deleted), then writes `<dir>/<stem>.retired` and deletes
         `<dir>/<stem>/`, keeping `<dir>/<stem>.lock`.
-  restore --repo R --default B [--drop-local <sha>]
-        Lock-free; reads the note only to validate, writes only git state. Fetches origin's B
-        (`+refs/heads/B:refs/remotes/origin/B`, which also overwrites a forged tracking ref), refuses (exit 2,
-        nothing changed) while local B holds commits not on origin unless --drop-local names B's current sha
-        (each such commit listed, the close-out ones marked), or while HEAD is on a deleted B; then clears
-        core.bare (the local config, and the worktree config when extensions.worktreeConfig is on) and moves B
-        to origin's B (`reset --keep` when HEAD is on B, else a guarded `update-ref`). A drop prints the old sha
-        and the `git branch git-env-rescue-<stamp> <sha>` that recovers it.
+  restore --repo R --default B [--drop-local <sha> | --bare-only]
+        Lock-free; reads the note only to validate, writes only git state. First, before and independently of
+        every guard, clears core.bare (the local config, and the worktree config when extensions.worktreeConfig
+        is on): that drops nothing, and `ack` refuses while R reads bare, so a refused restore must never leave
+        it bare (a pending close-out on B would otherwise deadlock the keep-and-ack route). --bare-only stops
+        there and moves no ref. Otherwise it fetches origin's B (`+refs/heads/B:refs/remotes/origin/B`, which
+        also overwrites a forged tracking ref), refuses (exit 2, refs unchanged) while local B holds commits not
+        on origin unless --drop-local names B's current sha (each such commit listed, the close-out ones marked),
+        or while HEAD is on a deleted B; then moves B to origin's B (`reset --keep` when HEAD is on B, else a
+        guarded `update-ref`). A drop prints the old sha and the `git branch git-env-rescue-<stamp> <sha>` that
+        recovers it.
 
 The common pass (`arm`, `check`, `check-all`, `ack`), under the lock: (1) re-log every `tripped` record whose
 trip line is missing from the log; (2) read the state once and compare every `armed` record with it: a
@@ -81,7 +87,7 @@ GIT_CONFIG_KEY_*/VALUE_* channels scrubbed.
 Line formats (the markers and the section heading are reconcile-rollout.py's GIT_ENV_TRIP_MARK, GIT_ENV_ACK_MARK
 and GIT_ENV_LOG_SECTION, imported, never copied):
   - <stamp> <GIT_ENV_TRIP_MARK> [[<slug>]] <kind>: <refs/heads/B old→new | core.bare false→true | record missing |
-    record unreadable | core.bare true at arm>; repo <R>
+    record unreadable | record not armed | core.bare true at arm>; repo <R>
   - <stamp> <GIT_ENV_ACK_MARK> [[a]], [[b]]: refs/heads/B at <sha|absent>, core.bare false
 
 Exit codes: 0 clean, 3 a trip or a hold, 1 nothing to ack, 2 a failure, a usage or a validation error. The lead
@@ -561,6 +567,13 @@ def cmd_check(ctx, args):
     elif own["state"] == "tripped" and not own["closed"]:
         own["closed"] = True
         ctx.save(own)
+    elif own["state"] in ("checked", "acked"):
+        # A tombstone of an earlier window: this one was never armed (fail closed, never a silent 0).
+        rec = {"v": 1, "slug": args.slug, "kind": args.kind, "repo": ctx.repo, "default": ctx.default,
+               "ref": own.get("ref"), "bare": False, "armedAt": None}
+        _tripped(rec, "record not armed", ctx.repo, True)
+        ctx.save(rec)
+        ctx.append([rec["trip"]["line"]])
     rc = 3 if ctx.hold() or any(r["state"] == "tripped" for r in ctx.records()) else 0
     if rc == 0:
         print(f"checked [[{args.slug}]] {args.kind}: clean")
@@ -630,9 +643,38 @@ def cmd_retire(ctx, args):
     return 0
 
 
+def _clear_bare(repo):
+    """Clear core.bare in the local config, and in the worktree config when extensions.worktreeConfig is on.
+    True when R read bare and now does not; a repo still bare after the fix is exit 2. It drops nothing."""
+    p = _git(repo, "rev-parse", "--is-bare-repository")
+    if p.returncode != 0 or p.stdout.strip() not in ("true", "false"):
+        raise CanaryError(f"cannot read the bareness of {repo}: {(p.stderr or p.stdout).strip()}")
+    if p.stdout.strip() == "false":
+        return False
+    _must(repo, "config", "--local", "core.bare", "false")
+    wt = _git(repo, "config", "--local", "--bool", "--get", "extensions.worktreeConfig")
+    if wt.stdout.strip() == "true":
+        u = _git(repo, "config", "--worktree", "--unset-all", "core.bare")
+        if u.returncode not in (0, 5):
+            raise CanaryError(f"cannot unset the worktree core.bare: {u.stderr.strip()}")
+    if _git(repo, "rev-parse", "--is-bare-repository").stdout.strip() != "false":
+        raise CanaryError(f"{repo} still reads as bare after the config fix")
+    return True
+
+
 def cmd_restore(ctx, args):
     _validate(ctx, args.repo, args.default)
     repo, branch = ctx.repo, ctx.default
+    if args.bare_only and args.drop_local is not None:
+        raise CanaryError("usage: --bare-only moves no ref, so it takes no --drop-local")
+    # Before every guard: clearing core.bare drops nothing, and ack refuses while R reads bare.
+    cleared = _clear_bare(repo)
+    if cleared:
+        print("restore: core.bare cleared (local and worktree config)", file=sys.stderr)
+    if args.bare_only:
+        _bare, local, _origin = _read_state(repo, branch)
+        print(f"restored: core.bare false; refs/heads/{branch} left at {local or 'absent'}")
+        return 0
     f = _git(repo, "fetch", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
     if f.returncode != 0:
         raise CanaryError(f"fetch of origin's {branch} failed: {f.stderr.strip()}")
@@ -646,25 +688,18 @@ def cmd_restore(ctx, args):
         for c in ahead:
             mark = "   <- a close-out § 2.7 wants landed: restore drops it; keep it with ack instead" if _closeout_commit(repo, c) else ""
             print(_must(repo, "log", "--oneline", "--stat", "-n", "1", c).rstrip() + mark, file=sys.stderr)
-        print(f"restore: nothing changed; to drop them (recoverable), re-run with --drop-local {local}", file=sys.stderr)
+        print(f"restore: refs unchanged, core.bare false, so `ack --ref {local}` keeps them; to drop them "
+              f"(recoverable), re-run with --drop-local {local}", file=sys.stderr)
         return 2
     head = _git(repo, "symbolic-ref", "-q", "HEAD")
     on_b = head.returncode == 0 and head.stdout.strip() == f"refs/heads/{branch}"
     if on_b and local is None:
-        print(f"restore: HEAD is on refs/heads/{branch}, which is deleted; nothing changed. By hand:\n"
+        print(f"restore: HEAD is on refs/heads/{branch}, which is deleted; refs unchanged. By hand:\n"
               f"  git -C {repo} update-ref refs/heads/{branch} {origin}\n"
               f"  git -C {repo} status   # then reset --keep {origin} if the tree should match", file=sys.stderr)
         return 2
     if bare:
-        _must(repo, "config", "--local", "core.bare", "false")
-        wt = _git(repo, "config", "--local", "--bool", "--get", "extensions.worktreeConfig")
-        if wt.stdout.strip() == "true":
-            u = _git(repo, "config", "--worktree", "--unset-all", "core.bare")
-            if u.returncode not in (0, 5):
-                raise CanaryError(f"cannot unset the worktree core.bare: {u.stderr.strip()}")
-        bare, local, origin = _read_state(repo, branch)
-        if bare:
-            raise CanaryError(f"{repo} still reads as bare after the config fix")
+        raise CanaryError(f"{repo} reads as bare again after the config fix")
     if local != origin:
         if on_b:
             k = _git(repo, "reset", "--keep", origin)
@@ -708,6 +743,7 @@ def main(argv=None):
             p.add_argument("--ref", required=True)
         if name == "restore":
             p.add_argument("--drop-local", default=None)
+            p.add_argument("--bare-only", action="store_true")
     try:
         args = ap.parse_args(argv)
         ctx = Ctx(args)

@@ -137,13 +137,19 @@ Considered:
     result; dropping it would make it a *Lost call*), and on a non-zero check no outcome is acted on.
   - **`restore`'s drop guard.** Repair's restore moves the local default to origin's only when it
     holds no commit missing from origin, or when `--drop-local` names the exact sha Lachy was shown;
-    a drop prints the old sha and the `git-env-rescue` branch command that recovers it.
+    a drop prints the old sha and the `git-env-rescue` branch command that recovers it. It clears
+    `core.bare` first, before and independently of that guard (clearing it drops nothing), and
+    `--bare-only` stops there: `ack` refuses while the checkout reads bare, so a refused restore that
+    left it bare would deadlock the keep-and-ack route whenever local B holds a pending close-out.
   - **Binding.** `--repo` must resolve to the rollout's `Project root` (and to its records and trip
     lines), and `--default` must be a plain branch name equal to the one the records and trip lines
     name, so a mistyped flag reads or changes nothing in the wrong repo.
   - **Records** live outside the repo, under `${THREAD_GIT_ENV_DIR:-${XDG_STATE_HOME:-~/.local/state}/thread/git-env}/<rollout>/`,
     so an agent's `git clean` or `rm -rf .claude` never reaches them, and a missing or unreadable record
-    at `check` is itself a trip. Every verb but `restore` holds a `flock` on `<rollout>.lock` beside the
+    at `check` is itself a trip. So is a closed one (`record not armed`): the owner holds at its own
+    check, so a tombstone an earlier window of the same slug and kind left means this window was never
+    armed, and passing it as clean would let a commit made with no window open go unseen. Each window is
+    checked once, a *Lost call* resume's included. Every verb but `restore` holds a `flock` on `<rollout>.lock` beside the
     per-rollout dir (never deleted); `retire` (completion, a supersede) leaves a `<rollout>.retired`
     marker that refuses a new window; `restore` is lock-free (git's own locks serialise it). POSIX only.
   - **Considered:** wrapping the verifier (inside a Ralph loop a canary diff invites the agent to "fix"

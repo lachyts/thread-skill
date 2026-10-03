@@ -89,7 +89,8 @@ overwrites, because each is independent of the pause and the lead:
 - § 5: a defer of a set-aside task with its queued dependants.
 - § 3e: the git-env ack, on Lachy's word. The canary's `ack` writes only the rollout note's `## Git-env log` and
   its own records, and it re-baselines a live window rather than overwriting a note. § 3e's `restore` is not an
-  every-mode write: it waits until nothing of the rollout is in flight.
+  every-mode write: it waits until nothing of the rollout is in flight. Its `--bare-only` form, which moves no
+  ref, runs with (b)'s ack.
 
 **Lead-held notes.** § 3c's `pr:` write and its defer of a RACE / UNVERIFIED task whose merge Lachy decides
 does not stand write a task note a live call's reconcile would overwrite. They run only when no lead is live
@@ -319,14 +320,18 @@ hard pause first. Then offer (`AskUserQuestion`):
   `--drop-local <the B sha shown>` only when that range was shown non-empty. Re-read and show the new sha (and
   any `git-env-rescue` line), then run
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py ack --rollout <rollout-note> --repo R --default B --slugs <exactly the set shown> --ref <that sha>`.
-- **(b) Keep the commit and ack:** `ack --rollout <rollout-note> --repo R --default B --slugs <exactly the set
-  shown> --ref <the sha shown>`, warning that execute § 2.7 halts the next `/thread:execute` entry (`local
+- **(b) Keep the commit and ack.** Whenever evidence item 2 reads `true`, first run
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py restore --rollout <rollout-note> --repo R --default B --bare-only`:
+  it clears core.bare (the local and the worktree config) and moves no ref, because `ack` refuses while R reads
+  bare. Re-read and show items 2 and 4. Then `ack --rollout <rollout-note> --repo R --default B --slugs <exactly
+  the set shown> --ref <the sha shown>`, warning that execute § 2.7 halts the next `/thread:execute` entry (`local
   default branch is ahead of origin`) until the commit lands by PR or is dropped.
 - **(c) Leave it:** the hold stands.
 
 If `ack` exits 3 (the unacked set, the ref or the bareness changed since it was shown), re-read the evidence,
 show it again and ask again. If `restore` exits 2 on its drop guard (B moved since it was shown), show the new
-list and ask again. Any other exit 2 names a validation failure: show it and stop. A dated `## Notes` line records
+list and ask again; restore clears core.bare before that guard, so a refused restore never leaves R bare and (b)
+stays open. Any other exit 2 names a validation failure: show it and stop. A dated `## Notes` line records
 the choice: `- <YYYY-MM-DD> repair: [[a]], [[b]] git-env trip, acked at <sha>: <restored | kept>` (or `left`).
 
 **RACE follow-on.** After a successful ack, re-run status. For each slug now in `raceHold` whose `## Race log`
@@ -474,7 +479,7 @@ the choice, any restore and its rescue line, and the ack line).
 - **Don't touch a signed task while its lead is live.** After `approve-gates`, its owner session holds the
   signed-gate handle (execute § 3.7): no hand-back, recut, defer, re-plan or `## Repair input` (§ 2).
 - **Don't ack a git-env trip unseen.** Never ack trips or a ref Lachy was not shown (`ack --slugs` is exactly the
-  set shown, `--ref` the sha shown), never restore with anything in flight, and never pass `--drop-local` for
+  set shown, `--ref` the sha shown), never restore with anything in flight (`--bare-only` aside: it moves no ref), and never pass `--drop-local` for
   commits Lachy was not shown (§ 3e).
 - **Don't escalate a RACE re-verify in flight.** The lead decides it itself (§ 2). Asking Lachy before its
   verdict exists invites a "stands" that a red re-verify then contradicts.

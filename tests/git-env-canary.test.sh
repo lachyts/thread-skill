@@ -83,6 +83,14 @@ code() { echo "$RANDOM$RANDOM" >> "$R/${1:-code.txt}"; g -C "$R" add -A; g -C "$
 cpath() { mkdir -p "$(dirname "$R/$1")"; echo "$RANDOM" >> "$R/$1"; g -C "$R" add -A; g -C "$R" commit -q -m "close-out $1"; }
 push2() { g -C "$C2" fetch -q origin; g -C "$C2" reset -q --hard origin/master; echo "$RANDOM" >> "$C2/c2.txt"; g -C "$C2" add -A; g -C "$C2" commit -q -m c2; g -C "$C2" push -q origin master; }
 ff() { g -C "$R" fetch -q origin; g -C "$R" merge -q --ff-only origin/master; }
+holder() {  # holder <seconds> — hold the lock in the background, $S/held once it is held
+  rm -f "$S/held"
+  python3 -c 'import fcntl, sys, time
+f = open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w").close(); time.sleep(float(sys.argv[3]))' \
+    "$THREAD_GIT_ENV_DIR/ro.lock" "$S/held" "$1" &
+  hp=$!
+  n=0; while [ ! -f "$S/held" ] && [ "$n" -lt 100 ]; do sleep 0.05; n=$((n + 1)); done
+}
 dellog() { python3 - "$RO" "$1" <<'PY'
 import sys
 p, needle = sys.argv[1:]
@@ -98,8 +106,25 @@ arm A; ok "$rc" 0 "a: arm on an unchanged repo → 0"
 ok "$(recf A task state)|$(recf A task closed)|$(recf A task ref)" "\"armed\"|false|\"$(cur)\"" "a: … an open armed record holding refs/heads/master"
 chk A; ok "$rc" 0 "a: check on an unchanged repo → 0"
 ok "$(recf A task state)|$(recf A task closed)" '"checked"|true' "a: … the record is a checked tombstone"
-chk A; ok "$rc" 0 "a: a repeated check is still 0"
 ok "$(grep -c 'git-env' "$RO")" 0 "a: … and the note carries no git-env line"
+chk A; ok "$rc" 3 "a: a repeated check of the closed window → 3 (its tombstone is not this window's arm)"
+has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "task: record not armed" "a: … logged as record not armed"
+# a2: the skipped arm. A revise, restart or resume of the same task that never armed must not pass on the last
+# window's tombstone: a code commit made with no window open would otherwise go unseen.
+scen a2
+mkt A in_progress
+arm A; chk A; ok "$rc" 0 "a2: arm A, check A → 0"
+code
+chk A; ok "$rc|$(trips A)" "3|1" "a2: a code commit with no new arm, then check A → 3, one trip line"
+has "$(grep 'git-env trip \[\[A\]\]' "$RO")" "task: record not armed" "a2: … logged as record not armed"
+ok "$(recf A task state)|$(recf A task closed)" '"tripped"|true' "a2: … the record reads tripped and closed"
+ackc A "$(cur)"; ok "$rc" 0 "a2: … which the ack clears"
+arm A; chk A; ok "$rc" 0 "a2: a fresh arm, then its check → 0"
+# a3: an acked tombstone is not an arm either.
+scen a3
+mkt A in_progress
+arm A; code; chk A; ackc A "$(cur)"; ok "$(recf A task state)" '"acked"' "a3: a trip on a closed window, acked → acked"
+chk A; ok "$rc|$(trips A)" "3|2" "a3: check A on the acked tombstone with no new arm → 3, a second trip line"
 
 # ── b: a code commit on local master trips ───────────────────────────────────────────────────────────────────
 scen b
@@ -421,8 +446,29 @@ t = open(src).read().replace("<repoPath>", repo).replace("<rollout-note>", ro).r
 open(dst, "w").write(t)
 PY
 CLAUDE_PLUGIN_ROOT="$PR" bash "$S/backoff.sh" > /dev/null 2>&1; brc=$?
-ok "$brc|$([ -e "$S/stub-ran" ] && echo ran || echo not-run)|$(cat "$R/.claude/merge-task.status" 2>/dev/null)" "3|not-run|failed:git-env" \
-  "g: the backoff under a hold never runs merge-task.sh and leaves failed:git-env"
+ok "$brc|$([ -e "$S/stub-ran" ] && echo ran || echo not-run)|$(cat "$R/.claude/merge-task.status" 2>/dev/null)" "3|not-run|failed:git-env:3" \
+  "g: the backoff under a hold never runs merge-task.sh and leaves failed:git-env:3 (the trip row)"
+# g2: a check-all that fails for another reason (a lock timeout, exit 2) records its own exit, so step 4 routes it
+# to `git-env canary failed`, never to the trip reason.
+scen g2
+mkt A in_progress
+PR="$S/plugin"; mkdir -p "$PR/skills/execute/scripts" "$R/.claude" "$THREAD_GIT_ENV_DIR"
+ln -s "$CAN" "$PR/skills/execute/scripts/git-env-canary.py"
+printf '#!/usr/bin/env bash\ntouch "%s/stub-ran"\n' "$S" > "$PR/skills/execute/scripts/merge-task.sh"; chmod +x "$PR/skills/execute/scripts/merge-task.sh"
+python3 - "$TMP/g/backoff.tpl" "$S/backoff.sh" "$R" "$RO --tasks-dir $V" <<'PY'
+import sys
+src, dst, repo, ro = sys.argv[1:]
+t = open(src).read().replace("<repoPath>", repo).replace("<rollout-note>", ro).replace("<the same four args>", "a b c d").replace("sleep 60", "sleep 0")
+open(dst, "w").write(t)
+PY
+holder 3
+THREAD_GIT_ENV_LOCK_TIMEOUT=1 CLAUDE_PLUGIN_ROOT="$PR" bash "$S/backoff.sh" > /dev/null 2>&1; brc=$?
+wait "$hp"
+ok "$brc|$([ -e "$S/stub-ran" ] && echo ran || echo not-run)|$(cat "$R/.claude/merge-task.status" 2>/dev/null)" "2|not-run|failed:git-env:2" \
+  "g2: a lock timeout in the backoff's check-all never runs merge-task.sh and leaves failed:git-env:2 (canary failed)"
+rows=$(grep -E '^   \| `failed:git-env:' "$SKILL")
+has "$rows" '`failed:git-env:3` | Halt with `reason="git-env trip: the shared checkout changed"`' "g2: step 4 routes failed:git-env:3 to the trip reason"
+has "$rows" '`failed:git-env:<any other rc>` | Halt with `reason="git-env canary failed"`' "g2: … and any other rc to git-env canary failed"
 
 # ── h: concurrency ───────────────────────────────────────────────────────────────────────────────────────────
 scen h
@@ -481,6 +527,23 @@ ok "$(git -C "$R" for-each-ref --format='%(objectname)' 'refs/heads/git-env-resc
 scen j4
 code; c=$(cur)
 rst --drop-local "$c"; ok "$rc|$(cur)|$(git -C "$R" status --porcelain)" "0|$(cur origin/master)|" "j4: a code commit, --drop-local <cur> → 0, master equals origin/master, tree clean"
+# j5: the keep-and-ack route with a bare flip and a pending close-out. restore's drop guard must not leave R bare,
+# or ack's bare refusal and restore's drop guard send each other round forever.
+scen j5
+mkt A in_progress
+arm A; cpath THREAD.md; b=$(cur); g -C "$R" config --local core.bare true
+chk A; ok "$rc" 3 "j5: a bare flip plus a local THREAD.md commit → check 3"
+rst; ok "$rc|$(cur)|$(git -C "$R" rev-parse --is-bare-repository)" "2|$b|false" "j5: restore, no --drop-local → 2 at the drop guard, core.bare cleared, B left at the close-out"
+has "$err" "ack --ref $b" "j5: … pointing at ack to keep it"
+ackc A "$b"; ok "$rc" 0 "j5: then ack --ref <B> → 0"
+has "$(grep 'git-env ack' "$RO")" "refs/heads/master at $b, core.bare false" "j5: … the ack line names B"
+# j6: --bare-only clears the bareness and moves no ref, even one behind origin (repair § 3e option (b)).
+scen j6
+g -C "$R" config --local extensions.worktreeConfig true; g -C "$R" config --worktree core.bare true
+g -C "$R" update-ref refs/heads/master "$(cur HEAD~1)"; b=$(cur)
+rst --bare-only; ok "$rc|$(cur)|$(git -C "$R" rev-parse --is-bare-repository)|$(git -C "$R" config --worktree --get core.bare || echo unset)" "0|$b|false|unset" \
+  "j6: restore --bare-only → 0, core.bare cleared at both levels, master left behind origin"
+rst --bare-only --drop-local "$b"; ok "$rc" 2 "j6: --bare-only with --drop-local → 2"
 
 # ── k: the env scrub ─────────────────────────────────────────────────────────────────────────────────────────
 scen k
@@ -568,14 +631,6 @@ ok "$([ -f "$THREAD_GIT_ENV_DIR/ro.lock" ] && echo y)" y "t: the .lock survives 
 scen t2
 mkt A in_progress
 mkdir -p "$THREAD_GIT_ENV_DIR"
-holder() {  # holder <seconds> — hold the lock in the background, $S/held once it is held
-  rm -f "$S/held"
-  python3 -c 'import fcntl, sys, time
-f = open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w").close(); time.sleep(float(sys.argv[3]))' \
-    "$THREAD_GIT_ENV_DIR/ro.lock" "$S/held" "$1" &
-  hp=$!
-  n=0; while [ ! -f "$S/held" ] && [ "$n" -lt 100 ]; do sleep 0.05; n=$((n + 1)); done
-}
 holder 3
 THREAD_GIT_ENV_LOCK_TIMEOUT=1 call; ok "$rc" 2 "t: a held lock with THREAD_GIT_ENV_LOCK_TIMEOUT=1 → check-all 2"
 has "$err" "timed out" "t: … a timeout"
