@@ -88,7 +88,10 @@ export const meta = {
 //                                    //   SIGNED_GATES_RESUME).
 //       resume          : object,    // optional (p12-6); the SEEDED REVISE after an Integration rejection:
 //                                    //   { stage: 'revise', prUrl, branch, worktreePath, reviewHistory,
-//                                    //   reviewRoundsUsed, plan }. Plan and implement are skipped; the
+//                                    //   reviewRoundsUsed, plan }. plan is the approved plan:
+//                                    //   `lead-integrate.py plan`'s `plan` (the note's "## Approved plan");
+//                                    //   '' when the last own call was not plan-gated; reference for the
+//                                    //   reviser, never the contract. Plan and implement are skipped; the
 //                                    //   review loop starts at round reviewRoundsUsed + 1 with one seeded
 //                                    //   `revise:<slug> r<R+1>` (COLD ENTRY: it re-enters the tree with
 //                                    //   branchTreeSetup, fast-forwards it to origin/<branch> and writes no
@@ -119,7 +122,9 @@ export const meta = {
 //                                    //   mainSha..<base>` for the PRs that landed after the lead's read.
 //       trouble         : string[],  // ⊆ conflict | red | shared-file, deduplicated; [] on a cold re-entry.
 //       landed          : [{ prUrl, title, files: string[], taskPath }], // EVERY PR merged in taskBase..mainSha.
-//       plan            : string,    // the approved plan ('' when the task was not plan-gated).
+//       plan            : string,    // the approved plan: `lead-integrate.py plan`'s `plan` (the note's
+//                                    //   "## Approved plan"); '' when the last own call was not plan-gated;
+//                                    //   reference for the integrator, never the contract.
 //       reviewHistory   : [{ round, feedback: string[], stage?: 'integration' }], // rounds strictly ascending; [] ok;
 //                                    //   a round with empty feedback is accepted and dropped (liveHistory).
 //       reviewRoundsUsed: number,    // >= 1 and >= the history's last round.
@@ -199,7 +204,7 @@ export const meta = {
 //
 // Returns { rolloutSlug, tasks: [ONE row: { slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
-//   approvedAtCeiling, summary, startRung, rung, climbs, rungDrift, ran, gatedInputs }] }
+//   approvedAtCeiling, summary, startRung, rung, climbs, rungDrift, ran, gatedInputs, plan }] }
 // — the pre-p12-5 envelope with exactly one row, the called task's, the shape reconcile-rollout.py reads —
 // where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending. The rung record (ADR 0029
 // decision 7): startRung is the rung the call started on, rung the one it ended on (reconcile stamps it as
@@ -212,6 +217,11 @@ export const meta = {
 // review-judge rejection rationale ([{ round, feedback: [] }], empty when the PR approved first try);
 // approvedAtCeiling marks an approval on the FINAL review round with actual rejection history —
 // reconcile persists that history to the task note so ceiling approvals stay auditable.
+// plan (p14-2) has three states, and only the task's own call settles it: the approved plan (a non-empty
+// string) when the own call ran with one, '' when the own call ran without a plan-gate, and null when the
+// call reached no plan outcome (plan-blocked, a plan-gate gate-pending, the pre-flight budget block, a
+// converge that threw, every seeded-revise and integrate row). reconcile upserts the note's
+// "## Approved plan" on a string, removes it on '', and leaves it on null.
 // A mode 'integrate' row carries one more key, `integration`: { outcome: integrated | rejected | set-aside,
 // path: integrator | judge-only, anchor: { headSha, taskBase }, headSha, baseSha, mergeCommit, triggers
 // (conflict | committed | branch-moved | shared-file), reReviewed, feedback, reason, agents: [{ role,
@@ -1713,21 +1723,26 @@ async function converge(task, a, st = rungState(task, a)) {
   // frontmatter fix covers both. (Read-only tasks never run the review layer, so their budget is moot.)
   if (task.scope !== 'read-only' && roundBudgetDiagnosis(task, ['maxReviewRounds'])) {
     const keys = task.planGate ? ['maxPlanRounds', 'maxReviewRounds'] : ['maxReviewRounds']
-    return wrap({ task, ...reviewBudgetBlock(null, roundBudgetDiagnosis(task, keys)) })
+    return wrap({ task, ...reviewBudgetBlock(null, roundBudgetDiagnosis(task, keys)), plan: null })
   }
   // A seeded revise (task.resume, validated before dispatch): the approved PR stands, so plan and
   // implement are skipped and the review loop starts from the seeded history (p12-6).
   if (task.resume) {
     const R = task.resume
     const pr = { prUrl: R.prUrl, branch: R.branch, worktreePath: R.worktreePath, verified: true, blocked: false, blockerDiagnosis: '', summary: '' }
-    return wrap(await reviewLoop(task, st, pr, a, R.plan, { history: R.reviewHistory, roundsUsed: R.reviewRoundsUsed }))
+    // A seeded revise never settles the plan (p14-2): its row carries plan null, so the note keeps it.
+    return wrap({ ...(await reviewLoop(task, st, pr, a, R.plan, { history: R.reviewHistory, roundsUsed: R.reviewRoundsUsed })), plan: null })
   }
   const planned = task.planGate ? await planLoop(task, st, a) : { task, plan: null, blocked: false }
   const impl = await implement(task, st, planned, a)
   // The approved plan rides into the review loop for the step-back round's reference ('' when the
   // task was not plan-gated — the step-back licence then runs against the brief alone).
   const reviewed = await reviewLoop(task, st, impl, a, (task.planGate && planned && planned.plan) || '')
-  return wrap(reviewed)
+  // The row's plan (p14-2), set here over any inner `plan`: the approved plan when the plan-gate approved
+  // one, '' when the task is not plan-gated, null when the plan-gate reached no approved plan (plan-blocked,
+  // gate-pending at the plan) — reconcile then leaves the note's "## Approved plan" as it was.
+  const approved = (planned && !planned.blocked && typeof planned.plan === 'string' && planned.plan.trim()) ? planned.plan : null
+  return wrap({ ...reviewed, plan: !task.planGate ? '' : approved })
 }
 
 // One result row per task, the shape reconcile-rollout.py reads. A converge() that threw (r === null)
@@ -1758,6 +1773,7 @@ function taskResult(t, r, st) {
     climbs: norm.climbs,
     rungDrift: norm.rungDrift,
     ran: norm.ran,
+    plan: (r && typeof r.plan === 'string') ? r.plan : null,
   }
 }
 
@@ -2227,8 +2243,8 @@ function integrationVerify(task, a) {
 }
 
 const INTEGRATION_PRIOR_NOTE = `The task note may carry "## Blocker diagnosis" runs from an earlier Integration or revise (a latest run
-starting \`integration:\` or \`revise:\`): read them as context. The approved plan and the review history
-below are the contract. Write NOTHING to the task note in this call — the engine records your result.`
+starting \`integration:\` or \`revise:\`): read them as context. The task brief and the review history below are
+the contract. Write NOTHING to the task note in this call — the engine records your result.`
 
 // The integrator's preflights. The scope check diffs against the INTEGRATION base, never the task's base:
 // once origin/<default> is merged in, everything it brought sits in the task-base range.
@@ -2281,7 +2297,8 @@ ${RM_RULE}
 Why you are here — the lead's trouble: ${trouble}.
 ${INTEGRATION_PRIOR_NOTE}
 
-The approved plan (the task's contract — your resolution keeps it):
+The approved plan, for reference only. The brief is the contract: a deviation from this plan that the PR body declares
+(a step-back revise may make one) stands, and your resolution never undoes it.
 ---
 ${I.plan || '(no plan: the task was not plan-gated — the brief is the contract)'}
 ---${history}
@@ -2513,7 +2530,7 @@ async function integrate(task, a, trace) {
   return { outcome: 'rejected', ...j, reReviewed: true, feedback: feedback.length ? feedback : ['the Integration re-review returned changes with no feedback'] }
 }
 
-// The integrate call's ONE row: the task row's 19 keys plus `integration` (the payload the Integration log line
+// The integrate call's ONE row: the task row's 20 keys plus `integration` (the payload the Integration log line
 // records). Its rung record is the task's own, passed through; its `ran` is Integration's agents.
 // Every status is one of reconcile's five: integrated → review; rejected → blocked with the revise
 // marker (review-blocked when no review round is left); set-aside → blocked with `integration: <reason>`
@@ -2563,6 +2580,7 @@ function integrationResult(task, out, a, trace) {
     climbs: g.climbs,
     rungDrift: '',
     ran: trace.agents.map((x) => ({ label: x.label, rung: x.rung, model: x.model, effort: x.effort })),
+    plan: null,
     integration: {
       outcome: o.outcome,
       path: trace.path,
