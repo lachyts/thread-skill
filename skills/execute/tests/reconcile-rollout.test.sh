@@ -111,6 +111,69 @@ for bad in '"Opus-XHigh"' '"yes"' '["opus-high"]' '"opus high"'; do
 done
 check "bad rung: the rest of the row is still written" "status: blocked" "$TMP/task-badrung.md"
 
+echo "== a pre-3.0.0 row (tier flags, no rung) maps an escalation to the ladder's top rung =="
+# A call started on the tier engine can finish there (a Lost-call resume re-passes its old scriptPath). Its
+# row carries model/escalated/tierCapped and no rung record. HOME is pinned so ladder.py reads this test's
+# ladder file, never the operator's.
+LH="$TMP/legacy-home"; mkdir -p "$LH"
+mknote task-legacy-esc in_progress
+mknote task-legacy-cap in_progress
+mknote task-legacy-flat in_progress
+cat > "$TMP/legacy.json" <<'EOF'
+{ "rolloutSlug": "t", "tasks": [
+  { "slug": "task-legacy-esc",  "scope": "single-file", "status": "blocked", "prUrl": "", "blockerDiagnosis": "red after the fable takeover", "model": "fable", "escalated": true, "escalatedAt": "implement", "tierCapped": false, "tierCappedAt": "" },
+  { "slug": "task-legacy-cap",  "scope": "single-file", "status": "review", "prUrl": "https://github.com/o/r/pull/9", "reviewRoundsUsed": 1, "model": "opus", "escalated": false, "escalatedAt": "", "tierCapped": true, "tierCappedAt": "implement" },
+  { "slug": "task-legacy-flat", "scope": "single-file", "status": "review", "prUrl": "https://github.com/o/r/pull/8", "reviewRoundsUsed": 1, "model": "opus", "escalated": false, "escalatedAt": "", "tierCapped": false, "tierCappedAt": "" }
+] }
+EOF
+lout=$(HOME="$LH" python3 "$SCRIPT" reconcile --result "$TMP/legacy.json" --tasks-dir "$TMP" 2>"$TMP/legacy.err"); lrc=$?
+lerr=$(cat "$TMP/legacy.err")
+[ "$lrc" -eq 0 ] && echo "ok   - legacy: a mappable legacy row is a warning, exit 0" || { echo "FAIL - legacy: exit $lrc ($lerr)"; fail=1; }
+check  "legacy escalated: stamped the built-in ladder's top rung" "rung: opus-xhigh"   "$TMP/task-legacy-esc.md"
+check  "legacy tier-capped: stamped the top rung too"             "rung: opus-xhigh"   "$TMP/task-legacy-cap.md"
+refute "legacy, no climb: nothing stamped"                        "rung:"              "$TMP/task-legacy-flat.md"
+refute "legacy: never a model stamp"                              "model:"             "$TMP/task-legacy-esc.md"
+refute "legacy: never a tier_capped stamp"                        "tier_capped:"       "$TMP/task-legacy-cap.md"
+check  "legacy: the rest of the row is written"                   "status: blocked"    "$TMP/task-legacy-esc.md"
+case "$lerr" in *"WARNING: task-legacy-esc: a pre-3.0.0 row (escalated, no rung) — stamped rung: opus-xhigh, the top rung of the ladder (built-in)"*) echo "ok   - legacy escalated: a WARNING naming the slug and the rung" ;;
+  *) echo "FAIL - legacy escalated: WARNING (got: $lerr)"; fail=1 ;; esac
+case "$lerr" in *"WARNING: task-legacy-cap: a pre-3.0.0 row (tier-capped, no rung)"*) echo "ok   - legacy tier-capped: a WARNING naming the slug" ;;
+  *) echo "FAIL - legacy tier-capped: WARNING (got: $lerr)"; fail=1 ;; esac
+case "$lerr" in *task-legacy-flat*) echo "FAIL - legacy, no climb: warned (got: $lerr)"; fail=1 ;; *) echo "ok   - legacy, no climb: no warning" ;; esac
+case "$lout" in *"task-legacy-esc: status=blocked rung=opus-xhigh (pre-3.0.0 row, escalated) [written]"*) echo "ok   - legacy escalated: the line shows the mapped rung" ;;
+  *) echo "FAIL - legacy escalated: reconcile line (got: $lout)"; fail=1 ;; esac
+# The operator's ladder file decides the top rung.
+mkdir -p "$LH/.config/thread"
+cat > "$LH/.config/thread/ladder.toml" <<'EOF'
+[[rung]]
+name = "opus-high"
+model = "opus"
+effort = "high"
+judge = "high"
+review = "xhigh"
+
+[[rung]]
+name = "fable-high"
+model = "fable"
+effort = "high"
+judge = "xhigh"
+review = "max"
+EOF
+mknote task-legacy-esc in_progress
+HOME="$LH" python3 "$SCRIPT" reconcile --result "$TMP/legacy.json" --tasks-dir "$TMP" >/dev/null 2>&1 || { echo "FAIL - legacy (file): exit"; fail=1; }
+check "legacy escalated: the ladder file's top rung" "rung: fable-high" "$TMP/task-legacy-esc.md"
+# A refused ladder file: an ERROR naming the slug, exit 1, nothing stamped.
+printf '[[rung]]\nname = "Opus"\n' > "$LH/.config/thread/ladder.toml"
+mknote task-legacy-esc in_progress
+if berr=$(HOME="$LH" python3 "$SCRIPT" reconcile --result "$TMP/legacy.json" --tasks-dir "$TMP" 2>&1 >/dev/null); then
+  echo "FAIL - legacy (refused ladder): reconcile exited 0"; fail=1
+else
+  case "$berr" in *"ERROR: task-legacy-esc: a pre-3.0.0 row (escalated, no rung) — the ladder could not be read"*) echo "ok   - legacy (refused ladder): an ERROR naming the slug, exit 1" ;;
+    *) echo "FAIL - legacy (refused ladder): stderr (got: $berr)"; fail=1 ;; esac
+fi
+refute "legacy (refused ladder): no rung: stamped" "rung:" "$TMP/task-legacy-esc.md"
+check  "legacy (refused ladder): the rest of the row is written" "status: blocked" "$TMP/task-legacy-esc.md"
+
 echo "== idempotency (re-run must not duplicate sections) =="
 python3 "$SCRIPT" reconcile --result "$TMP/result.json" --tasks-dir "$TMP" >/dev/null
 n=$(grep -c "## Review-blocked feedback" "$TMP/task-reviewblocked.md")
