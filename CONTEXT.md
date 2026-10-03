@@ -275,8 +275,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   re-review (ADR 0030). _Avoid_: update-branch (GitHub's merge-in, which
   re-verifies nothing without CI), rebase.
 - **Integration lane** — the one-at-a-time Integration step itself, held by one
-  approved task from the start of its Integration until it merges or is set
-  aside; a rollout's merges can never outpace it. Execute's prose shortens it
+  approved task at a time until it is released (a merge, a set-aside, a
+  rejection or a halt); a rollout's merges can never outpace it. Execute's prose shortens it
   to "the lane". Not a **Lane** (rollout vs session). _Avoid_: merge queue.
 - **Integration queue** — the approved tasks waiting for the Integration lane,
   in `next`'s order. _Avoid_: the lane (that is the step, not the line).
@@ -402,18 +402,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
 
 ## Run record and tuning
 
-- **Run record** — the append-only events the rollout lane and review loops
-  emit as they run (a Slot taken and freed, a task ready, the Integration
-  lane taken and freed, a merge, a set-aside, a pause, a hold, a ceiling
-  change, a quota stall, a review round), written by scripts, never by a
-  model (ADR 0032). _Avoid_: telemetry, metrics, log (a task note's
-  `## Integration log` is a different thing).
-- **Throughput** — merges per running hour: a rollout's merges (a read-only
-  task's completion included) over the time from its first Slot taken to its
-  last merge, minus paused spans. A merge hold counts as running, since task
-  calls go on. The one number a Retro optimises. Not **Running rollout**,
-  which also counts the time after the last merge. _Avoid_: speed,
-  wall-clock (it counts nights and sign-offs).
+- **Run record** — the append-only events a rollout's Slots and
+  Integration lane leave as they run, with the settings in force at each
+  Slot start, written by scripts, never by a model (ADR 0032). _Avoid_:
+  telemetry, metrics, log (a task note's `## Integration log` is a
+  different thing).
+- **Throughput** — merges per running hour: the one number a Retro
+  optimises. Running time leaves out pauses, halts and waits on Lachy.
+  _Avoid_: speed, wall-clock (it counts nights and sign-offs).
 - **Guardrail** — a measure a Tuning must not worsen past its bound to buy
   Throughput: tokens per merge, set-aside rate, conflict rate, quota stalls.
   Its bounds sit in the operator's rollout settings.
