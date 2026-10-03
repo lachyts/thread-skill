@@ -432,7 +432,7 @@ primary_hold() {
   local rc
   if [ -z "$HOLD_ASKED" ]; then
     HOLD_ASKED=1
-    HOLD=$(bounded bash "$here/primary-hold.sh" "$(git rev-parse --show-toplevel)" 2>/dev/null); rc=$?
+    HOLD=$(bounded bash "$here/primary-hold.sh" "$top" 2>/dev/null); rc=$?
     [ "$rc" = 0 ] || HOLD="the running-rollout check did not answer (rc $rc)"
   fi
   [ -n "$HOLD" ]
@@ -459,22 +459,13 @@ land_unprotected() {
   N=$(cat "$tmpd/rebased")
   if primary_hold; then
     # The rebase ran in a scratch worktree; only move_branch would touch the primary checkout. Push the
-    # rebased tip and leave the branch where it is (its commits are on origin by content now).
+    # rebased tip and leave the branch where it is (its commits are on origin by content once pushed).
     echo "land: held the primary checkout at $(git rev-parse --short HEAD), pushed the rebased tip without moving it: $HOLD"
-    [ -n "$made" ] && made=$N
-    if [ "$N" = "$(git rev-parse "$od")" ]; then
-      echo "land: nothing to land"
-      finish landed 0
-    fi
-    bounded git push origin "$N:refs/heads/$d" 2>"$tmpd/push.err"; rc=$?
-    net_rc "$rc" push required "$tmpd/push.err" git; rc=$?
-    [ "$rc" = 124 ] && finish "stuck: $NET_ERR" 1
-    [ "$rc" = 0 ] || finish "stuck: push refused: $NET_ERR" 1
-    finish landed 0
+  else
+    move_branch "$old" "$N" "land: rebase onto origin/$d"; rc=$?
+    [ "$rc" = 1 ] && finish "stuck: rebase refused: $MOVE_ERR" 1
+    [ "$rc" = 0 ] || finish "stuck: branch moved during landing" 1
   fi
-  move_branch "$old" "$N" "land: rebase onto origin/$d"; rc=$?
-  [ "$rc" = 1 ] && finish "stuck: rebase refused: $MOVE_ERR" 1
-  [ "$rc" = 0 ] || finish "stuck: branch moved during landing" 1
   [ -n "$made" ] && made=$N
   if [ "$N" = "$(git rev-parse "$od")" ]; then
     echo "land: nothing to land"

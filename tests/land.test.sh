@@ -551,10 +551,9 @@ for w in nohup disown setsid '--watch' 'sleep ' default-branch.sh 'gh pr edit' '
          'commit -a' ' --all' ' -am' 'budget()' 'push -u' '--set-upstream' 'branch -D' 'branch -d' ' --delete'; do
   hasnt "$code" "$w" "structural: no [$w]"
 done
-# ` checkout` is never a git command here; the two own-branch result lines that name the checkout, and the
-# primary-checkout hold's two lines (ADR 0031), are exempt.
-ok "$(printf '%s\n' "$code" | grep ' checkout' | grep -v 'stuck: checkout moved: on' | grep -v 'the primary checkout' | grep -vc 'commits this checkout lacks')" 0 \
-   "structural: no [ checkout] (bar the own-branch results and the primary-checkout hold that name the checkout)"
+# ` checkout` is never a git command here; messages may name the checkout, so double-quoted strings are
+# stripped first (a real `git -C "$wt" checkout` still matches).
+ok "$(printf '%s\n' "$code" | sed 's/"[^"]*"//g' | grep -c ' checkout')" 0 "structural: no [ checkout] command"
 ok "$(printf '%s\n' "$code" | grep -cE '(^|[^&])&[[:space:]]*$')" 0 "structural: no trailing &"
 ok "$(printf '%s\n' "$code" | grep -E 'git push' | grep -cE -- '--force|-f |[[:space:]]"?\+')" 0 "structural: no force push"
 ok "$(head -n 1 "$LAND")" "#!/usr/bin/env bash" "structural: the shebang has no -u"
@@ -1389,59 +1388,52 @@ own --; ores "case 70 empty login" 0 "not landed: PR https://github.com/o/x/pull
 nopush "case 70 empty login"
 
 # ==== The primary checkout holds while a rollout runs (ADR 0031) ===========================================
-# pplugin: commit a copy of this tree's skills/ into $W and push it, so $W is a primary checkout when land.sh
-# runs from $W's own copy ($PLAND). prollout [<line>]: a started rollout note (a task carries owner:) in the
-# default tasks dir under $HOME.
+# pplugin <name>: commit a copy of this tree's skills/ into $W and push it, so $W is a primary checkout when
+# land.sh runs from $W's own copy ($PLAND). The started rollout comes from tests/lib/rollout-fixtures.sh.
+. tests/lib/rollout-fixtures.sh
 PTASKS="$HOME/repos/obsidian/Work/Tasks"
 pplugin() {
   cp -R "$root/skills" "$W/skills"; git -C "$W" add skills && git -C "$W" commit -qm plugin
   git -C "$W" push -q "$SRV/o/$1.git" master; git -C "$W" update-ref refs/remotes/origin/master HEAD
   PLAND="$W/skills/_shared/scripts/land.sh"
 }
-prollout() {
-  mkdir -p "$PTASKS"
-  printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n%s\n---\n' "${1:-}" > "$PTASKS/demo-rollout-2026-10-03.md"
-  printf -- '---\ntags: [task]\nstatus: open\nrollout: "[[demo-rollout-2026-10-03]]"\nowner: lead\n---\n' > "$PTASKS/demo-task.md"
-}
 
 echo "== 71. protected, local behind, the primary checkout while a rollout runs"
-ghreset; mkrepo c71; pplugin c71; srvcommit c71 x.txt X; X=$(srvref c71 master); B0=$(git -C "$W" rev-parse HEAD); edit
-prollout
-LAND0=$LAND; LAND=$PLAND
-land -- --slug c71 -- "$W" "$W/THREAD.md"
+ghreset; mkrepo c71; pplugin c71; srvcommit c71 x.txt X; B0=$(git -C "$W" rev-parse HEAD); edit
+prollout "$PTASKS"
+LAND=$PLAND land -- --slug c71 -- "$W" "$W/THREAD.md"
 res "case 71" 0 "queued https://github.com/o/c71/pull/1"
 ok "$(git -C "$W" rev-parse HEAD^)" "$B0" "case 71: not fast-forwarded (C's parent is the old base)"
 has "$err" "land: held the primary checkout at ${B0:0:7}, not fast-forwarded: [[demo-rollout-2026-10-03]] running on it" "case 71: the held note names the rollout"
 ghreset; mkrepo c71b; pplugin c71b; srvcommit c71b x.txt X; X=$(srvref c71b master); edit
-LAND=$PLAND; prollout "paused: 2026-10-03T10:00+10:00"
-land -- --slug c71b -- "$W" "$W/THREAD.md"
+prollout "$PTASKS" "paused: 2026-10-03T10:00+10:00"
+LAND=$PLAND land -- --slug c71b -- "$W" "$W/THREAD.md"
 res "case 71b" 0 "queued https://github.com/o/c71b/pull/1"
 ok "$(git -C "$W" rev-parse HEAD^)" "$X" "case 71b: a hard-paused rollout releases it: fast-forwarded to X"
 hasnt "$err" "held the primary checkout" "case 71b: no held note"
 ghreset; mkrepo c71c; pplugin c71c; srvcommit c71c x.txt X; X=$(srvref c71c master); edit
-prollout; LAND=$LAND0
+prollout "$PTASKS"
 land -- --slug c71c -- "$W" "$W/THREAD.md"
 ok "$(git -C "$W" rev-parse HEAD^)" "$X" "case 71c: land.sh run from another checkout never holds this one"
 ghreset; mkrepo c71d; pplugin c71d; srvcommit c71d x.txt X; B0=$(git -C "$W" rev-parse HEAD); edit
 printf 'import sys\nsys.exit(5)\n' > "$W/skills/_shared/scripts/unfinished-rollout.py"
-LAND=$PLAND
-land -- --slug c71d -- "$W" "$W/THREAD.md"
+LAND=$PLAND land -- --slug c71d -- "$W" "$W/THREAD.md"
 ok "$(git -C "$W" rev-parse HEAD^)" "$B0" "case 71d: a failed running check holds"
 has "$err" "not fast-forwarded: the running-rollout check failed (rc 5)" "case 71d: … and says so"
 git -C "$W" checkout -q -- skills
 
 echo "== 72. unprotected, origin moved, the primary checkout while a rollout runs"
 ghreset; mkrepo c72; pplugin c72; c0; srvcommit c72 x.txt X; X=$(srvref c72 master); edit
-prollout; LAND=$PLAND
+prollout "$PTASKS"
 OLD=$(git -C "$W" rev-parse HEAD)
-land GH_PROT=false -- "$W" "$W/THREAD.md"
+LAND=$PLAND land GH_PROT=false -- "$W" "$W/THREAD.md"
 res "case 72" 0 landed
 ok "$(made)" "$(srvref c72 master)" "case 72: land: commit is the pushed, rebased tip"
 ok "$(git -C "$W" rev-parse "$(srvref c72 master)~2")" "$X" "case 72: C0 and C rebased onto origin's tip on the server"
 ok "$(git -C "$W" rev-parse HEAD^)" "$OLD" "case 72: the local branch never moved (C sits on its old base)"
 has "$err" "pushed the rebased tip without moving it: [[demo-rollout-2026-10-03]] running on it" "case 72: the held note"
 ok "$(wtcount)" 1 "case 72: the scratch worktree is gone"
-LAND=$LAND0; rm -rf "$HOME/repos"
+rm -rf "$HOME/repos"
 
 echo
 [ "$fail" = 0 ] && echo "land.test.sh: ALL PASS" || echo "land.test.sh: FAILED"

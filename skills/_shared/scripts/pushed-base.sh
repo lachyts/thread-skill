@@ -139,10 +139,11 @@ for c in "${members[@]}"; do
   n=$(git -C "$c" rev-list --count "$up..refs/heads/$b" 2>&1) || {
     echo "pushed-base: cannot count $b against origin/$b in $c: $(printf '%s\n' "$n" | head -n 1)" >&2; broken=1; continue; }
   [ "$n" -gt 0 ] 2>/dev/null || continue
+  hh=$(held_hint "$c")   # the wait a reset of this member needs, once per ahead member (ADR 0031)
   # Every ahead commit patch-equivalent to one on origin/<b>: landed by a cherry-pick or one-commit squash.
   if ch=$(git -C "$c" cherry "$up" "refs/heads/$b" 2>/dev/null) && [ -n "$ch" ] \
      && ! printf '%s\n' "$ch" | grep -q '^+'; then
-    note "local $b in $c is $n commit(s) ahead of origin/$b, but each is already on origin/$b by content (landed by a squash or cherry-picked PR): not a blocker; drop them with \`$(reset_hint "$c")\`$(held_hint "$c")"
+    note "local $b in $c is $n commit(s) ahead of origin/$b, but each is already on origin/$b by content (landed by a squash or cherry-picked PR): not a blocker; drop them with \`$(reset_hint "$c")\`$hh"
     continue
   fi
   # The files the ahead commits touch (merge-base..<b>), and which of them differ from origin/<b> now.
@@ -167,12 +168,12 @@ for c in "${members[@]}"; do
     elif [ ${#differ[@]} -gt 0 ]; then
       note "local $b in $c is $n commit(s) ahead of origin/$b, but beyond THREAD.md their content is already on origin/$b (landed by a squash or cherry-picked PR): not a blocker (agents never read THREAD.md)"
     else
-      note "local $b in $c is $n commit(s) ahead of origin/$b, but their content is already on origin/$b (landed by a squash or cherry-picked PR): not a blocker; drop them with \`$(reset_hint "$c")\`$(held_hint "$c")"
+      note "local $b in $c is $n commit(s) ahead of origin/$b, but their content is already on origin/$b (landed by a squash or cherry-picked PR): not a blocker; drop them with \`$(reset_hint "$c")\`$hh"
     fi
     continue
   fi
   blocked=1
-  rh=$(reset_hint "$c") hh=$(held_hint "$c")
+  rh=$(reset_hint "$c")
   echo "pushed-base: local $b in $c is $n commit(s) ahead of origin/$b: rollout worktrees branch from origin/$b, so agents will not see them:" >&2
   git -C "$c" log --oneline --no-decorate "$up..refs/heads/$b" 2>&1 | sed 's/^/  /' >&2
   line=''

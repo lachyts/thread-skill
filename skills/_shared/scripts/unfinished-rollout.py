@@ -64,15 +64,10 @@ Outcomes, the first that applies:
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py running [--tasks-dir <dir>]
 
-`running` answers ADR 0031's hold (skills/_shared/scripts/primary-hold.sh): which rollouts may have a lead
-running on the primary checkout, in any repo, since every lead runs its engine from it. A RUNNING rollout is
-a live rollout note at the current protocol (`protocol_version: 5`, the only one execute runs), tagged
-`rollout`, neither `done` nor `dropped`, not hard-paused (`paused:`) and started (reconcile-rollout.py's
-never_started is false). It counts one whose every task merged but whose completion ceremony has not run
-(its lead is still at work); it never counts a never-started or incomplete note (no lead runs it yet, and
-the first dispatch's gates must not wait on themselves) or a protocol-3 one (this engine refuses it).
-stdout: `running <slug>` per rollout, sorted, or `none`; exit 0. A missing tasks dir is `none`: with no
-vault, no rollout can run here.
+`running` answers primary-hold.sh (ADR 0031 says why): a live rollout note tagged `rollout` at the protocol
+the schedule template writes, neither `done` nor `dropped`, not `paused:`, and started (reconcile-rollout.py's
+never_started is false) is RUNNING. stdout: `running <slug>` per rollout, sorted, or `none` (a missing tasks
+dir included); exit 0.
 
 Output (check). stdout is exactly one line on exit 0 and 3: `none` | `supersede <slug>` | `interrupted <prior-slug>
 <new-slug>` | `file <slug> <relpath>` | `refuse <slug>[,<slug>…]`. Slugs are filename stems; an unfinished
@@ -91,6 +86,7 @@ from pathlib import Path
 
 DEFAULT_TASKS_DIR = Path(os.path.expanduser("~/repos/obsidian/Work/Tasks"))
 RR_SRC = Path(__file__).resolve().parent.parent.parent / "execute/scripts/reconcile-rollout.py"
+TEMPLATE = Path(__file__).resolve().parent.parent.parent / "schedule/rollout-template.md"
 RR_NAMES = ("Note", "_scan", "_queue_state", "_counts", "_project_root", "_wikilink_slug", "_scalar", "_status",
             "_valued", "never_started", "incomplete")
 CLOSED = {"done", "dropped"}
@@ -205,6 +201,20 @@ def tags_of(rr, note):
     return {rr._scalar(t).lower() for t in note.get_list("tags")}
 
 
+def rollout_notes(rr, tasks_dir: Path, archive: bool):
+    """(path, note, "root" | "archive") for each note tagged `rollout` directly in the tasks dir and, with
+    archive, directly in Archive/. A missing folder or an unreadable note yields nothing."""
+    folders = (("root", tasks_dir), ("archive", tasks_dir / "Archive")) if archive else (("root", tasks_dir),)
+    for where, folder in folders:
+        for path in sorted(folder.glob("*.md")):
+            try:
+                note = rr.Note(path)
+            except (ValueError, OSError):
+                continue
+            if "rollout" in tags_of(rr, note):
+                yield path, note, where
+
+
 def cmd_check(args, rr) -> int:
     repo = Path(os.path.expanduser(args.repo))
     if not repo.is_dir():
@@ -264,17 +274,7 @@ def cmd_check(args, rr) -> int:
         return repo_origin is not None and o == repo_origin
 
     # Rollout notes directly in the tasks dir and directly in Archive/ (never Archive/Rollouts/ or deeper).
-    notes = []
-    for where, folder in (("root", tasks_dir), ("archive", tasks_dir / "Archive")):
-        if not folder.is_dir():
-            continue
-        for path in sorted(folder.glob("*.md")):
-            try:
-                note = rr.Note(path)
-            except (ValueError, OSError):
-                continue
-            if "rollout" in tags_of(rr, note):
-                notes.append((path, note, where))
+    notes = list(rollout_notes(rr, tasks_dir, archive=True))
 
     # 1. A superseded note that was stamped but never moved into Archive/Rollouts/.
     stems = None
@@ -410,31 +410,17 @@ def remedy(x) -> str:
             "rollout per repo: wait for it to finish, or /thread:status then /thread:repair")
 
 
-RUNNING_PROTOCOL = "5"
-
-
 def cmd_running(args, rr) -> int:
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    protocol = rr._scalar(rr.Note(TEMPLATE).get("protocol_version"))  # what schedule writes, what execute runs
     running = []
-    if not tasks_dir.is_dir():
-        print("none")
-        return 0
-    for path in sorted(tasks_dir.glob("*.md")):
-        try:
-            note = rr.Note(path)
-        except (ValueError, OSError):
+    for path, note, _ in rollout_notes(rr, tasks_dir, archive=False):
+        if rr._status(note) in CLOSED or rr._scalar(note.get("protocol_version")) != protocol:
             continue
-        if "rollout" not in tags_of(rr, note) or rr._status(note) in CLOSED:
-            continue
-        if rr._scalar(note.get("protocol_version")) != RUNNING_PROTOCOL or rr._valued(note.get("paused")):
-            continue
-        if rr.never_started(note, rr._scan(path, tasks_dir)[0])[0]:
+        if rr._valued(note.get("paused")) or rr.never_started(note, rr._scan(path, tasks_dir)[0])[0]:
             continue
         running.append(path.stem)
-    for slug in running:
-        print(f"running {slug}")
-    if not running:
-        print("none")
+    print("\n".join(f"running {slug}" for slug in running) or "none")
     return 0
 
 

@@ -783,8 +783,8 @@ running ro-other" "R2: started, protocol 5, open, unpaused, live, any repo; neve
 mkro ro-ceremony.md "$R"; mkt t-c1.md ro-ceremony done "owner: lead"; mkt t-c2.md ro-ceremony done "owner: lead"
 run
 has "$out" "running ro-ceremony" "R3: every task done but its completion ceremony not run: still running"
-python3 "$CHECK" running --tasks-dir "$S/nowhere" > "$S.out" 2> "$S.err"; rc=$?
-ok "$rc|$(cat "$S.out")" "0|none" "R4: a missing tasks dir (no vault) → none"
+run --tasks-dir "$S/nowhere"
+ok "$rc|$out" "0|none" "R4: a missing tasks dir (no vault) → none"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi
