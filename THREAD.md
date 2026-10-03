@@ -870,7 +870,7 @@ scheduled 2026-07-15.
 
 **Now (from 2026-10-03, evening): the P13/P14 rollout is being scheduled in the clone; Chorus runs on this checkout.** The handoff `2026-10-03-schedule-p13-p14-rollout.md` was picked up by a session in `~/repos/tools/thread-skill-rollout` (consumed; its close deletes it).
 1. **Check progress there:** `/thread:status` on the Thread Skill rollout (from any session) and on `[[chorus-rollout-2026-10-03]]`. Never pull, switch, update the plugin or own-branch-land in this checkout while Chorus runs.
-2. **p14-7's last Verify line** (a landing from this checkout prints `land: held the primary checkout`) is answered by this close's landing row; then mark [[thread-skill-p14-7-primary-checkout-holds]] done.
+2. **p14-7's last Verify line** (a landing from this checkout prints `land: held the primary checkout`) is still open: the 2026-10-03 close here had nothing to fast-forward (origin/master had not moved), so the hold was never consulted. The first landing here after origin moves (PR #74 or #75 merging) answers it; then mark [[thread-skill-p14-7-primary-checkout-holds]] done.
 3. **When Chorus ends:** `git reset --keep origin/master` here (held close-outs are on origin), then p13-4 (3.0.0, `make evals` first) in the session lane, then [[ab-fable-vs-opus-planning]].
 4. **Still owed:** the fresh-reviews of workspaces `29ca886` and `eb136df`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
 
