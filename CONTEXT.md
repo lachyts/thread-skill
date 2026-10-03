@@ -274,9 +274,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the latest `main` merged in, the verifier re-run and, when needed, a short
   re-review (ADR 0030). _Avoid_: update-branch (GitHub's merge-in, which
   re-verifies nothing without CI), rebase.
-- **Integration lane** — the one-at-a-time line approved tasks wait in for
-  Integration; a rollout's merge throughput can never beat it. Not a **Lane**
-  (rollout vs session). _Avoid_: bare "the lane", merge queue.
+- **Integration lane** — the one-at-a-time Integration step itself, held by one
+  approved task from the start of its Integration until it merges or is set
+  aside; a rollout's merges can never outpace it. Execute's prose shortens it
+  to "the lane". Not a **Lane** (rollout vs session). _Avoid_: merge queue.
+- **Integration queue** — the approved tasks waiting for the Integration lane,
+  in `next`'s order. _Avoid_: the lane (that is the step, not the line).
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).
@@ -401,18 +404,25 @@ through time, from attention to merged PRs. Terms only — no implementation.
 
 - **Run record** — the append-only events the rollout lane and review loops
   emit as they run (a Slot taken and freed, a task ready, the Integration
-  lane taken and freed, a merge, a set-aside, a review round), written by the
-  deterministic steps, never by a model (ADR 0032). _Avoid_: telemetry,
-  metrics, log (a task note's `## Integration log` is a different thing).
-- **Throughput** — merges per hour while a rollout is running (pauses and
-  holds excluded): the one number a Retro optimises. _Avoid_: speed,
+  lane taken and freed, a merge, a set-aside, a pause, a hold, a ceiling
+  change, a quota stall, a review round), written by scripts, never by a
+  model (ADR 0032). _Avoid_: telemetry, metrics, log (a task note's
+  `## Integration log` is a different thing).
+- **Throughput** — merges per running hour: a rollout's merges (a read-only
+  task's completion included) over the time from its first Slot taken to its
+  last merge, minus paused spans. A merge hold counts as running, since task
+  calls go on. The one number a Retro optimises. Not **Running rollout**,
+  which also counts the time after the last merge. _Avoid_: speed,
   wall-clock (it counts nights and sign-offs).
 - **Guardrail** — a measure a Tuning must not worsen past its bound to buy
   Throughput: tokens per merge, set-aside rate, conflict rate, quota stalls.
-- **Retro** — the pass that reads one rollout's Run record, scores it on
-  Throughput and the Guardrails, names what bound it (Slots, the Integration
-  lane, quota, dependencies) and proposes Tunings. It never changes anything
-  itself. _Avoid_: review (the engine's), reflection (Chorus's).
+  Its bounds sit in the operator's rollout settings.
+- **Retro** — the pass that reads a rollout's Run record (and the records
+  of any rollout that overlapped it, so shared load shows), scores it on
+  Throughput and the Guardrails, names what bound it (Slots, the
+  Integration lane, quota, dependencies) and proposes Tunings. It never
+  changes anything itself. _Avoid_: review (the engine's), reflection
+  (Chorus's).
 - **Tuning** — one proposed change to the operator's rollout settings (a
   repo's Parallel ceiling, a round cap), applied only once Lachy picks it,
   and read by the next schedule. A rule that three Retros agree on may later
