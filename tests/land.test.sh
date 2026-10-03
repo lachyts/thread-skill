@@ -6,7 +6,8 @@
 # `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
 # labels, update-branch, the user, hold comments and per-SHA check-runs and status. Every handed path goes through a symlinked alias of the temp dir, so the
 # physical-path handling is exercised on every run. Hang stubs run a non-exec `sleep 40 | cat`; hang cases
-# pass LAND_TIMEOUT=2 and assert elapsed time. Every other case runs under the 15 s suite default, so a fake
+# pass LAND_TIMEOUT=$HANG (4 s: every call in the case shares it, the normal ones before and after the hang
+# too) and assert elapsed under $HANG_BOUND. Every other case runs under the 15 s suite default, so a fake
 # gh slowed by `make test`'s concurrent suites has room (a `pr merge` past 2 s once read as `queued: needs
 # merge`). Hermetic: HOME, the global git config and TMPDIR are temp, and the caller's GIT_DIR
 # & co. are unset. bash 3.2-compatible (macOS).
@@ -43,6 +44,7 @@ git config --global init.defaultBranch main
 git config --global advice.detachedHead false
 export LANDING_REGISTER="$tmp/register.md"
 export LAND_TIMEOUT=15 LAND_DEADLINE=300
+HANG=4 HANG_BOUND=25   # every hang case: LAND_TIMEOUT=$HANG; its elapsed bound, still well under a stub's 40 s
 cp tests/fixtures/land/fake-gh.py "$tmp/bin/gh"; cp tests/fixtures/land/fake-ssh.sh "$tmp/bin/fake-ssh"
 chmod +x "$tmp/bin/gh" "$tmp/bin/fake-ssh"
 export PATH="$tmp/bin:$PATH"
@@ -210,11 +212,9 @@ hasnt "$(ghlog)" "autoMergeRequest" "case 5b: the PR list never asks for autoMer
 
 echo "== 6. PR create hangs after creating"
 ghreset; mkrepo c6; edit
-# 4 s, not 2: after the hang the flow runs on to `pr merge`, and the exact `queued` result needs that call
-# to beat the timeout under make test's concurrency.
-land LAND_TIMEOUT=4 GH_CREATE=hang-after-create -- "$W" "$W/THREAD.md"
+land LAND_TIMEOUT=$HANG GH_CREATE=hang-after-create -- "$W" "$W/THREAD.md"
 res "case 6" 0 "queued https://github.com/o/c6/pull/1"
-ok "$([ "$el" -lt 15 ] && echo y)" y "case 6: bounded (${el}s < 15s)"
+ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 6: bounded (${el}s < ${HANG_BOUND}s)"
 ok "$(cnt "$(ghlog)" "pr list -R o/c6 --state open")" 2 "case 6: the re-lookup ran"
 land -- "$W"
 res "case 6 rerun" 0 "queued https://github.com/o/c6/pull/1"
@@ -244,8 +244,8 @@ echo "== 9. lookup failures"
 ghreset; mkrepo c9; c0
 land GH_LIST=fail -- "$W"; res "case 9" 1 "stuck: cannot look up landing PR: gh: Server Error (HTTP 502)"
 nopush "case 9"; hasnt "$(ghlog)" "POST" "case 9: no create"
-land LAND_TIMEOUT=2 GH_LIST=hang -- "$W"; res "case 9b" 1 "stuck: cannot look up landing PR: timed out"
-ok "$([ "$el" -lt 15 ] && echo y)" y "case 9b: bounded (${el}s < 15s)"
+land LAND_TIMEOUT=$HANG GH_LIST=hang -- "$W"; res "case 9b" 1 "stuck: cannot look up landing PR: timed out"
+ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 9b: bounded (${el}s < ${HANG_BOUND}s)"
 land GH_LIST_ALL=fail -- "$W"; res "case 9c" 1 "stuck: cannot look up landing PR: gh: Server Error (HTTP 502)"
 nopush "case 9c"
 land GH_LIST=badjson -- "$W"; res "case 9d (bad JSON)" 1 "stuck: cannot look up landing PR: bad JSON from the PR list"
@@ -255,8 +255,8 @@ echo "== 10. protection unreadable"
 ghreset; mkrepo c10; edit
 land GH_PROT=404 -- "$W" "$W/THREAD.md"; res "case 10" 1 "stuck: cannot read branch protection: gh: Branch not found (HTTP 404)"
 nopush "case 10"; ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 10: committed first"
-land LAND_TIMEOUT=2 GH_PROT=hang -- "$W"; res "case 10b" 1 "stuck: cannot read branch protection: timed out"
-ok "$([ "$el" -lt 15 ] && echo y)" y "case 10b: bounded (${el}s < 15s)"
+land LAND_TIMEOUT=$HANG GH_PROT=hang -- "$W"; res "case 10b" 1 "stuck: cannot read branch protection: timed out"
+ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 10b: bounded (${el}s < ${HANG_BOUND}s)"
 
 echo "== 11. unprotected, origin unmoved"
 ghreset; mkrepo c11; edit
@@ -481,16 +481,16 @@ land GH_PROT=false -- "$W" "$W/THREAD.md"; res "case 21" 0 landed
 edit; land FAKE_SSH=fail -- "$W" "$W/THREAD.md"
 res "case 21 ssh fails" 1 "stuck: default branch unresolved: fake-ssh: connect to host github.com port 22: Connection refused"
 ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 21: committed first"
-edit; land LAND_TIMEOUT=2 FAKE_SSH=hang -- "$W" "$W/THREAD.md"
+edit; land LAND_TIMEOUT=$HANG FAKE_SSH=hang -- "$W" "$W/THREAD.md"
 res "case 21b" 1 "stuck: default branch unresolved: timed out"
-ok "$([ "$el" -lt 15 ] && echo y)" y "case 21b: bounded (${el}s < 15s)"
+ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 21b: bounded (${el}s < ${HANG_BOUND}s)"
 
 echo "== 22. fetch hangs"
 ghreset; mkrepo c22; edit
-land LAND_TIMEOUT=2 FAKE_SSH=hang -- "$W" "$W/THREAD.md"
+land LAND_TIMEOUT=$HANG FAKE_SSH=hang -- "$W" "$W/THREAD.md"
 res "case 22" 1 "stuck: cannot fetch origin/master: timed out"
 ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 22: committed first"
-ok "$([ "$el" -lt 15 ] && echo y)" y "case 22: bounded (${el}s < 15s)"
+ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 22: bounded (${el}s < ${HANG_BOUND}s)"
 edit; land FAKE_SSH=fail -- "$W" "$W/THREAD.md"
 res "case 22b (fetch refused)" 1 "stuck: cannot fetch origin/master: fake-ssh: connect to host github.com port 22: Connection refused"
 
@@ -688,8 +688,8 @@ has "$(ghlog)" ".permissions.push | tostring" "case 33: the access probe uses | 
 land GH_ACCESS=null -- "$W"; res "case 33 null" 1 "stuck: push access unknown (token lacks permissions)"
 land GH_ACCESS=empty -- "$W"; res "case 33 empty" 1 "stuck: push access unknown (token lacks permissions)"
 land GH_ACCESS=404 -- "$W"; res "case 33 404" 1 "stuck: cannot read push access: gh: Not Found (HTTP 404)"
-land LAND_TIMEOUT=2 GH_ACCESS=hang -- "$W"; res "case 33 hang" 1 "stuck: cannot read push access: timed out"
-ok "$([ "$el" -lt 15 ] && echo y)" y "case 33 hang: bounded (${el}s < 15s)"
+land LAND_TIMEOUT=$HANG GH_ACCESS=hang -- "$W"; res "case 33 hang" 1 "stuck: cannot read push access: timed out"
+ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 33 hang: bounded (${el}s < ${HANG_BOUND}s)"
 
 echo "== 34. labelling"
 ghreset; mkrepo c34; c0
@@ -699,7 +699,7 @@ hasnt "$err" "label failed" "case 34: no label failure"
 ghreset; land GH_LABELS=404-then-ok GH_LABELCREATE=422 -- "$W"; res "case 34 422" 0 "queued …"
 ok "$(cnt "$(ghlog)" "issues/1/labels")" 2 "case 34: a 422 create still retries the add"
 hasnt "$err" "label failed" "case 34 422: counts as success"
-ghreset; land LAND_TIMEOUT=2 GH_LABELS=hang -- "$W"; res "case 34 hang" 0 "queued …"
+ghreset; land LAND_TIMEOUT=$HANG GH_LABELS=hang -- "$W"; res "case 34 hang" 0 "queued …"
 has "$err" "land: label failed: timed out" "case 34 hang: label failed: timed out"
 hasnt "$(ghlog)" "pr edit" "case 34: never pr edit"
 
@@ -1082,9 +1082,9 @@ own GH_CHECKS_MAP="$R=404,$H=pending" -- --queue --reviewed "$R"
 ores "case 46 R 404" 1 "stuck: cannot read checks: gh: Not Found (HTTP 404)"
 own GH_CHECKS_MAP="$R=pass,$H=404" -- --queue --reviewed "$R"
 ores "case 46 H 404" 1 "stuck: cannot read checks: gh: Not Found (HTTP 404)"
-own LAND_TIMEOUT=2 GH_CHECKS_MAP="$R=pass,$H=hang" -- --queue --reviewed "$R"
+own LAND_TIMEOUT=$HANG GH_CHECKS_MAP="$R=pass,$H=hang" -- --queue --reviewed "$R"
 ores "case 46 H hang" 1 "stuck: cannot read checks: timed out"
-ok "$([ "$el" -lt 15 ] && echo y)" y "case 46 hang: bounded (${el}s < 15s)"
+ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 46 hang: bounded (${el}s < ${HANG_BOUND}s)"
 own GH_CHECKS_MAP="$H=pass" -- --queue --reviewed "$H"
 ores "case 46 R = H" 0 "queued $U"
 ok "$(checkreads)" 1 "case 46 R = H: one SHA read"
