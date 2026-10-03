@@ -46,7 +46,7 @@
 #   plain    point <B>'s upstream at origin/<d> (the review base), print `land: upstream origin/<d> (was …)`
 #            and the tree line, `land: tree dirty: <paths>` or `land: digest <diff6>` (fresh-review's
 #            Step 1 digest, byte for byte); result `pr open <url>`
-#   --hold   comment `Landing held (thread:close, ADR 0028 § 3)` plus the diagnosis; result `held <url>`
+#   --hold   comment `Landing held (ADR 0028 § 3)` plus the diagnosis; result `held <url>`
 #   --queue  read protection, then ONE snapshot of check-runs and status on R (--reviewed) and HEAD. A
 #            `failure` on either (HEAD's own pass for that name supersedes R's) is `ci failed: <name>
 #            (failure: <title>) <url>` and no merge. The merge decision reads HEAD alone: pending, infra
@@ -598,8 +598,8 @@ EOF
       [ "$rc" = 0 ] || finish "stuck: push refused: $NET_ERR" 1
       title=$(git log -1 --format=%s HEAD)
       body=$tmpd/body
-      printf '%s\n\n%s\n' "Close-out landing for \`$sha12\` (thread:close, ADR 0028)." \
-        "Queued with auto-merge as a merge commit, so the close-out SHA stays an ancestor of $d." > "$body"
+      printf '%s\n\n%s\n' "Landing for \`$sha12\` (ADR 0028)." \
+        "Queued with auto-merge as a merge commit, so \`$sha12\` stays an ancestor of $d." > "$body"
       out=$(bounded gh api --method POST "repos/$slug/pulls" -f "title=$title" -f "head=$branch" -f "base=$d" \
             -F "body=@$body" --jq '[.number,.html_url]|@tsv' 2>"$tmpd/create.err"); rc=$?
       net_rc "$rc" "PR create" required "$tmpd/create.err"; rc=$?
@@ -1017,7 +1017,7 @@ EOF
   if [ -z "$n" ]; then
     local title body=$tmpd/body cerr
     title=$(git log --reverse --no-merges --format=%s "$od..HEAD" | head -n 1)
-    printf '%s\n' "Own-branch landing for \`$B\` (thread:close, ADR 0028 § 2): reviewed by /fresh-review before its merge is queued." > "$body"
+    printf '%s\n' "Own-branch landing for \`$B\` (ADR 0028 § 2): reviewed by /fresh-review before its merge is queued." > "$body"
     out=$(bounded gh api --method POST "repos/$slug/pulls" -f "title=$title" -f "head=$B" -f "base=$d" \
           -F "body=@$body" --jq '[.number,.html_url]|@tsv' 2>"$tmpd/create.err"); rc=$?
     net_rc "$rc" "PR create" required "$tmpd/create.err"; rc=$?
@@ -1040,7 +1040,7 @@ EOF
   # ---- O13. The action --------------------------------------------------------------------------------------
   case $act in
     --hold)
-      { printf '%s\n\n' 'Landing held (thread:close, ADR 0028 § 3)'; cat "$note"; } > "$tmpd/hold"
+      { printf '%s\n\n' 'Landing held (ADR 0028 § 3)'; cat "$note"; } > "$tmpd/hold"
       out=$(bounded gh api --method POST "repos/$slug/issues/$n/comments" -F "body=@$tmpd/hold" 2>&1 >/dev/null); rc=$?
       printf '%s\n' "$out" > "$tmpd/cm.err"
       net_rc "$rc" comment optional "$tmpd/cm.err"; rc=$?
