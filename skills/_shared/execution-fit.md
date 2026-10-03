@@ -163,8 +163,9 @@ clone exists, and a close-out committed in the primary is still seen.
   `close/…` landing PR mean wait for GitHub to merge it (never a second PR); **stranded** ones must be
   landed; a split names both. Otherwise the remedy is the generic one.
   Ahead by ancestry alone is not a block: commits whose content already reached `origin/<default>` by a
-  squash or cherry-picked PR (every one marked `-` by `git cherry`, or no file they touch differs from
-  `origin/<default>`) are a note naming that reset. An ahead set that touches no file still blocks.
+  squash or cherry-picked PR (no file they touch, merges included, differs from `origin/<default>`) are a
+  note naming that reset. Landed content that `origin/<default>` has since changed, and an ahead set that
+  touches no file, still block.
 - **Exit 2**: the check itself failed (a fetch, the default-branch lookup, a missing script). Stop, and
   print the stderr verbatim.
 
