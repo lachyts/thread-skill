@@ -422,6 +422,68 @@ test('L9 the engine\'s LADDER_EFFORTS and BUILT_IN_LADDER equal ladder.py\'s, an
   assert.equal(E.ladderArgsError(loads(home)), '', "the engine accepts ladder.py's output for a file")
 })
 
+// The rung-name rule is written three times: ladder.py's NAME_RE and YAML_WORDS (the loader), the engine's
+// LADDER_NAME and LADDER_YAML_WORDS (args.ladder's check, before any dispatch) and reconcile-rollout.py's
+// is_rung_name (the `rung:` stamp, and lead-integrate.py inputs' rung record). If the loader ever accepted a
+// name the engine refuses, every Workflow call would throw before dispatch and read as a Lost call; if
+// reconcile refused one, a climb would never be stamped. So the same names go to all three, through their
+// real entry points: ladder.py's load() on a one-rung file, the engine's ladderArgsError() on a one-rung
+// args.ladder, and reconcile's is_rung_name().
+const RECONCILE = path.join(root, 'skills', 'execute', 'scripts', 'reconcile-rollout.py')
+const NAME_CASES = {
+  valid: ['opus-high', 'opus-xhigh', 'fable-max', 'a', 'z9', 'r.1_b-c', 'x.', 'opus--', 'yes-please', 'nope', 'nulls', 'tru', 'o', 'ny'],
+  uppercase: ['Opus', 'OPUS-HIGH', 'opus-High', 'TRUE', 'Yes', 'NULL', 'Off'],
+  'a YAML word': ['true', 'false', 'yes', 'no', 'on', 'off', 'y', 'n', 'null'],
+  'a leading digit': ['1', '1opus', '9-high', '0.5'],
+  'a leading mark': ['-opus', '.opus', '_opus', '~'],
+  'a space': ['opus high', ' opus', 'opus ', 'opus\t', ' '],
+  'a line end': ['opus\n', 'opus\r\n', '\nopus'],
+  other: ['', 'opus/high', 'opus:high', 'opus#x', 'opüs', 'ópus', 'opus"x', 'opus\\x'],
+}
+const NAME_PROBE = `
+import importlib.util, json, os, runpy, sys
+ladder_py, reconcile_py, d, names = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4])
+g = runpy.run_path(ladder_py)
+spec = importlib.util.spec_from_file_location("reconcile_rollout", reconcile_py)
+rr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rr)
+out = []
+for i, n in enumerate(names):
+    p = os.path.join(d, "%d.toml" % i)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write('[[rung]]\\nname = %s\\nmodel = "opus"\\neffort = "high"\\njudge = "high"\\nreview = "xhigh"\\n' % json.dumps(n))
+    try:
+        loaded = g["load"](p)["rungs"][0]["name"] == n
+    except g["LadderError"]:
+        loaded = False
+    out.append([loaded, rr.is_rung_name(n)])
+print(json.dumps(out))
+`
+
+test('L9 ladder.py, the engine and reconcile agree on every rung name', (t) => {
+  const names = Object.values(NAME_CASES).flat()
+  const r = run(tmpHome(t), ['-B', '-c', NAME_PROBE, SCRIPT, RECONCILE, tmpHome(t), JSON.stringify(names)])
+  assert.equal(r.status, 0, r.stderr)
+  const py = JSON.parse(r.stdout)
+  assert.equal(py.length, names.length)
+  const E = loadEngine(['ladderArgsError', 'rungName'])
+  const one = (name) => ({ source: 'x', rungs: [{ name, model: 'opus', effort: 'high', judge: 'high', review: 'xhigh' }] })
+  names.forEach((name, i) => {
+    const [ladderPy, reconcile] = py[i]
+    const engine = E.ladderArgsError(one(name)) === ''
+    const show = JSON.stringify(name)
+    assert.equal(E.rungName(name), engine, `${show}: the engine's rungName and its args check agree`)
+    assert.equal(ladderPy, engine, `${show}: ladder.py ${ladderPy ? 'accepts' : 'refuses'} it, the engine ${engine ? 'accepts' : 'refuses'} it`)
+    assert.equal(reconcile, engine, `${show}: reconcile ${reconcile ? 'accepts' : 'refuses'} it, the engine ${engine ? 'accepts' : 'refuses'} it`)
+  })
+  // Agreement alone would pass if all three accepted (or refused) everything: pin the expected verdicts too.
+  for (const [kind, list] of Object.entries(NAME_CASES)) {
+    for (const name of list) {
+      assert.equal(E.rungName(name), kind === 'valid', `${JSON.stringify(name)} (${kind}) is ${kind === 'valid' ? 'a' : 'not a'} rung name`)
+    }
+  }
+})
+
 // ---- L10: CLI usage -----------------------------------------------------------------------------------
 
 test('L10 an extra argument is a one-line usage error, exit 2', (t) => {

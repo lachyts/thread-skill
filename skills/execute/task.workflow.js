@@ -1273,7 +1273,8 @@ checkout at "${a.repoPath}".`
 const LADDER_MODELS = ['opus', 'fable']   // ladder.py's MODELS (tests/ladder.test.mjs pins them equal)
 const LADDER_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 // A rung name is written raw into YAML frontmatter (`rung: <name>`), so it is a plain lowercase token that
-// YAML reads back as the same string: ladder.py's NAME_RE and YAML_WORDS.
+// YAML reads back as the same string: ladder.py's NAME_RE and YAML_WORDS, and reconcile-rollout.py's
+// is_rung_name (tests/ladder.test.mjs L9 feeds all three the same names and pins that they agree).
 const LADDER_NAME = /^[a-z][a-z0-9._-]*$/
 const LADDER_YAML_WORDS = ['true', 'false', 'yes', 'no', 'on', 'off', 'y', 'n', 'null']
 const BUILT_IN_LADDER = {

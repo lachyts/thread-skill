@@ -301,9 +301,16 @@ OUTSIDE_N = {"folded", "other"}                     # queue states that are not 
 PRIORITY_WEIGHTS = {"high": 3, "normal": 2, "low": 1, "none": 0}
 INTEGRATION_PREFIX = "integration:"                 # a blocked task's latest diagnosis -> set aside at Integration
 # A rung name (ADR 0029): written raw as `rung: <name>`, so a plain lowercase token YAML reads back as the same
-# string — ladder.py's NAME_RE and YAML_WORDS, and the engine's LADDER_NAME.
+# string — ladder.py's NAME_RE and YAML_WORDS, and the engine's LADDER_NAME and LADDER_YAML_WORDS.
+# tests/ladder.test.mjs (L9) feeds the same names to all three and pins that they agree.
 RUNG_NAME_RE = re.compile(r"[a-z][a-z0-9._-]*\Z")
 RUNG_YAML_WORDS = frozenset(("true", "false", "yes", "no", "on", "off", "y", "n", "null"))
+
+
+def is_rung_name(value) -> bool:
+    """A usable rung name: the one rule reconcile's stamp and lead-integrate.py inputs both apply."""
+    return isinstance(value, str) and bool(RUNG_NAME_RE.match(value)) and value not in RUNG_YAML_WORDS
+
 
 RUN_HEAD_RE = re.compile(r"^### Run (\d+) \(([^)]*)\)\s*$")
 RUN_END_RE = re.compile(r"^<!-- run (\d+) end sha=([0-9a-f]{12}) -->\s*$")
@@ -1411,7 +1418,7 @@ def cmd_reconcile(args) -> int:
         # the rung the call reached. Idempotent via Note.set. Never `model:` or `tier_capped:`.
         rung = task.get("rung")
         if rung not in (None, ""):
-            if isinstance(rung, str) and RUNG_NAME_RE.match(rung) and rung not in RUNG_YAML_WORDS:
+            if is_rung_name(rung):
                 note.set("rung", rung)
             else:
                 errors.append(f"{slug}: rung {rung!r} is not a rung name ([a-z][a-z0-9._-]*, never a YAML word) — "

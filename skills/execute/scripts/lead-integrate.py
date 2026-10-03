@@ -695,7 +695,7 @@ def task_inputs(path, note, max_rounds=None, repo=None):
     # The note's rung (ADR 0029) as the integrate call's rung record: Integration runs on the ladder's top rung
     # whatever this says, so a note with no valid `rung:` gives the neutral record, never a guess.
     rung = rr._scalar(note.get("rung"))
-    if not (rr.RUNG_NAME_RE.match(rung) and rung not in rr.RUNG_YAML_WORDS):
+    if not rr.is_rung_name(rung):
         rung = ""
     out = {
         "slug": path.stem, "status": status or None, "scope": rr._scope(note) or None, "pr": rr._pr(note) or None,
