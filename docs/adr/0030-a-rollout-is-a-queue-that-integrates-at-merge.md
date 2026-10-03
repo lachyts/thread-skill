@@ -4,6 +4,8 @@ Date: 2026-09-30
 Status: proposed, implementation pending (amends ADR 0009's wave and cursor, schedule § 5's
 same-file invariant and merge-wave's halt-on-conflict; grilled with Lachy 2026-09-30; supersedes
 protocol 4's `0019-task-readiness-governs-progress.md`, never landed on master)
+Amended by ADR 0031: the primary checkout holds while a rollout runs, so a migration is a deliberate
+cut-over.
 
 ## Context
 
