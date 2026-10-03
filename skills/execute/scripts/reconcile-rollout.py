@@ -34,6 +34,9 @@ Subcommands:
               approve-gates' `gates_signed:` marker (p12-14): when the note carries one, it is removed and a
               second line `<slug>: signed-gate restart (gates signed <stamp>) ...` is printed, so the lead
               prints execute § 3.7's fresh-call warning only on the restart that directly follows a sign-off.
+              It consumes descope's `descope_armed:` stamp the same way (p14-4): removed, with a line
+              `<slug>: descope restart (descoped <stamp>; descope_armed: cleared) ...`, so a block after that
+              restart reads as a second block and descope asks.
 
   mark-integrating Stamp `integrating: <time>` on a `review` note with a `pr:` as its Integration begins
               (the first wins): the durable signal /thread:status reads.
@@ -96,9 +99,36 @@ Subcommands:
               so only phases this rollout touched are ever closed.
 
   defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
-              and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:` stamps (first-start-wins would otherwise carry a
+              and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:` stamps
+              (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
               re-plans them. The dependent-closure safety check lives in the /thread:repair skill.
+
+  descope     An automatic descope of a plan-blocked task (p14-4), the one verb the live lead (execute § 4.5 step
+              1.2) and /thread:repair § 3d share: `--tasks <slug> --rollout <note> --part "<verbatim quote>"
+              (--optional --short <kebab> | --owner <slug> --owner-quote "<verbatim quote>") --reason "<line>"`.
+              The caller judges that the plan-block feedback centres on the part; the verb checks it. Exit 3 is an
+              ASK (one `ASK: [[slug]] <why>; nothing written: ...` line, nothing written) when: the part, or a clause
+              holding it, cites an ADR; a recorded decision (`## Decisions…`, a human `## Scope decision…`, a
+              `## Repair input` line without `(automatic)`, `## Approved gates`, `## Gated inputs`) holds the part
+              (or, for --owner, the quote); --optional and an occurrence of the part in the brief (the body minus
+              the record sections) has no marker word (consider, considering, optional, optionally, nice to have)
+              at or before it in its own clause, or the part is not in the brief; --owner and the part is in an
+              unmarked brief clause, or the owner is the task, not a task of this rollout, not unlanded and active
+              (its queue state carried), held by a RACE or UNVERIFIED, upstream of the task, or its note lacks the
+              quote; the task was descoped automatically before and restarted since (no `descope_armed:`, even when
+              the new block's feedback added no run); or another part or mode at the same run. Exit 0 writes, each
+              record checked and written on its own so a re-run finishes a partial one: the follow-up note
+              (--optional: `<project>-followup-<short>.md`, loose, `descoped_from:`; one at that path without it is
+              exit 1), then the task note in one save (a `## Scope decision (automatic)` entry and its
+              `<!-- descope run=<n> part=<sha12> mode=<m> -->` marker, ` (descoped: see ## Scope decision
+              (automatic))` on each brief item holding the part, or one pointer line for a part the brief lacks, a
+              `## Repair input` `(automatic)` line naming the superseded Plan-blocked feedback runs, and
+              `descope_armed: <now>`), then a `- <date> descope: [[slug]] ...` line in the rollout's `## Notes`.
+              `[no-change]` when all are present. `status:` is never written: the caller's `hand-back` re-enters
+              the task. Exit 1 (nothing written): a missing note, a note not plan-blocked at its run or without a
+              Plan-blocked run, a --rollout its `rollout:` does not name, a bad --short or a follow-up name that
+              reads as a phase member, a colliding follow-up, a failed save. Exit 2: usage.
 
   carry       A supersede's carry (ADR 0030; /thread:schedule step 6, and § 0 finishing an interrupted
               supersede): re-point every unlanded task of the prior rollout (--from, a path) to the rollout
@@ -1860,11 +1890,16 @@ def cmd_mark_started(args) -> int:
         note.remove("integrating")
         signed = _scalar(note.get(GATES_SIGNED_KEY))
         note.remove(GATES_SIGNED_KEY)
+        descoped = _scalar(note.get(DESCOPE_ARMED_KEY))
+        note.remove(DESCOPE_ARMED_KEY)
         note.save(dry_run=args.dry_run)
         print(f"{slug}: started={existing or _stamp(now)}{' (kept)' if existing else ''}{_flag(args, note)}")
         if signed:
             print(f"{slug}: signed-gate restart (gates signed {signed}; {GATES_SIGNED_KEY}: cleared) — "
                   "a fresh call, not a resume of its gate-pending call, prints execute § 3.7's warning first")
+        if descoped:
+            print(f"{slug}: descope restart (descoped {descoped}; {DESCOPE_ARMED_KEY}: cleared) — a block after this "
+                  "restart asks Lachy")
     return _finish(args, now)
 
 
@@ -2234,15 +2269,394 @@ def cmd_defer(args) -> int:
                 errors.append(f"{slug}: belongs to rollout {cur!r}, not {expected!r} — refusing to defer")
                 continue
         note.set("status", "open")
-        for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready", GATES_SIGNED_KEY):
+        for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready", GATES_SIGNED_KEY,
+                    DESCOPE_ARMED_KEY):
             note.remove(key)
         note.save(dry_run=args.dry_run)
-        print(f"{slug}: deferred->open (rollout/owner and started/merged/integrating/ready/{GATES_SIGNED_KEY} cleared, "
+        print(f"{slug}: deferred->open (rollout/owner and started/merged/integrating/ready/{GATES_SIGNED_KEY}/"
+              f"{DESCOPE_ARMED_KEY} cleared, "
               "a legacy `wave:` included)" +
               (" (dry-run)" if args.dry_run else " [written]"))
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
     return 1 if errors else 0
+
+
+# ---- descope (p14-4) ----------------------------------------------------------------
+
+DESCOPE_ARMED_KEY = "descope_armed"
+SCOPE_AUTO_SECTION = "## Scope decision (automatic)"
+REPAIR_INPUT_SECTION = "## Repair input"
+DESCOPE_POINTER = "(descoped: see ## Scope decision (automatic))"
+DESCOPE_ENTRY = "- descoped (automatic) "     # the entry line status greps (status § 4 **Descoped.**)
+DESCOPE_MARK_RE = re.compile(
+    r"^<!-- descope run=(\d+) part=([0-9a-f]{12}) mode=(optional|owner)(?: owner=([^\s>]+))? -->\s*$")
+# Record sections: never part of the brief the plan judge judges against.
+BRIEF_EXCLUDE = ("## Plan-blocked feedback", "## Review-blocked feedback", "## Blocker diagnosis",
+                 "## Review history", REPAIR_INPUT_SECTION, "## Scope decision", APPROVED_PLAN_SECTION,
+                 INTEGRATION_LOG_SECTION, APPROVED_GATES_SECTION, GATE_PENDING_SECTION, "## Decisions",
+                 "## Resume prompt")
+OPTIONAL_MARK_RE = re.compile(r"\b(?:consider|considering|optional|optionally|nice to have|nice-to-have)\b")
+CLAUSE_SPLIT_RE = re.compile(r"(?<=[.;:!?])\s+| [—–] ")
+ADR_RE = re.compile(r"\bADR[ -]?\d{1,4}\b|docs/adr/", re.I)
+KEBAB_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
+
+
+def _fold(text) -> str:
+    """Whitespace collapsed and case-folded: how a part, a quote and the brief are compared."""
+    return " ".join(str(text).split()).casefold()
+
+
+def _find_all(hay: str, needle: str):
+    out, i = [], hay.find(needle)
+    while needle and i >= 0:
+        out.append(i)
+        i = hay.find(needle, i + 1)
+    return out
+
+
+def _body_sections(note):
+    """(lines, sections): the body's lines and [(heading, [line indices])], the preamble first (heading '')."""
+    lines = note._body.split("\n")
+    sections = [("", [])]
+    for i, line in enumerate(lines):
+        if line.startswith("## "):
+            sections.append((line.strip(), []))
+        else:
+            sections[-1][1].append(i)
+    return lines, sections
+
+
+def _is_brief(heading: str) -> bool:
+    return heading == "" or not heading.startswith(BRIEF_EXCLUDE)
+
+
+def _brief_items(note):
+    """(lines, items): the brief is the body minus the record sections (BRIEF_EXCLUDE); an item is a list item with
+    its continuation lines, a paragraph, or a heading line. Each item is [heading, first, last, text]."""
+    lines, sections = _body_sections(note)
+    items = []
+    for heading, idxs in sections:
+        if not _is_brief(heading):
+            continue
+        cur = None
+        for i in idxs:
+            line = lines[i]
+            if not line.strip():
+                cur = None
+                continue
+            if cur is None or LIST_ITEM_RE.match(line) or line.lstrip().startswith("#"):
+                cur = [heading, i, i, line.strip()]
+                items.append(cur)
+                if line.lstrip().startswith("#"):
+                    cur = None
+            else:
+                cur[2] = i
+                cur[3] += " " + line.strip()
+    return lines, items
+
+
+def _clauses(text: str):
+    """A folded item split into clauses: at `.`, `;`, `:`, `!` or `?` followed by whitespace, and at ` — ` / ` – `."""
+    return CLAUSE_SPLIT_RE.split(text)
+
+
+def _part_hits(items, part_f):
+    """[(item, total, marked, clauses)] for every brief item holding the folded part: how many occurrences, how many
+    have an optional marker word starting at or before them in the same clause (an occurrence that crosses a clause
+    boundary is never marked), and the clauses that hold it."""
+    hits = []
+    for item in items:
+        text = _fold(item[3])
+        total = len(_find_all(text, part_f))
+        if not total:
+            continue
+        marked, holding = 0, []
+        for clause in _clauses(text):
+            found = _find_all(clause, part_f)
+            if not found:
+                continue
+            holding.append(clause)
+            marks = [m.start() for m in OPTIONAL_MARK_RE.finditer(clause)]
+            marked += sum(1 for pos in found if marks and marks[0] <= pos)
+        hits.append((item, total, marked, holding))
+    return hits
+
+
+def _optional_in_brief(hits) -> bool:
+    """Optional in the note: the part is in the brief, and every occurrence carries its own in-clause marker."""
+    return bool(hits) and all(marked == total for _item, total, marked, _c in hits)
+
+
+def _recorded_decision(note, needles) -> str:
+    """The recorded human decision holding one of the folded needles, as its heading, or '': a `## Decisions…`
+    section, a `## Scope decision…` other than the automatic one, a `## Repair input` line without `(automatic)`,
+    `## Approved gates` and `## Gated inputs (awaiting sign-off)`."""
+    lines, sections = _body_sections(note)
+    for heading, idxs in sections:
+        if heading.startswith("## Decisions") or heading in (APPROVED_GATES_SECTION, GATE_PENDING_SECTION) or \
+                (heading.startswith("## Scope decision") and heading != SCOPE_AUTO_SECTION):
+            text = [lines[i] for i in idxs]
+        elif heading == REPAIR_INPUT_SECTION:
+            text = [lines[i] for i in idxs if "(automatic)" not in lines[i]]
+        else:
+            continue
+        folded = _fold("\n".join(text))
+        if any(n and n in folded for n in needles):
+            return heading
+    return ""
+
+
+def _upstream(slug: str, index) -> set:
+    """Lowercased slugs in a task's transitive `depends-on:` / `blocked-by:` closure, a tombstone's `merged_into:`
+    target included."""
+    seen, stack = set(), [slug]
+    while stack:
+        entry = index.get(stack.pop().lower())
+        if entry is None:
+            continue
+        nexts = _dep_entries(entry[1])
+        if _status(entry[1]) == "merged" and _wikilink_slug(entry[1].get("merged_into")):
+            nexts.append(_wikilink_slug(entry[1].get("merged_into")))
+        for dep in nexts:
+            if dep.lower() not in seen:
+                seen.add(dep.lower())
+                stack.append(dep)
+    return seen
+
+
+def _owner_check(slug, owner, quote_f, rollout_path, rollout_note, tasks_dir) -> str:
+    """'' when [[owner]] may take the part over, else why not (an ASK): it is not the task itself; it is linked to
+    the same rollout, unlanded and active (its queue state carried, so done, merged, dropped and parked are out);
+    no undecided RACE or UNVERIFIED holds it; it is not upstream of the task; and its note holds --owner-quote.
+    Nothing proves the owner owns the part: that judgement is the caller's."""
+    if owner.lower() == slug.lower():
+        return "--owner names the task itself"
+    linked, index = _scan(rollout_path, tasks_dir)
+    entry = index.get(owner.lower())
+    if entry is None or (_wikilink_slug(entry[1].get("rollout")) or "").lower() != rollout_path.stem.lower():
+        return f"[[{owner}]] is not a task of [[{rollout_path.stem}]]"
+    state = _queue_state(entry[1])[0]
+    if state not in CARRIED_STATES:
+        return f"[[{owner}]] is {_status(entry[1]) or 'no status'} ({state}): it will not land the part"
+    if owner.lower() in _race_holds(rollout_note, linked):
+        return f"[[{owner}]] is held by an undecided RACE or UNVERIFIED"
+    if owner.lower() in _upstream(slug, index):
+        return f"[[{owner}]] is upstream of [[{slug}]] (its depends-on / blocked-by closure)"
+    if quote_f not in _fold(entry[1]._body):
+        return f"--owner-quote is not in [[{owner}]]'s note"
+    return ""
+
+
+def _followup_name(slug: str, short: str) -> str:
+    """`<project-slug>-followup-<short>`: the project slug is a phased task's `<slug>` (PHASED_STEM_RE), else the
+    loose task's own slug."""
+    m = PHASED_STEM_RE.match(slug)
+    return f"{m.group('slug') if m else slug}-followup-{short}"
+
+
+def _fm_block(note, key) -> list:
+    """The frontmatter lines of `key:` verbatim: its line, plus the block list under it when the value is empty."""
+    for i, line in enumerate(note._fm):
+        if re.match(rf"^{re.escape(key)}:", line):
+            out = [line]
+            if not re.sub(r"\s+#.*$", "", line.split(":", 1)[1]).strip():
+                for item in note._fm[i + 1:]:
+                    if not re.match(r"^\s+-", item):
+                        break
+                    out.append(item)
+            return out
+    return [f"{key}: []"]
+
+
+def _write_followup(path: Path, note, slug, part, reason, run_n, now, clause):
+    """File the follow-up: the vault's new-task shape (execute's completion ceremony), never `rollout:`, `phase:` or
+    `owner:` (a loose task, never a phase member), `projects:` copied, `descoped_from:` naming the task."""
+    lines = ["---", "tags: [task]", "status: open", "priority: normal", "work_depth: shallow",
+             *_fm_block(note, "projects"), "contexts: []", "scheduled:", "due:",
+             f"captured: {now.astimezone().date().isoformat()}", f'descoped_from: "[[{slug}]]"', "---", "",
+             "## Notes", "",
+             f"Descoped from [[{slug}]] by an automatic descope at its Plan-blocked feedback run {run_n}: {reason}", "",
+             f"- {part}"]
+    if clause:
+        lines += ["", f"Its item in [[{slug}]]'s brief: {clause}"]
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _and_list(nums) -> str:
+    s = [str(n) for n in nums]
+    return s[0] if len(s) == 1 else ", ".join(s[:-1]) + " and " + s[-1]
+
+
+def cmd_descope(args) -> int:
+    """Record an automatic descope of a plan-blocked task (p14-4), the one verb the live lead (execute § 4.5 step 1.2)
+    and /thread:repair § 3d share. The caller judged that the plan-block feedback centres on a part of the task that
+    is optional in the note (--optional) or that a later task in the same rollout owns (--owner); this verb checks
+    that judgement mechanically and writes the records. Exit 0: descoped ([written], or [no-change] for a complete
+    re-run), and the caller runs `hand-back`. Exit 3: ASK, nothing written, and repair asks Lachy. Exit 1: an ERROR,
+    nothing written. Exit 2: usage."""
+    def usage(msg):
+        print(f"ERROR: descope: usage: {msg}", file=sys.stderr)
+        return 2
+
+    def error(msg, tail="nothing written"):
+        print(f"ERROR: descope: {msg}; {tail}", file=sys.stderr)
+        return 1
+
+    slug = args.tasks.strip()
+    part = " ".join(args.part.split())
+    reason = " ".join(args.reason.split())
+    mode = "optional" if args.optional else "owner"
+    owner = (_wikilink_slug(args.owner) or "") if args.owner else ""
+    quote = " ".join((args.owner_quote or "").split())
+    if not slug or "," in slug:
+        return usage("--tasks takes one task slug")
+    if not part or not reason:
+        return usage("--part and --reason must not be empty")
+    if mode == "optional" and (not args.short or args.owner_quote):
+        return usage("--optional takes --short <kebab> and no --owner-quote")
+    if mode == "owner" and (not owner or not quote or args.short):
+        return usage("--owner takes --owner-quote \"<verbatim quote from the owner's note>\" and no --short")
+
+    now = _now(args)
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    path = tasks_dir / f"{slug}.md"
+    if not path.is_file():
+        return error(f"{slug}: task note not found at {path}")
+    if not rollout_path.is_file():
+        return error(f"rollout note not found at {rollout_path}")
+    try:
+        note, rollout_note = Note(path), Note(rollout_path)
+    except ValueError as e:
+        return error(str(e))
+    ro = rollout_path.stem
+    if (_wikilink_slug(note.get("rollout")) or "").lower() != ro.lower():
+        return error(f"{slug}: its rollout: is {note.get('rollout') or 'none'}, not [[{ro}]]")
+    if _status(note) != "plan-blocked" or _queue_state(note) != ("set-aside", "run"):
+        return error(f"{slug}: status is {_status(note) or 'none'!r}: only a plan-blocked note set aside at its run "
+                     "is descoped")
+    runs = note.run_blocks(BLOCKED_SECTIONS["plan-blocked"])
+    if not runs:
+        return error(f"{slug}: no run under {BLOCKED_SECTIONS['plan-blocked']}")
+    run_n = _top_run(runs)["n"]
+    fu_name = fu_path = None
+    if mode == "optional":
+        if not KEBAB_RE.match(args.short):
+            return error(f"--short {args.short!r} is not kebab-case ([a-z0-9] words joined by -)")
+        fu_name = _followup_name(slug, args.short)
+        if PHASED_STEM_RE.match(fu_name) or "-rollout-" in fu_name:
+            return error(f"the follow-up name {fu_name} would read as a phase member or a rollout note")
+        fu_path = tasks_dir / f"{fu_name}.md"
+        if fu_path.exists():
+            try:
+                theirs = _wikilink_slug(Note(fu_path).get("descoped_from")) or ""
+            except ValueError:
+                theirs = ""
+            if theirs.lower() != slug.lower():
+                return error(f"{fu_path} exists and is not this task's follow-up (no descoped_from: \"[[{slug}]]\")")
+
+    def ask(why):
+        print(f"ASK: [[{slug}]] {why}; nothing written: /thread:repair [[{ro}]] asks Lachy")
+        return 3
+
+    part_f, quote_f = _fold(part), _fold(quote)
+    part_sha = _sha12(part_f)
+    marks = [m for m in (DESCOPE_MARK_RE.match(l.strip()) for l in note.section_text(SCOPE_AUTO_SECTION).split("\n")) if m]
+    armed = _scalar(note.get(DESCOPE_ARMED_KEY))
+    lines, items = _brief_items(note)
+    hits = _part_hits(items, part_f)
+    if marks:
+        # Once per task: the stamp is the "not restarted since" signal (mark-started consumes it), so a block after a
+        # restart asks, even when its feedback is byte-identical and no run was added.
+        if not armed:
+            return ask(f"plan-blocked again after an automatic descope (run {marks[-1].group(1)}): a second block "
+                       "asks Lachy")
+        same = [m for m in marks if int(m.group(1)) == run_n and m.group(2) == part_sha and m.group(3) == mode and
+                (mode == "optional" or (m.group(4) or "").lower() == owner.lower())]
+        if not same:
+            return ask(f"already descoped automatically at Plan-blocked feedback run {marks[-1].group(1)}: one "
+                       "automatic descope per block, so another part or mode asks Lachy")
+    else:
+        if ADR_RE.search(part) or any(ADR_RE.search(c) for _i, _t, _m, cl in hits for c in cl):
+            return ask("the part touches an ADR decision")
+        held = _recorded_decision(note, [part_f, quote_f] if mode == "owner" else [part_f])
+        if held:
+            return ask(f"a recorded decision ({held}) names the part")
+        if mode == "optional":
+            if not hits:
+                return ask(f'"{part}" is not in the brief: only a part the note marks optional descopes as optional')
+            if not _optional_in_brief(hits):
+                return ask(f'"{part}" is required scope: an occurrence has no optional marker (consider, optional, '
+                           "nice to have) in its own clause")
+        else:
+            if hits and not _optional_in_brief(hits):
+                return ask(f'"{part}" is required scope in the brief: an owner never takes required scope')
+            why = _owner_check(slug, owner, quote_f, rollout_path, rollout_note, tasks_dir)
+            if why:
+                return ask(why)
+
+    # The records, each checked and written on its own so a re-run finishes a partial one: the follow-up first, then
+    # the task note (Scope decision, brief pointer, Repair input, the stamp) in one save, then the rollout's Notes line.
+    stamp, date = _stamp(now), now.astimezone().date().isoformat()
+    target = f"follow-up [[{fu_name}]]" if mode == "optional" else f"owned by [[{owner}]]"
+    wrote = False
+    if fu_path is not None and not fu_path.exists():
+        wrote = True
+        if not args.dry_run:
+            try:
+                _write_followup(fu_path, note, slug, part, reason, run_n, now, hits[0][0][3] if hits else "")
+            except OSError as e:
+                return error(f"cannot write {fu_path}: {e}", "a re-run finishes the records")
+    # the brief pointer: on every item holding the part, else (an emergent part) one line in the first brief section
+    if hits:
+        for item, *_rest in hits:
+            if _fold(DESCOPE_POINTER) not in _fold(item[3]):
+                lines[item[2]] = lines[item[2]].rstrip() + " " + DESCOPE_POINTER
+    else:
+        _lines, sections = _body_sections(note)
+        first = next((s for s in sections if s[0] and _is_brief(s[0])), sections[0])
+        filled = [i for i in first[1] if lines[i].strip()]
+        at = (filled[-1] + 1) if filled else (first[1][0] if first[1] else len(lines))
+        lines.insert(at, f'- out of scope (automatic descope, Plan-blocked feedback run {run_n}): "{part}", '
+                         f"{'owned by [[' + owner + ']]' if owner else 'filed as [[' + fu_name + ']]'} {DESCOPE_POINTER}")
+        if filled and at < len(lines) - 1 and lines[at + 1].strip():
+            lines.insert(at + 1, "")
+    note._set_body_lines(lines)
+    if not marks:
+        why = "is optional in the brief" if mode == "optional" else f'is owned by [[{owner}]] ("{quote}")'
+        note.append_line(SCOPE_AUTO_SECTION, f'{DESCOPE_ENTRY}{stamp}, Plan-blocked feedback run {run_n}: "{part}" {why}; '
+                                             f"{target if mode == 'optional' else 'no follow-up'}. {reason}")
+        note.append_line(SCOPE_AUTO_SECTION, f"<!-- descope run={run_n} part={part_sha} mode={mode}"
+                                             f"{' owner=' + owner if mode == 'owner' else ''} -->")
+    ri = [l for l in note.section_text(REPAIR_INPUT_SECTION).split("\n") if "(automatic)" in l]
+    if not any(_fold(f'"{part}"') in _fold(l) for l in ri):
+        superseded = sorted({r["n"] for r in runs if r["n"] <= run_n})
+        note.append_line(REPAIR_INPUT_SECTION,
+                         f'- (automatic) {date}: "{part}" is out of this task\'s scope; see {SCOPE_AUTO_SECTION}. '
+                         f"Plan-blocked feedback runs {_and_list(superseded)} are superseded where they concern it; "
+                         "every other point stands.")
+    if not armed:
+        note.set(DESCOPE_ARMED_KEY, stamp)
+    if note.dirty:
+        wrote = True
+        try:
+            note.save(dry_run=args.dry_run)
+        except OSError as e:
+            return error(f"cannot write {path}: {e}", "a re-run finishes the records")
+    link_re = re.compile(rf"descope:\s*\[\[{re.escape(slug)}(?:[|#\\][^\]]*)?\]\].*\brun {run_n}\b", re.I)
+    if not any(link_re.search(l) and part_f in _fold(l) for l in rollout_note.section_text(NOTES_SECTION).split("\n")):
+        rollout_note.append_line(NOTES_SECTION, f'- {date} descope: [[{slug}]] "{part}" → {target}; Plan-blocked feedback '
+                                                f"run {run_n}; {reason}")
+        wrote = True
+        try:
+            rollout_note.save(dry_run=args.dry_run)
+        except OSError as e:
+            return error(f"cannot write {rollout_path}: {e}", "a re-run finishes the records")
+    flag = " (dry-run)" if args.dry_run else (" [written]" if wrote else " [no-change]")
+    print(f'{slug}: descoped "{part}" ({mode}) at Plan-blocked feedback run {run_n} → {target}{flag}')
+    return 0
 
 
 # ---- carry (a supersede, ADR 0030) -------------------------------------------
@@ -2624,6 +3038,23 @@ def main() -> int:
     df.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     df.add_argument("--dry-run", action="store_true")
     df.set_defaults(func=cmd_defer)
+
+    de = sub.add_parser("descope", help="record an automatic descope of a plan-blocked task (p14-4): exit 0 descoped "
+                                         "(then hand-back), exit 3 ASK (nothing written; /thread:repair asks Lachy)")
+    de.add_argument("--tasks", required=True, help="the plan-blocked task's slug")
+    de.add_argument("--rollout", required=True, help="path to the rollout note the task's rollout: names")
+    de.add_argument("--part", required=True, help="the descoped part, a verbatim quote (of the brief, for --optional)")
+    dm = de.add_mutually_exclusive_group(required=True)
+    dm.add_argument("--optional", action="store_true", help="the part is optional in the note (files a follow-up)")
+    dm.add_argument("--owner", default=None, help="the slug of the later task in the same rollout that owns the part")
+    de.add_argument("--short", default=None, help="with --optional: the follow-up's kebab name, <project>-followup-<short>")
+    de.add_argument("--owner-quote", dest="owner_quote", default=None,
+                    help="with --owner: a verbatim quote from the owner's note")
+    de.add_argument("--reason", required=True, help="one line: why the feedback centres on the part")
+    de.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    de.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the stamps)")
+    de.add_argument("--dry-run", action="store_true", help="print the outcome and write nothing")
+    de.set_defaults(func=cmd_descope)
 
     ca = sub.add_parser("carry", help="re-point a superseded rollout's unlanded tasks to its successor (/thread:schedule)")
     ca.add_argument("--from", dest="from_", required=True, help="path to the prior (superseded) rollout note")
