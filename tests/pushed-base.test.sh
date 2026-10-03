@@ -278,8 +278,8 @@ g -C "$S" push -q origin master
 run "$C" ""
 ok "$rc" 3 "13e. squash-landed then edited upstream → 3 (content differs, conservative)"
 
-# 13f. 4000 stranded commits: `git cherry` prints ~172 KB, past any pipe buffer. A `printf | grep -q '^+'`
-# under pipefail took SIGPIPE there (grep quits on its first match) and read the set as landed by content.
+# 13f. 4000 stranded commits. The landed-by-content test once piped `git cherry`'s ~172 KB into grep -q under
+# pipefail; grep quit on its first match, SIGPIPE read as "no + line" and the set as landed by content.
 fresh
 awk -v n=4000 'BEGIN { print "commit refs/heads/master"; print "committer t <t@t> 0 +0000"; print "data 0"
   print "from refs/heads/master^0"; for (i = 1; i <= n; i++) { if (i > 1) { print "commit refs/heads/master"
@@ -292,6 +292,18 @@ ok "$rc|${out:-<empty>}" "3|<empty>" "13f. 4000 stranded commits → 3"
 has "$err" "pushed-base: local master in $C is 4000 commit(s) ahead of origin/master: rollout worktrees branch" "13f. … the block header, not the landed-by-content note"
 has "$err" "land them on origin/master by PR" "13f. … the land-by-PR remedy"
 lacks "$err" "already on origin/master by content" "13f. … no landed-by-content note"
+
+# 13g. an evil merge: local master merges branch f with --no-ff and the merge itself adds evil.txt; f's one
+# commit is then cherry-picked (-x, a new SHA) onto origin/master. `git cherry` skips merges, so it once printed only `- f1`
+# and the set read as landed by content, with a reset remedy that would drop evil.txt.
+fresh
+g -C "$C" checkout -q -b f && commit "$C" "f1" f.txt && g -C "$C" checkout -q master
+g -C "$C" merge -q --no-ff --no-commit f && echo evil > "$C/evil.txt" && g -C "$C" add evil.txt && g -C "$C" commit -q -m "merge f"
+g -C "$S" fetch -q "$C" f && g -C "$S" cherry-pick -x FETCH_HEAD >/dev/null && g -C "$S" push -q origin master
+ok "$(git -C "$C" fetch -q && git -C "$C" cherry origin/master master)" "- $(git -C "$C" rev-parse f)" "13g. git cherry prints only f1's - line (precondition)"
+run "$C" ""
+ok "$rc|${out:-<empty>}" "3|<empty>" "13g. a merge commit carrying new content → 3"
+lacks "$err" "already on origin/master by content" "13g. … no landed-by-content note"
 
 # ======== the clone set ==================================================================================
 # 14. rollout clone in sync, primary (same origin) ahead with an ADR, given via --also

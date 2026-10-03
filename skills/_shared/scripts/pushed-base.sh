@@ -129,14 +129,17 @@ reset_hint() {  # reset_hint <member>: the command that drops local <b>'s landed
 }
 for c in "${members[@]}"; do
   git -C "$c" rev-parse -q --verify "refs/heads/$b" >/dev/null 2>&1 || continue
-  n=$(git -C "$c" rev-list --count "$up..refs/heads/$b" 2>&1) || {
-    echo "pushed-base: cannot count $b against origin/$b in $c: $(printf '%s\n' "$n" | head -n 1)" >&2; broken=1; continue; }
-  [ "$n" -gt 0 ] 2>/dev/null || continue
+  # A count that is not a number (a git warning mixed in, say) is a failure: it blocks, never skips.
+  n=$(git -C "$c" rev-list --count "$up..refs/heads/$b" 2>&1); nrc=$?
+  case "$nrc:$n" in 0:[0-9]|0:[0-9]*[0-9]) case $n in *[!0-9]*) nrc=1 ;; esac ;; *) nrc=1 ;; esac
+  if [ "$nrc" != 0 ]; then
+    echo "pushed-base: cannot count $b against origin/$b in $c: $(printf '%s\n' "$n" | head -n 1)" >&2; broken=1; continue
+  fi
+  [ "$n" -gt 0 ] || continue
   # Every ahead commit patch-equivalent to one on origin/<b>: landed by a cherry-pick or one-commit squash.
-  # A here-string, not a pipe: grep -q quits on its first match, and under pipefail the writer's SIGPIPE on
-  # output past the pipe buffer would read as "no + line".
-  if ch=$(git -C "$c" cherry "$up" "refs/heads/$b" 2>/dev/null) && [ -n "$ch" ] \
-     && ! grep -q '^+' <<<"$ch"; then
+  # A count, not `git cherry` text: no pipe for grep -q to SIGPIPE under pipefail (2026-10-02's CI flake),
+  # and a merge commit always counts as unlanded (git cherry skips merges, whose content may be new).
+  if u=$(git -C "$c" rev-list --cherry-pick --right-only --count "$up...refs/heads/$b" 2>/dev/null) && [ "$u" = 0 ]; then
     note "local $b in $c is $n commit(s) ahead of origin/$b, but each is already on origin/$b by content (landed by a squash or cherry-picked PR): not a blocker; drop them with \`$(reset_hint "$c")\`"
     continue
   fi
