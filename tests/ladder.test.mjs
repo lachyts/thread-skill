@@ -29,9 +29,13 @@ const BUILT_IN = [
 
 // ---- helpers ------------------------------------------------------------------------------------------
 
-function tmpHome(t) {
+// beforeRemove(home) runs first in the same after-hook, so a case that locks a directory can unlock it.
+function tmpHome(t, beforeRemove = () => {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ladder-'))
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }))
+  t.after(() => {
+    beforeRemove(home)
+    fs.rmSync(home, { recursive: true, force: true })
+  })
   return home
 }
 
@@ -118,6 +122,13 @@ test('L1 absent file: ~/.config/thread/ without ladder.toml gives the built-in l
   assertBuiltIn(loads(home))
 })
 
+test('L1 absent file: ~/.config/thread as a plain file (a step on the way is no directory) gives the built-in ladder', (t) => {
+  const home = tmpHome(t)
+  fs.mkdirSync(path.join(home, '.config'))
+  fs.writeFileSync(path.join(home, '.config', 'thread'), 'not a directory\n')
+  assertBuiltIn(loads(home))
+})
+
 // ---- L2-L4: files that load ---------------------------------------------------------------------------
 
 test('L2 a three-rung file naming Fable loads as written, bottom first, from its path', (t) => {
@@ -157,8 +168,11 @@ test('L3 CRLF line endings load', (t) => {
   assert.deepEqual(loads(home).rungs, BUILT_IN)
 })
 
-const inline = (rungs) => ['# the ladder, bottom first', 'rung = [', ...rungs.map((r) =>
-  `  { ${Object.entries(r).map(([k, v]) => `${k} = ${typeof v === 'string' ? JSON.stringify(v) : v.raw}`).join(', ')} },`), ']', ''].join('\n')
+// The inline form: the head lines, then `rung = [`, then one inline table per line, then `]`. With the
+// default one-line head, `rung = [` is line 2 and rung N is line 2 + N; with no head, rung N is line 1 + N.
+const inlineTable = (r) => `{ ${Object.entries(r).map(([k, v]) => `${k} = ${typeof v === 'string' ? JSON.stringify(v) : v.raw}`).join(', ')} }`
+const inline = (rungs, head = ['# the ladder, bottom first']) =>
+  [...head, 'rung = [', ...rungs.map((r) => `  ${inlineTable(r)},`), ']', ''].join('\n')
 
 test('L4 the inline-array form loads the same as [[rung]] tables', (t) => {
   const a = tmpHome(t)
@@ -169,10 +183,32 @@ test('L4 the inline-array form loads the same as [[rung]] tables', (t) => {
   assert.deepEqual(loads(a).rungs, BUILT_IN)
 })
 
-test('L4 an inline-array error names the `rung =` line', (t) => {
+test('L4 an inline-array error names the bad rung\'s own line, not the `rung =` line', (t) => {
   const home = tmpHome(t)
-  writeLadder(home, inline([R('opus-high'), R('opus-xhigh', 'gpt-5', 'xhigh')]))
-  refused(home, { line: 2, reason: /rung 2 \("opus-xhigh"\): unknown model "gpt-5"/ })
+  writeLadder(home, inline([R('opus-high'), R('opus-xhigh', 'gpt-5', 'xhigh')], []))
+  refused(home, { line: 3, reason: /rung 2 \("opus-xhigh"\): unknown model "gpt-5"/ })
+})
+
+test('L4 an inline table on the `rung = [` line is rung 1\'s line, the next table rung 2\'s', (t) => {
+  const home = tmpHome(t)
+  writeLadder(home, `rung = [${inlineTable(R('opus-high'))},\n  ${inlineTable(R('opus-xhigh', 'opus', 'extreme'))}]\n`)
+  refused(home, { line: 2, reason: /rung 2 \("opus-xhigh"\): effort "extreme"/ })
+})
+
+test('L4 an inline-array missing key names the rung\'s own line, and a duplicate names the first one\'s', (t) => {
+  const a = tmpHome(t)
+  writeLadder(a, inline([R('opus-high'), without(R('opus-xhigh', 'opus', 'xhigh'), 'judge')]))
+  refused(a, { line: 4, reason: /rung 2 \("opus-xhigh"\): missing "judge"/ })
+  const b = tmpHome(t)
+  writeLadder(b, inline([R('opus-high'), R('opus-high', 'opus', 'xhigh')]))
+  refused(b, { line: 4, reason: /rung 2 \("opus-high"\): duplicate name "opus-high" \(first at line 3\)/ })
+})
+
+test('L4 brackets, braces and quotes inside the array\'s comments and strings are not rungs', (t) => {
+  const home = tmpHome(t)
+  writeLadder(home, ['rung = [ # [ { """ \'\'\'', '  # { not a rung }', `  ${inlineTable(R('opus-high'))}, # } ]`,
+    `  ${inlineTable(R('opus-xhigh', 'gpt-5', 'xhigh'))},`, ']', ''].join('\n'))
+  refused(home, { line: 4, reason: /rung 2 \("opus-xhigh"\): unknown model "gpt-5"/ })
 })
 
 // ---- L5: invalid files --------------------------------------------------------------------------------
@@ -226,6 +262,24 @@ const INVALID = [
     ['version = 1', ...render(TWO).split('\n')].join('\n'), 1, /unknown top-level key "version"/],
   ['a key after a rung\'s keys belongs to that rung',
     render(TWO) + 'top = "x"\n', 15, /rung 2 \("opus-xhigh"\): unknown key "top"/],
+  // The order errors are found in, which is not always file order. With no head line, rung 1's header is
+  // line 1 and its keys lines 2-6, so the bad model is line 3.
+  ['(n) order: an unknown top-level table (line 8) is reported ahead of an earlier rung\'s bad model (line 3)',
+    render([withKey(TWO[0], 'model', 'gpt')], []) + '\n[other]\nx = 1\n', 8, /unknown top-level key "other"/],
+  ['(n) order: a rung\'s unknown key (line 7) is reported ahead of its earlier bad model (line 3)',
+    render([{ ...withKey(TWO[0], 'model', 'gpt'), extra: 'x' }], []), 7, /rung 1 \("opus-high"\): unknown key "extra"/],
+  ['(o) TOML that ends inside an open array names the last line, at end of document',
+    render([withKey(TWO[0], 'review', raw('['))]), 7, /invalid TOML: .*end of document/],
+  // The line scan skips comments and strings, and carries multi-line strings and arrays over line ends.
+  ['(p) a triple quote in a comment opens no string: the bad line after it is still named',
+    render([withKey(withKey(TWO[0], 'name', raw('"opus-high"  # don\'t use \'\'\' here')), 'effort', 'bad'), TWO[1]], []), 4,
+    /rung 1 \("opus-high"\): effort "bad"/],
+  ['(p) a triple quote in a comment after a multi-line string\'s close reopens nothing',
+    render([withKey(withKey(TWO[0], 'model', raw('"""\nopus""" # not """ a new string')), 'effort', 'bad'), TWO[1]]), 6,
+    /rung 1 \("opus-high"\): effort "bad"/],
+  ['(p) a multi-line array\'s `[...]` line is no table header: the rung\'s keys after it are still placed',
+    render([withKey(TWO[0], 'model', raw('[\n  ["opus"]\n]')), TWO[1]]).replace('review = "xhigh"\n', 'review = "xhigh"\nextra = 1\n'), 10,
+    /rung 1 \("opus-high"\): unknown key "extra"/],
 ]
 
 for (const [label, content, line, reason] of INVALID) {
@@ -281,15 +335,34 @@ test('L6 `rung = []` is refused at its line', (t) => {
 test('L7 ladder.toml as a directory is refused', (t) => {
   const home = tmpHome(t)
   fs.mkdirSync(ladderPath(home), { recursive: true })
-  refused(home, {})
+  refused(home, { reason: /: cannot read it: Is a directory\n$/ })
 })
 
 test('L7 a dangling ladder.toml symlink is refused, never read as absent', (t) => {
   const home = tmpHome(t)
   fs.mkdirSync(path.dirname(ladderPath(home)), { recursive: true })
   fs.symlinkSync(path.join(home, 'nowhere.toml'), ladderPath(home))
-  refused(home, {})
+  refused(home, { reason: new RegExp(`: cannot read it: a symlink to a missing file \\(${escapeRe(path.join(home, 'nowhere.toml'))}\\)\\n$`) })
 })
+
+test('L7 a dangling symlink on the way (~/.config/thread) is refused, never read as absent', (t) => {
+  const home = tmpHome(t)
+  fs.mkdirSync(path.join(home, '.config'))
+  const link = path.join(home, '.config', 'thread')
+  fs.symlinkSync(path.join(home, 'dotfiles', 'thread'), link)
+  refused(home, { reason: new RegExp(`: cannot read it: ${escapeRe(link)} is a symlink to a missing directory \\(`) })
+})
+
+// lstat fails with EACCES, not ENOENT, under a directory that cannot be searched: present, unreadable. Root
+// searches any directory, so the case cannot arise for it.
+test('L7 a valid ladder.toml under a directory that cannot be searched is refused, never read as absent',
+  { skip: process.getuid?.() === 0 && 'root can search any directory' }, (t) => {
+    const config = (home) => path.join(home, '.config')
+    const home = tmpHome(t, (h) => { if (fs.existsSync(config(h))) fs.chmodSync(config(h), 0o755) })
+    writeLadder(home, render(TWO))
+    fs.chmodSync(config(home), 0o000)
+    refused(home, { reason: /: cannot read it: Permission denied\n$/ })
+  })
 
 // ---- L8: python without tomllib (< 3.11) --------------------------------------------------------------
 

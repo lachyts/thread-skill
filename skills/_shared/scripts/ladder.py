@@ -28,21 +28,27 @@ Each effort is one of low, medium, high, xhigh, max. Rungs may share a model, so
 step are the same kind of move. The order is the operator's statement: a rung may sit above one with more
 effort, and nothing is clamped. The inline form `rung = [{ name = "...", ... }, ...]` is accepted too.
 
-No file (nothing at the path, not even a dangling symlink) gives the built-in ladder: the two rungs above.
-It names no model above Opus and no `max` (ADR 0029 decision 2), and reading it needs no tomllib, so it
-works on any python 3. Reading a present file needs python >= 3.11 (tomllib).
+No file gives the built-in ladder: the two rungs above. It names no model above Opus and no `max` (ADR 0029
+decision 2), and reading it needs no tomllib, so it works on any python 3. Reading a present file needs
+python >= 3.11 (tomllib). "No file" means only that nothing is at the path: it, or a directory on the way
+to it, does not exist, or a step on the way is a plain file. Anything else is refused, never read as no
+file: a dangling symlink at the path or on the way to it, and a path that cannot be checked at all (a
+directory on the way that cannot be searched, say).
 
 Validation. A present file that does not validate is refused, never replaced by the built-in ladder: an
-empty or comment-only file included, because the operator wrote it. The first error in file order is
-reported, one per run:
-- the path is readable and the bytes are UTF-8 and valid TOML;
-- the only top-level key is `rung` (a `[[rungs]]` typo is an unknown key), and it holds at least one rung;
-- `rung` is an array of tables (`[[rung]]`, never a single `[rung]`);
-- within each rung, unknown keys first, then each key in turn: present, a string, then valid as above.
-  A duplicate name names its first line too.
-The line named is tomllib's for a syntax error, and the bad key's own line otherwise. A key that line
-scanning cannot place (the inline form, say) falls back to its rung's `[[rung]]` line, then the `rung =`
-line, then no line.
+empty or comment-only file included, because the operator wrote it. One error is reported per run: the
+first found in this order, which is not always the earliest line in the file:
+1. the path can be read, and the bytes are UTF-8 and valid TOML (tomllib's first syntax error);
+2. the only top-level key is `rung`. Any other key or table, a `[[rungs]]` typo included, is an unknown
+   key, reported ahead of every rung's own errors;
+3. `rung` holds at least one rung and is an array of tables (`[[rung]]`, never a single `[rung]`);
+4. the rungs in order. Within a rung its unknown keys come first, since each implies a missing key. Then
+   the error on the earliest line among: a missing key (named at the rung's own line), a value that is
+   not a string, and a value that is not valid as above. A duplicate name names its first line too.
+The line named is tomllib's for a syntax error, and the bad key's own line otherwise. A rung's own line is
+its `[[rung]]` header, or in the inline form the line its `{` opens on (so there every key of a rung names
+that line). A key the line scan cannot place falls back to its rung's own line, then the `rung =` line,
+then no line.
 
 Output. Exit 0 and one JSON line on stdout:
 
@@ -59,6 +65,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import sys
 
 # Must equal the engine's model set (task.workflow.js TIER_RANK's keys); tests/ladder.test.mjs pins it.
@@ -81,7 +88,7 @@ YAML_WORDS = frozenset(("true", "false", "yes", "no", "on", "off", "y", "n", "nu
 _SEG = r'(?:[A-Za-z0-9_-]+|"(?:[^"\\]|\\.)*"|\'[^\']*\')'
 _AOT_RE = re.compile(r"\[\[\s*(" + _SEG + r")\s*(\.[^\]]*)?\]\]\s*(?:#.*)?\Z")
 _TABLE_RE = re.compile(r"\[\s*(" + _SEG + r")\s*(?:\.[^\]]*)?\]\s*(?:#.*)?\Z")
-_KEY_RE = re.compile(r"(" + _SEG + r")\s*[.=]")
+_KEY_RE = re.compile(r"(" + _SEG + r")\s*([.=])")
 _TOML_POS_RE = re.compile(r"\s*\(at (?:line (\d+), column (\d+)|end of document)\)\s*\Z")
 
 
@@ -113,22 +120,30 @@ class _Index:
 
     top: each top-level name's first line (a key, a [table] or [[table]] header's first segment).
     headers: each [[rung]] header's line. keys: per [[rung]], each key's first line until the next header.
+    inline: in the inline form `rung = [...]`, the line each rung's `{` opens on, in order.
+
+    Only a line that starts outside every value is read as a header or a key. The rest of each line is
+    scanned as TOML values: strings and comments are skipped, so a quote or bracket inside one counts for
+    nothing, and the multi-line strings and arrays left open at a line's end carry over to the next line.
     """
 
     def __init__(self, text):
         self.top = {}
         self.headers = []
         self.keys = []
-        rung = None  # index into headers while inside a [[rung]]; "other" inside any other table
-        multiline = None
+        self.inline = []
+        self._table = None  # index into headers while inside a [[rung]]; "other" inside any other table
+        self._string = None  # the delimiter of a multi-line string left open at the end of a line
+        self._brackets = []  # the [ and { of the values left open at the end of a line, outermost first
+        self._rung_array = False  # the outermost open [ is the top-level `rung = [`
         for n, line in enumerate(text.split("\n"), 1):
-            s = line.strip()
-            if multiline:  # inside a multi-line string: only its closing quotes matter
-                if s.count(multiline) % 2:
-                    multiline = None
-                continue
+            self._line(n, line.strip())
+
+    def _line(self, n, s):
+        opens_rung = False
+        if self._string is None and not self._brackets:
             if not s or s.startswith("#"):
-                continue
+                return
             m = _AOT_RE.match(s)
             if m:
                 name = _unquote(m.group(1))
@@ -136,26 +151,84 @@ class _Index:
                 if name == "rung" and m.group(2) is None:
                     self.headers.append(n)
                     self.keys.append({})
-                    rung = len(self.headers) - 1
+                    self._table = len(self.headers) - 1
                 else:
-                    rung = "other"
-                continue
+                    self._table = "other"
+                return
             m = _TABLE_RE.match(s)
             if m:
                 self.top.setdefault(_unquote(m.group(1)), n)
-                rung = "other"
-                continue
+                self._table = "other"
+                return
             m = _KEY_RE.match(s)
             if m:
                 key = _unquote(m.group(1))
-                if rung is None:
+                if self._table is None:
                     self.top.setdefault(key, n)
-                elif rung != "other":
-                    self.keys[rung].setdefault(key, n)
-            for quotes in ('"""', "'''"):
-                if s.count(quotes) % 2:
-                    multiline = quotes
-                    break
+                    opens_rung = key == "rung" and m.group(2) == "="
+                elif self._table != "other":
+                    self.keys[self._table].setdefault(key, n)
+        self._scan(n, s, opens_rung)
+
+    def _scan(self, n, s, opens_rung):
+        i = 0
+        while i < len(s):
+            if self._string:
+                i = self._close_multiline(s, i)
+                continue
+            c = s[i]
+            if c == "#":  # a comment runs to the end of the line
+                return
+            if s.startswith('"""', i) or s.startswith("'''", i):
+                self._string = s[i:i + 3]
+                i += 3
+                continue
+            if c == '"':
+                i = self._end_of_basic(s, i + 1)
+                continue
+            if c == "'":
+                end = s.find("'", i + 1)
+                i = len(s) if end < 0 else end + 1
+                continue
+            if c in "[{":
+                if c == "{" and self._rung_array and self._brackets == ["["]:
+                    self.inline.append(n)
+                if c == "[" and opens_rung and not self._brackets:
+                    self._rung_array = True
+                self._brackets.append(c)
+            elif c in "]}" and self._brackets:
+                self._brackets.pop()
+                if not self._brackets:
+                    self._rung_array = False
+            i += 1
+
+    @staticmethod
+    def _end_of_basic(s, i):
+        """The index just past a one-line "basic" string's closing quote, from i just past its opening."""
+        while i < len(s):
+            if s[i] == "\\":
+                i += 2
+            elif s[i] == '"':
+                return i + 1
+            else:
+                i += 1
+        return len(s)
+
+    def _close_multiline(self, s, i):
+        """Inside a multi-line string from i: the index just past its closing quotes, or the line's end."""
+        quote = self._string[0]
+        while i < len(s):
+            if quote == '"' and s[i] == "\\":  # an escape, or a line-ending backslash in a basic string
+                i += 2
+            elif s.startswith(self._string, i):
+                # Up to two more quotes may directly precede the closing three: the whole run ends the string.
+                while i < len(s) and s[i] == quote:
+                    i += 1
+                self._string = None
+                return i
+            else:
+                i += 1
+        return len(s)
 
 
 def _type_name(value):
@@ -216,15 +289,19 @@ def _validate(text, doc):
     if not isinstance(rungs, list) or not all(isinstance(r, dict) for r in rungs):
         raise LadderError("rung must be an array of tables ([[rung]])", line=rung_line)
 
-    aligned = len(idx.headers) == len(rungs)
+    # Each rung's own line: its [[rung]] header, or in the inline form the line its { opens on. A valid file
+    # has one form or the other, never both. Per-key lines exist for [[rung]] tables only.
+    starts = idx.headers or idx.inline
+    aligned = len(starts) == len(rungs)
+    keyed = aligned and bool(idx.headers)
     seen = {}  # name -> (rung number, line)
     out = []
     for i, rung in enumerate(rungs):
         number = i + 1
-        header = idx.headers[i] if aligned else rung_line
+        header = starts[i] if aligned else rung_line
 
         def line_of(key):
-            found = idx.keys[i].get(key) if aligned else None
+            found = idx.keys[i].get(key) if keyed else None
             return found or header
 
         name = rung.get("name")
@@ -264,7 +341,7 @@ def _validate(text, doc):
         if errors:
             line, reason = min(errors, key=lambda e: e[0] if e[0] is not None else float("inf"))
             raise LadderError(reason, line=line)
-        seen[name] = (number, idx.keys[i].get("name") if aligned else None)
+        seen[name] = (number, line_of("name") if aligned else None)
         out.append({key: rung[key] for key in FIELDS})
     return out
 
@@ -275,17 +352,41 @@ def load(path=None):
     Raises LadderError (with .line and .code) when a present file cannot be read or does not validate.
     """
     path = default_path() if path is None else path
-    if not os.path.lexists(path):
+    try:
+        # lstat, not os.path.lexists: lexists reads every error as "nothing there", so a file in a directory
+        # that cannot be searched would give the built-in ladder.
+        st = os.lstat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        _refuse_dangling_parent(path)
         return {"source": "built-in", "rungs": [dict(r) for r in BUILT_IN]}
+    except OSError as e:
+        raise LadderError("cannot read it: %s" % (e.strerror or e))
     try:
         with open(path, "rb") as f:
             data = f.read()
     except OSError as e:
-        if os.path.islink(path) and not os.path.exists(path):
-            raise LadderError("cannot read it: a symlink to a missing file (%s)" % os.readlink(path))
+        if isinstance(e, FileNotFoundError) and stat.S_ISLNK(st.st_mode):
+            raise LadderError("cannot read it: a symlink to a missing file (%s)" % _target(path))
         raise LadderError("cannot read it: %s" % (e.strerror or e))
     text, doc = _parse(data)
     return {"source": path, "rungs": _validate(text, doc)}
+
+
+def _target(link):
+    try:
+        return os.readlink(link)
+    except OSError as e:
+        return "unreadable: %s" % (e.strerror or e)
+
+
+def _refuse_dangling_parent(path):
+    """Nothing is at the path. Refuse it when the cause is a dangling symlink on the way, not a missing step."""
+    parent = os.path.dirname(path)
+    while parent and parent != os.path.dirname(parent):
+        if os.path.islink(parent) and not os.path.exists(parent):
+            raise LadderError("cannot read it: %s is a symlink to a missing directory (%s)"
+                              % (parent, _target(parent)))
+        parent = os.path.dirname(parent)
 
 
 class _Parser(argparse.ArgumentParser):
