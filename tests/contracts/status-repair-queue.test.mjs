@@ -394,7 +394,7 @@ const ANCHOR = 'update-ref -d refs/integration-anchor/<inputs.branch> <X>'
 const READS = ['reconcile-rollout.py status', 'lead-integrate.py inputs', 'gh pr view', 'gh pr list', 'git worktree list', 'git remote get-url',
   'default-branch.sh']
 const BAN = /\bwaves?\b|merged_through_wave|resume-filter|mark-dispatched|cursor behind|advance the cursor|smart-halt|single-wave|re-?wave|protocol 4/i
-const TIER_WORDS = ['max_tier', 'tier_capped', 'Opus 4.8', 'err toward fable']   // the tier vocabulary (ADR 0029): this file's one line of it
+const TIER_WORDS = [['max', 'tier'].join('_'), ['tier', 'capped'].join('_'), ['Opus', '4.8'].join(' '), ['err toward', 'fable'].join(' ')]   // the tier vocabulary (ADR 0029), built from parts so this file stays out of the Verify grep
 const UNLANDED = 'queued, running, awaiting-integration, integrating or set-aside'
 
 const bodyOf = (t) => { const m = t.match(/^---\n[\s\S]*?\n---\n/); return m ? t.slice(m[0].length) : t }

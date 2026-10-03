@@ -2,7 +2,8 @@
 // model's name and the old step-up advice are gone, but for the compat sites that must still name a legacy key, each
 // pinned at an exact line count. Those are: execute's one ignored-ceiling warning (p13-2), the one constant naming
 // the legacy keys a supersede's carry maps, and the tests that feed those keys to the compat paths, each test file
-// keeping its tier words on as few lines as it needs (one constant line where it only names them).
+// keeping its tier words on as few lines as it needs. A test that only names the words builds them from parts, as
+// this file does, so it adds no hit.
 //
 // One pure function, countHits(files), counts the matching lines per file; the real tree and the controls run
 // through it, so the matcher can't pass vacuously. Reads files only. The words are built from parts here, so this
@@ -26,9 +27,6 @@ const ALLOW = {
   'tests/lead-integrate.test.sh': 2,                    // C12: stale stamps give the neutral rung record
   'tests/contracts/execute-queue.test.mjs': 6,          // the ladder and integrate-args rules and their control
   'tests/engine-ladder.test.mjs': 3,                    // p13-2's static check of skills/execute
-  'tests/contracts/schedule-queue.test.mjs': 1,         // its TIER_WORDS constant
-  'tests/contracts/status-repair-queue.test.mjs': 1,    // its TIER_WORDS constant
-  'tests/unfinished-rollout.test.sh': 1,                // K6's TIER_KEY constant
 }
 
 // { file: text } for every file under skills/ and tests/, minus __pycache__ and this file.
@@ -75,9 +73,14 @@ test('control: a second cap-key comment in reconcile-rollout.py fails', () => {
   fails({ ...real, [f]: `${real[f]}\n# a stale ${WORDS.cap}: stamp is dropped\n` })
 })
 
-test('control: a tier word on a second line of an allowlisted test file fails', () => {
-  const f = 'tests/unfinished-rollout.test.sh'
+test('control: a tier word on an extra line of an allowlisted test file fails', () => {
+  const f = 'tests/lead-integrate.test.sh'
   fails({ ...real, [f]: `${real[f]}\n# the old default was ${WORDS.model}\n` })
+})
+
+test('control: a tier word spelled out in a test that builds it from parts fails', () => {
+  const f = 'tests/unfinished-rollout.test.sh'
+  fails({ ...real, [f]: real[f].replace('TIER_KEY=tier_"capped"', `TIER_KEY=${WORDS.cap}`) })
 })
 
 test('control: a removed compat site fails too (the count is exact, not a ceiling)', () => {

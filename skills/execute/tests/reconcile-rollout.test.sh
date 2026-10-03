@@ -168,7 +168,7 @@ mknote task-legacy-esc in_progress
 if berr=$(HOME="$LH" python3 "$SCRIPT" reconcile --result "$TMP/legacy.json" --tasks-dir "$TMP" 2>&1 >/dev/null); then
   echo "FAIL - legacy (refused ladder): reconcile exited 0"; fail=1
 else
-  case "$berr" in *"ERROR: task-legacy-esc: a pre-3.0.0 row (escalated, no rung) — the ladder could not be read"*) echo "ok   - legacy (refused ladder): an ERROR naming the slug, exit 1" ;;
+  case "$berr" in *"ERROR: task-legacy-esc: a pre-3.0.0 row (escalated, no rung) — the ladder could not be read ($LH/.config/thread/ladder.toml:1: rung 1: "*) echo "ok   - legacy (refused ladder): an ERROR naming the slug and the file's <path>:<line>: <reason>, exit 1" ;;
     *) echo "FAIL - legacy (refused ladder): stderr (got: $berr)"; fail=1 ;; esac
 fi
 refute "legacy (refused ladder): no rung: stamped" "rung:" "$TMP/task-legacy-esc.md"

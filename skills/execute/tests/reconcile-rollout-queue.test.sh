@@ -472,7 +472,7 @@ printf '[[rung]]\nname = "Opus"\n' > "$TMP/status-home-bad/.config/thread/ladder
 J=$(SH="$TMP/status-home-bad" st); rc=$?
 ok "$rc" 0 "status: a refused ladder file still exits 0"
 ok "$(q "$J" '[d["ladder"]["rungs"], d["ladder"]["source"].endswith("/.config/thread/ladder.toml"), bool(d["ladder"]["error"])]')" '[[],true,true]' "status: a refused ladder: no rungs, its path, an error"
-has "$(q "$J" 'd["ladder"]["error"]')" "ladder.toml:" "status: … the error names the file (and its line)"
+has "$(q "$J" 'd["ladder"]["error"]')" "$TMP/status-home-bad/.config/thread/ladder.toml:1: rung 1: " "status: … the error names the file and its line (<path>:<line>: <reason>)"
 ok "$(q "$J" 'sorted(set(t["rungDrift"] for t in d["tasks"]))')" '[""]' "status: … and no row drifts"
 
 # ── resume: a merged PR whose note was never marked (p6-8), against a stub gh ────────────────────

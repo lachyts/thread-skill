@@ -530,7 +530,7 @@ ok "$rc" 0 "K5: with the RACE decided: line in ## Notes, it carries"
 ok "$(fm r1.md rollout)|$(fm q1.md rollout)" "rollout: \"[[$N]]\"|rollout: \"[[$N]]\"" "K5: … both unlanded tasks"
 
 # ── K6: carry maps the legacy stamps of each carried task to a rung ──────────────────────────────────
-TIER_KEY=tier_capped   # the stale cap stamp's key: the only line in this file that spells it
+TIER_KEY=tier_"capped"   # the stale cap stamp's key, quoted in two parts so this file stays out of the Verify grep
 scen k6
 CH="$S/carry-home"
 mkro $P.md "$R" "$DEMO" "$PAUSED"
@@ -606,7 +606,7 @@ printf '[[rung]]\nname = "Opus"\n' > "$CH/.config/thread/ladder.toml"
 before=$(sums)
 carry --from "$T/$P.md" --dry-run
 ok "$rc|$out" "2|" "K6: a refused ladder file and a task that needs the top rung: the preview refuses, exit 2, no stdout"
-has "$err" "ERROR: carry: ladder file refused: $CH/.config/thread/ladder.toml:" "K6: … one ERROR naming the file and its line"
+has "$err" "ERROR: carry: ladder file refused: $CH/.config/thread/ladder.toml:1: rung 1: " "K6: … one ERROR naming the file and its line (<path>:<line>: <reason>)"
 ok "$(printf '%s\n' "$err" | wc -l | tr -d ' ')" 1 "K6: … one line"
 ok "$(sums)" "$before" "K6: … writing nothing"
 carry --from "$T/$P.md" --to "$T/$N.md"
