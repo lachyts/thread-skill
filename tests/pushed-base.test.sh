@@ -294,7 +294,16 @@ write_reg "$P"
 run "$C" ""
 ok "$rc" 3 "15. primary found via the registry, --also \"\" → 3"
 has "$err" "local master in $P is 1 commit(s) ahead" "15. … naming the primary"
-rm -f "$reg"
+# 15b. the same while a rollout runs: the reset remedy waits for it (ADR 0031)
+mkdir -p "$home/repos/obsidian/Work/Tasks"
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n---\n' > "$home/repos/obsidian/Work/Tasks/demo-rollout-2026-10-03.md"
+run "$C" ""
+ok "$rc" 3 "15b. still blocked → 3"
+has "$err" "drops the local copies once no rollout runs on this primary checkout (ADR 0031; now: demo-rollout-2026-10-03)" "15b. … the reset remedy waits for the running rollout"
+printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\npaused: 2026-10-03T10:00+10:00\n---\n' > "$home/repos/obsidian/Work/Tasks/demo-rollout-2026-10-03.md"
+run "$C" ""
+lacks "$err" "once no rollout runs" "15b. … and not once it is hard-paused"
+rm -rf "$home/repos" "$reg"
 
 # 16. the live shape: rollout clone in sync, primary diverged by a THREAD.md-only commit, registry-found
 fresh; P="$tmp/p$k"; mkclone "$O" "$P"

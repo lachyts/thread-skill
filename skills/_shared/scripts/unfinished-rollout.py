@@ -62,7 +62,17 @@ Outcomes, the first that applies:
      finish it with /thread:schedule <its project> --regenerate), and /thread:repair for a candidate named
      by the `supersedes:` of a note that has run.
 
-Output. stdout is exactly one line on exit 0 and 3: `none` | `supersede <slug>` | `interrupted <prior-slug>
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py running [--tasks-dir <dir>]
+
+`running` answers land.sh's hold (ADR 0031): which rollouts may have a lead running on the primary checkout
+right now, in any repo, since every lead runs its engine from it. A RUNNING rollout is a live rollout note at
+the current protocol (`protocol_version: 5`, the only one execute runs), tagged `rollout`, neither `done` nor
+`dropped`, and not hard-paused (`paused:` valued). It counts a note whose every task merged but whose
+completion ceremony has not run (its lead is still at work), and a never-started one (cheap to hold for, and a
+hard pause takes it out); a protocol-3 note is never counted, since this engine refuses to run it. stdout:
+`running <slug>` per rollout, sorted, or `none`; exit 0. A missing tasks dir is exit 2.
+
+Output (check). stdout is exactly one line on exit 0 and 3: `none` | `supersede <slug>` | `interrupted <prior-slug>
 <new-slug>` | `file <slug> <relpath>` | `refuse <slug>[,<slug>…]`. Slugs are filename stems; an unfinished
 note is root-only, so `<tasks dir>/<slug>.md` is exact. `WARN:` lines go only to stderr and never change
 stdout or the exit code. Exit 2 prints no stdout and one `unfinished-rollout:` stderr line: a missing or
@@ -398,6 +408,31 @@ def remedy(x) -> str:
             "rollout per repo: wait for it to finish, or /thread:status then /thread:repair")
 
 
+RUNNING_PROTOCOL = "5"
+
+
+def cmd_running(args, rr) -> int:
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    if not tasks_dir.is_dir():
+        die(f"tasks dir {tasks_dir} not found")
+    running = []
+    for path in sorted(tasks_dir.glob("*.md")):
+        try:
+            note = rr.Note(path)
+        except (ValueError, OSError):
+            continue
+        if "rollout" not in tags_of(rr, note) or rr._status(note) in CLOSED:
+            continue
+        if rr._scalar(note.get("protocol_version")) != RUNNING_PROTOCOL or rr._valued(note.get("paused")):
+            continue
+        running.append(path.stem)
+    for slug in running:
+        print(f"running {slug}")
+    if not running:
+        print("none")
+    return 0
+
+
 def finish(warns, line, code, errors=()):
     for w in warns:
         print(w, file=sys.stderr)
@@ -416,9 +451,11 @@ def main() -> int:
     c.add_argument("--tasks", default=None, help="comma-separated task slugs (a --tasks run): their shared projects")
     c.add_argument("--regenerate", action="store_true", help="this run may supersede (schedule --regenerate)")
     c.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
+    r = sub.add_parser("running", help="print the rollouts that may have a lead running on the primary checkout")
+    r.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help="task-note dir (default: the vault's Work/Tasks)")
     args = p.parse_args()
     rr = load_rr()
-    return cmd_check(args, rr)
+    return cmd_running(args, rr) if args.cmd == "running" else cmd_check(args, rr)
 
 
 if __name__ == "__main__":

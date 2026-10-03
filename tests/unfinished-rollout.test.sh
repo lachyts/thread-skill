@@ -8,6 +8,7 @@
 #           write -> carry -> step 7 -> close-out (stamps, then the move), crash windows included.
 #   I1-I7   § 0's interrupted finish, then a cancel: the incomplete note (reconcile-rollout.py incomplete) is
 #           refused by `next`, reported by `status` and the check, until a completed supersede closes it.
+#   R1-R4   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031)
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
 #           without its `## Queue` row) never wedges the queue, started or not.
 # Temp vaults, temp git repos with literal origin URLs (only `git remote get-url` reads them) and a stub gh.
@@ -759,6 +760,30 @@ PY
 ok "$(grep -c '\[\[g' "$T/ro-g.md")" 0 "D3: g's row is gone"
 nx ro-g
 ok "$rc|$(starts)" "0|['e', 'f']" "D3: … and next runs the rest"
+
+# ---- running: the rollouts that may have a lead on the primary checkout (land.sh's hold, ADR 0031) ----
+# run [args...] -> $out, $err, $rc
+run() { python3 "$CHECK" running --tasks-dir "$T" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
+scen r1
+run
+ok "$rc|$out" "0|none" "R1: no rollout note → none"
+mkro ro-live.md "$R"
+mkro ro-other.md /elsewhere/repo   # any repo counts: every lead runs from the one primary checkout
+ST=open PV=3 mkro ro-proto3.md "$R"
+mkro ro-paused.md "$R" "$PAUSED"
+ST=done mkro ro-done.md "$R"
+ST=dropped mkro ro-dropped.md "$R"
+mkdir -p "$T/Archive"; mkro Archive/ro-filed.md "$R"
+mkt task.md ro-live open
+run
+ok "$rc|$out" "0|running ro-live
+running ro-other" "R2: protocol 5, open, unpaused, live, in any repo; never protocol 3, paused, done, dropped or archived"
+mkt done-task.md ro-done merged
+mkro ro-ceremony.md "$R"; mkt t2.md ro-ceremony merged
+run
+has "$out" "running ro-ceremony" "R3: every task merged but its completion ceremony not run: still running"
+python3 "$CHECK" running --tasks-dir "$S/nowhere" > "$S.out" 2> "$S.err"; rc=$?
+ok "$rc|$(cat "$S.out")" "2|" "R4: a missing tasks dir is exit 2 with no stdout"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

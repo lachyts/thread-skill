@@ -551,9 +551,10 @@ for w in nohup disown setsid '--watch' 'sleep ' default-branch.sh 'gh pr edit' '
          'commit -a' ' --all' ' -am' 'budget()' 'push -u' '--set-upstream' 'branch -D' 'branch -d' ' --delete'; do
   hasnt "$code" "$w" "structural: no [$w]"
 done
-# ` checkout` is never a git command here; the two own-branch result lines that name the checkout are exempt.
-ok "$(printf '%s\n' "$code" | grep ' checkout' | grep -v 'stuck: checkout moved: on' | grep -vc 'commits this checkout lacks')" 0 \
-   "structural: no [ checkout] (bar the two own-branch results that name the checkout)"
+# ` checkout` is never a git command here; the two own-branch result lines that name the checkout, and the
+# primary-checkout hold's two lines (ADR 0031), are exempt.
+ok "$(printf '%s\n' "$code" | grep ' checkout' | grep -v 'stuck: checkout moved: on' | grep -v 'the primary checkout' | grep -vc 'commits this checkout lacks')" 0 \
+   "structural: no [ checkout] (bar the own-branch results and the primary-checkout hold that name the checkout)"
 ok "$(printf '%s\n' "$code" | grep -cE '(^|[^&])&[[:space:]]*$')" 0 "structural: no trailing &"
 ok "$(printf '%s\n' "$code" | grep -E 'git push' | grep -cE -- '--force|-f |[[:space:]]"?\+')" 0 "structural: no force push"
 ok "$(head -n 1 "$LAND")" "#!/usr/bin/env bash" "structural: the shebang has no -u"
@@ -1386,6 +1387,41 @@ has "$err" "land: checks infra: build (cancelled)" "case 70 infra: the INFRA fie
 ghreset; mkbranch c70b; seedown OPEN "$OB" 0000 ""
 own --; ores "case 70 empty login" 0 "not landed: PR https://github.com/o/x/pull/1 belongs to an unknown author"
 nopush "case 70 empty login"
+
+# ==== The primary checkout holds while a rollout runs (ADR 0031) ===========================================
+# preg <dir>: a plugin registry naming <dir> as a directory source; $PCFG is its CLAUDE_CONFIG_DIR.
+# prollout [<extra frontmatter line>]: a running rollout note in the default tasks dir under $HOME.
+PCFG="$tmp/pcfg"; PTASKS="$HOME/repos/obsidian/Work/Tasks"
+preg() { mkdir -p "$PCFG/plugins"; printf '{"thread": {"source": {"source": "directory", "path": "%s"}, "installLocation": "%s"}}\n' "$1" "$1" > "$PCFG/plugins/known_marketplaces.json"; }
+prollout() { mkdir -p "$PTASKS"; printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n%s\n---\n' "${1:-}" > "$PTASKS/demo-rollout-2026-10-03.md"; }
+
+echo "== 71. protected, local behind, the primary checkout while a rollout runs"
+ghreset; mkrepo c71; srvcommit c71 x.txt X; X=$(srvref c71 master); B0=$(git -C "$W" rev-parse HEAD); edit
+preg "$W"; prollout
+land CLAUDE_CONFIG_DIR="$PCFG" -- --slug c71 -- "$W" "$W/THREAD.md"
+res "case 71" 0 "queued https://github.com/o/c71/pull/1"
+ok "$(git -C "$W" rev-parse HEAD^)" "$B0" "case 71: not fast-forwarded (C's parent is the old base)"
+has "$err" "land: held the primary checkout at ${B0:0:7}, not fast-forwarded: [[demo-rollout-2026-10-03]] running on it" "case 71: the held note names the rollout"
+ghreset; mkrepo c71b; srvcommit c71b x.txt X; X=$(srvref c71b master); edit
+preg "$W"; prollout "paused: 2026-10-03T10:00+10:00"
+land CLAUDE_CONFIG_DIR="$PCFG" -- --slug c71b -- "$W" "$W/THREAD.md"
+res "case 71b" 0 "queued https://github.com/o/c71b/pull/1"
+ok "$(git -C "$W" rev-parse HEAD^)" "$X" "case 71b: a hard-paused rollout releases it: fast-forwarded to X"
+hasnt "$err" "held the primary checkout" "case 71b: no held note"
+ghreset; mkrepo c71c; srvcommit c71c x.txt X; X=$(srvref c71c master); edit
+prollout
+land -- --slug c71c -- "$W" "$W/THREAD.md"
+ok "$(git -C "$W" rev-parse HEAD^)" "$X" "case 71c: a repo that is no directory source is never held"
+
+echo "== 72. unprotected, origin moved, the primary checkout while a rollout runs"
+ghreset; mkrepo c72; c0; srvcommit c72 x.txt X; S=$(srvref c72 master); edit
+preg "$W"; prollout
+land CLAUDE_CONFIG_DIR="$PCFG" GH_PROT=false -- "$W" "$W/THREAD.md"
+res "case 72" 0 "not landed: the primary checkout holds ([[demo-rollout-2026-10-03]] running on it); land once it has finished"
+ok "$(srvref c72 master)" "$S" "case 72: server untouched"
+ok "$(git -C "$W" rev-parse HEAD)" "$(made)" "case 72: local HEAD is this run's commit, never rebased or moved"
+ok "$(wtcount)" 1 "case 72: no scratch worktree"
+rm -rf "$PCFG" "$PTASKS"
 
 echo
 [ "$fail" = 0 ] && echo "land.test.sh: ALL PASS" || echo "land.test.sh: FAILED"

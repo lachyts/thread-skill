@@ -16,7 +16,8 @@
 # stderr carries `land: …` lines: `land: commit <sha40>` (this run's commit, final SHA after any rebase)
 # or `land: nothing committed`, `land: carried <N> earlier close-out commit(s)`, `land: nothing to land`,
 # `land: dropped <rel> (…)`, `land: ff refused: …`, `land: label failed: …`, `land: update-branch failed: …`,
-# `land: skipped <step>: deadline`, and git's or gh's own diagnostics.
+# `land: skipped <step>: deadline`, `land: held the primary checkout at <sha>, not fast-forwarded: …`, and
+# git's or gh's own diagnostics.
 #
 # Route (landing-register.py decides may-push; the repo's branch protection decides how):
 #   commit-only · swept by the daily sweep · listed on the landing register · no GitHub origin · a
@@ -24,6 +25,9 @@
 #   (a non-default checkout may need one ls-remote to learn the default when origin/HEAD is unset).
 #   Unprotected default branch → push it (a diverged origin: one rebase in a scratch worktree, then the
 #   branch moves by a two-tree read-tree, which keeps non-overlapping local changes exactly).
+#   The primary checkout (a directory-source plugin install) never moves while a rollout runs on it
+#   (ADR 0031): S4 skips its fast-forward, and a diverged unprotected origin is `not landed` instead of the
+#   rebase-and-move. A protected landing is unaffected: its PR merges on GitHub.
 #   Protected → push HEAD unchanged to close/<cdate>-<slug>-<sha12>, open the PR over REST, label it
 #   `landing`, queue `gh pr merge --auto --merge`, and update-branch once when origin/<d> moved on.
 #
@@ -304,8 +308,12 @@ main() {
     if [ "$class" = landable ] && [ "$b" != "$d" ]; then class=deferred; reason="on $b, not $d"; fi
   fi
 
+  # The primary checkout (a directory-source plugin install, which every rollout's lead runs its engine from)
+  # never moves while a rollout runs on it (ADR 0031): no fast-forward in S4, no rebase-and-move in S11.
+  hold=
   # ---- S4. Refresh: only a landable repo on its default branch ------------------------------------------
   if [ "$class" = landable ] && [ "$b" = "$d" ]; then
+    hold=$(plugin_hold)
     bounded git fetch --no-tags --no-write-fetch-head origin "+refs/heads/$d:refs/remotes/origin/$d" 2>"$tmpd/fetch.err"; rc=$?
     net_rc "$rc" fetch required "$tmpd/fetch.err" git; rc=$?
     if [ "$rc" = 124 ]; then class=pending; pending=$NET_ERR
@@ -315,7 +323,9 @@ main() {
         && stuck_early "local branch has no common history with origin/$d"
     elif [ "$(git rev-parse HEAD)" != "$(git rev-parse "refs/remotes/origin/$d")" ] \
          && git merge-base --is-ancestor HEAD "refs/remotes/origin/$d"; then
-      if ! git merge --ff-only --no-autostash -q "refs/remotes/origin/$d" >"$tmpd/ff.err" 2>&1; then
+      if [ -n "$hold" ]; then
+        echo "land: held the primary checkout at $(git rev-parse --short HEAD), not fast-forwarded: $hold"
+      elif ! git merge --ff-only --no-autostash -q "refs/remotes/origin/$d" >"$tmpd/ff.err" 2>&1; then
         echo "land: ff refused: $(first_line "$tmpd/ff.err")"
       fi
     fi
@@ -418,6 +428,20 @@ main() {
   esac
 }
 
+# plugin_hold: when the repo's toplevel is (or contains) a directory-source plugin marketplace, print why it
+# holds: the rollouts unfinished-rollout.py counts as running (ADR 0031), or a failed check, which holds too
+# (holding only skips a refresh). Prints nothing for any other repo, or when nothing runs.
+plugin_hold() {
+  local top out rc
+  top=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
+  bash "$here/../../execute/scripts/self-rollout-check.sh" "$top" >/dev/null 2>&1
+  [ $? = 3 ] || return 0
+  out=$(python3 "$here/unfinished-rollout.py" running 2>/dev/null); rc=$?
+  if [ "$rc" != 0 ]; then echo "the running-rollout check failed (rc $rc)"; return 0; fi
+  [ "$out" = none ] && return 0
+  printf '%s\n' "$out" | sed 's/^running /[[/; s/$/]]/' | paste -sd ' ' - | sed 's/$/ running on it/'
+}
+
 # ---- S11. Unprotected: push the default branch, rebasing once in a scratch worktree if origin moved -------
 land_unprotected() {
   local od="refs/remotes/origin/$d" old N rc
@@ -429,6 +453,7 @@ land_unprotected() {
     finish landed 0
   fi
   [ -n "$has_merge" ] && finish "stuck: local merge commit on $d; not rebased" 1
+  [ -n "$hold" ] && finish "not landed: the primary checkout holds ($hold); land once it has finished" 0
   [ $((LAND_DEADLINE - SECONDS)) -ge 1 ] || finish "stuck: deadline passed before rebase" 1
   old=$(git rev-parse HEAD)
   scratch_rebase "$old" "$od"; rc=$?
