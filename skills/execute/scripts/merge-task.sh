@@ -201,8 +201,16 @@ classify_failed_steps() (  # stdin: failed step names; stdout: "infra" | "genuin
   # The allowlist is the proof of "infra", so it matches WHOLE WORDS only: a token inside another word
   # proves nothing ("pip" in "pipeline", "apt" in "adapter"/"capture", "fetch" in "prefetch"). Portable word
   # boundaries (\b and [[:<:]] differ between GNU and BSD regex): every non-alphanumeric becomes a space and
-  # the line is padded with spaces, so each token is matched as " token ". Inflections are spelled out.
-  local allow=' (install(s|ed|ing)?|dependenc(y|ies)|set *up|checkout|cache[sd]?|download(s|ed|ing)?|provision(s|ed|ing)?|restore[sd]?|bootstrap|configure[sd]?|pip|poetry|npm +ci|npm +install|yarn|apt|brew|fetch|clone) '
+  # the line is padded with spaces, so each token is matched as " token ". Inflections are spelled out:
+  # every setup VERB carries its -s/-ed/-ing forms (an unlisted form would silently classify genuine).
+  # Nouns and tool names (checkout, setup, pip, poetry, yarn, apt, brew, npm ci/install) stay bare.
+  # KNOWN GAP (follow-up, out of scope here): ONE whole-word allowlist hit still makes the WHOLE line
+  # infra, however much real work the rest of the step names. "Restore DB snapshot and check integrity",
+  # "Download fixtures and compare golden output", "Configure and run e2e", "yarn jest" and "pip-audit"
+  # all classify infra today; verif/validat in the denylist covers only the "verify" wording. Likely fix:
+  # a word-bounded denylist of work verbs (check, compare, diff, e2e, smoke, audit) where "check" must
+  # not match "checkout".
+  local allow=' (install(s|ed|ing)?|dependenc(y|ies)|set *up|checkout|cach(e|es|ed|ing)|download(s|ed|ing)?|provision(s|ed|ing)?|restor(e|es|ed|ing)|bootstrap(s|ped|ping)?|configur(e|es|ed|ing)|pip|poetry|npm +ci|npm +install|yarn|apt|brew|fetch(es|ed|ing)?|clon(e|es|ed|ing)) '
   shopt -s nocasematch
   while IFS= read -r line; do
     [[ $line =~ ^[[:space:]]*$ ]] && continue
@@ -484,7 +492,25 @@ if [ "${1:-}" = "--self-test-classify" ]; then
   st infra   "punctuation splits words (checkout)" 'actions/checkout@v4\n'
   st infra   "apt-get => apt word" 'Run apt-get update\n'
   st infra   "setup-python => setup word" 'setup-python\n'
-  st infra   "dependency inflection" 'Install dependency\n'
+  # Inflections: in each case the inflected form is the ONLY allowlist token on the line, so a typo in its
+  # suffix group turns the suite red (other words on the line are deliberately not allowlisted).
+  st infra   "dependency word alone" 'Resolve dependency\n'
+  st infra   "dependencies word alone" 'Dependencies\n'
+  st infra   "installing" 'Installing deps\n'
+  st infra   "installed" 'Installed deps\n'
+  st infra   "downloaded" 'Downloaded artifacts\n'
+  st infra   "downloading" 'Downloading artifacts\n'
+  st infra   "provisioning" 'Provisioning runner\n'
+  st infra   "configured" 'Configured runner\n'
+  st infra   "configuring" 'Configuring runner\n'
+  st infra   "caching" 'Caching deps\n'
+  st infra   "restoring" 'Restoring deps\n'
+  st infra   "bootstrapping" 'Bootstrapping\n'
+  st infra   "bootstrapped" 'Bootstrapped runner\n'
+  st infra   "fetching" 'Fetching submodules\n'
+  st infra   "fetched" 'Fetched submodules\n'
+  st infra   "cloning" 'Cloning submodules\n'
+  st infra   "cloned" 'Cloned submodules\n'
   echo; [ "$st_fail" -eq 0 ] && echo "classifier: ALL PASS" || echo "classifier: SOME FAILED"
   exit "$st_fail"
 fi
