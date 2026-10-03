@@ -4,13 +4,13 @@
 # with close's `# thread:land-own` snippet (cases 42–70). Fixture repos talk to bare "servers" under $tmp/srv
 # through a fake ssh that maps git@github.com:<o>/<r>.git and ssh://git@github.com/<o>/<r>.git there; a fake
 # `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
-# labels, update-branch, the user, hold comments and per-SHA check-runs and status. Every handed path goes
-# through a symlinked alias of the temp dir, so the physical-path handling is exercised on every run. Hang
-# stubs run a non-exec `sleep 40 | cat`. A call handed any `*=hang*` setting runs under LAND_TIMEOUT=$HANG (an
-# explicit LAND_TIMEOUT after it wins, as case 35's does) and asserts elapsed under $HANG_BOUND; every other
-# call has the 15 s suite default, room for a fake gh slowed by `make test`'s concurrent suites. Hermetic:
-# HOME, the global git config and TMPDIR are temp, and the caller's GIT_DIR & co. are unset. bash
-# 3.2-compatible (macOS).
+# labels, update-branch, the user, PR bodies, hold comments and per-SHA check-runs and status. Every handed
+# path goes through a symlinked alias of the temp dir, so the physical-path handling is exercised on every run.
+# Hang stubs run a non-exec `sleep 40 | cat`. A call handed any `*=hang*` setting runs under
+# LAND_TIMEOUT=$HANG (an explicit LAND_TIMEOUT after it wins, as case 35's does) and asserts elapsed under
+# $HANG_BOUND; every other call has the 15 s suite default, room for a fake gh slowed by `make test`'s
+# concurrent suites. Hermetic: HOME, the global git config and TMPDIR are temp, and the caller's GIT_DIR & co.
+# are unset. bash 3.2-compatible (macOS).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
@@ -167,6 +167,8 @@ has "$(ghlog)" "pr list -R o/c1 --state all --limit 200" "case 1: phase 2 is --s
 has "$(ghlog)" "pr merge 1 -R o/c1 --auto --merge" "case 1: auto-merge queued with a merge commit"
 has "$(ghlog)" "-f labels[]=landing" "case 1: labelled landing over REST"
 for bad in "pr edit" "pr create" "update-branch"; do hasnt "$(ghlog)" "$bad" "case 1: no $bad"; done
+ok "$(head -n 1 "$GH_STATE/body.txt")" "Landing for \`$(sha12)\` (ADR 0028)." "case 1: the PR body names the landing, not a caller"
+hasnt "$(cat "$GH_STATE/body.txt")" "thread:close" "case 1: the PR body does not say thread:close"
 ok "$(git -C "$W" rev-parse refs/heads/master)" "$C" "case 1: the local default keeps the commit"
 
 echo "== 2. protected, diverged with a stranded C0"
@@ -558,6 +560,7 @@ ok "$(printf '%s\n' "$code" | sed 's/"[^"]*"//g' | grep -c ' checkout')" 0 "stru
 ok "$(printf '%s\n' "$code" | grep -cE '(^|[^&])&[[:space:]]*$')" 0 "structural: no trailing &"
 ok "$(printf '%s\n' "$code" | grep -E 'git push' | grep -cE -- '--force|-f |[[:space:]]"?\+')" 0 "structural: no force push"
 ok "$(head -n 1 "$LAND")" "#!/usr/bin/env bash" "structural: the shebang has no -u"
+ok "$(printf '%s\n' "$code" | grep -c 'thread:close')" 0 "structural: land.sh names no caller in what it writes"
 ok "$(printf '%s\n' "$code" | grep -E '(^|[^[:alnum:]_])(git (push|fetch|ls-remote)|gh )' | grep -vcE '^[[:space:]]*(out=\$\()?bounded ')" 0 \
    "structural: every git push|fetch|ls-remote and gh line starts with bounded"
 has "$src" "alarm \$t; waitpid(\$pid,0); my \$st=\$?; alarm 0;
@@ -839,6 +842,8 @@ for sh in "$BASH32" "${shells[@]}"; do
   ok "$(cnt "$(ghlog)" "pr merge 1 ")" 1 "$L: one pr merge"
   has "$(ghlog | grep -F 'pr merge 1 ')" "--auto" "$L: the merge is queued with --auto"
   has "$(ghlog | grep -F '/pulls ')" "title=📝 docs(handoff): x -f head=close/" "$L: the PR is titled with the doc's commit subject"
+  has "$(cat "$GH_STATE/body.txt")" "Landing for \`$(sha12)\`" "$L: the PR body names the doc's landing"
+  hasnt "$(cat "$GH_STATE/body.txt")" "thread:close" "$L: the handoff's PR body does not say thread:close"
   hasnt "$(ghlog)" "pr checks" "$L: no pr checks"; hasnt "$(ghlog)" "--watch" "$L: no --watch"
   # Unprotected: pushed.
   ghreset; mkrepo "c41u${#sh}"; mkdoc; fill41 "📝 docs(handoff): x"
@@ -999,6 +1004,9 @@ has "$err" "land: upstream origin/master (was none)" "case 42: the upstream line
 ok "$(digest)" "$(fr_digest)" "case 42: land: digest equals fresh-review's diff6"
 ok "$([ -n "$(digest)" ] && [ "$(digest)" != da39a3 ] && echo y)" y "case 42: the digest is not the empty da39a3"
 has "$(git -C "$W" config branch.$OB.remote)" origin "case 42: branch.<B>.remote is origin"
+ok "$(head -n 1 "$GH_STATE/body.txt")" "Own-branch landing for \`$OB\` (ADR 0028 § 2): reviewed by /fresh-review before its merge is queued." \
+   "case 42: the own-branch PR body names the landing, not a caller"
+hasnt "$(cat "$GH_STATE/body.txt")" "thread:close" "case 42: the own-branch PR body does not say thread:close"
 
 echo "== 43. own branch: a second plain call reuses the PR"
 work "a fix"
@@ -1128,7 +1136,8 @@ echo "== 50. own branch: --hold"
 qsetup c50; printf '%s\n' "ledger regression: round 4 reviewed round 3's fixes — Lachy's call" > "$tmp/diag50"
 own -- --hold -F "$tmp/diag50"
 ores "case 50" 0 "held https://github.com/o/c50/pull/1"
-ok "$(sed -n 1p "$GH_STATE/comment.txt")" "Landing held (thread:close, ADR 0028 § 3)" "case 50: the comment's first line"
+ok "$(sed -n 1p "$GH_STATE/comment.txt")" "Landing held (ADR 0028 § 3)" "case 50: the comment's first line"
+hasnt "$(cat "$GH_STATE/comment.txt")" "thread:close" "case 50: the hold comment does not say thread:close"
 ok "$(sed -n 2p "$GH_STATE/comment.txt")" "" "case 50: then a blank line"
 ok "$(sed -n 3p "$GH_STATE/comment.txt")" "ledger regression: round 4 reviewed round 3's fixes — Lachy's call" "case 50: then the diagnosis"
 ok "$(merges | grep -c .)" 0 "case 50: no merge"
