@@ -13,7 +13,8 @@ It is a **conductor** over execute's queue loop, not an engine (see
 `docs/adr/0004-repair-is-a-conductor-not-an-engine.md`). Execute's lead already restarts a stalled task,
 launches an automatic seeded revise, integrates each approved task and merges it. Repair adds only what the
 loop can't do by itself: hand a set-aside task back at the **stage it stopped** (ADR 0030 decision 4), capture
-an **input-gated** decision, record a gate sign-off, raise a review budget **once**, **defer** a wedged task
+an **input-gated** decision, record a gate sign-off, record an **automatic descope** of a plan-block the notes
+settle, raise a review budget **once**, **defer** a wedged task
 with its dependants, flip a **merged, never marked** task, **escalate** a merge the notes never recorded (or a
 RACE, or one into another base), and finish an interrupted supersede's **close-out**.
 It never re-implements Integration, merge or convergence, and **the engine keeps sole merge authority**.
@@ -98,8 +99,8 @@ stamped pause, where no call is live; otherwise they wait for the stamp or the l
   nothing to do" while a lead is live (the owner check below); with none, nothing is draining it, so
   `/thread:execute [[<rollout>]]` resumes the drain. Either way, point at `/thread:execute` only once every
   RACE / UNVERIFIED task has its `RACE decided:` line: its *Cold resume* runs `resume` first.
-- Beyond the every-mode writes it never runs `hand-back`, `approve-gates`, the raise, `resume` or the loop,
-  and it never clears the stamp or the flag.
+- Beyond the every-mode writes it never runs `hand-back`, `approve-gates`, § 3d's `descope`, the raise, `resume`
+  or the loop, and it never clears the stamp or the flag.
 - Why: `next` stamps `paused:` only once nothing runs, awaits Integration or integrates. A hand-back during the
   drain would put a task back into exactly those states, and the live lead would integrate and merge it after
   Lachy asked to pause. Under a stamped pause, the reinstate decides what restarts.
@@ -111,8 +112,8 @@ have ended. A Workflow run is listed only in the session that launched it, which
 `/workflows` in that owner session; from any other session "no run" proves nothing, so report "possibly live:
 check session `<owner tag>` first".
 
-- Beyond the every-mode writes, repair may hand back a set-aside task, apply the raise and run
-  `approve-gates` on sign-off.
+- Beyond the every-mode writes, repair may hand back a set-aside task, run § 3d's `descope` on one (wherever
+  `hand-back` may run), apply the raise and run `approve-gates` on sign-off.
 - It never runs `resume`, never enters the loop, and never writes a running or integrating note, because a
   live call's reconcile would overwrite it: the lead-held notes wait for the lead's end.
 - A RACE re-verify in flight (§ 2) is the lead's: report it and wait. It becomes a § 3c escalation only once
@@ -153,6 +154,8 @@ asks Lachy while the lead decides it.
 | **revise (automatic)** | `autoRevise: true` | nothing: the lead (or § 4's hand-off) launches the seeded revise itself |
 | **revise stopped** | `revise stopped:` in the marker, `resumeAt: revise` | hand back (§ 4) → a seeded revise |
 | **review-blocked, rejected** | `review-blocked`, `lastIntegration.outcome: rejected` | the raise (§ 4), then hand back → a seeded revise |
+| **plan-blocked after a descope** | `plan-blocked` with a `## Scope decision (automatic)` section and no `descope_armed:`: it restarted after an automatic descope and blocked again | input-gated: § 3b, quoting the new feedback and the automatic descope; never a silent hand-back, never a second descope (the verb refuses one, exit 3) |
+| **plan-blocked, descopable** | `plan-blocked` (`resumeAt: own`) with no `## Scope decision (automatic)` section, or one whose `descope_armed:` still stands (a descope whose hand-back never ran), its feedback centring on one part of the task that the note marks optional or that a later task in this rollout owns | `reconcile-rollout.py descope` (§ 3d): exit 0 → hand back (§ 4) → its own call, and tell Lachy afterwards; exit 3 → § 3b |
 | **own run** | `resumeAt: own`: `blocked`, `plan-blocked`, `review-blocked` with no `rejected` line, a code-writing `review` with no `pr:`, a `merge-task:` set-aside | agent-fixable → hand back (§ 4) → its own call; input-gated → § 3b first |
 | **gate** | `gate-pending` | present the gates verbatim; on sign-off `approve-gates` (§ 3b); never hand back |
 
@@ -194,9 +197,9 @@ escalate it (§ 3c). Under a pause or a live queue, report it and leave it: the 
 *Cold resume* runs `resume` first, and § 1 sends Lachy there only once every RACE decision is recorded.
 
 **3b — input-gated → capture + inject.** Ping the user only here and for the other decisions no agent can
-make (a gate, a § 3c escalation, a CLOSED PR or missing branch, a close-out, a defer chain, a second block or
-a second raise). For each input-gated task, `AskUserQuestion` with the specific decision its feedback needs
-(quote the feedback). Then write the
+make (a gate, a § 3c escalation, a CLOSED PR or missing branch, a close-out, a defer chain, a second block, a
+second raise, or a descope the verb refuses: § 3d's exit 3, with its `ASK:` line quoted). For each input-gated
+task, `AskUserQuestion` with the specific decision its feedback needs (quote the feedback). Then write the
 answer into the **task note body** so the next agent reads it: replace the placeholder in place, or append or
 update a `## Repair input` section with the decision verbatim. It is body content, not a status transition,
 so it is allowed under a pause. A gate is presented verbatim; on Lachy's sign-off run
@@ -250,6 +253,39 @@ evidence shown; decision left to Lachy.` Repair never writes that task's `status
   re-calls merge-task for it: whether the work reached the default branch (the ancestry check above shows it)
   and what becomes of the task are Lachy's call. Escalate, record, and leave it.
 
+**3d — a settled plan-block → descope.** A `plan-blocked` task whose feedback centres on one part of the task
+that the note marks optional ("consider", "optionally", "nice to have") or that a later task in this rollout owns
+or replaces (§ 2's **plan-blocked, descopable**) is descoped without asking Lachy. It runs wherever `hand-back`
+may (§ 1): never under a pause, and under a live queue only on a set-aside task (the live lead runs the same verb
+itself, execute § 4.5, so a second run is a harmless `[no-change]`). Judge the part from the feedback and the note,
+then:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py descope --tasks <slug> --rollout <rollout-note> --part "<a verbatim quote>" (--optional --short <kebab> | --owner <owner slug> --owner-quote "<a verbatim quote from the owner's note>") --reason "<one line>"
+```
+
+Exit 0 → § 4's `hand-back` → its own call. The verb wrote every record: the follow-up note (an optional part, a
+loose `<project>-followup-<short>` task with `descoped_from:`), the task's `## Scope decision (automatic)` entry
+and its `<!-- descope run=… -->` marker, a pointer on the brief item (or a pointer line for a part the brief
+lacks), an `(automatic)` `## Repair input` line naming the superseded Plan-blocked feedback runs,
+`descope_armed:` (consumed by the restart's `mark-started`) and the rollout's `## Notes` line
+(`- <YYYY-MM-DD> descope: [[<slug>]] …`). So tell Lachy afterwards, in the report, never before: the part, the
+follow-up or the owner, and the undo. **Undo**, on his word, removes every one of those records: on the task
+note the `## Scope decision (automatic)` section (entry and marker: a marker left behind makes the next block
+read as a second one), the brief pointer or pointer line, the `(automatic)` `## Repair input` line and
+`descope_armed:` if it still stands; the follow-up note set to `status: dropped`, so nobody picks up the
+descoped work twice; and the rollout's `## Notes` `descope:` line removed (or rewritten as `descope undone:`),
+so no report's `Descoped:` line or the Completion log lists it. Then hand back. Exit 3 → § 3b: its `ASK:` line
+says why (required scope, an ADR decision, a recorded decision, an owner that cannot take it, a part tied to
+neither the feedback nor the brief, or a second block after an automatic descope) and nothing was written.
+Exit 1 → report its ERROR line and leave the task set aside.
+
+The verb checks the judgement mechanically, verbatim only. An `--owner` part must appear word for word in the
+latest `## Plan-blocked feedback` run or in the brief, so a paraphrase of required scope asks; but a paraphrase
+the feedback itself uses still passes, and only the caller's judgement guards that case. A brief's marker words
+count only in their own clause (split at `.`, `;`, `:`, a dash and `, and` / `, but` / `, then`), a negated
+one ("not optional") is none, and a part in a fenced code block always asks.
+
 ### 4. Hand back: re-enter at the stage it stopped
 
 Every route uses execute's own re-entry verb, and never under a pause (§ 1):
@@ -299,9 +335,9 @@ there is nothing to clear. Per stage:
   2. Retire the branch with § 5's retire block plus `git -C <repoPath> branch -D <inputs.branch>`.
   3. Relabel it to its own run: the same pipe as above with `--kind own`.
   4. Run `hand-back`. Its old `## Integration log` lines survive and are harmless.
-- **Leash:** once per task per repair run. If a task blocks again after its one retry in this run, stop
-  retrying it: surface it with its new diagnosis and offer *more guidance and one more retry* / *defer it*
-  (§ 5) / *leave it set aside*. Don't loop.
+- **Leash:** once per task per repair run; § 3d's descope plus its hand-back is that one retry. If a task blocks
+  again after its one retry in this run, stop retrying it: surface it with its new diagnosis and offer *more
+  guidance and one more retry* / *defer it* (§ 5) / *leave it set aside*. Don't loop.
 - **Hand-off, when no lead is live and no pause stands**, and never while a RACE / UNVERIFIED escalation is
   undecided (§ 3c; report the hold and stop there) or the ladder file is refused (§ 2; name the file and stop
   there): execute's queue loop, entered at its §4.5 resume
@@ -345,8 +381,9 @@ execute. This hand-off enters execute's §4.5 resume directly, so execute's § 2
 points only) does not run; the next `/thread:execute [[<rollout>]]` runs it. Execute's **completion
 ceremony** then runs on the (possibly reduced) task set. Ensure the rollout's `## Completion log` records
 every repair action, copied from the dated `## Notes` records this and earlier runs wrote: hand-backs (task +
-stage), decisions injected (task + value), gates signed, raises (task + new budget), merged-never-marked tasks
-flipped by `resume` (task + PR), tasks deferred (task + reason + dependants moved with it), a CLOSED PR or
+stage), decisions injected (task + value), gates signed, raises (task + new budget), automatic descopes (task +
+part + follow-up or owner) from the `descope:` lines, whoever wrote them (§ 3d or the live lead),
+merged-never-marked tasks flipped by `resume` (task + PR), tasks deferred (task + reason + dependants moved with it), a CLOSED PR or
 missing branch (task + restore, recut, defer or leave), and the escalations of § 3c with Lachy's decisions:
 possible PR-less merges, RACE / UNVERIFIED (task + PR + the re-verify verdict + the recorded decision), and
 merges into another base (task + PR + base).
@@ -365,6 +402,10 @@ merges into another base (task + PR + base).
   The engine keeps sole merge authority (README → *Coexistence with Orca*).
 - **Don't redo what a set-aside task already finished.** At Integration, retry Integration only; a recut is
   only on Lachy's explicit ask.
+- **Don't descope by hand, or twice.** `reconcile-rollout.py descope` (§ 3d) writes every record and refuses a
+  second block after a restart (exit 3): ask Lachy then (§ 3b), and never hand the task back on a refusal. A
+  task plan-blocked again after an automatic descope is § 2's **plan-blocked after a descope**, never an own
+  run handed back silently.
 - **Don't ask the user about agent-fixable blocks.** Hand them back silently (once); ping only for
   input-gated decisions, gates, a second block or a second raise.
 - **Don't write a PR-less, RACE / UNVERIFIED or other-base task's `status:`**, and never re-call merge-task

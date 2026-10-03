@@ -244,8 +244,21 @@ parsed), and list every distinct tag.
 | `run` | `revise` | `true` | `blocked`, a plain rejection: the revise marker, no `revise stopped:`, the last log line `rejected` | none: the lead launches the seeded revise itself (execute § 4.5) |
 | `run` | `revise` | `false` | `blocked` with `revise stopped:` | `hand-back`, then a seeded revise |
 | `run` | `revise` | `false` | `review-blocked`, the last log line `rejected` | repair's one-round raise, then `hand-back`, then a seeded revise |
-| `run` | `own` | `false` | `blocked`, `plan-blocked`, `review-blocked` with no `rejected` line, or a code-writing `review` with no `pr:` | `hand-back`, then its own call |
+| `run` | `own` | `false` | `blocked`, `review-blocked` with no `rejected` line, or a code-writing `review` with no `pr:` | `hand-back`, then its own call |
+| `run` | `own` | `false` | `plan-blocked`, no `## Scope decision (automatic)` (or one whose `descope_armed:` still stands) | when the notes settle it (an optional part, or work a later task owns), `descope` once (the live lead itself, or repair § 3), then `hand-back`, then its own call; otherwise as an own run (repair § 2): agent-fixable → `hand-back`, then its own call; input-gated → Lachy's decision (repair § 3) first |
+| `run` | `own` | `false` | `plan-blocked` with a `## Scope decision (automatic)` and no `descope_armed:` (blocked again after an automatic descope) | Lachy's decision (repair § 3), then `hand-back`, then its own call; never a silent hand-back, never a second descope |
 | `gate` | `own` or `integration` | `false` | `gate-pending` | Lachy's sign-off, then `approve-gates` (execute § 3.7); never `hand-back` |
+
+**Descoped.** A task whose note has a `## Scope decision (automatic)` section was descoped automatically (by the
+live lead, execute § 4.5, or repair § 3). Its line also shows that section's first entry, read with
+`grep -m1 '^- descoped (automatic)' ~/repos/obsidian/Work/Tasks/<slug>.md` (a read, so still no command that
+writes), e.g. `descoped "a canary" → follow-up [[proj-followup-canary]]`, so Lachy sees every automatic descope,
+and any wrong owner, without opening the note. Undoing one is repair's (its § 3), on his word, and removes every
+record the verb wrote: on the task note, the `## Scope decision (automatic)` section (its entry and its
+`<!-- descope run=… -->` marker), the brief pointer or pointer line, the `(automatic)` `## Repair input` line and
+`descope_armed:` if it still stands; the follow-up note set to `status: dropped`; and the rollout's `## Notes`
+`descope:` line removed (or rewritten as `descope undone:`). A marker left behind makes the next block read as a
+second one; a `descope:` line left behind keeps the undone descope in every report and the Completion log.
 
 **Timing.** It comes from `timeline`, and the estimate is always rough: render it exactly as labelled
 (`~50m remaining (rough)`), never as a precise figure. With no merged task yet (`avgTaskMinutes` null) show
@@ -344,10 +357,15 @@ Keep the whole report scannable: it's a glance, not a wall of text.
     applies to it: once the owner session shows the `RACE: …` halt or no run, or has ended, the next step is
     `/thread:repair [[<rollout>]]` (action 7), never `/thread:execute`. A merge hold (the Review
     required flag) waits on you, not the run: "approve PR #N", and the lead merges on its next tick.
-    Meanwhile, a set-aside task other than an `autoRevise: true` one is never re-entered by the live lead
-    itself (a revise stopped, a rejected review-blocked task, an own run, an at-Integration one or a gate), so
-    add `/thread:repair [[<rollout>]]`: its live-queue mode hands those back, applies the raise or records a
-    gate sign-off without touching the run.
+    Meanwhile, a set-aside task other than an `autoRevise: true` one or a descopable `plan-blocked` one is
+    never re-entered by the live lead itself (a revise stopped, a rejected review-blocked task, an own run, an
+    at-Integration one or a gate). The live lead descopes a `plan-blocked` task the notes settle once, by
+    itself (execute § 4.5), and restarts it; a `plan-blocked` one it leaves set aside (the verb asked, or the
+    notes do not settle it) is repair's, and one plan-blocked again after an automatic descope (a
+    `## Scope decision (automatic)`, no `descope_armed:`) is always Lachy's decision, never a silent hand-back.
+    So add `/thread:repair [[<rollout>]]`: its live-queue mode hands those back, applies the raise, records a
+    gate sign-off or asks Lachy the descope the verb refused or the block after a descope, without touching the
+    run.
 11. Any drift flag but a Rung drift or a refused ladder, or a set-aside task other than an `autoRevise: true`
     one → `/thread:repair [[<rollout>]]`.
 12. Awaiting Integration, a handed-back running task (no `owner:`), an `autoRevise: true` set-aside, or a free
