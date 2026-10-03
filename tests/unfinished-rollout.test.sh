@@ -8,6 +8,7 @@
 #           write -> carry -> step 7 -> close-out (stamps, then the move), crash windows included.
 #   I1-I7   § 0's interrupted finish, then a cancel: the incomplete note (reconcile-rollout.py incomplete) is
 #           refused by `next`, reported by `status` and the check, until a completed supersede closes it.
+#   R1-R4   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031)
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
 #           without its `## Queue` row) never wedges the queue, started or not.
 # Temp vaults, temp git repos with literal origin URLs (only `git remote get-url` reads them) and a stub gh.
@@ -759,6 +760,31 @@ PY
 ok "$(grep -c '\[\[g' "$T/ro-g.md")" 0 "D3: g's row is gone"
 nx ro-g
 ok "$rc|$(starts)" "0|['e', 'f']" "D3: … and next runs the rest"
+
+# ---- running: the rollouts that may have a lead on the primary checkout (ADR 0031's hold) ----------------
+# run [args...] -> $out, $err, $rc
+run() { python3 "$CHECK" running --tasks-dir "$T" "$@" > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
+scen r1
+run
+ok "$rc|$out" "0|none" "R1: no rollout note → none"
+# started = a lead mark (an owner: on a linked task); every note below is started unless it says otherwise
+mkro ro-live.md "$R"; mkt t-live.md ro-live open "owner: lead"
+mkro ro-other.md /elsewhere/repo; mkt t-other.md ro-other open "owner: lead"   # any repo: one primary checkout
+PV=3 mkro ro-proto3.md "$R"; mkt t-proto3.md ro-proto3 open "owner: lead"
+mkro ro-paused.md "$R" "$PAUSED"; mkt t-paused.md ro-paused open "owner: lead"
+ST=done mkro ro-done.md "$R"; mkt t-done.md ro-done done "owner: lead"
+ST=dropped mkro ro-dropped.md "$R"
+mkdir -p "$T/Archive"; mkro Archive/ro-filed.md "$R"; mkt t-filed.md ro-filed open "owner: lead"
+mkro ro-fresh.md "$R"; mkt t-fresh.md ro-fresh open                            # never started
+mkro ro-incomplete.md "$R" "incomplete: true"; mkt t-inc.md ro-incomplete open  # never started either
+run
+ok "$rc|$out" "0|running ro-live
+running ro-other" "R2: started, protocol 5, open, unpaused, live, any repo; never protocol 3, paused, done, dropped, archived, never-started or incomplete"
+mkro ro-ceremony.md "$R"; mkt t-c1.md ro-ceremony done "owner: lead"; mkt t-c2.md ro-ceremony done "owner: lead"
+run
+has "$out" "running ro-ceremony" "R3: every task done but its completion ceremony not run: still running"
+run --tasks-dir "$S/nowhere"
+ok "$rc|$out" "0|none" "R4: a missing tasks dir (no vault) → none"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "unfinished-rollout: ALL PASS"; else echo "unfinished-rollout: FAILED"; fi

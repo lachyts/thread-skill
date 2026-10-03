@@ -339,7 +339,20 @@ write_reg "$P"
 run "$C" ""
 ok "$rc" 3 "15. primary found via the registry, --also \"\" → 3"
 has "$err" "local master in $P is 1 commit(s) ahead" "15. … naming the primary"
-rm -f "$reg"
+# 15b. the same while a rollout runs, the scripts running from the primary $P itself (a copy of this tree's
+# skills/ in it, CLAUDE_PLUGIN_ROOT=$P): the reset remedy waits for it (ADR 0031)
+cp -R "$root/skills" "$P/skills"
+. tests/lib/rollout-fixtures.sh
+tdir="$home/repos/obsidian/Work/Tasks"; prollout "$tdir"
+PLUGROOT=$P run "$C" ""
+ok "$rc" 3 "15b. still blocked → 3"
+has "$err" "drops the local copies once no rollout runs on this primary checkout (ADR 0031; now: [[demo-rollout-2026-10-03]] running on it)" "15b. … the reset remedy waits for the running rollout"
+run "$C" ""
+lacks "$err" "once no rollout runs" "15b. … but not when the scripts run from another checkout"
+prollout "$tdir" "paused: 2026-10-03T10:00+10:00"
+PLUGROOT=$P run "$C" ""
+lacks "$err" "once no rollout runs" "15b. … nor once it is hard-paused"
+rm -rf "$home/repos" "$reg" "$P/skills"
 
 # 16. the live shape: rollout clone in sync, primary diverged by a THREAD.md-only commit, registry-found
 fresh; P="$tmp/p$k"; mkclone "$O" "$P"

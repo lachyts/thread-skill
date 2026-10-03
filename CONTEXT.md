@@ -272,6 +272,18 @@ through time, from attention to merged PRs. Terms only — no implementation.
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).
   _Avoid_: checkpoint, pointer, progress marker.
+- **Primary checkout** — the git checkout the plugin runs from, live (a
+  directory-source install, or `--plugin-dir`): every rollout's lead, in any
+  repo, runs its engine from it. A self-rollout's repo is a separate clone, so
+  its merges never reach it. It never moves while a **Running rollout**
+  exists (ADR 0031). Not the engine's "main checkout", which is a rollout's own
+  repo. _Avoid_: live checkout, installed copy.
+- **Running rollout** — a live, started rollout at the current protocol,
+  neither `done` nor `dropped` and not hard-paused: one a lead may be running
+  on the primary checkout. It differs from unfinished both ways: it leaves out
+  paused, never-started and protocol-3 rollouts, and keeps one whose every
+  task merged but whose completion ceremony has not run. _Avoid_: active, in
+  flight.
 - **Dependent closure** — the set of tasks transitively depending on a task
   via `depends-on:` / `blocked-by:` (schedule § 3) — the blast radius that
   must move together if it's deferred, and the tasks a set-aside task holds

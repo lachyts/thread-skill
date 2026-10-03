@@ -22,7 +22,8 @@
 #     member's HEAD is <b> (queued / stranded / split, merge-task's three patterns), else a generic one; both
 #     name the reset that drops the local copies once landed. Ahead commits whose content is already on
 #     origin/<b> (no file they touch differs: a squash or cherry-picked PR) are a note naming that reset;
-#     ahead commits touching only THREAD.md are a note. An ahead set touching no file blocks.
+#     ahead commits touching only THREAD.md are a note. An ahead set touching no file blocks. A reset that
+#     would move the primary checkout while a rollout runs on it says to wait (primary-hold.sh, ADR 0031).
 #   Warn — each cited path on its own (never batched): a relative path in every member, an absolute or ~/
 #     one in the member containing it (else a note). Per (member, path): `diff HEAD` + `diff --cached`
 #     (uncommitted), `diff origin/<b>...HEAD` three-dot AND `diff origin/<b> HEAD` two-dot (committed on the
@@ -127,12 +128,18 @@ reset_hint() {  # reset_hint <member>: the command that drops local <b>'s landed
     printf 'git -C %q branch -f %s origin/%s' "$1" "$b" "$b"
   fi
 }
+held_hint() {  # held_hint <member>: the wait a reset of the primary checkout needs (ADR 0031), else nothing
+  local h
+  h=$(bash "$here/primary-hold.sh" "$1" 2>/dev/null)
+  [ -z "$h" ] || printf ' once no rollout runs on this primary checkout (ADR 0031; now: %s)' "$h"
+}
 for c in "${members[@]}"; do
   git -C "$c" rev-parse -q --verify "refs/heads/$b" >/dev/null 2>&1 || continue
   # git's stderr passes through (it says why); a failure blocks, never skips.
   n=$(git -C "$c" rev-list --count "$up..refs/heads/$b") || {
     echo "pushed-base: cannot count $b against origin/$b in $c" >&2; broken=1; continue; }
   [ "$n" -gt 0 ] || continue
+  hh=$(held_hint "$c")   # the wait a reset of this member needs, once per ahead member (ADR 0031)
   # The files the ahead commits touch (merge-base..<b>), and which of them differ from origin/<b> now.
   touched=() differ=() other=0
   while IFS= read -r -d '' f; do touched+=("$f"); done < <(git -C "$c" diff --no-renames --name-only -z "$up...refs/heads/$b" 2>/dev/null)
@@ -155,7 +162,7 @@ for c in "${members[@]}"; do
     elif [ ${#differ[@]} -gt 0 ]; then
       note "local $b in $c is $n commit(s) ahead of origin/$b, but beyond THREAD.md their content is already on origin/$b (landed by a squash or cherry-picked PR): not a blocker (agents never read THREAD.md)"
     else
-      note "local $b in $c is $n commit(s) ahead of origin/$b, but their content is already on origin/$b (landed by a squash or cherry-picked PR): not a blocker; drop them with \`$(reset_hint "$c")\`"
+      note "local $b in $c is $n commit(s) ahead of origin/$b, but their content is already on origin/$b (landed by a squash or cherry-picked PR): not a blocker; drop them with \`$(reset_hint "$c")\`$hh"
     fi
     continue
   fi
@@ -171,12 +178,12 @@ for c in "${members[@]}"; do
   if [ -n "$line" ]; then
     echo "pushed-base: $line" >&2
     case "$line" in
-      *"queued in"*", "*" stranded") echo "pushed-base: remedy: wait for the landing PR for the queued ones; land the stranded ones on origin/$b by PR (ADR 0025), then re-run; once their content is on origin/$b (a squash merge included), \`$rh\` drops the local copies" >&2 ;;
+      *"queued in"*", "*" stranded") echo "pushed-base: remedy: wait for the landing PR for the queued ones; land the stranded ones on origin/$b by PR (ADR 0025), then re-run; once their content is on origin/$b (a squash merge included), \`$rh\` drops the local copies$hh" >&2 ;;
       *"queued in"*) echo "pushed-base: remedy: a close/… landing PR already carries them: wait for GitHub to merge it, then re-run; do not open a second PR" >&2 ;;
-      *) echo "pushed-base: remedy: land them on origin/$b by PR first ($b is PR-only, ADR 0025), then re-run; once their content is on origin/$b (a squash merge included), \`$rh\` drops the local copies" >&2 ;;
+      *) echo "pushed-base: remedy: land them on origin/$b by PR first ($b is PR-only, ADR 0025), then re-run; once their content is on origin/$b (a squash merge included), \`$rh\` drops the local copies$hh" >&2 ;;
     esac
   else
-    echo "pushed-base: remedy: land them on origin/$b by PR first (ADR 0025); if a close/… landing PR already carries them (git branch -r --contains <sha>), wait for it to merge and re-run instead; once their content is on origin/$b (a squash merge included), \`$rh\` drops the local copies" >&2
+    echo "pushed-base: remedy: land them on origin/$b by PR first (ADR 0025); if a close/… landing PR already carries them (git branch -r --contains <sha>), wait for it to merge and re-run instead; once their content is on origin/$b (a squash merge included), \`$rh\` drops the local copies$hh" >&2
   fi
 done
 [ "$blocked" = 0 ] || exit 3

@@ -16,7 +16,8 @@
 # stderr carries `land: …` lines: `land: commit <sha40>` (this run's commit, final SHA after any rebase)
 # or `land: nothing committed`, `land: carried <N> earlier close-out commit(s)`, `land: nothing to land`,
 # `land: dropped <rel> (…)`, `land: ff refused: …`, `land: label failed: …`, `land: update-branch failed: …`,
-# `land: skipped <step>: deadline`, and git's or gh's own diagnostics.
+# `land: skipped <step>: deadline`, `land: held the primary checkout at <sha>, …: <why>`, and git's or gh's
+# own diagnostics.
 #
 # Route (landing-register.py decides may-push; the repo's branch protection decides how):
 #   commit-only · swept by the daily sweep · listed on the landing register · no GitHub origin · a
@@ -24,6 +25,9 @@
 #   (a non-default checkout may need one ls-remote to learn the default when origin/HEAD is unset).
 #   Unprotected default branch → push it (a diverged origin: one rebase in a scratch worktree, then the
 #   branch moves by a two-tree read-tree, which keeps non-overlapping local changes exactly).
+#   The primary checkout (the checkout this plugin runs from, live) never moves while a rollout runs on it
+#   (ADR 0031): S4 skips its fast-forward, and a diverged unprotected origin gets the rebased tip pushed
+#   without moving the branch. A protected landing is unaffected: its PR merges on GitHub.
 #   Protected → push HEAD unchanged to close/<cdate>-<slug>-<sha12>, open the PR over REST, label it
 #   `landing`, queue `gh pr merge --auto --merge`, and update-branch once when origin/<d> moved on.
 #
@@ -315,7 +319,9 @@ main() {
         && stuck_early "local branch has no common history with origin/$d"
     elif [ "$(git rev-parse HEAD)" != "$(git rev-parse "refs/remotes/origin/$d")" ] \
          && git merge-base --is-ancestor HEAD "refs/remotes/origin/$d"; then
-      if ! git merge --ff-only --no-autostash -q "refs/remotes/origin/$d" >"$tmpd/ff.err" 2>&1; then
+      if primary_hold; then
+        echo "land: held the primary checkout at $(git rev-parse --short HEAD), not fast-forwarded: $HOLD"
+      elif ! git merge --ff-only --no-autostash -q "refs/remotes/origin/$d" >"$tmpd/ff.err" 2>&1; then
         echo "land: ff refused: $(first_line "$tmpd/ff.err")"
       fi
     fi
@@ -418,6 +424,20 @@ main() {
   esac
 }
 
+# primary_hold: true when this checkout is the primary checkout and a rollout runs on it (ADR 0031), with
+# the reason in $HOLD. Asked lazily, once, only where the checkout would move; primary-hold.sh is its one copy.
+# A timed-out check holds, as a failed one does: holding only skips moving the checkout.
+HOLD= HOLD_ASKED=
+primary_hold() {
+  local rc
+  if [ -z "$HOLD_ASKED" ]; then
+    HOLD_ASKED=1
+    HOLD=$(bounded bash "$here/primary-hold.sh" "$top" 2>/dev/null); rc=$?
+    [ "$rc" = 0 ] || HOLD="the running-rollout check did not answer (rc $rc)"
+  fi
+  [ -n "$HOLD" ]
+}
+
 # ---- S11. Unprotected: push the default branch, rebasing once in a scratch worktree if origin moved -------
 land_unprotected() {
   local od="refs/remotes/origin/$d" old N rc
@@ -437,9 +457,15 @@ land_unprotected() {
     finish "stuck: rebase failed: $(first_line "$tmpd/wt.err")" 1
   fi
   N=$(cat "$tmpd/rebased")
-  move_branch "$old" "$N" "land: rebase onto origin/$d"; rc=$?
-  [ "$rc" = 1 ] && finish "stuck: rebase refused: $MOVE_ERR" 1
-  [ "$rc" = 0 ] || finish "stuck: branch moved during landing" 1
+  if primary_hold; then
+    # The rebase ran in a scratch worktree; only move_branch would touch the primary checkout. Push the
+    # rebased tip and leave the branch where it is (its commits are on origin by content once pushed).
+    echo "land: held the primary checkout at $(git rev-parse --short HEAD), pushed the rebased tip without moving it: $HOLD"
+  else
+    move_branch "$old" "$N" "land: rebase onto origin/$d"; rc=$?
+    [ "$rc" = 1 ] && finish "stuck: rebase refused: $MOVE_ERR" 1
+    [ "$rc" = 0 ] || finish "stuck: branch moved during landing" 1
+  fi
   [ -n "$made" ] && made=$N
   if [ "$N" = "$(git rev-parse "$od")" ]; then
     echo "land: nothing to land"
