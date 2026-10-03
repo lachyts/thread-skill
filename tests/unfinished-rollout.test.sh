@@ -4,6 +4,7 @@
 #   C1-C27  skills/_shared/scripts/unfinished-rollout.py check: none / supersede / interrupted / file / refuse
 #   K1-K5   skills/execute/scripts/reconcile-rollout.py carry: preview, refusals, per-field writes, re-runs, and
 #           the refusal of a prior that holds an undecided RACE or UNVERIFIED
+#   K5b     carry refuses a prior that holds an unacked git-env trip until its ack line (p14-6)
 #   K6      carry maps each carried task's legacy stamps to a rung (ADR 0029 consequences): the `restamp`
 #           lines, the ladder's top rung, a refused ladder file, and a re-run
 #   M1-M12  a protocol-3 wave rollout in flight with `review` PRs migrates: check -> resume -> carry preview ->
@@ -528,6 +529,26 @@ PY
 carry --from "$T/$P.md" --to "$T/$N.md"
 ok "$rc" 0 "K5: with the RACE decided: line in ## Notes, it carries"
 ok "$(fm r1.md rollout)|$(fm q1.md rollout)" "rollout: \"[[$N]]\"|rollout: \"[[$N]]\"" "K5: … both unlanded tasks"
+
+# ── K5b: carry refuses a prior that holds an unacked git-env trip (p14-6) ───────────────────────────────
+scen k5b
+BODY=$'## Git-env log\n\n- 2026-09-30T09:50:00+00:00 git-env trip [[g1]] task: refs/heads/main aaa→bbb; repo /r' \
+  mkro $P.md "$R" "$DEMO" "$PAUSED"
+mkt g1.md $P in_progress
+mkt q1.md $P open
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc" 2 "K5b: carry --dry-run refuses a prior holding an unacked git-env trip"
+has "$err" "holds an unacked git-env trip: [[g1]]" "K5b: … naming the tripped window's task"
+has "$err" "/thread:repair [[$P]]" "K5b: … and /thread:repair"
+ok "$(sums)" "$before" "K5b: … writing nothing"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(sums)" "2|$before" "K5b: carry refuses it for real too, writing nothing"
+printf -- '- 2026-09-30T10:05:00+00:00 git-env ack [[g1]]: refs/heads/main at bbb, core.bare false\n' >> "$T/$P.md"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc" 0 "K5b: with the git-env ack line, it carries"
+ok "$(fm g1.md rollout)|$(fm q1.md rollout)" "rollout: \"[[$N]]\"|rollout: \"[[$N]]\"" "K5b: … both unlanded tasks"
 
 # ── K6: carry maps the legacy stamps of each carried task to a rung ──────────────────────────────────
 TIER_KEY=tier_"capped"   # the stale cap stamp's key, quoted in two parts so this file stays out of the Verify grep

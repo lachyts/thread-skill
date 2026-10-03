@@ -87,7 +87,8 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
 
 - top level: `paused` (the pause stamp; null when not paused), `pause_requested` (a soft pause is draining:
   execute → *Pausing + reinstating a rollout*), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
-  included), `progress`, `timeline` and `ladder`;
+  included), `progress`, `timeline` and `ladder`, plus `gitEnvHold` (the unacked git-env trips, each
+  `{slug, kind, line}`; § 3's Git-env trip flag);
 - per task: `slug`, `status`, `queueState`, `setAsideAt`, `pr`, `solo`, `started`, `merged`, `integrating`,
   `waitingOn`, `blockerSummary`, `rung` and `rungDrift`.
 
@@ -161,7 +162,10 @@ missing rc → a halt with `reason="RACE: origin/<default> fails the verifier"`.
   is the lead's own procedure, not drift. Render `RACE re-verify in flight` on its Integrating line, flag
   nothing, and treat it as the live queue (§ 4's actions 9 and 10: wait, and check the owner session). It
   turns undecided once that session shows the `RACE: …` halt or no run, or has ended. From any other session,
-  status cannot tell which, so say so.
+  status cannot tell which, so say so. It turns undecided too once a `## Race log` line naming it carries
+  `git-env halt` (readable from any session), or once that session shows a git-env halt (`git-env trip: the
+  shared checkout changed` or `git-env canary failed`, execute § 4.5 *Git-env canary*): the lead never acts on
+  a re-verify after a git-env halt, so a `0` verdict there was never acted on.
 - **Undecided:** anything else. That is an open escalation, the flag below.
 
 Flag **drift**, one line each in the Drift block. The first three flags are first-match, in this order: a RACE
@@ -202,16 +206,24 @@ takes none of them.
 - **Ladder refused:** `ladder.error` is set. Execute halts `ladder file refused` at each call's start until the
   file reads, and the fix is Lachy's edit to `<ladder.source>` (<ladder.error>). The flag reads only the vault
   and a local file, so it holds offline too.
+- **Git-env trip:** `gitEnvHold` is non-empty: execute's git-env canary (execute § 4.5 *Git-env canary*) saw
+  the shared checkout's `refs/heads/<default>` or its bareness change during a window, and logged one
+  `git-env trip` line per tripped window on the rollout note's `## Git-env log` that no later `git-env ack`
+  line names. Render each line verbatim. The whole queue is held: `next` reports `halt: "git-env"`, every
+  canary verb exits 3, and `carry` refuses the rollout until `/thread:repair` (its git-env step, 3e) shows the evidence and records
+  Lachy's ack. It reads only the vault, so it holds offline too.
 
 **Offline.** `--offline` skips this step: say the report is vault-only, and every resume or reinstate
 recommendation it makes carries the caveat "drift is invisible offline; re-run with the live check before
 resuming". It skips the live reads only: the RACE / UNVERIFIED, Rung drift and Ladder refused flags still
-render, from § 2's data and the local files.
+render, from § 2's data and the local files. The Git-env trip flag reads only the vault, so it renders
+offline too.
 
 ### 4. Render the situational report
 
 **Headline.** `[[<rollout>]] — <progress>`, with `progress` verbatim, plus `PAUSED since <stamp>`,
-`pause pending (draining)`, `INCOMPLETE: <reason>` or the lineage (`supersedes [[<prior>]]`,
+`pause pending (draining)`, `INCOMPLETE: <reason>`, `GIT-ENV HOLD: [[a]], [[b]]` (each slug `gitEnvHold`
+names, once) or the lineage (`supersedes [[<prior>]]`,
 `superseded by [[<successor>]]`, or § 1's reverse lineage: `superseded by [[N]], close-out interrupted` or
 `superseded by [[N]], supersede interrupted`) when they apply.
 
@@ -340,6 +352,8 @@ Keep the whole report scannable: it's a glance, not a wall of text.
    held task. A possible PR-less merge gets a confirmed `pr:` only when no lead is live or under a
    stamped pause; while a lead is live repair records it only. A RACE re-verify in flight (§ 3) is not an
    open escalation: the lead decides it itself, so it waits under 9 or 10, and nobody asks Lachy mid-re-verify.
+   An unacked git-env trip (§ 3's Git-env trip flag) is an open escalation too → `/thread:repair [[<rollout>]]`,
+   ahead of every reinstate or resume: only its § 3e ack, on Lachy's word, lifts the hold.
 8. `paused` → "reinstate with `/thread:execute [[<rollout>]]`". For drift independent of the pause, add
    `/thread:repair [[<rollout>]]`, which under a pause only records escalations and decisions and defers: it
    never hands back.

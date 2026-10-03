@@ -284,6 +284,26 @@ through time, from attention to merged PRs. Terms only — no implementation.
   paused, never-started and protocol-3 rollouts, and keeps one whose every
   task merged but whose completion ceremony has not run. _Avoid_: active, in
   flight.
+- **Git-env canary** — the lead's check that the shared checkout (a rollout's
+  `Project root`) kept its `refs/heads/<default>` and its bareness across each
+  **Window** (execute § 4.5, ADR 0030). A local commit not on
+  `origin/<default>` is benign only when every one is a non-merge commit
+  touching only close-out paths (land.sh's `closeout_shaped`), stricter than
+  land.sh S9: a merge or an empty commit trips. Anything else trips. _Avoid_:
+  verifier wrapper, git guard.
+- **Window** — the span from a launch's canary `arm` to its `check`: a
+  Workflow call, a resume, the lead's Integration verify or a RACE re-verify.
+  A window can only be open while its vault owner holds (`in_progress` for a
+  task call, `integrating:` for the rest); an orphan is compared once and
+  closed. _Avoid_: watch, session.
+- **Git-env hold** — the unacked trip lines on a rollout note's
+  `## Git-env log`: while one stands, `next` halts `git-env`, nothing starts,
+  integrates or merges, and `carry` refuses the rollout. Only a **Git-env ack**
+  lifts it. _Avoid_: git-env halt (the lead's stop, not the hold).
+- **Git-env ack** — Lachy's recorded acceptance of the tripped windows, written
+  only by `/thread:repair` (its git-env step, 3e) through the canary's `ack`, naming exactly the
+  set shown and the ref shown (`--ref`), after an optional `restore`. Never
+  written by execute. _Avoid_: clear, reset.
 - **Dependent closure** — the set of tasks transitively depending on a task
   via `depends-on:` / `blocked-by:` (schedule § 3) — the blast radius that
   must move together if it's deferred, and the tasks a set-aside task holds
