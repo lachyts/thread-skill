@@ -133,7 +133,10 @@ else:
     esc = lambda s: s.replace("'", "'\\''")
 if not boot:
     line = re.sub(r""" --bootstrap (['"])<env_bootstrap>\1""", "", line)
+# <verify_timeout> is § 3's per-entry value (p14-2); left literal, the shell would read `<verify_timeout>` as a
+# redirection.
 line = (line.replace("<tree>", tree).replace("<repoPath>", repo).replace("<slug>", slug)
+        .replace("<verify_timeout>", os.environ.get("VERIFY_TIMEOUT", "1800"))
         .replace("<env_bootstrap>", esc(boot)).replace("<verifier>", esc(verifier)))
 print(line)
 PY
@@ -450,6 +453,7 @@ ok "$(j "$I" '[d["markerStage"], d["markerReason"], d["history"]]')" "$(j "$EP" 
 ok "$(j "$I" '[d["source"], d["lastRound"], d["reviewRoundsUsed"], d["readyAt"], d["rung"], d["resumeAt"]]')" \
   '["blocker",2,2,"2026-10-02T11:00+00:00",{"startRung":"","rung":"opus-xhigh","climbs":[]},"revise"]' "C12: source, rounds, readyAt, the rung record from the note's rung:, resumeAt revise"
 ok "$(j "$I" '[k for k in ("model", "tierCapped", "tierCappedAt") if k in d]')" '[]' "C12: inputs carries no tier keys"
+ok "$(j "$I" '"plan" in d')" false "C12: inputs carries no plan key (lead-integrate.py plan reads it, at the two launches only)"
 ok "$(j "$I" 'd["lastIntegration"]["outcome"]')|$(j "$I" 'd["lastIntegration"]["path"]')" "rejected|judge-only" "C12: lastIntegration is the log's last line, as fields"
 # the integrate call's rung fallback (SKILL.md § 4.5 step 3): inputs' rung record passes the engine's args check
 # as it is, from a note with a rung: and from one with only stale tier stamps (the neutral record); a raw rung:
@@ -577,14 +581,18 @@ I=$(inp proj-a --max-review-rounds 3)
 ok "$(j "$I" 'd["autoRevise"]')" true "C14: inputs → autoRevise true"
 setkey "$V/proj-a.md" status in_progress; setkey "$V/proj-a.md" owner execute-c14
 python3 "$RR" mark-started --tasks proj-a --tasks-dir "$V" >/dev/null
+# resume.plan is `lead-integrate.py plan`'s plan (p14-2): the note's "## Approved plan", unquoted
+printf '\n## Approved plan\n\nThe last approved plan, kept as a record for Integration.\n\n> C14 PLAN\n> - step one\n' >> "$V/proj-a.md"
+PL=$(python3 "$LI" plan --note "$V/proj-a.md")
+ok "$(j "$PL" 'd["plan"]')" "$(printf 'C14 PLAN\n- step one')" "C14: lead-integrate.py plan reads the note's approved plan"
 RES=$(node --input-type=module -e "
   import { loadEngine } from './tests/lib/engine.mjs'
   const T = loadEngine(['resumeArgsError'])
-  const i = JSON.parse(process.argv[1])
-  const resume = { stage: 'revise', prUrl: i.pr, branch: i.branch, worktreePath: '/repo/.claude/worktrees/proj-a', reviewHistory: i.history, reviewRoundsUsed: i.lastRound, plan: '' }
-  process.stdout.write(JSON.stringify(T.resumeArgsError({ repoPath: '/repo', task: { slug: 'proj-a', scope: 'cross-cutting', resume } })))
-" "$I")
-ok "$RES" '""' "C14: the seeded revise's task.resume, built from inputs, passes resumeArgsError"
+  const [i, pl] = [JSON.parse(process.argv[1]), JSON.parse(process.argv[2])]
+  const resume = { stage: 'revise', prUrl: i.pr, branch: i.branch, worktreePath: '/repo/.claude/worktrees/proj-a', reviewHistory: i.history, reviewRoundsUsed: i.lastRound, plan: pl.plan }
+  process.stdout.write(JSON.stringify([T.resumeArgsError({ repoPath: '/repo', task: { slug: 'proj-a', scope: 'cross-cutting', resume } }), resume.plan]))
+" "$I" "$PL")
+ok "$RES" '["","C14 PLAN\n- step one"]' "C14: the seeded revise's task.resume, built from inputs and plan, passes resumeArgsError"
 python3 "$RR" mark-integrating --tasks proj-b --tasks-dir "$V" >/dev/null
 NX=$(nxt proj-a)
 ok "$(j "$NX" '[d["running"], d["integrating"], d["slotsInUse"], d["start"]]')" '[["proj-a"],["proj-b"],1,["proj-c"]]' "C14: A revises in a slot while B integrates; C starts"
@@ -736,6 +744,23 @@ setkey "$V/proj-a.md" status in_progress; setkey "$V/proj-a.md" owner execute-c2
 python3 "$RR" mark-started --tasks proj-a --tasks-dir "$V" >/dev/null
 NX=$(nxt proj-a)
 ok "$(j "$NX" '[d["halt"], d["running"], d["slotsInUse"]]')" '[null,["proj-a"],1]' "C20: after the seeded revise launches, next --running A: no halt, A running, 1 slot"
+
+# ======== C21: plan — the approved plan for the two launches (p14-2) ======================================
+nfx c21 2
+ntask proj-a in_progress 'owner: execute-c21'
+PL=$(python3 "$LI" plan --note "$V/proj-a.md")
+ok "$(j "$PL" 'sorted(d)')|$(j "$PL" 'd["plan"]')|$(j "$PL" 'd["slug"]')" '["plan","slug"]||proj-a' "C21: no section → plan \"\", and the keys are exactly plan and slug"
+C21P=$(printf 'Planned on: abc\n### Files to modify\n- x.py\n\n> a quote\n### Gated inputs\nNone')
+python3 - "$C21P" <<'PY' > "$tmp/c21-row.json"
+import json, sys
+print(json.dumps({"rolloutSlug": "ro", "tasks": [{"slug": "proj-a", "scope": "cross-cutting", "status": "review",
+  "prUrl": "https://github.com/o/r/pull/97", "reviewRoundsUsed": 1, "plan": sys.argv[1]}]}))
+PY
+rec "$(cat "$tmp/c21-row.json")"
+ok "$(j "$(python3 "$LI" plan --note "$V/proj-a.md")" 'd["plan"]')" "$C21P" "C21: a reconciled plan reads back exactly"
+rec '{"rolloutSlug": "ro", "tasks": [{"slug": "proj-a", "scope": "cross-cutting", "status": "review", "prUrl": "https://github.com/o/r/pull/97", "reviewRoundsUsed": 1, "plan": ""}]}'
+ok "$(j "$(python3 "$LI" plan --note "$V/proj-a.md")" 'd["plan"]')|$(grep -c '^## Approved plan' "$V/proj-a.md")" "|0" "C21: a '' row removed it → plan \"\""
+python3 "$LI" plan --note "$V/proj-zz.md" >/dev/null 2>&1; ok "$?" 2 "C21: a missing note exits 2"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"

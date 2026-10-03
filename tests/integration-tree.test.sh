@@ -331,6 +331,22 @@ l3'; merge "$H0" "$TB"
   ok "$(hd)" "$LH" "$n 25: a diverged branch is left as it was"
   has "$out" "tree NOT fast-forwarded: $BR has diverged from origin/$BR — never rebase or force-push; STOP" "$n 25: … and the STOP line"
 
+  # 26. (p14-3) a modified tracked file the fast-forward would touch is never autostashed: under
+  #     merge.autoStash=true a bare `merge --ff-only` stashes it, moves the tree and re-applies it on top
+  #     (cleanly here: the edit is l3, origin's is l1), so the seeded reviser would build on a tree that
+  #     silently carried the change across. --no-autostash makes git refuse: the STOP line, the tree where
+  #     it was, the edit in place and no stash entry.
+  mk r26; setup; bcommit a.txt "$(printf 'l1 integrated\nl2 task\nl3')"; OH=$(git -C "$F/o.git" rev-parse "$BR")
+  printf 'l1\nl2 task\nl3 dirty\n' > "$wt/a.txt"; git -C "$wt" config merge.autoStash true
+  setupff
+  has "$out" "tree NOT fast-forwarded to origin/$BR: local changes in the way — STOP" "$n 26: a dirty tracked file under merge.autoStash → the STOP line"
+  ok "$(hd)" "$H0" "$n 26: … the tree is not moved"
+  ok "$(cat "$wt/a.txt")" "$(printf 'l1\nl2 task\nl3 dirty')" "$n 26: … the modified file is left in place, unmerged"
+  ok "$(git -C "$wt" stash list | wc -l | tr -d ' ')" 0 "$n 26: … and nothing was stashed"
+  git -C "$wt" checkout -q -- a.txt; setupff
+  ok "$(hd)" "$OH" "$n 26: once the change is gone the same setup fast-forwards"
+  lacks "$out" "STOP" "$n 26: … with no STOP"
+
   # GIT_DIR inherited: the merge step's scrub keeps a decoy untouched
   mk e1; setup; g init -q "$F/decoy"; g -C "$F/decoy" commit -q --allow-empty -m decoy
   before=$(git -C "$F/decoy" for-each-ref; git -C "$F/decoy" config --get core.bare)

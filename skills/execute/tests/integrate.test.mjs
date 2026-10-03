@@ -1,7 +1,7 @@
 // p12-6 (ADR 0030 decision 3): Integration's trouble path is its own small Workflow call.
 //
 // args.mode: 'integrate' runs the integrator (or, on P1, only the judge) in the task's worktree and returns
-// ONE row: today's 19 keys plus `integration`. These fixtures run the WHOLE script through runTask() with a
+// ONE row: today's 20 keys plus `integration`. These fixtures run the WHOLE script through runTask() with a
 // label-keyed stub that throws on any label it was not given (so a stray dispatch fails loudly) and
 // records every dispatch's opts. The rendered steps themselves run in tests/integration-tree.test.sh; the
 // note side of the stage markers runs in tests/integration-marker-roundtrip.test.mjs.
@@ -20,7 +20,7 @@ const T = loadEngine([
 const ROW_KEYS = [
   'slug', 'scope', 'status', 'prUrl', 'branch', 'worktreePath', 'reviewRoundsUsed', 'planRoundsUsed',
   'blockerDiagnosis', 'reviewFeedback', 'reviewHistory', 'approvedAtCeiling', 'gatedInputs', 'summary',
-  'startRung', 'rung', 'climbs', 'rungDrift', 'ran',
+  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan',
 ]
 const STATUSES = ['review', 'review-blocked', 'blocked', 'plan-blocked', 'gate-pending']
 const sha = (c) => c.repeat(40)
@@ -206,6 +206,18 @@ test('b4: the integrator prompt carries the landed PRs, the plan, the merge step
   assert.ok(!p.includes('ONE-SHOT'), 'integrator prompt: the full loop, never the one-shot')
   assert.ok(!p.includes('tracked changes in $WT — commit or discard them'), 'integrator prompt: leftovers are stashed, not a STOP')
   assert.ok(!p.includes('tree NOT fast-forwarded'), 'integrator prompt: its setup never fast-forwards (the merge step does, after the stash)')
+  // p14-2: the plan is reference only — the brief and the review history are the contract, and a deviation
+  // the PR body declares (a step-back revise may make one) stands.
+  for (const s of [
+    'The approved plan, for reference only', 'a deviation from this plan that the PR body declares',
+    'stands, and your resolution never undoes it', 'The task brief and the review history below are\nthe contract',
+  ]) assert.ok(p.includes(s), `integrator prompt (p14-2): ${s}`)
+  for (const s of ["the task's contract — your resolution keeps it", 'The approved plan and the review history below are the contract']) {
+    assert.ok(!p.replace(/\n/g, ' ').includes(s), `integrator prompt (p14-2): no ${s}`)
+  }
+  assert.ok(!p.includes('(no plan:'), 'a plan was passed: no placeholder')
+  const noPlan = T.integratorPrompt(mkTask(), mkArgs(mkI({ plan: '' })), mkI({ plan: '' }))
+  assert.ok(noPlan.includes('---\n(no plan: the task was not plan-gated — the brief is the contract)\n---'), 'the no-plan placeholder keeps its bytes')
   const empty = await run(mkArgs(mkI()), { [ILABEL]: ir() })
   assert.match(promptOf(empty, ILABEL), new RegExp(`git -C "${WT}" log --first-parent ${TB}\\.\\.origin/main`))
   assert.match(promptOf(empty, ILABEL), /none reported \(a re-entry/)
@@ -220,6 +232,23 @@ test('b4: the integrator prompt carries the landed PRs, the plan, the merge step
     'was anything of theirs (the landed PRs)', 'dropped or contradicted', 'anything of ours', 'Why you are here: conflict',
   ]) assert.ok(j.includes(s), `judge prompt: ${s}`)
   assert.ok(!j.includes(`log --first-parent ${B1}..`), 'judge prompt: base = mainSha, so no late-landed read')
+})
+
+test('b4b: the step-back reviser and the integrator agree — the plan is reference, the brief the contract', () => {
+  const P = 'PLAN P: rename foo to bar'
+  const resume = { stage: 'revise', prUrl: PR, branch: BR, worktreePath: WT, reviewHistory: HIST2, reviewRoundsUsed: 2, plan: P }
+  const a = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', task: mkTask({ resume }) }
+  const reviser = T.reviserPrompt(a.task, { prUrl: PR, branch: BR, worktreePath: WT }, HIST2, 3, a, P, { history: HIST2, roundsUsed: 2 })
+  const I = mkI({ plan: P })
+  const integrator = T.integratorPrompt(mkTask(), mkArgs(I), I)
+  for (const p of [reviser, integrator]) {
+    assert.ok(p.includes(P), 'both render the plan')
+    const flat = p.replace(/\s+/g, ' ')
+    assert.ok(!/plan[^.]{0,40}\bis (the|your) contract|the task's contract/i.test(flat), 'neither calls the plan the contract')
+    assert.match(flat, /The (task )?brief (remains your contract|is the contract|and the review history below are the contract)/)
+  }
+  assert.ok(reviser.includes('STEP-BACK ROUND') && reviser.replace(/\s+/g, ' ').includes('the plan is reference, not law'))
+  assert.ok(integrator.includes('The approved plan, for reference only'))
 })
 
 test('b5: an already-merged M integrates with that M', async () => {
@@ -756,6 +785,7 @@ test('S1: a seeded revise dispatches revise r3 then review r3 and approves with 
   assert.deepEqual(r.row.reviewHistory, HIST2)
   assert.equal(r.row.approvedAtCeiling, true)
   assert.deepEqual(Object.keys(r.row).sort(), [...ROW_KEYS].sort())
+  assert.equal(r.row.plan, null, 'a seeded revise never settles the plan (p14-2)')
   assert.ok(promptOf(r, `review:${SLUG} r3`).includes('Round 2 rejection:\n- keep their rename'))
 })
 
@@ -774,7 +804,7 @@ test('S2: the seeded prompt re-enters the tree; the unseeded prompt is byte-unch
     // the fast-forward to origin/$BR, STOPping on a divergence, and the no-force rule
     'if ! git -C "$WT" fetch origin --quiet; then echo "tree NOT fast-forwarded: fetch origin failed — STOP"',
     'elif ! git -C "$WT" merge-base --is-ancestor HEAD "origin/$BR" && ! git -C "$WT" merge-base --is-ancestor "origin/$BR" HEAD; then echo "tree NOT fast-forwarded: $BR has diverged from origin/$BR — never rebase or force-push; STOP"',
-    'elif ! git -C "$WT" merge --ff-only --quiet "origin/$BR"; then',
+    'elif ! git -C "$WT" merge --ff-only --no-autostash --quiet "origin/$BR"; then',
     ', fast-forwards it to origin/audit-fix/fix-a (never past a divergence)',
     '\npush plainly; never rebase or force-push; a rejected push returns blocked.\n',
   ]
@@ -965,6 +995,7 @@ test('static: no force, no PR merge, approvedGates-independent prompts, the row 
   for (const r of allRuns.filter((x) => x.row && x.row.integration)) {
     assert.deepEqual(Object.keys(r.row).sort(), [...ROW_KEYS, 'integration'].sort())
     assert.ok(STATUSES.includes(r.row.status), r.row.status)
+    assert.equal(r.row.plan, null, 'an integrate row never settles the plan (p14-2)')
   }
   const code = src.replace(/\/\/[^\n]*/g, '')
   assert.deepEqual(code.match(/['"`]revise: [^'"`]*/g), ["'revise: rejected at Integration re-review — revise on the branch, then re-integrate"])

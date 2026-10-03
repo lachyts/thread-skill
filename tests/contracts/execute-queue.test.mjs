@@ -201,8 +201,8 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   const vline = (skill.match(/^# thread:integration-verify[^\n]*\n([^\n]*)\n# end thread:integration-verify/m) ?? [])[1] ?? ''
   const raceLine = st4.slice(st4.indexOf('**RACE procedure**'))
   const sq = (l) => l.includes("--bootstrap '<env_bootstrap>' --verifier '<verifier>'")
-  if (!vline.includes('lead-integrate.py verify') || !vline.includes('--timeout 1800') ||
-    !verifyP.includes('`run_in_background`') || !verifyP.includes('`timeout: 2400000`') ||
+  if (!vline.includes('lead-integrate.py verify') || !vline.includes('--timeout <verify_timeout>') ||
+    !verifyP.includes('`run_in_background` and `timeout: <harnessTimeoutMs>`') ||
     !verifyP.includes('the rc is 124') || !verifyP.includes('leaves no rc, which reads as red') ||
     !verifyP.includes('write rc 143; only a SIGKILL leaves no rc') ||
     !verifyP.includes("**single quotes**, with each `'` in them written as `'\\''`") ||
@@ -395,6 +395,52 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   if (!hooksJson.includes('${CLAUDE_PLUGIN_ROOT}/hooks/rollout-stop-driver.py') || hooksJson.includes('wave-stop-driver') ||
     !exists('hooks/rollout-stop-driver.py') || exists('hooks/wave-stop-driver.py')) fails.push('driver')
 
+  // verify-timeout (p14-2, L3): the rollout key's default and its use. § 3's table row (default 1800, not passed to
+  // the engine, read by `reconcile-rollout.py verify-timeout`); § 3's once-per-entry check, before anything the
+  // entry writes, with its write-nothing halt; the verify line and the RACE re-verify bound by it, with no literal
+  // 1800 left; the harness bound (2400000 at the default) on the verify paragraph and § 8's timeout guardrail;
+  // every entry description runs the check before its first write (§ 4.5's entry paragraph, Cold resume, both
+  // Reinstates); § 7 lists the halt.
+  const s3raw = section(skill, S3) ?? ''
+  const vtRow = s3raw.split('\n').find((l) => l.startsWith('| `verify_timeout` |')) ?? ''
+  const vtP = collapse(s3raw.split('\n\n').find((x) => x.startsWith('**Validate `verify_timeout` once per loop entry, before anything the entry writes.**')) ?? '')
+  const VT = "§ 3's `verify_timeout` check"
+  const coldVT = labelled(skill, 'Cold resume.')
+  const reinstateVT = labelled(skill, 'Reinstate (resuming a paused rollout).')
+  const pzReinstate = collapse((section(skill, PAUSE) ?? '').split('\n').find((l) => l.startsWith('**Reinstate.**')) ?? '')
+  const timeoutGuard = collapse((section(skill, S8) ?? '').split('\n').find((l) => l.startsWith('- **Every background command names its `timeout:`.**')) ?? '')
+  if (!vtRow.startsWith('| `verify_timeout` | `1800` | not passed to the engine.') || !vtRow.includes('`reconcile-rollout.py verify-timeout`') ||
+    !vtRow.includes('`harnessTimeoutMs`') ||
+    !vtP.includes("Every entry into §4.5's loop (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry and `/thread:repair`'s hand-off)") ||
+    !vtP.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py verify-timeout --rollout <rollout-note>` once') ||
+    !vtP.includes('before `resume`, `clear-pause`, `next` and any stamp') || !vtP.includes('never at the verify line') ||
+    !vtP.includes('the lead writes nothing') || !vtP.includes('reason="invalid verify_timeout on [[rollout]]"') ||
+    !vline.includes('--timeout <verify_timeout>') || !raceLine.includes('--timeout <verify_timeout>') ||
+    !raceLine.includes('`timeout: <harnessTimeoutMs>`') || /--timeout 1800\b/.test(skill) ||
+    !verifyP.includes('(<verify_timeout> + 600) × 1000') || !verifyP.includes('`timeout: 2400000` at the default') ||
+    !timeoutGuard.includes('`timeout: <harnessTimeoutMs>` (their own `--timeout <verify_timeout>` bounds the verifier; `timeout: 2400000` at the default)') ||
+    !recheck.includes("Every entry then runs § 3's `verify_timeout` check once, before anything it writes") ||
+    !before(coldVT, VT, 'reconcile-rollout.py resume') || !before(reinstateVT, VT, 'clear-pause') || !before(pzReinstate, VT, 'clear-pause') ||
+    !S(skill, S7).includes('`reconcile-rollout.py verify-timeout` exits 1 at an entry (`reason="invalid verify_timeout on [[rollout]]"`')) {
+    fails.push('verify-timeout')
+  }
+
+  // approved-plan (p14-2, L2): the approved plan reaches the seeded revise (step 1.2) and the integrate call (step 3)
+  // from `lead-integrate.py plan`, read at those two launches only (Restart routing's revise reuses step 1.2's) and
+  // passed verbatim; no empty-plan literal is left; § 6 lists the row's `plan` and reconcile's three outcomes.
+  const planHits = (section(skill, S45) ?? '').split('lead-integrate.py plan').length - 1
+  const s6 = S(skill, S6)
+  const VERBATIM = 'passed verbatim as the same JSON string, never retyped, summarised or truncated'
+  if (!s2sub || !s2sub.text.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py plan --note <task note>`, then the Workflow call') ||
+    !s2sub.text.includes('plan: <plan.plan>}') || !s2sub.text.includes(VERBATIM) ||
+    !st3.includes('trouble, landed, plan, reviewHistory') ||
+    !st3.includes("`plan` is `lead-integrate.py plan --note <task note>`'s `plan`, read at this launch (after the approving row is reconciled) and " + VERBATIM) ||
+    planHits !== 2 || /plan: ''|plan: ""|`plan` is `""`/.test(s45) ||
+    !s6.includes('gatedInputs, plan }] }') || !s6.includes('upserts it, quoted, under `## Approved plan`') ||
+    !s6.includes('`""` removes that section') || !s6.includes('`null` or absent leaves it')) {
+    fails.push('approved-plan')
+  }
+
   // s5 (the dead-run resume keeps its shape for its consumers) is part of lost-call's routing: § 5 names *Lost call*.
   if (!s5.includes('(§ 4.5 *Lost call*)') || !before(s5, '(§ 4.5 *Lost call*)', 'resumeFromRunId: <runId>')) fails.push('lost-call')
   return [...new Set(fails)]
@@ -409,7 +455,7 @@ test('execute § 4.5, its neighbours, the heartbeat and the hook hold every queu
 const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lost-call', 'clean-path', 'verify-bound',
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
-  'ladder']
+  'ladder', 'verify-timeout', 'approved-plan']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -456,7 +502,7 @@ test('control: a merge route that verifies fails clean-path', () => {
 
 test('control: an unbounded verify command fails verify-bound', () => {
   const p = real.skill.split('\n').find((l) => l.startsWith('**The background verify command.**'))
-  only(sk(p, p.replace('`run_in_background` and `timeout: 2400000`', '`run_in_background`')), 'verify-bound', 'no timeout')
+  only(sk(p, p.replace('`run_in_background` and `timeout: <harnessTimeoutMs>`', '`run_in_background`')), 'verify-bound', 'no timeout')
 })
 
 test('control: leadMerge on a red verify fails trouble-path', () => {
@@ -617,7 +663,64 @@ test('control: a template budget that drifts from execute fails budget', () => {
   only({ template: real.template.replace('any re-review + required checks + squash', 'any re-review + squash') }, 'budget', 'template drift')
 })
 
-test('the rules are all named (26) and each has a control', () => {
-  assert.equal(RULES.length, 26)
+// verify-timeout (p14-2)
+test('control: a verify_timeout default of 3600 fails verify-timeout', () => {
+  only(sk('| `verify_timeout` | `1800` |', '| `verify_timeout` | `3600` |'), 'verify-timeout', 'default 3600')
+})
+
+test('control: a RACE re-verify back on --timeout 1800 fails verify-timeout', () => {
+  only(sk('race-<slug> --timeout <verify_timeout> --bootstrap', 'race-<slug> --timeout 1800 --bootstrap'), 'verify-timeout', 'race 1800')
+})
+
+test('control: a verify_timeout check read as each task starts fails verify-timeout', () => {
+  only(sk('**Validate `verify_timeout` once per loop entry, before anything the entry writes.**', '**Validate `verify_timeout` as each task starts.**'),
+    'verify-timeout', 'per task')
+})
+
+test("control: § 4.5's entry paragraph without the check fails verify-timeout", () => {
+  only(sk(" Every entry then runs § 3's `verify_timeout` check once, before anything it writes; the lane uses that value until the next entry.", ''),
+    'verify-timeout', 'no entry sentence')
+})
+
+test('control: a cold resume that checks after resume fails verify-timeout', () => {
+  only(sk("then § 3's `verify_timeout` check; then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume --rollout <rollout-note>`",
+    "then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume --rollout <rollout-note>`, then § 3's `verify_timeout` check"),
+  'verify-timeout', 'check after resume')
+})
+
+test("control: the Pausing Reinstate without the check fails verify-timeout", () => {
+  only(sk("re-runs § 2.5 and § 2.7, then § 3's `verify_timeout` check, then sees the `paused:` stamp", 're-runs § 2.5 and § 2.7, then sees the `paused:` stamp'),
+    'verify-timeout', 'pausing reinstate')
+})
+
+test('control: § 7 without the verify_timeout halt fails verify-timeout', () => {
+  const l = real.skill.split('\n').find((x) => x.startsWith('- `reconcile-rollout.py verify-timeout` exits 1 at an entry'))
+  only(sk(l + '\n', ''), 'verify-timeout', 'no § 7 bullet')
+})
+
+// approved-plan (p14-2)
+test("control: step 1.2 back on plan: '' fails approved-plan", () => {
+  only(sk('plan: <plan.plan>}', "plan: ''}"), 'approved-plan', "plan ''")
+})
+
+test('control: step 3 back on plan: "" fails approved-plan', () => {
+  only(sk('trouble, landed, plan, reviewHistory', 'trouble, landed, plan: "", reviewHistory'), 'approved-plan', 'plan ""')
+})
+
+test('control: step 3 without "verbatim" fails approved-plan', () => {
+  only(sk('read at this launch (after the approving row is reconciled) and passed verbatim as the same JSON string, never retyped, summarised or truncated;',
+    'read at this launch (after the approving row is reconciled);'), 'approved-plan', 'no verbatim')
+})
+
+test('control: a third lead-integrate.py plan read in Restart routing fails approved-plan', () => {
+  only(sk("- else the task's own call.", "- else `lead-integrate.py plan --note <task note>`, then the task's own call."), 'approved-plan', 'third read')
+})
+
+test("control: § 6 without the '' removal fails approved-plan", () => {
+  only(sk('`""` removes that section', '`""` leaves it too'), 'approved-plan', 'no removal')
+})
+
+test('the rules are all named (28) and each has a control', () => {
+  assert.equal(RULES.length, 28)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

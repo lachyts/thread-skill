@@ -886,6 +886,9 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
 // which that engine ignores, and the tier ceiling dropped, which changed nothing there — and the ladder
 // engine renders it byte-identically: the rung work moved no label and no prompt of these calls. Only the
 // rows hash was re-pinned, for the row's rung record (startRung, rung, climbs, rungDrift, ran).
+// Re-pinned on purpose by p14-2: the rows hash only, for the row's `plan` (proj-fix-p and proj-audit-x carry
+// PLAN_TEXT, proj-fix-a ''). Those rows with `plan` deleted hash to the p13-2 pin (a0fc1e71…); the calls
+// hash did not move — no task-mode prompt changed (the integrator wording is integrate mode, pinned by b4/b4b).
 {
   const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
   const variants = []
@@ -940,7 +943,7 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
   }
   ok(sha(calls.join('\n')) === 'ee821ac64ee16a13cf95c536bcbbf4ef7106c45c0d28c002f11b61196b1ee54b',
     'byte pin: three whole task-mode calls — every label and prompt unchanged (recorded on the p13-1 engine)')
-  ok(sha(rows.join('\n')) === 'a0fc1e71bf09d45f3dad3d76a58959e2105789f4c1699242ef41dec1f2f967dd',
+  ok(sha(rows.join('\n')) === '0b7fa8531f41dad8da30902e500d4cc7746f1540424af004039ab890433972aa',
     'byte pin: three whole task-mode calls — every row, rung record included')
 }
 

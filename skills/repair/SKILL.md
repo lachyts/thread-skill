@@ -305,7 +305,8 @@ there is nothing to clear. Per stage:
 - **Hand-off, when no lead is live and no pause stands**, and never while a RACE / UNVERIFIED escalation is
   undecided (§ 3c; report the hold and stop there) or the ladder file is refused (§ 2; name the file and stop
   there): execute's queue loop, entered at its §4.5 resume
-  (*Cold resume*): execute § 2.5 first (then § 2.6), then `reconcile-rollout.py resume`, then the loop with
+  (*Cold resume*): execute § 2.5 first (then § 2.6), then execute § 3's `verify_timeout` check (a halt there
+  writes nothing), then `reconcile-rollout.py resume`, then the loop with
   `--running ""` (this session holds no task call). Execute's § 2.7 pushed-base gate (entry points only)
   does not run on this hand-off; the next `/thread:execute [[<rollout>]]` runs it. Under a live queue the
   hand-backs are enough: the live lead's next `next` picks them up.
