@@ -203,14 +203,15 @@ classify_failed_steps() (  # stdin: failed step names; stdout: "infra" | "genuin
   # boundaries (\b and [[:<:]] differ between GNU and BSD regex): every non-alphanumeric becomes a space and
   # the line is padded with spaces, so each token is matched as " token ". Inflections are spelled out:
   # every setup VERB carries its -s/-ed/-ing forms (an unlisted form would silently classify genuine).
-  # Nouns and tool names (checkout, setup, pip, poetry, yarn, apt, brew, npm ci/install) stay bare.
+  # Nouns and tool names (checkout, setup, pip, poetry, yarn, apt, brew, npm ci) stay bare. There is no
+  # "npm install" token: its "install" word already matches, so one would be dead and untestable.
   # KNOWN GAP (follow-up, out of scope here): ONE whole-word allowlist hit still makes the WHOLE line
   # infra, however much real work the rest of the step names. "Restore DB snapshot and check integrity",
   # "Download fixtures and compare golden output", "Configure and run e2e", "yarn jest" and "pip-audit"
   # all classify infra today; verif/validat in the denylist covers only the "verify" wording. Likely fix:
   # a word-bounded denylist of work verbs (check, compare, diff, e2e, smoke, audit) where "check" must
   # not match "checkout".
-  local allow=' (install(s|ed|ing)?|dependenc(y|ies)|set *up|checkout|cach(e|es|ed|ing)|download(s|ed|ing)?|provision(s|ed|ing)?|restor(e|es|ed|ing)|bootstrap(s|ped|ping)?|configur(e|es|ed|ing)|pip|poetry|npm +ci|npm +install|yarn|apt|brew|fetch(es|ed|ing)?|clon(e|es|ed|ing)) '
+  local allow=' (install(s|ed|ing)?|dependenc(y|ies)|set *up|checkout|cach(e|es|ed|ing)|download(s|ed|ing)?|provision(s|ed|ing)?|restor(e|es|ed|ing)|bootstrap(s|ped|ping)?|configur(e|es|ed|ing)|pip|poetry|npm +ci|yarn|apt|brew|fetch(es|ed|ing)?|clon(e|es|ed|ing)) '
   shopt -s nocasematch
   while IFS= read -r line; do
     [[ $line =~ ^[[:space:]]*$ ]] && continue
@@ -511,6 +512,42 @@ if [ "${1:-}" = "--self-test-classify" ]; then
   st infra   "fetched" 'Fetched submodules\n'
   st infra   "cloning" 'Cloning submodules\n'
   st infra   "cloned" 'Cloned submodules\n'
+  # Base forms, each the only allowlist token on its line. 'Install dependencies' and 'Restore cache' above
+  # do NOT pin them: the two tokens on those lines mask each other.
+  st infra   "install alone" 'Install toolchain\n'
+  st infra   "download alone" 'Download artifacts\n'
+  st infra   "provision alone" 'Provision runner\n'
+  st infra   "configure alone" 'Configure runner\n'
+  st infra   "cache alone" 'Cache deps\n'
+  st infra   "restore alone" 'Restore deps\n'
+  st infra   "bootstrap alone" 'Bootstrap runner\n'
+  st infra   "fetch alone" 'Fetch submodules\n'
+  st infra   "clone alone" 'Clone submodules\n'
+  # Every form of every setup verb (9 verbs x base/-s/-ed/-ing = 36), each as '<form> runner' so it is the
+  # only allowlist token. This list is written out by hand, NOT derived from $allow, so dropping a base
+  # form, a suffix or a `?` from any verb group turns the suite red.
+  for st_w in install installs installed installing \
+              download downloads downloaded downloading \
+              provision provisions provisioned provisioning \
+              configure configures configured configuring \
+              cache caches cached caching \
+              restore restores restored restoring \
+              bootstrap bootstraps bootstrapped bootstrapping \
+              fetch fetches fetched fetching \
+              clone clones cloned cloning; do
+    st infra "$st_w alone" "$st_w runner\n"
+  done
+  # Bare tool tokens and nouns, each the only allowlist token on its line ('npm  ci' pins the ` +`).
+  # Together with the cases above, deleting any allowlist token, or dropping any base form, suffix, `?`,
+  # ` *` or ` +` from one, turns the suite red.
+  st infra   "pip alone" 'pip freeze\n'
+  st infra   "poetry alone" 'poetry lock\n'
+  st infra   "yarn alone" 'yarn\n'
+  st infra   "brew alone" 'brew update\n'
+  st infra   "npm ci alone" 'npm ci\n'
+  st infra   "npm  ci (two spaces)" 'npm  ci\n'
+  st infra   "setup one word alone" 'setup\n'
+  st infra   "npm install via the install word" 'npm install\n'
   echo; [ "$st_fail" -eq 0 ] && echo "classifier: ALL PASS" || echo "classifier: SOME FAILED"
   exit "$st_fail"
 fi
