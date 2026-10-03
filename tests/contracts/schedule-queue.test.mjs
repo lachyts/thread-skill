@@ -8,7 +8,8 @@
 // the rule to schedule. Schedule speaks rungs, never tiers (ADR 0029, p13-3): § 4.7 offers a starting rung read
 // from ladder.py and never lowers one, step 1's carry preview lists its `restamp` lines and stops on a refusal
 // (a refused ladder included), step 7 stamps `rung:` and leaves a top-mapping legacy stamp under a refused
-// ladder for step 8 to list, and the template's budget prices a top-rung start.
+// ladder for step 8 to list (and an unrecognised legacy value for step 8's own block), and the template's budget
+// prices a top-rung start.
 //
 // Every rule lives in one pure function, checkSchedule, that returns named failures, so the real files
 // and the control cases run through identical logic and the matcher can't pass vacuously. Each control
@@ -147,6 +148,13 @@ function checkSchedule({ schedule, template, orient, manifests = [], extra = [] 
     !s7.includes('leave a top-mapping legacy stamp in place, unmapped') || !s7.includes("execute's compat read") ||
     s8.indexOf('**Pre-flight — ladder refused.**') < 0 || !collapse(pre).includes('show its stderr line verbatim') ||
     !pre.includes("— model: fable left for execute's compat read")) fails.push('ladder-refused-preflight')
+
+  // legacy-left-preflight: an unrecognised legacy value step 7 leaves on a non-carried candidate is listed in step 8's
+  // own block, one line per value in carry's `WARN:` format.
+  const left = s8.slice(s8.indexOf('**Pre-flight — legacy values left in place.**'))
+  if (!s7.includes('leave an unrecognised value in place, listing it in step 8\'s "Pre-flight — legacy values left in place" block') ||
+    s8.indexOf('**Pre-flight — legacy values left in place.**') < 0 ||
+    !left.includes('WARN: schedule: task-w: effort: banana unrecognised, left in place')) fails.push('legacy-left-preflight')
 
   // no-tier: the skill and the template speak no tier: none of the tier words, no "step-up", no `model:` in the
   // template's frontmatter.
@@ -323,6 +331,13 @@ test('control: § 4.7 without its never-lower sentence fails rung-no-lower', () 
 
 test('control: step 8 without the ladder-refused block fails ladder-refused-preflight', () => {
   only({ schedule: edit(real.schedule, S8, '**Pre-flight — ladder refused.**', '**Pre-flight — other.**') }, ['ladder-refused-preflight'], 'no block')
+})
+
+test('control: step 7 naming no block for an unrecognised value fails legacy-left-preflight', () => {
+  only({ schedule: edit(real.schedule, S7, 'listing it in step 8\'s "Pre-flight — legacy values left in place" block', "naming it in step 8's summary") },
+    ['legacy-left-preflight'], 'dangling reference')
+  only({ schedule: edit(real.schedule, S8, '**Pre-flight — legacy values left in place.**', '**Pre-flight — other values.**') },
+    ['legacy-left-preflight'], 'no block')
 })
 
 test('control: a tier word in § 4.7 fails no-tier', () => {

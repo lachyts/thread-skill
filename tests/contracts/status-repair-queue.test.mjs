@@ -781,6 +781,7 @@ function check({ status, repair, fx }) {
     s2.includes('`progress`, `timeline` and `ladder`') && s2.includes('`blockerSummary`, `rung` and `rungDrift`') &&
       s2.includes(`the task is unlanded (\`queueState\` ${UNLANDED})`),
     rd.includes(`only for a task whose \`queueState\` is ${UNLANDED}`) && rd.includes('A merged, folded or other task is never flagged') &&
+      rd.includes('It needs no write: the engine reads it as the top rung') && rd.includes("a re-stamp or a ladder edit is Lachy's choice") &&
       rd.includes('so it holds offline too') && lr.includes('Execute halts `ladder file refused`') && lr.includes('so it holds offline too'),
     labelled(s3raw, 'Offline.').includes('the RACE / UNVERIFIED, Rung drift and Ladder refused flags still render'),
     action11.startsWith('Any drift flag but a Rung drift or a refused ladder,'),
@@ -1233,6 +1234,10 @@ test('control: § 2 without rungDrift fails rung', () => {
 test('control: a Rung drift flag without its state scope fails rung', () => {
   only(st('only for a task whose `queueState` is queued, running, awaiting-integration, integrating or set-aside, with a non-empty `rungDrift`',
     'for any task with a non-empty `rungDrift`'), 'rung', 'unscoped')
+})
+test('control: a Rung drift flag that says no write fixes it fails rung', () => {
+  only(st("It needs no write: the engine reads it as the top rung. A re-stamp to a listed rung, or restoring that rung in `~/.config/thread/ladder.toml`, clears it; a re-stamp or a ladder edit is Lachy's choice, and",
+    'Advisory: no write fixes it and'), 'rung', 'advisory wording')
 })
 test('control: an Offline paragraph that drops the local flags fails rung', () => {
   only(st(' It skips the live reads only: the RACE / UNVERIFIED, Rung drift and Ladder refused flags still render, from § 2\'s data and the local files.', ''), 'rung', 'offline')

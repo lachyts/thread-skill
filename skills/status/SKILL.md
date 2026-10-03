@@ -194,8 +194,10 @@ takes none of them.
   (A set-aside task's reaped tree is not drift: its re-entry recreates the tree from its branch.)
 - **Rung drift:** only for a task whose `queueState` is queued, running, awaiting-integration, integrating or
   set-aside, with a non-empty `rungDrift`: "`rung: <x>` is not on the ladder (<ladder.source>): its next call
-  starts on the top rung <top>, and reconcile overwrites the stamp". Advisory: no write fixes it and no route
-  sends it to repair (repair § 2). A merged, folded or other task is never flagged. The flag reads only the
+  starts on the top rung <top>, and reconcile overwrites the stamp". It needs no write: the engine reads it as the
+  top rung. A re-stamp to a listed rung, or restoring that rung in `~/.config/thread/ladder.toml`, clears it; a
+  re-stamp or a ladder edit is Lachy's choice, and no route sends it to repair (repair § 2). A merged, folded or
+  other task is never flagged. The flag reads only the
   vault and a local file, so it holds offline too.
 - **Ladder refused:** `ladder.error` is set. Execute halts `ladder file refused` at each call's start until the
   file reads, and the fix is Lachy's edit to `<ladder.source>` (<ladder.error>). The flag reads only the vault

@@ -329,7 +329,7 @@ For each task in the rollout:
 - For tasks the user confirmed as Solo in step 5, add `solo: true`
 - For the body dependencies the user confirmed in step 3, append `depends-on:` entries (`- "[[<slug>]]"`) to the dependant; never drop an existing entry
 - For a task whose § 4.7 offer the user confirmed, or whose rung the user named explicitly, add `rung: <name>` (a rung the ladder lists) — never by default, and never on the rollout note
-- For a non-carried `queued` candidate that still has a legacy stamp (a `model:`, an `effort:` or the stale cap stamp), apply carry's mapping (`reconcile-rollout.py carry`): with no non-empty `rung:` of its own, a `model: fable` or an `effort: xhigh` or `max` (trimmed, any case) becomes `rung: <the ladder's top rung>`; then remove each recognised key (`model:` at fable, opus or empty; `effort:` at low, medium, high, xhigh, max or empty; the cap stamp at any value) and leave an unrecognised value in place, naming it in step 8's summary. When `ladder.py` refused at schedule time, still remove the drop-only keys (they need no rung name, as in carry), but leave a top-mapping legacy stamp in place, unmapped: execute's compat read (execute SKILL.md, *Legacy stamps*) maps it at runtime once the file reads, and execute halts `ladder file refused` until then. List each such task in step 8's "Pre-flight — ladder refused" block
+- For a non-carried `queued` candidate that still has a legacy stamp (a `model:`, an `effort:` or the stale cap stamp), apply carry's mapping (`reconcile-rollout.py carry`): with no non-empty `rung:` of its own, a `model: fable` or an `effort: xhigh` or `max` (trimmed, any case) becomes `rung: <the ladder's top rung>`; then remove each recognised key (`model:` at fable, opus or empty; `effort:` at low, medium, high, xhigh, max or empty; the cap stamp at any value) and leave an unrecognised value in place, listing it in step 8's "Pre-flight — legacy values left in place" block. When `ladder.py` refused at schedule time, still remove the drop-only keys (they need no rung name, as in carry), but leave a top-mapping legacy stamp in place, unmapped: execute's compat read (execute SKILL.md, *Legacy stamps*) maps it at runtime once the file reads, and execute halts `ladder file refused` until then. List each such task in step 8's "Pre-flight — ladder refused" block
 - For tasks the §3.6 sweep flagged (user-confirmed), add `plan_approval: required` — advisory: it guarantees a plan-gate exists where the plan's own `### Gated inputs` declaration (the authoritative signal, ADR 0008) can pause for sign-off
 - Preserve all other frontmatter fields verbatim
 
@@ -387,6 +387,13 @@ GitHub's copy) before executing:
   ladder: /Users/<you>/.config/thread/ladder.toml:11: rung 2 ("opus-xhigh"): effort "huge" is not one of low, medium, high, xhigh, max
   - [[task-z]] — model: fable left for execute's compat read
 Fix: edit the named line of ~/.config/thread/ladder.toml, then execute.
+```
+
+**Pre-flight — legacy values left in place.** If step 7 left an unrecognised legacy value on a non-carried candidate, list one line per value above the summary, in carry's own `WARN: carry:` format with `schedule` in its place, so the two read alike (a carried task's lines already showed in step 1's confirm):
+
+```
+⚠️ Pre-flight — legacy values left in place (no rung was mapped from them; correct or remove each by hand):
+  WARN: schedule: task-w: effort: banana unrecognised, left in place
 ```
 
 **Pre-flight — unfinished-rollout warnings.** List the `WARN:` lines § 0's unfinished-rollout check printed (a Project root matched on its path only, a rollout left out for want of a Project root line, a complete rollout whose ceremony never ran, a superseded note it could not file, an incomplete rollout this run superseded) verbatim above the summary, so the user can resolve each.
