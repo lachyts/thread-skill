@@ -111,13 +111,18 @@ Subcommands:
               ASK (one `ASK: [[slug]] <why>; nothing written: ...` line, nothing written) when: the part, or a clause
               holding it, cites an ADR; a recorded decision (`## Decisions…`, a human `## Scope decision…`, a
               `## Repair input` line without `(automatic)`, `## Approved gates`, `## Gated inputs`) holds the part
-              (or, for --owner, the quote); --optional and an occurrence of the part in the brief (the body minus
-              the record sections) has no marker word (consider, considering, optional, optionally, nice to have)
-              at or before it in its own clause, or the part is not in the brief; --owner and the part is in an
-              unmarked brief clause, or the owner is the task, not a task of this rollout, not unlanded and active
-              (its queue state carried), held by a RACE or UNVERIFIED, upstream of the task, or its note lacks the
-              quote; the task was descoped automatically before and restarted since (no `descope_armed:`, even when
-              the new block's feedback added no run); or another part or mode at the same run. Exit 0 writes, each
+              (or, for --owner, the quote); the part sits in a fenced code block of the brief (the body minus the
+              record sections; a fence is never a brief item, so no pointer lands inside one); --optional and an
+              occurrence of the part in the brief has no marker word (consider, considering, optional, optionally,
+              nice to have) at or before it in its own clause, or the part is not in the brief (clauses split at
+              `.`, `;`, `:`, `!`, `?`, a dash and `, and` / `, but` / `, then`; a marker that not / never / no
+              negates is none; a clause that is only a marker ended by `:` or `.` marks the next one); --owner and
+              the part is in an unmarked brief clause, or is in neither the latest Plan-blocked feedback run nor
+              the brief (verbatim only: a paraphrase the feedback itself uses still passes, so the caller's
+              judgement stays the guard there), or the owner is the task, not a task of this rollout, not unlanded
+              and active (its queue state carried), held by a RACE or UNVERIFIED, upstream of the task, or its note
+              lacks the quote; the task was descoped automatically before and restarted since (no `descope_armed:`,
+              even when the new block's feedback added no run); or another part or mode at the same run. Exit 0 writes, each
               record checked and written on its own so a re-run finishes a partial one: the follow-up note
               (--optional: `<project>-followup-<short>.md`, loose, `descoped_from:`; one at that path without it is
               exit 1), then the task note in one save (a `## Scope decision (automatic)` entry and its
@@ -2296,8 +2301,15 @@ BRIEF_EXCLUDE = ("## Plan-blocked feedback", "## Review-blocked feedback", "## B
                  "## Review history", REPAIR_INPUT_SECTION, "## Scope decision", APPROVED_PLAN_SECTION,
                  INTEGRATION_LOG_SECTION, APPROVED_GATES_SECTION, GATE_PENDING_SECTION, "## Decisions",
                  "## Resume prompt")
-OPTIONAL_MARK_RE = re.compile(r"\b(?:consider|considering|optional|optionally|nice to have|nice-to-have)\b")
-CLAUSE_SPLIT_RE = re.compile(r"(?<=[.;:!?])\s+| [—–] ")
+MARKER_WORDS = r"(?:consider|considering|optional|optionally|nice to have|nice-to-have)"
+OPTIONAL_MARK_RE = re.compile(rf"\b{MARKER_WORDS}\b")
+# A marker negated by not / never / no (or an n't) up to two words before it is no marker: "not optional".
+NEGATED_RE = re.compile(r"(?:\b(?:not|never|no)|n['’]t)\s+(?:[\w-]+\s+){0,2}$")
+# A clause that is only a marker word ended by `:` or `.` ("Nice to have:", "Optional.") marks the next clause.
+MARKER_ONLY_RE = re.compile(rf"[*_\s]*{MARKER_WORDS}[*_\s]*[:.][*_\s]*")
+# Clauses split at `.`, `;`, `:`, `!` or `?` followed by whitespace, at ` — ` / ` – `, and at the coordinators
+# `, and` / `, but` / `, then`, so a marker never reaches past a coordinated second instruction.
+CLAUSE_SPLIT_RE = re.compile(r"(?<=[.;:!?])\s+| [—–] |,\s+(?:and|but|then)\s+")
 ADR_RE = re.compile(r"\bADR[ -]?\d{1,4}\b|docs/adr/", re.I)
 KEBAB_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
@@ -2333,16 +2345,28 @@ def _is_brief(heading: str) -> bool:
 
 
 def _brief_items(note):
-    """(lines, items): the brief is the body minus the record sections (BRIEF_EXCLUDE); an item is a list item with
-    its continuation lines, a paragraph, or a heading line. Each item is [heading, first, last, text]."""
+    """(lines, items, fenced): the brief is the body minus the record sections (BRIEF_EXCLUDE); an item is a list item
+    with its continuation lines, a paragraph, or a heading line, each [heading, first, last, text]. A fenced code
+    block is never an item, so no pointer is ever appended inside one (a fence line ends the item before it):
+    `fenced` holds each brief fenced block's folded text instead, an unclosed one running to its section's end."""
     lines, sections = _body_sections(note)
-    items = []
+    items, fenced = [], []
     for heading, idxs in sections:
         if not _is_brief(heading):
             continue
-        cur = None
+        cur, fence = None, None
         for i in idxs:
             line = lines[i]
+            if fence is not None:
+                if FENCE_RE.match(line):
+                    fenced.append(_fold(" ".join(fence)))
+                    fence = None
+                else:
+                    fence.append(line)
+                continue
+            if FENCE_RE.match(line):
+                cur, fence = None, []
+                continue
             if not line.strip():
                 cur = None
                 continue
@@ -2354,32 +2378,42 @@ def _brief_items(note):
             else:
                 cur[2] = i
                 cur[3] += " " + line.strip()
-    return lines, items
+        if fence is not None:
+            fenced.append(_fold(" ".join(fence)))
+    return lines, items, fenced
 
 
 def _clauses(text: str):
-    """A folded item split into clauses: at `.`, `;`, `:`, `!` or `?` followed by whitespace, and at ` — ` / ` – `."""
+    """A folded item split into clauses (CLAUSE_SPLIT_RE): at `.`, `;`, `:`, `!` or `?` followed by whitespace, at
+    ` — ` / ` – `, and at `, and` / `, but` / `, then`."""
     return CLAUSE_SPLIT_RE.split(text)
+
+
+def _marks(clause: str):
+    """The start of every optional marker word in a clause that no not / never / no (or n't) negates."""
+    return [m.start() for m in OPTIONAL_MARK_RE.finditer(clause) if not NEGATED_RE.search(clause[:m.start()])]
 
 
 def _part_hits(items, part_f):
     """[(item, total, marked, clauses)] for every brief item holding the folded part: how many occurrences, how many
-    have an optional marker word starting at or before them in the same clause (an occurrence that crosses a clause
-    boundary is never marked), and the clauses that hold it."""
+    are marked optional, and the clauses that hold it. An occurrence is marked when an un-negated marker word starts
+    at or before it in its own clause, or when the clause before is only a marker word ended by `:` or `.`
+    ("Nice to have: a canary", "Optional. A canary"). An occurrence that crosses a clause boundary is never marked."""
     hits = []
     for item in items:
-        text = _fold(item[3])
+        text = _fold(LIST_ITEM_RE.sub("", item[3], count=1))
         total = len(_find_all(text, part_f))
         if not total:
             continue
-        marked, holding = 0, []
+        marked, holding, carry = 0, [], False
         for clause in _clauses(text):
+            lead, carry = carry, bool(MARKER_ONLY_RE.fullmatch(clause))
             found = _find_all(clause, part_f)
             if not found:
                 continue
             holding.append(clause)
-            marks = [m.start() for m in OPTIONAL_MARK_RE.finditer(clause)]
-            marked += sum(1 for pos in found if marks and marks[0] <= pos)
+            marks = _marks(clause)
+            marked += len(found) if lead else sum(1 for pos in found if marks and marks[0] <= pos)
         hits.append((item, total, marked, holding))
     return hits
 
@@ -2565,7 +2599,7 @@ def cmd_descope(args) -> int:
     part_sha = _sha12(part_f)
     marks = [m for m in (DESCOPE_MARK_RE.match(l.strip()) for l in note.section_text(SCOPE_AUTO_SECTION).split("\n")) if m]
     armed = _scalar(note.get(DESCOPE_ARMED_KEY))
-    lines, items = _brief_items(note)
+    lines, items, fenced = _brief_items(note)
     hits = _part_hits(items, part_f)
     if marks:
         # Once per task: the stamp is the "not restarted since" signal (mark-started consumes it), so a block after a
@@ -2584,6 +2618,9 @@ def cmd_descope(args) -> int:
         held = _recorded_decision(note, [part_f, quote_f] if mode == "owner" else [part_f])
         if held:
             return ask(f"a recorded decision ({held}) names the part")
+        if any(part_f in block for block in fenced):
+            return ask(f'"{part}" sits in a fenced code block in the brief: only prose marks a part optional, and an '
+                       "owner never takes it")
         if mode == "optional":
             if not hits:
                 return ask(f'"{part}" is not in the brief: only a part the note marks optional descopes as optional')
@@ -2591,6 +2628,11 @@ def cmd_descope(args) -> int:
                 return ask(f'"{part}" is required scope: an occurrence has no optional marker (consider, optional, '
                            "nice to have) in its own clause")
         else:
+            # Tied to the block: an owned part is quoted verbatim from the latest feedback run or the brief, so a
+            # paraphrase of required scope cannot pass for an emergent part. The match is verbatim only.
+            if not hits and part_f not in _fold(_top_run(runs)["content"]):
+                return ask(f'"{part}" is in neither the latest Plan-blocked feedback run nor the brief: an owned part '
+                           "is quoted verbatim from the block")
             if hits and not _optional_in_brief(hits):
                 return ask(f'"{part}" is required scope in the brief: an owner never takes required scope')
             why = _owner_check(slug, owner, quote_f, rollout_path, rollout_note, tasks_dir)
@@ -2633,10 +2675,11 @@ def cmd_descope(args) -> int:
     ri = [l for l in note.section_text(REPAIR_INPUT_SECTION).split("\n") if "(automatic)" in l]
     if not any(_fold(f'"{part}"') in _fold(l) for l in ri):
         superseded = sorted({r["n"] for r in runs if r["n"] <= run_n})
+        runs_said = (f"runs {_and_list(superseded)} are superseded where they concern" if len(superseded) > 1 else
+                     f"run {superseded[0]} is superseded where it concerns")
         note.append_line(REPAIR_INPUT_SECTION,
                          f'- (automatic) {date}: "{part}" is out of this task\'s scope; see {SCOPE_AUTO_SECTION}. '
-                         f"Plan-blocked feedback runs {_and_list(superseded)} are superseded where they concern it; "
-                         "every other point stands.")
+                         f"Plan-blocked feedback {runs_said} the part; every other point stands.")
     if not armed:
         note.set(DESCOPE_ARMED_KEY, stamp)
     if note.dirty:
