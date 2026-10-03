@@ -191,11 +191,27 @@ REINTEGRATE_MAX=${MERGE_TASK_REINTEGRATE_MAX:-3}         # re-integrations allow
 # all — is "genuine". FAIL-CLOSED by construction: the burden of proof is on "infra".
 # Defined up here (before arg parsing) so the --self-test-classify hook can exercise it with no live GitHub.
 classify_failed_steps() (  # stdin: failed step names; stdout: "infra" | "genuine"
-  local saw=0 verdict=infra line
+  local saw=0 verdict=infra line words
   # Plain [[ =~ ]] (an unquoted variable is an ERE on bash 3.2 too) under nocasematch, scoped by the
-  # subshell body: no per-line fork. The patterns are unanchored, so surrounding blanks need no trim.
-  local deny='test|pytest|assert|spec|lint|mypy|type ?check|coverage|benchmark|compile|build'
-  local allow='install|dependenc|set ?up|checkout|cache|download|provision|restore|bootstrap|configure|pip|poetry|npm ci|npm install|yarn|apt|brew|fetch|clone'
+  # subshell body: no per-line fork.
+  # The denylist stays a SUBSTRING match on the raw line: a false hit only makes a step genuine, so the
+  # wider match is the fail-closed side ("unittest", "e2etests", "rebuild" all stay genuine). verif/validat
+  # catch verification steps whose other words look like setup ("Restore and verify DB snapshot").
+  local deny='test|pytest|assert|spec|lint|mypy|type ?check|coverage|benchmark|compile|build|verif|validat'
+  # The allowlist is the proof of "infra", so it matches WHOLE WORDS only: a token inside another word
+  # proves nothing ("pip" in "pipeline", "apt" in "adapter"/"capture", "fetch" in "prefetch"). Portable word
+  # boundaries (\b and [[:<:]] differ between GNU and BSD regex): every non-alphanumeric becomes a space and
+  # the line is padded with spaces, so each token is matched as " token ". Inflections are spelled out:
+  # every setup VERB carries its -s/-ed/-ing forms (an unlisted form would silently classify genuine).
+  # Nouns and tool names (checkout, setup, pip, poetry, yarn, apt, brew, npm ci) stay bare. There is no
+  # "npm install" token: its "install" word already matches, so one would be dead and untestable.
+  # KNOWN GAP (follow-up, out of scope here): ONE whole-word allowlist hit still makes the WHOLE line
+  # infra, however much real work the rest of the step names. "Restore DB snapshot and check integrity",
+  # "Download fixtures and compare golden output", "Configure and run e2e", "yarn jest" and "pip-audit"
+  # all classify infra today; verif/validat in the denylist covers only the "verify" wording. Likely fix:
+  # a word-bounded denylist of work verbs (check, compare, diff, e2e, smoke, audit) where "check" must
+  # not match "checkout".
+  local allow=' (install(s|ed|ing)?|dependenc(y|ies)|set *up|checkout|cach(e|es|ed|ing)|download(s|ed|ing)?|provision(s|ed|ing)?|restor(e|es|ed|ing)|bootstrap(s|ped|ping)?|configur(e|es|ed|ing)|pip|poetry|npm +ci|yarn|apt|brew|fetch(es|ed|ing)?|clon(e|es|ed|ing)) '
   shopt -s nocasematch
   while IFS= read -r line; do
     [[ $line =~ ^[[:space:]]*$ ]] && continue
@@ -205,7 +221,8 @@ classify_failed_steps() (  # stdin: failed step names; stdout: "infra" | "genuin
       verdict=genuine; break
     fi
     # Allowlist: recognised setup/provisioning/network steps. An UNRECOGNISED step ⇒ genuine (fail-closed).
-    if [[ $line =~ $allow ]]; then
+    words=" ${line//[^[:alnum:]]/ } "
+    if [[ $words =~ $allow ]]; then
       :  # infra-looking — keep scanning the rest
     else
       verdict=genuine; break
@@ -445,25 +462,92 @@ fi
 # see the UNSTABLE guard comment below). Must precede the arg-count check; uses ${1:-} for `set -u` safety.
 if [ "${1:-}" = "--self-test-classify" ]; then
   st_fail=0
-  st() {  # st <expected> <label> ; failed step names on stdin
-    local exp="$1" label="$2" got; got="$(classify_failed_steps)"
+  # st <expected> <label> <steps>: <steps> is a printf %b string (\n separates failed step names). The steps
+  # go in as an argument, never piped into st: `printf … | st` ran st in a pipeline subshell, so its
+  # st_fail=1 was lost and a failing case still printed "ALL PASS" with exit 0.
+  st() {
+    local exp="$1" label="$2" got; got="$(printf '%b' "$3" | classify_failed_steps)"
     if [ "$got" = "$exp" ]; then echo "ok   - $label ($got)"; else echo "FAIL - $label: expected $exp got $got"; st_fail=1; fi
   }
-  printf 'Install dependencies\n'           | st infra   "install-deps timeout"
-  printf 'Set up Python\n'                   | st infra   "set up python"
-  printf 'Checkout\nInstall dependencies\n'  | st infra   "checkout + install"
-  printf 'Restore cache\n'                   | st infra   "restore cache"
-  printf 'Run tests\n'                       | st genuine "run tests"
-  printf 'pytest (fast)\n'                   | st genuine "pytest"
-  printf 'Install dependencies\nRun tests\n' | st genuine "mixed install+test => genuine"
-  printf 'Lint\n'                            | st genuine "lint"
-  printf 'mypy\n'                            | st genuine "mypy"
-  printf 'Build wheel\n'                     | st genuine "build"
-  printf 'Deploy artifact\n'                 | st genuine "unrecognised step => fail-closed"
-  printf '\n'                                | st genuine "no steps => fail-closed"
-  printf '  \t\n'                            | st genuine "blank-only steps => fail-closed"
-  printf '\n  INSTALL DEPENDENCIES  \n\n'     | st infra   "blank lines skipped, case ignored"
-  printf 'RUN TESTS\n'                       | st genuine "upper-case test => genuine"
+  st infra   "install-deps timeout" 'Install dependencies\n'
+  st infra   "set up python" 'Set up Python\n'
+  st infra   "checkout + install" 'Checkout\nInstall dependencies\n'
+  st infra   "restore cache" 'Restore cache\n'
+  st genuine "run tests" 'Run tests\n'
+  st genuine "pytest" 'pytest (fast)\n'
+  st genuine "mixed install+test => genuine" 'Install dependencies\nRun tests\n'
+  st genuine "lint" 'Lint\n'
+  st genuine "mypy" 'mypy\n'
+  st genuine "build" 'Build wheel\n'
+  st genuine "unrecognised step => fail-closed" 'Deploy artifact\n'
+  st genuine "no steps => fail-closed" '\n'
+  st genuine "blank-only steps => fail-closed" '  \t\n'
+  st infra   "blank lines skipped, case ignored" '\n  INSTALL DEPENDENCIES  \n\n'
+  st genuine "upper-case test => genuine" 'RUN TESTS\n'
+  # Word match, not substring: an allowlist token buried inside another word proves nothing.
+  st genuine "pip inside pipeline => genuine" 'Run pipeline checks\n'
+  st genuine "apt inside adapter => genuine" 'Adapter contract check\n'
+  st genuine "apt inside capture => genuine" 'Capture screenshots\n'
+  st genuine "fetch inside prefetch => genuine" 'Verify prefetch manifest\n'
+  st genuine "restore + verify => genuine" 'Restore and verify DB snapshot\n'
+  st infra   "punctuation splits words (checkout)" 'actions/checkout@v4\n'
+  st infra   "apt-get => apt word" 'Run apt-get update\n'
+  st infra   "setup-python => setup word" 'setup-python\n'
+  # Inflections: in each case the inflected form is the ONLY allowlist token on the line, so a typo in its
+  # suffix group turns the suite red (other words on the line are deliberately not allowlisted).
+  st infra   "dependency word alone" 'Resolve dependency\n'
+  st infra   "dependencies word alone" 'Dependencies\n'
+  st infra   "installing" 'Installing deps\n'
+  st infra   "installed" 'Installed deps\n'
+  st infra   "downloaded" 'Downloaded artifacts\n'
+  st infra   "downloading" 'Downloading artifacts\n'
+  st infra   "provisioning" 'Provisioning runner\n'
+  st infra   "configured" 'Configured runner\n'
+  st infra   "configuring" 'Configuring runner\n'
+  st infra   "caching" 'Caching deps\n'
+  st infra   "restoring" 'Restoring deps\n'
+  st infra   "bootstrapping" 'Bootstrapping\n'
+  st infra   "bootstrapped" 'Bootstrapped runner\n'
+  st infra   "fetching" 'Fetching submodules\n'
+  st infra   "fetched" 'Fetched submodules\n'
+  st infra   "cloning" 'Cloning submodules\n'
+  st infra   "cloned" 'Cloned submodules\n'
+  # Base forms, each the only allowlist token on its line. 'Install dependencies' and 'Restore cache' above
+  # do NOT pin them: the two tokens on those lines mask each other.
+  st infra   "install alone" 'Install toolchain\n'
+  st infra   "download alone" 'Download artifacts\n'
+  st infra   "provision alone" 'Provision runner\n'
+  st infra   "configure alone" 'Configure runner\n'
+  st infra   "cache alone" 'Cache deps\n'
+  st infra   "restore alone" 'Restore deps\n'
+  st infra   "bootstrap alone" 'Bootstrap runner\n'
+  st infra   "fetch alone" 'Fetch submodules\n'
+  st infra   "clone alone" 'Clone submodules\n'
+  # Every form of every setup verb (9 verbs x base/-s/-ed/-ing = 36), each as '<form> runner' so it is the
+  # only allowlist token. This list is written out by hand, NOT derived from $allow, so dropping a base
+  # form, a suffix or a `?` from any verb group turns the suite red.
+  for st_w in install installs installed installing \
+              download downloads downloaded downloading \
+              provision provisions provisioned provisioning \
+              configure configures configured configuring \
+              cache caches cached caching \
+              restore restores restored restoring \
+              bootstrap bootstraps bootstrapped bootstrapping \
+              fetch fetches fetched fetching \
+              clone clones cloned cloning; do
+    st infra "form: $st_w" "$st_w runner\n"
+  done
+  # Bare tool tokens and nouns, each the only allowlist token on its line ('npm  ci' pins the ` +`).
+  # Together with the cases above, deleting any allowlist token, or dropping any base form, suffix, `?`,
+  # ` *` or ` +` from one, turns the suite red.
+  st infra   "pip alone" 'pip freeze\n'
+  st infra   "poetry alone" 'poetry lock\n'
+  st infra   "yarn alone" 'yarn\n'
+  st infra   "brew alone" 'brew update\n'
+  st infra   "npm ci alone" 'npm ci\n'
+  st infra   "npm  ci (two spaces)" 'npm  ci\n'
+  st infra   "setup one word alone" 'setup\n'
+  st infra   "npm install via the install word" 'npm install\n'
   echo; [ "$st_fail" -eq 0 ] && echo "classifier: ALL PASS" || echo "classifier: SOME FAILED"
   exit "$st_fail"
 fi
