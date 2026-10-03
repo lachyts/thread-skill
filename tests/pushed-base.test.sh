@@ -198,11 +198,14 @@ g -C "$C" checkout -q -b other; g -C "$C" branch -q -D master
 run "$C" ""
 ok "$rc|$out|$err" "0|pushed|" "10. no local master → 0"
 
-# 11. an empty commit ahead → 3 (conservative)
+# 11. an empty commit ahead → 3 (conservative), still when origin gains an unrelated empty commit too
 fresh
 g -C "$C" commit -q --allow-empty -m "empty ahead"
 run "$C" ""
 ok "$rc" 3 "11. empty-diff ahead → 3"
+g -C "$S" commit -q --allow-empty -m "trigger CI"; g -C "$S" push -q origin master
+run "$C" ""
+ok "$rc|${out:-<empty>}" "3|<empty>" "11. … beside an empty upstream commit → 3"
 
 # 12. origin/HEAD unset → generic remedy, no repo-state line
 fresh
@@ -278,15 +281,15 @@ g -C "$S" push -q origin master
 run "$C" ""
 ok "$rc" 3 "13e. squash-landed then edited upstream → 3 (content differs, conservative)"
 
-# 13f. 4000 stranded commits. The landed-by-content test once piped `git cherry`'s ~172 KB into grep -q under
-# pipefail; grep quit on its first match, SIGPIPE read as "no + line" and the set as landed by content.
+# 13f. 4000 stranded commits: a large ahead set still blocks (a pipe into grep -q under pipefail once read a
+# SIGPIPE here as landed).
 fresh
 awk -v n=4000 'BEGIN { print "commit refs/heads/master"; print "committer t <t@t> 0 +0000"; print "data 0"
   print "from refs/heads/master^0"; for (i = 1; i <= n; i++) { if (i > 1) { print "commit refs/heads/master"
   print "committer t <t@t> " i " +0000"; print "data 0" } print "M 644 inline bulk.txt"; print "data " length(i) + 1; print i } }' \
   | git -C "$C" fast-import --quiet
 g -C "$C" reset -q --hard
-ok "$(git -C "$C" cherry origin/master master | grep -c '^+')" 4000 "13f. git cherry marks all 4000 + (precondition)"
+ok "$(git -C "$C" rev-list --count origin/master..master)" 4000 "13f. 4000 ahead (precondition)"
 run "$C" ""
 ok "$rc|${out:-<empty>}" "3|<empty>" "13f. 4000 stranded commits → 3"
 has "$err" "pushed-base: local master in $C is 4000 commit(s) ahead of origin/master: rollout worktrees branch" "13f. … the block header, not the landed-by-content note"
@@ -294,18 +297,18 @@ has "$err" "land them on origin/master by PR" "13f. … the land-by-PR remedy"
 lacks "$err" "already on origin/master" "13f. … no landed-by-content note"
 
 # 13g. an evil merge: local master merges branch f with --no-ff and the merge itself adds evil.txt; f's one
-# commit is then cherry-picked (-x, a new SHA) onto origin/master. `git cherry` skips merges, so it once printed only `- f1`
-# and the set read as landed by content, with a reset remedy that would drop evil.txt.
+# commit is then cherry-picked (-x, a new SHA) onto origin/master. f1 has landed, the merge's content has not.
 fresh
 g -C "$C" checkout -q -b f && commit "$C" "f1" f.txt && g -C "$C" checkout -q master
 g -C "$C" merge -q --no-ff --no-commit f >/dev/null && echo evil > "$C/evil.txt" && g -C "$C" add evil.txt && g -C "$C" commit -q -m "merge f"
 g -C "$S" fetch -q "$C" f && g -C "$S" cherry-pick -x FETCH_HEAD >/dev/null && g -C "$S" push -q origin master
-ok "$(git -C "$C" fetch -q && git -C "$C" cherry origin/master master)" "- $(git -C "$C" rev-parse f)" "13g. git cherry prints only f1's - line (precondition)"
+ok "$(git -C "$C" fetch -q && git -C "$C" cat-file -e origin/master:f.txt && echo y)|$(git -C "$C" cat-file -e origin/master:evil.txt 2>/dev/null || echo n)" "y|n" "13g. f.txt on origin, evil.txt not (precondition)"
 run "$C" ""
 ok "$rc|${out:-<empty>}" "3|<empty>" "13g. a merge commit carrying new content → 3"
 lacks "$err" "already on origin/master" "13g. … no landed-by-content note"
 
-# 13h. landed by a cherry-pick, then reverted on origin: the patch matches, the content does not → 3
+# 13h. landed by a cherry-pick, then reverted on origin: the patch matches, the content does not → 3. Guards
+# against judging "landed" by patch identity (git cherry, rev-list --cherry-pick).
 fresh
 commit "$C" "add x" x.txt
 g -C "$S" fetch -q "$C" master && g -C "$S" cherry-pick -x FETCH_HEAD >/dev/null && g -C "$S" revert --no-edit HEAD >/dev/null
@@ -314,18 +317,11 @@ run "$C" ""
 ok "$rc|${out:-<empty>}" "3|<empty>" "13h. cherry-picked then reverted upstream → 3"
 lacks "$err" "already on origin/master" "13h. … no landed-by-content note"
 
-# 13i. an empty local commit while origin gains an unrelated empty one: both patch-empty, still nothing to compare → 3
+# 13i. a stderr line on a successful count (GIT_TRACE) never reads as a failure: an in-sync clone → 0
 fresh
-g -C "$C" commit -q --allow-empty -m "local marker"
-g -C "$S" commit -q --allow-empty -m "trigger CI"; g -C "$S" push -q origin master
-run "$C" ""
-ok "$rc|${out:-<empty>}" "3|<empty>" "13i. an empty commit beside an empty upstream one → 3"
-
-# 13j. a stderr line on a successful count (GIT_TRACE) never reads as a failure: an in-sync clone → 0
-fresh
-pb "$C" master; ok "$rc|$out" "0|pushed" "13j. in sync → 0 (precondition)"
-out=$(cd "$tmp" && env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" GIT_TRACE=1 bash "$script" "$C" master 2>"$tmp/err"); rc=$?
-ok "$rc|$out" "0|pushed" "13j. in sync under GIT_TRACE=1 → 0"
+GIT_TRACE=1 pb "$C" master
+ok "$rc|$out" "0|pushed" "13i. in sync under GIT_TRACE=1 → 0"
+has "$err" "trace:" "13i. … with git's trace on stderr (precondition)"
 
 # ======== the clone set ==================================================================================
 # 14. rollout clone in sync, primary (same origin) ahead with an ADR, given via --also

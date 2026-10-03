@@ -115,10 +115,9 @@ done
 # ---- block: a member's local <b> ahead of origin/<b> --------------------------------------------------
 # Ancestry alone over-counts: a commit landed by a squash or cherry-picked PR stays "ahead" for ever. So an
 # ahead member blocks only when some of its content is not on origin/<b>: a file the ahead commits touch
-# (merges included) differs between origin/<b> and local <b>. THREAD.md is set aside first. Content, never
-# patch identity: a patch that landed and was then reverted, or an empty commit matching another, would read
-# as landed. Landed content that origin/<b> has since changed blocks, and so does an ahead set that touches
-# no file (empty commits, net-zero changes): with nothing to compare, the gate stays conservative.
+# (merges included) differs between origin/<b> and local <b>. THREAD.md is set aside first. Landed content
+# that origin/<b> has since changed blocks, and so does an ahead set that touches no file (empty commits,
+# net-zero changes): with nothing to compare, the gate stays conservative.
 blocked=0 broken=0
 up="refs/remotes/origin/$b"
 reset_hint() {  # reset_hint <member>: the command that drops local <b>'s landed commits
@@ -130,11 +129,9 @@ reset_hint() {  # reset_hint <member>: the command that drops local <b>'s landed
 }
 for c in "${members[@]}"; do
   git -C "$c" rev-parse -q --verify "refs/heads/$b" >/dev/null 2>&1 || continue
-  # git's stderr passes through; a failure or a count that is not a number blocks, never skips.
-  n=$(git -C "$c" rev-list --count "$up..refs/heads/$b"); nrc=$?
-  if [ "$nrc" != 0 ] || ! [[ $n =~ ^[0-9]+$ ]]; then
-    echo "pushed-base: cannot count $b against origin/$b in $c (rc $nrc)" >&2; broken=1; continue
-  fi
+  # git's stderr passes through (it says why); a failure blocks, never skips.
+  n=$(git -C "$c" rev-list --count "$up..refs/heads/$b") || {
+    echo "pushed-base: cannot count $b against origin/$b in $c" >&2; broken=1; continue; }
   [ "$n" -gt 0 ] || continue
   # The files the ahead commits touch (merge-base..<b>), and which of them differ from origin/<b> now.
   touched=() differ=() other=0
