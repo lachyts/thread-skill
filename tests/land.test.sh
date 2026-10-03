@@ -210,7 +210,9 @@ hasnt "$(ghlog)" "autoMergeRequest" "case 5b: the PR list never asks for autoMer
 
 echo "== 6. PR create hangs after creating"
 ghreset; mkrepo c6; edit
-land LAND_TIMEOUT=2 GH_CREATE=hang-after-create -- "$W" "$W/THREAD.md"
+# 4 s, not 2: after the hang the flow runs on to `pr merge`, and the exact `queued` result needs that call
+# to beat the timeout under make test's concurrency.
+land LAND_TIMEOUT=4 GH_CREATE=hang-after-create -- "$W" "$W/THREAD.md"
 res "case 6" 0 "queued https://github.com/o/c6/pull/1"
 ok "$([ "$el" -lt 15 ] && echo y)" y "case 6: bounded (${el}s < 15s)"
 ok "$(cnt "$(ghlog)" "pr list -R o/c6 --state open")" 2 "case 6: the re-lookup ran"
