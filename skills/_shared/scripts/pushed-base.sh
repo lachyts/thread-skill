@@ -133,8 +133,10 @@ for c in "${members[@]}"; do
     echo "pushed-base: cannot count $b against origin/$b in $c: $(printf '%s\n' "$n" | head -n 1)" >&2; broken=1; continue; }
   [ "$n" -gt 0 ] 2>/dev/null || continue
   # Every ahead commit patch-equivalent to one on origin/<b>: landed by a cherry-pick or one-commit squash.
+  # A here-string, not a pipe: grep -q quits on its first match, and under pipefail the writer's SIGPIPE on
+  # output past the pipe buffer would read as "no + line".
   if ch=$(git -C "$c" cherry "$up" "refs/heads/$b" 2>/dev/null) && [ -n "$ch" ] \
-     && ! printf '%s\n' "$ch" | grep -q '^+'; then
+     && ! grep -q '^+' <<<"$ch"; then
     note "local $b in $c is $n commit(s) ahead of origin/$b, but each is already on origin/$b by content (landed by a squash or cherry-picked PR): not a blocker; drop them with \`$(reset_hint "$c")\`"
     continue
   fi

@@ -278,6 +278,21 @@ g -C "$S" push -q origin master
 run "$C" ""
 ok "$rc" 3 "13e. squash-landed then edited upstream → 3 (content differs, conservative)"
 
+# 13f. 4000 stranded commits: `git cherry` prints ~172 KB, past any pipe buffer. A `printf | grep -q '^+'`
+# under pipefail took SIGPIPE there (grep quits on its first match) and read the set as landed by content.
+fresh
+awk -v n=4000 'BEGIN { print "commit refs/heads/master"; print "committer t <t@t> 0 +0000"; print "data 0"
+  print "from refs/heads/master^0"; for (i = 1; i <= n; i++) { if (i > 1) { print "commit refs/heads/master"
+  print "committer t <t@t> " i " +0000"; print "data 0" } print "M 644 inline bulk.txt"; print "data " length(i) + 1; print i } }' \
+  | git -C "$C" fast-import --quiet
+g -C "$C" reset -q --hard
+ok "$(git -C "$C" cherry origin/master master | grep -c '^+')" 4000 "13f. git cherry marks all 4000 + (precondition)"
+run "$C" ""
+ok "$rc|${out:-<empty>}" "3|<empty>" "13f. 4000 stranded commits → 3"
+has "$err" "pushed-base: local master in $C is 4000 commit(s) ahead of origin/master: rollout worktrees branch" "13f. … the block header, not the landed-by-content note"
+has "$err" "land them on origin/master by PR" "13f. … the land-by-PR remedy"
+lacks "$err" "already on origin/master by content" "13f. … no landed-by-content note"
+
 # ======== the clone set ==================================================================================
 # 14. rollout clone in sync, primary (same origin) ahead with an ADR, given via --also
 fresh; P="$tmp/p$k"; mkclone "$O" "$P"

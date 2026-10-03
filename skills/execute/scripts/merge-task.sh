@@ -198,11 +198,11 @@ classify_failed_steps() {  # stdin: failed step names; stdout: "infra" | "genuin
     saw=1
     lc="$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')"
     # Denylist FIRST (fail-closed): anything that looks like the actual test/build/lint work is genuine.
-    if printf '%s' "$lc" | grep -qE 'test|pytest|assert|spec|lint|mypy|type ?check|coverage|benchmark|compile|build'; then
+    if grep -qE 'test|pytest|assert|spec|lint|mypy|type ?check|coverage|benchmark|compile|build' <<<"$lc"; then
       verdict=genuine; break
     fi
     # Allowlist: recognised setup/provisioning/network steps. An UNRECOGNISED step ⇒ genuine (fail-closed).
-    if printf '%s' "$lc" | grep -qE 'install|dependenc|set ?up|checkout|cache|download|provision|restore|bootstrap|configure|pip|poetry|npm ci|npm install|yarn|apt|brew|fetch|clone'; then
+    if grep -qE 'install|dependenc|set ?up|checkout|cache|download|provision|restore|bootstrap|configure|pip|poetry|npm ci|npm install|yarn|apt|brew|fetch|clone' <<<"$lc"; then
       :  # infra-looking — keep scanning the rest
     else
       verdict=genuine; break
@@ -815,7 +815,7 @@ wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAI
     # head) or genuinely never coming. While anything is running, wait — same trust semantics as
     # --watch on a visible pending check, bounded in practice by GitHub's own job timeouts. The
     # CHECK_RETRY_MAX budget only counts CONSECUTIVE polls where nothing is running anywhere.
-    if printf '%s' "$out" | grep -qiE 'no checks reported|no required checks'; then
+    if grep -qiE 'no checks reported|no required checks' <<<"$out"; then
       # No-CI recompute guard: after a merge advances the base, GitHub recomputes every open PR's
       # mergeability ASYNCHRONOUSLY — the state machine can sample a transient UNKNOWN/BLOCKED
       # and land here even in a repo with NO required checks configured at all (statusCheckRollup
