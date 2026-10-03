@@ -493,6 +493,31 @@ test('e5: a stage that throws → a prefixed set-aside carrying the history, whi
   assert.equal(bare.row.blockerDiagnosis, 'integration: workflow stage threw — see /workflows')
 })
 
+// ADR 0029 decision 7: a row records what the call actually ran. Integrate mode records each dispatch before
+// it runs (as task mode does on st.ran), so an integrator or a judge that throws is still listed.
+test('e5b: an integrator or a judge that throws is still in the row\'s ran and integration.agents', async () => {
+  const r = await run(mkArgs(mkI()), { [ILABEL]: new Error('boom') })
+  clean(r)
+  setAside(r, 'e5b integrator')
+  assert.deepEqual(r.labels, [ILABEL])
+  assert.deepEqual(r.row.ran, [{ label: ILABEL, rung: 'opus-xhigh', model: 'opus', effort: 'xhigh' }])
+  assert.deepEqual(r.row.integration.agents.map((g) => [g.role, g.label, g.rung, g.finishedAt]), [['integrator', ILABEL, 'opus-xhigh', '']])
+  const j = await run(mkArgs(mkI({ trouble: ['conflict'] })), { [ILABEL]: ir({ state: 'merged', conflicts: ['a.js'] }), [JLABEL(2)]: new Error('boom') })
+  clean(j)
+  setAside(j, 'e5b judge')
+  assert.deepEqual(j.labels, [ILABEL, JLABEL(2)])
+  assert.deepEqual(j.row.ran.map((x) => [x.label, x.rung, x.effort]), [[ILABEL, 'opus-xhigh', 'xhigh'], [JLABEL(2), 'opus-xhigh', 'xhigh']])
+  assert.deepEqual(j.row.integration.agents.map((g) => [g.role, g.label, g.finishedAt]), [
+    ['integrator', ILABEL, '2026-10-01T10:20:00Z'], ['judge', JLABEL(2), ''],
+  ], 'the judge that threw has no finishedAt; the integrator before it keeps its own')
+  const p1 = { mergeCommit: M, headSha: M, baseSha: B1, verified: true }
+  const jo = await run(mkArgs(mkI({ trouble: ['shared-file'], leadMerge: p1 })), { [JLABEL(2)]: new Error('boom') })
+  clean(jo)
+  setAside(jo, 'e5b judge-only')
+  assert.equal(jo.row.integration.path, 'judge-only')
+  assert.deepEqual(jo.row.ran.map((x) => x.label), [JLABEL(2)])
+})
+
 // ---- (f) re-entry --------------------------------------------------------------------------------------
 
 test('f1: after the e1 set-aside, the same args re-enter at Integration and land integrated', async () => {

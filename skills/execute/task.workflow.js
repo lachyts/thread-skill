@@ -1394,7 +1394,7 @@ const TRANSIENT_DIAGNOSIS =
 
 // st (optional): a task-mode call's rung state. Each dispatch is recorded on st.ran BEFORE it runs, so a
 // stage that throws still reports what it dispatched (ADR 0029 decision 7). The integrate mode passes none:
-// its agents are recorded on its own trace.
+// it records its agents on its own trace, also before each runs (integrate()).
 async function runAgent(prompt, opts, st) {
   if (st) st.ran.push({ label: (opts && opts.label) || '', rung: cur(st).name, model: opts && opts.model, effort: opts && opts.effort })
   let r = await agent(prompt, opts)
@@ -2470,8 +2470,16 @@ async function integrate(task, a, trace) {
   const R = I.reviewRoundsUsed
   const lm = I.leadMerge
   const opts = (label, schema, role) => ({ label, phase: 'Integration', schema, model: top.model, effort: effortOf[role] })
-  const record = (role, label, r) => {
-    trace.agents.push({ role, label, rung: top.name, model: top.model, effort: effortOf[role], finishedAt: !r.__dead && typeof r.finishedAt === 'string' ? r.finishedAt : '' })
+  // Each dispatch is recorded on the trace BEFORE it runs, as task mode records on st.ran (ADR 0029 decision
+  // 7): an integrator or judge that throws is still in the row's `ran` and `integration.agents`. `finished`
+  // fills its finishedAt in once it returns ('' for a dead or thrown one).
+  const record = (role, label) => {
+    const rec = { role, label, rung: top.name, model: top.model, effort: effortOf[role], finishedAt: '' }
+    trace.agents.push(rec)
+    return rec
+  }
+  const finished = (rec, r) => {
+    if (!r.__dead && typeof r.finishedAt === 'string') rec.finishedAt = r.finishedAt
   }
   const ilabel = `integrate:${task.slug}`
   const jlabel = `integration-review:${task.slug} r${R + 1}`
@@ -2482,15 +2490,17 @@ async function integrate(task, a, trace) {
     j = { mergeCommit: lm.mergeCommit, headSha: lm.headSha, baseSha: lm.baseSha, triggers: ['shared-file'], path: trace.path }
   } else {
     trace.path = 'integrator'
+    const ri = record('integrator', ilabel)
     const r = await runAgent(integratorPrompt(task, a, I), opts(ilabel, INTEGRATE_RESULT, 'integrator'))
-    record('integrator', ilabel, r)
+    finished(ri, r)
     const bad = integrationCheck(I, r, task.approvedGates)
     if (bad) return { outcome: 'set-aside', reason: bad.reason, gates: bad.gates || [] }
     j = { mergeCommit: r.mergeState === 'up-to-date' ? '' : r.mergeCommit, headSha: r.headSha, baseSha: r.baseSha, triggers: integrationTriggers(I, r), path: trace.path }
     if (!j.triggers.length) return { outcome: 'integrated', ...j, reReviewed: false }
   }
+  const rj = record('judge', jlabel)
   const v = await runAgent(integrationReviewPrompt(task, a, I, j), opts(jlabel, INTEGRATION_REVIEW, 'judge'))
-  record('judge', jlabel, v)
+  finished(rj, v)
   if (v.__dead) return { outcome: 'set-aside', reason: TRANSIENT_DIAGNOSIS, ...j, reReviewed: false }
   const feedback = (v.feedback || []).map(flattenLine).filter((f) => f)
   if (v.unreadable) return { outcome: 'set-aside', reason: `judge could not read the integration — ${feedback[0] || 'no reason given'}`, ...j, reReviewed: true, feedback }
