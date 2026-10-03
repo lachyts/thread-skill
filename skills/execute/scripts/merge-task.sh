@@ -535,7 +535,7 @@ if [ "${1:-}" = "--self-test-classify" ]; then
               bootstrap bootstraps bootstrapped bootstrapping \
               fetch fetches fetched fetching \
               clone clones cloned cloning; do
-    st infra "$st_w alone" "$st_w runner\n"
+    st infra "form: $st_w" "$st_w runner\n"
   done
   # Bare tool tokens and nouns, each the only allowlist token on its line ('npm  ci' pins the ` +`).
   # Together with the cases above, deleting any allowlist token, or dropping any base form, suffix, `?`,
