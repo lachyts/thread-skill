@@ -62,6 +62,13 @@ Subcommands:
       blocked, the source is the Blocker run, stage revise, markerReason empty, the last line `rejected`,
       a non-empty history and lastRound < K (false without --max-review-rounds).
 
+  plan --note N
+      The task's approved plan, for the two launches that pass it (execute § 4.5 step 1.2's seeded revise,
+      as `resume.plan`, and step 3's integrate call, as `integration.plan`): {slug, plan}, where plan is
+      the note's `## Approved plan` quote unquoted (reconcile-rollout.py approved_plan), or "" when the note
+      has none (its last own call was not plan-gated, or it predates p14-2). Kept out of `inputs`, which
+      every status and repair read prints. Read-only.
+
   set-aside --note N --kind integration|revise-stopped|own     (the reason on stdin)
       The lead's own set-aside row, for `reconcile-rollout.py reconcile --result -`: {rolloutSlug,
       tasks:[{slug, taskPath, scope, status: blocked, prUrl, blockerDiagnosis, reviewHistory}]}, with no
@@ -721,6 +728,11 @@ def cmd_inputs(args):
     return task_inputs(path, note, args.max_review_rounds, args.repo)
 
 
+def cmd_plan(args):
+    path, note = _load_note(args.note)
+    return {"slug": path.stem, "plan": rr.approved_plan(note)}
+
+
 def cmd_set_aside(args):
     path, note = _load_note(args.note)
     reason = sys.stdin.read().rstrip("\r\n")
@@ -784,6 +796,9 @@ def main(argv=None):
     ip.add_argument("--max-review-rounds", type=int, default=None)
     ip.add_argument("--repo", default=None, help="also print the task tree's worktreePath")
 
+    pl = sub.add_parser("plan", help="the task note's approved plan, for a seeded revise's resume.plan or an integrate call's plan")
+    pl.add_argument("--note", required=True)
+
     sa = sub.add_parser("set-aside", help="the lead's own set-aside row (reason on stdin) for reconcile --result -")
     sa.add_argument("--note", required=True)
     sa.add_argument("--kind", required=True, choices=["integration", "revise-stopped", "own"])
@@ -798,7 +813,7 @@ def main(argv=None):
         if args.cmd == "verify":
             return cmd_verify(args)
         handler = {"prepare": cmd_prepare, "push": cmd_push, "undo": cmd_undo, "inputs": cmd_inputs,
-                   "set-aside": cmd_set_aside}[args.cmd]
+                   "plan": cmd_plan, "set-aside": cmd_set_aside}[args.cmd]
         emit(handler(args))
         return 0
     except Refused as e:

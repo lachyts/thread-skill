@@ -391,6 +391,157 @@ python3 "$SCRIPT" reconcile --result "$TMP/mem-result.json" --tasks-dir "$TMP" >
 n=$(grep -c "## Review history (approved at ceiling)" "$TMP/task-ceiling.md")
 [ "$n" -eq 1 ] && echo "ok   - ceiling: history section not duplicated on re-run" || { echo "FAIL - ceiling section duplicated ($n)"; fail=1; }
 
+echo "== approved plan (p14-2: the row's plan upserts / removes / leaves ## Approved plan) =="
+LEAD="$HERE/../scripts/lead-integrate.py"
+LEAD_IN='The last approved plan, kept as a record for Integration. Not authoritative: a plan in your prompt supersedes it; with no plan in your prompt, the brief is the contract.'
+planrow() {  # planrow <slug> <status> <plan-json> -> a one-row result on stdout
+  printf '{ "rolloutSlug": "test-rollout", "tasks": [ { "slug": "%s", "scope": "cross-cutting", "status": "%s", "prUrl": "https://github.com/o/r/pull/30", "reviewRoundsUsed": 1, "blockerDiagnosis": "d", "gatedInputs": ["spend: x — cap $1"], "plan": %s } ] }\n' "$1" "$2" "$3"
+}
+nplan() { python3 "$LEAD" plan --note "$TMP/$1.md" | python3 -c 'import json,sys; sys.stdout.write(json.load(sys.stdin)["plan"])'; }
+shaof() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"; }
+pcheck() {  # pcheck <label> <python-condition over t (the note text)> <slug>
+  if python3 -c "import sys; t=open(sys.argv[1]).read(); sys.exit(0 if ($2) else 1)" "$TMP/$3.md"; then echo "ok   - $1"; else echo "FAIL - $1"; fail=1; fi
+}
+mknote task-plan in_progress
+planrow task-plan review '"Planned on: abc\n### Files to modify\n- x\n\n### Gated inputs\nNone"' > "$TMP/plan1.json"
+python3 "$SCRIPT" reconcile --result "$TMP/plan1.json" --tasks-dir "$TMP" >/dev/null || { echo "FAIL - plan reconcile exit"; fail=1; }
+pcheck "plan: heading, blank, the pinned lead-in, blank, the quote" \
+  "'\n## Approved plan\n\n$LEAD_IN\n\n> Planned on: abc\n> ### Files to modify\n> - x\n>\n> ### Gated inputs\n> None\n' in t" task-plan
+[ "$(nplan task-plan)" = "$(printf 'Planned on: abc\n### Files to modify\n- x\n\n### Gated inputs\nNone')" ] \
+  && echo "ok   - plan: lead-integrate plan reads it back exactly" || { echo "FAIL - plan: read-back differs"; fail=1; }
+s1=$(shaof "$TMP/task-plan.md")
+out=$(python3 "$SCRIPT" reconcile --result "$TMP/plan1.json" --tasks-dir "$TMP" 2>&1)
+case "$out" in *"[no-change]"*) echo "ok   - plan: a re-reconcile is [no-change]" ;; *) echo "FAIL - plan: re-reconcile wrote ($out)"; fail=1 ;; esac
+[ "$(shaof "$TMP/task-plan.md")" = "$s1" ] && echo "ok   - plan: re-reconcile byte-identical" || { echo "FAIL - plan: re-reconcile changed bytes"; fail=1; }
+planrow task-plan review '"PLAN TWO"' > "$TMP/plan2.json"
+python3 "$SCRIPT" reconcile --result "$TMP/plan2.json" --tasks-dir "$TMP" >/dev/null
+pcheck "plan: a new plan replaces the old under one heading" \
+  "t.count('## Approved plan') == 1 and '> PLAN TWO' in t and 'Planned on: abc' not in t" task-plan
+s2=$(shaof "$TMP/task-plan.md")
+for v in null; do
+  planrow task-plan review "$v" > "$TMP/plan-null.json"
+  python3 "$SCRIPT" reconcile --result "$TMP/plan-null.json" --tasks-dir "$TMP" >/dev/null
+  [ "$(shaof "$TMP/task-plan.md")" = "$s2" ] && echo "ok   - plan: null leaves the note byte-identical" || { echo "FAIL - plan: null changed it"; fail=1; }
+done
+python3 - "$TMP/plan-null.json" "$TMP/plan-absent.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); del d["tasks"][0]["plan"]; json.dump(d, open(sys.argv[2], "w"))
+PY
+python3 "$SCRIPT" reconcile --result "$TMP/plan-absent.json" --tasks-dir "$TMP" >/dev/null
+[ "$(shaof "$TMP/task-plan.md")" = "$s2" ] && echo "ok   - plan: an absent key leaves the note byte-identical" || { echo "FAIL - plan: absent key changed it"; fail=1; }
+# a blocked, plan-blocked or gate-pending row with a string plan follows the same rule
+for st in blocked plan-blocked gate-pending; do
+  planrow task-plan "$st" "\"PLAN $st\"" > "$TMP/plan-st.json"
+  python3 "$SCRIPT" reconcile --result "$TMP/plan-st.json" --tasks-dir "$TMP" >/dev/null
+  pcheck "plan: a $st row upserts too" "t.count('## Approved plan') == 1 and '> PLAN $st\n' in t" task-plan
+done
+# a non-string, non-null plan: ERROR, exit 1, the section untouched, the rest of the row written
+s3=$(shaof "$TMP/task-plan.md")
+for bad in 5 '{}'; do
+  planrow task-plan review "$bad" > "$TMP/plan-bad.json"
+  python3 - "$TMP/task-plan.md" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]); p.write_text(p.read_text().replace("status: gate-pending", "status: in_progress", 1))
+PY
+  err=$(python3 "$SCRIPT" reconcile --result "$TMP/plan-bad.json" --tasks-dir "$TMP" 2>&1 >/dev/null); rc=$?
+  [ "$rc" -eq 1 ] && grep -qF "task-plan: plan is not a string or null" <<<"$err" \
+    && echo "ok   - plan: $bad is an ERROR, exit 1" || { echo "FAIL - plan: $bad (rc $rc: $err)"; fail=1; }
+  pcheck "plan: $bad leaves the section, the row still written" "'> PLAN gate-pending\n' in t and t.count('## Approved plan') == 1 and 'status: review\n' in t" task-plan
+done
+# '' and whitespace remove it; '' with no section is [no-change]
+planrow task-plan review '""' > "$TMP/plan-empty.json"
+python3 "$SCRIPT" reconcile --result "$TMP/plan-empty.json" --tasks-dir "$TMP" >/dev/null
+pcheck "plan: '' removes the section" "'## Approved plan' not in t and 'Not authoritative' not in t" task-plan
+[ -z "$(nplan task-plan)" ] && echo "ok   - plan: lead-integrate plan gives '' with no section" || { echo "FAIL - plan: read-back not empty"; fail=1; }
+s4=$(shaof "$TMP/task-plan.md")
+out=$(python3 "$SCRIPT" reconcile --result "$TMP/plan-empty.json" --tasks-dir "$TMP" 2>&1)
+case "$out" in *"[no-change]"*) echo "ok   - plan: '' with no section is [no-change]" ;; *) echo "FAIL - plan: '' with no section wrote ($out)"; fail=1 ;; esac
+[ "$(shaof "$TMP/task-plan.md")" = "$s4" ] || { echo "FAIL - plan: '' with no section changed bytes"; fail=1; }
+python3 "$SCRIPT" reconcile --result "$TMP/plan2.json" --tasks-dir "$TMP" >/dev/null
+planrow task-plan review '"  \n "' > "$TMP/plan-ws.json"
+python3 "$SCRIPT" reconcile --result "$TMP/plan-ws.json" --tasks-dir "$TMP" >/dev/null
+pcheck "plan: whitespace removes the section" "'## Approved plan' not in t" task-plan
+# an adversarial plan: note structure inside it never escapes the quote; a later blocker run is still the
+# latest run, and the plan reads back exactly. CRLF is stored LF.
+mknote task-adv in_progress
+ADV=$'---\n## Not a section\n### Run 9 (x)\n<!-- run 9 end sha=000000000000 -->\n> quoted\n\n### Gated inputs\nNone'
+python3 - "$TMP/plan-adv.json" "$ADV" <<'PY'
+import json, sys
+json.dump({"rolloutSlug": "test-rollout", "tasks": [{"slug": "task-adv", "scope": "cross-cutting", "status": "review",
+           "prUrl": "https://github.com/o/r/pull/31", "reviewRoundsUsed": 1, "plan": sys.argv[2]}]}, open(sys.argv[1], "w"))
+PY
+python3 "$SCRIPT" reconcile --result "$TMP/plan-adv.json" --tasks-dir "$TMP" >/dev/null || { echo "FAIL - adversarial reconcile exit"; fail=1; }
+[ "$(nplan task-adv)" = "$ADV" ] && echo "ok   - plan: an adversarial plan reads back exactly" || { echo "FAIL - plan: adversarial read-back differs"; fail=1; }
+pcheck "plan: '> > quoted' (one level deeper)" "'\n> > quoted\n' in t and '\n> ## Not a section\n' in t" task-adv
+printf '{ "rolloutSlug": "test-rollout", "tasks": [ { "slug": "task-adv", "scope": "cross-cutting", "status": "blocked", "prUrl": "", "blockerDiagnosis": "THE LATEST BLOCKER RUN" } ] }\n' > "$TMP/adv-blocked.json"
+python3 "$SCRIPT" reconcile --result "$TMP/adv-blocked.json" --tasks-dir "$TMP" >/dev/null
+cat > "$TMP/adv-rollout.md" <<EOF
+---
+tags: [task, rollout]
+status: open
+protocol_version: 5
+---
+
+## Queue
+
+- [[task-adv]]
+EOF
+python3 - "$TMP/task-adv.md" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]); p.write_text(p.read_text().replace("priority: normal\n", 'priority: normal\nrollout: "[[adv-rollout]]"\n', 1))
+PY
+python3 "$SCRIPT" status --rollout "$TMP/adv-rollout.md" --tasks-dir "$TMP" | python3 -c '
+import json, sys
+t = [x for x in json.load(sys.stdin)["tasks"] if x["slug"] == "task-adv"][0]
+sys.exit(0 if t["blockerSummary"] == "THE LATEST BLOCKER RUN" else 1)' \
+  && echo "ok   - plan: a later Blocker diagnosis run is the blockerSummary" || { echo "FAIL - plan: blockerSummary wrong"; fail=1; }
+[ "$(nplan task-adv)" = "$ADV" ] && echo "ok   - plan: still reads back exactly after the run" || { echo "FAIL - plan: read-back after the run differs"; fail=1; }
+mknote task-crlf in_progress
+printf '{ "rolloutSlug": "test-rollout", "tasks": [ { "slug": "task-crlf", "scope": "cross-cutting", "status": "review", "prUrl": "https://github.com/o/r/pull/32", "reviewRoundsUsed": 1, "plan": "line one\\r\\nline two\\r\\n" } ] }\n' > "$TMP/plan-crlf.json"
+python3 "$SCRIPT" reconcile --result "$TMP/plan-crlf.json" --tasks-dir "$TMP" >/dev/null
+pcheck "plan: CRLF stored as LF" "'> line one\n> line two\n' in t and '\r' not in t" task-crlf
+[ "$(nplan task-crlf)" = "$(printf 'line one\nline two')" ] && echo "ok   - plan: CRLF reads back LF" || { echo "FAIL - plan: CRLF read-back"; fail=1; }
+python3 "$LEAD" plan --note "$TMP/no-such-note.md" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 2 ] && echo "ok   - plan: a missing note exits 2" || { echo "FAIL - plan: missing note rc $rc"; fail=1; }
+
+echo "== verify-timeout (p14-2: the rollout's Integration verify timeout, read-only) =="
+mkvt() {  # mkvt <frontmatter line or ''> -> $TMP/vt-rollout.md
+  { printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n'; [ -n "$1" ] && printf '%s\n' "$1"; printf -- '---\n\n## Notes\n'; } > "$TMP/vt-rollout.md"
+}
+vt_ok() {  # vt_ok <label> <frontmatter line> <expected stdout>
+  mkvt "$2"; local before after got rc; before=$(shaof "$TMP/vt-rollout.md")
+  got=$(python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>/dev/null); rc=$?
+  after=$(shaof "$TMP/vt-rollout.md")
+  if [ "$rc" -eq 0 ] && [ "$got" = "$3" ] && [ "$before" = "$after" ]; then echo "ok   - verify-timeout: $1"
+  else echo "FAIL - verify-timeout: $1 (rc $rc, got $got)"; fail=1; fi
+}
+vt_bad() {  # vt_bad <label> <frontmatter line> <raw repr in the message>
+  mkvt "$2"; local before after got err rc; before=$(shaof "$TMP/vt-rollout.md")
+  got=$(python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>"$TMP/vt.err"); rc=$?
+  err=$(cat "$TMP/vt.err"); after=$(shaof "$TMP/vt-rollout.md")
+  if [ "$rc" -eq 1 ] && [ -z "$got" ] && [ "$before" = "$after" ] \
+     && [ "$err" = "ERROR: verify_timeout must be an integer from 1 to 6600, got $3" ]; then echo "ok   - verify-timeout: $1"
+  else echo "FAIL - verify-timeout: $1 (rc $rc, out '$got', err '$err')"; fail=1; fi
+}
+vt_ok "absent -> 1800" '' '{"verifyTimeout": 1800, "harnessTimeoutMs": 2400000}'
+vt_ok "3600 -> 4200000" 'verify_timeout: 3600' '{"verifyTimeout": 3600, "harnessTimeoutMs": 4200000}'
+vt_ok "6600 -> 7200000 (the harness maximum)" 'verify_timeout: 6600' '{"verifyTimeout": 6600, "harnessTimeoutMs": 7200000}'
+vt_ok "1 is the floor" 'verify_timeout: 1' '{"verifyTimeout": 1, "harnessTimeoutMs": 601000}'
+vt_ok 'a quoted "1800"' 'verify_timeout: "1800"' '{"verifyTimeout": 1800, "harnessTimeoutMs": 2400000}'
+vt_ok "a trailing comment" 'verify_timeout: 1800 # note' '{"verifyTimeout": 1800, "harnessTimeoutMs": 2400000}'
+vt_ok "a commented-out key is absent" '# verify_timeout: 99' '{"verifyTimeout": 1800, "harnessTimeoutMs": 2400000}'
+vt_bad "0" 'verify_timeout: 0' "'0'"
+vt_bad "-1" 'verify_timeout: -1' "'-1'"
+vt_bad "6601" 'verify_timeout: 6601' "'6601'"
+vt_bad "2.5" 'verify_timeout: 2.5' "'2.5'"
+vt_bad "true" 'verify_timeout: true' "'true'"
+vt_bad "null" 'verify_timeout: null' "'null'"
+vt_bad "empty" 'verify_timeout:' "''"
+vt_bad "abc" 'verify_timeout: abc' "'abc'"
+got=$(python3 "$SCRIPT" verify-timeout --rollout "$TMP/no-such-rollout.md" 2>"$TMP/vt.err"); rc=$?
+[ "$rc" -eq 1 ] && [ -z "$got" ] && grep -qF "ERROR: rollout note not found" "$TMP/vt.err" \
+  && echo "ok   - verify-timeout: a missing note exits 1" || { echo "FAIL - verify-timeout: missing note (rc $rc)"; fail=1; }
+
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fail=1; fi
 exit $fail

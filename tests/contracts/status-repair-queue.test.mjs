@@ -733,8 +733,11 @@ function check({ status, repair, fx }) {
   if (!rc.startsWith("- **Recut, only on Lachy's explicit ask:**") ||
     !['landing-register check', "§ 5's retire block", 'branch -D', '--kind own', '`hand-back`'].every((k) => rc.includes(k))) fails.push('recut')
 
-  // hand-off: no live lead and no pause; execute § 2.5, then resume, then the loop with --running ""; no § 2.7.
+  // hand-off: no live lead and no pause; execute § 2.5, then execute § 3's verify_timeout check (p14-2: the hand-off
+  // enters § 4.5 directly, past execute's § 3), then resume, then the loop with --running ""; no § 2.7.
   if (!ho.includes('no lead is live and no pause stands') || !before(ho, 'execute § 2.5', '`reconcile-rollout.py resume`') ||
+    !before(ho, 'execute § 2.5', "execute § 3's `verify_timeout` check") ||
+    !before(ho, "execute § 3's `verify_timeout` check", '`reconcile-rollout.py resume`') ||
     !before(ho, '`reconcile-rollout.py resume`', '`--running ""`') || !ho.includes('§4.5 resume') || !ho.includes('§ 2.7') ||
     !ho.includes('does not run')) fails.push('hand-off')
 
@@ -1160,6 +1163,10 @@ test('control: an unguarded anchor-ref delete fails anchor', () => {
 test('control: a recut without the ask fails recut', () => {
   only(rp("- **Recut, only on Lachy's explicit ask:**", '- **Recut, when the branch is missing:**'), 'recut', 'no ask')
 })
+test("control: a hand-off without execute § 3's verify_timeout check fails hand-off", () => {
+  only(rp("then execute § 3's `verify_timeout` check (a halt there\n  writes nothing), then", 'then'), 'hand-off', 'no verify_timeout check')
+})
+
 test('control: a hand-off under a pause fails hand-off', () => {
   only(rp('- **Hand-off, when no lead is live and no pause stands**', '- **Hand-off, when no lead is live**'), 'hand-off', 'pause')
 })

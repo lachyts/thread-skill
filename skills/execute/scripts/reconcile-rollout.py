@@ -113,6 +113,12 @@ Subcommands:
               started; no --to without --dry-run. A failed save is exit 1 at once: the prior note is still
               open, so the next unfinished-rollout check pairs the two notes as interrupted.
 
+  verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2): given a rollout note,
+              print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": (N + 600) * 1000} from its
+              `verify_timeout` frontmatter (an integer from 1 to 6600; absent -> 1800; a quoted value or a
+              trailing ` # comment` is read as `parallel_ceiling` is). Anything else, or no note: one ERROR
+              line on stderr, exit 1, no stdout. Only the rollout note is read.
+
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
               `pause_requested`) from the rollout note. Run by /thread:execute's resume path when it
               finds a `paused:` stamp — reinstating IS plain re-invocation, so there is no separate
@@ -230,6 +236,12 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     the task non-mechanical: it stamps `rung: <the ladder's top rung>` (ladder.py's load(),
                     the file each call reads) and prints a WARNING naming the slug. When the ladder cannot be
                     read that is an error (exit 1) and nothing is stamped. Any other legacy row stamps nothing.
+  plan           -> (any status; p14-2) the row's approved plan, settled only by the task's own call: a non-empty
+                    string upserts "## Approved plan" (a lead-in line marking it a non-authoritative record,
+                    then the plan as a `> ` quote, CRLF -> LF; approved_plan() reads it back for
+                    `lead-integrate.py plan`); '' or whitespace removes that section; null or no key leaves
+                    it. Anything else is an error (exit 1) and leaves the section; the rest of the row is
+                    still written.
 
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
 
@@ -291,6 +303,22 @@ REVIEW_HISTORY_SECTION = "## Review history (approved at ceiling)"
 # The durable record of every Integration call (p12-16): one line per mode-'integrate' row, read by the
 # lead's clean path, the review-blocked resume and the gate-stop stage rule (see _integration_log_line).
 INTEGRATION_LOG_SECTION = "## Integration log"
+
+# The approved plan (p14-2): the plan-gate's approved plan, carried from the task's own call to Integration and
+# a seeded revise through the note. A RECORD, not an instruction: the lead-in says so to any agent that reads
+# the note, and the plan is stored as a `> ` quote so no line of it can end the section or open or close a
+# run. Written by reconcile from the row's `plan` (a non-empty string upserts, '' removes, null leaves it);
+# read back by approved_plan() for `lead-integrate.py plan`.
+APPROVED_PLAN_SECTION = "## Approved plan"
+APPROVED_PLAN_LEAD_IN = ("The last approved plan, kept as a record for Integration. Not authoritative: a plan in "
+                         "your prompt supersedes it; with no plan in your prompt, the brief is the contract.")
+
+# The lead's Integration verify timeout (p14-2, execute § 3): rollout frontmatter `verify_timeout`, seconds.
+# The harness bound on the background command is the verifier's own bound plus a margin, and the harness
+# maximum is 7200000 ms, so the key tops out at 7200 - 600.
+DEFAULT_VERIFY_TIMEOUT = 1800
+VERIFY_HARNESS_MARGIN = 600
+MAX_VERIFY_TIMEOUT = 6600
 
 # Every workflow status with a body section to write (reconcile) or scan (status).
 SECTION_BY_STATUS = {**BLOCKED_SECTIONS, GATE_PENDING_STATUS: GATE_PENDING_SECTION}
@@ -538,6 +566,36 @@ def _neutralise(text: str) -> str:
             line = " " + line
         out.append(line)
     return "\n".join(out)
+
+
+def quote_block(text: str) -> str:
+    """A text stored as a markdown quote (the approved plan, p14-2): CRLF (and a lone CR) normalised to LF,
+    trailing whitespace dropped, each line written `> <line>` and a blank line `>`. No stored line can read as
+    note structure: it starts with `>`, never `## `, `#`, `### Run` or `<!-- run`."""
+    lines = str(text).replace("\r\n", "\n").replace("\r", "\n").rstrip().split("\n")
+    return "\n".join(("> " + line) if line else ">" for line in lines)
+
+
+def unquote_block(lines) -> str:
+    """quote_block's inverse over a section's lines: only the `>` lines are kept, each with one `> ` (or a bare
+    `>`) stripped, so a lead-in or blank line around the quote is not part of the text."""
+    out = []
+    for line in lines:
+        if line.startswith("> "):
+            out.append(line[2:])
+        elif line.startswith(">"):
+            out.append(line[1:])
+    return "\n".join(out)
+
+
+def approved_plan(note) -> str:
+    """The note's approved plan (p14-2): the `> ` quote under `## Approved plan`, unquoted; '' when the note
+    has no such section (never plan-gated, or the last own call was not)."""
+    found = note._section_bounds(APPROVED_PLAN_SECTION)
+    if found is None:
+        return ""
+    lines, start, end = found
+    return unquote_block(lines[start + 1:end])
 
 
 def _run_end(n: int, sha: str) -> str:
@@ -1227,6 +1285,19 @@ def _ceiling(rollout_note):
     return None, f"parallel_ceiling must be an integer >= 1, got {raw!r}"
 
 
+def _verify_timeout(rollout_note):
+    """(seconds, error): `verify_timeout`, an integer from 1 to MAX_VERIFY_TIMEOUT; absent -> 1800; anything
+    else -> error. Read like `parallel_ceiling` (_scalar: a quoted value or a trailing ` # comment` is fine).
+    Only the rollout note is read, so a task-level key never applies."""
+    raw = rollout_note.get("verify_timeout")
+    if raw is None:
+        return DEFAULT_VERIFY_TIMEOUT, None
+    s = _scalar(raw)
+    if re.fullmatch(r"[0-9]+", s) and 1 <= int(s) <= MAX_VERIFY_TIMEOUT:
+        return int(s), None
+    return None, f"verify_timeout must be an integer from 1 to {MAX_VERIFY_TIMEOUT}, got {raw!r}"
+
+
 def _overlap(files, in_flight) -> int:
     """How many of a task's planned files match an in-flight file, exactly or by fnmatch either way."""
     return sum(1 for f in files
@@ -1523,6 +1594,19 @@ def cmd_reconcile(args) -> int:
         elif integration is not None:
             errors.append(f"{slug}: integration is not an object ({type(integration).__name__}) — "
                           "no Integration log line written")
+
+        # p14-2: the approved plan, settled only by the task's own call. A non-empty string is the plan its
+        # own call ran with (upserted, quoted, below the lead-in); '' (or whitespace) is an own call with no
+        # plan-gate, so an older plan is stale and removed; null or an absent key (a call that reached no plan
+        # outcome, a seeded revise, an Integration row, a lead-written row) leaves the section as it is.
+        plan = task.get("plan")
+        if isinstance(plan, str) and plan.strip():
+            note.upsert_section(APPROVED_PLAN_SECTION, APPROVED_PLAN_LEAD_IN + "\n\n" + quote_block(plan))
+        elif isinstance(plan, str):
+            note.remove_section(APPROVED_PLAN_SECTION)
+        elif plan is not None:
+            errors.append(f"{slug}: plan is not a string or null ({type(plan).__name__}) — "
+                          f"{APPROVED_PLAN_SECTION} left untouched")
 
         note.save(dry_run=args.dry_run)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
@@ -2326,6 +2410,29 @@ def cmd_clear_pause(args) -> int:
     return 0
 
 
+# ---- verify-timeout -----------------------------------------------------------
+
+def cmd_verify_timeout(args) -> int:
+    """The lead's per-entry check of the rollout's `verify_timeout` (execute § 3, p14-2). Read-only. Valid:
+    one JSON line {"verifyTimeout": N, "harnessTimeoutMs": (N + 600) * 1000}, exit 0. Invalid or no note:
+    one ERROR line on stderr, exit 1, and the lead's entry writes nothing."""
+    path = Path(os.path.expanduser(args.rollout))
+    if not path.exists():
+        print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
+        return 1
+    try:
+        note = Note(path)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+    seconds, err = _verify_timeout(note)
+    if err:
+        print(f"ERROR: {err}", file=sys.stderr)
+        return 1
+    print(json.dumps({"verifyTimeout": seconds, "harnessTimeoutMs": (seconds + VERIFY_HARNESS_MARGIN) * 1000}))
+    return 0
+
+
 # ---- CLI --------------------------------------------------------------------
 
 def main() -> int:
@@ -2421,6 +2528,11 @@ def main() -> int:
     cp.add_argument("--rollout", required=True, help="path to the rollout note")
     cp.add_argument("--dry-run", action="store_true")
     cp.set_defaults(func=cmd_clear_pause)
+
+    vt = sub.add_parser("verify-timeout", help="print the rollout's verify_timeout and its harness timeout as JSON, "
+                                               "or exit 1 when invalid (read-only; execute § 3)")
+    vt.add_argument("--rollout", required=True, help="path to the rollout note")
+    vt.set_defaults(func=cmd_verify_timeout)
 
     ag = sub.add_parser("approve-gates", help="record the human sign-off for a gate-pending task's gated inputs (ADR 0008)")
     ag.add_argument("--tasks", required=True, help="comma-separated task slugs (must be at status gate-pending)")
