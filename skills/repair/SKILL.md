@@ -87,6 +87,9 @@ overwrites, because each is independent of the pause and the lead:
   waits, for its defer (a lead-held note, below).
 - § 3b: a decision into a set-aside task's `## Repair input`.
 - § 5: a defer of a set-aside task with its queued dependants.
+- § 3e: the git-env ack, on Lachy's word. The canary's `ack` writes only the rollout note's `## Git-env log` and
+  its own records, and it re-baselines a live window rather than overwriting a note. § 3e's `restore` is not an
+  every-mode write: it waits until nothing of the rollout is in flight.
 
 **Lead-held notes.** § 3c's `pr:` write and its defer of a RACE / UNVERIFIED task whose merge Lachy decides
 does not stand write a task note a live call's reconcile would overwrite. They run only when no lead is live
@@ -117,7 +120,9 @@ check session `<owner tag>` first".
 - It never runs `resume`, never enters the loop, and never writes a running or integrating note, because a
   live call's reconcile would overwrite it: the lead-held notes wait for the lead's end.
 - A RACE re-verify in flight (§ 2) is the lead's: report it and wait. It becomes a § 3c escalation only once
-  its owner session shows the `RACE: …` halt or no run, or has ended.
+  its owner session shows the `RACE: …` halt or no run, or has ended. A git-env halt ends it too: a `## Race log`
+  line naming it that carries `git-env halt`, or the owner session's `git-env trip…` / `git-env canary failed`
+  halt, makes it a § 3c escalation (§ 3e hands it there).
 - The live lead's next `next` restarts an `in_progress` hand-back and integrates a `review` one.
 
 **No lead live.** No pause, and every owner session has ended (or shows no run there): the full flow, § 3 to
@@ -140,7 +145,7 @@ asks Lachy while the lead decides it.
 
 | Class | Signal | Action |
 |---|---|---|
-| **RACE re-verify in flight** | status's in-flight RACE (status § 3): a `## Race log` line names it, it still reads `integrating` with an `owner:` whose session is not known to have ended, no `paused:` stamp stands, and its verdict file is absent or reads `0` | nothing: execute's RACE procedure owns it (green → `mark-done`, red → its `RACE: …` halt); never escalate it or ask Lachy mid-re-verify. Once its owner session shows the `RACE: …` halt or no run, or has ended, it is **RACE** |
+| **RACE re-verify in flight** | status's in-flight RACE (status § 3): a `## Race log` line names it, it still reads `integrating` with an `owner:` whose session is not known to have ended, no `paused:` stamp stands, and its verdict file is absent or reads `0` | nothing: execute's RACE procedure owns it (green → `mark-done`, red → its `RACE: …` halt); never escalate it or ask Lachy mid-re-verify. Once its owner session shows the `RACE: …` halt or no run, or has ended, it is **RACE**. So is one whose `## Race log` carries a `git-env halt` line naming it, or whose owner session shows a git-env halt (§ 3e hands it to § 3c) |
 | **RACE** | merge-task exit 5 (a `## Race log` line names it) and not in flight, or `UNVERIFIED:` in its set-aside reason, with no decision recorded (§ 3c) | escalate (§ 3c); never re-call merge-task; while it is undecided no `resume` runs at all (§ 3a, § 4's hand-off) |
 | **PR-less merge** | status's "possible PR-less merge" flag | escalate with evidence (§ 3c) |
 | **merged into another base** | its PR is MERGED into a branch other than the default (status's flag) | escalate with evidence (§ 3c); never hand it back or defer it, and `resume` leaves it unchanged (it checks the base) |
@@ -286,6 +291,57 @@ the feedback itself uses still passes, and only the caller's judgement guards th
 count only in their own clause (split at `.`, `;`, `:`, a dash and `, and` / `, but` / `, then`), a negated
 one ("not optional") is none, and a part in a fenced code block always asks.
 
+**3e — a git-env trip → the evidence, then Lachy's ack.** Status's Git-env trip flag (`gitEnvHold` non-empty)
+means execute's canary saw the shared checkout change during a window, and the whole queue is held (execute § 4.5
+*Git-env canary*). R is the rollout's `Project root:` and B the branch the trip lines name: the canary refuses any
+other (exit 2). Show the evidence first:
+
+1. the unacked `## Git-env log` lines, verbatim. One culprit can trip several windows, and a `record missing`
+   trip on a call launched before the canary shipped is the upgrade case, not a culprit;
+2. `git -C R rev-parse --is-bare-repository`;
+3. `git -C R config --show-origin --show-scope --get-all core.bare`;
+4. `git -C R for-each-ref --format='%(objectname)' refs/heads/<B>`: the sha shown, which `--ref` and `--drop-local`
+   pass;
+5. `git -C R reflog -n 10 refs/heads/<B>`;
+6. `git -C R reflog -n 10 refs/remotes/origin/<B>`, plus `git -C R ls-remote origin refs/heads/<B>` against
+   `git -C R rev-parse origin/<B>` (a forged tracking ref shows here);
+7. `git -C R log --oneline --stat origin/<B>..<B>` and `git -C R log --oneline --stat <B>..origin/<B>`;
+8. `git -C R ls-remote --heads origin`.
+
+If a window is still in flight (a Workflow call or a background Integration command of the rollout), advise a
+hard pause first. Then offer (`AskUserQuestion`):
+
+- **(a) Restore and ack**, only when no Workflow call or background Integration command of the rollout is in
+  flight. When `origin/<B>..<B>` is non-empty, list those commits and mark each close-out-shaped one ("a
+  close-out § 2.7 wants landed: restore drops it; choose (b) to keep it"); say all of them will be dropped but
+  stay recoverable through the rescue command restore prints. Run
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py restore --rollout <rollout-note> --repo R --default B`, adding
+  `--drop-local <the B sha shown>` only when that range was shown non-empty. Re-read and show the new sha (and
+  any `git-env-rescue` line), then run
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py ack --rollout <rollout-note> --repo R --default B --slugs <exactly the set shown> --ref <that sha>`.
+- **(b) Keep the commit and ack:** `ack --rollout <rollout-note> --repo R --default B --slugs <exactly the set
+  shown> --ref <the sha shown>`, warning that execute § 2.7 halts the next `/thread:execute` entry (`local
+  default branch is ahead of origin`) until the commit lands by PR or is dropped.
+- **(c) Leave it:** the hold stands.
+
+If `ack` exits 3 (the unacked set, the ref or the bareness changed since it was shown), re-read the evidence,
+show it again and ask again. If `restore` exits 2 on its drop guard (B moved since it was shown), show the new
+list and ask again. Any other exit 2 names a validation failure: show it and stop. A dated `## Notes` line records
+the choice: `- <YYYY-MM-DD> repair: [[a]], [[b]] git-env trip, acked at <sha>: <restored | kept>` (or `left`).
+
+**RACE follow-on.** After a successful ack, re-run status. For each slug now in `raceHold` whose `## Race log`
+carries a `git-env halt` line, first show this evidence:
+
+- the owner session's halt reason: the git-env one (`git-env trip: the shared checkout changed` or `git-env
+  canary failed`), not `RACE: origin/<default> fails the verifier`;
+- the `git-env halt` Race log line;
+- the verdict file `<repoPath>/.claude/integration/race-<slug>.rc`. For this slug only, absent means the re-verify
+  never ran, or was skipped or stopped by the git-env halt, not a red result; `0` means it ran green but the
+  lead never acted on it.
+
+This reading replaces § 3c item 5's halt-reason reading for this slug only. Then go straight to § 3c in this run:
+Lachy decides once, and § 4's hand-off waits for that decision, as § 3c already requires.
+
 ### 4. Hand back: re-enter at the stage it stopped
 
 Every route uses execute's own re-entry verb, and never under a pause (§ 1):
@@ -339,10 +395,11 @@ there is nothing to clear. Per stage:
   again after its one retry in this run, stop retrying it: surface it with its new diagnosis and offer *more
   guidance and one more retry* / *defer it* (§ 5) / *leave it set aside*. Don't loop.
 - **Hand-off, when no lead is live and no pause stands**, and never while a RACE / UNVERIFIED escalation is
-  undecided (§ 3c; report the hold and stop there) or the ladder file is refused (§ 2; name the file and stop
-  there): execute's queue loop, entered at its §4.5 resume
+  undecided (§ 3c; report the hold and stop there), a git-env hold stands (§ 3e; report it and stop there) or
+  the ladder file is refused (§ 2; name the file and stop there): execute's queue loop, entered at its §4.5 resume
   (*Cold resume*): execute § 2.5 first (then § 2.6), then execute § 3's `verify_timeout` check (a halt there
-  writes nothing), then `reconcile-rollout.py resume`, then the loop with
+  writes nothing), then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts), then
+  `reconcile-rollout.py resume`, then the loop with
   `--running ""` (this session holds no task call). Execute's § 2.7 pushed-base gate (entry points only)
   does not run on this hand-off; the next `/thread:execute [[<rollout>]]` runs it. Under a live queue the
   hand-backs are enough: the live lead's next `next` picks them up.
@@ -386,7 +443,8 @@ part + follow-up or owner) from the `descope:` lines, whoever wrote them (§ 3d 
 merged-never-marked tasks flipped by `resume` (task + PR), tasks deferred (task + reason + dependants moved with it), a CLOSED PR or
 missing branch (task + restore, recut, defer or leave), and the escalations of § 3c with Lachy's decisions:
 possible PR-less merges, RACE / UNVERIFIED (task + PR + the re-verify verdict + the recorded decision), and
-merges into another base (task + PR + base).
+merges into another base (task + PR + base), and each git-env trip (§ 3e: the trip lines, the evidence's sha,
+the choice, any restore and its rescue line, and the ack line).
 
 ## Don'ts
 
@@ -415,6 +473,9 @@ merges into another base (task + PR + base).
   (§ 3c). The line itself is a rollout-note record, so no pause or live lead holds it back (§ 1).
 - **Don't touch a signed task while its lead is live.** After `approve-gates`, its owner session holds the
   signed-gate handle (execute § 3.7): no hand-back, recut, defer, re-plan or `## Repair input` (§ 2).
+- **Don't ack a git-env trip unseen.** Never ack trips or a ref Lachy was not shown (`ack --slugs` is exactly the
+  set shown, `--ref` the sha shown), never restore with anything in flight, and never pass `--drop-local` for
+  commits Lachy was not shown (§ 3e).
 - **Don't escalate a RACE re-verify in flight.** The lead decides it itself (§ 2). Asking Lachy before its
   verdict exists invites a "stands" that a red re-verify then contradicts.
 - **Don't reinstate a rollout another rollout's `supersedes:` names.** Its unlanded tasks were carried there;

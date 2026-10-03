@@ -76,6 +76,9 @@ writes all per-task vault frontmatter transitions deterministically and drives
 per-task resume; `skills/execute/scripts/lead-integrate.py` is the lead's side
 of Integration (the clean-path merge and its bounded verify, the trouble-path
 inputs and the lead's own set-aside rows).
+`skills/execute/scripts/git-env-canary.py` is the lead's git-env canary: it
+watches the shared checkout's default branch and bareness around every launch
+and halts the queue on a change that is not a close-out (execute § 4.5).
 
 ## Design
 

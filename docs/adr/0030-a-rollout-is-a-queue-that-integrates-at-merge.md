@@ -106,3 +106,55 @@ Considered:
   governs progress, and a pause drains. This decision supersedes it and goes further (a shared file
   never holds a task back). The queue is built on master's engine; the branch's standalone fixes
   that also hold on master are carried into the build.
+- **A git-env canary watches the shared checkout (p14-6).** The lead opens a window around every
+  launch that can run agents or a verifier against the rollout's `Project root` (each Workflow call,
+  a *Lost call* or signed-gate resume, the lead's Integration verify and a RACE re-verify):
+  `git-env-canary.py arm` records `refs/heads/<default>` and the effective bareness
+  (`rev-parse --is-bare-repository`, so a `config --worktree core.bare` flip counts), and `check`
+  compares them when the window ends. A window is open only while its vault owner holds (`in_progress`
+  for a task call, `integrating:` for the rest); an orphan is compared once and closed. A change that
+  is not benign appends a `git-env trip` line to the rollout note's `## Git-env log`, which halts the
+  queue before any merge (`next` reports `halt: "git-env"`, `carry` refuses) and is never retried; only
+  `/thread:repair` (its git-env step, 3e) clears it, through an `ack` on Lachy's word that names exactly the tripped set
+  shown and the ref shown (`--ref`), so a stale or partial ack writes nothing.
+  - **The close-out decision (option (a)).** Execute § 2.7 says a close-out landed mid-run must not
+    halt, so a local commit not on `origin/<default>` is benign when every one is a non-merge commit
+    touching only land.sh's `closeout_shaped` paths. That is **stricter than S9**: S9 also carries an
+    empty non-merge commit and a merge whose other parents are on origin, and the canary trips on both
+    (fail-closed). The rule covers land.sh's S4, S5 and S11 moves and merge-task's `refresh_local_base`.
+  - **The read order.** The canary reads B before O (`origin/<default>`), in one function. Every writer
+    that moves local B onto origin's commits fetches O first and then moves B, so an O read after B is
+    at least as new as the O that B moved onto; reading O first could pair a pre-fetch O with a moved
+    B and trip on origin's own commits. A future writer that breaks this trips falsely, which fails
+    closed.
+  - **The RACE path.** A git-env halt at a RACE site (the race-verify arm, the RACE check, merge-task's
+    exit 5 under a hold) writes one `git-env halt` line on the `## Race log`, the only write a git-env
+    halt makes. It ends the re-verify's in-flight state, from any session, and after the ack the task
+    is an undecided RACE that repair § 3e hands to § 3c with the git-env reading of its verdict file.
+    This is accepted on purpose, and consistent with a lead crash mid-re-verify. (Rejected: re-running
+    the RACE re-verify automatically after an ack: a human saw a git-env halt, so a human decides.)
+  - **The integrate-call return.** Its row is reconciled whatever its check says (the engine's own
+    result; dropping it would make it a *Lost call*), and on a non-zero check no outcome is acted on.
+  - **`restore`'s drop guard.** Repair's restore moves the local default to origin's only when it
+    holds no commit missing from origin, or when `--drop-local` names the exact sha Lachy was shown;
+    a drop prints the old sha and the `git-env-rescue` branch command that recovers it.
+  - **Binding.** `--repo` must resolve to the rollout's `Project root` (and to its records and trip
+    lines), and `--default` must be a plain branch name equal to the one the records and trip lines
+    name, so a mistyped flag reads or changes nothing in the wrong repo.
+  - **Records** live outside the repo, under `${THREAD_GIT_ENV_DIR:-${XDG_STATE_HOME:-~/.local/state}/thread/git-env}/<rollout>/`,
+    so an agent's `git clean` or `rm -rf .claude` never reaches them, and a missing or unreadable record
+    at `check` is itself a trip. Every verb but `restore` holds a `flock` on `<rollout>.lock` beside the
+    per-rollout dir (never deleted); `retire` (completion, a supersede) leaves a `<rollout>.retired`
+    marker that refuses a new window; `restore` is lock-free (git's own locks serialise it). POSIX only.
+  - **Considered:** wrapping the verifier (inside a Ralph loop a canary diff invites the agent to "fix"
+    it, it misses ad-hoc agent commands, and it changes prompt bytes, so the resume cache breaks);
+    prompt-only (it depends on the agent complying); records under `.claude/` (agents reach them);
+    accepting the close-out halt (§ 2.7 forbids it); and auto re-running the RACE re-verify after an ack
+    (rejected above).
+  - **Known gaps:** a direct push to an unprotected origin followed by a local fast-forward passes; so
+    does a forged `refs/remotes/origin/<default>` (repair's `ls-remote` exposes it, restore's fetch
+    overwrites it); close-out-path contents are not inspected; dropping a close-out commit from local B
+    passes; a net-zero change inside a window passes; other refs are unwatched; records are
+    machine-local (a cold resume elsewhere still has the vault hold); an orphan is compared once after
+    its owner ends; and the upgrade path: the first return of a call launched before the canary shipped
+    trips `record missing` and halts until a human acks it.

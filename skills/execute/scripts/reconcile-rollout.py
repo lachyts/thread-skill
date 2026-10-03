@@ -27,7 +27,8 @@ Subcommands:
               runs, awaits or integrates (a held RACE whose `integrating:` stands included, Race holds
               below), it stamps `paused:` and removes `pause_requested` (the drain, ADR 0030 decision 5).
               Refuses an incomplete rollout (below): exit 1, no stdout, one ERROR line naming why and the
-              remedy, `/thread:schedule <its first project> --regenerate`.
+              remedy, `/thread:schedule <its first project> --regenerate`. An unacked git-env trip (Git-env
+              hold, below) is listed as `gitEnvHold` and makes `halt` "git-env", ahead of every other verdict.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -83,7 +84,8 @@ Subcommands:
   status      Read-only situational scan for /thread:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
-              pause_requested, incomplete, ceiling, counts, progress, timeline, ladder, tasks}; `incomplete`
+              pause_requested, incomplete, ceiling, counts, progress, timeline, ladder, gitEnvHold, tasks};
+              `gitEnvHold` is the unacked git-env trips (Git-env hold, below), [] when none; `incomplete`
               is why the rollout must not run as written (below), or null. `ladder` is {source, rungs (names,
               bottom first), error}: the local ladder file through ladder.py's load(); a refused file gives
               rungs [], source ladder.py's default_path() and error its reason, and status still exits 0.
@@ -158,7 +160,10 @@ Subcommands:
               nothing written, one ERROR line): a --from that is missing, unparseable, not tagged `rollout`,
               done or dropped (unless done with `superseded_by:` naming --to: a re-run), or neither paused
               nor never started; a --from with a task an undecided RACE or UNVERIFIED holds (--dry-run
-              included; the line names each held slug and `/thread:repair [[<from>]]`); a carried note that
+              included; the line names each held slug and `/thread:repair [[<from>]]`); a --from with an
+              unacked git-env trip (Git-env hold, below; --dry-run included; `ERROR: carry: --from <stem> holds
+              an unacked git-env trip: [[a]], [[b]]: record Lachy's ack first with /thread:repair [[<stem>]]`,
+              checked after the RACE hold); a carried note that
               needs the top rung when the ladder file is refused (--dry-run included; `ERROR: carry: ladder
               file refused: <path>:<line>: <reason>`, no stdout); a --to that is
               missing, not directly in the tasks dir, untagged, done or
@@ -222,6 +227,19 @@ dependants wait) and lists it under `raceHold`; one whose `integrating:` stamp s
 re-verify holds the lane) still counts as integrating for the pause drain, the solo rule, the overlap and the
 halt verdict. `hand-back` refuses a held task (exit 2, nothing written). `status` reports the stored state,
 which status § 3 renders as a RACE itself.
+
+Git-env hold (_git_env_hold, read by `next`, `status`, `carry` and skills/execute/scripts/git-env-canary.py;
+execute § 4.5 *Git-env canary*): the rollout note's `## Git-env log` (GIT_ENV_LOG_SECTION) holds one line per
+tripped window, `- <stamp> git-env trip [[<slug>]] <kind>: <what changed>; repo <R>` (GIT_ENV_TRIP_MARK), written
+by the canary when the shared checkout's `refs/heads/<default>` or its bareness changed during a window, and one
+line per human ack, `- <stamp> git-env ack [[a]], [[b]]: refs/heads/<B> at <sha|absent>, core.bare false`
+(GIT_ENV_ACK_MARK), written only by the canary's `ack` (through /thread:repair). The hold is every trip line that
+no later ack line names (its wikilinks, read with WIKILINK_OPEN_RE), in log order, as {slug, kind, line}. While it
+is non-empty `next` starts and restarts nothing, holds every stalled or queued task with the reason
+`git-env hold: /thread:repair` and reports `halt: "git-env"` ahead of every other verdict; `status` reports it as
+`gitEnvHold`; and `carry` refuses the prior (exit 2, --dry-run included) with an ERROR line naming each held slug
+and `/thread:repair [[<from>]]`. A `## Race log` line carrying `git-env halt` names its slug like any Race log line,
+so once the hold is acked the RACE hold applies unchanged.
 
 Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
 session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
@@ -1327,6 +1345,39 @@ def _race_holds(rollout_note, linked):
     return holds
 
 
+# ---- the git-env hold (execute § 4.5 *Git-env canary*) ------------------------------------------------------
+
+GIT_ENV_LOG_SECTION = "## Git-env log"
+GIT_ENV_TRIP_MARK = "git-env trip"
+GIT_ENV_ACK_MARK = "git-env ack"
+
+
+def _git_env_hold(rollout_note):
+    """The unacked git-env trips (the module docstring's "Git-env hold"): an ordered [{slug, kind, line}] of the
+    `## Git-env log` trip lines that no later ack line names. A trip line's slug is the first wikilink after the
+    mark and its kind the word before the next `:`; an ack line names every wikilink it carries. A line with
+    neither mark is ignored. `rollout_note` None has no log, so no hold."""
+    if rollout_note is None:
+        return []
+    trips = []
+    for line in rollout_note.section_text(GIT_ENV_LOG_SECTION).split("\n"):
+        line = line.rstrip()
+        if GIT_ENV_TRIP_MARK in line:
+            rest = line[line.index(GIT_ENV_TRIP_MARK) + len(GIT_ENV_TRIP_MARK):]
+            m = WIKILINK_OPEN_RE.search(rest)
+            slug = (_wikilink_slug(m.group(1)) or "") if m else ""
+            if not slug:
+                continue
+            tail = rest[m.end():]
+            tail = tail[tail.index("]]") + 2:] if "]]" in tail else tail
+            km = re.match(r"\s*([A-Za-z-]+)\s*:", tail)
+            trips.append({"slug": slug, "kind": km.group(1) if km else "", "line": line})
+        elif GIT_ENV_ACK_MARK in line:
+            acked = {(_wikilink_slug(m.group(1)) or "").lower() for m in WIKILINK_OPEN_RE.finditer(line)}
+            trips = [t for t in trips if t["slug"].lower() not in acked]
+    return trips
+
+
 def _ceiling(rollout_note):
     """(ceiling, error): `parallel_ceiling`, an integer >= 1; absent -> 4; anything else -> error."""
     raw = rollout_note.get("parallel_ceiling")
@@ -1703,7 +1754,9 @@ def cmd_next(args) -> int:
     stands (the lead's RACE re-verify holds the lane on it) still counts as integrating everywhere else: a
     soft pause is not stamped past it, a solo waits for it, its files count as in flight, and no halt is
     reported while it stands. `raceHold` lists each, in rank order, with its kind; the counts and the
-    progress line are the re-read rows'."""
+    progress line are the re-read rows'. An unacked git-env trip (_git_env_hold) is listed under `gitEnvHold`, and
+    while it stands nothing starts or restarts, every stalled or queued task is held (`git-env hold:
+    /thread:repair`) and `halt` is "git-env", ahead of every other verdict."""
     rollout_path = Path(os.path.expanduser(args.rollout))
     if not rollout_path.exists():
         print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
@@ -1814,10 +1867,20 @@ def cmd_next(args) -> int:
     in_use = used + len(start)
     holds += [(r, f"ceiling: {in_use}/{ceiling} slots in use") for r in ceiling_held]
 
+    # An unacked git-env trip (execute § 4.5 *Git-env canary*) holds the whole queue until /thread:repair records
+    # Lachy's ack: nothing starts or restarts, every stalled or queued task is held, and the halt is "git-env",
+    # ahead of every other verdict (a live call or a held lane included: the lead halts at once).
+    git_env = _git_env_hold(rollout_note)
+    if git_env:
+        start, restart = [], []
+        used = len(live)
+        holds = [(r, "git-env hold: /thread:repair") for r in stalled + queued]
     in_n = [r for r in rows if r["state"] not in OUTSIDE_N]
     counts = _counts(rows)
     halt = None
-    if not start and not restart and not live and not awaiting and not integrating and not race_held_lane:
+    if git_env:
+        halt = "git-env"
+    elif not start and not restart and not live and not awaiting and not integrating and not race_held_lane:
         if paused:
             halt = "paused"
         elif not in_n:
@@ -1840,6 +1903,7 @@ def cmd_next(args) -> int:
         "setAside": [{"slug": r["slug"], "status": r["status"], "setAsideAt": r["setAsideAt"]}
                      for r in by_state.get("set-aside", [])],
         "raceHold": race_hold,
+        "gitEnvHold": git_env,
         "paused": paused,
         "pauseRequested": pause_requested,
         "pausedNow": paused_now,
@@ -2223,6 +2287,9 @@ def cmd_status(args) -> int:
         # {source, rungs, error}: the ladder status read (built-in, or the file's path); error non-null when the
         # file is refused, and then rungs is [] (execute halts `ladder file refused` at each call's start).
         "ladder": ladder,
+        # The unacked git-env trips (_git_env_hold; execute § 4.5 *Git-env canary*): [] when none. Vault-only, so
+        # status § 3's Git-env trip flag holds offline too.
+        "gitEnvHold": _git_env_hold(rollout_note),
         "tasks": tasks,
     }
     print(json.dumps(out, indent=2))
@@ -2794,6 +2861,11 @@ def cmd_carry(args) -> int:
         names = ", ".join(f"[[{slug}]] ({kind})" for slug, kind in sorted(held.values(), key=lambda h: h[0].lower()))
         return refuse(f"--from {src.stem} holds an undecided RACE or UNVERIFIED: {names}: record Lachy's decision "
                       f"first with /thread:repair [[{src.stem}]]")
+    git_env = _git_env_hold(src_note)
+    if git_env:
+        names = ", ".join(dict.fromkeys(f"[[{t['slug']}]]" for t in git_env))
+        return refuse(f"--from {src.stem} holds an unacked git-env trip: {names}: record Lachy's ack first with "
+                      f"/thread:repair [[{src.stem}]]")
     if dst is not None:
         if dst.stem.lower() == src.stem.lower() or (dst.exists() and dst.resolve() == src.resolve()):
             return refuse(f"--to is --from ({src.stem}): a rollout never carries into itself")
