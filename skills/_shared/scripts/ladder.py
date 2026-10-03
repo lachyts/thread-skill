@@ -68,7 +68,7 @@ import re
 import stat
 import sys
 
-# Must equal the engine's model set (task.workflow.js TIER_RANK's keys); tests/ladder.test.mjs pins it.
+# Must equal the engine's model set (task.workflow.js LADDER_MODELS); tests/ladder.test.mjs pins it.
 MODELS = ("opus", "fable")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 FIELDS = ("name", "model", "effort", "judge", "review")

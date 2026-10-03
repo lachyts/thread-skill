@@ -33,11 +33,11 @@ const BR = 'audit-fix/fix-a'
 const WT = '/repo/.claude/worktrees/proj-fix-a'
 const NOW = '2026-10-02T14:05:00Z'
 const HIST2 = [{ round: 1, feedback: ['own-run fix'] }, { round: 2, feedback: ['keep their rename'], stage: 'integration' }]
-const mkTask = (over = {}) => ({ slug: SLUG, taskPath: `/vault/Tasks/${SLUG}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 4, maxPlanRounds: 3, model: 'fable', ...over })
+const mkTask = (over = {}) => ({ slug: SLUG, taskPath: `/vault/Tasks/${SLUG}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 4, maxPlanRounds: 3, rung: 'opus-xhigh', ...over })
 const mkI = (over = {}) => ({
   prUrl: PR, branch: BR, worktreePath: WT, headSha: sha('a'), taskBase: sha('b'), mainSha: sha('c'), trouble: [], landed: [],
   plan: 'PLAN', reviewHistory: [{ round: 1, feedback: ['own-run fix'] }], reviewRoundsUsed: 1,
-  rung: { model: 'fable', escalated: false, escalatedAt: '', tierCapped: false, tierCappedAt: '' }, ...over,
+  rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] }, ...over,
 })
 const base = { rolloutSlug: ROLLOUT, repoPath: '/repo', verifier: 'make test', date: '2026-10-01' }
 const merged = {

@@ -386,15 +386,16 @@ test('L8 without tomllib a present file exits 3', (t) => {
 
 // ---- L9: the loader and the engine agree on the model set ---------------------------------------------
 
-// Pins ladder.py's MODELS to the engine's TIER_RANK keys. p13-2 (the engine climbs rungs) removes TIER_RANK:
-// it owns re-pointing this check at the model set the engine keeps then.
-test('L9 MODELS equals the engine\'s TIER_RANK keys', (t) => {
+// Pins ladder.py's MODELS to the engine's LADDER_MODELS (p13-2: the engine climbs rungs and validates
+// args.ladder against that set), and its EFFORTS and built-in rungs to the engine's LADDER_EFFORTS and
+// BUILT_IN_LADDER, so a machine with no ladder file runs the same ladder whether or not the lead passed one.
+test('L9 MODELS equals the engine\'s LADDER_MODELS', (t) => {
   const r = run(tmpHome(t), ['-B', '-c',
     "import json, runpy, sys; g = runpy.run_path(sys.argv[1]); print(json.dumps(list(g['MODELS'])))", SCRIPT])
   assert.equal(r.stderr, '')
   assert.equal(r.status, 0)
-  const engine = Object.keys(loadEngine(['TIER_RANK']).TIER_RANK).sort()
-  assert.deepEqual(JSON.parse(r.stdout).sort(), engine)
+  const engine = JSON.parse(JSON.stringify(loadEngine(['LADDER_MODELS']).LADDER_MODELS))
+  assert.deepEqual(JSON.parse(r.stdout), engine)
   for (const model of engine) {
     const home = tmpHome(t)
     writeLadder(home, render([R(`${model}-high`, model)]))
@@ -410,6 +411,15 @@ test('L9 the importable EFFORTS, FIELDS and BUILT_IN are the ones these tests pi
   assert.deepEqual(efforts, EFFORTS)
   assert.deepEqual(fields, FIELDS)
   assert.deepEqual(builtIn, BUILT_IN)
+})
+
+test('L9 the engine\'s LADDER_EFFORTS and BUILT_IN_LADDER equal ladder.py\'s, and the engine accepts its output', (t) => {
+  const E = loadEngine(['LADDER_EFFORTS', 'BUILT_IN_LADDER', 'ladderArgsError'])
+  assert.deepEqual(JSON.parse(JSON.stringify(E.LADDER_EFFORTS)), EFFORTS)
+  assert.deepEqual(JSON.parse(JSON.stringify(E.BUILT_IN_LADDER)), loads(tmpHome(t)), 'the built-in ladder, source and rungs')
+  const home = tmpHome(t)
+  writeLadder(home, render([R('opus-high', 'opus'), R('fable-max', 'fable')]))
+  assert.equal(E.ladderArgsError(loads(home)), '', "the engine accepts ladder.py's output for a file")
 })
 
 // ---- L10: CLI usage -----------------------------------------------------------------------------------

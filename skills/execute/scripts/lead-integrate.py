@@ -48,8 +48,11 @@ Subcommands:
       branch is not M. Stashes tracked leftovers, then `git reset --keep H`. Exit 1 otherwise.
 
   inputs --note N [--max-review-rounds K] [--repo R]
-      What the lead needs to (re-)enter a set-aside or restarted task: status, scope, pr, readyAt, model,
-      tierCapped/tierCappedAt, branch (and worktreePath with --repo); the source run (the newer, by its
+      What the lead needs to (re-)enter a set-aside or restarted task: status, scope, pr, readyAt, rung (the
+      integrate call's rung record when no approving row is at hand: {startRung: "", rung: <the note's
+      `rung:` when it is a rung name, else "">, climbs: []}, so a note with no `rung:`, or only stale
+      `model:` / `tier_capped:` stamps, gives the neutral record), branch (and worktreePath with --repo);
+      the source run (the newer, by its
       `### Run N (<stamp>)` heading, of the latest `## Blocker diagnosis` and `## Review-blocked feedback`
       runs; a tie goes to review-blocked) parsed through a parseIntegrationMarker port (markerStage,
       markerReason, history, lastRound); reviewRoundsUsed = max(1, the note's, lastRound);
@@ -61,12 +64,13 @@ Subcommands:
 
   set-aside --note N --kind integration|revise-stopped|own     (the reason on stdin)
       The lead's own set-aside row, for `reconcile-rollout.py reconcile --result -`: {rolloutSlug,
-      tasks:[{slug, taskPath, scope, status: blocked, prUrl, blockerDiagnosis, reviewHistory, tierCapped,
-      tierCappedAt}]}, with no `integration` key (so no Integration-log line). blockerDiagnosis is the
+      tasks:[{slug, taskPath, scope, status: blocked, prUrl, blockerDiagnosis, reviewHistory}]}, with no
+      `integration` key (so no Integration-log line) and no rung (so reconcile keeps the note's `rung:`).
+      blockerDiagnosis is the
       engine's own rendering: integrationMarker('set-aside', reason, history) for `integration` (it strips
       one leading `integration:`, so merge-task's exit-4 text passes through unchanged),
       integrationMarker('revise-stopped', …) for `revise-stopped`, and stageDiagnosis's `own run: `
-      escape for `own`; the history is `inputs`' history. tier_capped is carried, so reconcile keeps it.
+      escape for `own`; the history is `inputs`' history.
 
   stamp
       Now, in reconcile's `_stamp` form (the integrate call's startedAt, log-integration's --started).
@@ -688,11 +692,15 @@ def task_inputs(path, note, max_rounds=None, repo=None):
         resume_at = "integration"
     else:
         resume_at = "own"
-    tier = rr._scalar(note.get("tier_capped"))
+    # The note's rung (ADR 0029) as the integrate call's rung record: Integration runs on the ladder's top rung
+    # whatever this says, so a note with no valid `rung:` gives the neutral record, never a guess.
+    rung = rr._scalar(note.get("rung"))
+    if not (rr.RUNG_NAME_RE.match(rung) and rung not in rr.RUNG_YAML_WORDS):
+        rung = ""
     out = {
         "slug": path.stem, "status": status or None, "scope": rr._scope(note) or None, "pr": rr._pr(note) or None,
-        "readyAt": rr._scalar(note.get("ready")) or None, "model": rr._scalar(note.get("model")) or None,
-        "tierCapped": bool(tier), "tierCappedAt": tier, "branch": branch_of(path.stem),
+        "readyAt": rr._scalar(note.get("ready")) or None,
+        "rung": {"startRung": "", "rung": rung, "climbs": []}, "branch": branch_of(path.stem),
         "source": source or None, "markerStage": parsed["stage"] if run else None,
         "markerReason": parsed["reason"] if run else "", "history": history, "lastRound": last_round,
         "reviewRoundsUsed": max(1, rr._int_field(note.get("review_rounds_used"), 0) or 0, last_round),
@@ -729,7 +737,6 @@ def cmd_set_aside(args):
     return {"rolloutSlug": rollout, "tasks": [{
         "slug": path.stem, "taskPath": str(path), "scope": inp["scope"] or "", "status": "blocked",
         "prUrl": inp["pr"] or "", "blockerDiagnosis": diag, "reviewHistory": inp["history"],
-        "tierCapped": inp["tierCapped"], "tierCappedAt": inp["tierCappedAt"],
     }]}
 
 

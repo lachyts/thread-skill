@@ -26,15 +26,14 @@ export const meta = {
 //   repoPath    : string,            // absolute path to the project repo
 //   verifier    : string,            // shell command that decides pass/fail in a worktree
 //   date        : string,            // YYYY-MM-DD (passed in; Date.now() is unavailable here)
-//   maxTier     : string,            // optional; 'opus' | 'fable'. Tier CEILING for the whole run — use
-//                                    //   when the account's fable quota is exhausted. Clamps the seed,
-//                                    //   suppresses opus→fable escalation (recorded as tierCapped), and
-//                                    //   clamps a judgeModel pin. A capped tier is TERMINAL, so it runs
-//                                    //   the full Ralph loop and takes the higher tier's EFFORT row once
-//                                    //   an escalation has been suppressed. Absent ⇒ 'fable' ⇒ prompts
-//                                    //   and dispatch render byte-identical to pre-ceiling.
-//   judgeModel  : string,            // optional; pins EVERY judge to one tier (model + effort together),
-//                                    //   clamped by maxTier. Absent ⇒ judges follow the task's live tier.
+//   ladder      : object,            // the operator's ladder (ADR 0029), ladder.py's JSON as the lead resolved
+//                                    //   it at THIS call's start: { source: <the file's path> | 'built-in',
+//                                    //   rungs: [{ name, model, effort, judge, review }, …] }, bottom first.
+//                                    //   Fixed for the call: a resume re-passes its call's own ladder, so an
+//                                    //   edit reaches a task at its next call. Validated (ladderArgsError)
+//                                    //   before any dispatch, in both modes. Absent ⇒ the built-in ladder (a
+//                                    //   Lost-call resume of a call from before 3.0.0); that call's retired
+//                                    //   tier-ceiling and judge-pin args are ignored, never an error.
 //   knownBaselineFailures : string[],// optional; "test_id — reason" lines for tests already red on a
 //                                    //   clean main. Threaded into every agent so they don't re-diagnose
 //                                    //   them. Absent/empty ⇒ prompts render byte-identical to pre-item-2.
@@ -67,18 +66,16 @@ export const meta = {
 //                                    //   of the layer it would disable (roundBudgetDiagnosis, p12-2).
 //       ignoreGate      : boolean,   // optional; true ⇒ inject an operator override of any human/release
 //                                    //   gate in the note (per-task-override-channel). Absent/false ⇒ byte-identical.
-//       model           : "opus" | "fable",
-//                                    // optional; resolved by the skill (task → rollout → "opus").
-//                                    //   The task's STARTING tier. An opus task gets a ONE-SHOT first
-//                                    //   pass at each layer (one plan, one implementation + one verifier
-//                                    //   run, one review round); the first rejection/red/block ESCALATES
-//                                    //   the task to fable for all remaining work — sticky, judges follow.
-//                                    //   A fable task runs its whole pipeline on fable, as before.
-//       effort          : string,    // optional; per-task ESCAPE HATCH (ADR 0007), resolved by the skill
-//                                    //   from the task note's `effort:` frontmatter. Overrides the tier
-//                                    //   bundle's planner/implementer effort for THIS task only — judges
-//                                    //   always keep the EFFORT matrix. low | medium | high | xhigh | max.
-//                                    //   Absent ⇒ the tier bundle decides (opus: medium, fable: high).
+//       rung            : string,    // optional; the task note's `rung:`, the rung it STARTS on (ADR 0029
+//                                    //   decision 4; reconcile stamps the rung a task reached, so a
+//                                    //   re-dispatch starts there). Absent or '' ⇒ the legacy fields below,
+//                                    //   else the bottom rung. A name the ladder lacks (or a non-string)
+//                                    //   is read as the TOP rung and reported as drift (the row's rungDrift).
+//       model, effort   : string,    // optional, LEGACY: a note with no `rung:` passes its stale `model:`
+//                                    //   and `effort:` stamps. They only choose the starting rung (p13-3's
+//                                    //   mapping, startRung): `model: fable`, or `effort: xhigh | max`, starts
+//                                    //   on the top rung; anything else on the bottom one. No dispatch ever
+//                                    //   runs at the stamped model or effort; `rung` wins when both are set.
 //       approvedGates   : string[],  // optional; gated inputs a human already signed off, resolved by the
 //                                    //   skill from the task note's "## Approved gates" section (bullets,
 //                                    //   "(approved …)" annotations stripped). The engine pauses a task
@@ -126,7 +123,12 @@ export const meta = {
 //       reviewHistory   : [{ round, feedback: string[], stage?: 'integration' }], // rounds strictly ascending; [] ok;
 //                                    //   a round with empty feedback is accepted and dropped (liveHistory).
 //       reviewRoundsUsed: number,    // >= 1 and >= the history's last round.
-//       rung            : { model, escalated, escalatedAt, tierCapped, tierCappedAt }, // the task's, passed through.
+//       rung            : { startRung, rung, climbs }, // the task's own rung record, passed through to the row
+//                                    //   (rungRecordError): rung names or '', climbs [{ stage, from, to }].
+//                                    //   The neutral { startRung: '', rung: '', climbs: [] } when the note has
+//                                    //   none, and a pre-3.0.0 tier record { model, escalated, escalatedAt,
+//                                    //   tierCapped, tierCappedAt } reads as neutral. Integration itself runs
+//                                    //   on the ladder's TOP rung whatever this record says (ADR 0029 decision 5).
 //       leadMerge       : object,    // optional: { mergeCommit, headSha, baseSha, verified } — ONLY in a
 //                                    //   shared-file-only case where the lead merged and verified green itself.
 //       readyAt, startedAt : string, // optional ISO stamps for the merge-line metrics.
@@ -197,13 +199,14 @@ export const meta = {
 //
 // Returns { rolloutSlug, tasks: [ONE row: { slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
-//   approvedAtCeiling, summary, model, escalated, escalatedAt, tierCapped, tierCappedAt, gatedInputs }] }
+//   approvedAtCeiling, summary, startRung, rung, climbs, rungDrift, ran, gatedInputs }] }
 // — the pre-p12-5 envelope with exactly one row, the called task's, the shape reconcile-rollout.py reads —
-// where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending, model is the FINAL tier
-// the task ran on, escalated/escalatedAt ('plan' | 'implement' | 'review') record an opus→fable
-// escalation. tierCapped is true when maxTier suppressed an escalation this task would otherwise have
-// taken — a block on a tierCapped task is NOT evidence of a genuine wall (ADR 0006's triage invariant
-// holds only in an uncapped run); re-dispatch it uncapped when the higher tier's quota returns.
+// where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending. The rung record (ADR 0029
+// decision 7): startRung is the rung the call started on, rung the one it ended on (reconcile stamps it as
+// the note's `rung:`), climbs the stages that climbed this call, in order, as { stage: plan | implement |
+// review, from, to } (from === to is a recorded no-op on the top rung), rungDrift the task's `rung:` when
+// the ladder lacks it ('' otherwise), and ran every dispatch as { label, rung, model, effort }, in order.
+// A block on the top rung is a wall at the operator's ceiling: raising it is an edit to the ladder file.
 // gatedInputs lists the declared-but-unapproved gates when status is gate-pending
 // (a declared gate always pauses for a human — ADR 0008). reviewHistory is the accumulated by-round
 // review-judge rejection rationale ([{ round, feedback: [] }], empty when the PR approved first try);
@@ -212,9 +215,10 @@ export const meta = {
 // A mode 'integrate' row carries one more key, `integration`: { outcome: integrated | rejected | set-aside,
 // path: integrator | judge-only, anchor: { headSha, taskBase }, headSha, baseSha, mergeCommit, triggers
 // (conflict | committed | branch-moved | shared-file), reReviewed, feedback, reason, agents: [{ role,
-// label, model, effort, finishedAt }], metrics: { readyAt, startedAt, finishedAt, waitMinutes,
+// label, rung, model, effort, finishedAt }], metrics: { readyAt, startedAt, finishedAt, waitMinutes,
 // durationMinutes } } — the payload the Integration log line records. Its status is one of the
-// five above; model/escalated/tierCapped come from integration.rung.
+// five above; startRung/rung/climbs pass integration.rung through (integrationRung), rungDrift is '', and
+// ran lists its agents, each on the ladder's top rung.
 // =============================================================================
 
 // ---- Structured schemas (replace the old sentinel strings) ------------------
@@ -247,7 +251,7 @@ const IMPL_RESULT = {
   properties: {
     verified: { type: 'boolean', description: 'true if the verifier reached the accepted green state (exit 0, or — when a baseline manifest is present — only known-baseline tests fail, each matching its listed reason) before the PR was opened' },
     blocked: { type: 'boolean', description: 'true if Ralph exhausted max iterations or the worktree was unsafe' },
-    escalate: { type: 'boolean', description: 'true ONLY when your instructions gave you a ONE-SHOT verifier run and it was red — the task hands over to the stronger tier. Always false when you ran the full verification loop or did no implementation.' },
+    escalate: { type: 'boolean', description: 'true ONLY when your instructions gave you a ONE-SHOT verifier run and it was red — the task climbs one rung and hands over. Always false when you ran the full verification loop or did no implementation.' },
     prUrl: { type: 'string', description: 'PR URL, or empty string when blocked / read-only' },
     branch: { type: 'string', description: 'branch name, or empty string' },
     worktreePath: { type: 'string', description: 'absolute worktree path from git rev-parse --show-toplevel' },
@@ -430,15 +434,15 @@ function gateDiagnosis(gates) {
 // gate-pending call with resumeFromRunId and task.approvedGates added, so every agent() up to the stop
 // replays from cache — the stopped implementer or reviser included, with its cached
 // { blocked: true, gatedInputs: [G] }. Every G is now approved, so that block is neither a gate stop nor
-// hardness (a gate stop never escalates, §3.7): the stopped prompt is re-dispatched, at the same tier,
-// effort, schema and phase, with this STATIC block appended. It carries no gate text, so approvedGates
-// still never reaches a prompt (pinned by approved-gates-resume.test.mjs). The same continuation answers a
+// hardness (a gate stop never climbs, §3.7): the stopped prompt is re-dispatched, on the same rung (its
+// model and effort), schema and phase, with this STATIC block appended. It carries no gate text, so
+// approvedGates still never reaches a prompt (pinned by approved-gates-resume.test.mjs). The same continuation answers a
 // fresh run whose agent stops for gates the note already approved (ADR 0008's agent-fixable slip).
 // Bounded per site by the gates already continued past there, not by a count: an agent can find gates one
 // after another (A stops for G; G signed; B's continuation stops for G2; G2 signed; C replays both stops
 // from cache), so a signed stop that names a gate not yet passed at this site gets one more continuation —
 // at most one per distinct approved gate. A signed stop that repeats only gates already passed takes the
-// old path (escalate on opus, else block).
+// old path: it is the stage's evidence of hardness, so it climbs (a no-op on the top rung) and retries once.
 const SIGNED_GATES_RESUME = `RESUMED AFTER SIGN-OFF (ADR 0008): an earlier dispatch of this same prompt stopped before a gated
 action. A human has since signed those gates off: re-read the task note's "## Approved gates" section, then
 do the work. Each approved cap is a ceiling, never a target. A gate that section does not cover still stops
@@ -452,13 +456,14 @@ function signedStop(task, r) {
 
 // r unchanged, unless it is a signedStop: then continuations past the sign-off while each stop names a gate
 // not yet passed at this site (see above). The n-th is labelled `<label> signed` (n = 1) or
-// `<label> signed <n>`; each carries the same bytes, the stopped prompt plus SIGNED_GATES_RESUME.
-async function pastSignedGates(task, r, prompt, opts) {
+// `<label> signed <n>`; each carries the same bytes, the stopped prompt plus SIGNED_GATES_RESUME. st (the
+// rung state) records each continuation in the row's `ran`.
+async function pastSignedGates(task, r, prompt, opts, st) {
   const passed = new Set()
   for (let n = 1; signedStop(task, r) && r.gatedInputs.some((g) => !passed.has(normalizeGate(g))); n++) {
     for (const g of r.gatedInputs) passed.add(normalizeGate(g))
     log(`${opts.label}: stopped for gates already signed off — continuation ${n} past the sign-off (ADR 0008)`)
-    r = await runAgent(prompt + '\n\n' + SIGNED_GATES_RESUME, { ...opts, label: opts.label + (n === 1 ? ' signed' : ` signed ${n}`) })
+    r = await runAgent(prompt + '\n\n' + SIGNED_GATES_RESUME, { ...opts, label: opts.label + (n === 1 ? ' signed' : ` signed ${n}`) }, st)
   }
   return r
 }
@@ -534,9 +539,9 @@ Verification loop (Ralph-style):
      it did not converge. Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.`.trim()
 }
 
-// The opus first pass does NOT iterate — one verifier run, then either green or hand-over. Iteration is
-// evidence of hardness, and iteration runs at fable (see Model tiering below). baseline: same
-// "test_id — reason" array as ralphLoop; the green criterion stays baseline-aware.
+// A first pass below the top rung does NOT iterate — one verifier run, then either green or a hand-over one
+// rung up. Iteration is evidence of hardness, and iteration runs on the rung above (see The ladder below).
+// baseline: same "test_id — reason" array as ralphLoop; the green criterion stays baseline-aware.
 function oneShotVerify(verifier, baseline) {
   const green = baseline && baseline.length ? `
 - KNOWN BASELINE FAILURES (pre-existing, environmental — NOT yours; keep running the full verifier, do NOT
@@ -552,39 +557,45 @@ Verification (ONE-SHOT first pass — you do NOT iterate):
 - Run the verifier EXACTLY ONCE.${green}
 - If green: the work is verified — proceed.
 - If red (any failure outside the green criterion): do NOT attempt a fix, do NOT run the verifier again,
-  and do NOT open/update a PR. Commit your work so far on the branch (so the next tier inherits it),
+  and do NOT open/update a PR. Commit your work so far on the branch (so the next rung inherits it),
   append a one-paragraph diagnosis of the failure to the task note under a "## Blocker diagnosis"
   heading, and return escalate=true, verified=false, blocked=false with the same diagnosis in
-  blockerDiagnosis. A stronger model picks up your worktree and iterates from there.`.trim()
+  blockerDiagnosis. The next rung up (a stronger model or more effort) picks up your worktree and
+  iterates from there.`.trim()
 }
 
-// Tier-selected verification block for code-writing prompts: a NON-terminal opus first pass gets the
-// one-shot (hand over to fable on the first red), and every terminal tier — fable, or opus under a
-// maxTier cap — gets the full Ralph loop, because there is no stronger tier to hand to.
+// Rung-selected verification block for code-writing prompts (ADR 0029 decision 3): the implement stage's
+// first pass BELOW the top rung gets the one-shot (hand over one rung up on the first red); the retry after
+// the stage's climb, and every pass on the top rung, get the full Ralph loop — on the top there is no rung
+// to hand to.
 function verifyBlock(st, verifier, maxIterations, baseline) {
-  return terminalTier(st) ? ralphLoop(verifier, maxIterations, baseline) : oneShotVerify(verifier, baseline)
+  return !onTop(st) && !climbOf(st, 'implement')
+    ? oneShotVerify(verifier, baseline)
+    : ralphLoop(verifier, maxIterations, baseline)
 }
 
 // Escalation hand-over context (empty-when-unused, like baselineManifest/gateOverride — the non-empty
 // string carries its OWN leading "\n\n" so callers interpolate it bare). `prior` is the first-pass
 // attempt's diagnosis/feedback verbatim.
-// `st` decides the framing, so no caller can pick the wrong one: a REAL escalation (st.escalated) is a
-// stronger-tier takeover; anything else with a prior is a same-tier second pass. `kind` distinguishes the
+// `st` and the builder's own `stage` decide the framing, so no caller can pick the wrong one: when that
+// stage's climb MOVED the task, this is a takeover one rung up; anything else with a prior is the stage's
+// climb recorded as a no-op on the top rung, so a same-rung second pass. `kind` distinguishes the
 // read-only investigator, whose contract forbids the branch/verification wording the code path uses.
-function escalationContext(prior, st, kind) {
+function escalationContext(prior, st, stage, kind) {
   if (!prior) return ''
-  if (!(st && st.escalated)) {
+  const c = climbOf(st, stage)
+  if (!(c && c.from !== c.to)) {
     if (kind === 'readonly') return `
 
-SECOND PASS: a first attempt at this investigation did not complete, and you own it from here. No
-stronger tier is available in this run, so there is no hand-over — finish the investigation yourself.
+SECOND PASS: a first attempt at this investigation did not complete, and you own it from here. This
+task is on the ladder's top rung, so there is no hand-over — finish the investigation yourself.
 The read-only contract above still holds in full: no source edits, no commits, no PR.
 The prior attempt's diagnosis (verbatim):
 ${prior}`
     return `
 
-SECOND PASS: a first attempt did not land this task, and you own it from here. No stronger tier is
-available in this run, so there is no hand-over: run the FULL verification loop and finish the work.
+SECOND PASS: a first attempt did not land this task, and you own it from here. This task is on
+the ladder's top rung, so there is no hand-over: run the FULL verification loop and finish the work.
 The prior attempt's diagnosis (verbatim):
 ${prior}
 Any committed work from that attempt is already on your branch — build on or replace it as the diagnosis
@@ -592,8 +603,8 @@ warrants.`
   }
   return `
 
-ESCALATION: you are the STRONGER-TIER takeover of this task — a first-pass attempt at a lower tier did
-not land it, and you own it from here. The prior attempt's diagnosis (verbatim):
+ESCALATION: you take this task over ONE RUNG UP (a stronger model or more effort) — a first-pass attempt
+one rung down did not land it, and you own it from here. The prior attempt's diagnosis (verbatim):
 ${prior}
 Any committed work from that attempt is already on your branch — build on or replace it as the diagnosis
 warrants; do not blindly repeat the failed approach.`
@@ -632,8 +643,8 @@ Discipline for this round:
 }
 
 // After this many accumulated rejections the reviser prompt upgrades to a STEP-BACK round. Fixed in
-// the engine, deliberately not rollout config (same stance as the EFFORT matrix — this encodes when
-// patching has demonstrably failed, not a per-rollout preference).
+// the engine, deliberately not rollout config (this encodes when patching has demonstrably failed, not a
+// per-rollout preference).
 const STEP_BACK_AFTER = 2
 
 // Reviser side, round 3+: licence to restructure — the re-planning lever WITHOUT re-entering the plan
@@ -686,7 +697,7 @@ Steps:
 
 ${BUG_PREFLIGHTS}
 
-${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, st)}
+${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, st, 'implement')}
 
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.`
 }
@@ -717,7 +728,7 @@ Steps:
    line the setup printed — concrete, with file:line refs.
 4. Return your structured result: verified=true (findings produced) or blocked=true (could not complete),
    escalate=false, prUrl="", branch="", worktreePath="${worktreeDir(a.repoPath, task.slug)}" (the task tree),
-   blockerDiagnosis (empty unless blocked), and a one-paragraph summary of what you found.${baselineManifest(a)}${escalationContext(prior, st, 'readonly')}`
+   blockerDiagnosis (empty unless blocked), and a one-paragraph summary of what you found.${baselineManifest(a)}${escalationContext(prior, st, 'implement', 'readonly')}`
 }
 
 function plannerPrompt(task, a, st, prior) {
@@ -770,7 +781,7 @@ Steps:
 
 If during investigation you find the task is fundamentally malformed (impossible, contradicts a committed
 change, etc.), append a one-paragraph diagnosis to the task note under "## Blocker diagnosis" and return
-ready=false, blocked=true, blockerCause="<one line>", plan="".${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, st)}`
+ready=false, blocked=true, blockerCause="<one line>", plan="".${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, st, 'plan')}`
 }
 
 function planJudgePrompt(task, planText, a) {
@@ -884,7 +895,7 @@ Steps:
 
 ${BUG_PREFLIGHTS}
 
-${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, st)}
+${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, st, 'implement')}
 
 Do not update the task's \`status:\` yourself — the lead session reconciles that after review.`
 }
@@ -1214,163 +1225,140 @@ line as your diagnosis. Every repo read and command runs in this tree, never in 
 checkout at "${a.repoPath}".`
 }
 
-// ---- Model tiering -----------------------------------------------------------
-// task.model seeds the task's STARTING tier (task → rollout → 'opus'; thread:schedule pre-stamps
-// structural/deep tasks 'fable' — the predictive step-up). At run time the tier is per-task MUTABLE
-// state: an opus task gets a one-shot first pass at each layer, and the first evidence of hardness
-// anywhere — plan-judge 'changes', a first-pass planner/investigator block, a red one-shot verifier
-// run, an implementer block, or a review-judge 'changes' — ESCALATES the task to fable for all
-// remaining work. Escalation is one-way and sticky; judges follow the live tier (a.judgeModel, when
-// set, still pins all judges). A fable-seeded task never escalates — there is nothing above fable —
-// and runs the full Ralph loop from the start, exactly as before. The skill stamps `model: fable`
-// on the note at reconcile when a task escalated, so later re-dispatches start at fable.
-// ---- Tier ceiling (args.maxTier) --------------------------------------------
-// `args.maxTier` caps every tier decision for the whole run. It exists for ONE operating condition:
-// the account's quota for the higher tier is exhausted, so the choice is a capped run or no run.
-// Absent/unrecognised ⇒ 'fable' ⇒ byte-identical behaviour to before the ceiling existed.
+// ---- The ladder (ADR 0029) ----------------------------------------------------
+// The operator's ladder is the ONE place models and efforts live: named rungs, bottom first, each a model
+// (a tier alias, never a version) plus the efforts of the code-writing roles (`effort`: planner, plan
+// reviser, implementer, reviser, read-only investigator), the plan-gate judge (`judge`) and the master
+// review (`review`). Rungs may share a model, so an effort step and a model step are the same kind of move.
+// The top rung is the ceiling: there is no other cap, and a quota that runs out is an edit to the file.
 //
-// Three things follow from a cap, and each is load-bearing:
-//   1. The capped tier becomes TERMINAL. A terminal tier runs the full Ralph loop (verifyBlock), never
-//      the one-shot hand-over — the one-shot is a protocol for handing work to a stronger tier, and
-//      under a cap there is nobody to hand to. Without this the cap would silently buy a WEAKER run
-//      (one verifier pass, zero fix iterations) rather than the same run on a cheaper model.
-//   2. Effort is NOT capped. A tier is a (model, effort) bundle (ADR 0007), but only the model is
-//      quota-scarce: once a cap has suppressed an escalation, the task takes the HIGHER tier's effort
-//      row (see effortTier) — it is the capability still available to pay for.
-//   3. A suppressed escalation is recorded (`st.capSuppressed` → the result's `tierCapped`). ADR 0006's
-//      triage invariant is that a block is a genuine wall, never "the cheap model wasn't enough"; under
-//      a cap that is no longer true, so the result says so and /thread:repair can re-dispatch the task
-//      when the higher tier's quota returns instead of reading it as a wall.
-const TIER_RANK = { opus: 0, fable: 1 }
-// Iterations the capped same-tier retry gets: one fix-and-re-verify cycle. See implement().
+// Per call, no snapshot (decision 6). The lead runs ladder.py at each call's start and passes its JSON as
+// args.ladder; the call keeps it to the end, and a resume re-passes it. With none, BUILT_IN_LADDER applies
+// (ladder.py's built-in, pinned equal by tests/ladder.test.mjs): two Opus rungs, nothing above Opus, no max.
+//
+// A task's state (rungState) is mutable and shared by every layer of the call: the rung it STARTED on, the
+// rung it is AT, the stages that CLIMBED and every dispatch it RAN.
+// - Start (decision 4): the task's `rung:` names its starting rung (default the bottom one). A name the
+//   ladder lacks is read as the top rung and reported as drift. A note with no `rung:` still carries the
+//   pre-3.0.0 stamps, so the legacy `model: fable` or `effort: xhigh | max` starts on the top rung (p13-3's
+//   mapping; one place, startRung, for the lead's args and for an old call's resume alike).
+// - Climb (decision 3): each stage — plan, implement, review — climbs one rung at its FIRST evidence of
+//   hardness, once per call, never past the top: a planner that produced no plan, a plan-judge `changes`, a
+//   red one-shot or a blocked first implementer pass, a blocked investigator, a review-judge `changes`. On
+//   the top rung the climb is recorded as a no-op. A gate stop and a dead agent are never evidence.
+// - Effort and judges: every dispatch reads the CURRENT rung (implEffort, judgeEffort), so a climb carries
+//   the model and every role's effort at once, judges included.
+// - Verify shape: below the top, the implement stage's first pass verifies one-shot (verifyBlock); the retry
+//   after a real climb keeps the full max_iterations, which is what the hand-over buys. On the top rung
+//   every pass runs the full loop, so its first pass has ALREADY spent a full budget: its same-rung retry
+//   gets CAPPED_RETRY_ITERATIONS, never a second full one.
+// - Record (decision 7): rungRecord → the row's startRung, rung and climbs; reconcile stamps `rung:` with
+//   the rung reached, so a re-dispatch starts there and never re-pays the lower rungs.
+const LADDER_MODELS = ['opus', 'fable']   // ladder.py's MODELS (tests/ladder.test.mjs pins them equal)
+const LADDER_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
+// A rung name is written raw into YAML frontmatter (`rung: <name>`), so it is a plain lowercase token that
+// YAML reads back as the same string: ladder.py's NAME_RE and YAML_WORDS.
+const LADDER_NAME = /^[a-z][a-z0-9._-]*$/
+const LADDER_YAML_WORDS = ['true', 'false', 'yes', 'no', 'on', 'off', 'y', 'n', 'null']
+const BUILT_IN_LADDER = {
+  source: 'built-in',
+  rungs: [
+    { name: 'opus-high', model: 'opus', effort: 'high', judge: 'high', review: 'xhigh' },
+    { name: 'opus-xhigh', model: 'opus', effort: 'xhigh', judge: 'high', review: 'xhigh' },
+  ],
+}
+const STAGES = ['plan', 'implement', 'review']
+// The top-rung retry's budget: one fix-and-re-verify cycle. See implement().
 const CAPPED_RETRY_ITERATIONS = 2
-const TOP_TIER = 'fable'
 
-// Free-form operator input: normalise, and fail CLOSED to the uncapped default only for values that
-// are genuinely absent. An unrecognised non-empty value is a typo, not an intent to lift the cap —
-// it caps at the strictest tier and says so, because the failure it guards is spending a quota the
-// account does not have.
-// ONE lookup for the rank table. Bare `TIER_RANK[tier]` answers for every inherited Object.prototype
-// key — `TIER_RANK['constructor']` is a function, not undefined — so a `model: constructor` sailed
-// through clampTier unclamped and read as non-terminal. Every rank read goes through here.
-function rank(tier) {
-  return Object.prototype.hasOwnProperty.call(TIER_RANK, tier) ? TIER_RANK[tier] : undefined
-}
-function knownTier(tier) { return rank(tier) !== undefined }
-
-function normaliseTier(v, fallback) {
-  if (v === undefined || v === null || v === '') return fallback
-  const t = String(v).trim().toLowerCase()
-  return knownTier(t) ? t : fallback
+function rungName(s) {
+  return typeof s === 'string' && LADDER_NAME.test(s) && !LADDER_YAML_WORDS.includes(s)
 }
 
-let __capWarned = false
-function tierCap(a) {
-  const raw = a && a.maxTier
-  if (raw === undefined || raw === null || raw === '') return TOP_TIER
-  const v = normaliseTier(raw, null)
-  if (v) return v
-  if (!__capWarned) {   // a run constant: warn once, not on every prompt build
-    __capWarned = true
-    log(`maxTier: unrecognised value ${JSON.stringify(raw)} — capping at opus (the strict reading)`)
-  }
-  return 'opus'
-}
-
-// A ceiling, never a lift: a tier at or below the cap passes through unchanged.
-// An UNRECOGNISED tier ranks at the TOP, not the bottom: a stale or typo'd `model:` must be clamped
-// DOWN to the cap, and with no cap it stays as written, where terminalTier gives it the full loop —
-// the safe default the pre-ceiling code had.
-function clampTier(tier, cap) {
-  const t = knownTier(tier) ? rank(tier) : rank(TOP_TIER)
-  const c = knownTier(cap) ? rank(cap) : rank(TOP_TIER)
-  return t > c ? cap : tier
-}
-function taskModel(task, cap) { return clampTier((task && task.model) || 'opus', cap) }
-// A judgeModel pin is free-form operator input, exactly like maxTier: normalise it, and fall back to
-// the task's live tier (never a guess) when it names nothing we know.
-function judgeFor(a, st) { return clampTier(normaliseTier(a && a.judgeModel, st.tier), st.cap) }
-
-// True when no higher tier can take this task over in this run — because it is already at the top
-// tier, or because the cap makes its current tier the last one available.
-function terminalTier(st) { return !knownTier(st.tier) || st.tier === TOP_TIER || st.tier === st.cap }
-
-// Returns whether the tier actually CHANGED. Prompt framing does NOT read this return — every builder
-// takes `st` and derives its own framing from it (escalationContext off `st.escalated`, verifyBlock
-// off `terminalTier(st)`). That is a CONVENTION, not a structural guarantee, and two review rounds
-// have now been burned on comments here claiming otherwise: `plannerPrompt` and `readOnlyPrompt` both
-// render a complete, wrongly-framed prompt when `st` is undefined, because escalationContext's
-// `!(st && st.escalated)` guard reads a missing `st` as "not escalated". Only the implementer
-// builders throw (they reach verifyBlock). The cap-sweep assertions in the suite are what actually
-// catch a forgotten `st`; do not claim the omission is unwritable.
-// The one live consumer of the RETURN is implement()'s retry budget.
-function escalate(st, slug, at) {
-  if (terminalTier(st)) {
-    if (!st.capSuppressed) {
-      st.capSuppressed = true
-      st.capSuppressedAt = at
-      log(`escalation suppressed (maxTier=${st.cap}): ${slug} stays on ${st.tier} and runs the full loop (${at})`)
+// args.ladder: '' when usable (or absent), else why not. A bad value is a lead bug: the orchestration
+// throws before any dispatch, in both modes.
+function ladderArgsError(l) {
+  if (l === undefined || l === null) return ''
+  if (!l || typeof l !== 'object' || Array.isArray(l)) return `must be one object { source, rungs }, got ${JSON.stringify(l)}`
+  if (typeof l.source !== 'string' || !l.source) return `source must be a non-empty string, got ${JSON.stringify(l.source)}`
+  if (!Array.isArray(l.rungs) || !l.rungs.length) return 'rungs must be a non-empty array, bottom rung first'
+  const seen = []
+  for (let i = 0; i < l.rungs.length; i++) {
+    const r = l.rungs[i]
+    const at = `rung ${i + 1}`
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return `${at} must be an object { name, model, effort, judge, review }`
+    if (!rungName(r.name)) return `${at}: name ${JSON.stringify(r.name)} must be lowercase [a-z][a-z0-9._-]* and not a YAML word`
+    if (seen.includes(r.name)) return `${at}: duplicate name ${JSON.stringify(r.name)}`
+    seen.push(r.name)
+    if (!LADDER_MODELS.includes(r.model)) return `${at} (${r.name}): unknown model ${JSON.stringify(r.model)} (known: ${LADDER_MODELS.join(', ')})`
+    for (const k of ['effort', 'judge', 'review']) {
+      if (!LADDER_EFFORTS.includes(r[k])) return `${at} (${r.name}): ${k} ${JSON.stringify(r[k])} is not one of ${LADDER_EFFORTS.join(', ')}`
     }
-    return false
   }
-  st.tier = TOP_TIER
-  st.escalated = true
-  if (!st.escalatedAt) st.escalatedAt = at
-  log(`escalation: ${slug} → ${TOP_TIER} (${at})`)
-  return true
+  return ''
 }
 
-// ---- Effort bundles (ADR 0007) ----------------------------------------------
-// A tier is a (model, per-role EFFORT) bundle, not two knobs. This matrix is the ONE place the
-// per-role efforts live — fixed in the engine, deliberately not rollout config (tuning it means
-// editing this file: the matrix encodes a stance about where effort is worth paying, not a
-// per-rollout preference — see ADR 0007's rejected options). Escalation flips st.tier, and every
-// spawn site reads this matrix at dispatch time, so a mid-task opus→fable flip carries effort
-// automatically: no second ladder, no extra stamp.
-//   implementer  — the plan/code-writing role: planner, plan-reviser, implementer, reviser,
-//                  read-only investigator
-//   judge        — the plan-gate judge
-//   masterReview — the PR-review judge (the master-side review layer)
-//   reconcile    — mechanical reconcile stages. Documented stance only today: reconcile is
-//                  deterministic Python (scripts/reconcile-rollout.py), so no agent() consumes this
-//                  row — it fixes the effort for any future mechanical agent stage.
-const EFFORT = {
-  opus:  { implementer: 'medium', judge: 'high', masterReview: 'high',  reconcile: 'low' },
-  fable: { implementer: 'high',   judge: 'high', masterReview: 'xhigh', reconcile: 'low' },
+// The call's ladder: the one the lead passed, else the built-in one.
+function ladderOf(a) {
+  return a && a.ladder !== undefined && a.ladder !== null ? a.ladder : BUILT_IN_LADDER
 }
 
-// Effort for the planner/implementer role at the task's LIVE tier. Per-task `effort:` frontmatter
-// (task.effort) is the SINGLE escape hatch (ADR 0007): it overrides the bundle's planner/implementer
-// effort for that task only — judges always keep the matrix — and it is absolute across an
-// escalation (a monster task at fable/max stays at max).
-// Effort is NOT quota-scarce (ADR 0016), so a task the cap has made TERMINAL takes the top tier's
-// effort row. Key that off terminality — a run-level fact true from the first dispatch — not off
-// st.capSuppressed, which is an EVENT flag escalate() sets only once a hand-over has been refused.
-// On a non-plan-gated capped task nothing calls escalate() before the first implement dispatch, so
-// the flag alone gave that pass the full Ralph loop at the LOWER row — the opposite of the contract
-// in execute/SKILL.md and rollout-template.md. capSuppressed is kept in the test: it implies
-// terminality and state doubles in the suite set it without a `cap`.
-function effortTier(st) { return terminalTier(st) ? TOP_TIER : st.tier }
-// Same guard as rank(): a bare EFFORT[tier] answers for inherited Object.prototype keys, so an
-// unrecognised `model:` reaching st.tier would yield a truthy non-row whose .implementer is undefined.
-// Every matrix read goes through here and falls back to a REAL row rather than crashing the task.
-function effortRow(tier) {
-  return Object.prototype.hasOwnProperty.call(EFFORT, tier) ? EFFORT[tier] : EFFORT[TOP_TIER]
-}
-function implEffort(st, task) {
-  return (task && task.effort) || effortRow(effortTier(st)).implementer
+// { index, drift }: where the task starts on `ladder`, and its `rung:` when the ladder lacks it ('' else).
+function startRung(task, ladder) {
+  const names = ladder.rungs.map((r) => r.name)
+  const top = names.length - 1
+  const want = task ? task.rung : undefined
+  if (want !== undefined && want !== null && want !== '') {
+    const i = typeof want === 'string' ? names.indexOf(want) : -1
+    return i >= 0 ? { index: i, drift: '' } : { index: top, drift: typeof want === 'string' ? want : JSON.stringify(want) }
+  }
+  const legacy = (v) => (v === undefined || v === null ? '' : String(v).trim().toLowerCase())
+  const model = legacy(task && task.model)
+  const effort = legacy(task && task.effort)
+  return { index: model === 'fable' || effort === 'xhigh' || effort === 'max' ? top : 0, drift: '' }
 }
 
-// Effort for a judge role ('judge' | 'masterReview'). Judges take the bundle of the tier they RUN
-// on — judgeFor() — so a judgeModel pin moves model and effort together (a tier is a bundle). The
-// fallback guards a judgeModel value with no matrix row (fail to the task's tier, never crash).
-function judgeEffort(a, st, role) {
-  // A pin names the MODEL. Effort is not quota-scarce, so it still follows effortTier — otherwise
-  // pinning a judge to the tier the run is already capped at would silently LOWER review effort.
-  const pinned = a && a.judgeModel ? judgeFor(a, st) : null
-  const tier = pinned && rank(pinned) > rank(effortTier(st)) ? pinned : effortTier(st)
-  return effortRow(tier)[role]
+// The task's rung state for one call (see above). Logs the drift once, when there is one.
+function rungState(task, a) {
+  const L = ladderOf(a)
+  const s = startRung(task, L)
+  if (s.drift) {
+    log(`rung drift: ${task.slug}'s rung: ${s.drift} is not on the ladder (${L.source}) — read as the top rung ${L.rungs[L.rungs.length - 1].name}`)
+  }
+  return { source: L.source, rungs: L.rungs, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift }
 }
+
+function cur(st) { return st.rungs[st.at] }
+function onTop(st) { return st.at === st.rungs.length - 1 }
+function climbOf(st, stage) { return st.climbs.find((c) => c.stage === stage) || null }
+function rungRecord(st) {
+  return { startRung: st.rungs[st.start].name, rung: cur(st).name, climbs: st.climbs.map((c) => ({ ...c })) }
+}
+// The record plus the call's drift and its dispatches: the row's five rung keys.
+function rowRecord(st) {
+  return { ...rungRecord(st), rungDrift: st.drift, ran: st.ran.map((x) => ({ ...x })) }
+}
+
+// The stage's climb (see above): once per stage per call, never past the top, where it is recorded as a
+// no-op. Returns whether the rung MOVED. Prompt framing does not read this return: every builder derives
+// its own from `st` and its stage (escalationContext off the stage's climb, verifyBlock off onTop and the
+// implement climb). The one live consumer of the return is implement()'s retry budget.
+function escalate(st, slug, stage) {
+  if (climbOf(st, stage)) return false
+  const from = cur(st).name
+  if (!onTop(st)) st.at += 1
+  const to = cur(st).name
+  st.climbs.push({ stage, from, to })
+  log(from === to
+    ? `climb: ${slug} stays on the top rung ${to} (${stage}, a recorded no-op)`
+    : `climb: ${slug} → ${to} (${stage})`)
+  return from !== to
+}
+
+// The code-writing roles' effort, and a judge's ('judge' the plan gate, 'review' the master review), on
+// the task's CURRENT rung.
+function implEffort(st) { return cur(st).effort }
+function judgeEffort(st, role) { return cur(st)[role] }
 
 // ---- Dispatch resilience: transient agent death -----------------------------
 // A terminal API/connection error (observed 2026-07-18: "API Error: Connection closed mid-response") kills
@@ -1388,7 +1376,11 @@ const TRANSIENT_DIAGNOSIS =
   '(e.g. "Connection closed mid-response"), NOT a task-authored blocker. Re-dispatch cleanly: the worktree ' +
   'and any committed work are reusable and a fresh dispatch of the same prompt should proceed normally.'
 
-async function runAgent(prompt, opts) {
+// st (optional): a task-mode call's rung state. Each dispatch is recorded on st.ran BEFORE it runs, so a
+// stage that throws still reports what it dispatched (ADR 0029 decision 7). The integrate mode passes none:
+// its agents are recorded on its own trace.
+async function runAgent(prompt, opts, st) {
+  if (st) st.ran.push({ label: (opts && opts.label) || '', rung: cur(st).name, model: opts && opts.model, effort: opts && opts.effort })
   let r = await agent(prompt, opts)
   if (r == null) {
     log(`agent death (null return) on ${(opts && opts.label) || '?'} — one automatic retry`)
@@ -1437,15 +1429,16 @@ async function planLoop(task, st, a) {
   const badBudget = roundBudgetDiagnosis(task, ['maxPlanRounds'])
   if (badBudget) return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: badBudget, planRoundsUsed: 0 }
   let plan = await runAgent(plannerPrompt(task, a, st, ''), {
-    label: `plan:${task.slug}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier, effort: implEffort(st, task),
-  })
+    label: `plan:${task.slug}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: cur(st).model, effort: implEffort(st),
+  }, st)
   if (plan.__dead) return transientPlanBlock(task, 0)
-  if ((plan.blocked || !plan.ready) && st.tier === 'opus') {
-    // A first-pass planner failure is evidence of hardness — one fable retry before plan-blocked.
+  if (plan.blocked || !plan.ready) {
+    // A first-pass planner failure is the plan stage's first evidence of hardness: it climbs (a no-op on
+    // the top rung) and the planner gets one retry, on the rung it is now on, before plan-blocked.
     escalate(st, task.slug, 'plan')
     plan = await runAgent(plannerPrompt(task, a, st, plan.blockerCause || 'first-pass planner produced no plan'), {
-      label: `plan:${task.slug}@${st.tier}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier, effort: implEffort(st, task),
-    })
+      label: `plan:${task.slug}@${cur(st).name}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: cur(st).model, effort: implEffort(st),
+    }, st)
     if (plan.__dead) return transientPlanBlock(task, 0)
   }
   if (plan.blocked || !plan.ready) {
@@ -1458,8 +1451,8 @@ async function planLoop(task, st, a) {
   let round = 1
   while (round <= task.maxPlanRounds) {
     const verdict = await runAgent(planJudgePrompt(task, plan.plan, a), {
-      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: judgeFor(a, st), effort: judgeEffort(a, st, 'judge'),
-    })
+      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: cur(st).model, effort: judgeEffort(st, 'judge'),
+    }, st)
     if (verdict.__dead) return transientPlanBlock(task, round)
     if (verdict.verdict === 'approve') {
       // Gated inputs (ADR 0008): a declared gate always pauses for a human — regardless of
@@ -1496,11 +1489,12 @@ async function planLoop(task, st, a) {
           priorFeedback.map((r) => 'Round ' + r.round + ': ' + r.feedback.join('; ')).join('\n'),
       }
     }
-    // Opus got its one judged round; revision is iteration, and iteration runs at fable.
-    if (st.tier === 'opus') escalate(st, task.slug, 'plan')
+    // A judged `changes` is the plan stage's evidence of hardness: revision is iteration, and iteration
+    // runs one rung up (once per stage — a later `changes` never climbs again; a no-op on the top rung).
+    escalate(st, task.slug, 'plan')
     plan = await runAgent(planReviserPrompt(task, plan.plan, priorFeedback, round + 1, a), {
-      label: `plan-revise:${task.slug} r${round + 1}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: st.tier, effort: implEffort(st, task),
-    })
+      label: `plan-revise:${task.slug} r${round + 1}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: cur(st).model, effort: implEffort(st),
+    }, st)
     if (plan.__dead) return transientPlanBlock(task, round + 1)
     if (plan.blocked || !plan.ready) {
       return { task, blocked: true, status: 'plan-blocked', blockerDiagnosis: plan.blockerCause || 'plan-reviser returned no plan', planRoundsUsed: round + 1 }
@@ -1520,25 +1514,26 @@ async function implement(task, st, prev, a) {
   const planExtra = (task.planGate && prev && prev.plan) ? { planRoundsUsed: prev.planRoundsUsed || 0 } : undefined
   if (task.scope === 'read-only') {
     let r = await runAgent(readOnlyPrompt(task, a, st, ''), {
-      label: `investigate:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
-    })
+      label: `investigate:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: cur(st).model, effort: implEffort(st),
+    }, st)
     if (r.__dead) return transientImplBlock()
-    if (r.blocked && st.tier === 'opus') {
+    if (r.blocked) {
+      // The implement stage's first evidence of hardness: climb (a no-op on the top rung), one retry.
       escalate(st, task.slug, 'implement')
       r = await runAgent(readOnlyPrompt(task, a, st, r.blockerDiagnosis || 'first-pass investigation did not complete'), {
-        label: `investigate:${task.slug}@${st.tier}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task),
-      })
+        label: `investigate:${task.slug}@${cur(st).name}`, phase: 'Implement', schema: IMPL_RESULT, model: cur(st).model, effort: implEffort(st),
+      }, st)
       if (r.__dead) return transientImplBlock()
     }
     return r
   }
-  // Same builder for both passes: st.tier is read at build time, so the opus call renders the
-  // one-shot verification block and the post-escalation call renders the full Ralph loop.
+  // Same builder for both passes: st is read at build time, so a first pass below the top rung renders the
+  // one-shot verification block and the pass after the stage's climb renders the full Ralph loop.
   const prompt = (prior, t) => ((t || task).planGate && prev && prev.plan)
     ? approvedPlanImplementerPrompt(t || task, prev.plan, a, st, prior)
     : implementerPrompt(t || task, a, st, prior)
   // A stop for gated inputs (ADR 0008) is a HUMAN decision, not evidence of hardness: convert it to a
-  // clean gate-pending block and never escalate on it. Checked before the escalation branch on both
+  // clean gate-pending block and never climb on it. Checked before the climb branch on both
   // passes. Approved gates are filtered out defensively (the prompt already tells the agent to proceed
   // past them), so an already-signed gate can never be re-asked; a stop for ONLY approved gates has already
   // had its continuations (pastSignedGates) by the time this runs, so it repeats gates already passed.
@@ -1548,36 +1543,37 @@ async function implement(task, st, prev, a) {
     return { ...r, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates), ...(planExtra || {}) }
   }
   // The opts are held, and the builder call re-rendered (a pure function of unchanged inputs), so a signed
-  // stop's continuation (pastSignedGates) carries the same bytes at the same tier; the cached call itself
+  // stop's continuation (pastSignedGates) carries the same bytes on the same rung; the cached call itself
   // is unchanged. Each runAgent() keeps a builder call as its first argument (git-env-scrub's e2 guard).
-  const firstOpts = { label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task) }
-  let r = await runAgent(prompt(''), firstOpts)
-  r = await pastSignedGates(task, r, prompt(''), firstOpts)
-  // A dead agent is transient infra, NOT evidence of hardness — do NOT escalate; report a clean block.
+  const firstOpts = { label: `implement:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: cur(st).model, effort: implEffort(st) }
+  let r = await runAgent(prompt(''), firstOpts, st)
+  r = await pastSignedGates(task, r, prompt(''), firstOpts, st)
+  // A dead agent is transient infra, NOT evidence of hardness — do NOT climb; report a clean block.
   if (r.__dead) return transientImplBlock(planExtra)
   const gatedFirst = gatePending(r)
   if (gatedFirst) return gatedFirst
-  if ((r.escalate || r.blocked) && st.tier === 'opus') {
-    // One-shot red or a first-pass block: the task has proven non-mechanical. Fable takes over in the
-    // same worktree (the committed attempt + note diagnosis carry over; an approved plan is NOT
-    // re-planned) with the full Ralph budget.
+  if (r.escalate || r.blocked) {
+    // One-shot red or a first-pass block: the task has proven non-mechanical. The implement stage climbs
+    // and the next rung takes over in the same worktree (the committed attempt + note diagnosis carry
+    // over; an approved plan is NOT re-planned) with the full Ralph budget. On the top rung the climb is a
+    // recorded no-op and the same rung retries once.
     const moved = escalate(st, task.slug, 'implement')
     const prior = [r.blockerDiagnosis, r.summary].filter((s) => s && s.trim()).join('\n')
       || 'first-pass attempt did not verify green'
-    // Under a cap the first pass was ALREADY terminal, so it spent a FULL Ralph budget; a second full
-    // one would double the verifier spend on the model chosen because resources were scarce. The
-    // retry budget is NOT a function of max_iterations — two rounds of arithmetic (floor(n/2), then a
-    // floor of 2 around it) each broke at an edge: floor(n/2) gave 1 at the template default, and a
-    // 1-iteration ralphLoop fires step (d) at i == 1 and blocks WITHOUT re-running the verifier, so
-    // the agent commits an unverified fix; the floor then handed n=2 a full second budget, the exact
-    // doubling being guarded against. What the retry actually needs is one fix-and-re-verify cycle,
-    // which is a CONSTANT. Capped cost is therefore exactly `max_iterations + CAPPED_RETRY_ITERATIONS`
-    // against an uncapped run's `1 + max_iterations` — one extra iteration at every n, no edge cases.
-    // An escalation that really moved tier keeps its full budget: that is what the hand-over buys.
+    // On the top rung the first pass ran the full loop, so it ALREADY spent a FULL Ralph budget; a second
+    // full one would double the verifier spend at the ceiling. The retry budget is NOT a function of
+    // max_iterations — two rounds of arithmetic (floor(n/2), then a floor of 2 around it) each broke at an
+    // edge: floor(n/2) gave 1 at the template default, and a 1-iteration ralphLoop fires step (d) at i == 1
+    // and blocks WITHOUT re-running the verifier, so the agent commits an unverified fix; the floor then
+    // handed n=2 a full second budget, the exact doubling being guarded against. What the retry actually
+    // needs is one fix-and-re-verify cycle, which is a CONSTANT. A top-rung task's implement cost is
+    // therefore exactly `max_iterations + CAPPED_RETRY_ITERATIONS`, against a climbing one's
+    // `1 + max_iterations` — one extra iteration at every n, no edge cases. A climb that really moved keeps
+    // its full budget: that is what the hand-over buys.
     const retryTask = moved ? task : { ...task, maxIterations: CAPPED_RETRY_ITERATIONS }
-    const retryOpts = { label: `implement:${task.slug}@${st.tier}`, phase: 'Implement', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task) }
-    r = await runAgent(prompt(prior, retryTask), retryOpts)
-    r = await pastSignedGates(task, r, prompt(prior, retryTask), retryOpts)
+    const retryOpts = { label: `implement:${task.slug}@${cur(st).name}`, phase: 'Implement', schema: IMPL_RESULT, model: cur(st).model, effort: implEffort(st) }
+    r = await runAgent(prompt(prior, retryTask), retryOpts, st)
+    r = await pastSignedGates(task, r, prompt(prior, retryTask), retryOpts, st)
     if (r.__dead) return transientImplBlock(planExtra)
     const gatedRetry = gatePending(r)
     if (gatedRetry) return gatedRetry
@@ -1594,13 +1590,15 @@ async function implement(task, st, prev, a) {
 // entry reuses it). Returns { stop } — the row to return — or { current } to judge next. `round` is the
 // round being revised for; `seeded` is the task.resume seed (the reviser's COLD ENTRY) or null.
 async function reviseRound(task, st, current, priorFeedback, round, a, planText, seeded) {
-  // Opus got its one judged PR round; revision is iteration, and iteration runs at fable.
-  if (st.tier === 'opus') escalate(st, task.slug, 'review')
-  const reviseOpts = { label: `revise:${task.slug} r${round}`, phase: 'Review', schema: IMPL_RESULT, model: st.tier, effort: implEffort(st, task) }
-  let revised = await runAgent(reviserPrompt(task, current, priorFeedback, round, a, planText, seeded), reviseOpts)
+  // A review-judge `changes` is the review stage's evidence of hardness: revision is iteration, and
+  // iteration runs one rung up (once per stage per call; a no-op on the top rung). A seeded revise is its
+  // own call, so it climbs from the rung its note was stamped with.
+  escalate(st, task.slug, 'review')
+  const reviseOpts = { label: `revise:${task.slug} r${round}`, phase: 'Review', schema: IMPL_RESULT, model: cur(st).model, effort: implEffort(st) }
+  let revised = await runAgent(reviserPrompt(task, current, priorFeedback, round, a, planText, seeded), reviseOpts, st)
   // A replayed (or fresh) stop for gates the note has since approved: continuations (pastSignedGates), on the
   // same reviser prompt re-rendered from the same inputs. A dead result passes through (signedStop is false).
-  revised = await pastSignedGates(task, revised, reviserPrompt(task, current, priorFeedback, round, a, planText, seeded), reviseOpts)
+  revised = await pastSignedGates(task, revised, reviserPrompt(task, current, priorFeedback, round, a, planText, seeded), reviseOpts, st)
   if (revised.__dead) return { stop: { ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS } }
   if (revised.blocked) {
     // A reviser can DISCOVER a gated input the earlier passes never hit (ADR 0008) — same human
@@ -1653,8 +1651,8 @@ async function reviewLoop(task, st, prev, a, planText, seed) {
   }
   while (round <= task.maxReviewRounds) {
     const verdict = await runAgent(reviewJudgePrompt(task, current, a, priorFeedback), {
-      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: judgeFor(a, st), effort: judgeEffort(a, st, 'masterReview'),
-    })
+      label: `review:${task.slug} r${round}`, phase: 'Review', schema: REVIEW_VERDICT, model: cur(st).model, effort: judgeEffort(st, 'review'),
+    }, st)
     // Dead review-judge: the PR is real and stands — block on transient infra so the lead re-judges it.
     if (verdict.__dead) return stopped({ ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS })
     if (verdict.verdict === 'approve') {
@@ -1683,15 +1681,12 @@ async function reviewLoop(task, st, prev, a, planText, seed) {
   return { ...current, status: 'review-blocked', reviewRoundsUsed: round - 1, blockerDiagnosis: diag, reviewFeedback: [diag], reviewHistory: priorFeedback }
 }
 
-// One task, end to end: plan-gate → implement → review, sharing a single mutable tier state so an
-// escalation in any layer carries into every later agent AND judge. The orchestration below runs
-// converge() once, for the one task this call carries; tasks converge independently across calls.
-async function converge(task, a) {
-  const cap = tierCap(a)
-  const st = { tier: taskModel(task, cap), cap, escalated: false, escalatedAt: '', capSuppressed: false, capSuppressedAt: '' }
-  const wrap = (r) => r
-    ? { ...r, model: st.tier, escalated: st.escalated, escalatedAt: st.escalatedAt, tierCapped: !!st.capSuppressed, tierCappedAt: st.capSuppressedAt || '' }
-    : r
+// One task, end to end: plan-gate → implement → review, sharing a single mutable rung state so a climb
+// in any layer carries into every later agent AND judge. The orchestration below builds `st` first and runs
+// converge() once, for the one task this call carries, so a stage that throws still has its record (st);
+// tasks converge independently across calls.
+async function converge(task, a, st = rungState(task, a)) {
+  const wrap = (r) => (r ? { ...r, ...rowRecord(st) } : r)
   // Pre-flight: a code-writing task whose review layer cannot run must not spend a planner, an
   // implementer and a PR first. The diagnosis lists every invalid budget the task would use, so one
   // frontmatter fix covers both. (Read-only tasks never run the review layer, so their budget is moot.)
@@ -1715,11 +1710,12 @@ async function converge(task, a) {
 }
 
 // One result row per task, the shape reconcile-rollout.py reads. A converge() that threw (r === null)
-// becomes a blocked row with the same diagnosis the engine has always given a dropped item.
+// becomes a blocked row with the same diagnosis the engine has always given a dropped item, and the rung
+// record st held when it threw: the climbs so far and every dispatch that ran.
 // The diagnosis passes through stageDiagnosis (p12-6): a seeded revise that stopped blocked gets the
 // revise marker, and an own-run diagnosis that would read as a stage marker gets `own run: `.
-function taskResult(t, r, a) {
-  const norm = r || { blocked: true, status: 'blocked', blockerDiagnosis: 'workflow stage threw — see /workflows' }
+function taskResult(t, r, st) {
+  const norm = r || { blocked: true, status: 'blocked', blockerDiagnosis: 'workflow stage threw — see /workflows', ...rowRecord(st) }
   const status = norm.status || (norm.blocked ? 'blocked' : 'review')
   return {
     slug: t.slug,
@@ -1736,11 +1732,11 @@ function taskResult(t, r, a) {
     approvedAtCeiling: !!norm.approvedAtCeiling,
     gatedInputs: norm.gatedInputs || [],
     summary: norm.summary || '',
-    model: norm.model || taskModel(t, tierCap(a)),
-    escalated: !!norm.escalated,
-    escalatedAt: norm.escalatedAt || '',
-    tierCapped: !!norm.tierCapped,
-    tierCappedAt: norm.tierCappedAt || '',
+    startRung: norm.startRung,
+    rung: norm.rung,
+    climbs: norm.climbs,
+    rungDrift: norm.rungDrift,
+    ran: norm.ran,
   }
 }
 
@@ -1762,10 +1758,6 @@ function taskResult(t, r, a) {
 const INTEGRATION_PREFIX = 'integration: '
 const REVISE_MARKER = 'revise: rejected at Integration re-review — revise on the branch, then re-integrate'
 const OWN_RUN_PREFIX = 'own run: '
-// The integrator and the Integration judge run on the run's top tier — tierCap(a): opus under
-// `max_tier: opus`, else fable — at this effort. P13 swaps in the ladder's top rung (ADR 0029 decision 5).
-// judgeModel and the task's `effort:` do not apply: Integration is not the task's own run.
-const INTEGRATION_EFFORT = 'xhigh'
 const INTEGRATION_TROUBLE = ['conflict', 'red', 'shared-file']
 const INTEGRATION_THREW = 'workflow stage threw — see /workflows'
 const SHA40 = /^[0-9a-f]{40}$/
@@ -1951,6 +1943,40 @@ function prIdentityError(a, o) {
   return ''
 }
 
+// integration.rung: the task's own rung record (ADR 0029 decision 7), which Integration passes through to
+// its row. Three shapes pass; anything else is a lead bug, refused before dispatch:
+// - the record a task-mode row carries: { startRung, rung, climbs }, each name a rung name or '', each climb
+//   { stage: plan | implement | review, from, to } with rung names (from === to is a recorded no-op);
+// - the neutral record { startRung: '', rung: '', climbs: [] }, for a task whose note has no `rung:`
+//   (lead-integrate.py inputs gives it, and a note stamped `rung:` gives only that name);
+// - a pre-3.0.0 tier record { model: opus | fable, escalated, escalatedAt, tierCapped, tierCappedAt } (a
+//   Lost-call resume of an old integrate call), which reads as neutral: Integration runs on the top rung
+//   anyway, so the old record decides nothing.
+function rungRecordError(g) {
+  if (!isObj(g)) return `must be one object { startRung, rung, climbs }, got ${JSON.stringify(g)}`
+  if ('model' in g) {
+    if (!['opus', 'fable'].includes(g.model) || typeof g.escalated !== 'boolean' || typeof g.escalatedAt !== 'string' ||
+      typeof g.tierCapped !== 'boolean' || typeof g.tierCappedAt !== 'string') {
+      return `a pre-3.0.0 tier record must be { model: opus|fable, escalated: boolean, escalatedAt: string, tierCapped: boolean, tierCappedAt: string }, got ${JSON.stringify(g)}`
+    }
+    return ''
+  }
+  const keys = Object.keys(g).sort().join(',')
+  const name = (v) => v === '' || rungName(v)
+  if (keys !== 'climbs,rung,startRung' || !name(g.startRung) || !name(g.rung) || !Array.isArray(g.climbs) ||
+    g.climbs.some((c) => !isObj(c) || Object.keys(c).sort().join(',') !== 'from,stage,to' || !STAGES.includes(c.stage) || !rungName(c.from) || !rungName(c.to))) {
+    return `must be { startRung, rung, climbs } (rung names or '', climbs [{ stage: ${STAGES.join('|')}, from, to }]), got ${JSON.stringify(g)}`
+  }
+  return ''
+}
+
+// The record a validated integration.rung passes through to the row: a pre-3.0.0 tier record reads as
+// the neutral one.
+function integrationRung(g) {
+  if ('model' in g) return { startRung: '', rung: '', climbs: [] }
+  return { startRung: g.startRung, rung: g.rung, climbs: g.climbs.map((c) => ({ stage: c.stage, from: c.from, to: c.to })) }
+}
+
 // args.integration (mode 'integrate'). A bad value is a lead bug, not a task block: the caller throws
 // before any agent() call. The SHAs are interpolated into bash, so they are validated, never quoted.
 function integrationArgsError(a) {
@@ -1980,11 +2006,8 @@ function integrationArgsError(a) {
   if (!(Number.isInteger(I.reviewRoundsUsed) && I.reviewRoundsUsed >= 1 && I.reviewRoundsUsed >= last)) {
     return `reviewRoundsUsed must be an integer >= 1 and >= the history's last round (${last}), got ${JSON.stringify(I.reviewRoundsUsed)}`
   }
-  const g = I.rung
-  if (!isObj(g) || !knownTier(g.model) || typeof g.escalated !== 'boolean' || typeof g.escalatedAt !== 'string' ||
-    typeof g.tierCapped !== 'boolean' || typeof g.tierCappedAt !== 'string') {
-    return `rung must be { model: opus|fable, escalated: boolean, escalatedAt: string, tierCapped: boolean, tierCappedAt: string }, got ${JSON.stringify(g)}`
-  }
+  const rungBad = rungRecordError(I.rung)
+  if (rungBad) return 'rung ' + rungBad
   if (I.leadMerge !== undefined) {
     const m = I.leadMerge
     if (!isObj(m) || !isSha(m.mergeCommit) || !isSha(m.headSha) || !isSha(m.baseSha) || typeof m.verified !== 'boolean') {
@@ -2422,12 +2445,17 @@ function integrationTriggers(I, r) {
 // so a fresh integrate call re-reads the latest main (ADR 0030 decision 3) and is never a resume.
 async function integrate(task, a, trace) {
   const I = a.integration
-  const cap = tierCap(a)
+  // Integration runs on the ladder's TOP rung whatever rung the task reached (ADR 0029 decision 5): the
+  // integrator at the top rung's effort, the judge at its review effort. Integration is not the task's own
+  // run, so the task's record (integration.rung) decides nothing here; it only passes through to the row.
+  const L = ladderOf(a)
+  const top = L.rungs[L.rungs.length - 1]
+  const effortOf = { integrator: top.effort, judge: top.review }
   const R = I.reviewRoundsUsed
   const lm = I.leadMerge
-  const opts = (label, schema) => ({ label, phase: 'Integration', schema, model: cap, effort: INTEGRATION_EFFORT })
+  const opts = (label, schema, role) => ({ label, phase: 'Integration', schema, model: top.model, effort: effortOf[role] })
   const record = (role, label, r) => {
-    trace.agents.push({ role, label, model: cap, effort: INTEGRATION_EFFORT, finishedAt: !r.__dead && typeof r.finishedAt === 'string' ? r.finishedAt : '' })
+    trace.agents.push({ role, label, rung: top.name, model: top.model, effort: effortOf[role], finishedAt: !r.__dead && typeof r.finishedAt === 'string' ? r.finishedAt : '' })
   }
   const ilabel = `integrate:${task.slug}`
   const jlabel = `integration-review:${task.slug} r${R + 1}`
@@ -2438,14 +2466,14 @@ async function integrate(task, a, trace) {
     j = { mergeCommit: lm.mergeCommit, headSha: lm.headSha, baseSha: lm.baseSha, triggers: ['shared-file'], path: trace.path }
   } else {
     trace.path = 'integrator'
-    const r = await runAgent(integratorPrompt(task, a, I), opts(ilabel, INTEGRATE_RESULT))
+    const r = await runAgent(integratorPrompt(task, a, I), opts(ilabel, INTEGRATE_RESULT, 'integrator'))
     record('integrator', ilabel, r)
     const bad = integrationCheck(I, r, task.approvedGates)
     if (bad) return { outcome: 'set-aside', reason: bad.reason, gates: bad.gates || [] }
     j = { mergeCommit: r.mergeState === 'up-to-date' ? '' : r.mergeCommit, headSha: r.headSha, baseSha: r.baseSha, triggers: integrationTriggers(I, r), path: trace.path }
     if (!j.triggers.length) return { outcome: 'integrated', ...j, reReviewed: false }
   }
-  const v = await runAgent(integrationReviewPrompt(task, a, I, j), opts(jlabel, INTEGRATION_REVIEW))
+  const v = await runAgent(integrationReviewPrompt(task, a, I, j), opts(jlabel, INTEGRATION_REVIEW, 'judge'))
   record('judge', jlabel, v)
   if (v.__dead) return { outcome: 'set-aside', reason: TRANSIENT_DIAGNOSIS, ...j, reReviewed: false }
   const feedback = (v.feedback || []).map(flattenLine).filter((f) => f)
@@ -2454,7 +2482,8 @@ async function integrate(task, a, trace) {
   return { outcome: 'rejected', ...j, reReviewed: true, feedback: feedback.length ? feedback : ['the Integration re-review returned changes with no feedback'] }
 }
 
-// The integrate call's ONE row: today's 19 keys plus `integration` (the payload the Integration log line records).
+// The integrate call's ONE row: the task row's 19 keys plus `integration` (the payload the Integration log line
+// records). Its rung record is the task's own, passed through; its `ran` is Integration's agents.
 // Every status is one of reconcile's five: integrated → review; rejected → blocked with the revise
 // marker (review-blocked when no review round is left); set-aside → blocked with `integration: <reason>`
 // (gate-pending for a gate). A rejected task's note therefore never reads as approved.
@@ -2480,7 +2509,7 @@ function integrationResult(task, out, a, trace) {
     blockerDiagnosis = integrationMarker('set-aside', o.reason, I.reviewHistory)
   }
   const head = o.headSha || ''
-  const g = I.rung
+  const g = integrationRung(I.rung)
   return {
     slug: task.slug,
     scope: task.scope,
@@ -2498,11 +2527,11 @@ function integrationResult(task, out, a, trace) {
     summary: o.outcome === 'integrated'
       ? `integrated ${head} onto ${o.baseSha} (${trace.path}${o.reReviewed ? ', re-reviewed' : ', no re-review'})`
       : o.outcome === 'rejected' ? `Integration re-review rejected ${head}` : `set aside at Integration: ${flattenLine(o.reason)}`,
-    model: g.model,
-    escalated: g.escalated,
-    escalatedAt: g.escalatedAt,
-    tierCapped: g.tierCapped,
-    tierCappedAt: g.tierCappedAt,
+    startRung: g.startRung,
+    rung: g.rung,
+    climbs: g.climbs,
+    rungDrift: '',
+    ran: trace.agents.map((x) => ({ label: x.label, rung: x.rung, model: x.model, effort: x.effort })),
     integration: {
       outcome: o.outcome,
       path: trace.path,
@@ -2535,6 +2564,17 @@ if (!a.task || typeof a.task !== 'object' || Array.isArray(a.task)) throw new Er
 // path. Bad Integration or seeded-revise args are lead bugs, refused before any dispatch.
 const mode = a.mode === undefined ? 'task' : a.mode
 if (mode !== 'task' && mode !== 'integrate') throw new Error(`args.mode: refusing ${JSON.stringify(a.mode)} — 'task' (the default) or 'integrate'`)
+// args.ladder (ADR 0029 decision 6): the ladder.py JSON the lead resolved at this call's start. A malformed
+// one is a lead bug, refused before any dispatch in both modes; an absent one is the built-in ladder.
+const badLadder = ladderArgsError(a.ladder)
+if (badLadder) throw new Error('args.ladder: ' + badLadder)
+// Printed at every call, so a run's log names the ladder it ran on (a path, or built-in).
+function logLadder() {
+  const L = ladderOf(a)
+  const none = a.ladder === undefined || a.ladder === null
+  log(`ladder: ${L.source} — ${L.rungs.map((g) => g.name).join(', ')}` +
+    (none ? ' (no args.ladder: a call from before 3.0.0 runs on the built-in ladder)' : ''))
+}
 if (mode === 'integrate') {
   const bad = integrationArgsError(a)
   if (bad) throw new Error('args.integration: ' + bad)
@@ -2549,6 +2589,7 @@ if (mode === 'task' && a.task.resume !== undefined) {
 
 if (mode === 'integrate') {
   log(`integrate: ${a.rolloutSlug} — ${a.task.slug} (${a.task.scope})`)
+  logLadder()
   if (a.progress) log(a.progress)
   // The validated history with its empty rounds dropped (liveHistory) is the one every prompt and the row use.
   const ia = { ...a, integration: { ...a.integration, reviewHistory: liveHistory(a.integration.reviewHistory) } }
@@ -2567,7 +2608,7 @@ if (mode === 'integrate') {
 }
 
 log(`task: ${a.rolloutSlug} — ${a.task.slug} (${a.task.scope})`)
-if (tierCap(a) !== TOP_TIER) log(`maxTier=${tierCap(a)} — escalation is capped; capped tasks run the full loop at the higher tier's effort`)
+logLadder()
 // Progress/ETA relay: the sandbox has no clock, so the skill precomputes this line (reconcile-rollout.py
 // next / mark-started) from the task notes' started:/merged: stamps and the engine just surfaces it.
 if (a.progress) log(a.progress)
@@ -2577,16 +2618,18 @@ if (a.progress) log(a.progress)
 const callTask = a.task.resume
   ? { ...a.task, resume: { ...a.task.resume, reviewHistory: liveHistory(a.task.resume.reviewHistory) } }
   : a.task
+// The task's rung state, built before converge so a stage that throws still reports its record.
+const st = rungState(callTask, a)
 // A stage that throws drops the task to null, which taskResult() turns into a blocked row — the same
 // mapping the engine has always had, so one bad stage never loses the call's result.
 let r
 try {
-  r = await converge(callTask, a)
+  r = await converge(callTask, a, st)
 } catch (e) {
   log(`converge threw on ${a.task.slug}: ${(e && e.message) || e}`)
   r = null
 }
-const row = taskResult(callTask, r, a)
+const row = taskResult(callTask, r, st)
 log(`${row.slug} → ${row.status}`)
 
 return { rolloutSlug: a.rolloutSlug, tasks: [row] }

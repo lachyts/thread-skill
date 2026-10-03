@@ -57,11 +57,11 @@ const NOW = '2026-10-02T14:05:00Z'
 const sha = (c) => c.repeat(40)
 const prOf = (n) => `https://github.com/o/r/pull/${n}`
 const alias = (slug) => slug.slice(slug.indexOf('-') + 1)
-const mkTask = (slug, over = {}) => ({ slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 4, maxPlanRounds: 3, model: 'fable', ...over })
+const mkTask = (slug, over = {}) => ({ slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 4, maxPlanRounds: 3, rung: 'opus-xhigh', ...over })
 const mkI = (slug, n) => ({
   prUrl: prOf(n), branch: `audit-fix/${alias(slug)}`, worktreePath: `/repo/.claude/worktrees/${slug}`, headSha: sha('a'), taskBase: sha('b'),
   mainSha: sha('c'), trouble: [], landed: [], plan: 'PLAN', reviewHistory: [{ round: 1, feedback: ['own-run fix'] }], reviewRoundsUsed: 1,
-  rung: { model: 'fable', escalated: false, escalatedAt: '', tierCapped: false, tierCappedAt: '' },
+  rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] },
 })
 const base = (rolloutSlug) => ({ rolloutSlug, repoPath: '/repo', verifier: 'make test', date: '2026-10-01' })
 const integrateStep = {
@@ -194,7 +194,7 @@ function buildBBase() {
   const S = 'scope: cross-cutting'
   writeRollout(d, RB, Object.values(B))
   writeTask(d, B.merged, ['status: done', S, link, `pr: ${prOf(20)}`, 'started: 2026-10-02T08:00+00:00', 'merged: 2026-10-02T08:40+00:00'])
-  writeTask(d, B.target, ['status: review', S, link, `pr: ${prOf(21)}`, OWNER, 'model: fable', 'review_rounds_used: 2', 'plan_rounds_used: 1',
+  writeTask(d, B.target, ['status: review', S, link, `pr: ${prOf(21)}`, OWNER, 'rung: opus-xhigh', 'review_rounds_used: 2', 'plan_rounds_used: 1',
     'started: 2026-10-02T09:00+00:00', 'ready: 2026-10-02T10:40+00:00'], B_BODY)
   writeTask(d, B.dep, ['status: open', S, link, 'depends-on:', `  - "[[${B.target}]]"`])
   const note = path.join(d, `${B.target}.md`)
@@ -217,7 +217,7 @@ function buildB(d) {
   if (hb.rc !== 0) fails.push(`hand-back exited ${hb.rc}: ${hb.err}`)
   const after = fs.readFileSync(note, 'utf8')
   if (fmKey(after, 'status') !== 'review') fails.push(`status ${fmKey(after, 'status')}`)
-  for (const k of ['pr', 'review_rounds_used', 'plan_rounds_used', 'model', 'started']) {
+  for (const k of ['pr', 'review_rounds_used', 'plan_rounds_used', 'rung', 'started']) {
     if (fmKey(after, k) !== fmKey(before, k)) fails.push(`${k} changed`)
   }
   if (fmKey(after, 'ready') !== '2026-10-02T13:00+00:00') fails.push(`ready ${fmKey(after, 'ready')}`)
