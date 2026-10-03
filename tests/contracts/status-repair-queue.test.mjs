@@ -23,7 +23,9 @@
 // the lead's while its session holds the signed-gate handle (signed-gate). A RACE whose re-verify
 // the lead still runs (integrating under a live owner) is no escalation: both sides wait on it, and its fallback
 // is repair, never a resume (race-in-flight). Status's read-only rule is positive: it may invoke only its two
-// script reads, § 3's gh/git reads and the default-branch read.
+// script reads, § 3's gh/git reads and the default-branch read. Both speak rungs, never tiers (ADR 0029, p13-3):
+// status shows each task's rung and flags a Rung drift on unlanded tasks only and a refused ladder file, which
+// reorders no action; repair never edits the file and stops short of the hand-off under it (rung).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -41,12 +43,12 @@ const LEAD = path.join(SCRIPTS, 'lead-integrate.py')
 const UNFINISHED = path.join(root, 'skills', '_shared', 'scripts', 'unfinished-rollout.py')
 const ENV = { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1' }
 
-function py(script, args, input) {
-  const r = spawnSync('python3', [script, ...args], { encoding: 'utf8', env: ENV, input })
+function py(script, args, input, env = ENV) {
+  const r = spawnSync('python3', [script, ...args], { encoding: 'utf8', env, input })
   return { rc: r.status, out: r.stdout, err: r.stderr }
 }
-function must(script, args, input) {
-  const r = py(script, args, input)
+function must(script, args, input, env = ENV) {
+  const r = py(script, args, input, env)
   if (r.rc !== 0) throw new Error(`${path.basename(script)} ${args[0]} exited ${r.rc}: ${r.err}`)
   return r.out
 }
@@ -99,6 +101,9 @@ const seededStopRow = (R, slug, n) => {
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'p12-11-status-repair-'))
 process.on('exit', () => fs.rmSync(tmp, { recursive: true, force: true }))
+// status reads the operator's ladder file (its `ladder` key and each task's rungDrift): HOME is an empty dir here,
+// so it reads the built-in ladder and the operator's file never reaches the assertions.
+const STATUS_ENV = { ...ENV, HOME: path.join(tmp, 'status-home') }
 
 function writeTask(dir, slug, fm, body = '') {
   fs.writeFileSync(path.join(dir, `${slug}.md`), ['---', 'tags: [task]', ...fm, '---', '', '## Notes', '', `body ${slug}`, ''].join('\n') + body)
@@ -114,7 +119,7 @@ const bodyOfNote = (text) => text.slice(text.indexOf('\n---\n') + 5)
 const fmKey = (text, key) => (fmOf(text).match(new RegExp(`^${key}: (.*)$`, 'm')) || [])[1]
 const copyDir = (from, to) => { fs.cpSync(from, to, { recursive: true }); return to }
 const reconcileIn = (d, result, now = NOW) => must(RECONCILE, ['reconcile', '--result', '-', '--tasks-dir', d, '--now', now], JSON.stringify(result))
-const statusOf = (d, R) => JSON.parse(must(RECONCILE, ['status', '--rollout', path.join(d, `${R}.md`), '--tasks-dir', d, '--now', NOW]))
+const statusOf = (d, R) => JSON.parse(must(RECONCILE, ['status', '--rollout', path.join(d, `${R}.md`), '--tasks-dir', d, '--now', NOW], undefined, STATUS_ENV))
 const nextOf = (d, R) => JSON.parse(must(RECONCILE, ['next', '--rollout', path.join(d, `${R}.md`), '--tasks-dir', d, '--running', '', '--dry-run', '--now', NOW]))
 const inputsOf = (d, slug) => JSON.parse(must(LEAD, ['inputs', '--note', path.join(d, `${slug}.md`), '--max-review-rounds', '4', '--repo', '/repo']))
 const handBack = (d, slugs, now = '2026-10-02T13:00:00Z') => py(RECONCILE, ['hand-back', '--tasks', slugs, '--tasks-dir', d, '--now', now])
@@ -136,11 +141,12 @@ async function buildA() {
   const S = 'scope: cross-cutting'
   const st = (hm) => `started: 2026-10-02T${hm}+00:00`
   writeRollout(d, RA, Object.values(A))
-  writeTask(d, A.merged, ['status: done', S, link, `pr: ${prOf(1)}`, st('09:00'), 'merged: 2026-10-02T09:32+00:00'])
+  // Rungs: an off-ladder `rung:` drifts on the queued task only, never on the merged one; an on-ladder one never.
+  writeTask(d, A.merged, ['status: done', S, link, `pr: ${prOf(1)}`, st('09:00'), 'merged: 2026-10-02T09:32+00:00', 'rung: gone'])
   writeTask(d, A.running, ['status: in_progress', S, link, OWNER, st('12:00')])
   writeTask(d, A.integrating, ['status: review', S, link, `pr: ${prOf(3)}`, OWNER, st('10:00'), 'ready: 2026-10-02T13:00+00:00', 'integrating: 2026-10-02T13:50+00:00'])
-  writeTask(d, A.awaiting, ['status: review', S, link, `pr: ${prOf(4)}`, st('10:30'), 'ready: 2026-10-02T13:30+00:00'])
-  writeTask(d, A.queued, ['status: open', S, link, 'depends-on:', `  - "[[${A.atIntegration}]]"`])
+  writeTask(d, A.awaiting, ['status: review', S, link, `pr: ${prOf(4)}`, st('10:30'), 'ready: 2026-10-02T13:30+00:00', 'rung: opus-xhigh'])
+  writeTask(d, A.queued, ['status: open', S, link, 'rung: gone', 'depends-on:', `  - "[[${A.atIntegration}]]"`])
   writeTask(d, A.folded, ['status: merged', S, link, `merged_into: "[[${A.merged}]]"`])
   writeTask(d, A.other, ['status: dropped', S, link])
   for (const [k, n] of [['atIntegration', 8], ['rejected', 9], ['reviseStopped', 10], ['reviewBlocked', 11]]) {
@@ -388,6 +394,8 @@ const ANCHOR = 'update-ref -d refs/integration-anchor/<inputs.branch> <X>'
 const READS = ['reconcile-rollout.py status', 'lead-integrate.py inputs', 'gh pr view', 'gh pr list', 'git worktree list', 'git remote get-url',
   'default-branch.sh']
 const BAN = /\bwaves?\b|merged_through_wave|resume-filter|mark-dispatched|cursor behind|advance the cursor|smart-halt|single-wave|re-?wave|protocol 4/i
+const TIER_WORDS = ['max_tier', 'tier_capped', 'Opus 4.8', 'err toward fable']   // the tier vocabulary (ADR 0029): this file's one line of it
+const UNLANDED = 'queued, running, awaiting-integration, integrating or set-aside'
 
 const bodyOf = (t) => { const m = t.match(/^---\n[\s\S]*?\n---\n/); return m ? t.slice(m[0].length) : t }
 const raw = (text, re) => section(text, re) ?? ''
@@ -750,6 +758,42 @@ function check({ status, repair, fx }) {
   // ---- both ----
   // no-wave: neither file reads the wave rollout, its frontmatter description included.
   if (BAN.test(status) || BAN.test(repair)) fails.push('no-wave')
+
+  // rung (ADR 0029, p13-3): (1) fixture A's JSON: the queued task's off-ladder rung drifts, the merged task's never,
+  // an on-ladder one never, on the built-in ladder; (2) § 2 names the three keys; (3) § 3's Rung drift flag is
+  // scoped to the five unlanded states, the Ladder refused flag names execute's halt, and both hold offline;
+  // (4) the Offline paragraph keeps them rendering; (5) action 11 sends neither to repair; (6) a refused ladder
+  // reorders no action and never routes to repair on its own account; (7) repair: a Rung drift is never
+  // input-gated, a refused ladder leaves § 3, § 4's hand-backs and § 5 running and stops at the Hand-off;
+  // (8) neither skill speaks tiers.
+  const by = fx.A.bySlug
+  const rd = flag('Rung drift:')
+  const lr = flag('Ladder refused:')
+  const action11 = items[ACTIONS.indexOf('any drift flag')] ?? ''
+  const refusedP = labelled(s4raw, 'A refused ladder.')
+  const rRung = labelled(r2raw, 'Rungs (ADR 0029).')
+  const rRefused = labelled(r2raw, 'A refused ladder** (status')
+  const lower = (status + repair).toLowerCase()
+  const R = [
+    by[A.queued]?.rung === 'gone' && by[A.queued]?.rungDrift === 'gone' && by[A.merged]?.rung === 'gone' && by[A.merged]?.rungDrift === '' &&
+      by[A.awaiting]?.rung === 'opus-xhigh' && by[A.awaiting]?.rungDrift === '' && fx.A.status.ladder?.source === 'built-in' &&
+      fx.A.status.ladder?.error === null && fx.A.status.tasks.every((x) => x.rungDrift === '' || ['queued', 'running', 'awaiting-integration', 'integrating', 'set-aside'].includes(x.queueState)),
+    s2.includes('`progress`, `timeline` and `ladder`') && s2.includes('`blockerSummary`, `rung` and `rungDrift`') &&
+      s2.includes(`the task is unlanded (\`queueState\` ${UNLANDED})`),
+    rd.includes(`only for a task whose \`queueState\` is ${UNLANDED}`) && rd.includes('A merged, folded or other task is never flagged') &&
+      rd.includes('so it holds offline too') && lr.includes('Execute halts `ladder file refused`') && lr.includes('so it holds offline too'),
+    labelled(s3raw, 'Offline.').includes('the RACE / UNVERIFIED, Rung drift and Ladder refused flags still render'),
+    action11.startsWith('Any drift flag but a Rung drift or a refused ladder,'),
+    refusedP.includes('reorders nothing') && refusedP.includes(`from ${RUN.escalation} to ${RUN.nothing}`) && refusedP.includes('`ladder file refused`') &&
+      refusedP.includes('Status never routes a refused ladder to `/thread:repair` on its own account, because repair never edits the file') &&
+      prec.includes('A refused ladder adds its fix ahead of whichever action matches and moves none of them'),
+    rRung.includes('A Rung drift (status § 3) is never input-gated and needs no write') &&
+      rRefused.includes('Repair never edits `~/.config/thread/ladder.toml`') &&
+      rRefused.includes("§ 3's vault work, § 4's hand-back routes") && rRefused.includes("§ 5's defers (on Lachy's choice) still run") &&
+      rRefused.includes("Repair stops at § 4's **Hand-off**: no execute loop and no § 6") && ho.includes('or the ladder file is refused'),
+    !TIER_WORDS.some((w) => lower.includes(w.toLowerCase())),
+  ]
+  if (!R.every(Boolean)) fails.push('rung')
   return [...new Set(fails)]
 }
 
@@ -821,7 +865,7 @@ test('status and repair hold every queue rule', () => {
 
 const RULES = ['states', 'set-aside', 'log-line', 'owner', 'drift', 'actions', 'lineage', 'read-only', 'reverse-lineage', 'integration-only',
   'stages', 'first-match', 'another-base', 'race-hold', 'race-in-flight', 'closed-pr', 'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off',
-  'signed-gate', 'no-wave']
+  'signed-gate', 'no-wave', 'rung']
 const CONTROLLED = new Set()
 
 // Replaces the first match of `from`. Whitespace inside it matches any run of whitespace, so a reflowed line still
@@ -1179,7 +1223,35 @@ test("control: no signed-gate Don't fails signed-gate", () => {
   only(rp("- **Don't touch a signed task while its lead is live.**", '- **Mind signed tasks.**'), 'signed-gate', 'donts')
 })
 
-test('the rules are all named (25) and each has a control', () => {
-  assert.equal(RULES.length, 25)
+test('control: a merged row with a rung drift fails rung', () => {
+  const merged = { ...fx.A.bySlug[A.merged], rungDrift: 'gone' }
+  only({ fx: { ...fx, A: { ...fx.A, bySlug: { ...fx.A.bySlug, [A.merged]: merged } } } }, 'rung', 'merged drift')
+})
+test('control: § 2 without rungDrift fails rung', () => {
+  only(st('`blockerSummary`, `rung` and `rungDrift`.', '`blockerSummary` and `rung`.'), 'rung', 'no rungDrift key')
+})
+test('control: a Rung drift flag without its state scope fails rung', () => {
+  only(st('only for a task whose `queueState` is queued, running, awaiting-integration, integrating or set-aside, with a non-empty `rungDrift`',
+    'for any task with a non-empty `rungDrift`'), 'rung', 'unscoped')
+})
+test('control: an Offline paragraph that drops the local flags fails rung', () => {
+  only(st(' It skips the live reads only: the RACE / UNVERIFIED, Rung drift and Ladder refused flags still render, from § 2\'s data and the local files.', ''), 'rung', 'offline')
+})
+test('control: action 11 routing a refused ladder to repair fails rung', () => {
+  only(st('Any drift flag but a Rung drift or a refused ladder,', 'Any drift flag (a refused ladder included),'), 'rung', 'action 11')
+})
+test('control: a refused ladder routed to repair on its own fails rung', () => {
+  only(st('Status never routes a refused ladder to `/thread:repair` on its own account, because repair never edits the file;',
+    'Status routes a refused ladder to `/thread:repair`, which fixes the file;'), 'rung', 'routing paragraph')
+})
+test('control: repair handing off to execute under a refused ladder fails rung', () => {
+  only(rp("Repair stops at § 4's **Hand-off**: no execute loop and no § 6.", "Then § 4's **Hand-off** runs execute's loop as usual."), 'rung', 'hand-off')
+})
+test('control: tier vocabulary in status fails rung', () => {
+  only(st('**Outside the count.**', `A ${TIER_WORDS[0]} rollout is capped.\n\n**Outside the count.**`), 'rung', 'tier word')
+})
+
+test('the rules are all named (26) and each has a control', () => {
+  assert.equal(RULES.length, 26)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

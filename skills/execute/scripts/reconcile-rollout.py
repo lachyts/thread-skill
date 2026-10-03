@@ -80,8 +80,13 @@ Subcommands:
   status      Read-only situational scan for /thread:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
-              pause_requested, incomplete, ceiling, counts, progress, timeline, tasks}; `incomplete` is
-              why the rollout must not run as written (below), or null. Pure read; no network.
+              pause_requested, incomplete, ceiling, counts, progress, timeline, ladder, tasks}; `incomplete`
+              is why the rollout must not run as written (below), or null. `ladder` is {source, rungs (names,
+              bottom first), error}: the local ladder file through ladder.py's load(); a refused file gives
+              rungs [], source ladder.py's default_path() and error its reason, and status still exits 0.
+              Each task carries `rung` (its `rung:` stamp, or null) and `rungDrift`: the stamp when a
+              readable ladder lacks it and the task is unlanded (queued, running, awaiting-integration,
+              integrating, set-aside), else "". Pure read; no network.
 
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
@@ -100,14 +105,27 @@ Subcommands:
               that supersedes it (--to, a path). Each linked note (the notes `status` reads, root and Archive)
               is classified by its queue state: queued, running, awaiting-integration, integrating and
               set-aside ones are carried (`rollout: "[[<to>]]"` in place; `owner:`, `integrating:` and a
-              legacy `wave:` removed; nothing else changes), merged, folded and other ones are kept. It never
-              writes the prior note: closing it out is schedule step 7.5's. Prints one `carry <slug> <state>`
-              or `keep <slug> <state>` line per linked note, sorted by slug, then `[no-change]`,
-              `[written: <n>]` or `(dry-run)`. --dry-run previews and needs no --to. Refuses (exit 2,
+              legacy `wave:` removed; its legacy stamps mapped, below; nothing else changes), merged, folded
+              and other ones are kept. It never writes the prior note: closing it out is schedule step 7.5's.
+              Legacy stamps (ADR 0029 consequences; LEGACY_KEYS: the old model, effort and cap keys): a
+              carried note's non-empty `rung:` is kept, drifted or not; otherwise it gets `rung: <the
+              ladder's top rung>` when its model (failing that, the --from rollout's) is `fable` or its effort
+              is `xhigh` or `max` (trimmed, any case: the engine's startRung predicate). A recognised key is
+              then removed: the model at fable/opus/empty, the effort at low..max/empty, the cap key at any
+              value. An unrecognised value stays, with a `WARN: carry: <slug>: <key>: <value> unrecognised,
+              left in place` line on stderr. The ladder (ladder.py's load()) is read only when a carried note
+              needs its top rung; a refused file is a refusal (below). Prints one `carry <slug> <state>` or
+              `keep <slug> <state>` line per linked note, sorted by slug, each carry line followed by
+              `restamp <slug> rung=<name|kept|-> drop=<k1,k2|->` when the mapping changes the note (a rung
+              added or a key removed; `kept`: its own `rung:` stays; `-`: none written and it has none; drop=
+              in LEGACY_KEYS order, `-` for none), then `[no-change]`, `[written: <n>]` or `(dry-run)`.
+              --dry-run previews and needs no --to. Refuses (exit 2,
               nothing written, one ERROR line): a --from that is missing, unparseable, not tagged `rollout`,
               done or dropped (unless done with `superseded_by:` naming --to: a re-run), or neither paused
               nor never started; a --from with a task an undecided RACE or UNVERIFIED holds (--dry-run
-              included; the line names each held slug and `/thread:repair [[<from>]]`); a --to that is
+              included; the line names each held slug and `/thread:repair [[<from>]]`); a carried note that
+              needs the top rung when the ladder file is refused (--dry-run included; `ERROR: carry: ladder
+              file refused: <path>:<line>: <reason>`, no stdout); a --to that is
               missing, not directly in the tasks dir, untagged, done or
               dropped, whose `supersedes:` does not name --from, that is --from, or that is not never
               started; no --to without --dry-run. A failed save is exit 1 at once: the prior note is still
@@ -222,9 +240,9 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     `rung` is a non-empty rung name ([a-z][a-z0-9._-]*, never a YAML word), so a re-dispatch
                     starts there. A malformed name is an error (exit 1) and stamps nothing. An empty `rung`
                     (an integrate row passing a neutral record through, a lead-written row with none)
-                    stamps nothing. Reconcile never writes `model:` or `tier_capped:` and never removes
-                    `rung:`; stale `model:`, `effort:` and `tier_capped:` stamps are left for p13-3's
-                    `--regenerate`.
+                    stamps nothing. Reconcile never writes a legacy stamp and never removes `rung:`; stale
+                    legacy stamps (the old model, effort and cap keys) are left for a supersede's `carry`,
+                    which maps them to a rung (schedule § 0).
                     A pre-3.0.0 row (no `rung`; a call started on the tier engine that finished there, e.g.
                     a Lost-call resume of its old scriptPath) with `escalated` or `tierCapped` true proved
                     the task non-mechanical: it stamps `rung: <the ladder's top rung>` (ladder.py's load(),
@@ -1375,17 +1393,37 @@ def _rung_note(task) -> str:
 LADDER_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "ladder.py"
 
 
-def _ladder_top():
-    """(top rung name, source) of the operator's ladder, read through ladder.py's load(); (None, why) when it
-    cannot be read: a refused file (LadderError, exit 2 or 3 from the CLI) or a ladder.py that will not load."""
+def _ladder():
+    """The operator's ladder, read through ladder.py's load(): {source, rungs: [names, bottom first], error}.
+    `error` is None when it reads. When it cannot be read (a refused file: LadderError, exit 2 or 3 from the
+    CLI; or a ladder.py that will not load) `rungs` is [], `source` the path load() reads (ladder.py's
+    default_path(), '' when ladder.py itself will not load) and `error` the CLI's own words without its
+    `ladder: ` prefix: `<path>:<line>: <reason>`, or `<path>: <reason>` when no line applies."""
+    mod = None
     try:
         spec = importlib.util.spec_from_file_location("thread_ladder", LADDER_PY)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         ladder = mod.load()
-        return ladder["rungs"][-1]["name"], ladder["source"]
-    except Exception as e:  # any failure falls back to the caller's ERROR line, never a guessed rung
-        return None, str(getattr(e, "reason", "") or e) or type(e).__name__
+        return {"source": ladder["source"], "rungs": [r["name"] for r in ladder["rungs"]], "error": None}
+    except Exception as e:  # any failure is the caller's ERROR or flag, never a guessed rung
+        path = ""
+        try:
+            path = mod.default_path() if mod is not None else ""
+        except Exception:
+            pass
+        reason = str(getattr(e, "reason", "") or e) or type(e).__name__
+        line = getattr(e, "line", None)
+        where = path if line is None else f"{path}:{line}"
+        return {"source": path, "rungs": [], "error": f"{where}: {reason}" if where else reason}
+
+
+def _ladder_top():
+    """(top rung name, source) of the operator's ladder (_ladder()); (None, why) when it cannot be read."""
+    ladder = _ladder()
+    if ladder["error"]:
+        return None, ladder["error"]
+    return ladder["rungs"][-1], ladder["source"]
 
 
 def _legacy_climb(task) -> str:
@@ -1452,7 +1490,7 @@ def cmd_reconcile(args) -> int:
         # bottom. Stamped for every status, landed ones included, as the record of what it took; an
         # integrate row passes the task's own record through, and a neutral one (or a lead-written row)
         # carries no rung and stamps nothing. A drifted `rung:` (one the ladder lacks) is overwritten by
-        # the rung the call reached. Idempotent via Note.set. Never `model:` or `tier_capped:`.
+        # the rung the call reached. Idempotent via Note.set. Never a legacy stamp.
         rung = task.get("rung")
         legacy = _legacy_climb(task)
         legacy_note = ""
@@ -1465,7 +1503,7 @@ def cmd_reconcile(args) -> int:
         elif legacy:
             # A call started before 3.0.0 finished on the tier engine (a Lost-call resume re-passes its old
             # scriptPath): its row has no rung record, only the tier flags. The old reconcile made that climb
-            # durable (`model: fable` / `tier_capped:`); left unstamped, the re-dispatch would restart on the
+            # durable (a legacy model or cap stamp); left unstamped, the re-dispatch would restart on the
             # bottom rung and re-pay it. The top rung is that climb's equivalent on the ladder.
             if top is None:
                 top = _ladder_top()
@@ -2013,6 +2051,18 @@ def cmd_status(args) -> int:
     rows, index = _rows(rollout_path, rollout_note, tasks_dir)
     counts = _counts(rows)
     timeline = _timeline(rows, counts, ceiling, now)
+    # The operator's ladder (one local file read, no network): each task's `rung:` stamp, and its drift when a
+    # readable ladder lacks it. Drift is scoped to the unlanded rows (CARRIED_STATES): a merged, folded or other
+    # row keeps the rung it reached as a record, and an edit to the ladder since is no drift. A refused ladder
+    # gives no drift anywhere; its `error` is the flag.
+    ladder = _ladder()
+
+    def rung_drift(r):
+        stamp = _scalar(r["note"].get("rung"))
+        if not stamp or ladder["error"] or r["state"] not in CARRIED_STATES or stamp in ladder["rungs"]:
+            return ""
+        return stamp
+
     tasks = [{
         "slug": r["slug"],
         "status": r["status"],
@@ -2026,6 +2076,8 @@ def cmd_status(args) -> int:
         "integrating": r["integrating"],
         "waitingOn": _unsatisfied(r, index) if r["state"] == "queued" else [],
         "blockerSummary": _blocker_summary(r["note"]),
+        "rung": _scalar(r["note"].get("rung")) or None,
+        "rungDrift": rung_drift(r),
     } for r in sorted(rows, key=_rank)]
     paused = rollout_note.get("paused")
     out = {
@@ -2044,6 +2096,9 @@ def cmd_status(args) -> int:
         # Per-task started:/merged: stamps — durable on the notes, so elapsed + the rough (~) remaining
         # estimate render with no workflow run alive. null when no task has a started: stamp.
         "timeline": timeline,
+        # {source, rungs, error}: the ladder status read (built-in, or the file's path); error non-null when the
+        # file is refused, and then rungs is [] (execute halts `ladder file refused` at each call's start).
+        "ladder": ladder,
         "tasks": tasks,
     }
     print(json.dumps(out, indent=2))
@@ -2112,6 +2167,12 @@ def cmd_defer(args) -> int:
 CARRIED_STATES = {"queued", "running", "awaiting-integration", "integrating", "set-aside"}
 CLOSED_ROLLOUT_STATUSES = {"done", "dropped"}
 
+# Legacy stamps a supersede's carry maps to a rung (ADR 0029 consequences): the old model, effort and cap keys,
+# in the order a `restamp` line's drop= lists them. The only line in the skills that spells the cap key's name.
+LEGACY_KEYS = ("model", "effort", "tier_capped")
+LEGACY_MODELS = ("", "fable", "opus")                          # recognised model values (trimmed, any case)
+LEGACY_EFFORTS = ("", "low", "medium", "high", "xhigh", "max")  # recognised effort values; the cap key: any
+
 
 def _tags(note):
     return {_scalar(t).lower() for t in note.get_list("tags")}
@@ -2134,6 +2195,32 @@ def _carry_note(path: Path, role: str):
     if "rollout" not in _tags(note):
         return None, f"{role} {path.stem}: not a rollout note (its tags lack `rollout`)"
     return note, None
+
+
+def _legacy_plan(note, rollout_model) -> dict:
+    """What a supersede's carry does to one carried note's legacy stamps: {rung, drop, warn}. rung is 'top'
+    (it gets the ladder's top rung), 'kept' (its own non-empty `rung:` stays, drifted or not) or '-' (none
+    written, and it has none); drop the recognised keys present, in LEGACY_KEYS order; warn one (key, value)
+    per unrecognised value, left in place. The top-rung test is the engine's startRung predicate: the note's
+    model (failing that, the rollout's) is `fable`, or its effort is `xhigh` or `max`, trimmed, any case."""
+    model_key, effort_key, _cap_key = LEGACY_KEYS
+    known = {model_key: LEGACY_MODELS, effort_key: LEGACY_EFFORTS}
+    drop, warn, vals = [], [], {}
+    for key in LEGACY_KEYS:
+        value = note.get(key)
+        if value is None:
+            continue
+        vals[key] = _scalar(value).lower()
+        if key not in known or vals[key] in known[key]:
+            drop.append(key)
+        else:
+            warn.append((key, _scalar(value)))
+    if _scalar(note.get("rung")):
+        rung = "kept"
+    else:
+        model = vals.get(model_key) or rollout_model
+        rung = "top" if model == "fable" or vals.get(effort_key) in ("xhigh", "max") else "-"
+    return {"rung": rung, "drop": drop, "warn": warn}
 
 
 def cmd_carry(args) -> int:
@@ -2182,20 +2269,41 @@ def cmd_carry(args) -> int:
         if not fresh:
             return refuse(f"--to {dst.stem} has run ({why}): never carry into a running queue")
 
+    # Each carried note's legacy stamps, mapped before any line prints: a refused ladder is a refusal, and the
+    # ladder is read only when some carried note needs its top rung (so an unrelated bad file blocks nothing).
+    rollout_model = _scalar(src_note.get(LEGACY_KEYS[0])).lower()
     rows = []
     for path, note in sorted(linked, key=lambda pn: (pn[0].stem.lower(), str(pn[0]))):
         state = _queue_state(note)[0]
-        rows.append((path, note, state, state in CARRIED_STATES))
-        print(f"{'carry' if state in CARRIED_STATES else 'keep'} {path.stem} {state}")
+        carried = state in CARRIED_STATES
+        rows.append((path, note, state, carried, _legacy_plan(note, rollout_model) if carried else None))
+    top = None
+    if any(plan and plan["rung"] == "top" for *_rest, plan in rows):
+        ladder = _ladder()
+        if ladder["error"]:
+            return refuse(f"ladder file refused: {ladder['error']}")
+        top = ladder["rungs"][-1]
+    for path, _note, _state, _carried, plan in rows:
+        for key, value in (plan["warn"] if plan else []):
+            print(f"WARN: carry: {path.stem}: {key}: {value} unrecognised, left in place", file=sys.stderr)
+    for path, _note, state, carried, plan in rows:
+        print(f"{'carry' if carried else 'keep'} {path.stem} {state}")
+        if carried and (plan["rung"] == "top" or plan["drop"]):
+            rung = top if plan["rung"] == "top" else plan["rung"]
+            print(f"restamp {path.stem} rung={rung} drop={','.join(plan['drop']) or '-'}")
     if args.dry_run:
         print("(dry-run)")
         return 0
     written = 0
-    for path, note, _state, carried in rows:
+    for path, note, _state, carried, plan in rows:
         if not carried:
             continue
         note.set("rollout", f'"[[{dst.stem}]]"')
         for key in ("owner", "integrating", "wave"):
+            note.remove(key)
+        if plan["rung"] == "top":
+            note.set("rung", top)
+        for key in plan["drop"]:
             note.remove(key)
         if not note.dirty:
             continue

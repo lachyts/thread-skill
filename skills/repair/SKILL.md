@@ -164,8 +164,17 @@ routing* takes a fresh call behind § 3.7's warning.
 
 Agent-fixable versus input-gated is judged from the feedback: a test failure, a missed case or a concrete
 review note is agent-fixable; "human-decided", "supplied out-of-band", "needs a value", "ambiguous" or
-"design choice" is input-gated. When torn, ask: cheaper than looping on the same wall. A `tier_capped:` note
-is never input-gated: its block is the quota ceiling, so hand it back once the higher tier's quota returns.
+"design choice" is input-gated. When torn, ask: cheaper than looping on the same wall.
+
+**Rungs (ADR 0029).** A Rung drift (status § 3) is never input-gated and needs no write: report it with the
+ladder's source. The task's next call starts on the top rung, and reconcile overwrites the stamp with the rung
+it reaches. How a block on the top rung is triaged stays open (ADR 0029 Consequences).
+
+**A refused ladder** (status's Ladder refused flag). Repair never edits `~/.config/thread/ladder.toml`; under
+it, § 3's vault work, § 4's hand-back routes (the `hand-back` re-entry verb and its relabel and raise writes, none of
+which start an agent) and § 5's defers (on Lachy's choice) still run. Repair stops at § 4's **Hand-off**: no
+execute loop and no § 6. Name the file and the line its error gives, and say the queue resumes at the next
+`/thread:execute [[<rollout>]]` once the file reads.
 
 ### 3. Act on what doesn't need a task call
 
@@ -294,7 +303,8 @@ there is nothing to clear. Per stage:
   retrying it: surface it with its new diagnosis and offer *more guidance and one more retry* / *defer it*
   (§ 5) / *leave it set aside*. Don't loop.
 - **Hand-off, when no lead is live and no pause stands**, and never while a RACE / UNVERIFIED escalation is
-  undecided (§ 3c; report the hold and stop there): execute's queue loop, entered at its §4.5 resume
+  undecided (§ 3c; report the hold and stop there) or the ladder file is refused (§ 2; name the file and stop
+  there): execute's queue loop, entered at its §4.5 resume
   (*Cold resume*): execute § 2.5 first (then § 2.6), then `reconcile-rollout.py resume`, then the loop with
   `--running ""` (this session holds no task call). Execute's § 2.7 pushed-base gate (entry points only)
   does not run on this hand-off; the next `/thread:execute [[<rollout>]]` runs it. Under a live queue the

@@ -51,7 +51,7 @@ Subcommands:
       What the lead needs to (re-)enter a set-aside or restarted task: status, scope, pr, readyAt, rung (the
       integrate call's rung record when no approving row is at hand: {startRung: "", rung: <the note's
       `rung:` when it is a rung name, else "">, climbs: []}, so a note with no `rung:`, or only stale
-      `model:` / `tier_capped:` stamps, gives the neutral record), branch (and worktreePath with --repo);
+      legacy stamps, gives the neutral record), branch (and worktreePath with --repo);
       the source run (the newer, by its
       `### Run N (<stamp>)` heading, of the latest `## Blocker diagnosis` and `## Review-blocked feedback`
       runs; a tie goes to review-blocked) parsed through a parseIntegrationMarker port (markerStage,

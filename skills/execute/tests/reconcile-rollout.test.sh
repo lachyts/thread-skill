@@ -89,7 +89,7 @@ check "blocked: content"                "env mismatch"                          
 refute "blocked: no pr written (empty)" "pr:"                                          "$TMP/task-blocked.md"
 check "blocked: the drifted rung: is overwritten with the reached rung" "rung: opus-xhigh" "$TMP/task-blocked.md"
 refute "blocked: the drifted name is gone"       "rung: gone"                         "$TMP/task-blocked.md"
-check "blocked: a stale model: stamp is left alone (p13-3 regenerates it)" "model: fable" "$TMP/task-blocked.md"
+check "blocked: a stale model: stamp is left alone (a supersede's carry maps it)" "model: fable" "$TMP/task-blocked.md"
 check "blocked: a stale tier_capped: stamp is left alone"  "tier_capped: review"      "$TMP/task-blocked.md"
 case "$out" in *"task-blocked: status=blocked rung=opus-xhigh climbs=implement:opus-xhigh->opus-xhigh rung-drift=gone [written]"*) echo "ok   - blocked: the line shows the no-op climb and the drift, no from= when the call never left its rung" ;;
   *) echo "FAIL - blocked: reconcile line (got: $out)"; fail=1 ;; esac
