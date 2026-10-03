@@ -7,9 +7,9 @@
 # labels, update-branch, the user, hold comments and per-SHA check-runs and status. Every handed path goes through a symlinked alias of the temp dir, so the
 # physical-path handling is exercised on every run. Hang stubs run a non-exec `sleep 40 | cat`; hang cases
 # pass LAND_TIMEOUT=$HANG (4 s: every call in the case shares it, the normal ones before and after the hang
-# too) and assert elapsed under $HANG_BOUND. Every other case runs under the 15 s suite default, so a fake
-# gh slowed by `make test`'s concurrent suites has room (a `pr merge` past 2 s once read as `queued: needs
-# merge`). Hermetic: HOME, the global git config and TMPDIR are temp, and the caller's GIT_DIR
+# too) and assert elapsed under $HANG_BOUND. Case 35 sets its own LAND_TIMEOUT and LAND_DEADLINE to test the
+# deadline. Every other case runs under the 15 s suite default, so a fake gh slowed by `make test`'s
+# concurrent suites has room (a `pr merge` past 2 s once read as `queued: needs merge`). Hermetic: HOME, the global git config and TMPDIR are temp, and the caller's GIT_DIR
 # & co. are unset. bash 3.2-compatible (macOS).
 set -uo pipefail
 cd "$(dirname "$0")/.."

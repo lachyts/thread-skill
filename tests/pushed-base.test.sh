@@ -236,8 +236,8 @@ mkdir -p "$S/docs/adr"; cp "$C/docs/adr/0031-x.md" "$S/docs/adr/0031-x.md"
 g -C "$S" add -A; g -C "$S" commit -q -m "add adr 0031 (#99)"; g -C "$S" push -q origin master
 run "$C" ""
 ok "$(git -C "$C" rev-list --count origin/master..master)" 1 "13b. local master still ahead by ancestry (precondition)"
-ok "$rc|$out" "0|pushed" "13b. landed by squash (cherry -) → 0"
-has "$err" "pushed-base: note: local master in $C is 1 commit(s) ahead of origin/master, but each is already on origin/master by content" "13b. … a note, not a block"
+ok "$rc|$out" "0|pushed" "13b. landed by squash → 0"
+has "$err" "pushed-base: note: local master in $C is 1 commit(s) ahead of origin/master, but their content is already on origin/master" "13b. … a note, not a block"
 has "$err" "git -C $C reset --keep origin/master" "13b. … naming reset --keep (master checked out)"
 lacks "$err" "stranded" "13b. … no stranded line"
 
@@ -291,19 +291,41 @@ run "$C" ""
 ok "$rc|${out:-<empty>}" "3|<empty>" "13f. 4000 stranded commits → 3"
 has "$err" "pushed-base: local master in $C is 4000 commit(s) ahead of origin/master: rollout worktrees branch" "13f. … the block header, not the landed-by-content note"
 has "$err" "land them on origin/master by PR" "13f. … the land-by-PR remedy"
-lacks "$err" "already on origin/master by content" "13f. … no landed-by-content note"
+lacks "$err" "already on origin/master" "13f. … no landed-by-content note"
 
 # 13g. an evil merge: local master merges branch f with --no-ff and the merge itself adds evil.txt; f's one
 # commit is then cherry-picked (-x, a new SHA) onto origin/master. `git cherry` skips merges, so it once printed only `- f1`
 # and the set read as landed by content, with a reset remedy that would drop evil.txt.
 fresh
 g -C "$C" checkout -q -b f && commit "$C" "f1" f.txt && g -C "$C" checkout -q master
-g -C "$C" merge -q --no-ff --no-commit f && echo evil > "$C/evil.txt" && g -C "$C" add evil.txt && g -C "$C" commit -q -m "merge f"
+g -C "$C" merge -q --no-ff --no-commit f >/dev/null && echo evil > "$C/evil.txt" && g -C "$C" add evil.txt && g -C "$C" commit -q -m "merge f"
 g -C "$S" fetch -q "$C" f && g -C "$S" cherry-pick -x FETCH_HEAD >/dev/null && g -C "$S" push -q origin master
 ok "$(git -C "$C" fetch -q && git -C "$C" cherry origin/master master)" "- $(git -C "$C" rev-parse f)" "13g. git cherry prints only f1's - line (precondition)"
 run "$C" ""
 ok "$rc|${out:-<empty>}" "3|<empty>" "13g. a merge commit carrying new content → 3"
-lacks "$err" "already on origin/master by content" "13g. … no landed-by-content note"
+lacks "$err" "already on origin/master" "13g. … no landed-by-content note"
+
+# 13h. landed by a cherry-pick, then reverted on origin: the patch matches, the content does not → 3
+fresh
+commit "$C" "add x" x.txt
+g -C "$S" fetch -q "$C" master && g -C "$S" cherry-pick -x FETCH_HEAD >/dev/null && g -C "$S" revert --no-edit HEAD >/dev/null
+g -C "$S" push -q origin master
+run "$C" ""
+ok "$rc|${out:-<empty>}" "3|<empty>" "13h. cherry-picked then reverted upstream → 3"
+lacks "$err" "already on origin/master" "13h. … no landed-by-content note"
+
+# 13i. an empty local commit while origin gains an unrelated empty one: both patch-empty, still nothing to compare → 3
+fresh
+g -C "$C" commit -q --allow-empty -m "local marker"
+g -C "$S" commit -q --allow-empty -m "trigger CI"; g -C "$S" push -q origin master
+run "$C" ""
+ok "$rc|${out:-<empty>}" "3|<empty>" "13i. an empty commit beside an empty upstream one → 3"
+
+# 13j. a stderr line on a successful count (GIT_TRACE) never reads as a failure: an in-sync clone → 0
+fresh
+pb "$C" master; ok "$rc|$out" "0|pushed" "13j. in sync → 0 (precondition)"
+out=$(cd "$tmp" && env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" GIT_TRACE=1 bash "$script" "$C" master 2>"$tmp/err"); rc=$?
+ok "$rc|$out" "0|pushed" "13j. in sync under GIT_TRACE=1 → 0"
 
 # ======== the clone set ==================================================================================
 # 14. rollout clone in sync, primary (same origin) ahead with an ADR, given via --also
