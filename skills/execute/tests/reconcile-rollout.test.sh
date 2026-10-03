@@ -41,16 +41,24 @@ mknote task-planblocked in_progress
 
 cat > "$TMP/result.json" <<EOF
 { "rolloutSlug": "test-rollout", "tasks": [
-  { "slug": "task-approved",     "scope": "single-file",  "status": "review",         "prUrl": "https://github.com/o/r/pull/1", "reviewRoundsUsed": 1, "planRoundsUsed": 0 },
-  { "slug": "task-revised",      "scope": "cross-cutting","status": "review",         "prUrl": "https://github.com/o/r/pull/2", "reviewRoundsUsed": 3, "planRoundsUsed": 2, "model": "fable", "escalated": true, "escalatedAt": "review" },
+  { "slug": "task-approved",     "scope": "single-file",  "status": "review",         "prUrl": "https://github.com/o/r/pull/1", "reviewRoundsUsed": 1, "planRoundsUsed": 0, "startRung": "", "rung": "", "climbs": [], "rungDrift": "", "ran": [] },
+  { "slug": "task-revised",      "scope": "cross-cutting","status": "review",         "prUrl": "https://github.com/o/r/pull/2", "reviewRoundsUsed": 3, "planRoundsUsed": 2, "startRung": "opus-high", "rung": "opus-xhigh", "climbs": [{ "stage": "review", "from": "opus-high", "to": "opus-xhigh" }], "rungDrift": "", "ran": [] },
   { "slug": "task-reviewblocked","scope": "single-file",  "status": "review-blocked", "prUrl": "https://github.com/o/r/pull/3", "reviewRoundsUsed": 4, "reviewFeedback": ["bound assertion is a no-op", "missed sibling site in foo.py"] },
-  { "slug": "task-blocked",      "scope": "single-file",  "status": "blocked",        "prUrl": "", "blockerDiagnosis": "verifier never went green after 3 tries; root cause is an env mismatch.", "model": "fable", "escalated": true, "escalatedAt": "implement" },
+  { "slug": "task-blocked",      "scope": "single-file",  "status": "blocked",        "prUrl": "", "blockerDiagnosis": "verifier never went green after 3 tries; root cause is an env mismatch.", "startRung": "opus-xhigh", "rung": "opus-xhigh", "climbs": [{ "stage": "implement", "from": "opus-xhigh", "to": "opus-xhigh" }], "rungDrift": "gone" },
   { "slug": "task-planblocked",  "scope": "cross-cutting","status": "plan-blocked",   "prUrl": "", "blockerDiagnosis": "plan not approved after 3 rounds. Accumulated feedback: ..." }
 ] }
 EOF
 
+# task-blocked carries a drifted rung: from an earlier stamp the ladder no longer has
+python3 - "$TMP/task-blocked.md" <<'PY2'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1])
+p.write_text(p.read_text().replace("priority: normal\n", "priority: normal\nrung: gone\nmodel: fable\ntier_capped: review\n", 1))
+PY2
+
 echo "== reconcile =="
-python3 "$SCRIPT" reconcile --result "$TMP/result.json" --tasks-dir "$TMP" || { echo "FAIL - reconcile exited non-zero"; fail=1; }
+out=$(python3 "$SCRIPT" reconcile --result "$TMP/result.json" --tasks-dir "$TMP" 2>&1) || { echo "FAIL - reconcile exited non-zero"; fail=1; }
+printf '%s\n' "$out"
 
 check "approved: status review"         "status: review"                              "$TMP/task-approved.md"
 check "approved: pr unquoted"           "pr: https://github.com/o/r/pull/1"            "$TMP/task-approved.md"
@@ -61,8 +69,14 @@ check "approved: pr after owner"        "owner: execute-test"                   
 check "revised: status review"          "status: review"                              "$TMP/task-revised.md"
 check "revised: review_rounds_used 3"   "review_rounds_used: 3"                        "$TMP/task-revised.md"
 check "revised: plan_rounds_used 2"     "plan_rounds_used: 2"                          "$TMP/task-revised.md"
-check "revised: escalation stamped on landed task" "model: fable"                     "$TMP/task-revised.md"
-refute "approved: no model stamp (not escalated)"  "model:"                           "$TMP/task-approved.md"
+check "revised: the reached rung stamped on a landed task" "rung: opus-xhigh"          "$TMP/task-revised.md"
+refute "revised: never a model stamp"            "model:"                             "$TMP/task-revised.md"
+refute "approved: an empty rung stamps nothing"  "rung:"                              "$TMP/task-approved.md"
+refute "approved: no model stamp"                "model:"                             "$TMP/task-approved.md"
+case "$out" in *"task-revised: status=review pr=https://github.com/o/r/pull/2 rung=opus-xhigh from=opus-high climbs=review:opus-high->opus-xhigh [written]"*) echo "ok   - revised: the line shows the rung, where it started and the climb" ;;
+  *) echo "FAIL - revised: reconcile line (got: $out)"; fail=1 ;; esac
+case "$out" in *"task-approved: status=review pr=https://github.com/o/r/pull/1 [written]"*) echo "ok   - approved: no rung on the line" ;;
+  *) echo "FAIL - approved: reconcile line (got: $out)"; fail=1 ;; esac
 
 check "review-blocked: status"          "status: review-blocked"                       "$TMP/task-reviewblocked.md"
 check "review-blocked: pr"              "pr: https://github.com/o/r/pull/3"            "$TMP/task-reviewblocked.md"
@@ -73,10 +87,92 @@ check "blocked: status"                 "status: blocked"                       
 check "blocked: heading"                "## Blocker diagnosis"                         "$TMP/task-blocked.md"
 check "blocked: content"                "env mismatch"                                 "$TMP/task-blocked.md"
 refute "blocked: no pr written (empty)" "pr:"                                          "$TMP/task-blocked.md"
-check "blocked: escalation stamped (re-dispatch starts at fable)" "model: fable"      "$TMP/task-blocked.md"
+check "blocked: the drifted rung: is overwritten with the reached rung" "rung: opus-xhigh" "$TMP/task-blocked.md"
+refute "blocked: the drifted name is gone"       "rung: gone"                         "$TMP/task-blocked.md"
+check "blocked: a stale model: stamp is left alone (p13-3 regenerates it)" "model: fable" "$TMP/task-blocked.md"
+check "blocked: a stale tier_capped: stamp is left alone"  "tier_capped: review"      "$TMP/task-blocked.md"
+case "$out" in *"task-blocked: status=blocked rung=opus-xhigh climbs=implement:opus-xhigh->opus-xhigh rung-drift=gone [written]"*) echo "ok   - blocked: the line shows the no-op climb and the drift, no from= when the call never left its rung" ;;
+  *) echo "FAIL - blocked: reconcile line (got: $out)"; fail=1 ;; esac
 
 check "plan-blocked: status"            "status: plan-blocked"                         "$TMP/task-planblocked.md"
 check "plan-blocked: heading"           "## Plan-blocked feedback"                     "$TMP/task-planblocked.md"
+
+echo "== a malformed rung name is an ERROR and stamps nothing =="
+mknote task-badrung in_progress
+for bad in '"Opus-XHigh"' '"yes"' '["opus-high"]' '"opus high"'; do
+  printf '{"rolloutSlug":"t","tasks":[{"slug":"task-badrung","scope":"single-file","status":"blocked","prUrl":"","blockerDiagnosis":"x","rung":%s}]}' "$bad" > "$TMP/bad.json"
+  if berr=$(python3 "$SCRIPT" reconcile --result "$TMP/bad.json" --tasks-dir "$TMP" 2>&1 >/dev/null); then
+    echo "FAIL - bad rung $bad: reconcile exited 0"; fail=1
+  else
+    case "$berr" in *"ERROR: task-badrung: rung "*"is not a rung name"*) echo "ok   - bad rung $bad: an ERROR naming it, exit 1" ;;
+      *) echo "FAIL - bad rung $bad: stderr (got: $berr)"; fail=1 ;; esac
+  fi
+  refute "bad rung $bad: no rung: stamped" "rung:" "$TMP/task-badrung.md"
+done
+check "bad rung: the rest of the row is still written" "status: blocked" "$TMP/task-badrung.md"
+
+echo "== a pre-3.0.0 row (tier flags, no rung) maps an escalation to the ladder's top rung =="
+# A call started on the tier engine can finish there (a Lost-call resume re-passes its old scriptPath). Its
+# row carries model/escalated/tierCapped and no rung record. HOME is pinned so ladder.py reads this test's
+# ladder file, never the operator's.
+LH="$TMP/legacy-home"; mkdir -p "$LH"
+mknote task-legacy-esc in_progress
+mknote task-legacy-cap in_progress
+mknote task-legacy-flat in_progress
+cat > "$TMP/legacy.json" <<'EOF'
+{ "rolloutSlug": "t", "tasks": [
+  { "slug": "task-legacy-esc",  "scope": "single-file", "status": "blocked", "prUrl": "", "blockerDiagnosis": "red after the fable takeover", "model": "fable", "escalated": true, "escalatedAt": "implement", "tierCapped": false, "tierCappedAt": "" },
+  { "slug": "task-legacy-cap",  "scope": "single-file", "status": "review", "prUrl": "https://github.com/o/r/pull/9", "reviewRoundsUsed": 1, "model": "opus", "escalated": false, "escalatedAt": "", "tierCapped": true, "tierCappedAt": "implement" },
+  { "slug": "task-legacy-flat", "scope": "single-file", "status": "review", "prUrl": "https://github.com/o/r/pull/8", "reviewRoundsUsed": 1, "model": "opus", "escalated": false, "escalatedAt": "", "tierCapped": false, "tierCappedAt": "" }
+] }
+EOF
+lout=$(HOME="$LH" python3 "$SCRIPT" reconcile --result "$TMP/legacy.json" --tasks-dir "$TMP" 2>"$TMP/legacy.err"); lrc=$?
+lerr=$(cat "$TMP/legacy.err")
+[ "$lrc" -eq 0 ] && echo "ok   - legacy: a mappable legacy row is a warning, exit 0" || { echo "FAIL - legacy: exit $lrc ($lerr)"; fail=1; }
+check  "legacy escalated: stamped the built-in ladder's top rung" "rung: opus-xhigh"   "$TMP/task-legacy-esc.md"
+check  "legacy tier-capped: stamped the top rung too"             "rung: opus-xhigh"   "$TMP/task-legacy-cap.md"
+refute "legacy, no climb: nothing stamped"                        "rung:"              "$TMP/task-legacy-flat.md"
+refute "legacy: never a model stamp"                              "model:"             "$TMP/task-legacy-esc.md"
+refute "legacy: never a tier_capped stamp"                        "tier_capped:"       "$TMP/task-legacy-cap.md"
+check  "legacy: the rest of the row is written"                   "status: blocked"    "$TMP/task-legacy-esc.md"
+case "$lerr" in *"WARNING: task-legacy-esc: a pre-3.0.0 row (escalated, no rung) — stamped rung: opus-xhigh, the top rung of the ladder (built-in)"*) echo "ok   - legacy escalated: a WARNING naming the slug and the rung" ;;
+  *) echo "FAIL - legacy escalated: WARNING (got: $lerr)"; fail=1 ;; esac
+case "$lerr" in *"WARNING: task-legacy-cap: a pre-3.0.0 row (tier-capped, no rung)"*) echo "ok   - legacy tier-capped: a WARNING naming the slug" ;;
+  *) echo "FAIL - legacy tier-capped: WARNING (got: $lerr)"; fail=1 ;; esac
+case "$lerr" in *task-legacy-flat*) echo "FAIL - legacy, no climb: warned (got: $lerr)"; fail=1 ;; *) echo "ok   - legacy, no climb: no warning" ;; esac
+case "$lout" in *"task-legacy-esc: status=blocked rung=opus-xhigh (pre-3.0.0 row, escalated) [written]"*) echo "ok   - legacy escalated: the line shows the mapped rung" ;;
+  *) echo "FAIL - legacy escalated: reconcile line (got: $lout)"; fail=1 ;; esac
+# The operator's ladder file decides the top rung.
+mkdir -p "$LH/.config/thread"
+cat > "$LH/.config/thread/ladder.toml" <<'EOF'
+[[rung]]
+name = "opus-high"
+model = "opus"
+effort = "high"
+judge = "high"
+review = "xhigh"
+
+[[rung]]
+name = "fable-high"
+model = "fable"
+effort = "high"
+judge = "xhigh"
+review = "max"
+EOF
+mknote task-legacy-esc in_progress
+HOME="$LH" python3 "$SCRIPT" reconcile --result "$TMP/legacy.json" --tasks-dir "$TMP" >/dev/null 2>&1 || { echo "FAIL - legacy (file): exit"; fail=1; }
+check "legacy escalated: the ladder file's top rung" "rung: fable-high" "$TMP/task-legacy-esc.md"
+# A refused ladder file: an ERROR naming the slug, exit 1, nothing stamped.
+printf '[[rung]]\nname = "Opus"\n' > "$LH/.config/thread/ladder.toml"
+mknote task-legacy-esc in_progress
+if berr=$(HOME="$LH" python3 "$SCRIPT" reconcile --result "$TMP/legacy.json" --tasks-dir "$TMP" 2>&1 >/dev/null); then
+  echo "FAIL - legacy (refused ladder): reconcile exited 0"; fail=1
+else
+  case "$berr" in *"ERROR: task-legacy-esc: a pre-3.0.0 row (escalated, no rung) — the ladder could not be read"*) echo "ok   - legacy (refused ladder): an ERROR naming the slug, exit 1" ;;
+    *) echo "FAIL - legacy (refused ladder): stderr (got: $berr)"; fail=1 ;; esac
+fi
+refute "legacy (refused ladder): no rung: stamped" "rung:" "$TMP/task-legacy-esc.md"
+check  "legacy (refused ladder): the rest of the row is written" "status: blocked" "$TMP/task-legacy-esc.md"
 
 echo "== idempotency (re-run must not duplicate sections) =="
 python3 "$SCRIPT" reconcile --result "$TMP/result.json" --tasks-dir "$TMP" >/dev/null

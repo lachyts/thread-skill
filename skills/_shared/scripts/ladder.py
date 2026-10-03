@@ -68,7 +68,7 @@ import re
 import stat
 import sys
 
-# Must equal the engine's model set (task.workflow.js TIER_RANK's keys); tests/ladder.test.mjs pins it.
+# Must equal the engine's model set (task.workflow.js LADDER_MODELS); tests/ladder.test.mjs pins it.
 MODELS = ("opus", "fable")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 FIELDS = ("name", "model", "effort", "judge", "review")
@@ -80,7 +80,8 @@ BUILT_IN = (
 )
 
 # A rung name is later written raw into YAML frontmatter (`rung: <name>`), so it stays a plain lowercase
-# token that YAML reads back as the same string.
+# token that YAML reads back as the same string. The engine (LADDER_NAME, LADDER_YAML_WORDS) and
+# reconcile-rollout.py (is_rung_name) apply the same rule; tests/ladder.test.mjs L9 pins that they agree.
 NAME_RE = re.compile(r"[a-z][a-z0-9._-]*\Z")
 YAML_WORDS = frozenset(("true", "false", "yes", "no", "on", "off", "y", "n", "null"))
 

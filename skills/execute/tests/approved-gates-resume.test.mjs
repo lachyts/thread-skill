@@ -9,7 +9,7 @@
 // 2. The whole-run replay prefix: run A (no approvedGates) stops gate-pending; run B (A's args plus
 //    task.approvedGates = A's gatedInputs, nothing else) must replay A's calls as a byte-identical prefix
 //    (label, prompt, model, effort, schema, phase), make no second plan call, and go on past the sign-off.
-//    A replayed implementer or reviser stop is answered by a same-tier continuation (`<label> signed`,
+//    A replayed implementer or reviser stop is answered by a same-rung continuation (`<label> signed`,
 //    the stopped prompt plus SIGNED_GATES_RESUME), never read as hardness or a block. An agent that finds
 //    gates one after another (A stops for G; B's continuation stops for G2; C) is answered at each sign-off:
 //    C replays B as a byte-identical prefix and goes on with `<label> signed 2`. Then the E1/E2 bounds: a
@@ -30,6 +30,9 @@ const G = 'spend: Replicate API — cap USD 30'
 const G2 = 'credential: PROD_API_KEY'
 const PLAN_G = `Planned on: abc\n### Files to modify\n- x.js: the change\n### Gated inputs\n- ${G}\n### Risks / unknowns\n- none`
 const PLAN_NONE = 'Planned on: abc\n### Files to modify\n- x.js: the change\n### Gated inputs\nNone\n### Risks / unknowns\n- none'
+// The built-in ladder's two rungs: a task starts on BOTTOM by default; TOP is the ceiling.
+const BOTTOM = 'opus-high'
+const TOP = 'opus-xhigh'
 
 // SIGNED_GATES_RESUME is p12-14's: absent from an engine without the continuation, so it loads lazily and
 // the tests that need it fail with a named assertion instead of crashing the file.
@@ -37,7 +40,7 @@ const SG = (() => { try { return loadEngine(['SIGNED_GATES_RESUME']).SIGNED_GATE
 
 const mkTask = (over = {}) => ({
   slug: SLUG, taskPath: `/vault/Tasks/${SLUG}.md`, scope: 'cross-cutting', planGate: false,
-  maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, model: 'opus', ...over,
+  maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, rung: BOTTOM, ...over,
 })
 const mkArgs = (taskOver = {}, over = {}) => ({
   rolloutSlug: 'proj-rollout-2026-10-02', repoPath: '/repo', verifier: 'make test', date: '2026-10-02',
@@ -47,6 +50,7 @@ const mkArgs = (taskOver = {}, over = {}) => ({
 const green = (label) => ({ verified: true, blocked: false, escalate: false, prUrl: PR, branch: BR, worktreePath: WT, blockerDiagnosis: '', summary: `${label} done` })
 const red = { verified: false, blocked: false, escalate: true, prUrl: '', branch: BR, worktreePath: WT, blockerDiagnosis: 'one-shot red', summary: 'tried' }
 const gated = (gates) => ({ verified: false, blocked: true, escalate: false, prUrl: '', branch: BR, worktreePath: WT, blockerDiagnosis: 'stopped before a gated action', summary: '', gatedInputs: gates })
+const plainBlock = { verified: false, blocked: true, escalate: false, prUrl: '', branch: BR, worktreePath: WT, blockerDiagnosis: 'red after the loop', summary: '' }
 const approve = { verdict: 'approve', feedback: [] }
 const changes = (f) => ({ verdict: 'changes', feedback: [f] })
 const plan = (text) => ({ ready: true, blocked: false, blockerCause: '', plan: text })
@@ -95,7 +99,7 @@ async function resumeAfterSignOff(argsA, script, next) {
 }
 // A→B→C: an agent that finds gates one after another. A stops for G; B (G signed) replays A and its
 // continuation stops for G2; C (G and G2 signed, B's args otherwise) must replay B's calls as a byte-identical
-// prefix and go on past the second sign-off — never escalated, never blocked. Returns the three runs and C's
+// prefix and go on past the second sign-off — never climbed, never blocked. Returns the three runs and C's
 // calls after B's prefix.
 async function resumeTwiceAfterSignOff(argsA, script, next) {
   const A = await run(argsA, script)
@@ -144,27 +148,32 @@ const FRAGMENTS = [
   'worktreeSetup', 'taskTreeSetup', 'branchTreeSetup', 'coldEntryBlock', 'gateOverride',
   'integrationMergeStep', 'integrationMergeReads', 'integrationJudgeCheck', 'landedBlock',
 ]
-const E = loadEngine([...BUILDERS, ...FRAGMENTS, 'tierCap', 'taskModel'])
+const E = loadEngine([...BUILDERS, ...FRAGMENTS, 'rungState', 'escalate', 'rungRecord'])
 
 const sha = (c) => c.repeat(40)
 const HIST = [{ round: 1, feedback: ['own-run fix'] }, { round: 2, feedback: ['keep their rename'], stage: 'integration' }]
 const LANDED = [{ prUrl: 'https://github.com/o/r/pull/5', title: 'theirs', files: ['a.js'], taskPath: '/vault/Tasks/theirs.md' }]
 const SENTINEL_GATES = ['spend: SENTINEL-p12-14 — cap USD 7', 'credential: SENTINEL-KEY']
-// st as converge() builds it, for the three rungs: an uncapped opus first pass, fable, and a capped opus
-// task whose escalation was suppressed.
+// st as converge() builds it (rungState, then escalate), for the three shapes a prompt can see: a first pass
+// on the bottom rung, after a real climb, and on the top rung after a climb recorded as a no-op.
+const stateOf = (rung, stages) => {
+  const st = E.rungState({ slug: SLUG, rung }, {})
+  for (const stage of stages) E.escalate(st, SLUG, stage)
+  return st
+}
 const STATES = {
-  opus: { tier: 'opus', cap: 'fable', escalated: false, escalatedAt: '', capSuppressed: false, capSuppressedAt: '' },
-  fable: { tier: 'fable', cap: 'fable', escalated: true, escalatedAt: 'implement', capSuppressed: false, capSuppressedAt: '' },
-  capped: { tier: 'opus', cap: 'opus', escalated: false, escalatedAt: '', capSuppressed: true, capSuppressedAt: 'implement' },
+  bottom: stateOf(BOTTOM, []),
+  climbed: stateOf(BOTTOM, ['plan', 'implement']),
+  top: stateOf(TOP, ['plan', 'implement', 'review']),
 }
 const ARG_VARIANTS = [
   { name: 'base', args: {}, task: {} },
-  { name: 'maxTier', args: { maxTier: 'opus' }, task: {} },
+  { name: 'ladder', args: { ladder: { source: '/home/x/.config/thread/ladder.toml', rungs: [{ name: 'solo', model: 'fable', effort: 'high', judge: 'high', review: 'max' }] } }, task: {} },
   { name: 'envBootstrap', args: { envBootstrap: 'poetry env use 3.11 && poetry install' }, task: {} },
   { name: 'defaultBranch', args: { defaultBranch: 'master' }, task: {} },
   { name: 'knownBaselineFailures', args: { knownBaselineFailures: ['test_x — env (pre-existing)'] }, task: {} },
   { name: 'ignoreGate', args: {}, task: { ignoreGate: true } },
-  { name: 'effort', args: {}, task: { effort: 'max' } },
+  { name: 'legacy model and effort', args: {}, task: { model: 'fable', effort: 'max' } },
 ]
 
 // Every render the engine can produce from a task object, as (E, task, a, st, c) → string. `c` carries the
@@ -211,7 +220,7 @@ function approvedGatesLeaks(E) {
               const I = {
                 prUrl: PR, branch: BR, worktreePath: WT, headSha: sha('a'), taskBase: sha('b'), mainSha: sha('c'),
                 trouble: ['conflict'], landed, plan: planText, reviewHistory: HIST, reviewRoundsUsed: 2,
-                rung: { model: st.tier, escalated: st.escalated, escalatedAt: st.escalatedAt, tierCapped: st.capSuppressed, tierCappedAt: st.capSuppressedAt },
+                rung: E.rungRecord(st),
               }
               const c = {
                 prior, plan: planText, I, history: prior ? HIST : [],
@@ -275,7 +284,7 @@ test('S-plan: a plan-gated stop resumes on the signed plan — the implementer r
   assert.equal(B.row.planRoundsUsed, 1)
 })
 
-test('S-plan-r2: a gate declared on a revised plan — the revise and the escalation sit inside the prefix', async () => {
+test('S-plan-r2: a gate declared on a revised plan — the revise and the climb sit inside the prefix', async () => {
   const script = {
     [`plan:${SLUG}`]: plan(PLAN_NONE),
     [`plan-judge:${SLUG} r1`]: changes('declare the Replicate spend'),
@@ -286,13 +295,13 @@ test('S-plan-r2: a gate declared on a revised plan — the revise and the escala
   }
   const { A, B, tail } = await resumeAfterSignOff(mkArgs({ planGate: true }), script, `implement:${SLUG}`)
   assert.deepEqual(A.labels, [`plan:${SLUG}`, `plan-judge:${SLUG} r1`, `plan-revise:${SLUG} r2`, `plan-judge:${SLUG} r2`])
-  assert.equal(A.calls[2].model, 'fable', 'the plan escalation happened in A')
+  assert.equal(A.calls[2].effort, 'xhigh', 'the plan climb happened in A')
   assert.ok(tail[0].prompt.includes(PLAN_G))
-  assert.equal(tail[0].model, 'fable')
-  assert.deepEqual([B.row.model, B.row.escalated, B.row.escalatedAt, B.row.planRoundsUsed], ['fable', true, 'plan', 2])
+  assert.equal(tail[0].effort, 'xhigh', 'the implementer runs on the rung A reached')
+  assert.deepEqual([B.row.rung, B.row.climbs, B.row.planRoundsUsed], [TOP, [{ stage: 'plan', from: BOTTOM, to: TOP }], 2])
 })
 
-test('S-impl: an opus implementer stop resumes past the sign-off at opus — never escalated', async () => {
+test('S-impl: a bottom-rung implementer stop resumes past the sign-off on its rung — never climbed', async () => {
   const script = {
     [`implement:${SLUG}`]: gated([G]),
     [`implement:${SLUG} signed`]: green(`implement:${SLUG} signed`),
@@ -301,27 +310,27 @@ test('S-impl: an opus implementer stop resumes past the sign-off at opus — nev
   const { A, B } = await resumeAfterSignOff(mkArgs(), script, `implement:${SLUG} signed`)
   assert.deepEqual(A.labels, [`implement:${SLUG}`])
   assert.deepEqual(B.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `review:${SLUG} r1`])
-  assert.ok(B.labels.every((l) => !l.includes('@fable')), 'no fable takeover')
-  assert.deepEqual([B.row.model, B.row.escalated], ['opus', false])
+  assert.ok(B.labels.every((l) => !l.includes('@')), 'no takeover')
+  assert.deepEqual([B.row.rung, B.row.climbs], [BOTTOM, []])
   assertContinuation(B, `implement:${SLUG}`)
-  assert.equal(B.calls[1].model, 'opus')
+  assert.deepEqual([B.calls[1].model, B.calls[1].effort], ['opus', 'high'])
   noGateTextInPrompts(B, [G])
 })
 
-test('S-impl-fable: a fable implementer stop resumes past the sign-off — never set aside blocked', async () => {
+test('S-impl-top: a top-rung implementer stop resumes past the sign-off — never set aside blocked', async () => {
   const script = {
     [`implement:${SLUG}`]: gated([G]),
     [`implement:${SLUG} signed`]: green(`implement:${SLUG} signed`),
     [`review:${SLUG} r1`]: approve,
   }
-  const { B } = await resumeAfterSignOff(mkArgs({ model: 'fable' }), script, `implement:${SLUG} signed`)
+  const { B } = await resumeAfterSignOff(mkArgs({ rung: TOP }), script, `implement:${SLUG} signed`)
   assert.deepEqual(B.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `review:${SLUG} r1`])
-  assert.equal(B.row.model, 'fable')
+  assert.deepEqual([B.row.rung, B.row.climbs], [TOP, []])
   assertContinuation(B, `implement:${SLUG}`)
   noGateTextInPrompts(B, [G])
 })
 
-test('S-impl-plan: a plan-gated task whose implementer gates resumes on its plan — no re-plan, no escalation', async () => {
+test('S-impl-plan: a plan-gated task whose implementer gates resumes on its plan — no re-plan, no climb', async () => {
   const script = {
     [`plan:${SLUG}`]: plan(PLAN_NONE),
     [`plan-judge:${SLUG} r1`]: approve,
@@ -334,23 +343,24 @@ test('S-impl-plan: a plan-gated task whose implementer gates resumes on its plan
   assert.equal(A.row.planRoundsUsed, 1)
   assert.ok(tail[0].prompt.includes(PLAN_NONE), 'the continuation implements the approved plan')
   assert.deepEqual(B.labels.filter((l) => l.startsWith('plan:')), [`plan:${SLUG}`])
-  assert.deepEqual([B.row.model, B.row.escalated, B.row.planRoundsUsed], ['opus', false, 1])
+  assert.deepEqual([B.row.rung, B.row.climbs, B.row.planRoundsUsed], [BOTTOM, [], 1])
   assertContinuation(B, `implement:${SLUG}`)
 })
 
-test('S-impl-retry: a stop on the escalated retry resumes at fable, the escalation replayed from cache', async () => {
+test('S-impl-retry: a stop on the retry after a climb resumes on the reached rung, the climb replayed from cache', async () => {
   const script = {
     [`implement:${SLUG}`]: red,
-    [`implement:${SLUG}@fable`]: gated([G]),
-    [`implement:${SLUG}@fable signed`]: green(`implement:${SLUG}@fable signed`),
+    [`implement:${SLUG}@${TOP}`]: gated([G]),
+    [`implement:${SLUG}@${TOP} signed`]: green(`implement:${SLUG}@${TOP} signed`),
     [`review:${SLUG} r1`]: approve,
   }
-  const { A, B } = await resumeAfterSignOff(mkArgs(), script, `implement:${SLUG}@fable signed`)
-  assert.deepEqual(A.labels, [`implement:${SLUG}`, `implement:${SLUG}@fable`])
-  assert.deepEqual([A.row.model, A.row.escalated], ['fable', true])
-  assert.deepEqual(B.labels, [`implement:${SLUG}`, `implement:${SLUG}@fable`, `implement:${SLUG}@fable signed`, `review:${SLUG} r1`])
-  assert.deepEqual([B.row.model, B.row.escalated, B.row.escalatedAt], ['fable', true, 'implement'])
-  assertContinuation(B, `implement:${SLUG}@fable`)
+  const { A, B } = await resumeAfterSignOff(mkArgs(), script, `implement:${SLUG}@${TOP} signed`)
+  const climbs = [{ stage: 'implement', from: BOTTOM, to: TOP }]
+  assert.deepEqual(A.labels, [`implement:${SLUG}`, `implement:${SLUG}@${TOP}`])
+  assert.deepEqual([A.row.rung, A.row.climbs], [TOP, climbs])
+  assert.deepEqual(B.labels, [`implement:${SLUG}`, `implement:${SLUG}@${TOP}`, `implement:${SLUG}@${TOP} signed`, `review:${SLUG} r1`])
+  assert.deepEqual([B.row.rung, B.row.climbs], [TOP, climbs])
+  assertContinuation(B, `implement:${SLUG}@${TOP}`)
   noGateTextInPrompts(B, [G])
 })
 
@@ -362,7 +372,7 @@ test("S-revise: an own run's reviser stop resumes past the sign-off, then the ju
     [`revise:${SLUG} r2 signed`]: green(`revise:${SLUG} r2 signed`),
     [`review:${SLUG} r2`]: approve,
   }
-  const { A, B } = await resumeAfterSignOff(mkArgs({ model: 'fable' }), script, `revise:${SLUG} r2 signed`)
+  const { A, B } = await resumeAfterSignOff(mkArgs({ rung: TOP }), script, `revise:${SLUG} r2 signed`)
   assert.deepEqual(A.labels, [`implement:${SLUG}`, `review:${SLUG} r1`, `revise:${SLUG} r2`])
   assert.deepEqual(B.labels, [...A.labels, `revise:${SLUG} r2 signed`, `review:${SLUG} r2`])
   assert.equal(B.row.reviewRoundsUsed, 2)
@@ -377,7 +387,7 @@ test('S-seeded: a seeded revise stop resumes past the sign-off, then the judge',
     [`revise:${SLUG} r2 signed`]: green(`revise:${SLUG} r2 signed`),
     [`review:${SLUG} r2`]: approve,
   }
-  const { A, B } = await resumeAfterSignOff(mkArgs({ model: 'fable', resume }), script, `revise:${SLUG} r2 signed`)
+  const { A, B } = await resumeAfterSignOff(mkArgs({ rung: TOP, resume }), script, `revise:${SLUG} r2 signed`)
   assert.deepEqual(A.labels, [`revise:${SLUG} r2`])
   assert.deepEqual(B.labels, [`revise:${SLUG} r2`, `revise:${SLUG} r2 signed`, `review:${SLUG} r2`])
   assert.ok(B.calls[1].prompt.includes('COLD ENTRY'), 'the continuation keeps the cold entry')
@@ -387,7 +397,7 @@ test('S-seeded: a seeded revise stop resumes past the sign-off, then the judge',
 
 // ---- 3. gates found one after another: A → B → C ----------------------------------------------------
 
-test('S-chain: an opus implementer that finds G, then G2, resumes past both sign-offs at opus — never escalated', async () => {
+test('S-chain: a bottom-rung implementer that finds G, then G2, resumes past both sign-offs on its rung — never climbed', async () => {
   const script = {
     [`implement:${SLUG}`]: gated([G]),
     [`implement:${SLUG} signed`]: gated([G2]),
@@ -398,39 +408,39 @@ test('S-chain: an opus implementer that finds G, then G2, resumes past both sign
   assert.deepEqual(A.labels, [`implement:${SLUG}`])
   assert.deepEqual([B.labels, B.row.gatedInputs], [[`implement:${SLUG}`, `implement:${SLUG} signed`], [G2]])
   assert.deepEqual(C.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `implement:${SLUG} signed 2`, `review:${SLUG} r1`])
-  assert.ok(C.labels.every((l) => !l.includes('@fable')), 'no fable takeover')
-  assert.deepEqual([C.row.model, C.row.escalated], ['opus', false])
+  assert.ok(C.labels.every((l) => !l.includes('@')), 'no takeover')
+  assert.deepEqual([C.row.rung, C.row.climbs], [BOTTOM, []])
   assertContinuation(C, `implement:${SLUG}`, 1)
   assertContinuation(C, `implement:${SLUG}`, 2)
   noGateTextInPrompts(C, [G, G2])
 })
 
-test('S-chain-fable: a fable implementer that finds G, then G2, resumes past both — never set aside blocked', async () => {
+test('S-chain-top: a top-rung implementer that finds G, then G2, resumes past both — never set aside blocked', async () => {
   const script = {
     [`implement:${SLUG}`]: gated([G]),
     [`implement:${SLUG} signed`]: gated([G2]),
     [`implement:${SLUG} signed 2`]: green(`implement:${SLUG} signed 2`),
     [`review:${SLUG} r1`]: approve,
   }
-  const { C } = await resumeTwiceAfterSignOff(mkArgs({ model: 'fable' }), script, `implement:${SLUG} signed 2`)
+  const { C } = await resumeTwiceAfterSignOff(mkArgs({ rung: TOP }), script, `implement:${SLUG} signed 2`)
   assert.deepEqual(C.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `implement:${SLUG} signed 2`, `review:${SLUG} r1`])
-  assert.equal(C.row.model, 'fable')
+  assert.deepEqual([C.row.rung, C.row.climbs], [TOP, []])
   assertContinuation(C, `implement:${SLUG}`, 2)
   noGateTextInPrompts(C, [G, G2])
 })
 
-test('S-chain-retry: the escalated retry finds G, then G2 — C resumes past both at fable', async () => {
+test('S-chain-retry: the retry after a climb finds G, then G2 — C resumes past both on the reached rung', async () => {
   const script = {
     [`implement:${SLUG}`]: red,
-    [`implement:${SLUG}@fable`]: gated([G]),
-    [`implement:${SLUG}@fable signed`]: gated([G2]),
-    [`implement:${SLUG}@fable signed 2`]: green(`implement:${SLUG}@fable signed 2`),
+    [`implement:${SLUG}@${TOP}`]: gated([G]),
+    [`implement:${SLUG}@${TOP} signed`]: gated([G2]),
+    [`implement:${SLUG}@${TOP} signed 2`]: green(`implement:${SLUG}@${TOP} signed 2`),
     [`review:${SLUG} r1`]: approve,
   }
-  const { C } = await resumeTwiceAfterSignOff(mkArgs(), script, `implement:${SLUG}@fable signed 2`)
-  assert.deepEqual(C.labels, [`implement:${SLUG}`, `implement:${SLUG}@fable`, `implement:${SLUG}@fable signed`, `implement:${SLUG}@fable signed 2`, `review:${SLUG} r1`])
-  assert.deepEqual([C.row.model, C.row.escalated, C.row.escalatedAt], ['fable', true, 'implement'])
-  assertContinuation(C, `implement:${SLUG}@fable`, 2)
+  const { C } = await resumeTwiceAfterSignOff(mkArgs(), script, `implement:${SLUG}@${TOP} signed 2`)
+  assert.deepEqual(C.labels, [`implement:${SLUG}`, `implement:${SLUG}@${TOP}`, `implement:${SLUG}@${TOP} signed`, `implement:${SLUG}@${TOP} signed 2`, `review:${SLUG} r1`])
+  assert.deepEqual([C.row.rung, C.row.climbs], [TOP, [{ stage: 'implement', from: BOTTOM, to: TOP }]])
+  assertContinuation(C, `implement:${SLUG}@${TOP}`, 2)
   noGateTextInPrompts(C, [G, G2])
 })
 
@@ -443,7 +453,7 @@ test("S-chain-revise: an own run's reviser that finds G, then G2, resumes past b
     [`revise:${SLUG} r2 signed 2`]: green(`revise:${SLUG} r2 signed 2`),
     [`review:${SLUG} r2`]: approve,
   }
-  const { B, C } = await resumeTwiceAfterSignOff(mkArgs({ model: 'fable' }), script, `revise:${SLUG} r2 signed 2`)
+  const { B, C } = await resumeTwiceAfterSignOff(mkArgs({ rung: TOP }), script, `revise:${SLUG} r2 signed 2`)
   assert.deepEqual(B.row.gatedInputs, [G2])
   assert.deepEqual(C.labels, [`implement:${SLUG}`, `review:${SLUG} r1`, `revise:${SLUG} r2`, `revise:${SLUG} r2 signed`, `revise:${SLUG} r2 signed 2`, `review:${SLUG} r2`])
   assert.equal(C.row.reviewRoundsUsed, 2)
@@ -459,7 +469,7 @@ test('S-chain-seeded: a seeded revise that finds G, then G2, resumes past both, 
     [`revise:${SLUG} r2 signed 2`]: green(`revise:${SLUG} r2 signed 2`),
     [`review:${SLUG} r2`]: approve,
   }
-  const { C } = await resumeTwiceAfterSignOff(mkArgs({ model: 'fable', resume }), script, `revise:${SLUG} r2 signed 2`)
+  const { C } = await resumeTwiceAfterSignOff(mkArgs({ rung: TOP, resume }), script, `revise:${SLUG} r2 signed 2`)
   assert.deepEqual(C.labels, [`revise:${SLUG} r2`, `revise:${SLUG} r2 signed`, `revise:${SLUG} r2 signed 2`, `review:${SLUG} r2`])
   assert.ok(C.calls[2].prompt.includes('COLD ENTRY'), 'the second continuation keeps the cold entry')
   assertContinuation(C, `revise:${SLUG} r2`, 2)
@@ -475,7 +485,7 @@ test('E1: a fresh run whose implementer stops for already-approved gates gets a 
   })
   clean(r)
   assert.deepEqual(r.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `review:${SLUG} r1`])
-  assert.deepEqual([r.row.status, r.row.model, r.row.escalated], ['review', 'opus', false])
+  assert.deepEqual([r.row.status, r.row.rung, r.row.climbs], ['review', BOTTOM, []])
   assert.ok(r.logs.some((l) => l.includes(`implement:${SLUG}`) && /signed off/.test(l)), r.logs.join('\n'))
 })
 
@@ -488,72 +498,80 @@ test('E1: a fresh run whose implementer finds two approved gates in turn gets a 
   })
   clean(r)
   assert.deepEqual(r.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `implement:${SLUG} signed 2`, `review:${SLUG} r1`])
-  assert.deepEqual([r.row.status, r.row.model, r.row.escalated], ['review', 'opus', false])
+  assert.deepEqual([r.row.status, r.row.rung, r.row.climbs], ['review', BOTTOM, []])
 })
 
-test('E1: a repeat signed stop for a gate already passed takes the old path — escalation on opus, blocked on fable — never a loop', async () => {
-  const opus = await run(mkArgs({ approvedGates: [G] }), {
+test('E1: a repeat signed stop for a gate already passed takes the old path — a climb below the top, a same-rung retry on it — never a loop', async () => {
+  const bottom = await run(mkArgs({ approvedGates: [G] }), {
     [`implement:${SLUG}`]: gated([G]),
     [`implement:${SLUG} signed`]: gated([G]),
-    [`implement:${SLUG}@fable`]: green(`implement:${SLUG}@fable`),
+    [`implement:${SLUG}@${TOP}`]: green(`implement:${SLUG}@${TOP}`),
     [`review:${SLUG} r1`]: approve,
   })
-  clean(opus)
-  assert.deepEqual(opus.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `implement:${SLUG}@fable`, `review:${SLUG} r1`])
-  assert.deepEqual([opus.row.status, opus.row.escalated, opus.row.escalatedAt], ['review', true, 'implement'])
+  clean(bottom)
+  assert.deepEqual(bottom.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `implement:${SLUG}@${TOP}`, `review:${SLUG} r1`])
+  assert.deepEqual([bottom.row.status, bottom.row.climbs], ['review', [{ stage: 'implement', from: BOTTOM, to: TOP }]])
 
-  const fable = await run(mkArgs({ model: 'fable', approvedGates: [G] }), {
+  // on the top rung the climb is a recorded no-op and the same rung retries once (CAPPED_RETRY_ITERATIONS);
+  // the retry is its own site: it continues past G once there too, then a repeat G blocks
+  const top = await run(mkArgs({ rung: TOP, approvedGates: [G] }), {
     [`implement:${SLUG}`]: gated([G]),
     [`implement:${SLUG} signed`]: gated([G]),
+    [`implement:${SLUG}@${TOP}`]: gated([G]),
+    [`implement:${SLUG}@${TOP} signed`]: gated([G]),
   })
-  clean(fable)
-  assert.deepEqual(fable.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`])
-  assert.equal(fable.row.status, 'blocked')
+  clean(top)
+  assert.deepEqual(top.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `implement:${SLUG}@${TOP}`, `implement:${SLUG}@${TOP} signed`])
+  assert.ok(top.calls[2].prompt.includes('Max iterations: 2') && top.calls[2].prompt.includes('SECOND PASS'), 'a same-rung second pass at the reduced budget')
+  assert.deepEqual([top.row.status, top.row.climbs], ['blocked', [{ stage: 'implement', from: TOP, to: TOP }]])
 
-  // the escalated retry is its own site: it continues past G once there too, then a repeat G blocks
+  // below the top, the retry after the climb is its own site too: past G once there, then a repeat G blocks
   const retry = await run(mkArgs({ approvedGates: [G] }), {
     [`implement:${SLUG}`]: gated([G]),
     [`implement:${SLUG} signed`]: gated([G]),
-    [`implement:${SLUG}@fable`]: gated([G]),
-    [`implement:${SLUG}@fable signed`]: gated([G]),
+    [`implement:${SLUG}@${TOP}`]: gated([G]),
+    [`implement:${SLUG}@${TOP} signed`]: gated([G]),
   })
   clean(retry)
-  assert.deepEqual(retry.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `implement:${SLUG}@fable`, `implement:${SLUG}@fable signed`])
+  assert.deepEqual(retry.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `implement:${SLUG}@${TOP}`, `implement:${SLUG}@${TOP} signed`])
   assert.equal(retry.row.status, 'blocked')
 })
 
 test('E1: continuations are bounded by the distinct approved gates — a stop that repeats only passed gates takes the old path', async () => {
-  // G, then G2, then G again: two continuations (one per approved gate), then the old path.
-  const again = await run(mkArgs({ model: 'fable', approvedGates: [G, G2] }), {
+  // G, then G2, then G again: two continuations (one per approved gate), then the old path (on the top rung,
+  // the same-rung retry, which here blocks plainly).
+  const again = await run(mkArgs({ rung: TOP, approvedGates: [G, G2] }), {
     [`implement:${SLUG}`]: gated([G]),
     [`implement:${SLUG} signed`]: gated([G2]),
     [`implement:${SLUG} signed 2`]: gated([G]),
+    [`implement:${SLUG}@${TOP}`]: plainBlock,
   })
   clean(again)
-  assert.deepEqual(again.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `implement:${SLUG} signed 2`])
+  assert.deepEqual(again.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `implement:${SLUG} signed 2`, `implement:${SLUG}@${TOP}`])
   assert.equal(again.row.status, 'blocked')
-  // both gates at once, then both again: one continuation, then the old path (escalation on opus).
+  // both gates at once, then both again: one continuation, then the old path (a climb below the top).
   const both = await run(mkArgs({ approvedGates: [G, G2] }), {
     [`implement:${SLUG}`]: gated([G, G2]),
     [`implement:${SLUG} signed`]: gated([G2, G]),
-    [`implement:${SLUG}@fable`]: green(`implement:${SLUG}@fable`),
+    [`implement:${SLUG}@${TOP}`]: green(`implement:${SLUG}@${TOP}`),
     [`review:${SLUG} r1`]: approve,
   })
   clean(both)
-  assert.deepEqual(both.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `implement:${SLUG}@fable`, `review:${SLUG} r1`])
-  assert.deepEqual([both.row.status, both.row.escalated], ['review', true])
+  assert.deepEqual(both.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `implement:${SLUG}@${TOP}`, `review:${SLUG} r1`])
+  assert.deepEqual([both.row.status, both.row.climbs.length], ['review', 1])
   // a gate worded differently only in case/whitespace is the same gate: no second continuation for it.
-  const reworded = await run(mkArgs({ model: 'fable', approvedGates: [G] }), {
+  const reworded = await run(mkArgs({ rung: TOP, approvedGates: [G] }), {
     [`implement:${SLUG}`]: gated([G]),
     [`implement:${SLUG} signed`]: gated([`  ${G.toUpperCase()} `]),
+    [`implement:${SLUG}@${TOP}`]: plainBlock,
   })
   clean(reworded)
-  assert.deepEqual(reworded.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`])
+  assert.deepEqual(reworded.labels, [`implement:${SLUG}`, `implement:${SLUG} signed`, `implement:${SLUG}@${TOP}`])
   assert.equal(reworded.row.status, 'blocked')
 })
 
 test('E2: a reviser continues past each approved gate once; a repeat signed stop for a passed gate blocks', async () => {
-  const r = await run(mkArgs({ model: 'fable', approvedGates: [G] }), {
+  const r = await run(mkArgs({ rung: TOP, approvedGates: [G] }), {
     [`implement:${SLUG}`]: green(`implement:${SLUG}`),
     [`review:${SLUG} r1`]: changes('handle the empty corpus'),
     [`revise:${SLUG} r2`]: gated([G]),
@@ -563,7 +581,7 @@ test('E2: a reviser continues past each approved gate once; a repeat signed stop
   assert.deepEqual(r.labels, [`implement:${SLUG}`, `review:${SLUG} r1`, `revise:${SLUG} r2`, `revise:${SLUG} r2 signed`])
   assert.equal(r.row.status, 'blocked')
 
-  const two = await run(mkArgs({ model: 'fable', approvedGates: [G, G2] }), {
+  const two = await run(mkArgs({ rung: TOP, approvedGates: [G, G2] }), {
     [`implement:${SLUG}`]: green(`implement:${SLUG}`),
     [`review:${SLUG} r1`]: changes('handle the empty corpus'),
     [`revise:${SLUG} r2`]: gated([G]),
@@ -580,7 +598,7 @@ test('E1/E2: an unapproved stop never gets a continuation — it goes to gate-pe
     ['implementer, nothing approved', {}, { [`implement:${SLUG}`]: gated([G]) }, `implement:${SLUG}`],
     ['implementer, a new gate beside an approved one', { approvedGates: [G] }, { [`implement:${SLUG}`]: gated([G, G2]) }, `implement:${SLUG}`],
     ['implementer, a changed cap', { approvedGates: [G] }, { [`implement:${SLUG}`]: gated([G.replace('30', '45')]) }, `implement:${SLUG}`],
-    ['reviser', { model: 'fable', approvedGates: [G] }, {
+    ['reviser', { rung: TOP, approvedGates: [G] }, {
       [`implement:${SLUG}`]: green(`implement:${SLUG}`), [`review:${SLUG} r1`]: changes('x'), [`revise:${SLUG} r2`]: gated([G2]),
     }, `revise:${SLUG} r2`],
   ]) {
@@ -588,8 +606,9 @@ test('E1/E2: an unapproved stop never gets a continuation — it goes to gate-pe
     clean(r)
     assert.equal(r.row.status, 'gate-pending', name)
     assert.equal(r.labels[r.labels.length - 1], stop, name)
-    assert.ok(r.labels.every((l) => !/ signed( \d+)?$/.test(l) && !l.includes('@fable')), `${name}: ${r.labels}`)
-    assert.equal(r.row.escalated, false, name)
+    assert.ok(r.labels.every((l) => !/ signed( \d+)?$/.test(l) && !l.includes('@')), `${name}: ${r.labels}`)
+    // the gate stop itself never climbs: only the review judge's `changes` before the reviser's stop did
+    assert.deepEqual(r.row.climbs.map((c) => c.stage), name === 'reviser' ? ['review'] : [], name)
   }
 })
 

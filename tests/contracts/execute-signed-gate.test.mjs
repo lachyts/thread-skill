@@ -111,7 +111,8 @@ function checkSignedGate(skill, context = realContext) {
   // resume: after step 1.3's restart sequence (named, never repeated), the sha re-check against the handle's,
   // then resumeFromRunId with the handle's scriptPath and args plus task.approvedGates from the note; the
   // engine goes on past each newly signed gate; the one sanctioned exception, because it never reaches a
-  // prompt; never rebuild args from the note; § 4's ORIGINAL-args sentence and the Don't name it. Step 1.3
+  // prompt; never rebuild args from the note (a climb's rung: stamp, a ladder edit), and the resume keeps its call's
+  // own ladder; § 4's ORIGINAL-args sentence and the Don't name it. Step 1.3
   // passes mark-started's progress line to a fresh call only: a resume (Lost call, the signed-gate resume)
   // re-passes the args of the call it resumes.
   const call = 'Workflow({ scriptPath: <the handle\'s scriptPath>, args: <the handle\'s args, with task.approvedGates set from the note\'s ## Approved gates>, resumeFromRunId: <the handle\'s runId> })'
@@ -124,7 +125,8 @@ function checkSignedGate(skill, context = realContext) {
     !sub13.includes("A resume is exempt: *Lost call* and § 3.7's signed-gate resume re-pass the args of the call they resume (the handle's, for a signed gate), so its `progress:` line is shown to the user, not passed") ||
     /\(its `progress:` line becomes the args `progress`\)/.test(sub13) ||
     !resume.includes('`task.approvedGates` is the **one sanctioned exception**') || !resume.includes('never reaches a prompt') ||
-    !resume.includes('**Never rebuild** a resumed call\'s args from the note') || !resume.includes('`model: fable`') ||
+    !resume.includes('**Never rebuild** a resumed call\'s args from the note') || !resume.includes("a climb's `rung:` stamp or a ladder edit") ||
+    !resume.includes("The resume keeps its call's own `ladder`.") ||
     !s4.includes("re-passes the run's ORIGINAL args unchanged") ||
     !s4.includes("The one sanctioned exception is § 3.7's signed-gate resume, which adds `task.approvedGates`: it never reaches a prompt.") ||
     !donts.includes("Never resume a runId whose row was reconciled — except § 3.7's signed-gate resume of a `gate-pending` task call after `approve-gates`, with only `task.approvedGates` added to its args.")) {

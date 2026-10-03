@@ -65,7 +65,7 @@ Subcommands:
               (40 hex each). wait = --started - `ready:`, duration = --now - --started, both in whole
               minutes (_whole_minutes, the engine's wholeMinutes); triggers `-`. A re-run of the same
               Integration (same --started and SHAs) is a no-op, even at a later --now. Changes no status,
-              rounds, `tier_capped`, `integrating:` or `ready:`. Refuses (exit 1, nothing written) a note
+              rounds, `rung:`, `integrating:` or `ready:`. Refuses (exit 1, nothing written) a note
               that is not `review` with a `pr:`, a SHA that is not 40 hex and a --started that is not an
               ISO stamp.
 
@@ -218,6 +218,18 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     Until the lead passes startedAt, lines are told apart only by position: S, I, S' keeps
                     three lines, back-to-back identical lines collapse to one. Readers take the LAST line.
                     `integration: null` counts as absent; a non-object is an error (exit 1, no line).
+  rung           -> (any status; ADR 0029 decision 7) `rung: <name>`, the rung the task reached, when the row's
+                    `rung` is a non-empty rung name ([a-z][a-z0-9._-]*, never a YAML word), so a re-dispatch
+                    starts there. A malformed name is an error (exit 1) and stamps nothing. An empty `rung`
+                    (an integrate row passing a neutral record through, a lead-written row with none)
+                    stamps nothing. Reconcile never writes `model:` or `tier_capped:` and never removes
+                    `rung:`; stale `model:`, `effort:` and `tier_capped:` stamps are left for p13-3's
+                    `--regenerate`.
+                    A pre-3.0.0 row (no `rung`; a call started on the tier engine that finished there, e.g.
+                    a Lost-call resume of its old scriptPath) with `escalated` or `tierCapped` true proved
+                    the task non-mechanical: it stamps `rung: <the ladder's top rung>` (ladder.py's load(),
+                    the file each call reads) and prints a WARNING naming the slug. When the ladder cannot be
+                    read that is an error (exit 1) and nothing is stamped. Any other legacy row stamps nothing.
 
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
 
@@ -237,6 +249,7 @@ already written is ever deleted.
 import argparse
 import fnmatch
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -293,6 +306,17 @@ OUTSIDE_N = {"folded", "other"}                     # queue states that are not 
 # The vault's TaskNotes priority scale. `medium`, missing or unknown read as normal.
 PRIORITY_WEIGHTS = {"high": 3, "normal": 2, "low": 1, "none": 0}
 INTEGRATION_PREFIX = "integration:"                 # a blocked task's latest diagnosis -> set aside at Integration
+# A rung name (ADR 0029): written raw as `rung: <name>`, so a plain lowercase token YAML reads back as the same
+# string — ladder.py's NAME_RE and YAML_WORDS, and the engine's LADDER_NAME and LADDER_YAML_WORDS.
+# tests/ladder.test.mjs (L9) feeds the same names to all three and pins that they agree.
+RUNG_NAME_RE = re.compile(r"[a-z][a-z0-9._-]*\Z")
+RUNG_YAML_WORDS = frozenset(("true", "false", "yes", "no", "on", "off", "y", "n", "null"))
+
+
+def is_rung_name(value) -> bool:
+    """A usable rung name: the one rule reconcile's stamp and lead-integrate.py inputs both apply."""
+    return isinstance(value, str) and bool(RUNG_NAME_RE.match(value)) and value not in RUNG_YAML_WORDS
+
 
 RUN_HEAD_RE = re.compile(r"^### Run (\d+) \(([^)]*)\)\s*$")
 RUN_END_RE = re.compile(r"^<!-- run (\d+) end sha=([0-9a-f]{12}) -->\s*$")
@@ -1327,6 +1351,55 @@ def resolve_task_path(task, tasks_dir: Path) -> Path:
     return tasks_dir / f"{task['slug']}.md"
 
 
+def _rung_note(task) -> str:
+    """The reconcile line's rung part: ` rung=<name>`, then ` from=<start>` when the call climbed off it,
+    ` climbs=<stage:from->to,…>` and ` rung-drift=<name>` when they apply; '' for a row with no rung."""
+    rung = task.get("rung")
+    if not isinstance(rung, str) or not rung:
+        return ""
+    out = f" rung={rung}"
+    start = task.get("startRung")
+    if isinstance(start, str) and start and start != rung:
+        out += f" from={start}"
+    climbs = task.get("climbs")
+    if isinstance(climbs, list) and climbs:
+        out += " climbs=" + ",".join(
+            f"{c.get('stage')}:{c.get('from')}->{c.get('to')}" if isinstance(c, dict) else str(c) for c in climbs)
+    drift = task.get("rungDrift")
+    if isinstance(drift, str) and drift:
+        out += f" rung-drift={drift}"
+    return out
+
+
+# ladder.py, shared with every skill: the operator's ladder, as the lead reads it at each Workflow call's start.
+LADDER_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "ladder.py"
+
+
+def _ladder_top():
+    """(top rung name, source) of the operator's ladder, read through ladder.py's load(); (None, why) when it
+    cannot be read: a refused file (LadderError, exit 2 or 3 from the CLI) or a ladder.py that will not load."""
+    try:
+        spec = importlib.util.spec_from_file_location("thread_ladder", LADDER_PY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        ladder = mod.load()
+        return ladder["rungs"][-1]["name"], ladder["source"]
+    except Exception as e:  # any failure falls back to the caller's ERROR line, never a guessed rung
+        return None, str(getattr(e, "reason", "") or e) or type(e).__name__
+
+
+def _legacy_climb(task) -> str:
+    """A pre-3.0.0 row's evidence of hardness (ADR 0029 compat): 'escalated' or 'tier-capped', '' for none.
+    Only a row with no `rung` qualifies; every 3.0.0 row carries one (possibly '')."""
+    if task.get("rung") is not None:
+        return ""
+    if task.get("escalated"):
+        return "escalated"
+    if task.get("tierCapped"):
+        return "tier-capped"
+    return ""
+
+
 def cmd_reconcile(args) -> int:
     raw = sys.stdin.read() if args.result == "-" else Path(os.path.expanduser(args.result)).read_text()
     data = json.loads(raw)
@@ -1334,6 +1407,8 @@ def cmd_reconcile(args) -> int:
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     now = _now(args)
     errors = []
+    warnings = []
+    top = None  # (name, source) of the ladder's top rung, read once, only for a pre-3.0.0 row
     for task in tasks:
         slug = task.get("slug", "<no-slug>")
         status = task.get("status")
@@ -1372,25 +1447,38 @@ def cmd_reconcile(args) -> int:
         # Whatever Integration this task was in, the run that produced this row ended it.
         note.remove("integrating")
 
-        # Escalation is durable: a task that flipped opus→fable mid-run has proven non-mechanical,
-        # so every later re-dispatch (resume, /thread:repair) must start at fable, not re-pay the
-        # opus one-shot toll. Stamped for every status — including landed ones, as the record of
-        # what it took. Idempotent via Note.set.
-        if task.get("escalated"):
-            note.set("model", "fable")
-
-        # A tier ceiling (args.maxTier, ADR 0016) suppressed an escalation this task would otherwise
-        # have taken. That has to be DURABLE: /thread:status and /thread:repair build their triage
-        # entirely from note frontmatter, so without a stamp a capped block reads as a genuine wall
-        # and is never re-dispatched once the higher tier's quota returns. Deliberately NOT `model:
-        # fable` — the run could not use that tier, and stamping it would send the next dispatch
-        # straight back into the exhausted quota.
-        if task.get("tierCapped"):
-            note.set("tier_capped", (task.get("tierCappedAt") or "true"))
-        elif note.get("tier_capped"):
-            # An uncapped re-run that got further supersedes the old marker rather than leaving a
-            # stale one to be triaged against.
-            note.unset("tier_capped")
+        # The rung is durable (ADR 0029 decision 4): a task that climbed has proven non-mechanical, so
+        # every later re-dispatch (resume, /thread:repair) starts on the rung it reached, not back at the
+        # bottom. Stamped for every status, landed ones included, as the record of what it took; an
+        # integrate row passes the task's own record through, and a neutral one (or a lead-written row)
+        # carries no rung and stamps nothing. A drifted `rung:` (one the ladder lacks) is overwritten by
+        # the rung the call reached. Idempotent via Note.set. Never `model:` or `tier_capped:`.
+        rung = task.get("rung")
+        legacy = _legacy_climb(task)
+        legacy_note = ""
+        if rung not in (None, ""):
+            if is_rung_name(rung):
+                note.set("rung", rung)
+            else:
+                errors.append(f"{slug}: rung {rung!r} is not a rung name ([a-z][a-z0-9._-]*, never a YAML word) — "
+                              "no rung: stamped")
+        elif legacy:
+            # A call started before 3.0.0 finished on the tier engine (a Lost-call resume re-passes its old
+            # scriptPath): its row has no rung record, only the tier flags. The old reconcile made that climb
+            # durable (`model: fable` / `tier_capped:`); left unstamped, the re-dispatch would restart on the
+            # bottom rung and re-pay it. The top rung is that climb's equivalent on the ladder.
+            if top is None:
+                top = _ladder_top()
+            name, source = top
+            if name:  # ladder.py's load() only returns rung names (tests/ladder.test.mjs L9)
+                note.set("rung", name)
+                legacy_note = f" rung={name} (pre-3.0.0 row, {legacy})"
+                warnings.append(f"{slug}: a pre-3.0.0 row ({legacy}, no rung) — stamped rung: {name}, the top rung "
+                                f"of the ladder ({source}), so its re-dispatch does not restart on the bottom rung")
+            else:
+                errors.append(f"{slug}: a pre-3.0.0 row ({legacy}, no rung) — the ladder could not be read ({source}), "
+                              "so no rung: was stamped and its re-dispatch would restart on the bottom rung; fix "
+                              "~/.config/thread/ladder.toml and re-run this reconcile")
 
         if status in STATUS_WITH_PR and pr:
             note.set("pr", pr)
@@ -1438,11 +1526,11 @@ def cmd_reconcile(args) -> int:
 
         note.save(dry_run=args.dry_run)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
-        esc = " model=fable(escalated)" if task.get("escalated") else ""
-        esc += f" tier_capped={task.get('tierCappedAt') or 'true'}" if task.get("tierCapped") else ""
         ro = " (read-only, approved)" if note_status != status else ""
-        print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{esc}{flag}")
+        print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{_rung_note(task)}{legacy_note}{flag}")
 
+    for w in warnings:
+        print(f"WARNING: {w}", file=sys.stderr)
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
     return 1 if errors else 0

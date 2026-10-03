@@ -13,14 +13,14 @@ import { runTask, loadEngine, enginePath } from '../../../tests/lib/engine.mjs'
 const ROW_KEYS = [
   'slug', 'scope', 'status', 'prUrl', 'branch', 'worktreePath', 'reviewRoundsUsed', 'planRoundsUsed',
   'blockerDiagnosis', 'reviewFeedback', 'reviewHistory', 'approvedAtCeiling', 'gatedInputs', 'summary',
-  'model', 'escalated', 'escalatedAt', 'tierCapped', 'tierCappedAt',
+  'startRung', 'rung', 'climbs', 'rungDrift', 'ran',
 ]
 const THREW = 'workflow stage threw — see /workflows'
 const PLAN_TEXT = 'Planned on: abc\n### Files to modify\n- x\n### Gated inputs\nNone'
 
 const mkTask = (slug, over = {}) => ({
   slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: false,
-  maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, model: 'fable', ...over,
+  maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, rung: 'opus-xhigh', ...over,
 })
 const mkArgs = (task, over = {}) => ({
   rolloutSlug: 'proj-rollout-2026-10-01', repoPath: '/repo', verifier: 'make test', date: '2026-10-01',
@@ -138,21 +138,22 @@ test('the pre-p12-5 `waves` shape and a malformed task are refused before any di
 })
 
 test('resume determinism: the same args give the same agent calls, built by the unchanged builders', async () => {
-  const task = mkTask('proj-fix-a', { model: 'opus' })
+  const task = mkTask('proj-fix-a', { rung: 'opus-high' })
   const args = mkArgs(task)
   const r1 = await run(JSON.stringify(args))
   const r2 = await run(JSON.stringify(args))
   assert.deepEqual(r1.unknown, [])
   assert.deepEqual(r1.calls.map((c) => [c.label, c.prompt]), r2.calls.map((c) => [c.label, c.prompt]))
-  const T = loadEngine(['implementerPrompt', 'taskModel', 'tierCap'])
-  const cap = T.tierCap(args)
-  const st = { tier: T.taskModel(task, cap), cap, escalated: false, escalatedAt: '', capSuppressed: false, capSuppressedAt: '' }
+  assert.deepEqual(r1.result, r2.result, 'the row, its rung record and ran included, is the same')
+  const T = loadEngine(['implementerPrompt', 'rungState'])
+  const st = T.rungState(task, args)
   const first = r1.calls.find((c) => c.label.startsWith('implement:'))
   assert.equal(first.prompt, T.implementerPrompt(task, args, st, ''))
+  assert.ok(first.prompt.includes('EXACTLY ONCE'), 'a bottom-rung first pass: the one-shot')
 })
 
-test('plan-gated opus task: plan revise escalates, then implement and review', async () => {
-  const task = mkTask('proj-fix-p', { model: 'opus', planGate: true })
+test('plan-gated bottom task: the plan revise climbs, then implement and review on the reached rung', async () => {
+  const task = mkTask('proj-fix-p', { rung: 'opus-high', planGate: true })
   const r = await run(mkArgs(task), { planJudge: (l) => (l.endsWith(' r1') ? 'changes' : 'approve') })
   assert.equal(r.error, undefined)
   assert.deepEqual(r.unknown, [])
@@ -163,9 +164,12 @@ test('plan-gated opus task: plan revise escalates, then implement and review', a
   const row = r.result.tasks[0]
   assert.equal(row.status, 'review')
   assert.equal(row.planRoundsUsed, 2)
-  assert.equal(row.escalated, true)
-  assert.equal(row.escalatedAt, 'plan')
-  assert.equal(row.model, 'fable')
+  assert.deepEqual([row.startRung, row.rung, row.rungDrift], ['opus-high', 'opus-xhigh', ''])
+  assert.deepEqual(row.climbs, [{ stage: 'plan', from: 'opus-high', to: 'opus-xhigh' }])
+  assert.deepEqual(row.ran.map((x) => [x.label, x.rung]), [
+    ['plan:proj-fix-p', 'opus-high'], ['plan-judge:proj-fix-p r1', 'opus-high'], ['plan-revise:proj-fix-p r2', 'opus-xhigh'],
+    ['plan-judge:proj-fix-p r2', 'opus-xhigh'], ['implement:proj-fix-p', 'opus-xhigh'], ['review:proj-fix-p r1', 'opus-xhigh'],
+  ])
 })
 
 test('read-only task: only the investigator runs, no review layer', async () => {
@@ -187,7 +191,8 @@ test('a stage that throws drops the task to a blocked row and the result still r
   assert.equal(row.slug, 'proj-fix-a')
   assert.equal(row.status, 'blocked')
   assert.equal(row.blockerDiagnosis, THREW)
-  assert.equal(row.model, 'fable')
+  assert.deepEqual([row.startRung, row.rung, row.climbs], ['opus-xhigh', 'opus-xhigh', []])
+  assert.deepEqual(row.ran.map((x) => x.label), ['implement:proj-fix-a'], 'what ran before the throw')
   assert.ok(r.logs.some((l) => l.includes('converge threw on proj-fix-a')), r.logs.join('\n'))
 })
 

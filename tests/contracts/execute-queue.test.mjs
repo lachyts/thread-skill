@@ -24,6 +24,9 @@ const DRIVER = path.join(root, 'hooks', 'rollout-stop-driver.py')
 
 const S = (text, re) => collapse(section(text, re) ?? '')
 const S2 = /^### 2\. /
+const S3 = /^### 3\. /
+const S37 = /^### 3\.7\. /
+const S4 = /^### 4\. /
 const S45 = /^### 4\.5\. /
 const S5 = /^### 5\. /
 const S6 = /^### 6\. /
@@ -217,16 +220,43 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !st3.includes('`integrated` → step 4') || !st3.includes('`rejected` → the lane frees, step 1.2 launches the seeded revise') ||
     !st3.includes('`max_review_rounds` across those rounds sets it aside')) fails.push('trouble-path')
 
-  // integrate-args: startedAt from stamp at launch; readyAt from ready:; history live, else inputs; the rung's
-  // fallback names a source for each of its five fields, the tier cap from inputs (boolean + string), never the
-  // note's raw tier_capped string.
+  // integrate-args: startedAt from stamp at launch; readyAt from ready:; history live, else inputs; the rung is the
+  // task's own record (ADR 0029 decision 7): the approving row's three keys, else inputs' record verbatim (neutral
+  // when the note has no rung:), never the ladder's top rung, and no tier vocabulary left.
   if (!st3.includes('`startedAt` a fresh `lead-integrate.py stamp` taken at launch') ||
     !st3.includes("`readyAt` the note's `ready:`") ||
     !st3.includes('from the approving row when this session holds it, else from `lead-integrate.py inputs`') ||
-    !st3.includes('else `{model: <§ 3\'s resolved model>, escalated: false, escalatedAt: "", tierCapped: <inputs.tierCapped>, tierCappedAt: <inputs.tierCappedAt>}`') ||
-    !st3.includes('`tierCapped` (a boolean) and `tierCappedAt` (a string) from `lead-integrate.py inputs`') ||
-    !st3.includes("never the note's raw `tier_capped`")) {
+    !st3.includes("`rung` is the task's own rung record, from that row (`startRung`, `rung`, `climbs`), else `lead-integrate.py inputs`' `rung` record, verbatim") ||
+    !st3.includes('(neutral, `{startRung: "", rung: "", climbs: []}`, when the note has no `rung:`)') ||
+    !st3.includes("never the ladder's top rung: Integration runs on the top rung whatever the record says") ||
+    /tierCapped|tier_capped|escalated/.test(st3)) {
     fails.push('integrate-args')
+  }
+
+  // ladder (ADR 0029 decision 6, p13-2): § 3 reads ladder.py at each call's start — a start or restart, a seeded
+  // revise and each integrate call — before any stamp, and passes it as args.ladder; prepare and push need none;
+  // both resumes re-pass their call's own ladder; a refusal writes nothing and halts `ladder file refused`, which
+  // § 7 lists; the skill warns about `max_tier:` exactly once and passes nothing for it; § 4's args carry `ladder`
+  // and the task's `rung`; the integrate call carries a freshly resolved ladder; § 5's launch names it.
+  const ladderP = collapse((section(skill, S3) ?? '').split('\n\n').find((x) => x.startsWith("**The ladder, at each call's start (ADR 0029 decision 6).**")) ?? '')
+  const tierLines = skill.split('\n').filter((l) => /max_tier|maxTier/.test(l))
+  const s4 = section(skill, S4) ?? ''
+  const resume37 = collapse(section(skill, S37) ?? '')
+  if (!ladderP.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py` at the start of each Workflow call that starts agents') ||
+    !ladderP.includes("a start or restart (the task's own call), a seeded revise, and each integrate call") ||
+    !ladderP.includes('as `args.ladder`') || !ladderP.includes('It runs before any stamp for that call') ||
+    !ladderP.includes('(`lead-integrate.py prepare` and `push`) starts no agent and needs none') ||
+    !ladderP.includes("*Lost call*'s `resumeFromRunId`, or § 3.7's signed-gate resume — re-passes its call's own ladder") ||
+    !ladderP.includes('write nothing for that call') || !ladderP.includes('reason="ladder file refused"') ||
+    tierLines.length !== 1 || !tierLines[0].includes("\"`max_tier:` ignored; the ceiling is the ladder's top rung\"") ||
+    !tierLines[0].includes('nothing is passed to the engine') ||
+    !s4.includes('"ladder": {') || !s4.includes('"rung": "opus-high" }') ||
+    !st3.includes("a freshly resolved `ladder` (§ 3: read at this call's start)") ||
+    !lost.includes('the same `scriptPath` and args, the ladder included') ||
+    !resume37.includes("The resume keeps its call's own `ladder`.") ||
+    !s5.includes("the ladder it runs on (its `source`: the file's path, or `built-in`)") ||
+    !S(skill, S7).includes('`ladder.py` exits non-zero at a call\'s start (§ 3: `reason="ladder file refused"`')) {
+    fails.push('ladder')
   }
 
   // set-aside: dependants wait; hand-back for Integration, revise and own (a PR-less code-writing review note
@@ -378,7 +408,8 @@ test('execute § 4.5, its neighbours, the heartbeat and the hook hold every queu
 
 const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lost-call', 'clean-path', 'verify-bound',
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
-  'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget']
+  'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
+  'ladder']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -523,10 +554,18 @@ test('control: a double-quoted RACE re-verify fails verify-bound', () => {
     'verify-bound', 'dq race')
 })
 
-test("control: the rung fallback taking the note's tier_capped fails integrate-args", () => {
+test("control: a rung fallback naming the ladder's top rung fails integrate-args", () => {
   const p = real.skill.split('\n').find((l) => l.startsWith('   **The integrate call**'))
-  const from = p.slice(p.indexOf('else `{model:'), p.indexOf('; `readyAt`'))
-  only(sk(from, 'else the resolved model, `false`, `""` and the note\'s `tier_capped`'), 'integrate-args', 'raw tier_capped')
+  const from = p.slice(p.indexOf("else `lead-integrate.py inputs`' `rung` record"), p.indexOf('; `readyAt`'))
+  only(sk(from, "else `{startRung: \"\", rung: <the ladder's top rung>, climbs: []}`"), 'integrate-args', 'top-rung fallback')
+})
+
+test("control: an integrate call without a freshly resolved ladder fails ladder", () => {
+  only(sk(", a freshly resolved `ladder` (§ 3: read at this call's start), `mode: 'integrate'`", ", `mode: 'integrate'`"), 'ladder', 'no fresh ladder')
+})
+
+test('control: a second max_tier: line fails ladder', () => {
+  only(sk('| `env_bootstrap` | none (omit) |', '| `max_tier` | none (omit) | ignored |\n| `env_bootstrap` | none (omit) |'), 'ladder', 'second max_tier line')
 })
 
 test('control: a lead row written for an integrate call\'s review-blocked fails set-aside', () => {
@@ -578,7 +617,7 @@ test('control: a template budget that drifts from execute fails budget', () => {
   only({ template: real.template.replace('any re-review + required checks + squash', 'any re-review + squash') }, 'budget', 'template drift')
 })
 
-test('the rules are all named (25) and each has a control', () => {
-  assert.equal(RULES.length, 25)
+test('the rules are all named (26) and each has a control', () => {
+  assert.equal(RULES.length, 26)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

@@ -20,7 +20,7 @@ const T = loadEngine([
 const ROW_KEYS = [
   'slug', 'scope', 'status', 'prUrl', 'branch', 'worktreePath', 'reviewRoundsUsed', 'planRoundsUsed',
   'blockerDiagnosis', 'reviewFeedback', 'reviewHistory', 'approvedAtCeiling', 'gatedInputs', 'summary',
-  'model', 'escalated', 'escalatedAt', 'tierCapped', 'tierCappedAt',
+  'startRung', 'rung', 'climbs', 'rungDrift', 'ran',
 ]
 const STATUSES = ['review', 'review-blocked', 'blocked', 'plan-blocked', 'gate-pending']
 const sha = (c) => c.repeat(40)
@@ -44,12 +44,13 @@ const HIST2 = [{ round: 1, feedback: ['own-run fix'] }, { round: 2, feedback: ['
 
 const mkTask = (over = {}) => ({
   slug: SLUG, taskPath: `/vault/Tasks/${SLUG}.md`, scope: 'cross-cutting', planGate: true,
-  maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, model: 'fable', ...over,
+  maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, rung: 'opus-xhigh', ...over,
 })
+// The task's own rung record, as its approving row carried it.
+const RUNG = { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] }
 const mkI = (over = {}) => ({
   prUrl: PR, branch: BR, worktreePath: WT, headSha: H0, taskBase: TB, mainSha: B1, trouble: [], landed: [],
-  plan: 'THE APPROVED PLAN', reviewHistory: [], reviewRoundsUsed: 1,
-  rung: { model: 'fable', escalated: false, escalatedAt: '', tierCapped: false, tierCappedAt: '' }, startedAt: START, ...over,
+  plan: 'THE APPROVED PLAN', reviewHistory: [], reviewRoundsUsed: 1, rung: RUNG, startedAt: START, ...over,
 })
 const mkArgs = (I, over = {}, taskOver = {}) => ({
   rolloutSlug: 'proj-rollout-2026-10-01', repoPath: '/repo', verifier: 'make test', date: '2026-10-01',
@@ -492,6 +493,31 @@ test('e5: a stage that throws → a prefixed set-aside carrying the history, whi
   assert.equal(bare.row.blockerDiagnosis, 'integration: workflow stage threw — see /workflows')
 })
 
+// ADR 0029 decision 7: a row records what the call actually ran. Integrate mode records each dispatch before
+// it runs (as task mode does on st.ran), so an integrator or a judge that throws is still listed.
+test('e5b: an integrator or a judge that throws is still in the row\'s ran and integration.agents', async () => {
+  const r = await run(mkArgs(mkI()), { [ILABEL]: new Error('boom') })
+  clean(r)
+  setAside(r, 'e5b integrator')
+  assert.deepEqual(r.labels, [ILABEL])
+  assert.deepEqual(r.row.ran, [{ label: ILABEL, rung: 'opus-xhigh', model: 'opus', effort: 'xhigh' }])
+  assert.deepEqual(r.row.integration.agents.map((g) => [g.role, g.label, g.rung, g.finishedAt]), [['integrator', ILABEL, 'opus-xhigh', '']])
+  const j = await run(mkArgs(mkI({ trouble: ['conflict'] })), { [ILABEL]: ir({ state: 'merged', conflicts: ['a.js'] }), [JLABEL(2)]: new Error('boom') })
+  clean(j)
+  setAside(j, 'e5b judge')
+  assert.deepEqual(j.labels, [ILABEL, JLABEL(2)])
+  assert.deepEqual(j.row.ran.map((x) => [x.label, x.rung, x.effort]), [[ILABEL, 'opus-xhigh', 'xhigh'], [JLABEL(2), 'opus-xhigh', 'xhigh']])
+  assert.deepEqual(j.row.integration.agents.map((g) => [g.role, g.label, g.finishedAt]), [
+    ['integrator', ILABEL, '2026-10-01T10:20:00Z'], ['judge', JLABEL(2), ''],
+  ], 'the judge that threw has no finishedAt; the integrator before it keeps its own')
+  const p1 = { mergeCommit: M, headSha: M, baseSha: B1, verified: true }
+  const jo = await run(mkArgs(mkI({ trouble: ['shared-file'], leadMerge: p1 })), { [JLABEL(2)]: new Error('boom') })
+  clean(jo)
+  setAside(jo, 'e5b judge-only')
+  assert.equal(jo.row.integration.path, 'judge-only')
+  assert.deepEqual(jo.row.ran.map((x) => x.label), [JLABEL(2)])
+})
+
 // ---- (f) re-entry --------------------------------------------------------------------------------------
 
 test('f1: after the e1 set-aside, the same args re-enter at Integration and land integrated', async () => {
@@ -548,14 +574,17 @@ test('f4: the second Integration after a seeded revise keeps the landed PRs and 
 test('f5: an own-run diagnosis that looks like a marker is escaped as `own run: `', async () => {
   for (const diag of ['integration: the agent said so', T.REVISE_MARKER + ' (quoted)', 'INTEGRATION: shouting']) {
     const args = { rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', task: mkTask({ planGate: false }) }
-    const r = await run(args, { [`implement:${SLUG}`]: { verified: false, blocked: true, escalate: false, prUrl: '', branch: '', worktreePath: WT, blockerDiagnosis: diag, summary: '' } })
+    // a top-rung task: the block climbs as a recorded no-op and the same rung retries once, blocking again
+    const blocked = { verified: false, blocked: true, escalate: false, prUrl: '', branch: '', worktreePath: WT, blockerDiagnosis: diag, summary: '' }
+    const r = await run(args, { [`implement:${SLUG}`]: blocked, [`implement:${SLUG}@opus-xhigh`]: blocked })
     clean(r)
     assert.equal(r.row.status, 'blocked')
     assert.equal(r.row.blockerDiagnosis, 'own run: ' + diag)
     assert.equal(T.parseIntegrationMarker(r.row.blockerDiagnosis).stage, 'own')
   }
+  const red = { verified: false, blocked: true, escalate: false, prUrl: '', branch: '', worktreePath: WT, blockerDiagnosis: 'red suite', summary: '' }
   const plain = await run({ rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', task: mkTask({ planGate: false }) }, {
-    [`implement:${SLUG}`]: { verified: false, blocked: true, escalate: false, prUrl: '', branch: '', worktreePath: WT, blockerDiagnosis: 'red suite', summary: '' },
+    [`implement:${SLUG}`]: red, [`implement:${SLUG}@opus-xhigh`]: red,
   })
   assert.equal(plain.row.blockerDiagnosis, 'red suite', 'an ordinary diagnosis is untouched')
 })
@@ -663,6 +692,9 @@ test('arg validation: every bad field throws before any dispatch', async () => {
     ['reviewHistory', mkI({ reviewHistory: [{ round: 1, feedback: ['x'], stage: 'run' }] })],
     ['reviewRoundsUsed', mkI({ reviewRoundsUsed: 0 })], ['reviewRoundsUsed', mkI({ reviewHistory: HIST2, reviewRoundsUsed: 1 })],
     ['rung', mkI({ rung: undefined })], ['rung', mkI({ rung: { model: 'haiku', escalated: false, escalatedAt: '', tierCapped: false, tierCappedAt: '' } })],
+    ['rung', mkI({ rung: 'opus-xhigh' })], ['rung', mkI({ rung: { ...RUNG, rung: 'Opus-XHigh' } })],
+    ['rung', mkI({ rung: { ...RUNG, climbs: [{ stage: 'integration', from: 'opus-high', to: 'opus-xhigh' }] } })],
+    ['rung', mkI({ rung: { startRung: '', rung: '' } })],
     ['leadMerge', mkI({ leadMerge: { mergeCommit: 'x', headSha: LM, baseSha: B1, verified: true } })],
     ['leadMerge', mkI({ leadMerge: { mergeCommit: H0, headSha: H0, baseSha: B1, verified: true } })],
     ['readyAt', mkI({ readyAt: 5 })],
@@ -690,17 +722,22 @@ test('arg validation: every bad field throws before any dispatch', async () => {
 
 // ---- the rung -------------------------------------------------------------------------------------
 
-test('rung: the top tier at xhigh — opus when capped, fable uncapped; judgeModel and effort: do not apply', async () => {
-  const rung = { model: 'opus', escalated: true, escalatedAt: 'review', tierCapped: true, tierCappedAt: 'plan' }
+test('rung: Integration runs on the top rung whatever rung the task reached; the task\'s own rung: and effort: do not apply', async () => {
   const res = { [ILABEL]: ir({ state: 'merged', conflicts: ['a.js'] }), [JLABEL(2)]: jv() }
-  const capped = await run(mkArgs(mkI({ rung }), { maxTier: 'opus', judgeModel: 'fable' }, { effort: 'low' }), res)
-  const uncapped = await run(mkArgs(mkI({ rung }), { judgeModel: 'opus' }, { effort: 'low' }), res)
-  assert.deepEqual(capped.opts.map((o) => [o.model, o.effort, o.phase]), [['opus', 'xhigh', 'Integration'], ['opus', 'xhigh', 'Integration']])
-  assert.deepEqual(uncapped.opts.map((o) => [o.model, o.effort]), [['fable', 'xhigh'], ['fable', 'xhigh']])
-  for (const r of [capped, uncapped]) {
-    assert.deepEqual([r.row.model, r.row.escalated, r.row.escalatedAt, r.row.tierCapped, r.row.tierCappedAt], ['opus', true, 'review', true, 'plan'])
-    assert.deepEqual(r.row.integration.agents.map((g) => g.effort), ['xhigh', 'xhigh'])
-  }
+  const L3 = { source: '/home/x/.config/thread/ladder.toml', rungs: [
+    { name: 'r-low', model: 'opus', effort: 'low', judge: 'medium', review: 'high' },
+    { name: 'r-top', model: 'fable', effort: 'high', judge: 'xhigh', review: 'max' },
+  ] }
+  const bottom = { startRung: 'r-low', rung: 'r-low', climbs: [] }
+  const builtIn = await run(mkArgs(mkI(), {}, { rung: 'opus-high', effort: 'low' }), res)
+  const file = await run(mkArgs(mkI({ rung: bottom }), { ladder: L3 }, { rung: 'r-low', effort: 'low' }), res)
+  assert.deepEqual(builtIn.opts.map((o) => [o.model, o.effort, o.phase]), [['opus', 'xhigh', 'Integration'], ['opus', 'xhigh', 'Integration']])
+  assert.deepEqual(file.opts.map((o) => [o.label, o.model, o.effort]), [[ILABEL, 'fable', 'high'], [JLABEL(2), 'fable', 'max']], "the integrator at the top rung's effort, the judge at its review effort")
+  assert.deepEqual(builtIn.row.integration.agents.map((g) => [g.rung, g.effort]), [['opus-xhigh', 'xhigh'], ['opus-xhigh', 'xhigh']])
+  assert.deepEqual(file.row.integration.agents.map((g) => [g.rung, g.model]), [['r-top', 'fable'], ['r-top', 'fable']])
+  assert.deepEqual([builtIn.row.startRung, builtIn.row.rung, builtIn.row.climbs, builtIn.row.rungDrift], [RUNG.startRung, RUNG.rung, RUNG.climbs, ''], "the task's record passes through")
+  assert.deepEqual([file.row.startRung, file.row.rung, file.row.climbs], ['r-low', 'r-low', []], 'never the top rung: the task\'s own')
+  assert.deepEqual(file.row.ran.map((x) => [x.label, x.rung, x.model, x.effort]), [[ILABEL, 'r-top', 'fable', 'high'], [JLABEL(2), 'r-top', 'fable', 'max']])
 })
 
 // ---- seeded revise (task.resume) -----------------------------------------------------------------
@@ -820,12 +857,16 @@ test('S6: a seeded call that stops resumes at revise — the marker first, a rev
   assert.deepEqual(gated.row.gatedInputs, [gate])
 })
 
-test('S7: a seeded opus task escalates uncapped and reports tierCapped: review when capped', async () => {
+test('S7: a seeded revise climbs its review stage from the stamped rung, per call; on the top rung a recorded no-op', async () => {
   const script = { [`revise:${SLUG} r3`]: implOk, [`review:${SLUG} r3`]: { verdict: 'approve', feedback: [] } }
-  const up = await run(resumeArgs(mkResume(), { model: 'opus' }), script)
-  assert.deepEqual([up.row.model, up.row.escalated, up.row.escalatedAt, up.row.tierCapped], ['fable', true, 'review', false])
-  const capped = await run(resumeArgs(mkResume(), { model: 'opus' }, { maxTier: 'opus' }), script)
-  assert.deepEqual([capped.row.model, capped.row.escalated, capped.row.tierCapped, capped.row.tierCappedAt], ['opus', false, true, 'review'])
+  const up = await run(resumeArgs(mkResume(), { rung: 'opus-high' }), script)
+  clean(up)
+  assert.deepEqual([up.row.startRung, up.row.rung, up.row.climbs], ['opus-high', 'opus-xhigh', [{ stage: 'review', from: 'opus-high', to: 'opus-xhigh' }]])
+  assert.deepEqual(up.opts.map((o) => [o.label, o.model, o.effort]), [[`revise:${SLUG} r3`, 'opus', 'xhigh'], [`review:${SLUG} r3`, 'opus', 'xhigh']], 'the revise and its judge on the reached rung')
+  const top = await run(resumeArgs(mkResume(), { rung: 'opus-xhigh' }), script)
+  clean(top)
+  assert.deepEqual([top.row.startRung, top.row.rung, top.row.climbs], ['opus-xhigh', 'opus-xhigh', [{ stage: 'review', from: 'opus-xhigh', to: 'opus-xhigh' }]])
+  assert.deepEqual(top.row.ran.map((x) => x.label), [`revise:${SLUG} r3`, `review:${SLUG} r3`])
 })
 
 // ---- empty-feedback rounds (a `changes` verdict with [] is valid; the live row passes verbatim) ---------
@@ -902,7 +943,8 @@ test('static: no force, no PR merge, approvedGates-independent prompts, the row 
   const FORCE = /--force|force-with-lease|push +-f\b|\+refs\/|\+HEAD/
   assert.ok(!FORCE.test(src), 'engine source: no force flag')
   const LM = sha('9')
-  for (const over of [{}, { maxTier: 'opus' }, { defaultBranch: 'master', envBootstrap: 'poetry install', knownBaselineFailures: ['t — env'] }]) {
+  const L3 = { source: '/home/x/.config/thread/ladder.toml', rungs: [{ name: 'solo', model: 'fable', effort: 'high', judge: 'high', review: 'max' }] }
+  for (const over of [{}, { ladder: L3 }, { defaultBranch: 'master', envBootstrap: 'poetry install', knownBaselineFailures: ['t — env'] }]) {
     const I = mkI({ landed: LANDED, reviewHistory: HIST2, reviewRoundsUsed: 2, trouble: ['conflict', 'red'] })
     const a = mkArgs(I, over)
     const j = { mergeCommit: M, headSha: F1, baseSha: B1, triggers: ['conflict'], path: 'integrator' }

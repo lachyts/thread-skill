@@ -5,7 +5,10 @@
 //                               it equals the unset output PLUS exactly the injected bootstrap line.
 //   - escalationContext(prior)→ '' when prior is empty, hand-over block when set; a prompt with prior
 //                               equals the prior-less prompt PLUS exactly the injected block.
-//   - verifyBlock(tier, …)    → opus renders the ONE-SHOT block (no iteration), fable the full Ralph loop.
+//   - verifyBlock(st, …)      → a first pass below the top rung renders the ONE-SHOT block (no iteration);
+//                               the pass after the stage's climb, and every top-rung pass, the full Ralph loop.
+//   - the ladder (ADR 0029)   → every role's effort is the current rung's; each stage climbs once; a top-rung
+//                               retry is a same-rung second pass at CAPPED_RETRY_ITERATIONS.
 //   - gated inputs (ADR 0008) → the plan prompt ALWAYS renders the Gated inputs requirement; a non-empty
 //                               unapproved declaration pauses the task (status gate-pending) even when
 //                               planGate is false; approved gates on the note are never re-asked; "None"
@@ -34,7 +37,7 @@ const marker = '// ---- Orchestration'
 const idx = src.indexOf(marker)
 if (idx === -1) { console.error('FAIL - orchestration marker not found'); process.exit(1) }
 let head = src.slice(0, idx).replace('export const meta', 'const meta')
-head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, EFFORT, implEffort, judgeEffort, tierCap, clampTier, taskModel, judgeFor, terminalTier, escalate, effortTier, readOnlyPrompt, normaliseTier, roundBudgetDiagnosis, taskTreeSetup };\n'
+head += '\nvar __t = { gateOverride, envBootstrapStep, worktreeSetup, escalationContext, verifyBlock, oneShotVerify, ralphLoop, implementerPrompt, plannerPrompt, planReviserPrompt, planJudgePrompt, approvedPlanImplementerPrompt, reviewJudgePrompt, reviserPrompt, groupedRounds, reviewHistoryBlock, stepBackBlock, parseGatedInputs, unapprovedGates, runAgent, planLoop, implement, reviewLoop, converge, BUILT_IN_LADDER, CAPPED_RETRY_ITERATIONS, rungState, startRung, cur, onTop, climbOf, implEffort, judgeEffort, escalate, readOnlyPrompt, roundBudgetDiagnosis, taskTreeSetup };\n'
 
 // `agent` and `log` are Workflow globals the engine expects at run time. The layer functions resolve them
 // against the sandbox global at CALL time, so the transient-death tests below swap `ctx.agent` per case to
@@ -63,68 +66,65 @@ ok(!wt0.includes('env_bootstrap'), 'worktreeSetup: byte-clean when env unset')
 ok(wtE.includes('poetry install') && wtE.includes('env_bootstrap'), 'worktreeSetup: injects bootstrap when set')
 ok(wtE.replace(T.envBootstrapStep(aE), '') === wt0, 'worktreeSetup: set == unset + exactly the injected line (byte-identical base)')
 
-// ---- Model tiering: one-shot first pass + escalation hand-over ----------------
+// ---- The ladder (ADR 0029): one-shot below the top, a climb per stage, the top rung's second pass ----
 
-// State doubles: ST_OPUS an uncapped opus first pass, ST_FABLE an escalated/seeded fable task,
-// ST_CAPPED an opus task under maxTier:'opus' whose escalation has been suppressed.
-const ST_OPUS = { tier: 'opus', cap: 'fable', escalated: false, capSuppressed: false }
-const ST_FABLE = { tier: 'fable', cap: 'fable', escalated: true, capSuppressed: false }
-const ST_CAPPED = { tier: 'opus', cap: 'opus', escalated: false, capSuppressed: true }
-ok(T.escalationContext('') === '', 'escalationContext: empty when unused (empty string)')
-ok(T.escalationContext(undefined, ST_FABLE) === '', 'escalationContext: empty when unused (undefined)')
-ok(T.escalationContext('diag', ST_FABLE).includes('ESCALATION'), 'escalationContext: hand-over block when set')
+// State doubles, built by rungState() and escalate() exactly as converge() builds them, on the built-in
+// ladder (opus-high, then opus-xhigh). ST_BOTTOM is a first pass below the top; ST_CLIMBED is after a real
+// implement climb (now on the top rung); ST_PLAN_CLIMBED after a real plan climb; ST_TOP a task that
+// started on the top rung, whose plan and implement climbs were recorded as no-ops.
+const stOf = (task, a, stages = []) => {
+  const st = T.rungState({ slug: 'proj-fix-x', ...task }, a)
+  for (const s of stages) T.escalate(st, 'proj-fix-x', s)
+  return st
+}
+const ST_BOTTOM = stOf({}, {})
+const ST_CLIMBED = stOf({}, {}, ['implement'])
+const ST_PLAN_CLIMBED = stOf({}, {}, ['plan'])
+const ST_TOP = stOf({ rung: 'opus-xhigh' }, {}, ['plan', 'implement'])
+ok(T.escalationContext('', ST_BOTTOM, 'implement') === '', 'escalationContext: empty when unused (empty string)')
+ok(T.escalationContext(undefined, ST_CLIMBED, 'implement') === '', 'escalationContext: empty when unused (undefined)')
+ok(T.escalationContext('diag', ST_CLIMBED, 'implement').includes('ESCALATION: you take this task over ONE RUNG UP'), 'escalationContext: a real climb is a takeover one rung up')
 
-const vOpus = T.verifyBlock(ST_OPUS, 'make test', 3, undefined)
-const vFable = T.verifyBlock(ST_FABLE, 'make test', 3, undefined)
-ok(vOpus.includes('ONE-SHOT') && !vOpus.includes('Max iterations'), 'verifyBlock: opus = one-shot, no iteration budget')
-ok(vOpus.includes('escalate=true'), 'verifyBlock: one-shot instructs the escalate signal on red')
-ok(vFable.includes('Max iterations: 3') && !vFable.includes('ONE-SHOT'), 'verifyBlock: fable = full Ralph loop')
-ok(vFable === T.ralphLoop('make test', 3, undefined), 'verifyBlock: fable arm is byte-identical to ralphLoop (resume-cache)')
+const vBottom = T.verifyBlock(ST_BOTTOM, 'make test', 3, undefined)
+const vClimbed = T.verifyBlock(ST_CLIMBED, 'make test', 3, undefined)
+ok(vBottom.includes('ONE-SHOT') && !vBottom.includes('Max iterations'), 'verifyBlock: a first pass below the top = one-shot, no iteration budget')
+ok(vBottom.includes('escalate=true') && vBottom.includes('next rung'), 'verifyBlock: the one-shot instructs the escalate signal on red, for the next rung')
+ok(vClimbed.includes('Max iterations: 3') && !vClimbed.includes('ONE-SHOT'), 'verifyBlock: after the implement climb = full Ralph loop')
+ok(vClimbed === T.ralphLoop('make test', 3, undefined), 'verifyBlock: the loop arm is byte-identical to ralphLoop (resume-cache)')
 
-const vOpusB = T.verifyBlock(ST_OPUS, 'make test', 3, ['test_x — env'])
-ok(vOpusB.includes('KNOWN BASELINE FAILURES') && vOpusB.includes('test_x — env'), 'oneShotVerify: baseline arm renders the manifest')
+const vBottomB = T.verifyBlock(ST_BOTTOM, 'make test', 3, ['test_x — env'])
+ok(vBottomB.includes('KNOWN BASELINE FAILURES') && vBottomB.includes('test_x — env'), 'oneShotVerify: baseline arm renders the manifest')
 
 const taskI = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', ignoreGate: false, maxIterations: 3 }
 const aI = { repoPath: '/repo', rolloutSlug: 'proj-rollout', verifier: 'make test' }
-const pOpus = T.implementerPrompt(taskI, aI, ST_OPUS, '')
-const pFable = T.implementerPrompt(taskI, aI, ST_FABLE, '')
-ok(pOpus.includes('ONE-SHOT') && !pOpus.includes('Max iterations'), 'implementerPrompt: opus tier renders the one-shot block')
-ok(pFable.includes('Max iterations: 3') && !pFable.includes('ONE-SHOT'), 'implementerPrompt: fable tier renders the Ralph loop')
+const pBottom = T.implementerPrompt(taskI, aI, ST_BOTTOM, '')
+const pClimbed = T.implementerPrompt(taskI, aI, ST_CLIMBED, '')
+ok(pBottom.includes('ONE-SHOT') && !pBottom.includes('Max iterations'), 'implementerPrompt: a bottom-rung first pass renders the one-shot block')
+ok(pClimbed.includes('Max iterations: 3') && !pClimbed.includes('ONE-SHOT'), 'implementerPrompt: after the climb it renders the Ralph loop')
 const prior = 'the verifier failed on test_y'
-const pPrior = T.implementerPrompt(taskI, aI, ST_FABLE, prior)
-ok(pPrior.includes('ESCALATION'), 'implementerPrompt: escalation context present when prior set')
-ok(pPrior.replace(T.escalationContext(prior, ST_FABLE), '') === pFable, 'implementerPrompt: with prior == without + exactly the injected block (byte-identical base)')
+const pPrior = T.implementerPrompt(taskI, aI, ST_CLIMBED, prior)
+ok(pPrior.includes('ONE RUNG UP'), 'implementerPrompt: the takeover context is present when prior set')
+ok(pPrior.replace(T.escalationContext(prior, ST_CLIMBED, 'implement'), '') === pClimbed, 'implementerPrompt: with prior == without + exactly the injected block (byte-identical base)')
 
-// ---- Effort bundles (ADR 0007): a tier is a (model, per-role effort) bundle ----
-// The matrix is fixed in the engine — opus: implementer medium / judges high / master review high;
-// fable: implementer high / judges high / master review xhigh; reconcile low on either tier. Per-task
-// `effort:` frontmatter is the SINGLE escape hatch: it overrides the planner/implementer effort only —
-// judges always keep the matrix. Escalation flips st.tier, so effort carries automatically.
+// ---- Efforts ride the rung (ADR 0029: the ladder replaces the engine's effort matrix) ----
+// A rung is a model plus three efforts: `effort` (the code-writing roles — planner, plan reviser,
+// implementer, reviser, read-only investigator), `judge` (the plan gate) and `review` (the master review).
+// The built-in ladder: opus-high (high / high / xhigh), then opus-xhigh (xhigh / high / xhigh). A climb
+// moves every role at once, judges included.
+ok(JSON.stringify(T.BUILT_IN_LADDER) === JSON.stringify({ source: 'built-in', rungs: [
+  { name: 'opus-high', model: 'opus', effort: 'high', judge: 'high', review: 'xhigh' },
+  { name: 'opus-xhigh', model: 'opus', effort: 'xhigh', judge: 'high', review: 'xhigh' },
+] }), 'BUILT_IN_LADDER: two Opus rungs, high then xhigh, nothing above Opus, no max')
+ok(T.implEffort(ST_BOTTOM) === 'high' && T.implEffort(ST_CLIMBED) === 'xhigh', 'implEffort: the current rung\'s effort (high, then xhigh after a climb)')
+ok(T.judgeEffort(ST_BOTTOM, 'judge') === 'high' && T.judgeEffort(ST_CLIMBED, 'judge') === 'high', 'judgeEffort: the plan judge at the current rung\'s judge effort')
+ok(T.judgeEffort(ST_BOTTOM, 'review') === 'xhigh' && T.judgeEffort(ST_CLIMBED, 'review') === 'xhigh', 'judgeEffort: the master review at the current rung\'s review effort')
 
-ok(T.EFFORT.opus.implementer === 'medium' && T.EFFORT.opus.judge === 'high'
-  && T.EFFORT.opus.masterReview === 'high' && T.EFFORT.opus.reconcile === 'low',
-  'EFFORT: opus bundle = implementer medium, judges high, master review high, reconcile low')
-ok(T.EFFORT.fable.implementer === 'high' && T.EFFORT.fable.judge === 'high'
-  && T.EFFORT.fable.masterReview === 'xhigh' && T.EFFORT.fable.reconcile === 'low',
-  'EFFORT: fable bundle = implementer high, judges high, master review xhigh, reconcile low')
-
-ok(T.implEffort({ tier: 'opus' }, {}) === 'medium', 'implEffort: opus tier → medium')
-ok(T.implEffort({ tier: 'fable' }, {}) === 'high', 'implEffort: fable tier → high')
-ok(T.implEffort({ tier: 'opus' }, { effort: 'max' }) === 'max', 'implEffort: per-task effort override wins at opus')
-ok(T.implEffort({ tier: 'fable' }, { effort: 'max' }) === 'max', 'implEffort: per-task effort override wins at fable')
-ok(T.judgeEffort(undefined, { tier: 'opus' }, 'judge') === 'high', 'judgeEffort: plan judge high at opus')
-ok(T.judgeEffort(undefined, { tier: 'fable' }, 'judge') === 'high', 'judgeEffort: plan judge high at fable')
-ok(T.judgeEffort(undefined, { tier: 'opus' }, 'masterReview') === 'high', 'judgeEffort: master review high at opus')
-ok(T.judgeEffort(undefined, { tier: 'fable' }, 'masterReview') === 'xhigh', 'judgeEffort: master review xhigh at fable')
-ok(T.judgeEffort({ judgeModel: 'fable' }, { tier: 'opus' }, 'masterReview') === 'xhigh',
-  'judgeEffort: a judgeModel pin carries the pinned tier\'s effort (model + effort travel together)')
-
-// No rollout-level effort config, deliberately (ADR 0007 rejected options): the rollout template must
-// never grow an `effort:` key.
+// No rollout-level effort config, deliberately (ADR 0007's stance, now the operator's ladder): the rollout
+// template must never grow an `effort:` key.
 const tpl = fs.readFileSync(path.join(here, '..', '..', 'schedule', 'rollout-template.md'), 'utf8')
 ok(!/\beffort\s*:/i.test(tpl), 'rollout template: no effort: key (no rollout-level effort config)')
 
-// End-to-end: every spawn site passes the matrix effort for its role + the task's LIVE tier.
+// End-to-end: every spawn site passes its role's effort on the task's CURRENT rung.
 // ctx.agent records (label, model, effort) per dispatch; converge() drives all three layers.
 const aEff = { repoPath: '/repo', rolloutSlug: 'proj-rollout', verifier: 'make test' }
 const baseEff = { taskPath: '/v/t.md', maxIterations: 3, maxReviewRounds: 2, maxPlanRounds: 2 }
@@ -138,11 +138,11 @@ function recordingAgent(impl) {
 const greenImpl = { verified: true, blocked: false, escalate: false, prUrl: 'https://pr/9', branch: 'b', worktreePath: '/wt', blockerDiagnosis: '', summary: 's' }
 const call = (label) => effortCalls.find((c) => c.label.startsWith(label))
 // Exact-match sibling: `call` is a PREFIX match, so it cannot distinguish a first pass from
-// its `@tier` retry. Use callAt when the retry is the subject.
+// its `@<rung>` retry. Use callAt when the retry is the subject.
 const callAt = (label) => effortCalls.find((c) => c.label === label)
 
-// Scenario A — plan-gated opus task, clean pass: planner medium, plan judge high, implementer
-// medium, master review high; nothing escalates.
+// Scenario A — plan-gated bottom task, clean pass: planner high, plan judge high, implementer high (one-shot),
+// master review xhigh; nothing climbs.
 effortCalls.length = 0
 ctx.agent = recordingAgent(async (prompt, opts) => {
   if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
@@ -150,130 +150,35 @@ ctx.agent = recordingAgent(async (prompt, opts) => {
   if (opts.phase === 'Implement') return greenImpl
   return { verdict: 'approve', feedback: [] } // review judge
 })
-const cleanOpus = await T.converge({ ...baseEff, slug: 'proj-eff-a', scope: 'cross-cutting', planGate: true }, aEff)
-ok(cleanOpus && cleanOpus.status === 'review' && !cleanOpus.escalated, 'effort A: clean plan-gated opus task lands unescalated')
-ok(call('plan:proj-eff-a') && call('plan:proj-eff-a').effort === 'medium' && call('plan:proj-eff-a').model === 'opus', 'effort A: planner runs medium @ opus')
-ok(call('plan-judge:proj-eff-a') && call('plan-judge:proj-eff-a').effort === 'high', 'effort A: plan judge runs high (matrix)')
-ok(call('implement:proj-eff-a') && call('implement:proj-eff-a').effort === 'medium' && call('implement:proj-eff-a').model === 'opus', 'effort A: implementer runs medium @ opus')
-ok(call('review:proj-eff-a') && call('review:proj-eff-a').effort === 'high', 'effort A: master review runs high @ opus')
+const cleanBottom = await T.converge({ ...baseEff, slug: 'proj-eff-a', scope: 'cross-cutting', planGate: true }, aEff)
+ok(cleanBottom && cleanBottom.status === 'review' && cleanBottom.climbs.length === 0 && cleanBottom.rung === 'opus-high', 'effort A: a clean plan-gated bottom task lands on the bottom rung, no climb')
+ok(call('plan:proj-eff-a') && call('plan:proj-eff-a').effort === 'high' && call('plan:proj-eff-a').model === 'opus', 'effort A: planner runs high @ opus')
+ok(call('plan-judge:proj-eff-a') && call('plan-judge:proj-eff-a').effort === 'high', 'effort A: plan judge runs at the rung\'s judge effort (high)')
+ok(call('implement:proj-eff-a') && call('implement:proj-eff-a').effort === 'high' && call('implement:proj-eff-a').model === 'opus', 'effort A: implementer runs high @ opus')
+ok(call('review:proj-eff-a') && call('review:proj-eff-a').effort === 'xhigh', 'effort A: master review runs at the rung\'s review effort (xhigh)')
 
-// Scenario B — escalation flip mid-task: the opus one-shot goes red (escalate=true), the fable
-// takeover runs at high, and the master review — now at the fable tier — runs at xhigh.
+// Scenario B — a climb mid-task: the bottom one-shot goes red (escalate=true), the opus-xhigh takeover runs
+// at xhigh, and the master review runs on the reached rung.
 effortCalls.length = 0
 ctx.agent = recordingAgent(async (prompt, opts) => {
   if (opts.phase === 'Implement') {
-    if (opts.label.endsWith('@fable')) return greenImpl
+    if (opts.label.endsWith('@opus-xhigh')) return greenImpl
     return { verified: false, blocked: false, escalate: true, prUrl: '', branch: 'b', worktreePath: '/wt', blockerDiagnosis: 'red one-shot', summary: '' }
   }
   return { verdict: 'approve', feedback: [] }
 })
 const escRes = await T.converge({ ...baseEff, slug: 'proj-eff-b', scope: 'single-file', planGate: false }, aEff)
-ok(escRes && escRes.status === 'review' && escRes.escalated && escRes.model === 'fable', 'effort B: red one-shot escalates and lands at fable')
-ok(call('implement:proj-eff-b') && call('implement:proj-eff-b').effort === 'medium' && call('implement:proj-eff-b').model === 'opus', 'effort B: opus first pass runs medium')
-ok(call('implement:proj-eff-b@fable') && call('implement:proj-eff-b@fable').effort === 'high' && call('implement:proj-eff-b@fable').model === 'fable', 'effort B: fable takeover runs high (bundle flips with the tier)')
-ok(call('review:proj-eff-b') && call('review:proj-eff-b').effort === 'xhigh' && call('review:proj-eff-b').model === 'fable', 'effort B: master review after escalation runs xhigh @ fable')
-// The escalated retry keeps the FULL iteration budget — that is what the hand-over to a stronger
-// tier buys. Only a SUPPRESSED escalation (no hand-over) gets the reduced constant. Without this,
-// dropping implement()'s `moved ?` guard silently halves every real escalation and ships green.
-ok(callAt('implement:proj-eff-b@fable') && callAt('implement:proj-eff-b@fable').prompt.includes('Max iterations: 3'), 'effort B: a REAL escalation keeps the FULL max_iterations, never the capped retry constant')
+ok(escRes && escRes.status === 'review' && escRes.rung === 'opus-xhigh' && JSON.stringify(escRes.climbs) === JSON.stringify([{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }]), 'effort B: a red one-shot climbs and lands on opus-xhigh')
+ok(call('implement:proj-eff-b') && call('implement:proj-eff-b').effort === 'high', 'effort B: the bottom first pass runs high')
+ok(callAt('implement:proj-eff-b@opus-xhigh') && callAt('implement:proj-eff-b@opus-xhigh').effort === 'xhigh', 'effort B: the takeover runs at the reached rung\'s effort (xhigh)')
+ok(call('review:proj-eff-b') && call('review:proj-eff-b').effort === 'xhigh' && call('review:proj-eff-b').model === 'opus', 'effort B: the master review runs on the reached rung')
+// The retry after a real climb keeps the FULL iteration budget — that is what the hand-over buys. Only a
+// top-rung retry (a recorded no-op climb) gets the reduced constant. Without this, dropping implement()'s
+// `moved ?` guard silently halves every real climb and ships green.
+ok(callAt('implement:proj-eff-b@opus-xhigh') && callAt('implement:proj-eff-b@opus-xhigh').prompt.includes('Max iterations: 3'), 'effort B: a REAL climb keeps the FULL max_iterations, never the top-rung retry constant')
 
-// ---- maxTier ceiling (args.maxTier) -----------------------------------------
-// The ceiling exists for one condition: the higher tier's quota is exhausted. Its whole promise is
-// "the same run on a cheaper model", so the cases that matter are (a) absent ⇒ byte-identical, and
-// (b) capped ⇒ still the FULL loop, not a silently weaker one-shot run.
-
-// Parsing: only a genuinely absent value lifts the cap; a typo caps strictly rather than spending a
-// quota the account does not have.
-ok(T.tierCap({}) === 'fable' && T.tierCap(undefined) === 'fable' && T.tierCap({ maxTier: '' }) === 'fable', 'maxTier: absent/empty ⇒ uncapped (fable)')
-ok(T.tierCap({ maxTier: 'opus' }) === 'opus' && T.tierCap({ maxTier: '  OPUS ' }) === 'opus', 'maxTier: case/whitespace-insensitive')
-ok(T.tierCap({ maxTier: 'Opus5' }) === 'opus' && T.tierCap({ maxTier: 'fabel' }) === 'opus', 'maxTier: unrecognised value fails CLOSED to opus, never silently uncapped')
-
-// clampTier is a ceiling, never a lift.
-ok(T.clampTier('fable', 'opus') === 'opus', 'clampTier: above the cap clamps down')
-ok(T.clampTier('opus', 'fable') === 'opus', 'clampTier: below the cap passes through (never raised)')
-ok(T.taskModel({ model: 'fable' }, 'opus') === 'opus' && T.taskModel({ model: 'fable' }, 'fable') === 'fable', 'maxTier: seed clamped only under the cap')
-ok(T.judgeFor({ judgeModel: 'fable' }, { tier: 'opus', cap: 'opus' }) === 'opus', 'maxTier: a judgeModel pin is clamped too')
-
-// escalate() under the cap: no tier change, no escalated stamp (reconcile must not write a tier the
-// account cannot use), and a durable capSuppressed marker so a block is not misread as a wall.
-{
-  const capped = { tier: 'opus', cap: 'opus', escalated: false, escalatedAt: '', capSuppressed: false }
-  const moved = T.escalate(capped, 'x', 'plan')
-  ok(moved === false && capped.tier === 'opus' && capped.escalated === false && capped.capSuppressed === true, 'maxTier: escalation suppressed, recorded, not stamped as an escalation')
-  const free = { tier: 'opus', cap: 'fable', escalated: false, escalatedAt: '', capSuppressed: false }
-  const moved2 = T.escalate(free, 'x', 'plan')
-  ok(moved2 === true && free.tier === 'fable' && free.escalated === true && !free.capSuppressed, 'maxTier: absent ⇒ escalation behaves exactly as before')
-}
-
-// The regression this ceiling shipped with: a capped tier is TERMINAL, so it must render the full
-// Ralph loop. Rendering the one-shot would give a capped run one verifier pass and zero fix
-// iterations — strictly weaker than the run it replaces, with no stronger tier to hand over to.
-{
-  const ralph = T.verifyBlock(ST_FABLE, 'make test', 3, [])
-  const capped = T.verifyBlock(ST_CAPPED, 'make test', 3, [])
-  const firstPass = T.verifyBlock(ST_OPUS, 'make test', 3, [])
-  ok(capped === ralph, 'maxTier: a capped opus tier renders the FULL Ralph loop, not the one-shot')
-  ok(firstPass === T.oneShotVerify('make test', []), 'maxTier: absent ⇒ the opus first pass still gets the one-shot')
-  ok(firstPass !== ralph, 'maxTier: the two verification blocks are genuinely different text')
-  // An unrecognised tier is TERMINAL, so it keeps the full loop — the pre-ceiling default. A
-  // terminality test must not invert what `tier === 'opus' ? oneShot : ralph` used to give.
-  ok(T.verifyBlock({ tier: 'sonnet', cap: 'fable' }, 'make test', 3, []) === ralph, 'maxTier: an unrecognised tier still gets the full loop, never the one-shot')
-}
-
-// Effort is not quota-scarce: a task the cap has made TERMINAL takes the higher tier's row — from the
-// FIRST dispatch, not from the moment an escalation is refused. Every double carries a `cap`, because
-// a state with capSuppressed and no cap is one converge() cannot produce (escalate() only ever sets
-// the flag inside its `if (terminalTier(st))` branch).
-ok(T.effortTier({ tier: 'opus', cap: 'opus', capSuppressed: false }) === 'fable', 'maxTier: a capped tier takes the higher EFFORT row BEFORE any suppression is recorded')
-ok(T.effortTier({ tier: 'opus', cap: 'opus', capSuppressed: true }) === 'fable' && T.effortTier({ tier: 'opus', cap: 'fable', capSuppressed: false }) === 'opus', 'maxTier: terminal ⇒ higher row; uncapped opus ⇒ its own row')
-ok(T.implEffort({ tier: 'opus', cap: 'opus', capSuppressed: true }, {}) === 'high', 'maxTier: capped implementer runs high, not medium')
-ok(T.judgeEffort({}, { tier: 'opus', cap: 'opus', capSuppressed: true }, 'masterReview') === 'xhigh', 'maxTier: capped master review runs xhigh')
-
-// A same-tier retry must not be told it is a stronger-tier takeover.
-ok(T.escalationContext('diag', ST_CAPPED).includes('SECOND PASS') && !T.escalationContext('diag', ST_CAPPED).includes('STRONGER-TIER'), 'maxTier: capped retry says second pass, not stronger-tier takeover')
-ok(T.escalationContext('diag', ST_FABLE).includes('STRONGER-TIER'), 'maxTier: a real escalation keeps the takeover framing')
-ok(T.escalationContext('', ST_CAPPED) === '', 'maxTier: no prior ⇒ still empty (byte-identical)')
-// The read-only second pass must not inherit the code-writing wording: no verification loop, no branch.
-{
-  const ro = T.escalationContext('diag', ST_CAPPED, 'readonly')
-  ok(ro.includes('SECOND PASS') && !ro.includes('FULL verification loop') && !ro.includes('on your branch'), 'maxTier: read-only second pass keeps its read-only contract')
-}
-
-// CLASS closer: every builder derives its framing from st, so no call site can be forgotten (the
-// plannerPrompt site was missed exactly this way and shipped green against a helper-only assertion).
-{
-  const aCap = { maxTier: 'opus', verifier: 'make test' }
-  const tk = { slug: 'cap-sweep', scope: 'cross-cutting', maxIterations: 3 }
-  const built = [
-    T.plannerPrompt(tk, aCap, ST_CAPPED, 'prior diag'),
-    T.implementerPrompt(tk, aCap, ST_CAPPED, 'prior diag'),
-    T.approvedPlanImplementerPrompt(tk, 'PLAN', aCap, ST_CAPPED, 'prior diag'),
-    T.readOnlyPrompt(tk, aCap, ST_CAPPED, 'prior diag'),
-  ]
-  ok(built.every((p) => !p.includes('STRONGER-TIER')), 'maxTier: NO builder promises a stronger-tier takeover under a cap')
-  ok(built.every((p) => p.includes('SECOND PASS')), 'maxTier: every builder renders the second-pass framing under a cap')
-  ok(T.plannerPrompt(tk, { verifier: 'make test' }, ST_FABLE, 'prior diag').includes('STRONGER-TIER')
-    && T.implementerPrompt(tk, { verifier: 'make test' }, ST_FABLE, 'prior diag').includes('STRONGER-TIER'), 'maxTier: a real escalation still reads as a takeover in every builder')
-}
-
-// judgeModel is free-form operator input: normalised, clamped, never able to lift the cap.
-ok(T.judgeFor({ judgeModel: 'Fable' }, { tier: 'opus', cap: 'opus' }) === 'opus', 'judgeModel: a case-variant pin is normalised then clamped')
-ok(T.judgeFor({ judgeModel: '  fable  ' }, { tier: 'opus', cap: 'fable' }) === 'fable', 'judgeModel: whitespace tolerated when the cap allows it')
-ok(T.judgeFor({ judgeModel: 'nonsense' }, { tier: 'opus', cap: 'fable' }) === 'opus', 'judgeModel: an unrecognised pin falls back to the task tier, never a guess')
-ok(T.judgeEffort({ judgeModel: 'opus' }, { tier: 'opus', cap: 'opus', capSuppressed: true }, 'masterReview') === 'xhigh', 'judgeModel: pinning to the capped tier does not LOWER review effort')
-ok(T.clampTier('sonnet', 'opus') === 'opus', 'clampTier: an unrecognised tier ranks at the top, so a cap clamps it down')
-// Inherited Object.prototype keys answer a bare TIER_RANK[tier] lookup, so every rank read goes
-// through a hasOwnProperty-guarded helper. Without it `model: constructor` sailed through unclamped
-// AND read as non-terminal (one-shot, no takeover).
-ok(T.clampTier('constructor', 'opus') === 'opus', 'clampTier: an inherited prototype key is clamped, not passed through')
-ok(T.clampTier('toString', 'opus') === 'opus', 'clampTier: no prototype key escapes the ceiling')
-ok(T.taskModel({ model: 'constructor' }, 'opus') === 'opus', 'maxTier: a prototype-key model seed is clamped')
-ok(T.terminalTier({ tier: 'constructor', cap: 'fable' }) === true, 'terminalTier: an unknown tier is terminal, however it is spelled')
-ok(T.verifyBlock({ tier: 'constructor', cap: 'fable' }, 'make test', 3, []) === T.ralphLoop('make test', 3, []), 'verifyBlock: a prototype-key tier still gets the full loop')
-ok(T.implEffort({ tier: 'constructor', capSuppressed: false }, {}) === 'high', 'implEffort: an unknown tier falls back to a real EFFORT row instead of throwing')
-
-// Scenario C — per-task `effort: max` escape hatch on a plan-gated opus task: planner + implementer
-// run at max, judges keep the matrix (plan judge high, master review high @ opus).
+// Scenario C — the legacy `effort: max` stamp on a note with no `rung:`: it only picks the starting rung (the
+// top), and no dispatch ever runs at max.
 effortCalls.length = 0
 ctx.agent = recordingAgent(async (prompt, opts) => {
   if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
@@ -281,135 +186,165 @@ ctx.agent = recordingAgent(async (prompt, opts) => {
   if (opts.phase === 'Implement') return greenImpl
   return { verdict: 'approve', feedback: [] }
 })
-await T.converge({ ...baseEff, slug: 'proj-eff-c', scope: 'cross-cutting', planGate: true, effort: 'max' }, aEff)
-ok(call('plan:proj-eff-c') && call('plan:proj-eff-c').effort === 'max', 'effort C: effort override applies to the planner')
-ok(call('implement:proj-eff-c') && call('implement:proj-eff-c').effort === 'max', 'effort C: effort override applies to the implementer')
-ok(call('plan-judge:proj-eff-c') && call('plan-judge:proj-eff-c').effort === 'high', 'effort C: plan judge keeps the matrix (high) despite the override')
-ok(call('review:proj-eff-c') && call('review:proj-eff-c').effort === 'high', 'effort C: master review keeps the matrix (high @ opus) despite the override')
+const legacyMax = await T.converge({ ...baseEff, slug: 'proj-eff-c', scope: 'cross-cutting', planGate: true, effort: 'max' }, aEff)
+ok(legacyMax && legacyMax.startRung === 'opus-xhigh' && legacyMax.rung === 'opus-xhigh', 'effort C: a legacy effort: max starts on the top rung')
+ok(effortCalls.length === 4 && effortCalls.every((c) => c.effort !== 'max' && c.model === 'opus'), 'effort C: no dispatch runs at max or off the ladder')
+ok(call('plan:proj-eff-c').effort === 'xhigh' && call('implement:proj-eff-c').effort === 'xhigh' && call('plan-judge:proj-eff-c').effort === 'high' && call('review:proj-eff-c').effort === 'xhigh', 'effort C: every role at the top rung\'s efforts')
+ok(!call('implement:proj-eff-c').prompt.includes('EXACTLY ONCE'), 'effort C: the top rung\'s first pass runs the full loop')
 
-// Scenario D — the override survives an escalation flip: implementer stays max on both tiers while
-// the master review follows the matrix to xhigh.
-effortCalls.length = 0
-ctx.agent = recordingAgent(async (prompt, opts) => {
-  if (opts.phase === 'Implement') {
-    if (opts.label.endsWith('@fable')) return greenImpl
-    return { verified: false, blocked: false, escalate: true, prUrl: '', branch: 'b', worktreePath: '/wt', blockerDiagnosis: 'red one-shot', summary: '' }
-  }
-  return { verdict: 'approve', feedback: [] }
-})
-await T.converge({ ...baseEff, slug: 'proj-eff-d', scope: 'single-file', planGate: false, effort: 'max' }, aEff)
-ok(call('implement:proj-eff-d') && call('implement:proj-eff-d').effort === 'max', 'effort D: override holds on the opus first pass')
-ok(call('implement:proj-eff-d@fable') && call('implement:proj-eff-d@fable').effort === 'max', 'effort D: override survives the fable takeover')
-ok(call('review:proj-eff-d') && call('review:proj-eff-d').effort === 'xhigh', 'effort D: master review still follows the matrix (xhigh @ fable)')
+// ---- The rung sweep: verify shape, framing and efforts at every rung ---------------------------------------
+// A three-rung ladder whose efforts all differ, so a role reading the wrong rung shows.
+const L3 = { source: '/home/x/.config/thread/ladder.toml', rungs: [
+  { name: 'r-low', model: 'opus', effort: 'low', judge: 'medium', review: 'high' },
+  { name: 'r-mid', model: 'opus', effort: 'medium', judge: 'high', review: 'xhigh' },
+  { name: 'r-top', model: 'fable', effort: 'high', judge: 'xhigh', review: 'max' },
+] }
+const a3 = { ladder: L3 }
+for (let i = 0; i < 3; i++) {
+  const name = L3.rungs[i].name
+  const at = stOf({ rung: name }, a3)
+  ok(T.cur(at).name === name && T.onTop(at) === (i === 2), `rung sweep: ${name} — the state starts there`)
+  ok(T.implEffort(at) === L3.rungs[i].effort && T.judgeEffort(at, 'judge') === L3.rungs[i].judge && T.judgeEffort(at, 'review') === L3.rungs[i].review,
+    `rung sweep: ${name} — every role takes this rung's effort`)
+  const first = T.verifyBlock(at, 'make test', 3, [])
+  ok(first === (i < 2 ? T.oneShotVerify('make test', []) : T.ralphLoop('make test', 3, [])), `rung sweep: ${name} — the implement first pass is ${i < 2 ? 'one-shot' : 'the full loop (top rung)'}`)
+  const after = stOf({ rung: name }, a3, ['implement'])
+  ok(T.verifyBlock(after, 'make test', 3, []) === T.ralphLoop('make test', 3, []), `rung sweep: ${name} — the pass after the implement climb runs the full loop`)
+  ok(T.cur(after).name === L3.rungs[Math.min(i + 1, 2)].name, `rung sweep: ${name} — the climb moves one rung, never past the top`)
+  const planUp = stOf({ rung: name }, a3, ['plan'])
+  const stillBelow = Math.min(i + 1, 2) < 2
+  ok(T.verifyBlock(planUp, 'make test', 3, []) === (stillBelow ? T.oneShotVerify('make test', []) : T.ralphLoop('make test', 3, [])),
+    `rung sweep: ${name} — after a plan climb the implement first pass is ${stillBelow ? 'still one-shot (below the top)' : 'the full loop (now on the top)'}`)
+}
+// escalate(): once per stage per call, never past the top, a recorded no-op there; it returns whether it moved.
+{
+  const st = stOf({}, a3)
+  const moves = [T.escalate(st, 'x', 'plan'), T.escalate(st, 'x', 'plan'), T.escalate(st, 'x', 'implement'), T.escalate(st, 'x', 'implement'), T.escalate(st, 'x', 'review')]
+  ok(JSON.stringify(moves) === JSON.stringify([true, false, true, false, false]), 'escalate: moves once per stage, and not at all on the top rung')
+  ok(JSON.stringify(st.climbs) === JSON.stringify([{ stage: 'plan', from: 'r-low', to: 'r-mid' }, { stage: 'implement', from: 'r-mid', to: 'r-top' }, { stage: 'review', from: 'r-top', to: 'r-top' }]),
+    'escalate: each stage recorded once; the top-rung climb is a recorded no-op (from === to)')
+  ok(T.cur(st).name === 'r-top' && T.onTop(st), 'escalate: never past the top')
+}
+// The framing reads the builder's OWN stage: a real climb is a takeover one rung up; a no-op climb on the
+// top rung is a same-rung second pass. CLASS closer: every builder that takes a prior derives its framing
+// from st (the plannerPrompt site was once missed exactly this way and shipped green against a helper-only
+// assertion).
+{
+  const tk = { slug: 'rung-sweep', scope: 'cross-cutting', maxIterations: 3 }
+  const av = { verifier: 'make test' }
+  const builders = (stPlan, stImpl) => ({
+    planner: T.plannerPrompt(tk, av, stPlan, 'prior diag'),
+    implementer: T.implementerPrompt(tk, av, stImpl, 'prior diag'),
+    approvedPlan: T.approvedPlanImplementerPrompt(tk, 'PLAN', av, stImpl, 'prior diag'),
+    readOnly: T.readOnlyPrompt(tk, av, stImpl, 'prior diag'),
+  })
+  const top = builders(ST_TOP, ST_TOP)
+  ok(Object.values(top).every((p) => p.includes('SECOND PASS') && p.includes("the ladder's top rung") && !p.includes('ONE RUNG UP')), 'framing: on the top rung NO builder promises a takeover — every one renders the second pass')
+  const up = builders(ST_PLAN_CLIMBED, ST_CLIMBED)
+  ok(Object.values(up).every((p) => p.includes('ONE RUNG UP') && !p.includes('SECOND PASS')), 'framing: after its stage\'s real climb every builder renders the takeover')
+  ok(T.plannerPrompt(tk, av, ST_CLIMBED, 'prior diag').includes('SECOND PASS'), 'framing: the planner reads the PLAN climb, never the implement one')
+  ok(!T.escalationContext('diag', ST_CLIMBED, 'plan').includes('ONE RUNG UP') && T.escalationContext('diag', ST_CLIMBED, 'implement').includes('ONE RUNG UP'), 'framing: escalationContext keys off the stage it is given')
+  ok(T.escalationContext('', ST_TOP, 'implement') === '', 'framing: no prior ⇒ still empty (byte-identical)')
+  const ro = T.escalationContext('diag', ST_TOP, 'implement', 'readonly')
+  ok(ro.includes('SECOND PASS') && !ro.includes('FULL verification loop') && !ro.includes('on your branch'), 'framing: the read-only second pass keeps its read-only contract')
+  // The planner and the investigator write no code: in BOTH arms (the top rung's second pass, the takeover
+  // after a real climb) their framing restates the no-edit contract and never names a verification loop or
+  // a branch. Checked on the rendered builders, so a call site passing the wrong kind fails here too.
+  const noCode = (p) => !p.includes('FULL verification loop') && !p.includes('on your branch') && p.includes('no source edits, no commits, no PR')
+  const readers = (b) => ({ planner: b.planner, readOnly: b.readOnly })
+  ok(Object.values(readers(top)).every(noCode), 'framing: the planner and the investigator second pass (top rung) carry no verification-loop or branch wording, and keep the no-edit contract')
+  ok(Object.values(readers(up)).every(noCode), 'framing: the planner and the investigator takeover (after a real climb) carry no verification-loop or branch wording, and keep the no-edit contract')
+  ok(up.planner.includes('ONE RUNG UP') && up.planner.includes('plan-only contract') && top.planner.includes('plan-only contract'), 'framing: the planner\'s arms ask for a plan')
+  ok(up.readOnly.includes('ONE RUNG UP') && up.readOnly.includes('read-only contract') && top.readOnly.includes('read-only contract'), 'framing: the investigator\'s arms keep the read-only contract')
+  const coders = { implementer: up.implementer, approvedPlan: up.approvedPlan, implementerTop: top.implementer, approvedPlanTop: top.approvedPlan }
+  ok(Object.values(coders).every((p) => p.includes('on your branch')), 'framing: the code-writing roles keep the committed-work-on-your-branch wording in both arms')
+  ok(top.implementer.includes('FULL verification loop') && top.approvedPlan.includes('FULL verification loop'), 'framing: the code-writing second pass runs the FULL verification loop')
+}
+// A rung: the ladder lacks is read as the top rung — prototype keys included, never an inherited answer.
+for (const bad of ['gone', 'constructor', 'toString', '__proto__']) {
+  const st = stOf({ rung: bad }, {})
+  ok(T.onTop(st) && st.drift === bad && T.verifyBlock(st, 'make test', 3, []) === T.ralphLoop('make test', 3, []), `drift: rung ${bad} reads as the top rung, full loop, reported as drift`)
+}
 
-// Scenario E — the CAP, end to end (ADR 0016). Everything above in the maxTier block pokes helpers in
-// isolation; nothing drove converge() under a cap, so the plannerPrompt STRONGER-TIER lie, the judge
-// effort inversion and the doubled Ralph budget all passed a green suite. A plan-gated task SEEDED at
-// fable with judges PINNED to fable, under maxTier:'opus', failing its first pass in BOTH layers.
-// The judgeModel pin is load-bearing: without it judgeFor() returns st.tier either way and the
-// "judges are clamped" claim passes vacuously (proven by mutation — removing the clamp entirely
-// failed zero assertions here).
+// ---- Top-rung scenarios: the same rung retries at CAPPED_RETRY_ITERATIONS -----------------------------
+// Scenario E — a plan-gated task STARTING on the top rung (`rung: opus-xhigh`), failing its first pass in BOTH
+// layers. Its first implement pass already ran the full loop, so the retry gets the reduced constant.
 effortCalls.length = 0
 ctx.agent = recordingAgent(async (prompt, opts) => {
   if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
   if (opts.label.startsWith('plan:')) {
-    return opts.label.endsWith('@opus')
+    return opts.label.endsWith('@opus-xhigh')
       ? { ready: true, blocked: false, blockerCause: '', plan: 'PLAN\n### Gated inputs\nNone' }
       : { ready: false, blocked: false, blockerCause: 'first planner produced no plan', plan: '' }
   }
   if (opts.phase === 'Implement') {
-    // A CAPPED first pass renders ralphLoop, and ralphLoop never instructs escalate=true — its step
-    // (d) says blocked=true, verified=false. Only oneShotVerify asks for escalate. Returning
-    // escalate here would script a reply the capped prompt forbids, so the capped path must be
-    // reached through the arm a compliant agent can actually take.
-    return opts.label.endsWith('@opus')
+    // A top-rung first pass renders ralphLoop, and ralphLoop never instructs escalate=true — its step (d)
+    // says blocked=true, verified=false. Only oneShotVerify asks for escalate, so the retry is reached
+    // through the arm a compliant agent can actually take.
+    return opts.label.endsWith('@opus-xhigh')
       ? greenImpl
       : { verified: false, blocked: true, escalate: false, prUrl: '', branch: 'b', worktreePath: '/wt', blockerDiagnosis: 'red first pass', summary: '' }
   }
   return { verdict: 'approve', feedback: [] } // master review
 })
-const capRes = await T.converge(
-  { ...baseEff, slug: 'proj-eff-e', scope: 'cross-cutting', planGate: true, model: 'fable', maxIterations: 4 },
-  { ...aEff, maxTier: 'opus', judgeModel: 'fable' },
-)
-// (a) the ceiling holds at every dispatch — the fable SEED, the fable JUDGE PIN and the master
-// review each reach the model by a different path (taskModel / judgeFor / st.tier).
-ok(effortCalls.length > 0 && effortCalls.every((c) => c.model === 'opus'), 'cap E: EVERY dispatch runs at the capped tier — seed clamped, pinned judges clamped, no layer escapes')
-// (b) the result tells the truth: capped, NOT escalated (reconcile must never stamp an unusable tier).
-ok(capRes && capRes.tierCapped === true && capRes.escalated === false && capRes.model === 'opus', 'cap E: result reports tierCapped, never escalated, and lands on the capped tier')
-ok(capRes && capRes.tierCappedAt === 'plan' && capRes.escalatedAt === '', 'cap E: the layer the cap FIRST bit is reported; no escalation stamp')
-ok(capRes && capRes.status === 'review', 'cap E: a capped run still converges — the cap is not a failure mode')
-// (c) no same-tier retry is told it is a stronger-tier takeover, in EITHER layer.
-const capSecond = effortCalls.filter((c) => c.label.endsWith('@opus'))
-ok(capSecond.length === 2, 'cap E: both layers ran a same-tier second pass (plan + implement)')
-ok(capSecond.every((c) => c.prompt.includes('SECOND PASS') && !c.prompt.includes('STRONGER-TIER')), 'cap E: no second-pass prompt claims a stronger-tier takeover')
-// (d) effort is NOT quota-scarce. The cap makes the task terminal from the FIRST dispatch, so the
-// higher row applies immediately — not only after escalate() has recorded a suppression.
-ok(call('plan:proj-eff-e') && call('plan:proj-eff-e').effort === 'high', 'cap E: even the FIRST planner pass takes the higher tier EFFORT row — the cap makes it terminal at dispatch')
-ok(callAt('plan:proj-eff-e@opus') && callAt('plan:proj-eff-e@opus').effort === 'high', 'cap E: the suppressed plan retry keeps the higher tier EFFORT row')
-ok(call('implement:proj-eff-e') && call('implement:proj-eff-e').effort === 'high', 'cap E: the capped implementer runs high, not medium')
-ok(callAt('review:proj-eff-e r1') && callAt('review:proj-eff-e r1').effort === 'xhigh', 'cap E: master review runs xhigh — the effort an escalated run would have got')
-// (e) budget: a capped first pass is TERMINAL, so it already spends a full Ralph budget. The retry
-// gets a REDUCED one — capped cost is ~1.5x max_iterations, against an uncapped run's 1 + n. It is
-// not "shared" down to parity, and the template's resource-budget line says so.
-const capImplFirst = call('implement:proj-eff-e')
-const capImplRetry = callAt('implement:proj-eff-e@opus')
-ok(capImplFirst && capImplFirst.prompt.includes('Max iterations: 4') && !capImplFirst.prompt.includes('EXACTLY ONCE'), 'cap E: the capped first pass is terminal — full Ralph loop, never the one-shot')
-ok(capImplRetry && capImplRetry.prompt.includes('Max iterations: 2'), 'cap E: the capped retry runs a REDUCED budget (4 ⇒ 2), never a second full one')
+const topRes = await T.converge({ ...baseEff, slug: 'proj-eff-e', scope: 'cross-cutting', planGate: true, rung: 'opus-xhigh', maxIterations: 4 }, aEff)
+ok(effortCalls.length > 0 && effortCalls.every((c) => c.model === 'opus'), 'top E: every dispatch runs on the top rung\'s model')
+ok(topRes && topRes.status === 'review' && topRes.startRung === 'opus-xhigh' && topRes.rung === 'opus-xhigh', 'top E: a top-rung task still converges')
+ok(topRes && JSON.stringify(topRes.climbs) === JSON.stringify(['plan', 'implement'].map((stage) => ({ stage, from: 'opus-xhigh', to: 'opus-xhigh' }))), 'top E: both stages\' climbs are recorded no-ops, in order')
+const topSecond = effortCalls.filter((c) => c.label.endsWith('@opus-xhigh'))
+ok(topSecond.length === 2, 'top E: both layers ran a same-rung second pass (plan + implement)')
+ok(topSecond.every((c) => c.prompt.includes('SECOND PASS') && !c.prompt.includes('ONE RUNG UP')), 'top E: no second-pass prompt claims a takeover')
+ok(call('plan:proj-eff-e').effort === 'xhigh' && callAt('plan:proj-eff-e@opus-xhigh').effort === 'xhigh' && call('implement:proj-eff-e').effort === 'xhigh', 'top E: the code-writing roles run at the top rung\'s effort, retries included')
+ok(callAt('review:proj-eff-e r1') && callAt('review:proj-eff-e r1').effort === 'xhigh', 'top E: master review runs at the top rung\'s review effort')
+const topFirst = call('implement:proj-eff-e')
+const topRetry = callAt('implement:proj-eff-e@opus-xhigh')
+ok(topFirst && topFirst.prompt.includes('Max iterations: 4') && !topFirst.prompt.includes('EXACTLY ONCE'), 'top E: the top rung\'s first pass is the full Ralph loop, never the one-shot')
+ok(topRetry && topRetry.prompt.includes('Max iterations: 2'), 'top E: the same-rung retry runs a REDUCED budget (4 ⇒ 2), never a second full one')
 
-// Scenario F — the TEMPLATE DEFAULT capped task: scope single-file, so plan_approval: scope-gated
-// leaves planGate false, and max_iterations is the template's 3. This is the COMMON capped shape and
-// the one Scenario E cannot see: with no plan layer, nothing calls escalate() before the first
-// implement dispatch, so any effort rule keyed on the capSuppressed EVENT flag rather than on
-// terminality silently hands this pass the lower row. It also pins the retry budget floor: floor(3/2)
-// is 1, and a 1-iteration ralphLoop blocks without ever re-running the verifier.
+// Scenario F — the TEMPLATE DEFAULT shape on the top rung: scope single-file, so plan_approval: scope-gated
+// leaves planGate false, and max_iterations is the template's 3. With no plan layer nothing climbs before the
+// first implement dispatch. It also pins the retry budget floor: floor(3/2) is 1, and a 1-iteration
+// ralphLoop blocks without ever re-running the verifier.
 effortCalls.length = 0
 ctx.agent = recordingAgent(async (prompt, opts) => {
   if (opts.phase === 'Implement') {
-    return opts.label.endsWith('@opus')
+    return opts.label.endsWith('@opus-xhigh')
       ? greenImpl
       : { verified: false, blocked: true, escalate: false, prUrl: '', branch: 'b', worktreePath: '/wt', blockerDiagnosis: 'red first pass', summary: '' }
   }
   return { verdict: 'approve', feedback: [] }
 })
-const capDef = await T.converge(
-  { ...baseEff, slug: 'proj-eff-f', scope: 'single-file', planGate: false, maxIterations: 3 },
-  { ...aEff, maxTier: 'opus' },
-)
-ok(capDef && capDef.tierCapped === true && capDef.escalated === false, 'cap F: the default-shaped capped task reports tierCapped, never escalated')
-ok(call('implement:proj-eff-f') && call('implement:proj-eff-f').effort === 'high', 'cap F: the FIRST pass of a non-plan-gated capped task runs high — effort follows terminality, not the capSuppressed event')
+const topDef = await T.converge({ ...baseEff, slug: 'proj-eff-f', scope: 'single-file', planGate: false, rung: 'opus-xhigh', maxIterations: 3 }, aEff)
+ok(topDef && JSON.stringify(topDef.climbs) === JSON.stringify([{ stage: 'implement', from: 'opus-xhigh', to: 'opus-xhigh' }]), 'top F: with no plan layer the first climb is the IMPLEMENT stage\'s, a recorded no-op')
+ok(call('implement:proj-eff-f') && call('implement:proj-eff-f').effort === 'xhigh', 'top F: the first pass of a non-plan-gated top-rung task runs at the top rung\'s effort')
 const defFirst = call('implement:proj-eff-f')
-const defRetry = callAt('implement:proj-eff-f@opus')
-ok(defFirst && defFirst.prompt.includes('Max iterations: 3') && !defFirst.prompt.includes('EXACTLY ONCE'), 'cap F: the capped first pass spends the FULL template budget on the Ralph loop')
-ok(defRetry && defRetry.prompt.includes('Max iterations: 2'), 'cap F: the capped retry gets the fixed one-cycle constant, not a function of max_iterations')
-// Scenario E cannot see either of these: it HAS a plan layer, so its cap bites at 'plan' and its
-// judges are plan-judges. On the non-plan-gated path the cap first bites at implement.
-ok(capDef && capDef.tierCappedAt === 'implement', 'cap F: with no plan layer the cap first bites at the IMPLEMENT layer, and says so')
-ok(effortCalls.length > 0 && effortCalls.every((c) => c.model === 'opus'), 'cap F: the ceiling holds on every dispatch of the non-plan-gated path too')
-// n differs between E (4) and F (3) and both retries are 2 — that is what pins the budget as a
-// CONSTANT rather than an arithmetic function that happens to land on 2 at one value of n.
-ok(capImplRetry && capImplRetry.prompt.includes('Max iterations: 2') && defRetry.prompt.includes('Max iterations: 2'), 'cap E+F: the capped retry budget is independent of max_iterations (4 and 3 both ⇒ 2)')
+const defRetry = callAt('implement:proj-eff-f@opus-xhigh')
+ok(defFirst && defFirst.prompt.includes('Max iterations: 3') && !defFirst.prompt.includes('EXACTLY ONCE'), 'top F: the first pass spends the FULL template budget on the Ralph loop')
+ok(defRetry && defRetry.prompt.includes('Max iterations: 2'), 'top F: the retry gets the fixed one-cycle constant, not a function of max_iterations')
+ok(effortCalls.length > 0 && effortCalls.every((c) => c.model === 'opus'), 'top F: every dispatch of the non-plan-gated path stays on the ladder')
+// n differs between E (4) and F (3) and both retries are 2 — that is what pins the budget as a CONSTANT
+// rather than an arithmetic function that happens to land on 2 at one value of n.
+ok(T.CAPPED_RETRY_ITERATIONS === 2 && topRetry && topRetry.prompt.includes('Max iterations: 2') && defRetry.prompt.includes('Max iterations: 2'), 'top E+F: the retry budget is independent of max_iterations (4 and 3 both ⇒ 2)')
 
-// Scenario G — the budget edge BOTH previous arithmetic attempts got wrong, pinned at a value where
-// a constant and a halving visibly disagree. floor(n/2) and min(n, max(2, floor(n/2))) both return 2
-// at n=3 and n=4, so Scenarios E and F cannot tell an arithmetic function from a constant; at n=8
-// the halving returns 4 and the constant still returns 2. Without this, reverting to either
-// arithmetic form ships green — and each of those forms shipped a real defect (1 iteration at the
-// template default; a full second budget at n=2).
+// Scenario G — the budget edge BOTH earlier arithmetic attempts got wrong, pinned at a value where a constant
+// and a halving visibly disagree. floor(n/2) and min(n, max(2, floor(n/2))) both return 2 at n=3 and n=4, so
+// Scenarios E and F cannot tell an arithmetic function from a constant; at n=8 the halving returns 4 and the
+// constant still returns 2. Without this, reverting to either arithmetic form ships green — and each of those
+// forms shipped a real defect (1 iteration at the template default; a full second budget at n=2).
 effortCalls.length = 0
 ctx.agent = recordingAgent(async (prompt, opts) => {
   if (opts.phase === 'Implement') {
-    return opts.label.endsWith('@opus')
+    return opts.label.endsWith('@opus-xhigh')
       ? greenImpl
       : { verified: false, blocked: true, escalate: false, prUrl: '', branch: 'b', worktreePath: '/wt', blockerDiagnosis: 'red', summary: '' }
   }
   return { verdict: 'approve', feedback: [] }
 })
-await T.converge({ ...baseEff, slug: 'proj-eff-g', scope: 'single-file', planGate: false, maxIterations: 8 }, { ...aEff, maxTier: 'opus' })
+await T.converge({ ...baseEff, slug: 'proj-eff-g', scope: 'single-file', planGate: false, rung: 'opus-xhigh', maxIterations: 8 }, aEff)
 const gFirst = call('implement:proj-eff-g')
-const gRetry = callAt('implement:proj-eff-g@opus')
-ok(gFirst && gFirst.prompt.includes('Max iterations: 8'), 'cap G: the capped first pass still spends the full task budget')
-ok(gRetry && gRetry.prompt.includes('Max iterations: 2'), 'cap G: the capped retry is a CONSTANT one cycle at n=8 — not half (4), not a second full budget')
+const gRetry = callAt('implement:proj-eff-g@opus-xhigh')
+ok(gFirst && gFirst.prompt.includes('Max iterations: 8'), 'top G: the first pass still spends the full task budget')
+ok(gRetry && gRetry.prompt.includes('Max iterations: 2'), 'top G: the retry is a CONSTANT one cycle at n=8 — not half (4), not a second full budget')
 
 // ---- Gated inputs (ADR 0008): a declared gate always pauses for a human -------
 // The plan carries a REQUIRED "### Gated inputs" section (spend with a hard cap / credentials /
@@ -421,7 +356,7 @@ ok(gRetry && gRetry.prompt.includes('Max iterations: 2'), 'cap G: the capped ret
 
 // The requirement is ALWAYS rendered — in the planner, the plan-reviser, the plan-judge's checklist,
 // and every code-writing prompt's stop rule (the plan_approval:false path).
-const plPrompt = T.plannerPrompt(taskI, aI, ST_OPUS, '')
+const plPrompt = T.plannerPrompt(taskI, aI, ST_BOTTOM, '')
 ok(plPrompt.includes('### Gated inputs'), 'plannerPrompt: always renders the Gated inputs requirement')
 ok(/hard cap/i.test(plPrompt), 'plannerPrompt: spend gates require a hard cap')
 const prvPrompt = T.planReviserPrompt(taskI, 'PLAN', [{ round: 1, feedback: ['x'] }], 2, aI)
@@ -431,8 +366,8 @@ ok(pjPrompt.includes('Gated inputs') && /automatic "changes"/.test(pjPrompt), 'p
 ok(plPrompt.includes('BULLETS ONLY'), 'plannerPrompt: gated-inputs section forbids non-bullet prose')
 ok(/non-bullet prose/.test(pjPrompt), 'planJudgePrompt: prose in the gated-inputs section is an automatic changes')
 ok(/bullets only/i.test(prvPrompt), 'planReviserPrompt: revision keeps the bullets-only rule')
-ok(pOpus.includes('Gated inputs (hard rule'), 'implementerPrompt: carries the gated-inputs stop rule')
-ok(T.approvedPlanImplementerPrompt(taskI, 'PLAN', aI, ST_FABLE, '').includes('Gated inputs (hard rule'), 'approvedPlanImplementerPrompt: carries the stop rule')
+ok(pBottom.includes('Gated inputs (hard rule'), 'implementerPrompt: carries the gated-inputs stop rule')
+ok(T.approvedPlanImplementerPrompt(taskI, 'PLAN', aI, ST_CLIMBED, '').includes('Gated inputs (hard rule'), 'approvedPlanImplementerPrompt: carries the stop rule')
 ok(T.reviserPrompt(taskI, { prUrl: 'u', branch: 'b', worktreePath: '/wt' }, [{ round: 1, feedback: ['f'] }], 2, aI, '').includes('Gated inputs (hard rule'), 'reviserPrompt: carries the stop rule')
 
 // Parser: None → [], list items → entries, missing section → null (fail-closed upstream). Only list
@@ -474,7 +409,7 @@ const gPlan = await T.converge({ ...baseEff, slug: 'proj-gate-a', scope: 'cross-
 ok(gPlan && gPlan.status === 'gate-pending', 'gate A: non-empty declaration pauses at the plan-gate (gate-pending)')
 ok(gPlan.gatedInputs && gPlan.gatedInputs.length === 1 && /cap USD 30/.test(gPlan.gatedInputs[0]), 'gate A: the declared gate (with its cap) is surfaced')
 ok(!call('implement:proj-gate-a'), 'gate A: no implementation dispatched before sign-off')
-ok(!gPlan.escalated, 'gate A: a gate stop never escalates')
+ok(gPlan.climbs.length === 0, 'gate A: a gate stop never climbs')
 
 // Scenario gate-B — the same gate already approved on the note: NOT re-asked, task proceeds.
 effortCalls.length = 0
@@ -493,8 +428,8 @@ ctx.agent = recordingAgent(async (prompt, opts) => {
 const gImpl = await T.converge({ ...baseEff, slug: 'proj-gate-c', scope: 'single-file', planGate: false }, aEff)
 ok(gImpl && gImpl.status === 'gate-pending', 'gate C: an implementer-declared gate pauses a plan_approval:false run')
 ok(gImpl.gatedInputs && gImpl.gatedInputs[0] === 'credential: PROD_API_KEY (read-only)', 'gate C: the declaration is surfaced verbatim')
-ok(!gImpl.escalated && gImpl.model === 'opus', 'gate C: a gate stop on the opus first pass does not escalate')
-ok(!call('implement:proj-gate-c@fable'), 'gate C: no fable takeover on a gate stop')
+ok(gImpl.climbs.length === 0 && gImpl.rung === 'opus-high', 'gate C: a gate stop on the bottom first pass does not climb')
+ok(!effortCalls.some((c) => c.label.startsWith('implement:proj-gate-c@')), 'gate C: no takeover on a gate stop')
 
 // Scenario gate-D — judge approved a plan WITHOUT the required section: fail-closed to plan-blocked
 // (re-plan; no bogus sign-off request — there is nothing concrete to sign).
@@ -745,7 +680,7 @@ ok(roRes && /transient infrastructure/i.test(roRes.blockerDiagnosis), 'converge:
   {
     effortCalls.length = 0
     ctx.agent = approveAll
-    const st = { tier: 'opus', cap: 'fable', escalated: false, escalatedAt: '', capSuppressed: false, capSuppressedAt: '' }
+    const st = T.rungState({ slug: 'proj-rb-pl' }, aEff)
     const r = await T.planLoop({ ...baseEff, slug: 'proj-rb-pl', scope: 'cross-cutting', planGate: true, maxPlanRounds: 0 }, st, aEff)
     ok(r !== undefined && r.status === 'plan-blocked' && r.planRoundsUsed === 0, 'round budgets: planLoop(maxPlanRounds=0) returns a defined plan-blocked result, planRoundsUsed 0')
     ok(effortCalls.length === 0, 'round budgets: planLoop(maxPlanRounds=0) dispatches nothing')
@@ -769,7 +704,7 @@ ok(roRes && /transient infrastructure/i.test(roRes.blockerDiagnosis), 'converge:
     ctx.agent = approveAll
     const r = await T.converge({ ...baseEff, slug: 'proj-rb-both', scope: 'cross-cutting', planGate: true, maxReviewRounds: 0 }, aEff)
     ok(r && r.status === 'review-blocked' && effortCalls.length === 0, 'round budgets: plan-gated task with a bad review budget → review-blocked, no plan: dispatch either')
-    ok(r && typeof r.model === 'string' && r.escalated === false && r.tierCapped === false, 'round budgets: the pre-flight result carries the normal model/escalated/tierCapped wrap')
+    ok(r && r.startRung === 'opus-high' && r.rung === 'opus-high' && r.climbs.length === 0 && r.ran.length === 0 && r.rungDrift === '', 'round budgets: the pre-flight result carries the normal rung record — its starting rung, no climb, nothing ran')
     effortCalls.length = 0
     const both = await T.converge({ ...baseEff, slug: 'proj-rb-both', scope: 'cross-cutting', planGate: true, maxReviewRounds: 0, maxPlanRounds: NaN }, aEff)
     ok(both && both.status === 'review-blocked' && /max_review_rounds/.test(both.blockerDiagnosis) && /max_plan_rounds/.test(both.blockerDiagnosis),
@@ -780,7 +715,7 @@ ok(roRes && /transient infrastructure/i.test(roRes.blockerDiagnosis), 'converge:
   {
     effortCalls.length = 0
     ctx.agent = approveAll
-    const st = { tier: 'opus', cap: 'fable', escalated: false, escalatedAt: '', capSuppressed: false, capSuppressedAt: '' }
+    const st = T.rungState({ slug: 'proj-rb-rl' }, aEff)
     const r = await T.reviewLoop({ ...baseEff, slug: 'proj-rb-rl', scope: 'single-file', maxReviewRounds: 0 }, st, greenImpl, aEff, '')
     ok(r !== undefined && r.status === 'review-blocked' && r.reviewRoundsUsed === 0 && r.prUrl === greenImpl.prUrl && /max_review_rounds/.test(r.reviewFeedback[0] || ''),
       'round budgets: reviewLoop(maxReviewRounds=0) returns review-blocked (PR preserved), not undefined')
@@ -884,7 +819,7 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
 // removal ask. RM_RULE names the safe forms, and every builder renders it once, right after GIT_ENV_RULE.
 // The ten builders are git-env-scrub's (its (e2) proves every runAgent site is one of them).
 {
-  const E = loadEngine(['GIT_ENV_RULE', 'RM_RULE', 'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt',
+  const E = loadEngine(['GIT_ENV_RULE', 'RM_RULE', 'rungState', 'escalate', 'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt',
     'plannerPrompt', 'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt'])
   const H = (c) => c.repeat(40)
   const tk = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
@@ -894,19 +829,19 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
     prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
     landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }], plan: 'PLAN',
     reviewHistory: [{ round: 1, feedback: ['fix it'] }, { round: 2, feedback: ['keep theirs'], stage: 'integration' }], reviewRoundsUsed: 2,
-    rung: { model: 'fable', escalated: false, escalatedAt: '', tierCapped: false, tierCappedAt: '' },
+    rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] },
   }
   const J = { mergeCommit: H('d'), headSha: H('e'), baseSha: H('c'), triggers: ['conflict'], path: 'integrator' }
-  const tiers = [
-    { tier: 'opus', cap: 'fable', escalated: false, capSuppressed: false },
-    { tier: 'fable', cap: 'fable', escalated: true, capSuppressed: false },
-  ]
+  // The implementers on the bottom rung (one-shot) and after a climb (the full loop).
+  const climbed = E.rungState(tk, ar)
+  E.escalate(climbed, tk.slug, 'implement')
+  const states = [E.rungState(tk, ar), climbed]
   const prompts = {
-    implementerPrompt: tiers.map((st) => E.implementerPrompt(tk, ar, st, '')),
-    approvedPlanImplementerPrompt: tiers.map((st) => E.approvedPlanImplementerPrompt(tk, 'PLAN', ar, st, '')),
+    implementerPrompt: states.map((st) => E.implementerPrompt(tk, ar, st, '')),
+    approvedPlanImplementerPrompt: states.map((st) => E.approvedPlanImplementerPrompt(tk, 'PLAN', ar, st, '')),
     reviserPrompt: [E.reviserPrompt(tk, im, [{ round: 1, feedback: ['fix it'] }], 2, ar, ''), E.reviserPrompt(tk, im, I.reviewHistory, 3, ar, '', { history: I.reviewHistory, roundsUsed: 2 })],
-    readOnlyPrompt: [E.readOnlyPrompt(tk, ar, tiers[0], '')],
-    plannerPrompt: [E.plannerPrompt(tk, ar, tiers[0], '')],
+    readOnlyPrompt: [E.readOnlyPrompt(tk, ar, states[0], '')],
+    plannerPrompt: [E.plannerPrompt(tk, ar, states[0], '')],
     planReviserPrompt: [E.planReviserPrompt(tk, 'PLAN', [{ round: 1, feedback: ['fix it'] }], 2, ar)],
     planJudgePrompt: [E.planJudgePrompt(tk, 'PLAN', ar)],
     reviewJudgePrompt: [E.reviewJudgePrompt(tk, im, ar, [])],
@@ -946,6 +881,11 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
 // Re-pinned on purpose by p12-12 (the reviser pins and the whole-call pin): RM_RULE joins every agent prompt
 // right after GIT_ENV_RULE, and the implementer's worktree setup now says "every task that has already
 // merged". An old-vs-new render diff showed exactly those two changes; the taskTreeSetup pin did not move.
+// Split by p13-2 (the ladder): the whole-call pin is a CALLS hash (every label and prompt) and a ROWS hash.
+// The calls hash was recorded on the p13-1 engine (e3da213) with this fixture — `rung:` and `ladder` added,
+// which that engine ignores, and the tier ceiling dropped, which changed nothing there — and the ladder
+// engine renders it byte-identically: the rung work moved no label and no prompt of these calls. Only the
+// rows hash was re-pinned, for the row's rung record (startRung, rung, climbs, rungDrift, ran).
 {
   const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
   const variants = []
@@ -967,11 +907,17 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
     'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back)')
   ok(T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN', null) === T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN'),
     'byte pin: a null seeded argument renders the unseeded reviser')
-  // Every label, prompt and row of three whole task-mode calls (plan-gated opus with a plan revise and two
-  // review rounds; capped on master with env bootstrap and a baseline; plan-gated read-only).
+  // Every label, prompt and row of three whole task-mode calls (a plan-gated bottom-rung task with a plan
+  // revise and two review rounds; a top-rung task on master with env bootstrap and a baseline; a plan-gated
+  // read-only task on the top rung). Each task keeps the legacy `model:` that gave the p13-1 engine the same
+  // call shape; `rung:` wins over it here.
   const PLAN_TEXT = 'Planned on: abc\n### Files to modify\n- x\n### Gated inputs\nNone'
-  const mkT = (slug, over = {}) => ({ slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: false, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, model: 'fable', ...over })
-  const mkA = (task, over = {}) => ({ rolloutSlug: 'proj-rollout-2026-10-01', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', task, ...over })
+  const LADDER = { source: 'built-in', rungs: [
+    { name: 'opus-high', model: 'opus', effort: 'high', judge: 'high', review: 'xhigh' },
+    { name: 'opus-xhigh', model: 'opus', effort: 'xhigh', judge: 'high', review: 'xhigh' },
+  ] }
+  const mkT = (slug, over = {}) => ({ slug, taskPath: `/vault/Tasks/${slug}.md`, scope: 'cross-cutting', planGate: false, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3, model: 'fable', rung: 'opus-xhigh', ...over })
+  const mkA = (task, over = {}) => ({ rolloutSlug: 'proj-rollout-2026-10-01', repoPath: '/repo', verifier: 'make test', date: '2026-10-01', ladder: LADDER, task, ...over })
   const scripted = async (prompt, opts) => {
     const label = opts.label
     const kind = label.split(':')[0]
@@ -981,17 +927,21 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
     if (kind === 'review') return { verdict: /r[12]$/.test(label) ? 'changes' : 'approve', feedback: /r[12]$/.test(label) ? ['fix ' + label] : [] }
     return { verified: true, blocked: false, escalate: false, prUrl: kind === 'investigate' ? '' : `https://github.com/o/r/pull/${s}`, branch: kind === 'investigate' ? '' : `audit-fix/${s}`, worktreePath: `/repo/.claude/worktrees/${s}`, blockerDiagnosis: '', summary: `${label} done` }
   }
-  const parts = []
+  const calls = []
+  const rows = []
   for (const args of [
-    mkA(mkT('proj-fix-p', { model: 'opus', planGate: true })),
-    mkA(mkT('proj-fix-a'), { maxTier: 'opus', defaultBranch: 'master', envBootstrap: 'poetry install', knownBaselineFailures: ['t — env'] }),
+    mkA(mkT('proj-fix-p', { model: 'opus', rung: 'opus-high', planGate: true })),
+    mkA(mkT('proj-fix-a'), { defaultBranch: 'master', envBootstrap: 'poetry install', knownBaselineFailures: ['t — env'] }),
     mkA(mkT('proj-audit-x', { scope: 'read-only', planGate: true })),
   ]) {
     const r = await runTask(args, scripted)
-    parts.push(JSON.stringify({ calls: r.calls, result: r.result, err: r.error && String(r.error) }))
+    calls.push(JSON.stringify(r.calls))
+    rows.push(JSON.stringify({ result: r.result, err: r.error && String(r.error) }))
   }
-  ok(sha(parts.join('\n')) === 'c647ab859edc08ca62dcb4e1a1fcb59d9f57fcf54488b477663faadb4a04e912',
-    'byte pin: three whole task-mode calls — every label, prompt and row unchanged')
+  ok(sha(calls.join('\n')) === 'ee821ac64ee16a13cf95c536bcbbf4ef7106c45c0d28c002f11b61196b1ee54b',
+    'byte pin: three whole task-mode calls — every label and prompt unchanged (recorded on the p13-1 engine)')
+  ok(sha(rows.join('\n')) === 'a0fc1e71bf09d45f3dad3d76a58959e2105789f4c1699242ef41dec1f2f967dd',
+    'byte pin: three whole task-mode calls — every row, rung record included')
 }
 
 console.log()

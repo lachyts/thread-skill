@@ -12,7 +12,7 @@ import crypto from 'node:crypto'
 import { loadEngine, enginePath } from './lib/engine.mjs'
 import fs from 'node:fs'
 
-const T = loadEngine(['worktreeSetup', 'implementerPrompt', 'approvedPlanImplementerPrompt'])
+const T = loadEngine(['worktreeSetup', 'implementerPrompt', 'approvedPlanImplementerPrompt', 'rungState'])
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex')
 const task = { slug: 'proj-fix-x' }
 
@@ -46,7 +46,7 @@ test("'master' differs from unset only by the base ref", () => {
 })
 
 const t = { ...task, taskPath: '/vault/proj-fix-x.md', maxIterations: 3 }
-const st = { tier: 'opus', cap: 'fable', escalated: false, capSuppressed: false }
+const st = T.rungState(t, {}) // a bottom-rung first pass, as converge() builds it
 const prompts = (a) => [T.implementerPrompt(t, a, st, ''), T.approvedPlanImplementerPrompt(t, 'PLAN', a, st, '')]
 
 test('the base reaches both worktree-creating prompts', () => {

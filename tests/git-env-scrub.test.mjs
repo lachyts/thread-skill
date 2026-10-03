@@ -19,13 +19,21 @@ const T = loadEngine([
   'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt', 'plannerPrompt',
   'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt',
   'branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck', 'integrationMergeReads', 'ANCHOR_RECIPE',
+  'rungState', 'escalate',
 ])
 const SCRUB = 'unset $(git rev-parse --local-env-vars 2>/dev/null);'
 
-const ST_OPUS = { tier: 'opus', cap: 'fable', escalated: false, capSuppressed: false }
-const ST_FABLE = { tier: 'fable', cap: 'fable', escalated: true, capSuppressed: false }
-const ST_CAPPED = { tier: 'opus', cap: 'opus', escalated: false, capSuppressed: true }
 const task = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
+// The rung states a prompt can see, as rungState()/escalate() build them: a bottom-rung first pass (the
+// one-shot), after a real implement climb (the full loop), and on the top rung after a no-op climb.
+const stateOf = (rung, stages) => {
+  const st = T.rungState({ ...task, rung }, {})
+  for (const s of stages) T.escalate(st, task.slug, s)
+  return st
+}
+const ST_BOTTOM = stateOf('opus-high', [])
+const ST_CLIMBED = stateOf('opus-high', ['implement'])
+const ST_TOP = stateOf('opus-xhigh', ['implement'])
 const impl = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
 const feedback = [{ round: 1, feedback: ['fix it'] }]
 // p12-6: the Integration call's inputs (a cross-cutting task with an open PR on audit-fix/fix-x).
@@ -34,19 +42,19 @@ const I = {
   prUrl: impl.prUrl, branch: impl.branch, worktreePath: impl.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'),
   trouble: ['conflict'], landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }],
   plan: 'PLAN', reviewHistory: [{ round: 1, feedback: ['fix it'] }, { round: 2, feedback: ['keep theirs'], stage: 'integration' }],
-  reviewRoundsUsed: 2, rung: { model: 'fable', escalated: false, escalatedAt: '', tierCapped: false, tierCappedAt: '' },
+  reviewRoundsUsed: 2, rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }] },
 }
 const J = { mergeCommit: H('d'), headSha: H('e'), baseSha: H('c'), triggers: ['conflict'], path: 'integrator' }
 
-// Every builder, keyed by name, each as a list of rendered prompts (the implementers at every tier).
+// Every builder, keyed by name, each as a list of rendered prompts (the implementers in every rung state).
 function builders(a) {
-  const tiers = [ST_OPUS, ST_FABLE, ST_CAPPED]
+  const states = [ST_BOTTOM, ST_CLIMBED, ST_TOP]
   return {
-    implementerPrompt: tiers.map((st) => T.implementerPrompt(task, a, st, '')),
-    approvedPlanImplementerPrompt: tiers.map((st) => T.approvedPlanImplementerPrompt(task, 'PLAN', a, st, '')),
+    implementerPrompt: states.map((st) => T.implementerPrompt(task, a, st, '')),
+    approvedPlanImplementerPrompt: states.map((st) => T.approvedPlanImplementerPrompt(task, 'PLAN', a, st, '')),
     reviserPrompt: [T.reviserPrompt(task, impl, feedback, 2, a, ''), T.reviserPrompt(task, impl, I.reviewHistory, 3, a, '', { history: I.reviewHistory, roundsUsed: 2 })],
-    readOnlyPrompt: [T.readOnlyPrompt(task, a, ST_OPUS, '')],
-    plannerPrompt: [T.plannerPrompt(task, a, ST_OPUS, '')],
+    readOnlyPrompt: [T.readOnlyPrompt(task, a, ST_BOTTOM, '')],
+    plannerPrompt: [T.plannerPrompt(task, a, ST_BOTTOM, '')],
     planReviserPrompt: [T.planReviserPrompt(task, 'PLAN', feedback, 2, a)],
     planJudgePrompt: [T.planJudgePrompt(task, 'PLAN', a)],
     reviewJudgePrompt: [T.reviewJudgePrompt(task, impl, a, [])],

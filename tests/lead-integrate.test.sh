@@ -9,7 +9,7 @@
 #   C3  a shared file   C4  a conflict   C5  red, undo   C6  case (ii) from an engine line   C7  the own run merged
 #   main; a stale anchor ref   C8  a missing, detached or unpushed tree (merge while main is unmoved, trouble once
 #   it moved), leftovers, a gone branch   C9  push refused   C10 landed   C11 engine pins   C12 inputs parity (and
-#   the rung from inputs)   C13a exit-4 plumbing   C13b a dead integrate call   C13c lead-written own and
+#   the rung record from inputs)   C13a exit-4 plumbing   C13b a dead integrate call   C13c lead-written own and
 #   revise-stopped rows   C14 a rejection frees the lane while another integrates   C15 the verify line under bash
 #   and zsh -f ($, $(…), backticks, \ and ' single-quoted)   C16 stamp, usage, an unreachable origin   C17 timeouts, signals,
 #   the bootstrap, the race tree   C18 no relaunch loop   C19 an Integration set-aside re-enters   C20 the last
@@ -160,11 +160,11 @@ s = lambda c: c * 40
 alias = slug.split("-", 1)[1] if "-" in slug else slug
 print(json.dumps({"rolloutSlug": "ro", "repoPath": "/repo", "verifier": "true", "date": "2026-10-02", "mode": "integrate",
   "task": {"slug": slug, "taskPath": "", "scope": "cross-cutting", "planGate": False, "maxIterations": 3,
-           "maxReviewRounds": maxr, "maxPlanRounds": 3, "model": "fable"},
+           "maxReviewRounds": maxr, "maxPlanRounds": 3, "rung": "opus-xhigh"},
   "integration": {"prUrl": f"https://github.com/o/r/pull/{ord(slug[-1])}", "branch": f"audit-fix/{alias}",
     "worktreePath": f"/repo/.claude/worktrees/{slug}", "headSha": s("a"), "taskBase": s("b"), "mainSha": s("c"),
     "trouble": ["shared-file"], "landed": [], "plan": "", "reviewHistory": hist, "reviewRoundsUsed": used,
-    "rung": {"model": "fable", "escalated": False, "escalatedAt": "", "tierCapped": False, "tierCappedAt": ""},
+    "rung": {"startRung": "opus-high", "rung": "opus-xhigh", "climbs": [{"stage": "implement", "from": "opus-high", "to": "opus-xhigh"}]},
     "leadMerge": {"mergeCommit": s("d"), "headSha": s("d"), "baseSha": s("c"), "verified": True},
     "startedAt": "2026-10-02T12:00+00:00", "readyAt": "2026-10-02T11:00+00:00"}}))
 PY
@@ -435,10 +435,10 @@ ok "$(python3 -c 'import json,sys; print(sum(1 for x in json.loads(sys.argv[1])[
 
 # ======== C12: inputs parity ============================================================================
 nfx c12 4
-ntask proj-a review "pr: $(p1pr proj-a)" 'review_rounds_used: 1' 'ready: 2026-10-02T11:00+00:00' 'tier_capped: review' 'model: fable'
+ntask proj-a review "pr: $(p1pr proj-a)" 'review_rounds_used: 1' 'ready: 2026-10-02T11:00+00:00' 'rung: opus-high'
 ROW=$(erow "$(p1args proj-a 3)" "$(judge_changes proj-a 2)")
 rec "$ROW"
-setkey "$V/proj-a.md" tier_capped review
+ok "$(fm "$V/proj-a.md" rung)" "rung: opus-xhigh" "C12: reconcile stamps the integrate row's passed-through rung"
 I=$(inp proj-a --max-review-rounds 3)
 DIAG=$(printf '%s' "$ROW" | python3 -c 'import json,sys; print(json.load(sys.stdin)["tasks"][0]["blockerDiagnosis"])')
 EP=$(node --input-type=module -e "
@@ -447,19 +447,24 @@ EP=$(node --input-type=module -e "
   process.stdout.write(JSON.stringify(T.parseIntegrationMarker(process.argv[1])))
 " "$DIAG")
 ok "$(j "$I" '[d["markerStage"], d["markerReason"], d["history"]]')" "$(j "$EP" '[d["stage"], d["reason"], d["history"]]')" "C12: an engine rejected marker, reconciled, parses to exactly parseIntegrationMarker's output"
-ok "$(j "$I" '[d["source"], d["lastRound"], d["reviewRoundsUsed"], d["readyAt"], d["tierCapped"], d["tierCappedAt"], d["model"], d["resumeAt"]]')" \
-  '["blocker",2,2,"2026-10-02T11:00+00:00",true,"review","fable","revise"]' "C12: source, rounds, readyAt, tier_capped, model, resumeAt revise"
+ok "$(j "$I" '[d["source"], d["lastRound"], d["reviewRoundsUsed"], d["readyAt"], d["rung"], d["resumeAt"]]')" \
+  '["blocker",2,2,"2026-10-02T11:00+00:00",{"startRung":"","rung":"opus-xhigh","climbs":[]},"revise"]' "C12: source, rounds, readyAt, the rung record from the note's rung:, resumeAt revise"
+ok "$(j "$I" '[k for k in ("model", "tierCapped", "tierCappedAt") if k in d]')" '[]' "C12: inputs carries no tier keys"
 ok "$(j "$I" 'd["lastIntegration"]["outcome"]')|$(j "$I" 'd["lastIntegration"]["path"]')" "rejected|judge-only" "C12: lastIntegration is the log's last line, as fields"
-# the integrate call's rung fallback (SKILL.md § 4.5 step 3): tierCapped/tierCappedAt from inputs pass the engine's
-# args check; the note's raw tier_capped string in tierCapped fails it before dispatch (the control).
+# the integrate call's rung fallback (SKILL.md § 4.5 step 3): inputs' rung record passes the engine's args check
+# as it is, from a note with a rung: and from one with only stale tier stamps (the neutral record); a raw rung:
+# string where the record goes fails it before dispatch (the control).
+ntask proj-e review "pr: $(p1pr proj-e)" 'review_rounds_used: 1' 'tier_capped: review' 'model: fable'
+NEUTRAL=$(inp proj-e)
+ok "$(j "$NEUTRAL" 'd["rung"]')" '{"startRung":"","rung":"","climbs":[]}' "C12: a note with stale tier_capped:/model: fable and no rung: gives the neutral record"
 RUNG=$(node --input-type=module -e "
   import { loadEngine } from './tests/lib/engine.mjs'
   const T = loadEngine(['integrationArgsError'])
-  const [a, i] = [JSON.parse(process.argv[1]), JSON.parse(process.argv[2])]
-  const err = (tc) => { a.integration.rung = { model: 'fable', escalated: false, escalatedAt: '', tierCapped: tc, tierCappedAt: i.tierCappedAt }; return T.integrationArgsError(a) }
-  process.stdout.write(JSON.stringify([err(i.tierCapped), err('review').startsWith('rung must be')]))
-" "$(p1args proj-a 3)" "$I")
-ok "$RUNG" '["",true]' "C12: a rung from inputs' tierCapped/tierCappedAt passes integrationArgsError; the raw tier_capped string fails it"
+  const [a, i, n] = [JSON.parse(process.argv[1]), JSON.parse(process.argv[2]), JSON.parse(process.argv[3])]
+  const err = (r) => { a.integration.rung = r; return T.integrationArgsError(a) }
+  process.stdout.write(JSON.stringify([err(i.rung), err(n.rung), err(i.rung.rung).startsWith('rung must be')]))
+" "$(p1args proj-a 3)" "$I" "$NEUTRAL")
+ok "$RUNG" '["","",true]' "C12: inputs' rung record (named or neutral) passes integrationArgsError; a raw rung: string fails it"
 # a review-blocked run parses whole; the newer run wins; a tie goes to review-blocked
 ntask proj-b review-blocked "pr: $(p1pr proj-b)" 'review_rounds_used: 2'
 printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-02T10:00+00:00)\n\nintegration: old set-aside\n\n<!-- run 1 end sha=000000000000 -->\n\n## Review-blocked feedback\n\n### Run 1 (2026-10-02T11:00+00:00)\n\nRound 1:\n- x\n\nRound 2:\n- y\n\n<!-- run 1 end sha=000000000000 -->\n\n## Integration log\n\n2026-10-02T10:30+00:00 rejected path=integrator pr=1 anchor=- head=- base=- wait=- duration=- triggers=-\n' >> "$V/proj-b.md"
@@ -483,7 +488,7 @@ I5=$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")
 onbranch commit -q --allow-empty -m "pushed after the Integration"
 N=$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")
 mkpr 5 "$N"; printf '%s\n' "$B" > "$MT_STATE/base.seq"
-setkey "$V/$SLUG.md" tier_capped review
+setkey "$V/$SLUG.md" rung opus-xhigh
 mt 5 "$I5" "$B"
 ok "$rc" 4 "C13a: merge-task exit 4 (b): origin's branch moved past the integrated head"
 REASON4=$(printf '%s\n' "$out" | sed -n 's/^set-aside reason: //p' | head -n 1)
@@ -502,7 +507,7 @@ for r in "${REASONS[@]}"; do
   ok "$first" "${EXPECT[$i]}" "C13a[$i]: the diagnosis's first line is the reason, prefixed once"
   ok "$(printf '%s' "$first" | grep -ciE '^integration:[[:space:]]*integration:')" 0 "C13a[$i]: never integration: integration:"
   ok "$(setaside_at "$SLUG")" integration "C13a[$i]: status reports setAsideAt integration"
-  ok "$(fm "$V/$SLUG.md" pr)|$(fm "$V/$SLUG.md" tier_capped)|$(fm "$V/$SLUG.md" integrating)" "pr: $PR|tier_capped: review|<none>" "C13a[$i]: pr: and tier_capped: kept, integrating: gone"
+  ok "$(fm "$V/$SLUG.md" pr)|$(fm "$V/$SLUG.md" rung)|$(fm "$V/$SLUG.md" integrating)" "pr: $PR|rung: opus-xhigh|<none>" "C13a[$i]: pr: and rung: kept, integrating: gone"
   i=$((i+1))
 done
 
@@ -679,7 +684,7 @@ import json, sys
 i = json.loads(sys.argv[1])
 print(json.dumps({"rolloutSlug": "ro", "repoPath": "/repo", "verifier": "true", "date": "2026-10-02",
   "task": {"slug": "proj-a", "taskPath": "", "scope": "cross-cutting", "planGate": False, "maxIterations": 3, "maxReviewRounds": 3,
-           "maxPlanRounds": 3, "model": "fable", "resume": {"stage": "revise", "prUrl": sys.argv[2], "branch": i["branch"],
+           "maxPlanRounds": 3, "rung": "opus-xhigh", "resume": {"stage": "revise", "prUrl": sys.argv[2], "branch": i["branch"],
            "worktreePath": "/repo/.claude/worktrees/proj-a", "reviewHistory": i["history"], "reviewRoundsUsed": i["lastRound"], "plan": ""}}}))
 PY
 )

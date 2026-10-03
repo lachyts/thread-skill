@@ -386,15 +386,16 @@ test('L8 without tomllib a present file exits 3', (t) => {
 
 // ---- L9: the loader and the engine agree on the model set ---------------------------------------------
 
-// Pins ladder.py's MODELS to the engine's TIER_RANK keys. p13-2 (the engine climbs rungs) removes TIER_RANK:
-// it owns re-pointing this check at the model set the engine keeps then.
-test('L9 MODELS equals the engine\'s TIER_RANK keys', (t) => {
+// Pins ladder.py's MODELS to the engine's LADDER_MODELS (p13-2: the engine climbs rungs and validates
+// args.ladder against that set), and its EFFORTS and built-in rungs to the engine's LADDER_EFFORTS and
+// BUILT_IN_LADDER, so a machine with no ladder file runs the same ladder whether or not the lead passed one.
+test('L9 MODELS equals the engine\'s LADDER_MODELS', (t) => {
   const r = run(tmpHome(t), ['-B', '-c',
     "import json, runpy, sys; g = runpy.run_path(sys.argv[1]); print(json.dumps(list(g['MODELS'])))", SCRIPT])
   assert.equal(r.stderr, '')
   assert.equal(r.status, 0)
-  const engine = Object.keys(loadEngine(['TIER_RANK']).TIER_RANK).sort()
-  assert.deepEqual(JSON.parse(r.stdout).sort(), engine)
+  const engine = JSON.parse(JSON.stringify(loadEngine(['LADDER_MODELS']).LADDER_MODELS))
+  assert.deepEqual(JSON.parse(r.stdout), engine)
   for (const model of engine) {
     const home = tmpHome(t)
     writeLadder(home, render([R(`${model}-high`, model)]))
@@ -410,6 +411,77 @@ test('L9 the importable EFFORTS, FIELDS and BUILT_IN are the ones these tests pi
   assert.deepEqual(efforts, EFFORTS)
   assert.deepEqual(fields, FIELDS)
   assert.deepEqual(builtIn, BUILT_IN)
+})
+
+test('L9 the engine\'s LADDER_EFFORTS and BUILT_IN_LADDER equal ladder.py\'s, and the engine accepts its output', (t) => {
+  const E = loadEngine(['LADDER_EFFORTS', 'BUILT_IN_LADDER', 'ladderArgsError'])
+  assert.deepEqual(JSON.parse(JSON.stringify(E.LADDER_EFFORTS)), EFFORTS)
+  assert.deepEqual(JSON.parse(JSON.stringify(E.BUILT_IN_LADDER)), loads(tmpHome(t)), 'the built-in ladder, source and rungs')
+  const home = tmpHome(t)
+  writeLadder(home, render([R('opus-high', 'opus'), R('fable-max', 'fable')]))
+  assert.equal(E.ladderArgsError(loads(home)), '', "the engine accepts ladder.py's output for a file")
+})
+
+// The rung-name rule is written three times: ladder.py's NAME_RE and YAML_WORDS (the loader), the engine's
+// LADDER_NAME and LADDER_YAML_WORDS (args.ladder's check, before any dispatch) and reconcile-rollout.py's
+// is_rung_name (the `rung:` stamp, and lead-integrate.py inputs' rung record). If the loader ever accepted a
+// name the engine refuses, every Workflow call would throw before dispatch and read as a Lost call; if
+// reconcile refused one, a climb would never be stamped. So the same names go to all three, through their
+// real entry points: ladder.py's load() on a one-rung file, the engine's ladderArgsError() on a one-rung
+// args.ladder, and reconcile's is_rung_name().
+const RECONCILE = path.join(root, 'skills', 'execute', 'scripts', 'reconcile-rollout.py')
+const NAME_CASES = {
+  valid: ['opus-high', 'opus-xhigh', 'fable-max', 'a', 'z9', 'r.1_b-c', 'x.', 'opus--', 'yes-please', 'nope', 'nulls', 'tru', 'o', 'ny'],
+  uppercase: ['Opus', 'OPUS-HIGH', 'opus-High', 'TRUE', 'Yes', 'NULL', 'Off'],
+  'a YAML word': ['true', 'false', 'yes', 'no', 'on', 'off', 'y', 'n', 'null'],
+  'a leading digit': ['1', '1opus', '9-high', '0.5'],
+  'a leading mark': ['-opus', '.opus', '_opus', '~'],
+  'a space': ['opus high', ' opus', 'opus ', 'opus\t', ' '],
+  'a line end': ['opus\n', 'opus\r\n', '\nopus'],
+  other: ['', 'opus/high', 'opus:high', 'opus#x', 'opüs', 'ópus', 'opus"x', 'opus\\x'],
+}
+const NAME_PROBE = `
+import importlib.util, json, os, runpy, sys
+ladder_py, reconcile_py, d, names = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4])
+g = runpy.run_path(ladder_py)
+spec = importlib.util.spec_from_file_location("reconcile_rollout", reconcile_py)
+rr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rr)
+out = []
+for i, n in enumerate(names):
+    p = os.path.join(d, "%d.toml" % i)
+    with open(p, "w", encoding="utf-8") as f:
+        f.write('[[rung]]\\nname = %s\\nmodel = "opus"\\neffort = "high"\\njudge = "high"\\nreview = "xhigh"\\n' % json.dumps(n))
+    try:
+        loaded = g["load"](p)["rungs"][0]["name"] == n
+    except g["LadderError"]:
+        loaded = False
+    out.append([loaded, rr.is_rung_name(n)])
+print(json.dumps(out))
+`
+
+test('L9 ladder.py, the engine and reconcile agree on every rung name', (t) => {
+  const names = Object.values(NAME_CASES).flat()
+  const r = run(tmpHome(t), ['-B', '-c', NAME_PROBE, SCRIPT, RECONCILE, tmpHome(t), JSON.stringify(names)])
+  assert.equal(r.status, 0, r.stderr)
+  const py = JSON.parse(r.stdout)
+  assert.equal(py.length, names.length)
+  const E = loadEngine(['ladderArgsError', 'rungName'])
+  const one = (name) => ({ source: 'x', rungs: [{ name, model: 'opus', effort: 'high', judge: 'high', review: 'xhigh' }] })
+  names.forEach((name, i) => {
+    const [ladderPy, reconcile] = py[i]
+    const engine = E.ladderArgsError(one(name)) === ''
+    const show = JSON.stringify(name)
+    assert.equal(E.rungName(name), engine, `${show}: the engine's rungName and its args check agree`)
+    assert.equal(ladderPy, engine, `${show}: ladder.py ${ladderPy ? 'accepts' : 'refuses'} it, the engine ${engine ? 'accepts' : 'refuses'} it`)
+    assert.equal(reconcile, engine, `${show}: reconcile ${reconcile ? 'accepts' : 'refuses'} it, the engine ${engine ? 'accepts' : 'refuses'} it`)
+  })
+  // Agreement alone would pass if all three accepted (or refused) everything: pin the expected verdicts too.
+  for (const [kind, list] of Object.entries(NAME_CASES)) {
+    for (const name of list) {
+      assert.equal(E.rungName(name), kind === 'valid', `${JSON.stringify(name)} (${kind}) is ${kind === 'valid' ? 'a' : 'not a'} rung name`)
+    }
+  }
 })
 
 // ---- L10: CLI usage -----------------------------------------------------------------------------------

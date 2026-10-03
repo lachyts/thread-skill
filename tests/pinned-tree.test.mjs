@@ -15,10 +15,10 @@ import { loadEngine } from './lib/engine.mjs'
 const T = loadEngine([
   'taskTreeSetup', 'TASK_TREE_RULE', 'worktreeSetup', 'worktreeDir', 'envBootstrapStep', 'GIT_ENV_SCRUB',
   'plannerPrompt', 'planJudgePrompt', 'planReviserPrompt', 'readOnlyPrompt', 'reviewJudgePrompt',
-  'implementerPrompt', 'approvedPlanImplementerPrompt',
+  'implementerPrompt', 'approvedPlanImplementerPrompt', 'rungState',
 ])
 const SCRUB = 'unset $(git rev-parse --local-env-vars 2>/dev/null);'
-const ST = { tier: 'opus', cap: 'fable', escalated: false, capSuppressed: false }
+const ST = T.rungState({ slug: 'proj-fix-x' }, {}) // a bottom-rung first pass, as converge() builds it
 const R = '/REPOROOT' // a sentinel: any unmapped repoPath read shows up as a bare match
 const a = { repoPath: R, verifier: 'make test', rolloutSlug: 'r' }
 const slug = 'proj-fix-x'
