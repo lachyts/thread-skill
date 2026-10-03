@@ -190,19 +190,22 @@ REINTEGRATE_MAX=${MERGE_TASK_REINTEGRATE_MAX:-3}         # re-integrations allow
 # step is setup/provisioning; anything else — a test/lint/build step, an unrecognised step, or no steps at
 # all — is "genuine". FAIL-CLOSED by construction: the burden of proof is on "infra".
 # Defined up here (before arg parsing) so the --self-test-classify hook can exercise it with no live GitHub.
-classify_failed_steps() {  # stdin: failed step names; stdout: "infra" | "genuine"
-  local saw=0 verdict=infra line lc
+classify_failed_steps() (  # stdin: failed step names; stdout: "infra" | "genuine"
+  local saw=0 verdict=infra line
+  # Plain [[ =~ ]] (an unquoted variable is an ERE on bash 3.2 too) under nocasematch, scoped by the
+  # subshell body: no per-line fork. The patterns are unanchored, so surrounding blanks need no trim.
+  local deny='test|pytest|assert|spec|lint|mypy|type ?check|coverage|benchmark|compile|build'
+  local allow='install|dependenc|set ?up|checkout|cache|download|provision|restore|bootstrap|configure|pip|poetry|npm ci|npm install|yarn|apt|brew|fetch|clone'
+  shopt -s nocasematch
   while IFS= read -r line; do
-    line="$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-    [ -z "$line" ] && continue
+    [[ $line =~ ^[[:space:]]*$ ]] && continue
     saw=1
-    lc="$(printf '%s' "$line" | tr '[:upper:]' '[:lower:]')"
     # Denylist FIRST (fail-closed): anything that looks like the actual test/build/lint work is genuine.
-    if printf '%s' "$lc" | grep -qE 'test|pytest|assert|spec|lint|mypy|type ?check|coverage|benchmark|compile|build'; then
+    if [[ $line =~ $deny ]]; then
       verdict=genuine; break
     fi
     # Allowlist: recognised setup/provisioning/network steps. An UNRECOGNISED step ⇒ genuine (fail-closed).
-    if printf '%s' "$lc" | grep -qE 'install|dependenc|set ?up|checkout|cache|download|provision|restore|bootstrap|configure|pip|poetry|npm ci|npm install|yarn|apt|brew|fetch|clone'; then
+    if [[ $line =~ $allow ]]; then
       :  # infra-looking — keep scanning the rest
     else
       verdict=genuine; break
@@ -210,7 +213,7 @@ classify_failed_steps() {  # stdin: failed step names; stdout: "infra" | "genuin
   done
   [ "$saw" -eq 1 ] || verdict=genuine   # no parseable steps ⇒ cannot prove infra ⇒ genuine
   printf '%s' "$verdict"
-}
+)
 
 # ---- local base refresh --------------------------------------------------------------------------------
 # After the PR lands, fast-forward the checkout at repoPath — only when it is on the base branch; a
@@ -458,6 +461,9 @@ if [ "${1:-}" = "--self-test-classify" ]; then
   printf 'Build wheel\n'                     | st genuine "build"
   printf 'Deploy artifact\n'                 | st genuine "unrecognised step => fail-closed"
   printf '\n'                                | st genuine "no steps => fail-closed"
+  printf '  \t\n'                            | st genuine "blank-only steps => fail-closed"
+  printf '\n  INSTALL DEPENDENCIES  \n\n'     | st infra   "blank lines skipped, case ignored"
+  printf 'RUN TESTS\n'                       | st genuine "upper-case test => genuine"
   echo; [ "$st_fail" -eq 0 ] && echo "classifier: ALL PASS" || echo "classifier: SOME FAILED"
   exit "$st_fail"
 fi
@@ -804,18 +810,17 @@ snapshot_once() { local READ_TRIES=1; pr_snapshot "$1"; }   # one attempt (dynam
 
 WAIT_MSG=''
 wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAIT_MSG); 1 halt (printed)
-  local absent=0 out rc infra_reruns=0
+  local absent=0 rc infra_reruns=0
   echo "  PR #$PR — waiting on required checks…"
   while : ; do
     gh pr checks "$PR" -R "$OWNER/$REPO" --required --watch --fail-fast --interval "$CHECK_INTERVAL" \
       >"$tmp/checks.out" 2>"$tmp/checks.err"; rc=$?
     [ $rc -eq 0 ] && return 0
-    out=$(cat "$tmp/checks.out" "$tmp/checks.err" 2>/dev/null)
     # Required checks ABSENT — either not created YET (late roll-up check; CI still in flight on the
     # head) or genuinely never coming. While anything is running, wait — same trust semantics as
     # --watch on a visible pending check, bounded in practice by GitHub's own job timeouts. The
     # CHECK_RETRY_MAX budget only counts CONSECUTIVE polls where nothing is running anywhere.
-    if printf '%s' "$out" | grep -qiE 'no checks reported|no required checks'; then
+    if grep -qiE 'no checks reported|no required checks' "$tmp/checks.out" "$tmp/checks.err" 2>/dev/null; then
       # No-CI recompute guard: after a merge advances the base, GitHub recomputes every open PR's
       # mergeability ASYNCHRONOUSLY — the state machine can sample a transient UNKNOWN/BLOCKED
       # and land here even in a repo with NO required checks configured at all (statusCheckRollup
@@ -847,7 +852,7 @@ wait_required_checks() {  # 0 green; 8 a transient gh error with no red row (WAI
       return 8
     fi
     echo "ERROR: a REQUIRED check FAILED on PR #$PR (Ralph passed locally, but remote CI is red):" >&2
-    printf '%s\n' "$out" | tail -6 >&2
+    cat "$tmp/checks.out" "$tmp/checks.err" 2>/dev/null | tail -6 >&2
     # Finding #4: tell a transient infra/setup flake from a genuine test failure; auto-rerun the former a
     # bounded number of times before halting. infra_flake_rerun is FAIL-CLOSED — a genuine failure halts.
     if [ "$infra_reruns" -lt "$INFRA_RERUN_MAX" ] && infra_flake_rerun; then

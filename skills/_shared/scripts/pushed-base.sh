@@ -21,10 +21,9 @@
 #     on origin/<b>, with its `log --oneline` and a remedy built from close's repo-state.sh line when that
 #     member's HEAD is <b> (queued / stranded / split, merge-task's three patterns), else a generic one; both
 #     name the reset that drops the local copies once landed. Ahead commits whose content is already on
-#     origin/<b> (`git cherry` all `-`, or no touched file differs: a squash or cherry-picked PR) are a note
-#     naming that reset; ahead commits touching only THREAD.md are a note. An ahead set touching no file blocks.
-#     A reset that would move the primary checkout while a rollout runs on it says to wait
-#     (primary-hold.sh, ADR 0031).
+#     origin/<b> (no file they touch differs: a squash or cherry-picked PR) are a note naming that reset;
+#     ahead commits touching only THREAD.md are a note. An ahead set touching no file blocks. A reset that
+#     would move the primary checkout while a rollout runs on it says to wait (primary-hold.sh, ADR 0031).
 #   Warn — each cited path on its own (never batched): a relative path in every member, an absolute or ~/
 #     one in the member containing it (else a note). Per (member, path): `diff HEAD` + `diff --cached`
 #     (uncommitted), `diff origin/<b>...HEAD` three-dot AND `diff origin/<b> HEAD` two-dot (committed on the
@@ -116,10 +115,10 @@ done
 
 # ---- block: a member's local <b> ahead of origin/<b> --------------------------------------------------
 # Ancestry alone over-counts: a commit landed by a squash or cherry-picked PR stays "ahead" for ever. So an
-# ahead member blocks only when some of its content is not on origin/<b>: `git cherry` marks every ahead
-# commit `-` (patch-equivalent upstream), or no file the ahead commits touch differs between origin/<b> and
-# local <b> (a multi-commit squash). THREAD.md is set aside first. An ahead set that touches no file (empty
-# commits, net-zero changes) still blocks: there is no content to compare, so the gate stays conservative.
+# ahead member blocks only when some of its content is not on origin/<b>: a file the ahead commits touch
+# (merges included) differs between origin/<b> and local <b>. THREAD.md is set aside first. Landed content
+# that origin/<b> has since changed blocks, and so does an ahead set that touches no file (empty commits,
+# net-zero changes): with nothing to compare, the gate stays conservative.
 blocked=0 broken=0
 up="refs/remotes/origin/$b"
 reset_hint() {  # reset_hint <member>: the command that drops local <b>'s landed commits
@@ -136,16 +135,11 @@ held_hint() {  # held_hint <member>: the wait a reset of the primary checkout ne
 }
 for c in "${members[@]}"; do
   git -C "$c" rev-parse -q --verify "refs/heads/$b" >/dev/null 2>&1 || continue
-  n=$(git -C "$c" rev-list --count "$up..refs/heads/$b" 2>&1) || {
-    echo "pushed-base: cannot count $b against origin/$b in $c: $(printf '%s\n' "$n" | head -n 1)" >&2; broken=1; continue; }
-  [ "$n" -gt 0 ] 2>/dev/null || continue
+  # git's stderr passes through (it says why); a failure blocks, never skips.
+  n=$(git -C "$c" rev-list --count "$up..refs/heads/$b") || {
+    echo "pushed-base: cannot count $b against origin/$b in $c" >&2; broken=1; continue; }
+  [ "$n" -gt 0 ] || continue
   hh=$(held_hint "$c")   # the wait a reset of this member needs, once per ahead member (ADR 0031)
-  # Every ahead commit patch-equivalent to one on origin/<b>: landed by a cherry-pick or one-commit squash.
-  if ch=$(git -C "$c" cherry "$up" "refs/heads/$b" 2>/dev/null) && [ -n "$ch" ] \
-     && ! printf '%s\n' "$ch" | grep -q '^+'; then
-    note "local $b in $c is $n commit(s) ahead of origin/$b, but each is already on origin/$b by content (landed by a squash or cherry-picked PR): not a blocker; drop them with \`$(reset_hint "$c")\`$hh"
-    continue
-  fi
   # The files the ahead commits touch (merge-base..<b>), and which of them differ from origin/<b> now.
   touched=() differ=() other=0
   while IFS= read -r -d '' f; do touched+=("$f"); done < <(git -C "$c" diff --no-renames --name-only -z "$up...refs/heads/$b" 2>/dev/null)
