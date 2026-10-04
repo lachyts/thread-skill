@@ -261,6 +261,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   its start, up to the parallel ceiling, held back only by dependencies or a
   **Solo** task, never a shared file (ADR 0030). _Avoid_: batch (the
   session lane's).
+- **Slot** — one task's own run (a start, a restart or a seeded revise) in a
+  Queue, held from its launch until its result is reconciled. Integration
+  holds none. _Avoid_: worker, agent (a slot's run holds many agents).
+- **Parallel ceiling** — the most Slots a Queue holds at once, set per
+  rollout. Not the retired model-tier **Ceiling** (see **Top rung**).
+  _Avoid_: bare "ceiling", concurrency, max agents.
 - **Solo** — a task in a Queue that runs with nothing else in flight: a
   sweeping change every concurrent task would otherwise redo its work around
   (ADR 0030). _Avoid_: barrier, exclusive.
@@ -268,6 +274,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the latest `main` merged in, the verifier re-run and, when needed, a short
   re-review (ADR 0030). _Avoid_: update-branch (GitHub's merge-in, which
   re-verifies nothing without CI), rebase.
+- **Integration lane** — the one-at-a-time Integration step itself, held by one
+  approved task at a time until it is released (a merge, a set-aside, a
+  rejection or a halt); a rollout's merges can never outpace it. Execute's prose shortens it
+  to "the lane". Not a **Lane** (rollout vs session). _Avoid_: merge queue.
+- **Integration queue** — the approved tasks waiting for the Integration lane,
+  in `next`'s order. _Avoid_: the lane (that is the step, not the line).
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).
@@ -387,6 +399,30 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Hard: stop now; worktrees keep the work. _Avoid_: suspend, halt, abort.
 - **Reinstate** — resuming a paused rollout: plain `execute` on the rollout
   note. No separate resume command. _Avoid_: restart, relaunch, unpause.
+
+## Run record and tuning
+
+- **Run record** — the append-only events a rollout's Slots and
+  Integration lane leave as they run, with the settings in force at each
+  Slot start, written by scripts, never by a model (ADR 0032). _Avoid_:
+  telemetry, metrics, log (a task note's `## Integration log` is a
+  different thing).
+- **Throughput** — merges per running hour: the one number a Retro
+  optimises. Running time leaves out pauses, halts and waits on Lachy.
+  _Avoid_: speed, wall-clock (it counts nights and sign-offs).
+- **Guardrail** — a measure a Tuning must not worsen past its bound to buy
+  Throughput: tokens per merge, set-aside rate, conflict rate, quota stalls.
+  Its bounds sit in the operator's rollout settings.
+- **Retro** — the pass that reads a rollout's Run record (and the records
+  of any rollout that overlapped it, so shared load shows), scores it on
+  Throughput and the Guardrails, names what bound it (Slots, the
+  Integration lane, quota, dependencies) and proposes Tunings. It never
+  changes anything itself. _Avoid_: review (the engine's), reflection
+  (Chorus's).
+- **Tuning** — one proposed change to the operator's rollout settings (a
+  repo's Parallel ceiling, a round cap), applied only once Lachy picks it,
+  and read by the next schedule. A rule that three Retros agree on may later
+  become an automatic adjustment, by ADR. _Avoid_: tweak, auto-tune.
 
 ## Model ladder
 
