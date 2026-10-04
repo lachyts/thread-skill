@@ -11,10 +11,10 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 ## Where we are
 
 **2026-10-04 (morning): the Run record is decided and scheduled. ADR 0032 merged (#87, `d9b434d`); P15 is written and its rollout `[[thread-skill-rollout-2026-10-04]]` (p15-1..5) is stamped, not started: it runs after the Chorus rollout ends. The Chorus rollout runs at Parallel ceiling 5 since 09:43+11:00.**
-- **The question** (Lachy, via `/thread:orient Thread Skill` + grill-with-docs): why three tasks at once, why not ten? Read off chorus-rollout-2026-10-03: from 16:16+10:00 on 3 Oct every lead status line reads `running=3` (38 merges in 16 h 07 min, ~2.4/h); the Integration lane ran 51 Integrations (1.34 per merge, 431 min, ~45% busy), so it caps merges near 5.3/h. Slot-bound with headroom; RAM binds only for heavy verifiers; quota is unmeasured. The first reading (idle Slots) was wrong: it came from a partial task-note grep, not the lead's status lines.
-- **Decisions (ADR 0032):** a Run record written only by scripts, in `${THREAD_EVENTS_DIR:-$XDG_STATE_HOME/thread/events}` (Lachy's override: `_shared/state/thread-events/`); a Retro scores Throughput against Guardrails and proposes Tunings Lachy picks; Tunings live in `~/.config/thread/rollouts.toml` beside `ladder.toml`; automatic adjustment only once three Retros agree, by ADR. Scope: rollout lane plus review loops. Glossary: Slot, Parallel ceiling, Integration lane vs Integration queue, Run record, Throughput, Guardrail, Retro, Tuning.
-- **PR #87's reviews:** round 1 (15) fixed by widening the ADR into a spec; round 2 (15, all citing that fix) tripped the ledger STOP; reverted to decision level, the round-2 questions carried into the P15 task notes for their plan-gates; Lachy merged as is. The estate METHOD row on ADR altitude (line ~105) already said this; PR #53 did the same on 2026-09-30.
-- **P15** ([[thread-skill-p15-the-run-record]]): p15-1 writer, p15-2 execute emits, p15-3 journal folds, p15-4 `rollouts.toml`, p15-5 the Retro (the rollout); p15-6 first Retro on Chorus's 3→5 split (hands-on, after Chorus ends); p15-7 fresh-review emits rounds (`~/.agents`, low priority).
+- **The question** (Lachy, via `/thread:orient Thread Skill` + grill-with-docs): why three tasks at once, why not ten? Read off chorus-rollout-2026-10-03: from 16:16+10:00 on 3 Oct every lead status line reads `running=3` (38 merges in 16 h 07 min, ~2.4/h); the Integration lane ran 51 Integrations (1.34 per merge, 431 min, ~45% busy), so it caps merges near 5.3/h. Slot-bound with headroom, but thread-skill-rollout-2026-10-03 (16:33 to 00:43, ceiling 4) shared the machine and account inside that window, so 2.4/h is not a solo baseline. RAM binds only for heavy verifiers; quota is unmeasured. The first reading (idle Slots) was wrong: it came from a partial task-note grep, not the lead's status lines.
+- **Decisions (ADR 0032):** a Run record written only by scripts, in `${THREAD_EVENTS_DIR:-${XDG_STATE_HOME:-~/.local/state}/thread/events}` (Lachy's override, `~/repos/workspaces/_shared/state/thread-events/`, is decided but not set yet: Resume step 2); a Retro scores Throughput against Guardrails and proposes Tunings Lachy picks; Tunings live in `~/.config/thread/rollouts.toml` beside `ladder.toml`; automatic adjustment only once three Retros agree, by ADR. Scope: the rollout lane; `/fresh-review` rounds may emit the same format from their own repo, under the override only (p15-7). Glossary: Slot, Parallel ceiling, Integration lane vs Integration queue, Run record, Throughput, Guardrail, Retro, Tuning.
+- **PR #87's reviews:** round 1 (15) fixed by widening the ADR into a spec; round 2 (15, all citing that fix) tripped the ledger STOP; reverted to decision level, the round-2 questions carried into the P15 task notes for their plan-gates; Lachy merged as is. The estate METHOD row "Write each decision into the record as the grill resolves it" (`~/repos/workspaces/_shared/knowledge/METHOD.md`) already said this; PR #53 did the same on 2026-09-30.
+- **P15** ([[thread-skill-p15-the-run-record]]): p15-1 writer, p15-2 execute emits, p15-3 journal folds, p15-4 `rollouts.toml`, p15-5 the Retro (the rollout); p15-6 first Retro on Chorus's 3→5 split (hands-on, after P15 lands); p15-7 fresh-review emits rounds (`~/.agents`, low priority).
 
 **2026-10-04 (early): P13's rollout tasks and P14's queue hardening have landed. `[[thread-skill-rollout-2026-10-03]]` (archived, § Completion log): 9/9 merged (#77 to #85) in 8h 10m from the clone, all on Opus, on the held primary checkout's engine at `0b60690`. Nothing of thread-skill's is running; the Chorus rollout still runs on the primary.**
 - **Landed:** p13-1 ladder loader (#79), p13-2 the engine climbs rungs, execute feeds the ladder, `max_tier:` removed (#80), p13-3 schedule, status and repair speak rungs (#83; its Integration resolved a conflict with #81/#82 through the integrator). p14-2 the approved plan reaches Integration plus `verify_timeout` (#82), p14-3 seeded revise never autostashes (#81), p14-4 the lead descopes a settled plan-block (#84), p14-5 landing PR bodies name their caller (#78), p14-6 the git-env canary (#85), p14-8 infra classifier word match (#77).
@@ -486,6 +486,7 @@ scheduled 2026-07-15.
 
 ## What's been built / decided
 
+- **ADR 0032 (proposed, build = P15, PR #87): rollouts keep a Run record and tune by Retro.** Script-written events, a Retro that proposes Tunings, `~/.config/thread/rollouts.toml`; auto-adjust only by a later ADR.
 - **ADR 0031 (accepted, PR #72): the primary checkout holds while a rollout runs.** `land.sh` S4/S11 skip moving the plugin's own checkout while `unfinished-rollout.py running` lists a live, started, unpaused protocol-5 rollout; `primary-hold.sh` finds the checkout by where the plugin runs from. Moving it mid-run is a deliberate cut-over (pause, update, reinstate).
 - **pushed-base decides "landed" by touched-file content alone (PR #73).** No `git cherry`, no `rev-list --cherry-pick`: patch identity passed a cherry-picked-then-reverted commit and an empty commit. Landed content that origin has since changed blocks (conservative).
 - **Reshuffle 2026-10-03 (Lachy's calls):** Chorus, not GifLab, is the first queue run; P13 goes live only after it ends; p13-1 is the loader only; the `--admin` opt-in is dropped; the git-env canary (p14-6) is lead-side; estate chores merged into one note.
@@ -559,13 +560,11 @@ scheduled 2026-07-15.
 - **P12 landed (2026-10-03, #56–#69): the queue replaces waves.** Protocol 5 rollout notes; `task.workflow.js` (one task per call); `merge-task.sh`; `reconcile-rollout.py`; `lead-integrate.py`; `rollout-stop-driver.py` and the `ROLLOUT-STATUS` line. `merge-wave.sh`, `reconcile-wave.py`, `wave-execute.workflow.js` and `WAVE-STATUS` are deleted with no alias. Phase 12 stays open for p12-13.
 - **Hard rollout tasks start at the higher rung** (2026-10-01/02 evidence): a deep task stamped `effort: xhigh` with `max_plan_rounds: 6` converges; at the default rung it plan-blocks. ADR 0029's ladder makes this the rung-2 start; until P13, it's per-task frontmatter.
 
-- **2026-10-04, ADR 0032** (#87): rollouts keep a Run record and tune by Retro; P15 builds it.
-
 ## Open questions / decisions pending
 
-- **Concurrent Workflow calls past 3 are untested** (the spike tested 3). Every ceiling of 3+ plus an integrate call already exceeds it, and Chorus at 5 can hold 6. p15-6 answers it; until then a higher ceiling is an experiment.
+- **Concurrent Workflow calls past 3 are untested by design** (the spike ran 3). A ceiling of 4 or more passes it; so does a ceiling of 3 while an integrate call runs (the trouble path only: a clean Integration is the lead's, no call). Chorus at 5 can hold 6. p15-6 answers it (the Chorus Integration log's `path=integrator` lines may already show 4); until then a ceiling above 3 is an experiment.
 - **A machine-wide Slot cap across rollouts** is deferred (ADR 0032): two rollouts at once share RAM, CPU and quota, and each Retro sees only shared load. Decide once Retros show whether it binds.
-- **AGENTS.md's "Mac M3 96GB"** is wrong (`sysctl`: Apple M2 Max, 12 cores, 96 GB). Lachy's file, so the fix needs his word.
+- **AGENTS.md's "Mac M3 96GB"** is wrong (Known quirks: the machine). Lachy's file, so the fix needs his word.
 
 - **Hold own-branch moves too?** (p14-7 follow-up, Lachy's call) Putting the hold inside `move_branch` would guard `land.sh --own-branch` on the primary checkout, but an own-branch landing there would then end `stuck: held`.
 
@@ -659,7 +658,7 @@ scheduled 2026-07-15.
 
 - **`parallel_ceiling` is live:** `reconcile-rollout.py next` re-reads it from the rollout note on every call, so editing the note changes a running rollout at its next Slot fill (Chorus 3→5 at 09:43+11:00 on 2026-10-04). Nothing records the change until p15-2.
 - **Integrations ≠ merges:** a rejection or a re-Integration after `main` moves runs the lane again (Chorus: 51 for 38), so lane capacity in merges is lane capacity in Integrations over that ratio.
-- **The machine is an M2 Max, 12 cores** (Workflow per-call agent cap `min(16, CPUs-2)` = 10). The rollout template's "M3 96GB" and execute's "~14 on the M3" are wrong until p15-4.
+- **The machine is an M2 Max, 12 cores, 96 GB** (`sysctl`; Workflow per-call agent cap `min(16, CPUs-2)` = 10). The rollout template's "M3 96GB" and execute's "~14 on the M3" are wrong until p15-4.
 - **Lead transcript timestamps are UTC**, task-note stamps are local with an offset, and Melbourne moved +10 → +11 at 02:00 on 2026-10-04: subtract only after normalising.
 
 - **A Workflow task-notification's output file is one JSON object** (`summary`, `logs`, `result`, `agents`): pipe `json.load(f)['result']` into `reconcile-rollout.py reconcile --result -`; the file has no `<result>` tag to cut.
@@ -896,11 +895,12 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**Now (from 2026-10-04, morning): Chorus still runs on the primary checkout (held), at ceiling 5. P15's rollout waits for it.**
-1. **When Chorus ends:** `git reset --keep origin/master` in `~/repos/tools/thread-skill`, then p13-4 (3.0.0, `make evals` first) in the session lane, so the ladder engine goes live.
-2. **Then P15:** `execute [[thread-skill-rollout-2026-10-04]]` from a session in the clone `~/repos/tools/thread-skill-rollout` (a self-rollout never runs from the primary). Every task plan-gates; each note carries the PR #87 round-2 questions its plan must answer.
-3. **[[thread-skill-p15-6-first-retro-chorus-ceiling-3-to-5]]** once Chorus is complete: backfill its record, measure 3 vs 5, answer the concurrent-call question.
-4. **Carried:** p14-7's held-landing Verify line; [[thread-skill-land-takes-review-doc-deletions]] (then the six older consumed review docs); the fresh-reviews of workspaces `29ca886` and `eb136df`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
+**Now (from 2026-10-04, morning): Chorus still runs on the primary checkout (held), at ceiling 5. P15's rollout waits for it, and for p13-4.**
+1. **While Chorus runs:** [[thread-skill-p14-7-primary-checkout-holds]]'s last Verify line needs a close-out landing *from the primary checkout* after origin moves (origin has moved: #87, #88). Expect `land: held the primary checkout` on stderr, then mark the task done.
+2. **When Chorus ends:** keep p15-6's evidence first, since transcripts and Workflow journals are cleaned after ~30 days: copy `~/.claude-profiles/animately/projects/-Users-lachlants-repos-tools-chorus/aeedc82b-deec-41f8-b466-6f14407a4324.jsonl` and its `aeedc82b-…/workflows/` into `~/repos/workspaces/_shared/state/thread-events/sources/chorus-rollout-2026-10-03/`, and set `THREAD_EVENTS_DIR` to `~/repos/workspaces/_shared/state/thread-events` (Lachy's decided override). Then `git fetch origin && git reset --keep origin/master` in `~/repos/tools/thread-skill`, then p13-4 (3.0.0, `make evals` first) in the session lane, so the ladder engine goes live. Then [[ab-fable-vs-opus-planning]].
+3. **Then P15:** `execute [[thread-skill-rollout-2026-10-04]]` from a session in the clone `~/repos/tools/thread-skill-rollout` (a self-rollout never runs from the primary). Every task plan-gates; each note carries the PR #87 round-2 questions its plan must answer.
+4. **After P15 lands:** [[thread-skill-p15-6-first-retro-chorus-ceiling-3-to-5]] (it depends on p15-1 and p15-5): backfill the Chorus record from step 2's copies, measure 3 vs 5, answer the concurrent-call question.
+5. **Carried:** [[thread-skill-land-takes-review-doc-deletions]] (then the six consumed review docs left on master); the fresh-reviews of workspaces `29ca886` and `eb136df`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
 
 **Superseded 2026-10-04 (morning):**
 **Now (from 2026-10-04): the P13/P14 rollout is done; Chorus still runs on the primary checkout, which stays held.**
