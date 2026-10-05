@@ -426,6 +426,11 @@ python3 "$gc" <verb> --rollout <rollout-note> <its flags: --repo <repoPath> --de
 5. **Completion.** When the halt guard allows `halt: complete`, **perform the completion ceremony** (don't just point the user at the checklist):
    - Run the canary's `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py check-all --rollout <rollout-note>` first (*Git-env canary*): a non-zero exit halts the ceremony before anything is swept.
    - Sweep the rollout's task notes: every task should already read `status: done` (step 4's `mark-done` flips each as it merges). Flip any straggler still at `review` whose PR is verifiably merged (`mark-done` again); a straggler at any *other* status means the rollout isn't actually complete — stop and say so.
+   - **Fold the Workflow journals into the Run record (ADR 0032).** Each Workflow call's journal is cleaned up with its transcripts after about 30 days, and its tokens, duration and agent count are lost with it, so fold them before the note moves:
+     ```
+     python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py fold-journals --rollout <rollout-note>
+     ```
+     It reads only the rollout's Run record (its `run-bound` lines name each call's runId and journal dir) and writes one `call-journal` line per call through `run_record.py`. Record its summary line and every `WARN:` line in the Completion log. A non-zero exit (1: the events directory cannot be resolved or the record cannot be read; 2: usage or a refused slug) is surfaced to the user and the ceremony **continues**: it never halts and never files a follow-on. It is idempotent, so every Retro also runs it first (mid-run, at close, or on a superseded or dropped rollout, which folds the same way from its record alone).
    - **Close the phases this rollout finished (ADR 0026).** Without this step a phase closes only when a lead remembers to. Run it here, before the rollout stamp, never after:
      ```
      python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py touched-phases --rollout <rollout-note>
