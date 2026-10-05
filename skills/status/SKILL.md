@@ -88,7 +88,9 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
 - top level: `paused` (the pause stamp; null when not paused), `pause_requested` (a soft pause is draining:
   execute → *Pausing + reinstating a rollout*), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
   included), `progress`, `timeline` and `ladder`, plus `gitEnvHold` (the unacked git-env trips, each
-  `{slug, kind, line}`; § 3's Git-env trip flag);
+  `{slug, kind, line}`; § 3's Git-env trip flag) and `ceilingError` (why `ceiling` is null: an invalid
+  `parallel_ceiling`, or an absent one `rollout-settings.py` could not resolve; null otherwise; § 3's Rollout
+  settings refused flag);
 - per task: `slug`, `status`, `queueState`, `setAsideAt`, `pr`, `solo`, `started`, `merged`, `integrating`,
   `waitingOn`, `blockerSummary`, `rung` and `rungDrift`.
 
@@ -124,7 +126,10 @@ relays, e.g. `progress: 2/6 merged, 1 running, 1 awaiting integration, 1 queued,
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py inputs --note <task note> --max-review-rounds <K> --repo <repoPath>
 ```
 
-K is the task's `max_review_rounds`, resolved task → rollout → 4 as in execute § 3. When K is not an integer
+K is the task's `max_review_rounds`, resolved task → rollout → rollouts.toml / built-in, as in execute § 3. For
+a key absent at both levels, status runs `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py
+--repo <Project root>` (a local file read, no network) and reads `settings.max_review_rounds.value`; on its exit 2
+or 3, omit the flag and flag "rollout settings refused: <its stderr line>" on the task. When K is not an integer
 ≥ 1, omit the flag (so `autoRevise` reads false) and flag "invalid round budget" on the task. The call writes
 nothing (`--repo` only computes a path). Status reads `branch`, `worktreePath`, `readyAt`, `resumeAt`,
 `autoRevise`, `lastRound` and `lastIntegration` from it. `lastIntegration` is the `## Integration log`'s LAST
@@ -206,6 +211,11 @@ takes none of them.
 - **Ladder refused:** `ladder.error` is set. Execute halts `ladder file refused` at each call's start until the
   file reads, and the fix is Lachy's edit to `<ladder.source>` (<ladder.error>). The flag reads only the vault
   and a local file, so it holds offline too.
+- **Rollout settings refused:** `ceilingError` is set, or a task carries § 2's "rollout settings refused"
+  re-entry flag. Render each verbatim. Until it resolves `next` exits 1 (or that task's K is unknown, so its
+  re-entry is not automatic); the fix is Lachy's edit to the file and line it names
+  (`~/.config/thread/rollouts.toml`), or a `parallel_ceiling:` / `max_review_rounds:` stamp on the note. The flag
+  reads only the vault and local files, so it holds offline too.
 - **Git-env trip:** `gitEnvHold` is non-empty: execute's git-env canary (execute § 4.5 *Git-env canary*) saw
   the shared checkout's `refs/heads/<default>` or its bareness change during a window, and logged one
   `git-env trip` line per tripped window on the rollout note's `## Git-env log` that no later `git-env ack`
@@ -216,7 +226,8 @@ takes none of them.
 **Offline.** `--offline` skips this step: say the report is vault-only, and every resume or reinstate
 recommendation it makes carries the caveat "drift is invisible offline; re-run with the live check before
 resuming". It skips the live reads only: the RACE / UNVERIFIED, Rung drift and Ladder refused flags still
-render, from § 2's data and the local files. The Git-env trip flag reads only the vault, so it renders
+render, from § 2's data and the local files. The Rollout settings refused flag renders offline too, from the
+same local reads. The Git-env trip flag reads only the vault, so it renders
 offline too.
 
 ### 4. Render the situational report
@@ -390,6 +401,9 @@ Keep the whole report scannable: it's a glance, not a wall of text.
 the fix first: "fix `<ladder.source>` (<ladder.error>) first: execute halts `ladder file refused` at each call's
 start until it reads". Status never routes a refused ladder to `/thread:repair` on its own account, because
 repair never edits the file; another flag still sends the rollout there under action 11, carrying the fix.
+Refused rollout settings are handled the same way: they reorder nothing, add their fix ahead ("fix
+`~/.config/thread/rollouts.toml` at the named line, or stamp the key on the note, first"), are never routed to
+`/thread:repair` on their own account, and are not a drift flag for action 11.
 
 **Precedence.** The order is the precedence, with no override on top of it. Lineage (1, 2) comes before the
 version (3, 4): a supersede is how a legacy rollout migrates, so a legacy note that a successor's `supersedes:`

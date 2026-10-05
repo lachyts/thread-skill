@@ -367,11 +367,15 @@ there is nothing to clear. Per stage:
   `git -C <repoPath> update-ref -d refs/integration-anchor/<inputs.branch> <X>` (an absent ref is a no-op), then
   hand back.
 - **The raise** (review-blocked, its last log line `rejected`): when the resolved `max_review_rounds` (task →
-  rollout → 4) is ≤ `lastRound`, write `max_review_rounds: <lastRound + 1>` on the task note: the
-  "auto-retry agent-fixable, cap one" leash, applied to the ceiling. Announce it in the report and record it
+  rollout → rollouts.toml / built-in, execute § 3) is ≤ `lastRound`, write `max_review_rounds: <lastRound + 1>`
+  on the task note: the "auto-retry agent-fixable, cap one" leash, applied to the ceiling. Announce it in the report and record it
   in a dated `## Notes` line (`- <YYYY-MM-DD> repair: [[<slug>]] max_review_rounds raised to <N>, one round`),
   then hand back. If the task re-blocks after that raise (in this run, or a raise for it is already recorded
   in `## Notes`), ask Lachy instead of raising again. With no `rejected` line it is its own run: no raise.
+  When `max_review_rounds` is absent at both levels and `rollout-settings.py --repo <Project root>` exits 2 or 3,
+  make no raise:
+  report its stderr line and ask Lachy to fix `~/.config/thread/rollouts.toml` at the named line, or to stamp
+  `max_review_rounds:` on the task or rollout note. Repair never edits that file.
 - **A `merge-task:` own-run set-aside whose cause Lachy cleared on GitHub** (its last log line `integrated`):
   relabel it at Integration, then hand back: nothing before Integration is redone; it merges through case
   (ii) when main has not moved. A code cause stays its own call.
