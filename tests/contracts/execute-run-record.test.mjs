@@ -21,6 +21,11 @@ function labelled(text, label) {
   const j = lines.findIndex((l, k) => k > i && /^\*\*[A-Z`]/.test(l))
   return collapse(lines.slice(i, j < 0 ? undefined : j).join('\n'))
 }
+// One numbered sub-step of § 4.5's loop (step 1's list): the line that starts `   <prefix>`, collapsed.
+function loopStep(text, prefix) {
+  const line = (section(text, /^### 4\.5\. /) ?? '').split('\n').find((l) => l.startsWith(`   ${prefix}`))
+  return collapse(line ?? '')
+}
 const before = (hay, a, b) => hay.indexOf(a) >= 0 && hay.indexOf(b) >= 0 && hay.indexOf(a) < hay.indexOf(b)
 
 // Every rule in one place, returning named failures, so the real text and the controls run through the same code.
@@ -40,12 +45,22 @@ function checkRunRecord(md) {
   need('merge hold start', p.includes('`hold --tasks <slug> --hold merge --state start` on entering a *Merge hold*') && p.includes('exit 7'))
   need('merge hold end before launch and set-aside',
     p.includes("--state end` before each release's `merge-task.sh` launch and before a decline's set-aside row"))
-  need('end before start order', before(p, '--hold merge --state start', '--hold merge --state end'))
+  need('merge hold start before end', before(p, '--hold merge --state start', '--hold merge --state end'))
   need('race hold', p.includes("`hold --tasks <slug> --hold race --state start` right after the RACE procedure's `## Race log` line")
     && /`mark-done`, `resume` or `defer` ends it/.test(p))
   need('free-lane', p.includes('`free-lane --tasks <slug>` when the lane-free rule fires') && /§ 7 halt that leaves the lane held/.test(p))
   need('record-pause', p.includes('`record-pause --rollout <rollout-note>` right after hard-pause step 1'))
   need('next never knows a merge hold', /`next` never knows a merge hold/.test(p))
+  // Steps 1.2 and 1.3 agree with the paragraph: the seeded revise passes --start revise, and a restart resolves
+  // Restart routing before its mark-started, which passes the --start that routing chose.
+  const step12 = loopStep(md, '2. **Seeded revises')
+  need('step 1.2 passes --start revise', step12.includes('`mark-started --tasks <slug> --rollout <rollout-note> --start revise`'))
+  const step13 = loopStep(md, '3. For each slug in `restart`')
+  need('step 1.3 routes before mark-started',
+    before(step13, 'resolve *Restart routing*', 'mark-started --tasks <slug>')
+    && /mark-started --tasks <slug> --rollout <rollout-note>` with the `--start` that routing chose/.test(step13)
+    && step13.includes('`--start resume` for a *Lost call* or § 3.7 signed-gate resume')
+    && step13.includes('`--start revise` for a seeded revise'))
   const pause = collapse(section(md, /^## Pausing \+ reinstating a rollout/) ?? '')
   need('hard pause step 1 points to record-pause', /1\. Stamp the rollout note by hand FIRST:.*record-pause --rollout <rollout-note> \|\| true/.test(pause))
   return bad
@@ -94,6 +109,8 @@ const controls = [
   ['record-pause', (t) => t.replace('`record-pause --rollout <rollout-note>` right after hard-pause step 1', '`record-pause --rollout <rollout-note>` when convenient')],
   ['hard pause step 1 points to record-pause', (t) => t.replace('Then run `reconcile-rollout.py record-pause --rollout <rollout-note> || true` (§4.5 *Run record*).', '')],
   ['next never knows a merge hold', (t) => t.replace('`next` never knows a merge hold', '`next` records the merge hold')],
+  ['step 1.2 passes --start revise', (t) => t.replace('`mark-started --tasks <slug> --rollout <rollout-note> --start revise` (*Run record*)', '`mark-started --tasks <slug> --rollout <rollout-note>`')],
+  ['step 1.3 routes before mark-started', (t) => t.replace('for a restart resolve *Restart routing* (it writes nothing), stamp', 'stamp')],
 ]
 for (const [rule, mutate] of controls) {
   test(`control: ${rule}`, () => {

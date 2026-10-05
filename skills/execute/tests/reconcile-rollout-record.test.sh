@@ -4,8 +4,8 @@
 # start -> reconcile -> integrate -> merge, a set-aside, a live ceiling edit, merge and race holds, a Lost-call
 # resume, the integrate-call path, a hand-back, a signed gate, a quota stall, a read-only approval, `resume`,
 # `defer` and the halts; side rollouts cover the pauses, a carry and the idle-slots reasons. Each leg asserts
-# the `kind:task` sequence it appended and the key fields; the last legs check that --dry-run records nothing,
-# that an unwritable events dir changes no verb's exit, stdout or non-record stderr, and run the pairing
+# the `kind:task` sequence it appended and the key fields; the last legs check that --dry-run records nothing
+# (each verb then runs without it and must record), that an unwritable events dir changes no verb's exit, stdout or non-record stderr, and run the pairing
 # checker (run_record.py's reader rules) over the whole record. Temp dirs only.
 #
 # This suite reads the record, so it keeps its own THREAD_EVENTS_DIR and ignores THREAD_TEST_EVENTS_DIR (the
@@ -248,24 +248,39 @@ row "$(irow x blocked rejected integrator '["red"]' 2026-10-05T10:30:00Z $'revis
 ok "$(since ro "$M")" "lane-freed:x" "lane-freed only"
 ok "$(since ro "$M" '[d["release"], d["path"], d["triggers"], d["conflict"]]')" '["reject","integrator",["red"],false]' "release reject"
 
+echo "== 10b. a rejected integrate row that ends review-blocked -> lane-freed(reject), set-aside(integrate, review-rounds, run)"
+mkt xb ro review "pr: $PR/10" "ready: 2026-10-05T09:00+00:00"
+rrs mark-integrating --tasks xb --tasks-dir "$V" --now "$NOW" >/dev/null
+M=$(cnt ro)
+row "$(irow xb review-blocked rejected integrator '["red"]' 2026-10-05T10:31:00Z 'out of review rounds')" >/dev/null
+ok "$(since ro "$M")" "lane-freed:xb set-aside:xb" "lane-freed, then set-aside: no seeded revise follows"
+ok "$(since ro "$M" '[d.get("release"), d.get("stage"), d.get("reasonClass"), d.get("setAsideAt")]')" \
+  '["reject",null,null,null] [null,"integrate","review-rounds","run"]' "release reject; integrate, review-rounds, run"
+
 echo "== 11. merge-task exit 1 (--kind own on a lane holder) -> lane-freed(set-aside), set-aside(integrate, merge-task, run)"
 mkt m ro review "pr: $PR/11" "ready: 2026-10-05T09:00+00:00"
 rrs mark-integrating --tasks m --tasks-dir "$V" --now "$NOW" >/dev/null
+rrs log-integration --tasks m --started 2026-10-05T10:10+00:00 --anchor $A40 --head $B40 --base $C40 --tasks-dir "$V" --now "$NOW" >/dev/null
 M=$(cnt ro)
 lead m own 'merge-task: PR is CLOSED' >/dev/null
 ok "$(since ro "$M")" "lane-freed:m set-aside:m" "lane-freed, set-aside, no slot-freed"
 ok "$(since ro "$M" '[d.get("release"), d.get("stage"), d.get("reasonClass"), d.get("setAsideAt")]')" \
   '["set-aside",null,null,null] [null,"integrate","merge-task","run"]' "stage integrate, merge-task, setAsideAt run"
+ok "$(since ro "$M" '[d.get("path"), d.get("triggers"), d.get("conflict")]' | cut -d' ' -f1)" '["lead",[],false]' \
+  "a lead row's lane-freed reads path, triggers and conflict from the Integration log"
 
-echo "== 12. a gated decline: hold end before the set-aside row"
+echo "== 12. a gated decline after an integrate call: hold end before the set-aside row"
 mkt n ro review "pr: $PR/12" "ready: 2026-10-05T09:00+00:00"
 rrs mark-integrating --tasks n --tasks-dir "$V" --now "$NOW" >/dev/null
+row "$(irow n review integrated integrator '["red","conflict"]' 2026-10-05T10:01:00Z)" >/dev/null
 M=$(cnt ro)
 rrs hold --tasks n --hold merge --state start --tasks-dir "$V" >/dev/null
 rrs hold --tasks n --hold merge --state end --tasks-dir "$V" >/dev/null
 lead n integration 'merge declined at the --gated hold' >/dev/null
 ok "$(since ro "$M")" "hold-started:n hold-ended:n lane-freed:n set-aside:n" "start, end, then the row's events"
 ok "$(since ro "$((M+3))" '[d["stage"], d["reasonClass"], d["setAsideAt"]]')" '["integrate","declined","integration"]' "reasonClass declined"
+ok "$(since ro "$((M+2))" '[d.get("release"), d.get("path"), d.get("triggers"), d.get("conflict")]' | cut -d' ' -f1)" '["set-aside","integrator",["red","conflict"],true]' \
+  "the decline's lane-freed carries the integrated line's path, triggers and conflict"
 
 echo "== 13. a hand-back restart and a signed gate"
 rrs hand-back --tasks b --tasks-dir "$V" --now "$NOW" >/dev/null
@@ -332,6 +347,25 @@ ok "$(rrs resume --rollout "$V/ro.md" --tasks-dir "$V" --gh-bin "$GH" --now "$NO
 ok "$(since ro "$M")" "lane-freed:s merged:s" "lane-freed, merged"
 ok "$(since ro "$M" 'd.get("release") or d.get("pr")')" "\"merge\" \"$PR/18\"" "release merge, pr"
 
+echo "== 18b. resume flips a running (in_progress) note done -> slot-freed(completed), merged"
+mkt s2 ro in_progress "pr: $PR/28"
+rrs mark-started --tasks s2 --tasks-dir "$V" --now "$NOW" >/dev/null
+GHS2="$TMP/gh-s2"
+cat > "$GHS2" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"pr view"*pull/28*) echo '{"state":"MERGED","mergedAt":"2026-10-05T12:00:00Z","baseRefName":"main","url":"u"}';;
+  *"pr view"*) echo '{"state":"OPEN","mergedAt":null,"baseRefName":"main","url":"u"}';;
+  *"repo view"*) echo main;;
+esac
+SH
+chmod +x "$GHS2"
+M=$(cnt ro)
+rrs resume --rollout "$V/ro.md" --tasks-dir "$V" --gh-bin "$GHS2" --now "$NOW" >/dev/null
+ok "$(fm s2 status)" "status: done" "resume flipped the running note done"
+ok "$(since ro "$M")" "slot-freed:s2 merged:s2" "slot-freed before merged"
+ok "$(since ro "$M" 'd.get("outcome") or d.get("pr")')" "\"completed\" \"$PR/28\"" "outcome completed, pr"
+
 echo "== 19. defer records the frees before rollout: is cleared"
 mkt u ro in_progress
 rrs mark-started --tasks u --tasks-dir "$V" --now "$NOW" >/dev/null
@@ -343,30 +377,55 @@ ok "$(since ro "$M")" "slot-freed:u lane-freed:v" "slot-freed u, lane-freed v"
 ok "$(since ro "$M" 'd.get("outcome") or d.get("release")')" '"stopped" "halt"' "stopped, halt"
 ok "$(fm u rollout)|$(fm v rollout)" "<none>|<none>" "rollout: cleared"
 
-echo "== 22. --dry-run records nothing"
-mkt y ro in_progress; mkt z ro review "pr: $PR/22"
-mkt g3 ro gate-pending; printf '\n## Gated inputs (awaiting sign-off)\n\n- spend: x — cap $1\n' >> "$V/g3.md"
-M=$(cnt ro)
-{
-  rrs mark-started --tasks y --tasks-dir "$V" --dry-run
-  rrs mark-integrating --tasks z --tasks-dir "$V" --dry-run
-  rrs mark-done --tasks z --tasks-dir "$V" --dry-run
-  rrs reconcile --result "$(trow y '{"status":"blocked","blockerDiagnosis":"x"}')" --tasks-dir "$V" --dry-run
-  rrs hand-back --tasks m --tasks-dir "$V" --dry-run
-  rrs approve-gates --tasks g3 --tasks-dir "$V" --dry-run
-  rrs resume --rollout "$V/ro.md" --tasks-dir "$V" --gh-bin "$GH" --dry-run
-  rrs defer --tasks c --tasks-dir "$V" --dry-run
-  rrs next --rollout "$V/ro.md" --tasks-dir "$V" --running c --dry-run
-  rrs bind-run --tasks c --run-id wf_c1 --call task --journal-dir "$J" --tasks-dir "$V" --dry-run
-  rrs free-lane --tasks f --tasks-dir "$V" --dry-run
-  rrs hold --tasks f --hold merge --state start --tasks-dir "$V" --dry-run
-} >/dev/null 2>&1
-ok "$(since ro "$M")" "" "no verb records on --dry-run"
+echo "== 22. --dry-run records nothing; the same call without it records"
+# Each verb runs on a note it would record for: n is set aside at Integration with a pr: (hand-back's Integration
+# arm), g3 is gate-pending with a pr: and a last `set-aside` Integration log line (approve-gates' Integration arm),
+# z2 is a review + PR note the stub reports MERGED (resume), and the ceiling is raised so `next` leaves free Slots.
+mkt y ro in_progress; mkt z ro review "pr: $PR/22"; mkt z2 ro review "pr: $PR/222"
+mkt g3 ro gate-pending "pr: $PR/223"
+printf '\n## Integration log\n\n2026-10-05T10:00+00:00 set-aside path=integrator pr=223 anchor=%s head=%s base=%s wait=- duration=- triggers=-\n\n## Gated inputs (awaiting sign-off)\n\n- spend: x — cap $1\n' \
+  $A40 $B40 $C40 >> "$V/g3.md"
+GH22="$TMP/gh22"
+cat > "$GH22" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"pr view"*pull/222*) echo '{"state":"MERGED","mergedAt":"2026-10-05T12:00:00Z","baseRefName":"main","url":"u"}';;
+  *"pr view"*) echo '{"state":"OPEN","mergedAt":null,"baseRefName":"main","url":"u"}';;
+  *"repo view"*) echo main;;
+esac
+SH
+chmod +x "$GH22"
+# dry <expected kind:task list> <verb args...>: the call with --dry-run records nothing; without it, the list
+dry() {
+  local want=$1; shift; local m; m=$(cnt ro)
+  rrs "$@" --dry-run >/dev/null 2>&1
+  ok "$(since ro "$m")" "" "$1 --dry-run records nothing"
+  rrs "$@" >/dev/null 2>&1
+  ok "$(since ro "$m")" "$want" "$1 without --dry-run records"
+}
+dry "slot-taken:y" mark-started --tasks y --tasks-dir "$V" --now "$NOW"
+dry "lane-taken:z" mark-integrating --tasks z --tasks-dir "$V" --now "$NOW"
+dry "lane-freed:z merged:z" mark-done --tasks z --tasks-dir "$V" --now "$NOW"
+dry "slot-freed:y set-aside:y" reconcile --result "$(trow y '{"status":"blocked","blockerDiagnosis":"x"}')" --tasks-dir "$V" --now "$NOW"
+ok "$(rrs next --rollout "$V/ro.md" --tasks-dir "$V" --running "" --now "$NOW" | python3 -c 'import json,sys; print([e["setAsideAt"] for e in json.load(sys.stdin)["setAside"] if e["slug"] == "n"])')" \
+  "['integration']" "n is set aside at Integration"
+dry "ready:n" hand-back --tasks n --tasks-dir "$V" --now "$NOW"
+dry "ready:g3" approve-gates --tasks g3 --tasks-dir "$V" --now "$NOW"
+ok "$(fm g3 status)" "status: review" "approve-gates took the Integration arm"
+dry "merged:z2" resume --rollout "$V/ro.md" --tasks-dir "$V" --gh-bin "$GH22" --now "$NOW"
+dry "run-bound:c" bind-run --tasks c --run-id wf_c1 --call task --journal-dir "$J" --tasks-dir "$V"
+setfm ro parallel_ceiling 9
+dry "idle-slots:-" next --rollout "$V/ro.md" --tasks-dir "$V" --running c,b,g,g2 --now "$NOW"
+setfm ro parallel_ceiling 3
+dry "hold-started:f" hold --tasks f --hold merge --state start --tasks-dir "$V"
+dry "hold-ended:f" hold --tasks f --hold merge --state end --tasks-dir "$V"
+dry "lane-freed:f" free-lane --tasks f --tasks-dir "$V"
+dry "slot-freed:c" defer --tasks c --tasks-dir "$V"
 
 echo "== end of ro: the open Slots are deferred"
 M=$(cnt ro)
-rrs defer --tasks c,b,g,g2,y --rollout "$V/ro.md" --tasks-dir "$V" >/dev/null
-ok "$(since ro "$M")" "slot-freed:c slot-freed:b slot-freed:g slot-freed:g2 slot-freed:y" "five slot-freed (y never took a slot: ignored)"
+rrs defer --tasks b,g,g2 --rollout "$V/ro.md" --tasks-dir "$V" >/dev/null
+ok "$(since ro "$M")" "slot-freed:b slot-freed:g slot-freed:g2" "three slot-freed"
 
 echo "== 14. pauses (rollout pz)"
 mkro pz "parallel_ceiling: 2" "pause_requested: true"
