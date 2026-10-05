@@ -12,6 +12,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 D="$(mktemp -d)"
 trap 'rm -rf "$D"' EXIT
+export THREAD_EVENTS_DIR="$D/events"  # the Run record (run_record.py, ADR 0032) stays in temp
 NOW=2026-10-02T14:05:00Z
 
 fail=0
