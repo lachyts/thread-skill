@@ -44,7 +44,7 @@ const UNFINISHED = path.join(root, 'skills', '_shared', 'scripts', 'unfinished-r
 // The Run record (run_record.py, ADR 0032) the scripts may append lands in temp, never ~/.local/state.
 const EVENTS = fs.mkdtempSync(path.join(os.tmpdir(), 'srq-events-'))
 after(() => fs.rmSync(EVENTS, { recursive: true, force: true }))
-const ENV = { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: path.join(EVENTS, 'events') }
+const ENV = { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: process.env.THREAD_TEST_EVENTS_DIR || path.join(EVENTS, 'events') }
 
 function py(script, args, input, env = ENV) {
   const r = spawnSync('python3', [script, ...args], { encoding: 'utf8', env, input })

@@ -37,7 +37,8 @@ Subcommands:
               prints execute § 3.7's fresh-call warning only on the restart that directly follows a sign-off.
               It consumes descope's `descope_armed:` stamp the same way (p14-4): removed, with a line
               `<slug>: descope restart (descoped <stamp>; descope_armed: cleared) ...`, so a block after that
-              restart reads as a second block and descope asks.
+              restart reads as a second block and descope asks. It also removes hand-back's `handed_back:`
+              marker (p15-2). `--start start|restart|revise|resume` names the start for the Run record (below).
 
   mark-integrating Stamp `integrating: <time>` on a `review` note with a `pr:` as its Integration begins
               (the first wins): the durable signal /thread:status reads.
@@ -54,8 +55,9 @@ Subcommands:
               goes back to `status: review` with `ready:` restamped (it rejoins the Integration queue); a
               `blocked`, `review-blocked` or `plan-blocked` note set aside at its run, and a code-writing
               `review` note with no `pr:` (approved without a PR, which the queue sets aside at its run),
-              go to `status: in_progress` with `owner:` removed (the next `next --running` restarts it, and
-              its own call re-runs on the existing tree and branch). Refuses (exit 1, nothing written) every
+              go to `status: in_progress` with `owner:` removed and a `handed_back: <now>` marker (the next
+              `next --running` restarts it, and its own call re-runs on the existing tree and branch; the
+              restart's mark-started consumes the marker). Refuses (exit 1, nothing written) every
               other note: gate-pending (approve-gates' job), done, review with a PR (awaiting Integration),
               a read-only review note, in_progress, open, and a note set aside at Integration with no `pr:`.
               A task an undecided RACE or UNVERIFIED holds (Race holds, below; read on the rollout its
@@ -124,8 +126,34 @@ Subcommands:
               directory cannot be resolved or the record cannot be read, 2 usage, a bad slug or the reserved
               `reviews`.
 
+  bind-run    The lead's call right after each Workflow launch returns (p15-2): `--tasks <slug> --run-id <wf_…>
+              --call task|revise|integrate [--resumed-from <wf_…>] [--journal-dir <abs>]` records one `run-bound`
+              (runId verbatim, journalDir, call, resumedFrom) for fold-journals. A runId (and --resumed-from) must
+              match `wf_[A-Za-z0-9][A-Za-z0-9_.-]*` with no `..`: it is the journal's file stem and its `runId`.
+              journalDir is --journal-dir (absolute), else `<dir>/<session id>/workflows` for the one match of
+              `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/*/${CLAUDE_CODE_SESSION_ID}.jsonl`. The owner must
+              hold: task or revise -> the note reads `in_progress`; integrate -> it holds the lane (_holds_lane).
+              A Lost-call resume binds with the kind it resumes plus --resumed-from. Exit 1 (one ERROR line,
+              nothing written): no note, no `rollout:`, an unresolvable journal dir, a failed owner check. Exit 2:
+              usage (a malformed runId or a relative --journal-dir).
+
+  free-lane   `--tasks <slug>`: the lead frees the lane at the lane-free rule or a § 7 halt (p15-2). Requires
+              _holds_lane (else exit 1, nothing written); closes the task's open merge hold, then records
+              `lane-freed release=halt`. The note is not changed.
+
+  hold        `--tasks <slug> --hold merge|race --state start|end` (p15-2): the lead's hold transitions. A merge
+              start requires _holds_lane; a race start requires the rollout's `## Race log` to name the task
+              undecided (_race_holds' RACE). Exit 1 (nothing written) when it does not. A start is skipped
+              (`[no-change]`) while the record shows that (hold, task) open, an end while it does not; an end
+              never checks the lane, so it is never refused. The note is not changed.
+
+  record-pause  `--rollout <note>` (p15-2): right after a hard pause's hand stamp. Requires `paused:` (else exit
+              1). Skips everything (`[no-change]`) while the record shows a pause open; otherwise records `paused
+              mode=hard` (at the stamp), `slot-freed outcome=stopped` for each linked in_progress note and, for
+              each lane holder, a merge-hold close and `lane-freed release=halt`. Nothing in the vault changes.
+
   defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
-              and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:` stamps
+              and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:`/`handed_back:` stamps
               (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
               re-plans them. The dependent-closure safety check lives in the /thread:repair skill.
@@ -220,6 +248,75 @@ Subcommands:
               line with no `pr:` goes to in_progress with a WARN. Refuses a note that isn't
               gate-pending; idempotent once approved (already-approved note = no-op). Run by the lead
               session ONLY after the human explicitly signs off — never unattended.
+
+Run record (p15-2, ADR 0032): each verb records its own Slot and lane transitions through run_record.py's
+emit (one helper, _event), best-effort: a refusal or a write failure prints one `run_record:` line on stderr
+and never changes the verb's exit, stdout or vault writes. Nothing is recorded on --dry-run, by a refusal, by
+a re-run that writes nothing new, or for a note with no `rollout:` (the rollout slug is the task note's
+`rollout:`, read before any write; `next`, `record-pause` and `clear-pause` use the rollout path's stem). A
+note holds the lane (_holds_lane) when it reads `review` with a `pr:` and either carries `integrating:` or its
+`## Integration log`'s last line is `integrated` with a startedAt at or after `ready:` (the window between an
+integrate call's reconciled `integrated` row and the merge; a hand-back restamps `ready:`). The events:
+  mark-started      slot-taken {settings, start, carriedFrom?}. settings: parallel_ceiling (the rollout note's,
+                    _ceiling), max_review_rounds / max_iterations / max_plan_rounds (task fm, then rollout fm,
+                    then rollout-settings.py once per process; ints >= 1 kept; max_iterations 1 for a
+                    read-only task with no stamp), rung (a rung name). start, first match: --start resume;
+                    a `handed_back:`, `gates_signed:` or `descope_armed:` marker -> hand-back; --start
+                    revise|restart|start; `started:` present -> restart; else start. carriedFrom: the
+                    record's unconsumed `carried` line for the task. No resolvable ceiling (or no rollout
+                    note): one `run_record: warning: slot-taken for <slug> not recorded: <why>` line.
+  mark-integrating  lane-taken, on every successful call.
+  mark-done         (a note not already done) hold-ended race / merge for each the record shows open; then,
+                    when it held the lane, lane-freed release=merge with path, triggers and conflict from
+                    the Integration log's last line; then merged pr=.
+  resume            the same events as mark-done, for each note it flips done.
+  reconcile         per row, against the note's status and _holds_lane before the row's writes: slot-freed
+                    when it was in_progress and the row is not an integrate row (outcome ready, completed,
+                    lost for a lead row whose reason starts `workflow call failed:`, else set-aside); ready
+                    pr= when `ready:` is stamped; merged readOnly=true for a read-only approval; when it
+                    held the lane and the row is not an `integrated` integrate row, a merge-hold close and
+                    lane-freed (reject for a `rejected` integrate row, else set-aside; path, triggers and
+                    conflict from the integrate row); set-aside {stage, reasonClass, setAsideAt} when the row
+                    sets a slot or lane holder aside (never a rejected integrate row: its seeded revise is
+                    not a set-aside); quota-stall {stage, detail} for a `workflow call failed:` lead row
+                    whose error line reads as a usage or rate limit (QUOTA_RE).
+  hand-back         the Integration arm records ready pr=; the run arm stamps `handed_back:`.
+  approve-gates     the Integration arm records ready pr=.
+  defer             (read before clearing) slot-freed outcome=stopped for an in_progress note; for a lane
+                    holder a merge-hold close and lane-freed release=halt; an open race hold closes.
+  carry             to the --from rollout, after each carried note saves: slot-freed stopped for a running
+                    note, a merge-hold close and lane-freed halt for a lane holder; then carried {from, to}
+                    (the writer appends it to both files).
+  next              (not --dry-run) paused mode=soft when it stamps `paused:`; idle-slots {reason, free,
+                    settings} when free = ceiling - (slotsInUse + starts) > 0 and halt is not complete or
+                    empty.
+  clear-pause       when it removes `paused:`: paused mode=hard at the stamp when the record has no open pause
+                    (a hard pause whose record-pause never ran), then resumed. Removing only
+                    pause_requested records nothing.
+  bind-run, free-lane, hold, record-pause   above.
+  git-env-canary.py hold-started / hold-ended hold=git-env (task null) on the hold's empty <-> non-empty edge.
+set-aside stage, first match: gate-pending -> gate; an integrate row (review-blocked included) -> integrate;
+lead kind integration -> integrate; lead kind own on a note that read review (merge-task exit 1) -> integrate;
+lead kind revise-stopped -> review; a dead own call -> implement; plan-blocked -> plan; review-blocked ->
+review; an engine-blocked revise marker -> review; other engine-blocked -> implement; review with no PR ->
+review. `verify` is unused here. stage is where the task stopped; setAsideAt (_queue_state's run |
+integration | gate) is where it re-enters, so merge-task's exit 1 reads stage integrate, setAsideAt run.
+reasonClass, first match: quota; call-failed (`workflow call failed:` with the note in_progress before, or the
+integration kind); merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
+Integration`); declined; prepare (any other lead integration reason); revise-stopped; transient (the engine's
+TRANSIENT_DIAGNOSIS); then by status: gate, plan-rejected, review-rounds, integration-set-aside (an integrate
+row's set-aside) or blocked; approved-without-pr.
+idle-slots reason, first match ("queued" is queued and not starting this call): gitEnvHold -> hold-git-env;
+paused or pauseRequested -> pause-drain; the first held queued row's reason: `depends on` -> dependency,
+solo or behind solo -> solo; no queued row and a RACE in raceHold -> hold-race; no queued row and a set-aside
+row -> awaiting-hand-back (a known mislabel when every one is a blocked row step 1.2 relaunches as a seeded
+revise: its slot-taken start=revise splits the span seconds later); else queue-tail. `next` never records
+hold-merge: a merge hold is lead state, recorded by `hold`.
+Departures from the p15-2 brief: no ceiling-changed (the writer refuses it; the settings on every slot-taken
+and idle-slots carry the ceiling); log-integration records nothing (the lane is held through the merge, ADR
+0030; its path and triggers ride on mark-done's lane-freed release=merge); merge-task.sh records nothing (its
+positional args name neither rollout nor task, and `merged` has one writer per landing: the vault flip to
+done).
 
 Stdlib only. Frontmatter is edited line-surgically (not via a YAML round-trip) to preserve field order,
 comments, and spacing exactly — matching how the rest of the vault tooling treats frontmatter. Importing
@@ -1686,6 +1783,9 @@ def cmd_reconcile(args) -> int:
             continue
 
         pr = (task.get("prUrl") or "").strip()
+        # The Run record reads the note as it was before this row (p15-2): its status, whether it held the lane.
+        prior, held, rollout = _status(note), _holds_lane(note), _note_rollout(note)
+        ready_stamped = False
         # A read-only task is done when its review approves: nothing to merge, so it never enters
         # Integration (ADR 0030). The row's scope wins; the note's own is the fallback.
         scope = _scalar(task.get("scope")).lower() or _scope(note)
@@ -1698,6 +1798,7 @@ def cmd_reconcile(args) -> int:
         if (note_status == "review" and _status(note) != "review" and scope != "read-only"
                 and task.get("integration") is None):
             note.set("ready", _stamp(now))
+            ready_stamped = True
         note.set("status", note_status)
         # Its approval is its completion, so it is stamped `merged:` as a PR task is at its merge (the
         # first stamp wins): its duration then counts in the timeline, and a read-only task finishing
@@ -1798,6 +1899,7 @@ def cmd_reconcile(args) -> int:
                           f"{APPROVED_PLAN_SECTION} left untouched")
 
         note.save(dry_run=args.dry_run)
+        _reconcile_events(args, rollout, slug, task, note, prior, held, note_status, _pr(note), ready_stamped)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
         ro = " (read-only, approved)" if note_status != status else ""
         print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{_rung_note(task)}{legacy_note}{flag}")
@@ -1889,6 +1991,7 @@ def cmd_next(args) -> int:
             rollout_note.remove("pause_requested")
             rollout_note.save(dry_run=args.dry_run)
             paused_now = True
+            _event(rollout_path.stem, "paused", None, {"mode": "soft"}, args)
         reason = "paused" if paused else "pause requested: draining"
         holds += [(r, reason) for r in stalled + queued]
     else:
@@ -1954,6 +2057,13 @@ def cmd_next(args) -> int:
             halt = "complete"
         else:
             halt = "stuck"
+    # The Run record (p15-2): a reason marker for the idle Slots this call leaves (none at complete or empty).
+    free = ceiling - (used + len(start))
+    if free > 0 and halt not in ("complete", "empty") and not args.dry_run:
+        reason = _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold,
+                              by_state.get("set-aside", []))
+        _event(rollout_path.stem, "idle-slots", None,
+               {"reason": reason, "free": free, "settings": _rollout_settings(rollout_note, ceiling)}, args)
     slugs = lambda rs: [r["slug"] for r in rs]  # noqa: E731
     out = {
         "rollout": rollout_path.stem,
@@ -2011,13 +2121,15 @@ def cmd_mark_started(args) -> int:
     """Stamp `started:` as a task starts (first start wins: a restart keeps the first clock) and
     remove `integrating:`. Consumes approve-gates' `gates_signed:` marker (p12-14): the restart that
     directly follows a sign-off says so, once, and no later restart does. Refuses a done, merged or
-    dropped note."""
+    dropped note. Records slot-taken (p15-2), its start read before the markers are removed."""
     now = _now(args)
+    rollouts = {}
     for slug, _path, note in _each_note(args):
         status = _status(note)
         if status in FINISHED_STATUSES:
             args._errors.append(f"{slug}: status is {status!r} — refusing to mark started")
             continue
+        rollout, start = _note_rollout(note), _start_kind(note, args.start)  # read before the writes
         existing = _scalar(note.get("started"))
         if not existing:
             note.set("started", _stamp(now))
@@ -2026,6 +2138,7 @@ def cmd_mark_started(args) -> int:
         note.remove(GATES_SIGNED_KEY)
         descoped = _scalar(note.get(DESCOPE_ARMED_KEY))
         note.remove(DESCOPE_ARMED_KEY)
+        note.remove(HANDED_BACK_KEY)
         note.save(dry_run=args.dry_run)
         print(f"{slug}: started={existing or _stamp(now)}{' (kept)' if existing else ''}{_flag(args, note)}")
         if signed:
@@ -2034,6 +2147,8 @@ def cmd_mark_started(args) -> int:
         if descoped:
             print(f"{slug}: descope restart (descoped {descoped}; {DESCOPE_ARMED_KEY}: cleared) — a block after this "
                   "restart asks Lachy")
+        sys.stdout.flush()
+        _record_slot_taken(args, slug, note, rollout, start, rollouts)
     return _finish(args, now)
 
 
@@ -2051,6 +2166,7 @@ def cmd_mark_integrating(args) -> int:
         if not existing:
             note.set("integrating", _stamp(now))
         note.save(dry_run=args.dry_run)
+        _event(_note_rollout(note), "lane-taken", slug, None, args)
         print(f"{slug}: integrating={existing or _stamp(now)}{' (kept)' if existing else ''}{_flag(args, note)}")
     return _finish(args, now)
 
@@ -2070,11 +2186,13 @@ def cmd_mark_done(args) -> int:
             # caller's picture of the rollout is stale — refuse rather than mask a blocked/unmerged task.
             args._errors.append(f"{slug}: status is {status!r}, not 'review' — refusing to mark done")
             continue
+        held, lane_fields = _holds_lane(note), _lane_fields_from_log(note)  # read before the flip
         note.set("status", "done")
         if _pr(note) and not _scalar(note.get("merged")):
             note.set("merged", _stamp(now))
         note.remove("integrating")
         note.save(dry_run=args.dry_run)
+        _landed_events(_note_rollout(note), slug, held, lane_fields, _pr(note), args)
         print(f"{slug}: status=done" + (" (dry-run)" if args.dry_run else " [written]"))
     return _finish(args, now)
 
@@ -2127,11 +2245,13 @@ def cmd_hand_back(args) -> int:
             note.set("ready", _stamp(now))
             note.remove("integrating")
             note.save(dry_run=args.dry_run)
+            _event(_note_rollout(note), "ready", slug, {"pr": _pr(note)}, args)
             print(f"{slug}: blocked->review (set aside at Integration; ready: {_stamp(now)}){_flag(args, note)}")
             continue
         if state == "set-aside" and at == "run" and status in HAND_BACK_RUN_STATUSES:
             note.set("status", "in_progress")
             note.remove("owner")
+            note.set(HANDED_BACK_KEY, _stamp(now))  # the restart's mark-started records start=hand-back
             note.save(dry_run=args.dry_run)
             print(f"{slug}: {status}->in_progress (set aside at its run; owner: cleared){_flag(args, note)}")
             continue
@@ -2262,6 +2382,7 @@ def cmd_resume(args) -> int:
         if base != default:
             print(f"{slug}: PR {ref} merged into {base!r}, not the default branch {default!r} [no-change]")
             continue
+        lane_held, lane_fields = _holds_lane(note), _lane_fields_from_log(note)  # read before the flip
         note.set("status", "done")
         if not _scalar(note.get("merged")):
             merged_at = _parse_ts(info.get("mergedAt"))
@@ -2269,6 +2390,7 @@ def cmd_resume(args) -> int:
                 note.set("merged", _stamp(merged_at))
         note.remove("integrating")
         note.save(dry_run=args.dry_run)
+        _landed_events(_note_rollout(note), slug, lane_held, lane_fields, pr, args)
         print(f"{slug}: status={status or 'none'}->done (PR {ref} merged into {default})" + _flag(args, note))
     print(_progress_for(rollout_path, tasks_dir, now))
     for line in held:
@@ -2547,6 +2669,576 @@ def cmd_fold_journals(args) -> int:
     return 0
 
 
+# ---- the Run record's emits (p15-2; the module docstring's "Run record") -----------------------------------
+
+# hand-back's run-arm marker: the restart's mark-started consumes it and records start=hand-back.
+HANDED_BACK_KEY = "handed_back"
+START_CHOICES = ("start", "restart", "revise", "resume")
+CALL_CHOICES = ("task", "revise", "integrate")
+# A bound runId: the Workflow journal's file stem and its `runId` field (fold-journals reads <journalDir>/<runId>.json).
+BIND_RUN_ID_RE = re.compile(r"wf_[A-Za-z0-9][A-Za-z0-9_.-]*")
+CAP_KEYS = ("max_review_rounds", "max_iterations", "max_plan_rounds")
+CALL_FAILED_PREFIX = "workflow call failed:"
+# A dead call's error line that reads as a usage or rate limit (quota-stall; only `workflow call failed:` lines
+# are scanned, so task text that mentions a quota never matches).
+QUOTA_RE = re.compile(r"usage limit|rate[ -]?limit|quota|too many requests|\b429\b", re.I)
+TRANSIENT_MARK = "transient infrastructure failure"           # the engine's TRANSIENT_DIAGNOSIS opening
+REVISE_MARK = "revise: rejected at integration re-review"     # the engine's REVISE_MARKER opening, lowercased
+OWN_RUN_PREFIX = "own run: "                                  # stageDiagnosis's escape (lead-integrate.py)
+
+
+def _note_rollout(note):
+    """The rollout slug a task note's `rollout:` names, or None."""
+    return _wikilink_slug(note.get("rollout"))
+
+
+def _event(rollout, kind, task=None, fields=None, args=None, ts=None):
+    """Record one event in the rollout's Run record through run_record.emit, best-effort: it never raises and
+    never changes a verb's exit or stdout. Nothing on --dry-run or with no rollout. ts: the verb's --now when
+    given (else the writer's clock), unless the caller passes its own."""
+    if not rollout or (args is not None and getattr(args, "dry_run", False)):
+        return False
+    try:
+        rr = _run_record()
+    except Exception as e:
+        try:
+            print(f"run_record: warning: cannot load {RUN_RECORD_PY}: {e}", file=sys.stderr)
+        except Exception:
+            pass
+        return False
+    if ts is None:
+        now = getattr(args, "now", None) if args is not None else None
+        ts = now.isoformat() if now is not None else None
+    return rr.emit(rollout, kind, task, fields, ts=ts)
+
+
+def _record_state(rollout):
+    """The rollout's Run record replayed by the reader rules (run_record.py's "Reading the record"):
+    {slots: {task}, lane: task|None, holds: {(hold, task)}, paused: bool, carried: {task: from}}, tasks lowercased
+    as the writer stores them; `carried` keeps each task's `carried` line no later slot-taken consumed. No file
+    is an empty record; None when it cannot be read (callers then emit without the open-check)."""
+    try:
+        path = _run_record().record_path(rollout)
+    except Exception:
+        return None
+    st = {"slots": set(), "lane": None, "holds": set(), "paused": False, "carried": {}}
+    try:
+        lines, _bad = _record_lines(path)
+    except FileNotFoundError:
+        return st
+    except OSError:
+        return None
+    for d in lines:
+        kind, task = d.get("kind"), d.get("task")
+        if kind == "slot-taken":
+            st["slots"].add(task)
+            st["carried"].pop(task, None)
+        elif kind == "slot-freed":
+            st["slots"].discard(task)
+        elif kind == "lane-taken":
+            st["lane"] = task
+        elif kind == "lane-freed":
+            if st["lane"] == task:
+                st["lane"] = None
+            st["holds"].discard(("merge", task))
+        elif kind == "hold-started":
+            st["holds"].add((d.get("hold"), task))
+        elif kind == "hold-ended":
+            st["holds"].discard((d.get("hold"), task))
+        elif kind == "paused":
+            st["paused"] = True
+        elif kind == "resumed":
+            st["paused"] = False
+        elif kind == "carried":
+            if d.get("rollout") == d.get("from"):  # the from-file: the task's Slot, lane and holds end here
+                st["slots"].discard(task)
+                if st["lane"] == task:
+                    st["lane"] = None
+                st["holds"] = {h for h in st["holds"] if h[1] != task}
+            else:
+                st["carried"][task] = d.get("from")
+    return st
+
+
+def _log_tokens(line) -> dict:
+    """An Integration log line as {startedAt, outcome, <key>: <value>...} (the `key=value` tokens)."""
+    toks = (line or "").split(" ")
+    out = {"startedAt": toks[0] if toks else "", "outcome": toks[1] if len(toks) > 1 else ""}
+    for t in toks[2:]:
+        k, sep, v = t.partition("=")
+        if sep:
+            out[k] = v
+    return out
+
+
+def _holds_lane(note) -> bool:
+    """The note holds the Integration lane: `review` with a `pr:` and either `integrating:` (step 3 to step 4), or
+    the Integration log's last line `integrated` with a startedAt at or after `ready:` (the window an integrate
+    call's reconciled row leaves, since reconcile removes `integrating:`). A hand-back restamps `ready:` after its
+    old integrated line, so it reads as not holding; a `-` startedAt (legacy) reads as not holding."""
+    if _status(note) != "review" or not _pr(note):
+        return False
+    if _scalar(note.get("integrating")):
+        return True
+    t = _log_tokens(_last_log_line(note))
+    if t["outcome"] != "integrated":
+        return False
+    started = _iso_minutes(t["startedAt"])
+    if started is None:
+        return False
+    ready = _iso_minutes(_scalar(note.get("ready")))
+    return ready is None or started >= ready
+
+
+def _lane_fields(path, triggers) -> dict:
+    out = {"path": path} if isinstance(path, str) and path and path != "-" else {}
+    trig = [t for t in triggers if isinstance(t, str) and t]
+    out.update(triggers=trig, conflict="conflict" in trig)
+    return out
+
+
+def _lane_fields_from_log(note) -> dict:
+    """lane-freed's path, triggers and conflict from the Integration log's last line ({} with no log)."""
+    last = _last_log_line(note)
+    if not last:
+        return {}
+    t = _log_tokens(last)
+    raw = t.get("triggers", "-")
+    return _lane_fields(t.get("path"), [] if raw in ("", "-") else raw.split(","))
+
+
+def _lane_fields_from_row(integ) -> dict:
+    trig = integ.get("triggers")
+    return _lane_fields(integ.get("path"), trig if isinstance(trig, list) else [])
+
+
+def _close_holds(rollout, slug, holds, args, state):
+    """hold-ended for each of `holds` the record shows open for the task; every one when the record is unreadable
+    (state None: the reader rules absorb an end with nothing open)."""
+    for hold in holds:
+        if state is None or (hold, slug.lower()) in state["holds"]:
+            _event(rollout, "hold-ended", slug, {"hold": hold}, args)
+
+
+def _landed_events(rollout, slug, held, lane_fields, pr, args):
+    """A landing's events (mark-done, resume): open race and merge holds end, the lane frees on the merge when the
+    note held it, then merged."""
+    if not rollout or getattr(args, "dry_run", False):
+        return
+    _close_holds(rollout, slug, ("race", "merge"), args, _record_state(rollout))
+    if held:
+        _event(rollout, "lane-freed", slug, {"release": "merge", **lane_fields}, args)
+    _event(rollout, "merged", slug, {"pr": pr} if pr else {}, args)
+
+
+def _halt_lane(rollout, slug, args, state):
+    """A halt frees the lane: the task's open merge hold ends, then lane-freed release=halt."""
+    _close_holds(rollout, slug, ("merge",), args, state)
+    _event(rollout, "lane-freed", slug, {"release": "halt"}, args)
+
+
+_RESOLVED_CAPS = {}
+
+
+def _resolved_caps(rollout_note) -> dict:
+    """The round caps rollout-settings.py resolves for the rollout's Project root (rollouts.toml, then the
+    built-in), once per process per root; {} when it cannot (the caps are then left out of the settings)."""
+    root = _project_root(rollout_note)
+    key = str(root)
+    if key not in _RESOLVED_CAPS:
+        try:
+            spec = importlib.util.spec_from_file_location("thread_rollout_settings", ROLLOUT_SETTINGS_PY)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            res = mod.resolve(repo=None if root is None else str(root))["settings"]
+            _RESOLVED_CAPS[key] = {k: res[k]["value"] for k in CAP_KEYS if k in res}
+        except Exception:
+            _RESOLVED_CAPS[key] = {}
+    return _RESOLVED_CAPS[key]
+
+
+def _pos_int(raw):
+    s = _scalar(raw)
+    return int(s) if re.fullmatch(r"[0-9]+", s) and int(s) >= 1 else None
+
+
+def _slot_settings(note, rollout_note):
+    """(settings, error) for a slot-taken: the effective values after per-task overrides (§ 3's order)."""
+    ceiling, err = _ceiling(rollout_note)
+    if err:
+        return None, err
+    out = {"parallel_ceiling": ceiling}
+    for key in CAP_KEYS:
+        raw = note.get(key)
+        if raw is None:
+            raw = rollout_note.get(key)
+        if raw is not None:
+            value = _pos_int(raw)
+        elif key == "max_iterations" and _scope(note) == "read-only":
+            value = 1
+        else:
+            value = _resolved_caps(rollout_note).get(key)
+            if not (isinstance(value, int) and not isinstance(value, bool) and value >= 1):
+                value = None
+        if value is not None:
+            out[key] = value
+    rung = _scalar(note.get("rung"))
+    if is_rung_name(rung):
+        out["rung"] = rung
+    return out, None
+
+
+def _start_kind(note, explicit) -> str:
+    """slot-taken's start, first match: --start resume; a hand-back, signed-gate or descope marker -> hand-back;
+    --start revise|restart|start; `started:` present -> restart; else start. Read before mark-started's writes."""
+    if explicit == "resume":
+        return "resume"
+    if any(_scalar(note.get(k)) for k in (HANDED_BACK_KEY, GATES_SIGNED_KEY, DESCOPE_ARMED_KEY)):
+        return "hand-back"
+    if explicit:
+        return explicit
+    return "restart" if _scalar(note.get("started")) else "start"
+
+
+def _rollout_note_path(args, rollout) -> Path:
+    given = getattr(args, "rollout", None)
+    if given and Path(os.path.expanduser(given)).stem.lower() == rollout.lower():
+        return Path(os.path.expanduser(given))
+    return Path(os.path.expanduser(args.tasks_dir)) / f"{rollout}.md"
+
+
+def _record_slot_taken(args, slug, note, rollout, start, cache):
+    """mark-started's slot-taken. With no `rollout:`, no rollout note or no resolvable ceiling, one warning and
+    nothing recorded (a Slot with no ceiling cannot be read against it)."""
+    def warn(why):
+        print(f"run_record: warning: slot-taken for {slug} not recorded: {why}", file=sys.stderr)
+
+    if args.dry_run:
+        return
+    if not rollout:
+        return warn("the note has no rollout:")
+    key = rollout.lower()
+    if key not in cache:
+        path = _rollout_note_path(args, rollout)
+        try:
+            cache[key] = (Note(path), None) if path.is_file() else (None, f"no rollout note at {path}")
+        except (OSError, ValueError) as e:
+            cache[key] = (None, f"cannot read {path}: {e}")
+    rollout_note, why = cache[key]
+    if rollout_note is None:
+        return warn(why)
+    settings, err = _slot_settings(note, rollout_note)
+    if err:
+        return warn(err)
+    fields = {"settings": settings, "start": start}
+    state = _record_state(rollout)
+    carried = state["carried"].get(slug.lower()) if state else None
+    if carried:
+        fields["carriedFrom"] = carried
+    _event(rollout, "slot-taken", slug, fields, args)
+
+
+def _lead_reason(kind, diag) -> str:
+    """The reason a lead-written row (lead-integrate.py set-aside) was given, from its rendered diagnosis."""
+    s = (diag or "").strip()
+    if kind == "integration":
+        return re.sub(r"^integration:\s*", "", s.split("\n", 1)[0], flags=re.I)
+    if kind == "revise-stopped":
+        for line in s.split("\n"):
+            m = re.match(r"\s*revise stopped:\s*(.*)$", line, re.I)
+            if m:
+                return m.group(1)
+        return ""
+    return s[len(OWN_RUN_PREFIX):] if s.startswith(OWN_RUN_PREFIX) else s
+
+
+def _set_aside_stage(note_status, integ, lead, prior, failed, diag, pr) -> str:
+    """Where a set-aside task stopped (the module docstring's stage table, first match)."""
+    if note_status == GATE_PENDING_STATUS:
+        return "gate"
+    if integ is not None or lead == "integration" or (lead == "own" and prior == "review"):
+        return "integrate"
+    if lead == "revise-stopped":
+        return "review"
+    if lead == "own" and failed:
+        return "implement"
+    if note_status == "plan-blocked":
+        return "plan"
+    if note_status == "review-blocked":
+        return "review"
+    if note_status == "blocked" and diag.strip().lower().startswith(REVISE_MARK):
+        return "review"
+    if note_status == "review" and not pr:
+        return "review"
+    return "implement"
+
+
+def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr) -> str:
+    """Why a task was set aside (the module docstring's reasonClass table, first match)."""
+    first = reason.split("\n", 1)[0].strip().lower()
+    if failed and QUOTA_RE.search(first):
+        return "quota"
+    if failed and (prior == "in_progress" or lead == "integration"):
+        return "call-failed"
+    if lead and (first.startswith("merge-task") or first.startswith("base moved")
+                 or first.startswith("head moved after integration")):
+        return "merge-task"
+    if lead and first.startswith("merge declined"):
+        return "declined"
+    if lead == "integration":
+        return "prepare"
+    if lead == "revise-stopped":
+        return "revise-stopped"
+    if TRANSIENT_MARK in diag:
+        return "transient"
+    if note_status == GATE_PENDING_STATUS:
+        return "gate"
+    if note_status == "plan-blocked":
+        return "plan-rejected"
+    if note_status == "review-blocked":
+        return "review-rounds"
+    if note_status == "review" and not pr:
+        return "approved-without-pr"
+    if integ is not None and integ.get("outcome") == "set-aside":
+        return "integration-set-aside"
+    return "blocked"
+
+
+def _reconcile_events(args, rollout, slug, task, note, prior, held, note_status, pr, ready_stamped):
+    """One row's events, against the note's status (`prior`) and _holds_lane (`held`) read before its writes."""
+    if args.dry_run or not rollout:
+        return
+    integ = task.get("integration") if isinstance(task.get("integration"), dict) else None
+    outcome = integ.get("outcome") if integ else None
+    lead = task.get("leadSetAside") if isinstance(task.get("leadSetAside"), str) else None
+    diag = task.get("blockerDiagnosis") if isinstance(task.get("blockerDiagnosis"), str) else ""
+    reason = _lead_reason(lead, diag) if lead else ""
+    failed = bool(lead) and reason.lower().startswith(CALL_FAILED_PREFIX)
+    state_after, at_after = _queue_state(note)
+    if prior == "in_progress" and integ is None:
+        if note_status == "review" and pr:
+            outcome_s = "ready"
+        elif note_status == "done":
+            outcome_s = "completed"
+        elif failed:
+            outcome_s = "lost"
+        else:
+            outcome_s = "set-aside"
+        _event(rollout, "slot-freed", slug, {"outcome": outcome_s}, args)
+    if ready_stamped:
+        _event(rollout, "ready", slug, {"pr": pr} if pr else {}, args)
+    if note_status == "done" and prior != "done":
+        _event(rollout, "merged", slug, {"readOnly": True}, args)
+    rejected = integ is not None and outcome == "rejected"
+    if held and not (integ is not None and outcome == "integrated"):
+        fields = {"release": "reject" if rejected else "set-aside"}
+        if integ is not None:
+            fields.update(_lane_fields_from_row(integ))
+        _close_holds(rollout, slug, ("merge",), args, _record_state(rollout))
+        _event(rollout, "lane-freed", slug, fields, args)
+    if (prior == "in_progress" or held) and state_after == "set-aside" and not rejected:
+        stage = _set_aside_stage(note_status, integ, lead, prior, failed, diag, pr)
+        _event(rollout, "set-aside", slug, {
+            "stage": stage, "reasonClass": _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr),
+            "setAsideAt": at_after}, args)
+        error_line = reason.split("\n", 1)[0].strip()
+        if failed and QUOTA_RE.search(error_line):
+            _event(rollout, "quota-stall", slug, {"stage": stage, "detail": error_line[:500]}, args)
+
+
+def _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold, set_aside) -> str:
+    """The idle-slots reason (the module docstring's table, first match)."""
+    if git_env:
+        return "hold-git-env"
+    if paused or pause_requested:
+        return "pause-drain"
+    starting = {id(r) for r in start}
+    waiting = [r for r in queued if id(r) not in starting]
+    waiting_ids = {id(r) for r in waiting}
+    held = sorted(((r, why) for r, why in holds if id(r) in waiting_ids), key=lambda h: _rank(h[0]))
+    if held:
+        why = held[0][1]
+        if why.startswith("depends on"):
+            return "dependency"
+        if why.startswith("solo") or why.startswith("behind solo"):
+            return "solo"
+    if not waiting:
+        if any(h["kind"] == "RACE" for h in race_hold):
+            return "hold-race"
+        if set_aside:
+            return "awaiting-hand-back"
+    return "queue-tail"
+
+
+def _rollout_settings(rollout_note, ceiling) -> dict:
+    """idle-slots' settings: the ceiling plus the rollout's own stamped caps (ints >= 1)."""
+    out = {"parallel_ceiling": ceiling}
+    for key in CAP_KEYS:
+        value = _pos_int(rollout_note.get(key)) if rollout_note.get(key) is not None else None
+        if value is not None:
+            out[key] = value
+    return out
+
+
+def _task_note(args, slug):
+    """(path, Note) for --tasks <one slug>, or (path, error)."""
+    path = Path(os.path.expanduser(args.tasks_dir)) / f"{slug}.md"
+    if not path.is_file():
+        return path, f"{slug}: task note not found at {path}"
+    try:
+        return path, Note(path)
+    except (OSError, ValueError) as e:
+        return path, str(e)
+
+
+def _journal_dir(args):
+    """(journalDir, error): --journal-dir, else <dir>/<session id>/workflows for the one transcript
+    ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/*/${CLAUDE_CODE_SESSION_ID}.jsonl."""
+    if args.journal_dir:
+        return os.path.normpath(os.path.expanduser(args.journal_dir)), None
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
+    if not sid or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", sid) or ".." in sid:
+        return None, "CLAUDE_CODE_SESSION_ID is not set (pass --journal-dir <abs>)"
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    hits = sorted(Path(cfg).glob(f"projects/*/{sid}.jsonl"))
+    if len(hits) != 1:
+        return None, (f"{len(hits)} transcripts match {cfg}/projects/*/{sid}.jsonl, not one "
+                      "(pass --journal-dir <abs>)")
+    return str(hits[0].parent / sid / "workflows"), None
+
+
+def cmd_bind_run(args) -> int:
+    """run-bound for the call the lead just launched (the module docstring's bind-run)."""
+    def usage(msg):
+        print(f"ERROR: bind-run: usage: {msg}", file=sys.stderr)
+        return 2
+
+    slug = args.tasks.strip()
+    if not slug or "," in slug:
+        return usage("--tasks takes one task slug")
+    for flag, value in (("--run-id", args.run_id), ("--resumed-from", args.resumed_from)):
+        if value is not None and (not BIND_RUN_ID_RE.fullmatch(value) or ".." in value):
+            return usage(f"{flag} {value!r} is not a Workflow runId (wf_[A-Za-z0-9][A-Za-z0-9_.-]*, no ..)")
+    if args.journal_dir is not None and not os.path.isabs(os.path.expanduser(args.journal_dir)):
+        return usage(f"--journal-dir {args.journal_dir!r} is not an absolute path")
+    _path, note = _task_note(args, slug)
+    if isinstance(note, str):
+        print(f"ERROR: bind-run: {note}; nothing written", file=sys.stderr)
+        return 1
+    rollout = _note_rollout(note)
+    if not rollout:
+        print(f"ERROR: bind-run: {slug}: the note has no rollout:; nothing written", file=sys.stderr)
+        return 1
+    if args.call == "integrate":
+        if not _holds_lane(note):
+            print(f"ERROR: bind-run: {slug}: an integrate call's note must hold the lane (review with a pr: and "
+                  f"integrating:, or an integrated last log line); it reads {_status(note) or 'none'!r}; nothing "
+                  "written", file=sys.stderr)
+            return 1
+    elif _status(note) != "in_progress":
+        print(f"ERROR: bind-run: {slug}: a {args.call} call's note must read in_progress, not "
+              f"{_status(note) or 'none'!r}; nothing written", file=sys.stderr)
+        return 1
+    jdir, err = _journal_dir(args)
+    if err:
+        print(f"ERROR: bind-run: {slug}: {err}; nothing written", file=sys.stderr)
+        return 1
+    fields = {"runId": args.run_id, "journalDir": jdir, "call": args.call}
+    if args.resumed_from:
+        fields["resumedFrom"] = args.resumed_from
+    _event(rollout, "run-bound", slug, fields, args)
+    print(f"{slug}: run-bound {args.run_id} call={args.call}"
+          + (f" resumedFrom={args.resumed_from}" if args.resumed_from else "") + f" journalDir={jdir}"
+          + (" (dry-run)" if args.dry_run else ""))
+    return 0
+
+
+def cmd_free_lane(args) -> int:
+    """The lead frees the lane at the lane-free rule or a halt: a merge-hold close, then lane-freed halt."""
+    slug = args.tasks.strip()
+    _path, note = _task_note(args, slug)
+    if isinstance(note, str):
+        print(f"ERROR: free-lane: {note}; nothing written", file=sys.stderr)
+        return 1
+    if not _holds_lane(note):
+        print(f"ERROR: free-lane: {slug}: does not hold the lane (status {_status(note) or 'none'!r}, no "
+              "integrating: and no integrated last log line since ready:); nothing written", file=sys.stderr)
+        return 1
+    rollout = _note_rollout(note)
+    if rollout and not args.dry_run:
+        _halt_lane(rollout, slug, args, _record_state(rollout))
+    print(f"{slug}: lane freed (halt)" + (" (dry-run)" if args.dry_run else ""))
+    return 0
+
+
+def cmd_hold(args) -> int:
+    """The lead's merge and race holds: hold-started / hold-ended, idempotent against the record."""
+    slug = args.tasks.strip()
+    path, note = _task_note(args, slug)
+    if isinstance(note, str):
+        print(f"ERROR: hold: {note}; nothing written", file=sys.stderr)
+        return 1
+    rollout = _note_rollout(note)
+    if args.state == "start":
+        if args.hold == "merge" and not _holds_lane(note):
+            print(f"ERROR: hold: {slug}: a merge hold needs the task to hold the lane; nothing written", file=sys.stderr)
+            return 1
+        if args.hold == "race":
+            rpath = Path(os.path.expanduser(args.tasks_dir)) / f"{rollout}.md" if rollout else None
+            try:
+                rnote = Note(rpath) if rpath is not None and rpath.is_file() else None
+            except (OSError, ValueError):
+                rnote = None
+            held = _race_holds(rnote, [(path, note)]).get(path.stem.lower()) if rnote is not None else None
+            if not held or held[1] != "RACE":
+                print(f"ERROR: hold: {slug}: no undecided RACE: the rollout's {RACE_LOG_SECTION} does not name it "
+                      "(or its RACE decided: line stands); nothing written", file=sys.stderr)
+                return 1
+    state = _record_state(rollout) if rollout and not args.dry_run else None
+    is_open = state is not None and (args.hold, slug.lower()) in state["holds"]
+    skip = state is not None and (is_open if args.state == "start" else not is_open)
+    kind = "hold-started" if args.state == "start" else "hold-ended"
+    if not skip:
+        _event(rollout, kind, slug, {"hold": args.hold}, args)
+    flag = " (dry-run)" if args.dry_run else (" [no-change]" if skip or not rollout else " [written]")
+    print(f"{slug}: {kind} {args.hold}{flag}")
+    return 0
+
+
+def cmd_record_pause(args) -> int:
+    """A hard pause's record, right after its hand stamp: paused mode=hard, then each Slot and the lane freed."""
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.is_file():
+        print(f"ERROR: record-pause: rollout note not found at {rollout_path}", file=sys.stderr)
+        return 1
+    rollout_note = Note(rollout_path)
+    stamp = _scalar(rollout_note.get("paused"))
+    if not _valued(stamp):
+        print(f"ERROR: record-pause: {rollout_path.stem} carries no paused: stamp (hard-pause step 1 writes it "
+              "first); nothing written", file=sys.stderr)
+        return 1
+    ro = rollout_path.stem
+    state = None if args.dry_run else _record_state(ro)
+    if state is not None and state["paused"]:
+        print(f"{ro}: pause already recorded [no-change]")
+        return 0
+    at = _parse_ts(stamp)
+    _event(ro, "paused", None, {"mode": "hard"}, args, ts=at.isoformat() if at else None)
+    freed = []
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    for path, note in sorted(_linked_task_notes(rollout_path, tasks_dir), key=lambda pn: pn[0].stem.lower()):
+        if _status(note) == "in_progress":
+            _event(ro, "slot-freed", path.stem, {"outcome": "stopped"}, args)
+            freed.append(f"slot {path.stem}")
+        elif _holds_lane(note):
+            if not args.dry_run:
+                _halt_lane(ro, path.stem, args, state)
+            freed.append(f"lane {path.stem}")
+    print(f"{ro}: hard pause recorded ({', '.join(freed) or 'nothing in flight'})"
+          + (" (dry-run)" if args.dry_run else ""))
+    return 0
+
+
 # ---- defer ------------------------------------------------------------------
 
 def cmd_defer(args) -> int:
@@ -2569,13 +3261,22 @@ def cmd_defer(args) -> int:
             if cur and cur != expected:
                 errors.append(f"{slug}: belongs to rollout {cur!r}, not {expected!r} — refusing to defer")
                 continue
+        # Read before anything is cleared: `rollout:` goes, and with it the only way to record the frees.
+        rollout, prior, held = _note_rollout(note), _status(note), _holds_lane(note)
         note.set("status", "open")
         for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready", GATES_SIGNED_KEY,
-                    DESCOPE_ARMED_KEY):
+                    DESCOPE_ARMED_KEY, HANDED_BACK_KEY):
             note.remove(key)
         note.save(dry_run=args.dry_run)
+        if rollout and not args.dry_run:
+            state = _record_state(rollout)
+            if prior == "in_progress":
+                _event(rollout, "slot-freed", slug, {"outcome": "stopped"}, args)
+            if held:
+                _halt_lane(rollout, slug, args, state)
+            _close_holds(rollout, slug, ("race",), args, state)
         print(f"{slug}: deferred->open (rollout/owner and started/merged/integrating/ready/{GATES_SIGNED_KEY}/"
-              f"{DESCOPE_ARMED_KEY} cleared, "
+              f"{DESCOPE_ARMED_KEY}/{HANDED_BACK_KEY} cleared, "
               "a legacy `wave:` included)" +
               (" (dry-run)" if args.dry_run else " [written]"))
     for e in errors:
@@ -3137,9 +3838,10 @@ def cmd_carry(args) -> int:
         print("(dry-run)")
         return 0
     written = 0
-    for path, note, _state, carried, plan in rows:
+    for path, note, state, carried, plan in rows:
         if not carried:
             continue
+        lane_held = _holds_lane(note)  # before `integrating:` goes
         note.set("rollout", f'"[[{dst.stem}]]"')
         for key in ("owner", "integrating", "wave"):
             note.remove(key)
@@ -3156,6 +3858,13 @@ def cmd_carry(args) -> int:
                   file=sys.stderr)
             return 1
         written += 1
+        # The from-rollout's record: a carried note's open Slot and lane end there (a paused `next --running ""`
+        # can stamp while a stalled in_progress note stands), then `carried` lands in both files.
+        if state == "running":
+            _event(src.stem, "slot-freed", path.stem, {"outcome": "stopped"}, args)
+        if lane_held:
+            _halt_lane(src.stem, path.stem, args, _record_state(src.stem))
+        _event(dst.stem, "carried", path.stem, {"from": src.stem}, args)
     print(f"[written: {written}]" if written else "[no-change]")
     return 0
 
@@ -3236,12 +3945,15 @@ def cmd_approve_gates(args) -> int:
             note.set("status", "review")
             note.set("ready", _stamp(now))
             note.remove("integrating")
+            ready_pr = _pr(note)
             route = f"status review (stopped at Integration: rejoins the Integration queue; ready: {_stamp(now)})"
         else:
             note.set("status", "in_progress")
             note.set(GATES_SIGNED_KEY, _stamp(now))
             route = f"status in_progress ({GATES_SIGNED_KEY}: {_stamp(now)}, consumed by the restart's mark-started)"
         note.save(dry_run=args.dry_run)
+        if stage == "integration":
+            _event(_note_rollout(note), "ready", slug, {"pr": ready_pr}, args)
         print(f"{slug}: {len(gates)} gate(s) approved (signed off {date}) -> {route}"
               + (" (dry-run)" if args.dry_run else " [written]"))
     for e in errors:
@@ -3265,9 +3977,17 @@ def cmd_clear_pause(args) -> int:
         print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
         return 1
     note = Note(path)
+    stamp = _scalar(note.get("paused"))
     note.remove("paused")
     note.remove("pause_requested")
     note.save(dry_run=args.dry_run)
+    if _valued(stamp) and not args.dry_run:
+        # The Run record (p15-2): a hard pause whose record-pause never ran is caught up at its stamp first.
+        state = _record_state(path.stem)
+        if state is None or not state["paused"]:
+            at = _parse_ts(stamp)
+            _event(path.stem, "paused", None, {"mode": "hard"}, args, ts=at.isoformat() if at else None)
+        _event(path.stem, "resumed", None, None, args)
     if note.dirty:
         print("pause cleared (paused/pause_requested removed)" +
               (" (dry-run)" if args.dry_run else " [written]"))
@@ -3335,6 +4055,10 @@ def main() -> int:
         m.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
         m.add_argument("--now", type=_iso_arg, default=None, help=now_help)
         m.add_argument("--dry-run", action="store_true")
+        if name == "mark-started":
+            m.add_argument("--start", choices=START_CHOICES, default=None,
+                           help="the start the Run record names (resume: a Lost-call or signed-gate resume; revise: "
+                                "a seeded revise); default derived from the note's markers and started:")
         m.set_defaults(func=func)
 
     hb = sub.add_parser("hand-back", help="a set-aside task re-enters at its stage: Integration -> review, its run -> in_progress; "
@@ -3381,6 +4105,40 @@ def main() -> int:
     fj.add_argument("--rollout", required=True, help="the rollout: a note path, [[slug]] or a bare slug (the note is never read)")
     fj.add_argument("--dry-run", action="store_true", help="print what would fold; write nothing")
     fj.set_defaults(func=cmd_fold_journals)
+
+    br = sub.add_parser("bind-run", help="record the Workflow call just launched for a task (run-bound; p15-2)")
+    br.add_argument("--tasks", required=True, help="the task slug")
+    br.add_argument("--run-id", dest="run_id", required=True, help="the launch's runId (wf_...)")
+    br.add_argument("--call", required=True, choices=CALL_CHOICES, help="the call's kind (a resume: the kind it resumes)")
+    br.add_argument("--resumed-from", dest="resumed_from", default=None, help="a Lost-call resume: the runId it resumes")
+    br.add_argument("--journal-dir", dest="journal_dir", default=None,
+                    help="absolute journal dir (default: from CLAUDE_CODE_SESSION_ID's transcript)")
+    br.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    br.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    br.add_argument("--dry-run", action="store_true")
+    br.set_defaults(func=cmd_bind_run)
+
+    fl = sub.add_parser("free-lane", help="the lead frees the lane at a halt (lane-freed release=halt; p15-2)")
+    fl.add_argument("--tasks", required=True, help="the lane holder's slug")
+    fl.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    fl.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    fl.add_argument("--dry-run", action="store_true")
+    fl.set_defaults(func=cmd_free_lane)
+
+    ho = sub.add_parser("hold", help="the lead's merge or race hold starts or ends (hold-started / hold-ended; p15-2)")
+    ho.add_argument("--tasks", required=True, help="the task slug")
+    ho.add_argument("--hold", required=True, choices=("merge", "race"))
+    ho.add_argument("--state", required=True, choices=("start", "end"))
+    ho.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    ho.add_argument("--now", type=_iso_arg, default=None, help=now_help)
+    ho.add_argument("--dry-run", action="store_true")
+    ho.set_defaults(func=cmd_hold)
+
+    rp = sub.add_parser("record-pause", help="record a hard pause after its hand stamp (paused mode=hard; p15-2)")
+    rp.add_argument("--rollout", required=True, help="path to the rollout note")
+    rp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    rp.add_argument("--dry-run", action="store_true")
+    rp.set_defaults(func=cmd_record_pause)
 
     df = sub.add_parser("defer", help="pop task(s) out of a rollout back to open backlog (/thread:repair)")
     df.add_argument("--tasks", required=True, help="comma-separated task slugs to defer")

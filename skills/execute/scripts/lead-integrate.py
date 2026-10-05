@@ -71,8 +71,10 @@ Subcommands:
 
   set-aside --note N --kind integration|revise-stopped|own     (the reason on stdin)
       The lead's own set-aside row, for `reconcile-rollout.py reconcile --result -`: {rolloutSlug,
-      tasks:[{slug, taskPath, scope, status: blocked, prUrl, blockerDiagnosis, reviewHistory}]}, with no
-      `integration` key (so no Integration-log line) and no rung (so reconcile keeps the note's `rung:`).
+      tasks:[{slug, taskPath, scope, status: blocked, prUrl, blockerDiagnosis, reviewHistory, leadSetAside}]},
+      with no `integration` key (so no Integration-log line) and no rung (so reconcile keeps the note's
+      `rung:`). leadSetAside is the --kind; the engine never reads it, and reconcile classifies the Run
+      record's set-aside by it (p15-2).
       blockerDiagnosis is the
       engine's own rendering: integrationMarker('set-aside', reason, history) for `integration` (it strips
       one leading `integration:`, so merge-task's exit-4 text passes through unchanged),
@@ -749,6 +751,7 @@ def cmd_set_aside(args):
     return {"rolloutSlug": rollout, "tasks": [{
         "slug": path.stem, "taskPath": str(path), "scope": inp["scope"] or "", "status": "blocked",
         "prUrl": inp["pr"] or "", "blockerDiagnosis": diag, "reviewHistory": inp["history"],
+        "leadSetAside": args.kind,
     }]}
 
 

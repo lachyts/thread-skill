@@ -29,7 +29,7 @@ const SKIP = 'p12-8 reconcile-rollout.py not on this base'
 // The Run record (run_record.py, ADR 0032) the scripts may append lands in temp, never ~/.local/state.
 const EVENTS = fs.mkdtempSync(path.join(os.tmpdir(), 'imr-events-'))
 after(() => fs.rmSync(EVENTS, { recursive: true, force: true }))
-const PY_ENV = { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: path.join(EVENTS, 'events') }
+const PY_ENV = { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: process.env.THREAD_TEST_EVENTS_DIR || path.join(EVENTS, 'events') }
 const T = loadEngine(['parseIntegrationMarker', 'resumeArgsError', 'REVISE_MARKER'])
 
 const sha = (c) => c.repeat(40)
