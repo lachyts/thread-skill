@@ -5,8 +5,9 @@
 # resume, the integrate-call path, a hand-back, a signed gate, a quota stall, a read-only approval, `resume`,
 # `defer` and the halts; side rollouts cover the pauses, a carry and the idle-slots reasons. Each leg asserts
 # the `kind:task` sequence it appended and the key fields; the last legs check that --dry-run records nothing
-# (each verb then runs without it and must record), that an unwritable events dir changes no verb's exit, stdout or non-record stderr, and run the pairing
-# checker (run_record.py's reader rules) over the whole record. Temp dirs only.
+# (each verb then runs without it and must record), that an unwritable events dir changes no verb's exit,
+# stdout or non-record stderr, and run the pairing checker (run_record.py's reader rules) over the whole
+# record. Temp dirs only.
 #
 # This suite reads the record, so it keeps its own THREAD_EVENTS_DIR and ignores THREAD_TEST_EVENTS_DIR (the
 # knob tests/run.sh honours to run every other suite against an unwritable events dir).
@@ -282,6 +283,31 @@ ok "$(since ro "$((M+3))" '[d["stage"], d["reasonClass"], d["setAsideAt"]]')" '[
 ok "$(since ro "$((M+2))" '[d.get("release"), d.get("path"), d.get("triggers"), d.get("conflict")]' | cut -d' ' -f1)" '["set-aside","integrator",["red","conflict"],true]' \
   "the decline's lane-freed carries the integrated line's path, triggers and conflict"
 
+echo "== 12b. a later Integration's lead row leaves out an earlier Integration's path, triggers and conflict"
+# Each note was rejected at an earlier Integration (its 09:00 log line), then re-queued (`ready:` 11:00). This
+# Integration writes no log line of its own: a prepare set-aside, then a dead integrate call. One lane holder
+# at a time, so the pairing checker reads each holding closed.
+requeued() {  # requeued <slug>: a review + PR note re-queued at 11:00 after a 09:00 rejection, now integrating
+  mkt $1 ro review "pr: $PR/12" "ready: 2026-10-05T11:00+00:00"
+  printf '\n## Integration log\n\n2026-10-05T09:00:00Z rejected path=integrator pr=12 anchor=%s head=%s base=%s %s\n' \
+    $A40 $B40 $C40 'wait=3 duration=2 triggers=red,conflict' >> "$V/$1.md"
+  rrs mark-integrating --tasks $1 --tasks-dir "$V" --now "$NOW" >/dev/null
+}
+requeued p1
+M=$(cnt ro)
+lead p1 integration 'integration: prepare: trouble [git fetch failed]' >/dev/null
+ok "$(since ro "$M")" "lane-freed:p1 set-aside:p1" "prepare set-aside: lane-freed, set-aside"
+ok "$(since ro "$M" '[d.get("release"), d.get("path"), d.get("triggers"), d.get("conflict")]' | cut -d' ' -f1)" \
+  '["set-aside",null,null,null]' "lane-freed carries no path, triggers or conflict from the earlier Integration"
+ok "$(since ro "$((M+1))" '[d["stage"], d["reasonClass"]]')" '["integrate","prepare"]' "set-aside stage integrate, reasonClass prepare"
+requeued p2
+M=$(cnt ro)
+lead p2 integration 'workflow call failed: no result row' >/dev/null
+ok "$(since ro "$M")" "lane-freed:p2 set-aside:p2" "dead integrate call: lane-freed, set-aside"
+ok "$(since ro "$M" '[d.get("release"), d.get("path"), d.get("triggers"), d.get("conflict")]' | cut -d' ' -f1)" \
+  '["set-aside",null,null,null]' "a dead integrate call's lane-freed leaves the earlier Integration's fields out"
+ok "$(since ro "$((M+1))" '[d["stage"], d["reasonClass"]]')" '["integrate","call-failed"]' "set-aside stage integrate, reasonClass call-failed"
+
 echo "== 13. a hand-back restart and a signed gate"
 rrs hand-back --tasks b --tasks-dir "$V" --now "$NOW" >/dev/null
 ok "$(fm b handed_back)" "handed_back: 2026-10-05T10:00+00:00" "hand-back stamps handed_back:"
@@ -348,10 +374,10 @@ ok "$(since ro "$M")" "lane-freed:s merged:s" "lane-freed, merged"
 ok "$(since ro "$M" 'd.get("release") or d.get("pr")')" "\"merge\" \"$PR/18\"" "release merge, pr"
 
 echo "== 18b. resume flips a running (in_progress) note done -> slot-freed(completed), merged"
-mkt s2 ro in_progress "pr: $PR/28"
-rrs mark-started --tasks s2 --tasks-dir "$V" --now "$NOW" >/dev/null
-GHS2="$TMP/gh-s2"
-cat > "$GHS2" <<'SH'
+mkt s3 ro in_progress "pr: $PR/28"
+rrs mark-started --tasks s3 --tasks-dir "$V" --now "$NOW" >/dev/null
+GHS3="$TMP/gh-s3"
+cat > "$GHS3" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
   *"pr view"*pull/28*) echo '{"state":"MERGED","mergedAt":"2026-10-05T12:00:00Z","baseRefName":"main","url":"u"}';;
@@ -359,11 +385,11 @@ case "$*" in
   *"repo view"*) echo main;;
 esac
 SH
-chmod +x "$GHS2"
+chmod +x "$GHS3"
 M=$(cnt ro)
-rrs resume --rollout "$V/ro.md" --tasks-dir "$V" --gh-bin "$GHS2" --now "$NOW" >/dev/null
-ok "$(fm s2 status)" "status: done" "resume flipped the running note done"
-ok "$(since ro "$M")" "slot-freed:s2 merged:s2" "slot-freed before merged"
+rrs resume --rollout "$V/ro.md" --tasks-dir "$V" --gh-bin "$GHS3" --now "$NOW" >/dev/null
+ok "$(fm s3 status)" "status: done" "resume flipped the running note done"
+ok "$(since ro "$M")" "slot-freed:s3 merged:s3" "slot-freed before merged"
 ok "$(since ro "$M" 'd.get("outcome") or d.get("pr")')" "\"completed\" \"$PR/28\"" "outcome completed, pr"
 
 echo "== 19. defer records the frees before rollout: is cleared"

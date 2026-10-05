@@ -271,7 +271,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
   mark-integrating  lane-taken, on every successful call.
   mark-done         (a note not already done) hold-ended race / merge for each the record shows open; then,
                     when it held the lane, lane-freed release=merge with path, triggers and conflict from
-                    the Integration log's last line; then merged pr=.
+                    the Integration log's last line when it is the current Integration's (startedAt at or
+                    after `ready:`; otherwise left out); then merged pr=.
   resume            the same events as mark-done, for each note it flips done; a note that read `in_progress`
                     first records slot-freed outcome=completed (its PR merged, so its Slot ends there).
   reconcile         per row, against the note's status and _holds_lane before the row's writes: slot-freed
@@ -280,12 +281,15 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     pr= when `ready:` is stamped; merged readOnly=true for a read-only approval; when it
                     held the lane and the row is not an `integrated` integrate row, a merge-hold close and
                     lane-freed (reject for a `rejected` integrate row, else set-aside; path, triggers and
-                    conflict from the integrate row, or for a lead row, which carries no integration, from the
-                    Integration log's last line read before the row); set-aside {stage, reasonClass,
-                    setAsideAt} when the row sets a slot or lane holder aside (never a rejected integrate row
-                    that leaves the note `blocked`: its seeded revise follows, so it is not a set-aside; a
-                    rejected row that ends review-blocked is one); quota-stall {stage, detail} for a `workflow call failed:` lead row
-                    whose error line reads as a usage or rate limit (QUOTA_RE).
+                    conflict from the integrate row; a lead row carries no integration, so only an
+                    Integration log line from the current Integration, its startedAt at or after `ready:`
+                    and read before the row, supplies them, and otherwise they are left out: a prepare
+                    set-aside or a dead integrate call writes no line of its own); set-aside {stage,
+                    reasonClass, setAsideAt} when the row sets a slot or lane holder aside (never a rejected
+                    integrate row that leaves the note `blocked`: its seeded revise follows, so it is not a
+                    set-aside; a rejected row that ends review-blocked is one); quota-stall {stage, detail}
+                    for a `workflow call failed:` lead row whose error line reads as a usage or rate limit
+                    (QUOTA_RE).
   hand-back         the Integration arm records ready pr=; the run arm stamps `handed_back:`.
   approve-gates     the Integration arm records ready pr=.
   defer             (read before clearing) slot-freed outcome=stopped for an in_progress note; for a lane
@@ -2788,14 +2792,23 @@ def _holds_lane(note) -> bool:
         return False
     if _scalar(note.get("integrating")):
         return True
-    t = _log_tokens(_last_log_line(note))
-    if t["outcome"] != "integrated":
-        return False
+    t = _current_log_tokens(note)
+    return t is not None and t["outcome"] == "integrated"
+
+
+def _current_log_tokens(note):
+    """The Integration log's last line as _log_tokens when it belongs to the note's current Integration: its
+    startedAt at or after `ready:` (a hand-back, a ready review row and approve-gates all restamp `ready:`, so
+    an older line is an earlier Integration's). None with no log, a `-` startedAt (legacy), or an older line."""
+    last = _last_log_line(note)
+    if not last:
+        return None
+    t = _log_tokens(last)
     started = _iso_minutes(t["startedAt"])
     if started is None:
-        return False
+        return None
     ready = _iso_minutes(_scalar(note.get("ready")))
-    return ready is None or started >= ready
+    return t if ready is None or started >= ready else None
 
 
 def _lane_fields(path, triggers) -> dict:
@@ -2806,11 +2819,12 @@ def _lane_fields(path, triggers) -> dict:
 
 
 def _lane_fields_from_log(note) -> dict:
-    """lane-freed's path, triggers and conflict from the Integration log's last line ({} with no log)."""
-    last = _last_log_line(note)
-    if not last:
+    """lane-freed's path, triggers and conflict from the Integration log's last line, only when that line belongs
+    to the current Integration (_current_log_tokens); {} otherwise, so the fields are left out. A prepare
+    set-aside or a dead integrate call writes no log line, and an earlier Integration's must not stand in."""
+    t = _current_log_tokens(note)
+    if t is None:
         return {}
-    t = _log_tokens(last)
     raw = t.get("triggers", "-")
     return _lane_fields(t.get("path"), [] if raw in ("", "-") else raw.split(","))
 
