@@ -15,6 +15,7 @@ RR="$root/skills/execute/scripts/reconcile-rollout.py"
 TMP=$(mktemp -d) || { echo 'FAIL - mktemp'; exit 1; }
 TMP=$(cd "$TMP" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT
+export THREAD_EVENTS_DIR="$TMP/events"  # the Run record (run_record.py, ADR 0032) stays in temp
 NOW=2026-10-02T14:05:00Z
 
 D=""

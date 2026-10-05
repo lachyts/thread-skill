@@ -7,6 +7,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+export THREAD_EVENTS_DIR="$TMP/events"  # the Run record (run_record.py, ADR 0032) stays in temp
 
 fail=0
 check() {  # check <label> <expected-substring> <file>

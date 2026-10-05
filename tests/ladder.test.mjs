@@ -52,7 +52,7 @@ function writeLadder(home, content) {
 function run(home, argv = ['-B', SCRIPT]) {
   const r = spawnSync('python3', argv, {
     encoding: 'utf8',
-    env: { ...process.env, HOME: home, PYTHONDONTWRITEBYTECODE: '1' },
+    env: { ...process.env, HOME: home, PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: path.join(home, 'events') },
   })
   return { status: r.status, stdout: r.stdout, stderr: r.stderr }
 }

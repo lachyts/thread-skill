@@ -30,6 +30,7 @@ TPL="$root/skills/schedule/rollout-template.md"
 TMP=$(mktemp -d) || { echo 'FAIL - mktemp'; exit 1; }
 TMP=$(cd "$TMP" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT
+export THREAD_EVENTS_DIR="$TMP/events"  # the Run record (run_record.py, ADR 0032) stays in temp
 
 hasnt() { case "$1" in *"$2"*) ok n y "$3";; *) ok y y "$3";; esac; }
 

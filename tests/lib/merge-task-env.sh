@@ -9,6 +9,7 @@ export MT_STATE="$tmp/st" MT_SRV="$tmp/srv/github.com/o/r.git"
 export MERGE_TASK_CHECK_INTERVAL=0 MERGE_TASK_STATE_INTERVAL=0 MERGE_TASK_CONFIRM_INTERVAL=0 \
        MERGE_TASK_READ_INTERVAL=0 MERGE_TASK_READ_TRIES=2 MERGE_TASK_HEAD_LAG_INTERVAL=0
 unset MERGE_TASK_REINTEGRATE_MAX
+export THREAD_EVENTS_DIR="$tmp/events"  # the Run record (run_record.py, ADR 0032) stays in temp
 MT="$root/skills/execute/scripts/merge-task.sh"
 gt() { git -c user.name=t -c user.email=t@t "$@"; }
 gc() { gt -C "$tmp/repo" "$@"; }

@@ -21,6 +21,7 @@ SKILL="$root/skills/execute/SKILL.md"
 TMP=$(mktemp -d) || { echo 'FAIL - mktemp'; exit 1; }
 TMP=$(cd "$TMP" && pwd -P)
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
+export THREAD_EVENTS_DIR="$TMP/events"  # the Run record (run_record.py, ADR 0032) stays in temp
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master -c commit.gpgsign=false "$@"; }
 
 S=""; O=""; R=""; V=""; RO=""; C2=""
