@@ -30,6 +30,14 @@ export PYTHONUSERBASE=${py_info#*$'\n'}
 export PATH="$(dirname "$node_bin"):$(dirname "$py_bin"):$PATH"
 
 export HOME="$scratch/home"; mkdir -p "$HOME"
+# A refused operator rollouts.toml (p15-4) in the scratch HOME: reconcile-rollout.py resolves an absent
+# `parallel_ceiling` through rollout-settings.py, which reads ~/.config/thread/rollouts.toml. Every suite pins
+# HOME (an empty dir of its own) on each call that reaches the resolver, so this file is never read by a
+# passing run; a missed site fails loudly (`next` exits 1, status's ceiling goes null) instead of silently
+# reading whatever the scratch HOME holds.
+mkdir -p "$HOME/.config/thread"
+printf '%s\n' '# Seeded by tests/run.sh and refused on purpose: a suite that reaches rollout-settings.py must pin HOME.' \
+  '[defaults]' 'parallel_ceiling = 0' > "$HOME/.config/thread/rollouts.toml"
 export GIT_CONFIG_GLOBAL="$scratch/gitconfig"
 # A git hook running `make test` exports GIT_DIR & co. (and `git -c ...` exports GIT_CONFIG_PARAMETERS);
 # left set, every git call below and every suite's temp-repo git call (commits, pushes included) would land

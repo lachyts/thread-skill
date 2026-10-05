@@ -15,17 +15,29 @@ RR="$root/skills/execute/scripts/reconcile-rollout.py"
 TMP=$(mktemp -d) || { echo 'FAIL - mktemp'; exit 1; }
 TMP=$(cd "$TMP" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT
+# An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
+# call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
+EH="$TMP/settings-home"; mkdir -p "$EH"
 NOW=2026-10-02T14:05:00Z
 
 D=""
 scen() { D="$TMP/$1"; mkdir -p "$D"; echo "== $1"; }
 # render <slug> <queue rows> <file-set lines> — the template, every placeholder substituted, as $D/<slug>.md
-# (schedule step 6: the note is born `incomplete: true`)
+# (schedule step 6: the note is born `incomplete: true`). The four rollout settings come from schedule step 2.8's
+# real path: rollout-settings.py --repo <the Project root>, under HOME=$RH (default: an empty dir, so the
+# built-ins) with the Project root $RREPO (default $D).
+RS="$root/skills/_shared/scripts/rollout-settings.py"
 render() {
-  python3 - "$TPL" "$D/$1.md" "$D" "$2" "$3" <<'PY'
-import sys
-tpl, out, repo, rows, files = sys.argv[1:]
+  local rh="${RH:-$TMP/render-home}" repo="${RREPO:-$D}" settings
+  mkdir -p "$rh"
+  settings=$(HOME="$rh" python3 "$RS" --repo "$repo") || { echo "FAIL - render: rollout-settings.py refused"; fail=1; return 1; }
+  python3 - "$TPL" "$D/$1.md" "$repo" "$2" "$3" "$settings" <<'PY'
+import json, sys
+tpl, out, repo, rows, files, settings = sys.argv[1:]
+resolved = {k: str(v["value"]) for k, v in json.loads(settings)["settings"].items()}
 vals = {
+    "MAX_ITERATIONS": resolved["max_iterations"], "MAX_REVIEW_ROUNDS": resolved["max_review_rounds"],
+    "MAX_PLAN_ROUNDS": resolved["max_plan_rounds"], "PARALLEL_CEILING": resolved["parallel_ceiling"],
     "PROJECT_NAME": "Demo", "DATE": "2026-10-02", "VERIFIER": "make test", "REPO_PATH": repo,
     "ROLLOUT_SLUG": out.rsplit("/", 1)[1][:-3], "THREAD_LINE": "Thread: `" + repo + "/THREAD.md`",
     "QUEUE_TABLE": "| # | Task | Scope | Mode |\n|---|---|---|---|\n" + rows,
@@ -47,8 +59,8 @@ mkt() {
     for l in "$@"; do printf '%s\n' "$l"; done
     printf -- '---\n\n## Notes\n\nbody %s\n' "$s"; } > "$D/$s.md"
 }
-nxt() { python3 "$RR" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" --dry-run; }
-st() { python3 "$RR" status --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW"; }
+nxt() { HOME="$EH" python3 "$RR" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" --dry-run; }
+st() { HOME="$EH" python3 "$RR" status --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW"; }
 q() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps(eval(sys.argv[1]), separators=(",", ":"), sort_keys=True))' "$2"; }
 row() { printf '| %s | [[%s\\|%s]] | single-file | %s |' "$1" "$2" "$2" "$3"; }
 
@@ -69,6 +81,27 @@ has "$(cat "$D/err")" "is incomplete: it carries incomplete: true" "Q1: … nami
 step7end ro
 ok "$(grep -c '^incomplete:' "$D/ro.md")" 0 "Q1: step 7's last write removes the stamp"
 ok "$(q "$(nxt)" 'd["start"]')" '["a"]' "Q1: … and next then runs the queue"
+ok "$(grep -c '^max_iterations: 3$' "$D/ro.md")|$(grep -c '^max_review_rounds: 4$' "$D/ro.md")|$(grep -c '^max_plan_rounds: 3  #' "$D/ro.md")" "1|1|1" \
+  "Q1: with no rollouts.toml the built-in max_iterations 3, max_review_rounds 4, max_plan_rounds 3 are stamped"
+
+# ── Q1b: schedule stamps the operator's rollouts.toml values (p15-4) ─────────────────────────────────────
+scen q1b
+RH="$D/home"; mkdir -p "$RH/.config/thread"
+printf '%s\n' '[defaults]' 'max_review_rounds = 5' '[repo."o/r"]' 'parallel_ceiling = 6' > "$RH/.config/thread/rollouts.toml"
+RREPO="$D/clone"; git init -q "$RREPO"; git -C "$RREPO" remote add origin git@github.com:O/R.git
+render ro "$(row 1 a —)
+$(row 2 b —)
+$(row 3 c —)
+$(row 4 d —)
+$(row 5 e —)
+$(row 6 f —)
+$(row 7 g —)" ""
+unset RH RREPO
+ok "$(grep -c '^parallel_ceiling: 6$' "$D/ro.md")|$(grep -c '^max_review_rounds: 5$' "$D/ro.md")|$(grep -c '^max_iterations: 3$' "$D/ro.md")" "1|1|1" \
+  "Q1b: the repo table's parallel_ceiling 6 (matched ignoring case over SSH) and [defaults]' max_review_rounds 5 are stamped"
+step7end ro
+for s in a b c d e f g; do mkt "$s" open; done
+ok "$(q "$(nxt)" 'd["start"]')" '["a","b","c","d","e","f"]' "Q1b: next honours the stamped ceiling (6 of 7 start)"
 
 # ── Q2: three tasks on one file give one queue, no waves ─────────────────────────────────────────────
 scen q2

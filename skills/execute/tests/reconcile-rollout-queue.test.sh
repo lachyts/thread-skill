@@ -65,7 +65,10 @@ open(p, "w").write(head + "\n---\n" + rest)
 PY
 }
 fm() { grep -m1 "^$2:" "$D/$1.md" || echo "<none>"; }   # fm <slug> <key> — the frontmatter line
-nxt() { python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@"; }
+# An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
+# call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
+EH="$TMP/settings-home"; mkdir -p "$EH"
+nxt() { HOME="$EH" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@"; }
 # status reads the operator's ladder file (its `ladder` key, each task's rungDrift): HOME is pinned to an empty
 # dir (the built-in ladder) unless $SH names another, so the operator's file never reaches the assertions.
 SH="$TMP/status-home"; mkdir -p "$SH"
@@ -154,9 +157,76 @@ setkey a status in_progress
 J=$(nxt)
 ok "$(q "$J" '[d["start"], d["running"], d["slotsInUse"]]')" '[["b"],["a"],1]' "next: one in_progress task leaves one slot"
 mkro $'- [[a]]\n- [[b]]\n- [[c]]\n- [[d]]' 'parallel_ceiling: 0'
-python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" >/dev/null 2>"$D/err"; rc=$?
+HOME="$EH" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" >/dev/null 2>"$D/err"; rc=$?
 ok "$rc" 1 "next: parallel_ceiling 0 is an error (exit 1)"
 has "$(cat "$D/err")" "parallel_ceiling" "next: the error names parallel_ceiling"
+
+# ── an absent parallel_ceiling resolves from the operator's rollouts.toml (p15-4) ─────────────────
+# Each scenario's HOME is its own $D/home, so the resolver reads only the file the scenario writes there.
+rs_toml() { mkdir -p "$D/home/.config/thread"; printf '%s\n' "$@" > "$D/home/.config/thread/rollouts.toml"; }
+rnxt() { HOME="$D/home" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" "$@"; }
+rst() { HOME="$D/home" python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW"; }
+reroot() {  # reroot <path|-> — point the rollout's Project root line elsewhere, or drop it ("-")
+  python3 - "$D/ro.md" "$D/repo" "$1" <<'PY'
+import sys
+p, old, new = sys.argv[1:]
+t = open(p).read()
+line = "Project root: `%s`\n" % old
+open(p, "w").write(t.replace(line, "" if new == "-" else "Project root: `%s`\n" % new, 1))
+PY
+}
+five=$'- [[a]]\n- [[b]]\n- [[c]]\n- [[d]]\n- [[e]]'
+scen settings-none
+mkro "$five"; mkdir -p "$D/home"
+mkt a open; mkt b open; mkt c open; mkt d open; mkt e open
+ok "$(q "$(rnxt)" 'd["start"]')" '["a","b","c","d"]' "settings: absent key, no rollouts.toml -> the built-in 4"
+ok "$(q "$(rst)" '[d["ceiling"], d["ceilingError"]]')" '[4,null]' "settings: status ceiling 4, ceilingError null"
+scen settings-defaults
+mkro "$five"; rs_toml '[defaults]' 'parallel_ceiling = 2'
+mkt a open; mkt b open; mkt c open; mkt d open; mkt e open
+ok "$(q "$(rnxt)" 'd["start"]')" '["a","b"]' "settings: [defaults] parallel_ceiling = 2 holds next at 2"
+scen settings-repo
+mkro "$five"; rs_toml '[defaults]' 'parallel_ceiling = 2' '[repo."o/r"]' 'parallel_ceiling = 1'
+git init -q "$D/repo"; git -C "$D/repo" remote add origin https://github.com/o/r
+mkt a open; mkt b open; mkt c open; mkt d open; mkt e open
+ok "$(q "$(rnxt)" 'd["start"]')" '["a"]' "settings: [repo.\"o/r\"] matches the Project root's origin -> 1"
+out=$(HOME="$D/home" python3 "$SCRIPT" mark-started --tasks a --tasks-dir "$D" --now "$NOW" --rollout "$D/ro.md"); rc=$?
+ok "$rc" 0 "settings: mark-started --rollout resolves the ceiling through the repo table too"
+has "$out" "progress: 0/5 merged, 5 queued" "settings: … and prints its progress line"
+scen settings-refused
+mkro "$five"; rs_toml '# operator settings' '[defaults]' 'parallel_ceiling = 0'
+mkt a open; mkt b open
+rnxt >/dev/null 2>"$D/err"; rc=$?
+ok "$rc" 1 "settings: a refused rollouts.toml makes next exit 1"
+has "$(cat "$D/err")" "rollouts.toml:3: [defaults] parallel_ceiling must be an integer >= 1" "settings: … naming the file and line"
+has "$(cat "$D/err")" "stamp parallel_ceiling: on the rollout note" "settings: … and the remedy"
+J=$(rst); rc=$?
+ok "$rc" 0 "settings: status still exits 0 on a refused rollouts.toml"
+ok "$(q "$J" 'd["ceiling"]')" 'null' "settings: status ceiling null"
+has "$(q "$J" 'd["ceilingError"]')" "rollouts.toml:3:" "settings: status ceilingError names the file and line"
+setkey ro parallel_ceiling 2
+ok "$(q "$(rnxt)" 'd["start"]')" '["a","b"]' "settings: a present parallel_ceiling never consults the (refused) file"
+scen settings-gone-root
+mkro "$five"; mkdir -p "$D/home"; reroot "$D/gone"
+mkt a open; mkt b open; mkt c open; mkt d open; mkt e open
+rnxt >/dev/null 2>"$D/err"; rc=$?
+ok "$rc" 1 "settings: absent key with a Project root that is not a directory -> next exits 1"
+has "$(cat "$D/err")" "--repo $D/gone: not a directory" "settings: … with the resolver's reason"
+has "$(cat "$D/err")" "stamp parallel_ceiling" "settings: … and the remedy"
+J=$(rst)
+ok "$(q "$J" 'd["ceiling"]')" 'null' "settings: status ceiling null for the gone root"
+has "$(q "$J" 'd["ceilingError"]')" "not a directory" "settings: status ceilingError says why"
+setkey ro parallel_ceiling 3
+ok "$(q "$(rnxt)" 'd["start"]')" '["a","b","c"]' "settings: the same note with parallel_ceiling: 3 runs at 3"
+scen settings-no-root
+mkro "$five"; rs_toml '[defaults]' 'parallel_ceiling = 2' '[repo."o/r"]' 'parallel_ceiling = 1'; reroot -
+git init -q "$D/repo"; git -C "$D/repo" remote add origin https://github.com/o/r
+mkt a open; mkt b open; mkt c open; mkt d open; mkt e open
+ok "$(q "$(rnxt)" 'd["start"]')" '["a","b"]' "settings: no Project root line -> [defaults] applies (no repo table can)"
+scen settings-present-wins
+mkro "$five" 'parallel_ceiling: 1'; rs_toml '[defaults]' 'parallel_ceiling = 5'
+mkt a open; mkt b open; mkt c open; mkt d open; mkt e open
+ok "$(q "$(rnxt)" 'd["start"]')" '["a"]' "settings: a present parallel_ceiling: 1 beats the file's 5"
 
 # ── a priority change between calls reorders the live queue ──────────────────────────────────────
 scen priority
@@ -326,7 +396,7 @@ mkt a in_progress 'integrating: 2026-10-01T09:00+00:00'
 mkt b done
 mkt c review 'pr: https://github.com/o/r/pull/3' 'ready: 2026-10-02T12:00+00:00'
 mkt g open
-out=$(python3 "$SCRIPT" mark-started --tasks a,b,g --tasks-dir "$D" --now "$NOW" --rollout "$D/ro.md" 2>"$D/err"); rc=$?
+out=$(HOME="$EH" python3 "$SCRIPT" mark-started --tasks a,b,g --tasks-dir "$D" --now "$NOW" --rollout "$D/ro.md" 2>"$D/err"); rc=$?
 ok "$rc" 1 "mark-started: refusing a done note exits 1"
 has "$(cat "$D/err")" "b:" "mark-started: the refusal names the note"
 ok "$(fm a started)" "started: 2026-10-02T14:05+00:00" "mark-started: exact stamp"
@@ -346,7 +416,7 @@ ok "$(fm c integrating)" "integrating: 2026-10-02T15:10+00:00" "mark-integrating
 python3 "$SCRIPT" mark-integrating --tasks g --tasks-dir "$D" --now "$NOW" >/dev/null 2>&1; rc=$?
 ok "$rc" 1 "mark-integrating: refuses a note that is not review with a PR"
 ok "$(fm g integrating)" "<none>" "mark-integrating: … and writes nothing there"
-out=$(python3 "$SCRIPT" mark-done --tasks c --tasks-dir "$D" --now 2026-10-02T15:45:00Z --rollout "$D/ro.md"); rc=$?
+out=$(HOME="$EH" python3 "$SCRIPT" mark-done --tasks c --tasks-dir "$D" --now 2026-10-02T15:45:00Z --rollout "$D/ro.md"); rc=$?
 ok "$rc" 0 "mark-done: review -> done"
 ok "$(fm c status)" "status: done" "mark-done: status done"
 ok "$(fm c merged)" "merged: 2026-10-02T15:45+00:00" "mark-done: exact merged stamp on a PR task"
@@ -427,7 +497,7 @@ ok "$(q "$J" '[[t["blockerSummary"], t["priority"]] for t in d["tasks"] if t["sl
 ok "$(q "$J" 'sorted(set(k for t in d["tasks"] for k in t))')" \
   '["blockerSummary","integrating","merged","pr","priority","queueState","rung","rungDrift","setAsideAt","slug","solo","started","status","waitingOn"]' "status: the exact row keys (no owner key)"
 ok "$(q "$J" 'sorted(d)')" \
-  '["ceiling","counts","gitEnvHold","incomplete","ladder","pause_requested","paused","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline"]' "status: the exact top-level keys (no stored cursor; gitEnvHold, p14-6)"
+  '["ceiling","ceilingError","counts","gitEnvHold","incomplete","ladder","pause_requested","paused","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline"]' "status: the exact top-level keys (no stored cursor; gitEnvHold, p14-6; ceilingError, p15-4)"
 setkey s-d integrating 2026-10-02T11:50+00:00
 printf '\n### Run 2 (2026-10-02T11:30+00:00)\n\nIntegration: conflict in a.py\n\n<!-- run 2 end sha=111111111111 -->\n' >> "$D/s-e.md"
 J=$(st "" 2026-10-02T12:00:00Z)
@@ -505,11 +575,11 @@ mkt r-fail review "pr: $U/9"
 mkt r-done done "pr: $U/10"
 sums() { for f in "$D"/r-*.md; do cksum < "$f"; done; }
 before=$(sums)
-python3 "$SCRIPT" resume --rollout "$D/ro.md" --tasks-dir "$D" --gh-bin "$D/bin/gh" --now "$NOW" --dry-run >/dev/null 2>&1; rc=$?
+HOME="$EH" python3 "$SCRIPT" resume --rollout "$D/ro.md" --tasks-dir "$D" --gh-bin "$D/bin/gh" --now "$NOW" --dry-run >/dev/null 2>&1; rc=$?
 ok "$rc" 1 "resume --dry-run: a gh failure still exits 1"
 ok "$(sums)" "$before" "resume --dry-run writes nothing"
 : > "$GHLOG"
-out=$(python3 "$SCRIPT" resume --rollout "$D/ro.md" --tasks-dir "$D" --gh-bin "$D/bin/gh" --now "$NOW" 2>"$D/err"); rc=$?
+out=$(HOME="$EH" python3 "$SCRIPT" resume --rollout "$D/ro.md" --tasks-dir "$D" --gh-bin "$D/bin/gh" --now "$NOW" 2>"$D/err"); rc=$?
 ok "$rc" 1 "resume: a gh failure exits 1"
 has "$(cat "$D/err")" "r-fail" "resume: the ERROR names the failing note"
 ok "$(fm r-merged status)|$(fm r-merged merged)" "status: done|merged: 2026-10-01T03:24+00:00" "resume (p6-8): in_progress + MERGED on the default base -> done, merged: from mergedAt"
@@ -551,7 +621,7 @@ printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-02T10:00+00:00)\n\nintegrat
 mkt h-dep open 'depends-on:' '  - "[[h-race]]"'
 held() { cksum < "$D/h-race.md"; cksum < "$D/h-unv.md"; }
 before=$(held)
-rsm() { python3 "$SCRIPT" resume --rollout "$D/ro.md" --tasks-dir "$D" --gh-bin "$D/bin/gh" --now "$NOW" 2>"$D/err"; }
+rsm() { HOME="$EH" python3 "$SCRIPT" resume --rollout "$D/ro.md" --tasks-dir "$D" --gh-bin "$D/bin/gh" --now "$NOW" 2>"$D/err"; }
 notes_line() {  # notes_line <line> — add a line at the top of the rollout's ## Notes
   python3 - "$D/ro.md" "$1" <<'PY'
 import sys

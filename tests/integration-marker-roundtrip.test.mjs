@@ -12,7 +12,7 @@
 // Until p12-8 is on the base, every case SKIPs visibly. Whichever of p12-6 and p12-8 lands second runs it
 // against the other's real code; if p12-8's CLI changes (`reconcile --result --tasks-dir --now`, or the
 // status keys), this test is the contract to update in that PR.
-import { test } from 'node:test'
+import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -76,7 +76,11 @@ function vault(agentParagraph) {
     `rollout: "[[${ROLLOUT}]]"\n---\n\n## Notes\n\nbody\n` + (agentParagraph ? `\n## Blocker diagnosis\n\n${agentParagraph}\n` : ''))
   return d
 }
-const py = (args) => execFileSync('python3', [RECONCILE, ...args], { encoding: 'utf8', env: { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1' } })
+// status resolves the rollout's absent parallel_ceiling through rollout-settings.py (~/.config/thread/rollouts.toml,
+// p15-4): HOME is an empty dir of this suite's own, so the operator's file never reaches the assertions.
+const SETTINGS_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'p126-settings-home-'))
+after(() => fs.rmSync(SETTINGS_HOME, { recursive: true, force: true }))
+const py = (args) => execFileSync('python3', [RECONCILE, ...args], { encoding: 'utf8', env: { ...process.env, HOME: SETTINGS_HOME, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1' } })
 function reconcile(d, result, now = NOW) {
   const f = path.join(d, 'result.json')
   fs.writeFileSync(f, JSON.stringify(result))
