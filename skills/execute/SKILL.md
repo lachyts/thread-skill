@@ -428,7 +428,7 @@ python3 "$gc" <verb> --rollout <rollout-note> <its flags: --repo <repoPath> --de
      ```
      python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py fold-journals --rollout <rollout-note>
      ```
-     It reads only the rollout's Run record (its `run-bound` lines name each call's runId and journal dir) and writes one `call-journal` line per call through `run_record.py`. Record its summary line and every `WARN:` line in the Completion log. A non-zero exit (1: the events directory cannot be resolved; 2: usage) is surfaced to the user and the ceremony **continues**: it never halts and never files a follow-on. It is idempotent, so every Retro also runs it first (mid-run, at close, or on a superseded or dropped rollout, which folds the same way from its record alone).
+     It reads only the rollout's Run record (its `run-bound` lines name each call's runId and journal dir) and writes one `call-journal` line per call through `run_record.py`. Record its summary line and every `WARN:` line in the Completion log. A non-zero exit (1: the events directory cannot be resolved or the record cannot be read; 2: usage or a refused slug) is surfaced to the user and the ceremony **continues**: it never halts and never files a follow-on. It is idempotent, so every Retro also runs it first (mid-run, at close, or on a superseded or dropped rollout, which folds the same way from its record alone).
    - **Close the phases this rollout finished (ADR 0026).** Without this step a phase closes only when a lead remembers to. Run it here, before the rollout stamp, never after:
      ```
      python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py touched-phases --rollout <rollout-note>

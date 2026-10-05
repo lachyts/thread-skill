@@ -73,6 +73,15 @@ ok "$(grep -c 'no journal at' "$TMP/err")" 1 "the WARN says no journal"
 ok "$(tail -1 "$TMP/out")" "fold-journals: fold-r: 2 folded, 0 already folded, 0 unchanged, 1 warnings" "summary line"
 ok "$(grep -c '^folded wf_aaa \[\[t1\]\] task status=completed tokens=1234 durationMs=61000 agents=4$' "$TMP/out")" 1 "folded line"
 
+echo "== 1b. mode precedence: the bound call, then the journal's args.mode, then task"
+bind mode-r m1 "{\"runId\":\"wf_mode_j\",\"journalDir\":\"$WF\"}"
+journal wf_mode_j completed 10 integrate
+bind mode-r m2 "{\"runId\":\"wf_mode_c\",\"journalDir\":\"$WF\",\"call\":\"revise\"}"
+journal wf_mode_c completed 20 integrate
+ok "$(fold --rollout mode-r)" 0 "exit 0"
+ok "$(cj mode-r '[(d["runId"], d["mode"]) for d in L]')" "[('wf_mode_j', 'integrate'), ('wf_mode_c', 'revise')]" \
+  "no call: the journal's args.mode wins over task; a bound call wins over the journal's args.mode"
+
 echo "== 2. idempotent"
 before=$(sha "$(rec fold-r)")
 ok "$(fold --rollout fold-r)" 0 "re-run exit 0"
@@ -130,6 +139,21 @@ ok "$(grep -c '^ERROR: Refused' "$TMP/err")" 1 "bad slug ERROR line"
 ok "$(THREAD_EVENTS_DIR=relative/events fold --rollout fold-r)" 1 "relative events dir exit 1"
 ok "$(grep -c '^ERROR: cannot resolve the events directory' "$TMP/err")" 1 "events dir ERROR line"
 
+ok "$(fold --rollout reviews)" 2 "the reserved reviews slug exit 2"
+ok "$(grep -c "^ERROR: Refused: rollout 'reviews' is reserved" "$TMP/err")" 1 "reviews ERROR line"
+ok "$(fold --rollout '[[reviews]]')" 2 "[[reviews]] exit 2 too"
+ok "$(test -e "$(rec reviews)" && echo y || echo n)" n "nothing created for reviews"
+bind unread-r u1 "{\"runId\":\"wf_unread\",\"journalDir\":\"$WF\"}"
+chmod 000 "$(rec unread-r)"
+if cat "$(rec unread-r)" >/dev/null 2>&1; then
+  echo "ok   - (skipped: the unreadable-record check needs a non-root user)"
+else
+  ok "$(fold --rollout unread-r)" 1 "an unreadable record exit 1"
+  ok "$(grep -c '^ERROR: cannot read the run record' "$TMP/err")" 1 "unreadable record ERROR line"
+  ok "$(grep -c 'Traceback' "$TMP/err")" 0 "unreadable record: no traceback"
+fi
+chmod 644 "$(rec unread-r)"
+
 echo "== 8. robustness"
 mkdir -p "$TMP/wf2" "$TMP/outside"
 W2="$TMP/wf2"
@@ -159,6 +183,33 @@ ok "$(grep -c 'Traceback' "$TMP/err")" 0 "no crash"
 ok "$(cj rob-r 'sorted(d["runId"] for d in L)')" "['wf_negtok', 'wf_strtok']" "only the two bad-token journals fold"
 ok "$(cj rob-r '[("tokens" in d, d["durationMs"]) for d in L]')" "[(False, 61000), (False, 61000)]" \
   "a bad totalTokens is dropped, the rest folds"
+
+echo "== 8b. a non-object journal, and a journal with no status: one WARN each, and the fold goes on"
+one_bad() {  # one_bad <rollout> <label> <bad journal text>: the bad runId first, a good one bound after it
+  bind "$1" b1 "{\"runId\":\"wf_${1}_bad\",\"journalDir\":\"$W2\"}"
+  printf '%s' "$3" > "$W2/wf_${1}_bad.json"
+  bind "$1" b2 "{\"runId\":\"wf_${1}_good\",\"journalDir\":\"$W2\"}"
+  journal "wf_${1}_good" completed 3 "" "$W2/wf_${1}_good.json"
+  ok "$(fold --rollout "$1")" 0 "$2: exit 0"
+  ok "$(warns)" 1 "$2: exactly one WARN"
+  ok "$(grep -c "wf_${1}_bad" "$TMP/err")" 1 "$2: the WARN names the bad runId"
+  ok "$(grep -c 'Traceback' "$TMP/err")" 0 "$2: no traceback"
+  ok "$(cj "$1" '[d["runId"] for d in L]')" "['wf_${1}_good']" "$2: the good runId bound after it still folds"
+}
+one_bad arr-r "a JSON array journal" '[1]'
+ok "$(grep -c 'is not a JSON object' "$TMP/err")" 1 "a JSON array journal: the not-an-object WARN"
+one_bad nost-r "a journal with no status" '{"runId": "wf_nost-r_bad", "totalTokens": 1}'
+ok "$(grep -c 'has no status' "$TMP/err")" 1 "a journal with no status: the no-status WARN"
+one_bad empst-r "a journal with an empty status" '{"runId": "wf_empst-r_bad", "status": ""}'
+ok "$(grep -c 'has no status' "$TMP/err")" 1 "a journal with an empty status: the no-status WARN"
+
+echo "== 8c. a journalDir in ~ form expands against HOME"
+mkdir -p "$TMP/home/wf3"
+bind tilde-r t1 '{"runId":"wf_tilde","journalDir":"~/wf3"}'
+journal wf_tilde completed 77 "" "$TMP/home/wf3/wf_tilde.json"
+ok "$(HOME="$TMP/home" fold --rollout tilde-r)" 0 "exit 0"
+ok "$(warns)" 0 "no WARN"
+ok "$(cj tilde-r '[(d["runId"], d["tokens"]) for d in L]')" "[('wf_tilde', 77)]" "the ~/ journalDir folds from \$HOME/wf3"
 
 echo "== 9. a superseded rollout folds into its own file"
 bind old-r t9 "{\"runId\":\"wf_old\",\"journalDir\":\"$WF\"}"

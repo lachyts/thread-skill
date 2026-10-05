@@ -115,9 +115,10 @@ Subcommands:
               runId, no status, or an unparsable record line is one stderr `WARN:` line, and the fold goes
               on. Ends with `fold-journals: <slug>: N folded, M already folded, K unchanged, W warnings`.
               Exit 0 (warnings included; no record file prints `no run record at <path>`), 1 the events
-              directory cannot be resolved, 2 usage or a bad slug.
+              directory cannot be resolved or the record cannot be read, 2 usage, a bad slug or the reserved
+              `reviews`.
 
-  defer     Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
+  defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
               and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:` stamps
               (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
@@ -2383,6 +2384,9 @@ def cmd_fold_journals(args) -> int:
     except rr.Refused as e:
         print(f"ERROR: Refused: {e}", file=sys.stderr)
         return 2
+    if slug == rr.REVIEWS:  # run_record refuses every emit into it: reserved for review rounds
+        print(f"ERROR: Refused: rollout {rr.REVIEWS!r} is reserved for review rounds", file=sys.stderr)
+        return 2
     try:
         path = rr.record_path(slug)
     except ValueError as e:
@@ -2391,7 +2395,11 @@ def cmd_fold_journals(args) -> int:
     if not os.path.exists(path):
         print(f"fold-journals: {slug}: no run record at {path}")
         return 0
-    lines, bad = _record_lines(path)
+    try:
+        lines, bad = _record_lines(path)
+    except OSError as e:
+        print(f"ERROR: cannot read the run record {path}: {e}", file=sys.stderr)
+        return 1
 
     bound = {}  # runId -> the latest run-bound line for it, in first-appearance order
     for d in lines:
