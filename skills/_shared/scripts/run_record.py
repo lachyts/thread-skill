@@ -20,10 +20,13 @@ Directory: ${THREAD_EVENTS_DIR:-${XDG_STATE_HOME:-~/.local/state}/thread/events}
 as unset; `~` expands in the override. A relative override is a warned write failure (nothing written); a
 relative XDG_STATE_HOME is ignored, as the XDG spec says. A dangling symlink is a warned failure, never a
 fall back to another directory. Every writer resolves this chain itself: hooks, Codex and launchd export no
-override, so the default path is the shared meeting point. On Lachy's machine ~/.local/state/thread/events
-is a symlink to _shared/state/thread-events/ so the record is backed up (an operator step; nothing here
-creates it). THREAD_EVENTS_DIR is for tests and non-default setups. `dir` prints the resolved directory, so
-any writer can confirm it lands in the same place.
+override, so the default path is the shared meeting point. Pending operator step, a precondition of p15-2
+(whose emitters are the first real writers): on Lachy's machine ~/.local/state/thread/events must be made a
+symlink to _shared/state/thread-events/ so the record is backed up. Neither path exists yet (2026-10-05) and
+nothing here creates the link; if p15-2 lands first, the first emit's os.makedirs creates a real directory
+there and the record stays out of the backup until someone migrates it by hand. THREAD_EVENTS_DIR is for
+tests and non-default setups. `dir` prints the resolved directory, so any writer can confirm it lands in
+the same place.
 
 Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl (`reviews` is reserved
 and refused as a rollout slug).
@@ -38,8 +41,11 @@ with its newline. The common keys come first, in this order:
 
     v        1
     ts       UTC, millisecond precision, `Z` suffix: 2026-10-03T22:23:00.000Z. The writer stamps it; an
-             explicit --ts / ts= must carry an offset or Z and is converted to UTC; a naive one is refused.
-             Any other timestamp-valued field a caller adds must be UTC `Z` too.
+             explicit --ts / ts= is converted to UTC and must match, on every python version,
+             YYYY-MM-DD(T| )HH:MM[:SS[(.|,)fraction]] then Z, +HH, +HHMM or +HH:MM (a naive one is
+             refused; the fraction is cut to microseconds). So `date +%Y-%m-%dT%H:%M:%S%z` works.
+             Any other ISO timestamp field a caller adds must be UTC `Z` too; call-journal's
+             startTime is the one epoch field (the journal's own epoch-ms integer, verbatim).
     host     the hostname up to its first dot
     rollout  the rollout slug (null only for review-round)
     task     the task slug, or null
@@ -51,8 +57,8 @@ with a common key is refused.
 Kinds (T: a task is required; `?` marks an optional field; every enum is closed):
 
   slot-taken      T  settings{parallel_ceiling (int >= 1), max_review_rounds?, max_iterations?,
-                     max_plan_rounds? (ints >= 1), rung? (str)}, the effective values after per-task
-                     overrides; start? (start | restart | revise | hand-back | resume); carriedFrom? (slug)
+                     max_plan_rounds? (ints >= 1), rung? (str)} (the effective values after per-task
+                     overrides); start? (start | restart | revise | hand-back | resume); carriedFrom? (slug)
   run-bound       T  runId, journalDir; call? (task | revise | integrate | resume); resumedFrom?
   slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed)
   ready           T  pr? (url or number)
@@ -69,7 +75,7 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      hold-merge | hold-git-env | hold-race); free (int >= 0); settings (as slot-taken)
   quota-stall        stage?; detail?
   call-journal       runId; status (the journal's own status, verbatim); mode?; tokens?, durationMs?,
-                     agents? (ints >= 0); startTime?
+                     agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
                      (ints >= 0); verdict?. No rollout, no task; lands in reviews.jsonl.
   carried         T  from (the old rollout's slug), to (set to the new rollout). Appended to both
@@ -107,7 +113,7 @@ sync filesystems). Any failure to write (a short write, an OSError, anything une
 
 Exit codes: 0 written, skipped as a duplicate fold, or a warned write failure; 2 refused (an unknown kind,
 a missing or out-of-enum field, a task-scoped kind with no task, --json not a JSON object, a common-key
-collision, NaN, a bad slug, a naive --ts, a line over 16 KiB), with one line starting `run_record: ` on
+collision, NaN, a bad slug, a naive or malformed --ts, a line over 16 KiB), with one line starting `run_record: ` on
 stderr and nothing written; `dir` exits 1 when the directory cannot be resolved.
 """
 from __future__ import annotations
@@ -132,6 +138,9 @@ LOCK_WAIT = 5.0
 COMMON = ("v", "ts", "host", "rollout", "task", "kind")
 REVIEWS = "reviews"
 SLUG_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
+# One accepted --ts shape on every python (fromisoformat widened in 3.11): date, time, fraction, offset.
+STAMP_RE = re.compile(r"(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d)(?::(\d\d)(?:[.,](\d+))?)?"
+                      r"(?:([Zz])|([+-])(\d\d)(?::?(\d\d))?)?", re.ASCII)
 LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]")
 TERMINAL_STATUSES = frozenset({"completed", "failed", "killed", "stopped", "cancelled"})
 
@@ -211,7 +220,8 @@ KINDS = {
                            "free": _int(0), "settings": SETTINGS}, {}),
     "quota-stall": (False, {}, {"stage": _str, "detail": _str}),
     "call-journal": (False, {"runId": _str, "status": _str},
-                     {"mode": _str, "tokens": _int(0), "durationMs": _int(0), "agents": _int(0), "startTime": _str}),
+                     {"mode": _str, "tokens": _int(0), "durationMs": _int(0), "agents": _int(0),
+                      "startTime": _int(0)}),
     "review-round": (False, {"repo": _str, "head": _str, "digest": _str},
                      {"doc": _str, "mode": _str, "effort": _str, "findings": _int(0), "original": _int(0),
                       "regression": _int(0), "verdict": _str}),
@@ -287,15 +297,18 @@ def _stamp(ts):
     else:
         if not isinstance(ts, str):
             raise Refused("ts must be a string")
-        raw = ts.strip()
-        if raw[-1:] in ("Z", "z"):
-            raw = raw[:-1] + "+00:00"
-        try:
-            t = datetime.datetime.fromisoformat(raw)
-        except ValueError:
-            raise Refused("ts %r is not an ISO 8601 stamp" % ts)
-        if t.tzinfo is None or t.utcoffset() is None:
+        m = STAMP_RE.fullmatch(ts.strip())
+        if not m:
+            raise Refused("ts %r is not an ISO 8601 stamp (YYYY-MM-DDTHH:MM[:SS[.fff]] with Z or an offset)" % ts)
+        date, hm, sec, frac, zulu, sign, oh, om = m.groups()
+        if not zulu and not sign:
             raise Refused("ts %r has no offset or Z" % ts)
+        offset = "+00:00" if zulu else "%s%s:%s" % (sign, oh, om or "00")
+        canon = "%sT%s:%s.%s%s" % (date, hm, sec or "00", (frac or "")[:6].ljust(6, "0"), offset)
+        try:  # the canonical form parses the same on 3.8 and 3.11+
+            t = datetime.datetime.fromisoformat(canon)
+        except ValueError as e:
+            raise Refused("ts %r is not a valid time: %s" % (ts, e))
         t = t.astimezone(datetime.timezone.utc)
     return t.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (t.microsecond // 1000)
 

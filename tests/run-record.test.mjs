@@ -134,6 +134,21 @@ test('--ts with an offset converts to UTC; a Z stamp passes through; a naive sta
   assert.equal(lines(f).length, 2)
 })
 
+// One accepted shape on every python: 3.9's fromisoformat refuses both of these, 3.11's takes them.
+test('--ts takes a +HHMM offset (date %z) and a short fraction; a malformed stamp is refused', (t) => {
+  const home = tmpHome(t)
+  const f = path.join(ev(home), 'r.jsonl')
+  emitOk(home, ['--rollout', 'r', '--kind', 'resumed', '--ts', '2026-10-04T09:23:00+1100'], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--kind', 'resumed', '--ts', '2026-10-04T09:23:00.12Z'], { env: EV(home) })
+  assert.deepEqual(lines(f).map((l) => l.ts), ['2026-10-03T22:23:00.000Z', '2026-10-04T09:23:00.120Z'])
+  for (const bad of ['20261004T092300Z', '2026-10-04T25:00:00Z', 'yesterday']) {
+    const r = cli(home, ['emit', '--rollout', 'r', '--kind', 'resumed', '--ts', bad], { env: EV(home) })
+    assert.equal(r.status, 2, bad)
+    assert.match(r.stderr, /^run_record: refused: .*\n$/, bad)
+  }
+  assert.equal(lines(f).length, 2)
+})
+
 test('a DST-straddling pair (16:16+10:00 to 09:23+11:00) is 16 h 07 min apart', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--kind', 'resumed', '--ts', '2026-10-03T16:16:00+10:00'], { env: EV(home) })
@@ -156,6 +171,7 @@ const REFUSALS = [
   ['a common-key collision', ['--rollout', 'r', '--kind', 'resumed', '--json', '{"ts":"2026-10-04T00:00:00Z"}']],
   ['a NaN value', ['--rollout', 'r', '--kind', 'resumed', '--json', '{"x":NaN}']],
   ['call-journal without status', ['--rollout', 'r', '--kind', 'call-journal', '--json', '{"runId":"w1"}']],
+  ['call-journal with startTime as a string (it is the journal\'s epoch-ms integer)', ['--rollout', 'r', '--kind', 'call-journal', '--json', '{"runId":"w1","status":"running","startTime":"2026-10-04T09:23:00+11:00"}']],
   ['a traversal rollout slug', ['--rollout', '../x', '--kind', 'resumed']],
   ['a rollout slug with a slash', ['--rollout', 'a/b', '--kind', 'resumed']],
   ['an empty rollout slug', ['--rollout', '', '--kind', 'resumed']],
@@ -250,8 +266,9 @@ for i in range(300):
 test('8 concurrent call-journal folders over overlapping runIds leave one line per runId', async (t) => {
   const home = tmpHome(t)
   const env = baseEnv(home, EV(home))
-  // Every worker spins to a shared start instant, then folds the same runIds in the same order, so the scans
-  // race head to head; without the flock this leaves duplicate lines (checked by hand against an unlocked copy).
+  // A stress check: every worker spins to a shared start instant, then folds the same runIds in the same
+  // order, so the scans race head to head. It catches an unlocked fold only some of the time; the next test
+  // is the deterministic check that the fold waits for the lock.
   const worker = `${LOAD}
 import time
 start = float(sys.argv[2])
@@ -266,6 +283,56 @@ for i in range(40):
   const all = lines(path.join(ev(home), 'fold.jsonl'))
   assert.equal(all.length, 40)
   assert.equal(new Set(all.map((l) => l.runId)).size, 40)
+})
+
+// A holder takes the flock; a fold of runId X starts and reaches the lock (its retry sleep is the signal; an
+// unlocked fold never sleeps, so it finishes first and writes its line); the holder then appends a terminal X
+// line and releases. A fold that waited for the lock re-scans, finds the terminal line and skips: 1 line.
+test('a call-journal fold waits for the flock, then scans: a terminal line written meanwhile wins', async (t) => {
+  const home = tmpHome(t)
+  const f = path.join(ev(home), 'r.jsonl')
+  fs.mkdirSync(ev(home))
+  fs.writeFileSync(f, '')
+  const terminal = JSON.stringify({ v: 1, ts: '2026-10-04T00:00:00.000Z', host: 'h', rollout: 'r', task: null, kind: 'call-journal', runId: 'X', status: 'completed' })
+  const holder = spawn('python3', ['-B', '-c', [
+    'import fcntl, sys',
+    'fd = open(sys.argv[1], "a")',
+    'fcntl.flock(fd, fcntl.LOCK_EX)',
+    'print("held", flush=True)',
+    'sys.stdin.readline()',
+    'fd.write(sys.argv[2] + "\\n"); fd.flush()',
+    'fcntl.flock(fd, fcntl.LOCK_UN)',
+  ].join('\n'), f, terminal], { env: baseEnv(home), stdio: ['pipe', 'pipe', 'inherit'] })
+  t.after(() => holder.kill())
+  const holderDone = new Promise((resolve) => holder.on('close', resolve))
+  await new Promise((resolve) => holder.stdout.once('data', resolve))
+  const folder = spawn('python3', ['-B', '-c', `${LOAD}
+real = m.time.sleep
+said = []
+def sleep(s):
+    if not said:
+        said.append(1)
+        print("waiting", flush=True)
+    real(s)
+m.time.sleep = sleep
+print(json.dumps(m.emit("r", "call-journal", fields={"runId": "X", "status": "running", "tokens": 1}, strict=True)))`, SCRIPT],
+  { env: baseEnv(home, EV(home)), cwd: home, stdio: ['ignore', 'pipe', 'pipe'] })
+  t.after(() => folder.kill())
+  let out = ''
+  let err = ''
+  folder.stderr.on('data', (d) => { err += d })
+  const folderDone = new Promise((resolve) => folder.on('close', resolve))
+  // Release the holder once the fold is waiting on the lock, or once it has finished without waiting.
+  await Promise.race([new Promise((resolve) => folder.stdout.on('data', (d) => { out += d; if (out.includes('waiting')) resolve() })), folderDone])
+  holder.stdin.end('go\n')
+  await holderDone
+  const code = await folderDone
+  assert.equal(code, 0, err)
+  assert.equal(err, '')
+  assert.match(out, /^waiting\ntrue\n$/, 'the fold waited on the lock, then returned True (skipped)')
+  const all = lines(f)
+  assert.equal(all.length, 1, 'only the holder\'s terminal line: the fold saw it after taking the lock')
+  assert.equal(all[0].status, 'completed')
 })
 
 // ---- 6. shape ------------------------------------------------------------------------------------------------
@@ -357,6 +424,13 @@ for raw in open(sys.argv[2]):
 print(json.dumps({k: [v["status"], v["tokens"]] for k, v in latest.items()}))`, { args: [f] })
   assert.equal(r.status, 0, r.stderr)
   assert.deepEqual(JSON.parse(r.stdout), { w1: ['completed', 900], w2: ['killed', 7], w3: ['completed', 2] })
+})
+
+test('call-journal takes startTime as the journal\'s epoch-ms integer, verbatim', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'call-journal', '--json', '{"runId":"w1","status":"running","startTime":1788422612019}'], { env: EV(home) })
+  const [l] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.equal(l.startTime, 1788422612019)
 })
 
 test('a call-journal fold whose lock stays busy past 5 s warns, exits 0 and writes nothing', (t) => {
@@ -474,17 +548,42 @@ print(json.dumps([ok, d, h, p, m.normalise_slug("[[Foo|bar]]")]))`, { env: EV(ho
 
 // ---- 11. the header and KINDS agree ----------------------------------------------------------------------------
 
-test('the docstring catalogue names exactly KINDS, and every terminal status', (t) => {
-  const home = tmpHome(t)
-  const r = api(home, 'print(json.dumps({"doc": m.__doc__, "kinds": sorted(m.KINDS), "terminal": sorted(m.TERMINAL_STATUSES)}))')
-  assert.equal(r.status, 0, r.stderr)
-  const { doc, kinds, terminal } = JSON.parse(r.stdout)
+// Each catalogue entry is `kind [T] fields`, continued on deeper-indented lines. Its field list is what is left
+// once the (parenthesised) notes and {nested} settings keys are stripped, up to the first full stop (prose
+// follows it), split on , and ; with a trailing ? marking an optional field.
+function catalogue(doc) {
   const docLines = doc.split('\n')
   const start = docLines.findIndex((l) => l.startsWith('Kinds'))
   assert.ok(start >= 0, 'a Kinds section')
   const end = docLines.findIndex((l, i) => i > start && /^\S/.test(l))
-  const named = docLines.slice(start + 1, end < 0 ? undefined : end).map((l) => /^ {2}([a-z][a-z-]*) {2,}/.exec(l)?.[1]).filter(Boolean)
-  assert.deepEqual([...named].sort(), kinds, 'the catalogue lists every kind once, and no other')
+  const entries = []
+  for (const l of docLines.slice(start + 1, end < 0 ? undefined : end)) {
+    const m = /^ {2}([a-z][a-z-]*) +(?:(T) +)?(.*)$/.exec(l)
+    if (m) entries.push({ kind: m[1], task: m[2] === 'T', text: m[3] })
+    else if (l.trim() && entries.length) entries.at(-1).text += ` ${l.trim()}`
+  }
+  return entries.map(({ kind, task, text }) => {
+    let s = text
+    while (/\([^()]*\)/.test(s)) s = s.replace(/\([^()]*\)/g, '')
+    s = s.replace(/\{[^{}]*\}/g, '').split('.')[0]
+    const names = s.split(/[,;]/).map((x) => x.trim()).filter(Boolean)
+    for (const n of names) assert.match(n, /^[A-Za-z]+\??$/, `${kind}: catalogue field ${JSON.stringify(n)} parses as a name`)
+    const req = names.filter((n) => !n.endsWith('?')).sort()
+    const opt = names.filter((n) => n.endsWith('?')).map((n) => n.slice(0, -1)).sort()
+    return [kind, [task, req, opt]]
+  })
+}
+
+test('the docstring catalogue matches KINDS: kinds, the task flag, required and optional fields', (t) => {
+  const home = tmpHome(t)
+  const r = api(home, `print(json.dumps({"doc": m.__doc__, "terminal": sorted(m.TERMINAL_STATUSES),
+    "kinds": {k: [t, sorted(req), sorted(opt)] for k, (t, req, opt) in m.KINDS.items()}}))`)
+  assert.equal(r.status, 0, r.stderr)
+  const { doc, kinds: spec, terminal } = JSON.parse(r.stdout)
+  const kinds = Object.keys(spec).sort()
+  const entries = catalogue(doc)
+  assert.deepEqual(entries.map(([k]) => k).sort(), kinds, 'the catalogue lists every kind once, and no other')
+  for (const [kind, fields] of entries) assert.deepEqual(fields, spec[kind], `${kind}: [task required, required, optional]`)
   assert.ok(!kinds.includes('ceiling-changed'))
   for (const s of terminal) assert.ok(doc.includes(s), `terminal status ${s} in the docstring`)
   assert.match(doc, /Mirror contract \(p15-7\)/)
@@ -516,7 +615,11 @@ test('one real emit under the system python', { skip: sysPySkip() }, (t) => {
   assert.equal(r.stderr, '')
   const fold = { runId: 'w1', status: 'completed' }
   assert.equal(cli(home, ['emit', '--rollout', 'r', '--kind', 'call-journal', '--json', JSON.stringify(fold)], { env: EV(home), py: SYS_PY }).status, 0)
+  for (const ts of ['2026-10-04T09:23:00+1100', '2026-10-04T09:23:00.12Z']) {
+    const s = cli(home, ['emit', '--rollout', 'r', '--kind', 'resumed', '--ts', ts], { env: EV(home), py: SYS_PY })
+    assert.equal(s.status, 0, `${ts}: ${s.stderr}`)
+  }
   const all = lines(path.join(ev(home), 'r.jsonl'))
-  assert.equal(all.length, 2)
-  assert.equal(all[0].ts, '2026-10-04T09:23:00.000Z')
+  assert.equal(all.length, 4)
+  assert.deepEqual(all.map((l) => l.ts).filter((x, i) => i !== 1), ['2026-10-04T09:23:00.000Z', '2026-10-03T22:23:00.000Z', '2026-10-04T09:23:00.120Z'])
 })
