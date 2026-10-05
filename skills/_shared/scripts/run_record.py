@@ -96,8 +96,9 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   is the same pause; a resumed with no pause is ignored. A `carried` line in the from-file (its `rollout`
   equals its `from`) closes that task's Slot, lane and holds there. Anything still open at the record's last
   line ends there and is flagged.
-- slot-freed outcome: ready (approved with a PR), set-aside, completed (a read-only approval), lost (a dead
-  call's lead-written row), stopped (a hard pause, a defer or a carry ended it); `failed` is reserved.
+- slot-freed outcome: ready (approved with a PR), set-aside, completed (a read-only approval, or an
+  in_progress note whose PR `resume` found merged), lost (a dead call's lead-written row), stopped (a hard
+  pause, a defer or a carry ended it); `failed` is reserved.
 - slot-taken start: start, restart (a stalled note restarted), revise (a seeded revise), hand-back (the
   restart after a hand-back, an approve-gates sign-off or a descope), resume (a Lost-call or signed-gate
   resume).

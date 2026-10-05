@@ -251,9 +251,12 @@ Subcommands:
 
 Run record (p15-2, ADR 0032): each verb records its own Slot and lane transitions through run_record.py's
 emit (one helper, _event), best-effort: a refusal or a write failure prints one `run_record:` line on stderr
-and never changes the verb's exit, stdout or vault writes. Nothing is recorded on --dry-run, by a refusal, by
-a re-run that writes nothing new, or for a note with no `rollout:` (the rollout slug is the task note's
-`rollout:`, read before any write; `next`, `record-pause` and `clear-pause` use the rollout path's stem). A
+and never changes the verb's exit, stdout or vault writes. Nothing is recorded on --dry-run, by a refusal, or
+for a note with no `rollout:` (the rollout slug is the task note's `rollout:`, read before any write; `next`,
+`record-pause` and `clear-pause` use the rollout path's stem). Most re-runs that write nothing new record
+nothing, but not all: mark-integrating records `lane-taken` on every successful call and a re-run of
+mark-started records `slot-taken` again; run_record.py's reader rules absorb those repeats (the same holding,
+the same Slot keeping its first `start`). A
 note holds the lane (_holds_lane) when it reads `review` with a `pr:` and either carries `integrating:` or its
 `## Integration log`'s last line is `integrated` with a startedAt at or after `ready:` (the window between an
 integrate call's reconciled `integrated` row and the merge; a hand-back restamps `ready:`). The events:
@@ -269,16 +272,19 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
   mark-done         (a note not already done) hold-ended race / merge for each the record shows open; then,
                     when it held the lane, lane-freed release=merge with path, triggers and conflict from
                     the Integration log's last line; then merged pr=.
-  resume            the same events as mark-done, for each note it flips done.
+  resume            the same events as mark-done, for each note it flips done; a note that read `in_progress`
+                    first records slot-freed outcome=completed (its PR merged, so its Slot ends there).
   reconcile         per row, against the note's status and _holds_lane before the row's writes: slot-freed
                     when it was in_progress and the row is not an integrate row (outcome ready, completed,
                     lost for a lead row whose reason starts `workflow call failed:`, else set-aside); ready
                     pr= when `ready:` is stamped; merged readOnly=true for a read-only approval; when it
                     held the lane and the row is not an `integrated` integrate row, a merge-hold close and
                     lane-freed (reject for a `rejected` integrate row, else set-aside; path, triggers and
-                    conflict from the integrate row); set-aside {stage, reasonClass, setAsideAt} when the row
-                    sets a slot or lane holder aside (never a rejected integrate row: its seeded revise is
-                    not a set-aside); quota-stall {stage, detail} for a `workflow call failed:` lead row
+                    conflict from the integrate row, or for a lead row, which carries no integration, from the
+                    Integration log's last line read before the row); set-aside {stage, reasonClass,
+                    setAsideAt} when the row sets a slot or lane holder aside (never a rejected integrate row
+                    that leaves the note `blocked`: its seeded revise follows, so it is not a set-aside; a
+                    rejected row that ends review-blocked is one); quota-stall {stage, detail} for a `workflow call failed:` lead row
                     whose error line reads as a usage or rate limit (QUOTA_RE).
   hand-back         the Integration arm records ready pr=; the run arm stamps `handed_back:`.
   approve-gates     the Integration arm records ready pr=.
@@ -1785,6 +1791,7 @@ def cmd_reconcile(args) -> int:
         pr = (task.get("prUrl") or "").strip()
         # The Run record reads the note as it was before this row (p15-2): its status, whether it held the lane.
         prior, held, rollout = _status(note), _holds_lane(note), _note_rollout(note)
+        lane_fields = _lane_fields_from_log(note) if held else {}
         ready_stamped = False
         # A read-only task is done when its review approves: nothing to merge, so it never enters
         # Integration (ADR 0030). The row's scope wins; the note's own is the fallback.
@@ -1899,7 +1906,8 @@ def cmd_reconcile(args) -> int:
                           f"{APPROVED_PLAN_SECTION} left untouched")
 
         note.save(dry_run=args.dry_run)
-        _reconcile_events(args, rollout, slug, task, note, prior, held, note_status, _pr(note), ready_stamped)
+        _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, _pr(note),
+                          ready_stamped)
         flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
         ro = " (read-only, approved)" if note_status != status else ""
         print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{_rung_note(task)}{legacy_note}{flag}")
@@ -2390,7 +2398,7 @@ def cmd_resume(args) -> int:
                 note.set("merged", _stamp(merged_at))
         note.remove("integrating")
         note.save(dry_run=args.dry_run)
-        _landed_events(_note_rollout(note), slug, lane_held, lane_fields, pr, args)
+        _landed_events(_note_rollout(note), slug, lane_held, lane_fields, pr, args, running=status == "in_progress")
         print(f"{slug}: status={status or 'none'}->done (PR {ref} merged into {default})" + _flag(args, note))
     print(_progress_for(rollout_path, tasks_dir, now))
     for line in held:
@@ -2820,11 +2828,14 @@ def _close_holds(rollout, slug, holds, args, state):
             _event(rollout, "hold-ended", slug, {"hold": hold}, args)
 
 
-def _landed_events(rollout, slug, held, lane_fields, pr, args):
-    """A landing's events (mark-done, resume): open race and merge holds end, the lane frees on the merge when the
-    note held it, then merged."""
+def _landed_events(rollout, slug, held, lane_fields, pr, args, running=False):
+    """A landing's events (mark-done, resume): slot-freed outcome=completed when the note read `in_progress`
+    (`running`: resume found its PR merged, so its Slot ends at the landing), open race and merge holds end, the
+    lane frees on the merge when the note held it, then merged."""
     if not rollout or getattr(args, "dry_run", False):
         return
+    if running:
+        _event(rollout, "slot-freed", slug, {"outcome": "completed"}, args)
     _close_holds(rollout, slug, ("race", "merge"), args, _record_state(rollout))
     if held:
         _event(rollout, "lane-freed", slug, {"release": "merge", **lane_fields}, args)
@@ -3004,8 +3015,9 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr) -> 
     return "blocked"
 
 
-def _reconcile_events(args, rollout, slug, task, note, prior, held, note_status, pr, ready_stamped):
-    """One row's events, against the note's status (`prior`) and _holds_lane (`held`) read before its writes."""
+def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, pr, ready_stamped):
+    """One row's events, against the note's status (`prior`), _holds_lane (`held`) and the Integration log's lane
+    fields (`lane_fields`, for a lead row, which carries no `integration`) read before its writes."""
     if args.dry_run or not rollout:
         return
     integ = task.get("integration") if isinstance(task.get("integration"), dict) else None
@@ -3032,11 +3044,13 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, note_status,
     rejected = integ is not None and outcome == "rejected"
     if held and not (integ is not None and outcome == "integrated"):
         fields = {"release": "reject" if rejected else "set-aside"}
-        if integ is not None:
-            fields.update(_lane_fields_from_row(integ))
+        fields.update(_lane_fields_from_row(integ) if integ is not None else lane_fields)
         _close_holds(rollout, slug, ("merge",), args, _record_state(rollout))
         _event(rollout, "lane-freed", slug, fields, args)
-    if (prior == "in_progress" or held) and state_after == "set-aside" and not rejected:
+    # A rejected row that leaves the note `blocked` is followed by its seeded revise, so it is no set-aside; one
+    # that ends review-blocked (its last review round used) is.
+    revise_follows = rejected and note_status == "blocked"
+    if (prior == "in_progress" or held) and state_after == "set-aside" and not revise_follows:
         stage = _set_aside_stage(note_status, integ, lead, prior, failed, diag, pr)
         _event(rollout, "set-aside", slug, {
             "stage": stage, "reasonClass": _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr),
