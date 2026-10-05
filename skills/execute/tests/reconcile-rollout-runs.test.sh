@@ -12,6 +12,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 D="$(mktemp -d)"
 trap 'rm -rf "$D"' EXIT
+# An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
+# call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
+EH="$D/.settings-home"; mkdir -p "$EH"
 export THREAD_EVENTS_DIR="$D/events"  # the Run record (run_record.py, ADR 0032) stays in temp
 NOW=2026-10-02T14:05:00Z
 
@@ -91,14 +94,14 @@ res aba blocked "blockerDiagnosis=\"$A\""; rec >/dev/null
 res aba blocked 'blockerDiagnosis="verifier red: flaky"'; rec >/dev/null
 res aba blocked "blockerDiagnosis=\"$A\""; rec >/dev/null
 ok "$(cnt aba '### Run 3 (')|$(runblock aba 3 | sed -n 3p)" "1|$A" "Run 3 equals A"
-J=$(python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW")
+J=$(HOME="$EH" python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW")
 ok "$(printf '%s' "$J" | python3 -c 'import json,sys; t=[t for t in json.load(sys.stdin)["tasks"] if t["slug"]=="aba"][0]; print(t["setAsideAt"], "|", t["blockerSummary"])')" \
   "integration | $A" "status: setAsideAt integration, blockerSummary is the latest run"
-J=$(python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" --dry-run)
+J=$(HOME="$EH" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW" --dry-run)
 ok "$(printf '%s' "$J" | python3 -c 'import json,sys; print([s["setAsideAt"] for s in json.load(sys.stdin)["setAside"] if s["slug"]=="aba"])')" \
   "['integration']" "next: setAsideAt integration"
 res aba blocked 'blockerDiagnosis="verifier red: flaky"'; rec >/dev/null
-J=$(python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW")
+J=$(HOME="$EH" python3 "$SCRIPT" status --rollout "$D/ro.md" --tasks-dir "$D" --now "$NOW")
 ok "$(printf '%s' "$J" | python3 -c 'import json,sys; print([t["setAsideAt"] for t in json.load(sys.stdin)["tasks"] if t["slug"]=="aba"][0])')" \
   "run" "status: a later ordinary run reads as set aside at run"
 

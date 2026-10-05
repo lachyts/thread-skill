@@ -423,6 +423,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   repo's Parallel ceiling, a round cap), applied only once Lachy picks it,
   and read by the next schedule. A rule that three Retros agree on may later
   become an automatic adjustment, by ADR. _Avoid_: tweak, auto-tune.
+- **Rollout settings** — the operator's `~/.config/thread/rollouts.toml`,
+  `ladder.toml`'s sibling: `[defaults]`, the `[guardrails]` bounds and
+  per-repo `[repo."owner/name"]` tables (keyed by the GitHub origin),
+  resolved by `rollout-settings.py` and stamped into each rollout note by
+  schedule. _Avoid_: hardcoded defaults, config.
 
 ## Model ladder
 

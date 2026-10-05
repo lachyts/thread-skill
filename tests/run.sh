@@ -30,6 +30,14 @@ export PYTHONUSERBASE=${py_info#*$'\n'}
 export PATH="$(dirname "$node_bin"):$(dirname "$py_bin"):$PATH"
 
 export HOME="$scratch/home"; mkdir -p "$HOME"
+# A refused operator rollouts.toml (p15-4) in the scratch HOME: reconcile-rollout.py resolves an absent
+# `parallel_ceiling` through rollout-settings.py, which reads ~/.config/thread/rollouts.toml. Every suite pins
+# HOME (an empty dir of its own) on each call that reaches the resolver, so this file is never read by a
+# passing run; a missed site fails loudly (`next` exits 1, status's ceiling goes null) instead of silently
+# reading whatever the scratch HOME holds.
+mkdir -p "$HOME/.config/thread"
+printf '%s\n' '# Seeded by tests/run.sh and refused on purpose: a suite that reaches rollout-settings.py must pin HOME.' \
+  '[defaults]' 'parallel_ceiling = 0' > "$HOME/.config/thread/rollouts.toml"
 # The Run record (run_record.py, ADR 0032) lands in temp too, whatever the caller exported; each engine-driving
 # suite also sets its own (tests/contracts/run-record-hermetic.test.mjs), so this is the backstop.
 export THREAD_EVENTS_DIR="$scratch/events"; unset XDG_STATE_HOME

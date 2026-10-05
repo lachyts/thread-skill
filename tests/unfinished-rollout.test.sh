@@ -30,6 +30,9 @@ TPL="$root/skills/schedule/rollout-template.md"
 TMP=$(mktemp -d) || { echo 'FAIL - mktemp'; exit 1; }
 TMP=$(cd "$TMP" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT
+# An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
+# call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
+EH="$TMP/settings-home"; mkdir -p "$EH"
 export THREAD_EVENTS_DIR="$TMP/events"  # the Run record (run_record.py, ADR 0032) stays in temp
 
 hasnt() { case "$1" in *"$2"*) ok n y "$3";; *) ok y y "$3";; esac; }
@@ -94,6 +97,7 @@ render() {
 import sys
 tpl, out, repo, prior, rows = sys.argv[1:]
 vals = {
+    "MAX_ITERATIONS": "3", "MAX_REVIEW_ROUNDS": "4", "MAX_PLAN_ROUNDS": "3", "PARALLEL_CEILING": "4",
     "PROJECT_NAME": "Demo", "DATE": "2026-10-01", "VERIFIER": "make test", "REPO_PATH": repo,
     "ROLLOUT_SLUG": out.rsplit("/", 1)[1][:-3], "THREAD_LINE": "",
     "QUEUE_TABLE": "| # | Task | Scope | Mode |\n|---|---|---|---|\n" + rows,
@@ -110,9 +114,9 @@ PY
 }
 row() { printf '| %s | [[%s\\|%s]] | single-file | %s |' "$1" "$2" "$2" "$3"; }   # row <n> <slug> <mode>
 # nx <rollout slug> -> $out, $err, $rc — reconcile-rollout.py next --dry-run (the queue's start call)
-nx() { python3 "$RR" next --rollout "$T/$1.md" --tasks-dir "$T" --dry-run > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
+nx() { HOME="$EH" python3 "$RR" next --rollout "$T/$1.md" --tasks-dir "$T" --dry-run > "$S.out" 2> "$S.err"; rc=$?; out=$(cat "$S.out"); err=$(cat "$S.err"); }
 # inc <rollout slug> — status's `incomplete` field
-inc() { python3 "$RR" status --rollout "$T/$1.md" --tasks-dir "$T" | python3 -c 'import json,sys; print(json.load(sys.stdin)["incomplete"])'; }
+inc() { HOME="$EH" python3 "$RR" status --rollout "$T/$1.md" --tasks-dir "$T" | python3 -c 'import json,sys; print(json.load(sys.stdin)["incomplete"])'; }
 sums() { (cd "$T" && find . -name '*.md' -type f | LC_ALL=C sort | while read -r f; do printf '%s %s\n' "$f" "$(cksum < "$f")"; done); }
 # step7end <rollout slug> — schedule step 7's last write: the `incomplete: true` the note was born with (step 6) removed
 step7end() { fmset "$1.md" incomplete -; }
@@ -674,7 +678,7 @@ pr() { printf '{"state":"%s","mergedAt":%s,"baseRefName":"main","url":"%s"}\n' "
 echo main > "$S/gh/default-demo_repo"
 pr "$U/2" OPEN null; pr "$U/3" MERGED '"2026-09-30T08:15:00Z"'; pr "$U/9" OPEN null
 bb=$(sum1 b.md); ii=$(sum1 i.md)
-python3 "$RR" resume --rollout "$T/$P.md" --tasks-dir "$T" --gh-bin "$S/bin/gh" > "$S.out" 2> "$S.err"; rc=$?
+HOME="$EH" python3 "$RR" resume --rollout "$T/$P.md" --tasks-dir "$T" --gh-bin "$S/bin/gh" > "$S.out" 2> "$S.err"; rc=$?
 ok "$rc" 0 "M3: resume on the prior rollout exits 0"
 ok "$(fm c.md status)|$(fm c.md merged)" "status: done|merged: 2026-09-30T08:15+00:00" "M3: the review task whose PR merged is flipped done, merged: from mergedAt"
 ok "$(sum1 b.md)|$(sum1 i.md)" "$bb|$ii" "M3: the open-PR review tasks are unchanged"
@@ -736,12 +740,12 @@ has "$err" "ERROR: $N is incomplete: its supersedes: names [[$P]], still unfinis
 has "$err" "step 7.5" "M8: … naming the close-out that ends it"
 hasnt "$err" "died" "M8: … and no cause it cannot know"
 ln -s "$S/vault" "$S/vlink"
-python3 "$RR" next --rollout "$S/vlink/Work/Tasks/$N.md" --tasks-dir "$T" --dry-run > "$S.out" 2> "$S.err"; rc=$?
+HOME="$EH" python3 "$RR" next --rollout "$S/vlink/Work/Tasks/$N.md" --tasks-dir "$T" --dry-run > "$S.out" 2> "$S.err"; rc=$?
 ok "$rc" 1 "M8: … also when --rollout reaches N through a symlinked vault path"
-python3 "$RR" next --rollout "$T/$N.md" --tasks-dir "$S/vlink/Work/Tasks" --dry-run > "$S.out" 2> "$S.err"; rc=$?
+HOME="$EH" python3 "$RR" next --rollout "$T/$N.md" --tasks-dir "$S/vlink/Work/Tasks" --dry-run > "$S.out" 2> "$S.err"; rc=$?
 ok "$rc" 1 "M8: … or --tasks-dir does"
 
-st() { python3 "$RR" status --rollout "$T/$1.md" --tasks-dir "$T" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(" ".join(t["slug"] + "=" + t["queueState"] for t in sorted(d["tasks"], key=lambda t: t["slug"])))'; }
+st() { HOME="$EH" python3 "$RR" status --rollout "$T/$1.md" --tasks-dir "$T" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(" ".join(t["slug"] + "=" + t["queueState"] for t in sorted(d["tasks"], key=lambda t: t["slug"])))'; }
 ok "$(st $N)" "b=awaiting-integration d=queued e=running f=set-aside i=awaiting-integration" "M9: status on N reads the carried queue"
 ok "$(st $P)" "a=merged c=merged g=folded h=other" "M9: status on P keeps the landed, folded and other tasks"
 
@@ -758,7 +762,7 @@ ok "$out|$rc" "supersede $N|0" "M11: N (never started, its tasks keep started:/r
 chk --repo "$R" --project Demo
 ok "$out|$rc" "refuse $N|3" "M11: … and refused without it"
 
-J=$(python3 "$RR" next --rollout "$T/$N.md" --tasks-dir "$T" --dry-run)
+J=$(HOME="$EH" python3 "$RR" next --rollout "$T/$N.md" --tasks-dir "$T" --dry-run)
 ok "$(printf '%s' "$J" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps([d["start"], d["running"], d["awaitingIntegration"], d["slotsInUse"]]))')" \
   '[["d"], ["e"], ["b", "i"], 1]' "M12: next on N starts d; e holds the one slot; b and i await Integration"
 

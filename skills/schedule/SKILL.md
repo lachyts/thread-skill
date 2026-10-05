@@ -11,7 +11,7 @@ This skill is the **planner**. The rollout note it produces is a data artefact �
 
 ## Scope
 
-**Obsidian only**, plus § 0's remote, landing-register and pushed-base probes of the target repo; the pushed-base probe runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving or pruning only remote-tracking refs; § 0's unfinished-rollout check reads `git remote get-url` in each rollout note's Project root; a supersede's `reconcile-rollout.py resume` makes read-only `gh pr view`/`gh repo view` calls; a supersede's `git-env-canary.py check-all` and `retire` (steps 1 and 6) read the prior's Project root with read-only git calls and write only the prior note's `## Git-env log` and the canary's own records, kept outside the repo; § 4.7 reads the operator's ladder file through `ladder.py` (a local file, no network); and step 7.5 moves a superseded rollout note with a plain `mv`. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
+**Obsidian only**, plus § 0's remote, landing-register and pushed-base probes of the target repo; the pushed-base probe runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving or pruning only remote-tracking refs; § 0's unfinished-rollout check reads `git remote get-url` in each rollout note's Project root; a supersede's `reconcile-rollout.py resume` makes read-only `gh pr view`/`gh repo view` calls; a supersede's `git-env-canary.py check-all` and `retire` (steps 1 and 6) read the prior's Project root with read-only git calls and write only the prior note's `## Git-env log` and the canary's own records, kept outside the repo; § 4.7 reads the operator's ladder file through `ladder.py` (a local file, no network); step 2.8 reads the operator's `~/.config/thread/rollouts.toml` through `rollout-settings.py` (a local file, no network), which runs `land.sh --origin-slug` and so a read-only `git remote get-url origin` in the Project root when the file holds a repo table; and step 7.5 moves a superseded rollout note with a plain `mv`. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
 
 ## Invocation forms
 
@@ -182,6 +182,19 @@ If the verifier needs a one-time environment setup before it runs in a **fresh**
 
 Leave it unset when the verifier works in a bare checkout — the worktree setup then renders byte-identically to before. Store the command for step 6 (it becomes the rollout frontmatter's `env_bootstrap:` line).
 
+### 2.8. Resolve the rollout settings
+
+The rollout's four numeric defaults (`parallel_ceiling`, `max_review_rounds`, `max_iterations`, `max_plan_rounds`) are the operator's, not this skill's: they live in `~/.config/thread/rollouts.toml` (ADR 0032; a Retro proposes changes to it), beside ADR 0029's `ladder.toml`. Resolve them once, here, before step 4.5's first vault write:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py --repo <§ 0's resolved repo path>
+```
+
+It prints one JSON line: each key's `value` and its `source`, `file:repo` (the file's `[repo."owner/name"]` table for this repo's GitHub origin, read from the local `git remote`, so a self-rollout's separate clone resolves the same as its primary checkout), `file:defaults` (its `[defaults]` table) or `built-in` (4 / 4 / 3 / 3 when the file sets none, or there is no file). The script's header is the one copy of the file format.
+
+- **A non-zero exit stops the run before this run writes a rollout note or a task stamp**: print its stderr line verbatim (`rollout-settings: <path>:<line>: <reason>`, or `rollout-settings: --repo <p>: <reason>`) with the remedy "edit `~/.config/thread/rollouts.toml` at the named line, then re-run". Exit 3 adds "needs python ≥ 3.11" (a present file needs tomllib). A bad value is refused loudly, never dropped (ADR 0016).
+- **On success**, name each value and its source in the confirm batch (e.g. `parallel_ceiling 5 (file:repo), max_review_rounds 4 (built-in), …`) and store them for step 6's four settings substitutions.
+
 ### 3. Extract dependencies
 
 Look for:
@@ -306,6 +319,10 @@ Use the template at `${CLAUDE_PLUGIN_ROOT}/skills/schedule/rollout-template.md`.
 - `{{ROLLOUT_SLUG}}` — the resolved dated rollout slug, no extension (e.g. `giflab-rollout-2026-07-18`)
 - `{{DATE}}` — today's date (YYYY-MM-DD)
 - `{{VERIFIER}}` — the verifier command detected in step 2.5 (or user-provided)
+- `{{MAX_ITERATIONS}}` — `max_iterations` as step 2.8 resolved it
+- `{{MAX_REVIEW_ROUNDS}}` — `max_review_rounds` as step 2.8 resolved it
+- `{{MAX_PLAN_ROUNDS}}` — `max_plan_rounds` as step 2.8 resolved it (the template's trailing comment on that line stays)
+- `{{PARALLEL_CEILING}}` — `parallel_ceiling` as step 2.8 resolved it
 - `{{REPO_PATH}}` — the repo path § 0 resolved and checked (the project note's `Local:` line, or the path the user gave)
 - `{{THREAD_LINE}}` — the whole line `` Thread: `<path to the thread file>` ``, naming the project's THREAD.md or its shared thread file when one exists (e.g. `` Thread: `~/repos/tools/chorus/THREAD.md` ``); otherwise delete the line entirely — no blank placeholder line
 - `{{QUEUE_TABLE}}` — the rendered `## Queue` table, header row `| # | Task | Scope | Mode |` included, one row per task in schedule order (step 5): `| <n> | [[<full-slug>\|<alias>]] | <scope> | <mode> |`. Mode is `solo` (a confirmed Solo task), `sequential-merged (one agent/PR)` (a merged unit from step 4.5: one agent does the folded sub-tasks in sequence), `carried (<queue state>)` (a task carried from the superseded rollout, with its state from step 1's preview) or `—`. The row is the task's rank (`reconcile-rollout.py next` reads a task's first wikilink on a table row or list item), so nothing above the table lists a task.
@@ -314,7 +331,7 @@ Use the template at `${CLAUDE_PLUGIN_ROOT}/skills/schedule/rollout-template.md`.
 - `{{KNOWN_BASELINE_FAILURES}}` — the `## Known baseline failures` block from step 2.6: one `- <test_id> — <reason>` line per test already red on a clean `main`, or `none`. `/thread:execute` reads this block, threads it into every agent, and shifts the Ralph green criterion to "no NEW failures beyond this set" (never `--deselect`). Like `{{FILE_SETS}}`, this is rollout-note data the executor reads, never task frontmatter.
 - `{{POST_ROLLOUT_ITEMS}}` — rollout-specific post-completion items (audit re-runs, downstream unblocks, validation sweeps), one numbered/bulleted line each, or `none`. These slot under the template's fixed completion-ceremony steps; at completion the ceremony (execute SKILL §4.5 step 5) converts each into a new open task + thin pointer, so phrase them as work descriptions, not instructions to leave in place.
 
-The template's frontmatter carries `incomplete: true`: keep it as written. Step 7 removes it as its last write, once every task is stamped, and until then `reconcile-rollout.py next` refuses the note, so a run that stops between here and there (a crash, a cancel, a failed carry) never leaves a note `/thread:execute` would run with tasks unstamped. It also carries `protocol_version: 5` plus rollout-level convergence defaults (`max_iterations: 3`, `max_review_rounds: 4`, `max_plan_rounds: 3`, `plan_approval: scope-gated`, `parallel_ceiling: 4`). These are inherited by every task in the rollout; per-task overrides go in the task's own frontmatter. When step 2.7 detected an env-bootstrap command, uncomment the template's `env_bootstrap:` line and set it (`/thread:execute` runs it once per worktree); leave it commented out when none. `plan_approval: scope-gated` means the plan-gate fires only for `scope: cross-cutting` tasks (other values: `off`, `required`) — see `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` for the gate semantics. (`completion_sentinel` is gone as of protocol 3 — the Workflow engine returns validated structured output instead of parsing sentinel strings.)
+The template's frontmatter carries `incomplete: true`: keep it as written. Step 7 removes it as its last write, once every task is stamped, and until then `reconcile-rollout.py next` refuses the note, so a run that stops between here and there (a crash, a cancel, a failed carry) never leaves a note `/thread:execute` would run with tasks unstamped. It also carries `protocol_version: 5` plus rollout-level convergence defaults: `plan_approval: scope-gated`, and `max_iterations`, `max_review_rounds`, `max_plan_rounds` and `parallel_ceiling` at the values step 2.8 resolved (with no `rollouts.toml`, the built-ins 3, 4, 3 and 4). `--regenerate` stamps freshly resolved values; a carried task's own overrides are untouched. These are inherited by every task in the rollout; per-task overrides go in the task's own frontmatter. When step 2.7 detected an env-bootstrap command, uncomment the template's `env_bootstrap:` line and set it (`/thread:execute` runs it once per worktree); leave it commented out when none. `plan_approval: scope-gated` means the plan-gate fires only for `scope: cross-cutting` tasks (other values: `off`, `required`) — see `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` for the gate semantics. (`completion_sentinel` is gone as of protocol 3 — the Workflow engine returns validated structured output instead of parsing sentinel strings.)
 
 Render each task reference in the queue table as `[[<full-slug>|<short-alias>]]` for readability (escaping the alias pipe as `\|` inside the table).
 
@@ -354,7 +371,7 @@ Queue for {{PROJECT_NAME}} written to [[{{ROLLOUT_SLUG}}]] — N tasks (K carrie
 filed [[<P>]] into Archive/Rollouts/                     # one line per § 0 `file` finish
 finished the interrupted supersede of [[<P>]]; [[<N>]] was incomplete and is superseded here   # per `interrupted` finish
 Verifier: <detected command>
-Default review rounds: 4
+Settings: parallel_ceiling <n> (<source>), max_review_rounds <n> (<source>), max_iterations <n> (<source>), max_plan_rounds <n> (<source>)
 
 Open in Obsidian to review. To execute:
   execute [[{{ROLLOUT_SLUG}}]]                # continuous: the queue runs and merges to the end
@@ -419,7 +436,7 @@ This skill does not execute anything. The rollout note it produces is read by th
 - Never remove `incomplete: true` from a rollout note except as step 7's last write on the note this run wrote: a stamp on any other note (§ 0's on an interrupted supersede's note, or one a stopped run left) ends only when a supersede closes that note out.
 - Don't touch tasks outside the target project (the `projects:` filter is strict).
 - Don't fill in `touches:` on tasks where you regex-detected files — that promotes a guess into authoritative metadata. Only the user does that. The **one** exception is the combined note authored in step 4.5: when every member has its own `touches:`, its `touches:` is their union, so it's a derivation, not a fresh guess. (Separately, the `## File-sets` block in the **rollout note** — step 6 — records the best-effort file-sets, but that's rollout-note data the executor reads, never task frontmatter, so it doesn't touch this rule.)
-- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's remote, register, pushed-base and unfinished-rollout checks (`git remote get-url`, `gh repo view`, `landing-register.py check`, `git fetch --prune` of `origin/<default>` and `origin/close/*` (pushed-base check), which moves or prunes only remote-tracking refs, and `unfinished-rollout.py check`'s `git rev-parse --local-env-vars` and `git remote get-url`), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, and a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only.
+- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's remote, register, pushed-base and unfinished-rollout checks (`git remote get-url`, `gh repo view`, `landing-register.py check`, `git fetch --prune` of `origin/<default>` and `origin/close/*` (pushed-base check), which moves or prunes only remote-tracking refs, and `unfinished-rollout.py check`'s `git rev-parse --local-env-vars` and `git remote get-url`), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only, and step 2.8's `rollout-settings.py`, whose `land.sh --origin-slug` runs a read-only `git remote get-url origin` (only when `rollouts.toml` holds a repo table).
 - Never write a second unfinished rollout on a repo, and never supersede one that § 0 did not print as `supersede`.
 - Never move a rollout note except by step 7.5's move (which § 0 also runs for `file` and `interrupted`).
 
@@ -432,7 +449,7 @@ End-to-end test against an existing backlog (e.g. GifLab):
 3. Step 2.5 detects `make test` (or whatever GifLab's CLAUDE.md prescribes) — prints it and asks to confirm
 4. Orders the queue (dependencies first, Solo proposals and § 4.7's rung offers in the confirm batch)
 5. Writes the always-dated note `giflab-rollout-<YYYY-MM-DD>.md` (advancing to the next `-N` ordinal if today's already exists), its `## Queue` table in schedule order.
-6. Rollout note carries no `incomplete:` line (step 7's last write removed the one it was born with), and carries `protocol_version: 5`, `verifier:`, `max_iterations: 3`, `max_review_rounds: 4`, `max_plan_rounds: 3`, `plan_approval: scope-gated`, `parallel_ceiling: 4` in frontmatter, plus a commented-out `env_bootstrap:` line (set only when the run needs it). No inline execution playbook — the rollout body is data only.
+6. Rollout note carries no `incomplete:` line (step 7's last write removed the one it was born with), and carries `protocol_version: 5`, `verifier:`, `plan_approval: scope-gated`, and `max_iterations`, `max_review_rounds`, `max_plan_rounds` and `parallel_ceiling` at the four values step 2.8 printed (with no `rollouts.toml`, the built-ins 3, 4, 3 and 4) in frontmatter, plus a commented-out `env_bootstrap:` line (set only when the run needs it). No inline execution playbook — the rollout body is data only.
 7. Stamps `rollout: "[[...]]"` and `scope:` on each task, and removes any legacy `wave:`
 8. Prints summary pointing the user toward `/thread:execute`
 

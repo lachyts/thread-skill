@@ -828,7 +828,7 @@ function check({ status, repair, fx }) {
       rd.includes('It needs no write: the engine reads it as the top rung') && rd.includes("a re-stamp or a ladder edit is Lachy's choice") &&
       rd.includes('so it holds offline too') && lr.includes('Execute halts `ladder file refused`') && lr.includes('so it holds offline too'),
     labelled(s3raw, 'Offline.').includes('the RACE / UNVERIFIED, Rung drift and Ladder refused flags still render'),
-    action11.startsWith('Any drift flag but a Rung drift or a refused ladder,'),
+    action11.startsWith('Any drift flag but a Rung drift, a refused ladder,'),
     refusedP.includes('reorders nothing') && refusedP.includes(`from ${RUN.escalation} to ${RUN.nothing}`) && refusedP.includes('`ladder file refused`') &&
       refusedP.includes('Status never routes a refused ladder to `/thread:repair` on its own account, because repair never edits the file') &&
       prec.includes('A refused ladder adds its fix ahead of whichever action matches and moves none of them'),
@@ -839,6 +839,39 @@ function check({ status, repair, fx }) {
     !TIER_WORDS.some((w) => lower.includes(w.toLowerCase())),
   ]
   if (!R.every(Boolean)) fails.push('rung')
+
+  // settings (p15-4, the operator's rollout settings): (1) § 2 names `ceilingError` and `ceilingCause` and the K
+  // resolver's "rollout settings refused" task flag; (2) § 3's Ceiling unresolved flag gives one remedy per cause:
+  // the note's own stamp (no file), the file at its line, a stamp for a gone root (whether or not a file exists), a
+  // stamp for a resolver that will not run; (3) the Rollout settings refused flag tells a file line from a `--repo`
+  // one; (4) both render offline; (5) action 11 sends neither to repair; (6) § 4 adds their fix ahead and never
+  // routes them to repair; (7) the Don'ts allow `rollout-settings.py` and count its `remote get-url`, and Scope says
+  // status runs it; (8) repair makes no raise when the resolver refuses, names the fix by the line, and never edits
+  // the file.
+  const cu = flag('Ceiling unresolved:')
+  const rsr = flag('Rollout settings refused:')
+  const scope = collapse(raw(status, /^## Scope/))
+  const sDontsC = collapse(sDonts)
+  const SET = [
+    s2.includes('`ceilingCause` (what that error needs: `stamp`, `file`, `root` or `resolver`; null otherwise)') &&
+      s2.includes('flag "rollout settings refused: <its stderr line>" on the task'),
+    cu.includes("`stamp`: the rollout note's own `parallel_ceiling:` is invalid") && cu.includes('fix that stamp to an integer >= 1. No settings file is involved.') &&
+      cu.includes('`file`: `~/.config/thread/rollouts.toml` was refused: fix it at the line `ceilingError` names, or stamp `parallel_ceiling:` on the rollout note') &&
+      cu.includes("`root`: the note's Project root is gone (or its origin cannot be read), whether or not a rollouts.toml exists: stamp `parallel_ceiling:` on the rollout note") &&
+      cu.includes('`resolver`: `rollout-settings.py` would not run: stamp `parallel_ceiling:`') && cu.includes('Until it resolves `next` exits 1'),
+    rsr.includes("the fix is Lachy's edit at that line, or a `max_review_rounds:` stamp") && rsr.includes('when it names `--repo` (the Project root is gone or its origin unreadable), the fix is that stamp'),
+    s3.includes('The Ceiling unresolved and Rollout settings refused flags render offline too'),
+    action11.includes(', an unresolved ceiling or refused rollout settings, or a set-aside task'),
+    refusedP.includes('An unresolved ceiling and refused rollout settings are handled the same way: they reorder nothing') &&
+      refusedP.includes('are never routed to `/thread:repair` on their own account') && refusedP.includes('action 11 skips them') &&
+      prec.includes('and so do an unresolved ceiling and refused rollout settings'),
+    sDontsC.includes('`lead-integrate.py inputs` and `rollout-settings.py` (§ 2, a read) are the only Python scripts status runs') &&
+      sDontsC.includes('plus the local one `rollout-settings.py` makes per resolve') &&
+      scope.includes('Status itself runs `rollout-settings.py`') && !scope.includes('invokes nothing new'),
+    rz.includes('make no raise') && rz.includes('A line naming `~/.config/thread/rollouts.toml` is fixed at that line') &&
+      rz.includes('a line naming `--repo` (the Project root is gone or its origin unreadable) only by that stamp') && rz.includes('Repair never edits that file'),
+  ]
+  if (!SET.every(Boolean)) fails.push('settings')
   return [...new Set(fails)]
 }
 
@@ -910,7 +943,7 @@ test('status and repair hold every queue rule', () => {
 
 const RULES = ['states', 'set-aside', 'log-line', 'owner', 'drift', 'actions', 'lineage', 'read-only', 'reverse-lineage', 'integration-only',
   'stages', 'first-match', 'another-base', 'race-hold', 'race-in-flight', 'closed-pr', 'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off',
-  'signed-gate', 'no-wave', 'rung', 'descope', 'second-block']
+  'signed-gate', 'no-wave', 'rung', 'descope', 'second-block', 'settings']
 const CONTROLLED = new Set()
 
 // Replaces the first match of `from`. Whitespace inside it matches any run of whitespace, so a reflowed line still
@@ -1291,7 +1324,7 @@ test('control: an Offline paragraph that drops the local flags fails rung', () =
   only(st(' It skips the live reads only: the RACE / UNVERIFIED, Rung drift and Ladder refused flags still render, from § 2\'s data and the local files.', ''), 'rung', 'offline')
 })
 test('control: action 11 routing a refused ladder to repair fails rung', () => {
-  only(st('Any drift flag but a Rung drift or a refused ladder,', 'Any drift flag (a refused ladder included),'), 'rung', 'action 11')
+  only(st('Any drift flag but a Rung drift, a refused ladder,', 'Any drift flag (a refused ladder included),'), 'rung', 'action 11')
 })
 test('control: a refused ladder routed to repair on its own fails rung', () => {
   only(st('Status never routes a refused ladder to `/thread:repair` on its own account, because repair never edits the file;',
@@ -1339,7 +1372,32 @@ test('control: the after-descope class after the descopable one fails first-matc
   only({ repair: real.repair.replace(row + '\n', '').replace(dRow, dRow + '\n' + row) }, 'first-match', 'after-descope late')
 })
 
-test('the rules are all named (28) and each has a control', () => {
-  assert.equal(RULES.length, 28)
+test('control: a stamp-cause remedy that points at rollouts.toml fails settings', () => {
+  only(st('fix that stamp\n    to an integer >= 1. No settings file is involved.', 'fix `~/.config/thread/rollouts.toml` at the named line.'), 'settings', 'stamp remedy')
+})
+test('control: a root-cause remedy that edits the file fails settings', () => {
+  only(st('whether or not a rollouts.toml\n    exists: stamp `parallel_ceiling:` on the rollout note', 'fix `~/.config/thread/rollouts.toml`'), 'settings', 'root remedy')
+})
+test('control: a Rollout settings refused flag with no --repo case fails settings', () => {
+  only(st('; when it names\n  `--repo` (the Project root is gone or its origin unreadable), the fix is that stamp', ''), 'settings', 'no --repo case')
+})
+test('control: action 11 routing refused rollout settings to repair fails settings', () => {
+  only(st('a refused ladder, an unresolved ceiling or refused rollout settings, or a', 'a refused ladder, or a'), 'settings', 'action 11')
+})
+test('control: refused rollout settings routed to repair on their own fail settings', () => {
+  only(st('are never routed to `/thread:repair` on their own account', 'are routed to `/thread:repair`'), 'settings', 'routing')
+})
+test("control: Don'ts without rollout-settings.py fail settings", () => {
+  only(st('`lead-integrate.py inputs` and `rollout-settings.py`\n  (§ 2, a read) are the only', '`lead-integrate.py inputs` are the only'), 'settings', 'donts')
+})
+test('control: a Scope that still says status invokes nothing new fails settings', () => {
+  only(st('Status itself runs\n`rollout-settings.py`', 'Status itself invokes nothing new; it runs\n`rollout-settings.py`'), 'settings', 'scope')
+})
+test('control: repair raising when the resolver refuses fails settings', () => {
+  only(rp('make no raise: report its stderr line', 'raise to `lastRound + 1` anyway: report its stderr line'), 'settings', 'repair raise')
+})
+
+test('the rules are all named (29) and each has a control', () => {
+  assert.equal(RULES.length, 29)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
