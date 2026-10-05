@@ -41,7 +41,7 @@ max_plan_rounds 3; guardrails 25 / 5 / 10 / 0.
 
 Validation (ADR 0016: anything unknown or wrong is refused, never dropped):
 - an unknown top-level key or table key, `defaults` or `guardrails` that is not a table, a `repo` that is
-  not a table of tables;
+  not a table, a value under `repo` that is not a table (named by its key: `[repo."o/r"] must be a table`);
 - a rollout value that is not an integer >= 1 (a boolean, float, string or 0 is refused);
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
   integer >= 0);
@@ -159,6 +159,13 @@ class _Lines:
     their `{` opens on (line_of's nearest recorded prefix). Only a line that starts outside every value is
     read as a header or a key; the rest of each line is scanned as TOML values, as _Index scans it, so
     strings and comments count for nothing and multi-line strings and arrays carry over to the next line.
+
+    Why a copy and not a share (unlike read_toml): _Index's value scan carries the ladder's own hooks inside
+    its loop (the `rung = [` array and each inline rung's `{` line, which its refusals cite), and its records
+    are flat (top-level names, per-[[rung]] keys) where this one is path-keyed. Sharing it would mean
+    re-cutting the ladder's line attribution, which tests/ladder.test.mjs pins line by line, to serve a second
+    file. The copied part is only the string/comment/bracket skip (_scan, _close_multiline); a fix to one of
+    them belongs in both, and tests/rollout-settings.test.mjs pins this copy's lines on its own.
     """
 
     def __init__(self, text):
@@ -298,12 +305,15 @@ def _validate(text, doc, path):
     out["guardrails"] = dict(guardrails)
 
     repos = doc.get("repo", {})
-    if not isinstance(repos, dict) or not all(isinstance(v, dict) for v in repos.values()):
+    if not isinstance(repos, dict):
         refuse("repo must be a table of tables ([repo.\"owner/name\"]), got %s" % _describe(repos), ("repo",))
     seen = {}  # lowered slug -> the key as written
     for slug, table in repos.items():
         at = ("repo", slug)
         label = "[repo.%s]" % json.dumps(slug)
+        if not isinstance(table, dict):  # `repo."o/r" = 5`, or a rollout key written straight under `[repo]`
+            refuse("%s must be a table, got %s (a repo's keys go under [repo.\"owner/name\"])"
+                   % (label, _describe(table)), at)
         if slug.lower().endswith(".git"):
             refuse("%s: a repo key never ends .git (write the origin's owner/name)" % label, at)
         if not SLUG_RE.match(slug) or not slug.split("/", 1)[1].strip("."):
