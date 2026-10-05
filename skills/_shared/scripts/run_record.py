@@ -20,12 +20,10 @@ Directory: ${THREAD_EVENTS_DIR:-${XDG_STATE_HOME:-~/.local/state}/thread/events}
 as unset; `~` expands in the override. A relative override is a warned write failure (nothing written); a
 relative XDG_STATE_HOME is ignored, as the XDG spec says. A dangling symlink is a warned failure, never a
 fall back to another directory. Every writer resolves this chain itself: hooks, Codex and launchd export no
-override, so the default path is the shared meeting point. Pending operator step, a precondition of p15-2
-(whose emitters are the first real writers): on Lachy's machine ~/.local/state/thread/events must be made a
-symlink to _shared/state/thread-events/ so the record is backed up. Neither path exists yet (2026-10-05) and
-nothing here creates the link; if p15-2 lands first, the first emit's os.makedirs creates a real directory
-there and the record stays out of the backup until someone migrates it by hand. THREAD_EVENTS_DIR is for
-tests and non-default setups. `dir` prints the resolved directory, so any writer can confirm it lands in
+override, so the default path is the shared meeting point. On Lachy's machine ~/.local/state/thread/events is
+a symlink to _shared/state/thread-events/ (in place since 2026-10-06), so the record is backed up; nothing
+here creates the link, and on a machine without it the first emit's os.makedirs creates a real directory
+there. THREAD_EVENTS_DIR is for tests and non-default setups. `dir` prints the resolved directory, so any writer can confirm it lands in
 the same place.
 
 Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl (`reviews` is reserved
@@ -62,7 +60,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   run-bound       T  runId, journalDir; call? (task | revise | integrate | resume); resumedFrom?
   slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed)
   ready           T  pr? (url or number)
-  set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass
+  set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass;
+                     setAsideAt? (run | integration | gate)
   lane-taken      T  (no fields)
   lane-freed      T  release (merge | set-aside | reject | halt); path?; triggers? (list of str);
                      conflict? (bool)
@@ -85,7 +84,26 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
 There is no ceiling-changed kind, and it is refused: the settings stamped on every slot-taken and
 idle-slots replace it, which keeps `next` stateless and also covers round caps and per-task overrides.
 
-Reading the record:
+Reading the record (the writers are reconcile-rollout.py's verbs and git-env-canary.py, p15-2; that module's
+docstring lists each verb's events and the stage, reasonClass and idle-reason tables):
+- Pairing. A Slot is slot-taken .. slot-freed (or a `carried` line in the from-file), per task; the lane is
+  lane-taken .. lane-freed; a hold is hold-started .. hold-ended per (hold, task); a pause is paused ..
+  resumed. A slot-taken while that task's Slot is open is the same Slot and keeps the first `start` (a
+  Lost-call restart's `resume`, a restart after a dead lead). A slot-freed or lane-freed with nothing open
+  for that task is ignored. A lane-taken while the same task holds the lane is the same holding; while
+  another task holds it, that holding ends there, flagged as unrecorded. A hold-started while that (hold,
+  task) is open is the same hold. A lane-freed also closes the task's open merge hold. A paused while paused
+  is the same pause; a resumed with no pause is ignored. A `carried` line in the from-file (its `rollout`
+  equals its `from`) closes that task's Slot, lane and holds there. Anything still open at the record's last
+  line ends there and is flagged.
+- slot-freed outcome: ready (approved with a PR), set-aside, completed (a read-only approval, or an
+  in_progress note whose PR `resume` found merged), lost (a dead call's lead-written row), stopped (a hard
+  pause, a defer or a carry ended it); `failed` is reserved.
+- slot-taken start: start, restart (a stalled note restarted), revise (a seeded revise), hand-back (the
+  restart after a hand-back, an approve-gates sign-off or a descope), resume (a Lost-call or signed-gate
+  resume).
+- set-aside stage is where the task stopped; setAsideAt is where it re-enters (merge-task's exit 1 reads
+  stage integrate, setAsideAt run).
 - Idle Slot time is a span. A Retro derives it from slot-taken / slot-freed pairs against the ceiling
   stamped on each event. An idle-slots event is a reason marker labelling the span it falls in: a change
   of reason splits the span, a repeat is harmless, a span with no marker reads as "unexplained".
@@ -206,7 +224,7 @@ KINDS = {
     "slot-freed": (True, {"outcome": _enum("ready", "set-aside", "completed", "lost", "stopped", "failed")}, {}),
     "ready": (True, {}, {"pr": _pr}),
     "set-aside": (True, {"stage": _enum("plan", "implement", "verify", "review", "integrate", "gate"),
-                         "reasonClass": _str}, {}),
+                         "reasonClass": _str}, {"setAsideAt": _enum("run", "integration", "gate")}),
     "lane-taken": (True, {}, {}),
     "lane-freed": (True, {"release": _enum("merge", "set-aside", "reject", "halt")},
                    {"path": _str, "triggers": _strlist, "conflict": _bool}),

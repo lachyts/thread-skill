@@ -12,7 +12,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"   # physical: the stub gh logs the cwd gh ran in (macOS /var -> /private/var)
 trap 'rm -rf "$TMP"' EXIT
-export THREAD_EVENTS_DIR="$TMP/events"  # the Run record (run_record.py, ADR 0032) stays in temp
+export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 NOW=2026-10-02T14:05:00Z
 
 fail=0
@@ -431,7 +431,7 @@ ok "$(fm g started)" "started: 2026-10-02T14:05+00:00" "mark-started: still proc
 ok "$(fm b started)" "<none>" "mark-started: the done note is untouched"
 ok "$(fm a integrating)" "<none>" "mark-started: removes integrating:"
 has "$out" "progress: 1/4 merged" "mark-started --rollout prints the progress line"
-python3 "$SCRIPT" mark-started --tasks a --tasks-dir "$D" --now 2026-10-02T16:00:00Z >/dev/null
+HOME="$EH" python3 "$SCRIPT" mark-started --tasks a --tasks-dir "$D" --now 2026-10-02T16:00:00Z >/dev/null
 ok "$(fm a started)" "started: 2026-10-02T14:05+00:00" "mark-started: the first start wins"
 python3 "$SCRIPT" mark-integrating --tasks c --tasks-dir "$D" --now 2026-10-02T15:10:00Z >/dev/null; rc=$?
 ok "$rc" 0 "mark-integrating: a review note with a PR"

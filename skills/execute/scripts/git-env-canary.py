@@ -90,6 +90,11 @@ and GIT_ENV_LOG_SECTION, imported, never copied):
     record unreadable | record not armed | core.bare true at arm>; repo <R>
   - <stamp> <GIT_ENV_ACK_MARK> [[a]], [[b]]: refs/heads/B at <sha|absent>, core.bare false
 
+Run record (p15-2, ADR 0032): every append to the log reads the hold (reconcile-rollout.py's _git_env_hold) before
+and after; an empty -> non-empty edge (a trip opens it) records `hold-started hold=git-env` and a non-empty -> empty
+edge (the ack) `hold-ended hold=git-env`, rollout the note's stem and task null, through reconcile-rollout.py's
+_event: best-effort, never changing an exit.
+
 Exit codes: 0 clean, 3 a trip or a hold, 1 nothing to ack, 2 a failure, a usage or a validation error. The lead
 treats every non-zero exit as a halt.
 """
@@ -317,6 +322,7 @@ class Ctx:
         if not lines:
             return
         note = self.note()
+        held_before = bool(_git_env_hold(note))
         present = {ln.rstrip() for ln in note.section_text(RR.GIT_ENV_LOG_SECTION).split("\n")}
         for line in lines:
             if line not in present:
@@ -330,6 +336,11 @@ class Ctx:
         missing = [ln for ln in lines if ln not in now]
         if missing:
             raise CanaryError(f"the line did not land in {self.rollout}'s {RR.GIT_ENV_LOG_SECTION}: {missing[0]}")
+        # The Run record (p15-2): the hold's edges. A trip that opens it is hold-started, the ack that empties it
+        # hold-ended; both best-effort (reconcile-rollout.py's _event), task null.
+        held_after = bool(self.hold())
+        if held_after != held_before:
+            RR._event(self.stem, "hold-started" if held_after else "hold-ended", None, {"hold": "git-env"})
 
     def hold(self):
         return _git_env_hold(self.note())

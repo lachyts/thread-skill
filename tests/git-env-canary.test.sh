@@ -24,7 +24,7 @@ trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 # An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
 EH="$TMP/settings-home"; mkdir -p "$EH"
-export THREAD_EVENTS_DIR="$TMP/events"  # the Run record (run_record.py, ADR 0032) stays in temp
+export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master -c commit.gpgsign=false "$@"; }
 
 S=""; O=""; R=""; V=""; RO=""; C2=""
@@ -139,6 +139,20 @@ ok "$(trips A)" 1 "b: … one trip line logged"
 has "$(grep 'git-env trip' "$RO")" "task: refs/heads/master ${old}→${new}; repo $R" "b: … naming the kind, old→new and the repo"
 ok "$(recf A task state)|$(recf A task closed)" '"tripped"|true' "b: … the record reads tripped and closed"
 has "$err" "${old}→${new}" "b: … stderr names old→new"
+
+# ── rr: the Run record (p15-2): the hold's edges record hold-started / hold-ended git-env ─────────────────────────
+# Its own events dir on these calls, so the THREAD_TEST_EVENTS_DIR knob run never touches what this reads.
+scen rr
+mkt A in_progress
+EVR="$S/events"
+evs() { [ -f "$EVR/ro.jsonl" ] && python3 -c 'import json,sys; print(" ".join("%s:%s:%s" % (d["kind"], d.get("hold"), d["task"]) for d in map(json.loads, open(sys.argv[1]))))' "$EVR/ro.jsonl" || echo "<none>"; }
+THREAD_EVENTS_DIR="$EVR" arm A; THREAD_EVENTS_DIR="$EVR" chk A
+ok "$(evs)" "<none>" "rr: a clean window records nothing"
+THREAD_EVENTS_DIR="$EVR" arm A; code
+THREAD_EVENTS_DIR="$EVR" chk A; ok "$rc|$(evs)" "3|hold-started:git-env:None" "rr: the trip opens the hold → hold-started git-env, task null"
+THREAD_EVENTS_DIR="$EVR" call; ok "$rc|$(evs)" "3|hold-started:git-env:None" "rr: check-all under the hold records nothing more"
+THREAD_EVENTS_DIR="$EVR" ackc A "$(cur)"
+ok "$rc|$(evs)" "0|hold-started:git-env:None hold-ended:git-env:None" "rr: the ack empties it → hold-ended git-env"
 
 # ── c: bareness ──────────────────────────────────────────────────────────────────────────────────────────────
 scen c

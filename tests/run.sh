@@ -39,8 +39,11 @@ mkdir -p "$HOME/.config/thread"
 printf '%s\n' '# Seeded by tests/run.sh and refused on purpose: a suite that reaches rollout-settings.py must pin HOME.' \
   '[defaults]' 'parallel_ceiling = 0' > "$HOME/.config/thread/rollouts.toml"
 # The Run record (run_record.py, ADR 0032) lands in temp too, whatever the caller exported; each engine-driving
-# suite also sets its own (tests/contracts/run-record-hermetic.test.mjs), so this is the backstop.
-export THREAD_EVENTS_DIR="$scratch/events"; unset XDG_STATE_HOME
+# suite also sets its own (tests/contracts/run-record-hermetic.test.mjs), so this is the backstop. The one knob,
+# THREAD_TEST_EVENTS_DIR, points every such suite at another dir instead: `THREAD_TEST_EVENTS_DIR=<a regular
+# file>/events make test` runs them all against an unwritable record (p15-2: recording never breaks a verb).
+# The suites that read the record (run-record, the fold and record suites) keep their own dir.
+export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$scratch/events}"; unset XDG_STATE_HOME
 export GIT_CONFIG_GLOBAL="$scratch/gitconfig"
 # A git hook running `make test` exports GIT_DIR & co. (and `git -c ...` exports GIT_CONFIG_PARAMETERS);
 # left set, every git call below and every suite's temp-repo git call (commits, pushes included) would land

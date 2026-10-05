@@ -9,7 +9,10 @@
 // - a node test that binds one of those scripts' paths with path.join and spawns or execFiles python3 passes
 //   THREAD_EVENTS_DIR as an env key.
 // A heuristic (a prose mention never counts as an invocation); tests/run.sh's own export is the backstop for
-// `make test`. Pure matchers, so the real tree and the controls run through the same code. Reads files only.
+// `make test`. p15-2 wired the emitters in (git-env-canary.py records its hold too, so it joins the names), and
+// added one knob: each export may read `${THREAD_TEST_EVENTS_DIR:-<its temp>/events}` (node:
+// `process.env.THREAD_TEST_EVENTS_DIR || <tmp>`), so `THREAD_TEST_EVENTS_DIR=<a file>/events make test` runs every
+// such suite against an unwritable record. Pure matchers, so the real tree and the controls run through the same code. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
@@ -17,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { read, walk } from '../lib/contract-text.mjs'
 
 const SELF = `tests/contracts/${path.basename(fileURLToPath(import.meta.url))}`
-const NAMES = '(?:reconcile-rollout\\.py|merge-task\\.sh|lead-integrate\\.py)'
+const NAMES = '(?:reconcile-rollout\\.py|merge-task\\.sh|lead-integrate\\.py|git-env-canary\\.py)'
 
 // ---- shell ---------------------------------------------------------------------------------------------------
 
@@ -80,6 +83,8 @@ test('control: the shell matchers', () => {
   assert.ok(shellHermetic('export THREAD_EVENTS_DIR="$TMP/events"\n'))
   assert.ok(shellHermetic('export HOME="$s/home" THREAD_EVENTS_DIR="$s/events"\n'))
   assert.ok(shellHermetic('. tests/lib/merge-task-env.sh\n'))
+  assert.ok(shellHermetic('export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # x\n'), 'the knob form')
+  assert.ok(shellInvokes('CAN="$root/skills/execute/scripts/git-env-canary.py"\n'), 'the canary is an engine script')
   assert.ok(!shellHermetic('THREAD_EVENTS_DIR="$TMP/events"\n'), 'an unexported assignment does not reach the child')
   assert.ok(!shellHermetic('# export THREAD_EVENTS_DIR=x\n'))
 })
@@ -91,5 +96,6 @@ test('control: the node matchers', () => {
   assert.ok(!nodeSpawns(binds), 'a path with no python spawn')
   assert.ok(!nodeSpawns("spawnSync('python3', ['-c', 'x'])\nconst s = 'reconcile-rollout.py next'\n"), 'a prose mention')
   assert.ok(nodeHermetic("{ ...process.env, THREAD_EVENTS_DIR: ev }"))
+  assert.ok(nodeHermetic("{ ...process.env, THREAD_EVENTS_DIR: process.env.THREAD_TEST_EVENTS_DIR || ev }"), 'the knob form')
   assert.ok(!nodeHermetic('// THREAD_EVENTS_DIR is set by run.sh'))
 })
