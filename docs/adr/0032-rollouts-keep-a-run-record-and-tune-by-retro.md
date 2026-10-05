@@ -34,10 +34,12 @@ at 09:43+11:00 on 4 Oct.
    script to record it. The event catalogue and its schema belong to the implementation (P15).
 2. **It lives in `${THREAD_EVENTS_DIR:-${XDG_STATE_HOME:-~/.local/state}/thread/events}`**, the
    convention `git-env-canary.py` already uses. Every writer resolves this chain itself. Hooks,
-   Codex and launchd export no override, so the default path is the shared meeting point. On
-   Lachy's machine, the default directory `~/.local/state/thread/events` is a symlink to
-   `_shared/state/thread-events/` so the record is backed up. `THREAD_EVENTS_DIR` is for tests and
-   non-default setups.
+   Codex and launchd export no override, so the default path is the shared meeting point. To keep
+   the record backed up, Lachy's machine needs the default directory `~/.local/state/thread/events`
+   to be a symlink to `_shared/state/thread-events/`. That is a pending operator step, and a
+   precondition of P15's first emitters (p15-2): neither path exists yet, and if the emitters land
+   first, the first emit creates a real directory there that stays out of the backup until someone
+   migrates it by hand. `THREAD_EVENTS_DIR` is for tests and non-default setups.
 3. **A Retro turns the record into Tunings.** It scores a run on **Throughput**, weighs it against
    **Guardrails** whose bounds are operator settings, names what bound the run, and proposes
    Tunings. Lachy picks; a script applies them. The engine never changes its own settings mid-run.
