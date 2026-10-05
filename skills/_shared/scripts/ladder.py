@@ -59,7 +59,8 @@ with its keys in that order. Exit 2 when the file is refused (or on a usage erro
 file needs tomllib and this python has none. On failure stdout is empty and stderr carries one line,
 `ladder: <path>:<line>: <reason>`, or `ladder: <path>: <reason>` when no line applies.
 
-Importable: load(path=None), BUILT_IN, MODELS, EFFORTS, FIELDS, LadderError.
+Importable: load(path=None), read_toml(path) (shared with rollout-settings.py), BUILT_IN, MODELS, EFFORTS,
+FIELDS, LadderError.
 """
 import argparse
 import json
@@ -353,13 +354,29 @@ def load(path=None):
     Raises LadderError (with .line and .code) when a present file cannot be read or does not validate.
     """
     path = default_path() if path is None else path
+    read = read_toml(path)
+    if read is None:
+        return {"source": "built-in", "rungs": [dict(r) for r in BUILT_IN]}
+    text, doc = read
+    return {"source": path, "rungs": _validate(text, doc)}
+
+
+def read_toml(path):
+    """Read one operator TOML file: None when nothing is at the path, else (text, doc).
+
+    Shared with rollout-settings.py (rollouts.toml), so both files are read by the same rules: "nothing at
+    the path" is a missing file, a missing directory on the way, or a plain file as a step on the way. A
+    dangling symlink at the path or on the way, a path that cannot be checked (an unsearchable directory),
+    bytes that are not UTF-8 and a TOML syntax error raise LadderError, with the line where one applies;
+    a present file on a python without tomllib raises it with code 3.
+    """
     try:
         # lstat, not os.path.lexists: lexists reads every error as "nothing there", so a file in a directory
-        # that cannot be searched would give the built-in ladder.
+        # that cannot be searched would read as no file.
         st = os.lstat(path)
     except (FileNotFoundError, NotADirectoryError):
         _refuse_dangling_parent(path)
-        return {"source": "built-in", "rungs": [dict(r) for r in BUILT_IN]}
+        return None
     except OSError as e:
         raise LadderError("cannot read it: %s" % (e.strerror or e))
     try:
@@ -369,8 +386,7 @@ def load(path=None):
         if isinstance(e, FileNotFoundError) and stat.S_ISLNK(st.st_mode):
             raise LadderError("cannot read it: a symlink to a missing file (%s)" % _target(path))
         raise LadderError("cannot read it: %s" % (e.strerror or e))
-    text, doc = _parse(data)
-    return {"source": path, "rungs": _validate(text, doc)}
+    return _parse(data)
 
 
 def _target(link):

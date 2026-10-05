@@ -7,6 +7,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+# An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
+# call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
+EH="$TMP/settings-home"; mkdir -p "$EH"
 export THREAD_EVENTS_DIR="$TMP/events"  # the Run record (run_record.py, ADR 0032) stays in temp
 
 fail=0
@@ -246,7 +249,7 @@ rollout: "[[other-rollout]]"
 nope
 EOF
 
-JSON=$(python3 "$SCRIPT" status --rollout "$TMP/st-rollout.md" --tasks-dir "$TMP")
+JSON=$(HOME="$EH" python3 "$SCRIPT" status --rollout "$TMP/st-rollout.md" --tasks-dir "$TMP")
 grep -q '"slug": "st-ro"' <<<"$JSON"          && echo "ok   - status: read-only task included" || { echo "FAIL - read-only missing"; fail=1; }
 grep -q '"slug": "st-b"' <<<"$JSON"           && echo "ok   - status: blocked task included"   || { echo "FAIL - blocked missing"; fail=1; }
 if grep -q '"slug": "st-foreign"' <<<"$JSON"; then echo "FAIL - foreign rollout leaked"; fail=1; else echo "ok   - status: foreign rollout excluded"; fi
@@ -321,7 +324,7 @@ paused: 2026-07-18T10:00+10:00
 EOF
 
 # status surfaces the pause (timestamp set, no pending request)
-JSON=$(python3 "$SCRIPT" status --rollout "$TMP/pz-rollout.md" --tasks-dir "$TMP")
+JSON=$(HOME="$EH" python3 "$SCRIPT" status --rollout "$TMP/pz-rollout.md" --tasks-dir "$TMP")
 echo "$JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('paused') == '2026-07-18T10:00+10:00' else 1)" \
   && echo "ok   - status: paused surfaced" || { echo "FAIL - status: paused missing"; fail=1; }
 echo "$JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('pause_requested') is False else 1)" \
@@ -337,7 +340,7 @@ pause_requested: true
 
 ## Notes
 EOF
-JSON=$(python3 "$SCRIPT" status --rollout "$TMP/pz-pending.md" --tasks-dir "$TMP")
+JSON=$(HOME="$EH" python3 "$SCRIPT" status --rollout "$TMP/pz-pending.md" --tasks-dir "$TMP")
 echo "$JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('pause_requested') is True and not d.get('paused') else 1)" \
   && echo "ok   - status: pending request surfaced" || { echo "FAIL - status: pending request missing"; fail=1; }
 
@@ -491,7 +494,7 @@ python3 - "$TMP/task-adv.md" <<'PY'
 import pathlib, sys
 p = pathlib.Path(sys.argv[1]); p.write_text(p.read_text().replace("priority: normal\n", 'priority: normal\nrollout: "[[adv-rollout]]"\n', 1))
 PY
-python3 "$SCRIPT" status --rollout "$TMP/adv-rollout.md" --tasks-dir "$TMP" | python3 -c '
+HOME="$EH" python3 "$SCRIPT" status --rollout "$TMP/adv-rollout.md" --tasks-dir "$TMP" | python3 -c '
 import json, sys
 t = [x for x in json.load(sys.stdin)["tasks"] if x["slug"] == "task-adv"][0]
 sys.exit(0 if t["blockerSummary"] == "THE LATEST BLOCKER RUN" else 1)' \

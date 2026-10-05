@@ -302,7 +302,8 @@ ok(topFirst && topFirst.prompt.includes('Max iterations: 4') && !topFirst.prompt
 ok(topRetry && topRetry.prompt.includes('Max iterations: 2'), 'top E: the same-rung retry runs a REDUCED budget (4 ⇒ 2), never a second full one')
 
 // Scenario F — the TEMPLATE DEFAULT shape on the top rung: scope single-file, so plan_approval: scope-gated
-// leaves planGate false, and max_iterations is the template's 3. With no plan layer nothing climbs before the
+// leaves planGate false, and max_iterations is the built-in 3 (the template now holds a
+// {{MAX_ITERATIONS}} placeholder that schedule fills from rollouts.toml, then the built-in). With no plan layer nothing climbs before the
 // first implement dispatch. It also pins the retry budget floor: floor(3/2) is 1, and a 1-iteration
 // ralphLoop blocks without ever re-running the verifier.
 effortCalls.length = 0

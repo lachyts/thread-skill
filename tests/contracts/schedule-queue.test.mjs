@@ -30,6 +30,7 @@ const others = walk('skills/schedule').filter((f) => !/\/(SKILL|rollout-template
 const s = (text, re) => collapse(section(text, re) ?? '')
 const S0 = /^### 0\./
 const S47 = /^### 4\.7\. /
+const S28 = /^### 2\.8\. /
 const S1 = /^### 1\. /
 const S35 = /^### 3\.5\. /
 const S5 = /^### 5\. /
@@ -174,6 +175,23 @@ function checkSchedule({ schedule, template, orient, manifests = [], extra = [] 
   if (!tb.includes("A task whose implement stage starts on the ladder's top rung costs more there") ||
     !tb.includes('spends `max_iterations + 2` on implement, against `1 + max_iterations` for a task that climbs to the top during implement') ||
     !tb.includes('`max_iterations + 2 + (max_review_rounds − 1) × max_iterations`')) fails.push('rung-budget')
+
+  // rollout-settings (p15-4): step 2.8 runs rollout-settings.py for § 0's repo before step 4.5's first vault write;
+  // a non-zero exit stops the run before any write, with its stderr verbatim; the confirm names each value and its
+  // source; step 6 fills the template's four settings placeholders from it, and the template hardcodes none of them;
+  // step 8's summary prints them with their sources.
+  const s28 = s(schedule, S28)
+  const s6set = s(schedule, S6)
+  const fmT = frontmatter(template)
+  const SETTINGS = [['MAX_ITERATIONS', 'max_iterations'], ['MAX_REVIEW_ROUNDS', 'max_review_rounds'], ['MAX_PLAN_ROUNDS', 'max_plan_rounds'], ['PARALLEL_CEILING', 'parallel_ceiling']]
+  if (!s28.includes("python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py --repo <§ 0's resolved repo path>") ||
+    !s28.includes("Resolve them once, here, before step 4.5's first vault write") ||
+    !s28.includes('**A non-zero exit stops the run before this run writes a rollout note or a task stamp**: print its stderr line verbatim') ||
+    !s28.includes('**On success**, name each value and its source in the confirm batch') ||
+    !s28.includes("store them for step 6's four settings substitutions") ||
+    !SETTINGS.every(([ph, key]) => s6set.includes(`\`{{${ph}}}\` — \`${key}\` as step 2.8 resolved it`) && new RegExp(`^${key}: \\{\\{${ph}\\}\\}`, 'm').test(fmT)) ||
+    SETTINGS.some(([, key]) => new RegExp(`^${key}: \\d`, 'm').test(fmT)) ||
+    !s(schedule, S8).includes('Settings: parallel_ceiling <n> (<source>), max_review_rounds <n> (<source>)')) fails.push('rollout-settings')
 
   // Orient leaves the one-per-repo rule to schedule § 0: it reads no rollout state itself.
   const o6 = s(orient, /^### 6\./)
@@ -352,6 +370,24 @@ test('control: step 1 without its refusal sentence fails step1-carry-refusal', (
 test("control: the template's round-2 budget wording fails rung-budget", () => {
   only({ template: real.template.replace("A task whose implement stage starts on the ladder's top rung costs more there, not less",
     'A task on the top rung (stamped there, or climbed there) costs more there, not less') }, ['rung-budget'], 'round 2 wording')
+})
+
+test('control: a step 2.8 refusal that goes on to write fails rollout-settings', () => {
+  only({ schedule: edit(real.schedule, S28, '**A non-zero exit stops the run before this run writes a rollout note or a task stamp**', '**A non-zero exit is a warning: carry on with the built-ins**') },
+    ['rollout-settings'], 'refusal writes')
+})
+
+test('control: a confirm that names no sources fails rollout-settings', () => {
+  only({ schedule: edit(real.schedule, S28, 'name each value and its source in the confirm batch', 'name each value in the confirm batch') },
+    ['rollout-settings'], 'no sources')
+})
+
+test('control: step 6 without the {{PARALLEL_CEILING}} substitution fails rollout-settings', () => {
+  only({ schedule: edit(real.schedule, S6, '- `{{PARALLEL_CEILING}}` — `parallel_ceiling` as step 2.8 resolved it\n', '') }, ['rollout-settings'], 'no substitution')
+})
+
+test('control: a template with a hardcoded max_review_rounds fails rollout-settings', () => {
+  only({ template: real.template.replace('max_review_rounds: {{MAX_REVIEW_ROUNDS}}', 'max_review_rounds: 4') }, ['rollout-settings'], 'hardcoded')
 })
 
 test('control: orient reading rollout state itself fails', () => {

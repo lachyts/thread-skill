@@ -469,6 +469,20 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     fails.push('descope')
   }
 
+  // settings (p15-4, the operator's rollout settings): § 3 resolves a round-budget key absent at both levels
+  // through rollout-settings.py once per loop entry; its exit 2 or 3 is the round-budget write-nothing halt,
+  // `reason="rollout settings refused"`, its fix read off the stderr line (the file's line, or a stamp for a `--repo`
+  // one); § 7 lists that halt, and `next`'s exit 1 for an absent ceiling it could not resolve.
+  const settingsP = collapse((section(skill, S3) ?? '').split('\n\n').find((x) => x.startsWith("**The operator's rollout settings (p15-4).**")) ?? '')
+  const s7set = S(skill, S7)
+  if (!settingsP.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py --repo <Project root>` once per loop entry') ||
+    !settingsP.includes('Its exit 2 or 3 is the round-budget write-nothing halt') || !settingsP.includes('reason="rollout settings refused"') ||
+    !settingsP.includes('one naming `--repo` (the Project root is gone or its origin unreadable) is fixed by stamping the key') ||
+    !s7set.includes('`rollout-settings.py` exits 2 or 3 for a round-budget key absent at both levels (§ 3: `reason="rollout settings refused"`') ||
+    !s7set.includes('an absent one `rollout-settings.py` could not resolve')) {
+    fails.push('settings')
+  }
+
   // s5 (the dead-run resume keeps its shape for its consumers) is part of lost-call's routing: § 5 names *Lost call*.
   if (!s5.includes('(§ 4.5 *Lost call*)') || !before(s5, '(§ 4.5 *Lost call*)', 'resumeFromRunId: <runId>')) fails.push('lost-call')
   return [...new Set(fails)]
@@ -483,7 +497,7 @@ test('execute § 4.5, its neighbours, the heartbeat and the hook hold every queu
 const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lost-call', 'clean-path', 'verify-bound',
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
-  'ladder', 'verify-timeout', 'approved-plan', 'descope']
+  'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -766,7 +780,20 @@ test("control: § 6's undo that leaves the follow-up open fails descope", () => 
   only(sk('the follow-up note set to `status: dropped`', 'the follow-up note left as it is'), 'descope', 'follow-up left open')
 })
 
-test('the rules are all named (29) and each has a control', () => {
-  assert.equal(RULES.length, 29)
+test('control: a § 3 settings refusal without its halt reason fails settings', () => {
+  only(sk('state=halted reason="rollout settings refused"`. The fix follows', 'state=waiting`. The fix follows'), 'settings', 'no § 3 reason')
+})
+test('control: a § 3 settings refusal that writes fails settings', () => {
+  only(sk('Its exit 2 or 3 is the round-budget write-nothing halt', 'Its exit 2 or 3 is a warning; carry on with the built-in'), 'settings', 'writes on refusal')
+})
+test('control: § 7 without the settings halt fails settings', () => {
+  only(sk('- `rollout-settings.py` exits 2 or 3 for a round-budget key absent at both levels', '- a resolver exits 2 or 3 for a round-budget key absent at both levels'), 'settings', 'no § 7 halt')
+})
+test('control: a --repo refusal fixed in the file fails settings', () => {
+  only(sk('one naming `--repo` (the Project root is gone or its origin unreadable) is fixed by stamping the key', 'any other is fixed in the file'), 'settings', '--repo remedy')
+})
+
+test('the rules are all named (30) and each has a control', () => {
+  assert.equal(RULES.length, 30)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

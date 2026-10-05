@@ -80,7 +80,11 @@ function vault(agentParagraph) {
     `rollout: "[[${ROLLOUT}]]"\n---\n\n## Notes\n\nbody\n` + (agentParagraph ? `\n## Blocker diagnosis\n\n${agentParagraph}\n` : ''))
   return d
 }
-const py = (args) => execFileSync('python3', [RECONCILE, ...args], { encoding: 'utf8', env: PY_ENV })
+// status resolves the rollout's absent parallel_ceiling through rollout-settings.py (~/.config/thread/rollouts.toml,
+// p15-4): HOME is an empty dir of this suite's own, so the operator's file never reaches the assertions.
+const SETTINGS_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'p126-settings-home-'))
+after(() => fs.rmSync(SETTINGS_HOME, { recursive: true, force: true }))
+const py = (args) => execFileSync('python3', [RECONCILE, ...args], { encoding: 'utf8', env: { ...PY_ENV, HOME: SETTINGS_HOME } })
 function reconcile(d, result, now = NOW) {
   const f = path.join(d, 'result.json')
   fs.writeFileSync(f, JSON.stringify(result))
