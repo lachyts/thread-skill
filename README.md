@@ -79,6 +79,8 @@ inputs and the lead's own set-aside rows).
 `skills/execute/scripts/git-env-canary.py` is the lead's git-env canary: it
 watches the shared checkout's default branch and bareness around every launch
 and halts the queue on a change that is not a close-out (execute § 4.5).
+`skills/_shared/scripts/run_record.py` is the Run record's one writer (ADR 0032):
+every emitter appends its events through it, and its header is the schema.
 
 ## Design
 
