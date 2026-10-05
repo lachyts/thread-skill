@@ -160,6 +160,10 @@ mkro $'- [[a]]\n- [[b]]\n- [[c]]\n- [[d]]' 'parallel_ceiling: 0'
 HOME="$EH" python3 "$SCRIPT" next --rollout "$D/ro.md" --tasks-dir "$D" >/dev/null 2>"$D/err"; rc=$?
 ok "$rc" 1 "next: parallel_ceiling 0 is an error (exit 1)"
 has "$(cat "$D/err")" "parallel_ceiling" "next: the error names parallel_ceiling"
+has "$(cat "$D/err")" "fix the rollout note's parallel_ceiling: stamp" "next: … and the note-stamp remedy"
+hasnt "$(cat "$D/err")" "rollouts.toml" "next: … never the settings file"
+J=$(st)
+ok "$(q "$J" '[d["ceiling"], d["ceilingCause"]]')" '[null,"stamp"]' "status: an invalid stamp is ceilingCause stamp"
 
 # ── an absent parallel_ceiling resolves from the operator's rollouts.toml (p15-4) ─────────────────
 # Each scenario's HOME is its own $D/home, so the resolver reads only the file the scenario writes there.
@@ -180,7 +184,7 @@ scen settings-none
 mkro "$five"; mkdir -p "$D/home"
 mkt a open; mkt b open; mkt c open; mkt d open; mkt e open
 ok "$(q "$(rnxt)" 'd["start"]')" '["a","b","c","d"]' "settings: absent key, no rollouts.toml -> the built-in 4"
-ok "$(q "$(rst)" '[d["ceiling"], d["ceilingError"]]')" '[4,null]' "settings: status ceiling 4, ceilingError null"
+ok "$(q "$(rst)" '[d["ceiling"], d["ceilingError"], d["ceilingCause"]]')" '[4,null,null]' "settings: status ceiling 4, ceilingError and ceilingCause null"
 scen settings-defaults
 mkro "$five"; rs_toml '[defaults]' 'parallel_ceiling = 2'
 mkt a open; mkt b open; mkt c open; mkt d open; mkt e open
@@ -190,9 +194,24 @@ mkro "$five"; rs_toml '[defaults]' 'parallel_ceiling = 2' '[repo."o/r"]' 'parall
 git init -q "$D/repo"; git -C "$D/repo" remote add origin https://github.com/o/r
 mkt a open; mkt b open; mkt c open; mkt d open; mkt e open
 ok "$(q "$(rnxt)" 'd["start"]')" '["a"]' "settings: [repo.\"o/r\"] matches the Project root's origin -> 1"
-out=$(HOME="$D/home" python3 "$SCRIPT" mark-started --tasks a --tasks-dir "$D" --now "$NOW" --rollout "$D/ro.md"); rc=$?
-ok "$rc" 0 "settings: mark-started --rollout resolves the ceiling through the repo table too"
-has "$out" "progress: 0/5 merged, 5 queued" "settings: … and prints its progress line"
+# mark-started --rollout's progress line resolves the ceiling too: two merged tasks of 60 min each leave 3 pending,
+# so ~remaining is 60 x ceil(3 / ceiling): ~3h at the repo table's 1, ~2h at [defaults]' 2, ~1h at the built-in 4.
+scen settings-progress
+mkro "$five"; rs_toml '[defaults]' 'parallel_ceiling = 2' '[repo."o/r"]' 'parallel_ceiling = 1'
+git init -q "$D/repo"; git -C "$D/repo" remote add origin https://github.com/o/r
+for s in a b; do mkt $s done 'started: 2026-10-02T10:00+00:00' 'merged: 2026-10-02T11:00+00:00'; done
+mkt c open; mkt d open; mkt e open
+out=$(HOME="$D/home" python3 "$SCRIPT" mark-started --tasks c --tasks-dir "$D" --now "$NOW" --rollout "$D/ro.md"); rc=$?
+ok "$rc" 0 "settings: mark-started --rollout exits 0"
+has "$out" "progress: 2/5 merged, 3 queued" "settings: … and prints its progress line"
+has "$out" "~3h remaining (rough)" "settings: mark-started's ~remaining uses the repo table's ceiling 1"
+# Control: the same notes, read through status's progress line (the same _progress_line), move with the ceiling:
+# the repo table's 1 again, then [defaults]' 2 with the repo table gone, then the built-in 4 with no file.
+has "$(q "$(rst)" 'd["progress"]')" "~3h remaining (rough)" "settings: control: the repo table's 1 gives ~3h"
+rs_toml '[defaults]' 'parallel_ceiling = 2'
+has "$(q "$(rst)" 'd["progress"]')" "~2h remaining (rough)" "settings: control: [defaults]' 2 gives ~2h"
+rm -f "$D/home/.config/thread/rollouts.toml"
+has "$(q "$(rst)" 'd["progress"]')" "~1h remaining (rough)" "settings: control: no rollouts.toml (built-in 4) gives ~1h"
 scen settings-refused
 mkro "$five"; rs_toml '# operator settings' '[defaults]' 'parallel_ceiling = 0'
 mkt a open; mkt b open
@@ -204,6 +223,8 @@ J=$(rst); rc=$?
 ok "$rc" 0 "settings: status still exits 0 on a refused rollouts.toml"
 ok "$(q "$J" 'd["ceiling"]')" 'null' "settings: status ceiling null"
 has "$(q "$J" 'd["ceilingError"]')" "rollouts.toml:3:" "settings: status ceilingError names the file and line"
+has "$(q "$J" 'd["ceilingError"]')" "rollouts.toml at line 3, or stamp parallel_ceiling" "settings: … with the file's remedy"
+ok "$(q "$J" 'd["ceilingCause"]')" '"file"' "settings: status ceilingCause file"
 setkey ro parallel_ceiling 2
 ok "$(q "$(rnxt)" 'd["start"]')" '["a","b"]' "settings: a present parallel_ceiling never consults the (refused) file"
 scen settings-gone-root
@@ -216,6 +237,9 @@ has "$(cat "$D/err")" "stamp parallel_ceiling" "settings: … and the remedy"
 J=$(rst)
 ok "$(q "$J" 'd["ceiling"]')" 'null' "settings: status ceiling null for the gone root"
 has "$(q "$J" 'd["ceilingError"]')" "not a directory" "settings: status ceilingError says why"
+has "$(q "$J" 'd["ceilingError"]')" "the Project root is gone or has no readable origin: stamp parallel_ceiling" "settings: … with the root's remedy"
+hasnt "$(q "$J" 'd["ceilingError"]')" "fix " "settings: … never a file fix (no rollouts.toml exists here)"
+ok "$(q "$J" 'd["ceilingCause"]')" '"root"' "settings: status ceilingCause root, with no rollouts.toml at all"
 setkey ro parallel_ceiling 3
 ok "$(q "$(rnxt)" 'd["start"]')" '["a","b","c"]' "settings: the same note with parallel_ceiling: 3 runs at 3"
 scen settings-no-root
@@ -497,7 +521,7 @@ ok "$(q "$J" '[[t["blockerSummary"], t["priority"]] for t in d["tasks"] if t["sl
 ok "$(q "$J" 'sorted(set(k for t in d["tasks"] for k in t))')" \
   '["blockerSummary","integrating","merged","pr","priority","queueState","rung","rungDrift","setAsideAt","slug","solo","started","status","waitingOn"]' "status: the exact row keys (no owner key)"
 ok "$(q "$J" 'sorted(d)')" \
-  '["ceiling","ceilingError","counts","gitEnvHold","incomplete","ladder","pause_requested","paused","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline"]' "status: the exact top-level keys (no stored cursor; gitEnvHold, p14-6; ceilingError, p15-4)"
+  '["ceiling","ceilingCause","ceilingError","counts","gitEnvHold","incomplete","ladder","pause_requested","paused","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline"]' "status: the exact top-level keys (no stored cursor; gitEnvHold, p14-6; ceilingError and ceilingCause, p15-4)"
 setkey s-d integrating 2026-10-02T11:50+00:00
 printf '\n### Run 2 (2026-10-02T11:30+00:00)\n\nIntegration: conflict in a.py\n\n<!-- run 2 end sha=111111111111 -->\n' >> "$D/s-e.md"
 J=$(st "" 2026-10-02T12:00:00Z)

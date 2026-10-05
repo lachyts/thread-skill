@@ -84,11 +84,13 @@ Subcommands:
   status      Read-only situational scan for /thread:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
-              pause_requested, incomplete, ceiling, ceilingError, counts, progress, timeline, ladder,
+              pause_requested, incomplete, ceiling, ceilingError, ceilingCause, counts, progress, timeline, ladder,
               gitEnvHold, tasks}; `ceiling` is `parallel_ceiling`, or for a note without it the operator's
               rollout settings (rollout-settings.py for the Project root: rollouts.toml, then built-in 4),
               and null with `ceilingError` the reason when it is invalid or cannot be resolved (`next`
-              exits 1 on the same error; status still exits 0), else `ceilingError` is null;
+              exits 1 on the same error; status still exits 0), else `ceilingError` is null; `ceilingCause`
+              is what the error needs: `stamp` (the note's own value is invalid), `file` (rollouts.toml was
+              refused), `root` (the Project root is gone or its origin unreadable) or `resolver`, else null;
               `gitEnvHold` is the unacked git-env trips (Git-env hold, below), [] when none; `incomplete`
               is why the rollout must not run as written (below), or null. `ladder` is {source, rungs (names,
               bottom first), error}: the local ladder file through ladder.py's load(); a refused file gives
@@ -1385,33 +1387,53 @@ def _git_env_hold(rollout_note):
 ROLLOUT_SETTINGS_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "rollout-settings.py"
 
 
+# A null ceiling's cause (status's `ceilingCause`, status § 3's Ceiling unresolved flag) picks its remedy: "stamp"
+# (the note's own value is invalid: fix it), "file" (rollouts.toml was refused: fix the named line, or stamp the key),
+# "root" (the Project root is gone or its origin unreadable: stamp the key), "resolver" (it would not run: stamp it).
 def _resolved_ceiling(rollout_note):
-    """(ceiling, error) for a note with no `parallel_ceiling`: rollout-settings.py's resolve() for the note's
-    Project root (repo=None when it has no Project root line): rollouts.toml's [repo."<slug>"], then
-    [defaults], then the built-in. A refused file, a Project root that is not a directory or a resolver that
-    will not load is (None, error) with the resolver's own words, so `next` exits 1 and status flags it."""
+    """(ceiling, error, cause) for a note with no `parallel_ceiling`: rollout-settings.py's resolve() for the note's
+    Project root (repo=None when it has no Project root line): rollouts.toml's [repo."<slug>"], then [defaults],
+    then the built-in. Any failure is (None, error, cause), the error the resolver's own words plus the remedy
+    that fits its cause, so `next` exits 1 and status flags it; never a guessed ceiling."""
     root = _project_root(rollout_note)
     try:
         spec = importlib.util.spec_from_file_location("thread_rollout_settings", ROLLOUT_SETTINGS_PY)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
+    except Exception as e:
+        return None, (f"parallel_ceiling is absent and rollout-settings.py would not load: {e} "
+                      f"(stamp parallel_ceiling: on the rollout note)"), "resolver"
+    try:
         value = mod.resolve(repo=None if root is None else str(root))["settings"]["parallel_ceiling"]["value"]
-        return value, None
-    except Exception as e:  # any failure is next's ERROR and status's ceilingError, never a guessed ceiling
-        return None, (f"parallel_ceiling is absent and could not be resolved: {e} "
-                      f"(stamp parallel_ceiling: on the rollout note)")
+        return value, None, None
+    except mod.SettingsError as e:
+        if (e.subject or "").startswith("--repo "):
+            return None, (f"parallel_ceiling is absent and the Project root cannot be read: {e} (the Project root "
+                          f"is gone or has no readable origin: stamp parallel_ceiling: on the rollout note)"), "root"
+        where = f"{e.subject} at line {e.line}" if e.line is not None else f"{e.subject}"
+        return None, (f"parallel_ceiling is absent and the rollout settings were refused: {e} (fix {where}, "
+                      f"or stamp parallel_ceiling: on the rollout note)"), "file"
+    except Exception as e:
+        return None, (f"parallel_ceiling is absent and rollout-settings.py failed: {e} "
+                      f"(stamp parallel_ceiling: on the rollout note)"), "resolver"
 
 
-def _ceiling(rollout_note):
-    """(ceiling, error): `parallel_ceiling`, an integer >= 1; absent -> the operator's rollout settings
-    (_resolved_ceiling: rollouts.toml, then the built-in 4); anything else -> error."""
+def _ceiling_detail(rollout_note):
+    """(ceiling, error, cause): `parallel_ceiling`, an integer >= 1; absent -> the operator's rollout settings
+    (_resolved_ceiling: rollouts.toml, then the built-in 4); anything else -> error, cause "stamp"."""
     raw = rollout_note.get("parallel_ceiling")
     if raw is None:
         return _resolved_ceiling(rollout_note)
     s = _scalar(raw)
     if re.fullmatch(r"[0-9]+", s) and int(s) >= 1:
-        return int(s), None
-    return None, f"parallel_ceiling must be an integer >= 1, got {raw!r}"
+        return int(s), None, None
+    return None, (f"parallel_ceiling must be an integer >= 1, got {raw!r} "
+                  f"(fix the rollout note's parallel_ceiling: stamp)"), "stamp"
+
+
+def _ceiling(rollout_note):
+    """(ceiling, error): _ceiling_detail without the cause."""
+    return _ceiling_detail(rollout_note)[:2]
 
 
 def _verify_timeout(rollout_note):
@@ -2259,7 +2281,7 @@ def cmd_status(args) -> int:
         return 1
     now = _now(args)
     rollout_note = Note(rollout_path)
-    ceiling, ceiling_err = _ceiling(rollout_note)  # null when invalid or unresolvable: status still reports
+    ceiling, ceiling_err, ceiling_cause = _ceiling_detail(rollout_note)  # null when invalid or unresolvable: status still reports
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     rows, index = _rows(rollout_path, rollout_note, tasks_dir)
     counts = _counts(rows)
@@ -2305,8 +2327,10 @@ def cmd_status(args) -> int:
         "incomplete": incomplete(rollout_path, rollout_note, [(r["path"], r["note"]) for r in rows], index) or None,
         "ceiling": ceiling,
         # Why `ceiling` is null (an invalid `parallel_ceiling`, or an absent one rollout-settings.py could not
-        # resolve), else null: status § 3's Rollout settings refused flag. `next` exits 1 on the same error.
+        # resolve), else null: status § 3's Ceiling unresolved flag (with ceilingCause). `next` exits 1 on the same error.
         "ceilingError": ceiling_err,
+        # What ceilingError needs ("stamp", "file", "root" or "resolver", above _resolved_ceiling), else null.
+        "ceilingCause": ceiling_cause,
         "counts": counts,
         "progress": _progress_line(counts, timeline),
         # Per-task started:/merged: stamps — durable on the notes, so elapsed + the rough (~) remaining
