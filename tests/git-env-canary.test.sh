@@ -24,6 +24,7 @@ trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 # An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
 EH="$TMP/settings-home"; mkdir -p "$EH"
+export THREAD_EVENTS_DIR="$TMP/events"  # the Run record (run_record.py, ADR 0032) stays in temp
 g() { git -c user.name=t -c user.email=t@t -c init.defaultBranch=master -c commit.gpgsign=false "$@"; }
 
 S=""; O=""; R=""; V=""; RO=""; C2=""

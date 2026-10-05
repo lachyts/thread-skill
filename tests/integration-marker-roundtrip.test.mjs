@@ -12,7 +12,7 @@
 // Until p12-8 is on the base, every case SKIPs visibly. Whichever of p12-6 and p12-8 lands second runs it
 // against the other's real code; if p12-8's CLI changes (`reconcile --result --tasks-dir --now`, or the
 // status keys), this test is the contract to update in that PR.
-import { test, after } from 'node:test'
+import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -26,6 +26,10 @@ const RECONCILE = path.join(root, 'skills', 'execute', 'scripts', 'reconcile-rol
 const LEAD_INTEGRATE = path.join(root, 'skills', 'execute', 'scripts', 'lead-integrate.py')
 const PRESENT = fs.existsSync(RECONCILE)
 const SKIP = 'p12-8 reconcile-rollout.py not on this base'
+// The Run record (run_record.py, ADR 0032) the scripts may append lands in temp, never ~/.local/state.
+const EVENTS = fs.mkdtempSync(path.join(os.tmpdir(), 'imr-events-'))
+after(() => fs.rmSync(EVENTS, { recursive: true, force: true }))
+const PY_ENV = { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: path.join(EVENTS, 'events') }
 const T = loadEngine(['parseIntegrationMarker', 'resumeArgsError', 'REVISE_MARKER'])
 
 const sha = (c) => c.repeat(40)
@@ -80,7 +84,7 @@ function vault(agentParagraph) {
 // p15-4): HOME is an empty dir of this suite's own, so the operator's file never reaches the assertions.
 const SETTINGS_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'p126-settings-home-'))
 after(() => fs.rmSync(SETTINGS_HOME, { recursive: true, force: true }))
-const py = (args) => execFileSync('python3', [RECONCILE, ...args], { encoding: 'utf8', env: { ...process.env, HOME: SETTINGS_HOME, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1' } })
+const py = (args) => execFileSync('python3', [RECONCILE, ...args], { encoding: 'utf8', env: { ...PY_ENV, HOME: SETTINGS_HOME } })
 function reconcile(d, result, now = NOW) {
   const f = path.join(d, 'result.json')
   fs.writeFileSync(f, JSON.stringify(result))
@@ -323,7 +327,7 @@ const ownCall = (over = {}, script = {}) => row({ ...base, task: mkTask(over) },
   [`plan-judge:${SLUG} r1`]: { verdict: 'approve', feedback: [] },
   [`implement:${SLUG}`]: implOk, [`review:${SLUG} r1`]: { verdict: 'approve', feedback: [] }, ...script,
 })
-const leadJson = (args) => JSON.parse(execFileSync('python3', [LEAD_INTEGRATE, ...args], { encoding: 'utf8', env: { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1' } }))
+const leadJson = (args) => JSON.parse(execFileSync('python3', [LEAD_INTEGRATE, ...args], { encoding: 'utf8', env: PY_ENV }))
 const planOf = (d) => leadJson(['plan', '--note', path.join(d, `${SLUG}.md`)])
 function planSection(d) {
   const text = noteText(d)

@@ -26,7 +26,7 @@
 // script reads, § 3's gh/git reads and the default-branch read. Both speak rungs, never tiers (ADR 0029, p13-3):
 // status shows each task's rung and flags a Rung drift on unlanded tasks only and a refused ladder file, which
 // reorders no action; repair never edits the file and stops short of the hand-off under it (rung).
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -41,7 +41,10 @@ const SCRIPTS = path.join(root, 'skills', 'execute', 'scripts')
 const RECONCILE = path.join(SCRIPTS, 'reconcile-rollout.py')
 const LEAD = path.join(SCRIPTS, 'lead-integrate.py')
 const UNFINISHED = path.join(root, 'skills', '_shared', 'scripts', 'unfinished-rollout.py')
-const ENV = { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1' }
+// The Run record (run_record.py, ADR 0032) the scripts may append lands in temp, never ~/.local/state.
+const EVENTS = fs.mkdtempSync(path.join(os.tmpdir(), 'srq-events-'))
+after(() => fs.rmSync(EVENTS, { recursive: true, force: true }))
+const ENV = { ...process.env, TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1', THREAD_EVENTS_DIR: path.join(EVENTS, 'events') }
 
 function py(script, args, input, env = ENV) {
   const r = spawnSync('python3', [script, ...args], { encoding: 'utf8', env, input })

@@ -12,6 +12,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"   # physical: the stub gh logs the cwd gh ran in (macOS /var -> /private/var)
 trap 'rm -rf "$TMP"' EXIT
+export THREAD_EVENTS_DIR="$TMP/events"  # the Run record (run_record.py, ADR 0032) stays in temp
 NOW=2026-10-02T14:05:00Z
 
 fail=0

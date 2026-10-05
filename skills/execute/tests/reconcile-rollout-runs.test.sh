@@ -15,6 +15,7 @@ trap 'rm -rf "$D"' EXIT
 # An absent parallel_ceiling resolves through rollout-settings.py (~/.config/thread/rollouts.toml, p15-4): every
 # call that reaches it runs with HOME=$EH, an empty dir, so only the built-in applies and the operator's file never does.
 EH="$D/.settings-home"; mkdir -p "$EH"
+export THREAD_EVENTS_DIR="$D/events"  # the Run record (run_record.py, ADR 0032) stays in temp
 NOW=2026-10-02T14:05:00Z
 
 fail=0

@@ -33,8 +33,13 @@ at 09:43+11:00 on 4 Oct.
    never by a model. Where a transition happens only in the lead's own state, the lead calls a
    script to record it. The event catalogue and its schema belong to the implementation (P15).
 2. **It lives in `${THREAD_EVENTS_DIR:-${XDG_STATE_HOME:-~/.local/state}/thread/events}`**, the
-   convention `git-env-canary.py` already uses. On Lachy's machine the override points at
-   `_shared/state/thread-events/` so the record is backed up.
+   convention `git-env-canary.py` already uses. Every writer resolves this chain itself. Hooks,
+   Codex and launchd export no override, so the default path is the shared meeting point. To keep
+   the record backed up, Lachy's machine needs the default directory `~/.local/state/thread/events`
+   to be a symlink to `_shared/state/thread-events/`. That is a pending operator step, and a
+   precondition of P15's first emitters (p15-2): neither path exists yet, and if the emitters land
+   first, the first emit creates a real directory there that stays out of the backup until someone
+   migrates it by hand. `THREAD_EVENTS_DIR` is for tests and non-default setups.
 3. **A Retro turns the record into Tunings.** It scores a run on **Throughput**, weighs it against
    **Guardrails** whose bounds are operator settings, names what bound the run, and proposes
    Tunings. Lachy picks; a script applies them. The engine never changes its own settings mid-run.
@@ -51,7 +56,9 @@ Considered:
   the lead writes. That is model-written, so it drifts out of schema.
 - *Decision 2:* the plugin's data directory. No plugin-data variable is exported where the scripts
   run, and uninstalling the plugin deletes it. Hard-coding the estate path breaks the plugin for
-  other users. A file in each target repo makes cross-repo comparison harder.
+  other users. A file in each target repo makes cross-repo comparison harder. *An exported override
+  as the backup's home*: it doesn't reach hooks, Codex or launchd, so their events would split into
+  a second directory.
 - *Decision 3:* live auto-adjust now. Fast, but it acts on rules nobody has validated. Other
   objectives: wall-clock is noisy, cost per merge targets the wrong scarcity, and a scorecard with
   no headline is never decisive. A machine-wide Slot cap across rollouts is deferred until Retros
@@ -62,7 +69,9 @@ Considered:
 ## Consequences
 
 - **What it covers.** The decision is about the rollout lane. `/fresh-review` rounds may emit the
-  same record format from their own repo, under the override only.
+  same record format from their own repo, resolving the same directory chain (the override, then
+  `XDG_STATE_HOME`, then the home default), so a review round recorded with no override lands
+  beside the rollouts.
 - **Places that assume the old defaults.** Every place that hard-codes the rollout defaults moves
   to the resolved value: schedule's stamped frontmatter and its self-check, execute's defaults
   table, `reconcile-rollout.py`'s absent-value default, the template's `## Resource budget`
