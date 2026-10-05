@@ -373,9 +373,10 @@ there is nothing to clear. Per stage:
   then hand back. If the task re-blocks after that raise (in this run, or a raise for it is already recorded
   in `## Notes`), ask Lachy instead of raising again. With no `rejected` line it is its own run: no raise.
   When `max_review_rounds` is absent at both levels and `rollout-settings.py --repo <Project root>` exits 2 or 3,
-  make no raise:
-  report its stderr line and ask Lachy to fix `~/.config/thread/rollouts.toml` at the named line, or to stamp
-  `max_review_rounds:` on the task or rollout note. Repair never edits that file.
+  make no raise: report its stderr line and ask Lachy for the fix it names. A line naming
+  `~/.config/thread/rollouts.toml` is fixed at that line, or by a `max_review_rounds:` stamp on the task or
+  rollout note; a line naming `--repo` (the Project root is gone or its origin unreadable) only by that stamp.
+  Repair never edits that file.
 - **A `merge-task:` own-run set-aside whose cause Lachy cleared on GitHub** (its last log line `integrated`):
   relabel it at Integration, then hand back: nothing before Integration is redone; it merges through case
   (ii) when main has not moved. A code cause stays its own call.

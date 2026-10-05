@@ -18,8 +18,11 @@ the diagnosis; those are the treatment.
 Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` (older undated `<slug>-rollout` notes
 still resolve, see step 1) + its linked task notes, and makes **read-only** `gh`/`git` calls against the
 target repo (plus, for a RACE task, a plain read of its local verdict file, § 3). § 2's status read also
-reads the operator's local ladder file (`~/.config/thread/ladder.toml`); status itself invokes nothing new for
-it. Writes nothing. Obsidian + GitHub read access only.
+reads the operator's local ladder file (`~/.config/thread/ladder.toml`), and, for a rollout note with no
+`parallel_ceiling:`, the operator's rollout settings (`~/.config/thread/rollouts.toml`). Status itself runs
+`rollout-settings.py` for a task whose `max_review_rounds` is absent at both levels (§ 2). Either read of the
+settings file runs land.sh's `--origin-slug` read, and so one local `git remote get-url origin` in the Project root,
+when the file holds a repo table: no network. Writes nothing. Obsidian + GitHub read access only.
 
 ## Invocation forms
 
@@ -81,16 +84,18 @@ closed this note out, so this rollout must never be reinstated or resumed: its t
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py status --rollout <rollout-note>
 ```
 
-A pure read, no network: **every** task carrying `rollout: [[<slug>]]` (glob-by-backlink, so read-only tasks
+A pure read, no network (a note with no `parallel_ceiling:` resolves its ceiling through
+`rollout-settings.py`, whose only git call is a local `git remote get-url origin`): **every** task carrying `rollout: [[<slug>]]` (glob-by-backlink, so read-only tasks
 are included), sorted by schedule order (each task's first wikilink on a list-item or table-row line of the
 rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads these keys and no others:
 
 - top level: `paused` (the pause stamp; null when not paused), `pause_requested` (a soft pause is draining:
   execute → *Pausing + reinstating a rollout*), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
   included), `progress`, `timeline` and `ladder`, plus `gitEnvHold` (the unacked git-env trips, each
-  `{slug, kind, line}`; § 3's Git-env trip flag) and `ceilingError` (why `ceiling` is null: an invalid
-  `parallel_ceiling`, or an absent one `rollout-settings.py` could not resolve; null otherwise; § 3's Rollout
-  settings refused flag);
+  `{slug, kind, line}`; § 3's Git-env trip flag), `ceilingError` (why `ceiling` is null: an invalid
+  `parallel_ceiling`, or an absent one `rollout-settings.py` could not resolve; null otherwise) and
+  `ceilingCause` (what that error needs: `stamp`, `file`, `root` or `resolver`; null otherwise), both for § 3's
+  Ceiling unresolved flag;
 - per task: `slug`, `status`, `queueState`, `setAsideAt`, `pr`, `solo`, `started`, `merged`, `integrating`,
   `waitingOn`, `blockerSummary`, `rung` and `rungDrift`.
 
@@ -129,7 +134,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py inputs --
 K is the task's `max_review_rounds`, resolved task → rollout → rollouts.toml / built-in, as in execute § 3. For
 a key absent at both levels, status runs `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py
 --repo <Project root>` (a local file read, no network) and reads `settings.max_review_rounds.value`; on its exit 2
-or 3, omit the flag and flag "rollout settings refused: <its stderr line>" on the task. When K is not an integer
+or 3, omit the flag and flag "rollout settings refused: <its stderr line>" on the task (§ 3's Rollout settings
+refused flag). When K is not an integer
 ≥ 1, omit the flag (so `autoRevise` reads false) and flag "invalid round budget" on the task. The call writes
 nothing (`--repo` only computes a path). Status reads `branch`, `worktreePath`, `readyAt`, `resumeAt`,
 `autoRevise`, `lastRound` and `lastIntegration` from it. `lastIntegration` is the `## Integration log`'s LAST
@@ -211,11 +217,23 @@ takes none of them.
 - **Ladder refused:** `ladder.error` is set. Execute halts `ladder file refused` at each call's start until the
   file reads, and the fix is Lachy's edit to `<ladder.source>` (<ladder.error>). The flag reads only the vault
   and a local file, so it holds offline too.
-- **Rollout settings refused:** `ceilingError` is set, or a task carries § 2's "rollout settings refused"
-  re-entry flag. Render each verbatim. Until it resolves `next` exits 1 (or that task's K is unknown, so its
-  re-entry is not automatic); the fix is Lachy's edit to the file and line it names
-  (`~/.config/thread/rollouts.toml`), or a `parallel_ceiling:` / `max_review_rounds:` stamp on the note. The flag
-  reads only the vault and local files, so it holds offline too.
+- **Ceiling unresolved:** `ceilingError` is set. Render it verbatim: it ends with its own remedy. Until it
+  resolves `next` exits 1, so nothing starts. The fix follows `ceilingCause`, and each is Lachy's:
+  - `stamp`: the rollout note's own `parallel_ceiling:` is invalid (`0`, a word, a fraction): fix that stamp
+    to an integer >= 1. No settings file is involved.
+  - `file`: `~/.config/thread/rollouts.toml` was refused: fix it at the line `ceilingError` names, or stamp
+    `parallel_ceiling:` on the rollout note.
+  - `root`: the note's Project root is gone (or its origin cannot be read), whether or not a rollouts.toml
+    exists: stamp `parallel_ceiling:` on the rollout note (or correct its Project root line).
+  - `resolver`: `rollout-settings.py` would not run: stamp `parallel_ceiling:` on the rollout note.
+
+  The flag reads only the vault and local files, so it holds offline too.
+- **Rollout settings refused:** a task carries § 2's "rollout settings refused" re-entry flag: its K is
+  unknown, so its re-entry is not automatic. Render the stderr line verbatim. When it names
+  `~/.config/thread/rollouts.toml` (`rollout-settings: <path>:<line>: …`), the fix is Lachy's edit at that
+  line, or a `max_review_rounds:` stamp on the task or rollout note; when it names `--repo` (the Project root
+  is gone or its origin unreadable), the fix is that stamp. The flag reads only the vault and local files, so
+  it holds offline too.
 - **Git-env trip:** `gitEnvHold` is non-empty: execute's git-env canary (execute § 4.5 *Git-env canary*) saw
   the shared checkout's `refs/heads/<default>` or its bareness change during a window, and logged one
   `git-env trip` line per tripped window on the rollout note's `## Git-env log` that no later `git-env ack`
@@ -226,8 +244,8 @@ takes none of them.
 **Offline.** `--offline` skips this step: say the report is vault-only, and every resume or reinstate
 recommendation it makes carries the caveat "drift is invisible offline; re-run with the live check before
 resuming". It skips the live reads only: the RACE / UNVERIFIED, Rung drift and Ladder refused flags still
-render, from § 2's data and the local files. The Rollout settings refused flag renders offline too, from the
-same local reads. The Git-env trip flag reads only the vault, so it renders
+render, from § 2's data and the local files. The Ceiling unresolved and Rollout settings refused flags render
+offline too, from the same local reads. The Git-env trip flag reads only the vault, so it renders
 offline too.
 
 ### 4. Render the situational report
@@ -391,8 +409,8 @@ Keep the whole report scannable: it's a glance, not a wall of text.
     So add `/thread:repair [[<rollout>]]`: its live-queue mode hands those back, applies the raise, records a
     gate sign-off or asks Lachy the descope the verb refused or the block after a descope, without touching the
     run.
-11. Any drift flag but a Rung drift or a refused ladder, or a set-aside task other than an `autoRevise: true`
-    one → `/thread:repair [[<rollout>]]`.
+11. Any drift flag but a Rung drift, a refused ladder, an unresolved ceiling or refused rollout settings, or a
+    set-aside task other than an `autoRevise: true` one → `/thread:repair [[<rollout>]]`.
 12. Awaiting Integration, a handed-back running task (no `owner:`), an `autoRevise: true` set-aside, or a free
     slot, with no lead live → `/thread:execute [[<rollout>]]`.
 13. Nothing started → `/thread:execute [[<rollout>]]` to start.
@@ -401,9 +419,10 @@ Keep the whole report scannable: it's a glance, not a wall of text.
 the fix first: "fix `<ladder.source>` (<ladder.error>) first: execute halts `ladder file refused` at each call's
 start until it reads". Status never routes a refused ladder to `/thread:repair` on its own account, because
 repair never edits the file; another flag still sends the rollout there under action 11, carrying the fix.
-Refused rollout settings are handled the same way: they reorder nothing, add their fix ahead ("fix
-`~/.config/thread/rollouts.toml` at the named line, or stamp the key on the note, first"), are never routed to
-`/thread:repair` on their own account, and are not a drift flag for action 11.
+An unresolved ceiling and refused rollout settings are handled the same way: they reorder nothing, add their
+fix ahead (§ 3's fix for the flag's cause: the note's stamp, the file at its named line, or a stamp because the
+Project root is gone), are never routed to `/thread:repair` on their own account, because repair edits neither
+the rollout note's settings nor the file, and action 11 skips them.
 
 **Precedence.** The order is the precedence, with no override on top of it. Lineage (1, 2) comes before the
 version (3, 4): a supersede is how a legacy rollout migrates, so a legacy note that a successor's `supersedes:`
@@ -411,7 +430,8 @@ names needs its close-out, and `--regenerate` would only meet schedule's refusal
 comes before every reinstate, wait and resume (8 to 13), so status never sends an undecided RACE to
 `/thread:execute`. A RACE re-verify in flight is not yet undecided, so it waits (9, 10) instead of escalating.
 The RACE exception routes it to repair, never to a resume, once it turns undecided. A refused ladder adds its
-fix ahead of whichever action matches and moves none of them. Offline, every resume or reinstate
+fix ahead of whichever action matches and moves none of them, and so do an unresolved ceiling and refused
+rollout settings. Offline, every resume or reinstate
 recommendation carries § 3's caveat.
 
 ## Loopable
@@ -430,11 +450,13 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
 - **There is no cursor: the task notes are the progress.** Don't re-scan GitHub for progress; the live PR
   check is only for drift flags.
 - **Never call a writer.** Not `reconcile-rollout.py next` (it stamps `paused:` on a drained pause), `resume`,
-  `hand-back` or any other; `reconcile-rollout.py status` and `lead-integrate.py inputs` are the only Python
-  scripts status runs, and `default-branch.sh` the only shell one. Never `lead-integrate.py prepare`,
+  `hand-back` or any other; `reconcile-rollout.py status`, `lead-integrate.py inputs` and `rollout-settings.py`
+  (§ 2, a read) are the only Python scripts status runs, and `default-branch.sh` the only shell one (besides
+  the `land.sh --origin-slug` that `rollout-settings.py` runs itself). Never `lead-integrate.py prepare`,
   `set-aside`, `push` or `undo`, `merge-task.sh`, a `gh pr close`, `merge` or `reopen`, a `git push`, `fetch`
   or `update-ref`: of `gh` and `git`, only § 3's reads.
-- **Respect the § 3 budget.** One `worktree list`, one local `remote get-url`, one `gh pr view` per PR'd task
+- **Respect the § 3 budget.** One `worktree list`, one local `remote get-url` (plus the local one
+  `rollout-settings.py` makes per resolve when rollouts.toml holds a repo table, § 2), one `gh pr view` per PR'd task
   that has not landed, at most one guarded default-branch read and at most one guarded `gh pr list`. Status is
   a glance; keep it cheap.
 - **Don't parse the `## Queue` table** for the task list: use the `status` subcommand's glob-by-backlink (it
