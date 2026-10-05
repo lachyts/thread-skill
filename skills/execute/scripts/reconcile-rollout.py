@@ -100,7 +100,24 @@ Subcommands:
               Each line is the argument list for `reconcile-project.py <line> --kinds phase --apply`,
               so only phases this rollout touched are ever closed.
 
-  defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
+  fold-journals  For execute's completion ceremony and every Retro (p15-3, ADR 0032): `--rollout <note path |
+              [[slug]] | slug> [--dry-run]`. Resolves the slug with run_record.normalise_slug and never opens
+              the note, so a superseded, dropped or archived rollout folds the same way. Reads the rollout's
+              Run record: each `run-bound` runId (the last line for a runId wins its journalDir and call) is
+              folded from `<journalDir>/<runId>.json` into one `call-journal` line through run_record.emit
+              (the module's flock and dedupe; nothing else writes the record): status verbatim; mode = the
+              bound call, else the journal's args.mode, else task; tokens / durationMs / agents / startTime
+              from totalTokens / durationMs / agentCount / startTime, each kept only when an int >= 0 (else
+              dropped with a WARN). A runId already folded with a terminal status is reported `already
+              folded` before its journal is opened (journals are cleaned up after ~30 days); a fold equal to
+              the runId's latest line is `unchanged`. A missing journal, an unsafe runId (a path separator
+              or `..`), a relative journalDir, an unreadable or non-object journal, a journal naming another
+              runId, no status, or an unparsable record line is one stderr `WARN:` line, and the fold goes
+              on. Ends with `fold-journals: <slug>: N folded, M already folded, K unchanged, W warnings`.
+              Exit 0 (warnings included; no record file prints `no run record at <path>`), 1 the events
+              directory cannot be resolved, 2 usage or a bad slug.
+
+  defer     Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
               and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:` stamps
               (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
@@ -2318,6 +2335,158 @@ def cmd_touched_phases(args) -> int:
     return 0
 
 
+# ---- fold-journals ----------------------------------------------------------
+
+# run_record.py, shared with every skill: the Run record's one writer and its schema (ADR 0032).
+RUN_RECORD_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "run_record.py"
+_RUN_RECORD = None
+
+
+def _run_record():
+    """run_record.py, loaded on first use so no other subcommand pays for it or can fail on it."""
+    global _RUN_RECORD
+    if _RUN_RECORD is None:
+        spec = importlib.util.spec_from_file_location("thread_run_record", RUN_RECORD_PY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _RUN_RECORD = mod
+    return _RUN_RECORD
+
+
+# A Workflow runId as it names its journal file: no separator, no `..`, so the path stays in journalDir.
+RUN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+# journal key -> call-journal field, each an int >= 0 or dropped with a WARN
+JOURNAL_INTS = (("totalTokens", "tokens"), ("durationMs", "durationMs"), ("agentCount", "agents"),
+                ("startTime", "startTime"))
+
+
+def _record_lines(path):
+    """(the record's parsed lines (dicts only), the 1-based numbers of the lines that do not parse)."""
+    out, bad = [], []
+    with open(path, "rb") as f:
+        for n, raw in enumerate(f, 1):
+            try:
+                d = json.loads(raw)
+            except ValueError:
+                bad.append(n)
+                continue
+            if isinstance(d, dict):
+                out.append(d)
+    return out, bad
+
+
+def cmd_fold_journals(args) -> int:
+    """Fold each bound Workflow call's journal into the rollout's Run record as a call-journal line."""
+    rr = _run_record()
+    try:
+        slug = rr.normalise_slug(args.rollout, "rollout")
+    except rr.Refused as e:
+        print(f"ERROR: Refused: {e}", file=sys.stderr)
+        return 2
+    try:
+        path = rr.record_path(slug)
+    except ValueError as e:
+        print(f"ERROR: cannot resolve the events directory: {e}", file=sys.stderr)
+        return 1
+    if not os.path.exists(path):
+        print(f"fold-journals: {slug}: no run record at {path}")
+        return 0
+    lines, bad = _record_lines(path)
+
+    bound = {}  # runId -> the latest run-bound line for it, in first-appearance order
+    for d in lines:
+        if d.get("kind") == "run-bound" and isinstance(d.get("runId"), str):
+            bound[d["runId"]] = d
+    terminal, latest = set(), {}
+    for d in lines:
+        if d.get("kind") == "call-journal" and isinstance(d.get("runId"), str):
+            latest[d["runId"]] = d
+            if d.get("status") in rr.TERMINAL_STATUSES:
+                terminal.add(d["runId"])
+
+    folded = already = unchanged = warnings = 0
+
+    def warn(msg):
+        nonlocal warnings
+        warnings += 1
+        print(f"WARN: {msg}", file=sys.stderr)
+
+    for n in bad:  # a crash can leave a partial line (run_record's docstring): skipped, never fatal
+        warn(f"{path}:{n}: the record line does not parse; skipped")
+
+    for run_id, b in bound.items():
+        task = b.get("task")
+        who = f"{run_id} [[{task}]]"
+        if run_id in terminal:
+            print(f"already folded {who}")
+            already += 1
+            continue
+        if not RUN_ID_RE.fullmatch(run_id) or ".." in run_id:
+            warn(f"{who}: runId is not a journal file name ([A-Za-z0-9][A-Za-z0-9_.-]*, no ..); skipped")
+            continue
+        jdir = b.get("journalDir")
+        jdir = os.path.expanduser(jdir) if isinstance(jdir, str) else ""
+        if not jdir or not os.path.isabs(jdir):
+            warn(f"{who}: journalDir {b.get('journalDir')!r} is not an absolute path; skipped")
+            continue
+        jpath = os.path.join(jdir, run_id + ".json")
+        if not os.path.exists(jpath):
+            warn(f"{who}: no journal at {jpath} (still in flight, or cleaned up)")
+            continue
+        try:
+            with open(jpath, "rb") as f:
+                journal = json.load(f)
+        except (OSError, ValueError) as e:
+            warn(f"{who}: cannot read the journal {jpath}: {e}")
+            continue
+        if not isinstance(journal, dict):
+            warn(f"{who}: the journal {jpath} is not a JSON object; skipped")
+            continue
+        if journal.get("runId") != run_id:
+            warn(f"{who}: the journal {jpath} names runId {journal.get('runId')!r}; skipped")
+            continue
+        status = journal.get("status")
+        if not isinstance(status, str) or not status:
+            warn(f"{who}: the journal {jpath} has no status; skipped")
+            continue
+
+        jargs = journal.get("args")
+        jmode = jargs.get("mode") if isinstance(jargs, dict) else None
+        mode = b.get("call") or (jmode if isinstance(jmode, str) and jmode else "task")
+        fields = {"runId": run_id, "status": status, "mode": mode}
+        for key, field in JOURNAL_INTS:
+            if key not in journal:
+                continue
+            v = journal[key]
+            if isinstance(v, int) and not isinstance(v, bool) and v >= 0:
+                fields[field] = v
+            else:
+                warn(f"{who}: {key} {v!r} is not an integer >= 0; dropped from the fold")
+
+        prev = latest.get(run_id)  # the writer's own test (_same_fold): the kind fields and task, ts and host aside
+        if prev is not None and prev.get("task") == task and \
+                {k: v for k, v in prev.items() if k not in rr.COMMON} == fields:
+            print(f"unchanged {run_id}")
+            unchanged += 1
+            continue
+        nums = " ".join(f"{k}={fields[k]}" for k in ("tokens", "durationMs", "agents") if k in fields)
+        desc = f"{who} {mode} status={status}" + (f" {nums}" if nums else "")
+        if args.dry_run:
+            print(f"would fold {desc}")
+            folded += 1
+            continue
+        if rr.emit(slug, "call-journal", task, fields):
+            print(f"folded {desc}")
+            folded += 1
+        else:
+            warn(f"{who}: the run record refused or could not write the fold (see run_record above)")
+
+    verb = "would fold" if args.dry_run else "folded"
+    print(f"fold-journals: {slug}: {folded} {verb}, {already} already folded, {unchanged} unchanged, "
+          f"{warnings} warnings")
+    return 0
+
+
 # ---- defer ------------------------------------------------------------------
 
 def cmd_defer(args) -> int:
@@ -3146,6 +3315,12 @@ def main() -> int:
     tp.add_argument("--rollout", required=True, help="path to the rollout note")
     tp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     tp.set_defaults(func=cmd_touched_phases)
+
+    fj = sub.add_parser("fold-journals", help="fold each bound Workflow call's journal into the rollout's Run record "
+                                              "as call-journal lines (idempotent; ADR 0032)")
+    fj.add_argument("--rollout", required=True, help="the rollout: a note path, [[slug]] or a bare slug (the note is never read)")
+    fj.add_argument("--dry-run", action="store_true", help="print what would fold; write nothing")
+    fj.set_defaults(func=cmd_fold_journals)
 
     df = sub.add_parser("defer", help="pop task(s) out of a rollout back to open backlog (/thread:repair)")
     df.add_argument("--tasks", required=True, help="comma-separated task slugs to defer")
