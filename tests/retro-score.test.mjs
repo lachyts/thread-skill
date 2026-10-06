@@ -52,8 +52,9 @@ function emitAll(home, rollout, events) {
 }
 
 // One task's life: a Slot from..to (ready at its end), then a lane holding, then its merge. A terminal call journal
-// ends a minute before the Slot frees, unless journal is false (or an object to merge into the journal line).
-function life(slug, { from, to, c, lane, settings, journal = true, merged = true, tokens = 100000, outcome = 'ready' }) {
+// ends a minute before the Slot frees, unless journal is false (or an object to merge into the journal line). The
+// journal line is stamped at the Slot's end, or at `fold` (fold-journals stamps the fold time, not the call's).
+function life(slug, { from, to, c, lane, settings, journal = true, merged = true, tokens = 100000, outcome = 'ready', fold = to }) {
   const out = [
     [from, 'slot-taken', slug, { settings: settings || S(c), start: 'start' }],
     [from, 'run-bound', slug, { runId: `wf_${slug}`, journalDir: '/nonexistent/workflows', call: 'task' }],
@@ -62,7 +63,7 @@ function life(slug, { from, to, c, lane, settings, journal = true, merged = true
   if (outcome === 'ready') out.push([to, 'ready', slug, { pr: 7 }])
   if (journal) {
     const j = { runId: `wf_${slug}`, status: 'completed', mode: 'task', startTime: ms(from), durationMs: ms(to) - ms(from) - 60000, tokens }
-    out.push([to, 'call-journal', null, typeof journal === 'object' ? { ...j, ...journal } : j])
+    out.push([fold, 'call-journal', null, typeof journal === 'object' ? { ...j, ...journal } : j])
   }
   if (lane) {
     out.push([lane[0], 'lane-taken', slug, {}])
@@ -137,7 +138,7 @@ function signsHold(out) {
   }
   for (const w of out.withheld) {
     assert.equal(w.to, w.ranAt + w.direction, `${w.id}: to = ranAt + direction`)
-    assert.ok(Math.sign(w.to - w.from) !== w.direction || /Guardrail/.test(w.reason), `${w.id}: withheld for a reason`)
+    assert.ok(Math.sign(w.to - w.from) !== w.direction || /Guardrail|lane \d+% busy/.test(w.reason), `${w.id}: withheld for a reason`)
   }
 }
 
@@ -181,6 +182,7 @@ test('slot-bound: running time leaves out the pause and the hold, and the ceilin
   assert.equal(out.merges.count, 6)
   assert.equal(out.throughput, 0.857)
   assert.equal(out.slots.ceiling, 3)
+  assert.deepEqual(out.slots.ceilingSteps, [{ at: Z(at('00:00')), value: 3 }], 'one entry: the ceiling never changed')
   assert.equal(out.slots.fullShare, 0.7143)
   assert.equal(out.slots.utilisation, 0.7857)
   assert.equal(out.slots.capacityHours, 21)
@@ -224,6 +226,29 @@ test('lane-bound: the lane is the binding constraint and no key is proposed', (t
   assert.equal(out.throughput, 0.6)
 })
 
+// Ceiling 2, Slots full 00:00-10:00 and the lane held 03:00-10:00 (70% of running time, waits flat): Slot-bound,
+// and the raise is shown but withheld, because the extra Slot's work would queue on the lane.
+test('slot-bound with the lane 60-80% busy: the raise is withheld with the lane\'s share, never silently dropped', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs([
+    ...life('a', { from: at('00:00'), to: at('03:00'), c: 2, lane: [at('03:00'), at('06:00')] }),
+    ...life('b', { from: at('00:00'), to: at('06:00'), c: 2, lane: [at('06:00'), at('10:00')] }),
+    ...life('c', { from: at('03:00'), to: at('10:00'), c: 2, merged: false }),
+    ...life('d', { from: at('06:00'), to: at('10:00'), c: 2, merged: false }),
+  ]))
+  const out = scored(home, ['--until', at('10:00'), '--settings', writeSettings(home, { parallel_ceiling: 2 })])
+  assert.equal(out.runningTime.hours, 10)
+  assert.equal(out.lane.busyShare, 0.7)
+  assert.equal(out.lane.waitsClimbing, false)
+  assert.equal(out.binding.constraint, 'slot-bound')
+  assert.deepEqual(out.proposals, [])
+  assert.equal(out.withheld.length, 1)
+  const [w] = out.withheld
+  assert.deepEqual([w.key, w.from, w.to, w.ranAt, w.rule, w.direction], ['parallel_ceiling', 2, 3, 2, 'slot-bound-raise', 1])
+  assert.equal(w.reason, 'lane 70% busy, at or above 60%: a raise would queue on the Integration lane')
+  signsHold(out)
+})
+
 // ---- 3. direction and cause -------------------------------------------------------------------------------------
 
 test('(a) rollouts.toml edited after the run started, already past the evidence: withheld', (t) => {
@@ -263,6 +288,7 @@ test('(c) a mid-run ceiling change: ran at the time-weighted value, flagged with
   const out = scored(home, ['--until', at('10:00'), '--settings', writeSettings(home, { parallel_ceiling: 3 })])
   assert.equal(out.runningTime.hours, 10)
   assert.equal(out.slots.ceiling, 3, '7 h at 3 against 3 h at 5')
+  assert.deepEqual(out.slots.ceilingSteps, [{ at: Z(at('00:00')), value: 3 }, { at: Z(at('07:00')), value: 5 }], 'the changes only')
   assert.ok(has(out.flags, new RegExp(`^ceiling changed mid-window 3 → 5 at ${Z(at('07:00')).replace(/\./g, '\\.')} \\(a note or task override\\): split with --since/--until$`)))
   const [p] = out.proposals
   assert.deepEqual([p.from, p.to, p.ranAt, p.ranAtCause], [3, 4, 3, null])
@@ -548,6 +574,54 @@ test('a dead lead: a terminal call with its Slot left open is excluded past the 
   assert.ok(has(out.flags, /^lead absent: \[\[a\]\]'s call wf_a ended at/))
 })
 
+// fold-journals stamps a call-journal line with the fold time (here 12:00), so a split at 06:00 must still read it.
+test('journals folded after --until are read, and each call is clamped to --until', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs([
+    ...life('a', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')], fold: at('12:00') }),
+    ...life('b', { from: at('00:00'), to: at('10:00'), c: 2, lane: [at('10:00'), at('10:10')], tokens: 300000, fold: at('12:00') }),
+  ]))
+  const early = scored(home, ['--until', at('06:00')])
+  assert.equal(early.runningTime.hours, 6, 'b\'s call ran past 06:00: its Slot is active to --until')
+  assert.deepEqual(early.runningTime.excluded, [])
+  assert.equal(early.window.partial, true, 'a Slot still running at --until')
+  assert.equal(early.merges.count, 1)
+  assert.equal(early.headline.tokensPerMerge, 400000, 'both calls started in the window')
+  assert.ok(!has(early.flags, /never finished|no call journal/))
+  const whole = scored(home, ['--until', at('12:00')])
+  assert.equal(whole.runningTime.hours, 10.167)
+  assert.equal(whole.window.partial, false)
+  assert.equal(whole.headline.tokensPerMerge, 200000)
+})
+
+// A restart after a dead lead re-takes the open Slot (keeping its first start) and binds a second call: the gap
+// between the first call's last activity and the second call's start is not running time.
+test('a dead lead inside one Slot: the gap between its calls is excluded and labelled', (t) => {
+  const restart = (wf1) => byTs([
+    [at('00:00'), 'slot-taken', 'a', { settings: S(2) }],
+    [at('00:00'), 'run-bound', 'a', { runId: 'wf1', journalDir: '/nonexistent', call: 'task' }],
+    [at('09:00'), 'slot-taken', 'a', { settings: S(2) }],
+    [at('09:00'), 'run-bound', 'a', { runId: 'wf2', journalDir: '/nonexistent', call: 'task' }],
+    [at('10:00'), 'slot-freed', 'a', { outcome: 'ready' }],
+    [at('11:00'), 'call-journal', null, { runId: 'wf1', startTime: ms(at('00:00')), durationMs: 3600e3, tokens: 5, ...wf1 }],
+    [at('11:00'), 'call-journal', null, { runId: 'wf2', status: 'completed', startTime: ms(at('09:00')), durationMs: 3600e3, tokens: 5 }],
+  ])
+  const home = tmpHome(t)
+  emitAll(home, 'demo', restart({ status: 'running' }))
+  const out = scored(home, ['--until', at('10:00')])
+  assert.equal(out.runningTime.hours, 2.5, '00:00-01:30 (wf1 + grace) and 09:00-10:00 (wf2)')
+  assert.deepEqual(out.runningTime.excluded.map((e) => [e.kind, e.start, e.end]), [['never-finished', Z(at('01:30')), Z(at('09:00'))]])
+  assert.ok(has(out.flags, /^call wf1 never finished: its last activity was .*; wf2 re-took \[\[a\]\]'s Slot at /))
+  assert.equal(out.window.activeEnd, Z(at('10:00')))
+
+  const home2 = tmpHome(t)
+  emitAll(home2, 'demo', restart({ status: 'failed' }))
+  const out2 = scored(home2, ['--until', at('10:00')])
+  assert.equal(out2.runningTime.hours, 2.5)
+  assert.deepEqual(out2.runningTime.excluded.map((e) => [e.kind, e.start, e.end]), [['lead-absent', Z(at('01:30')), Z(at('09:00'))]])
+  assert.ok(has(out2.flags, /^lead absent: \[\[a\]\]'s call wf1 ended at .*; the next call wf2 started at /))
+})
+
 test('no call journal: the Slot ends at its slot-freed, flagged', (t) => {
   const home = tmpHome(t)
   emitAll(home, 'demo', life('a', { from: at('00:00'), to: at('02:00'), c: 2, journal: false, lane: [at('02:00'), at('02:10')] }))
@@ -571,6 +645,19 @@ test('load: an overlapping same-host record counts; another host\'s lines are pa
   assert.deepEqual(out.load.rollouts.map((r) => [r.rollout, r.start, r.end, r.slotsTaken, r.merges]), [['other-run', Z(at('01:00')), Z(at('03:10')), 1, 1]])
   assert.equal(out.load.otherHostLinesIgnored, 2)
   assert.notEqual(out.host, 'elsewhere-box')
+})
+
+// demo ran Mon 00:00-02:10; other ran Tue 00:00-05:10; the Retro runs Wed. Load is the overlap with demo's running
+// time, never with the [since, until] window, so a later rollout is no load.
+test('load: a Retro run long after the rollout never counts a later same-host rollout', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs(life('a', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] })))
+  emitAll(home, 'other', byTs(life('z', { from: D(6, '00:00'), to: D(6, '05:00'), c: 2, lane: [D(6, '05:00'), D(6, '05:10')] })))
+  emitAll(home, 'during', byTs(life('y', { from: at('01:00'), to: at('04:00'), c: 2 })))
+  const out = scored(home, ['--until', D(7, '00:00')])
+  assert.equal(out.runningTime.hours, 2.167)
+  assert.deepEqual(out.load.rollouts.map((r) => [r.rollout, r.start, r.end, r.hours]), [['during', Z(at('01:00')), Z(at('02:10')), 1.167]],
+    'only the overlap with demo\'s running time: other is no load, during counts up to 02:10')
 })
 
 test('reviews and tunings are refused as the scored rollout (exit 2)', (t) => {

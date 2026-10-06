@@ -9,25 +9,35 @@ python >= 3.8, stdlib only. Called by skills/retro/SKILL.md (step 4) as:
 
 Reads: the rollout's record `<events dir>/<slug>.jsonl` (run_record.py's directory chain), every other
 `<slug>.jsonl` there for load (reviews.jsonl and tunings.jsonl are never read as rollouts; only lines from the
-scored record's host count), tunings.jsonl for the baseline, earlier Tunings and their agreement, and the
-rollout note's frontmatter (parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, captured)
-through reconcile-rollout.py's Note, for the cause labels only. --settings is rollout-settings.py's JSON for
+scored record's host count, and only where a record's span overlaps this run's running time, not the window, so
+a Retro run long after the rollout never counts a later rollout), tunings.jsonl for the baseline, earlier
+Tunings and their agreement, and the rollout note's frontmatter (parallel_ceiling, max_review_rounds,
+max_iterations, max_plan_rounds, captured) through reconcile-rollout.py's Note, for the cause labels only. --settings is rollout-settings.py's JSON for
 the Project root: each key's resolved value now (a proposal's `from`), the Guardrail bounds, and `path`, whose
 mtime feeds the cause labels.
 
 Times. --since and --until take Z or an offset (run_record's `_stamp` rule; a naive stamp is refused) and
 everything printed is UTC `Z`. --since defaults to the record's first slot-taken, else its first line;
---until to now (the Retro's moment). Lines after --until are not read. With no line the score is empty and
-flagged "no record".
+--until to now (the Retro's moment). Lines after --until are not read, except `call-journal` lines: fold-journals
+stamps them with the fold time (completion, or the Retro's start), so each is read whatever its ts, and its call's
+startTime + durationMs is clamped to --until (a call still running at --until is read as running then). With no
+line the score is empty and flagged "no record".
 
 Running time is the time in [since, until] when the run is active and not paused. Active: a Slot is open (to
 its effective end, below), or the lane is held with no merge, race or git-env hold open and no Slot open, for
 at most LANE_ONLY_CAP of each such stretch of one holding (a pause splits a stretch). Paused spans (paused .. resumed) are excluded; the drain before a
 soft pause's stamp counts as running. A hold with no Slot open is a wait on Lachy: excluded, listed by kind.
-- A Slot's effective end. Its call is the latest run-bound (not an integrate call) for its task inside it, and
-  that call's journal is its latest terminal call-journal line, else its latest line.
+- A Slot's active intervals. Its calls are every run-bound (not an integrate call) for its task inside it (a
+  restart after a dead lead re-takes the open Slot, keeping its first start, and binds a new call); a call's
+  journal is its latest terminal call-journal line, else its latest line. The Slot is active from its start to
+  the first call's start, then over each call: from its startTime (else its run-bound) to its end, or its last
+  activity when not terminal, plus GRACE. An earlier call stops at the next call's start; the gap between them is
+  excluded and flagged ("lead absent" after a terminal call, "never finished" after one that is not). Missing
+  timing on an earlier call runs it to the next call's start (flagged). The last call sets the Slot's
+  effective end:
   - Terminal, with startTime and durationMs: the earlier of slot-freed (or --until) and the call's end plus
-    GRACE. A later slot-freed leaves a gap, excluded and flagged "lead absent".
+    GRACE. A later slot-freed leaves a gap, excluded and flagged "lead absent". A terminal call that ends after
+    --until was still running at --until: read as non-terminal with its last activity at --until.
   - Non-terminal: its last activity is startTime + durationMs, else the task's last record line (flagged).
     When last activity + GRACE reaches --until on an open Slot, the Slot runs to --until and the window is
     `partial` (a genuine mid-run tail); otherwise it ends at last activity + GRACE (or its earlier
@@ -41,10 +51,12 @@ soft pause's stamp counts as running. A hold with no Slot open is a wait on Lach
 
 Scores: Throughput = merges (distinct tasks with a `merged` line in the window, read-only ones included) per
 running hour (0.0 with no merge; null with no running time, flagged). Slots: the Parallel ceiling is a step
-function over the settings on slot-taken and idle-slots; full = Slots in use at or above the ceiling in force.
-Idle Slot time is labelled by its idle-slots markers (the first marker labels its idle span from the start,
-a change of reason splits it), else "unexplained". Lane: busy share, Integrations (lane holdings started in
-the window) and each ready -> lane-taken wait. Guardrails: tokens per merge (terminal journal tokens / merges),
+function over the settings on slot-taken and idle-slots (`ceilingSteps` lists its changes only); full = Slots
+in use at or above the ceiling in force. Idle Slot time is labelled by its idle-slots markers (the first
+marker labels its idle span from the start, a change of reason splits it), else "unexplained". Lane: busy share, Integrations (lane holdings started in
+the window) and each ready -> lane-taken wait. Guardrails: tokens per merge (the tokens of every call journal,
+its latest terminal line else its latest, so a call still running counts what it has spent, whose call started
+in the window by its startTime, else its run-bound; integrate calls included; over merges),
 set-aside rate (set-asides / (Slots closed + Integrations)), conflict rate (conflicting lane-freed /
 Integrations, with the integrator-path share beside it) and quota stalls, against their [guardrails] bounds:
 a % rise for tokens, point rises for the two rates (both measured from the baseline) and an absolute count for
@@ -58,8 +70,9 @@ LANE_BOUND_BUSY of running time, or the waits climbing: the last third's mean ov
 first third's and at least WAIT_CLIMB_MIN minutes); slot-bound (Slots full >= SLOT_BOUND_FULL); dependency-bound
 (idle >= DEPENDENCY_IDLE of Slot capacity, dependency plus solo the largest reason); else none-clear.
 
-Proposals, one rule each: slot-bound with the lane under LANE_FREE_FOR_RAISE busy -> parallel_ceiling +1;
-quota-bound -> parallel_ceiling -1; >= ROUND_SET_ASIDES set-asides of reasonClass review-rounds ->
+Proposals, one rule each: slot-bound -> parallel_ceiling +1, withheld ("lane N% busy, at or above 60%") when the
+lane is LANE_FREE_FOR_RAISE busy or more (so a Slot-bound run always shows its raise); quota-bound ->
+parallel_ceiling -1; >= ROUND_SET_ASIDES set-asides of reasonClass review-rounds ->
 max_review_rounds +1; of plan-rejected -> max_plan_rounds +1. `ranAt` is the value the run ran at: the ceiling
 in force for most of the running time (ties to the later), a round cap's most common value on the window's
 slot-taken lines. to = ranAt + direction; from = rollouts.toml's resolved value now (--settings). A proposal is
@@ -263,18 +276,28 @@ class Score:
         self.pauses, pause = [], None
         self.steps, self.markers, self.merges, self.readies = [], [], [], []
         self.set_asides, self.stalls, self.bound, self.slot_taken = [], [], [], []
-        self.journals, self.last_line = {}, {}
+        self.journals, self.last_line, self.task_lines = {}, {}, {}
         last_t = None
         for t, _n, d in lines:
-            if t > until:
-                break
-            last_t = t
             kind, task = d.get("kind"), d.get("task")
+            if kind == "call-journal" and isinstance(d.get("runId"), str):
+                # read whatever its ts: fold-journals stamps the fold time (completion, or the Retro's start), not
+                # the call's; the call's own startTime and durationMs are clamped to --until in slot_ends
+                prev = self.journals.get(d["runId"])
+                if prev is None or prev.get("status") not in RR.TERMINAL_STATUSES or \
+                        d.get("status") in RR.TERMINAL_STATUSES:
+                    self.journals[d["runId"]] = d
+                continue
+            if t > until:
+                continue
+            last_t = t
             if task:
                 self.last_line[task] = t
+                self.task_lines.setdefault(task, []).append((t, kind))
             settings = d.get("settings")
-            if kind in ("slot-taken", "idle-slots") and _settings_value(settings, "parallel_ceiling"):
-                self.steps.append((t, settings["parallel_ceiling"]))
+            if kind in ("slot-taken", "idle-slots") and _settings_value(settings, "parallel_ceiling") and \
+                    (not self.steps or self.steps[-1][1] != settings["parallel_ceiling"]):
+                self.steps.append((t, settings["parallel_ceiling"]))  # a change only (lines arrive in time order)
             if kind == "slot-taken" and task:
                 self.slot_taken.append((t, task, settings if isinstance(settings, dict) else {}))
                 if task not in open_slot:
@@ -337,11 +360,6 @@ class Score:
                 self.stalls.append(t)
             elif kind == "run-bound" and task and isinstance(d.get("runId"), str):
                 self.bound.append((t, task, d["runId"], d.get("call")))
-            elif kind == "call-journal" and isinstance(d.get("runId"), str):
-                prev = self.journals.get(d["runId"])
-                if prev is None or prev.get("status") not in RR.TERMINAL_STATUSES or \
-                        d.get("status") in RR.TERMINAL_STATUSES:
-                    self.journals[d["runId"]] = d
         self.last_t = last_t
         end = min(until, last_t) if last_t is not None else until
         if lane is not None:
@@ -355,55 +373,111 @@ class Score:
         if pause is not None:
             pause["end"] = end
             self.flag("a %s pause still open at the last line read (%s): it ends there" % (pause["mode"], fmt(end)))
-        self.steps.sort()
 
     def slot_ends(self, until):
-        """Each Slot's effective end, the gaps it leaves, and whether the window is partial."""
+        """Each Slot's active intervals from every call bound to it, the gaps it leaves, and whether the window is
+        partial."""
         self.partial = False
         self.gaps = []  # (kind, why, (a, b))
         for s in self.slots:
             hi = s["end"] if s["end"] is not None else until
             calls = [b for b in self.bound if b[1] == s["task"] and s["start"] <= b[0] <= hi and b[3] != "integrate"]
-            call = calls[-1] if calls else None
-            j = self.journals.get(call[2]) if call else None
-            st, dur = (j or {}).get("startTime"), (j or {}).get("durationMs")
-            timed = isinstance(st, int) and isinstance(dur, int)
             who = "[[%s]]" % s["task"]
-            if j is not None and j.get("status") in RR.TERMINAL_STATUSES and timed:
-                cap = st + dur + GRACE
-                eff = min(hi, cap)
-                if cap < hi:
-                    self.gaps.append(("lead-absent", "%s's call %s ended at %s; its Slot stayed open (lead absent)"
-                                      % (who, call[2], fmt(st + dur)), (cap, hi)))
-                    self.flag("lead absent: %s's call %s ended at %s but its Slot stayed open until %s"
-                              % (who, call[2], fmt(st + dur), fmt(hi)))
-            elif j is None and s["end"] is not None:
-                eff = s["end"]
-                self.flag("no call journal for %s: its Slot ends at its slot-freed" % who)
-            elif j is not None and j.get("status") in RR.TERMINAL_STATUSES:
-                eff = s["end"] if s["end"] is not None else self._tail(s, call, until, who)
-                self.flag("call %s's journal has no startTime or durationMs: %s's Slot ends at its slot-freed"
-                          % (call[2], who))
+            if not calls:
+                end = self._last_call(s, None, hi, until, who)
+                s["iv"] = [(s["start"], max(s["start"], end))]
+                continue
+            starts = [self._call_start(c, s["start"], hi) for c in calls]
+            iv = [(s["start"], starts[0])]  # the lead's set-up before the first call counts
+            for i, call in enumerate(calls):
+                if i + 1 < len(calls):
+                    end = self._earlier_call(s, call, starts[i], calls[i + 1], starts[i + 1], until, who)
+                else:
+                    end = self._last_call(s, call, hi, until, who)
+                iv.append((starts[i], max(starts[i], end)))
+            s["iv"] = union(iv) or [(s["start"], s["start"])]
+
+    def _call_start(self, call, lo, hi):
+        st = (self.journals.get(call[2]) or {}).get("startTime")
+        t = st if isinstance(st, int) and not isinstance(st, bool) else call[0]
+        return min(max(t, lo), hi)
+
+    def _timing(self, call):
+        """(journal, terminal, end) for a call, end = startTime + durationMs (None when either is missing)."""
+        j = self.journals.get(call[2]) if call else None
+        st, dur = (j or {}).get("startTime"), (j or {}).get("durationMs")
+        timed = isinstance(st, int) and isinstance(dur, int) and not isinstance(st, bool) and not isinstance(dur, bool)
+        return j, j is not None and j.get("status") in RR.TERMINAL_STATUSES, (st + dur) if timed else None
+
+    def _earlier_call(self, s, call, start, nxt, nxt_start, until, who):
+        """An earlier call of a Slot a later call re-took (a restart after a dead lead): it covers its start to its
+        end (terminal) or last activity (not), plus GRACE, at most to the next call's start; the rest is a gap."""
+        j, terminal, end = self._timing(call)
+        if j is None or end is None and terminal:
+            self.flag("call %s (%s) has %s: it runs to the next call %s's start"
+                      % (call[2], who, "no call journal" if j is None else "no startTime or durationMs", nxt[2]))
+            return nxt_start
+        if end is None:
+            # not terminal and untimed: the task's last line before the next call (a re-take is not activity)
+            seen = [t for t, k in self.task_lines.get(s["task"], [])
+                    if call[0] <= t < nxt[0] and k not in ("slot-taken", "run-bound")]
+            end = max(seen) if seen else start
+            self.flag("call %s has no durationMs: %s's last activity in it is its last record line (%s)"
+                      % (call[2], who, fmt(end)))
+        end = min(end, until)
+        cap = end + GRACE
+        if cap < nxt_start:
+            if terminal:
+                why = "%s's call %s ended at %s; the next call %s started at %s (lead absent)" % (
+                    who, call[2], fmt(end), nxt[2], fmt(nxt_start))
+                self.gaps.append(("lead-absent", why, (cap, nxt_start)))
+                self.flag("lead absent: " + why)
             else:
-                if timed:
-                    last = st + dur
-                else:
-                    last = self.last_line.get(s["task"], s["start"])
-                    if j is not None:
-                        self.flag("call %s has no durationMs: %s's last activity is its last record line (%s)"
-                                  % (call[2], who, fmt(last)))
-                cap = last + GRACE
-                if s["end"] is not None:
-                    eff = min(s["end"], cap)
-                    if cap < s["end"]:
-                        self._capped(call, who, last, cap, s["end"])
-                elif cap >= until:
-                    eff = until
-                    self.partial = True
-                else:
-                    eff = cap
-                    self._capped(call, who, last, cap, until)
-            s["eff"] = max(s["start"], eff)
+                why = "call %s never finished: its last activity was %s; %s re-took %s's Slot at %s" % (
+                    call[2], fmt(end), nxt[2], who, fmt(nxt_start))
+                self.gaps.append(("never-finished", why, (cap, nxt_start)))
+                self.flag(why)
+        return min(cap, nxt_start)
+
+    def _last_call(self, s, call, hi, until, who):
+        """The Slot's last call (or none): its end is the Slot's effective end. Activity is clamped to --until."""
+        j, terminal, end = self._timing(call)
+        if terminal and end is not None and end > until:
+            terminal = False  # still running at --until: read it as a call whose last activity is --until
+        if terminal and end is not None:
+            cap = end + GRACE
+            if cap < hi:
+                self.gaps.append(("lead-absent", "%s's call %s ended at %s; its Slot stayed open (lead absent)"
+                                  % (who, call[2], fmt(end)), (cap, hi)))
+                self.flag("lead absent: %s's call %s ended at %s but its Slot stayed open until %s"
+                          % (who, call[2], fmt(end), fmt(hi)))
+            return min(hi, cap)
+        if j is None and s["end"] is not None:
+            self.flag("no call journal for %s: its Slot ends at its slot-freed" % who)
+            return s["end"]
+        if terminal:
+            self.flag("call %s's journal has no startTime or durationMs: %s's Slot ends at its slot-freed"
+                      % (call[2], who))
+            if s["end"] is not None:
+                return s["end"]
+            return self._tail(s, call, until, who)
+        if end is not None:
+            last = min(end, until)
+        else:
+            last = self.last_line.get(s["task"], s["start"])
+            if j is not None:
+                self.flag("call %s has no durationMs: %s's last activity is its last record line (%s)"
+                          % (call[2], who, fmt(last)))
+        cap = last + GRACE
+        if s["end"] is not None:
+            if cap < s["end"]:
+                self._capped(call, who, last, cap, s["end"])
+            return min(s["end"], cap)
+        if cap >= until:
+            self.partial = True
+            return until
+        self._capped(call, who, last, cap, until)
+        return cap
 
     def _tail(self, s, call, until, who):
         last = self.last_line.get(s["task"], s["start"])
@@ -424,7 +498,7 @@ class Score:
 
     def running(self, since, until):
         win = [(since, until)]
-        slot_iv = union((s["start"], s["eff"]) for s in self.slots)
+        slot_iv = union(x for s in self.slots for x in s["iv"])
         lane_iv = union((h["start"], h["end"]) for h in self.holdings)
         hold_iv = union((h["start"], h["end"]) for h in self.holds)
         pause_iv = union((p["start"], p["end"]) for p in self.pauses)
@@ -483,7 +557,8 @@ class Score:
     def slots_score(self, since, until):
         cuts = {since, until}
         for s in self.slots:
-            cuts.update((s["start"], s["eff"]))
+            for x, y in s["iv"]:
+                cuts.update((x, y))
         cuts.update(t for t, _ in self.steps)
         cuts.update(t for t, _ in self.markers)
         for a, b in self.run_iv:
@@ -494,7 +569,7 @@ class Score:
             if b <= a:
                 continue
             running = total(intersect([(a, b)], self.run_iv))
-            n = sum(1 for s in self.slots if s["start"] <= a and s["eff"] >= b)
+            n = sum(1 for s in self.slots if any(x <= a and y >= b for x, y in s["iv"]))
             segs.append((a, b, running, n, self.ceiling_at(a)))
         weight, last_seen = {}, {}
         full = used = cap = 0
@@ -790,10 +865,17 @@ class Score:
         return fm
 
     def tokens(self, since, until):
+        """Every call's tokens (its journal's latest terminal line, else its latest: a call still running counts what
+        it has spent) when the call started in the window: its startTime, else its run-bound line's ts."""
         got, any_tokens = 0, False
-        for j in self.journals.values():
+        bound_at = {}
+        for t, _task, run_id, _call in self.bound:
+            bound_at.setdefault(run_id, t)
+        for run_id, j in self.journals.items():
             st = j.get("startTime")
-            if isinstance(st, int) and not since <= st <= until:
+            if not isinstance(st, int) or isinstance(st, bool):
+                st = bound_at.get(run_id)
+            if st is None or not since <= st <= until:
                 continue
             if isinstance(j.get("tokens"), int):
                 got += j["tokens"]
@@ -919,22 +1001,27 @@ class Score:
         lane_busy = self.lane_metrics["busyShare"] or 0
         sm = self.slot_metrics
         rh = headline["runningHours"]
-        if constraint == "slot-bound" and lane_busy < LANE_FREE_FOR_RAISE:
+        if constraint == "slot-bound":
+            # a busy lane would take the extra Slot's work one task at a time: the raise is withheld, never dropped
+            busy_lane = None
+            if lane_busy >= LANE_FREE_FOR_RAISE:
+                busy_lane = "lane %d%% busy, at or above %d%%: a raise would queue on the Integration lane" % (
+                    round(lane_busy * 100), round(LANE_FREE_FOR_RAISE * 100))
             rules.append(("parallel_ceiling", 1, "slot-bound-raise",
                           "Slot-bound: Slots full %d%% of %s running h at ceiling %s; lane %d%% busy"
-                          % (round(sm["fullShare"] * 100), rh, sm["ceiling"], round(lane_busy * 100))))
+                          % (round(sm["fullShare"] * 100), rh, sm["ceiling"], round(lane_busy * 100)), busy_lane))
         if constraint == "quota-bound":
             rules.append(("parallel_ceiling", -1, "quota-bound-lower",
                           "Quota-bound: %d quota stall(s) in %s running h at ceiling %s"
-                          % (headline["quotaStalls"], rh, sm["ceiling"])))
+                          % (headline["quotaStalls"], rh, sm["ceiling"]), None))
         for cls, key, rule in (("review-rounds", "max_review_rounds", "review-rounds-raise"),
                                ("plan-rejected", "max_plan_rounds", "plan-rejected-raise")):
             n = sum(1 for x in set_asides if x[2] == cls)
             if n >= ROUND_SET_ASIDES:
-                rules.append((key, 1, rule, "%d set-asides of reasonClass %s in the window" % (n, cls)))
+                rules.append((key, 1, rule, "%d set-asides of reasonClass %s in the window" % (n, cls), None))
         proposals, withheld = [], []
         breached = [k for k, v in guard.items() if v["breached"]]
-        for key, direction, rule, evidence in rules:
+        for key, direction, rule, evidence, hold in rules:
             spread = None
             if key == "parallel_ceiling":
                 ran_at = sm["ceiling"]
@@ -967,6 +1054,9 @@ class Score:
                     reason += "; " + entry["ranAtCause"]
                 entry["reason"] = reason
                 withheld.append(entry)
+            elif hold:
+                entry["reason"] = hold
+                withheld.append(entry)
             elif direction > 0 and breached:
                 entry["reason"] = "a raise while a Guardrail is breached: %s" % ", ".join(
                     "%s %s (baseline %s, bound %s)" % (k, guard[k]["value"], guard[k]["baseline"], guard[k]["bound"])
@@ -990,6 +1080,8 @@ class Score:
         return n
 
     def load(self, base, slug, host, since, until):
+        """Each other same-host record whose span (first line .. last line) overlaps this run's running time (run_iv),
+        never merely the window: a Retro run long after the rollout must not count later rollouts as load."""
         out, other_host = [], 0
         try:
             names = sorted(os.listdir(base))
@@ -1013,12 +1105,12 @@ class Score:
                 mine.append((t, d))
             if not mine:
                 continue
-            first, last = mine[0][0], mine[-1][0]
-            a, b = max(first, since), min(last, until)
-            if b < a:
+            overlap = intersect([(mine[0][0], mine[-1][0])], self.run_iv)
+            if not overlap:
                 continue
-            inside = [d for t, d in mine if since <= t <= until]
-            out.append({"rollout": name[:-6], "start": fmt(a), "end": fmt(b), "hours": hours(b - a),
+            a, b = overlap[0][0], overlap[-1][1]
+            inside = [d for t, d in mine if any(x <= t <= y for x, y in overlap)]
+            out.append({"rollout": name[:-6], "start": fmt(a), "end": fmt(b), "hours": hours(total(overlap)),
                         "slotsTaken": sum(1 for d in inside if d.get("kind") == "slot-taken"),
                         "merges": len({d.get("task") for d in inside if d.get("kind") == "merged"})})
         return {"rollouts": out, "otherHostLinesIgnored": other_host}
