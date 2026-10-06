@@ -176,6 +176,9 @@ const REFUSALS = [
   ['a rollout slug with a slash', ['--rollout', 'a/b', '--kind', 'resumed']],
   ['an empty rollout slug', ['--rollout', '', '--kind', 'resumed']],
   ['`reviews` as the rollout', ['--rollout', 'reviews', '--kind', 'resumed']],
+  ['`tunings` as the rollout', ['--rollout', 'tunings', '--kind', 'resumed']],
+  ['`tunings` as a carried from', ['--rollout', 'r', '--task', 't', '--kind', 'carried', '--json', '{"from":"[[Tunings]]"}']],
+  ['a tuning with a task', ['--rollout', 'r', '--task', 't', '--kind', 'tuning', '--json', JSON.stringify({ id: 't1', repo: 'o/r', window: { since: '2026-10-04T00:00:00.000Z', until: '2026-10-04T10:00:00.000Z' }, scores: { throughput: 1, runningHours: 2, merges: 2, tokensPerMerge: null, setAsideRate: 0, conflictRate: 0, quotaStalls: 0 }, applied: [] })]],
   ['a traversal task slug', ['--rollout', 'r', '--task', '../x', '--kind', 'ready']],
   ['no rollout for a rollout kind', ['--kind', 'resumed']],
   ['a line over 16 KiB', ['--rollout', 'r', '--kind', 'quota-stall', '--json', JSON.stringify({ detail: 'x'.repeat(17000) })]],
@@ -361,6 +364,93 @@ test('review-round lands in reviews.jsonl with rollout and task null', (t) => {
   assert.equal(l.rollout, null)
   assert.equal(l.task, null)
   assert.equal(l.kind, 'review-round')
+})
+
+// ---- the tuning kind (skills/retro/scripts/tune.py's one line per Retro) ---------------------------------------
+
+const WINDOW = { since: '2026-10-04T00:00:00.000Z', until: '2026-10-04T10:00:00.000Z', activeStart: '2026-10-04T00:00:00.000Z', activeEnd: '2026-10-04T09:00:00.000Z', partial: false }
+const SCORES = { throughput: 0.667, runningHours: 9, merges: 6, tokensPerMerge: 125000, setAsideRate: 0.1, conflictRate: null, quotaStalls: 0 }
+const APPLIED = { key: 'parallel_ceiling', from: 3, to: 4, ranAt: 3, rule: 'slot-bound-raise', evidence: 'Slot-bound: Slots full 62% of 9 running h, lane 25% busy', agreeing: 0 }
+const tuning = (over = {}) => ({ id: 't-1', repo: 'o/r', window: WINDOW, scores: SCORES, applied: [APPLIED], binding: 'slot-bound', ...over })
+
+test('tuning lands in tunings.jsonl, its rollout kept as a stamp and its task null', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', '[[Demo-Rollout]]', '--kind', 'tuning', '--json', JSON.stringify(tuning())], { env: EV(home) })
+  emitOk(home, ['--rollout', 'demo-rollout', '--kind', 'tuning', '--json', JSON.stringify(tuning({ id: 't-2', applied: [], voids: 't-1' }))], { env: EV(home) })
+  assert.deepEqual(listing(ev(home)), ['tunings.jsonl'], 'never the rollout\'s own record')
+  const [a, b] = lines(path.join(ev(home), 'tunings.jsonl'))
+  assert.equal(a.rollout, 'demo-rollout')
+  assert.equal(a.task, null)
+  assert.equal(a.kind, 'tuning')
+  assert.deepEqual(a.window, WINDOW)
+  assert.deepEqual(a.scores, SCORES)
+  assert.deepEqual(a.applied, [APPLIED])
+  assert.equal(b.voids, 't-1')
+  assert.deepEqual(b.applied, [])
+})
+
+test('a tuning with a null activeStart and activeEnd (no running time) is recorded', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ window: { since: WINDOW.since, until: WINDOW.until, activeStart: null, activeEnd: null } }))], { env: EV(home) })
+  assert.equal(lines(path.join(ev(home), 'tunings.jsonl')).length, 1)
+})
+
+const { merges: _m, ...SCORES_LESS } = SCORES
+const TUNING_REFUSALS = [
+  ['no rollout', null, tuning()],
+  ['scores missing a key', 'r', tuning({ scores: SCORES_LESS })],
+  ['scores with an extra key', 'r', tuning({ scores: { ...SCORES, speed: 1 } })],
+  ['scores with a string', 'r', tuning({ scores: { ...SCORES, throughput: 'fast' } })],
+  ['merges null', 'r', tuning({ scores: { ...SCORES, merges: null } })],
+  ['quotaStalls negative', 'r', tuning({ scores: { ...SCORES, quotaStalls: -1 } })],
+  ['window with an extra key', 'r', tuning({ window: { ...WINDOW, tz: 'Australia/Melbourne' } })],
+  ['window with no until', 'r', tuning({ window: { since: WINDOW.since } })],
+  ['a naive activeEnd', 'r', tuning({ window: { ...WINDOW, activeEnd: '2026-10-04T09:00:00' } })],
+  ['an offset since (UTC Z only)', 'r', tuning({ window: { ...WINDOW, since: '2026-10-04T11:00:00+11:00' } })],
+  ['partial not a boolean', 'r', tuning({ window: { ...WINDOW, partial: 'no' } })],
+  ['applied from == to', 'r', tuning({ applied: [{ ...APPLIED, to: 3 }] })],
+  ['applied with an unknown key name', 'r', tuning({ applied: [{ ...APPLIED, key: 'verify_timeout' }] })],
+  ['applied with an extra field', 'r', tuning({ applied: [{ ...APPLIED, note: 'x' }] })],
+  ['applied with a zero ranAt', 'r', tuning({ applied: [{ ...APPLIED, ranAt: 0 }] })],
+  ['applied evidence over 300 characters', 'r', tuning({ applied: [{ ...APPLIED, evidence: 'e'.repeat(301) }] })],
+  ['applied rule over 64 characters', 'r', tuning({ applied: [{ ...APPLIED, rule: 'r'.repeat(65) }] })],
+  ['applied with 9 entries', 'r', tuning({ applied: Array(9).fill(APPLIED) })],
+  ['an unknown binding', 'r', tuning({ binding: 'cpu-bound' })],
+  ['no id', 'r', (({ id, ...rest }) => rest)(tuning())],
+]
+
+for (const [name, rollout, fields] of TUNING_REFUSALS) {
+  test(`tuning refused with exit 2, nothing written: ${name}`, (t) => {
+    const home = tmpHome(t)
+    const r = cli(home, ['emit', ...(rollout ? ['--rollout', rollout] : []), '--kind', 'tuning', '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `stderr: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
+    assert.deepEqual(listing(ev(home)), [])
+  })
+}
+
+test('a NaN score is refused through the API (the CLI\'s JSON never carries one)', (t) => {
+  const home = tmpHome(t)
+  const r = api(home, `
+f = json.loads(sys.argv[2]); f["scores"]["throughput"] = float("nan")
+try:
+    m.emit("r", "tuning", fields=f, strict=True); print("written")
+except m.Refused as e:
+    print("Refused")`, { env: EV(home), args: [JSON.stringify(tuning())] })
+  assert.equal(r.stdout, 'Refused\n', r.stderr)
+  assert.deepEqual(listing(ev(home)), [])
+})
+
+test('the tuning keys are rollout-settings.py\'s KEYS, and RESERVED holds both record files', (t) => {
+  const home = tmpHome(t)
+  const rs = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings.py')
+  const r = api(home, `
+spec2 = importlib.util.spec_from_file_location("rs", sys.argv[2]); rs = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(rs)
+print(json.dumps([list(m.TUNING_KEYS), list(rs.KEYS), list(m.RESERVED)]))`, { args: [rs] })
+  assert.equal(r.status, 0, r.stderr)
+  const [mine, theirs, reserved] = JSON.parse(r.stdout)
+  assert.deepEqual(mine, theirs)
+  assert.deepEqual(reserved, ['reviews', 'tunings'])
 })
 
 test('rollout and task slugs normalise from wikilinks, note paths and any case', (t) => {

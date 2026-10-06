@@ -11,7 +11,7 @@ or imported by path (importlib.util.spec_from_file_location, git-env-canary.py's
 
     emit(rollout, kind, task=None, fields=None, *, ts=None, env=None, strict=False) -> bool
     events_dir(env=None) -> str            record_path(rollout, env=None) -> str
-    normalise_slug(value) -> str           Refused, KINDS, TERMINAL_STATUSES
+    normalise_slug(value) -> str           Refused, KINDS, TERMINAL_STATUSES, REVIEWS, TUNINGS, RESERVED
 
 Callers: in-process callers use the default strict=False, which never raises; shell callers append
 `|| true`. Recording must never break a rollout.
@@ -26,8 +26,18 @@ here creates the link, and on a machine without it the first emit's os.makedirs 
 there. THREAD_EVENTS_DIR is for tests and non-default setups. `dir` prints the resolved directory, so any writer can confirm it lands in
 the same place.
 
-Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl (`reviews` is reserved
-and refused as a rollout slug).
+Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl and tuning to
+tunings.jsonl. Both names are RESERVED: refused as a rollout slug and as a carried `from`.
+
+tunings.jsonl holds one line per Retro (skills/retro/scripts/tune.py is its one emitter, score.py its one
+reader): the scored window, its seven headline scores and the Tunings Lachy picked (`applied`, most often []).
+- Baseline: the next Retro on that repo (matched ignoring case) compares against the `scores` of the line with
+  the latest window.activeEnd at or before its own window.activeStart, preferring a line not marked partial; a
+  line whose activeEnd is null never qualifies. Comparing active spans, not ts or until, keeps a Retro run late
+  (after the next rollout began) a valid baseline for that rollout.
+- Void: when tune.py's config write fails after its line landed, it appends a second line carrying
+  `voids: <the first line's id>`, an empty `applied` and the same scores. Readers drop a voided line's
+  `applied` (it never took effect) and keep its scores as a baseline.
 
 Slugs: --rollout, --task and carried's `from` accept a bare slug, [[slug]], [[slug|alias]], a
 path-qualified [[dir/slug]] or a note path ending .md (its stem). The result is lowercased and must match
@@ -45,7 +55,7 @@ with its newline. The common keys come first, in this order:
              Any other ISO timestamp field a caller adds must be UTC `Z` too; call-journal's
              startTime is the one epoch field (the journal's own epoch-ms integer, verbatim).
     host     the hostname up to its first dot
-    rollout  the rollout slug (null only for review-round)
+    rollout  the rollout slug (null only for review-round; a tuning's is a provenance stamp)
     task     the task slug, or null
     kind     one of the kinds below
 
@@ -80,6 +90,17 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   carried         T  from (the old rollout's slug), to (set to the new rollout). Appended to both
                      <from>.jsonl and <to>.jsonl, each line's `rollout` the file it sits in; each append
                      is best-effort on its own.
+  tuning             id, repo, window{since, until, activeStart?, activeEnd?, partial?}, scores{throughput,
+                     runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls}, applied
+                     (a list of at most 8 {key, from, to, ranAt, rule, evidence, agreeing}); binding?
+                     (slot-bound | lane-bound | quota-bound | dependency-bound | none-clear); voids? (the id
+                     of the line this one voids). A rollout is required and a task is refused; lands in
+                     tunings.jsonl. window: since and until UTC `Z` stamps, activeStart and activeEnd a UTC
+                     `Z` stamp or null, partial a boolean, no other key. scores: exactly the seven keys,
+                     each a finite number or null, with merges and quotaStalls integers >= 0. applied: key
+                     one of parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds; from, to
+                     and ranAt integers >= 1 with from != to; rule a string of at most 64 characters;
+                     evidence one of at most 300; agreeing an integer >= 0; no other key.
 
 There is no ceiling-changed kind, and it is refused: the settings stamped on every slot-taken and
 idle-slots replace it, which keeps `next` stateless and also covers round caps and per-task overrides.
@@ -115,6 +136,7 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   as non-terminal: appended and later superseded, never dropped. Write call-journal only through this
   module, so every writer takes part in the lock.
 - review-round: dedupe on (repo, head, digest), keeping the latest line.
+- tuning: see tunings.jsonl under Files (the baseline and void rules).
 - Skip a line that does not parse: a crash can leave a last line with no newline, which the next append
   then merges with (a known limit; checking the tail would mean locking every emit).
 
@@ -130,7 +152,8 @@ sync filesystems). Any failure to write (a short write, an OSError, anything une
 `run_record: warning: cannot write <path>: <err>` and writes nothing more; the CLI still exits 0.
 
 Exit codes: 0 written, skipped as a duplicate fold, or a warned write failure; 2 refused (an unknown kind,
-a missing or out-of-enum field, a task-scoped kind with no task, --json not a JSON object, a common-key
+a missing or out-of-enum field, a task-scoped kind with no task, a tuning with one, a reserved rollout or
+`from`, --json not a JSON object, a common-key
 collision, NaN, a bad slug, a naive or malformed --ts, a line over 16 KiB), with one line starting `run_record: ` on
 stderr and nothing written; `dir` exits 1 when the directory cannot be resolved.
 """
@@ -139,6 +162,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import math
 import os
 import re
 import socket
@@ -155,6 +179,8 @@ MAX_LINE = 16 * 1024
 LOCK_WAIT = 5.0
 COMMON = ("v", "ts", "host", "rollout", "task", "kind")
 REVIEWS = "reviews"
+TUNINGS = "tunings"
+RESERVED = (REVIEWS, TUNINGS)  # record files that are no rollout's: refused as a rollout slug or a carried `from`
 SLUG_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
 # One accepted --ts shape on every python (fromisoformat widened in 3.11): date, time, fraction, offset.
 STAMP_RE = re.compile(r"(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d)(?::(\d\d)(?:[.,](\d+))?)?"
@@ -214,6 +240,78 @@ def _settings(v):
 
 
 SETTINGS = _settings
+
+# ---- the tuning kind (skills/retro/scripts/tune.py) -------------------------------------------------------
+
+UTC_Z_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z\Z", re.ASCII)
+# rollout-settings.py's KEYS (tests/run-record.test.mjs pins that the two agree).
+TUNING_KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
+SCORE_KEYS = ("throughput", "runningHours", "merges", "tokensPerMerge", "setAsideRate", "conflictRate",
+              "quotaStalls")
+APPLIED_KEYS = ("key", "from", "to", "ranAt", "rule", "evidence", "agreeing")
+MAX_APPLIED = 8
+BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "dependency-bound", "none-clear")
+
+
+def _utcz(v):
+    return isinstance(v, str) and bool(UTC_Z_RE.match(v))
+
+
+def _number(v):
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return False
+    return isinstance(v, int) or math.isfinite(v)
+
+
+def _window(v):
+    if not isinstance(v, dict):
+        return "an object"
+    extra = sorted(set(v) - {"since", "until", "activeStart", "activeEnd", "partial"})
+    if extra:
+        return "an object with no key %s" % ", ".join(extra)
+    for k in ("since", "until"):
+        if not _utcz(v.get(k)):
+            return "an object with %s a UTC Z stamp" % k
+    for k in ("activeStart", "activeEnd"):
+        if k in v and v[k] is not None and not _utcz(v[k]):
+            return "an object with %s a UTC Z stamp or null" % k
+    if "partial" in v and not isinstance(v["partial"], bool):
+        return "an object with partial true or false"
+    return None
+
+
+def _scores(v):
+    if not isinstance(v, dict) or set(v) != set(SCORE_KEYS):
+        return "an object with exactly the keys %s" % ", ".join(SCORE_KEYS)
+    for k in SCORE_KEYS:
+        if k in ("merges", "quotaStalls"):
+            if _int(0)(v[k]):
+                return "an object with %s an integer >= 0" % k
+        elif v[k] is not None and not _number(v[k]):
+            return "an object with %s a finite number or null" % k
+    return None
+
+
+def _applied(v):
+    if not isinstance(v, list) or len(v) > MAX_APPLIED:
+        return "a list of at most %d entries" % MAX_APPLIED
+    for e in v:
+        if not isinstance(e, dict) or set(e) != set(APPLIED_KEYS):
+            return "a list of objects with exactly the keys %s" % ", ".join(APPLIED_KEYS)
+        if e["key"] not in TUNING_KEYS:
+            return "a list whose key is one of %s" % ", ".join(TUNING_KEYS)
+        for k in ("from", "to", "ranAt"):
+            if _int(1)(e[k]):
+                return "a list whose %s is an integer >= 1" % k
+        if e["from"] == e["to"]:
+            return "a list whose from and to differ"
+        if not isinstance(e["rule"], str) or not e["rule"] or len(e["rule"]) > 64:
+            return "a list whose rule is a non-empty string of at most 64 characters"
+        if not isinstance(e["evidence"], str) or not e["evidence"] or len(e["evidence"]) > 300:
+            return "a list whose evidence is a non-empty string of at most 300 characters"
+        if _int(0)(e["agreeing"]):
+            return "a list whose agreeing is an integer >= 0"
+    return None
 HOLDS = ("merge", "git-env", "race")
 # kind -> (task required, required fields, optional fields)
 KINDS = {
@@ -244,6 +342,8 @@ KINDS = {
                      {"doc": _str, "mode": _str, "effort": _str, "findings": _int(0), "original": _int(0),
                       "regression": _int(0), "verdict": _str}),
     "carried": (True, {"from": _str, "to": _str}, {}),
+    "tuning": (False, {"id": _str, "repo": _str, "window": _window, "scores": _scores, "applied": _applied},
+               {"binding": _enum(*BINDINGS), "voids": _str}),
 }
 
 
@@ -466,8 +566,10 @@ def _emit(rollout, kind, task, fields, ts, env):
         if rollout is None:
             raise Refused("%s: a rollout is required" % kind)
         rollout = normalise_slug(rollout, "rollout")
-        if rollout == REVIEWS:
-            raise Refused("rollout %r is reserved for review rounds" % REVIEWS)
+        if rollout in RESERVED:
+            raise Refused("rollout %r is reserved (%s.jsonl is no rollout's record)" % (rollout, rollout))
+    if kind == "tuning" and task is not None:
+        raise Refused("tuning has no task (it lands in %s.jsonl)" % TUNINGS)
     if task is not None:
         task = normalise_slug(task, "task")
     elif task_required:
@@ -479,8 +581,8 @@ def _emit(rollout, kind, task, fields, ts, env):
         if "from" not in fields:
             raise Refused("carried: missing required field 'from'")
         old = normalise_slug(fields["from"], "from")
-        if old == REVIEWS:
-            raise Refused("from %r is reserved for review rounds" % REVIEWS)
+        if old in RESERVED:
+            raise Refused("from %r is reserved (%s.jsonl is no rollout's record)" % (old, old))
         if "to" in fields and normalise_slug(fields["to"], "to") != rollout:
             raise Refused("carried: to %r is not the rollout %r" % (fields["to"], rollout))
         if old == rollout:
@@ -497,7 +599,8 @@ def _emit(rollout, kind, task, fields, ts, env):
         return False
     ok = True
     for r, data in lines:
-        path = os.path.join(base, (REVIEWS if r is None else r) + ".jsonl")
+        name = REVIEWS if r is None else TUNINGS if kind == "tuning" else r
+        path = os.path.join(base, name + ".jsonl")
         new = json.loads(data)
         ok = _write(path, data, new, kind) and ok
     return ok
