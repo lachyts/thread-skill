@@ -270,6 +270,28 @@ test('an unwritable events dir: exit 1, the config untouched (an absent one stay
   }
 })
 
+test('a config directory that cannot be made: exit 1 with one tune: line, no traceback, nothing written', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  const locked = path.join(home, 'locked')
+  fs.mkdirSync(locked)
+  const config = path.join(locked, 'thread', 'rollouts.toml')
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  fs.chmodSync(locked, 0o555)
+  let r
+  try {
+    r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo, '--config', config])
+  } finally {
+    fs.chmodSync(locked, 0o755)
+  }
+  assert.equal(r.status, 1, r.stderr)
+  assert.match(r.stderr, /^tune: cannot write next to .*rollouts\.toml: .*Permission denied.*\n$/)
+  assert.doesNotMatch(r.stderr, /Traceback/)
+  assert.equal(r.stdout, '')
+  assert.deepEqual(fs.readdirSync(locked), [], 'no directory made')
+  assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+})
+
 // One Slot-bound run at ceiling 3 through run_record's own emit, for score.py to read back.
 function slotBoundRecord(home) {
   const ev = []

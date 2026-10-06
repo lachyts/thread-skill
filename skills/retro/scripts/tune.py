@@ -210,8 +210,12 @@ class Created:
     """Directories made for the temp file, removed again (deepest first) when left empty by a failure."""
 
     def __init__(self, directory):
+        self.directory = directory
         self.made = []
-        d = directory
+
+    def make(self):
+        """mkdir each missing level, outermost first; an OSError leaves `made` holding the ones made, for undo."""
+        d = self.directory
         missing = []
         while d and not os.path.exists(d):
             missing.append(d)
@@ -316,6 +320,7 @@ def pick(scores, picks_arg, repo, config, dry_run):
     created = Created(os.path.dirname(real))
     tmp = None
     try:
+        created.make()
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(real), prefix="." + os.path.basename(real) + ".", suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(new_text)
