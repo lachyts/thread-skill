@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-04
+last_touched: 2026-10-06
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,13 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-10-06: P15 (the Run record) has landed. `[[thread-skill-rollout-2026-10-04]]` (archived, § Completion log): 5/5 merged (#89 to #93) in 17h 39m from the clone, all on Opus. The primary checkout was fast-forwarded to `1c5c3ca` at 12:15. **That broke ADR 0031's hold:** `[[chorus-rollout-2026-10-06]]` had started at 10:13 from this checkout, so its lead switched to the P15 scripts mid-run. Left in place as the lesser move: P15's scripts take the old SKILL's calls, and its events start mid-run (a `slot-freed` before any `slot-taken`). P16 (unattended rollouts) is filed but not yet scheduled.**
+- **Landed:** p15-1 `run_record.py`, the Run record's one writer (#89); p15-4 `rollouts.toml` operator settings and `rollout-settings.py` (#90, Integration resolved 7 test-file conflicts with #89); p15-3 Workflow journals fold in at close (#91); p15-2 execute, lead-integrate and merge-task emit Run record events (#92); p15-5 `/thread:retro` (`score.py`, `tune.py`, #93).
+- **p15-2 plan-blocked once** at 3 rounds, with findings narrowing each round. It converged on its first plan round after a hand-back carrying the feedback. All five tasks stamped `tier_capped:` (the Opus lock).
+- **The overnight stall, about 12h (20:25 to 08:33).** The lead asked Lachy two questions through AskUserQuestion: whether to hand back p15-2, and whether to create the events symlink. A Stop hook (`check-closing-questions.sh`) had forced the question into that tool, and the tool holds the turn, so p15-4's finished Integration and p15-3's approval sat unprocessed. The 2026-10-06 grill became **P16 ([[thread-skill-p16-unattended-rollouts]], p16-1 to p16-5)**. Memory `wave-repair-autonomy` gained the rule; estate METHOD.md got K118.
+- **Operator step done:** `~/.local/state/thread/events` → `~/repos/workspaces/_shared/state/thread-events/` (created 2026-10-06, before #92 merged).
+- **No Run record for this rollout:** the lead ran from the held primary at `cba2835`, so the new emitters never ran. The planned self-Retro moved to [[thread-skill-retro-first-live-run-record]], to run on the next rollout.
 
 **2026-10-04 (early): P13's rollout tasks and P14's queue hardening have landed. `[[thread-skill-rollout-2026-10-03]]` (archived, § Completion log): 9/9 merged (#77 to #85) in 8h 10m from the clone, all on Opus, on the held primary checkout's engine at `0b60690`. Nothing of thread-skill's is running; the Chorus rollout still runs on the primary.**
 - **Landed:** p13-1 ladder loader (#79), p13-2 the engine climbs rungs, execute feeds the ladder, `max_tier:` removed (#80), p13-3 schedule, status and repair speak rungs (#83; its Integration resolved a conflict with #81/#82 through the integrator). p14-2 the approved plan reaches Integration plus `verify_timeout` (#82), p14-3 seeded revise never autostashes (#81), p14-4 the lead descopes a settled plan-block (#84), p14-5 landing PR bodies name their caller (#78), p14-6 the git-env canary (#85), p14-8 infra classifier word match (#77).
@@ -480,6 +487,8 @@ scheduled 2026-07-15.
 
 ## What's been built / decided
 
+- **P16 decided (2026-10-06 grill, [[thread-skill-p16-unattended-rollouts]]).** (A) While any call, Integration or merge is in flight, a rollout lead never uses the question tool. A question goes in the report plus one push notification, and the turn ends `waiting`; the closing-questions hook exempts ROLLOUT-STATUS turns. (B) Execute auto-retries set-asides, broader than repair. `auto_retries: 2` (task → rollout → rollouts.toml → built-in) covers plan-blocked, blocked, review-blocked (+1 round per retry) and Integration set-asides. It stops early on a repeated feedback fingerprint, and never retries a judge-declared `needsHuman`. Gates, RACE, closed PRs and declined merges stay human. (C) The lead acts on its own recommendations (memory).
+- **P15 landed (2026-10-06, #89 to #93): the Run record and the Retro (ADR 0032).** Events live at `${THREAD_EVENTS_DIR:-$XDG_STATE_HOME/thread/events}`, on Lachy's machine a symlink into `_shared/state/thread-events/`. Operator settings live in `~/.config/thread/rollouts.toml`. `/thread:retro` scores a run and applies only the Tunings Lachy picks. Phase 15 stays open for p15-6 and p15-7.
 - **ADR 0031 (accepted, PR #72): the primary checkout holds while a rollout runs.** `land.sh` S4/S11 skip moving the plugin's own checkout while `unfinished-rollout.py running` lists a live, started, unpaused protocol-5 rollout; `primary-hold.sh` finds the checkout by where the plugin runs from. Moving it mid-run is a deliberate cut-over (pause, update, reinstate).
 - **pushed-base decides "landed" by touched-file content alone (PR #73).** No `git cherry`, no `rev-list --cherry-pick`: patch identity passed a cherry-picked-then-reverted commit and an empty commit. Landed content that origin has since changed blocks (conservative).
 - **Reshuffle 2026-10-03 (Lachy's calls):** Chorus, not GifLab, is the first queue run; P13 goes live only after it ends; p13-1 is the loader only; the `--admin` opt-in is dropped; the git-env canary (p14-6) is lead-side; estate chores merged into one note.
@@ -555,6 +564,7 @@ scheduled 2026-07-15.
 
 ## Open questions / decisions pending
 
+- **Schedule P16 before or after p13-4 (3.0.0)?** p13-4 updates the live checkout, and a running rollout holds that checkout, so the two can't overlap. The recommendation is p13-4 first, since it was waiting only on Chorus.
 - **Hold own-branch moves too?** (p14-7 follow-up, Lachy's call) Putting the hold inside `move_branch` would guard `land.sh --own-branch` on the primary checkout, but an own-branch landing there would then end `stuck: held`.
 
 - **The daily lander (p11-7) doesn't exist yet.** Until it does, a queued merge that fails (red CI, a PR left behind master, `queued: needs merge`) waits for the next close in that repo. It has to catch up on wake: the laptop is often off overnight until the Mac mini arrives.
@@ -649,6 +659,9 @@ scheduled 2026-07-15.
 - **land.sh's close-out paths are `THREAD.md` and `docs/handoffs/` only** (`closeout_shaped`): a consumed `docs/reviews/` doc can't be deleted by a close-out landing, though fresh-review expects its docs deleted at close ([[thread-skill-land-takes-review-doc-deletions]]).
 - **A queued landing PR falls `BEHIND` when a rollout merges past it** (the repo requires up-to-date branches). land.sh's `update-branch` runs only inside its own call, so a peer's close-out waits for the next close in that repo or the daily lander.
 
+- **Run `unfinished-rollout.py running` before moving the primary checkout by hand.** ADR 0031's hold lives in land.sh only; a manual `git merge --ff-only` bypasses it (2026-10-06: a live Chorus lead switched engines mid-run).
+- **A rollout never runs the engine changes it lands.** The lead runs from the held primary checkout, so P15's emitters wrote no Run record for their own rollout. Expect a change to execute, the engine or its scripts to take effect only on the next rollout, after the fast-forward.
+- **AskUserQuestion holds the lead's turn.** Workflow and background-command notifications queue until it is answered, so a question asked overnight stalls every finished call behind it (2026-10-05, about 12h). P16 removes the hazard; until then, never ask while work is in flight.
 - **This checkout is the engine for every rollout lead.** While one runs, close from here still lands (a protected repo queues a `close/…` PR) but skips the fast-forward (`land: held the primary checkout`), so local `master` sits ahead until `git reset --keep origin/master` once nothing runs (ADR 0031 Consequences).
 - **`CLAUDE_PLUGIN_ROOT` is unset in the Bash tool** when a skill is followed through a router (next → handoff): the snippet guards exit 2. Export it to the plugin root and re-run ([[thread-skill-p5-5-plugin-root-read-as-file]]).
 - **gh 2.43: `gh pr edit` fails** (Projects-classic GraphQL); `gh api -X PATCH repos/lachyts/thread-skill/pulls/<n>` works, and `gh pr merge --merge` works.
@@ -879,6 +892,14 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Now (from 2026-10-06): P15 has landed. `[[chorus-rollout-2026-10-06]]` is running from the primary checkout at `1c5c3ca`, so the checkout is held again (ADR 0031).**
+0. **Watch the Chorus run for the mid-run engine switch** (Where we are): if its lead errors on a reconcile, lead-integrate or merge-task call, the P15 scripts are the first suspect.
+1. **p13-4 (3.0.0)** in the session lane, once the Chorus rollout ends (it updates the live checkout): `make evals` first. Then [[ab-fable-vs-opus-planning]].
+2. **Schedule P16:** `/thread:schedule Thread Skill` from a session in this repo picks up p16-1, p16-3, p16-4 and p16-5 (p16-4 waits on p16-3). [[thread-skill-p16-2-closing-questions-hook-exempts-rollout-turns]] needs a session in `~/repos/workspaces`. Self-rollouts run from the clone `~/repos/tools/thread-skill-rollout`.
+3. **First live Retro:** [[thread-skill-retro-first-live-run-record]] on the P16 rollout (check the events symlink first). [[thread-skill-p15-6-first-retro-chorus-ceiling-3-to-5]] (session lane) and [[thread-skill-p15-7-review-ledger-emits-review-rounds]] (`~/.agents`) close phase 15.
+4. **Carried:** p14-7's last Verify line (`land: held the primary checkout`, observable only while a rollout runs); [[thread-skill-land-takes-review-doc-deletions]]; the fresh-reviews of workspaces `29ca886` and `eb136df`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
+
+**Superseded 2026-10-06:**
 **Now (from 2026-10-04): the P13/P14 rollout is done; Chorus still runs on the primary checkout, which stays held.**
 1. **When Chorus ends:** `git reset --keep origin/master` in `~/repos/tools/thread-skill`, then p13-4 (3.0.0, `make evals` first) in the session lane: it updates the live checkout, so the ladder engine goes live. Then [[ab-fable-vs-opus-planning]].
 2. **p14-7's last Verify line** (a landing from the primary prints `land: held the primary checkout` while Chorus runs) is still unobserved; then mark [[thread-skill-p14-7-primary-checkout-holds]] done.
@@ -1059,6 +1080,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-10-06 (close): executed `[[thread-skill-rollout-2026-10-04]]` to 5/5 (#89 to #93, 17h 39m, Opus lock); p15-2 plan-blocked once and converged after a hand-back. About 12h of the run was an overnight stall on the lead's own AskUserQuestion. Grilled it into P16 (unattended rollouts, p16-1 to p16-5 filed). Created the events symlink; fast-forwarded the primary to `1c5c3ca` mid-way through a Chorus run (a hold breach, in Known quirks). Memory: `wave-repair-autonomy` updated; METHOD K118.
 - 2026-10-04 (close, from the clone): consumed the schedule handoff; Steer-only orient scheduled p13-1..3 + p14-2..6, p14-8 as one queue rollout and executed it to 9/9 (#77 to #85, 8h 10m, Opus lock). p14-4 and p14-6 plan-blocked at 3; Lachy raised both to 6 rounds through repair, and both converged. Updated peer PR #76 so #75/#76 merged. Filed the land.sh review-doc gap.
 - 2026-10-03 (third close): `/thread:orient Thread Skill` reshuffle with Lachy (Chorus first, P13 after it, P14 filed). Built and merged PR #73 (CI flakes; ledger STOP → root rethink: content-only landed check; 20/20 Ubuntu) and PR #72 (ADR 0031 primary-checkout hold; ledger STOP → Verify). Cut-over: Chorus soft-paused, checkout `04d1739` → `0b60690`, reinstated; the guard holds live. Handed off scheduling to the clone.
 - 2026-10-03 (second close): Lachy's plan: he re-orients GifLab himself (restructure, new queue rollout) as p12-13's acceptance; Thread's next is a Thread Skill reshuffle that refreshes P13 against what P12 landed and sorts the follow-ups, flake first.
