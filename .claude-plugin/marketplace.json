@@ -1,6 +1,6 @@
 {
   "name": "thread",
-  "description": "One system that drives work through time: thread continuity verbs (/thread:open, /thread:next, /thread:orient, /thread:stash, /thread:defer, /thread:handoff, /thread:close) plus the rollout queue engine (/thread:schedule, /thread:execute, /thread:status, /thread:repair).",
+  "description": "One system that drives work through time: thread continuity verbs (/thread:open, /thread:next, /thread:orient, /thread:stash, /thread:defer, /thread:handoff, /thread:close) plus the rollout queue engine (/thread:schedule, /thread:execute, /thread:status, /thread:repair, /thread:retro).",
   "owner": {
     "name": "Lachlan Tetlow-Stuart"
   },
@@ -8,7 +8,7 @@
     {
       "name": "thread",
       "source": "./",
-      "description": "Continuity family (open/next/orient/stash/defer/handoff/close: durable thread state, Obsidian captures, routing, orient's reshuffle into phased tasks) + rollout family (schedule/execute/status/repair: a queue of tasks, three-layer convergence, each approved task integrated with the latest main, then auto-merged). The execution-fit test decides which lane owns a cluster.",
+      "description": "Continuity family (open/next/orient/stash/defer/handoff/close: durable thread state, Obsidian captures, routing, orient's reshuffle into phased tasks) + rollout family (schedule/execute/status/repair/retro: a queue of tasks, three-layer convergence, each approved task integrated with the latest main, then auto-merged). The execution-fit test decides which lane owns a cluster.",
       "version": "2.11.0"
     }
   ]
