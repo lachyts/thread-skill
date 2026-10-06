@@ -417,12 +417,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   of any rollout that overlapped it, so shared load shows), scores it on
   Throughput and the Guardrails, names what bound it (Slots, the
   Integration lane, quota, dependencies) and proposes Tunings. It never
-  changes anything itself. _Avoid_: review (the engine's), reflection
-  (Chorus's).
+  changes anything itself. Its verb is `/thread:retro`. _Avoid_: review
+  (the engine's), reflection (Chorus's).
 - **Tuning** — one proposed change to the operator's rollout settings (a
   repo's Parallel ceiling, a round cap), applied only once Lachy picks it,
-  and read by the next schedule. A rule that three Retros agree on may later
-  become an automatic adjustment, by ADR. _Avoid_: tweak, auto-tune.
+  and read by the next schedule. Each Retro appends one line to
+  `tunings.jsonl` beside the record, with its headline scores (the next
+  Retro's baseline) and the Tunings applied (decision 5's tally). A rule
+  that three Retros agree on may later become an automatic adjustment, by
+  ADR. _Avoid_: tweak, auto-tune.
 - **Rollout settings** — the operator's `~/.config/thread/rollouts.toml`,
   `ladder.toml`'s sibling: `[defaults]`, the `[guardrails]` bounds and
   per-repo `[repo."owner/name"]` tables (keyed by the GitHub origin),

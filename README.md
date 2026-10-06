@@ -1,6 +1,6 @@
 # thread — one system that drives work through time
 
-Claude Code plugin, thirteen skills, two lanes. The **continuity verbs** solve
+Claude Code plugin, twelve skills, two lanes. The **continuity verbs** solve
 "too many live agent threads, and shutting one down feels like losing context"
 — every route out of a thread captures its state somewhere durable. The
 **rollout verbs** run large multi-PR changes as a queue of tasks on a
@@ -45,6 +45,7 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 | `/thread:execute` | executor | Runs the rollout's queue on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call up to `parallel_ceiling`; the lead integrates each approved task with the latest main and auto-merges it (`--gated` = a merge hold before each merge). |
 | `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. |
 | `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. |
+| `/thread:retro` | tuner | The Retro (ADR 0032): fold the journals, score the Run record (Throughput over running time, the Guardrails against the last Retro, Slot and lane use, load, the binding constraint) and propose Tunings to `rollouts.toml`; only the ones Lachy picks are applied, by the tune script, which records every Retro in `tunings.jsonl`. Never changes anything on its own. |
 
 ## Runtime support
 
@@ -81,6 +82,10 @@ watches the shared checkout's default branch and bareness around every launch
 and halts the queue on a change that is not a close-out (execute § 4.5).
 `skills/_shared/scripts/run_record.py` is the Run record's one writer (ADR 0032):
 every emitter appends its events through it, and its header is the schema.
+`skills/retro/scripts/score.py` reads a record into a Retro's scores and proposals
+(writing nothing), and `skills/retro/scripts/tune.py` is the only writer of
+`rollouts.toml` and `tunings.jsonl`: it applies the Tunings Lachy picks and records
+one line per Retro.
 
 ## Design
 
@@ -164,6 +169,10 @@ final check that the run wrote nothing into the tree):
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
   (`handoff-one-writer.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
   and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
+- **Retro** — `tests/retro-score.test.mjs` (`score.py` on synthetic records: running time and its
+  exclusions, the Slot-bound and lane-bound fixtures, each proposal's direction and cause, the baseline, load),
+  `tests/retro-tune.test.mjs` (`tune.py` edits only the picked keys, records one line, and writes nothing on a
+  refusal or a failed write) and `tests/contracts/retro.test.mjs` (the verb's wiring and its SKILL's order).
 - **Next-action script** — `tests/next-action.test.mjs`: `next-action.py`'s set-down, fill, read and
   captures against throwaway vaults — byte-level one-line edits, YAML-safe quoting, both tag forms, the
   shared dead-link rule, and refusals that write nothing.

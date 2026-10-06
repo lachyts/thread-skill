@@ -470,7 +470,7 @@ python3 "$gc" <verb> --rollout <rollout-note> <its flags: --repo <repoPath> --de
      due:
      captured: <today>
      ```
-   - Append a `## Completion log` to the rollout note: dispatch dates, tasks → PRs (links + merge dates), convergence stats per task, **total duration + a per-task duration breakdown** (read the `timeline` block from `reconcile-rollout.py status --rollout <rollout-note>` — it's computed from each task note's `started:`/`merged:` stamps, ADR 0030), the rollout note's `## Race log` copied (when it has one), phase closure: phases closed, already closed, ambiguous (with the tool's reason), failed (with the follow-on task link), left open (with the fixed reason), the automatic descopes copied from the rollout note's `## Notes` `descope:` lines (task, part, follow-up or owner, run), and the disposition of each post-rollout item.
+   - Append a `## Completion log` to the rollout note: dispatch dates, tasks → PRs (links + merge dates), convergence stats per task, **total duration + a per-task duration breakdown** (read the `timeline` block from `reconcile-rollout.py status --rollout <rollout-note>` — it's computed from each task note's `started:`/`merged:` stamps, ADR 0030), the rollout note's `## Race log` copied (when it has one), phase closure: phases closed, already closed, ambiguous (with the tool's reason), failed (with the follow-on task link), left open (with the fixed reason), the automatic descopes copied from the rollout note's `## Notes` `descope:` lines (task, part, follow-up or owner, run), the disposition of each post-rollout item, and the Retro line `Retro: offered as /thread:retro [[<rollout-slug>]], not run (a Retro needs Lachy's picks, so the ceremony never runs one, attended or not)`. An unattended Stop-driver run writes the same line.
    - Close out the associated thread (run `/thread:close` — a sibling: `${CLAUDE_PLUGIN_ROOT}/skills/close/SKILL.md`) — or record in the log why it stays open.
    - Delete the rollout's `ROLLOUT-HEARTBEAT` cron if one is registered (`CronList` → `CronDelete`); the heartbeat also self-deletes on its next tick, but don't leave it ticking for up to 20 minutes against a finished rollout.
    - Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py retire --rollout <rollout-note>` (*Git-env canary*): it runs `check-all`, then removes the rollout's records. A non-zero exit halts before the move.
@@ -626,6 +626,8 @@ Held: [[task-l]] — depends on [[task-h]] (blocked)
 Descoped: [[task-p]] — "a canary" → follow-up [[proj-followup-canary]] (automatic, Plan-blocked feedback run 1; restarted)
 ```
 
+At completion the report ends with one more line, in chat only (never written to the note): `Retro: /thread:retro [[<rollout-slug>]]`, the offer of a Retro that Lachy runs when he chooses.
+
 The `Descoped:` line lists every automatic descope this rollout has recorded (its `## Notes` `descope:` lines), so a wrong one is caught at the first report. Undo it (repair § 3, on Lachy's word) by removing every record the verb wrote: on the task note, the `## Scope decision (automatic)` section (its entry and its `<!-- descope run=… -->` marker: a marker left behind makes the next block read as a second one), the brief pointer or pointer line, the `(automatic)` `## Repair input` line and `descope_armed:` if it still stands; the follow-up note set to `status: dropped`; and the rollout's `## Notes` `descope:` line removed (or rewritten as `descope undone:`), so this line and the Completion log stop listing it. Then `hand-back`.
 
 **End every execute turn with the machine-readable status line** (after the report, or alone on turns that only reconcile, integrate or merge):
@@ -731,7 +733,7 @@ A paused rollout is **intentional**, not stalled: `/thread:status` reports it as
 - Don't skip the protocol-version gate. Legacy (absent, 2 or 3) rollouts must be regenerated, not retrofitted.
 - Don't update a task's `status:` from inside a subagent — the lead session reconciles after the workflow returns.
 - Don't hand-roll the convergence loop in the conversation — that engine moved into `task.workflow.js`. If the loop needs changing, edit the script and (for an interrupted run) re-invoke with `resumeFromRunId`.
-- Don't raise `parallel_ceiling` blindly. `parallel_ceiling` (resolved by schedule from rollouts.toml; a Retro proposes changes) caps how many task calls (worktrees) the lead runs at once. The Workflow tool's own agent cap (CPU-core-based: 10 on the M2 Max, 12 cores) is per call, so it never bounds the ceiling, and how many calls can safely run together is still open (ADR 0032 leaves it to the first Retro). Heavy-model tasks (LPIPS ≈ 500 MB/process) argue for a lower ceiling: raise it only for light rollouts.
+- Don't raise `parallel_ceiling` blindly. `parallel_ceiling` (resolved by schedule from rollouts.toml; `/thread:retro` proposes changes) caps how many task calls (worktrees) the lead runs at once. The Workflow tool's own agent cap (CPU-core-based: 10 on the M2 Max, 12 cores) is per call, so it never bounds the ceiling, and how many calls can safely run together is still open (ADR 0032 leaves it to the first Retro). Heavy-model tasks (LPIPS ≈ 500 MB/process) argue for a lower ceiling: raise it only for light rollouts.
 
 ## Worktree lifecycle (how the engine isolates + reuses worktrees)
 
