@@ -113,7 +113,9 @@ Only Lachy picks. A "yes" names ids (`p1`, `p1 and p3`); anything else, or no an
 
 ### 7. Apply through the tune script, exactly once
 
-Every Retro that reached its scores runs tune.py **exactly once**:
+Every Retro that reached its scores runs tune.py **exactly once**: it writes exactly one `tunings.jsonl` line
+(none only for a null repo, below). Before a `--pick` run, check every picked id against `score.json`'s
+`proposals` (not `withheld`): an id that is not there goes back to Lachy (step 6) before tune.py runs.
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/retro/scripts/tune.py --scores /tmp/thread-retro-<rollout-slug>/score.json --pick <p1,p2> --repo <Project root>
@@ -126,6 +128,14 @@ answering. `--record-only` still matters: its line is the next Retro's baseline.
 line voided) and exit 2 (refused: a stale `from` because rollouts.toml changed since the score, an unknown or
 withheld id, a dotted or inline key, another repo) are reported verbatim; a stale `from` is fixed by a fresh
 Retro. Never edit `rollouts.toml` to work around a refusal.
+
+A `--pick` run that wrote no line does not use up the one run: an exit-2 refusal writes nothing (no line, no key),
+and neither does an exit 1 that says `nothing applied: the Retro's line could not be written` or `cannot write
+next to`. Report it, then either re-ask Lachy once and run the corrected `--pick` (a withheld or mistyped id), or,
+when he picks nothing more or the refusal cannot be fixed in this Retro (a stale `from`, another repo), run
+`--record-only`, so the Retro still leaves its line as the next one's baseline. A run that wrote its line (exit 0,
+or the exit-1 `rollouts.toml was not written` failure, which records the line and voids it) is the one run: never
+run tune.py again for this Retro.
 
 ### 8. Report, then tidy
 
@@ -153,6 +163,8 @@ change a live rollout, Lachy edits its note.
 
 - Don't compute, round or restate a number the script did not print, and don't propose a Tuning score.py did not
   emit.
-- Don't run tune.py twice for one Retro, or before Lachy has answered (or ended the Retro).
+- Don't run tune.py again once it has written this Retro's line, or before Lachy has answered (or ended the
+  Retro). An exit-2 `--pick` refusal wrote nothing: it allows one corrected `--pick` or falls back to
+  `--record-only` (step 7), and never ends the Retro without a line.
 - Don't pick for Lachy, and don't treat a proposal's `agreeing` count as a pick: a rule three Retros agree on may
   become automatic only by ADR (`CONTEXT.md` § Run record and tuning).

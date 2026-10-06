@@ -1,5 +1,6 @@
-// /thread:retro's wiring (p15-5, ADR 0032): execute's completion offers a Retro and never runs one, the verb is
-// listed wherever its rollout siblings are, and its SKILL runs fold -> settings -> score -> Lachy's answer -> tune,
+// /thread:retro's wiring (p15-5, ADR 0032): execute's completion (and the template's manual one) offers a Retro
+// and never runs one, the verb is listed wherever its rollout siblings are, and its SKILL runs fold -> settings ->
+// score -> Lachy's answer -> tune,
 // with tune.py the only writer, run once per Retro, and a Tuning taking effect at the next /thread:schedule.
 //
 // One pure function, check(files), over { name: text }: the real files and the controls run through it, and each
@@ -10,6 +11,7 @@ import { read, collapse, FENCE } from '../lib/contract-text.mjs'
 
 const real = {
   execute: read('skills/execute/SKILL.md'),
+  template: read('skills/schedule/rollout-template.md'),
   skill: read('skills/retro/SKILL.md'),
   readme: read('README.md'),
   plugin: read('.claude-plugin/plugin.json'),
@@ -55,6 +57,10 @@ function check(files) {
     !collapse(log).includes('An unattended Stop-driver run writes the same line') ||
     move < 0 || bullets.slice(move + 1).some((b) => /retro/i.test(b))) fails.push('log')
   if (!collapse(files.execute).includes('At completion the report ends with one more line, in chat only (never written to the note): `Retro: /thread:retro [[<rollout-slug>]]`')) fails.push('report')
+  // the manual completion ceremony (a run that ended early or ran --gated) offers a Retro the same way
+  const manual = files.template.split('\n').find((l) => l.startsWith('4. Append a `## Completion log`')) || ''
+  if (!collapse(manual).includes('the Retro line `Retro: offered as /thread:retro [[<rollout-slug>]], not run (a Retro needs Lachy\'s picks, so the ceremony never runs one, attended or not)`') ||
+    !/so a Retro \(`\/thread:retro \[\[<rollout-slug>\]\]`\) proposes changes/.test(files.template)) fails.push('template')
   if (!/^\| `\/thread:retro` \| tuner \| .*tune script.*`tunings\.jsonl`/m.test(files.readme)) fails.push('readme')
   let plugin = ''
   let market = {}
@@ -96,6 +102,11 @@ test('control: the Completion-log item gone, or a retro bullet after the move, f
   only('execute', swap('execute', ', not run (a Retro needs Lachy\'s picks', ', run (a Retro needs Lachy\'s picks'), ['log'])
   const moveLine = real.execute.split('\n').find((l) => l.startsWith('   - Move the rollout note'))
   only('execute:after', swap('execute', moveLine, `${moveLine}\n   - Run /thread:retro [[<rollout-slug>]] once the note is archived.`), ['log'])
+})
+
+test('control: the manual ceremony without the Retro line, or the ceiling line not naming the verb, fails template', () => {
+  only('template', swap('template', ', and the Retro line `Retro: offered as', ', and the line `Retro: offered as'), ['template'])
+  only('template:verb', swap('template', 'so a Retro (`/thread:retro [[<rollout-slug>]]`) proposes', 'so a Retro proposes'), ['template'])
 })
 
 test('control: the chat-only report line gone fails report', () => {
