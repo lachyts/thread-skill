@@ -86,8 +86,8 @@ overwrites, because each is independent of the pause and the lead:
   Lachy decides a RACE / UNVERIFIED, its `RACE decided:` line. That line is what lifts the hold on `resume`
   (§ 3c), so neither a pause nor a live lead holds it back; only a decision that the merge does not stand
   waits, for its defer (a lead-held note, below).
-- § 3b: a decision into a set-aside task's `## Repair input`, and, with a `## Needs you` answer, the removal of that
-  section.
+- § 3b: a decision into a set-aside task's `## Repair input` (at its run or at Integration, the answer's
+  block-keyed entry, so a later run finds it), and, with a `## Needs you` answer, the removal of that section.
 - § 5: a defer of a set-aside task with its queued dependants.
 - § 3e: the git-env ack, on Lachy's word. The canary's `ack` writes only the rollout note's `## Git-env log` and
   its own records, and it re-baselines a live window rather than overwriting a note. § 3e's `restore` is not an
@@ -232,26 +232,43 @@ set) or whose `autoRetryWhy` names another cause that is his (§ 2), or a descop
 with its `ASK:` line quoted). For each input-gated task, `AskUserQuestion` with the specific decision its feedback
 needs: quote the feedback and `autoRetryWhy` (`prUrlError` for an `autoRevise: true` task, whose why names the
 seeded revise), and offer the raise (§ 4) where one applies. Then write the answer into the **task note body** so
-the next agent reads it: replace the placeholder in place, or append or update a `## Repair input` section with the
-decision verbatim. It is body content, not a status transition, so it is allowed under a pause. Where hand-back
-may run (§ 1), hand the task back on his answer (§ 4).
+the next agent reads it. For a set-aside at its run or at Integration that is *the answer's entry* (below), whatever
+was asked: a `## Needs you` question, a spent budget, a repeated fingerprint or any other `autoRetryWhy`. Otherwise
+replace the placeholder in place, or append or update a `## Repair input` section with the decision verbatim. It is
+body content, not a status transition, so it is allowed under a pause. Where hand-back may run (§ 1), hand the task
+back on his answer (§ 4).
+
+*The answer's entry.* Append
+`- <stamp> <kind> (block <fingerprint>): "<the ask, verbatim>" → <his answer, verbatim>`
+to `## Repair input`. `<stamp>` is now, in the form of the note's `### Run <n> (<stamp>)` headings (local time to
+the minute, with its offset: `2026-10-04T09:10+10:00`); `<kind>` is `needs you` for a `## Needs you` question and
+`decision` for every other ask; `<fingerprint>` is `inputs`' `fingerprint`, or `-` when it is null, as at a gate.
+The block key is what a later repair run and status read (*Answer already recorded*), so an answer recorded under a
+pause or a drain, where repair never hands back, is never asked again, and status reads it as answered.
 
 *Answer already recorded.* Before asking about a set-aside at its run or at Integration, look for an answer
-recorded for its current block: a `## Repair input` entry `needs you (block <fingerprint>)` whose `<fingerprint>` is
-`inputs`' `fingerprint`, while the note's `auto_retry_sha:` is absent or differs from it. A hand-back or an
-automatic retry stamps `auto_retry_sha` with the block it re-enters, so an equal value means that block was
-re-entered since the answer, and an identical re-block goes back to Lachy (ADR 0033 decision 6). A `-` entry never
-counts. With one found, never ask again: where hand-back may run (§ 1, § 4), repair hands back without asking again,
-and that is the task's one hand-back. An answer recorded on a block already re-entered (its why `same feedback as
-the block last re-entered`) never counts: ask again and quote it, so his word can be the answer.
+recorded for its current block: a `## Repair input` entry carrying `(block <fingerprint>)` with `inputs`'
+`fingerprint`, stamped later than the note's last re-entry, while the note's `auto_retry_sha:` is absent or differs
+from it. A `-` entry never counts.
+
+- The last re-entry is the latest of the note's `### Run <n> (<stamp>)` headings, in any section, and its
+  `auto_retry_at:`: a run recorded or an automatic retry made after the answer means the task was re-entered since.
+  A fingerprint is a content hash, so an earlier block's text can come back (answered and handed back, retried
+  through two other blocks, then the first text again with the budget spent): a repeated block is Lachy's again
+  (ADR 0033 decision 6), never handed back on the old answer.
+- A hand-back or an automatic retry stamps `auto_retry_sha` with the block it re-enters, so an equal value means
+  that block was re-entered since the answer: an identical re-block, which writes no new run, goes back to Lachy too.
+
+With one found, never ask again: where hand-back may run (§ 1, § 4), repair hands back without asking again, and that
+is the task's one hand-back. An answer recorded on a block already re-entered (its why `same feedback as the block
+last re-entered`) never counts: ask again and quote it, so his word can be the answer.
 
 *The needs-you flow*, for any set-aside whose note holds a `## Needs you` question (status's `needsHuman`), at its
 run, at Integration or at a gate:
 
 1. Ask the question verbatim, quoting the latest feedback.
-2. Note the note's `auto_retry_at:` (absent counts as a value), then append
-   `- <YYYY-MM-DD> needs you (block <fingerprint>): "<the question, verbatim>" → <his answer, verbatim>`
-   to `## Repair input`, where `<fingerprint>` is `inputs`' `fingerprint`, or `-` when it is null, as at a gate.
+2. Note the note's `auto_retry_at:` (absent counts as a value), then write the answer's entry (above), its kind
+   `needs you` and its ask the question, verbatim.
 3. Remove the `## Needs you` section, in every mode. It is body content, not a status transition, so a pause allows
    it as it allows the answer. Execute's verdict reads a non-empty `## Needs you` as open (`needs a human`), and
    neither `hand-back` nor a lead-written row (a dead call) clears it.
@@ -412,8 +429,9 @@ Lachy decides once, and § 4's hand-off waits for that decision, as § 3c alread
 
 ### 4. Hand back: re-enter at the stage it stopped
 
-Repair hands back only on Lachy's answer (§ 3b), this run's or one recorded for the task's current block, and after
-§ 3d's descope. Every route uses execute's own re-entry verb, and never under a pause (§ 1):
+Repair hands back only on Lachy's answer (§ 3b), this run's or one recorded for the task's current block (§ 3b's
+*Answer already recorded*), and after § 3d's descope. Every route uses execute's own re-entry verb, and never under
+a pause (§ 1):
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hand-back --tasks <slug>
@@ -526,9 +544,9 @@ execute. This hand-off enters execute's §4.5 resume directly, so execute's § 2
 points only) does not run; the next `/thread:execute [[<rollout>]]` runs it. Execute's **completion
 ceremony** then runs on the (possibly reduced) task set. Ensure the rollout's `## Completion log` records
 every repair action, copied from the dated `## Notes` records this and earlier runs wrote: hand-backs (task +
-stage), decisions injected (task + value), needs-you answers (task + question + answer, read from each task's
-`## Repair input` `needs you` entries), gates signed, raises (task + new budget), automatic descopes (task +
-part + follow-up or owner) from the `descope:` lines, whoever wrote them (§ 3d or the live lead),
+stage), decisions injected (task + value), § 3b's answers (task + kind + ask + answer, read from each task's
+`## Repair input` `(block <fingerprint>)` entries), gates signed, raises (task + new budget), automatic descopes
+(task + part + follow-up or owner) from the `descope:` lines, whoever wrote them (§ 3d or the live lead),
 merged-never-marked tasks flipped by `resume` (task + PR), tasks deferred (task + reason + dependants moved with it), a CLOSED PR or
 missing branch (task + restore, recut, defer or leave), and the escalations of § 3c with Lachy's decisions:
 possible PR-less merges, RACE / UNVERIFIED (task + PR + the re-verify verdict + the recorded decision), and

@@ -131,5 +131,9 @@ Considered:
 - **Status and repair caught up in p16-5.** Repair's **retry (automatic)** class leaves an `autoRetry: true` or
   cooling set-aside to the lead, and its **needs you** class answers a `## Needs you` question into
   `## Repair input` and removes the section before the hand-back. Every other hand-back, a raise included, follows
-  Lachy's answer, so decision 7's "raise already recorded" reading is now his word. Status shows each set-aside's
-  retry count and a `Needs you` block.
+  Lachy's answer, so decision 7's "raise already recorded" reading is now his word. Every answer repair records for
+  a set-aside at its run or at Integration, whatever it asked, is a stamped `## Repair input` entry keyed on the
+  block's fingerprint: an answer recorded under a pause is handed back once by a later repair run, never asked
+  again, and it counts only until the task is re-entered (a later run, `auto_retry_at` or `auto_retry_sha`), so a
+  block that comes back goes to Lachy again, as decision 6 wants. Status shows each set-aside's retry count and a
+  `Needs you` block, where an answered block reads `answered: awaiting /thread:repair`.

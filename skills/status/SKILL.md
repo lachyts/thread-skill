@@ -333,11 +333,16 @@ data (§ 2's per-task keys and each task's `inputs`), so it renders offline too.
   included: `[[<slug>]] set aside <where> (<status>): <reason> → /thread:repair [[<rollout>]]`, where `<reason>` is
   `autoRetryWhy`, or `prUrlError` for an `autoRevise: true` row (its why names the seeded revise), with its
   `needsHuman` question on a `→ asks:` line beneath it. The line reads `[[<slug>]] answered: awaiting /thread:repair`
-  instead when its `## Repair input` already answers its current block: `inputs`' `fingerprint` is non-null,
-  `grep -m1 -F 'needs you (block <fingerprint>)' ~/repos/obsidian/Work/Tasks/<slug>.md` prints the entry, and
-  `grep -m1 '^auto_retry_sha:' ~/repos/obsidian/Work/Tasks/<slug>.md` prints no line or a value other than
-  `<fingerprint>`. An equal value means a hand-back or a retry re-entered that block since the answer, so an
-  identical re-block is a fresh ask. A `-` entry never counts. Both greps are reads, not commands;
+  instead when its `## Repair input` already answers its current block (repair § 3's *Answer already recorded*,
+  whatever was asked): `inputs`' `fingerprint` is non-null, and three reads agree. First,
+  `grep -F '(block <fingerprint>)' ~/repos/obsidian/Work/Tasks/<slug>.md` prints an entry whose stamp (its first
+  word after `- `) is later than every stamp that
+  `grep -E '^(### Run [0-9]+ \(|auto_retry_at:)' ~/repos/obsidian/Work/Tasks/<slug>.md` prints: a run recorded or
+  an automatic retry made after the answer means the task was re-entered since, so an earlier block's text that
+  comes back is a fresh ask. Then `grep -m1 '^auto_retry_sha:' ~/repos/obsidian/Work/Tasks/<slug>.md` prints no
+  line or a value other than `<fingerprint>`: an equal value means a hand-back or a retry re-entered that block
+  since the answer, so an identical re-block, which writes no new run, is a fresh ask. A `-` entry never counts.
+  The greps are reads, not commands;
 - each task whose `inputs` failed, with its failure line.
 
 A set-aside task the RACE / UNVERIFIED, Merged into another base, Merged never marked, PR CLOSED or Possible
