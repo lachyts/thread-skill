@@ -62,8 +62,7 @@ Subcommands:
               `review` note with no `pr:` (approved without a PR, which the queue sets aside at its run),
               go to `status: in_progress` with `owner:` removed and a `handed_back: <now>` marker (the next
               `next --running` restarts it, and its own call re-runs on the existing tree and branch; the
-              restart's mark-started consumes the marker). Either arm removes a `descope_refused:` marker (the
-              re-entry is the answer to it). Refuses (exit 1, nothing written) every
+              restart's mark-started consumes the marker). Refuses (exit 1, nothing written) every
               other note: gate-pending (approve-gates' job), done, review with a PR (awaiting Integration),
               a read-only review note, in_progress, open, and a note set aside at Integration with no `pr:`.
               A task an undecided RACE or UNVERIFIED holds (Race holds, below; read on the rollout its
@@ -191,7 +190,7 @@ Subcommands:
               each lane holder, a merge-hold close and `lane-freed release=halt`. Nothing in the vault changes.
 
   defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
-              and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:`/`descope_refused:`/`handed_back:` stamps
+              and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:`/`handed_back:` stamps
               and the four automatic-retry markers (`auto_retries_used`, `quota_retries_used`, `auto_retry_sha`,
               `auto_retry_at`, p16-4: a deferred task starts its next rollout afresh)
               (first-start-wins would otherwise carry a
@@ -202,11 +201,7 @@ Subcommands:
               1.2) and /thread:repair § 3d share: `--tasks <slug> --rollout <note> --part "<verbatim quote>"
               (--optional --short <kebab> | --owner <slug> --owner-quote "<verbatim quote>") --reason "<line>"`.
               The caller judges that the plan-block feedback centres on the part; the verb checks it. Exit 3 is an
-              ASK (one `ASK: [[slug]] <why>; nothing written: ...` line; its one write is
-              `descope_refused: <now> run=<n> sha=<12 hex>`, naming the Plan-blocked feedback run it judged and its
-              feedback fingerprint, kept as it stands when it already names them, and skipped while `descope_armed:`
-              stands or under --dry-run: lead-integrate.py's verdict reads `autoRetry: false` while it names the
-              current block, so a refused scope decision is never retried silently, in any session) when: the part, or a clause
+              ASK (one `ASK: [[slug]] <why>; nothing written: ...` line, nothing written) when: the part, or a clause
               holding it, cites an ADR; a recorded decision (`## Decisions…`, a human `## Scope decision…`, a
               `## Repair input` line without `(automatic)`, `## Approved gates`, `## Gated inputs`) holds the part
               (or, for --owner, the quote); the part sits in a fenced code block of the brief (the body minus the
@@ -227,8 +222,7 @@ Subcommands:
               `<!-- descope run=<n> part=<sha12> mode=<m> -->` marker, ` (descoped: see ## Scope decision
               (automatic))` on each brief item holding the part, or one pointer line for a part the brief lacks, a
               `## Repair input` `(automatic)` line naming the superseded Plan-blocked feedback runs, and
-              `descope_armed: <now>`, a `descope_refused:` removed), then a `- <date> descope: [[slug]] ...` line in
-              the rollout's `## Notes`.
+              `descope_armed: <now>`), then a `- <date> descope: [[slug]] ...` line in the rollout's `## Notes`.
               `[no-change]` when all are present. `status:` is never written: the caller's `hand-back` re-enters
               the task. Exit 1 (nothing written): a missing note, a note not plan-blocked at its run or without a
               Plan-blocked run, a --rollout its `rollout:` does not name, a bad --short or a follow-up name that
@@ -2416,21 +2410,18 @@ def _hand_back_note(note, now):
     review-blocked or plan-blocked note set aside at its run, or a PR-less code-writing review note -> in_progress,
     `owner:` removed and `handed_back: <now>` stamped (arm "run": the restart's mark-started consumes the marker and
     records start=hand-back). Anything else is (None, why) and the note is untouched. `said` is the stdout tail
-    after `<slug>: `. Either arm removes `descope_refused:` (the re-entry answers it). Shared by cmd_hand_back and
-    cmd_auto_retry (p16-4), so the two re-enter a task identically."""
+    after `<slug>: `. Shared by cmd_hand_back and cmd_auto_retry (p16-4), so the two re-enter a task identically."""
     status = _status(note)
     state, at = _queue_state(note)
     if state == "set-aside" and at == "integration" and _pr(note):
         note.set("status", "review")
         note.set("ready", _stamp(now))
         note.remove("integrating")
-        note.remove(DESCOPE_REFUSED_KEY)
         return "integration", f"blocked->review (set aside at Integration; ready: {_stamp(now)})"
     if state == "set-aside" and at == "run" and status in HAND_BACK_RUN_STATUSES:
         note.set("status", "in_progress")
         note.remove("owner")
         note.set(HANDED_BACK_KEY, _stamp(now))  # the restart's mark-started records start=hand-back
-        note.remove(DESCOPE_REFUSED_KEY)  # a re-entry answers a refused descope
         return "run", f"{status}->in_progress (set aside at its run; owner: cleared)"
     return None, ("set aside at Integration with no pr:" if at == "integration"
                   else f"status is {status or 'none'!r} (queue state {state}{'' if at is None else ' at ' + at})")
@@ -3522,7 +3513,7 @@ def cmd_defer(args) -> int:
         rollout, prior, held = _note_rollout(note), _status(note), _holds_lane(note)
         note.set("status", "open")
         for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready", GATES_SIGNED_KEY,
-                    DESCOPE_ARMED_KEY, DESCOPE_REFUSED_KEY, HANDED_BACK_KEY, *AUTO_RETRY_KEYS):
+                    DESCOPE_ARMED_KEY, HANDED_BACK_KEY, *AUTO_RETRY_KEYS):
             note.remove(key)
         note.save(dry_run=args.dry_run)
         if rollout and not args.dry_run:
@@ -3533,7 +3524,7 @@ def cmd_defer(args) -> int:
                 _halt_lane(rollout, slug, args, state)
             _close_holds(rollout, slug, ("race",), args, state)
         print(f"{slug}: deferred->open (rollout/owner and started/merged/integrating/ready/{GATES_SIGNED_KEY}/"
-              f"{DESCOPE_ARMED_KEY}/{DESCOPE_REFUSED_KEY}/{HANDED_BACK_KEY}/{'/'.join(AUTO_RETRY_KEYS)} cleared, "
+              f"{DESCOPE_ARMED_KEY}/{HANDED_BACK_KEY}/{'/'.join(AUTO_RETRY_KEYS)} cleared, "
               "a legacy `wave:` included)" +
               (" (dry-run)" if args.dry_run else " [written]"))
     for e in errors:
@@ -3544,13 +3535,6 @@ def cmd_defer(args) -> int:
 # ---- descope (p14-4) ----------------------------------------------------------------
 
 DESCOPE_ARMED_KEY = "descope_armed"
-# A refused descope (exit 3), durable on the note: `descope_refused: <stamp> run=<n> sha=<12 hex>`, the Plan-blocked
-# feedback run it judged and that block's fingerprint (_block_fingerprint). While it names the note's current block,
-# lead-integrate.py's auto_retry_verdict reads `autoRetry: false` ("descope refused"): the scope decision is Lachy's,
-# whichever session refused it. A later block (a new run or sha) outdates it; hand-back, auto-retry's re-entry, an
-# exit-0 descope and defer remove it.
-DESCOPE_REFUSED_KEY = "descope_refused"
-DESCOPE_REFUSED_RE = re.compile(r"^(\S+) run=(\d+) sha=([0-9a-f]{12})$")
 SCOPE_AUTO_SECTION = "## Scope decision (automatic)"
 REPAIR_INPUT_SECTION = "## Repair input"
 DESCOPE_POINTER = "(descoped: see ## Scope decision (automatic))"
@@ -3574,28 +3558,6 @@ CLAUSE_SPLIT_RE = re.compile(r"(?<=[.;:!?])\s+| [—–] |,\s+(?:and|but|then)\s
 ADR_RE = re.compile(r"\bADR[ -]?\d{1,4}\b|docs/adr/", re.I)
 KEBAB_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
-
-
-def _descope_refusal(note):
-    """(run, sha) the note's `descope_refused:` names, or None when it is absent or malformed."""
-    m = DESCOPE_REFUSED_RE.match(_scalar(note.get(DESCOPE_REFUSED_KEY)))
-    return (int(m.group(2)), m.group(3)) if m else None
-
-
-def _plan_block_key(note):
-    """(run, sha) of a plan-blocked note's current block: its top Plan-blocked feedback run and _block_fingerprint,
-    or None (not plan-blocked, no run, no fingerprint)."""
-    if _status(note) != "plan-blocked":
-        return None
-    runs = note.run_blocks(BLOCKED_SECTIONS["plan-blocked"])
-    fp = _block_fingerprint(note)
-    return (_top_run(runs)["n"], fp) if runs and fp else None
-
-
-def descope_refused(note) -> bool:
-    """True while the note's `descope_refused:` names its current block (_plan_block_key): the verdict's refusal."""
-    key = _plan_block_key(note)
-    return key is not None and _descope_refusal(note) == key
 
 
 def _fold(text) -> str:
@@ -3811,8 +3773,8 @@ def cmd_descope(args) -> int:
     and /thread:repair § 3d share. The caller judged that the plan-block feedback centres on a part of the task that
     is optional in the note (--optional) or that a later task in the same rollout owns (--owner); this verb checks
     that judgement mechanically and writes the records. Exit 0: descoped ([written], or [no-change] for a complete
-    re-run), and the caller runs `hand-back`. Exit 3: ASK, its one write `descope_refused:` (DESCOPE_REFUSED_KEY), and
-    repair asks Lachy. Exit 1: an ERROR, nothing written. Exit 2: usage."""
+    re-run), and the caller runs `hand-back`. Exit 3: ASK, nothing written, and repair asks Lachy. Exit 1: an ERROR,
+    nothing written. Exit 2: usage."""
     def usage(msg):
         print(f"ERROR: descope: usage: {msg}", file=sys.stderr)
         return 2
@@ -3875,16 +3837,6 @@ def cmd_descope(args) -> int:
                 return error(f"{fu_path} exists and is not this task's follow-up (no descoped_from: \"[[{slug}]]\")")
 
     def ask(why):
-        # The refusal's one write: `descope_refused:` naming the block judged, so `inputs`' verdict reads autoRetry:
-        # false for it in every session. Kept when it already names it (idempotent); skipped while a descope is armed
-        # (that descope stands and its hand-back is pending) and under --dry-run. The ASK line is unchanged.
-        key = _plan_block_key(note)
-        if key is not None and not armed and not args.dry_run and _descope_refusal(note) != key:
-            note.set(DESCOPE_REFUSED_KEY, f"{_stamp(now)} run={key[0]} sha={key[1]}")
-            try:
-                note.save()
-            except OSError as e:
-                print(f"WARN: descope: cannot record {DESCOPE_REFUSED_KEY}: in {path}: {e}", file=sys.stderr)
         print(f"ASK: [[{slug}]] {why}; nothing written: /thread:repair [[{ro}]] asks Lachy")
         return 3
 
@@ -3975,7 +3927,6 @@ def cmd_descope(args) -> int:
                          f"Plan-blocked feedback {runs_said} the part; every other point stands.")
     if not armed:
         note.set(DESCOPE_ARMED_KEY, stamp)
-    note.remove(DESCOPE_REFUSED_KEY)  # descoped: an earlier refusal no longer stands
     if note.dirty:
         wrote = True
         try:

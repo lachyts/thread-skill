@@ -142,7 +142,7 @@ refused flag). When K is not an integer
 nothing (`--repo` only computes a path). Status reads `branch`, `worktreePath`, `readyAt`, `resumeAt`,
 `autoRevise`, `lastRound` and `lastIntegration` from it, and the automatic retry's verdict (ADR 0033): `autoRetry`,
 `autoRetryWhy`, `autoRetryAfter`, `autoRetryError`, `autoRetryClass`, `autoRetryBudget`, `autoRetriesUsed`,
-`quotaRetriesUsed` and `fingerprint`, plus `prUrlError` and `answerRecorded`. A non-empty `autoRetryError` flags
+`quotaRetriesUsed` and `fingerprint`, plus `prUrlError`. A non-empty `autoRetryError` flags
 "invalid round budget: <it>" on the task (execute § 3's round-budget halt). `lastIntegration` is the `## Integration log`'s LAST
 line as fields, never a search or a count: null when the note has no log, and a field is null where the line
 has `-`. If `inputs` exits 2 (an unreadable note), render "inputs failed: <stderr>" for that task and carry
@@ -334,17 +334,18 @@ data (§ 2's per-task keys and each task's `inputs`), so it renders offline too.
   `autoRetryWhy`, or `prUrlError` for an `autoRevise: true` row (its why names the seeded revise), with its
   `needsHuman` question on a `→ asks:` line beneath it. The line reads `[[<slug>]] answered: awaiting /thread:repair`
   instead when its `## Repair input` already answers its current block (repair § 3's *Answer already recorded*,
-  whatever was asked): `inputs`' `answerRecorded` is non-null. `lead-integrate.py` computes that key once for
-  repair, status and execute § 6.5, so status reads the key, never the note: of the entries keyed on the block,
-  the latest, when its stamp is later than the note's last re-entry (its run headings, `auto_retry_at:` and any
-  automatic descope entry, compared as instants): a run recorded, an automatic retry made or an automatic descope
-  recorded after the answer means the task was re-entered since, so an earlier block's text that comes back is a
-  fresh ask. A hand-back leaves no such stamp, so the entry is spent before it (repair § 3, and execute's "retry
-  [[task]]": its key becomes `(block <fingerprint>; handed back <stamp>)`), which `answerRecorded` never matches:
-  an identical re-block after it, which writes no new run, is a fresh ask. An entry recorded since the last
-  re-entry counts whatever the verdict's why, a `same feedback as the block last re-entered` block included. A `-`
-  entry never counts, so a set-aside with no fingerprint (a code-writing `review` with no `pr:`) shows as a fresh
-  ask after a pause;
+  whatever was asked): `inputs`' `fingerprint` is non-null, and
+  `grep -F '(block <fingerprint>)' ~/repos/obsidian/Work/Tasks/<slug>.md` prints an entry whose stamp (its first
+  word after `- `) is later than every stamp that
+  `grep -E '^(### Run [0-9]+ \(|auto_retry_at:|- descoped \(automatic\) )' ~/repos/obsidian/Work/Tasks/<slug>.md`
+  prints (a run heading's in its parentheses, `auto_retry_at:`'s value, an automatic descope entry's word after
+  `(automatic)`): a run recorded, an automatic retry made or an automatic descope recorded after the answer means
+  the task was re-entered since, so an earlier block's text that comes back is a fresh ask. A hand-back leaves no
+  such stamp, so the entry is spent before it (repair § 3, and execute's "retry [[task]]": its key becomes
+  `(block <fingerprint>; handed back <stamp>)`), which the `-F` read never prints: an identical re-block after it,
+  which writes no new run, is a fresh ask. An entry recorded since the last re-entry counts whatever the verdict's
+  why, a `same feedback as the block last re-entered` block included. A `-` entry never counts, so a set-aside with no fingerprint (a code-writing `review`
+  with no `pr:`) shows as a fresh ask after a pause. The greps are reads, not commands;
 - each task whose `inputs` failed, with its failure line.
 
 A set-aside task the RACE / UNVERIFIED, Merged into another base, Merged never marked, PR CLOSED or Possible
@@ -465,7 +466,7 @@ Keep the whole report scannable: it's a glance, not a wall of text.
     cool-down ends), or when it descopes a `plan-blocked` task the notes settle, once (execute § 4.5), and restarts
     it. Every other set-aside task is never re-entered by the live lead itself: it is a Needs you item, or a Drift
     line routes it. A `plan-blocked` one whose descope the verb refused (exit 3) is repair's too: the refusal
-    records `descope_refused:` for its block, so its verdict reads `autoRetry: false` and it is a Needs you item. One plan-blocked again
+    writes nothing, so its verdict can still read `autoRetry: true` while the lead skips it. One plan-blocked again
     after an automatic descope (a `## Scope decision (automatic)`, no `descope_armed:`) is always Lachy's decision,
     never a silent hand-back. So, with a Needs you item, a set-aside task the Needs you block leaves to its Drift
     line, or a `plan-blocked` set-aside, add `/thread:repair [[<rollout>]]`: its live-queue mode asks you those

@@ -166,7 +166,7 @@ class below it.
 | **awaiting Integration** | `review` with a `pr:` | nothing: the loop integrates it |
 | **queued** | `open`, its `waitingOn` unmet | nothing: it starts when its dependencies land (or defer it with its blocker, § 5) |
 | **plan-blocked after a descope** | `plan-blocked` with a `## Scope decision (automatic)` section and no `descope_armed:`: it restarted after an automatic descope and blocked again | input-gated: § 3b, quoting the new feedback and the automatic descope; never a silent hand-back, never a second descope (the verb refuses one, exit 3) |
-| **plan-blocked, descopable** | `plan-blocked` (`resumeAt: own`) with no `## Scope decision (automatic)` section, or one whose `descope_armed:` still stands (a descope whose hand-back never ran), its feedback centring on one part of the task that the note marks optional or that a later task in this rollout owns | `reconcile-rollout.py descope` (§ 3d): exit 0 → hand back (§ 4) → its own call, and tell Lachy afterwards; exit 3 → § 3b; judged before **retry (automatic)**, as execute's step 1.2 judges a descope before its automatic retry: a refusal's one write is `descope_refused:`, naming the block, so from then on `inputs` reads `autoRetry: false` (`descope refused: …`) for that block, whichever session refused it, and a re-judgement that finds it not descopable leaves it to **own run** |
+| **plan-blocked, descopable** | `plan-blocked` (`resumeAt: own`) with no `## Scope decision (automatic)` section, or one whose `descope_armed:` still stands (a descope whose hand-back never ran), its feedback centring on one part of the task that the note marks optional or that a later task in this rollout owns | `reconcile-rollout.py descope` (§ 3d): exit 0 → hand back (§ 4) → its own call, and tell Lachy afterwards; exit 3 → § 3b; judged before **retry (automatic)**, as execute's step 1.2 judges a descope before its automatic retry: a refusal writes nothing, so the verdict can still read `autoRetry: true` while the lead skips the key |
 | **retry (automatic)** | set aside at its run or at Integration, and `inputs` reads `autoRetry: true` or a non-empty `autoRetryAfter`; a `plan-blocked` task reaches it only once the class above judged it not descopable | nothing: the lead re-enters it (execute § 4.5 step 1.2's *Automatic retry*), now or once its cool-down ends, and with no lead live § 4's hand-off does; never a hand-back, which would reset its budget |
 | **needs you** | set aside at its run or at Integration (`setAsideAt: run` or `integration`, never a gate) with a `## Needs you` question (status's `needsHuman`) | input-gated: § 3b asks the question verbatim, writes the answer into `## Repair input`, removes the `## Needs you` section, then hands back at its stage (§ 4) |
 | **at Integration** | `setAsideAt: integration` (`resumeAt: integration`) | input-gated (§ 3b): ask why it is his (`autoRetryWhy`), then on his word `reconcile-rollout.py hand-back --tasks <slug>` → `review`: it rejoins the Integration queue and retries Integration only; its branch, plan and review stand, and nothing before Integration is redone (§ 4). One with no `pr:` is **PR CLOSED / branch missing**'s |
@@ -187,9 +187,9 @@ reads `inputs`' verdict. A set-aside at its run or at Integration that § 2 does
 reaches repair because its automatic retry is over (the auto-retry budget is spent, the fingerprint repeated, or
 `needsHuman` is set), or because `autoRetryWhy` names another cause that is his: `auto_retries: 0`, an unresolved
 budget, a quota block past its five free retries, a declined merge, a gone branch, a merge-task text a human must
-clear, a `prUrlError`, an at-Integration set-aside with no `pr:` (**PR CLOSED / branch missing**), a code-writing
-review with no `pr:` or a refused descope (`descope refused: …`, § 3d's exit 3). Either way it is input-gated
-(§ 3b), and the ask quotes `autoRetryWhy`. A non-empty `autoRetryError` is execute § 3's round-budget halt: report it; the fix is the stamp it names, on Lachy's word, and
+clear, a `prUrlError`, an at-Integration set-aside with no `pr:` (**PR CLOSED / branch missing**) or a code-writing
+review with no `pr:`. Either way it is input-gated (§ 3b), and the ask quotes `autoRetryWhy`. A non-empty
+`autoRetryError` is execute § 3's round-budget halt: report it; the fix is the stamp it names, on Lachy's word, and
 nothing is handed back until that reads. A usage limit that kills an agent mid-run is an infra block, never a quota
 block: it gets the infra cool-downs and the budget, then Lachy.
 
@@ -252,9 +252,6 @@ answered. A `-` entry never counts, so a block with no fingerprint is asked agai
 *Answer already recorded.* Before asking about a set-aside at its run or at Integration, look for an answer
 recorded for its current block: a `## Repair input` entry carrying `(block <fingerprint>)` with `inputs`'
 `fingerprint`, stamped later than the note's last re-entry. A `-` entry never counts, nor a spent one (below).
-`inputs`' `answerRecorded` is that entry, or null: `lead-integrate.py` computes the rule below once, its stamps
-compared as instants (an offset change across DST included), for this step, status § 4 and execute § 6.5 alike, so
-read the key, never the note by hand.
 
 - The last re-entry is the latest of the note's `### Run <n> (<stamp>)` headings, in any section, its
   `auto_retry_at:` and its `- descoped (automatic) <stamp>` entry: a run recorded, an automatic retry made or an
@@ -377,9 +374,7 @@ read as a second one), the brief pointer or pointer line, the `(automatic)` `## 
 descoped work twice; and the rollout's `## Notes` `descope:` line removed (or rewritten as `descope undone:`),
 so no report's `Descoped:` line or the Completion log lists it. Then hand back. Exit 3 → § 3b: its `ASK:` line
 says why (required scope, an ADR decision, a recorded decision, an owner that cannot take it, a part tied to
-neither the feedback nor the brief, or a second block after an automatic descope), and its one write is
-`descope_refused:`, naming the block (none while `descope_armed:` stands), which `inputs` reads as `autoRetry: false`
-until a later block, `hand-back` or `defer`.
+neither the feedback nor the brief, or a second block after an automatic descope) and nothing was written.
 Exit 1 → report its ERROR line and leave the task set aside. In this session § 3d's judgement is the session's for
 that key (execute § 4.5 step 1.2's *Automatic descope* key): the hand-off's loop neither judges it again nor, after
 an exit 3, retries it automatically; the refusal is § 3b's.

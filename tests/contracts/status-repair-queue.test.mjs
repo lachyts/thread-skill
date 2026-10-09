@@ -1397,10 +1397,8 @@ function check({ status, repair, execute, fx }) {
 
   // needs-you (both): status lists the decisions that are Lachy's and that no Drift line routes, each set-aside line
   // pointing at repair and carrying its question. An answered block, whatever was asked and whatever the verdict's why,
-  // reads `answered` until the task is re-entered: status reads `inputs`' `answerRecorded` (lead-integrate.py
-  // computes repair § 3b's rule once for repair, status and execute § 6.5; status never greps the note), and that
-  // key, run on fixture F's notes and agreeing with this file's own reading of repair's rule (answeredIn) on every
-  // one, reads it on (ii) asks answered, (iv) a spent budget answered under a pause and (v) a repeated block
+  // reads `answered` until the task is re-entered: status's reads, extracted from its prose and run on fixture F's
+  // notes, read it on (ii) asks answered, (iv) a spent budget answered under a pause and (v) a repeated block
   // answered under a pause (its fingerprint equal to `auto_retry_sha`), then answered again since its same-feedback
   // re-block; never once repair's hand-back has spent the entry (an identical re-block included), nor on a block
   // that came back (new runs and `auto_retry_at`, `auto_retry_at` alone, new runs alone, an automatic descope's entry
@@ -1425,28 +1423,34 @@ function check({ status, repair, execute, fx }) {
     .replace('<the ask, verbatim>', ask).replace('<his answer, verbatim>', answer)
   const spentTpl = (r3bFlat.match(/to `(\(block <fingerprint>;[^`]*)`/) ?? [])[1] ?? ''
   const spentRendered = spentTpl.replace('<fingerprint>', A_.fp).replace('<stamp>', A_.handed)
-  // Status's read on one fixture note: `inputs`' `answerRecorded`, an entry keyed on the block. It must agree with
-  // answeredIn (repair § 3b's rule as this file reads it) on every fixture note, and status's prose reads the key,
-  // never the note by hand (no grep).
-  const parity = []
+  const NOTE_AT = " ~/repos/obsidian/Work/Tasks/<slug>.md`"
+  const nyFlat = ny.replace(/\s*\n\s*/g, ' ')
+  const fNeedle = (nyFlat.match(/`grep -F '([^']+)' ~\/repos\/obsidian\/Work\/Tasks\/<slug>\.md`/) ?? [])[1]
+  const eNeedle = (nyFlat.match(/`grep -E '([^']+)' ~\/repos\/obsidian\/Work\/Tasks\/<slug>\.md`/) ?? [])[1]
+  const shaGrep = nyC.includes("`grep -m1 '^auto_retry_sha:'" + NOTE_AT)
+  const grepIn = (args, dir, slug) => spawnSync('grep', [...args, path.join(dir, `${slug}.md`)], { encoding: 'utf8' }).stdout.trim()
+  // Status's reads on one fixture note, as its prose words them: an entry the -F read prints, stamped later than every
+  // stamp the -E read prints (a run heading's in its parentheses, `auto_retry_at:`'s value, an automatic descope's
+  // word after `(automatic)`), and, only when its prose greps one, an auto_retry_sha other than the fingerprint.
+  const lineStamp = (l) => (l.match(/^### Run \d+ \(([^)]*)\)/) ?? l.match(/^auto_retry_at:\s*(\S+)/) ?? l.match(/^- descoped \(automatic\) ([^,\s]+)/) ?? [])[1]
   const reads = (dir, slug, fp) => {
-    const a = inputsAt(dir, slug).answerRecorded
-    const got = typeof a === 'string' && a.includes(`(block ${fp})`)
-    if (got !== answeredIn(dir, slug, fp)) parity.push(`${slug} in ${dir}`)
-    return got
+    const out = (args) => grepIn(args, dir, slug).split('\n').filter(Boolean)
+    const last = Math.max(-Infinity, ...out(['-E', eNeedle]).map((l) => Date.parse(lineStamp(l))))
+    return out(['-F', fNeedle.replace('<fingerprint>', fp)]).some((l) => Date.parse(l.split(' ')[1]) > last) &&
+      (!shaGrep || grepIn(['-m1', '^auto_retry_sha:'], dir, slug) !== `auto_retry_sha: ${fp}`)
   }
-  const greps = nyC.includes("`inputs`' `answerRecorded` is non-null") && nyC.includes('so status reads the key, never the note') && !/`grep /.test(nyC) &&
+  const greps = !!(fNeedle && eNeedle) &&
     reads(A_.answeredDir, A_.slug, A_.fp) && !reads(A_.reblockedDir, A_.slug, A_.fp) &&
     reads(S_.answeredDir, S_.slug, S_.fp) && !reads(S_.handedDir, S_.slug, S_.fp) &&
     reads(P_.answeredDir, P_.slug, P_.fp) && !reads(P_.handedDir, P_.slug, P_.fp) && !reads(P_.reblockedDir, P_.slug, P_.fp) &&
     reads(P_.reansweredDir, P_.slug, P_.fp) &&
-    (A_.stale ?? []).length === 4 && A_.stale.every((x) => !reads(x.dir, x.slug, x.fp)) && !parity.length
+    (A_.stale ?? []).length === 4 && A_.stale.every((x) => !reads(x.dir, x.slug, x.fp))
   const retryInv = collapse(execute.split('\n').find((l) => l.startsWith('In a live session, "retry [[task]]"')) ?? '')
   if (!s2.includes('`needsHuman`') ||
     !['`autoRetry: false`', 'no `autoRetryAfter`', '`autoRevise: false`', 'or `prUrlError` for an `autoRevise: true` row', 'a code-writing `review` with no `pr:`',
-      'answered: awaiting /thread:repair', 'whatever was asked', 'A `-` entry never counts', 'compared as instants',
+      'answered: awaiting /thread:repair', 'whatever was asked', 'A `-` entry never counts', 'is later than every stamp that',
       'a run recorded, an automatic retry made or an automatic descope recorded after the answer means the task was re-entered since',
-      'A hand-back leaves no such stamp, so the entry is spent before it', 'which `answerRecorded` never matches',
+      'A hand-back leaves no such stamp, so the entry is spent before it', 'which the `-F` read never prints',
       "entry recorded since the last re-entry counts whatever the verdict's why",
       'A set-aside task the RACE / UNVERIFIED, Merged into another base, Merged never marked, PR CLOSED or Possible PR-less merge flag names is no item',
       '(action 7 or 11; under a live queue, action 10 adds it)', 'A Rung drift excludes nothing', 'Offline, only the RACE / UNVERIFIED flag renders, so only it excludes',
@@ -2144,14 +2148,20 @@ test('control: an answer written to a signed task fails needs-you', () => {
 test('control: a PR-less review handed back without asking fails needs-you', () => {
   only(rp('A code-writing `review` with no `pr:` is asked too', 'A code-writing `review` with no `pr:` is handed back without asking'), 'needs-you', 'no-PR review')
 })
-test("control: status reading the note by hand, not inputs' answerRecorded, fails needs-you", () => {
-  only(st("`inputs`' `answerRecorded` is non-null.", "`grep -F '(block <fingerprint>)' ~/repos/obsidian/Work/Tasks/<slug>.md` prints an entry."), 'needs-you', 'grep back')
+test("control: status's needle on another entry fails needs-you", () => {
+  only(st("`grep -F '(block <fingerprint>)'", "`grep -F 'needs you (block <fingerprint>)'"), 'needs-you', 'needle')
 })
-test("control: status's key read restated as its own rule fails needs-you", () => {
-  only(st('so status reads the key, never the note:', 'so status may read the key or the note:'), 'needs-you', 'key or note')
+test("control: status's needle that prints a spent key fails needs-you", () => {
+  only(st("`grep -F '(block <fingerprint>)'", "`grep -F '(block <fingerprint>'"), 'needs-you', 'needle: spent')
 })
-test("control: status comparing stamps as strings fails needs-you", () => {
-  only(st('compared as instants', 'compared as strings'), 'needs-you', 'instants')
+test("control: status's stamp read without auto_retry_at fails needs-you", () => {
+  only(st("'^(### Run [0-9]+ \\(|auto_retry_at:|- descoped \\(automatic\\) )'", "'^(### Run [0-9]+ \\(|- descoped \\(automatic\\) )'"), 'needs-you', 'stamp: auto_retry_at')
+})
+test("control: status's stamp read without the runs fails needs-you", () => {
+  only(st("'^(### Run [0-9]+ \\(|auto_retry_at:|- descoped \\(automatic\\) )'", "'^(auto_retry_at:|- descoped \\(automatic\\) )'"), 'needs-you', 'stamp: runs')
+})
+test("control: status's stamp read without the automatic descope fails needs-you", () => {
+  only(st("'^(### Run [0-9]+ \\(|auto_retry_at:|- descoped \\(automatic\\) )'", "'^(### Run [0-9]+ \\(|auto_retry_at:)'"), 'needs-you', 'stamp: descope')
 })
 test('control: repair counting an entry of any age fails needs-you', () => {
   only(rp("`fingerprint`, stamped later than the note's last re-entry.", '`fingerprint`.'), 'needs-you', 'repair stamp')
