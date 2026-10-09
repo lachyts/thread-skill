@@ -622,7 +622,7 @@ const COUNT_KEY = { merged: 'merged', integrating: 'integrating', 'awaiting-inte
 // RACE and a PR-less merge ahead of merged-never-marked and at Integration (both also match a RACE / UNVERIFIED
 // task), PR CLOSED ahead of awaiting Integration, a plan-block after a descope ahead of the descopable one, and both
 // ahead of the automatic retry (a descope is judged first, as execute's step 1.2 judges it) and of the own run they
-// also match; the automatic retry and a `## Needs you` question ahead of every class that asks or hands back.
+// also match; the automatic retry and a `## Needs you` question ahead of at Integration and every class below it.
 const LABELS = ['RACE re-verify in flight', 'RACE', 'PR-less merge', 'merged into another base', 'merged, never marked', 'merge hold', 'live', 'PR CLOSED / branch missing',
   'awaiting Integration', 'queued', 'plan-blocked after a descope', 'plan-blocked, descopable', 'retry (automatic)', 'needs you', 'at Integration',
   'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'own run', 'gate']
@@ -858,12 +858,14 @@ function check({ status, repair, fx }) {
 
   // first-match: the classes are first-match in LABELS' order, and every resume (§ 3a, the hand-off) is held while
   // a RACE / UNVERIFIED escalation is undecided, i.e. until a dated `RACE decided:` line records Lachy's call;
-  // status flags a RACE first, so it never also reads as merged, never marked.
+  // status flags a RACE first, so it never also reads as merged, never marked. § 2's intro names where the automatic
+  // retry and a question sit: ahead of at Integration and every class below it, not ahead of every class that asks.
   // The order is read over the known classes present (a missing or extra one is stages').
   const ho = labelled(r4raw, 'Hand-off', { item: true })
   const order = clsRows.map((c) => c[0].slice(2, -2)).filter((l) => LABELS.includes(l))
   if (JSON.stringify(order) !== JSON.stringify(LABELS.filter((l) => order.includes(l))) ||
     !collapse(r2raw).includes('Each unmerged task takes the **first** class in table order whose signal it matches') ||
+    !collapse(r2raw).includes('**retry (automatic)** and **needs you** come before **at Integration** and every class below it') ||
     !(cls.RACE ?? '').includes('with no decision recorded (§ 3c)') || !(cls.RACE ?? '').includes('no `resume` runs at all') ||
     !r3a.includes('no RACE / UNVERIFIED escalation is undecided') || !ho.includes('never while a RACE / UNVERIFIED escalation is undecided') ||
     !c3.includes('`- <YYYY-MM-DD> repair: [[<slug>]] RACE decided: <his decision, verbatim>`') ||
@@ -1900,6 +1902,9 @@ test('control: retry (automatic) after own run fails first-match', () => {
   const ra = lineWith(real.repair, '| **retry (automatic)** |')
   const ownRow = lineWith(real.repair, '| **own run** |')
   only({ repair: real.repair.replace(ra + '\n', '').replace(ownRow, ownRow + '\n' + ra) }, 'first-match', 'retry after own run')
+})
+test('control: the automatic retry ahead of every class that asks fails first-match', () => {
+  only(rp('come before **at Integration** and every\nclass below it', 'come before every class that asks or\nhands back'), 'first-match', 'intro')
 })
 test('control: needs you after at Integration fails first-match', () => {
   const nyr = lineWith(real.repair, '| **needs you** |')

@@ -149,8 +149,8 @@ aside at Integration, so they match **merged, never marked** and **at Integratio
 escalates them before repair reaches for `resume` or `hand-back`, both of which hold back a held task themselves
 (§ 3c). A RACE re-verify in flight comes first of all: it is the lead's own procedure, so repair neither escalates
 it nor asks Lachy while the lead decides it. A plan-block is judged for a descope before the automatic retry, as
-execute's step 1.2 judges it, and **retry (automatic)** and **needs you** come before every class that asks or
-hands back.
+execute's step 1.2 judges it, and **retry (automatic)** and **needs you** come before **at Integration** and every
+class below it.
 
 | Class | Signal | Action |
 |---|---|---|
