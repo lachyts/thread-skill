@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # self-rollout-check.sh <repoPath> — refuse a rollout whose repoPath is a DIRECTORY-source plugin
-# marketplace checkout (skills/execute/SKILL.md § 2.6, p12-4). With a directory source Claude Code runs
-# the plugin live from that checkout (${CLAUDE_PLUGIN_ROOT} is it), so every engine change merged there
-# becomes the engine of the rollout's next task call. Execute calls it through the
-# `# thread:self-rollout-check` wrapper; it lives in a script because Claude Code substitutes skill
+# marketplace checkout (skills/_shared/execution-fit.md § Dispatch blockers, p12-4). With a directory
+# source Claude Code runs the plugin live from that checkout (${CLAUDE_PLUGIN_ROOT} is it), so every engine
+# change merged there becomes the engine of the rollout's next task call. Schedule § 0 and execute § 2.6
+# call it through the `# thread:self-rollout-check` wrapper there (and the `# thread:rollout-clone` lookup
+# runs it on the sibling clone it finds); it lives in a script because Claude Code substitutes skill
 # arguments into every positional `$N` in a SKILL.md body (p5-2).
 #
 # Reads ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json. For every entry whose

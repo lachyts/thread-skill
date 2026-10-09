@@ -1,7 +1,8 @@
 // Schedule orders a queue (ADR 0030 decision 1, p12-10): no colouring and no wave anywhere in the
 // schedule skill or its template, protocol 5, the queue's stamps (`solo: true`, `depends-on:`), and the
 // one-unfinished-rollout-per-repo rule wired into § 0 (the check, the supersede's `resume`, the `file`
-// and `interrupted` finishes, the `incomplete: true` stamp and the pinned "is incomplete" report), the
+// and `interrupted` finishes, the `incomplete: true` stamp and the pinned "is incomplete" report), § 0's
+// self-rollout check (a live plugin checkout is swapped for its sibling rollout clone, or refused), the
 // carry preview in step 1, a release gate's drop decided before step 6 (or, at step 8, taken out with its
 // row), Solo and dependency proposals for queued tasks only (step 5), step 6's Advance/Cancel-only naming,
 // a note born `incomplete: true` (the template) that only step 7's last write clears, and orient leaving
@@ -121,6 +122,19 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
 
   if (!s0.includes('`file <slug> <path>`') || !s0.includes('`interrupted <prior> <new>`') ||
     !/reconcile-rollout\.py carry --from/.test(s0)) fails.push('s0-outcomes')
+
+  // s0-self-rollout: § 0 runs execution-fit.md's self-rollout check between the landing register check and the
+  // pushed-base check. On its exit 3 the rollout-clone lookup's path becomes the root, with the checks re-run
+  // against it; with no clone it is a stop that prints the remedy. So no rollout note is ever written with a
+  // live plugin marketplace checkout as its Project root (execute § 2.6 would refuse it at launch).
+  const srAt = at('Then run the self-rollout check from the same § Dispatch blockers')
+  const s0S = sentences(s0)
+  if (srAt < 0 || srAt < at('landing register check') || srAt > at('Then run the pushed-base check') ||
+    !s0S.some((x) => x.includes('On its exit 3, run the rollout-clone lookup from the same § Dispatch blockers')) ||
+    !s0S.some((x) => x.includes('that separate clone becomes the resolved path') && x.includes('re-run the') &&
+      x.includes('the self-rollout check against the clone')) ||
+    !s0S.some((x) => x.includes("When it prints nothing, the self-rollout check's exit 3 is a failure")) ||
+    !s0.includes("for the self-rollout check's exit 3 it is the whole stderr")) fails.push('s0-self-rollout')
 
   // The pinned report: one § 0 sentence says the new note is incomplete because its run died before
   // closing out the prior rollout (a crash after step 7 leaves it fully stamped), names --regenerate and
@@ -356,6 +370,15 @@ test('control: § 0 without --regenerate on the check, or without resume, fails'
   only({ schedule: edit(real.schedule, S0, ' [--regenerate]`', '`') }, ['s0-check'], 'no --regenerate')
   only({ schedule: edit(real.schedule, S0, 'reconcile-rollout.py resume --rollout', 'reconcile-rollout.py status --rollout') },
     ['s0-check'], 'no resume')
+})
+
+test('control: § 0 without the self-rollout check, never taking the clone, or going on with no clone, fails s0-self-rollout', () => {
+  only({ schedule: edit(real.schedule, S0, 'Then run the self-rollout check from the same § Dispatch blockers', 'Then run the marketplace scan from the same § Dispatch blockers') },
+    ['s0-self-rollout'], 'no self-rollout check')
+  only({ schedule: edit(real.schedule, S0, 'that separate clone becomes the resolved', 'ask the user whether it becomes the resolved') },
+    ['s0-self-rollout'], 'the clone never taken')
+  only({ schedule: edit(real.schedule, S0, "When it prints nothing, the self-rollout check's exit 3 is a failure, below;", 'When it prints nothing, go on with the live path;') },
+    ['s0-self-rollout'], 'no clone, no stop')
 })
 
 test('control: § 0 that drops the file outcome fails', () => {

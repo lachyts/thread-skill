@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
-# p12-4, executed: execute's § 2.6 self-rollout gate — the `# thread:self-rollout-check` wrapper extracted
-# verbatim from skills/execute/SKILL.md by its markers, with `R="$1"` substituted for the `<repoPath>`
-# placeholder, run under bash AND zsh (the Bash tool's shell on macOS) against a fixture
-# known_marketplaces.json. Plus the wiring: § 2.6 and § 7 name both halt reasons, and the halt line the
-# lead prints parses for the Stop hook. Hermetic: HOME, CLAUDE_CONFIG_DIR and every path live under mktemp.
+# p12-4, executed: the self-rollout dispatch blocker — the `# thread:self-rollout-check` wrapper extracted
+# verbatim from skills/_shared/execution-fit.md § Dispatch blockers by its markers, with `R="$1"`
+# substituted for the `<repoPath>` placeholder, run under bash AND zsh (the Bash tool's shell on macOS)
+# against a fixture known_marketplaces.json; then the `# thread:rollout-clone` lookup beside it, against
+# fixture clones, and the schedule gate the two compose. Plus the wiring: schedule § 0 and execute § 2.6
+# point at the snippet without copying it, § 2.6 and § 7 name both halt reasons, and the halt line the lead
+# prints parses for the Stop hook. Hermetic: HOME, CLAUDE_CONFIG_DIR and every path live under mktemp; no
+# commits (so no identity), never the network; global/system git config is ignored.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
+unset $(git rev-parse --local-env-vars)   # git's own list of repo-local vars (GIT_DIR, GIT_CONFIG_PARAMETERS, …)
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 root=$(pwd -P)
 skill=skills/execute/SKILL.md
+ef=skills/_shared/execution-fit.md
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 tmp=$(cd "$tmp" && pwd -P)
@@ -21,8 +27,8 @@ elif [ "$(uname)" = Darwin ]; then ok "missing" "present" "zsh is installed (man
 else echo "SKIP - zsh arm: zsh not installed on this $(uname) runner"; fi
 
 # ---- the snippet, verbatim from the skill --------------------------------------------------------------
-awk '/^# thread:self-rollout-check/{on=1; next} /^# end thread:self-rollout-check/{on=0} on' "$skill" > "$tmp/raw.sh"
-ok "$(grep -c '^R="<repoPath>"$' "$tmp/raw.sh")" 1 "the § 2.6 snippet is found, with its <repoPath> placeholder"
+awk '/^# thread:self-rollout-check/{on=1; next} /^# end thread:self-rollout-check/{on=0} on' "$ef" > "$tmp/raw.sh"
+ok "$(grep -c '^R="<repoPath>"$' "$tmp/raw.sh")" 1 "the self-rollout snippet is found in execution-fit.md, with its <repoPath> placeholder"
 ok "$(grep -cE '\$[0-9]' "$tmp/raw.sh")" 0 "the snippet holds no positional \$N (skill arguments substitute into them)"
 snip=$(sed 's/^R="<repoPath>"$/R="$1"/' "$tmp/raw.sh")
 
@@ -100,6 +106,66 @@ has "$err" "WARN" "--list-dirs: … with the warning"
 ld_extra=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" bash "$sc" --list-dirs extra >/dev/null 2>&1; echo $?)
 ok "$ld_extra" 2 "--list-dirs with an extra argument → usage error 2"
 
+# ---- the rollout-clone lookup: schedule § 0's sibling `<repoPath>-rollout`, verbatim from execution-fit.md --
+awk '/^# thread:rollout-clone/{on=1; next} /^# end thread:rollout-clone/{on=0} on' "$ef" > "$tmp/rawc.sh"
+ok "$(grep -c '^R="<repoPath>"$' "$tmp/rawc.sh")" 1 "the rollout-clone snippet is found in execution-fit.md, with its <repoPath> placeholder"
+ok "$(grep -cE '\$[0-9]' "$tmp/rawc.sh")" 0 "the rollout-clone snippet holds no positional \$N"
+csnip=$(sed 's/^R="<repoPath>"$/R="$1"/' "$tmp/rawc.sh")
+csnip_f="$tmp/clone.sh"; printf '%s\n' "$csnip" > "$csnip_f"
+snip_f="$tmp/check.sh"; printf '%s\n' "$snip" > "$snip_f"
+
+g() { git -c init.defaultBranch=main "$@"; }
+repo() { g init -q "$1" && g -C "$1" remote add origin "$2"; }   # repo <dir> <origin-url>
+live="$home/repos/live"
+repo "$live" "https://github.com/Owner/Live.git"
+write_reg "$live" "$tmp/other"
+
+for sh in "${shells[@]}"; do
+  n=$(basename "${sh%% *}")
+  # look <repoPath> [VAR=val …]: rc in $rc, stdout in $out, stderr in $err
+  look() { local r="$1"; shift; out=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" "$@" $sh "$csnip_f" "$r" 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err"); }
+  rm -rf "$live-rollout" "$home/repos/nested"
+
+  look "$live"; ok "$rc|$out" "1|" "$n: no sibling clone → 1, nothing printed"
+  has "$err" "no clone at $live-rollout" "$n: … naming the clone to make"
+  repo "$live-rollout" "git@github.com:owner/live.git"
+  look "$live"; ok "$rc|$out" "0|$live-rollout" "$n: a sibling clone of the same repo (other URL shape and case) → its path"
+  look "~/repos/live/"; ok "$rc|$out" "0|$live-rollout" "$n: … from a ~/…/ Project root (trailing / stripped)"
+  g -C "$live-rollout" remote set-url origin "https://github.com/owner/other.git"
+  look "$live"; ok "$rc|$out" "1|" "$n: a sibling of another repo → 1, nothing printed"
+  has "$err" "is not a clone of the GitHub repo" "$n: … saying so"
+  rm -rf "$live-rollout"; mkdir -p "$live-rollout"
+  look "$live"; ok "$rc|$out" "1|" "$n: a sibling that is a plain directory → 1"
+  # a plain directory inside another clone of the same repo is not a clone's top
+  repo "$home/repos/nested" "https://github.com/owner/live.git"; mkdir -p "$home/repos/nested/x" "$home/repos/nested/x-rollout"
+  look "$home/repos/nested/x"; ok "$rc|$out" "1|" "$n: a sibling inside a parent clone of the same repo → 1"
+  rm -rf "$live-rollout"; repo "$live-rollout" "https://github.com/owner/live.git"
+  cat > "$reg" <<EOF
+{"a": {"source": {"source": "directory", "path": "$live"}}, "b": {"source": {"source": "directory", "path": "$live-rollout"}}}
+EOF
+  look "$live"; ok "$rc|$out" "1|" "$n: a sibling that is a marketplace checkout too → 1"
+  write_reg "$live" "$tmp/other"
+  look "$live" CLAUDE_PLUGIN_ROOT="$tmp/noplugin"; ok "$rc|$out" "2|" "$n: a script missing → 2"
+done
+
+# ---- the schedule gate: the check, then (on exit 3 only) the lookup, then the first write ---------------
+# gate <root>: writes the Project root it would carry to $tmp/written, or nothing; rc is the gate's exit.
+gate() {
+  rm -f "$tmp/written"; local r="$1" c
+  env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" bash "$snip_f" "$r" 2>/dev/null; rc=$?
+  if [ "$rc" = 3 ]; then
+    c=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" bash "$csnip_f" "$r" 2>/dev/null) || { rc=3; return; }
+    r=$c; env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" bash "$snip_f" "$r" 2>/dev/null; rc=$?
+  fi
+  [ "$rc" = 0 ] && printf '%s\n' "$r" > "$tmp/written"
+}
+written() { [ -e "$tmp/written" ] && cat "$tmp/written" || echo "<nothing>"; }
+rm -rf "$live-rollout"
+gate "$live"; ok "$rc|$(written)" "3|<nothing>" "schedule gate: the live checkout with no separate clone → refused, nothing written"
+repo "$live-rollout" "https://github.com/owner/live.git"
+gate "$live"; ok "$rc|$(written)" "0|$live-rollout" "schedule gate: the live checkout with a sibling clone → the clone is the Project root"
+gate "$tmp/other"; ok "$rc|$(written)" "0|$tmp/other" "schedule gate: a root that is no marketplace → kept as is"
+
 # ---- wiring: § 2.6 and § 7 name both reasons; the halt line parses for the Stop hook --------------------
 sect() { awk -v a="$1" -v b="$2" 'index($0, a) == 1 {on=1} index($0, b) == 1 && on && index($0, a) != 1 {exit} on' "$skill"; }
 s26=$(sect '### 2.6. Self-rollout gate' '### 2.7.')
@@ -122,7 +188,19 @@ hit = m.STATUS_RE.search(line)
 print("ok" if hit and hit.group("state") == "halted" else "no match")
 PY
 )" ok "the § 2.6 halt line matches the Stop hook's STATUS_RE"
-has "$(grep -n 'self-rollout-check' "$skill")" "tests/self-rollout-check.test.sh" "SKILL.md's snippet names this test"
+has "$(grep -n '^# thread:self-rollout-check' "$ef")" "tests/self-rollout-check.test.sh" "execution-fit.md's snippet names this test"
+has "$(grep -n '^# thread:rollout-clone' "$ef")" "tests/self-rollout-check.test.sh" "execution-fit.md's rollout-clone snippet names this test"
+
+# ---- wiring: one copy, in execution-fit.md; schedule § 0 and execute § 2.6 point at it ----------------
+for f in skills/schedule/SKILL.md "$skill"; do
+  ok "$(grep -c '# thread:self-rollout-check\|# thread:rollout-clone' "$f")" 0 "$f copies neither snippet"
+done
+has "$(tr '\n' ' ' < "$ef")" "Six blockers" "execution-fit names six blockers"
+lr=$(grep -n '^\*\*Landing register\.\*\*' "$ef" | cut -d: -f1); srl=$(grep -n '^\*\*Self-rollout\.\*\*' "$ef" | cut -d: -f1); pbl=$(grep -n '^\*\*Pushed base\.\*\*' "$ef" | cut -d: -f1)
+ok "$([ -n "$lr" ] && [ -n "$srl" ] && [ -n "$pbl" ] && [ "$lr" -lt "$srl" ] && [ "$srl" -lt "$pbl" ] && echo y)" y "Self-rollout sits between Landing register and Pushed base"
+s26f=$(printf '%s\n' "$s26" | tr '\n' ' ')
+has "$s26f" "execution-fit.md\` § Dispatch blockers (point at it; never copy the snippet here)" "execute § 2.6 points at execution-fit.md § Dispatch blockers"
+has "$s26f" "Execute never swaps a root itself" "execute § 2.6 never swaps a root"
 
 echo; [ "$fail" -eq 0 ] && echo "self-rollout-check: ALL PASS" || echo "self-rollout-check: SOME FAILED"
 exit "$fail"

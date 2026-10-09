@@ -551,7 +551,7 @@ ok "$(git -C "$tmp/decoy" for-each-ref)" "$before" "38. … the decoy's refs are
 # ======== wiring ========================================================================================
 eff=$(tr '\n' ' ' < "$ef")
 pbpara=$(awk '/^\*\*Pushed base\.\*\*/{on=1} /^\*\*Unfinished rollout\.\*\*/{on=0} on' "$ef" | tr '\n' ' ')
-has "$eff" "Five blockers" "execution-fit names five blockers"
+has "$eff" "Six blockers" "execution-fit names six blockers"
 has "$pbpara" "**Pushed base.**" "execution-fit has the Pushed base blocker"
 for w in "ADR 0025" "THREAD.md" "known_marketplaces" "\`Local:\`" "never per merge" "execute § 2.7" "origin/close/*" "queued" "stranded"; do
   has "$pbpara" "$w" "the Pushed base blocker names $w"

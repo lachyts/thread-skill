@@ -126,25 +126,19 @@ at once by § 2.6.
 A rollout must never run against the checkout the plugin itself runs from. When `repoPath` is a
 **directory-source** plugin marketplace path (`claude plugin marketplace add <dir>`), `${CLAUDE_PLUGIN_ROOT}`
 IS that checkout, so every engine or skill change a merge lands there becomes the engine of the rollout's
-next task call (p12-4, ADR 0030). Run this wherever § 2.5 runs: directly after it at every invocation that
-starts or continues work, and after every §4.5 re-check of it. **Pausing is exempt**, exactly as for § 2.5.
-
-```bash
-# thread:self-rollout-check (extracted and tested by tests/self-rollout-check.test.sh)
-R="<repoPath>"
-case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
-sc="${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh"
-[ -f "$sc" ] || { echo "self-rollout-check.sh not found at $sc: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }
-bash "$sc" "$R"
-# end thread:self-rollout-check
-```
+next task call (p12-4, ADR 0030). Run the self-rollout check in
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers (point at it; never copy the
+snippet here) against the rollout's `Project root`, wherever § 2.5 runs: directly after it at every
+invocation that starts or continues work, and after every §4.5 re-check of it. `/thread:schedule` § 0
+already ran it (and swapped in a separate clone where one exists), but a written rollout note can still
+name the primary checkout. **Pausing is exempt**, exactly as for § 2.5. Execute never swaps a root itself:
+the rollout-clone lookup in `execution-fit.md` is schedule's alone.
 
 `scripts/self-rollout-check.sh` reads `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json`
-and compares every directory source's `path` and `installLocation` with `repoPath` (`~/` expanded,
-trailing slashes stripped, symlinks resolved) by **containment**: a marketplace path equal to `repoPath` or
-nested inside it (`<repoPath>/…`, a monorepo with the marketplace in a subdirectory) matches, since
-`merge-task.sh` fast-forwards the whole checkout. A missing registry passes; a malformed one passes with a
-warning (the registry format is Claude Code's, so the check fails open).
+and compares every directory source with `repoPath` by **containment** (the full rule is in
+`execution-fit.md` § Dispatch blockers): a marketplace path equal to `repoPath` or nested inside it
+matches. A missing registry passes; a malformed one passes with a warning (the registry format is Claude
+Code's, so the check fails open).
 
 - **Exit 0**: proceed; pass any warning on to the user.
 - **Exit 3**: write nothing (no stamp, no `mark-started`, `mark-integrating` or `log-integration`, no push, no

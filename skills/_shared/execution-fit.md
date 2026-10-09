@@ -47,7 +47,7 @@ session lane. schedule § 0 runs these checks; callers that read this file
 for the fit test route through schedule rather than checking themselves. The
 schedule gate stops before anything is written (no task stamped, no rollout
 note, no heartbeat) and names the remedy. Fix the blocker, then schedule again.
-Five blockers:
+Six blockers:
 
 **GitHub `origin`.** The engine branches every worktree from
 `origin/<default branch>` and lands each task as a GitHub PR that merge-task
@@ -125,6 +125,63 @@ repair step is deliberately ungated too: `/thread:repair` § 5's clean defer run
 rollout's own branch and PR and lands nothing on the default branch, so, like a
 pause, it is cleanup that the register never blocks.
 
+**Self-rollout.** A rollout must never run against the checkout the plugin itself runs from. When the
+repo path is, or contains, a **directory-source** plugin marketplace checkout
+(`claude plugin marketplace add <dir>`), `${CLAUDE_PLUGIN_ROOT}` IS that checkout, so every engine or skill
+change a merge lands there becomes the engine of the rollout's next task call (p12-4, ADR 0030). Run this
+against the same resolved path, after the landing register check:
+
+```bash
+# thread:self-rollout-check (extracted and tested by tests/self-rollout-check.test.sh)
+R="<repoPath>"
+case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
+sc="${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh"
+[ -f "$sc" ] || { echo "self-rollout-check.sh not found at $sc: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }
+bash "$sc" "$R"
+# end thread:self-rollout-check
+```
+
+`self-rollout-check.sh` reads `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json` and
+compares every directory source's `path` and `installLocation` with the repo path (`~/` expanded, trailing
+slashes stripped, symlinks resolved) by **containment**: a marketplace path equal to the repo path or nested
+inside it (`<repoPath>/…`, a monorepo with the marketplace in a subdirectory) matches, since `merge-task.sh`
+fast-forwards the whole checkout. A missing registry passes; a malformed one passes with a warning (the
+registry format is Claude Code's, so the check fails open). Exit 0 is no match: pass any warning on. Exit 3
+is a match: the marketplace, the path and the remedy (a separate clone) on stderr. Exit 2 is a failure of
+the check itself (the script not found, an empty path, no python3), and any other non-zero exit fails
+closed the same way. schedule § 0 runs it before anything is written; execute § 2.6 re-runs it at every
+launch and after every § 4.5 re-check of the landing register, since a written rollout note can still name
+the primary checkout (one scheduled before this check, or edited by hand).
+
+The separate clone's conventional home is the sibling `<repoPath>-rollout`. On the check's exit 3, schedule
+§ 0 looks for it with this, against the same path:
+
+```bash
+# thread:rollout-clone (extracted and tested by tests/self-rollout-check.test.sh)
+R="<repoPath>"
+case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
+while [ "${#R}" -gt 1 ] && [ "${R%/}" != "$R" ]; do R=${R%/}; done
+C="$R-rollout"
+lb="${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land.sh"
+sc="${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh"
+for f in "$lb" "$sc"; do [ -f "$f" ] || { echo "rollout-clone: $f not found: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }; done
+t=$(git -C "$C" rev-parse --show-toplevel 2>/dev/null) && [ "$(cd "$t" && pwd -P)" = "$(cd "$C" && pwd -P)" ] || {
+  echo "rollout-clone: no clone at $C: clone the repo there (git clone <origin URL> \"$C\"), then re-invoke" >&2; exit 1; }
+a=$(bash "$lb" --origin-slug "$R" | tr '[:upper:]' '[:lower:]')
+b=$(bash "$lb" --origin-slug "$C" | tr '[:upper:]' '[:lower:]')
+[ -n "$a" ] && [ "$a" = "$b" ] || { echo "rollout-clone: $C is not a clone of the GitHub repo at $R" >&2; exit 1; }
+bash "$sc" "$C" >/dev/null 2>&1 || { echo "rollout-clone: $C is a plugin marketplace checkout too, or the check failed on it" >&2; exit 1; }
+printf '%s\n' "$C"
+# end thread:rollout-clone
+```
+
+It prints the clone's path (exit 0) only when `<repoPath>-rollout` (`~/` expanded, trailing slashes
+stripped, then `-rollout` appended) is the top of a git work tree whose `origin` names the same GitHub
+`<owner>/<name>` as the repo path's (`land.sh --origin-slug`, compared case-insensitively) and the
+self-rollout check passes on it. Otherwise it prints nothing and exits 1 with the reason on stderr, or 2
+when a script is missing. It never clones, fetches or writes. Only schedule § 0 swaps a root this way, and
+only before anything is written; execute § 2.6 halts instead, since its rollout note is already written.
+
 **Pushed base.** Rollout worktrees branch from a freshly fetched `origin/<default>`, and the agents
 read only their task note, the rollout note and the repo: never THREAD.md, and never anything that exists
 only in a local clone. So before launch, everything the tasks cite must be on GitHub. Run this against the
@@ -148,7 +205,7 @@ single-quoted, or nothing. The check runs over a **clone set**, not one checkout
 clone, plus `<localPath>`, plus every directory-source plugin marketplace path in
 `known_marketplaces.json` (read through `self-rollout-check.sh --list-dirs`, the one registry parser),
 each kept only when its raw `origin` URL names the same `<owner>/<name>` and de-duplicated by real path. The
-registry source matters here: execute § 2.6 forces a separate rollout clone exactly when the repo path is a
+registry source matters here: the self-rollout blocker above forces a separate rollout clone exactly when the repo path is a
 directory-source marketplace checkout, so the registry names the primary checkout exactly when a rollout
 clone exists, and a close-out committed in the primary is still seen.
 
