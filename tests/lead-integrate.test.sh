@@ -194,9 +194,10 @@ ok "$prc" 0 "C1: prepare exits 0"
 ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')" "merge|i" "C1: main unmoved → case (i), route merge"
 ok "$(j "$J" 'd["prHead"]')|$(j "$J" 'd["anchor"]')|$(j "$J" 'd["taskBase"]')|$(j "$J" 'd["mainSha"]')" "$H0|$H0|$TB|$TB" "C1: H = A = H0, TB = B"
 ok "$(j "$J" 'd["mergeCommit"]')|$(git -C "$WT" rev-parse HEAD)" "|$H0" "C1: no merge commit; the tree stays at H0"
-for k in branch worktreePath prHead anchor taskBase mainSha case route trouble reason landed; do
+for k in branch worktreePath prHead anchor taskBase mainSha case route trouble reason landed unlisted note; do
   ok "$(j "$J" "'$k' in d")" true "C1: prepare prints $k"
 done
+ok "$(j "$J" '[d["landed"], d["unlisted"], d["note"]]')" '[[],[],""]' "C1: an empty range → landed [], unlisted [], note \"\""
 S=$(python3 "$LI" stamp)
 python3 "$RR" log-integration --tasks "$SLUG" --tasks-dir "$V" --started "$S" --anchor "$H0" --head "$H0" --base "$TB" >/dev/null
 has "$(loglines)" " integrated path=lead pr=5 anchor=$H0 head=$H0 base=$TB " "C1: log-integration writes integrated path=lead head=H base=TB"
@@ -369,10 +370,39 @@ prep
 ok "$(j "$J" '[(x["prUrl"], x["title"], x["files"], x["taskPath"]) for x in d["landed"]]')" \
   "[[\"https://github.com/o/r/pull/7\",\"theirs: rename (#7)\",[\"x.txt\"],\"$V/proj-t7.md\"],[\"https://github.com/o/r/pull/8\",\"Merge pull request #8 from o/feature\",[\"y.txt\"],\"$V/Archive/proj-t8.md\"]]" \
   "C10: (#7) and a Merge pull request #8 commit → their PR, title, files and task note"
+# p17-1: a commit pushed without a PR is skipped from landed (listed in unlisted), never dropping the whole list.
 main z.txt "z" "a direct push"
 prep
-ok "$(j "$J" 'd["landed"]')" "[]" "C10: a commit with no PR number → landed []"
-has "$(j "$J" 'd["note"]')" "names no PR" "C10: … and says why"
+ok "$(j "$J" '[x["prUrl"] for x in d["landed"]]')" '["https://github.com/o/r/pull/7","https://github.com/o/r/pull/8"]' "C10: a commit with no PR number → landed still lists #7 and #8"
+ok "$(j "$J" 'd["unlisted"]')" "[{\"sha\":\"$B\",\"subject\":\"a direct push\",\"files\":[\"z.txt\"]}]" "C10: … and unlisted names it: sha, subject, files"
+N10=$(j "$J" 'd["note"]')
+has "$N10" "1 commit(s)" "C10: … note counts it"; has "$N10" "${B:0:12}" "C10: … names its sha"; has "$N10" "name no PR" "C10: … and says why"
+UL10=$(j "$J" 'd["unlisted"]')
+main w.txt "w" "theirs: later (#9)"
+prep
+ok "$(j "$J" '[x["prUrl"] for x in d["landed"]]')" '["https://github.com/o/r/pull/7","https://github.com/o/r/pull/8","https://github.com/o/r/pull/9"]' "C10: a PR after the direct push → landed #7, #8, #9, oldest first"
+ok "$(j "$J" 'd["unlisted"]')" "$UL10" "C10: … unlisted unchanged"
+TB10=$(j "$J" 'd["taskBase"]'); B10=$(j "$J" 'd["mainSha"]')
+NG=$(python3 - "$LI" "$R" "$TB10" "$B10" "$V" <<'PY2'
+import importlib.util, json, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("li", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+landed, unlisted, note = m._landed(sys.argv[2], sys.argv[3], sys.argv[4], "", Path(sys.argv[5]))
+print(json.dumps({"landed": landed, "unlisted": [u["subject"] for u in unlisted], "note": note}))
+PY2
+)
+ok "$(j "$NG" '[d["landed"], d["unlisted"]]')" '[[],["a direct push"]]' "C10: origin not github.com and pr: not a URL → landed [], unlisted still filled"
+ok "$(j "$NG" 'd["note"].startswith("origin is not a github.com remote")')|$(j "$NG" '"; 1 commit(s)" in d["note"]')" "true|true" "C10: … note gives the non-github reason first, then the unlisted one"
+ZB=$(git -C "$F/p" rev-parse HEAD~2); ZC=$(git -C "$F/p" rev-parse HEAD~1)
+AP=$(python3 - "$LI" "$R" "$ZB" "$ZC" "$V" <<'PY2'
+import importlib.util, json, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("li", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+landed, unlisted, note = m._landed(sys.argv[2], sys.argv[3], sys.argv[4], "o/r", Path(sys.argv[5]))
+print(json.dumps({"landed": landed, "unlisted": [u["subject"] for u in unlisted], "note": note}))
+PY2
+)
+ok "$(j "$AP" '[d["landed"], d["unlisted"], d["note"].startswith("1 commit(s)")]')" '[[],["a direct push"],true]' "C10: a range of PR-less commits only → landed [], each in unlisted"
 
 # ======== C11: engine pins (byte-equal) ===============================================================
 echo "== c11"
