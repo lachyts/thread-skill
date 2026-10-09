@@ -70,8 +70,12 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   run-bound       T  runId, journalDir; call? (task | revise | integrate | resume); resumedFrom?
   slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed)
   ready           T  pr? (url or number)
-  set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass;
-                     setAsideAt? (run | integration | gate)
+  set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass (a string,
+                     not checked as an enum; reconcile-rollout.py's table writes quota | call-failed |
+                     merge-task | declined | prepare | revise-stopped | transient | gate | needs-human |
+                     plan-rejected | review-rounds | approved-without-pr | integration-set-aside | blocked,
+                     where needs-human, p16-3, is a stop on a question for a person, never a plan or
+                     review round run out); setAsideAt? (run | integration | gate)
   lane-taken      T  (no fields)
   lane-freed      T  release (merge | set-aside | reject | halt); path?; triggers? (list of str);
                      conflict? (bool)

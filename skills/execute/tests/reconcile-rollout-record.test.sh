@@ -536,6 +536,34 @@ ok "$(idle i7 --running "")" '"hold-race"' "hold-race"
 mkro i8 "parallel_ceiling: 2"; mkt d1 i8 done
 ok "$(idle i8 --running "")" "-" "none at halt complete"
 
+echo "== 21b. a stop on a question (p16-3) -> reasonClass needs-human, never plan-rejected or review-rounds"
+# The Retro raises a round cap on 2+ review-rounds or plan-rejected set-asides, which can never answer a question.
+# Side rollout nh; each row is a task-call row reconciled from in_progress. A gate stop still reads gate.
+mkro nh "parallel_ceiling: 5" "max_review_rounds: 4" "max_iterations: 3" "max_plan_rounds: 3"
+nh() {  # nh <slug> <row json>: start the slug on nh, reconcile the row; prints the set-aside's [stage, reasonClass, setAsideAt]
+  mkt "$1" nh in_progress
+  rrs mark-started --tasks "$1" --tasks-dir "$V" --now "$NOW" >/dev/null
+  local m; m=$(cnt nh)
+  row "$(trow "$1" "$2")" >/dev/null
+  since nh "$m" '[d["stage"], d["reasonClass"], d["setAsideAt"]] if d["kind"] == "set-aside" else d["kind"]'
+}
+Q='Which of the two billing APIs should the export call?'
+ok "$(nh nh1 '{"status":"review-blocked","prUrl":"'"$PR/31"'","reviewRoundsUsed":1,"needsHuman":"'"$Q"'","blockerDiagnosis":"the judge asks"}')" \
+  '"slot-freed" ["review","needs-human","run"]' "review-blocked on a round-1 question -> needs-human"
+ok "$(grep -c '^## Needs you$' "$V/nh1.md")" 1 "and the note carries the question"
+ok "$(nh nh2 '{"status":"review-blocked","prUrl":"'"$PR/32"'","reviewRoundsUsed":4,"needsHuman":"","blockerDiagnosis":"out of review rounds"}')" \
+  '"slot-freed" ["review","review-rounds","run"]' "control: the same row with needsHuman '' -> review-rounds"
+ok "$(nh nh2b '{"status":"review-blocked","prUrl":"'"$PR/33"'","reviewRoundsUsed":4,"needsHuman":"  \n ","blockerDiagnosis":"out of review rounds"}')" \
+  '"slot-freed" ["review","review-rounds","run"]' "control: a whitespace-only needsHuman -> review-rounds"
+ok "$(nh nh3 '{"status":"plan-blocked","needsHuman":"'"$Q"'","blockerDiagnosis":"the plan judge asks"}')" \
+  '"slot-freed" ["plan","needs-human","run"]' "plan-blocked on a question -> needs-human"
+ok "$(nh nh3b '{"status":"plan-blocked","needsHuman":"","blockerDiagnosis":"plan rejected 3 times"}')" \
+  '"slot-freed" ["plan","plan-rejected","run"]' "control: plan-blocked with needsHuman '' -> plan-rejected"
+ok "$(nh nh4 '{"status":"gate-pending","gatedInputs":["spend: one call — cap $1"],"needsHuman":"'"$Q"'"}')" \
+  '"slot-freed" ["gate","gate","gate"]' "gate-pending with a question -> gate still wins"
+ok "$(nh nh5 '{"status":"blocked","needsHuman":"'"$Q"'","blockerDiagnosis":"the implementer asks"}')" \
+  '"slot-freed" ["implement","needs-human","run"]' "an engine-blocked row on a question -> needs-human"
+
 echo "== 23. an unwritable events dir changes no exit, stdout or non-record stderr"
 S="$TMP/s23"
 # scenario <events dir> <transcript>: a fresh vault at the same path, every verb once, each call's rc and stdout
@@ -659,6 +687,7 @@ PY
 ok "$(check ro)" "paired" "ro: every lane-taken, slot-taken and hold-started is closed"
 ok "$(check cr)" "pause open" "cr: the carried Slot is closed; only the superseded rollout's pause stays open"
 ok "$(check pz)" "paired" "pz: the hard pause freed h's Slot and i's lane"
+ok "$(check nh)" "paired" "nh: each question stop freed its Slot"
 
 echo
 [ "$fail" -eq 0 ] && echo "reconcile-rollout-record: all pass" || echo "reconcile-rollout-record: FAILURES"

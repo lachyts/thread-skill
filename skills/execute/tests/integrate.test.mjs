@@ -20,7 +20,7 @@ const T = loadEngine([
 const ROW_KEYS = [
   'slug', 'scope', 'status', 'prUrl', 'branch', 'worktreePath', 'reviewRoundsUsed', 'planRoundsUsed',
   'blockerDiagnosis', 'reviewFeedback', 'reviewHistory', 'approvedAtCeiling', 'gatedInputs', 'summary',
-  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan',
+  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman',
 ]
 const STATUSES = ['review', 'review-blocked', 'blocked', 'plan-blocked', 'gate-pending']
 const sha = (c) => c.repeat(40)
@@ -798,6 +798,7 @@ test('S1: a seeded revise dispatches revise r3 then review r3 and approves with 
   assert.equal(r.row.approvedAtCeiling, true)
   assert.deepEqual(Object.keys(r.row).sort(), [...ROW_KEYS].sort())
   assert.equal(r.row.plan, null, 'a seeded revise never settles the plan (p14-2)')
+  assert.equal(r.row.needsHuman, '', 'an approved seeded revise carries no question (p16-3)')
   assert.ok(promptOf(r, `review:${SLUG} r3`).includes('Round 2 rejection:\n- keep their rename'))
 })
 
@@ -1008,6 +1009,7 @@ test('static: no force, no PR merge, approvedGates-independent prompts, the row 
     assert.deepEqual(Object.keys(r.row).sort(), [...ROW_KEYS, 'integration'].sort())
     assert.ok(STATUSES.includes(r.row.status), r.row.status)
     assert.equal(r.row.plan, null, 'an integrate row never settles the plan (p14-2)')
+    assert.equal(r.row.needsHuman, null, 'an integrate row never settles ## Needs you (p16-3)')
   }
   const code = src.replace(/\/\/[^\n]*/g, '')
   assert.deepEqual(code.match(/['"`]revise: [^'"`]*/g), ["'revise: rejected at Integration re-review — revise on the branch, then re-integrate"])
