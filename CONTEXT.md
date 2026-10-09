@@ -355,8 +355,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   line. The lead never puts an item through the question tool while anything
   the session launched is in flight, and the queue runs on without the answer
   (execute § 6.5). _Avoid_: pending question, ask item, open question.
-- **Agent-fixable block** — a block a re-dispatched agent can resolve alone;
-  repair retries these without asking the human. _Avoid_: auto-block, soft block.
+- **Agent-fixable block** — a block a re-dispatched agent can resolve alone.
+  The live lead re-enters these itself through `reconcile-rollout.py
+  auto-retry`, up to `auto_retries` times (default 2; an infra block after a
+  short cool-down, while a quota block waits out a longer one free, ADR 0033);
+  repair keeps the ones that need a human (a spent
+  budget, a repeated feedback fingerprint, a `## Needs you` question). _Avoid_:
+  auto-block, soft block.
 - **Automatic descope** — a plan-block the notes already settle, dropped from
   the task without asking: the feedback centres on a part the note marks
   optional (a follow-up task is filed) or on work a later task in the same

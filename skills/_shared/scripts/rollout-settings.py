@@ -13,6 +13,7 @@ of the file format:
     max_review_rounds = 4
     max_iterations = 3
     max_plan_rounds = 3
+    auto_retries = 2             # execute's automatic retries of a set-aside task (p16-4, ADR 0033); 0 disables
 
     [guardrails]                 # the Retro's bounds, machine-wide only
     tokens_per_merge_pct = 25    # tokens per merge may rise at most +25%
@@ -23,8 +24,8 @@ of the file format:
     [repo."lachyts/thread-skill"] # one repo, keyed by its GitHub origin's owner/name
     parallel_ceiling = 5
 
-The only top-level keys are `defaults`, `guardrails` and `repo`. A repo table holds only the four rollout
-keys. Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form.
+The only top-level keys are `defaults`, `guardrails` and `repo`. A repo table holds only the five rollout
+keys (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries`). Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form.
 
 Repo keys. A repo key must be quoted (`[repo."owner/name"]`) and is an `owner/name` by land.sh's slug rule
 (`[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+`, a name that is not all dots), never ending `.git`. It is
@@ -37,12 +38,15 @@ was given, under ORIGIN_TIMEOUT seconds, in its own process group (killed whole 
 Precedence for each rollout key (the callers apply the first two): task frontmatter → rollout frontmatter →
 `[repo."<slug>"]` (source `file:repo`) → `[defaults]` (`file:defaults`) → `built-in`. Guardrail sources are
 `file:guardrails` or `built-in`. Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
-max_plan_rounds 3; guardrails 25 / 5 / 10 / 0.
+max_plan_rounds 3, auto_retries 2; guardrails 25 / 5 / 10 / 0. `auto_retries` is no Tuning key: schedule does not
+stamp it and a Retro never proposes it; execute's `lead-integrate.py inputs` and `reconcile-rollout.py
+auto-retry` resolve it themselves (p16-4).
 
 Validation (ADR 0016: anything unknown or wrong is refused, never dropped):
 - an unknown top-level key or table key, `defaults` or `guardrails` that is not a table, a `repo` that is
   not a table, a value under `repo` that is not a table (named by its key: `[repo."o/r"] must be a table`);
-- a rollout value that is not an integer >= 1 (a boolean, float, string or 0 is refused);
+- a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys, 0 for `auto_retries` (a
+  boolean, float or string is refused, and so is 0 for a Tuning key);
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
   integer >= 0);
 - a bad or case-duplicate repo key.
@@ -58,7 +62,7 @@ Output. Exit 0 and one JSON line on stdout:
 
     {"path": "<expanded path>", "file": true|false, "repo": "<owner/name>"|null,
      "settings": {"parallel_ceiling": {"value": 4, "source": "built-in"}, "max_review_rounds": {...},
-                  "max_iterations": {...}, "max_plan_rounds": {...}},
+                  "max_iterations": {...}, "max_plan_rounds": {...}, "auto_retries": {...}},
      "guardrails": {"tokens_per_merge_pct": {"value": 25, "source": "built-in"}, ...}}
 
 `repo` is the origin's owner/name as land.sh printed it (case kept), or null when no repo table could apply:
@@ -70,8 +74,10 @@ and this python has none. On failure stdout is empty and stderr carries one line
 `rollout-settings: <path>:<line>: <reason>`, `rollout-settings: <path>: <reason>` when no line applies, or
 `rollout-settings: --repo <p>: <reason>`.
 
-Importable: resolve(repo=None, path=None), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS, GUARDRAIL_KEYS,
-ORIGIN_TIMEOUT, default_path(), SettingsError(reason, line=None, code=2, subject=None).
+Importable: resolve(repo=None, path=None), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
+run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries`: every key a
+`settings` object holds), MINIMUM, GUARDRAIL_KEYS, ORIGIN_TIMEOUT, default_path(), SettingsError(reason,
+line=None, code=2, subject=None).
 """
 import argparse
 import importlib.util
@@ -86,8 +92,13 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAND_SH = os.path.join(HERE, "land.sh")
 
+# The four Tuning keys (a Retro proposes them; run_record.py's TUNING_KEYS is pinned to this tuple).
 KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
-BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, "max_plan_rounds": 3}
+# Every rollout key a table may hold and `settings` reports: the Tuning keys plus execute's automatic-retry budget.
+SETTING_KEYS = KEYS + ("auto_retries",)
+BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, "max_plan_rounds": 3, "auto_retries": 2}
+# The least valid value of each rollout key: a Tuning key is >= 1; `auto_retries: 0` disables automatic retries.
+MINIMUM = {"parallel_ceiling": 1, "max_review_rounds": 1, "max_iterations": 1, "max_plan_rounds": 1, "auto_retries": 0}
 GUARDRAIL_KEYS = ("tokens_per_merge_pct", "set_aside_rate_points", "conflict_rate_points", "quota_stalls")
 GUARDRAILS_BUILT_IN = {"tokens_per_merge_pct": 25, "set_aside_rate_points": 5, "conflict_rate_points": 10,
                        "quota_stalls": 0}
@@ -276,11 +287,11 @@ def _validate(text, doc, path):
 
     def rollout_table(table, label, at):
         for key, value in table.items():
-            if key not in KEYS:
-                refuse("%s: unknown key %s (a rollout table holds %s)" % (label, json.dumps(key), ", ".join(KEYS)),
+            if key not in SETTING_KEYS:
+                refuse("%s: unknown key %s (a rollout table holds %s)" % (label, json.dumps(key), ", ".join(SETTING_KEYS)),
                        at + (key,))
-            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                refuse("%s %s must be an integer >= 1, got %s" % (label, key, _describe(value)), at + (key,))
+            if isinstance(value, bool) or not isinstance(value, int) or value < MINIMUM[key]:
+                refuse("%s %s must be an integer >= %d, got %s" % (label, key, MINIMUM[key], _describe(value)), at + (key,))
         return dict(table)
 
     out = {"defaults": {}, "guardrails": {}, "repo": {}}
@@ -395,7 +406,7 @@ def resolve(repo=None, path=None):
             overrides = tables["repo"].get(slug.lower(), {})
 
     settings = {}
-    for key in KEYS:
+    for key in SETTING_KEYS:
         if key in overrides:
             settings[key] = {"value": overrides[key], "source": "file:repo"}
         elif key in tables["defaults"]:

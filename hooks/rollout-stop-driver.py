@@ -13,8 +13,9 @@ falling back to a transcript scan for history, and:
   running  -> block the stop (driving work remains: reconcile a returned call,
               integrate and merge one task, fill the free slots via `next`)
   waiting  -> allow (a task call, an integrate call, a background Integration
-              command or a merge hold is in flight; its notification or the
-              heartbeat cron is the wake signal)
+              command or a merge hold is in flight, or a retry cool-down,
+              quota or infra, is pending (execute §4.5 step 1.5, ADR 0033);
+              its notification or the heartbeat cron is the wake signal)
   halted   -> allow + clear driver state (a §7 stop condition; human's turn)
   done     -> allow + clear driver state (completion ceremony performed)
   (none)   -> allow (not a rollout-driving session)
@@ -198,9 +199,10 @@ def main():
             "mark-done), then run reconcile-rollout.py next and fill the free slots. Then end the turn "
             "with the correct line: "
             f"`ROLLOUT-STATUS: {slug} merged=<K>/{total} running=<R> state=waiting` while a call, a "
-            "background Integration command or a merge hold is in flight, state=halted with reason=\"…\" "
-            "if a §7 stop condition fired, or state=done after the completion ceremony. Do not end the "
-            "turn while state=running."
+            "background Integration command or a merge hold is in flight or a retry cool-down is pending "
+            "(with its reason=\"…\", §4.5 step 1.5), state=halted with reason=\"…\" if a §7 stop "
+            "condition fired, or state=done after the completion ceremony. Do not end the turn while "
+            "state=running."
         ),
     }))
 
