@@ -50,11 +50,11 @@ Subcommands:
       Drop the lead's unpushed merge: only when the tree is on its branch at M, M^1 == H and origin's
       branch is not M. Stashes tracked leftovers, then `git reset --keep H`. Exit 1 otherwise.
 
-  inputs --note N [--max-review-rounds K] [--repo R]
+  inputs --note N [--max-review-rounds K] [--repo R] [--row FILE|-]
       What the lead needs to (re-)enter a set-aside or restarted task: status, scope, pr, readyAt, rung (the
-      integrate call's rung record when no approving row is at hand: {startRung: "", rung: <the note's
-      `rung:` when it is a rung name, else "">, climbs: []}, so a note with no `rung:`, or only stale
-      legacy stamps, gives the neutral record), branch (and worktreePath with --repo);
+      note's rung record: {startRung: "", rung: <the note's `rung:` when it is a rung name, else "">,
+      climbs: []}, so a note with no `rung:`, or only stale legacy stamps, gives the neutral record),
+      branch (and worktreePath with --repo);
       the source run (the newer, by its
       `### Run N (<stamp>)` heading, of the latest `## Blocker diagnosis` and `## Review-blocked feedback`
       runs; a tie goes to review-blocked) parsed through a parseIntegrationMarker port (markerStage,
@@ -64,6 +64,15 @@ Subcommands:
       `integration:`, or gate-pending with the last line `set-aside`), else `own`; and autoRevise —
       blocked, the source is the Blocker run, stage revise, markerReason empty, the last line `rejected`,
       a non-empty history and lastRound < K (false without --max-review-rounds).
+      integrate (p17-1) is the integrate call's {prUrl, reviewHistory, reviewRoundsUsed, rung} (execute § 4.5
+      step 3 passes those four verbatim) plus source, rungSource and rowRefused. --row names the approving
+      row's result JSON (a file, or - for stdin: an envelope {rolloutSlug, tasks}, whose one entry for this
+      slug is taken, or a bare row). The row is used (source "row") only when it is this note's, `review`,
+      its prUrl a PR URL naming the note's pr:, its reviewHistory passing the engine's historyError and its
+      reviewRoundsUsed an integer >= 1, >= the history's last round and >= the note's review_rounds_used;
+      its rung record when it passes rungRecordError, else the note's (rungSource "note", rowRefused says
+      why). Otherwise, and with no --row, the note's: pr, history, reviewRoundsUsed and rung (source "note");
+      rowRefused is the one-line reason, or "" with no --row. An unreadable --row is refused, never exit 2.
 
   plan --note N
       The task's approved plan, for the two launches that pass it (execute § 4.5 step 1.2's seeded revise,
@@ -91,8 +100,9 @@ Exit codes: 0 a verdict (or verify finished; its own exit is the rc), 1 refused 
 environment, 8 retryable (prepare's fetch failed twice). Stdlib only; `Note` and `_stamp` come from
 reconcile-rollout.py (importlib), and every git and child process runs with git's repo-local variables
 (`git rev-parse --local-env-vars`) scrubbed. The engine copies (ANCHOR_RECIPE, the branch and tree names,
-the merge message, integrationMarker, parseIntegrationMarker, stageDiagnosis's escape) are pinned against
-task.workflow.js by tests/lead-integrate.test.sh.
+the merge message, integrationMarker, parseIntegrationMarker, stageDiagnosis's escape, and inputs --row's
+historyError, rungRecordError, PR_URL and STAGES) are pinned against task.workflow.js by
+tests/lead-integrate.test.sh.
 """
 
 import argparse
@@ -128,6 +138,9 @@ OWN_RUN_PREFIX = "own run: "
 JS_WS = rr._JS_WS
 JS_S = "[\\t\\n\\v\\f\\r \\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]"
 JS_DOT = "[^\\n\\r\\u2028\\u2029]"
+# The engine's PR_URL: `https://`, then JavaScript's `\S+` (no JS whitespace), `/pull/` and ASCII digits, whole.
+ENGINE_PR_URL_RE = re.compile("https://[^" + JS_S[1:] + "+/pull/[0-9]+")
+RUNG_STAGES = ("plan", "implement", "review")  # the engine's STAGES
 
 
 def js_trim(s):
@@ -217,6 +230,48 @@ def parse_integration_marker(text):
 def own_run_diagnosis(d):
     """stageDiagnosis's escape for a task's own run: a diagnosis that would parse as a marker gets `own run: `."""
     return OWN_RUN_PREFIX + d if d and parse_integration_marker(d)["stage"] != "own" else d
+
+
+def history_error(h, allow_empty):
+    """The engine's historyError: '' for a review history it accepts, else why. An integer is a JSON integer
+    (`type(x) is int`: never a bool, and a float such as 1.0 is refused, where the engine reads JSON 1.0 as 1)."""
+    if not isinstance(h, list):
+        return "must be an array"
+    if not allow_empty and not h:
+        return "must be non-empty"
+    prev = 0
+    for r in h:
+        if not isinstance(r, dict):
+            return "entries must be { round, feedback, stage? } objects"
+        n = r.get("round")
+        if not (type(n) is int and n >= 1):
+            return "round must be an integer >= 1"
+        if n <= prev:
+            return "rounds must be strictly ascending"
+        fb = r.get("feedback")
+        if not isinstance(fb, list) or any(not isinstance(f, str) for f in fb):
+            return f"round {n}: feedback must be an array of strings"
+        if "stage" in r and r["stage"] != "integration":
+            return f"round {n}: stage must be 'integration' when present"
+        prev = n
+    if not allow_empty and not any(js_trim(f) for r in h for f in r["feedback"]):
+        return "must carry at least one round with feedback"
+    return ""
+
+
+def rung_record_error(g):
+    """The engine's rungRecordError for the current shape only, { startRung, rung, climbs } (rung names or '',
+    climbs [{ stage, from, to }]): '' or why. A pre-3.0.0 tier record, which the engine reads as neutral, is
+    refused here, so a row carrying one falls back to the note's record."""
+    name = lambda v: v == "" or rr.is_rung_name(v)  # noqa: E731
+    climbs = g.get("climbs") if isinstance(g, dict) else None
+    if (not isinstance(g, dict) or sorted(g) != ["climbs", "rung", "startRung"] or not name(g["startRung"])
+            or not name(g["rung"]) or not isinstance(climbs, list)
+            or any(not isinstance(c, dict) or sorted(c) != ["from", "stage", "to"] or c["stage"] not in RUNG_STAGES
+                   or not rr.is_rung_name(c["from"]) or not rr.is_rung_name(c["to"]) for c in climbs)):
+        return (f"must be {{ startRung, rung, climbs }} (rung names or '', climbs [{{ stage: {'|'.join(RUNG_STAGES)}, "
+                f"from, to }}]), got {json.dumps(g)}")
+    return ""
 
 
 # ---- plumbing ------------------------------------------------------------------------------------------
@@ -693,7 +748,100 @@ def _latest_run(note, heading):
     return {"text": text, "at": at} if text else None
 
 
-def task_inputs(path, note, max_rounds=None, repo=None):
+def _one_line(e):
+    return (str(e).strip().splitlines() or [e.__class__.__name__])[0]
+
+
+def _read_row(spec, slug):
+    """(row, why): the approving row `--row` names (a file, or - for stdin). An envelope {rolloutSlug, tasks}
+    gives its one entry whose slug is the note's (case-insensitive); a bare row (an object with a slug and no
+    tasks) is taken as it is. Anything unreadable is (None, a one-line reason), never an exit."""
+    try:
+        text = sys.stdin.read() if spec == "-" else Path(os.path.expanduser(spec)).read_text()
+    except (OSError, UnicodeDecodeError) as e:
+        return None, f"--row {spec} is unreadable: {_one_line(e)}"
+    if not text.strip():
+        return None, f"--row {spec} is empty"
+    try:
+        data = json.loads(text)
+    except ValueError as e:
+        return None, f"--row {spec} is not JSON: {_one_line(e)}"
+    if not isinstance(data, dict):
+        return None, f"--row {spec} is not a JSON object"
+    if "tasks" in data:
+        tasks = data["tasks"] if isinstance(data["tasks"], list) else []
+        hits = [r for r in tasks if isinstance(r, dict) and isinstance(r.get("slug"), str)
+                and r["slug"].casefold() == slug.casefold()]
+        if len(hits) != 1:
+            return None, f"--row {spec} holds {len(hits)} entries for {slug} in its tasks, not one"
+        return hits[0], ""
+    if "slug" in data:
+        return data, ""
+    return None, f"--row {spec} is neither an envelope {{rolloutSlug, tasks}} nor a row with a slug"
+
+
+def _same_pr(url, pr):
+    """True when the row's PR URL names the note's `pr:` (a URL, one trailing / and case ignored, or a bare #N)."""
+    n = rr.PR_NUM_RE.match(pr)
+    if n:
+        return int(url.rsplit("/", 1)[1]) == int(n.group(1))
+    return url.lower() == (pr[:-1] if pr.endswith("/") else pr).lower()
+
+
+def _row_error(inp, note, row):
+    """Why the approving row cannot back the integrate call ('' when it can): it must be this note's, approved
+    (`review`), carry the note's PR as a PR URL, and pass the engine's args check on its history and rounds,
+    with at least the note's `review_rounds_used`."""
+    slug = row.get("slug")
+    if not isinstance(slug, str) or slug.casefold() != inp["slug"].casefold():
+        return f"the row's slug {json.dumps(slug)} is not {inp['slug']}"
+    if row.get("status") != "review":
+        return f"the row's status is {json.dumps(row.get('status'))}, not \"review\" (only an approving row is used)"
+    url = row.get("prUrl")
+    if not isinstance(url, str) or not ENGINE_PR_URL_RE.fullmatch(url):
+        return f"the row's prUrl {json.dumps(url)} is not a PR URL (…/pull/<n>)"
+    if not inp["pr"]:
+        return "the note has no pr: to check the row's prUrl against"
+    if not _same_pr(url, inp["pr"]):
+        return f"the row's prUrl {url} is not the note's pr: {inp['pr']}"
+    he = history_error(row.get("reviewHistory"), True)
+    if he:
+        return "the row's reviewHistory " + he
+    h, used = row["reviewHistory"], row.get("reviewRoundsUsed")
+    last = h[-1]["round"] if h else 0
+    floor = rr._int_field(note.get("review_rounds_used"), 0)
+    if not (type(used) is int and used >= 1 and used >= last and used >= floor):
+        return (f"the row's reviewRoundsUsed {json.dumps(used)} is not an integer >= 1, >= its history's last round "
+                f"({last}) and >= the note's review_rounds_used ({floor})")
+    return ""
+
+
+def integrate_record(inp, note, row, why):
+    """The integrate call's prUrl, reviewHistory, reviewRoundsUsed and rung (execute § 4.5 step 3, p17-1): the
+    approving row's (source "row") when it was read and _row_error passes, else the note's: `inputs`' pr,
+    history, reviewRoundsUsed and rung record (source "note"). An accepted row whose rung record fails
+    rung_record_error keeps the row and takes the note's rung record (rungSource "note"). rowRefused is the one
+    reason ('' with no --row, or when nothing was refused)."""
+    rec = {"prUrl": inp["pr"], "reviewHistory": inp["history"], "reviewRoundsUsed": inp["reviewRoundsUsed"],
+           "rung": inp["rung"], "source": "note", "rungSource": "note", "rowRefused": ""}
+    if row is None and not why:
+        return rec
+    refused = why or _row_error(inp, note, row)
+    if refused:
+        rec["rowRefused"] = refused
+        return rec
+    rung = {k: row.get(k) for k in ("startRung", "rung", "climbs")}
+    bad = rung_record_error(rung)
+    rec.update(prUrl=row["prUrl"], reviewHistory=row["reviewHistory"], reviewRoundsUsed=row["reviewRoundsUsed"],
+               source="row")
+    if bad:
+        rec["rowRefused"] = f"the row's rung record is missing or malformed ({bad}): the note's is used"
+    else:
+        rec.update(rung=rung, rungSource="row")
+    return rec
+
+
+def task_inputs(path, note, max_rounds=None, repo=None, row=None):
     status = rr._status(note)
     blk = _latest_run(note, rr.BLOCKED_SECTIONS["blocked"])
     rvb = _latest_run(note, rr.BLOCKED_SECTIONS["review-blocked"])
@@ -734,6 +882,8 @@ def task_inputs(path, note, max_rounds=None, repo=None):
     }
     if repo:
         out["worktreePath"] = worktree_dir(os.path.expanduser(repo), path.stem)
+    got, why = _read_row(row, path.stem) if row is not None else (None, "")
+    out["integrate"] = integrate_record(out, note, got, why)
     return out
 
 
@@ -741,7 +891,7 @@ def cmd_inputs(args):
     path, note = _load_note(args.note)
     if args.max_review_rounds is not None and args.max_review_rounds < 1:
         raise EnvError("--max-review-rounds must be an integer >= 1")
-    return task_inputs(path, note, args.max_review_rounds, args.repo)
+    return task_inputs(path, note, args.max_review_rounds, args.repo, args.row)
 
 
 def cmd_plan(args):
@@ -812,6 +962,8 @@ def main(argv=None):
     ip.add_argument("--note", required=True)
     ip.add_argument("--max-review-rounds", type=int, default=None)
     ip.add_argument("--repo", default=None, help="also print the task tree's worktreePath")
+    ip.add_argument("--row", default=None, help="the approving row's result JSON (file, or - for stdin): checked "
+                    "against the note for the integrate record")
 
     pl = sub.add_parser("plan", help="the task note's approved plan, for a seeded revise's resume.plan or an integrate call's plan")
     pl.add_argument("--note", required=True)
