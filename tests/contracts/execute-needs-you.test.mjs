@@ -211,18 +211,28 @@ function checkNeedsYou(skill, context = realContext) {
   // set-aside-fix: (c)'s question is read, never chosen, so the exact-text dedupe holds across sessions: <where>
   // from `setAsideAt`, the source run's section, and a <fix> that carries "raise <field>, " only when the source
   // run spent a budget, <field> taken from that run (a plain-rejection revise marker spends max_review_rounds,
-  // never max_iterations); every listed case that spends none drops it, a plan-block after a descope asks for
-  // scope, and a descope refusal (which writes nothing) changes no text.
+  // never max_iterations). max_iterations is named by what the run is, the implementer's or reviser's own
+  // paragraph, never by a default: rule 2 lists every fixed opening the engine, its prompts and the lead write
+  // for an own run (a dead call, merge-task's exit 1, a dead agent, a plan divergence, the engine's two fallbacks),
+  // the transient one glossed as a dead agent and the spent budget glossed on max_iterations itself, and rule 3
+  // drops the raise for each. A plan-block after a descope asks for scope, and a descope refusal (which writes
+  // nothing) changes no text.
+  const r2 = kindC.indexOf('2. a source run that spent a budget')
+  const r3 = kindC.indexOf('3. every other source run spends no budget')
+  const rule2 = r2 >= 0 && r3 > r2 ? kindC.slice(r2, r3) : ''
+  const iters = rule2.slice(rule2.indexOf("`max_iterations` for a code-writing task's"))
   if (!kindC.includes('`[[<slug>]] set aside <where> (<status>, <section> run <n>): <fix> with /thread:repair [[<rollout>]]`') ||
     !kindC.includes('never chosen, so two sessions word one block alike') ||
     !kindC.includes("`<where>`: `at Integration` when the entry's `setAsideAt` is `integration`, else `at its run`") ||
     !kindC.includes('`decide scope or defer`') ||
-    !kindC.includes("`raise <field>, hand back or defer`, with `<field>` the source run's own budget") ||
-    !kindC.includes('`max_plan_rounds` for a Plan-blocked feedback run that starts `plan not approved after`') ||
-    !kindC.includes('`max_review_rounds` for a Review-blocked feedback run, or for a Blocker diagnosis run that `inputs` reads as a plain rejection (`markerStage: revise`, `markerReason` empty) with `lastRound` at or above `max_review_rounds`') ||
-    !kindC.includes("`max_iterations` for a code-writing task's Blocker diagnosis run that `inputs` reads as its own (`markerStage: own`)") ||
-    !['`workflow call failed:`', '`merge-task:`', '`transient infrastructure failure`'].every((k) => kindC.includes(k)) ||
-    !kindC.includes("every other source run spends no budget: `hand back or defer`. That is every entry at Integration, a `revise stopped:` run, a dead call, merge-task's exit 1, a transient failure, any other plan-block and a review with no PR.") ||
+    !rule2.includes("`raise <field>, hand back or defer`, with `<field>` the source run's own budget, each named by what the run is, never by a default") ||
+    !rule2.includes('`max_plan_rounds` for a Plan-blocked feedback run that starts `plan not approved after` or `plan round budget exhausted`') ||
+    !rule2.includes('`max_review_rounds` for a Review-blocked feedback run, or for a Blocker diagnosis run that `inputs` reads as a plain rejection (`markerStage: revise`, `markerReason` empty) with `lastRound` at or above `max_review_rounds`') ||
+    !iters.startsWith("`max_iterations` for a code-writing task's Blocker diagnosis run that `inputs` reads as its own (`markerStage: own`) and that is the implementer's or reviser's own paragraph: its verifier budget ran out.") ||
+    !['`workflow call failed:` (a dead call)', "`merge-task:` (merge-task's exit 1)", '`transient infrastructure failure` (a dead agent)',
+      '`plan-divergence:`', '`agent returned neither verified nor blocked`', '`workflow stage threw`'].every((k) => iters.includes(k)) ||
+    /engine's own block|transient infrastructure failure` \([^)]*budget/.test(rule2) ||
+    !kindC.includes("every other source run spends no budget: `hand back or defer`. That is every entry at Integration, a `revise stopped:` run, a dead call, merge-task's exit 1, a transient failure (a dead agent), a plan divergence, a result with neither verified nor blocked, a stage that threw, any other plan-block and a review with no PR.") ||
     !kindC.includes('A descope refusal (exit 3) or error (exit 1) writes nothing, so it changes no item text') ||
     kindC.includes('the spent budget')) {
     fails.push('set-aside-fix')
@@ -273,6 +283,24 @@ function checkNeedsYou(skill, context = realContext) {
 
 test('execute § 1, § 3.7, § 4.5, § 6, § 6.5, § 7, § 8, the Don\'ts and CONTEXT.md hold every needs-you rule', () => {
   assert.deepEqual(checkNeedsYou(real), [], `stray asks: ${JSON.stringify(strayAsks(real), null, 1)}`)
+})
+
+// (c)'s rule 2 names each budget by what its source run is, so each opening it reads must still be the text its
+// writer writes: an engine or lead rewording fails here, never silently as a push naming the wrong fix.
+test('the openings (c)\'s rule 2 reads are still written by the engine, its prompts and the lead', () => {
+  const engine = read('skills/execute/task.workflow.js')
+  const reconcile = read('skills/execute/scripts/reconcile-rollout.py')
+  const written = [
+    [engine, "'plan not approved after '", 'plan-loop budget run out'],
+    [engine, '`plan round budget exhausted without a verdict', 'plan-loop guard'],
+    [engine, "'transient infrastructure failure — ", 'TRANSIENT_DIAGNOSIS'],
+    [engine, 'blockerDiagnosis="plan-divergence: <one line>"', 'the implementer\'s plan-divergence stop'],
+    [engine, "'agent returned neither verified nor blocked'", 'implement()\'s fallback'],
+    [engine, "blockerDiagnosis: 'workflow stage threw — see /workflows'", 'taskResult\'s fallback'],
+    [reconcile, 'CALL_FAILED_PREFIX = "workflow call failed:"', 'the lead\'s dead-call row'],
+    [real, 'reason `merge-task: <its message>`', 'the lead\'s exit-1 row'],
+  ]
+  for (const [src, text, what] of written) assert.ok(src.includes(text), `${what}: ${text} is no longer written`)
 })
 
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
@@ -377,9 +405,17 @@ test('control: a log at the note\'s top, or items carrying a log mark, fails log
 
 test('control: a raise where no budget was spent, or the wrong field, fails set-aside-fix', () => {
   only(edit(real, lineIn(real, S65, '    3. every other source run spends no budget'), ''), 'set-aside-fix', 'no-budget cases unruled')
-  only(edit(real, '; `max_review_rounds` for a Review-blocked feedback run, or for a Blocker diagnosis run that `inputs` reads as a plain rejection (`markerStage: revise`, `markerReason` empty) with `lastRound` at or above `max_review_rounds`;',
-    '; `max_review_rounds` for a Review-blocked feedback run;'), 'set-aside-fix', 'a spent revise marker left to max_iterations')
+  only(edit(real, '`max_review_rounds` for a Review-blocked feedback run, or for a Blocker diagnosis run that `inputs` reads as a plain rejection (`markerStage: revise`, `markerReason` empty) with `lastRound` at or above `max_review_rounds`: its review rounds ran out;',
+    '`max_review_rounds` for a Review-blocked feedback run: its review rounds ran out;'), 'set-aside-fix', 'a spent revise marker left to max_iterations')
   only(edit(real, "with `<field>` the source run's own budget", 'with `<field>` the spent budget'), 'set-aside-fix', 'field not from the source run')
+  only(edit(real, ', `plan-divergence:` (the implementer\'s designed stop for a broken plan)', ''), 'set-aside-fix',
+    'a plan divergence left to max_iterations')
+  only(edit(real, ', `agent returned neither verified nor blocked` (the engine\'s fallback for a result with neither) and `workflow stage threw` (the engine\'s fallback for a stage that returned no result)', ''),
+    'set-aside-fix', 'the engine\'s fallbacks left to max_iterations')
+  only(edit(real, '`transient infrastructure failure` (a dead agent)', '`transient infrastructure failure` (the engine\'s own block: its verifier budget ran out)'),
+    'set-aside-fix', 'the spent budget glossed on the transient opening')
+  only(edit(real, "and that is the implementer's or reviser's own paragraph: its verifier budget ran out. A run that starts with one of the fixed openings the engine, its prompts or the lead write is never that paragraph, and none of them spends a budget:",
+    'and that starts with none of'), 'set-aside-fix', 'max_iterations named by a default')
   only(edit(real, 'A descope refusal (exit 3) or error (exit 1) writes nothing, so it changes no item text (a later session that judged the same run otherwise would word it apart and push it twice): its `ASK:` or ERROR line is the item\'s `→` detail. ', ''),
     'set-aside-fix', 'a refusal rewords the item')
 })
