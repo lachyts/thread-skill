@@ -65,7 +65,7 @@ Subcommands:
       blocked, the source is the Blocker run, stage revise, markerReason empty, the last line `rejected`,
       a non-empty history and lastRound < K (false without --max-review-rounds).
       integrate (p17-1) is the integrate call's {prUrl, reviewHistory, reviewRoundsUsed, rung} (execute § 4.5
-      step 3 passes those four verbatim) plus source, rungSource and rowRefused. --row names the approving
+      step 3 passes those four verbatim) plus source, rungSource, rowRefused and prUrlError. --row names the approving
       row's result JSON (a file, or - for stdin: an envelope {rolloutSlug, tasks}, whose one entry for this
       slug is taken, or a bare row). The row is used (source "row") only when it is this note's, `review`,
       its prUrl a PR URL naming the note's pr:, its reviewHistory passing the engine's historyError and its
@@ -73,6 +73,10 @@ Subcommands:
       its rung record when it passes rungRecordError, else the note's (rungSource "note", rowRefused says
       why). Otherwise, and with no --row, the note's: pr, history, reviewRoundsUsed and rung (source "note");
       rowRefused is the one-line reason, or "" with no --row. An unreadable --row is refused, never exit 2.
+      The note's pr: becomes a PR URL the engine takes: a bare `#N` (or `N`) is built on --repo's GitHub
+      origin (owner/repo), and a trailing / is dropped. prUrlError is "" when prUrl is one, else why not and
+      the fix (no pr:, another form, a bare number with no --repo or no GitHub origin): the lead launches
+      nothing on it (a call it launched would fail the engine's args check, which reads as a Lost call).
 
   plan --note N
       The task's approved plan, for the two launches that pass it (execute § 4.5 step 1.2's seeded revise,
@@ -816,14 +820,40 @@ def _row_error(inp, note, row):
     return ""
 
 
-def integrate_record(inp, note, row, why):
+def _note_pr_url(pr, note, repo):
+    """(url, why): the note's `pr:` as the PR URL the engine's args check (prIdentityError) takes, for the integrate
+    record when no row is accepted (p17-1). A URL the engine takes passes verbatim; a GitHub PR URL with a trailing /
+    loses it; a bare number (`#N` or `N`, a hand-written form _same_pr accepts) is built on origin's owner/repo
+    (_owner_repo, read in --repo). Otherwise (no pr:, another form, or a bare number with no --repo or no GitHub
+    origin) the note's value stays and `why` says what the engine would refuse and the fix; '' when url passes."""
+    if not pr:
+        return pr, "the note has no pr:, so there is no PR to integrate: stamp the task's PR URL as its pr:"
+    if ENGINE_PR_URL_RE.fullmatch(pr):
+        return pr, ""
+    m, n = rr.PR_URL_RE.match(pr), rr.PR_NUM_RE.match(pr)
+    if m:
+        return f"https://github.com/{m.group(1)}/pull/{m.group(2)}", ""
+    if n:
+        owner = _owner_repo(os.path.expanduser(repo), note) if repo else ""
+        if owner:
+            return f"https://github.com/{owner}/pull/{int(n.group(1))}", ""
+        where = "no --repo was given" if not repo else f"--repo {repo} has no GitHub origin to build it on"
+        return pr, (f"the note's pr: {pr} is a bare number and {where}, so no PR URL can be built from it: stamp "
+                    f"the task's PR URL as its pr:")
+    return pr, f"the note's pr: {pr} is not a PR URL (…/pull/<n>) or a PR number: stamp the task's PR URL as its pr:"
+
+
+def integrate_record(inp, note, row, why, repo=None):
     """The integrate call's prUrl, reviewHistory, reviewRoundsUsed and rung (execute § 4.5 step 3, p17-1): the
-    approving row's (source "row") when it was read and _row_error passes, else the note's: `inputs`' pr,
-    history, reviewRoundsUsed and rung record (source "note"). An accepted row whose rung record fails
-    rung_record_error keeps the row and takes the note's rung record (rungSource "note"). rowRefused is the one
-    reason ('' with no --row, or when nothing was refused)."""
-    rec = {"prUrl": inp["pr"], "reviewHistory": inp["history"], "reviewRoundsUsed": inp["reviewRoundsUsed"],
-           "rung": inp["rung"], "source": "note", "rungSource": "note", "rowRefused": ""}
+    approving row's (source "row") when it was read and _row_error passes, else the note's: `inputs`' pr as a PR
+    URL (_note_pr_url: a bare `#N` is built on origin's owner/repo), history, reviewRoundsUsed and rung record
+    (source "note"). An accepted row whose rung record fails rung_record_error keeps the row and takes the note's
+    rung record (rungSource "note"). rowRefused is the one reason ('' with no --row, or when nothing was
+    refused); prUrlError is why prUrl is no PR URL the engine takes ('' when it is: the lead launches nothing
+    on a non-empty one)."""
+    url, url_why = _note_pr_url(inp["pr"], note, repo)
+    rec = {"prUrl": url, "reviewHistory": inp["history"], "reviewRoundsUsed": inp["reviewRoundsUsed"],
+           "rung": inp["rung"], "source": "note", "rungSource": "note", "rowRefused": "", "prUrlError": url_why}
     if row is None and not why:
         return rec
     refused = why or _row_error(inp, note, row)
@@ -833,7 +863,7 @@ def integrate_record(inp, note, row, why):
     rung = {k: row.get(k) for k in ("startRung", "rung", "climbs")}
     bad = rung_record_error(rung)
     rec.update(prUrl=row["prUrl"], reviewHistory=row["reviewHistory"], reviewRoundsUsed=row["reviewRoundsUsed"],
-               source="row")
+               source="row", prUrlError="")
     if bad:
         rec["rowRefused"] = f"the row's rung record is missing or malformed ({bad}): the note's is used"
     else:
@@ -883,7 +913,7 @@ def task_inputs(path, note, max_rounds=None, repo=None, row=None):
     if repo:
         out["worktreePath"] = worktree_dir(os.path.expanduser(repo), path.stem)
     got, why = _read_row(row, path.stem) if row is not None else (None, "")
-    out["integrate"] = integrate_record(out, note, got, why)
+    out["integrate"] = integrate_record(out, note, got, why, repo)
     return out
 
 

@@ -222,13 +222,15 @@ function checkExecute({ skill, hooksJson, exists, template }) {
 
   // integrate-args: startedAt from stamp at launch; readyAt from ready:; prUrl, the history, the rounds and the rung are
   // `inputs --row`'s integrate record verbatim (p17-1: a saved row is checked against the note, never trusted as it
-  // is), a non-empty rowRefused printed; the rung is the task's own record, the accepted row's, else the note's
+  // is), a non-empty rowRefused printed, a non-empty prUrlError (a note pr: with no PR URL, e.g. a bare #N and no GitHub
+  // origin) set aside at Integration, never launched; the rung is the task's own record, the accepted row's, else the note's
   // (neutral when the note has no rung:), never the ladder's top rung, and no tier vocabulary left. prepare's
   // `unlisted` and `note` only inform.
   if (!st3.includes('`startedAt` a fresh `lead-integrate.py stamp` taken at launch') ||
     !st3.includes("`readyAt` the note's `ready:`") ||
-    !st3.includes('`prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are, verbatim, the `integrate` record of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py inputs --note <task note> [--row') ||
+    !st3.includes('`prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are, verbatim, the `integrate` record of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py inputs --note <task note> --repo <repoPath> [--row') ||
     !st3.includes('the lead prints a non-empty `rowRefused`') || st3.includes('from the approving row when this session holds it') ||
+    !st3.includes("A non-empty `prUrlError` (the note's `pr:` gives no PR URL the engine takes) launches nothing: the lead's own *Set aside* row at Integration (`--kind integration`) with `prUrlError` as the reason") ||
     !st3.includes("`rung` is the task's own rung record, the accepted row's (`startRung`, `rung`, `climbs`), else the note's `rung` record") ||
     !st3.includes('(neutral, `{startRung: "", rung: "", climbs: []}`, when the note has no `rung:`)') ||
     !st3.includes("never the ladder's top rung: Integration runs on the top rung whatever the record says") ||
@@ -664,6 +666,11 @@ test('control: the approving row trusted unchecked fails integrate-args', () => 
   const from = p.slice(p.indexOf('`prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are, verbatim,'), p.indexOf("; `rung` is the task's own rung record"))
   only(sk(from, '`reviewHistory` and `reviewRoundsUsed` come from the approving row when this session holds it, else from `lead-integrate.py inputs`'),
     'integrate-args', 'unchecked row')
+})
+
+test('control: an integrate call launched on a prUrlError fails integrate-args', () => {
+  only(sk("A non-empty `prUrlError` (the note's `pr:` gives no PR URL the engine takes) launches nothing: the lead's own *Set aside* row at Integration (`--kind integration`) with `prUrlError` as the reason, since",
+    'The integrate call launches whatever `prUrl` reads, since'), 'integrate-args', 'prUrlError launched')
 })
 
 test('control: the lane order dropped fails lane-order', () => {
