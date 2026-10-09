@@ -57,10 +57,13 @@ grill's question was how much of that the live lead may do alone without ever hi
    future wording, is a human's (a closed PR, a branch not on origin, another base, a merge queue, a non-check
    gate, a refused merge, an unconfirmed merge, a read failure, a base that stays BEHIND, an unexpected state),
    so the list fails closed. Each allowed text is pinned against `merge-task.sh`.
-9. **The records.** Each retry leaves a dated line in the rollout's `## Notes` (`- <date> auto-retry:
-   [[<slug>]] <n>/<N> (<stage>; feedback <sha>)`), never in the task note (whose body is the brief), an
-   `auto-retry` Run record event (its stage paired with the task's latest set-aside line for a Retro), and a
-   report row; the Completion log copies the lines.
+9. **The records.** Each retry leaves a stamped line in the rollout's `## Notes` (`- <stamp> auto-retry:
+   [[<slug>]] <n>/<N> (<stage>; feedback <sha>)`, the stamp being the `auto_retry_at` the retry writes), never in
+   the task note (whose body is the brief), an `auto-retry` Run record event (its stage paired with the task's
+   latest set-aside line for a Retro), and a report row; the Completion log copies the lines. One line per retry:
+   a re-run that finishes a retry whose task-note save failed finds its line (the same text, stamped after the
+   note's `auto_retry_at`) and writes no second one, while a later retry that reads the same but for its stamp
+   (a hand-back reset the counters in between) is a line of its own.
 
 The bound per task per rollout: (`auto_retries` + one descope) × (1 + human hand-backs) agent and infra retries,
 plus at most five quota retries per stretch.

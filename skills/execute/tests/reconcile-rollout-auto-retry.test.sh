@@ -125,7 +125,7 @@ notes_lines() { sec "$RO" '## Notes' | grep -c "auto-retry: \[\[$1\]\]"; }
 # planblock <slug> <feedback> [now]: a running task (in_progress, owner) plan-blocks through the real reconcile
 planblock() { setfm "$1" status in_progress; setfm "$1" owner execute-test; rec "$(row "$1" plan-blocked "$2")" "${3:-2026-10-03T08:00:00Z}"; }
 SHA_A=$(sha12 "$FA"); SHA_B=$(sha12 "$FB"); SHA_C=$(sha12 "$FC")
-D_A="2026-10-03"
+S_NOW="2026-10-03T09:00+00:00"   # NOW as _stamp writes it: an auto-retry line's stamp and its auto_retry_at
 
 # ── A1: a first and second plan-block retried automatically; the third stops (the spec's queue test) ────────────
 scen a1
@@ -149,7 +149,7 @@ ok "$(fm "$A" status)|$(fm "$A" owner)|$(fm "$A" handed_back)" "status: in_progr
   "A1: hand-back's own transition (in_progress, owner: cleared, handed_back:)"
 ok "$(fm "$A" auto_retries_used)|$(fm "$A" auto_retry_sha)|$(fm "$A" auto_retry_at)|$(fm "$A" quota_retries_used)" \
   "auto_retries_used: 1|auto_retry_sha: $SHA_A|auto_retry_at: 2026-10-03T09:00+00:00|<none>" "A1: used 1, sha A, auto_retry_at; no quota counter"
-ok "$(sec "$RO" '## Notes' | grep 'auto-retry:')" "- $D_A auto-retry: [[$A]] 1/2 (plan; feedback $SHA_A)" "A1: one rollout ## Notes line, in the exact format"
+ok "$(sec "$RO" '## Notes' | grep 'auto-retry:')" "- $S_NOW auto-retry: [[$A]] 1/2 (plan; feedback $SHA_A)" "A1: one rollout ## Notes line, in the exact format (stamped with its auto_retry_at)"
 ok "$(since "$M")" "auto-retry:$A" "A1: one auto-retry event"
 ok "$(lastev auto-retry '[d["stage"], d["setAsideAt"], d["retryClass"], d["used"], d["budget"], d["fingerprint"]]')" \
   "[\"plan\",\"run\",\"agent\",1,2,\"$SHA_A\"]" "A1: its fields"
@@ -177,7 +177,7 @@ ok "$(snap)" "$before" "A1 third: both notes byte-identical"
 ok "$(since "$M")" "" "A1 third: nothing recorded"
 setfm "$B" status done
 NX=$(nxt "")
-ok "$(j "$NX" '[d["halt"], [e["slug"] for e in d["setAside"]]]')" "[\"stuck\",[\"$A\"]]" "A13: every set-aside exhausted (and nothing else to start) → halt stuck"
+ok "$(j "$NX" '[d["halt"], [e["slug"] for e in d["setAside"]]]')" "[\"stuck\",[\"$A\"]]" "A1: every set-aside exhausted (and nothing else to start) → halt stuck"
 
 # ── A2: an identical fingerprint stops at once ─────────────────────────────────────────────────────────────
 scen a2
@@ -423,20 +423,49 @@ has "$out" "not auto-retryable: not set aside (running)" "A7: (it is running now
 # a partial write: the task note unwritable → exit 1 with the Notes line written; the re-run writes one line, then the note
 ms "$A"; planblock "$A" "$FB" 2026-10-03T09:10:00Z
 chmod 0444 "$D/$A.md"
-ar "$A"
-ok "$rc|$(notes_lines "$A")|$(fm "$A" status)" "1|2|status: plan-blocked" "A7 partial: exit 1, the Notes line written, the task note not"
+ANOW=2026-10-03T09:15:00Z ar "$A"
+ok "$rc|$(notes_lines "$A")|$(fm "$A" status)|$(fm "$A" auto_retry_at)" "1|2|status: plan-blocked|auto_retry_at: $S_NOW" \
+  "A7 partial: exit 1, the Notes line written, the task note not (its auto_retry_at is still the first retry's)"
 has "$out" "a re-run finishes the records" "A7 partial: the ERROR says a re-run finishes it"
 chmod 0644 "$D/$A.md"
-ar "$A"
-ok "$rc|$(notes_lines "$A")|$(fm "$A" status)|$(fm "$A" auto_retries_used)" "0|2|status: in_progress|auto_retries_used: 2" \
-  "A7 partial: the re-run leaves one line for the retry and writes the task note"
+ANOW=2026-10-03T09:16:00Z ar "$A"
+ok "$rc|$(notes_lines "$A")|$(fm "$A" status)|$(fm "$A" auto_retries_used)|$(fm "$A" auto_retry_at)" \
+  "0|2|status: in_progress|auto_retries_used: 2|auto_retry_at: 2026-10-03T09:16+00:00" \
+  "A7 partial: the re-run leaves one line for the retry (stamped after the note's auto_retry_at) and writes the task note"
+ok "$(sec "$RO" '## Notes' | grep 'auto-retry:' | tail -1)" "- 2026-10-03T09:15+00:00 auto-retry: [[$A]] 2/2 (plan; feedback $SHA_B)" \
+  "A7 partial: the line is the first attempt's, kept"
 # --dry-run writes and records nothing
 ms "$A"; planblock "$A" "$FC" 2026-10-03T09:20:00Z
 setfm "$A" auto_retries 3
 before=$(snap); M=$(cnt)
 ar "$A" --dry-run
-ok "$rc|$(snap)|$(since "$M")" "0|$before|" "A14: --dry-run exits 0, writes and records nothing"
-has "$out" "$A: auto-retry 3/3 (plan; feedback $SHA_C) plan-blocked->in_progress (dry-run)" "A14: --dry-run prints the outcome"
+ok "$rc|$(snap)|$(since "$M")" "0|$before|" "A7: --dry-run exits 0, writes and records nothing"
+has "$out" "$A: auto-retry 3/3 (plan; feedback $SHA_C) plan-blocked->in_progress (dry-run)" "A7: --dry-run prints the outcome"
+# a hand-back resets the counters, so a later genuine retry can read exactly like an earlier one but for its stamp
+# (the same n/N, stage and feedback): it is a new line, one per retry, never taken for an unfinished write
+scen a7-hand-back
+mkro; mkt "$A" open; mkt "$B" open
+planblock "$A" "$FA"
+ar "$A"
+ok "$rc|$(notes_lines "$A")" "0|1" "A7 hand-back: the first retry (1/2, feedback A)"
+ms "$A" 2026-10-03T09:01:00Z; setfm "$A" owner execute-test
+rec "$(row "$A" plan-blocked "$FB" '{"needsHuman":"Which migration tool?"}')" 2026-10-03T09:10:00Z
+has "$(j "$(INOW=2026-10-03T09:10:00Z inp "$A")" 'd["autoRetryWhy"]')" "needs a human" "A7 hand-back: (the second block asks a human)"
+python3 "$SCRIPT" hand-back --tasks "$A" --tasks-dir "$D" --now 2026-10-03T09:20:00Z >/dev/null 2>&1
+ok "$(fm "$A" auto_retries_used)|$(fm "$A" auto_retry_at)" "<none>|auto_retry_at: $S_NOW" "A7 hand-back: (the counters cleared, auto_retry_at kept)"
+ms "$A" 2026-10-03T09:21:00Z; setfm "$A" owner execute-test
+rec "$(row "$A" plan-blocked "$FA" '{"needsHuman":""}')" 2026-10-03T09:30:00Z
+I=$(INOW=2026-10-03T09:30:00Z inp "$A")
+ok "$(j "$I" '[d["autoRetry"], d["autoRetriesUsed"], d["fingerprint"]]')" "[true,0,\"$SHA_A\"]" "A7 hand-back: feedback A again, on the fresh budget"
+M=$(cnt)
+ANOW=2026-10-03T09:30:00Z ar "$A"
+ok "$rc|$out" "0|$A: auto-retry 1/2 (plan; feedback $SHA_A) plan-blocked->in_progress [written]" \
+  "A7 hand-back: the same count, stage and feedback as the first retry"
+ok "$(notes_lines "$A")" 2 "A7 hand-back: a second Notes line (one per retry, so the Auto-retried row and the Completion log count both)"
+ok "$(sec "$RO" '## Notes' | grep 'auto-retry:' | tail -1)" "- 2026-10-03T09:30+00:00 auto-retry: [[$A]] 1/2 (plan; feedback $SHA_A)" \
+  "A7 hand-back: stamped with this retry's auto_retry_at"
+ok "$(since "$M")" "auto-retry:$A" "A7 hand-back: its event"
+ok "$(since 0 | tr ' ' '\n' | grep -c "^auto-retry:$A$")" "$(notes_lines "$A")" "A7 hand-back: as many Notes lines as auto-retry events"
 
 # ── A8: the raise ───────────────────────────────────────────────────────────────────────────────────────────
 scen a8
@@ -451,9 +480,9 @@ ar "$A"
 ok "$rc|$(fm "$A" max_review_rounds)" "0|max_review_rounds: 4" "A8: the verb writes max_review_rounds: 4 on the task note"
 ok "$out" "$A: auto-retry 1/2 (integrate; feedback $FP; max_review_rounds raised to 4) review-blocked->in_progress [written]" "A8: stdout names the raise"
 L=$(sec "$RO" '## Notes' | grep 'auto-retry:')
-ok "$L" "- $D_A auto-retry: [[$A]] 1/2 (integrate; feedback $FP); max_review_rounds raised to 4, one round" "A8: the Notes line carries repair's raise wording"
+ok "$L" "- $S_NOW auto-retry: [[$A]] 1/2 (integrate; feedback $FP); max_review_rounds raised to 4, one round" "A8: the Notes line carries repair's raise wording"
 ok "$(printf '%s\n' "$L" | python3 -c 'import re,sys; m=re.search(r"\[\[%s\]\].*max_review_rounds raised to (\d+), one round" % re.escape(sys.argv[1]), sys.stdin.read()); print(m.group(1) if m else "")' "$A")" 4 \
-  "A7: repair's already-raised rule finds the raise line in the rollout's ## Notes"
+  "A8: repair's already-raised rule finds the raise line in the rollout's ## Notes"
 ok "$(lastev auto-retry '[d["stage"], d["reviewRounds"]]')" '["integrate",4]' "A8: the event carries reviewRounds 4 (the set-aside line's stage)"
 I=$(inp "$A")
 ok "$(j "$I" '[d["resumeAt"], d["lastRound"]]')" '["revise",3]' "A8: inputs then gives resumeAt revise (Restart routing's seeded revise)"

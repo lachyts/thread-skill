@@ -80,9 +80,12 @@ Subcommands:
               integer) is exit 1; --auto-retries and --fingerprint are assertions the lead copies from `inputs`,
               and a mismatch is exit 1 (the note changed since `inputs`); `autoRetry: false` is exit 1, `ERROR:
               auto-retry: <slug>: not auto-retryable: <why>; nothing written`. Otherwise it writes, in order, each
-              finished by a re-run: (a) `- <date> auto-retry: [[<slug>]] <n>/<N> (<stage>; feedback <sha>)[;
+              finished by a re-run: (a) `- <stamp> auto-retry: [[<slug>]] <n>/<N> (<stage>; feedback <sha>)[;
               max_review_rounds raised to <K>, one round]` in the rollout's `## Notes` (`quota <q>/5` for a quota
-              block; skipped when the slug's last `auto-retry:` line equals it but for the date); (b) the task note
+              block; <stamp> is the `auto_retry_at` (b) writes; skipped when the slug's last `auto-retry:` line
+              equals it but for its stamp and that stamp is later than the note's `auto_retry_at`, or the note has
+              none: an earlier run's line for this same retry, whose task-note save never landed; a later retry
+              that reads the same, after a hand-back reset the counters, is a line of its own); (b) the task note
               in one save: hand-back's own transition (_hand_back_note), `auto_retries_used` + 1 for an agent or
               infra block or `quota_retries_used` + 1 for a quota block, `auto_retry_sha` (the block's
               fingerprint), `auto_retry_at` (now) and, for a raise, `max_review_rounds: <K>`; (c) the events
@@ -4035,6 +4038,27 @@ def _retry_stage(rollout, slug, note) -> str:
     return stage if stage in AUTO_RETRY_STAGES else "implement"
 
 
+def _unfinished_retry_line(last, line, note) -> bool:
+    """Whether `last`, the slug's last `auto-retry:` line in the rollout's `## Notes`, is this very retry's, written by
+    an earlier run of the verb whose task-note save never landed: it equals `line` but for its stamp, and that stamp
+    is later than the note's `auto_retry_at` (or the note has none). Each retry's line is stamped with the
+    `auto_retry_at` its task-note save writes, and hand-back keeps that stamp, so a completed retry's line is never
+    later than it: a genuine later retry that reads the same but for its stamp (a hand-back reset the counters in
+    between) is a new line. A line whose stamp does not parse is not one this verb wrote. Minute precision: a save
+    that failed in the same minute as the last completed retry reads as finished, and its re-run writes the line
+    again."""
+    if not last:
+        return False
+    lp, np_ = last.split(" ", 2), line.split(" ", 2)
+    if len(lp) < 3 or lp[2] != np_[2]:
+        return False
+    stamped = _parse_ts(lp[1])
+    if stamped is None:
+        return False
+    done = _parse_ts(note.get(AUTO_RETRY_AT_KEY)) if note.get(AUTO_RETRY_AT_KEY) is not None else None
+    return done is None or stamped > done
+
+
 def cmd_auto_retry(args) -> int:
     """Execute's automatic retry of one set-aside task (p16-4, ADR 0033; execute § 4.5 step 1.2's *Automatic retry*).
     The verb re-runs lead-integrate.py's auto_retry_verdict before it writes anything, so the lead's `inputs` read
@@ -4095,13 +4119,13 @@ def cmd_auto_retry(args) -> int:
     stage = _retry_stage(_note_rollout(note), slug, note)
     status, (_state, at) = _status(note), _queue_state(note)
     raised = f"; max_review_rounds raised to {raise_to}, one round" if raise_to else ""
-    line = f"- {now.astimezone().date().isoformat()} {AUTO_RETRY_MARK} [[{slug}]] {count} ({stage}; feedback {fingerprint}){raised}"
+    line = f"- {_stamp(now)} {AUTO_RETRY_MARK} [[{slug}]] {count} ({stage}; feedback {fingerprint}){raised}"
 
     # (a) The rollout's `## Notes` line, first: a failed task save leaves the verdict true, so the next step 1.2
-    # finishes the records, and a line equal to the slug's last auto-retry line (its date aside) is not written twice.
+    # finishes the records, and the line an earlier run wrote for this same retry is not written twice.
     link_re = re.compile(rf"{re.escape(AUTO_RETRY_MARK)}\s*\[\[{re.escape(slug)}(?:[|#\\][^\]]*)?\]\]", re.I)
     mine = [l.rstrip() for l in rollout_note.section_text(NOTES_SECTION).split("\n") if link_re.search(l)]
-    if not mine or mine[-1].split(" ", 2)[2:] != line.split(" ", 2)[2:]:
+    if not _unfinished_retry_line(mine[-1] if mine else None, line, note):
         rollout_note.append_line(NOTES_SECTION, line)
         try:
             rollout_note.save(dry_run=args.dry_run)
