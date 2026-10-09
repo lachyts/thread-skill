@@ -14,7 +14,7 @@
 #   and zsh -f ($, $(…), backticks, \ and ' single-quoted)   C16 stamp, usage, an unreachable origin   C17 timeouts, signals,
 #   the bootstrap, the race tree   C18 no relaunch loop   C19 an Integration set-aside re-enters   C20 the last
 #   task rejected   C21 plan, the approved plan for the two launches   C22 inputs --row, the integrate call's record
-#   checked against the note (p17-1). C10 is the landed list with a commit pushed without a PR (`unlisted`), and
+#   checked against the note and its fallback prUrl a PR URL the engine takes, a bare #N built (p17-1). C10 is the landed list with a commit pushed without a PR (`unlisted`), and
 #   C11 also pins inputs --row's ports of historyError, rungRecordError and PR_URL.
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0.
 set -uo pipefail
@@ -884,9 +884,9 @@ RECS="$F/recs.jsonl"; : > "$RECS"
 irow() { local s="$1"; shift; I=$(python3 "$LI" inputs --note "$V/$s.md" "$@" 2>"$F/irow.err"); irc=$?; IG=$(j "$I" 'd["integrate"]' 2>/dev/null); [ "$s" != proj-a ] || printf '%s\n' "$IG" >> "$RECS"; }
 NOTE_RUNG='{"startRung":"","rung":"opus-high","climbs":[]}'
 irow proj-a
-ok "$irc|$(j "$IG" 'sorted(d)')" '0|["prUrl","reviewHistory","reviewRoundsUsed","rowRefused","rung","rungSource","source"]' "C22: inputs prints the integrate record, with exactly its keys"
-ok "$(j "$IG" '[d["source"], d["rungSource"], d["prUrl"], d["reviewHistory"], d["reviewRoundsUsed"], d["rowRefused"]]')|$(j "$IG" 'd["rung"]')" \
-  "[\"note\",\"note\",\"$PRA\",[],2,\"\"]|$NOTE_RUNG" "C22: no --row → the note's PR, history, rounds and rung record; rowRefused \"\""
+ok "$irc|$(j "$IG" 'sorted(d)')" '0|["prUrl","prUrlError","reviewHistory","reviewRoundsUsed","rowRefused","rung","rungSource","source"]' "C22: inputs prints the integrate record, with exactly its keys"
+ok "$(j "$IG" '[d["source"], d["rungSource"], d["prUrl"], d["reviewHistory"], d["reviewRoundsUsed"], d["rowRefused"], d["prUrlError"]]')|$(j "$IG" 'd["rung"]')" \
+  "[\"note\",\"note\",\"$PRA\",[],2,\"\",\"\"]|$NOTE_RUNG" "C22: no --row → the note's PR, history, rounds and rung record; rowRefused and prUrlError \"\""
 irow proj-a --row "$F/incident.json"
 ok "$irc|$(j "$IG" '[d["source"], d["prUrl"], d["reviewRoundsUsed"], d["reviewHistory"]]')|$(j "$IG" 'd["rung"]')" "0|[\"note\",\"$PRA\",2,[]]|$NOTE_RUNG" "C22: the incident's saved row (blocked, no PR, 0 rounds) is refused: the note's values"
 has "$(j "$IG" 'd["rowRefused"]')" "status" "C22: … rowRefused names its status"
@@ -918,12 +918,37 @@ for form in good bare stdin; do
 done
 irow proj-b --row "$F/nopr.json"
 ok "$(j "$IG" '[d["source"], d["prUrl"]]')" '["note",null]' "C22: a note with no pr: refuses the row; prUrl null"
+has "$(j "$IG" 'd["prUrlError"]')" "no pr:" "C22: … and prUrlError says the note has no pr:"
 irow proj-c --row "$F/bynum.json"
-ok "$(j "$IG" '[d["source"], d["prUrl"]]')" '["row","https://github.com/o/r/pull/99"]' "C22: a bare-number note pr: matches the row's PR by number"
+ok "$(j "$IG" '[d["source"], d["prUrl"], d["prUrlError"]]')" '["row","https://github.com/o/r/pull/99",""]' "C22: a bare-number note pr: matches the row's PR by number; prUrlError \"\""
 irow proj-c --row "$F/bynumbad.json"
 ok "$(j "$IG" 'd["source"]')" note "C22: … and refuses another number"
 irow proj-d --row "$F/byurl.json"
 ok "$(j "$IG" 'd["source"]')" row "C22: a note pr: URL matches with one trailing / and case ignored"
+# The note's fallback prUrl is a PR URL the engine takes (prIdentityError), never a hand-written bare `#N`: one is
+# built on --repo's GitHub origin; with no --repo or no GitHub origin prUrl stays and prUrlError says why (the lead
+# sets the task aside at Integration on it, never launching a call the engine would refuse as a Lost call).
+g init -q "$F/gh"; git -C "$F/gh" remote add origin https://github.com/o/r.git
+g init -q "$F/local"; git -C "$F/local" remote add origin "$F/nowhere.git"
+irow proj-c
+ok "$(j "$IG" '[d["source"], d["prUrl"]]')" '["note","#99"]' "C22: a bare #99 with no --repo keeps the note's value"
+has "$(j "$IG" 'd["prUrlError"]')" "bare number and no --repo was given" "C22: … and prUrlError names the bare number and the missing --repo"
+irow proj-c --repo "$F/local"
+ok "$(j "$IG" '[d["source"], d["prUrl"]]')" '["note","#99"]' "C22: a bare #99 with a non-GitHub origin keeps the note's value"
+has "$(j "$IG" 'd["prUrlError"]')" "has no GitHub origin" "C22: … and prUrlError names the origin"
+C22B=()
+for args in "" "--row $F/bynumbad.json"; do
+  irow proj-c --repo "$F/gh" $args; C22B+=("$IG")
+  ok "$(j "$IG" '[d["source"], d["prUrl"], d["prUrlError"]]')" '["note","https://github.com/o/r/pull/99",""]' "C22: a bare #99 with a GitHub origin is built into its PR URL (${args:+a refused row}${args:-no --row})"
+done
+irow proj-d
+ok "$(j "$IG" '[d["source"], d["prUrl"], d["prUrlError"]]')" '["note","https://github.com/O/R/pull/100",""]' "C22: a note pr: URL's trailing / is dropped"
+PRE=$(node --input-type=module -e "
+  import { loadEngine } from './tests/lib/engine.mjs'
+  const T = loadEngine(['PR_URL'])
+  process.stdout.write(JSON.stringify([...process.argv.slice(1).map((r) => T.PR_URL.test(JSON.parse(r).prUrl)), T.PR_URL.test('#99')]))
+" "${C22B[@]}" "$IG")
+ok "$PRE" '[true,true,true,false]' "C22: every built prUrl passes the engine's PR_URL, which refuses the bare #99"
 # the engine's args check: every record inputs emitted for proj-a passes integrationArgsError; the refused rows' raw
 # fields fail it (so the record never carries them), and the bad rung fails rungRecordError.
 PAR=$(node --input-type=module -e "
