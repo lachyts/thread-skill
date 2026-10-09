@@ -94,9 +94,8 @@ overwrites, because each is independent of the pause and the lead:
   every-mode write: it waits until nothing of the rollout is in flight. Its `--bare-only` form, which moves no
   ref, runs with (b)'s ack.
 
-**Lead-held notes.** § 3c's `pr:` write (and § 4's, for an at-Integration set-aside with no `pr:`) and § 3c's
-defer of a RACE / UNVERIFIED task whose merge Lachy decides does not stand write a task note a live call's
-reconcile would overwrite. They run only when no lead is live
+**Lead-held notes.** § 3c's `pr:` write and § 3c's defer of a RACE / UNVERIFIED task whose merge Lachy decides
+does not stand write a task note a live call's reconcile would overwrite. They run only when no lead is live
 (every owner session has ended or shows no run there, a drain nothing is draining included) or under a
 stamped pause, where no call is live; otherwise they wait for the stamp or the lead's end.
 
@@ -121,8 +120,9 @@ check session `<owner tag>` first".
 
 - Beyond the every-mode writes, repair may hand back a set-aside task once Lachy has answered it (§ 3b), never one
   § 2 classes **retry (automatic)** (§ 2 classes it before any answer: a hand-back on his answer is the fresh
-  stretch he chose). It may also run § 3d's `descope` on one (wherever `hand-back` may run), apply a raise he chose
-  and run `approve-gates` on sign-off.
+  stretch he chose). It may also run § 3d's `descope` on one (wherever `hand-back` may run), apply a raise he chose,
+  run `approve-gates` on sign-off, and write the `pr:` § 4's restore finds for an at-Integration set-aside with no
+  `pr:`: no live call owns a set-aside note, so that write goes with the hand-back that follows it (§ 4).
 - It never runs `resume`, never enters the loop, and never writes a running or integrating note, because a
   live call's reconcile would overwrite it: the lead-held notes wait for the lead's end.
 - A RACE re-verify in flight (§ 2) is the lead's: report it and wait. It becomes a § 3c escalation only once
@@ -464,11 +464,14 @@ there is nothing to clear. Per stage:
   moment.
 
   A set-aside at Integration with no `pr:` (§ 2's same class) is refused by `hand-back`. Its restore first finds
-  its branch's PR: `gh pr list --repo <owner/name> --head <inputs.branch> --state all --json number,url,state`. On
-  Lachy's confirmation, write `pr: <url>`. That is a lead-held note (§ 1), so with a lead live it waits for the
-  lead's end or a stamped pause. Then, for OPEN, hand back; for CLOSED, the restore above (`gh pr reopen`, then
-  `hand-back`); for MERGED, it is § 3c's possible PR-less merge (its `pr:` write, then `resume`). With no PR for its
-  branch, the options are recut, defer or leave.
+  its branch's PR: `gh pr list --repo <owner/name> --head <inputs.branch> --state all --json number,url,state`.
+  Then, on Lachy's confirmation, by its state: OPEN → write `pr: <url>`, then hand back; CLOSED → the restore
+  above, writing `pr: <url>` after `gh pr reopen` and before `hand-back`, so the note never names a CLOSED PR;
+  MERGED → § 3c's possible PR-less merge (its `pr:` write, then `resume`). The OPEN and CLOSED `pr:` write runs
+  wherever `hand-back` may (§ 1), a live queue included: no live call owns a set-aside note, so no reconcile
+  overwrites it, and it goes with the hand-back that follows it. Once its `pr:` reads, the live lead's automatic
+  retry may re-enter the task first: `hand-back` then exits 1 with `status is 'review'`, which is no error (§ 3b's
+  live-queue race). With no PR for its branch, the options are recut, defer or leave.
 - **Recut, only on Lachy's explicit ask:** a fresh start from the queue's current base.
   1. Run the landing-register check (execute § 2.5).
   2. Retire the branch with § 5's retire block plus `git -C <repoPath> branch -D <inputs.branch>`.

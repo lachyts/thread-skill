@@ -947,7 +947,8 @@ function check({ status, repair, fx }) {
   // closed-pr: a CLOSED PR (or a missing branch) on an awaiting-Integration, integrating or at-Integration task is
   // input-gated, never left to the loop; it keeps its pr:, so hand-back follows a restore only when it is set aside.
   // An at-Integration set-aside with no pr: (which hand-back refuses, fixture F) is the same class: its restore
-  // finds its branch's PR first and writes `pr:` as a lead-held note; at Integration and status's row route it there.
+  // finds its branch's PR first and writes `pr:` wherever hand-back may run, a live queue included (no live call owns
+  // a set-aside note, so it is no lead-held note); at Integration and status's row route it there.
   const cp = cls['PR CLOSED / branch missing'] ?? ''
   const cpr = labelled(r4raw, 'A CLOSED PR or a missing branch', { item: true })
   const intRow = reRows.find((c) => c[0] === '`integration`') ?? []
@@ -955,7 +956,9 @@ function check({ status, repair, fx }) {
     !cp.includes('set aside at Integration with no `pr:`') || !cp.includes('which `hand-back` refuses') ||
     !cpr.includes('A CLOSED PR keeps its `pr:`') || !cpr.includes('then `hand-back` **only when the task is set aside**') ||
     !cpr.includes('`prepare` never reads the PR state') || /refuses an at-Integration note with no `pr:`/.test(collapse(rb)) ||
-    !cpr.includes('--head <inputs.branch> --state all') || !cpr.includes('a lead-held note (§ 1)') ||
+    !cpr.includes('--head <inputs.branch> --state all') || !cpr.includes('wherever `hand-back` may (§ 1), a live queue included') ||
+    !cpr.includes('no live call owns a set-aside note') || /lead-held/.test(cpr) || /§ 4's/.test(held) ||
+    !labelled(r1raw, 'Live queue, not paused.').includes("write the `pr:` § 4's restore finds for an at-Integration set-aside with no `pr:`") ||
     !atI.includes("One with no `pr:` is **PR CLOSED / branch missing**'s") || !(intRow[4] ?? '').includes('with no `pr:`') ||
     !flag('PR CLOSED:').includes('`prepare` never reads the PR state') || fx.F.nopr.fails.length) fails.push('closed-pr')
 
@@ -1885,6 +1888,13 @@ test('control: fixture F held failing fails needs-you', () => {
 })
 
 // closed-pr (p16-5)
+test("control: the no-pr: restore's pr: write held for the lead fails closed-pr", () => {
+  only(rp('wherever `hand-back` may (§ 1), a live queue included', 'as a lead-held note (§ 1), never under a live queue'), 'closed-pr', 'lead-held')
+})
+test('control: the live-queue mode without the restore\'s pr: write fails closed-pr', () => {
+  only(rp(", and write the `pr:` § 4's restore finds for an at-Integration set-aside with no\n  `pr:`: no live call owns a set-aside note, so that write goes with the hand-back that follows it (§ 4).", '.'),
+    'closed-pr', 'live queue')
+})
 test('control: a no-pr: Integration set-aside outside the CLOSED class fails closed-pr', () => {
   only(rp('; or set aside at Integration with no `pr:` (`autoRetryWhy` `set aside at Integration with no pr: …`), which `hand-back` refuses', ''), 'closed-pr', 'no pr:')
 })
