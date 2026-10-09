@@ -6,7 +6,9 @@
 // ends `halted` or `done`), the needs-you items (a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside
 // only a person moves on, a merge hold's release, any other § 7 halt), a set-aside's fix clause read from its
 // source run, with a needs-human stop (p16-3's `needsHuman` on `next`'s entry) never read as a spent budget and a
-// `pr:` the engine refuses (p17-1's `prUrlError`, on which no launch happens) asking for that `pr:`, and
+// `pr:` the engine refuses (p17-1's `prUrlError`, on which no launch happens) asking for that `pr:`, the three
+// seams p16-5 left (a refused descope that still reads `autoRetry: true`, an answer `## Repair input` already
+// records, an at-Integration set-aside with no `pr:` that `hand-back` refuses), and
 // a halt's fixed act (so two sessions word one item alike and the dedupe holds), the engine's needs-human
 // question shown on the item's detail line and carried by its push, one push per item
 // deduped on a `## Needs-you log` line and led by its act, where that log lives in the rollout note, the turn
@@ -228,23 +230,23 @@ function checkNeedsYou(skill, context = realContext) {
   // never max_iterations). max_iterations is named by what the run is, the implementer's or reviser's own
   // paragraph, never by a default: rule 3 lists every fixed opening the engine, its prompts and the lead write
   // for an own run (a dead call, merge-task's exit 1, a dead agent, a plan divergence, the engine's two fallbacks),
-  // the transient one glossed as a dead agent and the spent budget glossed on max_iterations itself, and rule 4
+  // the transient one glossed as a dead agent and the spent budget glossed on max_iterations itself, and rule 5
   // drops the raise for each. An entry that carries `needsHuman` (p16-3: a stop on a needs-human question, which
-  // the engine makes at once, below any cap, and another round cannot answer) is routed away from rule 3 by the
-  // entry itself, whatever its section or opening: rule 3 excludes it, rule 4 lists it, and (c)'s includes name
+  // the engine makes at once, below any cap, and another round cannot answer) is routed away from rule 4 by the
+  // entry itself, whatever its section or opening: rule 4 excludes it, rule 5 lists it, and (c)'s includes name
   // it for review-blocked and blocked, so a review-blocked entry is never read as max_review_rounds spent. A
   // plan-block after a descope asks for scope, an entry whose way back launches on the note's PR while `inputs`
   // reports a `prUrlError` (p17-1: step 1.2 and step 3 launch nothing on it) asks for the `pr:` before any budget
-  // or hand-back (rule 2), and a descope refusal (which writes nothing) changes no text.
-  const r2 = kindC.indexOf('3. a source run that spent a budget')
-  const r3 = kindC.indexOf('4. every other source run spends no budget')
+  // or hand-back (rule 3), and a descope refusal (which writes nothing) changes no text.
+  const r2 = kindC.indexOf('4. a source run that spent a budget')
+  const r3 = kindC.indexOf('5. every other source run spends no budget')
   const rule2 = r2 >= 0 && r3 > r2 ? kindC.slice(r2, r3) : ''
   const iters = rule2.slice(rule2.indexOf("`max_iterations` for a code-writing task's"))
   const asked = 'a stop on a needs-human question (the entry carries `needsHuman`)'
   if (!kindC.includes('`[[<slug>]] set aside <where> (<status>, <section> run <n>): <fix> with /thread:repair [[<rollout>]]`') ||
-    !kindC.includes("2. an entry whose way back launches on the note's PR (`inputs` reads `resumeAt: revise`, or the entry is at Integration) while `inputs` reports a non-empty `prUrlError`: `fix the note's pr: or defer`, since step 1.2 and step 3 launch nothing on a `pr:` the engine refuses, so a hand-back alone never moves it; its `prUrlError` is the item's `→` detail;") ||
-    !before(kindC, "2. an entry whose way back launches on the note's PR", '3. a source run that spent a budget') ||
-    !rule2.startsWith('3. a source run that spent a budget, never an entry that carries `needsHuman` (a stop on a needs-human question: the engine stops on the question, never on a budget run out, and no climb, retry or further plan or review round follows it, so its source run spent no budget whatever its section, round or opening, and another round cannot answer it):') ||
+    !kindC.includes("3. an entry whose way back launches on the note's PR (`inputs` reads `resumeAt: revise`, or the entry is at Integration) while `inputs` reports a non-empty `prUrlError`: `fix the note's pr: or defer`, since step 1.2 and step 3 launch nothing on a `pr:` the engine refuses, so a hand-back alone never moves it; its `prUrlError` is the item's `→` detail;") ||
+    !before(kindC, "3. an entry whose way back launches on the note's PR", '4. a source run that spent a budget') ||
+    !rule2.startsWith('4. a source run that spent a budget, never an entry that carries `needsHuman` (a stop on a needs-human question: the engine stops on the question, never on a budget run out, and no climb, retry or further plan or review round follows it, so its source run spent no budget whatever its section, round or opening, and another round cannot answer it):') ||
     !kindC.includes(`- review-blocked with \`max_review_rounds\` spent, or by ${asked} at any round;`) ||
     !kindC.includes(`a stage that threw, or ${asked});`) ||
     !kindC.includes('never chosen, so two sessions word one block alike') ||
@@ -310,6 +312,35 @@ function checkNeedsYou(skill, context = realContext) {
     fails.push('answers')
   }
 
+  // refused-descope: a `plan-blocked` key whose descope exited 3 this session is an item whatever `inputs` reads.
+  // Step 1.2's *Automatic retry* skips that key, and a refusal writes nothing, so its verdict can still read
+  // `autoRetry: true`: under (c)'s autoRetry exclusion alone nothing would push it and nothing would re-enter it.
+  // Step 1.2's skip points back at (c).
+  const s45 = collapse(s45raw)
+  if (!items.includes("A `plan-blocked` key whose descope exited 3 this session is never that last exclusion: step 1.2's *Automatic retry* skips the key, and a refusal writes nothing, so its verdict can still read `autoRetry: true` while nothing re-enters it.") ||
+    !before(items, 'stay excluded;', 'whose descope exited 3 this session is never that last exclusion') ||
+    !s45.includes("skipping a `plan-blocked` key whose descope exited 3 this session (a needs-you item whatever its verdict reads, § 6.5 (c))")) {
+    fails.push('refused-descope')
+  }
+
+  // recorded-answer: an entry whose current block `## Repair input` already answers (an answer Lachy gave under a
+  // pause or a drain, where repair records it and never hands back) is never pushed as a decision again: its fix is
+  // `act on the recorded answer`, ahead of every numbered rule, and the read is repair's *Answer already recorded*
+  // as status's **Needs you.** reads it, pointed at, never restated (the second test pins both still say it).
+  if (!kindC.includes("`<fix>`: `act on the recorded answer` when the note's `## Repair input` already answers the entry's current block (repair § 3's *Answer already recorded*, read exactly as status § 4's **Needs you.** reads it), since repair acts on that answer without asking again; the entry is the item's `→` detail. Otherwise the first of these that applies:") ||
+    !before(kindC, '`act on the recorded answer`', '1. a plan-block after an automatic descope')) {
+    fails.push('recorded-answer')
+  }
+
+  // no-pr-integration: an at-Integration set-aside with no `pr:` is refused by `hand-back`, so its fix routes to
+  // repair § 4's restore (which finds the branch's PR first) or recut, or to a defer, never to a hand-back, and it
+  // is judged before the `prUrlError` rule (its `inputs` reads that error too, whose fix would only stamp a `pr:`):
+  // its pinned number 2, with set-aside-fix pinning that rule as 3, holds the order.
+  const noPr = "2. an entry at Integration whose note has no `pr:`, which `hand-back` refuses: `restore or recut it, or defer`, by repair § 4's restore (it first finds the branch's PR) or recut, or repair § 5's defer;"
+  if (!kindC.includes(noPr) || !before(kindC, '1. a plan-block after an automatic descope', noPr)) {
+    fails.push('no-pr-integration')
+  }
+
   // glossary: CONTEXT.md defines the term, with its block, its log, § 6.5 and an Avoid list, so later tasks reuse it,
   // and tells the rollout note's `## Needs-you log` (the lead's push record) apart from the task note's
   // `## Needs you` (p16-3, the engine's question), two near-identical section names.
@@ -325,15 +356,17 @@ test('execute § 1, § 3.7, § 4.5, § 6, § 6.5, § 7, § 8, the Don\'ts and CO
   assert.deepEqual(checkNeedsYou(real), [], `stray asks: ${JSON.stringify(strayAsks(real), null, 1)}`)
 })
 
-// (c)'s rule 3 names each budget by what its source run is, so each opening it reads must still be the text its
+// (c)'s rule 4 names each budget by what its source run is, so each opening it reads must still be the text its
 // writer writes: an engine or lead rewording fails here, never silently as a push naming the wrong fix. Its
 // needs-human exclusion reads `next`'s setAside entry, so the engine's needs-human exits (the plan judge's
 // plan-blocked, the review judge's review-blocked below the cap, the implementer's and investigator's first-pass
 // block before any climb, the reviser's block) and `next`'s `needsHuman` key must still be there: a removed exit
-// or key fails here, never silently as an exclusion that no entry can trigger. Rule 2 and the autoRevise
+// or key fails here, never silently as an exclusion that no entry can trigger. Rule 3 and the autoRevise
 // exclusion read `inputs`' `prUrlError` and `resumeAt`, and step 1.2 and step 3 must still launch nothing on a
-// non-empty `prUrlError` (p17-1), or the item would ask for a `pr:` fix no launch waits on.
-test('the openings (c)\'s rule 3 reads, the needs-human exits it excludes, and the prUrlError rule 2 reads are still written by the engine, its prompts and the lead', () => {
+// non-empty `prUrlError` (p17-1), or the item would ask for a `pr:` fix no launch waits on. The recorded-answer fix
+// points at repair's and status's answer read, and rule 2 at repair § 4's no-`pr:` restore, which `inputs` and
+// `hand-back` must still treat as a human's: a removed rule fails here, never silently as a pointer to nothing.
+test('the openings (c)\'s rule 4 reads, the needs-human exits it excludes, the prUrlError rule 3 reads, and the rules the recorded-answer fix and rule 2 point at are still written', () => {
   const engine = read('skills/execute/task.workflow.js')
   const reconcile = read('skills/execute/scripts/reconcile-rollout.py')
   const leadIntegrate = read('skills/execute/scripts/lead-integrate.py')
@@ -366,13 +399,26 @@ test('the openings (c)\'s rule 3 reads, the needs-human exits it excludes, and t
     [real, 'A non-empty `prUrlError` (the note\'s `pr:` gives no PR URL the engine takes) launches nothing: the lead\'s own *Set aside* row at Integration',
       'step 3\'s prUrlError set-aside'],
   ]
+  const repair = collapse(read('skills/repair/SKILL.md'))
+  const status = collapse(read('skills/status/SKILL.md'))
+  written.push(
+    [repair, '*Answer already recorded.* Before asking about a set-aside at its run or at Integration, look for an answer recorded for its current block',
+      'repair § 3\'s *Answer already recorded*, which the recorded-answer fix points at'],
+    [status, "instead when its `## Repair input` already answers its current block (repair § 3's *Answer already recorded*",
+      'status § 4\'s **Needs you.** read, which the recorded-answer fix points at'],
+    [leadIntegrate, 'return no("set aside at Integration with no pr: a human restores or recuts it")', '`inputs`\' no-pr: Integration verdict'],
+    [reconcile, '"set aside at Integration with no pr:" if at == "integration"', 'hand-back\'s no-pr: Integration refusal'],
+    [repair, "A set-aside at Integration with no `pr:` (§ 2's same class) is refused by `hand-back`. Its restore first finds its branch's PR",
+      'repair § 4\'s no-pr: restore, which rule 2 routes to'],
+  )
   for (const [src, text, what] of written) assert.ok(src.includes(text), `${what}: ${text} is no longer written`)
 })
 
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
 
 const RULES = ['no-ask-in-flight', 'push-dedupe', 'kinds', 'turn-waiting', 'report-block', 'sign-off', 'guardrails',
-  'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'push-message', 'answers', 'glossary']
+  'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'push-message', 'answers',
+  'refused-descope', 'recorded-answer', 'no-pr-integration', 'glossary']
 const CONTROLLED = new Set()
 
 // Replaces the one occurrence of `from`; a control whose target is missing or ambiguous fails its setup.
@@ -477,8 +523,8 @@ test('control: a log at the note\'s top, or items carrying a log mark, fails log
 })
 
 test('control: a raise where no budget was spent, or the wrong field, fails set-aside-fix', () => {
-  only(edit(real, lineIn(real, S65, '    4. every other source run spends no budget'), ''), 'set-aside-fix', 'no-budget cases unruled')
-  only(edit(real, lineIn(real, S65, "    2. an entry whose way back launches on the note's PR"), ''), 'set-aside-fix', 'a prUrlError left to hand back')
+  only(edit(real, lineIn(real, S65, '    5. every other source run spends no budget'), ''), 'set-aside-fix', 'no-budget cases unruled')
+  only(edit(real, lineIn(real, S65, "    3. an entry whose way back launches on the note's PR"), ''), 'set-aside-fix', 'a prUrlError left to hand back')
   only(edit(real, '`max_review_rounds` for a Review-blocked feedback run, or for a Blocker diagnosis run that `inputs` reads as a plain rejection (`markerStage: revise`, `markerReason` empty) with `lastRound` at or above `max_review_rounds`: its review rounds ran out;',
     '`max_review_rounds` for a Review-blocked feedback run: its review rounds ran out;'), 'set-aside-fix', 'a spent revise marker left to max_iterations')
   only(edit(real, "with `<field>` the source run's own budget", 'with `<field>` the spent budget'), 'set-aside-fix', 'field not from the source run')
@@ -498,6 +544,25 @@ test('control: a raise where no budget was spent, or the wrong field, fails set-
     'set-aside-fix', 'a needs-human stop unlisted in rule 4')
   only(edit(real, ', or by a stop on a needs-human question (the entry carries `needsHuman`) at any round;', ';'),
     'set-aside-fix', 'review-blocked read as max_review_rounds spent')
+})
+
+test('control: the refused descope left to the autoRetry exclusion, or step 1.2 not pointing at it, fails refused-descope', () => {
+  only(edit(real, " A `plan-blocked` key whose descope exited 3 this session is never that last exclusion: step 1.2's *Automatic retry* skips the key, and a refusal writes nothing, so its verdict can still read `autoRetry: true` while nothing re-enters it.", ''),
+    'refused-descope', 'a refused descope reading autoRetry: true never pushed')
+  only(edit(real, ' (a needs-you item whatever its verdict reads, § 6.5 (c))', ''), 'refused-descope', 'step 1.2 skips it silently')
+})
+
+test('control: a recorded answer pushed again as a decision, or its read loosened, fails recorded-answer', () => {
+  only(edit(real, "  - `<fix>`: `act on the recorded answer` when the note's `## Repair input` already answers the entry's current block (repair § 3's *Answer already recorded*, read exactly as status § 4's **Needs you.** reads it), since repair acts on that answer without asking again; the entry is the item's `→` detail. Otherwise the first of these that applies:",
+    '  - `<fix>`, the first of these that applies:'), 'recorded-answer', 'the answer unread')
+  only(edit(real, "(repair § 3's *Answer already recorded*, read exactly as status § 4's **Needs you.** reads it)", '(any entry it holds)'),
+    'recorded-answer', 'any entry counts, a stale or spent one included')
+})
+
+test('control: an at-Integration set-aside with no pr: sent to a hand-back fails no-pr-integration', () => {
+  only(edit(real, lineIn(real, S65, '    2. an entry at Integration whose note has no `pr:`'), ''), 'no-pr-integration', 'left to the prUrlError or hand-back rule')
+  only(edit(real, "which `hand-back` refuses: `restore or recut it, or defer`, by repair § 4's restore (it first finds the branch's PR) or recut, or repair § 5's defer;",
+    '`hand back or defer`;'), 'no-pr-integration', 'routed to a hand-back')
 })
 
 test('control: the needs-human question kept off the detail line or the push fails needs-human-shown', () => {
@@ -535,7 +600,7 @@ test('control: CONTEXT.md without the entry, or without its Avoid list, fails gl
   only(real, 'glossary', 'the two sections not told apart', edit(realContext, "never the task note's `## Needs you` (p16-3)", "the task note's `## Needs you` (p16-3)"))
 })
 
-test('the rules are all named (15) and each has a control', () => {
-  assert.equal(RULES.length, 15)
+test('the rules are all named (18) and each has a control', () => {
+  assert.equal(RULES.length, 18)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
