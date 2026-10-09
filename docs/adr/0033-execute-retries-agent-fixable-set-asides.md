@@ -128,4 +128,17 @@ Considered:
 - **Needs-you items (execute § 6.5, p16-1).** An entry `inputs` reports `autoRetry: true`, or with a pending
   `autoRetryAfter`, is no needs-you item: the lead re-enters it, now or after its cool-down, so it is never pushed
   to Lachy. Every entry the verdict refuses stays one, worded by § 6.5's own rules.
-- Status and repair still describe their own routes; their prose catches up with this decision in p16-5.
+- **Status and repair caught up in p16-5.** Repair's **retry (automatic)** class leaves an `autoRetry: true` or
+  cooling set-aside to the lead, and its **needs you** class answers a `## Needs you` question into
+  `## Repair input` and removes the section before the hand-back. Every other hand-back, a raise included, follows
+  Lachy's answer, so decision 7's "raise already recorded" reading is now his word. Every answer repair records for
+  a set-aside at its run or at Integration, whatever it asked, is a stamped `## Repair input` entry keyed on the
+  block's fingerprint. An answer recorded under a pause for a block with a fingerprint is never asked again: a later
+  repair run acts on it once (a hand-back, or for an at-Integration set-aside with no `pr:` a restore, recut, defer
+  or leave). It counts only until the task is re-entered: repair's hand-back and execute's "retry [[task]]" spend
+  it first, since a hand-back leaves no stamp once the restart consumes `handed_back:`, and a later run, automatic
+  retry (`auto_retry_at`) or automatic descope (its stamped `## Scope decision (automatic)` entry, written before
+  the lead's hand-back) outdates it. So a block that comes back, an identical one included, goes to Lachy again, as
+  decision 6 wants, while an answer recorded since the last re-entry counts whatever the verdict's why. A block with no fingerprint (a gate, a PR-less code-writing review) takes a `-` entry
+  that never counts, so it is asked again. Status shows each set-aside's retry count and a `Needs you` block, where
+  an answered block reads `answered: awaiting /thread:repair`.

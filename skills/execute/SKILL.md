@@ -56,7 +56,7 @@ merges it — no per-PR confirmation. `--gated` is the same queue with a **merge
 
 **A wave number is refused.** `execute Wave N of [[rollout]]` prints "single-wave mode is gone (ADR 0030): run `execute [[rollout]]`, or add `--gated` to approve each merge" and stops.
 
-In a live session, "retry [[task]]" re-enters a set-aside task: run `reconcile-rollout.py hand-back --tasks <slug>` (§4.5 *Set aside*), then §4.5 step 1. Its exit 2 means an undecided RACE or UNVERIFIED holds the task: print its ERROR line and stop there, since only Lachy's `RACE decided:` line (through `/thread:repair`) releases it.
+In a live session, "retry [[task]]" re-enters a set-aside task: spend the answers its `## Repair input` holds, as repair's own hand-back does (repair § 3: each `(block <fingerprint>)` key becomes `(block <fingerprint>; handed back <stamp>)`, so an identical re-block goes back to Lachy), then run `reconcile-rollout.py hand-back --tasks <slug>` (§4.5 *Set aside*), then §4.5 step 1. Its exit 2 means an undecided RACE or UNVERIFIED holds the task: print its ERROR line and stop there, since only Lachy's `RACE decided:` line (through `/thread:repair`) releases it.
 
 ## Skill flow
 
@@ -733,7 +733,7 @@ The queue (§4.5) halts only when nothing can start and nothing is running or in
 
 A **merge hold** (`--gated`, or merge-task's exit 7) is not a halt: it ends `waiting` (§4.5 *Merge hold*). A **soft pause** (*Pausing + reinstating a rollout* below) exits through `state=halted reason="paused at user request"` once it drains, but is **deliberate**, not a failure — there is no cause to fix, and reinstating is plain re-invocation. After a halt, completions of calls still in flight are only reconciled: nothing new starts, integrates or merges.
 
-In every halt case the work merged so far stays on the base branch; the user fixes the cause and re-invokes `execute [[rollout]]`, which resumes from the task notes (§4.5 *Cold resume*). To see *why* a rollout halted, run `/thread:status [[rollout]]` (read-only situational report). To **sort out** a stalled rollout without ceding merge authority, run `/thread:repair [[rollout]]` — it reconciles drift, re-dispatches agent-fixable blocks, captures input-gated decisions, defers wedged tasks, and resumes via this skill's §4.5 loop (`merge-task.sh` stays the sole merger). `/thread:repair` is the systematised replacement for hand-repairing a worktree in an external cockpit (README → *Coexistence with Orca*).
+In every halt case the work merged so far stays on the base branch; the user fixes the cause and re-invokes `execute [[rollout]]`, which resumes from the task notes (§4.5 *Cold resume*). To see *why* a rollout halted, run `/thread:status [[rollout]]` (read-only situational report). To **sort out** a stalled rollout without ceding merge authority, run `/thread:repair [[rollout]]` — it reconciles drift, asks the decisions that are Lachy's and hands each task back on his answer (an agent-fixable block is §4.5 step 1.2's *Automatic retry*, never repair's), defers wedged tasks, and resumes via this skill's §4.5 loop (`merge-task.sh` stays the sole merger). `/thread:repair` is the systematised replacement for hand-repairing a worktree in an external cockpit (README → *Coexistence with Orca*).
 
 ### 8. Unattended driving — the automatic driver
 
