@@ -29,6 +29,8 @@ Subcommands:
               Refuses an incomplete rollout (below): exit 1, no stdout, one ERROR line naming why and the
               remedy, `/thread:schedule <its first project> --regenerate`. An unacked git-env trip (Git-env
               hold, below) is listed as `gitEnvHold` and makes `halt` "git-env", ahead of every other verdict.
+              `awaitingIntegration` is the Integration queue's order: a task a queued task depends on first, then
+              the oldest `ready:`, then schedule order.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -1427,13 +1429,21 @@ def _rows(rollout_path: Path, rollout_note, tasks_dir: Path):
             "priority": priority, "weight": PRIORITY_WEIGHTS[priority], "solo": _truthy_flag(note.get("solo")),
             "files": file_sets.get(slug.lower(), []), "rank": rank, "deps": _dep_entries(note),
             "started": _scalar(note.get("started")) or None, "merged": _scalar(note.get("merged")) or None,
-            "integrating": _scalar(note.get("integrating")) or None,
+            "integrating": _scalar(note.get("integrating")) or None, "ready": _scalar(note.get("ready")) or None,
         })
     return rows, index
 
 
 def _rank(row):
     return row["rank"]
+
+
+def _lane_key(row, waited):
+    """The Integration queue's order (p17-1): a task a queued task depends on first (`waited`: lowercased slugs),
+    then the oldest `ready:`, compared as instants (a missing or unparseable stamp after every stamped one), then
+    schedule order."""
+    m = _iso_minutes(row["ready"])
+    return (0 if row["slug"].lower() in waited else 1, m if m is not None else math.inf, row["rank"])
 
 
 # ---- race holds (status § 3's definitions) -------------------------------------
@@ -1933,7 +1943,8 @@ def cmd_next(args) -> int:
     stands (the lead's RACE re-verify holds the lane on it) still counts as integrating everywhere else: a
     soft pause is not stamped past it, a solo waits for it, its files count as in flight, and no halt is
     reported while it stands. `raceHold` lists each, in rank order, with its kind; the counts and the
-    progress line are the re-read rows'. An unacked git-env trip (_git_env_hold) is listed under `gitEnvHold`, and
+    progress line are the re-read rows'. `awaitingIntegration` is the Integration queue's order: a task a queued
+    task depends on first, then the oldest `ready:`, then schedule order (_lane_key). An unacked git-env trip (_git_env_hold) is listed under `gitEnvHold`, and
     while it stands nothing starts or restarts, every stalled or queued task is held (`git-env hold:
     /thread:repair`) and `halt` is "git-env", ahead of every other verdict."""
     rollout_path = Path(os.path.expanduser(args.rollout))
@@ -2077,6 +2088,8 @@ def cmd_next(args) -> int:
         _event(rollout_path.stem, "idle-slots", None,
                {"reason": reason, "free": free, "settings": _rollout_settings(rollout_note, ceiling)}, args)
     slugs = lambda rs: [r["slug"] for r in rs]  # noqa: E731
+    # The Integration queue's order (_lane_key); `awaiting` itself stays in rank order for everything above.
+    waited = {d.lower() for r in queued for d in r["deps"]}
     out = {
         "rollout": rollout_path.stem,
         "ceiling": ceiling,
@@ -2085,7 +2098,7 @@ def cmd_next(args) -> int:
         "restart": slugs(restart),
         "hold": [{"slug": r["slug"], "reason": why} for r, why in sorted(holds, key=lambda h: _rank(h[0]))],
         "running": slugs(live),
-        "awaitingIntegration": slugs(awaiting),
+        "awaitingIntegration": slugs(sorted(awaiting, key=lambda r: _lane_key(r, waited))),
         "integrating": slugs(integrating),
         "setAside": [{"slug": r["slug"], "status": r["status"], "setAsideAt": r["setAsideAt"]}
                      for r in by_state.get("set-aside", [])],
