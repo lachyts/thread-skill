@@ -27,8 +27,8 @@ is a failed status with `description: null`.
 `pr list --head <b>` keeps PRs whose headRefName is <b>. A create writes refs/pull/<n>/head on the bare
 server; GH_UPDATE=merge really merges server master into the PR's head branch and moves refs/pull/<n>/head;
 `--auto` ok sets autoMergeRequest, `--disable-auto` ok clears it, a direct ok marks the PR MERGED.
-`pr edit` always fails with the projectCards deprecation error. A hang runs a non-exec `sleep 40 | cat`.
-`holdout` prints `false` and leaves a `sleep 40` holding stdout after exiting 0.
+`pr edit` always fails with the projectCards deprecation error. A hang runs a non-exec `sleep 600 | cat`.
+`holdout` prints `false` and leaves a `sleep 600` holding stdout after exiting 0.
 """
 import json
 import os
@@ -46,7 +46,7 @@ PRS = os.path.join(st, "prs.json")
 
 
 def hang():
-    subprocess.run("sleep 40 | cat", shell=True)
+    subprocess.run("sleep 600 | cat", shell=True)
     sys.exit(1)
 
 
@@ -233,7 +233,7 @@ if method == "GET" and rest[:1] == ["branches"]:
         die("gh: Branch not found (HTTP 404)")
     if mode == "holdout":
         print("false", flush=True)
-        subprocess.Popen(["sleep", "40"])
+        subprocess.Popen(["sleep", "600"])
         sys.exit(0)
     print(mode)
     sys.exit(0)

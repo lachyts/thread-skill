@@ -22,8 +22,9 @@ State (a missing file takes the default in brackets):
   compare [ahead]         compare/A...B status. err.compare: "HTTP 404" in it ⇒ the 404 form, else transient.
   err.commits             transient error for commits/<oid> (unknown oid ⇒ the 404 form).
   inflight [0]            actions/runs in-flight count.
-  checks.seq              JSON lines {"rc","out","err","sleep"} popped per `pr checks --watch`, the last
-                          sticky; absent ⇒ rc 0 with one passing row.
+  checks.seq              JSON lines {"rc","out","err","sleep","until"} popped per `pr checks --watch`, the
+                          last sticky; absent ⇒ rc 0 with one passing row. "until" names a file: the call
+                          waits until it exists (300 s at most), so a test, not the clock, ends the wait.
   links, steps            the infra-classify reads; `run rerun` is logged, rc 0.
   merge.push <sha>        before anything else in a merge: headRefOid := sha, srv head branch := sha.
   merge.refuse <text>     its text, rc 1, nothing changed.   merge.neterr: a network error, rc 1.
@@ -184,6 +185,10 @@ if args[:2] == ["pr", "checks"]:
         e = json.loads(pop(p("checks.seq")))
     if e.get("sleep"):
         time.sleep(float(e["sleep"]))
+    if e.get("until"):
+        end = time.monotonic() + 300
+        while not os.path.exists(e["until"]) and time.monotonic() < end:
+            time.sleep(0.05)
     sys.stdout.write(e.get("out", ""))
     sys.stderr.write(e.get("err", ""))
     sys.exit(int(e.get("rc", 0)))

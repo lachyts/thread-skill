@@ -115,11 +115,15 @@ test('a relative THREAD_EVENTS_DIR is a warned write failure: exit 0, nothing wr
 
 test('ts is UTC with a Z, millisecond precision, whatever the local zone', (t) => {
   const home = tmpHome(t)
+  // Bracketed by the clock read before and after the call, never by a fixed window, so a loaded host cannot
+  // push a correct stamp out; a local time labelled Z is hours out under Melbourne's offset.
   const before = Date.now()
   emitOk(home, ['--rollout', 'r', '--kind', 'resumed'], { env: EV(home, { TZ: 'Australia/Melbourne' }) })
+  const after = Date.now()
   const [l] = lines(path.join(ev(home), 'r.jsonl'))
   assert.match(l.ts, TS_RE)
-  assert.ok(Math.abs(Date.parse(l.ts) - before) < 5000, `${l.ts} is within 5 s of now`)
+  const at = Date.parse(l.ts)
+  assert.ok(at >= before - 1 && at <= after + 1, `${l.ts} lies between the call's start and end`)
 })
 
 test('--ts with an offset converts to UTC; a Z stamp passes through; a naive stamp is refused', (t) => {

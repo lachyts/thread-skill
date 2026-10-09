@@ -203,16 +203,23 @@ ok "$rc" 5 "11. a RACE re-run exits 5 again"; ok "$(nmerge)" 0 "11. no merge cal
 ok "$(sent)" "failed:5" "11. never ok"
 
 # 12. the review gate (p6-6): a pending review halts at once with 7, never a checks wait, never a bypass
+#     "No checks wait" is proven structurally, never by the clock (a loaded host stretches any tight bound): a
+#     `sleep` stub first on PATH records every call and returns at once, and CHECK_INTERVAL is 600, so a halt that
+#     sleeps one CHECK_INTERVAL first leaves a `600` in the record. The SECONDS bound, half of 600, backs it up
+#     for a wait that does not go through `sleep`.
 fresh; pair; mkpr 5 "$I" BLOCKED; echo REVIEW_REQUIRED > "$MT_STATE/pr/5/reviewDecision"
-export MERGE_TASK_CHECK_INTERVAL=5
-t0=$(date +%s); run 5 "$I" "$B"; t1=$(date +%s)
+mkdir -p "$tmp/sleepbin"; : > "$tmp/sleeps"
+printf '#!/bin/sh\necho "$*" >> "%s/sleeps"\n' "$tmp" > "$tmp/sleepbin/sleep"; chmod +x "$tmp/sleepbin/sleep"
+export MERGE_TASK_CHECK_INTERVAL=600
+s12=$SECONDS; PATH="$tmp/sleepbin:$PATH" run 5 "$I" "$B"; el12=$((SECONDS - s12))
 export MERGE_TASK_CHECK_INTERVAL=0
 ok "$rc" 7 "12a. BLOCKED + REVIEW_REQUIRED exits 7"
 has "$out" "review required: approve PR #5 (https://github.com/o/r/pull/5)" "12a. names the PR and its URL"
 has "$out" "never bypasses protection" "12a. says it never bypasses protection"
 ok "$(nmerge)" 0 "12a. no merge call"; lacks "$(glog)" "pr checks" "12a. no checks wait"
 lacks "$(glog)" "branches/" "12a. no protection read"; lacks "$(glog)" "rules/" "12a. no rules read"
-ok "$([ $((t1 - t0)) -lt 5 ] && echo fast || echo slow)" fast "12a. halts in under one CHECK_INTERVAL"
+ok "$(grep -cx 600 "$tmp/sleeps")" 0 "12a. never sleeps one CHECK_INTERVAL before halting (sleep calls: $(tr '\n' ' ' < "$tmp/sleeps"))"
+ok "$([ "$el12" -lt 300 ] && echo y || echo "n (${el12}s)")" y "12a. halts well inside one CHECK_INTERVAL of 600 s"
 fresh; pair; mkpr 5 "$I" BLOCKED; echo CHANGES_REQUESTED > "$MT_STATE/pr/5/reviewDecision"
 run 5 "$I" "$B"; ok "$rc" 7 "12b. BLOCKED + CHANGES_REQUESTED exits 7"
 fresh; pair; mkpr 5 "$I" BLOCKED

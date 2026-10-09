@@ -6,11 +6,13 @@
 # `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
 # labels, update-branch, the user, PR bodies, hold comments and per-SHA check-runs and status. Every handed
 # path goes through a symlinked alias of the temp dir, so the physical-path handling is exercised on every run.
-# Hang stubs run a non-exec `sleep 40 | cat`. A call handed any `*=hang*` setting runs under
+# Hang stubs run a non-exec `sleep 600 | cat`. A call handed any `*=hang*` setting runs under
 # LAND_TIMEOUT=$HANG (an explicit LAND_TIMEOUT after it wins, as case 35's does) and asserts elapsed under
-# $HANG_BOUND; every other call has the 15 s suite default, room for a fake gh slowed by `make test`'s
-# concurrent suites. Hermetic: HOME, the global git config and TMPDIR are temp, and the caller's GIT_DIR & co.
-# are unset. bash 3.2-compatible (macOS).
+# $HANG_BOUND, half the stub's 600 s: a loaded host (a rollout runs several `make test`s at once) has stretched
+# one such call to 100 s at a load average near 300, while a call that waited out the stub takes 600 s. Every
+# other call has the 15 s suite default, room for a fake gh slowed by `make test`'s concurrent suites.
+# Hermetic: HOME, the global git config and TMPDIR are temp, and the caller's GIT_DIR & co. are unset. bash
+# 3.2-compatible (macOS).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
@@ -44,7 +46,7 @@ git config --global init.defaultBranch main
 git config --global advice.detachedHead false
 export LANDING_REGISTER="$tmp/register.md"
 export LAND_TIMEOUT=15 LAND_DEADLINE=300
-HANG=4 HANG_BOUND=25   # a hang call's LAND_TIMEOUT (land() applies it) and its elapsed bound, under a stub's 40 s
+HANG=4 HANG_BOUND=300   # a hang call's LAND_TIMEOUT (land() applies it) and its elapsed bound, under a stub's 600 s
 cp tests/fixtures/land/fake-gh.py "$tmp/bin/gh"; cp tests/fixtures/land/fake-ssh.sh "$tmp/bin/fake-ssh"
 chmod +x "$tmp/bin/gh" "$tmp/bin/fake-ssh"
 export PATH="$tmp/bin:$PATH"
@@ -268,7 +270,7 @@ ok "$(cnt "$(ghlog)" "pr ")" 0 "case 11: zero gh pr calls"
 edit again
 land GH_PROT=holdout -- "$W" "$W/THREAD.md"
 res "case 11b" 0 landed
-ok "$([ "$el" -lt 15 ] && echo y)" y "case 11b: a stub's leftover child cannot hold the capture (${el}s < 15s)"
+ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 11b: a stub's leftover 600 s child cannot hold the capture (${el}s < ${HANG_BOUND}s)"
 
 echo "== 12. unprotected, origin moved, stranded C0, clean tree"
 ghreset; mkrepo c12; c0; srvcommit c12 x.txt X; X=$(srvref c12 master); edit
@@ -704,13 +706,16 @@ hasnt "$(ghlog)" "pr edit" "case 34: never pr edit"
 
 echo "== 35. the deadline"
 ghreset; mkrepo c35; c0; srvcommit c35 x.txt X; edit
-land LAND_TIMEOUT=30 LAND_DEADLINE=12 GH_LABELS=hang GH_LABELCREATE=hang -- "$W" "$W/THREAD.md"
+# LAND_TIMEOUT 1200 is past the stub's 600 s, so only the deadline can cut the hung label call: `timed out` proves
+# the call's budget was clipped to the deadline (an unclipped call outlives the stub and fails as `rc 1`). The
+# deadline, 30 s, must fall inside the label call: the steps before it take about 3 s unloaded, and a loaded host
+# can stretch them past 12 s (the old deadline, which then expires before the label call ever starts).
+land LAND_TIMEOUT=1200 LAND_DEADLINE=30 GH_LABELS=hang GH_LABELCREATE=hang -- "$W" "$W/THREAD.md"
 res "case 35" 0 "queued: needs merge https://github.com/o/c35/pull/1"
-has "$err" "land: label failed" "case 35: label failed"
+has "$err" "land: label failed: timed out" "case 35: label failed: timed out, at the deadline"
 has "$err" "land: skipped label retry: deadline" "case 35: skipped label retry"
 has "$err" "land: skipped merge: deadline" "case 35: skipped merge"; hasnt "$(ghlog)" "pr merge" "case 35: no pr merge"
 has "$err" "land: skipped update-branch: deadline" "case 35: skipped update-branch"; hasnt "$(ghlog)" "update-branch" "case 35: no PUT"
-ok "$([ "$el" -lt 25 ] && echo y)" y "case 35: under the deadline (${el}s < 25s)"
 edit; land LAND_DEADLINE=0 -- "$W" "$W/THREAD.md"
 res "case 35 deadline 0" 1 "stuck: deadline passed before fetch"
 ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 35 deadline 0: THREAD.md committed"; nossh "case 35 deadline 0"
@@ -779,13 +784,13 @@ echo "== 39. a setsid holder cannot pin stdout"
 ghreset; mkrepo c39
 cat > "$W/.git/hooks/post-commit" <<EOF
 #!/bin/sh
-perl -MPOSIX -e 'exit if fork; POSIX::setsid(); open my \$f, ">", "$tmp/holder.pid"; print \$f \$\$; close \$f; sleep 40'
+perl -MPOSIX -e 'exit if fork; POSIX::setsid(); open my \$f, ">", "$tmp/holder.pid"; print \$f \$\$; close \$f; sleep 600'
 EOF
 chmod +x "$W/.git/hooks/post-commit"; edit; rm -f "$tmp/holder.pid"
 land GH_PROT=false -- "$W" "$W/THREAD.md"
 res "case 39" 0 landed
-ok "$([ "$el" -lt 15 ] && echo y)" y "case 39: returned while the holder lives (${el}s < 15s)"
-for k in 1 2 3 4 5; do [ -s "$tmp/holder.pid" ] && break; sleep 1; done
+ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 39: returned while the 600 s holder lives (${el}s < ${HANG_BOUND}s)"
+for k in $(seq 60); do [ -s "$tmp/holder.pid" ] && break; sleep 1; done
 hp=$(cat "$tmp/holder.pid" 2>/dev/null); [ -n "$hp" ] && holders+=("$hp")
 ok "$([ -n "$hp" ] && kill -0 "$hp" 2>/dev/null && echo alive)" alive "case 39: the holder was alive (precondition)"
 if command -v lsof >/dev/null 2>&1 && [ -n "$hp" ]; then
@@ -797,8 +802,8 @@ fi
 edit; rm -f "$tmp/holder.pid"
 fill "$W" c39 "" "$W/THREAD.md"
 snip bash GH_PROT=false; res "case 39 snippet" 0 landed
-ok "$([ "$el" -lt 15 ] && echo y)" y "case 39 snippet: returned while the holder lives (${el}s < 15s)"
-for k in 1 2 3 4 5; do [ -s "$tmp/holder.pid" ] && break; sleep 1; done
+ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 39 snippet: returned while the 600 s holder lives (${el}s < ${HANG_BOUND}s)"
+for k in $(seq 60); do [ -s "$tmp/holder.pid" ] && break; sleep 1; done
 hp=$(cat "$tmp/holder.pid" 2>/dev/null); [ -n "$hp" ] && { holders+=("$hp"); kill -9 "$hp" 2>/dev/null; }
 
 echo "== 40. a refused push says why"

@@ -87,14 +87,21 @@ code() { echo "$RANDOM$RANDOM" >> "$R/${1:-code.txt}"; g -C "$R" add -A; g -C "$
 cpath() { mkdir -p "$(dirname "$R/$1")"; echo "$RANDOM" >> "$R/$1"; g -C "$R" add -A; g -C "$R" commit -q -m "close-out $1"; }
 push2() { g -C "$C2" fetch -q origin; g -C "$C2" reset -q --hard origin/master; echo "$RANDOM" >> "$C2/c2.txt"; g -C "$C2" add -A; g -C "$C2" commit -q -m c2; g -C "$C2" push -q origin master; }
 ff() { g -C "$R" fetch -q origin; g -C "$R" merge -q --ff-only origin/master; }
-holder() {  # holder <seconds> — hold the lock in the background, $S/held once it is held
-  rm -f "$S/held"
-  python3 -c 'import fcntl, sys, time
-f = open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w").close(); time.sleep(float(sys.argv[3]))' \
-    "$THREAD_GIT_ENV_DIR/ro.lock" "$S/held" "$1" &
+# holder — hold the lock in the background, $S/held once it is held, until `release` (300 s at most, so a canary
+# that ignores its timeout fails rather than hangs). The test ends the hold, never the clock: a loaded host cannot
+# let a timed hold lapse before the canary reaches the lock.
+holder() {
+  rm -f "$S/held" "$S/release"
+  python3 -c 'import fcntl, os, sys, time
+f = open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w").close()
+end = time.monotonic() + 300
+while not os.path.exists(sys.argv[3]) and time.monotonic() < end:
+    time.sleep(0.05)' \
+    "$THREAD_GIT_ENV_DIR/ro.lock" "$S/held" "$S/release" &
   hp=$!
-  n=0; while [ ! -f "$S/held" ] && [ "$n" -lt 100 ]; do sleep 0.05; n=$((n + 1)); done
+  while [ ! -f "$S/held" ] && kill -0 "$hp" 2>/dev/null; do sleep 0.05; done
 }
+release() { touch "$S/release"; wait "$hp"; }
 dellog() { python3 - "$RO" "$1" <<'PY'
 import sys
 p, needle = sys.argv[1:]
@@ -518,9 +525,9 @@ src, dst, repo, ro = sys.argv[1:]
 t = open(src).read().replace("<repoPath>", repo).replace("<rollout-note>", ro).replace("<the same four args>", "a b c d").replace("sleep 60", "sleep 0")
 open(dst, "w").write(t)
 PY
-holder 3
+holder
 THREAD_GIT_ENV_LOCK_TIMEOUT=1 CLAUDE_PLUGIN_ROOT="$PR" bash "$S/backoff.sh" > /dev/null 2>&1; brc=$?
-wait "$hp"
+release
 ok "$brc|$([ -e "$S/stub-ran" ] && echo ran || echo not-run)|$(cat "$R/.claude/merge-task.status" 2>/dev/null)" "2|not-run|failed:git-env:2" \
   "g2: a lock timeout in the backoff's check-all never runs merge-task.sh and leaves failed:git-env:2 (canary failed)"
 rows=$(grep -E '^   \| `failed:git-env:' "$SKILL")
@@ -688,13 +695,28 @@ ok "$([ -f "$THREAD_GIT_ENV_DIR/ro.lock" ] && echo y)" y "t: the .lock survives 
 scen t2
 mkt A in_progress
 mkdir -p "$THREAD_GIT_ENV_DIR"
-holder 3
+holder
 THREAD_GIT_ENV_LOCK_TIMEOUT=1 call; ok "$rc" 2 "t: a held lock with THREAD_GIT_ENV_LOCK_TIMEOUT=1 → check-all 2"
 has "$err" "timed out" "t: … a timeout"
-wait "$hp"
-holder 1
-THREAD_GIT_ENV_LOCK_TIMEOUT=10 call; ok "$rc" 0 "t: a holder that releases after 1 s → check-all waits and returns 0"
-wait "$hp"
+release
+# The wait, proven by what the canary does rather than by the clock: check-all runs in the background with
+# time.sleep wrapped to mark $S/waiting (its lock poll is its only sleep), the hold is released only once that
+# mark shows it met the held lock, and it must then take the lock and return 0.
+holder
+rm -f "$S/waiting"
+THREAD_GIT_ENV_LOCK_TIMEOUT=600 CANARY_WAIT_MARK="$S/waiting" python3 -c 'import os, runpy, sys, time
+real = time.sleep
+def mark(s):
+    open(os.environ["CANARY_WAIT_MARK"], "a").close(); real(s)
+time.sleep = mark
+sys.argv = sys.argv[1:]
+runpy.run_path(sys.argv[0], run_name="__main__")' "$CAN" check-all --rollout "$RO" --tasks-dir "$V" \
+  > "$S/out" 2> "$S/err" &
+cp=$!
+while [ ! -f "$S/waiting" ] && kill -0 "$cp" 2>/dev/null; do sleep 0.05; done
+release; wait "$cp"; rc=$?; err=$(cat "$S/err")
+ok "$([ -f "$S/waiting" ] && echo waited || echo "never waited")" waited "t: a held lock → check-all polls it (sleeps) rather than failing at once"
+ok "$rc" 0 "t: … and once the holder releases, check-all takes the lock and returns 0"
 
 # ── o: end to end ────────────────────────────────────────────────────────────────────────────────────────────
 for variant in ref bare; do
