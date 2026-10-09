@@ -14,7 +14,8 @@
 #   and zsh -f ($, $(…), backticks, \ and ' single-quoted)   C16 stamp, usage, an unreachable origin   C17 timeouts, signals,
 #   the bootstrap, the race tree   C18 no relaunch loop   C19 an Integration set-aside re-enters   C20 the last
 #   task rejected   C21 plan, the approved plan for the two launches   C22 inputs --row, the integrate call's record
-#   checked against the note and its fallback prUrl a PR URL the engine takes, a bare #N built (p17-1). C10 is the landed list with a commit pushed without a PR (`unlisted`), and
+#   checked against the note and its fallback prUrl a PR URL the engine takes, a bare #N built (p17-1)   C23 inputs'
+#   answerRecorded, repair § 3b's *Answer already recorded* computed once (parsed stamps, a DST pair). C10 is the landed list with a commit pushed without a PR (`unlisted`), and
 #   C11 also pins inputs --row's ports of historyError, rungRecordError and PR_URL.
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0.
 set -uo pipefail
@@ -972,6 +973,45 @@ PAR=$(node --input-type=module -e "
   ]))
 " "$(p1args proj-a 3)" "$RECS" "$F")
 ok "$PAR" '[20,[],[],true]' "C22: all 20 proj-a records pass integrationArgsError; each refused row's raw fields fail it; the bad rung fails rungRecordError"
+
+# ======== C23: inputs' answerRecorded — repair § 3b's *Answer already recorded*, computed once =================
+# A plan-blocked proj-a, its run 1 stamped by reconcile; c23 <repair-input lines…> rewrites the note afresh with those
+# lines under `## Repair input`. FP is the block's fingerprint, as inputs reports it.
+nfx c23 2
+c23() {
+  ntask proj-a in_progress 'owner: execute-test'
+  rec "$(python3 -c 'import json; print(json.dumps({"rolloutSlug":"ro","tasks":[{"slug":"proj-a","scope":"cross-cutting","status":"plan-blocked","prUrl":"","blockerDiagnosis":"Round 1: the plan misses the migration"}]}))')" 2026-10-02T12:00:00Z
+  [ "$#" -gt 0 ] && { printf '\n## Repair input\n\n'; printf '%s\n' "$@"; } >> "$V/proj-a.md"
+  return 0
+}
+ans() { j "$(inp proj-a)" 'd["answerRecorded"]'; }
+runstamp() { sed -i.bak -E "s/^### Run 1 \([^)]*\)/### Run 1 ($1)/" "$V/proj-a.md"; }
+c23
+FP=$(j "$(inp proj-a)" 'd["fingerprint"]')
+ok "$([ -n "$FP" ] && [ "$FP" != null ] && echo y)|$(grep -c '^### Run 1 (2026-10-02T12:00+00:00)' "$V/proj-a.md")" "y|1" "C23: fixture — a fingerprint, run 1 at 12:00"
+ok "$(ans)" null "C23: no ## Repair input → null"
+E="- 2026-10-02T12:10+00:00 decision (block $FP): \"raise or hand back?\" → hand back"
+c23 "$E"; ok "$(ans)" "$E" "C23: an entry later than the last run → that entry"
+c23 "- 2026-10-02T11:50+00:00 decision (block $FP): \"q\" → a"; ok "$(ans)" null "C23: an entry earlier than the run → null"
+c23 "- 2026-10-02T12:10+00:00 decision (block $FP; handed back 2026-10-02T12:20+00:00): \"q\" → a"; ok "$(ans)" null "C23: a spent key never matches → null"
+c23 "- 2026-10-02T12:10+00:00 decision (block -): \"q\" → a"; ok "$(ans)" null "C23: a - entry never counts → null"
+c23 "- 2026-10-02T12:10+00:00 decision (block 0123456789ab): \"q\" → a"; ok "$(ans)" null "C23: an entry for another block → null"
+E2="- 2026-10-02T12:30+00:00 needs you (block $FP): \"which schema?\" → v2"
+c23 "$E" "$E2"; ok "$(ans)" "$E2" "C23: of two entries, the latest by its stamp"
+c23 "$E2" "$E"; ok "$(ans)" "$E2" "C23: … whatever their order in the section"
+c23 "$E"; setkey "$V/proj-a.md" auto_retry_at 2026-10-02T12:15+00:00; ok "$(ans)" null "C23: auto_retry_at later than the entry (an automatic retry since) → null"
+c23 "$E"; setkey "$V/proj-a.md" auto_retry_at 2026-10-02T12:05+00:00; ok "$(ans)" "$E" "C23: auto_retry_at earlier than the entry → the entry"
+c23 "$E"; setkey "$V/proj-a.md" auto_retry_at not-a-stamp; ok "$(ans)" null "C23: an unparseable auto_retry_at fails closed → null"
+c23 "$E"; printf '\n## Scope decision (automatic)\n\n- descoped (automatic) 2026-10-02T12:15+00:00, Plan-blocked feedback run 1: "x" is optional in the brief\n' >> "$V/proj-a.md"
+ok "$(ans)" null "C23: an automatic descope entry later than the entry → null"
+c23 "$E"; printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-02T12:20+00:00)\n\nan older block\n' >> "$V/proj-a.md"
+ok "$(ans)" null "C23: a run heading in any section later than the entry → null"
+c23 "- not-a-stamp decision (block $FP): \"q\" → a"; ok "$(ans)" null "C23: an entry whose stamp does not parse never counts"
+# A DST pair (Melbourne, 2026-04-05: +11:00 → +10:00): string order and instant order disagree, both ways.
+c23 "- 2026-04-05T02:05+10:00 decision (block $FP): \"q\" → a"; runstamp 2026-04-05T02:10+11:00
+ok "$(ans)" "- 2026-04-05T02:05+10:00 decision (block $FP): \"q\" → a" "C23 DST: entry 02:05+10:00 (16:05Z) after run 02:10+11:00 (15:10Z), though it sorts first as a string → the entry"
+c23 "- 2026-04-05T02:50+11:00 decision (block $FP): \"q\" → a"; runstamp 2026-04-05T02:20+10:00
+ok "$(ans)" null "C23 DST: entry 02:50+11:00 (15:50Z) before run 02:20+10:00 (16:20Z), though it sorts last as a string → null"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"

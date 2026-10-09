@@ -92,6 +92,13 @@ Subcommands:
       end). The rollout note (<note dir>/<rollout>.md) is read and the budget resolved only for a note set aside
       at its run or at Integration, so every other read stays cheap; a resolver failure is in the JSON and the
       exit stays 0.
+      answerRecorded (answer_recorded): the `## Repair input` entry that already answers the current block, or
+      null. Repair § 3b's *Answer already recorded*, computed once for repair, status and execute § 6.5: of the
+      `- <stamp> … (block <fingerprint>)…` entries keyed on `fingerprint` (a spent `(block <fp>; handed back …)`
+      key never matches; a null fingerprint, a `-` entry's, gives null), the latest, when its stamp is later than
+      the note's last re-entry: every `### Run <n> (<stamp>)` heading in any section, `auto_retry_at:` and every
+      `- descoped (automatic) <stamp>` entry. Stamps are compared parsed, never as strings (offsets differ across
+      a DST change); an unparseable re-entry stamp fails closed (null), an unparseable entry stamp never counts.
       --max-review-rounds K that differs from the resolved max_review_rounds means no retry. --now is the time
       a cool-down is read against (default: now).
 
@@ -958,7 +965,9 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
       1. not set aside at its run or at Integration (gate-pending: sign-off is the human's; a code-writing review
          note with no pr:; running, queued, awaiting Integration, landed), or no rollout note;
       2. an undecided RACE or UNVERIFIED; 3. a `## Needs you` question;
-      4. plan-blocked after an automatic descope (a descope marker and no `descope_armed:`): repair asks Lachy;
+      4. plan-blocked after an automatic descope (a descope marker and no `descope_armed:`), or a descope refused for
+         the current block (`descope_refused:` naming its run and fingerprint, reconcile-rollout.py descope's exit 3):
+         repair asks Lachy;
       5. autoRevise under the resolved max_review_rounds: step 1.2's seeded revise owns it;
       6. a human cause: prepare's `the PR branch is gone`, a `--gated` decline, a merge-task exit-1 text outside
          MERGE_TASK_FIXABLE, a set-aside at Integration with no pr:, or a non-empty `prUrlError` (p17-1) on a way back
@@ -1006,6 +1015,8 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
     if status == "plan-blocked" and not rr._scalar(note.get(rr.DESCOPE_ARMED_KEY)) and any(
             rr.DESCOPE_MARK_RE.match(l.strip()) for l in note.section_text(rr.SCOPE_AUTO_SECTION).split("\n")):
         return no("plan-blocked again after an automatic descope: repair asks Lachy")
+    if rr.descope_refused(note):
+        return no("descope refused: a scope decision is Lachy's (/thread:repair asks him)")
     budget = rr._retry_budget(note, rollout_note)
     k = budget["maxReviewRounds"]["value"] if budget["maxReviewRounds"] else None
     if k is not None and _revise_shaped(inp) and inp["lastRound"] < k:
@@ -1078,6 +1089,40 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
     return out
 
 
+def answer_recorded(note, fingerprint):
+    """The `## Repair input` entry that already answers the block `fingerprint` names, or None: repair § 3b's
+    *Answer already recorded*, the one implementation repair, status and execute § 6.5 read (as `inputs`'
+    answerRecorded). Of the section's `- <stamp> …` lines carrying `(block <fingerprint>)` (a spent
+    `(block <fp>; handed back …)` key never matches), the latest by its parsed stamp, when that stamp is later than
+    the note's last re-entry: every `### Run <n> (<stamp>)` heading in any section, `auto_retry_at:` and every
+    `- descoped (automatic) <stamp>` entry. Parsed datetimes, never strings: two offsets across a DST change order
+    by instant. An unparseable re-entry stamp fails closed (None); an entry whose stamp does not parse never counts."""
+    if not fingerprint:
+        return None
+    needle = f"(block {fingerprint})"
+    marks, entries, heading = [], [], ""
+    retry_at = note.get(rr.AUTO_RETRY_AT_KEY)
+    if retry_at is not None:
+        marks.append(rr._parse_ts(retry_at))
+    for line in note._body.split("\n"):
+        if line.startswith("## "):
+            heading = line.strip()
+            continue
+        m = rr.RUN_HEAD_RE.match(line)
+        if m:
+            marks.append(rr._parse_ts(m.group(2)))
+        elif line.startswith(rr.DESCOPE_ENTRY):
+            marks.append(rr._parse_ts(line[len(rr.DESCOPE_ENTRY):].split(" ", 1)[0].rstrip(",")))
+        elif heading == rr.REPAIR_INPUT_SECTION and line.startswith("- ") and needle in line:
+            at = rr._parse_ts(line[2:].split(" ", 1)[0])
+            if at is not None:
+                entries.append((at, line.strip()))
+    if not entries or any(m is None for m in marks):
+        return None
+    at, text = max(entries, key=lambda e: e[0])
+    return text if not marks or at > max(marks) else None
+
+
 def _rollout_note_of(path, note):
     """The rollout note the task's `rollout:` names, read beside the task note (<note dir>/<rollout>.md), or None."""
     slug = rr._wikilink_slug(note.get("rollout"))
@@ -1098,6 +1143,7 @@ def cmd_inputs(args):
     state, at = rr._queue_state(note)
     ro = _rollout_note_of(path, note) if state == "set-aside" and at in ("run", "integration") else None
     out.update(auto_retry_verdict(path, note, out, ro, args.now or datetime.now().astimezone(), args.max_review_rounds))
+    out["answerRecorded"] = answer_recorded(note, out["fingerprint"])
     return out
 
 

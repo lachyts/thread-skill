@@ -5,7 +5,7 @@
 # one writing verb, reconcile-rollout.py auto-retry, which re-runs the verdict before it writes: the rollout's
 # `## Notes` line, the task note (hand-back's own transition, the markers, the raise) and the Run record events.
 #   A1  a first and second plan-block retried, a third stopped by the budget   A2 an identical fingerprint stops
-#   A3  a `## Needs you` question never retries   A4 every excluded kind   A5 merge-task's fixable exit-1 texts
+#   A3  a `## Needs you` question never retries   A4 every excluded kind (a refused descope's `descope_refused:` included)   A5 merge-task's fixable exit-1 texts
 #   A6  the budget: task, rollout, rollouts.toml and built-in; invalid stamps; a refused file; the assertions
 #   A7  the records (the brief untouched, repair's raise regex, a re-run, a partial write)   A8 the raise
 #   A9  an Integration set-aside   A10 infra blocks and their cool-down   A11 quota blocks and theirs   A12 the budget lifetime
@@ -314,6 +314,16 @@ printf '\n## Scope decision (automatic)\n\n- descoped (automatic) 2026-10-03T07:
 excluded "plan-blocked after a descope" "plan-blocked again after an automatic descope"
 setfm "$A" descope_armed 2026-10-03T07:00+00:00
 ok "$(j "$(inp "$A")" 'd["autoRetry"]')" true "A4 control: with descope_armed: standing (the descope's own hand-back pending) it is retryable"
+
+scen a4-descope-refused
+mkro; mkt "$A" open; mkt "$B" open
+planblock "$A" "$FA"
+python3 "$SCRIPT" descope --tasks "$A" --rollout "$D/$RO.md" --tasks-dir "$D" --now "$NOW" --part "add the migration" \
+  --optional --short migration --reason "required scope" >/dev/null 2>&1
+ok "$?|$(fm "$A" descope_refused)" "3|descope_refused: $S_NOW run=1 sha=$SHA_A" "fixture: descope refuses required scope (exit 3) and records the block it judged"
+excluded "a refused descope" "descope refused: a scope decision is Lachy's"
+planblock "$A" "$FB" 2026-10-03T08:30:00Z
+ok "$(j "$(inp "$A")" 'd["autoRetry"]')" true "A4 control: a later block (run 2) outdates the refusal, so it is retryable"
 
 scen a4-zero
 mkro; mkt "$A" open "auto_retries: 0"; mkt "$B" open

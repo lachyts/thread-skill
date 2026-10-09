@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # reconcile-rollout.py descope (p14-4): the one guarded verb that records an automatic descope of a plan-blocked
 # task, run by the live lead (execute § 4.5 step 1.2) and by /thread:repair § 3d. Exit 0 records it (the caller
-# then runs `hand-back`); exit 3 is an ASK: nothing is written and repair asks Lachy. The fixtures are the brief's
-# four: an optional part descopes and files a follow-up (F1), work a later task owns descopes (F2), required scope
-# asks (F3), and a second block after an automatic descope asks (F4). The plan-blocked state is built through the
-# real `reconcile`. Temp notes only; no vault, no network.
+# then runs `hand-back`); exit 3 is an ASK and repair asks Lachy: its one write is `descope_refused:` naming the block
+# it judged (none while a descope is armed), which lead-integrate.py's verdict reads as autoRetry: false (R). The
+# fixtures are the brief's four: an optional part descopes and files a follow-up (F1), work a later task owns
+# descopes (F2), required scope asks (F3), and a second block after an automatic descope asks (F4); R is the refusal's
+# lifetime. The plan-blocked state is built through the real `reconcile`. Temp notes only; no vault, no network.
 # Usage: bash reconcile-rollout-descope.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/../scripts/reconcile-rollout.py"
+LI="$HERE/../scripts/lead-integrate.py"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
@@ -57,10 +59,14 @@ row() {  # row <slug> <status> <blockerDiagnosis>
   python3 -c 'import json,sys; s,st,d=sys.argv[1:4]; print(json.dumps({"rolloutSlug":"ro","tasks":[{"slug":s,"scope":"cross-cutting","status":st,"prUrl":"","blockerDiagnosis":d}]}))' "$1" "$2" "$3"
 }
 rec() { python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "${2:-2026-10-03T08:00:00Z}" <<<"$1" >/dev/null; }
-ds() { out=$(python3 "$SCRIPT" descope --tasks "$1" --rollout "$D/$RO.md" --tasks-dir "$D" --now "$NOW" "${@:2}" 2>&1); rc=$?; }
+ds() { last_call=(ds "$@"); out=$(python3 "$SCRIPT" descope --tasks "$1" --rollout "$D/$RO.md" --tasks-dir "$D" --now "$NOW" "${@:2}" 2>&1); rc=$?; }
 opt() { ds "$A" --part "${1:-a canary}" --optional --short "${2:-canary}" --reason "the canary pulls in machinery later tasks rewrite" "${@:3}"; }
 own() { ds "$A" --part "${1:-the resume filter changes}" --owner "${2:-$B}" --owner-quote "${3:-rewrites the resume filter}" --reason "p3-6 rewrites the filter" "${@:4}"; }
 snap() { (cd "$D" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s\n' "$f"; cat "$f"; done) | shasum | cut -c1-40; }
+# snapr: snap with every `descope_refused:` line left out (the refusal's one write).
+snapr() { (cd "$D" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s\n' "$f"; grep -v '^descope_refused: ' "$f"; done) | shasum | cut -c1-40; }
+# topkey <slug>: "run=<n> sha=<sha>" of the note's top Plan-blocked feedback run (its end marker).
+topkey() { grep -o '^<!-- run [0-9]* end sha=[0-9a-f]* -->' "$D/$1.md" | tail -1 | sed -E 's/<!-- run ([0-9]+) end sha=([0-9a-f]+) -->/run=\1 sha=\2/'; }
 sha12() { python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:12])' "$1"; }
 followups() { (cd "$D" && ls ./*-followup-*.md 2>/dev/null | wc -l | tr -d ' '); }
 # A plan-blocked a with the F1 brief, b queued as the owner, c queued.
@@ -79,12 +85,21 @@ brief() {
   mkt "$C" open "body c"
   rec "$(row "$A" plan-blocked "$FEEDBACK")"
 }
-# asks <label>: exit 3, one ASK line, and the whole vault dir byte-identical to $before.
+# asks <label> [armed]: exit 3, one ASK line, and the vault dir byte-identical to $before but for the one write,
+# `descope_refused: <now> run=<n> sha=<sha>` naming the top Plan-blocked feedback run (none while a descope is armed);
+# a re-run of the same call changes nothing (idempotent).
 asks() {
   ok "$rc" 3 "$1: exits 3 (ASK)"
   has "$out" "ASK: [[$A]]" "$1: one ASK line naming the task"
-  has "$out" "nothing written" "$1: says nothing was written"
-  ok "$(snap)" "$before" "$1: nothing written (the vault dir is byte-identical)"
+  has "$out" "nothing written" "$1: the ASK line is unchanged"
+  ok "$(snapr)" "$before" "$1: nothing written but descope_refused:"
+  if [ "${2:-}" = armed ]; then
+    ok "$(fm "$A" descope_refused)" "<none>" "$1: armed, so no descope_refused:"
+  else
+    ok "$(fm "$A" descope_refused)" "descope_refused: 2026-10-03T09:00+00:00 $(topkey "$A")" "$1: descope_refused: names the block judged"
+  fi
+  local again; again=$(snap); "${last_call[@]}" >/dev/null 2>&1
+  ok "$rc|$(snap)" "3|$again" "$1: a re-run exits 3 and writes nothing more"
 }
 # refuses <label>: exit 1, an ERROR line, nothing written.
 refuses() {
@@ -364,8 +379,44 @@ before=$(snap); opt; asks "F4 (ii) a byte-identical second block"
 scen f4-armed
 base
 opt
-before=$(snap); opt "a moved ref" moved-ref; asks "F4 (iii) a different part at the same run while armed"
-before=$(snap); own "a canary"; asks "F4 (iv) the same part in another mode while armed"
+before=$(snap); opt "a moved ref" moved-ref; asks "F4 (iii) a different part at the same run while armed" armed
+before=$(snap); own "a canary"; asks "F4 (iv) the same part in another mode while armed" armed
+
+# ── R: the refusal is durable on the note, read by the verdict, and outdated or removed by what moves the task ──
+# The verdict resolves the budget (rollouts.toml under an empty HOME of its own, the Project root a temp dir).
+inp() { mkdir -p "$TMP/home" "$D/repo"; HOME="$TMP/home" python3 "$LI" inputs --note "$D/$1.md" --now "$NOW"; }
+j() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); v=eval(sys.argv[1]); print(v if isinstance(v, str) else json.dumps(v, separators=(",", ":")))' "$2"; }
+scen r-refused
+base
+ok "$(j "$(inp "$A")" 'd["autoRetry"]')" true "R control: before the refusal the plan-block reads autoRetry true"
+before=$(snap); opt "the resume guard" guard; asks "R: required scope refused"
+ok "$(j "$(inp "$A")" '[d["autoRetry"], d["autoRetryWhy"]]')" "[false,\"descope refused: a scope decision is Lachy's (/thread:repair asks him)\"]" \
+  "R: the verdict reads the refusal (autoRetry false), whatever session asks"
+rec "$(row "$A" plan-blocked "$FEEDBACK")" 2026-10-03T10:00:00Z
+ok "$(grep -c '^### Run ' "$D/$A.md")|$(j "$(inp "$A")" 'd["autoRetry"]')" "1|false" "R: a byte-identical re-block adds no run, so the refusal still names the block"
+rec "$(row "$A" plan-blocked 'Round 2: the guard still reaches into repair')" 2026-10-03T10:30:00Z
+ok "$(grep -c '^### Run ' "$D/$A.md")|$(j "$(inp "$A")" 'd["autoRetry"]')" "2|true" "R: a later block (run 2) outdates it"
+scen r-handback
+base
+opt "the resume guard" guard
+python3 "$SCRIPT" hand-back --tasks "$A" --tasks-dir "$D" --now "$NOW" >/dev/null 2>&1
+ok "$(fm "$A" status)|$(fm "$A" descope_refused)" "status: in_progress|<none>" "R: hand-back removes descope_refused"
+scen r-descoped
+base
+opt "the resume guard" guard
+ok "$(fm "$A" descope_refused)" "descope_refused: 2026-10-03T09:00+00:00 $(topkey "$A")" "fixture R: refused first"
+opt
+ok "$rc|$(fm "$A" descope_refused)|$(fm "$A" descope_armed)" "0|<none>|descope_armed: 2026-10-03T09:00+00:00" "R: a later descope that goes ahead removes descope_refused"
+scen r-dry
+base
+before=$(snap); opt "the resume guard" guard --dry-run
+ok "$rc|$(snap)" "3|$before" "R: --dry-run writes no descope_refused"
+scen r-defer
+base
+opt "the resume guard" guard
+out=$(python3 "$SCRIPT" defer --tasks "$A" --rollout "$D/$RO.md" --tasks-dir "$D" 2>&1)
+ok "$(fm "$A" descope_refused)" "<none>" "R: defer clears descope_refused"
+has "$out" "descope_refused" "R: defer names descope_refused among what it clears"
 
 # ── defer clears the stamp ────────────────────────────────────────────────────────────────────────
 scen defer
