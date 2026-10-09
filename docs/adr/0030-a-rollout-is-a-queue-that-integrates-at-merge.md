@@ -119,7 +119,9 @@ Considered:
   shown and the ref shown (`--ref`), so a stale or partial ack writes nothing.
   - **The close-out decision (option (a)).** Execute § 2.7 says a close-out landed mid-run must not
     halt, so a local commit not on `origin/<default>` is benign when every one is a non-merge commit
-    touching only land.sh's `closeout_shaped` paths. That is **stricter than S9**: S9 also carries an
+    touching only land.sh's `closeout_shaped` paths (or, since P17, deleting a file directly under
+    `docs/reviews/`: the consumed review doc a close-out deletes, land.sh's `closeout_change`). That is
+    **stricter than S9**: S9 also carries an
     empty non-merge commit and a merge whose other parents are on origin, and the canary trips on both
     (fail-closed). The rule covers land.sh's S4, S5 and S11 moves and merge-task's `refresh_local_base`.
   - **The read order.** The canary reads B before O (`origin/<default>`), in one function. Every writer

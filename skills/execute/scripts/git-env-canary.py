@@ -65,11 +65,12 @@ The comparison (baseline against now; B and O are read by `_read_state`, the onl
     and `merge-base old O` is an ancestor of new. That covers land.sh's moves of a local default (S4's
     fast-forward, S5's close-out commit, S11's scratch rebase) and merge-task's `refresh_local_base`, so a
     close-out landed mid-run trips no window (execute § 2.7).
-A commit is close-out-shaped when it is not a merge and `git diff-tree --no-commit-id --name-only -r -z --root <c>`
-(land.sh S9's command) lists at least one path and only paths `closeout_shaped` accepts (a port of land.sh's:
-THREAD.md, */THREAD.md, or a file directly under (*/)docs/handoffs/). This is stricter than land.sh S9, which also
-carries an empty non-merge commit and a merge whose other parents are on origin: the canary trips on both, which
-fails closed.
+A commit is close-out-shaped when it is not a merge and `git diff-tree --no-commit-id --name-status -r -z --root <c>`
+(land.sh S9's command) lists at least one path and only changes `closeout_change` accepts (a port of land.sh's:
+a path `closeout_shaped` accepts, THREAD.md, */THREAD.md, or a file directly under (*/)docs/handoffs/; or the
+deletion of a review doc, a file directly under docs/reviews/, which land.sh lands only once it is consumed). This
+is stricter than land.sh S9, which also carries an empty non-merge commit and a merge whose other parents are on
+origin: the canary trips on both, which fails closed.
 
 Validation, before any git call or write (after the lock for the locking verbs): --repo must resolve (realpath) to
 the rollout's `Project root:` (none: exit 2), to every record's repo and to every unacked trip line's `repo`;
@@ -243,13 +244,29 @@ def closeout_shaped(path):
     return bool(rest) and "/" not in rest
 
 
+def review_doc(path):
+    """land.sh's review_doc, ported: a file directly under the repo's docs/reviews/."""
+    rest = path[len("docs/reviews/"):] if path.startswith("docs/reviews/") else ""
+    return bool(rest) and "/" not in rest
+
+
+def closeout_change(status, path):
+    """land.sh's closeout_change, ported: a close-out path, or a review doc's deletion (shape only, as S9)."""
+    return closeout_shaped(path) or (status == "D" and review_doc(path))
+
+
 def _closeout_commit(repo, sha):
-    """A non-merge commit whose diff lists at least one path, every one close-out-shaped (stricter than S9)."""
+    """A non-merge commit whose diff lists at least one path, every change close-out-shaped (stricter than S9)."""
     parents = _must(repo, "rev-list", "--parents", "-n", "1", sha).split()[1:]
     if len(parents) > 1:
         return False
-    names = [n for n in _must(repo, "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "--root", sha).split("\0") if n]
-    return bool(names) and all(closeout_shaped(n) for n in names)
+    out = _must(repo, "diff-tree", "--no-commit-id", "--name-status", "-r", "-z", "--root", sha)
+    fields = out.split("\0")
+    if fields and fields[-1] == "":
+        fields.pop()
+    if not fields or len(fields) % 2:
+        return False
+    return all(closeout_change(st, p) for st, p in zip(fields[0::2], fields[1::2]))
 
 
 def _revs(repo, *spec):
