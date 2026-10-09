@@ -279,7 +279,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rejection or a halt); a rollout's merges can never outpace it. Execute's prose shortens it
   to "the lane". Not a **Lane** (rollout vs session). _Avoid_: merge queue.
 - **Integration queue** — the approved tasks waiting for the Integration lane,
-  in `next`'s order. _Avoid_: the lane (that is the step, not the line).
+  in `next`'s order: a task a queued task depends on first, then the oldest
+  `ready:`, then schedule order. _Avoid_: the lane (that is the step, not the line).
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).
