@@ -397,6 +397,15 @@ const nested = T.parseGatedInputs('PLAN\n### Gated inputs\n- spend: Replicate AP
 ok(nested && nested.length === 2 && nested[1] === 'credential: PROD_API_KEY', 'parseGatedInputs: an indented sub-bullet is commentary, not a gate')
 const wrapped = T.parseGatedInputs('PLAN\n### Gated inputs\n- spend: Replicate API for the full corpus re-render —\n  cap USD 30\n### Risks')
 ok(wrapped && wrapped.length === 1 && wrapped[0] === 'spend: Replicate API for the full corpus re-render — cap USD 30', 'parseGatedInputs: a soft-wrapped gate keeps its cap (continuation rejoined)')
+// A doubled heading (chorus-rollout-2026-10-06, p20-4): the planner wrote "## Gated inputs" then
+// "### Gated inputs" / "None", the judge approved, and the parser stopped at the inner heading — no gate,
+// no None, plan-blocked. A Gated inputs heading inside the section is the same section, not its end.
+const doubledNone = T.parseGatedInputs('PLAN\n## Gated inputs\n### Gated inputs\nNone\n### Risks')
+ok(doubledNone !== null && doubledNone.length === 0, 'parseGatedInputs: a doubled heading ("## Gated inputs" then "### Gated inputs" / None) is the empty declaration')
+const doubledGate = T.parseGatedInputs('PLAN\n## Gated inputs\n\n### Gated inputs\n- spend: Replicate API — cap USD 30\n### Risks\n- credential: not a gate')
+ok(doubledGate && doubledGate.length === 1 && doubledGate[0] === 'spend: Replicate API — cap USD 30', 'parseGatedInputs: a doubled heading keeps its gates, and the next other heading still ends the section')
+const doubledSplit = T.parseGatedInputs('PLAN\n### Gated inputs\n- credential: PROD_API_KEY\n#### Gated inputs\n- spend: x — cap $5\n### Risks')
+ok(doubledSplit && doubledSplit.length === 2 && doubledSplit[1] === 'spend: x — cap $5', 'parseGatedInputs: gates on both sides of a doubled heading are all declared (fail-safe — none dropped)')
 
 // Scenario gate-A — plan-gated task declares a gate: pauses at the plan-gate, nothing implemented.
 effortCalls.length = 0
@@ -468,6 +477,19 @@ ctx.agent = recordingAgent(async (prompt, opts) => {
 const gProse = await T.converge({ ...baseEff, slug: 'proj-gate-f', scope: 'cross-cutting', planGate: true }, aEff)
 ok(gProse && gProse.status === 'plan-blocked' && /bullets/.test(gProse.blockerDiagnosis), 'gate F: prose-only declaration fails closed to plan-blocked, not gate-pending, not a silent pass')
 ok(!call('implement:proj-gate-f'), 'gate F: nothing implemented on the malformed declaration')
+
+// Scenario gate-G (chorus-rollout-2026-10-06, p20-4) — an approved plan with a doubled Gated inputs
+// heading ("## Gated inputs" then "### Gated inputs" / "None") is a clean None, not plan-blocked.
+effortCalls.length = 0
+ctx.agent = recordingAgent(async (prompt, opts) => {
+  if (opts.label.startsWith('plan-judge:')) return { verdict: 'approve', feedback: [] }
+  if (opts.label.startsWith('plan:')) return { ready: true, blocked: false, blockerCause: '', plan: 'PLAN\n## Gated inputs\n\n### Gated inputs\nNone\n\n### Risks / unknowns\n- none' }
+  if (opts.phase === 'Implement') return greenImpl
+  return { verdict: 'approve', feedback: [] }
+})
+const gDoubled = await T.converge({ ...baseEff, slug: 'proj-gate-g', scope: 'cross-cutting', planGate: true }, aEff)
+ok(gDoubled && gDoubled.status === 'review', 'gate G: a doubled Gated inputs heading over None is not plan-blocked — the task lands')
+ok(call('implement:proj-gate-g'), 'gate G: implementation proceeds on the doubled-heading None')
 
 // ---- Review-loop memory (2026-08-14): accumulated feedback + step-back + ceiling record ----
 // The review loop mirrors planLoop's accumulation but with review semantics: the LATEST round is the
