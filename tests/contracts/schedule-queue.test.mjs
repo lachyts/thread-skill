@@ -9,7 +9,10 @@
 // from ladder.py and never lowers one, step 1's carry preview lists its `restamp` lines and stops on a refusal
 // (a refused ladder included), step 7 stamps `rung:` and leaves a top-mapping legacy stamp under a refused
 // ladder for step 8 to list (and an unrecognised legacy value for step 8's own block), and the template's budget
-// prices a top-rung start.
+// prices a top-rung start. § 3.5's gate sweep catches sign-off in any wording, named or not, and a decision a
+// note leaves to a human ("raise, not decide"), the p2-6 wording the fixed phrases missed (p17-5); step 8 flags
+// a capture-shaped note (task-writer § 5's close-the-capture line, or a `## Launch` repo naming another
+// checkout), which engine agents read in full.
 //
 // Every rule lives in one pure function, checkSchedule, that returns named failures, so the real files
 // and the control cases run through identical logic and the matcher can't pass vacuously. Each control
@@ -22,6 +25,7 @@ const real = {
   schedule: read('skills/schedule/SKILL.md'),
   template: read('skills/schedule/rollout-template.md'),
   orient: read('skills/orient/SKILL.md'),
+  taskWriter: read('skills/_shared/task-writer.md'),
   manifests: [read('.claude-plugin/plugin.json'), read('.claude-plugin/marketplace.json'),
     read('README.md').split('\n').find((l) => l.startsWith('| `/thread:schedule`')) ?? ''],
 }
@@ -48,8 +52,21 @@ const TIER_WORDS = [['max', 'tier'].join('_'), ['tier', 'capped'].join('_'), ['O
 const description = (text) => (text.match(/^description: (.*)$/m) ?? [])[1] ?? ''
 const frontmatter = (text) => (text.match(/^---\n([\s\S]*?)\n---\n/) ?? [])[1] ?? ''
 
+// Gate wording § 3.5's sweep must catch: each sample needs at least one of the sweep's phrases (a
+// case-insensitive substring). The first is the p2-6 line the fixed phrases missed in the 2.7 rollout.
+const GATE_SAMPLES = [
+  'Open question for the planner to raise, not decide: would need Lachy\'s sign-off',
+  'This would need Lachy\'s sign-off before it ships',
+  'A call for the planner to raise, not decide',
+  'Hold for sign-off from Sarah',
+  'Needs Patrick to sign off on the copy',
+  "Don't action until the v0.5 release ships",
+]
+// The sweep's phrases: the backticked spans of § 3.5's one "Scan each task body" sentence.
+const sweepPhrases = (s35) => spans(sentences(s35).find((x) => x.startsWith('Scan each task body')) ?? '')
+
 // Named failures for the schedule skill, its template and orient; [] means every rule holds.
-function checkSchedule({ schedule, template, orient, manifests = [], extra = [] }) {
+function checkSchedule({ schedule, template, orient, taskWriter = '', manifests = [], extra = [] }) {
   const fails = []
   const s0 = s(schedule, S0)
 
@@ -106,6 +123,29 @@ function checkSchedule({ schedule, template, orient, manifests = [], extra = [] 
     x.includes('no `## Queue` row'))) fails.push('gate-drop-before-write')
   if (!sentences(s(schedule, S8)).some((x) => /drop/i.test(x) && x.includes('`rollout:`') &&
     x.includes('`## Queue` row') && x.includes('`## File-sets` line'))) fails.push('gate-drop-whole')
+
+  // gate-sweep-wide (p17-5): § 3.5 sweeps case-insensitively for sign-off in any wording and for a decision left to
+  // a human, so every GATE_SAMPLES line matches one of its phrases; it says why (a planner can declare such a line
+  // as a gated input, which `ignore_gate` does not override, and an unattended lead never signs one off).
+  const s35 = s(schedule, S35)
+  const phrases = sweepPhrases(s35).map((x) => x.toLowerCase())
+  if (!/case-insensitive/i.test(sentences(s35).find((x) => x.startsWith('Scan each task body')) ?? '') ||
+    !GATE_SAMPLES.every((g) => phrases.some((p) => g.toLowerCase().includes(p))) ||
+    !sentences(s35).some((x) => x.includes('gated input') && x.includes('`ignore_gate`') && /unattended lead/.test(x))) {
+    fails.push('gate-sweep-wide')
+  }
+
+  // capture-preflight (p17-5): step 8 flags a capture-shaped note: a resume prompt carrying task-writer § 5's
+  // close-the-capture line (the very phrase task-writer writes, so a reword there can't silently blind this), or
+  // a `## Launch` repo naming a checkout other than § 0's; it gives the "Rollout run" line that clears it.
+  const s8c = section(schedule, S8) ?? ''
+  const cap = collapse(s8c.slice(Math.max(0, s8c.indexOf('**Pre-flight — capture-shaped notes.**'))))
+  const closeLine = collapse(section(taskWriter, /^## 5\. /) ?? '').includes('mark the capture done')
+  if (s8c.indexOf('**Pre-flight — capture-shaped notes.**') < 0 || !closeLine ||
+    !cap.includes('`mark the capture done`') || !cap.includes('`## Launch`') || !cap.includes("§ 0's resolved repo path") ||
+    !cap.includes('**Rollout run') || !cap.includes("Skip the resume prompt's") || !cap.includes("the engine owns this note's `status`")) {
+    fails.push('capture-preflight')
+  }
 
   // Step 6 offers Advance or Cancel only, every time: each **Overwrite** it names is a "never".
   const s6 = s(schedule, S6)
@@ -306,6 +346,28 @@ test('control: a gate dropped only at step 8, or dropped without its row, fails'
     ['gate-drop-before-write'], 'dropped at step 8')
   only({ schedule: edit(real.schedule, S8, 'delete its `## Queue` row and its `## File-sets` line', 'leave the rest') },
     ['gate-drop-whole'], 'row left behind')
+})
+
+test('control: § 3.5 back on its fixed phrases, or case-sensitive, or without its why, fails gate-sweep-wide', () => {
+  const scan = sentences(s(real.schedule, S35)).find((x) => x.startsWith('Scan each task body'))
+  assert.ok(scan, 'control setup: the scan sentence')
+  const sec = section(real.schedule, S35)
+  const raw = sec.split(/(?<=[.!?]["”]?)\s+/).find((x) => collapse(x) === scan)
+  assert.ok(raw, 'control setup: the raw scan sentence')
+  only({ schedule: real.schedule.replace(raw, 'Scan each task body, case-insensitively, for gate language (`don\'t action until`, ' +
+    '`do not action until`, `hold for`, `until a release`, `until the next release`, `gated on a release`, `human sign-off`, `wait for sign-off`).') },
+  ['gate-sweep-wide'], 'the old fixed phrases')
+  only({ schedule: real.schedule.replace(raw, raw.replace(/case-insensitive\w*,?\s*/i, '')) }, ['gate-sweep-wide'], 'case-sensitive')
+  const why = sec.split(/(?<=[.!?]["”]?)\s+/).find((x) => /unattended lead/.test(x))
+  assert.ok(why, 'control setup: the why sentence')
+  only({ schedule: real.schedule.replace(why, '') }, ['gate-sweep-wide'], 'no why')
+})
+
+test('control: step 8 without the capture block, or task-writer rewording its close line, fails capture-preflight', () => {
+  only({ schedule: edit(real.schedule, S8, '**Pre-flight — capture-shaped notes.**', '**Pre-flight — other notes.**') },
+    ['capture-preflight'], 'no block')
+  only({ taskWriter: real.taskWriter.replaceAll('mark the capture done', 'close the capture') }, ['capture-preflight'], 'task-writer reworded')
+  only({ schedule: edit(real.schedule, S8, "§ 0's resolved repo path", 'the repo') }, ['capture-preflight'], 'no repo comparison')
 })
 
 test('control: step 1 without the carry preview fails', () => {
