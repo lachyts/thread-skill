@@ -132,13 +132,18 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   in_progress note whose PR `resume` found merged), lost (a dead call's lead-written row), stopped (a hard
   pause, a defer or a carry ended it); `failed` is reserved.
 - slot-taken start: start, restart (a stalled note restarted), revise (a seeded revise), hand-back (the
-  restart after a hand-back, an approve-gates sign-off or a descope), resume (a Lost-call or signed-gate
-  resume).
+  restart after a hand-back, an approve-gates sign-off, a descope or a run-stage automatic retry: auto-retry,
+  p16-4, stamps `handed_back:` through hand-back's own transition, so its restart follows its auto-retry
+  event), resume (a Lost-call or signed-gate resume).
 - set-aside stage is where the task stopped; setAsideAt is where it re-enters (merge-task's exit 1 reads
   stage integrate, setAsideAt run).
 - Idle Slot time is a span. A Retro derives it from slot-taken / slot-freed pairs against the ceiling
   stamped on each event. An idle-slots event is a reason marker labelling the span it falls in: a change
   of reason splits the span, a repeat is harmless, a span with no marker reads as "unexplained".
+  `awaiting-hand-back` also labels a span in which execute's automatic retry (p16-4, ADR 0033) waits out a
+  quota or infra cool-down with nothing queued: `next` is stateless and never reads the retry verdict. A
+  Retro tells the two apart by what precedes the slot-taken start=hand-back that ends the span: the task's
+  auto-retry event for a cool-down, none for a human's hand-back.
 - call-journal: for each runId, use its latest line with a terminal status (completed, failed, killed,
   stopped, cancelled); with none, use its latest line and treat the call as in flight. The writer folds
   under an exclusive flock on the file and skips a fold when that runId already has a terminal line, or

@@ -370,8 +370,9 @@ idle-slots reason, first match ("queued" is queued and not starting this call): 
 paused or pauseRequested -> pause-drain; the first held queued row's reason: `depends on` -> dependency,
 solo or behind solo -> solo; no queued row and a RACE in raceHold -> hold-race; no queued row and a set-aside
 row -> awaiting-hand-back (a known mislabel when every one is a blocked row step 1.2 relaunches as a seeded
-revise: its slot-taken start=revise splits the span seconds later); else queue-tail. `next` never records
-hold-merge: a merge hold is lead state, recorded by `hold`.
+revise: its slot-taken start=revise splits the span seconds later; also while step 1.2's automatic retry waits out
+a quota or infra cool-down, p16-4, since `next` never reads the retry verdict: the task's auto-retry event ends
+that span); else queue-tail. `next` never records hold-merge: a merge hold is lead state, recorded by `hold`.
 Departures from the p15-2 brief: no ceiling-changed (the writer refuses it; the settings on every slot-taken
 and idle-slots carry the ceiling); log-integration records nothing (the lane is held through the merge, ADR
 0030; its path and triggers ride on mark-done's lane-freed release=merge); merge-task.sh records nothing (its
