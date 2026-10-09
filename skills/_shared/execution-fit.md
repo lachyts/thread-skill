@@ -147,40 +147,38 @@ slashes stripped, symlinks resolved) by **containment**: a marketplace path equa
 inside it (`<repoPath>/…`, a monorepo with the marketplace in a subdirectory) matches, since `merge-task.sh`
 fast-forwards the whole checkout. A missing registry passes; a malformed one passes with a warning (the
 registry format is Claude Code's, so the check fails open). Exit 0 is no match: pass any warning on. Exit 3
-is a match: the marketplace, the path and the remedy (a separate clone) on stderr. Exit 2 is a failure of
+is a match: the marketplace, the path and the remedy (a separate clone at `<repoPath>-rollout`) on stderr. Exit 2 is a failure of
 the check itself (the script not found, an empty path, no python3), and any other non-zero exit fails
 closed the same way. schedule § 0 runs it before anything is written; execute § 2.6 re-runs it at every
 launch and after every § 4.5 re-check of the landing register, since a written rollout note can still name
 the primary checkout (one scheduled before this check, or edited by hand).
 
-The separate clone's conventional home is the sibling `<repoPath>-rollout`. On the check's exit 3, schedule
-§ 0 looks for it with this, against the same path:
+The separate clone always sits at `<repoPath>-rollout` (the repo path canonicalised as above, then
+`-rollout` appended): the path the check's remedy names. On the check's exit 3, schedule § 0 looks for it
+with this, against the same path:
 
 ```bash
 # thread:rollout-clone (extracted and tested by tests/self-rollout-check.test.sh)
 R="<repoPath>"
 case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
-while [ "${#R}" -gt 1 ] && [ "${R%/}" != "$R" ]; do R=${R%/}; done
-C="$R-rollout"
-lb="${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land.sh"
 sc="${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh"
-for f in "$lb" "$sc"; do [ -f "$f" ] || { echo "rollout-clone: $f not found: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }; done
-t=$(git -C "$C" rev-parse --show-toplevel 2>/dev/null) && [ "$(cd "$t" && pwd -P)" = "$(cd "$C" && pwd -P)" ] || {
-  echo "rollout-clone: no clone at $C: clone the repo there (git clone <origin URL> \"$C\"), then re-invoke" >&2; exit 1; }
-a=$(bash "$lb" --origin-slug "$R" | tr '[:upper:]' '[:lower:]')
-b=$(bash "$lb" --origin-slug "$C" | tr '[:upper:]' '[:lower:]')
-[ -n "$a" ] && [ "$a" = "$b" ] || { echo "rollout-clone: $C is not a clone of the GitHub repo at $R" >&2; exit 1; }
-bash "$sc" "$C" >/dev/null 2>&1 || { echo "rollout-clone: $C is a plugin marketplace checkout too, or the check failed on it" >&2; exit 1; }
-printf '%s\n' "$C"
+[ -f "$sc" ] || { echo "self-rollout-check.sh not found at $sc: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }
+bash "$sc" --rollout-clone "$R"
 # end thread:rollout-clone
 ```
 
-It prints the clone's path (exit 0) only when `<repoPath>-rollout` (`~/` expanded, trailing slashes
-stripped, then `-rollout` appended) is the top of a git work tree whose `origin` names the same GitHub
-`<owner>/<name>` as the repo path's (`land.sh --origin-slug`, compared case-insensitively) and the
-self-rollout check passes on it. Otherwise it prints nothing and exits 1 with the reason on stderr, or 2
-when a script is missing. It never clones, fetches or writes. Only schedule § 0 swaps a root this way, and
-only before anything is written; execute § 2.6 halts instead, since its rollout note is already written.
+`self-rollout-check.sh --rollout-clone` (its header is the one statement of the rule) prints that path
+(exit 0) only when it is a directory, the top of a git work tree, its own clone rather than a linked
+worktree (its `--git-common-dir` resolves inside it), a GitHub clone of the same repository
+(`land.sh --origin-slug` exits 0 for both trees and the two `<owner>/<name>` match, case-insensitively),
+not itself a marketplace checkout, and on its default branch (`refs/remotes/origin/HEAD`, read locally)
+with a clean working tree. Being behind its last-fetched `origin/<default>` passes with a stderr note:
+execute's worktrees branch from `origin/<default>`, and the pushed-base check fetches every clone. Any
+other state prints nothing and exits 1 with one `self-rollout-check: <path> is not a usable rollout clone:
+<reason>` line naming the condition that failed and its fix; exit 2 is land.sh or the script missing. It
+drops inherited repo-local git env first, and never clones, fetches or writes. Only schedule § 0 swaps a
+root this way, and only before anything is written; execute § 2.6 halts instead, since its rollout note is
+already written.
 
 **Pushed base.** Rollout worktrees branch from a freshly fetched `origin/<default>`, and the agents
 read only their task note, the rollout note and the repo: never THREAD.md, and never anything that exists

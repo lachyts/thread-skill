@@ -130,7 +130,7 @@ next task call (p12-4, ADR 0030). Run the self-rollout check in
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers (point at it; never copy the
 snippet here) against the rollout's `Project root`, wherever § 2.5 runs: directly after it at every
 invocation that starts or continues work, and after every §4.5 re-check of it. `/thread:schedule` § 0
-already ran it (and swapped in a separate clone where one exists), but a written rollout note can still
+already ran it (and swapped in a usable separate clone where one exists), but a written rollout note can still
 name the primary checkout. **Pausing is exempt**, exactly as for § 2.5. Execute never swaps a root itself:
 the rollout-clone lookup in `execution-fit.md` is schedule's alone.
 
@@ -144,7 +144,7 @@ Code's, so the check fails open).
 - **Exit 3**: write nothing (no stamp, no `mark-started`, `mark-integrating` or `log-integration`, no push, no
   merge, no Workflow call). Print the stderr verbatim above the ROLLOUT-STATUS line and end the turn with
   `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=halted reason="repoPath is a live plugin marketplace checkout"`.
-  The remedy: clone the repo to a separate path (e.g. `~/repos/<repo>-rollout`), set the rollout's
+  The remedy: clone the repo to the separate path `<repoPath>-rollout` (the path the check names), set the rollout's
   `Project root` to that clone, and re-invoke.
 - **Exit 2** (the script not found, an empty `repoPath`, no python3): the same write-nothing halt with
   `reason="self-rollout check failed"`.
@@ -716,7 +716,7 @@ The queue (§4.5) halts only when nothing can start and nothing is running or in
 - `lead-integrate.py` exits 2, or `prepare`'s backoff runs out (`reason="lead-integrate.py failed on [[task]]"`, or `reason="origin unreachable while integrating [[task]]"`), or
 - a RACE re-verify is red, timed out or left no rc (`reason="RACE: origin/<default> fails the verifier"`), or
 - § 2.5, or a §4.5 re-check of it, reports the repo on the landing register, or the check itself fails (`reason="<owner/name> is on the landing register"` or `reason="landing-register check failed"` — a **designed** stop: unlisting is Lachy's call; open PRs stay open and re-invocation after unlisting flushes them), or
-- § 2.6, or its run after a §4.5 re-check, finds `repoPath` is a directory-source plugin marketplace checkout, or the check itself fails (`reason="repoPath is a live plugin marketplace checkout"` or `reason="self-rollout check failed"` — nothing is stamped, dispatched or merged; clone the repo to a separate path such as `~/repos/<repo>-rollout`, point the rollout's `Project root` at it and re-invoke), or
+- § 2.6, or its run after a §4.5 re-check, finds `repoPath` is a directory-source plugin marketplace checkout, or the check itself fails (`reason="repoPath is a live plugin marketplace checkout"` or `reason="self-rollout check failed"` — nothing is stamped, dispatched or merged; clone the repo to the separate path `<repoPath>-rollout`, point the rollout's `Project root` at it and re-invoke), or
 - § 2.7, at an entry point, finds a known clone's local `<default>` ahead of `origin/<default>` beyond THREAD.md, or the check itself fails (`reason="local default branch is ahead of origin"` or `reason="pushed-base check failed"` — nothing is stamped, cleared or dispatched; land those commits by PR, or wait for the queued `close/…` landing PR to merge, then re-invoke), or
 - § 4's git-env check finds a repo-local `GIT_*` variable exported in the lead session, or the check itself fails (`reason="git env set in the lead session"` or `reason="git-env check failed"` — nothing is stamped or dispatched; relaunch Claude Code from a shell without them, or put a working `git` on PATH, then re-invoke), or
 - the git-env canary (§ 4.5 *Git-env canary*) exits non-zero anywhere, or `next` reports `halt: "git-env"` (`reason="git-env trip: the shared checkout changed"` on exit 3 or a hold, `reason="git-env canary failed"` on anything else — a **designed** stop: `/thread:repair` (its git-env step, 3e) shows the evidence and records Lachy's ack, and re-invocation resumes), or
