@@ -149,9 +149,12 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     fails.push('slots')
   }
 
-  // auto-revise: only autoRevise: true, with --max-review-rounds; revise-stopped and review-blocked wait for hand-back.
+  // auto-revise: only autoRevise: true, with --max-review-rounds; revise-stopped and review-blocked wait for hand-back;
+  // the resume's prUrl is inputs' prUrl (p17-1: the note's pr: as a PR URL), and a prUrlError launches nothing.
   if (!s2sub || !s2sub.text.includes('Launch one only when it reports `autoRevise: true`') ||
     !s2sub.text.includes('--max-review-rounds') ||
+    !s2sub.text.includes("resume: {stage: 'revise', prUrl: <inputs.prUrl>,") ||
+    !s2sub.text.includes('A non-empty `prUrlError` (the note\'s `pr:` gives no PR URL the engine takes, step 3) launches nothing') ||
     !/A `revise stopped:`, review-blocked or out-of-rounds note is never launched here: it waits for `hand-back`/.test(s2sub.text)) {
     fails.push('auto-revise')
   }
@@ -220,15 +223,21 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !st3.includes('`integrated` → step 4') || !st3.includes('`rejected` → the lane frees, step 1.2 launches the seeded revise') ||
     !st3.includes('`max_review_rounds` across those rounds sets it aside')) fails.push('trouble-path')
 
-  // integrate-args: startedAt from stamp at launch; readyAt from ready:; history live, else inputs; the rung is the
-  // task's own record (ADR 0029 decision 7): the approving row's three keys, else inputs' record verbatim (neutral
-  // when the note has no rung:), never the ladder's top rung, and no tier vocabulary left.
+  // integrate-args: startedAt from stamp at launch; readyAt from ready:; prUrl, the history, the rounds and the rung are
+  // `inputs --row`'s integrate record verbatim (p17-1: a saved row is checked against the note, never trusted as it
+  // is), a non-empty rowRefused printed, a non-empty prUrlError (a note pr: with no PR URL, e.g. a bare #N and no GitHub
+  // origin) set aside at Integration, never launched; the rung is the task's own record, the accepted row's, else the note's
+  // (neutral when the note has no rung:), never the ladder's top rung, and no tier vocabulary left. prepare's
+  // `unlisted` and `note` only inform.
   if (!st3.includes('`startedAt` a fresh `lead-integrate.py stamp` taken at launch') ||
     !st3.includes("`readyAt` the note's `ready:`") ||
-    !st3.includes('from the approving row when this session holds it, else from `lead-integrate.py inputs`') ||
-    !st3.includes("`rung` is the task's own rung record, from that row (`startRung`, `rung`, `climbs`), else `lead-integrate.py inputs`' `rung` record, verbatim") ||
+    !st3.includes('`prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are, verbatim, the `integrate` record of `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py inputs --note <task note> --repo <repoPath> [--row') ||
+    !st3.includes('the lead prints a non-empty `rowRefused`') || st3.includes('from the approving row when this session holds it') ||
+    !st3.includes("A non-empty `prUrlError` (the note's `pr:` gives no PR URL the engine takes) launches nothing: the lead's own *Set aside* row at Integration (`--kind integration`) with `prUrlError` as the reason") ||
+    !st3.includes("`rung` is the task's own rung record, the accepted row's (`startRung`, `rung`, `climbs`), else the note's `rung` record") ||
     !st3.includes('(neutral, `{startRung: "", rung: "", climbs: []}`, when the note has no `rung:`)') ||
     !st3.includes("never the ladder's top rung: Integration runs on the top rung whatever the record says") ||
+    !st3.includes('`unlisted`, the commits in `taskBase..mainSha` that name no PR,') || !st3.includes('pass neither to the integrate call') ||
     /tierCapped|tier_capped|escalated/.test(st3)) {
     fails.push('integrate-args')
   }
@@ -483,6 +492,13 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     fails.push('settings')
   }
 
+  // lane-order (p17-1): sub-step 4 takes the Integration queue in `next`'s order and says what that order is, a
+  // dependency on a folded member (an affine tombstone's `merged_into:`) included.
+  const s4sub = sub(/^If the lane is free, take `next`'s first `integrating` task/)
+  if (!s4sub || !s4sub.text.includes("else its first `awaitingIntegration` task (`next` orders the Integration queue: a task a queued task depends on, directly or through a folded member (`merged_into:`), first, then the oldest `ready:`, then schedule order)")) {
+    fails.push('lane-order')
+  }
+
   // s5 (the dead-run resume keeps its shape for its consumers) is part of lost-call's routing: § 5 names *Lost call*.
   if (!s5.includes('(§ 4.5 *Lost call*)') || !before(s5, '(§ 4.5 *Lost call*)', 'resumeFromRunId: <runId>')) fails.push('lost-call')
   return [...new Set(fails)]
@@ -497,7 +513,7 @@ test('execute § 4.5, its neighbours, the heartbeat and the hook hold every queu
 const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lost-call', 'clean-path', 'verify-bound',
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
-  'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings']
+  'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -520,6 +536,10 @@ test('control: Restart routing without the revise route fails launch', () => {
 
 test('control: a seeded revise launched regardless of the ceiling fails slots', () => {
   only(sk('; otherwise it waits, blocked, for a later step 1', ''), 'slots', 'no wait')
+})
+
+test("control: a seeded revise on the note's raw pr: fails auto-revise", () => {
+  only(sk("resume: {stage: 'revise', prUrl: <inputs.prUrl>,", "resume: {stage: 'revise', prUrl: <inputs.pr>,"), 'auto-revise', 'raw pr')
 })
 
 test('control: launching every rejected note fails auto-revise', () => {
@@ -644,8 +664,30 @@ test('control: a double-quoted RACE re-verify fails verify-bound', () => {
 
 test("control: a rung fallback naming the ladder's top rung fails integrate-args", () => {
   const p = real.skill.split('\n').find((l) => l.startsWith('   **The integrate call**'))
-  const from = p.slice(p.indexOf("else `lead-integrate.py inputs`' `rung` record"), p.indexOf('; `readyAt`'))
+  const from = p.slice(p.indexOf("else the note's `rung` record"), p.indexOf('; `readyAt`'))
   only(sk(from, "else `{startRung: \"\", rung: <the ladder's top rung>, climbs: []}`"), 'integrate-args', 'top-rung fallback')
+})
+
+test('control: the approving row trusted unchecked fails integrate-args', () => {
+  const p = real.skill.split('\n').find((l) => l.startsWith('   **The integrate call**'))
+  const from = p.slice(p.indexOf('`prUrl`, `reviewHistory`, `reviewRoundsUsed` and `rung` are, verbatim,'), p.indexOf("; `rung` is the task's own rung record"))
+  only(sk(from, '`reviewHistory` and `reviewRoundsUsed` come from the approving row when this session holds it, else from `lead-integrate.py inputs`'),
+    'integrate-args', 'unchecked row')
+})
+
+test('control: an integrate call launched on a prUrlError fails integrate-args', () => {
+  only(sk("A non-empty `prUrlError` (the note's `pr:` gives no PR URL the engine takes) launches nothing: the lead's own *Set aside* row at Integration (`--kind integration`) with `prUrlError` as the reason, since",
+    'The integrate call launches whatever `prUrl` reads, since'), 'integrate-args', 'prUrlError launched')
+})
+
+test('control: the lane order dropped fails lane-order', () => {
+  only(sk(" (`next` orders the Integration queue: a task a queued task depends on, directly or through a folded member (`merged_into:`), first, then the oldest `ready:`, then schedule order)", ''),
+    'lane-order', 'no lane order')
+})
+
+test('control: a lane order blind to folded members fails lane-order', () => {
+  only(sk('a task a queued task depends on, directly or through a folded member (`merged_into:`), first,', 'a task a queued task depends on first,'),
+    'lane-order', 'no folded member')
 })
 
 test("control: an integrate call without a freshly resolved ladder fails ladder", () => {
@@ -793,7 +835,7 @@ test('control: a --repo refusal fixed in the file fails settings', () => {
   only(sk('one naming `--repo` (the Project root is gone or its origin unreadable) is fixed by stamping the key', 'any other is fixed in the file'), 'settings', '--repo remedy')
 })
 
-test('the rules are all named (30) and each has a control', () => {
-  assert.equal(RULES.length, 30)
+test('the rules are all named (31) and each has a control', () => {
+  assert.equal(RULES.length, 31)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
