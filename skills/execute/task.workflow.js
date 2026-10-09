@@ -390,10 +390,14 @@ No operator override elsewhere in this prompt (release/hold gates) ever override
 // null when the section is MISSING or carries no parseable declaration — no top-level list items and
 // no exact "None" — so a gate written ONLY as prose can never silently pass: the caller fails closed
 // to plan-blocked and a re-plan under the bullets-only prompt self-heals. Returns [] for an explicit
-// "None", else the declared gate lines (markers stripped, wraps rejoined).
+// "None", else the declared gate lines (markers stripped, wraps rejoined). A doubled heading — another
+// Gated inputs heading inside the section, at any ##–#### level (chorus-rollout-2026-10-06: "## Gated inputs"
+// then "### Gated inputs" / "None" read as no declaration and plan-blocked an approved plan) — is the
+// same section, not its end: parsing carries on, so the None counts and no gate on either side drops.
+const GATED_HEADING = /^#{2,4}\s+gated inputs\b/i
 function parseGatedInputs(planText) {
   const lines = (planText || '').split('\n')
-  const start = lines.findIndex((l) => /^#{2,4}\s+gated inputs\b/i.test(l.trim()))
+  const start = lines.findIndex((l) => GATED_HEADING.test(l.trim()))
   if (start === -1) return null
   const out = []
   let sawNone = false
@@ -401,6 +405,7 @@ function parseGatedInputs(planText) {
   for (let i = start + 1; i < lines.length; i++) {
     const raw = lines[i]
     const line = raw.trim()
+    if (GATED_HEADING.test(line)) { open = false; continue } // a doubled heading — same section
     if (/^#{1,6}\s/.test(line)) break // next heading ends the section
     if (!line) { open = false; continue } // a blank line ends any soft-wrap
     const indent = raw.length - raw.replace(/^[ \t]+/, '').length
