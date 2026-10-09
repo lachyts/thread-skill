@@ -10,6 +10,25 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-10-09 (late): P16 (unattended rollouts) and P17 (queue fixes from live runs) have landed. `[[thread-skill-rollout-2026-10-09]]` (archived, § Completion log): 9/9 merged (#97 to #105) in 11h 6m, from the clone `~/repos/tools/thread-skill-rollout`, on the Opus ladder. Phases 16 and 17 are closed (p16-2 landed separately in `~/repos/workspaces`). p13-4 (release 3.0) is unblocked. The primary checkout is still held: `[[chorus-rollout-2026-10-09]]` is running from it, so the new P16/P17 skills are on `origin/master` but not yet live here.**
+- **Landed:**
+  - p16-3: the engine declares `needsHuman` and records `## Needs you` (#97);
+  - p17-4: land.sh takes consumed review-doc deletions (#98; the six 2026-10-03 docs are gone);
+  - p17-5: schedule's gate sweep and capture pre-flight (#99);
+  - p16-1: § 6.5 Needs you, so no question tool while work is in flight (#100);
+  - p17-3: a doubled Gated-inputs heading reads as one section (#101);
+  - p17-1: the Integration lane's order and its landed list (#102);
+  - p17-2: a Solo task holds by rank, and carry prints prose `order` hints (#103);
+  - p16-4: execute auto-retries agent-fixable set-asides, ADR 0033 (#104);
+  - p16-5: repair keeps only the asking (#105).
+- **The schedule wrote the live checkout as Project root.** The orient session's schedule set `~/repos/tools/thread-skill`; execute § 2.6 (the self-rollout gate) refused it at launch, and the lead re-pointed the rollout at the clone. Schedule § 0 has no self-rollout check: [[thread-skill-schedule-runs-the-self-rollout-gate]].
+- **Load made `make test` flaky.** At ceiling 4 the load average reached 80 to 210. `merge-task-integrated` 12a, a "halts in under 5 s" wall-clock assertion, failed three lead Integration verifies (p16-3, p17-3, p17-5) and three first passes. Each red verify cost an integrate call. Fix: [[thread-skill-load-tolerant-timing-tests]] (high priority, before the next rollout).
+- **Two lead hand-backs, both converged** (each logged in the rollout's `## Notes`):
+  - p16-1: the Integration judge rejected it at review round 4/4, a semantic conflict with #97's needs-human stops. Raised to 6 rounds and handed back as a seeded revise; landed at round 5.
+  - p16-5: plan-blocked at 3 rounds with narrowing feedback. Handed back for a fresh pass, approved on its first plan round.
+- **First live Run record:** 19 calls folded with no warnings, about 14.1M subagent tokens. The Retro is offered: `/thread:retro [[thread-skill-rollout-2026-10-09]]`.
+- **Follow-ons filed:** [[thread-skill-load-tolerant-timing-tests]], [[thread-skill-schedule-runs-the-self-rollout-gate]], [[thread-skill-execute-needs-you-c-gaps]] (three § 6.5 (c) seams PR #105 asks the lead to file).
+
 **2026-10-06: P15 (the Run record) has landed. `[[thread-skill-rollout-2026-10-04]]` (archived, § Completion log): 5/5 merged (#89 to #93) in 17h 39m from the clone, all on Opus. The primary checkout was fast-forwarded to `1c5c3ca` at 12:15. **That broke ADR 0031's hold:** `[[chorus-rollout-2026-10-06]]` had started at 10:13 from this checkout, so its lead switched to the P15 scripts mid-run. Left in place as the lesser move: P15's scripts take the old SKILL's calls, and its events start mid-run (a `slot-freed` before any `slot-taken`). P16 (unattended rollouts) is filed but not yet scheduled.**
 - **Landed:** p15-1 `run_record.py`, the Run record's one writer (#89); p15-4 `rollouts.toml` operator settings and `rollout-settings.py` (#90, Integration resolved 7 test-file conflicts with #89); p15-3 Workflow journals fold in at close (#91); p15-2 execute, lead-integrate and merge-task emit Run record events (#92); p15-5 `/thread:retro` (`score.py`, `tune.py`, #93).
 - **p15-2 plan-blocked once** at 3 rounds, with findings narrowing each round. It converged on its first plan round after a hand-back carrying the feedback. All five tasks stamped `tier_capped:` (the Opus lock).
@@ -562,6 +581,9 @@ scheduled 2026-07-15.
 - **P12 landed (2026-10-03, #56–#69): the queue replaces waves.** Protocol 5 rollout notes; `task.workflow.js` (one task per call); `merge-task.sh`; `reconcile-rollout.py`; `lead-integrate.py`; `rollout-stop-driver.py` and the `ROLLOUT-STATUS` line. `merge-wave.sh`, `reconcile-wave.py`, `wave-execute.workflow.js` and `WAVE-STATUS` are deleted with no alias. Phase 12 stays open for p12-13.
 - **Hard rollout tasks start at the higher rung** (2026-10-01/02 evidence): a deep task stamped `effort: xhigh` with `max_plan_rounds: 6` converges; at the default rung it plan-blocks. ADR 0029's ladder makes this the rung-2 start; until P13, it's per-task frontmatter.
 
+- **P16 landed (2026-10-09, #97, #100, #104, #105; p16-2 in workspaces): unattended rollouts.** The engine declares `needsHuman` (a stop that is never evidence of hardness); the lead never calls the question tool while anything is live and pushes each needs-you item once (`## Needs-you log`); execute auto-retries agent-fixable set-asides by budget (`auto_retries`, built-in 2) with a quota cool-down (ADR 0033); repair asks only what needs Lachy.
+- **P17 landed (2026-10-09, #98, #99, #101, #102, #103): queue fixes from the Chorus runs.** Integration lane order (dependants first, then oldest `ready:`) and a landed list that names PR-less commits; a Solo task holds by its row, not `priority:`; carry prints `order` hints from the prior rollout's prose; the plan gate reads a doubled Gated-inputs heading; land.sh takes consumed review-doc deletions; schedule's gate sweep widened.
+
 ## Open questions / decisions pending
 
 - **Schedule P16 before or after p13-4 (3.0.0)?** p13-4 updates the live checkout, and a running rollout holds that checkout, so the two can't overlap. The recommendation is p13-4 first, since it was waiting only on Chorus.
@@ -652,6 +674,8 @@ scheduled 2026-07-15.
 - **Review-gate-only repos** (no required checks): `merge-task.sh` halts with exit 7 ("review required"). A per-rollout `--admin` opt-in is Lachy's call: [[thread-skill-merge-task-followups]].
 - **The queue is live without a release.** The plugin version still reads 2.11.0 while the skills are P12's (the directory source loads the working tree). p13-4 releases 3.0.0; sessions started before 2026-10-03 still run the wave-era skill text until restarted.
 - **The fresh-review of workspaces `eb136df` (the dangerous-rm hook) hasn't run either**: same cwd binding as `29ca886`; run both from one session in `~/repos/workspaces`.
+
+- **Ceiling vs. a load-sensitive verifier.** Does the thread-skill ceiling stay at 4 while `make test` has wall-clock assertions? The Retro on `[[thread-skill-rollout-2026-10-09]]` reads the cost (three extra integrate calls, three climbs). Fixing the tests ([[thread-skill-load-tolerant-timing-tests]]) may make a lower ceiling unnecessary.
 
 ## Known quirks (don't re-derive)
 
@@ -890,11 +914,21 @@ scheduled 2026-07-15.
 - **`tests/contracts/refs.test.mjs` requires every `ADR NNNN` to resolve in this repo** unless a foreign qualifier precedes it (`Chorus ADR 0043`, `workspaces ADR …`). Citing another repo's ADR bare fails `make test`.
 - **fresh-review can only review the session's own repo.** A change made in another repo (for example `~/repos/workspaces`) from a thread-skill session has to be reviewed from a session launched there.
 
+- **The Workflow task-notification display HTML-escapes `<` and `>`** in the result and the re-run args it shows. The args themselves reach the agents unescaped (checked in the integrator's prompt, 2026-10-09), so an `&lt;q&gt;` in the notification is not a transcription error.
+- **Integrate-call args must be passed inline.** The Workflow tool has no file input, and a plan-gated task's args (its plan plus review history) run to about 40 KB. Build them with python from the row and `lead-integrate.py plan`, print them in parts of 10 KB or less, and paste them verbatim.
+- **`bind-run` records `journalDir` as `<session>/workflows`**, while the transcripts live under `<session>/subagents/workflows/<runId>/`. `fold-journals` still found every call (19 folded, 0 warnings, 2026-10-09).
+- **Schedule does not run the self-rollout gate:** a rollout scheduled from the primary checkout gets it as Project root, and execute § 2.6 refuses it at launch. Re-point the note at `~/repos/tools/thread-skill-rollout` and fast-forward that clone ([[thread-skill-schedule-runs-the-self-rollout-gate]]).
+
 ## Resume instructions
 
-The P16+P17 rollout `thread-skill-rollout-2026-10-09` is running in its own execute session (handoff consumed 2026-10-09). Check it with `/thread:status [[thread-skill-rollout-2026-10-09]]`; `/thread:repair` if it stalls. After P16 merges, p13-4 (release 3.0) is unblocked.
+**Now (from 2026-10-09, late): P16 and P17 have landed (#97 to #105). The primary checkout is held while `[[chorus-rollout-2026-10-09]]` runs from it (ADR 0031).**
+1. **When the Chorus rollout ends:** `git reset --keep origin/master` here, so the P16/P17 skills go live. Never pull, switch or update the plugin here while Chorus runs.
+2. **[[thread-skill-load-tolerant-timing-tests]] before the next rollout.** It is high priority: the 12a timing flake turned every Integration verify red at ceiling 4.
+3. **p13-4, release 3.0** ([[thread-skill-p13-4-release-3-0-and-e2e]], unblocked), in the session lane once the checkout is current: `make evals` first. Then [[ab-fable-vs-opus-planning]].
+4. **Retro:** `/thread:retro [[thread-skill-rollout-2026-10-09]]`, the first Retro on a live Run record ([[thread-skill-p15-6-first-retro-chorus-ceiling-3-to-5]] owns the live-record Retro).
+5. **Follow-ons:** [[thread-skill-schedule-runs-the-self-rollout-gate]], [[thread-skill-execute-needs-you-c-gaps]].
 
-**Earlier instructions (pre-handoff):**
+**Superseded 2026-10-09 (late):**
 
 
 **Now (from 2026-10-06): P15 has landed. `[[chorus-rollout-2026-10-06]]` is running from the primary checkout at `1c5c3ca`, so the checkout is held again (ADR 0031).**
@@ -1085,6 +1119,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-10-09 (close): executed `[[thread-skill-rollout-2026-10-09]]` to 9/9 (#97 to #105, 11h 6m, Opus) from the rollout clone, after the self-rollout gate refused the live checkout as Project root. Load-flaky `make test` (12a) forced three integrate calls; p16-1 (an Integration rejection against #97) and p16-5 (a plan-block) were handed back by the lead and converged. P16 and P17 closed; three follow-ons filed; METHOD K120.
 - 2026-10-09: orient reshuffle — P17 (queue fixes from live runs) formed, p12-13/p14-7 closed, p15-6 absorbs the live-record Retro, 3.0 gated after P16; thread-skill-rollout-2026-10-09 scheduled (P16+P17, 9 tasks); p16-2 landed in claude-workspaces PR #4; handed off to a fresh execute session.
 
 - 2026-10-06 (close): executed `[[thread-skill-rollout-2026-10-04]]` to 5/5 (#89 to #93, 17h 39m, Opus lock); p15-2 plan-blocked once and converged after a hand-back. About 12h of the run was an overnight stall on the lead's own AskUserQuestion. Grilled it into P16 (unattended rollouts, p16-1 to p16-5 filed). Created the events symlink; fast-forwarded the primary to `1c5c3ca` mid-way through a Chorus run (a hold breach, in Known quirks). Memory: `wave-repair-autonomy` updated; METHOD K118.
