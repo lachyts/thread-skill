@@ -3885,7 +3885,8 @@ def cmd_descope(args) -> int:
 
 # The task-note markers only verbs write: the agent and infra retries spent in the current stretch, the free quota
 # retries, the fingerprint of the block last re-entered (by auto-retry or hand-back) and the last auto-retry's stamp
-# (the quota cool-down's base). hand-back clears the two counters, carry clears them too, defer clears all four.
+# (the quota and infra cool-downs' base, and the stamp on its `## Notes` line). hand-back clears the two counters,
+# carry clears them too, defer clears all four.
 AUTO_RETRIES_USED_KEY = "auto_retries_used"
 QUOTA_RETRIES_USED_KEY = "quota_retries_used"
 AUTO_RETRY_SHA_KEY = "auto_retry_sha"
@@ -3894,6 +3895,11 @@ AUTO_RETRY_KEYS = (AUTO_RETRIES_USED_KEY, QUOTA_RETRIES_USED_KEY, AUTO_RETRY_SHA
 # A quota block (a dead call whose error line reads as a usage or rate limit) is retried free after a cool-down, from
 # the later of its run stamp and the last retry: 30, 60, 120, 240, then 480 minutes (about 15.5 h), then a human.
 QUOTA_COOLDOWN_MIN = (30, 60, 120, 240, 480)
+# An infra block (the engine's TRANSIENT_DIAGNOSIS, or any other dead call) spends the budget after a short cool-down,
+# from the same base: INFRA_COOLDOWN_MIN[auto_retries_used], the last repeating (15, then 60 minutes on the default
+# budget of 2). A usage limit that kills an agent mid-run reads as TRANSIENT, never as a quota line, so this back-off
+# is all it gets: a longer limit still reaches a human once the budget is spent (ADR 0033 decision 5).
+INFRA_COOLDOWN_MIN = (15, 60, 240)
 # merge-task.sh's exit-1 texts a code fix on the branch can clear (an allowlist: every other exit-1 text, today's and
 # any future wording, is a human's). Each is pinned against merge-task.sh by the auto-retry suite.
 MERGE_TASK_FIXABLE = ("has a MERGE CONFLICT with", "a REQUIRED check FAILED on PR")
@@ -4640,7 +4646,7 @@ def main() -> int:
                     help="assertion: inputs' autoRetryBudget.autoRetries.value (a mismatch refuses)")
     ar.add_argument("--fingerprint", default=None, help="assertion: inputs' fingerprint (a mismatch refuses)")
     ar.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
-    ar.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the stamps and the quota cool-down)")
+    ar.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the stamps and a retry cool-down)")
     ar.add_argument("--dry-run", action="store_true", help="print the outcome; write and record nothing")
     ar.set_defaults(func=cmd_auto_retry)
 

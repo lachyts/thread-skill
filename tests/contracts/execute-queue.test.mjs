@@ -487,8 +487,9 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   // runs before the halt guard (halt-guard pins that order). Skipped under a pause; it reads `inputs … --repo`, halts on
   // `autoRetryError` (§ 3's round-budget halt), acts only on `autoRetry: true`, runs the guarded verb with the two
   // assertions copied from that read (never resolved by hand), skips a plan-blocked key whose descope exited 3, notes an
-  // `autoRetryAfter` and re-runs `next`. The halt guard ends a quota cool-down `waiting` with its reason, which § 6 allows
-  // on `waiting`; § 3 has the key's row (resolved by the verbs, never the lead); *Set aside* names the re-entry first;
+  // `autoRetryAfter` and re-runs `next`. The halt guard ends a quota or infra cool-down `waiting` with its reason, which
+  // § 6 allows on `waiting`, but only while no gate-pending or UNVERIFIED task is set aside: with one, the `stuck` goes
+  // to § 7 (its reason, or the attended sign-off), so a cool-down never hides a human's item; § 3 has the key's row (resolved by the verbs, never the lead); *Set aside* names the re-entry first;
   // § 6 has the event line, the `Auto-retried:` report row, and step 5's Completion log copies the `auto-retry:` lines;
   // § 7's stuck halt waits for the retries; § 8 names the lead's verb and its route to repair; a Don't forbids a
   // hand-written retry, a hand-resolved budget and hand-written markers.
@@ -504,10 +505,13 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !ar.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py auto-retry --tasks <slug> --rollout <rollout-note> --auto-retries <inputs.autoRetryBudget.autoRetries.value> --fingerprint <inputs.fingerprint>`') ||
     !ar.includes('both values copied from that `inputs`, never resolved by hand') ||
     !ar.includes('skipping a `plan-blocked` key whose descope exited 3 this session') ||
-    !ar.includes('Note any `autoRetryAfter` (a quota cool-down) for the halt guard') ||
+    !ar.includes('Note any `autoRetryAfter` (a quota or infra cool-down), with its `autoRetryClass`, for the halt guard') ||
+    !ar.includes('each of its retries first waits a short cool-down, 15, then 60, then 240 minutes') ||
     !ar.includes('If any retry ran, re-run `next --running <the live slugs>`') ||
-    !guard.includes('A `stuck` while step 1.2 found an `autoRetryAfter` (a quota cool-down) ends the turn `waiting` with `reason="quota cool-down: [[<slug>]] retries at <autoRetryAfter>"`') ||
-    !s6all.includes('`reason` appears only on `halted`, on a hold and on a quota cool-down') ||
+    !guard.includes('A `stuck` while step 1.2 found an `autoRetryAfter` (a quota or infra cool-down), and no gate-pending or UNVERIFIED task among the set-aside entries, ends the turn `waiting` with `reason="<autoRetryClass> cool-down: [[<slug>]] retries at <autoRetryAfter>"`') ||
+    !guard.includes('With a gate-pending or UNVERIFIED task among them, a cool-down holds nothing back: the `stuck` goes to § 7 as usual') ||
+    !guard.includes('or, when the user is present, the in-conversation sign-off of § 3.7') ||
+    !s6all.includes('`reason` appears only on `halted`, on a hold and on a retry cool-down') ||
     !arRow.includes('resolved by `lead-integrate.py inputs` and `reconcile-rollout.py auto-retry` themselves (built-in `2`)') ||
     !arRow.includes('not passed to the engine') || !arRow.includes('`0` disables every automatic retry') ||
     !arRow.includes('The lead never resolves it') ||
@@ -515,7 +519,7 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !s6all.includes('"[[task-q]] → auto-retry 1/2 (plan; feedback <sha>); restarting"') || !s6all.includes('Auto-retried: [[task-q]]') ||
     !s6all.includes('The `Auto-retried:` line lists every automatic retry this rollout has recorded (its `## Notes` `auto-retry:` lines)') ||
     !arLog.includes('the automatic retries copied from its `auto-retry:` lines') ||
-    !arStuck.includes("acted on only once step 1.2's *Automatic retry* re-entered nothing and found no quota cool-down") ||
+    !arStuck.includes("acted on only once step 1.2's *Automatic retry* re-entered nothing and found no cool-down, or found one with an UNVERIFIED or gate-pending task set aside") ||
     !never.includes("The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*)") ||
     !never.includes('a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair') ||
     !donts.includes('Never auto-retry unless `inputs` reports `autoRetry: true`, never pass a budget you resolved yourself') ||
@@ -852,8 +856,18 @@ test('control: an Automatic retry without the autoRetryError halt fails auto-ret
 test('control: an Automatic retry that re-judges a descope refusal fails auto-retry', () => {
   only(sk(', skipping a `plan-blocked` key whose descope exited 3 this session', ''), 'auto-retry', 'descope exit 3')
 })
-test('control: a quota cool-down that halts fails auto-retry', () => {
-  only(sk('(a quota cool-down) ends the turn `waiting` with `reason="quota cool-down', '(a quota cool-down) halts with `reason="quota cool-down'), 'auto-retry', 'cool-down halts')
+test('control: a cool-down that halts fails auto-retry', () => {
+  only(sk('set-aside entries, ends the turn `waiting` with `reason="<autoRetryClass> cool-down', 'set-aside entries, halts with `reason="<autoRetryClass> cool-down'), 'auto-retry', 'cool-down halts')
+})
+test('control: a cool-down that waits over a gate-pending or UNVERIFIED task fails auto-retry', () => {
+  only(sk(', and no gate-pending or UNVERIFIED task among the set-aside entries,', ''), 'auto-retry', 'cool-down hides a gate')
+})
+test("control: a cool-down that never routes a gate to § 7 fails auto-retry", () => {
+  only(sk(" With a gate-pending or UNVERIFIED task among them, a cool-down holds nothing back: the `stuck` goes to § 7 as usual (its `UNVERIFIED undecided` or `gated inputs await sign-off` reason, or, when the user is present, the in-conversation sign-off of § 3.7), since a human is needed anyway, and the cooling task retries at the re-invocation after it.", ''),
+    'auto-retry', 'no § 7 route')
+})
+test('control: an infra retry with no cool-down fails auto-retry', () => {
+  only(sk('; each of its retries first waits a short cool-down, 15, then 60, then 240 minutes (the last repeating), counted by the retries already spent', ''), 'auto-retry', 'no infra cool-down')
 })
 test('control: § 3 without the auto_retries row fails auto-retry', () => {
   const l = real.skill.split('\n').find((x) => x.startsWith('| `auto_retries` |'))
@@ -870,7 +884,7 @@ test('control: a Completion log that drops the auto-retry lines fails auto-retry
   only(sk(' the automatic retries copied from its `auto-retry:` lines (task, count, stage, feedback sha, any raise),', ''), 'auto-retry', 'no log copy')
 })
 test('control: a § 7 stuck halt that ignores the retries fails auto-retry', () => {
-  only(sk(", acted on only once step 1.2's *Automatic retry* re-entered nothing and found no quota cool-down", ''), 'auto-retry', 'stuck early')
+  only(sk(", acted on only once step 1.2's *Automatic retry* re-entered nothing and found no cool-down, or found one with an UNVERIFIED or gate-pending task set aside, which a cool-down never holds back, §4.5 step 1.5", ''), 'auto-retry', 'stuck early')
 })
 test('control: § 8 without the auto-retry sentence fails auto-retry', () => {
   only(sk(" The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*), a guarded deterministic verb with its own budget: a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair.", ''),

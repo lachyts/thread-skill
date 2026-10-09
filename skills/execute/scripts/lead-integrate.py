@@ -69,11 +69,12 @@ Subcommands:
       {value, source}, resolved task -> rollout -> rollouts.toml -> built-in by reconcile-rollout.py
       _retry_budget; null until it resolves), autoRetriesUsed and quotaRetriesUsed (the note's counters, 0 when
       absent, null when malformed), fingerprint (the latest block's run sha), autoRetryRaise (lastRound + 1 when
-      a retry re-enters a revise with no round left) and autoRetryAfter (a quota block's cool-down end). The
-      rollout note (<note dir>/<rollout>.md) is read and the budget resolved only for a note set aside at its run
-      or at Integration, so every other read stays cheap; a resolver failure is in the JSON and the exit stays 0.
+      a retry re-enters a revise with no round left) and autoRetryAfter (a quota or infra block's cool-down
+      end). The rollout note (<note dir>/<rollout>.md) is read and the budget resolved only for a note set aside
+      at its run or at Integration, so every other read stays cheap; a resolver failure is in the JSON and the
+      exit stays 0.
       --max-review-rounds K that differs from the resolved max_review_rounds means no retry. --now is the time
-      a quota cool-down is read against (default: now).
+      a cool-down is read against (default: now).
 
   plan --note N
       The task's approved plan, for the two launches that pass it (execute § 4.5 step 1.2's seeded revise,
@@ -768,7 +769,10 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
       9. a quota block: 5 free retries spent, or still cooling (`autoRetryAfter`: the later of the block's run stamp
          and `auto_retry_at`, plus QUOTA_COOLDOWN_MIN[quota_retries_used]); malformed counters or stamps fail closed;
      10. an agent or infra block: `auto_retries_used` >= the budget (malformed: fails closed);
-     11. an agent block whose fingerprint equals `auto_retry_sha` (the block last re-entered).
+     11. an agent block whose fingerprint equals `auto_retry_sha` (the block last re-entered);
+     12. an infra block still cooling (`autoRetryAfter`: the same base plus INFRA_COOLDOWN_MIN[auto_retries_used], the
+         last repeating; no stamp fails closed): a usage limit that kills an agent mid-run reads as infra, so its
+         retries are spread out rather than spent at once.
     Otherwise `autoRetry: true`, with `autoRetryRaise` = lastRound + 1 when resumeAt is revise and the resolved
     max_review_rounds is <= lastRound (repair's raise: one round per retry)."""
     out = {k: None for k in AUTO_RETRY_KEYS}
@@ -835,21 +839,34 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
     if note.get(rr.AUTO_RETRY_AT_KEY) is not None and last_at is None:
         return no(f"malformed {rr.AUTO_RETRY_AT_KEY}: {note.get(rr.AUTO_RETRY_AT_KEY)!r} (fails closed)")
     cls = out["autoRetryClass"]
+
+    def cooling(minutes):
+        """The cool-down's refusal while `now` is before the later of the block's run stamp and the last retry, plus
+        `minutes` (setting `autoRetryAfter`), or None once it has passed. No stamp at all fails closed."""
+        stamps = [s for s in (rr._block_stamp(note), last_at) if s is not None]
+        if not stamps:
+            return no(f"{cls}: no block stamp to time the cool-down from (fails closed)")
+        after = max(stamps) + timedelta(minutes=minutes)
+        if now < after:
+            out["autoRetryAfter"] = rr._stamp(after)
+            return no(f"{cls} cool-down: retries at {out['autoRetryAfter']}")
+        return None
+
     if cls == "quota":
         if quota >= len(rr.QUOTA_COOLDOWN_MIN):
             return no(f"quota: {quota}/{len(rr.QUOTA_COOLDOWN_MIN)} free retries outlasted: a human")
-        stamps = [s for s in (rr._block_stamp(note), last_at) if s is not None]
-        if not stamps:
-            return no("quota: no block stamp to time the cool-down from (fails closed)")
-        after = max(stamps) + timedelta(minutes=rr.QUOTA_COOLDOWN_MIN[quota])
-        if now < after:
-            out["autoRetryAfter"] = rr._stamp(after)
-            return no(f"quota cool-down: retries at {out['autoRetryAfter']}")
+        refused = cooling(rr.QUOTA_COOLDOWN_MIN[quota])
+        if refused:
+            return refused
     else:
         if used >= n:
             return no(f"budget: {used}/{n} used")
         if cls == "agent" and out["fingerprint"] == rr._scalar(note.get(rr.AUTO_RETRY_SHA_KEY)):
             return no("same feedback as the block last re-entered")
+        if cls == "infra":
+            refused = cooling(rr.INFRA_COOLDOWN_MIN[min(used, len(rr.INFRA_COOLDOWN_MIN) - 1)])
+            if refused:
+                return refused
     if inp.get("resumeAt") == "revise" and k <= inp.get("lastRound", 0):
         out["autoRetryRaise"] = inp["lastRound"] + 1
     out["autoRetry"] = True
@@ -947,7 +964,7 @@ def main(argv=None):
     ip.add_argument("--note", required=True)
     ip.add_argument("--max-review-rounds", type=int, default=None)
     ip.add_argument("--repo", default=None, help="also print the task tree's worktreePath")
-    ip.add_argument("--now", type=rr._iso_arg, default=None, help="the time the quota cool-down is read against (default: now)")
+    ip.add_argument("--now", type=rr._iso_arg, default=None, help="the time a retry cool-down is read against (default: now)")
 
     pl = sub.add_parser("plan", help="the task note's approved plan, for a seeded revise's resume.plan or an integrate call's plan")
     pl.add_argument("--note", required=True)

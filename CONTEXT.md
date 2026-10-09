@@ -345,8 +345,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: approval item, spend gate, pre-approval.
 - **Agent-fixable block** — a block a re-dispatched agent can resolve alone.
   The live lead re-enters these itself through `reconcile-rollout.py
-  auto-retry`, up to `auto_retries` times (default 2; a quota block waits out a
-  cool-down instead, ADR 0033); repair keeps the ones that need a human (a spent
+  auto-retry`, up to `auto_retries` times (default 2; an infra block after a
+  short cool-down, while a quota block waits out a longer one free, ADR 0033);
+  repair keeps the ones that need a human (a spent
   budget, a repeated feedback fingerprint, a `## Needs you` question). _Avoid_:
   auto-block, soft block.
 - **Automatic descope** — a plan-block the notes already settle, dropped from

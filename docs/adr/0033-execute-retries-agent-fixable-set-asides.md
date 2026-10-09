@@ -35,13 +35,20 @@ grill's question was how much of that the live lead may do alone without ever hi
 4. **The fingerprint stop.** Each retry stores the block's feedback fingerprint (its run's `<!-- run n end
    sha=… -->` sha) as `auto_retry_sha`. An agent block whose fingerprint equals it stops at once: an agent given
    the same feedback again would do the same thing. A transient or a dead call is exempt (the same failure is the
-   expected shape of a flaky infrastructure), and the budget still bounds it. The fingerprint is compared with the
-   stored sha, never with the previous run, because reconcile writes no new run for identical content.
-5. **Quota blocks are retried free, after a cool-down.** A dead call whose error reads as a usage or rate limit
-   spends no budget and has no fingerprint stop. It is retried after 30, 60, 120, 240, then 480 minutes, measured
-   from the later of its block's run stamp and the last retry: five free retries (about 15.5 hours), then a human.
-   While a cool-down is pending, a `stuck` queue ends its turn `waiting`, not `halted`, so the heartbeat keeps
-   ticking and re-enters after it.
+   expected shape of a flaky infrastructure), and the budget still bounds it, each retry after decision 5's
+   short cool-down. The fingerprint is compared with the stored sha, never with the previous run, because
+   reconcile writes no new run for identical content.
+5. **Quota blocks are retried free, after a cool-down; infra blocks after a short one.** A dead call whose error
+   reads as a usage or rate limit spends no budget and has no fingerprint stop. It is retried after 30, 60, 120,
+   240, then 480 minutes, measured from the later of its block's run stamp and the last retry: five free retries
+   (about 15.5 hours), then a human. An infra block (the engine's transient, or any other dead call) spends the
+   budget, and each of its retries first waits 15, then 60, then 240 minutes (the last repeating, indexed by the
+   retries already spent), from the same base, so identical dead calls are spread out rather than spent within
+   minutes. While a cool-down is pending, a `stuck` queue ends its turn `waiting`, not `halted`, so the heartbeat
+   keeps ticking and re-enters after it; but only while no gate-pending or UNVERIFIED task is set aside. Those need
+   a human anyway, so with one among the set-asides the `stuck` halts as execute § 7 says (its `gated inputs await
+   sign-off` or `UNVERIFIED undecided` reason, or, attended, the in-conversation sign-off), and the cooling task
+   retries at the re-invocation after it.
 6. **The budget's lifetime.** `auto-retry` spends it (`auto_retries_used`, or `quota_retries_used`).
    `hand-back`, the explicit re-entry (repair after Lachy answers, "retry [[task]]", the lead after a descope),
    clears both counters and re-stamps `auto_retry_sha` with the block it re-enters: after a human answer the
@@ -80,6 +87,13 @@ Considered:
 - *A denylist of merge-task's human texts.* A new wording would be retried by default; the allowlist fails closed.
 - *Quota never retried (a halt).* It turns every overnight usage limit into a dead night. *Quota spending the
   budget.* Two limits in a night would exhaust it on blocks nobody can act on.
+- *Infra retried at once.* The engine has already retried a dead agent once in-run, and a usage limit that kills
+  an agent reads as infra (Consequences), so an immediate retry would spend the budget within minutes. The short
+  cool-down spreads it out without holding a genuine blip for long.
+- *A cool-down that waits over a gate-pending or UNVERIFIED task.* It keeps the queue `waiting` for up to the
+  quota's 15.5 hours, and in that time the `gated inputs await sign-off` and `UNVERIFIED undecided` reasons are
+  never shown and an attended lead never asks for the sign-off. A human is needed for those either way, so the
+  halt comes first and only the cooling task's retry waits for the re-invocation.
 - *A budget per stage.* More state for no observed need; the fingerprint stop already catches a loop.
 - *Making `auto_retries` Retro-tunable.* It is no throughput dial and nothing in the Run record scores it yet;
   it stays a plain setting until a Retro shows a rule.
@@ -90,10 +104,22 @@ Considered:
 
 - **Amends ADR 0030 decision 4.** A set-aside task resumes at the stage it stopped, as before, but the live lead
   now re-enters the agent-fixable ones itself, up to `auto_retries`, before a hand-back is needed; the rollout
-  halts `stuck` only once nothing is retryable and no quota cool-down is pending.
+  halts `stuck` only once nothing is retryable and no cool-down is pending, or at once when a gate-pending or
+  UNVERIFIED task needs a human anyway.
 - **Amends ADR 0004.** Repair is still a conductor and still the one place a human's decision is captured, but it
   is no longer the only place an agent-fixable block is retried: it keeps the ones a spent budget, a repeated
   fingerprint or a `needsHuman` question hands it.
 - `hand-back` now writes frontmatter markers (the counters cleared, `auto_retry_sha` stamped); its stdout is
   unchanged.
+- **A usage limit inside an agent is not a quota block.** The quota class reads only a `workflow call failed:`
+  error line. A usage limit that kills an agent mid-run surfaces as the engine's transient block (or a thrown
+  stage), which is infra: it gets the infra cool-downs (75 minutes in all on the default budget of 2) and then a
+  human, never the quota's 15.5 hours. p16-5's prose and a Retro must not count such a limit as covered by
+  decision 5.
+- **The idle-slots label during a cool-down.** `next` is stateless and never reads the verdict, so while a
+  set-aside task waits out a cool-down with nothing queued, the idle-slots reason is `awaiting-hand-back`; a
+  Retro tells the two apart by the `auto-retry` event before the restart that ends the span (run_record.py's
+  docstring).
+- A run-stage automatic retry's restart records `slot-taken start: hand-back`, as any hand-back's does: it
+  stamps `handed_back:` through hand-back's own transition, and its `auto-retry` event precedes the restart.
 - Status and repair still describe their own routes; their prose catches up with this decision in p16-5.

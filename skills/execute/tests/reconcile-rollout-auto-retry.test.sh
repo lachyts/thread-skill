@@ -8,8 +8,8 @@
 #   A3  a `## Needs you` question never retries   A4 every excluded kind   A5 merge-task's fixable exit-1 texts
 #   A6  the budget: task, rollout, rollouts.toml and built-in; invalid stamps; a refused file; the assertions
 #   A7  the records (the brief untouched, repair's raise regex, a re-run, a partial write)   A8 the raise
-#   A9  an Integration set-aside   A10 infra blocks   A11 quota blocks and their cool-down   A12 the budget lifetime
-#   A13 the queue   A14 the Run record   A15 the pins (merge-task.sh, lead-integrate.py, execute SKILL.md)
+#   A9  an Integration set-aside   A10 infra blocks and their cool-down   A11 quota blocks and theirs   A12 the budget lifetime
+#   A13 the queue   A14 the Run record   A15 the pins (merge-task.sh, lead-integrate.py, execute SKILL.md, the cool-downs)
 # The blocks are built through the real `reconcile` (and `lead-integrate.py set-aside` for the lead's own rows).
 # Hermetic: HOME is an empty dir of its own (rollout-settings.py reads ~/.config/thread/rollouts.toml), each
 # scenario's Project root is a temp dir, and this suite reads the Run record, so it keeps its own
@@ -519,29 +519,56 @@ ok "$(j "$(nxt "")" 'd["awaitingIntegration"]')" "[\"$A\"]" "A9: next lists it a
 ok "$(since "$M")" "ready:$A auto-retry:$A" "A9: a ready event, then auto-retry"
 ok "$(lastev auto-retry '[d["stage"], d["setAsideAt"], d["retryClass"]]')" '["integrate","integration","agent"]' "A9: stage integrate, setAsideAt integration"
 
-# ── A10: infra blocks are exempt from the same-fingerprint stop; the budget still bounds them ─────────────────
+# ── A10: infra blocks: a short cool-down, no same-fingerprint stop; the budget still bounds them ───────────────
 scen a10-transient
 mkro; mkt "$A" open; mkt "$B" open
 planblock "$A" "$TRANSIENT"
-I=$(inp "$A")
-ok "$(j "$I" '[d["autoRetry"], d["autoRetryClass"]]')" '[true,"infra"]' "A10: a TRANSIENT plan-block → infra, retryable"
-ar "$A"; ok "$rc" 0 "A10: retry 1"
-ms "$A"; planblock "$A" "$TRANSIENT" 2026-10-03T09:10:00Z
+I=$(INOW=2026-10-03T08:00:00Z inp "$A")
+ok "$(j "$I" '[d["autoRetry"], d["autoRetryClass"], d["autoRetryAfter"], d["autoRetryWhy"]]')" \
+  '[false,"infra","2026-10-03T08:15+00:00","infra cool-down: retries at 2026-10-03T08:15+00:00"]' \
+  "A10: a TRANSIENT plan-block → infra, cooling 15 minutes from its run stamp (INFRA_COOLDOWN_MIN[0])"
+before=$(snap)
+ANOW=2026-10-03T08:14:00Z ar "$A"
+ok "$rc|$(snap)" "1|$before" "A10: the verb refuses while it cools (nothing written)"
+has "$out" "not auto-retryable: infra cool-down: retries at 2026-10-03T08:15+00:00" "A10: the ERROR names the cool-down"
+ok "$(j "$(INOW=2026-10-03T08:15:00Z inp "$A")" '[d["autoRetry"], d["autoRetryClass"], d["autoRetryAfter"]]')" '[true,"infra",null]' "A10: at +15 → retryable"
+ANOW=2026-10-03T08:15:00Z ar "$A"; ok "$rc|$(fm "$A" auto_retry_at)" "0|auto_retry_at: 2026-10-03T08:15+00:00" "A10: retry 1"
+ms "$A" 2026-10-03T08:16:00Z; planblock "$A" "$TRANSIENT" 2026-10-03T08:30:00Z
 ok "$(grep -c '^### Run ' "$D/$A.md")" 1 "A10: the identical transient wrote no new run"
-ok "$(j "$(inp "$A")" '[d["autoRetry"], d["autoRetriesUsed"]]')" '[true,1]' "A10: the identical transient is still retryable (infra: no fingerprint stop)"
-ar "$A"; ok "$rc|$(fm "$A" auto_retries_used)" "0|auto_retries_used: 2" "A10: retry 2"
-ms "$A"; planblock "$A" "$TRANSIENT" 2026-10-03T09:20:00Z
-ok "$(j "$(inp "$A")" '[d["autoRetry"], d["autoRetryWhy"]]')" '[false,"budget: 2/2 used"]' "A10: the third stops on the budget"
+ok "$(j "$(INOW=2026-10-03T08:30:00Z inp "$A")" '[d["autoRetry"], d["autoRetriesUsed"], d["autoRetryAfter"]]')" '[false,1,"2026-10-03T09:15+00:00"]' \
+  "A10: the identical re-block cools 60 minutes from the last retry (INFRA_COOLDOWN_MIN[1], the later base)"
+ok "$(j "$(INOW=2026-10-03T09:15:00Z inp "$A")" '[d["autoRetry"], d["autoRetriesUsed"]]')" '[true,1]' \
+  "A10: then the identical transient is still retryable (infra: no fingerprint stop)"
+ANOW=2026-10-03T09:15:00Z ar "$A"; ok "$rc|$(fm "$A" auto_retries_used)" "0|auto_retries_used: 2" "A10: retry 2"
+ms "$A" 2026-10-03T09:16:00Z; planblock "$A" "$TRANSIENT" 2026-10-03T09:30:00Z
+ok "$(j "$(INOW=2026-10-03T09:30:00Z inp "$A")" '[d["autoRetry"], d["autoRetryWhy"], d["autoRetryAfter"]]')" '[false,"budget: 2/2 used",null]' \
+  "A10: the third stops on the budget (no cool-down to wait out)"
+setfm "$A" auto_retries 3
+ok "$(j "$(INOW=2026-10-03T09:30:00Z inp "$A")" 'd["autoRetryAfter"]')" "2026-10-03T13:15+00:00" "A10: a third retry (auto_retries: 3) cools 240 minutes"
+setfm "$A" auto_retries 5; setfm "$A" auto_retries_used 4
+ok "$(j "$(INOW=2026-10-03T09:30:00Z inp "$A")" 'd["autoRetryAfter"]')" "2026-10-03T13:15+00:00" "A10: the last cool-down repeats"
 scen a10-dead
 mkro; mkt "$A" in_progress "owner: execute-test"; mkt "$B" open
 lead "$A" own "workflow call failed: no result row"
-ok "$(j "$(inp "$A")" '[d["autoRetry"], d["autoRetryClass"]]')" '[true,"infra"]' "A10: a non-quota dead call → infra"
-ar "$A"; ok "$rc" 0 "A10 dead: retry 1"
-ms "$A"; setfm "$A" status in_progress; lead "$A" own "workflow call failed: no result row" 2026-10-03T09:10:00Z
-ok "$(j "$(inp "$A")" 'd["autoRetry"]')" true "A10 dead: the identical dead call is still retryable"
-ar "$A"; ok "$rc" 0 "A10 dead: retry 2"
-ms "$A"; setfm "$A" status in_progress; lead "$A" own "workflow call failed: no result row" 2026-10-03T09:20:00Z
-ok "$(j "$(inp "$A")" 'd["autoRetryWhy"]')" "budget: 2/2 used" "A10 dead: the third stops on the budget"
+ok "$(j "$(INOW=2026-10-03T08:14:00Z inp "$A")" '[d["autoRetry"], d["autoRetryClass"], d["autoRetryAfter"]]')" '[false,"infra","2026-10-03T08:15+00:00"]' \
+  "A10: a non-quota dead call → infra, cooling"
+ANOW=2026-10-03T08:15:00Z ar "$A"; ok "$rc" 0 "A10 dead: retry 1, after its cool-down"
+ms "$A" 2026-10-03T08:16:00Z; setfm "$A" status in_progress; lead "$A" own "workflow call failed: no result row" 2026-10-03T08:30:00Z
+ok "$(j "$(INOW=2026-10-03T09:14:00Z inp "$A")" 'd["autoRetryAfter"]')" "2026-10-03T09:15+00:00" "A10 dead: the identical dead call cools 60 minutes"
+ok "$(j "$(INOW=2026-10-03T09:15:00Z inp "$A")" 'd["autoRetry"]')" true "A10 dead: then it is still retryable"
+ANOW=2026-10-03T09:15:00Z ar "$A"; ok "$rc" 0 "A10 dead: retry 2"
+ms "$A" 2026-10-03T09:16:00Z; setfm "$A" status in_progress; lead "$A" own "workflow call failed: no result row" 2026-10-03T09:30:00Z
+ok "$(j "$(INOW=2026-10-03T12:00:00Z inp "$A")" 'd["autoRetryWhy"]')" "budget: 2/2 used" "A10 dead: the third stops on the budget"
+scen a10-legacy
+mkro; mkt "$A" open; mkt "$B" open
+planblock "$A" "$TRANSIENT"
+python3 - "$D/$A.md" <<'PY2'
+import re, sys
+p = sys.argv[1]; t = open(p).read()
+open(p, "w").write(re.sub(r"^### Run (\d+) \([^)]*\)", r"### Run \1", t, flags=re.M))
+PY2
+ok "$(j "$(INOW=2026-10-04T08:00:00Z inp "$A")" '[d["autoRetry"], d["autoRetryWhy"]]')" '[false,"infra: no block stamp to time the cool-down from (fails closed)"]' \
+  "A10: an infra block with no run stamp and no auto_retry_at fails closed"
 
 # ── A11: quota blocks: free retries after a cool-down ─────────────────────────────────────────────────────
 scen a11
@@ -661,7 +688,7 @@ pin() {
 import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 print(json.dumps({"fix": list(m.MERGE_TASK_FIXABLE), "gone": m.BRANCH_GONE_MARK, "declined": m.DECLINED_MARK,
-                  "cool": list(m.QUOTA_COOLDOWN_MIN), "keys": list(m.AUTO_RETRY_KEYS)}))
+                  "cool": list(m.QUOTA_COOLDOWN_MIN), "infra": list(m.INFRA_COOLDOWN_MIN), "keys": list(m.AUTO_RETRY_KEYS)}))
 PY
 }
 P=$(pin)
@@ -676,6 +703,11 @@ done
 ok "$(grep -c -F -- "$(j "$P" 'd["gone"]')" "$LI" | awk '{print ($1 > 0)}')" 1 "A15: BRANCH_GONE_MARK is lead-integrate.py prepare's text"
 ok "$(grep -c -F -- "$(j "$P" 'd["declined"]')" "$SKILL" | awk '{print ($1 > 0)}')" 1 "A15: DECLINED_MARK is execute SKILL.md's decline reason"
 ok "$(j "$P" 'd["cool"]')" '[30,60,120,240,480]' "A15: QUOTA_COOLDOWN_MIN"
+ok "$(j "$P" 'd["infra"]')" '[15,60,240]' "A15: INFRA_COOLDOWN_MIN"
+ok "$(grep -c -F -- "a short cool-down, 15, then 60, then 240 minutes (the last repeating)" "$SKILL" | awk '{print ($1 > 0)}')" 1 \
+  "A15: execute SKILL.md states INFRA_COOLDOWN_MIN"
+ok "$(grep -c -F -- "after a cool-down of 30, 60, 120, 240, then 480 minutes" "$SKILL" | awk '{print ($1 > 0)}')" 1 \
+  "A15: execute SKILL.md states QUOTA_COOLDOWN_MIN"
 ok "$(j "$P" 'd["keys"]')" '["auto_retries_used","quota_retries_used","auto_retry_sha","auto_retry_at"]' "A15: the four markers"
 
 echo
