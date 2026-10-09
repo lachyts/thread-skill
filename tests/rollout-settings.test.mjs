@@ -1,6 +1,7 @@
 // skills/_shared/scripts/rollout-settings.py — the resolver for the operator's rollout settings (p15-4, ADR 0032).
 //
-// The file is `~/.config/thread/rollouts.toml`, ladder.toml's sibling: `[defaults]` (the four rollout keys),
+// The file is `~/.config/thread/rollouts.toml`, ladder.toml's sibling: `[defaults]` (the five rollout keys: the four
+// Tuning keys and execute's `auto_retries`, p16-4),
 // `[guardrails]` (the Retro's bounds) and `[repo."owner/name"]` tables keyed by the GitHub origin that
 // `land.sh --origin-slug` reads from the local clone. No file gives the built-in values. A present file that
 // does not validate is refused with one `rollout-settings: <path>[:<line>]: <reason>` line (ADR 0016's typo
@@ -19,9 +20,13 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPT = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings.py')
+// KEYS are the four Tuning keys (run_record.py's TUNING_KEYS, tune.py and score.py read them); SETTING_KEYS adds
+// `auto_retries` (p16-4: execute's automatic retries, >= 0, not Retro-tunable): every key a `settings` object holds.
 const KEYS = ['parallel_ceiling', 'max_review_rounds', 'max_iterations', 'max_plan_rounds']
+const SETTING_KEYS = [...KEYS, 'auto_retries']
+const MINIMUM = { parallel_ceiling: 1, max_review_rounds: 1, max_iterations: 1, max_plan_rounds: 1, auto_retries: 0 }
 const GUARDRAIL_KEYS = ['tokens_per_merge_pct', 'set_aside_rate_points', 'conflict_rate_points', 'quota_stalls']
-const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3 }
+const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, auto_retries: 2 }
 const GUARDRAILS_BUILT_IN = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0 }
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 
@@ -83,16 +88,16 @@ function refused(home, { line = null, reason, code = 2, args = [], argv } = {}) 
 }
 
 function expectValues(out, values, sources) {
-  for (const k of KEYS) {
+  for (const k of SETTING_KEYS) {
     assert.deepEqual(out.settings[k], { value: values[k] ?? BUILT_IN[k], source: sources[k] ?? 'built-in' }, k)
   }
 }
 
 function assertAllBuiltIn(out) {
   assert.deepEqual(Object.keys(out), ['path', 'file', 'repo', 'settings', 'guardrails'])
-  assert.deepEqual(Object.keys(out.settings), KEYS)
+  assert.deepEqual(Object.keys(out.settings), SETTING_KEYS)
   assert.deepEqual(Object.keys(out.guardrails), GUARDRAIL_KEYS)
-  for (const k of KEYS) assert.deepEqual(out.settings[k], { value: BUILT_IN[k], source: 'built-in' })
+  for (const k of SETTING_KEYS) assert.deepEqual(out.settings[k], { value: BUILT_IN[k], source: 'built-in' })
   for (const k of GUARDRAIL_KEYS) assert.deepEqual(out.guardrails[k], { value: GUARDRAILS_BUILT_IN[k], source: 'built-in' })
 }
 
@@ -140,7 +145,25 @@ test('R2 [defaults] only, with --repo on a clone: still file:defaults, repo null
   expectValues(out, { parallel_ceiling: 2 }, { parallel_ceiling: 'file:defaults' })
 })
 
+test('R2 auto_retries (p16-4): built-in 2, and 0 is a valid [defaults] value (it disables automatic retries)', (t) => {
+  const home = tmpHome(t)
+  assert.deepEqual(resolves(home).settings.auto_retries, { value: 2, source: 'built-in' })
+  writeSettings(home, ['[defaults]', 'auto_retries = 0'])
+  const out = resolves(home)
+  expectValues(out, { auto_retries: 0 }, { auto_retries: 'file:defaults' })
+  writeSettings(home, ['[defaults]', 'auto_retries = 3'])
+  expectValues(resolves(home), { auto_retries: 3 }, { auto_retries: 'file:defaults' })
+})
+
 // ---- R3: a repo override -----------------------------------------------------------------------------------
+
+test('R3 auto_retries in a repo table overrides [defaults] (file:repo)', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['[defaults]', 'auto_retries = 3', '[repo."o/r"]', 'auto_retries = 1'])
+  const out = resolves(home, ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')])
+  assert.equal(out.repo, 'o/r')
+  expectValues(out, { auto_retries: 1 }, { auto_retries: 'file:repo' })
+})
 
 test('R3 a [repo."owner/name"] table matches the clone\'s GitHub origin, ignoring case', (t) => {
   const home = tmpHome(t)
@@ -188,9 +211,17 @@ const REFUSALS = [
   ['parallel_ceiling = "4"', ['[defaults]', 'parallel_ceiling = "4"'], 2, /must be an integer >= 1, got a string/],
   ['parallel_ceiling = true', ['[defaults]', 'parallel_ceiling = true'], 2, /must be an integer >= 1, got a boolean/],
   ['parallel_ceiling = 2.5', ['[defaults]', 'parallel_ceiling = 2.5'], 2, /must be an integer >= 1, got a float/],
+  ['auto_retries = -1', ['[defaults]', 'auto_retries = -1'], 2, /\[defaults\] auto_retries must be an integer >= 0, got -1/],
+  ['auto_retries = true', ['# settings', '[defaults]', 'auto_retries = true'], 3, /auto_retries must be an integer >= 0, got a boolean/],
+  ['auto_retries = 1.5', ['[defaults]', 'max_review_rounds = 3', 'auto_retries = 1.5'], 3, /auto_retries must be an integer >= 0, got a float/],
+  ['auto_retries = "2"', ['[defaults]', 'auto_retries = "2"'], 2, /auto_retries must be an integer >= 0, got a string/],
+  ['auto_retries = -1 in a repo table', ['[repo."o/r"]', 'parallel_ceiling = 3', 'auto_retries = -1'], 3,
+    /\[repo\."o\/r"\] auto_retries must be an integer >= 0, got -1/],
   ['an unknown key in [defaults]', ['[defaults]', 'max_review_rounds = 3', 'paralel_ceiling = 3'], 3,
     /\[defaults\]: unknown key "paralel_ceiling"/],
   ['an unknown key in a repo table', ['[repo."o/r"]', 'max_rounds = 3'], 2, /\[repo\."o\/r"\]: unknown key "max_rounds"/],
+  ['an unknown key names all five rollout keys', ['[defaults]', 'auto_retry = 1'], 2,
+    /unknown key "auto_retry" \(a rollout table holds parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, auto_retries\)/],
   ['an unknown table [default]', ['# settings', '[default]', 'parallel_ceiling = 3'], 2, /unknown top-level key "default"/],
   ['a repo key ending .git', ['[repo."o/r.git"]', 'parallel_ceiling = 3'], 1, /\.git/],
   ['a repo key that is no owner/name', ['[repo."not-a-slug"]', 'parallel_ceiling = 3'], 1, /owner\/name/],
@@ -337,7 +368,7 @@ test('R7 a guardrails override is file:guardrails; floats and quota_stalls = 0 a
     conflict_rate_points: { value: 10, source: 'built-in' },
     quota_stalls: { value: 0, source: 'file:guardrails' },
   })
-  for (const k of KEYS) assert.equal(out.settings[k].source, 'built-in')
+  for (const k of SETTING_KEYS) assert.equal(out.settings[k].source, 'built-in')
 })
 
 // ---- R8: the importable resolve() --------------------------------------------------------------------------
@@ -351,6 +382,7 @@ test('R8 the importable resolve() and constants agree with the CLI', (t) => {
     argv: ['-B', '-c', `import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location('rs', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 print(json.dumps({'out': m.resolve(repo=sys.argv[2]), 'keys': list(m.KEYS), 'gkeys': list(m.GUARDRAIL_KEYS),
+  'skeys': list(m.SETTING_KEYS), 'min': m.MINIMUM,
   'built': m.BUILT_IN, 'gbuilt': m.GUARDRAILS_BUILT_IN, 'timeout': m.ORIGIN_TIMEOUT, 'path': m.default_path()}))
 try:
     m.resolve(repo='/nonexistent/x')
@@ -361,6 +393,8 @@ except m.SettingsError as e:
   const [first, second] = r.stdout.trim().split('\n').map((l) => JSON.parse(l))
   assert.deepEqual(first.out, cli)
   assert.deepEqual(first.keys, KEYS)
+  assert.deepEqual(first.skeys, SETTING_KEYS)
+  assert.deepEqual(first.min, MINIMUM)
   assert.deepEqual(first.gkeys, GUARDRAIL_KEYS)
   assert.deepEqual(first.built, BUILT_IN)
   assert.deepEqual(first.gbuilt, GUARDRAILS_BUILT_IN)

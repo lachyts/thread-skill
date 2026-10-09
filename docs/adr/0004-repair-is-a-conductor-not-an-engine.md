@@ -1,5 +1,9 @@
 # Repair is a conductor, not an engine
 
+*(Amended by ADR 0033, 2026-10-09: repair is no longer the only place an agent-fixable block is retried. The live
+lead re-enters one itself through `reconcile-rollout.py auto-retry`, up to `auto_retries` times; repair keeps the
+blocks a spent budget, a repeated fingerprint or a question for a person hands it.)*
+
 `/thread:repair` orchestrates the existing `/thread:execute` engine to unstick a rollout — it diagnoses,
 captures human decisions into task notes, reconciles drift, and then hands off to execute's resume. It
 deliberately does **not** contain its own merge or convergence logic. We chose this because the engine's

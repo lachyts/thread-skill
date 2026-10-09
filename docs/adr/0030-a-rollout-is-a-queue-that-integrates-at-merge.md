@@ -6,6 +6,8 @@ same-file invariant and merge-wave's halt-on-conflict; grilled with Lachy 2026-0
 protocol 4's `0019-task-readiness-governs-progress.md`, never landed on master)
 Amended by ADR 0031: the primary checkout holds while a rollout runs, so a migration is a deliberate
 cut-over.
+Amended by ADR 0033: decision 4's set-aside task is re-entered by the live lead itself when its block is
+agent-fixable, up to `auto_retries` times, before a hand-back is needed.
 Amended 2026-10-09 by thread-skill-p17-2: a queued solo task's schedule rank beats `priority:` (decision 1).
 
 ## Context

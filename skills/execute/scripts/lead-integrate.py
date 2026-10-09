@@ -26,9 +26,12 @@ Subcommands:
       other failure aborts and routes `trouble []`; success routes `verify` with `mergeCommit` (unpushed),
       `sharedFiles` (task files over B...H that main changed over TB..B, or record.base..B in case ii)
       and `trouble` ["shared-file"] when there is one, else []. Always prints branch, worktreePath,
-      prHead, anchor, taskBase, mainSha, case, route, trouble, reason and landed (one {prUrl, title,
+      prHead, anchor, taskBase, mainSha, case, route, trouble, reason, landed (one {prUrl, title,
       files, taskPath} per first-parent commit in TB..B whose subject ends ` (#N)` or starts
-      `Merge pull request #N `; [] when any commit has no PR number, `note` says why).
+      `Merge pull request #N `), unlisted (one {sha, subject, files} per other first-parent commit in
+      TB..B: pushed without a PR, skipped from landed, which it never empties) and note ("" or why: when
+      origin is not a github.com remote and the task's pr: is not a PR URL, landed is [] and that reason
+      comes first, then `<n> commit(s) in <TB>..<B> name no PR …` naming each unlisted commit).
 
   verify --tree T --out O --timeout S [--bootstrap CMD] --verifier CMD [--repo R --detach-at SHA]
       Run the env bootstrap, then the verifier, each `bash -c` in its own session (process group) in T,
@@ -47,11 +50,12 @@ Subcommands:
       Drop the lead's unpushed merge: only when the tree is on its branch at M, M^1 == H and origin's
       branch is not M. Stashes tracked leftovers, then `git reset --keep H`. Exit 1 otherwise.
 
-  inputs --note N [--max-review-rounds K] [--repo R]
-      What the lead needs to (re-)enter a set-aside or restarted task: status, scope, pr, readyAt, rung (the
-      integrate call's rung record when no approving row is at hand: {startRung: "", rung: <the note's
-      `rung:` when it is a rung name, else "">, climbs: []}, so a note with no `rung:`, or only stale
-      legacy stamps, gives the neutral record), branch (and worktreePath with --repo);
+  inputs --note N [--max-review-rounds K] [--repo R] [--row FILE|-] [--now T]
+      What the lead needs to (re-)enter a set-aside or restarted task: status, scope, pr, prUrl and
+      prUrlError (below), readyAt, rung (the
+      note's rung record: {startRung: "", rung: <the note's `rung:` when it is a rung name, else "">,
+      climbs: []}, so a note with no `rung:`, or only stale legacy stamps, gives the neutral record),
+      branch (and worktreePath with --repo);
       the source run (the newer, by its
       `### Run N (<stamp>)` heading, of the latest `## Blocker diagnosis` and `## Review-blocked feedback`
       runs; a tie goes to review-blocked) parsed through a parseIntegrationMarker port (markerStage,
@@ -61,6 +65,35 @@ Subcommands:
       `integration:`, or gate-pending with the last line `set-aside`), else `own`; and autoRevise —
       blocked, the source is the Blocker run, stage revise, markerReason empty, the last line `rejected`,
       a non-empty history and lastRound < K (false without --max-review-rounds).
+      integrate (p17-1) is the integrate call's {prUrl, reviewHistory, reviewRoundsUsed, rung} (execute § 4.5
+      step 3 passes those four verbatim) plus source, rungSource, rowRefused and prUrlError. --row names the approving
+      row's result JSON (a file, or - for stdin: an envelope {rolloutSlug, tasks}, whose one entry for this
+      slug is taken, or a bare row). The row is used (source "row") only when it is this note's, `review`,
+      its prUrl a PR URL naming the note's pr:, its reviewHistory passing the engine's historyError and its
+      reviewRoundsUsed an integer >= 1, >= the history's last round and >= the note's review_rounds_used;
+      its rung record when it passes rungRecordError, else the note's (rungSource "note", rowRefused says
+      why). Otherwise, and with no --row, the note's: pr, history, reviewRoundsUsed and rung (source "note");
+      rowRefused is the one-line reason, or "" with no --row. An unreadable --row is refused, never exit 2.
+      prUrl is the note's pr: as a PR URL the engine takes, for the two launches that pass it (step 1.2's
+      seeded revise, and the integrate record's when no row is accepted): a bare `#N` (or `N`) is built on
+      --repo's GitHub origin (owner/repo), and a trailing / is dropped. prUrlError (top level, and the
+      integrate record's when it falls back to the note) is "" when prUrl is one, else why not and the fix
+      (no pr:, another form, a bare number with no --repo or no GitHub origin): the lead launches nothing on
+      it (a call it launched would fail the engine's args check, which reads as a Lost call).
+      Then the automatic retry's verdict (p16-4, ADR 0033; auto_retry_verdict, its rules in order), which every
+      caller gets and `reconcile-rollout.py auto-retry` re-runs before it writes: autoRetry, autoRetryWhy (the
+      first rule that refused, "" on true), autoRetryError (an `auto_retries` or `max_review_rounds` stamp that is
+      not a valid integer: execute § 3's halt; else null), autoRetryClass (agent | infra | quota, for a note set
+      aside at its run or at Integration; else null), autoRetryBudget ({autoRetries, maxReviewRounds}, each
+      {value, source}, resolved task -> rollout -> rollouts.toml -> built-in by reconcile-rollout.py
+      _retry_budget; null until it resolves), autoRetriesUsed and quotaRetriesUsed (the note's counters, 0 when
+      absent, null when malformed), fingerprint (the latest block's run sha), autoRetryRaise (lastRound + 1 when
+      a retry re-enters a revise with no round left) and autoRetryAfter (a quota or infra block's cool-down
+      end). The rollout note (<note dir>/<rollout>.md) is read and the budget resolved only for a note set aside
+      at its run or at Integration, so every other read stays cheap; a resolver failure is in the JSON and the
+      exit stays 0.
+      --max-review-rounds K that differs from the resolved max_review_rounds means no retry. --now is the time
+      a cool-down is read against (default: now).
 
   plan --note N
       The task's approved plan, for the two launches that pass it (execute § 4.5 step 1.2's seeded revise,
@@ -88,8 +121,9 @@ Exit codes: 0 a verdict (or verify finished; its own exit is the rc), 1 refused 
 environment, 8 retryable (prepare's fetch failed twice). Stdlib only; `Note` and `_stamp` come from
 reconcile-rollout.py (importlib), and every git and child process runs with git's repo-local variables
 (`git rev-parse --local-env-vars`) scrubbed. The engine copies (ANCHOR_RECIPE, the branch and tree names,
-the merge message, integrationMarker, parseIntegrationMarker, stageDiagnosis's escape) are pinned against
-task.workflow.js by tests/lead-integrate.test.sh.
+the merge message, integrationMarker, parseIntegrationMarker, stageDiagnosis's escape, and inputs --row's
+historyError, rungRecordError, PR_URL and STAGES) are pinned against task.workflow.js by
+tests/lead-integrate.test.sh.
 """
 
 import argparse
@@ -101,7 +135,7 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -125,6 +159,9 @@ OWN_RUN_PREFIX = "own run: "
 JS_WS = rr._JS_WS
 JS_S = "[\\t\\n\\v\\f\\r \\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff]"
 JS_DOT = "[^\\n\\r\\u2028\\u2029]"
+# The engine's PR_URL: `https://`, then JavaScript's `\S+` (no JS whitespace), `/pull/` and ASCII digits, whole.
+ENGINE_PR_URL_RE = re.compile("https://[^" + JS_S[1:] + "+/pull/[0-9]+")
+RUNG_STAGES = ("plan", "implement", "review")  # the engine's STAGES
 
 
 def js_trim(s):
@@ -214,6 +251,48 @@ def parse_integration_marker(text):
 def own_run_diagnosis(d):
     """stageDiagnosis's escape for a task's own run: a diagnosis that would parse as a marker gets `own run: `."""
     return OWN_RUN_PREFIX + d if d and parse_integration_marker(d)["stage"] != "own" else d
+
+
+def history_error(h, allow_empty):
+    """The engine's historyError: '' for a review history it accepts, else why. An integer is a JSON integer
+    (`type(x) is int`: never a bool, and a float such as 1.0 is refused, where the engine reads JSON 1.0 as 1)."""
+    if not isinstance(h, list):
+        return "must be an array"
+    if not allow_empty and not h:
+        return "must be non-empty"
+    prev = 0
+    for r in h:
+        if not isinstance(r, dict):
+            return "entries must be { round, feedback, stage? } objects"
+        n = r.get("round")
+        if not (type(n) is int and n >= 1):
+            return "round must be an integer >= 1"
+        if n <= prev:
+            return "rounds must be strictly ascending"
+        fb = r.get("feedback")
+        if not isinstance(fb, list) or any(not isinstance(f, str) for f in fb):
+            return f"round {n}: feedback must be an array of strings"
+        if "stage" in r and r["stage"] != "integration":
+            return f"round {n}: stage must be 'integration' when present"
+        prev = n
+    if not allow_empty and not any(js_trim(f) for r in h for f in r["feedback"]):
+        return "must carry at least one round with feedback"
+    return ""
+
+
+def rung_record_error(g):
+    """The engine's rungRecordError for the current shape only, { startRung, rung, climbs } (rung names or '',
+    climbs [{ stage, from, to }]): '' or why. A pre-3.0.0 tier record, which the engine reads as neutral, is
+    refused here, so a row carrying one falls back to the note's record."""
+    name = lambda v: v == "" or rr.is_rung_name(v)  # noqa: E731
+    climbs = g.get("climbs") if isinstance(g, dict) else None
+    if (not isinstance(g, dict) or sorted(g) != ["climbs", "rung", "startRung"] or not name(g["startRung"])
+            or not name(g["rung"]) or not isinstance(climbs, list)
+            or any(not isinstance(c, dict) or sorted(c) != ["from", "stage", "to"] or c["stage"] not in RUNG_STAGES
+                   or not rr.is_rung_name(c["from"]) or not rr.is_rung_name(c["to"]) for c in climbs)):
+        return (f"must be {{ startRung, rung, climbs }} (rung names or '', climbs [{{ stage: {'|'.join(RUNG_STAGES)}, "
+                f"from, to }}]), got {json.dumps(g)}")
+    return ""
 
 
 # ---- plumbing ------------------------------------------------------------------------------------------
@@ -343,23 +422,34 @@ def _pr_index(tasks_dir, owner_repo):
 
 
 def _landed(repo, tb, b, owner_repo, tasks_dir):
-    """Every PR merged in TB..B (first-parent), oldest first; [] when any commit has no PR number."""
+    """(landed, unlisted, note) over TB..B's first-parent commits, oldest first (p17-1). A commit whose subject
+    ends ` (#N)` or starts `Merge pull request #N ` is a landed PR; any other was pushed without one, so it is
+    skipped from `landed` and listed in `unlisted` as {sha, subject, files}: one PR-less commit never drops the
+    list. `landed` is [] when origin is not a github.com remote and the task's pr: is not a PR URL (no URL to
+    build); `note` says why, that reason first, then the unlisted commits."""
     if not tb or not b or tb == b:
-        return [], ""
+        return [], [], ""
     commits = out_of(git(repo, "rev-list", "--first-parent", "--reverse", f"{tb}..{b}")).split()
-    found = []
+    found, unlisted = [], []
     for c in commits:
         subject = out_of(git(repo, "log", "-1", "--format=%s", c))
-        m = re.search(r" \(#([0-9]+)\)$", subject) or re.match(r"Merge pull request #([0-9]+) ", subject)
-        if not m:
-            return [], f"commit {c[:12]} ({subject!r}) names no PR"
         files = [f for f in out_of(git(repo, "diff", "--name-only", f"{c}^1", c)).split("\n") if f]
-        found.append((m.group(1), subject, files))
-    if not owner_repo:
-        return [], "origin is not a github.com remote and the task's pr: is not a PR URL"
+        m = re.search(r" \(#([0-9]+)\)$", subject) or re.match(r"Merge pull request #([0-9]+) ", subject)
+        if m:
+            found.append((m.group(1), subject, files))
+        else:
+            unlisted.append({"sha": c, "subject": subject, "files": files})
+    why = []
+    if found and not owner_repo:
+        why.append("origin is not a github.com remote and the task's pr: is not a PR URL")
+    if unlisted:
+        why.append(f"{len(unlisted)} commit(s) in {tb[:12]}..{b[:12]} name no PR (pushed without one), listed in "
+                   "`unlisted`, not in `landed`: " + "; ".join(f"{u['sha'][:12]} {u['subject']!r}" for u in unlisted))
+    if not found or not owner_repo:
+        return [], unlisted, "; ".join(why)
     index = _pr_index(tasks_dir, owner_repo)
     return [{"prUrl": f"https://github.com/{owner_repo}/pull/{n}", "title": subject, "files": files,
-             "taskPath": index.get(n, "")} for n, subject, files in found], ""
+             "taskPath": index.get(n, "")} for n, subject, files in found], unlisted, "; ".join(why)
 
 
 def _clean_tree(tree):
@@ -410,7 +500,7 @@ def cmd_prepare(args):
     tasks_dir = Path(os.path.expanduser(args.tasks_dir)) if args.tasks_dir else _path.parent
     br, tree = branch_of(args.slug), worktree_dir(str(repo), args.slug)
     out = {"slug": args.slug, "branch": br, "worktreePath": tree, "prHead": None, "anchor": None, "taskBase": None,
-           "mainSha": None, "case": None, "route": None, "trouble": [], "reason": "", "landed": [],
+           "mainSha": None, "case": None, "route": None, "trouble": [], "reason": "", "landed": [], "unlisted": [],
            "mergeCommit": "", "sharedFiles": [], "conflictFiles": [], "staleRefDeleted": None,
            "abortedMerge": False, "stashed": "", "record": None, "note": ""}
 
@@ -442,8 +532,8 @@ def cmd_prepare(args):
     if not re.fullmatch(r"[0-9a-f]{40}", tb):
         raise EnvError(f"no merge-base of the anchor {a} and origin/{args.default}")
     out.update(anchor=a, taskBase=tb)
-    landed, note_why = _landed(repo, tb, b, _owner_repo(repo, note), tasks_dir)
-    out.update(landed=landed, note=note_why)
+    landed, unlisted, note_why = _landed(repo, tb, b, _owner_repo(repo, note), tasks_dir)
+    out.update(landed=landed, unlisted=unlisted, note=note_why)
 
     last = last_integration(note)
     # Only a complete `integrated` record can back case (ii): its head and base are the pair merge-task needs.
@@ -679,7 +769,126 @@ def _latest_run(note, heading):
     return {"text": text, "at": at} if text else None
 
 
-def task_inputs(path, note, max_rounds=None, repo=None):
+def _one_line(e):
+    return (str(e).strip().splitlines() or [e.__class__.__name__])[0]
+
+
+def _read_row(spec, slug):
+    """(row, why): the approving row `--row` names (a file, or - for stdin). An envelope {rolloutSlug, tasks}
+    gives its one entry whose slug is the note's (case-insensitive); a bare row (an object with a slug and no
+    tasks) is taken as it is. Anything unreadable is (None, a one-line reason), never an exit."""
+    try:
+        text = sys.stdin.read() if spec == "-" else Path(os.path.expanduser(spec)).read_text()
+    except (OSError, UnicodeDecodeError) as e:
+        return None, f"--row {spec} is unreadable: {_one_line(e)}"
+    if not text.strip():
+        return None, f"--row {spec} is empty"
+    try:
+        data = json.loads(text)
+    except ValueError as e:
+        return None, f"--row {spec} is not JSON: {_one_line(e)}"
+    if not isinstance(data, dict):
+        return None, f"--row {spec} is not a JSON object"
+    if "tasks" in data:
+        tasks = data["tasks"] if isinstance(data["tasks"], list) else []
+        hits = [r for r in tasks if isinstance(r, dict) and isinstance(r.get("slug"), str)
+                and r["slug"].casefold() == slug.casefold()]
+        if len(hits) != 1:
+            return None, f"--row {spec} holds {len(hits)} entries for {slug} in its tasks, not one"
+        return hits[0], ""
+    if "slug" in data:
+        return data, ""
+    return None, f"--row {spec} is neither an envelope {{rolloutSlug, tasks}} nor a row with a slug"
+
+
+def _same_pr(url, pr):
+    """True when the row's PR URL names the note's `pr:` (a URL, one trailing / and case ignored, or a bare #N)."""
+    n = rr.PR_NUM_RE.match(pr)
+    if n:
+        return int(url.rsplit("/", 1)[1]) == int(n.group(1))
+    return url.lower() == (pr[:-1] if pr.endswith("/") else pr).lower()
+
+
+def _row_error(inp, note, row):
+    """Why the approving row cannot back the integrate call ('' when it can): it must be this note's, approved
+    (`review`), carry the note's PR as a PR URL, and pass the engine's args check on its history and rounds,
+    with at least the note's `review_rounds_used`."""
+    slug = row.get("slug")
+    if not isinstance(slug, str) or slug.casefold() != inp["slug"].casefold():
+        return f"the row's slug {json.dumps(slug)} is not {inp['slug']}"
+    if row.get("status") != "review":
+        return f"the row's status is {json.dumps(row.get('status'))}, not \"review\" (only an approving row is used)"
+    url = row.get("prUrl")
+    if not isinstance(url, str) or not ENGINE_PR_URL_RE.fullmatch(url):
+        return f"the row's prUrl {json.dumps(url)} is not a PR URL (…/pull/<n>)"
+    if not inp["pr"]:
+        return "the note has no pr: to check the row's prUrl against"
+    if not _same_pr(url, inp["pr"]):
+        return f"the row's prUrl {url} is not the note's pr: {inp['pr']}"
+    he = history_error(row.get("reviewHistory"), True)
+    if he:
+        return "the row's reviewHistory " + he
+    h, used = row["reviewHistory"], row.get("reviewRoundsUsed")
+    last = h[-1]["round"] if h else 0
+    floor = rr._int_field(note.get("review_rounds_used"), 0)
+    if not (type(used) is int and used >= 1 and used >= last and used >= floor):
+        return (f"the row's reviewRoundsUsed {json.dumps(used)} is not an integer >= 1, >= its history's last round "
+                f"({last}) and >= the note's review_rounds_used ({floor})")
+    return ""
+
+
+def _note_pr_url(pr, note, repo):
+    """(url, why): the note's `pr:` as the PR URL the engine's args check (prIdentityError) takes (p17-1), for the
+    two launches that pass the note's PR: execute § 4.5 step 1.2's seeded revise (`inputs`' prUrl) and step 3's
+    integrate call when no row is accepted (the integrate record's). A URL the engine takes passes verbatim; a
+    GitHub PR URL with a trailing / loses it; a bare number (`#N` or `N`, a hand-written form _same_pr accepts) is
+    built on origin's owner/repo (_owner_repo, read in --repo). Otherwise (no pr:, another form, or a bare number
+    with no --repo or no GitHub origin) the note's value stays and `why` says what the engine would refuse and
+    the fix; '' when url passes."""
+    if not pr:
+        return pr, "the note has no pr:, so there is no PR to launch on: stamp the task's PR URL as its pr:"
+    if ENGINE_PR_URL_RE.fullmatch(pr):
+        return pr, ""
+    m, n = rr.PR_URL_RE.match(pr), rr.PR_NUM_RE.match(pr)
+    if m:
+        return f"https://github.com/{m.group(1)}/pull/{m.group(2)}", ""
+    if n:
+        owner = _owner_repo(os.path.expanduser(repo), note) if repo else ""
+        if owner:
+            return f"https://github.com/{owner}/pull/{int(n.group(1))}", ""
+        where = "no --repo was given" if not repo else f"--repo {repo} has no GitHub origin to build it on"
+        return pr, (f"the note's pr: {pr} is a bare number and {where}, so no PR URL can be built from it: stamp "
+                    f"the task's PR URL as its pr:")
+    return pr, f"the note's pr: {pr} is not a PR URL (…/pull/<n>) or a PR number: stamp the task's PR URL as its pr:"
+
+
+def integrate_record(inp, note, row, why):
+    """The integrate call's prUrl, reviewHistory, reviewRoundsUsed and rung (execute § 4.5 step 3, p17-1): the
+    approving row's (source "row") when it was read and _row_error passes, else the note's: `inputs`' prUrl (the
+    note's pr: as a PR URL, _note_pr_url), history, reviewRoundsUsed and rung record (source "note"). An accepted row whose rung record fails rung_record_error keeps the row and takes the note's
+    rung record (rungSource "note"). rowRefused is the one reason ('' with no --row, or when nothing was
+    refused); prUrlError is why prUrl is no PR URL the engine takes ('' when it is: the lead launches nothing
+    on a non-empty one)."""
+    rec = {"prUrl": inp["prUrl"], "reviewHistory": inp["history"], "reviewRoundsUsed": inp["reviewRoundsUsed"],
+           "rung": inp["rung"], "source": "note", "rungSource": "note", "rowRefused": "", "prUrlError": inp["prUrlError"]}
+    if row is None and not why:
+        return rec
+    refused = why or _row_error(inp, note, row)
+    if refused:
+        rec["rowRefused"] = refused
+        return rec
+    rung = {k: row.get(k) for k in ("startRung", "rung", "climbs")}
+    bad = rung_record_error(rung)
+    rec.update(prUrl=row["prUrl"], reviewHistory=row["reviewHistory"], reviewRoundsUsed=row["reviewRoundsUsed"],
+               source="row", prUrlError="")
+    if bad:
+        rec["rowRefused"] = f"the row's rung record is missing or malformed ({bad}): the note's is used"
+    else:
+        rec.update(rung=rung, rungSource="row")
+    return rec
+
+
+def task_inputs(path, note, max_rounds=None, repo=None, row=None):
     status = rr._status(note)
     blk = _latest_run(note, rr.BLOCKED_SECTIONS["blocked"])
     rvb = _latest_run(note, rr.BLOCKED_SECTIONS["review-blocked"])
@@ -706,28 +915,190 @@ def task_inputs(path, note, max_rounds=None, repo=None):
     rung = rr._scalar(note.get("rung"))
     if not rr.is_rung_name(rung):
         rung = ""
+    pr = rr._pr(note) or None
+    pr_url, pr_url_error = _note_pr_url(pr, note, repo)
     out = {
-        "slug": path.stem, "status": status or None, "scope": rr._scope(note) or None, "pr": rr._pr(note) or None,
+        "slug": path.stem, "status": status or None, "scope": rr._scope(note) or None, "pr": pr,
+        "prUrl": pr_url, "prUrlError": pr_url_error,
         "readyAt": rr._scalar(note.get("ready")) or None,
         "rung": {"startRung": "", "rung": rung, "climbs": []}, "branch": branch_of(path.stem),
         "source": source or None, "markerStage": parsed["stage"] if run else None,
         "markerReason": parsed["reason"] if run else "", "history": history, "lastRound": last_round,
         "reviewRoundsUsed": max(1, rr._int_field(note.get("review_rounds_used"), 0) or 0, last_round),
         "lastIntegration": last, "resumeAt": resume_at,
-        "autoRevise": bool(max_rounds is not None and status == "blocked" and source == "blocker"
-                           and parsed["stage"] == "revise" and parsed["reason"] == "" and last_outcome == "rejected"
-                           and history and last_round < max_rounds),
     }
+    out["autoRevise"] = bool(max_rounds is not None and _revise_shaped(out) and last_round < max_rounds)
     if repo:
         out["worktreePath"] = worktree_dir(os.path.expanduser(repo), path.stem)
+    got, why = _read_row(row, path.stem) if row is not None else (None, "")
+    out["integrate"] = integrate_record(out, note, got, why)
     return out
+
+
+def _revise_shaped(inp):
+    """autoRevise but its round test: blocked, the source is the Blocker run, stage revise, markerReason empty, the
+    last Integration line `rejected` and a non-empty history (a plain rejection step 1.2's seeded revise takes)."""
+    last = inp.get("lastIntegration") or {}
+    return bool(inp.get("status") == "blocked" and inp.get("source") == "blocker" and inp.get("markerStage") == "revise"
+                and inp.get("markerReason") == "" and last.get("outcome") == "rejected" and inp.get("history"))
+
+
+# ---- the automatic retry's verdict (p16-4, ADR 0033) ------------------------------------------------------
+
+AUTO_RETRY_KEYS = ("autoRetry", "autoRetryWhy", "autoRetryError", "autoRetryClass", "autoRetryBudget",
+                   "autoRetriesUsed", "quotaRetriesUsed", "fingerprint", "autoRetryRaise", "autoRetryAfter")
+
+
+def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None):
+    """Whether execute's lead re-enters a set-aside task by itself (`reconcile-rollout.py auto-retry`), as `inputs`'
+    AUTO_RETRY_KEYS. The one decision function: `inputs` prints it to every caller and the verb re-runs it before it
+    writes. `inp` is task_inputs' output for the note, `rollout_note` the rollout its `rollout:` names (None: no
+    retry), `max_rounds_flag` inputs' --max-review-rounds (None: not given). The first match is `autoRetry: false`
+    with its `autoRetryWhy`:
+      1. not set aside at its run or at Integration (gate-pending: sign-off is the human's; a code-writing review
+         note with no pr:; running, queued, awaiting Integration, landed), or no rollout note;
+      2. an undecided RACE or UNVERIFIED; 3. a `## Needs you` question;
+      4. plan-blocked after an automatic descope (a descope marker and no `descope_armed:`): repair asks Lachy;
+      5. autoRevise under the resolved max_review_rounds: step 1.2's seeded revise owns it;
+      6. a human cause: prepare's `the PR branch is gone`, a `--gated` decline, a merge-task exit-1 text outside
+         MERGE_TASK_FIXABLE, a set-aside at Integration with no pr:, or a non-empty `prUrlError` (p17-1) on a way back
+         that launches on the note's PR (resumeAt revise, or at Integration): step 1.2 and step 3 launch nothing on
+         it, so a hand-back alone never moves it (execute § 6.5 (c)'s `fix the note's pr: or defer`);
+      7. the budget (reconcile-rollout.py _retry_budget): an invalid stamp sets `autoRetryError` (execute § 3's halt),
+         an unresolvable value means no retry, a --max-review-rounds other than the resolved one means no retry, and
+         `auto_retries: 0` turns every retry off, quota included;
+      8. no feedback fingerprint;
+      9. a quota block: 5 free retries spent, or still cooling (`autoRetryAfter`: the later of the block's run stamp
+         and `auto_retry_at`, plus QUOTA_COOLDOWN_MIN[quota_retries_used]); malformed counters or stamps fail closed;
+     10. an agent or infra block: `auto_retries_used` >= the budget (malformed: fails closed);
+     11. an agent block whose fingerprint equals `auto_retry_sha` (the block last re-entered);
+     12. an infra block still cooling (`autoRetryAfter`: the same base plus INFRA_COOLDOWN_MIN[auto_retries_used], the
+         last repeating; no stamp fails closed): a usage limit that kills an agent mid-run reads as infra, so its
+         retries are spread out rather than spent at once.
+    Otherwise `autoRetry: true`, with `autoRetryRaise` = lastRound + 1 when resumeAt is revise and the resolved
+    max_review_rounds is <= lastRound (repair's raise: one round per retry)."""
+    out = {k: None for k in AUTO_RETRY_KEYS}
+    out.update(autoRetry=False, autoRetryWhy="")
+    used = rr._stamp_value(note.get(rr.AUTO_RETRIES_USED_KEY), 0) if note.get(rr.AUTO_RETRIES_USED_KEY) is not None else 0
+    quota = rr._stamp_value(note.get(rr.QUOTA_RETRIES_USED_KEY), 0) if note.get(rr.QUOTA_RETRIES_USED_KEY) is not None else 0
+    out.update(autoRetriesUsed=used, quotaRetriesUsed=quota, fingerprint=rr._block_fingerprint(note))
+
+    def no(why):
+        out["autoRetryWhy"] = why
+        return out
+
+    status = rr._status(note)
+    state, at = rr._queue_state(note)
+    if state == "set-aside" and at == "gate":
+        return no("gate-pending: sign-off is the human's (approve-gates)")
+    if state != "set-aside" or at not in ("run", "integration"):
+        return no(f"not set aside ({state})")
+    if status == "review":
+        return no("approved without a PR: a code-writing review note with no pr: is repair's call")
+    if rollout_note is None:
+        return no("no rollout note")
+    out["autoRetryClass"] = rr._retry_class(note)
+    hold = rr._race_holds(rollout_note, [(path, note)]).get(path.stem.lower())
+    if hold:
+        return no(f"{hold[1]} undecided: only Lachy's RACE decided: line (through /thread:repair) releases it")
+    if rr.needs_human(note):
+        return no("needs a human: the note's ## Needs you question")
+    if status == "plan-blocked" and not rr._scalar(note.get(rr.DESCOPE_ARMED_KEY)) and any(
+            rr.DESCOPE_MARK_RE.match(l.strip()) for l in note.section_text(rr.SCOPE_AUTO_SECTION).split("\n")):
+        return no("plan-blocked again after an automatic descope: repair asks Lachy")
+    budget = rr._retry_budget(note, rollout_note)
+    k = budget["maxReviewRounds"]["value"] if budget["maxReviewRounds"] else None
+    if k is not None and _revise_shaped(inp) and inp["lastRound"] < k:
+        return no("autoRevise: step 1.2's seeded revise owns it")
+    kind, reason = rr._note_reason(note)
+    first = reason.split("\n", 1)[0].strip()
+    if at == "integration" and not rr._pr(note):
+        return no("set aside at Integration with no pr: a human restores or recuts it")
+    if inp.get("prUrlError") and (at == "integration" or inp.get("resumeAt") == "revise"):
+        return no(f"the note's pr: gives no PR URL the engine takes, so no launch would go ahead: a human fixes it "
+                  f"({inp['prUrlError']})")
+    if status == "blocked" and kind == "integration" and rr.BRANCH_GONE_MARK in reason:
+        return no("the PR branch is gone: a human restores or recuts it")
+    if status == "blocked" and rr.DECLINED_MARK in reason:
+        return no("merge declined at the --gated hold: a human's decision")
+    if status == "blocked" and kind == "own" and first.lower().startswith("merge-task") and \
+            not any(f in reason for f in rr.MERGE_TASK_FIXABLE):
+        return no(f"merge-task needs a human: {first}")
+    if budget["error"]:
+        out["autoRetryError"] = budget["error"]
+        return no(f"invalid round budget: {budget['error']}")
+    if budget["unresolved"]:
+        return no(f"auto_retries unresolved: {budget['unresolved']}")
+    out["autoRetryBudget"] = {"autoRetries": budget["autoRetries"], "maxReviewRounds": budget["maxReviewRounds"]}
+    if max_rounds_flag is not None and max_rounds_flag != k:
+        return no(f"--max-review-rounds {max_rounds_flag} is not the resolved max_review_rounds {k}")
+    n = budget["autoRetries"]["value"]
+    if n == 0:
+        return no("auto_retries is 0: automatic retries are off")
+    if not out["fingerprint"]:
+        return no("no feedback fingerprint: the block recorded no feedback")
+    for key, value in ((rr.AUTO_RETRIES_USED_KEY, used), (rr.QUOTA_RETRIES_USED_KEY, quota)):
+        if value is None:
+            return no(f"malformed {key}: {note.get(key)!r} (fails closed)")
+    last_at = rr._parse_ts(note.get(rr.AUTO_RETRY_AT_KEY)) if note.get(rr.AUTO_RETRY_AT_KEY) is not None else None
+    if note.get(rr.AUTO_RETRY_AT_KEY) is not None and last_at is None:
+        return no(f"malformed {rr.AUTO_RETRY_AT_KEY}: {note.get(rr.AUTO_RETRY_AT_KEY)!r} (fails closed)")
+    cls = out["autoRetryClass"]
+
+    def cooling(minutes):
+        """The cool-down's refusal while `now` is before the later of the block's run stamp and the last retry, plus
+        `minutes` (setting `autoRetryAfter`), or None once it has passed. No stamp at all fails closed."""
+        stamps = [s for s in (rr._block_stamp(note), last_at) if s is not None]
+        if not stamps:
+            return no(f"{cls}: no block stamp to time the cool-down from (fails closed)")
+        after = max(stamps) + timedelta(minutes=minutes)
+        if now < after:
+            out["autoRetryAfter"] = rr._stamp(after)
+            return no(f"{cls} cool-down: retries at {out['autoRetryAfter']}")
+        return None
+
+    if cls == "quota":
+        if quota >= len(rr.QUOTA_COOLDOWN_MIN):
+            return no(f"quota: {quota}/{len(rr.QUOTA_COOLDOWN_MIN)} free retries outlasted: a human")
+        refused = cooling(rr.QUOTA_COOLDOWN_MIN[quota])
+        if refused:
+            return refused
+    else:
+        if used >= n:
+            return no(f"budget: {used}/{n} used")
+        if cls == "agent" and out["fingerprint"] == rr._scalar(note.get(rr.AUTO_RETRY_SHA_KEY)):
+            return no("same feedback as the block last re-entered")
+        if cls == "infra":
+            refused = cooling(rr.INFRA_COOLDOWN_MIN[min(used, len(rr.INFRA_COOLDOWN_MIN) - 1)])
+            if refused:
+                return refused
+    if inp.get("resumeAt") == "revise" and k <= inp.get("lastRound", 0):
+        out["autoRetryRaise"] = inp["lastRound"] + 1
+    out["autoRetry"] = True
+    return out
+
+
+def _rollout_note_of(path, note):
+    """The rollout note the task's `rollout:` names, read beside the task note (<note dir>/<rollout>.md), or None."""
+    slug = rr._wikilink_slug(note.get("rollout"))
+    p = path.parent / f"{slug}.md" if slug else None
+    try:
+        return rr.Note(p) if p is not None and p.is_file() else None
+    except (OSError, ValueError):
+        return None
 
 
 def cmd_inputs(args):
     path, note = _load_note(args.note)
     if args.max_review_rounds is not None and args.max_review_rounds < 1:
         raise EnvError("--max-review-rounds must be an integer >= 1")
-    return task_inputs(path, note, args.max_review_rounds, args.repo)
+    out = task_inputs(path, note, args.max_review_rounds, args.repo, args.row)
+    # The verdict reads the rollout note and resolves the budget only for a note set aside at its run or at
+    # Integration, so the restart and status reads of every other note stay cheap.
+    state, at = rr._queue_state(note)
+    ro = _rollout_note_of(path, note) if state == "set-aside" and at in ("run", "integration") else None
+    out.update(auto_retry_verdict(path, note, out, ro, args.now or datetime.now().astimezone(), args.max_review_rounds))
+    return out
 
 
 def cmd_plan(args):
@@ -798,6 +1169,9 @@ def main(argv=None):
     ip.add_argument("--note", required=True)
     ip.add_argument("--max-review-rounds", type=int, default=None)
     ip.add_argument("--repo", default=None, help="also print the task tree's worktreePath")
+    ip.add_argument("--row", default=None, help="the approving row's result JSON (file, or - for stdin): checked "
+                    "against the note for the integrate record")
+    ip.add_argument("--now", type=rr._iso_arg, default=None, help="the time a retry cool-down is read against (default: now)")
 
     pl = sub.add_parser("plan", help="the task note's approved plan, for a seeded revise's resume.plan or an integrate call's plan")
     pl.add_argument("--note", required=True)

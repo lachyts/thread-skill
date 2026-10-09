@@ -30,7 +30,10 @@ Subcommands:
               `pause_requested` (the drain, ADR 0030 decision 5). Refuses an incomplete rollout (below): exit 1, no
               stdout, one ERROR line naming why and the remedy, `/thread:schedule <its first project> --regenerate`.
               An unacked git-env trip (Git-env hold, below) is listed as `gitEnvHold` and makes `halt` "git-env",
-              ahead of every other verdict.
+              ahead of every other verdict. `awaitingIntegration` is the Integration queue's order: a task a queued
+              task depends on, directly or through a folded member (`merged_into:`), first, then the oldest
+              `ready:`, then schedule order. Each `setAside` entry is {slug, status, setAsideAt}, plus `needsHuman`
+              (p16-3: the note's `## Needs you` question, normalised) only when the note holds one.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -65,7 +68,37 @@ Subcommands:
               A task an undecided RACE or UNVERIFIED holds (Race holds, below; read on the rollout its
               `rollout:` names) is refused first, --dry-run included: exit 2, one ERROR line per held task
               naming it and `/thread:repair [[<rollout>]]`, and nothing written for any listed task.
-              Feedback runs and the Integration log are never touched.
+              Feedback runs and the Integration log are never touched. The explicit re-entry (repair after
+              Lachy answers, "retry [[task]]", the lead after a descope's exit 0) starts a fresh automatic-retry
+              stretch (p16-4, ADR 0033): it removes `auto_retries_used` and `quota_retries_used` and re-stamps
+              `auto_retry_sha` with the block it re-enters (_block_fingerprint, read before the transition;
+              removed when that block has none), so an identical re-block goes straight back to a human. Its
+              stdout is unchanged.
+
+  auto-retry  Execute's automatic retry of one set-aside task (p16-4, ADR 0033; execute § 4.5 step 1.2's *Automatic
+              retry*): `--tasks <slug> --rollout <note> [--auto-retries N] [--fingerprint <12 hex>]`. The task's
+              `rollout:` must name --rollout (else exit 1); an undecided RACE or UNVERIFIED is exit 2 with
+              hand-back's ERROR line. It then re-runs lead-integrate.py's auto_retry_verdict, the one `inputs`
+              prints (its task_inputs read with the rollout's Project root as --repo, the lead's `--repo
+              <repoPath>`, so the note's pr: reads as the same PR URL or `prUrlError`): an `autoRetryError` (an `auto_retries` or `max_review_rounds` stamp that is not a valid
+              integer) is exit 1; --auto-retries and --fingerprint are assertions the lead copies from `inputs`,
+              and a mismatch is exit 1 (the note changed since `inputs`); `autoRetry: false` is exit 1, `ERROR:
+              auto-retry: <slug>: not auto-retryable: <why>; nothing written`. Otherwise it writes, in order, each
+              finished by a re-run: (a) `- <stamp> auto-retry: [[<slug>]] <n>/<N> (<stage>; feedback <sha>)[;
+              max_review_rounds raised to <K>, one round]` in the rollout's `## Notes` (`quota <q>/5` for a quota
+              block; <stamp> is the `auto_retry_at` (b) writes; skipped when the slug's last `auto-retry:` line
+              equals it but for its stamp and that stamp is later than the note's `auto_retry_at`, or the note has
+              none: an earlier run's line for this same retry, whose task-note save never landed; a later retry
+              that reads the same, after a hand-back reset the counters, is a line of its own); (b) the task note
+              in one save: hand-back's own transition (_hand_back_note), `auto_retries_used` + 1 for an agent or
+              infra block or `quota_retries_used` + 1 for a quota block, `auto_retry_sha` (the block's
+              fingerprint), `auto_retry_at` (now) and, for a raise, `max_review_rounds: <K>`; (c) the events
+              (Run record, below). A failed save is exit 1 with `a re-run finishes the records`: the verdict still
+              holds, so the next step 1.2 finishes them. Prints `<slug>: auto-retry <n>/<N> (<stage>; feedback
+              <sha>[; max_review_rounds raised to <K>]) <status>-><new> [written]` (`auto-retry quota <q>/5` for a
+              quota block); --dry-run writes and records nothing. Exit 2 also on usage (more than one slug, a
+              --fingerprint that is not 12 hex, a negative --auto-retries). The task note's body is never written,
+              so the brief descope reads is untouched.
 
   log-integration  The lead's own clean-path Integration record (p12-9): append one `integrated path=lead`
               line to a `review` note with a `pr:` through _integration_log_line, from --started (the
@@ -101,7 +134,9 @@ Subcommands:
               rungs [], source ladder.py's default_path() and error its reason, and status still exits 0.
               Each task carries `rung` (its `rung:` stamp, or null) and `rungDrift`: the stamp when a
               readable ladder lacks it and the task is unlanded (queued, running, awaiting-integration,
-              integrating, set-aside), else "". Pure read; no network.
+              integrating, set-aside), else "". A set-aside task whose note holds a `## Needs you`
+              question also carries `needsHuman` (p16-3, normalised); no other task carries the key. Pure
+              read; no network.
 
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
@@ -156,6 +191,8 @@ Subcommands:
 
   defer       Pop task(s) out of a rollout, back to open backlog: clears `rollout:`/`owner:`, a legacy `wave:`
               and the `started:`/`merged:`/`integrating:`/`ready:`/`gates_signed:`/`descope_armed:`/`handed_back:` stamps
+              and the four automatic-retry markers (`auto_retries_used`, `quota_retries_used`, `auto_retry_sha`,
+              `auto_retry_at`, p16-4: a deferred task starts its next rollout afresh)
               (first-start-wins would otherwise carry a
               stale clock into the next rollout), and sets `status: open` so a future /thread:schedule
               re-plans them. The dependent-closure safety check lives in the /thread:repair skill.
@@ -196,7 +233,9 @@ Subcommands:
               that supersedes it (--to, a path). Each linked note (the notes `status` reads, root and Archive)
               is classified by its queue state: queued, running, awaiting-integration, integrating and
               set-aside ones are carried (`rollout: "[[<to>]]"` in place; `owner:`, `integrating:` and a
-              legacy `wave:` removed; its legacy stamps mapped, below; nothing else changes), merged, folded
+              legacy `wave:` removed; the automatic-retry counters `auto_retries_used` and `quota_retries_used`
+              removed, `auto_retry_sha` and `auto_retry_at` kept, p16-4; its legacy stamps mapped, below; nothing
+              else changes), merged, folded
               and other ones are kept. It never writes the prior note: closing it out is schedule step 7.5's.
               Legacy stamps (ADR 0029 consequences; LEGACY_KEYS: the old model, effort and cap keys): a
               carried note's non-empty `rung:` is kept, drifted or not; otherwise it gets `rung: <the
@@ -300,6 +339,13 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     for a `workflow call failed:` lead row whose error line reads as a usage or rate limit
                     (QUOTA_RE).
   hand-back         the Integration arm records ready pr=; the run arm stamps `handed_back:`.
+  auto-retry        hand-back's own events (the Integration arm's ready pr=), then auto-retry {stage, setAsideAt,
+                    retryClass, used, budget, fingerprint, reviewRounds?, quotaRetries?} (p16-4): stage is the
+                    task's latest set-aside line's in the record (exact pairing for a Retro), else the stage table
+                    below over the note (_retry_stage); setAsideAt run | integration; retryClass agent | infra |
+                    quota; used is auto_retries_used after the retry (a quota retry leaves it); budget the resolved
+                    auto_retries; reviewRounds the raised max_review_rounds; quotaRetries quota_retries_used after a
+                    quota retry.
   approve-gates     the Integration arm records ready pr=.
   defer             (read before clearing) slot-freed outcome=stopped for an in_progress note; for a lane
                     holder a merge-hold close and lane-freed release=halt; an open race hold closes.
@@ -314,23 +360,30 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     pause_requested records nothing.
   bind-run, free-lane, hold, record-pause   above.
   git-env-canary.py hold-started / hold-ended hold=git-env (task null) on the hold's empty <-> non-empty edge.
-set-aside stage, first match: gate-pending -> gate; an integrate row (review-blocked included) -> integrate;
-lead kind integration -> integrate; lead kind own on a note that read review (merge-task exit 1) -> integrate;
-lead kind revise-stopped -> review; a dead own call -> implement; plan-blocked -> plan; review-blocked ->
-review; an engine-blocked revise marker -> review; other engine-blocked -> implement; review with no PR ->
-review. `verify` is unused here. stage is where the task stopped; setAsideAt (_queue_state's run |
-integration | gate) is where it re-enters, so merge-task's exit 1 reads stage integrate, setAsideAt run.
+set-aside stage, first match (auto-retry's stage too, when the record holds no set-aside line for the task: the lead
+kind read off the note by _note_reason, failed a `workflow call failed:` reason, prior `review` for a `merge-task`
+reason, an integrate row for a review-blocked note whose current Integration log line is `rejected`): gate-pending ->
+gate; an integrate row (review-blocked included) -> integrate; lead kind integration -> integrate; lead kind own
+on a note that read review (merge-task exit 1) -> integrate; lead kind revise-stopped -> review; a dead own call ->
+implement; plan-blocked -> plan; review-blocked -> review; an engine-blocked revise marker -> review; other
+engine-blocked -> implement; review with no PR -> review. `verify` is unused here. stage is where the task stopped;
+setAsideAt (_queue_state's run | integration | gate) is where it re-enters, so merge-task's exit 1 reads stage
+integrate, setAsideAt run.
 reasonClass, first match: quota; call-failed (`workflow call failed:` with the note in_progress before, or the
 integration kind); merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
 Integration`); declined; prepare (any other lead integration reason); revise-stopped; transient (the engine's
-TRANSIENT_DIAGNOSIS); then by status: gate, plan-rejected, review-rounds, integration-set-aside (an integrate
-row's set-aside) or blocked; approved-without-pr.
+TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
+string, never the note's `## Needs you`, so an integrate or lead row, which carries null, never reads it; a
+question is no round run out, so it must not reach plan-rejected or review-rounds, the classes the Retro raises
+a round cap on); then by status: plan-rejected, review-rounds, approved-without-pr (review with no PR),
+integration-set-aside (an integrate row's set-aside), else blocked.
 idle-slots reason, first match ("queued" is queued and not starting this call): gitEnvHold -> hold-git-env;
 paused or pauseRequested -> pause-drain; the first held queued row's reason: `depends on` -> dependency,
 solo or behind solo -> solo; no queued row and a RACE in raceHold -> hold-race; no queued row and a set-aside
 row -> awaiting-hand-back (a known mislabel when every one is a blocked row step 1.2 relaunches as a seeded
-revise: its slot-taken start=revise splits the span seconds later); else queue-tail. `next` never records
-hold-merge: a merge hold is lead state, recorded by `hold`.
+revise: its slot-taken start=revise splits the span seconds later; also while step 1.2's automatic retry waits out
+a quota or infra cool-down, p16-4, since `next` never reads the retry verdict: the task's auto-retry event ends
+that span); else queue-tail. `next` never records hold-merge: a merge hold is lead state, recorded by `hold`.
 Departures from the p15-2 brief: no ceiling-changed (the writer refuses it; the settings on every slot-taken
 and idle-slots carry the ceiling); log-integration records nothing (the lane is held through the merge, ADR
 0030; its path and triggers ride on mark-done's lane-freed release=merge); merge-task.sh records nothing (its
@@ -453,6 +506,14 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     `lead-integrate.py plan`); '' or whitespace removes that section; null or no key leaves
                     it. Anything else is an error (exit 1) and leaves the section; the rest of the row is
                     still written.
+  needsHuman     -> (any status; p16-3) the question a person must answer, which the engine row carries when a
+                    judge, implementer, investigator or reviser stopped on one: a non-empty string upserts
+                    "## Needs you" (the question, stripped and neutralised like a gate-pending section, so a
+                    `## ` line in it never splits the section); '' or whitespace removes it (an own-call row
+                    with no question settles an older one); null or no key leaves it (an integrate row, a
+                    lead-written set-aside row). Anything else is an error (exit 1) and leaves the section;
+                    the rest of the row is still written. needs_human() reads it back, normalised, for `next`,
+                    `status` and lead-integrate.py.
 
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
 
@@ -523,6 +584,12 @@ INTEGRATION_LOG_SECTION = "## Integration log"
 APPROVED_PLAN_SECTION = "## Approved plan"
 APPROVED_PLAN_LEAD_IN = ("The last approved plan, kept as a record for Integration. Not authoritative: a plan in "
                          "your prompt supersedes it; with no plan in your prompt, the brief is the contract.")
+
+# The question a person must answer (p16-3): the engine row's `needsHuman`, the exact question a plan judge,
+# review judge, implementer, investigator or reviser stopped on. Written by reconcile from the row (a non-empty
+# string upserts, '' removes, null leaves it, like the approved plan); read back by needs_human() for `next` and
+# `status` (each set-aside entry) and lead-integrate.py's inputs. A record section, never brief text.
+NEEDS_HUMAN_SECTION = "## Needs you"
 
 # The lead's Integration verify timeout (p14-2, execute § 3): rollout frontmatter `verify_timeout`, seconds.
 # The harness bound on the background command is the verifier's own bound plus a margin, and the harness
@@ -821,6 +888,16 @@ def approved_plan(note) -> str:
         return ""
     lines, start, end = found
     return unquote_block(lines[start + 1:end])
+
+
+def needs_human(note) -> str:
+    """The note's open question for a person (p16-3): the `## Needs you` section's text, normalised (_normalise);
+    '' when the note has no such section or it is empty."""
+    found = note._section_bounds(NEEDS_HUMAN_SECTION)
+    if found is None:
+        return ""
+    lines, start, end = found
+    return _normalise("\n".join(lines[start + 1:end]))
 
 
 def _run_end(n: int, sha: str) -> str:
@@ -1360,29 +1437,39 @@ def _dep_entries(note):
     return out
 
 
-def _dep_status(slug: str, index):
-    """(satisfied, why): a dependency is satisfied only when its note is landed. A tombstone
-    (`status: merged`) resolves through `merged_into:` to the combined unit (cycle-guarded). `why` is
-    the parenthesised part of a hold reason."""
+def _fold_unit(slug: str, index):
+    """(unit, entry, folded): a dependency followed through affine-merge tombstones to the unit that lands it.
+    A tombstone (`status: merged`, `merged_into: [[u]]`) is a member schedule step 4.5 folded into the combined
+    unit u, and its dependants still name the member, so every reader of a dependency resolves it here,
+    cycle-guarded: _dep_status (the hold reason) and cmd_next's Integration queue order (_lane_key), which
+    therefore cannot disagree. `unit` is the slug the chain ends on (`slug` itself when it is no tombstone),
+    `entry` its index entry (None when its note is not found; a tombstone's when the chain ends on one with no
+    `merged_into:` or closes a cycle), `folded` whether a `merged_into:` link was followed."""
     entry = index.get(slug.lower())
-    if entry is None:
-        return False, "note not found"
-    if _status(entry[1]) != "merged":
-        return _landed(entry[1]), _status(entry[1]) or "no status"
-    cur, seen = slug, {slug.lower()}
-    while True:
+    unit, seen, folded = slug, {slug.lower()}, False
+    while entry is not None and _status(entry[1]) == "merged":
         target = _wikilink_slug(entry[1].get("merged_into"))
         if not target:
-            return False, "merged" if cur == slug else f"folded into [[{cur}]] (merged)"
+            break
         if target.lower() in seen:
-            return False, f"folded into [[{target}]] (merged)"
+            return target, index.get(target.lower()), True
         seen.add(target.lower())
-        entry = index.get(target.lower())
-        if entry is None:
-            return False, f"folded into [[{target}]] (note not found)"
-        cur = target
-        if _status(entry[1]) != "merged":
-            return _landed(entry[1]), f"folded into [[{target}]] ({_status(entry[1]) or 'no status'})"
+        unit, entry, folded = target, index.get(target.lower()), True
+    return unit, entry, folded
+
+
+def _dep_status(slug: str, index):
+    """(satisfied, why): a dependency is satisfied only when its note is landed. A tombstone
+    (`status: merged`) resolves through `merged_into:` to the combined unit (_fold_unit). `why` is
+    the parenthesised part of a hold reason."""
+    unit, entry, folded = _fold_unit(slug, index)
+    if entry is None:
+        ok, why = False, "note not found"
+    elif _status(entry[1]) == "merged":
+        ok, why = False, "merged"
+    else:
+        ok, why = _landed(entry[1]), _status(entry[1]) or "no status"
+    return ok, f"folded into [[{unit}]] ({why})" if folded else why
 
 
 def _unsatisfied(row, index):
@@ -1451,13 +1538,21 @@ def _rows(rollout_path: Path, rollout_note, tasks_dir: Path):
             "priority": priority, "weight": PRIORITY_WEIGHTS[priority], "solo": _truthy_flag(note.get("solo")),
             "files": file_sets.get(slug.lower(), []), "rank": rank, "deps": _dep_entries(note),
             "started": _scalar(note.get("started")) or None, "merged": _scalar(note.get("merged")) or None,
-            "integrating": _scalar(note.get("integrating")) or None,
+            "integrating": _scalar(note.get("integrating")) or None, "ready": _scalar(note.get("ready")) or None,
         })
     return rows, index
 
 
 def _rank(row):
     return row["rank"]
+
+
+def _lane_key(row, waited):
+    """The Integration queue's order (p17-1): a task a queued task depends on, directly or through a folded member
+    (`merged_into:`), first (`waited`: lowercased slugs, each dependency resolved by _fold_unit), then the oldest
+    `ready:`, compared as instants (a missing or unparseable stamp after every stamped one), then schedule order."""
+    m = _iso_minutes(row["ready"])
+    return (0 if row["slug"].lower() in waited else 1, m if m is not None else math.inf, row["rank"])
 
 
 # ---- race holds (status § 3's definitions) -------------------------------------
@@ -1536,35 +1631,54 @@ def _git_env_hold(rollout_note):
 ROLLOUT_SETTINGS_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "rollout-settings.py"
 
 
-# A null ceiling's cause (status's `ceilingCause`, status § 3's Ceiling unresolved flag) picks its remedy: "stamp"
-# (the note's own value is invalid: fix it), "file" (rollouts.toml was refused: fix the named line, or stamp the key),
-# "root" (the Project root is gone or its origin unreadable: stamp the key), "resolver" (it would not run: stamp it).
-def _resolved_ceiling(rollout_note):
-    """(ceiling, error, cause) for a note with no `parallel_ceiling`: rollout-settings.py's resolve() for the note's
-    Project root (repo=None when it has no Project root line): rollouts.toml's [repo."<slug>"], then [defaults],
-    then the built-in. Any failure is (None, error, cause), the error the resolver's own words plus the remedy
-    that fits its cause, so `next` exits 1 and status flags it; never a guessed ceiling."""
+def _resolved_settings(rollout_note) -> dict:
+    """rollout-settings.py's resolve() for the rollout note's Project root (repo=None when it has no Project root line):
+    rollouts.toml's [repo."<slug>"], then [defaults], then the built-in. {settings, error, cause, where}: settings is
+    resolve()'s `settings` object (each key {value, source}), or None when it cannot resolve, and then error is the
+    resolver's own words and cause what the error needs: "resolver" (rollout-settings.py would not load, or failed),
+    "root" (a `--repo` refusal: the Project root is gone or its origin unreadable) or "file" (rollouts.toml was
+    refused; `where` names its path and line). The one loader _resolved_ceiling, _resolved_caps and _retry_budget
+    share; it writes nothing and never raises."""
     root = _project_root(rollout_note)
     try:
         spec = importlib.util.spec_from_file_location("thread_rollout_settings", ROLLOUT_SETTINGS_PY)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
     except Exception as e:
-        return None, (f"parallel_ceiling is absent and rollout-settings.py would not load: {e} "
-                      f"(stamp parallel_ceiling: on the rollout note)"), "resolver"
+        return {"settings": None, "error": f"rollout-settings.py would not load: {e}", "cause": "resolver", "where": ""}
     try:
-        value = mod.resolve(repo=None if root is None else str(root))["settings"]["parallel_ceiling"]["value"]
-        return value, None, None
+        settings = mod.resolve(repo=None if root is None else str(root))["settings"]
+        return {"settings": settings, "error": None, "cause": None, "where": ""}
     except mod.SettingsError as e:
         if (e.subject or "").startswith("--repo "):
-            return None, (f"parallel_ceiling is absent and the Project root cannot be read: {e} (the Project root "
-                          f"is gone or has no readable origin: stamp parallel_ceiling: on the rollout note)"), "root"
+            return {"settings": None, "error": str(e), "cause": "root", "where": ""}
         where = f"{e.subject} at line {e.line}" if e.line is not None else f"{e.subject}"
-        return None, (f"parallel_ceiling is absent and the rollout settings were refused: {e} (fix {where}, "
-                      f"or stamp parallel_ceiling: on the rollout note)"), "file"
+        return {"settings": None, "error": str(e), "cause": "file", "where": where}
     except Exception as e:
-        return None, (f"parallel_ceiling is absent and rollout-settings.py failed: {e} "
-                      f"(stamp parallel_ceiling: on the rollout note)"), "resolver"
+        return {"settings": None, "error": f"rollout-settings.py failed: {e}", "cause": "resolver", "where": ""}
+
+
+# A null ceiling's cause (status's `ceilingCause`, status § 3's Ceiling unresolved flag) picks its remedy: "stamp"
+# (the note's own value is invalid: fix it), "file" (rollouts.toml was refused: fix the named line, or stamp the key),
+# "root" (the Project root is gone or its origin unreadable: stamp the key), "resolver" (it would not run: stamp it).
+def _resolved_ceiling(rollout_note):
+    """(ceiling, error, cause) for a note with no `parallel_ceiling`: _resolved_settings' parallel_ceiling. Any
+    failure is (None, error, cause), the error the resolver's own words plus the remedy that fits its cause, so
+    `next` exits 1 and status flags it; never a guessed ceiling."""
+    res = _resolved_settings(rollout_note)
+    if res["settings"] is not None:
+        try:
+            return res["settings"]["parallel_ceiling"]["value"], None, None
+        except Exception as e:
+            res = {"error": f"rollout-settings.py failed: {e}", "cause": "resolver"}
+    if res["cause"] == "root":
+        return None, (f"parallel_ceiling is absent and the Project root cannot be read: {res['error']} (the Project "
+                      f"root is gone or has no readable origin: stamp parallel_ceiling: on the rollout note)"), "root"
+    if res["cause"] == "file":
+        return None, (f"parallel_ceiling is absent and the rollout settings were refused: {res['error']} (fix "
+                      f"{res['where']}, or stamp parallel_ceiling: on the rollout note)"), "file"
+    return None, (f"parallel_ceiling is absent and {res['error']} "
+                  f"(stamp parallel_ceiling: on the rollout note)"), "resolver"
 
 
 def _ceiling_detail(rollout_note):
@@ -1933,6 +2047,19 @@ def cmd_reconcile(args) -> int:
             errors.append(f"{slug}: plan is not a string or null ({type(plan).__name__}) — "
                           f"{APPROVED_PLAN_SECTION} left untouched")
 
+        # p16-3: the question a person must answer, the same three states as the plan. A non-empty string is the
+        # question this row stopped on (upserted, neutralised by upsert_section, so it can never split the
+        # section); '' (or whitespace) is a row with no question, so an older one is settled and removed; null or
+        # an absent key (an integrate row, a lead-written set-aside row) leaves the section as it is.
+        ask = task.get("needsHuman")
+        if isinstance(ask, str) and ask.strip():
+            note.upsert_section(NEEDS_HUMAN_SECTION, ask.strip())
+        elif isinstance(ask, str):
+            note.remove_section(NEEDS_HUMAN_SECTION)
+        elif ask is not None:
+            errors.append(f"{slug}: needsHuman is not a string or null ({type(ask).__name__}) — "
+                          f"{NEEDS_HUMAN_SECTION} left untouched")
+
         note.save(dry_run=args.dry_run)
         _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, _pr(note),
                           ready_stamped)
@@ -1949,6 +2076,16 @@ def cmd_reconcile(args) -> int:
 
 # ---- next -------------------------------------------------------------------
 
+def _set_aside_entry(r) -> dict:
+    """One `next` setAside entry: slug, status, setAsideAt, and `needsHuman` (p16-3) only when the note holds an
+    open question, so an entry with none is byte-identical to the pre-p16-3 output."""
+    entry = {"slug": r["slug"], "status": r["status"], "setAsideAt": r["setAsideAt"]}
+    ask = needs_human(r["note"])
+    if ask:
+        entry["needsHuman"] = ask
+    return entry
+
+
 def cmd_next(args) -> int:
     """Which tasks start now (ADR 0030 decision 1). Pure function of the notes, except that a drained soft pause is
     stamped (`paused:`) here. New starts are picked greedily by `priority:`, then least file overlap with what is in
@@ -1961,7 +2098,9 @@ def cmd_next(args) -> int:
     `integrating:` stamp stands (the lead's RACE re-verify holds the lane on it) still counts as integrating
     everywhere else: a soft pause is not stamped past it, a solo waits for it, its files count as in flight, and no
     halt is reported while it stands. `raceHold` lists each, in rank order, with its kind; the counts and the
-    progress line are the re-read rows'. An unacked git-env trip (_git_env_hold) is listed under `gitEnvHold`, and
+    progress line are the re-read rows'. `awaitingIntegration` is the Integration queue's order: a task a queued
+    task depends on, directly or through a folded member (`merged_into:`), first, then the oldest `ready:`, then
+    schedule order (_lane_key). An unacked git-env trip (_git_env_hold) is listed under `gitEnvHold`, and
     while it stands nothing starts or restarts, every stalled or queued task is held (`git-env hold:
     /thread:repair`) and `halt` is "git-env", ahead of every other verdict."""
     rollout_path = Path(os.path.expanduser(args.rollout))
@@ -2117,6 +2256,9 @@ def cmd_next(args) -> int:
         _event(rollout_path.stem, "idle-slots", None,
                {"reason": reason, "free": free, "settings": _rollout_settings(rollout_note, ceiling)}, args)
     slugs = lambda rs: [r["slug"] for r in rs]  # noqa: E731
+    # The Integration queue's order (_lane_key); `awaiting` itself stays in rank order for everything above. A
+    # dependency on a folded member waits on its combined unit (_fold_unit), as its hold reason already says.
+    waited = {_fold_unit(d, index)[0].lower() for r in queued for d in r["deps"]}
     out = {
         "rollout": rollout_path.stem,
         "ceiling": ceiling,
@@ -2125,10 +2267,9 @@ def cmd_next(args) -> int:
         "restart": slugs(restart),
         "hold": [{"slug": r["slug"], "reason": why} for r, why in sorted(holds, key=lambda h: _rank(h[0]))],
         "running": slugs(live),
-        "awaitingIntegration": slugs(awaiting),
+        "awaitingIntegration": slugs(sorted(awaiting, key=lambda r: _lane_key(r, waited))),
         "integrating": slugs(integrating),
-        "setAside": [{"slug": r["slug"], "status": r["status"], "setAsideAt": r["setAsideAt"]}
-                     for r in by_state.get("set-aside", [])],
+        "setAside": [_set_aside_entry(r) for r in by_state.get("set-aside", [])],
         "raceHold": race_hold,
         "gitEnvHold": git_env,
         "paused": paused,
@@ -2257,6 +2398,35 @@ HAND_BACK_RUN_STATUSES = set(BLOCKED_SECTIONS) | {"review"}
 SHA40_RE = re.compile(r"[0-9a-f]{40}")
 
 
+def _race_hold_line(verb, slug, kind, ro) -> str:
+    """The ERROR line hand-back and auto-retry print for a task an undecided RACE or UNVERIFIED holds."""
+    return (f"{verb}: [[{slug}]] {kind} undecided: no \"repair: [[{slug}]] RACE decided:\" line on {ro}: record "
+            f"Lachy's decision first with /thread:repair [[{ro}]]; nothing written")
+
+
+def _hand_back_note(note, now):
+    """hand-back's transition of one note, in memory (the caller saves it): (arm, said). Set aside at Integration
+    with a pr: -> review, `ready:` restamped and `integrating:` removed (arm "integration"); a blocked,
+    review-blocked or plan-blocked note set aside at its run, or a PR-less code-writing review note -> in_progress,
+    `owner:` removed and `handed_back: <now>` stamped (arm "run": the restart's mark-started consumes the marker and
+    records start=hand-back). Anything else is (None, why) and the note is untouched. `said` is the stdout tail
+    after `<slug>: `. Shared by cmd_hand_back and cmd_auto_retry (p16-4), so the two re-enter a task identically."""
+    status = _status(note)
+    state, at = _queue_state(note)
+    if state == "set-aside" and at == "integration" and _pr(note):
+        note.set("status", "review")
+        note.set("ready", _stamp(now))
+        note.remove("integrating")
+        return "integration", f"blocked->review (set aside at Integration; ready: {_stamp(now)})"
+    if state == "set-aside" and at == "run" and status in HAND_BACK_RUN_STATUSES:
+        note.set("status", "in_progress")
+        note.remove("owner")
+        note.set(HANDED_BACK_KEY, _stamp(now))  # the restart's mark-started records start=hand-back
+        return "run", f"{status}->in_progress (set aside at its run; owner: cleared)"
+    return None, ("set aside at Integration with no pr:" if at == "integration"
+                  else f"status is {status or 'none'!r} (queue state {state}{'' if at is None else ' at ' + at})")
+
+
 def cmd_hand_back(args) -> int:
     """A set-aside task re-enters at the stage it stopped (ADR 0030 decision 4): set aside at Integration
     -> review (ready: restamped, it rejoins the Integration queue); set aside at its run (a blocked,
@@ -2266,7 +2436,10 @@ def cmd_hand_back(args) -> int:
     UNVERIFIED holds (_race_holds, on the rollout its `rollout:` names) is refused before anything is
     written, as `carry` refuses: exit 2, one ERROR line per held task naming it and `/thread:repair`, and
     no listed task written. Handing it back would let it integrate and later `resume` with no `RACE decided:`
-    line."""
+    line. The explicit re-entry (repair after Lachy answers, "retry [[task]]", the lead after a descope) starts a
+    fresh automatic-retry stretch (p16-4, ADR 0033): it removes `auto_retries_used` and `quota_retries_used` and
+    re-stamps `auto_retry_sha` with the block it re-enters (_block_fingerprint, read before the transition; removed
+    when that block has none), so an identical re-block goes straight back to a human."""
     now = _now(args)
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     notes = list(_each_note(args))
@@ -2283,35 +2456,29 @@ def cmd_hand_back(args) -> int:
                 rollouts[ro.lower()] = None
         hold = _race_holds(rollouts[ro.lower()], [(path, note)]).get(path.stem.lower())
         if hold:
-            held.append(f"hand-back: [[{slug}]] {hold[1]} undecided: no \"repair: [[{slug}]] RACE decided:\" line on "
-                        f"{ro}: record Lachy's decision first with /thread:repair [[{ro}]]; nothing written")
+            held.append(_race_hold_line("hand-back", slug, hold[1], ro))
     if held:
         for line in held + args._errors:
             print(f"ERROR: {line}", file=sys.stderr)
         return 2
     for slug, _path, note in notes:
-        status = _status(note)
-        state, at = _queue_state(note)
-        if state == "set-aside" and at == "integration" and _pr(note):
-            note.set("status", "review")
-            note.set("ready", _stamp(now))
-            note.remove("integrating")
-            note.save(dry_run=args.dry_run)
+        fingerprint = _block_fingerprint(note)  # before the transition: it reads the status's own section
+        arm, said = _hand_back_note(note, now)
+        if arm is None:
+            args._errors.append(f"{slug}: {said} — refusing to hand back: only a blocked note set aside at Integration "
+                                "(with a pr:), or a blocked, review-blocked, plan-blocked or PR-less code-writing review "
+                                "note set aside at its run, re-enters (a gate-pending note goes through approve-gates)")
+            continue
+        note.remove(AUTO_RETRIES_USED_KEY)
+        note.remove(QUOTA_RETRIES_USED_KEY)
+        if fingerprint:
+            note.set(AUTO_RETRY_SHA_KEY, fingerprint)
+        else:
+            note.remove(AUTO_RETRY_SHA_KEY)
+        note.save(dry_run=args.dry_run)
+        if arm == "integration":
             _event(_note_rollout(note), "ready", slug, {"pr": _pr(note)}, args)
-            print(f"{slug}: blocked->review (set aside at Integration; ready: {_stamp(now)}){_flag(args, note)}")
-            continue
-        if state == "set-aside" and at == "run" and status in HAND_BACK_RUN_STATUSES:
-            note.set("status", "in_progress")
-            note.remove("owner")
-            note.set(HANDED_BACK_KEY, _stamp(now))  # the restart's mark-started records start=hand-back
-            note.save(dry_run=args.dry_run)
-            print(f"{slug}: {status}->in_progress (set aside at its run; owner: cleared){_flag(args, note)}")
-            continue
-        why = ("set aside at Integration with no pr:" if at == "integration"
-               else f"status is {status or 'none'!r} (queue state {state}{'' if at is None else ' at ' + at})")
-        args._errors.append(f"{slug}: {why} — refusing to hand back: only a blocked note set aside at Integration "
-                            "(with a pr:), or a blocked, review-blocked, plan-blocked or PR-less code-writing review "
-                            "note set aside at its run, re-enters (a gate-pending note goes through approve-gates)")
+        print(f"{slug}: {said}{_flag(args, note)}")
     return _finish(args, now)
 
 
@@ -2490,22 +2657,30 @@ def cmd_status(args) -> int:
             return ""
         return stamp
 
-    tasks = [{
-        "slug": r["slug"],
-        "status": r["status"],
-        "queueState": r["state"],
-        "setAsideAt": r["setAsideAt"],
-        "pr": r["pr"],
-        "priority": r["priority"],
-        "solo": r["solo"],
-        "started": r["started"],
-        "merged": r["merged"],
-        "integrating": r["integrating"],
-        "waitingOn": _unsatisfied(r, index) if r["state"] == "queued" else [],
-        "blockerSummary": _blocker_summary(r["note"]),
-        "rung": _scalar(r["note"].get("rung")) or None,
-        "rungDrift": rung_drift(r),
-    } for r in sorted(rows, key=_rank)]
+    def task_row(r):
+        row = {
+            "slug": r["slug"],
+            "status": r["status"],
+            "queueState": r["state"],
+            "setAsideAt": r["setAsideAt"],
+            "pr": r["pr"],
+            "priority": r["priority"],
+            "solo": r["solo"],
+            "started": r["started"],
+            "merged": r["merged"],
+            "integrating": r["integrating"],
+            "waitingOn": _unsatisfied(r, index) if r["state"] == "queued" else [],
+            "blockerSummary": _blocker_summary(r["note"]),
+            "rung": _scalar(r["note"].get("rung")) or None,
+            "rungDrift": rung_drift(r),
+        }
+        # p16-3: the open question, only on a set-aside task whose note holds one (the key is absent otherwise).
+        ask = needs_human(r["note"]) if r["state"] == "set-aside" else ""
+        if ask:
+            row["needsHuman"] = ask
+        return row
+
+    tasks = [task_row(r) for r in sorted(rows, key=_rank)]
     paused = rollout_note.get("paused")
     out = {
         "rollout": rollout_path.stem,
@@ -2908,14 +3083,10 @@ _RESOLVED_CAPS = {}
 def _resolved_caps(rollout_note) -> dict:
     """The round caps rollout-settings.py resolves for the rollout's Project root (rollouts.toml, then the
     built-in), once per process per root; {} when it cannot (the caps are then left out of the settings)."""
-    root = _project_root(rollout_note)
-    key = str(root)
+    key = str(_project_root(rollout_note))
     if key not in _RESOLVED_CAPS:
+        res = _resolved_settings(rollout_note)["settings"] or {}
         try:
-            spec = importlib.util.spec_from_file_location("thread_rollout_settings", ROLLOUT_SETTINGS_PY)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            res = mod.resolve(repo=None if root is None else str(root))["settings"]
             _RESOLVED_CAPS[key] = {k: res[k]["value"] for k in CAP_KEYS if k in res}
         except Exception:
             _RESOLVED_CAPS[key] = {}
@@ -3038,8 +3209,10 @@ def _set_aside_stage(note_status, integ, lead, prior, failed, diag, pr) -> str:
     return "implement"
 
 
-def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr) -> str:
-    """Why a task was set aside (the module docstring's reasonClass table, first match)."""
+def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, asked) -> str:
+    """Why a task was set aside (the module docstring's reasonClass table, first match). `asked` is the row's own
+    needsHuman being a non-empty string (p16-3), never the note's `## Needs you` section: an integrate or lead row
+    carries null, so its class is unchanged."""
     first = reason.split("\n", 1)[0].strip().lower()
     if failed and QUOTA_RE.search(first):
         return "quota"
@@ -3058,6 +3231,10 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr) -> 
         return "transient"
     if note_status == GATE_PENDING_STATUS:
         return "gate"
+    # p16-3: a stop on a question is not a plan or review round run out; another round can never answer it, so it
+    # must not read as plan-rejected or review-rounds (the Retro raises a round cap on those). A gate stop wins.
+    if asked:
+        return "needs-human"
     if note_status == "plan-blocked":
         return "plan-rejected"
     if note_status == "review-blocked":
@@ -3080,6 +3257,8 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
     diag = task.get("blockerDiagnosis") if isinstance(task.get("blockerDiagnosis"), str) else ""
     reason = _lead_reason(lead, diag) if lead else ""
     failed = bool(lead) and reason.lower().startswith(CALL_FAILED_PREFIX)
+    ask = task.get("needsHuman")
+    asked = isinstance(ask, str) and bool(ask.strip())
     state_after, at_after = _queue_state(note)
     if prior == "in_progress" and integ is None:
         if note_status == "review" and pr:
@@ -3107,7 +3286,8 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
     if (prior == "in_progress" or held) and state_after == "set-aside" and not revise_follows:
         stage = _set_aside_stage(note_status, integ, lead, prior, failed, diag, pr)
         _event(rollout, "set-aside", slug, {
-            "stage": stage, "reasonClass": _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr),
+            "stage": stage,
+            "reasonClass": _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, asked),
             "setAsideAt": at_after}, args)
         error_line = reason.split("\n", 1)[0].strip()
         if failed and QUOTA_RE.search(error_line):
@@ -3333,7 +3513,7 @@ def cmd_defer(args) -> int:
         rollout, prior, held = _note_rollout(note), _status(note), _holds_lane(note)
         note.set("status", "open")
         for key in ("wave", "rollout", "owner", "started", "merged", "integrating", "ready", GATES_SIGNED_KEY,
-                    DESCOPE_ARMED_KEY, HANDED_BACK_KEY):
+                    DESCOPE_ARMED_KEY, HANDED_BACK_KEY, *AUTO_RETRY_KEYS):
             note.remove(key)
         note.save(dry_run=args.dry_run)
         if rollout and not args.dry_run:
@@ -3344,7 +3524,7 @@ def cmd_defer(args) -> int:
                 _halt_lane(rollout, slug, args, state)
             _close_holds(rollout, slug, ("race",), args, state)
         print(f"{slug}: deferred->open (rollout/owner and started/merged/integrating/ready/{GATES_SIGNED_KEY}/"
-              f"{DESCOPE_ARMED_KEY}/{HANDED_BACK_KEY} cleared, "
+              f"{DESCOPE_ARMED_KEY}/{HANDED_BACK_KEY}/{'/'.join(AUTO_RETRY_KEYS)} cleared, "
               "a legacy `wave:` included)" +
               (" (dry-run)" if args.dry_run else " [written]"))
     for e in errors:
@@ -3364,8 +3544,8 @@ DESCOPE_MARK_RE = re.compile(
 # Record sections: never part of the brief the plan judge judges against.
 BRIEF_EXCLUDE = ("## Plan-blocked feedback", "## Review-blocked feedback", "## Blocker diagnosis",
                  "## Review history", REPAIR_INPUT_SECTION, "## Scope decision", APPROVED_PLAN_SECTION,
-                 INTEGRATION_LOG_SECTION, APPROVED_GATES_SECTION, GATE_PENDING_SECTION, "## Decisions",
-                 "## Resume prompt")
+                 INTEGRATION_LOG_SECTION, APPROVED_GATES_SECTION, GATE_PENDING_SECTION, NEEDS_HUMAN_SECTION,
+                 "## Decisions", "## Resume prompt")
 MARKER_WORDS = r"(?:consider|considering|optional|optionally|nice to have|nice-to-have)"
 OPTIONAL_MARK_RE = re.compile(rf"\b{MARKER_WORDS}\b")
 # A marker negated by not / never / no (or an n't) up to two words before it is no marker: "not optional".
@@ -3767,6 +3947,300 @@ def cmd_descope(args) -> int:
     return 0
 
 
+# ---- auto-retry (p16-4, ADR 0033) ---------------------------------------------------------------------------
+
+# The task-note markers only verbs write: the agent and infra retries spent in the current stretch, the free quota
+# retries, the fingerprint of the block last re-entered (by auto-retry or hand-back) and the last auto-retry's stamp
+# (the quota and infra cool-downs' base, and the stamp on its `## Notes` line). hand-back clears the two counters,
+# carry clears them too, defer clears all four.
+AUTO_RETRIES_USED_KEY = "auto_retries_used"
+QUOTA_RETRIES_USED_KEY = "quota_retries_used"
+AUTO_RETRY_SHA_KEY = "auto_retry_sha"
+AUTO_RETRY_AT_KEY = "auto_retry_at"
+AUTO_RETRY_KEYS = (AUTO_RETRIES_USED_KEY, QUOTA_RETRIES_USED_KEY, AUTO_RETRY_SHA_KEY, AUTO_RETRY_AT_KEY)
+# A quota block (a dead call whose error line reads as a usage or rate limit) is retried free after a cool-down, from
+# the later of its run stamp and the last retry: 30, 60, 120, 240, then 480 minutes (about 15.5 h), then a human.
+QUOTA_COOLDOWN_MIN = (30, 60, 120, 240, 480)
+# An infra block (the engine's TRANSIENT_DIAGNOSIS, or any other dead call) spends the budget after a short cool-down,
+# from the same base: INFRA_COOLDOWN_MIN[auto_retries_used], the last repeating (15, then 60 minutes on the default
+# budget of 2). A usage limit that kills an agent mid-run reads as TRANSIENT, never as a quota line, so this back-off
+# is all it gets: a longer limit still reaches a human once the budget is spent (ADR 0033 decision 5).
+INFRA_COOLDOWN_MIN = (15, 60, 240)
+# merge-task.sh's exit-1 texts a code fix on the branch can clear (an allowlist: every other exit-1 text, today's and
+# any future wording, is a human's). Each is pinned against merge-task.sh by the auto-retry suite.
+MERGE_TASK_FIXABLE = ("has a MERGE CONFLICT with", "a REQUIRED check FAILED on PR")
+BRANCH_GONE_MARK = "the PR branch is gone"            # lead-integrate.py prepare's set-aside reason
+DECLINED_MARK = "merge declined at the --gated hold"  # execute's --gated decline reason
+AUTO_RETRY_MARK = "auto-retry:"                       # the rollout `## Notes` line's verb
+AUTO_RETRY_STAGES = ("plan", "implement", "verify", "review", "integrate")  # set-aside's stages minus `gate`
+# (frontmatter key, the budget's JSON key, the least valid value): what _retry_budget resolves.
+RETRY_BUDGET_KEYS = (("auto_retries", "autoRetries", 0), ("max_review_rounds", "maxReviewRounds", 1))
+LEAD_INTEGRATE_PY = Path(__file__).resolve().parent / "lead-integrate.py"
+_LEAD = None
+
+
+def _lead():
+    """lead-integrate.py, loaded on first use (the _run_record() pattern): auto-retry's verdict lives there, beside
+    `inputs`, so the verb and every `inputs` caller decide with one function."""
+    global _LEAD
+    if _LEAD is None:
+        spec = importlib.util.spec_from_file_location("thread_lead_integrate", LEAD_INTEGRATE_PY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _LEAD = mod
+    return _LEAD
+
+
+def _block_fingerprint(note):
+    """The feedback fingerprint of a set-aside note's latest block: the top run's `<!-- run <n> end sha=… -->` sha in
+    its status's section (BLOCKED_SECTIONS), else _sha12 of the section's latest text (legacy text, or a run whose
+    marker is gone), else None (no such section, an empty one, or a status with none). Compared with the stored
+    `auto_retry_sha`, never with the previous run: reconcile writes no run for identical content. Read it before a
+    transition, which changes the status."""
+    heading = BLOCKED_SECTIONS.get(_status(note))
+    if heading is None:
+        return None
+    runs = note.run_blocks(heading)
+    if runs and _top_run(runs)["sha"]:
+        return _top_run(runs)["sha"]
+    text = note.latest_run_text(heading)
+    return _sha12(text) if text else None
+
+
+def _block_stamp(note):
+    """When the latest block was recorded: its top run's `### Run <n> (<stamp>)` stamp in its status's section, as a
+    datetime, or None (no run, a legacy section, an unparseable stamp)."""
+    heading = BLOCKED_SECTIONS.get(_status(note))
+    found = note._section_bounds(heading) if heading else None
+    runs = note.run_blocks(heading) if found else []
+    if not runs:
+        return None
+    m = RUN_HEAD_RE.match(found[0][_top_run(runs)["head"]])
+    return _parse_ts(m.group(2)) if m else None
+
+
+def _note_reason(note):
+    """(kind, reason) of a set-aside note's latest block: _lead_reason with the kind read off the note, so an engine
+    row and a lead-written one read alike. The text is _blocker_summary's (its own status's section first): one
+    starting `integration:` -> integration; a revise marker carrying a `revise stopped:` line -> revise-stopped;
+    anything else -> own (its `own run: ` escape dropped)."""
+    text = _blocker_summary(note)
+    low = text.strip().lower()
+    if low.startswith(INTEGRATION_PREFIX):
+        kind = "integration"
+    elif low.startswith(REVISE_MARK) and any(re.match(r"\s*revise stopped:", l, re.I) for l in text.split("\n")):
+        kind = "revise-stopped"
+    else:
+        kind = "own"
+    return kind, _lead_reason(kind, text)
+
+
+def _retry_class(note) -> str:
+    """How an automatic retry treats a block: `quota` (a dead call, `workflow call failed:`, whose error line reads as
+    a usage or rate limit: QUOTA_RE), `infra` (the engine's TRANSIENT_DIAGNOSIS, or any other dead call) or `agent`
+    (everything else: an agent can act on its feedback)."""
+    _kind, reason = _note_reason(note)
+    first = reason.split("\n", 1)[0].strip()
+    if first.lower().startswith(CALL_FAILED_PREFIX):
+        return "quota" if QUOTA_RE.search(first) else "infra"
+    return "infra" if TRANSIENT_MARK in _blocker_summary(note) else "agent"
+
+
+def _stamp_value(raw, minimum):
+    """A budget or counter stamp as an int, or None when it is not a bare YAML integer >= minimum: digits only once an
+    inline ` # comment` is dropped (_scalar's strip), so a quoted, signed, fractional, boolean or empty value is no
+    value."""
+    s = re.sub(r"\s+#.*$", "", str(raw)).strip()
+    return int(s) if re.fullmatch(r"[0-9]+", s) and int(s) >= minimum else None
+
+
+def _retry_budget(note, rollout_note) -> dict:
+    """The automatic-retry budget: {autoRetries, maxReviewRounds, error, unresolved}. Each key resolves task note ->
+    rollout note -> rollouts.toml (_resolved_settings, run once, only for a key absent at both levels) -> built-in, as
+    {value, source} with source `task`, `rollout`, `file:repo`, `file:defaults` or `built-in` (None when it cannot).
+    `error` names the first invalid stamp (`<key> on [[<note>]] must be an integer >= <min>, got '<raw>'`: execute
+    § 3's write-nothing halt); `unresolved` is the resolver's words when it could not run (a refused rollouts.toml,
+    a Project root that is gone): no retry, and no halt."""
+    out = {"autoRetries": None, "maxReviewRounds": None, "error": None, "unresolved": None}
+    res = None
+    for key, name, minimum in RETRY_BUDGET_KEYS:
+        for where, n in (("task", note), ("rollout", rollout_note)):
+            raw = n.get(key) if n is not None else None
+            if raw is None:
+                continue
+            value = _stamp_value(raw, minimum)
+            if value is None:
+                out["error"] = out["error"] or f"{key} on [[{n.path.stem}]] must be an integer >= {minimum}, got {raw!r}"
+            else:
+                out[name] = {"value": value, "source": where}
+            break
+        else:
+            if res is None:
+                res = _resolved_settings(rollout_note)
+            settings = res["settings"] or {}
+            entry = settings.get(key)
+            if isinstance(entry, dict) and isinstance(entry.get("value"), int) and not isinstance(entry["value"], bool):
+                out[name] = {"value": entry["value"], "source": entry.get("source")}
+            else:
+                out["unresolved"] = out["unresolved"] or (res["error"] or f"rollout-settings.py resolves no {key}")
+    return out
+
+
+def _retry_stage(rollout, slug, note) -> str:
+    """The stage an automatic retry re-enters (the `auto-retry` event's `stage`): the task's latest `set-aside` line in
+    the Run record (exact pairing for a Retro), else the module docstring's stage table over arguments rebuilt from
+    the note (_note_reason's kind as the lead kind; failed: a `workflow call failed:` reason; prior `review` for a
+    `merge-task` reason; an integrate row when the note is review-blocked and its current Integration log line reads
+    `rejected`)."""
+    try:
+        lines, _bad = _record_lines(_run_record().record_path(rollout))
+    except Exception:
+        lines = []
+    for d in reversed(lines):
+        if d.get("kind") == "set-aside" and d.get("task") == slug.lower():
+            if d.get("stage") in AUTO_RETRY_STAGES:
+                return d["stage"]
+            break
+    kind, reason = _note_reason(note)
+    status = _status(note)
+    current = _current_log_tokens(note) if status == "review-blocked" else None
+    integ = {"outcome": "rejected"} if current is not None and current["outcome"] == "rejected" else None
+    stage = _set_aside_stage(status, integ, kind, "review" if kind == "own" and reason.lower().startswith("merge-task")
+                             else None, reason.lower().startswith(CALL_FAILED_PREFIX), _blocker_summary(note), _pr(note))
+    return stage if stage in AUTO_RETRY_STAGES else "implement"
+
+
+def _unfinished_retry_line(last, line, note) -> bool:
+    """Whether `last`, the slug's last `auto-retry:` line in the rollout's `## Notes`, is this very retry's, written by
+    an earlier run of the verb whose task-note save never landed: it equals `line` but for its stamp, and that stamp
+    is later than the note's `auto_retry_at` (or the note has none). Each retry's line is stamped with the
+    `auto_retry_at` its task-note save writes, and hand-back keeps that stamp, so a completed retry's line is never
+    later than it: a genuine later retry that reads the same but for its stamp (a hand-back reset the counters in
+    between) is a new line. A line whose stamp does not parse is not one this verb wrote. Minute precision: a save
+    that failed in the same minute as the last completed retry reads as finished, and its re-run writes the line
+    again."""
+    if not last:
+        return False
+    lp, np_ = last.split(" ", 2), line.split(" ", 2)
+    if len(lp) < 3 or lp[2] != np_[2]:
+        return False
+    stamped = _parse_ts(lp[1])
+    if stamped is None:
+        return False
+    done = _parse_ts(note.get(AUTO_RETRY_AT_KEY)) if note.get(AUTO_RETRY_AT_KEY) is not None else None
+    return done is None or stamped > done
+
+
+def cmd_auto_retry(args) -> int:
+    """Execute's automatic retry of one set-aside task (p16-4, ADR 0033; execute § 4.5 step 1.2's *Automatic retry*).
+    The verb re-runs lead-integrate.py's auto_retry_verdict before it writes anything, so the lead's `inputs` read
+    only routes; --auto-retries and --fingerprint are assertions copied from that read (a mismatch means the note
+    changed since). Writes, in order, each a re-run can finish: the rollout `## Notes` line, then the task note in one
+    save (hand-back's transition, the counter, `auto_retry_sha`, `auto_retry_at`, the raise), then the events."""
+    def error(msg, code=1, tail="nothing written"):
+        print(f"ERROR: auto-retry: {msg}; {tail}", file=sys.stderr)
+        return code
+
+    slug = args.tasks.strip()
+    if not slug or "," in slug:
+        return error("usage: --tasks takes one task slug", 2)
+    if args.fingerprint is not None and not re.fullmatch(r"[0-9a-f]{12}", args.fingerprint):
+        return error(f"usage: --fingerprint {args.fingerprint!r} is not a 12-hex run sha", 2)
+    if args.auto_retries is not None and args.auto_retries < 0:
+        return error(f"usage: --auto-retries {args.auto_retries} is not an integer >= 0", 2)
+    now = _now(args)
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    path, note = _task_note(args, slug)
+    if isinstance(note, str):
+        return error(note)
+    if not rollout_path.is_file():
+        return error(f"rollout note not found at {rollout_path}")
+    try:
+        rollout_note = Note(rollout_path)
+    except (OSError, ValueError) as e:
+        return error(str(e))
+    ro = rollout_path.stem
+    if (_note_rollout(note) or "").lower() != ro.lower():
+        return error(f"{slug}: its rollout: is {note.get('rollout') or 'none'}, not [[{ro}]]")
+    hold = _race_holds(rollout_note, [(path, note)]).get(path.stem.lower())
+    if hold:
+        print(f"ERROR: {_race_hold_line('auto-retry', slug, hold[1], ro)}", file=sys.stderr)
+        return 2
+    lead = _lead()
+    # The rollout's Project root is the lead's `inputs --repo <repoPath>`: the note's pr: is read as a PR URL
+    # (`prUrlError`, p17-1) against the same origin, so the verdict re-run here is the one `inputs` printed.
+    root = _project_root(rollout_note)
+    inp = lead.task_inputs(path, note, repo=str(root) if root is not None else None)
+    verdict = lead.auto_retry_verdict(path, note, inp, rollout_note, now)
+    if verdict["autoRetryError"]:
+        return error(f"{slug}: invalid round budget: {verdict['autoRetryError']}")
+    budget = verdict["autoRetryBudget"]
+    if args.auto_retries is not None and budget is not None and budget["autoRetries"]["value"] != args.auto_retries:
+        return error(f"{slug}: --auto-retries {args.auto_retries} is not the resolved auto_retries "
+                     f"{budget['autoRetries']['value']} ({budget['autoRetries']['source']}): the note changed since `inputs`")
+    if args.fingerprint is not None and verdict["fingerprint"] and args.fingerprint != verdict["fingerprint"]:
+        return error(f"{slug}: --fingerprint {args.fingerprint} is not the block's {verdict['fingerprint']}: the note "
+                     "changed since `inputs`")
+    if not verdict["autoRetry"]:
+        return error(f"{slug}: not auto-retryable: {verdict['autoRetryWhy']}")
+
+    retry_class, fingerprint, raise_to = verdict["autoRetryClass"], verdict["fingerprint"], verdict["autoRetryRaise"]
+    n_budget, used, quota = budget["autoRetries"]["value"], verdict["autoRetriesUsed"], verdict["quotaRetriesUsed"]
+    if retry_class == "quota":
+        quota += 1
+        count = f"quota {quota}/{len(QUOTA_COOLDOWN_MIN)}"
+    else:
+        used += 1
+        count = f"{used}/{n_budget}"
+    stage = _retry_stage(_note_rollout(note), slug, note)
+    status, (_state, at) = _status(note), _queue_state(note)
+    raised = f"; max_review_rounds raised to {raise_to}, one round" if raise_to else ""
+    line = f"- {_stamp(now)} {AUTO_RETRY_MARK} [[{slug}]] {count} ({stage}; feedback {fingerprint}){raised}"
+
+    # (a) The rollout's `## Notes` line, first: a failed task save leaves the verdict true, so the next step 1.2
+    # finishes the records, and the line an earlier run wrote for this same retry is not written twice.
+    link_re = re.compile(rf"{re.escape(AUTO_RETRY_MARK)}\s*\[\[{re.escape(slug)}(?:[|#\\][^\]]*)?\]\]", re.I)
+    mine = [l.rstrip() for l in rollout_note.section_text(NOTES_SECTION).split("\n") if link_re.search(l)]
+    if not _unfinished_retry_line(mine[-1] if mine else None, line, note):
+        rollout_note.append_line(NOTES_SECTION, line)
+        try:
+            rollout_note.save(dry_run=args.dry_run)
+        except OSError as e:
+            return error(f"{slug}: cannot write {rollout_path}: {e}")
+    # (b) The task note in one save: hand-back's own transition, the markers, the raise.
+    arm, said = _hand_back_note(note, now)
+    if arm is None:  # the verdict read it set aside at its run or at Integration with a pr:
+        return error(f"{slug}: {said}", tail="the rollout's Notes line is written: a re-run finishes the records")
+    if retry_class == "quota":
+        note.set(QUOTA_RETRIES_USED_KEY, quota)
+    else:
+        note.set(AUTO_RETRIES_USED_KEY, used)
+    note.set(AUTO_RETRY_SHA_KEY, fingerprint)
+    note.set(AUTO_RETRY_AT_KEY, _stamp(now))
+    if raise_to:
+        note.set("max_review_rounds", raise_to)
+    try:
+        note.save(dry_run=args.dry_run)
+    except OSError as e:
+        return error(f"{slug}: cannot write {path}: {e}", tail="the rollout's Notes line is written: a re-run finishes "
+                     "the records")
+    # (c) hand-back's own events, then the retry's.
+    rollout = _note_rollout(note)
+    if arm == "integration":
+        _event(rollout, "ready", slug, {"pr": _pr(note)}, args)
+    fields = {"stage": stage, "setAsideAt": at, "retryClass": retry_class, "used": used, "budget": n_budget,
+              "fingerprint": fingerprint}
+    if raise_to:
+        fields["reviewRounds"] = raise_to
+    if retry_class == "quota":
+        fields["quotaRetries"] = quota
+    _event(rollout, "auto-retry", slug, fields, args)
+    flag = " (dry-run)" if args.dry_run else " [written]"
+    print(f"{slug}: auto-retry {count} ({stage}; feedback {fingerprint}"
+          f"{f'; max_review_rounds raised to {raise_to}' if raise_to else ''}) {status}->{_status(note)}{flag}")
+    return 0
+
+
 # ---- carry (a supersede, ADR 0030) -------------------------------------------
 
 # _queue_state's exact strings: what a supersede carries into the new rollout, and what stays behind.
@@ -3980,7 +4454,9 @@ def cmd_carry(args) -> int:
             continue
         lane_held = _holds_lane(note)  # before `integrating:` goes
         note.set("rollout", f'"[[{dst.stem}]]"')
-        for key in ("owner", "integrating", "wave"):
+        # The automatic-retry counters start afresh in the new rollout; auto_retry_sha stays, so a block identical to
+        # the one last re-entered still goes to a human (p16-4, ADR 0033).
+        for key in ("owner", "integrating", "wave", AUTO_RETRIES_USED_KEY, QUOTA_RETRIES_USED_KEY):
             note.remove(key)
         if plan["rung"] == "top":
             note.set("rung", top)
@@ -4300,6 +4776,18 @@ def main() -> int:
     de.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the stamps)")
     de.add_argument("--dry-run", action="store_true", help="print the outcome and write nothing")
     de.set_defaults(func=cmd_descope)
+
+    ar = sub.add_parser("auto-retry", help="execute's automatic retry of one set-aside task (p16-4, ADR 0033): exit 0 "
+                                           "re-entered, 1 not retryable (nothing written), 2 a RACE / UNVERIFIED hold")
+    ar.add_argument("--tasks", required=True, help="the set-aside task's slug")
+    ar.add_argument("--rollout", required=True, help="path to the rollout note the task's rollout: names")
+    ar.add_argument("--auto-retries", dest="auto_retries", type=int, default=None,
+                    help="assertion: inputs' autoRetryBudget.autoRetries.value (a mismatch refuses)")
+    ar.add_argument("--fingerprint", default=None, help="assertion: inputs' fingerprint (a mismatch refuses)")
+    ar.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    ar.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the stamps and a retry cool-down)")
+    ar.add_argument("--dry-run", action="store_true", help="print the outcome; write and record nothing")
+    ar.set_defaults(func=cmd_auto_retry)
 
     ca = sub.add_parser("carry", help="re-point a superseded rollout's unlanded tasks to its successor (/thread:schedule)")
     ca.add_argument("--from", dest="from_", required=True, help="path to the prior (superseded) rollout note")
