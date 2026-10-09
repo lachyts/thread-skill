@@ -269,7 +269,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: bare "ceiling", concurrency, max agents.
 - **Solo** — a task in a Queue that runs with nothing else in flight: a
   sweeping change every concurrent task would otherwise redo its work around
-  (ADR 0030). _Avoid_: barrier, exclusive.
+  (ADR 0030). Queued with its dependencies met, it holds every task whose row
+  is below it, whatever their `priority:`. _Avoid_: barrier, exclusive.
 - **Integration** — the serial step between a task's approval and its merge:
   the latest `main` merged in, the verifier re-run and, when needed, a short
   re-review (ADR 0030). _Avoid_: update-branch (GitHub's merge-in, which

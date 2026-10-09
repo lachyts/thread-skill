@@ -18,17 +18,19 @@ Subcommands:
               ended any Integration). It also stamps `ready:` and appends the `## Integration log` line
               (see the Status mapping below).
 
-  next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start
-              and restart within the parallel ceiling, every held task with its reason, the running,
-              awaiting-Integration, integrating and set-aside tasks, the pause state, the halt verdict
-              and the progress line. Notes are re-read on every call, so a `priority:` edit reorders a
-              live queue. Schedule order is each task's first wikilink on a list-item or table-row line
-              of the rollout body; prose and fenced code never rank. Honours a soft pause: once nothing
-              runs, awaits or integrates (a held RACE whose `integrating:` stands included, Race holds
-              below), it stamps `paused:` and removes `pause_requested` (the drain, ADR 0030 decision 5).
-              Refuses an incomplete rollout (below): exit 1, no stdout, one ERROR line naming why and the
-              remedy, `/thread:schedule <its first project> --regenerate`. An unacked git-env trip (Git-env
-              hold, below) is listed as `gitEnvHold` and makes `halt` "git-env", ahead of every other verdict.
+  next        Which tasks start now. Given the rollout note, print one JSON object: the tasks to start and restart
+              within the parallel ceiling, every held task with its reason, the running, awaiting-Integration,
+              integrating and set-aside tasks, the pause state, the halt verdict and the progress line. Notes are
+              re-read on every call, so a `priority:` edit reorders a live queue. Above the first queued Solo task
+              whose dependencies are met, `priority:` orders; that task holds every task ranked below it, whatever
+              their `priority:` (p17-2), so a `## Queue` row move, never a `priority:` edit, takes a task past it.
+              Schedule order is each task's first wikilink on a list-item or table-row line of the rollout body;
+              prose and fenced code never rank. Honours a soft pause: once nothing runs, awaits or integrates (a held
+              RACE whose `integrating:` stands included, Race holds below), it stamps `paused:` and removes
+              `pause_requested` (the drain, ADR 0030 decision 5). Refuses an incomplete rollout (below): exit 1, no
+              stdout, one ERROR line naming why and the remedy, `/thread:schedule <its first project> --regenerate`.
+              An unacked git-env trip (Git-env hold, below) is listed as `gitEnvHold` and makes `halt` "git-env",
+              ahead of every other verdict.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -207,7 +209,11 @@ Subcommands:
               `keep <slug> <state>` line per linked note, sorted by slug, each carry line followed by
               `restamp <slug> rung=<name|kept|-> drop=<k1,k2|->` when the mapping changes the note (a rung
               added or a key removed; `kept`: its own `rung:` stays; `-`: none written and it has none; drop=
-              in LEGACY_KEYS order, `-` for none), then `[no-change]`, `[written: <n>]` or `(dry-run)`.
+              in LEGACY_KEYS order, `-` for none), then one `order <slug>,<slug>[,…]: <clause>` line per clause
+              of the --from note's own prose (fenced code skipped) that names two or more carried tasks, at
+              least one queued, beside an ordering word read outside every task name (p17-2, _order_hints:
+              an order kept only in prose, which schedule step 3 turns into a `depends-on:` proposal; printed
+              in both modes, writing nothing), then `[no-change]`, `[written: <n>]` or `(dry-run)`.
               --dry-run previews and needs no --to. Refuses (exit 2,
               nothing written, one ERROR line): a --from that is missing, unparseable, not tagged `rollout`,
               done or dropped (unless done with `superseded_by:` naming --to: a re-run), or neither paused
@@ -562,6 +568,21 @@ WIKILINK_OPEN_RE = re.compile(r"\[\[([^\]|#^\\]+)")
 # The rollout-body lines whose wikilinks rank a task: list items (`-`, `*`, `+`, `1.`) and table rows.
 RANKED_LINE_RE = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s|\|)")
 FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+# carry's `order` hints (p17-2, _order_hints): a task's short id is its slug's `-p<N>-<M>-` number (`p30-10` is
+# never `p30-1`); a full wikilink, alias and all; a list item's leading marker; the clause breaks (`;` and a
+# sentence end, never `:`); and the ordering words, read only outside every task name. `(?<!-)` keeps an HTML
+# comment's `-->` out.
+SHORT_ID_RE = re.compile(r"(?<!\w)p(\d+)-(\d+)(?!\w)", re.I)
+WIKILINK_FULL_RE = re.compile(r"\[\[[^\]]*\]\]")
+LIST_MARK_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
+ORDER_CLAUSE_RE = re.compile(r";|(?<=[.!?])\s+")
+# A masked name: a placeholder built from two private-use characters (no prose holds them, and no clause break,
+# word or short id matches them) around the name's index.
+ORDER_MASK = "\ue000{}\ue001"
+ORDER_MASK_RE = re.compile("\ue000(\\d+)\ue001")
+ORDER_CUE_RE = re.compile(r"\b(?:after|before|once|then|until|depends?|depending|dependency|dependencies|"
+                          r"blocked|blocks|gated|lands?|landed|waits?|follows?|needs?|requires?|prerequisites?)\b"
+                          r"|\bahead\s+of\b|→|(?<!-)->", re.I)
 PROJECT_ROOT_RE = re.compile(r"^Project root:\s*`?([^`\n]+?)`?\s*$", re.M)
 PR_URL_RE = re.compile(r"^https://github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)/?$")
 PR_NUM_RE = re.compile(r"^#?(\d+)$")
@@ -1926,13 +1947,16 @@ def cmd_reconcile(args) -> int:
 # ---- next -------------------------------------------------------------------
 
 def cmd_next(args) -> int:
-    """Which tasks start now (ADR 0030 decision 1). Pure function of the notes, except that a drained
-    soft pause is stamped (`paused:`) here. A task an undecided RACE or UNVERIFIED holds (_race_holds) and
-    that has not landed is re-read as set-aside at `race`: it never starts, restarts or integrates, is never
-    a seeded revise (those are set aside at `run`), and its dependants wait. One whose `integrating:` stamp
-    stands (the lead's RACE re-verify holds the lane on it) still counts as integrating everywhere else: a
-    soft pause is not stamped past it, a solo waits for it, its files count as in flight, and no halt is
-    reported while it stands. `raceHold` lists each, in rank order, with its kind; the counts and the
+    """Which tasks start now (ADR 0030 decision 1). Pure function of the notes, except that a drained soft pause is
+    stamped (`paused:`) here. New starts are picked greedily by `priority:`, then least file overlap with what is in
+    flight, then schedule rank, among the queued tasks ranked above the head Solo task (the first queued Solo task
+    by rank whose dependencies are met, p17-2); that task holds every task ranked below it, whatever their
+    `priority:`, and starts only when nothing else has started. A task an undecided RACE or UNVERIFIED holds
+    (_race_holds) and that has not landed is re-read as set-aside at `race`: it never starts, restarts or
+    integrates, is never a seeded revise (those are set aside at `run`), and its dependants wait. One whose
+    `integrating:` stamp stands (the lead's RACE re-verify holds the lane on it) still counts as integrating
+    everywhere else: a soft pause is not stamped past it, a solo waits for it, its files count as in flight, and no
+    halt is reported while it stands. `raceHold` lists each, in rank order, with its kind; the counts and the
     progress line are the re-read rows'. An unacked git-env trip (_git_env_hold) is listed under `gitEnvHold`, and
     while it stands nothing starts or restarts, every stalled or queued task is held (`git-env hold:
     /thread:repair`) and `halt` is "git-env", ahead of every other verdict."""
@@ -2027,8 +2051,14 @@ def cmd_next(args) -> int:
         else:
             in_flight = {f for r in started for f in r["files"]}
             remaining = list(candidates)
+            # The head Solo task (p17-2): the first queued Solo task by rank whose dependencies are met. It holds
+            # every task ranked below it, whatever their priority:, so priority and overlap order only the rows
+            # above it. A Solo task its dependency holds is no candidate, so it holds nothing.
+            solo_head = min((r for r in remaining if r["solo"]), key=_rank, default=None)
             while remaining:
-                best = min(remaining, key=lambda r: (-r["weight"], _overlap(r["files"], in_flight), r["rank"]))
+                above = [r for r in remaining if solo_head is None or r["rank"] < solo_head["rank"]]
+                best = (min(above, key=lambda r: (-r["weight"], _overlap(r["files"], in_flight), r["rank"]))
+                        if above else solo_head)
                 if best["solo"]:
                     remaining.remove(best)
                     if not started and not start:
@@ -3789,6 +3819,60 @@ def _legacy_plan(note, rollout_model) -> dict:
     return {"rung": rung, "drop": drop, "warn": warn}
 
 
+def _order_hints(src_note, rows) -> list:
+    """carry's `order` lines (p17-2): each clause of the prior rollout's own prose that names two or more carried
+    tasks, at least one `queued`, beside an ordering word, as `order <slug>,<slug>[,…]: <clause>`. An order kept only
+    in that prose (an older rollout note's lead rules, "p30-2 after p30-1") never reached `depends-on:`, so the
+    carry alone would drop it; schedule step 3 reads the clause and proposes the dependency. Read per line, fenced
+    code skipped, a list item's marker stripped; a line splits into clauses at `;` and at sentence ends. A clause
+    names a task by a full wikilink to it, its bare slug, or its short id `p<N>-<M>` when exactly one carried slug
+    carries that number (an ambiguous or unmatched one names nothing). Every wikilink (any note), bare linked slug
+    and short id is blanked before the ordering words are read, so a word inside a name never counts. Direction is
+    left to the reader. Writes nothing; an exact duplicate line prints once."""
+    carried = {path.stem.lower(): (path.stem, state) for path, _note, state, is_carried, _plan in rows if is_carried}
+    if len(carried) < 2:
+        return []
+    linked = sorted({path.stem.lower() for path, *_rest in rows}, key=lambda s: (-len(s), s))
+    bare_re = re.compile(r"(?<![\w-])(?:" + "|".join(re.escape(s) for s in linked) + r")(?![\w-])", re.I)
+    name_re = re.compile(ORDER_MASK_RE.pattern + "|" + SHORT_ID_RE.pattern, re.I)
+
+    def short_id(n, m):
+        hits = [s for s in carried if re.search(rf"(?:^|-)p{n}-{m}(?:-|$)", s)]
+        return hits[0] if len(hits) == 1 else None
+
+    out, fenced = [], False
+    for line in src_note._body.split("\n"):
+        if FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        held = []  # placeholder index -> (original text, lowercased slug)
+
+        def mask(m, slug=None):
+            held.append((m.group(0), slug if slug is not None else m.group(0).lower()))
+            return ORDER_MASK.format(len(held) - 1)
+
+        masked = WIKILINK_FULL_RE.sub(lambda m: mask(m, (_wikilink_slug(m.group(0)) or "").lower()),
+                                      LIST_MARK_RE.sub("", line, count=1))
+        masked = bare_re.sub(mask, masked)
+        for clause in ORDER_CLAUSE_RE.split(masked):
+            names = []
+            for m in name_re.finditer(clause):
+                slug = held[int(m.group(1))][1] if m.group(1) is not None else short_id(m.group(2), m.group(3))
+                if slug in carried and slug not in names:
+                    names.append(slug)
+            if len(names) < 2 or not any(carried[s][1] == "queued" for s in names):
+                continue
+            if not ORDER_CUE_RE.search(name_re.sub(" ", clause)):
+                continue
+            text = " ".join(ORDER_MASK_RE.sub(lambda m: held[int(m.group(1))][0], clause).split())
+            hint = f"order {','.join(carried[s][0] for s in names)}: {text}"
+            if hint not in out:
+                out.append(hint)
+    return out
+
+
 def cmd_carry(args) -> int:
     def refuse(msg):
         print(f"ERROR: carry: {msg}", file=sys.stderr)
@@ -3862,6 +3946,8 @@ def cmd_carry(args) -> int:
         if carried and (plan["rung"] == "top" or plan["drop"]):
             rung = top if plan["rung"] == "top" else plan["rung"]
             print(f"restamp {path.stem} rung={rung} drop={','.join(plan['drop']) or '-'}")
+    for hint in _order_hints(src_note, rows):
+        print(hint)
     if args.dry_run:
         print("(dry-run)")
         return 0

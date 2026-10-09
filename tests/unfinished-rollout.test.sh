@@ -7,6 +7,7 @@
 #   K5b     carry refuses a prior that holds an unacked git-env trip until its ack line (p14-6)
 #   K6      carry maps each carried task's legacy stamps to a rung (ADR 0029 consequences): the `restamp`
 #           lines, the ladder's top rung, a refused ladder file, and a re-run
+#   K7      carry prints an `order` line per clause of the prior's prose that orders two carried tasks (p17-2)
 #   M1-M12  a protocol-3 wave rollout in flight with `review` PRs migrates: check -> resume -> carry preview ->
 #           write -> carry -> step 7 -> close-out (stamps, then the move), crash windows included.
 #   I1-I7   § 0's interrupted finish, then a cancel: the incomplete note (reconcile-rollout.py incomplete) is
@@ -643,6 +644,52 @@ carry --from "$T/$P.md" --to "$T/$N.md"
 ok "$rc|$(printf '%s\n' "$out" | grep '^restamp ' | tr '\n' ' ')" "0|restamp h1 rung=- drop=model restamp h2 rung=- drop=effort " "K6: with no task needing the top rung, the refused file is never read: the drops still apply"
 ok "$(fm h1.md model)|$(fm h2.md effort)|$(fm h1.md rollout)" "<none>|<none>|rollout: \"[[$N]]\"" "K6: … written"
 CH=""
+
+# ── K7: carry prints an `order` line per clause of the prior's prose that orders two carried tasks ─────
+# The "Dependencies:" line is modelled on chorus-rollout-2026-09-30's lead rules (an order kept only in prose,
+# never in depends-on:), in demo slugs. The → line is synthetic: that note has no task arrow chain. ORDER's
+# line 2 is expected noise: p37-4 is kept (landed), so the clause orders only p36-2 and p36-6, and schedule
+# step 3 proposes nothing for it. No line comes from: p35-3 after p37-4 (one carried task), p39-2 after p39-1
+# (both running, none queued), p40-2 after p40-1 (p40-1 is ambiguous), the p32-4 / p33-1 line (its cue words
+# sit only inside the names), "Kept apart in review" (no cue) and the fenced line.
+scen k7
+BODY='**The lead'"'"'s rules for this run:**
+- Dependencies: p30-2 after p30-1; p35-3 after p37-4; p37-4 after p36-2, p36-6; p39-2 after p39-1.
+- [[demo-p38-5-column]] → [[demo-p38-6-column-reads]]
+- p41-3 needs p40-2'"'"'s measured answers.
+- p40-2 after p40-1.
+- [[demo-p32-4-turn-opened-after-a-restart|p32-4]] and [[demo-p33-1-then-the-rest]] share one card.
+- Kept apart in review: [[demo-p30-1-ledger]], [[demo-p36-2-ritual]]
+
+```
+p36-6 after p35-3
+```' mkro $P.md "$R" "$DEMO" "$PAUSED"
+for t in demo-p30-1-ledger demo-p30-2-restart demo-p35-3-voice demo-p36-2-ritual demo-p36-6-raycast demo-p38-5-column \
+  demo-p38-6-column-reads demo-p32-4-turn-opened-after-a-restart demo-p33-1-then-the-rest demo-p40-1-probe side-p40-1-probe \
+  demo-p40-2-fix demo-p41-3-conductor; do mkt $t.md $P open; done
+mkt demo-p39-1-sessions.md $P in_progress 'owner: execute-old'
+mkt demo-p39-2-asides.md $P in_progress 'owner: execute-old'
+mkt demo-p37-4-settings.md $P done
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+ORDER="order demo-p30-2-restart,demo-p30-1-ledger: Dependencies: p30-2 after p30-1
+order demo-p36-2-ritual,demo-p36-6-raycast: p37-4 after p36-2, p36-6
+order demo-p38-5-column,demo-p38-6-column-reads: [[demo-p38-5-column]] → [[demo-p38-6-column-reads]]
+order demo-p41-3-conductor,demo-p40-2-fix: p41-3 needs p40-2's measured answers."
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc" 0 "K7: the preview exits 0"
+ok "$(printf '%s\n' "$out" | grep '^order ')" "$ORDER" "K7: … one order line per clause naming two carried tasks (one queued) and an ordering word"
+ok "$(printf '%s\n' "$out" | sed -n '/^order /,$p')" "$ORDER
+(dry-run)" "K7: … printed together, right before the trailer"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p32-4" "K7: … no hint from cue words inside a slug or an alias"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p33-1" "K7: … nor from the other name in that clause"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p39" "K7: … nor from a clause whose tasks have all started"
+ok "$(sums)" "$before" "K7: … and the preview writes nothing"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)" "0|[written: 15]" "K7: carry exits 0, every carried note written"
+ok "$(printf '%s\n' "$out" | grep '^order ')" "$ORDER" "K7: … printing the same order lines"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$(printf '%s\n' "$out" | grep -c '^order ')" "0|[no-change]|0" "K7: a re-run carries nothing and prints no order line"
 
 # ── M1-M12: a protocol-3 wave rollout in flight, with review PRs, migrates ────────────────────────────
 scen m

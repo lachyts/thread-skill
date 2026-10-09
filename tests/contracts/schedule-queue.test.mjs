@@ -32,6 +32,7 @@ const S0 = /^### 0\./
 const S47 = /^### 4\.7\. /
 const S28 = /^### 2\.8\. /
 const S1 = /^### 1\. /
+const S3 = /^### 3\. /
 const S35 = /^### 3\.5\. /
 const S5 = /^### 5\. /
 const S6 = /^### 6\. /
@@ -192,6 +193,27 @@ function checkSchedule({ schedule, template, orient, manifests = [], extra = [] 
     !SETTINGS.every(([ph, key]) => s6set.includes(`\`{{${ph}}}\` — \`${key}\` as step 2.8 resolved it`) && new RegExp(`^${key}: \\{\\{${ph}\\}\\}`, 'm').test(fmT)) ||
     SETTINGS.some(([, key]) => new RegExp(`^${key}: \\d`, 'm').test(fmT)) ||
     !s(schedule, S8).includes('Settings: parallel_ceiling <n> (<source>), max_review_rounds <n> (<source>)')) fails.push('rollout-settings')
+
+  // order-hints (p17-2): an order the prior rollout kept only in prose reaches the confirm batch. Step 1's preview
+  // describes carry's `order <slug-a>,<slug-b>[,…]: <clause>` lines and its confirm lists them; step 3 reads each
+  // clause into a `depends-on:` proposal for a `queued` dependant; step 7 writes the confirmed ones.
+  const s7dep = s7.split(/ - /).find((x) => x.includes('append `depends-on:` entries')) ?? ''
+  if (!s1.includes('`order <slug-a>,<slug-b>') ||
+    !sentences(s1).some((x) => x.includes('The confirm lists') && x.includes('`order` lines')) ||
+    !sentences(s(schedule, S3)).some((x) => x.includes('`order`') && x.includes('`depends-on:`') && x.includes('`queued`')) ||
+    !s7dep.includes('`order` lines')) fails.push('order-hints')
+
+  // interrupted-order (p17-2): § 0's interrupted finish runs the only real carry that reads <prior>'s prose (the
+  // re-check previews from <new>), so its `order` lines are kept for step 1's confirm and step 3.
+  const finishCarry = s0.indexOf('reconcile-rollout.py carry --from')
+  const kept = sentences(s0).find((x) => x.includes('`order` lines') && x.includes("step 1's confirm")) ?? ''
+  if (finishCarry < 0 || !kept || s0.indexOf(kept) < finishCarry) fails.push('interrupted-order')
+
+  // solo-rank (p17-2): a queued Solo task whose dependencies are met holds every task whose row is below it,
+  // whatever their `priority:` (step 5 and the template say so): its row, never its `priority:`, places it.
+  if (!sentences(s(schedule, S5)).some((x) => x.includes('Solo task') && x.includes('holds every task whose row is below it') &&
+    x.includes('whatever their `priority:`')) ||
+    !collapse(template).includes('holds every task whose row is below it, whatever its `priority:`')) fails.push('solo-rank')
 
   // Orient leaves the one-per-repo rule to schedule § 0: it reads no rollout state itself.
   const o6 = s(orient, /^### 6\./)
@@ -393,4 +415,20 @@ test('control: a template with a hardcoded max_review_rounds fails rollout-setti
 test('control: orient reading rollout state itself fails', () => {
   only({ orient: edit(real.orient, /^### 6\./, 'unfinished-rollout check', 'reconcile-rollout.py status read') },
     ['orient-defers'], 'orient reads status')
+})
+
+test('control: step 3 without its order-line bullet fails order-hints', () => {
+  const s3 = section(real.schedule, S3)
+  const bullet = s3.split('\n').find((l) => l.startsWith('- ') && l.includes('`order`'))
+  assert.ok(bullet, 'control setup: the step 3 order-line bullet')
+  only({ schedule: edit(real.schedule, S3, `${bullet}\n`, '') }, ['order-hints'], 'no step 3 bullet')
+})
+
+test("control: § 0's interrupted finish dropping its order lines fails interrupted-order", () => {
+  only({ schedule: edit(real.schedule, S0, "keep them for step 1's confirm and step 3", 'ignore them') }, ['interrupted-order'], 'dropped')
+})
+
+test('control: a template that lets priority jump a Solo task fails solo-rank', () => {
+  only({ template: real.template.replace('holds every task whose row is below it, whatever its `priority:`',
+    'holds every task whose row is below it and whose `priority:` is no higher') }, ['solo-rank'], 'template')
 })

@@ -872,6 +872,13 @@ function check({ status, repair, fx }) {
       rz.includes('a line naming `--repo` (the Project root is gone or its origin unreadable) only by that stamp') && rz.includes('Repair never edits that file'),
   ]
   if (!SET.every(Boolean)) fails.push('settings')
+
+  // queued-solo (p17-2): the Queued row's "behind solo [[x]]" matches `next`: a started Solo task, or the first queued
+  // task in rank order that carries `solo` and has no `waitingOn` (the head Solo task) ranked above the row. A Solo
+  // task its dependency holds holds nothing. A missing row is states' failure, not this rule's.
+  const queuedRow = sb.split('\n').find((l) => l.startsWith('| `queued` | **Queued** |'))
+  if (queuedRow != null && (!queuedRow.includes('the first queued task in rank order that carries `solo` and has no `waitingOn`') ||
+    !queuedRow.includes('a Solo task with a `waitingOn` holds nothing'))) fails.push('queued-solo')
   return [...new Set(fails)]
 }
 
@@ -943,7 +950,7 @@ test('status and repair hold every queue rule', () => {
 
 const RULES = ['states', 'set-aside', 'log-line', 'owner', 'drift', 'actions', 'lineage', 'read-only', 'reverse-lineage', 'integration-only',
   'stages', 'first-match', 'another-base', 'race-hold', 'race-in-flight', 'closed-pr', 'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off',
-  'signed-gate', 'no-wave', 'rung', 'descope', 'second-block', 'settings']
+  'signed-gate', 'no-wave', 'rung', 'descope', 'second-block', 'settings', 'queued-solo']
 const CONTROLLED = new Set()
 
 // Replaces the first match of `from`. Whitespace inside it matches any run of whitespace, so a reflowed line still
@@ -1397,7 +1404,14 @@ test('control: repair raising when the resolver refuses fails settings', () => {
   only(rp('make no raise: report its stderr line', 'raise to `lastRound + 1` anyway: report its stderr line'), 'settings', 'repair raise')
 })
 
-test('the rules are all named (29) and each has a control', () => {
-  assert.equal(RULES.length, 29)
+// queued-solo (p17-2)
+test("control: the Queued row's old started-only solo rule fails queued-solo", () => {
+  const l = lineWith(real.status, '| `queued` | **Queued** |')
+  only(st(l, '| `queued` | **Queued** | `waitingOn`, else "behind solo [[x]]" when a started task carries `solo`, else "next free slot" |'),
+    'queued-solo', 'started-only')
+})
+
+test('the rules are all named (30) and each has a control', () => {
+  assert.equal(RULES.length, 30)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
