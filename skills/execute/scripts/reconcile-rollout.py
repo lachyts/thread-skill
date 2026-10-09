@@ -318,8 +318,11 @@ integration | gate) is where it re-enters, so merge-task's exit 1 reads stage in
 reasonClass, first match: quota; call-failed (`workflow call failed:` with the note in_progress before, or the
 integration kind); merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
 Integration`); declined; prepare (any other lead integration reason); revise-stopped; transient (the engine's
-TRANSIENT_DIAGNOSIS); then by status: gate, plan-rejected, review-rounds, integration-set-aside (an integrate
-row's set-aside) or blocked; approved-without-pr.
+TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
+string, never the note's `## Needs you`, so an integrate or lead row, which carries null, never reads it; a
+question is no round run out, so it must not reach plan-rejected or review-rounds, the classes the Retro raises
+a round cap on); then by status: plan-rejected, review-rounds, approved-without-pr (review with no PR),
+integration-set-aside (an integrate row's set-aside), else blocked.
 idle-slots reason, first match ("queued" is queued and not starting this call): gitEnvHold -> hold-git-env;
 paused or pauseRequested -> pause-drain; the first held queued row's reason: `depends on` -> dependency,
 solo or behind solo -> solo; no queued row and a RACE in raceHold -> hold-race; no queued row and a set-aside
@@ -3056,8 +3059,10 @@ def _set_aside_stage(note_status, integ, lead, prior, failed, diag, pr) -> str:
     return "implement"
 
 
-def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr) -> str:
-    """Why a task was set aside (the module docstring's reasonClass table, first match)."""
+def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, asked) -> str:
+    """Why a task was set aside (the module docstring's reasonClass table, first match). `asked` is the row's own
+    needsHuman being a non-empty string (p16-3), never the note's `## Needs you` section: an integrate or lead row
+    carries null, so its class is unchanged."""
     first = reason.split("\n", 1)[0].strip().lower()
     if failed and QUOTA_RE.search(first):
         return "quota"
@@ -3076,6 +3081,10 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr) -> 
         return "transient"
     if note_status == GATE_PENDING_STATUS:
         return "gate"
+    # p16-3: a stop on a question is not a plan or review round run out; another round can never answer it, so it
+    # must not read as plan-rejected or review-rounds (the Retro raises a round cap on those). A gate stop wins.
+    if asked:
+        return "needs-human"
     if note_status == "plan-blocked":
         return "plan-rejected"
     if note_status == "review-blocked":
@@ -3098,6 +3107,8 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
     diag = task.get("blockerDiagnosis") if isinstance(task.get("blockerDiagnosis"), str) else ""
     reason = _lead_reason(lead, diag) if lead else ""
     failed = bool(lead) and reason.lower().startswith(CALL_FAILED_PREFIX)
+    ask = task.get("needsHuman")
+    asked = isinstance(ask, str) and bool(ask.strip())
     state_after, at_after = _queue_state(note)
     if prior == "in_progress" and integ is None:
         if note_status == "review" and pr:
@@ -3125,7 +3136,8 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
     if (prior == "in_progress" or held) and state_after == "set-aside" and not revise_follows:
         stage = _set_aside_stage(note_status, integ, lead, prior, failed, diag, pr)
         _event(rollout, "set-aside", slug, {
-            "stage": stage, "reasonClass": _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr),
+            "stage": stage,
+            "reasonClass": _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, asked),
             "setAsideAt": at_after}, args)
         error_line = reason.split("\n", 1)[0].strip()
         if failed and QUOTA_RE.search(error_line):
