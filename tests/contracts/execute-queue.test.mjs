@@ -487,9 +487,10 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     fails.push('settings')
   }
 
-  // lane-order (p17-1): sub-step 4 takes the Integration queue in `next`'s order and says what that order is.
+  // lane-order (p17-1): sub-step 4 takes the Integration queue in `next`'s order and says what that order is, a
+  // dependency on a folded member (an affine tombstone's `merged_into:`) included.
   const s4sub = sub(/^If the lane is free, take `next`'s first `integrating` task/)
-  if (!s4sub || !s4sub.text.includes("else its first `awaitingIntegration` task (`next` orders the Integration queue: a task a queued task depends on first, then the oldest `ready:`, then schedule order)")) {
+  if (!s4sub || !s4sub.text.includes("else its first `awaitingIntegration` task (`next` orders the Integration queue: a task a queued task depends on, directly or through a folded member (`merged_into:`), first, then the oldest `ready:`, then schedule order)")) {
     fails.push('lane-order')
   }
 
@@ -666,8 +667,13 @@ test('control: the approving row trusted unchecked fails integrate-args', () => 
 })
 
 test('control: the lane order dropped fails lane-order', () => {
-  only(sk(" (`next` orders the Integration queue: a task a queued task depends on first, then the oldest `ready:`, then schedule order)", ''),
+  only(sk(" (`next` orders the Integration queue: a task a queued task depends on, directly or through a folded member (`merged_into:`), first, then the oldest `ready:`, then schedule order)", ''),
     'lane-order', 'no lane order')
+})
+
+test('control: a lane order blind to folded members fails lane-order', () => {
+  only(sk('a task a queued task depends on, directly or through a folded member (`merged_into:`), first,', 'a task a queued task depends on first,'),
+    'lane-order', 'no folded member')
 })
 
 test("control: an integrate call without a freshly resolved ladder fails ladder", () => {

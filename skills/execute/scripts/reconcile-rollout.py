@@ -29,8 +29,8 @@ Subcommands:
               Refuses an incomplete rollout (below): exit 1, no stdout, one ERROR line naming why and the
               remedy, `/thread:schedule <its first project> --regenerate`. An unacked git-env trip (Git-env
               hold, below) is listed as `gitEnvHold` and makes `halt` "git-env", ahead of every other verdict.
-              `awaitingIntegration` is the Integration queue's order: a task a queued task depends on first, then
-              the oldest `ready:`, then schedule order.
+              `awaitingIntegration` is the Integration queue's order: a task a queued task depends on, directly
+              or through a folded member (`merged_into:`), first, then the oldest `ready:`, then schedule order.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -1338,29 +1338,39 @@ def _dep_entries(note):
     return out
 
 
-def _dep_status(slug: str, index):
-    """(satisfied, why): a dependency is satisfied only when its note is landed. A tombstone
-    (`status: merged`) resolves through `merged_into:` to the combined unit (cycle-guarded). `why` is
-    the parenthesised part of a hold reason."""
+def _fold_unit(slug: str, index):
+    """(unit, entry, folded): a dependency followed through affine-merge tombstones to the unit that lands it.
+    A tombstone (`status: merged`, `merged_into: [[u]]`) is a member schedule step 4.5 folded into the combined
+    unit u, and its dependants still name the member, so every reader of a dependency resolves it here,
+    cycle-guarded: _dep_status (the hold reason) and cmd_next's Integration queue order (_lane_key), which
+    therefore cannot disagree. `unit` is the slug the chain ends on (`slug` itself when it is no tombstone),
+    `entry` its index entry (None when its note is not found; a tombstone's when the chain ends on one with no
+    `merged_into:` or closes a cycle), `folded` whether a `merged_into:` link was followed."""
     entry = index.get(slug.lower())
-    if entry is None:
-        return False, "note not found"
-    if _status(entry[1]) != "merged":
-        return _landed(entry[1]), _status(entry[1]) or "no status"
-    cur, seen = slug, {slug.lower()}
-    while True:
+    unit, seen, folded = slug, {slug.lower()}, False
+    while entry is not None and _status(entry[1]) == "merged":
         target = _wikilink_slug(entry[1].get("merged_into"))
         if not target:
-            return False, "merged" if cur == slug else f"folded into [[{cur}]] (merged)"
+            break
         if target.lower() in seen:
-            return False, f"folded into [[{target}]] (merged)"
+            return target, index.get(target.lower()), True
         seen.add(target.lower())
-        entry = index.get(target.lower())
-        if entry is None:
-            return False, f"folded into [[{target}]] (note not found)"
-        cur = target
-        if _status(entry[1]) != "merged":
-            return _landed(entry[1]), f"folded into [[{target}]] ({_status(entry[1]) or 'no status'})"
+        unit, entry, folded = target, index.get(target.lower()), True
+    return unit, entry, folded
+
+
+def _dep_status(slug: str, index):
+    """(satisfied, why): a dependency is satisfied only when its note is landed. A tombstone
+    (`status: merged`) resolves through `merged_into:` to the combined unit (_fold_unit). `why` is
+    the parenthesised part of a hold reason."""
+    unit, entry, folded = _fold_unit(slug, index)
+    if entry is None:
+        ok, why = False, "note not found"
+    elif _status(entry[1]) == "merged":
+        ok, why = False, "merged"
+    else:
+        ok, why = _landed(entry[1]), _status(entry[1]) or "no status"
+    return ok, f"folded into [[{unit}]] ({why})" if folded else why
 
 
 def _unsatisfied(row, index):
@@ -1439,9 +1449,9 @@ def _rank(row):
 
 
 def _lane_key(row, waited):
-    """The Integration queue's order (p17-1): a task a queued task depends on first (`waited`: lowercased slugs),
-    then the oldest `ready:`, compared as instants (a missing or unparseable stamp after every stamped one), then
-    schedule order."""
+    """The Integration queue's order (p17-1): a task a queued task depends on, directly or through a folded member
+    (`merged_into:`), first (`waited`: lowercased slugs, each dependency resolved by _fold_unit), then the oldest
+    `ready:`, compared as instants (a missing or unparseable stamp after every stamped one), then schedule order."""
     m = _iso_minutes(row["ready"])
     return (0 if row["slug"].lower() in waited else 1, m if m is not None else math.inf, row["rank"])
 
@@ -1944,7 +1954,8 @@ def cmd_next(args) -> int:
     soft pause is not stamped past it, a solo waits for it, its files count as in flight, and no halt is
     reported while it stands. `raceHold` lists each, in rank order, with its kind; the counts and the
     progress line are the re-read rows'. `awaitingIntegration` is the Integration queue's order: a task a queued
-    task depends on first, then the oldest `ready:`, then schedule order (_lane_key). An unacked git-env trip (_git_env_hold) is listed under `gitEnvHold`, and
+    task depends on, directly or through a folded member (`merged_into:`), first, then the oldest `ready:`, then
+    schedule order (_lane_key). An unacked git-env trip (_git_env_hold) is listed under `gitEnvHold`, and
     while it stands nothing starts or restarts, every stalled or queued task is held (`git-env hold:
     /thread:repair`) and `halt` is "git-env", ahead of every other verdict."""
     rollout_path = Path(os.path.expanduser(args.rollout))
@@ -2088,8 +2099,9 @@ def cmd_next(args) -> int:
         _event(rollout_path.stem, "idle-slots", None,
                {"reason": reason, "free": free, "settings": _rollout_settings(rollout_note, ceiling)}, args)
     slugs = lambda rs: [r["slug"] for r in rs]  # noqa: E731
-    # The Integration queue's order (_lane_key); `awaiting` itself stays in rank order for everything above.
-    waited = {d.lower() for r in queued for d in r["deps"]}
+    # The Integration queue's order (_lane_key); `awaiting` itself stays in rank order for everything above. A
+    # dependency on a folded member waits on its combined unit (_fold_unit), as its hold reason already says.
+    waited = {_fold_unit(d, index)[0].lower() for r in queued for d in r["deps"]}
     out = {
         "rollout": rollout_path.stem,
         "ceiling": ceiling,
