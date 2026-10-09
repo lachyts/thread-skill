@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-06
+last_touched: 2026-10-09
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -892,6 +892,11 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+The P16+P17 rollout `thread-skill-rollout-2026-10-09` is running in its own execute session (handoff consumed 2026-10-09). Check it with `/thread:status [[thread-skill-rollout-2026-10-09]]`; `/thread:repair` if it stalls. After P16 merges, p13-4 (release 3.0) is unblocked.
+
+**Earlier instructions (pre-handoff):**
+
+
 **Now (from 2026-10-06): P15 has landed. `[[chorus-rollout-2026-10-06]]` is running from the primary checkout at `1c5c3ca`, so the checkout is held again (ADR 0031).**
 0. **Watch the Chorus run for the mid-run engine switch** (Where we are): if its lead errors on a reconcile, lead-integrate or merge-task call, the P15 scripts are the first suspect.
 1. **p13-4 (3.0.0)** in the session lane, once the Chorus rollout ends (it updates the live checkout): `make evals` first. Then [[ab-fable-vs-opus-planning]].
@@ -1079,6 +1084,8 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
    route live testing through it.
 
 ## Session log
+
+- 2026-10-09: orient reshuffle — P17 (queue fixes from live runs) formed, p12-13/p14-7 closed, p15-6 absorbs the live-record Retro, 3.0 gated after P16; thread-skill-rollout-2026-10-09 scheduled (P16+P17, 9 tasks); p16-2 landed in claude-workspaces PR #4; handed off to a fresh execute session.
 
 - 2026-10-06 (close): executed `[[thread-skill-rollout-2026-10-04]]` to 5/5 (#89 to #93, 17h 39m, Opus lock); p15-2 plan-blocked once and converged after a hand-back. About 12h of the run was an overnight stall on the lead's own AskUserQuestion. Grilled it into P16 (unattended rollouts, p16-1 to p16-5 filed). Created the events symlink; fast-forwarded the primary to `1c5c3ca` mid-way through a Chorus run (a hold breach, in Known quirks). Memory: `wave-repair-autonomy` updated; METHOD K118.
 - 2026-10-04 (close, from the clone): consumed the schedule handoff; Steer-only orient scheduled p13-1..3 + p14-2..6, p14-8 as one queue rollout and executed it to 9/9 (#77 to #85, 8h 10m, Opus lock). p14-4 and p14-6 plan-blocked at 3; Lachy raised both to 6 rounds through repair, and both converged. Updated peer PR #76 so #75/#76 merged. Filed the land.sh review-doc gap.
