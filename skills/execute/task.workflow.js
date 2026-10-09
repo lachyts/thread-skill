@@ -226,10 +226,10 @@ export const meta = {
 // none: a plan judge's or review judge's `changes`, or an implementer's, investigator's or reviser's block, that
 // returned one (NEEDS_HUMAN_RULE, askOf). Such a stop is never evidence of hardness: no climb, no in-call
 // retry, no further plan or review round (a plan judge's ends plan-blocked, a review judge's review-blocked).
-// Unapproved gates still win (gate-pending), and the question rides along. A value on an approve verdict, a
-// verified result or a one-shot red (escalate) is ignored; a review row always carries ''. A mode 'integrate'
-// row carries null, like plan: reconcile upserts the note's "## Needs you" on a non-empty string, removes it
-// on '', and leaves it on null.
+// Unapproved gates still win (gate-pending), and a blocked result's question rides along. A value on an
+// approve verdict, a verified result (gate-pending or not) or a one-shot red (escalate) is ignored; a review
+// row always carries ''. A mode 'integrate' row carries null, like plan: reconcile upserts the note's
+// "## Needs you" on a non-empty string, removes it on '', and leaves it on null.
 // A mode 'integrate' row carries one more key, `integration`: { outcome: integrated | rejected | set-aside,
 // path: integrator | judge-only, anchor: { headSha, taskBase }, headSha, baseSha, mergeCommit, triggers
 // (conflict | committed | branch-moved | shared-file), reReviewed, feedback, reason, agents: [{ role,
@@ -384,6 +384,14 @@ const PRIOR_FEEDBACK_NOTE = `If the task note has a "## Review-blocked feedback"
 // IMPL_RESULT and the engine handles its question, but its prompt (byte-pinned) does not carry the rule. STATIC
 // text with its own leading "\n\n": no prompt ever renders a needsHuman value, so a prompt is its pre-p16-3
 // bytes plus exactly this rule (prompt-invariants proves it against the old whole-call pin).
+// The brief's "keep prompts byte-identical when it is absent, per the resume-cache invariant" is deliberately
+// not kept, and the cache break is accepted. needsHuman is an output, so no prompt can depend on its absence;
+// the only byte-identical option was no rule at all. And an agent() call's opts are part of the resume-cache key
+// (docs/wave-THREAD-archive.md, the `model` opts quirk): adding needsHuman to PLAN_JUDGE, REVIEW_VERDICT and
+// IMPL_RESULT already changes the opts (`schema`) of every call that renders this rule, and the reviser's. So a
+// run started on the pre-p16-3 engine and resumed on this one misses the cache on exactly those calls whatever
+// their prompt bytes, and the rule adds no new break. Every other call (planner, plan reviser, Integration's
+// agents) keeps its bytes and its opts.
 const NEEDS_HUMAN_RULE = `
 
 Needs a human (needsHuman): leave needsHuman empty unless this task cannot go on without a decision only a
@@ -1620,10 +1628,14 @@ async function implement(task, st, prev, a) {
   const gatePending = (r) => {
     const gates = unapprovedGates(r.gatedInputs, task.approvedGates)
     if (!gates.length) return null
-    return { ...r, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates), needsHuman: askOf(r), ...(planExtra || {}) }
+    // p16-3: the question rides on the gate stop only when the agent itself blocked on it; a verified result that
+    // lists unapproved gates is still gate-pending, but its stray needsHuman is ignored (the header's rule).
+    return { ...r, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates), needsHuman: r.blocked ? askOf(r) : '', ...(planExtra || {}) }
   }
   // A question only a person can answer (p16-3): like a gate stop, a human decision and never evidence of
-  // hardness, so checked after gatePending (gates win, ADR 0008) and before the climb branch, on both passes.
+  // hardness, so checked after gatePending (gates win, ADR 0008) and before the climb branch. Only the first
+  // pass needs the check: it is what skips the climb and the retry. The climbed retry's question needs none,
+  // as the fall-through below already keeps a blocked result's question (and its plan metadata) on the row.
   const asks = (r) => (r.blocked && askOf(r) ? { ...r, blocked: true, needsHuman: askOf(r), ...(planExtra || {}) } : null)
   // The opts are held, and the builder call re-rendered (a pure function of unchanged inputs), so a signed
   // stop's continuation (pastSignedGates) carries the same bytes on the same rung; the cached call itself
@@ -1662,11 +1674,10 @@ async function implement(task, st, prev, a) {
     if (r.__dead) return transientImplBlock(planExtra)
     const gatedRetry = gatePending(r)
     if (gatedRetry) return gatedRetry
-    const askedRetry = asks(r)
-    if (askedRetry) return askedRetry
   }
   // Every other exit carries a question only on the agent's own block: a verified or one-shot-red result's
-  // stray value never reaches a later row.
+  // stray value never reaches a later row. This is also how a climbed retry that blocks on a question ends:
+  // blocked, with that question.
   r = { ...r, needsHuman: r.blocked ? askOf(r) : '' }
   // Defensive: a result that neither verified nor blocked and has no PR cannot go to review.
   if (!r.verified && !r.blocked && !r.prUrl) {

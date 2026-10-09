@@ -970,6 +970,12 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
 // prompts, and every row carries `needsHuman`. The calls with the rule removed from each prompt hash to the old
 // calls pin (ee821ac6…), so each prompt is its old bytes plus exactly the rule; the rows with `needsHuman`
 // deleted hash to the old rows pin (0b7fa853…). taskTreeSetup and both reviser pins did not move.
+// This is a deliberate resume-cache break, against the brief's "keep prompts byte-identical when it is absent":
+// needsHuman is an output, so no prompt can depend on its absence, and agent() opts are part of the cache key
+// (docs/wave-THREAD-archive.md, the `model` opts quirk). The needsHuman field on PLAN_JUDGE, REVIEW_VERDICT and
+// IMPL_RESULT already changes the opts (`schema`) of exactly the calls that render the rule (and the reviser's),
+// so a pre-p16-3 run resumed on this engine misses the cache on those calls whatever their prompt bytes; the
+// static rule adds no new break. Every other call keeps its bytes and its opts.
 {
   const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
   const variants = []

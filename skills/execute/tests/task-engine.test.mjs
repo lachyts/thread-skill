@@ -441,6 +441,35 @@ test('p16-3: unapproved gates win over a question (gate-pending), and the questi
   assert.equal(row.needsHuman, Q)
 })
 
+test('p16-3: a verified result listing unapproved gates is gate-pending, and its stray question is ignored', async () => {
+  const r = await run(mkArgs(mkTask('proj-fix-a')), { result: (l) => (l.startsWith('implement:') ? { gatedInputs: ['spend: an API — cap $5'], needsHuman: Q } : {}) })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, ['implement:proj-fix-a'])
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'gate-pending', 'the gates still pause it')
+  assert.deepEqual(row.gatedInputs, ['spend: an API — cap $5'])
+  assert.equal(row.needsHuman, '', 'a question rides on a gate stop only when the agent blocked on it')
+})
+
+test('p16-3: a first pass blocked with no question climbs; a retry that blocks on one ends blocked with it', async () => {
+  // The climbed retry needs no question check of its own: the fall-through keeps a blocked result's question
+  // and the plan metadata, which this pins (planGate on, so planRoundsUsed rides on the row too).
+  const firstBlock = { verified: false, blocked: true, escalate: false, prUrl: '', branch: '', worktreePath: '', blockerDiagnosis: 'tests red on X', summary: '' }
+  const r = await run(mkArgs(mkTask('proj-fix-p', { rung: 'opus-high', planGate: true })), {
+    result: (l) => (l === 'implement:proj-fix-p' ? firstBlock : l === 'implement:proj-fix-p@opus-xhigh' ? BLOCKED_Q : {}),
+  })
+  assert.equal(r.error, undefined)
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, ['plan:proj-fix-p', 'plan-judge:proj-fix-p r1', 'implement:proj-fix-p', 'implement:proj-fix-p@opus-xhigh'],
+    'one climb, one retry, then the stop: no review')
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'blocked')
+  assert.deepEqual(row.climbs, [{ stage: 'implement', from: 'opus-high', to: 'opus-xhigh' }])
+  assert.equal(row.needsHuman, Q, 'the retry\'s question, trimmed')
+  assert.equal(row.blockerDiagnosis, Q)
+  assert.equal(row.planRoundsUsed, 1)
+})
+
 test('p16-3: no question gives needsHuman "" (a plain run, a run that threw)', async () => {
   const plain = await run(mkArgs(mkTask('proj-fix-a')))
   assert.equal(plain.result.tasks[0].needsHuman, '')
