@@ -836,6 +836,30 @@ ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["a","c","b"]' "lane-order: ready
 setkey a ready '2026-10-02T12:00+00:00'; setkey b ready '2026-10-02T10:00+00:00'; setkey c ready '1970-01-01T00:00Z'
 ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["c","b","a"]' "lane-order: a ready: at the epoch is the oldest, not a missing one"
 
+# A dependency on a folded member (an affine tombstone: `status: merged`, `merged_into: [[u]]`, schedule step 4.5,
+# which never rewrites the dependants) waits on its combined unit, so the lane takes that unit first: the order
+# and the hold reason resolve the chain through one helper (_fold_unit) and are asserted together here.
+scen lane-order-fold
+mkro $'- [[a]]\n- [[u]]\n- [[q]]'
+mkt a review 'pr: https://github.com/o/r/pull/1' 'ready: 2026-10-02T09:00+00:00'
+mkt u review 'pr: https://github.com/o/r/pull/2' 'ready: 2026-10-02T10:00+00:00'
+mkt m merged 'merged_into: "[[u]]"'
+mkt q open
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["a","u"]' "lane-order fold: with no dependant, the oldest ready: first"
+setkey q depends-on '["[[m]]"]'
+J=$(nxt)
+ok "$(q "$J" 'd["awaitingIntegration"]')" '["u","a"]' "lane-order fold: a dependency on a folded member puts its combined unit first"
+ok "$(q "$J" "$holds")" '{"q":"depends on [[m]] (folded into [[u]] (review))"}' "lane-order fold: … the unit its dependant's hold reason names"
+mkt m2 merged 'merged_into: "[[M]]"'
+setkey q depends-on '["[[m2]]"]'
+J=$(nxt)
+ok "$(q "$J" 'd["awaitingIntegration"]')" '["u","a"]' "lane-order fold: a two-step chain (m2 into m into u) puts u first"
+ok "$(q "$J" "$holds")" '{"q":"depends on [[m2]] (folded into [[u]] (review))"}' "lane-order fold: … and the hold reason names u too"
+setkey m merged_into '"[[m2]]"'
+J=$(nxt)
+ok "$(q "$J" 'd["awaitingIntegration"]')" '["a","u"]' "lane-order fold: a merged_into: cycle reaches no unit, so the order is ready:'s"
+ok "$(q "$J" "$holds")" '{"q":"depends on [[m2]] (folded into [[m2]] (merged))"}' "lane-order fold: … and the cycle holds its dependant"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-queue: ALL PASS"; else echo "reconcile-rollout-queue: FAILED"; fi
 exit "$fail"
