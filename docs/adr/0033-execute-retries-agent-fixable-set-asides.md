@@ -128,4 +128,8 @@ Considered:
 - **Needs-you items (execute § 6.5, p16-1).** An entry `inputs` reports `autoRetry: true`, or with a pending
   `autoRetryAfter`, is no needs-you item: the lead re-enters it, now or after its cool-down, so it is never pushed
   to Lachy. Every entry the verdict refuses stays one, worded by § 6.5's own rules.
-- Status and repair still describe their own routes; their prose catches up with this decision in p16-5.
+- **Status and repair caught up in p16-5.** Repair's **retry (automatic)** class leaves an `autoRetry: true` or
+  cooling set-aside to the lead, and its **needs you** class answers a `## Needs you` question into
+  `## Repair input` and removes the section before the hand-back. Every other hand-back, a raise included, follows
+  Lachy's answer, so decision 7's "raise already recorded" reading is now his word. Status shows each set-aside's
+  retry count and a `Needs you` block.
