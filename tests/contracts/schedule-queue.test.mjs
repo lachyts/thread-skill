@@ -10,16 +10,18 @@
 // (a refused ladder included), step 7 stamps `rung:` and leaves a top-mapping legacy stamp under a refused
 // ladder for step 8 to list (and an unrecognised legacy value for step 8's own block), and the template's budget
 // prices a top-rung start. § 3.5's gate sweep catches sign-off in any wording, named or not, and a decision a
-// note leaves to a human ("raise, not decide"), the p2-6 wording the fixed phrases missed (p17-5); step 8 flags
-// a capture-shaped note (task-writer § 5's close-the-capture line, or a `## Launch` repo naming another
-// checkout), which engine agents read in full.
+// note leaves to a human ("raise, not decide"), the p2-6 wording the fixed phrases missed (p17-5), while
+// matching no plain sentence, and a note that only quotes such wording is no gate for step 8's block; step 8
+// flags a capture-shaped note (task-writer § 5's close-the-capture template line, or a `## Launch` repo naming
+// another checkout of the same repo), skips only a note already cleared for this rollout, and sends a task from
+// another repository back to § 0's misfit drop, since engine agents read a note in full.
 //
 // Every rule lives in one pure function, checkSchedule, that returns named failures, so the real files
 // and the control cases run through identical logic and the matcher can't pass vacuously. Each control
 // mutates the real text in one place and must fail with exactly the rule(s) it names. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { collapse, read, section, walk } from '../lib/contract-text.mjs'
+import { collapse, fencedBlocks, read, section, walk } from '../lib/contract-text.mjs'
 
 const real = {
   schedule: read('skills/schedule/SKILL.md'),
@@ -52,18 +54,43 @@ const TIER_WORDS = [['max', 'tier'].join('_'), ['tier', 'capped'].join('_'), ['O
 const description = (text) => (text.match(/^description: (.*)$/m) ?? [])[1] ?? ''
 const frontmatter = (text) => (text.match(/^---\n([\s\S]*?)\n---\n/) ?? [])[1] ?? ''
 
-// Gate wording § 3.5's sweep must catch: each sample needs at least one of the sweep's phrases (a
-// case-insensitive substring). The first is the p2-6 line the fixed phrases missed in the 2.7 rollout.
+// Gate wording § 3.5's sweep must catch: each sample needs at least one of the sweep's phrases. The first is
+// the p2-6 line the fixed phrases missed in the 2.7 rollout; the "signs off" and "signing off" lines are the
+// forms a sign-off/sign off/signoff/signed off list missed.
 const GATE_SAMPLES = [
   'Open question for the planner to raise, not decide: would need Lachy\'s sign-off',
   'This would need Lachy\'s sign-off before it ships',
   'A call for the planner to raise, not decide',
+  'Deliberately not decided yet',
   'Hold for sign-off from Sarah',
   'Needs Patrick to sign off on the copy',
+  "Don't merge until Lachy signs off",
+  'Needs Lachy signing off first',
   "Don't action until the v0.5 release ships",
 ]
-// The sweep's phrases: the backticked spans of § 3.5's one "Scan each task body" sentence.
-const sweepPhrases = (s35) => spans(sentences(s35).find((x) => x.startsWith('Scan each task body')) ?? '')
+// Plain task sentences the sweep must leave alone, so a phrase broad enough to match anything fails. The
+// first holds "threshold for", which `hold for` matches unless a phrase is matched where a word starts.
+const NON_GATE_SAMPLES = [
+  'Raise the size threshold for animated exports',
+  'Fix the sign-in redirect and add a contract test',
+  'Decide the queue order from file overlap, then run make test',
+]
+// § 3.5's one "Scan each task body" sentence, and its phrases (the sentence's backticked spans).
+const scanSentence = (s35) => sentences(s35).find((x) => x.startsWith('Scan each task body')) ?? ''
+// Whether `line` matches one of the scan sentence's phrases, case-insensitively, and only where a word starts
+// when the sentence says so (as § 3.5 does): the matcher reads the sentence, so dropping either fails a sample.
+function sweepHits(scan, line) {
+  const start = /where a word starts/.test(scan) ? '\\b' : ''
+  const flags = /case-insensitive/i.test(scan) ? 'i' : ''
+  return spans(scan).some((p) => new RegExp(start + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags).test(line))
+}
+// task-writer § 5's close-the-capture line: the `First: you now own this work` line of the resume-prompt
+// template, inside the fenced block and after its `## Resume prompt` heading. Prose about the line (the
+// cross-reference to schedule step 8, say) is outside it, so it can't stand in for the line itself.
+function closeTemplateLine(taskWriter) {
+  const block = fencedBlocks(section(taskWriter, /^## 5\. /) ?? '').find((b) => b.includes('## Resume prompt')) ?? []
+  return block.slice(block.indexOf('## Resume prompt')).find((l) => l.startsWith('First: you now own this work')) ?? ''
+}
 
 // Named failures for the schedule skill, its template and orient; [] means every rule holds.
 function checkSchedule({ schedule, template, orient, taskWriter = '', manifests = [], extra = [] }) {
@@ -124,28 +151,43 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
   if (!sentences(s(schedule, S8)).some((x) => /drop/i.test(x) && x.includes('`rollout:`') &&
     x.includes('`## Queue` row') && x.includes('`## File-sets` line'))) fails.push('gate-drop-whole')
 
-  // gate-sweep-wide (p17-5): § 3.5 sweeps case-insensitively for sign-off in any wording and for a decision left to
-  // a human, so every GATE_SAMPLES line matches one of its phrases; it says why (a planner can declare such a line
-  // as a gated input, which `ignore_gate` does not override, and an unattended lead never signs one off).
+  // gate-sweep-wide (p17-5): § 3.5 sweeps case-insensitively, each phrase where a word starts, for sign-off in any
+  // wording and for a decision left to a human, so every GATE_SAMPLES line matches one of its phrases and no
+  // NON_GATE_SAMPLES line matches any; it says why (a planner can declare such a line as a gated input, which
+  // `ignore_gate` does not override, and an unattended lead never signs one off).
   const s35 = s(schedule, S35)
-  const phrases = sweepPhrases(s35).map((x) => x.toLowerCase())
-  if (!/case-insensitive/i.test(sentences(s35).find((x) => x.startsWith('Scan each task body')) ?? '') ||
-    !GATE_SAMPLES.every((g) => phrases.some((p) => g.toLowerCase().includes(p))) ||
+  const scan = scanSentence(s35)
+  if (!/case-insensitive/i.test(scan) || !GATE_SAMPLES.every((g) => sweepHits(scan, g)) ||
+    NON_GATE_SAMPLES.some((g) => sweepHits(scan, g)) ||
     !sentences(s35).some((x) => x.includes('gated input') && x.includes('`ignore_gate`') && /unattended lead/.test(x))) {
     fails.push('gate-sweep-wide')
   }
 
+  // gate-quote-only (p17-5): a match on a note that only quotes or describes gate wording is no gate, so it never
+  // reaches step 8's gated-tasks block as one to clear.
+  if (!sentences(s35).some((x) => x.includes('only quotes or describes') && x.includes('carries no gate') &&
+    x.includes("never reaches step 8's gated-tasks block"))) fails.push('gate-quote-only')
+
   // capture-preflight (p17-5): step 8 flags a capture-shaped note: a resume prompt carrying task-writer § 5's
-  // close-the-capture line (the very phrase task-writer writes, so a reword there can't silently blind this), or
-  // a `## Launch` repo naming a checkout other than § 0's; it gives the "Rollout run" line that clears it, and skips
-  // a note that already carries one (a carried task, or one a lead cleared by hand), so a cleared note is not re-flagged.
+  // close-the-capture line (read from the template line itself, so a reword there can't silently blind this), or
+  // a `## Launch` repo naming another checkout of the same repo (same origin) than § 0's. It gives the "Rollout run"
+  // line that clears it, and skips a note only when its Rollout run line names this rollout, flagging one that names
+  // another (a carried task's line for the superseded rollout) so it is rewritten. A `## Launch` repo of another
+  // repository is no capture shape: it goes back to § 0's misfit rule, dropped and never cleared. The block is read
+  // up to the next pre-flight block, so another block's wording can't stand in for its own.
   const s8c = section(schedule, S8) ?? ''
-  const cap = collapse(s8c.slice(Math.max(0, s8c.indexOf('**Pre-flight — capture-shaped notes.**'))))
-  const closeLine = collapse(section(taskWriter, /^## 5\. /) ?? '').includes('mark the capture done')
-  if (s8c.indexOf('**Pre-flight — capture-shaped notes.**') < 0 || !closeLine ||
+  const capAt = s8c.indexOf('**Pre-flight — capture-shaped notes.**')
+  const capEnd = s8c.indexOf('**Pre-flight — ', capAt + 1)
+  const cap = capAt < 0 ? '' : collapse(s8c.slice(capAt, capEnd < 0 ? undefined : capEnd))
+  const capS = sentences(cap)
+  if (capAt < 0 || !closeTemplateLine(taskWriter).includes('mark the capture done') ||
     !cap.includes('`mark the capture done`') || !cap.includes('`## Launch`') || !cap.includes("§ 0's resolved repo path") ||
-    !cap.includes('A note that already carries a **Rollout run** line is cleared, so skip it') ||
-    !cap.includes('**Rollout run') || !cap.includes("Skip the resume prompt's") || !cap.includes("the engine owns this note's `status`")) {
+    !capS.some((x) => x.includes('names another checkout of the same repo') && x.includes('same `origin` URL')) ||
+    !cap.includes('The `## Launch` repo names another checkout of this repo, so edit the same repo-relative files') ||
+    !capS.some((x) => x.includes('different repository') && x.includes("misfit under § 0's rule") && x.includes('never to clear')) ||
+    !cap.includes('Skip a note only when its **Rollout run** line names this rollout, `[[{{ROLLOUT_SLUG}}]]`') ||
+    !capS.some((x) => x.includes('**Rollout run** line that names another rollout') && x.includes('is stale, so flag the note')) ||
+    !cap.includes('**Rollout run (lead') || !cap.includes("Skip the resume prompt's") || !cap.includes("the engine owns this note's `status`")) {
     fails.push('capture-preflight')
   }
 
@@ -363,15 +405,46 @@ test('control: § 3.5 back on its fixed phrases, or case-sensitive, or without i
   const why = sec.split(/(?<=[.!?]["”]?)\s+/).find((x) => /unattended lead/.test(x))
   assert.ok(why, 'control setup: the why sentence')
   only({ schedule: real.schedule.replace(why, '') }, ['gate-sweep-wide'], 'no why')
+  // The sweep stays narrow: a phrase that matches anything, or phrases matched mid-word ("threshold for"), fail.
+  only({ schedule: edit(real.schedule, S35, '`hold for`, ', '`hold for`, `the`, ') }, ['gate-sweep-wide'], 'a phrase matching anything')
+  only({ schedule: edit(real.schedule, S35, ' and with each phrase matched where a word starts (so `hold for` skips "threshold for")', '') },
+    ['gate-sweep-wide'], 'matched mid-word')
+  // "until Lachy signs off" is caught by `signs off` alone, so dropping it reopens the gap.
+  only({ schedule: edit(real.schedule, S35, '`signs off`, ', '') }, ['gate-sweep-wide'], 'no signs off')
+})
+
+test('control: § 3.5 keeping a quote-only match as a gate fails gate-quote-only', () => {
+  const quote = section(real.schedule, S35).split(/(?<=[.!?]["”]?)\s+/).find((x) => x.includes('only quotes or describes'))
+  assert.ok(quote, 'control setup: the quote-only sentence')
+  only({ schedule: real.schedule.replace(quote, 'A note that only quotes or describes such wording is kept.') }, ['gate-quote-only'], 'kept as a gate')
 })
 
 test('control: step 8 without the capture block, or task-writer rewording its close line, fails capture-preflight', () => {
   only({ schedule: edit(real.schedule, S8, '**Pre-flight — capture-shaped notes.**', '**Pre-flight — other notes.**') },
     ['capture-preflight'], 'no block')
-  only({ taskWriter: real.taskWriter.replaceAll('mark the capture done', 'close the capture') }, ['capture-preflight'], 'task-writer reworded')
+  // Only the template line changes: § 5's prose still names the phrase, so a § 5-wide match would pass this.
+  const reworded = edit(real.taskWriter, null, 'First: you now own this work — mark the capture done:', 'First: you now own this work — close the capture:')
+  assert.ok(section(reworded, /^## 5\. /).includes('mark the capture done'), 'control setup: the prose still names the phrase')
+  only({ taskWriter: reworded }, ['capture-preflight'], 'task-writer reworded its template line')
   only({ schedule: edit(real.schedule, S8, "§ 0's resolved repo path", 'the repo') }, ['capture-preflight'], 'no repo comparison')
-  only({ schedule: edit(real.schedule, S8, ' A note that already carries a **Rollout run** line is cleared, so skip it.', '') },
-    ['capture-preflight'], 'a cleared note re-flagged')
+})
+
+test('control: step 8 skipping any Rollout run line, or not flagging a stale one, fails capture-preflight', () => {
+  only({ schedule: edit(real.schedule, S8, 'Skip a note only when its **Rollout run** line names this rollout, `[[{{ROLLOUT_SLUG}}]]`: that note is already cleared.',
+    'A note that already carries a **Rollout run** line is cleared, so skip it.') }, ['capture-preflight'], 'any Rollout run line skipped')
+  const stale = section(real.schedule, S8).split(/(?<=[.!?]["”]?)\s+/).find((x) => x.includes('line that names another rollout'))
+  assert.ok(stale, 'control setup: the stale-line sentence')
+  only({ schedule: real.schedule.replace(` ${stale}`, '') }, ['capture-preflight'], 'a stale line not flagged')
+})
+
+test('control: step 8 clearing a task from another repository fails capture-preflight', () => {
+  only({ schedule: edit(real.schedule, S8, 'names another checkout of the same repo: a path other than § 0\'s resolved repo path with the same `origin` URL (`git -C <path> remote get-url origin`)',
+    'names a checkout other than § 0\'s resolved repo path') }, ['capture-preflight'], 'any other path, any origin')
+  const misfit = section(real.schedule, S8).split(/(?<=[.!?]["”]?)\s+/).find((x) => x.includes('different repository'))
+  assert.ok(misfit, 'control setup: the misfit sentence')
+  only({ schedule: real.schedule.replace(` ${misfit}`, '') }, ['capture-preflight'], 'no misfit route')
+  only({ schedule: edit(real.schedule, S8, 'names another checkout of this repo, so edit', 'names another checkout, so edit') },
+    ['capture-preflight'], 'the clearing line for any checkout')
 })
 
 test('control: step 1 without the carry preview fails', () => {
