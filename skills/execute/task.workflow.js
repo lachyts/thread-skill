@@ -387,11 +387,11 @@ const PRIOR_FEEDBACK_NOTE = `If the task note has a "## Review-blocked feedback"
 // The brief's "keep prompts byte-identical when it is absent, per the resume-cache invariant" is deliberately
 // not kept, and the cache break is accepted. needsHuman is an output, so no prompt can depend on its absence;
 // the only byte-identical option was no rule at all. And an agent() call's opts are part of the resume-cache key
-// (docs/wave-THREAD-archive.md, the `model` opts quirk): adding needsHuman to PLAN_JUDGE, REVIEW_VERDICT and
-// IMPL_RESULT already changes the opts (`schema`) of every call that renders this rule, and the reviser's. So a
-// run started on the pre-p16-3 engine and resumed on this one misses the cache on exactly those calls whatever
-// their prompt bytes, and the rule adds no new break. Every other call (planner, plan reviser, Integration's
-// agents) keeps its bytes and its opts.
+// (the archived quirk from when `model` joined the opts, which broke the cache once): adding needsHuman to
+// PLAN_JUDGE, REVIEW_VERDICT and IMPL_RESULT already changes the opts (`schema`) of every call that renders this
+// rule, and the reviser's. So a run started on the pre-p16-3 engine and resumed on this one misses the cache on
+// exactly those calls whatever their prompt bytes, and the rule adds no new break. Every other call (planner,
+// plan reviser, Integration's agents) keeps its bytes and its opts.
 const NEEDS_HUMAN_RULE = `
 
 Needs a human (needsHuman): leave needsHuman empty unless this task cannot go on without a decision only a
