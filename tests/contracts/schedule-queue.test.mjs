@@ -137,12 +137,14 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
 
   // capture-preflight (p17-5): step 8 flags a capture-shaped note: a resume prompt carrying task-writer § 5's
   // close-the-capture line (the very phrase task-writer writes, so a reword there can't silently blind this), or
-  // a `## Launch` repo naming a checkout other than § 0's; it gives the "Rollout run" line that clears it.
+  // a `## Launch` repo naming a checkout other than § 0's; it gives the "Rollout run" line that clears it, and skips
+  // a note that already carries one (a carried task, or one a lead cleared by hand), so a cleared note is not re-flagged.
   const s8c = section(schedule, S8) ?? ''
   const cap = collapse(s8c.slice(Math.max(0, s8c.indexOf('**Pre-flight — capture-shaped notes.**'))))
   const closeLine = collapse(section(taskWriter, /^## 5\. /) ?? '').includes('mark the capture done')
   if (s8c.indexOf('**Pre-flight — capture-shaped notes.**') < 0 || !closeLine ||
     !cap.includes('`mark the capture done`') || !cap.includes('`## Launch`') || !cap.includes("§ 0's resolved repo path") ||
+    !cap.includes('A note that already carries a **Rollout run** line is cleared, so skip it') ||
     !cap.includes('**Rollout run') || !cap.includes("Skip the resume prompt's") || !cap.includes("the engine owns this note's `status`")) {
     fails.push('capture-preflight')
   }
@@ -368,6 +370,8 @@ test('control: step 8 without the capture block, or task-writer rewording its cl
     ['capture-preflight'], 'no block')
   only({ taskWriter: real.taskWriter.replaceAll('mark the capture done', 'close the capture') }, ['capture-preflight'], 'task-writer reworded')
   only({ schedule: edit(real.schedule, S8, "§ 0's resolved repo path", 'the repo') }, ['capture-preflight'], 'no repo comparison')
+  only({ schedule: edit(real.schedule, S8, ' A note that already carries a **Rollout run** line is cleared, so skip it.', '') },
+    ['capture-preflight'], 'a cleared note re-flagged')
 })
 
 test('control: step 1 without the carry preview fails', () => {

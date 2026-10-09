@@ -389,13 +389,15 @@ The thread:execute skill at ${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md reads 
 To run a release hold anyway, set `ignore_gate: true` on its task note (overrides the gate for the run). A sign-off or an undecided question needs deciding in the note (or its text removed): `ignore_gate` cannot unblock a gated input a planner declares from it. To drop one after all, take it out whole: clear its `rollout:` and delete its `## Queue` row and its `## File-sets` line from this note.
 ```
 
-**Pre-flight — capture-shaped notes.** Engine agents read a task note in full, so a note still shaped as a capture (`skills/_shared/task-writer.md` § 5) steers them wrong. Scan each task in the rollout (carried ones included) for either shape: a `## Resume prompt` carrying task-writer's close-the-capture line (`mark the capture done`), which tells an agent to set `status: done` on a note the engine owns, or a `## Launch` section whose **Repo:** names a checkout other than § 0's resolved repo path, which points an agent at the wrong tree. List each match above the summary with the shape it shows, then the line that clears it, to add at the top of the note's `## Notes`:
+**Pre-flight — capture-shaped notes.** Engine agents read a task note in full, so a note still shaped as a capture (`skills/_shared/task-writer.md` § 5) steers them wrong. Scan each task in the rollout (carried ones included) for either shape: a `## Resume prompt` carrying task-writer's close-the-capture line (`mark the capture done`), which tells an agent to set `status: done` on a note the engine owns, or a `## Launch` section whose **Repo:** names a checkout other than § 0's resolved repo path, which points an agent at the wrong tree. A note that already carries a **Rollout run** line is cleared, so skip it. List each match above the summary with the shape it shows, then the line that clears it, to add at the top of the note's `## Notes` with the sentence for each shape the note shows:
 
 ```
 ⚠️ Pre-flight — capture-shaped notes (engine agents read the whole note and may follow its resume prompt):
   - [[task-v]] — resume prompt says "mark the capture done"; ## Launch repo ~/repos/tools/x, not ~/repos/tools/x-rollout
-Clear each by adding at the top of its ## Notes:
-  **Rollout run (lead, <date>): read this first.** This task runs under [[{{ROLLOUT_SLUG}}]]. Work only in your worktree of `<§ 0's repo>`; the `## Launch` repo and the resume prompt name another checkout, so edit the same repo-relative files in your worktree instead. Skip the resume prompt's "mark the capture done" step, because the engine owns this note's `status`.
+Clear each by adding at the top of its ## Notes (keep the sentence for each shape it shows):
+  **Rollout run (lead, <date>): read this first.** This task runs under [[{{ROLLOUT_SLUG}}]]; work only in your worktree of `<§ 0's repo>`.
+  The `## Launch` repo names another checkout, so edit the same repo-relative files in your worktree instead.
+  Skip the resume prompt's "mark the capture done" step, because the engine owns this note's `status`.
 ```
 
 **Pre-flight — local copies agents won't see.** If step 2's pushed-base re-run printed any WARN
