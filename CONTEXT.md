@@ -345,6 +345,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   handle; a stop at Integration rejoins the Integration queue; otherwise it
   takes a fresh call behind a warning (execute § 3.7).
   _Avoid_: approval item, spend gate, pre-approval.
+- **Needs-you item** — a decision in a running rollout that is Lachy's alone:
+  a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside only a person
+  moves on, a merge hold's release, or a halt. The lead lists it in the
+  report's `Needs you:` block and pushes it once, deduped on its line in the
+  rollout note's `## Needs-you log`, the lead's push record. That log is
+  never the task note's `## Needs you` (p16-3), which holds the question the
+  engine stopped on; an item whose entry carries one shows it on its detail
+  line. The lead never puts an item through the question tool while anything
+  the session launched is in flight, and the queue runs on without the answer
+  (execute § 6.5). _Avoid_: pending question, ask item, open question.
 - **Agent-fixable block** — a block a re-dispatched agent can resolve alone;
   repair retries these without asking the human. _Avoid_: auto-block, soft block.
 - **Automatic descope** — a plan-block the notes already settle, dropped from
