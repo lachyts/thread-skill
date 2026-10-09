@@ -300,7 +300,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `Project root`) kept its `refs/heads/<default>` and its bareness across each
   **Window** (execute § 4.5, ADR 0030). A local commit not on
   `origin/<default>` is benign only when every one is a non-merge commit
-  touching only close-out paths (land.sh's `closeout_shaped`), stricter than
+  touching only close-out paths (land.sh's `closeout_shaped`) or deleting a
+  review doc directly under `docs/reviews/` (`closeout_change`), stricter than
   land.sh S9: a merge or an empty commit trips. Anything else trips. _Avoid_:
   verifier wrapper, git guard.
 - **Window** — the span from a launch's canary `arm` to its `check`: a

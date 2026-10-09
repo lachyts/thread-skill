@@ -8,7 +8,11 @@
 #
 # <repo> is any path inside the repo, a directory `git rm -f` just removed included: it resolves through
 # its nearest existing ancestor. Each <path> must be THREAD.md, */THREAD.md, or a file directly under
-# docs/handoffs/ or */docs/handoffs/, inside the repo. With no -F the message is `📝 docs(thread): close-out`.
+# docs/handoffs/ or */docs/handoffs/, inside the repo, or a consumed review doc: a file directly under the
+# repo's docs/reviews/, tracked in HEAD, whose front matter says `status: consumed` (on disk, or in HEAD when
+# it is gone from disk). A review doc only ever lands as its deletion: land.sh removes it (`git rm -f`, so an
+# uncommitted consumed mark is fine) and commits the removal. With no -F the message is
+# `📝 docs(thread): close-out`.
 #
 # stdout is exactly one line, printed by the parent process after the body exits:
 #   landed · queued <url> · queued: needs merge <url> · not landed: <reason> · stuck: <reason>
@@ -190,6 +194,43 @@ closeout_shaped() {
   return 0
 }
 
+# review_doc <rel>: a file directly under the repo's docs/reviews/ (fresh-review's review docs).
+review_doc() {
+  case $1 in docs/reviews/?*) ;; *) return 1 ;; esac
+  case ${1#docs/reviews/} in */*) return 1 ;; esac
+  return 0
+}
+
+# consumed: stdin's front matter (a first `---` line to the next `---`) holds `status: consumed`. awk reads
+# all of stdin, so a writer piping into it never meets SIGPIPE under pipefail.
+consumed() {
+  awk '{ sub(/\r$/, "") }
+       NR == 1 { fm = ($0 == "---"); next }
+       fm && $0 == "---" { fm = 0; closed = 1; next }
+       fm && /^status:[ \t]*consumed[ \t]*(#.*)?$/ { found = 1 }
+       END { exit (found && closed) ? 0 : 1 }'
+}
+
+# consumed_review <rel>: a review doc tracked in HEAD and consumed: the copy on disk says so, or HEAD's
+# when it is gone from disk (already `git rm`'d). Anything else under docs/reviews/ is never landed.
+consumed_review() {
+  local r=$1
+  review_doc "$r" || return 1
+  git -C "$top" cat-file -e "HEAD:$r" 2>/dev/null || return 1
+  if [ -e "$top/$r" ] || [ -L "$top/$r" ]; then
+    [ -f "$top/$r" ] && [ ! -L "$top/$r" ] && consumed < "$top/$r"
+  else
+    git -C "$top" cat-file blob "HEAD:$r" 2>/dev/null | consumed
+  fi
+}
+
+# closeout_change <status> <rel>: one path of a carried commit (S9): a close-out path, or the deletion of a
+# review doc. A carried deletion is checked by shape only; its consumed check ran when it was made (S1).
+closeout_change() {
+  closeout_shaped "$2" && return 0
+  [ "$1" = D ] && review_doc "$2"
+}
+
 # The fixed swept list mirrors daily-sweep.sh, test included: the sweep commits and pushes an entry only
 # when it holds a .git directory (a .git file, a linked worktree, is skipped there and so here). Every
 # $HOME/repos/concepts/<c>/ with a .git directory joins.
@@ -260,7 +301,12 @@ main() {
   for p in ${paths[@]+"${paths[@]}"}; do
     phys "$p" || stuck_early "path outside $top: $p"
     case $PHYS in "$top"/?*) rel=${PHYS#"$top"/} ;; *) stuck_early "path outside $top: $p" ;; esac
-    closeout_shaped "$rel" || stuck_early "not a close-out path: $rel"
+    if review_doc "$rel"; then
+      consumed_review "$rel" \
+        || stuck_early "not a close-out path: $rel (a review doc lands only as the deletion of a tracked, consumed one)"
+    else
+      closeout_shaped "$rel" || stuck_early "not a close-out path: $rel"
+    fi
     rels+=("$rel")
   done
   cd "$top" || stuck_early "cannot enter $top"
@@ -329,7 +375,10 @@ main() {
 
   # ---- S5. Stage and commit the handed paths ----------------------------------------------------------
   for rel in ${rels[@]+"${rels[@]}"}; do
-    if [ -e "$rel" ] || [ -L "$rel" ]; then
+    if review_doc "$rel" && { [ -e "$rel" ] || [ -L "$rel" ]; }; then
+      git rm -q -f -- "$rel" 2>"$tmpd/rm.err" || stuck_early "rm failed: $rel: $(first_line "$tmpd/rm.err")"
+      list+=("$rel")
+    elif [ -e "$rel" ] || [ -L "$rel" ]; then
       if ! git add -- "$rel" 2>"$tmpd/add.err"; then
         git check-ignore -q -- "$rel" && stuck_early "ignored: $rel"
         stuck_early "add failed: $rel: $(first_line "$tmpd/add.err")"
@@ -386,16 +435,16 @@ main() {
 
   # ---- S9. Ahead-set validation: only close-out commits are carried ------------------------------------
   git merge-base HEAD "$od" >/dev/null 2>&1 || finish "stuck: local branch has no common history with origin/$d" 1
-  local c ps f bad=() nbad=0 has_merge= subj
+  local c ps f st bad=() nbad=0 has_merge= subj
   for c in $ahead; do
     ps=$(git rev-list --parents -n 1 "$c"); set -- $ps; shift
     if [ $# -gt 1 ]; then
       has_merge=1; shift
       for p in "$@"; do git merge-base --is-ancestor "$p" "$od" || { bad+=("$c"); break; }; done
     else
-      while IFS= read -r -d '' f; do
-        closeout_shaped "$f" || { bad+=("$c"); break; }
-      done < <(git diff-tree --no-commit-id --name-only -r -z --root "$c")
+      while IFS= read -r -d '' st && IFS= read -r -d '' f; do
+        closeout_change "$st" "$f" || { bad+=("$c"); break; }
+      done < <(git diff-tree --no-commit-id --name-status -r -z --root "$c")
     fi
   done
   nbad=${#bad[@]}
