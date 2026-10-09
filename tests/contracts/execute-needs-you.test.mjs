@@ -5,7 +5,9 @@
 // Integration command or a merge hold is live: the bar is anything live, and in the loop that means a turn that
 // ends `halted` or `done`), the needs-you items (a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside
 // only a person moves on, a merge hold's release, any other § 7 halt), a set-aside's fix clause read from its
-// source run and a halt's fixed act (so two sessions word one item alike and the dedupe holds), one push per item
+// source run, with a needs-human stop (p16-3's `needsHuman` on `next`'s entry) never read as a spent budget, and
+// a halt's fixed act (so two sessions word one item alike and the dedupe holds), the engine's needs-human
+// question shown on the item's detail line and carried by its push, one push per item
 // deduped on a `## Needs-you log` line and led by its act, where that log lives in the rollout note, the turn
 // ending `waiting`, the report's `Needs you:` block, the answers' existing routes, § 3.7's and § 7's sign-off,
 // the § 8 guardrail and the Don't, CONTEXT.md's glossary entry, and no other ask site outside § 6.5, § 8 and the
@@ -165,16 +167,22 @@ function checkNeedsYou(skill, context = realContext) {
   // report-block: § 6's template lists `Needs you (` before the approve-gates line, before `Held:`; the old
   // gate-pending heading is gone; the Integration set-aside ([[task-i]], merge-task's exit-4 text) has its
   // needs-you line inside the block, and [[task-h]]'s Set aside line says why it has none (a plain rejection,
-  // autoRevise); a turn that adds an item prints the report; the block is derived from the current state on every
-  // turn, never rebuilt from the log, and a resolved item drops out of it.
+  // autoRevise); a review-blocked needs-human stop ([[task-n]], round 1, below the cap) reads `hand back or defer`
+  // with the engine's question on the `→` line under it, never a raise; a turn that adds an item prints the
+  // report; the block is derived from the current state on every turn, never rebuilt from the log, and a resolved
+  // item drops out of it.
   const lines6 = s6raw.split('\n')
   const iNeeds = lines6.findIndex((l) => l.startsWith('Needs you ('))
   const iGate = lines6.findIndex((l) => l.includes('approve-gates --tasks task-k'))
   const iHeld = lines6.findIndex((l) => l.startsWith('Held:'))
   const iTaskI = lines6.indexOf('- [[task-i]] set aside at Integration (blocked, Blocker diagnosis run 1): hand back or defer with /thread:repair [[<rollout-slug>]]')
   const iTaskH = lines6.findIndex((l) => l.startsWith('- at its run: [[task-h]] — blocked (plain rejection, autoRevise'))
+  const iTaskN = lines6.indexOf('- [[task-n]] set aside at its run (review-blocked, Review-blocked feedback run 1): hand back or defer with /thread:repair [[<rollout-slug>]]')
+  const iAsideN = lines6.indexOf('- review-blocked: [[task-n]] — a needs-human question (see "## Needs you")')
   if (!(iNeeds >= 0 && iNeeds < iGate && iGate < iHeld) || s6raw.includes('Gate-pending (awaiting YOUR sign-off') ||
     !(iNeeds < iTaskI && iTaskI < iHeld) || !(iTaskH >= 0 && iTaskH < iNeeds) ||
+    !(iNeeds < iTaskN && iTaskN < iHeld) || lines6[iTaskN + 1] !== '  → asks: <its needsHuman question, verbatim>' ||
+    !(iAsideN >= 0 && iAsideN < iNeeds) ||
     !s6.includes('(at a halt, a merge hold, completion, or a turn that adds a needs-you item, § 6.5)') ||
     !items.includes('from the current state, never from `## Needs-you log`') || !items.includes('drops out of the block')) {
     fails.push('report-block')
@@ -215,13 +223,20 @@ function checkNeedsYou(skill, context = realContext) {
   // paragraph, never by a default: rule 2 lists every fixed opening the engine, its prompts and the lead write
   // for an own run (a dead call, merge-task's exit 1, a dead agent, a plan divergence, the engine's two fallbacks),
   // the transient one glossed as a dead agent and the spent budget glossed on max_iterations itself, and rule 3
-  // drops the raise for each. A plan-block after a descope asks for scope, and a descope refusal (which writes
-  // nothing) changes no text.
+  // drops the raise for each. An entry that carries `needsHuman` (p16-3: a stop on a needs-human question, which
+  // the engine makes at once, below any cap, and another round cannot answer) is routed away from rule 2 by the
+  // entry itself, whatever its section or opening: rule 2 excludes it, rule 3 lists it, and (c)'s includes name
+  // it for review-blocked and blocked, so a review-blocked entry is never read as max_review_rounds spent. A
+  // plan-block after a descope asks for scope, and a descope refusal (which writes nothing) changes no text.
   const r2 = kindC.indexOf('2. a source run that spent a budget')
   const r3 = kindC.indexOf('3. every other source run spends no budget')
   const rule2 = r2 >= 0 && r3 > r2 ? kindC.slice(r2, r3) : ''
   const iters = rule2.slice(rule2.indexOf("`max_iterations` for a code-writing task's"))
+  const asked = 'a stop on a needs-human question (the entry carries `needsHuman`)'
   if (!kindC.includes('`[[<slug>]] set aside <where> (<status>, <section> run <n>): <fix> with /thread:repair [[<rollout>]]`') ||
+    !rule2.startsWith('2. a source run that spent a budget, never an entry that carries `needsHuman` (a stop on a needs-human question: the engine stops on the question, never on a budget run out, and no climb, retry or further plan or review round follows it, so its source run spent no budget whatever its section, round or opening, and another round cannot answer it):') ||
+    !kindC.includes(`- review-blocked with \`max_review_rounds\` spent, or by ${asked} at any round;`) ||
+    !kindC.includes(`a stage that threw, or ${asked});`) ||
     !kindC.includes('never chosen, so two sessions word one block alike') ||
     !kindC.includes("`<where>`: `at Integration` when the entry's `setAsideAt` is `integration`, else `at its run`") ||
     !kindC.includes('`decide scope or defer`') ||
@@ -232,10 +247,22 @@ function checkNeedsYou(skill, context = realContext) {
     !['`workflow call failed:` (a dead call)', "`merge-task:` (merge-task's exit 1)", '`transient infrastructure failure` (a dead agent)',
       '`plan-divergence:`', '`agent returned neither verified nor blocked`', '`workflow stage threw`'].every((k) => iters.includes(k)) ||
     /engine's own block|transient infrastructure failure` \([^)]*budget/.test(rule2) ||
-    !kindC.includes("every other source run spends no budget: `hand back or defer`. That is every entry at Integration, a `revise stopped:` run, a dead call, merge-task's exit 1, a transient failure (a dead agent), a plan divergence, a result with neither verified nor blocked, a stage that threw, any other plan-block and a review with no PR.") ||
+    !kindC.includes(`every other source run spends no budget: \`hand back or defer\`. That is every entry at Integration, ${asked}, a \`revise stopped:\` run, a dead call, merge-task's exit 1, a transient failure (a dead agent), a plan divergence, a result with neither verified nor blocked, a stage that threw, any other plan-block and a review with no PR.`) ||
     !kindC.includes('A descope refusal (exit 3) or error (exit 1) writes nothing, so it changes no item text') ||
     kindC.includes('the spent budget')) {
     fails.push('set-aside-fix')
+  }
+
+  // needs-human-shown: the question the engine stopped on (p16-3's `needsHuman`, the task note's `## Needs you`)
+  // reaches Lachy. It goes verbatim on a `→` line under the item whenever the entry carries one, never on the
+  // item line (the item text is the dedupe key and stays fixed), because a review judge's stop opens its section
+  // with a feedback bullet; and a (c) push for such an entry takes the question as its what, so the push carries
+  // it and a cut shortens it, never the act.
+  if (!items.includes('never on the item line, so the item text stays fixed') ||
+    !items.includes("an entry's `needsHuman` question, verbatim, on its own `→` line whenever the entry carries one") ||
+    !items.includes("for a review judge's stop the section's first line is a feedback bullet, never the question") ||
+    !kindC.includes("For an entry that carries `needsHuman`, the what is that question, verbatim, in place of `set aside …`: the push carries the question the engine stopped on, and a cut shortens it, never the act.")) {
+    fails.push('needs-human-shown')
   }
 
   // halt-act: (e)'s act is fixed per halt, never taken from § 7's prose (whose remedies are prose, not commands);
@@ -257,7 +284,7 @@ function checkNeedsYou(skill, context = realContext) {
     push.includes('`<rollout-slug>: <slug> <question>`') ||
     !items.includes('Act `sign off gated input`; what `<gate>`.') ||
     !kindB.includes('Act `decide with /thread:repair [[<rollout>]]`; what `RACE undecided` or `UNVERIFIED undecided`.') ||
-    !kindC.includes('Act `<fix> with /thread:repair [[<rollout>]]`; what `set aside <where> (<status>, <section> run <n>)`.') ||
+    !kindC.includes('Act `<fix> with /thread:repair [[<rollout>]]`; what `set aside <where> (<status>, <section> run <n>)`') ||
     !items.includes('Act `go ahead or decline the merge` or `approve PR #N (<url>)`; what `gated hold (PR #N)` or `review required`.') ||
     !kindE.includes('Act `<act>`; what `halted (<YYYY-MM-DD>): <reason>`.')) {
     fails.push('push-message')
@@ -273,9 +300,12 @@ function checkNeedsYou(skill, context = realContext) {
     fails.push('answers')
   }
 
-  // glossary: CONTEXT.md defines the term, with its block, its log, § 6.5 and an Avoid list, so later tasks reuse it.
+  // glossary: CONTEXT.md defines the term, with its block, its log, § 6.5 and an Avoid list, so later tasks reuse it,
+  // and tells the rollout note's `## Needs-you log` (the lead's push record) apart from the task note's
+  // `## Needs you` (p16-3, the engine's question), two near-identical section names.
   const entry = collapse(slice(context, /^- \*\*Needs-you item\*\*/, /^(- \*\*|#)/) ?? '')
-  if (!['`Needs you:` block', '`## Needs-you log`', 'execute § 6.5', '_Avoid_: pending question, ask item'].every((k) => entry.includes(k))) {
+  if (!['`Needs you:` block', '`## Needs-you log`', 'execute § 6.5', '_Avoid_: pending question, ask item'].every((k) => entry.includes(k)) ||
+    !entry.includes("never the task note's `## Needs you` (p16-3), which holds the question the engine stopped on")) {
     fails.push('glossary')
   }
   return [...new Set(fails)]
@@ -286,11 +316,29 @@ test('execute § 1, § 3.7, § 4.5, § 6, § 6.5, § 7, § 8, the Don\'ts and CO
 })
 
 // (c)'s rule 2 names each budget by what its source run is, so each opening it reads must still be the text its
-// writer writes: an engine or lead rewording fails here, never silently as a push naming the wrong fix.
-test('the openings (c)\'s rule 2 reads are still written by the engine, its prompts and the lead', () => {
+// writer writes: an engine or lead rewording fails here, never silently as a push naming the wrong fix. Its
+// needs-human exclusion reads `next`'s setAside entry, so the engine's needs-human exits (the plan judge's
+// plan-blocked, the review judge's review-blocked below the cap, the implementer's and investigator's first-pass
+// block before any climb, the reviser's block) and `next`'s `needsHuman` key must still be there: a removed exit
+// or key fails here, never silently as an exclusion that no entry can trigger.
+test('the openings (c)\'s rule 2 reads, and the needs-human exits it excludes, are still written by the engine, its prompts and the lead', () => {
   const engine = read('skills/execute/task.workflow.js')
   const reconcile = read('skills/execute/scripts/reconcile-rollout.py')
+  const firstAsk = engine.indexOf('if (askedFirst) return askedFirst')
+  const climb = engine.indexOf('if (r.escalate || r.blocked) {')
+  assert.ok(firstAsk >= 0 && climb > firstAsk, 'the implementer\'s needs-human stop no longer comes before the climb branch')
   const written = [
+    [engine, "status: 'plan-blocked', planRoundsUsed: round, needsHuman: q,", 'the plan judge\'s needs-human exit'],
+    [engine, "return { ...current, status: 'review-blocked', reviewRoundsUsed: round, reviewFeedback: verdict.feedback, reviewHistory: priorFeedback, needsHuman: q }",
+      'the review judge\'s needs-human exit, below the cap'],
+    [engine, 'const asks = (r) => (r.blocked && askOf(r) ? { ...r, blocked: true, needsHuman: askOf(r), ...(planExtra || {}) } : null)',
+      'the implementer\'s needs-human exit'],
+    [engine, 'if (r.blocked && askOf(r)) return { ...r, blocked: true, needsHuman: askOf(r) }', 'the investigator\'s needs-human exit'],
+    [engine, "return { stop: { ...current, status: 'blocked', blockerDiagnosis: revised.blockerDiagnosis, needsHuman: askOf(revised) } }",
+      'the reviser\'s needs-human exit'],
+    [engine, "needsHuman: status === 'review' ? '' : askOf(norm),", 'the row\'s needsHuman'],
+    [reconcile, 'entry["needsHuman"] = ask', '`next`\'s setAside entry key'],
+    [reconcile, '"setAside": [_set_aside_entry(r) for r in by_state.get("set-aside", [])]', '`next`\'s setAside entries'],
     [engine, "'plan not approved after '", 'plan-loop budget run out'],
     [engine, '`plan round budget exhausted without a verdict', 'plan-loop guard'],
     [engine, "'transient infrastructure failure — ", 'TRANSIENT_DIAGNOSIS'],
@@ -306,7 +354,7 @@ test('the openings (c)\'s rule 2 reads are still written by the engine, its prom
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
 
 const RULES = ['no-ask-in-flight', 'push-dedupe', 'kinds', 'turn-waiting', 'report-block', 'sign-off', 'guardrails',
-  'no-other-ask', 'log-placement', 'set-aside-fix', 'halt-act', 'push-message', 'answers', 'glossary']
+  'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'push-message', 'answers', 'glossary']
 const CONTROLLED = new Set()
 
 // Replaces the one occurrence of `from`; a control whose target is missing or ambiguous fails its setup.
@@ -352,7 +400,7 @@ test('control: the push dedupe removed, a push on every report, or the log line 
 test('control: an item kind dropped fails kinds', () => {
   only(edit(real, ', or `[[<slug>]] UNVERIFIED undecided: decide with /thread:repair [[<rollout>]]`', ''), 'kinds', 'no UNVERIFIED item')
   only(edit(real, lineIn(real, S65, '  - plan-blocked with `max_plan_rounds` spent'), ''), 'kinds', 'no plan-blocked')
-  only(edit(real, lineIn(real, S65, '  - blocked at its run with `autoRevise: false`'), ''), 'kinds', 'no autoRevise: false')
+  only(edit(real, '  - blocked at its run with `autoRevise: false` (', '  - blocked at its run ('), 'kinds', 'no autoRevise: false')
   only(edit(real, ", except a RACE whose re-verify this session still runs: a green one lands it with no decision)", ')'),
     'kinds', 'a RACE pushed while its re-verify runs')
 })
@@ -368,6 +416,10 @@ test('control: the old heading, a block rebuilt from the log, or the Integration
   only(edit(real, 'derived from the current state, never from `## Needs-you log`', 'rebuilt from `## Needs-you log`'),
     'report-block', 'rebuilt from the log')
   only(edit(real, lineIn(real, S6, '- [[task-i]] set aside at Integration'), ''), 'report-block', 'no Integration item')
+  only(edit(real, '- [[task-n]] set aside at its run (review-blocked, Review-blocked feedback run 1): hand back or defer with',
+    '- [[task-n]] set aside at its run (review-blocked, Review-blocked feedback run 1): raise max_review_rounds, hand back or defer with'),
+  'report-block', 'a needs-human stop raises the review budget')
+  only(edit(real, lineIn(real, S6, '  → asks: <its needsHuman question'), ''), 'report-block', 'the needs-human question left off')
   only(edit(real, '- at its run: [[task-h]] — blocked (plain rejection, autoRevise: its seeded revise waits for a free slot)',
     '- at its run: [[task-h]] — blocked, see "## Blocker diagnosis"'), 'report-block', 'task-h unexplained')
 })
@@ -418,6 +470,19 @@ test('control: a raise where no budget was spent, or the wrong field, fails set-
     'and that starts with none of'), 'set-aside-fix', 'max_iterations named by a default')
   only(edit(real, 'A descope refusal (exit 3) or error (exit 1) writes nothing, so it changes no item text (a later session that judged the same run otherwise would word it apart and push it twice): its `ASK:` or ERROR line is the item\'s `→` detail. ', ''),
     'set-aside-fix', 'a refusal rewords the item')
+  only(edit(real, ', never an entry that carries `needsHuman` (a stop on a needs-human question: the engine stops on the question, never on a budget run out, and no climb, retry or further plan or review round follows it, so its source run spent no budget whatever its section, round or opening, and another round cannot answer it):', ':'),
+    'set-aside-fix', 'a needs-human stop left to rule 2')
+  only(edit(real, 'every entry at Integration, a stop on a needs-human question (the entry carries `needsHuman`), a `revise stopped:` run', 'every entry at Integration, a `revise stopped:` run'),
+    'set-aside-fix', 'a needs-human stop unlisted in rule 3')
+  only(edit(real, ', or by a stop on a needs-human question (the entry carries `needsHuman`) at any round;', ';'),
+    'set-aside-fix', 'review-blocked read as max_review_rounds spent')
+})
+
+test('control: the needs-human question kept off the detail line or the push fails needs-human-shown', () => {
+  only(edit(real, "an entry's `needsHuman` question, verbatim, on its own `→` line whenever the entry carries one", "a stop's first line"),
+    'needs-human-shown', 'the question left off the detail line')
+  only(edit(real, " For an entry that carries `needsHuman`, the what is that question, verbatim, in place of `set aside …`: the push carries the question the engine stopped on, and a cut shortens it, never the act.", ''),
+    'needs-human-shown', 'the question left out of the push')
 })
 
 test('control: (e) naming § 7\'s prose, or a red RACE re-verify in both (b) and (e), fails halt-act', () => {
@@ -445,9 +510,10 @@ test('control: CONTEXT.md without the entry, or without its Avoid list, fails gl
   assert.ok(entry, 'control setup: no Needs-you item entry')
   only(real, 'glossary', 'no entry', edit(realContext, `${entry}\n`, ''))
   only(real, 'glossary', 'no Avoid list', edit(realContext, '_Avoid_: pending question, ask item,', ''))
+  only(real, 'glossary', 'the two sections not told apart', edit(realContext, "never the task note's `## Needs you` (p16-3)", "the task note's `## Needs you` (p16-3)"))
 })
 
-test('the rules are all named (14) and each has a control', () => {
-  assert.equal(RULES.length, 14)
+test('the rules are all named (15) and each has a control', () => {
+  assert.equal(RULES.length, 15)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
