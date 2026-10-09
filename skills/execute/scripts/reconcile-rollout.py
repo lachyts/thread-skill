@@ -202,8 +202,7 @@ Subcommands:
               1.2) and /thread:repair § 3d share: `--tasks <slug> --rollout <note> --part "<verbatim quote>"
               (--optional --short <kebab> | --owner <slug> --owner-quote "<verbatim quote>") --reason "<line>"`.
               The caller judges that the plan-block feedback centres on the part; the verb checks it. Exit 3 is an
-              ASK (one `ASK: [[slug]] <why>; refusal recorded as descope_refused:, nothing else written: ...` line,
-              or `…; nothing written: ...` when it records nothing; its one write is
+              ASK (one `ASK: [[slug]] <why>; nothing written: ...` line; its one write is
               `descope_refused: <now> run=<n> sha=<12 hex>`, naming the Plan-blocked feedback run it judged and its
               feedback fingerprint, kept as it stands when it already names them, and skipped while `descope_armed:`
               stands or under --dry-run: lead-integrate.py's verdict reads `autoRetry: false` while it names the
@@ -3878,18 +3877,15 @@ def cmd_descope(args) -> int:
     def ask(why):
         # The refusal's one write: `descope_refused:` naming the block judged, so `inputs`' verdict reads autoRetry:
         # false for it in every session. Kept when it already names it (idempotent); skipped while a descope is armed
-        # (that descope stands and its hand-back is pending) and under --dry-run. The ASK line says which.
+        # (that descope stands and its hand-back is pending) and under --dry-run. The ASK line is unchanged.
         key = _plan_block_key(note)
-        recorded = key is not None and not armed and not args.dry_run
-        if recorded and _descope_refusal(note) != key:
+        if key is not None and not armed and not args.dry_run and _descope_refusal(note) != key:
             note.set(DESCOPE_REFUSED_KEY, f"{_stamp(now)} run={key[0]} sha={key[1]}")
             try:
                 note.save()
             except OSError as e:
-                recorded = False
                 print(f"WARN: descope: cannot record {DESCOPE_REFUSED_KEY}: in {path}: {e}", file=sys.stderr)
-        said = f"refusal recorded as {DESCOPE_REFUSED_KEY}:, nothing else written" if recorded else "nothing written"
-        print(f"ASK: [[{slug}]] {why}; {said}: /thread:repair [[{ro}]] asks Lachy")
+        print(f"ASK: [[{slug}]] {why}; nothing written: /thread:repair [[{ro}]] asks Lachy")
         return 3
 
     part_f, quote_f = _fold(part), _fold(quote)
@@ -4814,8 +4810,7 @@ def main() -> int:
     df.set_defaults(func=cmd_defer)
 
     de = sub.add_parser("descope", help="record an automatic descope of a plan-blocked task (p14-4): exit 0 descoped "
-                                         "(then hand-back), exit 3 ASK (only descope_refused: written; /thread:repair "
-                                         "asks Lachy)")
+                                         "(then hand-back), exit 3 ASK (nothing written; /thread:repair asks Lachy)")
     de.add_argument("--tasks", required=True, help="the plan-blocked task's slug")
     de.add_argument("--rollout", required=True, help="path to the rollout note the task's rollout: names")
     de.add_argument("--part", required=True, help="the descoped part, a verbatim quote (of the brief, for --optional)")
