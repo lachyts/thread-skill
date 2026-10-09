@@ -26,9 +26,12 @@ Subcommands:
       other failure aborts and routes `trouble []`; success routes `verify` with `mergeCommit` (unpushed),
       `sharedFiles` (task files over B...H that main changed over TB..B, or record.base..B in case ii)
       and `trouble` ["shared-file"] when there is one, else []. Always prints branch, worktreePath,
-      prHead, anchor, taskBase, mainSha, case, route, trouble, reason and landed (one {prUrl, title,
+      prHead, anchor, taskBase, mainSha, case, route, trouble, reason, landed (one {prUrl, title,
       files, taskPath} per first-parent commit in TB..B whose subject ends ` (#N)` or starts
-      `Merge pull request #N `; [] when any commit has no PR number, `note` says why).
+      `Merge pull request #N `), unlisted (one {sha, subject, files} per other first-parent commit in
+      TB..B: pushed without a PR, skipped from landed, which it never empties) and note ("" or why: when
+      origin is not a github.com remote and the task's pr: is not a PR URL, landed is [] and that reason
+      comes first, then `<n> commit(s) in <TB>..<B> name no PR …` naming each unlisted commit).
 
   verify --tree T --out O --timeout S [--bootstrap CMD] --verifier CMD [--repo R --detach-at SHA]
       Run the env bootstrap, then the verifier, each `bash -c` in its own session (process group) in T,
@@ -343,23 +346,34 @@ def _pr_index(tasks_dir, owner_repo):
 
 
 def _landed(repo, tb, b, owner_repo, tasks_dir):
-    """Every PR merged in TB..B (first-parent), oldest first; [] when any commit has no PR number."""
+    """(landed, unlisted, note) over TB..B's first-parent commits, oldest first (p17-1). A commit whose subject
+    ends ` (#N)` or starts `Merge pull request #N ` is a landed PR; any other was pushed without one, so it is
+    skipped from `landed` and listed in `unlisted` as {sha, subject, files}: one PR-less commit never drops the
+    list. `landed` is [] when origin is not a github.com remote and the task's pr: is not a PR URL (no URL to
+    build); `note` says why, that reason first, then the unlisted commits."""
     if not tb or not b or tb == b:
-        return [], ""
+        return [], [], ""
     commits = out_of(git(repo, "rev-list", "--first-parent", "--reverse", f"{tb}..{b}")).split()
-    found = []
+    found, unlisted = [], []
     for c in commits:
         subject = out_of(git(repo, "log", "-1", "--format=%s", c))
-        m = re.search(r" \(#([0-9]+)\)$", subject) or re.match(r"Merge pull request #([0-9]+) ", subject)
-        if not m:
-            return [], f"commit {c[:12]} ({subject!r}) names no PR"
         files = [f for f in out_of(git(repo, "diff", "--name-only", f"{c}^1", c)).split("\n") if f]
-        found.append((m.group(1), subject, files))
-    if not owner_repo:
-        return [], "origin is not a github.com remote and the task's pr: is not a PR URL"
+        m = re.search(r" \(#([0-9]+)\)$", subject) or re.match(r"Merge pull request #([0-9]+) ", subject)
+        if m:
+            found.append((m.group(1), subject, files))
+        else:
+            unlisted.append({"sha": c, "subject": subject, "files": files})
+    why = []
+    if found and not owner_repo:
+        why.append("origin is not a github.com remote and the task's pr: is not a PR URL")
+    if unlisted:
+        why.append(f"{len(unlisted)} commit(s) in {tb[:12]}..{b[:12]} name no PR (pushed without one), listed in "
+                   "`unlisted`, not in `landed`: " + "; ".join(f"{u['sha'][:12]} {u['subject']!r}" for u in unlisted))
+    if not found or not owner_repo:
+        return [], unlisted, "; ".join(why)
     index = _pr_index(tasks_dir, owner_repo)
     return [{"prUrl": f"https://github.com/{owner_repo}/pull/{n}", "title": subject, "files": files,
-             "taskPath": index.get(n, "")} for n, subject, files in found], ""
+             "taskPath": index.get(n, "")} for n, subject, files in found], unlisted, "; ".join(why)
 
 
 def _clean_tree(tree):
@@ -410,7 +424,7 @@ def cmd_prepare(args):
     tasks_dir = Path(os.path.expanduser(args.tasks_dir)) if args.tasks_dir else _path.parent
     br, tree = branch_of(args.slug), worktree_dir(str(repo), args.slug)
     out = {"slug": args.slug, "branch": br, "worktreePath": tree, "prHead": None, "anchor": None, "taskBase": None,
-           "mainSha": None, "case": None, "route": None, "trouble": [], "reason": "", "landed": [],
+           "mainSha": None, "case": None, "route": None, "trouble": [], "reason": "", "landed": [], "unlisted": [],
            "mergeCommit": "", "sharedFiles": [], "conflictFiles": [], "staleRefDeleted": None,
            "abortedMerge": False, "stashed": "", "record": None, "note": ""}
 
@@ -442,8 +456,8 @@ def cmd_prepare(args):
     if not re.fullmatch(r"[0-9a-f]{40}", tb):
         raise EnvError(f"no merge-base of the anchor {a} and origin/{args.default}")
     out.update(anchor=a, taskBase=tb)
-    landed, note_why = _landed(repo, tb, b, _owner_repo(repo, note), tasks_dir)
-    out.update(landed=landed, note=note_why)
+    landed, unlisted, note_why = _landed(repo, tb, b, _owner_repo(repo, note), tasks_dir)
+    out.update(landed=landed, unlisted=unlisted, note=note_why)
 
     last = last_integration(note)
     # Only a complete `integrated` record can back case (ii): its head and base are the pair merge-task needs.
