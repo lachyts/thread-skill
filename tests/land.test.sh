@@ -1443,6 +1443,77 @@ has "$err" "pushed the rebased tip without moving it: [[demo-rollout-2026-10-03]
 ok "$(wtcount)" 1 "case 72: the scratch worktree is gone"
 rm -rf "$HOME/repos"
 
+# ==== Review docs: a close-out carries a consumed review doc's deletion, and nothing else of docs/reviews/ ====
+# rdoc <name> <status>: a fresh-review doc under docs/reviews/; its body repeats `status: consumed`, which
+# never counts (only the front matter does).
+rdoc() {
+  mkdir -p "$(dirname "$W/docs/reviews/$1")"
+  printf -- '---\nhead: abc1234\nstatus: %s\n---\n\nTarget: x\nstatus: consumed\n' "$2" > "$W/docs/reviews/$1"
+}
+rseed() { git -C "$W" add docs && git -C "$W" commit -qm "📝 docs(review): seed" && git -C "$W" push -q "$SRV/o/$1.git" master && fetchsrv "$1"; }
+rstuck() {  # rstuck <label> <want> <path> — refused before any commit, the path left as it was
+  local label=$1 want=$2 p=$3 before
+  before=$(cat "$W/$p" 2>/dev/null; git -C "$W" status --porcelain -- "$p")
+  H0=$(git -C "$W" rev-parse HEAD)
+  land GH_PROT=false -- "$W" "$W/THREAD.md" "$W/$p"; res "case 73 $label" 1 "$want"
+  has "$err" "land: nothing committed" "case 73 $label: nothing committed"
+  ok "$(git -C "$W" rev-parse HEAD)" "$H0" "case 73 $label: HEAD unchanged"
+  ok "$(cat "$W/$p" 2>/dev/null; git -C "$W" status --porcelain -- "$p")" "$before" "case 73 $label: $p untouched"
+  nossh "case 73 $label"
+}
+echo "== 73. consumed review-doc deletions"
+ghreset; mkrepo c73
+rdoc r1.md consumed; rdoc r2.md pending; rdoc r3.md pending; rdoc r4.md consumed; rdoc r5.md pending
+rdoc sub/n.md consumed; rseed c73
+edit
+land GH_PROT=false -- "$W" "$W/THREAD.md" "$W/docs/reviews/r1.md"
+res "case 73 committed mark" 0 landed
+ok "$(git -C "$W" show --name-status --format= HEAD | tr '\t\n' ' |')" "M THREAD.md|D docs/reviews/r1.md|" "case 73 committed mark: one commit holds M THREAD.md and D r1.md"
+ok "$([ -e "$W/docs/reviews/r1.md" ] && echo present || echo gone)" gone "case 73 committed mark: land.sh removed r1.md from disk"
+ok "$(srvref c73 master)" "$(git -C "$W" rev-parse HEAD)" "case 73 committed mark: landed on origin"
+sed -i.bak 's/^status: pending$/status: consumed/' "$W/docs/reviews/r2.md"; rm -f "$W/docs/reviews/r2.md.bak"
+land GH_PROT=false -- "$W" "$W/docs/reviews/r2.md"
+res "case 73 uncommitted mark" 0 landed
+ok "$(git -C "$W" show --name-status --format= HEAD | tr '\t\n' ' |')" "D docs/reviews/r2.md|" "case 73 uncommitted mark: a deletion only, the mark never committed"
+git -C "$W" rm -qf docs/reviews/r4.md
+land GH_PROT=false -- "$W" "$W/docs/reviews/r4.md"
+res "case 73 already git-rm'd" 0 landed
+ok "$(git -C "$W" show --name-status --format= HEAD | tr '\t\n' ' |')" "D docs/reviews/r4.md|" "case 73 already git-rm'd: committed as D"
+edit
+rdoc new.md consumed
+rstuck "added" "stuck: not a close-out path: docs/reviews/new.md…" docs/reviews/new.md
+rm -f "$W/docs/reviews/new.md"
+echo more >> "$W/docs/reviews/r3.md"
+rstuck "modified pending" "stuck: not a close-out path: docs/reviews/r3.md…" docs/reviews/r3.md
+git -C "$W" checkout -q -- docs/reviews/r3.md
+git -C "$W" rm -qf docs/reviews/r5.md
+rstuck "deleted pending" "stuck: not a close-out path: docs/reviews/r5.md…" docs/reviews/r5.md
+git -C "$W" reset -q -- docs/reviews/r5.md; git -C "$W" checkout -q -- docs/reviews/r5.md
+rstuck "nested" "stuck: not a close-out path: docs/reviews/sub/n.md" docs/reviews/sub/n.md
+rstuck "never tracked" "stuck: not a close-out path: docs/reviews/ghost.md…" docs/reviews/ghost.md
+
+echo "== 73b. carried commits: a review-doc deletion rides along, an addition or a modification does not"
+ghreset; mkrepo c73b; rdoc r.md consumed; rseed c73b
+git -C "$W" rm -q docs/reviews/r.md; git -C "$W" commit -qm "🔧 chore(review): r consumed — delete"; edit
+land GH_PROT=false -- "$W" "$W/THREAD.md"
+res "case 73b deletion carried" 0 landed
+has "$err" "land: carried 1 earlier close-out commit(s)" "case 73b: carried 1"
+ok "$(srvref c73b master)" "$(git -C "$W" rev-parse HEAD)" "case 73b: landed on origin"
+ghreset; mkrepo c73m; rdoc r.md consumed; rseed c73m
+echo more >> "$W/docs/reviews/r.md"; git -C "$W" commit -qam "📝 docs(review): annotate r"; edit
+land GH_PROT=false -- "$W" "$W/THREAD.md"
+res "case 73b modification" 1 "stuck: local commits not from a close-out: 📝 docs(review): annotate r"
+nopush "case 73b modification"
+ghreset; mkrepo c73a; rdoc r.md consumed
+git -C "$W" add docs; git -C "$W" commit -qm "📝 docs(review): add r"; edit
+land GH_PROT=false -- "$W" "$W/THREAD.md"
+res "case 73b addition" 1 "stuck: local commits not from a close-out: 📝 docs(review): add r"
+nopush "case 73b addition"
+ghreset; mkrepo c73n; rdoc sub/n.md consumed; rseed c73n
+git -C "$W" rm -q docs/reviews/sub/n.md; git -C "$W" commit -qm "🔧 chore(review): nested delete"; edit
+land GH_PROT=false -- "$W" "$W/THREAD.md"
+res "case 73b nested deletion" 1 "stuck: local commits not from a close-out: 🔧 chore(review): nested delete"
+
 echo
 [ "$fail" = 0 ] && echo "land.test.sh: ALL PASS" || echo "land.test.sh: FAILED"
 exit "$fail"
