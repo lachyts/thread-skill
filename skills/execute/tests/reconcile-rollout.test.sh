@@ -508,6 +508,86 @@ pcheck "plan: CRLF stored as LF" "'> line one\n> line two\n' in t and '\r' not i
 python3 "$LEAD" plan --note "$TMP/no-such-note.md" >/dev/null 2>&1; rc=$?
 [ "$rc" -eq 2 ] && echo "ok   - plan: a missing note exits 2" || { echo "FAIL - plan: missing note rc $rc"; fail=1; }
 
+echo "== needs you (p16-3: the row's needsHuman upserts / removes / leaves ## Needs you) =="
+nhrow() {  # nhrow <slug> <status> <needsHuman-json> -> a one-row result on stdout
+  printf '{ "rolloutSlug": "test-rollout", "tasks": [ { "slug": "%s", "scope": "cross-cutting", "status": "%s", "prUrl": "https://github.com/o/r/pull/40", "reviewRoundsUsed": 1, "blockerDiagnosis": "d", "gatedInputs": ["spend: x — cap $1"], "needsHuman": %s } ] }\n' "$1" "$2" "$3"
+}
+nhread() { python3 - "$SCRIPT" "$TMP/$1.md" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); rr = importlib.util.module_from_spec(spec); spec.loader.exec_module(rr)
+sys.stdout.write(rr.needs_human(rr.Note(__import__("pathlib").Path(sys.argv[2]))))
+PY
+}
+mknote task-nh in_progress
+nhrow task-nh plan-blocked '"Which retention window: 7 or 30 days?"' > "$TMP/nh1.json"
+python3 "$SCRIPT" reconcile --result "$TMP/nh1.json" --tasks-dir "$TMP" >/dev/null || { echo "FAIL - needs you: reconcile exit"; fail=1; }
+pcheck "needs you: heading, blank, the question" "'\n## Needs you\n\nWhich retention window: 7 or 30 days?\n' in t" task-nh
+[ "$(nhread task-nh)" = "Which retention window: 7 or 30 days?" ] && echo "ok   - needs you: needs_human reads it back" || { echo "FAIL - needs you: read-back ($(nhread task-nh))"; fail=1; }
+s1=$(shaof "$TMP/task-nh.md")
+out=$(python3 "$SCRIPT" reconcile --result "$TMP/nh1.json" --tasks-dir "$TMP" 2>&1)
+case "$out" in *"[no-change]"*) echo "ok   - needs you: a re-reconcile is [no-change]" ;; *) echo "FAIL - needs you: re-reconcile wrote ($out)"; fail=1 ;; esac
+[ "$(shaof "$TMP/task-nh.md")" = "$s1" ] || { echo "FAIL - needs you: re-reconcile changed bytes"; fail=1; }
+nhrow task-nh plan-blocked '"  Which owner signs the DPA?  "' > "$TMP/nh2.json"
+python3 "$SCRIPT" reconcile --result "$TMP/nh2.json" --tasks-dir "$TMP" >/dev/null
+pcheck "needs you: a new question replaces the old under one heading" \
+  "t.count('## Needs you') == 1 and '\n## Needs you\n\nWhich owner signs the DPA?\n' in t and 'retention' not in t.split('## Needs you')[1]" task-nh
+s2=$(shaof "$TMP/task-nh.md")
+nhrow task-nh blocked null > "$TMP/nh-null.json"
+python3 "$SCRIPT" reconcile --result "$TMP/nh-null.json" --tasks-dir "$TMP" >/dev/null
+pcheck "needs you: null leaves the section" "t.count('## Needs you') == 1 and 'Which owner signs the DPA?' in t and 'status: blocked\n' in t" task-nh
+python3 - "$TMP/nh-null.json" "$TMP/nh-absent.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1])); del d["tasks"][0]["needsHuman"]; json.dump(d, open(sys.argv[2], "w"))
+PY
+python3 "$SCRIPT" reconcile --result "$TMP/nh-absent.json" --tasks-dir "$TMP" >/dev/null
+pcheck "needs you: an absent key leaves the section" "t.count('## Needs you') == 1 and 'Which owner signs the DPA?' in t" task-nh
+# the review, gate-pending and blocked statuses upsert too
+for st in review gate-pending blocked review-blocked; do
+  nhrow task-nh "$st" "\"Q for $st?\"" > "$TMP/nh-st.json"
+  python3 "$SCRIPT" reconcile --result "$TMP/nh-st.json" --tasks-dir "$TMP" >/dev/null
+  pcheck "needs you: a $st row upserts" "t.count('## Needs you') == 1 and '\n## Needs you\n\nQ for $st?\n' in t" task-nh
+done
+# a non-string, non-null needsHuman: ERROR, exit 1, the section untouched, the rest of the row written
+for bad in 7 '["q"]'; do
+  python3 - "$TMP/task-nh.md" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1]); t = p.read_text()
+for s in ("review-blocked", "review", "gate-pending", "blocked", "plan-blocked"):
+    t = t.replace(f"status: {s}\n", "status: in_progress\n", 1)
+p.write_text(t)
+PY
+  nhrow task-nh plan-blocked "$bad" > "$TMP/nh-bad.json"
+  err=$(python3 "$SCRIPT" reconcile --result "$TMP/nh-bad.json" --tasks-dir "$TMP" 2>&1 >/dev/null); rc=$?
+  [ "$rc" -eq 1 ] && grep -qF "task-nh: needsHuman is not a string or null" <<<"$err" \
+    && echo "ok   - needs you: $bad is an ERROR, exit 1" || { echo "FAIL - needs you: $bad (rc $rc: $err)"; fail=1; }
+  pcheck "needs you: $bad leaves the section, the row still written" \
+    "t.count('## Needs you') == 1 and 'Q for review-blocked?' in t and 'status: plan-blocked\n' in t" task-nh
+done
+# a question holding a `## ` line is neutralised: the section never splits, and it reads back normalised
+nhrow task-nh blocked '"First line?\n## not a heading\n\n\nlast"' > "$TMP/nh-adv.json"
+python3 "$SCRIPT" reconcile --result "$TMP/nh-adv.json" --tasks-dir "$TMP" >/dev/null
+pcheck "needs you: a ## line is neutralised" "t.count('## Needs you') == 1 and '\n##### not a heading\n' in t and '\n## not a heading' not in t" task-nh
+[ "$(nhread task-nh)" = "$(printf 'First line?\n##### not a heading\n\nlast')" ] && echo "ok   - needs you: reads back normalised" || { echo "FAIL - needs you: adversarial read-back ($(nhread task-nh))"; fail=1; }
+python3 "$SCRIPT" reconcile --result "$TMP/nh-adv.json" --tasks-dir "$TMP" 2>&1 | grep -qF "[no-change]" \
+  && echo "ok   - needs you: the neutralised question re-reconciles [no-change]" || { echo "FAIL - needs you: adversarial re-reconcile wrote"; fail=1; }
+# --dry-run writes nothing
+s3=$(shaof "$TMP/task-nh.md")
+python3 "$SCRIPT" reconcile --result "$TMP/nh1.json" --tasks-dir "$TMP" --dry-run >/dev/null
+[ "$(shaof "$TMP/task-nh.md")" = "$s3" ] && echo "ok   - needs you: --dry-run writes nothing" || { echo "FAIL - needs you: --dry-run wrote"; fail=1; }
+# '' and whitespace remove it; '' with no section is [no-change]
+nhrow task-nh review '""' > "$TMP/nh-empty.json"
+python3 "$SCRIPT" reconcile --result "$TMP/nh-empty.json" --tasks-dir "$TMP" >/dev/null
+pcheck "needs you: '' removes the section" "'## Needs you' not in t and 'not a heading' not in t" task-nh
+[ -z "$(nhread task-nh)" ] && echo "ok   - needs you: needs_human gives '' with no section" || { echo "FAIL - needs you: read-back not empty"; fail=1; }
+s4=$(shaof "$TMP/task-nh.md")
+out=$(python3 "$SCRIPT" reconcile --result "$TMP/nh-empty.json" --tasks-dir "$TMP" 2>&1)
+case "$out" in *"[no-change]"*) echo "ok   - needs you: '' with no section is [no-change]" ;; *) echo "FAIL - needs you: '' with no section wrote ($out)"; fail=1 ;; esac
+[ "$(shaof "$TMP/task-nh.md")" = "$s4" ] || { echo "FAIL - needs you: '' with no section changed bytes"; fail=1; }
+python3 "$SCRIPT" reconcile --result "$TMP/nh1.json" --tasks-dir "$TMP" >/dev/null
+nhrow task-nh blocked '"  \n "' > "$TMP/nh-ws.json"
+python3 "$SCRIPT" reconcile --result "$TMP/nh-ws.json" --tasks-dir "$TMP" >/dev/null
+pcheck "needs you: whitespace removes the section" "'## Needs you' not in t" task-nh
+
 echo "== verify-timeout (p14-2: the rollout's Integration verify timeout, read-only) =="
 mkvt() {  # mkvt <frontmatter line or ''> -> $TMP/vt-rollout.md
   { printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n'; [ -n "$1" ] && printf '%s\n' "$1"; printf -- '---\n\n## Notes\n'; } > "$TMP/vt-rollout.md"

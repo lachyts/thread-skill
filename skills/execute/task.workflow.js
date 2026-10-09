@@ -204,7 +204,7 @@ export const meta = {
 //
 // Returns { rolloutSlug, tasks: [ONE row: { slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
-//   approvedAtCeiling, summary, startRung, rung, climbs, rungDrift, ran, gatedInputs, plan }] }
+//   approvedAtCeiling, summary, startRung, rung, climbs, rungDrift, ran, needsHuman, gatedInputs, plan }] }
 // — the pre-p12-5 envelope with exactly one row, the called task's, the shape reconcile-rollout.py reads —
 // where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending. The rung record (ADR 0029
 // decision 7): startRung is the rung the call started on, rung the one it ended on (reconcile stamps it as
@@ -222,6 +222,14 @@ export const meta = {
 // call reached no plan outcome (plan-blocked, a plan-gate gate-pending, the pre-flight budget block, a
 // converge that threw, every seeded-revise and integrate row). reconcile upserts the note's
 // "## Approved plan" on a string, removes it on '', and leaves it on null.
+// needsHuman (p16-3) is the exact question a person must answer before the task can go on, '' when there is
+// none: a plan judge's or review judge's `changes`, or an implementer's, investigator's or reviser's block, that
+// returned one (NEEDS_HUMAN_RULE, askOf). Such a stop is never evidence of hardness: no climb, no in-call
+// retry, no further plan or review round (a plan judge's ends plan-blocked, a review judge's review-blocked).
+// Unapproved gates still win (gate-pending), and the question rides along. A value on an approve verdict, a
+// verified result or a one-shot red (escalate) is ignored; a review row always carries ''. A mode 'integrate'
+// row carries null, like plan: reconcile upserts the note's "## Needs you" on a non-empty string, removes it
+// on '', and leaves it on null.
 // A mode 'integrate' row carries one more key, `integration`: { outcome: integrated | rejected | set-aside,
 // path: integrator | judge-only, anchor: { headSha, taskBase }, headSha, baseSha, mergeCommit, triggers
 // (conflict | committed | branch-moved | shared-file), reReviewed, feedback, reason, agents: [{ role,
@@ -232,6 +240,11 @@ export const meta = {
 // =============================================================================
 
 // ---- Structured schemas (replace the old sentinel strings) ------------------
+
+// needsHuman (p16-3): the exact question when a stop needs a person, empty when it does not. Optional on the
+// plan judge, the review judge and IMPL_RESULT (implementer, investigator, reviser) only; NEEDS_HUMAN_RULE
+// below is the prompt side. The engine reads it through askOf().
+const NEEDS_HUMAN_DESCRIPTION = 'ONLY when the task cannot go on without a decision only a person can make (a value, a design choice, or out-of-band input the task note does not supply and the repo cannot settle): that exact question, one line. Empty otherwise. A test failure, a red verifier or a concrete fix is never needsHuman; spend, credentials and irreversible actions are gated inputs.'
 
 const PLAN_VERDICT = {
   type: 'object',
@@ -251,6 +264,7 @@ const PLAN_JUDGE = {
   properties: {
     verdict: { type: 'string', enum: ['approve', 'changes'] },
     feedback: { type: 'array', items: { type: 'string' }, description: '3–8 specific bullets when verdict is changes; empty when approve' },
+    needsHuman: { type: 'string', description: NEEDS_HUMAN_DESCRIPTION },
   },
   required: ['verdict', 'feedback'],
 }
@@ -268,6 +282,7 @@ const IMPL_RESULT = {
     blockerDiagnosis: { type: 'string', description: 'one-paragraph diagnosis when blocked, else empty string' },
     summary: { type: 'string', description: 'one-paragraph summary of what changed and was tested' },
     gatedInputs: { type: 'array', items: { type: 'string' }, description: 'ONLY when you stopped before a gated action (ADR 0008): one line per human authorisation the task needs that the note\'s "## Approved gates" does not cover ("spend: <what> — cap <amount>" / "credential: <what>" / "irreversible: <what>"). Omit or empty otherwise.' },
+    needsHuman: { type: 'string', description: NEEDS_HUMAN_DESCRIPTION },
   },
   required: ['verified', 'blocked', 'escalate', 'prUrl', 'branch', 'worktreePath', 'blockerDiagnosis', 'summary'],
 }
@@ -278,6 +293,7 @@ const REVIEW_VERDICT = {
   properties: {
     verdict: { type: 'string', enum: ['approve', 'changes'] },
     feedback: { type: 'array', items: { type: 'string' }, description: '3–8 specific bullets when verdict is changes; empty when approve' },
+    needsHuman: { type: 'string', description: NEEDS_HUMAN_DESCRIPTION },
   },
   required: ['verdict', 'feedback'],
 }
@@ -361,6 +377,27 @@ Before you open or update a PR, run these preflight checks:
 // nudge the agent can re-read the note and silently repeat the rejected work. This line is static (always
 // in the prompt) and harmless on a fresh task where no such section exists.
 const PRIOR_FEEDBACK_NOTE = `If the task note has a "## Review-blocked feedback", "## Blocker diagnosis", "## Plan-blocked feedback", or "## Repair input" section from a PRIOR attempt, treat it as AUTHORITATIVE — resolve every point in it first, and use any "## Repair input" value exactly as given (do not re-derive or second-guess it).`
+
+// Needs a human (p16-3). The prompt side of the needsHuman field: rendered once, bare, at the END of exactly the
+// five builders whose schema carries it and whose role may stop on a question (implementerPrompt,
+// approvedPlanImplementerPrompt, readOnlyPrompt, planJudgePrompt, reviewJudgePrompt). The reviser shares
+// IMPL_RESULT and the engine handles its question, but its prompt (byte-pinned) does not carry the rule. STATIC
+// text with its own leading "\n\n": no prompt ever renders a needsHuman value, so a prompt is its pre-p16-3
+// bytes plus exactly this rule (prompt-invariants proves it against the old whole-call pin).
+const NEEDS_HUMAN_RULE = `
+
+Needs a human (needsHuman): leave needsHuman empty unless this task cannot go on without a decision only a
+person can make: a value, a design choice, or out-of-band input (an account, a file, a fact from outside the
+repo) that the task note, the brief and any "## Repair input" do not supply and the repo cannot settle. Then
+put that exact question in needsHuman as one line, and stop: a judge returns verdict "changes"; an implementer
+or investigator returns blocked=true with the same question in blockerDiagnosis. A test failure, a red
+verifier or a concrete fix is never needsHuman: name the fix instead. Spend, credentials and irreversible
+actions are gated inputs (ADR 0008), never needsHuman.`
+
+// The question an agent result carries: its needsHuman trimmed, or '' (absent, empty or not a string).
+function askOf(r) {
+  return r && typeof r.needsHuman === 'string' ? r.needsHuman.trim() : ''
+}
 
 // Gated inputs (ADR 0008): API spend, credentials, and irreversible actions are decisions no agent may
 // make. Two faces of one rule — the PLAN declares them up front (a required "### Gated inputs" section,
@@ -725,7 +762,7 @@ ${BUG_PREFLIGHTS}
 
 ${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, st, 'implement')}
 
-Do not update the task's \`status:\` yourself — the lead session reconciles that after review.`
+Do not update the task's \`status:\` yourself — the lead session reconciles that after review.${NEEDS_HUMAN_RULE}`
 }
 
 function readOnlyPrompt(task, a, st, prior) {
@@ -754,7 +791,7 @@ Steps:
    line the setup printed — concrete, with file:line refs.
 4. Return your structured result: verified=true (findings produced) or blocked=true (could not complete),
    escalate=false, prUrl="", branch="", worktreePath="${worktreeDir(a.repoPath, task.slug)}" (the task tree),
-   blockerDiagnosis (empty unless blocked), and a one-paragraph summary of what you found.${baselineManifest(a)}${escalationContext(prior, st, 'implement', 'readonly')}`
+   blockerDiagnosis (empty unless blocked), and a one-paragraph summary of what you found.${baselineManifest(a)}${escalationContext(prior, st, 'implement', 'readonly')}${NEEDS_HUMAN_RULE}`
 }
 
 function plannerPrompt(task, a, st, prior) {
@@ -851,7 +888,7 @@ ${RM_RULE}
 
 Read the brief and grep the task tree as needed to verify the plan's claims — do not approve on faith.
 Decide: verdict "approve" if the plan is sound (clean or trivially nitpicky), else "changes" with 3–8
-specific, actionable feedback bullets.`
+specific, actionable feedback bullets.${NEEDS_HUMAN_RULE}`
 }
 
 function planReviserPrompt(task, priorPlan, priorFeedback, round, a) {
@@ -923,7 +960,7 @@ ${BUG_PREFLIGHTS}
 
 ${GATED_INPUTS_CHECK}${baselineManifest(a)}${gateOverride(task)}${escalationContext(prior, st, 'implement')}
 
-Do not update the task's \`status:\` yourself — the lead session reconciles that after review.`
+Do not update the task's \`status:\` yourself — the lead session reconciles that after review.${NEEDS_HUMAN_RULE}`
 }
 
 function reviewJudgePrompt(task, prevImpl, a, priorFeedback) {
@@ -954,7 +991,7 @@ On a mismatch, a non-empty status or a missing tree, use \`gh pr diff\` / \`gh p
 project's shared checkout. You are read-only: no edit, commit or push, in the tree or anywhere else.
 
 Read \`gh pr diff ${prevImpl.prUrl}\` and the task brief. Decide: verdict "approve" if the PR is sound, else
-"changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}`
+"changes" with 3–8 specific, actionable feedback bullets (these become the reviser's instructions).${reviewHistoryBlock(priorFeedback)}${baselineManifest(a)}${NEEDS_HUMAN_RULE}`
 }
 
 // priorFeedback is the FULL accumulated [{ round, feedback }] history (latest round last) — the latest
@@ -1485,6 +1522,7 @@ async function planLoop(task, st, a) {
       label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: cur(st).model, effort: judgeEffort(st, 'judge'),
     }, st)
     if (verdict.__dead) return transientPlanBlock(task, round)
+    if (verdict.verdict === 'approve' && askOf(verdict)) log(`plan-judge:${task.slug} r${round}: needsHuman on an approve verdict ignored`)
     if (verdict.verdict === 'approve') {
       // Gated inputs (ADR 0008): a declared gate always pauses for a human — regardless of
       // plan_approval config or continuous mode. Gates already approved on the note
@@ -1513,11 +1551,20 @@ async function planLoop(task, st, a) {
     // plan-blocked diagnosis and the next reviser see the complete accumulated rationale (push with the
     // judge round `round`, not `round + 1` — that off-by-one would mislabel the "Round N" headings).
     priorFeedback.push({ round, feedback: verdict.feedback })
+    const roundLines = () => priorFeedback.map((r) => 'Round ' + r.round + ': ' + r.feedback.join('; ')).join('\n')
+    // A question only a person can answer (p16-3) is never evidence of hardness: no climb, no plan revise,
+    // no further round. The plan gate stops here, plan-blocked, with the question on the row.
+    const q = askOf(verdict)
+    if (q) {
+      return {
+        task, blocked: true, status: 'plan-blocked', planRoundsUsed: round, needsHuman: q,
+        blockerDiagnosis: 'needs a human decision: ' + q + '\nAccumulated reviewer feedback:\n' + roundLines(),
+      }
+    }
     if (round === task.maxPlanRounds) {
       return {
         task, blocked: true, status: 'plan-blocked', planRoundsUsed: round,
-        blockerDiagnosis: 'plan not approved after ' + round + ' rounds. Accumulated reviewer feedback:\n' +
-          priorFeedback.map((r) => 'Round ' + r.round + ': ' + r.feedback.join('; ')).join('\n'),
+        blockerDiagnosis: 'plan not approved after ' + round + ' rounds. Accumulated reviewer feedback:\n' + roundLines(),
       }
     }
     // A judged `changes` is the plan stage's evidence of hardness: revision is iteration, and iteration
@@ -1548,6 +1595,8 @@ async function implement(task, st, prev, a) {
       label: `investigate:${task.slug}`, phase: 'Implement', schema: IMPL_RESULT, model: cur(st).model, effort: implEffort(st),
     }, st)
     if (r.__dead) return transientImplBlock()
+    // A question only a person can answer (p16-3): a stop, never a climb or a retry.
+    if (r.blocked && askOf(r)) return { ...r, blocked: true, needsHuman: askOf(r) }
     if (r.blocked) {
       // The implement stage's first evidence of hardness: climb (a no-op on the top rung), one retry.
       escalate(st, task.slug, 'implement')
@@ -1556,7 +1605,7 @@ async function implement(task, st, prev, a) {
       }, st)
       if (r.__dead) return transientImplBlock()
     }
-    return r
+    return { ...r, needsHuman: r.blocked ? askOf(r) : '' }
   }
   // Same builder for both passes: st is read at build time, so a first pass below the top rung renders the
   // one-shot verification block and the pass after the stage's climb renders the full Ralph loop.
@@ -1571,8 +1620,11 @@ async function implement(task, st, prev, a) {
   const gatePending = (r) => {
     const gates = unapprovedGates(r.gatedInputs, task.approvedGates)
     if (!gates.length) return null
-    return { ...r, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates), ...(planExtra || {}) }
+    return { ...r, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates), needsHuman: askOf(r), ...(planExtra || {}) }
   }
+  // A question only a person can answer (p16-3): like a gate stop, a human decision and never evidence of
+  // hardness, so checked after gatePending (gates win, ADR 0008) and before the climb branch, on both passes.
+  const asks = (r) => (r.blocked && askOf(r) ? { ...r, blocked: true, needsHuman: askOf(r), ...(planExtra || {}) } : null)
   // The opts are held, and the builder call re-rendered (a pure function of unchanged inputs), so a signed
   // stop's continuation (pastSignedGates) carries the same bytes on the same rung; the cached call itself
   // is unchanged. Each runAgent() keeps a builder call as its first argument (git-env-scrub's e2 guard).
@@ -1583,6 +1635,8 @@ async function implement(task, st, prev, a) {
   if (r.__dead) return transientImplBlock(planExtra)
   const gatedFirst = gatePending(r)
   if (gatedFirst) return gatedFirst
+  const askedFirst = asks(r)
+  if (askedFirst) return askedFirst
   if (r.escalate || r.blocked) {
     // One-shot red or a first-pass block: the task has proven non-mechanical. The implement stage climbs
     // and the next rung takes over in the same worktree (the committed attempt + note diagnosis carry
@@ -1608,7 +1662,12 @@ async function implement(task, st, prev, a) {
     if (r.__dead) return transientImplBlock(planExtra)
     const gatedRetry = gatePending(r)
     if (gatedRetry) return gatedRetry
+    const askedRetry = asks(r)
+    if (askedRetry) return askedRetry
   }
+  // Every other exit carries a question only on the agent's own block: a verified or one-shot-red result's
+  // stray value never reaches a later row.
+  r = { ...r, needsHuman: r.blocked ? askOf(r) : '' }
   // Defensive: a result that neither verified nor blocked and has no PR cannot go to review.
   if (!r.verified && !r.blocked && !r.prUrl) {
     r = { ...r, blocked: true, blockerDiagnosis: r.blockerDiagnosis || 'agent returned neither verified nor blocked' }
@@ -1636,11 +1695,11 @@ async function reviseRound(task, st, current, priorFeedback, round, a, planText,
     // stop, never a plain block.
     const gates = unapprovedGates(revised.gatedInputs, task.approvedGates)
     if (gates.length) {
-      return { stop: { ...current, ...revised, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates) } }
+      return { stop: { ...current, ...revised, blocked: true, status: 'gate-pending', gatedInputs: gates, blockerDiagnosis: gateDiagnosis(gates), needsHuman: askOf(revised) } }
     }
-    return { stop: { ...current, status: 'blocked', blockerDiagnosis: revised.blockerDiagnosis } }
+    return { stop: { ...current, status: 'blocked', blockerDiagnosis: revised.blockerDiagnosis, needsHuman: askOf(revised) } }
   }
-  return { current: { ...current, ...revised } }
+  return { current: { ...current, ...revised, needsHuman: '' } }
 }
 
 // seed (p12-6, the `task.resume` revise after an Integration rejection): { history, roundsUsed }. The
@@ -1686,6 +1745,7 @@ async function reviewLoop(task, st, prev, a, planText, seed) {
     }, st)
     // Dead review-judge: the PR is real and stands — block on transient infra so the lead re-judges it.
     if (verdict.__dead) return stopped({ ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS })
+    if (verdict.verdict === 'approve' && askOf(verdict)) log(`review:${task.slug} r${round}: needsHuman on an approve verdict ignored`)
     if (verdict.verdict === 'approve') {
       // approvedAtCeiling: an approval on the LAST possible round with real rejection history — the
       // unauditable case the audit flagged (giflab p6-2). A clean first-round approve at a 1-round
@@ -1699,6 +1759,12 @@ async function reviewLoop(task, st, prev, a, planText, seed) {
     // review-blocked record and the next reviser/judge all see the complete accumulated rationale
     // (push with the judge round `round`, not `round + 1` — same off-by-one guard as planLoop).
     priorFeedback.push({ round, feedback: verdict.feedback })
+    // A question only a person can answer (p16-3): no reviser, no climb, no further round. It ends
+    // review-blocked, as at the ceiling, so the round history is written to the authoritative section.
+    const q = askOf(verdict)
+    if (q) {
+      return { ...current, status: 'review-blocked', reviewRoundsUsed: round, reviewFeedback: verdict.feedback, reviewHistory: priorFeedback, needsHuman: q }
+    }
     if (round === task.maxReviewRounds) {
       return { ...current, status: 'review-blocked', reviewRoundsUsed: round, reviewFeedback: verdict.feedback, reviewHistory: priorFeedback }
     }
@@ -1766,6 +1832,8 @@ function taskResult(t, r, st) {
     reviewFeedback: norm.reviewFeedback || [],
     reviewHistory: norm.reviewHistory || (t.resume && t.resume.reviewHistory) || [],
     approvedAtCeiling: !!norm.approvedAtCeiling,
+    // p16-3: the question a person must answer, '' when none (always '' on an approval).
+    needsHuman: status === 'review' ? '' : askOf(norm),
     gatedInputs: norm.gatedInputs || [],
     summary: norm.summary || '',
     startRung: norm.startRung,
@@ -2571,6 +2639,8 @@ function integrationResult(task, out, a, trace) {
     reviewFeedback,
     reviewHistory,
     approvedAtCeiling: false,
+    // p16-3: null, like `plan` — an integrate row never settles the note's `## Needs you`.
+    needsHuman: null,
     gatedInputs,
     summary: o.outcome === 'integrated'
       ? `integrated ${head} onto ${o.baseSha} (${trace.path}${o.reReviewed ? ', re-reviewed' : ', no re-review'})`

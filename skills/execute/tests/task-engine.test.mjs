@@ -13,7 +13,7 @@ import { runTask, loadEngine, enginePath } from '../../../tests/lib/engine.mjs'
 const ROW_KEYS = [
   'slug', 'scope', 'status', 'prUrl', 'branch', 'worktreePath', 'reviewRoundsUsed', 'planRoundsUsed',
   'blockerDiagnosis', 'reviewFeedback', 'reviewHistory', 'approvedAtCeiling', 'gatedInputs', 'summary',
-  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan',
+  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman',
 ]
 const THREW = 'workflow stage threw — see /workflows'
 const PLAN_TEXT = 'Planned on: abc\n### Files to modify\n- x\n### Gated inputs\nNone'
@@ -33,7 +33,8 @@ const slugOf = (label) => label.split(':')[1].split(/[ @]/)[0]
 // fails loudly even though the engine folds a stage throw into a blocked row.
 // script: { planJudge(label), review(label) → 'approve' | 'changes'; throwOn: kind to throw on;
 //   plan: the planner's plan text (default PLAN_TEXT); implGates: gates the implementer stops on;
-//   reviseBlocked: the reviser stops blocked }
+//   reviseBlocked: the reviser stops blocked; ask(label) → a needsHuman value a judge returns (absent ⇒
+//   the key is left out); result(label) → fields merged over an implement / investigate / revise result }
 function stub(script = {}) {
   const unknown = []
   const impl = async (prompt, opts) => {
@@ -48,7 +49,8 @@ function stub(script = {}) {
       case 'review': {
         const fn = kind === 'review' ? script.review : script.planJudge
         const verdict = fn ? fn(label) : 'approve'
-        return { verdict, feedback: verdict === 'changes' ? [`fix ${label}`] : [] }
+        const q = script.ask ? script.ask(label) : undefined
+        return { verdict, feedback: verdict === 'changes' ? [`fix ${label}`] : [], ...(q === undefined ? {} : { needsHuman: q }) }
       }
       case 'implement':
       case 'investigate':
@@ -65,6 +67,7 @@ function stub(script = {}) {
           prUrl: kind === 'investigate' ? '' : `https://github.com/o/r/pull/${s}`,
           branch: kind === 'investigate' ? '' : `audit-fix/${s}`,
           worktreePath: `/repo/.claude/worktrees/${s}`, blockerDiagnosis: '', summary: `${label} done`,
+          ...(script.result ? script.result(label) : {}),
         }
       }
       default:
@@ -81,7 +84,7 @@ async function run(args, script) {
   return { ...out, unknown: s.unknown, labels: out.calls.map((c) => c.label) }
 }
 
-test('one code-writing task: one row with exactly the 20 result fields (args stringified or object)', async () => {
+test('one code-writing task: one row with exactly the 21 result fields (args stringified or object)', async () => {
   const task = mkTask('proj-fix-a')
   const r = await run(JSON.stringify(mkArgs(task)))
   assert.equal(r.error, undefined)
@@ -317,4 +320,133 @@ test('p14-2: no plan outcome gives plan null (plan-blocked, planLoop gate-pendin
     assert.equal(threw.result.tasks[0].blockerDiagnosis, THREW)
     assert.equal(threw.result.tasks[0].plan, null, `threw on ${throwOn}, planGate ${planGate}`)
   }
+})
+
+// ---- p16-3: needsHuman. A plan judge, a review judge, an implementer, an investigator or a reviser may return
+// the exact question a person must answer. It is a stop that is never evidence of hardness: no climb, no
+// in-call retry, no further round. The row carries it ('' when there is none; null on an integrate row).
+const Q = 'Which retention window should the cache use: 7 or 30 days?'
+const BLOCKED_Q = { verified: false, blocked: true, escalate: false, prUrl: '', branch: '', worktreePath: '', blockerDiagnosis: Q, summary: '', needsHuman: '  ' + Q + '  ' }
+
+test('p16-3: a plan judge that returns needsHuman stops the plan gate', async () => {
+  const task = mkTask('proj-fix-p', { rung: 'opus-high', planGate: true })
+  const r = await run(mkArgs(task), { planJudge: () => 'changes', ask: (l) => (l.endsWith(' r1') ? Q : '') })
+  assert.equal(r.error, undefined)
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, ['plan:proj-fix-p', 'plan-judge:proj-fix-p r1'], 'no plan-revise, no implement')
+  const row = r.result.tasks[0]
+  assert.deepEqual(Object.keys(row).sort(), [...ROW_KEYS].sort())
+  assert.equal(row.status, 'plan-blocked')
+  assert.equal(row.planRoundsUsed, 1)
+  assert.deepEqual(row.climbs, [], 'a question is never evidence of hardness')
+  assert.equal(row.needsHuman, Q)
+  assert.ok(row.blockerDiagnosis.startsWith('needs a human decision: ' + Q), row.blockerDiagnosis)
+  assert.match(row.blockerDiagnosis, /Round 1: fix plan-judge:proj-fix-p r1/)
+  assert.equal(row.plan, null)
+})
+
+test('p16-3: a plan judge question on the last round is the same plan-blocked stop', async () => {
+  const task = mkTask('proj-fix-p', { planGate: true, maxPlanRounds: 2 })
+  const r = await run(mkArgs(task), { planJudge: () => 'changes', ask: (l) => (l.endsWith(' r2') ? Q : '') })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, ['plan:proj-fix-p', 'plan-judge:proj-fix-p r1', 'plan-revise:proj-fix-p r2', 'plan-judge:proj-fix-p r2'])
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'plan-blocked')
+  assert.equal(row.planRoundsUsed, 2)
+  assert.equal(row.needsHuman, Q)
+  assert.match(row.blockerDiagnosis, /^needs a human decision: .*\n[\s\S]*Round 1: [\s\S]*Round 2: /)
+})
+
+test('p16-3: a review judge that returns needsHuman ends review-blocked with no reviser and no climb', async () => {
+  const r = await run(mkArgs(mkTask('proj-fix-a')), { review: () => 'changes', ask: (l) => (l.startsWith('review:') ? Q : undefined) })
+  assert.equal(r.error, undefined)
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, ['implement:proj-fix-a', 'review:proj-fix-a r1'])
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'review-blocked')
+  assert.equal(row.reviewRoundsUsed, 1)
+  assert.deepEqual(row.reviewHistory, [{ round: 1, feedback: ['fix review:proj-fix-a r1'] }])
+  assert.deepEqual(row.climbs, [])
+  assert.equal(row.needsHuman, Q)
+})
+
+test('p16-3: an implementer that returns blocked with needsHuman stops at once, no climb, no retry', async () => {
+  const r = await run(mkArgs(mkTask('proj-fix-a', { rung: 'opus-high' })), { result: (l) => (l.startsWith('implement:') ? BLOCKED_Q : {}) })
+  assert.equal(r.error, undefined)
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, ['implement:proj-fix-a'])
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'blocked')
+  assert.deepEqual(row.climbs, [])
+  assert.equal(row.needsHuman, Q, 'trimmed')
+  assert.equal(row.blockerDiagnosis, Q)
+})
+
+test('p16-3: a read-only investigator that returns blocked with needsHuman stops at once', async () => {
+  const r = await run(mkArgs(mkTask('proj-audit-x', { scope: 'read-only', rung: 'opus-high' })), { result: () => BLOCKED_Q })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, ['investigate:proj-audit-x'])
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'blocked')
+  assert.deepEqual(row.climbs, [])
+  assert.equal(row.needsHuman, Q)
+})
+
+test('p16-3: a reviser that stops blocked with needsHuman carries it to the row', async () => {
+  const r = await run(mkArgs(mkTask('proj-fix-a')), { review: () => 'changes', result: (l) => (l.startsWith('revise:') ? BLOCKED_Q : {}) })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, ['implement:proj-fix-a', 'review:proj-fix-a r1', 'revise:proj-fix-a r2'])
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'blocked')
+  assert.equal(row.needsHuman, Q)
+})
+
+test('p16-3: a stray needsHuman (approve, verified, escalate) is ignored and never reaches the row', async () => {
+  const approve = await run(mkArgs(mkTask('proj-fix-a')), { ask: () => Q })
+  assert.deepEqual(approve.unknown, [])
+  assert.equal(approve.result.tasks[0].status, 'review')
+  assert.equal(approve.result.tasks[0].needsHuman, '')
+  assert.ok(approve.logs.some((l) => /needsHuman .*ignored/.test(l)), approve.logs.join('\n'))
+  const planApprove = await run(mkArgs(mkTask('proj-fix-p', { planGate: true })), { ask: (l) => (l.startsWith('plan-judge:') ? Q : undefined) })
+  assert.deepEqual(planApprove.labels, ['plan:proj-fix-p', 'plan-judge:proj-fix-p r1', 'implement:proj-fix-p', 'review:proj-fix-p r1'])
+  assert.equal(planApprove.result.tasks[0].needsHuman, '')
+  // a verified implementer carrying a question, then review-blocked at the ceiling: the question never leaks
+  const verified = await run(mkArgs(mkTask('proj-fix-a', { maxReviewRounds: 1 })), { review: () => 'changes', result: (l) => (l.startsWith('implement:') ? { needsHuman: Q } : {}) })
+  assert.deepEqual(verified.unknown, [])
+  assert.equal(verified.result.tasks[0].status, 'review-blocked')
+  assert.equal(verified.result.tasks[0].needsHuman, '')
+  // escalate=true (a one-shot red) carrying a question still climbs and retries
+  const red = await run(mkArgs(mkTask('proj-fix-a', { rung: 'opus-high' })), {
+    result: (l) => (l === 'implement:proj-fix-a' ? { verified: false, escalate: true, prUrl: '', needsHuman: Q } : {}),
+  })
+  assert.deepEqual(red.unknown, [])
+  assert.deepEqual(red.labels, ['implement:proj-fix-a', 'implement:proj-fix-a@opus-xhigh', 'review:proj-fix-a r1'])
+  assert.equal(red.result.tasks[0].status, 'review')
+  assert.equal(red.result.tasks[0].needsHuman, '')
+  // a non-string needsHuman on a blocked stop is not a question: the ordinary climb and retry run
+  const odd = await run(mkArgs(mkTask('proj-fix-a', { rung: 'opus-high' })), {
+    result: (l) => (l === 'implement:proj-fix-a' ? { ...BLOCKED_Q, needsHuman: 7 } : {}),
+  })
+  assert.deepEqual(odd.labels, ['implement:proj-fix-a', 'implement:proj-fix-a@opus-xhigh', 'review:proj-fix-a r1'])
+  assert.equal(odd.result.tasks[0].needsHuman, '')
+})
+
+test('p16-3: unapproved gates win over a question (gate-pending), and the question rides along', async () => {
+  const r = await run(mkArgs(mkTask('proj-fix-a')), { result: (l) => (l.startsWith('implement:') ? { ...BLOCKED_Q, gatedInputs: ['spend: an API — cap $5'] } : {}) })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, ['implement:proj-fix-a'])
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'gate-pending')
+  assert.deepEqual(row.gatedInputs, ['spend: an API — cap $5'])
+  assert.equal(row.needsHuman, Q)
+})
+
+test('p16-3: no question gives needsHuman "" (a plain run, a run that threw)', async () => {
+  const plain = await run(mkArgs(mkTask('proj-fix-a')))
+  assert.equal(plain.result.tasks[0].needsHuman, '')
+  const blocked = await run(mkArgs(mkTask('proj-fix-a', { maxReviewRounds: 1 })), { review: () => 'changes' })
+  assert.equal(blocked.result.tasks[0].needsHuman, '')
+  const threw = await run(mkArgs(mkTask('proj-fix-a')), { throwOn: 'implement' })
+  assert.equal(threw.result.tasks[0].blockerDiagnosis, THREW)
+  assert.equal(threw.result.tasks[0].needsHuman, '')
 })

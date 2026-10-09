@@ -874,6 +874,82 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
   ok(slashed !== E.RM_RULE && rmRuleFails(slashed, E.GIT_ENV_RULE, reslashed).length > 0, 'RM_RULE control: a "$T" form that gains /* fails')
 }
 
+// ---- Needs a human (p16-3): NEEDS_HUMAN_RULE at the end of exactly five builders, needsHuman on three schemas --
+// The plan judge, the review judge and IMPL_RESULT's implementer and investigator may stop on a question only a
+// person can answer. The rule is static, rendered once at the END of every variant of those five builders, and
+// in no other builder: the reviser shares IMPL_RESULT but keeps its byte-pinned prompt; the planner, plan reviser
+// and Integration's agents never ask.
+{
+  const E = loadEngine(['NEEDS_HUMAN_RULE', 'askOf', 'rungState', 'escalate', 'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt',
+    'plannerPrompt', 'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt',
+    'PLAN_VERDICT', 'PLAN_JUDGE', 'IMPL_RESULT', 'REVIEW_VERDICT', 'INTEGRATE_RESULT', 'INTEGRATION_REVIEW'])
+  const H = (c) => c.repeat(40)
+  const tk = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
+  const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
+  const ar = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
+  const arB = { ...ar, knownBaselineFailures: ['t — env'] }
+  const I = {
+    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
+    landed: [{ prUrl: 'https://github.com/o/r/pull/2', title: 't', files: ['a.js'], taskPath: '/vault/t.md' }], plan: 'PLAN',
+    reviewHistory: [{ round: 1, feedback: ['fix it'] }], reviewRoundsUsed: 1,
+    rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [] },
+  }
+  const J = { mergeCommit: H('d'), headSha: H('e'), baseSha: H('c'), triggers: ['conflict'], path: 'integrator' }
+  const climbed = E.rungState(tk, ar)
+  E.escalate(climbed, tk.slug, 'implement')
+  const states = [E.rungState(tk, ar), climbed]
+  const hist = [{ round: 1, feedback: ['a'] }, { round: 2, feedback: ['b'] }]
+  const withRule = {
+    implementerPrompt: [...states.map((st) => E.implementerPrompt(tk, ar, st, '')), E.implementerPrompt({ ...tk, ignoreGate: true }, arB, climbed, 'prior attempt')],
+    approvedPlanImplementerPrompt: [...states.map((st) => E.approvedPlanImplementerPrompt(tk, 'PLAN', ar, st, '')), E.approvedPlanImplementerPrompt(tk, 'PLAN', arB, climbed, 'prior')],
+    readOnlyPrompt: [E.readOnlyPrompt(tk, ar, states[0], ''), E.readOnlyPrompt(tk, arB, climbed, 'prior')],
+    planJudgePrompt: [E.planJudgePrompt(tk, 'PLAN', ar)],
+    reviewJudgePrompt: [E.reviewJudgePrompt(tk, im, ar, []), E.reviewJudgePrompt(tk, im, ar, hist), E.reviewJudgePrompt(tk, im, arB, hist)],
+  }
+  const without = {
+    plannerPrompt: [E.plannerPrompt(tk, ar, states[0], '')],
+    planReviserPrompt: [E.planReviserPrompt(tk, 'PLAN', [{ round: 1, feedback: ['fix it'] }], 2, ar)],
+    reviserPrompt: [E.reviserPrompt(tk, im, hist.slice(0, 1), 2, ar, ''), E.reviserPrompt(tk, im, hist, 3, ar, 'PLAN', { history: hist, roundsUsed: 2 })],
+    integratorPrompt: [E.integratorPrompt(tk, ar, I)],
+    integrationReviewPrompt: [E.integrationReviewPrompt(tk, ar, I, J)],
+  }
+  const WORDS = ['value', 'design choice', 'out-of-band', 'never needsHuman', 'test failure', 'gated', '## Repair input', 'blocked=true', '"changes"']
+  const times = (hay, needle) => hay.split(needle).length - 1
+  // [] when the rule and every prompt hold; else what failed.
+  const ruleFails = (rule, inBy, outBy) => {
+    const out = []
+    if (typeof rule !== 'string' || !rule.startsWith('\n\n') || rule.trim() === '') out.push('rule: its own leading blank line')
+    for (const w of WORDS) if (!String(rule).includes(w)) out.push(`rule: names ${w}`)
+    if (/\$\{/.test(String(rule))) out.push('rule: static')
+    for (const [name, ps] of Object.entries(inBy)) {
+      for (const p of ps) {
+        if (times(p, rule) !== 1) out.push(`${name}: rule once`)
+        if (!p.endsWith(rule)) out.push(`${name}: rule at the end`)
+      }
+    }
+    for (const [name, ps] of Object.entries(outBy)) for (const p of ps) if (p.includes('needsHuman')) out.push(`${name}: no needsHuman`)
+    return out
+  }
+  ok(Object.keys(withRule).length + Object.keys(without).length === 10, 'NEEDS_HUMAN_RULE: the ten agent builders are covered')
+  ok(JSON.stringify(ruleFails(E.NEEDS_HUMAN_RULE, withRule, without)) === '[]',
+    'NEEDS_HUMAN_RULE: static, names its limits, once at the END of every variant of the five asking builders, in no other builder')
+  const stripped = { ...withRule, reviewJudgePrompt: withRule.reviewJudgePrompt.map((p) => p.replace(E.NEEDS_HUMAN_RULE, '')) }
+  ok(ruleFails(E.NEEDS_HUMAN_RULE, stripped, without).length > 0, 'NEEDS_HUMAN_RULE control: a prompt with the rule stripped fails')
+  const leaked = { ...without, reviserPrompt: without.reviserPrompt.map((p) => p + E.NEEDS_HUMAN_RULE) }
+  ok(ruleFails(E.NEEDS_HUMAN_RULE, withRule, leaked).length > 0, 'NEEDS_HUMAN_RULE control: the rule in the reviser fails')
+  // The schemas: an optional string on exactly the three asking schemas.
+  const asking = { PLAN_JUDGE: E.PLAN_JUDGE, REVIEW_VERDICT: E.REVIEW_VERDICT, IMPL_RESULT: E.IMPL_RESULT }
+  for (const [name, s] of Object.entries(asking)) {
+    ok(s.properties.needsHuman && s.properties.needsHuman.type === 'string' && !s.required.includes('needsHuman') &&
+      /design choice/.test(s.properties.needsHuman.description), `schema: ${name} carries an optional needsHuman string`)
+  }
+  for (const [name, s] of Object.entries({ PLAN_VERDICT: E.PLAN_VERDICT, INTEGRATE_RESULT: E.INTEGRATE_RESULT, INTEGRATION_REVIEW: E.INTEGRATION_REVIEW })) {
+    ok(!('needsHuman' in s.properties) && !s.required.includes('needsHuman'), `schema: ${name} has no needsHuman`)
+  }
+  ok(E.askOf({ needsHuman: '  q?  ' }) === 'q?' && E.askOf({ needsHuman: ' \n ' }) === '' && E.askOf({ needsHuman: 7 }) === '' &&
+    E.askOf({ needsHuman: ['q'] }) === '' && E.askOf({}) === '' && E.askOf(null) === '', 'askOf: the trimmed string, else ""')
+}
+
 // ---- Byte pins (p12-6): task mode renders exactly what it did before Integration existed ----------
 // Recorded on 3c396eb (the p12-5 engine) BEFORE the p12-6 edit. p12-6 factored taskTreeSetup's self-heal
 // and lock lines out (treeSelfHeal/treeLockLines, shared with branchTreeSetup), gave reviserPrompt a 7th
@@ -890,6 +966,10 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
 // Re-pinned on purpose by p14-2: the rows hash only, for the row's `plan` (proj-fix-p and proj-audit-x carry
 // PLAN_TEXT, proj-fix-a ''). Those rows with `plan` deleted hash to the p13-2 pin (a0fc1e71…); the calls
 // hash did not move — no task-mode prompt changed (the integrator wording is integrate mode, pinned by b4/b4b).
+// Re-pinned on purpose by p16-3, both hashes: NEEDS_HUMAN_RULE ends the implementer, investigator and judge
+// prompts, and every row carries `needsHuman`. The calls with the rule removed from each prompt hash to the old
+// calls pin (ee821ac6…), so each prompt is its old bytes plus exactly the rule; the rows with `needsHuman`
+// deleted hash to the old rows pin (0b7fa853…). taskTreeSetup and both reviser pins did not move.
 {
   const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
   const variants = []
@@ -931,8 +1011,11 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
     if (kind === 'review') return { verdict: /r[12]$/.test(label) ? 'changes' : 'approve', feedback: /r[12]$/.test(label) ? ['fix ' + label] : [] }
     return { verified: true, blocked: false, escalate: false, prUrl: kind === 'investigate' ? '' : `https://github.com/o/r/pull/${s}`, branch: kind === 'investigate' ? '' : `audit-fix/${s}`, worktreePath: `/repo/.claude/worktrees/${s}`, blockerDiagnosis: '', summary: `${label} done` }
   }
+  const RULE = loadEngine(['NEEDS_HUMAN_RULE']).NEEDS_HUMAN_RULE
   const calls = []
   const rows = []
+  const oldCalls = []
+  const oldRows = []
   for (const args of [
     mkA(mkT('proj-fix-p', { model: 'opus', rung: 'opus-high', planGate: true })),
     mkA(mkT('proj-fix-a'), { defaultBranch: 'master', envBootstrap: 'poetry install', knownBaselineFailures: ['t — env'] }),
@@ -941,10 +1024,18 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
     const r = await runTask(args, scripted)
     calls.push(JSON.stringify(r.calls))
     rows.push(JSON.stringify({ result: r.result, err: r.error && String(r.error) }))
+    oldCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: c.prompt.replace(RULE, '') }))))
+    const old = JSON.parse(JSON.stringify(r.result))
+    for (const row of old.tasks) delete row.needsHuman
+    oldRows.push(JSON.stringify({ result: old, err: r.error && String(r.error) }))
   }
-  ok(sha(calls.join('\n')) === 'ee821ac64ee16a13cf95c536bcbbf4ef7106c45c0d28c002f11b61196b1ee54b',
-    'byte pin: three whole task-mode calls — every label and prompt unchanged (recorded on the p13-1 engine)')
-  ok(sha(rows.join('\n')) === '0b7fa8531f41dad8da30902e500d4cc7746f1540424af004039ab890433972aa',
+  ok(sha(oldCalls.join('\n')) === 'ee821ac64ee16a13cf95c536bcbbf4ef7106c45c0d28c002f11b61196b1ee54b',
+    'byte pin (p16-3 base): the same calls with NEEDS_HUMAN_RULE removed are the pre-p16-3 bytes')
+  ok(sha(oldRows.join('\n')) === '0b7fa8531f41dad8da30902e500d4cc7746f1540424af004039ab890433972aa',
+    'byte pin (p16-3 base): the same rows with needsHuman deleted are the pre-p16-3 rows')
+  ok(sha(calls.join('\n')) === '8236605ff29f46cc2c59346eb3bd42916deb8c9fda1859cb9eaaadec9fa607c4',
+    'byte pin: three whole task-mode calls — every label and prompt (re-pinned by p16-3: the base above plus the rule)')
+  ok(sha(rows.join('\n')) === '7a9ecf48734cee23672a77dbbde09a3fcee91a110746b46665bc3aaecd0984da',
     'byte pin: three whole task-mode calls — every row, rung record included')
 }
 
