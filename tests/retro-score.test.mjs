@@ -397,6 +397,23 @@ test('(i) a round cap whose ran-at differs from rollouts.toml by a task spread n
   assert.deepEqual([p.from, p.to, p.ranAt, p.rule, p.ranAtCause], [3, 5, 4, 'plan-rejected-raise', '1 of 3 tasks ran with a task override'])
 })
 
+test('(i) needs-human set-asides (p16-3, a stop on a question) raise no round cap', (t) => {
+  // reconcile-rollout.py classes a review or plan judge's question stop needs-human, not review-rounds or
+  // plan-rejected: another round can never answer a question, so two of each must propose nothing on the caps.
+  const home = tmpHome(t)
+  const ev = saturated(3, { settings: () => S(3, { max_review_rounds: 4, max_plan_rounds: 3 }) })
+  ev.push([at('03:00'), 'set-aside', 't1', { stage: 'review', reasonClass: 'needs-human', setAsideAt: 'run' }])
+  ev.push([at('03:10'), 'set-aside', 't2', { stage: 'review', reasonClass: 'needs-human', setAsideAt: 'run' }])
+  ev.push([at('03:20'), 'set-aside', 't3', { stage: 'plan', reasonClass: 'needs-human', setAsideAt: 'run' }])
+  ev.push([at('03:30'), 'set-aside', 't1', { stage: 'plan', reasonClass: 'needs-human', setAsideAt: 'run' }])
+  emitAll(home, 'demo', byTs(ev))
+  const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 3, max_review_rounds: 4, max_plan_rounds: 3 })])
+  const rules = [...out.proposals, ...out.withheld].map((x) => x.rule)
+  assert.ok(!rules.includes('review-rounds-raise') && !rules.includes('plan-rejected-raise'), JSON.stringify(rules))
+  assert.ok(![...out.proposals, ...out.withheld].some((x) => x.key === 'max_review_rounds' || x.key === 'max_plan_rounds'))
+  assert.equal(out.headline.setAsideRate > 0, true, 'the four set-asides still count toward the set-aside rate')
+})
+
 // ---- 4. the baseline ----------------------------------------------------------------------------------------------
 
 const SC = (over = {}) => ({ throughput: 1, runningHours: 4, merges: 4, tokensPerMerge: 100000, setAsideRate: 0.1, conflictRate: 0, quotaStalls: 0, ...over })

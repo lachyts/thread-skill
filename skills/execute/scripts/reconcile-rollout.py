@@ -29,6 +29,8 @@ Subcommands:
               Refuses an incomplete rollout (below): exit 1, no stdout, one ERROR line naming why and the
               remedy, `/thread:schedule <its first project> --regenerate`. An unacked git-env trip (Git-env
               hold, below) is listed as `gitEnvHold` and makes `halt` "git-env", ahead of every other verdict.
+              Each `setAside` entry is {slug, status, setAsideAt}, plus `needsHuman` (p16-3: the note's
+              `## Needs you` question, normalised) only when the note holds one.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -99,7 +101,9 @@ Subcommands:
               rungs [], source ladder.py's default_path() and error its reason, and status still exits 0.
               Each task carries `rung` (its `rung:` stamp, or null) and `rungDrift`: the stamp when a
               readable ladder lacks it and the task is unlanded (queued, running, awaiting-integration,
-              integrating, set-aside), else "". Pure read; no network.
+              integrating, set-aside), else "". A set-aside task whose note holds a `## Needs you`
+              question also carries `needsHuman` (p16-3, normalised); no other task carries the key. Pure
+              read; no network.
 
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
@@ -314,8 +318,11 @@ integration | gate) is where it re-enters, so merge-task's exit 1 reads stage in
 reasonClass, first match: quota; call-failed (`workflow call failed:` with the note in_progress before, or the
 integration kind); merge-task (a reason starting `merge-task`, and exit 4's `base moved` / `head moved after
 Integration`); declined; prepare (any other lead integration reason); revise-stopped; transient (the engine's
-TRANSIENT_DIAGNOSIS); then by status: gate, plan-rejected, review-rounds, integration-set-aside (an integrate
-row's set-aside) or blocked; approved-without-pr.
+TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
+string, never the note's `## Needs you`, so an integrate or lead row, which carries null, never reads it; a
+question is no round run out, so it must not reach plan-rejected or review-rounds, the classes the Retro raises
+a round cap on); then by status: plan-rejected, review-rounds, approved-without-pr (review with no PR),
+integration-set-aside (an integrate row's set-aside), else blocked.
 idle-slots reason, first match ("queued" is queued and not starting this call): gitEnvHold -> hold-git-env;
 paused or pauseRequested -> pause-drain; the first held queued row's reason: `depends on` -> dependency,
 solo or behind solo -> solo; no queued row and a RACE in raceHold -> hold-race; no queued row and a set-aside
@@ -444,6 +451,14 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     `lead-integrate.py plan`); '' or whitespace removes that section; null or no key leaves
                     it. Anything else is an error (exit 1) and leaves the section; the rest of the row is
                     still written.
+  needsHuman     -> (any status; p16-3) the question a person must answer, which the engine row carries when a
+                    judge, implementer, investigator or reviser stopped on one: a non-empty string upserts
+                    "## Needs you" (the question, stripped and neutralised like a gate-pending section, so a
+                    `## ` line in it never splits the section); '' or whitespace removes it (an own-call row
+                    with no question settles an older one); null or no key leaves it (an integrate row, a
+                    lead-written set-aside row). Anything else is an error (exit 1) and leaves the section;
+                    the rest of the row is still written. needs_human() reads it back, normalised, for `next`,
+                    `status` and lead-integrate.py.
 
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
 
@@ -514,6 +529,12 @@ INTEGRATION_LOG_SECTION = "## Integration log"
 APPROVED_PLAN_SECTION = "## Approved plan"
 APPROVED_PLAN_LEAD_IN = ("The last approved plan, kept as a record for Integration. Not authoritative: a plan in "
                          "your prompt supersedes it; with no plan in your prompt, the brief is the contract.")
+
+# The question a person must answer (p16-3): the engine row's `needsHuman`, the exact question a plan judge,
+# review judge, implementer, investigator or reviser stopped on. Written by reconcile from the row (a non-empty
+# string upserts, '' removes, null leaves it, like the approved plan); read back by needs_human() for `next` and
+# `status` (each set-aside entry) and lead-integrate.py's inputs. A record section, never brief text.
+NEEDS_HUMAN_SECTION = "## Needs you"
 
 # The lead's Integration verify timeout (p14-2, execute § 3): rollout frontmatter `verify_timeout`, seconds.
 # The harness bound on the background command is the verifier's own bound plus a margin, and the harness
@@ -797,6 +818,16 @@ def approved_plan(note) -> str:
         return ""
     lines, start, end = found
     return unquote_block(lines[start + 1:end])
+
+
+def needs_human(note) -> str:
+    """The note's open question for a person (p16-3): the `## Needs you` section's text, normalised (_normalise);
+    '' when the note has no such section or it is empty."""
+    found = note._section_bounds(NEEDS_HUMAN_SECTION)
+    if found is None:
+        return ""
+    lines, start, end = found
+    return _normalise("\n".join(lines[start + 1:end]))
 
 
 def _run_end(n: int, sha: str) -> str:
@@ -1909,6 +1940,19 @@ def cmd_reconcile(args) -> int:
             errors.append(f"{slug}: plan is not a string or null ({type(plan).__name__}) — "
                           f"{APPROVED_PLAN_SECTION} left untouched")
 
+        # p16-3: the question a person must answer, the same three states as the plan. A non-empty string is the
+        # question this row stopped on (upserted, neutralised by upsert_section, so it can never split the
+        # section); '' (or whitespace) is a row with no question, so an older one is settled and removed; null or
+        # an absent key (an integrate row, a lead-written set-aside row) leaves the section as it is.
+        ask = task.get("needsHuman")
+        if isinstance(ask, str) and ask.strip():
+            note.upsert_section(NEEDS_HUMAN_SECTION, ask.strip())
+        elif isinstance(ask, str):
+            note.remove_section(NEEDS_HUMAN_SECTION)
+        elif ask is not None:
+            errors.append(f"{slug}: needsHuman is not a string or null ({type(ask).__name__}) — "
+                          f"{NEEDS_HUMAN_SECTION} left untouched")
+
         note.save(dry_run=args.dry_run)
         _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, _pr(note),
                           ready_stamped)
@@ -1924,6 +1968,16 @@ def cmd_reconcile(args) -> int:
 
 
 # ---- next -------------------------------------------------------------------
+
+def _set_aside_entry(r) -> dict:
+    """One `next` setAside entry: slug, status, setAsideAt, and `needsHuman` (p16-3) only when the note holds an
+    open question, so an entry with none is byte-identical to the pre-p16-3 output."""
+    entry = {"slug": r["slug"], "status": r["status"], "setAsideAt": r["setAsideAt"]}
+    ask = needs_human(r["note"])
+    if ask:
+        entry["needsHuman"] = ask
+    return entry
+
 
 def cmd_next(args) -> int:
     """Which tasks start now (ADR 0030 decision 1). Pure function of the notes, except that a drained
@@ -2087,8 +2141,7 @@ def cmd_next(args) -> int:
         "running": slugs(live),
         "awaitingIntegration": slugs(awaiting),
         "integrating": slugs(integrating),
-        "setAside": [{"slug": r["slug"], "status": r["status"], "setAsideAt": r["setAsideAt"]}
-                     for r in by_state.get("set-aside", [])],
+        "setAside": [_set_aside_entry(r) for r in by_state.get("set-aside", [])],
         "raceHold": race_hold,
         "gitEnvHold": git_env,
         "paused": paused,
@@ -2450,22 +2503,30 @@ def cmd_status(args) -> int:
             return ""
         return stamp
 
-    tasks = [{
-        "slug": r["slug"],
-        "status": r["status"],
-        "queueState": r["state"],
-        "setAsideAt": r["setAsideAt"],
-        "pr": r["pr"],
-        "priority": r["priority"],
-        "solo": r["solo"],
-        "started": r["started"],
-        "merged": r["merged"],
-        "integrating": r["integrating"],
-        "waitingOn": _unsatisfied(r, index) if r["state"] == "queued" else [],
-        "blockerSummary": _blocker_summary(r["note"]),
-        "rung": _scalar(r["note"].get("rung")) or None,
-        "rungDrift": rung_drift(r),
-    } for r in sorted(rows, key=_rank)]
+    def task_row(r):
+        row = {
+            "slug": r["slug"],
+            "status": r["status"],
+            "queueState": r["state"],
+            "setAsideAt": r["setAsideAt"],
+            "pr": r["pr"],
+            "priority": r["priority"],
+            "solo": r["solo"],
+            "started": r["started"],
+            "merged": r["merged"],
+            "integrating": r["integrating"],
+            "waitingOn": _unsatisfied(r, index) if r["state"] == "queued" else [],
+            "blockerSummary": _blocker_summary(r["note"]),
+            "rung": _scalar(r["note"].get("rung")) or None,
+            "rungDrift": rung_drift(r),
+        }
+        # p16-3: the open question, only on a set-aside task whose note holds one (the key is absent otherwise).
+        ask = needs_human(r["note"]) if r["state"] == "set-aside" else ""
+        if ask:
+            row["needsHuman"] = ask
+        return row
+
+    tasks = [task_row(r) for r in sorted(rows, key=_rank)]
     paused = rollout_note.get("paused")
     out = {
         "rollout": rollout_path.stem,
@@ -2998,8 +3059,10 @@ def _set_aside_stage(note_status, integ, lead, prior, failed, diag, pr) -> str:
     return "implement"
 
 
-def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr) -> str:
-    """Why a task was set aside (the module docstring's reasonClass table, first match)."""
+def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, asked) -> str:
+    """Why a task was set aside (the module docstring's reasonClass table, first match). `asked` is the row's own
+    needsHuman being a non-empty string (p16-3), never the note's `## Needs you` section: an integrate or lead row
+    carries null, so its class is unchanged."""
     first = reason.split("\n", 1)[0].strip().lower()
     if failed and QUOTA_RE.search(first):
         return "quota"
@@ -3018,6 +3081,10 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr) -> 
         return "transient"
     if note_status == GATE_PENDING_STATUS:
         return "gate"
+    # p16-3: a stop on a question is not a plan or review round run out; another round can never answer it, so it
+    # must not read as plan-rejected or review-rounds (the Retro raises a round cap on those). A gate stop wins.
+    if asked:
+        return "needs-human"
     if note_status == "plan-blocked":
         return "plan-rejected"
     if note_status == "review-blocked":
@@ -3040,6 +3107,8 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
     diag = task.get("blockerDiagnosis") if isinstance(task.get("blockerDiagnosis"), str) else ""
     reason = _lead_reason(lead, diag) if lead else ""
     failed = bool(lead) and reason.lower().startswith(CALL_FAILED_PREFIX)
+    ask = task.get("needsHuman")
+    asked = isinstance(ask, str) and bool(ask.strip())
     state_after, at_after = _queue_state(note)
     if prior == "in_progress" and integ is None:
         if note_status == "review" and pr:
@@ -3067,7 +3136,8 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
     if (prior == "in_progress" or held) and state_after == "set-aside" and not revise_follows:
         stage = _set_aside_stage(note_status, integ, lead, prior, failed, diag, pr)
         _event(rollout, "set-aside", slug, {
-            "stage": stage, "reasonClass": _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr),
+            "stage": stage,
+            "reasonClass": _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, asked),
             "setAsideAt": at_after}, args)
         error_line = reason.split("\n", 1)[0].strip()
         if failed and QUOTA_RE.search(error_line):
@@ -3324,8 +3394,8 @@ DESCOPE_MARK_RE = re.compile(
 # Record sections: never part of the brief the plan judge judges against.
 BRIEF_EXCLUDE = ("## Plan-blocked feedback", "## Review-blocked feedback", "## Blocker diagnosis",
                  "## Review history", REPAIR_INPUT_SECTION, "## Scope decision", APPROVED_PLAN_SECTION,
-                 INTEGRATION_LOG_SECTION, APPROVED_GATES_SECTION, GATE_PENDING_SECTION, "## Decisions",
-                 "## Resume prompt")
+                 INTEGRATION_LOG_SECTION, APPROVED_GATES_SECTION, GATE_PENDING_SECTION, NEEDS_HUMAN_SECTION,
+                 "## Decisions", "## Resume prompt")
 MARKER_WORDS = r"(?:consider|considering|optional|optionally|nice to have|nice-to-have)"
 OPTIONAL_MARK_RE = re.compile(rf"\b{MARKER_WORDS}\b")
 # A marker negated by not / never / no (or an n't) up to two words before it is no marker: "not optional".
