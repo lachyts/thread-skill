@@ -25,7 +25,10 @@ grill's question was how much of that the live lead may do alone without ever hi
    or at Integration with a `pr:`. Never: a gate-pending task (sign-off is the human's, ADR 0008); an undecided
    RACE or UNVERIFIED; a `## Needs you` question (p16-3); a plan-block after an automatic descope (repair asks);
    a plain rejection the seeded revise owns; a PR branch gone; a declined `--gated` merge; a set-aside at
-   Integration with no `pr:`; a code-writing review note approved without a PR.
+   Integration with no `pr:`; a code-writing review note approved without a PR; a `pr:` the engine refuses
+   (`inputs`' `prUrlError`, p17-1) on a way back that launches on it, a revise or an Integration, since execute
+   launches nothing on it and a hand-back alone never moves it (the verb reads the `pr:` against the rollout's
+   Project root, the lead's `--repo`, so its re-run verdict is the one `inputs` printed).
 3. **The budget is resolved by the verbs.** `auto_retries` (default 2, an integer >= 0, `0` turning every retry
    off) resolves task note → rollout note → `rollouts.toml` → built-in, through the same resolver as the round
    caps (`rollout-settings.py`), inside `inputs` and the verb, never by the lead. The verb's `--auto-retries` and
@@ -47,8 +50,8 @@ grill's question was how much of that the live lead may do alone without ever hi
    minutes. While a cool-down is pending, a `stuck` queue ends its turn `waiting`, not `halted`, so the heartbeat
    keeps ticking and re-enters after it; but only while no gate-pending or UNVERIFIED task is set aside. Those need
    a human anyway, so with one among the set-asides the `stuck` halts as execute § 7 says (its `gated inputs await
-   sign-off` or `UNVERIFIED undecided` reason, or, attended, the in-conversation sign-off), and the cooling task
-   retries at the re-invocation after it.
+   sign-off` or `UNVERIFIED undecided` reason, its item in the report's `Needs you:` block, execute § 6.5), and the
+   cooling task retries at the re-invocation after it.
 6. **The budget's lifetime.** `auto-retry` spends it (`auto_retries_used`, or `quota_retries_used`).
    `hand-back`, the explicit re-entry (repair after Lachy answers, "retry [[task]]", the lead after a descope),
    clears both counters and re-stamps `auto_retry_sha` with the block it re-enters: after a human answer the
@@ -92,8 +95,8 @@ Considered:
   cool-down spreads it out without holding a genuine blip for long.
 - *A cool-down that waits over a gate-pending or UNVERIFIED task.* It keeps the queue `waiting` for up to the
   quota's 15.5 hours, and in that time the `gated inputs await sign-off` and `UNVERIFIED undecided` reasons are
-  never shown and an attended lead never asks for the sign-off. A human is needed for those either way, so the
-  halt comes first and only the cooling task's retry waits for the re-invocation.
+  never the turn's reason. A human is needed for those either way, so the halt comes first and only the cooling
+  task's retry waits for the re-invocation.
 - *A budget per stage.* More state for no observed need; the fingerprint stop already catches a loop.
 - *Making `auto_retries` Retro-tunable.* It is no throughput dial and nothing in the Run record scores it yet;
   it stays a plain setting until a Retro shows a rule.
@@ -122,4 +125,7 @@ Considered:
   docstring).
 - A run-stage automatic retry's restart records `slot-taken start: hand-back`, as any hand-back's does: it
   stamps `handed_back:` through hand-back's own transition, and its `auto-retry` event precedes the restart.
+- **Needs-you items (execute § 6.5, p16-1).** An entry `inputs` reports `autoRetry: true`, or with a pending
+  `autoRetryAfter`, is no needs-you item: the lead re-enters it, now or after its cool-down, so it is never pushed
+  to Lachy. Every entry the verdict refuses stays one, worded by § 6.5's own rules.
 - Status and repair still describe their own routes; their prose catches up with this decision in p16-5.

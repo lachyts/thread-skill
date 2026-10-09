@@ -961,7 +961,9 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
       4. plan-blocked after an automatic descope (a descope marker and no `descope_armed:`): repair asks Lachy;
       5. autoRevise under the resolved max_review_rounds: step 1.2's seeded revise owns it;
       6. a human cause: prepare's `the PR branch is gone`, a `--gated` decline, a merge-task exit-1 text outside
-         MERGE_TASK_FIXABLE, a set-aside at Integration with no pr:;
+         MERGE_TASK_FIXABLE, a set-aside at Integration with no pr:, or a non-empty `prUrlError` (p17-1) on a way back
+         that launches on the note's PR (resumeAt revise, or at Integration): step 1.2 and step 3 launch nothing on
+         it, so a hand-back alone never moves it (execute § 6.5 (c)'s `fix the note's pr: or defer`);
       7. the budget (reconcile-rollout.py _retry_budget): an invalid stamp sets `autoRetryError` (execute § 3's halt),
          an unresolvable value means no retry, a --max-review-rounds other than the resolved one means no retry, and
          `auto_retries: 0` turns every retry off, quota included;
@@ -1012,6 +1014,9 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
     first = reason.split("\n", 1)[0].strip()
     if at == "integration" and not rr._pr(note):
         return no("set aside at Integration with no pr: a human restores or recuts it")
+    if inp.get("prUrlError") and (at == "integration" or inp.get("resumeAt") == "revise"):
+        return no(f"the note's pr: gives no PR URL the engine takes, so no launch would go ahead: a human fixes it "
+                  f"({inp['prUrlError']})")
     if status == "blocked" and kind == "integration" and rr.BRANCH_GONE_MARK in reason:
         return no("the PR branch is gone: a human restores or recuts it")
     if status == "blocked" and rr.DECLINED_MARK in reason:

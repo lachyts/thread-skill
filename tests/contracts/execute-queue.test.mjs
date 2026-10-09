@@ -30,6 +30,7 @@ const S4 = /^### 4\. /
 const S45 = /^### 4\.5\. /
 const S5 = /^### 5\. /
 const S6 = /^### 6\. /
+const S65 = /^### 6\.5\. /
 const S7 = /^### 7\. /
 const S8 = /^### 8\. /
 const INV = /^## Invocation forms/
@@ -501,7 +502,9 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   // to § 7 (its reason, with the item in the report's `Needs you:` block, § 6.5), so a cool-down never hides a human's item; § 3 has the key's row (resolved by the verbs, never the lead); *Set aside* names the re-entry first;
   // § 6 has the event line, the `Auto-retried:` report row, and step 5's Completion log copies the `auto-retry:` lines;
   // § 7's stuck halt waits for the retries; § 8 names the lead's verb and its route to repair; a Don't forbids a
-  // hand-written retry, a hand-resolved budget and hand-written markers.
+  // hand-written retry, a hand-resolved budget and hand-written markers. A `prUrlError` on a revise or at Integration
+  // is never retried (p17-1: no launch goes ahead on it, so § 6.5 (c) asks for the `pr:`), and § 6.5 (c) excludes an
+  // entry `inputs` reports `autoRetry: true` or with an `autoRetryAfter`, so a task the lead re-enters is never pushed (p16-1).
   const ar = s2t.slice(Math.max(0, s2t.indexOf('**Automatic retry')))
   const arRow = (section(skill, S3) ?? '').split('\n').find((l) => l.startsWith('| `auto_retries` |')) ?? ''
   const arStuck = collapse(skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: stuck`')) ?? '')
@@ -532,7 +535,9 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !never.includes("The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*)") ||
     !never.includes('a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair') ||
     !donts.includes('Never auto-retry unless `inputs` reports `autoRetry: true`, never pass a budget you resolved yourself') ||
-    !donts.includes('`auto_retries_used`, `quota_retries_used`, `auto_retry_sha` or `auto_retry_at` by hand: `reconcile-rollout.py auto-retry` writes them')) {
+    !donts.includes('`auto_retries_used`, `quota_retries_used`, `auto_retry_sha` or `auto_retry_at` by hand: `reconcile-rollout.py auto-retry` writes them') ||
+    !ar.includes("a non-empty `prUrlError` on a way back that launches on the note's PR (a revise, or at Integration: a hand-back alone never moves it, § 6.5)") ||
+    !S(skill, S65).includes("and an entry that `inputs` reports `autoRetry: true` or with a non-empty `autoRetryAfter` (step 1.2's *Automatic retry* re-enters it, now or once its cool-down ends, p16-4). Under a pause step 1.2 is skipped, so those last three wait for the reinstate and stay excluded;")) {
     fails.push('auto-retry')
   }
 
@@ -931,6 +936,14 @@ test('control: a § 7 stuck halt that ignores the retries fails auto-retry', () 
 test('control: § 8 without the auto-retry sentence fails auto-retry', () => {
   only(sk(" The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*), a guarded deterministic verb with its own budget: a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair.", ''),
     'auto-retry', 'no § 8 sentence')
+})
+test('control: a needs-you block that pushes a task the lead re-enters fails auto-retry', () => {
+  only(sk(", and an entry that `inputs` reports `autoRetry: true` or with a non-empty `autoRetryAfter` (step 1.2's *Automatic retry* re-enters it, now or once its cool-down ends, p16-4). Under a pause step 1.2 is skipped, so those last three wait",
+    '. Under a pause step 1.2 is skipped, so those last three wait'), 'auto-retry', 'retried task pushed')
+})
+test("control: an Automatic retry on a pr: the engine refuses fails auto-retry", () => {
+  only(sk(" a non-empty `prUrlError` on a way back that launches on the note's PR (a revise, or at Integration: a hand-back alone never moves it, § 6.5),", ''),
+    'auto-retry', 'prUrlError retried')
 })
 test("control: no Don't on hand-written retry markers fails auto-retry", () => {
   const l = real.skill.split('\n').find((x) => x.startsWith('- Never auto-retry unless'))

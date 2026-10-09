@@ -78,7 +78,8 @@ Subcommands:
               retry*): `--tasks <slug> --rollout <note> [--auto-retries N] [--fingerprint <12 hex>]`. The task's
               `rollout:` must name --rollout (else exit 1); an undecided RACE or UNVERIFIED is exit 2 with
               hand-back's ERROR line. It then re-runs lead-integrate.py's auto_retry_verdict, the one `inputs`
-              prints: an `autoRetryError` (an `auto_retries` or `max_review_rounds` stamp that is not a valid
+              prints (its task_inputs read with the rollout's Project root as --repo, the lead's `--repo
+              <repoPath>`, so the note's pr: reads as the same PR URL or `prUrlError`): an `autoRetryError` (an `auto_retries` or `max_review_rounds` stamp that is not a valid
               integer) is exit 1; --auto-retries and --fingerprint are assertions the lead copies from `inputs`,
               and a mismatch is exit 1 (the note changed since `inputs`); `autoRetry: false` is exit 1, `ERROR:
               auto-retry: <slug>: not auto-retryable: <why>; nothing written`. Otherwise it writes, in order, each
@@ -4127,7 +4128,11 @@ def cmd_auto_retry(args) -> int:
         print(f"ERROR: {_race_hold_line('auto-retry', slug, hold[1], ro)}", file=sys.stderr)
         return 2
     lead = _lead()
-    verdict = lead.auto_retry_verdict(path, note, lead.task_inputs(path, note), rollout_note, now)
+    # The rollout's Project root is the lead's `inputs --repo <repoPath>`: the note's pr: is read as a PR URL
+    # (`prUrlError`, p17-1) against the same origin, so the verdict re-run here is the one `inputs` printed.
+    root = _project_root(rollout_note)
+    inp = lead.task_inputs(path, note, repo=str(root) if root is not None else None)
+    verdict = lead.auto_retry_verdict(path, note, inp, rollout_note, now)
     if verdict["autoRetryError"]:
         return error(f"{slug}: invalid round budget: {verdict['autoRetryError']}")
     budget = verdict["autoRetryBudget"]

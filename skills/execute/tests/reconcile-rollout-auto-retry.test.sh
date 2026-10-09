@@ -280,6 +280,22 @@ rec "$(row "$A" blocked 'integration: base moved before the merge 4 times in a r
 ok "$(j "$(nxt "")" '[e["setAsideAt"] for e in d["setAside"]]')" '["integration"]' "A4: (set aside at Integration)"
 excluded "Integration with no pr:" "set aside at Integration with no pr:"
 
+# p17-1's prUrlError: a pr: the engine refuses, on a way back that launches on it (here at Integration), is a human's:
+# no launch goes ahead on it, so a hand-back alone never moves it (execute § 6.5 (c): `fix the note's pr: or defer`).
+# The verb reads the pr: against the rollout's Project root, the lead's `inputs --repo <repoPath>`, so the two agree.
+scen a4-pr-url-error
+mkro; mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
+lead "$A" integration "merge-task exit 8 three times: origin unreachable"
+setfm "$A" pr '"#5"'
+excluded "a bare #5 and no GitHub origin (prUrlError)" "the note's pr: gives no PR URL the engine takes"
+ok "$(j "$(inp "$A" --repo "$D/root")" '[d["autoRetry"], d["prUrlError"] != ""]')" '[false,true]' \
+  "A4 prUrlError: inputs --repo <a Project root with no GitHub origin> → autoRetry false"
+git init -q "$D/root" && git -C "$D/root" remote add origin https://github.com/o/r
+ok "$(j "$(inp "$A" --repo "$D/root")" '[d["autoRetry"], d["prUrl"], d["prUrlError"]]')" "[true,\"$PR\",\"\"]" \
+  "A4 prUrlError control: a GitHub origin builds the PR URL → autoRetry true"
+ar "$A"
+ok "$rc|$(fm "$A" status)" "0|status: review" "A4 prUrlError control: the verb reads the same Project root, so it agrees: exit 0, back to review"
+
 scen a4-autorevise
 mkro; mkt "$A" review "pr: $PR" "ready: 2026-10-03T06:00+00:00" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
 DIAG="$REVISE
