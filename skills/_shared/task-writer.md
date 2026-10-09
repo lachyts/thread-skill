@@ -252,9 +252,12 @@ connected-but-unauthenticated (expired OAuth — the silent-degrade case).
 The **close-the-capture instruction runs first once preflight passes** (pickup
 auto-complete, ADR 0001 consequence) — deliberately *after* preflight, so a
 failed pickup never marks the capture done. It's inside the prompt so it works
-even when pasted into a non-Claude harness. If the work is conversation-gated (needs Lachy's input
-before an agent can act), say so explicitly in the Notes line — this is what
-keeps `/thread:schedule` from sweeping it into an autonomous rollout.
+even when pasted into a non-Claude harness. `/thread:schedule` step 8 matches
+its `mark the capture done` wording to flag a capture-shaped note before engine
+agents read it, so keep that phrase when rewording the line. If the work is
+conversation-gated (needs Lachy's input before an agent can act), say so
+explicitly in the Notes line — this is what keeps `/thread:schedule` from
+sweeping it into an autonomous rollout.
 
 **The worked task.** When the session being set down was working an existing
 vault task that is not itself a capture (picked up with `/thread:open

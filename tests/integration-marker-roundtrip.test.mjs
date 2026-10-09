@@ -384,7 +384,7 @@ test('x14: a seeded revise takes resume.plan from the note; its step-back render
     assert.ok(section && section.includes('> ## Not a section'))
     const inputs = leadJson(['inputs', '--note', path.join(d, `${SLUG}.md`), '--repo', '/repo'])
     const resume = {
-      stage: 'revise', prUrl: inputs.pr, branch: inputs.branch, worktreePath: inputs.worktreePath,
+      stage: 'revise', prUrl: inputs.prUrl, branch: inputs.branch, worktreePath: inputs.worktreePath,
       reviewHistory: inputs.history, reviewRoundsUsed: inputs.lastRound, plan: planOf(d).plan,
     }
     assert.equal(resume.plan, PLAN)

@@ -13,7 +13,9 @@
 #   revise-stopped rows   C14 a rejection frees the lane while another integrates   C15 the verify line under bash
 #   and zsh -f ($, $(…), backticks, \ and ' single-quoted)   C16 stamp, usage, an unreachable origin   C17 timeouts, signals,
 #   the bootstrap, the race tree   C18 no relaunch loop   C19 an Integration set-aside re-enters   C20 the last
-#   task rejected.
+#   task rejected   C21 plan, the approved plan for the two launches   C22 inputs --row, the integrate call's record
+#   checked against the note and its fallback prUrl a PR URL the engine takes, a bare #N built (p17-1). C10 is the landed list with a commit pushed without a PR (`unlisted`), and
+#   C11 also pins inputs --row's ports of historyError, rungRecordError and PR_URL.
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -194,9 +196,10 @@ ok "$prc" 0 "C1: prepare exits 0"
 ok "$(j "$J" 'd["route"]')|$(j "$J" 'd["case"]')" "merge|i" "C1: main unmoved → case (i), route merge"
 ok "$(j "$J" 'd["prHead"]')|$(j "$J" 'd["anchor"]')|$(j "$J" 'd["taskBase"]')|$(j "$J" 'd["mainSha"]')" "$H0|$H0|$TB|$TB" "C1: H = A = H0, TB = B"
 ok "$(j "$J" 'd["mergeCommit"]')|$(git -C "$WT" rev-parse HEAD)" "|$H0" "C1: no merge commit; the tree stays at H0"
-for k in branch worktreePath prHead anchor taskBase mainSha case route trouble reason landed; do
+for k in branch worktreePath prHead anchor taskBase mainSha case route trouble reason landed unlisted note; do
   ok "$(j "$J" "'$k' in d")" true "C1: prepare prints $k"
 done
+ok "$(j "$J" '[d["landed"], d["unlisted"], d["note"]]')" '[[],[],""]' "C1: an empty range → landed [], unlisted [], note \"\""
 S=$(python3 "$LI" stamp)
 python3 "$RR" log-integration --tasks "$SLUG" --tasks-dir "$V" --started "$S" --anchor "$H0" --head "$H0" --base "$TB" >/dev/null
 has "$(loglines)" " integrated path=lead pr=5 anchor=$H0 head=$H0 base=$TB " "C1: log-integration writes integrated path=lead head=H base=TB"
@@ -369,10 +372,39 @@ prep
 ok "$(j "$J" '[(x["prUrl"], x["title"], x["files"], x["taskPath"]) for x in d["landed"]]')" \
   "[[\"https://github.com/o/r/pull/7\",\"theirs: rename (#7)\",[\"x.txt\"],\"$V/proj-t7.md\"],[\"https://github.com/o/r/pull/8\",\"Merge pull request #8 from o/feature\",[\"y.txt\"],\"$V/Archive/proj-t8.md\"]]" \
   "C10: (#7) and a Merge pull request #8 commit → their PR, title, files and task note"
+# p17-1: a commit pushed without a PR is skipped from landed (listed in unlisted), never dropping the whole list.
 main z.txt "z" "a direct push"
 prep
-ok "$(j "$J" 'd["landed"]')" "[]" "C10: a commit with no PR number → landed []"
-has "$(j "$J" 'd["note"]')" "names no PR" "C10: … and says why"
+ok "$(j "$J" '[x["prUrl"] for x in d["landed"]]')" '["https://github.com/o/r/pull/7","https://github.com/o/r/pull/8"]' "C10: a commit with no PR number → landed still lists #7 and #8"
+ok "$(j "$J" 'd["unlisted"]')" "[{\"sha\":\"$B\",\"subject\":\"a direct push\",\"files\":[\"z.txt\"]}]" "C10: … and unlisted names it: sha, subject, files"
+N10=$(j "$J" 'd["note"]')
+has "$N10" "1 commit(s)" "C10: … note counts it"; has "$N10" "${B:0:12}" "C10: … names its sha"; has "$N10" "name no PR" "C10: … and says why"
+UL10=$(j "$J" 'd["unlisted"]')
+main w.txt "w" "theirs: later (#9)"
+prep
+ok "$(j "$J" '[x["prUrl"] for x in d["landed"]]')" '["https://github.com/o/r/pull/7","https://github.com/o/r/pull/8","https://github.com/o/r/pull/9"]' "C10: a PR after the direct push → landed #7, #8, #9, oldest first"
+ok "$(j "$J" 'd["unlisted"]')" "$UL10" "C10: … unlisted unchanged"
+TB10=$(j "$J" 'd["taskBase"]'); B10=$(j "$J" 'd["mainSha"]')
+NG=$(python3 - "$LI" "$R" "$TB10" "$B10" "$V" <<'PY2'
+import importlib.util, json, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("li", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+landed, unlisted, note = m._landed(sys.argv[2], sys.argv[3], sys.argv[4], "", Path(sys.argv[5]))
+print(json.dumps({"landed": landed, "unlisted": [u["subject"] for u in unlisted], "note": note}))
+PY2
+)
+ok "$(j "$NG" '[d["landed"], d["unlisted"]]')" '[[],["a direct push"]]' "C10: origin not github.com and pr: not a URL → landed [], unlisted still filled"
+ok "$(j "$NG" 'd["note"].startswith("origin is not a github.com remote")')|$(j "$NG" '"; 1 commit(s)" in d["note"]')" "true|true" "C10: … note gives the non-github reason first, then the unlisted one"
+ZB=$(git -C "$F/p" rev-parse HEAD~2); ZC=$(git -C "$F/p" rev-parse HEAD~1)
+AP=$(python3 - "$LI" "$R" "$ZB" "$ZC" "$V" <<'PY2'
+import importlib.util, json, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("li", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+landed, unlisted, note = m._landed(sys.argv[2], sys.argv[3], sys.argv[4], "o/r", Path(sys.argv[5]))
+print(json.dumps({"landed": landed, "unlisted": [u["subject"] for u in unlisted], "note": note}))
+PY2
+)
+ok "$(j "$AP" '[d["landed"], d["unlisted"], d["note"].startswith("1 commit(s)")]')" '[[],["a direct push"],true]' "C10: a range of PR-less commits only → landed [], each in unlisted"
 
 # ======== C11: engine pins (byte-equal) ===============================================================
 echo "== c11"
@@ -394,13 +426,42 @@ minutes = [["2026-10-02T12:00+00:00", "2026-10-02T12:30+00:00"], ["2026-10-02T12
            ["2026-10-02T12:30Z", "2026-10-02T12:00Z"], [None, "2026-10-02T12:00Z"], ["2026-10-02T12:00+1000", "2026-10-02T02:10Z"],
            [" 2026-10-02T12:00Z ", "2026-10-02T12:01Z"], ["2024-02-29T00:00Z", "2024-03-01T00:00Z"], ["2026-10-02T24:00Z", "2026-10-03T00:00Z"],
            ["2026-10-02T12:00:59.6Z", "2026-10-02T12:02Z"], ["2026-10-02T12:00", "2026-10-02T12:01Z"]]
+# p17-1: inputs --row's ports of historyError, rungRecordError and PR_URL, pass for pass.
+f = lambda *fb: {"round": 1, "feedback": list(fb)}
+hist = [[], [f("a")], [f()], [f(" ")], [f("\u00a0\ufeff")], [{"round": 2, "feedback": ["a"]}, {"round": 1, "feedback": ["b"]}],
+        [f("a"), f("b")], [{"round": 0, "feedback": ["a"]}], [{"round": True, "feedback": ["a"]}], [{"round": "1", "feedback": ["a"]}],
+        [{"round": 1, "feedback": "a"}], [{"round": 1, "feedback": [1]}], [{"round": 1, "feedback": ["a"], "stage": "x"}],
+        [{"round": 1, "feedback": ["a"], "stage": None}], [{"round": 1}], [None], [[1]], ["x"], "x", None, {},
+        [{"round": 1, "feedback": ["a"], "stage": "integration"}], [f(), {"round": 3, "feedback": ["c"], "stage": "integration"}],
+        [{"round": 1, "feedback": [""]}, {"round": 2, "feedback": ["", " "]}]]
+c = lambda s, a, b: {"stage": s, "from": a, "to": b}
+rungs = [{"startRung": "", "rung": "", "climbs": []}, {"startRung": "opus-high", "rung": "opus-xhigh", "climbs": [c("implement", "opus-high", "opus-xhigh")]},
+         {"startRung": "opus-high", "rung": "opus-high", "climbs": [c("review", "opus-high", "opus-high")]},
+         {"startRung": "a1", "rung": "b.c_d-e", "climbs": [c("plan", "a1", "b.c_d-e")]},
+         {"startRung": "", "rung": "Opus!", "climbs": []}, {"startRung": "", "rung": "true", "climbs": []},
+         {"startRung": "", "rung": "opus-high"}, {"startRung": "", "rung": "opus-high", "climbs": [], "extra": 1},
+         {"startRung": "", "rung": "opus-high", "climbs": [c("verify", "opus-high", "opus-xhigh")]},
+         {"startRung": "", "rung": "opus-high", "climbs": [{"stage": "plan", "from": "opus-high"}]},
+         {"startRung": "", "rung": "opus-high", "climbs": [c("plan", "", "opus-high")]},
+         {"startRung": "", "rung": "opus-high", "climbs": {}}, {"startRung": None, "rung": "", "climbs": []},
+         {"startRung": "", "rung": "", "climbs": [None]}, "opus-high", None, [], {}]
+urls = ["https://github.com/o/r/pull/5", "https://github.com/o/r/pull/5/", "http://github.com/o/r/pull/5",
+        "https://github.com/o/r/pulls/5", "https://ghe.example/o/r/pull/12", "https://github.com/o r/pull/5",
+        "https://github.com/o\u00a0r/pull/5", "https://github.com/o/r/pull/5\n", "https://github.com/o/r/pull/", "",
+        "https://github.com/o/r/pull/5x", "https://x/pull/1/pull/2", "https://github.com/o/r/pull/\u0665",
+        " https://github.com/o/r/pull/5", "https://github.com/o/r/pull/5#x", "https://GITHUB.com/O/R/pull/5"]
+# Two deliberate divergences, each stricter here (the row then falls back to the note): a pre-3.0.0 tier record and
+# a float round (JSON 1.0 is the integer 1 to the engine).
+div = [{"model": "opus", "escalated": False, "escalatedAt": "", "tierCapped": False, "tierCappedAt": ""}, [{"round": 1.0, "feedback": ["a"]}]]
 print(json.dumps({"slugs": ["proj-t5", "solo", "a-b-c"], "markers": markers, "own": ["plain", "integration: x",
-  "revise: rejected at Integration re-review — x", "", "Integration: X", " own text"], "minutes": minutes, "parse": parse}))
+  "revise: rejected at Integration re-review — x", "", "Integration: X", " own text"], "minutes": minutes, "parse": parse,
+  "hist": hist, "rungs": rungs, "urls": urls, "div": div}))
 PY
 )
 ENG=$(node --input-type=module -e "
   import { loadEngine } from './tests/lib/engine.mjs'
-  const T = loadEngine(['ANCHOR_RECIPE', 'shortAlias', 'worktreeDir', 'integrationMergeStep', 'integrationMarker', 'stageDiagnosis', 'wholeMinutes', 'parseIntegrationMarker'])
+  const T = loadEngine(['ANCHOR_RECIPE', 'shortAlias', 'worktreeDir', 'integrationMergeStep', 'integrationMarker', 'stageDiagnosis', 'wholeMinutes', 'parseIntegrationMarker',
+    'historyError', 'rungRecordError', 'PR_URL'])
   const c = JSON.parse(process.argv[1])
   const st = T.integrationMergeStep({ repoPath: '/r', defaultBranch: 'master' }, { slug: 'proj-t5' }, { headSha: 'a'.repeat(40), taskBase: 'b'.repeat(40) })
   const br = st.match(/BR=\"([^\"]+)\"/)[1]
@@ -412,6 +473,10 @@ ENG=$(node --input-type=module -e "
     own: c.own.map((d) => T.stageDiagnosis({}, { blockerDiagnosis: d }, 'blocked')),
     minutes: c.minutes.map(([f, t]) => T.wholeMinutes(f, t)),
     parse: c.parse.map((x) => T.parseIntegrationMarker(x)),
+    hist: c.hist.map((h) => [T.historyError(h, true) === '', T.historyError(h, false) === '']),
+    rungs: c.rungs.map((g) => T.rungRecordError(g) === ''),
+    urls: c.urls.map((u) => T.PR_URL.test(u)),
+    div: [T.rungRecordError(c.div[0]) === '', T.historyError(c.div[1], true) === ''],
   }))
 " "$CASES")
 PY_=$(python3 - "$LI" "$CASES" <<'PY'
@@ -426,13 +491,21 @@ print(json.dumps({
   "own": [m.own_run_diagnosis(d) for d in c["own"]],
   "minutes": [m.rr._whole_minutes(f, t) for f, t in c["minutes"]],
   "parse": [m.parse_integration_marker(x) for x in c["parse"]],
+  "hist": [[m.history_error(h, True) == "", m.history_error(h, False) == ""] for h in c["hist"]],
+  "rungs": [m.rung_record_error(g) == "" for g in c["rungs"]],
+  "urls": [bool(m.ENGINE_PR_URL_RE.fullmatch(u)) for u in c["urls"]],
+  "div": [m.rung_record_error(c["div"][0]) == "", m.history_error(c["div"][1], True) == ""],
 }, ensure_ascii=False))
 PY
 )
 canon() { python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(json.dumps(d[sys.argv[2]], sort_keys=True, ensure_ascii=False))' "$1" "$2"; }
-for k in recipe names mergeMsg markers own minutes parse; do
+for k in recipe names mergeMsg markers own minutes parse hist rungs urls; do
   ok "$(canon "$PY_" "$k")" "$(canon "$ENG" "$k")" "C11: lead-integrate's $k is byte-equal to the engine's"
 done
+# the cases are not vacuous: each list holds both verdicts, in the engine's own words (control)
+ok "$(canon "$ENG" hist)" "[[true, false], [true, true], [true, false], [true, false], [true, false]$(printf ', [false, false]%.0s' $(seq 16)), [true, true], [true, true], [true, false]]" "C11: the engine's verdicts on the history cases (control)"
+ok "$(canon "$ENG" rungs)|$(canon "$ENG" urls)" "[true, true, true, true$(printf ', false%.0s' $(seq 14))]|[true, false, false, false, true, false, false, false, false, false, false, true, false, false, false, true]" "C11: the engine's verdicts on the rung and URL cases (control)"
+ok "$(canon "$ENG" div)|$(canon "$PY_" div)" "[true, true]|[false, false]" "C11: the two deliberate divergences (a pre-3.0.0 tier record, a float round) pass the engine and are refused here"
 ok "$(canon "$ENG" names)" '[["audit-fix/t5", "/r/.claude/worktrees/proj-t5"], ["audit-fix/solo", "/r/.claude/worktrees/solo"], ["audit-fix/b-c", "/r/.claude/worktrees/a-b-c"]]' "C11: the names themselves (control)"
 ok "$(python3 -c 'import json,sys; print(sum(1 for x in json.loads(sys.argv[1])["markers"] if x.lower().startswith("integration: integration:")))' "$PY_")" 3 "C11: only the doubled-prefix reason (x3 histories) keeps a second prefix (the engine strips one)"
 
@@ -761,6 +834,144 @@ ok "$(j "$(python3 "$LI" plan --note "$V/proj-a.md")" 'd["plan"]')" "$C21P" "C21
 rec '{"rolloutSlug": "ro", "tasks": [{"slug": "proj-a", "scope": "cross-cutting", "status": "review", "prUrl": "https://github.com/o/r/pull/97", "reviewRoundsUsed": 1, "plan": ""}]}'
 ok "$(j "$(python3 "$LI" plan --note "$V/proj-a.md")" 'd["plan"]')|$(grep -c '^## Approved plan' "$V/proj-a.md")" "|0" "C21: a '' row removed it → plan \"\""
 python3 "$LI" plan --note "$V/proj-zz.md" >/dev/null 2>&1; ok "$?" 2 "C21: a missing note exits 2"
+
+# ======== C22: inputs --row — the integrate call's record, the approving row checked against the note (p17-1) ======
+# The incident: after a session limit a saved transient row (blocked, no PR, 0 rounds) was taken as the approving
+# row. `inputs --row` uses a row only when it matches the note and passes the engine's args check, else the note's.
+nfx c22 2
+ntask proj-a review "pr: $(p1pr proj-a)" 'review_rounds_used: 2' 'rung: opus-high'
+ntask proj-b review 'review_rounds_used: 1'
+ntask proj-c review 'pr: "#99"' 'review_rounds_used: 1'
+ntask proj-d review 'pr: https://github.com/O/R/pull/100/' 'review_rounds_used: 1'
+PRA=$(p1pr proj-a)
+python3 - "$F" "$PRA" <<'PY'
+import json, sys
+d, pr = sys.argv[1], sys.argv[2]
+H = [{"round": 1, "feedback": ["x"]}, {"round": 3, "feedback": ["keep theirs"], "stage": "integration"}]
+RUNG = {"startRung": "opus-high", "rung": "opus-xhigh", "climbs": [{"stage": "implement", "from": "opus-high", "to": "opus-xhigh"}]}
+good = {"slug": "proj-a", "scope": "cross-cutting", "status": "review", "prUrl": pr, "reviewRoundsUsed": 3, "reviewHistory": H, **RUNG}
+env = lambda *rows: {"rolloutSlug": "ro", "tasks": list(rows)}
+rows = {
+  "incident": env({"slug": "proj-a", "scope": "cross-cutting", "status": "blocked", "prUrl": "", "reviewRoundsUsed": 0, "reviewHistory": []}),
+  "noprurl": env({**good, "prUrl": ""}),
+  "otherslug": {**good, "slug": "proj-b"},
+  "otherenv": env({**good, "slug": "proj-b"}),
+  "dup": env(good, {**good, "slug": "PROJ-A"}),
+  "otherpr": env({**good, "prUrl": pr.rsplit("/", 1)[0] + "/99"}),
+  "belownote": env({**good, "reviewRoundsUsed": 1, "reviewHistory": []}),
+  "desc": env({**good, "reviewHistory": [{"round": 2, "feedback": ["a"]}, {"round": 1, "feedback": ["b"]}]}),
+  "nonstr": env({**good, "reviewHistory": [{"round": 1, "feedback": [1]}]}),
+  "stage": env({**good, "reviewHistory": [{"round": 1, "feedback": ["a"], "stage": "x"}]}),
+  "belowhist": env({**good, "reviewRoundsUsed": 2}),
+  "boolround": env({**good, "reviewHistory": [{"round": True, "feedback": ["a"]}]}),
+  "slash": env({**good, "prUrl": pr + "/"}),
+  "badrung": env({**good, "rung": "Opus!"}),
+  "good": env({"slug": "proj-x", "status": "review"}, good),
+  "bare": good,
+  "nopr": env({**good, "slug": "proj-b", "reviewRoundsUsed": 1, "reviewHistory": []}),
+  "bynum": env({**good, "slug": "proj-c", "prUrl": "https://github.com/o/r/pull/99", "reviewRoundsUsed": 1, "reviewHistory": []}),
+  "bynumbad": env({**good, "slug": "proj-c", "prUrl": "https://github.com/o/r/pull/98", "reviewRoundsUsed": 1, "reviewHistory": []}),
+  "byurl": env({**good, "slug": "proj-d", "prUrl": "https://github.com/o/r/pull/100", "reviewRoundsUsed": 1, "reviewHistory": []}),
+}
+for k, v in rows.items():
+    json.dump(v, open(f"{d}/{k}.json", "w"))
+open(f"{d}/malformed.json", "w").write("{not json")
+json.dump(H, open(f"{d}/H.json", "w")); json.dump(RUNG, open(f"{d}/RUNG.json", "w"))
+PY
+RECS="$F/recs.jsonl"; : > "$RECS"
+# irow <note slug> <inputs args…>: inputs' integrate record as IG (exit in irc); every proj-a record is kept for the
+# engine's args check below.
+irow() { local s="$1"; shift; I=$(python3 "$LI" inputs --note "$V/$s.md" "$@" 2>"$F/irow.err"); irc=$?; IG=$(j "$I" 'd["integrate"]' 2>/dev/null); [ "$s" != proj-a ] || printf '%s\n' "$IG" >> "$RECS"; }
+NOTE_RUNG='{"startRung":"","rung":"opus-high","climbs":[]}'
+irow proj-a
+ok "$irc|$(j "$IG" 'sorted(d)')" '0|["prUrl","prUrlError","reviewHistory","reviewRoundsUsed","rowRefused","rung","rungSource","source"]' "C22: inputs prints the integrate record, with exactly its keys"
+ok "$(j "$IG" '[d["source"], d["rungSource"], d["prUrl"], d["reviewHistory"], d["reviewRoundsUsed"], d["rowRefused"], d["prUrlError"]]')|$(j "$IG" 'd["rung"]')" \
+  "[\"note\",\"note\",\"$PRA\",[],2,\"\",\"\"]|$NOTE_RUNG" "C22: no --row → the note's PR, history, rounds and rung record; rowRefused and prUrlError \"\""
+irow proj-a --row "$F/incident.json"
+ok "$irc|$(j "$IG" '[d["source"], d["prUrl"], d["reviewRoundsUsed"], d["reviewHistory"]]')|$(j "$IG" 'd["rung"]')" "0|[\"note\",\"$PRA\",2,[]]|$NOTE_RUNG" "C22: the incident's saved row (blocked, no PR, 0 rounds) is refused: the note's values"
+has "$(j "$IG" 'd["rowRefused"]')" "status" "C22: … rowRefused names its status"
+irow proj-a --row "$F/noprurl.json"
+ok "$(j "$IG" 'd["source"]')" note "C22: a review row with prUrl \"\" is refused"
+has "$(j "$IG" 'd["rowRefused"]')" "prUrl" "C22: … rowRefused names its prUrl"
+for kw in "otherslug:slug" "otherenv:0 entries" "dup:2 entries" "otherpr:/pull/99" "belownote:review_rounds_used" "desc:ascending" \
+  "nonstr:feedback" "stage:stage" "belowhist:last round" "boolround:round" "slash:prUrl"; do
+  k=${kw%%:*}; want=${kw#*:}
+  irow proj-a --row "$F/$k.json"
+  ok "$irc|$(j "$IG" '[d["source"], d["prUrl"], d["reviewRoundsUsed"]]')" "0|[\"note\",\"$PRA\",2]" "C22: the $k row is refused: the note's values"
+  has "$(j "$IG" 'd["rowRefused"]')" "$want" "C22: … rowRefused: $want"
+done
+for k in "$F/malformed.json" "$F/missing.json"; do
+  irow proj-a --row "$k"
+  ok "$irc|$(j "$IG" '[d["source"], d["rowRefused"] != ""]')" '0|["note",true]' "C22: an unreadable --row ($(basename "$k")) is refused with a reason, exit 0"
+done
+I=$(python3 "$LI" inputs --note "$V/proj-a.md" --row - </dev/null); irc=$?
+ok "$irc|$(j "$I" '[d["integrate"]["source"], d["integrate"]["rowRefused"] != ""]')" '0|["note",true]' "C22: --row - with empty stdin is refused with a reason, exit 0"
+irow proj-a --row "$F/badrung.json"
+ok "$(j "$IG" '[d["source"], d["rungSource"], d["reviewRoundsUsed"]]')|$(j "$IG" 'd["rung"]')" "[\"row\",\"note\",3]|$NOTE_RUNG" "C22: a row with a bad rung record keeps the row and takes the note's rung record"
+has "$(j "$IG" 'd["rowRefused"]')" "rung" "C22: … rowRefused names the rung record"
+H22=$(j "$(cat "$F/H.json")" 'd'); RUNG22=$(j "$(cat "$F/RUNG.json")" 'd')
+for form in good bare stdin; do
+  if [ "$form" = stdin ]; then I=$(python3 "$LI" inputs --note "$V/proj-a.md" --row - <"$F/good.json"); irc=$?; IG=$(j "$I" 'd["integrate"]'); printf '%s\n' "$IG" >> "$RECS"
+  else irow proj-a --row "$F/$form.json"; fi
+  ok "$irc|$(j "$IG" '[d["source"], d["rungSource"], d["prUrl"], d["reviewRoundsUsed"], d["rowRefused"]]')|$(j "$IG" 'd["reviewHistory"]')|$(j "$IG" 'd["rung"]')" \
+    "0|[\"row\",\"row\",\"$PRA\",3,\"\"]|$H22|$RUNG22" "C22: an approving row that matches the note ($form) is used verbatim"
+done
+irow proj-b --row "$F/nopr.json"
+ok "$(j "$IG" '[d["source"], d["prUrl"]]')" '["note",null]' "C22: a note with no pr: refuses the row; prUrl null"
+has "$(j "$IG" 'd["prUrlError"]')" "no pr:" "C22: … and prUrlError says the note has no pr:"
+irow proj-c --row "$F/bynum.json"
+ok "$(j "$IG" '[d["source"], d["prUrl"], d["prUrlError"]]')" '["row","https://github.com/o/r/pull/99",""]' "C22: a bare-number note pr: matches the row's PR by number; prUrlError \"\""
+irow proj-c --row "$F/bynumbad.json"
+ok "$(j "$IG" 'd["source"]')" note "C22: … and refuses another number"
+irow proj-d --row "$F/byurl.json"
+ok "$(j "$IG" 'd["source"]')" row "C22: a note pr: URL matches with one trailing / and case ignored"
+# The note's fallback prUrl is a PR URL the engine takes (prIdentityError), never a hand-written bare `#N`: one is
+# built on --repo's GitHub origin; with no --repo or no GitHub origin prUrl stays and prUrlError says why (the lead
+# sets the task aside at Integration on it, and step 1.2 launches no seeded revise on it, never a call the engine
+# would refuse as a Lost call). inputs' own prUrl and prUrlError, step 1.2's, are the same.
+g init -q "$F/gh"; git -C "$F/gh" remote add origin https://github.com/o/r.git
+g init -q "$F/local"; git -C "$F/local" remote add origin "$F/nowhere.git"
+irow proj-c
+ok "$(j "$IG" '[d["source"], d["prUrl"]]')" '["note","#99"]' "C22: a bare #99 with no --repo keeps the note's value"
+has "$(j "$IG" 'd["prUrlError"]')" "bare number and no --repo was given" "C22: … and prUrlError names the bare number and the missing --repo"
+irow proj-c --repo "$F/local"
+ok "$(j "$IG" '[d["source"], d["prUrl"]]')" '["note","#99"]' "C22: a bare #99 with a non-GitHub origin keeps the note's value"
+has "$(j "$IG" 'd["prUrlError"]')" "has no GitHub origin" "C22: … and prUrlError names the origin"
+C22B=()
+for args in "" "--row $F/bynumbad.json"; do
+  irow proj-c --repo "$F/gh" $args; C22B+=("$IG")
+  ok "$(j "$IG" '[d["source"], d["prUrl"], d["prUrlError"]]')" '["note","https://github.com/o/r/pull/99",""]' "C22: a bare #99 with a GitHub origin is built into its PR URL (${args:+a refused row}${args:-no --row})"
+done
+ok "$(j "$I" '[d["pr"], d["prUrl"], d["prUrlError"]]')" '["#99","https://github.com/o/r/pull/99",""]' \
+  "C22: inputs' own prUrl (step 1.2's seeded revise passes it) is the same built URL; pr stays the note's"
+irow proj-c
+ok "$(j "$I" '[d["prUrl"], d["prUrlError"] == d["integrate"]["prUrlError"] != ""]')" '["#99",true]' "C22: … and with no --repo, inputs' own prUrlError is the record's"
+irow proj-d
+ok "$(j "$IG" '[d["source"], d["prUrl"], d["prUrlError"]]')" '["note","https://github.com/O/R/pull/100",""]' "C22: a note pr: URL's trailing / is dropped"
+PRE=$(node --input-type=module -e "
+  import { loadEngine } from './tests/lib/engine.mjs'
+  const T = loadEngine(['PR_URL'])
+  process.stdout.write(JSON.stringify([...process.argv.slice(1).map((r) => T.PR_URL.test(JSON.parse(r).prUrl)), T.PR_URL.test('#99')]))
+" "${C22B[@]}" "$IG")
+ok "$PRE" '[true,true,true,false]' "C22: every built prUrl passes the engine's PR_URL, which refuses the bare #99"
+# the engine's args check: every record inputs emitted for proj-a passes integrationArgsError; the refused rows' raw
+# fields fail it (so the record never carries them), and the bad rung fails rungRecordError.
+PAR=$(node --input-type=module -e "
+  import fs from 'node:fs'
+  import { loadEngine } from './tests/lib/engine.mjs'
+  const T = loadEngine(['integrationArgsError', 'historyError', 'rungRecordError', 'PR_URL'])
+  const [a, recs, dir] = [JSON.parse(process.argv[1]), fs.readFileSync(process.argv[2], 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)), process.argv[3]]
+  const err = (o) => { const x = JSON.parse(JSON.stringify(a)); Object.assign(x.integration, o); return T.integrationArgsError(x) }
+  const row = (k) => { const v = JSON.parse(fs.readFileSync(dir + '/' + k + '.json', 'utf8')); return v.tasks ? v.tasks[0] : v }
+  const raw = (r) => err({ prUrl: r.prUrl, reviewHistory: r.reviewHistory, reviewRoundsUsed: r.reviewRoundsUsed })
+  const bad = row('badrung')
+  process.stdout.write(JSON.stringify([
+    recs.length, recs.map((r) => err({ prUrl: r.prUrl, reviewHistory: r.reviewHistory, reviewRoundsUsed: r.reviewRoundsUsed, rung: r.rung })).filter((e) => e),
+    ['desc', 'nonstr', 'stage', 'belowhist', 'boolround', 'slash'].filter((k) => raw(row(k)) === ''),
+    T.rungRecordError({ startRung: bad.startRung, rung: bad.rung, climbs: bad.climbs }) !== '',
+  ]))
+" "$(p1args proj-a 3)" "$RECS" "$F")
+ok "$PAR" '[20,[],[],true]' "C22: all 20 proj-a records pass integrationArgsError; each refused row's raw fields fail it; the bad rung fails rungRecordError"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"
