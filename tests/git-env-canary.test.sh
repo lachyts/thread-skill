@@ -218,6 +218,23 @@ scen r10
 mkt A in_progress
 arm A; g -C "$R" commit -q --allow-empty -m empty
 chk A; ok "$rc" 3 "r10: commit --allow-empty → 3 (stricter than S9)"
+scen r11
+mkt A in_progress
+mkdir -p "$R/docs/reviews/sub"; echo r > "$R/docs/reviews/r.md"; echo n > "$R/docs/reviews/sub/n.md"
+g -C "$R" add -A; g -C "$R" commit -q -m "review docs"; g -C "$R" push -q origin master
+arm A; g -C "$R" rm -q docs/reviews/r.md; g -C "$R" commit -q -m "close-out: drop a consumed review doc"; cpath THREAD.md
+chk A; ok "$rc" 0 "r11: deleting docs/reviews/r.md (land.sh's review-doc deletion), then THREAD.md → 0"
+scen r12
+mkt A in_progress
+arm A; cpath docs/reviews/new.md; chk A; ok "$rc" 3 "r12: adding docs/reviews/new.md → 3"
+scen r13
+mkt A in_progress
+mkdir -p "$R/docs/reviews"; echo r > "$R/docs/reviews/r.md"; g -C "$R" add -A; g -C "$R" commit -q -m "review doc"; g -C "$R" push -q origin master
+arm A; cpath docs/reviews/r.md; chk A; ok "$rc" 3 "r13: modifying docs/reviews/r.md → 3"
+scen r14
+mkt A in_progress
+mkdir -p "$R/docs/reviews/sub"; echo n > "$R/docs/reviews/sub/n.md"; g -C "$R" add -A; g -C "$R" commit -q -m "nested review doc"; g -C "$R" push -q origin master
+arm A; g -C "$R" rm -q docs/reviews/sub/n.md; g -C "$R" commit -q -m "nested delete"; chk A; ok "$rc" 3 "r14: deleting a nested docs/reviews/sub/n.md → 3"
 # r9: the python port against land.sh's own function, extracted by sed.
 sed -n '/^closeout_shaped() {/,/^}/p' "$LAND" > "$TMP/closeout.sh"
 ok "$(grep -c 'closeout_shaped' "$TMP/closeout.sh")" 1 "r9: land.sh's closeout_shaped extracted"
@@ -243,6 +260,28 @@ spec = importlib.util.spec_from_file_location("c", sys.argv[1]); m = importlib.u
 for p in sys.stdin.read().split("\n"):
     if p: print(p, "y" if m.closeout_shaped(p) else "n")' "$CAN")
 ok "$got" "$want" "r9: the python closeout_shaped agrees with land.sh's on $(printf '%s\n' "$paths" | wc -l | tr -d ' ') paths"
+# r9b: the review-doc deletion rule, ported the same way: closeout_change over (status, path) pairs.
+sed -n '/^review_doc() {/,/^}/p; /^closeout_change() {/,/^}/p' "$LAND" >> "$TMP/closeout.sh"
+ok "$(grep -cE '^(review_doc|closeout_change)\(\) \{' "$TMP/closeout.sh")" 2 "r9b: land.sh's review_doc and closeout_change extracted"
+changes='D docs/reviews/r.md
+M docs/reviews/r.md
+A docs/reviews/r.md
+D docs/reviews/
+D docs/reviews/sub/r.md
+D sub/docs/reviews/r.md
+D docs/reviewsx/r.md
+D docs/handoffs/x.md
+M THREAD.md
+D src/x.py'
+want=$(printf '%s\n' "$changes" | while read -r st p; do bash -c ". '$TMP/closeout.sh'; closeout_change \"\$1\" \"\$2\" && echo \"\$1 \$2 y\" || echo \"\$1 \$2 n\"" _ "$st" "$p"; done)
+got=$(printf '%s\n' "$changes" | python3 -c '
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("c", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+for ln in sys.stdin.read().split("\n"):
+    if ln:
+        st, p = ln.split(" ", 1); print(st, p, "y" if m.closeout_change(st, p) else "n")' "$CAN")
+ok "$got" "$want" "r9b: the python closeout_change agrees with land.sh's on $(printf '%s\n' "$changes" | wc -l | tr -d ' ') changes"
+ok "$(printf '%s\n' "$want" | grep -c ' y$')" 3 "r9b: exactly the docs/reviews/r.md deletion, the handoff and THREAD.md are accepted"
 
 # ── u: the read order, through a recorder in place of _git ──────────────────────────────────────────────────
 scen u
@@ -262,7 +301,7 @@ def rec(r, *args):
     elif args[:1] == ("rev-list",): out = "" if "--parents" not in args else f"{C} {A}\n"
     elif args[:2] == ("merge-base", "--is-ancestor"): return types.SimpleNamespace(returncode=0, stdout="", stderr="")
     elif args[:1] == ("merge-base",): out = B + "\n"
-    elif args[:1] == ("diff-tree",): out = "THREAD.md\0"
+    elif args[:1] == ("diff-tree",): out = "M\0THREAD.md\0"
     return types.SimpleNamespace(returncode=0, stdout=out, stderr="")
 m._git = rec
 res = []
