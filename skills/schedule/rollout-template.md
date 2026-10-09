@@ -47,7 +47,7 @@ The contract lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` — three-
 
 ## Queue
 
-Tasks run in parallel up to `parallel_ceiling`, each branching from the `main` of its start; only a dependency (`depends-on:`/`blocked-by:`) or a Solo task holds one back, never a shared file. Every approved task goes through Integration (the latest `main` merged in, the verifier re-run) before its merge. When a slot frees, the next task is chosen by `priority:`, then least file overlap with what is running (`## File-sets`), then its row order here: the row is the task's schedule rank.
+Tasks run in parallel up to `parallel_ceiling`, each branching from the `main` of its start; only a dependency (`depends-on:`/`blocked-by:`) or a Solo task holds one back, never a shared file. Every approved task goes through Integration (the latest `main` merged in, the verifier re-run) before its merge. When a slot frees, the next task is chosen by `priority:`, then least file overlap with what is running (`## File-sets`), then its row order here: the row is the task's schedule rank. A queued Solo task whose dependencies are met holds every task whose row is below it, whatever its `priority:`.
 
 The table's **Mode** column reads `solo` for a Solo task (nothing new starts beside it until it merges or is set aside), `sequential-merged (one agent/PR)` for a unit `/thread:schedule` folded from an affine same-file cluster (one agent works its sub-tasks in sequence on one branch/PR), `carried (<queue state>)` for a task carried from the rollout this one supersedes, and `—` for every other task.
 

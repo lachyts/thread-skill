@@ -4,7 +4,8 @@
 # `next` refuses until schedule step 7's last write removes it), then fed to reconcile-rollout.py `next` /
 # `status`, which read the `## Queue` rows as the schedule rank: three tasks on one file give one queue, no
 # waves (Q2); a Solo task ranked first holds the rest (Q3); a frontmatter dependency holds its dependant
-# (Q4). Temp notes only; no vault, no network. bash 3.2-compatible (macOS).
+# (Q4); a head Solo pair at `normal` starts ahead of `high` tasks (Q5). Temp notes only; no vault, no
+# network. bash 3.2-compatible (macOS).
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 cd "$(dirname "$0")/.."
@@ -143,6 +144,28 @@ mkt a open; mkt b open 'depends-on:' '  - "[[a]]"'; mkt c open; step7end ro
 J=$(nxt)
 ok "$(q "$J" 'd["start"]')" '["a","c"]' "Q4: a and c start"
 ok "$(q "$J" '{h["slug"]: h["reason"] for h in d["hold"]}')" '{"b":"depends on [[a]] (open)"}' "Q4: b waits on its dependency"
+
+# ── Q5: a head Solo pair at normal starts ahead of high tasks ranked below it (p17-2) ───────────────────
+scen q5
+render ro "$(row 1 p1 solo)
+$(row 2 p2 solo)
+$(row 3 h1 —)
+$(row 4 h2 —)
+$(row 5 h3 —)" "- p1: src/stage.js
+- p2: src/stage.js
+- h1: src/stage.js
+- h2: src/stage.js
+- h3: src/stage.js"
+mkt p1 open 'solo: true'; mkt p2 open 'solo: true'
+mkt h1 open 'priority: high'; mkt h2 open 'priority: high'; mkt h3 open 'priority: high'; step7end ro
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["p1"]' "Q5: the first Solo row starts alone, ahead of three high tasks"
+ok "$(q "$J" '{h["slug"]: h["reason"] for h in d["hold"]}')" \
+  '{"h1":"behind solo [[p1]]","h2":"behind solo [[p1]]","h3":"behind solo [[p1]]","p2":"behind solo [[p1]]"}' "Q5: … the rest wait behind it"
+sed -i.bak 's/^status: open$/status: done/' "$D/p1.md"; rm -f "$D/p1.md.bak"
+ok "$(q "$(nxt)" 'd["start"]')" '["p2"]' "Q5: once it merges the second Solo row starts"
+sed -i.bak 's/^status: open$/status: done/' "$D/p2.md"; rm -f "$D/p2.md.bak"
+ok "$(q "$(nxt)" 'd["start"]')" '["h1","h2","h3"]' "Q5: once both merge the high tasks start"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "schedule-queue: ALL PASS"; else echo "schedule-queue: FAILED"; fi

@@ -8,6 +8,7 @@ Amended by ADR 0031: the primary checkout holds while a rollout runs, so a migra
 cut-over.
 Amended by ADR 0033: decision 4's set-aside task is re-entered by the live lead itself when its block is
 agent-fixable, up to `auto_retries` times, before a hand-back is needed.
+Amended 2026-10-09 by thread-skill-p17-2: a queued solo task's schedule rank beats `priority:` (decision 1).
 
 ## Context
 
@@ -29,7 +30,8 @@ about if we're working in worktrees and we're just merging them after we've done
    started task has merged or been set aside, and the queue resumes once the solo task merges or is
    set aside. Queue order is highest `priority:`, then least file overlap with what is running, then
    schedule's order, recomputed from the task notes before every start, so a `priority:` edit in the
-   vault reorders a live queue.
+   vault reorders a live queue, except that a queued solo task whose dependencies are met holds every
+   task ranked below it, whatever their `priority:`.
 2. **Execute's lead runs the queue and is the only merger.** Each task's own run (plan-gate,
    implement, review) is one Workflow call holding one slot until it returns. The Workflow script
    never merges. Every lead-side check (the landing register, a pause, the cursor) runs per task,
