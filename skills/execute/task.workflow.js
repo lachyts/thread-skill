@@ -122,6 +122,9 @@ export const meta = {
 //                                    //   mainSha..<base>` for the PRs that landed after the lead's read.
 //       trouble         : string[],  // ⊆ conflict | red | shared-file, deduplicated; [] on a cold re-entry.
 //       landed          : [{ prUrl, title, files: string[], taskPath }], // EVERY PR merged in taskBase..mainSha.
+//                                    //   A commit pushed without a PR is in no entry (lead-integrate.py prepare's
+//                                    //   `unlisted`): the integrator's and the judge's prompts send both to
+//                                    //   `log --first-parent taskBase..mainSha` for those.
 //       plan            : string,    // the approved plan: `lead-integrate.py plan`'s `plan` (the note's
 //                                    //   "## Approved plan"); '' when the last own call was not plan-gated;
 //                                    //   reference for the integrator, never the contract.
@@ -173,7 +176,9 @@ export const meta = {
 // last `integrated` line of the Integration log. Anything else — a rejection and revise, a set-aside, a
 // session that died mid-Integration — takes the trouble path, where `branch-moved` sends it to the judge.
 // Inputs. `landed` lists every PR merged in taskBase..mainSha, so a task back from a rejection still lists
-// the PRs behind it; the integrator and the judge read mainSha..<base> themselves for anything later.
+// the PRs behind it; the integrator and the judge read mainSha..<base> themselves for anything later. A commit
+// pushed to the default branch without a PR is in no entry: a non-empty `landed` points the integrator and the
+// judge at the first-parent log taskBase..mainSha for those (an empty one already sends both to the whole log).
 // `reviewHistory` comes from the live session (passed verbatim: rounds with empty feedback are dropped
 // here), or cold from the latest `## Blocker diagnosis` run (parseIntegrationMarker: every engine-written
 // rejected or set-aside marker carries it), else []. `reviewRoundsUsed` is the larger of the note's
@@ -2269,7 +2274,10 @@ function landedBlock(a, task, I) {
     `\nThis list ends at ${I.mainSha}, origin/${defaultBranch(a)} as the lead read it. When the merge step's \`integration base:\` sha
 is not ${I.mainSha}, more PRs landed after that read: run
 \`${GIT_ENV_SCRUB} git -C "${wt}" log --first-parent ${I.mainSha}..<integration base>\` after the merge step and read
-each PR there (its brief and \`gh pr diff\`) the same way, before you resolve anything.`
+each PR there (its brief and \`gh pr diff\`) the same way, before you resolve anything.` +
+    `\nCommits pushed to origin/${defaultBranch(a)} without a PR (no \` (#N)\` suffix, no \`Merge pull request #N\` prefix) are in no list here: after the merge step, find them with
+\`${GIT_ENV_SCRUB} git -C "${wt}" log --first-parent --oneline ${I.taskBase}..${I.mainSha}\` (and in the later range above, when there is one), and read
+each one's \`${GIT_ENV_SCRUB} git -C "${wt}" show <sha>\` before you resolve anything: its diff is its only brief, and it is theirs as much as the landed PRs.`
 }
 
 function integratorPrompt(task, a, I) {
@@ -2349,6 +2357,7 @@ function integrationReviewPrompt(task, a, I, j) {
   const M = j.mergeCommit
   // `landed` covers taskBase..mainSha (the lead's read). A base past mainSha means PRs landed after that
   // read, invisible to the list; with no list the taskBase..base read already covers them.
+  // Commits pushed without a PR are in no list: a non-empty list adds the taskBase..mainSha log for them.
   const late = I.landed.length && j.baseSha !== I.mainSha
   const reads = [
     `- EVERY first-parent merge on the branch since the anchor, not only the newest: a merge an earlier
@@ -2361,7 +2370,8 @@ ${integrationMergeReads(a, task, I, j).split('\n').map((l) => '    ' + l).join('
     ] : [`- No new merge commit: origin/${def} was not merged in this integration (the merges above, if any, are earlier ones).`]),
     `- \`${S} log -p --first-parent --no-merges ${I.headSha}..${j.headSha}\` — every commit on the branch since the anchor (repair, revise and fix commits).`,
     ...(I.landed.length
-      ? I.landed.map((p) => `- ${p.prUrl} (${p.title}): \`gh pr diff ${p.prUrl}\` and its brief ${p.taskPath || '(none)'}.`)
+      ? [...I.landed.map((p) => `- ${p.prUrl} (${p.title}): \`gh pr diff ${p.prUrl}\` and its brief ${p.taskPath || '(none)'}.`),
+        `- \`${S} log --first-parent --oneline ${I.taskBase}..${I.mainSha}\` — the commits pushed to origin/${def} without a PR (no \` (#N)\` suffix, no \`Merge pull request #N\` prefix) are in no list above: read each one's \`${S} show <sha>\` too (and any in the later range below, when it is listed). In Step 3 they count as theirs, the same as the landed PRs.`]
       : [`- No landed PRs were passed: read \`${S} log --first-parent ${I.taskBase}..${j.baseSha}\` for what landed.`]),
     ...(late ? [
       `- \`${S} log --first-parent ${I.mainSha}..${j.baseSha}\` — PRs that landed after the lead read origin/${def} at ${I.mainSha}, so not listed above: read each one's \`gh pr diff\` and brief too.`,
