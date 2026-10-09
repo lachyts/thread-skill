@@ -122,7 +122,8 @@ check session `<owner tag>` first".
   § 2 classes **retry (automatic)** (§ 2 classes it before any answer: a hand-back on his answer is the fresh
   stretch he chose). It may also run § 3d's `descope` on one (wherever `hand-back` may run), apply a raise he chose,
   run `approve-gates` on sign-off, and write the `pr:` § 4's restore finds for an at-Integration set-aside with no
-  `pr:`: no live call owns a set-aside note, so that write goes with the hand-back that follows it (§ 4).
+  `pr:`: no live call owns a set-aside note, so that write goes with the hand-back that follows it (§ 4). The spent
+  key § 3b writes before each hand-back goes with it the same way.
 - It never runs `resume`, never enters the loop, and never writes a running or integrating note, because a
   live call's reconcile would overwrite it: the lead-held notes wait for the lead's end.
 - A RACE re-verify in flight (§ 2) is the lead's: report it and wait. It becomes a § 3c escalation only once
@@ -236,32 +237,44 @@ the next agent reads it. For a set-aside at its run or at Integration that is *t
 was asked: a `## Needs you` question, a spent budget, a repeated fingerprint or any other `autoRetryWhy`. Otherwise
 replace the placeholder in place, or append or update a `## Repair input` section with the decision verbatim. It is
 body content, not a status transition, so it is allowed under a pause. Where hand-back may run (§ 1), hand the task
-back on his answer (§ 4).
+back on his answer (§ 4), spending its entry first (*Spent on the hand-back*, below).
 
 *The answer's entry.* Append
 `- <stamp> <kind> (block <fingerprint>): "<the ask, verbatim>" → <his answer, verbatim>`
 to `## Repair input`. `<stamp>` is now, in the form of the note's `### Run <n> (<stamp>)` headings (local time to
 the minute, with its offset: `2026-10-04T09:10+10:00`); `<kind>` is `needs you` for a `## Needs you` question and
-`decision` for every other ask; `<fingerprint>` is `inputs`' `fingerprint`, or `-` when it is null, as at a gate.
-The block key is what a later repair run and status read (*Answer already recorded*), so an answer recorded under a
-pause or a drain, where repair never hands back, is never asked again, and status reads it as answered.
+`decision` for every other ask; `<fingerprint>` is `inputs`' `fingerprint`, or `-` when it is null: a gate, or a
+block that recorded no feedback, such as a PR-less code-writing `review` (`no feedback fingerprint`). The block key
+is what a later repair run and status read (*Answer already recorded*), so an answer recorded for a block with a
+fingerprint under a pause or a drain, where repair never hands back, is never asked again, and status reads it as
+answered. A `-` entry never counts, so a block with no fingerprint is asked again after a pause.
 
 *Answer already recorded.* Before asking about a set-aside at its run or at Integration, look for an answer
 recorded for its current block: a `## Repair input` entry carrying `(block <fingerprint>)` with `inputs`'
-`fingerprint`, stamped later than the note's last re-entry, while the note's `auto_retry_sha:` is absent or differs
-from it. A `-` entry never counts.
+`fingerprint`, stamped later than the note's last re-entry. A `-` entry never counts, nor a spent one (below).
 
-- The last re-entry is the latest of the note's `### Run <n> (<stamp>)` headings, in any section, and its
-  `auto_retry_at:`: a run recorded or an automatic retry made after the answer means the task was re-entered since.
-  A fingerprint is a content hash, so an earlier block's text can come back (answered and handed back, retried
-  through two other blocks, then the first text again with the budget spent): a repeated block is Lachy's again
-  (ADR 0033 decision 6), never handed back on the old answer.
-- A hand-back or an automatic retry stamps `auto_retry_sha` with the block it re-enters, so an equal value means
-  that block was re-entered since the answer: an identical re-block, which writes no new run, goes back to Lachy too.
+- The last re-entry is the latest of the note's `### Run <n> (<stamp>)` headings, in any section, its
+  `auto_retry_at:` and its `- descoped (automatic) <stamp>` entry: a run recorded, an automatic retry made or an
+  automatic descope recorded after the answer means the task was re-entered since. A fingerprint is a content hash,
+  so an earlier block's text can come back (answered, retried through two other blocks, then the first text again
+  with the budget spent): a repeated block is Lachy's again (ADR 0033 decision 6), never handed back on the old
+  answer.
+- An entry recorded before the block's last re-entry never counts, whatever the verdict's why: ask again and quote
+  it, so his word can be the answer. One recorded since counts whatever the why, a block whose fingerprint equals
+  `auto_retry_sha` included (`same feedback as the block last re-entered`, or a spent budget on a repeated block).
 
-With one found, never ask again: where hand-back may run (§ 1, § 4), repair hands back without asking again, and that
-is the task's one hand-back. An answer recorded on a block already re-entered (its why `same feedback as the block
-last re-entered`) never counts: ask again and quote it, so his word can be the answer.
+With one found, never ask again: act on it where hand-back may run (§ 1, § 4). Repair hands back without asking
+again, spending it first, and that is the task's one hand-back; for an at-Integration set-aside with no `pr:`, which
+`hand-back` refuses, it acts on the answer as § 4's restore, recut, defer or leave.
+
+*Spent on the hand-back.* A hand-back leaves no stamp on the note (the restart's `mark-started` consumes its
+`handed_back:`), and an identical re-block writes no run, so the hand-back spends the answer instead. Before every
+hand-back repair makes (§ 4, § 3d's included), while the task is still set aside, rewrite each `(block <fingerprint>)`
+key in its `## Repair input` to `(block <fingerprint>; handed back <stamp>)`, `<stamp>` now in the entry's form;
+execute's "retry [[task]]" spends them the same way, and the lead's hand-back after an automatic descope needs no
+spend: the descope's own `- descoped (automatic) <stamp>` entry, written first, is a re-entry. A spent entry never
+matches the key again, so the block that comes back after the hand-back, an identical one included, is asked afresh
+(ADR 0033 decision 6).
 
 *The needs-you flow*, for any set-aside whose note holds a `## Needs you` question (status's `needsHuman`), at its
 run, at Integration or at a gate:
@@ -280,11 +293,11 @@ run, at Integration or at a gate:
    without asking again.
 5. *The live-queue race.* The live lead can re-enter the task after step 3. Just before `hand-back`, re-read the
    note's `auto_retry_at:`: a value other than the one step 2 noted means the lead's automatic retry re-entered it
-   (and it may have blocked again), so skip the hand-back. Otherwise, if `hand-back` then exits 1 with
-   `status is 'in_progress'` (for an Integration one, `status is 'review'`), the lead won the race. That is no
-   error. Either way, report it as re-entered by the lead (its `## Notes` `auto-retry:` line): the answer is in
-   `## Repair input`, a budget slot was spent instead of a fresh stretch starting, it counts as the task's hand-back
-   (§ 4's Leash), and a new block is asked afresh.
+   (and it may have blocked again), so skip the hand-back. Otherwise spend the entry, then hand back; if
+   `hand-back` then exits 1 with `status is 'in_progress'` (for an Integration one, `status is 'review'`), the lead
+   won the race. That is no error. Either way, report it as re-entered by the lead (its `## Notes` `auto-retry:`
+   line): the answer is in `## Repair input`, a budget slot was spent instead of a fresh stretch starting, it counts
+   as the task's hand-back (§ 4's Leash), and a new block is asked afresh.
 
 A gate is presented verbatim; on Lachy's sign-off run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <slug>`
@@ -430,8 +443,8 @@ Lachy decides once, and § 4's hand-off waits for that decision, as § 3c alread
 ### 4. Hand back: re-enter at the stage it stopped
 
 Repair hands back only on Lachy's answer (§ 3b), this run's or one recorded for the task's current block (§ 3b's
-*Answer already recorded*), and after § 3d's descope. Every route uses execute's own re-entry verb, and never under
-a pause (§ 1):
+*Answer already recorded*), and after § 3d's descope, and it spends the task's answers first (§ 3b's *Spent on the
+hand-back*). Every route uses execute's own re-entry verb, and never under a pause (§ 1):
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hand-back --tasks <slug>
@@ -497,9 +510,10 @@ there is nothing to clear. Per stage:
   4. Run `hand-back`. Its old `## Integration log` lines survive and are harmless.
 - **Leash:** repair re-enters a task on its own judgement only through § 3d's descope, once per task per repair
   run; every other hand-back follows Lachy's answer (§ 3b). `hand-back` starts a fresh automatic-retry stretch (the
-  counters cleared, `auto_retry_sha` stamped), so the lead's retry has its budget again and an identical re-block
-  comes straight back to him. A task that blocks again in this run is surfaced with its new diagnosis and three
-  offers: *more guidance and one more hand-back*, *defer it* (§ 5), or *leave it set aside*. Don't loop.
+  counters cleared, `auto_retry_sha` stamped), so the lead's retry has its budget again, and with the answer spent
+  first (§ 3b) an identical re-block comes straight back to him. A task that blocks again in this run is surfaced
+  with its new diagnosis and three offers: *more guidance and one more hand-back*, *defer it* (§ 5), or *leave it
+  set aside*. Don't loop.
 - **Hand-off, when no lead is live and no pause stands**, and never while a RACE / UNVERIFIED escalation is
   undecided (§ 3c; report the hold and stop there), a git-env hold stands (§ 3e; report it and stop there) or
   the ladder file is refused (§ 2; name the file and stop there): execute's queue loop, entered at its §4.5 resume
@@ -545,8 +559,8 @@ points only) does not run; the next `/thread:execute [[<rollout>]]` runs it. Exe
 ceremony** then runs on the (possibly reduced) task set. Ensure the rollout's `## Completion log` records
 every repair action, copied from the dated `## Notes` records this and earlier runs wrote: hand-backs (task +
 stage), decisions injected (task + value), § 3b's answers (task + kind + ask + answer, read from each task's
-`## Repair input` `(block <fingerprint>)` entries), gates signed, raises (task + new budget), automatic descopes
-(task + part + follow-up or owner) from the `descope:` lines, whoever wrote them (§ 3d or the live lead),
+`## Repair input` `(block …)` entries, spent ones included), gates signed, raises (task + new budget), automatic
+descopes (task + part + follow-up or owner) from the `descope:` lines, whoever wrote them (§ 3d or the live lead),
 merged-never-marked tasks flipped by `resume` (task + PR), tasks deferred (task + reason + dependants moved with it), a CLOSED PR or
 missing branch (task + restore, recut, defer or leave), and the escalations of § 3c with Lachy's decisions:
 possible PR-less merges, RACE / UNVERIFIED (task + PR + the re-verify verdict + the recorded decision), and

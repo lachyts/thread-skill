@@ -56,7 +56,7 @@ merges it — no per-PR confirmation. `--gated` is the same queue with a **merge
 
 **A wave number is refused.** `execute Wave N of [[rollout]]` prints "single-wave mode is gone (ADR 0030): run `execute [[rollout]]`, or add `--gated` to approve each merge" and stops.
 
-In a live session, "retry [[task]]" re-enters a set-aside task: run `reconcile-rollout.py hand-back --tasks <slug>` (§4.5 *Set aside*), then §4.5 step 1. Its exit 2 means an undecided RACE or UNVERIFIED holds the task: print its ERROR line and stop there, since only Lachy's `RACE decided:` line (through `/thread:repair`) releases it.
+In a live session, "retry [[task]]" re-enters a set-aside task: spend the answers its `## Repair input` holds, as repair's own hand-back does (repair § 3: each `(block <fingerprint>)` key becomes `(block <fingerprint>; handed back <stamp>)`, so an identical re-block goes back to Lachy), then run `reconcile-rollout.py hand-back --tasks <slug>` (§4.5 *Set aside*), then §4.5 step 1. Its exit 2 means an undecided RACE or UNVERIFIED holds the task: print its ERROR line and stop there, since only Lachy's `RACE decided:` line (through `/thread:repair`) releases it.
 
 ## Skill flow
 
