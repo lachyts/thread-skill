@@ -483,6 +483,46 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     fails.push('settings')
   }
 
+  // auto-retry (p16-4, ADR 0033): step 1.2's **Automatic retry** shares sub-step 2's line after *Automatic descope*, so it
+  // runs before the halt guard (halt-guard pins that order). Skipped under a pause; it reads `inputs … --repo`, halts on
+  // `autoRetryError` (§ 3's round-budget halt), acts only on `autoRetry: true`, runs the guarded verb with the two
+  // assertions copied from that read (never resolved by hand), skips a plan-blocked key whose descope exited 3, notes an
+  // `autoRetryAfter` and re-runs `next`. The halt guard ends a quota cool-down `waiting` with its reason, which § 6 allows
+  // on `waiting`; § 3 has the key's row (resolved by the verbs, never the lead); *Set aside* names the re-entry first;
+  // § 6 has the event line, the `Auto-retried:` report row, and step 5's Completion log copies the `auto-retry:` lines;
+  // § 7's stuck halt waits for the retries; § 8 names the lead's verb and its route to repair; a Don't forbids a
+  // hand-written retry, a hand-resolved budget and hand-written markers.
+  const ar = s2t.slice(Math.max(0, s2t.indexOf('**Automatic retry')))
+  const arRow = (section(skill, S3) ?? '').split('\n').find((l) => l.startsWith('| `auto_retries` |')) ?? ''
+  const arStuck = collapse(skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: stuck`')) ?? '')
+  const arLog = collapse(stepRaw(skill, 5).split('\n').find((l) => l.startsWith('   - Append a `## Completion log`')) ?? '')
+  const s6all = collapse(s6raw)
+  if (!s2t.includes('**Automatic retry (p16-4, ADR 0033).**') || !before(s2t, '**Automatic descope', '**Automatic retry') ||
+    !ar.includes('Skip it when `paused` or `pauseRequested` is set') ||
+    !ar.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/lead-integrate.py inputs --note <task note> --repo <repoPath>`') ||
+    !ar.includes("Its `autoRetryError` is § 3's round-budget halt") || !ar.includes('Act only on `autoRetry: true`') ||
+    !ar.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py auto-retry --tasks <slug> --rollout <rollout-note> --auto-retries <inputs.autoRetryBudget.autoRetries.value> --fingerprint <inputs.fingerprint>`') ||
+    !ar.includes('both values copied from that `inputs`, never resolved by hand') ||
+    !ar.includes('skipping a `plan-blocked` key whose descope exited 3 this session') ||
+    !ar.includes('Note any `autoRetryAfter` (a quota cool-down) for the halt guard') ||
+    !ar.includes('If any retry ran, re-run `next --running <the live slugs>`') ||
+    !guard.includes('A `stuck` while step 1.2 found an `autoRetryAfter` (a quota cool-down) ends the turn `waiting` with `reason="quota cool-down: [[<slug>]] retries at <autoRetryAfter>"`') ||
+    !s6all.includes('`reason` appears only on `halted`, on a hold and on a quota cool-down') ||
+    !arRow.includes('resolved by `lead-integrate.py inputs` and `reconcile-rollout.py auto-retry` themselves (built-in `2`)') ||
+    !arRow.includes('not passed to the engine') || !arRow.includes('`0` disables every automatic retry') ||
+    !arRow.includes('The lead never resolves it') ||
+    !aside.includes("- first, automatically: a run, revise-stopped, review-blocked, plan-blocked or Integration set-aside is re-entered by step 1.2's *Automatic retry*, up to `auto_retries` times (ADR 0033), before the routes below") ||
+    !s6all.includes('"[[task-q]] → auto-retry 1/2 (plan; feedback <sha>); restarting"') || !s6all.includes('Auto-retried: [[task-q]]') ||
+    !s6all.includes('The `Auto-retried:` line lists every automatic retry this rollout has recorded (its `## Notes` `auto-retry:` lines)') ||
+    !arLog.includes('the automatic retries copied from its `auto-retry:` lines') ||
+    !arStuck.includes("acted on only once step 1.2's *Automatic retry* re-entered nothing and found no quota cool-down") ||
+    !never.includes("The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*)") ||
+    !never.includes('a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair') ||
+    !donts.includes('Never auto-retry unless `inputs` reports `autoRetry: true`, never pass a budget you resolved yourself') ||
+    !donts.includes('`auto_retries_used`, `quota_retries_used`, `auto_retry_sha` or `auto_retry_at` by hand: `reconcile-rollout.py auto-retry` writes them')) {
+    fails.push('auto-retry')
+  }
+
   // s5 (the dead-run resume keeps its shape for its consumers) is part of lost-call's routing: § 5 names *Lost call*.
   if (!s5.includes('(§ 4.5 *Lost call*)') || !before(s5, '(§ 4.5 *Lost call*)', 'resumeFromRunId: <runId>')) fails.push('lost-call')
   return [...new Set(fails)]
@@ -497,7 +537,7 @@ test('execute § 4.5, its neighbours, the heartbeat and the hook hold every queu
 const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lost-call', 'clean-path', 'verify-bound',
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
-  'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings']
+  'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'auto-retry']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -793,7 +833,55 @@ test('control: a --repo refusal fixed in the file fails settings', () => {
   only(sk('one naming `--repo` (the Project root is gone or its origin unreadable) is fixed by stamping the key', 'any other is fixed in the file'), 'settings', '--repo remedy')
 })
 
-test('the rules are all named (30) and each has a control', () => {
-  assert.equal(RULES.length, 30)
+// auto-retry (p16-4)
+test('control: an Automatic retry that resolves the budget by hand fails auto-retry', () => {
+  only(sk('both values copied from that `inputs`, never resolved by hand', 'the values resolved from § 3'), 'auto-retry', 'hand budget')
+})
+test('control: an Automatic retry that acts on every set-aside fails auto-retry', () => {
+  only(sk('Act only on `autoRetry: true`: run', 'Act on each: run'), 'auto-retry', 'no autoRetry')
+})
+test('control: an Automatic retry before the Automatic descope fails auto-retry', () => {
+  const l = real.skill.split('\n').find((x) => x.startsWith('   2. **Seeded revises'))
+  const desc = l.slice(l.indexOf('**Automatic descope'), l.indexOf(' **Automatic retry'))
+  const retry = l.slice(l.indexOf(' **Automatic retry'))
+  only(sk(l, l.replace(desc, '\u0000').replace(retry, '').replace('\u0000', retry.trim() + ' ' + desc)), 'auto-retry', 'retry first')
+})
+test('control: an Automatic retry without the autoRetryError halt fails auto-retry', () => {
+  only(sk(" Its `autoRetryError` is § 3's round-budget halt.", ''), 'auto-retry', 'no error halt')
+})
+test('control: an Automatic retry that re-judges a descope refusal fails auto-retry', () => {
+  only(sk(', skipping a `plan-blocked` key whose descope exited 3 this session', ''), 'auto-retry', 'descope exit 3')
+})
+test('control: a quota cool-down that halts fails auto-retry', () => {
+  only(sk('(a quota cool-down) ends the turn `waiting` with `reason="quota cool-down', '(a quota cool-down) halts with `reason="quota cool-down'), 'auto-retry', 'cool-down halts')
+})
+test('control: § 3 without the auto_retries row fails auto-retry', () => {
+  const l = real.skill.split('\n').find((x) => x.startsWith('| `auto_retries` |'))
+  only(sk(l + '\n', ''), 'auto-retry', 'no row')
+})
+test('control: Set aside without the automatic re-entry fails auto-retry', () => {
+  const l = real.skill.split('\n').find((x) => x.startsWith('- first, automatically:'))
+  only(sk(l + '\n', ''), 'auto-retry', 'no set-aside bullet')
+})
+test('control: § 6 without the Auto-retried row fails auto-retry', () => {
+  only(sk('Auto-retried: [[task-q]] — 1/2 (plan; feedback 3f2a9c1b0d4e) (automatic; restarted)\n', ''), 'auto-retry', 'no report row')
+})
+test('control: a Completion log that drops the auto-retry lines fails auto-retry', () => {
+  only(sk(' the automatic retries copied from its `auto-retry:` lines (task, count, stage, feedback sha, any raise),', ''), 'auto-retry', 'no log copy')
+})
+test('control: a § 7 stuck halt that ignores the retries fails auto-retry', () => {
+  only(sk(", acted on only once step 1.2's *Automatic retry* re-entered nothing and found no quota cool-down", ''), 'auto-retry', 'stuck early')
+})
+test('control: § 8 without the auto-retry sentence fails auto-retry', () => {
+  only(sk(" The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*), a guarded deterministic verb with its own budget: a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair.", ''),
+    'auto-retry', 'no § 8 sentence')
+})
+test("control: no Don't on hand-written retry markers fails auto-retry", () => {
+  const l = real.skill.split('\n').find((x) => x.startsWith('- Never auto-retry unless'))
+  only(sk(l + '\n', ''), 'auto-retry', "no Don't")
+})
+
+test('the rules are all named (31) and each has a control', () => {
+  assert.equal(RULES.length, 31)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

@@ -182,6 +182,12 @@ const REFUSALS = [
   ['a traversal task slug', ['--rollout', 'r', '--task', '../x', '--kind', 'ready']],
   ['no rollout for a rollout kind', ['--kind', 'resumed']],
   ['a line over 16 KiB', ['--rollout', 'r', '--kind', 'quota-stall', '--json', JSON.stringify({ detail: 'x'.repeat(17000) })]],
+  // auto-retry (p16-4): its stage is a block's, never a gate (a sign-off is no retry); stage and a budget >= 1 required.
+  ['auto-retry at stage gate', ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json', JSON.stringify({ stage: 'gate', setAsideAt: 'run', retryClass: 'agent', used: 1, budget: 2 })]],
+  ['auto-retry without a stage', ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json', JSON.stringify({ setAsideAt: 'run', retryClass: 'agent', used: 1, budget: 2 })]],
+  ['auto-retry with budget 0 (auto_retries: 0 retries nothing)', ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json', JSON.stringify({ stage: 'plan', setAsideAt: 'run', retryClass: 'agent', used: 1, budget: 0 })]],
+  ['auto-retry set aside at a gate', ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json', JSON.stringify({ stage: 'plan', setAsideAt: 'gate', retryClass: 'agent', used: 1, budget: 2 })]],
+  ['auto-retry without a task', ['--rollout', 'r', '--kind', 'auto-retry', '--json', JSON.stringify({ stage: 'plan', setAsideAt: 'run', retryClass: 'agent', used: 1, budget: 2 })]],
 ]
 
 for (const [name, args] of REFUSALS) {
@@ -194,6 +200,17 @@ for (const [name, args] of REFUSALS) {
     assert.deepEqual(listing(ev(home)), [], 'no file created')
   })
 }
+
+test('auto-retry (p16-4): a valid emit, and a quota retry with used 0 and its quotaRetries', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json',
+    JSON.stringify({ stage: 'review', setAsideAt: 'run', retryClass: 'agent', used: 1, budget: 2, fingerprint: 'abcdef012345', reviewRounds: 4 })], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json',
+    JSON.stringify({ stage: 'integrate', setAsideAt: 'integration', retryClass: 'quota', used: 0, budget: 2, quotaRetries: 1 })], { env: EV(home) })
+  const [a, b] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([a.kind, a.task, a.stage, a.used, a.budget, a.reviewRounds, a.fingerprint], ['auto-retry', 't', 'review', 1, 2, 4, 'abcdef012345'])
+  assert.deepEqual([b.retryClass, b.used, b.quotaRetries, b.setAsideAt], ['quota', 0, 1, 'integration'])
+})
 
 test('unknown extra keys are allowed beside the kind fields', (t) => {
   const home = tmpHome(t)

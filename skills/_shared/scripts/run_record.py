@@ -87,6 +87,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   idle-slots         reason (dependency | solo | pause-drain | queue-tail | awaiting-hand-back |
                      hold-merge | hold-git-env | hold-race); free (int >= 0); settings (as slot-taken)
   quota-stall        stage?; detail?
+  auto-retry      T  stage (plan | implement | verify | review | integrate: the stage of the block it re-enters,
+                     the task's latest set-aside line's), setAsideAt (run | integration), retryClass (agent | infra
+                     | quota), used (int >= 0: auto_retries_used after this retry; a quota retry leaves it), budget
+                     (int >= 1: the resolved auto_retries); fingerprint? (the block's run sha); reviewRounds? (int
+                     >= 1: the raised max_review_rounds); quotaRetries? (int >= 1: quota_retries_used after a quota
+                     retry). p16-4, ADR 0033: reconcile-rollout.py auto-retry, execute's automatic retry of a
+                     set-aside task.
   call-journal       runId; status (the journal's own status, verbatim); mode?; tokens?, durationMs?,
                      agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
@@ -339,6 +346,10 @@ KINDS = {
                                            "hold-merge", "hold-git-env", "hold-race"),
                            "free": _int(0), "settings": SETTINGS}, {}),
     "quota-stall": (False, {}, {"stage": _str, "detail": _str}),
+    "auto-retry": (True, {"stage": _enum("plan", "implement", "verify", "review", "integrate"),
+                          "setAsideAt": _enum("run", "integration"), "retryClass": _enum("agent", "infra", "quota"),
+                          "used": _int(0), "budget": _int(1)},
+                   {"fingerprint": _str, "reviewRounds": _int(1), "quotaRetries": _int(1)}),
     "call-journal": (False, {"runId": _str, "status": _str},
                      {"mode": _str, "tokens": _int(0), "durationMs": _int(0), "agents": _int(0),
                       "startTime": _int(0)}),

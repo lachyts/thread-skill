@@ -1,0 +1,96 @@
+# 0033 — execute retries agent-fixable set-asides itself
+
+Date: 2026-10-09
+Status: proposed, implemented by p16-4 (amends ADR 0030 decision 4, where only a hand-back re-enters a set-aside
+task, and ADR 0004, where repair alone retries an agent-fixable block; from the 2026-10-06 grill on unattended
+rollouts, `thread-skill-p16-unattended-rollouts`)
+
+## Context
+
+ADR 0030 decision 4 sets a stuck task aside and lets the queue run on, but the task comes back only through
+`hand-back`: "retry [[task]]" in a live session, or `/thread:repair`, which ADR 0004 makes the one place an
+agent-fixable block is retried. An overnight rollout therefore stalls at its first plan-block, its first red
+verifier or its first dead call, and waits for a person who would, most nights, have said "retry it". The phase
+grill's question was how much of that the live lead may do alone without ever hiding a decision that is a human's.
+
+## Decision
+
+1. **One verdict, one writing verb.** `lead-integrate.py`'s `auto_retry_verdict` decides whether a set-aside
+   task is retried. `lead-integrate.py inputs` prints it to every caller (status, repair and the lead read the
+   same answer), and `reconcile-rollout.py auto-retry` re-runs it before it writes anything. The lead never
+   hand-edits frontmatter: execute § 4.5 step 1.2's *Automatic retry* reads `inputs` and runs the verb, which
+   writes the rollout's `## Notes` line, the task note (hand-back's own transition, the markers, a raise) and the
+   Run record events, in that order, each finished by a re-run.
+2. **What is retried.** A task set aside at its run (plan-blocked, blocked, review-blocked, `revise stopped:`)
+   or at Integration with a `pr:`. Never: a gate-pending task (sign-off is the human's, ADR 0008); an undecided
+   RACE or UNVERIFIED; a `## Needs you` question (p16-3); a plan-block after an automatic descope (repair asks);
+   a plain rejection the seeded revise owns; a PR branch gone; a declined `--gated` merge; a set-aside at
+   Integration with no `pr:`; a code-writing review note approved without a PR.
+3. **The budget is resolved by the verbs.** `auto_retries` (default 2, an integer >= 0, `0` turning every retry
+   off) resolves task note → rollout note → `rollouts.toml` → built-in, through the same resolver as the round
+   caps (`rollout-settings.py`), inside `inputs` and the verb, never by the lead. The verb's `--auto-retries` and
+   `--fingerprint` are assertions the lead copies from `inputs`: a mismatch refuses with nothing written. An
+   invalid stamp (of `auto_retries` or `max_review_rounds`) is execute § 3's round-budget halt; an unresolvable
+   value (a refused file, a Project root that is gone) only means no retry.
+4. **The fingerprint stop.** Each retry stores the block's feedback fingerprint (its run's `<!-- run n end
+   sha=… -->` sha) as `auto_retry_sha`. An agent block whose fingerprint equals it stops at once: an agent given
+   the same feedback again would do the same thing. A transient or a dead call is exempt (the same failure is the
+   expected shape of a flaky infrastructure), and the budget still bounds it. The fingerprint is compared with the
+   stored sha, never with the previous run, because reconcile writes no new run for identical content.
+5. **Quota blocks are retried free, after a cool-down.** A dead call whose error reads as a usage or rate limit
+   spends no budget and has no fingerprint stop. It is retried after 30, 60, 120, 240, then 480 minutes, measured
+   from the later of its block's run stamp and the last retry: five free retries (about 15.5 hours), then a human.
+   While a cool-down is pending, a `stuck` queue ends its turn `waiting`, not `halted`, so the heartbeat keeps
+   ticking and re-enters after it.
+6. **The budget's lifetime.** `auto-retry` spends it (`auto_retries_used`, or `quota_retries_used`).
+   `hand-back`, the explicit re-entry (repair after Lachy answers, "retry [[task]]", the lead after a descope),
+   clears both counters and re-stamps `auto_retry_sha` with the block it re-enters: after a human answer the
+   budget is fresh, but an identical re-block goes straight back to the human. A supersede's `carry` clears the
+   counters and keeps the sha; `defer` clears all four markers.
+7. **The raise.** A retry that re-enters a revise with no round left (`resumeAt: revise` and the resolved
+   `max_review_rounds` ≤ the last round) raises `max_review_rounds` on the task note by one, repair's own raise,
+   recorded with repair's wording (`max_review_rounds raised to <N>, one round`), so repair's "a raise already
+   recorded in `## Notes`" rule finds it. An own-run review-blocked task gets no raise: its own call restarts the
+   review loop.
+8. **merge-task's exit 1 is an allowlist.** Of merge-task's exit-1 texts, only a merge conflict on the integrated
+   base and a red required check are retried: a code fix on the branch can clear them. Every other text, and any
+   future wording, is a human's (a closed PR, a branch not on origin, another base, a merge queue, a non-check
+   gate, a refused merge, an unconfirmed merge, a read failure, a base that stays BEHIND, an unexpected state),
+   so the list fails closed. Each allowed text is pinned against `merge-task.sh`.
+9. **The records.** Each retry leaves a dated line in the rollout's `## Notes` (`- <date> auto-retry:
+   [[<slug>]] <n>/<N> (<stage>; feedback <sha>)`), never in the task note (whose body is the brief), an
+   `auto-retry` Run record event (its stage paired with the task's latest set-aside line for a Retro), and a
+   report row; the Completion log copies the lines.
+
+The bound per task per rollout: (`auto_retries` + one descope) × (1 + human hand-backs) agent and infra retries,
+plus at most five quota retries per stretch.
+
+Considered:
+- *Cap one, as repair does.* Repair's cap is per repair run, with a human watching; an unattended night needs a
+  second try for the common "the first fix was close" case, and `auto_retries` stays an operator setting.
+- *Comparing with the previous run.* Reconcile writes no run for identical feedback, so a repeat would read as
+  "no new block" rather than "the same block": the stored sha is the only reliable comparison.
+- *A live gh or `ls-remote` probe for a closed PR or a missing branch.* The verdict stays offline (status and
+  repair print it), working from prepare's and merge-task's own texts. An Integration set-aside for another reason
+  whose PR is in fact closed costs one bounded extra Integration before merge-task's CLOSED text routes it to a
+  human.
+- *A denylist of merge-task's human texts.* A new wording would be retried by default; the allowlist fails closed.
+- *Quota never retried (a halt).* It turns every overnight usage limit into a dead night. *Quota spending the
+  budget.* Two limits in a night would exhaust it on blocks nobody can act on.
+- *A budget per stage.* More state for no observed need; the fingerprint stop already catches a loop.
+- *Making `auto_retries` Retro-tunable.* It is no throughput dial and nothing in the Run record scores it yet;
+  it stays a plain setting until a Retro shows a rule.
+- *Writing the dated line in the task note.* The task body is the brief: descope's `_brief_items` and the plan
+  judge read it, and a record section there would need excluding everywhere.
+
+## Consequences
+
+- **Amends ADR 0030 decision 4.** A set-aside task resumes at the stage it stopped, as before, but the live lead
+  now re-enters the agent-fixable ones itself, up to `auto_retries`, before a hand-back is needed; the rollout
+  halts `stuck` only once nothing is retryable and no quota cool-down is pending.
+- **Amends ADR 0004.** Repair is still a conductor and still the one place a human's decision is captured, but it
+  is no longer the only place an agent-fixable block is retried: it keeps the ones a spent budget, a repeated
+  fingerprint or a `needsHuman` question hands it.
+- `hand-back` now writes frontmatter markers (the counters cleared, `auto_retry_sha` stamped); its stdout is
+  unchanged.
+- Status and repair still describe their own routes; their prose catches up with this decision in p16-5.

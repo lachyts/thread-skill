@@ -47,7 +47,7 @@ Subcommands:
       Drop the lead's unpushed merge: only when the tree is on its branch at M, M^1 == H and origin's
       branch is not M. Stashes tracked leftovers, then `git reset --keep H`. Exit 1 otherwise.
 
-  inputs --note N [--max-review-rounds K] [--repo R]
+  inputs --note N [--max-review-rounds K] [--repo R] [--now T]
       What the lead needs to (re-)enter a set-aside or restarted task: status, scope, pr, readyAt, rung (the
       integrate call's rung record when no approving row is at hand: {startRung: "", rung: <the note's
       `rung:` when it is a rung name, else "">, climbs: []}, so a note with no `rung:`, or only stale
@@ -61,6 +61,19 @@ Subcommands:
       `integration:`, or gate-pending with the last line `set-aside`), else `own`; and autoRevise —
       blocked, the source is the Blocker run, stage revise, markerReason empty, the last line `rejected`,
       a non-empty history and lastRound < K (false without --max-review-rounds).
+      Then the automatic retry's verdict (p16-4, ADR 0033; auto_retry_verdict, its rules in order), which every
+      caller gets and `reconcile-rollout.py auto-retry` re-runs before it writes: autoRetry, autoRetryWhy (the
+      first rule that refused, "" on true), autoRetryError (an `auto_retries` or `max_review_rounds` stamp that is
+      not a valid integer: execute § 3's halt; else null), autoRetryClass (agent | infra | quota, for a note set
+      aside at its run or at Integration; else null), autoRetryBudget ({autoRetries, maxReviewRounds}, each
+      {value, source}, resolved task -> rollout -> rollouts.toml -> built-in by reconcile-rollout.py
+      _retry_budget; null until it resolves), autoRetriesUsed and quotaRetriesUsed (the note's counters, 0 when
+      absent, null when malformed), fingerprint (the latest block's run sha), autoRetryRaise (lastRound + 1 when
+      a retry re-enters a revise with no round left) and autoRetryAfter (a quota block's cool-down end). The
+      rollout note (<note dir>/<rollout>.md) is read and the budget resolved only for a note set aside at its run
+      or at Integration, so every other read stays cheap; a resolver failure is in the JSON and the exit stays 0.
+      --max-review-rounds K that differs from the resolved max_review_rounds means no retry. --now is the time
+      a quota cool-down is read against (default: now).
 
   plan --note N
       The task's approved plan, for the two launches that pass it (execute § 4.5 step 1.2's seeded revise,
@@ -101,7 +114,7 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -714,20 +727,156 @@ def task_inputs(path, note, max_rounds=None, repo=None):
         "markerReason": parsed["reason"] if run else "", "history": history, "lastRound": last_round,
         "reviewRoundsUsed": max(1, rr._int_field(note.get("review_rounds_used"), 0) or 0, last_round),
         "lastIntegration": last, "resumeAt": resume_at,
-        "autoRevise": bool(max_rounds is not None and status == "blocked" and source == "blocker"
-                           and parsed["stage"] == "revise" and parsed["reason"] == "" and last_outcome == "rejected"
-                           and history and last_round < max_rounds),
     }
+    out["autoRevise"] = bool(max_rounds is not None and _revise_shaped(out) and last_round < max_rounds)
     if repo:
         out["worktreePath"] = worktree_dir(os.path.expanduser(repo), path.stem)
     return out
+
+
+def _revise_shaped(inp):
+    """autoRevise but its round test: blocked, the source is the Blocker run, stage revise, markerReason empty, the
+    last Integration line `rejected` and a non-empty history (a plain rejection step 1.2's seeded revise takes)."""
+    last = inp.get("lastIntegration") or {}
+    return bool(inp.get("status") == "blocked" and inp.get("source") == "blocker" and inp.get("markerStage") == "revise"
+                and inp.get("markerReason") == "" and last.get("outcome") == "rejected" and inp.get("history"))
+
+
+# ---- the automatic retry's verdict (p16-4, ADR 0033) ------------------------------------------------------
+
+AUTO_RETRY_KEYS = ("autoRetry", "autoRetryWhy", "autoRetryError", "autoRetryClass", "autoRetryBudget",
+                   "autoRetriesUsed", "quotaRetriesUsed", "fingerprint", "autoRetryRaise", "autoRetryAfter")
+
+
+def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None):
+    """Whether execute's lead re-enters a set-aside task by itself (`reconcile-rollout.py auto-retry`), as `inputs`'
+    AUTO_RETRY_KEYS. The one decision function: `inputs` prints it to every caller and the verb re-runs it before it
+    writes. `inp` is task_inputs' output for the note, `rollout_note` the rollout its `rollout:` names (None: no
+    retry), `max_rounds_flag` inputs' --max-review-rounds (None: not given). The first match is `autoRetry: false`
+    with its `autoRetryWhy`:
+      1. not set aside at its run or at Integration (gate-pending: sign-off is the human's; a code-writing review
+         note with no pr:; running, queued, awaiting Integration, landed), or no rollout note;
+      2. an undecided RACE or UNVERIFIED; 3. a `## Needs you` question;
+      4. plan-blocked after an automatic descope (a descope marker and no `descope_armed:`): repair asks Lachy;
+      5. autoRevise under the resolved max_review_rounds: step 1.2's seeded revise owns it;
+      6. a human cause: prepare's `the PR branch is gone`, a `--gated` decline, a merge-task exit-1 text outside
+         MERGE_TASK_FIXABLE, a set-aside at Integration with no pr:;
+      7. the budget (reconcile-rollout.py _retry_budget): an invalid stamp sets `autoRetryError` (execute § 3's halt),
+         an unresolvable value means no retry, a --max-review-rounds other than the resolved one means no retry, and
+         `auto_retries: 0` turns every retry off, quota included;
+      8. no feedback fingerprint;
+      9. a quota block: 5 free retries spent, or still cooling (`autoRetryAfter`: the later of the block's run stamp
+         and `auto_retry_at`, plus QUOTA_COOLDOWN_MIN[quota_retries_used]); malformed counters or stamps fail closed;
+     10. an agent or infra block: `auto_retries_used` >= the budget (malformed: fails closed);
+     11. an agent block whose fingerprint equals `auto_retry_sha` (the block last re-entered).
+    Otherwise `autoRetry: true`, with `autoRetryRaise` = lastRound + 1 when resumeAt is revise and the resolved
+    max_review_rounds is <= lastRound (repair's raise: one round per retry)."""
+    out = {k: None for k in AUTO_RETRY_KEYS}
+    out.update(autoRetry=False, autoRetryWhy="")
+    used = rr._stamp_value(note.get(rr.AUTO_RETRIES_USED_KEY), 0) if note.get(rr.AUTO_RETRIES_USED_KEY) is not None else 0
+    quota = rr._stamp_value(note.get(rr.QUOTA_RETRIES_USED_KEY), 0) if note.get(rr.QUOTA_RETRIES_USED_KEY) is not None else 0
+    out.update(autoRetriesUsed=used, quotaRetriesUsed=quota, fingerprint=rr._block_fingerprint(note))
+
+    def no(why):
+        out["autoRetryWhy"] = why
+        return out
+
+    status = rr._status(note)
+    state, at = rr._queue_state(note)
+    if state == "set-aside" and at == "gate":
+        return no("gate-pending: sign-off is the human's (approve-gates)")
+    if state != "set-aside" or at not in ("run", "integration"):
+        return no(f"not set aside ({state})")
+    if status == "review":
+        return no("approved without a PR: a code-writing review note with no pr: is repair's call")
+    if rollout_note is None:
+        return no("no rollout note")
+    out["autoRetryClass"] = rr._retry_class(note)
+    hold = rr._race_holds(rollout_note, [(path, note)]).get(path.stem.lower())
+    if hold:
+        return no(f"{hold[1]} undecided: only Lachy's RACE decided: line (through /thread:repair) releases it")
+    if rr.needs_human(note):
+        return no("needs a human: the note's ## Needs you question")
+    if status == "plan-blocked" and not rr._scalar(note.get(rr.DESCOPE_ARMED_KEY)) and any(
+            rr.DESCOPE_MARK_RE.match(l.strip()) for l in note.section_text(rr.SCOPE_AUTO_SECTION).split("\n")):
+        return no("plan-blocked again after an automatic descope: repair asks Lachy")
+    budget = rr._retry_budget(note, rollout_note)
+    k = budget["maxReviewRounds"]["value"] if budget["maxReviewRounds"] else None
+    if k is not None and _revise_shaped(inp) and inp["lastRound"] < k:
+        return no("autoRevise: step 1.2's seeded revise owns it")
+    kind, reason = rr._note_reason(note)
+    first = reason.split("\n", 1)[0].strip()
+    if at == "integration" and not rr._pr(note):
+        return no("set aside at Integration with no pr: a human restores or recuts it")
+    if status == "blocked" and kind == "integration" and rr.BRANCH_GONE_MARK in reason:
+        return no("the PR branch is gone: a human restores or recuts it")
+    if status == "blocked" and rr.DECLINED_MARK in reason:
+        return no("merge declined at the --gated hold: a human's decision")
+    if status == "blocked" and kind == "own" and first.lower().startswith("merge-task") and \
+            not any(f in reason for f in rr.MERGE_TASK_FIXABLE):
+        return no(f"merge-task needs a human: {first}")
+    if budget["error"]:
+        out["autoRetryError"] = budget["error"]
+        return no(f"invalid round budget: {budget['error']}")
+    if budget["unresolved"]:
+        return no(f"auto_retries unresolved: {budget['unresolved']}")
+    out["autoRetryBudget"] = {"autoRetries": budget["autoRetries"], "maxReviewRounds": budget["maxReviewRounds"]}
+    if max_rounds_flag is not None and max_rounds_flag != k:
+        return no(f"--max-review-rounds {max_rounds_flag} is not the resolved max_review_rounds {k}")
+    n = budget["autoRetries"]["value"]
+    if n == 0:
+        return no("auto_retries is 0: automatic retries are off")
+    if not out["fingerprint"]:
+        return no("no feedback fingerprint: the block recorded no feedback")
+    for key, value in ((rr.AUTO_RETRIES_USED_KEY, used), (rr.QUOTA_RETRIES_USED_KEY, quota)):
+        if value is None:
+            return no(f"malformed {key}: {note.get(key)!r} (fails closed)")
+    last_at = rr._parse_ts(note.get(rr.AUTO_RETRY_AT_KEY)) if note.get(rr.AUTO_RETRY_AT_KEY) is not None else None
+    if note.get(rr.AUTO_RETRY_AT_KEY) is not None and last_at is None:
+        return no(f"malformed {rr.AUTO_RETRY_AT_KEY}: {note.get(rr.AUTO_RETRY_AT_KEY)!r} (fails closed)")
+    cls = out["autoRetryClass"]
+    if cls == "quota":
+        if quota >= len(rr.QUOTA_COOLDOWN_MIN):
+            return no(f"quota: {quota}/{len(rr.QUOTA_COOLDOWN_MIN)} free retries outlasted: a human")
+        stamps = [s for s in (rr._block_stamp(note), last_at) if s is not None]
+        if not stamps:
+            return no("quota: no block stamp to time the cool-down from (fails closed)")
+        after = max(stamps) + timedelta(minutes=rr.QUOTA_COOLDOWN_MIN[quota])
+        if now < after:
+            out["autoRetryAfter"] = rr._stamp(after)
+            return no(f"quota cool-down: retries at {out['autoRetryAfter']}")
+    else:
+        if used >= n:
+            return no(f"budget: {used}/{n} used")
+        if cls == "agent" and out["fingerprint"] == rr._scalar(note.get(rr.AUTO_RETRY_SHA_KEY)):
+            return no("same feedback as the block last re-entered")
+    if inp.get("resumeAt") == "revise" and k <= inp.get("lastRound", 0):
+        out["autoRetryRaise"] = inp["lastRound"] + 1
+    out["autoRetry"] = True
+    return out
+
+
+def _rollout_note_of(path, note):
+    """The rollout note the task's `rollout:` names, read beside the task note (<note dir>/<rollout>.md), or None."""
+    slug = rr._wikilink_slug(note.get("rollout"))
+    p = path.parent / f"{slug}.md" if slug else None
+    try:
+        return rr.Note(p) if p is not None and p.is_file() else None
+    except (OSError, ValueError):
+        return None
 
 
 def cmd_inputs(args):
     path, note = _load_note(args.note)
     if args.max_review_rounds is not None and args.max_review_rounds < 1:
         raise EnvError("--max-review-rounds must be an integer >= 1")
-    return task_inputs(path, note, args.max_review_rounds, args.repo)
+    out = task_inputs(path, note, args.max_review_rounds, args.repo)
+    # The verdict reads the rollout note and resolves the budget only for a note set aside at its run or at
+    # Integration, so the restart and status reads of every other note stay cheap.
+    state, at = rr._queue_state(note)
+    ro = _rollout_note_of(path, note) if state == "set-aside" and at in ("run", "integration") else None
+    out.update(auto_retry_verdict(path, note, out, ro, args.now or datetime.now().astimezone(), args.max_review_rounds))
+    return out
 
 
 def cmd_plan(args):
@@ -798,6 +947,7 @@ def main(argv=None):
     ip.add_argument("--note", required=True)
     ip.add_argument("--max-review-rounds", type=int, default=None)
     ip.add_argument("--repo", default=None, help="also print the task tree's worktreePath")
+    ip.add_argument("--now", type=rr._iso_arg, default=None, help="the time the quota cool-down is read against (default: now)")
 
     pl = sub.add_parser("plan", help="the task note's approved plan, for a seeded revise's resume.plan or an integrate call's plan")
     pl.add_argument("--note", required=True)
