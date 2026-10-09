@@ -91,12 +91,13 @@ brief() {
 asks() {
   ok "$rc" 3 "$1: exits 3 (ASK)"
   has "$out" "ASK: [[$A]]" "$1: one ASK line naming the task"
-  has "$out" "nothing written" "$1: the ASK line is unchanged"
   ok "$(snapr)" "$before" "$1: nothing written but descope_refused:"
   if [ "${2:-}" = armed ]; then
     ok "$(fm "$A" descope_refused)" "<none>" "$1: armed, so no descope_refused:"
+    has "$out" "; nothing written: /thread:repair" "$1: armed, the ASK line says nothing was written"
   else
     ok "$(fm "$A" descope_refused)" "descope_refused: 2026-10-03T09:00+00:00 $(topkey "$A")" "$1: descope_refused: names the block judged"
+    has "$out" "; refusal recorded as descope_refused:, nothing else written: /thread:repair" "$1: the ASK line says the refusal is recorded"
   fi
   local again; again=$(snap); "${last_call[@]}" >/dev/null 2>&1
   ok "$rc|$(snap)" "3|$again" "$1: a re-run exits 3 and writes nothing more"
@@ -255,7 +256,7 @@ before=$(snap)
 own
 ok "$rc|$(snap)" "0|$before" "F2 re-run: [no-change]"
 
-# F2 owner controls: each asks, nothing written
+# F2 owner controls: each asks, writing only descope_refused:
 for case in dropped parked done; do
   scen "f2-owner-$case"
   base
@@ -411,6 +412,7 @@ scen r-dry
 base
 before=$(snap); opt "the resume guard" guard --dry-run
 ok "$rc|$(snap)" "3|$before" "R: --dry-run writes no descope_refused"
+has "$out" "; nothing written: /thread:repair" "R: --dry-run's ASK line says nothing was written"
 scen r-defer
 base
 opt "the resume guard" guard
