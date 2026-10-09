@@ -213,7 +213,10 @@ Subcommands:
               of the --from note's own prose (fenced code skipped) that names two or more carried tasks, at
               least one queued, beside an ordering word read outside every task name (p17-2, _order_hints:
               an order kept only in prose, which schedule step 3 turns into a `depends-on:` proposal; printed
-              in both modes, writing nothing), then `[no-change]`, `[written: <n>]` or `(dry-run)`.
+              in both modes, writing nothing; with --to and a --from still open, the tasks already on --to
+              count as carried too, so § 0's interrupted finish prints them after the dying run's own carry
+              moved every task; a closed re-run's --from reads only its own), then `[no-change]`, `[written: <n>]`
+              or `(dry-run)`.
               --dry-run previews and needs no --to. Refuses (exit 2,
               nothing written, one ERROR line): a --from that is missing, unparseable, not tagged `rollout`,
               done or dropped (unless done with `superseded_by:` naming --to: a re-run), or neither paused
@@ -1951,7 +1954,8 @@ def cmd_next(args) -> int:
     stamped (`paused:`) here. New starts are picked greedily by `priority:`, then least file overlap with what is in
     flight, then schedule rank, among the queued tasks ranked above the head Solo task (the first queued Solo task
     by rank whose dependencies are met, p17-2); that task holds every task ranked below it, whatever their
-    `priority:`, and starts only when nothing else has started. A task an undecided RACE or UNVERIFIED holds
+    `priority:` (each held `behind solo [[<head>]]`, a full ceiling included: only the head and the rows above it
+    wait on `ceiling:`), and starts only when nothing else has started. A task an undecided RACE or UNVERIFIED holds
     (_race_holds) and that has not landed is re-read as set-aside at `race`: it never starts, restarts or
     integrates, is never a seeded revise (those are set aside at `run`), and its dependants wait. One whose
     `integrating:` stamp stands (the lead's RACE re-verify holds the lane on it) still counts as integrating
@@ -2069,7 +2073,13 @@ def cmd_next(args) -> int:
                     holds += [(r, f"behind solo [[{best['slug']}]]") for r in remaining]
                     break
                 if used + len(start) >= ceiling:
-                    ceiling_held += remaining
+                    # A freed slot goes to a row above the head Solo task, or to that task, never to a row below
+                    # it: those wait behind it, as status's Queued row says, and only the rest wait on the ceiling.
+                    for r in remaining:
+                        if solo_head is not None and r["rank"] > solo_head["rank"]:
+                            holds.append((r, f"behind solo [[{solo_head['slug']}]]"))
+                        else:
+                            ceiling_held.append(r)
                     break
                 start.append(best)
                 remaining.remove(best)
@@ -3823,7 +3833,8 @@ def _order_hints(src_note, rows) -> list:
     """carry's `order` lines (p17-2): each clause of the prior rollout's own prose that names two or more carried
     tasks, at least one `queued`, beside an ordering word, as `order <slug>,<slug>[,…]: <clause>`. An order kept only
     in that prose (an older rollout note's lead rules, "p30-2 after p30-1") never reached `depends-on:`, so the
-    carry alone would drop it; schedule step 3 reads the clause and proposes the dependency. Read per line, fenced
+    carry alone would drop it; schedule step 3 reads the clause and proposes the dependency. `rows` are carry's
+    (path, note, state, is_carried, plan), the tasks already on an open --from's --to included. Read per line, fenced
     code skipped, a list item's marker stripped; a line splits into clauses at `;` and at sentence ends. A clause
     names a task by a full wikilink to it, its bare slug, or its short id `p<N>-<M>` when exactly one carried slug
     carries that number (an ambiguous or unmatched one names nothing). Every wikilink (any note), bare linked slug
@@ -3908,6 +3919,7 @@ def cmd_carry(args) -> int:
         names = ", ".join(dict.fromkeys(f"[[{t['slug']}]]" for t in git_env))
         return refuse(f"--from {src.stem} holds an unacked git-env trip: {names}: record Lachy's ack first with "
                       f"/thread:repair [[{src.stem}]]")
+    dst_linked = []
     if dst is not None:
         if dst.stem.lower() == src.stem.lower() or (dst.exists() and dst.resolve() == src.resolve()):
             return refuse(f"--to is --from ({src.stem}): a rollout never carries into itself")
@@ -3920,7 +3932,8 @@ def cmd_carry(args) -> int:
             return refuse(f"--to {dst.stem} is {_status(dst_note)}: carry only into an open rollout")
         if _link_slug(dst_note, "supersedes") != src.stem.lower():
             return refuse(f"--to {dst.stem}: its supersedes: does not name {src.stem}")
-        fresh, why = never_started(dst_note, _scan(dst, tasks_dir)[0])
+        dst_linked = _scan(dst, tasks_dir)[0]
+        fresh, why = never_started(dst_note, dst_linked)
         if not fresh:
             return refuse(f"--to {dst.stem} has run ({why}): never carry into a running queue")
 
@@ -3946,7 +3959,17 @@ def cmd_carry(args) -> int:
         if carried and (plan["rung"] == "top" or plan["drop"]):
             rung = top if plan["rung"] == "top" else plan["rung"]
             print(f"restamp {path.stem} rung={rung} drop={','.join(plan['drop']) or '-'}")
-    for hint in _order_hints(src_note, rows):
+    # The order hints read --from's prose against its carried tasks and, while --from is still open, against the
+    # tasks already on --to: an interrupted supersede whose own carry ran before it died (§ 0's finish) left none
+    # on --from, and this is the only run that reads that prose. A closed re-run's step 7 has confirmed them.
+    hint_rows = list(rows)
+    if src_status not in CLOSED_ROLLOUT_STATUSES:
+        mine = {path.stem.lower() for path, *_rest in rows}
+        for path, note in sorted(dst_linked, key=lambda pn: (pn[0].stem.lower(), str(pn[0]))):
+            if path.stem.lower() not in mine:
+                state = _queue_state(note)[0]
+                hint_rows.append((path, note, state, state in CARRIED_STATES, None))
+    for hint in _order_hints(src_note, hint_rows):
         print(hint)
     if args.dry_run:
         print("(dry-run)")

@@ -364,6 +364,31 @@ ok "$(q "$J" 'd["start"]')" '["b","a"]' "next: the rows above the head Solo task
 ok "$(q "$J" "$holds")" '{"c":"behind solo [[s]]","s":"solo: waits for 2 started task(s) to merge or be set aside"}' \
   "next: … a high task below the Solo task waits behind it"
 
+# The head is the FIRST queued Solo task by rank: a high task between two Solo rows waits behind the first, and
+# the second waits too. Were the head the last Solo row, h would rank above it and start ahead of s1.
+scen solo-rank-head
+mkro $'- [[s1]]\n- [[h]]\n- [[s2]]' 'parallel_ceiling: 4'
+mkt s1 open 'solo: true'; mkt h open 'priority: high'; mkt s2 open 'solo: true'
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["s1"]' "next: the first Solo row is the head and starts alone"
+ok "$(q "$J" "$holds")" '{"h":"behind solo [[s1]]","s2":"behind solo [[s1]]"}' \
+  "next: … the high task between the two Solo rows and the second Solo row wait behind it"
+
+# A full ceiling holds only the head Solo task and the rows above it on the ceiling: a freed slot goes to one of
+# them, never to a row below the head, which waits behind it whatever its priority: (status's Queued row agrees).
+scen solo-rank-ceiling
+mkro $'- [[a]]\n- [[b]]\n- [[c]]\n- [[s]]\n- [[d]]' 'parallel_ceiling: 2'
+mkt a open; mkt b open; mkt c open; mkt s open 'solo: true'; mkt d open 'priority: high'
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["a","b"]' "next: the rows above the head Solo task fill the ceiling"
+ok "$(q "$J" "$holds")" '{"c":"ceiling: 2/2 slots in use","d":"behind solo [[s]]","s":"ceiling: 2/2 slots in use"}' \
+  "next: … the head and the row above it wait on the ceiling; the high row below the head waits behind it"
+setkey a status done; setkey b status in_progress
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["c"]' "next: a freed slot goes to the row above the head, not to the high row below it"
+ok "$(q "$J" "$holds")" '{"d":"behind solo [[s]]","s":"solo: waits for 2 started task(s) to merge or be set aside"}' \
+  "next: … the head now waits for the started tasks, and d still waits behind it"
+
 # A Solo task its dependency holds is not the head, so it holds nothing (no wedged tail). Passes before and after p17-2.
 scen solo-rank-dep
 mkro $'- [[x]]\n- [[s]]\n- [[c]]' 'parallel_ceiling: 4'

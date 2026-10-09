@@ -77,7 +77,9 @@ A repo holds at most one unfinished rollout (one directly in `Work/Tasks/`, neit
      It also maps each carried task's legacy stamps to a rung (step 1's `restamp` lines; a re-run maps
      nothing twice). A non-zero exit stops the run with its stderr. It also prints `order` lines (step 1)
      for `<prior>`'s prose: keep them for step 1's confirm and step 3, since this is the only run that
-     reads that prose (the re-check's `supersede <new>` previews from `<new>`).
+     reads that prose (the re-check's `supersede <new>` previews from `<new>`). With `<prior>` still open,
+     carry reads that prose against the tasks already on `<new>` too, so the lines print even when the
+     dying run's own carry had moved every task.
   3. Step 7.5's close-out of `<prior>`: the stamps, then the move.
   4. Print the pinned report: "**[[<new>]] is incomplete**: the run that wrote it died before closing out [[<prior>]], so its tasks may be unstamped and its queue can name tasks `next` and `status` never see; it must be superseded with `--regenerate` (this run goes on to do that; a cancelled run leaves it stamped `incomplete: true`, which `next` refuses, for the next `--regenerate`), never `/thread:execute`d as written."
   5. Re-run only the check. It prints `supersede <new>`.
