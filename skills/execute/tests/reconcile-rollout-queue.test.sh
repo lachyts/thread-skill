@@ -793,6 +793,49 @@ ok "$(q "$(nxt --running "")" 'd["halt"]')" '"git-env"' "git-env integrate: … 
 gelog '- 2026-10-02T13:45:00+00:00 git-env ack [[gi]]: refs/heads/master at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, core.bare false'
 ok "$(q "$(nxt --running "")" '[d["halt"], d["awaitingIntegration"]]')" '[null,["gi"]]' "git-env integrate: after the ack it awaits Integration"
 
+# ── the Integration queue's order (p17-1) ─────────────────────────────────────────────────────────
+# `awaitingIntegration` lists a task a queued task depends on (depends-on or blocked-by) first, then the oldest
+# `ready:` (compared as instants; missing or unparseable last), then schedule order. `integrating` stays first, and
+# `hold` stays in schedule order.
+scen lane-order
+mkro $'- [[a]]\n- [[b]]\n- [[c]]\n- [[d]]\n- [[e]]\n- [[f]]'
+mkt a review 'pr: https://github.com/o/r/pull/1' 'ready: 2026-10-02T12:00+00:00'
+mkt b review 'pr: https://github.com/o/r/pull/2' 'ready: 2026-10-02T10:00+00:00'
+mkt c review 'pr: https://github.com/o/r/pull/3' 'ready: 2026-10-02T11:00+00:00'
+mkt d open
+mkt e review 'pr: https://github.com/o/r/pull/5' 'ready: 2026-10-02T09:00+00:00' 'integrating: 2026-10-02T13:00+00:00'
+mkt f open
+J=$(nxt)
+ok "$(q "$J" '[d["awaitingIntegration"], d["integrating"]]')" '[["b","c","a"],["e"]]' "lane-order: the oldest ready: first, not schedule order; an integrating task stays in integrating"
+setkey d depends-on '["[[a]]"]'
+J=$(nxt)
+ok "$(q "$J" 'd["awaitingIntegration"]')" '["a","b","c"]' "lane-order: a task a queued task depends on goes first"
+ok "$(q "$J" "$holds")" '{"d":"depends on [[a]] (review)"}' "lane-order: … while its dependant is held on it"
+setkey d depends-on '["[[A]]"]'
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["a","b","c"]' "lane-order: the dependency's slug compares case-insensitively"
+delkey d depends-on; setkey d blocked-by '["[[c]]"]'
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["c","b","a"]' "lane-order: blocked-by counts like depends-on"
+setkey f depends-on '["[[a]]"]'
+J=$(nxt)
+ok "$(q "$J" 'd["awaitingIntegration"]')" '["c","a","b"]' "lane-order: two waited-on tasks go first, oldest ready: first among them"
+ok "$(q "$J" '[h["slug"] for h in d["hold"]]')" '["d","f"]' "lane-order: hold stays in schedule order"
+delkey f depends-on; delkey d blocked-by; setkey d depends-on '["[[a]]"]'
+setkey d status in_progress
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["b","c","a"]' "lane-order: a running dependant is not waiting on the lane"
+setkey d status blocked
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["b","c","a"]' "lane-order: nor is a set-aside one"
+setkey d status open; delkey d depends-on
+delkey b ready
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["c","a","b"]' "lane-order: no ready: sorts after every stamped task"
+setkey b ready 'yesterday'
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["c","a","b"]' "lane-order: an unparseable ready: sorts last too"
+setkey a ready '2026-10-02T11:00+00:00'
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["a","c","b"]' "lane-order: an equal ready: falls back to schedule order"
+setkey a ready '2026-10-02T21:00+10:00'; setkey c ready '2026-10-02T11:30Z'
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["a","c","b"]' "lane-order: ready: compares as instants (21:00+10:00 is before 11:30Z)"
+setkey a ready '2026-10-02T12:00+00:00'; setkey b ready '2026-10-02T10:00+00:00'; setkey c ready '1970-01-01T00:00Z'
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["c","b","a"]' "lane-order: a ready: at the epoch is the oldest, not a missing one"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-queue: ALL PASS"; else echo "reconcile-rollout-queue: FAILED"; fi
 exit "$fail"
