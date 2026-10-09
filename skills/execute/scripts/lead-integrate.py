@@ -51,7 +51,8 @@ Subcommands:
       branch is not M. Stashes tracked leftovers, then `git reset --keep H`. Exit 1 otherwise.
 
   inputs --note N [--max-review-rounds K] [--repo R] [--row FILE|-]
-      What the lead needs to (re-)enter a set-aside or restarted task: status, scope, pr, readyAt, rung (the
+      What the lead needs to (re-)enter a set-aside or restarted task: status, scope, pr, prUrl and
+      prUrlError (below), readyAt, rung (the
       note's rung record: {startRung: "", rung: <the note's `rung:` when it is a rung name, else "">,
       climbs: []}, so a note with no `rung:`, or only stale legacy stamps, gives the neutral record),
       branch (and worktreePath with --repo);
@@ -73,10 +74,12 @@ Subcommands:
       its rung record when it passes rungRecordError, else the note's (rungSource "note", rowRefused says
       why). Otherwise, and with no --row, the note's: pr, history, reviewRoundsUsed and rung (source "note");
       rowRefused is the one-line reason, or "" with no --row. An unreadable --row is refused, never exit 2.
-      The note's pr: becomes a PR URL the engine takes: a bare `#N` (or `N`) is built on --repo's GitHub
-      origin (owner/repo), and a trailing / is dropped. prUrlError is "" when prUrl is one, else why not and
-      the fix (no pr:, another form, a bare number with no --repo or no GitHub origin): the lead launches
-      nothing on it (a call it launched would fail the engine's args check, which reads as a Lost call).
+      prUrl is the note's pr: as a PR URL the engine takes, for the two launches that pass it (step 1.2's
+      seeded revise, and the integrate record's when no row is accepted): a bare `#N` (or `N`) is built on
+      --repo's GitHub origin (owner/repo), and a trailing / is dropped. prUrlError (top level, and the
+      integrate record's when it falls back to the note) is "" when prUrl is one, else why not and the fix
+      (no pr:, another form, a bare number with no --repo or no GitHub origin): the lead launches nothing on
+      it (a call it launched would fail the engine's args check, which reads as a Lost call).
 
   plan --note N
       The task's approved plan, for the two launches that pass it (execute § 4.5 step 1.2's seeded revise,
@@ -821,13 +824,15 @@ def _row_error(inp, note, row):
 
 
 def _note_pr_url(pr, note, repo):
-    """(url, why): the note's `pr:` as the PR URL the engine's args check (prIdentityError) takes, for the integrate
-    record when no row is accepted (p17-1). A URL the engine takes passes verbatim; a GitHub PR URL with a trailing /
-    loses it; a bare number (`#N` or `N`, a hand-written form _same_pr accepts) is built on origin's owner/repo
-    (_owner_repo, read in --repo). Otherwise (no pr:, another form, or a bare number with no --repo or no GitHub
-    origin) the note's value stays and `why` says what the engine would refuse and the fix; '' when url passes."""
+    """(url, why): the note's `pr:` as the PR URL the engine's args check (prIdentityError) takes (p17-1), for the
+    two launches that pass the note's PR: execute § 4.5 step 1.2's seeded revise (`inputs`' prUrl) and step 3's
+    integrate call when no row is accepted (the integrate record's). A URL the engine takes passes verbatim; a
+    GitHub PR URL with a trailing / loses it; a bare number (`#N` or `N`, a hand-written form _same_pr accepts) is
+    built on origin's owner/repo (_owner_repo, read in --repo). Otherwise (no pr:, another form, or a bare number
+    with no --repo or no GitHub origin) the note's value stays and `why` says what the engine would refuse and
+    the fix; '' when url passes."""
     if not pr:
-        return pr, "the note has no pr:, so there is no PR to integrate: stamp the task's PR URL as its pr:"
+        return pr, "the note has no pr:, so there is no PR to launch on: stamp the task's PR URL as its pr:"
     if ENGINE_PR_URL_RE.fullmatch(pr):
         return pr, ""
     m, n = rr.PR_URL_RE.match(pr), rr.PR_NUM_RE.match(pr)
@@ -843,17 +848,15 @@ def _note_pr_url(pr, note, repo):
     return pr, f"the note's pr: {pr} is not a PR URL (…/pull/<n>) or a PR number: stamp the task's PR URL as its pr:"
 
 
-def integrate_record(inp, note, row, why, repo=None):
+def integrate_record(inp, note, row, why):
     """The integrate call's prUrl, reviewHistory, reviewRoundsUsed and rung (execute § 4.5 step 3, p17-1): the
-    approving row's (source "row") when it was read and _row_error passes, else the note's: `inputs`' pr as a PR
-    URL (_note_pr_url: a bare `#N` is built on origin's owner/repo), history, reviewRoundsUsed and rung record
-    (source "note"). An accepted row whose rung record fails rung_record_error keeps the row and takes the note's
+    approving row's (source "row") when it was read and _row_error passes, else the note's: `inputs`' prUrl (the
+    note's pr: as a PR URL, _note_pr_url), history, reviewRoundsUsed and rung record (source "note"). An accepted row whose rung record fails rung_record_error keeps the row and takes the note's
     rung record (rungSource "note"). rowRefused is the one reason ('' with no --row, or when nothing was
     refused); prUrlError is why prUrl is no PR URL the engine takes ('' when it is: the lead launches nothing
     on a non-empty one)."""
-    url, url_why = _note_pr_url(inp["pr"], note, repo)
-    rec = {"prUrl": url, "reviewHistory": inp["history"], "reviewRoundsUsed": inp["reviewRoundsUsed"],
-           "rung": inp["rung"], "source": "note", "rungSource": "note", "rowRefused": "", "prUrlError": url_why}
+    rec = {"prUrl": inp["prUrl"], "reviewHistory": inp["history"], "reviewRoundsUsed": inp["reviewRoundsUsed"],
+           "rung": inp["rung"], "source": "note", "rungSource": "note", "rowRefused": "", "prUrlError": inp["prUrlError"]}
     if row is None and not why:
         return rec
     refused = why or _row_error(inp, note, row)
@@ -898,8 +901,11 @@ def task_inputs(path, note, max_rounds=None, repo=None, row=None):
     rung = rr._scalar(note.get("rung"))
     if not rr.is_rung_name(rung):
         rung = ""
+    pr = rr._pr(note) or None
+    pr_url, pr_url_error = _note_pr_url(pr, note, repo)
     out = {
-        "slug": path.stem, "status": status or None, "scope": rr._scope(note) or None, "pr": rr._pr(note) or None,
+        "slug": path.stem, "status": status or None, "scope": rr._scope(note) or None, "pr": pr,
+        "prUrl": pr_url, "prUrlError": pr_url_error,
         "readyAt": rr._scalar(note.get("ready")) or None,
         "rung": {"startRung": "", "rung": rung, "climbs": []}, "branch": branch_of(path.stem),
         "source": source or None, "markerStage": parsed["stage"] if run else None,
@@ -913,7 +919,7 @@ def task_inputs(path, note, max_rounds=None, repo=None, row=None):
     if repo:
         out["worktreePath"] = worktree_dir(os.path.expanduser(repo), path.stem)
     got, why = _read_row(row, path.stem) if row is not None else (None, "")
-    out["integrate"] = integrate_record(out, note, got, why, repo)
+    out["integrate"] = integrate_record(out, note, got, why)
     return out
 
 

@@ -927,7 +927,8 @@ irow proj-d --row "$F/byurl.json"
 ok "$(j "$IG" 'd["source"]')" row "C22: a note pr: URL matches with one trailing / and case ignored"
 # The note's fallback prUrl is a PR URL the engine takes (prIdentityError), never a hand-written bare `#N`: one is
 # built on --repo's GitHub origin; with no --repo or no GitHub origin prUrl stays and prUrlError says why (the lead
-# sets the task aside at Integration on it, never launching a call the engine would refuse as a Lost call).
+# sets the task aside at Integration on it, and step 1.2 launches no seeded revise on it, never a call the engine
+# would refuse as a Lost call). inputs' own prUrl and prUrlError, step 1.2's, are the same.
 g init -q "$F/gh"; git -C "$F/gh" remote add origin https://github.com/o/r.git
 g init -q "$F/local"; git -C "$F/local" remote add origin "$F/nowhere.git"
 irow proj-c
@@ -941,6 +942,10 @@ for args in "" "--row $F/bynumbad.json"; do
   irow proj-c --repo "$F/gh" $args; C22B+=("$IG")
   ok "$(j "$IG" '[d["source"], d["prUrl"], d["prUrlError"]]')" '["note","https://github.com/o/r/pull/99",""]' "C22: a bare #99 with a GitHub origin is built into its PR URL (${args:+a refused row}${args:-no --row})"
 done
+ok "$(j "$I" '[d["pr"], d["prUrl"], d["prUrlError"]]')" '["#99","https://github.com/o/r/pull/99",""]' \
+  "C22: inputs' own prUrl (step 1.2's seeded revise passes it) is the same built URL; pr stays the note's"
+irow proj-c
+ok "$(j "$I" '[d["prUrl"], d["prUrlError"] == d["integrate"]["prUrlError"] != ""]')" '["#99",true]' "C22: … and with no --repo, inputs' own prUrlError is the record's"
 irow proj-d
 ok "$(j "$IG" '[d["source"], d["prUrl"], d["prUrlError"]]')" '["note","https://github.com/O/R/pull/100",""]' "C22: a note pr: URL's trailing / is dropped"
 PRE=$(node --input-type=module -e "

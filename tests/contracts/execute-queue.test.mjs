@@ -149,9 +149,12 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     fails.push('slots')
   }
 
-  // auto-revise: only autoRevise: true, with --max-review-rounds; revise-stopped and review-blocked wait for hand-back.
+  // auto-revise: only autoRevise: true, with --max-review-rounds; revise-stopped and review-blocked wait for hand-back;
+  // the resume's prUrl is inputs' prUrl (p17-1: the note's pr: as a PR URL), and a prUrlError launches nothing.
   if (!s2sub || !s2sub.text.includes('Launch one only when it reports `autoRevise: true`') ||
     !s2sub.text.includes('--max-review-rounds') ||
+    !s2sub.text.includes("resume: {stage: 'revise', prUrl: <inputs.prUrl>,") ||
+    !s2sub.text.includes('A non-empty `prUrlError` (the note\'s `pr:` gives no PR URL the engine takes, step 3) launches nothing') ||
     !/A `revise stopped:`, review-blocked or out-of-rounds note is never launched here: it waits for `hand-back`/.test(s2sub.text)) {
     fails.push('auto-revise')
   }
@@ -533,6 +536,10 @@ test('control: Restart routing without the revise route fails launch', () => {
 
 test('control: a seeded revise launched regardless of the ceiling fails slots', () => {
   only(sk('; otherwise it waits, blocked, for a later step 1', ''), 'slots', 'no wait')
+})
+
+test("control: a seeded revise on the note's raw pr: fails auto-revise", () => {
+  only(sk("resume: {stage: 'revise', prUrl: <inputs.prUrl>,", "resume: {stage: 'revise', prUrl: <inputs.pr>,"), 'auto-revise', 'raw pr')
 })
 
 test('control: launching every rejected note fails auto-revise', () => {
