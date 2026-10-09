@@ -2,14 +2,16 @@
 // tasks by queue state and re-entry stage, and the conductor hands a set-aside task back at the stage it stopped
 // (at Integration: Integration only), defers only its dependent closure, and never writes under a pause.
 //
-// Five fixtures run the landed scripts (reconcile-rollout.py, lead-integrate.py, unfinished-rollout.py) on temp
+// Six fixtures run the landed scripts (reconcile-rollout.py, lead-integrate.py, unfinished-rollout.py) on temp
 // vaults, the set-aside notes written through the real writers (engine rows from task.workflow.js via
 // tests/lib/engine.mjs, the lead's set-aside rows, reconcile): A is a status fixture with every queue state and
 // every set-aside stage; B is an at-Integration set-aside handed back (Integration retried, nothing else); C is B
 // under a draining soft pause, the reason repair never hands back during a pause; D is a legacy rollout another
 // rollout's supersedes: names, the reason the lineage is read before the version; E is a RACE under the lead and
 // an UNVERIFIED set-aside, which `resume` holds (exit 3, both notes untouched) until Lachy's `RACE decided:`
-// lines are recorded (p12-12). The fixtures pin data; the rules tie the prose to it.
+// lines are recorded (p12-12); F is the automatic retry's verdict (ADR 0033) on every set-aside kind repair and status
+// read, and repair's needs-you answer, recorded and re-entered once (p16-5). The fixtures pin data; the rules tie the
+// prose to it.
 //
 // Every rule lives in one function, check({ status, repair, fx }), that returns named failures, so the real text
 // and the controls run through identical logic: each control mutates the real text (or the fixture verdict) in one
@@ -25,7 +27,11 @@
 // is repair, never a resume (race-in-flight). Status's read-only rule is positive: it may invoke only its two
 // script reads, § 3's gh/git reads and the default-branch read. Both speak rungs, never tiers (ADR 0029, p13-3):
 // status shows each task's rung and flags a Rung drift on unlanded tasks only and a refused ladder file, which
-// reorders no action; repair never edits the file and stops short of the hand-off under it (rung).
+// reorders no action; repair never edits the file and stops short of the hand-off under it (rung). Agent-fixable is
+// execute's (ADR 0033): repair leaves an `autoRetry: true` or cooling set-aside to the lead's automatic retry, judging
+// a descope first, and asks every other one on its verdict, never on its feedback (auto-retry); status shows each
+// set-aside's retry count (retries) and a Needs you block, and repair answers a `## Needs you` question into
+// `## Repair input`, removes it in every mode and hands back once (needs-you).
 import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -368,10 +374,243 @@ function buildE() {
   return { fails }
 }
 
+// ---- fixture F: the automatic retry's verdict, as repair and status read it (p16-5, ADR 0033) --------------------
+
+// RF's set-asides each read one verdict from `inputs`: retry (true, budget left), spent (`budget: 2/2 used`), same
+// (an identical re-block), asks (a `## Needs you` question once the budget is spent), cooling (an infra cool-down),
+// quota (a quota cool-down) and gate (gate-pending with a question). RF2 holds an UNVERIFIED set-aside, which a Drift
+// line routes (kept off RF so `next` there never meets its hold), and an at-Integration set-aside with no `pr:`. Both
+// rollouts stamp auto_retries and max_review_rounds, so no verdict reads the operator's settings; their Project root
+// is gone on purpose (a copy with the stamp stripped reads the budget as unresolved). The blocks are real reconcile
+// rows, the retries the real `auto-retry`, the lead's rows `lead-integrate.py set-aside`. `answer` is repair § 3b's
+// needs-you flow on copies: a stale question blocks every retry; an answer recorded for the current block reads as
+// answered until a hand-back re-enters that block (`auto_retry_sha` then equals its fingerprint, so an identical
+// re-block is a fresh ask); and the live lead's retry can win the race to a hand-back.
+const RF = 'proj-rollout-2026-10-04'
+const RF2 = 'proj-rollout-2026-10-04-2'
+const F = { retry: 'proj-f-retry', spent: 'proj-f-spent', same: 'proj-f-same', asks: 'proj-f-asks', cooling: 'proj-f-cooling', quota: 'proj-f-quota', gate: 'proj-f-gate' }
+const F2 = { unverified: 'proj-f-unverified', nopr: 'proj-f-nopr' }
+const F_NOW = '2026-10-04T09:00:00Z'
+const F_OWNER = 'execute-2026-10-04-ab12cd34'
+const FA = 'Round 1: the plan misses the migration step'
+const FB = 'Round 1: the plan still misses the rollback path'
+const FC = 'Round 1: the plan names no test for the rollback'
+const FQ = 'Which migration tool: alembic or yoyo?'
+const FQG = 'Which billing account pays for the API?'
+const F_ANSWER = 'use the v2 schema'
+const F_DATE = '2026-10-04'
+const TRANSIENT = 'transient infrastructure failure — the agent process died mid-run on a terminal API/connection error'
+const QUOTA = 'workflow call failed: API Error: usage limit reached'
+const fPath = (d, slug) => path.join(d, `${slug}.md`)
+const fRead = (d, slug) => fs.readFileSync(fPath(d, slug), 'utf8')
+// Sets (or, with null, drops) one frontmatter key.
+function setKey(d, slug, key, value) {
+  const t = fRead(d, slug)
+  const end = t.indexOf('\n---\n')
+  const head = t.slice(0, end).split('\n')
+  const i = head.findIndex((l) => l.startsWith(`${key}:`))
+  if (value == null) { if (i >= 0) head.splice(i, 1) } else if (i >= 0) head[i] = `${key}: ${value}`
+  else head.push(`${key}: ${value}`)
+  fs.writeFileSync(fPath(d, slug), head.join('\n') + t.slice(end))
+}
+// Every F call runs hermetic (HOME empty, the Run record in temp).
+const fRun = (script, args, input) => py(script, args, input, STATUS_ENV)
+const fMust = (script, args, input) => must(script, args, input, STATUS_ENV)
+const fReconcile = (d, result, now) => fMust(RECONCILE, ['reconcile', '--result', '-', '--tasks-dir', d, '--now', now], JSON.stringify(result))
+const fBlock = (d, R, slug, status, diagnosis, now, extra = {}) =>
+  fReconcile(d, { rolloutSlug: R, tasks: [{ slug, scope: 'cross-cutting', status, prUrl: '', blockerDiagnosis: diagnosis, ...extra }] }, now)
+const fLead = (d, slug, kind, reason, now) => fReconcile(d, JSON.parse(fMust(LEAD, ['set-aside', '--note', fPath(d, slug), '--kind', kind], reason)), now)
+const inputsAt = (d, slug, now = F_NOW) => JSON.parse(fMust(LEAD, ['inputs', '--note', fPath(d, slug), '--max-review-rounds', '4', '--repo', '/repo', '--now', now]))
+const fAutoRetry = (d, R, slug, now, extra = []) => fRun(RECONCILE, ['auto-retry', '--tasks', slug, '--rollout', fPath(d, R), '--tasks-dir', d, '--now', now, ...extra])
+const fHandBack = (d, slug, now = F_NOW) => fRun(RECONCILE, ['hand-back', '--tasks', slug, '--tasks-dir', d, '--now', now])
+// A restart before a re-block: mark-started, then the call's owner: line.
+const fRestart = (d, slug, now) => { fMust(RECONCILE, ['mark-started', '--tasks', slug, '--tasks-dir', d, '--now', now]); setKey(d, slug, 'owner', F_OWNER) }
+const fStatus = (d, R) => JSON.parse(fMust(RECONCILE, ['status', '--rollout', fPath(d, R), '--tasks-dir', d, '--now', F_NOW]))
+const fNext = (d, R) => JSON.parse(fMust(RECONCILE, ['next', '--rollout', fPath(d, R), '--tasks-dir', d, '--running', '', '--dry-run', '--now', F_NOW]))
+const runCount = (text) => (text.match(/^### Run /gm) ?? []).length
+// Status's Needs you predicate (status § 4's **Needs you.**): a set-aside at its run or at Integration whose verdict
+// is false with no cool-down, not the seeded revise's (unless its pr: is refused), and, with `drift`, one no Drift
+// line routes (an undecided UNVERIFIED here: the RACE / UNVERIFIED flag).
+const needsYouItem = (t, i, { drift = true } = {}) => ['run', 'integration'].includes(t.setAsideAt) && i.autoRetry === false && !i.autoRetryAfter &&
+  (!i.autoRevise || !!i.prUrlError) && !(drift && (t.blockerSummary ?? '').includes('UNVERIFIED:'))
+// Repair § 3b's needs-you flow, by hand: the answer into `## Repair input`, then the `## Needs you` section removed.
+function answerNote(d, slug, entry) {
+  let t = fRead(d, slug)
+  const s = t.indexOf('\n## Needs you\n')
+  if (s >= 0) {
+    const e = t.indexOf('\n## ', s + 1)
+    t = t.slice(0, s) + (e < 0 ? '\n' : t.slice(e))
+  }
+  t = t.includes('\n## Repair input\n') ? t.replace('\n## Repair input\n\n', `\n## Repair input\n\n${entry}\n`) : `${t.replace(/\n*$/, '\n')}\n## Repair input\n\n${entry}\n`
+  fs.writeFileSync(fPath(d, slug), t)
+}
+
+function buildF() {
+  const d = path.join(tmp, 'F')
+  fs.mkdirSync(d)
+  const repo = path.join(tmp, 'F-root-gone')
+  const budget = ['auto_retries: 2', 'max_review_rounds: 4']
+  writeRollout(d, RF, Object.values(F), budget, { repo })
+  writeRollout(d, RF2, Object.values(F2), budget, { repo })
+  const task = (R, slug, fm = []) => writeTask(d, slug, ['status: in_progress', 'scope: cross-cutting', `rollout: "[[${R}]]"`, `owner: ${F_OWNER}`,
+    'started: 2026-10-04T06:00+00:00', ...fm])
+  for (const slug of Object.values(F)) task(RF, slug)
+  const plan = (slug, fb, now, extra) => fBlock(d, RF, slug, 'plan-blocked', fb, now, extra)
+  const retried = (slug, now) => { const r = fAutoRetry(d, RF, slug, now); if (r.rc !== 0) throw new Error(`F: auto-retry ${slug} exited ${r.rc}: ${r.err}`) }
+  plan(F.retry, FA, '2026-10-04T07:00:00Z')
+  // spent and asks: FA → retry → FB → retry → FC (asks' FC carries a question); same: FA → retry → FA again.
+  for (const slug of [F.spent, F.asks, F.same]) {
+    plan(slug, FA, '2026-10-04T07:00:00Z')
+    retried(slug, '2026-10-04T07:05:00Z')
+    fRestart(d, slug, '2026-10-04T07:06:00Z')
+  }
+  plan(F.same, FA, '2026-10-04T07:30:00Z')
+  for (const slug of [F.spent, F.asks]) {
+    plan(slug, FB, '2026-10-04T07:30:00Z')
+    retried(slug, '2026-10-04T07:35:00Z')
+    fRestart(d, slug, '2026-10-04T07:36:00Z')
+  }
+  plan(F.spent, FC, '2026-10-04T08:00:00Z')
+  plan(F.asks, FC, '2026-10-04T08:00:00Z', { needsHuman: FQ })
+  fBlock(d, RF, F.cooling, 'blocked', TRANSIENT, '2026-10-04T08:58:00Z')
+  fLead(d, F.quota, 'own', QUOTA, '2026-10-04T08:58:00Z')
+  fReconcile(d, { rolloutSlug: RF, tasks: [{ slug: F.gate, scope: 'cross-cutting', status: 'gate-pending', gatedInputs: ['spend: a paid API — cap USD 5'], needsHuman: FQG }] },
+    '2026-10-04T08:00:00Z')
+  // RF2: an UNVERIFIED set-aside at Integration, and an Integration set-aside whose pr: is then lost.
+  for (const [slug, n] of [[F2.unverified, 50], [F2.nopr, 51]]) {
+    writeTask(d, slug, ['status: review', 'scope: cross-cutting', `rollout: "[[${RF2}]]"`, `pr: ${prOf(n)}`, `owner: ${F_OWNER}`, 'started: 2026-10-04T06:00+00:00',
+      'ready: 2026-10-04T07:00+00:00'])
+  }
+  fLead(d, F2.unverified, 'integration', UNVERIFIED, '2026-10-04T08:00:00Z')
+  fLead(d, F2.nopr, 'integration', 'conflict in a.js cannot be resolved', '2026-10-04T08:00:00Z')
+  setKey(d, F2.nopr, 'pr', null)
+
+  const all = [...Object.values(F), ...Object.values(F2)]
+  const I = Object.fromEntries(all.map((s) => [s, inputsAt(d, s)]))
+  const T = Object.fromEntries([...fStatus(d, RF).tasks, ...fStatus(d, RF2).tasks].map((t) => [t.slug, t]))
+  const fp = (slug) => I[slug].fingerprint
+
+  // split: each set-aside reads its verdict, and the Needs you predicate picks exactly the three Lachy owns.
+  const split = []
+  const r = I[F.retry]
+  if (r.autoRetry !== true || r.autoRetriesUsed !== 0 || r.autoRetryBudget?.autoRetries?.value !== 2 || r.autoRetryBudget?.autoRetries?.source !== 'rollout') {
+    split.push(`retry: ${JSON.stringify([r.autoRetry, r.autoRetriesUsed, r.autoRetryBudget])}`)
+  }
+  if (I[F.spent].autoRetry !== false || I[F.spent].autoRetryWhy !== 'budget: 2/2 used') split.push(`spent: ${I[F.spent].autoRetryWhy}`)
+  if (I[F.same].autoRetry !== false || I[F.same].autoRetryWhy !== 'same feedback as the block last re-entered' || !fp(F.same) ||
+    fmKey(fRead(d, F.same), 'auto_retry_sha') !== fp(F.same)) split.push(`same: ${I[F.same].autoRetryWhy}`)
+  const a = I[F.asks]
+  if (a.autoRetry !== false || !a.autoRetryWhy.startsWith('needs a human') || T[F.asks]?.needsHuman !== FQ || a.autoRetryClass == null || a.autoRetryBudget !== null) {
+    split.push(`asks: ${JSON.stringify([a.autoRetryWhy, T[F.asks]?.needsHuman, a.autoRetryClass, a.autoRetryBudget])}`)
+  }
+  const c = I[F.cooling]
+  if (c.autoRetry !== false || c.autoRetryClass !== 'infra' || !c.autoRetryAfter) split.push(`cooling: ${JSON.stringify([c.autoRetryClass, c.autoRetryAfter])}`)
+  const gCopy = copyDir(d, path.join(tmp, 'F-gate'))
+  const gHb = fHandBack(gCopy, F.gate)
+  if (T[F.gate]?.setAsideAt !== 'gate' || T[F.gate]?.needsHuman !== FQG || !I[F.gate].autoRetryWhy.startsWith('gate-pending') ||
+    gHb.rc !== 1 || fmKey(fRead(gCopy, F.gate), 'status') !== 'gate-pending') split.push(`gate: ${JSON.stringify([T[F.gate]?.setAsideAt, I[F.gate].autoRetryWhy, gHb.rc])}`)
+  const picked = Object.values(F).filter((s) => T[s]?.queueState === 'set-aside' && needsYouItem(T[s], I[s])).sort()
+  if (JSON.stringify(picked) !== JSON.stringify([F.spent, F.same, F.asks].sort())) split.push(`needs you picks ${JSON.stringify(picked)}`)
+
+  // render: a count shows only where the verdict reached the budget; `?` only for an unresolved one.
+  const render = []
+  const q = I[F.quota]
+  if (!r.autoRetryBudget) render.push('retry: no budget')
+  if (a.autoRetryBudget !== null || a.autoRetryWhy.startsWith('auto_retries unresolved')) render.push('asks: a budget')
+  if (q.autoRetryClass !== 'quota' || !q.autoRetryBudget || !q.autoRetryAfter || q.quotaRetriesUsed !== 0) {
+    render.push(`quota: ${JSON.stringify([q.autoRetryClass, q.autoRetryBudget, q.autoRetryAfter, q.quotaRetriesUsed])}`)
+  }
+  const u = copyDir(d, path.join(tmp, 'F-unresolved'))
+  const ro = fPath(u, RF)
+  fs.writeFileSync(ro, fs.readFileSync(ro, 'utf8').replace('auto_retries: 2\n', ''))
+  const ur = inputsAt(u, F.retry)
+  if (!ur.autoRetryWhy.startsWith('auto_retries unresolved') || ur.autoRetryBudget !== null) render.push(`unresolved: ${ur.autoRetryWhy}`)
+
+  // held: an undecided UNVERIFIED set-aside is refused, and only the Drift exclusion keeps it out of the block.
+  const held = []
+  const uv = I[F2.unverified]
+  if (T[F2.unverified]?.setAsideAt !== 'integration' || uv.autoRetry !== false || !uv.autoRetryWhy.startsWith('UNVERIFIED undecided')) held.push(`unverified: ${uv.autoRetryWhy}`)
+  if (!needsYouItem(T[F2.unverified], uv, { drift: false }) || needsYouItem(T[F2.unverified], uv)) held.push('the Drift exclusion')
+
+  // nopr: an at-Integration set-aside with no pr: is refused by the verdict and by hand-back.
+  const nopr = []
+  const n = I[F2.nopr]
+  if (T[F2.nopr]?.setAsideAt !== 'integration' || T[F2.nopr]?.pr != null || !n.autoRetryWhy.startsWith('set aside at Integration with no pr:')) {
+    nopr.push(`nopr: ${JSON.stringify([T[F2.nopr]?.setAsideAt, T[F2.nopr]?.pr, n.autoRetryWhy])}`)
+  }
+  const nCopy = copyDir(d, path.join(tmp, 'F-nopr'))
+  const nBefore = fRead(nCopy, F2.nopr)
+  const nHb = fHandBack(nCopy, F2.nopr)
+  if (nHb.rc !== 1 || !nHb.err.includes('set aside at Integration with no pr:') || fRead(nCopy, F2.nopr) !== nBefore) nopr.push(`hand-back: ${nHb.rc} ${nHb.err}`)
+
+  return { dir: d, inputs: I, status: T, split: { fails: split }, render: { fails: render }, held: { fails: held }, nopr: { fails: nopr }, answer: answerF(d, fp(F.asks)) }
+}
+
+// Repair § 3b's needs-you flow on copies of F's `asks` (its budget spent, a `## Needs you` question open).
+function answerF(d0, fp) {
+  const fails = []
+  const slug = F.asks
+  const entry = `- ${F_DATE} needs you (block ${fp}): "${FQ}" → ${F_ANSWER}`
+  if (!fp) fails.push('asks has no fingerprint')
+  // (i) A stale question: a hand-back that leaves `## Needs you`, a restart, then a lead-written dead call. The lead's
+  // row clears no question, so the verdict still reads needs a human: why repair removes the section.
+  const i = copyDir(d0, path.join(tmp, 'F-stale'))
+  if (fHandBack(i, slug).rc !== 0) fails.push('(i) hand-back refused')
+  fRestart(i, slug, '2026-10-04T09:01:00Z')
+  fLead(i, slug, 'own', 'workflow call failed: no result row', '2026-10-04T09:10:00Z')
+  if (!inputsAt(i, slug, '2026-10-04T12:00:00Z').autoRetryWhy.startsWith('needs a human')) fails.push('(i) a stale question reads answered')
+
+  // (ii) Answered: the entry, the section removed; the verdict reads the spent budget, and hand-back starts the fresh
+  // stretch, stamping auto_retry_sha with this block. An identical re-block then writes no run and is a fresh ask.
+  const answered = copyDir(d0, path.join(tmp, 'F-answered'))
+  answerNote(answered, slug, entry)
+  const t0 = fStatus(answered, RF).tasks.find((t) => t.slug === slug)
+  const v0 = inputsAt(answered, slug)
+  if (!t0 || 'needsHuman' in t0) fails.push('(ii) status still carries needsHuman')
+  if (v0.autoRetryWhy !== 'budget: 2/2 used' || v0.fingerprint !== fp || fmKey(fRead(answered, slug), 'auto_retry_sha') === fp) {
+    fails.push(`(ii) answered: ${JSON.stringify([v0.autoRetryWhy, v0.fingerprint, fmKey(fRead(answered, slug), 'auto_retry_sha')])}`)
+  }
+  const answeredDir = copyDir(answered, path.join(tmp, 'F-answered-snapshot'))
+  const hb = fHandBack(answered, slug)
+  const after = fRead(answered, slug)
+  if (hb.rc !== 0) fails.push(`(ii) hand-back exited ${hb.rc}: ${hb.err}`)
+  if (!fNext(answered, RF).restart.includes(slug)) fails.push('(ii) next does not restart it')
+  if (fmKey(after, 'auto_retries_used') !== undefined || fmKey(after, 'auto_retry_sha') !== fp || !after.includes(entry)) {
+    fails.push(`(ii) after the hand-back: ${JSON.stringify([fmKey(after, 'auto_retries_used'), fmKey(after, 'auto_retry_sha'), after.includes(entry)])}`)
+  }
+  const runs = runCount(after)
+  fRestart(answered, slug, '2026-10-04T09:01:00Z')
+  fBlock(answered, RF, slug, 'plan-blocked', FC, '2026-10-04T09:30:00Z')
+  const re = fRead(answered, slug)
+  const v1 = inputsAt(answered, slug, '2026-10-04T09:30:00Z')
+  if (runCount(re) !== runs || v1.fingerprint !== fp || v1.autoRetryWhy !== 'same feedback as the block last re-entered' ||
+    fmKey(re, 'auto_retry_sha') !== fp || !re.includes(entry)) {
+    fails.push(`(ii) re-blocked: ${JSON.stringify([runCount(re), runs, v1.fingerprint, v1.autoRetryWhy, fmKey(re, 'auto_retry_sha')])}`)
+  }
+  const reblockedDir = answered
+
+  // (iii) The race: with budget left once the section is gone, the live lead's retry re-enters it first; hand-back
+  // then refuses a running note, and the retry spent a budget slot instead of a fresh stretch.
+  const race = copyDir(d0, path.join(tmp, 'F-race'))
+  setKey(race, slug, 'auto_retries', 3)
+  answerNote(race, slug, entry)
+  const at0 = fmKey(fRead(race, slug), 'auto_retry_at')
+  const v2 = inputsAt(race, slug)
+  if (v2.autoRetry !== true) fails.push(`(iii) the verdict reads ${v2.autoRetryWhy}`)
+  const ar = fAutoRetry(race, RF, slug, F_NOW, ['--auto-retries', '3', '--fingerprint', fp])
+  if (ar.rc !== 0 || fmKey(fRead(race, slug), 'auto_retry_at') === at0) fails.push(`(iii) auto-retry exited ${ar.rc}: ${ar.err}`)
+  const hb3 = fHandBack(race, slug)
+  const t3 = fRead(race, slug)
+  if (hb3.rc !== 1 || !hb3.err.includes("status is 'in_progress'") || !t3.includes(entry) || fmKey(t3, 'auto_retries_used') !== '3') {
+    fails.push(`(iii) hand-back after the retry: ${JSON.stringify([hb3.rc, hb3.err, fmKey(t3, 'auto_retries_used')])}`)
+  }
+  return { fails, fp, q: FQ, a: F_ANSWER, date: F_DATE, slug, entry, answeredDir, reblockedDir }
+}
+
 const fxA = await buildA()
 const dB0 = buildBBase()
 const dBC = copyDir(dB0, path.join(tmp, 'B-pristine'))
-const fx = { A: fxA, B: buildB(dB0), C: buildC(dBC), D: buildD(), E: buildE() }
+const fx = { A: fxA, B: buildB(dB0), C: buildC(dBC), D: buildD(), E: buildE(), F: buildF() }
 
 // ---- the prose ------------------------------------------------------------------------------------------------
 
@@ -381,11 +620,12 @@ const IN_COUNT = ['merged', 'integrating', 'awaiting-integration', 'running', 'q
 const COUNT_KEY = { merged: 'merged', integrating: 'integrating', 'awaiting-integration': 'awaitingIntegration', running: 'running', queued: 'queued', 'set-aside': 'setAside' }
 // Repair § 2's classes, first-match in this order: a RACE re-verify in flight first (the lead's own procedure), then
 // RACE and a PR-less merge ahead of merged-never-marked and at Integration (both also match a RACE / UNVERIFIED
-// task), PR CLOSED ahead of awaiting Integration, and a plan-block after a descope ahead of the descopable one and
-// both ahead of the own run they also match.
+// task), PR CLOSED ahead of awaiting Integration, a plan-block after a descope ahead of the descopable one, and both
+// ahead of the automatic retry (a descope is judged first, as execute's step 1.2 judges it) and of the own run they
+// also match; the automatic retry and a `## Needs you` question ahead of every class that asks or hands back.
 const LABELS = ['RACE re-verify in flight', 'RACE', 'PR-less merge', 'merged into another base', 'merged, never marked', 'merge hold', 'live', 'PR CLOSED / branch missing',
-  'awaiting Integration', 'queued', 'at Integration', 'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'plan-blocked after a descope', 'plan-blocked, descopable',
-  'own run', 'gate']
+  'awaiting Integration', 'queued', 'plan-blocked after a descope', 'plan-blocked, descopable', 'retry (automatic)', 'needs you', 'at Integration',
+  'revise (automatic)', 'revise stopped', 'review-blocked, rejected', 'own run', 'gate']
 const ROUTES = ['Stale anchor ref', 'The raise', 'A `merge-task:` own-run set-aside', 'A CLOSED PR or a missing branch', 'Recut', 'Leash', 'Hand-off']
 // Status's recommended actions, first-match in this order: the lineage before the version (a legacy note can be
 // a close-out), and an open escalation before every reinstate, wait and resume.
@@ -425,6 +665,16 @@ function numbered(text) {
   for (const l of (text ?? '').split('\n')) {
     const m = l.match(/^\d+\. (.*)$/)
     if (m) out.push(m[1])
+    else if (out.length && /^\s+\S/.test(l)) out[out.length - 1] += ' ' + l.trim()
+    else if (out.length && l.trim()) break
+  }
+  return out
+}
+// `- ` items with their indented continuation lines joined (a line at column 0 ends the list).
+function bullets(text) {
+  const out = []
+  for (const l of (text ?? '').split('\n')) {
+    if (l.startsWith('- ')) out.push(l.slice(2))
     else if (out.length && /^\s+\S/.test(l)) out[out.length - 1] += ' ' + l.trim()
     else if (out.length && l.trim()) break
   }
@@ -532,7 +782,7 @@ function check({ status, repair, fx }) {
   // actions: the first-match order is the precedence, with no override on top: the lineage before the version,
   // and the open escalation (an undecided RACE or a possible PR-less merge) before every reinstate, wait and
   // resume, the drain's included; a drain nothing is draining resumes; a live queue points at repair's live-queue
-  // mode for the set-asides the lead never re-enters by itself.
+  // mode for the set-asides the lead never re-enters by itself (ADR 0033: its automatic retry re-enters the rest).
   const items = numbered(labelledRaw(s4raw, 'Recommended action'))
   const liveItem = items[ACTIONS.indexOf('a live queue')] ?? ''
   const drainItem = items[ACTIONS.indexOf('`pause_requested`')] ?? ''
@@ -542,8 +792,8 @@ function check({ status, repair, fx }) {
     !prec.includes('The order is the precedence, with no override on top of it') || !prec.includes('Lineage (1, 2) comes before the version (3, 4)') ||
     !prec.includes(`An open escalation (${RUN.escalation}) comes before every reinstate, wait and resume (${RUN.escalation + 1} to ${RUN.nothing})`) ||
     !drainItem.includes('nothing is draining it, and `/thread:execute [[<rollout>]]` resumes the drain') ||
-    !liveItem.includes('other than an `autoRevise: true` one or a descopable `plan-blocked` one is never re-entered by the live lead itself') ||
-    !liveItem.includes('its live-queue mode hands those back')) fails.push('actions')
+    !liveItem.includes('Every other set-aside task is never re-entered by the live lead itself') ||
+    !liveItem.includes('its live-queue mode asks you those and hands each back on your answer')) fails.push('actions')
 
   // lineage (status § 1 and repair § 1): a legacy note gets execute § 2's remedy; any other non-5 version is
   // unsupported; incomplete and supersede are stops.
@@ -601,7 +851,7 @@ function check({ status, repair, fx }) {
     !labelled(r4raw, 'A `merge-task:` own-run set-aside', { item: true }).includes('it merges through case (ii) when main has not moved') ||
     fx.B.fails.length) fails.push('integration-only')
 
-  // stages: the 18 classes, each once, and § 4's per-stage routes.
+  // stages: the 20 classes, each once, and § 4's per-stage routes.
   if (JSON.stringify(clsRows.map((c) => c[0].slice(2, -2)).sort()) !== JSON.stringify([...LABELS].sort()) ||
     !ROUTES.every((l) => r4raw.split('\n').some((x) => x.startsWith(`- **${l}`))) ||
     !r4.includes('lead-integrate.py set-aside --note <task note> --kind integration')) fails.push('stages')
@@ -694,12 +944,18 @@ function check({ status, repair, fx }) {
 
   // closed-pr: a CLOSED PR (or a missing branch) on an awaiting-Integration, integrating or at-Integration task is
   // input-gated, never left to the loop; it keeps its pr:, so hand-back follows a restore only when it is set aside.
+  // An at-Integration set-aside with no pr: (which hand-back refuses, fixture F) is the same class: its restore
+  // finds its branch's PR first and writes `pr:` as a lead-held note; at Integration and status's row route it there.
   const cp = cls['PR CLOSED / branch missing'] ?? ''
   const cpr = labelled(r4raw, 'A CLOSED PR or a missing branch', { item: true })
+  const intRow = reRows.find((c) => c[0] === '`integration`') ?? []
   if (!cp.includes("input-gated: § 4's restore, recut, defer or leave; never left to the loop") || !cp.includes('awaiting Integration, integrating') ||
+    !cp.includes('set aside at Integration with no `pr:`') || !cp.includes('which `hand-back` refuses') ||
     !cpr.includes('A CLOSED PR keeps its `pr:`') || !cpr.includes('then `hand-back` **only when the task is set aside**') ||
     !cpr.includes('`prepare` never reads the PR state') || /refuses an at-Integration note with no `pr:`/.test(collapse(rb)) ||
-    !flag('PR CLOSED:').includes('`prepare` never reads the PR state')) fails.push('closed-pr')
+    !cpr.includes('--head <inputs.branch> --state all') || !cpr.includes('a lead-held note (§ 1)') ||
+    !atI.includes("One with no `pr:` is **PR CLOSED / branch missing**'s") || !(intRow[4] ?? '').includes('with no `pr:`') ||
+    !flag('PR CLOSED:').includes('`prepare` never reads the PR state') || fx.F.nopr.fails.length) fails.push('closed-pr')
 
   // merged: M1 resume, never resolve; M2 the ancestry check; M3 the vault history; M4 never the status; M5 a dated
   // ## Notes record; M6 copied to the Completion log; M7 pr: only on Lachy's word.
@@ -728,11 +984,12 @@ function check({ status, repair, fx }) {
   ]
   if (!L.every(Boolean) || fx.C.fails.length) fails.push('live')
 
-  // raise: one round, only at the ceiling, announced and recorded; a second block asks.
+  // raise: one round, only at the ceiling, announced and recorded; past the automatic retry's own raise, only on
+  // Lachy's word.
   const rz = labelled(r4raw, 'The raise', { item: true })
   const incs = [...rb.matchAll(/lastRound \+ (\d+)/g)].map((m) => m[1])
   if (!rz.includes('`max_review_rounds: <lastRound + 1>`') || !rz.includes('is ≤ `lastRound`') || !rz.includes('Announce it') ||
-    !rz.includes('`## Notes`') || !rz.includes('ask Lachy instead of raising again') || !incs.length || incs.some((n) => n !== '1')) fails.push('raise')
+    !rz.includes('`## Notes`') || !rz.includes("a further raise is only on Lachy's word") || !incs.length || incs.some((n) => n !== '1')) fails.push('raise')
 
   // defer: the dependent closure only (transitive, through tombstones), never a file-overlap reading.
   if (!r5.includes('transitive') || !r5.includes('`depends-on:`') || !r5.includes('`blocked-by:`') || !r5.includes('`merged_into:`') ||
@@ -781,7 +1038,7 @@ function check({ status, repair, fx }) {
     !dRow || !ticks(dRow[4]).includes('descope') || !dRow[4].includes('then `hand-back`, then its own call') ||
     !descoped.includes("`grep -m1 '^- descoped (automatic)' ~/repos/obsidian/Work/Tasks/<slug>.md`") ||
     !descoped.includes('every automatic descope, and any wrong owner') ||
-    !liveByName.includes('a `plan-blocked` one it leaves set aside (the verb asked, or the notes do not settle it) is repair\'s') ||
+    !liveByName.includes("A `plan-blocked` one whose descope the verb refused (exit 3) is repair's too") ||
     !undo(d3) || !undo(descoped) || !d3.includes('verbatim only') || !d3.includes('only the caller\'s judgement guards that case') ||
     !r6.includes('automatic descopes (task + part + follow-up or owner)') ||
     !collapse(raw(repair, /^## Don'ts/)).includes("Don't descope by hand, or twice.")) fails.push('descope')
@@ -795,7 +1052,7 @@ function check({ status, repair, fx }) {
     !sbCls.includes('never a silent hand-back') ||
     !dCls.includes('with no `## Scope decision (automatic)` section, or one whose `descope_armed:` still stands') ||
     !sbRow || !sbRow[4].includes("Lachy's decision (repair § 3), then `hand-back`") || !sbRow[4].includes('never a silent hand-back') ||
-    !dRow || !dRow[4].includes('agent-fixable → `hand-back`, then its own call; input-gated → Lachy\'s decision (repair § 3) first') ||
+    !dRow || !dRow[4].includes("otherwise the automatic retry, then Lachy's decision (repair § 3)") ||
     !liveByName.includes("is always Lachy's decision, never a silent hand-back") ||
     !collapse(raw(repair, /^## Don'ts/)).includes('never an own run handed back silently')) fails.push('second-block')
 
@@ -879,6 +1136,96 @@ function check({ status, repair, fx }) {
   const queuedRow = sb.split('\n').find((l) => l.startsWith('| `queued` | **Queued** |'))
   if (queuedRow != null && (!queuedRow.includes('the first queued task in rank order that carries `solo` and has no `waitingOn`') ||
     !queuedRow.includes('a Solo task with a `waitingOn` holds nothing'))) fails.push('queued-solo')
+
+  // ---- the automatic retry (p16-5, ADR 0033) ----
+  const rDontsC = collapse(raw(repair, /^## Don'ts/))
+  const row = (label) => clsRows.find((c) => c[0] === `**${label}**`) ?? []
+  const THREE = 'the auto-retry budget is spent, the fingerprint repeated, or `needsHuman` is set'
+  const r3b = labelled(r3raw, '3b')
+  const r3bRaw = labelledRaw(r3raw, '3b')
+
+  // auto-retry (repair): agent-fixable is execute's now. A set-aside `inputs` reads as `autoRetry: true` or cooling
+  // is the lead's (a hand-back would reset its budget); every other one reaches repair because its automatic retry
+  // is over (the three causes) or `autoRetryWhy` names a cause that is his, and is asked (§ 3b), never judged from
+  // its feedback. Classes are judged before the answer, so the hand-back his answer earns is never skipped. The
+  // Leash: every hand-back but § 3d's follows his answer and starts a fresh stretch; the description and a Don't
+  // say the same. Fixture F: each verdict, and the predicate picks exactly the three he owns.
+  const ra = row('retry (automatic)')
+  const agentFix = labelled(r2raw, "Agent-fixable is execute's now (ADR 0033).")
+  const classed = labelled(r2raw, 'Classed before the answer.')
+  const leash = labelled(r4raw, 'Leash', { item: true })
+  const desc = (repair.match(/^description: (.*)$/m) ?? [])[1] ?? ''
+  if (!(ra[1] ?? '').includes('`autoRetry: true`') || !(ra[1] ?? '').includes('`autoRetryAfter`') ||
+    !(ra[2] ?? '').startsWith('nothing: the lead re-enters it') || !(ra[2] ?? '').includes('never a hand-back') ||
+    ![THREE, '`autoRetryWhy`', '`autoRetryError`', 'A usage limit that kills an agent mid-run is an infra block, never a quota block'].every((k) => agentFix.includes(k)) ||
+    !classed.includes('never re-class a task after recording his answer') || !classed.includes('fresh automatic-retry stretch he chose') ||
+    /judged from the feedback/.test(collapse(rb)) || !r3b.includes(THREE) || /a second block, a second raise/.test(r3b) ||
+    !['at Integration', 'revise stopped', 'review-blocked, rejected', 'own run'].every((l) => (cls[l] ?? '').includes('§ 3b') && !(cls[l] ?? '').includes('agent-fixable → hand back')) ||
+    !rDontsC.includes("Don't hand back what the lead retries.") || rDontsC.includes('Hand them back silently') ||
+    !leash.includes("every other hand-back follows Lachy's answer (§ 3b)") || !leash.includes('fresh automatic-retry stretch') ||
+    desc.includes('auto-retries agent-fixable blocks') || fx.F.split.fails.length) fails.push('auto-retry')
+
+  // retries (status): § 2 reads the verdict; **Automatic retry first** (before the re-entry table) shows a count only
+  // where the verdict reached the budget, in disjoint forms (off, then quota, then n/N), `?` only for an unresolved
+  // budget, and the cool-down; the set-aside cell, the example and action 12 say the same. Fixture F: which verdicts
+  // carry a budget.
+  const reIn = labelled(raw(status, /^### 2\. /), 'Re-entry inputs.')
+  const arf = labelled(s4raw, 'Automatic retry first (ADR 0033).')
+  const FORMS = ['only when `autoRetryBudget` is non-null', '`auto-retry off`', '`quota <quotaRetriesUsed>/5`', '`auto-retry <autoRetriesUsed>/<autoRetryBudget.autoRetries.value>`']
+  const setAsideCell = (tableRows(s4raw).find((c) => c[0] === '`set-aside`') ?? [])[2] ?? ''
+  const exLines = example.slice(example.findIndex((l) => /^Set aside \(\d+\)$/.test(l)) + 1)
+  const setAsideGroup = exLines.slice(0, Math.max(0, exLines.findIndex((l) => !l.startsWith('  '))))
+  const action12 = items[ACTIONS.indexOf('awaiting integration')] ?? ''
+  if (!['autoRetry', 'autoRetryWhy', 'autoRetryAfter', 'autoRetryError', 'autoRetryClass', 'autoRetryBudget', 'autoRetriesUsed', 'quotaRetriesUsed', 'fingerprint', 'prUrlError']
+    .every((k) => reIn.includes(`\`${k}\``)) ||
+    !before(s4raw, '**Automatic retry first (ADR 0033).**', '**Set-aside re-entry.**') ||
+    !FORMS.every((k, i) => i === 0 || before(arf, FORMS[i - 1], k)) ||
+    !['`autoRetryClass` alone never shows a count', 'only when `autoRetryBudget` is null and `autoRetryWhy` starts `auto_retries unresolved`',
+      '`cooling until <autoRetryAfter>`', '`autoRetry: true`', '`autoRetryAfter`'].every((k) => arf.includes(k)) ||
+    !setAsideCell.includes('**Automatic retry first**') || !setAsideGroup.some((l) => /auto-retry \d\/\d/.test(l)) ||
+    !action12.includes('`autoRetry: true`') || fx.F.render.fails.length) fails.push('retries')
+
+  // needs-you (both): status lists the decisions that are Lachy's and that no Drift line routes, each set-aside line
+  // pointing at repair and carrying its question; an answered block reads `answered` until a hand-back re-enters it
+  // (the two greps, run on fixture F's answered and re-blocked notes), and a `-` entry never counts. Repair asks a
+  // `## Needs you` question (never on a gate), records his answer in the format fixture F's entry has, removes the
+  // section in every mode, hands back at its stage, and treats the live lead's winning retry as no error.
+  const ny = labelledRaw(s4raw, 'Needs you.')
+  const nyC = collapse(ny)
+  const nyItems = bullets(ny)
+  const gateItem = nyItems.find((b) => b.startsWith('each gate-pending gate')) ?? ''
+  const setItem = nyItems.find((b) => b.startsWith('each set-aside task')) ?? ''
+  const nyRow = row('needs you')
+  const gateCls = cls.gate ?? ''
+  const A_ = fx.F.answer
+  const tpl = (r3bRaw.match(/`(- <YYYY-MM-DD> needs you \(block <fingerprint>\): [^`]*)`/) ?? [])[1] ?? ''
+  const rendered = tpl.replace('<YYYY-MM-DD>', A_.date).replace('<fingerprint>', A_.fp).replace('<the question, verbatim>', A_.q).replace('<his answer, verbatim>', A_.a)
+  const NOTE_AT = " ~/repos/obsidian/Work/Tasks/<slug>.md`"
+  const needle = (ny.replace(/\s*\n\s*/g, ' ').match(/`grep -m1 -F '([^']+)' ~\/repos\/obsidian\/Work\/Tasks\/<slug>\.md`/) ?? [])[1]
+  const shaGrep = nyC.includes("`grep -m1 '^auto_retry_sha:'" + NOTE_AT)
+  const grepIn = (args, dir) => spawnSync('grep', [...args, path.join(dir, `${A_.slug}.md`)], { encoding: 'utf8' }).stdout.trim()
+  const greps = needle && shaGrep && [A_.answeredDir, A_.reblockedDir].every((d) => grepIn(['-m1', '-F', needle.replace('<fingerprint>', A_.fp)], d) === A_.entry) &&
+    grepIn(['-m1', '^auto_retry_sha:'], A_.answeredDir) !== `auto_retry_sha: ${A_.fp}` && grepIn(['-m1', '^auto_retry_sha:'], A_.reblockedDir) === `auto_retry_sha: ${A_.fp}`
+  if (!s2.includes('`needsHuman`') ||
+    !['`autoRetry: false`', 'no `autoRetryAfter`', '`autoRevise: false`', 'or `prUrlError` for an `autoRevise: true` row', 'a code-writing `review` with no `pr:`',
+      'answered: awaiting /thread:repair', 'no line or a value other than `<fingerprint>`', 'A `-` entry never counts',
+      'A set-aside task the RACE / UNVERIFIED, Merged into another base, Merged never marked, PR CLOSED or Possible PR-less merge flag names is no item',
+      '(action 7 or 11; under a live queue, action 10 adds it)', 'A Rung drift excludes nothing', 'Offline, only the RACE / UNVERIFIED flag renders, so only it excludes',
+      'A merge hold is no item', 'A cooling task is no item'].every((k) => nyC.includes(k)) ||
+    !setItem.includes('`→ asks:`') || !gateItem.includes('`→ asks:`') || !greps ||
+    !action11.includes('a Needs you item or a `plan-blocked` one (repair § 3 judges its descope first)') ||
+    !liveByName.includes('a set-aside task the Needs you block leaves to its Drift line') ||
+    !example.some((l) => /^Needs you \(\d+\)$/.test(l)) || !example.some((l) => l.includes('→ asks:')) ||
+    !(nyRow[1] ?? '').includes('(`setAsideAt: run` or `integration`, never a gate)') ||
+    !['§ 3b', '`## Repair input`', 'hands back at its stage'].every((k) => (nyRow[2] ?? '').includes(k)) ||
+    !['`→ asks:`', 'before any sign-off', 'never hand back'].every((k) => gateCls.includes(k)) ||
+    !['`- <YYYY-MM-DD> needs you (block <fingerprint>): "<the question, verbatim>" → <his answer, verbatim>`', 'Remove the `## Needs you` section, in every mode',
+      "the note's `auto_retry_sha:` is absent or differs from it", 'A `-` entry never counts', 'hands back without asking again',
+      "re-read the note's `auto_retry_at:`", 'absent counts as a value', "`hand-back` then exits 1 with `status is 'in_progress'`", 'That is no error',
+      'a signed task takes no `## Repair input`'].every((k) => r3b.includes(k)) ||
+    !(cls['own run'] ?? '').includes('A code-writing `review` with no `pr:` is asked too') ||
+    !rDontsC.includes("Don't hand back an answered question with its `## Needs you` still in place.") ||
+    !tpl || rendered !== A_.entry || A_.fails.length || fx.F.held.fails.length) fails.push('needs-you')
   return [...new Set(fails)]
 }
 
@@ -940,6 +1287,11 @@ test('fixture E: a RACE under the lead reads integrating, and resume holds it an
   assert.deepEqual(fx.E.fails, [])
 })
 
+test('fixture F: each set-aside reads its automatic-retry verdict, and a needs-you answer re-enters once, then asks afresh', () => {
+  assert.deepEqual({ split: fx.F.split.fails, render: fx.F.render.fails, held: fx.F.held.fails, nopr: fx.F.nopr.fails, answer: fx.F.answer.fails },
+    { split: [], render: [], held: [], nopr: [], answer: [] })
+})
+
 // ---- the rules -------------------------------------------------------------------------------------------------
 
 test('status and repair hold every queue rule', () => {
@@ -950,7 +1302,7 @@ test('status and repair hold every queue rule', () => {
 
 const RULES = ['states', 'set-aside', 'log-line', 'owner', 'drift', 'actions', 'lineage', 'read-only', 'reverse-lineage', 'integration-only',
   'stages', 'first-match', 'another-base', 'race-hold', 'race-in-flight', 'closed-pr', 'merged', 'live', 'raise', 'defer', 'anchor', 'recut', 'hand-off',
-  'signed-gate', 'no-wave', 'rung', 'descope', 'second-block', 'settings', 'queued-solo']
+  'signed-gate', 'no-wave', 'rung', 'descope', 'second-block', 'settings', 'queued-solo', 'auto-retry', 'retries', 'needs-you']
 const CONTROLLED = new Set()
 
 // Replaces the first match of `from`. Whitespace inside it matches any run of whitespace, so a reflowed line still
@@ -1050,7 +1402,7 @@ test('control (legacy P): the version stop ahead of the reverse lineage in statu
   only({ status: swapItems(real.status, 2, 3) }, 'actions', 'legacy P, status')
 })
 test("control: a live queue that never points at repair's live-queue mode fails actions", () => {
-  only(st('its live-queue mode hands those back', 'it waits for the run, which hands those back'), 'actions', 'live-queue mode')
+  only(st('its live-queue mode asks you those and hands each back on your answer', 'it waits for the run, which hands those back'), 'actions', 'live-queue mode')
 })
 test('control: two recommended actions swapped fails actions', () => {
   only({ status: swapItems(real.status, 4, 5) }, 'actions', 'swap')
@@ -1276,8 +1628,8 @@ test('control: fixture C failing fails live', () => {
 test('control: a raise of two rounds fails raise', () => {
   only(rp('`max_review_rounds: <lastRound + 1>`', '`max_review_rounds: <lastRound + 2>`'), 'raise', '+ 2')
 })
-test('control: a second raise without asking fails raise', () => {
-  only(rp('ask Lachy instead of raising again', 'raise it once more'), 'raise', 'no ask')
+test("control: a raise without Lachy's word fails raise", () => {
+  only(rp("a further raise is only on Lachy's word", 'repair raises once more'), 'raise', 'no word')
 })
 test('control: a file-overlap successor reading fails defer', () => {
   only(rp('1. **Compute the dependent closure.**', '1. **Compute the dependent closure** and note file-overlap successors.'), 'defer', 'file overlap')
@@ -1351,7 +1703,7 @@ test('control: § 3d handing back on exit 3 fails descope', () => {
 test('control: the plan-blocked re-entry row without descope fails descope', () => {
   const l = lineWith(real.status, '| `plan-blocked`, no `## Scope decision (automatic)`')
   const cells = l.split(' | ')
-  only(st(l, [...cells.slice(0, 4), 'otherwise as an own run (repair § 2): agent-fixable → `hand-back`, then its own call; input-gated → Lachy\'s decision (repair § 3) first |'].join(' | ')),
+  only(st(l, [...cells.slice(0, 4), "otherwise the automatic retry, then Lachy's decision (repair § 3), then `hand-back`, then its own call |"].join(' | ')),
     'descope', 'no descope in the row')
 })
 test('control: the descopable class after own run fails first-match', () => {
@@ -1411,7 +1763,151 @@ test("control: the Queued row's old started-only solo rule fails queued-solo", (
     'queued-solo', 'started-only')
 })
 
-test('the rules are all named (30) and each has a control', () => {
-  assert.equal(RULES.length, 30)
+// auto-retry (p16-5)
+test('control: § 3b asking only on a second block or raise fails auto-retry', () => {
+  only(rp('a set-aside whose automatic retry is over (the auto-retry budget is spent, the fingerprint repeated, or `needsHuman` is set)', 'a second block, a second raise'),
+    'auto-retry', '3b')
+})
+test('control: an own run handed back as agent-fixable fails auto-retry', () => {
+  only(rp('input-gated (§ 3b): ask why it is his (`autoRetryWhy`), then on his word hand back (§ 4) → its own call.',
+    'agent-fixable → hand back (§ 4) → its own call; input-gated → § 3b first.'), 'auto-retry', 'own run')
+})
+test('control: a retry (automatic) class that hands back fails auto-retry', () => {
+  only(rp('nothing: the lead re-enters it', 'hand back (§ 4): the lead re-enters it'), 'auto-retry', 'retry class')
+})
+test("control: the old silent hand-back Don't fails auto-retry", () => {
+  only(rp("- **Don't hand back what the lead retries.**", "- **Don't ask the user about agent-fixable blocks.** Hand them back silently (once)."), 'auto-retry', 'donts')
+})
+test('control: the old description fails auto-retry', () => {
+  only(rp('leaves agent-fixable blocks to execute', 'auto-retries agent-fixable blocks'), 'auto-retry', 'description')
+})
+test('control: a Leash with no fresh stretch fails auto-retry', () => {
+  only(rp('`hand-back` starts a fresh automatic-retry stretch', '`hand-back` re-enters it'), 'auto-retry', 'leash')
+})
+test('control: no infra reading of a usage limit fails auto-retry', () => {
+  only(rp(' A usage limit that kills an agent mid-run is an infra block, never a quota block: it gets the infra cool-downs and the budget, then Lachy.', ''),
+    'auto-retry', 'infra')
+})
+test('control: a class re-read after the answer fails auto-retry', () => {
+  only(rp('never re-class a task after recording his answer', 're-class a task after recording his answer'), 'auto-retry', 're-class')
+})
+test('control: fixture F split failing fails auto-retry', () => {
+  only({ fx: { ...real.fx, F: { ...real.fx.F, split: { fails: ['retry: no budget'] } } } }, 'auto-retry', 'fixture F split')
+})
+
+// retries (p16-5)
+test('control: no auto-retry n/N form fails retries', () => {
+  only(st('`auto-retry <autoRetriesUsed>/<autoRetryBudget.autoRetries.value>`', '`auto-retry <autoRetriesUsed>`'), 'retries', 'no n/N')
+})
+test('control: a ? on any null budget fails retries', () => {
+  only(st('only when `autoRetryBudget` is null and `autoRetryWhy` starts `auto_retries unresolved`', 'when `autoRetryBudget` is null'), 'retries', '?')
+})
+test('control: a count from autoRetryClass alone fails retries', () => {
+  only(st('`autoRetryClass` alone never shows a count', '`autoRetryClass` shows the quota count'), 'retries', 'class alone')
+})
+test('control: an example with no retry count fails retries', () => {
+  only({ status: real.status.replace(/ · auto-retry \d\/\d/g, '') }, 'retries', 'example')
+})
+test('control: action 12 without the automatic retry fails retries', () => {
+  only(st("an `autoRetry: true` or cooling set-aside (the lead's automatic retry re-enters it; a `plan-blocked` one is action 11's), ", ''), 'retries', 'action 12')
+})
+test('control: § 2 without autoRetryWhy fails retries', () => {
+  only(st('`autoRetry`, `autoRetryWhy`, `autoRetryAfter`', '`autoRetry`, `autoRetryAfter`'), 'retries', '§ 2')
+})
+test('control: fixture F render failing fails retries', () => {
+  only({ fx: { ...real.fx, F: { ...real.fx.F, render: { fails: ['asks: a budget'] } } } }, 'retries', 'fixture F render')
+})
+
+// needs-you (p16-5)
+test('control: an answered question left in place fails needs-you', () => {
+  only(rp('Remove the `## Needs you` section, in every mode', 'Leave the `## Needs you` section, in every mode'), 'needs-you', 'leave')
+})
+test('control: a section removed only where hand-back may run fails needs-you', () => {
+  only(rp('Remove the `## Needs you` section, in every mode', 'Remove the `## Needs you` section where hand-back may run (§ 1)'), 'needs-you', 'mode')
+})
+test('control: the lost race read as an error fails needs-you', () => {
+  only(rp('That is no error', 'Report it as an error'), 'needs-you', 'race')
+})
+test('control: an answer recorded on any block fails needs-you', () => {
+  only(rp(" while the note's `auto_retry_sha:` is absent or differs from it", ''), 'needs-you', 'repair sha')
+})
+test('control: status without the auto_retry_sha grep fails needs-you', () => {
+  only(st("`grep -m1 '^auto_retry_sha:' ~/repos/obsidian/Work/Tasks/<slug>.md`", "the note's `auto_retry_sha:`"), 'needs-you', 'status sha')
+})
+test('control: repair counting a - entry fails needs-you', () => {
+  const r3 = labelledRaw(raw(real.repair, /^### 3\. /), '3b')
+  only({ repair: real.repair.replace(r3, edit(r3, 'A `-` entry never counts.', '')) }, 'needs-you', 'repair -')
+})
+test('control: status without the exclusion sentence fails needs-you', () => {
+  only(st('A set-aside task the RACE / UNVERIFIED, Merged into another base, Merged never marked, PR CLOSED or Possible PR-less merge flag names is no item',
+    'A set-aside task a drift flag names is still an item'), 'needs-you', 'exclusion')
+})
+test('control: status without the offline exclusion fails needs-you', () => {
+  only(st('Offline, only the RACE / UNVERIFIED flag renders, so only it excludes', 'Offline, every flag renders'), 'needs-you', 'offline')
+})
+test('control: a cooling task as an item fails needs-you', () => {
+  only(st('no `autoRetryAfter` and', 'and'), 'needs-you', 'cooling')
+})
+test("control: the seeded revise's prUrlError dropped fails needs-you", () => {
+  only(st(', or `prUrlError` for an `autoRevise: true` row', ''), 'needs-you', 'prUrlError')
+})
+test('control: action 10 without the Drift-line set-asides fails needs-you', () => {
+  only(st('a set-aside task the Needs you block leaves to its Drift line, ', ''), 'needs-you', 'action 10')
+})
+test('control: an example with no question line fails needs-you', () => {
+  only(st(lineWith(real.status, '→ asks: Which') + '\n', ''), 'needs-you', 'example')
+})
+test('control: a needs-you class that takes a gate fails needs-you', () => {
+  only(rp(' (`setAsideAt: run` or `integration`, never a gate)', ''), 'needs-you', 'signal')
+})
+test("control: a gate class without its question fails needs-you", () => {
+  only(rp('beneath them on a `→ asks:` line', 'beneath them'), 'needs-you', 'gate')
+})
+test('control: an answer written to a signed task fails needs-you', () => {
+  only(rp('a signed task takes no `## Repair input`', 'a signed task takes it too'), 'needs-you', 'signed')
+})
+test('control: a PR-less review handed back without asking fails needs-you', () => {
+  only(rp('A code-writing `review` with no `pr:` is asked too', 'A code-writing `review` with no `pr:` is handed back without asking'), 'needs-you', 'no-PR review')
+})
+test("control: status's needle on another entry fails needs-you", () => {
+  only(st("`grep -m1 -F 'needs you (block <fingerprint>)'", "`grep -m1 -F 'answered (block <fingerprint>)'"), 'needs-you', 'needle')
+})
+test('control: no answered line in status fails needs-you', () => {
+  only(st('answered: awaiting /thread:repair', 'answered'), 'needs-you', 'answered')
+})
+test('control: fixture F answer failing fails needs-you', () => {
+  only({ fx: { ...real.fx, F: { ...real.fx.F, answer: { ...real.fx.F.answer, fails: ['(i) a stale question reads answered'] } } } }, 'needs-you', 'fixture F answer')
+})
+test('control: fixture F held failing fails needs-you', () => {
+  only({ fx: { ...real.fx, F: { ...real.fx.F, held: { fails: ['the Drift exclusion'] } } } }, 'needs-you', 'fixture F held')
+})
+
+// closed-pr (p16-5)
+test('control: a no-pr: Integration set-aside outside the CLOSED class fails closed-pr', () => {
+  only(rp('; or set aside at Integration with no `pr:` (`autoRetryWhy` `set aside at Integration with no pr: …`), which `hand-back` refuses', ''), 'closed-pr', 'no pr:')
+})
+test('control: fixture F nopr failing fails closed-pr', () => {
+  only({ fx: { ...real.fx, F: { ...real.fx.F, nopr: { fails: ['hand-back: 0'] } } } }, 'closed-pr', 'fixture F nopr')
+})
+
+// first-match (p16-5): a descope is judged before the automatic retry, and both before the classes that ask.
+test('control: the descopable class after retry (automatic) fails first-match', () => {
+  const row = lineWith(real.repair, '| **plan-blocked, descopable** |')
+  const ra = lineWith(real.repair, '| **retry (automatic)** |')
+  only({ repair: real.repair.replace(row + '\n', '').replace(ra, ra + '\n' + row) }, 'first-match', 'descopable after retry')
+})
+test('control: retry (automatic) after own run fails first-match', () => {
+  const ra = lineWith(real.repair, '| **retry (automatic)** |')
+  const ownRow = lineWith(real.repair, '| **own run** |')
+  only({ repair: real.repair.replace(ra + '\n', '').replace(ownRow, ownRow + '\n' + ra) }, 'first-match', 'retry after own run')
+})
+test('control: needs you after at Integration fails first-match', () => {
+  const nyr = lineWith(real.repair, '| **needs you** |')
+  const atRow = lineWith(real.repair, '| **at Integration** |')
+  only({ repair: real.repair.replace(nyr + '\n', '').replace(atRow, atRow + '\n' + nyr) }, 'first-match', 'needs you late')
+})
+
+test('the rules are all named (33) and each has a control', () => {
+  assert.equal(RULES.length, 33)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
