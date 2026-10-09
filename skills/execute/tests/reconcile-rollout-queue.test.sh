@@ -336,6 +336,67 @@ setkey a status done
 J=$(nxt)
 ok "$(q "$J" 'd["start"]')" '["s"]' "next: once a is done the Solo task starts"
 
+# A queued Solo task's rank beats priority: (p17-2): the head Solo task (the first queued one by rank whose
+# dependencies are met) holds every task ranked below it, whatever their priority:. The 2026-10-03 shape: a
+# Solo pair at normal ranked ahead of three high tasks.
+scen solo-rank
+mkro $'- [[s1]]\n- [[s2]]\n- [[h1]]\n- [[h2]]\n- [[h3]]' 'parallel_ceiling: 4'
+mkt s1 open 'solo: true'; mkt s2 open 'solo: true'
+mkt h1 open 'priority: high'; mkt h2 open 'priority: high'; mkt h3 open 'priority: high'
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["s1"]' "next: a head Solo task at normal starts ahead of high tasks ranked below it"
+ok "$(q "$J" "$holds")" '{"h1":"behind solo [[s1]]","h2":"behind solo [[s1]]","h3":"behind solo [[s1]]","s2":"behind solo [[s1]]"}' \
+  "next: … every task below it waits behind it, the second Solo task included"
+setkey s1 status done
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["s2"]' "next: once it merges the second Solo task is the head and starts alone"
+ok "$(q "$J" "$holds")" '{"h1":"behind solo [[s2]]","h2":"behind solo [[s2]]","h3":"behind solo [[s2]]"}' "next: … the high tasks wait behind it"
+setkey s2 status done
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["h1","h2","h3"]' "next: once both merge the high tasks start"
+
+# Rows above the head Solo task keep priority order among themselves (a low one included) and start ahead of it.
+scen solo-rank-ahead
+mkro $'- [[a]]\n- [[b]]\n- [[s]]\n- [[c]]' 'parallel_ceiling: 4'
+mkt a open 'priority: low'; mkt b open 'priority: high'; mkt s open 'solo: true'; mkt c open 'priority: high'
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["b","a"]' "next: the rows above the head Solo task start in priority order, the low one too"
+ok "$(q "$J" "$holds")" '{"c":"behind solo [[s]]","s":"solo: waits for 2 started task(s) to merge or be set aside"}' \
+  "next: … a high task below the Solo task waits behind it"
+
+# The head is the FIRST queued Solo task by rank: a high task between two Solo rows waits behind the first, and
+# the second waits too. Were the head the last Solo row, h would rank above it and start ahead of s1.
+scen solo-rank-head
+mkro $'- [[s1]]\n- [[h]]\n- [[s2]]' 'parallel_ceiling: 4'
+mkt s1 open 'solo: true'; mkt h open 'priority: high'; mkt s2 open 'solo: true'
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["s1"]' "next: the first Solo row is the head and starts alone"
+ok "$(q "$J" "$holds")" '{"h":"behind solo [[s1]]","s2":"behind solo [[s1]]"}' \
+  "next: … the high task between the two Solo rows and the second Solo row wait behind it"
+
+# A full ceiling holds only the head Solo task and the rows above it on the ceiling: a freed slot goes to one of
+# them, never to a row below the head, which waits behind it whatever its priority: (status's Queued row agrees).
+scen solo-rank-ceiling
+mkro $'- [[a]]\n- [[b]]\n- [[c]]\n- [[s]]\n- [[d]]' 'parallel_ceiling: 2'
+mkt a open; mkt b open; mkt c open; mkt s open 'solo: true'; mkt d open 'priority: high'
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["a","b"]' "next: the rows above the head Solo task fill the ceiling"
+ok "$(q "$J" "$holds")" '{"c":"ceiling: 2/2 slots in use","d":"behind solo [[s]]","s":"ceiling: 2/2 slots in use"}' \
+  "next: … the head and the row above it wait on the ceiling; the high row below the head waits behind it"
+setkey a status done; setkey b status in_progress
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["c"]' "next: a freed slot goes to the row above the head, not to the high row below it"
+ok "$(q "$J" "$holds")" '{"d":"behind solo [[s]]","s":"solo: waits for 2 started task(s) to merge or be set aside"}' \
+  "next: … the head now waits for the started tasks, and d still waits behind it"
+
+# A Solo task its dependency holds is not the head, so it holds nothing (no wedged tail). Passes before and after p17-2.
+scen solo-rank-dep
+mkro $'- [[x]]\n- [[s]]\n- [[c]]' 'parallel_ceiling: 4'
+mkt x in_progress; mkt s open 'solo: true' 'depends-on: [[x]]'; mkt c open 'priority: high'
+J=$(nxt)
+ok "$(q "$J" 'd["start"]')" '["c"]' "next: a Solo task held by its dependency holds nothing below it"
+has "$(q "$J" '[h["reason"] for h in d["hold"] if h["slug"] == "s"]')" "depends on [[x]]" "next: … it waits on its dependency"
+
 # ── --running: the default counts every in_progress note as live ─────────────────────────────────
 scen running
 mkro $'- [[x]]\n- [[y]]' 'parallel_ceiling: 1'
@@ -792,6 +853,73 @@ ok "$(fm gi integrating)|$(grep -c ' integrated path=integrator ' "$D/gi.md")" "
 ok "$(q "$(nxt --running "")" 'd["halt"]')" '"git-env"' "git-env integrate: … next still halts git-env"
 gelog '- 2026-10-02T13:45:00+00:00 git-env ack [[gi]]: refs/heads/master at bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, core.bare false'
 ok "$(q "$(nxt --running "")" '[d["halt"], d["awaitingIntegration"]]')" '[null,["gi"]]' "git-env integrate: after the ack it awaits Integration"
+
+# ── the Integration queue's order (p17-1) ─────────────────────────────────────────────────────────
+# `awaitingIntegration` lists a task a queued task depends on (depends-on or blocked-by) first, then the oldest
+# `ready:` (compared as instants; missing or unparseable last), then schedule order. `integrating` stays first, and
+# `hold` stays in schedule order.
+scen lane-order
+mkro $'- [[a]]\n- [[b]]\n- [[c]]\n- [[d]]\n- [[e]]\n- [[f]]'
+mkt a review 'pr: https://github.com/o/r/pull/1' 'ready: 2026-10-02T12:00+00:00'
+mkt b review 'pr: https://github.com/o/r/pull/2' 'ready: 2026-10-02T10:00+00:00'
+mkt c review 'pr: https://github.com/o/r/pull/3' 'ready: 2026-10-02T11:00+00:00'
+mkt d open
+mkt e review 'pr: https://github.com/o/r/pull/5' 'ready: 2026-10-02T09:00+00:00' 'integrating: 2026-10-02T13:00+00:00'
+mkt f open
+J=$(nxt)
+ok "$(q "$J" '[d["awaitingIntegration"], d["integrating"]]')" '[["b","c","a"],["e"]]' "lane-order: the oldest ready: first, not schedule order; an integrating task stays in integrating"
+setkey d depends-on '["[[a]]"]'
+J=$(nxt)
+ok "$(q "$J" 'd["awaitingIntegration"]')" '["a","b","c"]' "lane-order: a task a queued task depends on goes first"
+ok "$(q "$J" "$holds")" '{"d":"depends on [[a]] (review)"}' "lane-order: … while its dependant is held on it"
+setkey d depends-on '["[[A]]"]'
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["a","b","c"]' "lane-order: the dependency's slug compares case-insensitively"
+delkey d depends-on; setkey d blocked-by '["[[c]]"]'
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["c","b","a"]' "lane-order: blocked-by counts like depends-on"
+setkey f depends-on '["[[a]]"]'
+J=$(nxt)
+ok "$(q "$J" 'd["awaitingIntegration"]')" '["c","a","b"]' "lane-order: two waited-on tasks go first, oldest ready: first among them"
+ok "$(q "$J" '[h["slug"] for h in d["hold"]]')" '["d","f"]' "lane-order: hold stays in schedule order"
+delkey f depends-on; delkey d blocked-by; setkey d depends-on '["[[a]]"]'
+setkey d status in_progress
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["b","c","a"]' "lane-order: a running dependant is not waiting on the lane"
+setkey d status blocked
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["b","c","a"]' "lane-order: nor is a set-aside one"
+setkey d status open; delkey d depends-on
+delkey b ready
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["c","a","b"]' "lane-order: no ready: sorts after every stamped task"
+setkey b ready 'yesterday'
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["c","a","b"]' "lane-order: an unparseable ready: sorts last too"
+setkey a ready '2026-10-02T11:00+00:00'
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["a","c","b"]' "lane-order: an equal ready: falls back to schedule order"
+setkey a ready '2026-10-02T21:00+10:00'; setkey c ready '2026-10-02T11:30Z'
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["a","c","b"]' "lane-order: ready: compares as instants (21:00+10:00 is before 11:30Z)"
+setkey a ready '2026-10-02T12:00+00:00'; setkey b ready '2026-10-02T10:00+00:00'; setkey c ready '1970-01-01T00:00Z'
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["c","b","a"]' "lane-order: a ready: at the epoch is the oldest, not a missing one"
+
+# A dependency on a folded member (an affine tombstone: `status: merged`, `merged_into: [[u]]`, schedule step 4.5,
+# which never rewrites the dependants) waits on its combined unit, so the lane takes that unit first: the order
+# and the hold reason resolve the chain through one helper (_fold_unit) and are asserted together here.
+scen lane-order-fold
+mkro $'- [[a]]\n- [[u]]\n- [[q]]'
+mkt a review 'pr: https://github.com/o/r/pull/1' 'ready: 2026-10-02T09:00+00:00'
+mkt u review 'pr: https://github.com/o/r/pull/2' 'ready: 2026-10-02T10:00+00:00'
+mkt m merged 'merged_into: "[[u]]"'
+mkt q open
+ok "$(q "$(nxt)" 'd["awaitingIntegration"]')" '["a","u"]' "lane-order fold: with no dependant, the oldest ready: first"
+setkey q depends-on '["[[m]]"]'
+J=$(nxt)
+ok "$(q "$J" 'd["awaitingIntegration"]')" '["u","a"]' "lane-order fold: a dependency on a folded member puts its combined unit first"
+ok "$(q "$J" "$holds")" '{"q":"depends on [[m]] (folded into [[u]] (review))"}' "lane-order fold: … the unit its dependant's hold reason names"
+mkt m2 merged 'merged_into: "[[M]]"'
+setkey q depends-on '["[[m2]]"]'
+J=$(nxt)
+ok "$(q "$J" 'd["awaitingIntegration"]')" '["u","a"]' "lane-order fold: a two-step chain (m2 into m into u) puts u first"
+ok "$(q "$J" "$holds")" '{"q":"depends on [[m2]] (folded into [[u]] (review))"}' "lane-order fold: … and the hold reason names u too"
+setkey m merged_into '"[[m2]]"'
+J=$(nxt)
+ok "$(q "$J" 'd["awaitingIntegration"]')" '["a","u"]' "lane-order fold: a merged_into: cycle reaches no unit, so the order is ready:'s"
+ok "$(q "$J" "$holds")" '{"q":"depends on [[m2]] (folded into [[m2]] (merged))"}' "lane-order fold: … and the cycle holds its dependant"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-queue: ALL PASS"; else echo "reconcile-rollout-queue: FAILED"; fi

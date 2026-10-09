@@ -70,8 +70,12 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   run-bound       T  runId, journalDir; call? (task | revise | integrate | resume); resumedFrom?
   slot-freed      T  outcome (ready | set-aside | completed | lost | stopped | failed)
   ready           T  pr? (url or number)
-  set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass;
-                     setAsideAt? (run | integration | gate)
+  set-aside       T  stage (plan | implement | verify | review | integrate | gate), reasonClass (a string,
+                     not checked as an enum; reconcile-rollout.py's table writes quota | call-failed |
+                     merge-task | declined | prepare | revise-stopped | transient | gate | needs-human |
+                     plan-rejected | review-rounds | approved-without-pr | integration-set-aside | blocked,
+                     where needs-human, p16-3, is a stop on a question for a person, never a plan or
+                     review round run out); setAsideAt? (run | integration | gate)
   lane-taken      T  (no fields)
   lane-freed      T  release (merge | set-aside | reject | halt); path?; triggers? (list of str);
                      conflict? (bool)
@@ -83,6 +87,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   idle-slots         reason (dependency | solo | pause-drain | queue-tail | awaiting-hand-back |
                      hold-merge | hold-git-env | hold-race); free (int >= 0); settings (as slot-taken)
   quota-stall        stage?; detail?
+  auto-retry      T  stage (plan | implement | verify | review | integrate: the stage of the block it re-enters,
+                     the task's latest set-aside line's), setAsideAt (run | integration), retryClass (agent | infra
+                     | quota), used (int >= 0: auto_retries_used after this retry; a quota retry leaves it), budget
+                     (int >= 1: the resolved auto_retries); fingerprint? (the block's run sha); reviewRounds? (int
+                     >= 1: the raised max_review_rounds); quotaRetries? (int >= 1: quota_retries_used after a quota
+                     retry). p16-4, ADR 0033: reconcile-rollout.py auto-retry, execute's automatic retry of a
+                     set-aside task.
   call-journal       runId; status (the journal's own status, verbatim); mode?; tokens?, durationMs?,
                      agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
@@ -121,13 +132,18 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   in_progress note whose PR `resume` found merged), lost (a dead call's lead-written row), stopped (a hard
   pause, a defer or a carry ended it); `failed` is reserved.
 - slot-taken start: start, restart (a stalled note restarted), revise (a seeded revise), hand-back (the
-  restart after a hand-back, an approve-gates sign-off or a descope), resume (a Lost-call or signed-gate
-  resume).
+  restart after a hand-back, an approve-gates sign-off, a descope or a run-stage automatic retry: auto-retry,
+  p16-4, stamps `handed_back:` through hand-back's own transition, so its restart follows its auto-retry
+  event), resume (a Lost-call or signed-gate resume).
 - set-aside stage is where the task stopped; setAsideAt is where it re-enters (merge-task's exit 1 reads
   stage integrate, setAsideAt run).
 - Idle Slot time is a span. A Retro derives it from slot-taken / slot-freed pairs against the ceiling
   stamped on each event. An idle-slots event is a reason marker labelling the span it falls in: a change
   of reason splits the span, a repeat is harmless, a span with no marker reads as "unexplained".
+  `awaiting-hand-back` also labels a span in which execute's automatic retry (p16-4, ADR 0033) waits out a
+  quota or infra cool-down with nothing queued: `next` is stateless and never reads the retry verdict. A
+  Retro tells the two apart by what precedes the slot-taken start=hand-back that ends the span: the task's
+  auto-retry event for a cool-down, none for a human's hand-back.
 - call-journal: for each runId, use its latest line with a terminal status (completed, failed, killed,
   stopped, cancelled); with none, use its latest line and treat the call as in flight. The writer folds
   under an exclusive flock on the file and skips a fold when that runId already has a terminal line, or
@@ -335,6 +351,10 @@ KINDS = {
                                            "hold-merge", "hold-git-env", "hold-race"),
                            "free": _int(0), "settings": SETTINGS}, {}),
     "quota-stall": (False, {}, {"stage": _str, "detail": _str}),
+    "auto-retry": (True, {"stage": _enum("plan", "implement", "verify", "review", "integrate"),
+                          "setAsideAt": _enum("run", "integration"), "retryClass": _enum("agent", "infra", "quota"),
+                          "used": _int(0), "budget": _int(1)},
+                   {"fingerprint": _str, "reviewRounds": _int(1), "quotaRetries": _int(1)}),
     "call-journal": (False, {"runId": _str, "status": _str},
                      {"mode": _str, "tokens": _int(0), "durationMs": _int(0), "agents": _int(0),
                       "startTime": _int(0)}),

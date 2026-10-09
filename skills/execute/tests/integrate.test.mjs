@@ -20,7 +20,7 @@ const T = loadEngine([
 const ROW_KEYS = [
   'slug', 'scope', 'status', 'prUrl', 'branch', 'worktreePath', 'reviewRoundsUsed', 'planRoundsUsed',
   'blockerDiagnosis', 'reviewFeedback', 'reviewHistory', 'approvedAtCeiling', 'gatedInputs', 'summary',
-  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan',
+  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman',
 ]
 const STATUSES = ['review', 'review-blocked', 'blocked', 'plan-blocked', 'gate-pending']
 const sha = (c) => c.repeat(40)
@@ -218,7 +218,13 @@ test('b4: the integrator prompt carries the landed PRs, the plan, the merge step
   assert.ok(!p.includes('(no plan:'), 'a plan was passed: no placeholder')
   const noPlan = T.integratorPrompt(mkTask(), mkArgs(mkI({ plan: '' })), mkI({ plan: '' }))
   assert.ok(noPlan.includes('---\n(no plan: the task was not plan-gated — the brief is the contract)\n---'), 'the no-plan placeholder keeps its bytes')
+  // p17-1: a commit pushed without a PR is in no landed entry, so a non-empty list points at the first-parent log.
+  for (const s of [
+    'Commits pushed to origin/main without a PR', `\`${T.GIT_ENV_SCRUB} git -C "${WT}" log --first-parent --oneline ${TB}..${B1}\``,
+    `\`${T.GIT_ENV_SCRUB} git -C "${WT}" show <sha>\``, 'its diff is its only brief',
+  ]) assert.ok(p.includes(s), `integrator prompt (p17-1): ${s}`)
   const empty = await run(mkArgs(mkI()), { [ILABEL]: ir() })
+  assert.ok(!promptOf(empty, ILABEL).includes('without a PR'), 'no landed list: the whole first-parent log already shows every commit')
   assert.match(promptOf(empty, ILABEL), new RegExp(`git -C "${WT}" log --first-parent ${TB}\\.\\.origin/main`))
   assert.match(promptOf(empty, ILABEL), /none reported \(a re-entry/)
   assert.ok(!promptOf(empty, ILABEL).includes('This list ends at'), 'no landed list: the taskBase..origin read already covers it')
@@ -230,6 +236,8 @@ test('b4: the integrator prompt carries the landed PRs, the plan, the merge step
     `diff "${M}^1" ${M}`, `diff "${M}^2" ${M}`,
     `log -p --first-parent --no-merges ${H0}..${M}`, 'gh pr diff https://github.com/o/r/pull/5',
     'was anything of theirs (the landed PRs)', 'dropped or contradicted', 'anything of ours', 'Why you are here: conflict',
+    `log --first-parent --oneline ${TB}..${B1}\` — the commits pushed to origin/main without a PR`,
+    `git -C "${WT}" show <sha>\` too`, 'In Step 3 they count as theirs, the same as the landed PRs.',
   ]) assert.ok(j.includes(s), `judge prompt: ${s}`)
   assert.ok(!j.includes(`log --first-parent ${B1}..`), 'judge prompt: base = mainSha, so no late-landed read')
 })
@@ -355,6 +363,10 @@ test('c9: PRs that landed after the lead read main reach the judge; a base equal
   const none = await run(mkArgs(mkI({ mainSha: B1 })), { [ILABEL]: ir({ state: 'merged', base: B2, files: ['a.js'], mainFiles: ['a.js'] }), [JLABEL(2)]: jv() })
   const jn = promptOf(none, JLABEL(2))
   assert.ok(jn.includes(`log --first-parent ${TB}..${B2}\` for what landed`) && !jn.includes(`${B1}..${B2}`), 'no landed list: taskBase..base already covers it')
+  // p17-1: the PR-less pointer comes with a landed list, ahead of the late range; never with an empty one.
+  const ptr = j.indexOf(`log --first-parent --oneline ${TB}..${B1}\` — the commits pushed to origin/main without a PR`)
+  assert.ok(ptr > -1 && ptr < j.indexOf(`log --first-parent ${B1}..${B2}\``), 'judge: the PR-less pointer, before the late range')
+  assert.ok(!jn.includes('without a PR') && !jn.includes('--oneline'), 'no landed list: no PR-less pointer')
 })
 
 test('c10: two merges — a judge that died after M1 was pushed, then a re-entry that merges M2: the judge reads both', async () => {
@@ -786,6 +798,7 @@ test('S1: a seeded revise dispatches revise r3 then review r3 and approves with 
   assert.equal(r.row.approvedAtCeiling, true)
   assert.deepEqual(Object.keys(r.row).sort(), [...ROW_KEYS].sort())
   assert.equal(r.row.plan, null, 'a seeded revise never settles the plan (p14-2)')
+  assert.equal(r.row.needsHuman, '', 'an approved seeded revise carries no question (p16-3)')
   assert.ok(promptOf(r, `review:${SLUG} r3`).includes('Round 2 rejection:\n- keep their rename'))
 })
 
@@ -996,6 +1009,7 @@ test('static: no force, no PR merge, approvedGates-independent prompts, the row 
     assert.deepEqual(Object.keys(r.row).sort(), [...ROW_KEYS, 'integration'].sort())
     assert.ok(STATUSES.includes(r.row.status), r.row.status)
     assert.equal(r.row.plan, null, 'an integrate row never settles the plan (p14-2)')
+    assert.equal(r.row.needsHuman, null, 'an integrate row never settles ## Needs you (p16-3)')
   }
   const code = src.replace(/\/\/[^\n]*/g, '')
   assert.deepEqual(code.match(/['"`]revise: [^'"`]*/g), ["'revise: rejected at Integration re-review — revise on the branch, then re-integrate"])

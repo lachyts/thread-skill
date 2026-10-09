@@ -7,10 +7,13 @@
 #   K5b     carry refuses a prior that holds an unacked git-env trip until its ack line (p14-6)
 #   K6      carry maps each carried task's legacy stamps to a rung (ADR 0029 consequences): the `restamp`
 #           lines, the ladder's top rung, a refused ladder file, and a re-run
+#   K7      carry prints an `order` line per clause of the prior's prose that orders two carried tasks (p17-2),
+#           and again on a re-run while the prior is open (its tasks already on the new note), never once it closed
 #   M1-M12  a protocol-3 wave rollout in flight with `review` PRs migrates: check -> resume -> carry preview ->
 #           write -> carry -> step 7 -> close-out (stamps, then the move), crash windows included.
 #   I1-I7   § 0's interrupted finish, then a cancel: the incomplete note (reconcile-rollout.py incomplete) is
 #           refused by `next`, reported by `status` and the check, until a completed supersede closes it.
+#   I8      § 0's interrupted finish after step 6's carry already ran still prints the prior's `order` lines (p17-2)
 #   R1-R4   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031)
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
 #           without its `## Queue` row) never wedges the queue, started or not.
@@ -644,6 +647,72 @@ ok "$rc|$(printf '%s\n' "$out" | grep '^restamp ' | tr '\n' ' ')" "0|restamp h1 
 ok "$(fm h1.md model)|$(fm h2.md effort)|$(fm h1.md rollout)" "<none>|<none>|rollout: \"[[$N]]\"" "K6: … written"
 CH=""
 
+# ── K7: carry prints an `order` line per clause of the prior's prose that orders two carried tasks ─────
+# The "Dependencies:" line is modelled on chorus-rollout-2026-09-30's lead rules (an order kept only in prose,
+# never in depends-on:), in demo slugs. The → line is synthetic: that note has no task arrow chain. ORDER's
+# line 2 is expected noise: p37-4 is kept (landed), so the clause orders only p36-2 and p36-6, and schedule
+# step 3 proposes nothing for it. No line comes from: p35-3 after p37-4 (one carried task), p39-2 after p39-1
+# (both running, none queued), p40-2 after p40-1 (p40-1 is ambiguous), the p32-4 / p33-1 line (its cue words
+# sit only inside the names), the bare-slug p33-1 / p30-1 line (its one cue word sits inside a bare slug),
+# p30-2b after p30-1 (p30-2b is no short id: p30-2 runs on into a letter), the HTML comment (its `-->` is no
+# arrow), "Kept apart in review" (no cue) and the fenced line. The carried demo-p30-10-sweep keeps every
+# p30-1 from resolving to it: p30-10 is never p30-1.
+scen k7
+BODY='**The lead'"'"'s rules for this run:**
+- Dependencies: p30-2 after p30-1; p35-3 after p37-4; p37-4 after p36-2, p36-6; p39-2 after p39-1.
+- [[demo-p38-5-column]] → [[demo-p38-6-column-reads]]
+- p41-3 needs p40-2'"'"'s measured answers.
+- p40-2 after p40-1.
+- [[demo-p32-4-turn-opened-after-a-restart|p32-4]] and [[demo-p33-1-then-the-rest]] share one card.
+- demo-p30-2-restart after demo-p30-1-ledger
+- demo-p33-1-then-the-rest and demo-p30-1-ledger share one card.
+- p30-2b after p30-1.
+<!-- p30-1 p30-2 -->
+- Kept apart in review: [[demo-p30-1-ledger]], [[demo-p36-2-ritual]]
+
+```
+p36-6 after p35-3
+```' mkro $P.md "$R" "$DEMO" "$PAUSED"
+for t in demo-p30-1-ledger demo-p30-2-restart demo-p30-10-sweep demo-p35-3-voice demo-p36-2-ritual demo-p36-6-raycast \
+  demo-p38-5-column demo-p38-6-column-reads demo-p32-4-turn-opened-after-a-restart demo-p33-1-then-the-rest demo-p40-1-probe \
+  side-p40-1-probe demo-p40-2-fix demo-p41-3-conductor; do mkt $t.md $P open; done
+mkt demo-p39-1-sessions.md $P in_progress 'owner: execute-old'
+mkt demo-p39-2-asides.md $P in_progress 'owner: execute-old'
+mkt demo-p37-4-settings.md $P done
+mkro $N.md "$R" "$DEMO" "supersedes: \"[[$P]]\""
+ORDER="order demo-p30-2-restart,demo-p30-1-ledger: Dependencies: p30-2 after p30-1
+order demo-p36-2-ritual,demo-p36-6-raycast: p37-4 after p36-2, p36-6
+order demo-p38-5-column,demo-p38-6-column-reads: [[demo-p38-5-column]] → [[demo-p38-6-column-reads]]
+order demo-p41-3-conductor,demo-p40-2-fix: p41-3 needs p40-2's measured answers.
+order demo-p30-2-restart,demo-p30-1-ledger: demo-p30-2-restart after demo-p30-1-ledger"
+before=$(sums)
+carry --from "$T/$P.md" --dry-run
+ok "$rc" 0 "K7: the preview exits 0"
+ok "$(printf '%s\n' "$out" | grep '^order ')" "$ORDER" "K7: … one order line per clause naming two carried tasks (one queued) and an ordering word"
+ok "$(printf '%s\n' "$out" | sed -n '/^order /,$p')" "$ORDER
+(dry-run)" "K7: … printed together, right before the trailer"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p32-4" "K7: … no hint from cue words inside a slug or an alias"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p33-1" "K7: … nor from the other name in that clause"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p39" "K7: … nor from a clause whose tasks have all started"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p30-10" "K7: … a p30-1 never names demo-p30-10-sweep"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "p30-2b" "K7: … nor does p30-2b name demo-p30-2-restart"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "<!--" "K7: … and an HTML comment's --> is no arrow"
+ok "$(sums)" "$before" "K7: … and the preview writes nothing"
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)" "0|[written: 16]" "K7: carry exits 0, every carried note written"
+ok "$(printf '%s\n' "$out" | grep '^order ')" "$ORDER" "K7: … printing the same order lines"
+# A re-run while P is still open (the window § 0's interrupted finish meets: step 6's carry ran, the run died
+# before step 7.5) reads P's prose against the tasks already on N, so it prints the same lines.
+before=$(sums)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$(printf '%s\n' "$out" | grep -c '^carry ')" "0|[no-change]|0" "K7: a re-run carries nothing"
+ok "$(printf '%s\n' "$out" | grep '^order ')" "$ORDER" "K7: … and, P still open, prints the same order lines from the tasks on N"
+ok "$(sums)" "$before" "K7: … writing nothing"
+closeout $P $N
+carry --from "$T/Archive/Rollouts/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)|$(printf '%s\n' "$out" | grep -c '^order ')" "0|[no-change]|0" \
+  "K7: a closed P (done, superseded_by N: its step 7 confirmed them) re-runs with no order line"
+
 # ── M1-M12: a protocol-3 wave rollout in flight, with review PRs, migrates ────────────────────────────
 scen m
 U=https://github.com/demo/repo/pull
@@ -835,6 +904,30 @@ ok "$out|$rc" "supersede $N2|0" "I7: once N is closed out, only N2 is unfinished
 hasnt "$err" "incomplete" "I7: … and nothing is incomplete"
 nx $N2
 ok "$rc" 0 "I7: next runs N2"
+
+# ── I8: § 0's interrupted finish prints the order lines P kept only in prose ─────────────────────────
+# The likelier crash window: step 6's carry had already moved P's unlanded tasks to N, then the run died before
+# step 7 wrote the confirmed depends-on:. The finish's carry finds no task left on P to carry, yet it still reads
+# P's prose against the tasks on N, so the order reaches step 1's confirm and step 3.
+scen i8
+BODY='- Dependencies: p30-2 after p30-1.' mkro $P.md "$R" "$DEMO" "$PAUSED"
+mkt demo-p29-1-shipped.md $P done
+render $N $P "$(row 1 demo-p30-1-ledger 'carried (queued)')
+$(row 2 demo-p30-2-restart 'carried (queued)')"
+mkt demo-p30-1-ledger.md $N open; mkt demo-p30-2-restart.md $N open
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "interrupted $P $N|0" "I8: P paused, its tasks already on N -> interrupted"
+before=$(sums)
+carry --from "$T/$P.md" --to "$T/$N.md"
+ok "$rc|$(printf '%s\n' "$out" | grep -E '^(carry|keep) ' | tr '\n' ' ')" "0|keep demo-p29-1-shipped merged " \
+  "I8: the finish's carry finds nothing left on P to carry"
+ok "$(printf '%s\n' "$out" | sed -n '/^order /,$p')" "order demo-p30-2-restart,demo-p30-1-ledger: Dependencies: p30-2 after p30-1.
+[no-change]" "I8: … and still prints P's order line, from the tasks on N, right before the trailer"
+ok "$(sums)" "$before" "I8: … writing nothing"
+carry --from "$T/$P.md" --to "$T/$N.md" --dry-run
+has "$out" "order demo-p30-2-restart,demo-p30-1-ledger: " "I8: a --dry-run with --to prints it too"
+carry --from "$T/$P.md" --dry-run
+ok "$rc|$(printf '%s\n' "$out" | grep -c '^order ')" "0|0" "I8 control: with no --to, only P's own tasks are read: no order line"
 
 # ── D1-D3: a task taken out of a rollout whose step 7 ended never wedges its queue ──────────────────
 # D1: the queue has run (a started), then repair defers the started task, so the note reads never started again.

@@ -269,7 +269,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: bare "ceiling", concurrency, max agents.
 - **Solo** — a task in a Queue that runs with nothing else in flight: a
   sweeping change every concurrent task would otherwise redo its work around
-  (ADR 0030). _Avoid_: barrier, exclusive.
+  (ADR 0030). Queued with its dependencies met, it holds every task whose row
+  is below it, whatever their `priority:`. _Avoid_: barrier, exclusive.
 - **Integration** — the serial step between a task's approval and its merge:
   the latest `main` merged in, the verifier re-run and, when needed, a short
   re-review (ADR 0030). _Avoid_: update-branch (GitHub's merge-in, which
@@ -279,7 +280,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rejection or a halt); a rollout's merges can never outpace it. Execute's prose shortens it
   to "the lane". Not a **Lane** (rollout vs session). _Avoid_: merge queue.
 - **Integration queue** — the approved tasks waiting for the Integration lane,
-  in `next`'s order. _Avoid_: the lane (that is the step, not the line).
+  in `next`'s order: a task a queued task depends on, directly or through a
+  folded member (`merged_into:`), first, then the oldest `ready:`, then schedule
+  order. _Avoid_: the lane (that is the step, not the line).
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).
@@ -300,7 +303,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `Project root`) kept its `refs/heads/<default>` and its bareness across each
   **Window** (execute § 4.5, ADR 0030). A local commit not on
   `origin/<default>` is benign only when every one is a non-merge commit
-  touching only close-out paths (land.sh's `closeout_shaped`), stricter than
+  touching only close-out paths (land.sh's `closeout_shaped`) or deleting a
+  review doc directly under `docs/reviews/` (`closeout_change`), stricter than
   land.sh S9: a merge or an empty commit trips. Anything else trips. _Avoid_:
   verifier wrapper, git guard.
 - **Window** — the span from a launch's canary `arm` to its `check`: a
@@ -342,8 +346,23 @@ through time, from attention to merged PRs. Terms only — no implementation.
   handle; a stop at Integration rejoins the Integration queue; otherwise it
   takes a fresh call behind a warning (execute § 3.7).
   _Avoid_: approval item, spend gate, pre-approval.
-- **Agent-fixable block** — a block a re-dispatched agent can resolve alone;
-  repair retries these without asking the human. _Avoid_: auto-block, soft block.
+- **Needs-you item** — a decision in a running rollout that is Lachy's alone:
+  a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside only a person
+  moves on, a merge hold's release, or a halt. The lead lists it in the
+  report's `Needs you:` block and pushes it once, deduped on its line in the
+  rollout note's `## Needs-you log`, the lead's push record. That log is
+  never the task note's `## Needs you` (p16-3), which holds the question the
+  engine stopped on; an item whose entry carries one shows it on its detail
+  line. The lead never puts an item through the question tool while anything
+  the session launched is in flight, and the queue runs on without the answer
+  (execute § 6.5). _Avoid_: pending question, ask item, open question.
+- **Agent-fixable block** — a block a re-dispatched agent can resolve alone.
+  The live lead re-enters these itself through `reconcile-rollout.py
+  auto-retry`, up to `auto_retries` times (default 2; an infra block after a
+  short cool-down, while a quota block waits out a longer one free, ADR 0033);
+  repair keeps the ones that need a human (a spent
+  budget, a repeated feedback fingerprint, a `## Needs you` question). _Avoid_:
+  auto-block, soft block.
 - **Automatic descope** — a plan-block the notes already settle, dropped from
   the task without asking: the feedback centres on a part the note marks
   optional (a follow-up task is filed) or on work a later task in the same

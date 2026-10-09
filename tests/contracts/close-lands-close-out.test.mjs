@@ -83,6 +83,10 @@ test('§ Land the close-outs: when, what is collected, the message, the call', (
     'its own Bash tool call', 'timeout 600000', 'Never chain', 'one after another',
     'stuck only when origin\'s new changes overlap a local change', 'never pre-staged work',
     '`queued: needs merge <url>`', '`land: commit <sha>`', '`land: carried <N> earlier close-out commit(s)`',
+    '7.2\'s consumed review docs, still on disk (land.sh deletes them)',
+    'A consumed review doc\'s deletion rides the close-out landing; there is no other route',
+    'a `status: pending` review doc or any other `docs/reviews/` change',
+    '`🔧 chore(review): consumed review docs — delete (history keeps them)`',
   ])
 })
 

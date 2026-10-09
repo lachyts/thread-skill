@@ -73,7 +73,8 @@ first third's and at least WAIT_CLIMB_MIN minutes); slot-bound (Slots full >= SL
 Proposals, one rule each: slot-bound -> parallel_ceiling +1, withheld ("lane N% busy, at or above 60%") when the
 lane is LANE_FREE_FOR_RAISE busy or more (so a Slot-bound run always shows its raise); quota-bound ->
 parallel_ceiling -1; >= ROUND_SET_ASIDES set-asides of reasonClass review-rounds ->
-max_review_rounds +1; of plan-rejected -> max_plan_rounds +1. `ranAt` is the value the run ran at: the ceiling
+max_review_rounds +1; of plan-rejected -> max_plan_rounds +1 (a needs-human set-aside, a stop on a question,
+counts toward neither: another round cannot answer it). `ranAt` is the value the run ran at: the ceiling
 in force for most of the running time (ties to the later), a round cap's most common value on the window's
 slot-taken lines. to = ranAt + direction; from = rollouts.toml's resolved value now (--settings). A proposal is
 `from -> to` when sign(to - from) is the rule's direction; otherwise rollouts.toml is already at or past this

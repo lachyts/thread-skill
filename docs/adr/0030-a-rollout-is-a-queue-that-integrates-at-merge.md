@@ -6,6 +6,9 @@ same-file invariant and merge-wave's halt-on-conflict; grilled with Lachy 2026-0
 protocol 4's `0019-task-readiness-governs-progress.md`, never landed on master)
 Amended by ADR 0031: the primary checkout holds while a rollout runs, so a migration is a deliberate
 cut-over.
+Amended by ADR 0033: decision 4's set-aside task is re-entered by the live lead itself when its block is
+agent-fixable, up to `auto_retries` times, before a hand-back is needed.
+Amended 2026-10-09 by thread-skill-p17-2: a queued solo task's schedule rank beats `priority:` (decision 1).
 
 ## Context
 
@@ -27,7 +30,8 @@ about if we're working in worktrees and we're just merging them after we've done
    started task has merged or been set aside, and the queue resumes once the solo task merges or is
    set aside. Queue order is highest `priority:`, then least file overlap with what is running, then
    schedule's order, recomputed from the task notes before every start, so a `priority:` edit in the
-   vault reorders a live queue.
+   vault reorders a live queue, except that a queued solo task whose dependencies are met holds every
+   task ranked below it, whatever their `priority:`.
 2. **Execute's lead runs the queue and is the only merger.** Each task's own run (plan-gate,
    implement, review) is one Workflow call holding one slot until it returns. The Workflow script
    never merges. Every lead-side check (the landing register, a pause, the cursor) runs per task,
@@ -119,7 +123,9 @@ Considered:
   shown and the ref shown (`--ref`), so a stale or partial ack writes nothing.
   - **The close-out decision (option (a)).** Execute § 2.7 says a close-out landed mid-run must not
     halt, so a local commit not on `origin/<default>` is benign when every one is a non-merge commit
-    touching only land.sh's `closeout_shaped` paths. That is **stricter than S9**: S9 also carries an
+    touching only land.sh's `closeout_shaped` paths (or, since P17, deleting a file directly under
+    `docs/reviews/`: the consumed review doc a close-out deletes, land.sh's `closeout_change`). That is
+    **stricter than S9**: S9 also carries an
     empty non-merge commit and a merge whose other parents are on origin, and the canary trips on both
     (fail-closed). The rule covers land.sh's S4, S5 and S11 moves and merge-task's `refresh_local_base`.
   - **The read order.** The canary reads B before O (`origin/<default>`), in one function. Every writer
