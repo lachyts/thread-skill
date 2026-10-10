@@ -47,7 +47,42 @@ session lane. schedule § 0 runs these checks; callers that read this file
 for the fit test route through schedule rather than checking themselves. The
 schedule gate stops before anything is written (no task stamped, no rollout
 note, no heartbeat) and names the remedy. Fix the blocker, then schedule again.
-Five blockers:
+Six blockers:
+
+**Self-rollout.** A rollout must never run against the checkout the plugin itself runs from. When the
+repo path is, or contains, the plugin's live checkout (a **directory-source** marketplace,
+`claude plugin marketplace add <dir>`, or a `--plugin-dir` session), `${CLAUDE_PLUGIN_ROOT}` IS that
+checkout, so every engine or skill change a merge lands there becomes the engine of the rollout's next task
+call (p12-4, ADR 0030). This blocker runs first, since in schedule it decides the path every other blocker
+checks:
+
+```bash
+# thread:self-rollout-check (extracted and tested by tests/self-rollout-check.test.sh)
+R="<repoPath>"
+M="<mode>"
+case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
+sc="${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh"
+[ -f "$sc" ] || { echo "self-rollout-check.sh not found at $sc: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }
+bash "$sc" $M "$R"
+# end thread:self-rollout-check
+```
+
+`<mode>` is `--resolve` in schedule § 0 and empty in execute § 2.6. `self-rollout-check.sh` is read-only
+(it never clones, fetches or writes), and its header is the one statement of what matches and of what
+makes a clone usable.
+
+- **`--resolve`** (schedule § 0 only): exit 0 prints the Project root to use, the repo path itself when
+  nothing matches, or the separate clone `<repoPath>-rollout` when the repo path matches and that clone is
+  usable. Exit 3 is a match with no usable clone: the match lines, one
+  `self-rollout-check: <path> is not a usable rollout clone: <reason>` line and the fix, on stderr.
+- **Empty** (execute § 2.6): exit 0 is no match; exit 3 is a match, with the match lines and the fix on
+  stderr. Execute never swaps a root: its rollout note is already written.
+- **Exit 2**, in either mode, is the check itself failing (the script missing, an empty path, no python3),
+  and any other non-zero exit fails closed the same way. A missing registry passes; a malformed one passes
+  with a warning, to pass on (the registry format is Claude Code's, so the check fails open).
+
+On any non-zero exit, stop and print the stderr verbatim: it names the fix. The clone's location is a
+convention, not a setting: a clone anywhere else is not found.
 
 **GitHub `origin`.** The engine branches every worktree from
 `origin/<default branch>` and lands each task as a GitHub PR that merge-task
@@ -148,9 +183,10 @@ single-quoted, or nothing. The check runs over a **clone set**, not one checkout
 clone, plus `<localPath>`, plus every directory-source plugin marketplace path in
 `known_marketplaces.json` (read through `self-rollout-check.sh --list-dirs`, the one registry parser),
 each kept only when its raw `origin` URL names the same `<owner>/<name>` and de-duplicated by real path. The
-registry source matters here: execute § 2.6 forces a separate rollout clone exactly when the repo path is a
-directory-source marketplace checkout, so the registry names the primary checkout exactly when a rollout
-clone exists, and a close-out committed in the primary is still seen.
+registry source matters here: the self-rollout blocker above forces a separate rollout clone when the repo
+path is a directory-source marketplace checkout, so the registry names the primary checkout then, and a
+close-out committed in the primary is still seen (a `--plugin-dir` primary is in no registry: the project
+note's `Local:` path, passed as `<localPath>`, covers it).
 
 - **Exit 0** prints `pushed`; any notes and WARN lines on stderr pass through to the user.
 - **Exit 3**: some known clone's local `<default>` is ahead of `origin/<default>` with content that

@@ -12,7 +12,7 @@
 # note's `Local:` path; an empty <dir> is a no-op, a non-clone is noted and skipped) and from every
 # directory-source plugin marketplace in known_marketplaces.json, read through
 # skills/execute/scripts/self-rollout-check.sh --list-dirs so that file stays the one registry parser (a
-# registry entry for another repo is skipped silently). execute § 2.6 forces a separate rollout clone exactly
+# registry entry for another repo is skipped silently). schedule § 0 and execute § 2.6 force a separate rollout clone exactly
 # when repoPath is a directory-source marketplace, so the registry names the primary checkout exactly then.
 #
 # Every member is fetched with --prune (`origin/<b>` and `origin/close/*`, remote-tracking refs only; any
