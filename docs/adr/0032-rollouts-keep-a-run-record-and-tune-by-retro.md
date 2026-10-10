@@ -1,7 +1,7 @@
 # 0032 — rollouts keep a Run record and tune by Retro
 
 Date: 2026-10-04
-Status: proposed, implementation pending (amends the rollout defaults that schedule stamps and
+Status: accepted, shipped in 3.0.0 (amends the rollout defaults that schedule stamps and
 execute and reconcile assume, the rollout template's `## Resource budget`, and execute's "don't
 raise `parallel_ceiling` blindly" rule; grilled with Lachy 2026-10-04 in `/thread:orient Thread
 Skill`, from his question "why three tasks at once, why not ten?")

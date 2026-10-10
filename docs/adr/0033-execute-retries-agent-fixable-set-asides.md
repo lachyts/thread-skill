@@ -1,7 +1,7 @@
 # 0033 — execute retries agent-fixable set-asides itself
 
 Date: 2026-10-09
-Status: proposed, implemented by p16-4 (amends ADR 0030 decision 4, where only a hand-back re-enters a set-aside
+Status: accepted, implemented by p16-4, shipped in 3.0.0 (amends ADR 0030 decision 4, where only a hand-back re-enters a set-aside
 task, and ADR 0004, where repair alone retries an agent-fixable block; from the 2026-10-06 grill on unattended
 rollouts, `thread-skill-p16-unattended-rollouts`)
 

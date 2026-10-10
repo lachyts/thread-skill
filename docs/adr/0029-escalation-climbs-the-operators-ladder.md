@@ -1,7 +1,7 @@
 # 0029 — escalation climbs the operator's ladder
 
 Date: 2026-09-30
-Status: proposed (supersedes ADR 0024's `top-tier` file and absorbs task p7-1's first two questions;
+Status: accepted, shipped in 3.0.0 (supersedes ADR 0024's `top-tier` file and absorbs task p7-1's first two questions;
 amends ADR 0006's single opus→fable flip, ADR 0007's engine-fixed effort matrix and ADR 0016's
 ceiling; grilled with Lachy 2026-09-30)
 
