@@ -11,7 +11,7 @@ This skill is the **planner**. The rollout note it produces is a data artefact �
 
 ## Scope
 
-**Obsidian only**, plus § 0's remote, landing-register, self-rollout and pushed-base probes of the target repo; the self-rollout probe reads the plugin marketplace registry, and on a match its rollout-clone lookup makes read-only `git rev-parse` and `git remote get-url` calls in the sibling `<repoPath>-rollout`; the pushed-base probe runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving or pruning only remote-tracking refs; § 0's unfinished-rollout check reads `git remote get-url` in each rollout note's Project root; a supersede's `reconcile-rollout.py resume` makes read-only `gh pr view`/`gh repo view` calls; a supersede's `git-env-canary.py check-all` and `retire` (steps 1 and 6) read the prior's Project root with read-only git calls and write only the prior note's `## Git-env log` and the canary's own records, kept outside the repo; § 4.7 reads the operator's ladder file through `ladder.py` (a local file, no network); step 2.8 reads the operator's `~/.config/thread/rollouts.toml` through `rollout-settings.py` (a local file, no network), which runs `land.sh --origin-slug` and so a read-only `git remote get-url origin` in the Project root when the file holds a repo table; and step 7.5 moves a superseded rollout note with a plain `mv`. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
+**Obsidian only**, plus § 0's self-rollout, remote, landing-register and pushed-base probes of the target repo; the self-rollout probe reads the plugin marketplace registry, and on a match makes read-only `git rev-parse` and `git remote get-url` calls in the sibling `<repoPath>-rollout`; the pushed-base probe runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving or pruning only remote-tracking refs; § 0's unfinished-rollout check reads `git remote get-url` in each rollout note's Project root; a supersede's `reconcile-rollout.py resume` makes read-only `gh pr view`/`gh repo view` calls; a supersede's `git-env-canary.py check-all` and `retire` (steps 1 and 6) read the prior's Project root with read-only git calls and write only the prior note's `## Git-env log` and the canary's own records, kept outside the repo; § 4.7 reads the operator's ladder file through `ladder.py` (a local file, no network); step 2.8 reads the operator's `~/.config/thread/rollouts.toml` through `rollout-settings.py` (a local file, no network), which runs `land.sh --origin-slug` and so a read-only `git remote get-url origin` in the Project root when the file holds a repo table; and step 7.5 moves a superseded rollout note with a plain `mv`. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
 
 ## Invocation forms
 
@@ -41,29 +41,20 @@ windows, every externally-publishing task pauses at the human gate (ADR 0008; ex
 the queue cannot see a window or calendar constraint. A mixed set is fine if
 the rollout-shaped subset can roll out while the misfits stay unstamped — name them in the gate.
 
-After the misfit scan, check the dispatch blockers for the target repo, i.e. the project root the
-rollout note will carry. Resolve it from the project note's `Local:` line; if there is none, ask
-the user for the path (step 6 writes this resolved path as `{{REPO_PATH}}`). Then run the remote
-check in `${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers against it (point at
-it; never copy the snippet here), followed by its `gh repo view` confirmation. Then run the
+After the misfit scan, resolve the target repo, the project root the rollout note will carry, and check
+the dispatch blockers against it. Read the project note's `Local:` line; if there is none, ask the user
+for the path. First run the self-rollout check in
+`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` § Dispatch blockers (point at it; never copy the
+snippet here) on that path, with `<mode>` set to `--resolve`: a rollout never runs against the plugin's
+live checkout. On exit 0 its one stdout line is the resolved path: every check below runs against it,
+and step 6 writes it as `{{REPO_PATH}}`. When it is the separate clone, say so in one line naming both
+paths. Only the Project root moves: `<localPath>` below and step 6's Thread line keep the `Local:` path,
+where the thread lives. Exit 3 (a live checkout with no usable clone), exit 2 or any other
+non-zero exit is a stop, below. Then run the remote check from the same § Dispatch blockers against the
+resolved path (a pointer, never a copy), followed by its `gh repo view` confirmation. Then run the
 landing register check from the same § Dispatch blockers against the same resolved path (again a
 pointer, never a copy): a rollout never pushes to or merges into a repo on the landing register
-(ADR 0028 § Decision). Then run the self-rollout check from the same § Dispatch blockers against the
-same resolved path (a pointer, never a copy): a rollout never runs against the plugin's live checkout
-(a directory-source marketplace, or the session's `${CLAUDE_PLUGIN_ROOT}`), and execute § 2.6
-refuses such a root at launch. On its exit 3, run the rollout-clone lookup from the same § Dispatch
-blockers (a pointer, never a copy) against the same path. When it prints a path, that separate clone
-becomes the resolved path (step 6 writes it as `{{REPO_PATH}}`): say so in one line naming both
-paths. Only the Project root moves: `<localPath>` below and step 6's Thread line keep naming the
-primary checkout (the project note's `Local:` path) and its THREAD.md, where the thread lives. No
-check above is re-run against the clone: the lookup proved its `origin` names the same GitHub
-`<owner>/<name>` as the path they passed on, the remote check, its `gh repo view` confirmation and
-the landing register check each answer from that `<owner>/<name>` alone, and the lookup ran the
-self-rollout check on the clone itself. On a supersede, step 1's **Re-root guard** still refuses the
-clone when a carried task has started under the prior root. When the lookup exits 1 (no usable
-clone), the self-rollout check's exit 3 is a failure, below. The lookup's exit 2 or any other
-non-zero exit is its own failure, the lookup check failed, never read as no clone; so is the
-self-rollout check's own exit 2 or any other non-zero exit. Then run the pushed-base check from the same § Dispatch blockers (a pointer,
+(ADR 0028 § Decision). Then run the pushed-base check from the same § Dispatch blockers (a pointer,
 never a copy) with the resolved path, `<localPath>` set to the project note's `Local:` path (empty if
 the user gave the path), and no cited paths: rollout worktrees branch from `origin/<default>`, so a
 local default branch ahead of it (in this clone or a known sibling clone) hides those commits from
@@ -107,12 +98,8 @@ On any failure **stop before step 1**: no task stamped, no rollout note, no hear
 exception: a `file` move or an `interrupted` finish that § 0 made before a later refusal stays,
 since it completes a supersede an earlier run confirmed. Print the snippet's remedy line verbatim
 (or gh's error); for a listed repo that is the `listed <owner/name>: <reason>` line with its remedy,
-since unlisting is Lachy's call, for the self-rollout check's exit 3 it is the whole stderr (what
-matched, its path and the fix, a separate clone at `<repoPath>-rollout`) followed by the
-rollout-clone lookup's `is not a usable rollout clone: <reason>` line (which condition that clone
-fails, from nothing there to another repository's origin; a re-invoked schedule takes the clone once
-it passes), for the lookup's own failure it is its stderr, for the
-pushed-base check's exit 3 it is the whole stderr (the
+since unlisting is Lachy's call, for the self-rollout check it is the whole stderr (it names the
+fix), for the pushed-base check's exit 3 it is the whole stderr (the
 ahead commits and the land-by-PR or wait-for-the-landing-PR remedy), and for the unfinished-rollout
 check's refusal or exit 2 it is the whole stderr (each unfinished rollout with its remedy). The
 cluster is still rollout-shaped; don't re-route it to the session lane.
@@ -146,7 +133,7 @@ Walk `~/repos/obsidian/Work/Tasks/*.md`. Filter:
 
 On `supersede <prior>` (§ 0), first run the git-env canary's `check-all` on the prior (execute § 4.5 *Git-env canary*): `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/git-env-canary.py check-all --rollout ~/repos/obsidian/Work/Tasks/<prior>.md`. It compares the prior's windows left open (a hard pause's TaskStop'd calls) before its tasks move. A non-zero exit stops the run before this run writes a rollout note or a task stamp: print its stderr verbatim (exit 3 → `/thread:repair [[<prior>]]`, which shows the evidence and records Lachy's ack). This preview may append a trip line to the prior rollout note's `## Git-env log` before you confirm anything. That write is intended: it records evidence that a window changed. The decision to accept it stays with `/thread:repair`. Then preview the carry: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py carry --from ~/repos/obsidian/Work/Tasks/<prior>.md --dry-run`. It writes nothing and prints one line per task linked to the prior rollout. Its `carry <slug> <state>` lines join the candidate set (deduplicated, whatever their status: a carried `review`, `in_progress` or set-aside task keeps its place in the queue). Its `keep <slug> <state>` lines (merged, folded, or another status such as `dropped` or `parked`) stay with the prior rollout. After a carried task's line it prints `restamp <slug> rung=<name|kept|-> drop=<keys|->` when carry will map that task's legacy stamps (ADR 0029): `rung=<name>` is the ladder's top rung it writes (a `model: fable`, or an `effort: xhigh` or `max`), `kept` its own `rung:` staying, `-` none; `drop=` the legacy keys it removes. § 4.7 reads these lines and never lowers the rung they name. After the carry and keep lines it prints `order <slug-a>,<slug-b>[,…]: <clause>` for each clause of the prior note's own prose (its lead's rules, its queue rationale; never fenced code) that names two or more carried tasks, at least one `queued`, beside an ordering word ("after", "needs", "→" and the like). An order kept only in that prose never reached `depends-on:`, so the carry alone drops it: step 3 reads each `order` line's clause.
 
-**Re-root guard.** When the prior's `Project root` differs from § 0's resolved path (both `~/` expanded and compared by real path: § 0's rollout-clone swap, or a changed `Local:` line) and any task on a `carry` line has started (its note carries `started:`, whatever its state), stop before this run writes a rollout note or a task stamp, and never re-root those tasks silently: their worktrees, branches and PRs were made under the prior root, and no step moves them. Print each such task, both roots and the remedy: defer those tasks through `/thread:repair [[<prior>]]` (`/thread:repair` § 5's clean defer), then run `--regenerate` again. Under a swap this is rare: execute § 2.6 refuses a live plugin checkout as a root before anything is stamped, so only a rollout started before that gate existed, or under `--plugin-dir` before the check read `${CLAUDE_PLUGIN_ROOT}`, can hold a started task there. A carry with no started task takes the new root.
+**Re-root guard.** When the prior's `Project root` differs from § 0's resolved path (both `~/` expanded and compared by real path: § 0's swap to the separate clone, or a changed `Local:` line) and any task on a `carry` line has started (its note carries `started:`, whatever its state), stop before this run writes a rollout note or a task stamp, and never re-root those tasks silently: their worktrees, branches and PRs were made under the prior root, and no step moves them. Print each such task, both roots and the remedy: defer those tasks through `/thread:repair [[<prior>]]` (`/thread:repair` § 5's clean defer), then run `--regenerate` again. A carry with no started task takes the new root.
 
 A non-zero preview exit stops the run before this run writes a rollout note or a task stamp: print its stderr verbatim. Exit 2 is a refusal, for one of two causes: an undecided RACE or UNVERIFIED on the prior (`/thread:repair [[<prior>]]` records Lachy's decision), or a refused ladder file when a carried task needs the top rung (`ERROR: carry: ladder file refused: <path>:<line>: <reason>`). The refused ladder's remedy is Lachy's edit to `~/.config/thread/ladder.toml` at the line named, then `--regenerate` again.
 
@@ -350,7 +337,7 @@ Use the template at `${CLAUDE_PLUGIN_ROOT}/skills/schedule/rollout-template.md`.
 - `{{MAX_REVIEW_ROUNDS}}` — `max_review_rounds` as step 2.8 resolved it
 - `{{MAX_PLAN_ROUNDS}}` — `max_plan_rounds` as step 2.8 resolved it (the template's trailing comment on that line stays)
 - `{{PARALLEL_CEILING}}` — `parallel_ceiling` as step 2.8 resolved it
-- `{{REPO_PATH}}` — the repo path § 0 resolved and checked (the project note's `Local:` line, the path the user gave, or the separate clone § 0's rollout-clone lookup found)
+- `{{REPO_PATH}}` — the repo path § 0 resolved and checked (the self-rollout check's `--resolve` output: the project note's `Local:` line or the path the user gave, or its separate clone)
 - `{{THREAD_LINE}}` — the whole line `` Thread: `<path to the thread file>` ``, naming the project's THREAD.md or its shared thread file when one exists (e.g. `` Thread: `~/repos/tools/chorus/THREAD.md` ``); otherwise delete the line entirely — no blank placeholder line
 - `{{QUEUE_TABLE}}` — the rendered `## Queue` table, header row `| # | Task | Scope | Mode |` included, one row per task in schedule order (step 5): `| <n> | [[<full-slug>\|<alias>]] | <scope> | <mode> |`. Mode is `solo` (a confirmed Solo task), `sequential-merged (one agent/PR)` (a merged unit from step 4.5: one agent does the folded sub-tasks in sequence), `carried (<queue state>)` (a task carried from the superseded rollout, with its state from step 1's preview) or `—`. The row is the task's rank (`reconcile-rollout.py next` reads a task's first wikilink on a table row or list item), so nothing above the table lists a task.
 - `{{QUEUE_RATIONALE}}` — short prose explaining the order (dependencies, Solo placement, ties)
@@ -478,7 +465,7 @@ This skill does not execute anything. The rollout note it produces is read by th
 - Never remove `incomplete: true` from a rollout note except as step 7's last write on the note this run wrote: a stamp on any other note (§ 0's on an interrupted supersede's note, or one a stopped run left) ends only when a supersede closes that note out.
 - Don't touch tasks outside the target project (the `projects:` filter is strict).
 - Don't fill in `touches:` on tasks where you regex-detected files — that promotes a guess into authoritative metadata. Only the user does that. The **one** exception is the combined note authored in step 4.5: when every member has its own `touches:`, its `touches:` is their union, so it's a derivation, not a fresh guess. (Separately, the `## File-sets` block in the **rollout note** — step 6 — records the best-effort file-sets, but that's rollout-note data the executor reads, never task frontmatter, so it doesn't touch this rule.)
-- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's remote, register, self-rollout, pushed-base and unfinished-rollout checks (`git remote get-url`, `gh repo view`, `landing-register.py check`, the self-rollout check's read of `known_marketplaces.json` and its rollout-clone lookup's read-only `git rev-parse` and `land.sh --origin-slug` (`git remote get-url`) in `<repoPath>-rollout`, `git fetch --prune` of `origin/<default>` and `origin/close/*` (pushed-base check), which moves or prunes only remote-tracking refs, and `unfinished-rollout.py check`'s `git rev-parse --local-env-vars` and `git remote get-url`), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only, and step 2.8's `rollout-settings.py`, whose `land.sh --origin-slug` runs a read-only `git remote get-url origin` (only when `rollouts.toml` holds a repo table).
+- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's probes (listed under Scope), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only, and step 2.8's `rollout-settings.py`, whose `land.sh --origin-slug` runs a read-only `git remote get-url origin` (only when `rollouts.toml` holds a repo table).
 - Never write a second unfinished rollout on a repo, and never supersede one that § 0 did not print as `supersede`.
 - Never move a rollout note except by step 7.5's move (which § 0 also runs for `file` and `interrupted`).
 

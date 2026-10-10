@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # p12-4, executed: the self-rollout dispatch blocker — the `# thread:self-rollout-check` wrapper extracted
-# verbatim from skills/_shared/execution-fit.md § Dispatch blockers by its markers, with `R="$1"`
-# substituted for the `<repoPath>` placeholder, run under bash AND zsh (the Bash tool's shell on macOS)
-# against a fixture known_marketplaces.json; then the `# thread:rollout-clone` lookup beside it, against
-# fixture clones, and the schedule gate the two compose. Plus the wiring: schedule § 0 and execute § 2.6
-# point at the snippet without copying it, § 2.6 and § 7 name both halt reasons, and the halt line the lead
-# prints parses for the Stop hook. Hermetic: HOME, CLAUDE_CONFIG_DIR and every path live under mktemp; commits
-# carry an inline identity; never the network; global/system git config is ignored.
+# verbatim from skills/_shared/execution-fit.md § Dispatch blockers by its markers, with `R="$1"` and
+# `M="$2"` substituted for the `<repoPath>` and `<mode>` placeholders. The plain check (execute § 2.6,
+# `<mode>` empty) runs under bash AND zsh (the Bash tool's shell on macOS) against a fixture
+# known_marketplaces.json; `--resolve` (schedule § 0) runs its full matrix against fixture clones under bash,
+# and one pass, one rejection and one exit 2 under zsh, the only shell-dependent part being the wrapper. Plus
+# the wiring: schedule § 0 and execute § 2.6 point at the snippet without copying it, § 2.6 and § 7 name both
+# halt reasons, and the halt line the lead prints parses for the Stop hook. Hermetic: HOME, CLAUDE_CONFIG_DIR
+# and every path live under mktemp; commits carry an inline identity; never the network; global/system git
+# config is ignored.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
@@ -29,8 +31,10 @@ else echo "SKIP - zsh arm: zsh not installed on this $(uname) runner"; fi
 # ---- the snippet, verbatim from the skill --------------------------------------------------------------
 awk '/^# thread:self-rollout-check/{on=1; next} /^# end thread:self-rollout-check/{on=0} on' "$ef" > "$tmp/raw.sh"
 ok "$(grep -c '^R="<repoPath>"$' "$tmp/raw.sh")" 1 "the self-rollout snippet is found in execution-fit.md, with its <repoPath> placeholder"
+ok "$(grep -c '^M="<mode>"$' "$tmp/raw.sh")" 1 "… and its <mode> placeholder"
 ok "$(grep -cE '\$[0-9]' "$tmp/raw.sh")" 0 "the snippet holds no positional \$N (skill arguments substitute into them)"
-snip=$(sed 's/^R="<repoPath>"$/R="$1"/' "$tmp/raw.sh")
+snip=$(sed -e 's/^R="<repoPath>"$/R="$1"/' -e 's/^M="<mode>"$/M="$2"/' "$tmp/raw.sh")
+snip_f="$tmp/snippet.sh"; printf '%s\n' "$snip" > "$snip_f"
 
 # ---- fixtures -------------------------------------------------------------------------------------------
 home="$tmp/home"; cfg="$tmp/cfg"; mkdir -p "$home/repos/plug" "$home/repos/mono/tools/plug" "$home/repos/plugin2" "$tmp/other" "$cfg/plugins" "$tmp/noplugin"
@@ -55,7 +59,7 @@ EOF
 for sh in "${shells[@]}"; do
   n=$(basename "${sh%% *}")
   # run <repoPath> [VAR=val …]: rc in $rc, stderr in $err
-  run() { local r="$1"; shift; env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" "$@" $sh -c "$snip" _ "$r" >/dev/null 2>"$tmp/err"; rc=$?; err=$(cat "$tmp/err"); }
+  run() { local r="$1"; shift; env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" "$@" $sh "$snip_f" "$r" "" >/dev/null 2>"$tmp/err"; rc=$?; err=$(cat "$tmp/err"); }
 
   write_reg "$home/repos/plug" "$tmp/other"
   run "$home/repos/plug"; ok "$rc" 3 "$n: repoPath is a directory-source checkout → 3"
@@ -124,14 +128,7 @@ has "$err" "WARN" "--list-dirs: … with the warning"
 ld_extra=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" bash "$sc" --list-dirs extra >/dev/null 2>&1; echo $?)
 ok "$ld_extra" 2 "--list-dirs with an extra argument → usage error 2"
 
-# ---- the rollout-clone lookup: schedule § 0's sibling `<repoPath>-rollout`, verbatim from execution-fit.md --
-awk '/^# thread:rollout-clone/{on=1; next} /^# end thread:rollout-clone/{on=0} on' "$ef" > "$tmp/rawc.sh"
-ok "$(grep -c '^R="<repoPath>"$' "$tmp/rawc.sh")" 1 "the rollout-clone snippet is found in execution-fit.md, with its <repoPath> placeholder"
-ok "$(grep -cE '\$[0-9]' "$tmp/rawc.sh")" 0 "the rollout-clone snippet holds no positional \$N"
-csnip=$(sed 's/^R="<repoPath>"$/R="$1"/' "$tmp/rawc.sh")
-csnip_f="$tmp/clone.sh"; printf '%s\n' "$csnip" > "$csnip_f"
-snip_f="$tmp/check.sh"; printf '%s\n' "$snip" > "$snip_f"
-
+# ---- --resolve: schedule § 0's Project root, through the same snippet with <mode> = --resolve ---------------
 g() { git -c init.defaultBranch=main -c user.name=t -c user.email=t@example.invalid "$@"; }
 # mk <dir> <origin-url>: a clone — one empty commit on main, origin/main at it, origin/HEAD → origin/main
 mk() {
@@ -141,100 +138,97 @@ mk() {
 live="$home/repos/live"; sib="$live-rollout"
 mk "$live" "https://github.com/Owner/Live.git"
 write_reg "$live" "$tmp/other"
-# The test scrubbed its own repo-local git env above, for its fixtures. Every lookup runs with a hostile one
+# The test scrubbed its own repo-local git env above, for its fixtures. Every resolve runs with a hostile one
 # put back: GIT_DIR and GIT_WORK_TREE naming a decoy that is itself a usable clone of the same repo, so a
-# lookup that let inherited env override -C would answer for the decoy and wrongly pass the rejections.
+# script that let inherited env override -C would answer for the decoy and wrongly pass the rejections.
 decoy="$tmp/decoy"; mk "$decoy" "https://github.com/owner/live.git"
+# res <sh> <repoPath> [VAR=val …]: rc in $rc, stdout in $out, stderr in $err
+res() { local sh="$1" r="$2"; shift 2; out=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" GIT_DIR="$decoy/.git" GIT_WORK_TREE="$decoy" "$@" $sh "$snip_f" "$r" --resolve 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err"); }
+# no <reason> <label>: exit 3, nothing on stdout, and on stderr the match line, then the clone's reason line,
+# then the fix, in that order
+no() {
+  ok "$rc|$out" "3|" "$2 → 3, nothing printed"
+  ok "$(printf '%s\n' "$err" | awk -v r="$sib is not a usable rollout clone: $1" '
+    index($0, "is, or contains,") && !m {m=NR} index($0, r) && !w {w=NR} index($0, "make a separate clone at") && !f {f=NR}
+    END {print (m && w && f && m < w && w < f) ? "ordered" : "m=" m " w=" w " f=" f}')" ordered "$2: … the match, '$1', then the fix"
+}
+bash_sh=$(command -v bash)
+rm -rf "$sib"
 
-for sh in "${shells[@]}"; do
-  n=$(basename "${sh%% *}")
-  # look <repoPath> [VAR=val …]: rc in $rc, stdout in $out, stderr in $err
-  look() { local r="$1"; shift; out=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" GIT_DIR="$decoy/.git" GIT_WORK_TREE="$decoy" "$@" $sh "$csnip_f" "$r" 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err"); }
-  why() { has "$err" "$sib is not a usable rollout clone: $1" "$2"; }
-  rm -rf "$sib" "$home/repos/nested"
+res "$bash_sh" "$tmp/other"; ok "$rc|$out|$err" "0|$tmp/other|" "resolve: no match → the path itself, silent"
+res "$bash_sh" "$live"; no "nothing is there" "resolve: a match, no clone"
+has "$err" "make a separate clone at $sib (git clone <origin URL> \"$sib\"), then run /thread:schedule <project> --regenerate" "resolve: … the fix names <repoPath>-rollout and --regenerate"
+mk "$sib" "git@github.com:owner/live.git"
+res "$bash_sh" "$live"; ok "$rc|$out|$err" "0|$sib|" "resolve: a match with a clone of the same repo (other URL shape and case) → the clone, silent"
+res "$bash_sh" "~/repos/live/"; ok "$rc|$out" "0|$sib" "resolve: … from a ~/…/ path (trailing / stripped)"
 
-  look "$live"; ok "$rc|$out" "1|" "$n: no sibling → 1, nothing printed"
-  why "nothing is there; clone the repo to it (git clone <origin URL> \"$sib\")" "$n: … naming the one path to clone to"
-  mk "$sib" "git@github.com:owner/live.git"
-  look "$live"; ok "$rc|$out|$err" "0|$sib|" "$n: a clone of the same repo (other URL shape and case) → its path, silent"
-  look "~/repos/live/"; ok "$rc|$out" "0|$sib" "$n: … from a ~/…/ Project root (trailing / stripped)"
+# Its branch, working tree and lag are no rollout's concern: the real rollout clone carries the engine's own
+# untracked scratch, and execute's worktrees branch from origin.
+g -C "$sib" commit -q --allow-empty -m two; g -C "$sib" update-ref refs/remotes/origin/main HEAD; g -C "$sib" reset -q --hard HEAD~1
+g -C "$sib" switch -q -c feature; mkdir -p "$sib/.claude"; : > "$sib/.claude/merge.status"; : > "$sib/untracked"
+res "$bash_sh" "$live"; ok "$rc|$out|$err" "0|$sib|" "resolve: a clone on another branch, with untracked engine scratch, behind origin → still the clone, silent"
+rm -rf "$sib"; mk "$sib" "https://github.com/owner/live.git"
 
-  # Its branch, working tree and lag are no rollout's concern: the real rollout clone carries the engine's own
-  # untracked scratch, and execute's worktrees branch from origin.
-  g -C "$sib" commit -q --allow-empty -m two; g -C "$sib" update-ref refs/remotes/origin/main HEAD; g -C "$sib" reset -q --hard HEAD~1
-  g -C "$sib" switch -q -c feature; mkdir -p "$sib/.claude"; : > "$sib/.claude/merge.status"; : > "$sib/untracked"
-  look "$live"; ok "$rc|$out|$err" "0|$sib|" "$n: on another branch, untracked engine scratch, behind origin → still its path, silent"
-  rm -rf "$sib"; mk "$sib" "https://github.com/owner/live.git"
+g -C "$sib" remote set-url origin "https://github.com/owner/other.git"
+res "$bash_sh" "$live"; no "its origin is owner/other, not Owner/Live" "resolve: a clone of another repo"
+g -C "$sib" remote set-url origin "$tmp/somewhere.git"
+res "$bash_sh" "$live"; no "its origin does not name a GitHub <owner>/<name>" "resolve: a clone with a path origin (land.sh --origin-slug's exit, not its stdout)"
+g -C "$sib" remote set-url origin "https://github.com/owner/live.git"
+g -C "$live" remote set-url origin "$tmp/somewhere.git"
+res "$bash_sh" "$live"; no "the origin of $live does not name a GitHub <owner>/<name>" "resolve: a primary with no GitHub origin"
+g -C "$live" remote set-url origin "https://github.com/Owner/Live.git"
 
-  g -C "$sib" remote set-url origin "https://github.com/owner/other.git"
-  look "$live"; ok "$rc|$out" "1|" "$n: a sibling of another repo → 1"
-  why "its origin is owner/other, not Owner/Live" "$n: … naming both"
-  g -C "$sib" remote set-url origin "$tmp/somewhere.git"
-  look "$live"; ok "$rc|$out" "1|" "$n: a sibling with a path origin → 1 (land.sh --origin-slug's exit, not its stdout)"
-  why "its origin does not name a GitHub <owner>/<name>" "$n: … no GitHub origin"
-  g -C "$sib" remote set-url origin "https://github.com/owner/live.git"
-
-  cat > "$reg" <<EOF
+cat > "$reg" <<EOF
 {"a": {"source": {"source": "directory", "path": "$live"}}, "b": {"source": {"source": "directory", "path": "$sib"}}}
 EOF
-  look "$live"; ok "$rc|$out" "1|" "$n: a sibling that is a marketplace checkout too → 1"
-  why "it holds a live plugin checkout too" "$n: … saying so"
-  write_reg "$live" "$tmp/other"
-  # this session's plugin root inside the clone: the lookup's own self-rollout check refuses it
-  plugin_copy "$sib/plug"
-  look "$live" CLAUDE_PLUGIN_ROOT="$sib/plug"; ok "$rc|$out" "1|" "$n: a sibling holding \${CLAUDE_PLUGIN_ROOT} → 1"
-  why "it holds a live plugin checkout too" "$n: … saying so"
+res "$bash_sh" "$live"; no "it holds a live plugin checkout too" "resolve: a clone that is a marketplace checkout too"
+write_reg "$live" "$tmp/other"
+# this session's plugin root inside the clone: the clone's own match refuses it
+plugin_copy "$sib/plug"
+res "$bash_sh" "$live" CLAUDE_PLUGIN_ROOT="$sib/plug"; no "it holds a live plugin checkout too" "resolve: a clone holding \${CLAUDE_PLUGIN_ROOT}"
+rm -rf "$sib/plug"
 
-  # a linked worktree of the primary shares its .git: not a separate clone
-  rm -rf "$sib"; g -C "$live" worktree add -q --detach "$sib"
-  look "$live"; ok "$rc|$out" "1|" "$n: a linked worktree of the primary → 1"
-  why "it is a linked worktree of $live/.git, not a separate clone" "$n: … not a separate clone"
-  # CDPATH must not steer the common-dir lookup (the review reproduced `cd` honouring it)
-  look "$live" CDPATH="$decoy"; ok "$rc|$out" "1|" "$n: … still 1 with a hostile CDPATH"
-  g -C "$live" worktree remove --force "$sib"
+# a linked worktree of the primary shares its .git: not a separate clone
+rm -rf "$sib"; g -C "$live" worktree add -q --detach "$sib"
+res "$bash_sh" "$live"; no "it is a linked worktree of $live/.git, not a separate clone" "resolve: a linked worktree of the primary"
+# CDPATH must not steer the common-dir lookup (the review reproduced `cd` honouring it)
+res "$bash_sh" "$live" CDPATH="$decoy"; ok "$rc|$out" "3|" "resolve: … still 3 with a hostile CDPATH"
+g -C "$live" worktree remove --force "$sib"
 
-  mkdir -p "$sib"
-  look "$live"; ok "$rc|$out" "1|" "$n: a plain directory → 1"
-  why "it is not the top of a git work tree" "$n: … not a work-tree top"
-  rm -rf "$sib"
-  # a plain directory inside another clone of the same repo is not a clone's top
-  nx="$home/repos/nested/x"
-  mk "$home/repos/nested" "https://github.com/owner/live.git"; mkdir -p "$nx" "$nx-rollout"
-  look "$nx"; ok "$rc|$out" "1|" "$n: a sibling inside a parent clone of the same repo → 1"
-  has "$err" "not the top of a git work tree" "$n: … not a work-tree top"
-  # The review's reproduction: that directory holding a git dir that ignores everything, inherited as GIT_DIR
-  # (and no GIT_WORK_TREE). Unscrubbed, git takes the directory as a clean work tree of the same repo, its own
-  # clone, on main, and the lookup passes it.
-  mk "$nx-rollout/inner" "https://github.com/owner/live.git"; echo '*' > "$nx-rollout/inner/.git/info/exclude"
-  out=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" GIT_DIR="$nx-rollout/inner/.git" $sh "$csnip_f" "$nx" 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err")
-  ok "$rc|$out" "1|" "$n: … still 1 under an inherited GIT_DIR inside it"
-  has "$err" "not the top of a git work tree" "$n: … for the same reason"
-
-  mk "$sib" "https://github.com/owner/live.git"
-  look "$live" CLAUDE_PLUGIN_ROOT="$tmp/noplugin"; ok "$rc|$out" "2|" "$n: the script missing → 2"
-  has "$err" "self-rollout-check.sh not found at $tmp/noplugin/" "$n: … with the not-found line"
-done
-ok "$(env GIT_DIR="$decoy/.git" bash skills/execute/scripts/self-rollout-check.sh --rollout-clone >/dev/null 2>&1; echo $?)" 2 "--rollout-clone with no path → usage error 2"
-
-# ---- the schedule gate: the check, then (on exit 3 only) the lookup, then the first write ---------------
-# gate <root>: writes the Project root it would carry to $tmp/written, or nothing; rc is the gate's exit.
-gate() {
-  rm -f "$tmp/written"; local r="$1" c
-  env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" bash "$snip_f" "$r" 2>/dev/null; rc=$?
-  if [ "$rc" = 3 ]; then   # the lookup proves the clone (its own self-rollout check included): no re-run
-    r=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" bash "$csnip_f" "$r" 2>/dev/null) && rc=0 || { rc=3; return; }
-  fi
-  [ "$rc" = 0 ] && printf '%s\n' "$r" > "$tmp/written"
-}
-written() { [ -e "$tmp/written" ] && cat "$tmp/written" || echo "<nothing>"; }
+mkdir -p "$sib"
+res "$bash_sh" "$live"; no "it is not the top of a git work tree" "resolve: a plain directory"
 rm -rf "$sib"
-gate "$live"; ok "$rc|$(written)" "3|<nothing>" "schedule gate: the live checkout with no separate clone → refused, nothing written"
+# a plain directory inside another clone of the same repo is not a clone's top
+nx="$home/repos/nested/x"; sib_nx="$nx-rollout"
+mk "$home/repos/nested" "https://github.com/owner/live.git"; mkdir -p "$nx" "$sib_nx"
+write_reg "$nx" "$tmp/other"
+res "$bash_sh" "$nx"; ok "$rc|$out" "3|" "resolve: a clone inside a parent clone of the same repo → 3"
+has "$err" "$sib_nx is not a usable rollout clone: it is not the top of a git work tree" "resolve: … not a work-tree top"
+# The review's reproduction: that directory holding a git dir that ignores everything, inherited as GIT_DIR
+# (and no GIT_WORK_TREE). Unscrubbed, git takes the directory as a clean work tree of the same repo, its own
+# clone, on main, and the script passes it.
+mk "$sib_nx/inner" "https://github.com/owner/live.git"; echo '*' > "$sib_nx/inner/.git/info/exclude"
+out=$(env HOME="$home" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PLUGIN_ROOT="$root" GIT_DIR="$sib_nx/inner/.git" bash "$snip_f" "$nx" --resolve 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err")
+ok "$rc|$out" "3|" "resolve: … still 3 under an inherited GIT_DIR inside it"
+has "$err" "not the top of a git work tree" "resolve: … for the same reason"
+write_reg "$live" "$tmp/other"
+
 mk "$sib" "https://github.com/owner/live.git"
-gate "$live"; ok "$rc|$(written)" "0|$sib" "schedule gate: the live checkout with a usable sibling clone → the clone is the Project root"
-g -C "$sib" remote set-url origin "https://github.com/owner/other.git"
-gate "$live"; ok "$rc|$(written)" "3|<nothing>" "schedule gate: … but one of another repo → refused, nothing written"
-g -C "$sib" remote set-url origin "https://github.com/owner/live.git"
-gate "$tmp/other"; ok "$rc|$(written)" "0|$tmp/other" "schedule gate: a root that is no marketplace → kept as is"
+res "$bash_sh" "$live" CLAUDE_PLUGIN_ROOT="$tmp/noplugin"; ok "$rc|$out" "2|" "resolve: the script missing → 2"
+has "$err" "self-rollout-check.sh not found at $tmp/noplugin/" "resolve: … with the not-found line"
+usage() { env GIT_DIR="$decoy/.git" bash skills/execute/scripts/self-rollout-check.sh "$@" >/dev/null 2>&1; echo $?; }
+ok "$(usage --resolve)" 2 "--resolve with no path → usage error 2"
+ok "$(usage --resolve "")" 2 "--resolve with an empty path → usage error 2"
+ok "$(usage --resolve a b)" 2 "--resolve with an extra argument → usage error 2"
+
+# zsh: the wrapper is the only shell-dependent part, so one pass, one rejection and one exit 2
+if [ -n "$zsh_bin" ]; then
+  res "$zsh_bin -f" "$live"; ok "$rc|$out|$err" "0|$sib|" "zsh: resolve swaps to the usable clone"
+  rm -rf "$sib"
+  res "$zsh_bin -f" "$live"; ok "$rc|$out" "3|" "zsh: resolve with no clone → 3"
+  has "$err" "$sib is not a usable rollout clone: nothing is there" "zsh: … with the reason line"
+  res "$zsh_bin -f" "$live" CLAUDE_PLUGIN_ROOT="$tmp/noplugin"; ok "$rc|$out" "2|" "zsh: resolve with the script missing → 2"
+fi
 
 # ---- wiring: § 2.6 and § 7 name both reasons; the halt line parses for the Stop hook --------------------
 sect() { awk -v a="$1" -v b="$2" 'index($0, a) == 1 {on=1} index($0, b) == 1 && on && index($0, a) != 1 {exit} on' "$skill"; }
@@ -259,17 +253,15 @@ print("ok" if hit and hit.group("state") == "halted" else "no match")
 PY
 )" ok "the § 2.6 halt line matches the Stop hook's STATUS_RE"
 has "$(grep -n '^# thread:self-rollout-check' "$ef")" "tests/self-rollout-check.test.sh" "execution-fit.md's snippet names this test"
-has "$(grep -n '^# thread:rollout-clone' "$ef")" "tests/self-rollout-check.test.sh" "execution-fit.md's rollout-clone snippet names this test"
 
 # ---- wiring: one copy, in execution-fit.md; schedule § 0 and execute § 2.6 point at it ----------------
 for f in skills/schedule/SKILL.md "$skill"; do
-  ok "$(grep -c '# thread:self-rollout-check\|# thread:rollout-clone' "$f")" 0 "$f copies neither snippet"
+  ok "$(grep -c '# thread:self-rollout-check' "$f")" 0 "$f does not copy the snippet"
 done
-has "$(tr '\n' ' ' < "$ef")" "Six blockers" "execution-fit names six blockers"
-lr=$(grep -n '^\*\*Landing register\.\*\*' "$ef" | cut -d: -f1); srl=$(grep -n '^\*\*Self-rollout\.\*\*' "$ef" | cut -d: -f1); pbl=$(grep -n '^\*\*Pushed base\.\*\*' "$ef" | cut -d: -f1)
-ok "$([ -n "$lr" ] && [ -n "$srl" ] && [ -n "$pbl" ] && [ "$lr" -lt "$srl" ] && [ "$srl" -lt "$pbl" ] && echo y)" y "Self-rollout sits between Landing register and Pushed base"
+srl=$(grep -n '^\*\*Self-rollout\.\*\*' "$ef" | cut -d: -f1); gol=$(grep -n '^\*\*GitHub `origin`\.\*\*' "$ef" | cut -d: -f1)
+ok "$([ -n "$srl" ] && [ -n "$gol" ] && [ "$srl" -lt "$gol" ] && echo y)" y "Self-rollout is the first blocker, ahead of GitHub origin"
 s26f=$(printf '%s\n' "$s26" | tr '\n' ' ')
-has "$s26f" "execution-fit.md\` § Dispatch blockers (point at it; never copy the snippet here)" "execute § 2.6 points at execution-fit.md § Dispatch blockers"
+has "$s26f" "execution-fit.md\` § Dispatch blockers (point at it; never copy the snippet here), with \`<mode>\` empty" "execute § 2.6 points at execution-fit.md § Dispatch blockers, plain mode"
 has "$s26f" "Execute never swaps a root itself" "execute § 2.6 never swaps a root"
 
 echo; [ "$fail" -eq 0 ] && echo "self-rollout-check: ALL PASS" || echo "self-rollout-check: SOME FAILED"

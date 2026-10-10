@@ -49,6 +49,41 @@ schedule gate stops before anything is written (no task stamped, no rollout
 note, no heartbeat) and names the remedy. Fix the blocker, then schedule again.
 Six blockers:
 
+**Self-rollout.** A rollout must never run against the checkout the plugin itself runs from. When the
+repo path is, or contains, the plugin's live checkout (a **directory-source** marketplace,
+`claude plugin marketplace add <dir>`, or a `--plugin-dir` session), `${CLAUDE_PLUGIN_ROOT}` IS that
+checkout, so every engine or skill change a merge lands there becomes the engine of the rollout's next task
+call (p12-4, ADR 0030). This blocker runs first, since in schedule it decides the path every other blocker
+checks:
+
+```bash
+# thread:self-rollout-check (extracted and tested by tests/self-rollout-check.test.sh)
+R="<repoPath>"
+M="<mode>"
+case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
+sc="${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh"
+[ -f "$sc" ] || { echo "self-rollout-check.sh not found at $sc: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }
+bash "$sc" $M "$R"
+# end thread:self-rollout-check
+```
+
+`<mode>` is `--resolve` in schedule § 0 and empty in execute § 2.6. `self-rollout-check.sh` is read-only
+(it never clones, fetches or writes), and its header is the one statement of what matches and of what
+makes a clone usable.
+
+- **`--resolve`** (schedule § 0 only): exit 0 prints the Project root to use, the repo path itself when
+  nothing matches, or the separate clone `<repoPath>-rollout` when the repo path matches and that clone is
+  usable. Exit 3 is a match with no usable clone: the match lines, one
+  `self-rollout-check: <path> is not a usable rollout clone: <reason>` line and the fix, on stderr.
+- **Empty** (execute § 2.6): exit 0 is no match; exit 3 is a match, with the match lines and the fix on
+  stderr. Execute never swaps a root: its rollout note is already written.
+- **Exit 2**, in either mode, is the check itself failing (the script missing, an empty path, no python3),
+  and any other non-zero exit fails closed the same way. A missing registry passes; a malformed one passes
+  with a warning, to pass on (the registry format is Claude Code's, so the check fails open).
+
+On any non-zero exit, stop and print the stderr verbatim: it names the fix. The clone's location is a
+convention, not a setting: a clone anywhere else is not found.
+
 **GitHub `origin`.** The engine branches every worktree from
 `origin/<default branch>` and lands each task as a GitHub PR that merge-task
 merges, so the target repo needs an `origin` on GitHub. A repo with no `origin`
@@ -124,64 +159,6 @@ repair step is deliberately ungated too: `/thread:repair` § 5's clean defer run
 `gh pr close --delete-branch` on a task the user chose to defer. That removes the
 rollout's own branch and PR and lands nothing on the default branch, so, like a
 pause, it is cleanup that the register never blocks.
-
-**Self-rollout.** A rollout must never run against the checkout the plugin itself runs from. When the
-repo path is, or contains, the plugin's live checkout (a **directory-source** marketplace,
-`claude plugin marketplace add <dir>`, or a `--plugin-dir` session), `${CLAUDE_PLUGIN_ROOT}` IS that
-checkout, so every engine or skill change a merge lands there becomes the engine of the rollout's next task
-call (p12-4, ADR 0030). Run this against the same resolved path, after the landing register check:
-
-```bash
-# thread:self-rollout-check (extracted and tested by tests/self-rollout-check.test.sh)
-R="<repoPath>"
-case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
-sc="${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh"
-[ -f "$sc" ] || { echo "self-rollout-check.sh not found at $sc: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }
-bash "$sc" "$R"
-# end thread:self-rollout-check
-```
-
-`self-rollout-check.sh` compares two sources with the repo path (`~/` expanded, trailing slashes stripped,
-symlinks resolved) by **containment**: `${CLAUDE_PLUGIN_ROOT}`, the root this session runs the plugin
-from (so a `--plugin-dir` session the registry never lists is caught too), and every directory source's
-`path` and `installLocation` in `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json`. A
-path equal to the repo path or nested inside it (`<repoPath>/…`, a monorepo with the plugin in a
-subdirectory) matches, since `merge-task.sh` fast-forwards the whole checkout. A missing registry passes; a
-malformed one passes with a warning (the registry format is Claude Code's, so the check fails open). Exit 0
-is no match: pass any warning on. Exit 3 is a match: what matched, the path, and the fix on stderr (make a
-separate clone at `<repoPath>-rollout`, then run `/thread:schedule <project> --regenerate`, which re-roots
-the rollout there; never hand-edit a Project root). Exit 2 is a failure of the check itself (the script
-not found, an empty path, no python3), and any other non-zero exit fails closed the same way. schedule § 0 runs it before anything is written; execute § 2.6 re-runs it at every
-launch and after every § 4.5 re-check of the landing register, since a written rollout note can still name
-the primary checkout (one scheduled before this check, or edited by hand).
-
-The separate clone always sits at `<repoPath>-rollout` (the repo path canonicalised as above, then
-`-rollout` appended): the path the check's remedy names. On the check's exit 3, schedule § 0 looks for it
-with this, against the same path:
-
-```bash
-# thread:rollout-clone (extracted and tested by tests/self-rollout-check.test.sh)
-R="<repoPath>"
-case "$R" in "~"/*) R="$HOME/${R#\~/}" ;; esac
-sc="${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh"
-[ -f "$sc" ] || { echo "self-rollout-check.sh not found at $sc: is CLAUDE_PLUGIN_ROOT set?" >&2; exit 2; }
-bash "$sc" --rollout-clone "$R"
-# end thread:rollout-clone
-```
-
-`self-rollout-check.sh --rollout-clone` (its header is the one statement of the rule) prints that path
-(exit 0) only when it is a directory, the top of a git work tree, its own clone rather than a linked
-worktree (its `--git-common-dir` is inside it), a GitHub clone of the same repository
-(`land.sh --origin-slug` exits 0 for both trees and the two `<owner>/<name>` match, case-insensitively),
-and holds no live plugin checkout itself. Nothing else is asked of it: its branch, its working tree (the
-engine's own scratch included) and how far it is behind are no rollout's concern, since execute's
-worktrees branch from a freshly fetched `origin/<default>` and the pushed-base check fetches every clone
-and blocks a local default branch that is ahead. Any other state prints nothing and exits 1 with one
-`self-rollout-check: <path> is not a usable rollout clone: <reason>` line naming the condition that
-failed; exit 2 is land.sh or the script missing. It drops inherited repo-local git env first, and never
-clones, fetches or writes. Only schedule § 0 swaps a root this way, and only before anything is written;
-execute § 2.6 halts instead, since its rollout note is already written. The location is a convention, not
-a setting: a clone anywhere else is not found.
 
 **Pushed base.** Rollout worktrees branch from a freshly fetched `origin/<default>`, and the agents
 read only their task note, the rollout note and the repo: never THREAD.md, and never anything that exists

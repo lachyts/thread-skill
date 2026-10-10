@@ -572,7 +572,7 @@ has "$s2" "cited paths" "schedule step 2 passes cited paths"
 s8=$(awk '/^### 8\./{on=1} /^## Execution lives/{on=0} on' "$sch")
 has "$s8" "local copies agents won't see" "schedule step 8 lists the local copies agents won't see"
 has "$(grep -n '^\*\*Obsidian only\*\*' "$sch")" "origin/close/*" "schedule Scope names the fetch"
-has "$(grep "^- Don't run \`git\` operations" "$sch")" "git fetch" "schedule Don'ts names the fetch"
+has "$(grep "^- Don't run \`git\` operations" "$sch")" "§ 0's probes (listed under Scope)" "schedule Don'ts point at Scope, which names the fetch"
 
 for f in skills/schedule/SKILL.md skills/execute/SKILL.md skills/repair/SKILL.md; do
   ok "$(grep -c '# thread:pushed-base-check' "$f")" 0 "$f does not copy the pushed-base snippet"
