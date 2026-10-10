@@ -87,29 +87,22 @@ code() { echo "$RANDOM$RANDOM" >> "$R/${1:-code.txt}"; g -C "$R" add -A; g -C "$
 cpath() { mkdir -p "$(dirname "$R/$1")"; echo "$RANDOM" >> "$R/$1"; g -C "$R" add -A; g -C "$R" commit -q -m "close-out $1"; }
 push2() { g -C "$C2" fetch -q origin; g -C "$C2" reset -q --hard origin/master; echo "$RANDOM" >> "$C2/c2.txt"; g -C "$C2" add -A; g -C "$C2" commit -q -m c2; g -C "$C2" push -q origin master; }
 ff() { g -C "$R" fetch -q origin; g -C "$R" merge -q --ff-only origin/master; }
-# holder — hold the lock in the background until `release` (it creates $S/release), never for a fixed time a
-# loaded host can outrun before the canary reaches the lock. It takes the lock by polling LOCK_NB for 60 s at most
-# (then exits 3, and the `took the lock` check fails by name), and lets go after 300 s if never released, so a
-# canary that ignores its timeout fails rather than hangs. $S/held once it holds.
+# await <pid> <cmd…> — poll <cmd> until it succeeds or <pid> has exited.
+await() { local p=$1; shift; while ! "$@" 2>/dev/null && kill -0 "$p" 2>/dev/null; do sleep 0.05; done; }
+# holder — hold the lock in the background until `release` kills it (the kernel drops a flock with its process),
+# never for a fixed time a loaded host can outrun. A lock not taken within 60 s ends it by SIGALRM, and the `took
+# the lock` check fails by name; an unreleased hold ends after 300 s, so a canary that ignores its timeout fails
+# rather than hangs. $S/held once it holds.
 holder() {
-  rm -f "$S/held" "$S/release"
-  python3 -c 'import fcntl, os, sys, time
-lock, held, release = sys.argv[1:]
-f = open(lock, "a"); end = time.monotonic() + 60
-while True:
-    try:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB); break
-    except BlockingIOError:
-        if time.monotonic() >= end: sys.exit(3)
-        time.sleep(0.05)
-open(held, "w").close(); end = time.monotonic() + 300
-while not os.path.exists(release) and time.monotonic() < end:
-    time.sleep(0.05)' "$THREAD_GIT_ENV_DIR/ro.lock" "$S/held" "$S/release" &
+  rm -f "$S/held"
+  python3 -c 'import fcntl, signal, sys, time
+f = open(sys.argv[1], "a"); signal.alarm(60); fcntl.flock(f, fcntl.LOCK_EX); signal.alarm(0)
+open(sys.argv[2], "w").close(); time.sleep(300)' "$THREAD_GIT_ENV_DIR/ro.lock" "$S/held" &
   hp=$!
-  while [ ! -f "$S/held" ] && kill -0 "$hp" 2>/dev/null; do sleep 0.05; done
+  await "$hp" test -f "$S/held"
   ok "$([ -f "$S/held" ] && echo held || echo "never held")" held "holder: took the lock"
 }
-release() { touch "$S/release"; wait "$hp"; }
+release() { kill "$hp" 2>/dev/null; wait "$hp" 2>/dev/null; }
 dellog() { python3 - "$RO" "$1" <<'PY'
 import sys
 p, needle = sys.argv[1:]
@@ -707,27 +700,29 @@ holder
 THREAD_GIT_ENV_LOCK_TIMEOUT=1 call; ok "$rc" 2 "t: a held lock with THREAD_GIT_ENV_LOCK_TIMEOUT=1 → check-all 2"
 has "$err" "timed out" "t: … a timeout"
 release
-# The wait, proven by what check-all does, not by the clock: it runs in the background with fcntl.flock wrapped to
-# log each exclusive attempt's outcome to $S/flock (`busy` or `ok`). The hold is released only once a `busy` shows
-# check-all met the held lock, so a final `ok` is a lock taken after waiting for the release.
+# The wait, proven by what check-all does, not by the clock: check-all runs in the background with the canary's
+# fcntl.flock wrapped to log each exclusive attempt (`busy` or `ok`) to $S/flock. The hold is released only once
+# a `busy` shows check-all met it, so a final `ok` is the lock taken after waiting for the release.
 holder
 rm -f "$S/flock"
-THREAD_GIT_ENV_LOCK_TIMEOUT=600 CANARY_FLOCK_LOG="$S/flock" python3 -c 'import fcntl, os, runpy, sys
-real = fcntl.flock
+THREAD_GIT_ENV_LOCK_TIMEOUT=600 python3 - "$CAN" "$S/flock" "$RO" "$V" > "$S/out" 2> "$S/err" <<'PY' &
+import importlib.util, sys
+can, flog, ro, vault = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("canary", can); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+real, log = m.fcntl.flock, open(flog, "a", buffering=1)
 def logged(fd, op):
-    if not op & fcntl.LOCK_EX:
+    if not op & m.fcntl.LOCK_EX:
         return real(fd, op)
-    log = open(os.environ["CANARY_FLOCK_LOG"], "a", buffering=1)
     try:
         real(fd, op)
     except BlockingIOError:
         log.write("busy\n"); raise
     log.write("ok\n")
-fcntl.flock = logged
-sys.argv = sys.argv[1:]
-runpy.run_path(sys.argv[0], run_name="__main__")' "$CAN" check-all --rollout "$RO" --tasks-dir "$V" > "$S/out" 2> "$S/err" &
+m.fcntl.flock = logged
+sys.exit(m.main(["check-all", "--rollout", ro, "--tasks-dir", vault]))
+PY
 cp=$!
-while ! grep -qx busy "$S/flock" 2>/dev/null && kill -0 "$cp" 2>/dev/null; do sleep 0.05; done
+await "$cp" grep -qx busy "$S/flock"
 release; wait "$cp"; rc=$?
 ok "$(head -n 1 "$S/flock" 2>/dev/null)|$(tail -n 1 "$S/flock" 2>/dev/null)|$(grep -cx ok "$S/flock" 2>/dev/null)" "busy|ok|1" \
   "t: check-all meets the held lock (busy), waits, and takes it once the holder releases"

@@ -203,33 +203,19 @@ ok "$rc" 5 "11. a RACE re-run exits 5 again"; ok "$(nmerge)" 0 "11. no merge cal
 ok "$(sent)" "failed:5" "11. never ok"
 
 # 12. the review gate (p6-6): a pending review halts at once with 7, never a checks wait, never a bypass
-#     "No checks wait" is proven structurally, never by the clock (a loaded host stretches any tight bound): a
-#     `sleep` stub first on PATH records every call and returns at once, and CHECK_INTERVAL is 600, so a halt that
-#     sleeps one CHECK_INTERVAL first leaves a `600` in the record. The SECONDS bound, half of 600, backs it up
-#     for a wait that does not go through `sleep`.
+#     "No checks wait" is proven by the record, not the clock: a `sleep` stub first on PATH logs each call and
+#     returns at once, and CHECK_INTERVAL is a distinctive 7, so a halt that sleeps one CHECK_INTERVAL leaves a
+#     `7`. 16b, run under the same stub, is the positive control that the stub sees merge-task's sleeps.
 fresh; pair; mkpr 5 "$I" BLOCKED; echo REVIEW_REQUIRED > "$MT_STATE/pr/5/reviewDecision"
 mkdir -p "$tmp/sleepbin"; : > "$tmp/sleeps"
 printf '#!/bin/sh\necho "$*" >> "%s/sleeps"\n' "$tmp" > "$tmp/sleepbin/sleep"; chmod +x "$tmp/sleepbin/sleep"
-export MERGE_TASK_CHECK_INTERVAL=600
-s12=$SECONDS; PATH="$tmp/sleepbin:$PATH" run 5 "$I" "$B"; el12=$((SECONDS - s12))
-export MERGE_TASK_CHECK_INTERVAL=0
+MERGE_TASK_CHECK_INTERVAL=7 PATH="$tmp/sleepbin:$PATH" run 5 "$I" "$B"
 ok "$rc" 7 "12a. BLOCKED + REVIEW_REQUIRED exits 7"
 has "$out" "review required: approve PR #5 (https://github.com/o/r/pull/5)" "12a. names the PR and its URL"
 has "$out" "never bypasses protection" "12a. says it never bypasses protection"
 ok "$(nmerge)" 0 "12a. no merge call"; lacks "$(glog)" "pr checks" "12a. no checks wait"
 lacks "$(glog)" "branches/" "12a. no protection read"; lacks "$(glog)" "rules/" "12a. no rules read"
-ok "$(grep -cx 600 "$tmp/sleeps")" 0 "12a. never sleeps one CHECK_INTERVAL before halting (sleep calls: $(tr '\n' ' ' < "$tmp/sleeps"))"
-ok "$([ "$el12" -lt 300 ] && echo y || echo "n (${el12}s)")" y "12a. halts well inside one CHECK_INTERVAL of 600 s"
-#     Positive control, same stub and interval: a required check absent while CI is in flight is a path that does
-#     sleep one CHECK_INTERVAL, so the record must show exactly one `600`. That proves the stub intercepts
-#     merge-task's sleeps, so the empty record above means something.
-fresh; pair; mkpr 5 "$I" UNSTABLE; echo 1 > "$MT_STATE/inflight"; : > "$tmp/sleeps"
-printf '%s\n' '{"rc": 1, "out": "", "err": "no checks reported on the '"'"'audit-fix/t5'"'"' branch"}' \
-  '{"rc": 0, "out": "ci\tpass\t1m\thttps://github.com/o/r/actions/runs/7/job/8\t", "err": ""}' > "$MT_STATE/checks.seq"
-export MERGE_TASK_CHECK_INTERVAL=600
-PATH="$tmp/sleepbin:$PATH" run 5 "$I" "$B"
-export MERGE_TASK_CHECK_INTERVAL=0
-ok "$rc|$(grep -cx 600 "$tmp/sleeps")" "0|1" "12a. (control) an absent check with CI in flight sleeps one CHECK_INTERVAL through the stub, then merges"
+ok "$(grep -cx 7 "$tmp/sleeps")" 0 "12a. never sleeps one CHECK_INTERVAL before halting (sleep calls: $(tr '\n' ' ' < "$tmp/sleeps"))"
 fresh; pair; mkpr 5 "$I" BLOCKED; echo CHANGES_REQUESTED > "$MT_STATE/pr/5/reviewDecision"
 run 5 "$I" "$B"; ok "$rc" 7 "12b. BLOCKED + CHANGES_REQUESTED exits 7"
 fresh; pair; mkpr 5 "$I" BLOCKED
@@ -296,8 +282,9 @@ fresh; pair; mkpr 5 "$I" UNSTABLE
 run 5 "$I" "$B"; ok "$rc" 0 "16a. UNSTABLE with required checks green merges"; ok "$(nmerge)" 1 "16a. merged"
 fresh; pair; mkpr 5 "$I" UNSTABLE; echo 1 > "$MT_STATE/inflight"
 chk 1 "" "no checks reported on the 'audit-fix/t5' branch"; chk 0 "$(row ci pass)" ""
-run 5 "$I" "$B"
+: > "$tmp/sleeps"; MERGE_TASK_CHECK_INTERVAL=7 PATH="$tmp/sleepbin:$PATH" run 5 "$I" "$B"
 ok "$rc" 0 "16b. an absent check with CI in flight waits, then merges"
+ok "$(grep -cx 7 "$tmp/sleeps")" 1 "16b. (12a's control) the wait is one CHECK_INTERVAL through the sleep stub"
 has "$out" "CI in flight on head — waiting" "16b. reads the absent check as pending"
 has "$(glog)" "actions/runs?head_sha=$I" "16b. probes runs on the integrated head"
 fresh; pair; mkpr 5 "$I" BLOCKED; seed 5 "$(b 1)"

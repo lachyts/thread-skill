@@ -7,10 +7,10 @@
 # labels, update-branch, the user, PR bodies, hold comments and per-SHA check-runs and status. Every handed
 # path goes through a symlinked alias of the temp dir, so the physical-path handling is exercised on every run.
 # Hang stubs run a non-exec `sleep 40 | cat`. A call handed any `*=hang*` setting runs under
-# LAND_TIMEOUT=$HANG (an explicit LAND_TIMEOUT after it wins, as case 35's does) and asserts elapsed under
-# $HANG_BOUND; every other call has the 15 s suite default, room for a fake gh slowed by `make test`'s
-# concurrent suites. Hermetic: HOME, the global git config and TMPDIR are temp, and the caller's GIT_DIR & co.
-# are unset. bash 3.2-compatible (macOS).
+# LAND_TIMEOUT=$HANG and asserts elapsed under $HANG_BOUND (case 35 passes its own LAND_TIMEOUT after it, which
+# wins, and a HANG_BOUND prefix, since its deadline is the bound); every other call has the 15 s suite default,
+# room for a fake gh slowed by `make test`'s concurrent suites. Hermetic: HOME, the global git config and TMPDIR
+# are temp, and the caller's GIT_DIR & co. are unset. bash 3.2-compatible (macOS).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
@@ -703,30 +703,23 @@ has "$err" "land: label failed: timed out" "case 34 hang: label failed: timed ou
 hasnt "$(ghlog)" "pr edit" "case 34: never pr edit"
 
 echo "== 35. the deadline"
-# The hung label call must be cut by the run deadline, not by its own per-call budget. LAND_TIMEOUT=600 is far
-# past the hang stub's 40 s life, so a call left to its own budget ends when the stub exits (`label failed: rc 1`)
-# and `label failed: timed out` can only be the deadline-clipped budget firing: proof without timing the call.
-# The deadline, 30 s, must fall inside the label call: the steps before it take about 3 s unloaded but have been
-# stretched past 12 s (the old deadline) on a loaded host, and it must stay under the stub's 40 s, or a call
-# that starts early would outlive the stub. If the deadline still passes before the label call (no `label
-# failed` at all), that is load, not a regression: the case is skipped and run once more on a fresh repo, and a
-# second such run is reported as a SKIP, never a FAIL. land.sh is run directly, outside land(), because land()
-# bounds every hang run's elapsed time at 25 s.
-for c35 in c35 c35b; do
-  ghreset; mkrepo "$c35"; c0; srvcommit "$c35" x.txt X; edit
-  : > "$LOG_SSH"; : > "$LOG_GH"
-  out=$(env LAND_TIMEOUT=600 LAND_DEADLINE=30 GH_LABELS=hang GH_LABELCREATE=hang $LAND_SHELL "$LAND" "$W" "$W/THREAD.md" 2>"$tmp/err"); rc=$?
-  err=$(cat "$tmp/err")
-  case $err in *"land: label failed"*) break ;; esac
-  echo "SKIP - case 35 ($c35): the 30 s deadline passed before the label call (a loaded host); $([ "$c35" = c35 ] && echo "running once more" || echo "not run")"
+# LAND_TIMEOUT=600 outlives the 40 s hang stub, so `label failed: timed out` proves the deadline clipped the call's
+# budget. A deadline that passes before the label call (no `label failed`) is load, not a regression: retry once
+# with a longer one (still under the stub's 40 s), then SKIP.
+hit=
+for d in 12 30; do
+  ghreset; mkrepo "c35d$d"; c0; srvcommit "c35d$d" x.txt X; edit
+  HANG_BOUND=600 land LAND_TIMEOUT=600 LAND_DEADLINE=$d GH_LABELS=hang GH_LABELCREATE=hang -- "$W" "$W/THREAD.md"
+  case $err in *"land: label failed"*) hit=y; break ;; esac
+  echo "SKIP - case 35 (deadline ${d}s): the deadline passed before the label call (a loaded host)"
 done
-case $err in *"land: label failed"*)
-  res "case 35" 0 "queued: needs merge https://github.com/o/$c35/pull/1"
-  has "$err" "land: label failed: timed out" "case 35: the label call was cut by the deadline (timed out, not its own 600 s budget)"
+if [ "$hit" = y ]; then
+  res "case 35" 0 "queued: needs merge https://github.com/o/c35d$d/pull/1"
+  has "$err" "land: label failed: timed out" "case 35: the label call was cut by the ${d}s deadline (timed out, not its own 600 s budget)"
   has "$err" "land: skipped label retry: deadline" "case 35: skipped label retry"
   has "$err" "land: skipped merge: deadline" "case 35: skipped merge"; hasnt "$(ghlog)" "pr merge" "case 35: no pr merge"
-  has "$err" "land: skipped update-branch: deadline" "case 35: skipped update-branch"; hasnt "$(ghlog)" "update-branch" "case 35: no PUT" ;;
-esac
+  has "$err" "land: skipped update-branch: deadline" "case 35: skipped update-branch"; hasnt "$(ghlog)" "update-branch" "case 35: no PUT"
+fi
 edit; land LAND_DEADLINE=0 -- "$W" "$W/THREAD.md"
 res "case 35 deadline 0" 1 "stuck: deadline passed before fetch"
 ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 35 deadline 0: THREAD.md committed"; nossh "case 35 deadline 0"
