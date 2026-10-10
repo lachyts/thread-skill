@@ -94,12 +94,16 @@ export LC_ALL=C GIT_TERMINAL_PROMPT=0 GH_PROMPT_DISABLED=1 GCM_INTERACTIVE=never
 # ---- bounded: one network call, killed with its whole process group at the budget ----------------------
 # The deadline check and the budget are one read of SECONDS. 124: the deadline passed, nothing ran.
 # 142: the call timed out. perl execs the argv directly (no shell) in a fresh process group, and kills
-# that group after a normal exit too, so a leftover descendant cannot hold a pipe open.
+# that group after a normal exit too, so a leftover descendant cannot hold a pipe open. LAND_TRACE (tests
+# only): a file that gets `timed out after <t>s: <argv>` for each call the timer kills, <t> the budget the
+# alarm was armed with, so a test can check the configured timeout reaches the timer without timing it.
 read -r -d '' LAND_BOUNDED_PL <<'PL'
 my $t=shift; $t=1 unless defined $t && $t=~/^\d+$/ && $t>=1;
 my $pid=fork; defined $pid or exit 127;
 if(!$pid){ setpgrp(0,0); exec { $ARGV[0] } @ARGV; exit 127 }
-$SIG{ALRM}=sub{ kill 'KILL',-$pid; waitpid($pid,0); exit 142 };
+$SIG{ALRM}=sub{ kill 'KILL',-$pid; waitpid($pid,0);
+  if($ENV{LAND_TRACE} && open(my $h,'>>',$ENV{LAND_TRACE})){ print $h "timed out after ${t}s: @ARGV\n"; close $h }
+  exit 142 };
 alarm $t; waitpid($pid,0); my $st=$?; alarm 0;
 kill 'KILL',-$pid;
 exit($st & 127 ? 128+($st & 127) : $st >> 8)

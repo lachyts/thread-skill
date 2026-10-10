@@ -27,8 +27,10 @@ is a failed status with `description: null`.
 `pr list --head <b>` keeps PRs whose headRefName is <b>. A create writes refs/pull/<n>/head on the bare
 server; GH_UPDATE=merge really merges server master into the PR's head branch and moves refs/pull/<n>/head;
 `--auto` ok sets autoMergeRequest, `--disable-auto` ok clears it, a direct ok marks the PR MERGED.
-`pr edit` always fails with the projectCards deprecation error. A hang runs a non-exec `sleep 600 | cat`.
-`holdout` prints `false` and leaves a `sleep 600` holding stdout after exiting 0.
+`pr edit` always fails with the projectCards deprecation error. A hang runs a non-exec `$HANG_STUB | cat`
+(tests/fixtures/land/hang.sh: it holds stdout until its process group is killed, and logs to $HANG_LOG if
+the group leader dies first or nothing kills it). `holdout` prints `false` and exits 0, leaving a $HANG_STUB
+child holding stdout that watches land.sh's timer process (this one's parent) instead of the leader.
 """
 import json
 import os
@@ -46,7 +48,7 @@ PRS = os.path.join(st, "prs.json")
 
 
 def hang():
-    subprocess.run("sleep 600 | cat", shell=True)
+    subprocess.run('"$HANG_STUB" | cat', shell=True)
     sys.exit(1)
 
 
@@ -233,7 +235,7 @@ if method == "GET" and rest[:1] == ["branches"]:
         die("gh: Branch not found (HTTP 404)")
     if mode == "holdout":
         print("false", flush=True)
-        subprocess.Popen(["sleep", "600"])
+        subprocess.Popen([os.environ["HANG_STUB"], str(os.getppid())])
         sys.exit(0)
     print(mode)
     sys.exit(0)

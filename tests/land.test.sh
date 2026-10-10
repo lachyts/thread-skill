@@ -6,16 +6,18 @@
 # `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
 # labels, update-branch, the user, PR bodies, hold comments and per-SHA check-runs and status. Every handed
 # path goes through a symlinked alias of the temp dir, so the physical-path handling is exercised on every run.
-# Hang stubs run a non-exec `sleep 600 | cat`. A call handed any `*=hang*` setting runs under
-# LAND_TIMEOUT=$HANG (an explicit LAND_TIMEOUT after it wins, as case 35's does) and asserts elapsed under
-# $HANG_BOUND, half the stub's 600 s: a loaded host (a rollout runs several `make test`s at once) has stretched
-# one such call to 100 s at a load average near 300, while a call that waited out the stub takes 600 s. Every
-# other call has the 15 s suite default, room for a fake gh slowed by `make test`'s concurrent suites.
+# Hang stubs run a non-exec `tests/fixtures/land/hang.sh | cat`: it holds the pipe until land.sh kills the
+# call's process group, and logs to $HANG_LOG if the group leader dies first (the group was not killed whole) or
+# nothing kills it within its 120 s cap. Every call, hung or not, runs under the 15 s suite default (room for a
+# fake gh slowed by a loaded host), unless the case sets its own. A call handed any `*=hang*` setting is proven
+# without the clock: land.sh's LAND_TRACE shows each timed-out call's timer armed with exactly the configured
+# LAND_TIMEOUT, and $HANG_LOG stays empty.
 # Hermetic: HOME, the global git config and TMPDIR are temp, and the caller's GIT_DIR & co. are unset. bash
 # 3.2-compatible (macOS).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
+. tests/lib/handshake.sh
 unset $(git rev-parse --local-env-vars)
 
 root=$(pwd -P)
@@ -46,7 +48,7 @@ git config --global init.defaultBranch main
 git config --global advice.detachedHead false
 export LANDING_REGISTER="$tmp/register.md"
 export LAND_TIMEOUT=15 LAND_DEADLINE=300
-HANG=4 HANG_BOUND=300   # a hang call's LAND_TIMEOUT (land() applies it) and its elapsed bound, under a stub's 600 s
+export HANG_STUB="$root/tests/fixtures/land/hang.sh" HANG_LOG="$tmp/hang.log" LAND_TRACE="$tmp/trace"
 cp tests/fixtures/land/fake-gh.py "$tmp/bin/gh"; cp tests/fixtures/land/fake-ssh.sh "$tmp/bin/fake-ssh"
 chmod +x "$tmp/bin/gh" "$tmp/bin/fake-ssh"
 export PATH="$tmp/bin:$PATH"
@@ -99,18 +101,26 @@ fetchsrv() { git -C "$W" fetch -q "$SRV/o/$1.git" "+refs/heads/master:refs/remot
 c0() { echo "c0 ${1:-x}" >> "$W/THREAD.md"; git -C "$W" add THREAD.md; git -C "$W" commit -qm "📝 docs(thread): close-out — ${1:-earlier}"; }
 edit() { echo "${2:-closed}" >> "$W/THREAD.md"; }
 
-# land [VAR=value …] -- <land.sh args…> → $out, $err, $rc, $el (seconds). Logs are reset first.
+# land [VAR=value …] -- <land.sh args…> → $out, $err, $rc. Logs, the trace and $HANG_LOG are reset first. A
+# call handed a `*=hang*` setting also checks that no hung child outlived its group and, unless the case sets
+# LAND_DEADLINE (it checks its clipped budgets itself), that at least one call timed out and every timed-out
+# call's timer was armed with the LAND_TIMEOUT in effect (the case's own, else the suite's).
 LAND_SHELL=bash
 land() {
-  local extra=() hang=() e
+  local extra=() hang= budget=$LAND_TIMEOUT clip= e
   while [ $# -gt 0 ] && [ "$1" != -- ]; do extra+=("$1"); shift; done
   [ $# -gt 0 ] && shift
-  for e in ${extra[@]+"${extra[@]}"}; do case $e in *=hang*) hang=(LAND_TIMEOUT=$HANG) ;; esac; done
-  : > "$LOG_SSH"; : > "$LOG_GH"
-  local s=$SECONDS
-  out=$(env ${hang[@]+"${hang[@]}"} ${extra[@]+"${extra[@]}"} $LAND_SHELL "$LAND" "$@" 2>"$tmp/err"); rc=$?
-  el=$((SECONDS - s)); err=$(cat "$tmp/err")
-  [ ${#hang[@]} = 0 ] || ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "hang (${extra[*]}): bounded (${el}s < ${HANG_BOUND}s)"
+  for e in ${extra[@]+"${extra[@]}"}; do
+    case $e in *=hang*) hang=y ;; LAND_TIMEOUT=*) budget=${e#*=} ;; LAND_DEADLINE=*) clip=y ;; esac
+  done
+  : > "$LOG_SSH"; : > "$LOG_GH"; : > "$LAND_TRACE"; : > "$HANG_LOG"
+  out=$(env ${extra[@]+"${extra[@]}"} $LAND_SHELL "$LAND" "$@" 2>"$tmp/err"); rc=$?
+  err=$(cat "$tmp/err")
+  [ -n "$hang" ] || return 0
+  ok "$(cat "$HANG_LOG")" "" "hang (${extra[*]}): every hung child died with its process group"
+  [ -n "$clip" ] && return 0
+  ok "$([ -s "$LAND_TRACE" ] && sed 's/^timed out after \([0-9]*\)s: .*/\1/' "$LAND_TRACE" | sort -u)" "$budget" \
+    "hang (${extra[*]}): the timer was armed with LAND_TIMEOUT=${budget}"
 }
 # res <label> <rc> <stdout exact or prefix…> — one stdout line, rc, and TMPDIR left empty.
 res() {
@@ -270,7 +280,7 @@ ok "$(cnt "$(ghlog)" "pr ")" 0 "case 11: zero gh pr calls"
 edit again
 land GH_PROT=holdout -- "$W" "$W/THREAD.md"
 res "case 11b" 0 landed
-ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 11b: a stub's leftover 600 s child cannot hold the capture (${el}s < ${HANG_BOUND}s)"
+ok "$(cat "$HANG_LOG")" "" "case 11b: the stub's leftover child died with its group, so it never held the capture"
 
 echo "== 12. unprotected, origin moved, stranded C0, clean tree"
 ghreset; mkrepo c12; c0; srvcommit c12 x.txt X; X=$(srvref c12 master); edit
@@ -629,11 +639,11 @@ fill() {
   sed -e "s|top='<top>'|top='$t'|" -e "s|slug='<slug>'|slug='$s'|" -e "s|mode=''|mode='$m'|" \
       -e "s|<message>|📝 docs(thread): close-out — Lachy's snippet run|" -e "s| <paths>\$|$q|" "$tmp/snip.sh" > "$tmp/run.sh"
 }
-snip() {  # snip <shell> [VAR=value …] → out, err, rc, el
+snip() {  # snip <shell> [VAR=value …] → out, err, rc
   local sh=$1; shift
-  : > "$LOG_SSH"; : > "$LOG_GH"; local s=$SECONDS
+  : > "$LOG_SSH"; : > "$LOG_GH"
   out=$(env CLAUDE_PLUGIN_ROOT="$root" "$@" $sh "$tmp/run.sh" 2>"$tmp/err"); rc=$?
-  el=$((SECONDS - s)); err=$(cat "$tmp/err")
+  err=$(cat "$tmp/err")
 }
 for sh in "${shells[@]}"; do
   ghreset; mkrepo "c30${#sh}"; edit
@@ -705,13 +715,24 @@ has "$err" "land: label failed: timed out" "case 34 hang: label failed: timed ou
 hasnt "$(ghlog)" "pr edit" "case 34: never pr edit"
 
 echo "== 35. the deadline"
-ghreset; mkrepo c35; c0; srvcommit c35 x.txt X; edit
-# LAND_TIMEOUT 1200 is past the stub's 600 s, so only the deadline can cut the hung label call: `timed out` proves
-# the call's budget was clipped to the deadline (an unclipped call outlives the stub and fails as `rc 1`). The
-# deadline, 30 s, must fall inside the label call: the steps before it take about 3 s unloaded, and a loaded host
-# can stretch them past 12 s (the old deadline, which then expires before the label call ever starts).
-land LAND_TIMEOUT=1200 LAND_DEADLINE=30 GH_LABELS=hang GH_LABELCREATE=hang -- "$W" "$W/THREAD.md"
-res "case 35" 0 "queued: needs merge https://github.com/o/c35/pull/1"
+# LAND_TIMEOUT 1200 is far past the hang stub's 120 s cap, so only the deadline can cut the hung label call: the
+# trace shows its timer armed with the time left (under the deadline, not LAND_TIMEOUT), and `timed out` that the
+# timer fired. Where the deadline falls depends on how long the steps before the label call take, so a run whose
+# deadline passed before the label call (no label call in the trace and no `label failed`) is run again on a
+# fresh repo with four times the deadline: load moves the deadline, never what is asserted.
+for d35 in 12 48 192; do
+  ghreset; mkrepo "c35d$d35"; c0; srvcommit "c35d$d35" x.txt X; edit
+  land LAND_TIMEOUT=1200 LAND_DEADLINE=$d35 GH_LABELS=hang GH_LABELCREATE=hang -- "$W" "$W/THREAD.md"
+  grep -q 'issues/1/labels' "$LAND_TRACE" || case $err in *"label failed"*) ;; *)
+    echo "# case 35: the ${d35} s deadline passed before the label call; running again with more"; continue ;; esac
+  break
+done
+res "case 35" 0 "queued: needs merge https://github.com/o/c35d$d35/pull/1"
+ok "$(wc -l < "$LAND_TRACE" | tr -d ' ')|$(grep -c 'issues/1/labels' "$LAND_TRACE")" "1|1" \
+  "case 35: exactly one call timed out, the label call"
+b35=$(sed -n 's/^timed out after \([0-9]*\)s: .*/\1/p' "$LAND_TRACE")
+ok "$([ -n "$b35" ] && [ "$b35" -ge 1 ] && [ "$b35" -lt "$d35" ] && echo clipped || echo "budget [$b35]")" clipped \
+  "case 35: its timer was armed with the time left before the ${d35} s deadline, not LAND_TIMEOUT=1200"
 has "$err" "land: label failed: timed out" "case 35: label failed: timed out, at the deadline"
 has "$err" "land: skipped label retry: deadline" "case 35: skipped label retry"
 has "$err" "land: skipped merge: deadline" "case 35: skipped merge"; hasnt "$(ghlog)" "pr merge" "case 35: no pr merge"
@@ -784,15 +805,15 @@ echo "== 39. a setsid holder cannot pin stdout"
 ghreset; mkrepo c39
 cat > "$W/.git/hooks/post-commit" <<EOF
 #!/bin/sh
-perl -MPOSIX -e 'exit if fork; POSIX::setsid(); open my \$f, ">", "$tmp/holder.pid"; print \$f \$\$; close \$f; sleep 600'
+perl -MPOSIX -e 'exit if fork; POSIX::setsid(); open my \$f, ">", "$tmp/holder.pid.w"; print \$f \$\$; close \$f; rename "$tmp/holder.pid.w", "$tmp/holder.pid"; sleep 120'
 EOF
 chmod +x "$W/.git/hooks/post-commit"; edit; rm -f "$tmp/holder.pid"
 land GH_PROT=false -- "$W" "$W/THREAD.md"
 res "case 39" 0 landed
-ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 39: returned while the 600 s holder lives (${el}s < ${HANG_BOUND}s)"
-for k in $(seq 60); do [ -s "$tmp/holder.pid" ] && break; sleep 1; done
-hp=$(cat "$tmp/holder.pid" 2>/dev/null); [ -n "$hp" ] && holders+=("$hp")
-ok "$([ -n "$hp" ] && kill -0 "$hp" 2>/dev/null && echo alive)" alive "case 39: the holder was alive (precondition)"
+# The holder lives 120 s at most, so a land that waited for it returns only once it is gone: alive after land
+# returns proves land never waited, without timing it.
+hs_wait "$tmp/holder.pid"; hp=$(cat "$tmp/holder.pid" 2>/dev/null); [ -n "$hp" ] && holders+=("$hp")
+ok "$([ -n "$hp" ] && kill -0 "$hp" 2>/dev/null && echo alive)" alive "case 39: land returned while the holder lives"
 if command -v lsof >/dev/null 2>&1 && [ -n "$hp" ]; then
   ok "$(lsof -p "$hp" 2>/dev/null | awk '$4 ~ /^1[rwu]?$/' | grep -c PIPE)" 0 "case 39: the holder holds no pipe on fd 1"
 else
@@ -802,9 +823,9 @@ fi
 edit; rm -f "$tmp/holder.pid"
 fill "$W" c39 "" "$W/THREAD.md"
 snip bash GH_PROT=false; res "case 39 snippet" 0 landed
-ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 39 snippet: returned while the 600 s holder lives (${el}s < ${HANG_BOUND}s)"
-for k in $(seq 60); do [ -s "$tmp/holder.pid" ] && break; sleep 1; done
-hp=$(cat "$tmp/holder.pid" 2>/dev/null); [ -n "$hp" ] && { holders+=("$hp"); kill -9 "$hp" 2>/dev/null; }
+hs_wait "$tmp/holder.pid"; hp=$(cat "$tmp/holder.pid" 2>/dev/null); [ -n "$hp" ] && holders+=("$hp")
+ok "$([ -n "$hp" ] && kill -0 "$hp" 2>/dev/null && echo alive)" alive "case 39 snippet: land returned while the holder lives"
+[ -n "$hp" ] && kill -9 "$hp" 2>/dev/null
 
 echo "== 40. a refused push says why"
 ghreset; mkrepo c40; edit
