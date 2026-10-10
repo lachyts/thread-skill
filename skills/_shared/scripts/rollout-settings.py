@@ -364,7 +364,7 @@ def _origin_slug(repo):
         raise SettingsError("cannot read its origin (land.sh will not start: %s)" % (e.strerror or e), subject=subject)
     try:
         out, _err = p.communicate(timeout=ORIGIN_TIMEOUT)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
         # Kill the whole group before draining: a grandchild git holding the pipe would hang communicate().
         try:
             os.killpg(p.pid, signal.SIGKILL)
@@ -376,7 +376,8 @@ def _origin_slug(repo):
             except OSError:
                 pass
         p.wait()
-        raise SettingsError("reading its origin timed out after %ss" % ORIGIN_TIMEOUT, subject=subject)
+        # The timeout the timer actually ran under (TimeoutExpired carries it), not the constant it came from.
+        raise SettingsError("reading its origin timed out after %gs" % e.timeout, subject=subject)
     if p.returncode == 4:
         return None
     slug = out.strip()

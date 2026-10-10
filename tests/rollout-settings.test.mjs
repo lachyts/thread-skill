@@ -433,11 +433,13 @@ test('R10 a hung git is killed with its process group at ORIGIN_TIMEOUT, and the
   const home = tmpHome(t)
   writeSettings(home, ['[repo."o/r"]', 'parallel_ceiling = 2'])
   const repo = path.join(home, 'r'); fs.mkdirSync(repo)
-  // The hung read sleeps 600 s and the bound is 300 s: far above what a loaded host adds to a 1 s timeout, far
-  // below a call that waited the hang out.
-  const uniq = `600.${process.pid}${Date.now() % 100000}`
-  const bin = fakeGitBin(home, `case " $* " in *" remote "*) exec sleep ${uniq} ;; *) exit 0 ;; esac`)
-  const started = Date.now()
+  // Proven without the clock. The message reports the timeout the timer ran under (TimeoutExpired's own value),
+  // so ORIGIN_TIMEOUT=1 must read `1s`. The hung read is a non-exec `sleep` that logs `outlived` if it ever ends
+  // on its own (120 s): a call that drained the pipe instead of killing the group waits it out and leaves the
+  // line. Its argument is unique to this run (pid, then the ms clock padded to 5 digits) and pgrep is anchored.
+  const uniq = `120.${process.pid}${String(Date.now() % 100000).padStart(5, '0')}`
+  const outlived = path.join(home, 'outlived')
+  const bin = fakeGitBin(home, `case " $* " in *" remote "*) sleep ${uniq}; echo outlived > '${outlived}' ;; *) exit 0 ;; esac`)
   const r = run(home, [], {
     env: { PATH: `${bin}:${process.env.PATH}` },
     argv: ['-B', '-c', `import importlib.util, sys
@@ -448,11 +450,10 @@ try:
 except m.SettingsError as e:
     print(str(e))`, SCRIPT, repo],
   })
-  const elapsed = Date.now() - started
-  t.after(() => spawnSync('pkill', ['-f', `sleep ${uniq}`]))
+  t.after(() => spawnSync('pkill', ['-f', `^sleep ${uniq}$`]))
   assert.equal(r.status, 0, r.stderr)
   assert.equal(r.stdout, `--repo ${repo}: reading its origin timed out after 1s\n`)
-  assert.ok(elapsed < 300000, `bounded: took ${elapsed}ms, against a 600 s hang`)
-  const left = spawnSync('pgrep', ['-f', `sleep ${uniq}`], { encoding: 'utf8' })
+  assert.equal(fs.existsSync(outlived), false, 'the call returned without waiting the hung read out')
+  const left = spawnSync('pgrep', ['-f', `^sleep ${uniq}$`], { encoding: 'utf8' })
   assert.equal(left.stdout.trim(), '', 'no sleep child survives')
 })

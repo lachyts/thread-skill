@@ -722,24 +722,25 @@ has "$(cat "$F/prep.err")" "fetch origin failed twice" "C16: … naming the fail
 
 # ======== C17: timeouts, signals, the bootstrap after the merge, the race tree =============================
 fx c17
-# Load-tolerant: the verifier's sleeps run 3171 s or more, so the elapsed bound (300 s) sits far above anything a
-# loaded host adds and far below a verify that waited its children out. Each sleep carries this run's pid
-# ($u), so the pgrep counts see only this run's children, never a concurrent `make test`'s.
+# Proven without the clock. The log reports the budget verify's deadline was armed with (read back from the
+# deadline, not from --timeout), so `--timeout 2` must log exactly `2s`. Each verifier child logs `outlived` if
+# it ever ends on its own (601 s): a verify that waited its children out returns only after that line. Each sleep
+# carries this run's pid ($u) and pgrep is anchored, so the counts see only this run's children, never a
+# concurrent `make test`'s.
 u=$$
-s17=$SECONDS
-python3 "$LI" verify --tree "$WT" --out "$F/out/v" --timeout 2 --verifier "sleep 3171.$u & sleep 3172.$u; wait" >/dev/null
-el=$((SECONDS - s17))
+python3 "$LI" verify --tree "$WT" --out "$F/out/v" --timeout 2 \
+  --verifier "(sleep 601.$u; echo outlived >> '$F/out/v.outlived') & sleep 602.$u; echo outlived >> '$F/out/v.outlived'; wait" >/dev/null
 ok "$(cat "$F/out/v.rc")" 124 "C17: the deadline → rc 124"
-ok "$([ "$el" -lt 300 ] && echo fast || echo "slow ${el}s")" fast "C17: … well before the verifier's 3171 s sleeps end"
-ok "$(pgrep -f "sleep 317[12]\\.$u\$" | wc -l | tr -d ' ')" 0 "C17: no verifier child survives"
-has "$(cat "$F/out/v.log")" "timed out after 2s" "C17: the log names the timeout"
-python3 "$LI" verify --tree "$WT" --out "$F/out/t" --timeout 600 --verifier "sleep 3173.$u & sleep 3174.$u; wait" >/dev/null &
+has "$(cat "$F/out/v.log")" "verify: timed out after 2s during the verifier; killed its process group (rc 124)" "C17: the log names the budget the deadline ran under"
+ok "$([ -e "$F/out/v.outlived" ] && echo waited || echo killed)" killed "C17: … verify returned without waiting its children out"
+ok "$(pgrep -f "^sleep 60[12]\\.$u\$" | wc -l | tr -d ' ')" 0 "C17: no verifier child survives"
+python3 "$LI" verify --tree "$WT" --out "$F/out/t" --timeout 600 --verifier "sleep 603.$u & sleep 604.$u; wait" >/dev/null &
 vp=$!
-n=0; until grep -q '== verifier:' "$F/out/t.log" 2>/dev/null && [ "$(pgrep -f "sleep 317[34]\\.$u\$" | wc -l | tr -d ' ')" -ge 1 ]; do n=$((n+1)); [ "$n" -gt 1200 ] && break; sleep 0.1; done
+n=0; until grep -q '== verifier:' "$F/out/t.log" 2>/dev/null && [ "$(pgrep -f "^sleep 60[34]\\.$u\$" | wc -l | tr -d ' ')" -ge 1 ]; do n=$((n+1)); [ "$n" -gt 1200 ] && break; sleep 0.1; done
 kill -TERM "$vp"; wait "$vp"
 ok "$(cat "$F/out/t.rc")" 143 "C17: TERM to verify → rc 143"
-n=0; while [ "$(pgrep -f "sleep 317[34]\\.$u\$" | wc -l | tr -d ' ')" -gt 0 ] && [ "$n" -lt 600 ]; do n=$((n+1)); sleep 0.1; done
-ok "$(pgrep -f "sleep 317[34]\\.$u\$" | wc -l | tr -d ' ')" 0 "C17: … and its children are gone"
+n=0; while [ "$(pgrep -f "^sleep 60[34]\\.$u\$" | wc -l | tr -d ' ')" -gt 0 ] && [ "$n" -lt 600 ]; do n=$((n+1)); sleep 0.1; done
+ok "$(pgrep -f "^sleep 60[34]\\.$u\$" | wc -l | tr -d ' ')" 0 "C17: … and its children are gone"
 main from-main.txt "dep" "theirs: dep (#7)"
 prep; M=$(j "$J" 'd["mergeCommit"]')
 python3 "$LI" verify --tree "$WT" --out "$F/out/b" --timeout 60 --bootstrap 'test -f from-main.txt && touch .boot-ok' --verifier 'test -f .boot-ok && echo verified' >/dev/null
