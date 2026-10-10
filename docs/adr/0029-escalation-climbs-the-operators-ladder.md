@@ -1,7 +1,7 @@
 # 0029 — escalation climbs the operator's ladder
 
 Date: 2026-09-30
-Status: accepted, shipped in 3.0.0 (supersedes ADR 0024's `top-tier` file and absorbs task p7-1's first two questions;
+Status: proposed (supersedes ADR 0024's `top-tier` file and absorbs task p7-1's first two questions;
 amends ADR 0006's single opus→fable flip, ADR 0007's engine-fixed effort matrix and ADR 0016's
 ceiling; grilled with Lachy 2026-09-30)
 
@@ -77,7 +77,7 @@ Considered:
   never landed on master), which routed by a shared workspace policy and climbed to maximum effort
   before changing model. Its sound parts carry over: settings are fixed for a call, and the record
   keeps what was asked for apart from what ran.
-- Until the ladder shipped (3.0.0), `max_tier: opus` was the Opus lock. Execute prints the ladder it
+- Until the ladder is built, `max_tier: opus` stays the Opus lock. Execute prints the ladder it
   resolved (the file's path, or `built-in`) at every launch.
 - AGENTS.md § Model tier is locked to Lachy's hand edits. The pointer text to the ladder is proposed
   to him, never written.

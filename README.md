@@ -111,33 +111,13 @@ one line per Retro.
   gone (amends 0006). `0017` — a pending handoff owns the thread's
   continuation: handoff docs are durable and self-cleaning, and close refreshes
   a pending one instead of proposing vault tasks that restate it (amends 0011).
-  `0024` — the operator's top tier sets every rollout's ceiling (superseded by
-  0029 before it was built). `0025` — master moves only by green PR, owner
-  included. (0018–0023 are reserved: 0018–0022 are on the protocol 4 branch,
-  and 0023 belongs to orient's native-children task, p3-1.) `0026` — finished
-  work closes itself. `0027` — orient is the one shaping verb. `0028` — agents
-  land their own work. `0029` — escalation climbs the operator's ladder.
-  `0030` — a rollout is a queue that integrates at merge (one engine, no
-  alias). `0031` — the primary checkout holds while a rollout runs. `0032` —
-  rollouts keep a Run record and tune by Retro. `0033` — execute retries
-  agent-fixable set-asides.
+  `0024` — the operator's top tier sets every rollout's ceiling (amends 0016;
+  implementation pending, task p7-1). `0025` — master moves only by green PR,
+  owner included. (0018–0023 are reserved: 0018–0022 are on the protocol 4
+  branch, and 0023 belongs to orient's native-children task, p3-1.) `0030` — a
+  rollout is a queue that integrates at merge (one engine, no alias).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
-
-## Upgrading to 3.0.0
-
-3.0.0 is breaking for anyone running rollouts:
-
-- **The queue replaces waves (ADR 0030).** Execute runs only `protocol_version: 5` rollout notes and
-  refuses older ones. Hard-pause a running wave-era rollout, then `/thread:schedule <project>
-  --regenerate`: the supersede carries every unlanded task into a queue.
-- **The built-in ladder no longer climbs to Fable (ADR 0029).** Escalation climbs the operator's
-  ladder, `~/.config/thread/ladder.toml`. With no file, the built-in ladder has two Opus rungs
-  (`high`, then `xhigh`), so a machine without the file never leaves Opus. To keep a Fable step,
-  name it as a rung in that file. The rollout's `max_tier:` key is retired.
-- **Rollout defaults are the operator's (ADR 0032).** `parallel_ceiling` and the round budgets live
-  in `~/.config/thread/rollouts.toml`, and `/thread:retro` proposes changes to them from a run's
-  record.
 
 ## Install
 

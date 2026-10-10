@@ -1,7 +1,7 @@
 # 0032 — rollouts keep a Run record and tune by Retro
 
 Date: 2026-10-04
-Status: accepted, shipped in 3.0.0 (amends the rollout defaults that schedule stamps and
+Status: proposed, implementation pending (amends the rollout defaults that schedule stamps and
 execute and reconcile assume, the rollout template's `## Resource budget`, and execute's "don't
 raise `parallel_ceiling` blindly" rule; grilled with Lachy 2026-10-04 in `/thread:orient Thread
 Skill`, from his question "why three tasks at once, why not ten?")
@@ -36,9 +36,10 @@ at 09:43+11:00 on 4 Oct.
    convention `git-env-canary.py` already uses. Every writer resolves this chain itself. Hooks,
    Codex and launchd export no override, so the default path is the shared meeting point. To keep
    the record backed up, Lachy's machine needs the default directory `~/.local/state/thread/events`
-   to be a symlink to `_shared/state/thread-events/`. That operator step was a precondition of P15's
-   first emitters (p15-2), since an emit before it would create a real directory there that stays out
-   of the backup until someone migrates it by hand; it was done 2026-10-06. `THREAD_EVENTS_DIR` is for tests and non-default setups.
+   to be a symlink to `_shared/state/thread-events/`. That is a pending operator step, and a
+   precondition of P15's first emitters (p15-2): neither path exists yet, and if the emitters land
+   first, the first emit creates a real directory there that stays out of the backup until someone
+   migrates it by hand. `THREAD_EVENTS_DIR` is for tests and non-default setups.
 3. **A Retro turns the record into Tunings.** It scores a run on **Throughput**, weighs it against
    **Guardrails** whose bounds are operator settings, names what bound the run, and proposes
    Tunings. Lachy picks; a script applies them. The engine never changes its own settings mid-run.
