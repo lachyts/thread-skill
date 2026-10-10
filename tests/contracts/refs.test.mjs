@@ -361,3 +361,17 @@ test('every KNOWN_BROKEN entry still fails (remove it once fixed)', () => {
     assert.ok(violations.some((v) => v.file === k.file && v.cite === k.cite), `KNOWN_BROKEN entry now passes: ${k.file} ${k.cite}`)
   }
 })
+
+// Rule D: an "*(Amended by ADR NNNN.)*" or "*(Superseded by ADR NNNN.)*" back-reference names the ADR
+// only. A copied status ("ADR 0029, proposed") goes stale when the target is accepted, and the 3.0.0
+// release found five such lines left behind; the target's own Status line is the one copy.
+const STALE_BACKREF = /\*\((?:Amended|Superseded)\s+by\s+ADR\s+\d{4},\s*(?:proposed|accepted)\b/i
+test('rule D: an ADR back-reference carries no copied status', () => {
+  const dir = path.join(root, 'docs/adr')
+  const bad = fs.readdirSync(dir).filter((f) => f.endsWith('.md')).flatMap((f) =>
+    fs.readFileSync(path.join(dir, f), 'utf8').split('\n')
+      .map((l, i) => [l, i + 1]).filter(([l]) => STALE_BACKREF.test(l)).map(([l, n]) => `${f}:${n}: ${l.trim()}`))
+  assert.deepEqual(bad, [])
+  assert.ok(STALE_BACKREF.test('*(Amended by ADR 0029, proposed.)*'), 'control: a copied status is caught')
+  assert.ok(!STALE_BACKREF.test('*(Amended by ADR 0029.)*'), 'control: a bare back-reference passes')
+})

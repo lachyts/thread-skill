@@ -77,7 +77,7 @@ Considered:
   never landed on master), which routed by a shared workspace policy and climbed to maximum effort
   before changing model. Its sound parts carry over: settings are fixed for a call, and the record
   keeps what was asked for apart from what ran.
-- Until the ladder is built, `max_tier: opus` stays the Opus lock. Execute prints the ladder it
+- Until the ladder shipped (3.0.0), `max_tier: opus` was the Opus lock. Execute prints the ladder it
   resolved (the file's path, or `built-in`) at every launch.
 - AGENTS.md § Model tier is locked to Lachy's hand edits. The pointer text to the ladder is proposed
   to him, never written.
