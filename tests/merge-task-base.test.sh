@@ -148,16 +148,12 @@ gc switch -q master
 
 # 9. SIGTERM during a required-checks wait: exit 143, the sentinel never reads ok, the counter untouched.
 fresh; pair; mkpr 91 "$I" BLOCKED; seed 91 "$B"
-#    The checks wait lasts until the test releases it (fake gh's "until", tests/lib/handshake.sh), never a fixed
-#    2 s a loaded host can outrun: the TERM always lands inside the wait, and bash runs its trap once the released
-#    call returns.
-printf '{"rc":0,"out":"ci\\tpass\\t1s\\thttps://github.com/o/r/actions/runs/1/job/1\\t\\n","err":"","until":"%s"}\n' "$tmp/9.release" > "$MT_STATE/checks.seq"
-rm -f "$tmp/9.release" "$tmp/9.release.waiting"; : > "$MT_STATE/gh.log"
+printf '%s\n' '{"rc":0,"out":"ci\tpass\t1s\thttps://github.com/o/r/actions/runs/1/job/1\t\n","err":"","sleep":2}' > "$MT_STATE/checks.seq"
+: > "$MT_STATE/gh.log"
 PATH="$tmp/bin:$PATH" GIT_SSH_COMMAND=false bash "$MT" "$tmp/repo" 91 "$I" "$B" > "$tmp/9.out" 2>&1 &
 pid=$!
-hs_wait "$tmp/9.release.waiting" --pid "$pid"
-kill -TERM "$pid"; touch "$tmp/9.release"; wait "$pid"; rc=$?
-lacks "$(glog)" "until: never released" "9. the test released the checks wait"
+i=0; while [ "$i" -lt 300 ] && ! grep -q '^pr checks' "$MT_STATE/gh.log" 2>/dev/null; do sleep 0.1; i=$((i+1)); done
+kill -TERM "$pid"; wait "$pid"; rc=$?
 ok "$rc" 143 "9. SIGTERM in a checks wait exits 143"
 ok "$(sent)" "failed:143" "9. SIGTERM: the sentinel reads failed:143, never ok"
 ok "$(ctr 91)" "$B" "9. SIGTERM: the counter is byte-unchanged"

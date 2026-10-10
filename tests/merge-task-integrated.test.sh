@@ -220,6 +220,16 @@ ok "$(nmerge)" 0 "12a. no merge call"; lacks "$(glog)" "pr checks" "12a. no chec
 lacks "$(glog)" "branches/" "12a. no protection read"; lacks "$(glog)" "rules/" "12a. no rules read"
 ok "$(grep -cx 600 "$tmp/sleeps")" 0 "12a. never sleeps one CHECK_INTERVAL before halting (sleep calls: $(tr '\n' ' ' < "$tmp/sleeps"))"
 ok "$([ "$el12" -lt 300 ] && echo y || echo "n (${el12}s)")" y "12a. halts well inside one CHECK_INTERVAL of 600 s"
+#     Positive control, same stub and interval: a required check absent while CI is in flight is a path that does
+#     sleep one CHECK_INTERVAL, so the record must show exactly one `600`. That proves the stub intercepts
+#     merge-task's sleeps, so the empty record above means something.
+fresh; pair; mkpr 5 "$I" UNSTABLE; echo 1 > "$MT_STATE/inflight"; : > "$tmp/sleeps"
+printf '%s\n' '{"rc": 1, "out": "", "err": "no checks reported on the '"'"'audit-fix/t5'"'"' branch"}' \
+  '{"rc": 0, "out": "ci\tpass\t1m\thttps://github.com/o/r/actions/runs/7/job/8\t", "err": ""}' > "$MT_STATE/checks.seq"
+export MERGE_TASK_CHECK_INTERVAL=600
+PATH="$tmp/sleepbin:$PATH" run 5 "$I" "$B"
+export MERGE_TASK_CHECK_INTERVAL=0
+ok "$rc|$(grep -cx 600 "$tmp/sleeps")" "0|1" "12a. (control) an absent check with CI in flight sleeps one CHECK_INTERVAL through the stub, then merges"
 fresh; pair; mkpr 5 "$I" BLOCKED; echo CHANGES_REQUESTED > "$MT_STATE/pr/5/reviewDecision"
 run 5 "$I" "$B"; ok "$rc" 7 "12b. BLOCKED + CHANGES_REQUESTED exits 7"
 fresh; pair; mkpr 5 "$I" BLOCKED

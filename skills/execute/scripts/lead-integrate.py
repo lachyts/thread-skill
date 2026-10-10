@@ -669,8 +669,7 @@ def cmd_verify(args):
         signal.signal(s, _on_signal)
     rc = None
     try:
-        start = time.monotonic()
-        deadline = start + args.timeout
+        deadline = time.monotonic() + args.timeout
         with open(log_path, "ab", buffering=0) as log:
             note = lambda msg: log.write((msg + "\n").encode())  # noqa: E731
             steps = ([("env_bootstrap", args.bootstrap)] if args.bootstrap else []) + [("verifier", args.verifier)]
@@ -678,8 +677,7 @@ def cmd_verify(args):
                 note(f"== {name}: {cmd}")
                 got = _run_step(cmd, str(tree), log, deadline)
                 if got is TIMED_OUT:
-                    # The budget the deadline was armed with, read back from it rather than from args.
-                    note(f"verify: timed out after {round(deadline - start, 3):g}s during the {name}; killed its process group (rc 124)")
+                    note(f"verify: timed out after {args.timeout:g}s during the {name}; killed its process group (rc 124)")
                     rc = 124
                     break
                 note(f"== {name} rc {got}")
