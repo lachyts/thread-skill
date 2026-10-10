@@ -11,6 +11,7 @@ export MERGE_TASK_CHECK_INTERVAL=0 MERGE_TASK_STATE_INTERVAL=0 MERGE_TASK_CONFIR
 unset MERGE_TASK_REINTEGRATE_MAX
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$tmp/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
 MT="$root/skills/execute/scripts/merge-task.sh"
+. "$root/tests/lib/handshake.sh"; export HANDSHAKE   # the fake gh's checks.seq `until` waits through it
 gt() { git -c user.name=t -c user.email=t@t "$@"; }
 gc() { gt -C "$tmp/repo" "$@"; }
 git -c init.defaultBranch=master init -q --bare "$MT_SRV"

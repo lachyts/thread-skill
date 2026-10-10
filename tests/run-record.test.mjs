@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPT = path.join(root, 'skills', '_shared', 'scripts', 'run_record.py')
+const HANDSHAKE = path.join(root, 'tests', 'lib', 'handshake.py')
 const TS_RE = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/
 const SETTINGS = { parallel_ceiling: 3, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, rung: 'opus-xhigh' }
 
@@ -549,8 +550,10 @@ test('a call-journal fold whose lock stays busy past 5 s warns, exits 0 and writ
   const f = path.join(ev(home), 'r.jsonl')
   fs.mkdirSync(ev(home))
   fs.writeFileSync(f, '')
-  const holder = spawn('python3', ['-B', '-c', 'import fcntl, sys, time\nfd = open(sys.argv[1], "a")\nfcntl.flock(fd, fcntl.LOCK_EX)\nprint("held", flush=True)\ntime.sleep(30)', f], { env: baseEnv(home), stdio: ['ignore', 'pipe', 'inherit'] })
-  t.after(() => holder.kill())
+  // The holder (tests/lib/handshake.py) keeps the lock until the test closes its stdin, never for a fixed time a
+  // loaded host could outlast before the emit even starts.
+  const holder = spawn('python3', ['-B', HANDSHAKE, 'hold', f, '--held', '-', '--release', '-'], { env: baseEnv(home), stdio: ['pipe', 'pipe', 'inherit'] })
+  t.after(() => { holder.stdin.end(); holder.kill() })
   return new Promise((resolve, reject) => {
     holder.stdout.once('data', () => {
       try {

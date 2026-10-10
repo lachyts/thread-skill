@@ -22,9 +22,11 @@ State (a missing file takes the default in brackets):
   compare [ahead]         compare/A...B status. err.compare: "HTTP 404" in it ⇒ the 404 form, else transient.
   err.commits             transient error for commits/<oid> (unknown oid ⇒ the 404 form).
   inflight [0]            actions/runs in-flight count.
-  checks.seq              JSON lines {"rc","out","err","sleep","until"} popped per `pr checks --watch`, the
-                          last sticky; absent ⇒ rc 0 with one passing row. "until" names a file: the call
-                          waits until it exists (300 s at most), so a test, not the clock, ends the wait.
+  checks.seq              JSON lines {"rc","out","err","until"} popped per `pr checks --watch`, the last
+                          sticky; absent ⇒ rc 0 with one passing row. "until" names a file: the call creates
+                          <file>.waiting, then waits until <file> exists (tests/lib/handshake.py, $HANDSHAKE), so
+                          a test, not the clock, ends the wait; never released, it logs `until: never released`
+                          and exits 1.
   links, steps            the infra-classify reads; `run rerun` is logged, rc 0.
   merge.push <sha>        before anything else in a merge: headRefOid := sha, srv head branch := sha.
   merge.refuse <text>     its text, rc 1, nothing changed.   merge.neterr: a network error, rc 1.
@@ -38,7 +40,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 
 args = sys.argv[1:]
 ST = os.environ["MT_STATE"]
@@ -183,12 +184,15 @@ if args[:2] == ["pr", "checks"]:
     e = {"rc": 0, "out": "ci\tpass\t1s\thttps://github.com/o/r/actions/runs/1/job/1\t\n", "err": ""}
     if has("checks.seq"):
         e = json.loads(pop(p("checks.seq")))
-    if e.get("sleep"):
-        time.sleep(float(e["sleep"]))
     if e.get("until"):
-        end = time.monotonic() + 300
-        while not os.path.exists(e["until"]) and time.monotonic() < end:
-            time.sleep(0.05)
+        sys.path.insert(0, os.path.dirname(os.environ["HANDSHAKE"]))
+        import handshake
+        open(e["until"] + ".waiting", "w").close()
+        if handshake.wait_for(e["until"]) != 0:
+            with open(os.path.join(ST, "gh.log"), "a") as fh:
+                fh.write("until: never released\n")
+            sys.stderr.write("fake gh: pr checks: %s was never released\n" % e["until"])
+            sys.exit(1)
     sys.stdout.write(e.get("out", ""))
     sys.stderr.write(e.get("err", ""))
     sys.exit(int(e.get("rc", 0)))

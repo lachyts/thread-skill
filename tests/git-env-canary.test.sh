@@ -10,6 +10,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
+. tests/lib/handshake.sh
 unset $(git rev-parse --local-env-vars)   # git's own list of repo-local vars (GIT_DIR, GIT_CONFIG_PARAMETERS, …)
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
 root=$(pwd -P)
@@ -87,19 +88,14 @@ code() { echo "$RANDOM$RANDOM" >> "$R/${1:-code.txt}"; g -C "$R" add -A; g -C "$
 cpath() { mkdir -p "$(dirname "$R/$1")"; echo "$RANDOM" >> "$R/$1"; g -C "$R" add -A; g -C "$R" commit -q -m "close-out $1"; }
 push2() { g -C "$C2" fetch -q origin; g -C "$C2" reset -q --hard origin/master; echo "$RANDOM" >> "$C2/c2.txt"; g -C "$C2" add -A; g -C "$C2" commit -q -m c2; g -C "$C2" push -q origin master; }
 ff() { g -C "$R" fetch -q origin; g -C "$R" merge -q --ff-only origin/master; }
-# holder — hold the lock in the background, $S/held once it is held, until `release` (300 s at most, so a canary
-# that ignores its timeout fails rather than hangs). The test ends the hold, never the clock: a loaded host cannot
-# let a timed hold lapse before the canary reaches the lock.
+# holder — hold the lock in the background (tests/lib/handshake.sh) until `release`, never for a fixed time a
+# loaded host can outrun. It gives up after the handshake cap, so a canary that ignores its timeout fails rather
+# than hangs; a holder that never takes the lock (another process holds it) fails here, by name.
 holder() {
   rm -f "$S/held" "$S/release"
-  python3 -c 'import fcntl, os, sys, time
-f = open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w").close()
-end = time.monotonic() + 300
-while not os.path.exists(sys.argv[3]) and time.monotonic() < end:
-    time.sleep(0.05)' \
-    "$THREAD_GIT_ENV_DIR/ro.lock" "$S/held" "$S/release" &
+  hs_hold "$THREAD_GIT_ENV_DIR/ro.lock" "$S/held" "$S/release" &
   hp=$!
-  while [ ! -f "$S/held" ] && kill -0 "$hp" 2>/dev/null; do sleep 0.05; done
+  hs_wait "$S/held" --pid "$hp" || ok "never held" "held" "holder: took the lock"
 }
 release() { touch "$S/release"; wait "$hp"; }
 dellog() { python3 - "$RO" "$1" <<'PY'
@@ -700,23 +696,33 @@ THREAD_GIT_ENV_LOCK_TIMEOUT=1 call; ok "$rc" 2 "t: a held lock with THREAD_GIT_E
 has "$err" "timed out" "t: … a timeout"
 release
 # The wait, proven by what the canary does rather than by the clock: check-all runs in the background with
-# time.sleep wrapped to mark $S/waiting (its lock poll is its only sleep), the hold is released only once that
-# mark shows it met the held lock, and it must then take the lock and return 0.
+# fcntl.flock wrapped to log each exclusive-lock attempt (`try`) and its outcome (`busy`, `ok`) to $S/flock. The
+# holder takes the lock before check-all starts, so its first attempt is contended by construction; the hold is
+# released only once that attempt is logged, so a final `ok` can only be a lock taken after the release.
 holder
-rm -f "$S/waiting"
-THREAD_GIT_ENV_LOCK_TIMEOUT=600 CANARY_WAIT_MARK="$S/waiting" python3 -c 'import os, runpy, sys, time
-real = time.sleep
-def mark(s):
-    open(os.environ["CANARY_WAIT_MARK"], "a").close(); real(s)
-time.sleep = mark
+rm -f "$S/flock"
+THREAD_GIT_ENV_LOCK_TIMEOUT=600 CANARY_FLOCK_LOG="$S/flock" python3 -c 'import fcntl, os, runpy, sys
+real = fcntl.flock
+def logged(fd, op):
+    if not op & fcntl.LOCK_EX:
+        return real(fd, op)
+    log = open(os.environ["CANARY_FLOCK_LOG"], "a", buffering=1)
+    log.write("try\n")
+    try:
+        real(fd, op)
+    except BlockingIOError:
+        log.write("busy\n"); raise
+    log.write("ok\n")
+fcntl.flock = logged
 sys.argv = sys.argv[1:]
 runpy.run_path(sys.argv[0], run_name="__main__")' "$CAN" check-all --rollout "$RO" --tasks-dir "$V" \
   > "$S/out" 2> "$S/err" &
 cp=$!
-while [ ! -f "$S/waiting" ] && kill -0 "$cp" 2>/dev/null; do sleep 0.05; done
+hs_wait "$S/flock" --pid "$cp"
 release; wait "$cp"; rc=$?; err=$(cat "$S/err")
-ok "$([ -f "$S/waiting" ] && echo waited || echo "never waited")" waited "t: a held lock → check-all polls it (sleeps) rather than failing at once"
-ok "$rc" 0 "t: … and once the holder releases, check-all takes the lock and returns 0"
+ok "$(head -n 1 "$S/flock" 2>/dev/null)|$(grep -c '^ok$' "$S/flock" 2>/dev/null)" "try|1" "t: check-all tries the held lock and takes it exactly once"
+ok "$(tail -n 1 "$S/flock" 2>/dev/null)" ok "t: … it waits, and takes the lock once the holder releases"
+ok "$rc" 0 "t: … and returns 0"
 
 # ── o: end to end ────────────────────────────────────────────────────────────────────────────────────────────
 for variant in ref bare; do
