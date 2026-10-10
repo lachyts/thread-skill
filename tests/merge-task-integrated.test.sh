@@ -203,16 +203,19 @@ ok "$rc" 5 "11. a RACE re-run exits 5 again"; ok "$(nmerge)" 0 "11. no merge cal
 ok "$(sent)" "failed:5" "11. never ok"
 
 # 12. the review gate (p6-6): a pending review halts at once with 7, never a checks wait, never a bypass
+#     "No checks wait" is proven by the record, not the clock: a `sleep` stub first on PATH logs each call and
+#     returns at once, and CHECK_INTERVAL is a distinctive 7, so a halt that sleeps one CHECK_INTERVAL leaves a
+#     `7`. 16b, run under the same stub, is the positive control that the stub sees merge-task's sleeps.
 fresh; pair; mkpr 5 "$I" BLOCKED; echo REVIEW_REQUIRED > "$MT_STATE/pr/5/reviewDecision"
-export MERGE_TASK_CHECK_INTERVAL=5
-t0=$(date +%s); run 5 "$I" "$B"; t1=$(date +%s)
-export MERGE_TASK_CHECK_INTERVAL=0
+mkdir -p "$tmp/sleepbin"; : > "$tmp/sleeps"
+printf '#!/bin/sh\necho "$*" >> "%s/sleeps"\n' "$tmp" > "$tmp/sleepbin/sleep"; chmod +x "$tmp/sleepbin/sleep"
+MERGE_TASK_CHECK_INTERVAL=7 PATH="$tmp/sleepbin:$PATH" run 5 "$I" "$B"
 ok "$rc" 7 "12a. BLOCKED + REVIEW_REQUIRED exits 7"
 has "$out" "review required: approve PR #5 (https://github.com/o/r/pull/5)" "12a. names the PR and its URL"
 has "$out" "never bypasses protection" "12a. says it never bypasses protection"
 ok "$(nmerge)" 0 "12a. no merge call"; lacks "$(glog)" "pr checks" "12a. no checks wait"
 lacks "$(glog)" "branches/" "12a. no protection read"; lacks "$(glog)" "rules/" "12a. no rules read"
-ok "$([ $((t1 - t0)) -lt 5 ] && echo fast || echo slow)" fast "12a. halts in under one CHECK_INTERVAL"
+ok "$(grep -cx 7 "$tmp/sleeps")" 0 "12a. never sleeps one CHECK_INTERVAL before halting (sleep calls: $(tr '\n' ' ' < "$tmp/sleeps"))"
 fresh; pair; mkpr 5 "$I" BLOCKED; echo CHANGES_REQUESTED > "$MT_STATE/pr/5/reviewDecision"
 run 5 "$I" "$B"; ok "$rc" 7 "12b. BLOCKED + CHANGES_REQUESTED exits 7"
 fresh; pair; mkpr 5 "$I" BLOCKED
@@ -279,8 +282,9 @@ fresh; pair; mkpr 5 "$I" UNSTABLE
 run 5 "$I" "$B"; ok "$rc" 0 "16a. UNSTABLE with required checks green merges"; ok "$(nmerge)" 1 "16a. merged"
 fresh; pair; mkpr 5 "$I" UNSTABLE; echo 1 > "$MT_STATE/inflight"
 chk 1 "" "no checks reported on the 'audit-fix/t5' branch"; chk 0 "$(row ci pass)" ""
-run 5 "$I" "$B"
+: > "$tmp/sleeps"; MERGE_TASK_CHECK_INTERVAL=7 PATH="$tmp/sleepbin:$PATH" run 5 "$I" "$B"
 ok "$rc" 0 "16b. an absent check with CI in flight waits, then merges"
+ok "$(grep -cx 7 "$tmp/sleeps")" 1 "16b. (12a's control) the wait is one CHECK_INTERVAL through the sleep stub"
 has "$out" "CI in flight on head — waiting" "16b. reads the absent check as pending"
 has "$(glog)" "actions/runs?head_sha=$I" "16b. probes runs on the integrated head"
 fresh; pair; mkpr 5 "$I" BLOCKED; seed 5 "$(b 1)"
