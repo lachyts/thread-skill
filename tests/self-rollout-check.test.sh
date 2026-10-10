@@ -35,6 +35,13 @@ snip=$(sed 's/^R="<repoPath>"$/R="$1"/' "$tmp/raw.sh")
 # ---- fixtures -------------------------------------------------------------------------------------------
 home="$tmp/home"; cfg="$tmp/cfg"; mkdir -p "$home/repos/plug" "$home/repos/mono/tools/plug" "$home/repos/plugin2" "$tmp/other" "$cfg/plugins" "$tmp/noplugin"
 ln -s "$home/repos/plug" "$tmp/link"
+# plugin_copy <dir>: a plugin root the snippet can run from (the check and the land.sh its lookup calls)
+plugin_copy() {
+  mkdir -p "$1/skills/execute/scripts" "$1/skills/_shared/scripts"
+  cp "$root/skills/execute/scripts/self-rollout-check.sh" "$1/skills/execute/scripts/"
+  cp "$root/skills/_shared/scripts/land.sh" "$1/skills/_shared/scripts/"
+}
+pd="$home/repos/pd"; plugin_copy "$pd/plugin"; mkdir -p "$pd-x"; ln -s "$pd" "$tmp/pdlink"
 reg="$cfg/plugins/known_marketplaces.json"
 write_reg() {  # write_reg <directory path> <github installLocation>
   cat > "$reg" <<EOF
@@ -52,7 +59,8 @@ for sh in "${shells[@]}"; do
 
   write_reg "$home/repos/plug" "$tmp/other"
   run "$home/repos/plug"; ok "$rc" 3 "$n: repoPath is a directory-source checkout → 3"
-  has "$err" "clone the repo to the separate path $home/repos/plug-rollout," "$n: … the remedy on stderr, naming <repoPath>-rollout"
+  has "$err" "make a separate clone at $home/repos/plug-rollout (" "$n: … the fix on stderr, naming <repoPath>-rollout"
+  has "$err" "then run /thread:schedule <project> --regenerate, which re-roots the rollout there; never hand-edit its Project root" "$n: … through --regenerate, never a hand edit"
   has "$err" "'thread'" "$n: … naming the marketplace"
   run "$tmp/link"; ok "$rc" 3 "$n: via a symlink to it → 3"
   run "$home/repos/plug/"; ok "$rc" 3 "$n: with a trailing / → 3"
@@ -88,6 +96,16 @@ for sh in "${shells[@]}"; do
   run ""; ok "$rc" 2 "$n: an empty repoPath → 2"
   run "$home/repos/plug" CLAUDE_PLUGIN_ROOT="$tmp/noplugin"; ok "$rc" 2 "$n: the script missing → 2"
   has "$err" "self-rollout-check.sh not found at $tmp/noplugin/" "$n: … with the not-found line"
+
+  # ${CLAUDE_PLUGIN_ROOT}: a `--plugin-dir` session the registry never lists. No registry at all here.
+  rm -f "$reg"
+  run "$pd/plugin" CLAUDE_PLUGIN_ROOT="$pd/plugin"; ok "$rc" 3 "$n: repoPath is \${CLAUDE_PLUGIN_ROOT}, no registry → 3"
+  has "$err" "the root this session runs the plugin from" "$n: … naming the plugin root"
+  has "$err" "make a separate clone at $pd/plugin-rollout (" "$n: … and the same fix"
+  run "$pd" CLAUDE_PLUGIN_ROOT="$pd/plugin"; ok "$rc" 3 "$n: repoPath contains \${CLAUDE_PLUGIN_ROOT} → 3"
+  run "$tmp/pdlink" CLAUDE_PLUGIN_ROOT="$pd/plugin/"; ok "$rc" 3 "$n: … via a symlink to repoPath, a trailing / on the root → 3"
+  run "$pd/plugin/skills" CLAUDE_PLUGIN_ROOT="$pd/plugin"; ok "$rc|$err" "0|" "$n: repoPath inside \${CLAUDE_PLUGIN_ROOT}, not containing it → 0"
+  run "$pd-x" CLAUDE_PLUGIN_ROOT="$pd/plugin"; ok "$rc|$err" "0|" "$n: a sibling sharing a name prefix → 0"
 done
 
 # ---- --list-dirs: the registry's directory sources, for skills/_shared/scripts/pushed-base.sh (p12-15) -----
@@ -115,7 +133,7 @@ csnip_f="$tmp/clone.sh"; printf '%s\n' "$csnip" > "$csnip_f"
 snip_f="$tmp/check.sh"; printf '%s\n' "$snip" > "$snip_f"
 
 g() { git -c init.defaultBranch=main -c user.name=t -c user.email=t@example.invalid "$@"; }
-# mk <dir> <origin-url>: a usable clone — one empty commit on main, origin/main at it, origin/HEAD → origin/main
+# mk <dir> <origin-url>: a clone — one empty commit on main, origin/main at it, origin/HEAD → origin/main
 mk() {
   g init -q "$1" && g -C "$1" remote add origin "$2" && g -C "$1" commit -q --allow-empty -m one &&
     g -C "$1" update-ref refs/remotes/origin/main HEAD && g -C "$1" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
@@ -138,27 +156,15 @@ for sh in "${shells[@]}"; do
   look "$live"; ok "$rc|$out" "1|" "$n: no sibling → 1, nothing printed"
   why "nothing is there; clone the repo to it (git clone <origin URL> \"$sib\")" "$n: … naming the one path to clone to"
   mk "$sib" "git@github.com:owner/live.git"
-  look "$live"; ok "$rc|$out|$err" "0|$sib|" "$n: a clean clone of the same repo on its default branch (other URL shape and case) → its path, silent"
+  look "$live"; ok "$rc|$out|$err" "0|$sib|" "$n: a clone of the same repo (other URL shape and case) → its path, silent"
   look "~/repos/live/"; ok "$rc|$out" "0|$sib" "$n: … from a ~/…/ Project root (trailing / stripped)"
 
-  g -C "$sib" commit -q --allow-empty -m two && g -C "$sib" update-ref refs/remotes/origin/main HEAD && g -C "$sib" reset -q --hard HEAD~1
-  look "$live"; ok "$rc|$out" "0|$sib" "$n: merely behind its last-fetched origin/main → still its path"
-  has "$err" "1 commit(s) behind its last-fetched origin/main" "$n: … with a note"
-  has "$err" "execute's worktrees branch from origin/main" "$n: … saying execute's worktrees branch from origin"
-  g -C "$sib" reset -q --hard origin/main
-
-  g -C "$sib" switch -q -c feature
-  look "$live"; ok "$rc|$out" "1|" "$n: on another branch → 1"
-  why "it is on feature, not its default branch main" "$n: … naming the branch"
-  g -C "$sib" switch -q main
-  : > "$sib/untracked"
-  look "$live"; ok "$rc|$out" "1|" "$n: an untracked file → 1"
-  why "its working tree is not clean (1 changed or untracked path(s))" "$n: … not clean"
-  rm -f "$sib/untracked"
-  g -C "$sib" symbolic-ref --delete refs/remotes/origin/HEAD
-  look "$live"; ok "$rc|$out" "1|" "$n: no origin/HEAD → 1"
-  why "its default branch is unknown" "$n: … default branch unknown"
-  g -C "$sib" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+  # Its branch, working tree and lag are no rollout's concern: the real rollout clone carries the engine's own
+  # untracked scratch, and execute's worktrees branch from origin.
+  g -C "$sib" commit -q --allow-empty -m two; g -C "$sib" update-ref refs/remotes/origin/main HEAD; g -C "$sib" reset -q --hard HEAD~1
+  g -C "$sib" switch -q -c feature; mkdir -p "$sib/.claude"; : > "$sib/.claude/merge.status"; : > "$sib/untracked"
+  look "$live"; ok "$rc|$out|$err" "0|$sib|" "$n: on another branch, untracked engine scratch, behind origin → still its path, silent"
+  rm -rf "$sib"; mk "$sib" "https://github.com/owner/live.git"
 
   g -C "$sib" remote set-url origin "https://github.com/owner/other.git"
   look "$live"; ok "$rc|$out" "1|" "$n: a sibling of another repo → 1"
@@ -172,14 +178,20 @@ for sh in "${shells[@]}"; do
 {"a": {"source": {"source": "directory", "path": "$live"}}, "b": {"source": {"source": "directory", "path": "$sib"}}}
 EOF
   look "$live"; ok "$rc|$out" "1|" "$n: a sibling that is a marketplace checkout too → 1"
-  why "it is a directory-source plugin marketplace checkout too" "$n: … saying so"
+  why "it holds a live plugin checkout too" "$n: … saying so"
   write_reg "$live" "$tmp/other"
+  # this session's plugin root inside the clone: the lookup's own self-rollout check refuses it
+  plugin_copy "$sib/plug"
+  look "$live" CLAUDE_PLUGIN_ROOT="$sib/plug"; ok "$rc|$out" "1|" "$n: a sibling holding \${CLAUDE_PLUGIN_ROOT} → 1"
+  why "it holds a live plugin checkout too" "$n: … saying so"
 
-  # on main and clean, so only the linked-worktree condition can refuse it: the primary steps off main meanwhile
-  rm -rf "$sib"; g -C "$live" switch -q -C aside; g -C "$live" worktree add -q "$sib" main
+  # a linked worktree of the primary shares its .git: not a separate clone
+  rm -rf "$sib"; g -C "$live" worktree add -q --detach "$sib"
   look "$live"; ok "$rc|$out" "1|" "$n: a linked worktree of the primary → 1"
   why "it is a linked worktree of $live/.git, not a separate clone" "$n: … not a separate clone"
-  g -C "$live" worktree remove --force "$sib"; g -C "$live" switch -q main
+  # CDPATH must not steer the common-dir lookup (the review reproduced `cd` honouring it)
+  look "$live" CDPATH="$decoy"; ok "$rc|$out" "1|" "$n: … still 1 with a hostile CDPATH"
+  g -C "$live" worktree remove --force "$sib"
 
   mkdir -p "$sib"
   look "$live"; ok "$rc|$out" "1|" "$n: a plain directory → 1"
@@ -219,9 +231,9 @@ rm -rf "$sib"
 gate "$live"; ok "$rc|$(written)" "3|<nothing>" "schedule gate: the live checkout with no separate clone → refused, nothing written"
 mk "$sib" "https://github.com/owner/live.git"
 gate "$live"; ok "$rc|$(written)" "0|$sib" "schedule gate: the live checkout with a usable sibling clone → the clone is the Project root"
-: > "$sib/dirty"
-gate "$live"; ok "$rc|$(written)" "3|<nothing>" "schedule gate: … but a dirty one → refused, nothing written"
-rm -f "$sib/dirty"
+g -C "$sib" remote set-url origin "https://github.com/owner/other.git"
+gate "$live"; ok "$rc|$(written)" "3|<nothing>" "schedule gate: … but one of another repo → refused, nothing written"
+g -C "$sib" remote set-url origin "https://github.com/owner/live.git"
 gate "$tmp/other"; ok "$rc|$(written)" "0|$tmp/other" "schedule gate: a root that is no marketplace → kept as is"
 
 # ---- wiring: § 2.6 and § 7 name both reasons; the halt line parses for the Stop hook --------------------

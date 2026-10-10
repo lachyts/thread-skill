@@ -128,34 +128,47 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
   // pushed-base check. On its exit 3 the rollout-clone lookup's path becomes the root. No earlier check is re-run
   // against it, and § 0 says why: the lookup proved the same GitHub <owner>/<name> (which is all the remote, gh
   // and register checks answer from) and ran the self-rollout check on the clone itself; a supersede still meets
-  // step 1's Re-root guard. With no clone it is a stop that prints the remedy and the lookup's reason line. So no
-  // rollout note is ever written with a live plugin marketplace checkout as its Project root (execute § 2.6
-  // would refuse it at launch).
+  // step 1's Re-root guard. Only the Project root moves: the Thread line and <localPath> keep the primary
+  // (`Local:`) checkout. With no clone (lookup exit 1) it is a stop that prints the remedy and the lookup's reason
+  // line; the lookup's exit 2 is its own failure, never read as no clone. So no rollout note is ever written with
+  // a live plugin checkout as its Project root (execute § 2.6 would refuse it at launch). Every position is checked
+  // found first, so a missing phrase (at() = -1) can't pass the ordering vacuously.
   const srAt = at('Then run the self-rollout check from the same § Dispatch blockers')
+  const lrAt = at('landing register check')
+  const pbAt = at('Then run the pushed-base check')
   const s0S = sentences(s0)
-  if (srAt < 0 || srAt < at('landing register check') || srAt > at('Then run the pushed-base check') ||
+  if (srAt < 0 || lrAt < 0 || pbAt < 0 || srAt < lrAt || srAt > pbAt ||
     !s0S.some((x) => x.includes('On its exit 3, run the rollout-clone lookup from the same § Dispatch blockers')) ||
     !s0S.some((x) => x.includes('that separate clone becomes the resolved path')) ||
+    !s0S.some((x) => x.startsWith('Only the Project root moves') && x.includes("step 6's Thread line") &&
+      x.includes('`Local:` path') && x.includes('THREAD.md')) ||
+    !s0S.some((x) => x.startsWith("The lookup's exit 2 or any other non-zero exit is its own failure") &&
+      x.includes('never read as no clone')) ||
     !s0S.some((x) => x.startsWith('No check above is re-run against the clone') && x.includes('same GitHub `<owner>/<name>`') &&
       ['the remote check', '`gh repo view` confirmation', 'the landing register check'].every((k) => x.includes(k)) &&
       x.includes('the lookup ran the self-rollout check on the clone itself')) ||
     !s0S.some((x) => x.includes("step 1's **Re-root guard** still refuses the clone")) ||
-    !s0S.some((x) => x.includes("When it prints nothing, the self-rollout check's exit 3 is a failure")) ||
+    !s0S.some((x) => x.includes("When the lookup exits 1 (no usable clone), the self-rollout check's exit 3 is a failure")) ||
     !s0.includes("for the self-rollout check's exit 3 it is the whole stderr") ||
     !s0.includes('`is not a usable rollout clone: <reason>` line')) fails.push('s0-self-rollout')
 
-  // reroot-guard: on a supersede, step 1 refuses to carry in-flight tasks (running, awaiting-integration,
-  // integrating) to a Project root other than the prior's, before anything is written, and names the remedy
-  // (settle them on the prior through repair, then --regenerate again): their worktrees, branches and PRs live
-  // under the prior root. Read from the guard's own paragraph, so other step 1 wording can't stand in for it.
+  // reroot-guard: on a supersede, step 1 refuses to carry any started task (one carrying `started:`, whatever its
+  // state) to a Project root other than the prior's, before anything is written: its worktree, branch and PR live
+  // under the prior root. The remedy defers them through repair § 5's clean defer, then --regenerate again, and one
+  // sentence says why it is rare (execute § 2.6 refuses such a root before anything is stamped). Read from the
+  // guard's own paragraph, so other step 1 wording can't stand in for it.
   const s1g = section(schedule, S1) ?? ''
   const gAt = s1g.indexOf('**Re-root guard.**')
-  const guard = gAt < 0 ? '' : collapse(s1g.slice(gAt, s1g.indexOf('\n\n', gAt) < 0 ? undefined : s1g.indexOf('\n\n', gAt)))
+  const gEnd = gAt < 0 ? -1 : s1g.indexOf('\n\n', gAt)
+  const guard = gAt < 0 ? '' : collapse(s1g.slice(gAt, gEnd < 0 ? undefined : gEnd))
   if (gAt < 0 || !guard.includes("differs from § 0's resolved path") ||
-    !['`running`', '`awaiting-integration`', '`integrating`'].every((k) => guard.includes(k)) ||
+    !guard.includes('has started (its note carries `started:`, whatever its state)') ||
     !guard.includes('stop before this run writes a rollout note or a task stamp') ||
     !guard.includes('never re-root those tasks silently') ||
-    !guard.includes('`/thread:repair [[<prior>]]`') || !guard.includes('run `--regenerate` again')) fails.push('reroot-guard')
+    !guard.includes('defer those tasks through `/thread:repair [[<prior>]]` (`/thread:repair` § 5\'s clean defer)') ||
+    !guard.includes('run `--regenerate` again') ||
+    !sentences(guard).some((x) => x.includes('this is rare') && x.includes('execute § 2.6 refuses') &&
+      x.includes('before anything is stamped') && x.includes('`--plugin-dir`'))) fails.push('reroot-guard')
 
   // The pinned report: one § 0 sentence says the new note is incomplete because its run died before
   // closing out the prior rollout (a crash after step 7 leaves it fully stamped), names --regenerate and
@@ -396,23 +409,30 @@ test('control: § 0 without --regenerate on the check, or without resume, fails'
 test('control: § 0 without the self-rollout check, never taking the clone, or going on with no clone, fails s0-self-rollout', () => {
   only({ schedule: edit(real.schedule, S0, 'Then run the self-rollout check from the same § Dispatch blockers', 'Then run the marketplace scan from the same § Dispatch blockers') },
     ['s0-self-rollout'], 'no self-rollout check')
-  only({ schedule: edit(real.schedule, S0, 'that separate clone becomes the resolved', 'ask the user whether it becomes the resolved') },
+  only({ schedule: edit(real.schedule, S0, 'When it prints a path, that separate clone', 'When it prints a path, ask the user whether that clone') },
     ['s0-self-rollout'], 'the clone never taken')
-  only({ schedule: edit(real.schedule, S0, "When it prints nothing, the self-rollout check's exit 3 is a failure, below;", 'When it prints nothing, go on with the live path;') },
+  only({ schedule: edit(real.schedule, S0, "the self-rollout check's exit 3 is a failure, below.", 'the live path goes on unchanged.') },
     ['s0-self-rollout'], 'no clone, no stop')
-  only({ schedule: edit(real.schedule, S0, 'No check above is re-run against the clone:', 'Re-run every check above against the clone, though') },
+  only({ schedule: edit(real.schedule, S0, 'is its own failure, the lookup check failed, never read as no clone;', 'reads as no clone;') },
+    ['s0-self-rollout'], 'lookup exit 2 read as no clone')
+  only({ schedule: edit(real.schedule, S0, "step 6's Thread line keep naming the", 'the rest move with it, naming the') },
+    ['s0-self-rollout'], 'the Thread line moved to the clone')
+  only({ schedule: edit(real.schedule, S0, 'check above is re-run against the clone:', 'check above is skipped: re-run each against the clone, since') },
     ['s0-self-rollout'], 'no stated reason for skipping the re-runs')
-  only({ schedule: edit(real.schedule, S0, '`gh repo view` confirmation and the landing register check each answer', '`gh repo view` confirmation each answer') },
+  only({ schedule: edit(real.schedule, S0, 'the landing register check each answer from', 'nothing else, each answer from') },
     ['s0-self-rollout'], 'the register left out of the redundancy proof')
-  only({ schedule: edit(real.schedule, S0, '**Re-root guard** still refuses the clone', '**Re-root guard** is skipped for the clone') },
+  only({ schedule: edit(real.schedule, S0, '**Re-root guard** still refuses the', '**Re-root guard** is skipped for the') },
     ['s0-self-rollout'], 'a supersede re-rooted past the guard')
   only({ schedule: edit(real.schedule, S0, '`is not a usable rollout clone: <reason>` line', 'stderr line') },
     ['s0-self-rollout'], 'the lookup reason line not printed')
 })
 
-test('control: a Re-root guard that misses a state, goes on, or is gone fails reroot-guard', () => {
-  only({ schedule: edit(real.schedule, S1, '`awaiting-integration` or `integrating`', '`awaiting-integration`') },
-    ['reroot-guard'], 'integrating not in flight')
+test('control: a Re-root guard that reads only some states, goes on, loses its remedy or reason, or is gone fails reroot-guard', () => {
+  only({ schedule: edit(real.schedule, S1, 'has started (its note carries `started:`, whatever its state)', 'is `running` or `integrating`') },
+    ['reroot-guard'], 'a set-aside started task re-rooted')
+  only({ schedule: edit(real.schedule, S1, 'defer those tasks through `/thread:repair [[<prior>]]`', 'settle those tasks through `/thread:repair [[<prior>]]`') },
+    ['reroot-guard'], 'a remedy that is not the defer')
+  only({ schedule: edit(real.schedule, S1, 'Under a swap this is rare:', 'Under a swap:') }, ['reroot-guard'], 'no rarity sentence')
   only({ schedule: edit(real.schedule, S1, 'stop before this run writes a rollout note or a task stamp', 'note it in the confirm') },
     ['reroot-guard'], 'no stop')
   only({ schedule: edit(real.schedule, S1, '**Re-root guard.**', '**Carry roots.**') }, ['reroot-guard'], 'no guard')

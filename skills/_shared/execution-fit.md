@@ -126,10 +126,10 @@ rollout's own branch and PR and lands nothing on the default branch, so, like a
 pause, it is cleanup that the register never blocks.
 
 **Self-rollout.** A rollout must never run against the checkout the plugin itself runs from. When the
-repo path is, or contains, a **directory-source** plugin marketplace checkout
-(`claude plugin marketplace add <dir>`), `${CLAUDE_PLUGIN_ROOT}` IS that checkout, so every engine or skill
-change a merge lands there becomes the engine of the rollout's next task call (p12-4, ADR 0030). Run this
-against the same resolved path, after the landing register check:
+repo path is, or contains, the plugin's live checkout (a **directory-source** marketplace,
+`claude plugin marketplace add <dir>`, or a `--plugin-dir` session), `${CLAUDE_PLUGIN_ROOT}` IS that
+checkout, so every engine or skill change a merge lands there becomes the engine of the rollout's next task
+call (p12-4, ADR 0030). Run this against the same resolved path, after the landing register check:
 
 ```bash
 # thread:self-rollout-check (extracted and tested by tests/self-rollout-check.test.sh)
@@ -141,15 +141,17 @@ bash "$sc" "$R"
 # end thread:self-rollout-check
 ```
 
-`self-rollout-check.sh` reads `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json` and
-compares every directory source's `path` and `installLocation` with the repo path (`~/` expanded, trailing
-slashes stripped, symlinks resolved) by **containment**: a marketplace path equal to the repo path or nested
-inside it (`<repoPath>/…`, a monorepo with the marketplace in a subdirectory) matches, since `merge-task.sh`
-fast-forwards the whole checkout. A missing registry passes; a malformed one passes with a warning (the
-registry format is Claude Code's, so the check fails open). Exit 0 is no match: pass any warning on. Exit 3
-is a match: the marketplace, the path and the remedy (a separate clone at `<repoPath>-rollout`) on stderr. Exit 2 is a failure of
-the check itself (the script not found, an empty path, no python3), and any other non-zero exit fails
-closed the same way. schedule § 0 runs it before anything is written; execute § 2.6 re-runs it at every
+`self-rollout-check.sh` compares two sources with the repo path (`~/` expanded, trailing slashes stripped,
+symlinks resolved) by **containment**: `${CLAUDE_PLUGIN_ROOT}`, the root this session runs the plugin
+from (so a `--plugin-dir` session the registry never lists is caught too), and every directory source's
+`path` and `installLocation` in `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/known_marketplaces.json`. A
+path equal to the repo path or nested inside it (`<repoPath>/…`, a monorepo with the plugin in a
+subdirectory) matches, since `merge-task.sh` fast-forwards the whole checkout. A missing registry passes; a
+malformed one passes with a warning (the registry format is Claude Code's, so the check fails open). Exit 0
+is no match: pass any warning on. Exit 3 is a match: what matched, the path, and the fix on stderr (make a
+separate clone at `<repoPath>-rollout`, then run `/thread:schedule <project> --regenerate`, which re-roots
+the rollout there; never hand-edit a Project root). Exit 2 is a failure of the check itself (the script
+not found, an empty path, no python3), and any other non-zero exit fails closed the same way. schedule § 0 runs it before anything is written; execute § 2.6 re-runs it at every
 launch and after every § 4.5 re-check of the landing register, since a written rollout note can still name
 the primary checkout (one scheduled before this check, or edited by hand).
 
@@ -169,16 +171,17 @@ bash "$sc" --rollout-clone "$R"
 
 `self-rollout-check.sh --rollout-clone` (its header is the one statement of the rule) prints that path
 (exit 0) only when it is a directory, the top of a git work tree, its own clone rather than a linked
-worktree (its `--git-common-dir` resolves inside it), a GitHub clone of the same repository
+worktree (its `--git-common-dir` is inside it), a GitHub clone of the same repository
 (`land.sh --origin-slug` exits 0 for both trees and the two `<owner>/<name>` match, case-insensitively),
-not itself a marketplace checkout, and on its default branch (`refs/remotes/origin/HEAD`, read locally)
-with a clean working tree. Being behind its last-fetched `origin/<default>` passes with a stderr note:
-execute's worktrees branch from `origin/<default>`, and the pushed-base check fetches every clone. Any
-other state prints nothing and exits 1 with one `self-rollout-check: <path> is not a usable rollout clone:
-<reason>` line naming the condition that failed and its fix; exit 2 is land.sh or the script missing. It
-drops inherited repo-local git env first, and never clones, fetches or writes. Only schedule § 0 swaps a
-root this way, and only before anything is written; execute § 2.6 halts instead, since its rollout note is
-already written.
+and holds no live plugin checkout itself. Nothing else is asked of it: its branch, its working tree (the
+engine's own scratch included) and how far it is behind are no rollout's concern, since execute's
+worktrees branch from a freshly fetched `origin/<default>` and the pushed-base check fetches every clone
+and blocks a local default branch that is ahead. Any other state prints nothing and exits 1 with one
+`self-rollout-check: <path> is not a usable rollout clone: <reason>` line naming the condition that
+failed; exit 2 is land.sh or the script missing. It drops inherited repo-local git env first, and never
+clones, fetches or writes. Only schedule § 0 swaps a root this way, and only before anything is written;
+execute § 2.6 halts instead, since its rollout note is already written. The location is a convention, not
+a setting: a clone anywhere else is not found.
 
 **Pushed base.** Rollout worktrees branch from a freshly fetched `origin/<default>`, and the agents
 read only their task note, the rollout note and the repo: never THREAD.md, and never anything that exists
@@ -203,9 +206,10 @@ single-quoted, or nothing. The check runs over a **clone set**, not one checkout
 clone, plus `<localPath>`, plus every directory-source plugin marketplace path in
 `known_marketplaces.json` (read through `self-rollout-check.sh --list-dirs`, the one registry parser),
 each kept only when its raw `origin` URL names the same `<owner>/<name>` and de-duplicated by real path. The
-registry source matters here: the self-rollout blocker above forces a separate rollout clone exactly when the repo path is a
-directory-source marketplace checkout, so the registry names the primary checkout exactly when a rollout
-clone exists, and a close-out committed in the primary is still seen.
+registry source matters here: the self-rollout blocker above forces a separate rollout clone when the repo
+path is a directory-source marketplace checkout, so the registry names the primary checkout then, and a
+close-out committed in the primary is still seen (a `--plugin-dir` primary is in no registry: the project
+note's `Local:` path, passed as `<localPath>`, covers it).
 
 - **Exit 0** prints `pushed`; any notes and WARN lines on stderr pass through to the user.
 - **Exit 3**: some known clone's local `<default>` is ahead of `origin/<default>` with content that
