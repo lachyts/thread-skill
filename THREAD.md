@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-09
+last_touched: 2026-10-11
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,12 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-10-10: 3.0.0 is released (PR #110, `44f14fa`, tag `thread--v3.0.0`), but not installed: two rollouts run on the primary checkout's engine (`[[chorus-rollout-2026-10-10]]`, `[[event-script-rollout-2026-10-10]]`), so ADR 0031 holds it at `f0257cb` (2.11.0).**
+- **Landed:** #108, schedule § 0 resolves the rollout root (`self-rollout-check.sh --resolve` prints the root, or `<repoPath>-rollout`, or refuses); #109, the three load-flaky timing tests made structural (12a sleep stub, a held-until-killed lock holder, case 35's `timed out` proof); #110, the 3.0.0 bump plus `docs/evals/2026-10-10-release-3-0.md` (16 of 18 at 1.00, two lifecycle judge misses filed).
+- **Retro of `[[thread-skill-rollout-2026-10-09]]`:** no proposals, ceiling stays 4; the 12a flake's cost was invisible to the score.
+- **Review loops:** #107 (needs-you (c) gaps), #108, #109 and the release each hit the fresh-review ledger's STOP at round 2. #107 closed (design: [[thread-skill-needs-you-refused-descope-and-recorded-answer]], grill first); #108 and #109 reverted to root and took an alternate `/simplify`; the release cut back to bump + eval record, its ADR edits moved to [[thread-skill-adr-status-sweep-after-3-0]].
+- **Filed:** [[thread-skill-adr-status-sweep-after-3-0]], [[thread-skill-eval-close-consumed-fixture-names-thread-file]], [[thread-skill-eval-handoff-manual-dry-run-judge-miss]], [[thread-skill-eval-retro-routing-case]]. `ab-fable-vs-opus-planning` stays dropped (Lachy, 2026-10-10).
 
 **2026-10-09 (late): P16 (unattended rollouts) and P17 (queue fixes from live runs) have landed. `[[thread-skill-rollout-2026-10-09]]` (archived, § Completion log): 9/9 merged (#97 to #105) in 11h 6m, from the clone `~/repos/tools/thread-skill-rollout`, on the Opus ladder. Phases 16 and 17 are closed (p16-2 landed separately in `~/repos/workspaces`). p13-4 (release 3.0) is unblocked. The primary checkout is still held: `[[chorus-rollout-2026-10-09]]` is running from it, so the new P16/P17 skills are on `origin/master` but not yet live here.**
 - **Landed:**
@@ -506,6 +512,8 @@ scheduled 2026-07-15.
 
 ## What's been built / decided
 
+- **3.0.0 released 2026-10-10 (#110).** The release notes are #110's body: protocol 5 only, the built-in ladder never leaves Opus (Fable only by naming it in `~/.config/thread/ladder.toml`), `max_tier:` retired, rollout defaults from `rollouts.toml` stamped at schedule, schedule picks the `-rollout` clone. Release PRs stay minimal (memory `release-pr-scope`).
+- **Schedule resolves the rollout root (#108).** `self-rollout-check.sh --resolve <repoPath>` is the one call; § 0 runs it first, every other blocker runs on the resolved root, and `--regenerate` refuses a root change once a carried task has started (repair § 5 defer).
 - **P16 decided (2026-10-06 grill, [[thread-skill-p16-unattended-rollouts]]).** (A) While any call, Integration or merge is in flight, a rollout lead never uses the question tool. A question goes in the report plus one push notification, and the turn ends `waiting`; the closing-questions hook exempts ROLLOUT-STATUS turns. (B) Execute auto-retries set-asides, broader than repair. `auto_retries: 2` (task → rollout → rollouts.toml → built-in) covers plan-blocked, blocked, review-blocked (+1 round per retry) and Integration set-asides. It stops early on a repeated feedback fingerprint, and never retries a judge-declared `needsHuman`. Gates, RACE, closed PRs and declined merges stay human. (C) The lead acts on its own recommendations (memory).
 - **P15 landed (2026-10-06, #89 to #93): the Run record and the Retro (ADR 0032).** Events live at `${THREAD_EVENTS_DIR:-$XDG_STATE_HOME/thread/events}`, on Lachy's machine a symlink into `_shared/state/thread-events/`. Operator settings live in `~/.config/thread/rollouts.toml`. `/thread:retro` scores a run and applies only the Tunings Lachy picks. Phase 15 stays open for p15-6 and p15-7.
 - **ADR 0031 (accepted, PR #72): the primary checkout holds while a rollout runs.** `land.sh` S4/S11 skip moving the plugin's own checkout while `unfinished-rollout.py running` lists a live, started, unpaused protocol-5 rollout; `primary-hold.sh` finds the checkout by where the plugin runs from. Moving it mid-run is a deliberate cut-over (pause, update, reinstate).
@@ -679,6 +687,8 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **Worktrees under the live checkout can reach the plugin cache.** The `./` directory source copies ignored files; before `claude plugin update`, remove every `.claude/worktrees/*` (the stray `run-record` one belongs to open PR #88) or `make release-check`'s stray check fails and the cache copy must be deleted by hand.
+- **`make evals` grades routing on skill descriptions only.** A body-only change (#108) needs no eval re-run; a description change does. The lifecycle judges record no rationale: re-run a miss with transcripts before reading it.
 - **A Workflow task-notification's output file is one JSON object** (`summary`, `logs`, `result`, `agents`): pipe `json.load(f)['result']` into `reconcile-rollout.py reconcile --result -`; the file has no `<result>` tag to cut.
 - **land.sh's close-out paths are `THREAD.md` and `docs/handoffs/` only** (`closeout_shaped`): a consumed `docs/reviews/` doc can't be deleted by a close-out landing, though fresh-review expects its docs deleted at close ([[thread-skill-land-takes-review-doc-deletions]]).
 - **A queued landing PR falls `BEHIND` when a rollout merges past it** (the repo requires up-to-date branches). land.sh's `update-branch` runs only inside its own call, so a peer's close-out waits for the next close in that repo or the daily lander.
@@ -921,6 +931,13 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Now (from 2026-10-10): 3.0.0 is tagged; the primary checkout is held at `f0257cb` while `[[chorus-rollout-2026-10-10]]` and `[[event-script-rollout-2026-10-10]]` run on its engine (ADR 0031).**
+1. **When `python3 skills/_shared/scripts/unfinished-rollout.py running` lists neither:** finish p13-4 per its note ([[thread-skill-p13-4-release-3-0-and-e2e]], "Held" line): clear the stray `.claude/worktrees/run-record` (PR #88), `git reset --keep origin/master` here, `claude plugin update thread@thread` then `make release-check`, the E2E from a copy of `docs/e2e/2026-09-23-baseline.md`, retire the P13 interim rule. Lachy may drop `max_tier: opus` from his AGENTS.md § Model tier (told 2026-10-10).
+2. **Grill [[thread-skill-needs-you-refused-descope-and-recorded-answer]] with Lachy** before any code.
+3. **Cheap follow-ons:** [[thread-skill-adr-status-sweep-after-3-0]]; the three eval tasks re-run cases (spend: ask first).
+
+**Superseded 2026-10-10:**
+
 **Now (from 2026-10-09, late): P16 and P17 have landed (#97 to #105). The primary checkout is held while `[[chorus-rollout-2026-10-09]]` runs from it (ADR 0031).**
 1. **When the Chorus rollout ends:** `git reset --keep origin/master` here, so the P16/P17 skills go live. Never pull, switch or update the plugin here while Chorus runs.
 2. **[[thread-skill-load-tolerant-timing-tests]] before the next rollout.** It is high priority: the 12a timing flake turned every Integration verify red at ceiling 4.
@@ -1119,6 +1136,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-10-10 (close): fixed the load-flaky timing tests (#109) and schedule's self-rollout gate (#108, `--resolve`), both after ledger STOPs, reverted to root plus `/simplify`; closed #107 into a design task; Retro of the 10-09 rollout (no proposals); `make evals` ($4.60, 16/18) and released 3.0.0 (#110, tag `thread--v3.0.0`), held from install by two rollouts on the primary. Memory: release-pr-scope.
 - 2026-10-09 (close): executed `[[thread-skill-rollout-2026-10-09]]` to 9/9 (#97 to #105, 11h 6m, Opus) from the rollout clone, after the self-rollout gate refused the live checkout as Project root. Load-flaky `make test` (12a) forced three integrate calls; p16-1 (an Integration rejection against #97) and p16-5 (a plan-block) were handed back by the lead and converged. P16 and P17 closed; three follow-ons filed; METHOD K120.
 - 2026-10-09: orient reshuffle — P17 (queue fixes from live runs) formed, p12-13/p14-7 closed, p15-6 absorbs the live-record Retro, 3.0 gated after P16; thread-skill-rollout-2026-10-09 scheduled (P16+P17, 9 tasks); p16-2 landed in claude-workspaces PR #4; handed off to a fresh execute session.
 
