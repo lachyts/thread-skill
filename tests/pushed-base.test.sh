@@ -551,7 +551,7 @@ ok "$(git -C "$tmp/decoy" for-each-ref)" "$before" "38. … the decoy's refs are
 # ======== wiring ========================================================================================
 eff=$(tr '\n' ' ' < "$ef")
 pbpara=$(awk '/^\*\*Pushed base\.\*\*/{on=1} /^\*\*Unfinished rollout\.\*\*/{on=0} on' "$ef" | tr '\n' ' ')
-has "$eff" "Five blockers" "execution-fit names five blockers"
+has "$eff" "Six blockers" "execution-fit names six blockers"
 has "$pbpara" "**Pushed base.**" "execution-fit has the Pushed base blocker"
 for w in "ADR 0025" "THREAD.md" "known_marketplaces" "\`Local:\`" "never per merge" "execute § 2.7" "origin/close/*" "queued" "stranded"; do
   has "$pbpara" "$w" "the Pushed base blocker names $w"
@@ -572,7 +572,7 @@ has "$s2" "cited paths" "schedule step 2 passes cited paths"
 s8=$(awk '/^### 8\./{on=1} /^## Execution lives/{on=0} on' "$sch")
 has "$s8" "local copies agents won't see" "schedule step 8 lists the local copies agents won't see"
 has "$(grep -n '^\*\*Obsidian only\*\*' "$sch")" "origin/close/*" "schedule Scope names the fetch"
-has "$(grep "^- Don't run \`git\` operations" "$sch")" "git fetch" "schedule Don'ts names the fetch"
+has "$(grep "^- Don't run \`git\` operations" "$sch")" "§ 0's probes (listed under Scope)" "schedule Don'ts point at Scope, which names the fetch"
 
 for f in skills/schedule/SKILL.md skills/execute/SKILL.md skills/repair/SKILL.md; do
   ok "$(grep -c '# thread:pushed-base-check' "$f")" 0 "$f does not copy the pushed-base snippet"

@@ -4,7 +4,7 @@
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check --repo <path>
         (--project <name> | --tasks <slug,...>) [--regenerate] [--tasks-dir <dir>]
 
-/thread:schedule § 0 runs it last, after the remote, landing-register and pushed-base checks, and acts on
+/thread:schedule § 0 runs it last, after the remote, landing-register, self-rollout and pushed-base checks, and acts on
 the one line it prints. Stdlib only, python >= 3.9. No network. Git runs only as `git rev-parse
 --local-env-vars` (to scrub repo-local env vars such as a hook's GIT_DIR, landing-register.py's rule) and
 `git -C <path> remote get-url origin`. It writes nothing.

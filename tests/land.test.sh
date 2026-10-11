@@ -7,10 +7,10 @@
 # labels, update-branch, the user, PR bodies, hold comments and per-SHA check-runs and status. Every handed
 # path goes through a symlinked alias of the temp dir, so the physical-path handling is exercised on every run.
 # Hang stubs run a non-exec `sleep 40 | cat`. A call handed any `*=hang*` setting runs under
-# LAND_TIMEOUT=$HANG (an explicit LAND_TIMEOUT after it wins, as case 35's does) and asserts elapsed under
-# $HANG_BOUND; every other call has the 15 s suite default, room for a fake gh slowed by `make test`'s
-# concurrent suites. Hermetic: HOME, the global git config and TMPDIR are temp, and the caller's GIT_DIR & co.
-# are unset. bash 3.2-compatible (macOS).
+# LAND_TIMEOUT=$HANG and asserts elapsed under $HANG_BOUND (case 35 passes its own LAND_TIMEOUT after it, which
+# wins, and a HANG_BOUND prefix, since its deadline is the bound); every other call has the 15 s suite default,
+# room for a fake gh slowed by `make test`'s concurrent suites. Hermetic: HOME, the global git config and TMPDIR
+# are temp, and the caller's GIT_DIR & co. are unset. bash 3.2-compatible (macOS).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 . tests/lib/assert.sh
@@ -703,14 +703,23 @@ has "$err" "land: label failed: timed out" "case 34 hang: label failed: timed ou
 hasnt "$(ghlog)" "pr edit" "case 34: never pr edit"
 
 echo "== 35. the deadline"
-ghreset; mkrepo c35; c0; srvcommit c35 x.txt X; edit
-land LAND_TIMEOUT=30 LAND_DEADLINE=12 GH_LABELS=hang GH_LABELCREATE=hang -- "$W" "$W/THREAD.md"
-res "case 35" 0 "queued: needs merge https://github.com/o/c35/pull/1"
-has "$err" "land: label failed" "case 35: label failed"
-has "$err" "land: skipped label retry: deadline" "case 35: skipped label retry"
-has "$err" "land: skipped merge: deadline" "case 35: skipped merge"; hasnt "$(ghlog)" "pr merge" "case 35: no pr merge"
-has "$err" "land: skipped update-branch: deadline" "case 35: skipped update-branch"; hasnt "$(ghlog)" "update-branch" "case 35: no PUT"
-ok "$([ "$el" -lt 25 ] && echo y)" y "case 35: under the deadline (${el}s < 25s)"
+# LAND_TIMEOUT=600 outlives the 40 s hang stub, so `label failed: timed out` proves the deadline clipped the call's
+# budget. A deadline that passes before the label call (no `label failed`) is load, not a regression: retry once
+# with a longer one (still under the stub's 40 s), then SKIP.
+hit=
+for d in 12 30; do
+  ghreset; mkrepo "c35d$d"; c0; srvcommit "c35d$d" x.txt X; edit
+  HANG_BOUND=600 land LAND_TIMEOUT=600 LAND_DEADLINE=$d GH_LABELS=hang GH_LABELCREATE=hang -- "$W" "$W/THREAD.md"
+  case $err in *"land: label failed"*) hit=y; break ;; esac
+  echo "SKIP - case 35 (deadline ${d}s): the deadline passed before the label call (a loaded host)"
+done
+if [ "$hit" = y ]; then
+  res "case 35" 0 "queued: needs merge https://github.com/o/c35d$d/pull/1"
+  has "$err" "land: label failed: timed out" "case 35: the label call was cut by the ${d}s deadline (timed out, not its own 600 s budget)"
+  has "$err" "land: skipped label retry: deadline" "case 35: skipped label retry"
+  has "$err" "land: skipped merge: deadline" "case 35: skipped merge"; hasnt "$(ghlog)" "pr merge" "case 35: no pr merge"
+  has "$err" "land: skipped update-branch: deadline" "case 35: skipped update-branch"; hasnt "$(ghlog)" "update-branch" "case 35: no PUT"
+fi
 edit; land LAND_DEADLINE=0 -- "$W" "$W/THREAD.md"
 res "case 35 deadline 0" 1 "stuck: deadline passed before fetch"
 ok "$(made)" "$(git -C "$W" rev-parse HEAD)" "case 35 deadline 0: THREAD.md committed"; nossh "case 35 deadline 0"

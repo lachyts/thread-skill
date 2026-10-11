@@ -1,7 +1,8 @@
 // Schedule orders a queue (ADR 0030 decision 1, p12-10): no colouring and no wave anywhere in the
 // schedule skill or its template, protocol 5, the queue's stamps (`solo: true`, `depends-on:`), and the
 // one-unfinished-rollout-per-repo rule wired into § 0 (the check, the supersede's `resume`, the `file`
-// and `interrupted` finishes, the `incomplete: true` stamp and the pinned "is incomplete" report), the
+// and `interrupted` finishes, the `incomplete: true` stamp and the pinned "is incomplete" report), § 0's
+// self-rollout `--resolve` wired first (its output is the Project root) with step 1's Re-root guard, the
 // carry preview in step 1, a release gate's drop decided before step 6 (or, at step 8, taken out with its
 // row), Solo and dependency proposals for queued tasks only (step 5), step 6's Advance/Cancel-only naming,
 // a note born `incomplete: true` (the template) that only step 7's last write clears, and orient leaving
@@ -121,6 +122,27 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
 
   if (!s0.includes('`file <slug> <path>`') || !s0.includes('`interrupted <prior> <new>`') ||
     !/reconcile-rollout\.py carry --from/.test(s0)) fails.push('s0-outcomes')
+
+  // s0-self-rollout: § 0 resolves the root first, running execution-fit.md's self-rollout snippet with
+  // `--resolve` before the remote check; its output is the path step 6 writes as {{REPO_PATH}}; the Thread line
+  // and <localPath> keep the `Local:` path; exit 3 is a stop. The rule itself is tested on the script
+  // (tests/self-rollout-check.test.sh); this pins only the wiring. Positions are checked found first, so a
+  // missing phrase (at() = -1) can't pass the ordering vacuously.
+  const srAt = at('First run the self-rollout check')
+  const rcAt = at('Then run the remote check')
+  const s0S = sentences(s0)
+  if (srAt < 0 || rcAt < 0 || srAt > rcAt || !s0.includes('with `<mode>` set to `--resolve`') ||
+    !s0S.some((x) => x.includes('its one stdout line is the resolved path') && x.includes('step 6 writes it as `{{REPO_PATH}}`')) ||
+    !s0S.some((x) => x.startsWith('Only the Project root moves') && x.includes('`<localPath>`') &&
+      x.includes("step 6's Thread line keep the `Local:` path")) ||
+    !s0S.some((x) => x.startsWith('Exit 3 (a live checkout with no usable clone)') && x.includes('is a stop'))) fails.push('s0-self-rollout')
+
+  // reroot-guard: on a supersede, step 1's Re-root guard exists and names repair § 5's clean defer as its remedy.
+  const s1g = section(schedule, S1) ?? ''
+  const gAt = s1g.indexOf('**Re-root guard.**')
+  const gEnd = gAt < 0 ? -1 : s1g.indexOf('\n\n', gAt)
+  const guard = gAt < 0 ? '' : collapse(s1g.slice(gAt, gEnd < 0 ? undefined : gEnd))
+  if (gAt < 0 || !guard.includes("`/thread:repair` § 5's clean defer")) fails.push('reroot-guard')
 
   // The pinned report: one § 0 sentence says the new note is incomplete because its run died before
   // closing out the prior rollout (a crash after step 7 leaves it fully stamped), names --regenerate and
@@ -356,6 +378,25 @@ test('control: § 0 without --regenerate on the check, or without resume, fails'
   only({ schedule: edit(real.schedule, S0, ' [--regenerate]`', '`') }, ['s0-check'], 'no --regenerate')
   only({ schedule: edit(real.schedule, S0, 'reconcile-rollout.py resume --rollout', 'reconcile-rollout.py status --rollout') },
     ['s0-check'], 'no resume')
+})
+
+test('control: § 0 that resolves after the remote check, without --resolve, ignores its output, moves the Thread line or goes on at exit 3 fails s0-self-rollout', () => {
+  only({ schedule: edit(real.schedule, S0, 'After the misfit scan, resolve', 'After the misfit scan, run the remote check. Then run the remote check, then resolve') },
+    ['s0-self-rollout'], 'resolved after the remote check')
+  only({ schedule: edit(real.schedule, S0, '`<mode>` set to', '`<mode>` left empty, not') },
+    ['s0-self-rollout'], 'no --resolve')
+  only({ schedule: edit(real.schedule, S0, 'step 6 writes it as `{{REPO_PATH}}`', 'step 6 writes the `Local:` path as `{{REPO_PATH}}`') },
+    ['s0-self-rollout'], '{{REPO_PATH}} not its output')
+  only({ schedule: edit(real.schedule, S0, "step 6's Thread line keep the", "step 6's Thread line follow it, not the") },
+    ['s0-self-rollout'], 'the Thread line moved to the clone')
+  only({ schedule: edit(real.schedule, S0, 'non-zero exit is a stop, below.', 'non-zero exit is reported, and § 0 goes on.') },
+    ['s0-self-rollout'], 'exit 3 no stop')
+})
+
+test('control: a Re-root guard that is gone, or names another remedy, fails reroot-guard', () => {
+  only({ schedule: edit(real.schedule, S1, '**Re-root guard.**', '**Carry roots.**') }, ['reroot-guard'], 'no guard')
+  only({ schedule: edit(real.schedule, S1, "(`/thread:repair` § 5's clean defer)", '(a hand edit of each task)') },
+    ['reroot-guard'], 'a remedy that is not repair § 5')
 })
 
 test('control: § 0 that drops the file outcome fails', () => {

@@ -190,7 +190,7 @@ done
 has "$s5" "scriptPath\` the run started with" "execute § 5 resume re-passes the scriptPath the run started with"
 
 # ---- the register-check wiring -------------------------------------------------------------------------------
-has "$ef" "Five blockers" "execution-fit names five blockers"
+has "$ef" "Six blockers" "execution-fit names six blockers"
 ur=$(awk '/^\*\*Unfinished rollout\.\*\*/{on=1} /^\*\*Engine path\.\*\*/{on=0} on' skills/_shared/execution-fit.md | tr '\n' ' ')
 has "$ur" "**Unfinished rollout.**" "execution-fit has the Unfinished rollout blocker, ahead of Engine path"
 has "$ur" "unfinished-rollout.py check" "the Unfinished rollout blocker names unfinished-rollout.py check"
