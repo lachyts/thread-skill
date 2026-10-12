@@ -346,6 +346,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
   handle; a stop at Integration rejoins the Integration queue; otherwise it
   takes a fresh call behind a warning (execute § 3.7).
   _Avoid_: approval item, spend gate, pre-approval.
+- **Standing approval** — Lachy's one-off sign-off for every spend Gated input
+  whose **total exposure** is at most US$50: the cap summed across Logins,
+  a recurring cap counted per month, US$50 itself included. Such a gate
+  passes without him and is recorded as auto-approved; credential and
+  irreversible gates never pass under it.
+  _Avoid_: spend envelope, auto-approve limit.
+- **Human fix** — the one stated act that moves a set-aside task no agent may
+  move (sign a gate, decide a refused descope, restore an Integration with no
+  PR), with its detail. Execute, status and repair read it; none re-derives
+  it (ADR 0035).
+  _Avoid_: human cause, manual step.
 - **Needs-you item** — a decision in a running rollout that is Lachy's alone:
   a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside only a person
   moves on, a merge hold's release, or a halt. The lead lists it in the
