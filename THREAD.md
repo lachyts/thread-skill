@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-11
+last_touched: 2026-10-13
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -10,11 +10,17 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-10-13: 3.0.0 is installed (user scope, `make release-check` passes, primary at `e1a7d75`); the live E2E (p13-4 step 4) runs in a handed-off session. An orient reshuffle re-sorted the backlog into P18 and P19.**
+- **Install:** the hold cleared (both 10-10 rollouts archived; `unfinished-rollout.py running` → none). Stray `.claude/worktrees/run-record` removed (clean; branch and PR #88 stay on origin); primary `reset --keep origin/master`; `claude plugin update thread@thread` 2.11.0 → 3.0.0.
+- **Reshuffle:** P12 and P14 closed by drift. New [[thread-skill-p18-unattended-means-unattended]] (p18-1 stop calls at a step boundary, p18-2 a gate never holds the rollout, p18-3 one Human fix per refusal) and [[thread-skill-p19-coherence-after-3-0]] (12 tasks: p19-1 land-suite timeout first, the ADR status sweep, the P3/P4/P5/P8/P9 stragglers, the three eval fixes). P3, P4, P5, P8, P9 closed `done` into P19. Dropped: the footing-log task, handoff-widens, "Orient auto-detects…". codex-retro-route merged into [[thread-skill-estate-chores-after-p12]]; post-p12-cleanups stays loose (in-repo, waits on GifLab).
+- **Grill → PR #112 (merged):** ADR 0034 (a gate never holds an unattended rollout: standing US$50 approval by total exposure, ask ahead, a mid-run gate is set aside and the rollout closes) and ADR 0035 (`auto_retry_verdict` emits one Human fix per refusal; refused descopes durable, fail closed; the lead acts on recorded answers); CONTEXT.md **Standing approval**, **Human fix**. p19-8 decided: an explicit `capture: continuation` marker.
+- **Handoff:** `docs/handoffs/2026-10-13-3-0-e2e.md` (PR #113, queued), consumed by the E2E session the same day.
+
 **2026-10-10: 3.0.0 is released (PR #110, `44f14fa`, tag `thread--v3.0.0`), but not installed: two rollouts run on the primary checkout's engine (`[[chorus-rollout-2026-10-10]]`, `[[event-script-rollout-2026-10-10]]`), so ADR 0031 holds it at `f0257cb` (2.11.0).**
 - **Landed:** #108, schedule § 0 resolves the rollout root (`self-rollout-check.sh --resolve` prints the root, or `<repoPath>-rollout`, or refuses); #109, the three load-flaky timing tests made structural (12a sleep stub, a held-until-killed lock holder, case 35's `timed out` proof); #110, the 3.0.0 bump plus `docs/evals/2026-10-10-release-3-0.md` (16 of 18 at 1.00, two lifecycle judge misses filed).
 - **Retro of `[[thread-skill-rollout-2026-10-09]]`:** no proposals, ceiling stays 4; the 12a flake's cost was invisible to the score.
-- **Review loops:** #107 (needs-you (c) gaps), #108, #109 and the release each hit the fresh-review ledger's STOP at round 2. #107 closed (design: [[thread-skill-needs-you-refused-descope-and-recorded-answer]], grill first); #108 and #109 reverted to root and took an alternate `/simplify`; the release cut back to bump + eval record, its ADR edits moved to [[thread-skill-adr-status-sweep-after-3-0]].
-- **Filed:** [[thread-skill-adr-status-sweep-after-3-0]], [[thread-skill-eval-close-consumed-fixture-names-thread-file]], [[thread-skill-eval-handoff-manual-dry-run-judge-miss]], [[thread-skill-eval-retro-routing-case]]. `ab-fable-vs-opus-planning` stays dropped (Lachy, 2026-10-10).
+- **Review loops:** #107 (needs-you (c) gaps), #108, #109 and the release each hit the fresh-review ledger's STOP at round 2. #107 closed (design: [[thread-skill-p18-3-one-human-fix-per-refusal]], grill first); #108 and #109 reverted to root and took an alternate `/simplify`; the release cut back to bump + eval record, its ADR edits moved to [[thread-skill-p19-2-adr-status-sweep]].
+- **Filed:** [[thread-skill-p19-2-adr-status-sweep]], [[thread-skill-p19-10-eval-close-consumed-fixture]], [[thread-skill-p19-11-eval-handoff-manual-dry-run]], [[thread-skill-p19-12-eval-retro-routing-case]]. `ab-fable-vs-opus-planning` stays dropped (Lachy, 2026-10-10).
 
 **2026-10-09 (late): P16 (unattended rollouts) and P17 (queue fixes from live runs) have landed. `[[thread-skill-rollout-2026-10-09]]` (archived, § Completion log): 9/9 merged (#97 to #105) in 11h 6m, from the clone `~/repos/tools/thread-skill-rollout`, on the Opus ladder. Phases 16 and 17 are closed (p16-2 landed separately in `~/repos/workspaces`). p13-4 (release 3.0) is unblocked. The primary checkout is still held: `[[chorus-rollout-2026-10-09]]` is running from it, so the new P16/P17 skills are on `origin/master` but not yet live here.**
 - **Landed:**
@@ -83,7 +89,7 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 **2026-09-28 (evening): orient is the one shaping verb (ADR 0027) and 2.9.0 is live. `split` and `gather` are gone. Nothing is running.**
 - **ADR 0027**, grilled with Lachy from his "fold Fit Snack into Chorus" brain dump: he always runs orient → gather → split → grill-with-docs as one move on pickup. Orient now asks **Reshuffle / Steer only / Look only** after its audit. The reshuffle (`skills/orient/reshuffle.md`) sorts all open work by reach tier, unbundles brain dumps, grills only what's unclear (stoppable), and writes at one gate. Orient schedules wave-shaped phases itself (`--tasks`, members only) and ends with the execute offer (fresh session / here / not yet). One note → a scoped reshuffle (split's old job). New glossary: Reshuffle, Reach tiers, Clear / unclear item, Brain dump, execute offer.
 - **Landed:** #32 (`b1e2cf2`) with p10-3 (orient's drift wiring) and the gather-rename cache exclusion folded in; release #33 (`43ff855`, 2.9.0, carrying #31 too); #34 (`6962967`, the P10 release session's unpushed close-out). Plugin updated in both profiles, `make release-check` green at 2.9.0. **Sessions started before the update still load 2.8.0**, where split and gather exist.
-- **Review:** xhigh ×2 then simplify. Round 2's ledger stopped the chain (10 of 15 findings were round 1's rollout-lifecycle machinery: auto-pause, Pause-and-hand-off, a cross-project schedule gate). Reverted to the root: orient supersedes only a **paused** rollout whose unlanded tasks are all open; anything else waits, a stuck one goes to repair. Deferred: [[thread-skill-schedule-owns-one-live-rollout-per-repo]], [[thread-skill-p8-5-one-vault-grammar]].
+- **Review:** xhigh ×2 then simplify. Round 2's ledger stopped the chain (10 of 15 findings were round 1's rollout-lifecycle machinery: auto-pause, Pause-and-hand-off, a cross-project schedule gate). Reverted to the root: orient supersedes only a **paused** rollout whose unlanded tasks are all open; anything else waits, a stuck one goes to repair. Deferred: [[thread-skill-schedule-owns-one-live-rollout-per-repo]], [[thread-skill-p19-7-one-vault-grammar]].
 - **Evals:** the full suite, 18 cases, $3.34, recorded in `docs/evals/2026-09-28-orient-reshuffle.md`. All route correctly; `handoff-manual-dry-run` 0.83 (its LLM lifecycle judge), untouched by this work. This run has the exact shape p4-6 asked for.
 - **Outside this repo:** workspaces `affa997`, `3a57334` (writer specs name orient's reshuffle) and `~/.agents` `22da348` (Codex split/gather adapters deleted, router + orient adapter updated), both pushed.
 
@@ -697,7 +703,7 @@ scheduled 2026-07-15.
 - **A rollout never runs the engine changes it lands.** The lead runs from the held primary checkout, so P15's emitters wrote no Run record for their own rollout. Expect a change to execute, the engine or its scripts to take effect only on the next rollout, after the fast-forward.
 - **AskUserQuestion holds the lead's turn.** Workflow and background-command notifications queue until it is answered, so a question asked overnight stalls every finished call behind it (2026-10-05, about 12h). P16 removes the hazard; until then, never ask while work is in flight.
 - **This checkout is the engine for every rollout lead.** While one runs, close from here still lands (a protected repo queues a `close/…` PR) but skips the fast-forward (`land: held the primary checkout`), so local `master` sits ahead until `git reset --keep origin/master` once nothing runs (ADR 0031 Consequences).
-- **`CLAUDE_PLUGIN_ROOT` is unset in the Bash tool** when a skill is followed through a router (next → handoff): the snippet guards exit 2. Export it to the plugin root and re-run ([[thread-skill-p5-5-plugin-root-read-as-file]]).
+- **`CLAUDE_PLUGIN_ROOT` is unset in the Bash tool** when a skill is followed through a router (next → handoff): the snippet guards exit 2. Export it to the plugin root and re-run ([[thread-skill-p19-6-plugin-root-read-as-file]]).
 - **gh 2.43: `gh pr edit` fails** (Projects-classic GraphQL); `gh api -X PATCH repos/lachyts/thread-skill/pulls/<n>` works, and `gh pr merge --merge` works.
 - **A Linux Verify without Docker:** push a throwaway branch whose `test.yml` triggers on that branch and runs a 20-way `ubuntu-latest` matrix of `make test`; delete it after (p14-1's 20/20 run 37097172002).
 - **`/fresh-review` on a pushed PR branch** reads `diff6 = da39a3` (nothing unpushed): pass the explicit range and name the doc by the range's digest (`git diff <base>...<head> -- . ':!docs/reviews' | shasum`); from a session whose cwd is another checkout, tell the reviewer where the head's files are.
@@ -931,10 +937,16 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Now (from 2026-10-13): 3.0.0 installed; the E2E session (from handoff `docs/handoffs/2026-10-13-3-0-e2e.md`, consumed) is running p13-4.**
+1. **Finish p13-4** ([[thread-skill-p13-4-release-3-0-and-e2e]]): the live E2E from a dated copy of `docs/e2e/2026-09-23-baseline.md` (retired-verb rows rewritten for 3.0), then retire P13's interim rule and Lead actions, close p13-4 and P13. Lachy may drop `max_tier: opus` from AGENTS.md § Model tier.
+2. **Then a Steer-only `/thread:orient Thread Skill`** schedules P18 + P19 as one rollout, from the clone `~/repos/tools/thread-skill-rollout`; p19-1 first.
+
+**Superseded 2026-10-13:**
+
 **Now (from 2026-10-10): 3.0.0 is tagged; the primary checkout is held at `f0257cb` while `[[chorus-rollout-2026-10-10]]` and `[[event-script-rollout-2026-10-10]]` run on its engine (ADR 0031).**
 1. **When `python3 skills/_shared/scripts/unfinished-rollout.py running` lists neither:** finish p13-4 per its note ([[thread-skill-p13-4-release-3-0-and-e2e]], "Held" line): clear the stray `.claude/worktrees/run-record` (PR #88), `git reset --keep origin/master` here, `claude plugin update thread@thread` then `make release-check`, the E2E from a copy of `docs/e2e/2026-09-23-baseline.md`, retire the P13 interim rule. Lachy may drop `max_tier: opus` from his AGENTS.md § Model tier (told 2026-10-10).
-2. **Grill [[thread-skill-needs-you-refused-descope-and-recorded-answer]] with Lachy** before any code.
-3. **Cheap follow-ons:** [[thread-skill-adr-status-sweep-after-3-0]]; the three eval tasks re-run cases (spend: ask first).
+2. **Grill [[thread-skill-p18-3-one-human-fix-per-refusal]] with Lachy** before any code.
+3. **Cheap follow-ons:** [[thread-skill-p19-2-adr-status-sweep]]; the three eval tasks re-run cases (spend: ask first).
 
 **Superseded 2026-10-10:**
 
@@ -987,8 +999,8 @@ scheduled 2026-07-15.
 **Superseded 2026-09-30:**
 **Now (from 2026-09-28, late afternoon): 2.10.0 is live. Nothing is running, no handoff is pending, and both checkouts are on `master` (after this close-out's PR merges, fast-forward the clone).**
 - **Next** (pick one; nothing is decided):
-  1. [[thread-skill-schedule-owns-one-live-rollout-per-repo]] and [[thread-skill-p8-5-one-vault-grammar]], the ADR 0027 follow-ups (the second edits `reconcile-project.py`).
-  2. [[thread-skill-p4-5-trim-descriptions-700-hard-cap]] (its p4-6 baseline exists).
+  1. [[thread-skill-schedule-owns-one-live-rollout-per-repo]] and [[thread-skill-p19-7-one-vault-grammar]], the ADR 0027 follow-ups (the second edits `reconcile-project.py`).
+  2. [[thread-skill-p19-5-trim-descriptions-700-hard-cap]] (its p4-6 baseline exists).
   3. [[thread-skill-rewave-a-blocked-task-within-its-rollout]].
   4. Phase 9's rest: p9-2 (capture marker), p9-3 (open list prunes, close guard).
   5. Still owed: the fresh-review of workspaces `29ca886` (a session in `~/repos/workspaces`); tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
@@ -998,8 +1010,8 @@ scheduled 2026-07-15.
 **Now (from 2026-09-28, evening): 2.9.0 is live (orient's reshuffle, set-down next actions). Nothing is running and no handoff is pending. Both checkouts are on `master`.**
 - **Next:**
   1. The next rollout: `/thread:schedule` on [[thread-skill-p10-4-close-flips-a-finished-task]] and p9-4, from the rollout clone (p10-3 landed in #32). Consider [[thread-skill-reconcile-apply-binds-reviewed-list]] with them. Phase 10 closes itself when p10-4 lands.
-  2. p4-6's eval baseline now exists (`docs/evals/2026-09-28-orient-reshuffle.md`), so [[thread-skill-p4-5-trim-descriptions-700-hard-cap]] can be scheduled.
-  3. The two ADR 0027 follow-ups: [[thread-skill-schedule-owns-one-live-rollout-per-repo]], [[thread-skill-p8-5-one-vault-grammar]].
+  2. p4-6's eval baseline now exists (`docs/evals/2026-09-28-orient-reshuffle.md`), so [[thread-skill-p19-5-trim-descriptions-700-hard-cap]] can be scheduled.
+  3. The two ADR 0027 follow-ups: [[thread-skill-schedule-owns-one-live-rollout-per-repo]], [[thread-skill-p19-7-one-vault-grammar]].
   4. Still owed: the fresh-review of workspaces `29ca886` (a session in `~/repos/workspaces`); tag 2.7.1 at `e5903f5` and 2.9.0 at `43ff855` (`claude plugin tag` tags HEAD, so from a clean checkout sitting on that commit).
 - **Close-outs still go on a branch and a PR** (master is protected, strict: a PR behind master must be updated before it merges).
 
@@ -1136,6 +1148,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-10-13 (close): `/thread:orient Thread Skill` — drift closed P12/P14; reshuffle wrote P18 (unattended) and P19 (coherence), closed P3/4/5/8/9 into P19, dropped three; grill → ADRs 0034/0035 (#112, merged); installed 3.0.0 (p13-4 steps 1–3); handed the E2E off (#113).
 - 2026-10-10 (close): fixed the load-flaky timing tests (#109) and schedule's self-rollout gate (#108, `--resolve`), both after ledger STOPs, reverted to root plus `/simplify`; closed #107 into a design task; Retro of the 10-09 rollout (no proposals); `make evals` ($4.60, 16/18) and released 3.0.0 (#110, tag `thread--v3.0.0`), held from install by two rollouts on the primary. Memory: release-pr-scope.
 - 2026-10-09 (close): executed `[[thread-skill-rollout-2026-10-09]]` to 9/9 (#97 to #105, 11h 6m, Opus) from the rollout clone, after the self-rollout gate refused the live checkout as Project root. Load-flaky `make test` (12a) forced three integrate calls; p16-1 (an Integration rejection against #97) and p16-5 (a plan-block) were handed back by the lead and converged. P16 and P17 closed; three follow-ons filed; METHOD K120.
 - 2026-10-09: orient reshuffle — P17 (queue fixes from live runs) formed, p12-13/p14-7 closed, p15-6 absorbs the live-record Retro, 3.0 gated after P16; thread-skill-rollout-2026-10-09 scheduled (P16+P17, 9 tasks); p16-2 landed in claude-workspaces PR #4; handed off to a fresh execute session.
