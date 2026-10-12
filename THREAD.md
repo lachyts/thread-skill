@@ -10,6 +10,12 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-10-13 (later): p13-4 and P13 are done. The 3.0.0 live E2E is recorded (`docs/e2e/2026-10-13-3-0-0.md`, PR #115, auto-merge queued): 17 rows, 15 PASS, 1 KNOWN, 1 FAIL. Fixtures removed. Nothing of thread-skill's is running; `[[chorus-rollout-2026-10-13]]` still runs on this checkout's engine (held).**
+- **Shape:** the 2.5.3 baseline re-cut for 3.0 (orient reshuffle for split/gather, the protocol 5 queue for waves, new rows 16 `/thread:retro` and 17 ladder). Run as a hub (this repo: § 0, leak check, cleanup, filing) plus S1 in the fixture (rows 1–13, a Stage card with `cwd` set) and S2 (rows 14–15, started from row 13's native `create_thread` card). Every 2.5.3 finding re-tested is fixed except the archive `git mv`.
+- **Findings filed (loose, candidates for P19):** [[thread-skill-execute-archive-moves-an-untracked-rollout-note]] (row 5 KNOWN), [[thread-skill-retro-load-counts-a-quiet-concurrent-rollout]] (row 16 FAIL: `score.py` `load()` spans first..last line, so a rollout with long calls in flight looks absent), [[thread-skill-repair-stops-on-a-complete-rollout]] (row 7 seam: repair's § 4 hand-off would re-run the ceremony on a done rollout). Plus [[chorus-a-started-card-reports-back-to-its-originator]] (Chorus): the hub had no way to see S1/S2 finish.
+- **P13 closed:** the interim rule and Lead actions retired on [[thread-skill-p13-the-ladder]]; [[thread-skill-p13-4-release-3-0-and-e2e]] done. Lachy told (again) that his AGENTS.md § Model tier can drop `max_tier: opus`.
+- **Cleanup:** GitHub `lachyts/zz-thread-e2e` deleted (Lachy's OK), local fixture removed, vault fixtures out (`18affd5b`), thread file out (workspaces `94115d6`), fixture state files reverted.
+
 **2026-10-13: 3.0.0 is installed (user scope, `make release-check` passes, primary at `e1a7d75`); the live E2E (p13-4 step 4) runs in a handed-off session. An orient reshuffle re-sorted the backlog into P18 and P19.**
 - **Install:** the hold cleared (both 10-10 rollouts archived; `unfinished-rollout.py running` → none). Stray `.claude/worktrees/run-record` removed (clean; branch and PR #88 stay on origin); primary `reset --keep origin/master`; `claude plugin update thread@thread` 2.11.0 → 3.0.0.
 - **Reshuffle:** P12 and P14 closed by drift. New [[thread-skill-p18-unattended-means-unattended]] (p18-1 stop calls at a step boundary, p18-2 a gate never holds the rollout, p18-3 one Human fix per refusal) and [[thread-skill-p19-coherence-after-3-0]] (12 tasks: p19-1 land-suite timeout first, the ADR status sweep, the P3/P4/P5/P8/P9 stragglers, the three eval fixes). P3, P4, P5, P8, P9 closed `done` into P19. Dropped: the footing-log task, handoff-widens, "Orient auto-detects…". codex-retro-route merged into [[thread-skill-estate-chores-after-p12]]; post-p12-cleanups stays loose (in-repo, waits on GifLab).
@@ -693,6 +699,7 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **A live E2E needs a hub and children (2026-10-13).** The harness resets a `cd` outside the launch dir, so the CWD-bound verbs run in a child session launched in the fixture: in Chorus, `create_thread` (and `spawn_task`) take a `cwd`, so the hub raises a card that opens there. A card-started session never reports back to its raiser; the hub watched the checklist file with a background `until` loop (fix filed for Chorus).
 - **Worktrees under the live checkout can reach the plugin cache.** The `./` directory source copies ignored files; before `claude plugin update`, remove every `.claude/worktrees/*` (the stray `run-record` one belongs to open PR #88) or `make release-check`'s stray check fails and the cache copy must be deleted by hand.
 - **`make evals` grades routing on skill descriptions only.** A body-only change (#108) needs no eval re-run; a description change does. The lifecycle judges record no rationale: re-run a miss with transcripts before reading it.
 - **A Workflow task-notification's output file is one JSON object** (`summary`, `logs`, `result`, `agents`): pipe `json.load(f)['result']` into `reconcile-rollout.py reconcile --result -`; the file has no `<result>` tag to cut.
@@ -937,6 +944,13 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Now (from 2026-10-13, later): P13 is closed and 3.0.0 is verified live. Next is scheduling P18 + P19.**
+1. **Steer-only `/thread:orient Thread Skill`** schedules P18 + P19 as one rollout, from the clone `~/repos/tools/thread-skill-rollout` (never the primary: `[[chorus-rollout-2026-10-13]]` holds it); p19-1 first. Let it place the three E2E findings (loose tasks, linked in Where we are) into P19 or alongside.
+2. **Fast-forward the primary** (`git reset --keep origin/master`) only when `unfinished-rollout.py running` no longer lists a rollout on it.
+3. PR #115 (the E2E record) has auto-merge queued; nothing waits on it.
+
+**Superseded 2026-10-13 (later):**
+
 **Now (from 2026-10-13): 3.0.0 installed; the E2E session (from handoff `docs/handoffs/2026-10-13-3-0-e2e.md`, consumed) is running p13-4.**
 1. **Finish p13-4** ([[thread-skill-p13-4-release-3-0-and-e2e]]): the live E2E from a dated copy of `docs/e2e/2026-09-23-baseline.md` (retired-verb rows rewritten for 3.0), then retire P13's interim rule and Lead actions, close p13-4 and P13. Lachy may drop `max_tier: opus` from AGENTS.md § Model tier.
 2. **Then a Steer-only `/thread:orient Thread Skill`** schedules P18 + P19 as one rollout, from the clone `~/repos/tools/thread-skill-rollout`; p19-1 first.
@@ -1148,6 +1162,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-10-13: 3.0.0 live E2E recorded (15 PASS / 1 KNOWN / 1 FAIL over 17 rows, PR #115); three findings filed; fixtures removed; P13 interim rule retired, p13-4 and P13 closed.
 - 2026-10-13 (close): `/thread:orient Thread Skill` — drift closed P12/P14; reshuffle wrote P18 (unattended) and P19 (coherence), closed P3/4/5/8/9 into P19, dropped three; grill → ADRs 0034/0035 (#112, merged); installed 3.0.0 (p13-4 steps 1–3); handed the E2E off (#113).
 - 2026-10-10 (close): fixed the load-flaky timing tests (#109) and schedule's self-rollout gate (#108, `--resolve`), both after ledger STOPs, reverted to root plus `/simplify`; closed #107 into a design task; Retro of the 10-09 rollout (no proposals); `make evals` ($4.60, 16/18) and released 3.0.0 (#110, tag `thread--v3.0.0`), held from install by two rollouts on the primary. Memory: release-pr-scope.
 - 2026-10-09 (close): executed `[[thread-skill-rollout-2026-10-09]]` to 9/9 (#97 to #105, 11h 6m, Opus) from the rollout clone, after the self-rollout gate refused the live checkout as Project root. Load-flaky `make test` (12a) forced three integrate calls; p16-1 (an Integration rejection against #97) and p16-5 (a plan-block) were handed back by the lead and converged. P16 and P17 closed; three follow-ons filed; METHOD K120.
