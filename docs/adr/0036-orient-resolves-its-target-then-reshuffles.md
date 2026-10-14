@@ -69,9 +69,10 @@ ADR 0088 d4 asks orient to run a check a project declares (its SDK watch).
   sweep would run every project's check, and an advance is per project), run from the note's first
   `repos:` entry, never a later one, as `/bin/sh -c` with stdin closed and git's repo-local variables
   scrubbed, under a time limit that kills the check's whole process group. The declaration must be
-  one simple command, because `--advance` is appended to it: an operator, a `#` comment, a line
-  break, a backtick or a `$(…)` is refused unrun, quoted or not. Stdout is the entries, read whole;
-  stderr only names a failure and never enters the output. The advance is bound to the digest of
-  the output Lachy reviewed: it re-runs the plain command and runs `--advance` only on a
-  byte-identical result, so an entry that lands during a long grill is held for the next orient
-  instead of being passed unseen.
+  one simple command, because `--advance` is appended to it, and the guard reads it with sh's own
+  quoting rules: an unquoted operator or `#` comment, a line break, a quote that does not start a
+  word, and a backslash, backtick or `$` other than `$NAME` or `${NAME}` (so any `$(…)`), quoted or
+  not, are refused unrun. Stdout is the entries, read whole; stderr only names a failure and never
+  enters the output. The advance is bound to the digest of the output Lachy reviewed: it re-runs
+  the plain command and runs `--advance` only on a byte-identical result, so an entry that lands
+  during a long grill is held for the next orient instead of being passed unseen.

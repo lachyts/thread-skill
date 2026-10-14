@@ -236,8 +236,9 @@ final check that the run wrote nothing into the tree):
   that writes nothing.
 - **Declared check** — `tests/declared-check.test.mjs`: `declared-check.py` against a fixture vault and repos
   with a fixture check — undeclared, whole untruncated output and its digest, the advance on a matching digest
-  and the hold on a changed one or a failed re-run, the group-killing time limit (and on a signal), the stderr
-  tail, the one-simple-command guard through both verbs, the scrubbed git env, and every refusal.
+  and the hold on a changed one or a failed re-run, the group-killing time limit (and on a signal, even one that
+  lands while the check starts), the stderr tail, the one-simple-command guard through both verbs (read with sh's
+  quoting rules), the scrubbed git env, and every refusal.
 - **Default branch** — `tests/default-branch.test.{mjs,sh}`: `defaultBranch` keeps pre-fix bytes when
   unset, refuses unsafe names, and the resolver in `execute/SKILL.md` § 4 works against fixture remotes.
 - **Release check** — `tests/release-check.test.sh`: the real `make release-check` recipe against a temp

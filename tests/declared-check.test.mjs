@@ -143,6 +143,11 @@ repo('slowadv', { 'slow.sh': SLOW_SH })
 const SLOWADV = note('Slowadv', { check: 'sh slow.sh' })
 repo('sigslow', { 'slow.sh': SLOW_SH })
 const SIGSLOW = note('Sigslow', { check: 'sh slow.sh' })
+repo('sigstart', { 'slow.sh': SLOW_SH })
+const SIGSTART = note('Sigstart', { check: 'sh slow.sh' })
+// A check that traps SIGTERM: the group kill reaches it only when it runs with the caller's signal mask.
+repo('trapped', { 'trap.sh': "trap 'echo term > got; exit 0' TERM\nsleep 30 &\necho $! > pid\nwait\n" })
+const TRAPPED = note('Trapped', { check: 'sh trap.sh' })
 repo('missing')
 const MISSING = note('Missing', { check: 'definitely-not-a-command-xyz' })
 repo('fails', {
@@ -168,6 +173,12 @@ const REFUSED = [
   'sh c.sh `touch m`', 'sh c.sh $(touch m)', 'sh c.sh "$(touch m)"', 'sh c.sh "x$(touch m)y"', 'sh c.sh "$((1+2))"',
   "sh c.sh '$(x)'",
   'sh c.sh "abc', 'sh c.sh\ntouch m', '! sh c.sh', 'sh c.sh \\', 'if true', 'sh c.sh\ttouch',
+  // Each of these ran `touch m` under /bin/sh past a guard that read quotes unlike sh: a quote inside a word, a
+  // `\"` that does not close, and quotes nested inside `${…}` (bash reads `'…'` there as one string).
+  'sh c.sh a"b "x;touch m;y" c"', "sh c.sh a'b 'x;touch m;y' c'", 'sh c.sh "x\\" ";touch m;" y"',
+  'sh c.sh "x\\" "|touch m|" y"', `sh c.sh "\${x-'" '}";touch m; #'`,
+  // A `$` that does not start $NAME or ${NAME}, quoted or not.
+  'sh c.sh ${x-y}', "sh c.sh $'a b'", 'sh c.sh "$1"',
 ].map((cmd, i) => ({ cmd, rel: note(`Guard${i}`, { check: cmd, repos: ['~/repos/guard'] }) }))
 const PASSED = ['sh check.sh "a;b"', 'sh check.sh "a>b"', 'sh check.sh $HOME', 'sh check.sh ${HOME}', 'FOO=1 sh check.sh']
   .map((cmd, i) => ({ cmd, rel: note(`Pass${i}`, { check: cmd, repos: ['~/repos/guard'] }) }))
@@ -422,6 +433,43 @@ test('(o) a signalled script kills the live check group', async () => {
   const { code } = await exited
   assert.equal(code, 143)
   assert.ok(await gone(pid), `the backgrounded sleep ${pid} outlived the signalled script`)
+})
+
+// The script imported (never written to the checkout: -B) with Popen wrapped so a SIGTERM lands after the check has
+// started but before run_check records its group: the window between Popen returning and `_live` holding it.
+const LATE = `import importlib.util, os, signal, subprocess, sys, time
+spec = importlib.util.spec_from_file_location("declared_check", sys.argv[1])
+dc = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(dc)
+class Late(subprocess.Popen):
+    def __init__(self, args, **kw):
+        super().__init__(args, **kw)
+        if list(args[:2]) == ["/bin/sh", "-c"]:
+            pid = os.path.join(kw["cwd"], "pid")
+            for _ in range(400):
+                if os.path.exists(pid) and open(pid).read().strip():
+                    break
+                time.sleep(0.025)
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(0.5)
+subprocess.Popen = Late
+sys.exit(dc.main(sys.argv[2:]))
+`
+
+test('(o2) a signal while the check is starting is held until its group can be killed', async () => {
+  const r = spawnSync('python3', ['-B', '-c', LATE, SCRIPT, 'run', SIGSTART, '--vault', VAULT, '--timeout', '60'],
+    { cwd: scratch, env: { ...base, HOME }, encoding: 'utf8', timeout: 30000 })
+  assert.equal(r.status, 143, `exit ${r.status}: ${r.stderr}`)
+  const pid = Number((readIn('sigstart', 'pid') ?? '').trim())
+  assert.ok(pid > 0, 'the check never started')
+  assert.ok(await gone(pid), `the backgrounded sleep ${pid} outlived a signal sent while the check started`)
+})
+
+test('(o3) the check runs with the caller\'s signal mask, so the group kill\'s SIGTERM reaches its trap', async () => {
+  const { head } = run(TRAPPED, {}, ['--timeout', '1'])
+  assert.equal(head.status, 'timeout')
+  assert.equal(readIn('trapped', 'got'), 'term\n', 'SIGTERM never reached the check')
+  assert.ok(await gone(Number(readIn('trapped', 'pid'))))
 })
 
 test('(p) the vault is byte-unchanged after every case', () => {

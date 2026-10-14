@@ -41,7 +41,8 @@ target only, and carries its entries here. The command meets this contract:
 - **`<command> --advance` moves the record** to what it read. The check owns its record and how it
   lands: orient runs no git, and reports the record as the check's to land.
 - **One simple command** whose last word takes more arguments: no `;`, `&`, `|`, `(`, `)`, `<` or
-  `>`, no `#` comment, no line break, and no `$(…)` or backticks, quoted or not. Quoted arguments
+  `>`, no `#` comment, no line break, no quote that does not start a word, and no backslash,
+  backtick or `$` other than `$NAME` or `${NAME}` (so no `$(…)`), quoted or not. Quoted arguments
   and `$HOME` or `${HOME}` are fine. Anything else is refused, unrun, as one audit line.
 
 **Hold by default.** The record moves only when every entry got a disposition at R4. An entry the
@@ -236,9 +237,10 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
    are missing, never a second copy.
 7. **Misfits and unresolved items stay loose**, untouched apart from backlink rewrites.
 8. **The declared check advances, last.** When the footer said advance and every write above
-   landed, run orient § 2's `advance` call with the § 2 `digest` and report its `audit` line. On
-   `advanced`, also report the check's own lines and name its record as the check's to land. Any
-   other status, or a non-zero exit, is that one line; never a blocker.
+   landed, run orient § 2's `advance` call with the § 2 `digest` and its `timeout: 300000` (it
+   runs the check twice), and report its `audit` line. On `advanced`, also report the check's own
+   lines and name its record as the check's to land. Any other status, or a non-zero exit, is that
+   one line; never a blocker.
 
 **Report**: phases as clickable `obsidian://` links, renames, the other dispositions, surfacing
 status, misfits, out-of-vault links to fix, and what the grill left unresolved. Orient § 6 routes

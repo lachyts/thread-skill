@@ -29,9 +29,11 @@ function check(orient, reshuffle) {
   const surface = collapse(slice(reshuffle, /^\*\*Write surface\.\*\*/, /^$/) ?? '')
   const donts = collapse(section(reshuffle, /^## Don'ts/) ?? '')
 
-  if (!dc.includes(`python3 ${SCRIPT} run "<note>"`) || !dc.includes('`timeout: 300000`') || !/for a project target only/.test(dc) ||
+  if (!dc.includes(`python3 ${SCRIPT} run "<note>"`) || !dc.includes('a 300-second command timeout (`timeout: 300000`)') ||
+    !/for a project target only/.test(dc) ||
     !/A plain run changes nothing/.test(dc)) fails.push('call')
-  if (!dc.includes(`python3 ${SCRIPT} advance "<note>" --expect <digest>`) || !/Keep the header's `digest`/.test(dc)) fails.push('advance')
+  if (!dc.includes(`python3 ${SCRIPT} advance "<note>" --expect <digest>\`, also with \`timeout: 300000\``) ||
+    !/Keep the header's `digest`/.test(dc)) fails.push('advance')
   if (!/its one `audit` line/.test(dc) || !/never a blocker/.test(dc)) fails.push('blocker')
   if (!/An area or scoped target and `--debrief` run no check/.test(dc)) fails.push('reach')
   if (!/read all `bytes`/.test(dc) || !/saves to a file is read whole from that file, never from its preview/.test(dc)) fails.push('whole')
@@ -39,7 +41,9 @@ function check(orient, reshuffle) {
 
   if (!own.includes('`orient_check: <command>`') || !/A plain run changes nothing/.test(own) || !/the same bytes for the same readings/.test(own) ||
     !own.includes('`<command> --advance` moves the record') || !/One simple command/.test(own) ||
-    !own.includes('no `$(…)` or backticks, quoted or not') || !/orient runs no git/.test(own)) fails.push('contract')
+    !own.includes('no quote that does not start a word') ||
+    !own.includes('no backslash, backtick or `$` other than `$NAME` or `${NAME}` (so no `$(…)`), quoted or not') ||
+    !/orient runs no git/.test(own)) fails.push('contract')
   if (!/Hold by default/.test(own) || !/the grill did not reach/.test(own) || !/Steer only, Look only and a dry run all hold/.test(own) ||
     !/Nothing newer means no footer and no advance/.test(own)) fails.push('hold')
   if (!/re-runs the plain command/.test(own) || !/byte-identical/.test(own) || !/otherwise the record is held/.test(own)) fails.push('digest')
@@ -48,7 +52,7 @@ function check(orient, reshuffle) {
   if (!R(4).includes('**declared-check footer**') || !R(4).includes('; advance after the writes`') ||
     !R(4).includes('`declared check: hold (<unresolved>)`') || !/He may turn advance into hold/.test(R(4))) fails.push('gate')
   if (!/\*\*The declared check advances, last\.\*\*/.test(R(5)) || !/every write above landed/.test(R(5)) ||
-    !/orient § 2's `advance` call with the § 2 `digest`/.test(R(5))) fails.push('write')
+    !/orient § 2's `advance` call with the § 2 `digest`/.test(R(5)) || !R(5).includes('its `timeout: 300000`')) fails.push('write')
   if (!surface.includes("a declared check's own `--advance` moves its record") || !/orient still runs no git/.test(surface)) fails.push('surface')
   if (!donts.includes("**Don't advance a declared check** except through `advance --expect <digest>`") ||
     !/never run its `--advance` by hand/.test(donts)) fails.push('dont')
@@ -96,9 +100,12 @@ test('each control fails with exactly its rule', () => {
   assert.deepEqual(check(...o('A plain run changes nothing', 'A run may write')), ['call'])
   assert.deepEqual(check(...o('`timeout: 300000`', 'the default timeout')), ['call'])
   assert.deepEqual(check(...o("Keep the header's `digest`", 'Drop the header')), ['advance'])
+  assert.deepEqual(check(...o('also with `timeout: 300000`', 'with the default timeout')), ['advance'])
   // The contract loses its stable-output rule, its $(…) refusal or its no-git line.
   assert.deepEqual(check(...r('the same bytes for the same readings', 'something like the readings', own)), ['contract'])
-  assert.deepEqual(check(...r('no `$(…)` or backticks, quoted or not', 'no backticks', own)), ['contract'])
+  assert.deepEqual(check(...r('`$` other than `$NAME` or `${NAME}` (so no `$(…)`), quoted or not', '`$(…)`', own)), ['contract'])
+  assert.deepEqual(check(...r('no backslash, backtick', 'no backtick', own)), ['contract'])
+  assert.deepEqual(check(...r('no quote that does not start a word, and', 'and', own)), ['contract'])
   assert.deepEqual(check(...r('orient runs no git', 'orient commits it', own)), ['contract'])
   // The hold rule loses the unreached entries; the advance stops re-running.
   assert.deepEqual(check(...r('the grill did not reach', 'he dropped', own)), ['hold'])
@@ -106,4 +113,5 @@ test('each control fails with exactly its rule', () => {
   // R4's hold footer, R5's digest-bound call.
   assert.deepEqual(check(...r('`declared check: hold (<unresolved>)`', '`declared check: skipped`', '## R4.')), ['gate'])
   assert.deepEqual(check(...r("orient § 2's `advance` call with the § 2 `digest`", "the check's `--advance`", '## R5.')), ['write'])
+  assert.deepEqual(check(...r('and its `timeout: 300000`', 'and no time limit', '## R5.')), ['write'])
 })

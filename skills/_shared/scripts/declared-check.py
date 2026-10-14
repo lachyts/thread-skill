@@ -15,12 +15,16 @@ The check runs as `/bin/sh -c <command>` from the realpath of the note's first `
 against HOME; a later entry is never tried), stdin closed, in its own process group, with git's repo-local
 variables (GIT_DIR & co.) dropped from the environment. Its stdout is the entries; its stderr only ever names a
 failure, and never enters the output or the digest. A run past the time limit has its whole group killed
-(SIGTERM, a 2-second grace, SIGKILL); so does the live check when this script is signalled.
+(SIGTERM, a 2-second grace, SIGKILL); so does the live check when this script is signalled by SIGTERM, SIGINT or
+SIGHUP, which are held while a check starts so that one landing before its group is recorded still kills it. The
+check itself starts with the caller's signal mask.
 
 The guard: the command must be one simple command whose last word takes more arguments, because `advance`
-appends ` --advance` to it. Refused, unrun: a control character or line break; an unbalanced quote; a word made
-only of `;&|()<>`; a word starting with `#`; a word holding a backtick or `$(`, quoted or not (so `$((…))` and a
-single-quoted `'$(x)'` too); a shell reserved word first; a last word ending in a backslash.
+appends ` --advance` to it. It is read with sh's own quoting rules, over a subset of sh where the guard and
+/bin/sh cannot disagree on where a quote ends. Refused, unrun: a control character or line break; a backslash, a
+backtick or a `$` other than `$NAME` or `${NAME}`, quoted or not (so `$(…)`, `$((…))`, `${x-…}` and a
+single-quoted `'$(x)'` too); a quote that does not start a word, or one left open; an unquoted `;&|()<>`; an
+unquoted `#` starting a word; a shell reserved word first.
 
 `run` runs the command once. `advance` re-runs it, and only when that output's digest equals --expect (the
 `digest` of the run Lachy reviewed) runs `<command> --advance`; otherwise the record is held.
@@ -53,7 +57,6 @@ import importlib.util
 import json
 import os
 import re
-import shlex
 import signal
 import subprocess
 import sys
@@ -69,7 +72,9 @@ PREFIX = "declared check: "
 HELD = "record held, the next orient lists it"
 DIGEST = re.compile(r"[0-9a-f]{64}")
 OPERATORS = ";&|()<>"
-CONTROL = re.compile("[\x00-\x1f\x7f\x85  ]")
+CONTROL = re.compile("[\x00-\x1f\x7f\x85\u2028\u2029]")
+DOLLAR = re.compile(r"\$(?![A-Za-z_]|\{[A-Za-z_][A-Za-z0-9_]*\})")
+SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 RESERVED = {"!", "{", "}", "[[", "]]", "case", "coproc", "do", "done", "elif", "else", "esac", "fi", "for",
             "function", "if", "in", "select", "then", "time", "until", "while"}
 
@@ -103,29 +108,47 @@ class Parser(argparse.ArgumentParser):
 # ---- The declaration ---------------------------------------------------------------------------------
 
 def not_simple(cmd):
-    """Why `cmd` is not one simple command that takes a trailing ` --advance`, else None."""
+    """Why `cmd` is not one simple command that takes a trailing ` --advance`, else None.
+
+    It reads `cmd` as /bin/sh does, over a subset of sh where the two cannot disagree on where a quote ends: no
+    escapes (no backslash), nothing that nests quotes inside a quoted string (no backtick, no `$` but `$NAME` or
+    `${NAME}`), and every quote opening a word, so a quote is never glued to the word before it."""
     if CONTROL.search(cmd):
         return "a line break or control character"
-    lex = shlex.shlex(cmd, posix=False, punctuation_chars=OPERATORS)
-    lex.commenters = ""
-    lex.whitespace_split = True
-    try:
-        words = list(lex)
-    except ValueError:
-        return "an unbalanced quote"
-    for w in words:
-        if all(c in OPERATORS for c in w):
-            return "the operator %s" % w
-        if w.startswith("#"):
+    if "\\" in cmd:
+        return "a backslash"
+    if "`" in cmd:
+        return "a backtick"
+    if "$(" in cmd:
+        return "a $( substitution"
+    if DOLLAR.search(cmd):
+        return "a $ other than $NAME or ${NAME}"
+    words, word, quote = [], None, None
+    for c in cmd:
+        if quote is not None:  # every character is literal up to the closing quote, which keeps the word open
+            word += c
+            if c == quote:
+                quote = None
+        elif c == " ":
+            if word is not None:
+                words.append(word)
+            word = None
+        elif c in "'\"":
+            if word is not None:
+                return "a quote that does not start a word"
+            word = quote = c
+        elif c in OPERATORS:
+            return "the operator %s" % c
+        elif c == "#" and word is None:
             return "a # comment"
-        if "`" in w:
-            return "a backtick"
-        if "$(" in w:
-            return "a $( substitution"
-    if words[0] in RESERVED:
+        else:
+            word = (word or "") + c
+    if quote is not None:
+        return "an unbalanced quote"
+    if word is not None:
+        words.append(word)
+    if words and words[0] in RESERVED:
         return "the reserved word %s first" % words[0]
-    if words[-1].endswith("\\"):
-        return "a trailing backslash"
     return None
 
 
@@ -183,7 +206,7 @@ def kill_group(proc):
 
 
 def on_signal(signum, _frame):
-    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    for s in SIGNALS:
         signal.signal(s, signal.SIG_IGN)
     if _live["proc"] is not None:
         kill_group(_live["proc"])
@@ -206,12 +229,18 @@ class Ran:
 
 
 def run_check(cmd, cwd, env, timeout):
+    # The new group lives in its own session, so a signal that lands before `_live` holds it would leave it running
+    # with no limit: hold SIGNALS until it does. The check itself starts with the caller's mask, not the held one.
+    mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
     try:
         proc = subprocess.Popen(["/bin/sh", "-c", cmd], cwd=cwd, env=env, stdin=subprocess.DEVNULL,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+                                preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_SETMASK, mask))
+        _live["proc"] = proc
     except OSError as e:
         return Ran(start_error=e.strerror or str(e))
-    _live["proc"] = proc
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -361,7 +390,7 @@ def main(argv):
     body = b""
     found = check(args, head["note"], note, head)
     if found is not None:
-        for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        for s in SIGNALS:
             signal.signal(s, on_signal)
         cmd, cwd = found
         body = (verb_run if args.verb == "run" else verb_advance)(cmd, cwd, git_env(), args, head)

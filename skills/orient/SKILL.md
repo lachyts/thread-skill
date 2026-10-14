@@ -166,7 +166,8 @@ and Drift and the slots for each swept project.
   read whole from that file, never from its preview). Keep the header's `digest`, and carry the
   entries to § 3 Shape and to `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § Declared check,
   whose gate alone runs
-  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/declared-check.py advance "<note>" --expect <digest>`.
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/declared-check.py advance "<note>" --expect <digest>`,
+  also with `timeout: 300000` (it runs the check twice).
   `undeclared` adds nothing. Any other status is its one `audit` line, and a non-zero exit its one
   `declared-check:` line: report it in § 3 and carry on, never a blocker. An area or scoped target
   and `--debrief` run no check.
