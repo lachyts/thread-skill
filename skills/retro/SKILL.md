@@ -16,6 +16,8 @@ comes from two scripts, and the model only runs them, shows what they print and 
   line beside the record). Never edit either file by hand from this skill, and never compute a score or write a
   Tuning in the conversation.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 The loop is Chorus's `/reflect` shape: record → proposals → Lachy picks → the tune script.
 
 ## Scope
@@ -98,7 +100,9 @@ From `score.json`, verbatim numbers only (the record is UTC; local times may be 
   stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so.
 - **Slots and lane**: the ceiling it ran at (and any mid-window change), the share of running time the Slots were
   full, utilisation, idle Slot time by reason; the lane's busy share, Integrations and the ready-to-lane waits.
-- **Load**: the overlapping rollouts on this machine and their span.
+- **Load**: the overlapping rollouts on this machine, their span and the Slots each held open (`slotsOpen`). A
+  rollout counts through this run while a Slot it took has no slot-freed, even when its long calls wrote nothing
+  meanwhile; say so when its `load:` flag reads it live past its last line (a lost slot-freed overcounts it).
 - **The binding constraint** and its why. A lane-bound run proposes no key: say "no key moves this".
 - **Each proposal**: `id`, `key from → to`, its evidence, `agreeing` (earlier applied Tunings with the same rule),
   and its `ranAtCause` in plain words when present, e.g. "ran at 5 by a rollout-note override; rollouts.toml says

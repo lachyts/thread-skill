@@ -7,6 +7,8 @@ description: 'End-of-thread capture — update the active thread (project THREAD
 
 End-of-thread capture. The thread is about to end — make sure nothing valuable is lost. Triage what happened in this conversation and route each piece to exactly one destination.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 **The active thread is always the primary destination.** Update its `THREAD.md` first; everything else (vault tasks, memory, etc.) is supporting capture.
 
 **Everything saves autonomously except new vault tasks and unproven completions.**
@@ -75,7 +77,7 @@ slug="${slug:-}" shared="${shared:-}" pointer="${pointer:-}" bash "$hs"
 # end thread:handoff-scan
 ```
 
-The snippet announces each directory it scanned as a `# scanned <dir>` line on stderr, and a pointer it could not classify as `handoff-scan: pointer not absolute (<p>)` or `handoff-scan: pointer missing (<p>)`; stdout stays `<status> <path>` lines only. When the script or its resolver cannot be run (`CLAUDE_PLUGIN_ROOT` unset, a stale cache, a host without the plugin) or the resolver prints nothing, the scan exits 2 with a `handoff-scan:` line on stderr and prints nothing — it never guesses a directory (step 2's failure path).
+The snippet announces each directory it scanned as a `# scanned <dir>` line on stderr, and a pointer it could not classify as `handoff-scan: pointer not absolute (<p>)` or `handoff-scan: pointer missing (<p>)`; stdout stays `<status> <path>` lines only. When the script or its resolver cannot be run (`CLAUDE_PLUGIN_ROOT` still unset after the re-run `plugin-root.md` rule 4 asks for, a stale cache, a host without the plugin) or the resolver prints nothing, the scan exits 2 with a `handoff-scan:` line on stderr and prints nothing — it never guesses a directory (step 2's failure path).
 
 `pending` → this thread's continuation (the rules below). `consumed` → deleted in step 7 once the peer guard (`handoff-lifecycle.md` § Close-out) allows: at this session's close if it marked the doc, otherwise at the first close after 24 h with no listed peer in its `<home>` or `Run from:` directory; until then left for its consumer and reported. `legacy` and `unknown(…)` → one counted report line, untouched. The status is read from the front-matter block only (quotes stripped, case-folded, CRLF tolerated), so a body that mentions `status: pending` does not count.
 
@@ -422,7 +424,7 @@ Every stop calls `--hold` with the diagnosis before step 8's report and the bann
 - **A consumed doc this session marked but another close already removed** (a long-running consumer the listing missed) → the guard prints `keep missing`: `already gone`, no git command.
 - **A legacy handoff doc** (no `status:` front matter — written before ADR 0017) → counted on the `handoff legacy:` line; never refreshed, deleted or used to suppress. If it is plainly this thread's continuation and Lachy wants it in the lifecycle, he adds the front matter; close never guesses.
 - **A handoff doc's repo mid-rebase / mid-merge / detached HEAD** → that doc's handoff-lifecycle commit is skipped with a `not versioned:` line; the edit stays in the tree for the next close.
-- **The resolver cannot run** (`CLAUDE_PLUGIN_ROOT` unset, a stale plugin cache, another host) → the scan exits 2; step 2's failure path applies and step 8 prints `handoff: scan failed (…)`. Close never falls back to a hand-resolved `<home>`.
+- **The resolver cannot run** (`CLAUDE_PLUGIN_ROOT` still unset after the re-run `plugin-root.md` rule 4 asks for, a stale plugin cache, another host) → the scan exits 2; step 2's failure path applies and step 8 prints `handoff: scan failed (…)`. Close never falls back to a hand-resolved `<home>`.
 - **A squash- or rebase-merged branch, or a stale local `origin/<default>`** (repo-state runs in step 2, before landing's fetch, so its base ref can still be stale) → the repo-state line still reads `unmerged to <default>`: the count is commits on HEAD not reachable from the base ref, and a squash or rebase rewrites them. The caveat lives here only; the line's wording stays exactly `unmerged to <default>`.
 - **Default branch unresolved** (no local `origin/HEAD` — the common case for a repo that pushed its first branch, and for many https origins) → the unresolved line, on the default branch too, and step 8's row carries the one-time fix, `git remote set-head origin --auto`. Close never guesses `main` or `master`, and never treats the unresolved line as a candidate.
 - **A repo with no `origin` remote** (a local-only repo, or one whose remote has another name) → the same unresolved line, on every close. The set-head hint applies only when an `origin` remote exists: there it would fail with `No such remote 'origin'`. Tell the two apart with one read-only `git remote` call when the unresolved line appears, and print `Repo state: <line> — no origin remote, check skipped` without the hint. The script's output does not change.

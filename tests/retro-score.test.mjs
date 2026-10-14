@@ -677,6 +677,31 @@ test('load: a Retro run long after the rollout never counts a later same-host ro
     'only the overlap with demo\'s running time: other is no load, during counts up to 02:10')
 })
 
+// The 3.0.0 E2E's row 16: busy took two Slots at 00:00 and, its calls running long, wrote nothing after 00:25, so
+// its last line precedes demo's run (01:00-01:40). Its Slots are still open, so it is load through the run. done
+// freed its only Slot at 00:20 before the run began: no load. lost took a Slot on Sunday and never freed it: its
+// span is bounded by this run's window, so it counts against this run and is flagged, never counted forever.
+test('load: a quiet concurrent record with open Slots counts through the run; a freed one does not; a lost slot-freed is flagged', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs(life('a', { from: at('01:00'), to: at('01:30'), c: 2, lane: [at('01:30'), at('01:40')] })))
+  emitAll(home, 'busy', [
+    [at('00:00'), 'slot-taken', 'p65-1', { settings: S(5), start: 'start' }],
+    [at('00:00'), 'slot-taken', 'p66-1', { settings: S(5), start: 'start' }],
+    [at('00:25'), 'run-bound', 'p66-1', { runId: 'wf_p66', journalDir: '/nonexistent/workflows', call: 'task' }],
+  ])
+  emitAll(home, 'done', byTs(life('y', { from: at('00:00'), to: at('00:20'), c: 2 })))
+  emitAll(home, 'lost', [[D(4, '09:00'), 'slot-taken', 'q', { settings: S(1), start: 'start' }]])
+  const out = scored(home, ['--until', D(7, '00:00')])
+  assert.equal(out.runningTime.hours, 0.667)
+  assert.deepEqual(out.load.rollouts.map((r) => [r.rollout, r.start, r.end, r.hours, r.slotsTaken, r.slotsOpen]), [
+    ['busy', Z(at('01:00')), Z(at('01:40')), 0.667, 0, 2],
+    ['lost', Z(at('01:00')), Z(at('01:40')), 0.667, 0, 1],
+  ], 'busy and lost are live through the run on their open Slots; done is not')
+  assert.ok(has(out.flags, /^load: \[\[busy\]\] has 2 Slot\(s\) with no slot-freed \(\[\[p65-1\]\], \[\[p66-1\]\]\): read as live past its last line \(2026-10-05T00:25:00\.000Z\) to this run's end; a lost slot-freed overcounts it$/), out.flags.join('\n'))
+  assert.ok(has(out.flags, /^load: \[\[lost\]\] has 1 Slot\(s\) with no slot-freed \(\[\[q\]\]\)/))
+  assert.ok(!has(out.flags, /\[\[done\]\]/))
+})
+
 test('reviews and tunings are refused as the scored rollout (exit 2)', (t) => {
   const home = tmpHome(t)
   for (const r of ['reviews', '[[tunings]]']) {

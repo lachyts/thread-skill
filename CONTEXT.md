@@ -353,23 +353,38 @@ through time, from attention to merged PRs. Terms only — no implementation.
   supply; the decision must be written into the note before re-dispatch.
   _Avoid_: manual block, human block.
 - **Gated input** — a human authorisation a task's plan declares up front
-  (API spend with a cap, credentials, an irreversible action). Always pauses
-  for sign-off, even in continuous mode (ADR 0008). Once signed, the task
+  (API spend with a cap, credentials, an irreversible action). Sets its task
+  aside for sign-off, never the rollout (ADR 0008, ADR 0034). Once signed, the task
   resumes its gate-pending call on the signed plan while the lead holds its
   handle; a stop at Integration rejoins the Integration queue; otherwise it
   takes a fresh call behind a warning (execute § 3.7).
   _Avoid_: approval item, spend gate, pre-approval.
 - **Standing approval** — Lachy's one-off sign-off for every spend Gated input
   whose **total exposure** is at most US$50: the cap summed across Logins,
-  a recurring cap counted per month, US$50 itself included. Such a gate
-  passes without him and is recorded as auto-approved; credential and
-  irreversible gates never pass under it.
+  a recurring cap counted per month, US$50 itself included. The limit is
+  the Rollout settings key `spend_approval_usd` (a task may carry its own,
+  an ask-ahead answer; built-in 0, which is off). Exposure counts every USD
+  amount the gate names; a shape it cannot price asks. Such a gate passes
+  without him (`approve-gates --standing`, run by the lead) and is recorded
+  in `## Approved gates` with `(approved <date> under the standing approval:
+  total exposure …)`, the task's ceiling, never a target; credential and
+  irreversible gates never pass under it (ADR 0034).
   _Avoid_: spend envelope, auto-approve limit.
 - **Human fix** — the one stated act that moves a set-aside task no agent may
   move (sign a gate, decide a refused descope, restore an Integration with no
-  PR), with its detail. Execute, status and repair read it; none re-derives
-  it (ADR 0035).
+  PR), with its detail: `lead-integrate.py inputs`' `humanFix` ({act, detail,
+  handBack, label, raise}; `raise` names the budget a spent block may raise).
+  Execute, status and repair print it; none re-derives it (ADR 0035).
   _Avoid_: human cause, manual step.
+- **Recorded answer** — Lachy's answer to one set-aside block, a `## Repair
+  input` entry keyed on the block's fingerprint and written only by
+  `reconcile-rollout.py record-answer`, the entry last: `hand-back` (a bare
+  hand-back is all that is left, so the live lead hands it back itself once
+  nothing is paused), `awaiting repair` (repair still has work first) or
+  `left` (answered, left set aside). `inputs`' `answerRecorded` is its one
+  read; a re-entry since, a later answer (which supersedes it) or a hand-back
+  (which spends it) ends it, and an answered block is never retried (ADR
+  0035). _Avoid_: answer key by hand, spend by hand.
 - **Needs-you item** — a decision in a running rollout that is Lachy's alone:
   a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside only a person
   moves on, a merge hold's release, or a halt. The lead lists it in the
@@ -442,6 +457,20 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Hard: stop now; worktrees keep the work. _Avoid_: suspend, halt, abort.
 - **Reinstate** — resuming a paused rollout: plain `execute` on the rollout
   note. No separate resume command. _Avoid_: restart, relaunch, unpause.
+- **Room stop** — on the Chorus Stage, at a Login's line: the lead starts
+  nothing, stops each Workflow call at a step boundary (just after its running
+  agent's result line), and resumes every stopped call by `resumeFromRunId` on
+  the Stage's re-send (Chorus ADR 0071; execute § Room stop). It stands from
+  its `## Pause log` line to `room stop ended`, and it never stamps `paused:`.
+  _Avoid_: drain (Chorus's signal calls it "a drain, not a pause"; here the
+  soft pause is the drain), pause, hard pause, handoff.
+- **Sign-off pause** — the pause execute's sign-off form stamps (`paused:`
+  with `paused_for: sign-off`) once only gate-pending tasks and their queued
+  dependants remain: the run finished everything else and closed, and the
+  rest waits on Lachy's sign-off (ADR 0034). It keeps the repo's one
+  unfinished rollout until each gate is signed or deferred; its Reinstate
+  runs the Standing approval again and refuses while a gate is unsigned.
+  _Avoid_: stuck, gate hold.
 
 ## Run record and tuning
 
@@ -473,7 +502,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `ladder.toml`'s sibling: `[defaults]`, the `[guardrails]` bounds and
   per-repo `[repo."owner/name"]` tables (keyed by the GitHub origin),
   resolved by `rollout-settings.py` and stamped into each rollout note by
-  schedule. _Avoid_: hardcoded defaults, config.
+  schedule, except `auto_retries` and the Standing approval's
+  `spend_approval_usd`, which the execute verbs resolve themselves and
+  schedule never stamps. _Avoid_: hardcoded defaults, config.
 
 ## Model ladder
 

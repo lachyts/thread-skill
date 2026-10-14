@@ -261,7 +261,8 @@ resume=$(grep 'resumeFromRunId: <runId>' skills/execute/SKILL.md)
 has "$resume" "resumeFromRunId" "execute § 5 still carries the dead-run resume"
 has "${resume%%resumeFromRunId*}" "§ 2.5" "execute § 5 re-checks before a resumeFromRunId resume"
 hb=$(grep '^> ROLLOUT-HEARTBEAT' skills/execute/SKILL.md)
-has "$hb" "§4.5" "execute § 5 heartbeat re-enters through § 4.5 (and so its entry rule)"
+hb7=$(printf '%s' "$hb" | sed -n 's/^.*(7) /(7) /p')   # clause (7)'s span: clause (2) re-enters on a lapsed room stop too
+has "$hb7" "§4.5" "execute § 5 heartbeat's stall re-entry (clause (7)) re-enters through § 4.5 (and so its entry rule)"
 preins=$(grep '^\*\*Reinstate\.\*\*' skills/execute/SKILL.md)
 has "$preins" "clears it" "execute Pausing: the Reinstate line still clears the stamp"
 has "${preins%%"clears it"*}" "§ 2.5" "execute Pausing: the Reinstate line re-checks before clearing the stamp"

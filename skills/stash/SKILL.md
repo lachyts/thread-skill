@@ -7,6 +7,8 @@ description: 'Lock the current thread away dormant — out of time, not the curr
 
 The decisive "I'm done here *for now*, and I don't know when I'll be back" route. One job: make shutting this session down feel safe.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## Do
 
 1. **Write the capture task** — follow `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` exactly:

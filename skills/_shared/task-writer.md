@@ -9,6 +9,8 @@ lands here, once.
 Invariant (ADR 0001): **the task is complete on its own.** A cold session — any
 harness — must be able to resume the work from the task file alone.
 
+**Plugin root.** This spec is read as a file, never rendered: run its commands by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## 1. Resolve the project
 
 The task is never orphaned and never lands in `_Inbox/`. Resolve `projects:`
@@ -104,10 +106,15 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-day.py [<day>]
 - **Exit 2 with stderr starting `resolve-day:`** → the input was refused
   (unparseable, or before today). Apply the rules above: say a past date is
   refused, and a day that can't be resolved is a stash, not a guess.
-- **Exit 3, or the resolver can't run at all** (no `python3`, the script
-  missing, any other status) → compute the date by hand from these rules and
-  state that interpretation explicitly in the § 7 confirmation — never
-  silently. Exit 3 means no tz data: `python3 -m pip install tzdata`.
+- **An error naming a `/skills/…` path** (`python3`'s `can't open file
+  '/skills/…'`, exit 2) → the root was never exported, so the resolver did
+  not run: export it and re-run by `plugin-root.md` rule 4. It is neither a
+  refusal nor the by-hand case below.
+- **Exit 3, or the resolver can't run at all with the root set** (no
+  `python3`, the script missing even with the root exported by
+  `plugin-root.md`, any other status) → compute the date by hand from these
+  rules and state that interpretation explicitly in the § 7 confirmation —
+  never silently. Exit 3 means no tz data: `python3 -m pip install tzdata`.
 
 The confirmation ALWAYS echoes the resolved date (§ 7) so a parse surprise is
 visible immediately.
@@ -217,7 +224,10 @@ write and changes nothing: a dead task (the pointer would be dead), or an
 action that is blank or spans lines. Exit 3
 means no vault or no PyYAML (`python3 -m pip install pyyaml`). Either way
 the capture stands: say `Next action not written: <stderr>` in the
-confirmation, and never retry the write by hand.
+confirmation, and never retry the write by hand. An exit 2 with `python3`'s
+`can't open file '/skills/…'` is not that refusal: the script never ran, so
+export the root and re-run the same call by `plugin-root.md` rule 4, then
+apply the rules above to that run.
 
 **Close's form.** `close` writes only when the thread has a concrete next
 task, and never invents one. It stands down entirely — neither field — while

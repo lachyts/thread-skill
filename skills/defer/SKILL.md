@@ -8,6 +8,8 @@ argument-hint: "[day — tomorrow if omitted: monday | fri | next tue | 2026-07-
 
 The decisive "this is <day>'s problem" route. Same capture as `thread:stash`, plus a date that puts it on a day page.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## Do
 
 1. **Resolve the day** — run task-writer § 3's resolver (`resolve-day.py`, `Australia/Melbourne`) and follow its exit-code handling there; no day arithmetic in your head:
