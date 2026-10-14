@@ -152,8 +152,10 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   }
 
   // auto-revise: only autoRevise: true, with --max-review-rounds; revise-stopped and review-blocked wait for hand-back;
-  // the resume's prUrl is inputs' prUrl (p17-1: the note's pr: as a PR URL), and a prUrlError launches nothing.
+  // the resume's prUrl is inputs' prUrl (p17-1: the note's pr: as a PR URL), and a prUrlError launches nothing; an
+  // answered entry (ADR 0035's answerRecorded) is skipped: the answer's route moves it.
   if (!s2sub || !s2sub.text.includes('Launch one only when it reports `autoRevise: true`') ||
+    !s2sub.text.includes('Skip an entry whose `answerRecorded` is non-null: an answered block is the answer\'s') ||
     !s2sub.text.includes('--max-review-rounds') ||
     !s2sub.text.includes("resume: {stage: 'revise', prUrl: <inputs.prUrl>,") ||
     !s2sub.text.includes('A non-empty `prUrlError` (the note\'s `pr:` gives no PR URL the engine takes, step 3) launches nothing') ||
@@ -460,7 +462,8 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   // (halt-guard pins that order). Skipped under a pause; a `plan-blocked` set-aside judged once per session key (its
   // highest Plan-blocked run and that run's sha), never again on a heartbeat or another loop entry; the guarded verb
   // writes; exit 0 → `hand-back`, then `next` again; exit 3 leaves it set aside for `/thread:repair`, never a
-  // hand-back. § 8 says the lead runs this one verb itself and its refusal routes to repair; *Set aside* names the
+  // hand-back, its refusal recorded (ADR 0035), so an answered entry and one whose `humanFix` reads `decide scope or
+  // defer` are skipped, never re-judged by a new session. § 8 says the lead runs this one verb itself and its refusal routes to repair; *Set aside* names the
   // re-entry; a Don't forbids a hand-written or second descope. A block after the restart routes to repair's
   // **plan-blocked after a descope**, never a silent hand-back; § 6's undo lists every record (the marker, the
   // follow-up set `status: dropped`, the `## Notes` line).
@@ -472,6 +475,9 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !dsc.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py descope --tasks <slug>') ||
     !dsc.includes('Skip it when `paused` or `pauseRequested` is set') ||
     !dsc.includes('whose key this session has not judged') || !dsc.includes('held for the session\'s life') ||
+    !dsc.includes("skipping an entry whose `inputs` (*Recorded answer*'s read) reports a non-null `answerRecorded`") ||
+    !dsc.includes('or a `humanFix.act` of `decide scope or defer`') ||
+    !dsc.includes('the verb recorded the refusal on the task note, so its `humanFix` reads `decide scope or defer`') ||
     !dsc.includes('never re-judges it') ||
     !dsc.includes('exit 0 → `hand-back --tasks <slug>`') || !dsc.includes('then re-run `next --running') ||
     !dsc.includes('exit 3 → leave it set aside') || !dsc.includes('`/thread:repair` asks Lachy') ||
@@ -509,9 +515,9 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   // sign-off form closes the run); § 3 has the key's row (resolved by the verbs, never the lead); *Set aside* names the re-entry first;
   // § 6 has the event line, the `Auto-retried:` report row, and step 5's Completion log copies the `auto-retry:` lines;
   // § 7's stuck halt waits for the retries; § 8 names the lead's verb and its route to repair; a Don't forbids a
-  // hand-written retry, a hand-resolved budget and hand-written markers. A `prUrlError` on a revise or at Integration
-  // is never retried (p17-1: no launch goes ahead on it, so § 6.5 (c) asks for the `pr:`), and § 6.5 (c) excludes an
-  // entry `inputs` reports `autoRetry: true` or with an `autoRetryAfter`, so a task the lead re-enters is never pushed (p16-1).
+  // hand-written retry, a hand-resolved budget and hand-written markers. Every block whose way back is Lachy's (its
+  // `humanFix`, ADR 0035) and a recorded answer are never retried, the why only a log line; and § 6.5 (c) counts a null
+  // `humanFix` as the lead's own re-entry, so a task the lead re-enters is never pushed (p16-1).
   const ar = s2t.slice(Math.max(0, s2t.indexOf('**Automatic retry')))
   const arRow = (section(skill, S3) ?? '').split('\n').find((l) => l.startsWith('| `auto_retries` |')) ?? ''
   const arStuck = collapse(skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: stuck`')) ?? '')
@@ -544,9 +550,37 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !never.includes('a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair') ||
     !donts.includes('Never auto-retry unless `inputs` reports `autoRetry: true`, never pass a budget you resolved yourself') ||
     !donts.includes('`auto_retries_used`, `quota_retries_used`, `auto_retry_sha` or `auto_retry_at` by hand: `reconcile-rollout.py auto-retry` writes them') ||
-    !ar.includes("a non-empty `prUrlError` on a way back that launches on the note's PR (a revise, or at Integration: a hand-back alone never moves it, § 6.5)") ||
-    !S(skill, S65).includes("and an entry that `inputs` reports `autoRetry: true` or with a non-empty `autoRetryAfter` (step 1.2's *Automatic retry* re-enters it, now or once its cool-down ends, p16-4). Under a pause step 1.2 is skipped, so those last three wait for the reinstate and stay excluded;")) {
+    !ar.includes("for every block whose way back is Lachy's (its `humanFix` names the one act that moves it, ADR 0035, § 6.5) and for a recorded answer (`answerRecorded`") ||
+    !ar.includes("its `autoRetryWhy` is the log line only, never Lachy's reason") ||
+    !S(skill, S65).includes("A null `humanFix` is the lead's own re-entry (step 1.2's seeded revise, its *Automatic retry* now or once a cool-down ends,") ||
+    !S(skill, S65).includes('under a pause step 1.2 is skipped, so such an entry waits for the reinstate and stays excluded')) {
     fails.push('auto-retry')
+  }
+
+  // recorded-answer (ADR 0035 decision 3): step 1.2's **Recorded answer**, after the seeded revises and before the
+  // automatic descope and retry, hands back a `hand-back` answer once nothing is paused: skipped under a pause, it acts
+  // only on answerRecorded non-null, form `hand-back` and a null humanFix (the script's predicate, never the lead's
+  // reading of the answer), through `hand-back --answer <stamp>` (a compare-and-swap), and re-runs `next`. Set aside
+  // names the route, § 6 its event line, § 8 the verb as the lead's, a Don't bars any other hand-back on an answer and
+  // any key written by hand, and "retry [[task]]" leaves the spend to the verb.
+  const rec0 = s2t.indexOf('**Recorded answer')
+  const recA = rec0 >= 0 ? s2t.slice(rec0, s2t.indexOf('**Automatic descope') > rec0 ? s2t.indexOf('**Automatic descope') : undefined) : ''
+  const retryInv = collapse(skill.split('\n').find((l) => l.startsWith('In a live session, "retry [[task]]"')) ?? '')
+  if (!recA.includes('**Recorded answer (ADR 0035).**') || !before(s2t, '**Seeded revises', '**Recorded answer') ||
+    !before(s2t, '**Recorded answer', '**Automatic descope') || !before(s2t, '**Recorded answer', '**Automatic retry') ||
+    !recA.includes('Skip it when `paused` or `pauseRequested` is set') ||
+    !recA.includes('Act only when its `answerRecorded` is non-null, its `answerRecorded.form` is `hand-back` and its `humanFix` is null') ||
+    !recA.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hand-back --tasks <slug> --answer <answerRecorded.stamp>`') ||
+    !recA.includes('is a compare-and-swap') ||
+    !recA.includes('After any hand-back, re-run `next --running <the live slugs>` and use that output from here on') ||
+    !recA.includes('a hand-back counts as "sub-step 2 launched"') ||
+    !aside.includes("- a recorded answer: step 1.2's *Recorded answer*, once nothing is paused") ||
+    !collapse(s6raw).includes('"[[task-r]] → handed back on your answer of <stamp>; restarting"') ||
+    !never.includes("The lead runs `reconcile-rollout.py hand-back --answer <stamp>` itself too (§ 4.5 step 1.2's *Recorded answer*)") ||
+    !donts.includes('Never hand back on a recorded answer except through `reconcile-rollout.py hand-back --answer <stamp>`') ||
+    !donts.includes('never write, supersede or spend a `## Repair input` key by hand') ||
+    !retryInv.includes('which spends the answers its `## Repair input` holds in the same save') || /spend the answers its/.test(retryInv)) {
+    fails.push('recorded-answer')
   }
 
   // lane-order (p17-1): sub-step 4 takes the Integration queue in `next`'s order and says what that order is, a
@@ -570,7 +604,7 @@ test('execute § 4.5, its neighbours, the heartbeat and the hook hold every queu
 const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lost-call', 'clean-path', 'verify-bound',
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
-  'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry']
+  'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -597,6 +631,11 @@ test('control: a seeded revise launched regardless of the ceiling fails slots', 
 
 test("control: a seeded revise on the note's raw pr: fails auto-revise", () => {
   only(sk("resume: {stage: 'revise', prUrl: <inputs.prUrl>,", "resume: {stage: 'revise', prUrl: <inputs.pr>,"), 'auto-revise', 'raw pr')
+})
+
+test('control: Seeded revises without the answered skip fails auto-revise', () => {
+  only(sk(" Skip an entry whose `answerRecorded` is non-null: an answered block is the answer's (*Recorded answer* below, or `/thread:repair`).", ''),
+    'auto-revise', 'no answered skip')
 })
 
 test('control: launching every rejected note fails auto-revise', () => {
@@ -874,9 +913,16 @@ test('control: an Automatic descope that hands back on exit 3 fails descope', ()
   only(sk('exit 3 → leave it set aside', 'exit 3 → `hand-back` it anyway'), 'descope', 'exit 3 handed back')
 })
 
+test('control: an Automatic descope that re-judges an answered or refused block fails descope', () => {
+  only(sk("skipping an entry whose `inputs` (*Recorded answer*'s read) reports a non-null `answerRecorded` (an answered block is the answer's) or", 'skipping an entry whose'),
+    'descope', 'no answered skip')
+  only(sk(' or a `humanFix.act` of `decide scope or defer` (a refused descope, or a block after one, is Lachy\'s in every session)', ''),
+    'descope', 'no decide-scope skip')
+})
+
 test('control: § 8 without the descope sentence fails descope', () => {
-  const l = real.skill.split('\n').find((x) => x.startsWith('- **Never automate `/thread:repair`**'))
-  only(sk(l, l.slice(0, l.indexOf(" One verb is the lead's as well as repair's"))), 'descope', 'no § 8 sentence')
+  only(sk(" The lead runs `reconcile-rollout.py descope` itself (§ 4.5 step 1.2), a guarded deterministic verb that checks the lead's judgement, and its refusal (exit 3) routes the task to repair, which asks Lachy.", ''),
+    'descope', 'no § 8 sentence')
 })
 
 test("control: § 6's undo that leaves the follow-up open fails descope", () => {
@@ -954,19 +1000,44 @@ test('control: § 8 without the auto-retry sentence fails auto-retry', () => {
     'auto-retry', 'no § 8 sentence')
 })
 test('control: a needs-you block that pushes a task the lead re-enters fails auto-retry', () => {
-  only(sk(", and an entry that `inputs` reports `autoRetry: true` or with a non-empty `autoRetryAfter` (step 1.2's *Automatic retry* re-enters it, now or once its cool-down ends, p16-4). Under a pause step 1.2 is skipped, so those last three wait",
-    '. Under a pause step 1.2 is skipped, so those last three wait'), 'auto-retry', 'retried task pushed')
+  only(sk("(step 1.2's seeded revise, its *Automatic retry* now or once a cool-down ends, its", "(step 1.2's seeded revise, its"), 'auto-retry', 'retried task pushed')
 })
-test("control: an Automatic retry on a pr: the engine refuses fails auto-retry", () => {
-  only(sk(" a non-empty `prUrlError` on a way back that launches on the note's PR (a revise, or at Integration: a hand-back alone never moves it, § 6.5),", ''),
-    'auto-retry', 'prUrlError retried')
+test("control: an Automatic retry that reads its why as Lachy's reason fails auto-retry", () => {
+  only(sk("; its `autoRetryWhy` is the log line only, never Lachy's reason.", '; its `autoRetryWhy` is the reason to give Lachy.'), 'auto-retry', 'why as reason')
+  only(sk(" for every block whose way back is Lachy's (its `humanFix` names the one act that moves it, ADR 0035, § 6.5) and for a recorded answer (`answerRecorded`: *Recorded answer* above, or `/thread:repair`),",
+    ' for a spent budget,'), 'auto-retry', 'a cause list again')
 })
 test("control: no Don't on hand-written retry markers fails auto-retry", () => {
   const l = real.skill.split('\n').find((x) => x.startsWith('- Never auto-retry unless'))
   only(sk(l + '\n', ''), 'auto-retry', "no Don't")
 })
 
-test('the rules are all named (32) and each has a control', () => {
-  assert.equal(RULES.length, 32)
+// recorded-answer (ADR 0035)
+test('control: a Recorded answer without the script predicate fails recorded-answer', () => {
+  only(sk('Act only when its `answerRecorded` is non-null, its `answerRecorded.form` is `hand-back` and its `humanFix` is null', 'Act when its `answerRecorded` is non-null'),
+    'recorded-answer', 'no humanFix-null predicate')
+})
+test('control: a Recorded answer without the next re-run fails recorded-answer', () => {
+  only(sk(' After any hand-back, re-run `next --running <the live slugs>` and use that output from here on;', ''), 'recorded-answer', 'no next re-run')
+})
+test('control: a Recorded answer after the Automatic retry fails recorded-answer', () => {
+  const l = real.skill.split('\n').find((x) => x.startsWith('   2. **Seeded revises'))
+  const recorded = l.slice(l.indexOf(' **Recorded answer'), l.indexOf(' **Automatic descope'))
+  only(sk(l, l.replace(recorded, '') + recorded), 'recorded-answer', 'after the retry')
+})
+test('control: a Recorded answer under a pause fails recorded-answer', () => {
+  only(sk('**Recorded answer (ADR 0035).** Skip it when `paused` or `pauseRequested` is set: an answer waits for the reinstate.', '**Recorded answer (ADR 0035).**'),
+    'recorded-answer', 'not skipped under a pause')
+})
+test("control: \"retry [[task]]\" spending by hand fails recorded-answer", () => {
+  only(sk('run `reconcile-rollout.py hand-back --tasks <slug>` (§4.5 *Set aside*), which spends the answers its `## Repair input` holds in the same save',
+    'spend the answers its `## Repair input` holds, then run `reconcile-rollout.py hand-back --tasks <slug>` (§4.5 *Set aside*)'), 'recorded-answer', 'spend by hand')
+})
+test("control: no Don't on a hand-written key fails recorded-answer", () => {
+  only(sk(', and never write, supersede or spend a `## Repair input` key by hand', ''), 'recorded-answer', 'keys by hand')
+})
+
+test('the rules are all named (33) and each has a control', () => {
+  assert.equal(RULES.length, 33)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

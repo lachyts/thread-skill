@@ -4,9 +4,9 @@
 // skills/execute/SKILL.md: § 6.5's rule (no question tool while a task call, an integrate call, a background
 // Integration command or a merge hold is live: the bar is anything live, and in the loop that means a turn that
 // ends `halted` or `done`), the needs-you items (a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside
-// only a person moves on, a merge hold's release, any other § 7 halt), a set-aside's fix clause read from its
-// source run, with a needs-human stop (p16-3's `needsHuman` on `next`'s entry) never read as a spent budget and a
-// `pr:` the engine refuses (p17-1's `prUrlError`, on which no launch happens) asking for that `pr:`, and
+// only a person moves on, a merge hold's release, any other § 7 halt), a set-aside's act and label read from
+// `inputs`' `humanFix` (ADR 0035: the script names the one fix, so the prose re-derives no cause and keeps no rule
+// list), the answered set-asides (under a pause, `awaiting repair`, `left`), and
 // a halt's fixed act (so two sessions word one item alike and the dedupe holds), the engine's needs-human
 // question shown on the item's detail line and carried by its push, one push per item
 // deduped on a `## Needs-you log` line and led by its act, where that log lives in the rollout note, the turn
@@ -139,23 +139,19 @@ function checkNeedsYou(skill, context = realContext) {
   }
 
   // kinds: (a) a gate sign-off from `## Gated inputs (awaiting sign-off)`; (b) an undecided RACE or UNVERIFIED from
-  // `raceHold` (not one whose re-verify still runs here); (c) every set-aside only a person moves on, the
-  // plan-blocked, review-blocked, autoRevise: false and Integration cases named, and an autoRevise entry excluded
-  // only while its `prUrlError` is empty (p17-1: step 1.2 launches nothing on a non-empty one, so that entry waits
-  // for a person and is an item, as is the integrate launch's prUrlError set-aside); (d) a merge hold's release;
-  // (e) any other § 7 halt.
+  // `raceHold` (not one whose re-verify still runs here); (c) every set-aside at its run or at Integration whose
+  // `inputs` reports a non-null `humanFix` (ADR 0035: the script names the cause's one fix), a gate (a), a RACE (b) and
+  // an `autoRetryError` (e) placed, and a null `humanFix` named the lead's own re-entry; (d) a merge hold's release;
+  // (e) any other § 7 halt. (c) keeps no list of the causes it includes: `humanFix` is the membership.
   if (!items.includes('`## Gated inputs (awaiting sign-off)`') || !items.includes('`[[<slug>]] sign off gated input: <gate>`') ||
     !items.includes("(`next`'s `raceHold`, except a RACE whose re-verify this session still runs") ||
     !items.includes('`[[<slug>]] RACE undecided: decide with /thread:repair [[<rollout>]]`') ||
     !items.includes('`[[<slug>]] UNVERIFIED undecided: decide with /thread:repair [[<rollout>]]`') ||
-    !items.includes('only way back is `hand-back`, `/thread:repair` or a raised budget') ||
-    !items.includes('plan-blocked with `max_plan_rounds` spent') || !items.includes('not descopable') ||
-    !items.includes('a descope refusal (exit 3)') || !items.includes('review-blocked with `max_review_rounds` spent') ||
-    !items.includes('blocked at its run with `autoRevise: false`') ||
-    !items.includes('reports `autoRevise: true` with an empty `prUrlError` (step 1.2 relaunches it)') ||
-    !items.includes('blocked at its run with `autoRevise: true` and a non-empty `prUrlError`') ||
-    !items.includes('a `prUrlError` at the integrate launch') ||
-    !items.includes("set aside at Integration: merge-task's exit 4, a third exit 8") ||
+    !kindC.includes('every `setAside` entry at its run or at Integration whose `lead-integrate.py inputs`') ||
+    !kindC.includes('reports a non-null `humanFix`') ||
+    !kindC.includes('A gate-pending entry is (a), an entry in `raceHold` is (b), and a non-empty `autoRetryError` is (e)') ||
+    !kindC.includes("A null `humanFix` is the lead's own re-entry") ||
+    /It includes:|plan-blocked with `max_plan_rounds` spent|blocked at its run with `autoRevise/.test(kindC) ||
     !items.includes('`[[<slug>]] gated: awaiting merge approval for [[<slug>]] (PR #N)`') ||
     !items.includes('`[[<slug>]] review required: approve PR #N (<url>)`') || !items.includes('**Any other § 7 halt**')) {
     fails.push('kinds')
@@ -173,8 +169,8 @@ function checkNeedsYou(skill, context = realContext) {
   // report-block: § 6's template lists `Needs you (` before the approve-gates line, before `Held:`; the old
   // gate-pending heading is gone; the Integration set-aside ([[task-i]], merge-task's exit-4 text) has its
   // needs-you line inside the block, and [[task-h]]'s Set aside line says why it has none (a plain rejection,
-  // autoRevise); a review-blocked needs-human stop ([[task-n]], round 1, below the cap) reads `hand back or defer`
-  // with the engine's question on the `→` line under it, never a raise; a turn that adds an item prints the
+  // autoRevise); a review-blocked needs-human stop ([[task-n]], round 1, below the cap) reads `humanFix`'s `answer the
+  // question` with the engine's question on the `→` line under it, never a raise; a turn that adds an item prints the
   // report; the block is derived from the current state on every turn, never rebuilt from the log, and a resolved
   // item drops out of it.
   const lines6 = s6raw.split('\n')
@@ -183,7 +179,7 @@ function checkNeedsYou(skill, context = realContext) {
   const iHeld = lines6.findIndex((l) => l.startsWith('Held:'))
   const iTaskI = lines6.indexOf('- [[task-i]] set aside at Integration (blocked, Blocker diagnosis run 1): hand back or defer with /thread:repair [[<rollout-slug>]]')
   const iTaskH = lines6.findIndex((l) => l.startsWith('- at its run: [[task-h]] — blocked (plain rejection, autoRevise'))
-  const iTaskN = lines6.indexOf('- [[task-n]] set aside at its run (review-blocked, Review-blocked feedback run 1): hand back or defer with /thread:repair [[<rollout-slug>]]')
+  const iTaskN = lines6.indexOf('- [[task-n]] set aside at its run (review-blocked, Review-blocked feedback run 1): answer the question with /thread:repair [[<rollout-slug>]]')
   const iAsideN = lines6.indexOf('- review-blocked: [[task-n]] — a needs-human question (see "## Needs you")')
   if (!(iNeeds >= 0 && iNeeds < iGate && iGate < iHeld) || s6raw.includes('Gate-pending (awaiting YOUR sign-off') ||
     !(iNeeds < iTaskI && iTaskI < iHeld) || !(iTaskH >= 0 && iTaskH < iNeeds) ||
@@ -224,44 +220,18 @@ function checkNeedsYou(skill, context = realContext) {
     fails.push('log-placement')
   }
 
-  // set-aside-fix: (c)'s question is read, never chosen, so the exact-text dedupe holds across sessions: <where>
-  // from `setAsideAt`, the source run's section, and a <fix> that carries "raise <field>, " only when the source
-  // run spent a budget, <field> taken from that run (a plain-rejection revise marker spends max_review_rounds,
-  // never max_iterations). max_iterations is named by what the run is, the implementer's or reviser's own
-  // paragraph, never by a default: rule 3 lists every fixed opening the engine, its prompts and the lead write
-  // for an own run (a dead call, merge-task's exit 1, a dead agent, a plan divergence, the engine's two fallbacks),
-  // the transient one glossed as a dead agent and the spent budget glossed on max_iterations itself, and rule 4
-  // drops the raise for each. An entry that carries `needsHuman` (p16-3: a stop on a needs-human question, which
-  // the engine makes at once, below any cap, and another round cannot answer) is routed away from rule 3 by the
-  // entry itself, whatever its section or opening: rule 3 excludes it, rule 4 lists it, and (c)'s includes name
-  // it for review-blocked and blocked, so a review-blocked entry is never read as max_review_rounds spent. A
-  // plan-block after a descope asks for scope, an entry whose way back launches on the note's PR while `inputs`
-  // reports a `prUrlError` (p17-1: step 1.2 and step 3 launch nothing on it) asks for the `pr:` before any budget
-  // or hand-back (rule 2), and a descope refusal (which writes nothing) changes no text.
-  const r2 = kindC.indexOf('3. a source run that spent a budget')
-  const r3 = kindC.indexOf('4. every other source run spends no budget')
-  const rule2 = r2 >= 0 && r3 > r2 ? kindC.slice(r2, r3) : ''
-  const iters = rule2.slice(rule2.indexOf("`max_iterations` for a code-writing task's"))
-  const asked = 'a stop on a needs-human question (the entry carries `needsHuman`)'
-  if (!kindC.includes('`[[<slug>]] set aside <where> (<status>, <section> run <n>): <fix> with /thread:repair [[<rollout>]]`') ||
-    !kindC.includes("2. an entry whose way back launches on the note's PR (`inputs` reads `resumeAt: revise`, or the entry is at Integration) while `inputs` reports a non-empty `prUrlError`: `fix the note's pr: or defer`, since step 1.2 and step 3 launch nothing on a `pr:` the engine refuses, so a hand-back alone never moves it; its `prUrlError` is the item's `→` detail;") ||
-    !before(kindC, "2. an entry whose way back launches on the note's PR", '3. a source run that spent a budget') ||
-    !rule2.startsWith('3. a source run that spent a budget, never an entry that carries `needsHuman` (a stop on a needs-human question: the engine stops on the question, never on a budget run out, and no climb, retry or further plan or review round follows it, so its source run spent no budget whatever its section, round or opening, and another round cannot answer it):') ||
-    !kindC.includes(`- review-blocked with \`max_review_rounds\` spent, or by ${asked} at any round;`) ||
-    !kindC.includes(`a stage that threw, or ${asked});`) ||
+  // set-aside-fix: (c)'s question is read, never chosen, so the exact-text dedupe holds across sessions: <where> from
+  // `setAsideAt`, then `humanFix`'s label and act verbatim (ADR 0035: lead-integrate.py's one fix per cause, so the
+  // lead never re-derives a cause, never picks an act and keeps no numbered rule list), its `→` detail `humanFix.detail`,
+  // and a new block (a new run, or `ask <k>` after a spent answer) a new item.
+  if (!kindC.includes('`[[<slug>]] set aside <where> <humanFix.label>: <humanFix.act> with /thread:repair [[<rollout>]]`') ||
     !kindC.includes('never chosen, so two sessions word one block alike') ||
-    !kindC.includes("`<where>`: `at Integration` when the entry's `setAsideAt` is `integration`, else `at its run`") ||
-    !kindC.includes('`decide scope or defer`') ||
-    !rule2.includes("`raise <field>, hand back or defer`, with `<field>` the source run's own budget, each named by what the run is, never by a default") ||
-    !rule2.includes('`max_plan_rounds` for a Plan-blocked feedback run that starts `plan not approved after` or `plan round budget exhausted`') ||
-    !rule2.includes('`max_review_rounds` for a Review-blocked feedback run, or for a Blocker diagnosis run that `inputs` reads as a plain rejection (`markerStage: revise`, `markerReason` empty) with `lastRound` at or above `max_review_rounds`') ||
-    !iters.startsWith("`max_iterations` for a code-writing task's Blocker diagnosis run that `inputs` reads as its own (`markerStage: own`) and that is the implementer's or reviser's own paragraph: its verifier budget ran out.") ||
-    !['`workflow call failed:` (a dead call)', "`merge-task:` (merge-task's exit 1)", '`transient infrastructure failure` (a dead agent)',
-      '`plan-divergence:`', '`agent returned neither verified nor blocked`', '`workflow stage threw`'].every((k) => iters.includes(k)) ||
-    /engine's own block|transient infrastructure failure` \([^)]*budget/.test(rule2) ||
-    !kindC.includes(`every other source run spends no budget: \`hand back or defer\`. That is every entry at Integration, ${asked}, a \`revise stopped:\` run, a dead call, merge-task's exit 1, a transient failure (a dead agent), a plan divergence, a result with neither verified nor blocked, a stage that threw, any other plan-block and a review with no PR.`) ||
-    !kindC.includes('A descope refusal (exit 3) or error (exit 1) writes nothing, so it changes no item text') ||
-    kindC.includes('the spent budget')) {
+    !kindC.includes("`<where>` is `at Integration` when the entry's `setAsideAt` is `integration`, else `at its run`") ||
+    !kindC.includes("the label and the act are `humanFix`'s, verbatim") ||
+    !kindC.includes('so the lead never re-derives a cause or chooses a fix') ||
+    !kindC.includes('Its `→` detail is `humanFix.detail`.') || !kindC.includes('`ask <k>`') ||
+    /the first of these that applies|<fix>|`raise <field>, hand back or defer`|writes nothing, so it changes no item text/.test(kindC) ||
+    /^ {4}[1-4]\. /m.test(kind(section(skill, S65) ?? '', '- (c) **A set-aside only a person moves on**'))) {
     fails.push('set-aside-fix')
   }
 
@@ -296,20 +266,34 @@ function checkNeedsYou(skill, context = realContext) {
     push.includes('`<rollout-slug>: <slug> <question>`') ||
     !items.includes('Act `sign off gated input`; what `<gate>`.') ||
     !kindB.includes('Act `decide with /thread:repair [[<rollout>]]`; what `RACE undecided` or `UNVERIFIED undecided`.') ||
-    !kindC.includes('Act `<fix> with /thread:repair [[<rollout>]]`; what `set aside <where> (<status>, <section> run <n>)`') ||
+    !kindC.includes('Act `<humanFix.act> with /thread:repair [[<rollout>]]`; what `set aside <where> <humanFix.label>`') ||
     !items.includes('Act `go ahead or decline the merge` or `approve PR #N (<url>)`; what `gated hold (PR #N)` or `review required`.') ||
     !kindE.includes('Act `<act>`; what `halted (<YYYY-MM-DD>): <reason>`.')) {
     fails.push('push-message')
   }
 
-  // answers: an answer takes the route that already exists for it; a declined gate (§ 3.7) and a declined
-  // `--gated` merge (§ 4.5 *Merge hold*, the lead's own set-aside) are named before the `/thread:repair`
-  // catch-all, so § 6.5 never contradicts them.
+  // answers: an answer takes the route that already exists for it; a declined gate (§ 3.7), a declined `--gated`
+  // merge (§ 4.5 *Merge hold*, the lead's own set-aside) and an answer repair recorded as `hand-back` (step 1.2's
+  // *Recorded answer*, ADR 0035) are named before the `/thread:repair` catch-all, so § 6.5 never contradicts them.
   const rest = 'anything else goes through `/thread:repair`'
   if (!answers.includes('by the route that already exists for it') ||
+    !before(answers, "is handed back by step 1.2's *Recorded answer* once nothing is paused", rest) ||
     !before(answers, 'a declined gate defers the task or leaves it set aside (§ 3.7)', rest) ||
     !before(answers, 'a declined `--gated` merge is set aside at Integration with `merge declined at the --gated hold` by the lead itself (§ 4.5 *Merge hold*)', rest)) {
     fails.push('answers')
+  }
+
+  // answered-items (ADR 0035): an answered set-aside is treated by its form. Under a pause step 1.2 is skipped, so an
+  // entry whose way back is the lead's own (a null `humanFix`, a `hand-back` answer included) waits for the reinstate and
+  // is never listed; an `awaiting repair` answer is an item (`finish the recorded answer`), pushed once; a `left` one is
+  // listed and never pushed, by its form (*Push once* skips it, logging nothing), never by the dedupe: its item text can
+  // change once answered (a `## Needs you` question's what becomes `set aside …`, and its act the cause's).
+  if (!kindC.includes('under a pause step 1.2 is skipped, so such an entry waits for the reinstate and stays excluded, a `hand-back` answer included') ||
+    !kindC.includes('An `awaiting repair` answer is an item whose act is `finish the recorded answer`, pushed once') ||
+    !kindC.includes('an item whose `answerRecorded.form` is `left` is listed but never pushed') ||
+    !kindC.includes('so *Push once* skips it and logs nothing') ||
+    !push.includes('- **A `left` answer** ((c)): never pushed and never logged, whatever its text; the report still lists it.')) {
+    fails.push('answered-items')
   }
 
   // glossary: CONTEXT.md defines the term, with its block, its log, § 6.5 and an Avoid list, so later tasks reuse it,
@@ -327,15 +311,14 @@ test('execute § 1, § 3.7, § 4.5, § 6, § 6.5, § 7, § 8, the Don\'ts and CO
   assert.deepEqual(checkNeedsYou(real), [], `stray asks: ${JSON.stringify(strayAsks(real), null, 1)}`)
 })
 
-// (c)'s rule 3 names each budget by what its source run is, so each opening it reads must still be the text its
-// writer writes: an engine or lead rewording fails here, never silently as a push naming the wrong fix. Its
-// needs-human exclusion reads `next`'s setAside entry, so the engine's needs-human exits (the plan judge's
-// plan-blocked, the review judge's review-blocked below the cap, the implementer's and investigator's first-pass
-// block before any climb, the reviser's block) and `next`'s `needsHuman` key must still be there: a removed exit
-// or key fails here, never silently as an exclusion that no entry can trigger. Rule 2 and the autoRevise
-// exclusion read `inputs`' `prUrlError` and `resumeAt`, and step 1.2 and step 3 must still launch nothing on a
-// non-empty `prUrlError` (p17-1), or the item would ask for a `pr:` fix no launch waits on.
-test('the openings (c)\'s rule 3 reads, the needs-human exits it excludes, and the prUrlError rule 2 reads are still written by the engine, its prompts and the lead', () => {
+// lead-integrate.py's _raise_field (the Human fix's H9, ADR 0035) names each budget by what its source run is, so each
+// opening it reads (NO_BUDGET_OPENINGS, PLAN_BUDGET_OPENINGS) must still be the text its writer writes: an engine or lead
+// rewording fails here, never silently as a push naming the wrong fix. Its needs-human exclusion reads the note's
+// `## Needs you`, so the engine's needs-human exits (the plan judge's plan-blocked, the review judge's review-blocked
+// below the cap, the implementer's and investigator's first-pass block before any climb, the reviser's block) and
+// `next`'s `needsHuman` key must still be there. H7 reads `inputs`' `prUrlError` and `resumeAt`, and step 1.2 and step 3
+// must still launch nothing on a non-empty `prUrlError` (p17-1), or the item would ask for a `pr:` fix no launch waits on.
+test('the openings _raise_field reads, the needs-human exits it excludes, and the prUrlError H7 reads are still written by the engine, its prompts and the lead', () => {
   const engine = read('skills/execute/task.workflow.js')
   const reconcile = read('skills/execute/scripts/reconcile-rollout.py')
   const leadIntegrate = read('skills/execute/scripts/lead-integrate.py')
@@ -369,12 +352,17 @@ test('the openings (c)\'s rule 3 reads, the needs-human exits it excludes, and t
       'step 3\'s prUrlError set-aside'],
   ]
   for (const [src, text, what] of written) assert.ok(src.includes(text), `${what}: ${text} is no longer written`)
+  // Each opening is _raise_field's: the six own-run openings in NO_BUDGET_OPENINGS, the plan budget's in PLAN_BUDGET_OPENINGS.
+  const tuple = (name) => JSON.parse('[' + ((leadIntegrate.match(new RegExp(`^${name} = \\(([^)]*)\\)`, 'm')) ?? [])[1] ?? '').replace(/\s+/g, ' ').replace(/,\s*$/, '') + ']')
+  assert.deepEqual(tuple('NO_BUDGET_OPENINGS'), ['workflow call failed:', 'merge-task:', 'transient infrastructure failure', 'plan-divergence:',
+    'agent returned neither verified nor blocked', 'workflow stage threw'], 'NO_BUDGET_OPENINGS lists the six own-run openings')
+  assert.deepEqual(tuple('PLAN_BUDGET_OPENINGS'), ['plan not approved after', 'plan round budget exhausted'], 'PLAN_BUDGET_OPENINGS')
 })
 
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
 
 const RULES = ['no-ask-in-flight', 'push-dedupe', 'kinds', 'turn-waiting', 'report-block', 'sign-off', 'guardrails',
-  'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'push-message', 'answers', 'glossary']
+  'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'push-message', 'answers', 'answered-items', 'glossary']
 const CONTROLLED = new Set()
 
 // Replaces the one occurrence of `from`; a control whose target is missing or ambiguous fails its setup.
@@ -417,15 +405,15 @@ test('control: the push dedupe removed, a push on every report, or the log line 
   'push-dedupe', 'logged before the push')
 })
 
-test('control: an item kind dropped fails kinds', () => {
+test('control: an item kind dropped, or (c) re-deriving its causes, fails kinds', () => {
   only(edit(real, ', or `[[<slug>]] UNVERIFIED undecided: decide with /thread:repair [[<rollout>]]`', ''), 'kinds', 'no UNVERIFIED item')
-  only(edit(real, lineIn(real, S65, '  - plan-blocked with `max_plan_rounds` spent'), ''), 'kinds', 'no plan-blocked')
-  only(edit(real, '  - blocked at its run with `autoRevise: false` (', '  - blocked at its run ('), 'kinds', 'no autoRevise: false')
   only(edit(real, ", except a RACE whose re-verify this session still runs: a green one lands it with no decision)", ')'),
     'kinds', 'a RACE pushed while its re-verify runs')
-  only(edit(real, 'reports `autoRevise: true` with an empty `prUrlError` (step 1.2 relaunches it)', 'reports `autoRevise: true` (step 1.2 relaunches it)'),
-    'kinds', 'an autoRevise entry a prUrlError holds left silent')
-  only(edit(real, lineIn(real, S65, '  - blocked at its run with `autoRevise: true` and a non-empty `prUrlError`'), ''), 'kinds', 'the prUrlError wait unlisted')
+  only(edit(real, 'reports a non-null `humanFix`. The script', 'reports `autoRetry: false`. The script'), 'kinds', 'membership by autoRetry')
+  only(edit(real, ' A gate-pending entry is (a), an entry in `raceHold` is (b), and a non-empty `autoRetryError` is (e), § 3\'s round-budget halt.', ''),
+    'kinds', 'a, b and e unplaced')
+  only(edit(real, 'skips it and logs nothing.\n', 'skips it and logs nothing. It includes:\n  - plan-blocked with `max_plan_rounds` spent;\n'),
+    'kinds', 'the old includes list back')
 })
 
 test('control: a needs-you turn that halts, or step 1.6 without its clause, fails turn-waiting', () => {
@@ -439,7 +427,7 @@ test('control: the old heading, a block rebuilt from the log, or the Integration
   only(edit(real, 'derived from the current state, never from `## Needs-you log`', 'rebuilt from `## Needs-you log`'),
     'report-block', 'rebuilt from the log')
   only(edit(real, lineIn(real, S6, '- [[task-i]] set aside at Integration'), ''), 'report-block', 'no Integration item')
-  only(edit(real, '- [[task-n]] set aside at its run (review-blocked, Review-blocked feedback run 1): hand back or defer with',
+  only(edit(real, '- [[task-n]] set aside at its run (review-blocked, Review-blocked feedback run 1): answer the question with',
     '- [[task-n]] set aside at its run (review-blocked, Review-blocked feedback run 1): raise max_review_rounds, hand back or defer with'),
   'report-block', 'a needs-human stop raises the review budget')
   only(edit(real, lineIn(real, S6, '  → asks: <its needsHuman question'), ''), 'report-block', 'the needs-human question left off')
@@ -478,28 +466,13 @@ test('control: a log at the note\'s top, or items carrying a log mark, fails log
     'log-placement', 'no marks sentence')
 })
 
-test('control: a raise where no budget was spent, or the wrong field, fails set-aside-fix', () => {
-  only(edit(real, lineIn(real, S65, '    4. every other source run spends no budget'), ''), 'set-aside-fix', 'no-budget cases unruled')
-  only(edit(real, lineIn(real, S65, "    2. an entry whose way back launches on the note's PR"), ''), 'set-aside-fix', 'a prUrlError left to hand back')
-  only(edit(real, '`max_review_rounds` for a Review-blocked feedback run, or for a Blocker diagnosis run that `inputs` reads as a plain rejection (`markerStage: revise`, `markerReason` empty) with `lastRound` at or above `max_review_rounds`: its review rounds ran out;',
-    '`max_review_rounds` for a Review-blocked feedback run: its review rounds ran out;'), 'set-aside-fix', 'a spent revise marker left to max_iterations')
-  only(edit(real, "with `<field>` the source run's own budget", 'with `<field>` the spent budget'), 'set-aside-fix', 'field not from the source run')
-  only(edit(real, ', `plan-divergence:` (the implementer\'s designed stop for a broken plan)', ''), 'set-aside-fix',
-    'a plan divergence left to max_iterations')
-  only(edit(real, ', `agent returned neither verified nor blocked` (the engine\'s fallback for a result with neither) and `workflow stage threw` (the engine\'s fallback for a stage that returned no result)', ''),
-    'set-aside-fix', 'the engine\'s fallbacks left to max_iterations')
-  only(edit(real, '`transient infrastructure failure` (a dead agent)', '`transient infrastructure failure` (the engine\'s own block: its verifier budget ran out)'),
-    'set-aside-fix', 'the spent budget glossed on the transient opening')
-  only(edit(real, "and that is the implementer's or reviser's own paragraph: its verifier budget ran out. A run that starts with one of the fixed openings the engine, its prompts or the lead write is never that paragraph, and none of them spends a budget:",
-    'and that starts with none of'), 'set-aside-fix', 'max_iterations named by a default')
-  only(edit(real, 'A descope refusal (exit 3) or error (exit 1) writes nothing, so it changes no item text (a later session that judged the same run otherwise would word it apart and push it twice): its `ASK:` or ERROR line is the item\'s `→` detail. ', ''),
-    'set-aside-fix', 'a refusal rewords the item')
-  only(edit(real, ', never an entry that carries `needsHuman` (a stop on a needs-human question: the engine stops on the question, never on a budget run out, and no climb, retry or further plan or review round follows it, so its source run spent no budget whatever its section, round or opening, and another round cannot answer it):', ':'),
-    'set-aside-fix', 'a needs-human stop left to rule 3')
-  only(edit(real, 'every entry at Integration, a stop on a needs-human question (the entry carries `needsHuman`), a `revise stopped:` run', 'every entry at Integration, a `revise stopped:` run'),
-    'set-aside-fix', 'a needs-human stop unlisted in rule 4')
-  only(edit(real, ', or by a stop on a needs-human question (the entry carries `needsHuman`) at any round;', ';'),
-    'set-aside-fix', 'review-blocked read as max_review_rounds spent')
+test('control: a (c) rule list reinstated, or an act the lead chooses, fails set-aside-fix', () => {
+  only(edit(real, 'Its `→` detail is `humanFix.detail`.', 'Its `→` detail is `humanFix.detail`. Its `<fix>`, the first of these that applies:\n    1. a plan-block after an automatic descope: `decide scope or defer`;\n    4. every other source run spends no budget: `hand back or defer`.'),
+    'set-aside-fix', 'a rule list reinstated')
+  only(edit(real, "and the label and the act are `humanFix`'s, verbatim.", 'and the lead picks the act that fits the block.'), 'set-aside-fix', 'an act the lead chooses')
+  only(edit(real, ' Its `→` detail is `humanFix.detail`.', ' Its `→` detail is `autoRetryWhy`.'), 'set-aside-fix', 'detail re-derived')
+  only(edit(real, '`[[<slug>]] set aside <where> <humanFix.label>: <humanFix.act> with /thread:repair [[<rollout>]]`',
+    '`[[<slug>]] set aside <where> (<status>, <section> run <n>): <fix> with /thread:repair [[<rollout>]]`'), 'set-aside-fix', 'the old template')
 })
 
 test('control: the needs-human question kept off the detail line or the push fails needs-human-shown', () => {
@@ -519,14 +492,24 @@ test('control: (e) naming § 7\'s prose, or a red RACE re-verify in both (b) and
 test('control: slugs first, bracketed links, or a kind without its act fails push-message', () => {
   only(edit(real, 'the message `<act> — <slug>: <what>`', 'the message `<rollout-slug>: <slug> <question>`'), 'push-message', 'slugs first')
   only(edit(real, ', every wikilink written bare (`[[x]]` becomes `x`)', ''), 'push-message', 'brackets kept')
-  only(edit(real, ' Act `<fix> with /thread:repair [[<rollout>]]`; what `set aside <where> (<status>, <section> run <n>)`.', ''),
+  only(edit(real, ' Act `<humanFix.act> with /thread:repair [[<rollout>]]`; what `set aside <where> <humanFix.label>`.', ''),
     'push-message', '(c) without its act')
 })
 
-test('control: an answer route that drops a decline fails answers', () => {
+test('control: an answer route that drops a decline, or the Recorded answer, fails answers', () => {
+  only(edit(real, " an answer `/thread:repair` recorded as `hand-back`, with a null `humanFix`, is handed back by step 1.2's *Recorded answer* once nothing is paused;", ''),
+    'answers', 'no Recorded answer route')
   only(edit(real, ', and a declined gate defers the task or leaves it set aside (§ 3.7)', ' (§ 3.7)'), 'answers', 'gate decline to repair')
   only(edit(real, ', and a declined `--gated` merge is set aside at Integration with `merge declined at the --gated hold` by the lead itself (§ 4.5 *Merge hold*)', ' (§ 4.5 *Merge hold*)'),
     'answers', 'merge decline to repair')
+})
+
+test('control: an answered set-aside pushed under a pause, re-pushed, or unlisted fails answered-items', () => {
+  only(edit(real, ', a `hand-back` answer included. An', '. An'), 'answered-items', 'a hand-back answer under a pause')
+  only(edit(real, 'whose act is `finish the recorded answer`, pushed once', 'whose act is `finish the recorded answer`'), 'answered-items', 'awaiting repair re-pushed')
+  only(edit(real, 'an item whose `answerRecorded.form` is `left` is listed but never pushed', 'a `left` answer is no item'), 'answered-items', 'left unlisted')
+  only(edit(real, ', so *Push once* skips it and logs nothing', ', so the dedupe keeps it from being pushed again'), 'answered-items', 'left left to the dedupe')
+  only(edit(real, lineIn(real, S65, '- **A `left` answer** ((c))'), ''), 'answered-items', 'Push once pushes a left answer')
 })
 
 test('control: CONTEXT.md without the entry, or without its Avoid list, fails glossary', () => {
@@ -537,7 +520,7 @@ test('control: CONTEXT.md without the entry, or without its Avoid list, fails gl
   only(real, 'glossary', 'the two sections not told apart', edit(realContext, "never the task note's `## Needs you` (p16-3)", "the task note's `## Needs you` (p16-3)"))
 })
 
-test('the rules are all named (15) and each has a control', () => {
-  assert.equal(RULES.length, 15)
+test('the rules are all named (16) and each has a control', () => {
+  assert.equal(RULES.length, 16)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
