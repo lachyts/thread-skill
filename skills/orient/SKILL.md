@@ -378,14 +378,16 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
   3. Probe `Owns:` only, never a `Covers:` note (step 2 reads those, and the lead's stamp edits them
      after `issued:`). Stamp a reference file at `issued:` (`ref=$(mktemp)`, then
      `touch -d <issued:> "$ref"`) and, for each owned path that exists, run
-     `find <path> -path '*/.git' -prune -o -newer "$ref" -print`: BSD and GNU `find` both take
-     `-newer`, where macOS `find` cannot parse `issued:` as a date, and the prune skips `.git/`,
-     whose index any `git status` rewrites. If that lists anything, or, inside a git work tree,
-     `git status --porcelain -- <path>` shows the path deleted, or, in a code repository (never the
-     Obsidian vault, whose backup sweep commits older edits late),
+     `find -H <path> -path '*/.git' -prune -o -newer "$ref" -print`: BSD and GNU `find` both take
+     `-H` and `-newer`, where macOS `find` cannot parse `issued:` as a date. `-H` follows an owned
+     path that is a symlink to a directory, which the default walk examines only as the link, and
+     the prune skips `.git/`, whose index any `git status` rewrites. If that lists anything, or,
+     inside a git work tree, `git status --porcelain -- <path>` shows the path deleted, or, in a
+     code repository (never the Obsidian vault, whose backup sweep commits older edits late),
      `git log --all --since=<issued:> -- <path>` lists a commit, another session is live on it:
      STOP. A probe that errors (`touch`, `find` or a git probe exits non-zero) is a STOP too: a
-     probe with no answer never reads as "nothing newer". A dirty owned path none of these flags was
+     probe with no answer never reads as "nothing newer". Once the probes have run, STOP or not,
+     `rm -f "$ref"`. A dirty owned path none of these flags was
      modified only before `issued:`: an aborted partial, which you reconcile by building on it or
      reporting it, never by `checkout`, `reset`, `clean` or `stash`.
   4. Write a one-line start claim into each `Covers:` note's `## Notes` before editing anything:

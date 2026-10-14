@@ -31,11 +31,17 @@ const FORBIDDEN = [
   /background batch/i,
   /-newermt/i,
   /no end line of (the same|its) run and job after it/i,
+  /`find <path> -path '\*\/\.git'/i,
 ]
 const forbidden = (text) => FORBIDDEN.filter((re) => re.test(collapse(text))).map(String)
 
-// The Twin check's step 3 order: the portable mtime probe, then its STOP, then the aborted-partial reading.
-const TWIN_ORDER = /-newer "\$ref" -print[\s\S]*?STOP[\s\S]*?only before `issued:`[\s\S]*?aborted partial/
+// The Twin check's step 3 order: the portable mtime probe, then the rule's own STOP sentence, then the
+// probe-error STOP, then the aborted-partial reading. The STOP is anchored to its sentence: a bare lazy `STOP`
+// would also match the probe-error sentence ("… is a STOP too") and so pass with the main rule gone.
+const TWIN_ORDER =
+  /-newer "\$ref" -print[\s\S]*?another session is live on it: STOP\.[\s\S]*?A probe that errors[\s\S]*?only before `issued:`[\s\S]*?aborted partial/
+// The rule itself: any of the three probes firing is a live twin, and a live twin is a STOP.
+const TWIN_RULE = /If that lists anything, or[^.]*shows the path deleted, or[^.]*lists a commit, another session is live on it: STOP\./
 // A probe that errors is a STOP: read as "nothing newer", it would let a child build on a live twin's edits.
 const PROBE_ERROR_STOPS = /A probe that errors \([^)]*exits non-zero\) is a STOP too/
 
@@ -69,9 +75,11 @@ test('ADR 0023 exists once, accepted, superseding ADR 0010, in the house format'
     /`run_in_background: true`/,
     /a note that already holds that run and job's end line gets none/,
     /`issued:` instant \(UTC, whole seconds\)/,
-    /`find <path> -path '\*\/\.git' -prune -o -newer <ref> -print`/,
+    /`find -H <path> -path '\*\/\.git' -prune -o -newer <ref> -print`/,
+    /`-H` follows an owned path that is a symlink to a directory/,
     /A probe that errors is a stop/,
   ])
+  assert.doesNotMatch(C(section(t, /^## Decision$/)), /`find <path> -path/, 'ADR 0023 still names the probe without `-H`')
 })
 
 test('ADR 0010 is superseded by 0023 on its Status line, with its body kept', () => {
@@ -171,10 +179,13 @@ test('the Twin check stops on a live twin before any git probe and reconciles on
   assert.ok(stop >= 0 && git >= 0 && stop < git, 'the first STOP does not come before the first `git status`')
   assertHas(twin, `${ORIENT} Twin check`, [
     TWIN_ORDER,
+    TWIN_RULE,
     PROBE_ERROR_STOPS,
     /`touch -d <issued:> "\$ref"`/,
-    /for each owned path that exists, run `find <path> -path '\*\/\.git' -prune -o -newer "\$ref" -print`/,
+    /for each owned path that exists, run `find -H <path> -path '\*\/\.git' -prune -o -newer "\$ref" -print`/,
+    /`-H` follows an owned path that is a symlink to a directory/,
     /the prune skips `\.git\/`/,
+    /`rm -f "\$ref"`/,
     /own `Run:` and `Job:`/,
     /`Owns:` only, never a `Covers:` note/,
     /never the Obsidian vault/,
@@ -218,16 +229,30 @@ test('control: the forbidden matcher flags each retired phrase, wrapped or backt
     '(ADR 0010)', '**Profile fit**', "verify the profile's MCP namespaces", '**`git status` first**',
     'background\n    scoped sessions', 'limited to bare `cc`/project-root launchers', 'fan out\n  background batches',
     'If `find <path> -newermt <issued:>` lists an owned path',
-    'with no end line of the same run and job after it', 'with no end line of\n  its run and job after it']) {
+    'with no end line of the same run and job after it', 'with no end line of\n  its run and job after it',
+    "run `find <path> -path '*/.git' -prune -o -newer \"$ref\" -print`"]) {
     assert.equal(forbidden(bad).length, 1, `expected exactly one forbidden hit for: ${JSON.stringify(bad)}`)
   }
   assert.deepEqual(forbidden('native child agents of this session (ADR 0023)'), [])
 })
 
-test('control: the Twin check order rejects a STOP placed before the mtime probe', () => {
-  assert.doesNotMatch('STOP if `find <path> -newer "$ref" -print` lists it … only before `issued:` … aborted partial', TWIN_ORDER)
-  assert.match('if `find <path> -newer "$ref" -print` lists it: STOP. Modified only before `issued:`: an aborted partial', TWIN_ORDER)
-  assert.doesNotMatch('if `find <path> -newermt <issued:>` lists it: STOP. Modified only before `issued:`: an aborted partial', TWIN_ORDER)
+test('control: the Twin check order needs the rule\'s own STOP sentence after the mtime probe', () => {
+  const probe = "run `find -H <path> -path '*/.git' -prune -o -newer \"$ref\" -print`."
+  const errorStop = 'A probe that errors (`touch`, `find` or a git probe exits non-zero) is a STOP too.'
+  const partial = 'A dirty owned path none of these flags was modified only before `issued:`: an aborted partial.'
+  const good = `${probe} If that lists anything, or, inside a git work tree, \`git status --porcelain -- <path>\` shows ` +
+    'the path deleted, or, in a code repository, `git log --all --since=<issued:> -- <path>` lists a commit, ' +
+    `another session is live on it: STOP. ${errorStop} ${partial}`
+  assert.match(good, TWIN_ORDER)
+  assert.match(good, TWIN_RULE)
+  // The probe, then only the probe-error STOP, then the partial: the main rule is gone, so neither check passes.
+  const ruleGone = `${probe} If that lists anything, another session may be live on it: carry on. ${errorStop} ${partial}`
+  assert.doesNotMatch(ruleGone, TWIN_ORDER)
+  assert.doesNotMatch(ruleGone, TWIN_RULE)
+  // The rule's STOP placed before the probe, or after the partial reading, is out of order.
+  assert.doesNotMatch(`If anything is newer, another session is live on it: STOP. ${probe} ${errorStop} ${partial}`, TWIN_ORDER)
+  assert.doesNotMatch(`${probe} ${errorStop} ${partial} Another session is live on it: STOP.`, TWIN_ORDER)
+  assert.doesNotMatch(good.replace('-newer "$ref" -print', '-newermt <issued:>'), TWIN_ORDER)
 })
 
 test('control: the probe-error rule needs an erroring probe to STOP', () => {

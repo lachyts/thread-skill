@@ -106,10 +106,13 @@ dirt would stop children on the leftover partials the old emission bullet ("reco
 working") told them to reconcile, and the shared vault is always dirty. A child stops on an owned
 path written after `issued:`, deleted, or, in a code repository, committed to since `issued:`;
 that still catches a live twin that ignores the protocol. The write test is
-`find <path> -path '*/.git' -prune -o -newer <ref> -print` against a reference file that
+`find -H <path> -path '*/.git' -prune -o -newer <ref> -print` against a reference file that
 `touch -d <issued:>` stamps: macOS `find` cannot parse an ISO time for `-newermt`, and Claude
 Code's `find` wrapper refuses one with a fraction, so the probe uses `-newer` and `issued:` is
-taken at whole seconds. The prune keeps `.git/` out, because any `git status` rewrites the index.
+taken at whole seconds. `-H` follows an owned path that is a symlink to a directory: the default
+walk examines only the link, so an edit under it would list nothing, and the 2026-09-14 clobber
+was in `~/.agents/skills/`, which the `~/.claude/skills/` entries link into. The prune keeps
+`.git/` out, because any `git status` rewrites the index.
 A probe that errors is a stop, never "nothing newer": read as no signal, it would let a child
 build on a live twin's edits, the 2026-09-14 clobber. A dirty owned path written only before
 `issued:` is an aborted partial, reconciled by building on it or reporting it. Residual: a live
