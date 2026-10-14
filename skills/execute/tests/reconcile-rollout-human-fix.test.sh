@@ -353,6 +353,23 @@ mkt "$A" open "auto_retries: -1"; planblock "$A" "$FA"
 I=$(inp "$A")
 ok "$(hf "$I")" '["fix the round budget",false,null]' "H12: an invalid budget stamp"
 ok "$(fix "$I" detail)" "$(j "$I" 'd["autoRetryError"]')" "H12: its detail is autoRetryError"
+ERR=$(j "$I" 'd["autoRetryError"]'); CLS=$(j "$I" 'd["autoRetryClass"]')
+has "$ERR" "auto_retries on [[$A]] must be an integer >= 0" "H12: (autoRetryError names the stamp)"
+ra "$A" --kind decision --ask "fix the budget?" --answer "leave it" --fingerprint "$SHA_A" --form left
+ok "$rc" 0 "H12 answered: (a left answer)"
+I=$(inp "$A")
+ok "$(j "$I" 'd["autoRetryError"]')|$(j "$I" 'd["autoRetryClass"]')|$(j "$I" 'd["answerRecorded"]["form"]')" "$ERR|$CLS|left" \
+  "H12 answered: the answer keeps the cause's autoRetryError and autoRetryClass (execute § 3's halt, status's flag)"
+ok "$(fix "$I" act)" "fix the round budget" "H12 answered: the left answer keeps H12's act"
+before=$(snap); ar "$A"
+ok "$rc|$(snap)" "1|$before" "H12 answered: auto-retry exits 1, nothing written"
+has "$out" "invalid round budget: auto_retries on [[$A]]" "H12 answered: … on the invalid budget, as before the answer"
+scen h12-question
+mkro; mkt "$B" open
+mkt "$A" open "auto_retries: -1"; planblock "$A" "$FA" 2026-10-03T08:00:00Z "{\"needsHuman\":\"$Q\"}"
+I=$(inp "$A")
+ok "$(hf "$I")" '["answer the question",false,null]' "H12 under a question: H4, its handBack H12's (false)"
+has "$(j "$I" 'd["autoRetryError"]')" "auto_retries on [[$A]] must be an integer >= 0" "H12 under a question: autoRetryError kept"
 
 # the null cases: the way back is the lead's own
 scen null

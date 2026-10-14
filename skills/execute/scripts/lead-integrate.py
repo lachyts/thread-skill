@@ -83,7 +83,8 @@ Subcommands:
       Then the automatic retry's verdict (p16-4, ADR 0033; auto_retry_verdict, its rules in order), which every
       caller gets and `reconcile-rollout.py auto-retry` re-runs before it writes: autoRetry, autoRetryWhy (the
       first rule that refused, "" on true), autoRetryError (an `auto_retries` or `max_review_rounds` stamp that is
-      not a valid integer: execute § 3's halt; else null), autoRetryClass (agent | infra | quota, for a note set
+      not a valid integer: execute § 3's halt, kept under a `## Needs you` question or a recorded answer; else
+      null), autoRetryClass (agent | infra | quota, for a note set
       aside at its run or at Integration; else null), autoRetryBudget ({autoRetries, maxReviewRounds}, each
       {value, source}, resolved task -> rollout -> rollouts.toml -> built-in by reconcile-rollout.py
       _retry_budget; null until it resolves), autoRetriesUsed and quotaRetriesUsed (the note's counters, 0 when
@@ -1066,7 +1067,9 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
          its fix the answer overlay on the cause below (8 onwards): a `hand-back` answer is null when the cause's fix is
          null or has handBack true (the lead hands it back), else H0 `finish the recorded answer` (the entry); an
          `awaiting repair` answer is always H0; a `left` answer keeps its cause's fix, its detail prefixed `left on
-         your answer of <stamp>` (H10 when the cause's fix is null). So an answered block is never retried;
+         your answer of <stamp>` (H10 when the cause's fix is null). So an answered block is never retried. Both 6 and
+         7 keep the cause's `autoRetryError` and `autoRetryClass` (_keep_cause_flags), so an invalid budget stamp is
+         still execute § 3's halt under a question or an answer;
       8. plan-blocked after an automatic descope (a descope marker and no `descope_armed:`): H5 `decide scope or defer`;
       9. a refused descope recorded for this block (_descope_refusal, never while `descope_armed:` stands: the armed
          descope's hand-back is its way back): H5 with the record as its detail;
@@ -1108,6 +1111,13 @@ def cause_fix(path, note, inp, rollout_note, now):
     """The core's Human fix with the answer overlay skipped: the cause a recorded answer answers. record-answer reads it
     before its save to check a --raise against `humanFix.raise`."""
     return _verdict(path, note, inp, rollout_note, now, None)["humanFix"]
+
+
+def _keep_cause_flags(out, cause):
+    """Carry the cause's `autoRetryError` and `autoRetryClass` into a verdict that refuses above it (a `## Needs you`
+    question, a recorded answer): an invalid budget stamp stays execute § 3's round-budget halt and status's "invalid
+    round budget" flag (execute § 6.5 (e)) whatever answers or asks the block."""
+    out.update(autoRetryError=cause["autoRetryError"], autoRetryClass=cause["autoRetryClass"])
 
 
 def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
@@ -1159,11 +1169,13 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
                   fix(f"decide {hold[1]}", _hold_line(rollout_note, path.stem, hold[1], note), False))
     question = rr.needs_human(note)
     if question and not skip_needs:
-        below = _verdict(path, note, inp, rollout_note, now, None, skip_needs=True)["humanFix"]
+        below = _verdict(path, note, inp, rollout_note, now, None, skip_needs=True)
+        _keep_cause_flags(out, below)
         return no("needs a human: the note's ## Needs you question",
-                  fix("answer the question", question, below["handBack"] if below else True))
+                  fix("answer the question", question, below["humanFix"]["handBack"] if below["humanFix"] else True))
     if answer is not None:
         cause = _verdict(path, note, inp, rollout_note, now, None, skip_needs)
+        _keep_cause_flags(out, cause)
         cf, form, stamp = cause["humanFix"], answer["form"], answer["stamp"]
         if form == "hand-back":
             human = None if cf is None or cf["handBack"] else fix("finish the recorded answer", answer["line"], False)

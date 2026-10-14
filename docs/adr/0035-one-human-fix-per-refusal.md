@@ -64,8 +64,9 @@ round 1's own fix.
   so the lead and repair never both hand back on one answer, nor a new block on an old one.
 - **An answered block is never retried automatically** (amends ADR 0033 decision 2): the verdict reads
   `answered for this block …`, and only the lead's *Recorded answer* (a `hand-back` answer with a null `humanFix`, once
-  nothing is paused) or repair moves it. The descope verb refuses an answered block (exit 1, nothing written): the race
-  where the lead judged a block before repair answered it.
+  nothing is paused) or repair moves it. The verdict keeps the cause's `autoRetryError` and `autoRetryClass` under an
+  answer (and under a `## Needs you` question), so an invalid budget stamp stays execute § 3's halt. The descope verb
+  refuses an answered block (exit 1, nothing written): the race where the lead judged a block before repair answered it.
 - **A refused descope is recorded** under `## Descope refused (automatic)`, keyed on the top Plan-blocked run's number
   and sha (a legacy run's text sha when its marker is gone); a malformed line fails closed, and the section is never
   brief text. A recorded refusal re-exits 3 before the part is judged, an answer included; exit 1 and exit 2 record
