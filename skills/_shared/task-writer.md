@@ -52,9 +52,9 @@ whose Notes link the same `THREAD.md`, or whose resume prompt describes the
 same work.
 
 - **Found, and its match includes `marked`** → **update it in place**: refresh
-  the summary + resume prompt, set/move/remove `scheduled:`, rewrite § 4b's
-  two fields, leave `captured:` as the original date. Only a marked capture
-  is ever updated in place.
+  the summary + resume prompt, set/move/remove `scheduled:`,
+  rewrite § 4b's two fields, leave `captured:` as the original date. Only a
+  marked capture is ever updated in place.
 - **Found but unmarked** (a capture written before the marker existed, or a
   backlog task that carries the `thread` tag and the thread's link) → leave
   it **untouched**, its `scheduled:` and day-page line included; report it
