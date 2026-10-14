@@ -2,6 +2,8 @@
 
 Date: 2026-09-28
 Status: accepted (amends ADRs 0003, 0009, 0010 and 0026; retires `split` and `gather`)
+*(Amended by ADR 0036, 2026-10-14: decision 1's question is gone. Orient reshuffles by default;
+`--steer` or `--look` (or saying so) opts out, and an empty shape goes straight to steering.)*
 
 ## Context
 
