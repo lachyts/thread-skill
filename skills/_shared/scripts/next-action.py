@@ -15,9 +15,10 @@ Verbs:
   read <project>...                  Each project's slot: live, blank, or dead (with the reason).
   captures [--slug S] [--thread-file P] [--for-close]
                                      Thread captures: open, `thread`-tagged tasks directly under
-                                     Work/Tasks, each with whether it is named <S> and whether its text
-                                     names <P>. --for-close keeps only a capture matched by one of those —
-                                     close's concrete match.
+                                     Work/Tasks, each with whether its writer marked it
+                                     (`capture: continuation`), whether it is named <S> and whether its
+                                     text names <P>. --for-close keeps only a capture matched by <S> or
+                                     <P> — close's concrete match; the marker alone is none.
 
 `--action -` reads the line from stdin, so any character is safe:
     next-action.py set-down <task> --action - <<'EOF'
@@ -46,7 +47,7 @@ Output: one tab-separated row per outcome (tab, newline and backslash escaped as
     project   <name>     next_task    written | kept | unchanged    <vault-relative path>
     skip      <name>     <reason>
     slot      <name>     live | blank | dead:<reason>   <task>   <next_action or task name>
-    capture   <task>     <status>     <match,…>        (thread-tag, plus slug and/or thread-file)
+    capture   <task>     <status>     <match,…>        (thread-tag, plus marked, slug and/or thread-file)
 
 Exit 0 on success (skips included). Exit 2 when the input is refused — stderr then carries one line
 starting `next-action: ` and nothing was written. Exit 3 when the vault or PyYAML is missing.
@@ -60,6 +61,7 @@ import sys
 VAULT_DEFAULT = os.path.expanduser("~/repos/obsidian")
 DEAD_STATUSES = {"done", "merged", "dropped"}
 OPEN_STATUSES = {"open", "in_progress"}  # after normalising `-` to `_`: the vault writes both
+CAPTURE_MARKER = "continuation"  # `capture: continuation`, stamped by stash and defer (task-writer.md § 4)
 TASKS_DIR = os.path.join("Work", "Tasks")
 PROJECTS_DIR = os.path.join("Work", "Projects")
 LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]")
@@ -445,11 +447,13 @@ def captures(vault, slug, thread_file, for_close):
             continue
         base = fname[:-3]
         why = ["thread-tag"]
+        if text_of(note.get("capture")) == CAPTURE_MARKER:
+            why.append("marked")
         if slug and base.lower() == slug.lower():
             why.append("slug")
         if needles and any(n in note.text for n in needles):
             why.append("thread-file")
-        if for_close and len(why) == 1:
+        if for_close and not {"slug", "thread-file"} & set(why):
             continue
         rows.append({"kind": "capture", "name": base, "result": status_of(note), "match": ",".join(why)})
     return rows

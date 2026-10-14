@@ -10,6 +10,7 @@
 #   A7  the records (the brief untouched, repair's raise regex, a re-run, a partial write)   A8 the raise
 #   A9  an Integration set-aside   A10 infra blocks and their cool-down   A11 quota blocks and theirs   A12 the budget lifetime
 #   A13 the queue   A14 the Run record   A15 the pins (merge-task.sh, lead-integrate.py, execute SKILL.md, the cool-downs)
+#   A16 an answered block (ADR 0035: `inputs`' answerRecorded) is never retried
 # The blocks are built through the real `reconcile` (and `lead-integrate.py set-aside` for the lead's own rows).
 # Hermetic: HOME is an empty dir of its own (rollout-settings.py reads ~/.config/thread/rollouts.toml), each
 # scenario's Project root is a temp dir, and this suite reads the Run record, so it keeps its own
@@ -281,7 +282,7 @@ ok "$(j "$(nxt "")" '[e["setAsideAt"] for e in d["setAside"]]')" '["integration"
 excluded "Integration with no pr:" "set aside at Integration with no pr:"
 
 # p17-1's prUrlError: a pr: the engine refuses, on a way back that launches on it (here at Integration), is a human's:
-# no launch goes ahead on it, so a hand-back alone never moves it (execute § 6.5 (c): `fix the note's pr: or defer`).
+# no launch goes ahead on it, so a hand-back alone never moves it (`inputs`' humanFix H7, `fix the note's pr: or defer`).
 # The verb reads the pr: against the rollout's Project root, the lead's `inputs --repo <repoPath>`, so the two agree.
 scen a4-pr-url-error
 mkro; mkt "$A" review "pr: $PR" "integrating: 2026-10-03T07:00+00:00"; mkt "$B" open
@@ -697,6 +698,24 @@ planblock "$A" "$FA"
 THREAD_EVENTS_DIR="$TMP/a-file/events" ar "$A"
 ok "$rc|$(fm "$A" status)" "0|status: in_progress" "A14: an unwritable events dir still exits 0 and writes the notes"
 has "$out" "run_record: warning: cannot write" "A14: (the record warns)"
+
+# ── A16: an answered block is never retried (ADR 0035 decision 3) ───────────────────────────────────────────────
+# A block with budget left reads `autoRetry: true` until Lachy's answer is recorded for it: from then on the verdict
+# refuses it (`answered for this block …`), so only the lead's *Recorded answer* (a `hand-back` answer) or repair moves
+# it, and the verb writes nothing.
+scen a16
+mkro; mkt "$A" open; mkt "$B" open
+planblock "$A" "$FA"
+ok "$(j "$(inp "$A")" 'd["autoRetry"]')" true "A16: (retryable before the answer)"
+python3 "$SCRIPT" record-answer --tasks "$A" --rollout "$D/$RO.md" --tasks-dir "$D" --now "$NOW" --kind decision --ask "x" --answer "leave it" \
+  --fingerprint "$SHA_A" --form left >/dev/null 2>&1
+I=$(inp "$A")
+ok "$(j "$I" '[d["autoRetry"], d["answerRecorded"]["form"]]')" '[false,"left"]' "A16: answered → autoRetry false"
+has "$(j "$I" 'd["autoRetryWhy"]')" "answered for this block (left, $S_NOW)" "A16: the why names the answer"
+before=$(snap); M=$(cnt)
+ar "$A" --auto-retries 2 --fingerprint "$SHA_A"
+ok "$rc|$(snap)|$(since "$M")" "1|$before|" "A16: the verb exits 1, writes and records nothing"
+has "$out" "not auto-retryable: answered for this block" "A16: its ERROR line"
 
 # ── A15: the pins ───────────────────────────────────────────────────────────────────────────────────────────
 pin() {

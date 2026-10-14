@@ -80,7 +80,8 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   lane-freed      T  release (merge | set-aside | reject | halt); path?; triggers? (list of str);
                      conflict? (bool)
   merged          T  pr?; readOnly? (bool)
-  paused             mode (soft | hard)
+  paused             mode (soft | hard | sign-off: reconcile-rollout.py await-sign-off, the queue left only gates for
+                     Lachy and closed, ADR 0034)
   resumed            (no fields)
   hold-started       hold (merge | git-env | race)
   hold-ended         hold (merge | git-env | race)
@@ -343,7 +344,7 @@ KINDS = {
     "lane-freed": (True, {"release": _enum("merge", "set-aside", "reject", "halt")},
                    {"path": _str, "triggers": _strlist, "conflict": _bool}),
     "merged": (True, {}, {"pr": _pr, "readOnly": _bool}),
-    "paused": (False, {"mode": _enum("soft", "hard")}, {}),
+    "paused": (False, {"mode": _enum("soft", "hard", "sign-off")}, {}),
     "resumed": (False, {}, {}),
     "hold-started": (False, {"hold": _enum(*HOLDS)}, {}),
     "hold-ended": (False, {"hold": _enum(*HOLDS)}, {}),

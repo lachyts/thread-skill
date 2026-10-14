@@ -11,6 +11,7 @@ import { assertHas, collapse, lineOf, read, section, slice, walk } from '../lib/
 const ORIENT = 'skills/orient/SKILL.md'
 const README = 'README.md'
 const FIT = 'skills/_shared/execution-fit.md'
+const GRAMMAR = 'skills/_shared/vault-grammar.md'
 const ADR10 = 'docs/adr/0010-orient-launches-its-own-batches.md'
 const ADR03 = 'docs/adr/0003-orient-is-project-altitude-next.md'
 
@@ -123,13 +124,19 @@ test('orient cites ADR 0023, carries the guard and the Twin check, and names tie
   assertHas(C(slice(orient, /^## Don't/, null)), `${ORIENT} § Don't`, [/another session's run journal/])
 })
 
+// In flight is defined once, in the vault grammar (§ In flight): orient § 2 cites it and names its Vault body
+// read as what finds the start claims and end lines, and the grammar carries the start-claim rule itself.
 test('orient § 2 reads the run lines from note bodies and counts an open start claim as in flight', () => {
   const s2 = slice(orient, /^### 2\./, /^### 3\./)
   assertHas(C(slice(s2, /^- \*\*Vault\*\*/, /^- /)), `${ORIENT} § 2 Vault`, ["rg -n 'orient (start|dispatch|end): run'"])
   assertHas(C(slice(s2, /^- \*\*In flight\*\*/, /^- /)), `${ORIENT} § 2 In flight`, [
+    '_shared/vault-grammar.md` § In flight',
+    /start claims and end lines it weighs are the run lines the Vault body read finds/,
+  ])
+  assertHas(C(section(read(GRAMMAR), /^## In flight$/)), `${GRAMMAR} § In flight`, [
     /`dispatched:` stamp or an orient start claim ≤7 days old/,
     /unless an end line in the note names the same run and job, written before or after it/,
-    /Vault body read finds them/,
+    /orient § 2's Vault body read finds them/,
   ])
 })
 

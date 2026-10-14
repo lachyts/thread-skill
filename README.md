@@ -65,11 +65,18 @@ integrates each approved task and merges it:
 
 1. **Plan-gate** — an autonomous judge approves the implementation plan before
    code is written (skippable per rollout; a plan's declared gated inputs
-   always pause for human sign-off — ADR 0008).
+   pause the task for sign-off, never the rollout; a spend gate within the
+   standing approval passes — ADR 0008, ADR 0034).
 2. **Ralph-style verifier retry** — the implementer re-runs the rollout's
    verifier and self-corrects until green or the iteration budget is spent.
 3. **Master review-and-revise** — a master-side reviewer accepts or sends the
    task back with feedback, up to `max_review_rounds`.
+
+The standing approval is off until `~/.config/thread/rollouts.toml` sets
+`spend_approval_usd` (whole US dollars) under `[defaults]`; set it only after
+installing a version that knows the key, because an older `rollout-settings.py`
+refuses it, and every rollout's settings with it. `skills/_shared/scripts/gated_inputs.py`
+holds the exposure reading it applies and schedule's gated-input sweep.
 
 Worktree isolation is explicit: each task runs in
 `<repoPath>/.claude/worktrees/<slug>`. Merges go **only** through
@@ -82,6 +89,9 @@ inputs and the lead's own set-aside rows).
 `skills/execute/scripts/git-env-canary.py` is the lead's git-env canary: it
 watches the shared checkout's default branch and bareness around every launch
 and halts the queue on a change that is not a close-out (execute § 4.5).
+`skills/execute/scripts/step-boundary.py` is the lead's side of a Chorus room
+stop: it reads the Workflow journals to stop each call at a step boundary and
+records the stop on the rollout note (execute § Room stop).
 `skills/_shared/scripts/run_record.py` is the Run record's one writer (ADR 0032):
 every emitter appends its events through it, and its header is the schema.
 `skills/retro/scripts/score.py` reads a record into a Retro's scores and proposals
@@ -96,6 +106,9 @@ one line per Retro.
 - `skills/_shared/execution-fit.md` — the canonical lane rule.
 - `skills/_shared/task-writer.md` — the single spec for writing + routing the
   vault task (dedup, day parsing, resume prompt, pickup auto-complete).
+- `skills/_shared/plugin-root.md` — the one rule for running a
+  `${CLAUDE_PLUGIN_ROOT}` command from text read as a file rather than rendered
+  (a sibling SKILL.md a router follows, a `_shared` spec); every skill cites it.
 - `docs/adr/` — the decision record; read the directory for the current set.
   Each ADR's Status line is the one place its state is recorded: a
   back-reference in another ADR reads `*(Amended by ADR NNNN, <date>: <what
@@ -207,7 +220,9 @@ final check that the run wrote nothing into the tree):
   invariant** (optional engine features must render byte-identical Workflow `agent()` prompts when
   unset, or in-flight rollouts can't resume); `reconcile-rollout.test.sh`, `reconcile-rollout-queue.test.sh`
   (the queue verbs), `reconcile-rollout-runs.test.sh` (accumulated feedback runs), `reconcile-rollout-lead.test.sh`
-  (`hand-back`, `log-integration`) and `reconcile-rollout-descope.test.sh` (the automatic-descope verb); `rollout-stop-driver.test.sh`; `tests/lead-integrate.test.sh` (the lead's
+  (`hand-back`, `log-integration`), `reconcile-rollout-descope.test.sh` (the automatic-descope verb and its recorded
+  refusal) and `reconcile-rollout-human-fix.test.sh` (`inputs`' one Human fix per refusal, the recorded answer,
+  `record-answer` and `hand-back --answer`, ADR 0035); `rollout-stop-driver.test.sh`; `tests/lead-integrate.test.sh` (the lead's
   Integration against a fake `gh` and real repos) and `tests/contracts/execute-queue.test.mjs` (the queue loop's prose);
   `merge-task.sh --self-test-classify` / `--self-test-base`, and `tests/merge-task-base.test.sh` /
   `tests/merge-task-integrated.test.sh` (one integrated PR per call, against a fake `gh` and a real bare repo).

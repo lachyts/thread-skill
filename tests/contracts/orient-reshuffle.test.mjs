@@ -8,6 +8,7 @@ import { assertHas, collapse, fencedBlocks, read, section, slice, walk } from '.
 
 const reshuffle = read('skills/orient/reshuffle.md')
 const orient = read('skills/orient/SKILL.md')
+const grammar = read('skills/_shared/vault-grammar.md')
 const R = (n) => collapse(section(reshuffle, new RegExp(`^## R${n}\\.`)) ?? '')
 const S = (n) => collapse(section(orient, new RegExp(`^### ${n}\\.`)) ?? '')
 const donts = collapse(section(reshuffle, /^## Don'ts/) ?? '')
@@ -29,9 +30,12 @@ test('phases number from N_max + 1, never from phase 0, and ordinals are never r
   assert.deepEqual([...c.matchAll(/continu\w*\s+from\s+`?N_max`?(?!\s*\+)/g)].map((m) => m[0]), [])
 })
 
-test('in flight is defined once, in orient § 2, with TaskNotes spelling', () => {
-  assertHas(S(2), 'orient § 2', ['`status: in-progress`', '`in_progress`', '`review`', '`dispatched:`'])
-  assertHas(R(1), 'R1', [/[Oo]rient § 2's definition/, /never change/, /AMBIGUOUS/, /`thread`-tagged/,
+test('in flight is defined once, in the vault grammar, with TaskNotes spelling', () => {
+  assertHas(collapse(section(grammar, /^## In flight$/) ?? ''), 'vault-grammar.md § In flight',
+    ['`status: in-progress`', '`in_progress`', '`review`', '`dispatched:`', '**Live rollout**'])
+  assertHas(S(2), 'orient § 2', ['_shared/vault-grammar.md` § In flight', /never re-batch it/, /never reshuffle it/])
+  assert.doesNotMatch(S(2), /`dispatched:` stamp/, 'orient § 2 restates the in-flight definition')
+  assertHas(R(1), 'R1', [/vault grammar's definition/, /never change/, /AMBIGUOUS/, /`thread`-tagged/,
     /contains `task` but not `thread`/, '`-p<N>-`'])
   // What orient § 4's bound apply left open (landed since the review, or withheld) is frozen with AMBIGUOUS:
   // the § 2 sweep predates the apply, so without this R1 could re-phase, drop or schedule finished work.

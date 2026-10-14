@@ -9,6 +9,8 @@ lands here, once.
 Invariant (ADR 0001): **the task is complete on its own.** A cold session — any
 harness — must be able to resume the work from the task file alone.
 
+**Plugin root.** This spec is read as a file, never rendered: run its commands by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## 1. Resolve the project
 
 The task is never orphaned and never lands in `_Inbox/`. Resolve `projects:`
@@ -43,14 +45,40 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py captures \
 
 It lists the thread captures — open, `thread`-tagged tasks directly under
 `Work/Tasks/` (inline or block-list `tags:`) — one
-`capture <task> <status> <match,…>` row each, the match adding `slug` or
+`capture <task> <status> <match,…>` row each, the match adding `marked`
+when the task carries § 4's `capture: continuation`, and `slug` or
 `thread-file` when the capture is named `<slug>` or names the THREAD.md. A
 follow-up or rollout task that merely links the THREAD.md is not a capture
 and is never listed. Then read the captures: one whose slug matches, or
 whose Notes link the same `THREAD.md`, or whose resume prompt describes the
-same work. Found → **update it in place**: refresh the summary + resume prompt, set/move/remove
-`scheduled:`, rewrite § 4b's two fields, leave `captured:` as the original date. Never write a second
-task for the same thread. Re-deferring is a reschedule, not a new capture.
+same work. Sort what that finds into marked matches (the row's match
+includes `marked`) and unmarked ones, then take the two steps below in
+order: step 1 acts on each unmarked match, step 2 writes the capture, once
+per run. A marked and an unmarked match found together never pull two ways.
+
+1. **Each unmarked match** (a capture written before the marker existed, or
+   a backlog task that carries the `thread` tag and the thread's link) →
+   leave it **untouched**, its `scheduled:` and day-page line included, and
+   report it as `capture left open (unmarked): [[<slug>]]`, the line
+   `thread:handoff` uses. Several unmarked matches (a pre-marker capture plus
+   a backlog task carrying the link, say) → each one is left untouched and
+   reported on its own line. No unmarked match ever causes a write, and
+   nothing upgrades an unmarked task to a marked one. The safe failure is a
+   leftover task for Lachy to settle, never a lost one.
+2. **The capture, exactly one per run:**
+   - **Found, and its match includes `marked`** → **update it in place**:
+     refresh the summary + resume prompt, set/move/remove `scheduled:`,
+     rewrite § 4b's two fields, leave `captured:` as the original date. That
+     in-place update is the capture, whatever unmarked matches sit beside
+     it. Only a marked capture is ever updated in place.
+   - **No open marked capture found** → write one fresh marked capture under
+     a slug no unmarked match holds. A fresh capture is written only when
+     the search above found no open marked capture for this thread, and a
+     run writes at most one fresh marked capture, never one per unmarked
+     match.
+
+Never write a second marked capture for the same thread. Re-deferring a
+marked capture is a reschedule, not a new capture.
 
 ## 3. Resolve the day (`defer` only)
 
@@ -78,10 +106,15 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-day.py [<day>]
 - **Exit 2 with stderr starting `resolve-day:`** → the input was refused
   (unparseable, or before today). Apply the rules above: say a past date is
   refused, and a day that can't be resolved is a stash, not a guess.
-- **Exit 3, or the resolver can't run at all** (no `python3`, the script
-  missing, any other status) → compute the date by hand from these rules and
-  state that interpretation explicitly in the § 7 confirmation — never
-  silently. Exit 3 means no tz data: `python3 -m pip install tzdata`.
+- **An error naming a `/skills/…` path** (`python3`'s `can't open file
+  '/skills/…'`, exit 2) → the root was never exported, so the resolver did
+  not run: export it and re-run by `plugin-root.md` rule 4. It is neither a
+  refusal nor the by-hand case below.
+- **Exit 3, or the resolver can't run at all with the root set** (no
+  `python3`, the script missing even with the root exported by
+  `plugin-root.md`, any other status) → compute the date by hand from these
+  rules and state that interpretation explicitly in the § 7 confirmation —
+  never silently. Exit 3 means no tz data: `python3 -m pip install tzdata`.
 
 The confirmation ALWAYS echoes the resolved date (§ 7) so a parse surprise is
 visible immediately.
@@ -113,6 +146,7 @@ topic (`narcissus-mirror-shader-fix`, not `continue-working-on-thing`).
 ```yaml
 ---
 tags: [task, <area>, thread]
+capture: continuation          # the writer's marker — always, stash and defer alike
 status: open
 priority: normal
 projects: ["[[<Project>]]", "[[<Area>]]"]
@@ -135,6 +169,13 @@ launch: <cc-* alias>           # qualifying tasks only — OMIT when no alias ap
 - `thread` marker tag = this is a thread capture; makes dateless stashes
   queryable (`/weekly`'s Stashed-threads pass depends on it). Documented in
   `_shared/knowledge/obsidian-schema.md`.
+- `capture: continuation` = the writer's marker: this task is the thread's
+  set-down next move, written by stash or defer. The `thread` tag alone does
+  not say that (a backlog task can carry it and the thread link too), so
+  `thread:handoff` § Open captures supersedes **only** a task carrying this
+  line. Only a fresh stash or defer write stamps it; § 2 never adds it to an
+  existing unmarked task. Nothing else (a close follow-up, a rollout or
+  phase task) ever carries it.
 - Typed values: dates as `YYYY-MM-DD`, wiki-links quoted.
 - `next_action:` is not in this template: § 4b's script adds it to every
   stash and defer, quoted safely. Don't hand-write it.
@@ -183,7 +224,10 @@ write and changes nothing: a dead task (the pointer would be dead), or an
 action that is blank or spans lines. Exit 3
 means no vault or no PyYAML (`python3 -m pip install pyyaml`). Either way
 the capture stands: say `Next action not written: <stderr>` in the
-confirmation, and never retry the write by hand.
+confirmation, and never retry the write by hand. An exit 2 with `python3`'s
+`can't open file '/skills/…'` is not that refusal: the script never ran, so
+export the root and re-run the same call by `plugin-root.md` rule 4, then
+apply the rules above to that run.
 
 **Close's form.** `close` writes only when the thread has a concrete next
 task, and never invents one. It stands down entirely — neither field — while
@@ -335,6 +379,8 @@ One compact confirmation, always echoing the concrete outcome:
   project note § 4b's `set-down` wrote, then every `skip` row with its reason, except an
   `area note` and § 1.5's `[[Vault]]` umbrella (`no note` by design) — or
   `Next action not written: <stderr>` when the script refused.
+- and one `capture left open (unmarked): [[<slug>]]` line for each unmarked
+  match § 2 left untouched.
 
 Render the task link clickable (`obsidian://open?...` per the global link
 rules). When § 5 **Lean capture** leaves unlanded research — a THREAD.md
