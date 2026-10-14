@@ -57,8 +57,11 @@ ADR 0088 d4 asks orient to run a check a project declares (its SDK watch).
 - How p20-1 reads d1–d4 (`skills/_shared/scripts/resolve-target.py`): the directory rungs compare
   by depth, so a workspace holding the directory more deeply than any `repos:` entry gives its area,
   and a tie goes to the declaration (so every ops-workspace session resolves to Morning and Weekly
-  Commands, which declares that workspace, rather than asking; the one-line naming is the guard). Dated directories and repos inside umbrella repos (`~/Projects`,
-  `~/repos/workspaces`, `~/.agents`) are named by their own directory, never the umbrella's. A
-  matched workspace root or area directory is never learned, even after a stop, so a project pick
-  there asks every time; `_`-prefixed folders (`_archive`, `_sources`, `_shared`) are never learned
-  either. A list-valued `area:` gives its first item.
+  Commands, which declares that workspace, rather than asking; the one-line naming is the guard).
+  Dated directories, skills and repos inside umbrella repos (`~/Projects`, `~/repos/workspaces`,
+  `~/.agents`) are named by their own directory, never the umbrella's, and an umbrella is never
+  learned; a linked worktree reads as the same path in its main checkout. A project he types at
+  the ask is learned like one he picks. A matched workspace root or area directory is never
+  learned, even after a stop, so a project pick there asks every time; `_`-prefixed folders
+  (`_archive`, `_sources`, `_shared`) are never learned either. A list-valued `area:` gives its
+  first item.

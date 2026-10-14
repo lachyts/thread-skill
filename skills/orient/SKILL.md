@@ -59,11 +59,11 @@ not supply execute's detached Stop-hook/heartbeat driver.
 The target is one project, one area or one note (CONTEXT.md **Target**, ADR 0036), and the resolver
 runs before § 2 reads anything. Quoted prose is a scoped target, as below. Anything else, with
 orient's own flags (`--debrief`) removed, goes once to
-`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py [<argument>]`, run from the
-session directory (no argument for a bare invocation). It prints one JSON object: `outcome`
-(`resolved`, `candidates` or `none`), the `target`, up to three `candidates` (best first; the pick
-first when resolved), a `dir_anchor` (the area the directory sits in), a one-line `reason` and a
-`learn_dir`.
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py "<argument>"`, run from the
+session directory. The argument is quoted as one word, so a `[[link]]` never meets the shell's
+globbing; a bare invocation passes none. It prints one JSON object: `outcome` (`resolved`,
+`candidates` or `none`), the `target`, up to three `candidates` (best first; the pick first when
+resolved), a `dir_anchor` (the area the directory sits in), a one-line `reason` and a `learn_dir`.
 
 - **Resolver failure.** If the resolver exits non-zero (2: a refused `--cwd` or a usage error; 3:
   no vault or no PyYAML), report its one `resolve-target:` line and ask in plain text for the
@@ -74,7 +74,9 @@ first when resolved), a `dir_anchor` (the area the directory sits in), a one-lin
 - **`candidates` or `none`** → ask before any § 2 read: `AskUserQuestion` with the candidates, best
   first, then `dir_anchor` when it is not already listed, up to four options. With one option, add
   `Stop — orient nothing`, because the tool needs two. With none, ask in plain text for a project
-  or area name, or stop, and end the turn. A typed answer is resolved again as an argument.
+  or area name, or stop, and end the turn. A typed answer (the plain-text one, or
+  `AskUserQuestion`'s `Other`) is resolved again as an argument, and keeps the first answer's
+  `learn_dir` (below).
 - **A stop.** When he stops a pick, re-ask as above without the stopped pick. A stopped pick from
   a declared directory (rung `directory`) also names its declaring note, whose `repos:` sent the
   session there.
@@ -84,13 +86,15 @@ first when resolved), a `dir_anchor` (the area the directory sits in), a one-lin
   case-insensitive hit or a clear fuzzy winner resolves; a close call or no match asks.
 - **A single-note target** → a **scoped reshuffle**: a wikilink or vault path to a note that is not
   a project or area note (a design, phase or brain-dump note), a plan file path, or quoted prose.
-  The resolver reports it as kind `note` or `file`. Its project comes from `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § Scoped targets; the area and vault folder follow from
-  that project.
+  The resolver reports it as kind `note` or `file`. Its project comes from
+  `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § Scoped targets; the area and vault folder
+  follow from that project.
 - **Bare invocation** → the session directory, matched against `repos:` frontmatter across
   `~/repos/obsidian/Work/Projects/**` (the longest whole-component prefix; the git root counts; a
-  linked worktree reads as its main checkout; a directory several projects declare asks); else a
-  workspace or launch folder (`~/repos/workspaces/_shared/state/launch-folders.json`) gives its
-  area; else the directory's own name, matched within the area its parent directories name.
+  linked worktree reads as the same path in its main checkout; a directory several projects declare
+  asks); else a workspace or launch folder (`~/repos/workspaces/_shared/state/launch-folders.json`)
+  gives its area; else the directory's own name, matched within the area its parent directories
+  name.
 - **Vault folder and area**, for a note matched by either route: the vault
   folder is the top-level `Work/Projects/<Folder>/` the note sits in, at any
   depth, never its parent folder. The area is the note's `area:` frontmatter,
@@ -105,11 +109,14 @@ first when resolved), a `dir_anchor` (the area the directory sits in), a one-lin
   audit; dispatch is still possible but limited to bare `cc`/project-root launchers from the
   registry, with no scoped MCP profiles. For a project target both apply through its area and feed
   only §§ 7–8 dispatch.
-- **The learned directory.** When the answer carries a `learn_dir` and he picks a *project*, from
-  the ask or from the re-ask after he stops a `resolved` pick, hold the `learn_dir` with that
-  option's `note` field. The learn waits for § 4. Nothing is held for an area pick, a confirmed
-  pick, Look only, a scoped target, `--debrief` or a dry run, and a directory with no `learn_dir`
-  is never written back.
+- **The learned directory.** The `learn_dir` to hold always comes from the first answer, the
+  directory's, and survives everything after it in § 1: the re-ask after he stops a `resolved`
+  pick, a typed or `Other` answer, and that answer's re-resolution as an argument, whose own
+  `learn_dir` is null. When he lands on a *project*, from the ask, the re-ask or a typed answer,
+  hold that `learn_dir` with the project's `note` field: the picked option's, or the re-resolved
+  target's `note` when a typed answer resolves to a project. The learn waits for § 4. Nothing is
+  held for an area pick, a confirmed first pick, Look only, a scoped target, `--debrief` or a dry
+  run, and a directory with no `learn_dir` is never written back.
 
 A project or scoped target narrows § 2 to that project (§ 2 Scope); an area target keeps the area
 sweep.
@@ -205,10 +212,10 @@ report-only for it.
 
 **The learned directory.** Reshuffle and Steer only also run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py --learn "<learn_dir>" "<note>"`
-when § 1 held a `learn_dir`, where `<note>` is the picked option's vault-relative `note` field (it
-carries a `/`, so the script resolves exactly that file; never the bare name, which two projects
-can share), and report its one line; a refusal is reported and never blocks. Look only learns
-nothing.
+when § 1 held a `learn_dir`, where `<note>` is the vault-relative `note` field § 1 held with it (the
+picked option's or the re-resolved target's; it carries a `/`, so the script resolves exactly that
+file; never the bare name, which two projects can share), and report its one line; a refusal is
+reported and never blocks. Look only learns nothing.
 
 ### 5. Reshuffle
 
