@@ -97,8 +97,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   line — which reaches the task menu as before (ADR 0017). _Avoid_: next
   steps (ambiguous), remaining work.
 - **Capture** — the self-contained vault task `stash` or `defer` writes to set
-  a thread's next move down, marked as a capture by its writer. Only a capture
-  is superseded when the thread continues elsewhere. A loose end filed at
+  a thread's next move down, marked as a capture by its writer
+  (`capture: continuation` in its frontmatter). Only a marked capture is
+  superseded when the thread continues elsewhere; an unmarked one is left open
+  and reported. A loose end filed at
   `close` may link the same thread and is still never a capture. _Avoid_:
   thread task (any task can link a thread), backlog item.
 - **Close** — the work is finished; persist + commit, end-of-thread ritual.
