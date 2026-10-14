@@ -1021,7 +1021,7 @@ test('control: a Recorded answer without the next re-run fails recorded-answer',
   only(sk(' After any hand-back, re-run `next --running <the live slugs>` and use that output from here on;', ''), 'recorded-answer', 'no next re-run')
 })
 test('control: a Recorded answer after the Automatic retry fails recorded-answer', () => {
-  const l = real.skill.split('\n').find((x) => x.startsWith('   2. **Seeded revises'))
+  const l = real.skill.split('\n').find((x) => x.startsWith('   2. **') && x.includes('**Seeded revises'))
   const recorded = l.slice(l.indexOf(' **Recorded answer'), l.indexOf(' **Automatic descope'))
   only(sk(l, l.replace(recorded, '') + recorded), 'recorded-answer', 'after the retry')
 })

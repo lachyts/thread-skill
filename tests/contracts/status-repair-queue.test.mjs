@@ -1468,7 +1468,7 @@ function check({ status, repair, execute, fx }) {
   const r2intro = collapse(r2raw.split('\n\n').find((x) => x.startsWith('From its queue state')) ?? '')
   const exe65 = collapse(section(execute, /^### 6\.5\. /) ?? '')
   const exeC = exe65.slice(exe65.indexOf('- (c) **A set-aside only a person moves on**'), exe65.indexOf("- (d) **A merge hold's release**"))
-  const exe12 = collapse((section(execute, /^### 4\.5\. /) ?? '').split('\n').find((l) => l.startsWith('   2. **Seeded revises')) ?? '')
+  const exe12 = collapse((section(execute, /^### 4\.5\. /) ?? '').split('\n').find((l) => l.startsWith('   2. **') && l.includes('**Seeded revises')) ?? '')
   const statusWhy = [...sb.matchAll(/autoRetryWhy/g)].length
   const allowedStatus = [...s2.matchAll(/autoRetryWhy/g)].length + [...arf.matchAll(/autoRetryWhy/g)].length
   const repairWhy = [...rb.matchAll(/autoRetryWhy/g)].length
