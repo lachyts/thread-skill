@@ -28,7 +28,7 @@ Otherwise, fall through to `list`.
 ### `/thread:open list`
 
 1. Read `~/repos/workspaces/_shared/threads/INDEX.md` — these are the shared threads.
-2. Find recent project threads: `find ~/Projects -name THREAD.md -mtime -90 -not -path '*/_archive/*' 2>/dev/null` — sort by mtime descending.
+2. Find recent project threads: `find ~/Projects -maxdepth 5 \( -name _archive -o -name .claude -o -name .git -o -name node_modules \) -prune -o -name THREAD.md -mtime -90 -print 2>/dev/null` — sort by mtime descending. It walks `~/Projects` exactly as § Repo-thread lookup's slug tier does (same prunes, same depth bound), so an archived project or a worktree, `.git` or `node_modules` copy is never listed as a live thread.
 3. Find repo threads: run § Repo-thread lookup with `slug=` empty — it prints every repo thread. Sort them by mtime descending.
 4. Present grouped:
 

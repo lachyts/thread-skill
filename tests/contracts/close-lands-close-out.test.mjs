@@ -35,7 +35,7 @@ test('7.1: (a) to (e) intact, (f) hands the path to landing and never calls land
   assertHas(l, 'step 7.1', [
     '(a) `top=$(git -C "$(dirname <path>)" rev-parse --show-toplevel)`',
     '(b) Scan `git -C "$top" diff --cached --name-only` first',
-    '(c) A stricter form of sub-step 2\'s guard',
+    '(c) The half-applied-operation guard, which sub-step 2 shares',
     '(d) `git -C "$top" add -- <path>`',
     '(e) `git -C "$top" diff --cached --quiet -- <path>` exits 0 → `unchanged`, no commit.',
     '(f) Otherwise hand `<path>` to § Land the close-outs',
@@ -57,6 +57,17 @@ test('7.2: one landing commit per repo, the guard and rm -f kept, landing is its
   for (const gone of ['one file per commit', 'on the branch the work is on', 'commit -m']) {
     assert.ok(!l.includes(gone), `step 7.2 still says ${gone}`)
   }
+})
+
+test('7.2: the half-applied guard is 7.1(c)\'s, located through git (p19-9)', () => {
+  const l = s72()
+  assertHas(l, 'step 7.2', [
+    '`rebase-merge`, `rebase-apply`, `MERGE_HEAD`, `CHERRY_PICK_HEAD` or `BISECT_LOG`',
+    '[ -e "$(git -C "$(dirname <doc>)" rev-parse --path-format=absolute --git-path <name>)" ]',
+    'so a linked worktree works too', "7.1(c)'s guard",
+  ])
+  assert.ok(!l.includes('under `.git/`'), 'step 7.2 still locates the markers under .git/')
+  assert.ok(!s71().includes('stricter form'), 'step 7.1 still calls its guard stricter than 7.2\'s')
 })
 
 test('§ Land the close-outs sits after Commit hygiene and before step 8', () => {
