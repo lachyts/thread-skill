@@ -29,7 +29,7 @@ else runs as scoped sessions.
 |---|---|---|
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
-| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): audit an area's open work and recommend the best use of time, then **Reshuffle** (re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate) or **Look only**. Schedules rollout-shaped phases itself, steers the rest (background batch sessions it launches itself, ADR 0010, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
+| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then **Reshuffle** (re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate) or **Look only**. Schedules rollout-shaped phases itself, steers the rest (background batch sessions it launches itself, ADR 0010, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
 | `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop also create a fresh visible sidebar task seeded with it; elsewhere label it a manual handoff. |
@@ -95,11 +95,16 @@ one line per Retro.
 - `skills/_shared/task-writer.md` — the single spec for writing + routing the
   vault task (dedup, day parsing, resume prompt, pickup auto-complete).
 - `docs/adr/` — the decision record; read the directory for the current set.
+  Each ADR's Status line is the one place its state is recorded: a
+  back-reference in another ADR reads `*(Amended by ADR NNNN, <date>: <what
+  changed>.)*` and never copies the target's status. This list says what each
+  decided; read an ADR's own Status line for where it stands.
   `0001`–`0003` are the continuity decisions (task floor; next is a sibling;
   orient is project-altitude next — 0003's packaging and launch conclusions
   since superseded by 0009 and 0010). `0004`–`0008` are the engine decisions
-  (repair is a conductor; a phase is a plan; one-shot first pass, iteration
-  escalates to Fable; a tier is a model+effort bundle; a declared gate always
+  (repair is a conductor; a phase is a plan; one-shot first pass, then
+  iteration escalates, to Fable as first decided and up the operator's ladder
+  since 0029; a tier is a model+effort bundle; a declared gate always
   pauses). `0009` — thread absorbs wave: one plugin, one prefix, two lanes.
   `0010` — orient launches its own batches. `0011` — close saves
   autonomously; vault tasks stay gated. `0012` — process candidates flow to
@@ -112,12 +117,53 @@ one line per Retro.
   continuation: handoff docs are durable and self-cleaning, and close refreshes
   a pending one instead of proposing vault tasks that restate it (amends 0011).
   `0024` — the operator's top tier sets every rollout's ceiling (amends 0016;
-  implementation pending, task p7-1). `0025` — master moves only by green PR,
-  owner included. (0018–0023 are reserved: 0018–0022 are on the protocol 4
-  branch, and 0023 belongs to orient's native-children task, p3-1.) `0030` — a
-  rollout is a queue that integrates at merge (one engine, no alias).
+  superseded by 0029 before it was built). `0025` — master moves only by green
+  PR, owner included. (0018–0023 are reserved: 0018–0022 are on the protocol 4
+  branch, and 0023 belongs to orient's native-children task, p3-1.) `0026` —
+  finished work closes itself (amends 0011). `0027` — orient is the one shaping
+  verb (amends 0003, 0009, 0010 and 0026; retires `split` and `gather`).
+  `0028` — agents land their own work (amends 0011). `0029` — escalation
+  climbs the operator's ladder (supersedes 0024; amends 0006, 0007 and 0016).
+  `0030` — a rollout is a queue that integrates at merge (one engine, no
+  alias; amends 0009). `0031` — the primary checkout holds while a rollout
+  runs (amends 0030). `0032` — rollouts keep a Run record and tune by Retro.
+  `0033` — execute retries agent-fixable set-asides itself (amends 0004 and
+  0030). `0034` — a gate never holds an unattended rollout (amends 0008).
+  `0035` — one human fix per refusal (amends 0033). `0036` — orient resolves
+  its target before it reads, then reshuffles without asking (amends 0026 and
+  0027).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
+
+## Upgrading to 3.0.0
+
+3.0.0 breaks anyone running rollouts:
+
+- **A rollout is a queue (ADR 0030).** Execute runs only
+  `protocol_version: 5` rollout notes and refuses older ones. If a session is
+  running an older rollout, hard-pause it, then run
+  `/thread:schedule <project> --regenerate`: the supersede carries every
+  unlanded task into a queue.
+- **Escalation no longer climbs to Fable by default (ADR 0029).** It climbs
+  the operator's ladder, `~/.config/thread/ladder.toml`. With no file,
+  the built-in ladder has two Opus rungs, so a machine without the file never
+  leaves Opus. To keep a Fable step, name it as a rung in that file. The
+  rollout's `max_tier:` key is retired: execute ignores it with a warning. If
+  an operator instruction (an AGENTS.md "model tier" section, say) tells
+  schedule to stamp `max_tier:`, drop that line and set the ceiling as the
+  ladder's top rung instead.
+- **Rollout defaults are the operator's (ADR 0032).** `parallel_ceiling`,
+  `max_iterations`, `max_review_rounds` and `max_plan_rounds` come from
+  `~/.config/thread/rollouts.toml` (built-ins when it sets none), and
+  `/thread:retro` proposes changes to that file from a run's record. Schedule
+  stamps the values it resolves into each rollout note's frontmatter, and
+  execute reads the note first, so an edit to the file reaches the next
+  scheduled (or `--regenerate`d) rollout, not one already written. A task's
+  own frontmatter still overrides `max_iterations`, `max_review_rounds` and
+  `max_plan_rounds`.
+- **Schedule picks the rollout root (#108).** When the Project root is the
+  live directory-source plugin checkout, schedule uses the separate
+  `<repoPath>-rollout` clone, or refuses with the fix.
 
 ## Install
 
@@ -167,7 +213,8 @@ final check that the run wrote nothing into the tree):
 - **Contracts** — `tests/contracts/*.test.mjs`: manifests agree, skill names and description budgets,
   `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files, no SKILL.md body holds a
   positional `$N` (Claude Code substitutes skill arguments into them; logic that needs one lives in a
-  script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), and
+  script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), orient's
+  target resolution before it reads and its one learned `repos:` write (`orient-target.test.mjs`), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
   (`handoff-one-writer.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
   and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
@@ -178,6 +225,10 @@ final check that the run wrote nothing into the tree):
 - **Next-action script** — `tests/next-action.test.mjs`: `next-action.py`'s set-down, fill, read and
   captures against throwaway vaults — byte-level one-line edits, YAML-safe quoting, both tag forms, the
   shared dead-link rule, and refusals that write nothing.
+- **Target resolver** — `tests/resolve-target.test.mjs`: `resolve-target.py` against a fixture vault of real
+  names, aliases and `area:`/`repos:` shapes and a fake HOME with umbrella repos — each rung and outcome,
+  the clear winner and the close call, a shared directory, `--learn`'s one-line append and every refusal
+  that writes nothing.
 - **Default branch** — `tests/default-branch.test.{mjs,sh}`: `defaultBranch` keeps pre-fix bytes when
   unset, refuses unsafe names, and the resolver in `execute/SKILL.md` § 4 works against fixture remotes.
 - **Release check** — `tests/release-check.test.sh`: the real `make release-check` recipe against a temp

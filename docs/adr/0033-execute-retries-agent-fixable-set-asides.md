@@ -1,9 +1,12 @@
 # 0033 — execute retries agent-fixable set-asides itself
 
 Date: 2026-10-09
-Status: proposed, implemented by p16-4, amended by ADR 0035 (amends ADR 0030 decision 4, where only a hand-back
-re-enters a set-aside task, and ADR 0004, where repair alone retries an agent-fixable block; from the 2026-10-06
-grill on unattended rollouts, `thread-skill-p16-unattended-rollouts`)
+Status: accepted, shipped in 3.0.0 (implemented by p16-4; amends ADR 0030 decision 4, where only a hand-back re-enters a set-aside
+task, and ADR 0004, where repair alone retries an agent-fixable block; from the 2026-10-06 grill on unattended
+rollouts, `thread-skill-p16-unattended-rollouts`)
+*(Amended by ADR 0035, 2026-10-13: the verdict names one Human fix per refusal (`inputs`' `humanFix`); a refused
+descope is durable; an answered block (`inputs`' `answerRecorded`) is never retried automatically, and the live lead
+hands a `hand-back` answer back itself; an at-Integration set-aside with no `pr:` is restored, never handed back.)*
 
 ## Context
 

@@ -45,7 +45,7 @@ not supply execute's detached Stop-hook/heartbeat driver.
 ```
 /thread:orient Chorus                     # audit, then Reshuffle / Steer only / Look only
 /thread:orient [[Chorus]]                 # explicit wikilink form
-/thread:orient                            # infer the area from CWD
+/thread:orient                            # resolve the target from the session directory
 /thread:orient [[<design, phase or brain-dump note>]]   # scoped reshuffle of that note
 /thread:orient ~/.claude/plans/<plan>.md  # scoped reshuffle of an approved plan file
 /thread:orient "<prose describing the work>"            # scoped reshuffle of inline prose
@@ -56,19 +56,45 @@ not supply execute's detached Stop-hook/heartbeat driver.
 
 ### 1. Resolve the target
 
-Accept a fuzzy target and resolve it to (area, vault folder, workspace, project roots):
+The target is one project, one area or one note (CONTEXT.md **Target**, ADR 0036), and the resolver
+runs before § 2 reads anything. Quoted prose is a scoped target, as below. Anything else, with
+orient's own flags (`--debrief`) removed, goes once to
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py "<argument>"`, run from the
+session directory. The argument is quoted as one word, so a `[[link]]` never meets the shell's
+globbing; a bare invocation passes none. It prints one JSON object: `outcome` (`resolved`,
+`candidates` or `none`), the `target`, up to three `candidates` (best first; the pick first when
+resolved), a `dir_anchor` (the area the directory sits in), a one-line `reason` and a `learn_dir`.
 
-- **A name** (`/thread:orient Animately`) or **wikilink** (`[[Animately]]`, a
-  sub-project note) → match against the folders and notes under
-  `~/repos/obsidian/Work/Projects/`, at any depth, and the workspace registry
-  (`~/repos/workspaces/_shared/workspace-registry.md`).
+- **Resolver failure.** If the resolver exits non-zero (2: a refused `--cwd` or a usage error; 3:
+  no vault or no PyYAML), report its one `resolve-target:` line and ask in plain text for the
+  target, sweeping nothing before an answer. His answer goes to the resolver as an argument, and a
+  second failure ends the orient with that line.
+- **`resolved`** → name the pick in one line and carry on:
+  `Target: <name> (<kind>; <reason>) — say stop to change it`.
+- **`candidates` or `none`** → ask before any § 2 read: `AskUserQuestion` with the candidates, best
+  first, then `dir_anchor` when it is not already listed, up to four options. With one option, add
+  `Stop — orient nothing`, because the tool needs two. With none, ask in plain text for a project
+  or area name, or stop, and end the turn. A typed answer (the plain-text one, or
+  `AskUserQuestion`'s `Other`) is resolved again as an argument, and keeps the first answer's
+  `learn_dir` (below).
+- **A stop.** When he stops a pick, re-ask as above without the stopped pick. A stopped pick from
+  a declared directory (rung `directory`) also names its declaring note, whose `repos:` sent the
+  session there.
+- **A name or wikilink** (`/thread:orient Animately`, `[[Animately]]`, a sub-project note, an alias)
+  → the basenames and `aliases:` of every live project and area note under
+  `~/repos/obsidian/Work/Projects/`, at any depth (archived and done notes excluded). An exact,
+  case-insensitive hit or a clear fuzzy winner resolves; a close call or no match asks.
 - **A single-note target** → a **scoped reshuffle**: a wikilink or vault path to a note that is not
   a project or area note (a design, phase or brain-dump note), a plan file path, or quoted prose.
-  Its project comes from `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § Scoped targets; the area and vault folder follow from
-  that project.
-- **Bare invocation** → infer the area from CWD (workspace dir, project root,
-  or a repo matched via `repos:` frontmatter across
-  `~/repos/obsidian/Work/Projects/**`).
+  The resolver reports it as kind `note` or `file`. Its project comes from
+  `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § Scoped targets; the area and vault folder
+  follow from that project.
+- **Bare invocation** → the session directory, matched against `repos:` frontmatter across
+  `~/repos/obsidian/Work/Projects/**` (the longest whole-component prefix; the git root counts; a
+  linked worktree reads as the same path in its main checkout; a directory several projects declare
+  asks); else a workspace or launch folder (`~/repos/workspaces/_shared/state/launch-folders.json`)
+  gives its area; else the directory's own name, matched within the area its parent directories
+  name.
 - **Vault folder and area**, for a note matched by either route: the vault
   folder is the top-level `Work/Projects/<Folder>/` the note sits in, at any
   depth, never its parent folder. The area is the note's `area:` frontmatter,
@@ -76,16 +102,33 @@ Accept a fuzzy target and resolve it to (area, vault folder, workspace, project 
   `Life (area)/Audio Intake/Audio Intake.md` gives vault folder `Life (area)`
   and area `Life`. A name that matches a top-level folder takes that folder
   as the vault folder. § 2 Vault sweeps the vault folder; § 2 Threads sweeps
-  the area.
-- The registry row gives the workspace dir, launcher aliases, and project
-  roots. **Areas with no workspace** (Life, 2D, …) get a vault-only audit;
-  dispatch is still possible but limited to bare `cc`/project-root launchers
-  from the registry, with no scoped MCP profiles.
-- Ambiguous → `AskUserQuestion` with the 2–3 most likely areas.
+  the area. The resolver applies this rule and reports both as `folder` and `area` on its target
+  and every option, taking the first non-empty item of a list-valued `area:`.
+- The registry row (`~/repos/workspaces/_shared/workspace-registry.md`) gives the workspace dir,
+  launcher aliases, and project roots. **Areas with no workspace** (Life, 2D, …) get a vault-only
+  audit; dispatch is still possible but limited to bare `cc`/project-root launchers from the
+  registry, with no scoped MCP profiles. For a project target both apply through its area and feed
+  only §§ 7–8 dispatch.
+- **The learned directory.** The `learn_dir` to hold always comes from the first answer, the
+  directory's, and survives everything after it in § 1: the re-ask after he stops a `resolved`
+  pick, a typed or `Other` answer, and that answer's re-resolution as an argument, whose own
+  `learn_dir` is null. When he lands on a *project*, from the ask, the re-ask or a typed answer,
+  hold that `learn_dir` with the project's `note` field: the picked option's, or the re-resolved
+  target's `note` when a typed answer resolves to a project. The learn waits for § 4. Nothing is
+  held for an area pick, a confirmed first pick, Look only, a scoped target, `--debrief` or a dry
+  run, and a directory with no `learn_dir` is never written back.
 
-A scoped target narrows § 2 to the resolved project.
+A project or scoped target narrows § 2 to that project (§ 2 Scope); an area target keeps the area
+sweep.
 
 ### 2. Audit (read-only sweep)
+
+**Scope by target.** An area target keeps the bullets below word for word. A project target sweeps
+that project, never its whole area (ADR 0036): its note and, for a folder note, every project-tagged
+note in its folder at any depth (its sub-projects); tasks whose `projects:` link it or any swept
+sub-project; phase notes for each swept project; its related projects; THREAD.md in each swept
+project's `repos:` directories and in the directory it was resolved from, plus `_shared/threads/`;
+and Drift and the slots for each swept project.
 
 - **Next-action slots, first** (estate ADR 0008, decision 7): each project
   note's `next_task:` and that task's `next_action:` (its title when the
@@ -166,6 +209,13 @@ possibly-landed tier (reshuffle R1). If the saved file is gone (`--only` exits 2
 run and ask again. Ambiguous items are listed for Lachy and never applied. A scoped target skips
 this question and applies no drift fixes: it reshapes one note, so the § 3 Drift line is
 report-only for it.
+
+**The learned directory.** Reshuffle and Steer only also run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py --learn "<learn_dir>" "<note>"`
+when § 1 held a `learn_dir`, where `<note>` is the vault-relative `note` field § 1 held with it (the
+picked option's or the re-resolved target's; it carries a `/`, so the script resolves exactly that
+file; never the bare name, which two projects can share), and report its one line; a refusal is
+reported and never blocks. Look only learns nothing.
 
 ### 5. Reshuffle
 
@@ -335,7 +385,7 @@ lightweight version of this.
   or write anything — the slot write included — in Look only or dry runs.
 - **Don't reshuffle in-flight work.** Its scope, phase and body are frozen; only new members may
   join its phase (`reshuffle.md` R1).
-- **Don't write before the reshuffle's gate**, drift fixes (§ 4) aside.
+- **Don't write before the reshuffle's gate**, drift fixes and the learned `repos:` entry (§ 4) aside.
 - **Don't recommend more than one focus item**, and don't pad the audit —
   headline, balls in the air, drift, shape, one recommendation, then the question.
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s

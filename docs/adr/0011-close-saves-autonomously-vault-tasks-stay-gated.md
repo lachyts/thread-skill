@@ -9,6 +9,9 @@ vault-task gate itself stands.)*
 *(Amended by ADR 0026, 2026-09-27: close marks an existing task `done` without
 asking when the session explicitly worked it, the work is on the default branch, and
 its Verify line ran green; proposing new tasks stays gated.)*
+*(Amended by ADR 0028, 2026-09-29: close, which once never pushed, now lands its own close-out
+commits and the session's own branch (push, PR, review, merge); another session's branch is still
+only reported.)*
 
 ## Context
 

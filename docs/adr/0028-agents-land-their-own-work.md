@@ -1,7 +1,7 @@
 # 0028 — agents land their own work
 
 Date: 2026-09-29
-Status: proposed (amends ADR 0011's close guardrail "never touch a branch"; absorbs task p5-4)
+Status: accepted, shipped in 2.11.0 (amends ADR 0011's close guardrail "never touch a branch"; absorbs task p5-4)
 *(Amended 2026-09-29, after p11-3's plan failed review twice: landing queues the merge and finishes; nothing waits for it. §§ 5–7 below are the amended text.)*
 
 ## Context
