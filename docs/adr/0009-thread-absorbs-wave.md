@@ -4,7 +4,9 @@ Date: 2026-08-12
 Status: accepted (supersedes the packaging conclusion of ADR 0003)
 *(Amended by ADR 0027, 2026-09-28: `split` and `gather` are retired into orient's reshuffle; the
 rollout verbs are schedule, execute, status and repair.)*
-*(Amended by ADR 0030, proposed.)*
+*(Amended by ADR 0030, 2026-09-30: a rollout is a queue, not waves. A task starts when a slot frees,
+held back only by a dependency or a Solo task, never a shared file, and integrates with the latest
+main before it merges; there is no stored wave cursor: a rollout's progress is its task notes.)*
 
 ## Context
 

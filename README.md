@@ -95,11 +95,16 @@ one line per Retro.
 - `skills/_shared/task-writer.md` — the single spec for writing + routing the
   vault task (dedup, day parsing, resume prompt, pickup auto-complete).
 - `docs/adr/` — the decision record; read the directory for the current set.
+  Each ADR's Status line is the one place its state is recorded: a
+  back-reference in another ADR reads `*(Amended by ADR NNNN, <date>: <what
+  changed>.)*` and never copies the target's status. This list says what each
+  decided; read an ADR's own Status line for where it stands.
   `0001`–`0003` are the continuity decisions (task floor; next is a sibling;
   orient is project-altitude next — 0003's packaging and launch conclusions
   since superseded by 0009 and 0010). `0004`–`0008` are the engine decisions
-  (repair is a conductor; a phase is a plan; one-shot first pass, iteration
-  escalates to Fable; a tier is a model+effort bundle; a declared gate always
+  (repair is a conductor; a phase is a plan; one-shot first pass, then
+  iteration escalates, to Fable as first decided and up the operator's ladder
+  since 0029; a tier is a model+effort bundle; a declared gate always
   pauses). `0009` — thread absorbs wave: one plugin, one prefix, two lanes.
   `0010` — orient launches its own batches. `0011` — close saves
   autonomously; vault tasks stay gated. `0012` — process candidates flow to
@@ -112,12 +117,53 @@ one line per Retro.
   continuation: handoff docs are durable and self-cleaning, and close refreshes
   a pending one instead of proposing vault tasks that restate it (amends 0011).
   `0024` — the operator's top tier sets every rollout's ceiling (amends 0016;
-  implementation pending, task p7-1). `0025` — master moves only by green PR,
-  owner included. (0018–0023 are reserved: 0018–0022 are on the protocol 4
-  branch, and 0023 belongs to orient's native-children task, p3-1.) `0030` — a
-  rollout is a queue that integrates at merge (one engine, no alias).
+  superseded by 0029 before it was built). `0025` — master moves only by green
+  PR, owner included. (0018–0023 are reserved: 0018–0022 are on the protocol 4
+  branch, and 0023 belongs to orient's native-children task, p3-1.) `0026` —
+  finished work closes itself (amends 0011). `0027` — orient is the one shaping
+  verb (amends 0003, 0009, 0010 and 0026; retires `split` and `gather`).
+  `0028` — agents land their own work (amends 0011). `0029` — escalation
+  climbs the operator's ladder (supersedes 0024; amends 0006, 0007 and 0016).
+  `0030` — a rollout is a queue that integrates at merge (one engine, no
+  alias; amends 0009). `0031` — the primary checkout holds while a rollout
+  runs (amends 0030). `0032` — rollouts keep a Run record and tune by Retro.
+  `0033` — execute retries agent-fixable set-asides itself (amends 0004 and
+  0030). `0034` — a gate never holds an unattended rollout (amends 0008).
+  `0035` — one human fix per refusal (amends 0033). `0036` — orient resolves
+  its target before it reads, then reshuffles without asking (amends 0026 and
+  0027).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
+
+## Upgrading to 3.0.0
+
+3.0.0 breaks anyone running rollouts:
+
+- **A rollout is a queue (ADR 0030).** Execute runs only
+  `protocol_version: 5` rollout notes and refuses older ones. If a session is
+  running an older rollout, hard-pause it, then run
+  `/thread:schedule <project> --regenerate`: the supersede carries every
+  unlanded task into a queue.
+- **Escalation no longer climbs to Fable by default (ADR 0029).** It climbs
+  the operator's ladder, `~/.config/thread/ladder.toml`. With no file,
+  the built-in ladder has two Opus rungs, so a machine without the file never
+  leaves Opus. To keep a Fable step, name it as a rung in that file. The
+  rollout's `max_tier:` key is retired: execute ignores it with a warning. If
+  an operator instruction (an AGENTS.md "model tier" section, say) tells
+  schedule to stamp `max_tier:`, drop that line and set the ceiling as the
+  ladder's top rung instead.
+- **Rollout defaults are the operator's (ADR 0032).** `parallel_ceiling`,
+  `max_iterations`, `max_review_rounds` and `max_plan_rounds` come from
+  `~/.config/thread/rollouts.toml` (built-ins when it sets none), and
+  `/thread:retro` proposes changes to that file from a run's record. Schedule
+  stamps the values it resolves into each rollout note's frontmatter, and
+  execute reads the note first, so an edit to the file reaches the next
+  scheduled (or `--regenerate`d) rollout, not one already written. A task's
+  own frontmatter still overrides `max_iterations`, `max_review_rounds` and
+  `max_plan_rounds`.
+- **Schedule picks the rollout root (#108).** When the Project root is the
+  live directory-source plugin checkout, schedule uses the separate
+  `<repoPath>-rollout` clone, or refuses with the fix.
 
 ## Install
 
