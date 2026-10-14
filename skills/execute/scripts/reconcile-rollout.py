@@ -33,7 +33,16 @@ Subcommands:
               ahead of every other verdict. `awaitingIntegration` is the Integration queue's order: a task a queued
               task depends on, directly or through a folded member (`merged_into:`), first, then the oldest
               `ready:`, then schedule order. Each `setAside` entry is {slug, status, setAsideAt}, plus `needsHuman`
-              (p16-3: the note's `## Needs you` question, normalised) only when the note holds one.
+              (p16-3: the note's `## Needs you` question, normalised) only when the note holds one. `halt` is null
+              while anything starts, restarts, runs, awaits Integration or integrates; otherwise the first of
+              "git-env", "paused", "empty", "complete", "awaiting-sign-off" and "stuck". "awaiting-sign-off" (ADR
+              0034) replaces "stuck" only when every unlanded task of the rollout waits on a gate alone: W starts as
+              the set-aside rows at `gate` (a race-held one reads `race`, so it never counts), then gains, to a
+              fixpoint, each queued row whose every unsatisfied dependency resolves (_fold_unit) to a unit already in
+              W; the verdict needs W non-empty and equal to the in-N rows not landed. A gate beside any other
+              set-aside (blocked, review-blocked, plan-blocked, a RACE, an UNVERIFIED) stays "stuck". `awaitingSignOff`
+              lists W in rank order, [{slug, why: "gate-pending" | "depends on [[<unit>]]"}], and is [] for any other
+              verdict.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -121,8 +130,9 @@ Subcommands:
   status      Read-only situational scan for /thread:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
-              pause_requested, incomplete, ceiling, ceilingError, ceilingCause, counts, progress, timeline, ladder,
-              gitEnvHold, tasks}; `ceiling` is `parallel_ceiling`, or for a note without it the operator's
+              pause_requested, pausedFor, incomplete, ceiling, ceilingError, ceilingCause, counts, progress, timeline, ladder,
+              gitEnvHold, tasks}; `pausedFor` is the rollout's `paused_for` (`sign-off` under await-sign-off's
+              pause, ADR 0034), else null; `ceiling` is `parallel_ceiling`, or for a note without it the operator's
               rollout settings (rollout-settings.py for the Project root: rollouts.toml, then built-in 4),
               and null with `ceilingError` the reason when it is invalid or cannot be resolved (`next`
               exits 1 on the same error; status still exits 0), else `ceilingError` is null; `ceilingCause`
@@ -278,9 +288,26 @@ Subcommands:
               line on stderr, exit 1, no stdout. Only the rollout note is read.
 
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
-              `pause_requested`) from the rollout note. Run by /thread:execute's resume path when it
-              finds a `paused:` stamp — reinstating IS plain re-invocation, so there is no separate
-              resume command. Idempotent (no stamp = no-op).
+              `pause_requested`, and `paused_for`) from the rollout note. Run by /thread:execute's resume path
+              when it finds a `paused:` stamp — reinstating IS plain re-invocation, so there is no separate
+              resume command. Idempotent (no stamp = no-op). One refusal (ADR 0034): under `paused_for:
+              sign-off`, when the queue with the pause ignored would still be awaiting sign-off (_awaits_sign_off),
+              it writes nothing, prints `STILL-AWAITING: [[<slug>]]: <gate>` for each pending gate and exits 3, so
+              a reinstate with a gate still unsigned never re-runs the sign-off form. Every other pause clears as
+              before.
+
+  await-sign-off  `--rollout <note>` (ADR 0034; execute § 4.5 step 5's sign-off form): the rollout finished
+              everything else and only gates wait on Lachy, so it stays open, paused. Read-only check first: the
+              queue with no --running and any pause ignored (_awaits_sign_off: no git-env hold, nothing running,
+              awaiting Integration or integrating, no queued task free to start, and W, `next`'s
+              awaiting-sign-off set, equal to the unlanded rows) must be awaiting sign-off, else exit 1 and nothing
+              written. Then it stamps `paused: <now>` and `paused_for: sign-off`, appends `- <now> awaiting
+              sign-off: [[a]] (gate-pending), [[b]] (depends on [[a]]): sign off, then /thread:execute
+              [[<rollout>]]` under `## Pause log`, and records `paused mode=sign-off`. A note already stamped
+              `paused_for: sign-off` prints `[no-change]`; another standing pause (a hard pause's `paused:`) is
+              exit 1. A sign-off pause is a `paused:` like any other: never-started reads it as started, the
+              primary hold releases (unfinished-rollout.py running), and the repo keeps it as its one unfinished
+              rollout until signed or deferred.
 
   approve-gates  Sign off a gate-pending task's declared gated inputs (ADR 0008): move the bullets
               under "## Gated inputs (awaiting sign-off)" into "## Approved gates" with a sign-off
@@ -295,13 +322,35 @@ Subcommands:
               (execute § 3.7) and the restart's mark-started consumes the marker. A `set-aside` last
               line with no `pr:` goes to in_progress with a WARN. Refuses a note that isn't
               gate-pending; idempotent once approved (already-approved note = no-op). Run by the lead
-              session ONLY after the human explicitly signs off — never unattended.
+              session only after Lachy explicitly signs off.
+              --standing --rollout <note> (ADR 0034): the standing approval, run by the lead unattended. It
+              signs only the spend gates Lachy's recorded standing approval covers: each pending bullet is
+              priced by skills/_shared/scripts/gated_inputs.py's exposure() (fail closed: credential and
+              irreversible gates, and any shape it cannot price, never pass) against the limit
+              `spend_approval_usd`, resolved task frontmatter -> rollout frontmatter -> rollouts.toml
+              (_resolved_settings: file:repo, file:defaults) -> built-in 0, which is off (sources `task`,
+              `rollout`, `file:repo`, `file:defaults`, `built-in`; _retry_budget's order). A gate is covered iff
+              the limit is > 0 and its total exposure is at most the limit. Each covered gate moves to
+              `## Approved gates` with gated_inputs.annotation()'s suffix, `(approved <date> under the standing
+              approval: total exposure US$<x>, limit US$<t> from <source>)` (GATE_ANNOT_RE strips it), deduped by
+              _norm_gate, and prints `<slug>: gate approved under the standing approval: <gate> (exposure US$<x>
+              of US$<t>, <source>)`. Once nothing is pending the note flips by its stage exactly as above;
+              otherwise the remaining bullets stay pending (rewritten without the covered ones) and the note
+              stays gate-pending. Each remaining gate prints `ASK: <slug>: <gate>: <why>` (with a built-in
+              limit, a priceable gate's why is `standing approval off (built-in 0): set [defaults]
+              spend_approval_usd in ~/.config/thread/rollouts.toml`). Exit 0: every gate covered and written;
+              3: some or none covered (the covered ones written, an ASK line for each of the rest; a re-run on
+              gates already judged writes nothing and exits 3); 1: an error, nothing written for that slug (a
+              missing note, a task whose `rollout:` is not --rollout, a note that is not gate-pending with
+              pending gates, a `spend_approval_usd` stamp that is not an integer >= 0, rollout settings refused).
+              --standing without --rollout is exit 1 (`ERROR: --standing needs --rollout`), nothing written. A
+              note already fully approved stays `[no-change]`, exit 0.
 
 Run record (p15-2, ADR 0032): each verb records its own Slot and lane transitions through run_record.py's
 emit (one helper, _event), best-effort: a refusal or a write failure prints one `run_record:` line on stderr
 and never changes the verb's exit, stdout or vault writes. Nothing is recorded on --dry-run, by a refusal, or
 for a note with no `rollout:` (the rollout slug is the task note's `rollout:`, read before any write; `next`,
-`record-pause` and `clear-pause` use the rollout path's stem). Most re-runs that write nothing new record
+`record-pause`, `clear-pause` and `await-sign-off` use the rollout path's stem). Most re-runs that write nothing new record
 nothing, but not all: mark-integrating records `lane-taken` on every successful call and a re-run of
 mark-started records `slot-taken` again; run_record.py's reader rules absorb those repeats (the same holding,
 the same Slot keeping its first `start`). A
@@ -357,7 +406,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     empty.
   clear-pause       when it removes `paused:`: paused mode=hard at the stamp when the record has no open pause
                     (a hard pause whose record-pause never ran), then resumed. Removing only
-                    pause_requested records nothing.
+                    pause_requested records nothing; a refusal (STILL-AWAITING) records nothing.
+  await-sign-off    paused mode=sign-off when it stamps, unless the record shows a pause open.
   bind-run, free-lane, hold, record-pause   above.
   git-env-canary.py hold-started / hold-ended hold=git-env (task null) on the hold's empty <-> non-empty edge.
 set-aside stage, first match (auto-retry's stage too, when the record holds no set-aside line for the task: the lead
@@ -555,15 +605,22 @@ BLOCKED_SECTIONS = {
     "plan-blocked": "## Plan-blocked feedback",
 }
 
-# Gated inputs (ADR 0008): a task the engine paused for human sign-off of declared gates. Deliberately
-# NOT in BLOCKED_SECTIONS: `next` never starts or restarts one, and only approve-gates makes it startable
-# again.
+# Gated inputs (ADR 0008): a task the engine stopped for sign-off of declared gates (Lachy's, or for a covered spend
+# gate the standing approval's, ADR 0034). Deliberately NOT in BLOCKED_SECTIONS: `next` never starts or restarts one,
+# and only approve-gates makes it startable again.
 GATE_PENDING_STATUS = "gate-pending"
 GATE_PENDING_SECTION = "## Gated inputs (awaiting sign-off)"
 APPROVED_GATES_SECTION = "## Approved gates"
 # approve-gates' marker on a signed task sent back to in_progress (p12-14): the restart that directly follows
 # the sign-off reads it through mark-started, which removes it (execute § 3.7's fresh-call warning).
 GATES_SIGNED_KEY = "gates_signed"
+# The standing approval (ADR 0034): its limit, `spend_approval_usd` (task frontmatter, rollout frontmatter, then
+# rollouts.toml through rollout-settings.py), and the rollout's sign-off pause, `paused_for: sign-off` beside `paused:`
+# (await-sign-off writes both; clear-pause removes both).
+SPEND_APPROVAL_KEY = "spend_approval_usd"
+PAUSED_FOR_KEY = "paused_for"
+SIGN_OFF = "sign-off"
+PAUSE_LOG_SECTION = "## Pause log"
 
 # Review-loop memory (2026-08-14): an approval on the FINAL review round with real rejection history
 # (engine flag approvedAtCeiling) persists the accumulated by-round rationale. An AUDIT RECORD, not an
@@ -1629,6 +1686,20 @@ def _git_env_hold(rollout_note):
 
 # rollout-settings.py, shared with every skill: the operator's ~/.config/thread/rollouts.toml (p15-4).
 ROLLOUT_SETTINGS_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "rollout-settings.py"
+# gated_inputs.py, beside it: the standing approval's exposure reading and annotation (ADR 0034).
+GATED_INPUTS_PY = ROLLOUT_SETTINGS_PY.parent / "gated_inputs.py"
+_GATED = None
+
+
+def _gated():
+    """gated_inputs.py as a module (loaded once; raises when it will not load)."""
+    global _GATED
+    if _GATED is None:
+        spec = importlib.util.spec_from_file_location("thread_gated_inputs", GATED_INPUTS_PY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _GATED = mod
+    return _GATED
 
 
 def _resolved_settings(rollout_note) -> dict:
@@ -2237,6 +2308,7 @@ def cmd_next(args) -> int:
     in_n = [r for r in rows if r["state"] not in OUTSIDE_N]
     counts = _counts(rows)
     halt = None
+    sign_off = []
     if git_env:
         halt = "git-env"
     elif not start and not restart and not live and not awaiting and not integrating and not race_held_lane:
@@ -2247,7 +2319,10 @@ def cmd_next(args) -> int:
         elif counts["merged"] == counts["total"]:
             halt = "complete"
         else:
-            halt = "stuck"
+            # ADR 0034: a gate alone never halts `stuck`. When every unlanded task waits only on a gate (W), the
+            # verdict is awaiting-sign-off: execute's step 5 runs its sign-off form and the rollout closes.
+            sign_off = _sign_off_wait(rows, index)
+            halt = "awaiting-sign-off" if sign_off else "stuck"
     # The Run record (p15-2): a reason marker for the idle Slots this call leaves (none at complete or empty).
     free = ceiling - (used + len(start))
     if free > 0 and halt not in ("complete", "empty") and not args.dry_run:
@@ -2276,10 +2351,57 @@ def cmd_next(args) -> int:
         "pauseRequested": pause_requested,
         "pausedNow": paused_now,
         "halt": halt,
+        "awaitingSignOff": sign_off,
         "progress": _progress_line(counts, _timeline(rows, counts, ceiling, now)),
     }
     print(json.dumps(out, indent=2))
     return 0
+
+
+def _sign_off_wait(rows, index):
+    """W, the tasks that wait only on a gate (ADR 0034; the module docstring's `next`): [{slug, why}] in rank order,
+    or [] unless W is non-empty and equals the rollout's unlanded in-N rows. `rows` are `next`'s, race holds already
+    re-read (a race-held row reads set-aside at `race`, so it never joins W). W starts as the set-aside rows at `gate`
+    (why "gate-pending") and gains, to a fixpoint, each queued row whose every unsatisfied dependency resolves through
+    _fold_unit to a unit already in W (why "depends on [[<that unit>]]")."""
+    unlanded = {r["slug"].lower(): r for r in rows if r["state"] not in OUTSIDE_N and r["state"] != "merged"}
+    wait = {k: "gate-pending" for k, r in unlanded.items() if r["state"] == "set-aside" and r["setAsideAt"] == "gate"}
+    if not wait:
+        return []
+    grew = True
+    while grew:
+        grew = False
+        for k, r in unlanded.items():
+            if k in wait or r["state"] != "queued":
+                continue
+            units = [_fold_unit(d, index)[0] for d in r["deps"] if not _dep_status(d, index)[0]]
+            if units and all(u.lower() in wait for u in units):
+                wait[k] = f"depends on [[{units[0]}]]"
+                grew = True
+    if set(wait) != set(unlanded):
+        return []
+    return [{"slug": r["slug"], "why": wait[k]} for k, r in sorted(unlanded.items(), key=lambda kr: _rank(kr[1]))]
+
+
+def _awaits_sign_off(rollout_path: Path, rollout_note, tasks_dir: Path):
+    """`next`'s awaiting-sign-off verdict, read-only, as `next` with no --running and any pause ignored would give it:
+    no git-env hold; nothing running (every in_progress note counts as live), awaiting Integration or integrating (a
+    race-held lane included); no queued task free to start; then _sign_off_wait. Returns (W, rows): W [] when the queue
+    is anything else. Read by await-sign-off and clear-pause; it writes nothing."""
+    rows, index = _rows(rollout_path, rollout_note, tasks_dir)
+    if _git_env_hold(rollout_note):
+        return [], rows
+    race = _race_holds(rollout_note, [(r["path"], r["note"]) for r in rows])
+    for r in rows:
+        if race.get(r["slug"].lower()) and not _landed(r["note"]):
+            if r["state"] == "integrating":
+                return [], rows
+            r["state"], r["setAsideAt"] = "set-aside", "race"
+    if any(r["state"] in ("running", "awaiting-integration", "integrating") for r in rows):
+        return [], rows
+    if any(r["state"] == "queued" and not _unsatisfied(r, index) for r in rows):
+        return [], rows
+    return _sign_off_wait(rows, index), rows
 
 
 # ---- per-task stamps ----------------------------------------------------------
@@ -2690,6 +2812,9 @@ def cmd_status(args) -> int:
         # (render as PAUSED, not stalled); `pause_requested` = a soft pause is pending and drains.
         "paused": _scalar(paused) or None,
         "pause_requested": _truthy_flag(rollout_note.get("pause_requested")),
+        # What the pause waits for: "sign-off" under await-sign-off's pause (ADR 0034: only gates wait on Lachy, and the
+        # repo keeps this as its one unfinished rollout until they are signed or deferred), else null.
+        "pausedFor": _scalar(rollout_note.get(PAUSED_FOR_KEY)) or None,
         # Why the rollout must not run as written (`next` refuses it), or null: see "Incomplete".
         "incomplete": incomplete(rollout_path, rollout_note, [(r["path"], r["note"]) for r in rows], index) or None,
         "ceiling": ceiling,
@@ -4507,17 +4632,42 @@ def _gate_stage(note) -> str:
     return "integration" if _last_log_outcome(note) == "set-aside" and _pr(note) else "run"
 
 
-def cmd_approve_gates(args) -> int:
-    """Record the human sign-off for a gate-pending task's declared gated inputs (ADR 0008), and send
-    the task back by the stage it stopped (p12-14): a stop at Integration -> `review` with `ready:`
-    restamped and `integrating:` removed (it rejoins the Integration queue, and a fresh integrate call
-    re-reads the latest main); any other stop -> `in_progress` with a `gates_signed:` marker (Restart
-    routing resumes its gate-pending call on the signed plan, execute § 3.7, and the restart's
-    mark-started consumes the marker). The stage is read before the status flips.
+def _sign_route(note, slug, now):
+    """Flip a gate-pending note whose gates are all signed by the stage it stopped (p12-14), its pending section
+    removed: a stop at Integration -> `review` with `ready:` restamped and `integrating:` removed; any other stop ->
+    `in_progress` with a `gates_signed:` marker. The stage is read before the flip. Returns (stage, route, ready_pr)."""
+    stage = _gate_stage(note)  # before the flip: the pairing reads status gate-pending
+    if stage == "run" and _last_log_outcome(note) == "set-aside":
+        print(f"WARN: {slug}: the Integration log's last line is set-aside but the note has no pr: — "
+              "it cannot rejoin the Integration queue, so it goes to in_progress (its own call)", file=sys.stderr)
+    note.remove_section(GATE_PENDING_SECTION)
+    ready_pr = None
+    if stage == "integration":
+        note.set("status", "review")
+        note.set("ready", _stamp(now))
+        note.remove("integrating")
+        ready_pr = _pr(note)
+        route = f"status review (stopped at Integration: rejoins the Integration queue; ready: {_stamp(now)})"
+    else:
+        note.set("status", "in_progress")
+        note.set(GATES_SIGNED_KEY, _stamp(now))
+        route = f"status in_progress ({GATES_SIGNED_KEY}: {_stamp(now)}, consumed by the restart's mark-started)"
+    return stage, route, ready_pr
 
-    The CALLER's contract: run this only after the user explicitly signed off the gates in
-    conversation — the sign-off itself is the one decision no agent may make.
+
+def cmd_approve_gates(args) -> int:
+    """Record a sign-off for a gate-pending task's declared gated inputs (ADR 0008), and send the task back by the
+    stage it stopped (p12-14): a stop at Integration -> `review` with `ready:` restamped and `integrating:` removed
+    (it rejoins the Integration queue, and a fresh integrate call re-reads the latest main); any other stop ->
+    `in_progress` with a `gates_signed:` marker (Restart routing resumes its gate-pending call on the signed plan,
+    execute § 3.7, and the restart's mark-started consumes the marker). The stage is read before the status flips.
+
+    The CALLER's contract: run it bare only after Lachy explicitly signed off the gates, which is the one decision no
+    agent may make for him. With --standing it approves only the spend gates his recorded standing approval covers
+    (ADR 0034: _approve_standing), and the lead runs that unattended.
     """
+    if args.standing:
+        return _approve_standing(args)
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
     date = args.date or datetime.now().astimezone().date().isoformat()
@@ -4548,22 +4698,8 @@ def cmd_approve_gates(args) -> int:
         existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
         have = {_norm_gate(l) for l in existing}
         merged = existing + [f"- {g} (approved {date})" for g in gates if _norm_gate(g) not in have]
-        stage = _gate_stage(note)  # before the flip: the pairing reads status gate-pending
-        if stage == "run" and _last_log_outcome(note) == "set-aside":
-            print(f"WARN: {slug}: the Integration log's last line is set-aside but the note has no pr: — "
-                  "it cannot rejoin the Integration queue, so it goes to in_progress (its own call)", file=sys.stderr)
         note.upsert_section(APPROVED_GATES_SECTION, "\n".join(merged))
-        note.remove_section(GATE_PENDING_SECTION)
-        if stage == "integration":
-            note.set("status", "review")
-            note.set("ready", _stamp(now))
-            note.remove("integrating")
-            ready_pr = _pr(note)
-            route = f"status review (stopped at Integration: rejoins the Integration queue; ready: {_stamp(now)})"
-        else:
-            note.set("status", "in_progress")
-            note.set(GATES_SIGNED_KEY, _stamp(now))
-            route = f"status in_progress ({GATES_SIGNED_KEY}: {_stamp(now)}, consumed by the restart's mark-started)"
+        stage, route, ready_pr = _sign_route(note, slug, now)
         note.save(dry_run=args.dry_run)
         if stage == "integration":
             _event(_note_rollout(note), "ready", slug, {"pr": ready_pr}, args)
@@ -4574,16 +4710,142 @@ def cmd_approve_gates(args) -> int:
     return 1 if errors else 0
 
 
+def _standing_limit(note, rollout_note):
+    """The standing approval's limit (ADR 0034): ({value, source}, None), or (None, error). `spend_approval_usd`
+    resolves task frontmatter -> rollout frontmatter -> rollouts.toml (_resolved_settings, once: file:repo,
+    file:defaults) -> the built-in 0, which is off: _retry_budget's order. A stamp that is not a bare integer >= 0 is
+    an error, and so is a refused rollouts.toml."""
+    for where, n in (("task", note), ("rollout", rollout_note)):
+        raw = n.get(SPEND_APPROVAL_KEY)
+        if raw is None:
+            continue
+        value = _stamp_value(raw, 0)
+        if value is None:
+            return None, f"{SPEND_APPROVAL_KEY} on [[{n.path.stem}]] must be an integer >= 0, got {raw!r}"
+        return {"value": value, "source": where}, None
+    res = _resolved_settings(rollout_note)
+    if res["settings"] is None:
+        return None, f"rollout settings refused: {res['error']}"
+    entry = res["settings"].get(SPEND_APPROVAL_KEY)
+    if not isinstance(entry, dict) or isinstance(entry.get("value"), bool) or not isinstance(entry.get("value"), int):
+        return None, f"rollout-settings.py resolves no {SPEND_APPROVAL_KEY}"
+    return {"value": entry["value"], "source": entry.get("source") or "built-in"}, None
+
+
+def _ask_why(verdict, limit, gi):
+    """Why a gate stays pending under the standing approval: the exposure reading's own why, else the limit's."""
+    if verdict["usd"] is None:
+        return verdict["why"]
+    if limit["value"] == 0:
+        if limit["source"] == "built-in":
+            return (f"standing approval off (built-in 0): set [defaults] {SPEND_APPROVAL_KEY} in "
+                    "~/.config/thread/rollouts.toml")
+        return f"standing approval off ({limit['source']} 0)"
+    return (f"total exposure US${gi.format_usd(verdict['usd'])} is over the standing approval's "
+            f"US${gi.format_usd(limit['value'])} ({limit['source']})")
+
+
+def _approve_standing(args) -> int:
+    """approve-gates --standing (ADR 0034; the module docstring): sign each pending spend gate the standing approval
+    covers, leave the rest pending with an ASK line. Exit 0 every gate written, 3 some left, 1 an error."""
+    if not args.rollout:
+        print("ERROR: --standing needs --rollout", file=sys.stderr)
+        return 1
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.is_file():
+        print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
+        return 1
+    try:
+        gi = _gated()
+        rollout_note = Note(rollout_path)
+    except Exception as e:
+        print(f"ERROR: approve-gates --standing: {e}", file=sys.stderr)
+        return 1
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
+    date = args.date or datetime.now().astimezone().date().isoformat()
+    now = _now(args)
+    suffix = " (dry-run)" if args.dry_run else " [written]"
+    errors, asked = [], False
+    for slug in slugs:
+        path = tasks_dir / f"{slug}.md"
+        if not path.exists():
+            errors.append(f"{slug}: task note not found at {path}")
+            continue
+        try:
+            note = Note(path)
+        except ValueError as e:
+            errors.append(str(e))
+            continue
+        if (_note_rollout(note) or "").lower() != rollout_path.stem.lower():
+            errors.append(f"{slug}: its rollout: is {note.get('rollout')!r}, not [[{rollout_path.stem}]]; nothing written")
+            continue
+        status = note.get("status")
+        pending = note.section_text(GATE_PENDING_SECTION)
+        if status != GATE_PENDING_STATUS:
+            if note.has_heading(APPROVED_GATES_SECTION) and not pending:
+                print(f"{slug}: gates already approved [no-change]")
+                continue
+            errors.append(f"{slug}: status is {status!r}, not {GATE_PENDING_STATUS!r} — refusing to approve gates")
+            continue
+        gates = [re.sub(r"^[-*]\s+", "", l.strip()) for l in pending.split("\n") if l.strip()]
+        if not gates:
+            errors.append(f"{slug}: no gates under {GATE_PENDING_SECTION!r} — nothing to sign off")
+            continue
+        limit, err = _standing_limit(note, rollout_note)
+        if err:
+            errors.append(f"{slug}: {err}; nothing written")
+            continue
+        covered, left = [], []
+        for g in gates:
+            verdict = gi.covered(g, limit["value"])
+            if verdict["covered"]:
+                covered.append((g, verdict["usd"]))
+            else:
+                left.append((g, _ask_why(verdict, limit, gi)))
+        if covered:
+            existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
+            have = {_norm_gate(l) for l in existing}
+            for g, usd in covered:
+                if _norm_gate(g) not in have:
+                    have.add(_norm_gate(g))
+                    existing.append(f"- {g} {gi.annotation(date, usd, limit['value'], limit['source'])}")
+            note.upsert_section(APPROVED_GATES_SECTION, "\n".join(existing))
+            stage = None
+            if left:
+                note.upsert_section(GATE_PENDING_SECTION, bullets([g for g, _ in left]))
+            else:
+                stage, route, ready_pr = _sign_route(note, slug, now)
+            note.save(dry_run=args.dry_run)
+            if stage == "integration":
+                _event(_note_rollout(note), "ready", slug, {"pr": ready_pr}, args)
+            for g, usd in covered:
+                print(f"{slug}: gate approved under the standing approval: {g} (exposure US${gi.format_usd(usd)} of "
+                      f"US${gi.format_usd(limit['value'])}, {limit['source']})" + suffix)
+            if not left:
+                print(f"{slug}: every gate signed under the standing approval -> {route}" + suffix)
+        for g, why in left:
+            print(f"ASK: {slug}: {g}: {why}")
+            asked = True
+    for e in errors:
+        print(f"ERROR: {e}", file=sys.stderr)
+    return 1 if errors else (3 if asked else 0)
+
+
 # ---- clear-pause ------------------------------------------------------------
 
 def cmd_clear_pause(args) -> int:
-    """Reinstate: remove `paused:` + any pending `pause_requested` from the rollout note.
+    """Reinstate: remove `paused:` + any pending `pause_requested` + `paused_for` from the rollout note.
 
     Called by /thread:execute's resume path ONLY when it finds a `paused:` stamp — a pending
     `pause_requested` with no stamp is a live user request that must survive resumes (the heartbeat
     cron re-enters execute's resume, and it must never cancel a pause the user asked for). Clearing
     both here covers the hard-pause-before-honour edge (stamp hand-written while a soft request was
     still pending) so a freshly reinstated rollout doesn't immediately re-pause.
+
+    Under `paused_for: sign-off` (ADR 0034) it first checks the queue with the pause ignored: while that would still be
+    awaiting sign-off (_awaits_sign_off), it writes nothing, prints `STILL-AWAITING: [[<slug>]]: <gate>` per pending
+    gate and exits 3, so a reinstate with a gate unsigned never re-runs the sign-off form.
     """
     path = Path(os.path.expanduser(args.rollout))
     if not path.exists():
@@ -4591,8 +4853,22 @@ def cmd_clear_pause(args) -> int:
         return 1
     note = Note(path)
     stamp = _scalar(note.get("paused"))
+    if _valued(stamp) and _scalar(note.get(PAUSED_FOR_KEY)).lower() == SIGN_OFF:
+        wait, rows = _awaits_sign_off(path, note, Path(os.path.expanduser(args.tasks_dir)))
+        if wait:
+            by_slug = {r["slug"].lower(): r for r in rows}
+            for w in wait:
+                if w["why"] != GATE_PENDING_STATUS:
+                    continue
+                pending = by_slug[w["slug"].lower()]["note"].section_text(GATE_PENDING_SECTION)
+                for line in pending.split("\n"):
+                    gate = re.sub(r"^[-*]\s+", "", line.strip())
+                    if gate:
+                        print(f"STILL-AWAITING: [[{w['slug']}]]: {gate}")
+            return 3
     note.remove("paused")
     note.remove("pause_requested")
+    note.remove(PAUSED_FOR_KEY)
     note.save(dry_run=args.dry_run)
     if _valued(stamp) and not args.dry_run:
         # The Run record (p15-2): a hard pause whose record-pause never ran is caught up at its stamp first.
@@ -4602,10 +4878,49 @@ def cmd_clear_pause(args) -> int:
             _event(path.stem, "paused", None, {"mode": "hard"}, args, ts=at.isoformat() if at else None)
         _event(path.stem, "resumed", None, None, args)
     if note.dirty:
-        print("pause cleared (paused/pause_requested removed)" +
+        print("pause cleared (paused/pause_requested/paused_for removed)" +
               (" (dry-run)" if args.dry_run else " [written]"))
     else:
         print("no pause stamp [no-change]")
+    return 0
+
+
+# ---- await-sign-off ---------------------------------------------------------
+
+def cmd_await_sign_off(args) -> int:
+    """The sign-off pause (ADR 0034; the module docstring): stamp `paused:` and `paused_for: sign-off`, append the
+    `## Pause log` line and record `paused mode=sign-off`, only when the queue with no --running and any pause ignored is
+    awaiting sign-off. Exit 1 (nothing written) otherwise; `[no-change]` once stamped."""
+    path = Path(os.path.expanduser(args.rollout))
+    if not path.is_file():
+        print(f"ERROR: await-sign-off: rollout note not found at {path}", file=sys.stderr)
+        return 1
+    note = Note(path)
+    ro = path.stem
+    stamp = _scalar(note.get("paused"))
+    if _valued(stamp):
+        if _scalar(note.get(PAUSED_FOR_KEY)).lower() == SIGN_OFF:
+            print(f"{ro}: already awaiting sign-off since {stamp} [no-change]")
+            return 0
+        print(f"ERROR: await-sign-off: {ro} carries paused: {stamp} (another pause); nothing written", file=sys.stderr)
+        return 1
+    wait, _rows_ = _awaits_sign_off(path, note, Path(os.path.expanduser(args.tasks_dir)))
+    if not wait:
+        print(f"ERROR: await-sign-off: {ro} is not awaiting sign-off (something can still start, runs, integrates or "
+              "is set aside for another reason: `next` says why); nothing written", file=sys.stderr)
+        return 1
+    now = _stamp(_now(args))
+    named = ", ".join(f"[[{w['slug']}]] ({w['why']})" for w in wait)
+    note.set("paused", now, after=("pause_requested", "parallel_ceiling", "status"))
+    note.set(PAUSED_FOR_KEY, SIGN_OFF, after=("paused",))
+    note.append_line(PAUSE_LOG_SECTION, f"- {now} awaiting sign-off: {named}: sign off, then /thread:execute [[{ro}]]")
+    note.save(dry_run=args.dry_run)
+    if not args.dry_run:
+        state = _record_state(ro)
+        if state is None or not state["paused"]:
+            _event(ro, "paused", None, {"mode": SIGN_OFF}, args)
+    print(f"{ro}: awaiting sign-off: {named} -> paused: {now}, {PAUSED_FOR_KEY}: {SIGN_OFF}"
+          + (" (dry-run)" if args.dry_run else " [written]"))
     return 0
 
 
@@ -4796,18 +5111,38 @@ def main() -> int:
     ca.add_argument("--dry-run", action="store_true", help="print the carry/keep lines and write nothing")
     ca.set_defaults(func=cmd_carry)
 
-    cp = sub.add_parser("clear-pause", help="reinstate a paused rollout: remove paused/pause_requested (/thread:execute resume)")
+    cp = sub.add_parser("clear-pause", help="reinstate a paused rollout: remove paused/pause_requested/paused_for "
+                                            "(/thread:execute resume); exit 3 STILL-AWAITING under a sign-off pause "
+                                            "whose gates are unsigned (ADR 0034)")
     cp.add_argument("--rollout", required=True, help="path to the rollout note")
+    cp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     cp.add_argument("--dry-run", action="store_true")
     cp.set_defaults(func=cmd_clear_pause)
+
+    aw = sub.add_parser("await-sign-off", help="pause a rollout whose only unlanded tasks wait on a gate: stamp paused: + "
+                                               "paused_for: sign-off and a ## Pause log line (ADR 0034; execute § 4.5 "
+                                               "step 5's sign-off form); exit 1 when the queue is not awaiting sign-off")
+    aw.add_argument("--rollout", required=True, help="path to the rollout note")
+    aw.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    aw.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the paused: stamp)")
+    aw.add_argument("--dry-run", action="store_true")
+    aw.set_defaults(func=cmd_await_sign_off)
 
     vt = sub.add_parser("verify-timeout", help="print the rollout's verify_timeout and its harness timeout as JSON, "
                                                "or exit 1 when invalid (read-only; execute § 3)")
     vt.add_argument("--rollout", required=True, help="path to the rollout note")
     vt.set_defaults(func=cmd_verify_timeout)
 
-    ag = sub.add_parser("approve-gates", help="record the human sign-off for a gate-pending task's gated inputs (ADR 0008)")
+    ag = sub.add_parser("approve-gates", help="record a sign-off for a gate-pending task's gated inputs: Lachy's explicit "
+                                              "one, or with --standing the standing approval's (ADR 0008, ADR 0034)")
     ag.add_argument("--tasks", required=True, help="comma-separated task slugs (must be at status gate-pending)")
+    ag.add_argument("--standing", action="store_true",
+                    help="sign only the spend gates the standing approval covers (spend_approval_usd: task, rollout, "
+                         "rollouts.toml, built-in 0 = off); the rest stay pending as ASK lines: exit 0 all signed, "
+                         "3 some left, 1 an error (ADR 0034)")
+    ag.add_argument("--rollout", default=None,
+                    help="with --standing (required there): the rollout note, whose frontmatter and Project root "
+                         "resolve spend_approval_usd; the task's rollout: must name it")
     ag.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     ag.add_argument("--date", default=None, help="sign-off date stamped on each gate (default: today)")
     ag.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the ready: restamp of a stop at Integration)")

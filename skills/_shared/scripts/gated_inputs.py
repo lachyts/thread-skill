@@ -68,7 +68,7 @@ The single home of two readings of free text. Stdlib only; it writes nothing and
    GATE_ANNOT_RE strip it and the gate still matches its declaration.
 
 Importable (reconcile-rollout.py loads it with importlib, beside rollout-settings.py): sweep, hits, body_of, SPEND,
-OLD_SPEND, CREDENTIAL, IRREVERSIBLE, UNIT_NOUNS, PERIOD_ADVERBS, exposure, covered, annotation.
+OLD_SPEND, CREDENTIAL, IRREVERSIBLE, UNIT_NOUNS, PERIOD_ADVERBS, exposure, covered, annotation, format_usd.
 """
 import json
 import os
@@ -353,7 +353,8 @@ def covered(gate, limit):
     return {"covered": ok, "usd": out["usd"], "why": out["why"]}
 
 
-def _usd(value):
+def format_usd(value):
+    """An amount as the annotation writes it: whole when integral, else to 2 dp."""
     d = Decimal(value)
     if d == d.to_integral_value():
         return str(int(d))
@@ -363,8 +364,8 @@ def _usd(value):
 def annotation(date, usd, limit, source):
     """The standing approval's `## Approved gates` suffix (module docstring, 3). Raises ValueError on a `)` in any
     part: the engine's normalizeGate strips only an annotation with none."""
-    text = (f"(approved {date} under the standing approval: total exposure US${_usd(usd)}, "
-            f"limit US${_usd(limit)} from {source})")
+    text = (f"(approved {date} under the standing approval: total exposure US${format_usd(usd)}, "
+            f"limit US${format_usd(limit)} from {source})")
     if text.count(")") != 1:
         raise ValueError(f"an annotation part holds a ')': {date!r}, {source!r}")
     return text
