@@ -129,7 +129,7 @@ Gates: <fork> returns to Lachy via grill-me — report the fork and its evidence
 Next move: <the single concrete next step>
 ```
 
-The `Gates:` line comes from the grill-fit check's step 2(b): one line per Lachy-owned fork, omitted when there is none. The consumer stops at the fork and asks.
+The `Gates:` line comes from the grill-fit check's step 2(b): one line per Lachy-owned fork, omitted when there is none. The consumer stops at the fork and asks. A fork the consumer can settle (step 2(a)) goes into `Context:` or `Next move:` as "decide X from Y".
 
 Keep it tight — the doc carries the depth; the prompt carries the momentum.
 
