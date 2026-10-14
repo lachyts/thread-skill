@@ -4,7 +4,7 @@
 // Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { assertHas, collapse, fencedBlocks, read, section } from '../lib/contract-text.mjs'
+import { assertHas, collapse, fencedBlocks, read, section, slice, walk } from '../lib/contract-text.mjs'
 
 const reshuffle = read('skills/orient/reshuffle.md')
 const orient = read('skills/orient/SKILL.md')
@@ -58,6 +58,31 @@ test('orient runs drift dry, reports it, and applies it on a default or --steer 
     /Ambiguous items are listed for Lachy and never applied/,
     /A default run and Steer only authorise them/, /the § 3 Drift line is the notice/, /`--look` applies none/,
     /scoped target applies no drift fixes/])
+})
+
+// A scoped target applies no drift fixes (§ 4), so its Drift line is report-only: § 3 must not tell the model
+// to announce fixes for it, and CONTEXT.md's Drift entry must not say every non-look run fixes drift.
+test('the Drift line is the notice only when fixes follow; a scoped target is report-only', () => {
+  const s3 = S(3)
+  const drift = s3.slice(s3.indexOf('**Drift**'), s3.indexOf('**Shape**'))
+  assertHas(drift, 'orient § 3 Drift bullet', [/unless `--look` or a scoped target \(report-only then\)/,
+    /notice[^.]*only when fixes will follow/, /scoped target, say it is report-only/])
+  const entry = collapse(slice(read('CONTEXT.md'), /^- \*\*Drift\*\* —/, /^- \*\*/) ?? '')
+  assertHas(entry, 'CONTEXT.md Drift entry', [/never a look-only one or a scoped target/])
+  assert.doesNotMatch(entry, /any run but a look-only one(?! or a scoped target)/,
+    'CONTEXT.md says drift is fixed on any run but a look-only one, scoped targets included')
+})
+
+// Every ADR whose ADR 0027 amendment still describes the three-way question carries ADR 0036's amendment
+// beside it, so no ADR header reads as if orient still asks.
+test('every ADR amended for the three-way question also carries ADR 0036\'s amendment', () => {
+  const asked = /Amended by ADR 0027[^)]*(Reshuffle, Steer only or Look only|a Reshuffle or Steer only answer)/
+  const hits = walk('docs/adr').filter((f) => f.endsWith('.md'))
+    .map((file) => ({ file, head: collapse(slice(read(file), /^# /, /^## /) ?? '') }))
+    .filter(({ head }) => asked.test(head))
+  assert.deepEqual(hits.map((h) => h.file).sort(),
+    ['docs/adr/0003-orient-is-project-altitude-next.md', 'docs/adr/0026-finished-work-closes-itself.md'])
+  for (const { file, head } of hits) assert.match(head, /Amended by ADR 0036, 2026-10-14/, `${file} lacks ADR 0036's amendment`)
 })
 
 // ADR 0036 d5: Reshuffle is the default, not a question. § 4 asks nothing; `--steer` and `--look` (or the
