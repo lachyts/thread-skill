@@ -343,8 +343,11 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   if (!spec || JSON.stringify(driverStates(states.map(fill))) !== JSON.stringify(states) ||
     all.length !== shaped.length || reasons.length !== clean.length) fails.push('status-line')
 
-  // heartbeat: the > ROLLOUT-HEARTBEAT prompt's clauses, in order.
+  // heartbeat: the > ROLLOUT-HEARTBEAT prompt's clauses, in order. The stall re-entry is read on clause (7)'s own
+  // span (p18-1): clause (2) now re-enters *Cold resume* too, on a lapsed room stop, so a whole-prompt match would
+  // pass with clause (7)'s re-entry or its § 2.7 skip gone.
   const at = (k) => hb.indexOf(k)
+  const hb7 = hb.indexOf('(7)') >= 0 ? hb.slice(hb.indexOf('(7)')) : ''
   if (!hb.includes('Read the last ROLLOUT-STATUS line') || !/state=done or state=halted.*CronDelete it and stop/.test(hb) ||
     !(at('`paused:`') >= 0 && at('`paused:`') < at('Lost calls') && at('Lost calls') < at('background Integration command') &&
       at('background Integration command') < at('starts `gated:`') && at('starts `gated:`') < at('starts `review required:`') &&
@@ -353,7 +356,7 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     // *Lost call* resumes without re-checking liveness, so clause (3) applies it only to calls no longer in flight.
     !hb.includes('apply §4.5 *Lost call* to each call this session launched that is no longer in flight in /workflows with no reconciled row (never to a call still in flight') ||
     !hb.includes('`--running`') || !hb.includes('`<out>.rc`') || !hb.includes('merge-task.status') ||
-    !hb.includes('work remains') || !hb.includes('§4.5 *Cold resume*') || !hb.includes('skips § 2.7')) fails.push('heartbeat')
+    !hb7.includes('work remains') || !hb7.includes('§4.5 *Cold resume*') || !hb7.includes('skips § 2.7')) fails.push('heartbeat')
 
   // resume-running: a cold resume and a reinstate pass --running = this session's live task-call slugs, so a
   // re-invocation in the launching session never reports its own live calls as stalled (Restart routing would send
@@ -719,6 +722,15 @@ test('control: the stall clause before the hold clauses fails heartbeat', () => 
   only(sk(hb, hb.replace(c5, '\u0000').replace(c7, c5.trim()).replace('\u0000', c7 + ' ')), 'heartbeat', 'stall first')
 })
 
+test("control: clause (7) without its stall re-entry fails heartbeat, though clause (2) re-enters too", () => {
+  only(sk('re-enter /thread:execute [[<rollout-slug>]] §4.5 *Cold resume* (this re-entry skips § 2.7, execute\'s entry-point-only pushed-base gate); else end the turn silently.',
+    'end the turn silently.'), 'heartbeat', 'no stall re-entry')
+})
+
+test("control: clause (7) without its § 2.7 skip fails heartbeat, though clause (2) skips it too", () => {
+  only(sk(" (this re-entry skips § 2.7, execute's entry-point-only pushed-base gate)", ''), 'heartbeat', 'no § 2.7 skip')
+})
+
 test('control: registering the heartbeat at the first task call fails heartbeat-register', () => {
   only(sk('At each loop entry (top-down, *Cold resume*, *Reinstate*, `/thread:repair`\'s hand-off), the first turn that ends `state=waiting` runs',
     'At the first task call\'s launch, the turn runs'), 'heartbeat-register', 'first task call')
@@ -867,9 +879,10 @@ test("control: § 4.5's entry paragraph without the check fails verify-timeout",
 })
 
 test('control: a cold resume that checks after resume fails verify-timeout', () => {
-  only(sk("then § 3's `verify_timeout` check; then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume --rollout <rollout-note>`",
-    "then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume --rollout <rollout-note>`, then § 3's `verify_timeout` check"),
-  'verify-timeout', 'check after resume')
+  const RESUME = '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py resume --rollout <rollout-note>`'
+  const moved = edit(edit(real.skill, "then § 3's `verify_timeout` check; then, once the entry's `check-all`", "then, once the entry's `check-all`"),
+    `then ${RESUME} (a PR`, `then ${RESUME}, then § 3's \`verify_timeout\` check (a PR`)
+  only({ skill: moved }, 'verify-timeout', 'check after resume')
 })
 
 test("control: the Pausing Reinstate without the check fails verify-timeout", () => {

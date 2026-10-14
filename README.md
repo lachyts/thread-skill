@@ -89,6 +89,9 @@ inputs and the lead's own set-aside rows).
 `skills/execute/scripts/git-env-canary.py` is the lead's git-env canary: it
 watches the shared checkout's default branch and bareness around every launch
 and halts the queue on a change that is not a close-out (execute § 4.5).
+`skills/execute/scripts/step-boundary.py` is the lead's side of a Chorus room
+stop: it reads the Workflow journals to stop each call at a step boundary and
+records the stop on the rollout note (execute § Room stop).
 `skills/_shared/scripts/run_record.py` is the Run record's one writer (ADR 0032):
 every emitter appends its events through it, and its header is the schema.
 `skills/retro/scripts/score.py` reads a record into a Retro's scores and proposals

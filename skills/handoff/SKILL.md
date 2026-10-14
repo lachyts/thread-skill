@@ -28,6 +28,9 @@ to the default branch, or a `landing` PR is opened with its merge queued, and
 withdrawing it lands a second push or PR. It must still be removed, not left: a
 pending doc nobody meant silences the next `thread:close`'s continuation tasks
 for that thread. See `handoff-lifecycle.md` § Withdrawn.)
+On the Chorus Stage a Login at its line is never a handoff: execute § Room stop
+stops the rollout's calls at a step boundary and the Stage moves the Session
+(Chorus ADR 0071); off the Stage a handoff stays the way to continue.
 
 ## Success contract in Codex Desktop or a Chorus Session
 
