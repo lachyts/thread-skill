@@ -6,7 +6,7 @@ One system, two dispatch lanes. Every cluster of open tasks gets exactly one:
   the three-layer convergence engine, Integration and auto-merge.
 - **The session lane**: scoped sessions dispatched by calendar and attention —
   `defer` (`scheduled:` dates do the dispatch), a task's `## Launch` block via
-  `open`, or orient's parallel-safe cc-* batches.
+  `open`, or orient's parallel-safe native batches (ADR 0023).
 
 **Plugin root.** This spec is read as a file, never rendered: run its commands by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 
@@ -26,7 +26,9 @@ buys nothing there.
 **Signs a task is NOT rollout-shaped** (any one disqualifies it):
 
 - Its core action is an external publish — CMS, live site, DNS, config console.
-  (These always pause at the human gate regardless — ADR 0008; execute § 3.7.)
+  (An external publish is an irreversible or credential gate, so it always
+  stops its task for Lachy's sign-off and never passes the standing approval —
+  ADR 0008, ADR 0034; execute § 3.7.)
 - Its ordering constraint is a measurement window or calendar date, not file
   overlap. The engine's parallelism is forbidden by isolation windows, and
   the queue cannot see a window or calendar constraint.

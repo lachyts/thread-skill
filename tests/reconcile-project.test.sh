@@ -436,4 +436,92 @@ ok "$(items new_since_review)" "phase demo-p3-openwork" "the new phase is still 
 ok "$(items reviewed_not_applied)" "$U_ALL" "the 11 items the first run wrote are reviewed, not applied"
 ok "$(reasons reviewed_not_applied)" "$NO_LONGER_DRIFT" "each with the benign no-longer-drift reason, never now ambiguous"
 
+# ---- P1. a rollout that waits on sign-off (ADR 0034) ------------------------------------------------------------
+# execute § 4.5 step 5's sign-off form leaves the rollout open and paused (`paused_for: sign-off`) with a `not landed`
+# bullet in its `## Completion log`. While it waits the note is live (T root), so rule 2(b) never reads its log; once a
+# later full ceremony archives it, every task the bullet names has landed (done) or was deferred (no `rollout:`), and a
+# merge whose mark-done never ran reads A on the `not landed` bullet, never U.
+echo "# P1. a rollout awaiting sign-off"
+P1R=demo-rollout-2026-10-20
+WAIT="- [[demo-p40-1-gated]] not landed: awaiting your sign-off: spend: x — cap USD 70"
+COUNT="- and 1 queued task(s) that wait on them (named in ## Pause log): sign off, then /thread:execute [[$P1R]]"
+p1phase() { mkdir -p "$v/Work/Phases"; printf -- '---\ntags:\n  - phase\nstatus: open\nprojects:\n  - "[[Demo]]"\nphase: 40\n---\n\n# Demo phase 40\n' > "$v/Work/Phases/demo-p40-signoff.md"; }
+# p1task <file> <status> [frontmatter lines...]
+p1task() {
+  local n="$1" f="$v/Work/Tasks/$1.md" st="$2"; shift 2
+  { printf -- '---\ntags:\n  - task\nstatus: %s\nprojects:\n  - "[[Demo]]"\nphase: 40\n' "$st"
+    for l in "$@"; do printf '%s\n' "$l"; done
+    printf -- '---\n\n# %s\n\nbody\n' "$n"; } > "$f"
+}
+# p1ro <dir under Work/Tasks or ""> <status> <log lines (one string)> [frontmatter lines...]
+p1ro() {
+  local d="$v/Work/Tasks${1:+/$1}" st="$2" log="$3"; shift 3
+  mkdir -p "$d"
+  { printf -- '---\ntags:\n  - task\n  - rollout\nstatus: %s\nprotocol_version: 5\nprojects:\n  - "[[Demo]]"\n' "$st"
+    for l in "$@"; do printf '%s\n' "$l"; done
+    printf -- '---\n\n## Completion log\n\n%s\n' "$log"; } > "$d/$P1R.md"
+}
+ROL="rollout: \"[[$P1R]]\""
+inlists() { (items unambiguous; items ambiguous) | grep -c " $1\$"; }
+p1quiet() {  # p1quiet <label>: t, d and the phase are in neither list
+  for s in demo-p40-1-gated demo-p40-2-after demo-p40-signoff; do ok "$(inlists "$s")" 0 "$1: $s is in neither list"; done
+}
+
+# P1a: the real waiting state: the rollout live in T root, t gate-pending, d open and waiting on it.
+fresh; p1phase
+p1ro "" open "$WAIT"$'\n'"$COUNT" 'paused: 2026-10-20T09:00+00:00' 'paused_for: sign-off'
+p1task demo-p40-1-gated gate-pending "$ROL"
+p1task demo-p40-2-after open "$ROL" 'depends-on: ["[[demo-p40-1-gated]]"]'
+rp --phases 40 --no-gh --json
+ok "$rc" 0 "P1a: exits 0"
+p1quiet "P1a (waiting, live rollout)"
+# signed, not yet merged: still no drift, and --apply writes nothing of it
+p1task demo-p40-1-gated in_progress "$ROL" 'gates_signed: 2026-10-21T08:00+00:00'
+rp --phases 40 --no-gh --json
+p1quiet "P1a (signed, not merged)"
+before=$(manifest "$v/Work/Phases"; cat "$v/Work/Tasks/demo-p40-1-gated.md" "$v/Work/Tasks/demo-p40-2-after.md")
+rp --phases 40 --no-gh --kinds phase,task --apply --json
+ok "$(manifest "$v/Work/Phases"; cat "$v/Work/Tasks/demo-p40-1-gated.md" "$v/Work/Tasks/demo-p40-2-after.md")" "$before" "P1a: --apply writes nothing of p40"
+
+# P1b: the same log with the rollout in R: a gate-pending task is a HOLD, never a rule-2 candidate.
+fresh; p1phase
+p1ro Archive/Rollouts done "$WAIT"$'\n'"$COUNT"
+p1task demo-p40-1-gated gate-pending "$ROL"
+p1task demo-p40-2-after open "$ROL" 'depends-on: ["[[demo-p40-1-gated]]"]'
+rp --phases 40 --no-gh --json
+ok "$(inlists demo-p40-1-gated)" 0 "P1b: the gate-pending task is untouched"
+ok "$(inlists demo-p40-signoff)" 0 "P1b: the phase is quiet (a hold)"
+
+# P1c: the later archived state, after sign-off and the full ceremony: the `### <date>` block records both merges.
+fresh; p1phase
+p1ro Archive/Rollouts done "$WAIT"$'\n'"$COUNT"$'\n\n### 2026-10-21\n\n'"- [[demo-p40-1-gated]] → https://github.com/o/r/pull/42, merged 2026-10-21"$'\n'"- [[demo-p40-2-after]] → #43, merged 2026-10-21"
+p1task demo-p40-1-gated done "$ROL" 'pr: https://github.com/o/r/pull/42'
+p1task demo-p40-2-after done "$ROL" 'pr: https://github.com/o/r/pull/43'
+rp --phases 40 --no-gh --json
+ok "$(inlists demo-p40-1-gated)|$(inlists demo-p40-2-after)" "0|0" "P1c: done tasks are in neither list"
+has "$(items unambiguous)" "phase demo-p40-signoff" "P1c: the phase is U"
+rp --phases 40 --no-gh --kinds phase --apply --json
+ok "$(grep -m1 '^status:' "$v/Work/Phases/demo-p40-signoff.md")" "status: done" "P1c: --apply closes the phase"
+
+# P1d: Lachy declined: repair's defer cleared `rollout:` and reopened both; the archived log holds only the waiting bullet.
+fresh; p1phase
+p1ro Archive/Rollouts done "$WAIT"$'\n'"$COUNT"
+p1task demo-p40-1-gated open
+p1task demo-p40-2-after open 'depends-on: ["[[demo-p40-1-gated]]"]'
+rp --phases 40 --no-gh --json
+p1quiet "P1d (deferred)"
+
+# P1e: the fail-safe: P1c's log, but t left in_progress (a merge whose mark-done never ran), no pr:.
+fresh; p1phase
+p1ro Archive/Rollouts done "$WAIT"$'\n'"$COUNT"$'\n\n### 2026-10-21\n\n'"- [[demo-p40-1-gated]] → https://github.com/o/r/pull/42, merged 2026-10-21"$'\n'"- [[demo-p40-2-after]] → #43, merged 2026-10-21"
+p1task demo-p40-1-gated in_progress "$ROL"
+p1task demo-p40-2-after done "$ROL" 'pr: https://github.com/o/r/pull/43'
+rp --phases 40 --no-gh --json
+ok "$(items ambiguous | grep -c '^task demo-p40-1-gated$')|$(items unambiguous | grep -c ' demo-p40-1-gated$')" "1|0" "P1e: t is Ambiguous, never Unambiguous"
+has "$(field ambiguous demo-p40-1-gated reason)" "not landed" "P1e: its reason quotes the not landed bullet"
+has "$(field ambiguous demo-p40-signoff reason)" "demo-p40-1-gated" "P1e: the phase is A, naming t"
+before=$(cat "$v/Work/Tasks/demo-p40-1-gated.md")
+rp --phases 40 --no-gh --apply --json
+ok "$(cat "$v/Work/Tasks/demo-p40-1-gated.md")" "$before" "P1e: --apply leaves t byte-identical"
+
 exit $fail

@@ -83,17 +83,23 @@ Subcommands:
       Then the automatic retry's verdict (p16-4, ADR 0033; auto_retry_verdict, its rules in order), which every
       caller gets and `reconcile-rollout.py auto-retry` re-runs before it writes: autoRetry, autoRetryWhy (the
       first rule that refused, "" on true), autoRetryError (an `auto_retries` or `max_review_rounds` stamp that is
-      not a valid integer: execute § 3's halt; else null), autoRetryClass (agent | infra | quota, for a note set
+      not a valid integer: execute § 3's halt, kept under a `## Needs you` question or a recorded answer; else
+      null), autoRetryClass (agent | infra | quota, for a note set
       aside at its run or at Integration; else null), autoRetryBudget ({autoRetries, maxReviewRounds}, each
       {value, source}, resolved task -> rollout -> rollouts.toml -> built-in by reconcile-rollout.py
       _retry_budget; null until it resolves), autoRetriesUsed and quotaRetriesUsed (the note's counters, 0 when
       absent, null when malformed), fingerprint (the latest block's run sha), autoRetryRaise (lastRound + 1 when
       a retry re-enters a revise with no round left) and autoRetryAfter (a quota or infra block's cool-down
-      end). The rollout note (<note dir>/<rollout>.md) is read and the budget resolved only for a note set aside
-      at its run or at Integration, so every other read stays cheap; a resolver failure is in the JSON and the
-      exit stays 0.
-      --max-review-rounds K that differs from the resolved max_review_rounds means no retry. --now is the time
-      a cool-down is read against (default: now).
+      end); then humanFix (ADR 0035: null, or {act, detail, handBack, label, raise}, the one fixed act that moves
+      a block only a person may move, act one of HUMAN_FIX_ACTS; execute § 6.5 (c), status's Needs-you block and
+      repair § 2 print it and never re-derive it) and answerRecorded (reconcile-rollout.py _answer_recorded, read
+      for every note: the live `## Repair input` answer to the current block, {stamp, kind, form, line}, or
+      null; an answered block is never retried). The rollout note (<note dir>/<rollout>.md) is read and the
+      budget resolved only for a note set aside at its run or at Integration, so every other read stays cheap; a
+      resolver failure is in the JSON and the exit stays 0.
+      --max-review-rounds K that differs from the resolved max_review_rounds means no retry (an overlay: humanFix
+      ignores it, and with no answer recorded every other key is as before). --now is the time a cool-down is
+      read against (default: now).
 
   plan --note N
       The task's approved plan, for the two launches that pass it (execute § 4.5 step 1.2's seeded revise,
@@ -943,114 +949,301 @@ def _revise_shaped(inp):
                 and inp.get("markerReason") == "" and last.get("outcome") == "rejected" and inp.get("history"))
 
 
-# ---- the automatic retry's verdict (p16-4, ADR 0033) ------------------------------------------------------
+# ---- the automatic retry's verdict (p16-4, ADR 0033) and its Human fix (ADR 0035) ---------------------------------
 
 AUTO_RETRY_KEYS = ("autoRetry", "autoRetryWhy", "autoRetryError", "autoRetryClass", "autoRetryBudget",
-                   "autoRetriesUsed", "quotaRetriesUsed", "fingerprint", "autoRetryRaise", "autoRetryAfter")
+                   "autoRetriesUsed", "quotaRetriesUsed", "fingerprint", "autoRetryRaise", "autoRetryAfter",
+                   "humanFix", "answerRecorded")
+
+# The fixed acts a Human fix names (ADR 0035 decision 1), one per refusal cause a person owns. auto_retry_verdict sets
+# `humanFix.act` to one of these; execute § 6.5 (c), status's Needs-you block and repair § 2 print it and never
+# re-derive a cause, so a new cause is one branch here plus one test.
+HUMAN_FIX_ACTS = (
+    "finish the recorded answer",                      # H0  an answer whose way back is more than a bare hand-back
+    "sign off gated input",                            # H1  gate-pending
+    "fix its rollout: or defer",                       # H2  no rollout note
+    "decide RACE", "decide UNVERIFIED",                # H3  an undecided RACE or UNVERIFIED
+    "answer the question",                             # H4  a `## Needs you` question
+    "decide scope or defer",                           # H5  plan-blocked after a descope, or a refused descope
+    "restore, recut or defer",                         # H6  at Integration with no pr: (repair § 4, or § 3c's merge)
+                                                       # H8  the PR branch is gone
+    "fix the note's pr: or defer",                     # H7  a pr: the engine refuses, on a way back that launches on it
+    "raise max_plan_rounds, hand back or defer",       # H9  a spent budget: the run's own
+    "raise max_review_rounds, hand back or defer",
+    "raise max_iterations, hand back or defer",
+    "hand back or defer",                              # H10 every other refusal; H11 a code-writing review with no PR
+    "fix the round budget",                            # H12 an invalid budget stamp
+)
+# The fixed openings the engine, its prompts and the lead write for a code-writing task's own run. None of them spends a
+# budget (a dead call, merge-task's exit 1, a dead agent, a plan divergence, the engine's two fallbacks), so a run that
+# starts with one never raises max_iterations: only the implementer's or reviser's own paragraph does.
+NO_BUDGET_OPENINGS = ("workflow call failed:", "merge-task:", "transient infrastructure failure", "plan-divergence:",
+                      "agent returned neither verified nor blocked", "workflow stage threw")
+PLAN_BUDGET_OPENINGS = ("plan not approved after", "plan round budget exhausted")
+
+
+def human_fix_label(note):
+    """humanFix's label: `(<status>, <section> run <n>)`, the section the status writes and its top run (a legacy section
+    with no run: `(<status>, <section>)`); `(review, no PR)` for a code-writing review note with no pr:; `(gate-pending)`
+    for a gate. When k answers to the current block were spent by a hand-back it adds `, ask <k+1>`, so an identical
+    re-block after a spent answer is a new item, pushed again (ADR 0035 decision 3)."""
+    status = rr._status(note)
+    if status == rr.GATE_PENDING_STATUS:
+        return "(gate-pending)"
+    if status == "review" and not rr._pr(note):
+        base = "(review, no PR"
+    else:
+        heading = rr.BLOCKED_SECTIONS.get(status)
+        if heading is None:
+            base = f"({status or 'no status'}"
+        else:
+            runs = note.run_blocks(heading)
+            base = f"({status}, {heading[3:]}" + (f" run {rr._top_run(runs)['n']}" if runs else "")
+    k = rr._spent_count(note, rr._block_fingerprint(note))
+    return base + (f", ask {k + 1}" if k else "") + ")"
+
+
+def _raise_field(note, inp, k, at):
+    """The budget a refused block's source run spent (execute § 6.5's former (c) rule 3), or None. Never at Integration,
+    and never on a note carrying a `## Needs you` question (the engine stops on the question, never on a budget run out).
+    `max_plan_rounds` for a Plan-blocked run that starts `plan not approved after` or `plan round budget exhausted`;
+    `max_review_rounds` for a review-blocked note, or a plain-rejection revise marker (markerStage revise, markerReason
+    empty) with lastRound >= the resolved k; `max_iterations` for a code-writing task's own Blocker diagnosis run that
+    starts with none of NO_BUDGET_OPENINGS (the implementer's or reviser's own paragraph)."""
+    if at == "integration" or rr.needs_human(note):
+        return None
+    status = rr._status(note)
+    if status == "plan-blocked":
+        first = note.latest_run_text(rr.BLOCKED_SECTIONS["plan-blocked"]).split("\n", 1)[0].strip().lower()
+        return "max_plan_rounds" if first.startswith(PLAN_BUDGET_OPENINGS) else None
+    if status == "review-blocked":
+        return "max_review_rounds"
+    if status != "blocked" or inp.get("source") != "blocker":
+        return None
+    stage = inp.get("markerStage")
+    if stage == "revise" and inp.get("markerReason") == "":
+        return "max_review_rounds" if k is not None and inp.get("lastRound", 0) >= k else None
+    if stage == "own" and rr._scope(note) != "read-only":
+        text = note.latest_run_text(rr.BLOCKED_SECTIONS["blocked"])
+        first = rr._lead_reason("own", text).split("\n", 1)[0].strip().lower()
+        return None if first.startswith(NO_BUDGET_OPENINGS) else "max_iterations"
+    return None
+
+
+def _pending_gates(note):
+    return [l.strip()[2:].strip() for l in note.section_text(rr.GATE_PENDING_SECTION).split("\n") if l.strip().startswith("- ")]
+
+
+def _hold_line(rollout_note, slug, kind, note):
+    """H3's detail: the latest `## Race log` line naming the task (a RACE), else its blocker's `UNVERIFIED:` line."""
+    if kind == "RACE" and rollout_note is not None:
+        lines = [l.strip() for l in rollout_note.section_text(rr.RACE_LOG_SECTION).split("\n")
+                 if any((rr._wikilink_slug(m.group(1)) or "").lower() == slug.lower() for m in rr.WIKILINK_OPEN_RE.finditer(l))]
+        if lines:
+            return lines[-1]
+    text = rr._blocker_summary(note)
+    return next((l.strip() for l in text.split("\n") if rr.UNVERIFIED_MARK in l), text.split("\n", 1)[0].strip())
 
 
 def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None):
-    """Whether execute's lead re-enters a set-aside task by itself (`reconcile-rollout.py auto-retry`), as `inputs`'
-    AUTO_RETRY_KEYS. The one decision function: `inputs` prints it to every caller and the verb re-runs it before it
-    writes. `inp` is task_inputs' output for the note, `rollout_note` the rollout its `rollout:` names (None: no
-    retry), `max_rounds_flag` inputs' --max-review-rounds (None: not given). The first match is `autoRetry: false`
-    with its `autoRetryWhy`:
-      1. not set aside at its run or at Integration (gate-pending: sign-off is the human's; a code-writing review
-         note with no pr:; running, queued, awaiting Integration, landed), or no rollout note;
-      2. an undecided RACE or UNVERIFIED; 3. a `## Needs you` question;
-      4. plan-blocked after an automatic descope (a descope marker and no `descope_armed:`): repair asks Lachy;
-      5. autoRevise under the resolved max_review_rounds: step 1.2's seeded revise owns it;
-      6. a human cause: prepare's `the PR branch is gone`, a `--gated` decline, a merge-task exit-1 text outside
-         MERGE_TASK_FIXABLE, a set-aside at Integration with no pr:, or a non-empty `prUrlError` (p17-1) on a way back
-         that launches on the note's PR (resumeAt revise, or at Integration): step 1.2 and step 3 launch nothing on
-         it, so a hand-back alone never moves it (execute § 6.5 (c)'s `fix the note's pr: or defer`);
-      7. the budget (reconcile-rollout.py _retry_budget): an invalid stamp sets `autoRetryError` (execute § 3's halt),
-         an unresolvable value means no retry, a --max-review-rounds other than the resolved one means no retry, and
-         `auto_retries: 0` turns every retry off, quota included;
-      8. no feedback fingerprint;
-      9. a quota block: 5 free retries spent, or still cooling (`autoRetryAfter`: the later of the block's run stamp
-         and `auto_retry_at`, plus QUOTA_COOLDOWN_MIN[quota_retries_used]); malformed counters or stamps fail closed;
-     10. an agent or infra block: `auto_retries_used` >= the budget (malformed: fails closed);
-     11. an agent block whose fingerprint equals `auto_retry_sha` (the block last re-entered);
-     12. an infra block still cooling (`autoRetryAfter`: the same base plus INFRA_COOLDOWN_MIN[auto_retries_used], the
-         last repeating; no stamp fails closed): a usage limit that kills an agent mid-run reads as infra, so its
-         retries are spread out rather than spent at once.
+    """Whether execute's lead re-enters a set-aside task by itself (`reconcile-rollout.py auto-retry`), and, when it may
+    not, the one Human fix that moves it (ADR 0035), as `inputs`' AUTO_RETRY_KEYS. The one decision function: `inputs`
+    prints it to every caller and the verb re-runs it before it writes. `inp` is task_inputs' output for the note,
+    `rollout_note` the rollout its `rollout:` names (None: no retry), `max_rounds_flag` inputs' --max-review-rounds
+    (None: not given). `answerRecorded` (reconcile-rollout.py _answer_recorded) is read for every note.
+
+    The core (_verdict) is an ordered list of causes; the first that refuses is `autoRetry: false` with its
+    `autoRetryWhy` and its `humanFix` ({act, detail, handBack, label, raise}, act one of HUMAN_FIX_ACTS; handBack true
+    only when, once Lachy has answered, a bare `hand-back` is the whole way back; raise the budget a H9 names, else
+    null; label human_fix_label's), or a null humanFix when the way back is the lead's own:
+      1. gate-pending: H1 `sign off gated input` (the pending gates);
+      2. not set aside at its run or at Integration (running, queued, awaiting Integration, landed): null;
+      3. a code-writing review note with no pr:: H11 `hand back or defer`, handBack true, label `(review, no PR)`;
+      4. no rollout note: H2 `fix its rollout: or defer`;
+      5. an undecided RACE or UNVERIFIED: H3 `decide RACE` / `decide UNVERIFIED` (the hold's line);
+      6. a `## Needs you` question: H4 `answer the question` (the question), its handBack that of the first cause
+         below that refuses (7 skipped), true when none;
+      7. a recorded answer (answerRecorded non-null): `answered for this block (<form>, <stamp>): <the cause's why>`,
+         its fix the answer overlay on the cause below (8 onwards): a `hand-back` answer is null when the cause's fix is
+         null or has handBack true (the lead hands it back), else H0 `finish the recorded answer` (the entry); an
+         `awaiting repair` answer is always H0; a `left` answer keeps its cause's fix, its detail prefixed `left on
+         your answer of <stamp>` (H10 when the cause's fix is null). So an answered block is never retried. Both 6 and
+         7 keep the cause's `autoRetryError` and `autoRetryClass` (_keep_cause_flags), so an invalid budget stamp is
+         still execute § 3's halt under a question or an answer;
+      8. plan-blocked after an automatic descope (a descope marker and no `descope_armed:`): H5 `decide scope or defer`;
+      9. a refused descope recorded for this block (_descope_refusal, never while `descope_armed:` stands: the armed
+         descope's hand-back is its way back): H5 with the record as its detail;
+     10. autoRevise under the resolved max_review_rounds: null (step 1.2's seeded revise), or H7 when `prUrlError` is
+         non-empty (step 1.2 launches nothing on it);
+     11. set aside at Integration with no pr:: H6 `restore, recut or defer` (repair § 4's restore, or § 3c's PR-less merge
+         for a MERGED PR; never hand-back, which refuses it);
+     12. a non-empty `prUrlError` (p17-1) on a way back that launches on the note's PR (resumeAt revise, or at
+         Integration): H7 `fix the note's pr: or defer`, handBack false (the fix changes the note first);
+     13. prepare's `the PR branch is gone`: H8 `restore, recut or defer`;
+     14. a `--gated` decline; 15. a merge-task exit-1 text outside MERGE_TASK_FIXABLE: H9 or H10 (_raise_field gives none);
+     16. an invalid budget stamp: `autoRetryError` (execute § 3's halt), H12 `fix the round budget`;
+     17. an unresolvable budget: H9 or H10;
+     18. `auto_retries: 0`; 19. no feedback fingerprint; 20. malformed counters; 21. a malformed `auto_retry_at`;
+     22. a quota block past its 5 free retries; 23. an agent or infra block past its budget; 24. an agent block whose
+         fingerprint equals `auto_retry_sha`: each H9 `raise <field>, hand back or defer` when _raise_field names the
+         source run's spent budget, else H10 `hand back or defer`, the detail its autoRetryWhy;
+     and a quota block still cooling (QUOTA_COOLDOWN_MIN[quota_retries_used] from the later of the block's run stamp and
+     `auto_retry_at`, setting `autoRetryAfter`) or an infra block still cooling (INFRA_COOLDOWN_MIN[auto_retries_used],
+     the last repeating; no stamp fails closed) refuses with a null humanFix: the lead retries it once the cool-down ends.
     Otherwise `autoRetry: true`, with `autoRetryRaise` = lastRound + 1 when resumeAt is revise and the resolved
-    max_review_rounds is <= lastRound (repair's raise: one round per retry)."""
+    max_review_rounds is <= lastRound (one round per retry).
+
+    --max-review-rounds is an overlay the core ignores, so humanFix never depends on a hand-resolved K: only with no
+    answer recorded and the core past the budget point (autoRetryBudget non-null), a K other than the resolved one sets
+    `autoRetry: false` with today's mismatch why and clears autoRetryAfter and autoRetryRaise."""
+    answer = rr._answer_recorded(note)
+    out = _verdict(path, note, inp, rollout_note, now, answer)
+    budget = out["autoRetryBudget"]
+    if answer is None and budget is not None and max_rounds_flag is not None:
+        k = budget["maxReviewRounds"]["value"]
+        if max_rounds_flag != k:
+            out.update(autoRetry=False, autoRetryWhy=f"--max-review-rounds {max_rounds_flag} is not the resolved "
+                                                     f"max_review_rounds {k}", autoRetryAfter=None, autoRetryRaise=None)
+    return out
+
+
+def cause_fix(path, note, inp, rollout_note, now):
+    """The core's Human fix with the answer overlay skipped: the cause a recorded answer answers. record-answer reads it
+    before its save to check a --raise against `humanFix.raise`."""
+    return _verdict(path, note, inp, rollout_note, now, None)["humanFix"]
+
+
+def _keep_cause_flags(out, cause):
+    """Carry the cause's `autoRetryError` and `autoRetryClass` into a verdict that refuses above it (a `## Needs you`
+    question, a recorded answer): an invalid budget stamp stays execute § 3's round-budget halt and status's "invalid
+    round budget" flag (execute § 6.5 (e)) whatever answers or asks the block."""
+    out.update(autoRetryError=cause["autoRetryError"], autoRetryClass=cause["autoRetryClass"])
+
+
+def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
+    """auto_retry_verdict's core (its docstring lists the causes). `answer` is the note's answerRecorded (None skips
+    cause 7); `skip_needs` skips cause 6, for H4's handBack."""
     out = {k: None for k in AUTO_RETRY_KEYS}
-    out.update(autoRetry=False, autoRetryWhy="")
+    out.update(autoRetry=False, autoRetryWhy="", answerRecorded=answer)
     used = rr._stamp_value(note.get(rr.AUTO_RETRIES_USED_KEY), 0) if note.get(rr.AUTO_RETRIES_USED_KEY) is not None else 0
     quota = rr._stamp_value(note.get(rr.QUOTA_RETRIES_USED_KEY), 0) if note.get(rr.QUOTA_RETRIES_USED_KEY) is not None else 0
     out.update(autoRetriesUsed=used, quotaRetriesUsed=quota, fingerprint=rr._block_fingerprint(note))
+    label = human_fix_label(note)
 
-    def no(why):
+    def fix(act, detail, hand_back, raise_=None):
+        if act not in HUMAN_FIX_ACTS:  # the fixed vocabulary execute's dedupe and status's lines rely on
+            raise ValueError(f"humanFix act {act!r} is not one of HUMAN_FIX_ACTS")
+        return {"act": act, "detail": detail, "handBack": hand_back, "label": label, "raise": raise_}
+
+    def no(why, human=None):
         out["autoRetryWhy"] = why
+        out["humanFix"] = human
         return out
 
     status = rr._status(note)
     state, at = rr._queue_state(note)
+    k = None
+
+    def spent(why):
+        """H9 when the source run spent its own budget (_raise_field), else H10; the detail is the why."""
+        field = _raise_field(note, inp, k, at)
+        if field:
+            return no(why, fix(f"raise {field}, hand back or defer", why, True, field))
+        return no(why, fix("hand back or defer", why, True))
+
     if state == "set-aside" and at == "gate":
-        return no("gate-pending: sign-off is the human's (approve-gates)")
+        return no("gate-pending: sign-off is the human's (approve-gates)",
+                  fix("sign off gated input", "; ".join(_pending_gates(note)), False))
     if state != "set-aside" or at not in ("run", "integration"):
         return no(f"not set aside ({state})")
     if status == "review":
-        return no("approved without a PR: a code-writing review note with no pr: is repair's call")
+        why = "approved without a PR: a code-writing review note with no pr: is repair's call"
+        return no(why, fix("hand back or defer", why, True))
     if rollout_note is None:
-        return no("no rollout note")
+        return no("no rollout note", fix("fix its rollout: or defer", "no rollout note: the note's rollout: names no "
+                                         "readable rollout note", False))
     out["autoRetryClass"] = rr._retry_class(note)
     hold = rr._race_holds(rollout_note, [(path, note)]).get(path.stem.lower())
     if hold:
-        return no(f"{hold[1]} undecided: only Lachy's RACE decided: line (through /thread:repair) releases it")
-    if rr.needs_human(note):
-        return no("needs a human: the note's ## Needs you question")
+        return no(f"{hold[1]} undecided: only Lachy's RACE decided: line (through /thread:repair) releases it",
+                  fix(f"decide {hold[1]}", _hold_line(rollout_note, path.stem, hold[1], note), False))
+    question = rr.needs_human(note)
+    if question and not skip_needs:
+        below = _verdict(path, note, inp, rollout_note, now, None, skip_needs=True)
+        _keep_cause_flags(out, below)
+        return no("needs a human: the note's ## Needs you question",
+                  fix("answer the question", question, below["humanFix"]["handBack"] if below["humanFix"] else True))
+    if answer is not None:
+        cause = _verdict(path, note, inp, rollout_note, now, None, skip_needs)
+        _keep_cause_flags(out, cause)
+        cf, form, stamp = cause["humanFix"], answer["form"], answer["stamp"]
+        if form == "hand-back":
+            human = None if cf is None or cf["handBack"] else fix("finish the recorded answer", answer["line"], False)
+        elif form == "awaiting repair":
+            human = fix("finish the recorded answer", answer["line"], False)
+        elif cf is None:
+            human = fix("hand back or defer", f"left on your answer of {stamp}: {cause['autoRetryWhy'] or 'nothing else holds it'}",
+                        True)
+        else:
+            human = dict(cf, detail=f"left on your answer of {stamp}: {cf['detail']}")
+        return no(f"answered for this block ({form}, {stamp}): {cause['autoRetryWhy'] or 'nothing else holds it'}", human)
+    plan_runs = note.run_blocks(rr.BLOCKED_SECTIONS["plan-blocked"]) if status == "plan-blocked" else []
+    plan_n = rr._top_run(plan_runs)["n"] if plan_runs else "?"
     if status == "plan-blocked" and not rr._scalar(note.get(rr.DESCOPE_ARMED_KEY)) and any(
             rr.DESCOPE_MARK_RE.match(l.strip()) for l in note.section_text(rr.SCOPE_AUTO_SECTION).split("\n")):
-        return no("plan-blocked again after an automatic descope: repair asks Lachy")
+        return no("plan-blocked again after an automatic descope: repair asks Lachy",
+                  fix("decide scope or defer", f"plan-blocked again after an automatic descope (Plan-blocked feedback run "
+                                               f"{plan_n})", True))
+    refusal = rr._descope_refusal(note)
+    if refusal is not None:
+        return no(f"descope refused at Plan-blocked feedback run {refusal[0]}: Lachy decides the scope",
+                  fix("decide scope or defer", refusal[1], True))
     budget = rr._retry_budget(note, rollout_note)
     k = budget["maxReviewRounds"]["value"] if budget["maxReviewRounds"] else None
     if k is not None and _revise_shaped(inp) and inp["lastRound"] < k:
-        return no("autoRevise: step 1.2's seeded revise owns it")
+        return no("autoRevise: step 1.2's seeded revise owns it",
+                  fix("fix the note's pr: or defer", inp["prUrlError"], False) if inp.get("prUrlError") else None)
     kind, reason = rr._note_reason(note)
     first = reason.split("\n", 1)[0].strip()
     if at == "integration" and not rr._pr(note):
-        return no("set aside at Integration with no pr: a human restores or recuts it")
+        return no("set aside at Integration with no pr: a human restores or recuts it",
+                  fix("restore, recut or defer", f"{first}; restore finds its branch's PR (repair § 4), and a MERGED one is "
+                                                 "§ 3c's PR-less merge", False))
     if inp.get("prUrlError") and (at == "integration" or inp.get("resumeAt") == "revise"):
         return no(f"the note's pr: gives no PR URL the engine takes, so no launch would go ahead: a human fixes it "
-                  f"({inp['prUrlError']})")
+                  f"({inp['prUrlError']})", fix("fix the note's pr: or defer", inp["prUrlError"], False))
     if status == "blocked" and kind == "integration" and rr.BRANCH_GONE_MARK in reason:
-        return no("the PR branch is gone: a human restores or recuts it")
+        return no("the PR branch is gone: a human restores or recuts it", fix("restore, recut or defer", first, False))
     if status == "blocked" and rr.DECLINED_MARK in reason:
-        return no("merge declined at the --gated hold: a human's decision")
+        return spent("merge declined at the --gated hold: a human's decision")
     if status == "blocked" and kind == "own" and first.lower().startswith("merge-task") and \
             not any(f in reason for f in rr.MERGE_TASK_FIXABLE):
-        return no(f"merge-task needs a human: {first}")
+        return spent(f"merge-task needs a human: {first}")
     if budget["error"]:
         out["autoRetryError"] = budget["error"]
-        return no(f"invalid round budget: {budget['error']}")
+        return no(f"invalid round budget: {budget['error']}", fix("fix the round budget", budget["error"], False))
     if budget["unresolved"]:
-        return no(f"auto_retries unresolved: {budget['unresolved']}")
+        return spent(f"auto_retries unresolved: {budget['unresolved']}")
     out["autoRetryBudget"] = {"autoRetries": budget["autoRetries"], "maxReviewRounds": budget["maxReviewRounds"]}
-    if max_rounds_flag is not None and max_rounds_flag != k:
-        return no(f"--max-review-rounds {max_rounds_flag} is not the resolved max_review_rounds {k}")
     n = budget["autoRetries"]["value"]
     if n == 0:
-        return no("auto_retries is 0: automatic retries are off")
+        return spent("auto_retries is 0: automatic retries are off")
     if not out["fingerprint"]:
-        return no("no feedback fingerprint: the block recorded no feedback")
+        return spent("no feedback fingerprint: the block recorded no feedback")
     for key, value in ((rr.AUTO_RETRIES_USED_KEY, used), (rr.QUOTA_RETRIES_USED_KEY, quota)):
         if value is None:
-            return no(f"malformed {key}: {note.get(key)!r} (fails closed)")
+            return spent(f"malformed {key}: {note.get(key)!r} (fails closed)")
     last_at = rr._parse_ts(note.get(rr.AUTO_RETRY_AT_KEY)) if note.get(rr.AUTO_RETRY_AT_KEY) is not None else None
     if note.get(rr.AUTO_RETRY_AT_KEY) is not None and last_at is None:
-        return no(f"malformed {rr.AUTO_RETRY_AT_KEY}: {note.get(rr.AUTO_RETRY_AT_KEY)!r} (fails closed)")
+        return spent(f"malformed {rr.AUTO_RETRY_AT_KEY}: {note.get(rr.AUTO_RETRY_AT_KEY)!r} (fails closed)")
     cls = out["autoRetryClass"]
 
     def cooling(minutes):
         """The cool-down's refusal while `now` is before the later of the block's run stamp and the last retry, plus
-        `minutes` (setting `autoRetryAfter`), or None once it has passed. No stamp at all fails closed."""
+        `minutes` (setting `autoRetryAfter`), or None once it has passed. No stamp at all fails closed (H10)."""
         stamps = [s for s in (rr._block_stamp(note), last_at) if s is not None]
         if not stamps:
-            return no(f"{cls}: no block stamp to time the cool-down from (fails closed)")
+            return spent(f"{cls}: no block stamp to time the cool-down from (fails closed)")
         after = max(stamps) + timedelta(minutes=minutes)
         if now < after:
             out["autoRetryAfter"] = rr._stamp(after)
@@ -1059,15 +1252,15 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
 
     if cls == "quota":
         if quota >= len(rr.QUOTA_COOLDOWN_MIN):
-            return no(f"quota: {quota}/{len(rr.QUOTA_COOLDOWN_MIN)} free retries outlasted: a human")
+            return spent(f"quota: {quota}/{len(rr.QUOTA_COOLDOWN_MIN)} free retries outlasted: a human")
         refused = cooling(rr.QUOTA_COOLDOWN_MIN[quota])
         if refused:
             return refused
     else:
         if used >= n:
-            return no(f"budget: {used}/{n} used")
+            return spent(f"budget: {used}/{n} used")
         if cls == "agent" and out["fingerprint"] == rr._scalar(note.get(rr.AUTO_RETRY_SHA_KEY)):
-            return no("same feedback as the block last re-entered")
+            return spent("same feedback as the block last re-entered")
         if cls == "infra":
             refused = cooling(rr.INFRA_COOLDOWN_MIN[min(used, len(rr.INFRA_COOLDOWN_MIN) - 1)])
             if refused:
