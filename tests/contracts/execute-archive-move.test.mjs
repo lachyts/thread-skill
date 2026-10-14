@@ -86,6 +86,13 @@ function checkArchive(files) {
     !prose.includes("the follow-on's old `Work/Tasks/Archive/**` path when *Existing follow-on* moved it back and printed `tracked`"))
     fails.push('followon')
 
+  // signoff: the sign-off form's vault commit is by pathspec too, and names a `tracked` follow-on move-back's old path.
+  const signoff = files.execute.split('\n')
+    .find((l) => l.startsWith("   - `/thread:close`, as above; then the heartbeat's `CronDelete`; then the vault commit")) ?? ''
+  if (!signoff.includes('by pathspec as the full ceremony\'s, never the whole vault') ||
+    !signoff.includes("plus the follow-on's old `Work/Tasks/Archive/**` path when *Existing follow-on* moved it back and printed `tracked`") ||
+    !existing.includes("which the archive commit below (or the sign-off form's vault commit) must name")) fails.push('signoff')
+
   // template: the manual ceremony's archive step names both cases, the follow-on's old path and the no-clobber rule.
   const step6 = files.template.split('\n').find((l) => l.startsWith('6. Move this note')) ?? ''
   if (!step6.includes('`git ls-files --error-unmatch`') || !step6.includes('else a plain `mv`') ||
@@ -118,6 +125,8 @@ test('controls: each check fails on its own mutation', () => {
     'and commit the vault (task, phase, follow-on and rollout notes)'), ['pathspec'])
   only('followon:commit', swap('execute', ", and the follow-on's old `Work/Tasks/Archive/**` path when *Existing follow-on* moved it back and printed `tracked`", ''), ['followon'])
   only('followon:print', swap('execute', ', printing `tracked` or `untracked` as that snippet does', ''), ['followon'])
+  only('signoff:commit', swap('execute', "then the vault commit, by pathspec as the full ceremony's, never the whole vault", 'then the vault commit'), ['signoff'])
+  only('signoff:followon', swap('execute', " (or the sign-off form's vault commit)", ''), ['signoff'])
   only('template', swap('template', 'A move never overwrites', 'A move overwrites'), ['template'])
   only('sweep', swap('execute', '   - Stamp `status: done`', '   - `git mv` the task notes. Stamp `status: done`'), ['sweep'])
 })
