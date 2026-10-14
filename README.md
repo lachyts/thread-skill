@@ -29,7 +29,7 @@ else runs as scoped sessions.
 |---|---|---|
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
-| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then **Reshuffle** (re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate) or **Look only**. Schedules rollout-shaped phases itself, steers the rest (background batch sessions it launches itself, ADR 0010, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
+| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then **Reshuffle** (re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate) or **Look only**. Schedules rollout-shaped phases itself, steers the rest (parallel-safe batches it dispatches as native child agents of its own session, ADR 0023, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
 | `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop also create a fresh visible sidebar task seeded with it; elsewhere label it a manual handoff. |
@@ -49,10 +49,12 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 
 ## Runtime support
 
-Orient's local read/audit and task-note debrief are portable; its automatic
-batch dispatch requires a Claude Code session, a scoped `cc-*` profile and
-cmux. Other harnesses can prepare manual launch prompts without marking tasks
-dispatched. The rollout executor still requires its canonical Workflow runtime;
+Orient's audit, reshuffle, steering and task-note debrief are portable. Its
+batches run as native child agents of the calling session, through the shared
+native-workflow exchange (ADR 0023): no terminal multiplexer and no launch
+profile is required, the calling session must stay open to collect them, and a
+batch that needs a tool or account the session lacks is reported blocked, never
+substituted. The rollout executor still requires its canonical Workflow runtime;
 shared source and skill discovery do not provide that runtime.
 
 ## The convergence engine
@@ -101,13 +103,13 @@ one line per Retro.
   decided; read an ADR's own Status line for where it stands.
   `0001`–`0003` are the continuity decisions (task floor; next is a sibling;
   orient is project-altitude next — 0003's packaging and launch conclusions
-  since superseded by 0009 and 0010). `0004`–`0008` are the engine decisions
-  (repair is a conductor; a phase is a plan; one-shot first pass, then
-  iteration escalates, to Fable as first decided and up the operator's ladder
-  since 0029; a tier is a model+effort bundle; a declared gate always
-  pauses). `0009` — thread absorbs wave: one plugin, one prefix, two lanes.
-  `0010` — orient launches its own batches. `0011` — close saves
-  autonomously; vault tasks stay gated. `0012` — process candidates flow to
+  since superseded by 0009 and 0010, and 0010's in turn by 0023). `0004`–`0008`
+  are the engine decisions (repair is a conductor; a phase is a plan; one-shot
+  first pass, then iteration escalates, to Fable as first decided and up the
+  operator's ladder since 0029; a tier is a model+effort bundle; a declared
+  gate always pauses). `0009` — thread absorbs wave: one plugin, one prefix, two lanes.
+  `0010` — orient launches its own batches (superseded by `0023`). `0011` —
+  close saves autonomously; vault tasks stay gated. `0012` — process candidates flow to
   the project's METHOD.md (cross-repo interface with the `method` skill).
   `0013` — only list items declare gates. `0014` — stash and defer run the
   silent process scan. `0015` — process candidates route by altitude
@@ -116,11 +118,12 @@ one line per Retro.
   gone (amends 0006). `0017` — a pending handoff owns the thread's
   continuation: handoff docs are durable and self-cleaning, and close refreshes
   a pending one instead of proposing vault tasks that restate it (amends 0011).
-  `0024` — the operator's top tier sets every rollout's ceiling (amends 0016;
+  `0023` — orient dispatches native children of its own session: one launch
+  model, collect-and-accept, a batch lands once (supersedes 0010). `0024` —
+  the operator's top tier sets every rollout's ceiling (amends 0016;
   superseded by 0029 before it was built). `0025` — master moves only by green
-  PR, owner included. (0018–0023 are reserved: 0018–0022 are on the protocol 4
-  branch, and 0023 belongs to orient's native-children task, p3-1.) `0026` —
-  finished work closes itself (amends 0011). `0027` — orient is the one shaping
+  PR, owner included. (0018–0022 are reserved: they are on the protocol 4
+  branch.) `0026` — finished work closes itself (amends 0011). `0027` — orient is the one shaping
   verb (amends 0003, 0009, 0010 and 0026; retires `split` and `gather`).
   `0028` — agents land their own work (amends 0011). `0029` — escalation
   climbs the operator's ladder (supersedes 0024; amends 0006, 0007 and 0016).
