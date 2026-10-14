@@ -13,6 +13,8 @@ It is **read-only**: it never stamps frontmatter, never merges, never starts or 
 what it finds, that's `/thread:repair` (the conductor) or `/thread:execute` (the queue's lead). This skill is
 the diagnosis; those are the treatment.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## Scope
 
 Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` (older undated `<slug>-rollout` notes
@@ -23,7 +25,9 @@ reads the operator's local ladder file (`~/.config/thread/ladder.toml`), and, fo
 `rollout-settings.py` for a task whose `max_review_rounds` is absent at both levels (§ 2), and
 `lead-integrate.py inputs` resolves `auto_retries` the same way, inside its own read, for a set-aside task whose
 notes lack it. Either read of the settings file runs land.sh's `--origin-slug` read, and so one local
-`git remote get-url origin` in the Project root, when the file holds a repo table: no network. Writes nothing. Obsidian + GitHub read access only.
+`git remote get-url origin` in the Project root, when the file holds a repo table: no network. It also runs
+execute's `step-boundary.py stands`, a read of the rollout note's `## Pause log` (§ 2's *Room stop*). Writes nothing.
+Obsidian + GitHub read access only.
 
 ## Invocation forms
 
@@ -91,7 +95,8 @@ are included), sorted by schedule order (each task's first wikilink on a list-it
 rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads these keys and no others:
 
 - top level: `paused` (the pause stamp; null when not paused), `pause_requested` (a soft pause is draining:
-  execute → *Pausing + reinstating a rollout*), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
+  execute → *Pausing + reinstating a rollout*), `pausedFor` (`sign-off` under execute § 4.5 step 5's sign-off
+  pause, ADR 0034: the run finished everything else and only gates wait on Lachy; null otherwise), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
   included), `progress`, `timeline` and `ladder`, plus `gitEnvHold` (the unacked git-env trips, each
   `{slug, kind, line}`; § 3's Git-env trip flag), `ceilingError` (why `ceiling` is null: an invalid
   `parallel_ceiling`, or an absent one `rollout-settings.py` could not resolve; null otherwise) and
@@ -126,6 +131,18 @@ being alive**. `null` when no task has a `started:` stamp. `progress` is the one
 relays, e.g. `progress: 2/6 merged, 1 running, 1 awaiting integration, 1 queued, 1 set aside — 2h elapsed,
 ~45m remaining (rough)`.
 
+**Room stop.** One more read-only, local call, once per report: whether a Chorus room stop stands on the
+rollout (execute § Room stop), read from the note's `## Pause log`, the one durable record of it:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py stands --rollout <rollout-note>
+```
+
+It writes nothing. Exit 0: a room stop stands, and stdout names its stamp (`room stop stands since <stamp>`);
+exit 4: it has lapsed (`room stop since <stamp> has lapsed: …`, at or past its 6 h bound); exit 5: none stands.
+Exit 1 or 2 renders `room stop unreadable: <its stderr line>` under the headline and reads as none. § 4's
+*Room stop* renders it.
+
 **Re-entry inputs.** One read-only, local call per task whose `queueState` is `running`, `integrating`,
 `awaiting-integration` or `set-aside`, plus any other unmerged task that has `started` and no `pr`:
 
@@ -142,7 +159,11 @@ refused flag). When K is not an integer
 nothing (`--repo` only computes a path). Status reads `branch`, `worktreePath`, `readyAt`, `resumeAt`,
 `autoRevise`, `lastRound` and `lastIntegration` from it, and the automatic retry's verdict (ADR 0033): `autoRetry`,
 `autoRetryWhy`, `autoRetryAfter`, `autoRetryError`, `autoRetryClass`, `autoRetryBudget`, `autoRetriesUsed`,
-`quotaRetriesUsed` and `fingerprint`, plus `prUrlError`. A non-empty `autoRetryError` flags
+`quotaRetriesUsed` and `fingerprint`, plus `prUrlError`, `humanFix` and `answerRecorded` (ADR 0035). `humanFix` is the
+one act that moves a block only Lachy may move ({act, detail, handBack, label, raise}), named by the script, so status
+never re-derives a cause; it ignores K. `answerRecorded` is the live answer to the task's current block ({stamp, kind,
+form, line}), the one read status shares with execute and repair. `autoRetryWhy` is read only by § 4's count rule
+(`auto_retries unresolved`), never as Lachy's reason. A non-empty `autoRetryError` flags
 "invalid round budget: <it>" on the task (execute § 3's round-budget halt). `lastIntegration` is the `## Integration log`'s LAST
 line as fields, never a search or a count: null when the note has no log, and a field is null where the line
 has `-`. If `inputs` exits 2 (an unreadable note), render "inputs failed: <stderr>" for that task and carry
@@ -255,8 +276,11 @@ offline too.
 
 ### 4. Render the situational report
 
-**Headline.** `[[<rollout>]] — <progress>`, with `progress` verbatim, plus `PAUSED since <stamp>`,
-`pause pending (draining)`, `INCOMPLETE: <reason>`, `GIT-ENV HOLD: [[a]], [[b]]` (each slug `gitEnvHold`
+**Headline.** `[[<rollout>]] — <progress>`, with `progress` verbatim, plus `PAUSED since <stamp>` (or, with
+`pausedFor: sign-off`, `AWAITING SIGN-OFF since <stamp>: [[a]], [[b]]`, the tasks set aside at `gate`),
+`pause pending (draining)`, `ROOM STOP since <stamp>: awaiting the Stage's resume` or
+`room stop since <stamp> lapsed: the owner's heartbeat re-enters` (§ 2's *Room stop*, exit 0 or 4),
+`INCOMPLETE: <reason>`, `GIT-ENV HOLD: [[a]], [[b]]` (each slug `gitEnvHold`
 names, once) or the lineage (`supersedes [[<prior>]]`,
 `superseded by [[<successor>]]`, or § 1's reverse lineage: `superseded by [[N]], close-out interrupted` or
 `superseded by [[N]], supersede interrupted`) when they apply.
@@ -270,7 +294,7 @@ names, once) or the lineage (`supersedes [[<prior>]]`,
 | `awaiting-integration` | **Awaiting Integration** | its PR and `ready:` (`inputs.readyAt`) |
 | `running` | **Running** | the `owner:` tag; no `owner:` means it was handed back and restarts at the lead's next step; no `started` means it is starting; `auto-retry <autoRetriesUsed>` when above 0 (the verdict sets the counters before its first refusal, so `inputs` carries them for a running note too) |
 | `queued` | **Queued** | `waitingOn`, else "behind solo [[x]]" when a started task x carries `solo`, or when x is the first queued task in rank order that carries `solo` and has no `waitingOn` and ranks above this one (`next` holds every task below such a Solo task, whatever its `priority:`; a Solo task with a `waitingOn` holds nothing), else "next free slot" |
-| `set-aside` | **Set aside** | where it re-enters (below), the first line of `blockerSummary`, and its automatic retry's count and cool-down (**Automatic retry first**, below) |
+| `set-aside` | **Set aside** | where it re-enters (below), the first line of `blockerSummary`, its automatic retry's count and cool-down (**Automatic retry first**, below), and `answered: …` for an answered one (**Needs you**, below) |
 
 **Rungs.** Every task line also shows `rung <name>` when its note has one (§ 2's `rung`).
 
@@ -290,24 +314,25 @@ wins: `auto-retry off` when `autoRetryBudget.autoRetries.value` is 0 (every retr
 closed) shows no count, and `autoRetryClass` alone never shows a count: it is set for every set-aside past the
 verdict's first rule, a refused one included. `auto-retry <autoRetriesUsed>/?` shows only when `autoRetryBudget` is
 null and `autoRetryWhy` starts `auto_retries unresolved`; any other null budget (a question, a human cause, a
-plan-block after a descope, the seeded revise's own, a gate) shows no count, and its reason is in the Needs you
+plan-block after a descope, the seeded revise's own, a gate) shows no count, and its `humanFix` is in the Needs you
 block (below). A cool-down adds `cooling until <autoRetryAfter>`. The route: the live lead (execute § 4.5 step 1.2's
 *Automatic retry*) re-enters a set-aside task at its run or at Integration while `inputs` reads `autoRetry: true`,
 or once its `autoRetryAfter` ends; an `autoRevise: true` row is the seeded revise's, and a gate is never retried. A
-`plan-blocked` one is judged for a descope first (the lead's step 1.2, or repair § 3): a refused descope writes
-nothing, so its verdict can still read `autoRetry: true` while the lead skips it, and only repair asks it. The
-Re-entry column below is the route once the task is Lachy's.
+`plan-blocked` one is judged for a descope first (the lead's step 1.2, or repair § 3): a refused descope is
+recorded: its verdict reads `autoRetry: false` and its `humanFix` reads `decide scope or defer`, and only repair asks
+it. An answered block is never retried (`answerRecorded`). The Re-entry column below is the route once the task is
+Lachy's.
 
 **Set-aside re-entry.** Where a set-aside task goes back in, keyed on `setAsideAt` plus its `inputs`:
 
 | `setAsideAt` | `resumeAt` | `autoRevise` | The note | Re-entry |
 |---|---|---|---|---|
-| `integration` | `integration` | `false` | `blocked`, its latest `## Blocker diagnosis` run starts `integration:` | after the automatic retry: Lachy's decision (repair § 3), then `hand-back` retries Integration only: its branch, plan and review stand; with no `pr:` `hand-back` refuses it: repair's restore or recut |
+| `integration` | `integration` | `false` | `blocked`, its latest `## Blocker diagnosis` run starts `integration:` | after the automatic retry: Lachy's decision (repair § 3), then `hand-back` retries Integration only: its branch, plan and review stand; with no `pr:` `hand-back` refuses it: restore, recut or defer (repair § 4; a MERGED PR is § 3c's) |
 | `run` | `revise` | `true` | `blocked`, a plain rejection: the revise marker, no `revise stopped:`, the last log line `rejected` | none: the lead launches the seeded revise itself (execute § 4.5); a non-empty `prUrlError` waits for Lachy's fix of the note's `pr:` (repair § 3) |
 | `run` | `revise` | `false` | `blocked` with `revise stopped:` | after the automatic retry: Lachy's decision (repair § 3), then `hand-back`, then a seeded revise |
 | `run` | `revise` | `false` | `review-blocked`, the last log line `rejected` | after the automatic retry (which raises one round itself): Lachy's decision (repair § 3), a one-round raise on his word, then `hand-back`, then a seeded revise |
 | `run` | `own` | `false` | `blocked`, `review-blocked` with no `rejected` line, or a code-writing `review` with no `pr:` | after the automatic retry (never for a code-writing `review` with no `pr:`): Lachy's decision (repair § 3), then `hand-back`, then its own call |
-| `run` | `own` | `false` | `plan-blocked`, no `## Scope decision (automatic)` (or one whose `descope_armed:` still stands) | when the notes settle it (an optional part, or work a later task owns), `descope` once (the live lead itself, or repair § 3), then `hand-back`, then its own call; otherwise the automatic retry, then Lachy's decision (repair § 3), then `hand-back`, then its own call |
+| `run` | `own` | `false` | `plan-blocked`, no `## Scope decision (automatic)` (or one whose `descope_armed:` still stands) | when the notes settle it (an optional part, or work a later task owns), `descope` once (the live lead itself, or repair § 3), then `hand-back`, then its own call; a refused descope is recorded and is Lachy's (`decide scope or defer`; never while `descope_armed:` stands, whose armed descope is re-run and handed back); otherwise the automatic retry, then Lachy's decision (repair § 3), then `hand-back`, then its own call |
 | `run` | `own` | `false` | `plan-blocked` with a `## Scope decision (automatic)` and no `descope_armed:` (blocked again after an automatic descope) | Lachy's decision (repair § 3), then `hand-back`, then its own call; never a silent hand-back, never a second descope |
 | `gate` | `own` or `integration` | `false` | `gate-pending` | Lachy's sign-off (and the answer to its `needsHuman` question, if any), then `approve-gates` (execute § 3.7); never `hand-back` |
 
@@ -328,24 +353,22 @@ data (§ 2's per-task keys and each task's `inputs`), so it renders offline too.
 
 - each gate-pending gate, verbatim: `[[<slug>]] sign off gated input: <gate>`, with its `needsHuman` question,
   verbatim, on a `→ asks:` line beneath it when it carries one;
-- each set-aside task at `run` or `integration` whose `inputs` reads `autoRetry: false`, no `autoRetryAfter` and
-  `autoRevise: false` (or `autoRevise: true` with a non-empty `prUrlError`), a code-writing `review` with no `pr:`
-  included: `[[<slug>]] set aside <where> (<status>): <reason> → /thread:repair [[<rollout>]]`, where `<reason>` is
-  `autoRetryWhy`, or `prUrlError` for an `autoRevise: true` row (its why names the seeded revise), with its
-  `needsHuman` question on a `→ asks:` line beneath it. The line reads `[[<slug>]] answered: awaiting /thread:repair`
-  instead when its `## Repair input` already answers its current block (repair § 3's *Answer already recorded*,
-  whatever was asked): `inputs`' `fingerprint` is non-null, and
-  `grep -F '(block <fingerprint>)' ~/repos/obsidian/Work/Tasks/<slug>.md` prints an entry whose stamp (its first
-  word after `- `) is later than every stamp that
-  `grep -E '^(### Run [0-9]+ \(|auto_retry_at:|- descoped \(automatic\) )' ~/repos/obsidian/Work/Tasks/<slug>.md`
-  prints (a run heading's in its parentheses, `auto_retry_at:`'s value, an automatic descope entry's word after
-  `(automatic)`): a run recorded, an automatic retry made or an automatic descope recorded after the answer means
-  the task was re-entered since, so an earlier block's text that comes back is a fresh ask. A hand-back leaves no
-  such stamp, so the entry is spent before it (repair § 3, and execute's "retry [[task]]": its key becomes
-  `(block <fingerprint>; handed back <stamp>)`), which the `-F` read never prints: an identical re-block after it,
-  which writes no new run, is a fresh ask. An entry recorded since the last re-entry counts whatever the verdict's
-  why, a `same feedback as the block last re-entered` block included. A `-` entry never counts, so a set-aside with no fingerprint (a code-writing `review`
-  with no `pr:`) shows as a fresh ask after a pause. The greps are reads, not commands;
+- each set-aside task at `run` or `integration` whose `inputs` reads a non-null `humanFix` and a null
+  `answerRecorded` (ADR 0035: the script names the one act that moves it, so status never re-derives a cause), a
+  code-writing `review` with no `pr:` included:
+  `[[<slug>]] set aside <where> <humanFix.label>: <humanFix.act> → /thread:repair [[<rollout>]]`, `<where>`
+  `at Integration` or `at its run`, with `→ <humanFix.detail>` beneath it and its `needsHuman` question on a
+  `→ asks:` line (for `answer the question` the detail is the question itself, so it shows once, as `→ asks:`). A
+  null `humanFix` is the lead's own re-entry (its seeded revise, its automatic retry now or after a cool-down, its
+  automatic descope, or a recorded `hand-back` answer it hands back), so it is no item;
+- each answered set-aside, read from `answerRecorded` alone: an `awaiting repair` answer, or a `hand-back` one whose
+  `humanFix` is non-null, reads `[[<slug>]] answered: awaiting /thread:repair` (repair still has work to do before
+  the hand-back: its `humanFix` is `finish the recorded answer`); a `left` answer reads
+  `[[<slug>]] answered: left set aside → /thread:repair [[<rollout>]]`. A `hand-back` answer whose `humanFix` is null is no item: its Set aside line reads `answered: the
+  lead hands it back`, or `answered: at the reinstate` under `paused` or `pause_requested` (the lead's *Recorded
+  answer* waits for it). An answer counts only while `answerRecorded` reads it: a re-entry since (a run, an automatic
+  retry, an automatic descope, a new `started:`) or a hand-back, which spends it, makes the block a fresh ask, and its
+  label's `ask <k>` tells it apart;
 - each task whose `inputs` failed, with its failure line.
 
 A set-aside task the RACE / UNVERIFIED, Merged into another base, Merged never marked, PR CLOSED or Possible
@@ -362,18 +385,40 @@ line at all.
 
 **Pauses.** A paused rollout renders as paused, not stalled. `paused` → headline `PAUSED since <stamp>`, list
 what's left as usual, and skip the stalled framing: the pause is intentional, so unlanded tasks are "waiting
-for reinstate", not blockers. `pause_requested` → `pause pending (draining)`: running task calls finish,
+for reinstate", not blockers. With `pausedFor: sign-off` the headline is `AWAITING SIGN-OFF since <stamp>` with
+the waiting tasks (each gate-pending task, its pending gates verbatim; its queued dependants "waiting on it"):
+the run finished everything else and closed, and the rest is Lachy's sign-off. `pause_requested` → `pause pending (draining)`: running task calls finish,
 approved tasks integrate and merge, nothing new starts, and once nothing runs, awaits Integration or
 integrates, the lead's next step stamps `paused:`.
 
-**Owner-session qualifier.** It applies to a live queue: a running or integrating task with an `owner:`. A
-Workflow run is listed in `/workflows` only in the session that launched it, and the `owner:` tag names that
-session. The lead's background Integration commands (a verify, a RACE re-verify, the merge step, a backoff)
-are not Workflow runs, so there a run means either. While one is in flight, that session's last
-`ROLLOUT-STATUS` line reads `state=waiting`. "No run in `/workflows`" counts as evidence of a stall only when
-it was checked **in that owner session**, or that session is known to have ended (every owner session, when
-there are several tags). From any other session, status cannot tell live from stalled: say so, and recommend
-checking the owner session first. While the owner session is alive, its heartbeat re-enters *Cold resume* on a
+**Room stop.** A standing room stop (§ 2's `stands`, exit 0) renders as a room stop, not a stall: headline
+`ROOM STOP since <stamp>: awaiting the Stage's resume`, what's left listed as usual, and no stalled framing.
+On the Chorus Stage the lead stopped each Workflow call at a step boundary for a Login at its line (execute
+§ Room stop), so its owner session (the lead that wrote it, which the tasks' `owner:` tags name) shows no run in
+`/workflows` by design. Its tasks need not read running or integrating either: a call whose row came in before
+its stop was reconciled, and the signal can come in a cool-down's `waiting` turn with nothing in flight, so they
+may all await Integration, sit set aside or wait queued. While that session is alive (not known to have ended)
+the room stop is a live queue whatever its tasks read and whatever `/workflows` shows: action 10 matches it ahead
+of drift and every resume (11 to 13), and the Stage owes it the resume, so the recommendation is to wait for it,
+never `/thread:execute` from here, because any loop entry, whoever opens it, ends the room stop and resumes the
+stopped calls on a Login still at its line, and the Stage then sends nothing, since its resume skips a lead that
+has launched work since. A lapsed one (exit 4) renders `room stop since <stamp> lapsed: the owner's heartbeat
+re-enters`: it is a live queue the same way, and the owner session's heartbeat re-enters *Cold resume* on its
+next tick, which ends it and resumes the stopped calls by handle, so wait for that too. Under either, once the
+owner session has ended (the owner-session qualifier), nothing owes the resume and the room stop is no live
+queue: action 10's or 12's resume applies as usual, and that *Cold resume* ends it. A stamped pause comes first
+(action 8): the Stage's resume skips a paused lead, so the reinstate is yours, and it ends the room stop as any
+loop entry does.
+
+**Owner-session qualifier.** It applies to a live queue: a running or integrating task with an `owner:`, or a
+room stop, standing or lapsed, whatever its tasks read (*Room stop* above). A Workflow run is listed in
+`/workflows` only in the session that launched it, and the `owner:` tag names that session. The lead's
+background Integration commands (a verify, a RACE re-verify, the merge step, a backoff) are not Workflow runs,
+so there a run means either. While one is in flight, that session's last `ROLLOUT-STATUS` line reads
+`state=waiting`. "No run in `/workflows`" counts as evidence of a stall only when it was checked **in that owner
+session**, or that session is known to have ended (every owner session, when there are several tags); under a
+room stop only the session's end counts, since its run is gone by design. From any other session, status cannot
+tell live from stalled: say so, and recommend checking the owner session first. While the owner session is alive, its heartbeat re-enters *Cold resume* on a
 genuine stall (execute § 8); a closed terminal stops it, and another session resumes only once the owner
 session has ended. **The RACE exception:** with a RACE re-verify in flight (§ 3), the owner session's answer
 never leads to `/thread:execute`. If that session shows the `RACE: …` halt or no run, or has ended, the RACE
@@ -407,10 +452,12 @@ Outside the count: 1 folded, 1 other.
 
 Needs you (4)
   [[proj-gate]] sign off gated input: spend: a paid API — cap USD 5
-  [[proj-revise-stopped]] set aside at its run (blocked): budget: 2/2 used → /thread:repair [[proj-rollout-2026-10-01]]
-  [[proj-plan-blocked]] set aside at its run (plan-blocked): needs a human: the note's ## Needs you question → /thread:repair [[proj-rollout-2026-10-01]]
+  [[proj-revise-stopped]] set aside at its run (blocked, Blocker diagnosis run 1): hand back or defer → /thread:repair [[proj-rollout-2026-10-01]]
+    → budget: 2/2 used
+  [[proj-plan-blocked]] set aside at its run (plan-blocked, Plan-blocked feedback run 1): answer the question → /thread:repair [[proj-rollout-2026-10-01]]
     → asks: Which schema version does the export target?
-  [[proj-no-pr]] set aside at its run (review): approved without a PR: a code-writing review note with no pr: is repair's call → /thread:repair [[proj-rollout-2026-10-01]]
+  [[proj-no-pr]] set aside at its run (review, no PR): hand back or defer → /thread:repair [[proj-rollout-2026-10-01]]
+    → approved without a PR: a code-writing review note with no pr: is repair's call
 
 Drift:
   ⚠ [[proj-awaiting]] PR #4 is MERGED but the note says review → merged, never marked; /thread:repair runs resume
@@ -446,15 +493,24 @@ Keep the whole report scannable: it's a glance, not a wall of text.
    ahead of every reinstate or resume: only its § 3e ack, on Lachy's word, lifts the hold.
 8. `paused` → "reinstate with `/thread:execute [[<rollout>]]`". For drift independent of the pause, add
    `/thread:repair [[<rollout>]]`, which under a pause only records escalations and decisions and defers: it
-   never hands back.
+   never hands back. With `pausedFor: sign-off` → "sign off each waiting gate (or /thread:repair to defer),
+   then /thread:execute [[<rollout>]]; until then it is this repo's one unfinished rollout" (execute's
+   *Reinstate* runs the standing approval first, then `clear-pause`, which refuses while a gate is unsigned).
 9. `pause_requested` → "the live lead drains it; nothing to do." Repair may only record escalations and
    decisions, or defer. Check `/workflows` in the owner session (`<owner tag>`): if no run shows there, that
    session has ended, or no task carries an `owner:`, nothing is draining it, and
    `/thread:execute [[<rollout>]]` resumes the drain (*Cold resume*: its `next` integrates what awaits,
-   starts nothing and stamps `paused:`). The RACE exception (the owner-session qualifier): if a RACE
+   starts nothing and stamps `paused:`). Under a room stop, standing or lapsed (§ 4's *Room stop*), "no run" is
+   no evidence while its owner session is alive: a standing one waits for the Stage's resume, which drains it, and
+   a lapsed one for the owner's heartbeat, whose *Cold resume* drains it; never `/thread:execute`. The RACE
+   exception (the owner-session qualifier): if a RACE
    re-verify was in flight, the same answer makes it undecided, so the next step is
    `/thread:repair [[<rollout>]]` (action 7), never `/thread:execute`.
-10. A live queue → "wait for the run; don't resume from here." Check `/workflows` in the owner session
+10. A live queue → "wait for the run; don't resume from here." A room stop, standing or lapsed, is one while
+    its owner session is alive, whatever its tasks read and whatever `/workflows` shows, even when no task reads
+    running or integrating (§ 4's *Room stop*): a standing one → "wait for the Stage's resume", never `/thread:execute`,
+    which would end the room stop on a Login still at its line; a lapsed one waits for the owner's heartbeat.
+    Otherwise check `/workflows` in the owner session
     (`<owner tag>`): if no run shows there, or that session has ended, `/thread:execute [[<rollout>]]` resumes
     (*Cold resume*). Checked from any other session, "no run" proves nothing. A RACE re-verify in flight
     (§ 3) waits here too, as the lead's own procedure. The RACE exception (the owner-session qualifier)
@@ -463,21 +519,27 @@ Keep the whole report scannable: it's a glance, not a wall of text.
     required flag) waits on you, not the run: "approve PR #N", and the lead merges on its next tick.
     Meanwhile, the live lead re-enters a set-aside task by itself only when `inputs` reads `autoRevise: true` (the
     seeded revise), `autoRetry: true` or a pending `autoRetryAfter` (its automatic retry, now or once the
-    cool-down ends), or when it descopes a `plan-blocked` task the notes settle, once (execute § 4.5), and restarts
-    it. Every other set-aside task is never re-entered by the live lead itself: it is a Needs you item, or a Drift
-    line routes it. A `plan-blocked` one whose descope the verb refused (exit 3) is repair's too: the refusal
-    writes nothing, so its verdict can still read `autoRetry: true` while the lead skips it. One plan-blocked again
+    cool-down ends), when it descopes a `plan-blocked` task the notes settle, once, or when `answerRecorded` holds
+    a `hand-back` answer and `humanFix` is null (its *Recorded answer*, execute § 4.5), and restarts it. Every other
+    set-aside task is never re-entered by the live lead itself, except a recorded `hand-back` answer (`humanFix`
+    null), which its *Recorded answer* hands back: it is a Needs you item, or a Drift line routes it. A `plan-blocked`
+    one whose descope the verb refused (exit 3) is repair's too: the refusal is recorded, so its verdict reads
+    `autoRetry: false` and its `humanFix` reads `decide scope or defer`. One plan-blocked again
     after an automatic descope (a `## Scope decision (automatic)`, no `descope_armed:`) is always Lachy's decision,
     never a silent hand-back. So, with a Needs you item, a set-aside task the Needs you block leaves to its Drift
     line, or a `plan-blocked` set-aside, add `/thread:repair [[<rollout>]]`: its live-queue mode asks you those
     and hands each back on your answer, records a gate sign-off and asks the descope the verb refused or the block
     after a descope, without touching the run.
 11. Any drift flag but a Rung drift, a refused ladder, an unresolved ceiling or refused rollout settings, or a
-    set-aside task that is a Needs you item or a `plan-blocked` one (repair § 3 judges its descope first) →
-    `/thread:repair [[<rollout>]]`.
+    set-aside task that is a Needs you item (a non-null `humanFix`, an `awaiting repair` or `left` answer included)
+    or a `plan-blocked` one (repair § 3 judges its descope first) → `/thread:repair [[<rollout>]]`.
 12. Awaiting Integration, a handed-back running task (no `owner:`), an `autoRevise: true` set-aside, an
     `autoRetry: true` or cooling set-aside (the lead's automatic retry re-enters it; a `plan-blocked` one is
-    action 11's), or a free slot, with no lead live → `/thread:execute [[<rollout>]]`.
+    action 11's), a recorded `hand-back` answer whose `humanFix` is null (`answerRecorded`: the lead's *Recorded
+    answer* hands it back), or a free slot, with no lead live → `/thread:execute [[<rollout>]]`. A room stop,
+    standing or lapsed, whose owner session is alive is a live lead whatever its tasks read (§ 4's *Room stop*):
+    action 10 matches it first, so this resume never runs under one; a standing one waits for the Stage's resume,
+    a lapsed one for the owner's heartbeat.
 13. Nothing started → `/thread:execute [[<rollout>]]` to start.
 
 **A refused ladder.** The Ladder refused flag reorders nothing: whichever action matches, from 7 to 13, gets
@@ -494,7 +556,10 @@ version (3, 4): a supersede is how a legacy rollout migrates, so a legacy note t
 names needs its close-out, and `--regenerate` would only meet schedule's refusal again. An open escalation (7)
 comes before every reinstate, wait and resume (8 to 13), so status never sends an undecided RACE to
 `/thread:execute`. A RACE re-verify in flight is not yet undecided, so it waits (9, 10) instead of escalating.
-The RACE exception routes it to repair, never to a resume, once it turns undecided. A refused ladder adds its
+The RACE exception routes it to repair, never to a resume, once it turns undecided. A room stop needs no
+override either: while its owner session is alive it is a live queue (10) whatever its tasks read, so it waits
+ahead of drift and every resume (11 to 13), a drain under it waits too (9), and only an open escalation (7) and
+a stamped pause's reinstate (8) come before it. A refused ladder adds its
 fix ahead of whichever action matches and moves none of them, and so do an unresolved ceiling and refused
 rollout settings. Offline, every resume or reinstate
 recommendation carries § 3's caveat.
@@ -515,7 +580,8 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
 - **There is no cursor: the task notes are the progress.** Don't re-scan GitHub for progress; the live PR
   check is only for drift flags.
 - **Never call a writer.** Not `reconcile-rollout.py next` (it stamps `paused:` on a drained pause), `resume`,
-  `hand-back` or any other; `reconcile-rollout.py status`, `lead-integrate.py inputs` and `rollout-settings.py`
+  `hand-back` or any other, and never `step-boundary.py begin` or `step-boundary.py end`;
+  `reconcile-rollout.py status`, `step-boundary.py stands` (§ 2's *Room stop*), `lead-integrate.py inputs` and `rollout-settings.py`
   (§ 2, a read) are the only Python scripts status runs, and `default-branch.sh` the only shell one (besides
   the `land.sh --origin-slug` that `rollout-settings.py` runs itself). Never `lead-integrate.py prepare`,
   `set-aside`, `push` or `undo`, `merge-task.sh`, a `gh pr close`, `merge` or `reopen`, a `git push`, `fetch`
@@ -527,7 +593,9 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
 - **Don't parse the `## Queue` table** for the task list: use the `status` subcommand's glob-by-backlink (it
   catches tasks the table omits).
 - **Don't recommend a resume against a live queue** unless its owner session, checked there, shows no run or
-  has ended. Offline, qualify any resume with § 3's caveat.
+  has ended, and never under a room stop, standing or lapsed, while its owner session is alive, whatever
+  `/workflows` shows and whatever its tasks read (§ 4's *Room stop*), a stamped pause's reinstate excepted
+  (action 8). Offline, qualify any resume with § 3's caveat.
 - **Don't send an undecided RACE / UNVERIFIED to `/thread:execute`.** No reinstate and no resume until its
   `RACE decided:` line is recorded: § 4's action 7 comes first, and repair records the decision in any mode.
   Don't escalate a RACE re-verify in flight either: it is the lead's own procedure until its owner session

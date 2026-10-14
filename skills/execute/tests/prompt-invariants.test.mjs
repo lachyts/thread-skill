@@ -837,13 +837,12 @@ const codeOnly = src.replace(/\/\/[^\n]*/g, '')
 ok(!/\bDate\s*\.\s*now\b|\bnew\s+Date\b/.test(codeOnly), 'engine: no clock reads — Date is unavailable in the Workflow sandbox')
 ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precomputed progress line (absent ⇒ byte-identical logs)')
 
-// ---- Removing files (p12-12, the 2026-10-01 stall): RM_RULE in every agent prompt ----------
-// An agent's `cd /tmp/x && rm -rf ./*` stalled an unattended rollout 13 h on Claude Code's bypass-immune
-// removal ask. RM_RULE names the safe forms, and every builder renders it once, right after GIT_ENV_RULE.
-// The ten builders are git-env-scrub's (its (e2) proves every runAgent site is one of them).
-{
-  const E = loadEngine(['GIT_ENV_RULE', 'RM_RULE', 'rungState', 'escalate', 'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt',
-    'plannerPrompt', 'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt'])
+// The ten agent builders over one fixture that reaches each variant: the bottom-rung and climbed implementers,
+// both revisers, the read-only agents, the judges and Integration's two agents. They are git-env-scrub's ten (its
+// (e2) proves every runAgent site is one of them). Shared by the RM_RULE and KILL_RULE blocks below.
+const RULE_BUILDERS = ['rungState', 'escalate', 'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt',
+  'plannerPrompt', 'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt']
+function agentPrompts(E) {
   const H = (c) => c.repeat(40)
   const tk = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
   const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
@@ -871,6 +870,15 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
     integratorPrompt: [E.integratorPrompt(tk, ar, I), E.integratorPrompt(tk, ar, { ...I, landed: [], reviewHistory: [], trouble: [] })],
     integrationReviewPrompt: [E.integrationReviewPrompt(tk, ar, I, J), E.integrationReviewPrompt(tk, ar, { ...I, landed: [] }, { ...J, mergeCommit: '', path: 'judge-only' })],
   }
+  return prompts
+}
+
+// ---- Removing files (p12-12, the 2026-10-01 stall): RM_RULE in every agent prompt ----------
+// An agent's `cd /tmp/x && rm -rf ./*` stalled an unattended rollout 13 h on Claude Code's bypass-immune
+// removal ask. RM_RULE names the safe forms, and every builder renders it once, right after GIT_ENV_RULE.
+{
+  const E = loadEngine(['GIT_ENV_RULE', 'RM_RULE', ...RULE_BUILDERS])
+  const prompts = agentPrompts(E)
   const FORMS = ['`rm -rf /tmp/x && mkdir -p /tmp/x`', '`mktemp -d`', '`rm -rf "$T"`', '${T:?}', '`rm -rf ./*`', '`$VAR/`', 'command substitution', 'bypass mode']
   const times = (hay, needle) => hay.split(needle).length - 1
   // [] when the rule and every prompt hold; else what failed.
@@ -894,6 +902,39 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
   const slashed = E.RM_RULE.replace('`rm -rf "$T"`', '`rm -rf "$T"/*`')
   const reslashed = Object.fromEntries(Object.entries(prompts).map(([k, ps]) => [k, ps.map((p) => p.replace(E.RM_RULE, slashed))]))
   ok(slashed !== E.RM_RULE && rmRuleFails(slashed, E.GIT_ENV_RULE, reslashed).length > 0, 'RM_RULE control: a "$T" form that gains /* fails')
+}
+
+// ---- Stopping processes (p18-1, the 2026-10-04 incident): KILL_RULE in every agent prompt ----------
+// An implementer's `pkill -n` on the verifier's pattern killed the lead's Integration verify: the lead, other agents
+// and other sessions run the same verifier on one machine. KILL_RULE says to stop only a process the agent started,
+// by its pid or process group, never by name or pattern. It is static and one line, and every builder renders it
+// once, right after RM_RULE.
+{
+  const E = loadEngine(['RM_RULE', 'KILL_RULE', ...RULE_BUILDERS])
+  const prompts = agentPrompts(E)
+  const NAMES = ['`pkill`', '`killall`', 'pgrep', 'pid', '`kill <pid>`', 'process group']
+  const times = (hay, needle) => hay.split(needle).length - 1
+  // [] when the rule and every prompt hold; else what failed.
+  const killRuleFails = (rule, rmRule, byName) => {
+    const out = []
+    if (typeof rule !== 'string' || !rule || rule.includes('\n')) out.push('rule: one line')
+    if (/\$\{|'/.test(String(rule))) out.push('rule: static, no apostrophe')
+    for (const f of NAMES) if (!String(rule).includes(f)) out.push(`rule: names ${f}`)
+    for (const [name, ps] of Object.entries(byName)) {
+      for (const p of ps) {
+        if (times(p, rule) !== 1) out.push(`${name}: KILL_RULE once`)
+        if (!p.includes(rmRule + '\n\n' + rule)) out.push(`${name}: KILL_RULE right after RM_RULE`)
+      }
+    }
+    return out
+  }
+  ok(Object.keys(prompts).length === 10, 'KILL_RULE: the ten agent builders are covered')
+  ok(JSON.stringify(killRuleFails(E.KILL_RULE, E.RM_RULE, prompts)) === '[]', 'KILL_RULE: one static line naming pkill, killall, pgrep and the pid, once in every prompt, right after RM_RULE')
+  const stripped = { ...prompts, integratorPrompt: prompts.integratorPrompt.map((p) => p.replace('\n\n' + E.KILL_RULE, '')) }
+  ok(killRuleFails(E.KILL_RULE, E.RM_RULE, stripped).length > 0, 'KILL_RULE control: a prompt with KILL_RULE stripped fails')
+  const lax = E.KILL_RULE.replace('`killall`, ', '')
+  const relaxed = Object.fromEntries(Object.entries(prompts).map(([k, ps]) => [k, ps.map((p) => p.replace(E.KILL_RULE, lax))]))
+  ok(lax !== E.KILL_RULE && killRuleFails(lax, E.RM_RULE, relaxed).length > 0, 'KILL_RULE control: a rule without killall fails')
 }
 
 // ---- Needs a human (p16-3): NEEDS_HUMAN_RULE at the end of exactly five builders, needsHuman on three schemas --
@@ -998,6 +1039,12 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
 // IMPL_RESULT already changes the opts (`schema`) of exactly the calls that render the rule (and the reviser's),
 // so a pre-p16-3 run resumed on this engine misses the cache on those calls whatever their prompt bytes; the
 // static rule adds no new break. Every other call keeps its bytes and its opts.
+// Re-pinned on purpose by p18-1, the reviser pins and the calls hash: KILL_RULE (the 2026-10-04 incident) follows
+// RM_RULE in every agent prompt. Each prompt is its old bytes plus exactly the rule: the revisers with it removed hash
+// to their old pins (0f7eca82…, 00eb424a…), the calls with it removed to the p16-3 calls pin (8236605f…, the p18-1
+// base), and with both rules removed to the p16-3 base (ee821ac6…). The rows, taskTreeSetup and the default-branch
+// GOLDENs did not move. Like RM_RULE (p12-12), a deliberate resume-cache break: every agent prompt gains the rule,
+// and a resume re-passes its run's own version-keyed `scriptPath`, so a call launched on an older engine replays there.
 {
   const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
   const variants = []
@@ -1013,10 +1060,17 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
   const iR = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
   const aR = { repoPath: '/repo', verifier: 'make test', rolloutSlug: 'r' }
   const h2 = [{ round: 1, feedback: ['a'] }, { round: 2, feedback: ['b'] }]
-  ok(sha(T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')) === '0f7eca821281f140a718ea5bf84cec5c0a134a7924e8b2ff9d3abfe5ea9db585',
-    'byte pin: unseeded reviserPrompt, round 2')
-  ok(sha(T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')) === '00eb424a53642e113f76ea70fc78644762f75c0a40d2edcee36429f760fed660',
-    'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back)')
+  const KILL = '\n\n' + loadEngine(['KILL_RULE']).KILL_RULE
+  const r2 = T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')
+  const r3 = T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')
+  ok(sha(r2) === '7c82d98ade2ee614902acc1de14809c93e8a1c029fe1d2ac4a3e370e5b307f33',
+    'byte pin: unseeded reviserPrompt, round 2 (re-pinned by p18-1: the base below plus KILL_RULE)')
+  ok(sha(r3) === '7cf123a54536b064d21ec820b854216ab61a1c5c19ccb7d3050bffefb5370f07',
+    'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back; re-pinned by p18-1)')
+  ok(sha(r2.replace(KILL, '')) === '0f7eca821281f140a718ea5bf84cec5c0a134a7924e8b2ff9d3abfe5ea9db585',
+    'byte pin (p18-1 base): the round-2 reviser with KILL_RULE removed is its pre-p18-1 bytes')
+  ok(sha(r3.replace(KILL, '')) === '00eb424a53642e113f76ea70fc78644762f75c0a40d2edcee36429f760fed660',
+    'byte pin (p18-1 base): the round-3 reviser with KILL_RULE removed is its pre-p18-1 bytes')
   ok(T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN', null) === T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN'),
     'byte pin: a null seeded argument renders the unseeded reviser')
   // Every label, prompt and row of three whole task-mode calls (a plan-gated bottom-rung task with a plan
@@ -1042,6 +1096,7 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
   const RULE = loadEngine(['NEEDS_HUMAN_RULE']).NEEDS_HUMAN_RULE
   const calls = []
   const rows = []
+  const baseCalls = []
   const oldCalls = []
   const oldRows = []
   for (const args of [
@@ -1052,17 +1107,20 @@ ok(src.includes('if (a.progress) log(a.progress)'), 'engine: relays the precompu
     const r = await runTask(args, scripted)
     calls.push(JSON.stringify(r.calls))
     rows.push(JSON.stringify({ result: r.result, err: r.error && String(r.error) }))
-    oldCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: c.prompt.replace(RULE, '') }))))
+    baseCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: c.prompt.replace(KILL, '') }))))
+    oldCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: c.prompt.replace(KILL, '').replace(RULE, '') }))))
     const old = JSON.parse(JSON.stringify(r.result))
     for (const row of old.tasks) delete row.needsHuman
     oldRows.push(JSON.stringify({ result: old, err: r.error && String(r.error) }))
   }
   ok(sha(oldCalls.join('\n')) === 'ee821ac64ee16a13cf95c536bcbbf4ef7106c45c0d28c002f11b61196b1ee54b',
-    'byte pin (p16-3 base): the same calls with NEEDS_HUMAN_RULE removed are the pre-p16-3 bytes')
+    'byte pin (p16-3 base): the same calls with KILL_RULE and NEEDS_HUMAN_RULE removed are the pre-p16-3 bytes')
+  ok(sha(baseCalls.join('\n')) === '8236605ff29f46cc2c59346eb3bd42916deb8c9fda1859cb9eaaadec9fa607c4',
+    'byte pin (p18-1 base): the same calls with KILL_RULE removed are the pre-p18-1 bytes')
   ok(sha(oldRows.join('\n')) === '0b7fa8531f41dad8da30902e500d4cc7746f1540424af004039ab890433972aa',
     'byte pin (p16-3 base): the same rows with needsHuman deleted are the pre-p16-3 rows')
-  ok(sha(calls.join('\n')) === '8236605ff29f46cc2c59346eb3bd42916deb8c9fda1859cb9eaaadec9fa607c4',
-    'byte pin: three whole task-mode calls — every label and prompt (re-pinned by p16-3: the base above plus the rule)')
+  ok(sha(calls.join('\n')) === '1e51b62c997f39814ea75373fe38d97955c596ce77c7aa63762a4ab5c230cacc',
+    'byte pin: three whole task-mode calls — every label and prompt (re-pinned by p18-1: the p18-1 base above plus KILL_RULE)')
   ok(sha(rows.join('\n')) === '7a9ecf48734cee23672a77dbbde09a3fcee91a110746b46665bc3aaecd0984da',
     'byte pin: three whole task-mode calls — every row, rung record included')
 }

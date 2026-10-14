@@ -438,6 +438,23 @@ mkro $'- [[a]]'
 mkt a done
 J=$(nxt)
 ok "$(q "$J" '[d["halt"], d["progress"]]')" '["complete","progress: 1/1 merged — rollout complete"]' "next: halt complete"
+# The ceremony's idempotence guard (p19-14): a rollout whose ceremony already ran (`status: done`, filed under
+# Archive/Rollouts/) halts "done", never "complete", so no entry (repair's hand-off included) runs it twice. A
+# done note still in Work/Tasks/ is an interrupted ceremony: it halts "complete", so a re-entry finishes it.
+scen halt-done
+mkro $'- [[a]]' 'completed: 2026-10-02'
+sed -i.bak 's/^status: open$/status: done/' "$D/ro.md" && rm -f "$D/ro.md.bak"
+mkt a done
+J=$(nxt)
+ok "$(q "$J" 'd["halt"]')" '"complete"' "next: a done rollout note still in Work/Tasks/ (an interrupted ceremony) halts complete"
+mkdir -p "$D/Archive/Rollouts"; mv "$D/ro.md" "$D/Archive/Rollouts/ro.md"
+J=$(HOME="$EH" python3 "$SCRIPT" next --rollout "$D/Archive/Rollouts/ro.md" --tasks-dir "$D" --now "$NOW")
+ok "$(q "$J" '[d["halt"], d["progress"]]')" '["done","progress: 1/1 merged — rollout complete"]' "next: a done, archived rollout halts done (the ceremony already ran)"
+J=$(cd "$D/Archive/Rollouts" && HOME="$EH" python3 "$SCRIPT" next --rollout ro.md --tasks-dir "$D" --now "$NOW")
+ok "$(q "$J" 'd["halt"]')" '"done"' "next: a relative --rollout given from inside the archive still halts done"
+sed -i.bak 's/^status: done$/status: open/' "$D/Archive/Rollouts/ro.md" && rm -f "$D/Archive/Rollouts/ro.md.bak"
+J=$(HOME="$EH" python3 "$SCRIPT" next --rollout "$D/Archive/Rollouts/ro.md" --tasks-dir "$D" --now "$NOW")
+ok "$(q "$J" 'd["halt"]')" '"complete"' "next: an archived note not stamped done is no finished ceremony: halt complete"
 scen halt-stuck
 mkro $'- [[a]]\n- [[b]]'
 mkt a blocked; mkt b open 'depends-on: [[a]]'
@@ -583,7 +600,7 @@ ok "$(q "$J" '[[t["blockerSummary"], t["priority"]] for t in d["tasks"] if t["sl
 ok "$(q "$J" 'sorted(set(k for t in d["tasks"] for k in t))')" \
   '["blockerSummary","integrating","merged","pr","priority","queueState","rung","rungDrift","setAsideAt","slug","solo","started","status","waitingOn"]' "status: the exact row keys (no owner key)"
 ok "$(q "$J" 'sorted(d)')" \
-  '["ceiling","ceilingCause","ceilingError","counts","gitEnvHold","incomplete","ladder","pause_requested","paused","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline"]' "status: the exact top-level keys (no stored cursor; gitEnvHold, p14-6; ceilingError and ceilingCause, p15-4)"
+  '["ceiling","ceilingCause","ceilingError","counts","gitEnvHold","incomplete","ladder","pause_requested","paused","pausedFor","progress","rollout","rolloutPath","rolloutStatus","tasks","timeline"]' "status: the exact top-level keys (no stored cursor; gitEnvHold, p14-6; ceilingError and ceilingCause, p15-4; pausedFor, ADR 0034)"
 setkey s-d integrating 2026-10-02T11:50+00:00
 printf '\n### Run 2 (2026-10-02T11:30+00:00)\n\nIntegration: conflict in a.py\n\n<!-- run 2 end sha=111111111111 -->\n' >> "$D/s-e.md"
 J=$(st "" 2026-10-02T12:00:00Z)

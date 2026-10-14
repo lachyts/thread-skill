@@ -9,8 +9,9 @@ python >= 3.8, stdlib only. Called by skills/retro/SKILL.md (step 4) as:
 
 Reads: the rollout's record `<events dir>/<slug>.jsonl` (run_record.py's directory chain), every other
 `<slug>.jsonl` there for load (reviews.jsonl and tunings.jsonl are never read as rollouts; only lines from the
-scored record's host count, and only where a record's span overlaps this run's running time, not the window, so
-a Retro run long after the rollout never counts a later rollout), tunings.jsonl for the baseline, earlier
+scored record's host count, and only where a record's live span overlaps this run's running time, not the window, so
+a Retro run long after the rollout never counts a later rollout; the live span runs to its last line or, while a
+Slot it took is open, to --until, flagged, so a busy rollout whose long calls write nothing still counts), tunings.jsonl for the baseline, earlier
 Tunings and their agreement, and the rollout note's frontmatter (parallel_ceiling, max_review_rounds,
 max_iterations, max_plan_rounds, captured) through reconcile-rollout.py's Note, for the cause labels only. --settings is rollout-settings.py's JSON for
 the Project root: each key's resolved value now (a proposal's `from`), the Guardrail bounds, and `path`, whose
@@ -1081,8 +1082,12 @@ class Score:
         return n
 
     def load(self, base, slug, host, since, until):
-        """Each other same-host record whose span (first line .. last line) overlaps this run's running time (run_iv),
-        never merely the window: a Retro run long after the rollout must not count later rollouts as load."""
+        """Each other same-host record whose live span overlaps this run's running time (run_iv), never merely the
+        window: a Retro run long after the rollout must not count later rollouts as load. The live span runs from its
+        first line to its last line or, while a Slot it took has no slot-freed (nor a `carried` out), to --until: a
+        rollout whose calls run long writes nothing while they run, so its last line can precede this run although
+        its Slots are busy throughout. Bounding an open Slot by the window keeps a long-dead record with a lost
+        slot-freed from counting forever; it is flagged instead. slotsOpen counts the Slots live in the overlap."""
         out, other_host = [], 0
         try:
             names = sorted(os.listdir(base))
@@ -1106,13 +1111,32 @@ class Score:
                 mine.append((t, d))
             if not mine:
                 continue
-            overlap = intersect([(mine[0][0], mine[-1][0])], self.run_iv)
+            slots, open_slot = [], {}  # pairing as in pair(): one Slot per task, a re-take keeps the open one
+            for t, d in mine:
+                kind, task = d.get("kind"), d.get("task")
+                if not task:
+                    continue
+                if kind == "slot-taken" and task not in open_slot:
+                    open_slot[task] = [t, None]
+                    slots.append(open_slot[task])
+                elif kind == "slot-freed" or (kind == "carried" and d.get("rollout") == d.get("from")):
+                    if task in open_slot:
+                        open_slot.pop(task)[1] = t
+            last = mine[-1][0]
+            end = max(last, until) if open_slot else last
+            overlap = intersect([(mine[0][0], end)], self.run_iv)
             if not overlap:
                 continue
+            name_ = name[:-6]
+            if end > last and intersect([(last, end)], self.run_iv):
+                self.flag("load: [[%s]] has %d Slot(s) with no slot-freed (%s): read as live past its last line (%s) "
+                          "to this run's end; a lost slot-freed overcounts it"
+                          % (name_, len(open_slot), ", ".join("[[%s]]" % k for k in sorted(open_slot)), fmt(last)))
             a, b = overlap[0][0], overlap[-1][1]
             inside = [d for t, d in mine if any(x <= t <= y for x, y in overlap)]
-            out.append({"rollout": name[:-6], "start": fmt(a), "end": fmt(b), "hours": hours(total(overlap)),
+            out.append({"rollout": name_, "start": fmt(a), "end": fmt(b), "hours": hours(total(overlap)),
                         "slotsTaken": sum(1 for d in inside if d.get("kind") == "slot-taken"),
+                        "slotsOpen": sum(1 for x, y in slots if intersect([(x, end if y is None else y)], overlap)),
                         "merges": len({d.get("task") for d in inside if d.get("kind") == "merged"})})
         return {"rollouts": out, "otherHostLinesIgnored": other_host}
 

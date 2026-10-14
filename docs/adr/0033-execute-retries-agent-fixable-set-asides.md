@@ -4,6 +4,9 @@ Date: 2026-10-09
 Status: accepted, shipped in 3.0.0 (implemented by p16-4; amends ADR 0030 decision 4, where only a hand-back re-enters a set-aside
 task, and ADR 0004, where repair alone retries an agent-fixable block; from the 2026-10-06 grill on unattended
 rollouts, `thread-skill-p16-unattended-rollouts`)
+*(Amended by ADR 0035, 2026-10-13: the verdict names one Human fix per refusal (`inputs`' `humanFix`); a refused
+descope is durable; an answered block (`inputs`' `answerRecorded`) is never retried automatically, and the live lead
+hands a `hand-back` answer back itself; an at-Integration set-aside with no `pr:` is restored, never handed back.)*
 
 ## Context
 
@@ -136,9 +139,14 @@ Considered:
   block's fingerprint. An answer recorded under a pause for a block with a fingerprint is never asked again: a later
   repair run acts on it once (a hand-back, or for an at-Integration set-aside with no `pr:` a restore, recut, defer
   or leave). It counts only until the task is re-entered: repair's hand-back and execute's "retry [[task]]" spend
-  it first, since a hand-back leaves no stamp once the restart consumes `handed_back:`, and a later run, automatic
+  it first (since ADR 0035, inside the `hand-back` verb's own save): a hand-back leaves no stamp once the restart
+  consumes `handed_back:`. A later run, automatic
   retry (`auto_retry_at`) or automatic descope (its stamped `## Scope decision (automatic)` entry, written before
   the lead's hand-back) outdates it. So a block that comes back, an identical one included, goes to Lachy again, as
   decision 6 wants, while an answer recorded since the last re-entry counts whatever the verdict's why. A block with no fingerprint (a gate, a PR-less code-writing review) takes a `-` entry
   that never counts, so it is asked again. Status shows each set-aside's retry count and a `Needs you` block, where
   an answered block reads `answered: awaiting /thread:repair`.
+- **Amended by ADR 0035 (p18-3).** The verdict now names one Human fix per refusal (`inputs`' `humanFix`), and an
+  answered block (`inputs`' `answerRecorded`) is never retried automatically: decision 2's retry stops at a recorded
+  answer, which the lead hands back itself (a `hand-back` answer, `hand-back --answer`) or repair finishes. Answers are
+  written only by `reconcile-rollout.py record-answer` and spent only by `hand-back`.
