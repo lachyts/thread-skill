@@ -493,6 +493,21 @@ test('positive control: unscoped, the fixture really does close p3 and p10 (so s
     { 1: 'closed', 2: 'left open', 3: 'closed', 5: 'ambiguous', 10: 'closed' })
 })
 
+// A fractional phase (skills/_shared/vault-grammar.md § Phase and task filenames) is touched and closed like
+// a whole one; the whole-number phases keep their numeric order around it.
+test('touched-phases and the ceremony carry a fractional phase (p3.5) through to closed', () => {
+  const v = buildVault()
+  fs.writeFileSync(path.join(v, 'Work/Phases/demo-p3.5-frac.md'), phaseNote(3.5))
+  fs.writeFileSync(path.join(v, 'Work/Tasks/demo-p3.5-1-a.md'), taskNote(3.5, 'done', [LINK]))
+  const c = ceremony(v)
+  assert.equal(c.touched.stdout, '--project demo --phases 1,2,3.5,5\n--project other --phases 4\n')
+  assert.equal(c.runs.demo.code, 0, c.runs.demo.stdout + c.runs.demo.stderr)
+  assert.deepEqual(classify(c.runs.demo, 'demo', c.runs.demo.touched, v),
+    { 1: 'closed', 2: 'left open', 3.5: 'closed', 5: 'ambiguous' })
+  assert.match(fs.readFileSync(path.join(v, 'Work/Phases/demo-p3.5-frac.md'), 'utf8'), /\nstatus: done\ncompleted: 2026-09-27\n/)
+  assert.match(fs.readFileSync(path.join(v, 'Work/Phases/demo-p3-gamma.md'), 'utf8'), /\nstatus: open\n/, 'p3 is untouched')
+})
+
 test('touched-phases: a rollout with only loose tasks prints nothing and exits 0', () => {
   const v = buildVault()
   const T = path.join(v, 'Work/Tasks')

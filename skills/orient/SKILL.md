@@ -161,10 +161,9 @@ and Drift and the slots for each swept project.
 - **Recency**: overdue `scheduled:`/`due:` dates; note staleness
   (last-modified); `git status`/`git log -3` in each project root — dirty
   trees also surface aborted-session partial edits worth flagging.
-- **In flight** (the one definition; the reshuffle's reach tiers use it): a task stamped
-  `rollout:` whose rollout note is still live (the link resolves to a note directly in
-  `Work/Tasks/`), a `dispatched:` stamp ≤7 days old, or `status: in-progress` (TaskNotes' own
-  spelling), `in_progress` or `review`; a phase with any such member. Report it as such; never
+- **In flight** (the reshuffle's reach tiers use it too): as defined once in
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/vault-grammar.md` § In flight, which also holds the
+  phase/task filename pattern and the status sets this sweep reads. Report it as such; never
   re-batch it (§ 7) and never reshuffle it.
 
 ### 3. Present

@@ -141,9 +141,10 @@ Subcommands:
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
               `--project <slug> --phases <N,M,...>` line per project slug, slugs and phases sorted, for
-              every task named `<slug>-p<N>-*`. Loose tasks are ignored; nothing linked prints nothing.
-              Each line is the argument list for `reconcile-project.py <line> --kinds phase --apply`,
-              so only phases this rollout touched are ever closed.
+              every task named `<slug>-p<N>-*` (N whole or fractional, `3.5`, sorted numerically: the
+              vault grammar, skills/_shared/vault-grammar.md). Loose tasks are ignored; nothing linked
+              prints nothing. Each line is the argument list for `reconcile-project.py <line> --kinds
+              phase --apply`, so only phases this rollout touched are ever closed.
 
   fold-journals  For execute's completion ceremony and every Retro (p15-3, ADR 0032): `--rollout <note path |
               [[slug]] | slug> [--dry-run]`. Resolves the slug with run_record.normalise_slug and never opens
@@ -2717,7 +2718,9 @@ def cmd_status(args) -> int:
 
 # ---- touched-phases ---------------------------------------------------------
 
-PHASED_STEM_RE = re.compile(r"^(?P<slug>.+?)-p(?P<n>\d+)-")
+# The phase number is the vault grammar's PHASE_N, whole or fractional (skills/_shared/vault-grammar.md
+# § Phase and task filenames; pinned by tests/contracts/vault-grammar.test.mjs).
+PHASED_STEM_RE = re.compile(r"^(?P<slug>.+?)-p(?P<n>\d+(?:\.\d+)?)-")
 
 
 def cmd_touched_phases(args) -> int:
@@ -2731,9 +2734,10 @@ def cmd_touched_phases(args) -> int:
     for path, _note in _linked_task_notes(rollout_path, tasks_dir):
         m = PHASED_STEM_RE.match(path.stem)
         if m:  # loose tasks (no `-p<N>-` segment) belong to no phase
-            by_slug.setdefault(m.group("slug"), set()).add(int(m.group("n")))
+            whole, dot, frac = m.group("n").partition(".")  # canonical: `03` is `3`, `3.5` stays literal
+            by_slug.setdefault(m.group("slug"), set()).add(str(int(whole)) + dot + frac)
     for slug in sorted(by_slug):
-        print(f"--project {slug} --phases {','.join(str(n) for n in sorted(by_slug[slug]))}")
+        print(f"--project {slug} --phases {','.join(sorted(by_slug[slug], key=lambda n: (float(n), n)))}")
     return 0
 
 

@@ -27,7 +27,7 @@ cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 [ "$1 $2" = "pr view" ] || { echo "fake gh: unexpected $*" >&2; exit 1; }
 case "$3" in
-  */pull/42|*/pull/51|*/pull/81|*/pull/86) echo '{"mergedAt":"2026-09-20T00:00:00Z","state":"MERGED"}' ;;
+  */pull/42|*/pull/51|*/pull/81|*/pull/86|*/pull/35|*/pull/191) echo '{"mergedAt":"2026-09-20T00:00:00Z","state":"MERGED"}' ;;
   */pull/82) echo '{"mergedAt":null,"state":"OPEN"}' ;;
   */pull/811) echo '{"mergedAt":null,"state":"CLOSED"}' ;;
   */pull/88) echo 'GraphQL: Could not resolve to a PullRequest (HTTP 404)' >&2; exit 1 ;;
@@ -67,9 +67,12 @@ bound_keys() { python3 -c 'import json,sys
 d = json.load(open(sys.argv[1])); print(" ".join(k for k in ("new_since_review", "reviewed_not_applied") if k in d))' "$tmp/out"; }
 bound_lines() { printf '%s\n' "$out" | grep -E '^(New since review|Reviewed, not applied) \(|bound to the reviewed list'; }
 
+# demo-p19-*: TaskNotes' own `in-progress` spelling is active, never a hold. demo-p3.5-*: a fractional phase
+# (skills/_shared/vault-grammar.md § Phase and task filenames) is checked and closed like a whole one.
 U_ALL=$(lines "phase demo-p1-alpha" "phase demo-p18-single" "phase demo-p4-merged" "rollout demo-rollout-2025-12-01" \
   "rollout demo-rollout-2025-12-02" "task demo-p4-2-merged" "task demo-p8-1-merged" "task demo-p8-10-shortid" \
-  "task demo-p8-14-escalias" "task demo-p8-23-fenced" "task demo-p8-3-bullet" | LC_ALL=C sort)
+  "task demo-p8-14-escalias" "task demo-p8-23-fenced" "task demo-p8-3-bullet" \
+  "phase demo-p19-dashed" "phase demo-p3.5-frac" "task demo-p19-1-dashed" "task demo-p3.5-2-merged" | LC_ALL=C sort)
 A_ALL=$(lines "phase demo-p17-broken" "phase demo-p5-partial" "phase demo-p6-archived-open" "phase demo-p9-review" \
   "rollout demo-rollout-2025-10-01" "task demo-p12-1-log" "task demo-p16-2-remain" "task demo-p5-2-partial" \
   "task demo-p8-11-closed" "task demo-p8-12-prose" "task demo-p8-13-pointer" "task demo-p8-15-notmerged" \
@@ -116,6 +119,8 @@ ok "$(field unambiguous demo-p18-single reason)" "all 1 task landed" "one landed
 has "$(field unambiguous demo-p1-alpha reason)" "all 3 tasks landed" "several landed tasks read in the plural"
 ok "$(field unambiguous demo-p4-merged depends_on)" "demo-p4-2-merged" "demo-p4 depends on its merged task"
 ok "$(field unambiguous demo-p1-alpha depends_on)" "" "demo-p1 depends on nothing"
+ok "$(field unambiguous demo-p19-dashed depends_on)" "demo-p19-1-dashed" "demo-p19 depends on its in-progress (dashed) task"
+ok "$(field unambiguous demo-p3.5-frac depends_on)" "demo-p3.5-2-merged" "demo-p3.5 (fractional) depends on its merged task"
 has "$(strs skipped)" "demo-p8-8-gh404" "a gh error is skipped, not evidence"
 ok "$(strs gh)" "ok" "gh reported ok"
 ok "$(strs applied)" "False" "applied is false"
@@ -132,7 +137,7 @@ ok "$(manifest "$v")" "$before" "dry run (json) writes nothing"
 rp
 ok "$rc" 0 "text dry run exits 0"
 has "$out" "dry run: nothing written; pass --apply" "text header says dry run"
-has "$out" "Unambiguous (11)" "text lists the unambiguous block"
+has "$out" "Unambiguous (15)" "text lists the unambiguous block"
 has "$out" "Ambiguous (25)" "text lists the ambiguous block"
 ok "$(bound_lines)" "" "plain text dry run has no New since review / Reviewed, not applied lines"
 ok "$(manifest "$v")" "$before" "dry run (text) writes nothing"
@@ -145,6 +150,12 @@ print(bool(m.find_mentions("demo-p8-1-merged", "demo", row)), bool(m.find_mentio
       bool(m.find_mentions("demo-p8-14-x", "demo", "| 1 | [[demo-p8-14-x\\|a]] | #1 |")),
       bool(m.find_mentions("demo-p12-1-log", "demo", "- [[demo-p12-1-log-v2]] → #20")))' "$script" 2>&1)
 ok "$m" "False True True False" "mention matching: short-id bound, escaped alias, successor stem"
+# A fractional phase's short id is p3.5-2, bounded the same way: never a `| p3.5-20 |` row.
+m=$(python3 -c 'import importlib.util, sys
+s = importlib.util.spec_from_file_location("rp", sys.argv[1]); m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+print(m.short_id("demo-p3.5-2-merged", "demo"), bool(m.find_mentions("demo-p3.5-2-merged", "demo", "| p3.5-2 | #1 |")),
+      bool(m.find_mentions("demo-p3.5-2-merged", "demo", "| p3.5-20 | #1 |")))' "$script" 2>&1)
+ok "$m" "p3.5-2 True False" "mention matching: a fractional short id, bounded"
 
 # The partial-landing and negative-marker patterns catch each non-landing wording, and miss plain landed prose.
 m=$(python3 -c 'import importlib.util, sys
@@ -167,15 +178,16 @@ ok "$(strs applied)" "True" "applied is true"
 ok "$(bound_keys)" "" "plain --apply --json has no new_since_review / reviewed_not_applied keys"
 after=$(manifest "$v")
 changed=$(printf '%s\n%s\n' "$before" "$after" | LC_ALL=C sort | uniq -u | sed 's/^[0-9a-f]*  //' | LC_ALL=C sort -u | tr '\n' ' ')
-exp="./Work/Phases/demo-p1-alpha.md ./Work/Phases/demo-p18-single.md ./Work/Phases/demo-p4-merged.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-01.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-02.md ./Work/Tasks/Archive/demo-rollout-2025-12-01.md ./Work/Tasks/demo-p4-2-merged.md ./Work/Tasks/demo-p8-1-merged.md ./Work/Tasks/demo-p8-10-shortid.md ./Work/Tasks/demo-p8-14-escalias.md ./Work/Tasks/demo-p8-23-fenced.md ./Work/Tasks/demo-p8-3-bullet.md ./Work/Tasks/demo-rollout-2025-12-02.md "
+exp="./Work/Phases/demo-p1-alpha.md ./Work/Phases/demo-p18-single.md ./Work/Phases/demo-p19-dashed.md ./Work/Phases/demo-p3.5-frac.md ./Work/Phases/demo-p4-merged.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-01.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-02.md ./Work/Tasks/Archive/demo-rollout-2025-12-01.md ./Work/Tasks/demo-p19-1-dashed.md ./Work/Tasks/demo-p3.5-2-merged.md ./Work/Tasks/demo-p4-2-merged.md ./Work/Tasks/demo-p8-1-merged.md ./Work/Tasks/demo-p8-10-shortid.md ./Work/Tasks/demo-p8-14-escalias.md ./Work/Tasks/demo-p8-23-fenced.md ./Work/Tasks/demo-p8-3-bullet.md ./Work/Tasks/demo-rollout-2025-12-02.md "
 ok "$changed" "$exp" "apply changed exactly the unambiguous file set"
 F=$fixture/Work
 want=$(awk '/^status: open$/ {print "status: done"; print "completed: 2026-09-27"; next} {print}' "$F/Phases/demo-p1-alpha.md")
 ok "$(cat "$v/Work/Phases/demo-p1-alpha.md")" "$want" "demo-p1: status done, completed inserted directly after status (before owner)"
 want=$(awk '/^status: open$/ {print "status: done"; next} /^completed:[[:space:]]*$/ {print "completed: 2026-09-27"; next} {print}' "$F/Phases/demo-p4-merged.md")
 ok "$(cat "$v/Work/Phases/demo-p4-merged.md")" "$want" "demo-p4: the empty completed: line is filled in place"
-for t in demo-p4-2-merged demo-p8-1-merged demo-p8-3-bullet demo-p8-10-shortid demo-p8-14-escalias demo-p8-23-fenced; do
-  want=$(awk '/^status: (open|in_progress)$/ {print "status: done"; next} {print}' "$F/Tasks/$t.md")
+for t in demo-p4-2-merged demo-p8-1-merged demo-p8-3-bullet demo-p8-10-shortid demo-p8-14-escalias demo-p8-23-fenced \
+         demo-p19-1-dashed demo-p3.5-2-merged; do
+  want=$(awk '/^status: (open|in_progress|in-progress)$/ {print "status: done"; next} {print}' "$F/Tasks/$t.md")
   ok "$(cat "$v/Work/Tasks/$t.md")" "$want" "$t: only the status line changed"
 done
 for r in Archive/demo-rollout-2025-12-01 demo-rollout-2025-12-02; do
@@ -186,6 +198,10 @@ done
 ok "$(shasum < "$v/Work/Tasks/demo-rollout-2025-10-01.md")" "$(shasum < "$F/Tasks/demo-rollout-2025-10-01.md")" "clashing rollout stays in place"
 ok "$(shasum < "$v/Work/Tasks/Archive/Rollouts/demo-rollout-2025-10-01.md")" "$(shasum < "$F/Tasks/Archive/Rollouts/demo-rollout-2025-10-01.md")" "clash destination untouched"
 has "$(items ambiguous)" "rollout demo-rollout-2025-10-01" "the clash is still ambiguous in the apply output"
+for p in demo-p19-dashed demo-p3.5-frac; do
+  has "$(cat "$v/Work/Phases/$p.md")" "status: done
+completed: 2026-09-27" "$p: closed (status done, completed inserted)"
+done
 ok "$(strs errors)" "" "apply reports no errors"
 
 # ---- 3. idempotence ----------------------------------------------------------------------------------
@@ -212,6 +228,8 @@ for mode in missing disabled; do
   done
   for t in demo-p8-3-bullet demo-p8-10-shortid demo-p8-14-escalias; do has "$u" "task $t" "gh $mode: $t is still U"; done
   has "$(items ambiguous)" "phase demo-p4-merged" "gh $mode: demo-p4 is ambiguous"
+  has "$(items ambiguous)" "phase demo-p19-dashed" "gh $mode: demo-p19 (in-progress task, PR unverified) is ambiguous"
+  has "$(items ambiguous)" "phase demo-p3.5-frac" "gh $mode: demo-p3.5 (PR unverified) is ambiguous"
   # A phase with other open work stays quiet even though one of its in-flight tasks has a PR URL.
   case "$(items unambiguous; items ambiguous)" in *"phase demo-p16-mixed"*) ok listed absent "gh $mode: demo-p16 (a hold plus an in-flight PR) is in neither list";; *) ok absent absent "gh $mode: demo-p16 (a hold plus an in-flight PR) is in neither list";; esac
 done
@@ -242,6 +260,20 @@ rp --phases 4 --json
 ok "$rc" 0 "--phases 4 exits 0"
 ok "$( (items unambiguous; items ambiguous) | grep '^task ')" "task demo-p4-2-merged" "--phases 4: the only task candidate is demo-p4-2-merged"
 has "$(items unambiguous)" "phase demo-p4-merged" "--phases 4: demo-p4 is U with its task"
+# A fractional phase is its own scope: --phases 3.5 reaches demo-p3.5-* only, --phases 3 never reaches it,
+# and the whole part compares numerically (03 = 3), as int() did.
+rp --kinds phase,task --phases 3.5 --json
+ok "$rc" 0 "--phases 3.5 exits 0"
+ok "$(items unambiguous)" "$(lines "phase demo-p3.5-frac" "task demo-p3.5-2-merged")" "--phases 3.5: U is exactly demo-p3.5 and its merged task"
+ok "$(items ambiguous)" "" "--phases 3.5: nothing ambiguous"
+rp --phases 3 --json
+ok "$rc" 0 "--phases 3 exits 0"
+p3=$(items unambiguous; items ambiguous)
+case "$p3" in *"p3.5"*) ok listed absent "--phases 3: no p3.5 item";; *) ok absent absent "--phases 3: no p3.5 item";; esac
+rp --phases 03 --json; p03=$(items unambiguous; items ambiguous)
+ok "$p03" "$p3" "--phases 03 reads as --phases 3"
+rp --kinds phase --phases 3.5,3 --json
+ok "$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["phases"]))' "$tmp/out")" "[3, 3.5]" "--phases 3.5,3: JSON phases sorted numerically, whole numbers stay ints"
 ok "$(manifest "$v")" "$before" "--phases dry runs write nothing"
 
 # ---- 6. usage and dependency errors ------------------------------------------------------------------
@@ -251,6 +283,7 @@ mkdir -p "$tmp/novault"
 PATH="$tmp/bin:$PATH" python3 "$script" --project demo --vault "$tmp/novault" > /dev/null 2>&1; ok "$?" 2 "a vault with no Work/ exits 2"
 rp --kinds phase,nope; ok "$rc" 2 "a bad --kinds exits 2"
 rp --phases x; ok "$rc" 2 "a bad --phases exits 2"
+for bad in 3. 3.5.1 -1 .5; do rp --phases "$bad"; ok "$rc" 2 "--phases $bad (not a phase number) exits 2"; done
 mkdir -p "$tmp/plug/skills/_shared/scripts"; cp "$script" "$tmp/plug/skills/_shared/scripts/"
 PATH="$tmp/bin:$PATH" python3 "$tmp/plug/skills/_shared/scripts/reconcile-project.py" --project demo --vault "$v" --apply > "$tmp/out" 2> "$tmp/err"
 ok "$?" 2 "a missing reconcile-rollout.py exits 2"
@@ -343,8 +376,8 @@ has "$out" "applied (bound to the reviewed list: $tmp/review.json)" "text header
 has "$out" "New since review (1)" "text lists the new-since-review block"
 has "$out" "  - phase demo-p3-openwork: status: done" "text names the new phase under it"
 has "$out" "Reviewed, not applied (0)" "text lists the reviewed-not-applied block"
-ok "$(written_section | grep -c demo-p3)" 0 "text Written never names p3"
-has "$(written_section)" "Written (11)" "text Written lists the 11 reviewed writes"
+ok "$(written_section | grep -c demo-p3-)" 0 "text Written never names p3 (demo-p3.5 is its own phase)"
+has "$(written_section)" "Written (15)" "text Written lists the 15 reviewed writes"
 
 # 2. a reviewed item turned ambiguous: `now ambiguous: <its ambiguous reason>`, for a human
 fresh; review
@@ -433,7 +466,7 @@ ok "$rc" 0 "a second bound apply exits 0"
 ok "$(manifest "$v")" "$after" "a second bound apply writes nothing"
 ok "$(strs written)" "" "a second bound apply lists no writes"
 ok "$(items new_since_review)" "phase demo-p3-openwork" "the new phase is still listed, still unwritten"
-ok "$(items reviewed_not_applied)" "$U_ALL" "the 11 items the first run wrote are reviewed, not applied"
+ok "$(items reviewed_not_applied)" "$U_ALL" "the 15 items the first run wrote are reviewed, not applied"
 ok "$(reasons reviewed_not_applied)" "$NO_LONGER_DRIFT" "each with the benign no-longer-drift reason, never now ambiguous"
 
 exit $fail

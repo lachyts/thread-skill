@@ -29,13 +29,13 @@ A single-note target resolves its project like this, and the gate confirms it:
 
 Classify from orient § 2's frontmatter sweep; don't walk the folders again. The target project(s)
 are the notes whose `projects:` contains the wikilink and, for phase notes, filenames
-`<slug>-p<N>-…` where `<N>` is digits with an optional `.digits`: anchored on `-p<N>-` like
-`reconcile-project.py`, so a sibling project `<slug>-plugin` never matches, though that script
-only reads whole-number phases. Skip notes tagged `rollout` and landed statuses (`done`, `merged`,
-`dropped`). Give every item its **reach tier** (CONTEXT.md **Reach tiers**):
+`<slug>-p<N>-…` (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/vault-grammar.md` § Phase and task
+filenames): anchored on `-p<N>-` like `reconcile-project.py`, so a sibling project `<slug>-plugin`
+never matches. Skip notes tagged `rollout` and the landed statuses (vault grammar § Statuses).
+Give every item its **reach tier** (CONTEXT.md **Reach tiers**):
 
-- **In flight — frozen.** Orient § 2's definition. Shown for context. Its scope, phase and body
-  never change. New work may still join its phase.
+- **In flight — frozen.** The vault grammar's definition (`vault-grammar.md` § In flight). Shown
+  for context. Its scope, phase and body never change. New work may still join its phase.
 - **Possibly landed — frozen too.** Anything on the reconcile step's AMBIGUOUS list (orient § 2),
   and anything orient § 4's bound apply reported as `New since review` or `Reviewed, not applied`:
   it may already have merged (the § 2 sweep predates the apply, so it can still read as open), so
