@@ -2094,8 +2094,8 @@ def _ceremony_done(rollout_path: Path, rollout_note) -> bool:
     and sits in an `Archive/Rollouts/` directory, where the ceremony's last step moves it. `next` then halts "done",
     never "complete", so no entry (repair's hand-off included) runs the ceremony a second time. A done note still
     in Work/Tasks/ is an interrupted ceremony (stamped, never moved), so it stays "complete" and a re-entry finishes
-    it."""
-    parent = rollout_path.parent
+    it. The path is made absolute first, so a relative `--rollout` given from inside the archive still reads."""
+    parent = rollout_path.absolute().parent
     return (_status(rollout_note) == "done"
             and parent.name == "Rollouts" and parent.parent.name == "Archive")
 

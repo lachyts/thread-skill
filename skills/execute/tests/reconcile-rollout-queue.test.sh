@@ -450,6 +450,8 @@ ok "$(q "$J" 'd["halt"]')" '"complete"' "next: a done rollout note still in Work
 mkdir -p "$D/Archive/Rollouts"; mv "$D/ro.md" "$D/Archive/Rollouts/ro.md"
 J=$(HOME="$EH" python3 "$SCRIPT" next --rollout "$D/Archive/Rollouts/ro.md" --tasks-dir "$D" --now "$NOW")
 ok "$(q "$J" '[d["halt"], d["progress"]]')" '["done","progress: 1/1 merged — rollout complete"]' "next: a done, archived rollout halts done (the ceremony already ran)"
+J=$(cd "$D/Archive/Rollouts" && HOME="$EH" python3 "$SCRIPT" next --rollout ro.md --tasks-dir "$D" --now "$NOW")
+ok "$(q "$J" 'd["halt"]')" '"done"' "next: a relative --rollout given from inside the archive still halts done"
 sed -i.bak 's/^status: done$/status: open/' "$D/Archive/Rollouts/ro.md" && rm -f "$D/Archive/Rollouts/ro.md.bak"
 J=$(HOME="$EH" python3 "$SCRIPT" next --rollout "$D/Archive/Rollouts/ro.md" --tasks-dir "$D" --now "$NOW")
 ok "$(q "$J" 'd["halt"]')" '"complete"' "next: an archived note not stamped done is no finished ceremony: halt complete"

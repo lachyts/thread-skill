@@ -48,7 +48,9 @@ fix this rollout                     # resolves to the rollout in context
 
 ### 1. Diagnose
 
-Resolve `[[<slug>]]` (ask if ambiguous). Run the **`/thread:status` scan with the live cross-check on**
+Resolve `[[<slug>]]` (ask if ambiguous): `~/repos/obsidian/Work/Tasks/<slug>.md`, else
+`Work/Tasks/Archive/Rollouts/<slug>.md`, a rollout whose completion ceremony already ran (§ 3a's
+complete-rollout stop). Run the **`/thread:status` scan with the live cross-check on**
 (repair is about to act, so it always checks reality): the per-task queue state, each task's
 `lead-integrate.py inputs`, the drift flags and the repo path. Show the user the situational report first:
 they should see what they're repairing.

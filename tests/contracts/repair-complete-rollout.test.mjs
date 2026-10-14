@@ -2,7 +2,8 @@
 // live E2E's row 7). Repair's `resume` can flip a merged, never marked task on a rollout whose ceremony already
 // ran (the note reads `status: done` and sits in Archive/Rollouts/); § 4's hand-off into execute's Cold resume
 // would then re-run the ceremony (a second Completion log, thread close, cron delete, archive move). Two layers:
-//   - repair § 3a's complete-rollout stop, its exclusion from § 4's hand-off and its Don't;
+//   - repair § 1 resolves an archived rollout, § 3a's complete-rollout stop, its exclusion from § 4's hand-off
+//     and its Don't;
 //   - execute's idempotence guard: `next` halts "done" on a done, archived note (the behaviour is pinned in
 //     skills/execute/tests/reconcile-rollout-queue.test.sh, scenario halt-done), and the halt guard's `done`
 //     route runs no part of step 5.
@@ -16,6 +17,9 @@ const EXECUTE = read('skills/execute/SKILL.md')
 
 function check({ repair, execute }) {
   const fails = []
+  const s1 = collapse(section(repair, /^### 1\. /) ?? '')
+  if (!s1.includes("else `Work/Tasks/Archive/Rollouts/<slug>.md`, a rollout whose completion ceremony already ran (§ 3a's complete-rollout stop)"))
+    fails.push('repair-resolve')
   const s3 = collapse(section(repair, /^### 3\. /) ?? '')
   const stop = s3.slice(Math.max(0, s3.indexOf('**The complete-rollout stop')))
   if (!s3.includes('**The complete-rollout stop') ||
@@ -40,6 +44,11 @@ function check({ repair, execute }) {
 
 test('repair stops on a complete rollout and execute runs its ceremony once', () => {
   assert.deepEqual(check({ repair: REPAIR, execute: EXECUTE }), [])
+})
+
+test('control: a resolve that never looks in Archive/Rollouts/ fails repair-resolve', () => {
+  const repair = REPAIR.replace('else\n`Work/Tasks/Archive/Rollouts/<slug>.md`', 'never\n`Work/Tasks/Archive/Rollouts/<slug>.md`')
+  assert.deepEqual(check({ repair, execute: EXECUTE }), ['repair-resolve'])
 })
 
 test('control: no complete-rollout stop in repair § 3a fails repair-stop', () => {
