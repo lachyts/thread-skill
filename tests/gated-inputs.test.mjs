@@ -5,8 +5,10 @@
 // Pinned here:
 // - p18-7's two real gates (chorus-rollout-2026-10-10), verbatim from the archived note's `## Approved gates`: the probe
 //   reads 9 (its `Cap US$5 total` plus the `reaches US$4` stop line) and passes; the fast-mode gate asks;
-// - every exposure rule, each failure with its `why`, and the accepted residuals (R4) so a later change cannot "fix"
-//   one silently;
+// - every exposure rule, each failure with its `why`, and the accepted residuals (ADR 0034 § Consequences, *A
+//   fail-closed reading*) so a later change cannot "fix" one silently;
+// - the widening words (a cap that is not the ceiling asks, inside the clause and outside it), a count whose unit is not
+//   the per-unit token's, and one multiplier list for both sites;
 // - ask ahead: the count-phrased rewording prices, the uncounted one still asks, and schedule's own Planner example
 //   prices to exactly 150 (the guidance is coupled to the parser);
 // - the annotation round-trips through reconcile-rollout.py's GATE_ANNOT_RE and the engine's unapprovedGates, so an
@@ -111,6 +113,9 @@ test('gates that price: totals, monthly caps, per-unit counts, decimals and ever
     ['spend: OpenAI GPT-4o API — cap US$10', 10], // an identifier's digit is no bare number
     ['spend: image API — cap US$40, plus US$30 for the fallback', 70],
     ['spend: image API — cap US$40 and US$30 for the retry model', 70],
+    ['spend: x — cap US$20 per account per month across 2 Logins', 40], // Login and account are one unit
+    ['spend: x — cap US$20 per Login across 2 accounts', 40],
+    ['spend: x — cap US$20 per seat across two seats', 40],
   ]
   const got = py(cases.map(([gate]) => ({ op: 'exposure', gate })))
   cases.forEach(([gate, usd], i) => assert.deepEqual([num(got[i].usd), got[i].why], [usd, ''], gate))
@@ -124,14 +129,14 @@ test('gates that price: totals, monthly caps, per-unit counts, decimals and ever
   assert.equal(e.covered, false, 'US$40 plus US$30 is 70, over 50')
 })
 
-// ---- the accepted residual (R4) ------------------------------------------------------------------------------
+// ---- the accepted residuals (ADR 0034 § Consequences, *A fail-closed reading*) ---------------------------------
 
 // Rule 7(iii) is a list, never a blanket `every`: p18-7's probe reads "every signed-in Claude Login" and must pass
-// (ADR 0034 d1). So `every`, `a` or `an` before a noun NOT on UNIT_NOUNS reads x1. That is safe: the engine's
+// (ADR 0034 decision 1). So `every`, `a` or `an` before a noun NOT on UNIT_NOUNS reads x1. That is safe: the engine's
 // GATED_INPUTS_CHECK (task.workflow.js) makes an approved cap "a CEILING to respect, never a target (blowing it is a
 // verifier/review failure, not a re-ask)", and the annotation records the approval as "total exposure", so spending the
 // cap per push or per image is a review failure, never an approved spend.
-test('accepted residual (R4): every/a/an before a noun outside UNIT_NOUNS reads ×1; the cap is the task\'s total ceiling', () => {
+test('accepted residual (ADR 0034 § Consequences): every/a/an before a noun outside UNIT_NOUNS reads ×1; the cap is the task\'s total ceiling', () => {
   const [push, image, day, probe, ann] = py([
     { op: 'exposure', gate: 'spend: CI on every push — cap US$5' },
     { op: 'exposure', gate: 'spend: image API, one call every image — cap US$5' },
@@ -149,7 +154,7 @@ test('accepted residual (R4): every/a/an before a noun outside UNIT_NOUNS reads 
   assert.ok(!lists.UNIT_NOUNS.map((n) => n.toLowerCase()).includes('month'), 'month is the counting period, never a unit')
 })
 
-test('accepted residual (R4): a number word outside the clause with no Login/account/seat/user noun is not counted', () => {
+test('accepted residual (ADR 0034 § Consequences): a number word outside the clause with no Login/account/seat/user noun is not counted', () => {
   assert.equal(num(exposure('spend: x — cap US$5 total, seven Turns').usd), 5)
 })
 
@@ -205,6 +210,7 @@ test('never covered: each failure names its rule', () => {
     ['spend: x — cap US$5 nightly', 'unrecognised clause: nightly'],
     ['spend: x — cap US$5 (US$15 with retries)', 'unrecognised clause: (US$15 with retries)'], // a second amount inside
     ['spend: x — cap US$50 per Login per account across 3 Logins', 'more than one per-unit token'],
+    ['spend: x — cap US$5 double', 'unrecognised clause: double'],
     // 7. rule 7, round 3's reviewer shapes
     ['spend: nightly eval — cap US$20', 'period outside the cap clause: nightly'],
     ['spend: CI each night — cap US$10', 'per/each outside the cap clause: each'],
@@ -222,6 +228,8 @@ test('never covered: each failure names its rule', () => {
     ['spend: x — cap US$5 total, /user', 'per-unit slash outside the cap clause: /user'],
     ['spend: x — cap US$5, US$5 each for the runs', 'per/each outside the cap clause: each'],
     ['spend: x — cap US$5 total, run twice', 'multiplier outside the cap clause: twice'],
+    ['spend: probe, run double — cap US$45', 'multiplier outside the cap clause: double'], // one list with rule 5's
+    ['spend: x — cap US$5 total, then triple it', 'multiplier outside the cap clause: triple'],
     ['spend: x — cap US$5 total, plus 20%', 'percentage outside the cap clause: %'],
     // 6. currency
     ['spend: x — cap US$5 total, plus fifty dollars for retries', 'non-USD or ambiguous currency: dollars'],
@@ -235,6 +243,62 @@ test('never covered: each failure names its rule', () => {
   ]
   const got = py(cases.map(([gate]) => ({ op: 'exposure', gate })))
   cases.forEach(([gate, why], i) => assert.deepEqual(got[i], { usd: null, why }, gate))
+})
+
+// A cap whose own wording says it is not the ceiling never reads as the bare cap (ADR 0034: anything it cannot price
+// asks). WIDENING is one list for rule 5 (inside the clause) and rule 7 (outside it).
+test('never covered: a widening word inside or outside the cap clause asks, and is never read as the bare cap', () => {
+  const cases = [
+    // the review's shapes, each read as the bare cap and approved at 50 before WIDENING
+    ['spend: x — cap US$50 (no hard limit: overage possible)', 'unrecognised clause: (no hard limit'],
+    ['spend: x — cap US$50 plus overage', 'unrecognised clause: plus overage'],
+    ['spend: x — cap US$50, overage billed at cost', 'widening word outside the cap clause: overage'],
+    ['spend: x — cap US$45 + tax', 'unrecognised clause: + tax'],
+    ['spend: x — cap US$50 plus VAT', 'unrecognised clause: plus VAT'],
+    ['spend: x — cap US$50 before tax', 'unrecognised clause: before tax'],
+    ['spend: x — cap US$50 before discounts', 'unrecognised clause: before discounts'], // `before` alone, clause-only
+    ['spend: x — cap US$50 excluding overage charges', 'unrecognised clause: excluding overage charges'],
+    ['spend: x — cap US$50 soft', 'unrecognised clause: soft'],
+    ['spend: x — cap US$50 to start', 'unrecognised clause: to start'],
+    ['spend: x — cap US$50 initially', 'unrecognised clause: initially'],
+    ['spend: x — cap US$50 for now', 'unrecognised clause: for now'],
+    ['spend: x, plus overage at the provider rate — cap US$45', 'widening word outside the cap clause: plus, overage'],
+    // the rest of the list, inside and outside
+    ['spend: x — cap US$50 ex GST', 'unrecognised clause: ex GST'],
+    ['spend: x — cap US$50 exclusive of fees', 'unrecognised clause: exclusive of fees'],
+    ['spend: x — cap US$50 excl. taxes', 'unrecognised clause: excl'], // the `.` ends the clause; `excl` stays in it
+    ['spend: x — cap US$50 uncapped', 'unrecognised clause: uncapped'],
+    ['spend: x — cap US$50 or more', 'unrecognised clause: or more'],
+    ['spend: x — cap US$50 at least', 'unrecognised clause: at least'],
+    ['spend: x — cap US$50 minimum', 'unrecognised clause: minimum'],
+    ['spend: x — cap US$50 approx', 'unrecognised clause: approx'],
+    ['spend: x — cap US$50, plus fees', 'widening word outside the cap clause: plus, fees'],
+    ['spend: x — cap US$50, may exceed', 'widening word outside the cap clause: exceed'],
+    ['spend: x — cap US$50; soft, no hard cap', 'widening word outside the cap clause: soft, no hard cap'],
+    ['spend: x + VAT — cap US$50', 'widening word outside the cap clause: +, VAT'],
+    ['spend: x — cap US$50, roughly, for now', 'widening word outside the cap clause: roughly, for now'],
+    ['spend: x — cap US$50, initially', 'widening word outside the cap clause: initially'],
+  ]
+  const got = py(cases.flatMap(([gate]) => [{ op: 'exposure', gate }, { op: 'covered', gate, limit: 50 }]))
+  cases.forEach(([gate, why], i) => {
+    assert.deepEqual(got[2 * i], { usd: null, why }, gate)
+    assert.equal(got[2 * i + 1].covered, false, `${gate}: never covered at 50`)
+  })
+  // controls: `plus` with an amount after it is an amount (summed), and `before` outside the clause is the probe's own
+  // "stopping before any Turn", so p18-7's probe still reads 9 and the count-phrased fast-mode gate still reads 150
+  const [plus, probe, fast] = py([{ op: 'exposure', gate: 'spend: image API — cap US$40, plus US$30 for the fallback' },
+    { op: 'exposure', gate: PROBE }, { op: 'exposure', gate: FAST_COUNTED }])
+  assert.deepEqual(plus, { usd: '70', why: '' }, '`plus US$30` is an amount')
+  assert.deepEqual(probe, { usd: '9', why: '' }, 'PROBE still reads 9')
+  assert.deepEqual(fast, { usd: '150', why: '' }, 'FAST_COUNTED still reads 150')
+})
+
+test('never covered: a count whose noun is not the per-unit token\'s unit asks (a Login can hold several users)', () => {
+  const [user, seat] = py([{ op: 'exposure', gate: 'spend: x — cap US$20 per user per month across 2 Logins' },
+    { op: 'exposure', gate: 'spend: x — cap US$20 per seat across 3 accounts' }])
+  assert.deepEqual(user, { usd: null, why: 'count unit does not match the per-unit token' }, 'per user across Logins')
+  assert.deepEqual(seat, { usd: null, why: 'count unit does not match the per-unit token' }, 'per seat across accounts')
+  assert.equal(covered('spend: x — cap US$20 per user per month across 2 Logins', 50).covered, false, 'never covered at 50')
 })
 
 test('identifiers are never the cap word, an amount, a per or a budget hit', () => {

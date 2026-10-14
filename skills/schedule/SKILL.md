@@ -396,7 +396,7 @@ The ask-ahead section is exactly:
 ## Decisions (asked ahead <YYYY-MM-DD>)
 
 - Spend: Lachy approved up to <N> USD total exposure for this task at /thread:schedule (summed across Logins, a recurring cap counted per month).
-- Planner: word each spend gate as one priceable total, its period and count inside the cap clause, e.g. `spend: <what> — cap 50 USD per Login per month across 3 Logins`; the cap is the task's whole ceiling, so price per-item spend into the total (never "every push" or "each image"); keep other counts, `per`/`each` words and bare numbers out of the bullet (detail goes in the plan's other sections). A cap the standing approval cannot price is asked mid-run.
+- Planner: word each spend gate as one priceable total, its period and count (in the cap's own unit) inside the cap clause, e.g. `spend: <what> — cap 50 USD per Login per month across 3 Logins`; the cap is the task's whole ceiling, so price per-item spend into the total (never "every push" or "each image"); keep other counts, `per`/`each` words, bare numbers and words that widen the cap (`plus` tax, fees or overage, `soft`, `to start`) out of the bullet (detail goes in the plan's other sections). A cap the standing approval cannot price is asked mid-run.
 ```
 
 The `## Decisions` prefix makes it a recorded decision (descope asks before touching it) and keeps it out of the brief; the planner reads the note in full, so its Planner line shapes the gate the standing approval prices.

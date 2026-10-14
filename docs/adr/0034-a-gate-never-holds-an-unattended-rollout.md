@@ -51,7 +51,9 @@ nothing can be signed before a plan words its gate; some gates will always first
   the clause's per-unit count (a recurring cap counted per month), plus every other USD amount the gate names, so
   p18-7's probe reads 9 (its US$5 cap plus its US$4 stop line) and passes, and its fast-mode gate (US$50 per Login
   with no Login count) asks. Anything it cannot price asks: a non-USD or ambiguous currency, a range, a magnitude,
-  a multiplier or period outside the cap clause, a bare number, more than one cap. Two residuals are accepted and
+  a multiplier or period outside the cap clause, a bare number, more than one cap, a count of a unit other than
+  the cap's per-unit one (a Login can hold several users), or a word that says the cap is not the ceiling (`plus`
+  tax, fees or overage, `soft`, `to start`, `for now`), inside the cap clause or out. Two residuals are accepted and
   pinned by its tests: a number word outside the clause with no Login/account/seat/user noun is not counted, and
   `every`/`a`/`an` before a noun that is not a listed unit (`every push`) reads x1. The second stays because a
   blanket `every` would make the probe ("every signed-in Claude Login") ask, and it is safe because the cap is the

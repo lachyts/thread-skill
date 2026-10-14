@@ -39,28 +39,39 @@ The single home of two readings of free text. Stdlib only; it writes nothing and
         ("malformed amount"); a magnitude word after it ("magnitude word"); a dash, `to` or `or`, then another
         number ("range").
      5. The clause, from the cap amount's end to the first `,` `;` `:` `—` `–` ` and `, a `.` not followed by a
-        digit, or the gate's end, read against a whitelist: totals (`total`, `in total`, `one-off`, `one off`,
+        digit, or the gate's end. The recognised phrases: totals (`total`, `in total`, `one-off`, `one off`,
         `once`, `overall`) and monthly periods (`per (calendar )?month`, `a`/`each`/`every (calendar )?month`,
         `/month`, `/mo`, `monthly`) count x1; one `per Login|account|seat|user` with exactly one count phrase
         (`across N <unit>s`, `for N <unit>s`, `× N`, `x N`, `xN`; N digits >= 1 or a number word one to ten) counts
         xN. A per-unit token with no count asks ("per-Login cap with no Login count"), two ask ("more than one
-        per-unit token"). Any leftover digit, number word, multiplier word, `per`/`each`/`every`, `/` + letter, unit
-        noun, period adverb or currency asks ("unrecognised clause: <leftover>"). An empty clause is a total.
+        per-unit token"), and a count whose noun is another unit asks ("count unit does not match the per-unit
+        token"; Login and account are one unit, as p18-7's "per Login (per account)" reads). The leftover is read
+        against a reject list, not a whitelist: any digit, number word, MULTIPLIER_WORDS word, `per`/`each`/`every`,
+        `/` + letter, unit noun, period adverb, currency, WIDENING word or `before` asks ("unrecognised clause:
+        <leftover>"); any other word passes. An empty clause is a total.
      6. Currency, whole gate: a non-USD amount (`A$`, `AU$`, `NZ$`, `C$`, `CA$`, `€`, `£`, `¥`, `AUD`, `NZD`, `CAD`,
         `EUR`, `GBP`, `JPY` beside a number, or `minor units` after one), a currency word (dollar, bucks, euro,
         pound, cent), a number word beside a currency, or a magnitude before a code ("non-USD or ambiguous
         currency").
-     7. Multipliers and periods outside the clause (code spans included; `_` is a word character, so
-        `per_call_cap` never matches): (i) any `per`/`each`; (ii) a plural Logins/accounts/seats/users; (iii)
-        `every`/`a`/`an` directly before a UNIT_NOUNS noun; (iv) `night(s)` or a PERIOD_ADVERBS word; (v) `/` + a
-        unit noun; (vi) `×`, `x` + digit, digit + `x`, `times`, `twice`, `apiece`; (vii) `%`.
+     7. Multipliers, periods and widening words outside the clause (code spans included; `_` is a word
+        character, so `per_call_cap` never matches): (i) any `per`/`each`; (ii) a plural
+        Logins/accounts/seats/users; (iii) `every`/`a`/`an` directly before a UNIT_NOUNS noun; (iv) `night(s)` or a
+        PERIOD_ADVERBS word; (v) `/` + a unit noun; (vi) `×`, `x` + digit, digit + `x`, a MULTIPLIER_WORDS word
+        (`times`, `twice`, `double`, `triple`, `apiece`); (vii) `%`; (viii) a WIDENING word.
+        WIDENING is one list for rules 5 and 7, so the two readings never disagree: words that say the cap is not
+        the ceiling (`plus` or a bare `+` with no amount after it; `excluding`, `exclusive of`, `excl`, `ex`;
+        `tax(es)`, `VAT`, `GST`; `fee(s)`; `overage(s)`; `soft`; `uncapped`; `no hard limit|cap`; `exceed`;
+        `initially`, `to start`, `for now`; `or more`, `at least`, `minimum`; `approx(imately)`, `roughly`).
+        `plus US$30` is an amount, summed by rule 9. `before` is rule 5's alone, since p18-7's probe reads
+        "stopping before any Turn" outside its clause.
      8. A bare number outside the clause, code spans and amount tokens (no letter, digit, `_`, `.`, `,` or `-`
         before it): "a number outside the cap clause".
      9. The value: the cap amount × the clause multiplier, plus every other USD token (each once), in Decimal.
-   Accepted residuals (pinned in the tests, named in ADR 0034 R4): a number word outside the clause with no
-   Login/account/seat/user noun ("seven Turns") is not counted; `every`/`a`/`an` before a noun not on UNIT_NOUNS
-   (`every push`, `every image`) reads x1, safe because the cap is the task's total ceiling (the engine's
-   GATED_INPUTS_CHECK, task.workflow.js) and the annotation records "total exposure"; digits inside code spans.
+   Accepted residuals (pinned in the tests; the first two are named in ADR 0034 § Consequences, *A fail-closed
+   reading*): a number word outside the clause with no Login/account/seat/user noun ("seven Turns") is not counted;
+   `every`/`a`/`an` before a noun not on UNIT_NOUNS (`every push`, `every image`) reads x1, safe because the cap is
+   the task's total ceiling (the engine's GATED_INPUTS_CHECK, task.workflow.js) and the annotation records "total
+   exposure"; digits inside code spans.
 
 3. `annotation(date, usd, limit, source)` is the `## Approved gates` suffix a standing approval writes:
    `(approved <date> under the standing approval: total exposure US$<x>, limit US$<t> from <source>)`. It begins
@@ -171,6 +182,9 @@ CURRENCY_NUMBER_WORDS = COUNT_WORDS + ("eleven", "twelve", "thirteen", "fourteen
                                        "eighty", "ninety", "hundred", "thousand", "million", "billion", "dozen")
 NON_USD_CODES = ("AUD", "NZD", "CAD", "EUR", "GBP", "JPY")
 MAGNITUDES = ("k", "m", "bn", "mn", "thousand", "million", "billion", "grand")
+MULTIPLIER_WORDS = ("times", "twice", "double", "triple", "apiece")   # rules 5 and 7 share it
+# Login and account are one unit (p18-7's "per Login (per account)"), so a per-account cap counts across N Logins.
+SAME_UNIT = {"login": "login", "account": "login", "seat": "seat", "user": "user"}
 
 WE = r"(?![A-Za-z0-9_])"            # a word end
 
@@ -199,18 +213,29 @@ MONTH_RES = [re.compile(p, re.I) for p in (
 PER_UNIT_RE = re.compile(WS + r"per\s+(?P<unit>" + _alt(PER_UNITS) + ")" + WE, re.I)
 COUNT_N = r"(?P<n>[1-9]\d*|" + _alt(COUNT_WORDS) + ")"
 COUNT_RES = [re.compile(p, re.I) for p in (
-    WS + r"(?:across|for)\s+" + COUNT_N + r"\s+" + _alt(PER_UNITS) + r"s?" + WE,
+    WS + r"(?:across|for)\s+" + COUNT_N + r"\s+(?P<unit>" + _alt(PER_UNITS) + r")s?" + WE,
     r"×\s*" + COUNT_N + WE,
     WS + r"x ?" + COUNT_N + WE)]
+# Words that say the cap is not the ceiling: a soft or open-ended cap, a cap before tax, fees or overage, an opening
+# amount (ADR 0034: anything it cannot price asks). One list for rule 5 (inside the clause) and rule 7 (outside it),
+# so the two fail-closed readings never disagree. `plus` or a bare `+` widens only with no amount after it: `plus
+# US$30` is an amount, summed by rule 9, and `plus 20%` or `plus 30 more` keep their own rule's why.
+WIDENING = (r"(?:" + WS + r"plus" + WE + r"|\+)(?!\s*(?:US\$|USD|\$)?\s?\d)|" + WS + r"(?:" + "|".join((
+    r"excluding", r"exclusive\s+of", r"excl", r"ex", r"tax(?:es)?", r"VAT", r"GST", r"fees?", r"overages?", r"soft",
+    r"uncapped", r"no\s+hard\s+(?:limit|cap)", r"exceed(?:s|ed|ing)?", r"initially", r"to\s+start", r"for\s+now",
+    r"or\s+more", r"at\s+least", r"minimum", r"approx(?:imately)?", r"roughly")) + r")" + WE)
+MULTIPLIER = r"×|" + WS + r"x\d|" + WS + _alt(MULTIPLIER_WORDS) + WE
 LEFTOVER_RES = (
     ("a digit", re.compile(r"\d")),
     ("a number word", re.compile(WS + _alt(NUMBER_WORDS) + WE, re.I)),
-    ("a multiplier", re.compile(r"×|" + WS + r"x\d|" + WS + _alt(("times", "twice", "double", "apiece")) + WE, re.I)),
+    ("a multiplier", re.compile(MULTIPLIER, re.I)),
     ("per/each/every", re.compile(WS + _alt(("per", "each", "every")) + WE, re.I)),
     ("a / unit", re.compile(r"/\s?[A-Za-z]")),
     ("a unit noun", re.compile(WS + UNIT_RE + WE, re.I)),
     ("a period adverb", re.compile(WS + _alt(PERIOD_ADVERBS) + WE, re.I)),
     ("a currency", re.compile(r"[$€£¥]|" + WS + _alt(("USD",) + NON_USD_CODES) + WE, re.I)),
+    # `before` is the clause's alone: p18-7's probe reads "stopping before any Turn" outside its clause.
+    ("a widening word", re.compile(WIDENING + "|" + WS + r"before" + WE, re.I)),
 )
 CURRENCY_MARK = r"(?:US\$|USD" + WE + r"|\$|" + WS + _alt(NON_USD_CODES) + WE + ")"
 CURRENCY_RES = (
@@ -226,16 +251,16 @@ OUTSIDE_RES = (
     ("per/each outside the cap clause", re.compile(WS + _alt(("per", "each")) + WE, re.I)),
     ("plural unit outside the cap clause", re.compile(WS + _alt(("Logins", "accounts", "seats", "users")) + WE, re.I)),
     # (iii) stays a list, never a blanket `every`: p18-7's probe reads "every signed-in Claude Login" and must pass
-    # (ADR 0034 d1). Accepted residual: `every`/`a`/`an` before a noun NOT on UNIT_NOUNS (`every push`, `every
+    # (ADR 0034 decision 1). Accepted residual: `every`/`a`/`an` before a noun NOT on UNIT_NOUNS (`every push`, `every
     # image`) reads x1. That is safe because the cap is the task's total ceiling, never a target (the engine's
     # GATED_INPUTS_CHECK, task.workflow.js), and the annotation records "total exposure", so per-item spend above it
     # is a review failure, never an approved spend. tests/gated-inputs.test.mjs pins it as accepted.
     ("recurring unit outside the cap clause", re.compile(WS + r"(?:every|a|an)\s+" + UNIT_RE + WE, re.I)),
     ("period outside the cap clause", re.compile(WS + r"(?:nights?|" + _alt(PERIOD_ADVERBS) + ")" + WE, re.I)),
     ("per-unit slash outside the cap clause", re.compile(r"/\s?" + UNIT_RE + WE, re.I)),
-    ("multiplier outside the cap clause",
-     re.compile(r"×|" + WS + r"x\d|\dx" + WE + "|" + WS + _alt(("times", "twice", "apiece")) + WE, re.I)),
+    ("multiplier outside the cap clause", re.compile(MULTIPLIER + r"|\dx" + WE, re.I)),
     ("percentage outside the cap clause", re.compile(r"%")),
+    ("widening word outside the cap clause", re.compile(WIDENING, re.I)),
 )
 BARE_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_.,\-])\d+")
 
@@ -288,6 +313,9 @@ def _clause(clause):
             return None, "more than one per-unit token"
         if len(counts) > 1:
             return None, "more than one count phrase"
+        noun = counts[0].groupdict().get("unit")
+        if noun and SAME_UNIT[noun.lower()] != SAME_UNIT[per[0].group("unit").lower()]:
+            return None, "count unit does not match the per-unit token"
         n = counts[0].group("n")
         mult = int(n) if n.isdigit() else COUNT_WORDS.index(n.lower()) + 1
         rest = _blank(rest, [per[0].span(), counts[0].span()])
