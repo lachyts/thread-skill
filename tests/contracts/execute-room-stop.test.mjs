@@ -111,7 +111,8 @@ function checkRoomStop({ skill, status, handoff, repair, context }) {
   const it = (n) => item(skill, n)
   const s45 = section(skill, S45) ?? ''
   const subLine = (prefix) => collapse(s45.split('\n').find((l) => l.startsWith(prefix)) ?? '')
-  const s12 = subLine('   2. **Seeded revises')
+  // Sub-step 2 opens with the Standing approval (ADR 0034); the Seeded revises follow on the same line.
+  const s12 = collapse(s45.split('\n').find((l) => l.startsWith('   2. **') && l.includes('**Seeded revises')) ?? '')
   const s13 = subLine('   3. For each slug in `restart`')
   const s14 = subLine('   4. If the lane is free')
   const st2 = subLine('2. **A task call returns.**')
