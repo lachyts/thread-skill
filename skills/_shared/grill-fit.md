@@ -1,0 +1,35 @@
+# The grill-fit check — route every fork before a prompt leaves
+
+Run it while composing a prompt another session will execute cold: today orient § 8's batch prompts
+and handoff § Build the handoff prompt. It is a checklist step inside composition, not a new phase.
+
+1. **List the forks**, not the mechanics: scope choices, strategy trade-offs, "which approach"
+   moments, anything matching grill-me's trigger signals (vague intent, an unscoped feature decision).
+2. **Decide each fork.** (a) **Resolvable** by the executing session from code or data: say so in
+   the prompt ("decide X from Y"). (b) **A genuine Lachy decision**: bake a gate line into the
+   prompt. The fork returns to Lachy via grill-me: the session reports the fork and its evidence,
+   never resolves it downstream and never spawns a task for it.
+3. **No forks → no grill language at all**: no gate lines and no "decide X from Y" lines. Don't
+   manufacture ceremony. Orient's stop at an unforeseen Lachy-owned fork and its fork end-line form
+   are not grill language: they are standing end-of-run mechanics every orient batch prompt
+   carries, forks or none (orient § 8 End-of-run updates).
+
+**Example.** The Smart Slider silent-stall diagnosis needed this gate, and got it only by hand:
+
+> Gates: NO optimizer edits — diagnosis only. The remediation decision that follows your findings
+> (ceiling vs deadline fix vs UX copy vs park for Patrick) returns to Lachy for a grill-me session —
+> do NOT spawn a remediation fix task directly; report the fork and its evidence instead.
+
+**How a fork comes back.**
+
+- **Orient batch:** the child stops that task at the fork, leaves it open and ends it with one end
+  line naming every fork, `partial: fork for Lachy: <fork>; evidence: <…>` and so on (orient § 8
+  End-of-run updates). The lead lists them in the batch's close-out line as decisions for Lachy, so
+  does `--debrief` (orient § 10), and orient § 7 keeps the task out of batches until he rules. The
+  next reshuffle's grill puts each fork to him (orient § 5) and writes his ruling into the task
+  note as an `orient ruling:` line, which decides it.
+- **Handoff:** the consumer is interactive, so it stops at the fork and asks.
+
+**What it is not.** Not the conversation-gated exclusion (orient § 7), which keeps out a task that
+needs Lachy *before* it starts; this check routes forks that surface *mid-work*. Not ADR 0008's gated
+inputs (spend, credentials, irreversible actions in rollouts), which the engine enforces separately.

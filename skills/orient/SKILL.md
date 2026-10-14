@@ -150,8 +150,9 @@ and Drift and the slots for each swept project.
   `priority`, `scheduled`, `due`, `dispatched`, `launch`, `phase`,
   `rollout`, `tags`, `projects`), plus one body read of those task notes for orient's run lines
   (`rg -n 'orient (start|dispatch|end): run'`: the start claims, dispatch lines and end lines § 8
-  Double-dispatch guard writes); phase notes in `Work/Phases/` for the area's projects. The
-  reshuffle classifies from this sweep; it does not walk the folders again.
+  Double-dispatch guard writes) and a second for Lachy's fork rulings (`rg -n 'orient ruling: '`,
+  the lines § 5 writes); phase notes in `Work/Phases/` for the area's projects. The reshuffle
+  classifies from this sweep; it does not walk the folders again.
 - **Threads**: THREAD.md state lines across the area's project dirs
   (`~/Projects/<Area>/*/THREAD.md`) and `_shared/threads/`.
 - **Drift** (ADR 0026): run the shared reconcile step as a dry run for every project in the target
@@ -173,6 +174,12 @@ and Drift and the slots for each swept project.
   them; § 8 Double-dispatch guard, rule 1), or `status: in-progress` (TaskNotes' own spelling),
   `in_progress` or `review`; a phase with any such member. Report it as such; never re-batch it
   (§ 7) and never reshuffle it.
+- **Open forks** (the one definition; §§ 3, 5, 6, 7 and 10 use it): each fork a task's latest
+  orient end line names (`fork for Lachy: <fork>`, § 8 End-of-run updates) stays open until an
+  `orient ruling: <fork> → <ruling>` line in its `## Notes`, timed after that end line, rules on
+  it. A task with any open fork is blocked on Lachy. A ruled fork is decided: it is never
+  reported, excluded or grilled again, whatever route the task takes next. A later run's end line
+  supersedes the whole set.
 
 ### 3. Present
 
@@ -182,7 +189,9 @@ A situational report written for Lachy catching up, not a log:
 - **Balls in the air**: per-sub-project one-liners — the slot first
   (`next: <next_action> ([[<task>]])`, or `No next action`), then state,
   blocker, staleness. Group: active / in-flight (dispatched) / stalled /
-  dormant.
+  dormant. A task with an open fork (§ 2 Open forks: named by `fork for Lachy` in its latest orient
+  end line, with no `orient ruling:` line for it timed after that end line) is blocked on his
+  decision: name every open fork (grill-me). A ruled fork is not listed.
 - **Drift**: one line, the counts plus names, split into unambiguous (fixed on Reshuffle) and
   ambiguous (listed for Lachy, never applied). Omit the line when both lists are empty.
 - **Shape**: how much a reshuffle has to work with: loose tasks, brain dumps, unstarted phases,
@@ -231,6 +240,13 @@ tier, the clear/unclear sort and proposal, the grill of what is unclear (which L
 any point), the one gate, the writes. With nothing to reshape (Lachy stops the grill at once and
 the gate is empty), carry straight on to § 6.
 
+A task with an open fork (§ 2 Open forks) counts as **unclear** for R2 whatever its body says, so
+R3's interview (`grill-me` or `grill-with-docs`, as R3 picks) puts each open fork and its evidence
+to Lachy. His ruling is written into the task note at R5, after the gate: the respecced body
+carries it, and one `## Notes` line per fork, `- <UTC ISO> orient ruling: <fork> → <ruling>`, with
+`<fork>` worded as the end line words it, marks that fork decided. A fork he does not reach stays
+open. Steer only skips this step, so its open forks wait for the next Reshuffle.
+
 ### 6. Route
 
 - **Run the execution-fit test** on each phase the reshuffle touched and on each other open
@@ -239,7 +255,8 @@ the gate is empty), carry straight on to § 6.
   `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md` with `--regenerate --tasks <members>`, naming
   exactly the members of the rollout-shaped phases (or clusters) on that repo: never a bare project
   run, which would also sweep up misfits, session-lane phases and whatever the grill left
-  unresolved. A scoped target routes only the tasks its own reshuffle wrote. **At most one
+  unresolved. A task with an open fork (§ 2) is left out of `--tasks` until Lachy rules on it. A
+  scoped target routes only the tasks its own reshuffle wrote. **At most one
   unfinished rollout per repo**, and schedule § 0's unfinished-rollout check enforces it.
   `--regenerate` is orient's supersede policy: the check allows a supersede only for a paused or
   never-started rollout of this project (its unlanded tasks carry into the new one), and schedule
@@ -308,7 +325,13 @@ dispatchable open work into **parallel-safe batches**:
   kill fan-out ("Prompt is too long"). That table + the registry are the
   only config — orient maintains no manifest of its own.
 - **Exclusions**: conversation-gated tasks (need Lachy's input — say so, leave
-  them for Hands-on or the next reshuffle's grill); in-flight tasks and tasks a live run covers
+  them for Hands-on or the next reshuffle's grill). A task with an open fork (§ 2 Open forks: named
+  by `fork for Lachy` in its latest orient end line, with no `orient ruling:` line for it timed
+  after that end line) counts as conversation-gated at any age: a batch stopped it at a grill-fit
+  fork, and it stays out until Lachy rules on every open fork in a reshuffle grill (§ 5), which
+  writes each ruling into the note. Its next batch prompt carries his rulings, and whatever route
+  the task takes instead (Hands-on, the rollout lane, Not now, a capability-blocked batch), the
+  ruling lines keep it decided. Also excluded: in-flight tasks and tasks a live run covers
   (§ 8 Double-dispatch guard, rules 1 and 2), found before clustering; work
   whose playbook demands human sign-off before external effects.
 
@@ -349,7 +372,9 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
 5. **Collect and accept.** This session is the lead and stays open until every child returns:
    collect its output, `accept` its envelope, `advance`. Recover an interrupted child rather than
    clearing its claim. Report each batch as running, complete or blocked, with its native ID and
-   run dir.
+   run dir. Every fork a child reports (in its result or its `fork for Lachy` end line) goes to
+   Lachy as a decision (grill-me) in that batch's close-out line, never as a follow-up task spawned
+   on his behalf.
 
 **Every batch prompt must carry** (the emission spec):
 
@@ -397,6 +422,12 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
 - **Domain playbook gates** — staging-first, confirm-before-publish, and any
   domain-specific sign-off rules from the workspace's playbooks. No Linear
   filing unless the active profile carries a Linear server.
+- **Grill-fit gates** — run `${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` over the batch's
+  work: a fork the child can settle from code or data is written as "decide X from Y", a Lachy
+  decision gets a gate line, and a fork Lachy already ruled on (§ 5) goes in as his ruling. A
+  batch with no forks carries no grill language, meaning no gate lines and no "decide X from Y"
+  lines. The stop at a Lachy-owned fork and the fork end-line form are not grill language: they are
+  standing end-of-run mechanics every prompt carries, forks or none (End-of-run updates).
 - **Cross-batch coordination** — name any shared surfaces and who owns them;
   check task-note progress stamps before editing anything another batch might
   own.
@@ -405,14 +436,20 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
   orient run or `--debrief` reads the truth from the notes, and add the
   mandatory end line
   `- <UTC ISO> orient end: run <Run:>, job <Job:>, <done | blocked: … | partial: …>` to its
-  `## Notes`. It is the only record if the lead ends before collecting.
+  `## Notes`. It is the only record if the lead ends before collecting. At a gate line, or at a
+  Lachy-owned fork no gate foresaw, the child stops that task, never resolving the fork or spawning
+  a task for it. The task stays `status: open` (never `done`, nor `in-progress`, which § 2 reads as
+  in flight), and its end line ends `partial: fork for Lachy: <fork>; evidence: <…>`, with
+  `; fork for Lachy: <fork>; evidence: <…>` appended for each further fork, so the run's single
+  end line names every fork. The child's result names them too.
 - **Execution context** — identify the canonical workspace, project and required
   authenticated tools. Native tools come from the parent session. Isolate code
   edits in worktrees where needed; do not expect a worktree to load MCP profiles.
 
 Close the dispatch with one line per batch: native child ID, batch title, tasks
 covered, the model and effort as spawned (or "effort inherited"), and
-verified-running, completed or blocked.
+verified-running, completed or blocked, plus `fork for Lachy: [[<task>]] <fork> (grill-me)` for
+each fork it reported.
 
 #### Double-dispatch guard
 
@@ -523,7 +560,11 @@ names why (a running or blocked rollout, uncommitted grill docs, a schedule bloc
   meaning its dispatch line names a run whose journal exists and records no bound child
   (`childId`) for its job. A stamp with no dispatch line, or whose named journal is missing (a hand
   launch, a pre-0023 stamp), is unknown, never "never launched", and keeps its 7 days. An
-  unsettled stamp inside its 7 days stays, an abandoned run's included.
+  unsettled stamp inside its 7 days stays, an abandoned run's included. A task with an open fork
+  (§ 2 Open forks: named by `fork for Lachy` in its latest orient end line, with no
+  `orient ruling:` line for it timed after that end line) is reported as a decision for Lachy
+  (grill-me), every open fork with its evidence, never as completed work or a task to spawn. A
+  ruled fork is not reported again.
 
 A fresh `/thread:orient` audit is the lightweight version of this.
 
@@ -538,6 +579,10 @@ A fresh `/thread:orient` audit is the lightweight version of this.
   is too long"): run orient from the narrowest profile that covers the batches.
 - **Do not substitute another harness or account.** Native child dispatch is the
   default; absent capabilities are reported instead of shelling out to a model.
+- **Don't turn a reported fork into a task.** A `fork for Lachy` end line is Lachy's decision
+  (grill-me): § 3, the close-out and `--debrief` surface it, § 5's grill puts it to him, and § 6
+  and § 7 hold the task back until he rules. Nothing spawns a task for it: his ruling, written
+  into the note as an `orient ruling:` line, is what decides it.
 - **Don't re-batch in-flight work** (§ 2, § 8 Double-dispatch guard): only the
   two-step naming override re-dispatches it. Don't stamp or write anything —
   the slot write included — in Look only or dry runs.

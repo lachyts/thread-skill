@@ -76,7 +76,7 @@ Its rules — project directory, seat, `_shared`, git toplevel, and `_shared` fo
 Body sections, in this order:
 
 1. **Done and verified** — what landed this session, with evidence (paths, SHAs, test output).
-2. **What remains** — the continuation: what the next session does, in order.
+2. **What remains** — the continuation: what the next session does, in order, naming any fork the grill-fit check returned to Lachy.
 3. **Decisions settled** — rulings already made, so they are not re-litigated.
 4. **Gotchas found the hard way.**
 5. **Suggested skills** — the skills the next agent should invoke to continue.
@@ -116,6 +116,8 @@ What each outcome leaves. A doc committed but not landed (`stuck:` with `land: c
 
 ## Build the handoff prompt
 
+Run `${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` over the continuation first, so every fork the consumer could hit is resolvable or gated back to Lachy.
+
 Create this compact payload for the new task. Print it as a fenced block when native creation is unavailable or when the user asks to see it:
 
 ```
@@ -125,8 +127,11 @@ Read first: <home>/docs/handoffs/<YYYY-MM-DD>-<slug>.md (absolute path) — then
 Context: <2–5 lines: goal, state of play, what's built/decided, what's blocked.>
 Also read: <key file paths / artefact links>
 Suggested skills: <skills the next agent should invoke>
+Gates: <fork> returns to Lachy via grill-me — report the fork and its evidence, do not resolve it downstream
 Next move: <the single concrete next step>
 ```
+
+The `Gates:` line comes from the grill-fit check's step 2(b): one line per Lachy-owned fork, omitted when there is none. The consumer stops at the fork and asks. A fork the consumer can settle (step 2(a)) goes into `Context:` or `Next move:` as "decide X from Y".
 
 Keep it tight — the doc carries the depth; the prompt carries the momentum.
 
