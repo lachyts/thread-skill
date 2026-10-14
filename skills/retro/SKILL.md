@@ -16,6 +16,8 @@ comes from two scripts, and the model only runs them, shows what they print and 
   line beside the record). Never edit either file by hand from this skill, and never compute a score or write a
   Tuning in the conversation.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 The loop is Chorus's `/reflect` shape: record → proposals → Lachy picks → the tune script.
 
 ## Scope

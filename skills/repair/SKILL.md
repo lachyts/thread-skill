@@ -20,6 +20,8 @@ dependants, flip a **merged, never marked** task, **escalate** a merge the notes
 into another base), and finish an interrupted supersede's **close-out**.
 It never re-implements Integration, merge or convergence, and **the engine keeps sole merge authority**.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## Native runtime binding
 
 Diagnosis and authorised deterministic reconciliation (the hand-backs, the notes writes) run in either

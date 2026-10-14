@@ -8,6 +8,8 @@ One system, two dispatch lanes. Every cluster of open tasks gets exactly one:
   `defer` (`scheduled:` dates do the dispatch), a task's `## Launch` block via
   `open`, or orient's parallel-safe cc-* batches.
 
+**Plugin root.** This spec is read as a file, never rendered: run its commands by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 **The test decides, hard.** It is not a preference and not a count. A cluster is
 **rollout-shaped** when all three hold:
 

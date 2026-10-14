@@ -7,6 +7,8 @@ description: 'Use to execute a rollout queue — reads the rollout note, resolve
 
 `/thread:execute` is the executor half of the rollout split. Where `/thread:schedule` writes the rollout note (data), this skill reads it, resolves config, and hands the convergence work to a **dynamic Workflow** script. This skill is a thin shim; the engine lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/task.workflow.js`.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 The engine runs three layers per task — optional plan-gate (autonomous judge) → Ralph-style agent-side verifier retry → master-side review-and-revise loop — and converges **one task per Workflow call**. The lead session **runs the queue** (ADR 0030): it keeps up to `parallel_ceiling` task calls in flight, integrates each approved task with the latest `main` one at a time, and is the rollout's **only merger**. The skill itself stays in the conversation to do vault I/O, the protocol gate, status reconciliation, Integration, merging, reporting and the `--gated` merge hold (which an autonomous background workflow cannot do).
 
 ## Native runtime binding

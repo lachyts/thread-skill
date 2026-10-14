@@ -9,6 +9,8 @@ lands here, once.
 Invariant (ADR 0001): **the task is complete on its own.** A cold session — any
 harness — must be able to resume the work from the task file alone.
 
+**Plugin root.** This spec is read as a file, never rendered: run its commands by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## 1. Resolve the project
 
 The task is never orphaned and never lands in `_Inbox/`. Resolve `projects:`
