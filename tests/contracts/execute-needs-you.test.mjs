@@ -60,7 +60,7 @@ const EXEMPT = [
   'fail with a message asking the user to provide one', // § 3's config table
   'never the question tool while anything is live', // § 3.7
   '`/thread:repair` asks Lachy', // § 4.5 step 1.2
-  'only with nothing live may the question tool put the sign-off to Lachy', // § 7
+  'the sign-off form never calls the question tool', // § 4.5 step 5 (ADR 0034)
   'Legacy in-conversation playbook', // Protocol versions
   'asks the user to regenerate', // Protocol versions
 ]
@@ -195,11 +195,13 @@ function checkNeedsYou(skill, context = realContext) {
   }
 
   // sign-off: § 3.7 presents a gate as a needs-you item, never through the question tool while anything is live;
-  // § 7's stuck halt lists it in the `Needs you:` block and puts it to Lachy only with nothing live.
-  const stuck = collapse(s7raw.split('\n').find((l) => l.startsWith('- `next` reports `halt: stuck`')) ?? '')
+  // § 7's awaiting-sign-off stop (ADR 0034) lists each gate in the `Needs you:` block, and § 4.5 step 5's sign-off form
+  // never calls the question tool: its turn ends `halted`, the session holds nothing, and Lachy answers in chat.
+  const signOff7 = collapse(s7raw.split('\n').find((l) => l.startsWith('- `next` reports `halt: awaiting-sign-off`')) ?? '')
+  const step5 = collapse(s45raw.slice(Math.max(0, s45raw.indexOf('5. **Completion.**')), s45raw.indexOf('**Lost call.**')))
   if (!s37.includes('Present each gate **verbatim** as a needs-you item (§ 6.5)') ||
-    !s37.includes('never the question tool while anything is live') || !stuck.includes('`Needs you:` block') ||
-    !stuck.includes('only with nothing live may the question tool put the sign-off to Lachy')) {
+    !s37.includes('never the question tool while anything is live') || !signOff7.includes('`Needs you:` block') ||
+    !step5.includes('the sign-off form never calls the question tool')) {
     fails.push('sign-off')
   }
 
@@ -448,8 +450,8 @@ test('control: the old heading, a block rebuilt from the log, or the Integration
 test('control: § 3.7 or § 7 without the needs-you sign-off fails sign-off', () => {
   only(edit(real, 'Present each gate **verbatim** as a needs-you item (§ 6.5): its line in the report\'s `Needs you:` block and one push, never the question tool while anything is live —',
     'Present each gate **verbatim** in the report —'), 'sign-off', '§ 3.7 reworded')
-  only(edit(real, "; the halted turn lists it in the report's `Needs you:` block, and only with nothing live may the question tool put the sign-off to Lachy (§ 6.5))", ')'),
-    'sign-off', '§ 7 tail removed')
+  only(edit(real, ' Unlike a § 7 halt, **the sign-off form never calls the question tool**, live work or not: the turn ends on', ' The turn ends on'),
+    'sign-off', "the form's question-tool sentence removed")
 })
 
 test('control: the Don\'t or the § 8 bullet removed fails guardrails', () => {
@@ -464,7 +466,7 @@ test('control: an ask outside § 6.5, or an inexact exemption, fails no-other-as
     'no-other-ask', 'Merge hold release asks')
   only(edit(real, 'never the question tool while anything is live —', 'never the question tool while anything is live. Then ask for sign-off —'),
     'no-other-ask', '§ 3.7 asks again')
-  only(edit(real, 'put the sign-off to Lachy (§ 6.5))', 'put the sign-off to Lachy (§ 6.5); when the user IS present, ask for the sign-off in-conversation instead of halting)'),
+  only(edit(real, 'else a fresh call with the warning), or', 'else a fresh call with the warning; when the user IS present, ask for the sign-off in-conversation instead of halting), or'),
     'no-other-ask', '§ 7 asks in-conversation')
   only(edit(real, 'asks the user to regenerate', 'asks the user to sign off'), 'no-other-ask', 'inexact exemption')
 })
