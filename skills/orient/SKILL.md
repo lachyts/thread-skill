@@ -186,8 +186,10 @@ A situational report written for Lachy catching up, not a log:
   blocker, staleness. Group: active / in-flight (dispatched) / stalled /
   dormant.
 - **Drift**: one line, the counts plus names, split into unambiguous (fixed next, in § 4, unless
-  `--look`) and ambiguous (listed for Lachy, never applied). It is the notice for those fixes, so
-  say so on the line. Omit the line when both lists are empty.
+  `--look` or a scoped target (report-only then)) and ambiguous (listed for Lachy, never applied).
+  Call the line the notice for those fixes only when fixes will follow (a default or `--steer` run
+  on a project or area); on a `--look` run or a scoped target, say it is report-only. Omit the line
+  when both lists are empty.
 - **Shape**: how much a reshuffle has to work with: loose tasks, brain dumps, unstarted phases,
   overlaps found in related projects, and any live rollout.
 - **ONE recommended best use of his time**, with a one-line reason — same

@@ -10,6 +10,8 @@ grows a merge engine, and non-PR ops work is still the wrong fit for it. The
 body is left as written: a correct record of what was decided on the day.
 *(Amended by ADR 0027, 2026-09-28: orient is also the one shaping verb. After its audit it asks
 Reshuffle, Steer only or Look only, reshapes the project itself and schedules wave-shaped phases.)*
+*(Amended by ADR 0036, 2026-10-14: that question is gone. Orient reshuffles by default; `--steer` or
+`--look` (or saying so) opts out, and an empty shape goes straight to steering.)*
 *(Amended by ADR 0023, 2026-10-14: ADR 0010's launch conclusion is itself superseded; orient dispatches
 its batches as native children of its own session, and a kept prompt is hand-launched only for a
 batch blocked on a missing capability.)*
