@@ -440,6 +440,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Hard: stop now; worktrees keep the work. _Avoid_: suspend, halt, abort.
 - **Reinstate** — resuming a paused rollout: plain `execute` on the rollout
   note. No separate resume command. _Avoid_: restart, relaunch, unpause.
+- **Room stop** — on the Chorus Stage, at a Login's line: the lead starts
+  nothing, stops each Workflow call at a step boundary (just after its running
+  agent's result line), and resumes every stopped call by `resumeFromRunId` on
+  the Stage's re-send (Chorus ADR 0071; execute § Room stop). It stands from
+  its `## Pause log` line to `room stop ended`, and it never stamps `paused:`.
+  _Avoid_: drain (Chorus's signal calls it "a drain, not a pause"; here the
+  soft pause is the drain), pause, hard pause, handoff.
 
 ## Run record and tuning
 

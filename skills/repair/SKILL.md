@@ -191,7 +191,9 @@ clear, a `prUrlError`, an at-Integration set-aside with no `pr:` (**PR CLOSED / 
 review with no `pr:`. Either way it is input-gated (§ 3b), and the ask quotes `autoRetryWhy`. A non-empty
 `autoRetryError` is execute § 3's round-budget halt: report it; the fix is the stamp it names, on Lachy's word, and
 nothing is handed back until that reads. A usage limit that kills an agent mid-run is an infra block, never a quota
-block: it gets the infra cool-downs and the budget, then Lachy.
+block: it gets the infra cool-downs and the budget, then Lachy. When the limit is known to the lead's Session,
+execute § 4.5 *Lost call* first resumes such a transient row once from its own run, so only that resume's row, or
+the dead call's row, reaches this class.
 
 **Classed before the answer.** § 2 classes each task on the state § 1's diagnosis read. A § 3b answer changes what
 `inputs` reads (removing `## Needs you` can turn it to `autoRetry: true`), and the hand-back that follows his answer

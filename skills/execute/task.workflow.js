@@ -352,6 +352,16 @@ real remote. To test behaviour under an exported GIT_* variable, build a throwaw
 // span, so the scrub rule's span check is unaffected.
 const RM_RULE = 'Removing files (hard rule, the 2026-10-01 stall): remove a scratch directory by its literal absolute path (`rm -rf /tmp/x && mkdir -p /tmp/x`); for a `mktemp -d` directory, whose path is not known when you write the command, remove the directory itself by its variable with no trailing slash (`rm -rf "$T"`) or guard the variable (`rm -rf "${T:?}"/*`). Never `cd` into a directory and then remove a relative glob (`rm -rf ./*`), and never remove a path that starts with an unguarded `$VAR/` or a command substitution: Claude Code asks a person about those even in bypass mode, and an unattended run stalls on the ask.'
 
+// Stopping processes (p18-1, the 2026-10-04 incident). An implementer ran `pkill -n` on the verifier's command
+// pattern to stop its own test run and killed the lead's Integration verify instead: the lead, other agents and
+// other sessions run the same verifier on one machine, so a name or pattern match reaches processes the agent never
+// started. Every agent prompt (all 10 builders) renders it right after RM_RULE. A single-quoted one-line string, so
+// nothing in it is interpolated; it has no apostrophe and no git span, so the scrub rule's span check is unaffected.
+// It breaks the resume cache on purpose, as RM_RULE (p12-12) and NEEDS_HUMAN_RULE (p16-3) did: every agent prompt
+// gains it. A resume re-passes its run's own version-keyed `scriptPath`, so a call launched on an older engine still
+// replays on that engine.
+const KILL_RULE = 'Stopping processes (hard rule, the 2026-10-04 incident): stop only a process you started yourself, by the pid or process group you recorded when you started it (`kill <pid>`, `kill -- -<pgid>`). Never stop one by name or pattern (`pkill`, `killall`, `kill $(pgrep ...)`): the lead, other agents and other sessions run the same verifier on this machine, and an implementer whose `pkill -n` on the verifier pattern killed the Integration verify of the lead is why this rule exists.'
+
 // The read-only agents' side of the pinned task tree (ADR 0030, p12-4). The planner, plan judge, plan
 // reviser and investigator all work in the task's ONE worktree (taskTreeSetup below), which the
 // implementer then builds in — so what they may touch there is narrow: read under the tree, map the
@@ -771,6 +781,8 @@ ${GIT_ENV_RULE}
 
 ${RM_RULE}
 
+${KILL_RULE}
+
 Steps:
 1. Read the task note in full + every source file it references. Do not skim. ${PRIOR_FEEDBACK_NOTE}
 2. If the fix is well-defined, work test-first (write the failing test before the fix). Use the
@@ -807,6 +819,8 @@ ${GIT_ENV_RULE}
 
 ${RM_RULE}
 
+${KILL_RULE}
+
 Steps:
 1. Read the task note in full + every file it references (under the task tree).
 2. Run the read-only investigation it asks for (greps, reading tests, and a baseline verifier run to OBSERVE:
@@ -839,6 +853,8 @@ ${TASK_TREE_RULE}
 ${GIT_ENV_RULE}
 
 ${RM_RULE}
+
+${KILL_RULE}
 
 Steps:
 1. Read the task note in full + every source file it references. Do not skim. ${PRIOR_FEEDBACK_NOTE}
@@ -911,6 +927,8 @@ ${GIT_ENV_RULE}
 
 ${RM_RULE}
 
+${KILL_RULE}
+
 Read the brief and grep the task tree as needed to verify the plan's claims — do not approve on faith.
 Decide: verdict "approve" if the plan is sound (clean or trivially nitpicky), else "changes" with 3–8
 specific, actionable feedback bullets.${NEEDS_HUMAN_RULE}`
@@ -941,6 +959,8 @@ ${GIT_ENV_RULE}
 
 ${RM_RULE}
 
+${KILL_RULE}
+
 Run additional READ-ONLY investigation in the task tree as needed. Rewrite the plan so that its
 FIRST line is \`Planned on: <sha from your setup's tree base: line>\`, followed verbatim by any \`tree NOT
 attached\` line the setup printed and any \`tree NOT refreshed:\` line your prior plan quoted, with the SAME required sub-sections
@@ -962,6 +982,8 @@ ${worktreeSetup(a, task)}
 ${GIT_ENV_RULE}
 
 ${RM_RULE}
+
+${KILL_RULE}
 
 The approved plan:
 ---
@@ -1007,6 +1029,8 @@ ${GIT_ENV_RULE}
 
 ${RM_RULE}
 
+${KILL_RULE}
+
 The PR is authoritative: judge \`gh pr diff ${prevImpl.prUrl}\` at the PR head. The task tree is context only
 (the rest of the repo at that commit): read files there only when
 \`${GIT_ENV_SCRUB} git -C "${worktreeDir(a.repoPath, task.slug)}" rev-parse HEAD\` equals
@@ -1048,6 +1072,8 @@ in that worktree (NOT the project's main checkout) and on branch ${prevImpl.bran
 ${GIT_ENV_RULE}
 
 ${RM_RULE}
+
+${KILL_RULE}
 
 Review feedback — ROUND ${latest.round} (your work order; apply every bullet, verbatim below):
 ${latest.feedback.map((f) => '- ' + f).join('\n')}${guard}${stepBackBlock(priorFeedback, planText)}
@@ -2393,6 +2419,8 @@ ${GIT_ENV_RULE}
 
 ${RM_RULE}
 
+${KILL_RULE}
+
 Why you are here — the lead's trouble: ${trouble}.
 ${INTEGRATION_PRIOR_NOTE}
 
@@ -2491,6 +2519,8 @@ ${branchTreeSetup(a, task, false)}
 ${GIT_ENV_RULE}
 
 ${RM_RULE}
+
+${KILL_RULE}
 
 Step 1 — the judge check. Run exactly, as ONE Bash command:
 ${integrationJudgeCheck(a, task, I, j).split('\n').map((l) => '  ' + l).join('\n')}
