@@ -231,6 +231,7 @@ final check that the run wrote nothing into the tree):
   positional `$N` (Claude Code substitutes skill arguments into them; logic that needs one lives in a
   script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), orient's
   target resolution before it reads and its one learned `repos:` write (`orient-target.test.mjs`),
+  orient's declared check, its gate and digest-bound advance (`orient-declared-check.test.mjs`),
   orient's one launch model and its double-dispatch guard (`orient-launch-model.test.mjs`), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
   (`handoff-one-writer.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
@@ -246,6 +247,11 @@ final check that the run wrote nothing into the tree):
   names, aliases and `area:`/`repos:` shapes and a fake HOME with umbrella repos — each rung and outcome,
   the clear winner and the close call, a shared directory, `--learn`'s one-line append and every refusal
   that writes nothing.
+- **Declared check** — `tests/declared-check.test.mjs`: `declared-check.py` against a fixture vault and repos
+  with a fixture check — undeclared, whole untruncated output and its digest, the advance on a matching digest
+  and the hold on a changed one or a failed re-run, the group-killing time limit (and on a signal, even one that
+  lands while the check starts), the stderr tail, the one-simple-command guard through both verbs (read with sh's
+  quoting rules), the scrubbed git env, and every refusal.
 - **Default branch** — `tests/default-branch.test.{mjs,sh}`: `defaultBranch` keeps pre-fix bytes when
   unset, refuses unsafe names, and the resolver in `execute/SKILL.md` § 4 works against fixture remotes.
 - **Release check** — `tests/release-check.test.sh`: the real `make release-check` recipe against a temp
