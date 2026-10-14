@@ -49,19 +49,31 @@ when the task carries § 4's `capture: continuation`, and `slug` or
 follow-up or rollout task that merely links the THREAD.md is not a capture
 and is never listed. Then read the captures: one whose slug matches, or
 whose Notes link the same `THREAD.md`, or whose resume prompt describes the
-same work.
+same work. Sort what that finds into marked matches (the row's match
+includes `marked`) and unmarked ones, then take the two steps below in
+order: step 1 acts on each unmarked match, step 2 writes the capture, once
+per run. A marked and an unmarked match found together never pull two ways.
 
-- **Found, and its match includes `marked`** → **update it in place**: refresh
-  the summary + resume prompt, set/move/remove `scheduled:`,
-  rewrite § 4b's two fields, leave `captured:` as the original date. Only a
-  marked capture is ever updated in place.
-- **Found but unmarked** (a capture written before the marker existed, or a
-  backlog task that carries the `thread` tag and the thread's link) → leave
-  it **untouched**, its `scheduled:` and day-page line included; report it
-  as `capture left open (unmarked): [[<slug>]]`, the line `thread:handoff`
-  uses; and write a fresh marked capture under a slug the unmarked task does
-  not hold. Nothing upgrades an unmarked task to a marked one. The safe
-  failure is a leftover task for Lachy to settle, never a lost one.
+1. **Each unmarked match** (a capture written before the marker existed, or
+   a backlog task that carries the `thread` tag and the thread's link) →
+   leave it **untouched**, its `scheduled:` and day-page line included, and
+   report it as `capture left open (unmarked): [[<slug>]]`, the line
+   `thread:handoff` uses. Several unmarked matches (a pre-marker capture plus
+   a backlog task carrying the link, say) → each one is left untouched and
+   reported on its own line. No unmarked match ever causes a write, and
+   nothing upgrades an unmarked task to a marked one. The safe failure is a
+   leftover task for Lachy to settle, never a lost one.
+2. **The capture, exactly one per run:**
+   - **Found, and its match includes `marked`** → **update it in place**:
+     refresh the summary + resume prompt, set/move/remove `scheduled:`,
+     rewrite § 4b's two fields, leave `captured:` as the original date. That
+     in-place update is the capture, whatever unmarked matches sit beside
+     it. Only a marked capture is ever updated in place.
+   - **No open marked capture found** → write one fresh marked capture under
+     a slug no unmarked match holds. A fresh capture is written only when
+     the search above found no open marked capture for this thread, and a
+     run writes at most one fresh marked capture, never one per unmarked
+     match.
 
 Never write a second marked capture for the same thread. Re-deferring a
 marked capture is a reschedule, not a new capture.
