@@ -400,7 +400,9 @@ so no report's `Descoped:` line or the Completion log lists it. Then hand back. 
 says why (required scope, an ADR decision, a recorded decision, an owner that cannot take it, a part tied to
 neither the feedback nor the brief, or a second block after an automatic descope), and the verb recorded the refusal
 on the task note, so its `humanFix` reads `decide scope or defer` in every session from now on and no later descope
-of the block overrides it. Exit 1 → report its ERROR line and leave the task set aside (an answered block among
+of the block overrides it. While `descope_armed:` stands (a descope whose hand-back never ran) it records nothing
+and its `ASK:` line ends `not recorded`: re-run the armed descope (its part and mode from the `## Scope decision
+(automatic)` entry; exit 0, `[no-change]`), then hand back, as § 2's **plan-blocked, descopable** says. Exit 1 → report its ERROR line and leave the task set aside (an answered block among
 them: § 3b's *Answer already recorded* acts first). In this session § 3d's judgement is the session's for
 that key (execute § 4.5 step 1.2's *Automatic descope* key): the hand-off's loop neither judges it again nor, after
 an exit 3, retries it automatically; the refusal is § 3b's.

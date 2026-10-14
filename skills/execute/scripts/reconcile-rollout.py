@@ -246,7 +246,11 @@ Subcommands:
               refused (automatic) run=<n> sha=<12hex>, Plan-blocked feedback run <n>: "<part>" (<mode>[
               owner=<slug>]): <why>`, keyed on the top Plan-blocked run (_plan_block_key: its n and end-marker sha,
               _sha12 of its text for a legacy run with no marker), in one save and only when no line carries the key;
-              a failed save still exits 3 with a stderr WARN. Exit 1 and exit 2 record nothing. Exit 3 when: the
+              a failed save still exits 3 with a stderr WARN. While `descope_armed:` stands (a descope whose hand-back
+              never ran) nothing is recorded and no recorded refusal is read: the ASK line ends `; not recorded: its
+              armed descope (descope_armed:) stands, so re-run it and hand it back: /thread:repair [[<ro>]]`, so that
+              descope's re-run (exit 0, `[no-change]`) and hand-back stay its way back (repair § 2's **plan-blocked,
+              descopable**). Exit 1 and exit 2 record nothing. Exit 3 when: the
               part, or a clause holding it, cites an ADR; a recorded decision (`## Decisions…`, a human `## Scope decision…`, a
               `## Repair input` line without `(automatic)`, `## Approved gates`, `## Gated inputs`) holds the part
               (or, for --owner, the quote); the part sits in a fenced code block of the brief (the body minus the
@@ -3850,8 +3854,11 @@ def _descope_refusal(note):
     """(n, text) when a refused descope is recorded for the plan-blocked note's current block (ADR 0035 decision 2), else
     None: a `## Descope refused (automatic)` line carrying _plan_block_key's `run=<n> sha=<sha>`, its text after `- `.
     A non-blank line under the section that does not parse fails closed: the refusal stands, so a hand-edited record
-    never lets a refused block slip back to an automatic retry. Only a plan-blocked note has a block to refuse."""
-    if _status(note) != "plan-blocked":
+    never lets a refused block slip back to an automatic retry. Only a plan-blocked note has a block to refuse, and
+    never one whose `descope_armed:` stands: its block was descoped (the refusal pre-check exits before any descope, so
+    an armed block carries no earlier refusal), and that descope's hand-back is its way back (repair § 2's
+    **plan-blocked, descopable**), which a refusal must never block."""
+    if _status(note) != "plan-blocked" or _scalar(note.get(DESCOPE_ARMED_KEY)):
         return None
     key = _plan_block_key(note)
     if key is None:
@@ -3868,15 +3875,18 @@ def _descope_refusal(note):
     return None
 
 
-def _record_refusal(path: Path, slug, part, mode, owner, why, now, dry_run) -> str:
+def _record_refusal(path: Path, slug, part, mode, owner, why, now, dry_run):
     """Record descope's exit 3 durably (ADR 0035 decision 2): one `## Descope refused (automatic)` line keyed on the block,
     written in one task-note save only when no line already carries the key. Re-reads the note, so nothing the verb held
-    in memory is written. Returns '' when recorded (or already there), else a one-line warning (the verb still exits
-    3; the lead's session key is the backup)."""
+    in memory is written. Returns '' when recorded (or already there), None when the note's `descope_armed:` stands
+    (nothing recorded: the block's armed descope is its way back, _descope_refusal), else a one-line warning (the verb
+    still exits 3; the lead's session key is the backup)."""
     try:
         note = Note(path)
     except (OSError, ValueError) as e:
         return f"cannot read {path}: {e}"
+    if _scalar(note.get(DESCOPE_ARMED_KEY)):
+        return None
     key = _plan_block_key(note)
     if key is None:
         return f"{slug}: no Plan-blocked feedback run to key the refusal on"
@@ -3900,7 +3910,8 @@ def cmd_descope(args) -> int:
     that judgement mechanically and writes the records. Exit 0: descoped ([written], or [no-change] for a complete
     re-run), and the caller runs `hand-back`. Exit 3: ASK, the refusal recorded on the task note (_record_refusal, ADR
     0035 decision 2; a recorded refusal for the block exits 3 again before the part is judged, writing nothing new), and
-    repair asks Lachy. Exit 1: an ERROR, nothing written (a block with a recorded answer included). Exit 2: usage.
+    repair asks Lachy; while `descope_armed:` stands nothing is recorded, so the armed descope's re-run and hand-back
+    stay open. Exit 1: an ERROR, nothing written (a block with a recorded answer included). Exit 2: usage.
     Exit 1 and exit 2 record nothing."""
     def usage(msg):
         print(f"ERROR: descope: usage: {msg}", file=sys.stderr)
@@ -3966,7 +3977,13 @@ def cmd_descope(args) -> int:
     def ask(why):
         # ADR 0035 decision 2: the refusal is durable, recorded on the task note before the verb exits 3, so every
         # session reads it (`inputs`' humanFix `decide scope or defer`) and no later descope of the block overrides it.
+        # Never while `descope_armed:` stands: the block is already descoped, and that descope's hand-back (repair § 2's
+        # **plan-blocked, descopable**: re-run it, exit 0 [no-change], then hand-back) must stay open.
         warn = _record_refusal(path, slug, part, mode, owner, why, now, args.dry_run)
+        if warn is None:
+            print(f"ASK: [[{slug}]] {why}; not recorded: its armed descope (descope_armed:) stands, so re-run it and "
+                  f"hand it back: /thread:repair [[{ro}]]")
+            return 3
         if warn:
             print(f"WARN: descope: {slug}: the refusal is not recorded: {warn}", file=sys.stderr)
         print(f"ASK: [[{slug}]] {why}; recorded: /thread:repair [[{ro}]] asks Lachy")

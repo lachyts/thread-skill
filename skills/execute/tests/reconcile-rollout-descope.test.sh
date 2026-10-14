@@ -8,7 +8,8 @@
 # refusal: recorded once, read by `inputs` as the Human fix `decide scope or defer`, keyed on the block (a new run is
 # judged afresh, a legacy run with no end marker keys alike), never recorded by exit 1 or 2, outlived by an answer
 # (which lifts the hold, never the refusal), failing closed on a malformed line, never brief text, `ask 2` after a
-# spent answer, and an answered block refused with exit 1. The plan-blocked state is built through the real
+# spent answer, an answered block refused with exit 1, and nothing recorded while `descope_armed:` stands (R10: the
+# armed descope's re-run and hand-back stay its way back). The plan-blocked state is built through the real
 # `reconcile`. Temp notes only; no vault, no network.
 # Usage: bash reconcile-rollout-descope.test.sh   (exit 0 = pass)
 set -uo pipefail
@@ -104,6 +105,16 @@ asks() {
   has "$out" "; recorded: /thread:repair [[$RO]] asks Lachy" "$1: says the refusal is recorded"
   ok "$(snap | cut -d'|' -f2)" "${before#*|}" "$1: nothing else written (only the refusal section changed)"
   ok "$(refusals)" 1 "$1: the block's refusal is recorded, once"
+}
+# asks_armed <label>: exit 3 while descope_armed: stands: one ASK line saying nothing is recorded (the armed descope's
+# re-run and hand-back stay the way back), and nothing written at all.
+asks_armed() {
+  ok "$rc" 3 "$1: exits 3 (ASK)"
+  has "$out" "ASK: [[$A]]" "$1: one ASK line naming the task"
+  has "$out" "; not recorded: its armed descope (descope_armed:) stands, so re-run it and hand it back: /thread:repair [[$RO]]" \
+    "$1: says nothing is recorded"
+  ok "$(snap)" "$before" "$1: nothing written, no refusal included"
+  ok "$(refusals)" 0 "$1: no refusal recorded while armed"
 }
 # refuses <label>: exit 1, an ERROR line, nothing written.
 refuses() {
@@ -383,8 +394,8 @@ before=$(snap); opt; asks "F4 (ii) a byte-identical second block"
 scen f4-armed
 base
 opt
-before=$(snap); opt "a moved ref" moved-ref; asks "F4 (iii) a different part at the same run while armed"
-before=$(snap); own "a canary"; asks "F4 (iv) the same part in another mode while armed"
+before=$(snap); opt "a moved ref" moved-ref; asks_armed "F4 (iii) a different part at the same run while armed"
+before=$(snap); own "a canary"; asks_armed "F4 (iv) the same part in another mode while armed"
 
 # ── R: the refusal is durable and fails closed (ADR 0035 decision 2) ──────────────────────────────
 inp() { python3 "$LI" inputs --note "$D/$1.md" --now "${INOW:-$NOW}"; }
@@ -496,6 +507,28 @@ before=$(snap)
 opt
 ok "$rc|$(snap)|$(refusals)" "1|$before|0" "R9: a block with a recorded answer exits 1, writing and recording nothing"
 has "$out" "ERROR: descope: $A: answered for this block (" "R9: its ERROR line"
+
+# R10: an armed descope (its hand-back never ran) records no refusal, so its re-run and hand-back stay its way back
+# (repair § 2's **plan-blocked, descopable**): a second part refused while armed, then the original re-run.
+scen r10
+base
+opt
+ok "$rc|$(fm "$A" descope_armed)" "0|descope_armed: 2026-10-03T09:00+00:00" "fixture R10: descoped, armed (no hand-back yet)"
+opt "a moved ref" moved-ref
+ok "$rc|$(refusals)" "3|0" "R10: a second part while armed exits 3 and records no refusal"
+before=$(snap); opt
+ok "$rc|$(snap)" "0|$before" "R10: the armed descope's re-run is still exit 0, writing nothing"
+has "$out" "[no-change]" "R10: … [no-change]"
+I=$(inp "$A")
+ok "$(j "$I" '(d["humanFix"] or {}).get("act") != "decide scope or defer" and not d["autoRetryWhy"].startswith("descope refused")')" true \
+  "R10: the verdict is not H5"
+printf '\n## Descope refused (automatic)\n\n- a hand-edited refusal\n' >> "$D/$A.md"
+I=$(inp "$A")
+ok "$(j "$I" '(d["humanFix"] or {}).get("act") != "decide scope or defer"')" true "R10: no refusal is read while armed, a malformed line included"
+opt
+ok "$rc" 0 "R10: … and the armed descope's re-run still exits 0"
+python3 "$SCRIPT" hand-back --tasks "$A" --tasks-dir "$D" --now "$NOW" >/dev/null 2>&1
+ok "$(fm "$A" status)" "status: in_progress" "R10: the hand-back moves it"
 
 # ── defer clears the stamp ────────────────────────────────────────────────────────────────────────
 scen defer

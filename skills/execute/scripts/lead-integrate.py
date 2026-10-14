@@ -1068,7 +1068,8 @@ def auto_retry_verdict(path, note, inp, rollout_note, now, max_rounds_flag=None)
          `awaiting repair` answer is always H0; a `left` answer keeps its cause's fix, its detail prefixed `left on
          your answer of <stamp>` (H10 when the cause's fix is null). So an answered block is never retried;
       8. plan-blocked after an automatic descope (a descope marker and no `descope_armed:`): H5 `decide scope or defer`;
-      9. a refused descope recorded for this block (_descope_refusal): H5 with the record as its detail;
+      9. a refused descope recorded for this block (_descope_refusal, never while `descope_armed:` stands: the armed
+         descope's hand-back is its way back): H5 with the record as its detail;
      10. autoRevise under the resolved max_review_rounds: null (step 1.2's seeded revise), or H7 when `prUrlError` is
          non-empty (step 1.2 launches nothing on it);
      11. set aside at Integration with no pr:: H6 `restore, recut or defer` (repair § 4's restore, or § 3c's PR-less merge

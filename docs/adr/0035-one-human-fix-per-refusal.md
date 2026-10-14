@@ -69,7 +69,8 @@ round 1's own fix.
 - **A refused descope is recorded** under `## Descope refused (automatic)`, keyed on the top Plan-blocked run's number
   and sha (a legacy run's text sha when its marker is gone); a malformed line fails closed, and the section is never
   brief text. A recorded refusal re-exits 3 before the part is judged, an answer included; exit 1 and exit 2 record
-  nothing.
+  nothing. While `descope_armed:` stands (a descope whose hand-back never ran) an exit 3 records nothing and no
+  refusal is read, so that armed descope's re-run (`[no-change]`) and hand-back stay the block's way back.
 - **"Leave it" is now `; left`:** answered, listed under its cause's item text (so never pushed again), and never
   retried or asked again. It was a fingerprinted entry that counted as answered before; now it is a form of its own.
 - **H6 widens decision 4's "restore"** to repair § 4's full offer, `restore, recut or defer`, with § 3c's PR-less merge
