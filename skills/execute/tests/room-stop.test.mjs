@@ -322,6 +322,18 @@ test('(b) begin refuses empty or multi-line text and writes nothing; a second be
   assert.equal(begin(path.join(mk('b'), 'none.md'), 'x\n').rc, 1, 'a missing note')
 })
 
+test('(b) begin refuses a wikilink and writes nothing: a [[slug]] above ## Queue would reorder the queue', () => {
+  const p = note()
+  const r = begin(p, 'Lachy at its week\'s line; stopping at a step boundary: wf_x [[proj-a]] (task); lane: none\n')
+  assert.equal(r.rc, 2, r.err)
+  assert.match(r.err, /bare/)
+  assert.equal(r.out, '')
+  assert.equal(fs.readFileSync(p, 'utf8'), ROLLOUT, 'the note is byte-equal')
+  assert.equal(stands(p).rc, 5, 'no room stop stands')
+  const bare = begin(p, 'Lachy at its week\'s line; stopping at a step boundary: wf_x proj-a (task); lane: none\n')
+  assert.equal(bare.rc, 0, 'the same line with the slug bare is recorded')
+})
+
 test('(b) begin over a lapsed start line records a fresh one', () => {
   const p = note(ROLLOUT + '\n## Pause log\n\n- 2020-01-01T00:00+00:00 room stop: old\n')
   const r = begin(p, 'x at its week\'s line\n')

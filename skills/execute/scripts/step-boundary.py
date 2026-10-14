@@ -30,7 +30,10 @@ Verbs:
           Record the start: `- <stamp> room stop: <text>` inside `## Pause log`, the section created at the
           note's end when absent. A room stop that already stands (a start line under the 6 h bound, as
           `stands` reads it) prints `room stop already stands since <stamp>` and writes nothing. Empty or
-          multi-line text exits 2 and writes nothing.
+          multi-line text exits 2 and writes nothing, and so does text holding `[[`: slugs go in bare, because
+          reconcile-rollout.py's _schedule_positions ranks the first wikilink on ANY list line, so one on a
+          `## Pause log` line above `## Queue` would reorder the queue. This verb is the room-stop line's only
+          writer, so the rule is enforced here, not only in execute's prose.
 
   end     --rollout <note>
           When a room stop stands (the last room-stop line is a start line, lapsed or not), append
@@ -64,7 +67,8 @@ while each call's journal is <parent>/<sid>/subagents/workflows/<runId>/journal.
 runId (BIND_RUN_ID_RE) with no `..`.
 
 Exit codes: 0 ok; 1 no journals root, an unreadable state file, or an unreadable or unwritable note; 2 usage (a
-bad runId, `mark` with no --run, a --hours or --interval that is not positive, empty or multi-line `begin` text);
+bad runId, `mark` with no --run, a --hours or --interval that is not positive, empty or multi-line `begin` text,
+`begin` text holding `[[`);
 3 `watch` timed out; 4 `stands` found a room stop at or past its bound, or one whose stamp does not parse;
 5 `stands` found no room stop standing.
 """
@@ -340,6 +344,11 @@ def cmd_begin(args):
         text = text[:-1]
     if not text.strip() or "\n" in text or "\r" in text:
         raise _usage("begin", "one non-empty line of text on stdin; nothing written")
+    if "[[" in text:
+        # _schedule_positions ranks the first wikilink on any list line: one here, above `## Queue`, would
+        # reorder the queue.
+        raise _usage("begin", "slugs go in bare, never as [[wikilinks]] (a wikilink on a ## Pause log line "
+                              "above ## Queue reorders the queue); nothing written")
     note = _note(args.rollout, "begin")
     last = _last_room_line(note)
     if _standing(last, _now(), BOUND_HOURS) == 0:

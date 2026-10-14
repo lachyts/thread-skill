@@ -349,7 +349,8 @@ test('control: the old "an Integration log line makes it case (ii)" wording fail
 })
 
 test('control: Lost call without its under-hold sentence fails step11-halt', () => {
-  only('execute', "- Under a git-env hold (`gitEnvHold` non-empty, step 1.1), *Lost call* writes nothing and resumes nothing; after the ack the next entry's *Restart routing* handles it.\n", '',
+  const held = real.execute.split('\n').find((l) => l.startsWith('- Under a git-env hold (`gitEnvHold` non-empty, step 1.1), *Lost call*')) + '\n'
+  only('execute', held, '',
     'step11-halt', 'lost call')
 })
 

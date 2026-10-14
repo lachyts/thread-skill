@@ -2,10 +2,12 @@
 // Login's line the lead starts nothing, frees the lane, stops each Workflow call at a step boundary
 // (skills/execute/scripts/step-boundary.py, executed by skills/execute/tests/room-stop.test.mjs), records the stop on
 // the rollout note, never pauses, and resumes every stopped call at the next loop entry. A transient row after a usage
-// limit is a Lost call, never reconciled. This pins the prose an LLM lead follows, in execute, handoff, repair and
+// limit is a Lost call, never reconciled. Every Cold resume reads a believed-live call against /workflows, a room stop
+// or not; a tripped integrate check drops the call for `prepare`; status and repair read a standing room stop as a
+// live queue the Stage resumes. This pins the prose an LLM lead follows, in execute, status, handoff, repair and
 // CONTEXT.md.
 //
-// Every rule lives in one function, checkRoomStop({ skill, handoff, repair, context }), that returns named failures,
+// Every rule lives in one function, checkRoomStop({ skill, status, handoff, repair, context }), that returns named failures,
 // so the real files and the controls run through identical logic: each control mutates the real text in one place and
 // must fail with exactly its rule. The status lines are parsed with the Stop hook's own STATUS_RE. Reads files only.
 import { test, after } from 'node:test'
@@ -18,6 +20,7 @@ import { collapse, read, root, section, slice } from '../lib/contract-text.mjs'
 
 const real = {
   skill: read('skills/execute/SKILL.md'),
+  status: read('skills/status/SKILL.md'),
   handoff: read('skills/handoff/SKILL.md'),
   repair: read('skills/repair/SKILL.md'),
   context: read('CONTEXT.md'),
@@ -68,6 +71,22 @@ function bulletIn(block, prefix) {
   return collapse(lines.slice(i, j < 0 ? undefined : j).join('\n'))
 }
 const sentences = (text) => text.split(/(?<=\.)\s+/)
+// A bold-labelled paragraph of a section: from its label line to the next blank line, collapsed.
+function para(text, label) {
+  const lines = (text ?? '').split('\n')
+  const i = lines.findIndex((l) => l.startsWith(`**${label}`))
+  if (i < 0) return ''
+  const j = lines.findIndex((l, k) => k > i && !l.trim())
+  return collapse(lines.slice(i, j < 0 ? undefined : j).join('\n'))
+}
+// Status § 4's recommended action n, with its indented continuation, collapsed.
+function action(status, n) {
+  const lines = (section(status, /^### 4\. /) ?? '').split('\n')
+  const i = lines.findIndex((l) => l.startsWith(`${n}. `))
+  if (i < 0) return ''
+  const j = lines.findIndex((l, k) => k > i && !/^\s+\S/.test(l))
+  return collapse(lines.slice(i, j < 0 ? undefined : j).join('\n'))
+}
 
 // The Stop hook's STATUS_RE over candidate lines: [state group or null] per line.
 function driverStates(lines) {
@@ -84,7 +103,7 @@ function driverStates(lines) {
 const ORDER = ['Lost calls', 'background Integration command', 'starts `gated:`', 'starts `review required:`',
   'no Workflow call for this rollout is in flight']
 
-function checkRoomStop({ skill, handoff, repair, context }) {
+function checkRoomStop({ skill, status, handoff, repair, context }) {
   const fails = []
   const raw = section(skill, ROOM) ?? ''
   const sec = collapse(raw)
@@ -135,9 +154,11 @@ function checkRoomStop({ skill, handoff, repair, context }) {
   // trigger: a `Chorus: ` Prompt or Steer, either line.
   if (!['`Chorus: `', "`is at its week's line`", '`is at its 5-hour line`'].every((k) => it(1).includes(k))) fails.push('trigger')
 
-  // record-first: `begin` before any `mark`; no `paused:` stamp, no `record-pause`; bare slugs.
+  // record-first: `begin` before any `mark`; no `paused:` stamp, no `record-pause`; bare slugs, which `begin` itself
+  // enforces (exit 2, nothing written), so its exit 2 is re-run bare, never carried on as a non-durable stop.
   if (!before(sec, 'step-boundary.py begin', 'step-boundary.py mark') ||
-    !['writes no `paused:` stamp', 'runs no `record-pause`', 'never as wikilinks'].every((k) => it(2).includes(k))) fails.push('record-first')
+    !['writes no `paused:` stamp', 'runs no `record-pause`', 'never as wikilinks', '`begin` refuses text holding `[[` (exit 2, nothing written): re-run it once with the slugs bare',
+      'On any other non-zero exit, print its line and carry on'].every((k) => it(2).includes(k))) fails.push('record-first')
 
   // start-nothing: nothing launches; an integrate row's outcome waits; free-lane only after an `integrated` row, and
   // never on a row that already freed the lane.
@@ -201,8 +222,12 @@ function checkRoomStop({ skill, handoff, repair, context }) {
     !s6.includes('or a room stop stands (§ Room stop)')) fails.push('status-lines')
 
   // resume-entry: any loop entry ends it, whoever sends it, with or without a `Chorus: ` head; it runs as Cold resume
-  // (the Stage's re-send skips § 2.7); right after `end`, a call counts as live only while /workflows lists it.
-  if (!it(9).includes('whoever opens it') || !it(9).includes('with or without a `Chorus: ` head') ||
+  // (the Stage's re-send skips § 2.7); right after `end`, a room stop or not, a call counts as live only while
+  // /workflows lists it, and one gone with no row is room-stopped only when `end` ended a stop, else a Lost call.
+  const calls9 = bulletOf(skill, 9, 'Calls it had not stopped.')
+  if (!calls9.includes('whether or not a room stop stood') || !calls9.includes('it is a *Lost call* at this entry') ||
+    calls9.includes('Right after `end` prints `room stop ended`') ||
+    !it(9).includes('whoever opens it') || !it(9).includes('with or without a `Chorus: ` head') ||
     !it(9).includes('The entry runs exactly as *Cold resume* does') || it(9).includes('§ 2.5 and § 2.6') ||
     !s27.includes("or on the Chorus Stage's re-send of `/thread:execute [[<slug>]] §4.5 resume` (§ Room stop), with or without a `Chorus: ` head") ||
     !it(9).includes('counts as live only while /workflows lists it in flight') || !it(9).includes('is room-stopped (item 6)') ||
@@ -231,7 +256,8 @@ function checkRoomStop({ skill, handoff, repair, context }) {
 
   // usage-limit: how the limit is known, and what a transient row after it is.
   if (!['`hit its usage limit`', 'Lost calls the limit cut', '`usage limit reached`', 'with or without a `Chorus: ` head',
-    'contains `transient infrastructure failure`', 'is never reconciled', 'each usage limit grants a fresh once'].every((k) => lostUsage.includes(k))) {
+    'contains `transient infrastructure failure`', 'is never reconciled', 'each usage limit grants a fresh once',
+    "A call the CLI's respawn ended with no row at all (a usage-limit or signed-out re-send opened the entry, and *Cold resume* finds it gone) gets the same fresh once"].every((k) => lostUsage.includes(k))) {
     fails.push('usage-limit')
   }
 
@@ -284,6 +310,65 @@ function checkRoomStop({ skill, handoff, repair, context }) {
   const term = collapse(context.split('\n- **').find((x) => x.startsWith('Room stop**')) ?? '')
   if (!context.includes('- **Room stop** —') || !term.includes('from its `## Pause log` line to `room stop ended`') ||
     !term.includes('"a drain, not a pause"')) fails.push('context')
+  // live-check: EVERY Cold resume, a room stop or not, reads a believed-live call against /workflows. The Stage's d5
+  // usage-limit or signed-out re-send respawns the CLI with no room stop standing (none signalled before the limit,
+  // or item 11's lapse re-entry already ended it), and the dead calls must not ride `--running` as live until
+  // heartbeat clause (3)'s first tick. Gone with no row: room-stopped when this entry's `end` ended a stop, else a
+  // Lost call at this entry (a task call through Restart routing at step 1.3, an integrate call at step 1.4).
+  if (!cold.includes('At every *Cold resume*, whether or not a room stop stood, a call this session believed live counts as live only while /workflows lists it in flight') ||
+    !cold.includes("is room-stopped (§ Room stop) when this entry's `end` printed `room stop ended`; otherwise it is a *Lost call* at this entry, never left to heartbeat clause (3)'s first tick") ||
+    !cold.includes('while /workflows lists them in flight they are running, never stalled') ||
+    cold.includes('When `end` printed `room stop ended`, a call this session believed live') ||
+    !s14.includes('Any other integrate call that holds the lane with no reconciled row is a *Lost call* (one *Cold resume* found gone, or one a git-env hold left)')) {
+    fails.push('live-check')
+  }
+
+  // integrate-trip: at the integrate call's return a tripped check wins over Lost call and a room stop alike. A return
+  // that reconciled no row (a transient row, an error, no row) drops its runId and frees the lane, the note keeping
+  // `integrating:`, so after the ack `prepare` alone re-enters the task and no Lost call resume races it for the lane
+  // (two Integrations on one branch). Only after a check that exited 0 does such a row go to Lost call. The lane-free
+  // rule, item 6, Lost call's room and hold bullets and step 1.4 say the same.
+  const laneFree = lineStarting(skill, '- **The lane-free rule.**')
+  const lostHold = bulletIn(lostRaw, '- Under a git-env hold')
+  if (!integ.includes(', and goes to *Lost call*, unless its check tripped (below)') ||
+    !integ.includes('**A tripped check wins over *Lost call* and a room stop alike:** when the return reconciled no row (a transient row after a usage limit, an error, or no row), its runId is dropped too, so nothing resumes that call') ||
+    !integ.includes("the lane frees while the note keeps `integrating:`. After the ack, step 1.4 takes the task through step 3's `prepare`") ||
+    !integ.includes('An error, or no row, after a check that exited 0: *Lost call*') ||
+    !laneFree.includes('At the integrate check, a return that reconciled no row (a transient row, an error, or no row) also drops its runId') ||
+    !it(6).includes("An integrate call whose return's canary `check` tripped is never room-stopped: the trip wins (§ 4.5 step 3)") ||
+    !lost.includes("it is room-stopped and keeps its handle (an integrate call whose return's canary `check` tripped excepted: step 3)") ||
+    !lostHold.includes('and step 1.4 for an integrate call that still holds the lane') ||
+    !s14.includes("An integrate call whose return's canary `check` tripped holds no lane and no runId (step 3)")) fails.push('integrate-trip')
+
+  // status: it reads the durable record (`stands`, read-only), heads a standing room stop `ROOM STOP since <stamp>:
+  // awaiting the Stage's resume` with no stalled framing, and never recommends `/thread:execute` under it: any loop
+  // entry ends the stop on a Login still at its line, and the Stage then sends nothing. A lapsed one is the owner's
+  // heartbeat's.
+  const sts2 = collapse(section(status, /^### 2\. /) ?? '')
+  const st4raw = section(status, /^### 4\. /) ?? ''
+  const stRoom = para(st4raw, 'Room stop.')
+  const stDonts = collapse(section(status, /^## Don'ts/) ?? '')
+  if (!sts2.includes('python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py stands --rollout <rollout-note>') ||
+    !sts2.includes('It writes nothing. Exit 0: a room stop stands') || !sts2.includes('exit 4: it has lapsed') ||
+    !para(st4raw, 'Headline.').includes("`ROOM STOP since <stamp>: awaiting the Stage's resume`") ||
+    !para(st4raw, 'Headline.').includes("`room stop since <stamp> lapsed: the owner's heartbeat re-enters`") ||
+    !['renders as a room stop, not a stall', 'no stalled framing', 'never `/thread:execute` from here',
+      'any loop entry, whoever opens it, ends the room stop', 'the Stage then sends nothing',
+      "the owner session's heartbeat re-enters *Cold resume* on its next tick"].every((k) => stRoom.includes(k)) ||
+    !action(status, 10).includes('A standing room stop is one whatever `/workflows` shows') ||
+    !action(status, 10).includes('"wait for the Stage\'s resume", never `/thread:execute`') ||
+    !action(status, 9).includes('Under a standing room stop (§ 4\'s *Room stop*), "no run" is no evidence') ||
+    !stDonts.includes('and never under a standing room stop, whatever `/workflows` shows') ||
+    !stDonts.includes('never `step-boundary.py begin` or `step-boundary.py end`')) fails.push('status')
+
+  // repair-live: repair's diagnosis reads the scan's room stop as a live queue, so it never enters the loop or writes
+  // a lead-held note under it; its hand-off, a loop entry, ends a lapsed one after `check-all` and before `resume`.
+  const rc = collapse(repair)
+  if (!rc.includes("A standing room stop (the scan's `ROOM STOP since <stamp>` headline, status § 4's *Room stop*) is a live queue too, even with no run in its owner session") ||
+    !rc.includes('**No lead live.** No pause, no `ROOM STOP` headline, and every owner session has ended') ||
+    !rc.includes('They run only when no lead is live (no `ROOM STOP` headline, and every owner session has ended') ||
+    !before(rc, "then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts), then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>`",
+      '`reconcile-rollout.py resume`, then the loop with')) fails.push('repair-live')
   return [...new Set(fails)]
 }
 
@@ -295,11 +380,18 @@ test('execute § Room stop and every site it reaches hold every rule', () => {
 
 const RULES = ['section', 'trigger', 'record-first', 'start-nothing', 'lane', 'stopped-verify', 'stop-at-boundary', 'durable',
   'never-pause', 'status-lines', 'resume-entry', 'resume-live', 'git-env-hold', 'lost-call-room', 'usage-limit', 'transient-routing',
-  'lost-handle', 'bound', 'step12-pointer', 'guardrail', 'donts', 'handoff', 'repair', 'context']
+  'lost-handle', 'bound', 'step12-pointer', 'guardrail', 'donts', 'handoff', 'repair', 'context', 'live-check', 'integrate-trip',
+  'status', 'repair-live']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
   return text.replace(from, to)
+}
+// The same, matching any run of whitespace in `from` (status and repair wrap their prose).
+function wsEdit(text, from, to) {
+  const re = new RegExp(from.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'))
+  assert.ok(re.test(text), `control setup: ${from.slice(0, 80)} not found`)
+  return text.replace(re, () => to)
 }
 const only = (mut, rule, label) => {
   CONTROLLED.add(rule)
@@ -325,6 +417,8 @@ test('control: begin after the mark, or no bare slugs, fails record-first', () =
   only({ skill: edit(edit(real.skill, two, ''), rawItem(6), two + rawItem(6)) }, 'record-first', 'begin after mark')
   only(sk(' Slugs are written bare, never as wikilinks: `_schedule_positions` ranks the first wikilink on any list line, so a `## Pause log` above `## Queue` would reorder the queue.', ''),
     'record-first', 'no bare slugs')
+  only(sk(' `begin` refuses text holding `[[` (exit 2, nothing written): re-run it once with the slugs bare.', ''), 'record-first', 'no refusal')
+  only(sk('On any other non-zero exit, print its line', 'On a non-zero exit, print its line'), 'record-first', 'exit 2 carried on')
 })
 
 test('control: an unqualified free-lane, or no already-freed bullet, fails start-nothing', () => {
@@ -390,6 +484,8 @@ test('control: a Chorus-only resume, a re-listed entry, no § 2.7 entry, a live-
   const calls = rawItem(9).split('\n').find((x) => x.startsWith('   - **Calls it had not stopped.**'))
   only(sk(calls, '   - **Calls it had not stopped.** A call it had not stopped is live as before.'), 'resume-entry', 'live as before')
   only(sk('; and one that item 9 finds gone at the resume.', '.'), 'resume-entry', 'no gone call')
+  only(sk('Right after `end`, and before anything else, each Workflow call', 'Right after `end` prints `room stop ended`, and before anything else, each Workflow call'),
+    'resume-entry', 'item 9 qualifier back')
 })
 
 test('control: room-stopped calls sent to restart, no pause_requested, or no soft-pause sentence fails resume-live', () => {
@@ -420,13 +516,15 @@ test('control: each usage-limit part missing fails usage-limit', () => {
     'A row whose `blockerDiagnosis` starts `transient infrastructure failure`, from a call launched before that limit'), 'usage-limit', 'starts')
   only(sk('from a call launched before that limit, is never reconciled:', 'from a call launched before that limit, is reconciled, then'), 'usage-limit', 'reconciled')
   only(sk(', and each usage limit grants a fresh once.', '.'), 'usage-limit', 'no fresh once')
+  only(sk(" A call the CLI's respawn ended with no row at all (a usage-limit or signed-out re-send opened the entry, and *Cold resume* finds it gone) gets the same fresh once.", ''),
+    'usage-limit', 'no fresh once for a respawn-cut call')
 })
 
 test('control: a reconcile site that reconciles the row, or reads "starts", fails transient-routing', () => {
   only(sk(" except a row whose `blockerDiagnosis` contains `transient infrastructure failure` from a call launched before a usage limit this Session knows of: that row is never reconciled, whatever the check's exit; it goes to *Lost call* (*After a usage limit*) and its runId stays in this session's record. Otherwise",
     ''), 'transient-routing', 'step 2')
-  only(sk(' A transient row after a usage limit (its `blockerDiagnosis` contains `transient infrastructure failure`) is the exception, as at step 2: it is never reconciled, writes no `## Integration log` line, keeps `integrating:` and the lane held, and goes to *Lost call*.', ''),
-    'transient-routing', 'integrate return')
+  only(sk('is the exception, as at step 2: it is never reconciled, writes no `## Integration log` line, keeps `integrating:` and the lane held, and goes to *Lost call*, unless',
+    'is reconciled like any row, and goes to *Lost call*, unless'), 'transient-routing', 'integrate return')
   only(sk(', or a transient row after a usage limit (*After a usage limit*, below), or which', ', or which'), 'transient-routing', 'definition')
   only(sk('except a row whose `blockerDiagnosis` contains `transient', 'except a row whose `blockerDiagnosis` starts `transient'), 'transient-routing', 'starts')
 })
@@ -481,6 +579,45 @@ test('control: CONTEXT without the term, its span or Chorus\'s word fails contex
   only({ context: edit(real.context, '- **Room stop** —', '- **Room halt** —') }, 'context', 'no term')
   only({ context: edit(real.context, 'from\n  its `## Pause log` line to `room stop ended`', 'while\n  the Login is at its line') }, 'context', 'no span')
   only({ context: edit(real.context, ' (Chorus\'s signal calls it "a drain, not a pause"; here the\n  soft pause is the drain)', '') }, 'context', 'no Chorus word')
+})
+
+test('control: the `room stop ended` qualifier put back on the Cold resume read fails live-check', () => {
+  only(sk('At every *Cold resume*, whether or not a room stop stood, a call this session believed live',
+    'When `end` printed `room stop ended`, a call this session believed live'), 'live-check', 'qualifier back')
+  only(sk(' Any other integrate call that holds the lane with no reconciled row is a *Lost call* (one *Cold resume* found gone, or one a git-env hold left): after step 1.1 it is resumed first the same way, with *Lost call*\'s once in place of the room stop\'s fresh one (*After a usage limit* says when that once is fresh too).', ''),
+    'live-check', 'no step 1.4 path for a lost integrate call')
+})
+
+test('control: a tripped integrate return kept for a Lost call resume, or the old contradiction, fails integrate-trip', () => {
+  only(sk("its runId is dropped too, so nothing resumes that call (not *Lost call*, heartbeat clause (3) or step 1.4), and the lane frees while the note keeps `integrating:`. After the ack, step 1.4 takes the task through step 3's `prepare`",
+    'it keeps its runId and the lane across the halt, and after the ack step 1.4 resumes it first, with no `prepare`'), 'integrate-trip', 'choice (a)')
+  only(sk(', and goes to *Lost call*, unless its check tripped (below).', ', and goes to *Lost call*.'), 'integrate-trip', 'contradiction back')
+  only(sk('An error, or no row, after a check that exited 0: *Lost call*', 'An error, or no row: *Lost call*'), 'integrate-trip', 'error case unqualified')
+  only(sk(" An integrate call whose return's canary `check` tripped is never room-stopped: the trip wins (§ 4.5 step 3).", ''), 'integrate-trip', 'item 6')
+  only(sk(' At the integrate check, a return that reconciled no row (a transient row, an error, or no row) also drops its runId, so no *Lost call* resume ever races `prepare` for the lane (step 3).', ''),
+    'integrate-trip', 'lane-free rule')
+})
+
+const stat = (from, to) => ({ status: wsEdit(real.status, from, to) })
+test('control: status with no stands read, no ROOM STOP headline, a resume under the stop, or no lapse fails status', () => {
+  only(stat('python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py stands --rollout <rollout-note>', 'true'), 'status', 'no read')
+  only(stat("`ROOM STOP since <stamp>: awaiting the Stage's resume` or `room stop since <stamp> lapsed: the owner's heartbeat re-enters` (§ 2's *Room stop*, exit 0 or 4),", ''),
+    'status', 'no headline')
+  only(stat('A standing room stop is one whatever `/workflows` shows (§ 4\'s *Room stop*): "wait for the Stage\'s resume", never `/thread:execute`, which would end the room stop on a Login still at its line; a lapsed one waits for the owner\'s heartbeat while that session is alive. Otherwise check',
+    'Check'), 'status', 'action 10 resumes')
+  only(stat('never `/thread:execute` from here', '`/thread:execute` once its owner session shows no run'), 'status', 'room paragraph resumes')
+  only(stat("the owner session's heartbeat re-enters *Cold resume* on its next tick", 'nothing re-enters it'), 'status', 'no lapse')
+  only(stat(', and never under a standing room stop, whatever `/workflows` shows (§ 4\'s *Room stop*)', ''), 'status', "Don'ts")
+})
+
+test('control: repair that reads a room stop as no lead live, or a hand-off that never ends it, fails repair-live', () => {
+  only({ repair: wsEdit(real.repair, "A standing room stop (the scan's `ROOM STOP since <stamp>` headline, status § 4's *Room stop*) is a live queue too, even with no run in its owner session", 'A room stop') },
+    'repair-live', 'live queue')
+  only({ repair: wsEdit(real.repair, 'No pause, no `ROOM STOP` headline, and every owner session', 'No pause, and every owner session') }, 'repair-live', 'no lead live')
+  only({ repair: wsEdit(real.repair, '(no `ROOM STOP` headline, and every owner session has ended or shows no run there,', '(every owner session has ended or shows no run there,') },
+    'repair-live', 'lead-held notes')
+  only({ repair: wsEdit(real.repair, "then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>` (execute § Room stop: every loop entry ends a room stop, here a lapsed one an ended owner session left; with none standing it writes nothing, and a non-zero exit is printed and the hand-off goes on),", '') },
+    'repair-live', 'hand-off never ends it')
 })
 
 test(`the rules are all named (${RULES.length}) and each has a control`, () => {

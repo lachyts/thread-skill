@@ -23,7 +23,9 @@ reads the operator's local ladder file (`~/.config/thread/ladder.toml`), and, fo
 `rollout-settings.py` for a task whose `max_review_rounds` is absent at both levels (§ 2), and
 `lead-integrate.py inputs` resolves `auto_retries` the same way, inside its own read, for a set-aside task whose
 notes lack it. Either read of the settings file runs land.sh's `--origin-slug` read, and so one local
-`git remote get-url origin` in the Project root, when the file holds a repo table: no network. Writes nothing. Obsidian + GitHub read access only.
+`git remote get-url origin` in the Project root, when the file holds a repo table: no network. It also runs
+execute's `step-boundary.py stands`, a read of the rollout note's `## Pause log` (§ 2's *Room stop*). Writes nothing.
+Obsidian + GitHub read access only.
 
 ## Invocation forms
 
@@ -125,6 +127,18 @@ queued tasks) and `complete`. The stamps are durable frontmatter, so it renders 
 being alive**. `null` when no task has a `started:` stamp. `progress` is the one-line summary the lead
 relays, e.g. `progress: 2/6 merged, 1 running, 1 awaiting integration, 1 queued, 1 set aside — 2h elapsed,
 ~45m remaining (rough)`.
+
+**Room stop.** One more read-only, local call, once per report: whether a Chorus room stop stands on the
+rollout (execute § Room stop), read from the note's `## Pause log`, the one durable record of it:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py stands --rollout <rollout-note>
+```
+
+It writes nothing. Exit 0: a room stop stands, and stdout names its stamp (`room stop stands since <stamp>`);
+exit 4: it has lapsed (`room stop since <stamp> has lapsed: …`, at or past its 6 h bound); exit 5: none stands.
+Exit 1 or 2 renders `room stop unreadable: <its stderr line>` under the headline and reads as none. § 4's
+*Room stop* renders it.
 
 **Re-entry inputs.** One read-only, local call per task whose `queueState` is `running`, `integrating`,
 `awaiting-integration` or `set-aside`, plus any other unmerged task that has `started` and no `pr`:
@@ -256,7 +270,9 @@ offline too.
 ### 4. Render the situational report
 
 **Headline.** `[[<rollout>]] — <progress>`, with `progress` verbatim, plus `PAUSED since <stamp>`,
-`pause pending (draining)`, `INCOMPLETE: <reason>`, `GIT-ENV HOLD: [[a]], [[b]]` (each slug `gitEnvHold`
+`pause pending (draining)`, `ROOM STOP since <stamp>: awaiting the Stage's resume` or
+`room stop since <stamp> lapsed: the owner's heartbeat re-enters` (§ 2's *Room stop*, exit 0 or 4),
+`INCOMPLETE: <reason>`, `GIT-ENV HOLD: [[a]], [[b]]` (each slug `gitEnvHold`
 names, once) or the lineage (`supersedes [[<prior>]]`,
 `superseded by [[<successor>]]`, or § 1's reverse lineage: `superseded by [[N]], close-out interrupted` or
 `superseded by [[N]], supersede interrupted`) when they apply.
@@ -366,6 +382,18 @@ for reinstate", not blockers. `pause_requested` → `pause pending (draining)`: 
 approved tasks integrate and merge, nothing new starts, and once nothing runs, awaits Integration or
 integrates, the lead's next step stamps `paused:`.
 
+**Room stop.** A standing room stop (§ 2's `stands`, exit 0) renders as a room stop, not a stall: headline
+`ROOM STOP since <stamp>: awaiting the Stage's resume`, what's left listed as usual, and no stalled framing.
+On the Chorus Stage the lead stopped each Workflow call at a step boundary for a Login at its line (execute
+§ Room stop): its tasks still read `in_progress` or `integrating:`, and its owner session's `/workflows` shows
+no run by design. It is a live queue whatever `/workflows` shows, and the Stage owes the resume, so the
+recommendation is to wait for it, never `/thread:execute` from here: any loop entry, whoever opens it, ends
+the room stop and resumes the stopped calls on a Login still at its line, and the Stage then sends nothing,
+since its resume skips a lead that has launched work since. A lapsed one (exit 4) renders `room stop since
+<stamp> lapsed: the owner's heartbeat re-enters`: the owner session's heartbeat re-enters *Cold resume* on its
+next tick, which ends it, so wait for that too while the owner session is alive; once that session has ended,
+action 10's resume applies as usual.
+
 **Owner-session qualifier.** It applies to a live queue: a running or integrating task with an `owner:`. A
 Workflow run is listed in `/workflows` only in the session that launched it, and the `owner:` tag names that
 session. The lead's background Integration commands (a verify, a RACE re-verify, the merge step, a backoff)
@@ -451,10 +479,14 @@ Keep the whole report scannable: it's a glance, not a wall of text.
    decisions, or defer. Check `/workflows` in the owner session (`<owner tag>`): if no run shows there, that
    session has ended, or no task carries an `owner:`, nothing is draining it, and
    `/thread:execute [[<rollout>]]` resumes the drain (*Cold resume*: its `next` integrates what awaits,
-   starts nothing and stamps `paused:`). The RACE exception (the owner-session qualifier): if a RACE
+   starts nothing and stamps `paused:`). Under a standing room stop (§ 4's *Room stop*), "no run" is no
+   evidence: wait for the Stage's resume, which drains it, never `/thread:execute`. The RACE exception (the owner-session qualifier): if a RACE
    re-verify was in flight, the same answer makes it undecided, so the next step is
    `/thread:repair [[<rollout>]]` (action 7), never `/thread:execute`.
-10. A live queue → "wait for the run; don't resume from here." Check `/workflows` in the owner session
+10. A live queue → "wait for the run; don't resume from here." A standing room stop is one whatever
+    `/workflows` shows (§ 4's *Room stop*): "wait for the Stage's resume", never `/thread:execute`, which would
+    end the room stop on a Login still at its line; a lapsed one waits for the owner's heartbeat while that
+    session is alive. Otherwise check `/workflows` in the owner session
     (`<owner tag>`): if no run shows there, or that session has ended, `/thread:execute [[<rollout>]]` resumes
     (*Cold resume*). Checked from any other session, "no run" proves nothing. A RACE re-verify in flight
     (§ 3) waits here too, as the lead's own procedure. The RACE exception (the owner-session qualifier)
@@ -515,7 +547,8 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
 - **There is no cursor: the task notes are the progress.** Don't re-scan GitHub for progress; the live PR
   check is only for drift flags.
 - **Never call a writer.** Not `reconcile-rollout.py next` (it stamps `paused:` on a drained pause), `resume`,
-  `hand-back` or any other; `reconcile-rollout.py status`, `lead-integrate.py inputs` and `rollout-settings.py`
+  `hand-back` or any other, and never `step-boundary.py begin` or `step-boundary.py end`;
+  `reconcile-rollout.py status`, `step-boundary.py stands` (§ 2's *Room stop*), `lead-integrate.py inputs` and `rollout-settings.py`
   (§ 2, a read) are the only Python scripts status runs, and `default-branch.sh` the only shell one (besides
   the `land.sh --origin-slug` that `rollout-settings.py` runs itself). Never `lead-integrate.py prepare`,
   `set-aside`, `push` or `undo`, `merge-task.sh`, a `gh pr close`, `merge` or `reopen`, a `git push`, `fetch`
@@ -527,7 +560,8 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
 - **Don't parse the `## Queue` table** for the task list: use the `status` subcommand's glob-by-backlink (it
   catches tasks the table omits).
 - **Don't recommend a resume against a live queue** unless its owner session, checked there, shows no run or
-  has ended. Offline, qualify any resume with § 3's caveat.
+  has ended, and never under a standing room stop, whatever `/workflows` shows (§ 4's *Room stop*). Offline,
+  qualify any resume with § 3's caveat.
 - **Don't send an undecided RACE / UNVERIFIED to `/thread:execute`.** No reinstate and no resume until its
   `RACE decided:` line is recorded: § 4's action 7 comes first, and repair records the decision in any mode.
   Don't escalate a RACE re-verify in flight either: it is the lead's own procedure until its owner session
