@@ -136,8 +136,8 @@ Considered:
   block's fingerprint. An answer recorded under a pause for a block with a fingerprint is never asked again: a later
   repair run acts on it once (a hand-back, or for an at-Integration set-aside with no `pr:` a restore, recut, defer
   or leave). It counts only until the task is re-entered: repair's hand-back and execute's "retry [[task]]" spend
-  it first (since ADR 0035 the spend is the `hand-back` verb's own, in the save that moves the note), since a
-  hand-back leaves no stamp once the restart consumes `handed_back:`, and a later run, automatic
+  it first (since ADR 0035, inside the `hand-back` verb's own save): a hand-back leaves no stamp once the restart
+  consumes `handed_back:`. A later run, automatic
   retry (`auto_retry_at`) or automatic descope (its stamped `## Scope decision (automatic)` entry, written before
   the lead's hand-back) outdates it. So a block that comes back, an identical one included, goes to Lachy again, as
   decision 6 wants, while an answer recorded since the last re-entry counts whatever the verdict's why. A block with no fingerprint (a gate, a PR-less code-writing review) takes a `-` entry
