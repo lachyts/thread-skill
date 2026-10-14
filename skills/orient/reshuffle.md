@@ -11,7 +11,9 @@ themselves, pointer lines, and retiring a phase the move emptied). When R3 grill
 docs**, the interview also writes `CONTEXT.md` + `docs/adr/` in the **resolved project repo**
 (never committed here: orient § 6 holds scheduling until they land). Nothing else outside the
 vault: out-of-vault backlinks are reported, not rewritten (R5.3). Never git/gh. Never stamps
-`rollout:` or `scope:`: orient § 6 hands rollout-shaped phases to schedule, which owns them.
+`rollout:` or `scope:`: orient § 6 hands rollout-shaped phases to schedule, which owns them. After
+the gate, a declared check's own `--advance` moves its record (§ Declared check): the check writes
+it and owns how it lands, so orient still runs no git.
 
 ## Scoped targets
 
@@ -24,6 +26,33 @@ A single-note target resolves its project like this, and the gate confirms it:
   note (gains `project` in `tags:` and R5.6's surfacing).
 - A plan file or inline prose has no vault node: match it to an existing project where one fits,
   else derive the slug from its title.
+
+## Declared check
+
+A project may declare a check on its note, `orient_check: <command>` (CONTEXT.md **Declared
+check**, ADR 0036 d6). Orient § 2 runs it from the note's first `repos:` entry, for a project
+target only, and carries its entries here. The command meets this contract:
+
+- **A plain run changes nothing.** It prints the entries newer than its own record and exits 0;
+  with nothing newer it prints nothing, or one line saying so. Its output must be the same bytes
+  for the same readings (no clock times or run ids), because the advance compares them. A non-zero
+  exit, a timeout or a start failure is one audit line, never a blocker, and its output is not
+  read as entries.
+- **`<command> --advance` moves the record** to what it read. The check owns its record and how it
+  lands: orient runs no git, and reports the record as the check's to land.
+- **One simple command** whose last word takes more arguments: no `;`, `&`, `|`, `(`, `)`, `<` or
+  `>`, no `#` comment, no line break, and no `$(…)` or backticks, quoted or not. Quoted arguments
+  and `$HOME` or `${HOME}` are fine. Anything else is refused, unrun, as one audit line.
+
+**Hold by default.** The record moves only when every entry got a disposition at R4. An entry the
+grill did not reach, a gate he holds, Steer only, Look only and a dry run all hold. Nothing newer
+means no footer and no advance.
+
+**The advance is bound to what he saw.** `advance` re-runs the plain command and moves the record
+only when its output is byte-identical to the run he reviewed (the same `digest`); otherwise the
+record is held with one line, and the next orient lists the entries again. An entry an open task
+already covers (an earlier orient wrote it and its advance held) is proposed as **seen**, never as
+a second task.
 
 ## R1. The item set
 
@@ -86,6 +115,8 @@ plus lists for everything that is not a plain phase membership:
   unstarted or loose item that belongs here.
 - **Misfits** — items that stay loose. Loose is a valid end state; not everything must be phased.
 - **Frozen context** — the frozen items, read-only, so the proposal can be read against them.
+- **Declared check** — each entry: a new task, a member of an existing phase or task, or **seen**
+  (nothing to do).
 
 A task may join an **existing** phase (in-flight ones included) when it clearly belongs there.
 This is **a proposal, never a decision**: every row is an input to R3's interview or R4's gate.
@@ -142,6 +173,10 @@ A scoped target adds a **source-disposition footer**, e.g.
 `source: focus-app-p3-capture-tasknotes → phase note (legacy task-tagged: retag [phase] + move to Work/Phases/)`.
 Lachy may merge, split, rename, re-phase or drop rows; re-render until approved. This is where
 granularity is corrected cheaply: nothing exists yet.
+
+A declared check with entries (§ Declared check) adds a **declared-check footer**:
+`declared check: <N> entries → <dispositions>; advance after the writes` when every entry has a
+disposition, else `declared check: hold (<unresolved>)`. He may turn advance into hold.
 
 ## R5. Write
 
@@ -200,6 +235,10 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
 6. **Surfacing** — the project note's base blocks, per `add-phase.md` § Step 4: add whichever
    are missing, never a second copy.
 7. **Misfits and unresolved items stay loose**, untouched apart from backlink rewrites.
+8. **The declared check advances, last.** When the footer said advance and every write above
+   landed, run orient § 2's `advance` call with the § 2 `digest` and report its `audit` line. On
+   `advanced`, also report the check's own lines and name its record as the check's to land. Any
+   other status, or a non-zero exit, is that one line; never a blocker.
 
 **Report**: phases as clickable `obsidian://` links, renames, the other dispositions, surfacing
 status, misfits, out-of-vault links to fix, and what the grill left unresolved. Orient § 6 routes
@@ -214,6 +253,8 @@ The rules above are the contract; these are the ones most easily broken.
 - **Don't renumber.** Existing phases and ordinals are immutable, and an ordinal is never reused.
 - **Don't write before the R4 gate**, and don't rename without the basename check and the
   backlink rewrite.
+- **Don't advance a declared check** except through `advance --expect <digest>` after R4 passed
+  every entry; never run its `--advance` by hand.
 - **Don't copy the grill skills' instructions inline**: invoke `grill-with-docs` / `grill-me` by
   name; the inline shape is only the no-skills fallback.
 - **Don't duplicate the writer-spec schema**: note shape lives in `add-writers/add-task.md`,

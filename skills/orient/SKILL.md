@@ -158,6 +158,18 @@ and Drift and the slots for each swept project.
   saving each project's output to its own file under one `mktemp -d` directory (`<dir>/<slug>.json`)
   and printing the path and the JSON. Keep its UNAMBIGUOUS and AMBIGUOUS lists and each saved path:
   § 4 binds the apply to that file. It writes nothing to the vault.
+- **Declared check** (ADR 0036 d6; CONTEXT.md **Declared check**): for a project target only, run
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/declared-check.py run "<note>"` once, with
+  § 1's vault-relative `note` field and a 300-second command timeout (`timeout: 300000`). A plain
+  run changes nothing. Its first line is a JSON header; for `status: ok`, read all `bytes` of the
+  check's output after it, which are its entries (a long result the Bash tool saves to a file is
+  read whole from that file, never from its preview). Keep the header's `digest`, and carry the
+  entries to § 3 Shape and to `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § Declared check,
+  whose gate alone runs
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/declared-check.py advance "<note>" --expect <digest>`.
+  `undeclared` adds nothing. Any other status is its one `audit` line, and a non-zero exit its one
+  `declared-check:` line: report it in § 3 and carry on, never a blocker. An area or scoped target
+  and `--debrief` run no check.
 - **Related projects**: projects the target's notes link or name, and projects linking the
   target, especially ones `status: parked` or being absorbed by it. Read their unstarted phases
   and loose tasks for overlap with the target's open work (the reshuffle may pull them in).
@@ -184,7 +196,8 @@ A situational report written for Lachy catching up, not a log:
 - **Drift**: one line, the counts plus names, split into unambiguous (fixed on Reshuffle) and
   ambiguous (listed for Lachy, never applied). Omit the line when both lists are empty.
 - **Shape**: how much a reshuffle has to work with: loose tasks, brain dumps, unstarted phases,
-  overlaps found in related projects, and any live rollout.
+  overlaps found in related projects, and any live rollout; plus the declared check's entries
+  (§ 2), each a loose item until the reshuffle places it, or its one audit line.
 - **ONE recommended best use of his time**, with a one-line reason — same
   single-recommendation discipline as `next`. Everything else is context, not
   competing recommendations. Frame it as a **proposal against the slot** of

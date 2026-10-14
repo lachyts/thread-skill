@@ -1,7 +1,7 @@
 # 0036 — orient resolves its target before it reads, then reshuffles without asking
 
 Date: 2026-10-14
-Status: proposed, d1–d4 implemented by p20-1; d5, d6 pending (p20-2, p20-3). P20, orient's front
+Status: proposed, d1–d4 implemented by p20-1, d6 by p20-3; d5 pending (p20-2). P20, orient's front
 door; amends ADR 0027's three-way question and ADR 0026's drift authorisation; from the 2026-10-14
 `/thread:orient Thread Skill` grill.
 
@@ -65,3 +65,13 @@ ADR 0088 d4 asks orient to run a check a project declares (its SDK watch).
   learned, even after a stop, so a project pick there asks every time; `_`-prefixed folders
   (`_archive`, `_sources`, `_shared`) are never learned either. A list-valued `area:` gives its
   first item.
+- How p20-3 reads d6 (`skills/_shared/scripts/declared-check.py`): a project target only (an area
+  sweep would run every project's check, and an advance is per project), run from the note's first
+  `repos:` entry, never a later one, as `/bin/sh -c` with stdin closed and git's repo-local variables
+  scrubbed, under a time limit that kills the check's whole process group. The declaration must be
+  one simple command, because `--advance` is appended to it: an operator, a `#` comment, a line
+  break, a backtick or a `$(…)` is refused unrun, quoted or not. Stdout is the entries, read whole;
+  stderr only names a failure and never enters the output. The advance is bound to the digest of
+  the output Lachy reviewed: it re-runs the plain command and runs `--advance` only on a
+  byte-identical result, so an entry that lands during a long grill is held for the next orient
+  instead of being passed unseen.
