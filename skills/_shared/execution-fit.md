@@ -6,7 +6,7 @@ One system, two dispatch lanes. Every cluster of open tasks gets exactly one:
   the three-layer convergence engine, Integration and auto-merge.
 - **The session lane**: scoped sessions dispatched by calendar and attention —
   `defer` (`scheduled:` dates do the dispatch), a task's `## Launch` block via
-  `open`, or orient's parallel-safe cc-* batches.
+  `open`, or orient's parallel-safe native batches (ADR 0023).
 
 **The test decides, hard.** It is not a preference and not a count. A cluster is
 **rollout-shaped** when all three hold:
