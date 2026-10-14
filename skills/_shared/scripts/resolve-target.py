@@ -37,7 +37,29 @@ declaration: its name, matched against area and folder-project notes. Rung 4, th
 matched within the area its nearest area-named ancestor names; with no such area, suggestions only.
 
 Live targets: notes under Work/Projects whose `tags:` include `project` or `area`, outside Archive/, not
-dead (next-action's dead_note: the `archived` tag or status done/merged/dropped) and not `done: true`.
+dead (next-action's dead_note: the `archived` tag or status done/merged/dropped) and not `done: true`. Their
+keys are the basename and every `aliases:` entry; anchors are the folder notes (Work/Projects/<T>/<T>.md and
+Work/Projects/<T>/<F>/<F>.md).
+
+Matching. A name is lowercased, loses " (area)" and a leading yy-mm-dd date, and splits on non-alphanumerics
+(one-letter tokens dropped). Two tokens score 1 when equal or when one is a 3+-letter prefix of the other,
+else their difflib ratio when both have 4+ letters and it reaches 0.8. A key scores the mean of its two
+directions' best-token means; a target scores its best key. Any exact key resolves (several ask); else a
+best below FLOOR is `none`; else a best MARGIN clear of the runner-up resolves; else the top three ask.
+
+The own directory. A directory is named by its own directory O: the component just below the deepest frame
+holding it (a ~/Projects child, an _archive dir, a workspaces parent, the parent of a declared entry, or an
+area-named dir at or above the git root), or its git root when that is deeper; with no frame, its git root, else the directory itself.
+So a dated dir inside the ~/Projects umbrella repo names itself, never ~/Projects. `learn_dir` is O when it
+is under HOME, no umbrella (HOME, ~/Projects, a workspaces parent) or ancestor of one, declared by no note,
+not area-named or _-prefixed, and holds no declared entry or workspace. A declared directory, a matched
+workspace root and a matched area directory have none.
+
+--learn <dir> <note> appends <dir>, as "~/...", to the note's `repos:` when <dir> is exactly the learn_dir
+this script gives for it. <note> is a live project note by name or vault path (the path when two notes share
+a basename). A block list gains one line at its items' indent; a null, empty or missing `repos:` becomes a
+one-item block list; a flow list or a scalar is rewritten whole. The edit is re-parsed (`repos:` must equal
+the old list plus <dir>, every other key unchanged) and written in place. Prints {"learned": ..., "note": ...}.
 
 Exit 0 on any answer, `none` included. Exit 2 on a refusal (a usage error, an unusable --cwd when a
 directory rung reads it, any --learn refusal): stderr carries one line starting `resolve-target: ` and

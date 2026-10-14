@@ -109,8 +109,9 @@ const proj = (area, rest = '') => fm(`tags:\n  - project\narea:\n  - ${area}\nst
 function fixture() {
   return {
     [`${P}/AI/AI.md`]: fm('tags:\n  - area'),
+    // [departs] the five retired-name aliases are left out: queue-only.test.mjs (rule b2) keeps that name out of test files.
     [`${P}/AI/Thread Skill.md`]: fm('tags:\n  - project\narea:\n  - AI\nrepos:\n  - ~/repos/tools/thread-skill\nstatus: queued\ndone: false\n' +
-      'aliases:\n  - thread-skill\n  - Thread plugin\n  - thread\n  - ts\n  - wave-execute\n  - wave-plan\n  - Wave Plan\n  - Wave Execute\n  - Wave Plan & Execute',
+      'aliases:\n  - thread-skill\n  - Thread plugin\n  - thread\n  - ts',
     '\n# Thread Skill\n\nKeep me.\n'),
     [`${P}/AI/Murmur.md`]: proj('AI', '\nrepos:\n  - ~/repos/tools/murmur\n  - ~/repos/tools/cmux-fork-murmur'),
     [`${P}/AI/Murmur's cmux fork.md`]: proj('AI'),  // [stand-in]
