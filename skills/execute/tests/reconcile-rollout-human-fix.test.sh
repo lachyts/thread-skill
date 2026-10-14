@@ -4,7 +4,8 @@
 # answer (`inputs`' answerRecorded, reconcile-rollout.py _answer_recorded). reconcile-rollout.py record-answer is the only
 # writer of an answer, hand-back spends every live answer and takes `--answer <stamp>` as a compare-and-swap, and an
 # answered block is never retried.
-#   H  each Human-fix branch (H0a-H0d the answer overlay, H1-H12, the null cases)
+#   H  each Human-fix branch (H0a-H0f the answer overlay, a `left` question and a `left` null cause included; H1-H12,
+#      H12 under an answer and a question; the null cases)
 #   K  --max-review-rounds is an overlay humanFix ignores; the keys today's callers read are unchanged
 #   L  the label forms, and `ask 2` after a spent answer
 #   N  answerRecorded: the live forms, the dead keys, each re-entry stamp, ties and unparseable stamps
@@ -198,6 +199,28 @@ FP=$(j "$(inp "$A")" 'd["fingerprint"]')
 entry "$A" "- 2026-10-03T08:30+00:00 decision (block $FP): \"recut?\" → yes"
 I=$(inp "$A")
 ok "$(hf "$I")|$(predicate "$I")" '["finish the recorded answer",false,null]|false' "H0d: a hand-back answer on H8 is H0"
+
+# H0e: a `## Needs you` question answered `left`. record-answer removes the section, so the item's what is no longer the
+# question and its act is the cause's: execute § 6.5 (c) lists a `left` item by its form and never pushes it.
+scen h0e
+mkro "auto_retries: 0"; mkt "$B" open
+mkt "$A" open; planblock "$A" "$FA" 2026-10-03T08:00:00Z "{\"needsHuman\":\"$Q\"}"
+ok "$(hf "$(inp "$A")")" '["answer the question",true,null]' "H0e: (a question: H4)"
+ra "$A" --kind needs-you --ask "$Q" --answer "leave it for now" --fingerprint "$SHA_A" --form left
+ok "$rc|$(sec "$A" '## Needs you')" "0|" "H0e: --form left on the question exits 0 and removes the section"
+I=$(inp "$A")
+ok "$(ans "$I")|$(predicate "$I")" "[\"left\",\"$S_NOW\"]|false" "H0e: answerRecorded reads left (the form § 6.5 (c) skips the push on); never the lead's"
+ok "$(hf "$I")" '["hand back or defer",true,null]' "H0e: the act is now the cause's (H10), not answer the question: the item text changed"
+has "$(fix "$I" detail)" "left on your answer of $S_NOW: auto_retries is 0" "H0e: its detail names the left answer, then the cause"
+# H0f: a `left` answer on a block whose cause has no fix (a retry is due): the overlay's H10, never null.
+scen h0f
+mkro; mkt "$B" open
+mkt "$A" open; planblock "$A" "$FA"
+ok "$(j "$(inp "$A")" '[d["autoRetry"], d["humanFix"]]')" '[true,null]' "H0f: (the cause would retry: no fix)"
+ra "$A" --kind decision --ask "retry it?" --answer "no, leave it" --fingerprint "$SHA_A" --form left
+I=$(inp "$A")
+ok "$(j "$I" 'd["autoRetry"]')|$(hf "$I")|$(ans "$I")" "false|[\"hand back or defer\",true,null]|[\"left\",\"$S_NOW\"]" "H0f: a left answer on a null cause reads H10, form left"
+ok "$(fix "$I" detail)" "left on your answer of $S_NOW: nothing else holds it" "H0f: its detail"
 
 # ── H1-H12 ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 scen h1

@@ -72,8 +72,11 @@ round 1's own fix.
   brief text. A recorded refusal re-exits 3 before the part is judged, an answer included; exit 1 and exit 2 record
   nothing. While `descope_armed:` stands (a descope whose hand-back never ran) an exit 3 records nothing and no
   refusal is read, so that armed descope's re-run (`[no-change]`) and hand-back stay the block's way back.
-- **"Leave it" is now `; left`:** answered, listed under its cause's item text (so never pushed again), and never
-  retried or asked again. It was a fingerprinted entry that counted as answered before; now it is a form of its own.
+- **"Leave it" is now `; left`:** answered, listed in execute § 6.5 (c) but never pushed, and never retried or asked
+  again. Its item text is not always the one Lachy answered (once `record-answer` removes a `## Needs you` question the
+  what is `set aside …` and the act the cause's, and a cause with no fix reads `hand back or defer`), so the push is
+  skipped by the form, never left to the dedupe. It was a fingerprinted entry that counted as answered before; now
+  it is a form of its own.
 - **H6 widens decision 4's "restore"** to repair § 4's full offer, `restore, recut or defer`, with § 3c's PR-less merge
   named in the detail for a MERGED PR.
 - **Existing pushed items are reworded once.** A live rollout's (c) items whose act changed (an Integration set-aside

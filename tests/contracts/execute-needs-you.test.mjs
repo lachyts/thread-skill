@@ -283,11 +283,14 @@ function checkNeedsYou(skill, context = realContext) {
 
   // answered-items (ADR 0035): an answered set-aside is treated by its form. Under a pause step 1.2 is skipped, so an
   // entry whose way back is the lead's own (a null `humanFix`, a `hand-back` answer included) waits for the reinstate and
-  // is never listed; an `awaiting repair` answer is an item (`finish the recorded answer`), pushed once; a `left` one
-  // keeps its cause's item text, so the log line dedupes it: listed, never pushed again.
+  // is never listed; an `awaiting repair` answer is an item (`finish the recorded answer`), pushed once; a `left` one is
+  // listed and never pushed, by its form (*Push once* skips it, logging nothing), never by the dedupe: its item text can
+  // change once answered (a `## Needs you` question's what becomes `set aside …`, and its act the cause's).
   if (!kindC.includes('under a pause step 1.2 is skipped, so such an entry waits for the reinstate and stays excluded, a `hand-back` answer included') ||
     !kindC.includes('An `awaiting repair` answer is an item whose act is `finish the recorded answer`, pushed once') ||
-    !kindC.includes("a `left` answer keeps its cause's item text, so it is listed but never pushed again")) {
+    !kindC.includes('an item whose `answerRecorded.form` is `left` is listed but never pushed') ||
+    !kindC.includes('so *Push once* skips it and logs nothing') ||
+    !push.includes('- **A `left` answer** ((c)): never pushed and never logged, whatever its text; the report still lists it.')) {
     fails.push('answered-items')
   }
 
@@ -407,7 +410,7 @@ test('control: an item kind dropped, or (c) re-deriving its causes, fails kinds'
   only(edit(real, 'reports a non-null `humanFix`. The script', 'reports `autoRetry: false`. The script'), 'kinds', 'membership by autoRetry')
   only(edit(real, ' A gate-pending entry is (a), an entry in `raceHold` is (b), and a non-empty `autoRetryError` is (e), § 3\'s round-budget halt.', ''),
     'kinds', 'a, b and e unplaced')
-  only(edit(real, 'listed but never pushed again.\n', 'listed but never pushed again. It includes:\n  - plan-blocked with `max_plan_rounds` spent;\n'),
+  only(edit(real, 'skips it and logs nothing.\n', 'skips it and logs nothing. It includes:\n  - plan-blocked with `max_plan_rounds` spent;\n'),
     'kinds', 'the old includes list back')
 })
 
@@ -502,7 +505,9 @@ test('control: an answer route that drops a decline, or the Recorded answer, fai
 test('control: an answered set-aside pushed under a pause, re-pushed, or unlisted fails answered-items', () => {
   only(edit(real, ', a `hand-back` answer included. An', '. An'), 'answered-items', 'a hand-back answer under a pause')
   only(edit(real, 'whose act is `finish the recorded answer`, pushed once', 'whose act is `finish the recorded answer`'), 'answered-items', 'awaiting repair re-pushed')
-  only(edit(real, "a `left` answer keeps its cause's item text, so it is listed but never pushed again", 'a `left` answer is no item'), 'answered-items', 'left unlisted')
+  only(edit(real, 'an item whose `answerRecorded.form` is `left` is listed but never pushed', 'a `left` answer is no item'), 'answered-items', 'left unlisted')
+  only(edit(real, ', so *Push once* skips it and logs nothing', ', so the dedupe keeps it from being pushed again'), 'answered-items', 'left left to the dedupe')
+  only(edit(real, lineIn(real, S65, '- **A `left` answer** ((c))'), ''), 'answered-items', 'Push once pushes a left answer')
 })
 
 test('control: CONTEXT.md without the entry, or without its Avoid list, fails glossary', () => {

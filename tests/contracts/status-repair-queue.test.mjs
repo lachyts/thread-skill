@@ -392,7 +392,8 @@ function buildE() {
 // (ADR 0035): `record-answer` writes each answer, `inputs`' `answerRecorded` is the one read, an answered block is never
 // retried, `hand-back --answer` acts once (a second call, the lead's or repair's, exits 1), every hand-back spends the
 // answer so an identical re-block is a fresh ask (`ask 2`), a later run or automatic retry outdates it, the descope verb
-// refuses an answered block, and an `awaiting repair`, a `left` and a refused-descope block each read their Human fix.
+// refuses an answered block, an `awaiting repair`, a `left` and a refused-descope block each read their Human fix, and a
+// `left` answer to a `## Needs you` question changes the item's text (so execute skips its push by the form).
 const RF = 'proj-rollout-2026-10-04'
 const RF2 = 'proj-rollout-2026-10-04-2'
 const F = {
@@ -759,7 +760,8 @@ function answerF(d0, fpOf) {
   if (v10.autoRetry !== false || v10.humanFix?.act !== 'finish the recorded answer' || v10.humanFix?.handBack !== false || leadActs(v10) ||
     v10.answerRecorded?.form !== 'awaiting repair') fails.push(`(x) awaiting repair: ${JSON.stringify([v10.autoRetryWhy, v10.humanFix])}`)
 
-  // (xi) A `left` answer keeps its cause's item text (the act and the label), so execute's dedupe never pushes it again.
+  // (xi) A `left` answer on a block whose cause names a fix keeps that act and label, its detail prefixed; execute § 6.5
+  // (c) lists it and never pushes it, by its form.
   const lf = copyDir(d0, path.join(tmp, 'F-left'))
   const before11 = inputsAt(lf, spent).humanFix
   must0(fRecord(lf, spent, ['--kind', 'decision', '--ask', F_ASK, '--answer', 'leave it', '--fingerprint', spentFp, '--form', 'left']), '(xi) record-answer')
@@ -779,6 +781,25 @@ function answerF(d0, fpOf) {
   must0(fRecord(rf, spent, ['--kind', 'decision', '--ask', 'descope refused: keep the canary?', '--answer', 'yes, hand it back', '--fingerprint', spentFp,
     '--form', 'hand-back'], '2026-10-04T09:05:00Z'), '(xii) record-answer')
   if (!leadActs(inputsAt(rf, spent, '2026-10-04T09:05:00Z'))) fails.push('(xii) the answer does not lift the hold')
+
+  // (xiii) asks' `## Needs you` question answered `left`: record-answer removes the section, so status drops its
+  // needsHuman, the (c) what is no longer the question and the act is the cause's (`hand back or defer`, not `answer the
+  // question`): the item text changed, which is why execute § 6.5 (c) never pushes a `left` item rather than leaving it
+  // to the dedupe. A `decision` beside the open question is refused first, writing nothing.
+  const lq = copyDir(d0, path.join(tmp, 'F-left-question'))
+  const lqBefore = fRead(lq, slug)
+  const lqDecision = fRecord(lq, slug, ['--kind', 'decision', '--ask', FQ, '--answer', 'leave it', '--fingerprint', fp, '--form', 'left'])
+  if (lqDecision.rc !== 1 || !lqDecision.err.includes('record its answer with --kind needs-you') || fRead(lq, slug) !== lqBefore) {
+    fails.push(`(xiii) a decision beside the question: ${JSON.stringify([lqDecision.rc, lqDecision.err])}`)
+  }
+  const before13 = inputsAt(lq, slug).humanFix
+  must0(fRecord(lq, slug, ['--kind', 'needs-you', '--ask', FQ, '--answer', 'leave it', '--fingerprint', fp, '--form', 'left']), '(xiii) record-answer')
+  const v13 = inputsAt(lq, slug)
+  const t13 = fStatus(lq, RF).tasks.find((x) => x.slug === slug)
+  if (before13?.act !== 'answer the question' || v13.answerRecorded?.form !== 'left' || v13.humanFix == null || v13.humanFix.act === before13.act ||
+    !(v13.humanFix.detail ?? '').startsWith(`left on your answer of ${F_STAMP}`) || leadActs(v13) || !t13 || 'needsHuman' in t13) {
+    fails.push(`(xiii) left question: ${JSON.stringify([before13, v13.humanFix, v13.answerRecorded, t13?.needsHuman])}`)
+  }
 
   return { fails, entry }
 }
