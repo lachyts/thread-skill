@@ -103,6 +103,9 @@ one line per Retro.
 - `skills/_shared/execution-fit.md` — the canonical lane rule.
 - `skills/_shared/task-writer.md` — the single spec for writing + routing the
   vault task (dedup, day parsing, resume prompt, pickup auto-complete).
+- `skills/_shared/plugin-root.md` — the one rule for running a
+  `${CLAUDE_PLUGIN_ROOT}` command from text read as a file rather than rendered
+  (a sibling SKILL.md a router follows, a `_shared` spec); every skill cites it.
 - `docs/adr/` — the decision record; read the directory for the current set.
   Each ADR's Status line is the one place its state is recorded: a
   back-reference in another ADR reads `*(Amended by ADR NNNN, <date>: <what

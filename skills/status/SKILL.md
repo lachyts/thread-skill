@@ -13,6 +13,8 @@ It is **read-only**: it never stamps frontmatter, never merges, never starts or 
 what it finds, that's `/thread:repair` (the conductor) or `/thread:execute` (the queue's lead). This skill is
 the diagnosis; those are the treatment.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## Scope
 
 Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` (older undated `<slug>-rollout` notes
