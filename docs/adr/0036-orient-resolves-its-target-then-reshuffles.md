@@ -1,8 +1,9 @@
 # 0036 — orient resolves its target before it reads, then reshuffles without asking
 
 Date: 2026-10-14
-Status: proposed, implementation pending (P20, orient's front door; amends ADR 0027's three-way
-question and ADR 0026's drift authorisation; from the 2026-10-14 `/thread:orient Thread Skill` grill)
+Status: proposed, d1–d4 implemented by p20-1; d5, d6 pending (p20-2, p20-3). P20, orient's front
+door; amends ADR 0027's three-way question and ADR 0026's drift authorisation; from the 2026-10-14
+`/thread:orient Thread Skill` grill.
 
 ## Context
 
@@ -53,3 +54,14 @@ ADR 0088 d4 asks orient to run a check a project declares (its SDK watch).
 - `repos:` grows as a side effect of orients, and that frontmatter becomes the map from directories
   to projects.
 - Steer only and Look only become flags: an orient that should change nothing has to say so.
+- How p20-1 reads d1–d4 (`skills/_shared/scripts/resolve-target.py`): the directory rungs compare
+  by depth, so a workspace holding the directory more deeply than any `repos:` entry gives its area,
+  and a tie goes to the declaration (so every ops-workspace session resolves to Morning and Weekly
+  Commands, which declares that workspace, rather than asking; the one-line naming is the guard).
+  Dated directories, skills and repos inside umbrella repos (`~/Projects`, `~/repos/workspaces`,
+  `~/.agents`) are named by their own directory, never the umbrella's, and an umbrella is never
+  learned; a linked worktree reads as the same path in its main checkout. A project he types at
+  the ask is learned like one he picks. A matched workspace root or area directory is never
+  learned, even after a stop, so a project pick there asks every time; `_`-prefixed folders
+  (`_archive`, `_sources`, `_shared`) are never learned either. A list-valued `area:` gives its
+  first item.

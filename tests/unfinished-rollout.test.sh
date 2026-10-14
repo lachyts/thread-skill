@@ -2,6 +2,8 @@
 # At most one unfinished rollout per repo (schedule § 0; ADR 0027, ADR 0030 decision 1 and its migration
 # consequence), and the supersede that carries a rollout's unlanded tasks into its successor:
 #   C1-C27  skills/_shared/scripts/unfinished-rollout.py check: none / supersede / interrupted / file / refuse
+#   U1-U3   a rollout awaiting sign-off (ADR 0034: `paused_for: sign-off`) is unfinished, and its refusal names the
+#           sign-off path (another project's) or the sign-off path beside --regenerate (this project's)
 #   K1-K5   skills/execute/scripts/reconcile-rollout.py carry: preview, refusals, per-field writes, re-runs, and
 #           the refusal of a prior that holds an undecided RACE or UNVERIFIED
 #   K5b     carry refuses a prior that holds an unacked git-env trip until its ack line (p14-6)
@@ -165,6 +167,35 @@ mkro ro-o.md "$R" 'projects: ["[[Other]]"]' "$PAUSED"
 chk --repo "$R" --project Demo --regenerate
 ok "$out|$rc" "refuse ro-o|3" "C6: another project's paused rollout on this repo refuses"
 has "$err" "at most one unfinished rollout per repo" "C6: stderr names the one-per-repo rule"
+# U3: an ordinary pause keeps its exact remedy, with no sign-off wording.
+ok "$err" "unfinished rollout [[ro-o]] is another project's (Other; paused 2026-09-30T10:00+00:00): at most one unfinished rollout per repo: wait for it to finish, or /thread:status then /thread:repair" "U3: C6's stderr is unchanged"
+hasnt "$err" "sign-off" "U3: … and names no sign-off"
+
+# ── U1-U2: a rollout awaiting sign-off (ADR 0034) ─────────────────────────────────────────────────────
+SIGNOFF='paused_for: sign-off'
+scen u1
+mkro ro-o.md "$R" 'projects: ["[[Other]]"]' "$PAUSED" "$SIGNOFF"
+mkt t-gate.md ro-o gate-pending 'owner: execute-old'
+mkt t-done.md ro-o done
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "refuse ro-o|3" "U1: another project's rollout awaiting sign-off refuses"
+has "$err" "awaiting sign-off since 2026-09-30T10:00+00:00" "U1: stderr names the sign-off pause"
+has "$err" "[[t-gate]]" "U1: stderr names the waiting task"
+has "$err" "/thread:execute [[ro-o]]" "U1: stderr names the sign-off path's execute"
+has "$err" "/thread:repair [[ro-o]]" "U1: stderr names /thread:repair to defer"
+has "$err" "at most one unfinished rollout per repo" "U1: stderr still names the one-per-repo rule"
+
+scen u2
+mkro ro-p.md "$R" "$DEMO" "$PAUSED" "$SIGNOFF"
+mkt t-gate.md ro-p gate-pending 'owner: execute-old'
+chk --repo "$R" --project Demo
+ok "$out|$rc" "refuse ro-p|3" "U2: this project's rollout awaiting sign-off refuses without --regenerate"
+has "$err" "--regenerate" "U2: stderr names --regenerate"
+has "$err" "the waiting tasks carry still gate-pending" "U2: … that the waiting tasks carry gate-pending"
+has "$err" "sign off, then /thread:execute [[ro-p]]" "U2: … and the sign-off path"
+has "$err" "awaiting sign-off since 2026-09-30T10:00+00:00: [[t-gate]]" "U2: its state names the waiting task"
+chk --repo "$R" --project Demo --regenerate
+ok "$out|$rc" "supersede ro-p|0" "U2: with --regenerate it supersedes (eligibility unchanged)"
 
 # ── C7-C8: repo identity ──────────────────────────────────────────────────────────────────────────────
 scen c7

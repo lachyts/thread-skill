@@ -29,7 +29,7 @@ else runs as scoped sessions.
 |---|---|---|
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
-| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): audit an area's open work and recommend the best use of time, then **Reshuffle** (re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate) or **Look only**. Schedules rollout-shaped phases itself, steers the rest (background batch sessions it launches itself, ADR 0010, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
+| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then **Reshuffle** (re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate) or **Look only**. Schedules rollout-shaped phases itself, steers the rest (parallel-safe batches it dispatches as native child agents of its own session, ADR 0023, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
 | `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop also create a fresh visible sidebar task seeded with it; elsewhere label it a manual handoff. |
@@ -49,10 +49,12 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 
 ## Runtime support
 
-Orient's local read/audit and task-note debrief are portable; its automatic
-batch dispatch requires a Claude Code session, a scoped `cc-*` profile and
-cmux. Other harnesses can prepare manual launch prompts without marking tasks
-dispatched. The rollout executor still requires its canonical Workflow runtime;
+Orient's audit, reshuffle, steering and task-note debrief are portable. Its
+batches run as native child agents of the calling session, through the shared
+native-workflow exchange (ADR 0023): no terminal multiplexer and no launch
+profile is required, the calling session must stay open to collect them, and a
+batch that needs a tool or account the session lacks is reported blocked, never
+substituted. The rollout executor still requires its canonical Workflow runtime;
 shared source and skill discovery do not provide that runtime.
 
 ## The convergence engine
@@ -63,11 +65,18 @@ integrates each approved task and merges it:
 
 1. **Plan-gate** — an autonomous judge approves the implementation plan before
    code is written (skippable per rollout; a plan's declared gated inputs
-   always pause for human sign-off — ADR 0008).
+   pause the task for sign-off, never the rollout; a spend gate within the
+   standing approval passes — ADR 0008, ADR 0034).
 2. **Ralph-style verifier retry** — the implementer re-runs the rollout's
    verifier and self-corrects until green or the iteration budget is spent.
 3. **Master review-and-revise** — a master-side reviewer accepts or sends the
    task back with feedback, up to `max_review_rounds`.
+
+The standing approval is off until `~/.config/thread/rollouts.toml` sets
+`spend_approval_usd` (whole US dollars) under `[defaults]`; set it only after
+installing a version that knows the key, because an older `rollout-settings.py`
+refuses it, and every rollout's settings with it. `skills/_shared/scripts/gated_inputs.py`
+holds the exposure reading it applies and schedule's gated-input sweep.
 
 Worktree isolation is explicit: each task runs in
 `<repoPath>/.claude/worktrees/<slug>`. Merges go **only** through
@@ -97,6 +106,9 @@ one line per Retro.
 - `skills/_shared/execution-fit.md` — the canonical lane rule.
 - `skills/_shared/task-writer.md` — the single spec for writing + routing the
   vault task (dedup, day parsing, resume prompt, pickup auto-complete).
+- `skills/_shared/plugin-root.md` — the one rule for running a
+  `${CLAUDE_PLUGIN_ROOT}` command from text read as a file rather than rendered
+  (a sibling SKILL.md a router follows, a `_shared` spec); every skill cites it.
 - `docs/adr/` — the decision record; read the directory for the current set.
   Each ADR's Status line is the one place its state is recorded: a
   back-reference in another ADR reads `*(Amended by ADR NNNN, <date>: <what
@@ -104,13 +116,13 @@ one line per Retro.
   decided; read an ADR's own Status line for where it stands.
   `0001`–`0003` are the continuity decisions (task floor; next is a sibling;
   orient is project-altitude next — 0003's packaging and launch conclusions
-  since superseded by 0009 and 0010). `0004`–`0008` are the engine decisions
-  (repair is a conductor; a phase is a plan; one-shot first pass, then
-  iteration escalates, to Fable as first decided and up the operator's ladder
-  since 0029; a tier is a model+effort bundle; a declared gate always
-  pauses). `0009` — thread absorbs wave: one plugin, one prefix, two lanes.
-  `0010` — orient launches its own batches. `0011` — close saves
-  autonomously; vault tasks stay gated. `0012` — process candidates flow to
+  since superseded by 0009 and 0010, and 0010's in turn by 0023). `0004`–`0008`
+  are the engine decisions (repair is a conductor; a phase is a plan; one-shot
+  first pass, then iteration escalates, to Fable as first decided and up the
+  operator's ladder since 0029; a tier is a model+effort bundle; a declared
+  gate always pauses). `0009` — thread absorbs wave: one plugin, one prefix, two lanes.
+  `0010` — orient launches its own batches (superseded by `0023`). `0011` —
+  close saves autonomously; vault tasks stay gated. `0012` — process candidates flow to
   the project's METHOD.md (cross-repo interface with the `method` skill).
   `0013` — only list items declare gates. `0014` — stash and defer run the
   silent process scan. `0015` — process candidates route by altitude
@@ -119,11 +131,12 @@ one line per Retro.
   gone (amends 0006). `0017` — a pending handoff owns the thread's
   continuation: handoff docs are durable and self-cleaning, and close refreshes
   a pending one instead of proposing vault tasks that restate it (amends 0011).
-  `0024` — the operator's top tier sets every rollout's ceiling (amends 0016;
-  superseded by 0029 before it was built). `0025` — master moves only by green
-  PR, owner included. (0018–0023 are reserved: 0018–0022 are on the protocol 4
-  branch, and 0023 belongs to orient's native-children task, p3-1.) `0026` —
-  finished work closes itself (amends 0011). `0027` — orient is the one shaping
+  `0023` — orient dispatches native children of its own session: one launch
+  model, collect-and-accept, a batch lands once (supersedes 0010; amends
+  0003). `0024` — the operator's top tier sets every rollout's ceiling
+  (amends 0016; superseded by 0029 before it was built). `0025` — master moves only by green
+  PR, owner included. (0018–0022 are reserved: they are on the protocol 4
+  branch.) `0026` — finished work closes itself (amends 0011). `0027` — orient is the one shaping
   verb (amends 0003, 0009, 0010 and 0026; retires `split` and `gather`).
   `0028` — agents land their own work (amends 0011). `0029` — escalation
   climbs the operator's ladder (supersedes 0024; amends 0006, 0007 and 0016).
@@ -207,14 +220,18 @@ final check that the run wrote nothing into the tree):
   invariant** (optional engine features must render byte-identical Workflow `agent()` prompts when
   unset, or in-flight rollouts can't resume); `reconcile-rollout.test.sh`, `reconcile-rollout-queue.test.sh`
   (the queue verbs), `reconcile-rollout-runs.test.sh` (accumulated feedback runs), `reconcile-rollout-lead.test.sh`
-  (`hand-back`, `log-integration`) and `reconcile-rollout-descope.test.sh` (the automatic-descope verb); `rollout-stop-driver.test.sh`; `tests/lead-integrate.test.sh` (the lead's
+  (`hand-back`, `log-integration`), `reconcile-rollout-descope.test.sh` (the automatic-descope verb and its recorded
+  refusal) and `reconcile-rollout-human-fix.test.sh` (`inputs`' one Human fix per refusal, the recorded answer,
+  `record-answer` and `hand-back --answer`, ADR 0035); `rollout-stop-driver.test.sh`; `tests/lead-integrate.test.sh` (the lead's
   Integration against a fake `gh` and real repos) and `tests/contracts/execute-queue.test.mjs` (the queue loop's prose);
   `merge-task.sh --self-test-classify` / `--self-test-base`, and `tests/merge-task-base.test.sh` /
   `tests/merge-task-integrated.test.sh` (one integrated PR per call, against a fake `gh` and a real bare repo).
 - **Contracts** — `tests/contracts/*.test.mjs`: manifests agree, skill names and description budgets,
   `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files, no SKILL.md body holds a
   positional `$N` (Claude Code substitutes skill arguments into them; logic that needs one lives in a
-  script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), and
+  script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), orient's
+  target resolution before it reads and its one learned `repos:` write (`orient-target.test.mjs`),
+  orient's one launch model and its double-dispatch guard (`orient-launch-model.test.mjs`), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
   (`handoff-one-writer.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
   and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
@@ -225,6 +242,10 @@ final check that the run wrote nothing into the tree):
 - **Next-action script** — `tests/next-action.test.mjs`: `next-action.py`'s set-down, fill, read and
   captures against throwaway vaults — byte-level one-line edits, YAML-safe quoting, both tag forms, the
   shared dead-link rule, and refusals that write nothing.
+- **Target resolver** — `tests/resolve-target.test.mjs`: `resolve-target.py` against a fixture vault of real
+  names, aliases and `area:`/`repos:` shapes and a fake HOME with umbrella repos — each rung and outcome,
+  the clear winner and the close call, a shared directory, `--learn`'s one-line append and every refusal
+  that writes nothing.
 - **Default branch** — `tests/default-branch.test.{mjs,sh}`: `defaultBranch` keeps pre-fix bytes when
   unset, refuses unsafe names, and the resolver in `execute/SKILL.md` § 4 works against fixture remotes.
 - **Release check** — `tests/release-check.test.sh`: the real `make release-check` recipe against a temp

@@ -9,6 +9,8 @@ The router for the undecided moment. A sibling of the decisive routes, not their
 
 **Contains no route logic of its own.** Executing a chosen route means running that sibling's SKILL.md logic (`${CLAUDE_PLUGIN_ROOT}/skills/<route>/SKILL.md`), so every behaviour lives in exactly one place.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## Process
 
 1. **Read the situation**:

@@ -1,7 +1,7 @@
 // skills/_shared/scripts/rollout-settings.py — the resolver for the operator's rollout settings (p15-4, ADR 0032).
 //
-// The file is `~/.config/thread/rollouts.toml`, ladder.toml's sibling: `[defaults]` (the five rollout keys: the four
-// Tuning keys and execute's `auto_retries`, p16-4),
+// The file is `~/.config/thread/rollouts.toml`, ladder.toml's sibling: `[defaults]` (the six rollout keys: the four
+// Tuning keys, execute's `auto_retries`, p16-4, and the standing approval's `spend_approval_usd`, ADR 0034),
 // `[guardrails]` (the Retro's bounds) and `[repo."owner/name"]` tables keyed by the GitHub origin that
 // `land.sh --origin-slug` reads from the local clone. No file gives the built-in values. A present file that
 // does not validate is refused with one `rollout-settings: <path>[:<line>]: <reason>` line (ADR 0016's typo
@@ -21,12 +21,13 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPT = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings.py')
 // KEYS are the four Tuning keys (run_record.py's TUNING_KEYS, tune.py and score.py read them); SETTING_KEYS adds
-// `auto_retries` (p16-4: execute's automatic retries, >= 0, not Retro-tunable): every key a `settings` object holds.
+// `auto_retries` (p16-4: execute's automatic retries, >= 0, not Retro-tunable) and `spend_approval_usd` (ADR 0034: the
+// standing approval's limit in US dollars, >= 0, built-in 0 = off, not Retro-tunable): every key a `settings` object holds.
 const KEYS = ['parallel_ceiling', 'max_review_rounds', 'max_iterations', 'max_plan_rounds']
-const SETTING_KEYS = [...KEYS, 'auto_retries']
-const MINIMUM = { parallel_ceiling: 1, max_review_rounds: 1, max_iterations: 1, max_plan_rounds: 1, auto_retries: 0 }
+const SETTING_KEYS = [...KEYS, 'auto_retries', 'spend_approval_usd']
+const MINIMUM = { parallel_ceiling: 1, max_review_rounds: 1, max_iterations: 1, max_plan_rounds: 1, auto_retries: 0, spend_approval_usd: 0 }
 const GUARDRAIL_KEYS = ['tokens_per_merge_pct', 'set_aside_rate_points', 'conflict_rate_points', 'quota_stalls']
-const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, auto_retries: 2 }
+const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, auto_retries: 2, spend_approval_usd: 0 }
 const GUARDRAILS_BUILT_IN = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0 }
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 
@@ -155,6 +156,18 @@ test('R2 auto_retries (p16-4): built-in 2, and 0 is a valid [defaults] value (it
   expectValues(resolves(home), { auto_retries: 3 }, { auto_retries: 'file:defaults' })
 })
 
+test('R2 spend_approval_usd (ADR 0034): built-in 0 (off); [defaults] sets it, a repo table overrides it, 0 is valid', (t) => {
+  const home = tmpHome(t)
+  assert.deepEqual(resolves(home).settings.spend_approval_usd, { value: 0, source: 'built-in' })
+  writeSettings(home, ['[defaults]', 'spend_approval_usd = 50'])
+  expectValues(resolves(home), { spend_approval_usd: 50 }, { spend_approval_usd: 'file:defaults' })
+  writeSettings(home, ['[defaults]', 'spend_approval_usd = 0'])
+  expectValues(resolves(home), { spend_approval_usd: 0 }, { spend_approval_usd: 'file:defaults' })
+  writeSettings(home, ['[defaults]', 'spend_approval_usd = 50', '[repo."o/r"]', 'spend_approval_usd = 20'])
+  const out = resolves(home, ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')])
+  expectValues(out, { spend_approval_usd: 20 }, { spend_approval_usd: 'file:repo' })
+})
+
 // ---- R3: a repo override -----------------------------------------------------------------------------------
 
 test('R3 auto_retries in a repo table overrides [defaults] (file:repo)', (t) => {
@@ -220,8 +233,11 @@ const REFUSALS = [
   ['an unknown key in [defaults]', ['[defaults]', 'max_review_rounds = 3', 'paralel_ceiling = 3'], 3,
     /\[defaults\]: unknown key "paralel_ceiling"/],
   ['an unknown key in a repo table', ['[repo."o/r"]', 'max_rounds = 3'], 2, /\[repo\."o\/r"\]: unknown key "max_rounds"/],
-  ['an unknown key names all five rollout keys', ['[defaults]', 'auto_retry = 1'], 2,
-    /unknown key "auto_retry" \(a rollout table holds parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, auto_retries\)/],
+  ['an unknown key names all six rollout keys', ['[defaults]', 'auto_retry = 1'], 2,
+    /unknown key "auto_retry" \(a rollout table holds parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, auto_retries, spend_approval_usd\)/],
+  ['spend_approval_usd = -1', ['[defaults]', 'spend_approval_usd = -1'], 2, /\[defaults\] spend_approval_usd must be an integer >= 0, got -1/],
+  ['spend_approval_usd = 50.5', ['[defaults]', 'spend_approval_usd = 50.5'], 2, /spend_approval_usd must be an integer >= 0, got a float/],
+  ['spend_approval_usd = "50"', ['[defaults]', 'spend_approval_usd = "50"'], 2, /spend_approval_usd must be an integer >= 0, got a string/],
   ['an unknown table [default]', ['# settings', '[default]', 'parallel_ceiling = 3'], 2, /unknown top-level key "default"/],
   ['a repo key ending .git', ['[repo."o/r.git"]', 'parallel_ceiling = 3'], 1, /\.git/],
   ['a repo key that is no owner/name', ['[repo."not-a-slug"]', 'parallel_ceiling = 3'], 1, /owner\/name/],
