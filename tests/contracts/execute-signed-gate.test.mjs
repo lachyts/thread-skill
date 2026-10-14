@@ -55,7 +55,8 @@ function checkSignedGate(skill, context = realContext) {
   const aside = labelled(skill, S45, 'Set aside.')
   const s45raw = section(skill, S45) ?? ''
   const step2 = collapse((s45raw.split('\n').find((l) => /^2\. \*\*A task call returns\.\*\*/.test(l))) ?? '')
-  const sub12 = collapse((s45raw.split('\n').find((l) => /^\s+2\. \*\*Seeded revises/.test(l))) ?? '')
+  // Sub-step 2 opens with the Standing approval (ADR 0034), then the seeded revises.
+  const sub12 = collapse((s45raw.split('\n').find((l) => /^\s+2\. \*\*.*\*\*Seeded revises/.test(l))) ?? '')
   const sub13 = collapse((s45raw.split('\n').find((l) => /^\s+3\. For each slug in `restart`/.test(l))) ?? '')
   const lead = collapse((section(skill, S37) ?? '').split('\n').find((l) => l.startsWith('(moves the pending gates')) ?? '')
   const gated = collapse((context.split('\n- **').find((p) => p.startsWith('Gated input**')) ?? ''))

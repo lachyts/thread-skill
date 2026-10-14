@@ -8,13 +8,15 @@ argument-hint: "[day — tomorrow if omitted: monday | fri | next tue | 2026-07-
 
 The decisive "this is <day>'s problem" route. Same capture as `thread:stash`, plus a date that puts it on a day page.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## Do
 
 1. **Resolve the day** — run task-writer § 3's resolver (`resolve-day.py`, `Australia/Melbourne`) and follow its exit-code handling there; no day arithmetic in your head:
    - No argument → tomorrow.
    - Named day → next *future* occurrence, never today (`defer monday` on a Monday = +7).
    - Explicit date → as given; refuse past dates.
-2. **Write the capture task** — follow `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` exactly: § 1 routing, § 2 dedup (re-deferring an open capture = move its `scheduled:`, don't duplicate), § 3b **day-page To do line** (the visible surface), § 4 frontmatter **with `scheduled: <resolved date>`**, § 4b next action (the set-down, through `next-action.py set-down` — estate ADR 0008), § 5 self-contained body, § 6 THREAD.md upgrade only if thread-worthy.
+2. **Write the capture task** — follow `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` exactly: § 1 routing, § 2 dedup (re-deferring an open marked capture = move its `scheduled:`, don't duplicate; each unmarked match is left untouched and reported; a fresh marked capture is written only when no open marked capture exists, one at most), § 3b **day-page To do line** (the visible surface), § 4 frontmatter **with `scheduled: <resolved date>`**, § 4b next action (the set-down, through `next-action.py set-down` — estate ADR 0008), § 5 self-contained body, § 6 THREAD.md upgrade only if thread-worthy.
 3. **Process scan, silent** (ADR 0014, 0015) — run `${CLAUDE_PLUGIN_ROOT}/skills/_shared/process-scan.md` in silent mode on every defer: NOOP prints nothing; a hit adds one line to the confirmation.
 4. **Confirm** per § 7, always echoing the resolver's `Ddd` and date (or the stated hand-computed interpretation when § 3's fallback applied): `→ [[<slug>]] scheduled **Mon 20 Jul** — on that day page's To do list. <Project>.` — clickable task link, then state plainly that the session is safe to end.
 

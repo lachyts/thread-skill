@@ -33,7 +33,19 @@ Subcommands:
               ahead of every other verdict. `awaitingIntegration` is the Integration queue's order: a task a queued
               task depends on, directly or through a folded member (`merged_into:`), first, then the oldest
               `ready:`, then schedule order. Each `setAside` entry is {slug, status, setAsideAt}, plus `needsHuman`
-              (p16-3: the note's `## Needs you` question, normalised) only when the note holds one.
+              (p16-3: the note's `## Needs you` question, normalised) only when the note holds one. `halt` is null
+              while anything starts, restarts, runs, awaits Integration or integrates; otherwise the first of
+              "git-env", "paused", "empty", "complete" (or "done"), "awaiting-sign-off" and "stuck". With every
+              task merged, `halt` is "complete" (run the completion ceremony), or "done" when the ceremony already
+              ran (p19-14: the rollout note reads `status: done` and sits in `Archive/Rollouts/`), so no entry
+              runs it twice; a done note still in Work/Tasks/ is an interrupted ceremony and stays "complete".
+              "awaiting-sign-off" (ADR 0034) replaces "stuck" only when every unlanded task of the rollout waits on
+              a gate alone: W starts as the set-aside rows at `gate` (a race-held one reads `race`, so it never
+              counts), then gains, to a fixpoint, each queued row whose every unsatisfied dependency resolves
+              (_fold_unit) to a unit already in W; the verdict needs W non-empty and equal to the in-N rows not
+              landed. A gate beside any other set-aside (blocked, review-blocked, plan-blocked, a RACE, an
+              UNVERIFIED) stays "stuck". `awaitingSignOff` lists W in rank order, [{slug, why: "gate-pending" |
+              "depends on [[<unit>]]"}], and is [] for any other verdict.
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -73,7 +85,42 @@ Subcommands:
               stretch (p16-4, ADR 0033): it removes `auto_retries_used` and `quota_retries_used` and re-stamps
               `auto_retry_sha` with the block it re-enters (_block_fingerprint, read before the transition;
               removed when that block has none), so an identical re-block goes straight back to a human. Its
-              stdout is unchanged.
+              stdout is unchanged. Every hand-back that moves a note spends its live answers in the same save (ADR
+              0035): each `## Repair input` key `(block <fp>)`, `(block <fp>; awaiting repair)` or `(block <fp>;
+              left)` becomes `(block <fp>; handed back <now>)`, so no bare hand-back leaves a live answer behind (an
+              identical re-block writes no run, so it would otherwise re-arm the lead's *Recorded answer*); a refused
+              hand-back spends nothing. `--answer <stamp>` takes one slug (else usage, exit 2) and is a
+              compare-and-swap: unless the note is set aside and its answerRecorded (`inputs`) has exactly that stamp
+              and form `hand-back`, exit 1 with `ERROR: hand-back: <slug>: the answer of <stamp> is spent, superseded,
+              not a hand-back answer or no longer this block's; nothing written`, so the lead and repair never both
+              hand back on one answer, nor a new block on an old one.
+
+  record-answer  Record Lachy's answer to a set-aside block (ADR 0035 decision 3; /thread:repair § 3b and § 4), the
+              only writer of a `## Repair input` answer: `--tasks <slug> --rollout <note> --kind needs-you|decision
+              --ask "<ask>" --answer "<answer>" --fingerprint <12hex|-> [--form hand-back|awaiting-repair|left]
+              [--raise max_review_rounds|max_plan_rounds|max_iterations] [--pr <url>]`. Refuses (exit 1, nothing
+              written): a note not set aside at its run, at Integration or at a gate; a --fingerprint other than the
+              block's (_block_fingerprint, `-` when none); `--kind needs-you` whose --ask is not the note's question;
+              `--kind decision` while the note holds a `## Needs you` question (its answer is `--kind needs-you`, which
+              removes the section in the same save);
+              --form missing with a fingerprint or given with `-`; `--form hand-back` when a bare hand-back would not
+              move the note once saved (at Integration with no pr:, a `prUrlError` on a revise or Integration way back
+              read against the Project root, a revise re-entry with no round left and no `--raise
+              max_review_rounds`); --raise or --pr with `--form left`; a --raise other than the cause's
+              `humanFix.raise` (lead-integrate.py cause_fix, read before the save) or `max_review_rounds` on a revise
+              re-entry with no round left; an unresolvable value (the resolver's line); a re-entry stamp that does not
+              parse; a stamp that, bumped, is more than one minute after now. A raise writes `lastRound + 1` for a
+              revise re-entry's max_review_rounds, else the resolved value (task, rollout, rollout-settings.py) + 1,
+              first as the rollout `## Notes` line `- <date> repair: [[<slug>]] <field> raised to <N>, one round` (`one
+              iteration` for max_iterations) in its own save (skipped when present; its failure is exit 1 with nothing
+              written to the task note). Then the task note in one save, the entry last: the `## Needs you` removal
+              (needs-you), `<field>: <N>`, `pr:`, every earlier live entry for this fingerprint rewritten `(block <fp>;
+              superseded <stamp>)` (a block carries at most one live answer), and the entry `- <stamp> <needs
+              you|decision> (block <fp>[; awaiting repair|; left]): "<ask>" → <answer>`. The stamp is now's minute,
+              bumped to one minute after the latest of the last re-entry (_last_re_entry) and every entry stamp for
+              this fingerprint when now is not later, so no two entries of a block share one and none ties a
+              re-entry. An identical live entry with its raise and pr: in place is `[no-change]` at its stamp. Prints
+              `<slug>: answer recorded (<form>) <stamp> [written]`. Records no Run-record event.
 
   auto-retry  Execute's automatic retry of one set-aside task (p16-4, ADR 0033; execute § 4.5 step 1.2's *Automatic
               retry*): `--tasks <slug> --rollout <note> [--auto-retries N] [--fingerprint <12 hex>]`. The task's
@@ -121,8 +168,9 @@ Subcommands:
   status      Read-only situational scan for /thread:status. Given a rollout note, find every task note
               carrying `rollout: [[<this-rollout>]]` (glob-by-backlink — captures read-only tasks the
               `## File-sets` block omits) and emit JSON {rollout, rolloutPath, rolloutStatus, paused,
-              pause_requested, incomplete, ceiling, ceilingError, ceilingCause, counts, progress, timeline, ladder,
-              gitEnvHold, tasks}; `ceiling` is `parallel_ceiling`, or for a note without it the operator's
+              pause_requested, pausedFor, incomplete, ceiling, ceilingError, ceilingCause, counts, progress, timeline, ladder,
+              gitEnvHold, tasks}; `pausedFor` is the rollout's `paused_for` (`sign-off` under await-sign-off's
+              pause, ADR 0034), else null; `ceiling` is `parallel_ceiling`, or for a note without it the operator's
               rollout settings (rollout-settings.py for the Project root: rollouts.toml, then built-in 4),
               and null with `ceilingError` the reason when it is invalid or cannot be resolved (`next`
               exits 1 on the same error; status still exits 0), else `ceilingError` is null; `ceilingCause`
@@ -141,9 +189,10 @@ Subcommands:
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
               walk the same backlinked task notes as `status` (archived ones included) and print one
               `--project <slug> --phases <N,M,...>` line per project slug, slugs and phases sorted, for
-              every task named `<slug>-p<N>-*`. Loose tasks are ignored; nothing linked prints nothing.
-              Each line is the argument list for `reconcile-project.py <line> --kinds phase --apply`,
-              so only phases this rollout touched are ever closed.
+              every task named `<slug>-p<N>-*` (N whole or fractional, `3.5`, sorted numerically: the
+              vault grammar, skills/_shared/vault-grammar.md). Loose tasks are ignored; nothing linked
+              prints nothing. Each line is the argument list for `reconcile-project.py <line> --kinds
+              phase --apply`, so only phases this rollout touched are ever closed.
 
   fold-journals  For execute's completion ceremony and every Retro (p15-3, ADR 0032): `--rollout <note path |
               [[slug]] | slug> [--dry-run]`. Resolves the slug with run_record.normalise_slug and never opens
@@ -200,9 +249,23 @@ Subcommands:
   descope     An automatic descope of a plan-blocked task (p14-4), the one verb the live lead (execute § 4.5 step
               1.2) and /thread:repair § 3d share: `--tasks <slug> --rollout <note> --part "<verbatim quote>"
               (--optional --short <kebab> | --owner <slug> --owner-quote "<verbatim quote>") --reason "<line>"`.
-              The caller judges that the plan-block feedback centres on the part; the verb checks it. Exit 3 is an
-              ASK (one `ASK: [[slug]] <why>; nothing written: ...` line, nothing written) when: the part, or a clause
-              holding it, cites an ADR; a recorded decision (`## Decisions…`, a human `## Scope decision…`, a
+              The caller judges that the plan-block feedback centres on the part; the verb checks it. After its state
+              checks and before the part is judged: a refusal recorded for the block (_descope_refusal; a line under
+              the section that does not parse fails closed) is exit 3 again, citing it and writing nothing new, an
+              answer included (a later descope never overrides a refusal); then a block whose answerRecorded is
+              non-null is exit 1, `ERROR: descope: <slug>: answered for this block (<stamp>); the answer stands`, with
+              nothing written or recorded (the lead judged it before repair recorded the answer). Exit 3 is an ASK
+              (one `ASK: [[slug]] <why>; recorded: /thread:repair [[<ro>]] asks Lachy` line) whose refusal is recorded
+              (ADR 0035 decision 2): one `## Descope refused (automatic)` line on the task note, `- <stamp> descope
+              refused (automatic) run=<n> sha=<12hex>, Plan-blocked feedback run <n>: "<part>" (<mode>[
+              owner=<slug>]): <why>`, keyed on the top Plan-blocked run (_plan_block_key: its n and end-marker sha,
+              _sha12 of its text for a legacy run with no marker), in one save and only when no line carries the key;
+              a failed save still exits 3 with a stderr WARN. While `descope_armed:` stands (a descope whose hand-back
+              never ran) nothing is recorded and no recorded refusal is read: the ASK line ends `; not recorded: its
+              armed descope (descope_armed:) stands, so re-run it and hand it back: /thread:repair [[<ro>]]`, so that
+              descope's re-run (exit 0, `[no-change]`) and hand-back stay its way back (repair § 2's **plan-blocked,
+              descopable**). Exit 1 and exit 2 record nothing. Exit 3 when: the
+              part, or a clause holding it, cites an ADR; a recorded decision (`## Decisions…`, a human `## Scope decision…`, a
               `## Repair input` line without `(automatic)`, `## Approved gates`, `## Gated inputs`) holds the part
               (or, for --owner, the quote); the part sits in a fenced code block of the brief (the body minus the
               record sections; a fence is never a brief item, so no pointer lands inside one); --optional and an
@@ -226,7 +289,7 @@ Subcommands:
               `[no-change]` when all are present. `status:` is never written: the caller's `hand-back` re-enters
               the task. Exit 1 (nothing written): a missing note, a note not plan-blocked at its run or without a
               Plan-blocked run, a --rollout its `rollout:` does not name, a bad --short or a follow-up name that
-              reads as a phase member, a colliding follow-up, a failed save. Exit 2: usage.
+              reads as a phase member, a colliding follow-up, an answered block, a failed save. Exit 2: usage.
 
   carry       A supersede's carry (ADR 0030; /thread:schedule step 6, and § 0 finishing an interrupted
               supersede): re-point every unlanded task of the prior rollout (--from, a path) to the rollout
@@ -278,9 +341,26 @@ Subcommands:
               line on stderr, exit 1, no stdout. Only the rollout note is read.
 
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
-              `pause_requested`) from the rollout note. Run by /thread:execute's resume path when it
-              finds a `paused:` stamp — reinstating IS plain re-invocation, so there is no separate
-              resume command. Idempotent (no stamp = no-op).
+              `pause_requested`, and `paused_for`) from the rollout note. Run by /thread:execute's resume path
+              when it finds a `paused:` stamp — reinstating IS plain re-invocation, so there is no separate
+              resume command. Idempotent (no stamp = no-op). One refusal (ADR 0034): under `paused_for:
+              sign-off`, when the queue with the pause ignored would still be awaiting sign-off (_awaits_sign_off),
+              it writes nothing, prints `STILL-AWAITING: [[<slug>]]: <gate>` for each pending gate and exits 3, so
+              a reinstate with a gate still unsigned never re-runs the sign-off form. Every other pause clears as
+              before.
+
+  await-sign-off  `--rollout <note>` (ADR 0034; execute § 4.5 step 5's sign-off form): the rollout finished
+              everything else and only gates wait on Lachy, so it stays open, paused. Read-only check first: the
+              queue with no --running and any pause ignored (_awaits_sign_off: no git-env hold, nothing running,
+              awaiting Integration or integrating, no queued task free to start, and W, `next`'s
+              awaiting-sign-off set, equal to the unlanded rows) must be awaiting sign-off, else exit 1 and nothing
+              written. Then it stamps `paused: <now>` and `paused_for: sign-off`, appends `- <now> awaiting
+              sign-off: [[a]] (gate-pending), [[b]] (depends on [[a]]): sign off, then /thread:execute
+              [[<rollout>]]` under `## Pause log`, and records `paused mode=sign-off`. A note already stamped
+              `paused_for: sign-off` prints `[no-change]`; another standing pause (a hard pause's `paused:`) is
+              exit 1. A sign-off pause is a `paused:` like any other: never-started reads it as started, the
+              primary hold releases (unfinished-rollout.py running), and the repo keeps it as its one unfinished
+              rollout until signed or deferred.
 
   approve-gates  Sign off a gate-pending task's declared gated inputs (ADR 0008): move the bullets
               under "## Gated inputs (awaiting sign-off)" into "## Approved gates" with a sign-off
@@ -295,13 +375,35 @@ Subcommands:
               (execute § 3.7) and the restart's mark-started consumes the marker. A `set-aside` last
               line with no `pr:` goes to in_progress with a WARN. Refuses a note that isn't
               gate-pending; idempotent once approved (already-approved note = no-op). Run by the lead
-              session ONLY after the human explicitly signs off — never unattended.
+              session only after Lachy explicitly signs off.
+              --standing --rollout <note> (ADR 0034): the standing approval, run by the lead unattended. It
+              signs only the spend gates Lachy's recorded standing approval covers: each pending bullet is
+              priced by skills/_shared/scripts/gated_inputs.py's exposure() (fail closed: credential and
+              irreversible gates, and any shape it cannot price, never pass) against the limit
+              `spend_approval_usd`, resolved task frontmatter -> rollout frontmatter -> rollouts.toml
+              (_resolved_settings: file:repo, file:defaults) -> built-in 0, which is off (sources `task`,
+              `rollout`, `file:repo`, `file:defaults`, `built-in`; _retry_budget's order). A gate is covered iff
+              the limit is > 0 and its total exposure is at most the limit. Each covered gate moves to
+              `## Approved gates` with gated_inputs.annotation()'s suffix, `(approved <date> under the standing
+              approval: total exposure US$<x>, limit US$<t> from <source>)` (GATE_ANNOT_RE strips it), deduped by
+              _norm_gate, and prints `<slug>: gate approved under the standing approval: <gate> (exposure US$<x>
+              of US$<t>, <source>)`. Once nothing is pending the note flips by its stage exactly as above;
+              otherwise the remaining bullets stay pending (rewritten without the covered ones) and the note
+              stays gate-pending. Each remaining gate prints `ASK: <slug>: <gate>: <why>` (with a built-in
+              limit, a priceable gate's why is `standing approval off (built-in 0): set [defaults]
+              spend_approval_usd in ~/.config/thread/rollouts.toml`). Exit 0: every gate covered and written;
+              3: some or none covered (the covered ones written, an ASK line for each of the rest; a re-run on
+              gates already judged writes nothing and exits 3); 1: an error, nothing written for that slug (a
+              missing note, a task whose `rollout:` is not --rollout, a note that is not gate-pending with
+              pending gates, a `spend_approval_usd` stamp that is not an integer >= 0, rollout settings refused).
+              --standing without --rollout is exit 1 (`ERROR: --standing needs --rollout`), nothing written. A
+              note already fully approved stays `[no-change]`, exit 0.
 
 Run record (p15-2, ADR 0032): each verb records its own Slot and lane transitions through run_record.py's
 emit (one helper, _event), best-effort: a refusal or a write failure prints one `run_record:` line on stderr
 and never changes the verb's exit, stdout or vault writes. Nothing is recorded on --dry-run, by a refusal, or
 for a note with no `rollout:` (the rollout slug is the task note's `rollout:`, read before any write; `next`,
-`record-pause` and `clear-pause` use the rollout path's stem). Most re-runs that write nothing new record
+`record-pause`, `clear-pause` and `await-sign-off` use the rollout path's stem). Most re-runs that write nothing new record
 nothing, but not all: mark-integrating records `lane-taken` on every successful call and a re-run of
 mark-started records `slot-taken` again; run_record.py's reader rules absorb those repeats (the same holding,
 the same Slot keeping its first `start`). A
@@ -353,11 +455,12 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     note, a merge-hold close and lane-freed halt for a lane holder; then carried {from, to}
                     (the writer appends it to both files).
   next              (not --dry-run) paused mode=soft when it stamps `paused:`; idle-slots {reason, free,
-                    settings} when free = ceiling - (slotsInUse + starts) > 0 and halt is not complete or
-                    empty.
+                    settings} when free = ceiling - (slotsInUse + starts) > 0 and halt is not complete,
+                    done or empty.
   clear-pause       when it removes `paused:`: paused mode=hard at the stamp when the record has no open pause
                     (a hard pause whose record-pause never ran), then resumed. Removing only
-                    pause_requested records nothing.
+                    pause_requested records nothing; a refusal (STILL-AWAITING) records nothing.
+  await-sign-off    paused mode=sign-off when it stamps, unless the record shows a pause open.
   bind-run, free-lane, hold, record-pause   above.
   git-env-canary.py hold-started / hold-ended hold=git-env (task null) on the hold's empty <-> non-empty edge.
 set-aside stage, first match (auto-retry's stage too, when the record holds no set-aside line for the task: the lead
@@ -540,7 +643,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 DEFAULT_TASKS_DIR = Path(os.path.expanduser("~/repos/obsidian/Work/Tasks"))
@@ -555,15 +658,22 @@ BLOCKED_SECTIONS = {
     "plan-blocked": "## Plan-blocked feedback",
 }
 
-# Gated inputs (ADR 0008): a task the engine paused for human sign-off of declared gates. Deliberately
-# NOT in BLOCKED_SECTIONS: `next` never starts or restarts one, and only approve-gates makes it startable
-# again.
+# Gated inputs (ADR 0008): a task the engine stopped for sign-off of declared gates (Lachy's, or for a covered spend
+# gate the standing approval's, ADR 0034). Deliberately NOT in BLOCKED_SECTIONS: `next` never starts or restarts one,
+# and only approve-gates makes it startable again.
 GATE_PENDING_STATUS = "gate-pending"
 GATE_PENDING_SECTION = "## Gated inputs (awaiting sign-off)"
 APPROVED_GATES_SECTION = "## Approved gates"
 # approve-gates' marker on a signed task sent back to in_progress (p12-14): the restart that directly follows
 # the sign-off reads it through mark-started, which removes it (execute § 3.7's fresh-call warning).
 GATES_SIGNED_KEY = "gates_signed"
+# The standing approval (ADR 0034): its limit, `spend_approval_usd` (task frontmatter, rollout frontmatter, then
+# rollouts.toml through rollout-settings.py), and the rollout's sign-off pause, `paused_for: sign-off` beside `paused:`
+# (await-sign-off writes both; clear-pause removes both).
+SPEND_APPROVAL_KEY = "spend_approval_usd"
+PAUSED_FOR_KEY = "paused_for"
+SIGN_OFF = "sign-off"
+PAUSE_LOG_SECTION = "## Pause log"
 
 # Review-loop memory (2026-08-14): an approval on the FINAL review round with real rejection history
 # (engine flag approvedAtCeiling) persists the accumulated by-round rationale. An AUDIT RECORD, not an
@@ -1629,6 +1739,20 @@ def _git_env_hold(rollout_note):
 
 # rollout-settings.py, shared with every skill: the operator's ~/.config/thread/rollouts.toml (p15-4).
 ROLLOUT_SETTINGS_PY = Path(__file__).resolve().parent.parent.parent / "_shared" / "scripts" / "rollout-settings.py"
+# gated_inputs.py, beside it: the standing approval's exposure reading and annotation (ADR 0034).
+GATED_INPUTS_PY = ROLLOUT_SETTINGS_PY.parent / "gated_inputs.py"
+_GATED = None
+
+
+def _gated():
+    """gated_inputs.py as a module (loaded once; raises when it will not load)."""
+    global _GATED
+    if _GATED is None:
+        spec = importlib.util.spec_from_file_location("thread_gated_inputs", GATED_INPUTS_PY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _GATED = mod
+    return _GATED
 
 
 def _resolved_settings(rollout_note) -> dict:
@@ -2086,6 +2210,17 @@ def _set_aside_entry(r) -> dict:
     return entry
 
 
+def _ceremony_done(rollout_path: Path, rollout_note) -> bool:
+    """True when the rollout's completion ceremony already ran to its end (p19-14): the note reads `status: done`
+    and sits in an `Archive/Rollouts/` directory, where the ceremony's last step moves it. `next` then halts "done",
+    never "complete", so no entry (repair's hand-off included) runs the ceremony a second time. A done note still
+    in Work/Tasks/ is an interrupted ceremony (stamped, never moved), so it stays "complete" and a re-entry finishes
+    it. The path is made absolute first, so a relative `--rollout` given from inside the archive still reads."""
+    parent = rollout_path.absolute().parent
+    return (_status(rollout_note) == "done"
+            and parent.name == "Rollouts" and parent.parent.name == "Archive")
+
+
 def cmd_next(args) -> int:
     """Which tasks start now (ADR 0030 decision 1). Pure function of the notes, except that a drained soft pause is
     stamped (`paused:`) here. New starts are picked greedily by `priority:`, then least file overlap with what is in
@@ -2237,6 +2372,7 @@ def cmd_next(args) -> int:
     in_n = [r for r in rows if r["state"] not in OUTSIDE_N]
     counts = _counts(rows)
     halt = None
+    sign_off = []
     if git_env:
         halt = "git-env"
     elif not start and not restart and not live and not awaiting and not integrating and not race_held_lane:
@@ -2245,12 +2381,15 @@ def cmd_next(args) -> int:
         elif not in_n:
             halt = "empty"
         elif counts["merged"] == counts["total"]:
-            halt = "complete"
+            halt = "done" if _ceremony_done(rollout_path, rollout_note) else "complete"
         else:
-            halt = "stuck"
-    # The Run record (p15-2): a reason marker for the idle Slots this call leaves (none at complete or empty).
+            # ADR 0034: a gate alone never halts `stuck`. When every unlanded task waits only on a gate (W), the
+            # verdict is awaiting-sign-off: execute's step 5 runs its sign-off form and the rollout closes.
+            sign_off = _sign_off_wait(rows, index)
+            halt = "awaiting-sign-off" if sign_off else "stuck"
+    # The Run record (p15-2): a reason marker for the idle Slots this call leaves (none at complete, done or empty).
     free = ceiling - (used + len(start))
-    if free > 0 and halt not in ("complete", "empty") and not args.dry_run:
+    if free > 0 and halt not in ("complete", "done", "empty") and not args.dry_run:
         reason = _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold,
                               by_state.get("set-aside", []))
         _event(rollout_path.stem, "idle-slots", None,
@@ -2276,10 +2415,57 @@ def cmd_next(args) -> int:
         "pauseRequested": pause_requested,
         "pausedNow": paused_now,
         "halt": halt,
+        "awaitingSignOff": sign_off,
         "progress": _progress_line(counts, _timeline(rows, counts, ceiling, now)),
     }
     print(json.dumps(out, indent=2))
     return 0
+
+
+def _sign_off_wait(rows, index):
+    """W, the tasks that wait only on a gate (ADR 0034; the module docstring's `next`): [{slug, why}] in rank order,
+    or [] unless W is non-empty and equals the rollout's unlanded in-N rows. `rows` are `next`'s, race holds already
+    re-read (a race-held row reads set-aside at `race`, so it never joins W). W starts as the set-aside rows at `gate`
+    (why "gate-pending") and gains, to a fixpoint, each queued row whose every unsatisfied dependency resolves through
+    _fold_unit to a unit already in W (why "depends on [[<that unit>]]")."""
+    unlanded = {r["slug"].lower(): r for r in rows if r["state"] not in OUTSIDE_N and r["state"] != "merged"}
+    wait = {k: "gate-pending" for k, r in unlanded.items() if r["state"] == "set-aside" and r["setAsideAt"] == "gate"}
+    if not wait:
+        return []
+    grew = True
+    while grew:
+        grew = False
+        for k, r in unlanded.items():
+            if k in wait or r["state"] != "queued":
+                continue
+            units = [_fold_unit(d, index)[0] for d in r["deps"] if not _dep_status(d, index)[0]]
+            if units and all(u.lower() in wait for u in units):
+                wait[k] = f"depends on [[{units[0]}]]"
+                grew = True
+    if set(wait) != set(unlanded):
+        return []
+    return [{"slug": r["slug"], "why": wait[k]} for k, r in sorted(unlanded.items(), key=lambda kr: _rank(kr[1]))]
+
+
+def _awaits_sign_off(rollout_path: Path, rollout_note, tasks_dir: Path):
+    """`next`'s awaiting-sign-off verdict, read-only, as `next` with no --running and any pause ignored would give it:
+    no git-env hold; nothing running (every in_progress note counts as live), awaiting Integration or integrating (a
+    race-held lane included); no queued task free to start; then _sign_off_wait. Returns (W, rows): W [] when the queue
+    is anything else. Read by await-sign-off and clear-pause; it writes nothing."""
+    rows, index = _rows(rollout_path, rollout_note, tasks_dir)
+    if _git_env_hold(rollout_note):
+        return [], rows
+    race = _race_holds(rollout_note, [(r["path"], r["note"]) for r in rows])
+    for r in rows:
+        if race.get(r["slug"].lower()) and not _landed(r["note"]):
+            if r["state"] == "integrating":
+                return [], rows
+            r["state"], r["setAsideAt"] = "set-aside", "race"
+    if any(r["state"] in ("running", "awaiting-integration", "integrating") for r in rows):
+        return [], rows
+    if any(r["state"] == "queued" and not _unsatisfied(r, index) for r in rows):
+        return [], rows
+    return _sign_off_wait(rows, index), rows
 
 
 # ---- per-task stamps ----------------------------------------------------------
@@ -2439,9 +2625,17 @@ def cmd_hand_back(args) -> int:
     line. The explicit re-entry (repair after Lachy answers, "retry [[task]]", the lead after a descope) starts a
     fresh automatic-retry stretch (p16-4, ADR 0033): it removes `auto_retries_used` and `quota_retries_used` and
     re-stamps `auto_retry_sha` with the block it re-enters (_block_fingerprint, read before the transition; removed
-    when that block has none), so an identical re-block goes straight back to a human."""
+    when that block has none), so an identical re-block goes straight back to a human. Every hand-back that moves a
+    note spends its live answers in the same save (_spend_answers, ADR 0035), so no bare hand-back leaves one behind
+    to re-arm the lead's *Recorded answer* on an identical re-block; a refused hand-back spends nothing.
+    `--answer <stamp>` (one slug only, else usage exit 2) is a compare-and-swap: the note must still be set aside with
+    `answerRecorded` at exactly that stamp and form `hand-back`, else exit 1 and nothing written, so the lead and
+    repair never both hand back on one answer, and never hand back a new block on an old one."""
     now = _now(args)
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    if args.answer is not None and ("," in args.tasks or not args.tasks.strip()):
+        print("ERROR: hand-back: usage: --answer takes one task slug", file=sys.stderr)
+        return 2
     notes = list(_each_note(args))
     rollouts, held = {}, []
     for slug, path, note in notes:
@@ -2462,6 +2656,14 @@ def cmd_hand_back(args) -> int:
             print(f"ERROR: {line}", file=sys.stderr)
         return 2
     for slug, _path, note in notes:
+        if args.answer is not None:
+            got = _answer_recorded(note) if _queue_state(note)[0] == "set-aside" else None
+            if not got or got["stamp"] != args.answer or got["form"] != "hand-back":
+                args._errors.append(f"hand-back: {slug}: the answer of {args.answer} is spent, superseded, not a hand-back "
+                                    "answer or no longer this block's; nothing written")
+                for e in args._errors:
+                    print(f"ERROR: {e}", file=sys.stderr)
+                return 1
         fingerprint = _block_fingerprint(note)  # before the transition: it reads the status's own section
         arm, said = _hand_back_note(note, now)
         if arm is None:
@@ -2475,6 +2677,7 @@ def cmd_hand_back(args) -> int:
             note.set(AUTO_RETRY_SHA_KEY, fingerprint)
         else:
             note.remove(AUTO_RETRY_SHA_KEY)
+        _spend_answers(note, now)
         note.save(dry_run=args.dry_run)
         if arm == "integration":
             _event(_note_rollout(note), "ready", slug, {"pr": _pr(note)}, args)
@@ -2690,6 +2893,9 @@ def cmd_status(args) -> int:
         # (render as PAUSED, not stalled); `pause_requested` = a soft pause is pending and drains.
         "paused": _scalar(paused) or None,
         "pause_requested": _truthy_flag(rollout_note.get("pause_requested")),
+        # What the pause waits for: "sign-off" under await-sign-off's pause (ADR 0034: only gates wait on Lachy, and the
+        # repo keeps this as its one unfinished rollout until they are signed or deferred), else null.
+        "pausedFor": _scalar(rollout_note.get(PAUSED_FOR_KEY)) or None,
         # Why the rollout must not run as written (`next` refuses it), or null: see "Incomplete".
         "incomplete": incomplete(rollout_path, rollout_note, [(r["path"], r["note"]) for r in rows], index) or None,
         "ceiling": ceiling,
@@ -2717,7 +2923,22 @@ def cmd_status(args) -> int:
 
 # ---- touched-phases ---------------------------------------------------------
 
-PHASED_STEM_RE = re.compile(r"^(?P<slug>.+?)-p(?P<n>\d+)-")
+# The phase number is the vault grammar's PHASE_N, whole or fractional (skills/_shared/vault-grammar.md
+# § Phase and task filenames). PHASED_STEM_RE, _phase_key and _phase_sort are its pinned copies here
+# (reconcile-project.py keeps its own PHASE_N, phase_key and phase_sort): tests/contracts/vault-grammar.test.mjs
+# checks both scripts against the doc's examples.
+PHASED_STEM_RE = re.compile(r"^(?P<slug>.+?)-p(?P<n>\d+(?:\.\d+)?)-")
+
+
+def _phase_key(n: str) -> str:
+    """A phase number's canonical form: the whole part numeric (`03` is `3`), the fractional part literal."""
+    whole, dot, frac = n.partition(".")
+    return str(int(whole)) + dot + frac
+
+
+def _phase_sort(n: str):
+    """Numeric order (`2` before `10`, `3.5` before `5`); `3.5` and `3.50` stay distinct and ordered."""
+    return float(n), n
 
 
 def cmd_touched_phases(args) -> int:
@@ -2731,9 +2952,9 @@ def cmd_touched_phases(args) -> int:
     for path, _note in _linked_task_notes(rollout_path, tasks_dir):
         m = PHASED_STEM_RE.match(path.stem)
         if m:  # loose tasks (no `-p<N>-` segment) belong to no phase
-            by_slug.setdefault(m.group("slug"), set()).add(int(m.group("n")))
+            by_slug.setdefault(m.group("slug"), set()).add(_phase_key(m.group("n")))
     for slug in sorted(by_slug):
-        print(f"--project {slug} --phases {','.join(str(n) for n in sorted(by_slug[slug]))}")
+        print(f"--project {slug} --phases {','.join(sorted(by_slug[slug], key=_phase_sort))}")
     return 0
 
 
@@ -3541,11 +3762,15 @@ DESCOPE_POINTER = "(descoped: see ## Scope decision (automatic))"
 DESCOPE_ENTRY = "- descoped (automatic) "     # the entry line status greps (status § 4 **Descoped.**)
 DESCOPE_MARK_RE = re.compile(
     r"^<!-- descope run=(\d+) part=([0-9a-f]{12}) mode=(optional|owner)(?: owner=([^\s>]+))? -->\s*$")
+# A refused descope's durable record (ADR 0035 decision 2): one line per block, keyed on the top Plan-blocked run's
+# number and sha (_plan_block_key), so the refusal holds for that block in every session and a new run is judged afresh.
+DESCOPE_REFUSED_SECTION = "## Descope refused (automatic)"
+DESCOPE_REFUSED_RE = re.compile(r"^- (\S+) descope refused \(automatic\) run=(\d+) sha=([0-9a-f]{12}), (.*)$")
 # Record sections: never part of the brief the plan judge judges against.
 BRIEF_EXCLUDE = ("## Plan-blocked feedback", "## Review-blocked feedback", "## Blocker diagnosis",
                  "## Review history", REPAIR_INPUT_SECTION, "## Scope decision", APPROVED_PLAN_SECTION,
                  INTEGRATION_LOG_SECTION, APPROVED_GATES_SECTION, GATE_PENDING_SECTION, NEEDS_HUMAN_SECTION,
-                 "## Decisions", "## Resume prompt")
+                 "## Decisions", "## Resume prompt", "## Descope refused")
 MARKER_WORDS = r"(?:consider|considering|optional|optionally|nice to have|nice-to-have)"
 OPTIONAL_MARK_RE = re.compile(rf"\b{MARKER_WORDS}\b")
 # A marker negated by not / never / no (or an n't) up to two words before it is no marker: "not optional".
@@ -3768,13 +3993,81 @@ def _and_list(nums) -> str:
     return s[0] if len(s) == 1 else ", ".join(s[:-1]) + " and " + s[-1]
 
 
+def _plan_block_key(note):
+    """(n, sha): the key a refused descope is recorded under, the top `## Plan-blocked feedback` run's number and its
+    `<!-- run n end sha=… -->` sha, or for a legacy run whose end marker is gone _sha12 of the run's text (the same
+    fallback _block_fingerprint takes). None when the section holds no run. _record_refusal writes it and
+    _descope_refusal compares it, so the two can never disagree."""
+    runs = note.run_blocks(BLOCKED_SECTIONS["plan-blocked"])
+    if not runs:
+        return None
+    top = _top_run(runs)
+    return top["n"], (top["sha"] or _sha12(top["content"]))
+
+
+def _descope_refusal(note):
+    """(n, text) when a refused descope is recorded for the plan-blocked note's current block (ADR 0035 decision 2), else
+    None: a `## Descope refused (automatic)` line carrying _plan_block_key's `run=<n> sha=<sha>`, its text after `- `.
+    A non-blank line under the section that does not parse fails closed: the refusal stands, so a hand-edited record
+    never lets a refused block slip back to an automatic retry. Only a plan-blocked note has a block to refuse, and
+    never one whose `descope_armed:` stands: its block was descoped (the refusal pre-check exits before any descope, so
+    an armed block carries no earlier refusal), and that descope's hand-back is its way back (repair § 2's
+    **plan-blocked, descopable**), which a refusal must never block."""
+    if _status(note) != "plan-blocked" or _scalar(note.get(DESCOPE_ARMED_KEY)):
+        return None
+    key = _plan_block_key(note)
+    if key is None:
+        return None
+    for line in note.section_text(DESCOPE_REFUSED_SECTION).split("\n"):
+        s = line.strip()
+        if not s:
+            continue
+        m = DESCOPE_REFUSED_RE.match(s)
+        if m is None:
+            return key[0], s
+        if int(m.group(2)) == key[0] and m.group(3) == key[1]:
+            return key[0], s[2:]
+    return None
+
+
+def _record_refusal(path: Path, slug, part, mode, owner, why, now, dry_run):
+    """Record descope's exit 3 durably (ADR 0035 decision 2): one `## Descope refused (automatic)` line keyed on the block,
+    written in one task-note save only when no line already carries the key. Re-reads the note, so nothing the verb held
+    in memory is written. Returns '' when recorded (or already there), None when the note's `descope_armed:` stands
+    (nothing recorded: the block's armed descope is its way back, _descope_refusal), else a one-line warning (the verb
+    still exits 3; the lead's session key is the backup)."""
+    try:
+        note = Note(path)
+    except (OSError, ValueError) as e:
+        return f"cannot read {path}: {e}"
+    if _scalar(note.get(DESCOPE_ARMED_KEY)):
+        return None
+    key = _plan_block_key(note)
+    if key is None:
+        return f"{slug}: no Plan-blocked feedback run to key the refusal on"
+    n, sha = key
+    if any(f" run={n} sha={sha}," in l for l in note.section_text(DESCOPE_REFUSED_SECTION).split("\n")):
+        return ""
+    note.append_line(DESCOPE_REFUSED_SECTION,
+                     f'- {_stamp(now)} descope refused (automatic) run={n} sha={sha}, Plan-blocked feedback run {n}: '
+                     f'"{part}" ({mode}{" owner=" + owner if owner else ""}): {why}')
+    try:
+        note.save(dry_run=dry_run)
+    except OSError as e:
+        return f"cannot write {path}: {e}"
+    return ""
+
+
 def cmd_descope(args) -> int:
     """Record an automatic descope of a plan-blocked task (p14-4), the one verb the live lead (execute § 4.5 step 1.2)
     and /thread:repair § 3d share. The caller judged that the plan-block feedback centres on a part of the task that
     is optional in the note (--optional) or that a later task in the same rollout owns (--owner); this verb checks
     that judgement mechanically and writes the records. Exit 0: descoped ([written], or [no-change] for a complete
-    re-run), and the caller runs `hand-back`. Exit 3: ASK, nothing written, and repair asks Lachy. Exit 1: an ERROR,
-    nothing written. Exit 2: usage."""
+    re-run), and the caller runs `hand-back`. Exit 3: ASK, the refusal recorded on the task note (_record_refusal, ADR
+    0035 decision 2; a recorded refusal for the block exits 3 again before the part is judged, writing nothing new), and
+    repair asks Lachy; while `descope_armed:` stands nothing is recorded, so the armed descope's re-run and hand-back
+    stay open. Exit 1: an ERROR, nothing written (a block with a recorded answer included). Exit 2: usage.
+    Exit 1 and exit 2 record nothing."""
     def usage(msg):
         print(f"ERROR: descope: usage: {msg}", file=sys.stderr)
         return 2
@@ -3837,8 +4130,32 @@ def cmd_descope(args) -> int:
                 return error(f"{fu_path} exists and is not this task's follow-up (no descoped_from: \"[[{slug}]]\")")
 
     def ask(why):
-        print(f"ASK: [[{slug}]] {why}; nothing written: /thread:repair [[{ro}]] asks Lachy")
+        # ADR 0035 decision 2: the refusal is durable, recorded on the task note before the verb exits 3, so every
+        # session reads it (`inputs`' humanFix `decide scope or defer`) and no later descope of the block overrides it.
+        # Never while `descope_armed:` stands: the block is already descoped, and that descope's hand-back (repair § 2's
+        # **plan-blocked, descopable**: re-run it, exit 0 [no-change], then hand-back) must stay open.
+        warn = _record_refusal(path, slug, part, mode, owner, why, now, args.dry_run)
+        if warn is None:
+            print(f"ASK: [[{slug}]] {why}; not recorded: its armed descope (descope_armed:) stands, so re-run it and "
+                  f"hand it back: /thread:repair [[{ro}]]")
+            return 3
+        if warn:
+            print(f"WARN: descope: {slug}: the refusal is not recorded: {warn}", file=sys.stderr)
+        print(f"ASK: [[{slug}]] {why}; recorded: /thread:repair [[{ro}]] asks Lachy")
         return 3
+
+    # Before the part is judged: a refusal recorded for this block stands (a later descope never overrides it, an answer
+    # included), and a block Lachy answered is his (the lead judged it before repair recorded the answer: a descope now
+    # would void that answer with its re-entry stamp).
+    refused = _descope_refusal(note)
+    if refused is not None:
+        print(f"ASK: [[{slug}]] descope refused at Plan-blocked feedback run {refused[0]} ({refused[1]}); "
+              f"recorded: /thread:repair [[{ro}]] asks Lachy")
+        return 3
+    answered = _answer_recorded(note)
+    if answered is not None:
+        print(f"ERROR: descope: {slug}: answered for this block ({answered['stamp']}); the answer stands", file=sys.stderr)
+        return 1
 
     part_f, quote_f = _fold(part), _fold(quote)
     part_sha = _sha12(part_f)
@@ -4241,6 +4558,306 @@ def cmd_auto_retry(args) -> int:
     return 0
 
 
+# ---- recorded answers (ADR 0035 decision 3) ------------------------------------------------------------------------
+#
+# Lachy's answer to a set-aside block lives in the task note's `## Repair input`, one entry per answer:
+#   - <stamp> <needs you|decision> (block <fingerprint>[; awaiting repair|; left]): "<the ask>" → <the answer>
+# A live key is `(block <fp>)` (a `hand-back` answer: a bare hand-back is all that is left, so the lead hands it back),
+# `(block <fp>; awaiting repair)` (repair still has work to do first) or `(block <fp>; left)` (answered: left set aside).
+# A dead key is `(block <fp>; handed back <stamp>)` (spent by a hand-back), `(block <fp>; superseded <stamp>)` (a later
+# answer for the block replaced it) or `(block -)` (a block with no fingerprint: a gate, a PR-less review). Only
+# record-answer writes an entry or supersedes one, and only hand-back spends one; nothing else, and no prose, does.
+
+ANSWER_ENTRY_RE = re.compile(r"^- (\S+) (needs you|decision) \(block ([0-9a-f]{12})(?:; (awaiting repair|left))?\): ")
+# Any entry, live or dead, with its key's fingerprint (or `-`): the stamps record-answer bumps past.
+ANY_ENTRY_RE = re.compile(r"^- (\S+) (?:needs you|decision) \(block ([0-9a-f]{12}|-)(?:;[^)]*)?\): ")
+LIVE_KEY_RE = re.compile(r"\(block ([0-9a-f]{12})(?:; (?:awaiting repair|left))?\)")
+FORM_KEYS = {"hand-back": "", "awaiting-repair": "; awaiting repair", "left": "; left"}
+FORM_NAMES = {None: "hand-back", "awaiting repair": "awaiting repair", "left": "left"}
+RAISE_FIELDS = ("max_review_rounds", "max_plan_rounds", "max_iterations")
+RUN_HEAD_ANY_RE = re.compile(r"^### Run \d+ \(([^)]*)\)\s*$")
+
+
+def _last_re_entry(note):
+    """(stamp, bad): the latest time the task was re-entered, as far as the note can say: every `### Run <n> (<stamp>)`
+    heading in any section (a block recorded), `auto_retry_at:` (an automatic retry), every `- descoped (automatic)
+    <stamp>,` entry (an automatic descope, written before the lead's hand-back) and `started:` (a task deferred and
+    re-scheduled starts afresh). None when the note has none; `bad` is True when one of them does not parse (an answer
+    then fails closed: it never reads as recorded)."""
+    stamps, bad = [], False
+    for line in note._body.split("\n"):
+        m = RUN_HEAD_ANY_RE.match(line)
+        raw = m.group(1) if m else (line[len(DESCOPE_ENTRY):].split(",", 1)[0] if line.startswith(DESCOPE_ENTRY) else None)
+        if raw is not None:
+            ts = _parse_ts(raw)
+            bad = bad or ts is None
+            if ts is not None:
+                stamps.append(ts)
+    for key in (AUTO_RETRY_AT_KEY, "started"):
+        if _valued(note.get(key)):
+            ts = _parse_ts(note.get(key))
+            bad = bad or ts is None
+            if ts is not None:
+                stamps.append(ts)
+    return (max(stamps) if stamps else None), bad
+
+
+def _answer_recorded(note):
+    """`inputs`' answerRecorded, the one read execute, status and repair share (ADR 0035 decision 3): the live answer to
+    the note's current block, {stamp, kind, form: hand-back | awaiting repair | left, line}, or None. An entry counts
+    when its key is live and carries _block_fingerprint(note), and its stamp is strictly later than _last_re_entry: a
+    block re-entered since the answer is a fresh ask. Fails closed (None) on a tie with the re-entry stamp, an entry or
+    re-entry stamp that does not parse, and two live entries sharing the newest stamp; otherwise the latest wins."""
+    fp = _block_fingerprint(note)
+    if not fp:
+        return None
+    last, bad = _last_re_entry(note)
+    if bad:
+        return None
+    live = []
+    for line in note.section_text(REPAIR_INPUT_SECTION).split("\n"):
+        line = line.strip()
+        m = ANSWER_ENTRY_RE.match(line)
+        if not m or m.group(3) != fp:
+            continue
+        ts = _parse_ts(m.group(1))
+        if ts is None:
+            return None
+        if last is None or ts > last:
+            live.append((ts, m, line))
+    if not live:
+        return None
+    newest = max(ts for ts, _m, _l in live)
+    top = [(m, line) for ts, m, line in live if ts == newest]
+    if len(top) != 1:
+        return None
+    m, line = top[0]
+    return {"stamp": m.group(1), "kind": m.group(2), "form": FORM_NAMES[m.group(4)], "line": line}
+
+
+def _rewrite_keys(note, pick, to):
+    """Rewrite the key of each `## Repair input` entry `pick(fingerprint)` selects among the live ones to
+    `(block <fp>; <to>)`, in memory (the caller saves). Returns how many changed."""
+    found = note._section_bounds(REPAIR_INPUT_SECTION)
+    if found is None:
+        return 0
+    lines, start, end = found
+    n = 0
+    for i in range(start + 1, end):
+        m = ANSWER_ENTRY_RE.match(lines[i].strip())
+        if m and pick(m.group(3)):
+            lines[i] = LIVE_KEY_RE.sub(lambda k: f"(block {k.group(1)}; {to})", lines[i], count=1)
+            n += 1
+    if n:
+        note._set_body_lines(lines)
+    return n
+
+
+def _spend_answers(note, now) -> int:
+    """hand-back's spend: every live answer key on the note becomes `(block <fp>; handed back <now>)`, so an identical
+    re-block (which writes no run, so no re-entry stamp) never re-arms the lead's *Recorded answer* and is asked
+    afresh (ADR 0033 decision 6)."""
+    return _rewrite_keys(note, lambda _fp: True, f"handed back {_stamp(now)}")
+
+
+def _spent_count(note, fp) -> int:
+    """How many answers for block `fp` a hand-back spent: the `ask <k+1>` in humanFix's label, so an identical re-block
+    after a spent answer is a new Needs-you item, pushed again (ADR 0035 decision 3)."""
+    if not fp:
+        return 0
+    needle = f"(block {fp}; handed back "
+    return sum(1 for l in note.section_text(REPAIR_INPUT_SECTION).split("\n")
+               if ANY_ENTRY_RE.match(l.strip()) and needle in l)
+
+
+def _resolved_cap(note, rollout_note, key):
+    """(value, why): a round budget as a call resolves it (execute § 3; _slot_settings' order): the task's stamp, then the
+    rollout's, then rollout-settings.py for the Project root. (None, why) when a stamp is not an integer >= 1 or the
+    resolver cannot say."""
+    for n in (note, rollout_note):
+        raw = n.get(key)
+        if raw is not None:
+            value = _pos_int(raw)
+            return (value, "") if value is not None else \
+                (None, f"{key} on [[{n.path.stem}]] must be an integer >= 1, got {raw!r}")
+    res = _resolved_settings(rollout_note)
+    entry = (res["settings"] or {}).get(key)
+    if isinstance(entry, dict) and isinstance(entry.get("value"), int) and not isinstance(entry["value"], bool) and \
+            entry["value"] >= 1:
+        return entry["value"], ""
+    return None, res["error"] or f"rollout-settings.py resolves no {key}"
+
+
+def cmd_record_answer(args) -> int:
+    """Record Lachy's answer to a set-aside block (ADR 0035 decision 3; repair § 3b and § 4): the only writer of a
+    `## Repair input` answer entry. See the module docstring's `record-answer`."""
+    def error(msg, code=1, tail="nothing written"):
+        print(f"ERROR: record-answer: {msg}; {tail}", file=sys.stderr)
+        return code
+
+    slug = args.tasks.strip()
+    if not slug or "," in slug:
+        return error("usage: --tasks takes one task slug", 2)
+    fp_arg = args.fingerprint
+    if fp_arg != "-" and not re.fullmatch(r"[0-9a-f]{12}", fp_arg):
+        return error(f"usage: --fingerprint {fp_arg!r} is neither a 12-hex run sha nor -", 2)
+    ask, answer = " ".join(args.ask.split()), " ".join(args.answer.split())
+    if not ask or not answer:
+        return error("usage: --ask and --answer must not be empty", 2)
+    kind = "needs you" if args.kind == "needs-you" else "decision"
+    if fp_arg == "-" and args.form:
+        return error("--form goes with a fingerprint: a block with none (a gate, a PR-less review) is recorded (block -)")
+    if fp_arg != "-" and not args.form:
+        return error("--form hand-back|awaiting-repair|left is required with a fingerprint")
+    if args.form == "left" and (args.raise_field or args.pr):
+        return error("--raise and --pr never go with --form left: a block left set aside changes nothing")
+    now = _now(args)
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    path, note = _task_note(args, slug)
+    if isinstance(note, str):
+        return error(note)
+    if not rollout_path.is_file():
+        return error(f"rollout note not found at {rollout_path}")
+    try:
+        rollout_note = Note(rollout_path)
+    except (OSError, ValueError) as e:
+        return error(str(e))
+    ro = rollout_path.stem
+    if (_note_rollout(note) or "").lower() != ro.lower():
+        return error(f"{slug}: its rollout: is {note.get('rollout') or 'none'}, not [[{ro}]]")
+    state, at = _queue_state(note)
+    if state != "set-aside" or at not in ("run", "integration", "gate"):
+        return error(f"{slug}: not set aside at its run, at Integration or at a gate ({state})")
+    fp = _block_fingerprint(note) or "-"
+    if fp_arg != fp:
+        return error(f"{slug}: --fingerprint {fp_arg} is not the block's {fp}: re-read `inputs`")
+    key = FORM_KEYS[args.form] if args.form else ""
+    body = f'{kind} (block {fp}{key}): "{ask}" → {answer}'
+    last, bad = _last_re_entry(note)
+    if bad:
+        return error(f"{slug}: a re-entry stamp on the note (a run heading, auto_retry_at:, a descope entry or started:) "
+                     "does not parse, so no answer could ever read as recorded: fix the stamp")
+    field = args.raise_field
+    question = needs_human(note)
+    # A note holding a `## Needs you` question takes its answer as `--kind needs-you`, which removes the section in the
+    # same save: a decision recorded beside the open question would let a `hand-back` answer pass hand-back's
+    # compare-and-swap with the stale question still in place (repair's Don't).
+    if kind == "decision" and question:
+        return error(f"{slug}: the note holds a ## Needs you question: record its answer with --kind needs-you")
+
+    # Idempotent: the same live answer, with its raise and pr: already in place, is [no-change] at its existing stamp.
+    def live_same():
+        for line in note.section_text(REPAIR_INPUT_SECTION).split("\n"):
+            m = ANY_ENTRY_RE.match(line.strip())
+            if not m or m.group(2) != fp or line.strip().split(" ", 2)[2] != body:
+                continue
+            ts = _parse_ts(m.group(1))
+            if ts is not None and (last is None or ts > last) and (fp == "-" or
+                                                                   (_answer_recorded(note) or {}).get("stamp") == m.group(1)):
+                return m.group(1)
+        return None
+
+    same = live_same()
+    if same is not None and (not args.pr or _pr(note) == args.pr) and (not field or (
+            note.get(field) is not None and any(re.search(rf"\[\[{re.escape(slug)}\]\] {field} raised to "
+                                                          rf"{re.escape(_scalar(note.get(field)))}\b", l)
+                                                for l in rollout_note.section_text(NOTES_SECTION).split("\n")))):
+        print(f"{slug}: answer recorded ({args.form or '-'}) {same} [no-change]")
+        return 0
+
+    if kind == "needs you" and " ".join(question.split()) != ask:
+        return error(f"{slug}: --ask is not the note's ## Needs you question" if question else
+                     f"{slug}: the note holds no ## Needs you question (record a decision instead)")
+    lead = _lead()
+    root = _project_root(rollout_note)
+    repo = str(root) if root is not None else None
+    inp = lead.task_inputs(path, note, repo=repo)
+    budget = _retry_budget(note, rollout_note)
+    k = budget["maxReviewRounds"]["value"] if budget["maxReviewRounds"] else None
+    revise_spent = inp["resumeAt"] == "revise" and k is not None and k <= inp["lastRound"]
+    raise_to = None
+    if field:
+        cf = lead.cause_fix(path, note, inp, rollout_note, now)
+        allowed = ({cf["raise"]} if cf and cf.get("raise") else set()) | ({"max_review_rounds"} if revise_spent else set())
+        if field not in allowed:
+            return error(f"{slug}: --raise {field} is not this block's raise (allowed: "
+                         f"{', '.join(sorted(allowed)) or 'none'}): its humanFix names "
+                         f"{(cf or {}).get('act') or 'no human fix'}")
+        if field == "max_review_rounds" and revise_spent:
+            raise_to = inp["lastRound"] + 1
+        else:
+            value, why = _resolved_cap(note, rollout_note, field)
+            if value is None:
+                return error(f"{slug}: make no raise: {why}")
+            raise_to = value + 1
+    if args.pr and not lead.ENGINE_PR_URL_RE.fullmatch(args.pr):
+        return error(f"{slug}: --pr {args.pr!r} is not a PR URL (…/pull/<n>)")
+    if args.form == "hand-back":
+        pr_after = args.pr or _pr(note)
+        if at == "integration" and not pr_after:
+            return error(f"{slug}: set aside at Integration with no pr: a bare hand-back refuses it: restore it first "
+                         "(--pr), or record --form awaiting-repair")
+        _url, url_error = lead._note_pr_url(pr_after or None, note, repo)
+        if url_error and (at == "integration" or inp["resumeAt"] == "revise"):
+            return error(f"{slug}: the pr: gives no PR URL the engine takes ({url_error}): pass --pr, or record --form "
+                         "awaiting-repair")
+        if inp["resumeAt"] == "revise":
+            if k is None:
+                return error(f"{slug}: max_review_rounds does not resolve "
+                             f"({budget['error'] or budget['unresolved']}): no revise re-entry can be judged")
+            if revise_spent and raise_to is None:
+                return error(f"{slug}: a revise re-entry with no round left (max_review_rounds {k} <= lastRound "
+                             f"{inp['lastRound']}): pass --raise max_review_rounds, or record --form awaiting-repair")
+
+    # The stamp: now's minute, bumped past the last re-entry and every entry for this block, so no two entries of a block
+    # share a stamp and none ties a re-entry. A bump more than a minute ahead refuses (re-run in a minute).
+    floor = [last] if last is not None else []
+    for line in note.section_text(REPAIR_INPUT_SECTION).split("\n"):
+        m = ANY_ENTRY_RE.match(line.strip())
+        if m and m.group(2) == fp:
+            ts = _parse_ts(m.group(1))
+            if ts is not None:
+                floor.append(ts)
+    base = now.astimezone().replace(second=0, microsecond=0)
+    at_ts = base
+    if floor and max(floor) >= base:
+        at_ts = (max(floor) + timedelta(minutes=1)).astimezone().replace(second=0, microsecond=0)
+    if at_ts - base > timedelta(minutes=1):
+        return error(f"{slug}: the entry's stamp would be {_stamp(at_ts)}, more than a minute after now (the block's last "
+                     "re-entry or answer is that recent): re-run in a minute")
+    stamp = _stamp(at_ts)
+
+    # (a) The raise's rollout `## Notes` line, in its own save first: a failed task save leaves it for the re-run.
+    if raise_to is not None:
+        line = (f"- {now.astimezone().date().isoformat()} repair: [[{slug}]] {field} raised to {raise_to}, "
+                f"{'one iteration' if field == 'max_iterations' else 'one round'}")
+        if line not in [l.rstrip() for l in rollout_note.section_text(NOTES_SECTION).split("\n")]:
+            rollout_note.append_line(NOTES_SECTION, line)
+            try:
+                rollout_note.save(dry_run=args.dry_run)
+            except OSError as e:
+                return error(f"{slug}: cannot write {rollout_path}: {e}")
+    # (b) The task note in one save, the entry last: the `## Needs you` removal, the raise, pr:, the supersede rewrites,
+    # then the entry (the lead's trigger for a `hand-back` answer).
+    if kind == "needs you":
+        note.remove_section(NEEDS_HUMAN_SECTION)
+    if raise_to is not None:
+        note.set(field, raise_to)
+    if args.pr:
+        note.set("pr", args.pr)
+    if fp != "-":
+        _rewrite_keys(note, lambda f: f == fp, f"superseded {stamp}")
+    note.append_line(REPAIR_INPUT_SECTION, f"- {stamp} {body}")
+    try:
+        note.save(dry_run=args.dry_run)
+    except OSError as e:
+        return error(f"{slug}: cannot write {path}: {e}",
+                     tail="nothing written to the task note" + (": a re-run finishes the records" if raise_to else ""))
+    flag = " (dry-run)" if args.dry_run else " [written]"
+    print(f"{slug}: answer recorded ({args.form or '-'}) {stamp}{flag}")
+    return 0
+
+
 # ---- carry (a supersede, ADR 0030) -------------------------------------------
 
 # _queue_state's exact strings: what a supersede carries into the new rollout, and what stays behind.
@@ -4507,17 +5124,42 @@ def _gate_stage(note) -> str:
     return "integration" if _last_log_outcome(note) == "set-aside" and _pr(note) else "run"
 
 
-def cmd_approve_gates(args) -> int:
-    """Record the human sign-off for a gate-pending task's declared gated inputs (ADR 0008), and send
-    the task back by the stage it stopped (p12-14): a stop at Integration -> `review` with `ready:`
-    restamped and `integrating:` removed (it rejoins the Integration queue, and a fresh integrate call
-    re-reads the latest main); any other stop -> `in_progress` with a `gates_signed:` marker (Restart
-    routing resumes its gate-pending call on the signed plan, execute § 3.7, and the restart's
-    mark-started consumes the marker). The stage is read before the status flips.
+def _sign_route(note, slug, now):
+    """Flip a gate-pending note whose gates are all signed by the stage it stopped (p12-14), its pending section
+    removed: a stop at Integration -> `review` with `ready:` restamped and `integrating:` removed; any other stop ->
+    `in_progress` with a `gates_signed:` marker. The stage is read before the flip. Returns (stage, route, ready_pr)."""
+    stage = _gate_stage(note)  # before the flip: the pairing reads status gate-pending
+    if stage == "run" and _last_log_outcome(note) == "set-aside":
+        print(f"WARN: {slug}: the Integration log's last line is set-aside but the note has no pr: — "
+              "it cannot rejoin the Integration queue, so it goes to in_progress (its own call)", file=sys.stderr)
+    note.remove_section(GATE_PENDING_SECTION)
+    ready_pr = None
+    if stage == "integration":
+        note.set("status", "review")
+        note.set("ready", _stamp(now))
+        note.remove("integrating")
+        ready_pr = _pr(note)
+        route = f"status review (stopped at Integration: rejoins the Integration queue; ready: {_stamp(now)})"
+    else:
+        note.set("status", "in_progress")
+        note.set(GATES_SIGNED_KEY, _stamp(now))
+        route = f"status in_progress ({GATES_SIGNED_KEY}: {_stamp(now)}, consumed by the restart's mark-started)"
+    return stage, route, ready_pr
 
-    The CALLER's contract: run this only after the user explicitly signed off the gates in
-    conversation — the sign-off itself is the one decision no agent may make.
+
+def cmd_approve_gates(args) -> int:
+    """Record a sign-off for a gate-pending task's declared gated inputs (ADR 0008), and send the task back by the
+    stage it stopped (p12-14): a stop at Integration -> `review` with `ready:` restamped and `integrating:` removed
+    (it rejoins the Integration queue, and a fresh integrate call re-reads the latest main); any other stop ->
+    `in_progress` with a `gates_signed:` marker (Restart routing resumes its gate-pending call on the signed plan,
+    execute § 3.7, and the restart's mark-started consumes the marker). The stage is read before the status flips.
+
+    The CALLER's contract: run it bare only after Lachy explicitly signed off the gates, which is the one decision no
+    agent may make for him. With --standing it approves only the spend gates his recorded standing approval covers
+    (ADR 0034: _approve_standing), and the lead runs that unattended.
     """
+    if args.standing:
+        return _approve_standing(args)
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
     slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
     date = args.date or datetime.now().astimezone().date().isoformat()
@@ -4548,22 +5190,8 @@ def cmd_approve_gates(args) -> int:
         existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
         have = {_norm_gate(l) for l in existing}
         merged = existing + [f"- {g} (approved {date})" for g in gates if _norm_gate(g) not in have]
-        stage = _gate_stage(note)  # before the flip: the pairing reads status gate-pending
-        if stage == "run" and _last_log_outcome(note) == "set-aside":
-            print(f"WARN: {slug}: the Integration log's last line is set-aside but the note has no pr: — "
-                  "it cannot rejoin the Integration queue, so it goes to in_progress (its own call)", file=sys.stderr)
         note.upsert_section(APPROVED_GATES_SECTION, "\n".join(merged))
-        note.remove_section(GATE_PENDING_SECTION)
-        if stage == "integration":
-            note.set("status", "review")
-            note.set("ready", _stamp(now))
-            note.remove("integrating")
-            ready_pr = _pr(note)
-            route = f"status review (stopped at Integration: rejoins the Integration queue; ready: {_stamp(now)})"
-        else:
-            note.set("status", "in_progress")
-            note.set(GATES_SIGNED_KEY, _stamp(now))
-            route = f"status in_progress ({GATES_SIGNED_KEY}: {_stamp(now)}, consumed by the restart's mark-started)"
+        stage, route, ready_pr = _sign_route(note, slug, now)
         note.save(dry_run=args.dry_run)
         if stage == "integration":
             _event(_note_rollout(note), "ready", slug, {"pr": ready_pr}, args)
@@ -4574,16 +5202,142 @@ def cmd_approve_gates(args) -> int:
     return 1 if errors else 0
 
 
+def _standing_limit(note, rollout_note):
+    """The standing approval's limit (ADR 0034): ({value, source}, None), or (None, error). `spend_approval_usd`
+    resolves task frontmatter -> rollout frontmatter -> rollouts.toml (_resolved_settings, once: file:repo,
+    file:defaults) -> the built-in 0, which is off: _retry_budget's order. A stamp that is not a bare integer >= 0 is
+    an error, and so is a refused rollouts.toml."""
+    for where, n in (("task", note), ("rollout", rollout_note)):
+        raw = n.get(SPEND_APPROVAL_KEY)
+        if raw is None:
+            continue
+        value = _stamp_value(raw, 0)
+        if value is None:
+            return None, f"{SPEND_APPROVAL_KEY} on [[{n.path.stem}]] must be an integer >= 0, got {raw!r}"
+        return {"value": value, "source": where}, None
+    res = _resolved_settings(rollout_note)
+    if res["settings"] is None:
+        return None, f"rollout settings refused: {res['error']}"
+    entry = res["settings"].get(SPEND_APPROVAL_KEY)
+    if not isinstance(entry, dict) or isinstance(entry.get("value"), bool) or not isinstance(entry.get("value"), int):
+        return None, f"rollout-settings.py resolves no {SPEND_APPROVAL_KEY}"
+    return {"value": entry["value"], "source": entry.get("source") or "built-in"}, None
+
+
+def _ask_why(verdict, limit, gi):
+    """Why a gate stays pending under the standing approval: the exposure reading's own why, else the limit's."""
+    if verdict["usd"] is None:
+        return verdict["why"]
+    if limit["value"] == 0:
+        if limit["source"] == "built-in":
+            return (f"standing approval off (built-in 0): set [defaults] {SPEND_APPROVAL_KEY} in "
+                    "~/.config/thread/rollouts.toml")
+        return f"standing approval off ({limit['source']} 0)"
+    return (f"total exposure US${gi.format_usd(verdict['usd'])} is over the standing approval's "
+            f"US${gi.format_usd(limit['value'])} ({limit['source']})")
+
+
+def _approve_standing(args) -> int:
+    """approve-gates --standing (ADR 0034; the module docstring): sign each pending spend gate the standing approval
+    covers, leave the rest pending with an ASK line. Exit 0 every gate written, 3 some left, 1 an error."""
+    if not args.rollout:
+        print("ERROR: --standing needs --rollout", file=sys.stderr)
+        return 1
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.is_file():
+        print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
+        return 1
+    try:
+        gi = _gated()
+        rollout_note = Note(rollout_path)
+    except Exception as e:
+        print(f"ERROR: approve-gates --standing: {e}", file=sys.stderr)
+        return 1
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    slugs = [s.strip() for s in args.tasks.split(",") if s.strip()]
+    date = args.date or datetime.now().astimezone().date().isoformat()
+    now = _now(args)
+    suffix = " (dry-run)" if args.dry_run else " [written]"
+    errors, asked = [], False
+    for slug in slugs:
+        path = tasks_dir / f"{slug}.md"
+        if not path.exists():
+            errors.append(f"{slug}: task note not found at {path}")
+            continue
+        try:
+            note = Note(path)
+        except ValueError as e:
+            errors.append(str(e))
+            continue
+        if (_note_rollout(note) or "").lower() != rollout_path.stem.lower():
+            errors.append(f"{slug}: its rollout: is {note.get('rollout')!r}, not [[{rollout_path.stem}]]; nothing written")
+            continue
+        status = note.get("status")
+        pending = note.section_text(GATE_PENDING_SECTION)
+        if status != GATE_PENDING_STATUS:
+            if note.has_heading(APPROVED_GATES_SECTION) and not pending:
+                print(f"{slug}: gates already approved [no-change]")
+                continue
+            errors.append(f"{slug}: status is {status!r}, not {GATE_PENDING_STATUS!r} — refusing to approve gates")
+            continue
+        gates = [re.sub(r"^[-*]\s+", "", l.strip()) for l in pending.split("\n") if l.strip()]
+        if not gates:
+            errors.append(f"{slug}: no gates under {GATE_PENDING_SECTION!r} — nothing to sign off")
+            continue
+        limit, err = _standing_limit(note, rollout_note)
+        if err:
+            errors.append(f"{slug}: {err}; nothing written")
+            continue
+        covered, left = [], []
+        for g in gates:
+            verdict = gi.covered(g, limit["value"])
+            if verdict["covered"]:
+                covered.append((g, verdict["usd"]))
+            else:
+                left.append((g, _ask_why(verdict, limit, gi)))
+        if covered:
+            existing = [l for l in note.section_text(APPROVED_GATES_SECTION).split("\n") if l.strip()]
+            have = {_norm_gate(l) for l in existing}
+            for g, usd in covered:
+                if _norm_gate(g) not in have:
+                    have.add(_norm_gate(g))
+                    existing.append(f"- {g} {gi.annotation(date, usd, limit['value'], limit['source'])}")
+            note.upsert_section(APPROVED_GATES_SECTION, "\n".join(existing))
+            stage = None
+            if left:
+                note.upsert_section(GATE_PENDING_SECTION, bullets([g for g, _ in left]))
+            else:
+                stage, route, ready_pr = _sign_route(note, slug, now)
+            note.save(dry_run=args.dry_run)
+            if stage == "integration":
+                _event(_note_rollout(note), "ready", slug, {"pr": ready_pr}, args)
+            for g, usd in covered:
+                print(f"{slug}: gate approved under the standing approval: {g} (exposure US${gi.format_usd(usd)} of "
+                      f"US${gi.format_usd(limit['value'])}, {limit['source']})" + suffix)
+            if not left:
+                print(f"{slug}: every gate signed under the standing approval -> {route}" + suffix)
+        for g, why in left:
+            print(f"ASK: {slug}: {g}: {why}")
+            asked = True
+    for e in errors:
+        print(f"ERROR: {e}", file=sys.stderr)
+    return 1 if errors else (3 if asked else 0)
+
+
 # ---- clear-pause ------------------------------------------------------------
 
 def cmd_clear_pause(args) -> int:
-    """Reinstate: remove `paused:` + any pending `pause_requested` from the rollout note.
+    """Reinstate: remove `paused:` + any pending `pause_requested` + `paused_for` from the rollout note.
 
     Called by /thread:execute's resume path ONLY when it finds a `paused:` stamp — a pending
     `pause_requested` with no stamp is a live user request that must survive resumes (the heartbeat
     cron re-enters execute's resume, and it must never cancel a pause the user asked for). Clearing
     both here covers the hard-pause-before-honour edge (stamp hand-written while a soft request was
     still pending) so a freshly reinstated rollout doesn't immediately re-pause.
+
+    Under `paused_for: sign-off` (ADR 0034) it first checks the queue with the pause ignored: while that would still be
+    awaiting sign-off (_awaits_sign_off), it writes nothing, prints `STILL-AWAITING: [[<slug>]]: <gate>` per pending
+    gate and exits 3, so a reinstate with a gate unsigned never re-runs the sign-off form.
     """
     path = Path(os.path.expanduser(args.rollout))
     if not path.exists():
@@ -4591,8 +5345,22 @@ def cmd_clear_pause(args) -> int:
         return 1
     note = Note(path)
     stamp = _scalar(note.get("paused"))
+    if _valued(stamp) and _scalar(note.get(PAUSED_FOR_KEY)).lower() == SIGN_OFF:
+        wait, rows = _awaits_sign_off(path, note, Path(os.path.expanduser(args.tasks_dir)))
+        if wait:
+            by_slug = {r["slug"].lower(): r for r in rows}
+            for w in wait:
+                if w["why"] != GATE_PENDING_STATUS:
+                    continue
+                pending = by_slug[w["slug"].lower()]["note"].section_text(GATE_PENDING_SECTION)
+                for line in pending.split("\n"):
+                    gate = re.sub(r"^[-*]\s+", "", line.strip())
+                    if gate:
+                        print(f"STILL-AWAITING: [[{w['slug']}]]: {gate}")
+            return 3
     note.remove("paused")
     note.remove("pause_requested")
+    note.remove(PAUSED_FOR_KEY)
     note.save(dry_run=args.dry_run)
     if _valued(stamp) and not args.dry_run:
         # The Run record (p15-2): a hard pause whose record-pause never ran is caught up at its stamp first.
@@ -4602,10 +5370,49 @@ def cmd_clear_pause(args) -> int:
             _event(path.stem, "paused", None, {"mode": "hard"}, args, ts=at.isoformat() if at else None)
         _event(path.stem, "resumed", None, None, args)
     if note.dirty:
-        print("pause cleared (paused/pause_requested removed)" +
+        print("pause cleared (paused/pause_requested/paused_for removed)" +
               (" (dry-run)" if args.dry_run else " [written]"))
     else:
         print("no pause stamp [no-change]")
+    return 0
+
+
+# ---- await-sign-off ---------------------------------------------------------
+
+def cmd_await_sign_off(args) -> int:
+    """The sign-off pause (ADR 0034; the module docstring): stamp `paused:` and `paused_for: sign-off`, append the
+    `## Pause log` line and record `paused mode=sign-off`, only when the queue with no --running and any pause ignored is
+    awaiting sign-off. Exit 1 (nothing written) otherwise; `[no-change]` once stamped."""
+    path = Path(os.path.expanduser(args.rollout))
+    if not path.is_file():
+        print(f"ERROR: await-sign-off: rollout note not found at {path}", file=sys.stderr)
+        return 1
+    note = Note(path)
+    ro = path.stem
+    stamp = _scalar(note.get("paused"))
+    if _valued(stamp):
+        if _scalar(note.get(PAUSED_FOR_KEY)).lower() == SIGN_OFF:
+            print(f"{ro}: already awaiting sign-off since {stamp} [no-change]")
+            return 0
+        print(f"ERROR: await-sign-off: {ro} carries paused: {stamp} (another pause); nothing written", file=sys.stderr)
+        return 1
+    wait, _rows_ = _awaits_sign_off(path, note, Path(os.path.expanduser(args.tasks_dir)))
+    if not wait:
+        print(f"ERROR: await-sign-off: {ro} is not awaiting sign-off (something can still start, runs, integrates or "
+              "is set aside for another reason: `next` says why); nothing written", file=sys.stderr)
+        return 1
+    now = _stamp(_now(args))
+    named = ", ".join(f"[[{w['slug']}]] ({w['why']})" for w in wait)
+    note.set("paused", now, after=("pause_requested", "parallel_ceiling", "status"))
+    note.set(PAUSED_FOR_KEY, SIGN_OFF, after=("paused",))
+    note.append_line(PAUSE_LOG_SECTION, f"- {now} awaiting sign-off: {named}: sign off, then /thread:execute [[{ro}]]")
+    note.save(dry_run=args.dry_run)
+    if not args.dry_run:
+        state = _record_state(ro)
+        if state is None or not state["paused"]:
+            _event(ro, "paused", None, {"mode": SIGN_OFF}, args)
+    print(f"{ro}: awaiting sign-off: {named} -> paused: {now}, {PAUSED_FOR_KEY}: {SIGN_OFF}"
+          + (" (dry-run)" if args.dry_run else " [written]"))
     return 0
 
 
@@ -4679,8 +5486,30 @@ def main() -> int:
     hb.add_argument("--tasks", required=True, help="comma-separated task slugs")
     hb.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     hb.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the ready: restamp)")
+    hb.add_argument("--answer", default=None, help="a compare-and-swap on the recorded answer (one slug only): hand back "
+                    "only while answerRecorded is this stamp with form hand-back, else exit 1 (ADR 0035)")
     hb.add_argument("--dry-run", action="store_true")
     hb.set_defaults(func=cmd_hand_back)
+
+    ra = sub.add_parser("record-answer", help="record Lachy's answer to a set-aside block in ## Repair input, the entry "
+                                              "last (ADR 0035; repair § 3b): exit 1 refused, nothing written")
+    ra.add_argument("--tasks", required=True, help="the set-aside task's slug")
+    ra.add_argument("--rollout", required=True, help="path to the rollout note the task's rollout: names")
+    ra.add_argument("--kind", required=True, choices=("needs-you", "decision"),
+                    help="needs-you: the note's ## Needs you question (removed in the same save); decision: any other ask")
+    ra.add_argument("--ask", required=True, help="the ask, verbatim (for needs-you, the note's question)")
+    ra.add_argument("--answer", required=True, help="Lachy's answer, verbatim")
+    ra.add_argument("--fingerprint", required=True, help="inputs' fingerprint, or - for a block with none")
+    ra.add_argument("--form", choices=tuple(FORM_KEYS), default=None,
+                    help="hand-back: a bare hand-back is all that is left; awaiting-repair: repair has work first; "
+                         "left: answered, left set aside (required with a fingerprint, refused with -)")
+    ra.add_argument("--raise", dest="raise_field", choices=RAISE_FIELDS, default=None,
+                    help="the budget the block's humanFix.raise names (or max_review_rounds for a revise with no round left)")
+    ra.add_argument("--pr", default=None, help="a confirmed PR URL, written as pr: before the entry")
+    ra.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    ra.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the entry's stamp)")
+    ra.add_argument("--dry-run", action="store_true", help="print the outcome and write nothing")
+    ra.set_defaults(func=cmd_record_answer)
 
     li = sub.add_parser("log-integration", help="append the lead's clean-path Integration line (path=lead) to a review note")
     li.add_argument("--tasks", required=True, help="the task slug")
@@ -4761,7 +5590,7 @@ def main() -> int:
     df.set_defaults(func=cmd_defer)
 
     de = sub.add_parser("descope", help="record an automatic descope of a plan-blocked task (p14-4): exit 0 descoped "
-                                         "(then hand-back), exit 3 ASK (nothing written; /thread:repair asks Lachy)")
+                                         "(then hand-back), exit 3 ASK (the refusal recorded; /thread:repair asks Lachy)")
     de.add_argument("--tasks", required=True, help="the plan-blocked task's slug")
     de.add_argument("--rollout", required=True, help="path to the rollout note the task's rollout: names")
     de.add_argument("--part", required=True, help="the descoped part, a verbatim quote (of the brief, for --optional)")
@@ -4796,18 +5625,38 @@ def main() -> int:
     ca.add_argument("--dry-run", action="store_true", help="print the carry/keep lines and write nothing")
     ca.set_defaults(func=cmd_carry)
 
-    cp = sub.add_parser("clear-pause", help="reinstate a paused rollout: remove paused/pause_requested (/thread:execute resume)")
+    cp = sub.add_parser("clear-pause", help="reinstate a paused rollout: remove paused/pause_requested/paused_for "
+                                            "(/thread:execute resume); exit 3 STILL-AWAITING under a sign-off pause "
+                                            "whose gates are unsigned (ADR 0034)")
     cp.add_argument("--rollout", required=True, help="path to the rollout note")
+    cp.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     cp.add_argument("--dry-run", action="store_true")
     cp.set_defaults(func=cmd_clear_pause)
+
+    aw = sub.add_parser("await-sign-off", help="pause a rollout whose only unlanded tasks wait on a gate: stamp paused: + "
+                                               "paused_for: sign-off and a ## Pause log line (ADR 0034; execute § 4.5 "
+                                               "step 5's sign-off form); exit 1 when the queue is not awaiting sign-off")
+    aw.add_argument("--rollout", required=True, help="path to the rollout note")
+    aw.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    aw.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the paused: stamp)")
+    aw.add_argument("--dry-run", action="store_true")
+    aw.set_defaults(func=cmd_await_sign_off)
 
     vt = sub.add_parser("verify-timeout", help="print the rollout's verify_timeout and its harness timeout as JSON, "
                                                "or exit 1 when invalid (read-only; execute § 3)")
     vt.add_argument("--rollout", required=True, help="path to the rollout note")
     vt.set_defaults(func=cmd_verify_timeout)
 
-    ag = sub.add_parser("approve-gates", help="record the human sign-off for a gate-pending task's gated inputs (ADR 0008)")
+    ag = sub.add_parser("approve-gates", help="record a sign-off for a gate-pending task's gated inputs: Lachy's explicit "
+                                              "one, or with --standing the standing approval's (ADR 0008, ADR 0034)")
     ag.add_argument("--tasks", required=True, help="comma-separated task slugs (must be at status gate-pending)")
+    ag.add_argument("--standing", action="store_true",
+                    help="sign only the spend gates the standing approval covers (spend_approval_usd: task, rollout, "
+                         "rollouts.toml, built-in 0 = off); the rest stay pending as ASK lines: exit 0 all signed, "
+                         "3 some left, 1 an error (ADR 0034)")
+    ag.add_argument("--rollout", default=None,
+                    help="with --standing (required there): the rollout note, whose frontmatter and Project root "
+                         "resolve spend_approval_usd; the task's rollout: must name it")
     ag.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     ag.add_argument("--date", default=None, help="sign-off date stamped on each gate (default: today)")
     ag.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the ready: restamp of a stop at Integration)")

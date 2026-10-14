@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # reconcile-rollout.py descope (p14-4): the one guarded verb that records an automatic descope of a plan-blocked
 # task, run by the live lead (execute § 4.5 step 1.2) and by /thread:repair § 3d. Exit 0 records it (the caller
-# then runs `hand-back`); exit 3 is an ASK: nothing is written and repair asks Lachy. The fixtures are the brief's
-# four: an optional part descopes and files a follow-up (F1), work a later task owns descopes (F2), required scope
-# asks (F3), and a second block after an automatic descope asks (F4). The plan-blocked state is built through the
-# real `reconcile`. Temp notes only; no vault, no network.
+# then runs `hand-back`); exit 3 is an ASK whose refusal is recorded on the task note (ADR 0035 decision 2: one
+# `## Descope refused (automatic)` line keyed on the block, and nothing else written), and repair asks Lachy. The
+# fixtures are the brief's four: an optional part descopes and files a follow-up (F1), work a later task owns
+# descopes (F2), required scope asks (F3), and a second block after an automatic descope asks (F4). R pins the
+# refusal: recorded once, read by `inputs` as the Human fix `decide scope or defer`, keyed on the block (a new run is
+# judged afresh, a legacy run with no end marker keys alike), never recorded by exit 1 or 2, outlived by an answer
+# (which lifts the hold, never the refusal), failing closed on a malformed line, never brief text, `ask 2` after a
+# spent answer, an answered block refused with exit 1, and nothing recorded while `descope_armed:` stands (R10: the
+# armed descope's re-run and hand-back stay its way back). The plan-blocked state is built through the real
+# `reconcile`. Temp notes only; no vault, no network.
 # Usage: bash reconcile-rollout-descope.test.sh   (exit 0 = pass)
 set -uo pipefail
 export TZ=UTC PYTHONDONTWRITEBYTECODE=1
@@ -14,6 +20,8 @@ SCRIPT="$HERE/../scripts/reconcile-rollout.py"
 TMP="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$TMP"' EXIT
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # the Run record (run_record.py, ADR 0032) stays in temp
+export HOME="$TMP/home"; mkdir -p "$HOME"   # R's `inputs` reads rollout-settings.py, which reads ~/.config/thread
+LI="$HERE/../scripts/lead-integrate.py"
 NOW=2026-10-03T09:00:00Z
 
 fail=0
@@ -60,7 +68,17 @@ rec() { python3 "$SCRIPT" reconcile --result - --tasks-dir "$D" --now "${2:-2026
 ds() { out=$(python3 "$SCRIPT" descope --tasks "$1" --rollout "$D/$RO.md" --tasks-dir "$D" --now "$NOW" "${@:2}" 2>&1); rc=$?; }
 opt() { ds "$A" --part "${1:-a canary}" --optional --short "${2:-canary}" --reason "the canary pulls in machinery later tasks rewrite" "${@:3}"; }
 own() { ds "$A" --part "${1:-the resume filter changes}" --owner "${2:-$B}" --owner-quote "${3:-rewrites the resume filter}" --reason "p3-6 rewrites the filter" "${@:4}"; }
-snap() { (cd "$D" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s\n' "$f"; cat "$f"; done) | shasum | cut -c1-40; }
+# A vault-dir snapshot, `<every file>|<every file, a's ## Descope refused (automatic) section and blank lines left out>`: a
+# write is any change to the first; an exit 3 may change only the second's left-out part.
+snap() {
+  local strict loose
+  strict=$( (cd "$D" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s\n' "$f"; cat "$f"; done) | shasum | cut -c1-40)
+  loose=$( (cd "$D" && find . -type f | LC_ALL=C sort | while read -r f; do printf '%s\n' "$f"
+    if [ "$f" = "./$A.md" ]; then awk '$0=="## Descope refused (automatic)"{skip=1; next} skip && /^## /{skip=0} !skip && NF' "$f"; else cat "$f"; fi
+  done) | shasum | cut -c1-40)
+  printf '%s|%s' "$strict" "$loose"
+}
+refusals() { awk '$0=="## Descope refused (automatic)"{on=1; next} on && /^## /{exit} on' "$D/$A.md" | grep -c 'descope refused (automatic) run='; }
 sha12() { python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest()[:12])' "$1"; }
 followups() { (cd "$D" && ls ./*-followup-*.md 2>/dev/null | wc -l | tr -d ' '); }
 # A plan-blocked a with the F1 brief, b queued as the owner, c queued.
@@ -79,12 +97,24 @@ brief() {
   mkt "$C" open "body c"
   rec "$(row "$A" plan-blocked "$FEEDBACK")"
 }
-# asks <label>: exit 3, one ASK line, and the whole vault dir byte-identical to $before.
+# asks <label>: exit 3, one ASK line saying the refusal is recorded; every other file byte-identical to $before, and
+# the task note changed only by its `## Descope refused (automatic)` section, which holds the block's refusal.
 asks() {
   ok "$rc" 3 "$1: exits 3 (ASK)"
   has "$out" "ASK: [[$A]]" "$1: one ASK line naming the task"
-  has "$out" "nothing written" "$1: says nothing was written"
-  ok "$(snap)" "$before" "$1: nothing written (the vault dir is byte-identical)"
+  has "$out" "; recorded: /thread:repair [[$RO]] asks Lachy" "$1: says the refusal is recorded"
+  ok "$(snap | cut -d'|' -f2)" "${before#*|}" "$1: nothing else written (only the refusal section changed)"
+  ok "$(refusals)" 1 "$1: the block's refusal is recorded, once"
+}
+# asks_armed <label>: exit 3 while descope_armed: stands: one ASK line saying nothing is recorded (the armed descope's
+# re-run and hand-back stay the way back), and nothing written at all.
+asks_armed() {
+  ok "$rc" 3 "$1: exits 3 (ASK)"
+  has "$out" "ASK: [[$A]]" "$1: one ASK line naming the task"
+  has "$out" "; not recorded: its armed descope (descope_armed:) stands, so re-run it and hand it back: /thread:repair [[$RO]]" \
+    "$1: says nothing is recorded"
+  ok "$(snap)" "$before" "$1: nothing written, no refusal included"
+  ok "$(refusals)" 0 "$1: no refusal recorded while armed"
 }
 # refuses <label>: exit 1, an ERROR line, nothing written.
 refuses() {
@@ -364,8 +394,141 @@ before=$(snap); opt; asks "F4 (ii) a byte-identical second block"
 scen f4-armed
 base
 opt
-before=$(snap); opt "a moved ref" moved-ref; asks "F4 (iii) a different part at the same run while armed"
-before=$(snap); own "a canary"; asks "F4 (iv) the same part in another mode while armed"
+before=$(snap); opt "a moved ref" moved-ref; asks_armed "F4 (iii) a different part at the same run while armed"
+before=$(snap); own "a canary"; asks_armed "F4 (iv) the same part in another mode while armed"
+
+# ── R: the refusal is durable and fails closed (ADR 0035 decision 2) ──────────────────────────────
+inp() { python3 "$LI" inputs --note "$D/$1.md" --now "${INOW:-$NOW}"; }
+j() { printf '%s' "$1" | python3 -c 'import json,sys; d=json.load(sys.stdin); v=eval(sys.argv[1]); print(v if isinstance(v, str) else json.dumps(v, separators=(",", ":"), sort_keys=True))' "$2"; }
+hf() { j "$1" '[d["humanFix"]["act"], d["humanFix"]["handBack"], d["humanFix"]["label"]] if d["humanFix"] else None'; }
+fp_a() { sha12 "$FEEDBACK"; }
+answer() { python3 "$SCRIPT" record-answer --tasks "$A" --rollout "$D/$RO.md" --tasks-dir "$D" --now "${RNOW:-$NOW}" --kind decision \
+  --ask "descope refused: keep the guard?" --answer "${1:-yes, hand it back}" --fingerprint "$(fp_a)" --form "${2:-hand-back}" >/dev/null 2>&1; }
+H5_RUN1='["decide scope or defer",true,"(plan-blocked, Plan-blocked feedback run 1)"]'
+
+scen r1
+base
+opt "the resume guard" guard
+ok "$rc|$(refusals)" "3|1" "R1: exit 3 records one refusal"
+has "$(sec "$A" '## Descope refused (automatic)')" "- 2026-10-03T09:00+00:00 descope refused (automatic) run=1 sha=$(fp_a), Plan-blocked feedback run 1: \"the resume guard\" (optional): \"the resume guard\" is required scope" \
+  "R1: the line: the stamp, the block's key, the run, the part, the mode and why"
+before=$(snap)
+opt "the resume guard" guard
+ok "$rc|$(snap)" "3|$before" "R1: a re-run exits 3 and writes no second line"
+has "$out" "descope refused at Plan-blocked feedback run 1 (" "R1: the re-run cites the refusal"
+opt
+ok "$rc|$(snap)" "3|$before" "R1: another part of the same block exits 3 citing it: a later descope never overrides a refusal"
+own
+ok "$rc|$(refusals)" "3|1" "R1: … nor another mode"
+
+scen r2
+base
+own "the resume guard"
+I=$(inp "$A")
+ok "$(j "$I" '[d["autoRetry"], d["autoRetryWhy"]]')|$(hf "$I")" "[false,\"descope refused at Plan-blocked feedback run 1: Lachy decides the scope\"]|$H5_RUN1" \
+  "R2: inputs reads the refusal: decide scope or defer, handBack true"
+has "$(j "$I" 'd["humanFix"]["detail"]')" "descope refused (automatic) run=1 sha=$(fp_a)" "R2: the record is its detail"
+python3 "$SCRIPT" hand-back --tasks "$A" --tasks-dir "$D" --now "$NOW" >/dev/null 2>&1
+python3 "$SCRIPT" mark-started --tasks "$A" --tasks-dir "$D" --now "$NOW" >/dev/null 2>&1
+rec "$(row "$A" plan-blocked 'Round 1: the canary drags in integration machinery')" 2026-10-03T10:00:00Z
+I=$(INOW=2026-10-03T10:00:00Z inp "$A")
+ok "$(j "$I" '(d["humanFix"] or {}).get("act") != "decide scope or defer" and not d["autoRetryWhy"].startswith("descope refused")')" true \
+  "R2: a new run is a new block: the old refusal no longer holds it"
+opt
+ok "$rc|$(refusals)" "0|1" "R2: … and the verb judges it afresh (exit 0)"
+
+scen r3
+base
+grep -v '^<!-- run 1 end sha=' "$D/$A.md" > "$D/a.tmp" && mv "$D/a.tmp" "$D/$A.md"
+ok "$(grep -c '^<!-- run ' "$D/$A.md")" 0 "fixture R3: the run's end marker is gone (a legacy run)"
+opt "the resume guard" guard
+ok "$rc" 3 "R3: exit 3"
+has "$(sec "$A" '## Descope refused (automatic)')" "run=1 sha=$(fp_a)," "R3: the key falls back to the run text's sha"
+ok "$(hf "$(inp "$A")")" "$H5_RUN1" "R3: the fallback key matches, so the verdict reads the refusal"
+
+scen r4
+base
+ds "$A" --part "a canary" --optional --reason x
+ok "$rc|$(refusals)" "2|0" "R4: usage (exit 2) records nothing"
+opt "a canary" Not_Kebab
+ok "$rc|$(refusals)" "1|0" "R4: an ERROR (exit 1) records nothing"
+ok "$(grep -c '^## Descope refused' "$D/$A.md")" 0 "R4: no section at all"
+
+scen r5
+base
+opt "the resume guard" guard
+answer "keep the guard; hand it back"
+I=$(inp "$A")
+ok "$(j "$I" '[d["answerRecorded"]["form"], d["humanFix"]]')" '["hand-back",null]' "R5: an answer lifts the hold (H5's handBack is true, so the lead hands it back)"
+ok "$(j "$I" 'd["autoRetryWhy"]')" "answered for this block (hand-back, 2026-10-03T09:00+00:00): descope refused at Plan-blocked feedback run 1: Lachy decides the scope" \
+  "R5: the why names the answer, then the refusal it answers"
+before=$(snap)
+opt
+ok "$rc|$(snap)" "3|$before" "R5: but never the refusal: a later descope still exits 3, writing nothing"
+
+scen r6
+base
+printf '\n## Descope refused (automatic)\n\n- a hand-edited refusal\n' >> "$D/$A.md"
+I=$(inp "$A")
+ok "$(hf "$I")|$(j "$I" 'd["humanFix"]["detail"]')" "$H5_RUN1|- a hand-edited refusal" "R6: a malformed line fails closed: the refusal stands"
+before=$(snap); opt
+ok "$rc|$(snap)" "3|$before" "R6: the verb exits 3 on it too, writing nothing"
+
+scen r7
+base
+opt "the resume guard" guard
+ok "$(python3 - "$SCRIPT" "$D/$A.md" <<'PY'
+import importlib.util, json, sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("rr", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+_lines, items, fenced = m._brief_items(m.Note(Path(sys.argv[2])))
+print(any("descope refused" in i[3] for i in items) or any("descope refused" in f for f in fenced))
+PY
+)" False "R7: the refusal section is never brief text"
+
+scen r8
+base
+opt "the resume guard" guard
+answer
+ST=$(j "$(inp "$A")" 'd["answerRecorded"]["stamp"]')
+hb=$(python3 "$SCRIPT" hand-back --tasks "$A" --tasks-dir "$D" --now 2026-10-03T09:05:00Z --answer "$ST" 2>&1); hbrc=$?
+ok "$hbrc" 0 "R8: the lead's hand-back --answer"
+python3 "$SCRIPT" mark-started --tasks "$A" --tasks-dir "$D" --now 2026-10-03T09:06:00Z >/dev/null 2>&1
+rec "$(row "$A" plan-blocked "$FEEDBACK")" 2026-10-03T10:00:00Z
+ok "$(grep -c '^### Run ' "$D/$A.md")" 1 "R8: (an identical re-block writes no run)"
+I=$(INOW=2026-10-03T10:00:00Z inp "$A")
+ok "$(j "$I" 'd["answerRecorded"]')|$(hf "$I")" 'null|["decide scope or defer",true,"(plan-blocked, Plan-blocked feedback run 1, ask 2)"]' \
+  "R8: the identical re-block after the spent answer is H5 again, ask 2 (pushed again)"
+
+scen r9
+base
+answer "leave it" left
+before=$(snap)
+opt
+ok "$rc|$(snap)|$(refusals)" "1|$before|0" "R9: a block with a recorded answer exits 1, writing and recording nothing"
+has "$out" "ERROR: descope: $A: answered for this block (" "R9: its ERROR line"
+
+# R10: an armed descope (its hand-back never ran) records no refusal, so its re-run and hand-back stay its way back
+# (repair § 2's **plan-blocked, descopable**): a second part refused while armed, then the original re-run.
+scen r10
+base
+opt
+ok "$rc|$(fm "$A" descope_armed)" "0|descope_armed: 2026-10-03T09:00+00:00" "fixture R10: descoped, armed (no hand-back yet)"
+opt "a moved ref" moved-ref
+ok "$rc|$(refusals)" "3|0" "R10: a second part while armed exits 3 and records no refusal"
+before=$(snap); opt
+ok "$rc|$(snap)" "0|$before" "R10: the armed descope's re-run is still exit 0, writing nothing"
+has "$out" "[no-change]" "R10: … [no-change]"
+I=$(inp "$A")
+ok "$(j "$I" '(d["humanFix"] or {}).get("act") != "decide scope or defer" and not d["autoRetryWhy"].startswith("descope refused")')" true \
+  "R10: the verdict is not H5"
+printf '\n## Descope refused (automatic)\n\n- a hand-edited refusal\n' >> "$D/$A.md"
+I=$(inp "$A")
+ok "$(j "$I" '(d["humanFix"] or {}).get("act") != "decide scope or defer"')" true "R10: no refusal is read while armed, a malformed line included"
+opt
+ok "$rc" 0 "R10: … and the armed descope's re-run still exits 0"
+python3 "$SCRIPT" hand-back --tasks "$A" --tasks-dir "$D" --now "$NOW" >/dev/null 2>&1
+ok "$(fm "$A" status)" "status: in_progress" "R10: the hand-back moves it"
 
 # ── defer clears the stamp ────────────────────────────────────────────────────────────────────────
 scen defer

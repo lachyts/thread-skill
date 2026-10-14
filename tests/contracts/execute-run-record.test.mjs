@@ -53,7 +53,7 @@ function checkRunRecord(md) {
   need('next never knows a merge hold', /`next` never knows a merge hold/.test(p))
   // Steps 1.2 and 1.3 agree with the paragraph: the seeded revise passes --start revise, and a restart resolves
   // Restart routing before its mark-started, which passes the --start that routing chose.
-  const step12 = loopStep(md, '2. **Seeded revises')
+  const step12 = loopStep(md, '2. **')  // sub-step 2: the Standing approval (ADR 0034), then the seeded revises
   need('step 1.2 passes --start revise', step12.includes('`mark-started --tasks <slug> --rollout <rollout-note> --start revise`'))
   const step13 = loopStep(md, '3. For each slug in `restart`')
   need('step 1.3 routes before mark-started',

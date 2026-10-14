@@ -668,6 +668,32 @@ arm A; arm B; code; chk A; ackc A,B "$(cur)"
 ok "$(recf B task state)" '"armed"' "q5: an ack with B's window still open re-baselines it"
 chk B; ok "$rc" 0 "q5: … and B's later clean check → 0"
 
+# ── rs: a room stop's stopped verify (execute § Room stop item 9: its `undo` runs with no canary `check`) ────────
+# A verify the room stop TaskStopped keeps its window open while the note keeps `integrating:`. The resume entry's
+# check-all compares that window; a `check` at the undo adds nothing, and it trips `record not armed` once the window
+# is closed (rs2, and a3's second check), so item 9 runs none. rs1 is the half that does not trip: an ack while the
+# owner holds re-baselines the window, so a check after it is clean.
+scen rs1
+mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
+arm A verify; code
+call; ok "$rc|$(recf A verify state)|$(recf A verify closed)" '3|"tripped"|false' "rs1: the stop's window trips at the entry check-all, still open (the owner holds)"
+ackc A "$(cur)"; ok "$rc|$(recf A verify state)|$(recf A verify closed)" '0|"armed"|false' "rs1: … an ack while the owner holds re-baselines it"
+chk A verify; ok "$rc" 0 "rs1: … and a check after it → 0"
+has "$out" "checked [[A]] verify: clean" "rs1: … clean"
+scen rs2
+mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-14T10:00+00:00'
+arm A verify; code
+call; ok "$rc|$(recf A verify state)" '3|"tripped"' "rs2: the stop's window trips at the entry check-all"
+python3 - "$V/A.md" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+open(p, "w").write("".join(l for l in t.splitlines(True) if not l.startswith("integrating:")))
+PY
+ackc A "$(cur)"; ok "$rc|$(recf A verify state)" '0|"acked"' "rs2: integrating: removed before the ack → the record is an acked tombstone"
+chk A verify; ok "$rc|$(trips A)" "3|2" "rs2: … a check on it → 3, a second trip line"
+has "$(grep 'git-env trip \[\[A\]\]' "$RO" | tail -n 1)" "verify: record not armed" "rs2: … logged as record not armed"
+
 # ── s: --tasks-dir ───────────────────────────────────────────────────────────────────────────────────────────
 scen s
 mkt A in_progress

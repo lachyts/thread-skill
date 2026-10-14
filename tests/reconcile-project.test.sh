@@ -27,7 +27,7 @@ cat > "$tmp/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 [ "$1 $2" = "pr view" ] || { echo "fake gh: unexpected $*" >&2; exit 1; }
 case "$3" in
-  */pull/42|*/pull/51|*/pull/81|*/pull/86) echo '{"mergedAt":"2026-09-20T00:00:00Z","state":"MERGED"}' ;;
+  */pull/42|*/pull/51|*/pull/81|*/pull/86|*/pull/35|*/pull/191) echo '{"mergedAt":"2026-09-20T00:00:00Z","state":"MERGED"}' ;;
   */pull/82) echo '{"mergedAt":null,"state":"OPEN"}' ;;
   */pull/811) echo '{"mergedAt":null,"state":"CLOSED"}' ;;
   */pull/88) echo 'GraphQL: Could not resolve to a PullRequest (HTTP 404)' >&2; exit 1 ;;
@@ -67,9 +67,12 @@ bound_keys() { python3 -c 'import json,sys
 d = json.load(open(sys.argv[1])); print(" ".join(k for k in ("new_since_review", "reviewed_not_applied") if k in d))' "$tmp/out"; }
 bound_lines() { printf '%s\n' "$out" | grep -E '^(New since review|Reviewed, not applied) \(|bound to the reviewed list'; }
 
+# demo-p19-*: TaskNotes' own `in-progress` spelling is active, never a hold. demo-p3.5-*: a fractional phase
+# (skills/_shared/vault-grammar.md § Phase and task filenames) is checked and closed like a whole one.
 U_ALL=$(lines "phase demo-p1-alpha" "phase demo-p18-single" "phase demo-p4-merged" "rollout demo-rollout-2025-12-01" \
   "rollout demo-rollout-2025-12-02" "task demo-p4-2-merged" "task demo-p8-1-merged" "task demo-p8-10-shortid" \
-  "task demo-p8-14-escalias" "task demo-p8-23-fenced" "task demo-p8-3-bullet" | LC_ALL=C sort)
+  "task demo-p8-14-escalias" "task demo-p8-23-fenced" "task demo-p8-3-bullet" \
+  "phase demo-p19-dashed" "phase demo-p3.5-frac" "task demo-p19-1-dashed" "task demo-p3.5-2-merged" | LC_ALL=C sort)
 A_ALL=$(lines "phase demo-p17-broken" "phase demo-p5-partial" "phase demo-p6-archived-open" "phase demo-p9-review" \
   "rollout demo-rollout-2025-10-01" "task demo-p12-1-log" "task demo-p16-2-remain" "task demo-p5-2-partial" \
   "task demo-p8-11-closed" "task demo-p8-12-prose" "task demo-p8-13-pointer" "task demo-p8-15-notmerged" \
@@ -116,6 +119,8 @@ ok "$(field unambiguous demo-p18-single reason)" "all 1 task landed" "one landed
 has "$(field unambiguous demo-p1-alpha reason)" "all 3 tasks landed" "several landed tasks read in the plural"
 ok "$(field unambiguous demo-p4-merged depends_on)" "demo-p4-2-merged" "demo-p4 depends on its merged task"
 ok "$(field unambiguous demo-p1-alpha depends_on)" "" "demo-p1 depends on nothing"
+ok "$(field unambiguous demo-p19-dashed depends_on)" "demo-p19-1-dashed" "demo-p19 depends on its in-progress (dashed) task"
+ok "$(field unambiguous demo-p3.5-frac depends_on)" "demo-p3.5-2-merged" "demo-p3.5 (fractional) depends on its merged task"
 has "$(strs skipped)" "demo-p8-8-gh404" "a gh error is skipped, not evidence"
 ok "$(strs gh)" "ok" "gh reported ok"
 ok "$(strs applied)" "False" "applied is false"
@@ -132,7 +137,7 @@ ok "$(manifest "$v")" "$before" "dry run (json) writes nothing"
 rp
 ok "$rc" 0 "text dry run exits 0"
 has "$out" "dry run: nothing written; pass --apply" "text header says dry run"
-has "$out" "Unambiguous (11)" "text lists the unambiguous block"
+has "$out" "Unambiguous (15)" "text lists the unambiguous block"
 has "$out" "Ambiguous (25)" "text lists the ambiguous block"
 ok "$(bound_lines)" "" "plain text dry run has no New since review / Reviewed, not applied lines"
 ok "$(manifest "$v")" "$before" "dry run (text) writes nothing"
@@ -145,6 +150,12 @@ print(bool(m.find_mentions("demo-p8-1-merged", "demo", row)), bool(m.find_mentio
       bool(m.find_mentions("demo-p8-14-x", "demo", "| 1 | [[demo-p8-14-x\\|a]] | #1 |")),
       bool(m.find_mentions("demo-p12-1-log", "demo", "- [[demo-p12-1-log-v2]] → #20")))' "$script" 2>&1)
 ok "$m" "False True True False" "mention matching: short-id bound, escaped alias, successor stem"
+# A fractional phase's short id is p3.5-2, bounded the same way: never a `| p3.5-20 |` row.
+m=$(python3 -c 'import importlib.util, sys
+s = importlib.util.spec_from_file_location("rp", sys.argv[1]); m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
+print(m.short_id("demo-p3.5-2-merged", "demo"), bool(m.find_mentions("demo-p3.5-2-merged", "demo", "| p3.5-2 | #1 |")),
+      bool(m.find_mentions("demo-p3.5-2-merged", "demo", "| p3.5-20 | #1 |")))' "$script" 2>&1)
+ok "$m" "p3.5-2 True False" "mention matching: a fractional short id, bounded"
 
 # The partial-landing and negative-marker patterns catch each non-landing wording, and miss plain landed prose.
 m=$(python3 -c 'import importlib.util, sys
@@ -167,15 +178,16 @@ ok "$(strs applied)" "True" "applied is true"
 ok "$(bound_keys)" "" "plain --apply --json has no new_since_review / reviewed_not_applied keys"
 after=$(manifest "$v")
 changed=$(printf '%s\n%s\n' "$before" "$after" | LC_ALL=C sort | uniq -u | sed 's/^[0-9a-f]*  //' | LC_ALL=C sort -u | tr '\n' ' ')
-exp="./Work/Phases/demo-p1-alpha.md ./Work/Phases/demo-p18-single.md ./Work/Phases/demo-p4-merged.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-01.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-02.md ./Work/Tasks/Archive/demo-rollout-2025-12-01.md ./Work/Tasks/demo-p4-2-merged.md ./Work/Tasks/demo-p8-1-merged.md ./Work/Tasks/demo-p8-10-shortid.md ./Work/Tasks/demo-p8-14-escalias.md ./Work/Tasks/demo-p8-23-fenced.md ./Work/Tasks/demo-p8-3-bullet.md ./Work/Tasks/demo-rollout-2025-12-02.md "
+exp="./Work/Phases/demo-p1-alpha.md ./Work/Phases/demo-p18-single.md ./Work/Phases/demo-p19-dashed.md ./Work/Phases/demo-p3.5-frac.md ./Work/Phases/demo-p4-merged.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-01.md ./Work/Tasks/Archive/Rollouts/demo-rollout-2025-12-02.md ./Work/Tasks/Archive/demo-rollout-2025-12-01.md ./Work/Tasks/demo-p19-1-dashed.md ./Work/Tasks/demo-p3.5-2-merged.md ./Work/Tasks/demo-p4-2-merged.md ./Work/Tasks/demo-p8-1-merged.md ./Work/Tasks/demo-p8-10-shortid.md ./Work/Tasks/demo-p8-14-escalias.md ./Work/Tasks/demo-p8-23-fenced.md ./Work/Tasks/demo-p8-3-bullet.md ./Work/Tasks/demo-rollout-2025-12-02.md "
 ok "$changed" "$exp" "apply changed exactly the unambiguous file set"
 F=$fixture/Work
 want=$(awk '/^status: open$/ {print "status: done"; print "completed: 2026-09-27"; next} {print}' "$F/Phases/demo-p1-alpha.md")
 ok "$(cat "$v/Work/Phases/demo-p1-alpha.md")" "$want" "demo-p1: status done, completed inserted directly after status (before owner)"
 want=$(awk '/^status: open$/ {print "status: done"; next} /^completed:[[:space:]]*$/ {print "completed: 2026-09-27"; next} {print}' "$F/Phases/demo-p4-merged.md")
 ok "$(cat "$v/Work/Phases/demo-p4-merged.md")" "$want" "demo-p4: the empty completed: line is filled in place"
-for t in demo-p4-2-merged demo-p8-1-merged demo-p8-3-bullet demo-p8-10-shortid demo-p8-14-escalias demo-p8-23-fenced; do
-  want=$(awk '/^status: (open|in_progress)$/ {print "status: done"; next} {print}' "$F/Tasks/$t.md")
+for t in demo-p4-2-merged demo-p8-1-merged demo-p8-3-bullet demo-p8-10-shortid demo-p8-14-escalias demo-p8-23-fenced \
+         demo-p19-1-dashed demo-p3.5-2-merged; do
+  want=$(awk '/^status: (open|in_progress|in-progress)$/ {print "status: done"; next} {print}' "$F/Tasks/$t.md")
   ok "$(cat "$v/Work/Tasks/$t.md")" "$want" "$t: only the status line changed"
 done
 for r in Archive/demo-rollout-2025-12-01 demo-rollout-2025-12-02; do
@@ -186,6 +198,10 @@ done
 ok "$(shasum < "$v/Work/Tasks/demo-rollout-2025-10-01.md")" "$(shasum < "$F/Tasks/demo-rollout-2025-10-01.md")" "clashing rollout stays in place"
 ok "$(shasum < "$v/Work/Tasks/Archive/Rollouts/demo-rollout-2025-10-01.md")" "$(shasum < "$F/Tasks/Archive/Rollouts/demo-rollout-2025-10-01.md")" "clash destination untouched"
 has "$(items ambiguous)" "rollout demo-rollout-2025-10-01" "the clash is still ambiguous in the apply output"
+for p in demo-p19-dashed demo-p3.5-frac; do
+  has "$(cat "$v/Work/Phases/$p.md")" "status: done
+completed: 2026-09-27" "$p: closed (status done, completed inserted)"
+done
 ok "$(strs errors)" "" "apply reports no errors"
 
 # ---- 3. idempotence ----------------------------------------------------------------------------------
@@ -212,6 +228,8 @@ for mode in missing disabled; do
   done
   for t in demo-p8-3-bullet demo-p8-10-shortid demo-p8-14-escalias; do has "$u" "task $t" "gh $mode: $t is still U"; done
   has "$(items ambiguous)" "phase demo-p4-merged" "gh $mode: demo-p4 is ambiguous"
+  has "$(items ambiguous)" "phase demo-p19-dashed" "gh $mode: demo-p19 (in-progress task, PR unverified) is ambiguous"
+  has "$(items ambiguous)" "phase demo-p3.5-frac" "gh $mode: demo-p3.5 (PR unverified) is ambiguous"
   # A phase with other open work stays quiet even though one of its in-flight tasks has a PR URL.
   case "$(items unambiguous; items ambiguous)" in *"phase demo-p16-mixed"*) ok listed absent "gh $mode: demo-p16 (a hold plus an in-flight PR) is in neither list";; *) ok absent absent "gh $mode: demo-p16 (a hold plus an in-flight PR) is in neither list";; esac
 done
@@ -242,6 +260,29 @@ rp --phases 4 --json
 ok "$rc" 0 "--phases 4 exits 0"
 ok "$( (items unambiguous; items ambiguous) | grep '^task ')" "task demo-p4-2-merged" "--phases 4: the only task candidate is demo-p4-2-merged"
 has "$(items unambiguous)" "phase demo-p4-merged" "--phases 4: demo-p4 is U with its task"
+# A fractional phase is its own scope: --phases 3.5 reaches demo-p3.5-* only, --phases 3 never reaches it.
+rp --kinds phase,task --phases 3.5 --json
+ok "$rc" 0 "--phases 3.5 exits 0"
+ok "$(items unambiguous)" "$(lines "phase demo-p3.5-frac" "task demo-p3.5-2-merged")" "--phases 3.5: U is exactly demo-p3.5 and its merged task"
+ok "$(items ambiguous)" "" "--phases 3.5: nothing ambiguous"
+rp --phases 3 --json
+ok "$rc" 0 "--phases 3 exits 0"
+p3=$(items unambiguous; items ambiguous)
+case "$p3" in *"p3.5"*) ok listed absent "--phases 3: no p3.5 item";; *) ok absent absent "--phases 3: no p3.5 item";; esac
+# The zero-padded form is checked on a phase with items, and with --kinds phase,task so the rollout items
+# (which --phases never scopes) cannot fill the comparison: an empty 04 set never equals the 4 set.
+rp --kinds phase,task --phases 4 --json; p4=$(items unambiguous; items ambiguous)
+ok "$p4" "$(lines "phase demo-p4-merged" "task demo-p4-2-merged")" "--kinds phase,task --phases 4: demo-p4 and its task, nothing else"
+rp --kinds phase,task --phases 04 --json; p04=$(items unambiguous; items ambiguous)
+ok "$rc" 0 "--phases 04 exits 0"
+ok "$p04" "$p4" "--phases 04 reads as --phases 4 (a non-empty set)"
+# JSON phases: canonical, numeric order, deduplicated; a fractional phase stays its string, so 3.5 and 3.50
+# (distinct phases) never print alike and 3.10 never prints as 3.1.
+jphases() { python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["phases"]))' "$tmp/out"; }
+rp --kinds phase --phases 3.5,3 --json
+ok "$(jphases)" '[3, "3.5"]' "--phases 3.5,3: JSON phases sorted numerically, whole numbers ints, fractional strings"
+rp --kinds phase --phases 10,3.50,03,3.10,3.5,3 --json
+ok "$(jphases)" '[3, "3.10", "3.5", "3.50", 10]' "--phases 10,3.50,03,3.10,3.5,3: 03 is 3, 3.5 and 3.50 distinct, 3.10 kept"
 ok "$(manifest "$v")" "$before" "--phases dry runs write nothing"
 
 # ---- 6. usage and dependency errors ------------------------------------------------------------------
@@ -251,6 +292,7 @@ mkdir -p "$tmp/novault"
 PATH="$tmp/bin:$PATH" python3 "$script" --project demo --vault "$tmp/novault" > /dev/null 2>&1; ok "$?" 2 "a vault with no Work/ exits 2"
 rp --kinds phase,nope; ok "$rc" 2 "a bad --kinds exits 2"
 rp --phases x; ok "$rc" 2 "a bad --phases exits 2"
+for bad in 3. 3.5.1 -1 .5; do rp --phases "$bad"; ok "$rc" 2 "--phases $bad (not a phase number) exits 2"; done
 mkdir -p "$tmp/plug/skills/_shared/scripts"; cp "$script" "$tmp/plug/skills/_shared/scripts/"
 PATH="$tmp/bin:$PATH" python3 "$tmp/plug/skills/_shared/scripts/reconcile-project.py" --project demo --vault "$v" --apply > "$tmp/out" 2> "$tmp/err"
 ok "$?" 2 "a missing reconcile-rollout.py exits 2"
@@ -343,8 +385,8 @@ has "$out" "applied (bound to the reviewed list: $tmp/review.json)" "text header
 has "$out" "New since review (1)" "text lists the new-since-review block"
 has "$out" "  - phase demo-p3-openwork: status: done" "text names the new phase under it"
 has "$out" "Reviewed, not applied (0)" "text lists the reviewed-not-applied block"
-ok "$(written_section | grep -c demo-p3)" 0 "text Written never names p3"
-has "$(written_section)" "Written (11)" "text Written lists the 11 reviewed writes"
+ok "$(written_section | grep -c demo-p3-)" 0 "text Written never names p3 (demo-p3.5 is its own phase)"
+has "$(written_section)" "Written (15)" "text Written lists the 15 reviewed writes"
 
 # 2. a reviewed item turned ambiguous: `now ambiguous: <its ambiguous reason>`, for a human
 fresh; review
@@ -433,7 +475,95 @@ ok "$rc" 0 "a second bound apply exits 0"
 ok "$(manifest "$v")" "$after" "a second bound apply writes nothing"
 ok "$(strs written)" "" "a second bound apply lists no writes"
 ok "$(items new_since_review)" "phase demo-p3-openwork" "the new phase is still listed, still unwritten"
-ok "$(items reviewed_not_applied)" "$U_ALL" "the 11 items the first run wrote are reviewed, not applied"
+ok "$(items reviewed_not_applied)" "$U_ALL" "the 15 items the first run wrote are reviewed, not applied"
 ok "$(reasons reviewed_not_applied)" "$NO_LONGER_DRIFT" "each with the benign no-longer-drift reason, never now ambiguous"
+
+# ---- P1. a rollout that waits on sign-off (ADR 0034) ------------------------------------------------------------
+# execute § 4.5 step 5's sign-off form leaves the rollout open and paused (`paused_for: sign-off`) with a `not landed`
+# bullet in its `## Completion log`. While it waits the note is live (T root), so rule 2(b) never reads its log; once a
+# later full ceremony archives it, every task the bullet names has landed (done) or was deferred (no `rollout:`), and a
+# merge whose mark-done never ran reads A on the `not landed` bullet, never U.
+echo "# P1. a rollout awaiting sign-off"
+P1R=demo-rollout-2026-10-20
+WAIT="- [[demo-p40-1-gated]] not landed: awaiting your sign-off: spend: x — cap USD 70"
+COUNT="- and 1 queued task(s) that wait on them (named in ## Pause log): sign off, then /thread:execute [[$P1R]]"
+p1phase() { mkdir -p "$v/Work/Phases"; printf -- '---\ntags:\n  - phase\nstatus: open\nprojects:\n  - "[[Demo]]"\nphase: 40\n---\n\n# Demo phase 40\n' > "$v/Work/Phases/demo-p40-signoff.md"; }
+# p1task <file> <status> [frontmatter lines...]
+p1task() {
+  local n="$1" f="$v/Work/Tasks/$1.md" st="$2"; shift 2
+  { printf -- '---\ntags:\n  - task\nstatus: %s\nprojects:\n  - "[[Demo]]"\nphase: 40\n' "$st"
+    for l in "$@"; do printf '%s\n' "$l"; done
+    printf -- '---\n\n# %s\n\nbody\n' "$n"; } > "$f"
+}
+# p1ro <dir under Work/Tasks or ""> <status> <log lines (one string)> [frontmatter lines...]
+p1ro() {
+  local d="$v/Work/Tasks${1:+/$1}" st="$2" log="$3"; shift 3
+  mkdir -p "$d"
+  { printf -- '---\ntags:\n  - task\n  - rollout\nstatus: %s\nprotocol_version: 5\nprojects:\n  - "[[Demo]]"\n' "$st"
+    for l in "$@"; do printf '%s\n' "$l"; done
+    printf -- '---\n\n## Completion log\n\n%s\n' "$log"; } > "$d/$P1R.md"
+}
+ROL="rollout: \"[[$P1R]]\""
+inlists() { (items unambiguous; items ambiguous) | grep -c " $1\$"; }
+p1quiet() {  # p1quiet <label>: t, d and the phase are in neither list
+  for s in demo-p40-1-gated demo-p40-2-after demo-p40-signoff; do ok "$(inlists "$s")" 0 "$1: $s is in neither list"; done
+}
+
+# P1a: the real waiting state: the rollout live in T root, t gate-pending, d open and waiting on it.
+fresh; p1phase
+p1ro "" open "$WAIT"$'\n'"$COUNT" 'paused: 2026-10-20T09:00+00:00' 'paused_for: sign-off'
+p1task demo-p40-1-gated gate-pending "$ROL"
+p1task demo-p40-2-after open "$ROL" 'depends-on: ["[[demo-p40-1-gated]]"]'
+rp --phases 40 --no-gh --json
+ok "$rc" 0 "P1a: exits 0"
+p1quiet "P1a (waiting, live rollout)"
+# signed, not yet merged: still no drift, and --apply writes nothing of it
+p1task demo-p40-1-gated in_progress "$ROL" 'gates_signed: 2026-10-21T08:00+00:00'
+rp --phases 40 --no-gh --json
+p1quiet "P1a (signed, not merged)"
+before=$(manifest "$v/Work/Phases"; cat "$v/Work/Tasks/demo-p40-1-gated.md" "$v/Work/Tasks/demo-p40-2-after.md")
+rp --phases 40 --no-gh --kinds phase,task --apply --json
+ok "$(manifest "$v/Work/Phases"; cat "$v/Work/Tasks/demo-p40-1-gated.md" "$v/Work/Tasks/demo-p40-2-after.md")" "$before" "P1a: --apply writes nothing of p40"
+
+# P1b: the same log with the rollout in R: a gate-pending task is a HOLD, never a rule-2 candidate.
+fresh; p1phase
+p1ro Archive/Rollouts done "$WAIT"$'\n'"$COUNT"
+p1task demo-p40-1-gated gate-pending "$ROL"
+p1task demo-p40-2-after open "$ROL" 'depends-on: ["[[demo-p40-1-gated]]"]'
+rp --phases 40 --no-gh --json
+ok "$(inlists demo-p40-1-gated)" 0 "P1b: the gate-pending task is untouched"
+ok "$(inlists demo-p40-signoff)" 0 "P1b: the phase is quiet (a hold)"
+
+# P1c: the later archived state, after sign-off and the full ceremony: the `### <date>` block records both merges.
+fresh; p1phase
+p1ro Archive/Rollouts done "$WAIT"$'\n'"$COUNT"$'\n\n### 2026-10-21\n\n'"- [[demo-p40-1-gated]] → https://github.com/o/r/pull/42, merged 2026-10-21"$'\n'"- [[demo-p40-2-after]] → #43, merged 2026-10-21"
+p1task demo-p40-1-gated done "$ROL" 'pr: https://github.com/o/r/pull/42'
+p1task demo-p40-2-after done "$ROL" 'pr: https://github.com/o/r/pull/43'
+rp --phases 40 --no-gh --json
+ok "$(inlists demo-p40-1-gated)|$(inlists demo-p40-2-after)" "0|0" "P1c: done tasks are in neither list"
+has "$(items unambiguous)" "phase demo-p40-signoff" "P1c: the phase is U"
+rp --phases 40 --no-gh --kinds phase --apply --json
+ok "$(grep -m1 '^status:' "$v/Work/Phases/demo-p40-signoff.md")" "status: done" "P1c: --apply closes the phase"
+
+# P1d: Lachy declined: repair's defer cleared `rollout:` and reopened both; the archived log holds only the waiting bullet.
+fresh; p1phase
+p1ro Archive/Rollouts done "$WAIT"$'\n'"$COUNT"
+p1task demo-p40-1-gated open
+p1task demo-p40-2-after open 'depends-on: ["[[demo-p40-1-gated]]"]'
+rp --phases 40 --no-gh --json
+p1quiet "P1d (deferred)"
+
+# P1e: the fail-safe: P1c's log, but t left in_progress (a merge whose mark-done never ran), no pr:.
+fresh; p1phase
+p1ro Archive/Rollouts done "$WAIT"$'\n'"$COUNT"$'\n\n### 2026-10-21\n\n'"- [[demo-p40-1-gated]] → https://github.com/o/r/pull/42, merged 2026-10-21"$'\n'"- [[demo-p40-2-after]] → #43, merged 2026-10-21"
+p1task demo-p40-1-gated in_progress "$ROL"
+p1task demo-p40-2-after done "$ROL" 'pr: https://github.com/o/r/pull/43'
+rp --phases 40 --no-gh --json
+ok "$(items ambiguous | grep -c '^task demo-p40-1-gated$')|$(items unambiguous | grep -c ' demo-p40-1-gated$')" "1|0" "P1e: t is Ambiguous, never Unambiguous"
+has "$(field ambiguous demo-p40-1-gated reason)" "not landed" "P1e: its reason quotes the not landed bullet"
+has "$(field ambiguous demo-p40-signoff reason)" "demo-p40-1-gated" "P1e: the phase is A, naming t"
+before=$(cat "$v/Work/Tasks/demo-p40-1-gated.md")
+rp --phases 40 --no-gh --apply --json
+ok "$(cat "$v/Work/Tasks/demo-p40-1-gated.md")" "$before" "P1e: --apply leaves t byte-identical"
 
 exit $fail
