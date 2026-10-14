@@ -3,9 +3,9 @@
 // (skills/execute/scripts/step-boundary.py, executed by skills/execute/tests/room-stop.test.mjs), records the stop on
 // the rollout note, never pauses, and resumes every stopped call at the next loop entry. A transient row after a usage
 // limit is a Lost call, never reconciled. Every Cold resume reads a believed-live call against /workflows, a room stop
-// or not; a tripped integrate check drops the call for `prepare`; status and repair read a standing room stop as a
-// live queue the Stage resumes. This pins the prose an LLM lead follows, in execute, status, handoff, repair and
-// CONTEXT.md.
+// or not; a tripped integrate check drops the call for `prepare`; status and repair read a room stop, standing or
+// lapsed, as a live queue while its owner session lives, whatever its tasks read. This pins the prose an LLM lead
+// follows, in execute, status, handoff, repair and CONTEXT.md.
 //
 // Every rule lives in one function, checkRoomStop({ skill, status, handoff, repair, context }), that returns named failures,
 // so the real files and the controls run through identical logic: each control mutates the real text in one place and
@@ -226,6 +226,7 @@ function checkRoomStop({ skill, status, handoff, repair, context }) {
   // /workflows lists it, and one gone with no row is room-stopped only when `end` ended a stop, else a Lost call.
   const calls9 = bulletOf(skill, 9, 'Calls it had not stopped.')
   if (!calls9.includes('whether or not a room stop stood') || !calls9.includes('it is a *Lost call* at this entry') ||
+    !calls9.includes('each Workflow call this session still believes live counts as live only while /workflows lists it in flight') ||
     calls9.includes('Right after `end` prints `room stop ended`') ||
     !it(9).includes('whoever opens it') || !it(9).includes('with or without a `Chorus: ` head') ||
     !it(9).includes('The entry runs exactly as *Cold resume* does') || it(9).includes('§ 2.5 and § 2.6') ||
@@ -343,9 +344,15 @@ function checkRoomStop({ skill, status, handoff, repair, context }) {
   // status: it reads the durable record (`stands`, read-only), heads a standing room stop `ROOM STOP since <stamp>:
   // awaiting the Stage's resume` with no stalled framing, and never recommends `/thread:execute` under it: any loop
   // entry ends the stop on a Login still at its line, and the Stage then sends nothing. A lapsed one is the owner's
-  // heartbeat's.
+  // heartbeat's. While its owner session is alive a room stop, standing or lapsed, is a live queue whatever its tasks
+  // read: every row can come in before its TaskStop, or the signal can come in a cool-down's `waiting` turn, so no
+  // task need read running or integrating, and action 10 must still match ahead of action 12's resume ("the order is
+  // the precedence"). Action 12 says so itself, and so does § 4's Precedence; action 9's drain waits on a lapsed stop
+  // too. Once the owner session has ended, nothing owes the resume.
   const sts2 = collapse(section(status, /^### 2\. /) ?? '')
   const st4raw = section(status, /^### 4\. /) ?? ''
+  const prec = para(st4raw, 'Precedence.')
+  const ownerQ = para(st4raw, 'Owner-session qualifier.')
   const stRoom = para(st4raw, 'Room stop.')
   const stDonts = collapse(section(status, /^## Don'ts/) ?? '')
   if (!sts2.includes('python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py stands --rollout <rollout-note>') ||
@@ -354,20 +361,34 @@ function checkRoomStop({ skill, status, handoff, repair, context }) {
     !para(st4raw, 'Headline.').includes("`room stop since <stamp> lapsed: the owner's heartbeat re-enters`") ||
     !['renders as a room stop, not a stall', 'no stalled framing', 'never `/thread:execute` from here',
       'any loop entry, whoever opens it, ends the room stop', 'the Stage then sends nothing',
-      "the owner session's heartbeat re-enters *Cold resume* on its next tick"].every((k) => stRoom.includes(k)) ||
-    !action(status, 10).includes('A standing room stop is one whatever `/workflows` shows while its owner session is alive') ||
+      "the owner session's heartbeat re-enters *Cold resume* on its next tick",
+      'the room stop is a live queue whatever its tasks read and whatever `/workflows` shows: action 10 matches it ahead of drift and every resume (11 to 13)',
+      'a call whose row came in before its stop was reconciled', "the signal can come in a cool-down's `waiting` turn with nothing in flight",
+      'it is a live queue the same way'].every((k) => stRoom.includes(k)) ||
+    !action(status, 10).includes('A room stop, standing or lapsed, is one while its owner session is alive, whatever its tasks read and whatever `/workflows` shows, even when no task reads running or integrating') ||
     !action(status, 10).includes('"wait for the Stage\'s resume", never `/thread:execute`') ||
-    !action(status, 9).includes('Under a standing room stop (§ 4\'s *Room stop*), "no run" is no evidence') ||
-    !stDonts.includes('and never under a standing room stop while its owner session is alive, whatever `/workflows` shows') ||
-    !stRoom.includes('Under either, once the owner session has ended (the owner-session qualifier), nothing owes the resume') ||
+    !action(status, 10).includes("a lapsed one waits for the owner's heartbeat") ||
+    !action(status, 12).includes('A room stop, standing or lapsed, whose owner session is alive is a live lead whatever its tasks read (§ 4\'s *Room stop*): action 10 matches it first, so this resume never runs under one') ||
+    !action(status, 9).includes('Under a room stop, standing or lapsed (§ 4\'s *Room stop*), "no run" is no evidence while its owner session is alive') ||
+    !action(status, 9).includes("a lapsed one for the owner's heartbeat") ||
+    !prec.includes('A room stop needs no override either: while its owner session is alive it is a live queue (10) whatever its tasks read, so it waits ahead of drift and every resume (11 to 13)') ||
+    !ownerQ.includes('or a room stop, standing or lapsed, whatever its tasks read') ||
+    !stDonts.includes('and never under a room stop, standing or lapsed, while its owner session is alive, whatever `/workflows` shows and whatever its tasks read') ||
+    !stRoom.includes('Under either, once the owner session has ended (the owner-session qualifier), nothing owes the resume and the room stop is no live queue') ||
     !stDonts.includes('never `step-boundary.py begin` or `step-boundary.py end`')) fails.push('status')
 
-  // repair-live: repair's diagnosis reads the scan's room stop as a live queue, so it never enters the loop or writes
-  // a lead-held note under it; its hand-off, a loop entry, ends a lapsed one after `check-all` and before `resume`.
+  // repair-live: repair's diagnosis reads the scan's room stop, standing or lapsed, as a live queue while its owner
+  // session lives, so it never enters the loop or writes a lead-held note under either: a lapsed one's owner heartbeat
+  // is about to resume the same calls by handle, and the hand-off's `--running ""` would give each task a second call.
+  // Its hand-off, a loop entry, ends one an ended owner session left (lapsed or not) after `check-all`, before `resume`.
   const rc = collapse(repair)
-  if (!rc.includes("A standing room stop (the scan's `ROOM STOP since <stamp>` headline, status § 4's *Room stop*) is a live queue too while its owner session has not ended, even with no run there") ||
-    !rc.includes('**No lead live.** No pause, and every owner session has ended (or shows no run there, under no `ROOM STOP` headline)') ||
-    !rc.includes('They run only when no lead is live (every owner session has ended, or shows no run there under no `ROOM STOP` headline') ||
+  const LAPSED = 'neither the standing `ROOM STOP since <stamp>` nor the lapsed `room stop since <stamp> lapsed`'
+  if (!rc.includes("A room stop, standing or lapsed (the scan's `ROOM STOP since <stamp>` or `room stop since <stamp> lapsed` headline, status § 4's *Room stop*), is a live queue too while its owner session has not ended, even with no run there and whatever its tasks read") ||
+    !rc.includes('two calls per task') ||
+    !rc.includes(`**No lead live.** No pause, and every owner session has ended (or shows no run there, under no room-stop headline, ${LAPSED})`) ||
+    !rc.includes(`They run only when no lead is live (every owner session has ended, or shows no run there under no room-stop headline, ${LAPSED},`) ||
+    !rc.includes('while a lead is live (the owner check below, under which a room stop counts as live)') ||
+    !rc.includes('every loop entry ends a room stop, here one an ended owner session left, lapsed or not') ||
     !before(rc, "then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts), then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>`",
       '`reconcile-rollout.py resume`, then the loop with')) fails.push('repair-live')
   return [...new Set(fails)]
@@ -487,6 +508,8 @@ test('control: a Chorus-only resume, a re-listed entry, no § 2.7 entry, a live-
   only(sk('; and one that item 9 finds gone at the resume.', '.'), 'resume-entry', 'no gone call')
   only(sk('Right after `end`, and before anything else, each Workflow call', 'Right after `end` prints `room stop ended`, and before anything else, each Workflow call'),
     'resume-entry', 'item 9 qualifier back')
+  only(sk('each Workflow call this session still believes live counts as live', 'each Workflow call this session still counts as live counts as live'),
+    'resume-entry', 'item 9 old wording')
 })
 
 test('control: room-stopped calls sent to restart, no pause_requested, or no soft-pause sentence fails resume-live', () => {
@@ -604,23 +627,48 @@ test('control: status with no stands read, no ROOM STOP headline, a resume under
   only(stat('python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py stands --rollout <rollout-note>', 'true'), 'status', 'no read')
   only(stat("`ROOM STOP since <stamp>: awaiting the Stage's resume` or `room stop since <stamp> lapsed: the owner's heartbeat re-enters` (§ 2's *Room stop*, exit 0 or 4),", ''),
     'status', 'no headline')
-  only(stat('A standing room stop is one whatever `/workflows` shows while its owner session is alive (§ 4\'s *Room stop*): "wait for the Stage\'s resume", never `/thread:execute`, which would end the room stop on a Login still at its line; a lapsed one waits for the owner\'s heartbeat. Otherwise check',
+  only(stat('A room stop, standing or lapsed, is one while its owner session is alive, whatever its tasks read and whatever `/workflows` shows, even when no task reads running or integrating (§ 4\'s *Room stop*): a standing one → "wait for the Stage\'s resume", never `/thread:execute`, which would end the room stop on a Login still at its line; a lapsed one waits for the owner\'s heartbeat. Otherwise check',
     'Check'), 'status', 'action 10 resumes')
+  // Round 2's gap: action 10 matching only a room stop with a running or integrating task leaves an all-awaiting room
+  // stop to action 12's resume.
+  only(stat('whatever its tasks read and whatever `/workflows` shows, even when no task reads running or integrating (§ 4\'s *Room stop*): a standing one',
+    'whatever `/workflows` shows (§ 4\'s *Room stop*): a standing one'), 'status', 'action 10 needs a running task')
+  only(stat('A room stop, standing or lapsed, whose owner session is alive is a live lead whatever its tasks read (§ 4\'s *Room stop*): action 10 matches it first, so this resume never runs under one; a standing one waits for the Stage\'s resume, a lapsed one for the owner\'s heartbeat.', ''),
+    'status', 'action 12 gate removed')
+  only(stat('Under a room stop, standing or lapsed (§ 4\'s *Room stop*), "no run" is no evidence while its owner session is alive: a standing one waits for the Stage\'s resume, which drains it, and a lapsed one for the owner\'s heartbeat, whose *Cold resume* drains it; never `/thread:execute`.',
+    'Under a standing room stop (§ 4\'s *Room stop*), "no run" is no evidence while its owner session is alive: wait for the Stage\'s resume, which drains it, never `/thread:execute`.'),
+  'status', 'action 9 without the lapsed stop')
+  only(stat('the room stop is a live queue whatever its tasks read and whatever `/workflows` shows: action 10 matches it ahead of drift and every resume (11 to 13), and',
+    'it is a live queue whatever `/workflows` shows, and'), 'status', 'room paragraph reads the tasks')
+  only(stat(' A room stop needs no override either: while its owner session is alive it is a live queue (10) whatever its tasks read, so it waits ahead of drift and every resume (11 to 13), a drain under it waits too (9), and only an open escalation (7) and a stamped pause\'s reinstate (8) come before it.', ''),
+    'status', 'Precedence silent on the room stop')
+  only(stat(', or a room stop, standing or lapsed, whatever its tasks read (*Room stop* above).', '.'), 'status', 'owner-session qualifier')
   only(stat('never `/thread:execute` from here', '`/thread:execute` once its owner session shows no run'), 'status', 'room paragraph resumes')
   only(stat("the owner session's heartbeat re-enters *Cold resume* on its next tick", 'nothing re-enters it'), 'status', 'no lapse')
-  only(stat(', and never under a standing room stop while its owner session is alive, whatever `/workflows` shows (§ 4\'s *Room stop*)', ''), 'status', "Don'ts")
-  only(stat('Under either, once the owner session has ended (the owner-session qualifier), nothing owes the resume, and action 10\'s resume applies as usual.', ''),
+  only(stat(', and never under a room stop, standing or lapsed, while its owner session is alive, whatever `/workflows` shows and whatever its tasks read (§ 4\'s *Room stop*), a stamped pause\'s reinstate excepted (action 8)', ''), 'status', "Don'ts")
+  only(stat('Under either, once the owner session has ended (the owner-session qualifier), nothing owes the resume and the room stop is no live queue: action 10\'s or 12\'s resume applies as usual, and that *Cold resume* ends it.', ''),
     'status', 'a dead owner waited on forever')
 })
 
 test('control: repair that reads a room stop as no lead live, or a hand-off that never ends it, fails repair-live', () => {
-  only({ repair: wsEdit(real.repair, "A standing room stop (the scan's `ROOM STOP since <stamp>` headline, status § 4's *Room stop*) is a live queue too while its owner session has not ended, even with no run there", 'A room stop') },
+  only({ repair: wsEdit(real.repair, "A room stop, standing or lapsed (the scan's `ROOM STOP since <stamp>` or `room stop since <stamp> lapsed` headline, status § 4's *Room stop*), is a live queue too while its owner session has not ended, even with no run there and whatever its tasks read", 'A room stop') },
     'repair-live', 'live queue')
-  only({ repair: wsEdit(real.repair, '(or shows no run there, under no `ROOM STOP` headline):', '(or shows no run there):') }, 'repair-live', 'no lead live')
-  only({ repair: wsEdit(real.repair, '(every owner session has ended, or shows no run there under no `ROOM STOP` headline,', '(every owner session has ended or shows no run there,') },
+  only({ repair: wsEdit(real.repair, "A room stop, standing or lapsed (the scan's `ROOM STOP since <stamp>` or `room stop since <stamp> lapsed` headline,", "A standing room stop (the scan's `ROOM STOP since <stamp>` headline,") },
+    'repair-live', 'live queue without the lapsed form')
+  only({ repair: wsEdit(real.repair, '(or shows no run there, under no room-stop headline, neither the standing `ROOM STOP since <stamp>` nor the lapsed `room stop since <stamp> lapsed`):', '(or shows no run there):') },
+    'repair-live', 'no lead live')
+  // Round 2's gap: excluding only the upper-case standing headline lets a lapsed stop with its owner alive take the
+  // full flow, whose hand-off runs `--running ""` fresh calls beside the owner heartbeat's resume.
+  only({ repair: wsEdit(real.repair, 'under no room-stop headline, neither the standing `ROOM STOP since <stamp>` nor the lapsed `room stop since <stamp> lapsed`): the full flow', 'under no `ROOM STOP` headline): the full flow') },
+    'repair-live', 'no lead live without the lapsed form')
+  only({ repair: wsEdit(real.repair, '(every owner session has ended, or shows no run there under no room-stop headline, neither the standing `ROOM STOP since <stamp>` nor the lapsed `room stop since <stamp> lapsed`,', '(every owner session has ended or shows no run there,') },
     'repair-live', 'lead-held notes')
-  only({ repair: wsEdit(real.repair, "then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>` (execute § Room stop: every loop entry ends a room stop, here a lapsed one an ended owner session left; with none standing it writes nothing, and a non-zero exit is printed and the hand-off goes on),", '') },
+  only({ repair: wsEdit(real.repair, 'under no room-stop headline, neither the standing `ROOM STOP since <stamp>` nor the lapsed `room stop since <stamp> lapsed`, a drain', 'under no `ROOM STOP` headline, a drain') },
+    'repair-live', 'lead-held notes without the lapsed form')
+  only({ repair: wsEdit(real.repair, '(the owner check below, under which a room stop counts as live)', '(the owner check below)') }, 'repair-live', 'drain owner check')
+  only({ repair: wsEdit(real.repair, "then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>` (execute § Room stop: every loop entry ends a room stop, here one an ended owner session left, lapsed or not; with none standing it writes nothing, and a non-zero exit is printed and the hand-off goes on),", '') },
     'repair-live', 'hand-off never ends it')
+  only({ repair: wsEdit(real.repair, 'here one an ended owner session left, lapsed or not;', 'here a lapsed one an ended owner session left;') }, 'repair-live', 'hand-off names only a lapsed stop')
 })
 
 test(`the rules are all named (${RULES.length}) and each has a control`, () => {

@@ -96,15 +96,15 @@ overwrites, because each is independent of the pause and the lead:
 
 **Lead-held notes.** § 3c's `pr:` write and § 3c's defer of a RACE / UNVERIFIED task whose merge Lachy decides
 does not stand write a task note a live call's reconcile would overwrite. They run only when no lead is live
-(every owner session has ended, or shows no run there under no `ROOM STOP` headline, a drain nothing is
-draining included) or under a
-stamped pause, where no call is live; otherwise they wait for the stamp or the lead's end.
+(every owner session has ended, or shows no run there under no room-stop headline, neither the standing
+`ROOM STOP since <stamp>` nor the lapsed `room stop since <stamp> lapsed`, a drain nothing is draining
+included) or under a stamped pause, where no call is live; otherwise they wait for the stamp or the lead's end.
 
 **Pause, drained or stamped.** While `pause_requested` drains, or `paused:` stands:
 
 - Repair reports the pause. Stamped → "reinstate with `/thread:execute [[<rollout>]]`". Pending → "it drains;
-  nothing to do" while a lead is live (the owner check below); with none, nothing is draining it, so
-  `/thread:execute [[<rollout>]]` resumes the drain. Either way, point at `/thread:execute` only once every
+  nothing to do" while a lead is live (the owner check below, under which a room stop counts as live); with
+  none, nothing is draining it, so `/thread:execute [[<rollout>]]` resumes the drain. Either way, point at `/thread:execute` only once every
   RACE / UNVERIFIED task has its `RACE decided:` line: its *Cold resume* runs `resume` first.
 - Beyond the every-mode writes it never runs `hand-back`, `approve-gates`, § 3d's `descope`, the raise, `resume`
   or the loop, and it never clears the stamp or the flag.
@@ -117,11 +117,12 @@ stamped pause, where no call is live; otherwise they wait for the stamp or the l
 **Live queue, not paused.** A running or integrating task carries an `owner:` whose session is not known to
 have ended. A Workflow run is listed only in the session that launched it, which the tag names, so check
 `/workflows` in that owner session; from any other session "no run" proves nothing, so report "possibly live:
-check session `<owner tag>` first". A standing room stop (the scan's `ROOM STOP since <stamp>` headline, status
-§ 4's *Room stop*) is a live queue too while its owner session has not ended, even with no run there: its calls are
-room-stopped and the Chorus
-Stage owes their resume (execute § Room stop), and any loop entry would end it on a Login still at its line. A
-lapsed one (`room stop since <stamp> lapsed`) is the owner's heartbeat's while that session is alive.
+check session `<owner tag>` first". A room stop, standing or lapsed (the scan's `ROOM STOP since <stamp>` or
+`room stop since <stamp> lapsed` headline, status § 4's *Room stop*), is a live queue too while its owner session
+has not ended, even with no run there and whatever its tasks read: its calls are room-stopped, the Chorus Stage
+owes a standing one's resume and the owner's heartbeat re-enters a lapsed one (execute § Room stop), each
+resuming them by handle. Any loop entry from here would end it, on a Login that may still be at its line, and give
+each task a fresh call beside that resume: two calls per task.
 
 - Beyond the every-mode writes, repair may hand back a set-aside task once Lachy has answered it (§ 3b), never one
   § 2 classes **retry (automatic)** (§ 2 classes it before any answer: a hand-back on his answer is the fresh
@@ -137,8 +138,9 @@ lapsed one (`room stop since <stamp> lapsed`) is the owner's heartbeat's while t
   halt, makes it a § 3c escalation (§ 3e hands it there).
 - The live lead's next `next` restarts an `in_progress` hand-back and integrates a `review` one.
 
-**No lead live.** No pause, and every owner session has ended (or shows no run there, under no `ROOM STOP` headline): the full flow, § 3 to
-§ 6, except that an undecided RACE / UNVERIFIED escalation holds every `resume` and the hand-off (§ 3c).
+**No lead live.** No pause, and every owner session has ended (or shows no run there, under no room-stop
+headline, neither the standing `ROOM STOP since <stamp>` nor the lapsed `room stop since <stamp> lapsed`): the
+full flow, § 3 to § 6, except that an undecided RACE / UNVERIFIED escalation holds every `resume` and the hand-off (§ 3c).
 
 **Sent here by schedule's unfinished-rollout refusal.** Repair sorts out what is stuck; superseding stays
 schedule's `--regenerate`. A refusal line `<P> is named by the supersedes: of <N>, which has since run` is
@@ -527,7 +529,7 @@ there is nothing to clear. Per stage:
   (*Cold resume*): execute § 2.5 first (then § 2.6), then execute § 3's `verify_timeout` check (a halt there
   writes nothing), then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts), then
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>` (execute
-  § Room stop: every loop entry ends a room stop, here a lapsed one an ended owner session left; with none standing
+  § Room stop: every loop entry ends a room stop, here one an ended owner session left, lapsed or not; with none standing
   it writes nothing, and a non-zero exit is printed and the hand-off goes on), then
   `reconcile-rollout.py resume`, then the loop with
   `--running ""` (this session holds no task call, so a room-stopped call's handle is lost: execute § Room stop
