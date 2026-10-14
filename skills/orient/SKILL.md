@@ -10,9 +10,10 @@ answers "what's my move?" for the *current thread*; `orient` answers it for a *w
 area* returned to after time away. It audits the balls in the air, recommends ONE best use of
 Lachy's time, then asks **Reshuffle, Steer only or Look only**. A reshuffle re-sorts all the open work, grills
 what is unclear and writes the result at one gate (`reshuffle.md`). Orient then routes by lane:
-it schedules rollout-shaped phases itself, steers the session-lane work (background batches, a focus
-item, or both) and ends with the **execute offer**. Pointed at a single plan, design note or brain
-dump, it runs a **scoped reshuffle** of that note alone.
+it schedules rollout-shaped phases itself, steers the session-lane work (batches dispatched as
+native child agents of this session, a focus item, or both) and ends with the **execute offer**.
+Pointed at a single plan, design note or brain dump, it runs a **scoped reshuffle** of that note
+alone.
 
 **Contains no route logic of its own** beyond batching, emission and the reshuffle: hands-on focus
 dispatches to `${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` (or the task's own `## Launch` block);
@@ -165,10 +166,11 @@ and Drift and the slots for each swept project.
   trees also surface aborted-session partial edits worth flagging.
 - **In flight** (the one definition; the reshuffle's reach tiers use it): a task stamped
   `rollout:` whose rollout note is still live (the link resolves to a note directly in
-  `Work/Tasks/`), a `dispatched:` stamp or an orient start claim ≤7 days old with no end line of
-  its run and job after it (the Vault body read finds them; § 8 Double-dispatch guard), or
-  `status: in-progress` (TaskNotes' own spelling), `in_progress` or `review`; a phase with any such
-  member. Report it as such; never re-batch it (§ 7) and never reshuffle it.
+  `Work/Tasks/`), a `dispatched:` stamp or an orient start claim ≤7 days old unless an end line
+  in the note names the same run and job, written before or after it (the Vault body read finds
+  them; § 8 Double-dispatch guard, rule 1), or `status: in-progress` (TaskNotes' own spelling),
+  `in_progress` or `review`; a phase with any such member. Report it as such; never re-batch it
+  (§ 7) and never reshuffle it.
 
 ### 3. Present
 
@@ -195,8 +197,8 @@ A situational report written for Lachy catching up, not a log:
 `AskUserQuestion`, recommended option first:
 
 - **Reshuffle** (the usual choice on pickup) — continue to § 5.
-- **Steer only** — no reshaping: route the open work as it stands (§ 6), e.g. to fan out
-  background batches.
+- **Steer only** — no reshaping: route the open work as it stands (§ 6), e.g. to dispatch
+  batches as native child agents of this session.
 - **Look only** — the audit was the deliverable; stop, no writes of any kind.
 
 **Drift fixes.** Reshuffle and Steer only authorise them (as any steer did under ADR 0026): re-run
@@ -299,9 +301,10 @@ dispatchable open work into **parallel-safe batches**:
   file is kept (§ 8 step 1), its tasks stay unstamped and it gets no job. The
   report names the covering alias from the workspace's
   `CLAUDE.md § Launch profiles` table or the registry (e.g. SEO work →
-  `cc-animately-seo`) for a hand launch, which still runs the Twin check. Run orient from the narrowest covering profile, because
-  kitchen-sink sets kill fan-out ("Prompt is too long"). That table + the
-  registry are the only config — orient maintains no manifest of its own.
+  `cc-animately-seo`) for a hand launch, which still runs the Twin check.
+  Run orient from the narrowest covering profile, because kitchen-sink sets
+  kill fan-out ("Prompt is too long"). That table + the registry are the
+  only config — orient maintains no manifest of its own.
 - **Exclusions**: conversation-gated tasks (need Lachy's input — say so, leave
   them for Hands-on or the next reshuffle's grill); in-flight tasks and tasks a live run covers
   (§ 8 Double-dispatch guard, rules 1 and 2), found before clustering; work
@@ -314,11 +317,12 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
 
 1. **Home, run dir and `issued:`.** Resolve the area's home, run the Double-dispatch guard's rule 2
    Ignored check from its anchor, then `mkdir -p <home>`. Pick a free run dir name (rule 2 Names);
-   orient never creates the run dir. Take `issued:` once: UTC now, ISO with `Z`. Re-read every
-   covered note against rule 1 and run rule 2's lookup, dropping what they catch, so nothing that
-   landed since the audit slips in under the new `issued:`. Write each prompt, header first, to its
-   unique `<home>/<YYYY-MM-DD>-<batch-slug>-prompt.txt`; a capability-blocked batch's prompt is
-   kept the same way.
+   orient never creates the run dir. Take `issued:` once, at whole seconds:
+   `date -u +%Y-%m-%dT%H:%M:%SZ` (UTC, no fraction, the form the Twin check's `touch -d` takes on
+   BSD and GNU alike). Re-read every covered note against rule 1 and run rule 2's lookup, dropping
+   what they catch, so nothing that landed since the audit slips in under the new `issued:`. Write
+   each prompt, header first, to its unique `<home>/<YYYY-MM-DD>-<batch-slug>-prompt.txt`; a
+   capability-blocked batch's prompt is kept the same way.
 2. **Tier, capability and jobs.** Read the operator's ladder with
    `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py` (ADR 0029). Its last rung is
    the top, and every job names that rung's `model` and `effort`, so no child inherits a default
@@ -331,9 +335,12 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
    Claude) and config `{ "models": { "<top model>": { "model": "<native model>" } } }`.
 3. **Claim, spawn, bind.** `advance`, then `claim` a pending request (the pre-spawn lock), then
    spawn a clean native child with the request's exact prompt, model and effort, then `bind` the
-   returned child ID at once. Where the harness has no per-child effort control, the report says the
-   effort was inherited. Children and all their nested agents and reviewers stay in this harness
-   and account.
+   returned child ID at once. The spawn must return the child's ID before the child works: on
+   Claude, an Agent call with `run_in_background: true`, never a foreground call, whose ID comes
+   back only after the child has run and written its end line. One spawn per message, since rule 3
+   stamps before the next spawn. A harness with no such spawn cannot dispatch: every batch is
+   blocked. Where the harness has no per-child effort control, the report says the effort was
+   inherited. Children and all their nested agents and reviewers stay in this harness and account.
 4. **Stamp after bind** (rule 3), before the next spawn. A claim without a bound child is never
    stamped. Respect available concurrency; queue excess batches without launching another model
    process.
@@ -345,9 +352,9 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
 **Every batch prompt must carry** (the emission spec):
 
 - **Header** — the prompt opens with one line each: `Dispatch:` (the lead's local date),
-  `issued:` (step 1's UTC ISO time), `Run:` (the run dir's absolute path), `Job:` (the batch
-  slug), `Lead:` (`<harness> <config dir> <peer name> [<ref>]` from the lead's own peer-list
-  header, or `<harness> <config dir> <session ID> (no peer ref)`; the config dir is
+  `issued:` (step 1's UTC time, whole seconds), `Run:` (the run dir's absolute path), `Job:`
+  (the batch slug), `Lead:` (`<harness> <config dir> <peer name> [<ref>]` from the lead's own
+  peer-list header, or `<harness> <config dir> <session ID> (no peer ref)`; the config dir is
   `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` on Claude, the same expression `reconcile-rollout.py`
   uses, or `${CODEX_HOME:-$HOME/.codex}` on Codex), `Covers:` (task-note paths) and `Owns:` (repo
   paths and external surfaces, never a `Covers:` note). Times are UTC ISO with `Z` and compare as
@@ -369,10 +376,16 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
      names a covered task or this job. The lead's own stamp is never a signal: the dispatch line
      naming this prompt's own `Run:` and `Job:`, and the `dispatched:` written with it.
   3. Probe `Owns:` only, never a `Covers:` note (step 2 reads those, and the lead's stamp edits them
-     after `issued:`). If `find <path> -newermt <issued:>` lists an owned path, `git status
-     --porcelain -- <path>` shows it deleted, or, in a code repository (never the Obsidian vault,
-     whose backup sweep commits older edits late), `git log --all --since=<issued:> -- <path>` lists
-     a commit, another session is live on it: STOP. A dirty owned path none of these flags was
+     after `issued:`). Stamp a reference file at `issued:` (`ref=$(mktemp)`, then
+     `touch -d <issued:> "$ref"`) and, for each owned path that exists, run
+     `find <path> -path '*/.git' -prune -o -newer "$ref" -print`: BSD and GNU `find` both take
+     `-newer`, where macOS `find` cannot parse `issued:` as a date, and the prune skips `.git/`,
+     whose index any `git status` rewrites. If that lists anything, or, inside a git work tree,
+     `git status --porcelain -- <path>` shows the path deleted, or, in a code repository (never the
+     Obsidian vault, whose backup sweep commits older edits late),
+     `git log --all --since=<issued:> -- <path>` lists a commit, another session is live on it:
+     STOP. A probe that errors (`touch`, `find` or a git probe exits non-zero) is a STOP too: a
+     probe with no answer never reads as "nothing newer". A dirty owned path none of these flags was
      modified only before `issued:`: an aborted partial, which you reconcile by building on it or
      reporting it, never by `checkout`, `reset`, `clean` or `stash`.
   4. Write a one-line start claim into each `Covers:` note's `## Notes` before editing anything:
@@ -402,10 +415,12 @@ verified-running, completed or blocked.
 One batch lands once (ADR 0023). Four rules hold it at both ends, orient's dispatch and each
 child's preflight:
 
-1. **In flight stays out.** A task with a `dispatched:` stamp or an orient start claim ≤7 days old,
-   with no end line of the same run and job after it, is in flight (§ 2, whose Vault body read
-   finds the claims): it is excluded and reported. It is re-dispatched only by the **override**,
-   the one sequence used everywhere:
+1. **In flight stays out.** A task with a `dispatched:` stamp or an orient start claim ≤7 days old
+   is in flight (§ 2, whose Vault body read finds the claims) unless an end line in the note names
+   the same run and job (a stamp's run and job are its dispatch line's), wherever that line sits:
+   run dirs are unique and never reused, so the order the lines were written in never matters, and
+   an end line written before a late stamp still settles the task. In flight, it is excluded and
+   reported. It is re-dispatched only by the **override**, the one sequence used everywhere:
    1. Lachy names the task in the steering answer.
    2. Rule 2's lookup runs.
    3. If a run in flight elsewhere (b) covers the task, orient reports
@@ -464,8 +479,9 @@ child's preflight:
    one edit of each covered note the frontmatter `dispatched: <YYYY-MM-DD>` (local date) and the
    `## Notes` line
    `- <UTC ISO> orient dispatch: run <Run:>, job <key>, child <ID>, lead <Lead:>, model <model>, effort <effort>`.
-   Stamping before the spawn would mark unlaunched work as in flight; the journal claim is the
-   pre-spawn lock.
+   A note that already holds this run and job's end line gets no stamp: its child finished first,
+   and its end-of-run update stands. Stamping before the spawn would mark unlaunched work as in
+   flight; the journal claim is the pre-spawn lock.
 4. **Every prompt carries the Twin check** (the emission spec), so a second paste or a re-run of a
    prompt stops before its first edit.
 
@@ -498,11 +514,12 @@ names why (a running or blocked rollout, uncommitted grill docs, a schedule bloc
   children's end lines in the task notes are the record.
 - **Notes.** Sweep the area's stamped and start-claimed task notes (§ 2's Vault sweep and its body
   read) and report per batch: completed, stalled or never launched. Clear a `dispatched:` stamp
-  only when it is stale: older than 7 days with no progress line, or, at any age, never launched,
+  only when it is settled, meaning an end line names its dispatch line's run and job, in any order
+  (rule 1), or stale: older than 7 days with no progress line, or, at any age, never launched,
   meaning its dispatch line names a run whose journal exists and records no bound child
   (`childId`) for its job. A stamp with no dispatch line, or whose named journal is missing (a hand
-  launch, a pre-0023 stamp), is unknown, never "never launched", and keeps its 7 days. A stamp
-  inside its 7 days stays, an abandoned run's included.
+  launch, a pre-0023 stamp), is unknown, never "never launched", and keeps its 7 days. An
+  unsettled stamp inside its 7 days stays, an abandoned run's included.
 
 A fresh `/thread:orient` audit is the lightweight version of this.
 

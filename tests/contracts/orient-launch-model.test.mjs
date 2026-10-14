@@ -27,11 +27,17 @@ const FORBIDDEN = [
   /\(ADR 0010\)/i,
   /profile's MCP namespaces/i,
   /\*\*`git status` first\*\*/i,
+  /limited to bare `cc`/i,
+  /background batch/i,
+  /-newermt/i,
+  /no end line of (the same|its) run and job after it/i,
 ]
 const forbidden = (text) => FORBIDDEN.filter((re) => re.test(collapse(text))).map(String)
 
-// The Twin check's step 3 order: the mtime probe, then its STOP, then the aborted-partial reading.
-const TWIN_ORDER = /-newermt <issued:>[\s\S]*?STOP[\s\S]*?only before `issued:`[\s\S]*?aborted partial/
+// The Twin check's step 3 order: the portable mtime probe, then its STOP, then the aborted-partial reading.
+const TWIN_ORDER = /-newer "\$ref" -print[\s\S]*?STOP[\s\S]*?only before `issued:`[\s\S]*?aborted partial/
+// A probe that errors is a STOP: read as "nothing newer", it would let a child build on a live twin's edits.
+const PROBE_ERROR_STOPS = /A probe that errors \([^)]*exits non-zero\) is a STOP too/
 
 // § 10's stamp-clearing rule: "never launched" needs a journal that exists; a stamp with none is unknown.
 const DEBRIEF_NEVER_LAUNCHED = [
@@ -44,11 +50,13 @@ test('ADR 0023 exists once, accepted, superseding ADR 0010, in the house format'
   const files = walk('docs/adr').filter((f) => /^docs\/adr\/0023-[^/]*\.md$/.test(f))
   assert.equal(files.length, 1, `expected exactly one docs/adr/0023-*.md, found ${JSON.stringify(files)}`)
   const t = read(files[0])
-  assert.match(t, /^Status: accepted \(supersedes ADR 0010\)/m)
+  assert.match(t, /^Status: accepted \(supersedes ADR 0010; amends ADR 0003\)/m)
   for (const h of ['Context', 'Decision', 'Rejected', 'Consequences']) {
     assert.match(t, new RegExp(`^## ${h}$`, 'm'), `ADR 0023 has no ## ${h}`)
   }
-  assertHas(C(section(t, /^## Consequences$/)), 'ADR 0023 § Consequences', ['CONTEXT.md', /config dir/])
+  const consequences = C(section(t, /^## Consequences$/))
+  assertHas(consequences, 'ADR 0023 § Consequences', ['CONTEXT.md', /config dir/, /no task owns the rewrite yet/])
+  assert.doesNotMatch(consequences, /follow-up task owns the rewrite/)
   assertHas(C(section(t, /^## Decision$/)), 'ADR 0023 § Decision', [
     /narrows the grilled rule that `git status`/,
     /`--debrief` collects and accepts only in the lead's own session/,
@@ -57,6 +65,12 @@ test('ADR 0023 exists once, accepted, superseding ADR 0010, in the house format'
     /uncollected envelopes are lost/,
     'ADR 0029',
     /top rung/,
+    /names the same run and job, in any order/,
+    /`run_in_background: true`/,
+    /a note that already holds that run and job's end line gets none/,
+    /`issued:` instant \(UTC, whole seconds\)/,
+    /`find <path> -path '\*\/\.git' -prune -o -newer <ref> -print`/,
+    /A probe that errors is a stop/,
   ])
 })
 
@@ -81,8 +95,22 @@ test('orient cites ADR 0023, carries the guard and the Twin check, and names tie
     '`Dispatch:`', '`issued:`', '`Run:`', '`Job:`', '`Lead:`', '`Covers:`', '`Owns:`',
     /<harness> <config dir> <peer name> \[<ref>\]/,
     '${CLAUDE_CONFIG_DIR:-$HOME/.claude}',
+    /`issued:` \(step 1's UTC time, whole seconds\)/,
   ])
-  assertHas(C(section(orient, /^### 8\./)), `${ORIENT} § 8`, ['ladder.py', 'ADR 0029', /no child inherits a default silently/])
+  assertHas(C(section(orient, /^### 8\./)), `${ORIENT} § 8`, [
+    'ladder.py', 'ADR 0029', /no child inherits a default silently/,
+    /Take `issued:` once, at whole seconds: `date -u \+%Y-%m-%dT%H:%M:%SZ`/,
+  ])
+  assertHas(C(slice(orient, /^3\. \*\*Claim, spawn, bind\.\*\*/, /^4\. /)), `${ORIENT} § 8 step 3`, [
+    /must return the child's ID before the child works/,
+    /`run_in_background: true`, never a foreground call/,
+    /One spawn per message/,
+    /A harness with no such spawn cannot dispatch/,
+  ])
+  assertHas(C(slice(orient, /^### 1\./, /^### 2\./)), `${ORIENT} § 1`, [
+    /dispatch still runs, as native children with whatever the calling session carries/,
+    /launcher aliases are named only for a blocked batch \(§ 7 Capability fit\)/,
+  ])
   assertHas(C(slice(orient, /^- \*\*Preflight\*\*/, /^- \*\*/)), `${ORIENT} Preflight`, [/inherited from the lead session/])
   assertHas(C(slice(orient, /^## Don't/, null)), `${ORIENT} § Don't`, [/another session's run journal/])
 })
@@ -92,6 +120,7 @@ test('orient § 2 reads the run lines from note bodies and counts an open start 
   assertHas(C(slice(s2, /^- \*\*Vault\*\*/, /^- /)), `${ORIENT} § 2 Vault`, ["rg -n 'orient (start|dispatch|end): run'"])
   assertHas(C(slice(s2, /^- \*\*In flight\*\*/, /^- /)), `${ORIENT} § 2 In flight`, [
     /`dispatched:` stamp or an orient start claim ≤7 days old/,
+    /unless an end line in the note names the same run and job, written before or after it/,
     /Vault body read finds them/,
   ])
 })
@@ -127,6 +156,10 @@ test('the Double-dispatch guard has four rules and each rule phrase', () => {
     /never creates the run dir: `init` makes it private \(mode 700\)/,
     /Immediately after a batch's `bind`, before the next spawn/,
     /`dispatched:` stamp or an orient start claim ≤7 days old/,
+    /unless an end line in the note names the same run and job/,
+    /the order the lines were written in never matters/,
+    /an end line written before a late stamp still settles the task/,
+    /already holds this run and job's end line gets no stamp/,
   ])
 })
 
@@ -138,6 +171,10 @@ test('the Twin check stops on a live twin before any git probe and reconciles on
   assert.ok(stop >= 0 && git >= 0 && stop < git, 'the first STOP does not come before the first `git status`')
   assertHas(twin, `${ORIENT} Twin check`, [
     TWIN_ORDER,
+    PROBE_ERROR_STOPS,
+    /`touch -d <issued:> "\$ref"`/,
+    /for each owned path that exists, run `find <path> -path '\*\/\.git' -prune -o -newer "\$ref" -print`/,
+    /the prune skips `\.git\/`/,
     /own `Run:` and `Job:`/,
     /`Owns:` only, never a `Covers:` note/,
     /never the Obsidian vault/,
@@ -153,7 +190,8 @@ test('§ 10 --debrief recovers only its own runs and never calls a journal-less 
     /claude --resume <id>/,
     /--fork-session/,
     /uncollected envelopes are lost/,
-    /A stamp inside its 7 days stays, an abandoned run's included/,
+    /An unsettled stamp inside its 7 days stays, an abandoned run's included/,
+    /settled, meaning an end line names its dispatch line's run and job, in any order/,
   ])
   assert.deepEqual(debriefFails(s10), [])
   assert.doesNotMatch(s10, /fire-and-forget/i)
@@ -167,6 +205,10 @@ test('README and execution-fit carry the native model and no cmux or cc-* batch'
     assert.ok(!/cc-\*`?\s*batch/i.test(collapse(text)), `${name} mentions cc-* batches`)
   }
   assertHas(collapse(readme), README, ['ADR 0023', /`0010` — [^.]*superseded by `?0023/])
+  const row = lineOf(readme, '| `/thread:orient` |')
+  assertHas(row, `${README} orient row`, [/native child agents of its own session, ADR 0023/])
+  assert.doesNotMatch(row, /ADR 0010/, `${README} orient row still cites ADR 0010 for the launch`)
+  assert.doesNotMatch(row, /launches itself/, `${README} orient row still has orient launch its own sessions`)
   assertHas(C(section(readme, /^## Runtime support/)), `${README} § Runtime support`, [/native child/, /blocked/])
   assertHas(collapse(fit), FIT, [/orient's parallel-safe native batches \(ADR 0023\)/])
 })
@@ -174,15 +216,24 @@ test('README and execution-fit carry the native model and no cmux or cc-* batch'
 test('control: the forbidden matcher flags each retired phrase, wrapped or backticked', () => {
   for (const bad of ['Fire-and-forget remains the default', 'cc-* batches', '`cc-*` batches', 'cc-*\n  batches',
     '(ADR 0010)', '**Profile fit**', "verify the profile's MCP namespaces", '**`git status` first**',
-    'background\n    scoped sessions']) {
+    'background\n    scoped sessions', 'limited to bare `cc`/project-root launchers', 'fan out\n  background batches',
+    'If `find <path> -newermt <issued:>` lists an owned path',
+    'with no end line of the same run and job after it', 'with no end line of\n  its run and job after it']) {
     assert.equal(forbidden(bad).length, 1, `expected exactly one forbidden hit for: ${JSON.stringify(bad)}`)
   }
   assert.deepEqual(forbidden('native child agents of this session (ADR 0023)'), [])
 })
 
 test('control: the Twin check order rejects a STOP placed before the mtime probe', () => {
-  assert.doesNotMatch('STOP if `find <path> -newermt <issued:>` lists it … only before `issued:` … aborted partial', TWIN_ORDER)
-  assert.match('if `find <path> -newermt <issued:>` lists it: STOP. Modified only before `issued:`: an aborted partial', TWIN_ORDER)
+  assert.doesNotMatch('STOP if `find <path> -newer "$ref" -print` lists it … only before `issued:` … aborted partial', TWIN_ORDER)
+  assert.match('if `find <path> -newer "$ref" -print` lists it: STOP. Modified only before `issued:`: an aborted partial', TWIN_ORDER)
+  assert.doesNotMatch('if `find <path> -newermt <issued:>` lists it: STOP. Modified only before `issued:`: an aborted partial', TWIN_ORDER)
+})
+
+test('control: the probe-error rule needs an erroring probe to STOP', () => {
+  assert.doesNotMatch('If that lists anything, another session is live on it: STOP.', PROBE_ERROR_STOPS)
+  assert.doesNotMatch('A probe that errors (`find` exits non-zero) is no signal.', PROBE_ERROR_STOPS)
+  assert.match('A probe that errors (`touch`, `find` or a git probe exits non-zero) is a STOP too', PROBE_ERROR_STOPS)
 })
 
 test('control: the § 10 check rejects the old journal-free "never launched" sentence', () => {

@@ -1,7 +1,7 @@
 # 0023 — orient dispatches native children of its own session
 
 Date: 2026-10-14
-Status: accepted (supersedes ADR 0010)
+Status: accepted (supersedes ADR 0010; amends ADR 0003)
 
 ## Context
 
@@ -77,11 +77,13 @@ confirm.
 **e. A batch lands once.** Four rules hold it, at orient's dispatch and in each child's preflight
 (orient § 8, Double-dispatch guard):
 
-1. *In flight stays out.* A task with a `dispatched:` stamp or an orient start claim ≤7 days old,
-   with no end line of the same run and job after it, is excluded and reported. One override
-   sequence re-dispatches it, the same everywhere: Lachy names it in the steering answer → orient
-   runs the journal lookup → a run in flight elsewhere that covers it is reported → Lachy names it
-   again → orient dispatches it in a new run dir and records the override.
+1. *In flight stays out.* A task with a `dispatched:` stamp or an orient start claim ≤7 days old
+   is excluded and reported unless an end line in the note names the same run and job, in any
+   order: run dirs are unique and never reused, so an end line written before a late stamp still
+   settles the task. One override sequence re-dispatches it, the same everywhere: Lachy names it in
+   the steering answer → orient runs the journal lookup → a run in flight elsewhere that covers it
+   is reported → Lachy names it again → orient dispatches it in a new run dir and records the
+   override.
 2. *One unique run dir per dispatch, and a lookup before `init`.* Each area has one gitignored home
    for its prompt files and run dirs, and an existing run dir or prompt file is never reused or
    overwritten. Before `init`, orient reads every journal in the home as data. Its own run is
@@ -89,20 +91,30 @@ confirm.
    in the same config dir, or, wherever the peer list cannot decide, while the clock says it is
    live; otherwise it is abandoned, reported, and stops blocking. A foreign run is never called,
    edited, moved or advanced.
-3. *Stamp right after bind.* The `dispatched:` stamp and a dispatch line naming the run, job, child,
-   lead, model and effort are written after `bind`, before the next spawn.
-4. *Every prompt carries the Twin check.* Its header names the dispatch's `issued:` instant, its
-   run, job, lead, covered notes and owned paths. Before its first edit the child stops on any
-   live-twin signal in the covered notes, probes only its owned paths, and writes a start claim.
+3. *Stamp right after bind.* The spawn returns the child's ID before the child works (on Claude, a
+   background Agent call, `run_in_background: true`; a foreground call returns only after the
+   child's end line). The `dispatched:` stamp and a dispatch line naming the run, job, child, lead,
+   model and effort are written after `bind`, before the next spawn, and a note that already holds
+   that run and job's end line gets none.
+4. *Every prompt carries the Twin check.* Its header names the dispatch's `issued:` instant (UTC,
+   whole seconds), its run, job, lead, covered notes and owned paths. Before its first edit the
+   child stops on any live-twin signal in the covered notes, probes only its owned paths, and
+   writes a start claim.
 
 This narrows the grilled rule that `git status` dirt in the target surface stops a child. Whole-path
 dirt would stop children on the leftover partials the old emission bullet ("reconcile before
 working") told them to reconcile, and the shared vault is always dirty. A child stops on an owned
-path written after `issued:` (`find -newermt`), deleted, or, in a code repository, committed to
-since `issued:`; that still catches a live twin that ignores the protocol. A dirty owned path
-written only before `issued:` is an aborted partial, reconciled by building on it or reporting it.
-Residual: a live twin whose last write predates `issued:` reads as a partial. Reconciling never
-discards anything (no `checkout`, `reset`, `clean` or `stash`), so its work survives.
+path written after `issued:`, deleted, or, in a code repository, committed to since `issued:`;
+that still catches a live twin that ignores the protocol. The write test is
+`find <path> -path '*/.git' -prune -o -newer <ref> -print` against a reference file that
+`touch -d <issued:>` stamps: macOS `find` cannot parse an ISO time for `-newermt`, and Claude
+Code's `find` wrapper refuses one with a fraction, so the probe uses `-newer` and `issued:` is
+taken at whole seconds. The prune keeps `.git/` out, because any `git status` rewrites the index.
+A probe that errors is a stop, never "nothing newer": read as no signal, it would let a child
+build on a live twin's edits, the 2026-09-14 clobber. A dirty owned path written only before
+`issued:` is an aborted partial, reconciled by building on it or reporting it. Residual: a live
+twin whose last write predates `issued:` reads as a partial. Reconciling never discards anything
+(no `checkout`, `reset`, `clean` or `stash`), so its work survives.
 
 **f. Tier and effort.** Each job names the top rung's `model` and `effort` from the operator's
 ladder (`skills/_shared/scripts/ladder.py`, ADR 0029, which superseded ADR 0024's `top-tier` file
@@ -125,8 +137,9 @@ was inherited. A refused ladder blocks every batch, and their prompts are kept.
 
 - `CONTEXT.md` (its session-lane entry, **Batch**, **Dispatch artefact** and **`dispatched:`
   stamp**) still describes cc-* batches and the no-cmux fallback, and this change deliberately
-  leaves it. The protocol 4 redesign that was to rewrite it was retired unlanded (THREAD.md), so a
-  follow-up task owns the rewrite.
+  leaves it. The protocol 4 redesign that was to rewrite it was retired unlanded (THREAD.md), and
+  no task owns the rewrite yet: until Lachy files one, those four entries stay stale and nothing
+  tracks them.
 - The Codex orient adapter (`~/.agents/skills/orient/SKILL.md`, outside this repo) still says cmux.
 - ADR 0003's launch conclusion, superseded by ADR 0010, now ends here.
 - The lead must stay open until its children return. A lead that ends early loses their envelopes;

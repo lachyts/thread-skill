@@ -119,9 +119,9 @@ one line per Retro.
   continuation: handoff docs are durable and self-cleaning, and close refreshes
   a pending one instead of proposing vault tasks that restate it (amends 0011).
   `0023` — orient dispatches native children of its own session: one launch
-  model, collect-and-accept, a batch lands once (supersedes 0010). `0024` —
-  the operator's top tier sets every rollout's ceiling (amends 0016;
-  superseded by 0029 before it was built). `0025` — master moves only by green
+  model, collect-and-accept, a batch lands once (supersedes 0010; amends
+  0003). `0024` — the operator's top tier sets every rollout's ceiling
+  (amends 0016; superseded by 0029 before it was built). `0025` — master moves only by green
   PR, owner included. (0018–0022 are reserved: they are on the protocol 4
   branch.) `0026` — finished work closes itself (amends 0011). `0027` — orient is the one shaping
   verb (amends 0003, 0009, 0010 and 0026; retires `split` and `gather`).
@@ -215,7 +215,8 @@ final check that the run wrote nothing into the tree):
   `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files, no SKILL.md body holds a
   positional `$N` (Claude Code substitutes skill arguments into them; logic that needs one lives in a
   script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), orient's
-  target resolution before it reads and its one learned `repos:` write (`orient-target.test.mjs`), and
+  target resolution before it reads and its one learned `repos:` write (`orient-target.test.mjs`),
+  orient's one launch model and its double-dispatch guard (`orient-launch-model.test.mjs`), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
   (`handoff-one-writer.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
   and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
