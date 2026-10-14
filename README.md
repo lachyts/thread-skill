@@ -63,11 +63,18 @@ integrates each approved task and merges it:
 
 1. **Plan-gate** — an autonomous judge approves the implementation plan before
    code is written (skippable per rollout; a plan's declared gated inputs
-   always pause for human sign-off — ADR 0008).
+   pause the task for sign-off, never the rollout; a spend gate within the
+   standing approval passes — ADR 0008, ADR 0034).
 2. **Ralph-style verifier retry** — the implementer re-runs the rollout's
    verifier and self-corrects until green or the iteration budget is spent.
 3. **Master review-and-revise** — a master-side reviewer accepts or sends the
    task back with feedback, up to `max_review_rounds`.
+
+The standing approval is off until `~/.config/thread/rollouts.toml` sets
+`spend_approval_usd` (whole US dollars) under `[defaults]`; set it only after
+installing a version that knows the key, because an older `rollout-settings.py`
+refuses it, and every rollout's settings with it. `skills/_shared/scripts/gated_inputs.py`
+holds the exposure reading it applies and schedule's gated-input sweep.
 
 Worktree isolation is explicit: each task runs in
 `<repoPath>/.claude/worktrees/<slug>`. Merges go **only** through

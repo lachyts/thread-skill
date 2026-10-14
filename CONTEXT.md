@@ -351,17 +351,22 @@ through time, from attention to merged PRs. Terms only — no implementation.
   supply; the decision must be written into the note before re-dispatch.
   _Avoid_: manual block, human block.
 - **Gated input** — a human authorisation a task's plan declares up front
-  (API spend with a cap, credentials, an irreversible action). Always pauses
-  for sign-off, even in continuous mode (ADR 0008). Once signed, the task
+  (API spend with a cap, credentials, an irreversible action). Sets its task
+  aside for sign-off, never the rollout (ADR 0008, ADR 0034). Once signed, the task
   resumes its gate-pending call on the signed plan while the lead holds its
   handle; a stop at Integration rejoins the Integration queue; otherwise it
   takes a fresh call behind a warning (execute § 3.7).
   _Avoid_: approval item, spend gate, pre-approval.
 - **Standing approval** — Lachy's one-off sign-off for every spend Gated input
   whose **total exposure** is at most US$50: the cap summed across Logins,
-  a recurring cap counted per month, US$50 itself included. Such a gate
-  passes without him and is recorded as auto-approved; credential and
-  irreversible gates never pass under it.
+  a recurring cap counted per month, US$50 itself included. The limit is
+  the Rollout settings key `spend_approval_usd` (a task may carry its own,
+  an ask-ahead answer; built-in 0, which is off). Exposure counts every USD
+  amount the gate names; a shape it cannot price asks. Such a gate passes
+  without him (`approve-gates --standing`, run by the lead) and is recorded
+  in `## Approved gates` with `(approved <date> under the standing approval:
+  total exposure …)`, the task's ceiling, never a target; credential and
+  irreversible gates never pass under it (ADR 0034).
   _Avoid_: spend envelope, auto-approve limit.
 - **Human fix** — the one stated act that moves a set-aside task no agent may
   move (sign a gate, decide a refused descope, restore an Integration with no
@@ -440,6 +445,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Hard: stop now; worktrees keep the work. _Avoid_: suspend, halt, abort.
 - **Reinstate** — resuming a paused rollout: plain `execute` on the rollout
   note. No separate resume command. _Avoid_: restart, relaunch, unpause.
+- **Sign-off pause** — the pause execute's sign-off form stamps (`paused:`
+  with `paused_for: sign-off`) once only gate-pending tasks and their queued
+  dependants remain: the run finished everything else and closed, and the
+  rest waits on Lachy's sign-off (ADR 0034). It keeps the repo's one
+  unfinished rollout until each gate is signed or deferred; its Reinstate
+  runs the Standing approval again and refuses while a gate is unsigned.
+  _Avoid_: stuck, gate hold.
 
 ## Run record and tuning
 
@@ -471,7 +483,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `ladder.toml`'s sibling: `[defaults]`, the `[guardrails]` bounds and
   per-repo `[repo."owner/name"]` tables (keyed by the GitHub origin),
   resolved by `rollout-settings.py` and stamped into each rollout note by
-  schedule. _Avoid_: hardcoded defaults, config.
+  schedule, except `auto_retries` and the Standing approval's
+  `spend_approval_usd`, which the execute verbs resolve themselves and
+  schedule never stamps. _Avoid_: hardcoded defaults, config.
 
 ## Model ladder
 

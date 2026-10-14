@@ -107,6 +107,10 @@ stamped pause, where no call is live; otherwise they wait for the stamp or the l
   RACE / UNVERIFIED task has its `RACE decided:` line: its *Cold resume* runs `resume` first.
 - Beyond the every-mode writes it never runs `hand-back`, `approve-gates`, § 3d's `descope`, the raise, `resume`
   or the loop, and it never clears the stamp or the flag.
+- One exception, the sign-off pause (ADR 0034): under a stamped pause whose `paused_for` is `sign-off` (execute
+  § 4.5 step 5's form: the run finished everything else and closed, and nothing is live), repair may also run
+  `approve-gates` on Lachy's sign-off, and `defer` a waiting task he declines; then "reinstate with
+  `/thread:execute [[<rollout>]]`". Every other pause is unchanged.
 - Why: `next` stamps `paused:` only once nothing runs, awaits Integration or integrates. A hand-back during the
   drain would put a task back into exactly those states, and the live lead would integrate and merge it after
   Lachy asked to pause. Under a stamped pause, the reinstate decides what restarts.
