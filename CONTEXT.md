@@ -209,6 +209,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   the queue orders runs, and the engine never reads `phase:`. One phase = one
   rollout by convention. A phase is a plan, never a task (ADR 0005).
   _Avoid_: stage, iteration.
+- **Vault grammar** — the phase/task filename pattern (whole or fractional phase
+  numbers, `p3`, `p3.5`) and the status sets (landed, active, review, hold, in
+  flight) the vault's readers classify by, defined once in
+  `skills/_shared/vault-grammar.md` (its § Readers names the readers not yet
+  adopted). _Avoid_: naming scheme.
 - **Reshuffle** — the usual reason a project is picked up after time away:
   re-examine *all* its open work (stray bugs, brain dumps, loose tasks and
   unstarted phases alike), rethink what the next steps are, and leave it

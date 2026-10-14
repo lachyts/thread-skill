@@ -167,13 +167,11 @@ and Drift and the slots for each swept project.
 - **Recency**: overdue `scheduled:`/`due:` dates; note staleness
   (last-modified); `git status`/`git log -3` in each project root — dirty
   trees also surface aborted-session partial edits worth flagging.
-- **In flight** (the one definition; the reshuffle's reach tiers use it): a task stamped
-  `rollout:` whose rollout note is still live (the link resolves to a note directly in
-  `Work/Tasks/`), a `dispatched:` stamp or an orient start claim ≤7 days old unless an end line
-  in the note names the same run and job, written before or after it (the Vault body read finds
-  them; § 8 Double-dispatch guard, rule 1), or `status: in-progress` (TaskNotes' own spelling),
-  `in_progress` or `review`; a phase with any such member. Report it as such; never re-batch it
-  (§ 7) and never reshuffle it.
+- **In flight** (the reshuffle's reach tiers use it too): as defined once in
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/vault-grammar.md` § In flight, which also holds the
+  phase/task filename pattern and the status sets this sweep reads. The orient start claims and end
+  lines it weighs are the run lines the Vault body read finds (§ 8 Double-dispatch guard, rule 1).
+  Report it as such; never re-batch it (§ 7) and never reshuffle it.
 - **Open forks** (the one definition; §§ 3, 5, 6, 7 and 10 use it): each fork a task's latest
   orient end line names (`fork for Lachy: <fork>`, § 8 End-of-run updates) stays open until an
   `orient ruling: <fork> → <ruling>` line in its `## Notes`, timed after that end line, rules on
