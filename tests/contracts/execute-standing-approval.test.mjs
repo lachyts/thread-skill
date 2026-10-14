@@ -5,7 +5,8 @@
 // sub-step (first in the step, skipped under a pause, judged once per session key, before the turn's needs-you items,
 // counted as launched); the halt guard (awaiting-sign-off goes to step 5's sign-off form; only an UNVERIFIED stops a
 // cool-down); step 5's sign-off form (await-sign-off, no `status: done`, no retire, no archive move, a `not landed`
-// waiting bullet with the dependants counted, why reconcile-project never misreads it, and no question tool); § 6.5's
+// waiting bullet with the dependants counted, why reconcile-project never misreads it, a phase-close follow-on's
+// re-run commands on the live note path that a later full ceremony re-points, and no question tool); § 6.5's
 // halted-turn exception and (e) exclusion; § 7's designed awaiting-sign-off stop and a stuck bullet with no gate
 // reason; *Reinstate* under a sign-off pause. In skills/schedule/SKILL.md: § 3.6's sweep (the recall floor, never the
 // verdict, every dismissal listed) and its ask-ahead, § 7's `## Decisions (asked ahead <date>)` section and its
@@ -58,6 +59,7 @@ function checkStanding(f) {
   const guard = collapse(s45raw.split('\n').find((l) => /^ {3}5\. \*\*Halt guard/.test(l)) ?? '').trim()
   const step5 = collapse(s45raw.slice(Math.max(0, s45raw.indexOf('5. **Completion.**')), s45raw.indexOf('**Lost call.**')))
   const form = step5.slice(Math.max(0, step5.indexOf('**Completion awaiting sign-off (ADR 0034).**')))
+  const ceremony = step5.slice(0, Math.max(0, step5.indexOf('**Completion awaiting sign-off (ADR 0034).**')))
   const standing = labelled(f.execute, S37, 'Standing approval (ADR 0034).')
   const reinstate = labelled(f.execute, S45, 'Reinstate (resuming a paused rollout).')
   const turn = labelled(f.execute, S65, 'The turn.')
@@ -92,7 +94,9 @@ function checkStanding(f) {
 
   // form: the sign-off form closes the run but leaves the rollout open and paused: await-sign-off, no done stamp, no
   // retire, no archive move; its waiting bullet carries `not landed`, the dependants are counted, not named, and its
-  // rationale says why reconcile-project never misreads the log, now or once a later ceremony archives it.
+  // rationale says why reconcile-project never misreads the log, now or once a later ceremony archives it. A phase-close
+  // follow-on the form files points its re-run commands' `--rollout` at the live note (the form never moves it, so the
+  // full ceremony's archive path would exit 1), and the full ceremony re-points them when it archives the note.
   if (!form.includes('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py await-sign-off --rollout <rollout-note>`') ||
     !form.includes("It skips the `status: done` stamp, the Post-rollout follow-ons, the canary's `retire` and the archive move") ||
     !form.includes('`- [[<slug>]] not landed: awaiting your sign-off: <gate verbatim>`') ||
@@ -100,6 +104,8 @@ function checkStanding(f) {
     !form.includes('The dependants are counted, not named') || !form.includes('never reads this log') ||
     !form.includes('A later full ceremony archives the note') ||
     !form.includes('schedule picks up only `status: open` tasks, so an archived rollout would strand the gate-pending task') ||
+    !form.includes("a follow-on filed or appended to here (*Failure*) points each re-run command's `--rollout` at the live `Work/Tasks/<rollout-slug>.md`, never the archive path, because this form never moves the note (a later full ceremony re-points it at the post-move path)") ||
+    !ceremony.includes('The full ceremony (never the sign-off form below) also re-points at the post-move path every re-run command whose `--rollout` still names the live `Work/Tasks/<rollout-slug>.md`') ||
     !before(form, 'the phase close', 'await-sign-off --rollout') || !before(form, 'await-sign-off --rollout', '`/thread:close`')) {
     fails.push('form')
   }
@@ -224,6 +230,13 @@ test('control: a waiting bullet without `not landed` fails form', () => {
     'form', 'landing evidence')
   only('execute', "It skips the `status: done` stamp, the Post-rollout follow-ons, the canary's `retire` and the archive move",
     "It also stamps `status: done` and archives the note", 'form', 'archived')
+})
+
+test("control: a sign-off form whose phase-close follow-on uses the archive path, or a ceremony that never re-points it, fails form", () => {
+  only('execute', "points each re-run command's `--rollout` at the live `Work/Tasks/<rollout-slug>.md`, never the archive path",
+    "points each re-run command's `--rollout` at `Work/Tasks/Archive/Rollouts/<rollout-slug>.md`", 'form', 'archive path in the form')
+  only('execute', ' The full ceremony (never the sign-off form below) also re-points at the post-move path every re-run command whose `--rollout` still names the live `Work/Tasks/<rollout-slug>.md` (the sign-off form writes them so), since the move below archives the note.',
+    '', 'form', 'no re-point in the full ceremony')
 })
 
 test('control: a form that asks through the question tool fails question-tool', () => {
