@@ -14,6 +14,8 @@ of the file format:
     max_iterations = 3
     max_plan_rounds = 3
     auto_retries = 2             # execute's automatic retries of a set-aside task (p16-4, ADR 0033); 0 disables
+    spend_approval_usd = 50      # the standing approval (ADR 0034): a spend gate whose total exposure is at most
+                                 # this many US dollars passes without a person; 0 (the built-in) is off
 
     [guardrails]                 # the Retro's bounds, machine-wide only
     tokens_per_merge_pct = 25    # tokens per merge may rise at most +25%
@@ -24,8 +26,8 @@ of the file format:
     [repo."lachyts/thread-skill"] # one repo, keyed by its GitHub origin's owner/name
     parallel_ceiling = 5
 
-The only top-level keys are `defaults`, `guardrails` and `repo`. A repo table holds only the five rollout
-keys (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries`). Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form.
+The only top-level keys are `defaults`, `guardrails` and `repo`. A repo table holds only the six rollout
+keys (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries` and `spend_approval_usd`). Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form.
 
 Repo keys. A repo key must be quoted (`[repo."owner/name"]`) and is an `owner/name` by land.sh's slug rule
 (`[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+`, a name that is not all dots), never ending `.git`. It is
@@ -38,15 +40,19 @@ was given, under ORIGIN_TIMEOUT seconds, in its own process group (killed whole 
 Precedence for each rollout key (the callers apply the first two): task frontmatter → rollout frontmatter →
 `[repo."<slug>"]` (source `file:repo`) → `[defaults]` (`file:defaults`) → `built-in`. Guardrail sources are
 `file:guardrails` or `built-in`. Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
-max_plan_rounds 3, auto_retries 2; guardrails 25 / 5 / 10 / 0. `auto_retries` is no Tuning key: schedule does not
-stamp it and a Retro never proposes it; execute's `lead-integrate.py inputs` and `reconcile-rollout.py
-auto-retry` resolve it themselves (p16-4).
+max_plan_rounds 3, auto_retries 2, spend_approval_usd 0; guardrails 25 / 5 / 10 / 0. `auto_retries` is no Tuning key:
+schedule does not stamp it and a Retro never proposes it; execute's `lead-integrate.py inputs` and
+`reconcile-rollout.py auto-retry` resolve it themselves (p16-4). Nor is `spend_approval_usd` (ADR 0034): schedule
+shows it but never stamps it on a rollout, and `reconcile-rollout.py approve-gates --standing` resolves it itself (task
+`spend_approval_usd:`, then rollout, then this file, then the built-in 0, which is off: the approval lives in this
+file, never in the skills, so a fresh install approves nothing). Write the key only once the installed plugin knows
+it: an older rollout-settings.py refuses an unknown key, and every rollout's settings with it.
 
 Validation (ADR 0016: anything unknown or wrong is refused, never dropped):
 - an unknown top-level key or table key, `defaults` or `guardrails` that is not a table, a `repo` that is
   not a table, a value under `repo` that is not a table (named by its key: `[repo."o/r"] must be a table`);
-- a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys, 0 for `auto_retries` (a
-  boolean, float or string is refused, and so is 0 for a Tuning key);
+- a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys, 0 for `auto_retries` and
+  `spend_approval_usd` (a boolean, float or string is refused, and so is 0 for a Tuning key);
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
   integer >= 0);
 - a bad or case-duplicate repo key.
@@ -62,7 +68,8 @@ Output. Exit 0 and one JSON line on stdout:
 
     {"path": "<expanded path>", "file": true|false, "repo": "<owner/name>"|null,
      "settings": {"parallel_ceiling": {"value": 4, "source": "built-in"}, "max_review_rounds": {...},
-                  "max_iterations": {...}, "max_plan_rounds": {...}, "auto_retries": {...}},
+                  "max_iterations": {...}, "max_plan_rounds": {...}, "auto_retries": {...},
+                  "spend_approval_usd": {...}},
      "guardrails": {"tokens_per_merge_pct": {"value": 25, "source": "built-in"}, ...}}
 
 `repo` is the origin's owner/name as land.sh printed it (case kept), or null when no repo table could apply:
@@ -75,8 +82,8 @@ and this python has none. On failure stdout is empty and stderr carries one line
 `rollout-settings: --repo <p>: <reason>`.
 
 Importable: resolve(repo=None, path=None), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
-run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries`: every key a
-`settings` object holds), MINIMUM, GUARDRAIL_KEYS, ORIGIN_TIMEOUT, default_path(), SettingsError(reason,
+run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries` and
+`spend_approval_usd`: every key a `settings` object holds), MINIMUM, GUARDRAIL_KEYS, ORIGIN_TIMEOUT, default_path(), SettingsError(reason,
 line=None, code=2, subject=None).
 """
 import argparse
@@ -94,11 +101,15 @@ LAND_SH = os.path.join(HERE, "land.sh")
 
 # The four Tuning keys (a Retro proposes them; run_record.py's TUNING_KEYS is pinned to this tuple).
 KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
-# Every rollout key a table may hold and `settings` reports: the Tuning keys plus execute's automatic-retry budget.
-SETTING_KEYS = KEYS + ("auto_retries",)
-BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, "max_plan_rounds": 3, "auto_retries": 2}
-# The least valid value of each rollout key: a Tuning key is >= 1; `auto_retries: 0` disables automatic retries.
-MINIMUM = {"parallel_ceiling": 1, "max_review_rounds": 1, "max_iterations": 1, "max_plan_rounds": 1, "auto_retries": 0}
+# Every rollout key a table may hold and `settings` reports: the Tuning keys plus execute's automatic-retry budget and
+# the standing approval's limit in US dollars (ADR 0034; neither is Retro-tunable).
+SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd")
+BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, "max_plan_rounds": 3, "auto_retries": 2,
+            "spend_approval_usd": 0}
+# The least valid value of each rollout key: a Tuning key is >= 1; `auto_retries: 0` disables automatic retries;
+# `spend_approval_usd: 0` turns the standing approval off.
+MINIMUM = {"parallel_ceiling": 1, "max_review_rounds": 1, "max_iterations": 1, "max_plan_rounds": 1, "auto_retries": 0,
+           "spend_approval_usd": 0}
 GUARDRAIL_KEYS = ("tokens_per_merge_pct", "set_aside_rate_points", "conflict_rate_points", "quota_stalls")
 GUARDRAILS_BUILT_IN = {"tokens_per_merge_pct": 25, "set_aside_rate_points": 5, "conflict_rate_points": 10,
                        "quota_stalls": 0}

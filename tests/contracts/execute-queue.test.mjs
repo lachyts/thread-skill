@@ -142,7 +142,8 @@ function checkExecute({ skill, hooksJson, exists, template }) {
 
   // slots: a slot is a task's own call (a seeded revise holds one); Integration holds none; one Integration at a
   // time; a revise launches only below the ceiling counting this step's launches, else waits; next is re-run.
-  const s2sub = sub(/^\*\*Seeded revises/)
+  // Sub-step 2 opens with the Standing approval (ADR 0034), then the seeded revises.
+  const s2sub = sub(/\*\*Seeded revises \(automatic\)/)
   if (!slots.includes("A **slot** is one task's own Workflow call") || !/a seeded revise — held/.test(slots) ||
     !slots.includes('Integration holds **no slot**') || !slots.includes('One Integration runs at a time') || !s2sub ||
     !s2sub.text.includes('`slotsInUse` (live plus restarts) plus the revises already launched in this step is below `ceiling`') ||
@@ -164,7 +165,7 @@ function checkExecute({ skill, hooksJson, exists, template }) {
 
   // halt-guard: seeded revises < restart/start < the halt guard, which is the last sub-step before the turn ends;
   // it acts only with the lane free, no live call and nothing launched in sub-step 2; sub-step 1 defers `halt`.
-  const iRev = subs.findIndex((x) => /^\*\*Seeded revises/.test(x.text))
+  const iRev = subs.findIndex((x) => /\*\*Seeded revises \(automatic\)/.test(x.text))
   const iStart = subs.findIndex((x) => /`restart`, then each in `start`/.test(x.text))
   const iGuard = subs.findIndex((x) => /^\*\*Halt guard/.test(x.text))
   const guard = subs[iGuard]?.text ?? ''
@@ -387,11 +388,15 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   const coldR = labelled(skill, 'Cold resume.')
   const s7 = S(skill, S7)
   const s8 = S(skill, S8)
+  const stuck7 = collapse(skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: stuck`')) ?? '')
+  const signOff7 = collapse(skill.split('\n').find((l) => l.startsWith('- `next` reports `halt: awaiting-sign-off`')) ?? '')
   if (!s1.includes('`raceHold`') || !s1.includes('the lane is free') || !s1.includes('`reason="RACE undecided: [[<slug>]]"`') ||
     !s1.includes('An `UNVERIFIED` entry stays set aside like any other') ||
     !coldR.includes('Exit 3 means `resume` held back an undecided RACE or UNVERIFIED') || !coldR.includes('print the lines and go on') ||
     !s7.includes('`next` reports a `RACE` in `raceHold` while the lane is free') || !s7.includes('`reason="RACE undecided: [[task]]"`') ||
-    !before(s7, '`reason="UNVERIFIED undecided: [[task]]"`', '`reason="gated inputs await sign-off: …"`') ||
+    // ADR 0034: the stuck bullet names an UNVERIFIED first and no gate reason; a gate alone is § 7's awaiting-sign-off stop.
+    !stuck7.includes('`reason="UNVERIFIED undecided: [[task]]"`, checked first') || stuck7.includes('gated inputs await sign-off') ||
+    !signOff7.includes('`reason="awaiting sign-off: [[task]]"`') ||
     !s8.includes('`resume` flips merged PRs done and skips a held RACE or UNVERIFIED task, and `next` keeps a held task out of Integration')) {
     fails.push('race-hold')
   }
@@ -504,8 +509,10 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   // `autoRetryError` (§ 3's round-budget halt), acts only on `autoRetry: true`, runs the guarded verb with the two
   // assertions copied from that read (never resolved by hand), skips a plan-blocked key whose descope exited 3, notes an
   // `autoRetryAfter` and re-runs `next`. The halt guard ends a quota or infra cool-down `waiting` with its reason, which
-  // § 6 allows on `waiting`, but only while no gate-pending or UNVERIFIED task is set aside: with one, the `stuck` goes
-  // to § 7 (its reason, with the item in the report's `Needs you:` block, § 6.5), so a cool-down never hides a human's item; § 3 has the key's row (resolved by the verbs, never the lead); *Set aside* names the re-entry first;
+  // § 6 allows on `waiting`, but only while no UNVERIFIED task is set aside: with one, the `stuck` goes to § 7 (its
+  // reason, with the item in the report's `Needs you:` block, § 6.5), so a cool-down never hides a human's item. A
+  // gate-pending task never stops a cool-down (ADR 0034: a gate never holds the rollout; once only gates remain, step 5's
+  // sign-off form closes the run); § 3 has the key's row (resolved by the verbs, never the lead); *Set aside* names the re-entry first;
   // § 6 has the event line, the `Auto-retried:` report row, and step 5's Completion log copies the `auto-retry:` lines;
   // § 7's stuck halt waits for the retries; § 8 names the lead's verb and its route to repair; a Don't forbids a
   // hand-written retry, a hand-resolved budget and hand-written markers. Every block whose way back is Lachy's (its
@@ -526,8 +533,9 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !ar.includes('Note any `autoRetryAfter` (a quota or infra cool-down), with its `autoRetryClass`, for the halt guard') ||
     !ar.includes('each of its retries first waits a short cool-down, 15, then 60, then 240 minutes') ||
     !ar.includes('If any retry ran, re-run `next --running <the live slugs>`') ||
-    !guard.includes('A `stuck` while step 1.2 found an `autoRetryAfter` (a quota or infra cool-down), and no gate-pending or UNVERIFIED task among the set-aside entries, ends the turn `waiting` with `reason="<autoRetryClass> cool-down: [[<slug>]] retries at <autoRetryAfter>"`') ||
-    !guard.includes('With a gate-pending or UNVERIFIED task among them, a cool-down holds nothing back: the `stuck` goes to § 7 as usual') ||
+    !guard.includes('A `stuck` while step 1.2 found an `autoRetryAfter` (a quota or infra cool-down), and no UNVERIFIED task among the set-aside entries, ends the turn `waiting` with `reason="<autoRetryClass> cool-down: [[<slug>]] retries at <autoRetryAfter>"`') ||
+    !guard.includes('With an UNVERIFIED task among them, a cool-down holds nothing back: the `stuck` goes to § 7 as usual') ||
+    !guard.includes('A gate-pending task never stops a cool-down') ||
     !guard.includes("with the item in the report's `Needs you:` block, § 6.5)") ||
     !s6all.includes('`reason` appears only on `halted`, on a hold and on a retry cool-down') ||
     !arRow.includes('resolved by `lead-integrate.py inputs` and `reconcile-rollout.py auto-retry` themselves (built-in `2`)') ||
@@ -537,7 +545,7 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !s6all.includes('"[[task-q]] → auto-retry 1/2 (plan; feedback <sha>); restarting"') || !s6all.includes('Auto-retried: [[task-q]]') ||
     !s6all.includes('The `Auto-retried:` line lists every automatic retry this rollout has recorded (its `## Notes` `auto-retry:` lines)') ||
     !arLog.includes('the automatic retries copied from its `auto-retry:` lines') ||
-    !arStuck.includes("acted on only once step 1.2's *Automatic retry* re-entered nothing and found no cool-down, or found one with an UNVERIFIED or gate-pending task set aside") ||
+    !arStuck.includes("acted on only once step 1.2's *Automatic retry* re-entered nothing and found no cool-down, or found one with an UNVERIFIED task set aside") ||
     !never.includes("The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*)") ||
     !never.includes('a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair') ||
     !donts.includes('Never auto-retry unless `inputs` reports `autoRetry: true`, never pass a budget you resolved yourself') ||
@@ -825,10 +833,14 @@ test('control: a cold resume that halts on exit 3 fails race-hold', () => {
   only(sk('print the lines and go on, since the loop\'s step 1.1 holds them', 'halt with its lines'), 'race-hold', 'cold resume halts')
 })
 
-test('control: the gate-pending reason checked before UNVERIFIED fails race-hold', () => {
+test('control: a stuck bullet that names a gate reason fails race-hold', () => {
   const l = real.skill.split('\n').find((x) => x.startsWith('- `next` reports `halt: stuck`'))
-  const u = 'with an UNVERIFIED hold among them, `reason="UNVERIFIED undecided: [[task]]"`, checked first; '
-  only(sk(l, l.replace(u, '').replace(' — a **designed** pause', `; ${u.replace(', checked first; ', '')} — a **designed** pause`)), 'race-hold', 'UNVERIFIED late')
+  only(sk(l, l.replace('checked first; ', 'checked first; with a gate-pending task among them, `reason="gated inputs await sign-off: …"`; ')),
+    'race-hold', 'gate reason back on stuck')
+})
+test('control: § 7 without the awaiting-sign-off stop fails race-hold', () => {
+  const l = real.skill.split('\n').find((x) => x.startsWith('- `next` reports `halt: awaiting-sign-off`'))
+  only(sk(l + '\n', ''), 'race-hold', 'no sign-off stop')
 })
 
 test('control: a template budget that drifts from execute fails budget', () => {
@@ -938,7 +950,7 @@ test('control: an Automatic retry that acts on every set-aside fails auto-retry'
   only(sk('Act only on `autoRetry: true`: run', 'Act on each: run'), 'auto-retry', 'no autoRetry')
 })
 test('control: an Automatic retry before the Automatic descope fails auto-retry', () => {
-  const l = real.skill.split('\n').find((x) => x.startsWith('   2. **Seeded revises'))
+  const l = real.skill.split('\n').find((x) => x.startsWith('   2. **') && x.includes('**Seeded revises'))
   const desc = l.slice(l.indexOf('**Automatic descope'), l.indexOf(' **Automatic retry'))
   const retry = l.slice(l.indexOf(' **Automatic retry'))
   only(sk(l, l.replace(desc, '\u0000').replace(retry, '').replace('\u0000', retry.trim() + ' ' + desc)), 'auto-retry', 'retry first')
@@ -952,12 +964,16 @@ test('control: an Automatic retry that re-judges a descope refusal fails auto-re
 test('control: a cool-down that halts fails auto-retry', () => {
   only(sk('set-aside entries, ends the turn `waiting` with `reason="<autoRetryClass> cool-down', 'set-aside entries, halts with `reason="<autoRetryClass> cool-down'), 'auto-retry', 'cool-down halts')
 })
-test('control: a cool-down that waits over a gate-pending or UNVERIFIED task fails auto-retry', () => {
-  only(sk(', and no gate-pending or UNVERIFIED task among the set-aside entries,', ''), 'auto-retry', 'cool-down hides a gate')
+test('control: a cool-down that waits over an UNVERIFIED task fails auto-retry', () => {
+  only(sk(', and no UNVERIFIED task among the set-aside entries,', ''), 'auto-retry', 'cool-down hides an UNVERIFIED')
 })
-test("control: a cool-down that never routes a gate to § 7 fails auto-retry", () => {
-  only(sk(" With a gate-pending or UNVERIFIED task among them, a cool-down holds nothing back: the `stuck` goes to § 7 as usual (its `UNVERIFIED undecided` or `gated inputs await sign-off` reason, with the item in the report's `Needs you:` block, § 6.5), since a human is needed anyway, and the cooling task retries at the re-invocation after it.", ''),
+test("control: a cool-down that never routes an UNVERIFIED to § 7 fails auto-retry", () => {
+  only(sk(" With an UNVERIFIED task among them, a cool-down holds nothing back: the `stuck` goes to § 7 as usual (its `UNVERIFIED undecided` reason, with the item in the report's `Needs you:` block, § 6.5), since a human is needed anyway, and the cooling task retries at the re-invocation after it.", ''),
     'auto-retry', 'no § 7 route')
+})
+test('control: a gate-pending task that stops a cool-down fails auto-retry', () => {
+  only(sk(' A gate-pending task never stops a cool-down: the turn waits for the retry, and once only gates remain the queue ends in step 5\'s sign-off form.', ''),
+    'auto-retry', 'a gate stops the cool-down')
 })
 test('control: an infra retry with no cool-down fails auto-retry', () => {
   only(sk('; each of its retries first waits a short cool-down, 15, then 60, then 240 minutes (the last repeating), counted by the retries already spent', ''), 'auto-retry', 'no infra cool-down')
@@ -977,7 +993,7 @@ test('control: a Completion log that drops the auto-retry lines fails auto-retry
   only(sk(' the automatic retries copied from its `auto-retry:` lines (task, count, stage, feedback sha, any raise),', ''), 'auto-retry', 'no log copy')
 })
 test('control: a § 7 stuck halt that ignores the retries fails auto-retry', () => {
-  only(sk(", acted on only once step 1.2's *Automatic retry* re-entered nothing and found no cool-down, or found one with an UNVERIFIED or gate-pending task set aside, which a cool-down never holds back, §4.5 step 1.5", ''), 'auto-retry', 'stuck early')
+  only(sk(", acted on only once step 1.2's *Automatic retry* re-entered nothing and found no cool-down, or found one with an UNVERIFIED task set aside, which a cool-down never holds back, §4.5 step 1.5", ''), 'auto-retry', 'stuck early')
 })
 test('control: § 8 without the auto-retry sentence fails auto-retry', () => {
   only(sk(" The lead runs `reconcile-rollout.py auto-retry` itself too (§ 4.5 step 1.2's *Automatic retry*), a guarded deterministic verb with its own budget: a spent budget, a repeated fingerprint or a `needsHuman` question routes the task to repair.", ''),
@@ -1005,7 +1021,7 @@ test('control: a Recorded answer without the next re-run fails recorded-answer',
   only(sk(' After any hand-back, re-run `next --running <the live slugs>` and use that output from here on;', ''), 'recorded-answer', 'no next re-run')
 })
 test('control: a Recorded answer after the Automatic retry fails recorded-answer', () => {
-  const l = real.skill.split('\n').find((x) => x.startsWith('   2. **Seeded revises'))
+  const l = real.skill.split('\n').find((x) => x.startsWith('   2. **') && x.includes('**Seeded revises'))
   const recorded = l.slice(l.indexOf(' **Recorded answer'), l.indexOf(' **Automatic descope'))
   only(sk(l, l.replace(recorded, '') + recorded), 'recorded-answer', 'after the retry')
 })

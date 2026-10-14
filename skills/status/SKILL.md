@@ -91,7 +91,8 @@ are included), sorted by schedule order (each task's first wikilink on a list-it
 rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads these keys and no others:
 
 - top level: `paused` (the pause stamp; null when not paused), `pause_requested` (a soft pause is draining:
-  execute → *Pausing + reinstating a rollout*), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
+  execute → *Pausing + reinstating a rollout*), `pausedFor` (`sign-off` under execute § 4.5 step 5's sign-off
+  pause, ADR 0034: the run finished everything else and only gates wait on Lachy; null otherwise), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
   included), `progress`, `timeline` and `ladder`, plus `gitEnvHold` (the unacked git-env trips, each
   `{slug, kind, line}`; § 3's Git-env trip flag), `ceilingError` (why `ceiling` is null: an invalid
   `parallel_ceiling`, or an absent one `rollout-settings.py` could not resolve; null otherwise) and
@@ -259,7 +260,8 @@ offline too.
 
 ### 4. Render the situational report
 
-**Headline.** `[[<rollout>]] — <progress>`, with `progress` verbatim, plus `PAUSED since <stamp>`,
+**Headline.** `[[<rollout>]] — <progress>`, with `progress` verbatim, plus `PAUSED since <stamp>` (or, with
+`pausedFor: sign-off`, `AWAITING SIGN-OFF since <stamp>: [[a]], [[b]]`, the tasks set aside at `gate`),
 `pause pending (draining)`, `INCOMPLETE: <reason>`, `GIT-ENV HOLD: [[a]], [[b]]` (each slug `gitEnvHold`
 names, once) or the lineage (`supersedes [[<prior>]]`,
 `superseded by [[<successor>]]`, or § 1's reverse lineage: `superseded by [[N]], close-out interrupted` or
@@ -365,7 +367,9 @@ line at all.
 
 **Pauses.** A paused rollout renders as paused, not stalled. `paused` → headline `PAUSED since <stamp>`, list
 what's left as usual, and skip the stalled framing: the pause is intentional, so unlanded tasks are "waiting
-for reinstate", not blockers. `pause_requested` → `pause pending (draining)`: running task calls finish,
+for reinstate", not blockers. With `pausedFor: sign-off` the headline is `AWAITING SIGN-OFF since <stamp>` with
+the waiting tasks (each gate-pending task, its pending gates verbatim; its queued dependants "waiting on it"):
+the run finished everything else and closed, and the rest is Lachy's sign-off. `pause_requested` → `pause pending (draining)`: running task calls finish,
 approved tasks integrate and merge, nothing new starts, and once nothing runs, awaits Integration or
 integrates, the lead's next step stamps `paused:`.
 
@@ -451,7 +455,9 @@ Keep the whole report scannable: it's a glance, not a wall of text.
    ahead of every reinstate or resume: only its § 3e ack, on Lachy's word, lifts the hold.
 8. `paused` → "reinstate with `/thread:execute [[<rollout>]]`". For drift independent of the pause, add
    `/thread:repair [[<rollout>]]`, which under a pause only records escalations and decisions and defers: it
-   never hands back.
+   never hands back. With `pausedFor: sign-off` → "sign off each waiting gate (or /thread:repair to defer),
+   then /thread:execute [[<rollout>]]; until then it is this repo's one unfinished rollout" (execute's
+   *Reinstate* runs the standing approval first, then `clear-pause`, which refuses while a gate is unsigned).
 9. `pause_requested` → "the live lead drains it; nothing to do." Repair may only record escalations and
    decisions, or defer. Check `/workflows` in the owner session (`<owner tag>`): if no run shows there, that
    session has ended, or no task carries an `owner:`, nothing is draining it, and
