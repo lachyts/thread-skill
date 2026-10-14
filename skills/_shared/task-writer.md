@@ -43,13 +43,14 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/next-action.py captures \
 
 It lists the thread captures — open, `thread`-tagged tasks directly under
 `Work/Tasks/` (inline or block-list `tags:`) — one
-`capture <task> <status> <match,…>` row each, the match adding `slug` or
+`capture <task> <status> <match,…>` row each, the match adding `marked`
+when the task carries § 4's `capture: continuation`, and `slug` or
 `thread-file` when the capture is named `<slug>` or names the THREAD.md. A
 follow-up or rollout task that merely links the THREAD.md is not a capture
 and is never listed. Then read the captures: one whose slug matches, or
 whose Notes link the same `THREAD.md`, or whose resume prompt describes the
 same work. Found → **update it in place**: refresh the summary + resume prompt, set/move/remove
-`scheduled:`, rewrite § 4b's two fields, leave `captured:` as the original date. Never write a second
+`scheduled:`, rewrite § 4b's two fields, add `capture: continuation` if it lacks it, leave `captured:` as the original date. Never write a second
 task for the same thread. Re-deferring is a reschedule, not a new capture.
 
 ## 3. Resolve the day (`defer` only)
@@ -113,6 +114,7 @@ topic (`narcissus-mirror-shader-fix`, not `continue-working-on-thing`).
 ```yaml
 ---
 tags: [task, <area>, thread]
+capture: continuation          # the writer's marker — always, stash and defer alike
 status: open
 priority: normal
 projects: ["[[<Project>]]", "[[<Area>]]"]
@@ -135,6 +137,13 @@ launch: <cc-* alias>           # qualifying tasks only — OMIT when no alias ap
 - `thread` marker tag = this is a thread capture; makes dateless stashes
   queryable (`/weekly`'s Stashed-threads pass depends on it). Documented in
   `_shared/knowledge/obsidian-schema.md`.
+- `capture: continuation` = the writer's marker: this task is the thread's
+  set-down next move, written by stash or defer. The `thread` tag alone does
+  not say that (a backlog task can carry it and the thread link too), so
+  `thread:handoff` § Open captures supersedes **only** a task carrying this
+  line. Only this spec writes it; a § 2 re-capture adds it to a capture
+  written before the marker existed. Nothing else (a close follow-up, a
+  rollout or phase task) ever carries it.
 - Typed values: dates as `YYYY-MM-DD`, wiki-links quoted.
 - `next_action:` is not in this template: § 4b's script adds it to every
   stash and defer, quoted safely. Don't hand-write it.

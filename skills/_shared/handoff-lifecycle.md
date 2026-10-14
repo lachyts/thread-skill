@@ -96,7 +96,7 @@ The single definition of the `state:` transitions every continuity route applies
 |---|---|---|
 | `stash` | `parked` | `## Parked` |
 | `defer` | `paused` | `## Paused` |
-| `handoff` | `active`; Resume instructions become the pointer `Read <abs doc path> first`; open thread captures linked to this thread are closed as superseded (handoff **Open captures.**) | `## Active` |
+| `handoff` | `active`; Resume instructions become the pointer `Read <abs doc path> first`; open marked captures (`capture: continuation`) linked to this thread are closed as superseded, unmarked ones left open and reported (handoff **Open captures.**) | `## Active` |
 | pickup: `/thread:open [[<task>]]`, `/thread:open <handoff doc>`, or `/thread:open <slug>` whose Resume points at a pending doc | `active` when it reads `parked` or `paused`; otherwise unchanged | `## Active` |
 | `close`, `/thread:open save` | unchanged; `done` only when Lachy says the thread is finished | `## Done` when set |
 | creation | `active` | `## Active` |
