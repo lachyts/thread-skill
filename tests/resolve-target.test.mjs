@@ -564,6 +564,27 @@ test('learn: a non-git dir, by absolute or ~/ form', () => {
   assert.match(read(a, gig), /^ {2}- ~\/Desktop\/sketch$/m)
 })
 
+test('learn: ~/.agents is an umbrella and each skill names itself, with no repos: entry under ~/.agents', () => {
+  // The live vault's ~/.agents/skills/ab and ~/.agents/skills/method declarations are gone here, so nothing a note
+  // declares frames ~/.agents/skills: the umbrella and the frame must hold on their own.
+  const vault = makeVault({
+    [`${P}/AI/Bake-off Model Rails.md`]: proj('AI', '\nrepos:\n  - ~/repos/workspaces\naliases:\n  - bakeoff-model-rails'),
+    [`${P}/AI/Method Skill.md`]: proj('AI', '\nrepos:\naliases:\n  - method\n  - method-skill'),
+  })
+  const unpack = `${P}/AI/Unpack Skill.md`
+  let r = at(h('.agents/skills/unpack'), { vault })
+  assert.deepEqual([r.outcome, r.rung, r.dir_anchor, names(r)[0], r.learn_dir],
+    ['none', 'directory-name', null, 'Unpack Skill', '~/.agents/skills/unpack'])
+  assert.match(r.reason, /holds unpack/, 'the skill names itself, never .agents')
+  for (const cwd of [h('.agents'), h('.agents/skills')]) assert.equal(at(cwd, { vault }).learn_dir, null, cwd)
+  for (const dir of [h('.agents'), '~/.agents', h('.agents/skills')]) refused(['--learn', dir, unpack], /umbrella/, { vault })
+  learn('~/.agents/skills/unpack', unpack, vault)
+  resolved(at(h('.agents/skills/unpack'), { vault }), target('project', 'Unpack Skill', unpack, 'AI', 'AI'), 'directory')
+  r = at(h('.agents/skills/method'), { vault })
+  assert.deepEqual([r.outcome, r.rung, names(r)[0], r.learn_dir], ['none', 'directory-name', 'Method Skill', '~/.agents/skills/method'],
+    'one learned skill never claims its siblings')
+})
+
 test('learn: every directory the resolver would not name is refused, and the vault is untouched', () => {
   const vault = makeVault()
   const gig = `${P}/2D/Gig Posters.md`
@@ -576,7 +597,8 @@ test('learn: every directory the resolver would not name is refused, and the vau
     [h('Projects/_archive'), /_-prefixed/],
     [h('Projects/Narcissus/_sources'), /_-prefixed/],
     [h('repos/tools'), /area directory/],
-    [h('.agents'), /holds other projects/],
+    [h('.agents'), /umbrella/],
+    [h('.agents/skills'), /umbrella/],
     [HOME, /umbrella/],
     [h('repos/workspaces/animately-workspace'), /no learnable directory here/],
     [h('repos/tools/thread-skill-rollout/docs'), /the resolver names ~\/repos\/tools\/thread-skill-rollout for this directory/],

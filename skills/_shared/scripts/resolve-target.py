@@ -48,12 +48,13 @@ directions' best-token means; a target scores its best key. Any exact key resolv
 best below FLOOR is `none`; else a best MARGIN clear of the runner-up resolves; else the top three ask.
 
 The own directory. A directory is named by its own directory O: the component just below the deepest frame
-holding it (a ~/Projects child, an _archive dir, a workspaces parent, the parent of a declared entry, or an
-area-named dir at or above the git root), or its git root when that is deeper; with no frame, its git root, else the directory itself.
-So a dated dir inside the ~/Projects umbrella repo names itself, never ~/Projects. `learn_dir` is O when it
-is under HOME, no umbrella (HOME, ~/Projects, a workspaces parent) or ancestor of one, declared by no note,
-not area-named or _-prefixed, and holds no declared entry or workspace. A declared directory, a matched
-workspace root and a matched area directory have none.
+holding it (a ~/Projects child, an _archive dir, ~/.agents/skills, a workspaces parent, the parent of a
+declared entry, or an area-named dir at or above the git root), or its git root when that is deeper; with
+no frame, its git root, else the directory itself. So a dated dir inside the ~/Projects umbrella repo, or a
+skill inside ~/.agents, names itself, never the umbrella. `learn_dir` is O when it is under HOME, no
+umbrella (HOME, ~/Projects, ~/.agents, ~/.agents/skills, a workspaces parent) or ancestor of one, declared
+by no note, not area-named or _-prefixed, and holds no declared entry or workspace. A declared directory, a
+matched workspace root and a matched area directory have none.
 
 --learn <dir> <note> appends <dir>, as "~/...", to the note's `repos:` when <dir> is exactly the learn_dir
 this script gives for it. <note> is a live project note by name or vault path (the path when two notes share
@@ -130,6 +131,8 @@ class Home:
     def __init__(self):
         self.root = real(os.path.expanduser("~"))
         self.projects = os.path.join(self.root, "Projects")
+        self.agents = os.path.join(self.root, ".agents")
+        self.skills = os.path.join(self.agents, "skills")
 
     def tilde(self, p):
         if p == self.root:
@@ -508,7 +511,7 @@ class Resolver:
             return None, "no directory of its own"
         if not within(o, home.root):
             return None, "%s is outside HOME" % o
-        umbrellas = {home.root, home.projects} | {os.path.dirname(w) for w in roots}
+        umbrellas = {home.root, home.projects, home.agents, home.skills} | {os.path.dirname(w) for w in roots}
         if any(within(u, o) for u in umbrellas):
             return None, "%s is an umbrella directory" % home.tilde(o)
         owners = [t for e, t in entries if e == o]
@@ -532,6 +535,7 @@ class Resolver:
         while home.below(d):
             if (os.path.dirname(d) == home.projects
                     or (os.path.basename(d) == "_archive" and within(d, home.projects))
+                    or d == home.skills
                     or d in parents
                     or ((G is None or within(G, d)) and self.index.anchor_named(os.path.basename(d)))):
                 return d
