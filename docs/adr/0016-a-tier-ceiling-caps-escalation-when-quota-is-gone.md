@@ -2,9 +2,11 @@
 
 Date: 2026-09-17
 Status: accepted
-*(Amended by ADR 0024, 2026-09-26: a standing operator top tier is a second ceiling source, and
-under it a capped block is a wall, not a wait for quota.)*
-*(Amended by ADR 0029, proposed.)*
+*(Amended by ADR 0024, 2026-09-26: a standing operator choice is a second reason for the ceiling,
+beside exhausted quota.)*
+*(Amended by ADR 0029, 2026-09-30: the ceiling is the top rung of the operator's ladder,
+`~/.config/thread/ladder.toml`, in place of `args.maxTier` and the rollout's `max_tier:`; exhausted
+quota is an edit to that file, and `tierCapped` is retired.)*
 
 ## Context
 
