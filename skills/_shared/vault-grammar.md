@@ -2,9 +2,10 @@
 
 The one definition of how a vault note's filename places it in a phase and how its `status:` reads.
 `reconcile-project.py`'s drift detector, execute's phase-close ceremony, orient § 2's sweep and the
-reshuffle's R1 all read the vault through it, so they classify the same note the same way. A reader
-that needs a pattern or a set cites the section here instead of restating it; the scripts that cannot
-cite a doc keep a literal copy that `tests/contracts/vault-grammar.test.mjs` pins to this file.
+reshuffle's R1 all read the vault through it, so they classify the same note the same way (§ Readers
+names three readers that do not yet). A reader that needs a pattern or a set cites the section here
+instead of restating it; the scripts that cannot cite a doc keep a literal copy that
+`tests/contracts/vault-grammar.test.mjs` pins to this file.
 
 ## Phase and task filenames
 
@@ -38,10 +39,17 @@ member.
 
 ## Readers
 
-- `skills/_shared/scripts/reconcile-project.py`: `PHASE_N`, `LANDED`, `ACTIVE` and `Rec.status` (the
-  normalised read); its docstring cites this file.
-- `skills/execute/scripts/reconcile-rollout.py` `touched-phases`: `PHASED_STEM_RE`, which feeds
-  `--phases` to reconcile-project in execute's phase-close ceremony.
+- `skills/_shared/scripts/reconcile-project.py`: `PHASE_N`, `LANDED`, `ACTIVE`, `phase_key` and
+  `phase_sort` (the canonical form and the order) and `Rec.status` (the normalised read); its docstring
+  cites this file.
+- `skills/execute/scripts/reconcile-rollout.py` `touched-phases`: `PHASED_STEM_RE`, `_phase_key` and
+  `_phase_sort`, which feed `--phases` to reconcile-project in execute's phase-close ceremony.
 - `skills/_shared/scripts/next-action.py`: `DEAD_STATUSES` (Landed) and `OPEN_STATUSES` (Active).
 - orient § 2 (the sweep's in-flight report) and the reshuffle's R1 (the item set and its reach tiers).
-- `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file.
+- `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both
+  scripts' key and sort helpers against the examples under § Phase and task filenames.
+
+**Not yet adopted** (they keep their own grammar, so do not assume they conform; follow-up task
+`thread-skill-close-and-carry-adopt-the-vault-grammar`): close's `repo-track.sh` (`open|in_progress`,
+so `in-progress` is missed), close's candidate statuses (`open`, `in_progress` or `review`) and carry's
+`SHORT_ID_RE` in `reconcile-rollout.py` (whole-number `p<N>-<M>` only).

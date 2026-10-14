@@ -2719,8 +2719,21 @@ def cmd_status(args) -> int:
 # ---- touched-phases ---------------------------------------------------------
 
 # The phase number is the vault grammar's PHASE_N, whole or fractional (skills/_shared/vault-grammar.md
-# § Phase and task filenames; pinned by tests/contracts/vault-grammar.test.mjs).
+# § Phase and task filenames). PHASED_STEM_RE, _phase_key and _phase_sort are its pinned copies here
+# (reconcile-project.py keeps its own PHASE_N, phase_key and phase_sort): tests/contracts/vault-grammar.test.mjs
+# checks both scripts against the doc's examples.
 PHASED_STEM_RE = re.compile(r"^(?P<slug>.+?)-p(?P<n>\d+(?:\.\d+)?)-")
+
+
+def _phase_key(n: str) -> str:
+    """A phase number's canonical form: the whole part numeric (`03` is `3`), the fractional part literal."""
+    whole, dot, frac = n.partition(".")
+    return str(int(whole)) + dot + frac
+
+
+def _phase_sort(n: str):
+    """Numeric order (`2` before `10`, `3.5` before `5`); `3.5` and `3.50` stay distinct and ordered."""
+    return float(n), n
 
 
 def cmd_touched_phases(args) -> int:
@@ -2734,10 +2747,9 @@ def cmd_touched_phases(args) -> int:
     for path, _note in _linked_task_notes(rollout_path, tasks_dir):
         m = PHASED_STEM_RE.match(path.stem)
         if m:  # loose tasks (no `-p<N>-` segment) belong to no phase
-            whole, dot, frac = m.group("n").partition(".")  # canonical: `03` is `3`, `3.5` stays literal
-            by_slug.setdefault(m.group("slug"), set()).add(str(int(whole)) + dot + frac)
+            by_slug.setdefault(m.group("slug"), set()).add(_phase_key(m.group("n")))
     for slug in sorted(by_slug):
-        print(f"--project {slug} --phases {','.join(sorted(by_slug[slug], key=lambda n: (float(n), n)))}")
+        print(f"--project {slug} --phases {','.join(sorted(by_slug[slug], key=_phase_sort))}")
     return 0
 
 

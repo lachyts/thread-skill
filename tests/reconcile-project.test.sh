@@ -260,8 +260,7 @@ rp --phases 4 --json
 ok "$rc" 0 "--phases 4 exits 0"
 ok "$( (items unambiguous; items ambiguous) | grep '^task ')" "task demo-p4-2-merged" "--phases 4: the only task candidate is demo-p4-2-merged"
 has "$(items unambiguous)" "phase demo-p4-merged" "--phases 4: demo-p4 is U with its task"
-# A fractional phase is its own scope: --phases 3.5 reaches demo-p3.5-* only, --phases 3 never reaches it,
-# and the whole part compares numerically (03 = 3), as int() did.
+# A fractional phase is its own scope: --phases 3.5 reaches demo-p3.5-* only, --phases 3 never reaches it.
 rp --kinds phase,task --phases 3.5 --json
 ok "$rc" 0 "--phases 3.5 exits 0"
 ok "$(items unambiguous)" "$(lines "phase demo-p3.5-frac" "task demo-p3.5-2-merged")" "--phases 3.5: U is exactly demo-p3.5 and its merged task"
@@ -270,10 +269,20 @@ rp --phases 3 --json
 ok "$rc" 0 "--phases 3 exits 0"
 p3=$(items unambiguous; items ambiguous)
 case "$p3" in *"p3.5"*) ok listed absent "--phases 3: no p3.5 item";; *) ok absent absent "--phases 3: no p3.5 item";; esac
-rp --phases 03 --json; p03=$(items unambiguous; items ambiguous)
-ok "$p03" "$p3" "--phases 03 reads as --phases 3"
+# The zero-padded form is checked on a phase with items, and with --kinds phase,task so the rollout items
+# (which --phases never scopes) cannot fill the comparison: an empty 04 set never equals the 4 set.
+rp --kinds phase,task --phases 4 --json; p4=$(items unambiguous; items ambiguous)
+ok "$p4" "$(lines "phase demo-p4-merged" "task demo-p4-2-merged")" "--kinds phase,task --phases 4: demo-p4 and its task, nothing else"
+rp --kinds phase,task --phases 04 --json; p04=$(items unambiguous; items ambiguous)
+ok "$rc" 0 "--phases 04 exits 0"
+ok "$p04" "$p4" "--phases 04 reads as --phases 4 (a non-empty set)"
+# JSON phases: canonical, numeric order, deduplicated; a fractional phase stays its string, so 3.5 and 3.50
+# (distinct phases) never print alike and 3.10 never prints as 3.1.
+jphases() { python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["phases"]))' "$tmp/out"; }
 rp --kinds phase --phases 3.5,3 --json
-ok "$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["phases"]))' "$tmp/out")" "[3, 3.5]" "--phases 3.5,3: JSON phases sorted numerically, whole numbers stay ints"
+ok "$(jphases)" '[3, "3.5"]' "--phases 3.5,3: JSON phases sorted numerically, whole numbers ints, fractional strings"
+rp --kinds phase --phases 10,3.50,03,3.10,3.5,3 --json
+ok "$(jphases)" '[3, "3.10", "3.5", "3.50", 10]' "--phases 10,3.50,03,3.10,3.5,3: 03 is 3, 3.5 and 3.50 distinct, 3.10 kept"
 ok "$(manifest "$v")" "$before" "--phases dry runs write nothing"
 
 # ---- 6. usage and dependency errors ------------------------------------------------------------------

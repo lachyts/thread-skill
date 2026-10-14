@@ -508,6 +508,25 @@ test('touched-phases and the ceremony carry a fractional phase (p3.5) through to
   assert.match(fs.readFileSync(path.join(v, 'Work/Phases/demo-p3-gamma.md'), 'utf8'), /\nstatus: open\n/, 'p3 is untouched')
 })
 
+// touched-phases canonicalises and orders by the vault grammar (§ Phase and task filenames): a zero-padded
+// `p05` is phase 5 and phases sort numerically, so `10` comes last. A lexical sort (`10,2,3.5,5`) or a lost
+// canonicalisation (`2,3.5,05,10`) prints another line.
+test('touched-phases: a zero-padded phase reads canonical and phases sort numerically (2,3.5,5,10)', () => {
+  const v = buildVault()
+  const T = path.join(v, 'Work/Tasks')
+  const slug = 'demo-rollout-2026-09-28'
+  const rollout = path.join(T, `${slug}.md`)
+  fs.writeFileSync(rollout, fm(['tags: [task, rollout]', 'status: open', 'projects: ["[[Demo]]"]']))
+  for (const [name, n] of [['demo-p10-2-b', 10], ['demo-p05-1-a', 5], ['demo-p3.5-1-a', 3.5], ['demo-p2-3-c', 2]]) {
+    fs.writeFileSync(path.join(T, `${name}.md`), taskNote(n, 'done', [`rollout: "[[${slug}]]"`]))
+  }
+  const before = manifest(v)
+  const t = touched(v, rollout)
+  assert.equal(t.code, 0, t.stderr)
+  assert.equal(t.stdout, '--project demo --phases 2,3.5,5,10\n')
+  assert.deepEqual(manifest(v), before)
+})
+
 test('touched-phases: a rollout with only loose tasks prints nothing and exits 0', () => {
   const v = buildVault()
   const T = path.join(v, 'Work/Tasks')

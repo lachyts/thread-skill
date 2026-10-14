@@ -21,13 +21,13 @@ ignored for classification (every real task note carries a `phase: N` key). A RO
 in its tags.
 
 Terms. The vault grammar (skills/_shared/vault-grammar.md) defines the phase number N (whole or fractional:
-`p3`, `p3.5`), the filename prefixes and the status sets; PHASE_N, LANDED and ACTIVE below are its pinned
-copies. A status is read lower-cased with `-` as `_`, so `in-progress` (TaskNotes' spelling) and
-`in_progress` are either spelling of one ACTIVE status. LANDED = {done, merged, dropped}. A HOLD status is
-any status other than landed, open, in_progress or review (parked, blocked, ...): a deliberate hold, not
-drift. A task's rollout is LIVE when its `rollout:` wikilink resolves to a file in T root, and RETIRED
-when it resolves into R, into A, or to no note. A task with no `rollout:` link has no rollout: neither
-live nor retired.
+`p3`, `p3.5`), the filename prefixes and the status sets; PHASE_N, LANDED, ACTIVE, phase_key and phase_sort
+below are its pinned copies. A status is read lower-cased with `-` as `_`, so `in-progress` (TaskNotes'
+spelling) and `in_progress` are either spelling of one ACTIVE status. LANDED = {done, merged, dropped}. A
+HOLD status is any status other than landed, open, in_progress or review (parked, blocked, ...): a
+deliberate hold, not drift. A task's rollout is LIVE when its `rollout:` wikilink resolves to a file in T
+root, and RETIRED when it resolves into R, into A, or to no note. A task with no `rollout:` link has no
+rollout: neither live nor retired.
 
 Scoping. Task candidates are always `<slug>-p<N>-*` (so `--project chorus` never picks up a
 `chorus-cmux-*` task). --phases N,M (each whole or fractional, `3,3.5`; the whole part compares
@@ -119,11 +119,14 @@ gh. --no-gh (gh `disabled`), or a --gh-bin that does not resolve (gh `missing`),
 Output. Text: a header (`dry run: nothing written; pass --apply` or `applied`), then `Unambiguous (n)`,
 `Ambiguous (n)`, `Skipped (n)` and, on apply, `Written (n)` and `Errors (n)`. --json: {project, vault,
 today, kinds, phases, applied, gh: ok|missing|disabled, unambiguous: [{kind, slug, path, action, reason,
-depends_on}], ambiguous: [{kind, slug, path, reason}], skipped: [str], written: [str], errors: [str]};
-paths are vault-relative. With --only (and only then): the header reads `applied (bound to the reviewed
-list: <file>)`, `New since review (n)` and `Reviewed, not applied (n)` come before `Written (n)`, and the
-JSON adds new_since_review: [{kind, slug, path, action, reason, depends_on}] and reviewed_not_applied:
-[{kind, slug, reason}]. `unambiguous` stays the full recomputed list; `written` holds only bound writes.
+depends_on}], ambiguous: [{kind, slug, path, reason}], skipped: [str], written: [str], errors: [str]}; paths
+are vault-relative. `phases` is null without --phases, else the canonical phases in numeric order, a whole
+number as an int and a fractional one as its string (`--phases 3.50,03,3.5` gives `[3, "3.5", "3.50"]`), so
+no two distinct phases print alike. With --only (and only then): the header reads `applied (bound to the
+reviewed list: <file>)`, `New since review (n)` and `Reviewed, not applied (n)` come before `Written (n)`,
+and the JSON adds new_since_review: [{kind, slug, path, action, reason, depends_on}] and
+reviewed_not_applied: [{kind, slug, reason}]. `unambiguous` stays the full recomputed list; `written` holds
+only bound writes.
 
 Exit codes. 0: it ran (drift or none). 1: an --apply write or move failed, or a dependent phase was
 skipped. 2: usage error (missing --project, bad --kinds/--phases/--today, no Work/ under --vault; --only
@@ -169,6 +172,8 @@ WIKILINK_RE = re.compile(r"\[\[([^\]|#\\]+)")
 MARKER_BLIND_RE = re.compile(r"\[\[[^\]|#\\]*|https?://\S+")
 
 
+# phase_key and phase_sort are pinned too: the contract test checks them, and reconcile-rollout.py's
+# _phase_key/_phase_sort, against the doc's own examples (`03` is `3`, `3.5` and `3.50` distinct, the order).
 def phase_key(n: str) -> str:
     """A phase number's canonical form: the whole part numeric (`03` is `3`), the fractional part literal."""
     whole, dot, frac = n.partition(".")
@@ -176,6 +181,7 @@ def phase_key(n: str) -> str:
 
 
 def phase_sort(n: str):
+    """Numeric order (`2` before `10`, `3.5` before `5`); `3.5` and `3.50` stay distinct and ordered."""
     return float(n), n
 
 
@@ -753,8 +759,10 @@ def main(argv=None) -> int:
     public_na = sorted(not_applied, key=order)
 
     if args.json:
+        # A fractional phase stays its canonical string: a float would merge `3.5` with `3.50` and print
+        # `3.10` as `3.1`, forms the vault grammar keeps distinct.
         doc = {"project": args.project, "vault": str(vault), "today": today, "kinds": kinds,
-               "phases": None if phases is None else [float(n) if "." in n else int(n) for n in phases],
+               "phases": None if phases is None else [n if "." in n else int(n) for n in phases],
                "applied": bool(args.apply), "gh": gh_mode,
                "unambiguous": public_u, "ambiguous": public_a, "skipped": det.skipped}
         if reviewed is not None:
