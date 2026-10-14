@@ -79,8 +79,8 @@ Considered:
   before changing model. Its sound parts carry over: settings are fixed for a call, and the record
   keeps what was asked for apart from what ran.
 - Until the ladder shipped in 3.0.0, `max_tier: opus` was the Opus lock; execute now warns that the
-  key is ignored. Each call records the ladder it resolved (`args.ladder.source`: the file's path, or
-  `built-in`).
+  key is ignored. Execute names the ladder each call runs on (its source: the file's path, or
+  `built-in`) when it launches the call.
 - AGENTS.md § Model tier is locked to Lachy's hand edits. The pointer text to the ladder is proposed
   to him, never written.
 - Schedule offers a starting rung for a task it judges hard, in place of `model: fable` and

@@ -139,13 +139,13 @@ one line per Retro.
 
 3.0.0 breaks anyone running rollouts:
 
-- **The queue replaces waves (ADR 0030).** Execute runs only
+- **A rollout is a queue (ADR 0030).** Execute runs only
   `protocol_version: 5` rollout notes and refuses older ones. If a session is
-  running a wave-era rollout, hard-pause it, then run
+  running an older rollout, hard-pause it, then run
   `/thread:schedule <project> --regenerate`: the supersede carries every
   unlanded task into a queue.
-- **The built-in ladder no longer climbs to Fable (ADR 0029).** Escalation
-  climbs the operator's ladder, `~/.config/thread/ladder.toml`. With no file,
+- **Escalation no longer climbs to Fable by default (ADR 0029).** It climbs
+  the operator's ladder, `~/.config/thread/ladder.toml`. With no file,
   the built-in ladder has two Opus rungs, so a machine without the file never
   leaves Opus. To keep a Fable step, name it as a rung in that file. The
   rollout's `max_tier:` key is retired: execute ignores it with a warning. If
@@ -159,7 +159,8 @@ one line per Retro.
   stamps the values it resolves into each rollout note's frontmatter, and
   execute reads the note first, so an edit to the file reaches the next
   scheduled (or `--regenerate`d) rollout, not one already written. A task's
-  own frontmatter still overrides the per-task values.
+  own frontmatter still overrides `max_iterations`, `max_review_rounds` and
+  `max_plan_rounds`.
 
 ## Install
 
