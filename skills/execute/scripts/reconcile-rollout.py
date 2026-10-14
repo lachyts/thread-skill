@@ -73,7 +73,40 @@ Subcommands:
               stretch (p16-4, ADR 0033): it removes `auto_retries_used` and `quota_retries_used` and re-stamps
               `auto_retry_sha` with the block it re-enters (_block_fingerprint, read before the transition;
               removed when that block has none), so an identical re-block goes straight back to a human. Its
-              stdout is unchanged.
+              stdout is unchanged. Every hand-back that moves a note spends its live answers in the same save (ADR
+              0035): each `## Repair input` key `(block <fp>)`, `(block <fp>; awaiting repair)` or `(block <fp>;
+              left)` becomes `(block <fp>; handed back <now>)`, so no bare hand-back leaves a live answer behind (an
+              identical re-block writes no run, so it would otherwise re-arm the lead's *Recorded answer*); a refused
+              hand-back spends nothing. `--answer <stamp>` takes one slug (else usage, exit 2) and is a
+              compare-and-swap: unless the note is set aside and its answerRecorded (`inputs`) has exactly that stamp
+              and form `hand-back`, exit 1 with `ERROR: hand-back: <slug>: the answer of <stamp> is spent, superseded,
+              not a hand-back answer or no longer this block's; nothing written`, so the lead and repair never both
+              hand back on one answer, nor a new block on an old one.
+
+  record-answer  Record Lachy's answer to a set-aside block (ADR 0035 decision 3; /thread:repair § 3b and § 4), the
+              only writer of a `## Repair input` answer: `--tasks <slug> --rollout <note> --kind needs-you|decision
+              --ask "<ask>" --answer "<answer>" --fingerprint <12hex|-> [--form hand-back|awaiting-repair|left]
+              [--raise max_review_rounds|max_plan_rounds|max_iterations] [--pr <url>]`. Refuses (exit 1, nothing
+              written): a note not set aside at its run, at Integration or at a gate; a --fingerprint other than the
+              block's (_block_fingerprint, `-` when none); `--kind needs-you` whose --ask is not the note's question;
+              --form missing with a fingerprint or given with `-`; `--form hand-back` when a bare hand-back would not
+              move the note once saved (at Integration with no pr:, a `prUrlError` on a revise or Integration way back
+              read against the Project root, a revise re-entry with no round left and no `--raise
+              max_review_rounds`); --raise or --pr with `--form left`; a --raise other than the cause's
+              `humanFix.raise` (lead-integrate.py cause_fix, read before the save) or `max_review_rounds` on a revise
+              re-entry with no round left; an unresolvable value (the resolver's line); a re-entry stamp that does not
+              parse; a stamp that, bumped, is more than one minute after now. A raise writes `lastRound + 1` for a
+              revise re-entry's max_review_rounds, else the resolved value (task, rollout, rollout-settings.py) + 1,
+              first as the rollout `## Notes` line `- <date> repair: [[<slug>]] <field> raised to <N>, one round` (`one
+              iteration` for max_iterations) in its own save (skipped when present; its failure is exit 1 with nothing
+              written to the task note). Then the task note in one save, the entry last: the `## Needs you` removal
+              (needs-you), `<field>: <N>`, `pr:`, every earlier live entry for this fingerprint rewritten `(block <fp>;
+              superseded <stamp>)` (a block carries at most one live answer), and the entry `- <stamp> <needs
+              you|decision> (block <fp>[; awaiting repair|; left]): "<ask>" → <answer>`. The stamp is now's minute,
+              bumped to one minute after the latest of the last re-entry (_last_re_entry) and every entry stamp for
+              this fingerprint when now is not later, so no two entries of a block share one and none ties a
+              re-entry. An identical live entry with its raise and pr: in place is `[no-change]` at its stamp. Prints
+              `<slug>: answer recorded (<form>) <stamp> [written]`. Records no Run-record event.
 
   auto-retry  Execute's automatic retry of one set-aside task (p16-4, ADR 0033; execute § 4.5 step 1.2's *Automatic
               retry*): `--tasks <slug> --rollout <note> [--auto-retries N] [--fingerprint <12 hex>]`. The task's
@@ -200,9 +233,19 @@ Subcommands:
   descope     An automatic descope of a plan-blocked task (p14-4), the one verb the live lead (execute § 4.5 step
               1.2) and /thread:repair § 3d share: `--tasks <slug> --rollout <note> --part "<verbatim quote>"
               (--optional --short <kebab> | --owner <slug> --owner-quote "<verbatim quote>") --reason "<line>"`.
-              The caller judges that the plan-block feedback centres on the part; the verb checks it. Exit 3 is an
-              ASK (one `ASK: [[slug]] <why>; nothing written: ...` line, nothing written) when: the part, or a clause
-              holding it, cites an ADR; a recorded decision (`## Decisions…`, a human `## Scope decision…`, a
+              The caller judges that the plan-block feedback centres on the part; the verb checks it. After its state
+              checks and before the part is judged: a refusal recorded for the block (_descope_refusal; a line under
+              the section that does not parse fails closed) is exit 3 again, citing it and writing nothing new, an
+              answer included (a later descope never overrides a refusal); then a block whose answerRecorded is
+              non-null is exit 1, `ERROR: descope: <slug>: answered for this block (<stamp>); the answer stands`, with
+              nothing written or recorded (the lead judged it before repair recorded the answer). Exit 3 is an ASK
+              (one `ASK: [[slug]] <why>; recorded: /thread:repair [[<ro>]] asks Lachy` line) whose refusal is recorded
+              (ADR 0035 decision 2): one `## Descope refused (automatic)` line on the task note, `- <stamp> descope
+              refused (automatic) run=<n> sha=<12hex>, Plan-blocked feedback run <n>: "<part>" (<mode>[
+              owner=<slug>]): <why>`, keyed on the top Plan-blocked run (_plan_block_key: its n and end-marker sha,
+              _sha12 of its text for a legacy run with no marker), in one save and only when no line carries the key;
+              a failed save still exits 3 with a stderr WARN. Exit 1 and exit 2 record nothing. Exit 3 when: the
+              part, or a clause holding it, cites an ADR; a recorded decision (`## Decisions…`, a human `## Scope decision…`, a
               `## Repair input` line without `(automatic)`, `## Approved gates`, `## Gated inputs`) holds the part
               (or, for --owner, the quote); the part sits in a fenced code block of the brief (the body minus the
               record sections; a fence is never a brief item, so no pointer lands inside one); --optional and an
@@ -226,7 +269,7 @@ Subcommands:
               `[no-change]` when all are present. `status:` is never written: the caller's `hand-back` re-enters
               the task. Exit 1 (nothing written): a missing note, a note not plan-blocked at its run or without a
               Plan-blocked run, a --rollout its `rollout:` does not name, a bad --short or a follow-up name that
-              reads as a phase member, a colliding follow-up, a failed save. Exit 2: usage.
+              reads as a phase member, a colliding follow-up, an answered block, a failed save. Exit 2: usage.
 
   carry       A supersede's carry (ADR 0030; /thread:schedule step 6, and § 0 finishing an interrupted
               supersede): re-point every unlanded task of the prior rollout (--from, a path) to the rollout
@@ -540,7 +583,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 DEFAULT_TASKS_DIR = Path(os.path.expanduser("~/repos/obsidian/Work/Tasks"))
@@ -2439,9 +2482,17 @@ def cmd_hand_back(args) -> int:
     line. The explicit re-entry (repair after Lachy answers, "retry [[task]]", the lead after a descope) starts a
     fresh automatic-retry stretch (p16-4, ADR 0033): it removes `auto_retries_used` and `quota_retries_used` and
     re-stamps `auto_retry_sha` with the block it re-enters (_block_fingerprint, read before the transition; removed
-    when that block has none), so an identical re-block goes straight back to a human."""
+    when that block has none), so an identical re-block goes straight back to a human. Every hand-back that moves a
+    note spends its live answers in the same save (_spend_answers, ADR 0035), so no bare hand-back leaves one behind
+    to re-arm the lead's *Recorded answer* on an identical re-block; a refused hand-back spends nothing.
+    `--answer <stamp>` (one slug only, else usage exit 2) is a compare-and-swap: the note must still be set aside with
+    `answerRecorded` at exactly that stamp and form `hand-back`, else exit 1 and nothing written, so the lead and
+    repair never both hand back on one answer, and never hand back a new block on an old one."""
     now = _now(args)
     tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    if args.answer is not None and ("," in args.tasks or not args.tasks.strip()):
+        print("ERROR: hand-back: usage: --answer takes one task slug", file=sys.stderr)
+        return 2
     notes = list(_each_note(args))
     rollouts, held = {}, []
     for slug, path, note in notes:
@@ -2462,6 +2513,14 @@ def cmd_hand_back(args) -> int:
             print(f"ERROR: {line}", file=sys.stderr)
         return 2
     for slug, _path, note in notes:
+        if args.answer is not None:
+            got = _answer_recorded(note) if _queue_state(note)[0] == "set-aside" else None
+            if not got or got["stamp"] != args.answer or got["form"] != "hand-back":
+                args._errors.append(f"hand-back: {slug}: the answer of {args.answer} is spent, superseded, not a hand-back "
+                                    "answer or no longer this block's; nothing written")
+                for e in args._errors:
+                    print(f"ERROR: {e}", file=sys.stderr)
+                return 1
         fingerprint = _block_fingerprint(note)  # before the transition: it reads the status's own section
         arm, said = _hand_back_note(note, now)
         if arm is None:
@@ -2475,6 +2534,7 @@ def cmd_hand_back(args) -> int:
             note.set(AUTO_RETRY_SHA_KEY, fingerprint)
         else:
             note.remove(AUTO_RETRY_SHA_KEY)
+        _spend_answers(note, now)
         note.save(dry_run=args.dry_run)
         if arm == "integration":
             _event(_note_rollout(note), "ready", slug, {"pr": _pr(note)}, args)
@@ -3541,11 +3601,15 @@ DESCOPE_POINTER = "(descoped: see ## Scope decision (automatic))"
 DESCOPE_ENTRY = "- descoped (automatic) "     # the entry line status greps (status § 4 **Descoped.**)
 DESCOPE_MARK_RE = re.compile(
     r"^<!-- descope run=(\d+) part=([0-9a-f]{12}) mode=(optional|owner)(?: owner=([^\s>]+))? -->\s*$")
+# A refused descope's durable record (ADR 0035 decision 2): one line per block, keyed on the top Plan-blocked run's
+# number and sha (_plan_block_key), so the refusal holds for that block in every session and a new run is judged afresh.
+DESCOPE_REFUSED_SECTION = "## Descope refused (automatic)"
+DESCOPE_REFUSED_RE = re.compile(r"^- (\S+) descope refused \(automatic\) run=(\d+) sha=([0-9a-f]{12}), (.*)$")
 # Record sections: never part of the brief the plan judge judges against.
 BRIEF_EXCLUDE = ("## Plan-blocked feedback", "## Review-blocked feedback", "## Blocker diagnosis",
                  "## Review history", REPAIR_INPUT_SECTION, "## Scope decision", APPROVED_PLAN_SECTION,
                  INTEGRATION_LOG_SECTION, APPROVED_GATES_SECTION, GATE_PENDING_SECTION, NEEDS_HUMAN_SECTION,
-                 "## Decisions", "## Resume prompt")
+                 "## Decisions", "## Resume prompt", "## Descope refused")
 MARKER_WORDS = r"(?:consider|considering|optional|optionally|nice to have|nice-to-have)"
 OPTIONAL_MARK_RE = re.compile(rf"\b{MARKER_WORDS}\b")
 # A marker negated by not / never / no (or an n't) up to two words before it is no marker: "not optional".
@@ -3768,13 +3832,74 @@ def _and_list(nums) -> str:
     return s[0] if len(s) == 1 else ", ".join(s[:-1]) + " and " + s[-1]
 
 
+def _plan_block_key(note):
+    """(n, sha): the key a refused descope is recorded under, the top `## Plan-blocked feedback` run's number and its
+    `<!-- run n end sha=… -->` sha, or for a legacy run whose end marker is gone _sha12 of the run's text (the same
+    fallback _block_fingerprint takes). None when the section holds no run. _record_refusal writes it and
+    _descope_refusal compares it, so the two can never disagree."""
+    runs = note.run_blocks(BLOCKED_SECTIONS["plan-blocked"])
+    if not runs:
+        return None
+    top = _top_run(runs)
+    return top["n"], (top["sha"] or _sha12(top["content"]))
+
+
+def _descope_refusal(note):
+    """(n, text) when a refused descope is recorded for the plan-blocked note's current block (ADR 0035 decision 2), else
+    None: a `## Descope refused (automatic)` line carrying _plan_block_key's `run=<n> sha=<sha>`, its text after `- `.
+    A non-blank line under the section that does not parse fails closed: the refusal stands, so a hand-edited record
+    never lets a refused block slip back to an automatic retry. Only a plan-blocked note has a block to refuse."""
+    if _status(note) != "plan-blocked":
+        return None
+    key = _plan_block_key(note)
+    if key is None:
+        return None
+    for line in note.section_text(DESCOPE_REFUSED_SECTION).split("\n"):
+        s = line.strip()
+        if not s:
+            continue
+        m = DESCOPE_REFUSED_RE.match(s)
+        if m is None:
+            return key[0], s
+        if int(m.group(2)) == key[0] and m.group(3) == key[1]:
+            return key[0], s[2:]
+    return None
+
+
+def _record_refusal(path: Path, slug, part, mode, owner, why, now, dry_run) -> str:
+    """Record descope's exit 3 durably (ADR 0035 decision 2): one `## Descope refused (automatic)` line keyed on the block,
+    written in one task-note save only when no line already carries the key. Re-reads the note, so nothing the verb held
+    in memory is written. Returns '' when recorded (or already there), else a one-line warning (the verb still exits
+    3; the lead's session key is the backup)."""
+    try:
+        note = Note(path)
+    except (OSError, ValueError) as e:
+        return f"cannot read {path}: {e}"
+    key = _plan_block_key(note)
+    if key is None:
+        return f"{slug}: no Plan-blocked feedback run to key the refusal on"
+    n, sha = key
+    if any(f" run={n} sha={sha}," in l for l in note.section_text(DESCOPE_REFUSED_SECTION).split("\n")):
+        return ""
+    note.append_line(DESCOPE_REFUSED_SECTION,
+                     f'- {_stamp(now)} descope refused (automatic) run={n} sha={sha}, Plan-blocked feedback run {n}: '
+                     f'"{part}" ({mode}{" owner=" + owner if owner else ""}): {why}')
+    try:
+        note.save(dry_run=dry_run)
+    except OSError as e:
+        return f"cannot write {path}: {e}"
+    return ""
+
+
 def cmd_descope(args) -> int:
     """Record an automatic descope of a plan-blocked task (p14-4), the one verb the live lead (execute § 4.5 step 1.2)
     and /thread:repair § 3d share. The caller judged that the plan-block feedback centres on a part of the task that
     is optional in the note (--optional) or that a later task in the same rollout owns (--owner); this verb checks
     that judgement mechanically and writes the records. Exit 0: descoped ([written], or [no-change] for a complete
-    re-run), and the caller runs `hand-back`. Exit 3: ASK, nothing written, and repair asks Lachy. Exit 1: an ERROR,
-    nothing written. Exit 2: usage."""
+    re-run), and the caller runs `hand-back`. Exit 3: ASK, the refusal recorded on the task note (_record_refusal, ADR
+    0035 decision 2; a recorded refusal for the block exits 3 again before the part is judged, writing nothing new), and
+    repair asks Lachy. Exit 1: an ERROR, nothing written (a block with a recorded answer included). Exit 2: usage.
+    Exit 1 and exit 2 record nothing."""
     def usage(msg):
         print(f"ERROR: descope: usage: {msg}", file=sys.stderr)
         return 2
@@ -3837,8 +3962,26 @@ def cmd_descope(args) -> int:
                 return error(f"{fu_path} exists and is not this task's follow-up (no descoped_from: \"[[{slug}]]\")")
 
     def ask(why):
-        print(f"ASK: [[{slug}]] {why}; nothing written: /thread:repair [[{ro}]] asks Lachy")
+        # ADR 0035 decision 2: the refusal is durable, recorded on the task note before the verb exits 3, so every
+        # session reads it (`inputs`' humanFix `decide scope or defer`) and no later descope of the block overrides it.
+        warn = _record_refusal(path, slug, part, mode, owner, why, now, args.dry_run)
+        if warn:
+            print(f"WARN: descope: {slug}: the refusal is not recorded: {warn}", file=sys.stderr)
+        print(f"ASK: [[{slug}]] {why}; recorded: /thread:repair [[{ro}]] asks Lachy")
         return 3
+
+    # Before the part is judged: a refusal recorded for this block stands (a later descope never overrides it, an answer
+    # included), and a block Lachy answered is his (the lead judged it before repair recorded the answer: a descope now
+    # would void that answer with its re-entry stamp).
+    refused = _descope_refusal(note)
+    if refused is not None:
+        print(f"ASK: [[{slug}]] descope refused at Plan-blocked feedback run {refused[0]} ({refused[1]}); "
+              f"recorded: /thread:repair [[{ro}]] asks Lachy")
+        return 3
+    answered = _answer_recorded(note)
+    if answered is not None:
+        print(f"ERROR: descope: {slug}: answered for this block ({answered['stamp']}); the answer stands", file=sys.stderr)
+        return 1
 
     part_f, quote_f = _fold(part), _fold(quote)
     part_sha = _sha12(part_f)
@@ -4238,6 +4381,301 @@ def cmd_auto_retry(args) -> int:
     flag = " (dry-run)" if args.dry_run else " [written]"
     print(f"{slug}: auto-retry {count} ({stage}; feedback {fingerprint}"
           f"{f'; max_review_rounds raised to {raise_to}' if raise_to else ''}) {status}->{_status(note)}{flag}")
+    return 0
+
+
+# ---- recorded answers (ADR 0035 decision 3) ------------------------------------------------------------------------
+#
+# Lachy's answer to a set-aside block lives in the task note's `## Repair input`, one entry per answer:
+#   - <stamp> <needs you|decision> (block <fingerprint>[; awaiting repair|; left]): "<the ask>" → <the answer>
+# A live key is `(block <fp>)` (a `hand-back` answer: a bare hand-back is all that is left, so the lead hands it back),
+# `(block <fp>; awaiting repair)` (repair still has work to do first) or `(block <fp>; left)` (answered: left set aside).
+# A dead key is `(block <fp>; handed back <stamp>)` (spent by a hand-back), `(block <fp>; superseded <stamp>)` (a later
+# answer for the block replaced it) or `(block -)` (a block with no fingerprint: a gate, a PR-less review). Only
+# record-answer writes an entry or supersedes one, and only hand-back spends one; nothing else, and no prose, does.
+
+ANSWER_ENTRY_RE = re.compile(r"^- (\S+) (needs you|decision) \(block ([0-9a-f]{12})(?:; (awaiting repair|left))?\): ")
+# Any entry, live or dead, with its key's fingerprint (or `-`): the stamps record-answer bumps past.
+ANY_ENTRY_RE = re.compile(r"^- (\S+) (?:needs you|decision) \(block ([0-9a-f]{12}|-)(?:;[^)]*)?\): ")
+LIVE_KEY_RE = re.compile(r"\(block ([0-9a-f]{12})(?:; (?:awaiting repair|left))?\)")
+FORM_KEYS = {"hand-back": "", "awaiting-repair": "; awaiting repair", "left": "; left"}
+FORM_NAMES = {None: "hand-back", "awaiting repair": "awaiting repair", "left": "left"}
+RAISE_FIELDS = ("max_review_rounds", "max_plan_rounds", "max_iterations")
+RUN_HEAD_ANY_RE = re.compile(r"^### Run \d+ \(([^)]*)\)\s*$")
+
+
+def _last_re_entry(note):
+    """(stamp, bad): the latest time the task was re-entered, as far as the note can say: every `### Run <n> (<stamp>)`
+    heading in any section (a block recorded), `auto_retry_at:` (an automatic retry), every `- descoped (automatic)
+    <stamp>,` entry (an automatic descope, written before the lead's hand-back) and `started:` (a task deferred and
+    re-scheduled starts afresh). None when the note has none; `bad` is True when one of them does not parse (an answer
+    then fails closed: it never reads as recorded)."""
+    stamps, bad = [], False
+    for line in note._body.split("\n"):
+        m = RUN_HEAD_ANY_RE.match(line)
+        raw = m.group(1) if m else (line[len(DESCOPE_ENTRY):].split(",", 1)[0] if line.startswith(DESCOPE_ENTRY) else None)
+        if raw is not None:
+            ts = _parse_ts(raw)
+            bad = bad or ts is None
+            if ts is not None:
+                stamps.append(ts)
+    for key in (AUTO_RETRY_AT_KEY, "started"):
+        if _valued(note.get(key)):
+            ts = _parse_ts(note.get(key))
+            bad = bad or ts is None
+            if ts is not None:
+                stamps.append(ts)
+    return (max(stamps) if stamps else None), bad
+
+
+def _answer_recorded(note):
+    """`inputs`' answerRecorded, the one read execute, status and repair share (ADR 0035 decision 3): the live answer to
+    the note's current block, {stamp, kind, form: hand-back | awaiting repair | left, line}, or None. An entry counts
+    when its key is live and carries _block_fingerprint(note), and its stamp is strictly later than _last_re_entry: a
+    block re-entered since the answer is a fresh ask. Fails closed (None) on a tie with the re-entry stamp, an entry or
+    re-entry stamp that does not parse, and two live entries sharing the newest stamp; otherwise the latest wins."""
+    fp = _block_fingerprint(note)
+    if not fp:
+        return None
+    last, bad = _last_re_entry(note)
+    if bad:
+        return None
+    live = []
+    for line in note.section_text(REPAIR_INPUT_SECTION).split("\n"):
+        line = line.strip()
+        m = ANSWER_ENTRY_RE.match(line)
+        if not m or m.group(3) != fp:
+            continue
+        ts = _parse_ts(m.group(1))
+        if ts is None:
+            return None
+        if last is None or ts > last:
+            live.append((ts, m, line))
+    if not live:
+        return None
+    newest = max(ts for ts, _m, _l in live)
+    top = [(m, line) for ts, m, line in live if ts == newest]
+    if len(top) != 1:
+        return None
+    m, line = top[0]
+    return {"stamp": m.group(1), "kind": m.group(2), "form": FORM_NAMES[m.group(4)], "line": line}
+
+
+def _rewrite_keys(note, pick, to):
+    """Rewrite the key of each `## Repair input` entry `pick(fingerprint)` selects among the live ones to
+    `(block <fp>; <to>)`, in memory (the caller saves). Returns how many changed."""
+    found = note._section_bounds(REPAIR_INPUT_SECTION)
+    if found is None:
+        return 0
+    lines, start, end = found
+    n = 0
+    for i in range(start + 1, end):
+        m = ANSWER_ENTRY_RE.match(lines[i].strip())
+        if m and pick(m.group(3)):
+            lines[i] = LIVE_KEY_RE.sub(lambda k: f"(block {k.group(1)}; {to})", lines[i], count=1)
+            n += 1
+    if n:
+        note._set_body_lines(lines)
+    return n
+
+
+def _spend_answers(note, now) -> int:
+    """hand-back's spend: every live answer key on the note becomes `(block <fp>; handed back <now>)`, so an identical
+    re-block (which writes no run, so no re-entry stamp) never re-arms the lead's *Recorded answer* and is asked
+    afresh (ADR 0033 decision 6)."""
+    return _rewrite_keys(note, lambda _fp: True, f"handed back {_stamp(now)}")
+
+
+def _spent_count(note, fp) -> int:
+    """How many answers for block `fp` a hand-back spent: the `ask <k+1>` in humanFix's label, so an identical re-block
+    after a spent answer is a new Needs-you item, pushed again (ADR 0035 decision 3)."""
+    if not fp:
+        return 0
+    needle = f"(block {fp}; handed back "
+    return sum(1 for l in note.section_text(REPAIR_INPUT_SECTION).split("\n")
+               if ANY_ENTRY_RE.match(l.strip()) and needle in l)
+
+
+def _resolved_cap(note, rollout_note, key):
+    """(value, why): a round budget as a call resolves it (execute § 3; _slot_settings' order): the task's stamp, then the
+    rollout's, then rollout-settings.py for the Project root. (None, why) when a stamp is not an integer >= 1 or the
+    resolver cannot say."""
+    for n in (note, rollout_note):
+        raw = n.get(key)
+        if raw is not None:
+            value = _pos_int(raw)
+            return (value, "") if value is not None else \
+                (None, f"{key} on [[{n.path.stem}]] must be an integer >= 1, got {raw!r}")
+    res = _resolved_settings(rollout_note)
+    entry = (res["settings"] or {}).get(key)
+    if isinstance(entry, dict) and isinstance(entry.get("value"), int) and not isinstance(entry["value"], bool) and \
+            entry["value"] >= 1:
+        return entry["value"], ""
+    return None, res["error"] or f"rollout-settings.py resolves no {key}"
+
+
+def cmd_record_answer(args) -> int:
+    """Record Lachy's answer to a set-aside block (ADR 0035 decision 3; repair § 3b and § 4): the only writer of a
+    `## Repair input` answer entry. See the module docstring's `record-answer`."""
+    def error(msg, code=1, tail="nothing written"):
+        print(f"ERROR: record-answer: {msg}; {tail}", file=sys.stderr)
+        return code
+
+    slug = args.tasks.strip()
+    if not slug or "," in slug:
+        return error("usage: --tasks takes one task slug", 2)
+    fp_arg = args.fingerprint
+    if fp_arg != "-" and not re.fullmatch(r"[0-9a-f]{12}", fp_arg):
+        return error(f"usage: --fingerprint {fp_arg!r} is neither a 12-hex run sha nor -", 2)
+    ask, answer = " ".join(args.ask.split()), " ".join(args.answer.split())
+    if not ask or not answer:
+        return error("usage: --ask and --answer must not be empty", 2)
+    kind = "needs you" if args.kind == "needs-you" else "decision"
+    if fp_arg == "-" and args.form:
+        return error("--form goes with a fingerprint: a block with none (a gate, a PR-less review) is recorded (block -)")
+    if fp_arg != "-" and not args.form:
+        return error("--form hand-back|awaiting-repair|left is required with a fingerprint")
+    if args.form == "left" and (args.raise_field or args.pr):
+        return error("--raise and --pr never go with --form left: a block left set aside changes nothing")
+    now = _now(args)
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    path, note = _task_note(args, slug)
+    if isinstance(note, str):
+        return error(note)
+    if not rollout_path.is_file():
+        return error(f"rollout note not found at {rollout_path}")
+    try:
+        rollout_note = Note(rollout_path)
+    except (OSError, ValueError) as e:
+        return error(str(e))
+    ro = rollout_path.stem
+    if (_note_rollout(note) or "").lower() != ro.lower():
+        return error(f"{slug}: its rollout: is {note.get('rollout') or 'none'}, not [[{ro}]]")
+    state, at = _queue_state(note)
+    if state != "set-aside" or at not in ("run", "integration", "gate"):
+        return error(f"{slug}: not set aside at its run, at Integration or at a gate ({state})")
+    fp = _block_fingerprint(note) or "-"
+    if fp_arg != fp:
+        return error(f"{slug}: --fingerprint {fp_arg} is not the block's {fp}: re-read `inputs`")
+    key = FORM_KEYS[args.form] if args.form else ""
+    body = f'{kind} (block {fp}{key}): "{ask}" → {answer}'
+    last, bad = _last_re_entry(note)
+    if bad:
+        return error(f"{slug}: a re-entry stamp on the note (a run heading, auto_retry_at:, a descope entry or started:) "
+                     "does not parse, so no answer could ever read as recorded: fix the stamp")
+    field = args.raise_field
+
+    # Idempotent: the same live answer, with its raise and pr: already in place, is [no-change] at its existing stamp.
+    def live_same():
+        for line in note.section_text(REPAIR_INPUT_SECTION).split("\n"):
+            m = ANY_ENTRY_RE.match(line.strip())
+            if not m or m.group(2) != fp or line.strip().split(" ", 2)[2] != body:
+                continue
+            ts = _parse_ts(m.group(1))
+            if ts is not None and (last is None or ts > last) and (fp == "-" or
+                                                                   (_answer_recorded(note) or {}).get("stamp") == m.group(1)):
+                return m.group(1)
+        return None
+
+    same = live_same()
+    if same is not None and (not args.pr or _pr(note) == args.pr) and (not field or (
+            note.get(field) is not None and any(re.search(rf"\[\[{re.escape(slug)}\]\] {field} raised to "
+                                                          rf"{re.escape(_scalar(note.get(field)))}\b", l)
+                                                for l in rollout_note.section_text(NOTES_SECTION).split("\n")))):
+        print(f"{slug}: answer recorded ({args.form or '-'}) {same} [no-change]")
+        return 0
+
+    question = needs_human(note)
+    if kind == "needs you" and " ".join(question.split()) != ask:
+        return error(f"{slug}: --ask is not the note's ## Needs you question" if question else
+                     f"{slug}: the note holds no ## Needs you question (record a decision instead)")
+    lead = _lead()
+    root = _project_root(rollout_note)
+    repo = str(root) if root is not None else None
+    inp = lead.task_inputs(path, note, repo=repo)
+    budget = _retry_budget(note, rollout_note)
+    k = budget["maxReviewRounds"]["value"] if budget["maxReviewRounds"] else None
+    revise_spent = inp["resumeAt"] == "revise" and k is not None and k <= inp["lastRound"]
+    raise_to = None
+    if field:
+        cf = lead.cause_fix(path, note, inp, rollout_note, now)
+        allowed = ({cf["raise"]} if cf and cf.get("raise") else set()) | ({"max_review_rounds"} if revise_spent else set())
+        if field not in allowed:
+            return error(f"{slug}: --raise {field} is not this block's raise (allowed: "
+                         f"{', '.join(sorted(allowed)) or 'none'}): its humanFix names "
+                         f"{(cf or {}).get('act') or 'no human fix'}")
+        if field == "max_review_rounds" and revise_spent:
+            raise_to = inp["lastRound"] + 1
+        else:
+            value, why = _resolved_cap(note, rollout_note, field)
+            if value is None:
+                return error(f"{slug}: make no raise: {why}")
+            raise_to = value + 1
+    if args.pr and not lead.ENGINE_PR_URL_RE.fullmatch(args.pr):
+        return error(f"{slug}: --pr {args.pr!r} is not a PR URL (…/pull/<n>)")
+    if args.form == "hand-back":
+        pr_after = args.pr or _pr(note)
+        if at == "integration" and not pr_after:
+            return error(f"{slug}: set aside at Integration with no pr: a bare hand-back refuses it: restore it first "
+                         "(--pr), or record --form awaiting-repair")
+        _url, url_error = lead._note_pr_url(pr_after or None, note, repo)
+        if url_error and (at == "integration" or inp["resumeAt"] == "revise"):
+            return error(f"{slug}: the pr: gives no PR URL the engine takes ({url_error}): pass --pr, or record --form "
+                         "awaiting-repair")
+        if inp["resumeAt"] == "revise":
+            if k is None:
+                return error(f"{slug}: max_review_rounds does not resolve "
+                             f"({budget['error'] or budget['unresolved']}): no revise re-entry can be judged")
+            if revise_spent and raise_to is None:
+                return error(f"{slug}: a revise re-entry with no round left (max_review_rounds {k} <= lastRound "
+                             f"{inp['lastRound']}): pass --raise max_review_rounds, or record --form awaiting-repair")
+
+    # The stamp: now's minute, bumped past the last re-entry and every entry for this block, so no two entries of a block
+    # share a stamp and none ties a re-entry. A bump more than a minute ahead refuses (re-run in a minute).
+    floor = [last] if last is not None else []
+    for line in note.section_text(REPAIR_INPUT_SECTION).split("\n"):
+        m = ANY_ENTRY_RE.match(line.strip())
+        if m and m.group(2) == fp:
+            ts = _parse_ts(m.group(1))
+            if ts is not None:
+                floor.append(ts)
+    base = now.astimezone().replace(second=0, microsecond=0)
+    at_ts = base
+    if floor and max(floor) >= base:
+        at_ts = (max(floor) + timedelta(minutes=1)).astimezone().replace(second=0, microsecond=0)
+    if at_ts - base > timedelta(minutes=1):
+        return error(f"{slug}: the entry's stamp would be {_stamp(at_ts)}, more than a minute after now (the block's last "
+                     "re-entry or answer is that recent): re-run in a minute")
+    stamp = _stamp(at_ts)
+
+    # (a) The raise's rollout `## Notes` line, in its own save first: a failed task save leaves it for the re-run.
+    if raise_to is not None:
+        line = (f"- {now.astimezone().date().isoformat()} repair: [[{slug}]] {field} raised to {raise_to}, "
+                f"{'one iteration' if field == 'max_iterations' else 'one round'}")
+        if line not in [l.rstrip() for l in rollout_note.section_text(NOTES_SECTION).split("\n")]:
+            rollout_note.append_line(NOTES_SECTION, line)
+            try:
+                rollout_note.save(dry_run=args.dry_run)
+            except OSError as e:
+                return error(f"{slug}: cannot write {rollout_path}: {e}")
+    # (b) The task note in one save, the entry last: the `## Needs you` removal, the raise, pr:, the supersede rewrites,
+    # then the entry (the lead's trigger for a `hand-back` answer).
+    if kind == "needs you":
+        note.remove_section(NEEDS_HUMAN_SECTION)
+    if raise_to is not None:
+        note.set(field, raise_to)
+    if args.pr:
+        note.set("pr", args.pr)
+    if fp != "-":
+        _rewrite_keys(note, lambda f: f == fp, f"superseded {stamp}")
+    note.append_line(REPAIR_INPUT_SECTION, f"- {stamp} {body}")
+    try:
+        note.save(dry_run=args.dry_run)
+    except OSError as e:
+        return error(f"{slug}: cannot write {path}: {e}",
+                     tail="nothing written to the task note" + (": a re-run finishes the records" if raise_to else ""))
+    flag = " (dry-run)" if args.dry_run else " [written]"
+    print(f"{slug}: answer recorded ({args.form or '-'}) {stamp}{flag}")
     return 0
 
 
@@ -4679,8 +5117,30 @@ def main() -> int:
     hb.add_argument("--tasks", required=True, help="comma-separated task slugs")
     hb.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
     hb.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the ready: restamp)")
+    hb.add_argument("--answer", default=None, help="a compare-and-swap on the recorded answer (one slug only): hand back "
+                    "only while answerRecorded is this stamp with form hand-back, else exit 1 (ADR 0035)")
     hb.add_argument("--dry-run", action="store_true")
     hb.set_defaults(func=cmd_hand_back)
+
+    ra = sub.add_parser("record-answer", help="record Lachy's answer to a set-aside block in ## Repair input, the entry "
+                                              "last (ADR 0035; repair § 3b): exit 1 refused, nothing written")
+    ra.add_argument("--tasks", required=True, help="the set-aside task's slug")
+    ra.add_argument("--rollout", required=True, help="path to the rollout note the task's rollout: names")
+    ra.add_argument("--kind", required=True, choices=("needs-you", "decision"),
+                    help="needs-you: the note's ## Needs you question (removed in the same save); decision: any other ask")
+    ra.add_argument("--ask", required=True, help="the ask, verbatim (for needs-you, the note's question)")
+    ra.add_argument("--answer", required=True, help="Lachy's answer, verbatim")
+    ra.add_argument("--fingerprint", required=True, help="inputs' fingerprint, or - for a block with none")
+    ra.add_argument("--form", choices=tuple(FORM_KEYS), default=None,
+                    help="hand-back: a bare hand-back is all that is left; awaiting-repair: repair has work first; "
+                         "left: answered, left set aside (required with a fingerprint, refused with -)")
+    ra.add_argument("--raise", dest="raise_field", choices=RAISE_FIELDS, default=None,
+                    help="the budget the block's humanFix.raise names (or max_review_rounds for a revise with no round left)")
+    ra.add_argument("--pr", default=None, help="a confirmed PR URL, written as pr: before the entry")
+    ra.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    ra.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the entry's stamp)")
+    ra.add_argument("--dry-run", action="store_true", help="print the outcome and write nothing")
+    ra.set_defaults(func=cmd_record_answer)
 
     li = sub.add_parser("log-integration", help="append the lead's clean-path Integration line (path=lead) to a review note")
     li.add_argument("--tasks", required=True, help="the task slug")
@@ -4761,7 +5221,7 @@ def main() -> int:
     df.set_defaults(func=cmd_defer)
 
     de = sub.add_parser("descope", help="record an automatic descope of a plan-blocked task (p14-4): exit 0 descoped "
-                                         "(then hand-back), exit 3 ASK (nothing written; /thread:repair asks Lachy)")
+                                         "(then hand-back), exit 3 ASK (the refusal recorded; /thread:repair asks Lachy)")
     de.add_argument("--tasks", required=True, help="the plan-blocked task's slug")
     de.add_argument("--rollout", required=True, help="path to the rollout note the task's rollout: names")
     de.add_argument("--part", required=True, help="the descoped part, a verbatim quote (of the brief, for --optional)")
