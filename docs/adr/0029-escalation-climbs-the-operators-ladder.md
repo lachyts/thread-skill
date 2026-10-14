@@ -1,14 +1,15 @@
 # 0029 — escalation climbs the operator's ladder
 
 Date: 2026-09-30
-Status: proposed (supersedes ADR 0024's `top-tier` file and absorbs task p7-1's first two questions;
+Status: accepted, shipped in 3.0.0 (supersedes ADR 0024's `top-tier` file and absorbs task p7-1's first two questions;
 amends ADR 0006's single opus→fable flip, ADR 0007's engine-fixed effort matrix and ADR 0016's
 ceiling; grilled with Lachy 2026-09-30)
 
 ## Context
 
-Since ADR 0024 the operator's top tier caps every rollout, and Lachy runs everything on Opus 5.5.
-Under that cap every task is terminal: it takes the top row of the engine's `EFFORT` matrix from its
+Lachy runs everything on Opus 5.5, held on each rollout as `max_tier: opus` (ADR 0016's ceiling);
+ADR 0024 decided the ceiling should be one operator setting, but that was never built. Under that
+cap every task is terminal: it takes the top row of the engine's `EFFORT` matrix from its
 first pass and never escalates, because escalation (ADR 0006) only ever meant a change of model. A
 task that fights (rejected, red, plan-blocked) gets exactly the effort of one that sails through.
 Lachy asked: *"can the effort level start at high and only be escalated when it needs to be."*
@@ -69,16 +70,17 @@ Considered:
 ## Consequences
 
 - The engine's `EFFORT` matrix and `TOP_TIER` give way to the built-in ladder. There is still no
-  rollout- or task-level effort knob: ADR 0007's stance moves to the operator, where ADR 0024
-  already put the ceiling. `tierCapped` goes.
+  rollout- or task-level effort knob: ADR 0007's stance moves to the operator, who holds the
+  ceiling too (decision 1). `tierCapped` goes.
 - p7-1's third question (how a block at the top rung is triaged, ADR 0016's "wait for quota"
   reading) stays open.
 - Supersedes protocol 4's `0021-shared-effort-first-routing.md` (on `codex/thread-rollout-redesign`,
   never landed on master), which routed by a shared workspace policy and climbed to maximum effort
   before changing model. Its sound parts carry over: settings are fixed for a call, and the record
   keeps what was asked for apart from what ran.
-- Until the ladder is built, `max_tier: opus` stays the Opus lock. Execute prints the ladder it
-  resolved (the file's path, or `built-in`) at every launch.
+- Until the ladder shipped in 3.0.0, `max_tier: opus` was the Opus lock; execute now warns that the
+  key is ignored. Each call records the ladder it resolved (`args.ladder.source`: the file's path, or
+  `built-in`).
 - AGENTS.md § Model tier is locked to Lachy's hand edits. The pointer text to the ladder is proposed
   to him, never written.
 - Schedule offers a starting rung for a task it judges hard, in place of `model: fable` and

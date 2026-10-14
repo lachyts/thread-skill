@@ -1,6 +1,8 @@
 # One-shot first pass; iteration escalates to Fable
 
-*(Amended by ADR 0029, proposed.)*
+*(Amended by ADR 0029, 2026-09-30: escalation climbs one rung of the operator's ladder, once per
+stage, in place of one opus→fable flip per task; the built-in ladder is two Opus rungs and names no
+Fable, and a task's `rung:` replaces the `model: fable` stamp and step-up.)*
 
 An `opus` task gets exactly one un-iterated pass at each convergence layer — one plan, one
 implementation with a single verifier run, one judged PR round. The first evidence of hardness
