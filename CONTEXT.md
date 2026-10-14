@@ -365,9 +365,19 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: spend envelope, auto-approve limit.
 - **Human fix** — the one stated act that moves a set-aside task no agent may
   move (sign a gate, decide a refused descope, restore an Integration with no
-  PR), with its detail. Execute, status and repair read it; none re-derives
-  it (ADR 0035).
+  PR), with its detail: `lead-integrate.py inputs`' `humanFix` ({act, detail,
+  handBack, label, raise}; `raise` names the budget a spent block may raise).
+  Execute, status and repair print it; none re-derives it (ADR 0035).
   _Avoid_: human cause, manual step.
+- **Recorded answer** — Lachy's answer to one set-aside block, a `## Repair
+  input` entry keyed on the block's fingerprint and written only by
+  `reconcile-rollout.py record-answer`, the entry last: `hand-back` (a bare
+  hand-back is all that is left, so the live lead hands it back itself once
+  nothing is paused), `awaiting repair` (repair still has work first) or
+  `left` (answered, left set aside). `inputs`' `answerRecorded` is its one
+  read; a re-entry since, a later answer (which supersedes it) or a hand-back
+  (which spends it) ends it, and an answered block is never retried (ADR
+  0035). _Avoid_: answer key by hand, spend by hand.
 - **Needs-you item** — a decision in a running rollout that is Lachy's alone:
   a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside only a person
   moves on, a merge hold's release, or a halt. The lead lists it in the

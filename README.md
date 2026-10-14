@@ -158,7 +158,9 @@ final check that the run wrote nothing into the tree):
   invariant** (optional engine features must render byte-identical Workflow `agent()` prompts when
   unset, or in-flight rollouts can't resume); `reconcile-rollout.test.sh`, `reconcile-rollout-queue.test.sh`
   (the queue verbs), `reconcile-rollout-runs.test.sh` (accumulated feedback runs), `reconcile-rollout-lead.test.sh`
-  (`hand-back`, `log-integration`) and `reconcile-rollout-descope.test.sh` (the automatic-descope verb); `rollout-stop-driver.test.sh`; `tests/lead-integrate.test.sh` (the lead's
+  (`hand-back`, `log-integration`), `reconcile-rollout-descope.test.sh` (the automatic-descope verb and its recorded
+  refusal) and `reconcile-rollout-human-fix.test.sh` (`inputs`' one Human fix per refusal, the recorded answer,
+  `record-answer` and `hand-back --answer`, ADR 0035); `rollout-stop-driver.test.sh`; `tests/lead-integrate.test.sh` (the lead's
   Integration against a fake `gh` and real repos) and `tests/contracts/execute-queue.test.mjs` (the queue loop's prose);
   `merge-task.sh --self-test-classify` / `--self-test-base`, and `tests/merge-task-base.test.sh` /
   `tests/merge-task-integrated.test.sh` (one integrated PR per call, against a fake `gh` and a real bare repo).
