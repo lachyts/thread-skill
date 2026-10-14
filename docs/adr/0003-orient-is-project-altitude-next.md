@@ -10,6 +10,9 @@ grows a merge engine, and non-PR ops work is still the wrong fit for it. The
 body is left as written: a correct record of what was decided on the day.
 *(Amended by ADR 0027, 2026-09-28: orient is also the one shaping verb. After its audit it asks
 Reshuffle, Steer only or Look only, reshapes the project itself and schedules wave-shaped phases.)*
+*(Amended by ADR 0023, 2026-10-14: ADR 0010's launch conclusion is itself superseded; orient dispatches
+its batches as native children of its own session, and a kept prompt is hand-launched only for a
+batch blocked on a missing capability.)*
 
 `thread:orient` joins the family as the *project-altitude* router: where
 `next` reads one live thread and recommends its next move, `orient` reads a
