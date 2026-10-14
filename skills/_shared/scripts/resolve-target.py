@@ -30,11 +30,13 @@ has a null `note` and its path as `name`.
 
 The ladder. Rung 1, an argument: a [[link]]; a path (it contains `/` or starts with `~`) inside the vault (a
 note, a folder through its folder note) or outside it (a file is a scoped target, a directory runs the
-directory rungs); else a typed name, matched over every live key. Rung 2, the directory: the longest live
-`repos:` entry that is the cwd, its git top-level or its git main root, or a whole-component prefix of one;
-several declarers ask. Rung 3, a workspace (launch-folders.json) holding the directory more deeply than any
-declaration: its name, matched against area and folder-project notes. Rung 4, the directory's own name,
-matched within the area its nearest area-named ancestor names; with no such area, suggestions only.
+directory rungs); else a typed name, matched over every live key. The directory rungs read a linked worktree
+as the same sub-path of its main checkout (the checkout's root when it lacks that path), so a worktree of an
+umbrella repo keeps its sub-path. Rung 2, the directory: the longest live `repos:` entry that is the cwd,
+that sub-path, its git top-level or its git main root, or a whole-component prefix of one; several declarers
+ask. Rung 3, a workspace (launch-folders.json) holding the directory more deeply than any declaration: its
+name, matched against area and folder-project notes. Rung 4, the directory's own name, matched within the
+area its nearest area-named ancestor names; with no such area, suggestions only.
 
 Live targets: notes under Work/Projects whose `tags:` include `project` or `area`, outside Archive/, not
 dead (next-action's dead_note: the `archived` tag or status done/merged/dropped) and not `done: true`. Their
@@ -563,7 +565,10 @@ class Resolver:
         """Rungs 2-4 for the realpath'd directory C. Returns the answer plus the own directory O."""
         home = self.home
         top, G = self.git_roots(C)
-        L = G if (G and top and top != G) else C
+        L = C
+        if G and top and top != G:  # a linked worktree: the same sub-path of the main checkout, else its root
+            L = real(os.path.join(G, os.path.relpath(C, top))) if within(C, top) else G
+            L = L if os.path.isdir(L) else G
         roots, lf_why = self.workspace_roots()
         note = "; rung 3 skipped: %s" % lf_why if lf_why else ""
         F = self.frames(L, G)
@@ -576,7 +581,7 @@ class Resolver:
             if G and within(G, F) and G != F and len(G) > len(O):
                 O = G
 
-        probes = [p for p in (C, top, G) if p]
+        probes = [p for p in (C, L, top, G) if p]
         E = None
         for e, _ in self.declared():
             if any(within(p, e) for p in probes) and (E is None or len(e) > len(E)):

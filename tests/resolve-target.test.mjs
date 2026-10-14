@@ -64,21 +64,28 @@ git(['-C', h('repos/tools/thread-skill-rollout'), 'worktree', 'add', '-q', '-b',
 repo(h('repos/tools/murmur'), { commit: true })
 git(['-C', h('repos/tools/murmur'), 'worktree', 'add', '-q', '-b', 'wt', path.join(OUTSIDE, 'murmur-wt')])
 mkdir(path.join(OUTSIDE, 'plain'))
-// ~/repos/workspaces: one umbrella repo for every *-workspace.
-repo(h('repos/workspaces'))
+// ~/repos/workspaces: one umbrella repo for every *-workspace, with a linked worktree inside it.
+repo(h('repos/workspaces'), { commit: true })
 for (const ws of ['ops', 'animately', 'narcissus', 'td-experiments', '2d', '3d', 'xr']) mkdir(h(`repos/workspaces/${ws}-workspace/launchers/full`))
 mkdir(h('repos/workspaces/ops-workspace/launchers/lean'))
 mkdir(h('repos/workspaces/animately-workspace/launchers/seo'))
 repo(h('repos/workspaces/animately-workspace/crawler'), { commit: true })
 git(['-C', h('repos/workspaces/animately-workspace/crawler'), 'worktree', 'add', '-q', '-b', 'wt', path.join(OUTSIDE, 'crawler-wt')])
 mkdir(h('repos/workspaces/_shared/scripts'))
-// ~/Projects: one umbrella repo, dated project dirs, a nested repo, archive and resource folders.
-repo(h('Projects'))
+const WS_WT = h('repos/workspaces/.claude/worktrees/wt')
+git(['-C', h('repos/workspaces'), 'worktree', 'add', '-q', '-b', 'wt', WS_WT])
+for (const d of ['animately-workspace/launchers/seo', 'ops-workspace/launchers/lean', 'wt-only']) mkdir(path.join(WS_WT, d))
+// ~/Projects: one umbrella repo, dated project dirs, a nested repo, archive and resource folders, and a linked
+// worktree outside HOME.
+repo(h('Projects'), { commit: true })
 for (const d of ['2D/26-08-03_possum-paste-up/finals', '2D/26-09-24_macklemore-mate', '2D/_archive/26-08-01_x',
   '2D/26-06-15_class-war-australian-cards', 'Narcissus/_sources', 'Narcissus/26-10-02_light-probe',
   '3D/26-10-01_bracket', 'skate', 'TSMS', '_archive']) mkdir(h(`Projects/${d}`))
 repo(h('Projects/Narcissus/narcissus-avp'))
 mkdir(h('Projects/Narcissus/narcissus-avp/Sources/App'))
+const PROJECTS_WT = path.join(OUTSIDE, 'projects-wt')
+git(['-C', h('Projects'), 'worktree', 'add', '-q', '-b', 'wt', PROJECTS_WT])
+for (const d of ['2D/26-08-03_possum-paste-up/finals', '2D/26-09-24_macklemore-mate', '2D/26-10-20_wt-only']) mkdir(path.join(PROJECTS_WT, d))
 // ~/.agents: one umbrella repo of skills.
 repo(h('.agents'))
 for (const s of ['ab', 'method', 'unpack']) mkdir(h(`.agents/skills/${s}`))
@@ -384,6 +391,25 @@ test('rung 3: a workspace below a shared declaration gives its area or folder pr
   for (const [ws, [name, score]] of Object.entries(table)) {
     r = at(h(`repos/workspaces/${ws}-workspace/launchers/full`))
     assert.deepEqual([r.outcome, r.rung, r.target?.name, scores(r)[0]], ['resolved', 'workspace', name, score], ws)
+  }
+})
+
+test('a linked worktree of an umbrella repo reads as the same sub-path of its main checkout', () => {
+  const sub = (d) => path.join(WS_WT, d)
+  assert.deepEqual(at(sub('animately-workspace/launchers/seo')), at(h('repos/workspaces/animately-workspace/launchers/seo')))
+  resolved(at(sub('animately-workspace/launchers/seo')), target('area', 'Animately', `${P}/Animately/Animately.md`, 'Animately', 'Animately'),
+    'workspace')
+  // The worktree path itself sits under the shared ~/repos/workspaces declaration; the mapped path is deeper.
+  resolved(at(sub('ops-workspace/launchers/lean')),
+    target('project', 'Morning and Weekly Commands', `${P}/Tools/Morning and Weekly Commands.md`, 'Tools', 'Tools'), 'directory')
+  assert.deepEqual(at(sub('wt-only')), at(h('repos/workspaces')), 'a sub-path the main checkout lacks reads as its root')
+  const only = at(path.join(PROJECTS_WT, '2D/26-10-20_wt-only'))
+  assert.deepEqual(only, at(h('Projects')), 'so a dated dir only the worktree holds is never learned')
+  assert.equal(only.learn_dir, null)
+  for (const d of ['2D/26-08-03_possum-paste-up/finals', '2D/26-09-24_macklemore-mate']) {
+    const r = at(path.join(PROJECTS_WT, d))
+    assert.deepEqual(r, at(h(`Projects/${d}`)), d)
+    assert.notEqual(r.learn_dir, '~/Projects', 'never the umbrella')
   }
 })
 
