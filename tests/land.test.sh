@@ -6,9 +6,10 @@
 # `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
 # labels, update-branch, the user, PR bodies, hold comments and per-SHA check-runs and status. Every handed
 # path goes through a symlinked alias of the temp dir, so the physical-path handling is exercised on every run.
-# Hang stubs run a non-exec `sleep 40 | cat`. A call handed any `*=hang*` setting runs under
+# Hang stubs run a non-exec `sleep 120 | cat`. A call handed any `*=hang*` setting runs under
 # LAND_TIMEOUT=$HANG and asserts elapsed under $HANG_BOUND (case 35 passes its own LAND_TIMEOUT after it, which
-# wins, and a HANG_BOUND prefix, since its deadline is the bound); every other call has the 15 s suite default,
+# wins, and a HANG_BOUND prefix, since its deadline is the bound), and a call that must return while a stub's
+# or hook's leftover child (also 120 s) lives asserts the same bound; every other call has the 15 s suite default,
 # room for a fake gh slowed by `make test`'s concurrent suites. Hermetic: HOME, the global git config and TMPDIR
 # are temp, and the caller's GIT_DIR & co. are unset. bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -20,8 +21,45 @@ root=$(pwd -P)
 LAND=$root/skills/_shared/scripts/land.sh
 CLOSE=$root/skills/close/SKILL.md
 BASH32=/bin/bash
-echo "# bash on PATH: $(bash --version | head -n 1)"
-echo "# BASH32 ($BASH32): $($BASH32 --version | head -n 1)"
+
+# ---- shards ----------------------------------------------------------------------------------------------
+# The cases are grouped into shard_<n>() functions below, each self-contained (it builds every repo it reads).
+# Run bare, this script is the parent: it starts one child per shard (`--shard <n>`), all at once, each with
+# its own temp dir, HOME, fake servers, logs and TMPDIR, then prints their output in shard order. Almost all
+# of the suite's CPU is land.sh's own git, perl and fake-gh processes; on a loaded host (a rollout at its
+# parallel ceiling, load ~150) one serial chain of them got ~1/12 of a core and took ~1700 s against the
+# verifier's 1800 s timeout (p19-1). Shards take a share each, so the suite's wall time is its slowest shard.
+# A case must sit inside a shard_<n>() (a top-level case would run once per child); the parent checks it.
+self=$root/tests/land.test.sh
+if [ "${1:-}" != --shard ]; then
+  echo "# bash on PATH: $(bash --version | head -n 1)"
+  echo "# BASH32 ($BASH32): $($BASH32 --version | head -n 1)"
+  echo "== land.sh exists"
+  ok "$([ -x "$LAND" ] && echo y)" y "land.sh is present and executable"
+  [ -x "$LAND" ] || { echo "make test: land.sh missing"; exit 1; }
+  echo "== shards"
+  ids=$(sed -n 's/^shard_\([0-9][0-9]*\)() {$/\1/p' "$self" | tr '\n' ' ')
+  ok "$(awk '/^shard_[0-9]+\(\) \{$/{on=1; next} /^\}  # end shard_[0-9]+$/{on=0; next} !on && /^echo "== [0-9]/' "$self")" "" \
+     "every case sits inside a shard_<n>() function"
+  ok "$(grep -E '^(shard_[0-9]+\(\) \{|\}  # end shard_[0-9]+)$' "$self" | sed 's/[^0-9]//g' | paste -d' ' - - | awk '$1 != $2')" "" \
+     "each shard_<n>() closes with its own end marker"
+  ok "$([ -n "$ids" ] && echo y)" y "shards found: $ids"
+  sd=$(mktemp -d) || { echo 'FAIL - mktemp'; exit 1; }
+  pids=()  # a parent stopped early (the verifier's timeout) stops its children; each child's own trap cleans up
+  trap 'kill ${pids[@]+"${pids[@]}"} 2>/dev/null; rm -rf "$sd"' EXIT
+  for k in $ids; do "$BASH" "$self" --shard "$k" > "$sd/$k.out" 2>&1 & pids+=($!); done
+  i=0
+  for k in $ids; do
+    wait "${pids[$i]}"; rc=$?; i=$((i+1))
+    cat "$sd/$k.out"
+    ok "$rc" 0 "shard $k exited 0"
+  done
+  pids=()
+  echo
+  [ "$fail" = 0 ] && echo "land.test.sh: ALL PASS" || echo "land.test.sh: FAILED"
+  exit "$fail"
+fi
+shard=${2:-}
 
 real=$(mktemp -d) || { echo 'FAIL - mktemp'; exit 1; }
 real=$(cd "$real" && pwd -P) || { echo 'FAIL - cd into the mktemp dir'; exit 1; }
@@ -44,7 +82,9 @@ git config --global init.defaultBranch main
 git config --global advice.detachedHead false
 export LANDING_REGISTER="$tmp/register.md"
 export LAND_TIMEOUT=15 LAND_DEADLINE=300
-HANG=4 HANG_BOUND=25   # a hang call's LAND_TIMEOUT (land() applies it) and its elapsed bound, under a stub's 40 s
+# HANG is a hang call's LAND_TIMEOUT (land() applies it). HANG_BOUND is its elapsed bound: the whole land.sh call,
+# whose other steps took 30-38 s on a host at load ~150 (p19-1), so it sits well above that and under a stub's 120 s.
+HANG=4 HANG_BOUND=90
 cp tests/fixtures/land/fake-gh.py "$tmp/bin/gh"; cp tests/fixtures/land/fake-ssh.sh "$tmp/bin/fake-ssh"
 chmod +x "$tmp/bin/gh" "$tmp/bin/fake-ssh"
 export PATH="$tmp/bin:$PATH"
@@ -144,12 +184,17 @@ json.dump(prs, open(f, "w"))
 PY
 }
 wtcount() { git -C "$W" worktree list | grep -c .; }
-
-echo "== land.sh exists"
-ok "$([ -x "$LAND" ] && echo y)" y "land.sh is present and executable"
-[ -x "$LAND" ] || { echo "make test: land.sh missing"; exit 1; }
+# sw <dir>: a repo with a GitHub origin and an uncommitted THREAD.md (case 19's swept repos, case 53).
+sw() { mkdir -p "$1"; git init -q -b master "$1"; git -C "$1" remote add origin git@github.com:o/sw.git; echo t > "$1/THREAD.md"; }
+snip() {  # snip <shell> [VAR=value …] → out, err, rc, el: run $tmp/run.sh (a filled SKILL.md snippet)
+  local sh=$1; shift
+  : > "$LOG_SSH"; : > "$LOG_GH"; local s=$SECONDS
+  out=$(env CLAUDE_PLUGIN_ROOT="$root" "$@" $sh "$tmp/run.sh" 2>"$tmp/err"); rc=$?
+  el=$((SECONDS - s)); err=$(cat "$tmp/err")
+}
 
 # ==== Protected route: creating and queueing a PR =========================================================
+shard_1() {
 echo "== 1. protected, local strictly behind"
 ghreset; mkrepo c1; srvcommit c1 x.txt X; X=$(srvref c1 master); edit
 land -- --slug 'c1 thread' -- "$W" "$W/THREAD.md"
@@ -268,7 +313,7 @@ ok "$(cnt "$(ghlog)" "pr ")" 0 "case 11: zero gh pr calls"
 edit again
 land GH_PROT=holdout -- "$W" "$W/THREAD.md"
 res "case 11b" 0 landed
-ok "$([ "$el" -lt 15 ] && echo y)" y "case 11b: a stub's leftover child cannot hold the capture (${el}s < 15s)"
+ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 11b: a stub's leftover child cannot hold the capture (${el}s < ${HANG_BOUND}s)"
 
 echo "== 12. unprotected, origin moved, stranded C0, clean tree"
 ghreset; mkrepo c12; c0; srvcommit c12 x.txt X; X=$(srvref c12 master); edit
@@ -334,7 +379,9 @@ git -C "$W" stash -q
 land GH_PROT=false -- "$W"
 res "case 13d re-run after git stash" 0 landed
 ok "$(srvref c13dstaged master)" "$(git -C "$W" rev-parse master)" "case 13d: landed after the stash"
+}  # end shard_1
 
+shard_2() {
 echo "== 14. a non-close-out commit ahead"
 ghreset; mkrepo c14; echo x >> "$W/src/c.txt"; git -C "$W" commit -qam "feat: unrelated"; edit
 land -- "$W" "$W/THREAD.md"
@@ -411,7 +458,7 @@ stuck0() {  # stuck0 <label> <want> <land args…>
   ok "$(git -C "$W" rev-parse HEAD 2>/dev/null)" "$H0" "case 18 $label: HEAD unchanged"
 }
 stuck0 "non-close-out path" "stuck: not a close-out path: src/c.txt" "$W" "$W/src/c.txt"
-stuck0 "path outside top" "stuck: path outside …" "$W" "$tmp/w/c1/THREAD.md"
+stuck0 "path outside top" "stuck: path outside …" "$W" "$tmp/w/c17/THREAD.md"  # c17: this shard's case 17
 stuck0 "a .. tail" "stuck: path outside …" "$W" "$W/docs/nope/../THREAD.md"
 printf 'docs/handoffs/ign.md\n' > "$W/.git/info/exclude"; mkdir -p "$W/docs/handoffs"; echo i > "$W/docs/handoffs/ign.md"
 stuck0 "ignored path" "stuck: ignored: docs/handoffs/ign.md" "$W" "$W/docs/handoffs/ign.md"
@@ -434,7 +481,6 @@ fi
 chmod 755 "$tmp/w/locked"
 
 echo "== 19. swept repos"
-sw() { mkdir -p "$1"; git init -q -b master "$1"; git -C "$1" remote add origin git@github.com:o/sw.git; echo t > "$1/THREAD.md"; }
 for e in repos/workspaces repos/obsidian .claude .agents Projects Projects/Life/audio-archive \
          Projects/Life/grandma-shirleys-book Projects/Narcissus/narcissus-echo repos/concepts/cc; do
   sw "$HOME/$e"
@@ -608,8 +654,10 @@ ok "$(printf '%s\n' "$ownb" | grep -c 'gh pr checks')" 0 "structural: own-branch
 has "$ownb" 'commits/$1/check-runs?per_page=100' "structural: …check-runs"; has "$ownb" 'commits/$1/status' "structural: …and the combined status"
 ok "$(printf '%s\n' "$ownb" | grep -c 'git commit')" 0 "structural: own-branch never commits (merge commits come from git merge in the scratch worktree)"
 ok "$(grep -c '^  if \[ "${1:-}" = --own-branch \]; then shift; own_main "$@"; exit 1; fi$' "$LAND")" 1 "structural: --own-branch dispatches at the top of main"
+}  # end shard_2
 
 # ==== The snippet =========================================================================================
+shard_3() {
 echo "== 30. close's # thread:land snippet"
 o=$(grep -cE '^[[:space:]]*# thread:land( |$)' "$CLOSE"); c=$(grep -cE '^[[:space:]]*# end thread:land$' "$CLOSE")
 ok "$o/$c" "1/1" "one # thread:land marker pair"
@@ -626,12 +674,6 @@ fill() {
   local p; for p in "$@"; do q="$q '$p'"; done
   sed -e "s|top='<top>'|top='$t'|" -e "s|slug='<slug>'|slug='$s'|" -e "s|mode=''|mode='$m'|" \
       -e "s|<message>|📝 docs(thread): close-out — Lachy's snippet run|" -e "s| <paths>\$|$q|" "$tmp/snip.sh" > "$tmp/run.sh"
-}
-snip() {  # snip <shell> [VAR=value …] → out, err, rc, el
-  local sh=$1; shift
-  : > "$LOG_SSH"; : > "$LOG_GH"; local s=$SECONDS
-  out=$(env CLAUDE_PLUGIN_ROOT="$root" "$@" $sh "$tmp/run.sh" 2>"$tmp/err"); rc=$?
-  el=$((SECONDS - s)); err=$(cat "$tmp/err")
 }
 for sh in "${shells[@]}"; do
   ghreset; mkrepo "c30${#sh}"; edit
@@ -703,9 +745,9 @@ has "$err" "land: label failed: timed out" "case 34 hang: label failed: timed ou
 hasnt "$(ghlog)" "pr edit" "case 34: never pr edit"
 
 echo "== 35. the deadline"
-# LAND_TIMEOUT=600 outlives the 40 s hang stub, so `label failed: timed out` proves the deadline clipped the call's
+# LAND_TIMEOUT=600 outlives the 120 s hang stub, so `label failed: timed out` proves the deadline clipped the call's
 # budget. A deadline that passes before the label call (no `label failed`) is load, not a regression: retry once
-# with a longer one (still under the stub's 40 s), then SKIP.
+# with a longer one (still under the stub's 120 s), then SKIP.
 hit=
 for d in 12 30; do
   ghreset; mkrepo "c35d$d"; c0; srvcommit "c35d$d" x.txt X; edit
@@ -788,12 +830,12 @@ echo "== 39. a setsid holder cannot pin stdout"
 ghreset; mkrepo c39
 cat > "$W/.git/hooks/post-commit" <<EOF
 #!/bin/sh
-perl -MPOSIX -e 'exit if fork; POSIX::setsid(); open my \$f, ">", "$tmp/holder.pid"; print \$f \$\$; close \$f; sleep 40'
+perl -MPOSIX -e 'exit if fork; POSIX::setsid(); open my \$f, ">", "$tmp/holder.pid"; print \$f \$\$; close \$f; sleep 120'
 EOF
 chmod +x "$W/.git/hooks/post-commit"; edit; rm -f "$tmp/holder.pid"
 land GH_PROT=false -- "$W" "$W/THREAD.md"
 res "case 39" 0 landed
-ok "$([ "$el" -lt 15 ] && echo y)" y "case 39: returned while the holder lives (${el}s < 15s)"
+ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 39: returned while the holder lives (${el}s < ${HANG_BOUND}s)"
 for k in 1 2 3 4 5; do [ -s "$tmp/holder.pid" ] && break; sleep 1; done
 hp=$(cat "$tmp/holder.pid" 2>/dev/null); [ -n "$hp" ] && holders+=("$hp")
 ok "$([ -n "$hp" ] && kill -0 "$hp" 2>/dev/null && echo alive)" alive "case 39: the holder was alive (precondition)"
@@ -806,7 +848,7 @@ fi
 edit; rm -f "$tmp/holder.pid"
 fill "$W" c39 "" "$W/THREAD.md"
 snip bash GH_PROT=false; res "case 39 snippet" 0 landed
-ok "$([ "$el" -lt 15 ] && echo y)" y "case 39 snippet: returned while the holder lives (${el}s < 15s)"
+ok "$([ "$el" -lt "$HANG_BOUND" ] && echo y)" y "case 39 snippet: returned while the holder lives (${el}s < ${HANG_BOUND}s)"
 for k in 1 2 3 4 5; do [ -s "$tmp/holder.pid" ] && break; sleep 1; done
 hp=$(cat "$tmp/holder.pid" 2>/dev/null); [ -n "$hp" ] && { holders+=("$hp"); kill -9 "$hp" 2>/dev/null; }
 
@@ -821,7 +863,9 @@ chmod +x "$SRV/o/c40b.git/hooks/pre-receive"; S=$(srvref c40b master); edit
 land GH_PROT=false -- "$W" "$W/THREAD.md"
 res "case 40b (declined by the server)" 1 "stuck: push refused: remote: error: GH006: Protected branch update failed for refs/heads/master."
 ok "$(srvref c40b master)" "$S" "case 40b: server untouched"
+}  # end shard_3
 
+shard_4() {
 echo "== 41. handoff's # thread:handoff-land snippet"
 HANDOFF=$root/skills/handoff/SKILL.md
 o=$(grep -cE '^[[:space:]]*# thread:handoff-land( |$)' "$HANDOFF"); c=$(grep -cE '^[[:space:]]*# end thread:handoff-land$' "$HANDOFF")
@@ -890,6 +934,7 @@ for sh in "$BASH32" "${shells[@]}"; do
   ok "$([ -f "$D" ] && echo y)/$(isuntracked)" y/untracked "$L: the doc stays on disk, uncommitted"
   tmpempty "$L bogus root"
 done
+}  # end shard_4
 
 # ==== Own-branch mode (ADR 0028 §§ 1–3, 5; close § Land the own branch) =====================================
 OB=feat/x
@@ -996,6 +1041,7 @@ qsetup() {
   docscommit r1.md "status: pending"; docscommit r1.md "status: consumed"; docsdelete; H=$(tip)
 }
 
+shard_5() {
 echo "== 42. own branch: plain, protected, fresh <B>"
 ghreset; mkbranch c42; F=$(tip)
 own --
@@ -1101,7 +1147,9 @@ own GH_CHECKS_MAP="$H=pass" -- --queue --reviewed "$H"
 ores "case 46 R = H" 0 "queued $U"
 ok "$(checkreads)" 1 "case 46 R = H: one SHA read"
 ok "$(ghlog | grep -c "commits/$H/")" 2 "case 46 R = H: one check-runs and one status GET"
+}  # end shard_5
 
+shard_6() {
 echo "== 47. own branch: unprotected"
 qsetup c47a GH_PROT=false
 own GH_PROT=false GH_CHECKS_MAP="$R=pass" -- --queue --reviewed "$R"
@@ -1219,7 +1267,9 @@ nopush "case 56 merged"; hasnt "$(ghlog)" "POST" "case 56 merged: no create"; ha
 work "after the merge"
 own --; ores "case 56 merged, then new work" 0 "pr open https://github.com/o/c56/pull/2"
 has "$(ghlog)" "POST repos/o/c56/pulls" "case 56 new work: a new PR"
+}  # end shard_6
 
+shard_7() {
 echo "== 57. own branch: update-branch, then GitHub merges"
 ghreset; mkbranch c57; own --; R=$(tip); srvcommit c57 x.txt X
 own GH_UPDATE=merge GH_CHECKS_MAP="$R=pending" -- --queue --reviewed "$R"
@@ -1332,7 +1382,9 @@ ok "$(digest)" "$(fr_digest)" "case 65 excluded: an ignored scratch file never c
 mkdir -p "$W/docs/reviews"; echo pending > "$W/docs/reviews/2026-01-01-abc-def.md"
 own --; ores "case 65 docs/reviews" 0 "pr open https://github.com/o/c65/pull/1"
 ok "$(digest)" "$(fr_digest)" "case 65 docs/reviews: a review doc never counts and the digest matches"
+}  # end shard_7
 
+shard_8() {
 echo "== 66. own branch: the upstream is restored"
 qsetup c66
 own GH_CHECKS_MAP="$R=pass,$H=pending" -- --queue --reviewed "$R"
@@ -1522,7 +1574,12 @@ ghreset; mkrepo c73n; rdoc sub/n.md consumed; rseed c73n
 git -C "$W" rm -q docs/reviews/sub/n.md; git -C "$W" commit -qm "🔧 chore(review): nested delete"; edit
 land GH_PROT=false -- "$W" "$W/THREAD.md"
 res "case 73b nested deletion" 1 "stuck: local commits not from a close-out: 🔧 chore(review): nested delete"
+}  # end shard_8
 
+# ---- run this child's shard -------------------------------------------------------------------------------
+declare -F "shard_$shard" >/dev/null || { echo "FAIL - no shard_$shard"; exit 1; }
+"shard_$shard"
 echo
-[ "$fail" = 0 ] && echo "land.test.sh: ALL PASS" || echo "land.test.sh: FAILED"
+[ "$fail" = 0 ] && r="ALL PASS" || r=FAILED
+echo "land.test.sh shard $shard: $r (${SECONDS}s)"   # the wall time, to rebalance shards by
 exit "$fail"
