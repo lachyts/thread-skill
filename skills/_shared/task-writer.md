@@ -49,9 +49,22 @@ when the task carries § 4's `capture: continuation`, and `slug` or
 follow-up or rollout task that merely links the THREAD.md is not a capture
 and is never listed. Then read the captures: one whose slug matches, or
 whose Notes link the same `THREAD.md`, or whose resume prompt describes the
-same work. Found → **update it in place**: refresh the summary + resume prompt, set/move/remove
-`scheduled:`, rewrite § 4b's two fields, add `capture: continuation` if it lacks it, leave `captured:` as the original date. Never write a second
-task for the same thread. Re-deferring is a reschedule, not a new capture.
+same work.
+
+- **Found, and its match includes `marked`** → **update it in place**: refresh
+  the summary + resume prompt, set/move/remove `scheduled:`, rewrite § 4b's
+  two fields, leave `captured:` as the original date. Only a marked capture
+  is ever updated in place.
+- **Found but unmarked** (a capture written before the marker existed, or a
+  backlog task that carries the `thread` tag and the thread's link) → leave
+  it **untouched**, its `scheduled:` and day-page line included; report it
+  as `capture left open (unmarked): [[<slug>]]`, the line `thread:handoff`
+  uses; and write a fresh marked capture under a slug the unmarked task does
+  not hold. Nothing upgrades an unmarked task to a marked one. The safe
+  failure is a leftover task for Lachy to settle, never a lost one.
+
+Never write a second marked capture for the same thread. Re-deferring a
+marked capture is a reschedule, not a new capture.
 
 ## 3. Resolve the day (`defer` only)
 
@@ -141,9 +154,9 @@ launch: <cc-* alias>           # qualifying tasks only — OMIT when no alias ap
   set-down next move, written by stash or defer. The `thread` tag alone does
   not say that (a backlog task can carry it and the thread link too), so
   `thread:handoff` § Open captures supersedes **only** a task carrying this
-  line. Only this spec writes it; a § 2 re-capture adds it to a capture
-  written before the marker existed. Nothing else (a close follow-up, a
-  rollout or phase task) ever carries it.
+  line. Only a fresh stash or defer write stamps it; § 2 never adds it to an
+  existing unmarked task. Nothing else (a close follow-up, a rollout or
+  phase task) ever carries it.
 - Typed values: dates as `YYYY-MM-DD`, wiki-links quoted.
 - `next_action:` is not in this template: § 4b's script adds it to every
   stash and defer, quoted safely. Don't hand-write it.
@@ -344,6 +357,8 @@ One compact confirmation, always echoing the concrete outcome:
   project note § 4b's `set-down` wrote, then every `skip` row with its reason, except an
   `area note` and § 1.5's `[[Vault]]` umbrella (`no note` by design) — or
   `Next action not written: <stderr>` when the script refused.
+- and one `capture left open (unmarked): [[<slug>]]` line for each unmarked
+  match § 2 left untouched.
 
 Render the task link clickable (`obsidian://open?...` per the global link
 rules). When § 5 **Lean capture** leaves unlanded research — a THREAD.md
