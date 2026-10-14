@@ -226,6 +226,18 @@ decision moves it: hold `resume` until § 3c records it. An exit 3 here (a `HOLD
 escalate it (§ 3c). Under a pause or a live queue, report it and leave it: the reinstate's or the lead's next
 *Cold resume* runs `resume` first, and § 1 sends Lachy there only once every RACE decision is recorded.
 
+**The complete-rollout stop (p19-14).** A rollout whose note reads `status: done`, or sits in
+`Work/Tasks/Archive/Rollouts/`, already had its completion ceremony. When `resume`'s `progress:` line reads
+`rollout complete` on such a note, repair reports the repair and stops: no § 4 hand-off and no § 6. For each task
+`resume` flipped, append a dated `## Notes` line to the rollout note,
+`- <YYYY-MM-DD> repair: [[<slug>]] merged, never marked: flipped done (PR <url>); rollout already complete, no hand-off`,
+since no second ceremony copies it into a Completion log. Execute's loop would otherwise re-run that ceremony (a
+second Completion log, thread close, cron delete and archive move); its own idempotence guard, `next`'s `halt:
+"done"` on a done, archived note (execute § 4.5 step 5), is the backstop, never the route. A done note still in
+`Work/Tasks/` is a ceremony interrupted before its archive move: say so, and point at `/thread:execute [[<rollout>]]`,
+which finishes it. A complete rollout whose note does not read done (its lead ended before the ceremony) is no stop:
+§ 4's hand-off runs, `next` halts `complete`, and the ceremony it never ran is the hand-off's only work.
+
 **3b — input-gated → capture + inject.** Ping the user only here and for the other decisions no agent can
 make (a gate, a § 3c escalation, a CLOSED PR, a missing branch or a missing `pr:`, a close-out, a defer chain, a
 set-aside whose automatic retry is over (the auto-retry budget is spent, the fingerprint repeated, or `needsHuman` is
@@ -516,7 +528,8 @@ there is nothing to clear. Per stage:
   set aside*. Don't loop.
 - **Hand-off, when no lead is live and no pause stands**, and never while a RACE / UNVERIFIED escalation is
   undecided (§ 3c; report the hold and stop there), a git-env hold stands (§ 3e; report it and stop there) or
-  the ladder file is refused (§ 2; name the file and stop there): execute's queue loop, entered at its §4.5 resume
+  the ladder file is refused (§ 2; name the file and stop there), and never on a rollout whose ceremony already ran
+  (§ 3a's complete-rollout stop: report the repair and stop there): execute's queue loop, entered at its §4.5 resume
   (*Cold resume*): execute § 2.5 first (then § 2.6), then execute § 3's `verify_timeout` check (a halt there
   writes nothing), then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts), then
   `reconcile-rollout.py resume`, then the loop with
@@ -606,6 +619,9 @@ the choice, any restore and its rescue line, and the ack line).
   commits Lachy was not shown (§ 3e).
 - **Don't escalate a RACE re-verify in flight.** The lead decides it itself (§ 2). Asking Lachy before its
   verdict exists invites a "stands" that a red re-verify then contradicts.
+- **Don't hand a finished rollout back to execute.** A rollout whose note reads `status: done` or sits in
+  `Archive/Rollouts/` had its ceremony: flip what `resume` finds, record it, and stop (§ 3a's complete-rollout stop).
+  A hand-off would re-run the completion ceremony on it.
 - **Don't reinstate a rollout another rollout's `supersedes:` names.** Its unlanded tasks were carried there;
   finish its close-out instead (§ 1).
 - **Don't defer a task with dependants alone.** Compute the closure first; defer the chain or fix it.

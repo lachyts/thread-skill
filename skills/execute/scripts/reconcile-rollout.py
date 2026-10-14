@@ -33,7 +33,10 @@ Subcommands:
               ahead of every other verdict. `awaitingIntegration` is the Integration queue's order: a task a queued
               task depends on, directly or through a folded member (`merged_into:`), first, then the oldest
               `ready:`, then schedule order. Each `setAside` entry is {slug, status, setAsideAt}, plus `needsHuman`
-              (p16-3: the note's `## Needs you` question, normalised) only when the note holds one.
+              (p16-3: the note's `## Needs you` question, normalised) only when the note holds one. With every
+              task merged, `halt` is "complete" (run the completion ceremony), or "done" when the ceremony already
+              ran (p19-14: the rollout note reads `status: done` and sits in `Archive/Rollouts/`), so no entry
+              runs it twice; a done note still in Work/Tasks/ is an interrupted ceremony and stays "complete".
 
   mark-started     Stamp `started: <time>` on task notes as they start (the first start wins) and remove
               `integrating:`. The Workflow sandbox has no clock, so wall-clock enters here. It also consumes
@@ -353,8 +356,8 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     note, a merge-hold close and lane-freed halt for a lane holder; then carried {from, to}
                     (the writer appends it to both files).
   next              (not --dry-run) paused mode=soft when it stamps `paused:`; idle-slots {reason, free,
-                    settings} when free = ceiling - (slotsInUse + starts) > 0 and halt is not complete or
-                    empty.
+                    settings} when free = ceiling - (slotsInUse + starts) > 0 and halt is not complete,
+                    done or empty.
   clear-pause       when it removes `paused:`: paused mode=hard at the stamp when the record has no open pause
                     (a hard pause whose record-pause never ran), then resumed. Removing only
                     pause_requested records nothing.
@@ -2086,6 +2089,17 @@ def _set_aside_entry(r) -> dict:
     return entry
 
 
+def _ceremony_done(rollout_path: Path, rollout_note) -> bool:
+    """True when the rollout's completion ceremony already ran to its end (p19-14): the note reads `status: done`
+    and sits in an `Archive/Rollouts/` directory, where the ceremony's last step moves it. `next` then halts "done",
+    never "complete", so no entry (repair's hand-off included) runs the ceremony a second time. A done note still
+    in Work/Tasks/ is an interrupted ceremony (stamped, never moved), so it stays "complete" and a re-entry finishes
+    it."""
+    parent = rollout_path.parent
+    return (_status(rollout_note) == "done"
+            and parent.name == "Rollouts" and parent.parent.name == "Archive")
+
+
 def cmd_next(args) -> int:
     """Which tasks start now (ADR 0030 decision 1). Pure function of the notes, except that a drained soft pause is
     stamped (`paused:`) here. New starts are picked greedily by `priority:`, then least file overlap with what is in
@@ -2245,12 +2259,12 @@ def cmd_next(args) -> int:
         elif not in_n:
             halt = "empty"
         elif counts["merged"] == counts["total"]:
-            halt = "complete"
+            halt = "done" if _ceremony_done(rollout_path, rollout_note) else "complete"
         else:
             halt = "stuck"
-    # The Run record (p15-2): a reason marker for the idle Slots this call leaves (none at complete or empty).
+    # The Run record (p15-2): a reason marker for the idle Slots this call leaves (none at complete, done or empty).
     free = ceiling - (used + len(start))
-    if free > 0 and halt not in ("complete", "empty") and not args.dry_run:
+    if free > 0 and halt not in ("complete", "done", "empty") and not args.dry_run:
         reason = _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold,
                               by_state.get("set-aside", []))
         _event(rollout_path.stem, "idle-slots", None,
