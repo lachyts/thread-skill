@@ -24,7 +24,9 @@ buys nothing there.
 **Signs a task is NOT rollout-shaped** (any one disqualifies it):
 
 - Its core action is an external publish — CMS, live site, DNS, config console.
-  (These always pause at the human gate regardless — ADR 0008; execute § 3.7.)
+  (An external publish is an irreversible or credential gate, so it always
+  stops its task for Lachy's sign-off and never passes the standing approval —
+  ADR 0008, ADR 0034; execute § 3.7.)
 - Its ordering constraint is a measurement window or calendar date, not file
   overlap. The engine's parallelism is forbidden by isolation windows, and
   the queue cannot see a window or calendar constraint.
