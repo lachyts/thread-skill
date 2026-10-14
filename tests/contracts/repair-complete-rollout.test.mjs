@@ -19,7 +19,8 @@ function check({ repair, execute }) {
   const s3 = collapse(section(repair, /^### 3\. /) ?? '')
   const stop = s3.slice(Math.max(0, s3.indexOf('**The complete-rollout stop')))
   if (!s3.includes('**The complete-rollout stop') ||
-      !['`status: done`', 'Archive/Rollouts/', 'rollout complete', 'no § 4 hand-off and no § 6'].every((k) => stop.includes(k)))
+      !['`status: done`', 'Archive/Rollouts/', 'rollout complete', 'no § 4 hand-off and no § 6',
+        'write a dated `## Notes` line', 'merged, never marked: flipped done'].every((k) => stop.includes(k)))
     fails.push('repair-stop')
   const s4 = collapse(section(repair, /^### 4\. /) ?? '')
   const handOff = s4.slice(Math.max(0, s4.indexOf('**Hand-off')))
@@ -43,6 +44,11 @@ test('repair stops on a complete rollout and execute runs its ceremony once', ()
 
 test('control: no complete-rollout stop in repair § 3a fails repair-stop', () => {
   const repair = REPAIR.replace('**The complete-rollout stop (p19-14).**', '**A note (p19-14).**')
+  assert.deepEqual(check({ repair, execute: EXECUTE }), ['repair-stop'])
+})
+
+test('control: a stop that writes no dated Notes record fails repair-stop', () => {
+  const repair = REPAIR.replace('write a dated `## Notes` line to the rollout note', 'mention it in the report')
   assert.deepEqual(check({ repair, execute: EXECUTE }), ['repair-stop'])
 })
 

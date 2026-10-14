@@ -229,7 +229,7 @@ escalate it (§ 3c). Under a pause or a live queue, report it and leave it: the 
 **The complete-rollout stop (p19-14).** A rollout whose note reads `status: done`, or sits in
 `Work/Tasks/Archive/Rollouts/`, already had its completion ceremony. When `resume`'s `progress:` line reads
 `rollout complete` on such a note, repair reports the repair and stops: no § 4 hand-off and no § 6. For each task
-`resume` flipped, append a dated `## Notes` line to the rollout note,
+`resume` flipped, write a dated `## Notes` line to the rollout note,
 `- <YYYY-MM-DD> repair: [[<slug>]] merged, never marked: flipped done (PR <url>); rollout already complete, no hand-off`,
 since no second ceremony copies it into a Completion log. Execute's loop would otherwise re-run that ceremony (a
 second Completion log, thread close, cron delete and archive move); its own idempotence guard, `next`'s `halt:
