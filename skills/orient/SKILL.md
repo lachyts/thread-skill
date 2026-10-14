@@ -180,7 +180,8 @@ A situational report written for Lachy catching up, not a log:
 - **Balls in the air**: per-sub-project one-liners — the slot first
   (`next: <next_action> ([[<task>]])`, or `No next action`), then state,
   blocker, staleness. Group: active / in-flight (dispatched) / stalled /
-  dormant.
+  dormant. A task whose latest orient end line carries `fork for Lachy`
+  (§ 8 End-of-run updates) is blocked on his decision: name the fork (grill-me).
 - **Drift**: one line, the counts plus names, split into unambiguous (fixed on Reshuffle) and
   ambiguous (listed for Lachy, never applied). Omit the line when both lists are empty.
 - **Shape**: how much a reshuffle has to work with: loose tasks, brain dumps, unstarted phases,
@@ -306,7 +307,11 @@ dispatchable open work into **parallel-safe batches**:
   kill fan-out ("Prompt is too long"). That table + the registry are the
   only config — orient maintains no manifest of its own.
 - **Exclusions**: conversation-gated tasks (need Lachy's input — say so, leave
-  them for Hands-on or the next reshuffle's grill); in-flight tasks and tasks a live run covers
+  them for Hands-on or the next reshuffle's grill). A task whose latest orient end line (§ 2's body
+  read) carries `fork for Lachy` counts as conversation-gated at any age: a batch stopped it at a
+  grill-fit fork, and it stays out until Lachy decides the fork in this orient's steering answer or
+  reshuffle grill; its batch prompt then carries his ruling, and the new run's end line supersedes
+  the fork. Also excluded: in-flight tasks and tasks a live run covers
   (§ 8 Double-dispatch guard, rules 1 and 2), found before clustering; work
   whose playbook demands human sign-off before external effects.
 
@@ -347,7 +352,9 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
 5. **Collect and accept.** This session is the lead and stays open until every child returns:
    collect its output, `accept` its envelope, `advance`. Recover an interrupted child rather than
    clearing its claim. Report each batch as running, complete or blocked, with its native ID and
-   run dir.
+   run dir. A fork a child reports (in its result or a `fork for Lachy` end line) goes to Lachy as
+   a decision (grill-me) in that batch's close-out line, never as a follow-up task spawned on his
+   behalf.
 
 **Every batch prompt must carry** (the emission spec):
 
@@ -395,6 +402,11 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
 - **Domain playbook gates** — staging-first, confirm-before-publish, and any
   domain-specific sign-off rules from the workspace's playbooks. No Linear
   filing unless the active profile carries a Linear server.
+- **Grill-fit gates** — run `${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` over the batch's
+  work: a fork the child can settle from code or data is written as "decide X from Y", a Lachy
+  decision gets a gate line, and a batch with no forks carries no grill language. At a gate, or at
+  a Lachy-owned fork no gate foresaw, the child stops that task and reports the fork (End-of-run
+  updates), never resolving it or spawning a task for it.
 - **Cross-batch coordination** — name any shared surfaces and who owns them;
   check task-note progress stamps before editing anything another batch might
   own.
@@ -403,14 +415,18 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
   orient run or `--debrief` reads the truth from the notes, and add the
   mandatory end line
   `- <UTC ISO> orient end: run <Run:>, job <Job:>, <done | blocked: … | partial: …>` to its
-  `## Notes`. It is the only record if the lead ends before collecting.
+  `## Notes`. It is the only record if the lead ends before collecting. A task stopped at a
+  grill-fit fork stays `status: open` (never `done`, nor `in-progress`, which § 2 reads as in
+  flight), its end line ends `partial: fork for Lachy: <fork>; evidence: <…>` (one per fork), and
+  the child's result names the fork; the child never spawns a task for it.
 - **Execution context** — identify the canonical workspace, project and required
   authenticated tools. Native tools come from the parent session. Isolate code
   edits in worktrees where needed; do not expect a worktree to load MCP profiles.
 
 Close the dispatch with one line per batch: native child ID, batch title, tasks
 covered, the model and effort as spawned (or "effort inherited"), and
-verified-running, completed or blocked.
+verified-running, completed or blocked, plus `fork for Lachy: [[<task>]] <fork> (grill-me)` for
+each fork it reported.
 
 #### Double-dispatch guard
 
@@ -521,7 +537,9 @@ names why (a running or blocked rollout, uncommitted grill docs, a schedule bloc
   meaning its dispatch line names a run whose journal exists and records no bound child
   (`childId`) for its job. A stamp with no dispatch line, or whose named journal is missing (a hand
   launch, a pre-0023 stamp), is unknown, never "never launched", and keeps its 7 days. An
-  unsettled stamp inside its 7 days stays, an abandoned run's included.
+  unsettled stamp inside its 7 days stays, an abandoned run's included. An end line carrying
+  `fork for Lachy` is reported as a decision for Lachy (grill-me), with its fork and evidence, never
+  as completed work or a task to spawn.
 
 A fresh `/thread:orient` audit is the lightweight version of this.
 
@@ -536,6 +554,9 @@ A fresh `/thread:orient` audit is the lightweight version of this.
   is too long"): run orient from the narrowest profile that covers the batches.
 - **Do not substitute another harness or account.** Native child dispatch is the
   default; absent capabilities are reported instead of shelling out to a model.
+- **Don't turn a reported fork into a task.** A `fork for Lachy` end line is Lachy's decision
+  (grill-me): § 3, § 7, the close-out and `--debrief` surface it; nothing spawns or schedules work
+  for it.
 - **Don't re-batch in-flight work** (§ 2, § 8 Double-dispatch guard): only the
   two-step naming override re-dispatches it. Don't stamp or write anything —
   the slot write included — in Look only or dry runs.
