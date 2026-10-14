@@ -6,7 +6,8 @@
 # `*/.claude/*`), the ~/Projects walk's prunes (`_archive`, `.claude`, `node_modules`, depth > 5), and a CWD
 # repo outside the hits leaving every hit in place. Two mutation checks prove the worktree exclusion is
 # load-bearing twice over: the `.claude` rule alone excludes a depth-3 fixture, and dropping the depth limit
-# still leaves the worktree copy out; a third proves an `_archive` copy would otherwise hide a repo thread. Section B greps the prose that wires the lookup into open, close, handoff-lifecycle.md,
+# still leaves the worktree copy out; a third proves an `_archive` copy would otherwise hide a repo thread. It also
+# runs open's `list` step 2 find (p19-9), which must walk ~/Projects with the same prunes and depth bound. Section B greps the prose that wires the lookup into open, close, handoff-lifecycle.md,
 # CONTEXT.md and ADR 0017.
 # Hermetic: every path lives under mktemp, HOME is a temp dir per case, GIT_CEILING_DIRECTORIES stops git
 # walking above the temp root, git's repo-local vars are unset, and system and global git config are
@@ -84,6 +85,12 @@ if [ "$runA" = 1 ]; then
   fx "$h4/Projects/A/P/node_modules/x/THREAD.md"      '---\nslug: foo\n---\n'
   fx "$h4/Projects/A/P/a/b/c/THREAD.md"               '---\nslug: foo\n---\n# depth 6\n'
   fx "$h4/Projects/A/P/S/T/THREAD.md"                 '---\nslug: deep\n---\n# nested project, depth 5\n'
+  fx "$h4/Projects/A/P/.git/x/THREAD.md"              '---\nslug: foo\n---\n# inside a .git dir\n'
+  fx "$h4/Projects/B/Old/THREAD.md"                   '---\nslug: stale\n---\n# untouched for a year\n'
+  touch -t 202501010000 "$h4/Projects/B/Old/THREAD.md"
+  # open's `list` step 2: its ~/Projects find, extracted from the backtick span on that line (p19-9).
+  lcmd=$(sed -n 's/^2\. Find recent project threads: `\([^`]*\)`.*/\1/p' "$OPEN")
+  ok "$(printf '%s' "$lcmd" | awk 'END{print NR}')" 1 "open list step 2 holds one find command"
 
   # lk <snippet> <shell> <cwd> <home> <slug> — sets $out, $err, $rc. <shell> is word-split on purpose.
   lk() {
@@ -132,6 +139,10 @@ repos/tools/foo/THREAD.md" "$L CWD in tools/bar, slug=foo: the tiebreak keeps bo
 repos/tools/foo/THREAD.md" "$L pruned ~/Projects copies do not hide the repo threads"
     lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h4" deep
     ok "$(rel "$h4")" "Projects/A/P/S/T/THREAD.md" "$L a nested project THREAD.md at depth 5 is still found"
+    # 5d: open's list step 2 walks ~/Projects with the lookup's prunes and depth bound, and keeps -mtime -90
+    out=$(cd "$tmp/plain" && HOME="$h4" $sh -c "$lcmd" 2>"$tmp/err" | LC_ALL=C sort); err=$(cat "$tmp/err")
+    ok "$(rel "$h4")" "Projects/A/P/S/T/THREAD.md" "$L open list step 2: no _archive, .claude, .git, node_modules, depth-6 or stale copy"
+    ok "$err" "" "$L open list step 2: empty stderr"
     # 6
     lk "$tmp/lk.sh" "$sh" "$tmp/plain" "$h1" baz
     ok "$(rel "$h1")" "repos/tools/baz/THREAD.md" "$L a CRLF, quoted slug: matches"
@@ -191,6 +202,10 @@ repos/tools/renamed/THREAD.md" "$L an empty slug lists exactly the six repo thre
   ok "$(rel "$h4")" "Projects/A/_archive/Old/THREAD.md" "M3: without the prune the _archive copy hides the repo threads (the fixture is sensitive)"
 fi
 
+# open's list step 2 and the lookup's ~/Projects walk prune the same directories (p19-9)
+ok "$(occ "$OPEN" '\( -name _archive -o -name .claude -o -name .git -o -name node_modules \) -prune')" 2 \
+  "open: list step 2 and the lookup share the ~/Projects prunes"
+
 # ==== Section B: the prose =============================================================================
 QOPEN='`${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` § Repo-thread lookup'
 
@@ -218,7 +233,7 @@ has "$r2" 'never rung 3' "close rung 2 never falls to rung 3"
 slugin=$(first "$(cat "$CLOSE")" '- `slug` ')
 has "$slugin" 'effective slug' "close's handoff-scan slug input is the effective slug"
 s71=$(grep -F 'Thread update — write THREAD.md' "$CLOSE" | head -n 1)
-for s in 'rev-parse --show-toplevel' '--path-format=absolute --git-path' 'stricter form of sub-step 2' 'diff --cached --quiet --' 'check-ignore -q --' '(add failed:' 'whichever rung resolved it'; do
+for s in 'rev-parse --show-toplevel' '--path-format=absolute --git-path' 'which sub-step 2 shares' 'diff --cached --quiet --' 'check-ignore -q --' '(add failed:' 'whichever rung resolved it'; do
   has "$s71" "$s" "close step 7.1 carries: $s"
 done
 has "$(grep -F -- '- **Auto-execute, no asking**' "$CLOSE")" 'step 7.1' "close's Auto-execute line names the step-7.1 commit"
