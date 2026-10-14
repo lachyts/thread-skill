@@ -253,7 +253,8 @@ its `humanFix` `decide scope or defer`). For a set-aside at its run or at Integr
    fingerprint or any other `humanFix`): one task-note save, the entry
    `- <stamp> <kind> (block <fingerprint>[; awaiting repair|; left]): "<the ask, verbatim>" → <his answer, verbatim>`
    last, after the removal of the `## Needs you` section it answers, the raise and the `pr:`. `<kind>` is `needs you`
-   for a `## Needs you` question and `decision` for every other ask; `<stamp>` is the verb's (now's minute, bumped past
+   for a `## Needs you` question and `decision` for every other ask (the verb refuses `decision` while the note holds
+   a question, so no answer stands beside a stale one); `<stamp>` is the verb's (now's minute, bumped past
    the block's last re-entry and its earlier entries, so no two share a stamp and none ties a re-entry). A raise goes
    in as `--raise <field>` (the field `humanFix.raise` names, or `max_review_rounds` for a revise re-entry with no round
    left, § 4), and a confirmed `pr:` as `--pr`, never as a hand-written frontmatter edit. The form:

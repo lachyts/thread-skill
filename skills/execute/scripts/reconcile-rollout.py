@@ -89,6 +89,8 @@ Subcommands:
               [--raise max_review_rounds|max_plan_rounds|max_iterations] [--pr <url>]`. Refuses (exit 1, nothing
               written): a note not set aside at its run, at Integration or at a gate; a --fingerprint other than the
               block's (_block_fingerprint, `-` when none); `--kind needs-you` whose --ask is not the note's question;
+              `--kind decision` while the note holds a `## Needs you` question (its answer is `--kind needs-you`, which
+              removes the section in the same save);
               --form missing with a fingerprint or given with `-`; `--form hand-back` when a bare hand-back would not
               move the note once saved (at Integration with no pr:, a `prUrlError` on a revise or Integration way back
               read against the Project root, a revise re-entry with no round left and no `--raise
@@ -4564,6 +4566,12 @@ def cmd_record_answer(args) -> int:
         return error(f"{slug}: a re-entry stamp on the note (a run heading, auto_retry_at:, a descope entry or started:) "
                      "does not parse, so no answer could ever read as recorded: fix the stamp")
     field = args.raise_field
+    question = needs_human(note)
+    # A note holding a `## Needs you` question takes its answer as `--kind needs-you`, which removes the section in the
+    # same save: a decision recorded beside the open question would let a `hand-back` answer pass hand-back's
+    # compare-and-swap with the stale question still in place (repair's Don't).
+    if kind == "decision" and question:
+        return error(f"{slug}: the note holds a ## Needs you question: record its answer with --kind needs-you")
 
     # Idempotent: the same live answer, with its raise and pr: already in place, is [no-change] at its existing stamp.
     def live_same():
@@ -4585,7 +4593,6 @@ def cmd_record_answer(args) -> int:
         print(f"{slug}: answer recorded ({args.form or '-'}) {same} [no-change]")
         return 0
 
-    question = needs_human(note)
     if kind == "needs you" and " ".join(question.split()) != ask:
         return error(f"{slug}: --ask is not the note's ## Needs you question" if question else
                      f"{slug}: the note holds no ## Needs you question (record a decision instead)")

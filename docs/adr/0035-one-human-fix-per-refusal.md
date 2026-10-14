@@ -52,7 +52,9 @@ round 1's own fix.
 - **`record-answer` is the only writer of an answer.** One task-note save, the entry last, after the `## Needs you`
   removal it answers, a `--raise <field>` (all three budgets, validated against the cause's `humanFix.raise`, or
   `max_review_rounds` for a revise re-entry with no round left: `lastRound + 1` there, else the resolved value + 1,
-  with its rollout `## Notes` line written first) and a confirmed `--pr`. It supersedes every earlier live answer for
+  with its rollout `## Notes` line written first) and a confirmed `--pr`. A note holding a `## Needs you` question takes
+  only `--kind needs-you` (a `decision` is refused, nothing written), so no answer stands beside a stale question. It
+  supersedes every earlier live answer for
   the block, and its stamp is unique per block: now's minute, bumped one minute past the last re-entry and every entry
   for the fingerprint when now is not later (a bump more than a minute ahead refuses). A raise and a `pr:` are
   every-mode writes only inside an answer's save. An own call starts its budgets afresh, so its raise is + 1 per call.

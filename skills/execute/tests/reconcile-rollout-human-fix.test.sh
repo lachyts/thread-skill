@@ -8,7 +8,8 @@
 #   K  --max-review-rounds is an overlay humanFix ignores; the keys today's callers read are unchanged
 #   L  the label forms, and `ask 2` after a spent answer
 #   N  answerRecorded: the live forms, the dead keys, each re-entry stamp, ties and unparseable stamps
-#   W  record-answer: the save, its refusals, --raise for all three fields, --pr, the stamp bump, supersede
+#   W  record-answer: the save, its refusals (a decision beside an open question included), --raise for all three
+#      fields, --pr, the stamp bump, supersede
 #   B  hand-back: --answer's compare-and-swap, the spend, a refused hand-back spends nothing
 #   X  the races between the lead's Recorded answer, repair and the other verbs
 # The blocks are built through the real `reconcile` (and `lead-integrate.py set-aside` for the lead's own rows).
@@ -526,6 +527,20 @@ ok "$rc|$(snap)" "1|$before" "W: --kind needs-you with no question exits 1"
 ra "$A" --kind decision --ask "restore?" --answer "restored PR #5" --fingerprint "$FP" --form hand-back --pr "$PR"
 ok "$rc|$(fm "$A" pr)" "0|pr: $PR" "W: with --pr the hand-back answer is recorded (the pr: written before the entry)"
 ok "$(predicate "$(inp "$A")")" true "W: … and the lead's predicate holds"
+scen w-decision-question
+mkro; mkt "$B" open
+mkt "$A" open; planblock "$A" "$FA" 2026-10-03T08:00:00Z "{\"needsHuman\":\"$Q\"}"
+before=$(snap)
+for form in hand-back awaiting-repair left; do
+  ra "$A" --kind decision --ask "hand it back?" --answer yes --fingerprint "$SHA_A" --form "$form"
+  ok "$rc|$(snap)" "1|$before" "W: --kind decision --form $form while the note holds a ## Needs you question exits 1, nothing written"
+done
+has "$out" "ERROR: record-answer: $A: the note holds a ## Needs you question: record its answer with --kind needs-you; nothing written" \
+  "W: … its ERROR points to --kind needs-you"
+I=$(inp "$A")
+ok "$(hf "$I")|$(ans "$I")|$(sec "$A" '## Needs you' | grep -c "$Q")" '["answer the question",true,null]|null|1' "W: … the question stands, H4, no answer"
+ra "$A" --kind needs-you --ask "$Q" --answer alembic --fingerprint "$SHA_A" --form hand-back
+ok "$rc|$(sec "$A" '## Needs you')|$(predicate "$(inp "$A")")" "0||true" "W: the same answer as --kind needs-you records, removes the section, and the lead may act"
 scen w-pr-url-error
 mkro; mkt "$B" open
 int_retryable; setfm "$A" pr '"#5"'
