@@ -8,8 +8,9 @@ description: 'Pick a project back up and reshuffle it: audit a project/area afte
 The project-altitude sibling of `next` (ADR 0003), and the one shaping verb (ADR 0027). `next`
 answers "what's my move?" for the *current thread*; `orient` answers it for a *whole project or
 area* returned to after time away. It audits the balls in the air, recommends ONE best use of
-Lachy's time, then asks **Reshuffle, Steer only or Look only**. A reshuffle re-sorts all the open work, grills
-what is unclear and writes the result at one gate (`reshuffle.md`). Orient then routes by lane:
+Lachy's time, then reshuffles without asking (ADR 0036 d5): `--steer` routes the work as it stands and
+`--look` stops at the audit. A reshuffle re-sorts all the open work, grills what is unclear and writes
+the result at one gate (`reshuffle.md`). Orient then routes by lane:
 it schedules rollout-shaped phases itself, steers the session-lane work (batches dispatched as
 native child agents of this session, a focus item, or both) and ends with the **execute offer**.
 Pointed at a single plan, design note or brain dump, it runs a **scoped reshuffle** of that note
@@ -44,7 +45,9 @@ not supply execute's detached Stop-hook/heartbeat driver.
 ## Invocation forms
 
 ```
-/thread:orient Chorus                     # audit, then Reshuffle / Steer only / Look only
+/thread:orient Chorus                     # audit, then reshuffle (the default)
+/thread:orient Chorus --steer             # audit, then steer the work as it stands (no reshaping)
+/thread:orient Chorus --look              # audit only: stop after § 3 and write nothing
 /thread:orient [[Chorus]]                 # explicit wikilink form
 /thread:orient                            # resolve the target from the session directory
 /thread:orient [[<design, phase or brain-dump note>]]   # scoped reshuffle of that note
@@ -59,7 +62,8 @@ not supply execute's detached Stop-hook/heartbeat driver.
 
 The target is one project, one area or one note (CONTEXT.md **Target**, ADR 0036), and the resolver
 runs before § 2 reads anything. Quoted prose is a scoped target, as below. Anything else, with
-orient's own flags (`--debrief`) removed, goes once to
+orient's own flags (`--debrief`, `--steer`, `--look`, and the words "steer only" or "look only")
+removed, goes once to
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py "<argument>"`, run from the
 session directory. The argument is quoted as one word, so a `[[link]]` never meets the shell's
 globbing; a bare invocation passes none. It prints one JSON object: `outcome` (`resolved`,
@@ -116,7 +120,7 @@ resolved), a `dir_anchor` (the area the directory sits in), a one-line `reason` 
   `learn_dir` is null. When he lands on a *project*, from the ask, the re-ask or a typed answer,
   hold that `learn_dir` with the project's `note` field: the picked option's, or the re-resolved
   target's `note` when a typed answer resolves to a project. The learn waits for § 4. Nothing is
-  held for an area pick, a confirmed first pick, Look only, a scoped target, `--debrief` or a dry
+  held for an area pick, a confirmed first pick, Look only (`--look`), a scoped target, `--debrief` or a dry
   run, and a directory with no `learn_dir` is never written back.
 
 A project or scoped target narrows § 2 to that project (§ 2 Scope); an area target keeps the area
@@ -181,8 +185,9 @@ A situational report written for Lachy catching up, not a log:
   (`next: <next_action> ([[<task>]])`, or `No next action`), then state,
   blocker, staleness. Group: active / in-flight (dispatched) / stalled /
   dormant.
-- **Drift**: one line, the counts plus names, split into unambiguous (fixed on Reshuffle) and
-  ambiguous (listed for Lachy, never applied). Omit the line when both lists are empty.
+- **Drift**: one line, the counts plus names, split into unambiguous (fixed next, in § 4, unless
+  `--look`) and ambiguous (listed for Lachy, never applied). It is the notice for those fixes, so
+  say so on the line. Omit the line when both lists are empty.
 - **Shape**: how much a reshuffle has to work with: loose tasks, brain dumps, unstarted phases,
   overlaps found in related projects, and any live rollout.
 - **ONE recommended best use of his time**, with a one-line reason — same
@@ -192,16 +197,21 @@ A situational report written for Lachy catching up, not a log:
   the slot's own task → say they agree; a different item → name the slot and
   say why this beats it; a blank slot → say the recommendation would fill it.
 
-### 4. Reshuffle, Steer only or Look only
+### 4. Reshuffle by default
 
-`AskUserQuestion`, recommended option first:
+No question (ADR 0036 d5): Lachy picked Reshuffle at every orient, so the audit flows straight into
+the reshuffle (§ 5), which writes nothing before its gate and whose grill he can stop at any
+question. The opt-outs come with the invocation (§ Invocation forms):
 
-- **Reshuffle** (the usual choice on pickup) — continue to § 5.
-- **Steer only** — no reshaping: route the open work as it stands (§ 6), e.g. to dispatch
-  batches as native child agents of this session.
-- **Look only** — the audit was the deliverable; stop, no writes of any kind.
+- **Steer only** (`--steer`, or "steer only" in the arguments) — no reshaping: route the open work
+  as it stands (§ 6), e.g. to dispatch batches as native child agents of this session.
+- **Look only** (`--look`, or "look only" in the arguments) — the audit was the deliverable; stop
+  after § 3, with no writes of any kind: no drift fixes, no learned directory, no slot write.
+- **An empty shape** (§ 3 Shape: nothing loose, unclear or unphased, and no pull-ins) — nothing to
+  reshuffle, so go straight to § 6's steering.
 
-**Drift fixes.** Reshuffle and Steer only authorise them (as any steer did under ADR 0026): re-run
+**Drift fixes.** A default run and Steer only authorise them, as choosing Reshuffle did under ADR
+0027; the § 3 Drift line is the notice, and `--look` applies none. Re-run
 the reconcile step with `--apply --only <that project's saved dry-run file>` for each project whose
 dry run listed unambiguous items, so the reshuffle never forms a roadmap on top of work Lachy saw
 finished. `--only` writes just the items the § 2 dry run listed: a plain `--apply` recomputes and
@@ -211,11 +221,11 @@ orient lists them again), and any `Reviewed, not applied` items with their reaso
 `now ambiguous: …` needs his eye; `no longer drift (…)` is benign (closed or moved since, by the
 rollout's ceremony or a mark-done). Neither is written, so both join the reshuffle's frozen
 possibly-landed tier (reshuffle R1). If the saved file is gone (`--only` exits 2), re-run the dry
-run and ask again. Ambiguous items are listed for Lachy and never applied. A scoped target skips
-this question and applies no drift fixes: it reshapes one note, so the § 3 Drift line is
-report-only for it.
+run, report its Drift line and apply from the new file. Ambiguous items are listed for Lachy and
+never applied. A scoped target applies no drift fixes: it reshapes one note, so the § 3 Drift line
+is report-only for it. It goes straight to its reshuffle (`--look` still stops it after § 3).
 
-**The learned directory.** Reshuffle and Steer only also run
+**The learned directory.** A default run and Steer only also run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py --learn "<learn_dir>" "<note>"`
 when § 1 held a `learn_dir`, where `<note>` is the vault-relative `note` field § 1 held with it (the
 picked option's or the re-resolved target's; it carries a `/`, so the script resolves exactly that
@@ -251,11 +261,11 @@ the gate is empty), carry straight on to § 6.
     prior rollout). Orient reports any such finish from schedule's output, never as "nothing
     written". The phases are written and wait; orient reports schedule's remedy and names the next
     move: `/thread:status` (then `repair`) for a stuck rollout, or a later `/thread:orient <project>`
-    (Steer only is enough) once the repo is free.
+    (`--steer` is enough) once the repo is free.
   - **Uncommitted grill docs.** If R3's grill left `CONTEXT.md` or `docs/adr/` changes
     uncommitted in the target repo, schedule nothing there either: every worktree branches from
     `origin`, which lacks them. Name them as the next move (land them through the repo's PR
-    route), then Steer only schedules.
+    route), then an orient with `--steer` schedules.
 
   Schedule's own § 0 checks can still stop it with a named remedy, which orient reports.
   Session-lane batches are never offered for rollout-shaped work; orient never re-implements the
@@ -546,7 +556,7 @@ A fresh `/thread:orient` audit is the lightweight version of this.
   join its phase (`reshuffle.md` R1).
 - **Don't write before the reshuffle's gate**, drift fixes and the learned `repos:` entry (§ 4) aside.
 - **Don't recommend more than one focus item**, and don't pad the audit —
-  headline, balls in the air, drift, shape, one recommendation, then the question.
+  headline, balls in the air, drift, shape, one recommendation, then the reshuffle (§ 4).
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s
   logic; rollout-shaped work goes to schedule (the execution-fit test
   decides, hard); execute runs only through the execute offer; batch clusters never grow a merge

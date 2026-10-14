@@ -49,18 +49,43 @@ test('backlinks: one pass, alias and heading forms, cache dirs excluded, out-of-
     '`]]`, `|`, `\\|` or `#`', /vault only/, /listed in the report/])
 })
 
-test('orient runs drift dry, reports it, and applies it only on an authorising answer', () => {
+test('orient runs drift dry, reports it, and applies it on a default or --steer run, never --look', () => {
   assertHas(S(2), 'orient § 2', ['reconcile-project.py --project <slug> --json', /dry run/, /mktemp -d/,
     '`<dir>/<slug>.json`', /§ 4 binds the apply to that file/])
   assertHas(S(3), 'orient § 3', ['**Drift**'])
   assertHas(S(4), 'orient § 4', [/--apply --only <that project's saved dry-run file>/, /New since review/,
     /Reviewed, not applied/, /now\s+ambiguous/, /no longer drift/,
     /Ambiguous items are listed for Lachy and never applied/,
-    /scoped target skips this question and applies no drift fixes/])
+    /A default run and Steer only authorise them/, /the § 3 Drift line is the notice/, /`--look` applies none/,
+    /scoped target applies no drift fixes/])
 })
 
-test('Look only writes nothing; Steer only exists', () => {
-  assertHas(S(4), 'orient § 4', ['**Reshuffle**', '**Steer only**', /\*\*Look only\*\*[^.]*no writes of any kind/])
+// ADR 0036 d5: Reshuffle is the default, not a question. § 4 asks nothing; `--steer` and `--look` (or the
+// words in the arguments) are the opt-outs, an empty shape goes straight to steering, and `--look` writes nothing.
+test('orient reshuffles by default; --steer and --look opt out, and Look only writes nothing', () => {
+  const s4 = S(4)
+  assert.doesNotMatch(s4, /AskUserQuestion/, 'orient § 4 still asks Reshuffle / Steer only / Look only')
+  assertHas(s4, 'orient § 4', [/no question/i, /straight into the reshuffle \(§ 5\)/,
+    /\*\*Steer only\*\* \(`--steer`, or "steer only" in the arguments\)[^.]*§ 6/,
+    /\*\*Look only\*\* \(`--look`, or "look only" in the arguments\)[^.]*stop after § 3[^.]*no writes of any kind/,
+    /\*\*An empty shape\*\*[^.]*nothing loose, unclear or unphased[^.]*no pull-ins[^.]*§ 6's steering/])
+  const forms = section(orient, /^## Invocation forms/) ?? ''
+  assertHas(forms, 'orient § Invocation forms', [/--steer\s+# /, /--look\s+# /])
+  assert.doesNotMatch(forms, /Reshuffle \/ Steer only \/ Look only/, 'the invocation forms still offer the three-way question')
+  // § 1 strips the opt-outs before the resolver sees the argument, as it does `--debrief`.
+  assertHas(S(1), 'orient § 1', [/orient's own flags \(`--debrief`, `--steer`, `--look`/])
+})
+
+// The three-way question is gone from every surface Lachy or the model reads; only the flag wording stays.
+test('no surface still offers Reshuffle / Steer only / Look only as a question', () => {
+  const surfaces = { 'skills/orient/SKILL.md': orient, 'skills/orient/reshuffle.md': reshuffle, 'README.md': read('README.md'),
+    'CONTEXT.md': read('CONTEXT.md') }
+  for (const [file, text] of Object.entries(surfaces)) {
+    const c = collapse(text)
+    assert.doesNotMatch(c, /Steer only or Look only/, `${file} still offers the three-way question`)
+    assert.doesNotMatch(c, /Reshuffle \/ Steer only/, `${file} still offers the three-way question`)
+    assert.doesNotMatch(c, /picks \*\*Reshuffle\*\*|a Reshuffle or Steer only answer|or \*\*Look only\*\*\./, `${file} still treats Reshuffle as an answer`)
+  }
 })
 
 test('orient schedules only rollout-shaped members and never runs another rollout', () => {

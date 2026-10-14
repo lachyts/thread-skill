@@ -1,6 +1,6 @@
 # Reshuffle — orient's reshape step
 
-Orient § 5 runs this after Lachy picks **Reshuffle** (or at once for a scoped target). It takes the
+Orient § 5 runs this by default after the audit (ADR 0036 d5; at once for a scoped target). It takes the
 target's open work, sorts it, grills what is unclear, and writes the result at one gate. It carries
 the machinery of the retired `split` and `gather` verbs (ADR 0027): roadmap forming and renames,
 decomposition and task writing.
