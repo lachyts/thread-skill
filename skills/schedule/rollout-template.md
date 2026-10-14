@@ -97,7 +97,7 @@ When every task has merged, run the **completion ceremony** (`/thread:execute` p
 3. File any follow-on work (validation re-runs, audits, deferred items) as **new open tasks** in `Work/Tasks/` and rewrite the items below as thin pointers to them. Never leave live work as checklist prose inside a done note — the moment `status: done` lands, every Bases view filters this note out and the work goes invisible.
 4. Append a `## Completion log`: dispatch dates, tasks → PRs (links + merge dates), convergence stats (plan/review rounds per task), phase closure, the disposition of each post-rollout item, and the Retro line `Retro: offered as /thread:retro [[<rollout-slug>]], not run (a Retro needs Lachy's picks, so the ceremony never runs one, attended or not)`. Then offer it in chat: `Retro: /thread:retro [[<rollout-slug>]]`.
 5. Close out any associated thread (run `/thread:close`) — or record here why it stays open.
-6. Move this note to `Work/Tasks/Archive/Rollouts/` and commit the vault. Obsidian wikilinks resolve by filename, so `[[<slug>]]` references and the task notes' `rollout:` backlinks survive the move.
+6. Move this note to `Work/Tasks/Archive/Rollouts/` (`git mv` when `git ls-files --error-unmatch` finds it tracked, else a plain `mv`: a rollout note is usually untracked, and `git mv` refuses one) and commit the moved note by pathspec, naming the old path too only when it was tracked. Obsidian wikilinks resolve by filename, so `[[<slug>]]` references and the task notes' `rollout:` backlinks survive the move.
 
 Rollout-specific items (audit re-runs etc.) go here:
 
