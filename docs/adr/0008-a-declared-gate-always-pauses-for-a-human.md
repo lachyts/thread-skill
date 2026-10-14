@@ -1,7 +1,7 @@
 # A declared gate always pauses for a human, even in continuous mode
 
-Amended by ADR 0034: a gate sets its task aside, never the rollout, and a spend gate within Lachy's standing approval
-passes without him.
+*(Amended by ADR 0034, 2026-10-13: a gate sets its task aside, never the rollout, and a spend gate
+within Lachy's standing approval passes without him.)*
 
 Every implementer plan must carry a **Gated inputs** section declaring any human authorisation the
 task will need — API spend with a cap, credentials, or an irreversible action — or an explicit
