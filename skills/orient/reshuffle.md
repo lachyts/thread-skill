@@ -1,6 +1,6 @@
 # Reshuffle — orient's reshape step
 
-Orient § 5 runs this after Lachy picks **Reshuffle** (or at once for a scoped target). It takes the
+Orient § 5 runs this by default after the audit (ADR 0036 d5; at once for a scoped target). It takes the
 target's open work, sorts it, grills what is unclear, and writes the result at one gate. It carries
 the machinery of the retired `split` and `gather` verbs (ADR 0027): roadmap forming and renames,
 decomposition and task writing.
@@ -29,13 +29,13 @@ A single-note target resolves its project like this, and the gate confirms it:
 
 Classify from orient § 2's frontmatter sweep; don't walk the folders again. The target project(s)
 are the notes whose `projects:` contains the wikilink and, for phase notes, filenames
-`<slug>-p<N>-…` where `<N>` is digits with an optional `.digits`: anchored on `-p<N>-` like
-`reconcile-project.py`, so a sibling project `<slug>-plugin` never matches, though that script
-only reads whole-number phases. Skip notes tagged `rollout` and landed statuses (`done`, `merged`,
-`dropped`). Give every item its **reach tier** (CONTEXT.md **Reach tiers**):
+`<slug>-p<N>-…` (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/vault-grammar.md` § Phase and task
+filenames): anchored on `-p<N>-` like `reconcile-project.py`, so a sibling project `<slug>-plugin`
+never matches. Skip notes tagged `rollout` and the landed statuses (vault grammar § Statuses).
+Give every item its **reach tier** (CONTEXT.md **Reach tiers**):
 
-- **In flight — frozen.** Orient § 2's definition. Shown for context. Its scope, phase and body
-  never change. New work may still join its phase.
+- **In flight — frozen.** The vault grammar's definition (`vault-grammar.md` § In flight). Shown
+  for context. Its scope, phase and body never change. New work may still join its phase.
 - **Possibly landed — frozen too.** Anything on the reconcile step's AMBIGUOUS list (orient § 2),
   and anything orient § 4's bound apply reported as `New since review` or `Reviewed, not applied`:
   it may already have merged (the § 2 sweep predates the apply, so it can still read as open), so
@@ -112,6 +112,12 @@ A full-depth interview, one question at a time, recommended answer first, resolv
 - **(b) per-item speccing** — every unclear item gets its decisions grilled into a real body (goal,
   runnable prompt, verify line, the shape `add-task.md` prescribes). An unbundled task quotes its
   slice of the brain dump verbatim as **His words**.
+- **(c) gates asked ahead** (ADR 0034) — a task the gated-input sweep flags (a hit of schedule
+  § 3.6's `gated_inputs.py sweep` that its dismissal rule keeps) gets § 3.6's ask-ahead question in
+  the grill, clear item or not: for spend, up to what total exposure in USD (summed
+  across Logins, a recurring cap counted per month), against the standing approval
+  (`spend_approval_usd`, e.g. 50 USD, or off at the built-in 0); for a credential or irreversible
+  gate, a sign-off now or none. Asked here, it is not asked again at schedule.
 
 Clear items are not grilled; they go straight to the gate. Grill cluster by cluster, highest value
 first (the cluster holding orient's recommendation leads). **Lachy can stop at any point**: what is
@@ -170,6 +176,12 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      `## Build sequence`, struck through with a pointer (`~~p3-2~~ moved to [[<new-slug>]]`), so
      its ordinal stays used.
    - Don't set `rollout:` or `scope:`: schedule stamps them (`scope:` inferred from `touches:`).
+   - **Answers from R3 (c)** are written exactly as schedule step 7 does: `spend_approval_usd: <N>`
+     (whole US dollars) when the spend answer is above the standing approval; for any spend amount,
+     the `## Decisions (asked ahead <date>)` section with the same two lines (its Spend line, naming
+     `/thread:orient` where schedule's names `/thread:schedule`, and its Planner line asking for one
+     priceable total, e.g. `cap 50 USD per Login per month across 3 Logins`); and a credential or irreversible sign-off's `## Approved gates` bullet,
+     `- <kind>: <his words> (approved <date>, asked ahead at orient)`.
 3. **Renames rewrite backlinks, in one pass.** First check every target basename is free, in one
    listing. Then write all the old slugs to a file and find the files that mention any of them
    with one `/usr/bin/grep -rlF -f <old-slugs-file>` (the Bash tool's `rg`/`grep` are shell

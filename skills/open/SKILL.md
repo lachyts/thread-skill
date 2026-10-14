@@ -17,6 +17,8 @@ Canonical template: `~/.agents/skills/thread/THREAD-template.md`. Index of share
 
 Sibling routes for *leaving* a thread: `thread:next` (undecided), `thread:stash` / `thread:defer` (set down), `thread:handoff` (fork), `thread:close` (finish).
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## Modes
 
 ### `/thread:open` (no args) — suggest or list

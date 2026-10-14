@@ -20,15 +20,21 @@ tags and neither `rollout` nor `phase` in its tags; frontmatter keys named `phas
 ignored for classification (every real task note carries a `phase: N` key). A ROLLOUT note has `rollout`
 in its tags.
 
-Terms. LANDED = {done, merged, dropped}. A HOLD status is any status other than landed, open,
-in_progress or review (parked, blocked, ...): a deliberate hold, not drift. A task's rollout is LIVE when
-its `rollout:` wikilink resolves to a file in T root, and RETIRED when it resolves into R, into A, or to
-no note. A task with no `rollout:` link has no rollout: neither live nor retired.
+Terms. The vault grammar (skills/_shared/vault-grammar.md) defines the phase number N (whole or fractional:
+`p3`, `p3.5`), the filename prefixes and the status sets; PHASE_N, LANDED, ACTIVE, phase_key and phase_sort
+below are its pinned copies. A status is read lower-cased with `-` as `_`, so `in-progress` (TaskNotes'
+spelling) and `in_progress` are either spelling of one ACTIVE status. LANDED = {done, merged, dropped}. A
+HOLD status is any status other than landed, open, in_progress or review (parked, blocked, ...): a
+deliberate hold, not drift. A task's rollout is LIVE when its `rollout:` wikilink resolves to a file in T
+root, and RETIRED when it resolves into R, into A, or to no note. A task with no `rollout:` link has no
+rollout: neither live nor retired.
 
 Scoping. Task candidates are always `<slug>-p<N>-*` (so `--project chorus` never picks up a
-`chorus-cmux-*` task). --phases N,M restricts phase candidates to those N and task candidates to
-filenames starting `<slug>-pN-`; rollout detection ignores it. --kinds (default all three) selects
-which kinds are listed and written; a kind outside --kinds is never written, even as a dependency.
+`chorus-cmux-*` task). --phases N,M (each whole or fractional, `3,3.5`; the whole part compares
+numerically, so `03` is `3`) restricts phase candidates to those N and task candidates to filenames
+starting `<slug>-pN-` (vault grammar § Phase and task filenames: `-p3-` never reaches `-p3.5-`); rollout
+detection ignores it. --kinds (default all three) selects which kinds are listed and written; a kind
+outside --kinds is never written, even as a dependency.
 
 1. FINISHED PHASE. Candidate: a phase note in P named `<slug>-p<N>-*.md` at `status: open`. Its tasks
    are the task notes in T and A whose filename starts with the literal `<slug>-p<N>-` (so `-p1-` never
@@ -45,7 +51,8 @@ which kinds are listed and written; a kind outside --kinds is never written, eve
    - Otherwise any non-landed task that is A, skipped, unparseable, archived-but-open (in A or tagged
      `archived`, not landed), or at `review` under a retired rollout (one resolving into R, into A or
      to no note: `run /thread:repair`) makes the phase A, naming it.
-2. FINISHED TASK. Candidate: a task note in T root named `<slug>-p<N>-*` at `open` or `in_progress`.
+2. FINISHED TASK. Candidate: a task note in T root named `<slug>-p<N>-*` at `open` or `in_progress`
+   (either spelling: `in-progress` too).
    Evidence precedence:
    - `pr:` a `https://github.com/.../pull/N` URL (quoted or bare): decided by (a) alone.
    - `pr:` present but not a URL (e.g. `pr: 7`): A, `pr: is not a URL; cannot verify`.
@@ -56,8 +63,8 @@ which kinds are listed and written; a kind outside --kinds is never written, eve
    (b) Completion log. The task's `rollout:` resolves into R, and a line of that note's
        `## Completion log` section (up to the next `## ` heading) NAMES the task: a wikilink
        `[[<stem>` followed by `]]`, `|`, `\\|` (an escaped alias inside a table) or `#`; or its short
-       id `p<N>-<M>`, bounded so `p8-1` never matches `p8-10` or `demo-p8-1`. A naming line is evidence
-       only if all three hold, else the task is A:
+       id `p<N>-<M>`, bounded so `p8-1` never matches `p8-10` or `demo-p8-1` (nor `p3.5-2` `p3.5-20`). A
+       naming line is evidence only if all three hold, else the task is A:
        (1) it is a table row (`^\\s*\\|`) or a list bullet (`^\\s*([-*+]|\\d+\\.)\\s`), else
            `log names it only in prose`;
        (2) a PR ref (`/pull/N` or `#N`) lies in the mention's own SEGMENT, from the end of the mention to
@@ -112,11 +119,14 @@ gh. --no-gh (gh `disabled`), or a --gh-bin that does not resolve (gh `missing`),
 Output. Text: a header (`dry run: nothing written; pass --apply` or `applied`), then `Unambiguous (n)`,
 `Ambiguous (n)`, `Skipped (n)` and, on apply, `Written (n)` and `Errors (n)`. --json: {project, vault,
 today, kinds, phases, applied, gh: ok|missing|disabled, unambiguous: [{kind, slug, path, action, reason,
-depends_on}], ambiguous: [{kind, slug, path, reason}], skipped: [str], written: [str], errors: [str]};
-paths are vault-relative. With --only (and only then): the header reads `applied (bound to the reviewed
-list: <file>)`, `New since review (n)` and `Reviewed, not applied (n)` come before `Written (n)`, and the
-JSON adds new_since_review: [{kind, slug, path, action, reason, depends_on}] and reviewed_not_applied:
-[{kind, slug, reason}]. `unambiguous` stays the full recomputed list; `written` holds only bound writes.
+depends_on}], ambiguous: [{kind, slug, path, reason}], skipped: [str], written: [str], errors: [str]}; paths
+are vault-relative. `phases` is null without --phases, else the canonical phases in numeric order, a whole
+number as an int and a fractional one as its string (`--phases 3.50,03,3.5` gives `[3, "3.5", "3.50"]`), so
+no two distinct phases print alike. With --only (and only then): the header reads `applied (bound to the
+reviewed list: <file>)`, `New since review (n)` and `Reviewed, not applied (n)` come before `Written (n)`,
+and the JSON adds new_since_review: [{kind, slug, path, action, reason, depends_on}] and
+reviewed_not_applied: [{kind, slug, reason}]. `unambiguous` stays the full recomputed list; `written` holds
+only bound writes.
 
 Exit codes. 0: it ran (drift or none). 1: an --apply write or move failed, or a dependent phase was
 skipped. 2: usage error (missing --project, bad --kinds/--phases/--today, no Work/ under --vault; --only
@@ -135,8 +145,10 @@ from datetime import date
 from pathlib import Path
 
 KINDS = ("phase", "task", "rollout")
+# The vault grammar's pinned copies (skills/_shared/vault-grammar.md; tests/contracts/vault-grammar.test.mjs).
+PHASE_N = r"\d+(?:\.\d+)?"  # a phase number: whole or fractional with a literal dot (`3`, `3.5`)
 LANDED = {"done", "merged", "dropped"}
-ACTIVE = {"open", "in_progress"}
+ACTIVE = {"open", "in_progress"}  # statuses are read with `-` as `_` (Rec.status)
 NOTE_SRC = Path(__file__).resolve().parent.parent.parent / "execute/scripts/reconcile-rollout.py"
 
 PR_URL_RE = re.compile(r"^https://github\.com/[^/\s]+/[^/\s]+/pull/\d+/?$")
@@ -158,6 +170,19 @@ WIKILINK_RE = re.compile(r"\[\[([^\]|#\\]+)")
 # What the negative-marker scan ignores: link targets and URLs are names, not prose (a task named
 # `…-partial-log` or a `/follow-up` path is no disposition). Aliases stay: they are display text.
 MARKER_BLIND_RE = re.compile(r"\[\[[^\]|#\\]*|https?://\S+")
+
+
+# phase_key and phase_sort are pinned too: the contract test checks them, and reconcile-rollout.py's
+# _phase_key/_phase_sort, against the doc's own examples (`03` is `3`, `3.5` and `3.50` distinct, the order).
+def phase_key(n: str) -> str:
+    """A phase number's canonical form: the whole part numeric (`03` is `3`), the fractional part literal."""
+    whole, dot, frac = n.partition(".")
+    return str(int(whole)) + dot + frac
+
+
+def phase_sort(n: str):
+    """Numeric order (`2` before `10`, `3.5` before `5`); `3.5` and `3.50` stay distinct and ordered."""
+    return float(n), n
 
 
 def die(msg: str, code: int = 2):
@@ -236,7 +261,7 @@ class Rec:
 
     @property
     def status(self) -> str:
-        return self.scalar("status").lower()
+        return self.scalar("status").lower().replace("-", "_")  # vault grammar § Statuses
 
     def is_task(self) -> bool:
         return self.fm is not None and "task" in self.tags and not ({"rollout", "phase"} & self.tags)
@@ -245,7 +270,7 @@ class Rec:
 # ---- the Completion-log reader ------------------------------------------------------------------------
 
 def short_id(stem: str, slug: str):
-    m = re.match(rf"^{re.escape(slug)}-(p\d+-\d+)(?=-|$)", stem)
+    m = re.match(rf"^{re.escape(slug)}-(p{PHASE_N}-\d+)(?=-|$)", stem)
     return m.group(1) if m else None
 
 
@@ -413,8 +438,8 @@ class Detector:
 
     def in_phase_scope(self, stem: str) -> bool:
         """A task candidate is `<slug>-p<N>-*` (so `chorus` never reaches `chorus-cmux-*`), N in --phases."""
-        m = re.match(rf"^{re.escape(self.slug)}-p(\d+)-", stem)
-        return bool(m) and (self.phases is None or int(m.group(1)) in self.phases)
+        m = re.match(rf"^{re.escape(self.slug)}-p({PHASE_N})-", stem)
+        return bool(m) and (self.phases is None or phase_key(m.group(1)) in self.phases)
 
     # -- the three detectors --
 
@@ -429,8 +454,8 @@ class Detector:
 
     def detect_phases(self):
         for rec in self.p_recs:
-            m = re.match(rf"^{re.escape(self.slug)}-p(\d+)-", rec.stem)
-            if not m or (self.phases is not None and int(m.group(1)) not in self.phases):
+            m = re.match(rf"^{re.escape(self.slug)}-p({PHASE_N})-", rec.stem)
+            if not m or (self.phases is not None and phase_key(m.group(1)) not in self.phases):
                 continue
             if rec.fm is None:
                 self.Amb.append(self.item("phase", rec, f"the note does not parse: {rec.err}"))
@@ -676,7 +701,7 @@ def parse_args(argv):
     ap = argparse.ArgumentParser(prog="reconcile-project.py", description="Find and close project Drift.")
     ap.add_argument("--project", required=True, help="project slug, e.g. chorus")
     ap.add_argument("--vault", default="~/repos/obsidian")
-    ap.add_argument("--phases", help="N[,M...]: restrict phase and task candidates")
+    ap.add_argument("--phases", help="N[,M...], each whole or fractional (3,3.5): restrict phase and task candidates")
     ap.add_argument("--kinds", default=",".join(KINDS), help="phase,task,rollout (default all)")
     ap.add_argument("--apply", action="store_true", help="write the unambiguous list")
     ap.add_argument("--only", metavar="FILE", help="with --apply: write only the items this dry run's --json "
@@ -699,12 +724,10 @@ def main(argv=None) -> int:
         die(f"--kinds takes a comma list of {', '.join(KINDS)}, got {args.kinds!r}")
     phases = None
     if args.phases is not None:
-        try:
-            phases = sorted({int(x) for x in args.phases.split(",") if x.strip()})
-        except ValueError:
-            die(f"--phases takes N[,M...], got {args.phases!r}")
-        if not phases or any(n < 0 for n in phases):
-            die(f"--phases takes N[,M...], got {args.phases!r}")
+        tokens = [x.strip() for x in args.phases.split(",") if x.strip()]
+        if not tokens or not all(re.fullmatch(PHASE_N, x) for x in tokens):
+            die(f"--phases takes N[,M...] (each whole or fractional, e.g. 3,3.5), got {args.phases!r}")
+        phases = sorted({phase_key(x) for x in tokens}, key=phase_sort)
     today = args.today or date.today().isoformat()
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", today):
         die(f"--today takes YYYY-MM-DD, got {today!r}")
@@ -736,8 +759,11 @@ def main(argv=None) -> int:
     public_na = sorted(not_applied, key=order)
 
     if args.json:
+        # A fractional phase stays its canonical string: a float would merge `3.5` with `3.50` and print
+        # `3.10` as `3.1`, forms the vault grammar keeps distinct.
         doc = {"project": args.project, "vault": str(vault), "today": today, "kinds": kinds,
-               "phases": phases, "applied": bool(args.apply), "gh": gh_mode,
+               "phases": None if phases is None else [n if "." in n else int(n) for n in phases],
+               "applied": bool(args.apply), "gh": gh_mode,
                "unambiguous": public_u, "ambiguous": public_a, "skipped": det.skipped}
         if reviewed is not None:
             doc |= {"new_since_review": public_new, "reviewed_not_applied": public_na}

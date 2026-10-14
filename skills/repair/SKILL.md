@@ -20,6 +20,8 @@ dependants, flip a **merged, never marked** task, **escalate** a merge the notes
 into another base), and finish an interrupted supersede's **close-out**.
 It never re-implements Integration, merge or convergence, and **the engine keeps sole merge authority**.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## Native runtime binding
 
 Diagnosis and authorised deterministic reconciliation (the hand-backs, the notes writes) run in either
@@ -48,7 +50,9 @@ fix this rollout                     # resolves to the rollout in context
 
 ### 1. Diagnose
 
-Resolve `[[<slug>]]` (ask if ambiguous). Run the **`/thread:status` scan with the live cross-check on**
+Resolve `[[<slug>]]` (ask if ambiguous): `~/repos/obsidian/Work/Tasks/<slug>.md`, else
+`Work/Tasks/Archive/Rollouts/<slug>.md`, a rollout whose completion ceremony already ran (§ 3a's
+complete-rollout stop). Run the **`/thread:status` scan with the live cross-check on**
 (repair is about to act, so it always checks reality): the per-task queue state, each task's
 `lead-integrate.py inputs`, the drift flags and the repo path. Show the user the situational report first:
 they should see what they're repairing.
@@ -97,17 +101,22 @@ overwrites, because each is independent of the pause and the lead:
 
 **Lead-held notes.** § 3c's `pr:` write and § 3c's defer of a RACE / UNVERIFIED task whose merge Lachy decides
 does not stand write a task note a live call's reconcile would overwrite. They run only when no lead is live
-(every owner session has ended or shows no run there, a drain nothing is draining included) or under a
-stamped pause, where no call is live; otherwise they wait for the stamp or the lead's end.
+(every owner session has ended, or shows no run there under no room-stop headline, neither the standing
+`ROOM STOP since <stamp>` nor the lapsed `room stop since <stamp> lapsed`, a drain nothing is draining
+included) or under a stamped pause, where no call is live; otherwise they wait for the stamp or the lead's end.
 
 **Pause, drained or stamped.** While `pause_requested` drains, or `paused:` stands:
 
 - Repair reports the pause. Stamped → "reinstate with `/thread:execute [[<rollout>]]`". Pending → "it drains;
-  nothing to do" while a lead is live (the owner check below); with none, nothing is draining it, so
-  `/thread:execute [[<rollout>]]` resumes the drain. Either way, point at `/thread:execute` only once every
+  nothing to do" while a lead is live (the owner check below, under which a room stop counts as live); with
+  none, nothing is draining it, so `/thread:execute [[<rollout>]]` resumes the drain. Either way, point at `/thread:execute` only once every
   RACE / UNVERIFIED task has its `RACE decided:` line: its *Cold resume* runs `resume` first.
 - Beyond the every-mode writes it never runs `hand-back`, `approve-gates`, § 3d's `descope`, a raise beyond the one
   an answer's entry carries, `resume` or the loop, and it never clears the stamp or the flag.
+- One exception, the sign-off pause (ADR 0034): under a stamped pause whose `paused_for` is `sign-off` (execute
+  § 4.5 step 5's form: the run finished everything else and closed, and nothing is live), repair may also run
+  `approve-gates` on Lachy's sign-off, and `defer` a waiting task he declines; then "reinstate with
+  `/thread:execute [[<rollout>]]`". Every other pause is unchanged.
 - Why: `next` stamps `paused:` only once nothing runs, awaits Integration or integrates. A hand-back during the
   drain would put a task back into exactly those states, and the live lead would integrate and merge it after
   Lachy asked to pause. Under a stamped pause, the reinstate decides what restarts.
@@ -117,7 +126,12 @@ stamped pause, where no call is live; otherwise they wait for the stamp or the l
 **Live queue, not paused.** A running or integrating task carries an `owner:` whose session is not known to
 have ended. A Workflow run is listed only in the session that launched it, which the tag names, so check
 `/workflows` in that owner session; from any other session "no run" proves nothing, so report "possibly live:
-check session `<owner tag>` first".
+check session `<owner tag>` first". A room stop, standing or lapsed (the scan's `ROOM STOP since <stamp>` or
+`room stop since <stamp> lapsed` headline, status § 4's *Room stop*), is a live queue too while its owner session
+has not ended, even with no run there and whatever its tasks read: its calls are room-stopped, the Chorus Stage
+owes a standing one's resume and the owner's heartbeat re-enters a lapsed one (execute § Room stop), each
+resuming them by handle. Any loop entry from here would end it, on a Login that may still be at its line, and give
+each task a fresh call beside that resume: two calls per task.
 
 - Beyond the every-mode writes, repair may hand back a set-aside task once Lachy has answered it (§ 3b), never one
   § 2 classes **retry (automatic)** (§ 2 classes it before any answer: a hand-back on his answer is the fresh
@@ -134,8 +148,9 @@ check session `<owner tag>` first".
   halt, makes it a § 3c escalation (§ 3e hands it there).
 - The live lead's next `next` restarts an `in_progress` hand-back and integrates a `review` one.
 
-**No lead live.** No pause, and every owner session has ended (or shows no run there): the full flow, § 3 to
-§ 6, except that an undecided RACE / UNVERIFIED escalation holds every `resume` and the hand-off (§ 3c).
+**No lead live.** No pause, and every owner session has ended (or shows no run there, under no room-stop
+headline, neither the standing `ROOM STOP since <stamp>` nor the lapsed `room stop since <stamp> lapsed`): the
+full flow, § 3 to § 6, except that an undecided RACE / UNVERIFIED escalation holds every `resume` and the hand-off (§ 3c).
 
 **Sent here by schedule's unfinished-rollout refusal.** Repair sorts out what is stuck; superseding stays
 schedule's `--regenerate`. A refusal line `<P> is named by the supersedes: of <N>, which has since run` is
@@ -195,7 +210,9 @@ clear, a `prUrlError`, an at-Integration set-aside with no `pr:` (**PR CLOSED / 
 review with no `pr:`. Either way it is input-gated (§ 3b), and the ask quotes `humanFix` (its act and its detail). A non-empty
 `autoRetryError` is execute § 3's round-budget halt: report it; the fix is the stamp it names, on Lachy's word, and
 nothing is handed back until that reads. A usage limit that kills an agent mid-run is an infra block, never a quota
-block: it gets the infra cool-downs and the budget, then Lachy.
+block: it gets the infra cool-downs and the budget, then Lachy. When the limit is known to the lead's Session,
+execute § 4.5 *Lost call* first resumes such a transient row once from its own run, so only that resume's row, or
+the dead call's row, reaches this class.
 
 **Classed before the answer.** § 2 classes each task on the state § 1's diagnosis read. A § 3b answer changes what
 `inputs` reads (an answered block reads `answered for this block …`, its `humanFix` the answer's own), and the
@@ -229,6 +246,18 @@ flipped. An undecided RACE / UNVERIFIED task is merged into the default branch t
 decision moves it: hold `resume` until § 3c records it. An exit 3 here (a `HOLD:` line) means § 2 missed one:
 escalate it (§ 3c). Under a pause or a live queue, report it and leave it: the reinstate's or the lead's next
 *Cold resume* runs `resume` first, and § 1 sends Lachy there only once every RACE decision is recorded.
+
+**The complete-rollout stop (p19-14).** A rollout whose note reads `status: done`, or sits in
+`Work/Tasks/Archive/Rollouts/`, already had its completion ceremony. When `resume`'s `progress:` line reads
+`rollout complete` on such a note, repair reports the repair and stops: no § 4 hand-off and no § 6. For each task
+`resume` flipped, write a dated `## Notes` line to the rollout note,
+`- <YYYY-MM-DD> repair: [[<slug>]] merged, never marked: flipped done (PR <url>); rollout already complete, no hand-off`,
+since no second ceremony copies it into a Completion log. Execute's loop would otherwise re-run that ceremony (a
+second Completion log, thread close, cron delete and archive move); its own idempotence guard, `next`'s `halt:
+"done"` on a done, archived note (execute § 4.5 step 5), is the backstop, never the route. A done note still in
+`Work/Tasks/` is a ceremony interrupted before its archive move: say so, and point at `/thread:execute [[<rollout>]]`,
+which finishes it. A complete rollout whose note does not read done (its lead ended before the ceremony) is no stop:
+§ 4's hand-off runs, `next` halts `complete`, and the ceremony it never ran is the hand-off's only work.
 
 **3b — input-gated → capture + inject.** Ping the user only here and for the other decisions no agent can
 make (a gate, a § 3c escalation, a CLOSED PR, a missing branch or a missing `pr:`, a close-out, a defer chain, a
@@ -549,11 +578,16 @@ there is nothing to clear. Per stage:
   set aside*. Don't loop.
 - **Hand-off, when no lead is live and no pause stands**, and never while a RACE / UNVERIFIED escalation is
   undecided (§ 3c; report the hold and stop there), a git-env hold stands (§ 3e; report it and stop there) or
-  the ladder file is refused (§ 2; name the file and stop there): execute's queue loop, entered at its §4.5 resume
+  the ladder file is refused (§ 2; name the file and stop there), and never on a rollout whose ceremony already ran
+  (§ 3a's complete-rollout stop: report the repair and stop there): execute's queue loop, entered at its §4.5 resume
   (*Cold resume*): execute § 2.5 first (then § 2.6), then execute § 3's `verify_timeout` check (a halt there
   writes nothing), then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts), then
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>` (execute
+  § Room stop: every loop entry ends a room stop, here one an ended owner session left, lapsed or not; with none standing
+  it writes nothing, and a non-zero exit is printed and the hand-off goes on), then
   `reconcile-rollout.py resume`, then the loop with
-  `--running ""` (this session holds no task call). Execute's § 2.7 pushed-base gate (entry points only)
+  `--running ""` (this session holds no task call, so a room-stopped call's handle is lost: execute § Room stop
+  item 10). Execute's § 2.7 pushed-base gate (entry points only)
   does not run on this hand-off; the next `/thread:execute [[<rollout>]]` runs it. Under a live queue the
   hand-backs are enough: the live lead's next `next` picks them up.
 
@@ -642,6 +676,9 @@ the choice, any restore and its rescue line, and the ack line).
   commits Lachy was not shown (§ 3e).
 - **Don't escalate a RACE re-verify in flight.** The lead decides it itself (§ 2). Asking Lachy before its
   verdict exists invites a "stands" that a red re-verify then contradicts.
+- **Don't hand a finished rollout back to execute.** A rollout whose note reads `status: done` or sits in
+  `Archive/Rollouts/` had its ceremony: flip what `resume` finds, record it, and stop (§ 3a's complete-rollout stop).
+  A hand-off would re-run the completion ceremony on it.
 - **Don't reinstate a rollout another rollout's `supersedes:` names.** Its unlanded tasks were carried there;
   finish its close-out instead (§ 1).
 - **Don't defer a task with dependants alone.** Compute the closure first; defer the chain or fix it.
