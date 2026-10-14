@@ -135,8 +135,9 @@ wherever § 2.5 runs: directly after it at every invocation that starts or conti
   merge, no Workflow call). Print the stderr verbatim above the ROLLOUT-STATUS line (it names the fix: a separate
   clone, then `/thread:schedule --regenerate`) and end the turn with
   `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=halted reason="repoPath is a live plugin marketplace checkout"`.
-- **Exit 2** (the script not found, an empty `repoPath`, no python3): the same write-nothing halt with
-  `reason="self-rollout check failed"`.
+- **Exit 2** (the script not found with the root set, an empty `repoPath`, no python3): the same
+  write-nothing halt with `reason="self-rollout check failed"`. The guard's `not found at /skills/…` is no
+  halt: the root was never exported, so export it and re-run by `plugin-root.md` rule 4 first.
 - **Any other non-zero exit** (1, 127, …: bash or the script crashing): the same write-nothing halt with
   `reason="self-rollout check failed"`. The gate fails closed on any status it does not define.
 
@@ -176,8 +177,9 @@ exactly as for § 2.5.
   clone, and the remedy: land them by PR, or wait for the queued `close/…` landing PR) above the
   ROLLOUT-STATUS line and end the turn with
   `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=halted reason="local default branch is ahead of origin"`.
-- **Exit 2** (a fetch or the default-branch lookup failed, a script not found): the same write-nothing
-  halt with `reason="pushed-base check failed"`.
+- **Exit 2** (a fetch or the default-branch lookup failed, a script not found with the root set): the
+  same write-nothing halt with `reason="pushed-base check failed"`. The guard's `pushed-base: /skills/… not
+  found` is no halt: export the root and re-run by `plugin-root.md` rule 4 first.
 - **Any other non-zero exit** (1, 127, …): the same write-nothing halt with
   `reason="pushed-base check failed"`. The gate fails closed on any status it does not define.
 
@@ -323,7 +325,7 @@ bash "$db" "$R"
 # end thread:default-branch-resolver
 ```
 
-Pass the printed name as `defaultBranch` only when it is not `main`. Any non-zero exit stops: 1 means the remote did not answer, 2 means `scripts/default-branch.sh` was not found or `<repoPath>` was left empty. A resume (`resumeFromRunId`) re-passes the run's ORIGINAL args unchanged — adding `defaultBranch` to a run that started without it changes prompt bytes and re-runs cached agents. The one sanctioned exception is § 3.7's signed-gate resume, which adds `task.approvedGates`: it never reaches a prompt.
+Pass the printed name as `defaultBranch` only when it is not `main`. Any non-zero exit stops: 1 means the remote did not answer, 2 means `scripts/default-branch.sh` was not found with the root set or `<repoPath>` was left empty (a `not found at /skills/…` is an unexported root: re-run by `plugin-root.md` rule 4 first). A resume (`resumeFromRunId`) re-passes the run's ORIGINAL args unchanged — adding `defaultBranch` to a run that started without it changes prompt bytes and re-runs cached agents. The one sanctioned exception is § 3.7's signed-gate resume, which adds `task.approvedGates`: it never reaches a prompt.
 
 Also read the rollout note's **`## Known baseline failures`** block (`/thread:schedule` step 2.6): when it lists tests (not `none`/empty), pass them as `knownBaselineFailures: ["<test_id> — <reason>", …]`. The engine threads the manifest into every agent and shifts the Ralph green criterion to "no NEW failures beyond this set" — it keeps running the full verifier and never `--deselect`s the listed reds (per the project's `CLAUDE.md`: a comparison reference, not a mute button). Omit the key when the block is absent or `none` — the engine then behaves exactly as before (`verifier` exit 0 = pass).
 
