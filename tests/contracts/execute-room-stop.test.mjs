@@ -355,18 +355,19 @@ function checkRoomStop({ skill, status, handoff, repair, context }) {
     !['renders as a room stop, not a stall', 'no stalled framing', 'never `/thread:execute` from here',
       'any loop entry, whoever opens it, ends the room stop', 'the Stage then sends nothing',
       "the owner session's heartbeat re-enters *Cold resume* on its next tick"].every((k) => stRoom.includes(k)) ||
-    !action(status, 10).includes('A standing room stop is one whatever `/workflows` shows') ||
+    !action(status, 10).includes('A standing room stop is one whatever `/workflows` shows while its owner session is alive') ||
     !action(status, 10).includes('"wait for the Stage\'s resume", never `/thread:execute`') ||
     !action(status, 9).includes('Under a standing room stop (§ 4\'s *Room stop*), "no run" is no evidence') ||
-    !stDonts.includes('and never under a standing room stop, whatever `/workflows` shows') ||
+    !stDonts.includes('and never under a standing room stop while its owner session is alive, whatever `/workflows` shows') ||
+    !stRoom.includes('Under either, once the owner session has ended (the owner-session qualifier), nothing owes the resume') ||
     !stDonts.includes('never `step-boundary.py begin` or `step-boundary.py end`')) fails.push('status')
 
   // repair-live: repair's diagnosis reads the scan's room stop as a live queue, so it never enters the loop or writes
   // a lead-held note under it; its hand-off, a loop entry, ends a lapsed one after `check-all` and before `resume`.
   const rc = collapse(repair)
-  if (!rc.includes("A standing room stop (the scan's `ROOM STOP since <stamp>` headline, status § 4's *Room stop*) is a live queue too, even with no run in its owner session") ||
-    !rc.includes('**No lead live.** No pause, no `ROOM STOP` headline, and every owner session has ended') ||
-    !rc.includes('They run only when no lead is live (no `ROOM STOP` headline, and every owner session has ended') ||
+  if (!rc.includes("A standing room stop (the scan's `ROOM STOP since <stamp>` headline, status § 4's *Room stop*) is a live queue too while its owner session has not ended, even with no run there") ||
+    !rc.includes('**No lead live.** No pause, and every owner session has ended (or shows no run there, under no `ROOM STOP` headline)') ||
+    !rc.includes('They run only when no lead is live (every owner session has ended, or shows no run there under no `ROOM STOP` headline') ||
     !before(rc, "then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts), then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>`",
       '`reconcile-rollout.py resume`, then the loop with')) fails.push('repair-live')
   return [...new Set(fails)]
@@ -603,18 +604,20 @@ test('control: status with no stands read, no ROOM STOP headline, a resume under
   only(stat('python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py stands --rollout <rollout-note>', 'true'), 'status', 'no read')
   only(stat("`ROOM STOP since <stamp>: awaiting the Stage's resume` or `room stop since <stamp> lapsed: the owner's heartbeat re-enters` (§ 2's *Room stop*, exit 0 or 4),", ''),
     'status', 'no headline')
-  only(stat('A standing room stop is one whatever `/workflows` shows (§ 4\'s *Room stop*): "wait for the Stage\'s resume", never `/thread:execute`, which would end the room stop on a Login still at its line; a lapsed one waits for the owner\'s heartbeat while that session is alive. Otherwise check',
+  only(stat('A standing room stop is one whatever `/workflows` shows while its owner session is alive (§ 4\'s *Room stop*): "wait for the Stage\'s resume", never `/thread:execute`, which would end the room stop on a Login still at its line; a lapsed one waits for the owner\'s heartbeat. Otherwise check',
     'Check'), 'status', 'action 10 resumes')
   only(stat('never `/thread:execute` from here', '`/thread:execute` once its owner session shows no run'), 'status', 'room paragraph resumes')
   only(stat("the owner session's heartbeat re-enters *Cold resume* on its next tick", 'nothing re-enters it'), 'status', 'no lapse')
-  only(stat(', and never under a standing room stop, whatever `/workflows` shows (§ 4\'s *Room stop*)', ''), 'status', "Don'ts")
+  only(stat(', and never under a standing room stop while its owner session is alive, whatever `/workflows` shows (§ 4\'s *Room stop*)', ''), 'status', "Don'ts")
+  only(stat('Under either, once the owner session has ended (the owner-session qualifier), nothing owes the resume, and action 10\'s resume applies as usual.', ''),
+    'status', 'a dead owner waited on forever')
 })
 
 test('control: repair that reads a room stop as no lead live, or a hand-off that never ends it, fails repair-live', () => {
-  only({ repair: wsEdit(real.repair, "A standing room stop (the scan's `ROOM STOP since <stamp>` headline, status § 4's *Room stop*) is a live queue too, even with no run in its owner session", 'A room stop') },
+  only({ repair: wsEdit(real.repair, "A standing room stop (the scan's `ROOM STOP since <stamp>` headline, status § 4's *Room stop*) is a live queue too while its owner session has not ended, even with no run there", 'A room stop') },
     'repair-live', 'live queue')
-  only({ repair: wsEdit(real.repair, 'No pause, no `ROOM STOP` headline, and every owner session', 'No pause, and every owner session') }, 'repair-live', 'no lead live')
-  only({ repair: wsEdit(real.repair, '(no `ROOM STOP` headline, and every owner session has ended or shows no run there,', '(every owner session has ended or shows no run there,') },
+  only({ repair: wsEdit(real.repair, '(or shows no run there, under no `ROOM STOP` headline):', '(or shows no run there):') }, 'repair-live', 'no lead live')
+  only({ repair: wsEdit(real.repair, '(every owner session has ended, or shows no run there under no `ROOM STOP` headline,', '(every owner session has ended or shows no run there,') },
     'repair-live', 'lead-held notes')
   only({ repair: wsEdit(real.repair, "then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>` (execute § Room stop: every loop entry ends a room stop, here a lapsed one an ended owner session left; with none standing it writes nothing, and a non-zero exit is printed and the hand-off goes on),", '') },
     'repair-live', 'hand-off never ends it')

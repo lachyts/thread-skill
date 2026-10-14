@@ -96,8 +96,8 @@ overwrites, because each is independent of the pause and the lead:
 
 **Lead-held notes.** § 3c's `pr:` write and § 3c's defer of a RACE / UNVERIFIED task whose merge Lachy decides
 does not stand write a task note a live call's reconcile would overwrite. They run only when no lead is live
-(no `ROOM STOP` headline, and every owner session has ended or shows no run there, a drain nothing is draining
-included) or under a
+(every owner session has ended, or shows no run there under no `ROOM STOP` headline, a drain nothing is
+draining included) or under a
 stamped pause, where no call is live; otherwise they wait for the stamp or the lead's end.
 
 **Pause, drained or stamped.** While `pause_requested` drains, or `paused:` stands:
@@ -118,7 +118,8 @@ stamped pause, where no call is live; otherwise they wait for the stamp or the l
 have ended. A Workflow run is listed only in the session that launched it, which the tag names, so check
 `/workflows` in that owner session; from any other session "no run" proves nothing, so report "possibly live:
 check session `<owner tag>` first". A standing room stop (the scan's `ROOM STOP since <stamp>` headline, status
-§ 4's *Room stop*) is a live queue too, even with no run in its owner session: its calls are room-stopped and the Chorus
+§ 4's *Room stop*) is a live queue too while its owner session has not ended, even with no run there: its calls are
+room-stopped and the Chorus
 Stage owes their resume (execute § Room stop), and any loop entry would end it on a Login still at its line. A
 lapsed one (`room stop since <stamp> lapsed`) is the owner's heartbeat's while that session is alive.
 
@@ -136,7 +137,7 @@ lapsed one (`room stop since <stamp> lapsed`) is the owner's heartbeat's while t
   halt, makes it a § 3c escalation (§ 3e hands it there).
 - The live lead's next `next` restarts an `in_progress` hand-back and integrates a `review` one.
 
-**No lead live.** No pause, no `ROOM STOP` headline, and every owner session has ended (or shows no run there): the full flow, § 3 to
+**No lead live.** No pause, and every owner session has ended (or shows no run there, under no `ROOM STOP` headline): the full flow, § 3 to
 § 6, except that an undecided RACE / UNVERIFIED escalation holds every `resume` and the hand-off (§ 3c).
 
 **Sent here by schedule's unfinished-rollout refusal.** Repair sorts out what is stuck; superseding stays

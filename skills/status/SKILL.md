@@ -386,13 +386,13 @@ integrates, the lead's next step stamps `paused:`.
 `ROOM STOP since <stamp>: awaiting the Stage's resume`, what's left listed as usual, and no stalled framing.
 On the Chorus Stage the lead stopped each Workflow call at a step boundary for a Login at its line (execute
 § Room stop): its tasks still read `in_progress` or `integrating:`, and its owner session's `/workflows` shows
-no run by design. It is a live queue whatever `/workflows` shows, and the Stage owes the resume, so the
-recommendation is to wait for it, never `/thread:execute` from here: any loop entry, whoever opens it, ends
+no run by design. While that session is alive it is a live queue whatever `/workflows` shows, and the Stage
+owes it the resume, so the recommendation is to wait for it, never `/thread:execute` from here: any loop entry, whoever opens it, ends
 the room stop and resumes the stopped calls on a Login still at its line, and the Stage then sends nothing,
 since its resume skips a lead that has launched work since. A lapsed one (exit 4) renders `room stop since
 <stamp> lapsed: the owner's heartbeat re-enters`: the owner session's heartbeat re-enters *Cold resume* on its
-next tick, which ends it, so wait for that too while the owner session is alive; once that session has ended,
-action 10's resume applies as usual.
+next tick, which ends it, so wait for that too. Under either, once the owner session has ended (the owner-session
+qualifier), nothing owes the resume, and action 10's resume applies as usual.
 
 **Owner-session qualifier.** It applies to a live queue: a running or integrating task with an `owner:`. A
 Workflow run is listed in `/workflows` only in the session that launched it, and the `owner:` tag names that
@@ -480,13 +480,13 @@ Keep the whole report scannable: it's a glance, not a wall of text.
    session has ended, or no task carries an `owner:`, nothing is draining it, and
    `/thread:execute [[<rollout>]]` resumes the drain (*Cold resume*: its `next` integrates what awaits,
    starts nothing and stamps `paused:`). Under a standing room stop (§ 4's *Room stop*), "no run" is no
-   evidence: wait for the Stage's resume, which drains it, never `/thread:execute`. The RACE exception (the owner-session qualifier): if a RACE
+   evidence while its owner session is alive: wait for the Stage's resume, which drains it, never `/thread:execute`. The RACE exception (the owner-session qualifier): if a RACE
    re-verify was in flight, the same answer makes it undecided, so the next step is
    `/thread:repair [[<rollout>]]` (action 7), never `/thread:execute`.
 10. A live queue → "wait for the run; don't resume from here." A standing room stop is one whatever
-    `/workflows` shows (§ 4's *Room stop*): "wait for the Stage's resume", never `/thread:execute`, which would
-    end the room stop on a Login still at its line; a lapsed one waits for the owner's heartbeat while that
-    session is alive. Otherwise check `/workflows` in the owner session
+    `/workflows` shows while its owner session is alive (§ 4's *Room stop*): "wait for the Stage's resume",
+    never `/thread:execute`, which would end the room stop on a Login still at its line; a lapsed one waits for
+    the owner's heartbeat. Otherwise check `/workflows` in the owner session
     (`<owner tag>`): if no run shows there, or that session has ended, `/thread:execute [[<rollout>]]` resumes
     (*Cold resume*). Checked from any other session, "no run" proves nothing. A RACE re-verify in flight
     (§ 3) waits here too, as the lead's own procedure. The RACE exception (the owner-session qualifier)
@@ -560,8 +560,8 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
 - **Don't parse the `## Queue` table** for the task list: use the `status` subcommand's glob-by-backlink (it
   catches tasks the table omits).
 - **Don't recommend a resume against a live queue** unless its owner session, checked there, shows no run or
-  has ended, and never under a standing room stop, whatever `/workflows` shows (§ 4's *Room stop*). Offline,
-  qualify any resume with § 3's caveat.
+  has ended, and never under a standing room stop while its owner session is alive, whatever `/workflows` shows
+  (§ 4's *Room stop*). Offline, qualify any resume with § 3's caveat.
 - **Don't send an undecided RACE / UNVERIFIED to `/thread:execute`.** No reinstate and no resume until its
   `RACE decided:` line is recorded: § 4's action 7 comes first, and repair records the decision in any mode.
   Don't escalate a RACE re-verify in flight either: it is the lead's own procedure until its owner session
