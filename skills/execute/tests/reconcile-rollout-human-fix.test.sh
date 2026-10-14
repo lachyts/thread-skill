@@ -395,6 +395,11 @@ ok "$(python3 -c 'import importlib.util,json,sys
 s=importlib.util.spec_from_file_location("li",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
 print(json.dumps([list(m.AUTO_RETRY_KEYS[:10]), list(m.AUTO_RETRY_KEYS[10:])], separators=(",", ":")))' "$LI")" \
   "[$SETTINGS_KEYS,[\"humanFix\",\"answerRecorded\"]]" "K: today's ten verdict keys, in order, then the two new ones"
+ok "$(python3 -c 'import importlib.util,json,sys
+s=importlib.util.spec_from_file_location("li",sys.argv[1]); m=importlib.util.module_from_spec(s); s.loader.exec_module(m)
+print(json.dumps(list(m.HUMAN_FIX_ACTS), separators=(",", ":"), ensure_ascii=False))' "$LI")" \
+  '["finish the recorded answer","sign off gated input","fix its rollout: or defer","decide RACE","decide UNVERIFIED","answer the question","decide scope or defer","restore, recut or defer","fix the note'"'"'s pr: or defer","raise max_plan_rounds, hand back or defer","raise max_review_rounds, hand back or defer","raise max_iterations, hand back or defer","hand back or defer","fix the round budget"]' \
+  "K: HUMAN_FIX_ACTS, the fixed vocabulary every act the H series reads comes from (the verdict refuses any other)"
 
 # ── L: the label ─────────────────────────────────────────────────────────────────────────────────────────────────
 scen l

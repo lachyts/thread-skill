@@ -1120,6 +1120,8 @@ def _verdict(path, note, inp, rollout_note, now, answer, skip_needs=False):
     label = human_fix_label(note)
 
     def fix(act, detail, hand_back, raise_=None):
+        if act not in HUMAN_FIX_ACTS:  # the fixed vocabulary execute's dedupe and status's lines rely on
+            raise ValueError(f"humanFix act {act!r} is not one of HUMAN_FIX_ACTS")
         return {"act": act, "detail": detail, "handBack": hand_back, "label": label, "raise": raise_}
 
     def no(why, human=None):
