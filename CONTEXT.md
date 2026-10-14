@@ -40,12 +40,23 @@ through time, from attention to merged PRs. Terms only — no implementation.
   carry a **compact recommendation**, which only Lachy acts on: compact is a
   recommendation inside keep going, never a route.
 - **Orient** — the one shaping verb, at project altitude: audits a whole
-  project/area (not one thread), then reshuffles it (the default on pickup),
-  steers it as it stands, or just looks. It schedules rollout-shaped work itself,
-  routes the rest by the execution-fit test, and ends with the **execute
-  offer** (run the rollout in a fresh session, here, or not yet). Pointed at a
-  single plan, design note or brain dump it runs a **scoped reshuffle** of that
-  note alone. Absorbs the former `split` and `gather` verbs (ADR 0027).
+  project/area (not one thread), then reshuffles it without asking (ADR 0036),
+  unless told to steer it as it stands or just look. It schedules rollout-shaped
+  work itself, routes the rest by the execution-fit test, and ends with the
+  **execute offer** (run the rollout in a fresh session, here, or not yet).
+  Pointed at a single plan, design note or brain dump it runs a **scoped
+  reshuffle** of that note alone. Absorbs the former `split` and `gather` verbs
+  (ADR 0027).
+- **Target** — what an orient picks up: one project, one area, or one note.
+  It is resolved before anything is read: from the argument (a name, alias or
+  link), else from the session's directory. A directory a project declares, an
+  exact name or alias, or a clear best match goes ahead; a close call or no
+  match asks Lachy first (ADR 0036). A project target audits that project,
+  never its whole area. _Avoid_: inferring the area.
+- **Declared check** — a command a project names for orient to run in its
+  audit. It prints what is new since its own record, and the record moves on
+  only once Lachy has passed those items at the gate, so it says what he has
+  seen. The check owns its record (ADR 0036).
 - **Batch** — a parallel-safe cluster of open work (disjoint files/surfaces)
   matched to the narrowest covering launch profile; the session-lane unit
   orient dispatches. Never contains a rollout-shaped cluster.
