@@ -1,10 +1,9 @@
 # 0024 — the operator's top tier sets every rollout's ceiling (amends 0016)
 
 Date: 2026-09-26
-Status: accepted, implementation pending (task p7-1). Until it lands, schedule and execute still
-carry 0016's quota-only wording, and the ceiling reaches rollouts only through the operator's
-own instruction (AGENTS.md § Model tier).
-*(Superseded by ADR 0029, proposed.)*
+Status: superseded by ADR 0029 before it was built. The `top-tier` file never landed; 0029's
+operator ladder, whose top rung is the ceiling, replaced it. Was: accepted, implementation pending
+(task p7-1).
 
 ## Context
 
