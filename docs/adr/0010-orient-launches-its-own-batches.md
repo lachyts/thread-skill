@@ -1,7 +1,7 @@
 # 0010 — orient launches its own batches; the steering answer is the authorisation
 
 Date: 2026-08-14
-Status: accepted (supersedes the launch conclusion of ADR 0003)
+Status: superseded by ADR 0023 (orient now dispatches native children of its own session, which retires cmux launches); it had superseded the launch conclusion of ADR 0003
 *(Amended by ADR 0027, 2026-09-28: the steering question now comes after the reshuffle and covers
 only session-lane work; it still authorises the batch launch.)*
 

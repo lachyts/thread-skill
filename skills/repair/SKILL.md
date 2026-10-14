@@ -20,6 +20,8 @@ dependants, flip a **merged, never marked** task, **escalate** a merge the notes
 into another base), and finish an interrupted supersede's **close-out**.
 It never re-implements Integration, merge or convergence, and **the engine keeps sole merge authority**.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## Native runtime binding
 
 Diagnosis and authorised deterministic reconciliation (the hand-backs, the notes writes) run in either
@@ -86,8 +88,9 @@ overwrites, because each is independent of the pause and the lead:
   Lachy decides a RACE / UNVERIFIED, its `RACE decided:` line. That line is what lifts the hold on `resume`
   (§ 3c), so neither a pause nor a live lead holds it back; only a decision that the merge does not stand
   waits, for its defer (a lead-held note, below).
-- § 3b: a decision into a set-aside task's `## Repair input` (at its run or at Integration, the answer's
-  block-keyed entry, so a later run finds it), and, with a `## Needs you` answer, the removal of that section.
+- § 3b: an answer recorded with `reconcile-rollout.py record-answer` (the only writer of a `## Repair input` answer,
+  block-keyed so a later run, status and the lead find it). Its one save carries, the entry last, the removal of the
+  `## Needs you` section it answers, a `--raise <field>` on Lachy's word and a confirmed `--pr`.
 - § 5: a defer of a set-aside task with its queued dependants.
 - § 3e: the git-env ack, on Lachy's word. The canary's `ack` writes only the rollout note's `## Git-env log` and
   its own records, and it re-baselines a live window rather than overwriting a note. § 3e's `restore` is not an
@@ -96,17 +99,22 @@ overwrites, because each is independent of the pause and the lead:
 
 **Lead-held notes.** § 3c's `pr:` write and § 3c's defer of a RACE / UNVERIFIED task whose merge Lachy decides
 does not stand write a task note a live call's reconcile would overwrite. They run only when no lead is live
-(every owner session has ended or shows no run there, a drain nothing is draining included) or under a
-stamped pause, where no call is live; otherwise they wait for the stamp or the lead's end.
+(every owner session has ended, or shows no run there under no room-stop headline, neither the standing
+`ROOM STOP since <stamp>` nor the lapsed `room stop since <stamp> lapsed`, a drain nothing is draining
+included) or under a stamped pause, where no call is live; otherwise they wait for the stamp or the lead's end.
 
 **Pause, drained or stamped.** While `pause_requested` drains, or `paused:` stands:
 
 - Repair reports the pause. Stamped → "reinstate with `/thread:execute [[<rollout>]]`". Pending → "it drains;
-  nothing to do" while a lead is live (the owner check below); with none, nothing is draining it, so
-  `/thread:execute [[<rollout>]]` resumes the drain. Either way, point at `/thread:execute` only once every
+  nothing to do" while a lead is live (the owner check below, under which a room stop counts as live); with
+  none, nothing is draining it, so `/thread:execute [[<rollout>]]` resumes the drain. Either way, point at `/thread:execute` only once every
   RACE / UNVERIFIED task has its `RACE decided:` line: its *Cold resume* runs `resume` first.
-- Beyond the every-mode writes it never runs `hand-back`, `approve-gates`, § 3d's `descope`, the raise, `resume`
-  or the loop, and it never clears the stamp or the flag.
+- Beyond the every-mode writes it never runs `hand-back`, `approve-gates`, § 3d's `descope`, a raise beyond the one
+  an answer's entry carries, `resume` or the loop, and it never clears the stamp or the flag.
+- One exception, the sign-off pause (ADR 0034): under a stamped pause whose `paused_for` is `sign-off` (execute
+  § 4.5 step 5's form: the run finished everything else and closed, and nothing is live), repair may also run
+  `approve-gates` on Lachy's sign-off, and `defer` a waiting task he declines; then "reinstate with
+  `/thread:execute [[<rollout>]]`". Every other pause is unchanged.
 - Why: `next` stamps `paused:` only once nothing runs, awaits Integration or integrates. A hand-back during the
   drain would put a task back into exactly those states, and the live lead would integrate and merge it after
   Lachy asked to pause. Under a stamped pause, the reinstate decides what restarts.
@@ -116,14 +124,20 @@ stamped pause, where no call is live; otherwise they wait for the stamp or the l
 **Live queue, not paused.** A running or integrating task carries an `owner:` whose session is not known to
 have ended. A Workflow run is listed only in the session that launched it, which the tag names, so check
 `/workflows` in that owner session; from any other session "no run" proves nothing, so report "possibly live:
-check session `<owner tag>` first".
+check session `<owner tag>` first". A room stop, standing or lapsed (the scan's `ROOM STOP since <stamp>` or
+`room stop since <stamp> lapsed` headline, status § 4's *Room stop*), is a live queue too while its owner session
+has not ended, even with no run there and whatever its tasks read: its calls are room-stopped, the Chorus Stage
+owes a standing one's resume and the owner's heartbeat re-enters a lapsed one (execute § Room stop), each
+resuming them by handle. Any loop entry from here would end it, on a Login that may still be at its line, and give
+each task a fresh call beside that resume: two calls per task.
 
 - Beyond the every-mode writes, repair may hand back a set-aside task once Lachy has answered it (§ 3b), never one
   § 2 classes **retry (automatic)** (§ 2 classes it before any answer: a hand-back on his answer is the fresh
-  stretch he chose). It may also run § 3d's `descope` on one (wherever `hand-back` may run), apply a raise he chose,
-  run `approve-gates` on sign-off, and write the `pr:` § 4's restore finds for an at-Integration set-aside with no
-  `pr:`: no live call owns a set-aside note, so that write goes with the hand-back that follows it (§ 4). The spent
-  key § 3b writes before each hand-back goes with it the same way.
+  stretch he chose). It may also run § 3d's `descope` on one (wherever `hand-back` may run), run `approve-gates` on
+  sign-off (the raise goes in through `record-answer --raise`), and write the `pr:` § 4's restore finds for an
+  at-Integration set-aside with no `pr:`: no live call owns a set-aside note, so that write goes with the hand-back
+  that follows it (§ 4). It writes that `pr:` through `record-answer --pr`, and the spend is the `hand-back` verb's
+  own.
 - It never runs `resume`, never enters the loop, and never writes a running or integrating note, because a
   live call's reconcile would overwrite it: the lead-held notes wait for the lead's end.
 - A RACE re-verify in flight (§ 2) is the lead's: report it and wait. It becomes a § 3c escalation only once
@@ -132,8 +146,9 @@ check session `<owner tag>` first".
   halt, makes it a § 3c escalation (§ 3e hands it there).
 - The live lead's next `next` restarts an `in_progress` hand-back and integrates a `review` one.
 
-**No lead live.** No pause, and every owner session has ended (or shows no run there): the full flow, § 3 to
-§ 6, except that an undecided RACE / UNVERIFIED escalation holds every `resume` and the hand-off (§ 3c).
+**No lead live.** No pause, and every owner session has ended (or shows no run there, under no room-stop
+headline, neither the standing `ROOM STOP since <stamp>` nor the lapsed `room stop since <stamp> lapsed`): the
+full flow, § 3 to § 6, except that an undecided RACE / UNVERIFIED escalation holds every `resume` and the hand-off (§ 3c).
 
 **Sent here by schedule's unfinished-rollout refusal.** Repair sorts out what is stuck; superseding stays
 schedule's `--regenerate`. A refusal line `<P> is named by the supersedes: of <N>, which has since run` is
@@ -143,7 +158,9 @@ P out, so schedule's check no longer counts P.
 ### 2. Classify each unmerged task
 
 From its queue state, its `lead-integrate.py inputs` (`resumeAt`, `autoRevise`, `lastIntegration`), its verdict
-(`autoRetry`, `autoRetryWhy`, `autoRetryAfter`, `autoRetryError`, `fingerprint`) and `prUrlError`, status's
+(`autoRetry`, `autoRetryWhy`, `autoRetryAfter`, `autoRetryError`, `fingerprint`), `prUrlError`, `humanFix` (the one act
+that moves a block only Lachy may move, ADR 0035: repair reads it and never re-derives a cause) and `answerRecorded`
+(the live answer to the current block, the one read status and the lead share), status's
 per-task `needsHuman`, and the live PR state. Each unmerged task takes the **first** class in table order whose
 signal it matches. The order matters: a RACE task's PR is MERGED, and so is an UNVERIFIED one's, which is also set
 aside at Integration, so they match **merged, never marked** and **at Integration** further down too; the order
@@ -162,18 +179,18 @@ class below it.
 | **merged, never marked** | not done; its PR is MERGED into the default branch | `reconcile-rollout.py resume` (§ 3a) flips it done; never hand it back or defer it |
 | **merge hold** | merge-task exit 7: review required on the integrating PR | "approve PR #N": Lachy's; never re-integrated, never set aside |
 | **live** | running or integrating under a live lead | nothing: the lead owns it (§ 1) |
-| **PR CLOSED / branch missing** | awaiting Integration, integrating (no lead live) or set aside at Integration, and its PR is CLOSED unmerged (status's flag) or `git -C <repoPath> ls-remote --exit-code --heads origin <inputs.branch>` finds no branch; or set aside at Integration with no `pr:` (`autoRetryWhy` `set aside at Integration with no pr: …`), which `hand-back` refuses | input-gated: § 4's restore, recut, defer or leave; never left to the loop, which would integrate it only for merge-task to set it aside at its own run; with no `pr:`, restore starts by finding its PR (§ 4) |
+| **PR CLOSED / branch missing** | awaiting Integration, integrating (no lead live) or set aside at Integration, and its PR is CLOSED unmerged (status's flag) or `git -C <repoPath> ls-remote --exit-code --heads origin <inputs.branch>` finds no branch; or set aside at Integration with no `pr:` (`humanFix.act` `restore, recut or defer` with no `pr:`), which `hand-back` refuses | input-gated: § 4's restore, recut, defer or leave; never left to the loop, which would integrate it only for merge-task to set it aside at its own run; with no `pr:`, restore starts by finding its PR (§ 4) |
 | **awaiting Integration** | `review` with a `pr:` | nothing: the loop integrates it |
 | **queued** | `open`, its `waitingOn` unmet | nothing: it starts when its dependencies land (or defer it with its blocker, § 5) |
 | **plan-blocked after a descope** | `plan-blocked` with a `## Scope decision (automatic)` section and no `descope_armed:`: it restarted after an automatic descope and blocked again | input-gated: § 3b, quoting the new feedback and the automatic descope; never a silent hand-back, never a second descope (the verb refuses one, exit 3) |
-| **plan-blocked, descopable** | `plan-blocked` (`resumeAt: own`) with no `## Scope decision (automatic)` section, or one whose `descope_armed:` still stands (a descope whose hand-back never ran), its feedback centring on one part of the task that the note marks optional or that a later task in this rollout owns | `reconcile-rollout.py descope` (§ 3d): exit 0 → hand back (§ 4) → its own call, and tell Lachy afterwards; exit 3 → § 3b; judged before **retry (automatic)**, as execute's step 1.2 judges a descope before its automatic retry: a refusal writes nothing, so the verdict can still read `autoRetry: true` while the lead skips the key |
+| **plan-blocked, descopable** | `plan-blocked` (`resumeAt: own`) with no `## Scope decision (automatic)` section, or one whose `descope_armed:` still stands (a descope whose hand-back never ran), its feedback centring on one part of the task that the note marks optional or that a later task in this rollout owns | `reconcile-rollout.py descope` (§ 3d): exit 0 → hand back (§ 4) → its own call, and tell Lachy afterwards; exit 3 → § 3b; judged before **retry (automatic)**, as execute's step 1.2 judges a descope before its automatic retry: a refusal (exit 3) is recorded on the task note, so its `humanFix` reads `decide scope or defer` and the verdict `autoRetry: false` |
 | **retry (automatic)** | set aside at its run or at Integration, and `inputs` reads `autoRetry: true` or a non-empty `autoRetryAfter`; a `plan-blocked` task reaches it only once the class above judged it not descopable | nothing: the lead re-enters it (execute § 4.5 step 1.2's *Automatic retry*), now or once its cool-down ends, and with no lead live § 4's hand-off does; never a hand-back, which would reset its budget |
 | **needs you** | set aside at its run or at Integration (`setAsideAt: run` or `integration`, never a gate) with a `## Needs you` question (status's `needsHuman`) | input-gated: § 3b asks the question verbatim, writes the answer into `## Repair input`, removes the `## Needs you` section, then hands back at its stage (§ 4) |
-| **at Integration** | `setAsideAt: integration` (`resumeAt: integration`) | input-gated (§ 3b): ask why it is his (`autoRetryWhy`), then on his word `reconcile-rollout.py hand-back --tasks <slug>` → `review`: it rejoins the Integration queue and retries Integration only; its branch, plan and review stand, and nothing before Integration is redone (§ 4). One with no `pr:` is **PR CLOSED / branch missing**'s |
-| **revise (automatic)** | `autoRevise: true` | nothing: the lead (or § 4's hand-off) launches the seeded revise itself; with a non-empty `prUrlError` it launches nothing, so that one is input-gated (§ 3b): quote `prUrlError` (its `autoRetryWhy` names the seeded revise), and Lachy fixes the note's `pr:` or defers it |
+| **at Integration** | `setAsideAt: integration` (`resumeAt: integration`) | input-gated (§ 3b): ask its `humanFix` (the act and the detail), then on his word `reconcile-rollout.py hand-back --tasks <slug>` → `review`: it rejoins the Integration queue and retries Integration only; its branch, plan and review stand, and nothing before Integration is redone (§ 4). One with no `pr:` is **PR CLOSED / branch missing**'s |
+| **revise (automatic)** | `autoRevise: true` | nothing: the lead (or § 4's hand-off) launches the seeded revise itself; with a non-empty `prUrlError` it launches nothing, so that one is input-gated (§ 3b): its `humanFix` reads `fix the note's pr: or defer` with `prUrlError` as the detail, and Lachy fixes the note's `pr:` (`record-answer --pr`) or defers it |
 | **revise stopped** | `revise stopped:` in the marker, `resumeAt: revise` | input-gated (§ 3b), then hand back (§ 4) → a seeded revise |
 | **review-blocked, rejected** | `review-blocked`, `lastIntegration.outcome: rejected` | input-gated (§ 3b): offer the raise (§ 4, on his word), more guidance, defer or leave; then hand back → a seeded revise |
-| **own run** | `resumeAt: own`: `blocked`, `plan-blocked`, `review-blocked` with no `rejected` line, a code-writing `review` with no `pr:`, a `merge-task:` set-aside | input-gated (§ 3b): ask why it is his (`autoRetryWhy`), then on his word hand back (§ 4) → its own call. A code-writing `review` with no `pr:` is asked too (the verdict never retries it: "repair's call"): hand back, so its own call opens the PR on its branch, or defer |
+| **own run** | `resumeAt: own`: `blocked`, `plan-blocked`, `review-blocked` with no `rejected` line, a code-writing `review` with no `pr:`, a `merge-task:` set-aside | input-gated (§ 3b): ask its `humanFix` (the act and the detail), then on his word hand back (§ 4) → its own call. A code-writing `review` with no `pr:` is asked too (the verdict never retries it: "repair's call"): hand back, so its own call opens the PR on its branch, or defer |
 | **gate** | `gate-pending` | present the gates verbatim, and its `## Needs you` question (status's `needsHuman`), if any, verbatim beneath them on a `→ asks:` line; § 3b records his answer and removes the section before any sign-off; on sign-off `approve-gates` (§ 3b); never hand back |
 
 **A signed task is the lead's.** After `approve-gates` the task reads `in_progress` with `gates_signed:`, or
@@ -185,19 +202,21 @@ routing* takes a fresh call behind § 3.7's warning.
 **Agent-fixable is execute's now (ADR 0033).** Repair never judges a block agent-fixable from its feedback: it
 reads `inputs`' verdict. A set-aside at its run or at Integration that § 2 does not class **retry (automatic)**
 reaches repair because its automatic retry is over (the auto-retry budget is spent, the fingerprint repeated, or
-`needsHuman` is set), or because `autoRetryWhy` names another cause that is his: `auto_retries: 0`, an unresolved
+`needsHuman` is set), or because its `humanFix` names another cause that is his: `auto_retries: 0`, an unresolved
 budget, a quota block past its five free retries, a declined merge, a gone branch, a merge-task text a human must
 clear, a `prUrlError`, an at-Integration set-aside with no `pr:` (**PR CLOSED / branch missing**) or a code-writing
-review with no `pr:`. Either way it is input-gated (§ 3b), and the ask quotes `autoRetryWhy`. A non-empty
+review with no `pr:`. Either way it is input-gated (§ 3b), and the ask quotes `humanFix` (its act and its detail). A non-empty
 `autoRetryError` is execute § 3's round-budget halt: report it; the fix is the stamp it names, on Lachy's word, and
 nothing is handed back until that reads. A usage limit that kills an agent mid-run is an infra block, never a quota
-block: it gets the infra cool-downs and the budget, then Lachy.
+block: it gets the infra cool-downs and the budget, then Lachy. When the limit is known to the lead's Session,
+execute § 4.5 *Lost call* first resumes such a transient row once from its own run, so only that resume's row, or
+the dead call's row, reaches this class.
 
 **Classed before the answer.** § 2 classes each task on the state § 1's diagnosis read. A § 3b answer changes what
-`inputs` reads (removing `## Needs you` can turn it to `autoRetry: true`), and the hand-back that follows his answer
-is the fresh automatic-retry stretch he chose (ADR 0033 decision 6: the counters cleared, `auto_retry_sha`
-stamped). So never re-class a task after recording his answer, and never skip that hand-back because a re-read says
-`autoRetry: true`; the one exception is § 3b's race check.
+`inputs` reads (an answered block reads `answered for this block …`, its `humanFix` the answer's own), and the
+hand-back that follows his answer is the fresh automatic-retry stretch he chose (ADR 0033 decision 6: the counters
+cleared, `auto_retry_sha` stamped). So never re-class a task after recording his answer, and never skip that
+hand-back because a re-read reads differently; the one exception is § 3b's race (the compare-and-swap).
 
 **Rungs (ADR 0029).** A Rung drift (status § 3) is never input-gated and needs no write: report it with the
 ladder's source. The task's next call starts on the top rung, and reconcile overwrites the stamp with the rung
@@ -229,75 +248,95 @@ escalate it (§ 3c). Under a pause or a live queue, report it and leave it: the 
 **3b — input-gated → capture + inject.** Ping the user only here and for the other decisions no agent can
 make (a gate, a § 3c escalation, a CLOSED PR, a missing branch or a missing `pr:`, a close-out, a defer chain, a
 set-aside whose automatic retry is over (the auto-retry budget is spent, the fingerprint repeated, or `needsHuman` is
-set) or whose `autoRetryWhy` names another cause that is his (§ 2), or a descope the verb refuses: § 3d's exit 3,
-with its `ASK:` line quoted). For each input-gated task, `AskUserQuestion` with the specific decision its feedback
-needs: quote the feedback and `autoRetryWhy` (`prUrlError` for an `autoRevise: true` task, whose why names the
-seeded revise), and offer the raise (§ 4) where one applies. Then write the answer into the **task note body** so
-the next agent reads it. For a set-aside at its run or at Integration that is *the answer's entry* (below), whatever
-was asked: a `## Needs you` question, a spent budget, a repeated fingerprint or any other `autoRetryWhy`. Otherwise
-replace the placeholder in place, or append or update a `## Repair input` section with the decision verbatim. It is
-body content, not a status transition, so it is allowed under a pause. Where hand-back may run (§ 1), hand the task
-back on his answer (§ 4), spending its entry first (*Spent on the hand-back*, below).
+set) or whose `humanFix` names another cause that is his (§ 2), or a descope the verb refused: § 3d's exit 3, recorded,
+its `humanFix` `decide scope or defer`). For a set-aside at its run or at Integration, in order:
 
-*The answer's entry.* Append
-`- <stamp> <kind> (block <fingerprint>): "<the ask, verbatim>" → <his answer, verbatim>`
-to `## Repair input`. `<stamp>` is now, in the form of the note's `### Run <n> (<stamp>)` headings (local time to
-the minute, with its offset: `2026-10-04T09:10+10:00`); `<kind>` is `needs you` for a `## Needs you` question and
-`decision` for every other ask; `<fingerprint>` is `inputs`' `fingerprint`, or `-` when it is null: a gate, or a
-block that recorded no feedback, such as a PR-less code-writing `review` (`no feedback fingerprint`). The block key
-is what a later repair run and status read (*Answer already recorded*), so an answer recorded for a block with a
-fingerprint under a pause or a drain, where repair never hands back, is never asked again, and status reads it as
-answered. A `-` entry never counts, so a block with no fingerprint is asked again after a pause.
+1. **Ask.** `AskUserQuestion` with the specific decision its block needs: quote the feedback and its `humanFix` (the
+   act and the detail the script names, never a cause re-derived from the feedback), and offer the raise (§ 4) when
+   `humanFix.raise` names a field, or for a revise re-entry with no round left.
+2. **Prerequisites first**, only where hand-back may run (§ 1): whatever his answer needs before a bare hand-back is
+   all that is left. That is § 4's push and `gh pr reopen`, a recut's retire and relabel, a `merge-task:` relabel, a
+   stale anchor ref's deletion, or § 5's defer (its `## Notes` line is then the record).
+3. **Record LAST, with `record-answer`**, in every mode (it is body content, not a status transition, so a pause allows
+   it):
 
-*Answer already recorded.* Before asking about a set-aside at its run or at Integration, look for an answer
-recorded for its current block: a `## Repair input` entry carrying `(block <fingerprint>)` with `inputs`'
-`fingerprint`, stamped later than the note's last re-entry. A `-` entry never counts, nor a spent one (below).
+   ```
+   python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-answer --tasks <slug> --rollout <rollout-note> --kind needs-you|decision --ask "<the ask, verbatim>" --answer "<his answer, verbatim>" --fingerprint <inputs.fingerprint, or -> [--form hand-back|awaiting-repair|left] [--raise <field>] [--pr <url>]
+   ```
+
+   It is the only writer of an answer, whatever was asked (a `## Needs you` question, a spent budget, a repeated
+   fingerprint or any other `humanFix`): one task-note save, the entry
+   `- <stamp> <kind> (block <fingerprint>[; awaiting repair|; left]): "<the ask, verbatim>" → <his answer, verbatim>`
+   last, after the removal of the `## Needs you` section it answers, the raise and the `pr:`. `<kind>` is `needs you`
+   for a `## Needs you` question and `decision` for every other ask (the verb refuses `decision` while the note holds
+   a question, so no answer stands beside a stale one); `<stamp>` is the verb's (now's minute, bumped past
+   the block's last re-entry and its earlier entries, so no two share a stamp and none ties a re-entry). A raise goes
+   in as `--raise <field>` (the field `humanFix.raise` names, or `max_review_rounds` for a revise re-entry with no round
+   left, § 4), and a confirmed `pr:` as `--pr`, never as a hand-written frontmatter edit. The form:
+   - `--form hand-back` only when a bare hand-back is all that is left: the verb refuses it at Integration with no
+     `pr:`, on a `prUrlError`, and on a revise re-entry with no round left and no raise;
+   - `--form awaiting-repair` otherwise: while a restore, recut, relabel, ref deletion or § 3c merge is still to
+     do (under a pause or a drain, where step 2 cannot run, it is whenever his answer needs one), so the lead never
+     hands it back first;
+   - `--form left` for "leave it": answered, never asked again and never retried;
+   - no form, with `--fingerprint -`, for a block with no fingerprint (a gate, a PR-less code-writing review): a `-`
+     entry never counts, so a block with no fingerprint is asked again.
+
+   After a relabel, re-read `inputs` and record against its new fingerprint. A changed answer is recorded again, and
+   the verb supersedes the old one (`(block <fingerprint>; superseded <stamp>)`): a block carries one live answer.
+4. **Hand back** where hand-back may run (§ 1, § 4): `hand-back --tasks <slug> --answer <stamp>`, the stamp
+   `record-answer` printed. A `-` entry hands back with a bare `hand-back`, which spends whatever is live.
+
+*Answer already recorded.* Before asking about a set-aside at its run or at Integration, read `inputs`'
+`answerRecorded`, the one read the lead and status share: the live answer to the block's current fingerprint, stamped
+later than the note's last re-entry. A `-` entry never counts, nor a spent or superseded one.
 
 - The last re-entry is the latest of the note's `### Run <n> (<stamp>)` headings, in any section, its
-  `auto_retry_at:` and its `- descoped (automatic) <stamp>` entry: a run recorded, an automatic retry made or an
-  automatic descope recorded after the answer means the task was re-entered since. A fingerprint is a content hash,
-  so an earlier block's text can come back (answered, retried through two other blocks, then the first text again
-  with the budget spent): a repeated block is Lachy's again (ADR 0033 decision 6), never handed back on the old
-  answer.
+  `auto_retry_at:`, its `- descoped (automatic) <stamp>` entries and its `started:`: a run recorded, an automatic retry
+  made, an automatic descope recorded or a new start after the answer means the task was re-entered since. A
+  fingerprint is a content hash, so an earlier block's text can come back (answered, retried through two other blocks,
+  then the first text again with the budget spent): a repeated block is Lachy's again (ADR 0033 decision 6), never
+  handed back on the old answer.
 - An entry recorded before the block's last re-entry never counts, whatever the verdict's why: ask again and quote
   it, so his word can be the answer. One recorded since counts whatever the why, a block whose fingerprint equals
-  `auto_retry_sha` included (`same feedback as the block last re-entered`, or a spent budget on a repeated block).
+  `auto_retry_sha` included (`same feedback as the block last re-entered`, or a spent budget on a repeated block). A
+  tie, an unparseable stamp or two live entries sharing one fail closed: it is asked again.
 
-With one found, never ask again: act on it where hand-back may run (§ 1, § 4). Repair hands back without asking
-again, spending it first, and that is the task's one hand-back; for an at-Integration set-aside with no `pr:`, which
-`hand-back` refuses, it acts on the answer as § 4's restore, recut, defer or leave.
+With one found, never ask again; act on it by its form, where hand-back may run (§ 1, § 4):
 
-*Spent on the hand-back.* A hand-back leaves no stamp on the note (the restart's `mark-started` consumes its
-`handed_back:`), and an identical re-block writes no run, so the hand-back spends the answer instead. Before every
-hand-back repair makes (§ 4, § 3d's included), while the task is still set aside, rewrite each `(block <fingerprint>)`
-key in its `## Repair input` to `(block <fingerprint>; handed back <stamp>)`, `<stamp>` now in the entry's form;
-execute's "retry [[task]]" spends them the same way, and the lead's hand-back after an automatic descope needs no
-spend: the descope's own `- descoped (automatic) <stamp>` entry, written first, is a re-entry. A spent entry never
-matches the key again, so the block that comes back after the hand-back, an identical one included, is asked afresh
-(ADR 0033 decision 6).
+- `hand-back`: hand back with `--answer <answerRecorded.stamp>`, once (the lead's *Recorded answer* may get there
+  first);
+- `awaiting repair`: finish the work it recorded (step 2: for an at-Integration set-aside with no `pr:`, which
+  `hand-back` refuses, it acts on the answer as § 4's restore, recut, defer or leave), record it again with
+  `--form hand-back` (plus `--pr` or `--raise`), which supersedes the old entry, then hand back with `--answer`;
+- `left`: report it, and ask nothing.
+
+*Spent on the hand-back.* The `hand-back` verb spends the answers itself: every hand-back that moves a note (§ 4,
+§ 3d's included, and execute's "retry [[task]]") rewrites each live key on it, `(block <fingerprint>)`,
+`(block <fingerprint>; awaiting repair)` or `(block <fingerprint>; left)`, to `(block <fingerprint>; handed back <stamp>)`
+in the same save, while the task is still set aside; a refused hand-back spends nothing. A spent entry never matches
+again, so the block that comes back after the hand-back, an identical one included, is asked afresh (ADR 0033 decision
+6), its `humanFix.label`'s `ask <k>` making it a new item. Repair never rewrites, supersedes or spends a key by hand.
 
 *The needs-you flow*, for any set-aside whose note holds a `## Needs you` question (status's `needsHuman`), at its
 run, at Integration or at a gate:
 
 1. Ask the question verbatim, quoting the latest feedback.
-2. Note the note's `auto_retry_at:` (absent counts as a value), then write the answer's entry (above), its kind
-   `needs you` and its ask the question, verbatim.
-3. Remove the `## Needs you` section, in every mode. It is body content, not a status transition, so a pause allows
-   it as it allows the answer. Execute's verdict reads a non-empty `## Needs you` as open (`needs a human`), and
-   neither `hand-back` nor a lead-written row (a dead call) clears it.
-4. Then, where hand-back may run (§ 1), hand it back at its stage (§ 4): its class was judged before the answer
-   (§ 2). A gate takes `approve-gates` on sign-off instead, with the answer and the removal first: a signed task
-   takes no `## Repair input`. A hand-back that re-enters a revise with no round left also asks the raise (§ 4, on
-   his word). Under a pause or a drain nothing more happens: the reinstate's automatic retry re-enters the task
-   with the answer in place if its verdict allows; otherwise a later repair run finds the entry and hands back
-   without asking again.
-5. *The live-queue race.* The live lead can re-enter the task after step 3. Just before `hand-back`, re-read the
-   note's `auto_retry_at:`: a value other than the one step 2 noted means the lead's automatic retry re-entered it
-   (and it may have blocked again), so skip the hand-back. Otherwise spend the entry, then hand back; if
-   `hand-back` then exits 1 with `status is 'in_progress'` (for an Integration one, `status is 'review'`), the lead
-   won the race. That is no error. Either way, report it as re-entered by the lead (its `## Notes` `auto-retry:`
-   line): the answer is in `## Repair input`, a budget slot was spent instead of a fresh stretch starting, it counts
-   as the task's hand-back (§ 4's Leash), and a new block is asked afresh.
+2. Do step 2's prerequisites, where hand-back may run.
+3. Record it: `record-answer --kind needs-you`, its ask the question, verbatim. The verb removes the `## Needs you`
+   section in the same save, in every mode. Execute's verdict reads a non-empty `## Needs you` as open (`answer the
+   question`), and neither `hand-back` nor a lead-written row (a dead call) clears it.
+4. Then, where hand-back may run (§ 1), hand it back at its stage (§ 4) with `--answer`: its class was judged before
+   the answer (§ 2). A gate takes `approve-gates` on sign-off instead, with the answer and the removal first: a signed
+   task takes no `## Repair input`. A hand-back that re-enters a revise with no round left also asks the raise (§ 4,
+   on his word), recorded with `--raise max_review_rounds`. Under a pause or a drain nothing more happens: the lead's
+   *Recorded answer* hands back a `hand-back` answer at the reinstate; a later repair run acts on any other without
+   asking again.
+5. *The live-queue race.* The lead's *Recorded answer* can hand the task back after step 3, and its automatic retry
+   never re-enters an answered block. `hand-back --answer <stamp>` is a compare-and-swap on the stamp and the form:
+   if it exits 1, the lead or another session got there first (the answer is spent), or the task re-blocked since.
+   That is no error: report it as handed back by the lead (it counts as the task's hand-back, § 4's Leash), and a new
+   block is asked afresh. Repair never hands back a re-block on the old answer, and the verb never writes a tie.
 
 A gate is presented verbatim; on Lachy's sign-off run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <slug>`
@@ -374,8 +413,12 @@ read as a second one), the brief pointer or pointer line, the `(automatic)` `## 
 descoped work twice; and the rollout's `## Notes` `descope:` line removed (or rewritten as `descope undone:`),
 so no report's `Descoped:` line or the Completion log lists it. Then hand back. Exit 3 → § 3b: its `ASK:` line
 says why (required scope, an ADR decision, a recorded decision, an owner that cannot take it, a part tied to
-neither the feedback nor the brief, or a second block after an automatic descope) and nothing was written.
-Exit 1 → report its ERROR line and leave the task set aside. In this session § 3d's judgement is the session's for
+neither the feedback nor the brief, or a second block after an automatic descope), and the verb recorded the refusal
+on the task note, so its `humanFix` reads `decide scope or defer` in every session from now on and no later descope
+of the block overrides it. While `descope_armed:` stands (a descope whose hand-back never ran) it records nothing
+and its `ASK:` line ends `not recorded`: re-run the armed descope (its part and mode from the `## Scope decision
+(automatic)` entry; exit 0, `[no-change]`), then hand back, as § 2's **plan-blocked, descopable** says. Exit 1 → report its ERROR line and leave the task set aside (an answered block among
+them: § 3b's *Answer already recorded* acts first). In this session § 3d's judgement is the session's for
 that key (execute § 4.5 step 1.2's *Automatic descope* key): the hand-off's loop neither judges it again nor, after
 an exit 3, retries it automatically; the refusal is § 3b's.
 
@@ -443,8 +486,9 @@ Lachy decides once, and § 4's hand-off waits for that decision, as § 3c alread
 ### 4. Hand back: re-enter at the stage it stopped
 
 Repair hands back only on Lachy's answer (§ 3b), this run's or one recorded for the task's current block (§ 3b's
-*Answer already recorded*), and after § 3d's descope, and it spends the task's answers first (§ 3b's *Spent on the
-hand-back*). Every route uses execute's own re-entry verb, and never under a pause (§ 1):
+*Answer already recorded*), and after § 3d's descope; the verb spends the task's answers itself (§ 3b's *Spent on the
+hand-back*). Every route uses execute's own re-entry verb (`--answer <stamp>` on a recorded answer), and never under a
+pause (§ 1):
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hand-back --tasks <slug>
@@ -461,17 +505,20 @@ there is nothing to clear. Per stage:
 - **Stale anchor ref** (a reason starting `merge step STOP: stale anchor ref <X>`): delete it first, guarded,
   `git -C <repoPath> update-ref -d refs/integration-anchor/<inputs.branch> <X>` (an absent ref is a no-op), then
   hand back.
-- **The raise, on Lachy's word** (review-blocked, its last log line `rejected`), never silently: offer it with the
-  task's § 3b ask. On his word, when the resolved `max_review_rounds` (task → rollout → rollouts.toml / built-in,
-  execute § 3) is ≤ `lastRound`, write `max_review_rounds: <lastRound + 1>` on the task note. Announce it in the
-  report and record it in a dated `## Notes` line
-  (`- <YYYY-MM-DD> repair: [[<slug>]] max_review_rounds raised to <N>, one round`), then hand back. Execute's
-  automatic retry already raises one round per retry that re-enters a revise with no round left, with this
-  `## Notes` wording (ADR 0033 decision 7), so a further raise is only on Lachy's word. With no `rejected` line it
-  is its own run: no raise.
-  When `max_review_rounds` is absent at both levels and `rollout-settings.py --repo <Project root>` exits 2 or 3,
-  make no raise: report its stderr line and ask Lachy for the fix it names. A line naming
-  `~/.config/thread/rollouts.toml` is fixed at that line, or by a `max_review_rounds:` stamp on the task or
+- **The raise, on Lachy's word**, never silently: the field `humanFix.raise` names (`max_review_rounds`,
+  `max_plan_rounds` or `max_iterations`: the budget the source run spent), or `max_review_rounds` for a revise
+  re-entry (review-blocked, its last log line `rejected`) with no round left. Offer it with the task's § 3b ask. On
+  his word it goes in through `record-answer --raise <field>`, never a hand-written frontmatter edit, and the verb
+  refuses any other field. For a revise re-entry whose resolved `max_review_rounds` (task → rollout → rollouts.toml /
+  built-in, execute § 3) is ≤ `lastRound`, it writes `max_review_rounds: <lastRound + 1>`. Any other raise is on an own
+  call, which starts its plan, review and verifier budgets afresh, so a raise there writes the resolved value + 1: one
+  more per call. Announce it in the report; the verb records it in a dated `## Notes` line
+  (`- <YYYY-MM-DD> repair: [[<slug>]] <field> raised to <N>, one round`, `one iteration` for `max_iterations`) before
+  the entry, then hand back. Execute's automatic retry already raises one round per retry that re-enters a revise with
+  no round left, with this `## Notes` wording (ADR 0033 decision 7), so a further raise is only on Lachy's word.
+  When the field is absent at both levels and `rollout-settings.py --repo <Project root>` exits 2 or 3,
+  make no raise: report its stderr line (the verb's exit 1 carries it) and ask Lachy for the fix it names. A line naming
+  `~/.config/thread/rollouts.toml` is fixed at that line, or by a stamp of the field on the task or
   rollout note; a line naming `--repo` (the Project root is gone or its origin unreadable) only by that stamp.
   Repair never edits that file.
 - **A `merge-task:` own-run set-aside whose cause Lachy cleared on GitHub** (its last log line `integrated`):
@@ -496,13 +543,14 @@ there is nothing to clear. Per stage:
 
   A set-aside at Integration with no `pr:` (§ 2's same class) is refused by `hand-back`. Its restore first finds
   its branch's PR: `gh pr list --repo <owner/name> --head <inputs.branch> --state all --json number,url,state`.
-  Then, on Lachy's confirmation, by its state: OPEN → write `pr: <url>`, then hand back; CLOSED → the restore
-  above, writing `pr: <url>` after `gh pr reopen` and before `hand-back`, so the note never names a CLOSED PR;
-  MERGED → § 3c's possible PR-less merge (its `pr:` write, then `resume`). The OPEN and CLOSED `pr:` write runs
+  Then, on Lachy's confirmation, by its state: OPEN → `record-answer --pr <url> --form hand-back`, then hand back
+  with `--answer`; CLOSED → the restore above, then `record-answer --pr <url> --form hand-back` after `gh pr reopen`
+  and before `hand-back --answer`, so the note never names a CLOSED PR (under a pause, where nothing is pushed or
+  reopened, `--form awaiting-repair` with no `--pr`); MERGED → § 3c's possible PR-less merge (its `pr:` write, then
+  `resume`). The OPEN and CLOSED `pr:` write runs
   wherever `hand-back` may (§ 1), a live queue included: no live call owns a set-aside note, so no reconcile
-  overwrites it, and it goes with the hand-back that follows it. Once its `pr:` reads, the live lead's automatic
-  retry may re-enter the task first: `hand-back` then exits 1 with `status is 'review'`, which is no error (§ 3b's
-  live-queue race). With no PR for its branch, the options are recut, defer or leave.
+  overwrites it, and it goes with the hand-back that follows it. Once its answer reads, the live lead's *Recorded answer* may hand the task
+  back first: `hand-back --answer` then exits 1, which is no error (§ 3b's live-queue race). With no PR for its branch, the options are recut, defer or leave.
 - **Recut, only on Lachy's explicit ask:** a fresh start from the queue's current base.
   1. Run the landing-register check (execute § 2.5).
   2. Retire the branch with § 5's retire block plus `git -C <repoPath> branch -D <inputs.branch>`.
@@ -510,8 +558,8 @@ there is nothing to clear. Per stage:
   4. Run `hand-back`. Its old `## Integration log` lines survive and are harmless.
 - **Leash:** repair re-enters a task on its own judgement only through § 3d's descope, once per task per repair
   run; every other hand-back follows Lachy's answer (§ 3b). `hand-back` starts a fresh automatic-retry stretch (the
-  counters cleared, `auto_retry_sha` stamped), so the lead's retry has its budget again, and with the answer spent
-  first (§ 3b) an identical re-block comes straight back to him. A task that blocks again in this run is surfaced
+  counters cleared, `auto_retry_sha` stamped), so the lead's retry has its budget again, and with the answer spent by
+  the verb (§ 3b) an identical re-block comes straight back to him. A task that blocks again in this run is surfaced
   with its new diagnosis and three offers: *more guidance and one more hand-back*, *defer it* (§ 5), or *leave it
   set aside*. Don't loop.
 - **Hand-off, when no lead is live and no pause stands**, and never while a RACE / UNVERIFIED escalation is
@@ -519,8 +567,12 @@ there is nothing to clear. Per stage:
   the ladder file is refused (§ 2; name the file and stop there): execute's queue loop, entered at its §4.5 resume
   (*Cold resume*): execute § 2.5 first (then § 2.6), then execute § 3's `verify_timeout` check (a halt there
   writes nothing), then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts), then
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>` (execute
+  § Room stop: every loop entry ends a room stop, here one an ended owner session left, lapsed or not; with none standing
+  it writes nothing, and a non-zero exit is printed and the hand-off goes on), then
   `reconcile-rollout.py resume`, then the loop with
-  `--running ""` (this session holds no task call). Execute's § 2.7 pushed-base gate (entry points only)
+  `--running ""` (this session holds no task call, so a room-stopped call's handle is lost: execute § Room stop
+  item 10). Execute's § 2.7 pushed-base gate (entry points only)
   does not run on this hand-off; the next `/thread:execute [[<rollout>]]` runs it. Under a live queue the
   hand-backs are enough: the live lead's next `next` picks them up.
 
@@ -559,7 +611,7 @@ points only) does not run; the next `/thread:execute [[<rollout>]]` runs it. Exe
 ceremony** then runs on the (possibly reduced) task set. Ensure the rollout's `## Completion log` records
 every repair action, copied from the dated `## Notes` records this and earlier runs wrote: hand-backs (task +
 stage), decisions injected (task + value), § 3b's answers (task + kind + ask + answer, read from each task's
-`## Repair input` `(block …)` entries, spent ones included), gates signed, raises (task + new budget), automatic
+`## Repair input` `(block …)` entries, spent and superseded ones included), gates signed, raises (task + new budget), automatic
 descopes (task + part + follow-up or owner) from the `descope:` lines, whoever wrote them (§ 3d or the live lead),
 merged-never-marked tasks flipped by `resume` (task + PR), tasks deferred (task + reason + dependants moved with it), a CLOSED PR or
 missing branch (task + restore, recut, defer or leave), and the escalations of § 3c with Lachy's decisions:
@@ -589,11 +641,14 @@ the choice, any restore and its rescue line, and the ack line).
   (`autoRetryAfter`), is the lead's (§ 2's **retry (automatic)**, judged before any answer), and a hand-back would
   reset its budget. A hand-back on Lachy's answer is never this case: it is the fresh stretch he chose. Ping Lachy
   only once its automatic retry is over (the auto-retry budget spent, the fingerprint repeated or `needsHuman` set),
-  when `autoRetryWhy` names another cause that is his, and for gates, escalations, a CLOSED PR, a missing branch or
+  when its `humanFix` names another cause that is his, and for gates, escalations, a CLOSED PR, a missing branch or
   a missing `pr:`, a defer chain or a refused descope.
-- **Don't hand back an answered question with its `## Needs you` still in place.** Remove the section once the
-  answer is in `## Repair input` (§ 3b): neither `hand-back` nor a lead-written row clears it, so the verdict would
-  read the answered question as open and never retry the task.
+- **Don't hand back an answered question with its `## Needs you` still in place.** `record-answer --kind needs-you`
+  removes the section in the answer's own save (§ 3b): neither `hand-back` nor a lead-written row clears it, so the
+  verdict would read the answered question as open and never retry the task.
+- **Don't write an answer, a raise or a spend by hand.** `record-answer` is the only writer of a `## Repair input`
+  answer (it supersedes an earlier one and carries the raise and the `pr:`, the entry last), and `hand-back` spends it;
+  never edit a key, and never hand back on an answer but through `hand-back --answer <stamp>`.
 - **Don't write a PR-less, RACE / UNVERIFIED or other-base task's `status:`**, and never re-call merge-task
   for a RACE.
 - **Don't run `resume` while a RACE / UNVERIFIED escalation is undecided.** Not in § 3a, not through § 4's
