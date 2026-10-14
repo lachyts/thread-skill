@@ -161,6 +161,9 @@ one line per Retro.
   scheduled (or `--regenerate`d) rollout, not one already written. A task's
   own frontmatter still overrides `max_iterations`, `max_review_rounds` and
   `max_plan_rounds`.
+- **Schedule picks the rollout root (#108).** When the Project root is the
+  live directory-source plugin checkout, schedule uses the separate
+  `<repoPath>-rollout` clone, or refuses with the fix.
 
 ## Install
 
