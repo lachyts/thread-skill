@@ -259,8 +259,9 @@ its `humanFix` `decide scope or defer`). For a set-aside at its run or at Integr
    left, § 4), and a confirmed `pr:` as `--pr`, never as a hand-written frontmatter edit. The form:
    - `--form hand-back` only when a bare hand-back is all that is left: the verb refuses it at Integration with no
      `pr:`, on a `prUrlError`, and on a revise re-entry with no round left and no raise;
-   - `--form awaiting-repair` otherwise: under a pause or a drain, or while a restore, recut, relabel, ref deletion or
-     § 3c merge is still to do, so the lead never hands it back first;
+   - `--form awaiting-repair` otherwise: while a restore, recut, relabel, ref deletion or § 3c merge is still to
+     do (under a pause or a drain, where step 2 cannot run, it is whenever his answer needs one), so the lead never
+     hands it back first;
    - `--form left` for "leave it": answered, never asked again and never retried;
    - no form, with `--fingerprint -`, for a block with no fingerprint (a gate, a PR-less code-writing review): a `-`
      entry never counts, so a block with no fingerprint is asked again.
