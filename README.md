@@ -29,7 +29,7 @@ else runs as scoped sessions.
 |---|---|---|
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
-| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): audit an area's open work and recommend the best use of time, then **Reshuffle** (re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate) or **Look only**. Schedules rollout-shaped phases itself, steers the rest (background batch sessions it launches itself, ADR 0010, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
+| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then **Reshuffle** (re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate) or **Look only**. Schedules rollout-shaped phases itself, steers the rest (background batch sessions it launches itself, ADR 0010, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
 | `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop also create a fresh visible sidebar task seeded with it; elsewhere label it a manual handoff. |
@@ -165,7 +165,8 @@ final check that the run wrote nothing into the tree):
 - **Contracts** — `tests/contracts/*.test.mjs`: manifests agree, skill names and description budgets,
   `${CLAUDE_PLUGIN_ROOT}` references resolve, hooks target real files, no SKILL.md body holds a
   positional `$N` (Claude Code substitutes skill arguments into them; logic that needs one lives in a
-  script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), and
+  script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), orient's
+  target resolution before it reads and its one learned `repos:` write (`orient-target.test.mjs`), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
   (`handoff-one-writer.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
   and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
@@ -176,6 +177,10 @@ final check that the run wrote nothing into the tree):
 - **Next-action script** — `tests/next-action.test.mjs`: `next-action.py`'s set-down, fill, read and
   captures against throwaway vaults — byte-level one-line edits, YAML-safe quoting, both tag forms, the
   shared dead-link rule, and refusals that write nothing.
+- **Target resolver** — `tests/resolve-target.test.mjs`: `resolve-target.py` against a fixture vault of real
+  names, aliases and `area:`/`repos:` shapes and a fake HOME with umbrella repos — each rung and outcome,
+  the clear winner and the close call, a shared directory, `--learn`'s one-line append and every refusal
+  that writes nothing.
 - **Default branch** — `tests/default-branch.test.{mjs,sh}`: `defaultBranch` keeps pre-fix bytes when
   unset, refuses unsafe names, and the resolver in `execute/SKILL.md` § 4 works against fixture remotes.
 - **Release check** — `tests/release-check.test.sh`: the real `make release-check` recipe against a temp

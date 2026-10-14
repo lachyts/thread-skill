@@ -680,7 +680,7 @@ def with_repo(note, item):
 
 
 def learn(resolver, dir_arg, note_arg):
-    vault, index, home = resolver.vault, resolver.index, resolver.home
+    vault, home = resolver.vault, resolver.home
     d = os.path.expanduser(dir_arg)
     if not os.path.isdir(d):
         fail(2, "no such directory: %s" % dir_arg)
@@ -709,7 +709,10 @@ def learn(resolver, dir_arg, note_arg):
         text = with_repo(note, item)
     except NA.Refused as e:
         fail(2, str(e))
-    note.save(text)
+    try:
+        note.save(text)
+    except OSError as e:
+        fail(2, "cannot write %s: %s" % (slash(rel), e))
     sys.stdout.write(json.dumps({"learned": item, "note": slash(rel)}, ensure_ascii=False) + "\n")
 
 
