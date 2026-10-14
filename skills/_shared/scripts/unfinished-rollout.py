@@ -30,6 +30,10 @@ Rules.
 - Complete: at least one linked task and every one merged (reconcile-rollout.py's queue states).
 - Never started: reconcile-rollout.py's never_started (only execute's own marks).
 - Eligible: this project's, and paused (`paused:`) or never started.
+- Awaiting sign-off (ADR 0034): paused with `paused_for: sign-off` (reconcile-rollout.py await-sign-off: the
+  run finished everything else and closed, and only gates wait on Lachy). It is a `paused:` like any other
+  (eligible, released by `running`); its state reads `awaiting sign-off since <stamp>: [[a]], [[b]]`, the
+  linked tasks set aside at `gate`, and its refusal names the sign-off path.
 - Interrupted pair (P, N): both candidates, N's `supersedes:` names P, N never started, P paused or never
   started. N is the note an interrupted /thread:schedule wrote and died before closing P out (step 7.5), so
   N's tasks may be unstamped.
@@ -54,9 +58,13 @@ Outcomes, the first that applies:
      exit 0; without, `refuse P,N` (sorted), exit 3, and stderr says N is incomplete.
   4. U is one note X: eligible with --regenerate -> `supersede X`, exit 0 (an incomplete X WARNs that this
      run finishes it). Otherwise `refuse X`, exit 3, with the remedy for its case (incomplete: the
-     incomplete line; eligible: re-run with --regenerate; this project's, has run, not paused: let it
-     finish, pause it, or hard-pause it, then --regenerate, or /thread:status then /thread:repair; another
-     project's: wait, or /thread:status then /thread:repair).
+     incomplete line; eligible: re-run with --regenerate, and for one awaiting sign-off (below) the
+     waiting tasks carry still gate-pending, or sign off, then /thread:execute; this project's, has run,
+     not paused: let it finish, pause it, or hard-pause it, then --regenerate, or /thread:status then
+     /thread:repair; another project's: wait, or /thread:status then /thread:repair; another project's
+     awaiting sign-off: it waits only on Lachy's sign-off of its waiting tasks: sign off each gate, then
+     /thread:execute (it runs them and closes), or /thread:repair to defer them, then /thread:execute
+     closes it).
   5. Two or more -> `refuse <a>,<b>,…` (sorted), exit 3; stderr lists each with its project and state, the
      incomplete line for each pair among them and for each other incomplete note (another project's note:
      finish it with /thread:schedule <its project> --regenerate), and /thread:repair for a candidate named
@@ -308,15 +316,19 @@ def cmd_check(args, rr) -> int:
         fresh, why = rr.never_started(note, linked)
         counts = rr._counts([dict(zip(("state", "setAsideAt"), rr._queue_state(t))) for _, t in linked])
         paused = rr._scalar(note.get("paused")) if rr._valued(note.get("paused")) else ""
+        sign_off = bool(paused) and rr._scalar(note.get("paused_for")).lower() == "sign-off"
+        waiting = sorted(p.stem for p, t in linked if rr._queue_state(t) == ("set-aside", "gate")) if sign_off else []
         cands[path.stem.lower()] = {
             "slug": path.stem, "mine": bool(projects_of(rr, note) & mine), "label": project_label(rr, note),
             "paused": paused, "fresh": fresh, "why": why, "status": rr._status(note) or "no status",
+            "signOff": sign_off, "waiting": waiting,
             "complete": counts["total"] >= 1 and counts["merged"] == counts["total"],
             "supersedes": link_slug(rr, note, "supersedes"), "incomplete": rr.incomplete(path, note, linked, index),
         }
     for c in cands.values():
         c["eligible"] = c["mine"] and (bool(c["paused"]) or c["fresh"])
-        c["state"] = (f"paused {c['paused']}" if c["paused"] else "never started" if c["fresh"]
+        c["state"] = (f"awaiting sign-off since {c['paused']}: {links(c['waiting'])}" if c["signOff"]
+                      else f"paused {c['paused']}" if c["paused"] else "never started" if c["fresh"]
                       else f"has run: {c['why']}")
 
     pairs = []  # (P key, N key)
@@ -394,10 +406,18 @@ def lone_incomplete(x) -> str:
             f"[[{x['slug']}]] as written")
 
 
+def links(slugs) -> str:
+    return ", ".join(f"[[{t}]]" for t in slugs) or "no task"
+
+
 def remedy(x) -> str:
     s = x["slug"]
     if x["incomplete"]:
         return f"unfinished rollout [[{s}]] ({x['label']}; {x['state']}) is on this repo, and {lone_incomplete(x)}"
+    if x["eligible"] and x["signOff"]:
+        return (f"unfinished rollout [[{s}]] ({x['label']}; {x['state']}) is on this repo: re-run with "
+                "--regenerate to supersede it (its unlanded tasks carry into the new rollout; the waiting tasks carry "
+                f"still gate-pending), or sign off, then /thread:execute [[{s}]]")
     if x["eligible"]:
         return (f"unfinished rollout [[{s}]] ({x['label']}; {x['state']}) is on this repo: re-run with "
                 "--regenerate to supersede it (its unlanded tasks carry into the new rollout)")
@@ -406,6 +426,11 @@ def remedy(x) -> str:
                 "drives it, let it finish or pause it (execute § Pausing); if none does, hard-pause it (stamp "
                 f"`paused:` and a `## Pause log` line) and re-run with --regenerate; if stuck: /thread:status "
                 f"[[{s}]], then /thread:repair [[{s}]]")
+    if x["signOff"]:
+        return (f"unfinished rollout [[{s}]] is another project's ({x['label']}; awaiting sign-off since {x['paused']}): "
+                f"at most one unfinished rollout per repo: it waits only on your sign-off of {links(x['waiting'])}: sign "
+                f"off each gate, then /thread:execute [[{s}]] (it runs them and closes), or /thread:repair [[{s}]] to "
+                f"defer them, then /thread:execute [[{s}]] closes it")
     return (f"unfinished rollout [[{s}]] is another project's ({x['label']}; {x['state']}): at most one unfinished "
             "rollout per repo: wait for it to finish, or /thread:status then /thread:repair")
 

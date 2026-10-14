@@ -29,7 +29,7 @@ else runs as scoped sessions.
 |---|---|---|
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
-| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then **Reshuffle** (re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate) or **Look only**. Schedules rollout-shaped phases itself, steers the rest (parallel-safe batches it dispatches as native child agents of its own session, ADR 0023, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
+| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing. Schedules rollout-shaped phases itself, steers the rest (parallel-safe batches it dispatches as native child agents of its own session, ADR 0023, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
 | `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop also create a fresh visible sidebar task seeded with it; elsewhere label it a manual handoff. |
@@ -65,11 +65,18 @@ integrates each approved task and merges it:
 
 1. **Plan-gate** — an autonomous judge approves the implementation plan before
    code is written (skippable per rollout; a plan's declared gated inputs
-   always pause for human sign-off — ADR 0008).
+   pause the task for sign-off, never the rollout; a spend gate within the
+   standing approval passes — ADR 0008, ADR 0034).
 2. **Ralph-style verifier retry** — the implementer re-runs the rollout's
    verifier and self-corrects until green or the iteration budget is spent.
 3. **Master review-and-revise** — a master-side reviewer accepts or sends the
    task back with feedback, up to `max_review_rounds`.
+
+The standing approval is off until `~/.config/thread/rollouts.toml` sets
+`spend_approval_usd` (whole US dollars) under `[defaults]`; set it only after
+installing a version that knows the key, because an older `rollout-settings.py`
+refuses it, and every rollout's settings with it. `skills/_shared/scripts/gated_inputs.py`
+holds the exposure reading it applies and schedule's gated-input sweep.
 
 Worktree isolation is explicit: each task runs in
 `<repoPath>/.claude/worktrees/<slug>`. Merges go **only** through
@@ -82,6 +89,9 @@ inputs and the lead's own set-aside rows).
 `skills/execute/scripts/git-env-canary.py` is the lead's git-env canary: it
 watches the shared checkout's default branch and bareness around every launch
 and halts the queue on a change that is not a close-out (execute § 4.5).
+`skills/execute/scripts/step-boundary.py` is the lead's side of a Chorus room
+stop: it reads the Workflow journals to stop each call at a step boundary and
+records the stop on the rollout note (execute § Room stop).
 `skills/_shared/scripts/run_record.py` is the Run record's one writer (ADR 0032):
 every emitter appends its events through it, and its header is the schema.
 `skills/retro/scripts/score.py` reads a record into a Retro's scores and proposals
@@ -96,6 +106,9 @@ one line per Retro.
 - `skills/_shared/execution-fit.md` — the canonical lane rule.
 - `skills/_shared/task-writer.md` — the single spec for writing + routing the
   vault task (dedup, day parsing, resume prompt, pickup auto-complete).
+- `skills/_shared/plugin-root.md` — the one rule for running a
+  `${CLAUDE_PLUGIN_ROOT}` command from text read as a file rather than rendered
+  (a sibling SKILL.md a router follows, a `_shared` spec); every skill cites it.
 - `docs/adr/` — the decision record; read the directory for the current set.
   Each ADR's Status line is the one place its state is recorded: a
   back-reference in another ADR reads `*(Amended by ADR NNNN, <date>: <what

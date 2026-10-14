@@ -1,7 +1,7 @@
 # 0036 — orient resolves its target before it reads, then reshuffles without asking
 
 Date: 2026-10-14
-Status: proposed, d1–d4 implemented by p20-1, d6 by p20-3; d5 pending (p20-2). P20, orient's front
+Status: proposed, d1–d4 implemented by p20-1, d5 by p20-2, d6 by p20-3. P20, orient's front
 door; amends ADR 0027's three-way question and ADR 0026's drift authorisation; from the 2026-10-14
 `/thread:orient Thread Skill` grill.
 

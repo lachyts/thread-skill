@@ -4,10 +4,11 @@
 // Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { assertHas, collapse, fencedBlocks, read, section } from '../lib/contract-text.mjs'
+import { assertHas, collapse, fencedBlocks, read, section, slice, walk } from '../lib/contract-text.mjs'
 
 const reshuffle = read('skills/orient/reshuffle.md')
 const orient = read('skills/orient/SKILL.md')
+const grammar = read('skills/_shared/vault-grammar.md')
 const R = (n) => collapse(section(reshuffle, new RegExp(`^## R${n}\\.`)) ?? '')
 const S = (n) => collapse(section(orient, new RegExp(`^### ${n}\\.`)) ?? '')
 const donts = collapse(section(reshuffle, /^## Don'ts/) ?? '')
@@ -29,9 +30,12 @@ test('phases number from N_max + 1, never from phase 0, and ordinals are never r
   assert.deepEqual([...c.matchAll(/continu\w*\s+from\s+`?N_max`?(?!\s*\+)/g)].map((m) => m[0]), [])
 })
 
-test('in flight is defined once, in orient § 2, with TaskNotes spelling', () => {
-  assertHas(S(2), 'orient § 2', ['`status: in-progress`', '`in_progress`', '`review`', '`dispatched:`'])
-  assertHas(R(1), 'R1', [/[Oo]rient § 2's definition/, /never change/, /AMBIGUOUS/, /`thread`-tagged/,
+test('in flight is defined once, in the vault grammar, with TaskNotes spelling', () => {
+  assertHas(collapse(section(grammar, /^## In flight$/) ?? ''), 'vault-grammar.md § In flight',
+    ['`status: in-progress`', '`in_progress`', '`review`', '`dispatched:`', '**Live rollout**'])
+  assertHas(S(2), 'orient § 2', ['_shared/vault-grammar.md` § In flight', /never re-batch it/, /never reshuffle it/])
+  assert.doesNotMatch(S(2), /`dispatched:` stamp/, 'orient § 2 restates the in-flight definition')
+  assertHas(R(1), 'R1', [/vault grammar's definition/, /never change/, /AMBIGUOUS/, /`thread`-tagged/,
     /contains `task` but not `thread`/, '`-p<N>-`'])
   // What orient § 4's bound apply left open (landed since the review, or withheld) is frozen with AMBIGUOUS:
   // the § 2 sweep predates the apply, so without this R1 could re-phase, drop or schedule finished work.
@@ -49,18 +53,68 @@ test('backlinks: one pass, alias and heading forms, cache dirs excluded, out-of-
     '`]]`, `|`, `\\|` or `#`', /vault only/, /listed in the report/])
 })
 
-test('orient runs drift dry, reports it, and applies it only on an authorising answer', () => {
+test('orient runs drift dry, reports it, and applies it on a default or --steer run, never --look', () => {
   assertHas(S(2), 'orient § 2', ['reconcile-project.py --project <slug> --json', /dry run/, /mktemp -d/,
     '`<dir>/<slug>.json`', /§ 4 binds the apply to that file/])
   assertHas(S(3), 'orient § 3', ['**Drift**'])
   assertHas(S(4), 'orient § 4', [/--apply --only <that project's saved dry-run file>/, /New since review/,
     /Reviewed, not applied/, /now\s+ambiguous/, /no longer drift/,
     /Ambiguous items are listed for Lachy and never applied/,
-    /scoped target skips this question and applies no drift fixes/])
+    /A default run and Steer only authorise them/, /the § 3 Drift line is the notice/, /`--look` applies none/,
+    /scoped target applies no drift fixes/])
 })
 
-test('Look only writes nothing; Steer only exists', () => {
-  assertHas(S(4), 'orient § 4', ['**Reshuffle**', '**Steer only**', /\*\*Look only\*\*[^.]*no writes of any kind/])
+// A scoped target applies no drift fixes (§ 4), so its Drift line is report-only: § 3 must not tell the model
+// to announce fixes for it, and CONTEXT.md's Drift entry must not say every non-look run fixes drift.
+test('the Drift line is the notice only when fixes follow; a scoped target is report-only', () => {
+  const s3 = S(3)
+  const drift = s3.slice(s3.indexOf('**Drift**'), s3.indexOf('**Shape**'))
+  assertHas(drift, 'orient § 3 Drift bullet', [/unless `--look` or a scoped target \(report-only then\)/,
+    /notice[^.]*only when fixes will follow/, /scoped target, say it is report-only/])
+  const entry = collapse(slice(read('CONTEXT.md'), /^- \*\*Drift\*\* —/, /^- \*\*/) ?? '')
+  assertHas(entry, 'CONTEXT.md Drift entry', [/never a look-only one or a scoped target/])
+  assert.doesNotMatch(entry, /any run but a look-only one(?! or a scoped target)/,
+    'CONTEXT.md says drift is fixed on any run but a look-only one, scoped targets included')
+})
+
+// Every ADR whose ADR 0027 amendment still describes the three-way question carries ADR 0036's amendment
+// beside it, so no ADR header reads as if orient still asks.
+test('every ADR amended for the three-way question also carries ADR 0036\'s amendment', () => {
+  const asked = /Amended by ADR 0027[^)]*(Reshuffle, Steer only or Look only|a Reshuffle or Steer only answer)/
+  const hits = walk('docs/adr').filter((f) => f.endsWith('.md'))
+    .map((file) => ({ file, head: collapse(slice(read(file), /^# /, /^## /) ?? '') }))
+    .filter(({ head }) => asked.test(head))
+  assert.deepEqual(hits.map((h) => h.file).sort(),
+    ['docs/adr/0003-orient-is-project-altitude-next.md', 'docs/adr/0026-finished-work-closes-itself.md'])
+  for (const { file, head } of hits) assert.match(head, /Amended by ADR 0036, 2026-10-14/, `${file} lacks ADR 0036's amendment`)
+})
+
+// ADR 0036 d5: Reshuffle is the default, not a question. § 4 asks nothing; `--steer` and `--look` (or the
+// words in the arguments) are the opt-outs, an empty shape goes straight to steering, and `--look` writes nothing.
+test('orient reshuffles by default; --steer and --look opt out, and Look only writes nothing', () => {
+  const s4 = S(4)
+  assert.doesNotMatch(s4, /AskUserQuestion/, 'orient § 4 still asks Reshuffle / Steer only / Look only')
+  assertHas(s4, 'orient § 4', [/no question/i, /straight into the reshuffle \(§ 5\)/,
+    /\*\*Steer only\*\* \(`--steer`, or "steer only" in the arguments\)[^.]*§ 6/,
+    /\*\*Look only\*\* \(`--look`, or "look only" in the arguments\)[^.]*stop after § 3[^.]*no writes of any kind/,
+    /\*\*An empty shape\*\*[^.]*nothing loose, unclear or unphased[^.]*no pull-ins[^.]*§ 6's steering/])
+  const forms = section(orient, /^## Invocation forms/) ?? ''
+  assertHas(forms, 'orient § Invocation forms', [/--steer\s+# /, /--look\s+# /])
+  assert.doesNotMatch(forms, /Reshuffle \/ Steer only \/ Look only/, 'the invocation forms still offer the three-way question')
+  // § 1 strips the opt-outs before the resolver sees the argument, as it does `--debrief`.
+  assertHas(S(1), 'orient § 1', [/orient's own flags \(`--debrief`, `--steer`, `--look`/])
+})
+
+// The three-way question is gone from every surface Lachy or the model reads; only the flag wording stays.
+test('no surface still offers Reshuffle / Steer only / Look only as a question', () => {
+  const surfaces = { 'skills/orient/SKILL.md': orient, 'skills/orient/reshuffle.md': reshuffle, 'README.md': read('README.md'),
+    'CONTEXT.md': read('CONTEXT.md') }
+  for (const [file, text] of Object.entries(surfaces)) {
+    const c = collapse(text)
+    assert.doesNotMatch(c, /Steer only or Look only/, `${file} still offers the three-way question`)
+    assert.doesNotMatch(c, /Reshuffle \/ Steer only/, `${file} still offers the three-way question`)
+    assert.doesNotMatch(c, /picks \*\*Reshuffle\*\*|a Reshuffle or Steer only answer|or \*\*Look only\*\*\./, `${file} still treats Reshuffle as an answer`)
+  }
 })
 
 test('orient schedules only rollout-shaped members and never runs another rollout', () => {

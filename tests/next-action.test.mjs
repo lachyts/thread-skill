@@ -416,3 +416,31 @@ test('read by path applies the same project checks as read by name', () => {
     ['skip', `area note (${P}/Area.md)`], ['skip', 'archived'], ['skip', 'not a project note (Notes/Loose.md)'],
   ])
 })
+
+// p19-8: stash and defer stamp `capture: continuation` (task-writer § 4); the query reports it as `marked`, and
+// handoff's Open captures supersedes only a marked capture. The 2026-09-25 Chorus case: a backlog task carrying
+// the `thread` tag and the thread's `**Thread:**` link (chorus-misstep-walk-and-knob) matched deterministically.
+test('captures marks a capture its writer stamped `capture: continuation`; an unmarked one that links the thread is not', () => {
+  const THREAD = '/Users/x/repos/tools/chorus/THREAD.md'
+  const dir = vault({
+    [`${T}/chorus-next.md`]: task('tags: [task, ai, thread]\nstatus: open\ncapture: continuation',
+      `\n## Notes\n\n**Thread:** [THREAD.md](${THREAD}) · state: parked\n`),
+    [`${T}/chorus-misstep-walk-and-knob.md`]: task('tags: [task, ai, thread]\nstatus: open',
+      `\n## Notes\n\n**Thread:** [THREAD.md](${THREAD}) · state: active\n`),
+    [`${T}/chorus.md`]: task('tags: [task, thread]\nstatus: open\ncapture: "continuation"'),
+    [`${T}/other-marker.md`]: task('tags: [task, thread]\nstatus: open\ncapture: backlog',
+      `\n**Thread:** [THREAD.md](${THREAD})\n`),
+    [`${T}/untagged.md`]: task('tags: [task]\nstatus: open\ncapture: continuation', `\n**Thread:** [THREAD.md](${THREAD})\n`),
+  })
+  const args = ['captures', '--slug', 'chorus', '--thread-file', THREAD]
+  assert.deepEqual(ok(dir, args), [
+    ['capture', 'chorus-misstep-walk-and-knob', 'open', 'thread-tag,thread-file'],
+    ['capture', 'chorus-next', 'open', 'thread-tag,marked,thread-file'],
+    ['capture', 'chorus', 'open', 'thread-tag,marked,slug'],
+    ['capture', 'other-marker', 'open', 'thread-tag,thread-file'],
+  ])
+  // The marker alone is no concrete match for close: --for-close still needs the slug or the thread file.
+  assert.deepEqual(ok(dir, ['captures', '--for-close']), [])
+  assert.deepEqual(ok(dir, ['captures', '--thread-file', THREAD, '--for-close']).map((r) => r[1]),
+    ['chorus-misstep-walk-and-knob', 'chorus-next', 'other-marker'])
+})

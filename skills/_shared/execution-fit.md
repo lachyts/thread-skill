@@ -8,6 +8,8 @@ One system, two dispatch lanes. Every cluster of open tasks gets exactly one:
   `defer` (`scheduled:` dates do the dispatch), a task's `## Launch` block via
   `open`, or orient's parallel-safe native batches (ADR 0023).
 
+**Plugin root.** This spec is read as a file, never rendered: run its commands by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 **The test decides, hard.** It is not a preference and not a count. A cluster is
 **rollout-shaped** when all three hold:
 
@@ -24,7 +26,9 @@ buys nothing there.
 **Signs a task is NOT rollout-shaped** (any one disqualifies it):
 
 - Its core action is an external publish — CMS, live site, DNS, config console.
-  (These always pause at the human gate regardless — ADR 0008; execute § 3.7.)
+  (An external publish is an irreversible or credential gate, so it always
+  stops its task for Lachy's sign-off and never passes the standing approval —
+  ADR 0008, ADR 0034; execute § 3.7.)
 - Its ordering constraint is a measurement window or calendar date, not file
   overlap. The engine's parallelism is forbidden by isolation windows, and
   the queue cannot see a window or calendar constraint.
@@ -77,11 +81,13 @@ makes a clone usable.
   `self-rollout-check: <path> is not a usable rollout clone: <reason>` line and the fix, on stderr.
 - **Empty** (execute § 2.6): exit 0 is no match; exit 3 is a match, with the match lines and the fix on
   stderr. Execute never swaps a root: its rollout note is already written.
-- **Exit 2**, in either mode, is the check itself failing (the script missing, an empty path, no python3),
-  and any other non-zero exit fails closed the same way. A missing registry passes; a malformed one passes
-  with a warning, to pass on (the registry format is Claude Code's, so the check fails open).
+- **Exit 2**, in either mode, is the check itself failing (the script missing with the root set, an empty
+  path, no python3), and any other non-zero exit fails closed the same way. A missing registry passes; a
+  malformed one passes with a warning, to pass on (the registry format is Claude Code's, so the check fails
+  open). The guard's `not found at /skills/…` is not this exit 2: the root was never exported, so export it
+  and re-run by `plugin-root.md` rule 4 first.
 
-On any non-zero exit, stop and print the stderr verbatim: it names the fix. The clone's location is a
+On any non-zero exit from a run with the root set, stop and print the stderr verbatim: it names the fix. The clone's location is a
 convention, not a setting: a clone anywhere else is not found.
 
 **GitHub `origin`.** The engine branches every worktree from
@@ -144,7 +150,9 @@ its stderr verbatim: that stderr is the remedy, or the reader's error. Exit 3 is
 listed repo (`listed <owner/name>: <reason>` plus the remedy), 4 is no GitHub
 origin, and 2 is any failure of the check itself, where any stderr already printed
 stands (python3 missing, exit 127, or a crash prints no `landing-register:` line).
-Never read 2 or 4 as "not listed": only exit 0 permits a rollout. This is a blocker,
+Never read 2 or 4 as "not listed": only exit 0 permits a rollout. The guard's
+`not found at /skills/…` is not that exit 2 but an unexported root: export it and
+re-run by `plugin-root.md` rule 4 before stopping. This is a blocker,
 not a re-route: the session lane can't push to a listed repo either. A repo can be
 listed after scheduling, so execute § 2.5 re-runs this check at every launch, and
 execute § 4.5 re-runs it before every task call, Integration push and merge.
@@ -202,8 +210,9 @@ note's `Local:` path, passed as `<localPath>`, covers it).
   squash or cherry-picked PR (no file they touch, merges included, differs from `origin/<default>`) are a
   note naming that reset. Landed content that `origin/<default>` has since changed, and an ahead set that
   touches no file, still block.
-- **Exit 2**: the check itself failed (a fetch, the default-branch lookup, a missing script). Stop, and
-  print the stderr verbatim.
+- **Exit 2**: the check itself failed (a fetch, the default-branch lookup, a missing script with the root
+  set). Stop, and print the stderr verbatim. The guard's `pushed-base: /skills/… not found` is not this
+  stop: the root was never exported, so export it and re-run by `plugin-root.md` rule 4 first.
 
 Each cited path is compared on its own, never batched: a relative path in every clone of the set, an
 absolute or `~/` path in the clone that contains it (anything else, such as a vault note, is a note and is

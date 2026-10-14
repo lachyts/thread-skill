@@ -8,8 +8,9 @@ description: 'Pick a project back up and reshuffle it: audit a project/area afte
 The project-altitude sibling of `next` (ADR 0003), and the one shaping verb (ADR 0027). `next`
 answers "what's my move?" for the *current thread*; `orient` answers it for a *whole project or
 area* returned to after time away. It audits the balls in the air, recommends ONE best use of
-Lachy's time, then asks **Reshuffle, Steer only or Look only**. A reshuffle re-sorts all the open work, grills
-what is unclear and writes the result at one gate (`reshuffle.md`). Orient then routes by lane:
+Lachy's time, then reshuffles without asking (ADR 0036 d5): `--steer` routes the work as it stands and
+`--look` stops at the audit. A reshuffle re-sorts all the open work, grills what is unclear and writes
+the result at one gate (`reshuffle.md`). Orient then routes by lane:
 it schedules rollout-shaped phases itself, steers the session-lane work (batches dispatched as
 native child agents of this session, a focus item, or both) and ends with the **execute offer**.
 Pointed at a single plan, design note or brain dump, it runs a **scoped reshuffle** of that note
@@ -22,6 +23,8 @@ rollout-shaped phases go to `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md`; th
 None is re-implemented here. The execution-fit test
 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`) decides the lane, hard, not as a
 preference.
+
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 
 ## Runtime boundary
 
@@ -44,7 +47,9 @@ not supply execute's detached Stop-hook/heartbeat driver.
 ## Invocation forms
 
 ```
-/thread:orient Chorus                     # audit, then Reshuffle / Steer only / Look only
+/thread:orient Chorus                     # audit, then reshuffle (the default)
+/thread:orient Chorus --steer             # audit, then steer the work as it stands (no reshaping)
+/thread:orient Chorus --look              # audit only: stop after § 3 and write nothing
 /thread:orient [[Chorus]]                 # explicit wikilink form
 /thread:orient                            # resolve the target from the session directory
 /thread:orient [[<design, phase or brain-dump note>]]   # scoped reshuffle of that note
@@ -59,7 +64,8 @@ not supply execute's detached Stop-hook/heartbeat driver.
 
 The target is one project, one area or one note (CONTEXT.md **Target**, ADR 0036), and the resolver
 runs before § 2 reads anything. Quoted prose is a scoped target, as below. Anything else, with
-orient's own flags (`--debrief`) removed, goes once to
+orient's own flags (`--debrief`, `--steer`, `--look`, and the words "steer only" or "look only")
+removed, goes once to
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py "<argument>"`, run from the
 session directory. The argument is quoted as one word, so a `[[link]]` never meets the shell's
 globbing; a bare invocation passes none. It prints one JSON object: `outcome` (`resolved`,
@@ -116,7 +122,7 @@ resolved), a `dir_anchor` (the area the directory sits in), a one-line `reason` 
   `learn_dir` is null. When he lands on a *project*, from the ask, the re-ask or a typed answer,
   hold that `learn_dir` with the project's `note` field: the picked option's, or the re-resolved
   target's `note` when a typed answer resolves to a project. The learn waits for § 4. Nothing is
-  held for an area pick, a confirmed first pick, Look only, a scoped target, `--debrief` or a dry
+  held for an area pick, a confirmed first pick, Look only (`--look`), a scoped target, `--debrief` or a dry
   run, and a directory with no `learn_dir` is never written back.
 
 A project or scoped target narrows § 2 to that project (§ 2 Scope); an area target keeps the area
@@ -148,8 +154,9 @@ and Drift and the slots for each swept project.
   `priority`, `scheduled`, `due`, `dispatched`, `launch`, `phase`,
   `rollout`, `tags`, `projects`), plus one body read of those task notes for orient's run lines
   (`rg -n 'orient (start|dispatch|end): run'`: the start claims, dispatch lines and end lines § 8
-  Double-dispatch guard writes); phase notes in `Work/Phases/` for the area's projects. The
-  reshuffle classifies from this sweep; it does not walk the folders again.
+  Double-dispatch guard writes) and a second for Lachy's fork rulings (`rg -n 'orient ruling: '`,
+  the lines § 5 writes); phase notes in `Work/Phases/` for the area's projects. The reshuffle
+  classifies from this sweep; it does not walk the folders again.
 - **Threads**: THREAD.md state lines across the area's project dirs
   (`~/Projects/<Area>/*/THREAD.md`) and `_shared/threads/`.
 - **Drift** (ADR 0026): run the shared reconcile step as a dry run for every project in the target
@@ -177,13 +184,17 @@ and Drift and the slots for each swept project.
 - **Recency**: overdue `scheduled:`/`due:` dates; note staleness
   (last-modified); `git status`/`git log -3` in each project root — dirty
   trees also surface aborted-session partial edits worth flagging.
-- **In flight** (the one definition; the reshuffle's reach tiers use it): a task stamped
-  `rollout:` whose rollout note is still live (the link resolves to a note directly in
-  `Work/Tasks/`), a `dispatched:` stamp or an orient start claim ≤7 days old unless an end line
-  in the note names the same run and job, written before or after it (the Vault body read finds
-  them; § 8 Double-dispatch guard, rule 1), or `status: in-progress` (TaskNotes' own spelling),
-  `in_progress` or `review`; a phase with any such member. Report it as such; never re-batch it
-  (§ 7) and never reshuffle it.
+- **In flight** (the reshuffle's reach tiers use it too): as defined once in
+  `${CLAUDE_PLUGIN_ROOT}/skills/_shared/vault-grammar.md` § In flight, which also holds the
+  phase/task filename pattern and the status sets this sweep reads. The orient start claims and end
+  lines it weighs are the run lines the Vault body read finds (§ 8 Double-dispatch guard, rule 1).
+  Report it as such; never re-batch it (§ 7) and never reshuffle it.
+- **Open forks** (the one definition; §§ 3, 5, 6, 7 and 10 use it): each fork a task's latest
+  orient end line names (`fork for Lachy: <fork>`, § 8 End-of-run updates) stays open until an
+  `orient ruling: <fork> → <ruling>` line in its `## Notes`, timed after that end line, rules on
+  it. A task with any open fork is blocked on Lachy. A ruled fork is decided: it is never
+  reported, excluded or grilled again, whatever route the task takes next. A later run's end line
+  supersedes the whole set.
 
 ### 3. Present
 
@@ -193,9 +204,14 @@ A situational report written for Lachy catching up, not a log:
 - **Balls in the air**: per-sub-project one-liners — the slot first
   (`next: <next_action> ([[<task>]])`, or `No next action`), then state,
   blocker, staleness. Group: active / in-flight (dispatched) / stalled /
-  dormant.
-- **Drift**: one line, the counts plus names, split into unambiguous (fixed on Reshuffle) and
-  ambiguous (listed for Lachy, never applied). Omit the line when both lists are empty.
+  dormant. A task with an open fork (§ 2 Open forks: named by `fork for Lachy` in its latest orient
+  end line, with no `orient ruling:` line for it timed after that end line) is blocked on his
+  decision: name every open fork (grill-me). A ruled fork is not listed.
+- **Drift**: one line, the counts plus names, split into unambiguous (fixed next, in § 4, unless
+  `--look` or a scoped target (report-only then)) and ambiguous (listed for Lachy, never applied).
+  Call the line the notice for those fixes only when fixes will follow (a default or `--steer` run
+  on a project or area); on a `--look` run or a scoped target, say it is report-only. Omit the line
+  when both lists are empty.
 - **Shape**: how much a reshuffle has to work with: loose tasks, brain dumps, unstarted phases,
   overlaps found in related projects, and any live rollout; plus the declared check's entries
   (§ 2), each a loose item until the reshuffle places it, or its one audit line.
@@ -206,16 +222,21 @@ A situational report written for Lachy catching up, not a log:
   the slot's own task → say they agree; a different item → name the slot and
   say why this beats it; a blank slot → say the recommendation would fill it.
 
-### 4. Reshuffle, Steer only or Look only
+### 4. Reshuffle by default
 
-`AskUserQuestion`, recommended option first:
+No question (ADR 0036 d5): Lachy picked Reshuffle at every orient, so the audit flows straight into
+the reshuffle (§ 5), which writes nothing before its gate and whose grill he can stop at any
+question. The opt-outs come with the invocation (§ Invocation forms):
 
-- **Reshuffle** (the usual choice on pickup) — continue to § 5.
-- **Steer only** — no reshaping: route the open work as it stands (§ 6), e.g. to dispatch
-  batches as native child agents of this session.
-- **Look only** — the audit was the deliverable; stop, no writes of any kind.
+- **Steer only** (`--steer`, or "steer only" in the arguments) — no reshaping: route the open work
+  as it stands (§ 6), e.g. to dispatch batches as native child agents of this session.
+- **Look only** (`--look`, or "look only" in the arguments) — the audit was the deliverable; stop
+  after § 3, with no writes of any kind: no drift fixes, no learned directory, no slot write.
+- **An empty shape** (§ 3 Shape: nothing loose, unclear or unphased, and no pull-ins) — nothing to
+  reshuffle, so go straight to § 6's steering.
 
-**Drift fixes.** Reshuffle and Steer only authorise them (as any steer did under ADR 0026): re-run
+**Drift fixes.** A default run and Steer only authorise them, as choosing Reshuffle did under ADR
+0027; the § 3 Drift line is the notice, and `--look` applies none. Re-run
 the reconcile step with `--apply --only <that project's saved dry-run file>` for each project whose
 dry run listed unambiguous items, so the reshuffle never forms a roadmap on top of work Lachy saw
 finished. `--only` writes just the items the § 2 dry run listed: a plain `--apply` recomputes and
@@ -225,11 +246,11 @@ orient lists them again), and any `Reviewed, not applied` items with their reaso
 `now ambiguous: …` needs his eye; `no longer drift (…)` is benign (closed or moved since, by the
 rollout's ceremony or a mark-done). Neither is written, so both join the reshuffle's frozen
 possibly-landed tier (reshuffle R1). If the saved file is gone (`--only` exits 2), re-run the dry
-run and ask again. Ambiguous items are listed for Lachy and never applied. A scoped target skips
-this question and applies no drift fixes: it reshapes one note, so the § 3 Drift line is
-report-only for it.
+run, report its Drift line and apply from the new file. Ambiguous items are listed for Lachy and
+never applied. A scoped target applies no drift fixes: it reshapes one note, so the § 3 Drift line
+is report-only for it. It goes straight to its reshuffle (`--look` still stops it after § 3).
 
-**The learned directory.** Reshuffle and Steer only also run
+**The learned directory.** A default run and Steer only also run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py --learn "<learn_dir>" "<note>"`
 when § 1 held a `learn_dir`, where `<note>` is the vault-relative `note` field § 1 held with it (the
 picked option's or the re-resolved target's; it carries a `/`, so the script resolves exactly that
@@ -243,6 +264,13 @@ tier, the clear/unclear sort and proposal, the grill of what is unclear (which L
 any point), the one gate, the writes. With nothing to reshape (Lachy stops the grill at once and
 the gate is empty), carry straight on to § 6.
 
+A task with an open fork (§ 2 Open forks) counts as **unclear** for R2 whatever its body says, so
+R3's interview (`grill-me` or `grill-with-docs`, as R3 picks) puts each open fork and its evidence
+to Lachy. His ruling is written into the task note at R5, after the gate: the respecced body
+carries it, and one `## Notes` line per fork, `- <UTC ISO> orient ruling: <fork> → <ruling>`, with
+`<fork>` worded as the end line words it, marks that fork decided. A fork he does not reach stays
+open. Steer only skips this step, so its open forks wait for the next Reshuffle.
+
 ### 6. Route
 
 - **Run the execution-fit test** on each phase the reshuffle touched and on each other open
@@ -251,7 +279,8 @@ the gate is empty), carry straight on to § 6.
   `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md` with `--regenerate --tasks <members>`, naming
   exactly the members of the rollout-shaped phases (or clusters) on that repo: never a bare project
   run, which would also sweep up misfits, session-lane phases and whatever the grill left
-  unresolved. A scoped target routes only the tasks its own reshuffle wrote. **At most one
+  unresolved. A task with an open fork (§ 2) is left out of `--tasks` until Lachy rules on it. A
+  scoped target routes only the tasks its own reshuffle wrote. **At most one
   unfinished rollout per repo**, and schedule § 0's unfinished-rollout check enforces it.
   `--regenerate` is orient's supersede policy: the check allows a supersede only for a paused or
   never-started rollout of this project (its unlanded tasks carry into the new one), and schedule
@@ -265,11 +294,11 @@ the gate is empty), carry straight on to § 6.
     prior rollout). Orient reports any such finish from schedule's output, never as "nothing
     written". The phases are written and wait; orient reports schedule's remedy and names the next
     move: `/thread:status` (then `repair`) for a stuck rollout, or a later `/thread:orient <project>`
-    (Steer only is enough) once the repo is free.
+    (`--steer` is enough) once the repo is free.
   - **Uncommitted grill docs.** If R3's grill left `CONTEXT.md` or `docs/adr/` changes
     uncommitted in the target repo, schedule nothing there either: every worktree branches from
     `origin`, which lacks them. Name them as the next move (land them through the repo's PR
-    route), then Steer only schedules.
+    route), then an orient with `--steer` schedules.
 
   Schedule's own § 0 checks can still stop it with a named remedy, which orient reports.
   Session-lane batches are never offered for rollout-shaped work; orient never re-implements the
@@ -320,7 +349,13 @@ dispatchable open work into **parallel-safe batches**:
   kill fan-out ("Prompt is too long"). That table + the registry are the
   only config — orient maintains no manifest of its own.
 - **Exclusions**: conversation-gated tasks (need Lachy's input — say so, leave
-  them for Hands-on or the next reshuffle's grill); in-flight tasks and tasks a live run covers
+  them for Hands-on or the next reshuffle's grill). A task with an open fork (§ 2 Open forks: named
+  by `fork for Lachy` in its latest orient end line, with no `orient ruling:` line for it timed
+  after that end line) counts as conversation-gated at any age: a batch stopped it at a grill-fit
+  fork, and it stays out until Lachy rules on every open fork in a reshuffle grill (§ 5), which
+  writes each ruling into the note. Its next batch prompt carries his rulings, and whatever route
+  the task takes instead (Hands-on, the rollout lane, Not now, a capability-blocked batch), the
+  ruling lines keep it decided. Also excluded: in-flight tasks and tasks a live run covers
   (§ 8 Double-dispatch guard, rules 1 and 2), found before clustering; work
   whose playbook demands human sign-off before external effects.
 
@@ -361,7 +396,9 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
 5. **Collect and accept.** This session is the lead and stays open until every child returns:
    collect its output, `accept` its envelope, `advance`. Recover an interrupted child rather than
    clearing its claim. Report each batch as running, complete or blocked, with its native ID and
-   run dir.
+   run dir. Every fork a child reports (in its result or its `fork for Lachy` end line) goes to
+   Lachy as a decision (grill-me) in that batch's close-out line, never as a follow-up task spawned
+   on his behalf.
 
 **Every batch prompt must carry** (the emission spec):
 
@@ -409,6 +446,12 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
 - **Domain playbook gates** — staging-first, confirm-before-publish, and any
   domain-specific sign-off rules from the workspace's playbooks. No Linear
   filing unless the active profile carries a Linear server.
+- **Grill-fit gates** — run `${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` over the batch's
+  work: a fork the child can settle from code or data is written as "decide X from Y", a Lachy
+  decision gets a gate line, and a fork Lachy already ruled on (§ 5) goes in as his ruling. A
+  batch with no forks carries no grill language, meaning no gate lines and no "decide X from Y"
+  lines. The stop at a Lachy-owned fork and the fork end-line form are not grill language: they are
+  standing end-of-run mechanics every prompt carries, forks or none (End-of-run updates).
 - **Cross-batch coordination** — name any shared surfaces and who owns them;
   check task-note progress stamps before editing anything another batch might
   own.
@@ -417,14 +460,20 @@ Each batch runs as a native child agent of this session (ADR 0023) through the s
   orient run or `--debrief` reads the truth from the notes, and add the
   mandatory end line
   `- <UTC ISO> orient end: run <Run:>, job <Job:>, <done | blocked: … | partial: …>` to its
-  `## Notes`. It is the only record if the lead ends before collecting.
+  `## Notes`. It is the only record if the lead ends before collecting. At a gate line, or at a
+  Lachy-owned fork no gate foresaw, the child stops that task, never resolving the fork or spawning
+  a task for it. The task stays `status: open` (never `done`, nor `in-progress`, which § 2 reads as
+  in flight), and its end line ends `partial: fork for Lachy: <fork>; evidence: <…>`, with
+  `; fork for Lachy: <fork>; evidence: <…>` appended for each further fork, so the run's single
+  end line names every fork. The child's result names them too.
 - **Execution context** — identify the canonical workspace, project and required
   authenticated tools. Native tools come from the parent session. Isolate code
   edits in worktrees where needed; do not expect a worktree to load MCP profiles.
 
 Close the dispatch with one line per batch: native child ID, batch title, tasks
 covered, the model and effort as spawned (or "effort inherited"), and
-verified-running, completed or blocked.
+verified-running, completed or blocked, plus `fork for Lachy: [[<task>]] <fork> (grill-me)` for
+each fork it reported.
 
 #### Double-dispatch guard
 
@@ -535,7 +584,11 @@ names why (a running or blocked rollout, uncommitted grill docs, a schedule bloc
   meaning its dispatch line names a run whose journal exists and records no bound child
   (`childId`) for its job. A stamp with no dispatch line, or whose named journal is missing (a hand
   launch, a pre-0023 stamp), is unknown, never "never launched", and keeps its 7 days. An
-  unsettled stamp inside its 7 days stays, an abandoned run's included.
+  unsettled stamp inside its 7 days stays, an abandoned run's included. A task with an open fork
+  (§ 2 Open forks: named by `fork for Lachy` in its latest orient end line, with no
+  `orient ruling:` line for it timed after that end line) is reported as a decision for Lachy
+  (grill-me), every open fork with its evidence, never as completed work or a task to spawn. A
+  ruled fork is not reported again.
 
 A fresh `/thread:orient` audit is the lightweight version of this.
 
@@ -550,6 +603,10 @@ A fresh `/thread:orient` audit is the lightweight version of this.
   is too long"): run orient from the narrowest profile that covers the batches.
 - **Do not substitute another harness or account.** Native child dispatch is the
   default; absent capabilities are reported instead of shelling out to a model.
+- **Don't turn a reported fork into a task.** A `fork for Lachy` end line is Lachy's decision
+  (grill-me): § 3, the close-out and `--debrief` surface it, § 5's grill puts it to him, and § 6
+  and § 7 hold the task back until he rules. Nothing spawns a task for it: his ruling, written
+  into the note as an `orient ruling:` line, is what decides it.
 - **Don't re-batch in-flight work** (§ 2, § 8 Double-dispatch guard): only the
   two-step naming override re-dispatches it. Don't stamp or write anything —
   the slot write included — in Look only or dry runs.
@@ -560,7 +617,7 @@ A fresh `/thread:orient` audit is the lightweight version of this.
   join its phase (`reshuffle.md` R1).
 - **Don't write before the reshuffle's gate**, drift fixes and the learned `repos:` entry (§ 4) aside.
 - **Don't recommend more than one focus item**, and don't pad the audit —
-  headline, balls in the air, drift, shape, one recommendation, then the question.
+  headline, balls in the air, drift, shape, one recommendation, then the reshuffle (§ 4).
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s
   logic; rollout-shaped work goes to schedule (the execution-fit test
   decides, hard); execute runs only through the execute offer; batch clusters never grow a merge
