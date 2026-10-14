@@ -602,8 +602,11 @@ rr=$(grep '^"Re-run § 2.5"' "$ex")
 ok "$([ -n "$rr" ] && echo y)" y "execute keeps the Re-run § 2.5 definition"
 lacks "$rr" "2.7" "the Re-run § 2.5 definition does not include § 2.7"
 hb=$(grep '^> ROLLOUT-HEARTBEAT' "$ex")
-has "$hb" "§4.5" "the heartbeat still re-enters through §4.5"
-has "$hb" "skips § 2.7" "the heartbeat says its re-entry skips § 2.7"
+# Clause (7)'s own span: clause (2) re-enters on a lapsed room stop too (p18-1), so a whole-prompt match would pass
+# with the stall re-entry or its § 2.7 skip gone.
+hb7=$(printf '%s' "$hb" | sed -n 's/^.*(7) /(7) /p')
+has "$hb7" "§4.5" "the heartbeat's stall re-entry (clause (7)) still re-enters through §4.5"
+has "$hb7" "skips § 2.7" "the heartbeat's stall re-entry (clause (7)) says it skips § 2.7"
 pz=$(awk '/^## Pausing \+ reinstating/{on=1} /^\*\*Soft pause/{on=0} on' "$ex" | tr '\n' ' ')
 has "$pz" "§ 2.7" "execute Pausing: neither pause runs § 2.7"
 s7=$(awk '/^### 7\./{on=1} /^### 8\./{on=0} on' "$ex")

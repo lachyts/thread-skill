@@ -13,6 +13,8 @@ Brief a fresh agent so it can continue the work *immediately*.
 
 Every handoff produces two artefacts: a **durable handoff doc**, committed to the repo the session is working in and landed there (pushed, or its merge queued, never waited on: ADR 0028, § Commit it), and a **paste-ready prompt** that points at it. In **Codex Desktop or a Chorus Session**, the primary outcome is additionally a **new visible task** that the user can open and interact with; the prompt is the payload used to create that task. (On the Stage the call raises a Handoff card the listener Starts — an offer, not yet a live Session, which is what the queued `clientThreadId` form of the directive already means; Chorus ADR 0047.) The doc is the object Lachy tracks — it is never optional and never lives in OS temp (ADR 0017).
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 **Invocation gate.** Run this only on explicit fork intent (the user asked for a
 handoff of THIS conversation) or when a router (`next`/`orient`) dispatched it.
 Never self-initiate a handoff because the session feels long or the context is
@@ -26,6 +28,9 @@ to the default branch, or a `landing` PR is opened with its merge queued, and
 withdrawing it lands a second push or PR. It must still be removed, not left: a
 pending doc nobody meant silences the next `thread:close`'s continuation tasks
 for that thread. See `handoff-lifecycle.md` § Withdrawn.)
+On the Chorus Stage a Login at its line is never a handoff: execute § Room stop
+stops the rollout's calls at a step boundary and the Stage moves the Session
+(Chorus ADR 0071); off the Stage a handoff stays the way to continue.
 
 ## Success contract in Codex Desktop or a Chorus Session
 
@@ -65,7 +70,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/handoff-home.sh"            #
 
 Its rules — project directory, seat, `_shared`, git toplevel, and `_shared` for a unit outside git or one whose repo ignores `docs/handoffs/` — are `${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Home; never resolve `<home>` by hand, and never edit a `.gitignore` to make room. Never the OS temp directory (macOS clears it on reboot; a handoff must survive reboots and account switches) and never the vault. Slug: ≤5 words naming the work. Create `docs/handoffs/` if absent. A doc briefs exactly one consumer (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md`). Every path in this skill, in `thread:close` and in `thread:open` is this same `<home>/docs/handoffs/<doc>`; the prompt carries it **absolute**.
 
-**Failure path.** If the resolver exits non-zero, prints nothing, or cannot be run (`CLAUDE_PLUGIN_ROOT` unset, a stale cache), stop before writing: no doc, no landing call, no Thread-state row, no captures touched, no task created. Print `handoff: resolver failed (<its stderr, or "not found at <path>">) — no doc written` and ask Lachy for an absolute directory. Only a directory he names is used as `<home>`, never one the agent infers.
+**Failure path.** If the resolver exits non-zero, prints nothing, or cannot be run (`CLAUDE_PLUGIN_ROOT` still unset after the re-run `plugin-root.md` rule 4 asks for, a stale cache), stop before writing: no doc, no landing call, no Thread-state row, no captures touched, no task created. Print `handoff: resolver failed (<its stderr, or "not found at <path>">) — no doc written` and ask Lachy for an absolute directory. Only a directory he names is used as `<home>`, never one the agent infers.
 
 **Consumer home.** When the consumer will launch somewhere other than this session's launch directory — the work moves to another repo, or this repo is about to be deleted or moved — resolve with `--dir <consumer launch dir>` (plus `--shared` for a shared thread), then write the doc there and hand it to landing with `home` set to that home (§ Commit it): land.sh resolves the repo that holds it. The prompt names that absolute path, and the producer's later `thread:close` still finds the doc through the THREAD.md Resume pointer.
 
@@ -74,7 +79,7 @@ Its rules — project directory, seat, `_shared`, git toplevel, and `_shared` fo
 Body sections, in this order:
 
 1. **Done and verified** — what landed this session, with evidence (paths, SHAs, test output).
-2. **What remains** — the continuation: what the next session does, in order.
+2. **What remains** — the continuation: what the next session does, in order, naming any fork the grill-fit check returned to Lachy.
 3. **Decisions settled** — rulings already made, so they are not re-litigated.
 4. **Gotchas found the hard way.**
 5. **Suggested skills** — the skills the next agent should invoke to continue.
@@ -114,6 +119,8 @@ What each outcome leaves. A doc committed but not landed (`stuck:` with `land: c
 
 ## Build the handoff prompt
 
+Run `${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` over the continuation first, so every fork the consumer could hit is resolvable or gated back to Lachy.
+
 Create this compact payload for the new task. Print it as a fenced block when native creation is unavailable or when the user asks to see it:
 
 ```
@@ -123,8 +130,11 @@ Read first: <home>/docs/handoffs/<YYYY-MM-DD>-<slug>.md (absolute path) — then
 Context: <2–5 lines: goal, state of play, what's built/decided, what's blocked.>
 Also read: <key file paths / artefact links>
 Suggested skills: <skills the next agent should invoke>
+Gates: <fork> returns to Lachy via grill-me — report the fork and its evidence, do not resolve it downstream
 Next move: <the single concrete next step>
 ```
+
+The `Gates:` line comes from the grill-fit check's step 2(b): one line per Lachy-owned fork, omitted when there is none. The consumer stops at the fork and asks. A fork the consumer can settle (step 2(a)) goes into `Context:` or `Next move:` as "decide X from Y".
 
 Keep it tight — the doc carries the depth; the prompt carries the momentum.
 
