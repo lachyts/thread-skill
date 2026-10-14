@@ -137,7 +137,7 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !sch1.includes(LOG) || [LOG, TRIP, ACK].some((k) => canary.includes(k))) fails.push('marker-tie')
 
   // arm-sites: an arm beside each launch (next to its shasum), in order where it matters.
-  const sub12 = subs.find((x) => x.startsWith('**Seeded revises')) ?? ''
+  const sub12 = subs.find((x) => x.includes('**Seeded revises')) ?? ''  // sub-step 2 opens with the Standing approval (ADR 0034)
   const sub13 = subs.find((x) => x.includes('`restart`, then each in `start`')) ?? ''
   const resume37 = s37.slice(s37.indexOf('**Signed-gate resume.**'))
   const s5resume = s5.slice(s5.indexOf('If a call dies'))

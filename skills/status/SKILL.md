@@ -13,6 +13,8 @@ It is **read-only**: it never stamps frontmatter, never merges, never starts or 
 what it finds, that's `/thread:repair` (the conductor) or `/thread:execute` (the queue's lead). This skill is
 the diagnosis; those are the treatment.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## Scope
 
 Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` (older undated `<slug>-rollout` notes
@@ -91,7 +93,8 @@ are included), sorted by schedule order (each task's first wikilink on a list-it
 rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads these keys and no others:
 
 - top level: `paused` (the pause stamp; null when not paused), `pause_requested` (a soft pause is draining:
-  execute → *Pausing + reinstating a rollout*), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
+  execute → *Pausing + reinstating a rollout*), `pausedFor` (`sign-off` under execute § 4.5 step 5's sign-off
+  pause, ADR 0034: the run finished everything else and only gates wait on Lachy; null otherwise), `incomplete` (§ 1), `counts` (`setAsideAtIntegration`
   included), `progress`, `timeline` and `ladder`, plus `gitEnvHold` (the unacked git-env trips, each
   `{slug, kind, line}`; § 3's Git-env trip flag), `ceilingError` (why `ceiling` is null: an invalid
   `parallel_ceiling`, or an absent one `rollout-settings.py` could not resolve; null otherwise) and
@@ -142,7 +145,11 @@ refused flag). When K is not an integer
 nothing (`--repo` only computes a path). Status reads `branch`, `worktreePath`, `readyAt`, `resumeAt`,
 `autoRevise`, `lastRound` and `lastIntegration` from it, and the automatic retry's verdict (ADR 0033): `autoRetry`,
 `autoRetryWhy`, `autoRetryAfter`, `autoRetryError`, `autoRetryClass`, `autoRetryBudget`, `autoRetriesUsed`,
-`quotaRetriesUsed` and `fingerprint`, plus `prUrlError`. A non-empty `autoRetryError` flags
+`quotaRetriesUsed` and `fingerprint`, plus `prUrlError`, `humanFix` and `answerRecorded` (ADR 0035). `humanFix` is the
+one act that moves a block only Lachy may move ({act, detail, handBack, label, raise}), named by the script, so status
+never re-derives a cause; it ignores K. `answerRecorded` is the live answer to the task's current block ({stamp, kind,
+form, line}), the one read status shares with execute and repair. `autoRetryWhy` is read only by § 4's count rule
+(`auto_retries unresolved`), never as Lachy's reason. A non-empty `autoRetryError` flags
 "invalid round budget: <it>" on the task (execute § 3's round-budget halt). `lastIntegration` is the `## Integration log`'s LAST
 line as fields, never a search or a count: null when the note has no log, and a field is null where the line
 has `-`. If `inputs` exits 2 (an unreadable note), render "inputs failed: <stderr>" for that task and carry
@@ -255,7 +262,8 @@ offline too.
 
 ### 4. Render the situational report
 
-**Headline.** `[[<rollout>]] — <progress>`, with `progress` verbatim, plus `PAUSED since <stamp>`,
+**Headline.** `[[<rollout>]] — <progress>`, with `progress` verbatim, plus `PAUSED since <stamp>` (or, with
+`pausedFor: sign-off`, `AWAITING SIGN-OFF since <stamp>: [[a]], [[b]]`, the tasks set aside at `gate`),
 `pause pending (draining)`, `INCOMPLETE: <reason>`, `GIT-ENV HOLD: [[a]], [[b]]` (each slug `gitEnvHold`
 names, once) or the lineage (`supersedes [[<prior>]]`,
 `superseded by [[<successor>]]`, or § 1's reverse lineage: `superseded by [[N]], close-out interrupted` or
@@ -270,7 +278,7 @@ names, once) or the lineage (`supersedes [[<prior>]]`,
 | `awaiting-integration` | **Awaiting Integration** | its PR and `ready:` (`inputs.readyAt`) |
 | `running` | **Running** | the `owner:` tag; no `owner:` means it was handed back and restarts at the lead's next step; no `started` means it is starting; `auto-retry <autoRetriesUsed>` when above 0 (the verdict sets the counters before its first refusal, so `inputs` carries them for a running note too) |
 | `queued` | **Queued** | `waitingOn`, else "behind solo [[x]]" when a started task x carries `solo`, or when x is the first queued task in rank order that carries `solo` and has no `waitingOn` and ranks above this one (`next` holds every task below such a Solo task, whatever its `priority:`; a Solo task with a `waitingOn` holds nothing), else "next free slot" |
-| `set-aside` | **Set aside** | where it re-enters (below), the first line of `blockerSummary`, and its automatic retry's count and cool-down (**Automatic retry first**, below) |
+| `set-aside` | **Set aside** | where it re-enters (below), the first line of `blockerSummary`, its automatic retry's count and cool-down (**Automatic retry first**, below), and `answered: …` for an answered one (**Needs you**, below) |
 
 **Rungs.** Every task line also shows `rung <name>` when its note has one (§ 2's `rung`).
 
@@ -290,24 +298,25 @@ wins: `auto-retry off` when `autoRetryBudget.autoRetries.value` is 0 (every retr
 closed) shows no count, and `autoRetryClass` alone never shows a count: it is set for every set-aside past the
 verdict's first rule, a refused one included. `auto-retry <autoRetriesUsed>/?` shows only when `autoRetryBudget` is
 null and `autoRetryWhy` starts `auto_retries unresolved`; any other null budget (a question, a human cause, a
-plan-block after a descope, the seeded revise's own, a gate) shows no count, and its reason is in the Needs you
+plan-block after a descope, the seeded revise's own, a gate) shows no count, and its `humanFix` is in the Needs you
 block (below). A cool-down adds `cooling until <autoRetryAfter>`. The route: the live lead (execute § 4.5 step 1.2's
 *Automatic retry*) re-enters a set-aside task at its run or at Integration while `inputs` reads `autoRetry: true`,
 or once its `autoRetryAfter` ends; an `autoRevise: true` row is the seeded revise's, and a gate is never retried. A
-`plan-blocked` one is judged for a descope first (the lead's step 1.2, or repair § 3): a refused descope writes
-nothing, so its verdict can still read `autoRetry: true` while the lead skips it, and only repair asks it. The
-Re-entry column below is the route once the task is Lachy's.
+`plan-blocked` one is judged for a descope first (the lead's step 1.2, or repair § 3): a refused descope is
+recorded: its verdict reads `autoRetry: false` and its `humanFix` reads `decide scope or defer`, and only repair asks
+it. An answered block is never retried (`answerRecorded`). The Re-entry column below is the route once the task is
+Lachy's.
 
 **Set-aside re-entry.** Where a set-aside task goes back in, keyed on `setAsideAt` plus its `inputs`:
 
 | `setAsideAt` | `resumeAt` | `autoRevise` | The note | Re-entry |
 |---|---|---|---|---|
-| `integration` | `integration` | `false` | `blocked`, its latest `## Blocker diagnosis` run starts `integration:` | after the automatic retry: Lachy's decision (repair § 3), then `hand-back` retries Integration only: its branch, plan and review stand; with no `pr:` `hand-back` refuses it: repair's restore or recut |
+| `integration` | `integration` | `false` | `blocked`, its latest `## Blocker diagnosis` run starts `integration:` | after the automatic retry: Lachy's decision (repair § 3), then `hand-back` retries Integration only: its branch, plan and review stand; with no `pr:` `hand-back` refuses it: restore, recut or defer (repair § 4; a MERGED PR is § 3c's) |
 | `run` | `revise` | `true` | `blocked`, a plain rejection: the revise marker, no `revise stopped:`, the last log line `rejected` | none: the lead launches the seeded revise itself (execute § 4.5); a non-empty `prUrlError` waits for Lachy's fix of the note's `pr:` (repair § 3) |
 | `run` | `revise` | `false` | `blocked` with `revise stopped:` | after the automatic retry: Lachy's decision (repair § 3), then `hand-back`, then a seeded revise |
 | `run` | `revise` | `false` | `review-blocked`, the last log line `rejected` | after the automatic retry (which raises one round itself): Lachy's decision (repair § 3), a one-round raise on his word, then `hand-back`, then a seeded revise |
 | `run` | `own` | `false` | `blocked`, `review-blocked` with no `rejected` line, or a code-writing `review` with no `pr:` | after the automatic retry (never for a code-writing `review` with no `pr:`): Lachy's decision (repair § 3), then `hand-back`, then its own call |
-| `run` | `own` | `false` | `plan-blocked`, no `## Scope decision (automatic)` (or one whose `descope_armed:` still stands) | when the notes settle it (an optional part, or work a later task owns), `descope` once (the live lead itself, or repair § 3), then `hand-back`, then its own call; otherwise the automatic retry, then Lachy's decision (repair § 3), then `hand-back`, then its own call |
+| `run` | `own` | `false` | `plan-blocked`, no `## Scope decision (automatic)` (or one whose `descope_armed:` still stands) | when the notes settle it (an optional part, or work a later task owns), `descope` once (the live lead itself, or repair § 3), then `hand-back`, then its own call; a refused descope is recorded and is Lachy's (`decide scope or defer`; never while `descope_armed:` stands, whose armed descope is re-run and handed back); otherwise the automatic retry, then Lachy's decision (repair § 3), then `hand-back`, then its own call |
 | `run` | `own` | `false` | `plan-blocked` with a `## Scope decision (automatic)` and no `descope_armed:` (blocked again after an automatic descope) | Lachy's decision (repair § 3), then `hand-back`, then its own call; never a silent hand-back, never a second descope |
 | `gate` | `own` or `integration` | `false` | `gate-pending` | Lachy's sign-off (and the answer to its `needsHuman` question, if any), then `approve-gates` (execute § 3.7); never `hand-back` |
 
@@ -328,24 +337,22 @@ data (§ 2's per-task keys and each task's `inputs`), so it renders offline too.
 
 - each gate-pending gate, verbatim: `[[<slug>]] sign off gated input: <gate>`, with its `needsHuman` question,
   verbatim, on a `→ asks:` line beneath it when it carries one;
-- each set-aside task at `run` or `integration` whose `inputs` reads `autoRetry: false`, no `autoRetryAfter` and
-  `autoRevise: false` (or `autoRevise: true` with a non-empty `prUrlError`), a code-writing `review` with no `pr:`
-  included: `[[<slug>]] set aside <where> (<status>): <reason> → /thread:repair [[<rollout>]]`, where `<reason>` is
-  `autoRetryWhy`, or `prUrlError` for an `autoRevise: true` row (its why names the seeded revise), with its
-  `needsHuman` question on a `→ asks:` line beneath it. The line reads `[[<slug>]] answered: awaiting /thread:repair`
-  instead when its `## Repair input` already answers its current block (repair § 3's *Answer already recorded*,
-  whatever was asked): `inputs`' `fingerprint` is non-null, and
-  `grep -F '(block <fingerprint>)' ~/repos/obsidian/Work/Tasks/<slug>.md` prints an entry whose stamp (its first
-  word after `- `) is later than every stamp that
-  `grep -E '^(### Run [0-9]+ \(|auto_retry_at:|- descoped \(automatic\) )' ~/repos/obsidian/Work/Tasks/<slug>.md`
-  prints (a run heading's in its parentheses, `auto_retry_at:`'s value, an automatic descope entry's word after
-  `(automatic)`): a run recorded, an automatic retry made or an automatic descope recorded after the answer means
-  the task was re-entered since, so an earlier block's text that comes back is a fresh ask. A hand-back leaves no
-  such stamp, so the entry is spent before it (repair § 3, and execute's "retry [[task]]": its key becomes
-  `(block <fingerprint>; handed back <stamp>)`), which the `-F` read never prints: an identical re-block after it,
-  which writes no new run, is a fresh ask. An entry recorded since the last re-entry counts whatever the verdict's
-  why, a `same feedback as the block last re-entered` block included. A `-` entry never counts, so a set-aside with no fingerprint (a code-writing `review`
-  with no `pr:`) shows as a fresh ask after a pause. The greps are reads, not commands;
+- each set-aside task at `run` or `integration` whose `inputs` reads a non-null `humanFix` and a null
+  `answerRecorded` (ADR 0035: the script names the one act that moves it, so status never re-derives a cause), a
+  code-writing `review` with no `pr:` included:
+  `[[<slug>]] set aside <where> <humanFix.label>: <humanFix.act> → /thread:repair [[<rollout>]]`, `<where>`
+  `at Integration` or `at its run`, with `→ <humanFix.detail>` beneath it and its `needsHuman` question on a
+  `→ asks:` line (for `answer the question` the detail is the question itself, so it shows once, as `→ asks:`). A
+  null `humanFix` is the lead's own re-entry (its seeded revise, its automatic retry now or after a cool-down, its
+  automatic descope, or a recorded `hand-back` answer it hands back), so it is no item;
+- each answered set-aside, read from `answerRecorded` alone: an `awaiting repair` answer, or a `hand-back` one whose
+  `humanFix` is non-null, reads `[[<slug>]] answered: awaiting /thread:repair` (repair still has work to do before
+  the hand-back: its `humanFix` is `finish the recorded answer`); a `left` answer reads
+  `[[<slug>]] answered: left set aside → /thread:repair [[<rollout>]]`. A `hand-back` answer whose `humanFix` is null is no item: its Set aside line reads `answered: the
+  lead hands it back`, or `answered: at the reinstate` under `paused` or `pause_requested` (the lead's *Recorded
+  answer* waits for it). An answer counts only while `answerRecorded` reads it: a re-entry since (a run, an automatic
+  retry, an automatic descope, a new `started:`) or a hand-back, which spends it, makes the block a fresh ask, and its
+  label's `ask <k>` tells it apart;
 - each task whose `inputs` failed, with its failure line.
 
 A set-aside task the RACE / UNVERIFIED, Merged into another base, Merged never marked, PR CLOSED or Possible
@@ -362,7 +369,9 @@ line at all.
 
 **Pauses.** A paused rollout renders as paused, not stalled. `paused` → headline `PAUSED since <stamp>`, list
 what's left as usual, and skip the stalled framing: the pause is intentional, so unlanded tasks are "waiting
-for reinstate", not blockers. `pause_requested` → `pause pending (draining)`: running task calls finish,
+for reinstate", not blockers. With `pausedFor: sign-off` the headline is `AWAITING SIGN-OFF since <stamp>` with
+the waiting tasks (each gate-pending task, its pending gates verbatim; its queued dependants "waiting on it"):
+the run finished everything else and closed, and the rest is Lachy's sign-off. `pause_requested` → `pause pending (draining)`: running task calls finish,
 approved tasks integrate and merge, nothing new starts, and once nothing runs, awaits Integration or
 integrates, the lead's next step stamps `paused:`.
 
@@ -407,10 +416,12 @@ Outside the count: 1 folded, 1 other.
 
 Needs you (4)
   [[proj-gate]] sign off gated input: spend: a paid API — cap USD 5
-  [[proj-revise-stopped]] set aside at its run (blocked): budget: 2/2 used → /thread:repair [[proj-rollout-2026-10-01]]
-  [[proj-plan-blocked]] set aside at its run (plan-blocked): needs a human: the note's ## Needs you question → /thread:repair [[proj-rollout-2026-10-01]]
+  [[proj-revise-stopped]] set aside at its run (blocked, Blocker diagnosis run 1): hand back or defer → /thread:repair [[proj-rollout-2026-10-01]]
+    → budget: 2/2 used
+  [[proj-plan-blocked]] set aside at its run (plan-blocked, Plan-blocked feedback run 1): answer the question → /thread:repair [[proj-rollout-2026-10-01]]
     → asks: Which schema version does the export target?
-  [[proj-no-pr]] set aside at its run (review): approved without a PR: a code-writing review note with no pr: is repair's call → /thread:repair [[proj-rollout-2026-10-01]]
+  [[proj-no-pr]] set aside at its run (review, no PR): hand back or defer → /thread:repair [[proj-rollout-2026-10-01]]
+    → approved without a PR: a code-writing review note with no pr: is repair's call
 
 Drift:
   ⚠ [[proj-awaiting]] PR #4 is MERGED but the note says review → merged, never marked; /thread:repair runs resume
@@ -446,7 +457,9 @@ Keep the whole report scannable: it's a glance, not a wall of text.
    ahead of every reinstate or resume: only its § 3e ack, on Lachy's word, lifts the hold.
 8. `paused` → "reinstate with `/thread:execute [[<rollout>]]`". For drift independent of the pause, add
    `/thread:repair [[<rollout>]]`, which under a pause only records escalations and decisions and defers: it
-   never hands back.
+   never hands back. With `pausedFor: sign-off` → "sign off each waiting gate (or /thread:repair to defer),
+   then /thread:execute [[<rollout>]]; until then it is this repo's one unfinished rollout" (execute's
+   *Reinstate* runs the standing approval first, then `clear-pause`, which refuses while a gate is unsigned).
 9. `pause_requested` → "the live lead drains it; nothing to do." Repair may only record escalations and
    decisions, or defer. Check `/workflows` in the owner session (`<owner tag>`): if no run shows there, that
    session has ended, or no task carries an `owner:`, nothing is draining it, and
@@ -463,21 +476,24 @@ Keep the whole report scannable: it's a glance, not a wall of text.
     required flag) waits on you, not the run: "approve PR #N", and the lead merges on its next tick.
     Meanwhile, the live lead re-enters a set-aside task by itself only when `inputs` reads `autoRevise: true` (the
     seeded revise), `autoRetry: true` or a pending `autoRetryAfter` (its automatic retry, now or once the
-    cool-down ends), or when it descopes a `plan-blocked` task the notes settle, once (execute § 4.5), and restarts
-    it. Every other set-aside task is never re-entered by the live lead itself: it is a Needs you item, or a Drift
-    line routes it. A `plan-blocked` one whose descope the verb refused (exit 3) is repair's too: the refusal
-    writes nothing, so its verdict can still read `autoRetry: true` while the lead skips it. One plan-blocked again
+    cool-down ends), when it descopes a `plan-blocked` task the notes settle, once, or when `answerRecorded` holds
+    a `hand-back` answer and `humanFix` is null (its *Recorded answer*, execute § 4.5), and restarts it. Every other
+    set-aside task is never re-entered by the live lead itself, except a recorded `hand-back` answer (`humanFix`
+    null), which its *Recorded answer* hands back: it is a Needs you item, or a Drift line routes it. A `plan-blocked`
+    one whose descope the verb refused (exit 3) is repair's too: the refusal is recorded, so its verdict reads
+    `autoRetry: false` and its `humanFix` reads `decide scope or defer`. One plan-blocked again
     after an automatic descope (a `## Scope decision (automatic)`, no `descope_armed:`) is always Lachy's decision,
     never a silent hand-back. So, with a Needs you item, a set-aside task the Needs you block leaves to its Drift
     line, or a `plan-blocked` set-aside, add `/thread:repair [[<rollout>]]`: its live-queue mode asks you those
     and hands each back on your answer, records a gate sign-off and asks the descope the verb refused or the block
     after a descope, without touching the run.
 11. Any drift flag but a Rung drift, a refused ladder, an unresolved ceiling or refused rollout settings, or a
-    set-aside task that is a Needs you item or a `plan-blocked` one (repair § 3 judges its descope first) →
-    `/thread:repair [[<rollout>]]`.
+    set-aside task that is a Needs you item (a non-null `humanFix`, an `awaiting repair` or `left` answer included)
+    or a `plan-blocked` one (repair § 3 judges its descope first) → `/thread:repair [[<rollout>]]`.
 12. Awaiting Integration, a handed-back running task (no `owner:`), an `autoRevise: true` set-aside, an
     `autoRetry: true` or cooling set-aside (the lead's automatic retry re-enters it; a `plan-blocked` one is
-    action 11's), or a free slot, with no lead live → `/thread:execute [[<rollout>]]`.
+    action 11's), a recorded `hand-back` answer whose `humanFix` is null (`answerRecorded`: the lead's *Recorded
+    answer* hands it back), or a free slot, with no lead live → `/thread:execute [[<rollout>]]`.
 13. Nothing started → `/thread:execute [[<rollout>]]` to start.
 
 **A refused ladder.** The Ladder refused flag reorders nothing: whichever action matches, from 7 to 13, gets

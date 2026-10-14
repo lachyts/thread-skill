@@ -23,6 +23,8 @@ None is re-implemented here. The execution-fit test
 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`) decides the lane, hard, not as a
 preference.
 
+**Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## Runtime boundary
 
 The project audit, reshuffle, steering and task-note debrief are shared. Autonomous batches use
