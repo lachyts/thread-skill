@@ -883,14 +883,14 @@ test('decide: a done task at today\'s path stays byte-identical and the new task
 
 // ---- close ---------------------------------------------------------------------------------------------------------------
 
-test('close: exactly one line with quiet computed; a second close is refused; --cadence 14 is written, 10 refused, none absent', (t) => {
+test('close: exactly one line with quiet and cadence computed; a second close is refused; --cadence is no flag (the rule sets it)', (t) => {
   const h = setup(t)
   const sp = fakeSpan(h, RID(1), ['a'], { entries: { a: { breached: ['setAsideRate'], breachCounts: false } } })
   const r = ok(h, ['close', '--span', sp])
   assert.match(r.stdout, /^closed r-\S+: quiet, sightings 0, /)
   const [l] = rlines(h)
-  assert.deepEqual([l.kind, l.id, l.since, l.until, l.rollouts, l.escapesOnly, l.quiet, 'cadence' in l, 'decisionTask' in l],
-    ['reflection', RID(1), '2026-09-03T14:00:00.000Z', '2026-09-10T14:00:00.000Z', ['a'], [], true, false, false])
+  assert.deepEqual([l.kind, l.id, l.since, l.until, l.rollouts, l.escapesOnly, l.quiet, l.cadence, 'decisionTask' in l],
+    ['reflection', RID(1), '2026-09-03T14:00:00.000Z', '2026-09-10T14:00:00.000Z', ['a'], [], true, 7, false])
   const again = reflect(h, ['close', '--span', sp])
   assert.equal(again.status, 2)
   assert.match(again.stderr, /a second close is refused/)
@@ -899,9 +899,10 @@ test('close: exactly one line with quiet computed; a second close is refused; --
     assert.equal(x.status, 2, w[0])
     assert.match(x.stderr, /is closed: nothing written/, w[0])
   }
-  ok(h, ['close', '--span', fakeSpan(h, RID(2), ['a']), '--cadence', '14'])
-  assert.equal(rlines(h).at(-1).cadence, 14)
-  assert.equal(reflect(h, ['close', '--span', fakeSpan(h, RID(3), ['a']), '--cadence', '10']).status, 2)
+  const flag = reflect(h, ['close', '--span', fakeSpan(h, RID(2), ['a']), '--cadence', '14'])
+  assert.equal(flag.status, 2)
+  assert.match(flag.stderr, /unrecognized arguments: --cadence 14/)
+  assert.equal(rlines(h).length, 1, 'nothing written')
 })
 
 // Every writer refuses a closed Reflection, so close refuses while decide or knobs still has a line to write.
