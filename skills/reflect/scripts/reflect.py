@@ -126,15 +126,16 @@ captured; launch cc-thread; bug_key; fixes: when --fixes names landed work; no s
 and `## Resume prompt`. The file goes first, then one `proposal` line per (Reflection, key): altitude bug, vaultTask,
 filed, and auto: true only when filed. A repeat call prints the first outcome.
 
-knobs. Once, after step 14's tune.py calls: one `proposal` line per (Reflection, knob_key) over the read rollouts'
-score.py proposals (none for withheld entries, escapes-only rollouts or a rollout with no repo; a partial rollout's
-are held "partial window"). from, to and ranAt are the land candidate's, else the newest proposer's; rollouts names
-every proposer. landed needs a non-voided tunings line with auto: true, this reflection, the same repo (case ignored),
-its rollout among the line's rollouts, no reverts, and an applied entry with the same key and rule and sign(to -
-from) == direction; then auto: true and tuning: <its id>. An unlanded line carries held: span's reason, or
-"eligible: tune.py --auto was not run". Each revert this Reflection wrote gets its own landed line, id knob_key(repo,
-key, "revert:<rule>", -direction), with reverts and tuning. Every line passes run_record.check() before any is
-written (a refusal is exit 2, nothing written); then each (Reflection, id) not yet in reflections.jsonl is written.
+knobs. Once, after step 14's tune.py calls (its lines are knob_lines(), which close re-reads): one `proposal` line per
+(Reflection, knob_key) over the read rollouts' score.py proposals (none for withheld entries, escapes-only rollouts or a
+rollout with no repo; a partial rollout's are held "partial window"). from, to and ranAt are the land candidate's, else
+the newest proposer's; rollouts names every proposer. landed needs a non-voided tunings line with auto: true, this
+reflection, the same repo (case ignored), its rollout among the line's rollouts, no reverts, and an applied entry with
+the same key and rule and sign(to - from) == direction; then auto: true and tuning: <its id>. An unlanded line carries
+held: span's reason, or "eligible: tune.py --auto was not run". Each revert this Reflection wrote gets its own landed
+line, id knob_key(repo, key, "revert:<rule>", -direction), with reverts and tuning. Every line passes run_record.check()
+before any is written (a refusal is exit 2, nothing written); then each (Reflection, id) not yet in reflections.jsonl is
+written.
 
 decide. Rule items are the recurring open Watches. --decisions is a JSON object {<watch id>: {why, amends}}; an entry
 naming a Watch that is not recurring, closed or unknown is exit 2; a recurring Watch it leaves out is still an item
@@ -153,11 +154,15 @@ append_section appends at the end of the body, where an H3 would fall inside `##
 (altitude rule, vaultTask) per (Reflection, rule item). It prints the slug, the scheduled date (and the old one when
 moved) and new | appended.
 
-close. Exactly one `reflection` line per Reflection (a second close is exit 2): since, until, rollouts, escapesOnly,
+close. Exactly one `reflection` line per Reflection (a second close is exit 2). The writers refuse a closed Reflection,
+so a skipped step could never be made up: first close checks that knobs and decide ran, and is exit 2 naming the step,
+nothing written, when a line knob_lines() gives (a span proposal with a knob_key, or a revert tune.py wrote for this
+Reflection) is not in reflections.jsonl (`run knobs`), or when a recurring Watch (the Watch reader's, which needs a line
+from this Reflection) has no rule `proposal` line from it (`run decide`). The line: since, until, rollouts, escapesOnly,
 counts (sightings: Watch ids with a line from this Reflection; newWatches: those that are new; rules, bugs, filed,
 knobs, landed and reverted from its proposal lines; breaches: distinct (rollout, Guardrail) pairs over breachCounts
-rollouts), quiet (newWatches, rules, bugs and breaches all 0), decisionTask when a rule line names one, and cadence
-when --cadence is given (absent reads as 7). The writers watch, bug, knobs and decide refuse a closed Reflection.
+rollouts), quiet (newWatches, rules, bugs and breaches all 0), decisionTask when a rule line names one, and cadence when
+--cadence is given (absent reads as 7). The writers watch, bug, knobs and decide refuse a closed Reflection.
 
 rung. The ladder (ladder.py's load()): it prints {rung, model "opus", effort, judge, review, top, topModel}, the own
 values of the highest opus rung, with a stderr note when the top rung is not opus (`rung: the ladder's top rung
@@ -166,7 +171,8 @@ values of the highest opus rung, with a stderr note when the top rung is not opu
 
 Exit codes: 0 done (exists and no-op answers included); 1 a file cannot be read or written (the events directory,
 tunings.jsonl, reflections.jsonl, --out, a note); 2 usage or a refusal (a path that exists, a watch call that leaves
-out a recorded rollout, a raise on a closed or unknown Watch, a closed Reflection, a run_record refusal); 3 no tz data,
+out a recorded rollout, a raise on a closed or unknown Watch, a closed Reflection, a close before knobs or decide ran,
+a run_record refusal); 3 no tz data,
 or no tomllib for `rung` over a present ladder file.
 """
 from __future__ import annotations
@@ -1307,12 +1313,10 @@ def landed_line(tunings, rid, repo, key, rule, direction, proposers):
     return None
 
 
-def cmd_knobs(a):
-    span = read_span(a.span)
+def knob_lines(span, tunings):
+    """The `proposal` lines (altitude knob) `knobs` writes for span's Reflection, in order: one per knob_key over the
+    read rollouts' proposals, then one per entry of each revert tune.py wrote for it. close checks each is written."""
     rid = span["reflection"]
-    lines = read_reflections()
-    refuse_closed(lines, rid)
-    tunings = read_tunings()
     knobs = span.get("knobs") or {}
     land = {x["id"]: x for x in knobs.get("land") or []}
     held = {}
@@ -1360,6 +1364,15 @@ def cmd_knobs(a):
                         "rollouts": [d.get("rollout")], "repo": d["repo"], "key": e["key"], "rule": e["rule"],
                         "direction": direction, "from": e["from"], "to": e["to"], "ranAt": e["ranAt"], "landed": True,
                         "auto": True, "reverts": d["reverts"], "tuning": d["id"]})
+    return out
+
+
+def cmd_knobs(a):
+    span = read_span(a.span)
+    rid = span["reflection"]
+    lines = read_reflections()
+    refuse_closed(lines, rid)
+    out = knob_lines(span, read_tunings())
     for f in out:
         try:
             RR.check(None, "proposal", None, f)
@@ -1563,6 +1576,20 @@ def cmd_close(a):
 
     def ids(pred):
         return {d.get("id") for d in mine if pred(d)}
+
+    # every writer refuses a closed Reflection, so a step skipped now is lost for good: name it, write nothing
+    missing = []
+    unknobbed = sorted({f["id"] for f in knob_lines(span, read_tunings())} - ids(lambda d: d.get("altitude") == "knob"))
+    if unknobbed:
+        missing.append("knob %s ha%s no knob proposal line: run knobs" % (", ".join(unknobbed),
+                                                                         "s" if len(unknobbed) == 1 else "ve"))
+    ruled = ids(lambda d: d.get("altitude") == "rule")
+    unruled = sorted(w["id"] for w in ws.values() if w["recurring"] and w["id"] not in ruled)
+    if unruled:
+        missing.append("Watch %s recur%s in this Reflection with no rule proposal line: run decide"
+                       % (", ".join(unruled), "s" if len(unruled) == 1 else ""))
+    if missing:
+        raise Stop("Reflection %s is not closed: %s" % (rid, "; ".join(missing)), 2)
 
     knob = [d for d in mine if d.get("altitude") == "knob"]
     breaches = set()

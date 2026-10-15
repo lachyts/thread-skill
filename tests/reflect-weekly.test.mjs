@@ -763,6 +763,52 @@ test('close: exactly one line with quiet computed; a second close is refused; --
   assert.equal(reflect(h, ['close', '--span', fakeSpan(h, RID(3), ['a']), '--cadence', '10']).status, 2)
 })
 
+// Every writer refuses a closed Reflection, so close refuses while decide or knobs still has a line to write.
+test('close: a recurring Watch with no rule line is exit 2 naming decide, nothing written; once decide runs, close writes', (t) => {
+  const h = setup(t)
+  const [wid] = ids(h, [['w', RULE, SHAPE]])
+  const sp1 = fakeSpan(h, RID(1), ['a'])
+  ok(h, watchArgs(sp1, ['a']))
+  ok(h, ['close', '--span', sp1])
+  // R2 sees W in b: the cycle {a, b} recurs, a rule item only in a Reflection that sights it
+  const sp2 = fakeSpan(h, RID(2), ['b'])
+  ok(h, watchArgs(sp2, ['b']))
+  const before = bytes(reflectionsFile(h))
+  const r = reflect(h, ['close', '--span', sp2])
+  assert.equal(r.status, 2)
+  assert.equal(r.stderr, `reflect: Reflection ${RID(2)} is not closed: Watch ${wid} recurs in this Reflection with no rule proposal line: run decide\n`)
+  assert.deepEqual(bytes(reflectionsFile(h)), before, 'nothing written')
+  assert.equal(reflect(h, ['close', '--span', sp2, '--dry-run']).status, 2, 'a dry run is refused alike')
+  ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-17T09:00+10:00'])
+  ok(h, ['close', '--span', sp2])
+  const c = rlines(h).at(-1)
+  assert.deepEqual([c.kind, c.id, c.counts.rules, c.quiet], ['reflection', RID(2), 1, false])
+})
+
+test('close: a span knob or a revert tune.py wrote with no knob line is exit 2 naming knobs; both missing steps named at once', (t) => {
+  const h = setup(t)
+  const [kid, kidRevert, wid] = ids(h, [['k', 'o/r', 'parallel_ceiling', 'slot-bound-raise', 1], ['k', 'o/r', 'max_review_rounds', 'revert:review-rounds-raise', -1],
+    ['w', RULE, SHAPE]])
+  const entries = { a: { window: { activeEnd: '2026-09-05T00:00:00.000Z' }, proposals: [{ key: 'parallel_ceiling', rule: 'slot-bound-raise', direction: 1, from: 3, to: 4, ranAt: 3, knob_key: kid }] } }
+  const sp = fakeSpan(h, RID(1), ['a', 'b'], { entries, knobs: { revert: [], land: [], held: [{ id: kid, rollout: 'a', reason: 'agreement 1 of 3' }] } })
+  fs.writeFileSync(tuningsFile(h), `${JSON.stringify({ v: 2, ts: '2026-09-08T01:00:00.000Z', host: 'h', rollout: 'a', task: null, kind: 'tuning', id: 't-rev', repo: 'o/r',
+    window: { since: '2026-09-07T00:00:00.000Z', until: '2026-09-08T00:00:00.000Z' }, scores: {}, auto: true, reflection: RID(1), reverts: 't-old',
+    applied: [{ key: 'max_review_rounds', from: 5, to: 4, ranAt: 5, rule: 'revert:review-rounds-raise', evidence: 'e', agreeing: 0 }] })}\n`)
+  ok(h, watchArgs(sp, ['a', 'b']))
+  const both = reflect(h, ['close', '--span', sp])
+  assert.equal(both.status, 2)
+  const knobsMsg = `knob ${[kid, kidRevert].sort().join(', ')} have no knob proposal line: run knobs`
+  assert.equal(both.stderr, `reflect: Reflection ${RID(1)} is not closed: ${knobsMsg}; Watch ${wid} recurs in this Reflection with no rule proposal line: run decide\n`)
+  ok(h, ['decide', '--span', sp, '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00'])
+  const one = reflect(h, ['close', '--span', sp])
+  assert.equal(one.stderr, `reflect: Reflection ${RID(1)} is not closed: ${knobsMsg}\n`)
+  assert.equal(rlines(h).filter((l) => l.kind === 'reflection').length, 0)
+  ok(h, ['knobs', '--span', sp])
+  ok(h, ['close', '--span', sp])
+  const c = rlines(h).at(-1)
+  assert.deepEqual([c.kind, c.counts.knobs, c.counts.landed, c.counts.reverted, c.counts.rules], ['reflection', 1, 0, 1, 1])
+})
+
 // ---- rung ------------------------------------------------------------------------------------------------------------------
 
 const hasTomllib = spawnSync('python3', ['-c', 'import tomllib']).status === 0

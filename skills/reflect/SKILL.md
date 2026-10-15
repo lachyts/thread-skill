@@ -338,7 +338,9 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span /tm
 ```
 
 Exactly once, quiet weeks included: its line is the Reflection's record, and its `quiet` feeds the cadence (ADR
-0037 d6). A quiet week writes only record lines, never a vault task.
+0037 d6). A quiet week writes only record lines, never a vault task. Every writer refuses a closed Reflection, so
+`close` refuses first (exit 2, nothing written) while step 14's `knobs` or step 15's `decide` has a line to write:
+run the step its stderr line names, then close.
 
 ### 17. Report, then tidy
 
