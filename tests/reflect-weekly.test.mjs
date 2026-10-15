@@ -205,6 +205,57 @@ test('span: every friction kind, a Human fix as movedBy unrecorded with its task
   assert.ok(s.cannotShow.some((c) => c.startsWith('[[fixed]] (demo) moved on with no recorded act')), JSON.stringify(s.cannotShow))
 })
 
+// score.py's handsOff lists landed tasks only: span reads the asks from the record, so an act on a task still waiting
+// at until, or on one that lands next week, is an item in the week it happened, and only then.
+test('span: an ask on a task that has not landed by until is an item, read straight from the record, in its week only', (t) => {
+  const h = setup(t)
+  const N1 = (d, hm) => `2026-09-${d}T${hm}:00Z` // a UTC stamp in the week after the window, d in 10..16
+  emitAll(h, 'demo', byTs([
+    ...life('landed', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] }),
+    [W(4, '00:20'), 'answer-recorded', 'landed', { answerKind: 'needs-you' }],
+    // waiting: ready, never merged
+    ...life('waiting', W(5, '00:00'), W(5, '01:00')),
+    [W(5, '01:10'), 'answer-recorded', 'waiting', { answerKind: 'decision', form: 'hand-back' }],
+    [W(5, '01:20'), 'gate-signed', 'waiting', { standing: false, gates: 2 }],
+    [W(5, '01:25'), 'gate-signed', 'waiting', { standing: true, gates: 1 }], // a Standing approval: no ask
+    [W(5, '01:30'), 'handed-back', 'waiting', { via: 'retry', arm: 'run' }],
+    [W(5, '01:35'), 'handed-back', 'waiting', { via: 'descope', arm: 'run' }], // automatic: no ask
+    [W(5, '01:40'), 'race-decided', 'waiting', { mark: 'RACE', by: 'resume' }],
+    [W(5, '01:50'), 'hold-started', 'waiting', { hold: 'merge' }],
+    [W(5, '01:55'), 'hold-started', 'waiting', { hold: 'merge' }], // the same hold, still open
+    [W(5, '02:00'), 'hold-ended', 'waiting', { hold: 'merge' }],
+    [W(5, '02:10'), 'hold-started', 'waiting', { hold: 'merge' }],
+    [W(5, '02:20'), 'hold-started', 'waiting', { hold: 'race' }], // a RACE hold is no act
+    // later: asked this week, landed next week
+    ...life('later', W(6, '00:00'), W(6, '01:00')),
+    [W(6, '00:30'), 'answer-recorded', 'later', { answerKind: 'decision', form: 'hand-back' }],
+    [N1(11, '00:00'), 'lane-taken', 'later', {}],
+    [N1(11, '00:10'), 'lane-freed', 'later', { release: 'merge', path: 'lead', triggers: [], conflict: false }],
+    [N1(11, '00:10'), 'merged', 'later', { pr: 9 }],
+  ]))
+  rolloutNote(h, 'demo')
+  taskNote(h, 'waiting', { body: '## Needs you\n\nWhich colour?' })
+  const asks = (s) => entryOf(s, 'demo').friction.filter((x) => x.kind === 'ask').map((x) => [x.task, x.act, x.at])
+  const s = span(h)
+  assert.deepEqual(asks(s), [
+    ['landed', 'answer', '2026-09-04T00:20:00.000Z'],
+    ['waiting', 'answer', '2026-09-05T01:10:00.000Z'],
+    ['waiting', 'signOff', '2026-09-05T01:20:00.000Z'],
+    ['waiting', 'retry', '2026-09-05T01:30:00.000Z'],
+    ['waiting', 'raceDecided', '2026-09-05T01:40:00.000Z'],
+    ['waiting', 'mergeHold', '2026-09-05T01:50:00.000Z'],
+    ['waiting', 'mergeHold', '2026-09-05T02:10:00.000Z'],
+    ['later', 'answer', '2026-09-06T00:30:00.000Z'],
+  ])
+  const w = entryOf(s, 'demo').friction.find((x) => x.kind === 'ask' && x.task === 'waiting' && x.act === 'answer')
+  assert.deepEqual([w.detail, w.needsYou], ['decision answer (hand-back)', 'Which colour?'])
+  const sc = JSON.parse(fs.readFileSync(entryOf(s, 'demo').score, 'utf8'))
+  assert.deepEqual(sc.handsOff.tasks.map((x) => x.task), ['landed'], 'the Hands-off rate lists the landed task only')
+  // next week: later lands, and its ask (before since) is not read again
+  const s2 = span(h, [], { since: UNTIL, until: '2026-09-17T00:00+10:00' })
+  assert.deepEqual(asks(s2), [])
+})
+
 test('span: a missing note is scored by slug and flagged; without --fold the events and tasks dirs are unchanged', (t) => {
   const h = setup(t)
   emitAll(h, 'orphan', byTs(life('a', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))

@@ -251,7 +251,8 @@ For each rollout, read its `friction` items, of seven kinds (`ask`, `set-aside`,
   credential or an irreversible action, schedule § 3.5 (Detect human/release gates) or schedule § 3.6 (Sweep for
   gated-input smell), or `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § R3 (Grill the unclear), item (c),
   asked ahead. An ask whose `askedAhead` is true was asked at the top and still came back: trace why the answer
-  did not hold.
+  did not hold. span reads each ask from the record in the week it happened, on a landed task or one still waiting
+  (the Hands-off rate counts landed tasks only).
 - A `set-aside` is traced by its stage and `reasonClass` to the rule that stopped it: execute § 3.5 (the plan
   gate), execute § 3.7 (gated inputs, ADR 0034), execute § 4.5 (the queue, ADR 0030) or execute § 6.5 (Needs
   you), and by its `movedBy` to what moved it on.

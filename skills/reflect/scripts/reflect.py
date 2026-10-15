@@ -53,9 +53,14 @@ r-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>. It reads every non-reserved <slug>.jsonl in th
 - breachCounts: true only for a read, non-partial rollout whose window.activeEnd falls in [since, until], so a
   Guardrail breach counts in the week its run ends. A partial rollout's breaches are reported, not counted.
 - friction, each item {kind, rollout, task, at, ...}:
-  ask       score.py's handsOff acts (answer, signOff, retry, mergeHold, raceDecided) in the window, and each
-            git-env hold; with askedAhead (the task note holds a `## Decisions (asked ahead` section or an `asked
-            ahead at schedule` gate) and needsYou (its `## Needs you`, at most 600 characters).
+  ask       each human act in the window, read straight from the record for every task, landed or not (score.py's
+            handsOff lists the landed tasks' acts only, so an act on a task still waiting at until, or on one that
+            lands after it, would be lost): answer-recorded (answer), gate-signed standing false (signOff),
+            handed-back via retry (retry) and race-decided (raceDecided), each with score.py's human_act() detail;
+            and each merge hold (mergeHold) and git-env hold (gitEnvHold, task null), at the hold-started that opens
+            it (holds paired as score.py pairs them). Each carries askedAhead (the task note holds a `## Decisions
+            (asked ahead` section or an `asked ahead at schedule` gate) and needsYou (its `## Needs you`, at most 600
+            characters).
   set-aside a set-aside line in the window: stage, reasonClass, setAsideAt, taskNote (Work/Tasks, then Archive, or
             null) and movedBy, the first later event of auto-retry, handed-back (with its via), answer-recorded,
             gate-signed, race-decided, carried, slot-taken, lane-taken or merged; `unrecorded` when a slot-taken,
@@ -203,7 +208,6 @@ REPAIR_RE = re.compile(r"^- (\d{4}-\d\d-\d\d) repair:\s*(.+)$", re.I)
 UNDATED_REPAIR_RE = re.compile(r"^-\s+(?:(\S+)\s+)?repair:", re.I)
 SLUG_WORDS_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+){0,4}\Z")
 ASKED_AHEAD_RE = re.compile(r"^## Decisions \(asked ahead|asked ahead at schedule", re.M)
-ACT_NAMES = ("answer", "signOff", "retry", "mergeHold", "raceDecided")
 MOVERS = ("auto-retry", "handed-back", "answer-recorded", "gate-signed", "race-decided", "carried", "slot-taken",
           "lane-taken", "merged")
 UNRECORDED_MOVERS = ("slot-taken", "lane-taken", "merged")
@@ -231,6 +235,9 @@ WIKILINK_OPEN_RE, _wikilink_slug = REC.WIKILINK_OPEN_RE, REC._wikilink_slug
 LANDED = RP.LANDED
 REPAIR_SHAPES = ((None, "race-decided"), ("possible PR-less merge", "escalated"), ("merged, never marked", "flipped"),
                  ("git-env trip", "git-env"), ("raised to", "raise"), ("deferred:", "deferred"))
+# the holds a hold-started opens that are an ask: (act, detail)
+HOLD_ASKS = {"merge": ("mergeHold", "a merge hold (%s)" % SCORE.MERGE_HOLD_DETAIL),
+             "git-env": ("gitEnvHold", "a git-env hold: an unacked canary trip")}
 
 
 class Stop(Exception):
@@ -705,7 +712,7 @@ class Span:
             entry["flags"].append("score.py exited %s: %s" % (rc, first_line(err)))
         if sc is not None:
             self.scored(entry, sc, since, until)
-        self.friction(entry, lines, sc, since, until)
+        self.friction(entry, lines, since, until)
         for f in entry["flags"]:
             self.flag("[[%s]]: %s" % (slug, f))
         return entry, sc
@@ -737,18 +744,33 @@ class Span:
         p = self.vault.find(task) if task else None
         return str(p) if p else None
 
-    def friction(self, entry, lines, sc, since, until):
+    def friction(self, entry, lines, since, until):
         slug, items = entry["rollout"], entry["friction"]
-        # ask: score.py's handsOff acts, and every git-env hold
-        for t in ((sc or {}).get("handsOff") or {}).get("tasks") or []:
-            for act in t.get("acts") or []:
-                at = _ts({"ts": act.get("at")})
-                if at is None or not since <= at <= until or act.get("kind") not in ACT_NAMES:
-                    continue
-                items.append(self.ask(slug, t.get("task"), act.get("at"), act.get("kind"), act.get("detail")))
+        # ask: straight from the record, for every task, landed or not (score.py's handsOff lists landed tasks only):
+        # each human act line (score.py's human_act) and each hold a hold-started opens (paired as score.py pairs them)
+        holding = set()
         for t, _n, d in lines:
-            if d.get("kind") == "hold-started" and d.get("hold") == "git-env" and since <= t <= until:
-                items.append(self.ask(slug, d.get("task"), fmt(t), "gitEnvHold", "a git-env hold: an unacked canary trip"))
+            if t > until:
+                break
+            kind = d.get("kind")
+            task = d.get("task") if isinstance(d.get("task"), str) else None
+            hold = d.get("hold") if isinstance(d.get("hold"), str) else None
+            inside = since <= t
+            if kind == "hold-started" and hold in HOLD_ASKS:
+                if (hold, task) not in holding:
+                    holding.add((hold, task))
+                    if inside:
+                        items.append(self.ask(slug, task, fmt(t), *HOLD_ASKS[hold]))
+            elif kind == "hold-ended":
+                holding.discard((hold, task))
+            elif kind == "lane-freed" and task:
+                holding.discard(("merge", task))
+            elif kind == "carried" and task and d.get("rollout") == d.get("from"):
+                holding = {k for k in holding if k[1] != task}
+            elif inside and task and kind in SCORE.ACT_KINDS:
+                act = SCORE.human_act(kind, d)
+                if act is not None:
+                    items.append(self.ask(slug, task, fmt(t), act[0], act[1]))
         for i, (t, n, d) in enumerate(lines):
             if not since <= t <= until:
                 continue
