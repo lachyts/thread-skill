@@ -36,7 +36,10 @@ completed by preparing one. Never create a second convergence engine.
 ## Scope
 
 Reads/writes `~/repos/obsidian/Work/Tasks/`, makes `gh`/`git` calls against the target repo, and drives
-`/thread:execute`'s queue loop. Merges only ever happen through execute's merge step (`merge-task.sh`).
+`/thread:execute`'s queue loop, and, at a close-out's finish (§ 1), `close-score.py`: it writes fold-journals'
+`call-journal` lines and one `tunings.jsonl` line under the events directory, outside the vault, and reads every
+note under `Work/Tasks/` (Archive included) and the Project root's git, read-only and never fetched. Merges only
+ever happen through execute's merge step (`merge-task.sh`).
 
 ## Invocation forms
 
@@ -71,10 +74,14 @@ version stop's `--regenerate` would only meet schedule's refusal again.
     `interrupted` line finishes that supersede. Stop.
   - N has run → finish step 7.5's close-out, **on Lachy's confirmation**, and only when status counts no
     running, integrating, awaiting-Integration, queued or set-aside task here (`carry` moved every such task;
-    one still here would be stranded, so show it and stop). Stamp `status: done` and
-    `superseded_by: "[[N]]"` on this rollout note, then `mkdir -p ~/repos/obsidian/Work/Tasks/Archive/Rollouts/`
-    and a plain `mv` of the note into it. A same-named file already there → skip the move and report the
-    collision. Write nothing else. Stop, and point at `/thread:status [[N]]`.
+    one still here would be stranded, so show it and stop). Run
+    `python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/close-score.py --rollout <this rollout note> --close supersede`
+    first, with the Bash tool's `timeout: 600000` (ADR 0037 d4; report its line; a non-zero exit is reported and
+    the close-out goes on), then stamp `status: done` and `superseded_by: "[[N]]"` on this rollout note, then
+    `mkdir -p ~/repos/obsidian/Work/Tasks/Archive/Rollouts/` and a plain `mv` of the note into it. A same-named
+    file already there → skip the move and report the collision. Write nothing else in the vault: close-score's
+    `call-journal` lines and its one `tunings.jsonl` line, both under the events directory, are its only other
+    writes. Stop, and point at `/thread:status [[N]]`.
 - `protocol_version` absent, `2` or `3` → execute § 2's remedy: hard-pause it if a session is running it, then
   `/thread:schedule <project> --regenerate`. Stop.
 - any other value except `5` → "unsupported protocol version <N>; the queue reads protocol_version: 5". Stop.

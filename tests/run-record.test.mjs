@@ -527,8 +527,17 @@ test('a tuning with a null activeStart and activeEnd (no running time) is record
   assert.equal(lines(path.join(ev(home), 'tunings.jsonl')).length, 1)
 })
 
+// A close line (p21-6, ADR 0037 d4): close-score.py's record-only line carries the close that wrote it.
+test('a tuning with close completion or supersede is recorded with it', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ applied: [], close: 'completion' }))], { env: EV(home) })
+  emitOk(home, ['--rollout', 's', '--kind', 'tuning', '--json', JSON.stringify(tuning({ id: 't-2', applied: [], close: 'supersede' }))], { env: EV(home) })
+  assert.deepEqual(lines(path.join(ev(home), 'tunings.jsonl')).map((l) => [l.rollout, l.close]), [['r', 'completion'], ['s', 'supersede']])
+})
+
 const { merges: _m, ...SCORES_LESS } = SCORES
 const TUNING_REFUSALS = [
+  ['a close outside the enum', 'r', tuning({ applied: [], close: 'weekly' })],
   ['no rollout', null, tuning()],
   ['scores missing a key', 'r', tuning({ scores: SCORES_LESS })],
   ['scores with an extra key', 'r', tuning({ scores: { ...SCORES, speed: 1 } })],

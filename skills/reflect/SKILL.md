@@ -43,9 +43,13 @@ write, no git write, no PR.
 reflect on [[chorus-rollout-2026-10-01]] since Tue 9am until Wed 6pm   # one span (a before/after split)
 ```
 
-A Reflection runs at completion (execute's completion ceremony offers it), mid-run (the slow tail shows, because
-running time ends at the Reflection, not at the last merge), or on a superseded or dropped rollout (its record
-alone is enough).
+Every completion ceremony and every supersede (schedule step 7.5, § 0's `file` finish, repair's close-out) records
+the script half on its own through `close-score.py` (ADR 0037 d4): fold, settings, score, and one `close` line in
+`tunings.jsonl` that tune.py writes, one per rollout, with no model reading and no picks. A dropped rollout has no
+close path, and the weekly Reflection covers it. A by-hand Reflection still runs at completion on Lachy's word,
+mid-run (the slow tail shows, because running time ends at the Reflection, not at the last merge), or on a
+superseded or dropped rollout (its record alone is enough). It writes its own line through tune.py, which the close
+line never blocks.
 
 ## Skill flow
 
