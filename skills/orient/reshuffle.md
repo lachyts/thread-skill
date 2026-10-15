@@ -211,6 +211,12 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      cleared, so the task belongs to no rollout until schedule stamps it. A task moving out of a phase leaves its entry in that phase's
      `## Build sequence`, struck through with a pointer (`~~p3-2~~ moved to [[<new-slug>]]`), so
      its ordinal stays used.
+   - **A task that fixes landed work** (any task R5.2 writes: new, unbundled, decomposed, phased, moved or respecced)
+     carries `fixes: ["[[<landed task>]]"]`, naming the task that landed: the note whose PR merged, or a
+     member schedule step 4.5 folded, accepted because it resolves through its `merged_into:`. R3 (b)
+     confirms the slug when it is unclear. An existing `fixes:` survives the rename. The key's rule is
+     `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` § 4's: never a phase, a rollout or planned
+     follow-on work.
    - Don't set `rollout:` or `scope:`: schedule stamps them (`scope:` inferred from `touches:`).
    - **Answers from R3 (c)** are written exactly as schedule step 7 does: `spend_approval_usd: <N>`
      (whole US dollars) when the spend answer is above the standing approval; for any spend amount,
@@ -224,14 +230,16 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
    functions a script can't call), excluding `.git`, `.obsidian`, `.smart-env` and `.trash`: a
    plain vault-wide rewrite corrupts Smart Connections' `.smart-env/*.ajson` cache. In each hit,
    rewrite every old→new pair in one edit. A link is `[[old-slug` followed by `]]`, `|`, `\|` or
-   `#`, so aliased and heading links are caught and `[[old-slug-more]]` is not. Rewrite inside the
+   `#`, so aliased and heading links are caught and `[[old-slug-more]]` is not, and the rewrite
+   covers a `fixes:` wikilink in frontmatter too. Rewrite inside the
    vault only. Links outside it (`~/Projects/**/THREAD.md`, `~/repos/workspaces/_shared/threads/`,
    the project repo's `THREAD.md` and `docs/handoffs/`) are found by the same search and **listed
    in the report** for Lachy, never edited: they are committed files in other repos.
 4. **Other dispositions.** An unbundled brain dump gets an `## Unbundled into` list of its tasks;
    it is marked `status: done` only when every idea in it was unbundled. If the grill stopped
-   first, it stays open with the unreached ideas in its body, for the next reshuffle. A
-   merged-away item gets `status: dropped` and `Merged into [[<survivor>]]`; a dropped item gets
+   first, it stays open with the unreached ideas in its body, for the next reshuffle. In a merge
+   the survivor first takes the union of the merged items' `fixes:`, then each merged-away item
+   gets `status: dropped` and `Merged into [[<survivor>]]`; a dropped item gets
    `status: dropped` and a one-line reason. A re-homed item's `projects:` is switched. A
    pulled-in item is renamed into the target's roadmap, its `projects:` switched to the target,
    and its source phase note gains a pointer line

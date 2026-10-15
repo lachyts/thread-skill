@@ -5,7 +5,11 @@ python >= 3.8, stdlib only. Called by skills/reflect/SKILL.md (step 4) as:
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/score.py --rollout <slug|[[slug]]|note path> \\
         [--note <rollout note>] [--since TS] [--until TS] [--settings <rollout-settings JSON file|->] \\
-        [--repo-slug owner/name] [--out F]
+        [--repo-slug owner/name] [--repo <Project root>] [--tasks-dir <dir>] [--out F]
+
+--repo takes any directory in the Project root's clone, as tune.py's and rollout-settings.py's --repo do; --tasks-dir
+the vault's task notes, as unfinished-rollout.py's and reconcile-rollout.py's do (default ~/repos/obsidian/Work/Tasks,
+`~` read against the scored env's HOME). Both only feed the Escapes, below; without them those sources read unread.
 
 Reads: the rollout's record `<events dir>/<slug>.jsonl` (run_record.py's directory chain), every other
 `<slug>.jsonl` there for load (reviews.jsonl and tunings.jsonl are never read as rollouts, though reviews.jsonl is
@@ -16,7 +20,9 @@ Slot it took is open, to --until, flagged, so a busy rollout whose long calls wr
 Tunings and their agreement, and the rollout note's frontmatter (parallel_ceiling, max_review_rounds,
 max_iterations, max_plan_rounds, captured) through reconcile-rollout.py's Note, for the cause labels only. --settings is rollout-settings.py's JSON for
 the Project root: each key's resolved value now (a proposal's `from`), the Guardrail bounds, and `path`, whose
-mtime feeds the cause labels.
+mtime feeds the cause labels. For the Escapes, escapes.py (beside this script, loaded here) also reads, read-only and
+never fetched: every note under --tasks-dir (Archive included) for `fixes:` and `merged_into:`, and the --repo
+clone's commit messages, `docs/reviews/` and `git blame`. Its docstring is the one copy of those rules.
 
 Times. --since and --until take Z or an offset (run_record's `_stamp` rule; a naive stamp is refused) and
 everything printed is UTC `Z`. --since defaults to the record's first slot-taken, else its first line;
@@ -116,16 +122,24 @@ inferred (the record stamps effective values with no source): a label changes th
 a proposal is made. `agreeing` counts earlier non-voided applied Tunings with the same repo, key, rule and
 direction.
 
+Escapes and Quality. The landed set is every task with a `merged` line in the window (read-only ones included; the
+latest line wins, a later line with no pr keeping the earlier pr, two different prs flagged), keyed as `merges` is,
+so escapes.landed == merges.count. escapes.py scores it: an Escape is a task note whose `fixes:` names a landed task,
+a revert of its merge, or a later review finding against its lines, each read up to now (never bounded by --until,
+so a re-score counts a late Escape against this rollout), deduped per landed task; Quality = 1 - Escapes / landed.
+Its flags are prefixed `escapes: `; one that will not load leaves every source unread, flagged.
+
 Output: one JSON object (stdout, or --out F): rollout, repo, host, window{since, until, activeStart, activeEnd,
-partial}, runningTime{hours, excluded[{kind, start, end, hours, why}], excludedHours{kind: hours}}, merges,
+partial}, runningTime{hours, excluded[{kind, start, end, hours, why}], excludedHours{kind: hours}}, merges, escapes
+(escapes.py's block: count, landed, quality, partial, bySource, reviewDocs, tasks, sources, ref, excluded),
 throughput, slots, lane, guardrails (reviewChurn among them: {value | "unknown", bound "<=N%", baseline null,
 breached, roundsPerLandedTask}), load, binding{constraint, why}, headline (the seven numbers tune.py records:
-throughput, runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls), reviewChurn{value,
-findings, original, regression, unclassified, rounds, engine{rounds, findings, original, regression, unclassified,
-landedTasks (the landed tasks with a recorded round), roundsPerLandedTask}, freshReview{rounds, findings, original,
-regression, unclassified, unattributed}}, baseline,
-proposals[{id, key, from, to, ranAt, ranAtCause, rule, direction, evidence, agreeing}], withheld (the same
-plus reason), flags, thresholds. stderr gets one summary line.
+throughput, runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls; and quality,
+escapes.quality, which tune.py does not record yet), reviewChurn{value, findings, original, regression,
+unclassified, rounds, engine{rounds, findings, original, regression, unclassified, landedTasks (the landed tasks
+with a recorded round), roundsPerLandedTask}, freshReview{rounds, findings, original, regression, unclassified,
+unattributed}}, baseline, proposals[{id, key, from, to, ranAt, ranAtCause, rule, direction, evidence, agreeing}],
+withheld (the same plus reason), flags, thresholds. stderr gets one summary line.
 
 Exit codes: 0 scored (a "no record" score included); 1 the record, the events directory, --settings or --note
 cannot be read; 2 a usage error, a bad or reserved slug, or a bad TS.
@@ -149,6 +163,7 @@ SKILLS = os.path.dirname(os.path.dirname(HERE))
 RUN_RECORD_PY = os.path.join(SKILLS, "_shared", "scripts", "run_record.py")
 RECONCILE_PY = os.path.join(SKILLS, "execute", "scripts", "reconcile-rollout.py")
 ROLLOUT_SETTINGS_PY = os.path.join(SKILLS, "_shared", "scripts", "rollout-settings.py")
+ESCAPES_PY = os.path.join(HERE, "escapes.py")
 
 HOUR = 3600 * 1000
 MINUTE = 60 * 1000
@@ -343,6 +358,7 @@ class Score:
         self.holds, open_holds = [], {}
         self.pauses, pause = [], None
         self.steps, self.markers, self.merges, self.readies = [], [], [], []
+        self.merge_lines = []  # (t, task, pr, readOnly) of every merged line, for the Escapes' landed set
         self.set_asides, self.stalls, self.bound, self.slot_taken = [], [], [], []
         self.journals, self.last_line, self.task_lines = {}, {}, {}
         self.verdict_lines, self.read_only = [], set()  # p21-3: review-verdict (n, t, task, d); read-only merges
@@ -427,6 +443,7 @@ class Score:
                 self.markers.append((t, d.get("reason")))
             elif kind == "merged" and task:
                 self.merges.append((t, task))
+                self.merge_lines.append((t, task, d.get("pr"), d.get("readOnly") is True))
                 if d.get("readOnly") is True:
                     self.read_only.add(task)
             elif kind == "ready" and task:
@@ -855,6 +872,7 @@ class Score:
         act_start = self.run_iv[0][0] if self.run_iv else None
         act_end = self.run_iv[-1][1] if self.run_iv else None
         merged = sorted({task for t, task in self.merges if since <= t <= until})
+        escapes = self.escapes(self.landed(since, until), repo)
         throughput = None
         if rt:
             throughput = round(len(merged) / (rt / HOUR), 3)
@@ -870,7 +888,8 @@ class Score:
         tpm = round(tokens / n_merges, 1) if tokens is not None and n_merges else None
         stalls = sum(1 for t in self.stalls if since <= t <= until)
         headline = {"throughput": throughput, "runningHours": hours(rt), "merges": n_merges, "tokensPerMerge": tpm,
-                    "setAsideRate": sa_rate, "conflictRate": conflict, "quotaStalls": stalls}
+                    "setAsideRate": sa_rate, "conflictRate": conflict, "quotaStalls": stalls,
+                    "quality": escapes["quality"]}
         base_line = self.baseline(repo, act_start)
         if base_line is None and repo is not None:
             self.flag("no baseline: no earlier Reflection on %s ended before this run began; only quota stalls and "
@@ -883,6 +902,7 @@ class Score:
                        "activeEnd": fmt(act_end), "partial": self.partial},
             "runningTime": {"hours": hours(rt), "excluded": self.excluded, "excludedHours": self.excluded_hours},
             "merges": {"count": n_merges, "tasks": merged},
+            "escapes": escapes,
             "throughput": throughput,
             "slots": self.slot_metrics,
             "lane": dict(self.lane_metrics, integratorShare=integ_share),
@@ -945,6 +965,53 @@ class Score:
             except (ValueError, OverflowError):
                 pass
         return fm
+
+    # ---- Escapes and Quality (escapes.py) ---------------------------------------------------------------------
+
+    def landed(self, since, until):
+        """{task: {pr, readOnly, at}} for every task with a `merged` line in the window, the same raw `task` keys as
+        `merges` (emit's normalise_slug output). Lines arrive in time order, so the latest wins; a later line with no
+        pr keeps the earlier one, and two different prs for one task are flagged."""
+        out, prs = {}, {}
+        for t, task, pr, read_only in self.merge_lines:
+            if not since <= t <= until:
+                continue
+            if pr not in (None, ""):
+                prs.setdefault(task, set()).add(str(pr).rstrip("/").rsplit("/", 1)[-1].lstrip("#"))
+            prev = out.get(task, {})
+            out[task] = {"pr": pr if pr not in (None, "") else prev.get("pr"), "readOnly": read_only, "at": fmt(t)}
+        for task in sorted(prs):
+            if len(prs[task]) > 1:
+                self.flag("escapes: [[%s]]'s merged lines carry %d different prs (%s): the latest is read"
+                          % (task, len(prs[task]), ", ".join(sorted(prs[task]))))
+        return out
+
+    def _expand(self, p):
+        """`~` expanded against the scored env's HOME (a scratch HOME stays hermetic)."""
+        if p == "~" or p.startswith("~/"):
+            return RR._home(self.env) + p[1:]
+        return os.path.expanduser(p)
+
+    def escapes(self, landed, repo):
+        """escapes.py's block (its flags prefixed `escapes: `); an all-unread block, flagged, when it will not load."""
+        a = self.args
+        tasks_dir = self._expand(a.tasks_dir) if a.tasks_dir else \
+            os.path.join(RR._home(self.env), "repos", "obsidian", "Work", "Tasks")
+        repo_dir = self._expand(a.repo) if a.repo else None
+        try:
+            block, flags = _load("thread_escapes", ESCAPES_PY).score(landed, tasks_dir, repo_dir, repo, self.env)
+        except Exception as e:
+            why = "unread: escapes.py did not load (%s: %s)" % (type(e).__name__, e)
+            block = {"count": None, "landed": len(landed), "quality": None, "partial": True,
+                     "bySource": {"fixes": None, "reverts": None, "reviews": None}, "reviewDocs": None, "tasks": [],
+                     "sources": {"fixes": why, "reverts": why, "reviews": why}, "ref": None,
+                     "excluded": {"dropped": [], "selfNamed": [], "unreadNotes": 0, "rejectedRows": 0,
+                                  "unresolved": [], "unresolvedDocs": [], "unlandedDocs": [],
+                                  "unresolvedRows": []}}
+            flags = ["Quality unknown: escapes.py did not load (%s: %s)" % (type(e).__name__, e)]
+        for f in flags:
+            self.flag("escapes: " + f)
+        return block
 
     def tokens(self, since, until):
         """Every call's tokens (its journal's latest terminal line, else its latest: a call still running counts what
@@ -1379,6 +1446,8 @@ def main(argv):
     p.add_argument("--until")
     p.add_argument("--settings")
     p.add_argument("--repo-slug")
+    p.add_argument("--repo", help="any directory in the Project root's clone: its git gives reverts and review findings")
+    p.add_argument("--tasks-dir", help="the vault's task notes, for fixes: (default ~/repos/obsidian/Work/Tasks)")
     p.add_argument("--out")
     args = p.parse_args(argv)
     try:
