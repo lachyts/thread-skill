@@ -527,7 +527,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   ADR before a build); a **bug** (the engine or a skill did not do what its
   rule says: a task). Each Reflection appends one line to `tunings.jsonl`
   beside the record, with its headline scores (the next Reflection's
-  baseline) and the Tunings applied (decision 5's tally). A rule that three
+  baseline) and the Tunings applied (decision 5's tally). Each rollout's
+  close (its completion ceremony or its supersede) appends one scored line
+  of its own through the same tune script (ADR 0037 d4). A rule that three
   Reflections agree on may later become an automatic adjustment, by ADR.
   _Avoid_: tweak, auto-tune.
 - **Watch** — a pattern a Reflection saw in one rollout and would not yet

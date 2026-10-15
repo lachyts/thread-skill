@@ -13,7 +13,7 @@ This skill is the **planner**. The rollout note it produces is a data artefact �
 
 ## Scope
 
-**Obsidian only**, plus § 0's self-rollout, remote, landing-register and pushed-base probes of the target repo; the self-rollout probe reads the plugin marketplace registry, and on a match makes read-only `git rev-parse` and `git remote get-url` calls in the sibling `<repoPath>-rollout`; the pushed-base probe runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving or pruning only remote-tracking refs; § 0's unfinished-rollout check reads `git remote get-url` in each rollout note's Project root; a supersede's `reconcile-rollout.py resume` makes read-only `gh pr view`/`gh repo view` calls; a supersede's `git-env-canary.py check-all` and `retire` (steps 1 and 6) read the prior's Project root with read-only git calls and write only the prior note's `## Git-env log` and the canary's own records, kept outside the repo; § 4.7 reads the operator's ladder file through `ladder.py` (a local file, no network); step 2.8 reads the operator's `~/.config/thread/rollouts.toml` through `rollout-settings.py` (a local file, no network), which runs `land.sh --origin-slug` and so a read-only `git remote get-url origin` in the Project root when the file holds a repo table; § 3.6 runs `gated_inputs.py sweep` (it reads task notes only); and step 7.5 moves a superseded rollout note with a plain `mv`. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
+**Obsidian only**, plus § 0's self-rollout, remote, landing-register and pushed-base probes of the target repo; the self-rollout probe reads the plugin marketplace registry, and on a match makes read-only `git rev-parse` and `git remote get-url` calls in the sibling `<repoPath>-rollout`; the pushed-base probe runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving or pruning only remote-tracking refs; § 0's unfinished-rollout check reads `git remote get-url` in each rollout note's Project root; a supersede's `reconcile-rollout.py resume` makes read-only `gh pr view`/`gh repo view` calls; a supersede's `git-env-canary.py check-all` and `retire` (steps 1 and 6) read the prior's Project root with read-only git calls and write only the prior note's `## Git-env log` and the canary's own records, kept outside the repo; § 4.7 reads the operator's ladder file through `ladder.py` (a local file, no network); step 2.8 reads the operator's `~/.config/thread/rollouts.toml` through `rollout-settings.py` (a local file, no network), which runs `land.sh --origin-slug` and so a read-only `git remote get-url origin` in the Project root when the file holds a repo table; § 3.6 runs `gated_inputs.py sweep` (it reads task notes only); step 7.5 (and § 0's `file` finish) runs `close-score.py` on the prior (ADR 0037 d4), which reads the prior note, the Run record, `reviews.jsonl` and `tunings.jsonl` under the events directory, `rollouts.toml` through `rollout-settings.py`, every note under `Work/Tasks/` (Archive included) for `fixes:`/`merged_into:`, and the Project root's git, read-only and never fetched (land.sh's `git remote get-url origin`, escapes.py's read-only rev-parse/symbolic-ref/log/show/rev-list/merge-base/cat-file/diff-tree/blame reads, and `git remote get-url origin` in each clone `reviews.jsonl` names), and writes only fold-journals' `call-journal` lines to the prior's Run record and tune.py's one `tunings.jsonl` line, both under the events directory, outside the vault and the repo (its scratch dir is removed on exit); and step 7.5 moves a superseded rollout note with a plain `mv`. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
 
 ## Invocation forms
 
@@ -72,7 +72,10 @@ this project's rollout carries them forward still gate-pending. The check prints
 - `none` → go on.
 - `supersede <prior>` → this run supersedes `<prior>`: run the **Supersede prep** below.
 - `file <slug> <path>` → an earlier supersede stamped `<slug>` but died before its move. Run step
-  7.5's move for it now: `mkdir -p` `~/repos/obsidian/Work/Tasks/Archive/Rollouts/`, then a plain
+  7.5's score and move for it now: first
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/close-score.py --rollout ~/repos/obsidian/Work/Tasks/<path> --close supersede`
+  with the Bash tool's `timeout: 600000` (report its line; a non-zero exit is a `WARN:` for step 8,
+  never a stop), then `mkdir -p` `~/repos/obsidian/Work/Tasks/Archive/Rollouts/`, then a plain
   `mv` of `~/repos/obsidian/Work/Tasks/<path>` into it. Report it, then re-run only the check. A
   failed `mv` stops the run with its error.
 - `interrupted <prior> <new>` (printed only with `--regenerate`, and only when those two notes are
@@ -91,7 +94,7 @@ this project's rollout carries them forward still gate-pending. The check prints
      reads that prose (the re-check's `supersede <new>` previews from `<new>`). With `<prior>` still open,
      carry reads that prose against the tasks already on `<new>` too, so the lines print even when the
      dying run's own carry had moved every task.
-  3. Step 7.5's close-out of `<prior>`: the stamps, then the move.
+  3. Step 7.5's close-out of `<prior>`: the score, the stamps, then the move.
   4. Print the pinned report: "**[[<new>]] is incomplete**: the run that wrote it died before closing out [[<prior>]], so its tasks may be unstamped and its queue can name tasks `next` and `status` never see; it must be superseded with `--regenerate` (this run goes on to do that; a cancelled run leaves it stamped `incomplete: true`, which `next` refuses, for the next `--regenerate`), never `/thread:execute`d as written."
   5. Re-run only the check. It prints `supersede <new>`.
 - **Loop guard.** Each finish removes the note it names from the next check, so a second `file`
@@ -416,6 +419,14 @@ Use the same YAML field ordering the file already has; insert the new fields jus
 
 ### 7.5. Close out a superseded rollout
 
+**Score the prior rollout first (ADR 0037 d4).** Before the close-out below stamps the prior note, run the script half of a Reflection on it, with the Bash tool's `timeout: 600000`:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/close-score.py --rollout <the prior note where it sits> --close supersede
+```
+
+It records one `tunings.jsonl` line, or prints `already recorded <id>` (a re-run, after a run that died past this point) or `not recorded: nothing ran` (a never-started prior). Report its one line in step 8's summary. A non-zero exit is a `WARN:` for step 8's pre-flight, never a stop: the close-out goes on.
+
 **Superseding a prior rollout.** Close out the prior rollout last, after step 7 has stamped this rollout's tasks, so an interrupted run always leaves the prior note open for § 0 to pair with this one. Step 6 stamped `supersedes: "[[<prior-slug>]]"` in this note's frontmatter and carried the prior note's unlanded tasks here. Now set `status: done` + `superseded_by: "[[<this-slug>]]"` on the prior note, stamps first and then the move. This note is always a new file (step 6 never offers **Overwrite**), so the prior note is never the note this run wrote. Then move it with a plain `mv` into `~/repos/obsidian/Work/Tasks/Archive/Rollouts/`, running `mkdir -p` on that folder first if it is absent. The move is explicit because a note left in `Work/Tasks/` at `status: done` is filed into `Work/Tasks/Archive/` by the daily sweep (`_shared/scripts/daily-sweep.sh`), which is the wrong folder for a rollout. Find the prior note wherever it now sits: `Work/Tasks/<prior-slug>.md` is the normal case; at `Work/Tasks/Archive/<prior-slug>.md` the daily sweep already filed it (a run that died between the stamps and the move, which § 0's `file` line finishes, or a note superseded under older wording), so move it on from there; already in `Work/Tasks/Archive/Rollouts/`, leave it where it is. Never overwrite a same-named file already in `Archive/Rollouts/`: on a collision skip only the move, report the collision and continue the run; meanwhile the daily sweep files the stamped note into `Work/Tasks/Archive/`, and ADR 0026's shared reconcile step flags it as drift until someone resolves the collision. Schedule leaves the commit to the daily sweep, which commits the move with the rest of this run's vault writes (the planner runs no git, per the Don'ts). Wikilinks resolve by filename, so `supersedes:`, `superseded_by:` and the tasks' `rollout:` backlinks survive the move. As a backstop, ADR 0026's shared reconcile step reports a superseded rollout note outside `Archive/Rollouts/` as drift. Landed tasks stay linked to the prior note; carried ones now belong here.
 
 ### 8. Print summary
@@ -424,6 +435,7 @@ Use the same YAML field ordering the file already has; insert the new fields jus
 Queue for {{PROJECT_NAME}} written to [[{{ROLLOUT_SLUG}}]] — N tasks (K carried from [[<prior>]], S solo).
 filed [[<P>]] into Archive/Rollouts/                     # one line per § 0 `file` finish
 finished the interrupted supersede of [[<P>]]; [[<N>]] was incomplete and is superseded here   # per `interrupted` finish
+scored [[<P>]]: <close-score's line>                     # per close-score.py run (step 7.5, § 0's `file` finish)
 Verifier: <detected command>
 Settings: parallel_ceiling <n> (<source>), max_review_rounds <n> (<source>), max_iterations <n> (<source>), max_plan_rounds <n> (<source>); standing approval <t> USD (<source>), or off (built-in 0)
 
@@ -509,7 +521,7 @@ This skill does not execute anything. The rollout note it produces is read by th
 - Never remove `incomplete: true` from a rollout note except as step 7's last write on the note this run wrote: a stamp on any other note (§ 0's on an interrupted supersede's note, or one a stopped run left) ends only when a supersede closes that note out.
 - Don't touch tasks outside the target project (the `projects:` filter is strict).
 - Don't fill in `touches:` on tasks where you regex-detected files — that promotes a guess into authoritative metadata. Only the user does that. The **one** exception is the combined note authored in step 4.5: when every member has its own `touches:`, its `touches:` is their union, so it's a derivation, not a fresh guess. (Separately, the `## File-sets` block in the **rollout note** — step 6 — records the best-effort file-sets, but that's rollout-note data the executor reads, never task frontmatter, so it doesn't touch this rule.)
-- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's probes (listed under Scope), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only, and step 2.8's `rollout-settings.py`, whose `land.sh --origin-slug` runs a read-only `git remote get-url origin` (only when `rollouts.toml` holds a repo table).
+- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's probes (listed under Scope), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only, step 2.8's `rollout-settings.py`, whose `land.sh --origin-slug` runs a read-only `git remote get-url origin` (only when `rollouts.toml` holds a repo table), and `close-score.py` (step 7.5, § 0's `file` finish), whose git calls are read-only and whose only writes are its events-directory lines (both listed under Scope).
 - Never write a second unfinished rollout on a repo, and never supersede one that § 0 did not print as `supersede`.
 - Never move a rollout note except by step 7.5's move (which § 0 also runs for `file` and `interrupted`).
 
