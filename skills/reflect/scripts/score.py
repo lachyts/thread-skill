@@ -255,23 +255,6 @@ KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rou
 ACT_KINDS = ("answer-recorded", "gate-signed", "handed-back", "race-decided")
 ACT_NAMES = ("answer", "signOff", "retry", "mergeHold", "raceDecided")
 MERGE_HOLD_DETAIL = "a --gated or exit-7 hold: the record carries no reason"
-
-
-def human_act(kind, d):
-    """(name, detail) when a record line of an ACT_KINDS kind is a human act (the header's Acts), else None. A merge
-    hold is paired from its hold lines, so it is no single line's act. hands_off() reads it for the window's landed
-    tasks; reflect.py's span reads it for every task, landed or not."""
-    if kind == "answer-recorded":
-        how = [x for x in (d.get("form"), "raise %s" % d["raise"] if d.get("raise") else None,
-                           "pr" if d.get("pr") is True else None) if x]
-        return "answer", "%s answer%s" % (d.get("answerKind"), " (%s)" % "; ".join(how) if how else "")
-    if kind == "gate-signed" and d.get("standing") is not True:
-        return "signOff", "%s gate(s) signed off" % d.get("gates")
-    if kind == "handed-back" and d.get("via") == "retry":
-        return "retry", "handed back with no answer (%s arm)" % d.get("arm")
-    if kind == "race-decided":
-        return "raceDecided", "%s decided, acted on by %s" % (d.get("mark"), d.get("by"))
-    return None
 # The two headlines (ADR 0037 d1) and each proposal rule's declared effect: (serves, risks). A heuristic (the header).
 HEADLINES = ("handsOffRate", "quality")
 OLD_GUARDRAILS = ("tokensPerMerge", "setAsideRate", "conflictRate", "quotaStalls")
@@ -289,6 +272,23 @@ UNDECLARED_EFFECT = ((), GUARDRAILS)
 HOLD_WHY = {"merge": "a merge hold with no Slot open (a --gated or exit-7 hold: a wait on Lachy)",
             "race": "a RACE hold with no Slot open (an undecided RACE or its re-verify: a wait on Lachy)",
             "git-env": "a git-env hold with no Slot open (an unacked canary trip: a wait on Lachy)"}
+
+
+def human_act(kind, d):
+    """(name, detail) when a record line of an ACT_KINDS kind is a human act (the header's Acts), else None. A merge
+    hold is paired from its hold lines, so it is no single line's act. hands_off() reads it for the window's landed
+    tasks; reflect.py's span reads it for every task, landed or not."""
+    if kind == "answer-recorded":
+        how = [x for x in (d.get("form"), "raise %s" % d["raise"] if d.get("raise") else None,
+                           "pr" if d.get("pr") is True else None) if x]
+        return "answer", "%s answer%s" % (d.get("answerKind"), " (%s)" % "; ".join(how) if how else "")
+    if kind == "gate-signed" and d.get("standing") is not True:
+        return "signOff", "%s gate(s) signed off" % d.get("gates")
+    if kind == "handed-back" and d.get("via") == "retry":
+        return "retry", "handed back with no answer (%s arm)" % d.get("arm")
+    if kind == "race-decided":
+        return "raceDecided", "%s decided, acted on by %s" % (d.get("mark"), d.get("by"))
+    return None
 
 
 class Usage(Exception):
