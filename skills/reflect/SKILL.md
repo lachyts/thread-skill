@@ -312,10 +312,12 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --scores /tmp/threa
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py knobs --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json
 ```
 
-`--revert` runs once per `knobs.revert[]` item (its `scores`, `tuning` and `root`), `--auto` once per `knobs.land[]`
-item, and `knobs` once, after them. Report every exit verbatim: an `applied` line, a `held <key>: <reason>` line
-(`agreement 1 of 3`, say), a refusal (exit 2) or a write failure (exit 1). Never `--pick`, `--record-only` or
-`--close`, and never edit `rollouts.toml`.
+`--revert` runs once per `knobs.revert[]` item (its `scores`, `tuning` and `root`), `--auto` once per distinct
+`scores` file among `knobs.land[]` (with its items' `root`): one call lands every eligible proposal in that file as one
+line, and a repo's land items all come from its newest rollout's file. `knobs` runs once, after them. Report every exit
+verbatim: an `applied` line, a `held <key>: <reason>` line (`agreement 1 of 3`, say; a key this Reflection's revert
+moved is held `Reflection <id> already moved <key>`), a refusal (exit 2) or a write failure (exit 1). Never `--pick`,
+`--record-only` or `--close`, and never edit `rollouts.toml`.
 
 ### 15. Decide
 
