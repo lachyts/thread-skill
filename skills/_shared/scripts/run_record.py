@@ -184,9 +184,11 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      and vaultTask, a bug rule, shape, vaultTask and filed, each id watch_id(rule, shape); auto is true
                      only, on a landed knob or a filed bug; held only on an unlanded knob; landed only on a knob and
                      filed only on a bug). No rollout, no task; lands in reflections.jsonl.
-  reflection         id, since, until, rollouts, escapesOnly, counts, quiet; decisionTask?, cadence? (p21-7: the
-                     Reflection's one closing line; since and until UTC Z stamps; rollouts and escapesOnly lists of
-                     slugs; counts exactly sightings, newWatches, rules, bugs, filed, knobs, landed, reverted and
+  reflection         id, since, until, rollouts, escapesOnly, counts, quiet; decisionTask?, cadence?, repairsOnly?
+                     (p21-7: the Reflection's one closing line; since and until UTC Z stamps; rollouts, escapesOnly
+                     and repairsOnly lists of slugs: the rollouts read, those not read that hold an in-window
+                     Escape, and those not read that hold only in-window repair lines, repairsOnly written only when
+                     non-empty; counts exactly sightings, newWatches, rules, bugs, filed, knobs, landed, reverted and
                      breaches, each an integer >= 0; quiet a boolean; cadence 7 or 14, absent read as 7). No
                      rollout, no task; lands in reflections.jsonl.
 
@@ -597,7 +599,7 @@ KINDS = {
                   "filed": _bool, "fixes": _str}),
     "reflection": (False, {"id": _rid, "since": _stampz, "until": _stampz, "rollouts": _slugs(0, 4096),
                            "escapesOnly": _slugs(0, 4096), "counts": _counts, "quiet": _bool},
-                   {"decisionTask": _str, "cadence": _cadence}),
+                   {"decisionTask": _str, "cadence": _cadence, "repairsOnly": _slugs(1, 4096)}),
 }
 
 

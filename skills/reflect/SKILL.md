@@ -232,10 +232,10 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py span --fold --ou
 ```
 
 It folds each read rollout's journals and scores it, reads its friction and close line, sweeps the Escapes over
-every record (ADR 0037 d4), and lists the open Watches and the knob candidates; its header holds every rule. Add
-`--since <TS>` and `--until <TS>` only on Lachy's word: by default it starts where the last Reflection ended. Read
-the whole `span.json`. Exit 1 or 2 stops the reading: quote its stderr line. Never re-run it after a write (step 12
-on): a new span is a new Reflection, with a new id.
+every record (ADR 0037 d4) and the dated `repair:` lines over every record's rollout note, and lists the open Watches
+and the knob candidates; its header holds every rule. Add `--since <TS>` and `--until <TS>` only on Lachy's word: by
+default it starts where the last Reflection ended. Read the whole `span.json`. Exit 1 or 2 stops the reading: quote
+its stderr line. Never re-run it after a write (step 12 on): a new span is a new Reflection, with a new id.
 
 ### 11. The reading
 
@@ -262,7 +262,9 @@ For each rollout, read its `friction` items, of seven kinds (`ask`, `set-aside`,
   whole.
 - A `repair` item is traced by its shape: `race-decided` is read with its `raceDecided` ask, never twice;
   `escalated` and `flipped` are drift the run should have closed itself (repair § 3); `git-env` is execute § 4.5's
-  canary; `raise` is a round cap (weigh it beside score.py's own knob); `deferred` is repair § 5.
+  canary; `raise` is a round cap (weigh it beside score.py's own knob); `deferred` is repair § 5. A rollout with no
+  line in the window still brings its in-window repair lines, read `repairs-only` (or with its Escapes,
+  `escapes-only`).
 - An `escape` is traced to the review that should have caught it (execute § 5, ADR 0037 d7), and only when its
   `inWindow` is true: an Escape counts in the week it surfaced, against the rollout that landed the work.
 - A `churn` item is a review round that only answered the last round's fix (execute § 5): trace what the fix broke.
@@ -346,9 +348,9 @@ run the step its stderr line names, then close.
 
 ### 17. Report, then tidy
 
-Report the rollouts read (and the escapes-only ones), each trace and what it became, the Watches written (and any
-`extended` line), the bugs filed or found, each knob landed, reverted or held with its reason, the decision task (or
-none), the close line's counts and `quiet`, the `cannotShow` list and every flag. Then `rm -rf
+Report the rollouts read (and the escapes-only and repairs-only ones), each trace and what it became, the Watches
+written (and any `extended` line), the bugs filed or found, each knob landed, reverted or held with its reason, the
+decision task (or none), the close line's counts and `quiet`, the `cannotShow` list and every flag. Then `rm -rf
 /tmp/thread-reflect-week-<YYYY-MM-DD>`.
 
 ## Deciding the decision task
@@ -402,19 +404,22 @@ yes or a no (each `raised` printed `raised` or `exists`). An item left open keep
 - Reverts and review findings are read from the Project root's local ref, never fetched: `escapes.ref.tipDate`
   shows how old it is, and anything pushed since the last fetch is missed.
 - A repair run that writes no dated `repair:` line in the rollout note's `## Notes` and records no event is not seen
-  by the weekly reading.
+  by the weekly reading, nor is a `repair:` line on a rollout with no Run record (one that never ran): the repair
+  lines are swept from the notes of the rollouts the record holds.
 - A Human fix (ADR 0035) has no event of its own: the weekly reading sees it only as a set-aside whose `movedBy` is
   `unrecorded`, and then its `## Needs you` and `## Integration log` say what moved it, or nothing does.
 - /fresh-review churn names no rollout (`reviews.jsonl` carries none): the weekly reading reports it (`freshReview`)
   and traces none of it.
 - The Escapes sweep misses a record with no rollout note or Project root and a repo with no GitHub origin (both in
   `cannotShow`), and dates an undated fixer by its mtime.
-- An escapes-only rollout's breaches are not counted: a Guardrail breach counts in the week its run ends.
+- An escapes-only rollout's breaches are not counted, nor a repairs-only one's: a Guardrail breach counts in the week
+  its run ends.
 - A closed rollout with no close line (a dropped one, one archived unscored, or a close that was not scored) is read
   in the week its record has lines but leaves no baseline, and one whose lines all predate a window is never re-read.
 - A date-only piece of evidence (a `repair:` line, a fixer's `captured:`) carries no time: it is read by the
-  Reflection whose window runs from that Melbourne date, so one dated the day a reading ends waits for the next
-  reading.
+  Reflection whose window holds that Melbourne date, from every rollout with a Run record whether or not it has a line
+  that week, so one dated the day a reading ends is read once, by the next reading. A `--since` other than the last
+  Reflection's end skips or re-reads the dates between.
 - A single-rollout Watch is offered only beside a rule proposal, but still makes the week not quiet when it is new.
 - A declined Watch seen again in one rollout is neither new nor offered: it returns only when two later rollouts show
   it.

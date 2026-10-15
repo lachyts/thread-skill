@@ -36,8 +36,10 @@ then save), and a done task (vault grammar § Statuses: Landed) is never opened 
 Melbourne dates. Every calendar date is read on Australia/Melbourne: a note's `captured:`, a `repair:` line's date,
 the decision task's slug date and its `## Still open` date. A date-only piece of evidence (a `repair:` line, a fixer's
 `captured:` or its mtime's date) counts when it is on or after the Melbourne date of since and before that of until
-(date_in()). The next Reflection's since is this one's until, so the two windows share until's date: half-open, it is
-read once, by the next Reflection, once the day is whole; an instant counts in [since, until]. No tz data is exit 3
+(date_in()), and span reads it from every record, read this week or not: the Escapes sweep and the repair lines of
+every record's rollout note (below). The next Reflection's since is this one's until, so the windows' dates tile: each
+date is read once, by the Reflection whose window holds it, whichever rollouts have a line in that window (until's
+date by the next Reflection, once the day is whole). An instant counts in [since, until]. No tz data is exit 3
 (`python3 -m pip install tzdata`).
 
 span. The window: --until defaults to now, and a future --until is clamped to now and flagged; --since defaults to
@@ -75,8 +77,9 @@ r-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>. It reads every non-reserved <slug>.jsonl in th
             window (date_in()): {date, tasks (every wikilink), text (at most 300), shape}. shape is the first match of
             RACE decided (race-decided), `possible PR-less merge` (escalated), `merged, never marked` (flipped),
             `git-env trip` (git-env), `raised to` (raise), `deferred:` (deferred), else other. An undated
-            `- repair:` line is flagged. auto-retry and descope lines are other items, and nothing outside `## Notes`
-            is read.
+            `- repair:` line is flagged (on a read rollout only). auto-retry and descope lines are other items, and
+            nothing outside `## Notes` is read. A line is date-only, so it is read by its date from the note of every
+            record, read this week or not: a rollout with no line in the window that holds one is read light (below).
   escape    the sweep's evidence (below) against this rollout's landed tasks, with at and inWindow.
   churn     a review-verdict line in the window with regression > 0.
 - The Escapes sweep (ADR 0037 d4). Every record's `merged` lines, of any age, are folded per rollout by score.py's
@@ -84,18 +87,21 @@ r-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>. It reads every non-reserved <slug>.jsonl in th
   is used; a repo with several is flagged). A task landed in two records is credited to the later, flagged. Per repo,
   one escapes.py score() over the union reads the evidence (fixes:, reverts, review findings). Each piece gets an at:
   a fixer note's captured: (else its mtime, flagged "undated fixer"), a revert's committer date, a review doc's
-  newest add or modify commit (else its mtime). A rollout not read this week that holds in-window evidence is read
-  escapes-only: only its in-window Escapes, never a breach. A record with no resolvable note or root, and a repo with
-  no origin, are named in cannotShow.
+  newest add or modify commit (else its mtime). A record with no resolvable note or root, and a repo with no origin,
+  are named in cannotShow.
+- The light reads. A record not read this week is read for its in-window evidence alone, never scored, never a breach
+  or a knob: escapes-only when the sweep traced an in-window Escape to it, else repairs-only when its rollout note
+  holds an in-window repair line; either carries both kinds it holds. A repair line on a rollout with no Run record is
+  not read, and cannotShow says so.
 - knobs: revert[] (each non-voided, un-reverted auto tunings line that is no revert, paired with a read non-partial
   rollout of its repo that passes tune.py's revert_check), land[] (the proposals of a repo's newest non-partial read
   rollout that pass tune.py's auto_check, over the same reflections.jsonl read and the same agreement as tune.py, and
   whose key no revert[] item names) and held[] (the rest, each with its reason).
-span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | escapes-only), note, root, repo, status,
-closeLine, score, window, partial, headline{handsOffRate, quality, reviewChurn, throughput}, breached, breachCounts,
-binding, proposals (each with its knob_key), flags, friction[]}], freshReview[] (/fresh-review rounds in the window
-with regression > 0, reported only: reviews.jsonl names no rollout), watches[] (every open Watch: rule, shape,
-rollouts, count, recurring, stale, new, declinedBefore, lastSeen), knobs{revert, land, held}, bugsOpen[],
+span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | escapes-only | repairs-only), note,
+root, repo, status, closeLine, score, window, partial, headline{handsOffRate, quality, reviewChurn, throughput},
+breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[]}], freshReview[] (/fresh-review
+rounds in the window with regression > 0, reported only: reviews.jsonl names no rollout), watches[] (every open Watch:
+rule, shape, rollouts, count, recurring, stale, new, declinedBefore, lastSeen), knobs{revert, land, held}, bugsOpen[],
 decisionTask, cannotShow[], flags[]}. stderr gets one summary line.
 
 watch. One `watch` line per (Reflection, Watch), naming every rollout where the reading saw it. id is run_record's
@@ -130,8 +136,8 @@ and `## Resume prompt`. The file goes first, then one `proposal` line per (Refle
 filed, and auto: true only when filed. A repeat call prints the first outcome.
 
 knobs. Once, after step 14's tune.py calls (its lines are knob_lines(), which close re-reads): one `proposal` line per
-(Reflection, knob_key) over the read rollouts' score.py proposals (none for withheld entries, escapes-only rollouts or a
-rollout with no repo; a partial rollout's are held "partial window"). from, to and ranAt are the land candidate's, else
+(Reflection, knob_key) over the read rollouts' score.py proposals (none for withheld entries, a light read or a rollout
+with no repo; a partial rollout's are held "partial window"). from, to and ranAt are the land candidate's, else
 the newest proposer's; rollouts names every proposer. landed needs a non-voided tunings line with auto: true, this
 reflection, the same repo (case ignored), its rollout among the line's rollouts, no reverts, and an applied entry with
 the same key and rule and sign(to - from) == direction; then auto: true and tuning: <its id>. An unlanded line carries
@@ -161,11 +167,13 @@ close. Exactly one `reflection` line per Reflection (a second close is exit 2). 
 so a skipped step could never be made up: first close checks that knobs and decide ran, and is exit 2 naming the step,
 nothing written, when a line knob_lines() gives (a span proposal with a knob_key, or a revert tune.py wrote for this
 Reflection) is not in reflections.jsonl (`run knobs`), or when a recurring Watch (the Watch reader's, which needs a line
-from this Reflection) has no rule `proposal` line from it (`run decide`). The line: since, until, rollouts, escapesOnly,
-counts (sightings: Watch ids with a line from this Reflection; newWatches: those that are new; rules, bugs, filed,
-knobs, landed and reverted from its proposal lines; breaches: distinct (rollout, Guardrail) pairs over breachCounts
-rollouts), quiet (newWatches, rules, bugs and breaches all 0), decisionTask when a rule line names one, and cadence when
---cadence is given (absent reads as 7). The writers watch, bug, knobs and decide refuse a closed Reflection.
+from this Reflection) has no rule `proposal` line from it (`run decide`). A `knobs` refusal (a run_record.check() of any
+of its lines) therefore blocks close too: it is a fault to fix, never a step to skip. The line: since, until, rollouts
+(read), escapesOnly, counts (sightings: Watch ids with a line from this Reflection; newWatches: those that are new;
+rules, bugs, filed, knobs, landed and reverted from its proposal lines; breaches: distinct (rollout, Guardrail) pairs
+over breachCounts rollouts), quiet (newWatches, rules, bugs and breaches all 0), repairsOnly when a rollout was read
+repairs-only, decisionTask when a rule line names one, and cadence when --cadence is given (absent reads as 7). The
+writers watch, bug, knobs and decide refuse a closed Reflection.
 
 rung. The ladder (ladder.py's load()): it prints {rung, model "opus", effort, judge, review, top, topModel}, the own
 values of the highest opus rung, with a stderr note when the top rung is not opus (`rung: the ladder's top rung
@@ -175,8 +183,7 @@ values of the highest opus rung, with a stderr note when the top rung is not opu
 Exit codes: 0 done (exists and no-op answers included); 1 a file cannot be read or written (the events directory,
 tunings.jsonl, reflections.jsonl, --out, a note); 2 usage or a refusal (a path that exists, a watch call that leaves
 out a recorded rollout, a raise on a closed or unknown Watch, a closed Reflection, a close before knobs or decide ran,
-a run_record refusal); 3 no tz data,
-or no tomllib for `rung` over a present ladder file.
+a run_record refusal); 3 no tz data, or no tomllib for `rung` over a present ladder file.
 """
 from __future__ import annotations
 
@@ -301,7 +308,8 @@ def mdate(ms):
 
 def date_in(day, since, until):
     """A date-only piece of evidence's window test (the module docstring's Melbourne dates): since's date up to, not
-    including, until's, so the Reflection after this one (whose since is this until) reads until's date, once."""
+    including, until's, so the Reflection after this one (whose since is this until) reads until's date, once. span
+    reads such evidence from every record, so that reading needs no line of the rollout in its own window."""
     return mdate(since) <= day < mdate(until)
 
 
@@ -837,7 +845,9 @@ class Span:
             return kind
         return None
 
-    def repairs(self, slug, note_path, since, until):
+    def repairs(self, slug, note_path, since, until, flag_undated=True):
+        """The repair items of one rollout note: its `## Notes` lines dated in the window (date_in()). An undated line
+        is flagged only for a read rollout (flag_undated), so a swept old note does not repeat its flag every week."""
         note = read_note(note_path)
         if note is None:
             self.flag("[[%s]]: its note cannot be read: no repair lines" % slug)
@@ -847,7 +857,7 @@ class Span:
             line = line.rstrip()
             m = REPAIR_RE.match(line)
             if not m:
-                u = UNDATED_REPAIR_RE.match(line)
+                u = UNDATED_REPAIR_RE.match(line) if flag_undated else None
                 if u and not re.fullmatch(r"\d{4}-\d\d-\d\d", u.group(1) or ""):
                     self.flag("[[%s]]: an undated repair line in ## Notes: %s" % (slug, line[:120]))
                 continue
@@ -1114,22 +1124,27 @@ class Span:
             if sc is not None:
                 scores[slug] = sc
         swept = self.sweep(records, read, since, until)
-        for slug in sorted(s for s in swept if s):
-            items = swept[slug]
+        for slug in sorted(s for s in swept if s in read):
+            read[slug]["friction"].extend(swept[slug])
+        # A rollout not read this week is read light for its in-window evidence, from every record: the Escapes the
+        # sweep traced to it, and the dated repair: lines of its note's ## Notes (date-only, so read by date whatever
+        # the record holds, or a line on until's date would be lost when the next window has no line of the rollout).
+        for slug in sorted(records):
             if slug in read:
-                read[slug]["friction"].extend(items)
-                continue
-            inw = [x for x in items if x["inWindow"]]
-            if not inw:
                 continue
             note = self.vault.rollout_note(slug)
-            entries.append({"rollout": slug, "mode": "escapes-only", "note": str(note) if note else None,
-                            "root": project_root(note) if note else None, "repo": None, "status": None,
-                            "closeLine": None, "score": None, "window": None, "partial": None, "headline": None,
-                            "breached": [], "breachCounts": False, "binding": None, "proposals": [], "flags": [],
-                            "friction": inw})
-            entries[-1]["repo"] = self.origin(entries[-1]["root"])
-        self.cannot_show("a repair run that writes no dated repair: line and records no event is not seen")
+            inw = [x for x in swept.get(slug) or [] if x["inWindow"]]
+            reps = self.repairs(slug, note, since, until, flag_undated=False) if note is not None else []
+            if not inw and not reps:
+                continue
+            root = project_root(note) if note else None
+            entries.append({"rollout": slug, "mode": "escapes-only" if inw else "repairs-only",
+                            "note": str(note) if note else None, "root": root, "repo": self.origin(root),
+                            "status": None, "closeLine": None, "score": None, "window": None, "partial": None,
+                            "headline": None, "breached": [], "breachCounts": False, "binding": None, "proposals": [],
+                            "flags": [], "friction": inw + reps})
+        self.cannot_show("a repair run that writes no dated repair: line and records no event is not seen, nor is a "
+                         "repair: line on a rollout with no Run record")
         fresh = self.fresh_review(ev, since, until)
         ws = watches(reflections, rid, until)
         knobs = self.knobs(entries, scores, rid, tunings, reflections)
@@ -1150,11 +1165,12 @@ class Span:
                 f.write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
         except OSError as e:
             raise Stop("cannot write --out %s: %s" % (out, e), 1)
-        n_read = sum(1 for e in entries if e["mode"] == "read")
-        say("span %s %s .. %s: %d read, %d escapes-only, %d friction item(s), %d open Watch(es), knobs %d land / "
-            "%d revert / %d held, %d cannot-show -> %s" % (
-                rid, fmt(since), fmt(until), n_read, len(entries) - n_read, sum(len(e["friction"]) for e in entries),
-                len(doc["watches"]), len(knobs["land"]), len(knobs["revert"]), len(knobs["held"]), len(self.cannot), out))
+        n = {m: sum(1 for e in entries if e["mode"] == m) for m in ("read", "escapes-only", "repairs-only")}
+        say("span %s %s .. %s: %d read, %d escapes-only, %d repairs-only, %d friction item(s), %d open Watch(es), "
+            "knobs %d land / %d revert / %d held, %d cannot-show -> %s" % (
+                rid, fmt(since), fmt(until), n["read"], n["escapes-only"], n["repairs-only"],
+                sum(len(e["friction"]) for e in entries), len(doc["watches"]), len(knobs["land"]),
+                len(knobs["revert"]), len(knobs["held"]), len(self.cannot), out))
         return 0
 
 
@@ -1619,8 +1635,11 @@ def cmd_close(a):
     quiet = counts["newWatches"] == 0 and counts["rules"] == 0 and counts["bugs"] == 0 and counts["breaches"] == 0
     read = sorted(e["rollout"] for e in span["rollouts"] if e.get("mode") == "read")
     only = sorted(e["rollout"] for e in span["rollouts"] if e.get("mode") == "escapes-only")
+    repairs_only = sorted(e["rollout"] for e in span["rollouts"] if e.get("mode") == "repairs-only")
     fields = {"id": rid, "since": fmt(since), "until": fmt(until), "rollouts": read, "escapesOnly": only,
               "counts": counts, "quiet": quiet}
+    if repairs_only:
+        fields["repairsOnly"] = repairs_only
     task = next((d.get("vaultTask") for d in mine if d.get("altitude") == "rule" and d.get("vaultTask")), None)
     if task:
         fields["decisionTask"] = task

@@ -663,15 +663,16 @@ test('the four weekly kinds land in reflections.jsonl as v 1, rollout and task n
     [1, null, null, 'proposal'], [1, null, null, 'proposal'], [1, null, null, 'proposal'], [1, null, null, 'reflection']])
 })
 
-test('watch-raised takes recurring, confirmed and declined; reflection takes cadence 14 or none', (t) => {
+test('watch-raised takes recurring, confirmed and declined; reflection takes cadence 14 or none, and repairsOnly', (t) => {
   const home = tmpHome(t)
   const [wid, kid] = ids(home)
   const k = kinds(wid, kid)
   for (const via of ['recurring', 'confirmed', 'declined']) emitOk(home, ['--kind', 'watch-raised', '--json', JSON.stringify({ ...k.raised, via })], { env: EV(home) })
   emitOk(home, ['--kind', 'reflection', '--json', JSON.stringify({ ...k.reflection, cadence: 14 })], { env: EV(home) })
   emitOk(home, ['--kind', 'reflection', '--json', JSON.stringify({ ...k.reflection, rollouts: [], escapesOnly: [], quiet: true, decisionTask: 'thread-skill-decisions-2026-10-16' })], { env: EV(home) })
+  emitOk(home, ['--kind', 'reflection', '--json', JSON.stringify({ ...k.reflection, repairsOnly: ['d'] })], { env: EV(home) })
   const all = lines(path.join(ev(home), 'reflections.jsonl'))
-  assert.deepEqual(all.map((l) => l.via ?? l.cadence ?? null), ['recurring', 'confirmed', 'declined', 14, null])
+  assert.deepEqual(all.map((l) => l.via ?? l.cadence ?? l.repairsOnly ?? null), ['recurring', 'confirmed', 'declined', 14, null, ['d']])
 })
 
 test('the weekly kinds are refused, exit 2 and nothing written, when malformed', (t) => {
@@ -705,6 +706,8 @@ test('the weekly kinds are refused, exit 2 and nothing written, when malformed',
     ['a reflection counts missing a key', 'reflection', { ...k.reflection, counts: (({ breaches, ...rest }) => rest)(COUNTS) }],
     ['a reflection count negative', 'reflection', { ...k.reflection, counts: { ...COUNTS, bugs: -1 } }],
     ['a reflection cadence 10', 'reflection', { ...k.reflection, cadence: 10 }],
+    ['a reflection with an empty repairsOnly', 'reflection', { ...k.reflection, repairsOnly: [] }],
+    ['a reflection repairsOnly naming a reserved file', 'reflection', { ...k.reflection, repairsOnly: ['reflections'] }],
     ['a reflection with an offset until', 'reflection', { ...k.reflection, until: '2026-10-16T00:00:00+11:00' }],
   ]
   for (const [name, kind, fields, extra = []] of cases) {

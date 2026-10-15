@@ -319,7 +319,47 @@ test('span: repair lines: dated in-window ones by shape, since\'s date counted a
   assert.deepEqual(reps(span(h, [], { since: UNTIL, until: '2026-09-17T00:00+10:00' })), [['2026-09-10', ['u'], 'deferred']])
 })
 
-test('span: the Escapes sweep reads an old, never-read record: an in-window revert or fixes: note makes it escapes-only; pre-window evidence and an unresolvable record do not', (t) => {
+// A repair, then the rollout finishing earlier on the day the Reflection runs: every record line is on until's
+// Melbourne date, before until, and so is the repair line. The first span reads the rollout but not the line (until's
+// date is the next Reflection's); the next span has no line of the rollout in its window, so it reads the line from
+// the swept note, repairs-only, exactly once. A record of any age with an in-window repair line is read the same way.
+test('span: a repair line on until\'s date is read once, by the next span, repairs-only, though that span has no line of the rollout; close names it', (t) => {
+  const h = setup(t)
+  const S1 = '2026-09-03T18:00+10:00'
+  const S2 = '2026-09-10T18:00+10:00'
+  const S3 = '2026-09-17T18:00+10:00'
+  const S4 = '2026-09-24T18:00+10:00'
+  // 08:00 to 09:10 Melbourne on 2026-09-10
+  emitAll(h, 'demo', byTs(life('a', '2026-09-09T22:00:00Z', '2026-09-09T23:00:00Z', { lane: ['2026-09-09T23:00:00Z', '2026-09-09T23:10:00Z'] })))
+  rolloutNote(h, 'demo', { notes: ['- 2026-09-10 repair: [[a]] merged, never marked: flipped done'] })
+  // a record a month old: its repair line falls in the second span, its undated one is no unread rollout's flag
+  emitAll(h, 'old', byTs(life('o', '2026-08-10T00:00:00Z', '2026-08-10T01:00:00Z', { lane: ['2026-08-10T01:00:00Z', '2026-08-10T01:10:00Z'] })))
+  rolloutNote(h, 'old', { status: 'done', archived: true, notes: ['- 2026-09-12 repair: [[o]] deferred: a late follow-up', '- repair: [[o]] undated'] })
+  const reps = (x, slug) => (entryOf(x, slug)?.friction || []).filter((f) => f.kind === 'repair').map((f) => [f.date, f.tasks, f.shape])
+
+  const s1 = span(h, [], { since: S1, until: S2 })
+  assert.equal(entryOf(s1, 'demo').mode, 'read')
+  assert.deepEqual(reps(s1, 'demo'), [], 'until\'s date waits for the next span')
+  assert.equal(entryOf(s1, 'old'), undefined)
+
+  const s2 = span(h, [], { since: S2, until: S3 })
+  const demo = entryOf(s2, 'demo')
+  assert.ok(demo, 'the next span reads the line though it has no line of demo')
+  assert.deepEqual([demo.mode, demo.score, demo.breachCounts, demo.proposals], ['repairs-only', null, false, []])
+  assert.deepEqual(reps(s2, 'demo'), [['2026-09-10', ['a'], 'flipped']], 'read exactly once')
+  assert.deepEqual(demo.friction.map((f) => f.kind), ['repair'])
+  assert.equal(entryOf(s2, 'old').mode, 'repairs-only')
+  assert.deepEqual(reps(s2, 'old'), [['2026-09-12', ['o'], 'deferred']])
+  assert.ok(!s2.flags.some((f) => /undated repair line/.test(f)), 'an unread rollout\'s undated line is not flagged weekly')
+  assert.match(ok(h, ['close', '--span', path.join(h.out, 'span.json')]).stdout, /^closed r-/)
+  const line = rlines(h).filter((l) => l.kind === 'reflection').pop()
+  assert.deepEqual([line.rollouts, line.escapesOnly, line.repairsOnly], [[], [], ['demo', 'old']])
+
+  const s3 = span(h, [], { since: S3, until: S4 })
+  assert.deepEqual([entryOf(s3, 'demo'), entryOf(s3, 'old')], [undefined, undefined], 'and never again')
+})
+
+test('span: the Escapes sweep reads an old, never-read record: an in-window revert or fixes: note makes it escapes-only, its in-window repair lines riding along; pre-window evidence and an unresolvable record do not', (t) => {
   const h = setup(t)
   // three weeks before the window: old-r landed two tasks through squash commits (#7, #8) on main
   h.gitEnv = { GIT_AUTHOR_DATE: '2026-08-09T00:00:00Z', GIT_COMMITTER_DATE: '2026-08-09T00:00:00Z' }
@@ -337,7 +377,7 @@ test('span: the Escapes sweep reads an old, never-read record: an in-window reve
   h.gitEnv = {}
   emitAll(h, 'old-r', byTs([...life('old-a', '2026-08-10T00:00:00Z', '2026-08-10T01:00:00Z', { lane: ['2026-08-10T01:00:00Z', '2026-08-10T01:10:00Z'], pr: 7 }),
     ...life('old-b', '2026-08-10T02:00:00Z', '2026-08-10T03:00:00Z', { lane: ['2026-08-10T03:00:00Z', '2026-08-10T03:10:00Z'], pr: 8 })]))
-  rolloutNote(h, 'old-r', { status: 'done', archived: true })
+  rolloutNote(h, 'old-r', { status: 'done', archived: true, notes: ['- 2026-09-07 repair: [[old-b]] deferred: its fixer'] })
   taskNote(h, 'fix-old-b', { captured: '2026-09-06', fm: ['fixes: ["[[old-b]]"]'] })
   // a pre-window fixer, and a record with no note at all
   emitAll(h, 'older-r', byTs(life('older-a', '2026-08-01T00:00:00Z', '2026-08-01T01:00:00Z', { lane: ['2026-08-01T01:00:00Z', '2026-08-01T01:10:00Z'], pr: 3 })))
@@ -347,7 +387,8 @@ test('span: the Escapes sweep reads an old, never-read record: an in-window reve
   const s = span(h)
   const old = entryOf(s, 'old-r')
   assert.equal(old.mode, 'escapes-only')
-  assert.deepEqual(old.friction.map((x) => [x.task, x.source, x.inWindow]).sort(), [['old-a', 'revert', true], ['old-b', 'fixes', true]], JSON.stringify([s.flags, s.cannotShow]))
+  assert.deepEqual(old.friction.filter((x) => x.kind === 'escape').map((x) => [x.task, x.source, x.inWindow]).sort(), [['old-a', 'revert', true], ['old-b', 'fixes', true]], JSON.stringify([s.flags, s.cannotShow]))
+  assert.deepEqual(old.friction.filter((x) => x.kind === 'repair').map((x) => [x.date, x.tasks, x.shape]), [['2026-09-07', ['old-b'], 'deferred']])
   assert.equal(old.friction.find((x) => x.source === 'revert').at, '2026-09-05T00:00:00.000Z')
   assert.equal(old.friction.find((x) => x.source === 'fixes').at, '2026-09-06')
   assert.equal(entryOf(s, 'older-r'), undefined, 'pre-window evidence adds nothing')
