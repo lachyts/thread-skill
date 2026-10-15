@@ -10,10 +10,14 @@ python >= 3.8, stdlib only: hooks may run it under /usr/bin/python3, so no 3.10+
 or imported by path (importlib.util.spec_from_file_location, git-env-canary.py's _load_reconcile pattern):
 
     emit(rollout, kind, task=None, fields=None, *, ts=None, env=None, strict=False) -> bool
+    check(rollout, kind, task=None, fields=None, *, ts=None) -> None   (raises Refused exactly where emit would
+                                           refuse, and writes nothing: reflect.py checks a whole pass first)
     events_dir(env=None) -> str            record_path(rollout, env=None) -> str
-    normalise_slug(value) -> str           Refused, KINDS, TERMINAL_STATUSES, REVIEWS, TUNINGS, RESERVED
+    normalise_slug(value) -> str           Refused, KINDS, TERMINAL_STATUSES, REVIEWS, TUNINGS, REFLECTIONS, RESERVED
     verdict_digest(verdict, feedback) -> str    verdict_key(line) -> tuple   (review-verdict's identity, p21-3:
                                            the writer, reconcile-rollout.py, and the reader, score.py, share them)
+    watch_id(rule, shape) -> str           knob_key(repo, key, rule, direction) -> str   (the weekly reading's
+                                           identities, p21-7: reflect.py writes them, tune.py reads them back)
 
 Callers: in-process callers use the default strict=False, which never raises; shell callers append
 `|| true`. Recording must never break a rollout.
@@ -28,12 +32,15 @@ here creates the link, and on a machine without it the first emit's os.makedirs 
 there. THREAD_EVENTS_DIR is for tests and non-default setups. `dir` prints the resolved directory, so any writer can confirm it lands in
 the same place.
 
-Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl and tuning to
-tunings.jsonl. Both names are RESERVED: refused as a rollout slug and as a carried `from`.
+Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl, tuning to tunings.jsonl, and the
+weekly reading's kinds (watch, watch-raised, proposal, reflection) to reflections.jsonl. All three names are RESERVED:
+refused as a rollout slug and as a carried `from`.
 
-tunings.jsonl holds one line per Reflection, plus one `close` line per rollout, at its completion ceremony or its
-supersede (skills/reflect/scripts/tune.py is its one emitter; score.py reads it for baselines, and tune.py and
-skills/reflect/scripts/close-score.py read it only to refuse a second close line): the scored window, its ten scores
+tunings.jsonl holds one line per by-hand Reflection, plus one `close` line per rollout, at its completion ceremony or
+its supersede, plus one `auto` line per knob the weekly reading lands or reverts (skills/reflect/scripts/tune.py is
+its one emitter; score.py reads it for baselines and the applied tally; tune.py and
+skills/reflect/scripts/close-score.py read it to refuse a second close line; tune.py `--auto`/`--revert` and
+skills/reflect/scripts/reflect.py read it for a key's last move and the auto lines): the scored window, its ten scores
 (the two headlines, Hands-off rate and Quality, beside the Guardrails' and the run's numbers) and the Tunings Lachy
 picked (`applied`, most often []). A tuning line is `v` 2 (p21-2); a v1 line carries the first seven scores only and
 still serves as a baseline, its missing keys read as no baseline.
@@ -41,6 +48,16 @@ still serves as a baseline, its missing keys read as no baseline.
   line through `tune.py --record-only --close <completion|supersede>`, which stamps `close`. One close line per
   rollout: a non-voided line with a `close` for that rollout refuses a second. A by-hand Reflection's line never
   carries `close`, so it neither blocks a close line nor is blocked by one.
+- Auto (p21-7, ADR 0037 d5): `tune.py --auto|--revert --reflection <id>` stamps `auto` and `reflection`, and a revert
+  stamps `reverts` (the auto line it undoes). An auto line never carries `close`, and a close line never carries
+  `auto`. A close line's `applied` is [], so it never moves a key and never counts toward `agreeing` or `agreed`.
+  `agreeing` stays score.py's count (earlier applied Tunings with the same rule and direction); `agreed` is the
+  weekly agreement (the Agreement rule below), carried on each entry of an auto landing.
+
+reflections.jsonl holds the weekly reading's lines (skills/reflect/scripts/reflect.py is its only writer, and tune.py
+reads it for the agreement and to refuse a closed Reflection): a `watch` line per (Reflection, Watch), a `watch-raised`
+line per decided Watch, a `proposal` line per (Reflection, Tuning) at each altitude, and one `reflection` line that
+closes the Reflection. None carries a rollout or a task.
 - Baseline: the next Reflection on that repo (matched ignoring case) compares against the `scores` of the line with
   the latest window.activeEnd at or before its own window.activeStart, preferring a line not marked partial; a
   line whose activeEnd is null never qualifies. Comparing active spans, not ts or until, keeps a Reflection run late
@@ -65,7 +82,8 @@ with its newline. The common keys come first, in this order:
              Any other ISO timestamp field a caller adds must be UTC `Z` too; call-journal's
              startTime is the one epoch field (the journal's own epoch-ms integer, verbatim).
     host     the hostname up to its first dot
-    rollout  the rollout slug (null only for review-round; a tuning's is a provenance stamp)
+    rollout  the rollout slug (null only for review-round and the four reflections.jsonl kinds; a tuning's is a
+             provenance stamp)
     task     the task slug, or null
     kind     one of the kinds below
 
@@ -135,10 +153,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   tuning             id, repo, window{since, until, activeStart?, activeEnd?, partial?}, scores{throughput,
                      runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
                      quality, reviewChurn}, applied (a list of at most 8 {key, from, to, ranAt, rule, evidence,
-                     agreeing}); binding? (slot-bound | lane-bound | quota-bound | dependency-bound | none-clear);
-                     voids? (the id of the line this one voids); close? (completion | supersede: the close that wrote
-                     it, through close-score.py and `tune.py --close`; one per rollout; never on a by-hand
-                     Reflection's line). A rollout is required and a task is refused;
+                     agreeing, agreed?}); binding? (slot-bound | lane-bound | quota-bound | dependency-bound |
+                     none-clear); voids? (the id of the line this one voids); close? (completion | supersede: the close
+                     that wrote it, through close-score.py and `tune.py --close`; one per rollout; never on a by-hand
+                     Reflection's line); auto? (true only: `tune.py --auto` or `--revert`, the weekly reading's own
+                     landing); reflection? (the weekly reading's r- id, present exactly when auto is); reverts? (the
+                     t- id of the auto line a revert undoes: auto, with one applied entry). A rollout is required
+                     and a task is refused;
                      lands in tunings.jsonl, `v` 2. window: since and until UTC `Z` stamps, activeStart and
                      activeEnd a UTC `Z` stamp or null, partial a boolean, no other key. scores: exactly the ten
                      keys, each a finite number or null, with merges and quotaStalls integers >= 0 and
@@ -146,7 +167,28 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      p21-4; reviewChurn when no review round was recorded, p21-3). applied: key
                      one of parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds; from, to
                      and ranAt integers >= 1 with from != to; rule a string of at most 64 characters;
-                     evidence one of at most 300; agreeing an integer >= 0; no other key.
+                     evidence one of at most 300; agreeing an integer >= 0; agreed (an integer >= 1, on every
+                     entry of a non-void auto landing and on no other line); no other key. Never auto and close on one
+                     line.
+  watch              id, rule, shape, rollouts, count, reflection (p21-7: one per (Reflection, Watch); id is
+                     watch_id(rule, shape); rule and shape stripped, each at most 120 characters; rollouts 1 to 64
+                     slugs, none reserved, every rollout where the Reflection saw it; count an integer >= 1).
+                     No rollout, no task; lands in reflections.jsonl.
+  watch-raised       id, reflection, via (recurring | confirmed | declined: Lachy's yes to a recurring Watch, his yes
+                     to a Watch to confirm, or his no; any of them closes the Watch's cycle). No rollout, no task;
+                     lands in reflections.jsonl.
+  proposal           id, altitude (knob | rule | bug), reflection, rollouts; repo?, key?, rule?, shape?, direction?,
+                     from?, to?, ranAt?, landed?, auto?, tuning?, reverts?, held?, vaultTask?, filed?, fixes? (per
+                     altitude: a knob needs repo, key, rule of at most 64, direction 1 or -1, from, to and ranAt
+                     integers >= 1 and landed, its id knob_key(repo, key, rule, direction); a rule needs rule, shape
+                     and vaultTask, a bug rule, shape, vaultTask and filed, each id watch_id(rule, shape); auto is true
+                     only, on a landed knob or a filed bug; held only on an unlanded knob; landed only on a knob and
+                     filed only on a bug). No rollout, no task; lands in reflections.jsonl.
+  reflection         id, since, until, rollouts, escapesOnly, counts, quiet; decisionTask?, cadence? (p21-7: the
+                     Reflection's one closing line; since and until UTC Z stamps; rollouts and escapesOnly lists of
+                     slugs; counts exactly sightings, newWatches, rules, bugs, filed, knobs, landed, reverted and
+                     breaches, each an integer >= 0; quiet a boolean; cadence 7 or 14, absent read as 7). No
+                     rollout, no task; lands in reflections.jsonl.
 
 There is no ceiling-changed kind, and it is refused: the settings stamped on every slot-taken and
 idle-slots replace it, which keeps `next` stateless and also covers round caps and per-task overrides.
@@ -206,7 +248,27 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   duplicate that slips in counts once. Two head-less lines for one round with different bullets stay two (a fresh
   re-judge after a cache miss, a known overcount); two head-less approve lines for one round collapse (rounds
   only, no findings).
-- tuning: see tunings.jsonl under Files (the baseline, void and close rules).
+- tuning: see tunings.jsonl under Files (the baseline, void, close and auto rules).
+- The Watch rule (p21-7, ADR 0037 d2 and d5). A Watch's id is watch_id(rule, shape), the first 8 hex of sha1 over the
+  stripped rule, a newline and the stripped shape (Chorus's watch_id, re-implemented), so a pattern named the same
+  way is one Watch. A Reflection writes one `watch` line per Watch, naming every rollout where it saw it (a later
+  line from the same Reflection only ever extends that set). A cycle opens at a sighting and closes at any
+  `watch-raised`, whatever its via: recurring or confirmed for Lachy's yes (a rule grill filed), declined for his no.
+  A sighting after a close opens a new cycle that recurs only on two distinct rollouts of its own, so a declined rule
+  returns only when two later rollouts show it afresh. Within a cycle each Reflection counts by its latest line, the
+  cycle's rollouts are the union and its count the sum. Recurring: two or more distinct rollouts in the open cycle,
+  one of them this Reflection's. A Watch is new only at its id's first-ever `watch` line.
+- The Agreement rule (p21-7, ADR 0037 d5: a knob lands once three Reflections agree). For K = knob_key(repo, key,
+  rule, direction) of the current proposal P, from rollout X in Reflection R: the key's last move is the latest
+  non-voided tuning line for the repo (case ignored) with an applied entry on `key`, any rule or direction (a pick, an
+  auto landing or a revert); the earlier lines are the knob `proposal` lines with id K in reflections.jsonl, in file
+  order, each after the last move, from a Reflection other than R that has its `reflection` line (and not the
+  Reflection whose auto line made the last move: its lines were that move's evidence). Walking them with an empty set
+  seen, a line agrees when it names a rollout not yet seen, and its rollouts then join seen. The agreement is the
+  agreeing lines plus one when X is not seen; a knob lands at 3. tune.py's auto_check computes it.
+- The cadence rule (p21-7, ADR 0037 d6): a `reflection` line's `cadence` is the reading's cadence in days as that
+  Reflection closed it (7 weekly, 14 fortnightly); absent reads as 7. Its `quiet` is newWatches, rules, bugs and
+  breaches all 0.
 - Skip a line that does not parse: a crash can leave a last line with no newline, which the next append
   then merges with (a known limit; checking the tail would mean locking every emit).
 
@@ -254,7 +316,9 @@ LOCK_WAIT = 5.0
 COMMON = ("v", "ts", "host", "rollout", "task", "kind")
 REVIEWS = "reviews"
 TUNINGS = "tunings"
-RESERVED = (REVIEWS, TUNINGS)  # record files that are no rollout's: refused as a rollout slug or a carried `from`
+REFLECTIONS = "reflections"
+# record files that are no rollout's: refused as a rollout slug or a carried `from`
+RESERVED = (REVIEWS, TUNINGS, REFLECTIONS)
 SLUG_RE = re.compile(r"[a-z0-9][a-z0-9._-]*")
 # One accepted --ts shape on every python (fromisoformat widened in 3.11): date, time, fraction, offset.
 STAMP_RE = re.compile(r"(\d{4}-\d\d-\d\d)[T ](\d\d:\d\d)(?::(\d\d)(?:[.,](\d+))?)?"
@@ -324,6 +388,8 @@ TUNING_KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_p
 SCORE_KEYS = ("throughput", "runningHours", "merges", "tokensPerMerge", "setAsideRate", "conflictRate",
               "quotaStalls", "handsOffRate", "quality", "reviewChurn")
 APPLIED_KEYS = ("key", "from", "to", "ranAt", "rule", "evidence", "agreeing")
+# p21-7: `agreed`, the weekly agreement (the Agreement rule), on every entry of a non-void auto landing only
+APPLIED_OPTIONAL = ("agreed",)
 MAX_APPLIED = 8
 BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "dependency-bound", "none-clear")
 # a close line's `close` (p21-6): the close that wrote it, through close-score.py and tune.py --close
@@ -375,8 +441,8 @@ def _applied(v):
     if not isinstance(v, list) or len(v) > MAX_APPLIED:
         return "a list of at most %d entries" % MAX_APPLIED
     for e in v:
-        if not isinstance(e, dict) or set(e) != set(APPLIED_KEYS):
-            return "a list of objects with exactly the keys %s" % ", ".join(APPLIED_KEYS)
+        if not isinstance(e, dict) or not set(APPLIED_KEYS) <= set(e) <= set(APPLIED_KEYS + APPLIED_OPTIONAL):
+            return "a list of objects with exactly the keys %s (and agreed? only)" % ", ".join(APPLIED_KEYS)
         if e["key"] not in TUNING_KEYS:
             return "a list whose key is one of %s" % ", ".join(TUNING_KEYS)
         for k in ("from", "to", "ranAt"):
@@ -390,7 +456,90 @@ def _applied(v):
             return "a list whose evidence is a non-empty string of at most 300 characters"
         if _int(0)(e["agreeing"]):
             return "a list whose agreeing is an integer >= 0"
+        if "agreed" in e and _int(1)(e["agreed"]):
+            return "a list whose agreed is an integer >= 1"
     return None
+
+
+# ---- the weekly reading's kinds (skills/reflect/scripts/reflect.py; p21-7, ADR 0037 d3-d5) --------------------
+
+# The kinds that land in reflections.jsonl: no rollout, no task (the Files rule).
+REFLECTION_KINDS = ("watch", "watch-raised", "proposal", "reflection")
+RULE_MAX = 120             # a Watch's rule and shape
+MAX_ROLLOUTS = 64          # a watch's or proposal's rollouts
+VIAS = ("recurring", "confirmed", "declined")
+ALTITUDES = ("knob", "rule", "bug")
+COUNT_KEYS = ("sightings", "newWatches", "rules", "bugs", "filed", "knobs", "landed", "reverted", "breaches")
+CADENCES = (7, 14)
+REFLECTION_ID_RE = re.compile(r"r-[A-Za-z0-9._-]+\Z")
+TUNING_ID_RE = re.compile(r"t-[A-Za-z0-9._-]+\Z")
+
+
+def watch_id(rule, shape):
+    """A Watch's id: the first 8 hex of sha1 over the stripped rule, a newline and the stripped shape (Chorus's
+    watch_id, re-implemented: the Watch rule)."""
+    return hashlib.sha1(("%s\n%s" % (rule.strip(), shape.strip())).encode("utf-8")).hexdigest()[:8]
+
+
+def knob_key(repo, key, rule, direction):
+    """A knob proposal's id across Reflections: sha1 over "knob", the repo lowercased, the key, the rule and the
+    direction, one per line; its first 8 hex."""
+    text = "knob\n%s\n%s\n%s\n%s" % (repo.lower(), key, rule, direction)
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+
+
+def _rid(v):
+    return None if isinstance(v, str) and REFLECTION_ID_RE.match(v) else "an r- id (a Reflection's)"
+
+
+def _tid(v):
+    return None if isinstance(v, str) and TUNING_ID_RE.match(v) else "a t- id (a tuning line's)"
+
+
+def _true(v):
+    return None if v is True else "true (omit it otherwise)"
+
+
+def _short(n):
+    def check(v):
+        return None if isinstance(v, str) and v.strip() and len(v) <= n else "a non-empty string of at most %d characters" % n
+    return check
+
+
+def _slugs(lo, hi):
+    def check(v):
+        if not isinstance(v, list) or not lo <= len(v) <= hi:
+            return "a list of %d to %d rollout slugs" % (lo, hi)
+        for x in v:
+            if not isinstance(x, str) or not SLUG_RE.fullmatch(x) or x in RESERVED:
+                return "a list of rollout slugs ([a-z0-9][a-z0-9._-]*, none reserved)"
+        if len(set(v)) != len(v):
+            return "a list of distinct rollout slugs"
+        return None
+    return check
+
+
+def _stampz(v):
+    return None if _utcz(v) else "a UTC Z stamp"
+
+
+def _counts(v):
+    if not isinstance(v, dict) or set(v) != set(COUNT_KEYS):
+        return "an object with exactly the keys %s" % ", ".join(COUNT_KEYS)
+    for k in COUNT_KEYS:
+        if _int(0)(v[k]):
+            return "an object with %s an integer >= 0" % k
+    return None
+
+
+def _cadence(v):
+    return None if isinstance(v, int) and not isinstance(v, bool) and v in CADENCES else "7 or 14"
+
+
+def _direction(v):
+    return None if isinstance(v, int) and not isinstance(v, bool) and v in (1, -1) else "1 or -1"
+
+
 HOLDS = ("merge", "git-env", "race")
 # kind -> (task required, required fields, optional fields)
 KINDS = {
@@ -435,7 +584,20 @@ KINDS = {
     "handed-back": (True, {"via": _enum("answer", "descope", "retry"), "arm": _enum("run", "integration")}, {}),
     "race-decided": (True, {"mark": _enum("RACE", "UNVERIFIED"), "by": _enum("resume", "hand-back", "auto-retry")}, {}),
     "tuning": (False, {"id": _str, "repo": _str, "window": _window, "scores": _scores, "applied": _applied},
-               {"binding": _enum(*BINDINGS), "voids": _str, "close": _enum(*CLOSES)}),
+               {"binding": _enum(*BINDINGS), "voids": _str, "close": _enum(*CLOSES), "auto": _true,
+                "reflection": _rid, "reverts": _tid}),
+    "watch": (False, {"id": _str, "rule": _short(RULE_MAX), "shape": _short(RULE_MAX),
+                      "rollouts": _slugs(1, MAX_ROLLOUTS), "count": _int(1), "reflection": _rid}, {}),
+    "watch-raised": (False, {"id": _str, "reflection": _rid, "via": _enum(*VIAS)}, {}),
+    "proposal": (False, {"id": _str, "altitude": _enum(*ALTITUDES), "reflection": _rid,
+                         "rollouts": _slugs(1, MAX_ROLLOUTS)},
+                 {"repo": _str, "key": _enum(*TUNING_KEYS), "rule": _str, "shape": _short(RULE_MAX),
+                  "direction": _direction, "from": _int(1), "to": _int(1), "ranAt": _int(1), "landed": _bool,
+                  "auto": _true, "tuning": _tid, "reverts": _tid, "held": _short(300), "vaultTask": _str,
+                  "filed": _bool, "fixes": _str}),
+    "reflection": (False, {"id": _rid, "since": _stampz, "until": _stampz, "rollouts": _slugs(0, 4096),
+                           "escapesOnly": _slugs(0, 4096), "counts": _counts, "quiet": _bool},
+                   {"decisionTask": _str, "cadence": _cadence}),
 }
 
 
@@ -549,6 +711,63 @@ def _check_fields(kind, fields):
     if kind == "review-verdict" and fields["original"] + fields["regression"] > fields["findings"]:
         raise Refused("review-verdict: original + regression (%d + %d) exceed findings (%d)"
                       % (fields["original"], fields["regression"], fields["findings"]))
+    if kind == "tuning":
+        _check_tuning(fields)
+    elif kind == "watch":
+        if fields["rule"] != fields["rule"].strip() or fields["shape"] != fields["shape"].strip():
+            raise Refused("watch: rule and shape are stored stripped")
+        if fields["id"] != watch_id(fields["rule"], fields["shape"]):
+            raise Refused("watch: id %r is not watch_id(rule, shape) %r" % (fields["id"], watch_id(fields["rule"], fields["shape"])))
+    elif kind == "proposal":
+        _check_proposal(fields)
+
+
+def _check_tuning(f):
+    """The auto rules (the Files' Auto bullet): auto <=> reflection; reverts => auto with one entry; agreed only on an
+    auto line without reverts, and on every entry of a non-void auto landing; never auto and close on one line."""
+    auto = f.get("auto") is True
+    if auto != ("reflection" in f):
+        raise Refused("tuning: auto and reflection go together (the weekly reading's landing carries both)")
+    if "reverts" in f and (not auto or len(f["applied"]) != 1):
+        raise Refused("tuning: reverts needs auto and exactly one applied entry")
+    if auto and "close" in f:
+        raise Refused("tuning: a line is never both auto and a close line")
+    has_agreed = [e for e in f["applied"] if "agreed" in e]
+    if has_agreed and (not auto or "reverts" in f):
+        raise Refused("tuning: agreed is only on an auto landing's entries (never a pick, a record-only or a revert)")
+    if auto and "reverts" not in f and "voids" not in f and len(has_agreed) != len(f["applied"]):
+        raise Refused("tuning: every entry of an auto landing carries agreed")
+
+
+def _check_proposal(f):
+    """Each altitude's fields (the catalogue's proposal entry)."""
+    alt = f["altitude"]
+    need = {"knob": ("repo", "key", "rule", "direction", "from", "to", "ranAt", "landed"),
+            "rule": ("rule", "shape", "vaultTask"),
+            "bug": ("rule", "shape", "vaultTask", "filed")}[alt]
+    missing = [k for k in need if k not in f]
+    if missing:
+        raise Refused("proposal: a %s proposal needs %s" % (alt, ", ".join(missing)))
+    if "landed" in f and alt != "knob":
+        raise Refused("proposal: landed is a knob's field")
+    if "filed" in f and alt != "bug":
+        raise Refused("proposal: filed is a bug's field")
+    if alt == "knob":
+        if len(f["rule"]) > 64:
+            raise Refused("proposal: a knob's rule is at most 64 characters")
+        want = knob_key(f["repo"], f["key"], f["rule"], f["direction"])
+        if f["id"] != want:
+            raise Refused("proposal: id %r is not knob_key(repo, key, rule, direction) %r" % (f["id"], want))
+    else:
+        if len(f["rule"]) > RULE_MAX or f["rule"] != f["rule"].strip() or f["shape"] != f["shape"].strip():
+            raise Refused("proposal: a %s's rule and shape are stored stripped, at most %d characters" % (alt, RULE_MAX))
+        want = watch_id(f["rule"], f["shape"])
+        if f["id"] != want:
+            raise Refused("proposal: id %r is not watch_id(rule, shape) %r" % (f["id"], want))
+    if "auto" in f and not ((alt == "knob" and f.get("landed") is True) or (alt == "bug" and f.get("filed") is True)):
+        raise Refused("proposal: auto is only on a landed knob or a filed bug")
+    if "held" in f and not (alt == "knob" and f.get("landed") is False):
+        raise Refused("proposal: held is only on an unlanded knob")
 
 
 # ---- review-verdict's identity (p21-3) -------------------------------------------------------------------
@@ -664,7 +883,8 @@ def _write(path, data, new, kind):
 
 # ---- emit ------------------------------------------------------------------------------------------------
 
-def _emit(rollout, kind, task, fields, ts, env):
+def _prepare(rollout, kind, task, fields, ts):
+    """Every refusal emit makes, in its order: [(file name, line bytes)] to append, or Refused. Writes nothing."""
     if not isinstance(kind, str) or kind not in KINDS:
         raise Refused("unknown kind %r (known: %s)" % (kind, ", ".join(sorted(KINDS))))
     if fields is None:
@@ -676,6 +896,9 @@ def _emit(rollout, kind, task, fields, ts, env):
     if kind == "review-round":
         if rollout is not None or task is not None:
             raise Refused("review-round has no rollout or task (it lands in reviews.jsonl)")
+    elif kind in REFLECTION_KINDS:
+        if rollout is not None or task is not None:
+            raise Refused("%s has no rollout or task (it lands in %s.jsonl)" % (kind, REFLECTIONS))
     else:
         if rollout is None:
             raise Refused("%s: a rollout is required" % kind)
@@ -705,19 +928,31 @@ def _emit(rollout, kind, task, fields, ts, env):
         targets = [old, rollout]
     _check_fields(kind, fields)
     stamp, host = _stamp(ts), _host()
-    lines = [(r, _line(stamp, host, r, task, kind, fields)) for r in targets]
+    out = []
+    for r in targets:
+        name = REFLECTIONS if kind in REFLECTION_KINDS else REVIEWS if r is None else TUNINGS if kind == "tuning" else r
+        out.append((name, _line(stamp, host, r, task, kind, fields)))
+    return out
+
+
+def _emit(rollout, kind, task, fields, ts, env):
+    lines = _prepare(rollout, kind, task, fields, ts)
     try:
         base = events_dir(env)
     except Exception as e:
         _say("warning: cannot write the run record: %s" % e)
         return False
     ok = True
-    for r, data in lines:
-        name = REVIEWS if r is None else TUNINGS if kind == "tuning" else r
+    for name, data in lines:
         path = os.path.join(base, name + ".jsonl")
         new = json.loads(data)
         ok = _write(path, data, new, kind) and ok
     return ok
+
+
+def check(rollout, kind, task=None, fields=None, *, ts=None):
+    """Raise Refused exactly where emit would refuse (its message the same); write nothing, print nothing."""
+    _prepare(rollout, kind, task, fields, ts)
 
 
 def emit(rollout, kind, task=None, fields=None, *, ts=None, env=None, strict=False):

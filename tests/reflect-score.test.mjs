@@ -1277,3 +1277,58 @@ test('(k) review churn: the breach is decided from the integer sums, not the rou
   const over = breach(40, 100001, 60000, 40001)
   assert.deepEqual([over.value, over.breached], [0.4, true])
 })
+
+// ---- the weekly reading's reads (p21-7, ADR 0037 d5) ----------------------------------------------------------------
+// ranAt is each key's ran-at value, computed once; a spread is flagged only for a key a proposal uses. An auto line's
+// applied entries (with agreed) count like a pick's; a close line adds nothing. landed_from is the landed set's one rule.
+
+test('ranAt holds the ceiling and each cap, a spread included; a spread on an unproposed key adds no flag', (t) => {
+  const home = tmpHome(t)
+  const caps = [4, 4, 6]
+  emitAll(home, 'demo', byTs(saturated(3, { settings: (i) => S(3, { max_review_rounds: caps[i], max_iterations: 2 }) })))
+  const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 3 })])
+  assert.deepEqual(out.ranAt, { parallel_ceiling: 3, max_review_rounds: 4, max_iterations: 2, max_plan_rounds: 3 })
+  assert.ok(!out.proposals.concat(out.withheld).some((p) => p.key === 'max_review_rounds'), 'no review-rounds proposal')
+  assert.ok(!has(out.flags, /task override/), `no spread flag for an unproposed key: ${JSON.stringify(out.flags)}`)
+})
+
+test('an auto line with agreed gives the same agreeing, ranAtCause and baseline as a pick line; a close line adds nothing', (t) => {
+  const run = (over) => {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', byTs(saturated(3)))
+    emitAll(home, 'older-run', [[at('02:00'), 'tuning', null, {
+      id: 't-prior', repo: 'o/r', window: { since: D(4, '00:00'), until: D(4, '10:00'), activeStart: D(4, '00:00'), activeEnd: D(4, '09:00'), partial: false },
+      scores: SC(), applied: [{ key: 'parallel_ceiling', from: 3, to: 4, ranAt: 3, rule: 'slot-bound-raise', evidence: 'Slot-bound', agreeing: 0 }],
+      ...over,
+    }]])
+    const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 })])
+    const [w] = out.withheld
+    return [w.agreeing, w.ranAtCause, out.baseline && out.baseline.id]
+  }
+  const pick = run({})
+  assert.deepEqual(pick, [1, `Tuning t-prior moved it on ${Z(at('02:00'))}`, 't-prior'])
+  const auto = run({ auto: true, reflection: 'r-20261005T000000Z-abcdef',
+    applied: [{ key: 'parallel_ceiling', from: 3, to: 4, ranAt: 3, rule: 'slot-bound-raise', evidence: 'Slot-bound', agreeing: 2, agreed: 3 }] })
+  assert.deepEqual(auto, pick)
+  const close = run({ applied: [], close: 'completion' })
+  assert.equal(close[0], 0, 'a close line\'s empty applied never agrees')
+  assert.equal(close[2], 't-prior', 'and it still serves as the baseline')
+})
+
+test('landed_from: the same escapes.landed and pr-conflict flag as the score, and a pure function', (t) => {
+  const home = tmpHome(t)
+  const ev = life('t1', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] })
+  ev.push([at('02:20'), 'merged', 't1', { pr: 8 }])
+  emitAll(home, 'demo', byTs([...ev, ...life('t2', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:10'), at('02:30')] })]))
+  const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 2 })])
+  assert.equal(out.escapes.landed, out.merges.count)
+  assert.ok(has(out.flags, /^escapes: \[\[t1\]\]'s merged lines carry 2 different prs \(7, 8\): the latest is read$/), JSON.stringify(out.flags))
+  const body = ['import importlib.util, json, sys', 'spec = importlib.util.spec_from_file_location("s", sys.argv[1])',
+    's = importlib.util.module_from_spec(spec); spec.loader.exec_module(s)',
+    'print(json.dumps(s.landed_from([(1, "a", 7, False), (2, "a", None, False), (3, "b", "#9", True), (9, "c", 1, False)], 0, 5)))'].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', body, SCORE], { encoding: 'utf8', cwd: home, env: baseEnv(home) })
+  assert.equal(r.status, 0, r.stderr)
+  const [landed, flags] = JSON.parse(r.stdout)
+  assert.deepEqual(Object.keys(landed).sort(), ['a', 'b'])
+  assert.deepEqual([landed.a.pr, landed.b.readOnly, flags], [7, true, []])
+})

@@ -1,15 +1,51 @@
 #!/usr/bin/env python3
-"""tune.py — land the Tunings Lachy picked from a Reflection, and record the Reflection (p15-5, ADR 0032).
+"""tune.py — land the Tunings Lachy picked from a by-hand Reflection, or the knobs the weekly reading lands or reverts on
+its own (ADR 0037 d5), and record each (p15-5, ADR 0032).
 
-python >= 3.8, stdlib only. The only writer of rollouts.toml and of tunings.jsonl. Two callers (ADR 0037 d4):
-skills/reflect/SKILL.md (step 7) runs it exactly once per Reflection that reached its scores, and
-skills/reflect/scripts/close-score.py runs `--record-only --close <kind>` once at each rollout's close (its completion
-ceremony, or its supersede):
+python >= 3.8, stdlib only (score.py, which it loads, keeps the same floor). The only writer of rollouts.toml and of
+tunings.jsonl. Three callers (ADR 0037 d4-d5): skills/reflect/SKILL.md step 7 runs it exactly once per by-hand
+Reflection that reached its scores; skills/reflect/scripts/close-score.py runs `--record-only --close <kind>` once at
+each rollout's close (its completion ceremony, or its supersede); and SKILL.md step 14 (the weekly reading) runs
+`--revert` then `--auto`, zero or more times per repo:
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --scores <score.json|-> \\
-        (--pick p1[,p2...] --repo <dir> | --record-only [--close completion|supersede]) [--config <path>] [--dry-run]
+        (--pick p1[,p2...] --repo <dir> | --record-only [--close completion|supersede] |
+         --auto --repo <dir> --reflection <id> | --revert <tuning id> --repo <dir> --reflection <id>)
+        [--config <path>] [--dry-run]
 
---scores is score.py's JSON. --pick and --record-only are mutually exclusive and one is required.
+--scores is score.py's JSON. --pick, --record-only, --auto and --revert are mutually exclusive and one is required.
+--reflection (an r- id, the weekly reading's) is required with --auto and --revert and refused with the other two (exit
+2, nothing written); --close with --auto or --revert is refused by --close's own rule (it needs --record-only).
+
+Reads: --scores; rollouts.toml through rollout-settings.py (resolve() and _origin_slug()); tunings.jsonl (close_line()
+for --close; for --auto and --revert, score.py's load_tunings(): a key's last move and the auto lines); and, for --auto
+and --revert, reflections.jsonl at reflections_path() (run_record's events directory; the closed check and the
+agreement): a missing file is no earlier Reflection, a line that does not parse is skipped, and a file that exists but
+cannot be read prints `tune: reflections.jsonl cannot be read: ...` and exits 1, nothing written (as does an
+unresolvable events directory, `tune: cannot resolve the events directory: ...`). Both modes refuse a --reflection that
+already has its `reflection` (close) line: exit 2, `Reflection <id> is closed`.
+
+--auto --repo <dir> --reflection <id> (ADR 0037 d5) lands every proposal in scores.proposals that passes auto_check(),
+as ONE tuning line stamped `auto: true` and `reflection`. auto_check's checks run in order, and the first that fails is
+the reason: (1) no trade and no caution (Lachy's call, ADR 0037 d1); (2) no Guardrail breached and the window not
+partial; (3) ranAt == from (a landing steps one past the value the run ran at, never a jump); (4) no auto line of this
+Reflection has already moved the key (a revert included); (5) the agreement is at least AGREE (3): run_record.py's
+Agreement rule, closed earlier Reflections' knob lines since the key's last move, each counted when it names a rollout
+not yet seen, plus this proposal when its rollout is new; lines from the Reflection whose auto line made the last move
+are that move's evidence and never count again. Each entry records `agreeing` (the proposal's own, score.py's count)
+and `agreed` (the agreement). A held proposal prints `held <key>: <reason>` (`agreement <n> of 3`, say); with nothing
+eligible it exits 0 and writes nothing. The write is --pick's, below, with the same checks.
+
+--revert <tuning id> --repo <dir> --reflection <id> undoes an auto landing a later run finds breaching. revert_check()
+passes only when the id is a non-voided auto line of this repo that is no revert and whose entry is not reverted yet;
+rollouts.toml still holds the entry's `to` (a hand edit since is left alone); this score's `ranAt[key]` is that `to`,
+in a window whose activeStart is after the auto line and that is not partial; and a breached Guardrail is among
+score.py's RULE_EFFECTS risks for its rule. It lands to = the entry's `from` as one auto line with `reverts: <id>`, rule
+`revert:<rule>` (so it never counts toward <rule>) and `agreeing` = score.py's agreeing() for that rule and the reverse
+direction; it carries no `agreed`. An auto line that moved several keys is reverted one key per call. A revert is never
+reverted. A refusal is exit 2, nothing written.
+
+Void lines (a replace failure, below) in --auto or --revert carry the same `auto` and `reflection`, never `close`.
 
 --record-only writes ONE `tuning` line (applied: []) through run_record.emit and never reads or touches the
 config: every Reflection leaves its scores as the next Reflection's baseline. A line's `scores` are score.py's
@@ -60,10 +96,11 @@ On success stdout names the line's id and file, then one line per Tuning: `appli
 <repo>: takes effect at the next /thread:schedule (or --regenerate); a rollout note already stamped keeps its
 own values`.
 
-Exit codes: 0 applied, recorded, already recorded (a --close run whose rollout has its close line), or not recorded
-for a null repo; 1 a write failed (nothing applied, or the line voided), or tunings.jsonl cannot be read for --close;
-2 refused (usage, scores, picks, identity, a stale from, a refused or unvalidated config); 3 no tomllib for a present
-config.
+Exit codes: 0 applied, recorded, already recorded (a --close run whose rollout has its close line), not recorded
+for a null repo, or nothing eligible under --auto (each `held` line printed); 1 a write failed (nothing applied, or the
+line voided), tunings.jsonl cannot be read for --close, --auto or --revert, or reflections.jsonl cannot be read; 2
+refused (usage, scores, picks, identity, a stale from, a refused or unvalidated config, a closed Reflection, a revert
+revert_check refuses); 3 no tomllib for a present config.
 """
 from __future__ import annotations
 
@@ -97,7 +134,10 @@ def _load(name, path):
 
 RR = _load("thread_run_record", os.path.join(SHARED, "run_record.py"))
 RS = _load("thread_rollout_settings", os.path.join(SHARED, "rollout-settings.py"))
+# score.py (python >= 3.8 too): RULE_EFFECTS for --revert, load_tunings() and agreeing() for --auto and --revert
+SCORE = _load("thread_score", os.path.join(HERE, "score.py"))
 CLOSES = RR.CLOSES  # completion | supersede: the close that wrote a line (run_record.py's Close rule)
+AGREE = 3  # ADR 0037 d5: a knob lands once three Reflections agree (run_record.py's Agreement rule)
 
 
 class Stop(Exception):
@@ -128,7 +168,8 @@ def read_scores(src):
     return doc
 
 
-def line_fields(scores, applied, tid, voids=None, close=None):
+def line_fields(scores, applied, tid, voids=None, close=None, auto=None):
+    """A tuning line's fields. `auto` is the weekly reading's stamp ({auto, reflection[, reverts]}), never with close."""
     w = scores["window"]
     fields = {"id": tid, "repo": scores["repo"],
               "window": {k: w[k] for k in ("since", "until", "activeStart", "activeEnd", "partial") if k in w},
@@ -140,6 +181,8 @@ def line_fields(scores, applied, tid, voids=None, close=None):
         fields["voids"] = voids
     if close:
         fields["close"] = close
+    if auto:
+        fields.update(auto)
     return fields
 
 
@@ -176,6 +219,158 @@ def close_line(rollout, path=None):
                 d.get("id") not in voided:
             return d
     return None
+
+
+def reflections_path():
+    """reflections.jsonl under run_record's events directory (ValueError when it cannot be resolved)."""
+    return os.path.join(RR.events_dir(), RR.REFLECTIONS + ".jsonl")
+
+
+def read_reflections(path=None):
+    """reflections.jsonl's lines (dicts) in file order: a line that does not parse is skipped, a missing file is [],
+    and a file that exists but cannot be read raises OSError."""
+    path = path or reflections_path()
+    try:
+        f = open(path, "rb")
+    except FileNotFoundError:
+        return []
+    out = []
+    with f:
+        for raw in f:
+            try:
+                d = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(d, dict):
+                out.append(d)
+    return out
+
+
+def _ms(stamp):
+    try:
+        return SCORE.to_ms(stamp)
+    except Exception:
+        return None
+
+
+def _moves(tunings, repo, key):
+    """The non-voided tuning lines for `repo` (case ignored) with an applied entry on `key`: picks, auto landings and
+    reverts alike (a close line's applied is [], so it never moves a key)."""
+    return [d for d in tunings if not d["_voided"] and d["repo"].lower() == repo.lower() and
+            any(isinstance(e, dict) and e.get("key") == key for e in d.get("applied") or [])]
+
+
+def agreement(scores, proposal, reflection, tunings, reflections):
+    """The weekly agreement on a knob (run_record.py's Agreement rule), an int: the agreeing earlier knob lines plus
+    one when this proposal's rollout is new."""
+    repo, key = scores["repo"], proposal["key"]
+    kid = RR.knob_key(repo, key, proposal["rule"], proposal["direction"])
+    moves = _moves(tunings, repo, key)
+    last = max(moves, key=lambda d: d["_t"]) if moves else None
+    last_t = last["_t"] if last else None
+    mover = last.get("reflection") if last and last.get("auto") is True else None
+    closed = {d.get("id") for d in reflections if d.get("kind") == "reflection"}
+    seen, agreeing = set(), 0
+    for d in reflections:
+        if d.get("kind") != "proposal" or d.get("altitude") != "knob" or d.get("id") != kid:
+            continue
+        r = d.get("reflection")
+        if r == reflection or r not in closed or r == mover:
+            continue
+        t = _ms(d.get("ts"))
+        if t is None or (last_t is not None and t <= last_t):
+            continue
+        rollouts = [x for x in d.get("rollouts") or [] if isinstance(x, str)]
+        if any(x not in seen for x in rollouts):
+            agreeing += 1
+        seen.update(rollouts)
+    return agreeing + (0 if scores["rollout"] in seen else 1)
+
+
+def auto_check(scores, proposal, reflection, tunings, reflections):
+    """(ok, reason, agreed) for one of score.py's proposals under --auto: the first check that fails is the reason, in
+    order (1) no trade and no caution, (2) no Guardrail breached and the window not partial, (3) ranAt == from, (4) no
+    auto line of this Reflection has moved the key yet (a revert included), (5) agreement >= AGREE. `agreed` is the
+    agreement once (5) is reached, else None. Pure: reflect.py's span calls it with the same reads."""
+    if proposal.get("trade"):
+        t = proposal["trade"]
+        return False, "a trade (gains %s, costs %s): Lachy decides" % (
+            ", ".join(t.get("gains") or []), ", ".join(t.get("costs") or [])), None
+    if proposal.get("caution"):
+        return False, "a caution: Lachy decides", None
+    breached = sorted(k for k, v in (scores.get("guardrails") or {}).items() if isinstance(v, dict) and v.get("breached"))
+    if breached:
+        return False, "a Guardrail is breached (%s)" % ", ".join(breached), None
+    if (scores.get("window") or {}).get("partial") is True:
+        return False, "a partial window (the run's tail has not landed)", None
+    if proposal.get("ranAt") != proposal.get("from"):
+        return False, "from %s is not the value the run ran at (%s)" % (proposal.get("from"), proposal.get("ranAt")), None
+    for d in _moves(tunings, scores["repo"], proposal["key"]):
+        if d.get("auto") is True and d.get("reflection") == reflection:
+            return False, "Reflection %s already moved %s (%s)" % (reflection, proposal["key"], d.get("id")), None
+    n = agreement(scores, proposal, reflection, tunings, reflections)
+    if n < AGREE:
+        return False, "agreement %d of %d" % (n, AGREE), n
+    return True, None, n
+
+
+def reverted(tunings):
+    """{(auto line id, key)} every non-voided revert line undoes."""
+    out = set()
+    for d in tunings:
+        if d["_voided"] or not isinstance(d.get("reverts"), str):
+            continue
+        for e in d.get("applied") or []:
+            if isinstance(e, dict):
+                out.add((d["reverts"], e.get("key")))
+    return out
+
+
+def revert_check(scores, tid, tunings, now_values):
+    """(entry, None) for the first entry of auto line `tid` a revert may undo now, else (None, why). `now_values` is
+    rollouts.toml's resolved {key: value} for the repo (rollout-settings.py). It passes only when the id is a
+    non-voided auto line of this repo that is no revert, the entry is not reverted yet, rollouts.toml still holds its
+    `to`, this score ran at that `to` (ranAt) in a window that started after the auto line and is not partial, and a
+    breached Guardrail is among score.py's RULE_EFFECTS risks for its rule. An auto line that moved several keys is
+    reverted one key per call."""
+    line = next((d for d in tunings if d.get("id") == tid), None)
+    if line is None:
+        return None, "%s is no tuning line" % tid
+    if line["_voided"] or line.get("auto") is not True:
+        return None, "%s is not a standing auto line (only the weekly reading's own landing is reverted unasked)" % tid
+    if isinstance(line.get("reverts"), str):
+        return None, "%s is itself a revert: a revert is never reverted" % tid
+    if line["repo"].lower() != (scores.get("repo") or "").lower():
+        return None, "%s is %s's, but the scores are for %s" % (tid, line["repo"], scores.get("repo"))
+    window = scores.get("window") or {}
+    if window.get("partial") is True:
+        return None, "a partial window (the run's tail has not landed)"
+    start = _ms(window.get("activeStart"))
+    if start is None or start <= line["_t"]:
+        return None, "the scored run started before %s landed: it is no evidence against it" % tid
+    breached = [k for k, v in (scores.get("guardrails") or {}).items() if isinstance(v, dict) and v.get("breached")]
+    done, why = reverted(tunings), None
+    for e in line.get("applied") or []:
+        key = e.get("key")
+        if (tid, key) in done:
+            why = why or "%s's %s is already reverted" % (tid, key)
+            continue
+        if now_values.get(key) != e.get("to"):
+            why = why or "rollouts.toml no longer holds %s's %s %s (it is %s now): a hand edit, left alone" % (
+                tid, key, e.get("to"), now_values.get(key))
+            continue
+        if (scores.get("ranAt") or {}).get(key) != e.get("to"):
+            why = why or "this run did not run at %s's %s %s (ran at %s)" % (tid, key, e.get("to"),
+                                                                            (scores.get("ranAt") or {}).get(key))
+            continue
+        risks = SCORE.RULE_EFFECTS.get(e.get("rule"), SCORE.UNDECLARED_EFFECT)[1]
+        hit = [k for k in breached if k in risks]
+        if not hit:
+            why = why or "no breached Guardrail is among %s's risks (breached: %s)" % (e.get("rule"),
+                                                                                       ", ".join(breached) or "none")
+            continue
+        return dict(e, breached=hit), None
+    return None, why or "%s applied nothing" % tid
 
 
 def emit(scores, fields):
@@ -319,6 +514,34 @@ def record_only(scores, dry_run, close=None):
     return 0
 
 
+def _identity(scores, repo, flag):
+    """The --repo checks every config write shares: a directory whose GitHub origin is scores.repo (ignoring case)."""
+    if repo is None:
+        raise Stop("%s needs --repo <dir> (the clone whose GitHub origin names the repo)" % flag, 2)
+    repo = os.path.expanduser(repo)
+    if not os.path.isdir(repo):
+        raise Stop("--repo %s is not a directory" % repo, 2)
+    if scores.get("repo") is None:
+        raise Stop("the scores carry no repo: nothing can be tuned", 2)
+    try:
+        origin = RS._origin_slug(repo)
+    except RS.SettingsError as e:
+        raise Stop(str(e), 2)
+    if origin is None:
+        raise Stop("--repo %s has no GitHub origin (land.sh exit 4): nothing can be tuned" % repo, 2)
+    if origin.lower() != scores["repo"].lower():
+        raise Stop("--repo %s is %s, but the scores are for %s" % (repo, origin, scores["repo"]), 2)
+    return repo
+
+
+def _resolve(repo, config):
+    config = os.path.expanduser(config or RS.default_path())
+    try:
+        return config, RS.resolve(repo=repo, path=config)
+    except RS.SettingsError as e:
+        raise Stop("rollout-settings: %s" % e, e.code)
+
+
 def pick(scores, picks_arg, repo, config, dry_run):
     ids = []
     for x in picks_arg.split(","):
@@ -343,37 +566,29 @@ def pick(scores, picks_arg, repo, config, dry_run):
     for p in picks:
         if p.get("key") not in RS.KEYS or not all(isinstance(p.get(k), int) for k in ("from", "to", "ranAt")):
             raise Stop("%s is not a well-formed proposal (key, from, to, ranAt)" % p.get("id"), 2)
-    if repo is None:
-        raise Stop("--pick needs --repo <dir> (the clone whose GitHub origin names the repo)", 2)
-    repo = os.path.expanduser(repo)
-    if not os.path.isdir(repo):
-        raise Stop("--repo %s is not a directory" % repo, 2)
-    if scores.get("repo") is None:
-        raise Stop("the scores carry no repo: nothing can be tuned", 2)
-    try:
-        origin = RS._origin_slug(repo)
-    except RS.SettingsError as e:
-        raise Stop(str(e), 2)
-    if origin is None:
-        raise Stop("--repo %s has no GitHub origin (land.sh exit 4): nothing can be tuned" % repo, 2)
-    if origin.lower() != scores["repo"].lower():
-        raise Stop("--repo %s is %s, but the scores are for %s" % (repo, origin, scores["repo"]), 2)
-    config = os.path.expanduser(config or RS.default_path())
-    try:
-        before = RS.resolve(repo=repo, path=config)
-    except RS.SettingsError as e:
-        raise Stop("rollout-settings: %s" % e, e.code)
-    for p in picks:
-        now = before["settings"][p["key"]]["value"]
-        if now != p["from"]:
+    repo = _identity(scores, repo, "--pick")
+    config, before = _resolve(repo, config)
+    applied = [{"key": p["key"], "from": p["from"], "to": p["to"], "ranAt": p["ranAt"],
+                "rule": str(p.get("rule"))[:64], "evidence": str(p.get("evidence"))[:300],
+                "agreeing": p.get("agreeing") if isinstance(p.get("agreeing"), int) else 0} for p in picks]
+    return _apply(scores, applied, [p["id"] for p in picks], repo, config, before, dry_run)
+
+
+def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
+    """Land `applied` (tuning entries) in rollouts.toml and record them as ONE tuning line (pick, --auto and --revert
+    share it): each entry's `from` must be the key's value now, then the edit, its validation, the line, the replace."""
+    for e, name in zip(applied, names):
+        now = before["settings"][e["key"]]["value"]
+        if now != e["from"]:
             raise Stop("%s's from is stale: %s is %d now, not %d (re-run the Reflection's score)"
-                       % (p["id"], p["key"], now, p["from"]), 2)
+                       % (name, e["key"], now, e["from"]), 2)
     real = os.path.realpath(config)
     try:
         text = open(real, encoding="utf-8").read() if os.path.exists(real) else ""
         read = RS._ladder().read_toml(config)
     except Exception as e:
         raise Stop("cannot read %s: %s" % (config, e), 2)
+    picks = [{"key": e["key"], "to": e["to"]} for e in applied]
     new_text = edit_text(text, scores["repo"], picks, read[1] if read else None)
     created = Created(os.path.dirname(real))
     tmp = None
@@ -396,10 +611,7 @@ def pick(scores, picks_arg, repo, config, dry_run):
         if after["guardrails"] != before["guardrails"]:
             raise Stop("the edit changes the Guardrails: nothing written", 2)
         tid = new_id()
-        applied = [{"key": p["key"], "from": p["from"], "to": p["to"], "ranAt": p["ranAt"],
-                    "rule": str(p.get("rule"))[:64], "evidence": str(p.get("evidence"))[:300],
-                    "agreeing": p.get("agreeing") if isinstance(p.get("agreeing"), int) else 0} for p in picks]
-        fields = line_fields(scores, applied, tid)
+        fields = line_fields(scores, applied, tid, auto=auto)
         if dry_run:
             diff = difflib.unified_diff(text.splitlines(True), new_text.splitlines(True), config, config + " (tuned)")
             sys.stdout.write("".join(diff))
@@ -417,8 +629,9 @@ def pick(scores, picks_arg, repo, config, dry_run):
             created.undo()
             vid = new_id()
             ok = False
+            void_auto = {k: v for k, v in (auto or {}).items() if k in ("auto", "reflection")}  # never reverts
             try:
-                ok = RR.emit(scores["rollout"], "tuning", fields=line_fields(scores, [], vid, voids=tid))
+                ok = RR.emit(scores["rollout"], "tuning", fields=line_fields(scores, [], vid, voids=tid, auto=void_auto))
             except Exception:
                 ok = False
             if not ok:
@@ -442,6 +655,76 @@ def pick(scores, picks_arg, repo, config, dry_run):
     return 0
 
 
+def _reflection_open(reflection):
+    """reflections.jsonl's lines, once --reflection is known to have no `reflection` (close) line yet."""
+    try:
+        lines = read_reflections()
+    except ValueError as e:
+        raise Stop("cannot resolve the events directory: %s" % e, 1)
+    except OSError as e:
+        raise Stop("reflections.jsonl cannot be read: %s: nothing written" % e, 1)
+    if any(d.get("kind") == "reflection" and d.get("id") == reflection for d in lines):
+        raise Stop("Reflection %s is closed: nothing written" % reflection, 2)
+    return lines
+
+
+def _tunings():
+    try:
+        return SCORE.load_tunings(RR.events_dir())
+    except ValueError as e:
+        raise Stop("cannot resolve the events directory: %s" % e, 1)
+    except OSError as e:
+        raise Stop("tunings.jsonl cannot be read: %s: nothing written" % e, 1)
+
+
+def auto(scores, repo, reflection, config, dry_run):
+    """--auto: land every proposal that passes auto_check, as ONE auto line; print `held <key>: <reason>` for the rest."""
+    reflections = _reflection_open(reflection)
+    repo = _identity(scores, repo, "--auto")
+    tunings = _tunings()
+    land, keys = [], set()
+    for p in scores["proposals"]:
+        if not isinstance(p, dict) or p.get("key") not in RS.KEYS or \
+                not all(isinstance(p.get(k), int) for k in ("from", "to", "ranAt", "direction")):
+            print("held %s: not a well-formed proposal (key, from, to, ranAt, direction)" % (p.get("key") if isinstance(p, dict) else p))
+            continue
+        ok, reason, agreed = auto_check(scores, p, reflection, tunings, reflections)
+        if ok and p["key"] in keys:
+            ok, reason = False, "another proposal on %s lands first" % p["key"]
+        if not ok:
+            print("held %s: %s" % (p["key"], reason))
+            continue
+        keys.add(p["key"])
+        land.append((p, agreed))
+    if not land:
+        return 0
+    config, before = _resolve(repo, config)
+    applied = [{"key": p["key"], "from": p["from"], "to": p["to"], "ranAt": p["ranAt"], "rule": str(p.get("rule"))[:64],
+                "evidence": str(p.get("evidence"))[:300],
+                "agreeing": p.get("agreeing") if isinstance(p.get("agreeing"), int) else 0, "agreed": n} for p, n in land]
+    return _apply(scores, applied, [p["id"] for p, _n in land], repo, config, before, dry_run,
+                  auto={"auto": True, "reflection": reflection})
+
+
+def revert(scores, tid, repo, reflection, config, dry_run):
+    """--revert <tid>: undo one key of an auto line that this run finds breaching a Guardrail its rule risks."""
+    _reflection_open(reflection)
+    repo = _identity(scores, repo, "--revert")
+    tunings = _tunings()
+    config, before = _resolve(repo, config)
+    now_values = {k: before["settings"][k]["value"] for k in RS.KEYS}
+    e, why = revert_check(scores, tid, tunings, now_values)
+    if e is None:
+        raise Stop("%s is not reverted: %s: nothing written" % (tid, why), 2)
+    direction = 1 if e["to"] > e["from"] else -1
+    rule = ("revert:%s" % e.get("rule"))[:64]
+    entry = {"key": e["key"], "from": e["to"], "to": e["from"], "ranAt": e["to"], "rule": rule,
+             "evidence": ("revert %s: breaches %s, which %s risks" % (tid, ", ".join(e["breached"]), e.get("rule")))[:300],
+             "agreeing": SCORE.agreeing(tunings, scores["repo"], e["key"], rule, -direction)}
+    return _apply(scores, [entry], ["%s's %s" % (tid, e["key"])], repo, config, before, dry_run,
+                  auto={"auto": True, "reflection": reflection, "reverts": tid})
+
+
 class Parser(argparse.ArgumentParser):
     def error(self, message):
         say(message)
@@ -454,7 +737,10 @@ def main(argv):
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--pick")
     g.add_argument("--record-only", action="store_true")
+    g.add_argument("--auto", action="store_true")
+    g.add_argument("--revert", metavar="TUNING_ID")
     p.add_argument("--close", choices=CLOSES)
+    p.add_argument("--reflection")
     p.add_argument("--repo")
     p.add_argument("--config")
     p.add_argument("--dry-run", action="store_true")
@@ -462,10 +748,24 @@ def main(argv):
     if a.close and not a.record_only:
         say("--close needs --record-only")
         return 2
+    weekly = a.auto or a.revert is not None
+    if weekly and not a.reflection:
+        say("--auto and --revert need --reflection <id> (the weekly reading's)")
+        return 2
+    if a.reflection is not None and not weekly:
+        say("--reflection goes with --auto or --revert only")
+        return 2
+    if weekly and not RR.REFLECTION_ID_RE.match(a.reflection):
+        say("--reflection %s is no r- id" % a.reflection)
+        return 2
     try:
         scores = read_scores(a.scores)
         if a.record_only:
             return record_only(scores, a.dry_run, a.close)
+        if a.auto:
+            return auto(scores, a.repo, a.reflection, a.config, a.dry_run)
+        if a.revert is not None:
+            return revert(scores, a.revert, a.repo, a.reflection, a.config, a.dry_run)
         return pick(scores, a.pick, a.repo, a.config, a.dry_run)
     except Stop as e:
         say(str(e))

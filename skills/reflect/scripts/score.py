@@ -176,7 +176,13 @@ to ranAt with rollouts.toml absent or older than the note's `captured` (local mi
 override; the note now differing; else "unclear: rollouts.toml changed around schedule time". These are
 inferred (the record stamps effective values with no source): a label changes the wording only, never whether
 a proposal is made. `agreeing` counts earlier non-voided applied Tunings with the same repo, key, rule and
-direction.
+direction: an auto landing's entries (tune.py --auto, the weekly reading, p21-7) count like a pick's, a revert's rule
+is `revert:<rule>`, so it never counts toward <rule>, and a close line's empty `applied` adds nothing. A round cap's
+spread (a task override) is flagged only for a key a proposal uses.
+
+Shared, at module level (bodies as the methods had them): load_tunings(base) and agreeing(tunings, repo, key, rule,
+direction), read by tune.py's --auto and --revert; landed_from(merge_lines, since, until), read by
+skills/reflect/scripts/reflect.py's Escapes sweep; and RULE_EFFECTS, whose risks tune.py --revert reads.
 
 Escapes and Quality. The landed set is every task with a `merged` line in the window (read-only ones included; the
 latest line wins, a later line with no pr keeping the earlier pr, two different prs flagged), keyed as `merges` is,
@@ -194,7 +200,8 @@ lane, guardrails{throughput{value, runningHours, tasks, allowanceHours, bound, b
 setAsideRate, conflictRate, quotaStalls, reviewChurn{value | "unknown", bound "<=N%", baseline, breached,
 roundsPerLandedTask}}, load, binding{constraint, why}, headline (the ten numbers tune.py records, its name kept for
 tune.py: throughput, runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
-quality (escapes.quality), reviewChurn (reviewChurn.value)), reviewChurn{value, findings, original, regression,
+quality (escapes.quality), reviewChurn (reviewChurn.value)), ranAt{parallel_ceiling, max_review_rounds, max_iterations,
+max_plan_rounds} (each key's ran-at value, the proposals' rule, or null), reviewChurn{value, findings, original, regression,
 unclassified, rounds, engine{rounds, findings, original, regression, unclassified, landedTasks (the landed tasks
 with a recorded round), roundsPerLandedTask}, freshReview{rounds, findings, original, regression, unclassified,
 unattributed}}, baseline{id, activeEnd, partial, v, scores}, proposals[{id, key, from, to, ranAt, ranAtCause, rule,
@@ -355,6 +362,62 @@ def total(iv):
 
 
 # ---- reading -------------------------------------------------------------------------------------------------
+
+def load_tunings(base):
+    """Every `tuning` line of <base>/tunings.jsonl with a string repo, in time then file order, each a copy carrying
+    `_t` (its ts in ms) and `_voided` (another line's `voids` names it). [] with no file; OSError when it exists but
+    cannot be read. Shared with tune.py (--auto, --revert)."""
+    path = os.path.join(base, RR.TUNINGS + ".jsonl")
+    out = []
+    if not os.path.exists(path):
+        return out
+    lines, _skipped = read_lines(path)
+    voided = {d.get("voids") for _t, _n, d in lines if d.get("kind") == "tuning" and isinstance(d.get("voids"), str)}
+    for t, _n, d in lines:
+        if d.get("kind") != "tuning" or not isinstance(d.get("repo"), str):
+            continue
+        d = dict(d)
+        d["_t"] = t
+        d["_voided"] = d.get("id") in voided
+        out.append(d)
+    return out
+
+
+def agreeing(tunings, repo, key, rule, direction):
+    """Earlier non-voided applied Tunings (load_tunings' lines) with the same repo (case ignored), key, rule and
+    direction. A pick's entries and an auto landing's count alike; a revert's rule is `revert:<rule>`, so it never
+    counts toward <rule>; a close line's `applied` is [], so it adds nothing. Shared with tune.py."""
+    n = 0
+    for d in tunings:
+        if d["_voided"] or d["repo"].lower() != repo.lower():
+            continue
+        for e in d.get("applied") or []:
+            if not isinstance(e, dict) or e.get("key") != key or e.get("rule") != rule:
+                continue
+            if isinstance(e.get("to"), int) and isinstance(e.get("from"), int) and \
+                    _sign(e["to"] - e["from"]) == direction:
+                n += 1
+    return n
+
+
+def landed_from(merge_lines, since, until):
+    """({task: {pr, readOnly, at}}, flags) for every task with a `merged` line in [since, until] (ms), from
+    (t, task, pr, readOnly) tuples in time order: the latest line wins, a later line with no pr keeping the earlier
+    one, and two different prs for one task are flagged. Shared with reflect.py (the Escapes sweep)."""
+    out, prs, flags = {}, {}, []
+    for t, task, pr, read_only in merge_lines:
+        if not since <= t <= until:
+            continue
+        if pr not in (None, ""):
+            prs.setdefault(task, set()).add(str(pr).rstrip("/").rsplit("/", 1)[-1].lstrip("#"))
+        prev = out.get(task, {})
+        out[task] = {"pr": pr if pr not in (None, "") else prev.get("pr"), "readOnly": read_only, "at": fmt(t)}
+    for task in sorted(prs):
+        if len(prs[task]) > 1:
+            flags.append("escapes: [[%s]]'s merged lines carry %d different prs (%s): the latest is read"
+                         % (task, len(prs[task]), ", ".join(sorted(prs[task]))))
+    return out, flags
+
 
 def read_lines(path):
     """[(ms, n, dict)] sorted by time then file order; unparsable lines (and ones with no valid ts) skipped."""
@@ -971,23 +1034,11 @@ class Score:
     # ---- tunings.jsonl -----------------------------------------------------------------------------------------
 
     def read_tunings(self, base):
-        path = os.path.join(base, RR.TUNINGS + ".jsonl")
-        self.tunings = []
-        if not os.path.exists(path):
-            return
         try:
-            lines, _skipped = read_lines(path)
+            self.tunings = load_tunings(base)
         except OSError as e:
+            self.tunings = []
             self.flag("tunings.jsonl cannot be read (%s): no baseline, no earlier Tunings" % e)
-            return
-        voided = {d.get("voids") for _t, _n, d in lines if d.get("kind") == "tuning" and isinstance(d.get("voids"), str)}
-        for t, _n, d in lines:
-            if d.get("kind") != "tuning" or not isinstance(d.get("repo"), str):
-                continue
-            d = dict(d)
-            d["_t"] = t
-            d["_voided"] = d.get("id") in voided
-            self.tunings.append(d)
 
     def baseline(self, repo, active_start):
         if repo is None or active_start is None:
@@ -1066,6 +1117,11 @@ class Score:
         self.running(since, until)
         self.slots_score(since, until)
         self.lane_score(since, until)
+        # each key's ran-at value, once: the ceiling in force for most of the running time, each round cap's most
+        # common value on the window's slot-taken lines (tune.py --revert and reflect.py read `ranAt`)
+        self.ran_at = {"parallel_ceiling": (self.slot_metrics["ceiling"], None)}
+        for key in KEYS[1:]:
+            self.ran_at[key] = self._ran_at(key, since, until)
         self.read_tunings(base)
         rt = self.run_ms
         act_start = self.run_iv[0][0] if self.run_iv else None
@@ -1113,6 +1169,7 @@ class Score:
             "guardrails": guard,
             "load": self.load(base, slug, host, since, until),
             "headline": headline,
+            "ranAt": {k: self.ran_at[k][0] for k in KEYS},
             "reviewChurn": churn,
             "baseline": base_line,
         })
@@ -1172,20 +1229,10 @@ class Score:
 
     def landed(self, since, until):
         """{task: {pr, readOnly, at}} for every task with a `merged` line in the window, the same raw `task` keys as
-        `merges` (emit's normalise_slug output). Lines arrive in time order, so the latest wins; a later line with no
-        pr keeps the earlier one, and two different prs for one task are flagged."""
-        out, prs = {}, {}
-        for t, task, pr, read_only in self.merge_lines:
-            if not since <= t <= until:
-                continue
-            if pr not in (None, ""):
-                prs.setdefault(task, set()).add(str(pr).rstrip("/").rsplit("/", 1)[-1].lstrip("#"))
-            prev = out.get(task, {})
-            out[task] = {"pr": pr if pr not in (None, "") else prev.get("pr"), "readOnly": read_only, "at": fmt(t)}
-        for task in sorted(prs):
-            if len(prs[task]) > 1:
-                self.flag("escapes: [[%s]]'s merged lines carry %d different prs (%s): the latest is read"
-                          % (task, len(prs[task]), ", ".join(sorted(prs[task]))))
+        `merges` (emit's normalise_slug output): landed_from's rule, its flags raised here."""
+        out, flags = landed_from(self.merge_lines, since, until)
+        for f in flags:
+            self.flag(f)
         return out
 
     def _expand(self, p):
@@ -1454,7 +1501,10 @@ class Score:
                         "dependencies or a Solo task" % round(self.idle_total * 100 / self.capacity)}
         return {"constraint": "none-clear", "why": "no rule held"}
 
-    def ran_at_cap(self, key, since, until):
+    def _ran_at(self, key, since, until):
+        """(ran, spread) for a round cap: its most common value on the window's slot-taken lines (ties to the later),
+        and how many tasks ran with another (a task override), or (None, None). Pure: run() computes each key once
+        into self.ran_at, and ran_at_cap flags a spread only for a key a proposal uses."""
         vals = [(t, task, s.get(key)) for t, task, s in self.slot_taken
                 if since <= t <= until and _settings_value(s, key)]
         if not vals:
@@ -1469,6 +1519,11 @@ class Score:
             per_task[task] = v
         odd = sum(1 for v in per_task.values() if v != ran)
         spread = "%d of %d tasks ran with a task override" % (odd, len(per_task)) if odd else None
+        return ran, spread
+
+    def ran_at_cap(self, key):
+        """A proposal's ran-at value for a round cap (self.ran_at's), its spread flagged here."""
+        ran, spread = self.ran_at.get(key, (None, None))
         if spread:
             self.flag("%s: %s" % (key, spread))
         return ran, spread
@@ -1537,7 +1592,7 @@ class Score:
             if key == "parallel_ceiling":
                 ran_at = sm["ceiling"]
             else:
-                ran_at, spread = self.ran_at_cap(key, since, until)
+                ran_at, spread = self.ran_at_cap(key)
             frm = (((settings or {}).get("settings") or {}).get(key) or {}).get("value")
             if ran_at is None:
                 if not isinstance(frm, int):
@@ -1581,17 +1636,7 @@ class Score:
         return proposals, withheld
 
     def agreeing(self, key, rule, direction):
-        n = 0
-        for d in self.tunings:
-            if d["_voided"] or d["repo"].lower() != self.repo.lower():
-                continue
-            for e in d.get("applied") or []:
-                if not isinstance(e, dict) or e.get("key") != key or e.get("rule") != rule:
-                    continue
-                if isinstance(e.get("to"), int) and isinstance(e.get("from"), int) and \
-                        _sign(e["to"] - e["from"]) == direction:
-                    n += 1
-        return n
+        return agreeing(self.tunings, self.repo, key, rule, direction)
 
     def load(self, base, slug, host, since, until):
         """Each other same-host record whose live span overlaps this run's running time (run_iv), never merely the

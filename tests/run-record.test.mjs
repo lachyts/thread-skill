@@ -178,6 +178,8 @@ const REFUSALS = [
   ['`reviews` as the rollout', ['--rollout', 'reviews', '--kind', 'resumed']],
   ['`tunings` as the rollout', ['--rollout', 'tunings', '--kind', 'resumed']],
   ['`tunings` as a carried from', ['--rollout', 'r', '--task', 't', '--kind', 'carried', '--json', '{"from":"[[Tunings]]"}']],
+  ['`reflections` as the rollout', ['--rollout', 'reflections', '--kind', 'resumed']],
+  ['`reflections` as a carried from', ['--rollout', 'r', '--task', 't', '--kind', 'carried', '--json', '{"from":"[[Reflections]]"}']],
   ['a tuning with a task', ['--rollout', 'r', '--task', 't', '--kind', 'tuning', '--json', JSON.stringify({ id: 't1', repo: 'o/r', window: { since: '2026-10-04T00:00:00.000Z', until: '2026-10-04T10:00:00.000Z' }, scores: { throughput: 1, runningHours: 2, merges: 2, tokensPerMerge: null, setAsideRate: 0, conflictRate: 0, quotaStalls: 0, handsOffRate: 1, quality: null, reviewChurn: null }, applied: [] })]],
   ['a traversal task slug', ['--rollout', 'r', '--task', '../x', '--kind', 'ready']],
   ['no rollout for a rollout kind', ['--kind', 'resumed']],
@@ -480,7 +482,7 @@ test('the docstring carries the review-verdict and review-round reader rules and
   assert.match(doc, /verdict_key\(line\) -> tuple/)
 })
 
-// ---- the tuning kind (skills/reflect/scripts/tune.py's one line per Reflection) --------------------------------
+// ---- the tuning kind (skills/reflect/scripts/tune.py's one line per by-hand Reflection) --------------------------
 
 const WINDOW = { since: '2026-10-04T00:00:00.000Z', until: '2026-10-04T10:00:00.000Z', activeStart: '2026-10-04T00:00:00.000Z', activeEnd: '2026-10-04T09:00:00.000Z', partial: false }
 const SCORES = { throughput: 0.667, runningHours: 9, merges: 6, tokensPerMerge: 125000, setAsideRate: 0.1, conflictRate: null, quotaStalls: 0,
@@ -586,7 +588,174 @@ except m.Refused as e:
   assert.deepEqual(listing(ev(home)), [])
 })
 
-test('the tuning keys are rollout-settings.py\'s KEYS, and RESERVED holds both record files', (t) => {
+// ---- the auto line (p21-7, ADR 0037 d5): tune.py --auto / --revert, the weekly reading's own landing -------------
+
+const AUTO = { auto: true, reflection: 'r-20261015T000000Z-abcdef' }
+const AGREED = { ...APPLIED, agreed: 3 }
+
+test('a tuning line takes auto, reflection, reverts and an applied entry\'s agreed', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ ...AUTO, applied: [AGREED] }))], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ id: 't-2', ...AUTO, reverts: 't-1',
+    applied: [{ ...APPLIED, from: 4, to: 3, rule: 'revert:slot-bound-raise' }] }))], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ id: 't-3', ...AUTO, voids: 't-1', applied: [] }))], { env: EV(home) })
+  const [a, b, c] = lines(path.join(ev(home), 'tunings.jsonl'))
+  assert.deepEqual([a.auto, a.reflection, a.applied[0].agreed, a.applied[0].agreeing], [true, AUTO.reflection, 3, 0])
+  assert.equal(b.reverts, 't-1')
+  assert.equal(c.voids, 't-1')
+})
+
+const AUTO_REFUSALS = [
+  ['auto false', tuning({ auto: false, reflection: AUTO.reflection })],
+  ['auto without reflection', tuning({ auto: true, applied: [AGREED] })],
+  ['reflection without auto', tuning({ reflection: AUTO.reflection })],
+  ['a reflection that is no r- id', tuning({ auto: true, reflection: 'week-1', applied: [AGREED] })],
+  ['reverts without auto', tuning({ reverts: 't-1' })],
+  ['reverts with two entries', tuning({ ...AUTO, reverts: 't-1', applied: [APPLIED, { ...APPLIED, key: 'max_review_rounds' }] })],
+  ['agreed on a pick line', tuning({ applied: [AGREED] })],
+  ['agreed on a revert line', tuning({ ...AUTO, reverts: 't-1', applied: [AGREED] })],
+  ['agreed 0', tuning({ ...AUTO, applied: [{ ...APPLIED, agreed: 0 }] })],
+  ['an auto landing with an entry missing agreed', tuning({ ...AUTO, applied: [AGREED, { ...APPLIED, key: 'max_review_rounds' }] })],
+  ['an unknown applied key beside agreed', tuning({ ...AUTO, applied: [{ ...AGREED, weight: 1 }] })],
+  ['auto with close completion', tuning({ ...AUTO, applied: [], close: 'completion' })],
+]
+
+for (const [name, fields] of AUTO_REFUSALS) {
+  test(`tuning refused with exit 2, nothing written: ${name}`, (t) => {
+    const home = tmpHome(t)
+    const r = cli(home, ['emit', '--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `stderr: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/)
+    assert.deepEqual(listing(ev(home)), [])
+  })
+}
+
+// ---- the weekly reading's kinds (p21-7): watch, watch-raised, proposal, reflection, in reflections.jsonl -----------
+
+const RID = 'r-20261015T000000Z-abcdef'
+// the ids are computed by the module itself, so a test never restates the hash
+function ids(home) {
+  const r = api(home, 'print(json.dumps([m.watch_id("  asks mid-run ", " a gate the grill missed "), m.knob_key("O/R", "parallel_ceiling", "slot-bound-raise", 1)]))')
+  assert.equal(r.status, 0, r.stderr)
+  return JSON.parse(r.stdout)
+}
+const COUNTS = { sightings: 1, newWatches: 1, rules: 1, bugs: 0, filed: 0, knobs: 1, landed: 0, reverted: 0, breaches: 0 }
+const kinds = (wid, kid) => ({
+  watch: { id: wid, rule: 'asks mid-run', shape: 'a gate the grill missed', rollouts: ['a', 'b'], count: 2, reflection: RID },
+  raised: { id: wid, reflection: RID, via: 'declined' },
+  rule: { id: wid, altitude: 'rule', reflection: RID, rollouts: ['a', 'b'], rule: 'asks mid-run', shape: 'a gate the grill missed', vaultTask: 'thread-skill-decisions-2026-10-16' },
+  bug: { id: wid, altitude: 'bug', reflection: RID, rollouts: ['a'], rule: 'asks mid-run', shape: 'a gate the grill missed', vaultTask: 'thread-skill-bug-x', filed: true, auto: true, fixes: 'p1-1' },
+  knob: { id: kid, altitude: 'knob', reflection: RID, rollouts: ['a'], repo: 'o/r', key: 'parallel_ceiling', rule: 'slot-bound-raise', direction: 1, from: 3, to: 4, ranAt: 3, landed: false, held: 'agreement 1 of 3' },
+  reflection: { id: RID, since: '2026-10-08T13:00:00.000Z', until: '2026-10-15T13:00:00.000Z', rollouts: ['a', 'b'], escapesOnly: ['c'], counts: COUNTS, quiet: false },
+})
+
+test('the four weekly kinds land in reflections.jsonl as v 1, rollout and task null', (t) => {
+  const home = tmpHome(t)
+  const [wid, kid] = ids(home)
+  assert.match(wid, /^[0-9a-f]{8}$/)
+  const k = kinds(wid, kid)
+  for (const [kind, f] of [['watch', k.watch], ['watch-raised', k.raised], ['proposal', k.rule], ['proposal', k.bug], ['proposal', k.knob], ['reflection', k.reflection]]) {
+    emitOk(home, ['--kind', kind, '--json', JSON.stringify(f)], { env: EV(home) })
+  }
+  assert.deepEqual(listing(ev(home)), ['reflections.jsonl'])
+  const all = lines(path.join(ev(home), 'reflections.jsonl'))
+  assert.deepEqual(all.map((l) => [l.v, l.rollout, l.task, l.kind]), [[1, null, null, 'watch'], [1, null, null, 'watch-raised'],
+    [1, null, null, 'proposal'], [1, null, null, 'proposal'], [1, null, null, 'proposal'], [1, null, null, 'reflection']])
+})
+
+test('watch-raised takes recurring, confirmed and declined; reflection takes cadence 14 or none', (t) => {
+  const home = tmpHome(t)
+  const [wid, kid] = ids(home)
+  const k = kinds(wid, kid)
+  for (const via of ['recurring', 'confirmed', 'declined']) emitOk(home, ['--kind', 'watch-raised', '--json', JSON.stringify({ ...k.raised, via })], { env: EV(home) })
+  emitOk(home, ['--kind', 'reflection', '--json', JSON.stringify({ ...k.reflection, cadence: 14 })], { env: EV(home) })
+  emitOk(home, ['--kind', 'reflection', '--json', JSON.stringify({ ...k.reflection, rollouts: [], escapesOnly: [], quiet: true, decisionTask: 'thread-skill-decisions-2026-10-16' })], { env: EV(home) })
+  const all = lines(path.join(ev(home), 'reflections.jsonl'))
+  assert.deepEqual(all.map((l) => l.via ?? l.cadence ?? null), ['recurring', 'confirmed', 'declined', 14, null])
+})
+
+test('the weekly kinds are refused, exit 2 and nothing written, when malformed', (t) => {
+  const home = tmpHome(t)
+  const [wid, kid] = ids(home)
+  const k = kinds(wid, kid)
+  const { held, ...knobLanded } = k.knob
+  const cases = [
+    ['a watch with a rollout', 'watch', k.watch, ['--rollout', 'r']],
+    ['a watch with a task', 'watch', k.watch, ['--task', 't']],
+    ['a watch id that is not its hash', 'watch', { ...k.watch, id: '00000000' }],
+    ['a watch with empty rollouts', 'watch', { ...k.watch, rollouts: [] }],
+    ['a watch naming a reserved rollout', 'watch', { ...k.watch, rollouts: ['tunings'] }],
+    ['a watch naming a rollout twice', 'watch', { ...k.watch, rollouts: ['a', 'a'] }],
+    ['a watch with count 0', 'watch', { ...k.watch, count: 0 }],
+    ['a watch with an unstripped rule', 'watch', { ...k.watch, rule: ' asks mid-run' }],
+    ['a watch rule over 120 characters', 'watch', { ...k.watch, rule: 'r'.repeat(121) }],
+    ['watch-raised via rejected', 'watch-raised', { ...k.raised, via: 'rejected' }],
+    ['a reflection that is no r- id', 'watch-raised', { ...k.raised, reflection: 'week-42' }],
+    ['a knob without key', 'proposal', (({ key, ...rest }) => rest)(k.knob)],
+    ['a knob without from and to', 'proposal', (({ from, to, ...rest }) => rest)(k.knob)],
+    ['a knob id that is not its knob_key', 'proposal', { ...k.knob, id: wid }],
+    ['a knob direction 2', 'proposal', { ...k.knob, direction: 2 }],
+    ['auto on an unlanded knob', 'proposal', { ...k.knob, auto: true }],
+    ['held on a landed knob', 'proposal', { ...k.knob, landed: true }],
+    ['auto on a rule', 'proposal', { ...k.rule, auto: true }],
+    ['a rule without vaultTask', 'proposal', (({ vaultTask, ...rest }) => rest)(k.rule)],
+    ['a bug without filed', 'proposal', (({ filed, auto, ...rest }) => rest)(k.bug)],
+    ['auto on an unfiled bug', 'proposal', { ...k.bug, filed: false }],
+    ['an unknown altitude', 'proposal', { ...k.rule, altitude: 'policy' }],
+    ['a reflection counts missing a key', 'reflection', { ...k.reflection, counts: (({ breaches, ...rest }) => rest)(COUNTS) }],
+    ['a reflection count negative', 'reflection', { ...k.reflection, counts: { ...COUNTS, bugs: -1 } }],
+    ['a reflection cadence 10', 'reflection', { ...k.reflection, cadence: 10 }],
+    ['a reflection with an offset until', 'reflection', { ...k.reflection, until: '2026-10-16T00:00:00+11:00' }],
+  ]
+  for (const [name, kind, fields, extra = []] of cases) {
+    const r = cli(home, ['emit', ...extra, '--kind', kind, '--json', JSON.stringify(fields)], { env: EV(home) })
+    assert.equal(r.status, 2, `${name}: ${r.stderr}`)
+    assert.match(r.stderr, /^run_record: refused: \S.*\n$/, name)
+    assert.deepEqual(listing(ev(home)), [], name)
+  }
+  // a landed knob with no held is fine, and so is it with auto
+  emitOk(home, ['--kind', 'proposal', '--json', JSON.stringify({ ...knobLanded, landed: true, auto: true, tuning: 't-1' })], { env: EV(home) })
+})
+
+test('check() refuses exactly what emit refuses, with the same message, and writes nothing', (t) => {
+  const home = tmpHome(t)
+  const [wid, kid] = ids(home)
+  const k = kinds(wid, kid)
+  const r = api(home, `
+cases = json.loads(sys.argv[2])
+out = []
+for rollout, kind, fields in cases:
+    got = []
+    for fn in (m.check, lambda *a: m.emit(*a, strict=True)):
+        try:
+            fn(rollout, kind, None, fields)
+            got.append("ok")
+        except m.Refused as e:
+            got.append(str(e))
+    out.append(got)
+print(json.dumps(out))`, { env: EV(home), args: [JSON.stringify([
+    [null, 'watch', { ...k.watch, id: '00000000' }],
+    [null, 'proposal', { ...k.knob, auto: true }],
+    ['r', 'watch', k.watch],
+    [null, 'reflection', { ...k.reflection, cadence: 10 }],
+    ['r', 'tuning', tuning({ auto: true })],
+    [null, 'reflection', k.reflection],
+  ])] })
+  assert.equal(r.status, 0, r.stderr)
+  const out = JSON.parse(r.stdout)
+  for (const [a, b] of out.slice(0, 5)) {
+    assert.notEqual(a, 'ok')
+    assert.equal(a, b)
+  }
+  assert.deepEqual(out[5], ['ok', 'ok'])
+  // only the emit of the valid reflection line wrote anything
+  assert.equal(lines(path.join(ev(home), 'reflections.jsonl')).length, 1)
+  const c = api(home, `m.check(None, "reflection", None, json.loads(sys.argv[2])); print("ok")`, { env: EV(path.join(home, 'other')), args: [JSON.stringify(k.reflection)] })
+  assert.equal(c.stdout, 'ok\n', c.stderr)
+  assert.ok(!fs.existsSync(ev(path.join(home, 'other'))), 'check never creates the events dir')
+})
+
+test('the tuning keys are rollout-settings.py\'s KEYS, and RESERVED holds all three record files', (t) => {
   const home = tmpHome(t)
   const rs = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings.py')
   const r = api(home, `
@@ -595,7 +764,7 @@ print(json.dumps([list(m.TUNING_KEYS), list(rs.KEYS), list(m.RESERVED)]))`, { ar
   assert.equal(r.status, 0, r.stderr)
   const [mine, theirs, reserved] = JSON.parse(r.stdout)
   assert.deepEqual(mine, theirs)
-  assert.deepEqual(reserved, ['reviews', 'tunings'])
+  assert.deepEqual(reserved, ['reviews', 'tunings', 'reflections'])
 })
 
 test('rollout and task slugs normalise from wikilinks, note paths and any case', (t) => {

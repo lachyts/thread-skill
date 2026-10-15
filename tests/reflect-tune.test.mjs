@@ -1,5 +1,6 @@
 // skills/reflect/scripts/tune.py — the only writer of rollouts.toml and tunings.jsonl (p15-5, ADR 0032): it edits
-// only the picked keys, records one `tuning` line per Reflection, and writes nothing when anything is refused.
+// only the picked keys, records one `tuning` line per by-hand Reflection, lands and reverts the weekly reading's knobs
+// (p21-7, --auto and --revert), and writes nothing when anything is refused.
 //
 // Hermetic: each case gets its own mkdtemp HOME (so rollouts.toml is <HOME>/.config/thread/rollouts.toml), its own
 // THREAD_EVENTS_DIR, an env built from scratch with that HOME as cwd, and a temp git repo whose origin is
@@ -56,9 +57,10 @@ const HEADLINE = { throughput: 0.857, runningHours: 7, merges: 6, tokensPerMerge
   handsOffRate: 0.8333, quality: null, reviewChurn: null }
 const P = (id, key, from, to, extra = {}) => ({ id, key, from, to, ranAt: from, ranAtCause: null, rule: `${key}-rule`, direction: Math.sign(to - from), evidence: `evidence for ${key}`, agreeing: 0, ...extra })
 
-function writeScores(home, { repo = 'o/r', proposals = [], withheld = [], headline = HEADLINE } = {}) {
+function writeScores(home, { repo = 'o/r', proposals = [], withheld = [], headline = HEADLINE, window = WINDOW, guardrails, ranAt, rollout = 'demo-rollout' } = {}) {
   const p = path.join(home, 'score.json')
-  fs.writeFileSync(p, JSON.stringify({ rollout: 'demo-rollout', repo, window: WINDOW, headline, binding: { constraint: 'slot-bound', why: 'x' }, proposals, withheld, flags: [] }))
+  fs.writeFileSync(p, JSON.stringify({ rollout, repo, window, headline, binding: { constraint: 'slot-bound', why: 'x' }, proposals, withheld, flags: [],
+    ...(guardrails ? { guardrails } : {}), ...(ranAt ? { ranAt } : {}) }))
   return p
 }
 
@@ -255,10 +257,11 @@ test('refused with exit 2 and nothing written: stale from, unknown, withheld and
   }
 })
 
-test('usage: --pick and --record-only are exclusive and one is required', (t) => {
+test('usage: --pick and --record-only are exclusive and one is required (--auto and --revert too)', (t) => {
   const home = tmpHome(t)
   const scores = writeScores(home)
-  for (const args of [['--scores', scores], ['--scores', scores, '--pick', 'p1', '--record-only']]) {
+  for (const args of [['--scores', scores], ['--scores', scores, '--pick', 'p1', '--record-only'],
+    ['--scores', scores, '--auto', '--revert', 't-x', '--reflection', 'r-x']]) {
     const r = tune(home, args)
     assert.equal(r.status, 2)
     assert.match(r.stderr, /^tune: /)
@@ -481,7 +484,251 @@ test('a null repo with --close still writes nothing (exit 0); --dry-run --close 
   assert.ok(!fs.existsSync(evDir(home)))
 })
 
-test('tune.py parses as python 3.8', () => {
-  const r = spawnSync('python3', ['-B', '-c', 'import ast, sys\nast.parse(open(sys.argv[1]).read(), sys.argv[1], feature_version=(3, 8))', TUNE], { encoding: 'utf8' })
+// ---- --auto and --revert (p21-7, ADR 0037 d5): the weekly reading's own landings ------------------------------------
+// reflections.jsonl's lines are written by hand in run_record's shape; the knob id comes from run_record.knob_key itself.
+
+const R0 = 'r-20261001T000000Z-000000'
+const R1 = 'r-20261002T000000Z-111111'
+const R2 = 'r-20261003T000000Z-222222'
+const RNOW = 'r-20261006T000000Z-aaaaaa'
+const reflectionsPath = (home) => path.join(evDir(home), 'reflections.jsonl')
+const RAISE = () => P('p1', 'parallel_ceiling', 3, 4, { ranAt: 3, rule: 'slot-bound-raise', direction: 1 })
+const OK_GUARDS = { throughput: { breached: false }, tokensPerMerge: { breached: false }, setAsideRate: { breached: false },
+  conflictRate: { breached: false }, quotaStalls: { breached: false }, reviewChurn: { breached: false } }
+
+function knobKey(repo, key, rule, direction) {
+  const body = ['import importlib.util, sys', 'spec = importlib.util.spec_from_file_location("rr", sys.argv[1])',
+    'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+    'print(m.knob_key(sys.argv[2], sys.argv[3], sys.argv[4], int(sys.argv[5])))'].join('\n')
+  return execFileSync('python3', ['-B', '-c', body, RUN_RECORD, repo, key, rule, String(direction)], { encoding: 'utf8', env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } }).trim()
+}
+const KID = knobKey('o/r', 'parallel_ceiling', 'slot-bound-raise', 1)
+
+const rline = (ts, kind, f) => JSON.stringify({ v: 1, ts, host: 'h', rollout: null, task: null, kind, ...f })
+const knobLine = (ts, reflection, rollouts, over = {}) => rline(ts, 'proposal', { id: KID, altitude: 'knob', reflection, rollouts, repo: 'o/r',
+  key: 'parallel_ceiling', rule: 'slot-bound-raise', direction: 1, from: 3, to: 4, ranAt: 3, landed: false, held: 'agreement 1 of 3', ...over })
+const closeLine = (ts, id) => rline(ts, 'reflection', { id, since: '2026-09-24T00:00:00.000Z', until: ts, rollouts: [], escapesOnly: [],
+  counts: { sightings: 0, newWatches: 0, rules: 0, bugs: 0, filed: 0, knobs: 1, landed: 0, reverted: 0, breaches: 0 }, quiet: true })
+function writeReflections(home, rows) {
+  fs.mkdirSync(evDir(home), { recursive: true })
+  fs.writeFileSync(reflectionsPath(home), rows.map((r) => `${r}\n`).join(''))
+}
+// two closed earlier Reflections, one knob line each, on rollouts a and b
+const TWO_AGREE = [knobLine('2026-10-01T01:00:00.000Z', R0, ['a']), closeLine('2026-10-01T02:00:00.000Z', R0),
+  knobLine('2026-10-02T01:00:00.000Z', R1, ['b']), closeLine('2026-10-02T02:00:00.000Z', R1)]
+const autoArgs = (scores, repo, reflection = RNOW) => ['--scores', scores, '--auto', '--repo', repo, '--reflection', reflection]
+
+// Held (exit 0): the reason printed, nothing written (no tunings line, the config byte-identical).
+function held(home, args, re, configBefore) {
+  const r = tune(home, args)
   assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, re)
+  assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), configBefore)
+  return r
+}
+
+test('--auto lands a knob three Reflections agree on: one auto line with reflection, agreeing and agreed, the config edited', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  writeToml(home, CONFIG)
+  writeReflections(home, TWO_AGREE)
+  const r = tune(home, autoArgs(writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS }), repo))
+  assert.equal(r.status, 0, r.stderr)
+  const [l, ...rest] = lines(tuningsPath(home))
+  assert.equal(rest.length, 0)
+  assert.deepEqual([l.auto, l.reflection, l.close, l.reverts], [true, RNOW, undefined, undefined])
+  assert.deepEqual(l.applied, [{ key: 'parallel_ceiling', from: 3, to: 4, ranAt: 3, rule: 'slot-bound-raise', evidence: 'evidence for parallel_ceiling', agreeing: 0, agreed: 3 }])
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), CONFIG.replace('parallel_ceiling = 3   # hand', 'parallel_ceiling = 4   # hand'))
+  assert.match(r.stdout, /^applied parallel_ceiling 3 → 4 for o\/r: /m)
+})
+
+test('--auto holds, exit 0 and nothing written, below three agreeing Reflections', (t) => {
+  const cases = [
+    ['no earlier Reflection', [], /^held parallel_ceiling: agreement 1 of 3$/m],
+    ['one closed earlier Reflection', TWO_AGREE.slice(0, 2), /^held parallel_ceiling: agreement 2 of 3$/m],
+    ['an earlier Reflection with no close line', [TWO_AGREE[0], TWO_AGREE[1], TWO_AGREE[2]], /^held parallel_ceiling: agreement 2 of 3$/m],
+    ['an earlier line naming only a counted rollout', [knobLine('2026-10-01T01:00:00.000Z', R0, ['a']), closeLine('2026-10-01T02:00:00.000Z', R0),
+      knobLine('2026-10-02T01:00:00.000Z', R1, ['a']), closeLine('2026-10-02T02:00:00.000Z', R1)], /^held parallel_ceiling: agreement 2 of 3$/m],
+    ['this rollout named earlier', [knobLine('2026-10-01T01:00:00.000Z', R0, ['a']), closeLine('2026-10-01T02:00:00.000Z', R0),
+      knobLine('2026-10-02T01:00:00.000Z', R1, ['demo-rollout']), closeLine('2026-10-02T02:00:00.000Z', R1)], /^held parallel_ceiling: agreement 2 of 3$/m],
+    ['this Reflection\'s own earlier line', [...TWO_AGREE.slice(0, 2), knobLine('2026-10-02T01:00:00.000Z', RNOW, ['b'])], /^held parallel_ceiling: agreement 2 of 3$/m],
+    ['a missing reflections.jsonl (no file at all)', null, /^held parallel_ceiling: agreement 1 of 3$/m],
+  ]
+  for (const [name, rows, re] of cases) {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, CONFIG)
+    if (rows !== null) writeReflections(home, rows)
+    held(home, autoArgs(writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS }), repo), re, CONFIG)
+  }
+})
+
+test('--auto: the key\'s last move (a pick, an auto landing or a revert) resets the count; a voided move or a close line does not', (t) => {
+  const tl = (ts, id, over = {}) => JSON.stringify({ v: 2, ts, host: 'h', rollout: 'x', task: null, kind: 'tuning', id, repo: 'O/R', window: WINDOW, scores: HEADLINE,
+    applied: [{ key: 'parallel_ceiling', from: 2, to: 3, ranAt: 2, rule: 'other-rule', evidence: 'e', agreeing: 0 }], ...over })
+  const after = '2026-10-02T12:00:00.000Z'
+  const moves = [
+    ['a pick', [tl(after, 't-pick')], false],
+    ['an auto landing', [tl(after, 't-auto', { auto: true, reflection: R2, applied: [{ key: 'parallel_ceiling', from: 2, to: 3, ranAt: 2, rule: 'x', evidence: 'e', agreeing: 0, agreed: 3 }] })], false],
+    ['a revert', [tl(after, 't-rev', { auto: true, reflection: R2, reverts: 't-old' })], false],
+    ['a voided pick', [tl(after, 't-v'), tl(after, 't-vv', { applied: [], voids: 't-v' })], true],
+    ['a close line', [tl(after, 't-close', { applied: [], close: 'completion' })], true],
+  ]
+  for (const [name, tunings, lands] of moves) {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, CONFIG)
+    writeReflections(home, TWO_AGREE)
+    fs.writeFileSync(tuningsPath(home), tunings.map((x) => `${x}\n`).join(''))
+    const r = tune(home, autoArgs(writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS }), repo))
+    assert.equal(r.status, 0, `${name}: ${r.stderr}`)
+    const added = lines(tuningsPath(home)).length - tunings.length
+    if (lands) assert.equal(added, 1, `${name}: lands`)
+    else {
+      assert.match(r.stdout, /^held parallel_ceiling: agreement 1 of 3$/m, name)
+      assert.equal(added, 0, name)
+    }
+  }
+})
+
+test('--auto holds a trade, a caution, a breach, a partial window, ranAt != from, and a key this Reflection already moved', (t) => {
+  const prior = JSON.stringify({ v: 2, ts: '2026-10-05T13:00:00.000Z', host: 'h', rollout: 'x', task: null, kind: 'tuning', id: 't-mine', repo: 'o/r', window: WINDOW,
+    scores: HEADLINE, auto: true, reflection: RNOW, reverts: 't-z', applied: [{ key: 'parallel_ceiling', from: 4, to: 3, ranAt: 4, rule: 'revert:x', evidence: 'e', agreeing: 0 }] })
+  const cases = [
+    ['a trade', { proposals: [RAISE()].map((p) => ({ ...p, trade: { gains: ['handsOffRate'], costs: ['quality'] } })) }, /^held parallel_ceiling: a trade \(gains handsOffRate, costs quality\): Lachy decides$/m],
+    ['a caution', { proposals: [RAISE()].map((p) => ({ ...p, caution: 'risks throughput' })) }, /^held parallel_ceiling: a caution: Lachy decides$/m],
+    ['a breach', { guardrails: { ...OK_GUARDS, conflictRate: { breached: true } } }, /^held parallel_ceiling: a Guardrail is breached \(conflictRate\)$/m],
+    ['a partial window', { window: { ...WINDOW, partial: true } }, /^held parallel_ceiling: a partial window/m],
+    ['ranAt != from', { proposals: [P('p1', 'parallel_ceiling', 3, 6, { ranAt: 5, rule: 'slot-bound-raise', direction: 1 })] }, /^held parallel_ceiling: from 3 is not the value the run ran at \(5\)$/m],
+    ['already moved', {}, /^held parallel_ceiling: Reflection r-20261006T000000Z-aaaaaa already moved parallel_ceiling \(t-mine\)$/m, prior],
+  ]
+  for (const [name, over, re, tunings] of cases) {
+    const home = tmpHome(t)
+    const repo = gitRepo(home)
+    writeToml(home, CONFIG)
+    writeReflections(home, TWO_AGREE)
+    if (tunings) fs.writeFileSync(tuningsPath(home), `${tunings}\n`)
+    const r = tune(home, autoArgs(writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS, ...over }), repo))
+    assert.equal(r.status, 0, `${name}: ${r.stderr}`)
+    assert.match(r.stdout, re, name)
+    assert.equal(fs.existsSync(tuningsPath(home)) ? lines(tuningsPath(home)).length : 0, tunings ? 1 : 0, `${name}: nothing written`)
+    assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), CONFIG, name)
+  }
+})
+
+test('--auto reads: torn lines skipped; an unreadable reflections.jsonl is exit 1; a closed --reflection is exit 2', { skip: process.getuid?.() === 0 && 'root ignores the mode' }, (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  writeToml(home, CONFIG)
+  writeReflections(home, [...TWO_AGREE, '{"kind": "proposal", "id": "torn'])
+  const scores = writeScores(home, { proposals: [RAISE()], guardrails: OK_GUARDS })
+  const ok = tune(home, [...autoArgs(scores, repo), '--dry-run'])
+  assert.equal(ok.status, 0, ok.stderr)
+  assert.match(ok.stdout, /^would record t-\S+ in \S+: \{.*"agreed": 3.*"auto": true, "reflection": "r-20261006T000000Z-aaaaaa"\}$/m)
+  fs.chmodSync(reflectionsPath(home), 0o000)
+  t.after(() => { try { fs.chmodSync(reflectionsPath(home), 0o644) } catch { /* gone */ } })
+  const bad = tune(home, autoArgs(scores, repo))
+  fs.chmodSync(reflectionsPath(home), 0o644)
+  assert.equal(bad.status, 1, bad.stderr)
+  assert.match(bad.stderr, /^tune: reflections\.jsonl cannot be read: .*Permission denied.*: nothing written\n$/)
+  assert.ok(!fs.existsSync(tuningsPath(home)))
+  fs.appendFileSync(reflectionsPath(home), `${closeLine('2026-10-06T02:00:00.000Z', RNOW)}\n`)
+  refusedNothingWritten(home, autoArgs(scores, repo), 2, /^tune: Reflection r-20261006T000000Z-aaaaaa is closed: nothing written\n$/, CONFIG)
+  refusedNothingWritten(home, ['--scores', scores, '--revert', 't-x', '--repo', repo, '--reflection', RNOW], 2, /^tune: Reflection r-20261006T000000Z-aaaaaa is closed/, CONFIG)
+})
+
+// ---- --revert ----------------------------------------------------------------------------------------------
+
+const AUTO_LINE = (over = {}) => JSON.stringify({ v: 2, ts: '2026-10-05T13:00:00.000Z', host: 'h', rollout: 'older', task: null, kind: 'tuning', id: 't-auto', repo: 'o/r',
+  window: WINDOW, scores: HEADLINE, auto: true, reflection: R2,
+  applied: [{ key: 'parallel_ceiling', from: 3, to: 4, ranAt: 3, rule: 'slot-bound-raise', evidence: 'e', agreeing: 0, agreed: 3 }], ...over })
+const LATER = { since: '2026-10-06T00:00:00.000Z', until: '2026-10-06T12:00:00.000Z', activeStart: '2026-10-06T00:00:00.000Z', activeEnd: '2026-10-06T09:00:00.000Z', partial: false }
+const AT4 = CONFIG.replace('parallel_ceiling = 3   # hand', 'parallel_ceiling = 4   # hand')
+const BREACH = { ...OK_GUARDS, tokensPerMerge: { breached: true } }
+const RAN4 = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3 }
+
+function revertCase(t, { tunings = [AUTO_LINE()], toml = AT4, scores = {} } = {}) {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  writeToml(home, toml)
+  fs.mkdirSync(evDir(home), { recursive: true })
+  fs.writeFileSync(tuningsPath(home), tunings.map((x) => `${x}\n`).join(''))
+  const sc = writeScores(home, { window: LATER, guardrails: BREACH, ranAt: RAN4, ...scores })
+  return { home, repo, sc, args: ['--scores', sc, '--revert', 't-auto', '--repo', repo, '--reflection', RNOW] }
+}
+
+test('--revert lands the reverse as one auto line: revert:<rule>, reverts, no agreed, no close', (t) => {
+  const { home, args } = revertCase(t)
+  const r = tune(home, args)
+  assert.equal(r.status, 0, r.stderr)
+  const all = lines(tuningsPath(home))
+  assert.equal(all.length, 2)
+  const l = all[1]
+  assert.deepEqual([l.auto, l.reflection, l.reverts, l.close], [true, RNOW, 't-auto', undefined])
+  assert.equal(l.applied.length, 1)
+  const [e] = l.applied
+  assert.deepEqual([e.key, e.from, e.to, e.ranAt, e.rule, e.agreeing, 'agreed' in e], ['parallel_ceiling', 4, 3, 4, 'revert:slot-bound-raise', 0, false])
+  assert.match(e.evidence, /^revert t-auto: breaches tokensPerMerge, which slot-bound-raise risks$/)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), CONFIG)
+  // a second revert of the same line is refused: already reverted
+  const again = tune(home, args)
+  assert.equal(again.status, 2, again.stderr)
+  assert.match(again.stderr, /^tune: t-auto is not reverted: t-auto's parallel_ceiling is already reverted: nothing written\n$/)
+  assert.equal(lines(tuningsPath(home)).length, 2)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), CONFIG)
+})
+
+test('--revert refuses, exit 2 and nothing written: no auto line, reverted, a revert, a stale value, another repo, an earlier run, a partial window, a breach outside the rule\'s risks', (t) => {
+  const cases = [
+    ['a pick line', { tunings: [AUTO_LINE({ auto: undefined, reflection: undefined })] }, /not a standing auto line/],
+    ['a voided auto line', { tunings: [AUTO_LINE(), JSON.stringify({ kind: 'tuning', ts: '2026-10-05T13:01:00.000Z', id: 't-v', repo: 'o/r', voids: 't-auto', applied: [] })] }, /not a standing auto line/],
+    ['already reverted', { tunings: [AUTO_LINE(), AUTO_LINE({ id: 't-rev', reverts: 't-auto', ts: '2026-10-05T14:00:00.000Z',
+      applied: [{ key: 'parallel_ceiling', from: 4, to: 3, ranAt: 4, rule: 'revert:slot-bound-raise', evidence: 'e', agreeing: 0 }] })], toml: CONFIG }, /already reverted|no longer holds/],
+    ['a revert line', { tunings: [AUTO_LINE({ reverts: 't-zero' })] }, /itself a revert/],
+    ['a stale value (a hand edit since)', { toml: CONFIG }, /no longer holds t-auto's parallel_ceiling 4 \(it is 3 now\)/],
+    ['another repo', { tunings: [AUTO_LINE({ repo: 'o/other' })] }, /is o\/other's, but the scores are for o\/r/],
+    ['a run that started before the auto line', { scores: { window: WINDOW } }, /started before t-auto landed/],
+    ['a partial window', { scores: { window: { ...LATER, partial: true } } }, /a partial window/],
+    ['a breach outside the rule\'s risks', { scores: { guardrails: { ...OK_GUARDS, throughput: { breached: true } } } }, /no breached Guardrail is among slot-bound-raise's risks \(breached: throughput\)/],
+    ['a run at another value', { scores: { ranAt: { ...RAN4, parallel_ceiling: 5 } } }, /did not run at t-auto's parallel_ceiling 4/],
+  ]
+  for (const [name, opts, re] of cases) {
+    const { home, args } = revertCase(t, opts)
+    const before = fs.readFileSync(tuningsPath(home), 'utf8')
+    const toml = fs.readFileSync(tomlPath(home), 'utf8')
+    const r = tune(home, args)
+    assert.equal(r.status, 2, `${name}: ${r.stderr}`)
+    assert.match(r.stderr, /^tune: t-auto is not reverted: /, name)
+    assert.match(r.stderr, re, name)
+    assert.equal(fs.readFileSync(tuningsPath(home), 'utf8'), before, `${name}: tunings.jsonl unchanged`)
+    assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), toml, `${name}: the config unchanged`)
+  }
+})
+
+test('usage: --auto and --revert are exclusive with --pick and --record-only; --reflection rules; --close needs --record-only', (t) => {
+  const home = tmpHome(t)
+  writeToml(home, CONFIG)
+  const repo = gitRepo(home)
+  const scores = writeScores(home, { proposals: [RAISE()] })
+  for (const [args, re] of [
+    [['--scores', scores, '--auto', '--record-only', '--reflection', RNOW], /not allowed with argument/],
+    [['--scores', scores, '--revert', 't-x', '--pick', 'p1', '--reflection', RNOW], /not allowed with argument/],
+    [['--scores', scores, '--reflection', RNOW], /one of the arguments/],
+    [['--scores', scores, '--auto', '--repo', repo], /^tune: --auto and --revert need --reflection <id>/],
+    [['--scores', scores, '--record-only', '--reflection', RNOW], /^tune: --reflection goes with --auto or --revert only\n$/],
+    [['--scores', scores, '--pick', 'p1', '--repo', repo, '--reflection', RNOW], /^tune: --reflection goes with --auto or --revert only\n$/],
+    [['--scores', scores, '--auto', '--repo', repo, '--reflection', 'week-1'], /^tune: --reflection week-1 is no r- id\n$/],
+    [['--scores', scores, '--auto', '--repo', repo, '--reflection', RNOW, '--close', 'completion'], /^tune: --close needs --record-only\n$/],
+    [['--scores', scores, '--revert', 't-x', '--repo', repo, '--reflection', RNOW, '--close', 'supersede'], /^tune: --close needs --record-only\n$/],
+  ]) {
+    refusedNothingWritten(home, args, 2, re, CONFIG)
+  }
+})
+
+test('tune.py and the score.py it loads parse as python 3.8', () => {
+  for (const script of [TUNE, SCORE]) {
+    const r = spawnSync('python3', ['-B', '-c', 'import ast, sys\nast.parse(open(sys.argv[1]).read(), sys.argv[1], feature_version=(3, 8))', script], { encoding: 'utf8' })
+    assert.equal(r.status, 0, `${path.basename(script)}: ${r.stderr}`)
+  }
 })
