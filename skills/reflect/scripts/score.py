@@ -69,9 +69,15 @@ used only when no other qualifies, flagged); activeEnd null never qualifies. Wit
 churn, the two absolute bounds, can breach ("no baseline").
 
 Review churn (p21-3, ADR 0037 d1) = Σregression / Σfindings over the window's review rounds, both sources together,
-rounded to 4 places: null, flagged "review churn unknown: no review rounds recorded", with no round; 0.0 with rounds
-but no findings. The denominator is every finding, unclassified ones included (the rest of findings once original
-and regression are taken), so sparse `path:line` cites understate it; `unclassified` reports the coverage.
+rounded to 4 places: null, flagged "review churn unknown: no review rounds recorded", with no round; 0.0 only with
+rounds but no findings (every round approved clean); null, flagged "review churn unknown: N finding(s), none
+classified (...)", with findings none of which original or regression placed (no head, no tree, no `path:line`
+cite), since a 0.0 there would read clean and never breach. A null never breaches. The denominator is every
+finding, unclassified ones included (the rest of findings once original and regression are taken), so sparse
+`path:line` cites understate it; `unclassified` reports the coverage, and more than half of the findings
+unclassified is flagged "review churn: low coverage" (review-ledger.py's 40% THRESHOLD, the built-in bound, is
+measured over classified findings only). The breach is decided from the integer sums, Σregression x 100 >
+review_churn_pct x Σfindings, never from the rounded value (11 of 20 is at a 55 bound, not over it).
 - Engine rounds: the record's review-verdict lines (reconcile-rollout.py, one per judged master-review round, split
   by review-split.py). The lines read (ts <= --until) are deduped ONCE by run_record.verdict_key, the first line per
   key in record order kept; that one set feeds both the windowed sums (rounds with ts in [since, until]) and rounds
@@ -130,11 +136,13 @@ import argparse
 import datetime
 import importlib.util
 import json
+import math
 import os
 import pathlib
 import re
 import sys
 import time
+from fractions import Fraction
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.dirname(os.path.dirname(HERE))
@@ -291,6 +299,27 @@ def _counts(d):
     if any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in vals) or vals[1] + vals[2] > vals[0]:
         return None
     return tuple(vals)
+
+
+def _churn_over(regression, findings, bound_pct):
+    """regression / findings above bound_pct %, decided from the integer sums: the rounded fraction is no test
+    (11/20 * 100 is 55.00000000000001, over a 55 bound; 4-place rounding can hide a breach just over one). A float
+    bound is read as the decimal it prints as, so 14.1 is 141/10."""
+    finite = not (isinstance(bound_pct, float) and not math.isfinite(bound_pct))
+    bound = Fraction(str(bound_pct)) if finite else bound_pct
+    return regression * 100 > bound * findings
+
+
+def guardrail_bounds(settings):
+    """The [guardrails] bounds: each built-in, overridden by --settings' numeric value (a boolean refused)."""
+    bounds = dict(GUARDRAILS_BUILT_IN)
+    g = (settings or {}).get("guardrails")
+    if isinstance(g, dict):
+        for k in bounds:
+            v = g.get(k, {}).get("value") if isinstance(g.get(k), dict) else None
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                bounds[k] = v
+    return bounds
 
 
 class Score:
@@ -846,8 +875,9 @@ class Score:
         if base_line is None and repo is not None:
             self.flag("no baseline: no earlier Reflection on %s ended before this run began; only quota stalls and "
                       "Review churn can withhold a raise" % repo)
-        churn = self.review_churn(since, until, base, repo)
-        guard = self.guardrails(headline, base_line, settings, churn)
+        bounds = guardrail_bounds(settings)
+        churn, churn_breached = self.review_churn(since, until, base, repo, bounds["review_churn_pct"])
+        guard = self.guardrails(headline, base_line, bounds, churn, churn_breached)
         out.update({
             "window": {"since": fmt(since), "until": fmt(until), "activeStart": fmt(act_start),
                        "activeEnd": fmt(act_end), "partial": self.partial},
@@ -936,10 +966,12 @@ class Score:
 
     # ---- Review churn (p21-3, ADR 0037 d1) -------------------------------------------------------------------
 
-    def review_churn(self, since, until, base, repo):
-        """Regression findings over all findings, over the engine's master-review rounds (this record's review-verdict
-        lines) and /fresh-review's rounds (reviews.jsonl's review-round lines attributed to `repo`), with the engine's
-        rounds per landed task beside it. None (unknown) with no round recorded; 0.0 with rounds but no findings."""
+    def review_churn(self, since, until, base, repo, bound_pct):
+        """(churn, breached): regression findings over all findings, over the engine's master-review rounds (this
+        record's review-verdict lines) and /fresh-review's rounds (reviews.jsonl's review-round lines attributed to
+        `repo`), with the engine's rounds per landed task beside it, and whether it is over `bound_pct` %, decided
+        from the integer sums. None (unknown) with no round recorded, or with findings none of which was classified;
+        0.0 with rounds but no findings. A None never breaches."""
         # Engine: dedupe the lines read (ts <= --until) ONCE by verdict_key, the first in record order kept (the line
         # the writer kept); the windowed sums and the per-task round counts both read this one set.
         kept, seen = [], set()
@@ -978,15 +1010,31 @@ class Score:
                                       if with_rounds else None)
         fresh = self.fresh_review_rounds(since, until, base, repo)
         tot = {k: eng[k] + fresh[k] for k in ("rounds", "findings", "original", "regression", "unclassified")}
+        findings, regression = tot["findings"], tot["regression"]
+        breached = False
         if tot["rounds"] == 0:
             value = None
             self.flag("review churn unknown: no review rounds recorded")
+        elif findings == 0:
+            value = 0.0  # every round approved with nothing to fix: no churn, and known
+        elif tot["original"] + regression == 0:
+            # findings, but none placed: a 0.0 here would read clean and never breach (unknown is not 0)
+            value = None
+            self.flag("review churn unknown: %d finding(s), none classified (no head, no tree or no path:line cite)"
+                      % findings)
         else:
-            value = round(tot["regression"] / tot["findings"], 4) if tot["findings"] else 0.0
+            value = round(regression / findings, 4)
+            breached = _churn_over(regression, findings, bound_pct)
+            if tot["unclassified"] * 2 > findings:
+                # review-ledger.py's 40% THRESHOLD is measured over classified findings only; here the unclassified
+                # ones sit in the denominator as non-regressions, so a sparse split understates the churn
+                self.flag("review churn: low coverage: %d of %d finding(s) unclassified (no head, no tree or no "
+                          "path:line cite): the churn counts them as non-regressions, so it may read low"
+                          % (tot["unclassified"], findings))
         out = {"value": value}
         out.update((k, tot[k]) for k in ("findings", "original", "regression", "unclassified", "rounds"))
         out.update(engine=eng, freshReview=fresh)
-        return out
+        return out, breached
 
     @staticmethod
     def _add(acc, c):
@@ -1060,14 +1108,7 @@ class Score:
         slug = cache[line_repo]
         return None if slug is None else slug.lower() == repo.lower()
 
-    def guardrails(self, headline, base_line, settings, churn=None):
-        bounds = dict(GUARDRAILS_BUILT_IN)
-        g = (settings or {}).get("guardrails")
-        if isinstance(g, dict):
-            for k in bounds:
-                v = g.get(k, {}).get("value") if isinstance(g.get(k), dict) else None
-                if isinstance(v, (int, float)) and not isinstance(v, bool):
-                    bounds[k] = v
+    def guardrails(self, headline, base_line, bounds, churn=None, churn_breached=False):
         bs = (base_line or {}).get("scores") or {}
 
         def rise(value, base, points):
@@ -1096,10 +1137,11 @@ class Score:
                             "breached": headline["quotaStalls"] > bounds["quota_stalls"]},
         }
         if churn is not None:
-            # an absolute bound (ADR 0037 d1): it breaches with no baseline, and a null value never breaches
+            # an absolute bound (ADR 0037 d1): it breaches with no baseline, and a null value never breaches; the
+            # breach is review_churn's, decided from the integer sums, never from the rounded value
             v = churn["value"]
             out["reviewChurn"] = {"value": v if v is not None else "unknown", "bound": "<=%s%%" % bounds["review_churn_pct"],
-                                  "baseline": None, "breached": v is not None and v * 100 > bounds["review_churn_pct"],
+                                  "baseline": None, "breached": v is not None and churn_breached,
                                   "roundsPerLandedTask": churn["engine"]["roundsPerLandedTask"]}
         if tpm is None:
             self.flag("tokens per merge unknown: no folded call journal carries tokens (or nothing merged)")

@@ -125,6 +125,12 @@ import json, sys
 c = json.load(sys.stdin)["reviewChurn"]
 print(c["value"], c["engine"]["rounds"], c["engine"]["findings"])'
 }
+# churnflags [args...]: score.py's "review churn" flags, one per line
+churnflags() {
+  python3 "$SCORE" --rollout ro --until 2026-10-05T12:00:00Z "$@" 2>/dev/null | python3 -c '
+import json, sys
+print("\n".join(f for f in json.load(sys.stdin)["flags"] if f.startswith("review churn")))'
+}
 
 F1='["a.py:2 the empty corpus is not handled","a.py:3 the off-by-one in the loop","no cite: the README is stale"]'
 F2='["a.py:5 the r1 fix drops the guard"]'
@@ -162,7 +168,9 @@ setst "$T" in_progress
 rec "$(row review "[$(v 1 changes '' "$F1"),$(v 2 approve '' '[]')]")" >/dev/null 2>&1
 ok "$(rv)" "r1:3/0/0 r2:0/0/0" "gate: the resume's replayed r1 is skipped; r2 is written"
 python3 "$RRPY" emit --rollout ro --task "$T" --kind merged --json '{"pr":7}' --ts 2026-10-05T10:30:00Z
-ok "$(churn --repo-slug o/r)" "0.0 2 3" "gate e2e: score.py counts 2 rounds and 3 findings"
+ok "$(churn --repo-slug o/r)" "None 2 3" "gate e2e: 2 rounds, 3 head-less findings, none classified: unknown, never 0.0"
+has "$(churnflags --repo-slug o/r)" "review churn unknown: 3 finding(s), none classified (no head, no tree or no path:line cite)" \
+  "gate e2e: the unknown is flagged with its cause"
 use gatehead
 rec "$(row gate-pending "[$(v 1 changes "$H1" "$F1")]" "$GATE")" >/dev/null 2>&1
 setst "$T" in_progress

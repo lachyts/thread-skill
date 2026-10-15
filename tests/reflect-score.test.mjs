@@ -919,3 +919,53 @@ test('(h) TRIPWIRE (p21-2 hand-off): a headline reviewChurn slot carries reviewC
   if ('reviewChurn' in out.headline) assert.equal(out.headline.reviewChurn, out.reviewChurn.value)
   assert.match(fs.readFileSync(SCORE, 'utf8'), /HAND-OFF p21-2: when the headline\/tuning scores gain a reviewChurn slot, set headline\.reviewChurn =\s+# reviewChurn\.value/)
 })
+
+// t1 merged, with review-verdict lines given as [hh:mm, round, verdict, findings, original, regression]
+const landedWith = (...verdicts) => byTs([...life('t1', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] }),
+  ...verdicts.map(([ts, round, verdict, f, o, r]) => rv(at(ts), 't1', round, verdict, f, o, r))])
+
+test('(i) review churn: findings none of which was classified read as unknown, never 0, and never breach', (t) => {
+  // a head-less round (or no tree, or no path:line cite): 3 findings, 0 original, 0 regression
+  const home = tmpHome(t)
+  emitAll(home, 'demo', landedWith(['00:30', 1, 'changes', 3, 0, 0], ['01:00', 2, 'approve', 0, 0, 0]))
+  const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, {}, { guardrails: { review_churn_pct: 0 } })])
+  assert.equal(out.reviewChurn.value, null)
+  assert.deepEqual([out.reviewChurn.findings, out.reviewChurn.original, out.reviewChurn.regression, out.reviewChurn.unclassified, out.reviewChurn.rounds], [3, 0, 0, 3, 2])
+  assert.equal(out.guardrails.reviewChurn.value, 'unknown')
+  assert.equal(out.guardrails.reviewChurn.breached, false, 'unknown never breaches, not even a 0% bound')
+  assert.ok(has(out.flags, /^review churn unknown: 3 finding\(s\), none classified \(no head, no tree or no path:line cite\)$/))
+  assert.ok(!has(out.flags, /no review rounds recorded/))
+  assert.ok(!has(out.flags, /low coverage/), 'the unknown flag says it, once')
+})
+
+test('(j) review churn: more than half the findings unclassified is flagged low coverage; half is not', (t) => {
+  const low = tmpHome(t)
+  emitAll(low, 'demo', landedWith(['00:30', 1, 'changes', 5, 1, 1]))
+  const l = scored(low, ['--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.equal(l.reviewChurn.value, 0.2)
+  assert.equal(l.reviewChurn.unclassified, 3)
+  assert.ok(has(l.flags, /^review churn: low coverage: 3 of 5 finding\(s\) unclassified \(no head, no tree or no path:line cite\)/))
+  const half = tmpHome(t)
+  emitAll(half, 'demo', landedWith(['00:30', 1, 'changes', 4, 1, 1]))
+  const h = scored(half, ['--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.equal(h.reviewChurn.value, 0.25)
+  assert.ok(!has(h.flags, /low coverage/))
+})
+
+test('(k) review churn: the breach is decided from the integer sums, not the rounded fraction', (t) => {
+  const breach = (bound, f, o, r) => {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', landedWith(['00:30', 1, 'changes', f, o, r]))
+    return scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, {}, { guardrails: { review_churn_pct: bound } })]).guardrails.reviewChurn
+  }
+  // exactly at the bound: 11/20 * 100 is 55.00000000000001 and 7/25 * 100 is 28.000000000000004 in floats
+  assert.deepEqual(breach(55, 20, 9, 11), { value: 0.55, bound: '<=55%', baseline: null, breached: false, roundsPerLandedTask: 1 })
+  assert.equal(breach(28, 25, 18, 7).breached, false, '7 of 25 is at a 28% bound')
+  assert.equal(breach(55, 20, 8, 12).breached, true, 'one over the bound breaches')
+  // a decimal bound reads as the decimal it prints as: 141 of 1000 is at 14.1%, 142 is over
+  assert.equal(breach(14.1, 1000, 859, 141).breached, false)
+  assert.equal(breach(14.1, 1000, 858, 142).breached, true)
+  // 4-place rounding cannot hide a breach: 40001/100001 rounds to 0.4, yet it is over 40%
+  const over = breach(40, 100001, 60000, 40001)
+  assert.deepEqual([over.value, over.breached], [0.4, true])
+})

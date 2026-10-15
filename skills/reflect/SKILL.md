@@ -99,11 +99,12 @@ From `score.json`, verbatim numbers only (the record is UTC; local times may be 
   Reflection).
 - **Guardrails**: tokens per merge, set-aside rate, conflict rate (and the integrator-path share) and quota
   stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so.
-  **Review churn** too (`reviewChurn`, p21-3): its value, or "unknown" when no review round was recorded (never 0),
-  rounds per landed task, the engine and /fresh-review split (`engine`, `freshReview`), the `unclassified` count
-  (findings no `path:line` blame could place), its bound (`review_churn_pct`, absolute: it breaches with no
-  baseline) and whether it is breached. Integration re-review rejections are not counted: rounds per landed task
-  is master-review rounds only.
+  **Review churn** too (`reviewChurn`, p21-3): its value, or "unknown" when no review round was recorded or no
+  finding could be classified (never 0; say which, from its flag, and any "low coverage" flag), rounds per landed
+  task, the engine and /fresh-review split (`engine`, `freshReview`), the `unclassified` count (findings no
+  `path:line` blame could place), its bound (`review_churn_pct`, absolute: it breaches with no baseline) and
+  whether it is breached. Integration re-review rejections are not counted: rounds per landed task is
+  master-review rounds only.
 - **Slots and lane**: the ceiling it ran at (and any mid-window change), the share of running time the Slots were
   full, utilisation, idle Slot time by reason; the lane's busy share, Integrations and the ready-to-lane waits.
 - **Load**: the overlapping rollouts on this machine, their span and the Slots each held open (`slotsOpen`). A
