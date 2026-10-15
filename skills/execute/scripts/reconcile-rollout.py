@@ -120,7 +120,8 @@ Subcommands:
               bumped to one minute after the latest of the last re-entry (_last_re_entry) and every entry stamp for
               this fingerprint when now is not later, so no two entries of a block share one and none ties a
               re-entry. An identical live entry with its raise and pr: in place is `[no-change]` at its stamp. Prints
-              `<slug>: answer recorded (<form>) <stamp> [written]`. Records no Run-record event.
+              `<slug>: answer recorded (<form>) <stamp> [written]`. Records `answer-recorded` once the task note saves
+              (Run record, below); a `[no-change]` re-run, a refusal and --dry-run record nothing.
 
   auto-retry  Execute's automatic retry of one set-aside task (p16-4, ADR 0033; execute § 4.5 step 1.2's *Automatic
               retry*): `--tasks <slug> --rollout <note> [--auto-retries N] [--fingerprint <12 hex>]`. The task's
@@ -399,7 +400,8 @@ Subcommands:
               --standing without --rollout is exit 1 (`ERROR: --standing needs --rollout`), nothing written. A
               note already fully approved stays `[no-change]`, exit 0.
 
-Run record (p15-2, ADR 0032): each verb records its own Slot and lane transitions through run_record.py's
+Run record (p15-2, ADR 0032): each verb records its own Slot and lane transitions, and (p21-2) the human acts it
+carries out (a Recorded answer, a sign-off, a hand-back, a consumed RACE decision), through run_record.py's
 emit (one helper, _event), best-effort: a refusal or a write failure prints one `run_record:` line on stderr
 and never changes the verb's exit, stdout or vault writes. Nothing is recorded on --dry-run, by a refusal, or
 for a note with no `rollout:` (the rollout slug is the task note's `rollout:`, read before any write; `next`,
@@ -424,7 +426,10 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     the Integration log's last line when it is the current Integration's (startedAt at or
                     after `ready:`; otherwise left out); then merged pr=.
   resume            the same events as mark-done, for each note it flips done; a note that read `in_progress`
-                    first records slot-freed outcome=completed (its PR merged, so its Slot ends there).
+                    first records slot-freed outcome=completed (its PR merged, so its Slot ends there). A note a
+                    decided RACE or UNVERIFIED marks first records race-decided {mark, by=resume} (p21-2: Lachy's
+                    decision landed it; once per task). mark-done never does: a green re-verify lands the task with
+                    no decision consumed.
   reconcile         per row, against the note's status and _holds_lane before the row's writes: slot-freed
                     when it was in_progress and the row is not an integrate row (outcome ready, completed,
                     lost for a lead row whose reason starts `workflow call failed:`, else set-aside); ready
@@ -440,15 +445,27 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     set-aside; a rejected row that ends review-blocked is one); quota-stall {stage, detail}
                     for a `workflow call failed:` lead row whose error line reads as a usage or rate limit
                     (QUOTA_RE).
-  hand-back         the Integration arm records ready pr=; the run arm stamps `handed_back:`.
-  auto-retry        hand-back's own events (the Integration arm's ready pr=), then auto-retry {stage, setAsideAt,
+  hand-back         (p21-2) race-decided {mark, by=hand-back} when a `RACE decided:` line lifted the task's hold
+                    (_record_decision: once per task per record); then handed-back {via, arm}: via, first match,
+                    descope (a `descope_armed:` stamp standing, read before the transition), answer (--answer, a live
+                    answer of any block spent by this save, or a `(block -)` entry newer than _last_re_entry: not
+                    this block's answer only, so it can skew a Reflection's act tally by kind, never its per-task
+                    rate), else retry; arm run | integration. Then the Integration arm records ready pr=; the run
+                    arm stamps `handed_back:`.
+  record-answer     (p21-2) answer-recorded {answerKind: --kind, form?: --form, raise?: --raise, pr: --pr given},
+                    after the task note saves.
+  auto-retry        race-decided {mark, by=auto-retry} when a `RACE decided:` line lifted the hold (once per task;
+                    p21-2, no handed-back: the retry's own event names it), hand-back's own events (the
+                    Integration arm's ready pr=), then auto-retry {stage, setAsideAt,
                     retryClass, used, budget, fingerprint, reviewRounds?, quotaRetries?} (p16-4): stage is the
                     task's latest set-aside line's in the record (exact pairing for a Reflection), else the stage table
                     below over the note (_retry_stage); setAsideAt run | integration; retryClass agent | infra |
                     quota; used is auto_retries_used after the retry (a quota retry leaves it); budget the resolved
                     auto_retries; reviewRounds the raised max_review_rounds; quotaRetries quota_retries_used after a
                     quota retry.
-  approve-gates     the Integration arm records ready pr=.
+  approve-gates     (p21-2) gate-signed {standing: false, gates: the count signed} for each note it signs (Lachy's
+                    sign-off), --standing gate-signed {standing: true, gates: the count covered} when it covered any
+                    (the Standing approval's, never counted as his act); then the Integration arm records ready pr=.
   defer             (read before clearing) slot-freed outcome=stopped for an in_progress note; for a lane
                     holder a merge-hold close and lane-freed release=halt; an open race hold closes.
   carry             to the --from rollout, after each carried note saves: slot-freed stopped for a running
@@ -512,9 +529,9 @@ Queue states (one per linked task, re-read on every call):
   anything else (dropped, parked)             -> other, outside N
   an undecided RACE / UNVERIFIED (next only)  -> set-aside at race (Race holds, below)
 
-Race holds (_race_holds, read by `resume`, `next`, `carry` and `hand-back`; status § 3's definitions): RACE
-is a linked note not done, merged or dropped whose slug a wikilink names on a line of the rollout's
-`## Race log` (any alias, heading or escaped pipe; any case). UNVERIFIED is a set-aside note whose latest run
+Race holds (_race_holds; _race_marks keeps the decided ones too; read by `resume`, `next`, `carry`, `hand-back` and
+`auto-retry`; status § 3's definitions): RACE is a linked note not done, merged or dropped whose slug a wikilink
+names on a line of the rollout's `## Race log` (any alias, heading or escaped pipe; any case). UNVERIFIED is a set-aside note whose latest run
 (`blockerSummary`) carries `UNVERIFIED:`. RACE wins when both apply. Either is lifted only by a line in the
 rollout's `## Notes` section matching `repair: [[<slug>]] RACE decided:` (an alias allowed, any case): main
 holds a combination nobody verified, and only Lachy's recorded decision releases it. `next` re-reads a held
@@ -522,7 +539,10 @@ task that has not landed as set-aside at `race` (so it never starts, restarts or
 dependants wait) and lists it under `raceHold`; one whose `integrating:` stamp stands (the lead's RACE
 re-verify holds the lane) still counts as integrating for the pause drain, the solo rule, the overlap and the
 halt verdict. `hand-back` refuses a held task (exit 2, nothing written). `status` reports the stored state,
-which status § 3 renders as a RACE itself.
+which status § 3 renders as a RACE itself. A verb that moves a task because its decision lifted the hold (`resume`
+lands it, `hand-back` or `auto-retry` re-enters it) records that once, `race-decided` (_record_decision, p21-2): the
+human act a Reflection counts. The hold itself, opened on every merge-task exit 5 and ended by a green re-verify's
+mark-done, is no act. `defer` and `mark-done` never read the decision.
 
 Git-env hold (_git_env_hold, read by `next`, `status`, `carry` and skills/execute/scripts/git-env-canary.py;
 execute § 4.5 *Git-env canary*): the rollout note's `## Git-env log` (GIT_ENV_LOG_SECTION) holds one line per
@@ -1675,14 +1695,15 @@ RACE_DECIDED_RE = re.compile(r"repair:\s*\[\[([^\]|#^\\]+)[^\]]*\]\]\s*RACE deci
 UNVERIFIED_MARK = "UNVERIFIED:"
 
 
-def _race_holds(rollout_note, linked):
-    """{slug_lower: (slug, kind)} for every linked task an undecided RACE or UNVERIFIED holds (the module
-    docstring's "Race holds"). RACE: a note not done, merged or dropped whose slug a wikilink names on a line
+def _race_marks(rollout_note, linked):
+    """{slug_lower: (slug, kind, decided)} for every linked task a RACE or UNVERIFIED marks, decided or not (the
+    module docstring's "Race holds"). RACE: a note not done, merged or dropped whose slug a wikilink names on a line
     of the rollout's `## Race log`. UNVERIFIED: a set-aside note whose latest run (_blocker_summary) carries
-    `UNVERIFIED:`. RACE wins when both apply. A `repair: [[<slug>]] RACE decided:` line in the rollout's
-    `## Notes` lifts either; a decision recorded anywhere else never does. `linked` is _scan's (path, Note)
-    list. Read by `resume`, `next`, `carry` and `hand-back`. `rollout_note` None (hand-back's `rollout:`
-    names no readable note) has no Race log and no decision, so only an UNVERIFIED holds there."""
+    `UNVERIFIED:`. RACE wins when both apply. `decided` is True when a `repair: [[<slug>]] RACE decided:` line in the
+    rollout's `## Notes` lifts it; a decision recorded anywhere else never does. `linked` is _scan's (path, Note)
+    list. `rollout_note` None (hand-back's `rollout:` names no readable note) has no Race log and no decision, so
+    only an undecided UNVERIFIED marks there. Read by _race_holds, and by the verbs that move a task because a
+    decision lifted its hold (resume, hand-back, auto-retry: _record_decision records that once, p21-2)."""
     race_log = rollout_note.section_text(RACE_LOG_SECTION) if rollout_note is not None else ""
     notes = rollout_note.section_text(NOTES_SECTION) if rollout_note is not None else ""
     raced = set()
@@ -1692,16 +1713,22 @@ def _race_holds(rollout_note, linked):
             if slug:
                 raced.add(slug)
     decided = {(_wikilink_slug(m.group(1)) or "").lower() for m in RACE_DECIDED_RE.finditer(notes)}
-    holds = {}
+    marks = {}
     for path, note in linked:
         key = path.stem.lower()
-        if key in decided:
-            continue
         if key in raced and _status(note) not in FINISHED_STATUSES:
-            holds[key] = (path.stem, "RACE")
+            marks[key] = (path.stem, "RACE", key in decided)
         elif _queue_state(note)[0] == "set-aside" and UNVERIFIED_MARK in _blocker_summary(note):
-            holds[key] = (path.stem, "UNVERIFIED")
-    return holds
+            marks[key] = (path.stem, "UNVERIFIED", key in decided)
+    return marks
+
+
+def _race_holds(rollout_note, linked):
+    """{slug_lower: (slug, kind)} for every linked task an undecided RACE or UNVERIFIED holds: _race_marks without the
+    decided ones, the same result as before p21-2. Read by `next` (and _awaits_sign_off), `carry`, `hold`, descope's
+    owner check and lead-integrate.py; `resume`, `hand-back` and `auto-retry` read _race_marks, so the move a decision
+    allows is recorded (_record_decision)."""
+    return {k: (slug, kind) for k, (slug, kind, decided) in _race_marks(rollout_note, linked).items() if not decided}
 
 
 # ---- the git-env hold (execute § 4.5 *Git-env canary*) ------------------------------------------------------
@@ -2637,7 +2664,7 @@ def cmd_hand_back(args) -> int:
         print("ERROR: hand-back: usage: --answer takes one task slug", file=sys.stderr)
         return 2
     notes = list(_each_note(args))
-    rollouts, held = {}, []
+    rollouts, held, decided = {}, [], {}
     for slug, path, note in notes:
         ro = _wikilink_slug(note.get("rollout"))
         if not ro:
@@ -2648,9 +2675,11 @@ def cmd_hand_back(args) -> int:
                 rollouts[ro.lower()] = Note(ro_path) if ro_path.is_file() else None
             except ValueError:
                 rollouts[ro.lower()] = None
-        hold = _race_holds(rollouts[ro.lower()], [(path, note)]).get(path.stem.lower())
-        if hold:
-            held.append(_race_hold_line("hand-back", slug, hold[1], ro))
+        mark = _race_marks(rollouts[ro.lower()], [(path, note)]).get(path.stem.lower())
+        if mark and not mark[2]:
+            held.append(_race_hold_line("hand-back", slug, mark[1], ro))
+        elif mark:
+            decided[slug] = mark[1]  # a decision lifted its hold: the move below records it (_record_decision)
     if held:
         for line in held + args._errors:
             print(f"ERROR: {line}", file=sys.stderr)
@@ -2665,6 +2694,9 @@ def cmd_hand_back(args) -> int:
                     print(f"ERROR: {e}", file=sys.stderr)
                 return 1
         fingerprint = _block_fingerprint(note)  # before the transition: it reads the status's own section
+        # handed-back's via (p21-2), read before the transition too: a standing descope_armed: (mark-started clears it)
+        # is a descope's re-entry; a fresh `(block -)` answer is one hand-back never spends.
+        descoped, dash = _scalar(note.get(DESCOPE_ARMED_KEY)), _fresh_dash_answer(note)
         arm, said = _hand_back_note(note, now)
         if arm is None:
             args._errors.append(f"{slug}: {said} — refusing to hand back: only a blocked note set aside at Integration "
@@ -2677,10 +2709,15 @@ def cmd_hand_back(args) -> int:
             note.set(AUTO_RETRY_SHA_KEY, fingerprint)
         else:
             note.remove(AUTO_RETRY_SHA_KEY)
-        _spend_answers(note, now)
+        spent = _spend_answers(note, now)
         note.save(dry_run=args.dry_run)
+        rollout = _note_rollout(note)
+        if slug in decided:
+            _record_decision(rollout, slug, decided[slug], "hand-back", args)
+        via = "descope" if descoped else "answer" if (args.answer is not None or spent or dash) else "retry"
+        _event(rollout, "handed-back", slug, {"via": via, "arm": arm}, args)
         if arm == "integration":
-            _event(_note_rollout(note), "ready", slug, {"pr": _pr(note)}, args)
+            _event(rollout, "ready", slug, {"pr": _pr(note)}, args)
         print(f"{slug}: {said}{_flag(args, note)}")
     return _finish(args, now)
 
@@ -2756,7 +2793,8 @@ def cmd_resume(args) -> int:
     rollout_note = Note(rollout_path)
     root = _project_root(rollout_note)
     linked = _linked_task_notes(rollout_path, tasks_dir)
-    race = _race_holds(rollout_note, linked)
+    marks = _race_marks(rollout_note, linked)
+    race = {k: (s, kind) for k, (s, kind, decided) in marks.items() if not decided}  # _race_holds, read once
     defaults, errors, held = {}, [], []
     for path, note in linked:
         slug, status, pr = path.stem, _status(note), _pr(note)
@@ -2812,6 +2850,9 @@ def cmd_resume(args) -> int:
                 note.set("merged", _stamp(merged_at))
         note.remove("integrating")
         note.save(dry_run=args.dry_run)
+        mark = marks.get(slug.lower())
+        if mark is not None:  # a decided RACE or UNVERIFIED (an undecided one was held above): Lachy's decision landed it
+            _record_decision(_note_rollout(note), slug, mark[1], "resume", args)
         _landed_events(_note_rollout(note), slug, lane_held, lane_fields, pr, args, running=status == "in_progress")
         print(f"{slug}: status={status or 'none'}->done (PR {ref} merged into {default})" + _flag(args, note))
     print(_progress_for(rollout_path, tasks_dir, now))
@@ -3162,14 +3203,15 @@ def _event(rollout, kind, task=None, fields=None, args=None, ts=None):
 
 def _record_state(rollout):
     """The rollout's Run record replayed by the reader rules (run_record.py's "Reading the record"):
-    {slots: {task}, lane: task|None, holds: {(hold, task)}, paused: bool, carried: {task: from}}, tasks lowercased
-    as the writer stores them; `carried` keeps each task's `carried` line no later slot-taken consumed. No file
+    {slots: {task}, lane: task|None, holds: {(hold, task)}, paused: bool, carried: {task: from}, decided: {task}},
+    tasks lowercased as the writer stores them; `carried` keeps each task's `carried` line no later slot-taken
+    consumed; `decided` is every task with a `race-decided` line (_record_decision's once-per-task check). No file
     is an empty record; None when it cannot be read (callers then emit without the open-check)."""
     try:
         path = _run_record().record_path(rollout)
     except Exception:
         return None
-    st = {"slots": set(), "lane": None, "holds": set(), "paused": False, "carried": {}}
+    st = {"slots": set(), "lane": None, "holds": set(), "paused": False, "carried": {}, "decided": set()}
     try:
         lines, _bad = _record_lines(path)
     except FileNotFoundError:
@@ -3197,6 +3239,8 @@ def _record_state(rollout):
             st["paused"] = True
         elif kind == "resumed":
             st["paused"] = False
+        elif kind == "race-decided":
+            st["decided"].add(task)
         elif kind == "carried":
             if d.get("rollout") == d.get("from"):  # the from-file: the task's Slot, lane and holds end here
                 st["slots"].discard(task)
@@ -3290,6 +3334,19 @@ def _landed_events(rollout, slug, held, lane_fields, pr, args, running=False):
     if held:
         _event(rollout, "lane-freed", slug, {"release": "merge", **lane_fields}, args)
     _event(rollout, "merged", slug, {"pr": pr} if pr else {}, args)
+
+
+def _record_decision(rollout, slug, mark, by, args):
+    """race-decided {mark, by} (p21-2): `by` (resume, hand-back, auto-retry) moved the task because Lachy's `RACE
+    decided:` line lifted its RACE or UNVERIFIED hold. The one writer of the kind, and at most once per task per record
+    (_record_state's `decided`); an unreadable record emits anyway, as _close_holds does (the reader counts per task).
+    Nothing on --dry-run or with no rollout."""
+    if not rollout or getattr(args, "dry_run", False):
+        return
+    state = _record_state(rollout)
+    if state is not None and slug.lower() in state["decided"]:
+        return
+    _event(rollout, "race-decided", slug, {"mark": mark, "by": by}, args)
 
 
 def _halt_lane(rollout, slug, args, state):
@@ -4479,9 +4536,9 @@ def cmd_auto_retry(args) -> int:
     ro = rollout_path.stem
     if (_note_rollout(note) or "").lower() != ro.lower():
         return error(f"{slug}: its rollout: is {note.get('rollout') or 'none'}, not [[{ro}]]")
-    hold = _race_holds(rollout_note, [(path, note)]).get(path.stem.lower())
-    if hold:
-        print(f"ERROR: {_race_hold_line('auto-retry', slug, hold[1], ro)}", file=sys.stderr)
+    mark = _race_marks(rollout_note, [(path, note)]).get(path.stem.lower())
+    if mark and not mark[2]:
+        print(f"ERROR: {_race_hold_line('auto-retry', slug, mark[1], ro)}", file=sys.stderr)
         return 2
     lead = _lead()
     # The rollout's Project root is the lead's `inputs --repo <repoPath>`: the note's pr: is read as a PR URL
@@ -4541,8 +4598,10 @@ def cmd_auto_retry(args) -> int:
     except OSError as e:
         return error(f"{slug}: cannot write {path}: {e}", tail="the rollout's Notes line is written: a re-run finishes "
                      "the records")
-    # (c) hand-back's own events, then the retry's.
+    # (c) the decision that lifted a RACE or UNVERIFIED hold (once per task), hand-back's own events, then the retry's.
     rollout = _note_rollout(note)
+    if mark:
+        _record_decision(rollout, slug, mark[1], "auto-retry", args)
     if arm == "integration":
         _event(rollout, "ready", slug, {"pr": _pr(note)}, args)
     fields = {"stage": stage, "setAsideAt": at, "retryClass": retry_class, "used": used, "budget": n_budget,
@@ -4658,6 +4717,20 @@ def _spend_answers(note, now) -> int:
     re-block (which writes no run, so no re-entry stamp) never re-arms the lead's *Recorded answer* and is asked
     afresh (ADR 0033 decision 6)."""
     return _rewrite_keys(note, lambda _fp: True, f"handed back {_stamp(now)}")
+
+
+def _fresh_dash_answer(note) -> bool:
+    """True when `## Repair input` holds a `(block -)` entry (an answer to a block with no fingerprint: a PR-less review,
+    a gate) stamped after _last_re_entry: an answer to the block hand-back now re-enters, which it never spends.
+    handed-back's via=answer reads it (p21-2)."""
+    last, _bad = _last_re_entry(note)
+    for line in note.section_text(REPAIR_INPUT_SECTION).split("\n"):
+        m = ANY_ENTRY_RE.match(line.strip())
+        if m and m.group(2) == "-":
+            ts = _parse_ts(m.group(1))
+            if ts is not None and (last is None or ts > last):
+                return True
+    return False
 
 
 def _spent_count(note, fp) -> int:
@@ -4853,6 +4926,13 @@ def cmd_record_answer(args) -> int:
     except OSError as e:
         return error(f"{slug}: cannot write {path}: {e}",
                      tail="nothing written to the task note" + (": a re-run finishes the records" if raise_to else ""))
+    fields = {"answerKind": args.kind}  # (p21-2) Lachy's Recorded answer: an act the Hands-off rate counts
+    if args.form:
+        fields["form"] = args.form
+    if field:
+        fields["raise"] = field
+    fields["pr"] = bool(args.pr)
+    _event(_note_rollout(note), "answer-recorded", slug, fields, args)
     flag = " (dry-run)" if args.dry_run else " [written]"
     print(f"{slug}: answer recorded ({args.form or '-'}) {stamp}{flag}")
     return 0
@@ -5193,6 +5273,7 @@ def cmd_approve_gates(args) -> int:
         note.upsert_section(APPROVED_GATES_SECTION, "\n".join(merged))
         stage, route, ready_pr = _sign_route(note, slug, now)
         note.save(dry_run=args.dry_run)
+        _event(_note_rollout(note), "gate-signed", slug, {"standing": False, "gates": len(gates)}, args)  # Lachy's sign-off
         if stage == "integration":
             _event(_note_rollout(note), "ready", slug, {"pr": ready_pr}, args)
         print(f"{slug}: {len(gates)} gate(s) approved (signed off {date}) -> {route}"
@@ -5309,6 +5390,8 @@ def _approve_standing(args) -> int:
             else:
                 stage, route, ready_pr = _sign_route(note, slug, now)
             note.save(dry_run=args.dry_run)
+            # the Standing approval signed these, not Lachy: recorded, and not counted as his act (p21-2)
+            _event(_note_rollout(note), "gate-signed", slug, {"standing": True, "gates": len(covered)}, args)
             if stage == "integration":
                 _event(_note_rollout(note), "ready", slug, {"pr": ready_pr}, args)
             for g, usd in covered:

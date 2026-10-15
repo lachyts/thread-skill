@@ -3,7 +3,8 @@
 # (ADR 0032). A fixture rollout `ro` (parallel_ceiling 2, the three round caps stamped) is driven through
 # start -> reconcile -> integrate -> merge, a set-aside, a live ceiling edit, merge and race holds, a Lost-call
 # resume, the integrate-call path, a hand-back, a signed gate, a quota stall, a read-only approval, `resume`,
-# `defer` and the halts; side rollouts cover the pauses, a carry and the idle-slots reasons. Each leg asserts
+# `defer` and the halts; side rollouts cover the pauses, a carry, the idle-slots reasons and (p21-2) the human acts
+# (record-answer, approve-gates, hand-back's via) and the RACE decisions a verb consumes. Each leg asserts
 # the `kind:task` sequence it appended and the key fields; the last legs check that --dry-run records nothing
 # (each verb then runs without it and must record), that an unwritable events dir changes no verb's exit,
 # stdout or non-record stderr, and run the pairing checker (run_record.py's reader rules) over the whole
@@ -435,8 +436,8 @@ dry "lane-freed:z merged:z" mark-done --tasks z --tasks-dir "$V" --now "$NOW"
 dry "slot-freed:y set-aside:y" reconcile --result "$(trow y '{"status":"blocked","blockerDiagnosis":"x"}')" --tasks-dir "$V" --now "$NOW"
 ok "$(rrs next --rollout "$V/ro.md" --tasks-dir "$V" --running "" --now "$NOW" | python3 -c 'import json,sys; print([e["setAsideAt"] for e in json.load(sys.stdin)["setAside"] if e["slug"] == "n"])')" \
   "['integration']" "n is set aside at Integration"
-dry "ready:n" hand-back --tasks n --tasks-dir "$V" --now "$NOW"
-dry "ready:g3" approve-gates --tasks g3 --tasks-dir "$V" --now "$NOW"
+dry "handed-back:n ready:n" hand-back --tasks n --tasks-dir "$V" --now "$NOW"
+dry "gate-signed:g3 ready:g3" approve-gates --tasks g3 --tasks-dir "$V" --now "$NOW"
 ok "$(fm g3 status)" "status: review" "approve-gates took the Integration arm"
 dry "merged:z2" resume --rollout "$V/ro.md" --tasks-dir "$V" --gh-bin "$GH22" --now "$NOW"
 dry "run-bound:c" bind-run --tasks c --run-id wf_c1 --call task --journal-dir "$J" --tasks-dir "$V"
@@ -564,6 +565,155 @@ ok "$(nh nh4 '{"status":"gate-pending","gatedInputs":["spend: one call — cap $
 ok "$(nh nh5 '{"status":"blocked","needsHuman":"'"$Q"'","blockerDiagnosis":"the implementer asks"}')" \
   '"slot-freed" ["implement","needs-human","run"]' "an engine-blocked row on a question -> needs-human"
 
+echo "== 25. human acts (p21-2): record-answer, approve-gates and hand-back record their own act (rollout ha)"
+# Each verb that carries a decision of Lachy's records it (the Hands-off rate's events); hand-back classifies its own
+# via. ha stamps every cap and auto_retries 0 (the Human-fix path), and a standing approval of US$50; its Project root
+# is a real dir, so the verbs that read it (inputs, the resolver) see one.
+mkro ha "parallel_ceiling: 4" "max_review_rounds: 4" "max_iterations: 3" "max_plan_rounds: 3" "auto_retries: 0" "spend_approval_usd: 50"
+mkdir -p "$TMP/ha-root"
+python3 - "$V/ha.md" "$TMP/no-repo" "$TMP/ha-root" <<'PY2'
+import sys
+p, a, b = sys.argv[1:]
+t = open(p).read()
+open(p, "w").write(t.replace(a, b, 1))
+PY2
+fp() { python3 "$LI" inputs --note "$V/$1.md" --now "$NOW" | python3 -c 'import json,sys; print(json.load(sys.stdin)["fingerprint"])'; }
+ra() { rrs record-answer --tasks "$1" --rollout "$V/ha.md" --tasks-dir "$V" --now 2026-10-05T10:30:00Z "${@:2}"; }
+HQ='Which tool: alembic or yoyo?'
+mkt ra1 ha in_progress "owner: execute-test"
+row "$(trow ra1 '{"status":"plan-blocked","needsHuman":"Which tool: alembic or yoyo?","blockerDiagnosis":"the plan judge asks"}')" >/dev/null
+FP1=$(fp ra1)
+M=$(cnt ha)
+ok "$(ra ra1 --kind needs-you --ask "$HQ" --answer alembic --fingerprint "$FP1" --form hand-back)" \
+  "ra1: answer recorded (hand-back) 2026-10-05T10:30+00:00 [written]" "record-answer needs-you writes its entry"
+ok "$(since ha "$M")" "answer-recorded:ra1" "record-answer records answer-recorded"
+ok "$(since ha "$M" '[d["answerKind"], d.get("form"), d.get("raise"), d.get("pr")]')" '["needs-you","hand-back",null,false]' "answerKind needs-you, form hand-back, no raise, pr false"
+M=$(cnt ha)
+ok "$(ra ra1 --kind needs-you --ask "$HQ" --answer alembic --fingerprint "$FP1" --form hand-back)" \
+  "ra1: answer recorded (hand-back) 2026-10-05T10:30+00:00 [no-change]" "an identical re-run is [no-change]"
+ok "$(since ha "$M")" "" "and records nothing"
+mkt ra2 ha in_progress "owner: execute-test"
+row "$(trow ra2 '{"status":"plan-blocked","blockerDiagnosis":"plan not approved after 3 rounds. Accumulated reviewer feedback:\nRound 1: x"}')" >/dev/null
+FP2=$(fp ra2)
+M=$(cnt ha)
+ra ra2 --kind decision --ask "one more plan round?" --answer yes --fingerprint "$FP2" --form hand-back --raise max_plan_rounds --pr "$PR/251" >/dev/null
+ok "$(fm ra2 max_plan_rounds)|$(since ha "$M")" "max_plan_rounds: 4|answer-recorded:ra2" "a decision with --raise and --pr records answer-recorded"
+ok "$(since ha "$M" '[d["answerKind"], d["form"], d["raise"], d["pr"]]')" '["decision","hand-back","max_plan_rounds",true]' "answerKind decision, form, raise, pr true"
+M=$(cnt ha)
+ok "$(ra ra2 --kind decision --ask x --answer y --fingerprint 0123456789ab --form left 2>/dev/null; echo $?)" 1 "a refused record-answer exits 1"
+ra ra1 --kind decision --ask x --answer y --fingerprint "$FP1" --form left --dry-run >/dev/null
+ok "$(since ha "$M")" "" "a refusal and a --dry-run record nothing"
+for g in hg1 hg2; do
+  mkt $g ha gate-pending
+  printf '\n## Gated inputs (awaiting sign-off)\n\n- spend: one test call — cap US$1\n' >> "$V/$g.md"
+done
+M=$(cnt ha)
+rrs approve-gates --tasks hg1 --tasks-dir "$V" --now "$NOW" >/dev/null
+ok "$(since ha "$M")|$(since ha "$M" '[d["standing"], d["gates"]]')" "gate-signed:hg1|[false,1]" "a bare approve-gates records gate-signed standing=false gates=1"
+M=$(cnt ha)
+ok "$(rrs approve-gates --standing --rollout "$V/ha.md" --tasks hg2 --tasks-dir "$V" --now "$NOW" >/dev/null; echo $?)" 0 "approve-gates --standing covers the US\$1 gate"
+ok "$(since ha "$M")|$(since ha "$M" '[d["standing"], d["gates"]]')" "gate-signed:hg2|[true,1]" "the standing approval records gate-signed standing=true"
+M=$(cnt ha)
+rrs approve-gates --tasks hg1 --tasks-dir "$V" --now "$NOW" >/dev/null
+ok "$(since ha "$M")" "" "an already-approved note records nothing"
+# hand-back's via, first match: descope_armed: -> descope; --answer, a live answer spent or a fresh (block -) entry ->
+# answer; else retry.
+mkt hb1 ha in_progress "owner: execute-test"
+row "$(trow hb1 '{"status":"blocked","blockerDiagnosis":"the tests fail on Z"}')" >/dev/null
+mkt hd ha in_progress "owner: execute-test"
+row "$(trow hd '{"status":"plan-blocked","blockerDiagnosis":"Round 1: the plan misses a step"}')" >/dev/null
+setfm hd descope_armed 2026-10-05T10:20+00:00
+mkt hp ha review
+rrs record-answer --tasks hp --rollout "$V/ha.md" --tasks-dir "$V" --now 2026-10-05T10:30:00Z --kind decision --ask "no PR: re-run it?" --answer yes --fingerprint - >/dev/null
+mkt hi ha review "pr: $PR/252" "ready: 2026-10-05T09:00+00:00"
+rrs mark-integrating --tasks hi --tasks-dir "$V" --now "$NOW" >/dev/null
+lead hi integration 'merge declined at the --gated hold' >/dev/null
+ST1=$(python3 "$LI" inputs --note "$V/ra1.md" --now "$NOW" | python3 -c 'import json,sys; print(json.load(sys.stdin)["answerRecorded"]["stamp"])')
+hbk() { local m; m=$(cnt ha); rrs hand-back --tasks "$1" --tasks-dir "$V" --now 2026-10-05T10:40:00Z "${@:2}" >/dev/null 2>&1
+  echo "$(since ha "$m")|$(since ha "$m" '[d["via"], d["arm"]] if d["kind"] == "handed-back" else d["kind"]')"; }
+ok "$(hbk hb1)" 'handed-back:hb1|["retry","run"]' "a plain block's hand-back: via retry, arm run"
+ok "$(hbk ra1 --answer "$ST1")" 'handed-back:ra1|["answer","run"]' "hand-back --answer: via answer"
+ok "$(hbk ra2)" 'handed-back:ra2|["answer","run"]' "a bare hand-back that spends a live answer: via answer"
+ok "$(grep -c '; handed back ' "$V/ra2.md")" 1 "(the answer was spent)"
+ok "$(hbk hd)" 'handed-back:hd|["descope","run"]' "a standing descope_armed: via descope"
+ok "$(hbk hp)" 'handed-back:hp|["answer","run"]' "a fresh (block -) answer: via answer"
+ok "$(hbk hi)" 'handed-back:hi ready:hi|["retry","integration"] "ready"' "the Integration arm: handed-back, then ready"
+M=$(cnt ha)
+ok "$(rrs hand-back --tasks hb1 --tasks-dir "$V" --now "$NOW" 2>/dev/null; echo $?)" 1 "a refused hand-back (hb1 runs now) exits 1"
+ok "$(since ha "$M")" "" "and records nothing"
+mkt ar1 ha in_progress "owner: execute-test" "auto_retries: 2"
+row "$(trow ar1 '{"status":"plan-blocked","blockerDiagnosis":"Round 1: the plan misses the rollback"}')" >/dev/null
+M=$(cnt ha)
+ok "$(rrs auto-retry --tasks ar1 --rollout "$V/ha.md" --tasks-dir "$V" --now "$NOW" >/dev/null; echo $?)" 0 "auto-retry retries ar1"
+ok "$(since ha "$M")" "auto-retry:ar1" "auto-retry records its own event and no handed-back"
+
+echo "== 26. RACE decisions (p21-2): a verb that moves a task because Lachy's RACE decided: line lifted its hold records race-decided once"
+noteline() {  # noteline <rollout> <line>: append one line to the rollout's ## Notes section
+  python3 - "$V/$1.md" "$2" <<'PY2'
+import sys
+p, line = sys.argv[1:]
+lines = open(p).read().split("\n")
+i = lines.index("## Notes")
+j = next((k for k in range(i + 1, len(lines)) if lines[k].startswith("## ")), len(lines))
+while j > i + 1 and not lines[j - 1].strip():
+    j -= 1
+lines[j:j] = [line]
+open(p, "w").write("\n".join(lines))
+PY2
+}
+GH26="$TMP/gh26"
+cat > "$GH26" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"pr view"*pull/260*) echo '{"state":"MERGED","mergedAt":"2026-10-05T12:00:00Z","baseRefName":"main","url":"u"}';;
+  *"pr view"*) echo '{"state":"OPEN","mergedAt":null,"baseRefName":"main","url":"u"}';;
+  *"repo view"*) echo main;;
+esac
+SH
+chmod +x "$GH26"
+mkt rd ha review "pr: $PR/260" "ready: 2026-10-05T09:00+00:00"
+rrs mark-integrating --tasks rd --tasks-dir "$V" --now "$NOW" >/dev/null
+section ha $'## Race log\n\n- 2026-10-05T11:00+00:00 [[rd]] RACE: PR #260 merged as x on parent y; re-verify it\n'
+ok "$(rrs hold --tasks rd --hold race --state start --tasks-dir "$V")" "rd: hold-started race [written]" "rd's race hold opens"
+M=$(cnt ha)
+ok "$(rrs resume --rollout "$V/ha.md" --tasks-dir "$V" --gh-bin "$GH26" --now "$NOW" >/dev/null 2>&1; echo $?)" 3 "resume: an undecided RACE exits 3"
+ok "$(since ha "$M")" "" "and records nothing"
+noteline ha "- 2026-10-05 repair: [[rd]] RACE decided: the merge stands"
+ok "$(rrs resume --rollout "$V/ha.md" --tasks-dir "$V" --gh-bin "$GH26" --now "$NOW" >/dev/null 2>&1; echo $?)" 0 "resume lands the decided RACE"
+ok "$(since ha "$M")" "race-decided:rd hold-ended:rd lane-freed:rd merged:rd" "race-decided before the landing's events"
+ok "$(since ha "$M" '[d.get("mark"), d.get("by")]' | cut -d' ' -f1)" '["RACE","resume"]' "mark RACE, by resume"
+M=$(cnt ha)
+rrs resume --rollout "$V/ha.md" --tasks-dir "$V" --gh-bin "$GH26" --now "$NOW" >/dev/null 2>&1
+ok "$(since ha "$M")" "" "a re-run records nothing"
+# a green re-verify: mark-done lands the task with no decision consumed, even with a decided line standing
+mkt gv ha review "pr: $PR/261" "ready: 2026-10-05T09:00+00:00"
+rrs mark-integrating --tasks gv --tasks-dir "$V" --now "$NOW" >/dev/null
+python3 - "$V/ha.md" <<'PY2'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+open(p, "w").write(t.replace("re-verify it\n", "re-verify it\n- 2026-10-05T11:05+00:00 [[gv]] RACE: PR #261 merged as x2; re-verify it\n", 1))
+PY2
+M=$(cnt ha)
+rrs hold --tasks gv --hold race --state start --tasks-dir "$V" >/dev/null
+noteline ha "- 2026-10-05 repair: [[gv]] RACE decided: the merge stands"
+rrs mark-done --tasks gv --tasks-dir "$V" --now "$NOW" >/dev/null
+ok "$(since ha "$M")" "hold-started:gv hold-ended:gv lane-freed:gv merged:gv" "mark-done after a green re-verify records no race-decided"
+# UNVERIFIED: hand-back refuses it undecided; decided, it records race-decided once, then handed-back and ready
+mkt u ha blocked "pr: $PR/262" 'owner: execute-test'
+printf '\n## Blocker diagnosis\n\n### Run 1 (2026-10-05T09:40+00:00)\n\nintegration: merge-task exit 8 three times: UNVERIFIED: PR #262 merged as eee; not verifiable yet; re-run to verify\n\n<!-- run 1 end sha=000000000000 -->\n' >> "$V/u.md"
+M=$(cnt ha)
+ok "$(rrs hand-back --tasks u --tasks-dir "$V" --now "$NOW" >/dev/null 2>&1; echo $?)" 2 "hand-back: an undecided UNVERIFIED exits 2"
+ok "$(since ha "$M")" "" "and records nothing"
+noteline ha "- 2026-10-05 repair: [[u]] RACE decided: re-run it"
+ok "$(rrs hand-back --tasks u --tasks-dir "$V" --now "$NOW" >/dev/null 2>&1; echo $?)" 0 "decided, hand-back moves it"
+ok "$(since ha "$M")" "race-decided:u handed-back:u ready:u" "race-decided, handed-back, ready"
+ok "$(since ha "$M" '[d.get("mark"), d.get("by")]' | cut -d' ' -f1)" '["UNVERIFIED","hand-back"]' "mark UNVERIFIED, by hand-back"
+setfm u status blocked
+M=$(cnt ha)
+rrs hand-back --tasks u --tasks-dir "$V" --now "$NOW" >/dev/null 2>&1
+ok "$(since ha "$M")" "handed-back:u ready:u" "a second hand-back of the same decided task records no second race-decided"
+
 echo "== 23. an unwritable events dir changes no exit, stdout or non-record stderr"
 S="$TMP/s23"
 # scenario <events dir> <transcript>: a fresh vault at the same path, every verb once, each call's rc and stdout
@@ -600,6 +750,7 @@ scenario() {
   run vv hand-back --tasks b --tasks-dir "$V" --now "$NOW"
   run vv mark-started --tasks b --tasks-dir "$V" --now "$NOW"
   mkt g ro gate-pending; printf '\n## Gated inputs (awaiting sign-off)\n\n- spend: x — cap $1\n' >> "$V/g.md"
+  run vv record-answer --tasks g --rollout "$V/ro.md" --tasks-dir "$V" --now "$NOW" --kind decision --ask "sign it off?" --answer "yes" --fingerprint -
   run vv approve-gates --tasks g --tasks-dir "$V" --now "$NOW"
   run vv mark-started --tasks g --start resume --tasks-dir "$V" --now "$NOW"
   mkt d ro in_progress
