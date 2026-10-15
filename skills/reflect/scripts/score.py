@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""score.py — score one rollout's Run record for a Reflection (p15-5, ADR 0032). Reads only; writes nothing.
+"""score.py — score one rollout's Run record for a Reflection (p15-5, ADR 0032; p21-2, ADR 0037 d1). Reads only;
+writes nothing.
 
 python >= 3.8, stdlib only. Called by skills/reflect/SKILL.md (step 4) as:
 
@@ -50,21 +51,51 @@ soft pause's stamp counts as running. A hold with no Slot open is a wait on Lach
   closing that task's Slot, lane and holds. A lane, hold or pause still open at the last line read ends there,
   flagged.
 
+Headlines (ADR 0037 d1: two, and Lachy settles any trade between them; there is no tie-breaker):
+- Hands-off rate: the share of the window's landed tasks (distinct tasks with a `merged` line in [since, until])
+  with no act from Lachy between the run's start (the record's first slot-taken, else its first line) and the task's
+  first `merged` in the window; an act before --since counts for a task that lands inside it. Read only from the Run
+  record events the verbs write (run_record.py's "Human acts"), never from task notes. Acts: `answer-recorded`
+  (answer), `gate-signed` standing=false (signOff), `handed-back` via=retry (retry), any merge hold, a paired
+  `hold-started` hold=merge (mergeHold), and `race-decided` (raceDecided). Not counted (`notCounted`): `gate-signed`
+  standing=true (standingApproval: the Standing approval), `handed-back` via=descope and `auto-retry`
+  (automaticHandBack), and a landed task with a race hold and no `race-decided` (raceReverified: the RACE procedure
+  opens the hold on every merge-task exit 5, and a green re-verify's mark-done ends it with no decision). A
+  `handed-back` via=answer is no act of its own: its `answer-recorded` is. rate = (landed - the tasks with an act) /
+  landed, to 4 places; null with nothing landed, flagged. `byKind` counts act events, not tasks. Known gaps, so read
+  the rate as a floor on Lachy's involvement, not a full count: every merge hold counts, the exit-7 `review required:`
+  hold a heartbeat tick can release with no act from him included (the record carries no reason); a race hold counts
+  only through its `race-decided`; a repair run that records no answer, sign-off, retry hand-back or RACE decision is
+  not counted (one that only descopes and hands back, a `resume` that lands no decided RACE, a `defer`, drift
+  reconciliation); acts from before p21-2's events are not in the record. Flagged: each `slot-taken start=hand-back`
+  with no `auto-retry`, `handed-back` or `gate-signed` for its task since that task's last set-aside ("no recorded
+  cause: not counted"), and each git-env hold (task null: a rollout-level wait, attributed to no task). An act's own
+  line is no activity of the task's call: it never moves an untimed call's last activity (the four act kinds stay out
+  of each task's last record line).
+- Quality: null until p21-4 traces Escapes; `quality.why` says so, and the headline slot carries null.
+
 Scores: Throughput = merges (distinct tasks with a `merged` line in the window, read-only ones included) per
-running hour (0.0 with no merge; null with no running time, flagged). Slots: the Parallel ceiling is a step
+running hour (0.0 with no merge; null with no running time, flagged), now a Guardrail. Slots: the Parallel ceiling
+is a step
 function over the settings on slot-taken and idle-slots (`ceilingSteps` lists its changes only); full = Slots
 in use at or above the ceiling in force. Idle Slot time is labelled by its idle-slots markers (the first
 marker labels its idle span from the start, a change of reason splits it), else "unexplained". Lane: busy share, Integrations (lane holdings started in
-the window) and each ready -> lane-taken wait. Guardrails: tokens per merge (the tokens of every call journal,
-its latest terminal line else its latest, so a call still running counts what it has spent, whose call started
-in the window by its startTime, else its run-bound; integrate calls included; over merges),
+the window) and each ready -> lane-taken wait. Guardrails: Throughput first (ADR 0037 d1: no longer a headline,
+bounded so an overnight run still finishes by morning): breached when running time exceeds `[guardrails]
+hours_per_task` (built-in 1.5, a heuristic) times the tasks whose Slot overlaps [since, until] (at least 1),
+compared in ms and strictly greater, so a run exactly at its allowance is inside it; never with zero running time;
+a breach on a partial window is flagged ("the run's tail has not landed"). Then tokens per merge (the tokens of
+every call journal, its latest terminal line else its latest, so a call still running counts what it has spent,
+whose call started in the window by its startTime, else its run-bound; integrate calls included; over merges),
 set-aside rate (set-asides / (Slots closed + Integrations)), conflict rate (conflicting lane-freed /
 Integrations, with the integrator-path share beside it) and quota stalls, against their [guardrails] bounds:
 a % rise for tokens, point rises for the two rates (both measured from the baseline) and an absolute count for
-stalls. The baseline is the `scores` of the tunings.jsonl line for this repo (ignoring case) with the latest
+stalls. Review churn reads "unknown" and never breaches until p21-3 records review rounds. The baseline is the
+`scores` of the tunings.jsonl line for this repo (ignoring case) with the latest
 window.activeEnd at or before this window's activeStart, a line not marked partial preferred (a partial one is
-used only when no other qualifies, flagged); activeEnd null never qualifies. With none, only quota stalls can
-breach ("no baseline").
+used only when no other qualifies, flagged); activeEnd null never qualifies. It carries the line's `v`; a line
+whose scores lack the v2 keys (a v1 line, seven scores) is flagged and gives no Hands-off rate, Quality or Review
+churn baseline. With none, only quota stalls and Throughput (both absolute) can breach ("no baseline").
 
 Binding, the first that holds: quota-bound (quota stalls >= QUOTA_STALLS); lane-bound (lane busy >=
 LANE_BOUND_BUSY of running time, or the waits climbing: the last third's mean over WAIT_CLIMB_RATIO times the
@@ -79,8 +110,25 @@ counts toward neither: another round cannot answer it). `ranAt` is the value the
 in force for most of the running time (ties to the later), a round cap's most common value on the window's
 slot-taken lines. to = ranAt + direction; from = rollouts.toml's resolved value now (--settings). A proposal is
 `from -> to` when sign(to - from) is the rule's direction; otherwise rollouts.toml is already at or past this
-run's evidence and the entry is withheld. to < 1 is dropped and flagged. A raise is withheld while any
-Guardrail is breached. With no repo identity nothing is proposed. `ranAtCause`, when from != ranAt, is the
+run's evidence and the entry is withheld. to < 1 is dropped and flagged. With no repo identity nothing is
+proposed. Each rule's effect is a declared heuristic, RULE_EFFECTS (this header is the one copy of it):
+  slot-bound-raise      serves throughput; risks tokensPerMerge, setAsideRate, conflictRate, quotaStalls
+  quota-bound-lower     serves quotaStalls; risks throughput
+  review-rounds-raise   serves handsOffRate; risks quality, throughput, tokensPerMerge, setAsideRate,
+                        conflictRate, quotaStalls, reviewChurn
+  plan-rejected-raise   serves handsOffRate; risks quality, throughput, tokensPerMerge, setAsideRate,
+                        conflictRate, quotaStalls
+weigh(rule, measured) gives every proposal and withheld entry `serves`, `risks` and `trade`: {gains: the headlines
+it serves, costs: the headlines it risks and does not serve}, only when both lists are non-empty and every headline
+in them is scored (non-null); else null. Quality is null until p21-4, so no trade fires yet. Once p21-4 scores it,
+this static table makes both round raises standing trades: whether they stay so (which takes two knob rules out of
+ADR 0037 d5's unattended landing) or become evidence-based is Lachy's decision, which p21-4 inherits. Withheld, in
+this order: no settings, the sign, the lane hold, then a Guardrail: a raise (direction > 0) is withheld while a
+Guardrail in its `risks` is breached, naming only those ("a raise while a Guardrail is breached: ..."), so a
+slot-bound raise is never withheld by the Throughput it serves. A lower is never withheld by a Guardrail: when one it
+risks is breached it stays in `proposals` with a `caution` ("risks <k>, breached (<value> against <bound>): a
+Guardrail against a Guardrail, Lachy decides"). A `trade` or a `caution` is Lachy's call (ADR 0037 d1); each is null
+otherwise. `ranAtCause`, when from != ranAt, is the
 first of: a later non-voided Tuning of this key ("Tuning <id> moved it on <ts>"); a mid-window ceiling change;
 round caps that differ across tasks; rollouts.toml's mtime after the first slot-taken; the note's value equal
 to ranAt with rollouts.toml absent or older than the note's `captured` (local midnight): a rollout-note
@@ -91,10 +139,15 @@ direction.
 
 Output: one JSON object (stdout, or --out F): rollout, repo, host, window{since, until, activeStart, activeEnd,
 partial}, runningTime{hours, excluded[{kind, start, end, hours, why}], excludedHours{kind: hours}}, merges,
-throughput, slots, lane, guardrails, load, binding{constraint, why}, headline (the seven numbers tune.py
-records: throughput, runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls), baseline,
-proposals[{id, key, from, to, ranAt, ranAtCause, rule, direction, evidence, agreeing}], withheld (the same
-plus reason), flags, thresholds. stderr gets one summary line.
+throughput, handsOff{rate, landed, handsOff, tasks[{task, acts[{kind, at, detail}]}], byKind{answer, signOff,
+retry, mergeHold, raceDecided}, notCounted{standingApproval, automaticHandBack, raceReverified}, baseline},
+quality{value, why}, slots, lane, guardrails{throughput{value, runningHours, tasks, allowanceHours, bound,
+baseline, breached}, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, reviewChurn}, load, binding{constraint,
+why}, headline (the ten numbers tune.py records, its name kept for tune.py: throughput, runningHours, merges,
+tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate, quality, reviewChurn), baseline{id,
+activeEnd, partial, v, scores}, proposals[{id, key, from, to, ranAt, ranAtCause, rule, direction, evidence,
+agreeing, serves, risks, trade, caution}], withheld (the same plus reason), flags, thresholds. stderr gets one
+summary line, led by `hands-off R (M of N)`.
 
 Exit codes: 0 scored (a "no record" score included); 1 the record, the events directory, --settings or --note
 cannot be read; 2 a usage error, a bad or reserved slug, or a bad TS.
@@ -130,9 +183,22 @@ DEPENDENCY_IDLE = 0.5            # idle Slot time this share of capacity -> depe
 QUOTA_STALLS = 1                 # this many quota stalls -> quota-bound
 ROUND_SET_ASIDES = 2             # this many review-rounds (plan-rejected) set-asides -> a round cap +1
 EVIDENCE_MAX = 300
+# rollout-settings.py's GUARDRAILS_BUILT_IN; hours_per_task (p21-2) is Throughput's absolute bound.
 GUARDRAILS_BUILT_IN = {"tokens_per_merge_pct": 25, "set_aside_rate_points": 5, "conflict_rate_points": 10,
-                       "quota_stalls": 0}
+                       "quota_stalls": 0, "hours_per_task": 1.5}
 KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
+# The human acts' kinds (run_record.py's "Human acts"): never a task's call activity (pair keeps them out of last_line).
+ACT_KINDS = ("answer-recorded", "gate-signed", "handed-back", "race-decided")
+ACT_NAMES = ("answer", "signOff", "retry", "mergeHold", "raceDecided")
+# The two headlines (ADR 0037 d1) and each proposal rule's declared effect: (serves, risks). A heuristic (the header).
+HEADLINES = ("handsOffRate", "quality")
+OLD_GUARDRAILS = ("tokensPerMerge", "setAsideRate", "conflictRate", "quotaStalls")
+RULE_EFFECTS = {
+    "slot-bound-raise": (("throughput",), OLD_GUARDRAILS),
+    "quota-bound-lower": (("quotaStalls",), ("throughput",)),
+    "review-rounds-raise": (("handsOffRate",), ("quality", "throughput") + OLD_GUARDRAILS + ("reviewChurn",)),
+    "plan-rejected-raise": (("handsOffRate",), ("quality", "throughput") + OLD_GUARDRAILS),
+}
 HOLD_WHY = {"merge": "a merge hold with no Slot open (a --gated or exit-7 hold: a wait on Lachy)",
             "race": "a RACE hold with no Slot open (an undecided RACE or its re-verify: a wait on Lachy)",
             "git-env": "a git-env hold with no Slot open (an unacked canary trip: a wait on Lachy)"}
@@ -258,6 +324,40 @@ def _sign(x):
     return (x > 0) - (x < 0)
 
 
+def weigh(rule, measured):
+    """A rule's declared effect (RULE_EFFECTS) and its trade: {serves, risks, trade}. trade is {gains: the headlines it
+    serves, costs: the headlines it risks and does not serve} only when both are non-empty and every one of them is
+    scored in `measured` ({headline: value or None}); else None. Pure."""
+    serves, risks = RULE_EFFECTS.get(rule, ((), ()))
+    gains = [h for h in serves if h in HEADLINES]
+    costs = [h for h in risks if h in HEADLINES and h not in serves]
+    trade = None
+    if gains and costs and all(measured.get(h) is not None for h in gains + costs):
+        trade = {"gains": gains, "costs": costs}
+    return {"serves": list(serves), "risks": list(risks), "trade": trade}
+
+
+def _breach(k, g):
+    """One breached Guardrail as a withheld reason names it."""
+    if k == "throughput":
+        return "throughput %s running h against %s h (%s, %d task(s))" % (g["runningHours"], g["allowanceHours"],
+                                                                         g["bound"], g["tasks"])
+    return "%s %s (baseline %s, bound %s)" % (k, g["value"], g["baseline"], g["bound"])
+
+
+def _caution(hit, guard):
+    """A lower's caution: the breached Guardrails it risks, for Lachy to weigh (a Guardrail against a Guardrail)."""
+    parts = []
+    for k in hit:
+        g = guard[k]
+        if k == "throughput":
+            got, bound = "%s running h" % g["runningHours"], "%s h, %s" % (g["allowanceHours"], g["bound"])
+        else:
+            got, bound = g["value"], g["bound"]
+        parts.append("%s, breached (%s against %s)" % (k, got, bound))
+    return "risks %s: a Guardrail against a Guardrail, Lachy decides" % "; ".join(parts)
+
+
 class Score:
     def __init__(self, args, env=None):
         self.args = args
@@ -279,6 +379,7 @@ class Score:
         self.steps, self.markers, self.merges, self.readies = [], [], [], []
         self.set_asides, self.stalls, self.bound, self.slot_taken = [], [], [], []
         self.journals, self.last_line, self.task_lines = {}, {}, {}
+        self.acts, self.hand_back_starts = [], []
         last_t = None
         for t, _n, d in lines:
             kind, task = d.get("kind"), d.get("task")
@@ -293,15 +394,19 @@ class Score:
             if t > until:
                 continue
             last_t = t
-            if task:
+            if task and kind not in ACT_KINDS:  # a human act is no activity of the task's call
                 self.last_line[task] = t
                 self.task_lines.setdefault(task, []).append((t, kind))
+            if task and (kind in ACT_KINDS or kind == "auto-retry"):
+                self.acts.append((t, kind, task, d))
             settings = d.get("settings")
             if kind in ("slot-taken", "idle-slots") and _settings_value(settings, "parallel_ceiling") and \
                     (not self.steps or self.steps[-1][1] != settings["parallel_ceiling"]):
                 self.steps.append((t, settings["parallel_ceiling"]))  # a change only (lines arrive in time order)
             if kind == "slot-taken" and task:
                 self.slot_taken.append((t, task, settings if isinstance(settings, dict) else {}))
+                if d.get("start") == "hand-back":
+                    self.hand_back_starts.append((t, task))
                 if task not in open_slot:
                     s = {"task": task, "start": t, "end": None, "outcome": None}
                     open_slot[task] = s
@@ -680,6 +785,83 @@ class Score:
             "integratorPath": sum(1 for h in freed if h["path"] == "integrator"),
         }
 
+    # ---- the Hands-off rate (ADR 0037 d1; the header's rules) -----------------------------------------------------
+
+    def hands_off(self, run_start, since, until):
+        first = {}
+        for t, task in self.merges:
+            if since <= t <= until and task not in first:
+                first[task] = t
+        landed = sorted(first)
+        acts = {task: [] for task in landed}
+        not_counted = {"standingApproval": 0, "automaticHandBack": 0, "raceReverified": 0}
+        decided = set()
+
+        def inside(task, t):
+            return task in first and run_start <= t <= first[task]
+
+        for t, kind, task, d in self.acts:
+            if not inside(task, t):
+                continue
+            act = None
+            if kind == "answer-recorded":
+                how = [x for x in (d.get("form"), "raise %s" % d["raise"] if d.get("raise") else None,
+                                   "pr" if d.get("pr") is True else None) if x]
+                act = ("answer", "%s answer%s" % (d.get("answerKind"), " (%s)" % "; ".join(how) if how else ""))
+            elif kind == "gate-signed":
+                if d.get("standing") is True:
+                    not_counted["standingApproval"] += 1
+                else:
+                    act = ("signOff", "%s gate(s) signed off" % d.get("gates"))
+            elif kind == "handed-back":
+                if d.get("via") == "retry":
+                    act = ("retry", "handed back with no answer (%s arm)" % d.get("arm"))
+                elif d.get("via") == "descope":
+                    not_counted["automaticHandBack"] += 1
+            elif kind == "auto-retry":
+                not_counted["automaticHandBack"] += 1
+            elif kind == "race-decided":
+                decided.add(task)
+                act = ("raceDecided", "%s decided, acted on by %s" % (d.get("mark"), d.get("by")))
+            if act:
+                acts[task].append((t, act[0], act[1]))
+        for h in self.holds:
+            if h["hold"] == "merge" and inside(h["task"], h["start"]):
+                acts[h["task"]].append((h["start"], "mergeHold", "a merge hold to %s (a --gated or exit-7 hold: the "
+                                                                  "record carries no reason)" % fmt(h["end"])))
+        for task in landed:
+            if task not in decided and any(h["hold"] == "race" and h["task"] == task and inside(task, h["start"])
+                                           for h in self.holds):
+                not_counted["raceReverified"] += 1
+        by_kind = {k: 0 for k in ACT_NAMES}
+        for task in landed:
+            for _t, k, _d in acts[task]:
+                by_kind[k] += 1
+        with_act = sum(1 for task in landed if acts[task])
+        rate = round((len(landed) - with_act) / len(landed), 4) if landed else None
+        if not landed:
+            self.flag("hands-off rate: nothing landed in the window: null")
+        for t, task in self.hand_back_starts:
+            if not run_start <= t <= until:
+                continue
+            last_sa = max((x[0] for x in self.set_asides if x[1] == task and x[0] <= t), default=run_start)
+            if not any(a_task == task and last_sa <= at_ <= t and kind in ("auto-retry", "handed-back", "gate-signed")
+                       for at_, kind, a_task, _d in self.acts):
+                self.flag("[[%s]]: slot-taken start=hand-back at %s follows no auto-retry, handed-back or gate-signed "
+                          "since its last set-aside: no recorded cause: not counted (a hand-back from before p21-2's "
+                          "events, or a hand edit)" % (task, fmt(t)))
+        for h in self.holds:
+            if h["hold"] == "git-env" and run_start <= h["start"] <= until:
+                self.flag("a git-env hold at %s: a rollout-level wait on Lachy, attributed to no task in the "
+                          "Hands-off rate" % fmt(h["start"]))
+        return {
+            "rate": rate, "landed": len(landed), "handsOff": len(landed) - with_act,
+            "tasks": [{"task": task, "acts": [{"kind": k, "at": fmt(t), "detail": det}
+                                              for t, k, det in sorted(acts[task], key=lambda a: a[0])]}
+                      for task in landed],
+            "byKind": by_kind, "notCounted": not_counted, "baseline": None,
+        }
+
     # ---- tunings.jsonl -----------------------------------------------------------------------------------------
 
     def read_tunings(self, base):
@@ -721,7 +903,10 @@ class Score:
             return None
         if pick[2]:
             self.flag("baseline: only a partial Reflection's line qualifies (%s); read it with care" % pick[3].get("id"))
-        return {"id": pick[3].get("id"), "activeEnd": fmt(pick[0]), "partial": pick[2], "scores": pick[3]["scores"]}
+        if "handsOffRate" not in pick[3]["scores"]:
+            self.flag("baseline %s is a v1 line: no Hands-off rate, Quality or Review churn baseline" % pick[3].get("id"))
+        return {"id": pick[3].get("id"), "activeEnd": fmt(pick[0]), "partial": pick[2], "v": pick[3].get("v"),
+                "scores": pick[3]["scores"]}
 
     # ---- the whole score -----------------------------------------------------------------------------------------
 
@@ -794,19 +979,25 @@ class Score:
         integ_share = round(self.lane_metrics["integratorPath"] / self.integrations, 4) if self.integrations else None
         tpm = round(tokens / n_merges, 1) if tokens is not None and n_merges else None
         stalls = sum(1 for t in self.stalls if since <= t <= until)
+        run_start = first_taken if first_taken is not None else (lines[0][0] if lines else since)
+        hands_off = self.hands_off(run_start, since, until)
         headline = {"throughput": throughput, "runningHours": hours(rt), "merges": n_merges, "tokensPerMerge": tpm,
-                    "setAsideRate": sa_rate, "conflictRate": conflict, "quotaStalls": stalls}
+                    "setAsideRate": sa_rate, "conflictRate": conflict, "quotaStalls": stalls,
+                    "handsOffRate": hands_off["rate"], "quality": None, "reviewChurn": None}
         base_line = self.baseline(repo, act_start)
         if base_line is None and repo is not None:
-            self.flag("no baseline: no earlier Reflection on %s ended before this run began; only quota stalls can "
-                      "withhold a raise" % repo)
-        guard = self.guardrails(headline, base_line, settings)
+            self.flag("no baseline: no earlier Reflection on %s ended before this run began; only quota stalls and "
+                      "Throughput can withhold a raise" % repo)
+        hands_off["baseline"] = ((base_line or {}).get("scores") or {}).get("handsOffRate")
+        guard = self.guardrails(headline, base_line, settings, since, until)
         out.update({
             "window": {"since": fmt(since), "until": fmt(until), "activeStart": fmt(act_start),
                        "activeEnd": fmt(act_end), "partial": self.partial},
             "runningTime": {"hours": hours(rt), "excluded": self.excluded, "excludedHours": self.excluded_hours},
             "merges": {"count": n_merges, "tasks": merged},
             "throughput": throughput,
+            "handsOff": hands_off,
+            "quality": {"value": None, "why": "not scored yet: Escapes are traced by p21-4"},
             "slots": self.slot_metrics,
             "lane": dict(self.lane_metrics, integratorShare=integ_share),
             "guardrails": guard,
@@ -884,7 +1075,7 @@ class Score:
                 any_tokens = True
         return got if any_tokens else None
 
-    def guardrails(self, headline, base_line, settings):
+    def guardrails(self, headline, base_line, settings, since, until):
         bounds = dict(GUARDRAILS_BUILT_IN)
         g = (settings or {}).get("guardrails")
         if isinstance(g, dict):
@@ -903,7 +1094,20 @@ class Score:
         t_breach = None
         if tpm is not None and isinstance(tbase, (int, float)) and not isinstance(tbase, bool) and tbase > 0:
             t_breach = tpm > tbase * (1 + bounds["tokens_per_merge_pct"] / 100.0)
+        # Throughput's absolute bound: hours_per_task running hours for each task whose Slot overlaps the window.
+        # Compared in ms and strictly greater: a run exactly at its allowance is inside it (the (i) round-cap
+        # fixtures in tests/reflect-score.test.mjs sit on the bound and rely on this), and zero running time never
+        # breaches.
+        tasks = len({s["task"] for s in self.slots if s["start"] <= until and (s["end"] is None or s["end"] >= since)})
+        hpt = bounds["hours_per_task"]
+        allowance = hpt * HOUR * max(tasks, 1)
+        t_over = self.run_ms > allowance
+        if t_over and self.partial:
+            self.flag("throughput: breached on a partial window: the run's tail has not landed")
         out = {
+            "throughput": {"value": headline["throughput"], "runningHours": hours(self.run_ms), "tasks": tasks,
+                           "allowanceHours": hours(allowance), "bound": "<= %s running h per task" % hpt,
+                           "baseline": bs.get("throughput"), "breached": t_over},
             "tokensPerMerge": {"value": tpm if tpm is not None else "unknown",
                                "bound": "+%s%%" % bounds["tokens_per_merge_pct"], "baseline": tbase,
                                "breached": bool(t_breach)},
@@ -918,6 +1122,8 @@ class Score:
             "quotaStalls": {"value": headline["quotaStalls"], "bound": bounds["quota_stalls"],
                             "baseline": bs.get("quotaStalls"),
                             "breached": headline["quotaStalls"] > bounds["quota_stalls"]},
+            # p21-3 records review rounds; until then Review churn is unknown and never breaches
+            "reviewChurn": {"value": "unknown", "bound": None, "baseline": bs.get("reviewChurn"), "breached": False},
         }
         if tpm is None:
             self.flag("tokens per merge unknown: no folded call journal carries tokens (or nothing merged)")
@@ -1023,6 +1229,7 @@ class Score:
                 rules.append((key, 1, rule, "%d set-asides of reasonClass %s in the window" % (n, cls), None))
         proposals, withheld = [], []
         breached = [k for k, v in guard.items() if v["breached"]]
+        measured = {h: headline.get(h) for h in HEADLINES}
         for key, direction, rule, evidence, hold in rules:
             spread = None
             if key == "parallel_ceiling":
@@ -1041,9 +1248,12 @@ class Score:
                 self.flag("%s: %s would drop to %d (ran at %d): dropped" % (rule, key, to, ran_at))
                 continue
             evidence = ("%s (ran at %d)" % (evidence, ran_at))[:EVIDENCE_MAX]
+            weight = weigh(rule, measured)
             entry = {"id": "p%d" % (len(proposals) + len(withheld) + 1), "key": key, "from": frm, "to": to,
                      "ranAt": ran_at, "ranAtCause": None, "rule": rule, "direction": direction,
-                     "evidence": evidence, "agreeing": self.agreeing(key, rule, direction)}
+                     "evidence": evidence, "agreeing": self.agreeing(key, rule, direction),
+                     "serves": weight["serves"], "risks": weight["risks"], "trade": weight["trade"], "caution": None}
+            hit = [k for k in breached if k in weight["risks"]]  # the breached Guardrails this rule risks
             if not isinstance(frm, int) or isinstance(frm, bool):
                 entry["reason"] = "no rollout settings (--settings): rollouts.toml's current value is unknown"
                 withheld.append(entry)
@@ -1059,12 +1269,12 @@ class Score:
             elif hold:
                 entry["reason"] = hold
                 withheld.append(entry)
-            elif direction > 0 and breached:
-                entry["reason"] = "a raise while a Guardrail is breached: %s" % ", ".join(
-                    "%s %s (baseline %s, bound %s)" % (k, guard[k]["value"], guard[k]["baseline"], guard[k]["bound"])
-                    for k in breached)
+            elif direction > 0 and hit:
+                entry["reason"] = "a raise while a Guardrail is breached: %s" % ", ".join(_breach(k, guard[k]) for k in hit)
                 withheld.append(entry)
             else:
+                if direction < 0 and hit:  # a lower is never withheld by a Guardrail: Lachy weighs it
+                    entry["caution"] = _caution(hit, guard)
                 proposals.append(entry)
         return proposals, withheld
 
@@ -1175,10 +1385,13 @@ def main(argv):
             return 1
     else:
         sys.stdout.write(text)
-    h = out["headline"]
-    sys.stderr.write("score: %s: %s merge(s) in %s running h (throughput %s/h), %s, %d proposal(s), %d withheld\n"
-                     % (out["rollout"], h["merges"], h["runningHours"], h["throughput"], out["binding"]["constraint"],
-                        len(out["proposals"]), len(out["withheld"])))
+    h, ho = out["headline"], out["handsOff"]
+    sys.stderr.write("score: %s: hands-off %s (%d of %d), %s merge(s) in %s running h (throughput %s/h%s), %s, "
+                     "%d proposal(s), %d withheld\n"
+                     % (out["rollout"], "n/a" if ho["rate"] is None else ho["rate"], ho["handsOff"], ho["landed"],
+                        h["merges"], h["runningHours"], h["throughput"],
+                        ", breached" if out["guardrails"]["throughput"]["breached"] else "",
+                        out["binding"]["constraint"], len(out["proposals"]), len(out["withheld"])))
     return 0
 
 

@@ -10,8 +10,12 @@ skills/reflect/SKILL.md (step 7) exactly once per Reflection that reached its sc
 --scores is score.py's JSON. --pick and --record-only are mutually exclusive and one is required.
 
 --record-only writes ONE `tuning` line (applied: []) through run_record.emit and never reads or touches the
-config: every Reflection leaves its headline scores as the next Reflection's baseline. With `repo: null` in the scores
-(no GitHub origin) it writes nothing, prints `tune: not recorded: ...` on stderr and exits 0.
+config: every Reflection leaves its scores as the next Reflection's baseline. A line's `scores` are score.py's
+`headline` read through run_record.SCORE_KEYS (the v2 line's ten, p21-2: the old seven, then handsOffRate, quality
+and reviewChurn), so a key a stale score.json lacks is recorded null. The `trade`, `caution`, `serves` and `risks` a
+proposal carries are Lachy's to weigh before he picks: tune.py reads none of them, and a proposal carrying a trade or a
+caution is as pickable as any other. With `repo: null` in the scores (no GitHub origin) it writes nothing, prints
+`tune: not recorded: ...` on stderr and exits 0.
 
 --pick, checked before any write:
 - every pick names an id in scores.proposals (a withheld or unknown id is refused; a repeated id counts once;

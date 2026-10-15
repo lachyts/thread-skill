@@ -51,12 +51,14 @@ function writeToml(home, text) {
 }
 
 const WINDOW = { since: '2026-10-05T00:00:00.000Z', until: '2026-10-05T12:00:00.000Z', activeStart: '2026-10-05T00:00:00.000Z', activeEnd: '2026-10-05T09:00:00.000Z', partial: false }
-const HEADLINE = { throughput: 0.857, runningHours: 7, merges: 6, tokensPerMerge: 100000, setAsideRate: 0, conflictRate: 0, quotaStalls: 0 }
+// score.py's ten scores (p21-2): the old seven, then the Hands-off rate and the Quality and Review churn slots
+const HEADLINE = { throughput: 0.857, runningHours: 7, merges: 6, tokensPerMerge: 100000, setAsideRate: 0, conflictRate: 0, quotaStalls: 0,
+  handsOffRate: 0.8333, quality: null, reviewChurn: null }
 const P = (id, key, from, to, extra = {}) => ({ id, key, from, to, ranAt: from, ranAtCause: null, rule: `${key}-rule`, direction: Math.sign(to - from), evidence: `evidence for ${key}`, agreeing: 0, ...extra })
 
-function writeScores(home, { repo = 'o/r', proposals = [], withheld = [] } = {}) {
+function writeScores(home, { repo = 'o/r', proposals = [], withheld = [], headline = HEADLINE } = {}) {
   const p = path.join(home, 'score.json')
-  fs.writeFileSync(p, JSON.stringify({ rollout: 'demo-rollout', repo, window: WINDOW, headline: HEADLINE, binding: { constraint: 'slot-bound', why: 'x' }, proposals, withheld, flags: [] }))
+  fs.writeFileSync(p, JSON.stringify({ rollout: 'demo-rollout', repo, window: WINDOW, headline, binding: { constraint: 'slot-bound', why: 'x' }, proposals, withheld, flags: [] }))
   return p
 }
 
@@ -114,6 +116,7 @@ test('pick p1 of p1, p2: only that key changes, its comment kept, and one tuning
   assert.equal(l.rollout, 'demo-rollout')
   assert.equal(l.task, null)
   assert.match(l.id, /^t-\d{8}T\d{6}Z-[0-9a-f]{6}$/)
+  assert.equal(l.v, 2, 'a tuning line is v2: its ten scores')
   assert.equal(l.repo, 'o/r')
   assert.deepEqual(l.window, WINDOW)
   assert.deepEqual(l.scores, HEADLINE)
@@ -122,6 +125,19 @@ test('pick p1 of p1, p2: only that key changes, its comment kept, and one tuning
   assert.equal(r.stdout.split('\n').filter(Boolean).at(-1), `applied parallel_ceiling 3 → 4 for o/r: ${TAKES_EFFECT}`)
   assert.match(r.stdout, new RegExp(`^recorded ${l.id} in `))
   assert.deepEqual(resolved(home, repo).settings.parallel_ceiling, { value: 4, source: 'file:repo' })
+})
+
+test('a proposal carrying a trade and a caution (p21-2) is pickable: they are Lachy\'s call, not a withhold', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  writeToml(home, CONFIG)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 3, 2, { rule: 'quota-bound-lower', serves: ['quotaStalls'], risks: ['throughput'],
+    trade: null, caution: 'risks throughput, breached (4.667 running h against 4.0 h, <= 1 running h per task): a Guardrail against a Guardrail, Lachy decides' }),
+  P('p2', 'max_review_rounds', 4, 5, { rule: 'review-rounds-raise', serves: ['handsOffRate'], risks: ['quality'], trade: { gains: ['handsOffRate'], costs: ['quality'] }, caution: null })] })
+  const r = tune(home, ['--scores', scores, '--pick', 'p1,p2', '--repo', repo])
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(lines(tuningsPath(home))[0].applied.map((a) => [a.key, a.from, a.to, a.rule]),
+    [['parallel_ceiling', 3, 2, 'quota-bound-lower'], ['max_review_rounds', 4, 5, 'review-rounds-raise']])
 })
 
 test('two picks: one line carrying both applied entries; a repeated id counts once', (t) => {
@@ -360,6 +376,16 @@ test('--record-only writes one line with applied [] and never reads the config (
   assert.deepEqual(l.scores, HEADLINE)
   assert.match(r.stdout, new RegExp(`^recorded ${l.id} in \\S+: no Tuning applied`))
   assert.equal(fs.readFileSync(bad, 'utf8'), '[defaults]\nparallel_ceiling = 0\n')
+})
+
+test('--record-only from a stale seven-score headline (a v1 score.json) records the three new keys as null', (t) => {
+  const home = tmpHome(t)
+  const { handsOffRate, quality, reviewChurn, ...seven } = HEADLINE
+  const r = tune(home, ['--scores', writeScores(home, { headline: seven }), '--record-only'])
+  assert.equal(r.status, 0, r.stderr)
+  const [l] = lines(tuningsPath(home))
+  assert.equal(l.v, 2)
+  assert.deepEqual(l.scores, { ...seven, handsOffRate: null, quality: null, reviewChurn: null })
 })
 
 test('null repo: --record-only writes nothing and says so (exit 0); --pick is exit 2', (t) => {
