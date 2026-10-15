@@ -11,7 +11,8 @@ operator's rollout settings (`~/.config/thread/rollouts.toml`). It never changes
 comes from two scripts, and the model only runs them, shows what they print and passes Lachy's answer on:
 
 - `skills/reflect/scripts/score.py` computes the scores and the proposals. It reads only; its header is the one
-  copy of every rule (running time, the binding constraint, the baseline, the proposal rules).
+  copy of every rule (running time, the binding constraint, the baseline, the proposal rules), and
+  `skills/reflect/scripts/escapes.py` beside it, which it loads, holds the rules for the Escapes and Quality.
 - `skills/reflect/scripts/tune.py` is the **only writer** of `rollouts.toml` and of `tunings.jsonl` (the
   Reflection's line beside the record). Never edit either file by hand from this skill, and never compute a score
   or write a Tuning in the conversation.
@@ -26,7 +27,9 @@ reads a rollout's Run record, never the Companion's: "reflect on the Companion" 
 Reads the rollout note (`~/repos/obsidian/Work/Tasks/`, then `Work/Tasks/Archive/Rollouts/`), the Run record and
 `tunings.jsonl` under the events directory (`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/run_record.py dir`
 prints it), and `~/.config/thread/rollouts.toml` through `rollout-settings.py`. `land.sh --origin-slug` runs one
-local `git remote get-url origin` in the Project root: no network. Writes: `fold-journals`' `call-journal` lines,
+local `git remote get-url origin` in the Project root: no network. For the Escapes the score also reads, read-only:
+every note under `~/repos/obsidian/Work/Tasks/`, Archive included, for `fixes:` and `merged_into:`; and the Project
+root's git (commit messages, `docs/reviews/` and `git blame`), never fetched. Writes: `fold-journals`' `call-journal` lines,
 and tune.py's one line and its picked keys. Scratch files go under `/tmp/thread-reflect-<rollout-slug>/`. No vault
 write, no git write, no PR.
 
@@ -79,9 +82,13 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land.sh --origin-slug <Project
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/score.py --rollout <slug> --note <rollout note path> \
-  --settings /tmp/thread-reflect-<rollout-slug>/settings.json --repo-slug <owner/name> \
+  --settings /tmp/thread-reflect-<rollout-slug>/settings.json --repo-slug <owner/name> --repo <Project root> \
   --out /tmp/thread-reflect-<rollout-slug>/score.json
 ```
+
+`--repo <Project root>` lets the score read the Escapes git holds (reverts of this rollout's merges, later review
+findings against its lines); the task notes' `fixes:` come from the vault's `Work/Tasks/` (`--tasks-dir <dir>` only to
+point it elsewhere). With `land.sh` exit 4 (no `--repo-slug`), still pass `--repo`.
 
 The whole run by default (`--since` the first Slot taken, `--until` now). On Lachy's word add `--since <TS>` and
 `--until <TS>`, each with `Z` or an offset (`2026-10-02T09:00+11:00`), to score one span: a before/after split
@@ -97,6 +104,11 @@ From `score.json`, verbatim numbers only (the record is UTC; local times may be 
   `hold-merge` / `hold-race` / `hold-git-env` waits on Lachy, `lead-absent`, `never-finished`,
   `lane-only-over-cap`, `idle`) with its why. Say when the window is `partial` (a Slot still running at the
   Reflection).
+- **Quality**: `escapes.count` Escapes of `escapes.landed` landed tasks, `headline.quality`, and `escapes.bySource`
+  (fixes, reverts, reviews), with each escaped task's evidence verbatim (the `fixes:` note, the revert commit, or the
+  review doc and row). When `escapes.partial` is true, say Quality rests on fewer than all three sources: name each
+  unread source (`escapes.sources`) and each `escapes.excluded.unresolved` task with its why, and say Quality can
+  only read too high. An Escape found later counts against this rollout, so a later re-score can lower Quality.
 - **Guardrails**: tokens per merge, set-aside rate, conflict rate (and the integrator-path share) and quota
   stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so.
 - **Slots and lane**: the ceiling it ran at (and any mid-window change), the share of running time the Slots were
@@ -163,6 +175,11 @@ change a live rollout, Lachy edits its note.
   the wording only, never whether a proposal is made.
 - The thresholds (the 30-min grace, the 2-h lane-only cap, the 50 / 80 / 60 % shares) are heuristics, named in
   `score.json`'s `thresholds`.
+- A fix written without `fixes:` is not counted as an Escape (task-writer § 4 sets the key).
+- A review finding is attributed by `git blame`, so a finding on an old line counts against whichever task last
+  wrote that line.
+- Reverts and review findings are read from the Project root's local ref, never fetched: `escapes.ref.tipDate`
+  shows how old it is, and anything pushed since the last fetch is missed.
 
 ## Don'ts
 

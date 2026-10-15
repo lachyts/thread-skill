@@ -498,7 +498,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Quality** — the other headline: how few Escapes a rollout's landed work
   produces. _Avoid_: correctness, polish.
 - **Escape** — landed work that later needs a fix it should not have needed:
-  a follow-up fix task traced to it, a revert, or a later review finding
+  a follow-up fix task traced to it by its `fixes:` key, a revert, or a later review finding
   against its lines. Counted against the rollout that landed it, so it is
   known only after the run. _Avoid_: bug (alone), regression (a review
   round's word).
