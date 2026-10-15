@@ -454,9 +454,11 @@ def main(argv):
         signal.signal(s, on_signal)
     try:
         Close(a, slug, started).run()
-        outcome = Outcome("not scored: no outcome", 1)  # unreachable: run() always raises one
+        outcome = Outcome("not scored: no outcome", 1)  # run() always raises its Outcome
     except Outcome as o:
         outcome = o
+    except Exception as e:  # never a traceback: the caller reads one line
+        outcome = Outcome("not scored: %s: %s" % (type(e).__name__, str(e)[:TAIL_MAX]), 1)
     finally:
         mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
         try:
