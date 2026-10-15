@@ -188,6 +188,12 @@ const REFUSALS = [
   ['auto-retry with budget 0 (auto_retries: 0 retries nothing)', ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json', JSON.stringify({ stage: 'plan', setAsideAt: 'run', retryClass: 'agent', used: 1, budget: 0 })]],
   ['auto-retry set aside at a gate', ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json', JSON.stringify({ stage: 'plan', setAsideAt: 'gate', retryClass: 'agent', used: 1, budget: 2 })]],
   ['auto-retry without a task', ['--rollout', 'r', '--kind', 'auto-retry', '--json', JSON.stringify({ stage: 'plan', setAsideAt: 'run', retryClass: 'agent', used: 1, budget: 2 })]],
+  // review-verdict (p21-3): one judged master-review round, task-scoped, its counts consistent.
+  ['review-verdict without a task', ['--rollout', 'r', '--kind', 'review-verdict', '--json', JSON.stringify({ round: 1, verdict: 'changes', findings: 3, original: 2, regression: 0, digest: 'abcdef0123456789' })]],
+  ['review-verdict without a digest', ['--rollout', 'r', '--task', 't', '--kind', 'review-verdict', '--json', JSON.stringify({ round: 1, verdict: 'changes', findings: 3, original: 2, regression: 0 })]],
+  ['review-verdict with a verdict outside approve | changes', ['--rollout', 'r', '--task', 't', '--kind', 'review-verdict', '--json', JSON.stringify({ round: 1, verdict: 'reject', findings: 0, original: 0, regression: 0, digest: 'abcdef0123456789' })]],
+  ['review-verdict at round 0', ['--rollout', 'r', '--task', 't', '--kind', 'review-verdict', '--json', JSON.stringify({ round: 0, verdict: 'approve', findings: 0, original: 0, regression: 0, digest: 'abcdef0123456789' })]],
+  ['review-verdict with original + regression over findings', ['--rollout', 'r', '--task', 't', '--kind', 'review-verdict', '--json', JSON.stringify({ round: 2, verdict: 'changes', findings: 2, original: 2, regression: 1, digest: 'abcdef0123456789' })]],
 ]
 
 for (const [name, args] of REFUSALS) {
@@ -381,6 +387,60 @@ test('review-round lands in reviews.jsonl with rollout and task null', (t) => {
   assert.equal(l.rollout, null)
   assert.equal(l.task, null)
   assert.equal(l.kind, 'review-round')
+})
+
+// ---- the review-verdict kind (p21-3: reconcile-rollout.py's one line per judged master-review round) ----------
+
+test('review-verdict lands in <rollout>.jsonl with its task, with and without head', (t) => {
+  const home = tmpHome(t)
+  const base = { round: 1, verdict: 'changes', findings: 3, original: 2, regression: 0, digest: '464188ef5ed3159b' }
+  emitOk(home, ['--rollout', 'r', '--task', '[[T]]', '--kind', 'review-verdict', '--json', JSON.stringify({ ...base, head: 'a'.repeat(40) })], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', 'review-verdict', '--json', JSON.stringify({ ...base, round: 2, verdict: 'approve', findings: 0, original: 0 })], { env: EV(home) })
+  assert.deepEqual(listing(ev(home)), ['r.jsonl'], 'the rollout\'s own record, never reviews.jsonl')
+  const [a, b] = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual([a.kind, a.task, a.round, a.verdict, a.findings, a.original, a.regression, a.digest, a.head],
+    ['review-verdict', 't', 1, 'changes', 3, 2, 0, '464188ef5ed3159b', 'a'.repeat(40)])
+  assert.deepEqual([b.round, b.verdict, b.findings], [2, 'approve', 0])
+  assert.ok(!('head' in b), 'no head when the judge gave none')
+})
+
+test('verdict_digest is stable and pinned; verdict_key uses the head, else the digest', (t) => {
+  const home = tmpHome(t)
+  const r = api(home, `
+d = m.verdict_digest
+out = {
+  "pinned": d("changes", ["a.py:2 x"]),
+  "again": d("changes", ["a.py:2 x"]),
+  "approve": d("approve", []),
+  "changesEmpty": d("changes", []),
+  "other": d("changes", ["a.py:2 y"]),
+  "head": list(m.verdict_key({"task": "t", "round": 1, "head": "a" * 40, "digest": "x"})),
+  "emptyHead": list(m.verdict_key({"task": "t", "round": 1, "head": "", "digest": "x"})),
+  "noHead": list(m.verdict_key({"task": "t", "round": 2, "digest": "y"})),
+}
+print(json.dumps(out))`)
+  assert.equal(r.status, 0, r.stderr)
+  const o = JSON.parse(r.stdout)
+  assert.equal(o.pinned, '464188ef5ed3159b', 'the first 16 hex of sha256 over ["changes",["a.py:2 x"]]')
+  assert.equal(o.again, o.pinned)
+  assert.match(o.pinned, /^[0-9a-f]{16}$/)
+  assert.notEqual(o.approve, o.changesEmpty, 'approve and an empty changes differ')
+  assert.notEqual(o.other, o.pinned, 'two bullet lists differ')
+  assert.deepEqual(o.head, ['t', 1, 'head', 'a'.repeat(40)])
+  assert.deepEqual(o.emptyHead, ['t', 1, 'digest', 'x'])
+  assert.deepEqual(o.noHead, ['t', 2, 'digest', 'y'])
+})
+
+test('the docstring carries the review-verdict and review-round reader rules and the Integration gap', (t) => {
+  const home = tmpHome(t)
+  const r = api(home, 'print(json.dumps(m.__doc__))')
+  assert.equal(r.status, 0, r.stderr)
+  const doc = JSON.parse(r.stdout).replace(/\s+/g, ' ')
+  assert.match(doc, /- review-verdict: one line per verdict_key, \(task, round, head\) when the line carries a head, else \(task, round, digest\)\. Keep the first line per key\. The writer \(reconcile\) skips an entry whose key the record already holds/)
+  assert.match(doc, /- review-round: dedupe on \(repo, doc\) when doc is present, else on \(repo, head, digest\), keeping the latest line/)
+  assert.match(doc, /an Integration re-review rejection uses a review round but writes no line, so `round` skips it \(r1, r2, r4\)/)
+  assert.match(doc, /verdict_digest\(verdict, feedback\) -> str/)
+  assert.match(doc, /verdict_key\(line\) -> tuple/)
 })
 
 // ---- the tuning kind (skills/reflect/scripts/tune.py's one line per Reflection) --------------------------------
