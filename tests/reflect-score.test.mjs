@@ -191,7 +191,7 @@ test('slot-bound: running time leaves out the pause and the hold, and the ceilin
   assert.equal(out.lane.integrations, 6)
   assert.equal(out.lane.waitsClimbing, false)
   assert.equal(out.binding.constraint, 'slot-bound')
-  assert.deepEqual(out.headline, { throughput: 0.857, runningHours: 7, merges: 6, tokensPerMerge: 100000, setAsideRate: 0, conflictRate: 0, quotaStalls: 0 })
+  assert.deepEqual(out.headline, { throughput: 0.857, runningHours: 7, merges: 6, tokensPerMerge: 100000, setAsideRate: 0, conflictRate: 0, quotaStalls: 0, quality: null })
   assert.equal(out.proposals.length, 1)
   const [p] = out.proposals
   assert.deepEqual([p.id, p.key, p.from, p.to, p.ranAt, p.ranAtCause, p.rule, p.direction, p.agreeing], ['p1', 'parallel_ceiling', 3, 4, 3, null, 'slot-bound-raise', 1, 0])
@@ -533,7 +533,7 @@ test('no record: an empty score, flagged, exit 0', (t) => {
   const home = tmpHome(t)
   const out = scored(home, ['--until', at('03:00'), '--repo-slug', 'o/r'])
   assert.ok(has(out.flags, /^no record$/))
-  assert.deepEqual(out.headline, { throughput: null, runningHours: 0, merges: 0, tokensPerMerge: null, setAsideRate: null, conflictRate: null, quotaStalls: 0 })
+  assert.deepEqual(out.headline, { throughput: null, runningHours: 0, merges: 0, tokensPerMerge: null, setAsideRate: null, conflictRate: null, quotaStalls: 0, quality: null })
   assert.deepEqual(out.proposals, [])
 })
 
