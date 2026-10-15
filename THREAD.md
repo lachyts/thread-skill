@@ -10,6 +10,13 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-10-15 (evening): P21 is running overnight as `[[thread-skill-rollout-2026-10-15]]` from the clone; p15-7 landed.**
+- **#139 merged** (`38d75ec`): CI had failed on ADR 0037 citing Chorus's ADR 0043 bare; `0981b9e` qualified it ("Chorus ADR 0043"), then the branch was updated so auto-merge could fire.
+- **Scope (Lachy, grill):** P21 plus p15-7 tonight; the eval rollout (make-evals-on-opus, p19-5/10/11) waits for an attended session (spend + p19-5's irreversible sign-off).
+- **Scheduled** via `/thread:orient Thread Skill --steer` → schedule: 7 tasks (p21-1,2,3,4,6,7,8), Project root the clone, verifier `make test`, built-in settings (no `rollouts.toml`), `rung: opus-xhigh` on p21-2/p21-7, p21-1 `spend_approval_usd: 30` asked ahead (its routing evals). Rollout run lines added to every note. p21-8's workspaces half split to new [[thread-skill-p21-9-daily-sweep-starts-the-reflection]] (session lane, with p21-5).
+- **Execute** runs in a Chorus Session launched in the clone (handoff `docs/handoffs/2026-10-15-execute-p21-rollout.md`, landed #142, consumed by it).
+- **p15-7 done:** an orient session-lane child landed agents-config PR #1 (`b01befa`): `skills/fresh-review/scripts/review-round.py` + Step 5 call + tests. Unset `THREAD_EVENTS_DIR` falls back to run_record's dir chain (the Mirror contract), not "write nothing". **Not yet clean-room reviewed**: a Stage suggestion card runs `/fresh-review` from `~/.agents`. `~/.agents`' local checkout is still at `08e72f3` (pull to make the emit live).
+
 **2026-10-15 (later): ADR 0037 decided, P21 written, scheduling handed off.** The orient grill turned the Retro into an automatic Reflection tuned for hands-off quality (ADR 0037 and its CONTEXT.md terms, PR #139, auto-merge queued). [[thread-skill-p21-reflections-run-on-their-own]] holds 8 tasks. Handoff `docs/handoffs/2026-10-15-schedule-p21-reflections.md` (landing PR #140) was consumed by the session that schedules P21 and runs it overnight. Chorus's side is [[chorus-reflect-cadence]].
 
 **2026-10-15: 3.1.0 is released and installed (PR #136, tag `thread--v3.1.0` on `bce79a8`; `claude plugin update` 3.0.0 → 3.1.0; `make release-check` passes; primary checkout at `bce79a8`). P18 (unattended rollouts), P20 (orient's front door) and P19 bar p19-5 and the eval tasks are live.**
@@ -716,6 +723,7 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **`native_workflow.mjs init DIR SCRIPT ARGS CONFIG` takes ARGS and CONFIG as file paths**, not inline JSON: an inline jobs object fails `ENAMETOOLONG`. Write both to files beside the prompt (orient § 8 dispatch, 2026-10-15).
 - **`claude plugin eval` defaults (2026-10-15).** The LLM judge is Haiku unless `--judge-model` is passed (`make evals` passes none until [[thread-skill-make-evals-on-opus]] lands). `--case` takes one glob per run: a second `--case` silently replaces the first. A `--max-cost-usd` breach skips the remaining cases and exits non-zero.
 - **A live E2E needs a hub and children (2026-10-13).** The harness resets a `cd` outside the launch dir, so the CWD-bound verbs run in a child session launched in the fixture: in Chorus, `create_thread` (and `spawn_task`) take a `cwd`, so the hub raises a card that opens there. A card-started session never reports back to its raiser; the hub watched the checklist file with a background `until` loop (fix filed for Chorus).
 - **Worktrees under the live checkout can reach the plugin cache.** The `./` directory source copies ignored files; before `claude plugin update`, remove every `.claude/worktrees/*` (the stray `run-record` one belongs to open PR #88) or `make release-check`'s stray check fails and the cache copy must be deleted by hand. Bit again at 3.1.0 (2026-10-15) by this session's own release and withdraw worktrees: remove them from `~/.claude/plugins/cache/thread/thread/<v>/.claude/worktrees/`.
@@ -962,6 +970,14 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Now (from 2026-10-15, evening, at close): P21 runs overnight; check it in the morning.**
+1. `/thread:status [[thread-skill-rollout-2026-10-15]]` (from any session). If stuck, `/thread:repair` from a session launched in the clone `~/repos/tools/thread-skill-rollout`.
+2. Start or keep the Stage card "Fresh-review the review-round emit (agents-config #1)" (session in `~/.agents`), and `git -C ~/.agents pull --ff-only` once its working tree is clean.
+3. Session lane once their dependencies land: p21-5 (workspaces `add-task.md`), p21-9 (daily sweep calls `reflect-due`).
+4. Attended: [[thread-skill-make-evals-on-opus]], then the eval rollout ([[thread-skill-eval-rollout-p19-evals]]).
+
+**Superseded 2026-10-15 (evening):**
+
 **Now (from 2026-10-15, later): P21 is being scheduled by the handoff session** (its doc, now consumed, is `docs/handoffs/2026-10-15-schedule-p21-reflections.md`).
 1. Check `/thread:status` for a P21 rollout. If there is none: confirm PR #139 merged, then run `/thread:orient Thread Skill --steer` from this repo, which schedules from the clone `~/repos/tools/thread-skill-rollout`.
 2. **Ask Lachy** whether tonight's run is P21 alone or P21 plus the eval rollout's p19-5, p19-10 and p19-11. The eval tasks need [[thread-skill-make-evals-on-opus]] first, and p19-5 needs his irreversible sign-off. Only one unfinished rollout is allowed per repo.
@@ -1194,6 +1210,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-10-15: #139 fixed and merged; P21 scheduled (+p21-9 split) and executing overnight from the clone; p15-7 landed in agents-config #1 by an orient child (review pending).
 - 2026-10-15 (close, later): `/thread:orient` on the Retro, then a grill-with-docs: ADR 0037 + CONTEXT.md terms (#139), P21 phase and 8 tasks, p19-12 merged into p21-1, p15-7 raised, [[chorus-reflect-cadence]] filed; scheduling handed off (#140, consumed by its successor).
 - 2026-10-15 (close): released and installed 3.1.0 (#136, tag `thread--v3.1.0`) from handoff `2026-10-15-release-p18-p20` (withdrawn by #137); evals $8.24, Haiku judge found; review ledger STOP at round 2 → record cut to facts; filed make-evals-on-opus and the 3.1 ADR sweep. Memory: release-pr-scope updated.
 - 2026-10-13: 3.0.0 live E2E recorded (15 PASS / 1 KNOWN / 1 FAIL over 17 rows, PR #115); three findings filed; fixtures removed; P13 interim rule retired, p13-4 and P13 closed.
