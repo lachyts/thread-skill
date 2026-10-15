@@ -178,7 +178,7 @@ const REFUSALS = [
   ['`reviews` as the rollout', ['--rollout', 'reviews', '--kind', 'resumed']],
   ['`tunings` as the rollout', ['--rollout', 'tunings', '--kind', 'resumed']],
   ['`tunings` as a carried from', ['--rollout', 'r', '--task', 't', '--kind', 'carried', '--json', '{"from":"[[Tunings]]"}']],
-  ['a tuning with a task', ['--rollout', 'r', '--task', 't', '--kind', 'tuning', '--json', JSON.stringify({ id: 't1', repo: 'o/r', window: { since: '2026-10-04T00:00:00.000Z', until: '2026-10-04T10:00:00.000Z' }, scores: { throughput: 1, runningHours: 2, merges: 2, tokensPerMerge: null, setAsideRate: 0, conflictRate: 0, quotaStalls: 0 }, applied: [] })]],
+  ['a tuning with a task', ['--rollout', 'r', '--task', 't', '--kind', 'tuning', '--json', JSON.stringify({ id: 't1', repo: 'o/r', window: { since: '2026-10-04T00:00:00.000Z', until: '2026-10-04T10:00:00.000Z' }, scores: { throughput: 1, runningHours: 2, merges: 2, tokensPerMerge: null, setAsideRate: 0, conflictRate: 0, quotaStalls: 0, handsOffRate: 1, quality: null, reviewChurn: null }, applied: [] })]],
   ['a traversal task slug', ['--rollout', 'r', '--task', '../x', '--kind', 'ready']],
   ['no rollout for a rollout kind', ['--kind', 'resumed']],
   ['a line over 16 KiB', ['--rollout', 'r', '--kind', 'quota-stall', '--json', JSON.stringify({ detail: 'x'.repeat(17000) })]],
@@ -188,6 +188,19 @@ const REFUSALS = [
   ['auto-retry with budget 0 (auto_retries: 0 retries nothing)', ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json', JSON.stringify({ stage: 'plan', setAsideAt: 'run', retryClass: 'agent', used: 1, budget: 0 })]],
   ['auto-retry set aside at a gate', ['--rollout', 'r', '--task', 't', '--kind', 'auto-retry', '--json', JSON.stringify({ stage: 'plan', setAsideAt: 'gate', retryClass: 'agent', used: 1, budget: 2 })]],
   ['auto-retry without a task', ['--rollout', 'r', '--kind', 'auto-retry', '--json', JSON.stringify({ stage: 'plan', setAsideAt: 'run', retryClass: 'agent', used: 1, budget: 2 })]],
+  // The human acts (p21-2): each enum is closed, and each kind is task-scoped.
+  ['answer-recorded with a bad answerKind', ['--rollout', 'r', '--task', 't', '--kind', 'answer-recorded', '--json', JSON.stringify({ answerKind: 'needs you' })]],
+  ['answer-recorded with `ask` in place of answerKind', ['--rollout', 'r', '--task', 't', '--kind', 'answer-recorded', '--json', JSON.stringify({ ask: 'needs-you' })]],
+  ['answer-recorded with a bad form', ['--rollout', 'r', '--task', 't', '--kind', 'answer-recorded', '--json', JSON.stringify({ answerKind: 'decision', form: 'awaiting repair' })]],
+  ['answer-recorded with a raise that is no round cap', ['--rollout', 'r', '--task', 't', '--kind', 'answer-recorded', '--json', JSON.stringify({ answerKind: 'decision', raise: 'parallel_ceiling' })]],
+  ['answer-recorded with pr not a bool', ['--rollout', 'r', '--task', 't', '--kind', 'answer-recorded', '--json', JSON.stringify({ answerKind: 'decision', pr: 'https://github.com/o/r/pull/7' })]],
+  ['answer-recorded without a task', ['--rollout', 'r', '--kind', 'answer-recorded', '--json', JSON.stringify({ answerKind: 'decision' })]],
+  ['gate-signed with standing not a bool', ['--rollout', 'r', '--task', 't', '--kind', 'gate-signed', '--json', JSON.stringify({ standing: 'no', gates: 1 })]],
+  ['gate-signed with gates 0', ['--rollout', 'r', '--task', 't', '--kind', 'gate-signed', '--json', JSON.stringify({ standing: false, gates: 0 })]],
+  ['handed-back with a bad via', ['--rollout', 'r', '--task', 't', '--kind', 'handed-back', '--json', JSON.stringify({ via: 'lead', arm: 'run' })]],
+  ['handed-back with a bad arm', ['--rollout', 'r', '--task', 't', '--kind', 'handed-back', '--json', JSON.stringify({ via: 'retry', arm: 'gate' })]],
+  ['race-decided with a bad mark', ['--rollout', 'r', '--task', 't', '--kind', 'race-decided', '--json', JSON.stringify({ mark: 'race', by: 'resume' })]],
+  ['race-decided with a bad by', ['--rollout', 'r', '--task', 't', '--kind', 'race-decided', '--json', JSON.stringify({ mark: 'RACE', by: 'mark-done' })]],
 ]
 
 for (const [name, args] of REFUSALS) {
@@ -210,6 +223,30 @@ test('auto-retry (p16-4): a valid emit, and a quota retry with used 0 and its qu
   const [a, b] = lines(path.join(ev(home), 'r.jsonl'))
   assert.deepEqual([a.kind, a.task, a.stage, a.used, a.budget, a.reviewRounds, a.fingerprint], ['auto-retry', 't', 'review', 1, 2, 4, 'abcdef012345'])
   assert.deepEqual([b.retryClass, b.used, b.quotaRetries, b.setAsideAt], ['quota', 0, 1, 'integration'])
+})
+
+test('the human acts (p21-2): answer-recorded, gate-signed, handed-back and race-decided land with their fields', (t) => {
+  const home = tmpHome(t)
+  const emit = (kind, f) => emitOk(home, ['--rollout', 'r', '--task', 't', '--kind', kind, '--json', JSON.stringify(f)], { env: EV(home) })
+  emit('answer-recorded', { answerKind: 'needs-you', form: 'hand-back', pr: false })
+  emit('answer-recorded', { answerKind: 'decision', form: 'awaiting-repair', raise: 'max_review_rounds', pr: true })
+  emit('answer-recorded', { answerKind: 'decision' })
+  emit('gate-signed', { standing: false, gates: 2 })
+  emit('gate-signed', { standing: true, gates: 1 })
+  for (const via of ['answer', 'descope', 'retry']) emit('handed-back', { via, arm: 'run' })
+  emit('handed-back', { via: 'retry', arm: 'integration' })
+  emit('race-decided', { mark: 'RACE', by: 'resume' })
+  emit('race-decided', { mark: 'UNVERIFIED', by: 'hand-back' })
+  emit('race-decided', { mark: 'RACE', by: 'auto-retry' })
+  const all = lines(path.join(ev(home), 'r.jsonl'))
+  assert.deepEqual(all.map((l) => [l.kind, l.task, l.v]), [
+    ['answer-recorded', 't', 1], ['answer-recorded', 't', 1], ['answer-recorded', 't', 1], ['gate-signed', 't', 1], ['gate-signed', 't', 1],
+    ['handed-back', 't', 1], ['handed-back', 't', 1], ['handed-back', 't', 1], ['handed-back', 't', 1],
+    ['race-decided', 't', 1], ['race-decided', 't', 1], ['race-decided', 't', 1]])
+  assert.deepEqual([all[1].answerKind, all[1].form, all[1].raise, all[1].pr], ['decision', 'awaiting-repair', 'max_review_rounds', true])
+  assert.deepEqual([all[3].standing, all[3].gates, all[4].standing], [false, 2, true])
+  assert.deepEqual(all.slice(5, 9).map((l) => [l.via, l.arm]), [['answer', 'run'], ['descope', 'run'], ['retry', 'run'], ['retry', 'integration']])
+  assert.deepEqual(all.slice(9).map((l) => [l.mark, l.by]), [['RACE', 'resume'], ['UNVERIFIED', 'hand-back'], ['RACE', 'auto-retry']])
 })
 
 test('unknown extra keys are allowed beside the kind fields', (t) => {
@@ -386,7 +423,8 @@ test('review-round lands in reviews.jsonl with rollout and task null', (t) => {
 // ---- the tuning kind (skills/reflect/scripts/tune.py's one line per Reflection) --------------------------------
 
 const WINDOW = { since: '2026-10-04T00:00:00.000Z', until: '2026-10-04T10:00:00.000Z', activeStart: '2026-10-04T00:00:00.000Z', activeEnd: '2026-10-04T09:00:00.000Z', partial: false }
-const SCORES = { throughput: 0.667, runningHours: 9, merges: 6, tokensPerMerge: 125000, setAsideRate: 0.1, conflictRate: null, quotaStalls: 0 }
+const SCORES = { throughput: 0.667, runningHours: 9, merges: 6, tokensPerMerge: 125000, setAsideRate: 0.1, conflictRate: null, quotaStalls: 0,
+  handsOffRate: 0.8333, quality: null, reviewChurn: null }
 const APPLIED = { key: 'parallel_ceiling', from: 3, to: 4, ranAt: 3, rule: 'slot-bound-raise', evidence: 'Slot-bound: Slots full 62% of 9 running h, lane 25% busy', agreeing: 0 }
 const tuning = (over = {}) => ({ id: 't-1', repo: 'o/r', window: WINDOW, scores: SCORES, applied: [APPLIED], binding: 'slot-bound', ...over })
 
@@ -406,6 +444,23 @@ test('tuning lands in tunings.jsonl, its rollout kept as a stamp and its task nu
   assert.deepEqual(b.applied, [])
 })
 
+// The tuning line's schema is v2 (p21-2: the ten scores); every other kind stays v1, so a v1 tuning line still reads as
+// a baseline with its seven.
+test('a tuning line is v 2 with its ten scores; every other kind stays v 1', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning())], { env: EV(home) })
+  emitOk(home, ['--rollout', 'r', '--kind', 'resumed'], { env: EV(home) })
+  const [l] = lines(path.join(ev(home), 'tunings.jsonl'))
+  assert.equal(l.v, 2)
+  assert.deepEqual(Object.keys(l.scores).sort(), ['conflictRate', 'handsOffRate', 'merges', 'quality', 'quotaStalls', 'reviewChurn',
+    'runningHours', 'setAsideRate', 'throughput', 'tokensPerMerge'])
+  assert.equal(lines(path.join(ev(home), 'r.jsonl'))[0].v, 1)
+  const r = api(home, 'print(json.dumps([m.VERSION, m.KIND_VERSIONS, list(m.SCORE_KEYS)]))')
+  assert.equal(r.status, 0, r.stderr)
+  assert.deepEqual(JSON.parse(r.stdout), [1, { tuning: 2 }, ['throughput', 'runningHours', 'merges', 'tokensPerMerge', 'setAsideRate',
+    'conflictRate', 'quotaStalls', 'handsOffRate', 'quality', 'reviewChurn']])
+})
+
 test('a tuning with a null activeStart and activeEnd (no running time) is recorded', (t) => {
   const home = tmpHome(t)
   emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(tuning({ window: { since: WINDOW.since, until: WINDOW.until, activeStart: null, activeEnd: null } }))], { env: EV(home) })
@@ -420,6 +475,10 @@ const TUNING_REFUSALS = [
   ['scores with a string', 'r', tuning({ scores: { ...SCORES, throughput: 'fast' } })],
   ['merges null', 'r', tuning({ scores: { ...SCORES, merges: null } })],
   ['quotaStalls negative', 'r', tuning({ scores: { ...SCORES, quotaStalls: -1 } })],
+  ['the seven v1 scores (a v2 line carries ten)', 'r', tuning({ scores: (({ handsOffRate, quality, reviewChurn, ...rest }) => rest)(SCORES) })],
+  ['handsOffRate above 1', 'r', tuning({ scores: { ...SCORES, handsOffRate: 1.2 } })],
+  ['handsOffRate below 0', 'r', tuning({ scores: { ...SCORES, handsOffRate: -0.1 } })],
+  ['quality as a string', 'r', tuning({ scores: { ...SCORES, quality: 'good' } })],
   ['window with an extra key', 'r', tuning({ window: { ...WINDOW, tz: 'Australia/Melbourne' } })],
   ['window with no until', 'r', tuning({ window: { since: WINDOW.since } })],
   ['a naive activeEnd', 'r', tuning({ window: { ...WINDOW, activeEnd: '2026-10-04T09:00:00' } })],
