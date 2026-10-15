@@ -439,7 +439,9 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
                     integrate row that leaves the note `blocked`: its seeded revise follows, so it is not a
                     set-aside; a rejected row that ends review-blocked is one); quota-stall {stage, detail}
                     for a `workflow call failed:` lead row whose error line reads as a usage or rate limit
-                    (QUOTA_RE).
+                    (QUOTA_RE); then (p21-3) review-verdict {round, verdict, findings, original, regression,
+                    digest, head?} per reviewVerdicts entry of a row that was in_progress and carries no
+                    integration (the row-field mapping's reviewVerdicts, below), written once per verdict_key.
   hand-back         the Integration arm records ready pr=; the run arm stamps `handed_back:`.
   auto-retry        hand-back's own events (the Integration arm's ready pr=), then auto-retry {stage, setAsideAt,
                     retryClass, used, budget, fingerprint, reviewRounds?, quotaRetries?} (p16-4): stage is the
@@ -617,6 +619,21 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
                     lead-written set-aside row). Anything else is an error (exit 1) and leaves the section;
                     the rest of the row is still written. needs_human() reads it back, normalised, for `next`,
                     `status` and lead-integrate.py.
+  reviewVerdicts -> (Run record only; task-mode rows; p21-3) one review-verdict event per entry, its head resolved in
+                    the task tree, written once per verdict_key; Integration re-reviews write none. Each entry is a
+                    master-review round the call judged, {round, verdict, head, feedback}: its head (7-40 hex, else
+                    dropped with a `run_record: warning:` line and never given to git) is resolved to a full sha in
+                    the row's worktreePath (review-split.py resolve; kept as given when the tree cannot), and the
+                    event is skipped when the record already holds its run_record.verdict_key ((task, round, head),
+                    else (task, round, digest)), so a signed-gate or Lost-call resume's replayed rounds are written
+                    once. A `changes` round's bullets are split original / regression by review-split.py: each
+                    bullet's first `path:line` blamed at the head, a regression when the blamed commit is in
+                    first-parent baseline..head, the baseline the task's first judged head (the record's earlier
+                    heads, then this row's, the first that is an ancestor of the head); no cite, no tree or no blame
+                    leaves a finding unclassified (in findings, in neither count). An approve is 0/0/0. Written only
+                    for a row that ends a Slot (the note read in_progress) and carries no `integration`; nothing for
+                    a row without the key (a pre-p21-3 engine's, a lead-written one) or on --dry-run; a non-list
+                    or a malformed entry is one warning. Never changes the exit, stdout or vault writes.
 
 Accumulated feedback (p6-4): the run sections keep every run, never only the first. Each run is a block
 
@@ -2187,7 +2204,8 @@ def cmd_reconcile(args) -> int:
         note.save(dry_run=args.dry_run)
         _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, _pr(note),
                           ready_stamped)
-        flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
+        _review_verdict_events(args, rollout, slug, task, prior)
+        flag =" (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
         ro = " (read-only, approved)" if note_status != status else ""
         print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{_rung_note(task)}{legacy_note}{flag}")
 
@@ -3513,6 +3531,109 @@ def _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields,
         error_line = reason.split("\n", 1)[0].strip()
         if failed and QUOTA_RE.search(error_line):
             _event(rollout, "quota-stall", slug, {"stage": stage, "detail": error_line[:500]}, args)
+
+
+# review-split.py, beside this module: the original / regression split of one engine review round (p21-3).
+REVIEW_SPLIT_PY = Path(__file__).resolve().parent / "review-split.py"
+_SPLIT = None
+# A judge's head the split may hand to git: 7-40 hex, never an option or a ref name (the engine applies the same rule).
+REVIEW_HEAD_RE = re.compile(r"[0-9a-fA-F]{7,40}\Z")
+
+
+def _review_split():
+    """review-split.py, loaded on first use (the _run_record() pattern)."""
+    global _SPLIT
+    if _SPLIT is None:
+        spec = importlib.util.spec_from_file_location("thread_review_split", REVIEW_SPLIT_PY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _SPLIT = mod
+    return _SPLIT
+
+
+def _rv_warn(slug, why):
+    try:
+        print(f"run_record: warning: {slug}: reviewVerdicts: {why}", file=sys.stderr)
+    except Exception:
+        pass
+
+
+def _verdict_entry(e):
+    """A reviewVerdicts entry when well formed (round an int >= 1, verdict approve | changes, head a string,
+    feedback a list of strings), else None."""
+    if not isinstance(e, dict):
+        return None
+    rnd, verdict, head, feedback = e.get("round"), e.get("verdict"), e.get("head"), e.get("feedback")
+    if isinstance(rnd, bool) or not isinstance(rnd, int) or rnd < 1 or verdict not in ("approve", "changes"):
+        return None
+    if not isinstance(head, str) or not isinstance(feedback, list) or not all(isinstance(f, str) for f in feedback):
+        return None
+    return {"round": rnd, "verdict": verdict, "head": head, "feedback": feedback}
+
+
+def _review_verdict_events(args, rollout, slug, task, prior):
+    """p21-3: one review-verdict event per entry of an engine row's reviewVerdicts (each master-review round the call
+    judged), written once per run_record.verdict_key: an entry whose key the record already holds for this task (a
+    signed-gate or Lost-call resume replaying the stopped call's rounds) is skipped. Its head is resolved to a full
+    sha in the task tree first (an abbreviated and a full head key alike); a head that is not 7-40 hex is dropped
+    with a warning and never reaches git. A `changes` round is split original / regression by review-split.py
+    against the task's first judged head (the record's earlier heads, then this row's); an approve is 0/0/0.
+    Only for a row that ends a Slot (the note read in_progress) and carries no `integration` (an Integration
+    re-review is no master-review round); nothing on --dry-run, with no rollout, or for a row without the key (a
+    pre-p21-3 engine's, a lead-written one). Best-effort: it never changes the verb's exit or stdout."""
+    if args.dry_run or not rollout or prior != "in_progress" or task.get("integration") is not None:
+        return
+    verdicts = task.get("reviewVerdicts")
+    if verdicts is None:
+        return
+    if not isinstance(verdicts, list):
+        _rv_warn(slug, f"not a list ({type(verdicts).__name__}); no review-verdict recorded")
+        return
+    try:
+        rr = _run_record()
+        me = rr.normalise_slug(slug, "task")
+        try:
+            lines, _bad = _record_lines(rr.record_path(rollout))
+        except Exception:  # no record yet, or unreadable: no history to skip or to take a baseline from
+            lines = []
+        heads, seen = [], set()
+        for d in lines:
+            if d.get("kind") != "review-verdict" or d.get("task") != me:
+                continue
+            if isinstance(d.get("head"), str) and d["head"]:
+                heads.append(d["head"])
+            seen.add(rr.verdict_key(d))
+        sp = _review_split()
+        tree = task.get("worktreePath") if isinstance(task.get("worktreePath"), str) else ""
+        for i, raw in enumerate(verdicts, 1):
+            e = _verdict_entry(raw)
+            if e is None:
+                _rv_warn(slug, f"entry {i} is malformed (round, verdict, head, feedback); skipped")
+                continue
+            head = e["head"]
+            if head and not REVIEW_HEAD_RE.match(head):
+                _rv_warn(slug, f"round {e['round']}: head {head[:60]!r} is not 7-40 hex; recorded without one")
+                head = ""
+            elif head:
+                head = sp.resolve(tree, head.lower())
+            digest = rr.verdict_digest(e["verdict"], e["feedback"])
+            key = rr.verdict_key({"task": me, "round": e["round"], "head": head, "digest": digest})
+            if key in seen:
+                continue
+            if e["verdict"] == "approve":
+                counts = {"findings": 0, "original": 0, "regression": 0}
+            else:
+                counts = sp.split(tree, sp.baseline(tree, heads, head), head, e["feedback"])
+            fields = {"round": e["round"], "verdict": e["verdict"], "findings": counts["findings"],
+                      "original": counts["original"], "regression": counts["regression"], "digest": digest}
+            if head:
+                fields["head"] = head
+            _event(rollout, "review-verdict", slug, fields, args)
+            seen.add(key)
+            if head:
+                heads.append(head)
+    except Exception as e:
+        _rv_warn(slug, f"not recorded: {type(e).__name__}: {e}")
 
 
 def _idle_reason(git_env, paused, pause_requested, holds, queued, start, race_hold, set_aside) -> str:
