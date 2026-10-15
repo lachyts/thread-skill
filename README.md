@@ -99,8 +99,8 @@ proposals (writing nothing), and `skills/reflect/scripts/escapes.py`, which it l
 reads the landed tasks' Escapes and Quality from the task notes' `fixes:` and the
 Project root's git (reverts, later review findings), writing nothing either.
 `skills/reflect/scripts/tune.py` is the only writer of `rollouts.toml` and
-`tunings.jsonl`: it applies the Tunings Lachy picks and records one line per
-Reflection.
+`tunings.jsonl`: it applies the Tunings Lachy picks and records
+one line per Reflection.
 
 ## Design
 
