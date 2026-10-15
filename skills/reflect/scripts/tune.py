@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""tune.py — land the Tunings Lachy picked from a Retro, and record the Retro (p15-5, ADR 0032).
+"""tune.py — land the Tunings Lachy picked from a Reflection, and record the Reflection (p15-5, ADR 0032).
 
 python >= 3.8, stdlib only. The only writer of rollouts.toml and of tunings.jsonl. Called by
-skills/retro/SKILL.md (step 7) exactly once per Retro that reached its scores:
+skills/reflect/SKILL.md (step 7) exactly once per Reflection that reached its scores:
 
-    python3 ${CLAUDE_PLUGIN_ROOT}/skills/retro/scripts/tune.py --scores <score.json|-> \\
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --scores <score.json|-> \\
         (--pick p1[,p2...] --repo <dir> | --record-only) [--config <path>] [--dry-run]
 
 --scores is score.py's JSON. --pick and --record-only are mutually exclusive and one is required.
 
 --record-only writes ONE `tuning` line (applied: []) through run_record.emit and never reads or touches the
-config: every Retro leaves its headline scores as the next Retro's baseline. With `repo: null` in the scores
+config: every Reflection leaves its headline scores as the next Reflection's baseline. With `repo: null` in the scores
 (no GitHub origin) it writes nothing, prints `tune: not recorded: ...` on stderr and exits 0.
 
 --pick, checked before any write:
@@ -254,9 +254,9 @@ def record_only(scores, dry_run):
         print("would record %s in %s: %s" % (tid, tunings_path(), json.dumps(fields, ensure_ascii=False)))
         return 0
     if not emit(scores, fields):
-        say("nothing recorded: the Retro's line could not be written (see run_record above)")
+        say("nothing recorded: the Reflection's line could not be written (see run_record above)")
         return 1
-    print("recorded %s in %s: no Tuning applied (a baseline for the next Retro on %s)"
+    print("recorded %s in %s: no Tuning applied (a baseline for the next Reflection on %s)"
           % (tid, tunings_path(), scores["repo"]))
     return 0
 
@@ -308,7 +308,7 @@ def pick(scores, picks_arg, repo, config, dry_run):
     for p in picks:
         now = before["settings"][p["key"]]["value"]
         if now != p["from"]:
-            raise Stop("%s's from is stale: %s is %d now, not %d (re-run the Retro's score)"
+            raise Stop("%s's from is stale: %s is %d now, not %d (re-run the Reflection's score)"
                        % (p["id"], p["key"], now, p["from"]), 2)
     real = os.path.realpath(config)
     try:
@@ -350,7 +350,7 @@ def pick(scores, picks_arg, repo, config, dry_run):
             created.undo()
             return 0
         if not emit(scores, fields):
-            raise Stop("nothing applied: the Retro's line could not be written (see run_record above); "
+            raise Stop("nothing applied: the Reflection's line could not be written (see run_record above); "
                        "rollouts.toml is unchanged", 1)
         try:
             os.replace(tmp, real)
@@ -391,7 +391,7 @@ class Parser(argparse.ArgumentParser):
 
 
 def main(argv):
-    p = Parser(prog="tune.py", description="Apply a Retro's picked Tunings to rollouts.toml and record the Retro.")
+    p = Parser(prog="tune.py", description="Apply a Reflection's picked Tunings to rollouts.toml and record the Reflection.")
     p.add_argument("--scores", required=True)
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--pick")

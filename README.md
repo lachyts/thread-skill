@@ -45,7 +45,7 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 | `/thread:execute` | executor | Runs the rollout's queue on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call up to `parallel_ceiling`; the lead integrates each approved task with the latest main and auto-merges it (`--gated` = a merge hold before each merge). |
 | `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. |
 | `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. |
-| `/thread:retro` | tuner | The Retro (ADR 0032): fold the journals, score the Run record (Throughput over running time, the Guardrails against the last Retro, Slot and lane use, load, the binding constraint) and propose Tunings to `rollouts.toml`; only the ones Lachy picks are applied, by the tune script, which records every Retro in `tunings.jsonl`. Never changes anything on its own. |
+| `/thread:reflect` | tuner | The Reflection (ADR 0032, renamed by ADR 0037): fold the journals, score the Run record (Throughput over running time, the Guardrails against the last Reflection, Slot and lane use, load, the binding constraint) and propose Tunings to `rollouts.toml`; only the ones Lachy picks are applied, by the tune script, which records every Reflection in `tunings.jsonl`. Never changes anything on its own. |
 
 ## Runtime support
 
@@ -94,10 +94,10 @@ stop: it reads the Workflow journals to stop each call at a step boundary and
 records the stop on the rollout note (execute § Room stop).
 `skills/_shared/scripts/run_record.py` is the Run record's one writer (ADR 0032):
 every emitter appends its events through it, and its header is the schema.
-`skills/retro/scripts/score.py` reads a record into a Retro's scores and proposals
-(writing nothing), and `skills/retro/scripts/tune.py` is the only writer of
-`rollouts.toml` and `tunings.jsonl`: it applies the Tunings Lachy picks and records
-one line per Retro.
+`skills/reflect/scripts/score.py` reads a record into a Reflection's scores and
+proposals (writing nothing), and `skills/reflect/scripts/tune.py` is the only writer
+of `rollouts.toml` and `tunings.jsonl`: it applies the Tunings Lachy picks and
+records one line per Reflection.
 
 ## Design
 
@@ -147,7 +147,8 @@ one line per Retro.
   0030). `0034` — a gate never holds an unattended rollout (amends 0008).
   `0035` — one human fix per refusal (amends 0033). `0036` — orient resolves
   its target before it reads, then reshuffles without asking (amends 0026 and
-  0027).
+  0027). `0037` — Reflections run on their own and tune for hands-off quality
+  (amends 0032).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
@@ -171,7 +172,7 @@ one line per Retro.
 - **Rollout defaults are the operator's (ADR 0032).** `parallel_ceiling`,
   `max_iterations`, `max_review_rounds` and `max_plan_rounds` come from
   `~/.config/thread/rollouts.toml` (built-ins when it sets none), and
-  `/thread:retro` proposes changes to that file from a run's record. Schedule
+  `/thread:reflect` proposes changes to that file from a run's record. Schedule
   stamps the values it resolves into each rollout note's frontmatter, and
   execute reads the note first, so an edit to the file reaches the next
   scheduled (or `--regenerate`d) rollout, not one already written. A task's
@@ -236,10 +237,11 @@ final check that the run wrote nothing into the tree):
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
   (`handoff-one-writer.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
   and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
-- **Retro** — `tests/retro-score.test.mjs` (`score.py` on synthetic records: running time and its
+- **Reflection** — `tests/reflect-score.test.mjs` (`score.py` on synthetic records: running time and its
   exclusions, the Slot-bound and lane-bound fixtures, each proposal's direction and cause, the baseline, load),
-  `tests/retro-tune.test.mjs` (`tune.py` edits only the picked keys, records one line, and writes nothing on a
-  refusal or a failed write) and `tests/contracts/retro.test.mjs` (the verb's wiring and its SKILL's order).
+  `tests/reflect-tune.test.mjs` (`tune.py` edits only the picked keys, records one line, and writes nothing on a
+  refusal or a failed write) and `tests/contracts/reflect.test.mjs` (the verb's wiring, its SKILL's order and
+  triggers, and the retired name staying gone).
 - **Next-action script** — `tests/next-action.test.mjs`: `next-action.py`'s set-down, fill, read and
   captures against throwaway vaults — byte-level one-line edits, YAML-safe quoting, both tag forms, the
   shared dead-link rule, and refusals that write nothing.

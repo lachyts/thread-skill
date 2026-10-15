@@ -3,7 +3,7 @@
 // state, through four thin verbs. Pins the prose an LLM lead follows in skills/execute/SKILL.md § 4.5 *Run
 // record*: each call and form, the end-before-launch and end-before-set-aside order, best-effort; that each new
 // verb is documented in reconcile-rollout.py's docstring and wired in main(); and run_record.py's pairing rules,
-// which every reader of the record (a Retro, the record suite's checker) relies on. The behaviour is pinned by
+// which every reader of the record (a Reflection, the record suite's checker) relies on. The behaviour is pinned by
 // skills/execute/tests/reconcile-rollout-record.test.sh. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

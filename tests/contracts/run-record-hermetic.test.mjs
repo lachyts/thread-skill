@@ -67,7 +67,7 @@ test('every shell suite that invokes an engine script points THREAD_EVENTS_DIR a
 test('every node test that spawns an engine script passes THREAD_EVENTS_DIR in its env', () => {
   const spawning = nodeFiles().filter((f) => nodeSpawns(read(f)))
   for (const f of ['tests/integration-marker-roundtrip.test.mjs', 'tests/contracts/status-repair-queue.test.mjs', 'tests/ladder.test.mjs',
-    'tests/retro-tune.test.mjs']) {
+    'tests/reflect-tune.test.mjs']) {
     assert.ok(spawning.includes(f), `${f} is seen as spawning an engine script`)
   }
   const bad = spawning.filter((f) => !nodeHermetic(read(f)))
@@ -87,7 +87,7 @@ test('control: the shell matchers', () => {
   assert.ok(shellHermetic('. tests/lib/merge-task-env.sh\n'))
   assert.ok(shellHermetic('export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$TMP/events}"  # x\n'), 'the knob form')
   assert.ok(shellInvokes('CAN="$root/skills/execute/scripts/git-env-canary.py"\n'), 'the canary is an engine script')
-  assert.ok(shellInvokes('python3 -B skills/retro/scripts/tune.py --record-only\n'), 'the tune script writes the record')
+  assert.ok(shellInvokes('python3 -B skills/reflect/scripts/tune.py --record-only\n'), 'the tune script writes the record')
   assert.ok(!shellHermetic('THREAD_EVENTS_DIR="$TMP/events"\n'), 'an unexported assignment does not reach the child')
   assert.ok(!shellHermetic('# export THREAD_EVENTS_DIR=x\n'))
 })

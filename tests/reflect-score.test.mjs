@@ -1,4 +1,4 @@
-// skills/retro/scripts/score.py — a Retro's scoring script (p15-5, ADR 0032): Throughput over running time,
+// skills/reflect/scripts/score.py — a Reflection's scoring script (p15-5, ADR 0032): Throughput over running time,
 // the Guardrails against a baseline, Slot and lane utilisation, load, the binding constraint and the proposals.
 //
 // Hermetic: each case gets its own mkdtemp HOME and THREAD_EVENTS_DIR, an env built from scratch, and that HOME
@@ -16,13 +16,13 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const SCORE = path.join(root, 'skills', 'retro', 'scripts', 'score.py')
+const SCORE = path.join(root, 'skills', 'reflect', 'scripts', 'score.py')
 const RUN_RECORD = path.join(root, 'skills', '_shared', 'scripts', 'run_record.py')
 
 // ---- helpers ----------------------------------------------------------------------------------------------
 
 function tmpHome(t) {
-  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'retro-score-')))
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'reflect-score-')))
   t.after(() => fs.rmSync(home, { recursive: true, force: true }))
   return home
 }
@@ -198,7 +198,7 @@ test('slot-bound: running time leaves out the pause and the hold, and the ceilin
   assert.match(p.evidence, /^Slot-bound: Slots full 71% of 7\.0 running h at ceiling 3; lane 38% busy/)
   assert.ok(p.evidence.length <= 300)
   assert.deepEqual(out.withheld, [])
-  assert.ok(has(out.flags, /no baseline/), 'the first Retro on a repo has no baseline')
+  assert.ok(has(out.flags, /no baseline/), 'the first Reflection on a repo has no baseline')
   signsHold(out)
 })
 
@@ -442,9 +442,9 @@ test('baseline: the latest line ending before this run began, so a set-aside ris
   assert.ok(!has(out.flags, /no baseline/))
 })
 
-test('baseline: a late Retro (its line stamped after the next run began) still serves, on its active span', (t) => {
+test('baseline: a late Reflection (its line stamped after the next run began) still serves, on its active span', (t) => {
   const home = tmpHome(t)
-  // Run B starts Tue 09:00; run A was active until Mon 18:00 and its Retro ran Tue 12:00.
+  // Run B starts Tue 09:00; run A was active until Mon 18:00 and its Reflection ran Tue 12:00.
   const shift = 33 * 3600e3 // Mon 00:00 -> Tue 09:00, the journals' startTime with it
   emitAll(home, 'demo', byTs(saturated(3, { prefix: 'b' }).map(([ts, kind, task, f]) =>
     [new Date(ms(ts) + shift).toISOString(), kind, task, 'startTime' in f ? { ...f, startTime: f.startTime + shift } : f])))
@@ -466,7 +466,7 @@ test('baseline: a partial line only when no complete one qualifies; activeEnd nu
   const settings = writeSettings(home, { parallel_ceiling: 3 })
   const out = scored(home, ['--until', at('06:00'), '--settings', settings])
   assert.equal(out.baseline.id, 't-whole', 'a complete line beats a later partial one')
-  assert.ok(!has(out.flags, /partial Retro/))
+  assert.ok(!has(out.flags, /partial Reflection/))
 
   const home2 = tmpHome(t)
   emitAll(home2, 'demo', byTs(saturated(3)))
@@ -476,7 +476,7 @@ test('baseline: a partial line only when no complete one qualifies; activeEnd nu
   ])
   const out2 = scored(home2, ['--until', at('06:00'), '--settings', writeSettings(home2, { parallel_ceiling: 3 })])
   assert.equal(out2.baseline.id, 't-partial')
-  assert.ok(has(out2.flags, /^baseline: only a partial Retro's line qualifies \(t-partial\)/))
+  assert.ok(has(out2.flags, /^baseline: only a partial Reflection's line qualifies \(t-partial\)/))
 
   const home3 = tmpHome(t)
   emitAll(home3, 'demo', byTs(saturated(3)))
@@ -664,9 +664,9 @@ test('load: an overlapping same-host record counts; another host\'s lines are pa
   assert.notEqual(out.host, 'elsewhere-box')
 })
 
-// demo ran Mon 00:00-02:10; other ran Tue 00:00-05:10; the Retro runs Wed. Load is the overlap with demo's running
+// demo ran Mon 00:00-02:10; other ran Tue 00:00-05:10; the Reflection runs Wed. Load is the overlap with demo's running
 // time, never with the [since, until] window, so a later rollout is no load.
-test('load: a Retro run long after the rollout never counts a later same-host rollout', (t) => {
+test('load: a Reflection run long after the rollout never counts a later same-host rollout', (t) => {
   const home = tmpHome(t)
   emitAll(home, 'demo', byTs(life('a', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] })))
   emitAll(home, 'other', byTs(life('z', { from: D(6, '00:00'), to: D(6, '05:00'), c: 2, lane: [D(6, '05:00'), D(6, '05:10')] })))

@@ -29,11 +29,11 @@ the same place.
 Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl and tuning to
 tunings.jsonl. Both names are RESERVED: refused as a rollout slug and as a carried `from`.
 
-tunings.jsonl holds one line per Retro (skills/retro/scripts/tune.py is its one emitter, score.py its one
+tunings.jsonl holds one line per Reflection (skills/reflect/scripts/tune.py is its one emitter, score.py its one
 reader): the scored window, its seven headline scores and the Tunings Lachy picked (`applied`, most often []).
-- Baseline: the next Retro on that repo (matched ignoring case) compares against the `scores` of the line with
+- Baseline: the next Reflection on that repo (matched ignoring case) compares against the `scores` of the line with
   the latest window.activeEnd at or before its own window.activeStart, preferring a line not marked partial; a
-  line whose activeEnd is null never qualifies. Comparing active spans, not ts or until, keeps a Retro run late
+  line whose activeEnd is null never qualifies. Comparing active spans, not ts or until, keeps a Reflection run late
   (after the next rollout began) a valid baseline for that rollout.
 - Void: when tune.py's config write fails after its line landed, it appends a second line carrying
   `voids: <the first line's id>`, an empty `applied` and the same scores. Readers drop a voided line's
@@ -138,18 +138,18 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   event), resume (a Lost-call or signed-gate resume).
 - set-aside stage is where the task stopped; setAsideAt is where it re-enters (merge-task's exit 1 reads
   stage integrate, setAsideAt run).
-- Idle Slot time is a span. A Retro derives it from slot-taken / slot-freed pairs against the ceiling
+- Idle Slot time is a span. A Reflection derives it from slot-taken / slot-freed pairs against the ceiling
   stamped on each event. An idle-slots event is a reason marker labelling the span it falls in: a change
   of reason splits the span, a repeat is harmless, a span with no marker reads as "unexplained".
   `awaiting-hand-back` also labels a span in which execute's automatic retry (p16-4, ADR 0033) waits out a
   quota or infra cool-down with nothing queued: `next` is stateless and never reads the retry verdict. A
-  Retro tells the two apart by what precedes the slot-taken start=hand-back that ends the span: the task's
+  Reflection tells the two apart by what precedes the slot-taken start=hand-back that ends the span: the task's
   auto-retry event for a cool-down, none for a human's hand-back.
 - call-journal: for each runId, use its latest line with a terminal status (completed, failed, killed,
   stopped, cancelled); with none, use its latest line and treat the call as in flight. The writer folds
   under an exclusive flock on the file and skips a fold when that runId already has a terminal line, or
-  when the fold equals that runId's latest line (ts and host aside). So a mid-run Retro records partial
-  numbers, a close Retro's terminal fold always lands, and re-folding is safe. An unknown status counts
+  when the fold equals that runId's latest line (ts and host aside). So a mid-run Reflection records partial
+  numbers, a close Reflection's terminal fold always lands, and re-folding is safe. An unknown status counts
   as non-terminal: appended and later superseded, never dropped. Write call-journal only through this
   module, so every writer takes part in the lock.
 - review-round: dedupe on (repo, head, digest), keeping the latest line.
@@ -258,7 +258,7 @@ def _settings(v):
 
 SETTINGS = _settings
 
-# ---- the tuning kind (skills/retro/scripts/tune.py) -------------------------------------------------------
+# ---- the tuning kind (skills/reflect/scripts/tune.py) -----------------------------------------------------
 
 UTC_Z_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z\Z", re.ASCII)
 # rollout-settings.py's KEYS (tests/run-record.test.mjs pins that the two agree).

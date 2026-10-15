@@ -17,7 +17,7 @@ of the file format:
     spend_approval_usd = 50      # the standing approval (ADR 0034): a spend gate whose total exposure is at most
                                  # this many US dollars passes without a person; 0 (the built-in) is off
 
-    [guardrails]                 # the Retro's bounds, machine-wide only
+    [guardrails]                 # the Reflection's bounds, machine-wide only
     tokens_per_merge_pct = 25    # tokens per merge may rise at most +25%
     set_aside_rate_points = 5    # set-aside rate may rise at most +5 points
     conflict_rate_points = 10    # conflict rate may rise at most +10 points
@@ -41,7 +41,7 @@ Precedence for each rollout key (the callers apply the first two): task frontmat
 `[repo."<slug>"]` (source `file:repo`) → `[defaults]` (`file:defaults`) → `built-in`. Guardrail sources are
 `file:guardrails` or `built-in`. Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
 max_plan_rounds 3, auto_retries 2, spend_approval_usd 0; guardrails 25 / 5 / 10 / 0. `auto_retries` is no Tuning key:
-schedule does not stamp it and a Retro never proposes it; execute's `lead-integrate.py inputs` and
+schedule does not stamp it and a Reflection never proposes it; execute's `lead-integrate.py inputs` and
 `reconcile-rollout.py auto-retry` resolve it themselves (p16-4). Nor is `spend_approval_usd` (ADR 0034): schedule
 shows it but never stamps it on a rollout, and `reconcile-rollout.py approve-gates --standing` resolves it itself (task
 `spend_approval_usd:`, then rollout, then this file, then the built-in 0, which is off: the approval lives in this
@@ -99,10 +99,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAND_SH = os.path.join(HERE, "land.sh")
 
-# The four Tuning keys (a Retro proposes them; run_record.py's TUNING_KEYS is pinned to this tuple).
+# The four Tuning keys (a Reflection proposes them; run_record.py's TUNING_KEYS is pinned to this tuple).
 KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
 # Every rollout key a table may hold and `settings` reports: the Tuning keys plus execute's automatic-retry budget and
-# the standing approval's limit in US dollars (ADR 0034; neither is Retro-tunable).
+# the standing approval's limit in US dollars (ADR 0034; neither is Reflection-tunable).
 SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd")
 BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, "max_plan_rounds": 3, "auto_retries": 2,
             "spend_approval_usd": 0}

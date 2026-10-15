@@ -202,7 +202,7 @@ Leave it unset when the verifier works in a bare checkout — the worktree setup
 
 ### 2.8. Resolve the rollout settings
 
-The rollout's four numeric defaults (`parallel_ceiling`, `max_review_rounds`, `max_iterations`, `max_plan_rounds`) are the operator's, not this skill's: they live in `~/.config/thread/rollouts.toml` (ADR 0032; a Retro proposes changes to it), beside ADR 0029's `ladder.toml`. Resolve them once, here, before step 4.5's first vault write:
+The rollout's four numeric defaults (`parallel_ceiling`, `max_review_rounds`, `max_iterations`, `max_plan_rounds`) are the operator's, not this skill's: they live in `~/.config/thread/rollouts.toml` (ADR 0032; a Reflection proposes changes to it), beside ADR 0029's `ladder.toml`. Resolve them once, here, before step 4.5's first vault write:
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py --repo <§ 0's resolved repo path>
