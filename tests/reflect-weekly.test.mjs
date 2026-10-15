@@ -667,6 +667,101 @@ test('knobs: a check() refusal writes nothing (exit 2)', (t) => {
   assert.deepEqual(rlines(h), [])
 })
 
+// ---- knobs end to end: a real span's land[], held[] and revert[] ------------------------------------------------------------
+
+const TUNE = path.join(root, 'skills', 'reflect', 'scripts', 'tune.py')
+const KSINCE = '2026-10-09T00:00+11:00'
+const KUNTIL = '2026-10-15T12:00+11:00'
+
+// c tasks all in their Slots from 00:00 on 2026-10-<day>, at ceiling c: Slot-bound, so score.py proposes a ceiling raise.
+function saturated(prefix, day, c) {
+  const V = (hm) => `2026-10-${day}T${hm}:00Z`
+  const out = []
+  for (let i = 0; i < c; i++) out.push(...life(`${prefix}${i + 1}`, V('00:00'), V(`04:${i}0`), { c, lane: [V(`04:${i}0`), V(`04:${i}5`)] }))
+  return byTs(out)
+}
+
+// A closed earlier Reflection whose knob line names one other rollout (the Agreement rule counts each).
+function agreeingReflection(h, rid, kid, rollout, ts) {
+  const L = (o) => JSON.stringify({ v: 1, ts, host: 'h', rollout: null, task: null, ...o })
+  fs.appendFileSync(reflectionsFile(h), `${L({ kind: 'proposal', id: kid, altitude: 'knob', reflection: rid, rollouts: [rollout], repo: 'o/r', key: 'parallel_ceiling',
+    rule: 'slot-bound-raise', direction: 1, landed: false, held: 'agreement 1 of 3' })}\n${L({ kind: 'reflection', id: rid })}\n`)
+}
+
+function tune(h, args) {
+  return spawnSync('python3', ['-B', TUNE, ...args], { encoding: 'utf8', cwd: h.home, env: env(h) })
+}
+
+test('knobs end to end: two agreeing earlier Reflections make the newest rollout\'s raise a land item, an older one held; tune.py --auto lands it, knobs records it, close counts it', (t) => {
+  const h = setup(t)
+  const config = path.join(h.home, 'rollouts.toml')
+  fs.writeFileSync(config, '[defaults]\nparallel_ceiling = 3\n')
+  const [kid] = ids(h, [['k', 'o/r', 'parallel_ceiling', 'slot-bound-raise', 1]])
+  agreeingReflection(h, RID(1), kid, 'old-1', '2026-10-01T00:00:00.000Z')
+  agreeingReflection(h, RID(2), kid, 'old-2', '2026-10-02T00:00:00.000Z')
+  emitAll(h, 'week-a', saturated('a', 10, 3))
+  emitAll(h, 'week-b', saturated('b', 12, 3))
+  rolloutNote(h, 'week-a')
+  rolloutNote(h, 'week-b')
+  const s = span(h, [], { since: KSINCE, until: KUNTIL }) // span's --config is <home>/rollouts.toml
+  assert.deepEqual(s.knobs.land.map((k) => [k.id, k.rollout, k.key, k.from, k.to, k.agreed]), [[kid, 'week-b', 'parallel_ceiling', 3, 4, 3]], JSON.stringify(s.knobs))
+  assert.deepEqual(s.knobs.held.map((k) => [k.id, k.rollout, k.reason]), [[kid, 'week-a', 'not the repo\'s newest rollout ([[week-b]] is)']])
+  assert.deepEqual(s.knobs.revert, [])
+  const out = path.join(h.out, 'span.json')
+  const early = reflect(h, ['close', '--span', out])
+  assert.equal(early.status, 2)
+  assert.match(early.stderr, new RegExp(`knob ${kid} has no knob proposal line: run knobs\\n$`))
+  const scores = [...new Set(s.knobs.land.map((k) => k.scores))]
+  assert.equal(scores.length, 1)
+  const r = tune(h, ['--scores', scores[0], '--auto', '--repo', s.knobs.land[0].root, '--reflection', s.reflection, '--config', config])
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /^applied parallel_ceiling 3 → 4 for o\/r: /m)
+  const [tl] = fs.readFileSync(tuningsFile(h), 'utf8').trim().split('\n').map(parse)
+  assert.deepEqual([tl.auto, tl.reflection, tl.rollout, tl.applied[0].agreed], [true, s.reflection, 'week-b', 3])
+  ok(h, ['knobs', '--span', out])
+  const k = rlines(h).filter((l) => l.kind === 'proposal' && l.reflection === s.reflection)
+  assert.deepEqual(k.map((l) => [l.id, l.rollouts, l.landed, l.auto, l.tuning]), [[kid, ['week-a', 'week-b'], true, true, tl.id]])
+  ok(h, ['close', '--span', out])
+  const c = rlines(h).at(-1)
+  assert.deepEqual([c.kind, c.counts.knobs, c.counts.landed, c.counts.reverted], ['reflection', 1, 1, 0])
+})
+
+test('knobs end to end: an auto line a later finished run breaches at its to is a revert item, and the raise on its key is held behind it; --revert, knobs and close record it', (t) => {
+  const h = setup(t)
+  const config = path.join(h.home, 'rollouts.toml')
+  fs.writeFileSync(config, '[defaults]\nparallel_ceiling = 4\n')
+  const [kid] = ids(h, [['k', 'o/r', 'parallel_ceiling', 'slot-bound-raise', 1]])
+  // RID(1)'s auto line moved the ceiling 3 -> 4; two later Reflections agree on raising it again
+  fs.writeFileSync(tuningsFile(h), `${JSON.stringify({ v: 2, ts: '2026-10-08T00:00:00.000Z', host: 'h', rollout: 'old-1', task: null, kind: 'tuning', id: 't-auto', repo: 'o/r',
+    window: { since: '2026-10-07T00:00:00.000Z', until: '2026-10-08T00:00:00.000Z' }, scores: {}, auto: true, reflection: RID(1),
+    applied: [{ key: 'parallel_ceiling', from: 3, to: 4, ranAt: 3, rule: 'slot-bound-raise', evidence: 'e', agreeing: 0, agreed: 3 }] })}\n`)
+  agreeingReflection(h, RID(2), kid, 'old-2', '2026-10-08T06:00:00.000Z')
+  agreeingReflection(h, RID(3), kid, 'old-3', '2026-10-08T07:00:00.000Z')
+  // rev-x ran at 4 and stalled on quota (a risk of slot-bound-raise); rev-y ran at 4, Slot-bound, clean
+  emitAll(h, 'rev-x', byTs([...life('x1', '2026-10-10T00:00:00Z', '2026-10-10T01:00:00Z', { c: 4, lane: ['2026-10-10T01:00:00Z', '2026-10-10T01:10:00Z'] }),
+    ['2026-10-10T00:30:00Z', 'quota-stall', null, { stage: 'implement' }]]))
+  emitAll(h, 'rev-y', saturated('y', 12, 4))
+  rolloutNote(h, 'rev-x')
+  rolloutNote(h, 'rev-y')
+  const s = span(h, [], { since: KSINCE, until: KUNTIL }) // span's --config is <home>/rollouts.toml
+  assert.deepEqual(s.knobs.revert.map((k) => [k.tuning, k.key, k.rollout, k.breached]), [['t-auto', 'parallel_ceiling', 'rev-x', ['quotaStalls']]], JSON.stringify(s.knobs))
+  assert.deepEqual(s.knobs.land, [])
+  const held = s.knobs.held.find((k) => k.id === kid && k.rollout === 'rev-y')
+  assert.equal(held.reason, 'a revert of parallel_ceiling comes first this Reflection')
+  assert.equal(held.agreed, 3, 'the raise passed tune.py\'s own checks')
+  const rv = s.knobs.revert[0]
+  const r = tune(h, ['--scores', rv.scores, '--revert', rv.tuning, '--repo', rv.root, '--reflection', s.reflection, '--config', config])
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /^applied parallel_ceiling 4 → 3 for o\/r: /m)
+  const out = path.join(h.out, 'span.json')
+  ok(h, ['knobs', '--span', out])
+  const mine = rlines(h).filter((l) => l.kind === 'proposal' && l.reflection === s.reflection)
+  assert.equal(mine.find((l) => l.id === kid).held, 'a revert of parallel_ceiling comes first this Reflection')
+  assert.deepEqual(mine.filter((l) => l.reverts).map((l) => [l.reverts, l.key, l.direction, l.landed]), [['t-auto', 'parallel_ceiling', -1, true]])
+  ok(h, ['close', '--span', out])
+  assert.equal(rlines(h).at(-1).counts.reverted, 1)
+})
+
 // ---- decide ----------------------------------------------------------------------------------------------------------------
 
 function twoWatches(h, rid, sp) {
