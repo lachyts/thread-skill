@@ -18,7 +18,7 @@ measured none of this. Throughput, its one headline, matters little once a run f
 overnight. And the `review-round` event that would show the review waste is specified but not
 emitted (p15-7 is open; `reviews.jsonl` does not exist).
 
-He also wants Thread's loop and Chorus's `/reflect` (ADR 0043 in the Chorus repo) to be uniform,
+He also wants Thread's loop and Chorus's `/reflect` (Chorus ADR 0043) to be uniform,
 and both of them automatic.
 
 ## Decision
