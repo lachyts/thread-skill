@@ -504,8 +504,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   round's word).
 - **Review churn** — review rounds whose findings only answer the previous
   round's fix rather than the original work, in the engine's review loop and
-  in `/fresh-review` alike. A Guardrail every Reflection reports. _Avoid_: review
-  waste, ping-pong.
+  in `/fresh-review` alike. A Guardrail every Reflection reports. Measured as
+  regression findings over all findings, by the review ledger's blame split,
+  reported beside rounds per landed task (master-review rounds; Integration
+  re-reviews not counted). _Avoid_: review waste, ping-pong.
 - **Guardrail** — a measure a Tuning must not worsen past its bound to buy
   either headline: Throughput, tokens per merge, set-aside rate, conflict
   rate, quota stalls, Review churn.
