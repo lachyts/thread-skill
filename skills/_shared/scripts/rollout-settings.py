@@ -23,7 +23,8 @@ of the file format:
     conflict_rate_points = 10    # conflict rate may rise at most +10 points
     quota_stalls = 0             # more than this many quota stalls breaches (0 = any stall)
     hours_per_task = 1.5         # Throughput (p21-2, ADR 0037 d1): running hours may not exceed this many per task
-                                 # whose Slot overlaps the scored window, so an overnight run still lands by morning
+                                 # whose Slot or lane holding overlaps the scored window, so an overnight run still
+                                 # lands by morning
 
     [repo."lachyts/thread-skill"] # one repo, keyed by its GitHub origin's owner/name
     parallel_ceiling = 5

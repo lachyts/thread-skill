@@ -82,8 +82,10 @@ in use at or above the ceiling in force. Idle Slot time is labelled by its idle-
 marker labels its idle span from the start, a change of reason splits it), else "unexplained". Lane: busy share, Integrations (lane holdings started in
 the window) and each ready -> lane-taken wait. Guardrails: Throughput first (ADR 0037 d1: no longer a headline,
 bounded so an overnight run still finishes by morning): breached when running time exceeds `[guardrails]
-hours_per_task` (built-in 1.5, a heuristic) times the tasks whose Slot overlaps [since, until] (at least 1),
-compared in ms and strictly greater, so a run exactly at its allowance is inside it; never with zero running time;
+hours_per_task` (built-in 1.5, a heuristic) times the tasks whose Slot or lane holding overlaps [since, until] (at
+least 1: running time counts lane-only stretches, so a task that only integrates in the window, a supersede's carried
+task or the far side of a --since split, earns its allowance too), compared in ms and strictly greater, so a run
+exactly at its allowance is inside it; never with zero running time;
 a breach on a partial window is flagged ("the run's tail has not landed"). Then tokens per merge (the tokens of
 every call journal, its latest terminal line else its latest, so a call still running counts what it has spent,
 whose call started in the window by its startTime, else its run-bound; integrate calls included; over merges),
@@ -118,6 +120,8 @@ proposed. Each rule's effect is a declared heuristic, RULE_EFFECTS (this header 
                         conflictRate, quotaStalls, reviewChurn
   plan-rejected-raise   serves handsOffRate; risks quality, throughput, tokensPerMerge, setAsideRate,
                         conflictRate, quotaStalls
+A rule missing from RULE_EFFECTS fails closed (UNDECLARED_EFFECT): it serves nothing and risks every Guardrail, so
+any breach withholds its raise.
 weigh(rule, measured) gives every proposal and withheld entry `serves`, `risks` and `trade`: {gains: the headlines
 it serves, costs: the headlines it risks and does not serve}, only when both lists are non-empty and every headline
 in them is scored (non-null); else null. Quality is null until p21-4, so no trade fires yet. Once p21-4 scores it,
@@ -193,12 +197,16 @@ ACT_NAMES = ("answer", "signOff", "retry", "mergeHold", "raceDecided")
 # The two headlines (ADR 0037 d1) and each proposal rule's declared effect: (serves, risks). A heuristic (the header).
 HEADLINES = ("handsOffRate", "quality")
 OLD_GUARDRAILS = ("tokensPerMerge", "setAsideRate", "conflictRate", "quotaStalls")
+GUARDRAILS = ("throughput",) + OLD_GUARDRAILS + ("reviewChurn",)  # guardrails()' keys, in its order
 RULE_EFFECTS = {
     "slot-bound-raise": (("throughput",), OLD_GUARDRAILS),
     "quota-bound-lower": (("quotaStalls",), ("throughput",)),
     "review-rounds-raise": (("handsOffRate",), ("quality", "throughput") + OLD_GUARDRAILS + ("reviewChurn",)),
     "plan-rejected-raise": (("handsOffRate",), ("quality", "throughput") + OLD_GUARDRAILS),
 }
+# A rule missing from RULE_EFFECTS fails closed: it serves nothing and risks every Guardrail, so any breach withholds
+# its raise, as every breach withheld every raise before p21-2 weighed effects, instead of none.
+UNDECLARED_EFFECT = ((), GUARDRAILS)
 HOLD_WHY = {"merge": "a merge hold with no Slot open (a --gated or exit-7 hold: a wait on Lachy)",
             "race": "a RACE hold with no Slot open (an undecided RACE or its re-verify: a wait on Lachy)",
             "git-env": "a git-env hold with no Slot open (an unacked canary trip: a wait on Lachy)"}
@@ -327,8 +335,9 @@ def _sign(x):
 def weigh(rule, measured):
     """A rule's declared effect (RULE_EFFECTS) and its trade: {serves, risks, trade}. trade is {gains: the headlines it
     serves, costs: the headlines it risks and does not serve} only when both are non-empty and every one of them is
-    scored in `measured` ({headline: value or None}); else None. Pure."""
-    serves, risks = RULE_EFFECTS.get(rule, ((), ()))
+    scored in `measured` ({headline: value or None}); else None. A rule RULE_EFFECTS does not declare is
+    UNDECLARED_EFFECT (fail closed). Pure."""
+    serves, risks = RULE_EFFECTS.get(rule, UNDECLARED_EFFECT)
     gains = [h for h in serves if h in HEADLINES]
     costs = [h for h in risks if h in HEADLINES and h not in serves]
     trade = None
@@ -1094,11 +1103,13 @@ class Score:
         t_breach = None
         if tpm is not None and isinstance(tbase, (int, float)) and not isinstance(tbase, bool) and tbase > 0:
             t_breach = tpm > tbase * (1 + bounds["tokens_per_merge_pct"] / 100.0)
-        # Throughput's absolute bound: hours_per_task running hours for each task whose Slot overlaps the window.
-        # Compared in ms and strictly greater: a run exactly at its allowance is inside it (the (i) round-cap
-        # fixtures in tests/reflect-score.test.mjs sit on the bound and rely on this), and zero running time never
-        # breaches.
-        tasks = len({s["task"] for s in self.slots if s["start"] <= until and (s["end"] is None or s["end"] >= since)})
+        # Throughput's absolute bound: hours_per_task running hours for each task whose Slot or lane holding overlaps
+        # the window. Running time counts lane-only stretches too, so a task that only integrates in the window (a
+        # supersede's carried awaiting-integration task, which holds no Slot here, or the far side of a --since split)
+        # earns its allowance like one that ran. The bound is an allowance: compared in ms and strictly greater, so a
+        # run exactly at its allowance is inside it, and zero running time never breaches.
+        tasks = len({x["task"] for x in self.slots + self.holdings
+                     if x["start"] <= until and (x["end"] is None or x["end"] >= since)})
         hpt = bounds["hours_per_task"]
         allowance = hpt * HOUR * max(tasks, 1)
         t_over = self.run_ms > allowance

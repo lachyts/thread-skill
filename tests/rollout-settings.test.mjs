@@ -26,7 +26,8 @@ const SCRIPT = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings
 const KEYS = ['parallel_ceiling', 'max_review_rounds', 'max_iterations', 'max_plan_rounds']
 const SETTING_KEYS = [...KEYS, 'auto_retries', 'spend_approval_usd']
 const MINIMUM = { parallel_ceiling: 1, max_review_rounds: 1, max_iterations: 1, max_plan_rounds: 1, auto_retries: 0, spend_approval_usd: 0 }
-// hours_per_task (p21-2): the Throughput Guardrail's bound, running hours per task whose Slot overlaps the window.
+// hours_per_task (p21-2): the Throughput Guardrail's bound, running hours per task whose Slot or lane holding overlaps
+// the window.
 const GUARDRAIL_KEYS = ['tokens_per_merge_pct', 'set_aside_rate_points', 'conflict_rate_points', 'quota_stalls', 'hours_per_task']
 const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, auto_retries: 2, spend_approval_usd: 0 }
 const GUARDRAILS_BUILT_IN = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0, hours_per_task: 1.5 }
