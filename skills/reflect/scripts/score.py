@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""score.py — score one rollout's Run record for a Retro (p15-5, ADR 0032). Reads only; writes nothing.
+"""score.py — score one rollout's Run record for a Reflection (p15-5, ADR 0032). Reads only; writes nothing.
 
-python >= 3.8, stdlib only. Called by skills/retro/SKILL.md (step 4) as:
+python >= 3.8, stdlib only. Called by skills/reflect/SKILL.md (step 4) as:
 
-    python3 ${CLAUDE_PLUGIN_ROOT}/skills/retro/scripts/score.py --rollout <slug|[[slug]]|note path> \\
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/score.py --rollout <slug|[[slug]]|note path> \\
         [--note <rollout note>] [--since TS] [--until TS] [--settings <rollout-settings JSON file|->] \\
         [--repo-slug owner/name] [--out F]
 
 Reads: the rollout's record `<events dir>/<slug>.jsonl` (run_record.py's directory chain), every other
 `<slug>.jsonl` there for load (reviews.jsonl and tunings.jsonl are never read as rollouts; only lines from the
 scored record's host count, and only where a record's live span overlaps this run's running time, not the window, so
-a Retro run long after the rollout never counts a later rollout; the live span runs to its last line or, while a
+a Reflection run long after the rollout never counts a later rollout; the live span runs to its last line or, while a
 Slot it took is open, to --until, flagged, so a busy rollout whose long calls write nothing still counts), tunings.jsonl for the baseline, earlier
 Tunings and their agreement, and the rollout note's frontmatter (parallel_ceiling, max_review_rounds,
 max_iterations, max_plan_rounds, captured) through reconcile-rollout.py's Note, for the cause labels only. --settings is rollout-settings.py's JSON for
@@ -19,8 +19,8 @@ mtime feeds the cause labels.
 
 Times. --since and --until take Z or an offset (run_record's `_stamp` rule; a naive stamp is refused) and
 everything printed is UTC `Z`. --since defaults to the record's first slot-taken, else its first line;
---until to now (the Retro's moment). Lines after --until are not read, except `call-journal` lines: fold-journals
-stamps them with the fold time (completion, or the Retro's start), so each is read whatever its ts, and its call's
+--until to now (the Reflection's moment). Lines after --until are not read, except `call-journal` lines: fold-journals
+stamps them with the fold time (completion, or the Reflection's start), so each is read whatever its ts, and its call's
 startTime + durationMs is clamped to --until (a call still running at --until is read as running then). With no
 line the score is empty and flagged "no record".
 
@@ -118,7 +118,7 @@ RECONCILE_PY = os.path.join(SKILLS, "execute", "scripts", "reconcile-rollout.py"
 
 HOUR = 3600 * 1000
 MINUTE = 60 * 1000
-# The named thresholds (heuristics: ADR 0032 leaves them to the first Retros).
+# The named thresholds (heuristics: ADR 0032 leaves them to the first Reflections).
 GRACE = 30 * MINUTE              # a call's end (or last activity) + this is its Slot's latest effective end
 LANE_ONLY_CAP = 2 * HOUR         # a lane-only stretch (no Slot, no hold) counts as running for at most this
 SLOT_BOUND_FULL = 0.5            # Slots full this share of running time -> slot-bound
@@ -283,7 +283,7 @@ class Score:
         for t, _n, d in lines:
             kind, task = d.get("kind"), d.get("task")
             if kind == "call-journal" and isinstance(d.get("runId"), str):
-                # read whatever its ts: fold-journals stamps the fold time (completion, or the Retro's start), not
+                # read whatever its ts: fold-journals stamps the fold time (completion, or the Reflection's start), not
                 # the call's; the call's own startTime and durationMs are clamped to --until in slot_ends
                 prev = self.journals.get(d["runId"])
                 if prev is None or prev.get("status") not in RR.TERMINAL_STATUSES or \
@@ -720,7 +720,7 @@ class Score:
         if pick is None:
             return None
         if pick[2]:
-            self.flag("baseline: only a partial Retro's line qualifies (%s); read it with care" % pick[3].get("id"))
+            self.flag("baseline: only a partial Reflection's line qualifies (%s); read it with care" % pick[3].get("id"))
         return {"id": pick[3].get("id"), "activeEnd": fmt(pick[0]), "partial": pick[2], "scores": pick[3]["scores"]}
 
     # ---- the whole score -----------------------------------------------------------------------------------------
@@ -798,7 +798,7 @@ class Score:
                     "setAsideRate": sa_rate, "conflictRate": conflict, "quotaStalls": stalls}
         base_line = self.baseline(repo, act_start)
         if base_line is None and repo is not None:
-            self.flag("no baseline: no earlier Retro on %s ended before this run began; only quota stalls can "
+            self.flag("no baseline: no earlier Reflection on %s ended before this run began; only quota stalls can "
                       "withhold a raise" % repo)
         guard = self.guardrails(headline, base_line, settings)
         out.update({
@@ -1083,7 +1083,7 @@ class Score:
 
     def load(self, base, slug, host, since, until):
         """Each other same-host record whose live span overlaps this run's running time (run_iv), never merely the
-        window: a Retro run long after the rollout must not count later rollouts as load. The live span runs from its
+        window: a Reflection run long after the rollout must not count later rollouts as load. The live span runs from its
         first line to its last line or, while a Slot it took has no slot-freed (nor a `carried` out), to --until: a
         rollout whose calls run long writes nothing while they run, so its last line can precede this run although
         its Slots are busy throughout. Bounding an open Slot by the window keeps a long-dead record with a lost
@@ -1148,7 +1148,7 @@ class Parser(argparse.ArgumentParser):
 
 
 def main(argv):
-    p = Parser(prog="score.py", description="Score one rollout's Run record for a Retro (writes nothing).")
+    p = Parser(prog="score.py", description="Score one rollout's Run record for a Reflection (writes nothing).")
     p.add_argument("--rollout", required=True)
     p.add_argument("--note")
     p.add_argument("--since")

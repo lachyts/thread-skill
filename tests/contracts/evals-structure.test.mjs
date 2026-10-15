@@ -37,6 +37,10 @@ const HOME_MARKERS = ['/Users/', '/home/', '~/', 'repos/obsidian', 'repos/worksp
 const NUMERIC_LIKE = [/^[-+]?(\d|\.\d)/, /^[-+]?\.(inf|nan)$/i]
 const KEYWORDS = /^(true|false|null|~|yes|no|on|off|y|n)$/i
 const looksNumeric = (s) => NUMERIC_LIKE.some((re) => re.test(s))
+// Skill names another installed skill also answers to bare: `reflect` is Chorus's user-level skill too
+// (`/reflect`, the Reflection over the Companion's record), so a bare {"skill":"reflect"} call is Chorus's and
+// never ours. A grader on one of these names must match the thread: form only.
+const SHARED_NAMES = new Set(['reflect'])
 
 // ---------------------------------------------------------------------------------------------------
 // Frontmatter reader
@@ -282,7 +286,10 @@ function checkSkillGrader(file, g, skills, errors) {
     .filter((h) => h.ns || h.bare)
   if (hits.length === 0) err(file, 'f', 'input_match matches no skill under skills/')
   else if (hits.length > 1) err(file, 'f', `input_match is ambiguous: it matches ${hits.map((h) => h.d).join(', ')}`)
-  else if (!hits[0].ns || !hits[0].bare) err(file, 'f', `input_match matches only one of thread:${hits[0].d} and ${hits[0].d}`)
+  else if (SHARED_NAMES.has(hits[0].d)) {
+    const d = hits[0].d
+    if (!hits[0].ns || hits[0].bare) err(file, 'f', `input_match for ${d} must match thread:${d} only (a bare ${d} is another skill's)`)
+  } else if (!hits[0].ns || !hits[0].bare) err(file, 'f', `input_match matches only one of thread:${hits[0].d} and ${hits[0].d}`)
 }
 
 function checkPaths(files, errors) {
@@ -687,6 +694,21 @@ test('negative control: each known-bad change gives its own named error', () => 
     assert.ok(errors.some((e) => e.startsWith(`${file}: `)), `${name}: no error names ${file}: ${errors.join(' | ')}`)
     for (const k of keywords) assert.ok(errors.some((e) => e.includes(k)), `${name}: no error mentions ${k}: ${errors.join(' | ')}`)
   }
+})
+
+test('a shared skill name (reflect) is graded on thread:reflect only', () => {
+  const skills = [...SKILLS, 'reflect'].sort()
+  const nsOnly = (name, extra = '') => `---\ntype: tool_used\ntool: Skill\ninput_match: '"skill"\\s*:\\s*"thread:${name}"'\n${extra}arm: both\n---\n`
+  const G = `${C}/graders/reflects.md`
+  assert.deepEqual(validateSuite({ ...cleanSuite(), [G]: nsOnly('reflect') }, skills), [], 'a thread:reflect-only grader')
+  assert.deepEqual(validateSuite({ ...cleanSuite(), [G]: nsOnly('reflect', 'min: 0\nmax: 0\n') }, skills), [], 'a thread:reflect-only negative grader')
+  const both = validateSuite({ ...cleanSuite(), [G]: skillGrader('reflect') }, skills)
+  assert.ok(both.length > 0, 'a both-forms reflect grader: expected errors, got none')
+  for (const e of both) assert.ok(e.startsWith(`${G}: (f) `) && e.includes('thread:reflect only'), `expected only (f) thread:reflect only errors, got: ${e}`)
+  // every other name keeps the both-forms rule
+  assert.deepEqual(validateSuite(cleanSuite(), skills), [], 'skillGrader(open) still passes')
+  const one = validateSuite({ ...cleanSuite(), [`${C}/graders/routes.md`]: nsOnly('open') }, skills)
+  assert.ok(one.length > 0 && one.every((e) => e.includes(' (f) ') && e.includes('matches only one of')), `a thread:open-only grader: ${one.join(' | ')}`)
 })
 
 test('a missing evals/ is one named error, not a thrown load', () => {

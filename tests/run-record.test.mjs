@@ -383,7 +383,7 @@ test('review-round lands in reviews.jsonl with rollout and task null', (t) => {
   assert.equal(l.kind, 'review-round')
 })
 
-// ---- the tuning kind (skills/retro/scripts/tune.py's one line per Retro) ---------------------------------------
+// ---- the tuning kind (skills/reflect/scripts/tune.py's one line per Reflection) --------------------------------
 
 const WINDOW = { since: '2026-10-04T00:00:00.000Z', until: '2026-10-04T10:00:00.000Z', activeStart: '2026-10-04T00:00:00.000Z', activeEnd: '2026-10-04T09:00:00.000Z', partial: false }
 const SCORES = { throughput: 0.667, runningHours: 9, merges: 6, tokensPerMerge: 125000, setAsideRate: 0.1, conflictRate: null, quotaStalls: 0 }

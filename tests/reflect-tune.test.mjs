@@ -1,5 +1,5 @@
-// skills/retro/scripts/tune.py — the only writer of rollouts.toml and tunings.jsonl (p15-5, ADR 0032): it edits
-// only the picked keys, records one `tuning` line per Retro, and writes nothing when anything is refused.
+// skills/reflect/scripts/tune.py — the only writer of rollouts.toml and tunings.jsonl (p15-5, ADR 0032): it edits
+// only the picked keys, records one `tuning` line per Reflection, and writes nothing when anything is refused.
 //
 // Hermetic: each case gets its own mkdtemp HOME (so rollouts.toml is <HOME>/.config/thread/rollouts.toml), its own
 // THREAD_EVENTS_DIR, an env built from scratch with that HOME as cwd, and a temp git repo whose origin is
@@ -14,8 +14,8 @@ import { spawnSync, execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const TUNE = path.join(root, 'skills', 'retro', 'scripts', 'tune.py')
-const SCORE = path.join(root, 'skills', 'retro', 'scripts', 'score.py')
+const TUNE = path.join(root, 'skills', 'reflect', 'scripts', 'tune.py')
+const SCORE = path.join(root, 'skills', 'reflect', 'scripts', 'score.py')
 const SETTINGS = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings.py')
 const RUN_RECORD = path.join(root, 'skills', '_shared', 'scripts', 'run_record.py')
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
@@ -24,7 +24,7 @@ const TAKES_EFFECT = 'takes effect at the next /thread:schedule (or --regenerate
 // ---- helpers ----------------------------------------------------------------------------------------------
 
 function tmpHome(t) {
-  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'retro-tune-')))
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'reflect-tune-')))
   t.after(() => fs.rmSync(home, { recursive: true, force: true }))
   return home
 }
@@ -261,7 +261,7 @@ test('an unwritable events dir: exit 1, the config untouched (an absent one stay
     const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo], { extra: { THREAD_EVENTS_DIR: path.join(home, 'afile', 'events') } })
     assert.equal(r.status, 1, r.stderr)
     assert.match(r.stderr, /run_record: warning: cannot write/)
-    assert.match(r.stderr, /^tune: nothing applied: the Retro's line could not be written/m)
+    assert.match(r.stderr, /^tune: nothing applied: the Reflection's line could not be written/m)
     if (text === null) assert.ok(!fs.existsSync(path.join(home, '.config')), 'the created directory is removed again')
     else {
       assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), text)

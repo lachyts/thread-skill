@@ -537,7 +537,7 @@ mkro i8 "parallel_ceiling: 2"; mkt d1 i8 done
 ok "$(idle i8 --running "")" "-" "none at halt complete"
 
 echo "== 21b. a stop on a question (p16-3) -> reasonClass needs-human, never plan-rejected or review-rounds"
-# The Retro raises a round cap on 2+ review-rounds or plan-rejected set-asides, which can never answer a question.
+# The Reflection raises a round cap on 2+ review-rounds or plan-rejected set-asides, which can never answer a question.
 # Side rollout nh; each row is a task-call row reconciled from in_progress. A gate stop still reads gate.
 mkro nh "parallel_ceiling: 5" "max_review_rounds: 4" "max_iterations: 3" "max_plan_rounds: 3"
 nh() {  # nh <slug> <row json>: start the slug on nh, reconcile the row; prints the set-aside's [stage, reasonClass, setAsideAt]

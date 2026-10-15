@@ -194,7 +194,7 @@ Subcommands:
               prints nothing. Each line is the argument list for `reconcile-project.py <line> --kinds
               phase --apply`, so only phases this rollout touched are ever closed.
 
-  fold-journals  For execute's completion ceremony and every Retro (p15-3, ADR 0032): `--rollout <note path |
+  fold-journals  For execute's completion ceremony and every Reflection (p15-3, ADR 0032): `--rollout <note path |
               [[slug]] | slug> [--dry-run]`. Resolves the slug with run_record.normalise_slug and never opens
               the note, so a superseded, dropped or archived rollout folds the same way. Reads the rollout's
               Run record: each `run-bound` runId (the last line for a runId wins its journalDir and call) is
@@ -443,7 +443,7 @@ integrate call's reconciled `integrated` row and the merge; a hand-back restamps
   hand-back         the Integration arm records ready pr=; the run arm stamps `handed_back:`.
   auto-retry        hand-back's own events (the Integration arm's ready pr=), then auto-retry {stage, setAsideAt,
                     retryClass, used, budget, fingerprint, reviewRounds?, quotaRetries?} (p16-4): stage is the
-                    task's latest set-aside line's in the record (exact pairing for a Retro), else the stage table
+                    task's latest set-aside line's in the record (exact pairing for a Reflection), else the stage table
                     below over the note (_retry_stage); setAsideAt run | integration; retryClass agent | infra |
                     quota; used is auto_retries_used after the retry (a quota retry leaves it); budget the resolved
                     auto_retries; reviewRounds the raised max_review_rounds; quotaRetries quota_retries_used after a
@@ -477,7 +477,7 @@ integration kind); merge-task (a reason starting `merge-task`, and exit 4's `bas
 Integration`); declined; prepare (any other lead integration reason); revise-stopped; transient (the engine's
 TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
 string, never the note's `## Needs you`, so an integrate or lead row, which carries null, never reads it; a
-question is no round run out, so it must not reach plan-rejected or review-rounds, the classes the Retro raises
+question is no round run out, so it must not reach plan-rejected or review-rounds, the classes the Reflection raises
 a round cap on); then by status: plan-rejected, review-rounds, approved-without-pr (review with no PR),
 integration-set-aside (an integrate row's set-aside), else blocked.
 idle-slots reason, first match ("queued" is queued and not starting this call): gitEnvHold -> hold-git-env;
@@ -3453,7 +3453,7 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, ask
     if note_status == GATE_PENDING_STATUS:
         return "gate"
     # p16-3: a stop on a question is not a plan or review round run out; another round can never answer it, so it
-    # must not read as plan-rejected or review-rounds (the Retro raises a round cap on those). A gate stop wins.
+    # must not read as plan-rejected or review-rounds (the Reflection raises a round cap on those). A gate stop wins.
     if asked:
         return "needs-human"
     if note_status == "plan-blocked":
@@ -4405,7 +4405,7 @@ def _retry_budget(note, rollout_note) -> dict:
 
 def _retry_stage(rollout, slug, note) -> str:
     """The stage an automatic retry re-enters (the `auto-retry` event's `stage`): the task's latest `set-aside` line in
-    the Run record (exact pairing for a Retro), else the module docstring's stage table over arguments rebuilt from
+    the Run record (exact pairing for a Reflection), else the module docstring's stage table over arguments rebuilt from
     the note (_note_reason's kind as the lead kind; failed: a `workflow call failed:` reason; prior `review` for a
     `merge-task` reason; an integrate row when the note is review-blocked and its current Integration log line reads
     `rejected`)."""
