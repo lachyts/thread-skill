@@ -26,9 +26,10 @@ const SCRIPT = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings
 const KEYS = ['parallel_ceiling', 'max_review_rounds', 'max_iterations', 'max_plan_rounds']
 const SETTING_KEYS = [...KEYS, 'auto_retries', 'spend_approval_usd']
 const MINIMUM = { parallel_ceiling: 1, max_review_rounds: 1, max_iterations: 1, max_plan_rounds: 1, auto_retries: 0, spend_approval_usd: 0 }
-const GUARDRAIL_KEYS = ['tokens_per_merge_pct', 'set_aside_rate_points', 'conflict_rate_points', 'quota_stalls']
+// hours_per_task (p21-2): the Throughput Guardrail's bound, running hours per task whose Slot overlaps the window.
+const GUARDRAIL_KEYS = ['tokens_per_merge_pct', 'set_aside_rate_points', 'conflict_rate_points', 'quota_stalls', 'hours_per_task']
 const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, auto_retries: 2, spend_approval_usd: 0 }
-const GUARDRAILS_BUILT_IN = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0 }
+const GUARDRAILS_BUILT_IN = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0, hours_per_task: 1.5 }
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 
 // ---- helpers ------------------------------------------------------------------------------------------
@@ -247,6 +248,10 @@ const REFUSALS = [
   ['a fractional quota_stalls', ['[guardrails]', 'quota_stalls = 1.5'], 2, /quota_stalls must be an integer >= 0/],
   ['a guardrail in a repo table (guardrails are machine-wide)', ['[repo."o/r"]', 'quota_stalls = 1'], 2, /unknown key "quota_stalls"/],
   ['an unknown guardrail', ['[guardrails]', 'tokens_pct = 3'], 2, /\[guardrails\]: unknown key "tokens_pct"/],
+  ['hours_per_task = 0 (a run allowed no running time)', ['[guardrails]', 'hours_per_task = 0'], 2, /\[guardrails\] hours_per_task must be a number > 0, got 0/],
+  ['hours_per_task = -1', ['# settings', '[guardrails]', 'hours_per_task = -1'], 3, /\[guardrails\] hours_per_task must be a number > 0, got -1/],
+  ['hours_per_task = true', ['[guardrails]', 'hours_per_task = true'], 2, /hours_per_task must be a number > 0, got a boolean/],
+  ['hours_per_task = "2"', ['[guardrails]', 'hours_per_task = "2"'], 2, /hours_per_task must be a number > 0, got a string/],
   ['repo as a scalar', ['repo = 5'], 1, /repo must be a table of tables/],
   ['repo as an array of tables', ['[[repo]]', 'parallel_ceiling = 3'], 1, /repo must be a table of tables/],
   ['a scalar under repo names its key and value', ['# settings', 'repo."o/r" = 5'], 2, /\[repo\."o\/r"\] must be a table, got 5 /],
@@ -383,8 +388,17 @@ test('R7 a guardrails override is file:guardrails; floats and quota_stalls = 0 a
     set_aside_rate_points: { value: 2.5, source: 'file:guardrails' },
     conflict_rate_points: { value: 10, source: 'built-in' },
     quota_stalls: { value: 0, source: 'file:guardrails' },
+    hours_per_task: { value: 1.5, source: 'built-in' },
   })
   for (const k of SETTING_KEYS) assert.equal(out.settings[k].source, 'built-in')
+})
+
+test('R7 hours_per_task (p21-2) takes an integer or a float > 0, as file:guardrails', (t) => {
+  for (const [v, want] of [['2.5', 2.5], ['3', 3]]) {
+    const home = tmpHome(t)
+    writeSettings(home, ['[guardrails]', `hours_per_task = ${v}`])
+    assert.deepEqual(resolves(home).guardrails.hours_per_task, { value: want, source: 'file:guardrails' }, v)
+  }
 })
 
 // ---- R8: the importable resolve() --------------------------------------------------------------------------

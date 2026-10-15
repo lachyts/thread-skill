@@ -22,6 +22,8 @@ of the file format:
     set_aside_rate_points = 5    # set-aside rate may rise at most +5 points
     conflict_rate_points = 10    # conflict rate may rise at most +10 points
     quota_stalls = 0             # more than this many quota stalls breaches (0 = any stall)
+    hours_per_task = 1.5         # Throughput (p21-2, ADR 0037 d1): running hours may not exceed this many per task
+                                 # whose Slot overlaps the scored window, so an overnight run still lands by morning
 
     [repo."lachyts/thread-skill"] # one repo, keyed by its GitHub origin's owner/name
     parallel_ceiling = 5
@@ -40,7 +42,8 @@ was given, under ORIGIN_TIMEOUT seconds, in its own process group (killed whole 
 Precedence for each rollout key (the callers apply the first two): task frontmatter → rollout frontmatter →
 `[repo."<slug>"]` (source `file:repo`) → `[defaults]` (`file:defaults`) → `built-in`. Guardrail sources are
 `file:guardrails` or `built-in`. Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
-max_plan_rounds 3, auto_retries 2, spend_approval_usd 0; guardrails 25 / 5 / 10 / 0. `auto_retries` is no Tuning key:
+max_plan_rounds 3, auto_retries 2, spend_approval_usd 0; guardrails 25 / 5 / 10 / 0 / 1.5 (hours_per_task, a
+heuristic: Lachy's rollouts.toml sets the real bound). `auto_retries` is no Tuning key:
 schedule does not stamp it and a Reflection never proposes it; execute's `lead-integrate.py inputs` and
 `reconcile-rollout.py auto-retry` resolve it themselves (p16-4). Nor is `spend_approval_usd` (ADR 0034): schedule
 shows it but never stamps it on a rollout, and `reconcile-rollout.py approve-gates --standing` resolves it itself (task
@@ -54,7 +57,7 @@ Validation (ADR 0016: anything unknown or wrong is refused, never dropped):
 - a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys, 0 for `auto_retries` and
   `spend_approval_usd` (a boolean, float or string is refused, and so is 0 for a Tuning key);
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
-  integer >= 0);
+  integer >= 0; `hours_per_task` is an integer or float > 0, since a bound of 0 breaches every run);
 - a bad or case-duplicate repo key.
 No file (nothing at the path, a missing directory on the way, a plain file as a step on the way) gives the
 built-ins, and so does an empty or comment-only file. The file is read by ladder.py's read_toml(), so a
@@ -110,9 +113,10 @@ BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, 
 # `spend_approval_usd: 0` turns the standing approval off.
 MINIMUM = {"parallel_ceiling": 1, "max_review_rounds": 1, "max_iterations": 1, "max_plan_rounds": 1, "auto_retries": 0,
            "spend_approval_usd": 0}
-GUARDRAIL_KEYS = ("tokens_per_merge_pct", "set_aside_rate_points", "conflict_rate_points", "quota_stalls")
+GUARDRAIL_KEYS = ("tokens_per_merge_pct", "set_aside_rate_points", "conflict_rate_points", "quota_stalls", "hours_per_task")
+# hours_per_task (p21-2): the Throughput Guardrail's absolute bound, skills/reflect/scripts/score.py's built-in too.
 GUARDRAILS_BUILT_IN = {"tokens_per_merge_pct": 25, "set_aside_rate_points": 5, "conflict_rate_points": 10,
-                       "quota_stalls": 0}
+                       "quota_stalls": 0, "hours_per_task": 1.5}
 TABLES = ("defaults", "guardrails", "repo")
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 
@@ -321,6 +325,10 @@ def _validate(text, doc, path):
         if key == "quota_stalls":
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 refuse("[guardrails] quota_stalls must be an integer >= 0, got %s" % _describe(value), at)
+        elif key == "hours_per_task":
+            if (isinstance(value, bool) or not isinstance(value, (int, float)) or not value > 0
+                    or (isinstance(value, float) and not math.isfinite(value))):
+                refuse("[guardrails] hours_per_task must be a number > 0, got %s" % _describe(value), at)
         elif (isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0
               or (isinstance(value, float) and not math.isfinite(value))):
             refuse("[guardrails] %s must be a non-negative number, got %s" % (key, _describe(value)), at)
