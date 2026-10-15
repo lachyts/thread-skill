@@ -438,16 +438,16 @@ class Vault:
                 return p
         return None
 
-    def open_root_notes(self):
+    def open_root_notes(self, flag=None):
         """(path, Rec) for every note directly under Work/Tasks that is not Landed; one with no frontmatter is
-        skipped and flagged on stderr."""
+        skipped and flagged (span's flags, else stderr)."""
         out = []
         if not self.root.is_dir():
             return out
         for p in sorted(self.root.glob("*.md")):
             rec = RP.Rec(p, "root")
             if rec.fm is None:
-                say("skipped %s: no frontmatter (%s)" % (p.name, rec.err))
+                (flag or say)("skipped %s: no frontmatter (%s)" % (p.name, rec.err))
                 continue
             if rec.status in LANDED:
                 continue
@@ -636,6 +636,9 @@ class Span:
             hit = TUNE.close_line(slug, path=tunings_file)
         except OSError as e:
             raise Stop("tunings.jsonl cannot be read: %s" % e, 1)
+        except Exception as e:  # a record whose file name is no slug (run_record writes none)
+            hit = None
+            entry["flags"].append("no close line read (%s)" % e)
         if hit is not None:
             entry["closeLine"] = {"id": hit.get("id"), "close": hit.get("close")}
         note = self.vault.rollout_note(slug)
@@ -1090,7 +1093,7 @@ class Span:
         ws = watches(reflections, rid, until)
         knobs = self.knobs(entries, scores, rid, tunings, reflections)
         bugs, decision = [], None
-        for p, rec in self.vault.open_root_notes():
+        for p, rec in self.vault.open_root_notes(self.flag):
             if rec.scalar("bug_key"):
                 bugs.append({"slug": p.stem, "bug_key": rec.scalar("bug_key"), "status": rec.status})
             if "decisions" in rec.tags and decision is None:
@@ -1320,6 +1323,10 @@ def cmd_knobs(a):
         if d["_voided"] or d.get("auto") is not True or d.get("reflection") != rid or not isinstance(d.get("reverts"), str):
             continue
         for e in d.get("applied") or []:
+            if not isinstance(e, dict) or not all(isinstance(e.get(k), int) for k in ("from", "to", "ranAt")) or \
+                    not isinstance(e.get("key"), str) or not isinstance(e.get("rule"), str):
+                say("revert line %s: an applied entry is not well formed: skipped" % d.get("id"))
+                continue
             direction = SCORE._sign(e["to"] - e["from"])
             out.append({"id": RR.knob_key(d["repo"], e["key"], e["rule"], direction), "altitude": "knob", "reflection": rid,
                         "rollouts": [d.get("rollout")], "repo": d["repo"], "key": e["key"], "rule": e["rule"],
