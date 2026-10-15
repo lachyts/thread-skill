@@ -7,7 +7,8 @@
 // - reshuffle R5.2 sets it on every task it writes, R5.3's rewrite covers it, R5.4's survivor takes the union;
 // - schedule step 4.5's combined note takes the members' union;
 // - CONTEXT.md's Escape entry names the key;
-// - reflect step 4 passes `--repo <Project root>`, and step 5 presents Quality, partial included.
+// - reflect step 4 passes `--repo <Project root>`, and step 5 presents Quality, partial included (an unread source,
+//   an unresolved task or a failed blame, any of them even with all three sources read).
 // tests/reflect-escapes.test.mjs pins the reader's behaviour.
 //
 // One pure function, check(files), over { key: text }: the real files and the controls run through it, and each
@@ -89,7 +90,8 @@ function check(f) {
   const step4 = section(f.reflect, /^### 4\. Score/)
   if (!fencedBlocks(step4 ?? '').some((b) => b.some((l) => l.includes('--repo <Project root>')))) fails.push('reflect-4')
   if (!all(bullet(section(f.reflect, /^### 5\. Present/), /^- \*\*Quality\*\*/),
-    ['`escapes.count`', '`headline.quality`', '`escapes.bySource`', '`escapes.partial`', 'can only read too high', 'a later re-score can lower Quality'])) fails.push('reflect-5')
+    ['`escapes.count`', '`headline.quality`', '`escapes.bySource`', '`escapes.partial`', 'even with all three sources read',
+      '`escapes.excluded.unresolved`', '`escapes.excluded.unresolvedRows`', 'can only read too high', 'a later re-score can lower Quality'])) fails.push('reflect-5')
   return fails
 }
 
@@ -142,5 +144,6 @@ test('control: CONTEXT.md\'s Escape entry without the key fails context', () => 
 test('control: reflect step 4 without --repo, or step 5 without Quality\'s partial reading, fails its rule', () => {
   only('reflect', '--repo-slug <owner/name> --repo <Project root>', '--repo-slug <owner/name>', ['reflect-4'])
   only('reflect', '`escapes.partial`', '`escapes.flags`', ['reflect-5'])
+  only('reflect', '(`escapes.excluded.unresolvedRows`)', '(the review rows)', ['reflect-5'])
   only('reflect', '- **Quality**', '- **Escapes**', ['reflect-5'])
 })

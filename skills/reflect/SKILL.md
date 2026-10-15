@@ -106,9 +106,11 @@ From `score.json`, verbatim numbers only (the record is UTC; local times may be 
   Reflection).
 - **Quality**: `escapes.count` Escapes of `escapes.landed` landed tasks, `headline.quality`, and `escapes.bySource`
   (fixes, reverts, reviews), with each escaped task's evidence verbatim (the `fixes:` note, the revert commit, or the
-  review doc and row). When `escapes.partial` is true, say Quality rests on fewer than all three sources: name each
-  unread source (`escapes.sources`) and each `escapes.excluded.unresolved` task with its why, and say Quality can
-  only read too high. An Escape found later counts against this rollout, so a later re-score can lower Quality.
+  review doc and row). When `escapes.partial` is true, say what Quality misses, which can hold even with all three
+  sources read: each unread source (`escapes.sources`), each `escapes.excluded.unresolved` task with its why (a
+  landed task whose git evidence is unresolved), and the count of review findings whose blame failed
+  (`escapes.excluded.unresolvedRows`); say Quality can only read too high. An Escape found later counts against this
+  rollout, so a later re-score can lower Quality.
 - **Guardrails**: tokens per merge, set-aside rate, conflict rate (and the integrator-path share) and quota
   stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so.
 - **Slots and lane**: the ceiling it ran at (and any mid-window change), the share of running time the Slots were
@@ -177,7 +179,11 @@ change a live rollout, Lachy edits its note.
   `score.json`'s `thresholds`.
 - A fix written without `fixes:` is not counted as an Escape (task-writer § 4 sets the key).
 - A review finding is attributed by `git blame`, so a finding on an old line counts against whichever task last
-  wrote that line.
+  wrote that line: a landed later PR's review can still blame its sibling-site findings (a line it should have
+  changed alongside its own change) on the task that last wrote the line, so Quality can read too low.
+- Only a review of landed work counts: a review whose head the Project root's ref does not reach (a closed PR's
+  rounds, or a branch that landed only by squash) is skipped and listed in `escapes.excluded.unlandedDocs`, so a
+  squash-landed later PR's findings are missed too.
 - Reverts and review findings are read from the Project root's local ref, never fetched: `escapes.ref.tipDate`
   shows how old it is, and anything pushed since the last fetch is missed.
 

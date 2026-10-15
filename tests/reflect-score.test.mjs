@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SCORE = path.join(root, 'skills', 'reflect', 'scripts', 'score.py')
+const ESCAPES = path.join(root, 'skills', 'reflect', 'scripts', 'escapes.py') // score.py loads it
 const RUN_RECORD = path.join(root, 'skills', '_shared', 'scripts', 'run_record.py')
 
 // ---- helpers ----------------------------------------------------------------------------------------------
@@ -759,9 +760,11 @@ test('a --note given as the --rollout path is read; an unreadable --note is exit
   assert.match(bad.stderr, /^score: cannot read --note /)
 })
 
-test('score.py parses as python 3.8 and writes nothing into the events dir', (t) => {
-  const r = spawnSync('python3', ['-B', '-c', 'import ast, sys\nast.parse(open(sys.argv[1]).read(), sys.argv[1], feature_version=(3, 8))', SCORE], { encoding: 'utf8' })
-  assert.equal(r.status, 0, r.stderr)
+test('score.py and the escapes.py it loads parse as python 3.8, and score.py writes nothing into the events dir', (t) => {
+  for (const script of [SCORE, ESCAPES]) {
+    const r = spawnSync('python3', ['-B', '-c', 'import ast, sys\nast.parse(open(sys.argv[1]).read(), sys.argv[1], feature_version=(3, 8))', script], { encoding: 'utf8' })
+    assert.equal(r.status, 0, `${path.basename(script)}: ${r.stderr}`)
+  }
   const home = tmpHome(t)
   emitAll(home, 'demo', byTs(saturated(3)))
   const before = fs.readdirSync(evDir(home)).map((f) => [f, fs.readFileSync(path.join(evDir(home), f), 'utf8')])

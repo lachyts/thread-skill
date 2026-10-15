@@ -95,9 +95,12 @@ records the stop on the rollout note (execute § Room stop).
 `skills/_shared/scripts/run_record.py` is the Run record's one writer (ADR 0032):
 every emitter appends its events through it, and its header is the schema.
 `skills/reflect/scripts/score.py` reads a record into a Reflection's scores and
-proposals (writing nothing), and `skills/reflect/scripts/tune.py` is the only writer
-of `rollouts.toml` and `tunings.jsonl`: it applies the Tunings Lachy picks and
-records one line per Reflection.
+proposals (writing nothing), and `skills/reflect/scripts/escapes.py`, which it loads,
+reads the landed tasks' Escapes and Quality from the task notes' `fixes:` and the
+Project root's git (reverts, later review findings), writing nothing either.
+`skills/reflect/scripts/tune.py` is the only writer of `rollouts.toml` and
+`tunings.jsonl`: it applies the Tunings Lachy picks and records one line per
+Reflection.
 
 ## Design
 
@@ -239,9 +242,12 @@ final check that the run wrote nothing into the tree):
   and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
 - **Reflection** — `tests/reflect-score.test.mjs` (`score.py` on synthetic records: running time and its
   exclusions, the Slot-bound and lane-bound fixtures, each proposal's direction and cause, the baseline, load),
-  `tests/reflect-tune.test.mjs` (`tune.py` edits only the picked keys, records one line, and writes nothing on a
-  refusal or a failed write) and `tests/contracts/reflect.test.mjs` (the verb's wiring, its SKILL's order and
-  triggers, and the retired name staying gone).
+  `tests/reflect-escapes.test.mjs` (`escapes.py` through `score.py` against throwaway repos and vaults: `fixes:` in
+  every form, reverts, later review findings of landed work bounded by blame, and the unread, unresolved and
+  partial readings), `tests/reflect-tune.test.mjs` (`tune.py` edits only the picked keys, records one line, and
+  writes nothing on a refusal or a failed write), `tests/contracts/reflect.test.mjs` (the verb's wiring, its SKILL's
+  order and triggers, and the retired name staying gone) and `tests/contracts/escapes-fixes-key.test.mjs` (every
+  writer of a fix of landed work adds `fixes:`, and the Reflection presents Quality).
 - **Next-action script** — `tests/next-action.test.mjs`: `next-action.py`'s set-down, fill, read and
   captures against throwaway vaults — byte-level one-line edits, YAML-safe quoting, both tag forms, the
   shared dead-link rule, and refusals that write nothing.
