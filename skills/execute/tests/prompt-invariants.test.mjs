@@ -1045,6 +1045,14 @@ function agentPrompts(E) {
 // base), and with both rules removed to the p16-3 base (ee821ac6…). The rows, taskTreeSetup and the default-branch
 // GOLDENs did not move. Like RM_RULE (p12-12), a deliberate resume-cache break: every agent prompt gains the rule,
 // and a resume re-passes its run's own version-keyed `scriptPath`, so a call launched on an older engine replays there.
+// Re-pinned on purpose by p21-3, the rows hash only: every row carries `reviewVerdicts`, each master-review round
+// the call judged ({round, verdict, head, feedback}; proj-fix-p and proj-fix-a carry r1 and r2 `changes` with their
+// one `fix review:<slug> rN` bullet and r3 `approve`, all head ''; the read-only proj-audit-x carries []). The rows
+// with `reviewVerdicts` deleted hash to the p18-1 rows pin (7a9ecf48…, the p21-3 base), and with `needsHuman` deleted
+// too to the p16-3 base (0b7fa853…). The calls hash did not move: no prompt byte changed (head and the `path:line`
+// lead ride on REVIEW_VERDICT's descriptions alone), and runTask records only {label, prompt}. The schema change
+// does move the review judge's opts (`schema`), so a pre-p21-3 run resumed on this engine misses the cache on its
+// review calls: the same accepted break as p16-3's needsHuman field.
 {
   const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
   const variants = []
@@ -1099,6 +1107,7 @@ function agentPrompts(E) {
   const baseCalls = []
   const oldCalls = []
   const oldRows = []
+  const baseRows = []
   for (const args of [
     mkA(mkT('proj-fix-p', { model: 'opus', rung: 'opus-high', planGate: true })),
     mkA(mkT('proj-fix-a'), { defaultBranch: 'master', envBootstrap: 'poetry install', knownBaselineFailures: ['t — env'] }),
@@ -1109,20 +1118,30 @@ function agentPrompts(E) {
     rows.push(JSON.stringify({ result: r.result, err: r.error && String(r.error) }))
     baseCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: c.prompt.replace(KILL, '') }))))
     oldCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: c.prompt.replace(KILL, '').replace(RULE, '') }))))
+    const base = JSON.parse(JSON.stringify(r.result))
+    for (const row of base.tasks) delete row.reviewVerdicts
+    baseRows.push(JSON.stringify({ result: base, err: r.error && String(r.error) }))
     const old = JSON.parse(JSON.stringify(r.result))
-    for (const row of old.tasks) delete row.needsHuman
+    for (const row of old.tasks) { delete row.needsHuman; delete row.reviewVerdicts }
     oldRows.push(JSON.stringify({ result: old, err: r.error && String(r.error) }))
+    const [row] = r.result.tasks
+    const want = row.scope === 'read-only' ? [] : [1, 2, 3].map((n) => ({
+      round: n, verdict: n < 3 ? 'changes' : 'approve', head: '', feedback: n < 3 ? [`fix review:${row.slug} r${n}`] : [],
+    }))
+    ok(JSON.stringify(row.reviewVerdicts) === JSON.stringify(want), `p21-3: ${row.slug}'s reviewVerdicts are its judged rounds`)
   }
   ok(sha(oldCalls.join('\n')) === 'ee821ac64ee16a13cf95c536bcbbf4ef7106c45c0d28c002f11b61196b1ee54b',
     'byte pin (p16-3 base): the same calls with KILL_RULE and NEEDS_HUMAN_RULE removed are the pre-p16-3 bytes')
   ok(sha(baseCalls.join('\n')) === '8236605ff29f46cc2c59346eb3bd42916deb8c9fda1859cb9eaaadec9fa607c4',
     'byte pin (p18-1 base): the same calls with KILL_RULE removed are the pre-p18-1 bytes')
   ok(sha(oldRows.join('\n')) === '0b7fa8531f41dad8da30902e500d4cc7746f1540424af004039ab890433972aa',
-    'byte pin (p16-3 base): the same rows with needsHuman deleted are the pre-p16-3 rows')
+    'byte pin (p16-3 base): the same rows with needsHuman and reviewVerdicts deleted are the pre-p16-3 rows')
+  ok(sha(baseRows.join('\n')) === '7a9ecf48734cee23672a77dbbde09a3fcee91a110746b46665bc3aaecd0984da',
+    'byte pin (p21-3 base): the same rows with reviewVerdicts deleted are the pre-p21-3 rows')
   ok(sha(calls.join('\n')) === '1e51b62c997f39814ea75373fe38d97955c596ce77c7aa63762a4ab5c230cacc',
     'byte pin: three whole task-mode calls — every label and prompt (re-pinned by p18-1: the p18-1 base above plus KILL_RULE)')
-  ok(sha(rows.join('\n')) === '7a9ecf48734cee23672a77dbbde09a3fcee91a110746b46665bc3aaecd0984da',
-    'byte pin: three whole task-mode calls — every row, rung record included')
+  ok(sha(rows.join('\n')) === '0137cf70ddf1d5131b4511462f43f1d639311e6b4ada4016af30a2269bd563d4',
+    'byte pin: three whole task-mode calls — every row, rung record and reviewVerdicts included (re-pinned by p21-3: the p21-3 base above plus reviewVerdicts)')
 }
 
 console.log()
