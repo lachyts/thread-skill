@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-15
+last_touched: 2026-10-16
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,13 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-10-16 (overnight): P21 has landed. `[[thread-skill-rollout-2026-10-15]]` (archived, § Completion log): 7/7 merged (#144 to #150) in 8h 47m, from the clone, hands-off. Phase 21 stays open for the session-lane p21-5 and p21-9.**
+- **Landed:** p21-1 rename Retro → Reflection, `/thread:reflect` (#144); p21-4 Escapes traced by `fixes:` + git (#145); p21-2 the two headlines in the score (#146); p21-3 Review churn recorded and scored (#147); p21-6 every close records a score line via `close-score.py` (#148); p21-7 the weekly Reflection, `reflect.py` (#149); p21-8 `reflect-due.py` + the quiet-streak cadence (#150).
+- **Run shape:** p21-1 plan-blocked once (its spend-gate bullet did not price), auto-retried, then gate-pending and signed under its own `spend_approval_usd: 30` (US$8 exposure; actual eval spend $1.49). p21-7 plan-blocked twice and landed on its last auto-retry. p21-2 and p21-4 integrated through the integrator (score.py conflicts with #147, and with #145 too for p21-2); the rest were lead merges with no merge-in. All Opus.
+- **Start delay:** § 2.7's pushed-base gate held the start ~25 min while last session's close-out commits landed (#142's macOS CI timed out at 20 min; #143 carried all three).
+- **The installed plugin is still pre-P21.** The primary checkout (live plugin) was not touched, since `[[chorus-rollout-2026-10-15]]` runs on it. The new verbs and scripts (`/thread:reflect`, `reflect.py`, `reflect-due.py`, `close-score.py`) go live only once it is updated, so this rollout's own ceremony used the old Retro line.
+- **Filed:** [[thread-skill-first-live-weekly-reflection]] (the first live `/thread:reflect` over this rollout, after the plugin update).
 
 **2026-10-15 (evening): P21 is running overnight as `[[thread-skill-rollout-2026-10-15]]` from the clone; p15-7 landed.**
 - **#139 merged** (`38d75ec`): CI had failed on ADR 0037 citing Chorus's ADR 0043 bare; `0981b9e` qualified it ("Chorus ADR 0043"), then the branch was updated so auto-merge could fire.
@@ -630,6 +637,7 @@ scheduled 2026-07-15.
 
 ## Open questions / decisions pending
 
+- **The C17 flake (2026-10-16).** `tests/lead-integrate.test.sh` C17 "TERM to verify … its children are gone" failed on macOS CI under load (`pgrep` found 3 children right after the TERM) on PR #148, which does not touch it, and passed on rerun. merge-task's infra classifier called it genuine (fail-closed), so its exit 1 would have set the task aside and auto-retried a whole call. Make the assertion wait for the group to exit, like the 12a/35 load-tolerant fixes? Lachy's call whether to file it.
 - **Schedule P16 before or after p13-4 (3.0.0)?** p13-4 updates the live checkout, and a running rollout holds that checkout, so the two can't overlap. The recommendation is p13-4 first, since it was waiting only on Chorus.
 - **Hold own-branch moves too?** (p14-7 follow-up, Lachy's call) Putting the hold inside `move_branch` would guard `land.sh --own-branch` on the primary checkout, but an own-branch landing there would then end `stuck: held`.
 
@@ -723,6 +731,8 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **An integrate call carries the task's approved plan verbatim in its args (2026-10-16).** The plans here ran 32–38k chars, so the lead re-emits ~40k of JSON through the Workflow tool call (execute § 4.5 step 3: "never retyped"). It worked, but it is the lead hand-copying a large blob; a plan path the engine reads would be safer. Same for a seeded revise's `plan`.
+- **A merge-task exit 1 on a known flake (2026-10-16).** When the red required check is a test the PR does not touch and the other OS is green, the lead reran the one failed job (`gh run rerun <id> --failed`) and re-ran `merge-task.sh` on the same integrated pair rather than set the task aside. Recorded in the P21 Completion log as a lead judgement call.
 - **`native_workflow.mjs init DIR SCRIPT ARGS CONFIG` takes ARGS and CONFIG as file paths**, not inline JSON: an inline jobs object fails `ENAMETOOLONG`. Write both to files beside the prompt (orient § 8 dispatch, 2026-10-15).
 - **`claude plugin eval` defaults (2026-10-15).** The LLM judge is Haiku unless `--judge-model` is passed (`make evals` passes none until [[thread-skill-make-evals-on-opus]] lands). `--case` takes one glob per run: a second `--case` silently replaces the first. A `--max-cost-usd` breach skips the remaining cases and exits non-zero.
 - **A live E2E needs a hub and children (2026-10-13).** The harness resets a `cd` outside the launch dir, so the CWD-bound verbs run in a child session launched in the fixture: in Chorus, `create_thread` (and `spawn_task`) take a `cwd`, so the hub raises a card that opens there. A card-started session never reports back to its raiser; the hub watched the checklist file with a background `until` loop (fix filed for Chorus).
@@ -970,6 +980,16 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Now (from 2026-10-16, after the P21 rollout):**
+1. **Update the installed plugin** once `[[chorus-rollout-2026-10-15]]` is no longer running on the primary checkout: bring `~/repos/tools/thread-skill` to origin/master (at or after `7f05ee9`, #150), then `make release-check` and decide whether this is a release (3.2.0: P21 changes verbs, `/thread:retro` → `/thread:reflect`).
+2. [[thread-skill-first-live-weekly-reflection]]: the first live `/thread:reflect` over `[[thread-skill-rollout-2026-10-15]]`.
+3. Session lane: p21-5 (workspaces `add-task.md` `fixes:` key) and p21-9 (daily sweep calls `reflect-due.py`), both now unblocked; then phase 21 can close.
+4. Start or keep the Stage card "Fresh-review the review-round emit (agents-config #1)" (session in `~/.agents`), and `git -C ~/.agents pull --ff-only` once its tree is clean.
+5. Attended: [[thread-skill-make-evals-on-opus]], then the eval rollout ([[thread-skill-eval-rollout-p19-evals]]).
+6. Offered, not run: `/thread:retro [[thread-skill-rollout-2026-10-15]]` (once installed, `/thread:reflect`).
+
+**Superseded 2026-10-16:**
+
 **Now (from 2026-10-15, evening, at close): P21 runs overnight; check it in the morning.**
 1. `/thread:status [[thread-skill-rollout-2026-10-15]]` (from any session). If stuck, `/thread:repair` from a session launched in the clone `~/repos/tools/thread-skill-rollout`.
 2. Start or keep the Stage card "Fresh-review the review-round emit (agents-config #1)" (session in `~/.agents`), and `git -C ~/.agents pull --ff-only` once its working tree is clean.
@@ -1210,6 +1230,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-10-16: P21 rollout executed unattended from the clone: 7/7 merged (#144–#150) in 8h 47m; 3 auto-retries, 1 standing approval, 2 integrator conflict merges, 1 macOS CI flake rerun; rollout archived, first-live-Reflection task filed; installed plugin still pre-P21.
 - 2026-10-15: #139 fixed and merged; P21 scheduled (+p21-9 split) and executing overnight from the clone; p15-7 landed in agents-config #1 by an orient child (review pending).
 - 2026-10-15 (close, later): `/thread:orient` on the Retro, then a grill-with-docs: ADR 0037 + CONTEXT.md terms (#139), P21 phase and 8 tasks, p19-12 merged into p21-1, p15-7 raised, [[chorus-reflect-cadence]] filed; scheduling handed off (#140, consumed by its successor).
 - 2026-10-15 (close): released and installed 3.1.0 (#136, tag `thread--v3.1.0`) from handoff `2026-10-15-release-p18-p20` (withdrawn by #137); evals $8.24, Haiku judge found; review ledger STOP at round 2 → record cut to facts; filed make-evals-on-opus and the 3.1 ADR sweep. Memory: release-pr-scope updated.
