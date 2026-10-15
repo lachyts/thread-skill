@@ -713,6 +713,29 @@ setfm u status blocked
 M=$(cnt ha)
 rrs hand-back --tasks u --tasks-dir "$V" --now "$NOW" >/dev/null 2>&1
 ok "$(since ha "$M")" "handed-back:u ready:u" "a second hand-back of the same decided task records no second race-decided"
+# auto-retry: a plan-blocked task the Race log names is refused undecided; decided, it is retried with race-decided
+# (by auto-retry) before the retry's own event, and its next block's retry records no second race-decided
+mkt ar2 ha in_progress "owner: execute-test" "auto_retries: 2"
+row "$(trow ar2 '{"status":"plan-blocked","blockerDiagnosis":"Round 1: the plan misses the down migration"}')" >/dev/null
+python3 - "$V/ha.md" <<'PY2'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+open(p, "w").write(t.replace("## Race log\n\n", "## Race log\n\n- 2026-10-05T11:10+00:00 [[ar2]] RACE: PR #263 merged as x3; re-verify it\n", 1))
+PY2
+arr() { rrs auto-retry --tasks ar2 --rollout "$V/ha.md" --tasks-dir "$V" --now "$1" >/dev/null 2>&1; echo $?; }
+M=$(cnt ha)
+ok "$(arr "$NOW")" 2 "auto-retry: an undecided RACE exits 2"
+ok "$(since ha "$M")" "" "and records nothing"
+noteline ha "- 2026-10-05 repair: [[ar2]] RACE decided: re-run it"
+ok "$(arr "$NOW")" 0 "decided, auto-retry retries it"
+ok "$(since ha "$M")" "race-decided:ar2 auto-retry:ar2" "race-decided, then auto-retry (no handed-back)"
+ok "$(since ha "$M" '[d.get("mark"), d.get("by")]' | cut -d' ' -f1)" '["RACE","auto-retry"]' "mark RACE, by auto-retry"
+rrs mark-started --tasks ar2 --tasks-dir "$V" --now 2026-10-05T10:05:00Z >/dev/null
+row "$(trow ar2 '{"status":"plan-blocked","blockerDiagnosis":"Round 1: the plan still names no rollback test"}')" 2026-10-05T10:10:00Z >/dev/null
+M=$(cnt ha)
+ok "$(arr 2026-10-05T10:20:00Z)" 0 "its next block (new feedback) is retried again"
+ok "$(since ha "$M")" "auto-retry:ar2" "a second auto-retry of the same decided task records no second race-decided"
 
 echo "== 23. an unwritable events dir changes no exit, stdout or non-record stderr"
 S="$TMP/s23"
