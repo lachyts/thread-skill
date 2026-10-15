@@ -378,6 +378,26 @@ test("S-revise: an own run's reviser stop resumes past the sign-off, then the ju
   assert.equal(B.row.reviewRoundsUsed, 2)
   assertContinuation(B, `revise:${SLUG} r2`)
   noGateTextInPrompts(B, [G])
+  // p21-3: the stopped call's judged round rides on its gate-pending row, and the resume replays it entry-identical
+  // (same round, verdict, head and bullets), so reconcile's digest and verdict_key match and it is written once.
+  assert.deepEqual(A.row.reviewVerdicts, [{ round: 1, verdict: 'changes', head: '', feedback: ['handle the empty corpus'] }])
+  assert.equal(B.row.reviewVerdicts.length, 2)
+  assert.deepEqual(B.row.reviewVerdicts[0], A.row.reviewVerdicts[0], 'the replayed round is entry-identical')
+  assert.deepEqual(B.row.reviewVerdicts[1], { round: 2, verdict: 'approve', head: '', feedback: [] })
+})
+
+test("S-revise (p21-3): a judge that returns its head replays the same head on the resume", async () => {
+  const script = {
+    [`implement:${SLUG}`]: green(`implement:${SLUG}`),
+    [`review:${SLUG} r1`]: { ...changes('handle the empty corpus'), head: 'A'.repeat(40) },
+    [`revise:${SLUG} r2`]: gated([G]),
+    [`revise:${SLUG} r2 signed`]: green(`revise:${SLUG} r2 signed`),
+    [`review:${SLUG} r2`]: { ...approve, head: 'b'.repeat(40) },
+  }
+  const { A, B } = await resumeAfterSignOff(mkArgs({ rung: TOP }), script, `revise:${SLUG} r2 signed`)
+  assert.deepEqual(A.row.reviewVerdicts, [{ round: 1, verdict: 'changes', head: 'a'.repeat(40), feedback: ['handle the empty corpus'] }])
+  assert.deepEqual(B.row.reviewVerdicts[0], A.row.reviewVerdicts[0], 'an identical head (lowercased) and bullets')
+  assert.equal(B.row.reviewVerdicts[1].head, 'b'.repeat(40))
 })
 
 test('S-seeded: a seeded revise stop resumes past the sign-off, then the judge', async () => {
@@ -393,6 +413,9 @@ test('S-seeded: a seeded revise stop resumes past the sign-off, then the judge',
   assert.ok(B.calls[1].prompt.includes('COLD ENTRY'), 'the continuation keeps the cold entry')
   assertContinuation(B, `revise:${SLUG} r2`)
   noGateTextInPrompts(B, [G])
+  // p21-3: the seeded stop comes before any judge, so A judged nothing; B's one round is its own
+  assert.deepEqual(A.row.reviewVerdicts, [])
+  assert.deepEqual(B.row.reviewVerdicts, [{ round: 2, verdict: 'approve', head: '', feedback: [] }])
 })
 
 // ---- 3. gates found one after another: A → B → C ----------------------------------------------------

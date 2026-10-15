@@ -13,7 +13,7 @@ import { runTask, loadEngine, enginePath } from '../../../tests/lib/engine.mjs'
 const ROW_KEYS = [
   'slug', 'scope', 'status', 'prUrl', 'branch', 'worktreePath', 'reviewRoundsUsed', 'planRoundsUsed',
   'blockerDiagnosis', 'reviewFeedback', 'reviewHistory', 'approvedAtCeiling', 'gatedInputs', 'summary',
-  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman',
+  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman', 'reviewVerdicts',
 ]
 const THREW = 'workflow stage threw — see /workflows'
 const PLAN_TEXT = 'Planned on: abc\n### Files to modify\n- x\n### Gated inputs\nNone'
@@ -33,14 +33,18 @@ const slugOf = (label) => label.split(':')[1].split(/[ @]/)[0]
 // fails loudly even though the engine folds a stage throw into a blocked row.
 // script: { planJudge(label), review(label) → 'approve' | 'changes'; throwOn: kind to throw on;
 //   plan: the planner's plan text (default PLAN_TEXT); implGates: gates the implementer stops on;
-//   reviseBlocked: the reviser stops blocked; ask(label) → a needsHuman value a judge returns (absent ⇒
-//   the key is left out); result(label) → fields merged over an implement / investigate / revise result }
+//   reviseBlocked: the reviser stops blocked; reviseGates: gates the reviser stops on; ask(label) → a
+//   needsHuman value a judge returns (absent ⇒ the key is left out); feedback(label) → a review judge's
+//   bullets (default one `fix <label>` on changes); head(label) → the head a review judge returns (absent ⇒
+//   the key is left out); dead(label) → true makes the agent return null on both runAgent attempts;
+//   result(label) → fields merged over an implement / investigate / revise result }
 function stub(script = {}) {
   const unknown = []
   const impl = async (prompt, opts) => {
     const label = (opts && opts.label) || ''
     const kind = label.split(':')[0]
     if (script.throwOn && kind === script.throwOn) throw new Error('scripted stage failure on ' + label)
+    if (script.dead && script.dead(label)) return null
     switch (kind) {
       case 'plan':
       case 'plan-revise':
@@ -50,7 +54,12 @@ function stub(script = {}) {
         const fn = kind === 'review' ? script.review : script.planJudge
         const verdict = fn ? fn(label) : 'approve'
         const q = script.ask ? script.ask(label) : undefined
-        return { verdict, feedback: verdict === 'changes' ? [`fix ${label}`] : [], ...(q === undefined ? {} : { needsHuman: q }) }
+        const fb = kind === 'review' && script.feedback ? script.feedback(label) : undefined
+        const h = kind === 'review' && script.head ? script.head(label) : undefined
+        return {
+          verdict, feedback: fb !== undefined ? fb : verdict === 'changes' ? [`fix ${label}`] : [],
+          ...(q === undefined ? {} : { needsHuman: q }), ...(h === undefined ? {} : { head: h }),
+        }
       }
       case 'implement':
       case 'investigate':
@@ -58,6 +67,9 @@ function stub(script = {}) {
         const s = slugOf(label)
         if (kind === 'implement' && script.implGates) {
           return { verified: false, blocked: true, escalate: false, prUrl: '', branch: '', worktreePath: '', blockerDiagnosis: 'needs a gate', summary: '', gatedInputs: script.implGates }
+        }
+        if (kind === 'revise' && script.reviseGates) {
+          return { verified: false, blocked: true, escalate: false, prUrl: '', branch: '', worktreePath: '', blockerDiagnosis: 'needs a gate', summary: '', gatedInputs: script.reviseGates }
         }
         if (kind === 'revise' && script.reviseBlocked) {
           return { verified: false, blocked: true, escalate: false, prUrl: '', branch: '', worktreePath: '', blockerDiagnosis: 'reviser could not resolve it', summary: '' }
@@ -84,7 +96,7 @@ async function run(args, script) {
   return { ...out, unknown: s.unknown, labels: out.calls.map((c) => c.label) }
 }
 
-test('one code-writing task: one row with exactly the 21 result fields (args stringified or object)', async () => {
+test('one code-writing task: one row with exactly the 22 result fields (args stringified or object)', async () => {
   const task = mkTask('proj-fix-a')
   const r = await run(JSON.stringify(mkArgs(task)))
   assert.equal(r.error, undefined)
@@ -478,4 +490,83 @@ test('p16-3: no question gives needsHuman "" (a plain run, a run that threw)', a
   const threw = await run(mkArgs(mkTask('proj-fix-a')), { throwOn: 'implement' })
   assert.equal(threw.result.tasks[0].blockerDiagnosis, THREW)
   assert.equal(threw.result.tasks[0].needsHuman, '')
+})
+
+// ---- p21-3: reviewVerdicts. Every master-review round this call judged, in order, each with its OWN bullets, pushed
+// right after the judge returns (before any exit), so a call that stops after a `changes` round still carries
+// that round's findings. reconcile turns each entry into one review-verdict Run-record event.
+const H1 = 'a1'.repeat(20)
+const H2 = 'b2'.repeat(20)
+const B3 = ['a.py:2 the empty corpus', 'a.py:3 the off-by-one', 'no cite at all']
+
+test('p21-3: r1 changes then r2 approve: one entry per judged round, with its head and its own bullets', async () => {
+  const r = await run(mkArgs(mkTask('proj-fix-a')), {
+    review: (l) => (l.endsWith(' r1') ? 'changes' : 'approve'),
+    head: (l) => (l.endsWith(' r1') ? H1 : H2),
+  })
+  assert.equal(r.error, undefined)
+  assert.deepEqual(r.unknown, [])
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'review')
+  assert.deepEqual(row.reviewVerdicts, [
+    { round: 1, verdict: 'changes', head: H1, feedback: ['fix review:proj-fix-a r1'] },
+    { round: 2, verdict: 'approve', head: H2, feedback: [] },
+  ])
+})
+
+test('p21-3: a reviser that blocks after r1 changes keeps r1\'s three bullets though reviewHistory is []', async () => {
+  const r = await run(mkArgs(mkTask('proj-fix-a')), { review: () => 'changes', feedback: () => B3, reviseBlocked: true })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, ['implement:proj-fix-a', 'review:proj-fix-a r1', 'revise:proj-fix-a r2'])
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'blocked')
+  assert.deepEqual(row.reviewHistory, [], 'an unseeded stop carries no history')
+  assert.equal(row.reviewVerdicts.length, 1)
+  assert.deepEqual(row.reviewVerdicts[0], { round: 1, verdict: 'changes', head: '', feedback: B3 })
+})
+
+test('p21-3: a dead judge at r2 after r1 changes: one entry, r1, with its bullets; the dead round adds none', async () => {
+  const r = await run(mkArgs(mkTask('proj-fix-a')), { review: () => 'changes', feedback: () => B3, dead: (l) => l === 'review:proj-fix-a r2' })
+  assert.deepEqual(r.unknown, [])
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'blocked')
+  assert.deepEqual(row.reviewVerdicts, [{ round: 1, verdict: 'changes', head: '', feedback: B3 }])
+  const first = await run(mkArgs(mkTask('proj-fix-a')), { dead: (l) => l.startsWith('review:') })
+  assert.equal(first.result.tasks[0].status, 'blocked')
+  assert.deepEqual(first.result.tasks[0].reviewVerdicts, [], 'a dead judge adds no entry')
+})
+
+test('p21-3: a gate-pending reviser after r1 changes keeps r1\'s bullets', async () => {
+  const r = await run(mkArgs(mkTask('proj-fix-a')), { review: () => 'changes', feedback: () => B3, reviseGates: ['spend: an API — cap $5'] })
+  assert.deepEqual(r.unknown, [])
+  const row = r.result.tasks[0]
+  assert.equal(row.status, 'gate-pending')
+  assert.deepEqual(row.reviewVerdicts.map((v) => [v.round, v.verdict, v.feedback.length]), [[1, 'changes', 3]])
+})
+
+test('p21-3: the head is a 7-40 hex string, lowercased; anything else (absent, non-hex, too short) is ""', async () => {
+  for (const [head, want] of [[undefined, ''], ['--output=x', ''], ['abc12', ''], ['ABCDEF0', 'abcdef0'], [H1.toUpperCase(), H1], [7, ''], ['a'.repeat(41), '']]) {
+    const r = await run(mkArgs(mkTask('proj-fix-a')), { head: () => head })
+    assert.deepEqual(r.unknown, [])
+    assert.deepEqual(r.result.tasks[0].reviewVerdicts, [{ round: 1, verdict: 'approve', head: want, feedback: [] }], JSON.stringify(head))
+  }
+  // an approve carries no bullets even when the judge sent some; a changes keeps only its string bullets
+  const stray = await run(mkArgs(mkTask('proj-fix-a', { maxReviewRounds: 1 })), { review: () => 'changes', feedback: () => ['x.py:1 a', 7, null, 'b'] })
+  assert.deepEqual(stray.result.tasks[0].reviewVerdicts[0].feedback, ['x.py:1 a', 'b'])
+  const approveFb = await run(mkArgs(mkTask('proj-fix-a')), { feedback: () => ['stray'] })
+  assert.deepEqual(approveFb.result.tasks[0].reviewVerdicts[0].feedback, [])
+})
+
+test('p21-3: no judged round gives []: read-only, the pre-flight budget block, plan-blocked; a throw after r1 keeps r1', async () => {
+  const ro = await run(mkArgs(mkTask('proj-audit-x', { scope: 'read-only' })))
+  assert.deepEqual(ro.result.tasks[0].reviewVerdicts, [])
+  const pre = await run(mkArgs(mkTask('proj-fix-a', { maxReviewRounds: 0 })))
+  assert.equal(pre.calls.length, 0)
+  assert.deepEqual(pre.result.tasks[0].reviewVerdicts, [])
+  const pb = await run(mkArgs(mkTask('proj-fix-p', { planGate: true, maxPlanRounds: 1 })), { planJudge: () => 'changes' })
+  assert.equal(pb.result.tasks[0].status, 'plan-blocked')
+  assert.deepEqual(pb.result.tasks[0].reviewVerdicts, [])
+  const threw = await run(mkArgs(mkTask('proj-fix-a')), { review: () => 'changes', feedback: () => B3, throwOn: 'revise' })
+  assert.equal(threw.result.tasks[0].blockerDiagnosis, THREW)
+  assert.deepEqual(threw.result.tasks[0].reviewVerdicts, [{ round: 1, verdict: 'changes', head: '', feedback: B3 }])
 })

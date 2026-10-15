@@ -216,7 +216,8 @@ export const meta = {
 //
 // Returns { rolloutSlug, tasks: [ONE row: { slug, scope, status, prUrl, branch, worktreePath,
 //   reviewRoundsUsed, planRoundsUsed, blockerDiagnosis, reviewFeedback, reviewHistory,
-//   approvedAtCeiling, summary, startRung, rung, climbs, rungDrift, ran, needsHuman, gatedInputs, plan }] }
+//   approvedAtCeiling, summary, startRung, rung, climbs, rungDrift, ran, needsHuman, gatedInputs, plan,
+//   reviewVerdicts }] }
 // — the pre-p12-5 envelope with exactly one row, the called task's, the shape reconcile-rollout.py reads —
 // where status ∈ review | review-blocked | blocked | plan-blocked | gate-pending. The rung record (ADR 0029
 // decision 7): startRung is the rung the call started on, rung the one it ended on (reconcile stamps it as
@@ -242,6 +243,13 @@ export const meta = {
 // approve verdict, a verified result (gate-pending or not) or a one-shot red (escalate) is ignored; a review
 // row always carries ''. A mode 'integrate' row carries null, like plan: reconcile upserts the note's
 // "## Needs you" on a non-empty string, removes it on '', and leaves it on null.
+// reviewVerdicts (p21-3) is [{ round, verdict, head, feedback }]: every master-review round this call judged, in
+// order, each with its own bullets (an approve's are []), recorded as the judge returned, before any exit, so a
+// call that stops after a `changes` round still carries that round; head is the PR head the judge returned (7-40
+// hex, lowercased; '' when it gave none). A signed-gate resume replays the stopped call's rounds identically, and
+// reconcile writes them once (one review-verdict Run-record event per verdict_key). [] when no round was judged
+// (read-only, the pre-flight block, plan-blocked, a stop before the judge) and on every integrate row: an
+// Integration re-review is not a master-review round.
 // A mode 'integrate' row carries one more key, `integration`: { outcome: integrated | rejected | set-aside,
 // path: integrator | judge-only, anchor: { headSha, taskBase }, headSha, baseSha, mergeCommit, triggers
 // (conflict | committed | branch-moved | shared-file), reReviewed, feedback, reason, agents: [{ role,
@@ -299,13 +307,16 @@ const IMPL_RESULT = {
   required: ['verified', 'blocked', 'escalate', 'prUrl', 'branch', 'worktreePath', 'blockerDiagnosis', 'summary'],
 }
 
+// head and the feedback's `path:line` lead (p21-3) steer the judge through the schema alone, so no prompt byte moves
+// (the calls pin): reconcile blames each cited line at that head to split the round's findings original / regression.
 const REVIEW_VERDICT = {
   type: 'object',
   additionalProperties: false,
   properties: {
     verdict: { type: 'string', enum: ['approve', 'changes'] },
-    feedback: { type: 'array', items: { type: 'string' }, description: '3–8 specific bullets when verdict is changes; empty when approve' },
+    feedback: { type: 'array', items: { type: 'string' }, description: '3–8 specific bullets when verdict is changes; empty when approve. Start each bullet with the `path:line` it concerns, at that head, when it concerns a line.' },
     needsHuman: { type: 'string', description: NEEDS_HUMAN_DESCRIPTION },
+    head: { type: 'string', description: 'the full PR head SHA you judged: the `gh pr view <pr> --json headRefOid -q .headRefOid` value the prompt already has you read' },
   },
   required: ['verdict', 'feedback'],
 }
@@ -1444,7 +1455,8 @@ function rungState(task, a) {
   if (s.drift) {
     log(`rung drift: ${task.slug}'s rung: ${s.drift} is not on the ladder (${L.source}) — read as the top rung ${L.rungs[L.rungs.length - 1].name}`)
   }
-  return { source: L.source, rungs: L.rungs, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift }
+  // verdicts (p21-3): every master-review round this call judged, pushed by reviewLoop (reviewVerdictOf).
+  return { source: L.source, rungs: L.rungs, start: s.index, at: s.index, climbs: [], ran: [], drift: s.drift, verdicts: [] }
 }
 
 function cur(st) { return st.rungs[st.at] }
@@ -1453,9 +1465,21 @@ function climbOf(st, stage) { return st.climbs.find((c) => c.stage === stage) ||
 function rungRecord(st) {
   return { startRung: st.rungs[st.start].name, rung: cur(st).name, climbs: st.climbs.map((c) => ({ ...c })) }
 }
-// The record plus the call's drift and its dispatches: the row's five rung keys.
+// The record plus the call's drift and its dispatches: the row's five rung keys, and the call's judged review
+// rounds (p21-3), so every task-mode row carries them, a stage throw included.
 function rowRecord(st) {
-  return { ...rungRecord(st), rungDrift: st.drift, ran: st.ran.map((x) => ({ ...x })) }
+  return {
+    ...rungRecord(st), rungDrift: st.drift, ran: st.ran.map((x) => ({ ...x })),
+    reviewVerdicts: (st.verdicts || []).map((v) => ({ ...v, feedback: [...v.feedback] })),
+  }
+}
+
+// One judged master-review round as the row's reviewVerdicts entry (p21-3): its own bullets (a `changes` verdict's
+// strings; an approve carries none) and the head the judge returned, a 7-40 hex string lowercased, else ''.
+function reviewVerdictOf(round, verdict) {
+  const h = typeof verdict.head === 'string' && /^[0-9a-f]{7,40}$/i.test(verdict.head) ? verdict.head.toLowerCase() : ''
+  const feedback = verdict.verdict === 'changes' && Array.isArray(verdict.feedback) ? verdict.feedback.filter((f) => typeof f === 'string') : []
+  return { round, verdict: verdict.verdict, head: h, feedback }
 }
 
 // The stage's climb (see above): once per stage per call, never past the top, where it is recorded as a
@@ -1799,6 +1823,10 @@ async function reviewLoop(task, st, prev, a, planText, seed) {
     }, st)
     // Dead review-judge: the PR is real and stands — block on transient infra so the lead re-judges it.
     if (verdict.__dead) return stopped({ ...current, status: 'blocked', blockerDiagnosis: TRANSIENT_DIAGNOSIS })
+    // p21-3: the round's record, with its own bullets, BEFORE every exit below (approve, a question, the ceiling, a
+    // reviser that stops), so a call that stops after a `changes` round still carries its findings. The one push site.
+    if (!st.verdicts) st.verdicts = []
+    st.verdicts.push(reviewVerdictOf(round, verdict))
     if (verdict.verdict === 'approve' && askOf(verdict)) log(`review:${task.slug} r${round}: needsHuman on an approve verdict ignored`)
     if (verdict.verdict === 'approve') {
       // approvedAtCeiling: an approval on the LAST possible round with real rejection history — the
@@ -1896,6 +1924,8 @@ function taskResult(t, r, st) {
     rungDrift: norm.rungDrift,
     ran: norm.ran,
     plan: (r && typeof r.plan === 'string') ? r.plan : null,
+    // p21-3: every master-review round this call judged (rowRecord), in order, each with its own bullets.
+    reviewVerdicts: norm.reviewVerdicts || [],
   }
 }
 
@@ -2661,7 +2691,7 @@ async function integrate(task, a, trace) {
   return { outcome: 'rejected', ...j, reReviewed: true, feedback: feedback.length ? feedback : ['the Integration re-review returned changes with no feedback'] }
 }
 
-// The integrate call's ONE row: the task row's 20 keys plus `integration` (the payload the Integration log line
+// The integrate call's ONE row: the task row's 22 keys plus `integration` (the payload the Integration log line
 // records). Its rung record is the task's own, passed through; its `ran` is Integration's agents.
 // Every status is one of reconcile's five: integrated → review; rejected → blocked with the revise
 // marker (review-blocked when no review round is left); set-aside → blocked with `integration: <reason>`
@@ -2714,6 +2744,9 @@ function integrationResult(task, out, a, trace) {
     rungDrift: '',
     ran: trace.agents.map((x) => ({ label: x.label, rung: x.rung, model: x.model, effort: x.effort })),
     plan: null,
+    // p21-3: always []. INTEGRATION_REVIEW is not a master-review round: a rejection here uses a review round
+    // (reviewRoundsUsed + 1) but writes no review-verdict line, so the record's `round` skips it (r1, r2, r4).
+    reviewVerdicts: [],
     integration: {
       outcome: o.outcome,
       path: trace.path,

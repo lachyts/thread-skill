@@ -26,9 +26,10 @@ const SCRIPT = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings
 const KEYS = ['parallel_ceiling', 'max_review_rounds', 'max_iterations', 'max_plan_rounds']
 const SETTING_KEYS = [...KEYS, 'auto_retries', 'spend_approval_usd']
 const MINIMUM = { parallel_ceiling: 1, max_review_rounds: 1, max_iterations: 1, max_plan_rounds: 1, auto_retries: 0, spend_approval_usd: 0 }
-const GUARDRAIL_KEYS = ['tokens_per_merge_pct', 'set_aside_rate_points', 'conflict_rate_points', 'quota_stalls']
+// review_churn_pct (p21-3): Review churn's absolute bound, built-in 40.
+const GUARDRAIL_KEYS = ['tokens_per_merge_pct', 'set_aside_rate_points', 'conflict_rate_points', 'quota_stalls', 'review_churn_pct']
 const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, auto_retries: 2, spend_approval_usd: 0 }
-const GUARDRAILS_BUILT_IN = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0 }
+const GUARDRAILS_BUILT_IN = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0, review_churn_pct: 40 }
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 
 // ---- helpers ------------------------------------------------------------------------------------------
@@ -245,6 +246,8 @@ const REFUSALS = [
   ['a guardrail below zero', ['[guardrails]', 'tokens_per_merge_pct = -1'], 2, /tokens_per_merge_pct must be a non-negative number/],
   ['a boolean guardrail', ['[guardrails]', 'tokens_per_merge_pct = true'], 2, /tokens_per_merge_pct must be a non-negative number, got a boolean/],
   ['a fractional quota_stalls', ['[guardrails]', 'quota_stalls = 1.5'], 2, /quota_stalls must be an integer >= 0/],
+  ['a negative review_churn_pct', ['[guardrails]', 'review_churn_pct = -5'], 2, /review_churn_pct must be a non-negative number, got -5/],
+  ['a boolean review_churn_pct', ['[guardrails]', 'review_churn_pct = false'], 2, /review_churn_pct must be a non-negative number, got a boolean/],
   ['a guardrail in a repo table (guardrails are machine-wide)', ['[repo."o/r"]', 'quota_stalls = 1'], 2, /unknown key "quota_stalls"/],
   ['an unknown guardrail', ['[guardrails]', 'tokens_pct = 3'], 2, /\[guardrails\]: unknown key "tokens_pct"/],
   ['repo as a scalar', ['repo = 5'], 1, /repo must be a table of tables/],
@@ -376,13 +379,14 @@ test('R6 a usage error is one line, exit 2', (t) => {
 
 test('R7 a guardrails override is file:guardrails; floats and quota_stalls = 0 are valid', (t) => {
   const home = tmpHome(t)
-  writeSettings(home, ['[guardrails]', 'tokens_per_merge_pct = 30', 'set_aside_rate_points = 2.5', 'quota_stalls = 0'])
+  writeSettings(home, ['[guardrails]', 'tokens_per_merge_pct = 30', 'set_aside_rate_points = 2.5', 'quota_stalls = 0', 'review_churn_pct = 60'])
   const out = resolves(home)
   assert.deepEqual(out.guardrails, {
     tokens_per_merge_pct: { value: 30, source: 'file:guardrails' },
     set_aside_rate_points: { value: 2.5, source: 'file:guardrails' },
     conflict_rate_points: { value: 10, source: 'built-in' },
     quota_stalls: { value: 0, source: 'file:guardrails' },
+    review_churn_pct: { value: 60, source: 'file:guardrails' },
   })
   for (const k of SETTING_KEYS) assert.equal(out.settings[k].source, 'built-in')
 })

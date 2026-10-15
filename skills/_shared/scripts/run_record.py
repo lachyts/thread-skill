@@ -12,6 +12,8 @@ or imported by path (importlib.util.spec_from_file_location, git-env-canary.py's
     emit(rollout, kind, task=None, fields=None, *, ts=None, env=None, strict=False) -> bool
     events_dir(env=None) -> str            record_path(rollout, env=None) -> str
     normalise_slug(value) -> str           Refused, KINDS, TERMINAL_STATUSES, REVIEWS, TUNINGS, RESERVED
+    verdict_digest(verdict, feedback) -> str    verdict_key(line) -> tuple   (review-verdict's identity, p21-3:
+                                           the writer, reconcile-rollout.py, and the reader, score.py, share them)
 
 Callers: in-process callers use the default strict=False, which never raises; shell callers append
 `|| true`. Recording must never break a rollout.
@@ -99,6 +101,13 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      agents? (ints >= 0); startTime? (int >= 0: the journal's epoch ms, verbatim)
   review-round       repo, head, digest; doc?; mode?; effort?; findings?, original?, regression?
                      (ints >= 0); verdict?. No rollout, no task; lands in reviews.jsonl.
+  review-verdict  T  round (int >= 1), verdict (approve | changes), findings, original, regression (ints >= 0;
+                     original + regression <= findings, the rest unclassified), digest (verdict_digest of the
+                     verdict and its bullets); head? (the PR head the judge judged, resolved to a full sha in the
+                     task tree; omitted when the judge gave none). One line per judged master-review round,
+                     written by reconcile-rollout.py from the row's reviewVerdicts; lands in <rollout>.jsonl.
+                     Engine rounds are reviewLoop's REVIEW_VERDICT rounds only: an Integration re-review
+                     rejection uses a review round but writes no line, so `round` skips it (r1, r2, r4).
   carried         T  from (the old rollout's slug), to (set to the new rollout). Appended to both
                      <from>.jsonl and <to>.jsonl, each line's `rollout` the file it sits in; each append
                      is best-effort on its own.
@@ -152,7 +161,14 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   numbers, a close Reflection's terminal fold always lands, and re-folding is safe. An unknown status counts
   as non-terminal: appended and later superseded, never dropped. Write call-journal only through this
   module, so every writer takes part in the lock.
-- review-round: dedupe on (repo, head, digest), keeping the latest line.
+- review-round: dedupe on (repo, doc) when doc is present, else on (repo, head, digest), keeping the latest line
+  (p15-7's emitter is idempotent per (repo, doc)).
+- review-verdict: one line per verdict_key, (task, round, head) when the line carries a head, else (task, round,
+  digest). Keep the first line per key. The writer (reconcile) skips an entry whose key the record already holds,
+  so a signed-gate or Lost-call resume's replayed rounds are written once; readers apply the same key, so a
+  duplicate that slips in counts once. Two head-less lines for one round with different bullets stay two (a fresh
+  re-judge after a cache miss, a known overcount); two head-less approve lines for one round collapse (rounds
+  only, no findings).
 - tuning: see tunings.jsonl under Files (the baseline and void rules).
 - Skip a line that does not parse: a crash can leave a last line with no newline, which the next append
   then merges with (a known limit; checking the tail would mean locking every emit).
@@ -171,13 +187,15 @@ sync filesystems). Any failure to write (a short write, an OSError, anything une
 Exit codes: 0 written, skipped as a duplicate fold, or a warned write failure; 2 refused (an unknown kind,
 a missing or out-of-enum field, a task-scoped kind with no task, a tuning with one, a reserved rollout or
 `from`, --json not a JSON object, a common-key
-collision, NaN, a bad slug, a naive or malformed --ts, a line over 16 KiB), with one line starting `run_record: ` on
+collision, NaN, a bad slug, a naive or malformed --ts, a line over 16 KiB, a review-verdict whose original +
+regression exceed its findings), with one line starting `run_record: ` on
 stderr and nothing written; `dir` exits 1 when the directory cannot be resolved.
 """
 from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import math
 import os
@@ -362,6 +380,9 @@ KINDS = {
     "review-round": (False, {"repo": _str, "head": _str, "digest": _str},
                      {"doc": _str, "mode": _str, "effort": _str, "findings": _int(0), "original": _int(0),
                       "regression": _int(0), "verdict": _str}),
+    "review-verdict": (True, {"round": _int(1), "verdict": _enum("approve", "changes"), "findings": _int(0),
+                              "original": _int(0), "regression": _int(0), "digest": _str},
+                       {"head": _str}),
     "carried": (True, {"from": _str, "to": _str}, {}),
     "tuning": (False, {"id": _str, "repo": _str, "window": _window, "scores": _scores, "applied": _applied},
                {"binding": _enum(*BINDINGS), "voids": _str}),
@@ -475,6 +496,28 @@ def _check_fields(kind, fields):
             why = check(fields[k])
             if why:
                 raise Refused("%s: %s must be %s" % (kind, k, why))
+    if kind == "review-verdict" and fields["original"] + fields["regression"] > fields["findings"]:
+        raise Refused("review-verdict: original + regression (%d + %d) exceed findings (%d)"
+                      % (fields["original"], fields["regression"], fields["findings"]))
+
+
+# ---- review-verdict's identity (p21-3) -------------------------------------------------------------------
+# One definition for the writer (reconcile-rollout.py skips an entry whose key the record already holds) and the
+# reader (score.py keeps the first line per key), so a replayed round is written, and counted, once.
+
+def verdict_digest(verdict, feedback):
+    """The first 16 lowercase hex of sha256 over the compact ASCII JSON of [verdict, feedback]."""
+    text = json.dumps([verdict, feedback], ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode("ascii")).hexdigest()[:16]
+
+
+def verdict_key(line):
+    """A review-verdict line's identity: (task, round, "head", head) when it carries a non-empty head, else
+    (task, round, "digest", digest). `line` is a dict with task, round, head? and digest."""
+    head = line.get("head")
+    if isinstance(head, str) and head:
+        return (line.get("task"), line.get("round"), "head", head)
+    return (line.get("task"), line.get("round"), "digest", line.get("digest"))
 
 
 def _line(ts, host, rollout, task, kind, fields):
