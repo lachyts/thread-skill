@@ -6,8 +6,11 @@ description: 'Use to score a rollout and tune the operator''s rollout settings: 
 # /thread:reflect — score a rollout, propose Tunings, apply the picked ones
 
 `/thread:reflect [[rollout]]` is the **Reflection** (`CONTEXT.md` § Run record and tuning; ADR 0032): it reads a
-rollout's Run record, scores it on Throughput and the Guardrails, names what bound it, and proposes **Tunings** to the
-operator's rollout settings (`~/.config/thread/rollouts.toml`). It never changes anything itself. Every number
+rollout's Run record, scores it on its two headlines (ADR 0037 d1), **Hands-off rate** (the share of landed tasks
+with no act from Lachy once the run started) and **Quality** (not scored until Escapes are traced), then on the
+Guardrails (Throughput, bounded so an overnight run still finishes by morning, among them), names what bound it, and
+proposes **Tunings** to the operator's rollout settings (`~/.config/thread/rollouts.toml`). It never changes anything
+itself. Every number
 comes from two scripts, and the model only runs them, shows what they print and passes Lachy's answer on:
 
 - `skills/reflect/scripts/score.py` computes the scores and the proposals. It reads only; its header is the one
@@ -93,12 +96,20 @@ Exit 0 with the flag `no record` is a real answer (nothing was recorded), shown 
 
 From `score.json`, verbatim numbers only (the record is UTC; local times may be shown beside them):
 
-- **Throughput**: merges per running hour, the running hours, and every excluded span by kind (`paused`,
-  `hold-merge` / `hold-race` / `hold-git-env` waits on Lachy, `lead-absent`, `never-finished`,
+- **The two headlines.**
+  - **Hands-off rate** (`handsOff`): the rate, landed tasks and how many landed with no act from Lachy, then each
+    task's acts (`tasks[].acts`: a Recorded answer, a sign-off, a retry hand-back, a merge hold, a RACE decision),
+    the tally by kind, and what was not counted (`notCounted`: Standing approvals, automatic hand-backs, green RACE
+    re-verifies). Show the baseline's rate (`handsOff.baseline`), or "none (a v1 line)" when the flags say the
+    baseline is a v1 line.
+  - **Quality**: "not scored yet" (`quality.why`).
+- **Guardrails**: **Throughput** first, against its bound: merges per running hour, the running hours against the
+  allowance (`allowanceHours` for its `tasks`, `bound`), and whether it is breached; then every excluded span by kind
+  (`paused`, `hold-merge` / `hold-race` / `hold-git-env` waits on Lachy, `lead-absent`, `never-finished`,
   `lane-only-over-cap`, `idle`) with its why. Say when the window is `partial` (a Slot still running at the
-  Reflection).
-- **Guardrails**: tokens per merge, set-aside rate, conflict rate (and the integrator-path share) and quota
-  stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so.
+  Reflection). Then tokens per merge, set-aside rate, conflict rate (and the integrator-path share) and quota
+  stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so. Last,
+  **Review churn**: "unknown until review rounds are recorded".
 - **Slots and lane**: the ceiling it ran at (and any mid-window change), the share of running time the Slots were
   full, utilisation, idle Slot time by reason; the lane's busy share, Integrations and the ready-to-lane waits.
 - **Load**: the overlapping rollouts on this machine, their span and the Slots each held open (`slotsOpen`). A
@@ -107,7 +118,9 @@ From `score.json`, verbatim numbers only (the record is UTC; local times may be 
 - **The binding constraint** and its why. A lane-bound run proposes no key: say "no key moves this".
 - **Each proposal**: `id`, `key from → to`, its evidence, `agreeing` (earlier applied Tunings with the same rule),
   and its `ranAtCause` in plain words when present, e.g. "ran at 5 by a rollout-note override; rollouts.toml says
-  3", so a jump such as 3 → 6 reads as one step past what the run proved.
+  3", so a jump such as 3 → 6 reads as one step past what the run proved. Then what it `serves` and `risks`. A
+  `trade` reads "buys <gains> at the risk of <costs>: Lachy decides, no tie-breaker (ADR 0037 d1)". A `caution` is
+  shown verbatim, as Lachy's call.
 - **Each withheld entry** with its reason, and every flag.
 
 Then ask which proposals to apply, by id, or none.
@@ -156,7 +169,18 @@ change a live rollout, Lachy edits its note.
 ## What the record cannot show
 
 - A merge hold carries no reason, so a `--gated` hold cannot be told from an exit-7 hold: both read as a wait on
-  Lachy.
+  Lachy, and both count as an act in the Hands-off rate, though a heartbeat tick can release an exit-7 `review
+  required:` hold with no act from him (someone else approved the PR).
+- A RACE hold is no act. Only a `RACE decided:` line that `resume`, `hand-back` or `auto-retry` acts on is counted
+  (`race-decided`). A decision that arrives while a green re-verify lands the task, or that a defer applies, is not
+  counted.
+- A repair run that records no answer, sign-off, retry hand-back or RACE decision is not counted: one that only
+  descopes and hands back, runs a `resume` that lands no decided RACE, defers, or reconciles drift. The Hands-off rate
+  is a floor on Lachy's involvement, not a full count.
+- Acts from before p21-2's events (a lead's own hand-back then included) are not in the record: such a hand-back is
+  flagged "no recorded cause: not counted".
+- A descope's hand-back reads as automatic, whichever session ran it.
+- A hand edit to a note is no event.
 - A RACE re-verify with no Slot open reads as a wait (`hold-race`), not as running time.
 - The cause of a gap between the value the run ran at and rollouts.toml (`ranAtCause`) is **inferred**: the
   record stamps effective values with no source, and rollouts.toml's mtime moves on any save. A label changes
