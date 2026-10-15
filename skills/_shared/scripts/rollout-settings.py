@@ -22,6 +22,7 @@ of the file format:
     set_aside_rate_points = 5    # set-aside rate may rise at most +5 points
     conflict_rate_points = 10    # conflict rate may rise at most +10 points
     quota_stalls = 0             # more than this many quota stalls breaches (0 = any stall)
+    review_churn_pct = 40        # regression findings over all review findings above this % breaches
     hours_per_task = 1.5         # Throughput (p21-2, ADR 0037 d1): running hours may not exceed this many per task
                                  # whose Slot or lane holding overlaps the scored window, so an overnight run still
                                  # lands by morning
@@ -43,8 +44,8 @@ was given, under ORIGIN_TIMEOUT seconds, in its own process group (killed whole 
 Precedence for each rollout key (the callers apply the first two): task frontmatter → rollout frontmatter →
 `[repo."<slug>"]` (source `file:repo`) → `[defaults]` (`file:defaults`) → `built-in`. Guardrail sources are
 `file:guardrails` or `built-in`. Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
-max_plan_rounds 3, auto_retries 2, spend_approval_usd 0; guardrails 25 / 5 / 10 / 0 / 1.5 (hours_per_task, a
-heuristic: Lachy's rollouts.toml sets the real bound). `auto_retries` is no Tuning key:
+max_plan_rounds 3, auto_retries 2, spend_approval_usd 0; guardrails 25 / 5 / 10 / 0 / 40 / 1.5 (hours_per_task,
+a heuristic: Lachy's rollouts.toml sets the real bound). `auto_retries` is no Tuning key:
 schedule does not stamp it and a Reflection never proposes it; execute's `lead-integrate.py inputs` and
 `reconcile-rollout.py auto-retry` resolve it themselves (p16-4). Nor is `spend_approval_usd` (ADR 0034): schedule
 shows it but never stamps it on a rollout, and `reconcile-rollout.py approve-gates --standing` resolves it itself (task
@@ -114,10 +115,12 @@ BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, 
 # `spend_approval_usd: 0` turns the standing approval off.
 MINIMUM = {"parallel_ceiling": 1, "max_review_rounds": 1, "max_iterations": 1, "max_plan_rounds": 1, "auto_retries": 0,
            "spend_approval_usd": 0}
-GUARDRAIL_KEYS = ("tokens_per_merge_pct", "set_aside_rate_points", "conflict_rate_points", "quota_stalls", "hours_per_task")
+# review_churn_pct (p21-3, ADR 0037 d1): Review churn's absolute bound, a non-negative number like the rates.
 # hours_per_task (p21-2): the Throughput Guardrail's absolute bound, skills/reflect/scripts/score.py's built-in too.
+GUARDRAIL_KEYS = ("tokens_per_merge_pct", "set_aside_rate_points", "conflict_rate_points", "quota_stalls",
+                  "review_churn_pct", "hours_per_task")
 GUARDRAILS_BUILT_IN = {"tokens_per_merge_pct": 25, "set_aside_rate_points": 5, "conflict_rate_points": 10,
-                       "quota_stalls": 0, "hours_per_task": 1.5}
+                       "quota_stalls": 0, "review_churn_pct": 40, "hours_per_task": 1.5}
 TABLES = ("defaults", "guardrails", "repo")
 ORIGIN_TIMEOUT = 20  # seconds for land.sh --origin-slug (one local git call); the whole group dies on expiry
 

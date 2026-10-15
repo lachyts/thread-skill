@@ -68,7 +68,8 @@ per run. A marked and an unmarked match found together never pull two ways.
 2. **The capture, exactly one per run:**
    - **Found, and its match includes `marked`** → **update it in place**:
      refresh the summary + resume prompt, set/move/remove `scheduled:`,
-     rewrite § 4b's two fields, leave `captured:` as the original date. That
+     rewrite § 4b's two fields, leave `captured:` as the original date,
+     and keep an existing `fixes:` line (§ 4). That
      in-place update is the capture, whatever unmarked matches sit beside
      it. Only a marked capture is ever updated in place.
    - **No open marked capture found** → write one fresh marked capture under
@@ -153,6 +154,7 @@ projects: ["[[<Project>]]", "[[<Area>]]"]
 scheduled: <YYYY-MM-DD>        # defer only — OMIT the line entirely for stash
 captured: <YYYY-MM-DD today>
 launch: <cc-* alias>           # qualifying tasks only — OMIT when no alias applies
+fixes: ["[[<landed task>]]"]   # OMIT unless the task fixes landed work
 ---
 ```
 
@@ -176,6 +178,15 @@ launch: <cc-* alias>           # qualifying tasks only — OMIT when no alias ap
   line. Only a fresh stash or defer write stamps it; § 2 never adds it to an
   existing unmarked task. Nothing else (a close follow-up, a rollout or
   phase task) ever carries it.
+- `fixes:` = set only when the task repairs work that already landed (its
+  task is `done`, merged or archived) and should not have needed the fix:
+  an **Escape**, as the plugin's `CONTEXT.md` defines it. It names the task
+  that landed, by slug: the note whose PR merged. A member that schedule
+  step 4.5 folded into a combined note is accepted, because it resolves
+  through its `merged_into:`. It is never a phase, a rollout or a capture,
+  and never marks planned follow-on work. A list or a scalar both read. The
+  Reflection's score counts it against the rollout that landed the task, so
+  Quality can see it (ADR 0037 d7).
 - Typed values: dates as `YYYY-MM-DD`, wiki-links quoted.
 - `next_action:` is not in this template: § 4b's script adds it to every
   stash and defer, quoted safely. Don't hand-write it.

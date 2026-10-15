@@ -14,7 +14,7 @@ The decisive "I'm done here *for now*, and I don't know when I'll be back" route
 1. **Write the capture task** — follow `${CLAUDE_PLUGIN_ROOT}/skills/_shared/task-writer.md` exactly:
    - § 1 project routing (never orphaned, never `_Inbox`).
    - § 2 dedup (an open marked capture for this thread → update it, don't duplicate; if it had a `scheduled:` date, remove it — stash means dateless. Each unmarked match is left untouched and reported; a fresh marked capture is written only when no open marked capture exists, one at most).
-   - § 4 frontmatter with **no `scheduled:` line** — that's what makes it a stash.
+   - § 4 frontmatter with **no `scheduled:` line** — that's what makes it a stash — plus `fixes:` when the set-down work fixes landed work (task-writer § 4).
    - § 4b next action — the set-down, through `next-action.py set-down` (estate ADR 0008).
    - § 5 body: summary, resume prompt (first instruction closes the capture), THREAD.md link if one exists.
    - § 6 THREAD.md upgrade only if the work is thread-worthy — never manufactured.

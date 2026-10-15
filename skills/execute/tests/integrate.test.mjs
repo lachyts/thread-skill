@@ -1,7 +1,7 @@
 // p12-6 (ADR 0030 decision 3): Integration's trouble path is its own small Workflow call.
 //
 // args.mode: 'integrate' runs the integrator (or, on P1, only the judge) in the task's worktree and returns
-// ONE row: today's 20 keys plus `integration`. These fixtures run the WHOLE script through runTask() with a
+// ONE row: the task row's 22 keys plus `integration`. These fixtures run the WHOLE script through runTask() with a
 // label-keyed stub that throws on any label it was not given (so a stray dispatch fails loudly) and
 // records every dispatch's opts. The rendered steps themselves run in tests/integration-tree.test.sh; the
 // note side of the stage markers runs in tests/integration-marker-roundtrip.test.mjs.
@@ -20,7 +20,7 @@ const T = loadEngine([
 const ROW_KEYS = [
   'slug', 'scope', 'status', 'prUrl', 'branch', 'worktreePath', 'reviewRoundsUsed', 'planRoundsUsed',
   'blockerDiagnosis', 'reviewFeedback', 'reviewHistory', 'approvedAtCeiling', 'gatedInputs', 'summary',
-  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman',
+  'startRung', 'rung', 'climbs', 'rungDrift', 'ran', 'plan', 'needsHuman', 'reviewVerdicts',
 ]
 const STATUSES = ['review', 'review-blocked', 'blocked', 'plan-blocked', 'gate-pending']
 const sha = (c) => c.repeat(40)
@@ -460,6 +460,8 @@ test('d4: a task.resume built only from d1\'s diagnosis passes validation and di
   clean(r)
   assert.deepEqual(r.labels, [`revise:${SLUG} r3`, `review:${SLUG} r3`])
   assert.equal(r.row.status, 'review')
+  // p21-3: only its own call's judged round; the Integration rejection (round 2) writes no review-verdict
+  assert.deepEqual(r.row.reviewVerdicts, [{ round: 3, verdict: 'approve', head: '', feedback: [] }])
 })
 
 // ---- (e) set-asides --------------------------------------------------------------------------------
@@ -894,6 +896,7 @@ test('S6: a seeded call that stops resumes at revise — the marker first, a rev
   assert.deepEqual(JSON.parse(JSON.stringify(T.parseIntegrationMarker(later.row.blockerDiagnosis).history)), [...HIST2, { round: 3, feedback: ['r3 point'] }])
   assert.equal(later.row.reviewRoundsUsed, 3)
   assert.ok(promptOf(later, `revise:${SLUG} r4`).includes('COLD ENTRY'), 'every revise in a seeded call keeps the cold entry')
+  assert.deepEqual(later.row.reviewVerdicts, [{ round: 3, verdict: 'changes', head: '', feedback: ['r3 point'] }], 'p21-3: the stopped call keeps its judged round')
   const gate = 'credential: the deploy key'
   const gated = await run(resumeArgs(mkResume()), { [`revise:${SLUG} r3`]: { ...implOk, verified: false, blocked: true, blockerDiagnosis: 'needs a key', gatedInputs: [gate] } })
   assert.equal(gated.row.status, 'gate-pending')
@@ -910,6 +913,20 @@ test('S7: a seeded revise climbs its review stage from the stamped rung, per cal
   clean(top)
   assert.deepEqual([top.row.startRung, top.row.rung, top.row.climbs], ['opus-xhigh', 'opus-xhigh', [{ stage: 'review', from: 'opus-xhigh', to: 'opus-xhigh' }]])
   assert.deepEqual(top.row.ran.map((x) => x.label), [`revise:${SLUG} r3`, `review:${SLUG} r3`])
+})
+
+test('S8 (p21-3): a seeded judge r3 changes then a gate-pending reviser r4 keeps r3\'s three bullets', async () => {
+  const bullets = ['a.js:3 keep their rename', 'b.js:9 restore the export', 'the tests still drop theirs']
+  const gate = 'credential: the deploy key'
+  const r = await run(resumeArgs(mkResume(), { maxReviewRounds: 5 }), {
+    [`revise:${SLUG} r3`]: implOk, [`review:${SLUG} r3`]: { verdict: 'changes', feedback: bullets },
+    [`revise:${SLUG} r4`]: { ...implOk, verified: false, blocked: true, blockerDiagnosis: 'needs a key', gatedInputs: [gate] },
+  })
+  clean(r)
+  assert.equal(r.row.status, 'gate-pending')
+  assert.equal(r.row.reviewVerdicts.length, 1)
+  assert.equal(r.row.reviewVerdicts[0].round, 3)
+  assert.equal(r.row.reviewVerdicts[0].feedback.length, 3)
 })
 
 // ---- empty-feedback rounds (a `changes` verdict with [] is valid; the live row passes verbatim) ---------
@@ -1010,6 +1027,7 @@ test('static: no force, no PR merge, approvedGates-independent prompts, the row 
     assert.ok(STATUSES.includes(r.row.status), r.row.status)
     assert.equal(r.row.plan, null, 'an integrate row never settles the plan (p14-2)')
     assert.equal(r.row.needsHuman, null, 'an integrate row never settles ## Needs you (p16-3)')
+    assert.deepEqual(r.row.reviewVerdicts, [], 'an Integration re-review is no master-review round (p21-3)')
   }
   const code = src.replace(/\/\/[^\n]*/g, '')
   assert.deepEqual(code.match(/['"`]revise: [^'"`]*/g), ["'revise: rejected at Integration re-review — revise on the branch, then re-integrate"])

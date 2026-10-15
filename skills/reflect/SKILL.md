@@ -1,20 +1,21 @@
 ---
 name: reflect
-description: 'Use to score a rollout and tune the operator''s rollout settings: a Reflection over its Run record. Triggers on "reflect on [[rollout]]", "how did [[rollout]] run", "how did the rollout run", "score this rollout", "what bound the rollout", "should I raise the parallel ceiling", or /thread:reflect. Folds the Workflow journals, scores the Run record on its two headlines (Hands-off rate, and Quality once Escapes are traced) and the Guardrails (Throughput among them, bounded in running hours per task), with Slot and lane use, load and the binding constraint, proposes Tunings weighed for what each serves and risks, and applies only the ones Lachy picks through the tune script, which records every Reflection in tunings.jsonl. Never changes anything on its own. Not for Chorus''s Companion record: "reflect on the Companion" is Chorus''s /reflect.'
+description: 'Use to score a rollout and tune the operator''s rollout settings: a Reflection over its Run record. Triggers on "reflect on [[rollout]]", "how did [[rollout]] run", "how did the rollout run", "score this rollout", "what bound the rollout", "should I raise the parallel ceiling", or /thread:reflect. Folds the Workflow journals, scores the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to it) and the Guardrails (Throughput among them, bounded in running hours per task, and Review churn), with Slot and lane use, load and the binding constraint, proposes Tunings weighed for what each serves and risks, and applies only the ones Lachy picks through the tune script, which records every Reflection in tunings.jsonl. Never changes anything on its own. Not for Chorus''s Companion record: "reflect on the Companion" is Chorus''s /reflect.'
 ---
 
 # /thread:reflect — score a rollout, propose Tunings, apply the picked ones
 
 `/thread:reflect [[rollout]]` is the **Reflection** (`CONTEXT.md` § Run record and tuning; ADR 0032): it reads a
 rollout's Run record, scores it on its two headlines (ADR 0037 d1), **Hands-off rate** (the share of landed tasks
-with no act from Lachy once the run started) and **Quality** (not scored until Escapes are traced), then on the
-Guardrails (Throughput, bounded so an overnight run still finishes by morning, among them), names what bound it, and
-proposes **Tunings** to the operator's rollout settings (`~/.config/thread/rollouts.toml`). It never changes anything
-itself. Every number
+with no act from Lachy once the run started) and **Quality** (how few Escapes its landed tasks produced), then on
+the Guardrails (Throughput, bounded so an overnight run still finishes by morning, and Review churn among them),
+names what bound it, and proposes **Tunings** to the operator's rollout settings (`~/.config/thread/rollouts.toml`).
+It never changes anything itself. Every number
 comes from two scripts, and the model only runs them, shows what they print and passes Lachy's answer on:
 
 - `skills/reflect/scripts/score.py` computes the scores and the proposals. It reads only; its header is the one
-  copy of every rule (running time, the binding constraint, the baseline, the proposal rules).
+  copy of every rule (running time, the binding constraint, the baseline, the proposal rules), and
+  `skills/reflect/scripts/escapes.py` beside it, which it loads, holds the rules for the Escapes and Quality.
 - `skills/reflect/scripts/tune.py` is the **only writer** of `rollouts.toml` and of `tunings.jsonl` (the
   Reflection's line beside the record). Never edit either file by hand from this skill, and never compute a score
   or write a Tuning in the conversation.
@@ -29,7 +30,9 @@ reads a rollout's Run record, never the Companion's: "reflect on the Companion" 
 Reads the rollout note (`~/repos/obsidian/Work/Tasks/`, then `Work/Tasks/Archive/Rollouts/`), the Run record and
 `tunings.jsonl` under the events directory (`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/run_record.py dir`
 prints it), and `~/.config/thread/rollouts.toml` through `rollout-settings.py`. `land.sh --origin-slug` runs one
-local `git remote get-url origin` in the Project root: no network. Writes: `fold-journals`' `call-journal` lines,
+local `git remote get-url origin` in the Project root: no network. For the Escapes the score also reads, read-only:
+every note under `~/repos/obsidian/Work/Tasks/`, Archive included, for `fixes:` and `merged_into:`; and the Project
+root's git (commit messages, `docs/reviews/` and `git blame`), never fetched. Writes: `fold-journals`' `call-journal` lines,
 and tune.py's one line and its picked keys. Scratch files go under `/tmp/thread-reflect-<rollout-slug>/`. No vault
 write, no git write, no PR.
 
@@ -82,9 +85,13 @@ bash ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/land.sh --origin-slug <Project
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/score.py --rollout <slug> --note <rollout note path> \
-  --settings /tmp/thread-reflect-<rollout-slug>/settings.json --repo-slug <owner/name> \
+  --settings /tmp/thread-reflect-<rollout-slug>/settings.json --repo-slug <owner/name> --repo <Project root> \
   --out /tmp/thread-reflect-<rollout-slug>/score.json
 ```
+
+`--repo <Project root>` lets the score read the Escapes git holds (reverts of this rollout's merges, later review
+findings against its lines); the task notes' `fixes:` come from the vault's `Work/Tasks/` (`--tasks-dir <dir>` only to
+point it elsewhere). With `land.sh` exit 4 (no `--repo-slug`), still pass `--repo`.
 
 The whole run by default (`--since` the first Slot taken, `--until` now). On Lachy's word add `--since <TS>` and
 `--until <TS>`, each with `Z` or an offset (`2026-10-02T09:00+11:00`), to score one span: a before/after split
@@ -94,22 +101,33 @@ Exit 0 with the flag `no record` is a real answer (nothing was recorded), shown 
 
 ### 5. Present
 
-From `score.json`, verbatim numbers only (the record is UTC; local times may be shown beside them):
+From `score.json`, verbatim numbers only (the record is UTC; local times may be shown beside them), the two
+headlines first (ADR 0037 d1), then the Guardrails:
 
-- **The two headlines.**
-  - **Hands-off rate** (`handsOff`): the rate, landed tasks and how many landed with no act from Lachy, then each
-    task's acts (`tasks[].acts`: a Recorded answer, a sign-off, a retry hand-back, a merge hold, a RACE decision),
-    the tally by kind, and what was not counted (`notCounted`: Standing approvals, automatic hand-backs, green RACE
-    re-verifies). Show the baseline's rate (`handsOff.baseline`), or "none (a v1 line)" when the flags say the
-    baseline is a v1 line.
-  - **Quality**: "not scored yet" (`quality.why`).
+- **Hands-off rate** (`handsOff`), the first headline: the rate, landed tasks and how many landed with no act from
+  Lachy, then each task's acts (`tasks[].acts`: a Recorded answer, a sign-off, a retry hand-back, a merge hold, a RACE
+  decision), the tally by kind, and what was not counted (`notCounted`: Standing approvals, automatic hand-backs, green
+  RACE re-verifies). Show the baseline's rate (`handsOff.baseline`), or "none (a v1 line)" when the flags say the
+  baseline is a v1 line.
+- **Quality**, the second headline: `escapes.count` Escapes of `escapes.landed` landed tasks, `headline.quality`, and
+  `escapes.bySource` (fixes, reverts, reviews), with each escaped task's evidence verbatim (the `fixes:` note, the
+  revert commit, or the review doc and row). When `escapes.partial` is true, say what Quality misses, which can hold
+  even with all three sources read: each unread source (`escapes.sources`), each `escapes.excluded.unresolved` task
+  with its why (a landed task whose git evidence is unresolved), and the count of review findings whose blame failed
+  (`escapes.excluded.unresolvedRows`); say Quality can only read too high. An Escape found later counts against this
+  rollout, so a later re-score can lower Quality.
 - **Guardrails**: **Throughput** first, against its bound: merges per running hour, the running hours against the
   allowance (`allowanceHours` for its `tasks`, `bound`), and whether it is breached; then every excluded span by kind
   (`paused`, `hold-merge` / `hold-race` / `hold-git-env` waits on Lachy, `lead-absent`, `never-finished`,
   `lane-only-over-cap`, `idle`) with its why. Say when the window is `partial` (a Slot still running at the
   Reflection). Then tokens per merge, set-aside rate, conflict rate (and the integrator-path share) and quota
   stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so. Last,
-  **Review churn**: "unknown until review rounds are recorded".
+  **Review churn** (`reviewChurn`, p21-3): its value, or "unknown" when no review round was recorded or no
+  finding could be classified (never 0; say which, from its flag, and any "low coverage" flag), rounds per landed
+  task, the engine and /fresh-review split (`engine`, `freshReview`), the `unclassified` count (findings no
+  `path:line` blame could place), its bound (`review_churn_pct`, absolute: it breaches with no baseline) and
+  whether it is breached. Integration re-review rejections are not counted: rounds per landed task is
+  master-review rounds only.
 - **Slots and lane**: the ceiling it ran at (and any mid-window change), the share of running time the Slots were
   full, utilisation, idle Slot time by reason; the lane's busy share, Integrations and the ready-to-lane waits.
 - **Load**: the overlapping rollouts on this machine, their span and the Slots each held open (`slotsOpen`). A
@@ -187,6 +205,15 @@ change a live rollout, Lachy edits its note.
   the wording only, never whether a proposal is made.
 - The thresholds (the 30-min grace, the 2-h lane-only cap, the 50 / 80 / 60 % shares) are heuristics, named in
   `score.json`'s `thresholds`.
+- A fix written without `fixes:` is not counted as an Escape (task-writer § 4 sets the key).
+- A review finding is attributed by `git blame`, so a finding on an old line counts against whichever task last
+  wrote that line: a landed later PR's review can still blame its sibling-site findings (a line it should have
+  changed alongside its own change) on the task that last wrote the line, so Quality can read too low.
+- Only a review of landed work counts: a review whose head the Project root's ref does not reach (a closed PR's
+  rounds, or a branch that landed only by squash) is skipped and listed in `escapes.excluded.unlandedDocs`, so a
+  squash-landed later PR's findings are missed too.
+- Reverts and review findings are read from the Project root's local ref, never fetched: `escapes.ref.tipDate`
+  shows how old it is, and anything pushed since the last fetch is missed.
 
 ## Don'ts
 

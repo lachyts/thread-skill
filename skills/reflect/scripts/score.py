@@ -6,17 +6,24 @@ python >= 3.8, stdlib only. Called by skills/reflect/SKILL.md (step 4) as:
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/score.py --rollout <slug|[[slug]]|note path> \\
         [--note <rollout note>] [--since TS] [--until TS] [--settings <rollout-settings JSON file|->] \\
-        [--repo-slug owner/name] [--out F]
+        [--repo-slug owner/name] [--repo <Project root>] [--tasks-dir <dir>] [--out F]
+
+--repo takes any directory in the Project root's clone, as tune.py's and rollout-settings.py's --repo do; --tasks-dir
+the vault's task notes, as unfinished-rollout.py's and reconcile-rollout.py's do (default ~/repos/obsidian/Work/Tasks,
+`~` read against the scored env's HOME). Both only feed the Escapes, below; without them those sources read unread.
 
 Reads: the rollout's record `<events dir>/<slug>.jsonl` (run_record.py's directory chain), every other
-`<slug>.jsonl` there for load (reviews.jsonl and tunings.jsonl are never read as rollouts; only lines from the
+`<slug>.jsonl` there for load (reviews.jsonl and tunings.jsonl are never read as rollouts, though reviews.jsonl is
+read for its /fresh-review rounds, Review churn below; only lines from the
 scored record's host count, and only where a record's live span overlaps this run's running time, not the window, so
 a Reflection run long after the rollout never counts a later rollout; the live span runs to its last line or, while a
 Slot it took is open, to --until, flagged, so a busy rollout whose long calls write nothing still counts), tunings.jsonl for the baseline, earlier
 Tunings and their agreement, and the rollout note's frontmatter (parallel_ceiling, max_review_rounds,
 max_iterations, max_plan_rounds, captured) through reconcile-rollout.py's Note, for the cause labels only. --settings is rollout-settings.py's JSON for
 the Project root: each key's resolved value now (a proposal's `from`), the Guardrail bounds, and `path`, whose
-mtime feeds the cause labels.
+mtime feeds the cause labels. For the Escapes, escapes.py (beside this script, loaded here) also reads, read-only and
+never fetched: every note under --tasks-dir (Archive included) for `fixes:` and `merged_into:`, and the --repo
+clone's commit messages, `docs/reviews/` and `git blame`. Its docstring is the one copy of those rules.
 
 Times. --since and --until take Z or an offset (run_record's `_stamp` rule; a naive stamp is refused) and
 everything printed is UTC `Z`. --since defaults to the record's first slot-taken, else its first line;
@@ -72,7 +79,8 @@ Headlines (ADR 0037 d1: two, and Lachy settles any trade between them; there is 
   cause: not counted"), and each git-env hold (task null: a rollout-level wait, attributed to no task). An act's own
   line is no activity of the task's call: it never moves an untimed call's last activity (the four act kinds stay out
   of each task's last record line).
-- Quality: null until p21-4 traces Escapes; `quality.why` says so, and the headline slot carries null.
+- Quality: escapes.quality (Escapes and Quality, below; p21-4): 1 - Escapes / landed, null with nothing landed or
+  every Escape source unread. `escapes.partial` says when it rests on fewer sources and can only read too high.
 
 Scores: Throughput = merges (distinct tasks with a `merged` line in the window, read-only ones included) per
 running hour (0.0 with no merge; null with no running time, flagged), now a Guardrail. Slots: the Parallel ceiling
@@ -92,12 +100,38 @@ whose call started in the window by its startTime, else its run-bound; integrate
 set-aside rate (set-asides / (Slots closed + Integrations)), conflict rate (conflicting lane-freed /
 Integrations, with the integrator-path share beside it) and quota stalls, against their [guardrails] bounds:
 a % rise for tokens, point rises for the two rates (both measured from the baseline) and an absolute count for
-stalls. Review churn reads "unknown" and never breaches until p21-3 records review rounds. The baseline is the
-`scores` of the tunings.jsonl line for this repo (ignoring case) with the latest
+stalls; and Review churn (below) against an absolute `review_churn_pct` bound (built-in 40), which breaches with no
+baseline. The baseline is the `scores` of the tunings.jsonl line for this repo (ignoring case) with the latest
 window.activeEnd at or before this window's activeStart, a line not marked partial preferred (a partial one is
 used only when no other qualifies, flagged); activeEnd null never qualifies. It carries the line's `v`; a line
 whose scores lack the v2 keys (a v1 line, seven scores) is flagged and gives no Hands-off rate, Quality or Review
-churn baseline. With none, only quota stalls and Throughput (both absolute) can breach ("no baseline").
+churn baseline. With none, only quota stalls, Throughput and Review churn, the three absolute bounds, can breach ("no
+baseline"). Throughput's and Review churn's `baseline` is shown beside them, never compared.
+
+Review churn (p21-3, ADR 0037 d1) = Σregression / Σfindings over the window's review rounds, both sources together,
+rounded to 4 places: null, flagged "review churn unknown: no review rounds recorded", with no round; 0.0 only with
+rounds but no findings (every round approved clean); null, flagged "review churn unknown: N finding(s), none
+classified (...)", with findings none of which original or regression placed (no head, no tree, no `path:line`
+cite), since a 0.0 there would read clean and never breach. A null never breaches. The denominator is every
+finding, unclassified ones included (the rest of findings once original and regression are taken), so sparse
+`path:line` cites understate it; `unclassified` reports the coverage, and more than half of the findings
+unclassified is flagged "review churn: low coverage" (review-ledger.py's 40% THRESHOLD, the built-in bound, is
+measured over classified findings only). The breach is decided from the integer sums, Σregression x 100 >
+review_churn_pct x Σfindings, never from the rounded value (11 of 20 is at a 55 bound, not over it).
+- Engine rounds: the record's review-verdict lines (reconcile-rollout.py, one per judged master-review round, split
+  by review-split.py). The lines read (ts <= --until) are deduped ONCE by run_record.verdict_key, the first line per
+  key in record order kept; that one set feeds both the windowed sums (rounds with ts in [since, until]) and rounds
+  per landed task: each landed task's kept rounds up to --until, over the landed tasks with at least one (landed:
+  a `merged` line in the window, read-only ones out); null with none, and a landed task with no round is flagged.
+  Engine rounds are reviewLoop's REVIEW_VERDICT rounds only; an Integration re-review rejection uses a review round
+  but writes no review-verdict line, so rounds per landed task counts master-review rounds only and `round` can skip.
+- /fresh-review rounds: reviews.jsonl's review-round lines (p15-7) read up to --until, deduped on (repo, doc), else
+  (repo, head, digest), the latest kept, then windowed by the kept line's ts. A line counts only when its repo is
+  this score's repo (--repo-slug, else --settings' `repo`): an owner/name matched ignoring case, or an absolute path
+  whose GitHub origin is (rollout-settings.py's _origin_slug, cached per path; a deleted worktree resolves through
+  its nearest existing ancestor). With no repo identity, or a path with no readable origin, it is `unattributed`,
+  flagged and not counted. A missing file is no rounds; a line without valid counts is a round outside the sums,
+  flagged.
 
 Binding, the first that holds: quota-bound (quota stalls >= QUOTA_STALLS); lane-bound (lane busy >=
 LANE_BOUND_BUSY of running time, or the waits climbing: the last third's mean over WAIT_CLIMB_RATIO times the
@@ -114,19 +148,22 @@ slot-taken lines. to = ranAt + direction; from = rollouts.toml's resolved value 
 `from -> to` when sign(to - from) is the rule's direction; otherwise rollouts.toml is already at or past this
 run's evidence and the entry is withheld. to < 1 is dropped and flagged. With no repo identity nothing is
 proposed. Each rule's effect is a declared heuristic, RULE_EFFECTS (this header is the one copy of it):
-  slot-bound-raise      serves throughput; risks tokensPerMerge, setAsideRate, conflictRate, quotaStalls
+  slot-bound-raise      serves throughput; risks tokensPerMerge, setAsideRate, conflictRate, quotaStalls,
+                        reviewChurn
   quota-bound-lower     serves quotaStalls; risks throughput
   review-rounds-raise   serves handsOffRate; risks quality, throughput, tokensPerMerge, setAsideRate,
                         conflictRate, quotaStalls, reviewChurn
   plan-rejected-raise   serves handsOffRate; risks quality, throughput, tokensPerMerge, setAsideRate,
-                        conflictRate, quotaStalls
+                        conflictRate, quotaStalls, reviewChurn
+Review churn sits in every raise's risks: its absolute bound (p21-3) withheld any raise when it landed, and still does.
 A rule missing from RULE_EFFECTS fails closed (UNDECLARED_EFFECT): it serves nothing and risks every Guardrail, so
 any breach withholds its raise.
 weigh(rule, measured) gives every proposal and withheld entry `serves`, `risks` and `trade`: {gains: the headlines
 it serves, costs: the headlines it risks and does not serve}, only when both lists are non-empty and every headline
-in them is scored (non-null); else null. Quality is null until p21-4, so no trade fires yet. Once p21-4 scores it,
-this static table makes both round raises standing trades: whether they stay so (which takes two knob rules out of
-ADR 0037 d5's unattended landing) or become evidence-based is Lachy's decision, which p21-4 inherits. Withheld, in
+in them is scored (non-null); else null. p21-4 scores Quality (escapes.quality), so whenever both headlines are
+scored this static table makes both round raises standing trades: whether they stay so (which takes two knob rules
+out of ADR 0037 d5's unattended landing) or become evidence-based is Lachy's decision, still open. A Quality that
+rests on fewer sources (`escapes.partial`) still names the trade. Withheld, in
 this order: no settings, the sign, the lane hold, then a Guardrail: a raise (direction > 0) is withheld while a
 Guardrail in its `risks` is breached, naming only those ("a raise while a Guardrail is breached: ..."), so a
 slot-bound raise is never withheld by the Throughput it serves. A lower is never withheld by a Guardrail: when one it
@@ -141,17 +178,28 @@ inferred (the record stamps effective values with no source): a label changes th
 a proposal is made. `agreeing` counts earlier non-voided applied Tunings with the same repo, key, rule and
 direction.
 
+Escapes and Quality. The landed set is every task with a `merged` line in the window (read-only ones included; the
+latest line wins, a later line with no pr keeping the earlier pr, two different prs flagged), keyed as `merges` is,
+so escapes.landed == merges.count. escapes.py scores it: an Escape is a task note whose `fixes:` names a landed task,
+a revert of its merge, or a later review finding against its lines, each read up to now (never bounded by --until,
+so a re-score counts a late Escape against this rollout), deduped per landed task; Quality = 1 - Escapes / landed.
+Its flags are prefixed `escapes: `; one that will not load leaves every source unread, flagged.
+
 Output: one JSON object (stdout, or --out F): rollout, repo, host, window{since, until, activeStart, activeEnd,
-partial}, runningTime{hours, excluded[{kind, start, end, hours, why}], excludedHours{kind: hours}}, merges,
+partial}, runningTime{hours, excluded[{kind, start, end, hours, why}], excludedHours{kind: hours}}, merges, escapes
+(escapes.py's block: count, landed, quality, partial, bySource, reviewDocs, tasks, sources, ref, excluded),
 throughput, handsOff{rate, landed, handsOff, tasks[{task, acts[{kind, at, detail}]}], byKind{answer, signOff,
-retry, mergeHold, raceDecided}, notCounted{standingApproval, automaticHandBack, raceReverified}, baseline},
-quality{value, why}, slots, lane, guardrails{throughput{value, runningHours, tasks, allowanceHours, bound,
-baseline, breached}, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, reviewChurn}, load, binding{constraint,
-why}, headline (the ten numbers tune.py records, its name kept for tune.py: throughput, runningHours, merges,
-tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate, quality, reviewChurn), baseline{id,
-activeEnd, partial, v, scores}, proposals[{id, key, from, to, ranAt, ranAtCause, rule, direction, evidence,
-agreeing, serves, risks, trade, caution}], withheld (the same plus reason), flags, thresholds. stderr gets one
-summary line, led by `hands-off R (M of N)`.
+retry, mergeHold, raceDecided}, notCounted{standingApproval, automaticHandBack, raceReverified}, baseline}, slots,
+lane, guardrails{throughput{value, runningHours, tasks, allowanceHours, bound, baseline, breached}, tokensPerMerge,
+setAsideRate, conflictRate, quotaStalls, reviewChurn{value | "unknown", bound "<=N%", baseline, breached,
+roundsPerLandedTask}}, load, binding{constraint, why}, headline (the ten numbers tune.py records, its name kept for
+tune.py: throughput, runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
+quality (escapes.quality), reviewChurn (reviewChurn.value)), reviewChurn{value, findings, original, regression,
+unclassified, rounds, engine{rounds, findings, original, regression, unclassified, landedTasks (the landed tasks
+with a recorded round), roundsPerLandedTask}, freshReview{rounds, findings, original, regression, unclassified,
+unattributed}}, baseline{id, activeEnd, partial, v, scores}, proposals[{id, key, from, to, ranAt, ranAtCause, rule,
+direction, evidence, agreeing, serves, risks, trade, caution}], withheld (the same plus reason), flags, thresholds.
+stderr gets one summary line, led by `hands-off R (M of N)`.
 
 Exit codes: 0 scored (a "no record" score included); 1 the record, the events directory, --settings or --note
 cannot be read; 2 a usage error, a bad or reserved slug, or a bad TS.
@@ -162,16 +210,20 @@ import argparse
 import datetime
 import importlib.util
 import json
+import math
 import os
 import pathlib
 import re
 import sys
 import time
+from fractions import Fraction
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.dirname(os.path.dirname(HERE))
 RUN_RECORD_PY = os.path.join(SKILLS, "_shared", "scripts", "run_record.py")
 RECONCILE_PY = os.path.join(SKILLS, "execute", "scripts", "reconcile-rollout.py")
+ROLLOUT_SETTINGS_PY = os.path.join(SKILLS, "_shared", "scripts", "rollout-settings.py")
+ESCAPES_PY = os.path.join(HERE, "escapes.py")
 
 HOUR = 3600 * 1000
 MINUTE = 60 * 1000
@@ -187,9 +239,10 @@ DEPENDENCY_IDLE = 0.5            # idle Slot time this share of capacity -> depe
 QUOTA_STALLS = 1                 # this many quota stalls -> quota-bound
 ROUND_SET_ASIDES = 2             # this many review-rounds (plan-rejected) set-asides -> a round cap +1
 EVIDENCE_MAX = 300
-# rollout-settings.py's GUARDRAILS_BUILT_IN; hours_per_task (p21-2) is Throughput's absolute bound.
+# rollout-settings.py's GUARDRAILS_BUILT_IN; review_churn_pct (p21-3) is Review churn's absolute bound, hours_per_task
+# (p21-2) Throughput's.
 GUARDRAILS_BUILT_IN = {"tokens_per_merge_pct": 25, "set_aside_rate_points": 5, "conflict_rate_points": 10,
-                       "quota_stalls": 0, "hours_per_task": 1.5}
+                       "quota_stalls": 0, "review_churn_pct": 40, "hours_per_task": 1.5}
 KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
 # The human acts' kinds (run_record.py's "Human acts"): never a task's call activity (pair keeps them out of last_line).
 ACT_KINDS = ("answer-recorded", "gate-signed", "handed-back", "race-decided")
@@ -198,11 +251,12 @@ ACT_NAMES = ("answer", "signOff", "retry", "mergeHold", "raceDecided")
 HEADLINES = ("handsOffRate", "quality")
 OLD_GUARDRAILS = ("tokensPerMerge", "setAsideRate", "conflictRate", "quotaStalls")
 GUARDRAILS = ("throughput",) + OLD_GUARDRAILS + ("reviewChurn",)  # guardrails()' keys, in its order
+# Review churn is in every raise's risks: its absolute bound (p21-3) withheld any raise when it landed, and still does.
 RULE_EFFECTS = {
-    "slot-bound-raise": (("throughput",), OLD_GUARDRAILS),
+    "slot-bound-raise": (("throughput",), OLD_GUARDRAILS + ("reviewChurn",)),
     "quota-bound-lower": (("quotaStalls",), ("throughput",)),
     "review-rounds-raise": (("handsOffRate",), ("quality", "throughput") + OLD_GUARDRAILS + ("reviewChurn",)),
-    "plan-rejected-raise": (("handsOffRate",), ("quality", "throughput") + OLD_GUARDRAILS),
+    "plan-rejected-raise": (("handsOffRate",), ("quality", "throughput") + OLD_GUARDRAILS + ("reviewChurn",)),
 }
 # A rule missing from RULE_EFFECTS fails closed: it serves nothing and risks every Guardrail, so any breach withholds
 # its raise, as every breach withheld every raise before p21-2 weighed effects, instead of none.
@@ -367,11 +421,43 @@ def _caution(hit, guard):
     return "risks %s: a Guardrail against a Guardrail, Lachy decides" % "; ".join(parts)
 
 
+def _counts(d):
+    """(findings, original, regression) of a review line when all three are ints >= 0 and original + regression <=
+    findings, else None."""
+    vals = [d.get(k) for k in ("findings", "original", "regression")]
+    if any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in vals) or vals[1] + vals[2] > vals[0]:
+        return None
+    return tuple(vals)
+
+
+def _churn_over(regression, findings, bound_pct):
+    """regression / findings above bound_pct %, decided from the integer sums: the rounded fraction is no test
+    (11/20 * 100 is 55.00000000000001, over a 55 bound; 4-place rounding can hide a breach just over one). A float
+    bound is read as the decimal it prints as, so 14.1 is 141/10."""
+    finite = not (isinstance(bound_pct, float) and not math.isfinite(bound_pct))
+    bound = Fraction(str(bound_pct)) if finite else bound_pct
+    return regression * 100 > bound * findings
+
+
+def guardrail_bounds(settings):
+    """The [guardrails] bounds: each built-in, overridden by --settings' numeric value (a boolean refused)."""
+    bounds = dict(GUARDRAILS_BUILT_IN)
+    g = (settings or {}).get("guardrails")
+    if isinstance(g, dict):
+        for k in bounds:
+            v = g.get(k, {}).get("value") if isinstance(g.get(k), dict) else None
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                bounds[k] = v
+    return bounds
+
+
 class Score:
     def __init__(self, args, env=None):
         self.args = args
         self.flags = []
         self.env = os.environ if env is None else env
+        self.origins = {}  # a review-round's repo path -> its GitHub owner/name, or None (review churn)
+        self.rs = None     # rollout-settings.py, loaded on the first review-round path
 
     def flag(self, text):
         if text not in self.flags:
@@ -386,11 +472,13 @@ class Score:
         self.holds, open_holds = [], {}
         self.pauses, pause = [], None
         self.steps, self.markers, self.merges, self.readies = [], [], [], []
+        self.merge_lines = []  # (t, task, pr, readOnly) of every merged line, for the Escapes' landed set
         self.set_asides, self.stalls, self.bound, self.slot_taken = [], [], [], []
         self.journals, self.last_line, self.task_lines = {}, {}, {}
         self.acts, self.hand_back_starts = [], []
+        self.verdict_lines, self.read_only = [], set()  # p21-3: review-verdict (n, t, task, d); read-only merges
         last_t = None
-        for t, _n, d in lines:
+        for t, n, d in lines:
             kind, task = d.get("kind"), d.get("task")
             if kind == "call-journal" and isinstance(d.get("runId"), str):
                 # read whatever its ts: fold-journals stamps the fold time (completion, or the Reflection's start), not
@@ -399,6 +487,12 @@ class Score:
                 if prev is None or prev.get("status") not in RR.TERMINAL_STATUSES or \
                         d.get("status") in RR.TERMINAL_STATUSES:
                     self.journals[d["runId"]] = d
+                continue
+            if kind == "review-verdict":
+                # reconcile writes these with the row's other events: read for Review churn only, never as a task's
+                # activity (last_line) or the record's last line
+                if t <= until and task:
+                    self.verdict_lines.append((n, t, task, d))
                 continue
             if t > until:
                 continue
@@ -468,6 +562,9 @@ class Score:
                 self.markers.append((t, d.get("reason")))
             elif kind == "merged" and task:
                 self.merges.append((t, task))
+                self.merge_lines.append((t, task, d.get("pr"), d.get("readOnly") is True))
+                if d.get("readOnly") is True:
+                    self.read_only.add(task)
             elif kind == "ready" and task:
                 self.readies.append((t, task))
             elif kind == "set-aside" and task:
@@ -974,6 +1071,7 @@ class Score:
         act_start = self.run_iv[0][0] if self.run_iv else None
         act_end = self.run_iv[-1][1] if self.run_iv else None
         merged = sorted({task for t, task in self.merges if since <= t <= until})
+        escapes = self.escapes(self.landed(since, until), repo)
         throughput = None
         if rt:
             throughput = round(len(merged) / (rt / HOUR), 3)
@@ -990,28 +1088,32 @@ class Score:
         stalls = sum(1 for t in self.stalls if since <= t <= until)
         run_start = first_taken if first_taken is not None else (lines[0][0] if lines else since)
         hands_off = self.hands_off(run_start, since, until)
+        bounds = guardrail_bounds(settings)
+        churn, churn_breached = self.review_churn(since, until, base, repo, bounds["review_churn_pct"])
+        # the ten scores tune.py records: Quality is escapes.quality (p21-4), Review churn reviewChurn.value (p21-3)
         headline = {"throughput": throughput, "runningHours": hours(rt), "merges": n_merges, "tokensPerMerge": tpm,
                     "setAsideRate": sa_rate, "conflictRate": conflict, "quotaStalls": stalls,
-                    "handsOffRate": hands_off["rate"], "quality": None, "reviewChurn": None}
+                    "handsOffRate": hands_off["rate"], "quality": escapes["quality"], "reviewChurn": churn["value"]}
         base_line = self.baseline(repo, act_start)
         if base_line is None and repo is not None:
-            self.flag("no baseline: no earlier Reflection on %s ended before this run began; only quota stalls and "
-                      "Throughput can withhold a raise" % repo)
+            self.flag("no baseline: no earlier Reflection on %s ended before this run began; only quota stalls, "
+                      "Throughput and Review churn can withhold a raise" % repo)
         hands_off["baseline"] = ((base_line or {}).get("scores") or {}).get("handsOffRate")
-        guard = self.guardrails(headline, base_line, settings, since, until)
+        guard = self.guardrails(headline, base_line, bounds, since, until, churn, churn_breached)
         out.update({
             "window": {"since": fmt(since), "until": fmt(until), "activeStart": fmt(act_start),
                        "activeEnd": fmt(act_end), "partial": self.partial},
             "runningTime": {"hours": hours(rt), "excluded": self.excluded, "excludedHours": self.excluded_hours},
             "merges": {"count": n_merges, "tasks": merged},
+            "escapes": escapes,
             "throughput": throughput,
             "handsOff": hands_off,
-            "quality": {"value": None, "why": "not scored yet: Escapes are traced by p21-4"},
             "slots": self.slot_metrics,
             "lane": dict(self.lane_metrics, integratorShare=integ_share),
             "guardrails": guard,
             "load": self.load(base, slug, host, since, until),
             "headline": headline,
+            "reviewChurn": churn,
             "baseline": base_line,
         })
         binding = self.binding(stalls)
@@ -1066,6 +1168,53 @@ class Score:
                 pass
         return fm
 
+    # ---- Escapes and Quality (escapes.py) ---------------------------------------------------------------------
+
+    def landed(self, since, until):
+        """{task: {pr, readOnly, at}} for every task with a `merged` line in the window, the same raw `task` keys as
+        `merges` (emit's normalise_slug output). Lines arrive in time order, so the latest wins; a later line with no
+        pr keeps the earlier one, and two different prs for one task are flagged."""
+        out, prs = {}, {}
+        for t, task, pr, read_only in self.merge_lines:
+            if not since <= t <= until:
+                continue
+            if pr not in (None, ""):
+                prs.setdefault(task, set()).add(str(pr).rstrip("/").rsplit("/", 1)[-1].lstrip("#"))
+            prev = out.get(task, {})
+            out[task] = {"pr": pr if pr not in (None, "") else prev.get("pr"), "readOnly": read_only, "at": fmt(t)}
+        for task in sorted(prs):
+            if len(prs[task]) > 1:
+                self.flag("escapes: [[%s]]'s merged lines carry %d different prs (%s): the latest is read"
+                          % (task, len(prs[task]), ", ".join(sorted(prs[task]))))
+        return out
+
+    def _expand(self, p):
+        """`~` expanded against the scored env's HOME (a scratch HOME stays hermetic)."""
+        if p == "~" or p.startswith("~/"):
+            return RR._home(self.env) + p[1:]
+        return os.path.expanduser(p)
+
+    def escapes(self, landed, repo):
+        """escapes.py's block (its flags prefixed `escapes: `); an all-unread block, flagged, when it will not load."""
+        a = self.args
+        tasks_dir = self._expand(a.tasks_dir) if a.tasks_dir else \
+            os.path.join(RR._home(self.env), "repos", "obsidian", "Work", "Tasks")
+        repo_dir = self._expand(a.repo) if a.repo else None
+        try:
+            block, flags = _load("thread_escapes", ESCAPES_PY).score(landed, tasks_dir, repo_dir, repo, self.env)
+        except Exception as e:
+            why = "unread: escapes.py did not load (%s: %s)" % (type(e).__name__, e)
+            block = {"count": None, "landed": len(landed), "quality": None, "partial": True,
+                     "bySource": {"fixes": None, "reverts": None, "reviews": None}, "reviewDocs": None, "tasks": [],
+                     "sources": {"fixes": why, "reverts": why, "reviews": why}, "ref": None,
+                     "excluded": {"dropped": [], "selfNamed": [], "unreadNotes": 0, "rejectedRows": 0,
+                                  "unresolved": [], "unresolvedDocs": [], "unlandedDocs": [],
+                                  "unresolvedRows": []}}
+            flags = ["Quality unknown: escapes.py did not load (%s: %s)" % (type(e).__name__, e)]
+        for f in flags:
+            self.flag("escapes: " + f)
+        return block
+
     def tokens(self, since, until):
         """Every call's tokens (its journal's latest terminal line, else its latest: a call still running counts what
         it has spent) when the call started in the window: its startTime, else its run-bound line's ts."""
@@ -1084,14 +1233,151 @@ class Score:
                 any_tokens = True
         return got if any_tokens else None
 
-    def guardrails(self, headline, base_line, settings, since, until):
-        bounds = dict(GUARDRAILS_BUILT_IN)
-        g = (settings or {}).get("guardrails")
-        if isinstance(g, dict):
-            for k in bounds:
-                v = g.get(k, {}).get("value") if isinstance(g.get(k), dict) else None
-                if isinstance(v, (int, float)) and not isinstance(v, bool):
-                    bounds[k] = v
+    # ---- Review churn (p21-3, ADR 0037 d1) -------------------------------------------------------------------
+
+    def review_churn(self, since, until, base, repo, bound_pct):
+        """(churn, breached): regression findings over all findings, over the engine's master-review rounds (this
+        record's review-verdict lines) and /fresh-review's rounds (reviews.jsonl's review-round lines attributed to
+        `repo`), with the engine's rounds per landed task beside it, and whether it is over `bound_pct` %, decided
+        from the integer sums. None (unknown) with no round recorded, or with findings none of which was classified;
+        0.0 with rounds but no findings. A None never breaches."""
+        # Engine: dedupe the lines read (ts <= --until) ONCE by verdict_key, the first in record order kept (the line
+        # the writer kept); the windowed sums and the per-task round counts both read this one set.
+        kept, seen = [], set()
+        for _n, t, task, d in sorted(self.verdict_lines, key=lambda x: x[0]):
+            try:
+                key = RR.verdict_key(d)
+            except Exception:
+                continue
+            if key not in seen:
+                seen.add(key)
+                kept.append((t, task, d))
+        eng = {"rounds": 0, "findings": 0, "original": 0, "regression": 0, "unclassified": 0}
+        uncounted = 0
+        for t, _task, d in kept:
+            if since <= t <= until:
+                eng["rounds"] += 1
+                c = _counts(d)
+                if c is None:
+                    uncounted += 1
+                else:
+                    self._add(eng, c)
+        if uncounted:
+            self.flag("review churn: %d engine round(s) carry no valid findings/original/regression counts: counted as "
+                      "rounds, not in the churn" % uncounted)
+        landed = sorted({task for t, task in self.merges if since <= t <= until} - self.read_only)
+        per_task = {}
+        for _t, task, _d in kept:
+            per_task[task] = per_task.get(task, 0) + 1
+        with_rounds = [task for task in landed if per_task.get(task)]
+        without = [task for task in landed if not per_task.get(task)]
+        if without:
+            self.flag("review churn: landed task(s) with no recorded review round: %s (a pre-p21-3 engine's row, or a "
+                      "lead-written one)" % ", ".join("[[%s]]" % x for x in without))
+        eng["landedTasks"] = len(with_rounds)
+        eng["roundsPerLandedTask"] = (round(sum(per_task[x] for x in with_rounds) / len(with_rounds), 2)
+                                      if with_rounds else None)
+        fresh = self.fresh_review_rounds(since, until, base, repo)
+        tot = {k: eng[k] + fresh[k] for k in ("rounds", "findings", "original", "regression", "unclassified")}
+        findings, regression = tot["findings"], tot["regression"]
+        breached = False
+        if tot["rounds"] == 0:
+            value = None
+            self.flag("review churn unknown: no review rounds recorded")
+        elif findings == 0:
+            value = 0.0  # every round approved with nothing to fix: no churn, and known
+        elif tot["original"] + regression == 0:
+            # findings, but none placed: a 0.0 here would read clean and never breach (unknown is not 0)
+            value = None
+            self.flag("review churn unknown: %d finding(s), none classified (no head, no tree or no path:line cite)"
+                      % findings)
+        else:
+            value = round(regression / findings, 4)
+            breached = _churn_over(regression, findings, bound_pct)
+            if tot["unclassified"] * 2 > findings:
+                # review-ledger.py's 40% THRESHOLD is measured over classified findings only; here the unclassified
+                # ones sit in the denominator as non-regressions, so a sparse split understates the churn
+                self.flag("review churn: low coverage: %d of %d finding(s) unclassified (no head, no tree or no "
+                          "path:line cite): the churn counts them as non-regressions, so it may read low"
+                          % (tot["unclassified"], findings))
+        out = {"value": value}
+        out.update((k, tot[k]) for k in ("findings", "original", "regression", "unclassified", "rounds"))
+        out.update(engine=eng, freshReview=fresh)
+        return out, breached
+
+    @staticmethod
+    def _add(acc, c):
+        f, o, r = c
+        acc["findings"] += f
+        acc["original"] += o
+        acc["regression"] += r
+        acc["unclassified"] += f - o - r
+
+    def fresh_review_rounds(self, since, until, base, repo):
+        """reviews.jsonl's review-round lines (p15-7's /fresh-review rounds): read up to --until, deduped on (repo, doc),
+        else (repo, head, digest), the latest kept, windowed by the kept line's ts, and counted only when their repo
+        is this score's (an owner/name ignoring case, or a path whose GitHub origin is)."""
+        out = {"rounds": 0, "findings": 0, "original": 0, "regression": 0, "unclassified": 0, "unattributed": 0}
+        path = os.path.join(base, RR.REVIEWS + ".jsonl")
+        if not os.path.exists(path):
+            return out
+        try:
+            lines, _skipped = read_lines(path)
+        except OSError as e:
+            self.flag("review churn: reviews.jsonl cannot be read (%s): no /fresh-review rounds" % e)
+            return out
+        latest = {}
+        for t, _n, d in lines:  # time order, then file order: the last one per key is the latest
+            if d.get("kind") != "review-round" or t > until or not isinstance(d.get("repo"), str):
+                continue
+            doc = d.get("doc")
+            key = ("doc", d["repo"], doc) if isinstance(doc, str) and doc else \
+                ("head", d["repo"], d.get("head"), d.get("digest"))
+            latest[key] = (t, d)
+        uncounted = 0
+        for t, d in latest.values():
+            if not since <= t <= until:
+                continue
+            mine = self._review_repo(d["repo"], repo)
+            if mine is None:
+                out["unattributed"] += 1
+                continue
+            if not mine:
+                continue
+            out["rounds"] += 1
+            c = _counts(d)
+            if c is None:
+                uncounted += 1
+            else:
+                self._add(out, c)
+        if out["unattributed"]:
+            self.flag("review churn: %d /fresh-review round(s) in reviews.jsonl could not be attributed (no repo "
+                      "identity, or a repo path with no readable GitHub origin): not counted" % out["unattributed"])
+        if uncounted:
+            self.flag("review churn: %d /fresh-review round(s) carry no findings/original/regression counts: counted "
+                      "as rounds, not in the churn" % uncounted)
+        return out
+
+    def _review_repo(self, line_repo, repo):
+        """True when a review-round's repo is this score's repo, False when it is another's, None when it cannot be
+        told: no repo identity here, or a path with no readable GitHub origin (land.sh --origin-slug, which reads a
+        deleted worktree through its nearest existing ancestor; cached per path)."""
+        if repo is None or not line_repo:
+            return None
+        if not os.path.isabs(line_repo):
+            return line_repo.lower() == repo.lower()
+        cache = self.origins
+        if line_repo not in cache:
+            try:
+                if self.rs is None:
+                    self.rs = _load("thread_rollout_settings", ROLLOUT_SETTINGS_PY)
+                cache[line_repo] = self.rs._origin_slug(line_repo)
+            except Exception:  # rs.SettingsError (land.sh failed or timed out) or a load failure: unresolvable
+                cache[line_repo] = None
+        slug = cache[line_repo]
+        return None if slug is None else slug.lower() == repo.lower()
+
+    def guardrails(self, headline, base_line, bounds, since, until, churn, churn_breached):
         bs = (base_line or {}).get("scores") or {}
 
         def rise(value, base, points):
@@ -1133,9 +1419,14 @@ class Score:
             "quotaStalls": {"value": headline["quotaStalls"], "bound": bounds["quota_stalls"],
                             "baseline": bs.get("quotaStalls"),
                             "breached": headline["quotaStalls"] > bounds["quota_stalls"]},
-            # p21-3 records review rounds; until then Review churn is unknown and never breaches
-            "reviewChurn": {"value": "unknown", "bound": None, "baseline": bs.get("reviewChurn"), "breached": False},
         }
+        # an absolute bound (ADR 0037 d1): it breaches with no baseline (its baseline is shown, never compared), and a
+        # null value never breaches; the breach is review_churn's, decided from the integer sums, never from the
+        # rounded value
+        v = churn["value"]
+        out["reviewChurn"] = {"value": v if v is not None else "unknown", "bound": "<=%s%%" % bounds["review_churn_pct"],
+                              "baseline": bs.get("reviewChurn"), "breached": v is not None and churn_breached,
+                              "roundsPerLandedTask": churn["engine"]["roundsPerLandedTask"]}
         if tpm is None:
             self.flag("tokens per merge unknown: no folded call journal carries tokens (or nothing merged)")
         return out
@@ -1376,6 +1667,8 @@ def main(argv):
     p.add_argument("--until")
     p.add_argument("--settings")
     p.add_argument("--repo-slug")
+    p.add_argument("--repo", help="any directory in the Project root's clone: its git gives reverts and review findings")
+    p.add_argument("--tasks-dir", help="the vault's task notes, for fixes: (default ~/repos/obsidian/Work/Tasks)")
     p.add_argument("--out")
     args = p.parse_args(argv)
     try:

@@ -447,7 +447,8 @@ function checkExecute({ skill, hooksJson, exists, template }) {
 
   // approved-plan (p14-2, L2): the approved plan reaches the seeded revise (step 1.2) and the integrate call (step 3)
   // from `lead-integrate.py plan`, read at those two launches only (Restart routing's revise reuses step 1.2's) and
-  // passed verbatim; no empty-plan literal is left; § 6 lists the row's `plan` and reconcile's three outcomes.
+  // passed verbatim; no empty-plan literal is left; § 6 lists the row's `plan` (then p21-3's `reviewVerdicts`, the row's
+  // last key) and reconcile's three outcomes.
   const planHits = (section(skill, S45) ?? '').split('lead-integrate.py plan').length - 1
   const s6 = S(skill, S6)
   const VERBATIM = 'passed verbatim as the same JSON string, never retyped, summarised or truncated'
@@ -456,7 +457,7 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !st3.includes('trouble, landed, plan, reviewHistory') ||
     !st3.includes("`plan` is `lead-integrate.py plan --note <task note>`'s `plan`, read at this launch (after the approving row is reconciled) and " + VERBATIM) ||
     planHits !== 2 || /plan: ''|plan: ""|`plan` is `""`/.test(s45) ||
-    !s6.includes('gatedInputs, plan }] }') || !s6.includes('upserts it, quoted, under `## Approved plan`') ||
+    !s6.includes('gatedInputs, plan, reviewVerdicts }] }') || !s6.includes('upserts it, quoted, under `## Approved plan`') ||
     !s6.includes('`""` removes that section') || !s6.includes('`null` or absent leaves it')) {
     fails.push('approved-plan')
   }

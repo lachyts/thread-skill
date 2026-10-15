@@ -303,6 +303,7 @@ For each confirmed cluster, author a new task note at `~/repos/obsidian/Work/Tas
 - `tags: [task, <area>]`, `status: open`, `priority`, `projects:` (copied from the members)
 - `scope: cross-cutting` — a merge always crosses the members' concerns, so the plan-gate + rigorous review apply
 - `touches:` = the **union** of the members' own `touches:`, only when every member has one — the one sanctioned place the planner writes `touches:` (see Don'ts): a union of authoritative sets, not a fresh guess. Otherwise leave it unset: the union of the members' detected file-sets lives only in the rollout's `## File-sets` (step 6).
+- `fixes:` = the **union** of the members' `fixes:` (task-writer § 4), when any member carries one, so the combined note names every landed task its work fixes. The Escape count does not depend on it: each tombstone keeps its own `fixes:` at `status: merged`, which the Reflection's score counts, and the count dedupes per landed task.
 
 In the body, aggregate every member's acceptance criteria under one `## Acceptance criteria` (the implementer must satisfy all of them, in sequence), and link each original with an unpathed `[[wikilink]]` under a `## Folded-in tasks` heading so the per-task detail stays discoverable.
 
