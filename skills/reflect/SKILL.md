@@ -1,13 +1,16 @@
 ---
 name: reflect
-description: 'Use to score a rollout and tune the operator''s rollout settings: a Reflection over its Run record. Triggers on "reflect on [[rollout]]", "how did [[rollout]] run", "how did the rollout run", "score this rollout", "what bound the rollout", "should I raise the parallel ceiling", or /thread:reflect. Folds the Workflow journals, scores the Run record (Throughput over running time, Guardrails, Slot and lane use, load, the binding constraint), proposes Tunings, and applies only the ones Lachy picks through the tune script, which records every Reflection in tunings.jsonl. Never changes anything on its own. Not for Chorus''s Companion record: "reflect on the Companion" is Chorus''s /reflect.'
+description: 'Use to score a rollout and tune the operator''s rollout settings: a Reflection over its Run record. Triggers on "reflect on [[rollout]]", "how did [[rollout]] run", "how did the rollout run", "score this rollout", "what bound the rollout", "should I raise the parallel ceiling", or /thread:reflect. Folds the Workflow journals, scores the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to it) and the Guardrails (Throughput among them, bounded in running hours per task, and Review churn), with Slot and lane use, load and the binding constraint, proposes Tunings weighed for what each serves and risks, and applies only the ones Lachy picks through the tune script, which records every Reflection in tunings.jsonl. Never changes anything on its own. Not for Chorus''s Companion record: "reflect on the Companion" is Chorus''s /reflect.'
 ---
 
 # /thread:reflect — score a rollout, propose Tunings, apply the picked ones
 
 `/thread:reflect [[rollout]]` is the **Reflection** (`CONTEXT.md` § Run record and tuning; ADR 0032): it reads a
-rollout's Run record, scores it on Throughput and the Guardrails, names what bound it, and proposes **Tunings** to the
-operator's rollout settings (`~/.config/thread/rollouts.toml`). It never changes anything itself. Every number
+rollout's Run record, scores it on its two headlines (ADR 0037 d1), **Hands-off rate** (the share of landed tasks
+with no act from Lachy once the run started) and **Quality** (how few Escapes its landed tasks produced), then on
+the Guardrails (Throughput, bounded so an overnight run still finishes by morning, and Review churn among them),
+names what bound it, and proposes **Tunings** to the operator's rollout settings (`~/.config/thread/rollouts.toml`).
+It never changes anything itself. Every number
 comes from two scripts, and the model only runs them, shows what they print and passes Lachy's answer on:
 
 - `skills/reflect/scripts/score.py` computes the scores and the proposals. It reads only; its header is the one
@@ -98,22 +101,28 @@ Exit 0 with the flag `no record` is a real answer (nothing was recorded), shown 
 
 ### 5. Present
 
-From `score.json`, verbatim numbers only (the record is UTC; local times may be shown beside them):
+From `score.json`, verbatim numbers only (the record is UTC; local times may be shown beside them), the two
+headlines first (ADR 0037 d1), then the Guardrails:
 
-- **Throughput**: merges per running hour, the running hours, and every excluded span by kind (`paused`,
-  `hold-merge` / `hold-race` / `hold-git-env` waits on Lachy, `lead-absent`, `never-finished`,
-  `lane-only-over-cap`, `idle`) with its why. Say when the window is `partial` (a Slot still running at the
-  Reflection).
-- **Quality**: `escapes.count` Escapes of `escapes.landed` landed tasks, `headline.quality`, and `escapes.bySource`
-  (fixes, reverts, reviews), with each escaped task's evidence verbatim (the `fixes:` note, the revert commit, or the
-  review doc and row). When `escapes.partial` is true, say what Quality misses, which can hold even with all three
-  sources read: each unread source (`escapes.sources`), each `escapes.excluded.unresolved` task with its why (a
-  landed task whose git evidence is unresolved), and the count of review findings whose blame failed
+- **Hands-off rate** (`handsOff`), the first headline: the rate, landed tasks and how many landed with no act from
+  Lachy, then each task's acts (`tasks[].acts`: a Recorded answer, a sign-off, a retry hand-back, a merge hold, a RACE
+  decision), the tally by kind, and what was not counted (`notCounted`: Standing approvals, automatic hand-backs, green
+  RACE re-verifies). Show the baseline's rate (`handsOff.baseline`), or "none (a v1 line)" when the flags say the
+  baseline is a v1 line.
+- **Quality**, the second headline: `escapes.count` Escapes of `escapes.landed` landed tasks, `headline.quality`, and
+  `escapes.bySource` (fixes, reverts, reviews), with each escaped task's evidence verbatim (the `fixes:` note, the
+  revert commit, or the review doc and row). When `escapes.partial` is true, say what Quality misses, which can hold
+  even with all three sources read: each unread source (`escapes.sources`), each `escapes.excluded.unresolved` task
+  with its why (a landed task whose git evidence is unresolved), and the count of review findings whose blame failed
   (`escapes.excluded.unresolvedRows`); say Quality can only read too high. An Escape found later counts against this
   rollout, so a later re-score can lower Quality.
-- **Guardrails**: tokens per merge, set-aside rate, conflict rate (and the integrator-path share) and quota
-  stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so.
-  **Review churn** too (`reviewChurn`, p21-3): its value, or "unknown" when no review round was recorded or no
+- **Guardrails**: **Throughput** first, against its bound: merges per running hour, the running hours against the
+  allowance (`allowanceHours` for its `tasks`, `bound`), and whether it is breached; then every excluded span by kind
+  (`paused`, `hold-merge` / `hold-race` / `hold-git-env` waits on Lachy, `lead-absent`, `never-finished`,
+  `lane-only-over-cap`, `idle`) with its why. Say when the window is `partial` (a Slot still running at the
+  Reflection). Then tokens per merge, set-aside rate, conflict rate (and the integrator-path share) and quota
+  stalls, each against its bound and the baseline, and whether it is breached. With no baseline, say so. Last,
+  **Review churn** (`reviewChurn`, p21-3): its value, or "unknown" when no review round was recorded or no
   finding could be classified (never 0; say which, from its flag, and any "low coverage" flag), rounds per landed
   task, the engine and /fresh-review split (`engine`, `freshReview`), the `unclassified` count (findings no
   `path:line` blame could place), its bound (`review_churn_pct`, absolute: it breaches with no baseline) and
@@ -127,7 +136,9 @@ From `score.json`, verbatim numbers only (the record is UTC; local times may be 
 - **The binding constraint** and its why. A lane-bound run proposes no key: say "no key moves this".
 - **Each proposal**: `id`, `key from → to`, its evidence, `agreeing` (earlier applied Tunings with the same rule),
   and its `ranAtCause` in plain words when present, e.g. "ran at 5 by a rollout-note override; rollouts.toml says
-  3", so a jump such as 3 → 6 reads as one step past what the run proved.
+  3", so a jump such as 3 → 6 reads as one step past what the run proved. Then what it `serves` and `risks`. A
+  `trade` reads "buys <gains> at the risk of <costs>: Lachy decides, no tie-breaker (ADR 0037 d1)". A `caution` is
+  shown verbatim, as Lachy's call.
 - **Each withheld entry** with its reason, and every flag.
 
 Then ask which proposals to apply, by id, or none.
@@ -176,7 +187,18 @@ change a live rollout, Lachy edits its note.
 ## What the record cannot show
 
 - A merge hold carries no reason, so a `--gated` hold cannot be told from an exit-7 hold: both read as a wait on
-  Lachy.
+  Lachy, and both count as an act in the Hands-off rate, though a heartbeat tick can release an exit-7 `review
+  required:` hold with no act from him (someone else approved the PR).
+- A RACE hold is no act. Only a `RACE decided:` line that `resume`, `hand-back` or `auto-retry` acts on is counted
+  (`race-decided`). A decision that arrives while a green re-verify lands the task, or that a defer applies, is not
+  counted.
+- A repair run that records no answer, sign-off, retry hand-back or RACE decision is not counted: one that only
+  descopes and hands back, runs a `resume` that lands no decided RACE, defers, or reconciles drift. The Hands-off rate
+  is a floor on Lachy's involvement, not a full count.
+- Acts from before p21-2's events (a lead's own hand-back then included) are not in the record: such a hand-back is
+  flagged "no recorded cause: not counted".
+- A descope's hand-back reads as automatic, whichever session ran it.
+- A hand edit to a note is no event.
 - A RACE re-verify with no Slot open reads as a wait (`hold-race`), not as running time.
 - The cause of a gap between the value the run ran at and rollouts.toml (`ranAtCause`) is **inferred**: the
   record stamps effective values with no source, and rollouts.toml's mtime moves on any save. A label changes

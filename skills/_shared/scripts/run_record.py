@@ -32,7 +32,9 @@ Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jso
 tunings.jsonl. Both names are RESERVED: refused as a rollout slug and as a carried `from`.
 
 tunings.jsonl holds one line per Reflection (skills/reflect/scripts/tune.py is its one emitter, score.py its one
-reader): the scored window, its seven headline scores and the Tunings Lachy picked (`applied`, most often []).
+reader): the scored window, its ten scores (the two headlines, Hands-off rate and Quality, beside the Guardrails' and
+the run's numbers) and the Tunings Lachy picked (`applied`, most often []). A tuning line is `v` 2 (p21-2); a v1
+line carries the first seven scores only and still serves as a baseline, its missing keys read as no baseline.
 - Baseline: the next Reflection on that repo (matched ignoring case) compares against the `scores` of the line with
   the latest window.activeEnd at or before its own window.activeStart, preferring a line not marked partial; a
   line whose activeEnd is null never qualifies. Comparing active spans, not ts or until, keeps a Reflection run late
@@ -49,7 +51,7 @@ events never split between `Foo` and `foo`.
 Line format: one JSON object per line, ASCII only, compact separators, no NaN or Infinity, at most 16 KiB
 with its newline. The common keys come first, in this order:
 
-    v        1
+    v        the kind's schema version: KIND_VERSIONS, else VERSION (1). Only tuning is 2 (p21-2: its ten scores).
     ts       UTC, millisecond precision, `Z` suffix: 2026-10-03T22:23:00.000Z. The writer stamps it; an
              explicit --ts / ts= is converted to UTC and must match, on every python version,
              YYYY-MM-DD(T| )HH:MM[:SS[(.|,)fraction]] then Z, +HH, +HHMM or +HH:MM (a naive one is
@@ -111,14 +113,29 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
   carried         T  from (the old rollout's slug), to (set to the new rollout). Appended to both
                      <from>.jsonl and <to>.jsonl, each line's `rollout` the file it sits in; each append
                      is best-effort on its own.
+  answer-recorded T  answerKind (needs-you | decision: record-answer's --kind); form? (hand-back |
+                     awaiting-repair | left: its --form, none for a `(block -)` answer); raise? (max_review_rounds |
+                     max_plan_rounds | max_iterations: its --raise); pr? (bool: --pr was given). p21-2:
+                     reconcile-rollout.py record-answer, Lachy's Recorded answer.
+  gate-signed     T  standing (bool: false for a bare approve-gates sign-off, true for the gates --standing
+                     covered); gates (int >= 1: how many it signed). p21-2: reconcile-rollout.py approve-gates.
+  handed-back     T  via (answer | descope | retry: hand-back classifies itself, first match: a standing
+                     `descope_armed:`; --answer, a live answer spent or a fresh `(block -)` entry; else retry); arm
+                     (run | integration: the stage it re-enters). p21-2: reconcile-rollout.py hand-back, never
+                     auto-retry (its own event names it).
+  race-decided    T  mark (RACE | UNVERIFIED); by (resume | hand-back | auto-retry: the verb that moved the task
+                     because Lachy's `RACE decided:` line lifted its hold). At most once per task per record.
+                     p21-2: reconcile-rollout.py _record_decision.
   tuning             id, repo, window{since, until, activeStart?, activeEnd?, partial?}, scores{throughput,
-                     runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls}, applied
-                     (a list of at most 8 {key, from, to, ranAt, rule, evidence, agreeing}); binding?
-                     (slot-bound | lane-bound | quota-bound | dependency-bound | none-clear); voids? (the id
-                     of the line this one voids). A rollout is required and a task is refused; lands in
-                     tunings.jsonl. window: since and until UTC `Z` stamps, activeStart and activeEnd a UTC
-                     `Z` stamp or null, partial a boolean, no other key. scores: exactly the seven keys,
-                     each a finite number or null, with merges and quotaStalls integers >= 0. applied: key
+                     runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
+                     quality, reviewChurn}, applied (a list of at most 8 {key, from, to, ranAt, rule, evidence,
+                     agreeing}); binding? (slot-bound | lane-bound | quota-bound | dependency-bound | none-clear);
+                     voids? (the id of the line this one voids). A rollout is required and a task is refused;
+                     lands in tunings.jsonl, `v` 2. window: since and until UTC `Z` stamps, activeStart and
+                     activeEnd a UTC `Z` stamp or null, partial a boolean, no other key. scores: exactly the ten
+                     keys, each a finite number or null, with merges and quotaStalls integers >= 0 and
+                     handsOffRate in [0, 1] (quality is null when nothing landed or no Escape source was read,
+                     p21-4; reviewChurn when no review round was recorded, p21-3). applied: key
                      one of parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds; from, to
                      and ranAt integers >= 1 with from != to; rule a string of at most 64 characters;
                      evidence one of at most 300; agreeing an integer >= 0; no other key.
@@ -153,7 +170,9 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   `awaiting-hand-back` also labels a span in which execute's automatic retry (p16-4, ADR 0033) waits out a
   quota or infra cool-down with nothing queued: `next` is stateless and never reads the retry verdict. A
   Reflection tells the two apart by what precedes the slot-taken start=hand-back that ends the span: the task's
-  auto-retry event for a cool-down, none for a human's hand-back.
+  auto-retry event for a cool-down; a `handed-back` (and, for an answered block, the `answer-recorded` before it)
+  or a `gate-signed` for a human's hand-back or sign-off. A record from before p21-2 carries neither, so its human
+  hand-back has none.
 - call-journal: for each runId, use its latest line with a terminal status (completed, failed, killed,
   stopped, cancelled); with none, use its latest line and treat the call as in flight. The writer folds
   under an exclusive flock on the file and skips a fold when that runId already has a terminal line, or
@@ -161,6 +180,16 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   numbers, a close Reflection's terminal fold always lands, and re-folding is safe. An unknown status counts
   as non-terminal: appended and later superseded, never dropped. Write call-journal only through this
   module, so every writer takes part in the lock.
+- Human acts (p21-2; a Reflection's Hands-off rate, skills/reflect/scripts/score.py). Each is recorded by the verb
+  that acts on it, never model-written. Acts: `answer-recorded` (a Recorded answer); `gate-signed` standing=false (a
+  bare approve-gates sign-off); `handed-back` via=retry (a "retry [[task]]" or repair hand-back that re-enters a block
+  with no answer); `hold-started` hold=merge, any merge hold: the record carries no reason, so a `--gated` hold and an
+  exit-7 `review required:` hold both count; `race-decided`. Not acts: `hold-started` hold=race (the RACE procedure
+  opens it on every merge-task exit 5 and a green re-verify's mark-done ends it with no decision: only the
+  `race-decided` a verb records when Lachy's `RACE decided:` line lifts the hold is his act); `gate-signed`
+  standing=true (the Standing approval); `handed-back` via=answer (the answer is the act) and via=descope (an
+  automatic descope's re-entry); `auto-retry`. via=answer means a live answer of any block spent, `--answer`, or a
+  fresh `(block -)` entry, not this block's answer only.
 - review-round: dedupe on (repo, doc) when doc is present, else on (repo, head, digest), keeping the latest line
   (p15-7's emitter is idempotent per (repo, doc)).
 - review-verdict: one line per verdict_key, (task, round, head) when the line carries a head, else (task, round,
@@ -210,6 +239,8 @@ except ImportError:  # Windows: call-journal folds scan unlocked, with a warning
     fcntl = None
 
 VERSION = 1
+# A kind whose schema moved on stamps its own `v`; every other kind is VERSION. tuning 2: the ten scores (p21-2).
+KIND_VERSIONS = {"tuning": 2}
 MAX_LINE = 16 * 1024
 LOCK_WAIT = 5.0
 COMMON = ("v", "ts", "host", "rollout", "task", "kind")
@@ -281,8 +312,9 @@ SETTINGS = _settings
 UTC_Z_RE = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z\Z", re.ASCII)
 # rollout-settings.py's KEYS (tests/run-record.test.mjs pins that the two agree).
 TUNING_KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
+# v2 (p21-2): the old seven, then the two headlines' and Review churn's slots. A v1 line carries the first seven.
 SCORE_KEYS = ("throughput", "runningHours", "merges", "tokensPerMerge", "setAsideRate", "conflictRate",
-              "quotaStalls")
+              "quotaStalls", "handsOffRate", "quality", "reviewChurn")
 APPLIED_KEYS = ("key", "from", "to", "ranAt", "rule", "evidence", "agreeing")
 MAX_APPLIED = 8
 BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "dependency-bound", "none-clear")
@@ -324,6 +356,8 @@ def _scores(v):
                 return "an object with %s an integer >= 0" % k
         elif v[k] is not None and not _number(v[k]):
             return "an object with %s a finite number or null" % k
+        elif k == "handsOffRate" and v[k] is not None and not 0 <= v[k] <= 1:
+            return "an object with handsOffRate in [0, 1] or null"
     return None
 
 
@@ -384,6 +418,12 @@ KINDS = {
                               "original": _int(0), "regression": _int(0), "digest": _str},
                        {"head": _str}),
     "carried": (True, {"from": _str, "to": _str}, {}),
+    "answer-recorded": (True, {"answerKind": _enum("needs-you", "decision")},
+                        {"form": _enum("hand-back", "awaiting-repair", "left"),
+                         "raise": _enum("max_review_rounds", "max_plan_rounds", "max_iterations"), "pr": _bool}),
+    "gate-signed": (True, {"standing": _bool, "gates": _int(1)}, {}),
+    "handed-back": (True, {"via": _enum("answer", "descope", "retry"), "arm": _enum("run", "integration")}, {}),
+    "race-decided": (True, {"mark": _enum("RACE", "UNVERIFIED"), "by": _enum("resume", "hand-back", "auto-retry")}, {}),
     "tuning": (False, {"id": _str, "repo": _str, "window": _window, "scores": _scores, "applied": _applied},
                {"binding": _enum(*BINDINGS), "voids": _str}),
 }
@@ -521,7 +561,7 @@ def verdict_key(line):
 
 
 def _line(ts, host, rollout, task, kind, fields):
-    obj = {"v": VERSION, "ts": ts, "host": host, "rollout": rollout, "task": task, "kind": kind}
+    obj = {"v": KIND_VERSIONS.get(kind, VERSION), "ts": ts, "host": host, "rollout": rollout, "task": task, "kind": kind}
     obj.update(fields)
     try:
         text = json.dumps(obj, ensure_ascii=True, allow_nan=False, separators=(",", ":"))

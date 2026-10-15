@@ -1,5 +1,6 @@
-// skills/reflect/scripts/score.py — a Reflection's scoring script (p15-5, ADR 0032): Throughput over running time,
-// the Guardrails against a baseline, Slot and lane utilisation, load, the binding constraint and the proposals.
+// skills/reflect/scripts/score.py — a Reflection's scoring script (p15-5, ADR 0032; p21-2, ADR 0037 d1): the two
+// headlines (Hands-off rate, Quality's slot), the Guardrails (Throughput's absolute bound among them) against a baseline,
+// Slot and lane utilisation, load, the binding constraint and the weighed proposals.
 //
 // Hermetic: each case gets its own mkdtemp HOME and THREAD_EVENTS_DIR, an env built from scratch, and that HOME
 // as cwd. Same-host record lines go through run_record.py's own emit (one python process per fixture, each line
@@ -93,7 +94,7 @@ function writeSettings(home, values, { file = null, repo = 'o/r', guardrails = {
   for (const k of ['parallel_ceiling', 'max_review_rounds', 'max_iterations', 'max_plan_rounds']) {
     settings[k] = { value: values[k] ?? { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3 }[k], source: file ? 'file:repo' : 'built-in' }
   }
-  const g = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0, review_churn_pct: 40, ...guardrails }
+  const g = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0, review_churn_pct: 40, hours_per_task: 1.5, ...guardrails }
   const doc = {
     path: file || path.join(home, '.config', 'thread', 'rollouts.toml'), file: !!file, repo,
     settings, guardrails: Object.fromEntries(Object.entries(g).map(([k, v]) => [k, { value: v, source: 'built-in' }])),
@@ -192,7 +193,8 @@ test('slot-bound: running time leaves out the pause and the hold, and the ceilin
   assert.equal(out.lane.integrations, 6)
   assert.equal(out.lane.waitsClimbing, false)
   assert.equal(out.binding.constraint, 'slot-bound')
-  assert.deepEqual(out.headline, { throughput: 0.857, runningHours: 7, merges: 6, tokensPerMerge: 100000, setAsideRate: 0, conflictRate: 0, quotaStalls: 0, quality: null })
+  assert.deepEqual(out.headline, { throughput: 0.857, runningHours: 7, merges: 6, tokensPerMerge: 100000, setAsideRate: 0, conflictRate: 0, quotaStalls: 0,
+    handsOffRate: 0.8333, quality: null, reviewChurn: null }, 'f\'s merge hold is an act: 5 of 6 hands-off')
   assert.equal(out.proposals.length, 1)
   const [p] = out.proposals
   assert.deepEqual([p.id, p.key, p.from, p.to, p.ranAt, p.ranAtCause, p.rule, p.direction, p.agreeing], ['p1', 'parallel_ceiling', 3, 4, 3, null, 'slot-bound-raise', 1, 0])
@@ -225,6 +227,8 @@ test('lane-bound: the lane is the binding constraint and no key is proposed', (t
   assert.deepEqual(out.withheld, [])
   assert.ok(has(out.flags, /no key moves this/))
   assert.equal(out.throughput, 0.6)
+  assert.deepEqual([out.guardrails.throughput.tasks, out.guardrails.throughput.allowanceHours, out.guardrails.throughput.breached], [6, 9, true],
+    '10 running h against 1.5 h for each of 6 tasks')
 })
 
 // Ceiling 2, Slots full 00:00-10:00 and the lane held 03:00-10:00 (70% of running time, waits flat): Slot-bound,
@@ -313,7 +317,7 @@ test('(d) a prior Tuning already moved the key: withheld with its id', (t) => {
   emitAll(home, 'demo', byTs(saturated(3)))
   emitAll(home, 'older-run', [[at('02:00'), 'tuning', null, {
     id: 't-prior', repo: 'o/r', window: { since: D(4, '00:00'), until: D(4, '10:00'), activeStart: D(4, '00:00'), activeEnd: D(4, '09:00'), partial: false },
-    scores: { throughput: 1, runningHours: 9, merges: 9, tokensPerMerge: null, setAsideRate: 0, conflictRate: 0, quotaStalls: 0 },
+    scores: { throughput: 1, runningHours: 9, merges: 9, tokensPerMerge: null, setAsideRate: 0, conflictRate: 0, quotaStalls: 0, handsOffRate: 1, quality: null, reviewChurn: null },
     applied: [{ key: 'parallel_ceiling', from: 3, to: 4, ranAt: 3, rule: 'slot-bound-raise', evidence: 'Slot-bound', agreeing: 0 }],
   }]])
   const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 })])
@@ -349,6 +353,20 @@ test('(f) quota-bound at 4 with rollouts.toml at 4: proposed 4 → 3', (t) => {
   const [p] = out.proposals
   assert.deepEqual([p.key, p.from, p.to, p.ranAt, p.direction, p.rule], ['parallel_ceiling', 4, 3, 4, -1, 'quota-bound-lower'])
   assert.equal(out.guardrails.quotaStalls.breached, true, 'a stall breaches the absolute bound with no baseline')
+  assert.equal(out.guardrails.throughput.breached, false, '4.667 running h against 6 h for 4 tasks')
+  assert.deepEqual([p.serves, p.risks, p.trade, p.caution], [['quotaStalls'], ['throughput'], null, null], 'no Guardrail it risks is breached: no caution')
+  signsHold(out)
+})
+
+test('(f) a lower is never withheld by a Guardrail: with Throughput breached it stays proposed, with a caution for Lachy', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs([...saturated(4), [at('02:00'), 'quota-stall', null, { stage: 'implement', detail: 'usage limit' }]]))
+  const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 4 }, { guardrails: { hours_per_task: 1.0 } })])
+  assert.equal(out.guardrails.throughput.breached, true, '4.667 running h against 4 h')
+  assert.deepEqual(out.withheld, [])
+  const [p] = out.proposals
+  assert.equal(p.rule, 'quota-bound-lower')
+  assert.match(p.caution, /^risks throughput, breached \(4\.667 running h against 4\.0 h, <= 1 running h per task\): a Guardrail against a Guardrail, Lachy decides$/)
   signsHold(out)
 })
 
@@ -383,6 +401,30 @@ test('(i) round caps: the most common slot-taken value is ran-at, and a task ove
   const p = out.proposals.find((x) => x.key === 'max_review_rounds')
   assert.deepEqual([p.from, p.to, p.ranAt, p.rule, p.ranAtCause], [4, 5, 4, 'review-rounds-raise', null])
   assert.ok(has(out.flags, /^max_review_rounds: 1 of 3 tasks ran with a task override$/))
+  // Throughput sits exactly on its bound here (4.5 running h for 3 tasks at 1.5 h each): compared in ms and strictly
+  // greater, so not breached. This test and the next two rely on that.
+  assert.deepEqual(out.guardrails.throughput, { value: 0.667, runningHours: 4.5, tasks: 3, allowanceHours: 4.5,
+    bound: '<= 1.5 running h per task', baseline: null, breached: false })
+  assert.deepEqual([p.serves, p.trade, p.caution], [['handsOffRate'], null, null], 'Quality is unscored: no trade yet')
+  assert.ok(p.risks.includes('quality') && p.risks.includes('throughput') && p.risks.includes('reviewChurn'), JSON.stringify(p.risks))
+  for (const e of [...out.proposals, ...out.withheld]) {
+    for (const k of ['serves', 'risks', 'trade', 'caution']) assert.ok(k in e, `${e.id} carries ${k}`)
+  }
+  signsHold(out)
+})
+
+test('(i) Throughput past its bound withholds the round raise it risks, never the slot-bound raise it serves', (t) => {
+  const home = tmpHome(t)
+  const caps = [4, 4, 6]
+  const ev = saturated(3, { settings: (i) => S(3, { max_review_rounds: caps[i] }) })
+  ev.push([at('03:00'), 'set-aside', 't1', { stage: 'review', reasonClass: 'review-rounds', setAsideAt: 'run' }])
+  ev.push([at('03:30'), 'set-aside', 't2', { stage: 'review', reasonClass: 'review-rounds', setAsideAt: 'run' }])
+  emitAll(home, 'demo', byTs(ev))
+  const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 3, max_review_rounds: 4 }, { guardrails: { hours_per_task: 1.0 } })])
+  assert.equal(out.guardrails.throughput.breached, true, '4.5 running h against 3 h')
+  const w = out.withheld.find((x) => x.rule === 'review-rounds-raise')
+  assert.match(w.reason, /^a raise while a Guardrail is breached: throughput 4\.5 running h against 3\.0 h \(<= 1 running h per task, 3 task\(s\)\)$/)
+  assert.deepEqual(out.proposals.map((x) => x.rule), ['slot-bound-raise'], 'the slot-bound raise serves Throughput, so it is never withheld by it')
   signsHold(out)
 })
 
@@ -417,7 +459,8 @@ test('(i) needs-human set-asides (p16-3, a stop on a question) raise no round ca
 
 // ---- 4. the baseline ----------------------------------------------------------------------------------------------
 
-const SC = (over = {}) => ({ throughput: 1, runningHours: 4, merges: 4, tokensPerMerge: 100000, setAsideRate: 0.1, conflictRate: 0, quotaStalls: 0, ...over })
+const SC = (over = {}) => ({ throughput: 1, runningHours: 4, merges: 4, tokensPerMerge: 100000, setAsideRate: 0.1, conflictRate: 0, quotaStalls: 0,
+  handsOffRate: 0.8, quality: null, reviewChurn: null, ...over })
 const tuningLine = (ts, id, window, { repo = 'o/r', scores = SC(), applied = [], voids } = {}) =>
   [ts, 'tuning', null, { id, repo, window: { since: window[0], until: window[1], activeStart: window[2], activeEnd: window[3], partial: window[4] ?? false }, scores, applied, ...(voids ? { voids } : {}) }, 'older-run']
 
@@ -435,6 +478,8 @@ test('baseline: the latest line ending before this run began, so a set-aside ris
   ])
   const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 3 })])
   assert.equal(out.baseline.id, 't-base')
+  assert.deepEqual([out.baseline.v, out.handsOff.baseline], [2, 0.8], 'a v2 line: its Hands-off rate is the baseline')
+  assert.ok(!has(out.flags, /a v1 line/))
   assert.equal(out.headline.setAsideRate, 0.3333)
   assert.equal(out.guardrails.setAsideRate.baseline, 0.1)
   assert.equal(out.guardrails.setAsideRate.breached, true)
@@ -516,6 +561,263 @@ test('a voided line: its applied neither agrees nor causes, its scores still a b
   assert.equal(w0.ranAtCause, 'unclear: rollouts.toml changed around schedule time')
 })
 
+test('baseline: a v1 line (seven scores) still serves, flagged, with no Hands-off rate baseline', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', withSetAsides())
+  // written by hand in run_record's line format: the writer now refuses seven scores
+  const v1 = { v: 1, ts: Z(D(4, '21:00')), host: 'h', rollout: 'older-run', task: null, kind: 'tuning', id: 't-v1', repo: 'o/r',
+    window: { since: Z(D(4, '10:00')), until: Z(D(4, '21:00')), activeStart: Z(D(4, '10:00')), activeEnd: Z(D(4, '20:00')), partial: false },
+    scores: { throughput: 1, runningHours: 4, merges: 4, tokensPerMerge: 100000, setAsideRate: 0.1, conflictRate: 0, quotaStalls: 0 }, applied: [] }
+  fs.mkdirSync(evDir(home), { recursive: true })
+  fs.appendFileSync(path.join(evDir(home), 'tunings.jsonl'), JSON.stringify(v1) + '\n')
+  const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 3 })])
+  assert.deepEqual([out.baseline.id, out.baseline.v], ['t-v1', 1])
+  assert.ok(has(out.flags, /^baseline t-v1 is a v1 line: no Hands-off rate, Quality or Review churn baseline$/), out.flags.join('\n'))
+  assert.equal(out.handsOff.baseline, null)
+  assert.equal(out.guardrails.setAsideRate.breached, true, 'its old Guardrails still compare')
+  assert.equal(out.guardrails.reviewChurn.baseline, null)
+})
+
+// ---- 6. the two headlines (p21-2, ADR 0037 d1) -------------------------------------------------------------------
+
+// A task set aside at 01:00 and re-entered at 02:00 (a slot-taken start=hand-back), landing at 03:00: `between` are its
+// [kind, fields] events at 01:30, after the set-aside and before the restart.
+function handedBack(slug, between, stage = 'implement') {
+  return [
+    [at('00:00'), 'slot-taken', slug, { settings: S(11), start: 'start' }],
+    [at('01:00'), 'slot-freed', slug, { outcome: 'set-aside' }],
+    [at('01:00'), 'set-aside', slug, { stage, reasonClass: stage === 'gate' ? 'gate' : 'blocked', setAsideAt: stage === 'gate' ? 'gate' : 'run' }],
+    ...between.map(([kind, f]) => [at('01:30'), kind, slug, f]),
+    [at('02:00'), 'slot-taken', slug, { settings: S(11), start: 'hand-back' }],
+    [at('03:00'), 'slot-freed', slug, { outcome: 'ready' }],
+    [at('03:00'), 'merged', slug, { pr: 7 }],
+  ]
+}
+// A task whose Slot runs 00:00-01:00 and lands at 01:10, `after` events between its Slot's end and the merge.
+function landed(slug, after = []) {
+  return [
+    [at('00:00'), 'slot-taken', slug, { settings: S(11), start: 'start' }],
+    [at('01:00'), 'slot-freed', slug, { outcome: 'ready' }],
+    ...after.map(([hm, kind, f]) => [at(hm), kind, slug, f]),
+    [at('01:10'), 'merged', slug, { pr: 7 }],
+  ]
+}
+
+// Ten landed tasks, five with an act from Lachy, and one that never lands.
+function handsOffRecord() {
+  return byTs([
+    ...landed('h01'),
+    ...landed('h02', [['01:00', 'hold-started', { hold: 'merge' }], ['01:10', 'hold-ended', { hold: 'merge' }]]),
+    ...handedBack('h03', [['answer-recorded', { answerKind: 'needs-you', form: 'hand-back', pr: false }], ['handed-back', { via: 'answer', arm: 'run' }]]),
+    ...handedBack('h04', [['gate-signed', { standing: true, gates: 1 }]], 'gate'),
+    ...handedBack('h05', [['handed-back', { via: 'descope', arm: 'run' }]], 'plan'),
+    ...handedBack('h06', [['handed-back', { via: 'retry', arm: 'run' }]]),
+    ...landed('h07', [['01:00', 'hold-started', { hold: 'race' }], ['01:10', 'hold-ended', { hold: 'race' }]]),
+    ...handedBack('h08', [['gate-signed', { standing: false, gates: 2 }]], 'gate'),
+    ...landed('h09', [['01:00', 'hold-started', { hold: 'race' }], ['01:05', 'race-decided', { mark: 'RACE', by: 'resume' }], ['01:10', 'hold-ended', { hold: 'race' }]]),
+    ...handedBack('h10', [['auto-retry', { stage: 'implement', setAsideAt: 'run', retryClass: 'agent', used: 1, budget: 2 }]]),
+    [at('00:00'), 'slot-taken', 'h11', { settings: S(11), start: 'start' }],
+    [at('01:00'), 'slot-freed', 'h11', { outcome: 'set-aside' }],
+    [at('01:00'), 'set-aside', 'h11', { stage: 'implement', reasonClass: 'blocked', setAsideAt: 'run' }],
+    [at('01:30'), 'answer-recorded', 'h11', { answerKind: 'decision', form: 'left', pr: false }],
+  ])
+}
+
+test('hands-off rate: the landed tasks with no act from Lachy, read from the verbs\' events only', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', handsOffRecord())
+  const out = scored(home, ['--until', at('04:00'), '--settings', writeSettings(home, { parallel_ceiling: 11 })])
+  const h = out.handsOff
+  assert.deepEqual([h.rate, h.landed, h.handsOff], [0.5, 10, 5])
+  assert.deepEqual(Object.fromEntries(h.tasks.map((x) => [x.task, x.acts.map((a) => a.kind)])), {
+    h01: [], h02: ['mergeHold'], h03: ['answer'], h04: [], h05: [], h06: ['retry'], h07: [], h08: ['signOff'], h09: ['raceDecided'], h10: [],
+  }, 'h11 never landed: its answer is outside the denominator')
+  assert.deepEqual(h.byKind, { answer: 1, signOff: 1, retry: 1, mergeHold: 1, raceDecided: 1 })
+  assert.deepEqual(h.notCounted, { standingApproval: 1, automaticHandBack: 2, raceReverified: 1 })
+  const [answer] = h.tasks.find((x) => x.task === 'h03').acts
+  assert.equal(answer.at, Z(at('01:30')))
+  assert.match(answer.detail, /needs-you/)
+  assert.equal(h.baseline, null, 'no baseline')
+  assert.ok(!has(out.flags, /no recorded cause/), out.flags.join('\n'))
+  assert.equal(out.headline.handsOffRate, 0.5)
+  // no --repo and no tasks dir under the scratch HOME: every Escape source is unread, so Quality is null; no review round
+  assert.deepEqual([out.headline.quality, out.headline.reviewChurn], [out.escapes.quality, out.reviewChurn.value])
+  assert.deepEqual([out.headline.quality, out.headline.reviewChurn], [null, null])
+  assert.ok(!('quality' in out), 'Quality is escapes.quality (p21-4): no placeholder object')
+  assert.deepEqual(out.guardrails.reviewChurn, { value: 'unknown', bound: '<=40%', baseline: null, breached: false, roundsPerLandedTask: null })
+  assert.match(score(home, ['--until', at('04:00')]).stderr, /^score: demo: hands-off 0\.5 \(5 of 10\), /)
+})
+
+// The header's window: an act counts for a task from the run's start (the record's first slot-taken, 00:00 here) to
+// the task's first merge, both ends inclusive. h01 lands at 01:10 and h07 (a race hold, no decision) at 01:10.
+test('hands-off rate: an act before the run\'s start or after the task\'s merge never counts; one on either edge does', (t) => {
+  const base = tmpHome(t)
+  emitAll(base, 'demo', handsOffRecord())
+  const want = scored(base, ['--until', at('04:00')]).handsOff
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs([
+    ...handsOffRecord(),
+    [D(4, '23:59'), 'answer-recorded', 'h01', { answerKind: 'decision', form: 'left', pr: false }], // before the run's start
+    [at('01:11'), 'gate-signed', 'h01', { standing: false, gates: 1 }], // after h01's merge
+    [at('01:20'), 'race-decided', 'h07', { mark: 'RACE', by: 'resume' }], // after h07's merge: it stays a green re-verify
+  ]))
+  const out = scored(home, ['--until', at('04:00')])
+  assert.deepEqual(out.handsOff, want, 'the rate, every task\'s acts, byKind and notCounted are unchanged')
+  assert.deepEqual([out.handsOff.rate, out.handsOff.tasks.find((x) => x.task === 'h01').acts, out.handsOff.notCounted.raceReverified], [0.5, [], 1])
+  assert.deepEqual(out.handsOff.byKind, { answer: 1, signOff: 1, retry: 1, mergeHold: 1, raceDecided: 1 })
+  const edge = tmpHome(t)
+  emitAll(edge, 'demo', byTs([
+    ...handsOffRecord(),
+    [at('00:00'), 'answer-recorded', 'h01', { answerKind: 'decision', form: 'left', pr: false }], // at the run's start
+    [at('01:10'), 'gate-signed', 'h01', { standing: false, gates: 1 }], // at h01's merge
+  ]))
+  const e = scored(edge, ['--until', at('04:00')]).handsOff
+  assert.deepEqual([e.rate, e.landed, e.handsOff], [0.4, 10, 4])
+  assert.deepEqual(e.tasks.find((x) => x.task === 'h01').acts.map((a) => [a.kind, a.at]), [['answer', Z(at('00:00'))], ['signOff', Z(at('01:10'))]])
+  assert.deepEqual(e.byKind, { answer: 2, signOff: 2, retry: 1, mergeHold: 1, raceDecided: 1 })
+})
+
+test('hands-off rate: a hand-back with no recorded cause (a record from before p21-2) is flagged and reads hands-off', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs([...landed('l1'), ...handedBack('l2', [])]))
+  const out = scored(home, ['--until', at('04:00')])
+  assert.deepEqual([out.handsOff.rate, out.handsOff.landed], [1, 2])
+  assert.ok(has(out.flags, new RegExp(`^\\[\\[l2\\]\\]: slot-taken start=hand-back at ${Z(at('02:00')).replace(/\./g, '\\.')} .*no recorded cause: not counted`)), out.flags.join('\n'))
+})
+
+test('hands-off rate: nothing landed is null, flagged; a git-env hold is a rollout-level wait', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', [[at('00:00'), 'slot-taken', 'a', { settings: S(2) }], [at('01:00'), 'slot-freed', 'a', { outcome: 'set-aside' }],
+    [at('01:30'), 'hold-started', null, { hold: 'git-env' }], [at('02:00'), 'hold-ended', null, { hold: 'git-env' }]])
+  const out = scored(home, ['--until', at('03:00')])
+  assert.deepEqual([out.handsOff.rate, out.handsOff.landed, out.headline.handsOffRate], [null, 0, null])
+  assert.ok(has(out.flags, /^hands-off rate: nothing landed in the window/))
+  assert.ok(has(out.flags, /git-env hold .*rollout-level wait/))
+})
+
+// An act's own line is no activity of the task's call: an open Slot whose call has no journal ends at its last real
+// activity + GRACE, however late Lachy's acts on it come.
+test('an act stamped while an untimed call is open never extends its Slot', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', [
+    [at('00:00'), 'slot-taken', 'a', { settings: S(2) }],
+    [at('00:00'), 'run-bound', 'a', { runId: 'wf_a', journalDir: '/nonexistent' }],
+    [at('02:00'), 'answer-recorded', 'a', { answerKind: 'decision' }],
+    [at('02:00'), 'race-decided', 'a', { mark: 'RACE', by: 'hand-back' }],
+  ])
+  const out = scored(home, ['--until', at('06:00')])
+  assert.equal(out.runningTime.hours, 0.5, 'the Slot ends at its start + 30 min, not at 02:30')
+  assert.equal(out.window.activeEnd, Z(at('00:30')))
+})
+
+test('Throughput counts the tasks whose Slot or lane holding overlaps a mid-run window (a --since split)', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', slotBound())
+  const out = scored(home, ['--since', at('04:30'), '--until', at('12:00'), '--settings', writeSettings(home, { parallel_ceiling: 3 })])
+  assert.deepEqual([out.guardrails.throughput.tasks, out.guardrails.throughput.allowanceHours, out.guardrails.throughput.breached], [3, 4.5, false],
+    'd, e and f overlap 04:30; a, b and c ended before it, Slot and lane holding both')
+  const split = scored(home, ['--since', at('04:10'), '--until', at('12:00'), '--settings', writeSettings(home, { parallel_ceiling: 3 })])
+  assert.deepEqual([split.guardrails.throughput.tasks, split.guardrails.throughput.allowanceHours], [4, 6],
+    'c\'s Slot ended at 04:00, but it integrates 04:00-04:20, inside the window: it earns its allowance too')
+})
+
+// A supersede's carried awaiting-integration tasks: c1-c4 were carried in from old-demo and only integrate here (no
+// Slot in this record), one after another for an hour each from 01:10; s1 runs a Slot 00:00-01:00 and integrates
+// 01:00-01:10. Running time is 00:00-04:16 (each lane-only stretch is under the 2 h cap): 4.267 h for five landed
+// tasks. Counting Slots alone gave 1 task, a 1.5 h allowance and a false breach that withholds every round raise.
+test('Throughput: lane-only landed tasks (a supersede\'s carried ones) earn their allowance; no false breach', (t) => {
+  const home = tmpHome(t)
+  const carried = ['c1', 'c2', 'c3', 'c4']
+  const lanes = [['01:10', '02:10'], ['02:10', '03:10'], ['03:10', '04:10'], ['04:10', '04:16']]
+  emitAll(home, 'demo', byTs([
+    ...carried.map((c) => [at('00:00'), 'carried', c, { from: 'old-demo' }]),
+    ...life('s1', { from: at('00:00'), to: at('01:00'), c: 2, lane: [at('01:00'), at('01:10')] }),
+    ...carried.flatMap((c, i) => [
+      [at(lanes[i][0]), 'lane-taken', c, {}],
+      [at(lanes[i][1]), 'lane-freed', c, { release: 'merge', path: 'lead', triggers: [], conflict: false }],
+      [at(lanes[i][1]), 'merged', c, { pr: 7 }],
+    ]),
+  ]))
+  const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 2 })])
+  assert.deepEqual([out.merges.count, out.runningTime.hours], [5, 4.267])
+  assert.deepEqual(out.guardrails.throughput, { value: 1.172, runningHours: 4.267, tasks: 5, allowanceHours: 7.5,
+    bound: '<= 1.5 running h per task', baseline: null, breached: false })
+  assert.deepEqual(Object.keys(out.guardrails), ['throughput', 'tokensPerMerge', 'setAsideRate', 'conflictRate', 'quotaStalls', 'reviewChurn'],
+    'the Guardrails, in score.py GUARDRAILS\' order (the weigh() test pins that tuple)')
+})
+
+test('weigh(): a trade only when both headlines it names are scored', () => {
+  const body = [
+    'import importlib.util, json, sys',
+    'spec = importlib.util.spec_from_file_location("score", sys.argv[1])',
+    'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+    'print(json.dumps([m.weigh("review-rounds-raise", {"handsOffRate": 0.8, "quality": None}),',
+    '                  m.weigh("review-rounds-raise", {"handsOffRate": 0.8, "quality": 0.9}),',
+    '                  m.weigh("slot-bound-raise", {"handsOffRate": 0.8, "quality": 0.9}),',
+    '                  m.weigh("slot-bound-raise", {"handsOffRate": None, "quality": None}),',
+    '                  m.weigh("quota-bound-lower", {"handsOffRate": 0.8, "quality": 0.9}), list(m.HEADLINES),',
+    '                  m.weigh("no-such-rule", {"handsOffRate": 0.8, "quality": 0.9}), list(m.GUARDRAILS),',
+    '                  m.weigh("plan-rejected-raise", {"handsOffRate": 0.8, "quality": 0.9})]))',
+  ].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', body, SCORE], { encoding: 'utf8', env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } })
+  assert.equal(r.status, 0, r.stderr)
+  const [rrNull, rrTrade, slot, slotNull, lower, headlines, undeclared, guardrails, plan] = JSON.parse(r.stdout)
+  assert.equal(rrNull.trade, null, 'Quality unscored: no trade')
+  assert.deepEqual(rrTrade.trade, { gains: ['handsOffRate'], costs: ['quality'] })
+  assert.deepEqual([slot.trade, slotNull.trade], [null, null], 'a slot-bound raise names no headline')
+  assert.deepEqual([lower.serves, lower.risks, lower.trade], [['quotaStalls'], ['throughput'], null])
+  assert.deepEqual(headlines, ['handsOffRate', 'quality'])
+  assert.deepEqual(guardrails, ['throughput', 'tokensPerMerge', 'setAsideRate', 'conflictRate', 'quotaStalls', 'reviewChurn'])
+  assert.deepEqual(undeclared, { serves: [], risks: guardrails, trade: null }, 'a rule RULE_EFFECTS does not declare fails closed: it risks every Guardrail')
+  // Review churn's absolute bound (p21-3) withholds any raise, as it did when it landed: every raise risks it
+  for (const w of [rrTrade, slot, plan]) assert.ok(w.risks.includes('reviewChurn'), JSON.stringify(w.risks))
+  assert.deepEqual(plan.trade, { gains: ['handsOffRate'], costs: ['quality'] }, 'both round raises trade once Quality is scored')
+})
+
+// Every rule propose() can emit has a declared effect, so none reaches weigh()'s fail-closed default by accident: the
+// rule names written in propose()'s source are exactly RULE_EFFECTS' keys. A new rule fails here until it is declared.
+test('the rules propose() emits are exactly RULE_EFFECTS\' keys', () => {
+  const body = [
+    'import importlib.util, inspect, json, re, sys',
+    'spec = importlib.util.spec_from_file_location("score", sys.argv[1])',
+    'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+    'src = inspect.getsource(m.Score.propose)',
+    'print(json.dumps([sorted(set(re.findall(r\'"([a-z]+(?:-[a-z]+)*-(?:raise|lower))"\', src))), sorted(m.RULE_EFFECTS)]))',
+  ].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', body, SCORE], { encoding: 'utf8', env: { PATH: process.env.PATH, PYTHONDONTWRITEBYTECODE: '1' } })
+  assert.equal(r.status, 0, r.stderr)
+  const [emitted, declared] = JSON.parse(r.stdout)
+  assert.deepEqual(emitted, ['plan-rejected-raise', 'quota-bound-lower', 'review-rounds-raise', 'slot-bound-raise'], 'the scan found the four rules')
+  assert.deepEqual(emitted, declared)
+})
+
+// The fail-closed default end to end: with review-rounds-raise's declaration removed in memory, a breached Throughput
+// still withholds that raise (with no declaration it risks every Guardrail), never lets it through.
+test('an undeclared rule\'s raise is withheld by any breached Guardrail', (t) => {
+  const home = tmpHome(t)
+  const ev = saturated(3, { settings: () => S(3, { max_review_rounds: 4 }) })
+  ev.push([at('03:00'), 'set-aside', 't1', { stage: 'review', reasonClass: 'review-rounds', setAsideAt: 'run' }])
+  ev.push([at('03:30'), 'set-aside', 't2', { stage: 'review', reasonClass: 'review-rounds', setAsideAt: 'run' }])
+  emitAll(home, 'demo', byTs(ev))
+  const settings = writeSettings(home, { parallel_ceiling: 4, max_review_rounds: 4 }, { guardrails: { hours_per_task: 1.0 } })
+  const body = [
+    'import importlib.util, sys',
+    'spec = importlib.util.spec_from_file_location("score", sys.argv[1])',
+    'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+    'del m.RULE_EFFECTS["review-rounds-raise"]',
+    'sys.exit(m.main(sys.argv[2:]))',
+  ].join('\n')
+  const r = spawnSync('python3', ['-B', '-c', body, SCORE, '--rollout', 'demo', '--until', at('06:00'), '--settings', settings],
+    { encoding: 'utf8', cwd: home, env: baseEnv(home) })
+  assert.equal(r.status, 0, r.stderr)
+  const out = JSON.parse(r.stdout)
+  assert.equal(out.guardrails.throughput.breached, true, '4.5 running h against 3 h')
+  const w = out.withheld.find((x) => x.rule === 'review-rounds-raise')
+  assert.ok(w, JSON.stringify(out.proposals))
+  assert.deepEqual([w.serves, w.risks], [[], ['throughput', 'tokensPerMerge', 'setAsideRate', 'conflictRate', 'quotaStalls', 'reviewChurn']])
+  assert.match(w.reason, /^a raise while a Guardrail is breached: throughput /)
+})
+
 // ---- 5. edge cases --------------------------------------------------------------------------------------------
 
 test('no merge: Throughput 0.0; zero running time: null, flagged', (t) => {
@@ -528,13 +830,15 @@ test('no merge: Throughput 0.0; zero running time: null, flagged', (t) => {
   const z = scored(home, ['--since', at('02:30'), '--until', at('03:00')])
   assert.equal(z.throughput, null)
   assert.ok(has(z.flags, /^zero running time/))
+  assert.deepEqual([z.guardrails.throughput.tasks, z.guardrails.throughput.breached], [0, false], 'zero running time never breaches')
 })
 
 test('no record: an empty score, flagged, exit 0', (t) => {
   const home = tmpHome(t)
   const out = scored(home, ['--until', at('03:00'), '--repo-slug', 'o/r'])
   assert.ok(has(out.flags, /^no record$/))
-  assert.deepEqual(out.headline, { throughput: null, runningHours: 0, merges: 0, tokensPerMerge: null, setAsideRate: null, conflictRate: null, quotaStalls: 0, quality: null })
+  assert.deepEqual(out.headline, { throughput: null, runningHours: 0, merges: 0, tokensPerMerge: null, setAsideRate: null, conflictRate: null, quotaStalls: 0,
+    handsOffRate: null, quality: null, reviewChurn: null })
   assert.deepEqual(out.proposals, [])
 })
 
@@ -913,14 +1217,15 @@ test('(g) review churn: [guardrails] review_churn_pct 60 raises the bound, and t
   assert.equal(out.proposals[0].key, 'parallel_ceiling')
 })
 
-test('(h) TRIPWIRE (p21-2 hand-off): a headline reviewChurn slot carries reviewChurn.value', (t) => {
-  // Vacuous until p21-2 gives the headline a reviewChurn slot; then whichever of p21-2 / p21-3 lands second must set
-  // headline.reviewChurn = reviewChurn.value (score.py's HAND-OFF comment) or this fails.
+test('(h) the p21-2 hand-off: the headline\'s reviewChurn slot carries reviewChurn.value', (t) => {
+  // p21-2 gave the headline (tune.py's `scores`) a reviewChurn slot and landed second, so it wired the slot: the
+  // tripwire p21-3 left is now a plain assertion, never vacuous.
   const home = tmpHome(t)
   emitAll(home, 'demo', churnFixture())
   const out = scored(home, ['--until', at('06:00'), '--repo-slug', 'o/r'])
-  if ('reviewChurn' in out.headline) assert.equal(out.headline.reviewChurn, out.reviewChurn.value)
-  assert.match(fs.readFileSync(SCORE, 'utf8'), /HAND-OFF p21-2: when the headline\/tuning scores gain a reviewChurn slot, set headline\.reviewChurn =\s+# reviewChurn\.value/)
+  assert.ok('reviewChurn' in out.headline, JSON.stringify(out.headline))
+  assert.equal(out.reviewChurn.value, 0.4)
+  assert.equal(out.headline.reviewChurn, out.reviewChurn.value)
 })
 
 // t1 merged, with review-verdict lines given as [hh:mm, round, verdict, findings, original, regression]

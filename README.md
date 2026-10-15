@@ -45,7 +45,7 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 | `/thread:execute` | executor | Runs the rollout's queue on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call up to `parallel_ceiling`; the lead integrates each approved task with the latest main and auto-merges it (`--gated` = a merge hold before each merge). |
 | `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. |
 | `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. |
-| `/thread:reflect` | tuner | The Reflection (ADR 0032, renamed by ADR 0037): fold the journals, score the Run record (Throughput over running time, the Guardrails against the last Reflection, Slot and lane use, load, the binding constraint) and propose Tunings to `rollouts.toml`; only the ones Lachy picks are applied, by the tune script, which records every Reflection in `tunings.jsonl`. Never changes anything on its own. |
+| `/thread:reflect` | tuner | The Reflection (ADR 0032, renamed by ADR 0037): fold the journals, score the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to its landed tasks), the Guardrails (Throughput among them, bounded in running hours per task, and Review churn) against their bounds and the last Reflection, Slot and lane use, load and the binding constraint, and propose Tunings to `rollouts.toml`, each weighed for what it serves and risks; only the ones Lachy picks are applied, by the tune script, which records every Reflection in `tunings.jsonl`. Never changes anything on its own. |
 
 ## Runtime support
 
@@ -241,7 +241,8 @@ final check that the run wrote nothing into the tree):
   (`handoff-one-writer.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
   and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
 - **Reflection** — `tests/reflect-score.test.mjs` (`score.py` on synthetic records: running time and its
-  exclusions, the Slot-bound and lane-bound fixtures, each proposal's direction and cause, the baseline, load),
+  exclusions, the Hands-off rate and its acts, Throughput's bound, the Slot-bound and lane-bound fixtures, each
+  proposal's direction, cause and weighing, the baseline (a v1 line included), load),
   `tests/reflect-escapes.test.mjs` (`escapes.py` through `score.py` against throwaway repos and vaults: `fixes:` in
   every form, reverts, later review findings of landed work bounded by blame, and the unread, unresolved and
   partial readings), `tests/reflect-tune.test.mjs` (`tune.py` edits only the picked keys, records one line, and
