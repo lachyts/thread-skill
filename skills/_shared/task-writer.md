@@ -120,6 +120,8 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-day.py [<day>]
 The confirmation ALWAYS echoes the resolved date (§ 7) so a parse surprise is
 visible immediately.
 
+Reflect's decision task runs this resolver too (§ 3b names that writer).
+
 ## 3b. Make it visible on the day page (`defer` only)
 
 `scheduled:` frontmatter alone is INVISIBLE — the day note's `## To do`
@@ -138,6 +140,12 @@ file, put a line on the target day's note:
 3. **Dedup**: skip if any line linking `[[<slug>]]` already exists in the note.
    Re-deferring moves the line — add to the new day, remove the unchecked line
    from the old day's note.
+
+One writer outside defer reuses § 3 (Resolve the day) and these three steps:
+reflect's decision task (`skills/reflect/SKILL.md` § The weekly reading, step 15)
+resolves its next-morning `scheduled:` through § 3's `resolve-day.py` with no day,
+and puts its line on that day's page here; rescheduling it moves the line as a
+re-defer does.
 
 ## 4. Task file shape
 

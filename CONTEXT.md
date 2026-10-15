@@ -231,7 +231,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   several ideas at once. A reshuffle **unbundles** it: one task per idea, each
   grilled into a real body. _Avoid_: capture (that is stash/defer's task).
 - **Reach tiers** — what a reshuffle may change, by an item's state: **in
-  flight** and other **frozen** items (possibly landed, thread captures) are
+  flight** and other **frozen** items (possibly landed, thread captures, decision tasks) are
   context only (schedule may still re-queue an in-flight task when a
   superseding rollout takes it over); **unstarted** phased work is movable; **loose** work is fully
   open, including re-homing and pull-ins across projects. Defined in
@@ -500,8 +500,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Escape** — landed work that later needs a fix it should not have needed:
   a follow-up fix task traced to it by its `fixes:` key, a revert, or a later review finding
   against its lines. Counted against the rollout that landed it, so it is
-  known only after the run. _Avoid_: bug (alone), regression (a review
-  round's word).
+  known only after the run: each weekly reading counts the ones that surfaced
+  that week against the rollout that landed them, however old (ADR 0037 d4).
+  _Avoid_: bug (alone), regression (a review round's word).
 - **Review churn** — review rounds whose findings only answer the previous
   round's fix rather than the original work, in the engine's review loop and
   in `/fresh-review` alike. A Guardrail every Reflection reports. Measured as
@@ -512,35 +513,47 @@ through time, from attention to merged PRs. Terms only — no implementation.
   either headline: Throughput, tokens per merge, set-aside rate, conflict
   rate, quota stalls, Review churn.
   Its bounds sit in the operator's rollout settings.
-- **Reflection** — the pass that reads a rollout's Run record (and the
-  records of any rollout that overlapped it, so shared load shows), scores
+- **Reflection** — the pass that reads one rollout's Run record by hand, or
+  every rollout's since the last one in the weekly reading (ADR 0037 d3–d4)
+  (and the records of any rollout that overlapped each, so shared load shows), scores
   it on the two headlines, Hands-off rate and Quality, and the Guardrails,
   traces what cost them to the rule that produced it, names what bound the
   run (Slots, the Integration lane, quota, dependencies) and proposes
   Tunings. The same word and shape as Chorus's Reflection over the
   Companion's record. Its verb is `/thread:reflect`. _Avoid_: retro, review
   (the engine's).
-- **Tuning** — one proposed change, picked by Lachy before it lands, at one
+- **Tuning** — one proposed change at one
   of three altitudes, as in Chorus: a **knob** (a value in the operator's
   rollout settings: a repo's Parallel ceiling, a round cap, read by the next
   schedule); a **rule** (how a skill or the engine behaves: a grill and an
   ADR before a build); a **bug** (the engine or a skill did not do what its
-  rule says: a task). Each Reflection appends one line to `tunings.jsonl`
+  rule says: a task). By hand Lachy picks the ones that land; the weekly
+  reading lands some unasked under ADR 0037 d5 (a bug filed, a knob three
+  Reflections agree on, the revert of one that breaches a Guardrail); a rule
+  never lands unasked. Each by-hand Reflection appends one line to `tunings.jsonl`
   beside the record, with its headline scores (the next Reflection's
   baseline) and the Tunings applied (decision 5's tally). Each rollout's
   close (its completion ceremony or its supersede) appends one scored line
-  of its own through the same tune script (ADR 0037 d4). A rule that three
-  Reflections agree on may later become an automatic adjustment, by ADR.
+  of its own through the same tune script (ADR 0037 d4). The weekly reading
+  writes a line there only when it lands or reverts a knob, never a close
+  line, and records its Watches, proposals and close in `reflections.jsonl`.
   _Avoid_: tweak, auto-tune.
 - **Watch** — a pattern a Reflection saw in one rollout and would not yet
   propose a rule for: named, written to the record and carried into the next
   Reflection. It becomes a rule proposal when a later rollout shows the same
-  thing again, or at once when Lachy confirms it. Knobs need no Watch.
-  _Avoid_: candidate, hunch.
-- **Quiet Reflection** — one that finds no new Watch, no rule proposal, no
+  thing again, or at once when Lachy confirms it. Lachy's no closes it too:
+  it comes back only when two later rollouts show it again. Knobs need no
+  Watch. _Avoid_: candidate, hunch.
+- **Quiet Reflection** — one that finds no new Watch (one first seen in this
+  reading; a declined one seen again is not new), no rule proposal, no
   bug and no Guardrail breach. Three in a row move the reading from weekly
   to fortnightly; one that is not quiet moves it back (ADR 0037).
   _Avoid_: clean run, empty retro.
+- **Decision task** — the one open vault task tagged `decisions` that the
+  weekly reading writes for the next morning when it has a rule proposal
+  (ADR 0037 d5): Lachy decides it at the top of a run
+  (`/thread:reflect --decide`); schedule, the reshuffle and orient's batches
+  never take it. _Avoid_: inbox, review queue.
 - **Rollout settings** — the operator's `~/.config/thread/rollouts.toml`,
   `ladder.toml`'s sibling: `[defaults]`, the `[guardrails]` bounds and
   per-repo `[repo."owner/name"]` tables (keyed by the GitHub origin),

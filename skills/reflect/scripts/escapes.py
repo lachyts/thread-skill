@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """escapes.py — a rollout's Escapes and Quality, for score.py (p21-4, ADR 0037 d7). Reads only; writes nothing.
 
-python >= 3.8, stdlib only. score.py loads it and calls
+python >= 3.8, stdlib only. Two callers load it and call
 
     score(landed, tasks_dir, repo, repo_slug, env) -> (block, flags)
+
+score.py, once per scored rollout (its window's landed set), and skills/reflect/scripts/reflect.py's weekly Escapes
+sweep (p21-7, ADR 0037 d4), once per repo over every record's landed tasks, whatever their age.
 
 `landed` is {task: {pr, readOnly, at}} from the scored window's `merged` lines; `tasks_dir` the vault's Work/Tasks;
 `repo` any directory in the Project root's clone (or None); `repo_slug` its owner/name (or None); `env` the caller's

@@ -45,7 +45,7 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 | `/thread:execute` | executor | Runs the rollout's queue on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call up to `parallel_ceiling`; the lead integrates each approved task with the latest main and auto-merges it (`--gated` = a merge hold before each merge). |
 | `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. |
 | `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. |
-| `/thread:reflect` | tuner | The Reflection (ADR 0032, renamed by ADR 0037): fold the journals, score the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to its landed tasks), the Guardrails (Throughput among them, bounded in running hours per task, and Review churn) against their bounds and the last Reflection, Slot and lane use, load and the binding constraint, and propose Tunings to `rollouts.toml`, each weighed for what it serves and risks; only the ones Lachy picks are applied, by the tune script, which records every Reflection in `tunings.jsonl`. Never changes anything on its own. |
+| `/thread:reflect` | tuner | The Reflection (ADR 0032, renamed by ADR 0037): fold the journals, score the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to its landed tasks), the Guardrails (Throughput among them, bounded in running hours per task, and Review churn) against their bounds and the last Reflection, Slot and lane use, load and the binding constraint, and propose Tunings to `rollouts.toml`, each weighed for what it serves and risks; by hand only the ones Lachy picks are applied, by the tune script, which records each by-hand Reflection in `tunings.jsonl`. The weekly reading (`--weekly`, ADR 0037 d3–d5) reads every rollout since the last one, traces the friction to its rules, keeps Watches in `reflections.jsonl`, files bugs and lands a knob three Reflections agree on, never a rule: a rule proposal waits in one decision task for Lachy. |
 
 ## Runtime support
 
@@ -99,11 +99,14 @@ proposals (writing nothing), and `skills/reflect/scripts/escapes.py`, which it l
 reads the landed tasks' Escapes and Quality from the task notes' `fixes:` and the
 Project root's git (reverts, later review findings), writing nothing either.
 `skills/reflect/scripts/tune.py` is the only writer of `rollouts.toml` and
-`tunings.jsonl`: it applies the Tunings Lachy picks and records
-one line per Reflection. `skills/reflect/scripts/close-score.py` runs the script
+`tunings.jsonl`: it applies the Tunings Lachy picks and the knobs the weekly
+reading lands or reverts (ADR 0037 d5), and records one line per by-hand Reflection.
+`skills/reflect/scripts/close-score.py` runs the script
 half of a Reflection at each rollout's close (fold, settings, score,
 `tune.py --record-only --close`) and records one line per rollout through it
-(ADR 0037 d4).
+(ADR 0037 d4). `skills/reflect/scripts/reflect.py` runs the weekly reading's
+script half and is the only writer of `reflections.jsonl` and of the bug and
+decision tasks.
 
 ## Design
 
@@ -251,7 +254,10 @@ final check that the run wrote nothing into the tree):
   partial readings), `tests/reflect-tune.test.mjs` (`tune.py` edits only the picked keys, records one line, and
   writes nothing on a refusal or a failed write), `tests/reflect-close-score.test.mjs` (`close-score.py` end to end:
   one close line per rollout, the re-run, nothing ran, failures, step timeouts and the overall deadline, signals and
-  the GIT_* scrub), `tests/contracts/reflect.test.mjs` (the verb's wiring, every close scoring its rollout, its
+  the GIT_* scrub), `tests/reflect-weekly.test.mjs` (`reflect.py`'s weekly reading against throwaway records,
+  vaults and repos: the span and its friction, close lines and the Escapes sweep, one line per Watch and per Tuning,
+  the bug and decision tasks never written over, Lachy's recorded no, the close and the rung),
+  `tests/contracts/reflect.test.mjs` (the verb's wiring, every close scoring its rollout, its
   SKILL's order and triggers, and the retired name staying gone) and `tests/contracts/escapes-fixes-key.test.mjs` (every
   writer of a fix of landed work adds `fixes:`, and the Reflection presents Quality).
 - **Next-action script** — `tests/next-action.test.mjs`: `next-action.py`'s set-down, fill, read and

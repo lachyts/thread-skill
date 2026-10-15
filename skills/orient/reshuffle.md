@@ -73,10 +73,13 @@ Give every item its **reach tier** (CONTEXT.md **Reach tiers**):
 - **Thread captures — frozen too.** A `thread`-tagged task (stash/defer's capture) belongs to its
   thread and is picked up by `open`; the reshuffle shows it for context and never unbundles,
   drops, renames or re-homes it.
+- **Decision tasks — frozen too.** A `decisions`-tagged task (the weekly Reflection's decision task,
+  ADR 0037 d5) is Lachy's, decided at the top of a run through `/thread:reflect --decide`: the
+  reshuffle shows it for context and never moves, drops, renames, re-homes, grills or schedules it.
 - **Unstarted — movable.** A phased task (`phase:` set) that is not in flight, and phase notes with
   no in-flight member. May be re-phased, merged, unbundled, dropped, or the phase retired.
-- **Loose — open.** `tags:` contains `task` but not `thread`, no `phase:`, not in flight. Anything
-  goes, including a re-home to another project.
+- **Loose — open.** `tags:` contains `task` but not `thread` or `decisions`, no `phase:`, not in
+  flight. Anything goes, including a re-home to another project.
 
 The target project note itself is an item too when its body holds a plan with no
 `## Build sequence` yet (a design section never decomposed): it is unclear by definition, R2
@@ -270,8 +273,8 @@ from here.
 
 The rules above are the contract; these are the ones most easily broken.
 
-- **Don't touch frozen items** (in flight, possibly landed, thread captures) beyond adding new
-  members to an in-flight phase.
+- **Don't touch frozen items** (in flight, possibly landed, thread captures, decision tasks) beyond
+  adding new members to an in-flight phase.
 - **Don't renumber.** Existing phases and ordinals are immutable, and an ordinal is never reused.
 - **Don't write before the R4 gate**, and don't rename without the basename check and the
   backlink rewrite.

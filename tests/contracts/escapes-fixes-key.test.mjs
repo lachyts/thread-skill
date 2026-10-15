@@ -8,7 +8,8 @@
 // - schedule step 4.5's combined note takes the members' union;
 // - CONTEXT.md's Escape entry names the key;
 // - reflect step 4 passes `--repo <Project root>`, and step 5 presents Quality, partial included (an unread source,
-//   an unresolved task or a failed blame, any of them even with all three sources read).
+//   an unresolved task or a failed blame, any of them even with all three sources read);
+// - reflect step 13 (the weekly reading's bug, p21-7) passes `--fixes`, so a bug fixing landed work carries `fixes:`.
 // tests/reflect-escapes.test.mjs pins the reader's behaviour.
 //
 // One pure function, check(files), over { key: text }: the real files and the controls run through it, and each
@@ -92,6 +93,9 @@ function check(f) {
   if (!all(bullet(section(f.reflect, /^### 5\. Present/), /^- \*\*Quality\*\*/),
     ['`escapes.count`', '`headline.quality`', '`escapes.bySource`', '`escapes.partial`', 'even with all three sources read',
       '`escapes.excluded.unresolved`', '`escapes.excluded.unresolvedRows`', 'can only read too high', 'a later re-score can lower Quality'])) fails.push('reflect-5')
+  const step13 = section(f.reflect, /^### 13\. Bugs/)
+  if (!all(step13, ['Pass `--fixes <landed task>` when the bug fixes work that already landed', `carries its ${KEY} key`, '(task-writer § 4)']) ||
+    !fencedBlocks(step13 ?? '').some((b) => b.some((l) => l.includes('[--fixes <landed task>]')))) fails.push('reflect-13')
   return fails
 }
 
@@ -146,4 +150,10 @@ test('control: reflect step 4 without --repo, or step 5 without Quality\'s parti
   only('reflect', '`escapes.partial`', '`escapes.flags`', ['reflect-5'])
   only('reflect', '(`escapes.excluded.unresolvedRows`)', '(the review rows)', ['reflect-5'])
   only('reflect', '- **Quality**', '- **Escapes**', ['reflect-5'])
+})
+
+test('control: reflect step 13 without --fixes, or without the key it sets, fails reflect-13', () => {
+  only('reflect', ' [--fixes <landed task>]\n```', '\n```', ['reflect-13'])
+  only('reflect', 'carries its `fixes:` key', 'carries a link', ['reflect-13'])
+  only('reflect', '(task-writer § 4). An open bug task', '. An open bug task', ['reflect-13'])
 })

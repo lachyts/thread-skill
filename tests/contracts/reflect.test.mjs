@@ -8,7 +8,11 @@
 // Reflection, and a Tuning taking effect at the next /thread:schedule. Its triggers name the rollout and never take
 // Chorus's Companion (Chorus's own /reflect), and the retired name stays gone: no skills/ directory, verb, scratch
 // path or noun of it in skills/**, hooks/**, evals/**, README.md or the manifests, but for ADR 0032's title in the
-// README's ADR list (history).
+// README's ADR list (history). The weekly reading (p21-7, ADR 0037 d3-d5) runs span -> watch -> bug -> tune.py
+// --revert -> --auto -> knobs -> decide -> close after the by-hand steps, reflect.py the only writer of
+// reflections.jsonl; its trace list names the grills a mid-run ask is traced to, in full form; it reads a Human fix
+// from the task note; Lachy's no is recorded; and the decision task stays out of schedule § 1, the reshuffle's R1
+// and orient's batches, listed by orient § 2 (the `weekly` rule).
 //
 // One pure function, check(files), over { name: text } plus `tree` (the paths under skills/) and `rest` ({ relPath:
 // text } of every other file the retired-name scan reads): the real files and the controls run through it, and each
@@ -34,9 +38,11 @@ const NAMED = {
   market: '.claude-plugin/marketplace.json',
   schedule: 'skills/schedule/SKILL.md',
   repair: 'skills/repair/SKILL.md',
+  orient: 'skills/orient/SKILL.md',
+  reshuffle: 'skills/orient/reshuffle.md',
   context: 'CONTEXT.md',
 }
-const SCANNED = ['skill', 'execute', 'template', 'readme', 'plugin', 'market', 'schedule', 'repair']
+const SCANNED = ['skill', 'execute', 'template', 'readme', 'plugin', 'market', 'schedule', 'repair', 'orient', 'reshuffle']
 
 // The paths no scan reads: git-ignored `make evals` output (its transcripts can list an installed older verb),
 // Python's byte-code caches and Finder's .DS_Store. A NUL-byte file is skipped where its text is read.
@@ -165,7 +171,60 @@ const NOUN = new RegExp(`\\b${OLD}s?\\b`, 'i')
 const ADR_TITLE = new RegExp(`\\btune by ${Old}\\b`) // ADR 0032's title in the README's ADR list: history
 const KEPT = ['skills/reflect/SKILL.md', 'skills/reflect/scripts/score.py', 'skills/reflect/scripts/tune.py']
 
-// The rules that fail, in a fixed order. `notes` collects one line per retired-name finding.
+// ---- the weekly reading (p21-7) --------------------------------------------------------------------------------
+
+const PY = 'python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py '
+const RESHUFFLE = '`${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md`'
+const HUMAN_FIX = 'For each `set-aside` item whose `movedBy` is `unrecorded`, open its `taskNote` and read its `## Needs you` and `## Integration log`; trace the Human fix you find there (ADR 0035) like a mid-run ask; when neither says what moved it, name it as unexplained.'
+const KINDS7 = 'of seven kinds (`ask`, `set-aside`, `retry`, `descope`, `repair`, `escape`, `churn`)'
+const GRILLS = ['orient § 5', `${RESHUFFLE} § R2`, `${RESHUFFLE} § R3`, '`${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` § How a fork comes back', 'orient § 7', 'schedule § 3.5', 'schedule § 3.6']
+const CANNOT = ['writes no dated `repair:` line', 'a set-aside whose `movedBy` is `unrecorded`', '/fresh-review churn names no rollout',
+  'An escapes-only rollout\'s breaches are not counted', 'is read in the week its record has lines but leaves no baseline',
+  'A single-rollout Watch is offered only beside a rule proposal', 'A declined Watch seen again in one rollout is neither new nor offered']
+const WEEKLY_ORDER = [/reflect\.py span /, /reflect\.py watch /, /reflect\.py bug /, /tune\.py\b.*--revert /, /tune\.py\b.*--auto /,
+  /reflect\.py knobs /, /reflect\.py decide /, /reflect\.py close /]
+
+// The weekly clauses that fail (w1..w14), [] when all hold.
+function weeklyFails(files) {
+  const s = files.skill
+  const out = []
+  const lines = s.split('\n')
+  const head = lines.findIndex((l) => /^## The weekly reading\b/.test(l))
+  const at = WEEKLY_ORDER.map((re) => (head < 0 ? -1 : lines.findIndex((l, k) => k > head && re.test(l))))
+  if (at.some((i) => i < 0) || at.some((i, k) => k > 0 && i <= at[k - 1])) out.push('w1')
+  const s7 = collapse(sectionOf(s, /^### 7\. /))
+  if (!s7.includes('Every by-hand Reflection that reached its scores runs tune.py') ||
+    !s7.includes('The weekly reading (step 14) runs it zero or more times per repo, never with `--pick`, `--record-only` or `--close`')) out.push('w2')
+  if (!/`skills\/reflect\/scripts\/reflect\.py` is the \*\*only writer\*\* of `reflections\.jsonl`/.test(s)) out.push('w3')
+  const fenced = fencedLines(s)
+  if (fenced.filter((l) => /reflect\.py/.test(l)).some((l) => !l.startsWith(PY)) || fenced.some((l) => /reflections\.jsonl/.test(l))) out.push('w4')
+  const s11 = collapse(sectionOf(s, /^### 11\. /))
+  if (!s11.includes(KINDS7) || !s11.includes(HUMAN_FIX)) out.push('w5')
+  if (!collapse(sectionOf(s, /^### 15\. /)).includes('a decision task only with a rule proposal')) out.push('w6')
+  const o2 = collapse(sectionOf(files.orient, /^### 2\. Audit/))
+  const o7 = collapse(sectionOf(files.orient, /^### 7\. Batch/))
+  if (!o2.includes('**Decisions waiting**: an open task tagged `decisions`') || !o2.includes('`/thread:reflect --decide`') ||
+    !o7.includes('The weekly Reflection\'s decision task (tagged `decisions`') || !o7.includes('is conversation-gated and never batched')) out.push('w7')
+  const cannot = collapse(sectionOf(s, /^## What the record cannot show$/))
+  if (!CANNOT.every((c) => cannot.includes(c))) out.push('w8')
+  if (!GRILLS.every((g) => s11.includes(g))) out.push('w9')
+  if (!collapse(sectionOf(s, /^### 12\. /)).includes('make ONE `reflect.py watch` call per Watch, naming every rollout where you saw it') ||
+    !collapse(sectionOf(s, /^### 13\. /)).includes('never edit, move or remove the existing note')) out.push('w10')
+  const inv = collapse(sectionOf(s, /^## Invocation forms$/))
+  if (!inv.includes('but writes no `tunings.jsonl` line for it') || inv.includes('and the weekly Reflection covers it')) out.push('w11')
+  const d1 = collapse(sectionOf(files.schedule, /^### 1\. Discover tasks/))
+  if (!d1.includes('`tags:` does **not** contain `decisions`') || !d1.includes('with or without `--tasks`') || !d1.includes('skipped decision task')) out.push('w12')
+  const r1 = sectionOf(files.reshuffle, /^## R1\./)
+  if (!collapse(r1).includes('**Decision tasks — frozen too.** A `decisions`-tagged task') ||
+    !collapse(r1).includes('never moves, drops, renames, re-homes, grills or schedules it') ||
+    !collapse(item(r1, '- **Loose — open.**')).includes('but not `thread` or `decisions`')) out.push('w13')
+  const dec = collapse(sectionOf(s, /^## Deciding the decision task$/))
+  if (!/reflect\.py raised .*--declined/.test(dec) || !dec.includes('the same with `--declined`') || !dec.includes('closes the Watch\'s cycle') ||
+    !dec.includes('only once every item it lists has had a yes or a no')) out.push('w14')
+  return out
+}
+
+// The rules that fail, in a fixed order. `notes` collects one line per retired-name finding (and the weekly clauses).
 function check(files, notes = []) {
   const fails = []
   const bullets = stepFive(files.execute)
@@ -231,6 +290,8 @@ function check(files, notes = []) {
   const triggers = to < 0 ? '' : desc.slice(from, to + '/thread:reflect'.length)
   if (fm.name !== 'reflect' || !triggers.includes('"reflect on [[rollout]]"') || !triggers.includes('"how did the rollout run"') ||
     triggers.includes('Companion') || !desc.includes('Not for Chorus\'s Companion record')) fails.push('triggers')
+  const wk = weeklyFails(files)
+  if (wk.length) { fails.push('weekly'); notes.push(`weekly: ${wk.join(', ')}`) }
   // the old skill directory holds no tracked content (a leftover byte-code cache or .DS_Store aside)
   if (files.tree.some((p) => p.startsWith(`skills/${OLD}/`) && !skipped(p)) || KEPT.some((p) => !files.tree.includes(p))) fails.push('tree')
   // the retired name, in any form, over the product files
@@ -337,7 +398,7 @@ test('control: the chat-only report line gone fails report', () => {
 test('control: the README row gone fails readme; the row or a line naming the old name fails retired', () => {
   only('readme', swap('readme', '| `/thread:reflect` | tuner |', '| `/thread:reflect` | scorer |'), ['readme'])
   only('readme:old', swap('readme', '| `/thread:reflect` | tuner |', `| \`/thread:${OLD}\` | tuner |`), ['readme', 'retired'])
-  only('readme:noun', swap('readme', 'one line per Reflection.', `one line per ${Old}.`), ['retired'])
+  only('readme:noun', swap('readme', 'one line per by-hand Reflection.', `one line per by-hand ${Old}.`), ['retired'])
 })
 
 test('control: each manifest string without reflect fails manifests', () => {
@@ -393,4 +454,91 @@ test('control: a hook naming the old verb fails retired; eval output, a byte-cod
 
 test('control: the glossary entry not naming the verb fails context', () => {
   only('context', swap('context', 'Its verb is `/thread:reflect`', 'Its verb is `/thread:tune`'), ['context'])
+})
+
+// ---- the weekly reading's controls (p21-7) --------------------------------------------------------------------
+
+// `rules`, and the weekly clause the mutation must break (when the rules include weekly).
+const weekly = (name, mut, clause) => {
+  const key = name.split(':')[0]
+  only(name, mut, ['weekly'])
+  assert.ok(weeklyFails({ ...real, [key]: mut }).includes(clause), `${name}: ${clause}`)
+}
+const REVERT_LINE = real.skill.split('\n').find((l) => /tune\.py --scores \S+ --revert /.test(l))
+
+test('control: --revert before --scores, or a fenced tunings.jsonl in the weekly steps, fails writer', () => {
+  assert.ok(REVERT_LINE, 'control setup: no revert line')
+  only('skill', real.skill.replace(REVERT_LINE, REVERT_LINE.replace(/--scores (\S+) (--revert <tuning id>)/, '$2 --scores $1')), ['writer'])
+  only('skill:fenced', swap('skill', `${PY}knobs --span`, `cat ~/.local/state/thread/events/tunings.jsonl\n${PY}knobs --span`), ['writer'])
+})
+
+test('control: the weekly steps out of order fail weekly (w1)', () => {
+  const close = real.skill.split('\n').find((l) => l.startsWith(`${PY}close `))
+  const decide = real.skill.split('\n').find((l) => l.startsWith(`${PY}decide `))
+  weekly('skill', real.skill.replace(decide, '\u0000').replace(close, decide).replace('\u0000', close), 'w1')
+})
+
+test('control: step 7 without "by-hand", or without the weekly sentence, fails weekly (w2)', () => {
+  weekly('skill', swap('skill', 'Every by-hand Reflection that reached its scores runs tune.py', 'Every Reflection that reached its scores runs tune.py'), 'w2')
+  weekly('skill:never', swap('skill', 'never with\n`--pick`, `--record-only` or `--close`', 'with any flag'), 'w2')
+})
+
+test('control: reflect.py not named the only writer of reflections.jsonl, a fenced reflect.py line without its prefix, or a fence naming reflections.jsonl, fails weekly (w3, w4)', () => {
+  weekly('skill', swap('skill', 'is the **only writer** of `reflections.jsonl`', 'writes `reflections.jsonl`'), 'w3')
+  weekly('skill:prefix', swap('skill', `${PY}rung`, 'python3 reflect.py rung'), 'w4')
+  weekly('skill:file', swap('skill', `${PY}rung\n`, `${PY}rung\nwc -l ~/.local/state/thread/events/reflections.jsonl\n`), 'w4')
+})
+
+test('control: step 11 without the Human-fix paragraph, or without a friction kind, fails weekly (w5)', () => {
+  weekly('skill', swap('skill', 'For each `set-aside` item whose `movedBy` is `unrecorded`', 'For each set-aside item'), 'w5')
+  weekly('skill:repair', swap('skill', '`descope`, `repair`,\n`escape`', '`descope`,\n`escape`'), 'w5')
+})
+
+test('control: step 15 writing a decision task without a rule proposal fails weekly (w6)', () => {
+  weekly('skill', swap('skill', 'It writes a decision task only with a rule proposal', 'It writes a decision task'), 'w6')
+})
+
+test('control: orient § 2 without its decisions bullet, or § 7 without its exclusion, fails weekly (w7)', () => {
+  weekly('orient', swap('orient', '- **Decisions waiting**: an open task tagged `decisions`', '- **Decisions**: a task'), 'w7')
+  weekly('orient:batch', swap('orient', 'is conversation-gated and never batched', 'may be batched'), 'w7')
+})
+
+test('control: a weekly cannot-show line dropped fails weekly (w8)', () => {
+  weekly('skill', swap('skill', '- A declined Watch seen again in one rollout is neither new nor offered', '- A declined Watch'), 'w8')
+})
+
+test('control: the ask bullet without orient § 5, or with a short R2 citation, fails weekly (w9)', () => {
+  weekly('skill', swap('skill', 'mid-run ask. A mid-run ask is traced to the grill that should have asked it before the run: orient § 5\n  (Reshuffle), where',
+    'mid-run ask. A mid-run ask is traced to the grill that should have asked it before the run, where'), 'w9')
+  weekly('skill:short', swap('skill', `${RESHUFFLE} § R2 (Sort and propose)`, '`reshuffle.md` § R2 (Sort and propose)'), 'w9')
+})
+
+test('control: step 12 without its ONE call, or step 13 allowing an edit of the existing note, fails weekly (w10)', () => {
+  weekly('skill', swap('skill', 'make ONE `reflect.py watch` call per Watch', 'make a `reflect.py watch` call per sighting'), 'w10')
+  weekly('skill:bug', swap('skill', 'never edit, move or remove the existing note', 'or edit the existing note'), 'w10')
+})
+
+test('control: p21-6\'s "the weekly Reflection covers it" restored, or the no-baseline clause dropped, fails weekly (w11)', () => {
+  weekly('skill', swap('skill', 'A dropped rollout has no\nclose path: the weekly reading reads its record', 'A dropped rollout has no\nclose path, and the weekly Reflection covers it; it reads its record'), 'w11')
+  weekly('skill:baseline', swap('skill', 'but writes no `tunings.jsonl` line for it', 'and covers it'), 'w11')
+})
+
+test('control: schedule § 1 without its decisions skip fails weekly (w12)', () => {
+  const bullet = real.schedule.split('\n').find((l) => l.startsWith('- `tags:` does **not** contain `decisions`'))
+  assert.ok(bullet, 'control setup: no decisions bullet')
+  weekly('schedule', real.schedule.replace(`${bullet}\n`, ''), 'w12')
+})
+
+test('control: the reshuffle\'s R1 without its decision-task tier, or a Loose item that takes decisions, fails weekly (w13)', () => {
+  const tier = item(real.reshuffle, '- **Decision tasks — frozen too.**')
+  assert.ok(tier, 'control setup: no tier')
+  weekly('reshuffle', real.reshuffle.replace(`${tier}\n`, ''), 'w13')
+  weekly('reshuffle:loose', swap('reshuffle', 'but not `thread` or `decisions`', 'but not `thread`'), 'w13')
+})
+
+test('control: § Deciding the decision task without --declined, its cycle close or its done rule, fails weekly (w14)', () => {
+  const dec = sectionOf(real.skill, /^## Deciding the decision task$/)
+  weekly('skill', real.skill.replace(dec, dec.replaceAll('--declined', '--rejected')), 'w14')
+  weekly('skill:cycle', swap('skill', 'closes the Watch\'s cycle', 'notes it'), 'w14')
+  weekly('skill:done', swap('skill', 'only once every item it lists has had a\nyes or a no', 'when the reading ends'), 'w14')
 })
