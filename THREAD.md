@@ -10,6 +10,8 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-10-15 (later): ADR 0037 decided, P21 written, scheduling handed off.** The orient grill turned the Retro into an automatic Reflection tuned for hands-off quality (ADR 0037 and its CONTEXT.md terms, PR #139, auto-merge queued). [[thread-skill-p21-reflections-run-on-their-own]] holds 8 tasks. Handoff `docs/handoffs/2026-10-15-schedule-p21-reflections.md` (landing PR #140) was consumed by the session that schedules P21 and runs it overnight. Chorus's side is [[chorus-reflect-cadence]].
+
 **2026-10-15: 3.1.0 is released and installed (PR #136, tag `thread--v3.1.0` on `bce79a8`; `claude plugin update` 3.0.0 → 3.1.0; `make release-check` passes; primary checkout at `bce79a8`). P18 (unattended rollouts), P20 (orient's front door) and P19 bar p19-5 and the eval tasks are live.**
 - **Rollout `[[thread-skill-rollout-2026-10-14]]`** (archived, § Completion log): 17/17 merged (#118 to #134) in 12h 43m from the clone. P18 and P20 closed; P19 open. p19-5 deferred to the eval rollout (its irreversible gate needs a pre-trim baseline first).
 - **Evals** (`docs/evals/2026-10-15-release-3-1.md`, facts only, $8.24): 16 of 19 cases at 1.00 on `make evals`' defaults; three lifecycle cases fail on the judge alone (one new: `close-pending-doc-owns-continuation`, 1.00 → 0.75). **`make evals` judges with Haiku by default**, which breaks the Opus lock; on `--model opus --judge-model opus` all three score 1.00, but that run changed model and judge together, so the misses stay unexplained.
@@ -532,6 +534,13 @@ scheduled 2026-07-15.
 
 ## What's been built / decided
 
+- **ADR 0037 (accepted, not built; PR #139; build = P21): Reflections run on their own and tune for hands-off quality.**
+  - **Why:** in about 16 rollouts, one Retro was ever run, so ADR 0032 d5 could never trigger.
+  - **Headlines:** two, Hands-off rate and Quality (Escapes). Throughput and Review churn become Guardrails.
+  - **Naming:** Retro → Reflection, `/thread:retro` → `/thread:reflect`, in Chorus's words (Tuning knob/rule/bug, Watch).
+  - **Running:** completion scores every rollout by script. A model Reflection runs weekly (Opus xhigh, uncapped), and three quiet ones in a row move it to fortnightly.
+  - **What lands unasked:** bugs as tasks, and knobs three Reflections agree on. Rules wait for a morning decision task.
+  - **Escapes:** traced by a `fixes:` key.
 - **3.0.0 released 2026-10-10 (#110).** The release notes are #110's body: protocol 5 only, the built-in ladder never leaves Opus (Fable only by naming it in `~/.config/thread/ladder.toml`), `max_tier:` retired, rollout defaults from `rollouts.toml` stamped at schedule, schedule picks the `-rollout` clone. Release PRs stay minimal (memory `release-pr-scope`).
 - **Schedule resolves the rollout root (#108).** `self-rollout-check.sh --resolve <repoPath>` is the one call; § 0 runs it first, every other blocker runs on the resolved root, and `--regenerate` refuses a root change once a carried task has started (repair § 5 defer).
 - **P16 decided (2026-10-06 grill, [[thread-skill-p16-unattended-rollouts]]).** (A) While any call, Integration or merge is in flight, a rollout lead never uses the question tool. A question goes in the report plus one push notification, and the turn ends `waiting`; the closing-questions hook exempts ROLLOUT-STATUS turns. (B) Execute auto-retries set-asides, broader than repair. `auto_retries: 2` (task → rollout → rollouts.toml → built-in) covers plan-blocked, blocked, review-blocked (+1 round per retry) and Integration set-asides. It stops early on a repeated feedback fingerprint, and never retries a judge-declared `needsHuman`. Gates, RACE, closed PRs and declined merges stay human. (C) The lead acts on its own recommendations (memory).
@@ -953,6 +962,13 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Now (from 2026-10-15, later): P21 is being scheduled by the handoff session** (its doc, now consumed, is `docs/handoffs/2026-10-15-schedule-p21-reflections.md`).
+1. Check `/thread:status` for a P21 rollout. If there is none: confirm PR #139 merged, then run `/thread:orient Thread Skill --steer` from this repo, which schedules from the clone `~/repos/tools/thread-skill-rollout`.
+2. **Ask Lachy** whether tonight's run is P21 alone or P21 plus the eval rollout's p19-5, p19-10 and p19-11. The eval tasks need [[thread-skill-make-evals-on-opus]] first, and p19-5 needs his irreversible sign-off. Only one unfinished rollout is allowed per repo.
+3. Session lane, after their dependencies: p21-5 (workspaces `add-task.md`) and p21-8's daily-sweep half.
+
+**Superseded 2026-10-15 (later):**
+
 **Now (from 2026-10-15): 3.1.0 is installed. Next is the eval work.**
 1. **[[thread-skill-make-evals-on-opus]] first** (small Makefile PR; its Verify is one full Opus `make evals`, spend: ask first). It decides whether p19-10/p19-11 still have anything to chase.
 2. **Then the eval rollout** ([[thread-skill-eval-rollout-p19-evals]]): set `spend_approval_usd = 50` in `~/.config/thread/rollouts.toml` (the file does not exist yet), then `/thread:schedule --tasks` p19-5, p19-10..12 with the pre-trim baseline ordered before p19-5, from the clone `~/repos/tools/thread-skill-rollout`.
@@ -1178,6 +1194,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-10-15 (close, later): `/thread:orient` on the Retro, then a grill-with-docs: ADR 0037 + CONTEXT.md terms (#139), P21 phase and 8 tasks, p19-12 merged into p21-1, p15-7 raised, [[chorus-reflect-cadence]] filed; scheduling handed off (#140, consumed by its successor).
 - 2026-10-15 (close): released and installed 3.1.0 (#136, tag `thread--v3.1.0`) from handoff `2026-10-15-release-p18-p20` (withdrawn by #137); evals $8.24, Haiku judge found; review ledger STOP at round 2 → record cut to facts; filed make-evals-on-opus and the 3.1 ADR sweep. Memory: release-pr-scope updated.
 - 2026-10-13: 3.0.0 live E2E recorded (15 PASS / 1 KNOWN / 1 FAIL over 17 rows, PR #115); three findings filed; fixtures removed; P13 interim rule retired, p13-4 and P13 closed.
 - 2026-10-13 (close): `/thread:orient Thread Skill` — drift closed P12/P14; reshuffle wrote P18 (unattended) and P19 (coherence), closed P3/4/5/8/9 into P19, dropped three; grill → ADRs 0034/0035 (#112, merged); installed 3.0.0 (p13-4 steps 1–3); handed the E2E off (#113).
