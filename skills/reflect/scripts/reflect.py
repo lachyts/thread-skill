@@ -34,8 +34,11 @@ file name. An existing note is edited only through reconcile-rollout.py's Note (
 then save), and a done task (vault grammar § Statuses: Landed) is never opened for writing.
 
 Melbourne dates. Every calendar date is read on Australia/Melbourne: a note's `captured:`, a `repair:` line's date,
-the decision task's slug date and its `## Still open` date. A date counts when it lies between the Melbourne dates of
-since and until, inclusive. No tz data is exit 3 (`python3 -m pip install tzdata`).
+the decision task's slug date and its `## Still open` date. A date-only piece of evidence (a `repair:` line, a fixer's
+`captured:` or its mtime's date) counts when it is on or after the Melbourne date of since and before that of until
+(date_in()). The next Reflection's since is this one's until, so the two windows share until's date: half-open, it is
+read once, by the next Reflection, once the day is whole; an instant counts in [since, until]. No tz data is exit 3
+(`python3 -m pip install tzdata`).
 
 span. The window: --until defaults to now, and a future --until is clamped to now and flagged; --since defaults to
 the last `reflection` line's until, else until - 7 days; since after until is exit 2. span mints the Reflection's id,
@@ -68,8 +71,8 @@ r-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>. It reads every non-reserved <slug>.jsonl in th
             edit); null while the task is still set aside at until.
   retry     an auto-retry line in the window.
   descope   a handed-back line with via descope in the window.
-  repair    each line of the rollout note's `## Notes` matching `- <YYYY-MM-DD> repair: ...` whose Melbourne date
-            is in the window: {date, tasks (every wikilink), text (at most 300), shape}. shape is the first match of
+  repair    each line of the rollout note's `## Notes` matching `- <YYYY-MM-DD> repair: ...` whose date is in the
+            window (date_in()): {date, tasks (every wikilink), text (at most 300), shape}. shape is the first match of
             RACE decided (race-decided), `possible PR-less merge` (escalated), `merged, never marked` (flipped),
             `git-env trip` (git-env), `raised to` (raise), `deferred:` (deferred), else other. An undated
             `- repair:` line is flagged. auto-retry and descope lines are other items, and nothing outside `## Notes`
@@ -294,6 +297,12 @@ def now_ms():
 def mdate(ms):
     """The Melbourne calendar date of an instant (ms), as YYYY-MM-DD."""
     return datetime.datetime.fromtimestamp(ms / 1000.0, tz=zone()).date().isoformat()
+
+
+def date_in(day, since, until):
+    """A date-only piece of evidence's window test (the module docstring's Melbourne dates): since's date up to, not
+    including, until's, so the Reflection after this one (whose since is this until) reads until's date, once."""
+    return mdate(since) <= day < mdate(until)
 
 
 # ---- files -----------------------------------------------------------------------------------------------------
@@ -833,7 +842,6 @@ class Span:
         if note is None:
             self.flag("[[%s]]: its note cannot be read: no repair lines" % slug)
             return []
-        lo, hi = mdate(since), mdate(until)
         out = []
         for line in note.section_text(NOTES_SECTION).split("\n"):
             line = line.rstrip()
@@ -844,7 +852,7 @@ class Span:
                     self.flag("[[%s]]: an undated repair line in ## Notes: %s" % (slug, line[:120]))
                 continue
             day, text = m.group(1), m.group(2)
-            if not lo <= day <= hi:
+            if not date_in(day, since, until):
                 continue
             tasks = []
             for link in WIKILINK_OPEN_RE.findall(text):
@@ -934,7 +942,7 @@ class Span:
         if at is None:
             return False
         if re.fullmatch(r"\d{4}-\d\d-\d\d", at):
-            return mdate(since) <= at <= mdate(until)
+            return date_in(at, since, until)
         t = _ts({"ts": at})
         return t is not None and since <= t <= until
 

@@ -295,13 +295,16 @@ test('span: close lines: a completed rollout\'s is read, a running one\'s null p
   assert.equal(sha(tuningsFile(h)), before, 'span writes no tunings.jsonl line')
 })
 
-test('span: repair lines: dated in-window ones by shape, the boundary date counted, others not read', (t) => {
+test('span: repair lines: dated in-window ones by shape, since\'s date counted and until\'s left to the next Reflection, others not read', (t) => {
   const h = setup(t)
-  emitAll(h, 'demo', byTs(life('a', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))
+  emitAll(h, 'demo', byTs([...life('a', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] }),
+    ...life('next', '2026-09-12T00:00:00Z', '2026-09-12T01:00:00Z', { lane: ['2026-09-12T01:00:00Z', '2026-09-12T01:10:00Z'] })]))
   rolloutNote(h, 'demo', {
-    notes: ['- 2026-09-05 repair: [[a]] RACE decided: keep',
+    notes: ['- 2026-09-03 repair: [[s]] deferred: on since\'s date',
+      '- 2026-09-05 repair: [[a]] RACE decided: keep',
       '- 2026-09-05 repair: [[a]], [[b]] git-env trip, acked at abc1234: restored',
       '- 2026-09-09 repair: [[g]] max_review_rounds raised to 5, one round',
+      '- 2026-09-10 repair: [[u]] deferred: on until\'s date',
       '- 2026-09-01 repair: [[c]] deferred: x',
       '- 2026-09-05T10:00+10:00 auto-retry: [[d]] 1/2 (plan; feedback x)',
       '- 2026-09-05 descope: [[e]] the follow-up',
@@ -309,9 +312,11 @@ test('span: repair lines: dated in-window ones by shape, the boundary date count
     extra: '## Completion log\n\n- 2026-09-05 repair: [[z]] merged, never marked: flipped done\n',
   })
   const s = span(h)
-  const reps = entryOf(s, 'demo').friction.filter((x) => x.kind === 'repair')
-  assert.deepEqual(reps.map((x) => [x.date, x.tasks, x.shape]), [['2026-09-05', ['a'], 'race-decided'], ['2026-09-05', ['a', 'b'], 'git-env'], ['2026-09-09', ['g'], 'raise']])
+  const reps = (x) => entryOf(x, 'demo').friction.filter((f) => f.kind === 'repair').map((f) => [f.date, f.tasks, f.shape])
+  assert.deepEqual(reps(s), [['2026-09-03', ['s'], 'deferred'], ['2026-09-05', ['a'], 'race-decided'], ['2026-09-05', ['a', 'b'], 'git-env'], ['2026-09-09', ['g'], 'raise']])
   assert.ok(s.flags.some((f) => /an undated repair line in ## Notes: - repair: \[\[h\]\] undated/.test(f)), JSON.stringify(s.flags))
+  // the next Reflection's since is this until: until's date is read there, once, and nothing before it again
+  assert.deepEqual(reps(span(h, [], { since: UNTIL, until: '2026-09-17T00:00+10:00' })), [['2026-09-10', ['u'], 'deferred']])
 })
 
 test('span: the Escapes sweep reads an old, never-read record: an in-window revert or fixes: note makes it escapes-only; pre-window evidence and an unresolvable record do not', (t) => {

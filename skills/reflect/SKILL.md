@@ -410,6 +410,9 @@ yes or a no (each `raised` printed `raised` or `exists`). An item left open keep
 - An escapes-only rollout's breaches are not counted: a Guardrail breach counts in the week its run ends.
 - A closed rollout with no close line (a dropped one, one archived unscored, or a close that was not scored) is read
   in the week its record has lines but leaves no baseline, and one whose lines all predate a window is never re-read.
+- A date-only piece of evidence (a `repair:` line, a fixer's `captured:`) carries no time: it is read by the
+  Reflection whose window runs from that Melbourne date, so one dated the day a reading ends waits for the next
+  reading.
 - A single-rollout Watch is offered only beside a rule proposal, but still makes the week not quiet when it is new.
 - A declined Watch seen again in one rollout is neither new nor offered: it returns only when two later rollouts show
   it.
