@@ -2205,7 +2205,7 @@ def cmd_reconcile(args) -> int:
         _reconcile_events(args, rollout, slug, task, note, prior, held, lane_fields, note_status, _pr(note),
                           ready_stamped)
         _review_verdict_events(args, rollout, slug, task, prior)
-        flag =" (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
+        flag = " (dry-run)" if args.dry_run else (" [written]" if note.dirty else " [no-change]")
         ro = " (read-only, approved)" if note_status != status else ""
         print(f"{slug}: status={note_status}{ro}{(' pr=' + pr) if pr else ''}{_rung_note(task)}{legacy_note}{flag}")
 
