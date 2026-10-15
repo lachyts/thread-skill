@@ -329,12 +329,17 @@ def refuse_closed(reflections, rid):
         raise Stop("Reflection %s is closed: nothing written" % rid, 2)
 
 
-def write_line(kind, fields, dry_run):
-    """One reflections.jsonl line through run_record (validated first; a refusal is exit 2, a failed write exit 1)."""
+def check_line(kind, fields):
+    """run_record's refusal of a reflections.jsonl line, before anything is written (exit 2, nothing written)."""
     try:
         RR.check(None, kind, None, fields)
     except RR.Refused as e:
-        raise Stop("the run record refused the line: %s" % e, 2)
+        raise Stop("the run record refused the line: %s: nothing written" % e, 2)
+
+
+def write_line(kind, fields, dry_run):
+    """One reflections.jsonl line through run_record (validated first; a refusal is exit 2, a failed write exit 1)."""
+    check_line(kind, fields)
     if dry_run:
         print("would write %s: %s" % (kind, json.dumps(fields, ensure_ascii=False, sort_keys=True)))
         return
@@ -1238,7 +1243,15 @@ def cmd_bug(a):
         if not mine:
             print("exists %s" % slug)
     else:
-        slug = "thread-skill-bug-%s" % a.slug
+        slug, filed = "thread-skill-bug-%s" % a.slug, True
+    fields = {"id": key, "altitude": "bug", "reflection": rid, "rollouts": rollouts, "rule": rule, "shape": shape,
+              "vaultTask": slug, "filed": filed}
+    if filed:
+        fields["auto"] = True
+    if fixes:
+        fields["fixes"] = fixes
+    check_line("proposal", fields)  # before the file: a refused line never leaves a task behind
+    if found is None:
         held = vault.taken(slug)
         if held is not None:
             raise Stop("path exists: %s (%s); choose other slug words" % (slug, status_of(held)), 2)
@@ -1247,13 +1260,6 @@ def cmd_bug(a):
         if not vault.root.is_dir():
             raise Stop("--tasks-dir %s is not a directory" % vault.root, 1)
         create(str(vault.root / ("%s.md" % slug)), text, a.dry_run)
-        filed = True
-    fields = {"id": key, "altitude": "bug", "reflection": rid, "rollouts": rollouts, "rule": rule, "shape": shape,
-              "vaultTask": slug, "filed": filed}
-    if filed:
-        fields["auto"] = True
-    if fixes:
-        fields["fixes"] = fixes
     write_line("proposal", fields, a.dry_run)
     if filed:
         print("filed %s" % slug)
@@ -1419,6 +1425,9 @@ def cmd_decide(a):
     if not rules:
         print("no rule proposal: no decision task")
         return 0
+    for w in rules:  # every rule line passes run_record before the task is touched
+        check_line("proposal", {"id": w["id"], "altitude": "rule", "reflection": rid, "rollouts": w["rollouts"],
+                                "rule": w["rule"], "shape": w["shape"], "vaultTask": "thread-skill-decisions"})
     now = a.now
     now_t = to_ms(now, "--now") if now else now_ms()
     vault = Vault(a.tasks_dir)
