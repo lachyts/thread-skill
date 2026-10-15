@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-13
+last_touched: 2026-10-15
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,14 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-10-15: 3.1.0 is released and installed (PR #136, tag `thread--v3.1.0` on `bce79a8`; `claude plugin update` 3.0.0 → 3.1.0; `make release-check` passes; primary checkout at `bce79a8`). P18 (unattended rollouts), P20 (orient's front door) and P19 bar p19-5 and the eval tasks are live.**
+- **Rollout `[[thread-skill-rollout-2026-10-14]]`** (archived, § Completion log): 17/17 merged (#118 to #134) in 12h 43m from the clone. P18 and P20 closed; P19 open. p19-5 deferred to the eval rollout (its irreversible gate needs a pre-trim baseline first).
+- **Evals** (`docs/evals/2026-10-15-release-3-1.md`, facts only, $8.24): 16 of 19 cases at 1.00 on `make evals`' defaults; three lifecycle cases fail on the judge alone (one new: `close-pending-doc-owns-continuation`, 1.00 → 0.75). **`make evals` judges with Haiku by default**, which breaks the Opus lock; on `--model opus --judge-model opus` all three score 1.00, but that run changed model and judge together, so the misses stay unexplained.
+- **Release review:** two `xhigh` rounds; the ledger stopped at round 2 (9 of 12 findings cited round 1's rewrite of the record), so the record was cut back to what ran. Version stays minor; the PR body states that a bare `/thread:orient` now writes drift fixes without asking (`--look` is read-only).
+- **#137** deleted the release handoff doc #135 had landed as pending, before the tag.
+- **Filed:** [[thread-skill-make-evals-on-opus]] (Opus model + judge in `EVAL_ARGS`, a ceiling that covers 19 cases), [[thread-skill-adr-status-sweep-after-3-1]] (ADRs 0035/0036 still proposed). [[thread-skill-eval-rollout-p19-evals]] updated: the third miss folds into p19-10; this record is not p19-5's baseline.
+- **Not set:** `~/.config/thread/rollouts.toml` does not exist, so `spend_approval_usd` is 0; the eval rollout's first step sets it to 50.
 
 **2026-10-13 (later): p13-4 and P13 are done. The 3.0.0 live E2E is recorded (`docs/e2e/2026-10-13-3-0-0.md`, PR #115, auto-merge queued): 17 rows, 15 PASS, 1 KNOWN, 1 FAIL. Fixtures removed. Nothing of thread-skill's is running; `[[chorus-rollout-2026-10-13]]` still runs on this checkout's engine (held).**
 - **Shape:** the 2.5.3 baseline re-cut for 3.0 (orient reshuffle for split/gather, the protocol 5 queue for waves, new rows 16 `/thread:retro` and 17 ladder). Run as a hub (this repo: § 0, leak check, cleanup, filing) plus S1 in the fixture (rows 1–13, a Stage card with `cwd` set) and S2 (rows 14–15, started from row 13's native `create_thread` card). Every 2.5.3 finding re-tested is fixed except the archive `git mv`.
@@ -699,8 +707,9 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **`claude plugin eval` defaults (2026-10-15).** The LLM judge is Haiku unless `--judge-model` is passed (`make evals` passes none until [[thread-skill-make-evals-on-opus]] lands). `--case` takes one glob per run: a second `--case` silently replaces the first. A `--max-cost-usd` breach skips the remaining cases and exits non-zero.
 - **A live E2E needs a hub and children (2026-10-13).** The harness resets a `cd` outside the launch dir, so the CWD-bound verbs run in a child session launched in the fixture: in Chorus, `create_thread` (and `spawn_task`) take a `cwd`, so the hub raises a card that opens there. A card-started session never reports back to its raiser; the hub watched the checklist file with a background `until` loop (fix filed for Chorus).
-- **Worktrees under the live checkout can reach the plugin cache.** The `./` directory source copies ignored files; before `claude plugin update`, remove every `.claude/worktrees/*` (the stray `run-record` one belongs to open PR #88) or `make release-check`'s stray check fails and the cache copy must be deleted by hand.
+- **Worktrees under the live checkout can reach the plugin cache.** The `./` directory source copies ignored files; before `claude plugin update`, remove every `.claude/worktrees/*` (the stray `run-record` one belongs to open PR #88) or `make release-check`'s stray check fails and the cache copy must be deleted by hand. Bit again at 3.1.0 (2026-10-15) by this session's own release and withdraw worktrees: remove them from `~/.claude/plugins/cache/thread/thread/<v>/.claude/worktrees/`.
 - **`make evals` grades routing on skill descriptions only.** A body-only change (#108) needs no eval re-run; a description change does. The lifecycle judges record no rationale: re-run a miss with transcripts before reading it.
 - **A Workflow task-notification's output file is one JSON object** (`summary`, `logs`, `result`, `agents`): pipe `json.load(f)['result']` into `reconcile-rollout.py reconcile --result -`; the file has no `<result>` tag to cut.
 - **land.sh's close-out paths are `THREAD.md` and `docs/handoffs/` only** (`closeout_shaped`): a consumed `docs/reviews/` doc can't be deleted by a close-out landing, though fresh-review expects its docs deleted at close ([[thread-skill-land-takes-review-doc-deletions]]).
@@ -944,6 +953,13 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
+**Now (from 2026-10-15): 3.1.0 is installed. Next is the eval work.**
+1. **[[thread-skill-make-evals-on-opus]] first** (small Makefile PR; its Verify is one full Opus `make evals`, spend: ask first). It decides whether p19-10/p19-11 still have anything to chase.
+2. **Then the eval rollout** ([[thread-skill-eval-rollout-p19-evals]]): set `spend_approval_usd = 50` in `~/.config/thread/rollouts.toml` (the file does not exist yet), then `/thread:schedule --tasks` p19-5, p19-10..12 with the pre-trim baseline ordered before p19-5, from the clone `~/repos/tools/thread-skill-rollout`.
+3. **Cheap, any time:** [[thread-skill-adr-status-sweep-after-3-1]]; optionally `/thread:retro [[thread-skill-rollout-2026-10-14]]`.
+
+**Superseded 2026-10-15:**
+
 **Now (from 2026-10-13, later): P13 is closed and 3.0.0 is verified live. Next is scheduling P18 + P19.**
 1. **Steer-only `/thread:orient Thread Skill`** schedules P18 + P19 as one rollout, from the clone `~/repos/tools/thread-skill-rollout` (never the primary: `[[chorus-rollout-2026-10-13]]` holds it); p19-1 first. Let it place the three E2E findings (loose tasks, linked in Where we are) into P19 or alongside.
 2. **Fast-forward the primary** (`git reset --keep origin/master`) only when `unfinished-rollout.py running` no longer lists a rollout on it.
@@ -1162,6 +1178,7 @@ the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidat
 
 ## Session log
 
+- 2026-10-15 (close): released and installed 3.1.0 (#136, tag `thread--v3.1.0`) from handoff `2026-10-15-release-p18-p20` (withdrawn by #137); evals $8.24, Haiku judge found; review ledger STOP at round 2 → record cut to facts; filed make-evals-on-opus and the 3.1 ADR sweep. Memory: release-pr-scope updated.
 - 2026-10-13: 3.0.0 live E2E recorded (15 PASS / 1 KNOWN / 1 FAIL over 17 rows, PR #115); three findings filed; fixtures removed; P13 interim rule retired, p13-4 and P13 closed.
 - 2026-10-13 (close): `/thread:orient Thread Skill` — drift closed P12/P14; reshuffle wrote P18 (unattended) and P19 (coherence), closed P3/4/5/8/9 into P19, dropped three; grill → ADRs 0034/0035 (#112, merged); installed 3.0.0 (p13-4 steps 1–3); handed the E2E off (#113).
 - 2026-10-10 (close): fixed the load-flaky timing tests (#109) and schedule's self-rollout gate (#108, `--resolve`), both after ledger STOPs, reverted to root plus `/simplify`; closed #107 into a design task; Retro of the 10-09 rollout (no proposals); `make evals` ($4.60, 16/18) and released 3.0.0 (#110, tag `thread--v3.0.0`), held from install by two rollouts on the primary. Memory: release-pr-scope.
