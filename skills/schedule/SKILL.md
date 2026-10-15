@@ -136,6 +136,7 @@ Walk `~/repos/obsidian/Work/Tasks/*.md`. Filter:
 - `tags:` **contains** `task` — phase notes (`tags: [phase]`, see ADR 0005) and any other non-task
   note linked to the project are never dispatched
 - `tags:` does **not** contain `rollout` (rollouts aren't tasks)
+- `tags:` does **not** contain `decisions` (the weekly Reflection's decision task, ADR 0037 d5: Lachy decides it at the top of a run, never during one), with or without `--tasks`. Name each skipped decision task in the count report.
 - Skip a task whose `rollout:` links a rollout note directly in `Work/Tasks/` that is neither `done` nor `dropped`: it belongs to that rollout, and only a supersede may take it. Name each skipped task and its rollout in the count report.
 - Skip tasks with `status: merged` — step 4.5 folded these into a combined note; their `merged_into:` target carries the work and gets dispatched in their place
 
@@ -145,7 +146,7 @@ On `supersede <prior>` (§ 0), first run the git-env canary's `check-all` on the
 
 A non-zero preview exit stops the run before this run writes a rollout note or a task stamp: print its stderr verbatim. Exit 2 is a refusal, for one of two causes: an undecided RACE or UNVERIFIED on the prior (`/thread:repair [[<prior>]]` records Lachy's decision), or a refused ladder file when a carried task needs the top rung (`ERROR: carry: ladder file refused: <path>:<line>: <reason>`). The refused ladder's remedy is Lachy's edit to `~/.config/thread/ladder.toml` at the line named, then `--regenerate` again.
 
-Report the count and let the user confirm before proceeding. The confirm lists the candidates, each skipped task with its rollout and, on a supersede, both the carried and the kept lists (the carried list with its `restamp` lines and any `WARN: carry:` line for a value carry left in place), the `order` lines (this preview's and, after an `interrupted` finish, § 0's carry's) with step 3's proposals from them, any `ERROR:` lines from § 0's `resume`, the check's `WARN: <prior> is incomplete` line when it printed one, and, after an `interrupted` finish, § 0's pinned report.
+Report the count and let the user confirm before proceeding. The confirm lists the candidates, each skipped task with its rollout, each skipped decision task and, on a supersede, both the carried and the kept lists (the carried list with its `restamp` lines and any `WARN: carry:` line for a value carry left in place), the `order` lines (this preview's and, after an `interrupted` finish, § 0's carry's) with step 3's proposals from them, any `ERROR:` lines from § 0's `resume`, the check's `WARN: <prior> is incomplete` line when it printed one, and, after an `interrupted` finish, § 0's pinned report.
 
 ### 2. Extract file scope per task — best effort
 

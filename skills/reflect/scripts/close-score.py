@@ -79,7 +79,8 @@ fetched: land.sh's `git remote get-url origin`, escapes.py's rev-parse, symbolic
 merge-base, cat-file, diff-tree and blame, and `git remote get-url origin` in each clone reviews.jsonl names
 (score.py, through rollout-settings.py's _origin_slug).
 
-Not covered, left to the weekly Reflection (ADR 0037 d4):
+Not covered (ADR 0037 d4). The weekly Reflection reads each such rollout's record in the week it ran and names a
+closed one with no close line (skills/reflect/SKILL.md § The weekly reading), but writes no tunings.jsonl line for it:
 - A dropped rollout: no writer sets a rollout `status: dropped` and schedule never archives one, so there is no close
   path to run this from.
 - reconcile-project.py's MISFILED SUPERSEDED ROLLOUT move (orient § 4's `--apply`) archives a note it never scores.

@@ -195,6 +195,8 @@ and Drift and the slots for each swept project.
   it. A task with any open fork is blocked on Lachy. A ruled fork is decided: it is never
   reported, excluded or grilled again, whatever route the task takes next. A later run's end line
   supersedes the whole set.
+- **Decisions waiting**: an open task tagged `decisions` (the weekly Reflection's decision task,
+  ADR 0037 d5) is Lachy's, decided at the top of a run through `/thread:reflect --decide`.
 
 ### 3. Present
 
@@ -204,7 +206,8 @@ A situational report written for Lachy catching up, not a log:
 - **Balls in the air**: per-sub-project one-liners — the slot first
   (`next: <next_action> ([[<task>]])`, or `No next action`), then state,
   blocker, staleness. Group: active / in-flight (dispatched) / stalled /
-  dormant. A task with an open fork (§ 2 Open forks: named by `fork for Lachy` in its latest orient
+  dormant. An open decision task (§ 2 Decisions waiting) is listed first, as
+  blocked on Lachy: its rule proposals wait for his yes or no. A task with an open fork (§ 2 Open forks: named by `fork for Lachy` in its latest orient
   end line, with no `orient ruling:` line for it timed after that end line) is blocked on his
   decision: name every open fork (grill-me). A ruled fork is not listed.
 - **Drift**: one line, the counts plus names, split into unambiguous (fixed next, in § 4, unless
@@ -349,7 +352,9 @@ dispatchable open work into **parallel-safe batches**:
   kill fan-out ("Prompt is too long"). That table + the registry are the
   only config — orient maintains no manifest of its own.
 - **Exclusions**: conversation-gated tasks (need Lachy's input — say so, leave
-  them for Hands-on or the next reshuffle's grill). A task with an open fork (§ 2 Open forks: named
+  them for Hands-on or the next reshuffle's grill). The weekly Reflection's decision task (tagged
+  `decisions`, § 2 Decisions waiting) is conversation-gated and never batched: Lachy decides it at
+  the top of a run. A task with an open fork (§ 2 Open forks: named
   by `fork for Lachy` in its latest orient end line, with no `orient ruling:` line for it timed
   after that end line) counts as conversation-gated at any age: a batch stopped it at a grill-fit
   fork, and it stays out until Lachy rules on every open fork in a reshuffle grill (§ 5), which

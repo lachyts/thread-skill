@@ -1,6 +1,6 @@
 ---
 name: reflect
-description: 'Use to score a rollout and tune the operator''s rollout settings: a Reflection over its Run record. Triggers on "reflect on [[rollout]]", "how did [[rollout]] run", "how did the rollout run", "score this rollout", "what bound the rollout", "should I raise the parallel ceiling", or /thread:reflect. Folds the Workflow journals, scores the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to it) and the Guardrails (Throughput among them, bounded in running hours per task, and Review churn), with Slot and lane use, load and the binding constraint, proposes Tunings weighed for what each serves and risks, and applies only the ones Lachy picks through the tune script, which records every Reflection in tunings.jsonl. Never changes anything on its own. Not for Chorus''s Companion record: "reflect on the Companion" is Chorus''s /reflect.'
+description: 'Use to score a rollout and tune the operator''s rollout settings: a Reflection over its Run record, by hand or weekly. Triggers on "reflect on [[rollout]]", "how did [[rollout]] run", "how did the rollout run", "score this rollout", "what bound the rollout", "should I raise the parallel ceiling", "run the weekly Reflection", "reflect on this week''s rollouts", or /thread:reflect. Folds the Workflow journals, scores the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to it) and the Guardrails (Throughput among them, bounded in running hours per task, and Review churn), with Slot and lane use, load and the binding constraint, and proposes Tunings weighed for what each serves and risks. By hand it applies only the ones Lachy picks, through the tune script, which records each by-hand Reflection in tunings.jsonl; the weekly reading traces the friction to its rules, keeps Watches, files bugs and lands agreed knobs on its own, never a rule. Not for Chorus''s Companion record: "reflect on the Companion" is Chorus''s /reflect.'
 ---
 
 # /thread:reflect — score a rollout, propose Tunings, apply the picked ones
@@ -10,8 +10,11 @@ rollout's Run record, scores it on its two headlines (ADR 0037 d1), **Hands-off 
 with no act from Lachy once the run started) and **Quality** (how few Escapes its landed tasks produced), then on
 the Guardrails (Throughput, bounded so an overnight run still finishes by morning, and Review churn among them),
 names what bound it, and proposes **Tunings** to the operator's rollout settings (`~/.config/thread/rollouts.toml`).
-It never changes anything itself. Every number
-comes from two scripts, and the model only runs them, shows what they print and passes Lachy's answer on:
+By hand (steps 1–8) it changes nothing itself: Lachy picks. The **weekly reading** (steps 9–17, ADR 0037 d3–d5)
+reads every rollout since the last one, traces each cost to the rule that produced it, and lands only what ADR 0037
+d5 lets it land unasked (a bug task, a knob three Reflections agree on, the revert of one that breaches); a rule
+always waits for Lachy. Every number comes from scripts, and the model only runs them, reads what they print and
+passes Lachy's answer on:
 
 - `skills/reflect/scripts/score.py` computes the scores and the proposals. It reads only; its header is the one
   copy of every rule (running time, the binding constraint, the baseline, the proposal rules), and
@@ -19,11 +22,14 @@ comes from two scripts, and the model only runs them, shows what they print and 
 - `skills/reflect/scripts/tune.py` is the **only writer** of `rollouts.toml` and of `tunings.jsonl` (the
   Reflection's line beside the record). Never edit either file by hand from this skill, and never compute a score
   or write a Tuning in the conversation.
+- `skills/reflect/scripts/reflect.py` is the **only writer** of `reflections.jsonl` (the weekly reading's Watches,
+  proposals and close), and of the bug and decision tasks it files. Its header is the one copy of its rules.
 
 **Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 
-The Reflection takes Chorus's word and shape (ADR 0037 d2): record → proposals → Lachy picks → the tune script. It
-reads a rollout's Run record, never the Companion's: "reflect on the Companion" is Chorus's `/reflect`.
+The Reflection takes Chorus's word and shape (ADR 0037 d2): record → proposals → Lachy picks → the tune script, and
+for the weekly reading, Chorus's span → Watches → close. It reads rollouts' Run records, never the Companion's:
+"reflect on the Companion" is Chorus's `/reflect`.
 
 ## Scope
 
@@ -32,21 +38,29 @@ Reads the rollout note (`~/repos/obsidian/Work/Tasks/`, then `Work/Tasks/Archive
 prints it), and `~/.config/thread/rollouts.toml` through `rollout-settings.py`. `land.sh --origin-slug` runs one
 local `git remote get-url origin` in the Project root: no network. For the Escapes the score also reads, read-only:
 every note under `~/repos/obsidian/Work/Tasks/`, Archive included, for `fixes:` and `merged_into:`; and the Project
-root's git (commit messages, `docs/reviews/` and `git blame`), never fetched. Writes: `fold-journals`' `call-journal` lines,
-and tune.py's one line and its picked keys. Scratch files go under `/tmp/thread-reflect-<rollout-slug>/`. No vault
-write, no git write, no PR.
+root's git (commit messages, `docs/reviews/` and `git blame`), never fetched. By hand it writes `fold-journals`'
+`call-journal` lines, and tune.py's one line and its picked keys; scratch files go under
+`/tmp/thread-reflect-<rollout-slug>/`, and it makes no vault write. The weekly reading reads every rollout record and
+`reflections.jsonl` too, and writes: `reflections.jsonl` through reflect.py; a bug task and the decision task under
+`~/repos/obsidian/Work/Tasks/`; the decision task's one line on its day page (task-writer § 3b); `tunings.jsonl` lines
+only through tune.py's `--auto` and `--revert`; and `call-journal` lines through `span --fold`. Its scratch dir is
+`/tmp/thread-reflect-week-<YYYY-MM-DD>/`. Neither form makes a git write or a PR.
 
 ## Invocation forms
 
 ```
 /thread:reflect [[thread-skill-rollout-2026-10-04]]        # the whole run, up to now
 reflect on [[chorus-rollout-2026-10-01]] since Tue 9am until Wed 6pm   # one span (a before/after split)
+/thread:reflect --weekly [--since TS] [--until TS]         # the weekly reading, since the last one (steps 9-17)
+/thread:reflect --decide [[thread-skill-decisions-<date>]]  # Lachy decides the weekly decision task
 ```
 
 Every completion ceremony and every supersede (schedule step 7.5, § 0's `file` finish, repair's close-out) records
 the script half on its own through `close-score.py` (ADR 0037 d4): fold, settings, score, and one `close` line in
 `tunings.jsonl` that tune.py writes, one per rollout, with no model reading and no picks. A dropped rollout has no
-close path, and the weekly Reflection covers it. A by-hand Reflection still runs at completion on Lachy's word,
+close path: the weekly reading reads its record in the week it ran, like every rollout with a line in its window, and
+names a closed rollout with no close line, but writes no `tunings.jsonl` line for it, so it leaves no baseline. A
+by-hand Reflection still runs at completion on Lachy's word,
 mid-run (the slow tail shows, because running time ends at the Reflection, not at the last merge), or on a
 superseded or dropped rollout (its record alone is enough). It writes its own line through tune.py, which the close
 line never blocks.
@@ -153,8 +167,9 @@ Only Lachy picks. A "yes" names ids (`p1`, `p1 and p3`); anything else, or no an
 
 ### 7. Apply through the tune script, exactly once
 
-Every Reflection that reached its scores runs tune.py **exactly once**: it writes exactly one `tunings.jsonl` line
-(none only for a null repo, below). Before a `--pick` run, check every picked id against `score.json`'s
+Every by-hand Reflection that reached its scores runs tune.py **exactly once**: it writes exactly one `tunings.jsonl`
+line (none only for a null repo, below). The weekly reading (step 14) runs it zero or more times per repo, never with
+`--pick`, `--record-only` or `--close`. Before a `--pick` run, check every picked id against `score.json`'s
 `proposals` (not `withheld`): an id that is not there goes back to Lachy (step 6) before tune.py runs.
 
 ```
@@ -188,6 +203,169 @@ started, keeps its own frontmatter values: execute reads task frontmatter, then 
 rollouts.toml, and only a legacy note missing a key reads rollouts.toml, at its next loop entry (execute § 3). To
 change a live rollout, Lachy edits its note.
 
+## The weekly reading (ADR 0037 d3–d5)
+
+`/thread:reflect --weekly` reads every rollout since the last weekly Reflection, on its own, once a week (ADR 0037
+d4): the scripts score and sweep, the model traces each cost to its rule, and the writers record the outcome. It
+lands a bug task, an agreed knob or a knob's revert unasked (ADR 0037 d5); a rule proposal, and any Watch to confirm
+beside it, goes into one decision task for Lachy's next morning. Every write goes through `reflect.py` or tune.py,
+each idempotent, so a reading that dies part-way is finished by running the remaining steps against the same
+`span.json`.
+
+### 9. Preflight
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py rung
+mkdir -p /tmp/thread-reflect-week-<YYYY-MM-DD>
+```
+
+`rung` prints the ladder's highest Opus rung with its own effort (ADR 0037 d4 names Opus at xhigh, no token cap)
+and notes on stderr when the top rung is not Opus or that rung's effort is not xhigh. A skill cannot set its own
+model: if this session is not on that model and effort, say so and go on. `<YYYY-MM-DD>` is today's Melbourne date.
+
+### 10. Span
+
+Run it once, through the Bash tool with `timeout: 600000`:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py span --fold --out /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json
+```
+
+It folds each read rollout's journals and scores it, reads its friction and close line, sweeps the Escapes over
+every record (ADR 0037 d4), and lists the open Watches and the knob candidates; its header holds every rule. Add
+`--since <TS>` and `--until <TS>` only on Lachy's word: by default it starts where the last Reflection ended. Read
+the whole `span.json`. Exit 1 or 2 stops the reading: quote its stderr line. Never re-run it after a write (step 12
+on): a new span is a new Reflection, with a new id.
+
+### 11. The reading
+
+For each rollout, read its `friction` items, of seven kinds (`ask`, `set-aside`, `retry`, `descope`, `repair`,
+`escape`, `churn`), and trace each to the skill rule or ADR that produced it:
+
+- An `ask` (a Recorded answer, a sign-off, a retry hand-back, a merge hold, a RACE decision, a git-env hold) is a
+  mid-run ask. A mid-run ask is traced to the grill that should have asked it before the run: orient § 5
+  (Reshuffle), where `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § R2 (Sort and propose) sorted the task
+  clear, or where `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § R3 (Grill the unclear) never put the fork
+  to Lachy; `${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` § How a fork comes back, where the batch prompt
+  routed no gate; orient § 7 (Batch), where a conversation-gated task entered a batch; and, only for spend, a
+  credential or an irreversible action, schedule § 3.5 (Detect human/release gates) or schedule § 3.6 (Sweep for
+  gated-input smell), or `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § R3 (Grill the unclear), item (c),
+  asked ahead. An ask whose `askedAhead` is true was asked at the top and still came back: trace why the answer
+  did not hold.
+- A `set-aside` is traced by its stage and `reasonClass` to the rule that stopped it: execute § 3.5 (the plan
+  gate), execute § 3.7 (gated inputs, ADR 0034), execute § 4.5 (the queue, ADR 0030) or execute § 6.5 (Needs
+  you), and by its `movedBy` to what moved it on.
+- A `retry` is execute § 4.5's automatic retry (ADR 0033): trace why the first attempt failed a block an agent
+  could fix.
+- A `descope` is repair § 2–§ 5's descope and its hand-back (ADR 0035): trace why the task's scope could not land
+  whole.
+- A `repair` item is traced by its shape: `race-decided` is read with its `raceDecided` ask, never twice;
+  `escalated` and `flipped` are drift the run should have closed itself (repair § 3); `git-env` is execute § 4.5's
+  canary; `raise` is a round cap (weigh it beside score.py's own knob); `deferred` is repair § 5.
+- An `escape` is traced to the review that should have caught it (execute § 5, ADR 0037 d7), and only when its
+  `inWindow` is true: an Escape counts in the week it surfaced, against the rollout that landed the work.
+- A `churn` item is a review round that only answered the last round's fix (execute § 5): trace what the fix broke.
+
+For each `set-aside` item whose `movedBy` is `unrecorded`, open its `taskNote` and read its `## Needs you` and
+`## Integration log`; trace the Human fix you find there (ADR 0035) like a mid-run ask; when neither says what moved
+it, name it as unexplained.
+
+Each item becomes a sighting (step 12), a bug (step 13), a knob (score.py's only: never invent one) or nothing,
+named with why. Read `freshReview` and `cannotShow` as reported, not traced. A `closed with no close line` flag is
+reported, not traced: that rollout leaves no baseline (ADRs 0030, 0033, 0034, 0035 and 0037 bound what each
+trace may conclude). The Watch, its id and its recurring rule are Chorus's Reflection's, borrowed and never imported;
+recording Lachy's no (step 15's decision task, § Deciding the decision task) is this skill's own.
+
+### 12. Sightings
+
+After the whole reading, make ONE `reflect.py watch` call per Watch, naming every rollout where you saw it. Reuse an
+open Watch's rule and shape verbatim, a declined one's included. On exit 2, re-run naming the union the refusal
+prints.
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py watch --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --rollout <slug> [--rollout <slug> ...] --rule "<rule>" --shape "<shape>" --count <n>
+```
+
+The rule is the citation the trace reached (at most 120 characters); the shape says what happened, in a few words.
+A Watch seen in two rollouts, or confirmed by Lachy, becomes a rule proposal (step 15).
+
+### 13. Bugs
+
+A bug is a skill or the engine not doing what its own rule says. File each once:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py bug --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --rule "<rule>" --shape "<shape>" --slug <one-to-five-words> --title "Thread Skill: <title>" --why "<why>" --rollout <slug> [--rollout <slug> ...] [--fixes <landed task>]
+```
+
+Pass `--fixes <landed task>` when the bug fixes work that already landed, so the task carries its `fixes:` key
+(task-writer § 4). An open bug task with the same rule and shape prints `exists <slug>` and files nothing. On `path
+exists`, call again with other slug words; never edit, move or remove the existing note.
+
+### 14. Knobs
+
+From `span.json`'s `knobs`: each revert first, then each landing, then one `knobs` call.
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --scores /tmp/thread-reflect-week-<YYYY-MM-DD>/<slug>.score.json --revert <tuning id> --repo <Project root> --reflection <reflection id>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --scores /tmp/thread-reflect-week-<YYYY-MM-DD>/<slug>.score.json --auto --repo <Project root> --reflection <reflection id>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py knobs --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json
+```
+
+`--revert` runs once per `knobs.revert[]` item (its `scores`, `tuning` and `root`), `--auto` once per `knobs.land[]`
+item, and `knobs` once, after them. Report every exit verbatim: an `applied` line, a `held <key>: <reason>` line
+(`agreement 1 of 3`, say), a refusal (exit 2) or a write failure (exit 1). Never `--pick`, `--record-only` or
+`--close`, and never edit `rollouts.toml`.
+
+### 15. Decide
+
+Write `/tmp/thread-reflect-week-<YYYY-MM-DD>/decisions.json`, `{"<watch id>": {"why": "...", "amends": "..."}}`,
+one entry per recurring Watch: why it matters, and the rule it would amend. Then:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py decide --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --decisions /tmp/thread-reflect-week-<YYYY-MM-DD>/decisions.json
+```
+
+It writes a decision task only with a rule proposal: a week with Watches to confirm alone writes none, and they
+wait. The task is scheduled for the next Melbourne morning, conversation-gated, and orient's audit lists it (orient
+§ 2). Put its line on its `scheduled:` day's page by task-writer § 3b; when `decide` printed `(was <date>)`, move the
+line from the old day's page.
+
+### 16. Close
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json
+```
+
+Exactly once, quiet weeks included: its line is the Reflection's record, and its `quiet` feeds the cadence (ADR
+0037 d6). A quiet week writes only record lines, never a vault task.
+
+### 17. Report, then tidy
+
+Report the rollouts read (and the escapes-only ones), each trace and what it became, the Watches written (and any
+`extended` line), the bugs filed or found, each knob landed, reverted or held with its reason, the decision task (or
+none), the close line's counts and `quiet`, the `cannotShow` list and every flag. Then `rm -rf
+/tmp/thread-reflect-week-<YYYY-MM-DD>`.
+
+## Deciding the decision task
+
+`/thread:reflect --decide [[<slug>]]`, with Lachy, at the top of a run. Read every `## Reflection <id>` section and
+`## Still open`. For each item:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py raised --watch <id> --reflection <the section's id> [--confirmed | --declined]
+```
+
+- **A yes to a rule item**: `raised` plain, then file the rule's grill task (task-writer § 4: a grill and an ADR
+  before any build).
+- **A yes to a Watch to confirm**: the same with `--confirmed`, then the grill task.
+- **A no**: the same with `--declined`. It records his no and closes the Watch's cycle, so the pattern is proposed
+  again only when two later rollouts show it afresh, never next week from the same evidence.
+- **Not now, or not reached**: nothing. The Watch stays open, and the next weekly reading lists it under `## Still
+  open`.
+
+Then mark the task done (`status: done` and `completed: <Melbourne today>`) only once every item it lists has had a
+yes or a no (each `raised` printed `raised` or `exists`). An item left open keeps the task open.
+
 ## What the record cannot show
 
 - A merge hold carries no reason, so a `--gated` hold cannot be told from an exit-7 hold: both read as a wait on
@@ -218,6 +396,20 @@ change a live rollout, Lachy edits its note.
   squash-landed later PR's findings are missed too.
 - Reverts and review findings are read from the Project root's local ref, never fetched: `escapes.ref.tipDate`
   shows how old it is, and anything pushed since the last fetch is missed.
+- A repair run that writes no dated `repair:` line in the rollout note's `## Notes` and records no event is not seen
+  by the weekly reading.
+- A Human fix (ADR 0035) has no event of its own: the weekly reading sees it only as a set-aside whose `movedBy` is
+  `unrecorded`, and then its `## Needs you` and `## Integration log` say what moved it, or nothing does.
+- /fresh-review churn names no rollout (`reviews.jsonl` carries none): the weekly reading reports it (`freshReview`)
+  and traces none of it.
+- The Escapes sweep misses a record with no rollout note or Project root and a repo with no GitHub origin (both in
+  `cannotShow`), and dates an undated fixer by its mtime.
+- An escapes-only rollout's breaches are not counted: a Guardrail breach counts in the week its run ends.
+- A closed rollout with no close line (a dropped one, one archived unscored, or a close that was not scored) is read
+  in the week its record has lines but leaves no baseline, and one whose lines all predate a window is never re-read.
+- A single-rollout Watch is offered only beside a rule proposal, but still makes the week not quiet when it is new.
+- A declined Watch seen again in one rollout is neither new nor offered: it returns only when two later rollouts show
+  it.
 
 ## Don'ts
 
@@ -226,5 +418,10 @@ change a live rollout, Lachy edits its note.
 - Don't run tune.py again once it has written this Reflection's line, or before Lachy has answered (or ended the
   Reflection). An exit-2 `--pick` refusal wrote nothing: it allows one corrected `--pick` or falls back to
   `--record-only` (step 7), and never ends the Reflection without a line.
-- Don't pick for Lachy, and don't treat a proposal's `agreeing` count as a pick: a rule three Reflections agree on may
-  become automatic only by ADR (`CONTEXT.md` § Run record and tuning).
+- By hand, don't pick for Lachy or treat a proposal's `agreeing` count as a pick; the weekly reading lands a knob only
+  through `tune.py --auto` (ADR 0037 d5), never a rule.
+- Don't write a decision task for Watches to confirm alone: they wait for a rule proposal.
+- Don't re-run step 10 after a write: a new span is a new Reflection.
+- Never overwrite or edit a done task: reflect.py creates a note by exclusive create and refuses a taken path.
+- Never write a close line from the weekly reading: `--close` is close-score.py's alone (ADR 0037 d4).
+- Never decide a rule item during a run, and never schedule, batch or reshuffle the decision task.

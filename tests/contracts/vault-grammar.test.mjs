@@ -140,7 +140,7 @@ function readersOf(text) {
   return at < 0 ? { adopted: s, notYet: null } : { adopted: s.slice(0, at), notYet: s.slice(at) }
 }
 const CONFORMING = ['reconcile-project.py', 'reconcile-rollout.py', 'next-action.py', 'orient', 'R1',
-  'tests/contracts/vault-grammar.test.mjs']
+  'tests/contracts/vault-grammar.test.mjs', 'reflect.py']
 const NOT_ADOPTED = ['repo-track.sh', 'candidate statuses', 'SHORT_ID_RE']
 
 // The names of the failed § Readers checks; [] when every conforming reader is listed as such and the three
