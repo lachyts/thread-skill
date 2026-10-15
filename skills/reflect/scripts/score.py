@@ -299,6 +299,7 @@ class Score:
         self.flags = []
         self.env = os.environ if env is None else env
         self.origins = {}  # a review-round's repo path -> its GitHub owner/name, or None (review churn)
+        self.rs = None     # rollout-settings.py, loaded on the first review-round path
 
     def flag(self, text):
         if text not in self.flags:
@@ -1051,8 +1052,9 @@ class Score:
         cache = self.origins
         if line_repo not in cache:
             try:
-                rs = _load("thread_rollout_settings", ROLLOUT_SETTINGS_PY)
-                cache[line_repo] = rs._origin_slug(line_repo)
+                if self.rs is None:
+                    self.rs = _load("thread_rollout_settings", ROLLOUT_SETTINGS_PY)
+                cache[line_repo] = self.rs._origin_slug(line_repo)
             except Exception:  # rs.SettingsError (land.sh failed or timed out) or a load failure: unresolvable
                 cache[line_repo] = None
         slug = cache[line_repo]

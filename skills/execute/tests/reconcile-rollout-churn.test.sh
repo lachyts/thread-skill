@@ -259,6 +259,12 @@ ok "$?" 0 "a non-list reviewVerdicts: exit 0"
 ok "$(grep -c 'run_record: warning: t-notalist: reviewVerdicts: not a list' "$TMP/err")" 1 "a non-list reviewVerdicts: one warning"
 ok "$(rv)" "" "a non-list reviewVerdicts: nothing recorded"
 
+# ---- 9. the python 3.8 floor ------------------------------------------------------------------------------------------
+SPLIT="$HERE/../scripts/review-split.py"
+ok "$(python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read(), sys.argv[1], feature_version=(3, 8)); print("ok")' "$SPLIT" 2>&1)" ok \
+  "review-split.py parses as python 3.8"
+ok "$(grep -c '^from __future__ import annotations$' "$SPLIT")" 1 "review-split.py defers annotations"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "ALL PASS"; else echo "SOME FAILED"; fi
 exit "$fail"

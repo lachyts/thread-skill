@@ -92,7 +92,7 @@ function writeSettings(home, values, { file = null, repo = 'o/r', guardrails = {
   for (const k of ['parallel_ceiling', 'max_review_rounds', 'max_iterations', 'max_plan_rounds']) {
     settings[k] = { value: values[k] ?? { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3 }[k], source: file ? 'file:repo' : 'built-in' }
   }
-  const g = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0, ...guardrails }
+  const g = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0, review_churn_pct: 40, ...guardrails }
   const doc = {
     path: file || path.join(home, '.config', 'thread', 'rollouts.toml'), file: !!file, repo,
     settings, guardrails: Object.fromEntries(Object.entries(g).map(([k, v]) => [k, { value: v, source: 'built-in' }])),
