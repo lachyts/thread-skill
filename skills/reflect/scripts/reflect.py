@@ -243,6 +243,11 @@ def say(line):
     sys.stderr.write("reflect: %s\n" % line)
 
 
+def done(a, line):
+    """A writer's outcome line; under --dry-run it says nothing was written."""
+    print(("dry run, nothing written: " if getattr(a, "dry_run", False) else "") + line)
+
+
 # ---- time ------------------------------------------------------------------------------------------------------
 
 _TZ = []
@@ -1151,13 +1156,13 @@ def cmd_watch(a):
             return 0
         if set(rollouts) > set(have):
             write_line("watch", fields, a.dry_run)
-            print("extended %s: +%s" % (wid, ", ".join(sorted(set(rollouts) - set(have)))))
+            done(a, "extended %s: +%s" % (wid, ", ".join(sorted(set(rollouts) - set(have)))))
             return 0
         union = sorted(set(have) | set(rollouts))
         raise Stop("watch %s: Reflection %s's line names [%s]; this call names [%s]; one line per Watch names every "
                    "rollout: re-run naming [%s]" % (wid, rid, ", ".join(have), ", ".join(rollouts), ", ".join(union)), 2)
     write_line("watch", fields, a.dry_run)
-    print("watched %s (%s): %s" % (wid, ", ".join(rollouts), rule))
+    done(a, "watched %s (%s): %s" % (wid, ", ".join(rollouts), rule))
     return 0
 
 
@@ -1178,7 +1183,7 @@ def cmd_raised(a):
         raise Stop("Watch %s is seen in one rollout (%s): a plain raise needs two; use --confirmed or --declined"
                    % (a.watch, ", ".join(w["rollouts"])), 2)
     write_line("watch-raised", {"id": a.watch, "reflection": a.reflection, "via": via}, a.dry_run)
-    print("raised %s (%s)" % (a.watch, via))
+    done(a, "raised %s (%s)" % (a.watch, via))
     return 0
 
 
@@ -1262,7 +1267,7 @@ def cmd_bug(a):
         create(str(vault.root / ("%s.md" % slug)), text, a.dry_run)
     write_line("proposal", fields, a.dry_run)
     if filed:
-        print("filed %s" % slug)
+        done(a, "filed %s" % slug)
     return 0
 
 
@@ -1347,7 +1352,7 @@ def cmd_knobs(a):
             continue
         write_line("proposal", f, a.dry_run)
         have.add(f["id"])
-        print("knob %s %s %s -> %s %s" % (f["id"], f["key"], f["from"], f["to"], state))
+        done(a, "knob %s %s %s -> %s %s" % (f["id"], f["key"], f["from"], f["to"], state))
     if not out:
         print("no knob proposals")
     return 0
@@ -1513,8 +1518,8 @@ def cmd_decide(a):
         write_line("proposal", {"id": w["id"], "altitude": "rule", "reflection": rid, "rollouts": w["rollouts"],
                                 "rule": w["rule"], "shape": w["shape"], "vaultTask": slug}, a.dry_run)
     sched = REC._scalar(note.get("scheduled"))
-    print("decision task %s: scheduled %s%s (%s)" % (slug, sched, " (was %s)" % moved if moved else "",
-                                                     "new" if created else "appended"))
+    done(a, "decision task %s: scheduled %s%s (%s)" % (slug, sched, " (was %s)" % moved if moved else "",
+                                                       "new" if created else "appended"))
     return 0
 
 
@@ -1565,8 +1570,8 @@ def cmd_close(a):
     if a.cadence is not None:
         fields["cadence"] = a.cadence
     write_line("reflection", fields, a.dry_run)
-    print("closed %s: %s, %s" % (rid, "quiet" if quiet else "not quiet",
-                                 ", ".join("%s %d" % (k, v) for k, v in counts.items())))
+    done(a, "closed %s: %s, %s" % (rid, "quiet" if quiet else "not quiet",
+                                   ", ".join("%s %d" % (k, v) for k, v in counts.items())))
     return 0
 
 
