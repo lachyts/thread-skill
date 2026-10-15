@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """tune.py — land the Tunings Lachy picked from a Reflection, and record the Reflection (p15-5, ADR 0032).
 
-python >= 3.8, stdlib only. The only writer of rollouts.toml and of tunings.jsonl. Called by
-skills/reflect/SKILL.md (step 7) exactly once per Reflection that reached its scores:
+python >= 3.8, stdlib only. The only writer of rollouts.toml and of tunings.jsonl. Two callers (ADR 0037 d4):
+skills/reflect/SKILL.md (step 7) runs it exactly once per Reflection that reached its scores, and
+skills/reflect/scripts/close-score.py runs `--record-only --close <kind>` once at each rollout's close (its completion
+ceremony, or its supersede):
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/tune.py --scores <score.json|-> \\
-        (--pick p1[,p2...] --repo <dir> | --record-only) [--config <path>] [--dry-run]
+        (--pick p1[,p2...] --repo <dir> | --record-only [--close completion|supersede]) [--config <path>] [--dry-run]
 
 --scores is score.py's JSON. --pick and --record-only are mutually exclusive and one is required.
 
@@ -15,7 +17,16 @@ config: every Reflection leaves its scores as the next Reflection's baseline. A 
 and reviewChurn), so a key a stale score.json lacks is recorded null. The `trade`, `caution`, `serves` and `risks` a
 proposal carries are Lachy's to weigh before he picks: tune.py reads none of them, and a proposal carrying a trade or a
 caution is as pickable as any other. With `repo: null` in the scores (no GitHub origin) it writes nothing, prints
-`tune: not recorded: ...` on stderr and exits 0.
+`tune: not recorded: ...` on stderr and exits 0 (checked first, --close or not).
+
+--close completion|supersede (with --record-only only; else exit 2, nothing written) stamps the line's `close`: the
+close that wrote it (run_record.py's Close rule). One close line per rollout, checked after the null-repo check and
+before any write, --dry-run included: close_line() reads tunings.jsonl, skips a line that does not parse and every
+line another line's `voids` names, and a remaining `tuning` line for scores.rollout with a `close` means this run
+prints `already recorded <id> (<close>) in <file>: nothing written` and exits 0. A tunings.jsonl that exists but
+cannot be read prints `tune: tunings.jsonl cannot be read: ...` and exits 1, nothing written. A by-hand line (no
+--close) is never checked and never blocks: only a close line blocks a close line. The check and the append take no
+lock, so two closes racing on one rollout could both write (one lead closes a rollout, so it is not guarded).
 
 --pick, checked before any write:
 - every pick names an id in scores.proposals (a withheld or unknown id is refused; a repeated id counts once;
@@ -49,9 +60,10 @@ On success stdout names the line's id and file, then one line per Tuning: `appli
 <repo>: takes effect at the next /thread:schedule (or --regenerate); a rollout note already stamped keeps its
 own values`.
 
-Exit codes: 0 applied, recorded, or not recorded for a null repo; 1 a write failed (nothing applied, or the
-line voided); 2 refused (usage, scores, picks, identity, a stale from, a refused or unvalidated config);
-3 no tomllib for a present config.
+Exit codes: 0 applied, recorded, already recorded (a --close run whose rollout has its close line), or not recorded
+for a null repo; 1 a write failed (nothing applied, or the line voided), or tunings.jsonl cannot be read for --close;
+2 refused (usage, scores, picks, identity, a stale from, a refused or unvalidated config); 3 no tomllib for a present
+config.
 """
 from __future__ import annotations
 
@@ -85,6 +97,7 @@ def _load(name, path):
 
 RR = _load("thread_run_record", os.path.join(SHARED, "run_record.py"))
 RS = _load("thread_rollout_settings", os.path.join(SHARED, "rollout-settings.py"))
+CLOSES = RR.CLOSES  # completion | supersede: the close that wrote a line (run_record.py's Close rule)
 
 
 class Stop(Exception):
@@ -115,7 +128,7 @@ def read_scores(src):
     return doc
 
 
-def line_fields(scores, applied, tid, voids=None):
+def line_fields(scores, applied, tid, voids=None, close=None):
     w = scores["window"]
     fields = {"id": tid, "repo": scores["repo"],
               "window": {k: w[k] for k in ("since", "until", "activeStart", "activeEnd", "partial") if k in w},
@@ -125,6 +138,8 @@ def line_fields(scores, applied, tid, voids=None):
         fields["binding"] = binding
     if voids:
         fields["voids"] = voids
+    if close:
+        fields["close"] = close
     return fields
 
 
@@ -133,6 +148,34 @@ def tunings_path():
         return os.path.join(RR.events_dir(), RR.TUNINGS + ".jsonl")
     except ValueError:
         return RR.TUNINGS + ".jsonl"
+
+
+def close_line(rollout, path=None):
+    """The rollout's close line: the first `tuning` line in tunings.jsonl for `rollout` (a slug, [[slug]] or note
+    path) whose `close` is one of CLOSES and whose id no other line's `voids` names, else None. A line that does not
+    parse is skipped; a missing file is None; a file that exists but cannot be read raises OSError. close-score.py
+    calls it before any step, and record_only() before a --close write."""
+    rollout = RR.normalise_slug(rollout, "rollout")
+    path = path or tunings_path()
+    try:
+        f = open(path, "rb")
+    except FileNotFoundError:
+        return None
+    rows = []
+    with f:
+        for raw in f:
+            try:
+                d = json.loads(raw)
+            except ValueError:
+                continue
+            if isinstance(d, dict):
+                rows.append(d)
+    voided = {d["voids"] for d in rows if isinstance(d.get("voids"), str)}
+    for d in rows:
+        if d.get("kind") == "tuning" and d.get("rollout") == rollout and d.get("close") in CLOSES and \
+                d.get("id") not in voided:
+            return d
+    return None
 
 
 def emit(scores, fields):
@@ -248,12 +291,23 @@ def _unlink(path):
 
 # ---- the verbs ---------------------------------------------------------------------------------------------
 
-def record_only(scores, dry_run):
+def record_only(scores, dry_run, close=None):
     if scores.get("repo") is None:
         say("not recorded: the scores carry no repo (no GitHub origin), so no baseline is kept")
         return 0
+    if close:
+        try:
+            hit = close_line(scores["rollout"])
+        except RR.Refused as e:
+            raise Stop("the run record refused the line: %s" % e, 2)
+        except OSError as e:
+            say("tunings.jsonl cannot be read: %s: nothing written" % e)
+            return 1
+        if hit is not None:
+            print("already recorded %s (%s) in %s: nothing written" % (hit.get("id"), hit.get("close"), tunings_path()))
+            return 0
     tid = new_id()
-    fields = line_fields(scores, [], tid)
+    fields = line_fields(scores, [], tid, close=close)
     if dry_run:
         print("would record %s in %s: %s" % (tid, tunings_path(), json.dumps(fields, ensure_ascii=False)))
         return 0
@@ -400,14 +454,18 @@ def main(argv):
     g = p.add_mutually_exclusive_group(required=True)
     g.add_argument("--pick")
     g.add_argument("--record-only", action="store_true")
+    p.add_argument("--close", choices=CLOSES)
     p.add_argument("--repo")
     p.add_argument("--config")
     p.add_argument("--dry-run", action="store_true")
     a = p.parse_args(argv)
+    if a.close and not a.record_only:
+        say("--close needs --record-only")
+        return 2
     try:
         scores = read_scores(a.scores)
         if a.record_only:
-            return record_only(scores, a.dry_run)
+            return record_only(scores, a.dry_run, a.close)
         return pick(scores, a.pick, a.repo, a.config, a.dry_run)
     except Stop as e:
         say(str(e))

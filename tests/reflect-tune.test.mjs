@@ -399,6 +399,88 @@ test('null repo: --record-only writes nothing and says so (exit 0); --pick is ex
   refusedNothingWritten(home, ['--scores', scores, '--pick', 'p1', '--repo', gitRepo(home)], 2, /^tune: p1 is no proposal in the scores \(proposals: none\)/, null)
 })
 
+// ---- --close (p21-6, ADR 0037 d4): close-score.py's record-only line, one per rollout ----------------------------
+
+// A tunings.jsonl line written by hand in run_record's shape (the guard reads lines, it never re-validates them).
+const handLine = (over = {}) => JSON.stringify({ v: 2, ts: '2026-10-05T12:00:00.000Z', host: 'h', rollout: 'demo-rollout', task: null,
+  kind: 'tuning', id: 't-hand', repo: 'o/r', window: WINDOW, scores: HEADLINE, applied: [], ...over })
+
+test('--record-only --close completion stamps close; a second run writes nothing and names the first line', (t) => {
+  const home = tmpHome(t)
+  const scores = writeScores(home)
+  const r = tune(home, ['--scores', scores, '--record-only', '--close', 'completion'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stderr, '')
+  const [l, ...rest] = lines(tuningsPath(home))
+  assert.equal(rest.length, 0)
+  assert.equal(l.close, 'completion')
+  assert.deepEqual(l.applied, [])
+  assert.match(r.stdout, new RegExp(`^recorded ${l.id} in \\S+: no Tuning applied`))
+  const again = tune(home, ['--scores', scores, '--record-only', '--close', 'completion'])
+  assert.equal(again.status, 0, again.stderr)
+  assert.equal(again.stdout, `already recorded ${l.id} (completion) in ${tuningsPath(home)}: nothing written\n`)
+  assert.equal(again.stderr, '')
+  const sup = tune(home, ['--scores', scores, '--record-only', '--close', 'supersede'])
+  assert.equal(sup.stdout, `already recorded ${l.id} (completion) in ${tuningsPath(home)}: nothing written\n`, 'one close line per rollout, whatever the kind')
+  assert.equal(lines(tuningsPath(home)).length, 1)
+})
+
+test('--close is not blocked by a by-hand line, another rollout\'s close line, a voided close line or a malformed line', (t) => {
+  const home = tmpHome(t)
+  fs.mkdirSync(evDir(home), { recursive: true })
+  fs.writeFileSync(tuningsPath(home), [
+    handLine({ id: 't-byhand' }),
+    handLine({ id: 't-other', rollout: 'other-rollout', close: 'completion' }),
+    handLine({ id: 't-void', close: 'completion' }),
+    handLine({ id: 't-voider', voids: 't-void' }),
+    '{"kind": "tuning", "rollout": "demo-rollout", "close": "completion", "id": "t-cut',
+    '',
+  ].join('\n'))
+  const r = tune(home, ['--scores', writeScores(home), '--record-only', '--close', 'supersede'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /^recorded t-\S+ in /)
+  const raw = fs.readFileSync(tuningsPath(home), 'utf8').split('\n').filter(Boolean)
+  assert.equal(raw.length, 6, 'the five seeded lines and the new one')
+  const last = JSON.parse(raw.at(-1))
+  assert.equal(last.close, 'supersede')
+  assert.equal(last.rollout, 'demo-rollout')
+})
+
+test('--close over a tunings.jsonl that cannot be read: exit 1, nothing written', { skip: process.getuid?.() === 0 && 'root ignores the mode' }, (t) => {
+  const home = tmpHome(t)
+  fs.mkdirSync(evDir(home), { recursive: true })
+  fs.writeFileSync(tuningsPath(home), `${handLine({ id: 't-byhand' })}\n`)
+  fs.chmodSync(tuningsPath(home), 0o000)
+  t.after(() => { try { fs.chmodSync(tuningsPath(home), 0o644) } catch { /* gone */ } })
+  const r = tune(home, ['--scores', writeScores(home), '--record-only', '--close', 'completion'])
+  fs.chmodSync(tuningsPath(home), 0o644)
+  assert.equal(r.status, 1, r.stderr)
+  assert.equal(r.stdout, '')
+  assert.match(r.stderr, /^tune: tunings\.jsonl cannot be read: .*Permission denied.*: nothing written\n$/)
+  assert.equal(lines(tuningsPath(home)).length, 1)
+})
+
+test('--close needs --record-only; a bad --close value is refused; both write nothing', (t) => {
+  const home = tmpHome(t)
+  writeToml(home, CONFIG)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 3, 4, { ranAt: 3, rule: 'slot-bound-raise' })] })
+  refusedNothingWritten(home, ['--scores', scores, '--pick', 'p1', '--repo', gitRepo(home), '--close', 'completion'], 2, /^tune: --close needs --record-only\n$/, CONFIG)
+  refusedNothingWritten(home, ['--scores', scores, '--record-only', '--close', 'weekly'], 2, /^tune: argument --close: invalid choice/, CONFIG)
+})
+
+test('a null repo with --close still writes nothing (exit 0); --dry-run --close prints the line with its close and writes nothing', (t) => {
+  const home = tmpHome(t)
+  const r = tune(home, ['--scores', writeScores(home, { repo: null }), '--record-only', '--close', 'completion'])
+  assert.equal(r.status, 0)
+  assert.equal(r.stdout, '')
+  assert.equal(r.stderr, 'tune: not recorded: the scores carry no repo (no GitHub origin), so no baseline is kept\n')
+  assert.ok(!fs.existsSync(evDir(home)))
+  const d = tune(home, ['--scores', writeScores(home), '--record-only', '--close', 'completion', '--dry-run'])
+  assert.equal(d.status, 0, d.stderr)
+  assert.match(d.stdout, /^would record t-\S+ in \S+: \{.*"close": "completion"\}\n$/)
+  assert.ok(!fs.existsSync(evDir(home)))
+})
+
 test('tune.py parses as python 3.8', () => {
   const r = spawnSync('python3', ['-B', '-c', 'import ast, sys\nast.parse(open(sys.argv[1]).read(), sys.argv[1], feature_version=(3, 8))', TUNE], { encoding: 'utf8' })
   assert.equal(r.status, 0, r.stderr)

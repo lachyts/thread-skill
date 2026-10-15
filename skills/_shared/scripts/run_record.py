@@ -31,10 +31,16 @@ the same place.
 Files: <rollout>.jsonl, one per rollout; review-round always goes to reviews.jsonl and tuning to
 tunings.jsonl. Both names are RESERVED: refused as a rollout slug and as a carried `from`.
 
-tunings.jsonl holds one line per Reflection (skills/reflect/scripts/tune.py is its one emitter, score.py its one
-reader): the scored window, its ten scores (the two headlines, Hands-off rate and Quality, beside the Guardrails' and
-the run's numbers) and the Tunings Lachy picked (`applied`, most often []). A tuning line is `v` 2 (p21-2); a v1
-line carries the first seven scores only and still serves as a baseline, its missing keys read as no baseline.
+tunings.jsonl holds one line per Reflection, plus one `close` line per rollout, at its completion ceremony or its
+supersede (skills/reflect/scripts/tune.py is its one emitter; score.py reads it for baselines, and tune.py and
+skills/reflect/scripts/close-score.py read it only to refuse a second close line): the scored window, its ten scores
+(the two headlines, Hands-off rate and Quality, beside the Guardrails' and the run's numbers) and the Tunings Lachy
+picked (`applied`, most often []). A tuning line is `v` 2 (p21-2); a v1 line carries the first seven scores only and
+still serves as a baseline, its missing keys read as no baseline.
+- Close (p21-6, ADR 0037 d4): close-score.py runs the script half of a Reflection at a rollout's close and writes its
+  line through `tune.py --record-only --close <completion|supersede>`, which stamps `close`. One close line per
+  rollout: a non-voided line with a `close` for that rollout refuses a second. A by-hand Reflection's line never
+  carries `close`, so it neither blocks a close line nor is blocked by one.
 - Baseline: the next Reflection on that repo (matched ignoring case) compares against the `scores` of the line with
   the latest window.activeEnd at or before its own window.activeStart, preferring a line not marked partial; a
   line whose activeEnd is null never qualifies. Comparing active spans, not ts or until, keeps a Reflection run late
@@ -130,7 +136,9 @@ Kinds (T: a task is required; `?` marks an optional field; every enum is closed)
                      runningHours, merges, tokensPerMerge, setAsideRate, conflictRate, quotaStalls, handsOffRate,
                      quality, reviewChurn}, applied (a list of at most 8 {key, from, to, ranAt, rule, evidence,
                      agreeing}); binding? (slot-bound | lane-bound | quota-bound | dependency-bound | none-clear);
-                     voids? (the id of the line this one voids). A rollout is required and a task is refused;
+                     voids? (the id of the line this one voids); close? (completion | supersede: the close that wrote
+                     it, through close-score.py and `tune.py --close`; one per rollout; never on a by-hand
+                     Reflection's line). A rollout is required and a task is refused;
                      lands in tunings.jsonl, `v` 2. window: since and until UTC `Z` stamps, activeStart and
                      activeEnd a UTC `Z` stamp or null, partial a boolean, no other key. scores: exactly the ten
                      keys, each a finite number or null, with merges and quotaStalls integers >= 0 and
@@ -198,7 +206,7 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   duplicate that slips in counts once. Two head-less lines for one round with different bullets stay two (a fresh
   re-judge after a cache miss, a known overcount); two head-less approve lines for one round collapse (rounds
   only, no findings).
-- tuning: see tunings.jsonl under Files (the baseline and void rules).
+- tuning: see tunings.jsonl under Files (the baseline, void and close rules).
 - Skip a line that does not parse: a crash can leave a last line with no newline, which the next append
   then merges with (a known limit; checking the tail would mean locking every emit).
 
@@ -318,6 +326,8 @@ SCORE_KEYS = ("throughput", "runningHours", "merges", "tokensPerMerge", "setAsid
 APPLIED_KEYS = ("key", "from", "to", "ranAt", "rule", "evidence", "agreeing")
 MAX_APPLIED = 8
 BINDINGS = ("slot-bound", "lane-bound", "quota-bound", "dependency-bound", "none-clear")
+# a close line's `close` (p21-6): the close that wrote it, through close-score.py and tune.py --close
+CLOSES = ("completion", "supersede")
 
 
 def _utcz(v):
@@ -425,7 +435,7 @@ KINDS = {
     "handed-back": (True, {"via": _enum("answer", "descope", "retry"), "arm": _enum("run", "integration")}, {}),
     "race-decided": (True, {"mark": _enum("RACE", "UNVERIFIED"), "by": _enum("resume", "hand-back", "auto-retry")}, {}),
     "tuning": (False, {"id": _str, "repo": _str, "window": _window, "scores": _scores, "applied": _applied},
-               {"binding": _enum(*BINDINGS), "voids": _str}),
+               {"binding": _enum(*BINDINGS), "voids": _str, "close": _enum(*CLOSES)}),
 }
 
 
