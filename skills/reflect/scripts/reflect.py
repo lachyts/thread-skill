@@ -278,11 +278,6 @@ def mdate(ms):
     return datetime.datetime.fromtimestamp(ms / 1000.0, tz=zone()).date().isoformat()
 
 
-def utc_z(ms):
-    """A UTC Z stamp run_record accepts in a field (second precision is enough; milliseconds kept)."""
-    return fmt(ms)
-
-
 # ---- files -----------------------------------------------------------------------------------------------------
 
 def events_dir():
