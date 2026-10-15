@@ -926,7 +926,8 @@ class Score:
                      "bySource": {"fixes": None, "reverts": None, "reviews": None}, "reviewDocs": None, "tasks": [],
                      "sources": {"fixes": why, "reverts": why, "reviews": why}, "ref": None,
                      "excluded": {"dropped": [], "selfNamed": [], "unreadNotes": 0, "rejectedRows": 0,
-                                  "unresolved": [], "unresolvedDocs": [], "unresolvedRows": []}}
+                                  "unresolved": [], "unresolvedDocs": [], "unlandedDocs": [],
+                                  "unresolvedRows": []}}
             flags = ["Quality unknown: escapes.py did not load (%s: %s)" % (type(e).__name__, e)]
         for f in flags:
             self.flag("escapes: " + f)

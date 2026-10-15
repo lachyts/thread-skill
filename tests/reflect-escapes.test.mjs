@@ -136,7 +136,7 @@ test('E1: a later fixes: note and a revert give rollout A 2 Escapes and Quality 
   w.commit('init', { 'README.md': 'demo\n' })
   const s1 = w.commit('a1: add a (#1)', { 'a.txt': 'a1\n' })
   const s2 = w.commit('a2: add b (#2)', { 'b.txt': 'b1\n' })
-  const s3 = w.commit('b1: fix a (#3)', { 'a.txt': 'a1 fixed\n' })
+  w.commit('b1: fix a (#3)', { 'a.txt': 'a1 fixed\n' })
   const rv = w.revert(s2, 'Revert "a2: add b (#2)" (#4)')
   w.publish()
   note(home, 'a1'); note(home, 'a2'); note(home, 'b1', ['status: done', 'fixes: "[[a1]]"'])
@@ -167,7 +167,6 @@ test('E1: a later fixes: note and a revert give rollout A 2 Escapes and Quality 
   assert.equal(b.escapes.quality, 1)
   assert.equal(b.headline.quality, 1)
   assert.deepEqual(b.escapes.tasks, [])
-  assert.ok(s3)
 })
 
 // ---- E2: dedupe ---------------------------------------------------------------------------------------------
@@ -364,16 +363,16 @@ function reviewDoc(head, status, rows, disposition) {
   return lines.join('\n')
 }
 
-test('E8: a later review finding on a landed line counts; the reviewer\'s own lines, rejected rows and pre-merge reviews do not', (t) => {
+test('E8: a landed later review finding on a landed line counts; the reviewer\'s own lines, rejected rows, pre-merge and unlanded reviews do not', (t) => {
   const home = tmpHome(t)
   const w = new Repo(home)
   const base = w.commit('init', { 'README.md': 'demo\n', 'sub/x.txt': 'x\n' })
   const s3 = w.commit('b1: add c (#3)', { 'c.txt': 'c1\nc2\nc3\nc4\n' })
-  // the PR's own branch before its squash, reviewed there
+  // the PR's own branch before its squash, reviewed there: the squash leaves its head off main
   w.checkout('-b', 'b1-pr', base)
   const pre = w.commit('b1 wip', { 'c.txt': 'c1\nc2\nc3\nc4\n' })
   w.commit('review b1 pre-merge', { 'docs/reviews/2026-10-05-pre.md': reviewDoc(pre.slice(0, 7), 'consumed', [[1, 'c.txt:1', '—']]) })
-  // a later branch, reviewed after #3 landed: it rewrote line 3 itself
+  // a later branch, reviewed after #3 landed and then merged: it rewrote line 3 itself
   w.checkout('main')
   w.checkout('-b', 'rev1')
   const h1 = w.commit('later work', { 'c.txt': 'c1\nc2\nc3 changed\nc4\n' })
@@ -382,26 +381,91 @@ test('E8: a later review finding on a landed line counts; the reviewer\'s own li
       [[1, 'c.txt:1', '—'], [2, 'c.txt:3', '—'], [3, 'c.txt:2', '**skip**: not a bug'], [4, 'c.txt:4', '—']],
       [[4, '**deliberate** — kept by design'], [1, 'held for later']]),
   })
+  // PR #107's shape: a later branch, reviewed after #3 landed, closed unmerged; its finding cites a line b1 wrote
   w.checkout('main')
+  w.checkout('-b', 'closed')
+  const hc = w.commit('closed work: renumber', { 'c.txt': 'c1\nc2\nc3\nc4\nc5\n' })
+  w.commit('review closed', { 'docs/reviews/2026-10-06-closed.md': reviewDoc(hc.slice(0, 7), 'consumed', [[1, 'c.txt:2', '—']]) })
+  w.checkout('main')
+  w.merge('rev1', 'Merge pull request #4 from o/rev1')
   w.commit('a review whose head is gone', { 'docs/reviews/2026-10-07-gone.md': reviewDoc('feedface', 'pending', [[1, 'c.txt:1', '—']]) })
   w.publish()
+  assert.equal(w.g(['blame', '-L', '2,2', '--porcelain', hc, '--', 'c.txt']).split(' ')[0], s3, 'fixture: the closed review cites a line b1 wrote')
   note(home, 'b1')
   emitAll(home, 'rb', [merged(D(5, '01:00'), 'b1', { pr: 3 })])
   const b = run(home, 'rb', { repo: w.dir })
   assert.equal(b.escapes.count, 1)
   assert.deepEqual(b.escapes.bySource, { fixes: 0, reverts: 0, reviews: 1 })
-  assert.equal(b.escapes.reviewDocs, 3)
+  assert.equal(b.escapes.reviewDocs, 4)
+  assert.deepEqual(task(b, 'b1').commits, [s3])
   assert.deepEqual(task(b, 'b1').evidence, [{
     source: 'review', doc: 'docs/reviews/2026-10-06-rev1.md', head: h1, row: 1, cite: 'c.txt:1', status: 'pending', disposition: 'held for later',
   }])
   assert.equal(b.escapes.excluded.rejectedRows, 2, 'the skip verdict and the deliberate disposition')
   assert.deepEqual(b.escapes.excluded.unresolvedDocs.map((d) => [d.doc, d.head]), [['docs/reviews/2026-10-07-gone.md', 'feedface']])
+  assert.deepEqual(b.escapes.excluded.unlandedDocs, [
+    { doc: 'docs/reviews/2026-10-05-pre.md', head: pre },
+    { doc: 'docs/reviews/2026-10-06-closed.md', head: hc },
+  ], 'a review of work origin/main never reached adds nothing')
   assert.deepEqual(b.escapes.excluded.unresolvedRows, [])
   assert.equal(b.escapes.partial, false)
-  assert.ok(s3)
 
   const sub = run(home, 'rb', { repo: path.join(w.dir, 'sub') })
   assert.deepEqual(sub.escapes, b.escapes, '--repo may be any directory in the clone')
+})
+
+test('E8: through a merge-commit landing, a later finding counts, the PR\'s own pre-merge review on main does not, and a failed blame makes Quality partial', (t) => {
+  const home = tmpHome(t)
+  const w = new Repo(home)
+  w.commit('init', { 'README.md': 'demo\n', 'd.txt': 'd0\n' })
+  w.checkout('-b', 'feat')
+  const x = w.commit('a3: add d', { 'd.txt': 'd0\nd1\nd2\n' })
+  // reviewed on its branch before merging: the merge commit brings the head onto main, but it does not descend from it
+  w.commit('review a3 pre-merge', { 'docs/reviews/2026-10-05-pre.md': reviewDoc(x.slice(0, 7), 'consumed', [[1, 'd.txt:2', '—']]) })
+  w.checkout('main')
+  const m8 = w.merge('feat', 'Merge pull request #8 from o/feat')
+  const later = w.commit('later work', { 'e.txt': 'e\n' })
+  // row 1 a line a3 wrote, row 2 a line older than a3 (the range boundary), row 3 a line d.txt does not have
+  w.commit('review later', {
+    'docs/reviews/2026-10-06-later.md': reviewDoc(later.slice(0, 7), 'pending', [[1, 'd.txt:2', '—'], [2, 'd.txt:1', '—'], [3, 'd.txt:9', '—']]),
+  })
+  w.publish()
+  note(home, 'a3')
+  emitAll(home, 'ra', [merged(D(5, '01:00'), 'a3', { pr: 8 })])
+  const a = run(home, 'ra', { repo: w.dir })
+  assert.equal(a.escapes.count, 1)
+  assert.deepEqual(task(a, 'a3').commits.slice(0, 1), [m8])
+  assert.ok(task(a, 'a3').commits.includes(x))
+  assert.deepEqual(task(a, 'a3').evidence, [{
+    source: 'review', doc: 'docs/reviews/2026-10-06-later.md', head: later, row: 1, cite: 'd.txt:2', status: 'pending', disposition: null,
+  }])
+  assert.deepEqual(a.escapes.excluded.unlandedDocs, [], 'the pre-merge head is on main: the ancestry bound, not reach, leaves it out')
+  assert.deepEqual(a.escapes.excluded.unresolvedRows.map((r) => [r.doc, r.row, r.cite]), [['docs/reviews/2026-10-06-later.md', 3, 'd.txt:9']])
+  assert.match(a.escapes.excluded.unresolvedRows[0].why, /^git blame failed: /)
+  assert.deepEqual(a.escapes.sources, READ)
+  assert.equal(a.escapes.partial, true, 'a failed blame inside the bounds is missed evidence')
+  assert.ok(has(a.flags, /^escapes: Quality misses 1 review finding\(s\) whose git blame failed \(excluded\.unresolvedRows\); it can only read too high$/), a.flags.join('\n'))
+})
+
+test('E8: blame stops at each landing, so a line older than a pr\'s second squash is never blamed on its first', (t) => {
+  // pr #5 matches two squashes: blamed back to the second one's parent, the first, a line older than both reads as
+  // the range boundary, never as the first squash
+  const home = tmpHome(t)
+  const w = new Repo(home)
+  w.commit('init', { 'c.txt': 'c1\nc2\nc3\n' })
+  const p1 = w.commit('a1: part one (#5)', { 'c.txt': 'c1\nc2 one\nc3\n' })
+  const p2 = w.commit('a1: part two (#5)', { 'c.txt': 'c1\nc2 one\nc3 two\n' })
+  const later = w.commit('later work', { 'e.txt': 'e\n' })
+  w.commit('review later', { 'docs/reviews/2026-10-06-later.md': reviewDoc(later.slice(0, 7), 'pending', [[1, 'c.txt:1', '—'], [2, 'c.txt:2', '—']]) })
+  w.publish()
+  note(home, 'a1')
+  emitAll(home, 'ra', [merged(D(5, '01:00'), 'a1', { pr: 5 })])
+  const a = run(home, 'ra', { repo: w.dir })
+  assert.deepEqual(task(a, 'a1').commits, [p2, p1])
+  assert.deepEqual(task(a, 'a1').evidence.map((e) => [e.row, e.cite]), [[2, 'c.txt:2']], 'row 1 is older than both squashes')
+  assert.deepEqual(a.escapes.excluded.unresolvedRows, [])
+  assert.equal(a.escapes.partial, false)
+  assert.ok(has(a.flags, /^escapes: pr #5 of \[\[a1\]\] matches 2 commits on origin\/main: all of them are its commits$/), a.flags.join('\n'))
 })
 
 // ---- E9: degradation ----------------------------------------------------------------------------------------

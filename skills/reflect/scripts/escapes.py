@@ -76,22 +76,32 @@ its commits, so one revert counts once for each of them, flagged.
     wins). A row never counts (excluded.rejectedRows) when its verdict or disposition, `*` and backticks removed,
     trimmed and lowercased, starts with one of REJECTED; `fixed`, `held`, `deferred`, `moved` and a pending doc's
     rows count. Heads resolve in one `git cat-file --batch-check`; a missing, ambiguous or non-sha head is
-    excluded.unresolvedDocs. Blame is bounded: for each landing commit C (a squash, or a PR's merge commit) one `git
-    rev-list --ancestry-path ^C <every resolved head>` and one `git diff-tree -r --name-only <C's first parent> C`;
-    only a row whose doc head is C or descends from it, citing a file C changed, is blamed (`git blame -L n,n
-    --porcelain <head> -- <file>`). A blamed sha among the task's commits is evidence {source: review, doc, head, row,
-    cite, status, disposition}; a failed blame is excluded.unresolvedRows. A review of the task's own PR before it
-    merged never counts: its head does not descend from the squash. Attribution is by blame, so a finding on an old
-    line counts against whichever task last wrote it.
+    excluded.unresolvedDocs. Only a review of landed work counts: a doc whose resolved head the ref does not reach (not
+    in the full log, so not an ancestor of its tip) reviewed work that never landed there, such as a closed PR's rounds
+    (PR #107's shape: a later branch's review citing a line the task wrote, about the branch's own change), and is
+    skipped: excluded.unlandedDocs [{doc, head}]. A branch that landed only by squash leaves its review heads unreached
+    too, so its reviews are skipped the same way, and Quality can read too high there. Blame is bounded: for each
+    landing commit C (a squash, or a PR's merge commit) with first parent P, one `git rev-list --ancestry-path ^C <every
+    reached head>` and one `git diff-tree -r --name-only P C`; only a row whose doc head is C or descends from it,
+    citing a file C changed, is blamed, and only back to the landing (`git blame -L n,n --porcelain P..<head> --
+    <file>`: a line older than P is porcelain's `boundary` and names no commit). A blamed sha among the task's commits
+    is evidence {source: review, doc, head, row, cite, status, disposition}. A failed blame (a GIT_TIMEOUT included) is
+    excluded.unresolvedRows: missed evidence inside the bounds, so it makes the block partial, flagged with their count.
+    A review of the task's own PR before it merged never counts: its head does not descend from the landing. Attribution
+    is by blame, so a finding on an old line counts against whichever task last wrote it, and one bias remains: a landed
+    later PR's review can still blame its sibling-site findings (a line it should have changed alongside its own change,
+    such as a stale rule number after its renumbering) on the task that last wrote that line, so Quality can read too
+    low there.
 
 The block: {count, landed, quality, partial, bySource {fixes, reverts, reviews}, reviewDocs, tasks [{task, pr,
 commits, evidence}], sources {fixes, reverts, reviews: "read" | "unread: <why>"}, ref, excluded {dropped, selfNamed,
-unreadNotes, rejectedRows, unresolved, unresolvedDocs, unresolvedRows}}. Escapes are deduped per landed task: count
-is the landed tasks with any evidence (null when every source is unread), and every piece is listed. bySource.<s>
-counts the landed tasks with evidence from s (null when s is unread); reviewDocs the docs read (null when reviews
-are unread). quality = round(1 - count / landed, 4), null with nothing landed or every source unread. partial is true
-when a source is unread or a landed task that is not read-only has unresolved git evidence: Quality can then only
-read too high, and a flag says what it rests on.
+unreadNotes, rejectedRows, unresolved, unresolvedDocs, unlandedDocs, unresolvedRows}}. Escapes are deduped per
+landed task: count is the landed tasks with any evidence (null when every source is unread), and every piece is
+listed. bySource.<s> counts the landed tasks with evidence from s (null when s is unread); reviewDocs the docs read
+(null when reviews are unread). quality = round(1 - count / landed, 4), null with nothing landed or every source
+unread. partial is true when a source is unread, a landed task that is not read-only has unresolved git evidence, or
+a review row inside the bounds has a failed blame (any of them, even with all three sources read): Quality can then
+only read too high, and a flag says what it misses.
 """
 from __future__ import annotations
 
@@ -264,7 +274,7 @@ class _Escapes:
         self.commits = {}   # task -> its commit shas (squash or merge commit first, then the PR's own commits)
         self.landings = {}  # task -> [(landing commit, its first parent)]
         self.excluded = {"dropped": [], "selfNamed": [], "unreadNotes": 0, "rejectedRows": 0, "unresolved": [],
-                         "unresolvedDocs": [], "unresolvedRows": []}
+                         "unresolvedDocs": [], "unlandedDocs": [], "unresolvedRows": []}
         self.ref = self.top = self.genv = None
         self.log, self.by_sha = [], {}
         self.review_docs = None
@@ -325,9 +335,13 @@ class _Escapes:
         if unresolved:
             self.flag("Quality misses git evidence for %d landed task(s): %s; it can only read too high"
                       % (len(unresolved), "; ".join("[[%s]] (%s)" % (u["task"], u["why"]) for u in unresolved)))
+        rows = self.excluded["unresolvedRows"] if "reviews" in read else []
+        if rows:
+            self.flag("Quality misses %d review finding(s) whose git blame failed (excluded.unresolvedRows); "
+                      "it can only read too high" % len(rows))
         excluded = dict(self.excluded, unresolved=unresolved)
         return {
-            "count": count, "landed": n, "quality": quality, "partial": bool(unread or unresolved),
+            "count": count, "landed": n, "quality": quality, "partial": bool(unread or unresolved or rows),
             "bySource": by, "reviewDocs": self.review_docs if "reviews" in read else None,
             "tasks": [{"task": t, "pr": self.landed[t]["pr"], "commits": self.commits.get(t, []),
                        "evidence": self.evidence[t]} for t in escaped],
@@ -614,8 +628,11 @@ class _Escapes:
                 why = "head %s is not a commit sha" % h
             else:
                 sha, why = heads.get(h, (None, "unresolved"))
-                if sha:
+                if sha and sha in self.by_sha:  # the full log is every commit the ref reaches: an ancestor of its tip
                     live.append((p, d, sha))
+                    continue
+                if sha:  # reviewed work that never landed on the ref (a closed PR's rounds, a squashed branch)
+                    self.excluded["unlandedDocs"].append({"doc": p, "head": sha})
                     continue
             self.excluded["unresolvedDocs"].append({"doc": p, "head": h, "why": why})
         return self._blame_rows(live)
@@ -685,17 +702,17 @@ class _Escapes:
                         if _rejected(row["verdict"], row["disposition"]):
                             rejected.add(key)
                             continue
-                        spot = (h, row["file"], row["line"])
+                        spot = (parent, h, row["file"], row["line"])
                         if spot not in blamed:
                             blamed[spot] = self._blame(*spot)
-                        who = blamed[spot]
-                        if who is None or not BLAME_RE.match(who):
+                        who, why = blamed[spot]
+                        if why:
                             if key not in failed:
                                 failed.add(key)
                                 self.excluded["unresolvedRows"].append({"doc": p, "row": row["n"], "cite": row["cite"],
-                                                                        "why": who or "git blame failed"})
+                                                                        "why": why})
                             continue
-                        if who.split()[0] in self.commits[task] and (task, key) not in seen:
+                        if who in self.commits[task] and (task, key) not in seen:
                             seen.add((task, key))
                             found.append((task, {"source": "review", "doc": p, "head": h, "row": row["n"],
                                                  "cite": row["cite"], "status": d["status"],
@@ -703,13 +720,19 @@ class _Escapes:
         self.excluded["rejectedRows"] = len(rejected)
         return found
 
-    def _blame(self, head, path, line):
-        """The porcelain header line of `git blame -L line,line <head> -- <path>`, or a why when blame fails."""
-        rc, out, err = self.git("blame", "-L", "%d,%d" % (line, line), "--porcelain", head, "--", path)
+    def _blame(self, stop, head, path, line):
+        """(sha, None) of the commit `git blame -L line,line --porcelain <stop>..<head> -- <path>` names; (None, None)
+        for a line older than the range (porcelain's `boundary`: no commit of this landing wrote it); (None, why) when
+        blame fails or prints no commit."""
+        rc, out, err = self.git("blame", "-L", "%d,%d" % (line, line), "--porcelain", "%s..%s" % (stop, head), "--",
+                                path)
         if rc != 0:
-            return "git blame failed: %s" % _first(err)
-        first = out.split("\n", 1)[0]
-        return first if BLAME_RE.match(first) else "git blame printed no commit"
+            return None, "git blame failed: %s" % _first(err)
+        lines = out.split("\n")
+        m = BLAME_RE.match(lines[0])
+        if not m:
+            return None, "git blame printed no commit"
+        return (None, None) if "boundary" in lines[1:] else (m.group(1), None)
 
 
 def score(landed, tasks_dir, repo, repo_slug, env):
