@@ -93,7 +93,7 @@ function writeSettings(home, values, { file = null, repo = 'o/r', guardrails = {
   for (const k of ['parallel_ceiling', 'max_review_rounds', 'max_iterations', 'max_plan_rounds']) {
     settings[k] = { value: values[k] ?? { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3 }[k], source: file ? 'file:repo' : 'built-in' }
   }
-  const g = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0, ...guardrails }
+  const g = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0, review_churn_pct: 40, ...guardrails }
   const doc = {
     path: file || path.join(home, '.config', 'thread', 'rollouts.toml'), file: !!file, repo,
     settings, guardrails: Object.fromEntries(Object.entries(g).map(([k, v]) => [k, { value: v, source: 'built-in' }])),
@@ -770,4 +770,205 @@ test('score.py and the escapes.py it loads parse as python 3.8, and score.py wri
   const before = fs.readdirSync(evDir(home)).map((f) => [f, fs.readFileSync(path.join(evDir(home), f), 'utf8')])
   scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 3 })])
   assert.deepEqual(fs.readdirSync(evDir(home)).map((f) => [f, fs.readFileSync(path.join(evDir(home), f), 'utf8')]), before)
+})
+
+// ---- Review churn (p21-3, ADR 0037 d1) ----------------------------------------------------------------------------
+// Engine rounds are the record's review-verdict lines (reconcile-rollout.py writes one per judged master-review round);
+// /fresh-review rounds are reviews.jsonl's review-round lines (p15-7). Churn = Σregression / Σfindings over both.
+
+const rv = (ts, task, round, verdict, findings, original, regression, extra = {}) =>
+  [ts, 'review-verdict', task, { round, verdict, findings, original, regression, digest: `d-${task}-${round}`, ...extra }]
+const rr = (ts, fields) => [ts, 'review-round', null, fields, null]
+
+// t1: r1 changes (3 original), r2 changes (2 regression, answering r1's fix), r3 approve; merged. Head-less, so each
+// line's identity is its digest.
+function churnFixture() {
+  return byTs([
+    ...life('t1', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] }),
+    rv(at('00:30'), 't1', 1, 'changes', 3, 3, 0),
+    rv(at('01:00'), 't1', 2, 'changes', 2, 0, 2),
+    rv(at('01:30'), 't1', 3, 'approve', 0, 0, 0),
+  ])
+}
+
+test('(a) review churn: a round that only answers the last round\'s fix scores churn > 0, with rounds per landed task', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', churnFixture())
+  const out = scored(home, ['--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.equal(out.reviewChurn.value, 0.4)
+  assert.deepEqual([out.reviewChurn.findings, out.reviewChurn.original, out.reviewChurn.regression, out.reviewChurn.unclassified, out.reviewChurn.rounds], [5, 3, 2, 0, 3])
+  assert.deepEqual(out.reviewChurn.engine, { rounds: 3, findings: 5, original: 3, regression: 2, unclassified: 0, landedTasks: 1, roundsPerLandedTask: 3 })
+  assert.deepEqual(out.reviewChurn.freshReview, { rounds: 0, findings: 0, original: 0, regression: 0, unclassified: 0, unattributed: 0 })
+  assert.deepEqual(out.guardrails.reviewChurn, { value: 0.4, bound: '<=40%', baseline: null, breached: false, roundsPerLandedTask: 3 })
+  assert.ok(!has(out.flags, /review churn unknown/))
+})
+
+test('(b) review churn: a one-round task approved first time scores 0.0, not null', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs([...life('t1', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] }),
+    rv(at('01:00'), 't1', 1, 'approve', 0, 0, 0)]))
+  const out = scored(home, ['--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.equal(out.reviewChurn.value, 0)
+  assert.equal(out.reviewChurn.engine.roundsPerLandedTask, 1)
+  assert.equal(out.guardrails.reviewChurn.value, 0)
+  assert.equal(out.guardrails.reviewChurn.breached, false)
+})
+
+test('(c) review churn: no round recorded reads as unknown, never 0', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs(life('t1', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] })))
+  const out = scored(home, ['--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.equal(out.reviewChurn.value, null)
+  assert.equal(out.reviewChurn.rounds, 0)
+  assert.equal(out.guardrails.reviewChurn.value, 'unknown')
+  assert.equal(out.guardrails.reviewChurn.breached, false, 'a null guardrail never breaches')
+  assert.ok(has(out.flags, /^review churn unknown: no review rounds recorded$/))
+  assert.ok(has(out.flags, /^review churn: landed task\(s\) with no recorded review round: \[\[t1\]\]/))
+  assert.equal(out.reviewChurn.engine.roundsPerLandedTask, null)
+})
+
+function gitOrigin(dir, url) {
+  fs.mkdirSync(dir, { recursive: true })
+  for (const args of [['init', '-q', dir], ['-C', dir, 'remote', 'add', 'origin', url]]) {
+    const r = spawnSync('git', args, { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: dir, GIT_CONFIG_NOSYSTEM: '1' } })
+    assert.equal(r.status, 0, r.stderr)
+  }
+  return dir
+}
+
+test('(d) review churn: /fresh-review rounds are attributed by repo (owner/name or path), deduped on (repo, doc) else (repo, head, digest)', (t) => {
+  const home = tmpHome(t)
+  const clone = gitOrigin(path.join(home, 'clone'), 'https://github.com/O/R.git')
+  const other = gitOrigin(path.join(home, 'other'), 'git@github.com:o/other.git')
+  emitAll(home, 'demo', byTs(life('t1', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] })))
+  const c = (findings, original, regression) => ({ findings, original, regression })
+  emitAll(home, 'x', [
+    rr(at('00:10'), { repo: 'O/R', head: 'h1', digest: 'g1', doc: 'docs/reviews/a.md', ...c(4, 4, 0) }),
+    rr(at('00:20'), { repo: 'O/R', head: 'h1', digest: 'g1', doc: 'docs/reviews/a.md', ...c(4, 3, 1) }), // same (repo, doc): the latest kept
+    rr(at('00:30'), { repo: 'O/R', head: 'h2', digest: 'g2', doc: 'docs/reviews/b.md', ...c(2, 0, 2) }),
+    rr(at('00:31'), { repo: 'O/R', head: 'h2', digest: 'g2', doc: 'docs/reviews/c.md', ...c(2, 0, 2) }), // another doc: a round of its own
+    rr(at('00:40'), { repo: clone, head: 'h3', digest: 'g3', ...c(1, 1, 0) }), // by path
+    rr(at('00:41'), { repo: clone, head: 'h3', digest: 'g3', ...c(1, 1, 0) }), // doc-less duplicate: collapses
+    rr(at('00:50'), { repo: path.join(clone, '.claude', 'worktrees', 'gone'), head: 'h4', digest: 'g4', ...c(2, 1, 0) }), // a deleted worktree
+    rr(at('01:00'), { repo: 'o/other', head: 'h5', digest: 'g5', ...c(9, 0, 9) }), // another repo
+    rr(at('01:01'), { repo: other, head: 'h6', digest: 'g6', ...c(9, 0, 9) }), // another repo by path
+  ])
+  // a.md's latest (4: 3 original, 1 regression), b.md and c.md (2 regression each), the clone (1 original) and the
+  // deleted worktree (2: 1 original, 1 unclassified); o/other and the other clone are another repo's
+  const bySlug = scored(home, ['--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.deepEqual(bySlug.reviewChurn.freshReview, { rounds: 5, findings: 11, original: 5, regression: 5, unclassified: 1, unattributed: 0 })
+  assert.equal(bySlug.reviewChurn.value, 0.4545)
+  const bySettings = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, {}, { repo: 'o/r' })])
+  assert.deepEqual(bySettings.reviewChurn.freshReview, bySlug.reviewChurn.freshReview, '--settings\' repo with no --repo-slug')
+  const none = scored(home, ['--until', at('06:00')])
+  assert.deepEqual(none.reviewChurn.freshReview, { rounds: 0, findings: 0, original: 0, regression: 0, unclassified: 0, unattributed: 7 })
+  assert.equal(none.reviewChurn.value, null)
+  assert.ok(has(none.flags, /^review churn: 7 \/fresh-review round\(s\) in reviews\.jsonl could not be attributed/))
+})
+
+test('(e) review churn: one verdict_key dedupe feeds both the sums and rounds per landed task', (t) => {
+  // a replayed head-less r1 (same digest, later ts: what a signed-gate resume writes when the writer skip is bypassed)
+  const home = tmpHome(t)
+  emitAll(home, 'demo', byTs([...churnFixture(), rv(at('01:45'), 't1', 1, 'changes', 3, 3, 0)]))
+  const out = scored(home, ['--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.equal(out.reviewChurn.value, 0.4)
+  assert.equal(out.reviewChurn.engine.rounds, 3)
+  assert.equal(out.reviewChurn.engine.roundsPerLandedTask, 3, 'not 4')
+  // two r1 lines with the same head and different digests: one round, the first line's findings
+  const same = tmpHome(t)
+  emitAll(same, 'demo', byTs([...life('t1', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] }),
+    rv(at('00:30'), 't1', 1, 'changes', 4, 2, 2, { head: 'a'.repeat(40), digest: 'first' }),
+    rv(at('00:40'), 't1', 1, 'changes', 1, 1, 0, { head: 'a'.repeat(40), digest: 'second' })]))
+  const s = scored(same, ['--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.deepEqual([s.reviewChurn.engine.rounds, s.reviewChurn.engine.findings, s.reviewChurn.value, s.reviewChurn.engine.roundsPerLandedTask], [1, 4, 0.5, 1])
+  // two head-less r1 lines with different digests (a fresh re-judge after a cache miss): two rounds, both counted
+  const two = tmpHome(t)
+  emitAll(two, 'demo', byTs([...life('t1', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] }),
+    rv(at('00:30'), 't1', 1, 'changes', 4, 2, 2, { digest: 'one' }),
+    rv(at('00:40'), 't1', 1, 'changes', 1, 1, 0, { digest: 'two' })]))
+  const w = scored(two, ['--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.deepEqual([w.reviewChurn.engine.rounds, w.reviewChurn.engine.findings, w.reviewChurn.engine.roundsPerLandedTask], [2, 5, 2])
+})
+
+// A Slot-bound run (saturated(3)) whose t1 review rounds churned 50%.
+const churned = () => byTs([...saturated(3), rv(at('01:00'), 't1', 1, 'changes', 2, 1, 1)])
+
+test('(f) review churn: 50% against the 40% bound is breached, and a raise is withheld naming it', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', churned())
+  const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 3 })])
+  assert.equal(out.binding.constraint, 'slot-bound')
+  assert.deepEqual(out.guardrails.reviewChurn, { value: 0.5, bound: '<=40%', baseline: null, breached: true, roundsPerLandedTask: 1 })
+  assert.deepEqual(out.proposals, [])
+  assert.match(out.withheld[0].reason, /^a raise while a Guardrail is breached: reviewChurn 0\.5 \(baseline None, bound <=40%\)$/)
+  assert.ok(has(out.flags, /^review churn: landed task\(s\) with no recorded review round: \[\[t2\]\], \[\[t3\]\]/))
+  signsHold(out)
+})
+
+test('(g) review churn: [guardrails] review_churn_pct 60 raises the bound, and the raise is proposed', (t) => {
+  const home = tmpHome(t)
+  emitAll(home, 'demo', churned())
+  const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, { parallel_ceiling: 3 }, { guardrails: { review_churn_pct: 60 } })])
+  assert.deepEqual(out.guardrails.reviewChurn, { value: 0.5, bound: '<=60%', baseline: null, breached: false, roundsPerLandedTask: 1 })
+  assert.equal(out.proposals[0].key, 'parallel_ceiling')
+})
+
+test('(h) TRIPWIRE (p21-2 hand-off): a headline reviewChurn slot carries reviewChurn.value', (t) => {
+  // Vacuous until p21-2 gives the headline a reviewChurn slot; then whichever of p21-2 / p21-3 lands second must set
+  // headline.reviewChurn = reviewChurn.value (score.py's HAND-OFF comment) or this fails.
+  const home = tmpHome(t)
+  emitAll(home, 'demo', churnFixture())
+  const out = scored(home, ['--until', at('06:00'), '--repo-slug', 'o/r'])
+  if ('reviewChurn' in out.headline) assert.equal(out.headline.reviewChurn, out.reviewChurn.value)
+  assert.match(fs.readFileSync(SCORE, 'utf8'), /HAND-OFF p21-2: when the headline\/tuning scores gain a reviewChurn slot, set headline\.reviewChurn =\s+# reviewChurn\.value/)
+})
+
+// t1 merged, with review-verdict lines given as [hh:mm, round, verdict, findings, original, regression]
+const landedWith = (...verdicts) => byTs([...life('t1', { from: at('00:00'), to: at('02:00'), c: 2, lane: [at('02:00'), at('02:10')] }),
+  ...verdicts.map(([ts, round, verdict, f, o, r]) => rv(at(ts), 't1', round, verdict, f, o, r))])
+
+test('(i) review churn: findings none of which was classified read as unknown, never 0, and never breach', (t) => {
+  // a head-less round (or no tree, or no path:line cite): 3 findings, 0 original, 0 regression
+  const home = tmpHome(t)
+  emitAll(home, 'demo', landedWith(['00:30', 1, 'changes', 3, 0, 0], ['01:00', 2, 'approve', 0, 0, 0]))
+  const out = scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, {}, { guardrails: { review_churn_pct: 0 } })])
+  assert.equal(out.reviewChurn.value, null)
+  assert.deepEqual([out.reviewChurn.findings, out.reviewChurn.original, out.reviewChurn.regression, out.reviewChurn.unclassified, out.reviewChurn.rounds], [3, 0, 0, 3, 2])
+  assert.equal(out.guardrails.reviewChurn.value, 'unknown')
+  assert.equal(out.guardrails.reviewChurn.breached, false, 'unknown never breaches, not even a 0% bound')
+  assert.ok(has(out.flags, /^review churn unknown: 3 finding\(s\), none classified \(no head, no tree or no path:line cite\)$/))
+  assert.ok(!has(out.flags, /no review rounds recorded/))
+  assert.ok(!has(out.flags, /low coverage/), 'the unknown flag says it, once')
+})
+
+test('(j) review churn: more than half the findings unclassified is flagged low coverage; half is not', (t) => {
+  const low = tmpHome(t)
+  emitAll(low, 'demo', landedWith(['00:30', 1, 'changes', 5, 1, 1]))
+  const l = scored(low, ['--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.equal(l.reviewChurn.value, 0.2)
+  assert.equal(l.reviewChurn.unclassified, 3)
+  assert.ok(has(l.flags, /^review churn: low coverage: 3 of 5 finding\(s\) unclassified \(no head, no tree or no path:line cite\)/))
+  const half = tmpHome(t)
+  emitAll(half, 'demo', landedWith(['00:30', 1, 'changes', 4, 1, 1]))
+  const h = scored(half, ['--until', at('06:00'), '--repo-slug', 'o/r'])
+  assert.equal(h.reviewChurn.value, 0.25)
+  assert.ok(!has(h.flags, /low coverage/))
+})
+
+test('(k) review churn: the breach is decided from the integer sums, not the rounded fraction', (t) => {
+  const breach = (bound, f, o, r) => {
+    const home = tmpHome(t)
+    emitAll(home, 'demo', landedWith(['00:30', 1, 'changes', f, o, r]))
+    return scored(home, ['--until', at('06:00'), '--settings', writeSettings(home, {}, { guardrails: { review_churn_pct: bound } })]).guardrails.reviewChurn
+  }
+  // exactly at the bound: 11/20 * 100 is 55.00000000000001 and 7/25 * 100 is 28.000000000000004 in floats
+  assert.deepEqual(breach(55, 20, 9, 11), { value: 0.55, bound: '<=55%', baseline: null, breached: false, roundsPerLandedTask: 1 })
+  assert.equal(breach(28, 25, 18, 7).breached, false, '7 of 25 is at a 28% bound')
+  assert.equal(breach(55, 20, 8, 12).breached, true, 'one over the bound breaches')
+  // a decimal bound reads as the decimal it prints as: 141 of 1000 is at 14.1%, 142 is over
+  assert.equal(breach(14.1, 1000, 859, 141).breached, false)
+  assert.equal(breach(14.1, 1000, 858, 142).breached, true)
+  // 4-place rounding cannot hide a breach: 40001/100001 rounds to 0.4, yet it is over 40%
+  const over = breach(40, 100001, 60000, 40001)
+  assert.deepEqual([over.value, over.breached], [0.4, true])
 })
