@@ -106,7 +106,9 @@ half of a Reflection at each rollout's close (fold, settings, score,
 `tune.py --record-only --close`) and records one line per rollout through it
 (ADR 0037 d4). `skills/reflect/scripts/reflect.py` runs the weekly reading's
 script half and is the only writer of `reflections.jsonl` and of the bug and
-decision tasks.
+decision tasks. `skills/reflect/scripts/reflect-due.py` tells the daily sweep
+when the weekly reading is due: 7 days after the last one, 14 after three quiet
+Reflections in a row (ADR 0037 d4, d6).
 
 ## Design
 
@@ -257,6 +259,8 @@ final check that the run wrote nothing into the tree):
   the GIT_* scrub), `tests/reflect-weekly.test.mjs` (`reflect.py`'s weekly reading against throwaway records,
   vaults and repos: the span and its friction, close lines and the Escapes sweep, one line per Watch and per Tuning,
   the bug and decision tasks never written over, Lachy's recorded no, the close and the rung),
+  `tests/reflect-due.test.mjs` (`reflect-due.py` on fixture records: due at day 7 and not day 6, three quiet
+  Reflections to the 14-day cadence and a non-quiet one back to 7, and the cadence `close` writes),
   `tests/contracts/reflect.test.mjs` (the verb's wiring, every close scoring its rollout, its
   SKILL's order and triggers, and the retired name staying gone) and `tests/contracts/escapes-fixes-key.test.mjs` (every
   writer of a fix of landed work adds `fixes:`, and the Reflection presents Quality).

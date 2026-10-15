@@ -16,7 +16,7 @@ scripts/companion/reflect.py (span / watch / raised / close) gives the shape: bo
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py knobs --span F [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py decide --span F [--decisions F] [--tasks-dir D] \\
         [--now ISO] [--dry-run]
-    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span F [--cadence 7|14] [--dry-run]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span F [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py rung
 
 Writes. reflect.py is the only writer of reflections.jsonl (run_record.py's REFLECTIONS file, through
@@ -172,8 +172,11 @@ of its lines) therefore blocks close too: it is a fault to fix, never a step to 
 (read), escapesOnly, counts (sightings: Watch ids with a line from this Reflection; newWatches: those that are new;
 rules, bugs, filed, knobs, landed and reverted from its proposal lines; breaches: distinct (rollout, Guardrail) pairs
 over breachCounts rollouts), quiet (newWatches, rules, bugs and breaches all 0), repairsOnly when a rollout was read
-repairs-only, decisionTask when a rule line names one, and cadence when --cadence is given (absent reads as 7). The
-writers watch, bug, knobs and decide refuse a closed Reflection.
+repairs-only, decisionTask when a rule line names one, and cadence: run_record's cadence() over reflections.jsonl
+with this line appended (three quiet Reflections in a row: 14; any that is not quiet: 7), on every line, so each change
+of cadence is on a record line, and the outcome line ends `cadence <old> -> <new>` when it changes. The writers watch,
+bug, knobs and decide refuse a closed Reflection. reflect-due.py beside it reads the same rule to say when the next
+reading is due (ADR 0037 d4 and d6).
 
 rung. The ladder (ladder.py's load()): it prints {rung, model "opus", effort, judge, review, top, topModel}, the own
 values of the highest opus rung, with a stderr note when the top rung is not opus (`rung: the ladder's top rung
@@ -1643,11 +1646,12 @@ def cmd_close(a):
     task = next((d.get("vaultTask") for d in mine if d.get("altitude") == "rule" and d.get("vaultTask")), None)
     if task:
         fields["decisionTask"] = task
-    if a.cadence is not None:
-        fields["cadence"] = a.cadence
+    was, _ = RR.cadence(lines)
+    fields["cadence"], _ = RR.cadence(lines + [{"kind": "reflection", "id": rid, "quiet": quiet}])
     write_line("reflection", fields, a.dry_run)
-    done(a, "closed %s: %s, %s" % (rid, "quiet" if quiet else "not quiet",
-                                   ", ".join("%s %d" % (k, v) for k, v in counts.items())))
+    done(a, "closed %s: %s, %s%s" % (rid, "quiet" if quiet else "not quiet",
+                                     ", ".join("%s %d" % (k, v) for k, v in counts.items()),
+                                     "; cadence %d -> %d" % (was, fields["cadence"]) if was != fields["cadence"] else ""))
     return 0
 
 
@@ -1740,7 +1744,6 @@ def main(argv):
     d.add_argument("--dry-run", action="store_true")
     c = sub.add_parser("close")
     c.add_argument("--span", required=True)
-    c.add_argument("--cadence", type=int, choices=(7, 14))
     c.add_argument("--dry-run", action="store_true")
     sub.add_parser("rung")
     a = p.parse_args(argv)

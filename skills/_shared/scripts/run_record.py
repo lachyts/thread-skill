@@ -18,6 +18,8 @@ or imported by path (importlib.util.spec_from_file_location, git-env-canary.py's
                                            the writer, reconcile-rollout.py, and the reader, score.py, share them)
     watch_id(rule, shape) -> str           knob_key(repo, key, rule, direction) -> str   (the weekly reading's
                                            identities, p21-7: reflect.py writes them, tune.py reads them back)
+    cadence(lines) -> (days, streak)       (the cadence rule, p21-8: reflect.py's close writes it, reflect-due.py
+                                           reads it)
 
 Callers: in-process callers use the default strict=False, which never raises; shell callers append
 `|| true`. Recording must never break a rollout.
@@ -268,9 +270,14 @@ docstring lists each verb's events and the stage, reasonClass and idle-reason ta
   Reflection whose auto line made the last move: its lines were that move's evidence). Walking them with an empty set
   seen, a line agrees when it names a rollout not yet seen, and its rollouts then join seen. The agreement is the
   agreeing lines plus one when X is not seen; a knob lands at 3. tune.py's auto_check computes it.
-- The cadence rule (p21-7, ADR 0037 d6): a `reflection` line's `cadence` is the reading's cadence in days as that
-  Reflection closed it (7 weekly, 14 fortnightly); absent reads as 7. Its `quiet` is newWatches, rules, bugs and
-  breaches all 0.
+- The cadence rule (p21-7 and p21-8, ADR 0037 d6). A `reflection` line's `quiet` is newWatches, rules, bugs and
+  breaches all 0. The quiet streak is the number of `reflection` lines at the end of the file, in file order (the
+  first line per id), whose quiet is true; the cadence is 14 days (fortnightly) when the streak is 3 or more, else 7
+  (weekly). So three quiet Reflections in a row move the reading to fortnightly, a fourth keeps it there, and any that
+  is not quiet moves it back to weekly at once. cadence() computes it, and readers (reflect-due.py) take it from the
+  quiet flags, never from a written value. A line's `cadence` records the rule's value as that Reflection closed it,
+  its own line counted (reflect.py's close writes it on every line, so each change is on a record line); absent (a
+  line from before p21-8) reads as 7.
 - Skip a line that does not parse: a crash can leave a last line with no newline, which the next append
   then merges with (a known limit; checking the tail would mean locking every emit).
 
@@ -481,6 +488,24 @@ def watch_id(rule, shape):
     """A Watch's id: the first 8 hex of sha1 over the stripped rule, a newline and the stripped shape (Chorus's
     watch_id, re-implemented: the Watch rule)."""
     return hashlib.sha1(("%s\n%s" % (rule.strip(), shape.strip())).encode("utf-8")).hexdigest()[:8]
+
+
+QUIET_STREAK = 3           # quiet Reflections in a row that relax the cadence (ADR 0037 d6)
+
+
+def cadence(lines):
+    """The cadence rule over reflections.jsonl's lines (dicts, file order): (days, streak). streak counts the trailing
+    `reflection` lines, the first per id, whose quiet is true; days is 14 at a streak of QUIET_STREAK or more, else 7.
+    A line with no string id is skipped."""
+    seen = set()
+    streak = 0
+    for d in lines:
+        rid = d.get("id") if isinstance(d, dict) and d.get("kind") == "reflection" else None
+        if not isinstance(rid, str) or rid in seen:
+            continue
+        seen.add(rid)
+        streak = streak + 1 if d.get("quiet") is True else 0
+    return (CADENCES[1] if streak >= QUIET_STREAK else CADENCES[0]), streak
 
 
 def knob_key(repo, key, rule, direction):

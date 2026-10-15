@@ -24,6 +24,8 @@ passes Lachy's answer on:
   or write a Tuning in the conversation.
 - `skills/reflect/scripts/reflect.py` is the **only writer** of `reflections.jsonl` (the weekly reading's Watches,
   proposals and close), and of the bug and decision tasks it files. Its header is the one copy of its rules.
+- `skills/reflect/scripts/reflect-due.py` says whether the weekly reading is due (ADR 0037 d4 and d6). It reads
+  `reflections.jsonl` only and writes nothing; its header is the one copy of its rule.
 
 **Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 
@@ -206,11 +208,21 @@ change a live rollout, Lachy edits its note.
 ## The weekly reading (ADR 0037 d3–d5)
 
 `/thread:reflect --weekly` reads every rollout since the last weekly Reflection, on its own, once a week (ADR 0037
-d4): the scripts score and sweep, the model traces each cost to its rule, and the writers record the outcome. It
-lands a bug task, an agreed knob or a knob's revert unasked (ADR 0037 d5); a rule proposal, and any Watch to confirm
-beside it, goes into one decision task for Lachy's next morning. Every write goes through `reflect.py` or tune.py,
-each idempotent, so a reading that dies part-way is finished by running the remaining steps against the same
-`span.json`.
+d4), or once a fortnight on a quiet streak (d6): the scripts score and sweep, the model traces each cost to its rule,
+and the writers record the outcome. It lands a bug task, an agreed knob or a knob's revert unasked (ADR 0037 d5); a
+rule proposal, and any Watch to confirm beside it, goes into one decision task for Lachy's next morning. Every write
+goes through `reflect.py` or tune.py, each idempotent, so a reading that dies part-way is finished by running the
+remaining steps against the same `span.json`.
+
+What starts it is the daily sweep, which asks each day:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect-due.py
+```
+
+Exit 0 is due, 4 is not yet; any other exit starts nothing. It is due once the cadence's days (7, or 14 after three
+quiet Reflections in a row) have passed, in Melbourne dates, since the last Reflection's `until`, and at once when
+there is none. Its JSON names the cadence, the quiet streak and the day it falls due.
 
 ### 9. Preflight
 
@@ -342,7 +354,9 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span /tm
 ```
 
 Exactly once, quiet weeks included: its line is the Reflection's record, and its `quiet` feeds the cadence (ADR
-0037 d6). A quiet week writes only record lines, never a vault task. Every writer refuses a closed Reflection, so
+0037 d6). Three quiet Reflections in a row move the reading to fortnightly (`cadence` 14), and any that is not quiet
+moves it back to weekly (7): `close` writes the cadence on its line, and its outcome line ends `cadence <old> -> <new>`
+when it changes. A quiet week writes only record lines, never a vault task. Every writer refuses a closed Reflection, so
 `close` refuses first (exit 2, nothing written) while step 14's `knobs` or step 15's `decide` has a line to write:
 run the step its stderr line names, then close.
 
