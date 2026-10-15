@@ -485,25 +485,58 @@ through time, from attention to merged PRs. Terms only — no implementation.
   Slot start, written by scripts, never by a model (ADR 0032). _Avoid_:
   telemetry, metrics, log (a task note's `## Integration log` is a
   different thing).
-- **Throughput** — merges per running hour: the one number a Retro
-  optimises. Running time leaves out pauses, halts and waits on Lachy.
+- **Throughput** — merges per running hour, a Guardrail: a Tuning may not
+  slow a run past its bound, since an overnight rollout must still finish by
+  morning. Running time leaves out pauses, halts and waits on Lachy.
   _Avoid_: speed, wall-clock (it counts nights and sign-offs).
+- **Hands-off rate** — the share of a rollout's tasks that land with no act
+  from Lachy once the run has started: no Human fix, Recorded answer,
+  sign-off, merge hold or repair run. One of a Reflection's two headlines, beside
+  Quality. Questions belong before the run starts, so every mid-run ask counts
+  against it; a gate passed under the Standing approval does not.
+  _Avoid_: autonomy score, automation rate.
+- **Quality** — the other headline: how few Escapes a rollout's landed work
+  produces. _Avoid_: correctness, polish.
+- **Escape** — landed work that later needs a fix it should not have needed:
+  a follow-up fix task traced to it, a revert, or a later review finding
+  against its lines. Counted against the rollout that landed it, so it is
+  known only after the run. _Avoid_: bug (alone), regression (a review
+  round's word).
+- **Review churn** — review rounds whose findings only answer the previous
+  round's fix rather than the original work, in the engine's review loop and
+  in `/fresh-review` alike. A Guardrail every Reflection reports. _Avoid_: review
+  waste, ping-pong.
 - **Guardrail** — a measure a Tuning must not worsen past its bound to buy
-  Throughput: tokens per merge, set-aside rate, conflict rate, quota stalls.
+  either headline: Throughput, tokens per merge, set-aside rate, conflict
+  rate, quota stalls, Review churn.
   Its bounds sit in the operator's rollout settings.
-- **Retro** — the pass that reads a rollout's Run record (and the records
-  of any rollout that overlapped it, so shared load shows), scores it on
-  Throughput and the Guardrails, names what bound it (Slots, the
-  Integration lane, quota, dependencies) and proposes Tunings. It never
-  changes anything itself. Its verb is `/thread:retro`. _Avoid_: review
-  (the engine's), reflection (Chorus's).
-- **Tuning** — one proposed change to the operator's rollout settings (a
-  repo's Parallel ceiling, a round cap), applied only once Lachy picks it,
-  and read by the next schedule. Each Retro appends one line to
-  `tunings.jsonl` beside the record, with its headline scores (the next
-  Retro's baseline) and the Tunings applied (decision 5's tally). A rule
-  that three Retros agree on may later become an automatic adjustment, by
-  ADR. _Avoid_: tweak, auto-tune.
+- **Reflection** — the pass that reads a rollout's Run record (and the
+  records of any rollout that overlapped it, so shared load shows), scores
+  it on the two headlines, Hands-off rate and Quality, and the Guardrails,
+  traces what cost them to the rule that produced it, names what bound the
+  run (Slots, the Integration lane, quota, dependencies) and proposes
+  Tunings. The same word and shape as Chorus's Reflection over the
+  Companion's record. Its verb is `/thread:reflect`. _Avoid_: retro, review
+  (the engine's).
+- **Tuning** — one proposed change, picked by Lachy before it lands, at one
+  of three altitudes, as in Chorus: a **knob** (a value in the operator's
+  rollout settings: a repo's Parallel ceiling, a round cap, read by the next
+  schedule); a **rule** (how a skill or the engine behaves: a grill and an
+  ADR before a build); a **bug** (the engine or a skill did not do what its
+  rule says: a task). Each Reflection appends one line to `tunings.jsonl`
+  beside the record, with its headline scores (the next Reflection's
+  baseline) and the Tunings applied (decision 5's tally). A rule that three
+  Reflections agree on may later become an automatic adjustment, by ADR.
+  _Avoid_: tweak, auto-tune.
+- **Watch** — a pattern a Reflection saw in one rollout and would not yet
+  propose a rule for: named, written to the record and carried into the next
+  Reflection. It becomes a rule proposal when a later rollout shows the same
+  thing again, or at once when Lachy confirms it. Knobs need no Watch.
+  _Avoid_: candidate, hunch.
+- **Quiet Reflection** — one that finds no new Watch, no rule proposal, no
+  bug and no Guardrail breach. Three in a row move the reading from weekly
+  to fortnightly; one that is not quiet moves it back (ADR 0037).
+  _Avoid_: clean run, empty retro.
 - **Rollout settings** — the operator's `~/.config/thread/rollouts.toml`,
   `ladder.toml`'s sibling: `[defaults]`, the `[guardrails]` bounds and
   per-repo `[repo."owner/name"]` tables (keyed by the GitHub origin),
