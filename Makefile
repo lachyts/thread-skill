@@ -44,25 +44,29 @@ release-check:
 # Lachy's account, is nondeterministic and spawns nested claude sessions, so it is a human step, never
 # part of `make test` (the self-rollout verifier) or of a bare `make` (this target stays last, and test
 # is the default goal). tests/contracts/evals-structure.test.mjs checks the suite's shape there for free.
-# - The recipe line locks four flags, so no EVAL_ARGS override or environment variable can drop them,
-#   and tests/contracts/evals-structure.test.mjs fails any second --ablation, --model or --judge-model
-#   (the CLI keeps a repeated option's last value):
-#   - --ablation none: a no-plugin arm can never fire a thread skill, so its delta means nothing here
-#     and it would double the cost. Every Skill grader sets `arm: both`.
-#   - --model opus --judge-model opus: every case and every LLM grader runs on Opus (the operator's
-#     Opus lock). `claude plugin eval` judges with Haiku by default. Three lifecycle cases missed under
-#     Haiku and passed with Opus model and judge in the 3.1.0 record (docs/evals/2026-10-15-release-3-1.md),
-#     but that run changed both together, so those misses are not explained.
-#   - --no-publish: the HTML report stays local.
+# - The recipe line has three parts. The CLI keeps a repeated option's last value, so the order is the
+#   design:
+#   1. Defaults, first, so EVAL_ARGS may override them: --runs 1, --max-cost-usd 30, --threshold 0.
+#      30 is an estimate, a ceiling and never a target: the 3.1.0 record ran 4 lifecycle cases on Opus
+#      model and judge for $1.64, so the 23 cases come to about $10 (no full Opus run is recorded yet).
+#      --threshold 0 keeps a sub-1.0 case from failing the run.
+#   2. $(EVAL_ARGS), empty by default: e.g. `make evals EVAL_ARGS="--case status-*"`, or
+#      `EVAL_ARGS="--runs 3 --max-cost-usd 90"` to raise the defaults.
+#   3. Locks, last, so nothing in EVAL_ARGS can undo them:
+#      - --ablation none: a no-plugin arm can never fire a thread skill, so its delta means nothing here
+#        and it would double the cost. Every Skill grader sets `arm: both`.
+#      - --model opus --judge-model opus: every case and every LLM grader on Opus (the operator's Opus
+#        lock). `claude plugin eval` judges with Haiku by default. Three lifecycle cases missed under
+#        Haiku and passed with Opus model and judge in the 3.1.0 record
+#        (docs/evals/2026-10-15-release-3-1.md), but that run changed both together, so the misses are
+#        not explained.
+#      - --no-publish: the HTML report stays local.
+#   tests/contracts/evals-structure.test.mjs holds the evals recipe to exactly this one line.
 # - Record a scored baseline in docs/evals/ before changing any skill description.
 # - Results land in the git-ignored evals/results/<timestamp>/. Record what you need in docs/evals/, then
 #   clear it before `claude plugin update`: the `./` directory source copies ignored files into the
 #   version cache. `make release-check` refuses while it holds output, and its stray check fails on any
 #   copy that reached the cache.
-# - EVAL_ARGS is the overridable tail. --max-cost-usd 30 is an estimate for all 19 cases on Opus (no
-#   full Opus run has been recorded yet; the 3.1.0 suite on the defaults hit a 5-dollar ceiling at 17 of
-#   19). It is a ceiling, never a target. --threshold 0 keeps a sub-1.0 case from failing the run.
-#   An override replaces the whole tail, e.g. `make evals EVAL_ARGS="--runs 3 --max-cost-usd 60 --threshold 0"`.
-EVAL_ARGS ?= --runs 1 --max-cost-usd 30 --threshold 0
+EVAL_ARGS ?=
 evals:
-	claude plugin eval . --ablation none --model opus --judge-model opus --no-publish $(EVAL_ARGS)
+	claude plugin eval . --runs 1 --max-cost-usd 30 --threshold 0 $(EVAL_ARGS) --ablation none --model opus --judge-model opus --no-publish
