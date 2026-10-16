@@ -32,7 +32,11 @@ const GRADER_KEYS = {
 }
 const ARMS = new Set(['with-only', 'both'])
 const TARGETS = new Set(['last_message', 'trace'])
-const FORBIDDEN_FLAGS = ['--allow-tools', '--scaffold', '--mocks', '--allow-real-servers', '--trust-plugin']
+const FORBIDDEN_FLAGS = ['--allow-tools', '--scaffold', '--mocks', '--allow-real-servers', '--trust-plugin', '--publish-report']
+// The evals recipe is exactly this line (an `@` prefix and ${EVAL_ARGS} aside). The CLI keeps a repeated
+// option's last value, so the defaults come before $(EVAL_ARGS) and the locks after it: an override can
+// raise a default but never undo a lock (the operator's Opus lock, AGENTS.md § Model tier).
+const EVALS_RECIPE = 'claude plugin eval . --runs 1 --max-cost-usd 30 --threshold 0 $(EVAL_ARGS) --ablation none --model opus --judge-model opus --no-publish'
 const HOME_MARKERS = ['/Users/', '/home/', '~/', 'repos/obsidian', 'repos/workspaces', /\$\{?HOME\b/]
 const NUMERIC_LIKE = [/^[-+]?(\d|\.\d)/, /^[-+]?\.(inf|nan)$/i]
 const KEYWORDS = /^(true|false|null|~|yes|no|on|off|y|n)$/i
@@ -481,23 +485,13 @@ function checkMakefile(text, file = 'Makefile') {
   if (!phony.includes('evals')) err('.PHONY lacks evals')
   const ev = rules.get('evals')
   if (!ev) { err('no evals rule'); return errors }
-  const unresolved = []
-  const recipe = ev.recipes.map((l) => expandMake(l, vars, unresolved)).join('\n')
-  for (const u of unresolved) err(`the evals recipe references ${u}, which this check cannot resolve`)
-  if (!recipe.includes('claude plugin eval')) err('the evals recipe does not run claude plugin eval')
-  if (!ev.recipes.some((l) => /claude plugin eval \.\s+\$(\(EVAL_ARGS\)|\{EVAL_ARGS\})/.test(l))) err('no evals recipe line runs claude plugin eval . $(EVAL_ARGS)')
-  let args = ''
-  if (!vars.has('EVAL_ARGS')) err('EVAL_ARGS is not assigned')
-  else {
-    const u = []
-    args = expandMake(vars.get('EVAL_ARGS'), vars, u)
-    for (const x of u) err(`EVAL_ARGS references ${x}, which this check cannot resolve`)
-    if (!/(^|\s)--ablation none(\s|$)/.test(args)) err('EVAL_ARGS lacks --ablation none')
-    if (!/(^|\s)--no-publish(\s|$)/.test(args)) err('EVAL_ARGS lacks --no-publish')
-    if (!/(^|\s)--max-cost-usd \d+(\.\d+)?(\s|$)/.test(args)) err('EVAL_ARGS lacks --max-cost-usd <number>')
-    if (!/(^|\s)--runs [123](\s|$)/.test(args)) err('EVAL_ARGS lacks --runs 1|2|3')
-  }
-  for (const f of FORBIDDEN_FLAGS) if (`${recipe} ${args}`.includes(f)) err(`the evals recipe or EVAL_ARGS passes ${f}`)
+  const lines = ev.recipes.map((l) => l.trim().replace(/^@/, '').replace('${EVAL_ARGS}', '$(EVAL_ARGS)'))
+  if (lines.length !== 1 || lines[0] !== EVALS_RECIPE) err(`the evals recipe is not exactly: ${EVALS_RECIPE}`)
+  // The pinned line holds no forbidden flag, so only the EVAL_ARGS default can carry one.
+  const u = []
+  const args = vars.has('EVAL_ARGS') ? expandMake(vars.get('EVAL_ARGS'), vars, u) : ''
+  for (const x of u) err(`EVAL_ARGS references ${x}, which this check cannot resolve`)
+  for (const f of FORBIDDEN_FLAGS) if (args.includes(f)) err(`EVAL_ARGS passes ${f}`)
   return errors
 }
 
@@ -720,8 +714,8 @@ test('a missing evals/ is one named error, not a thrown load', () => {
 
 const MK_PHONY = '.PHONY: test evals\n'
 const MK_TEST = 'test:\n\t@bash tests/run.sh\n'
-const MK_ARGS = 'EVAL_ARGS ?= --ablation none --runs 1 --max-cost-usd 5 --no-publish --threshold 0\n'
-const MK_EVALS = 'evals:\n\tclaude plugin eval . $(EVAL_ARGS)\n'
+const MK_ARGS = 'EVAL_ARGS ?=\n'
+const MK_EVALS = `evals:\n\t${EVALS_RECIPE}\n`
 const mk = (parts = {}) => {
   const p = { phony: MK_PHONY, pre: '', test: MK_TEST, mid: '', args: MK_ARGS, evals: MK_EVALS, post: '', ...parts }
   return p.phony + p.pre + p.test + p.mid + p.args + p.evals + p.post
@@ -741,9 +735,15 @@ test('Makefile control: every way to reach or weaken evals is a named (h) error'
     ['!= shell assignment', mk({ pre: 'X != claude plugin eval .\n', test: 'test:\n\t$(X)\n' }), 'mentions claude'],
     ['$(MAKE) evals', mk({ test: 'test:\n\t$(MAKE) evals\n' }), 'mentions claude, evals or make'],
     ['an unresolved reference', mk({ test: 'test:\n\techo $(UNDEFINED)\n' }), 'cannot resolve'],
-    ['--allow-tools in the recipe', mk({ evals: 'evals:\n\tclaude plugin eval . --allow-tools Bash $(EVAL_ARGS)\n' }), '--allow-tools'],
-    ['--scaffold in EVAL_ARGS', mk({ args: MK_ARGS.replace('--threshold 0', '--threshold 0 --scaffold') }), '--scaffold'],
-    ['EVAL_ARGS without --no-publish', mk({ args: MK_ARGS.replace(' --no-publish', '') }), 'lacks --no-publish'],
+    ['--allow-tools in the recipe', mk({ evals: MK_EVALS.replace('$(EVAL_ARGS)', '--allow-tools Bash $(EVAL_ARGS)') }), 'not exactly'],
+    ['--allow-tools in EVAL_ARGS', mk({ args: 'EVAL_ARGS ?= --allow-tools Bash\n' }), '--allow-tools'],
+    ['--scaffold in EVAL_ARGS', mk({ args: 'EVAL_ARGS ?= --scaffold\n' }), '--scaffold'],
+    ['--publish-report in EVAL_ARGS', mk({ args: 'EVAL_ARGS ?= --publish-report\n' }), '--publish-report'],
+    ['recipe without --no-publish', mk({ evals: MK_EVALS.replace(' --no-publish', '') }), 'not exactly'],
+    ['recipe judging with haiku', mk({ evals: MK_EVALS.replace('--judge-model opus', '--judge-model haiku') }), 'not exactly'],
+    ['locks before $(EVAL_ARGS)', mk({ evals: `evals:\n\t${EVALS_RECIPE.replace(' $(EVAL_ARGS)', '')} $(EVAL_ARGS)\n` }), 'not exactly'],
+    ['a second recipe line', mk({ evals: MK_EVALS + '\tclaude plugin eval . $(EVAL_ARGS)\n' }), 'not exactly'],
+    ['a recipe variable after the locks', mk({ pre: 'POST ?=\n', evals: MK_EVALS.replace('--no-publish', '--no-publish $(POST)') }), 'not exactly'],
     ['evals missing from .PHONY', mk({ phony: '.PHONY: test\n' }), '.PHONY lacks evals'],
     ['no evals rule', mk({ evals: '' }), 'no evals rule'],
     ['a tab line before any rule', mk({ phony: '\techo hi\n' + MK_PHONY }), 'no current rule'],
@@ -755,7 +755,7 @@ test('Makefile control: every way to reach or weaken evals is a named (h) error'
     ['.SHELLFLAGS naming make evals', mk({ pre: '.SHELLFLAGS := -c make evals;\n' }), '.SHELLFLAGS (-c make evals;) mentions'],
     ['SHELL through a variable', mk({ pre: 'C = claude\nSHELL = $(C)\n' }), 'SHELL ($(C)) mentions claude'],
     ['grouped targets test evals &:', mk({ post: 'test evals &:\n' }), 'grouped targets'],
-    ['claude plugin eval without .', mk({ evals: 'evals:\n\tclaude plugin eval $(EVAL_ARGS)\n' }), 'claude plugin eval . $(EVAL_ARGS)'],
+    ['claude plugin eval without .', mk({ evals: MK_EVALS.replace('eval . ', 'eval ') }), 'not exactly'],
   ]
   // The clean baseline has no errors, so every error a row reports comes from that row's change.
   const base = checkMakefile(mk(), 'M')
@@ -768,7 +768,7 @@ test('Makefile control: every way to reach or weaken evals is a named (h) error'
     ['X ::= a:b', mk({ pre: 'X ::= a:b\n' })],
     ['.PHONY: evals test, test first, evals last', mk({ phony: '.PHONY: evals test\n' })],
     ['SHELL := /bin/bash, .SHELLFLAGS := -ec', mk({ pre: 'SHELL := /bin/bash\n.SHELLFLAGS := -ec\n' })],
-    ['${EVAL_ARGS}', mk({ evals: 'evals:\n\t@claude plugin eval . ${EVAL_ARGS}\n' })],
+    ['@ and ${EVAL_ARGS}', mk({ evals: `evals:\n\t@${EVALS_RECIPE.replace('$(EVAL_ARGS)', '${EVAL_ARGS}')}\n` })],
   ]
   for (const [name, text] of positive) assert.deepEqual(checkMakefile(text, 'M'), [], name)
 })
