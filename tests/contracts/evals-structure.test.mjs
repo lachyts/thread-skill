@@ -32,7 +32,23 @@ const GRADER_KEYS = {
 }
 const ARMS = new Set(['with-only', 'both'])
 const TARGETS = new Set(['last_message', 'trace'])
-const FORBIDDEN_FLAGS = ['--allow-tools', '--scaffold', '--mocks', '--allow-real-servers', '--trust-plugin']
+const FORBIDDEN_FLAGS = ['--allow-tools', '--scaffold', '--mocks', '--allow-real-servers', '--trust-plugin', '--publish-report']
+// The operator's Opus lock (AGENTS.md § Model tier) and the free-run flags, held literally on the evals
+// recipe line so no EVAL_ARGS override drops them. Each flag appears once in recipe + EVAL_ARGS together:
+// the CLI keeps a repeated option's last value, so a second --model is an override, in any spelling.
+const OPUS = /^(opus|claude-opus-[\w.-]+)$/
+const LOCKED_FLAGS = [['--ablation', (v) => v === 'none'], ['--model', (v) => OPUS.test(v)], ['--judge-model', (v) => OPUS.test(v)]]
+const unquote = (v) => v.replace(/^(["'])(.*)\1$/, '$2')
+// Every value an option takes in a command line, from `--flag v`, `--flag=v` and quoted forms.
+function optionValues(cmd, flag) {
+  const toks = cmd.split(/\s+/).filter(Boolean)
+  const vals = []
+  toks.forEach((t, i) => {
+    if (t === flag) vals.push(unquote(toks[i + 1] ?? ''))
+    else if (t.startsWith(flag + '=')) vals.push(unquote(t.slice(flag.length + 1)))
+  })
+  return vals
+}
 const HOME_MARKERS = ['/Users/', '/home/', '~/', 'repos/obsidian', 'repos/workspaces', /\$\{?HOME\b/]
 const NUMERIC_LIKE = [/^[-+]?(\d|\.\d)/, /^[-+]?\.(inf|nan)$/i]
 const KEYWORDS = /^(true|false|null|~|yes|no|on|off|y|n)$/i
@@ -485,19 +501,28 @@ function checkMakefile(text, file = 'Makefile') {
   const recipe = ev.recipes.map((l) => expandMake(l, vars, unresolved)).join('\n')
   for (const u of unresolved) err(`the evals recipe references ${u}, which this check cannot resolve`)
   if (!recipe.includes('claude plugin eval')) err('the evals recipe does not run claude plugin eval')
-  if (!ev.recipes.some((l) => /claude plugin eval \.\s+\$(\(EVAL_ARGS\)|\{EVAL_ARGS\})/.test(l))) err('no evals recipe line runs claude plugin eval . $(EVAL_ARGS)')
+  const evalLine = ev.recipes.find((l) => /claude plugin eval \..*\$(\(EVAL_ARGS\)|\{EVAL_ARGS\})/.test(l))
+  if (!evalLine) err('no evals recipe line runs claude plugin eval . $(EVAL_ARGS)')
   let args = ''
   if (!vars.has('EVAL_ARGS')) err('EVAL_ARGS is not assigned')
   else {
     const u = []
     args = expandMake(vars.get('EVAL_ARGS'), vars, u)
     for (const x of u) err(`EVAL_ARGS references ${x}, which this check cannot resolve`)
-    if (!/(^|\s)--ablation none(\s|$)/.test(args)) err('EVAL_ARGS lacks --ablation none')
-    if (!/(^|\s)--no-publish(\s|$)/.test(args)) err('EVAL_ARGS lacks --no-publish')
     if (!/(^|\s)--max-cost-usd \d+(\.\d+)?(\s|$)/.test(args)) err('EVAL_ARGS lacks --max-cost-usd <number>')
     if (!/(^|\s)--runs [123](\s|$)/.test(args)) err('EVAL_ARGS lacks --runs 1|2|3')
-    if (!/(^|\s)--model opus(\s|$)/.test(args)) err('EVAL_ARGS lacks --model opus')
-    if (!/(^|\s)--judge-model opus(\s|$)/.test(args)) err('EVAL_ARGS lacks --judge-model opus')
+  }
+  if (evalLine) {
+    // The locked flags sit on the recipe line itself, ahead of $(EVAL_ARGS), and appear nowhere else.
+    const head = evalLine.split(/\$(\(EVAL_ARGS\)|\{EVAL_ARGS\})/)[0]
+    const all = recipe // the expanded recipe already carries EVAL_ARGS, appends included
+    for (const [flag, ok] of LOCKED_FLAGS) {
+      const here = optionValues(head, flag)
+      const vals = optionValues(all, flag)
+      if (here.length !== 1 || !ok(here[0])) err(`the evals recipe line does not lock ${flag} (${here.join(', ') || 'absent'}) ahead of $(EVAL_ARGS)`)
+      else if (vals.length !== 1) err(`${flag} is given ${vals.length} times in the expanded evals recipe (${vals.join(', ')}); the last one wins, so only the locked one may appear`)
+    }
+    if (!/(^|\s)--no-publish(\s|$)/.test(head)) err('the evals recipe line does not lock --no-publish ahead of $(EVAL_ARGS)')
   }
   for (const f of FORBIDDEN_FLAGS) if (`${recipe} ${args}`.includes(f)) err(`the evals recipe or EVAL_ARGS passes ${f}`)
   return errors
@@ -722,8 +747,9 @@ test('a missing evals/ is one named error, not a thrown load', () => {
 
 const MK_PHONY = '.PHONY: test evals\n'
 const MK_TEST = 'test:\n\t@bash tests/run.sh\n'
-const MK_ARGS = 'EVAL_ARGS ?= --ablation none --model opus --judge-model opus --runs 1 --max-cost-usd 30 --no-publish --threshold 0\n'
-const MK_EVALS = 'evals:\n\tclaude plugin eval . $(EVAL_ARGS)\n'
+const MK_ARGS = 'EVAL_ARGS ?= --runs 1 --max-cost-usd 30 --threshold 0\n'
+const MK_LOCKED = 'claude plugin eval . --ablation none --model opus --judge-model opus --no-publish'
+const MK_EVALS = `evals:\n\t${MK_LOCKED} $(EVAL_ARGS)\n`
 const mk = (parts = {}) => {
   const p = { phony: MK_PHONY, pre: '', test: MK_TEST, mid: '', args: MK_ARGS, evals: MK_EVALS, post: '', ...parts }
   return p.phony + p.pre + p.test + p.mid + p.args + p.evals + p.post
@@ -745,9 +771,16 @@ test('Makefile control: every way to reach or weaken evals is a named (h) error'
     ['an unresolved reference', mk({ test: 'test:\n\techo $(UNDEFINED)\n' }), 'cannot resolve'],
     ['--allow-tools in the recipe', mk({ evals: 'evals:\n\tclaude plugin eval . --allow-tools Bash $(EVAL_ARGS)\n' }), '--allow-tools'],
     ['--scaffold in EVAL_ARGS', mk({ args: MK_ARGS.replace('--threshold 0', '--threshold 0 --scaffold') }), '--scaffold'],
-    ['EVAL_ARGS without --no-publish', mk({ args: MK_ARGS.replace(' --no-publish', '') }), 'lacks --no-publish'],
-    ['EVAL_ARGS without --model opus', mk({ args: MK_ARGS.replace(' --model opus', '') }), 'lacks --model opus'],
-    ['EVAL_ARGS judging with haiku', mk({ args: MK_ARGS.replace('--judge-model opus', '--judge-model haiku') }), 'lacks --judge-model opus'],
+    ['recipe without --no-publish', mk({ evals: MK_EVALS.replace(' --no-publish', '') }), 'lock --no-publish'],
+    ['--publish-report in EVAL_ARGS', mk({ args: MK_ARGS.replace('--threshold 0', '--threshold 0 --publish-report') }), '--publish-report'],
+    ['recipe without --model', mk({ evals: MK_EVALS.replace(' --model opus', '') }), 'lock --model'],
+    ['recipe judging with haiku', mk({ evals: MK_EVALS.replace('--judge-model opus', '--judge-model haiku') }), 'lock --judge-model'],
+    ['recipe with --ablation with-without', mk({ evals: MK_EVALS.replace('--ablation none', '--ablation with-without') }), 'lock --ablation'],
+    ['lock only in EVAL_ARGS', mk({ args: 'EVAL_ARGS ?= --ablation none --model opus --judge-model opus --no-publish --runs 1 --max-cost-usd 30\n', evals: 'evals:\n\tclaude plugin eval . $(EVAL_ARGS)\n' }), 'lock --model'],
+    ['a later --judge-model in EVAL_ARGS', mk({ args: MK_ARGS.replace('--threshold 0', '--threshold 0 --judge-model haiku') }), '--judge-model is given 2 times'],
+    ['--judge-model=haiku in EVAL_ARGS', mk({ args: MK_ARGS.replace('--threshold 0', '--threshold 0 --judge-model=haiku') }), '--judge-model is given 2 times'],
+    ['EVAL_ARGS += --model haiku', mk({ mid: 'EVAL_ARGS ?= --runs 1 --max-cost-usd 30\nEVAL_ARGS += --model haiku\n', args: '' }), '--model is given 2 times'],
+    ['--judge-model after $(EVAL_ARGS)', mk({ evals: `evals:\n\t${MK_LOCKED} $(EVAL_ARGS) --judge-model haiku\n` }), '--judge-model is given 2 times'],
     ['evals missing from .PHONY', mk({ phony: '.PHONY: test\n' }), '.PHONY lacks evals'],
     ['no evals rule', mk({ evals: '' }), 'no evals rule'],
     ['a tab line before any rule', mk({ phony: '\techo hi\n' + MK_PHONY }), 'no current rule'],
@@ -772,7 +805,8 @@ test('Makefile control: every way to reach or weaken evals is a named (h) error'
     ['X ::= a:b', mk({ pre: 'X ::= a:b\n' })],
     ['.PHONY: evals test, test first, evals last', mk({ phony: '.PHONY: evals test\n' })],
     ['SHELL := /bin/bash, .SHELLFLAGS := -ec', mk({ pre: 'SHELL := /bin/bash\n.SHELLFLAGS := -ec\n' })],
-    ['${EVAL_ARGS}', mk({ evals: 'evals:\n\t@claude plugin eval . ${EVAL_ARGS}\n' })],
+    ['${EVAL_ARGS}', mk({ evals: `evals:\n\t@${MK_LOCKED} \${EVAL_ARGS}\n` })],
+    ['an exact Opus id, = and quoted spellings', mk({ evals: 'evals:\n\tclaude plugin eval . --ablation=none --model claude-opus-5-5 --judge-model "opus" --no-publish $(EVAL_ARGS)\n' })],
   ]
   for (const [name, text] of positive) assert.deepEqual(checkMakefile(text, 'M'), [], name)
 })
