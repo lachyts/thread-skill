@@ -163,6 +163,18 @@ Reflections in a row (ADR 0037 d4, d6).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
+## Upgrading to 4.0.0
+
+4.0.0 renames one verb and changes one record:
+
+- **The scoring verb is `/thread:reflect` (ADR 0037).** It was renamed in
+  4.0.0 with no alias, so a saved prompt, macro or task resume prompt that
+  calls the previous name gets an unknown-skill error: point it at
+  `/thread:reflect`. Completion logs written before 4.0.0 offer the previous
+  name; read them as `/thread:reflect`.
+- **Tuning records are schema v2.** `tunings.jsonl` lines written by 4.0.0
+  carry the new fields; older lines still read.
+
 ## Upgrading to 3.0.0
 
 3.0.0 breaks anyone running rollouts:
