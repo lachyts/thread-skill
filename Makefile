@@ -52,7 +52,9 @@ release-check:
 #      --threshold 0 keeps a sub-1.0 case from failing the run.
 #   2. $(EVAL_ARGS), empty by default: e.g. `make evals EVAL_ARGS="--case status-*"`, or
 #      `EVAL_ARGS="--runs 3 --max-cost-usd 90"` to raise the defaults.
-#   3. Locks, last, so nothing in EVAL_ARGS can undo them:
+#   3. Locks, last, so a repeated --ablation, --model or --judge-model in EVAL_ARGS loses to them. A
+#      different option given on the command line on purpose (say --publish-report) is the operator's
+#      own act; the contract keeps every forbidden flag out of the EVAL_ARGS default:
 #      - --ablation none: a no-plugin arm can never fire a thread skill, so its delta means nothing here
 #        and it would double the cost. Every Skill grader sets `arm: both`.
 #      - --model opus --judge-model opus: every case and every LLM grader on Opus (the operator's Opus

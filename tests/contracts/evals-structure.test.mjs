@@ -485,20 +485,13 @@ function checkMakefile(text, file = 'Makefile') {
   if (!phony.includes('evals')) err('.PHONY lacks evals')
   const ev = rules.get('evals')
   if (!ev) { err('no evals rule'); return errors }
-  const unresolved = []
-  const recipe = ev.recipes.map((l) => expandMake(l, vars, unresolved)).join('\n')
-  for (const u of unresolved) err(`the evals recipe references ${u}, which this check cannot resolve`)
-  if (!recipe.includes('claude plugin eval')) err('the evals recipe does not run claude plugin eval')
   const lines = ev.recipes.map((l) => l.trim().replace(/^@/, '').replace('${EVAL_ARGS}', '$(EVAL_ARGS)'))
   if (lines.length !== 1 || lines[0] !== EVALS_RECIPE) err(`the evals recipe is not exactly: ${EVALS_RECIPE}`)
-  let args = ''
-  if (!vars.has('EVAL_ARGS')) err('EVAL_ARGS is not assigned')
-  else {
-    const u = []
-    args = expandMake(vars.get('EVAL_ARGS'), vars, u)
-    for (const x of u) err(`EVAL_ARGS references ${x}, which this check cannot resolve`)
-  }
-  for (const f of FORBIDDEN_FLAGS) if (`${recipe} ${args}`.includes(f)) err(`the evals recipe or EVAL_ARGS passes ${f}`)
+  // The pinned line holds no forbidden flag, so only the EVAL_ARGS default can carry one.
+  const u = []
+  const args = vars.has('EVAL_ARGS') ? expandMake(vars.get('EVAL_ARGS'), vars, u) : ''
+  for (const x of u) err(`EVAL_ARGS references ${x}, which this check cannot resolve`)
+  for (const f of FORBIDDEN_FLAGS) if (args.includes(f)) err(`EVAL_ARGS passes ${f}`)
   return errors
 }
 
@@ -742,12 +735,13 @@ test('Makefile control: every way to reach or weaken evals is a named (h) error'
     ['!= shell assignment', mk({ pre: 'X != claude plugin eval .\n', test: 'test:\n\t$(X)\n' }), 'mentions claude'],
     ['$(MAKE) evals', mk({ test: 'test:\n\t$(MAKE) evals\n' }), 'mentions claude, evals or make'],
     ['an unresolved reference', mk({ test: 'test:\n\techo $(UNDEFINED)\n' }), 'cannot resolve'],
-    ['--allow-tools in the recipe', mk({ evals: MK_EVALS.replace('$(EVAL_ARGS)', '--allow-tools Bash $(EVAL_ARGS)') }), '--allow-tools'],
+    ['--allow-tools in the recipe', mk({ evals: MK_EVALS.replace('$(EVAL_ARGS)', '--allow-tools Bash $(EVAL_ARGS)') }), 'not exactly'],
+    ['--allow-tools in EVAL_ARGS', mk({ args: 'EVAL_ARGS ?= --allow-tools Bash\n' }), '--allow-tools'],
     ['--scaffold in EVAL_ARGS', mk({ args: 'EVAL_ARGS ?= --scaffold\n' }), '--scaffold'],
     ['--publish-report in EVAL_ARGS', mk({ args: 'EVAL_ARGS ?= --publish-report\n' }), '--publish-report'],
     ['recipe without --no-publish', mk({ evals: MK_EVALS.replace(' --no-publish', '') }), 'not exactly'],
     ['recipe judging with haiku', mk({ evals: MK_EVALS.replace('--judge-model opus', '--judge-model haiku') }), 'not exactly'],
-    ['locks before $(EVAL_ARGS)', mk({ evals: 'evals:\n\tclaude plugin eval . --runs 1 --max-cost-usd 30 --threshold 0 --ablation none --model opus --judge-model opus --no-publish $(EVAL_ARGS)\n' }), 'not exactly'],
+    ['locks before $(EVAL_ARGS)', mk({ evals: `evals:\n\t${EVALS_RECIPE.replace(' $(EVAL_ARGS)', '')} $(EVAL_ARGS)\n` }), 'not exactly'],
     ['a second recipe line', mk({ evals: MK_EVALS + '\tclaude plugin eval . $(EVAL_ARGS)\n' }), 'not exactly'],
     ['a recipe variable after the locks', mk({ pre: 'POST ?=\n', evals: MK_EVALS.replace('--no-publish', '--no-publish $(POST)') }), 'not exactly'],
     ['evals missing from .PHONY', mk({ phony: '.PHONY: test\n' }), '.PHONY lacks evals'],
