@@ -47,8 +47,8 @@ release-check:
 # - The recipe line has three parts. The CLI keeps a repeated option's last value, so the order is the
 #   design:
 #   1. Defaults, first, so EVAL_ARGS may override them: --runs 1, --max-cost-usd 30, --threshold 0.
-#      30 is an estimate, a ceiling and never a target: the 3.1.0 record ran 4 lifecycle cases on Opus
-#      model and judge for $1.64, so the 23 cases come to about $10 (no full Opus run is recorded yet).
+#      30 is a ceiling, never a target: the first full Opus run, 23 cases at --runs 1, cost $6.56
+#      (docs/evals/2026-10-16-release-4-0.md).
 #      --threshold 0 keeps a sub-1.0 case from failing the run.
 #   2. $(EVAL_ARGS), empty by default: e.g. `make evals EVAL_ARGS="--case status-*"`, or
 #      `EVAL_ARGS="--runs 3 --max-cost-usd 90"` to raise the defaults.
