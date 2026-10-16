@@ -496,6 +496,8 @@ function checkMakefile(text, file = 'Makefile') {
     if (!/(^|\s)--no-publish(\s|$)/.test(args)) err('EVAL_ARGS lacks --no-publish')
     if (!/(^|\s)--max-cost-usd \d+(\.\d+)?(\s|$)/.test(args)) err('EVAL_ARGS lacks --max-cost-usd <number>')
     if (!/(^|\s)--runs [123](\s|$)/.test(args)) err('EVAL_ARGS lacks --runs 1|2|3')
+    if (!/(^|\s)--model opus(\s|$)/.test(args)) err('EVAL_ARGS lacks --model opus')
+    if (!/(^|\s)--judge-model opus(\s|$)/.test(args)) err('EVAL_ARGS lacks --judge-model opus')
   }
   for (const f of FORBIDDEN_FLAGS) if (`${recipe} ${args}`.includes(f)) err(`the evals recipe or EVAL_ARGS passes ${f}`)
   return errors
@@ -720,7 +722,7 @@ test('a missing evals/ is one named error, not a thrown load', () => {
 
 const MK_PHONY = '.PHONY: test evals\n'
 const MK_TEST = 'test:\n\t@bash tests/run.sh\n'
-const MK_ARGS = 'EVAL_ARGS ?= --ablation none --runs 1 --max-cost-usd 5 --no-publish --threshold 0\n'
+const MK_ARGS = 'EVAL_ARGS ?= --ablation none --model opus --judge-model opus --runs 1 --max-cost-usd 30 --no-publish --threshold 0\n'
 const MK_EVALS = 'evals:\n\tclaude plugin eval . $(EVAL_ARGS)\n'
 const mk = (parts = {}) => {
   const p = { phony: MK_PHONY, pre: '', test: MK_TEST, mid: '', args: MK_ARGS, evals: MK_EVALS, post: '', ...parts }
@@ -744,6 +746,8 @@ test('Makefile control: every way to reach or weaken evals is a named (h) error'
     ['--allow-tools in the recipe', mk({ evals: 'evals:\n\tclaude plugin eval . --allow-tools Bash $(EVAL_ARGS)\n' }), '--allow-tools'],
     ['--scaffold in EVAL_ARGS', mk({ args: MK_ARGS.replace('--threshold 0', '--threshold 0 --scaffold') }), '--scaffold'],
     ['EVAL_ARGS without --no-publish', mk({ args: MK_ARGS.replace(' --no-publish', '') }), 'lacks --no-publish'],
+    ['EVAL_ARGS without --model opus', mk({ args: MK_ARGS.replace(' --model opus', '') }), 'lacks --model opus'],
+    ['EVAL_ARGS judging with haiku', mk({ args: MK_ARGS.replace('--judge-model opus', '--judge-model haiku') }), 'lacks --judge-model opus'],
     ['evals missing from .PHONY', mk({ phony: '.PHONY: test\n' }), '.PHONY lacks evals'],
     ['no evals rule', mk({ evals: '' }), 'no evals rule'],
     ['a tab line before any rule', mk({ phony: '\techo hi\n' + MK_PHONY }), 'no current rule'],

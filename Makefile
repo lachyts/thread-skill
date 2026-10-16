@@ -51,8 +51,13 @@ release-check:
 #   clear it before `claude plugin update`: the `./` directory source copies ignored files into the
 #   version cache. `make release-check` refuses while it holds output, and its stray check fails on any
 #   copy that reached the cache.
+# - --model opus --judge-model opus: every case and every LLM grader runs on Opus (the operator's Opus
+#   lock; `claude plugin eval` judges with Haiku by default, which failed three lifecycle cases on the
+#   judge alone in the 3.1.0 record, docs/evals/2026-10-15-release-3-1.md).
+# - --max-cost-usd 30: covers all 19 cases on Opus with headroom (the 3.1.0 suite on the defaults hit
+#   the old 5-dollar ceiling at 17 of 19). It is a ceiling, never a target.
 # - Override e.g. `make evals EVAL_ARGS="--runs 3 --no-publish"`. An override replaces the whole
-#   default, so repeat `--ablation none --max-cost-usd 5` to keep them.
-EVAL_ARGS ?= --ablation none --runs 1 --max-cost-usd 5 --no-publish --threshold 0
+#   default, so repeat `--ablation none --model opus --judge-model opus --max-cost-usd 30` to keep them.
+EVAL_ARGS ?= --ablation none --model opus --judge-model opus --runs 1 --max-cost-usd 30 --no-publish --threshold 0
 evals:
 	claude plugin eval . $(EVAL_ARGS)
