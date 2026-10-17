@@ -3,6 +3,11 @@
 Date: 2026-10-15
 Status: accepted, not built (amends ADR 0032 decisions 3 and 5 and its objective; grilled with
 Lachy 2026-10-15 in `/thread:orient` on the Thread Skill repo)
+*(Amended 2026-10-17 by thread-skill-p22-7: d5's decision task also carries a held trade or caution,
+the knob d1 leaves to Lachy. "A rule proposal, or a Watch to confirm, goes into one vault task" reads
+"A rule proposal, a Watch to confirm beside it, or a held trade goes into one vault task", and "A
+quiet week writes only its record line" reads "...its record line, and the decision task a held trade
+needs". d6's quiet definition and the cadence are unchanged.)*
 
 ## Context
 
