@@ -1,11 +1,12 @@
 // The queue is the only rollout (ADR 0030: one engine, no alias; p12-12). Nothing of the retired grouped
 // rollout survives in code or docs except what this file lists, and every surviving mention is pinned by
-// file, pattern and a maximum, in one of five categories:
+// file, pattern and a maximum, in one of six categories:
 //   refusal         names a retired form in order to refuse it;
 //   migration       ADR 0030's strip of the legacy `wave:` task key, still on open vault tasks;
 //   history         a record of what was (the glossary's retired entry, the README's lineage);
 //   enforcement     a ban regex, a control or a negative assertion (test files only);
-//   legacy fixture  a protocol-3 input a test migrates (test files only).
+//   legacy fixture  a protocol-3 input a test migrates (test files only);
+//   port            a test's copy of another repo's reader, which still reads the retired line (test files only).
 //
 // (a) The task's Verify regex has no hit over skills/ (tests included), hooks/ and README.md.
 // (b) Product files (skills/** outside skills/*/tests/, hooks/**, README.md, CONTEXT.md, .claude-plugin/*.json):
@@ -58,6 +59,7 @@ const TESTS = [
   { id: 'T7', file: 'tests/contracts/schedule-queue.test.mjs', count: 22, why: 'enforcement' },
   { id: 'T8', file: 'tests/contracts/status-repair-queue.test.mjs', count: 10, why: 'enforcement' },
   { id: 'T9', file: 'tests/fixtures/reconcile/vault/Work/Tasks/Archive/Rollouts/demo-rollout-2026-01-10.md', count: 1, why: 'legacy fixture (an archived Completion log)' },
+  { id: 'T10', file: 'tests/contracts/close-handoff-chorus-words.test.mjs', count: 5, why: 'port (Chorus summarise.py\'s lead-line readers: their names in the header, WAVE_STATUS, the drift check\'s Python call)' },
 ]
 
 const SKILL_TESTS = /^skills\/[^/]+\/tests\//
