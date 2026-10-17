@@ -212,8 +212,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Vault grammar** — the phase/task filename pattern (whole or fractional phase
   numbers, `p3`, `p3.5`) and the status sets (landed, active, review, hold, in
   flight) the vault's readers classify by, defined once in
-  `skills/_shared/vault-grammar.md` (its § Readers names the readers not yet
-  adopted). _Avoid_: naming scheme.
+  `skills/_shared/vault-grammar.md` (its § Readers lists every reader).
+  _Avoid_: naming scheme.
 - **Reshuffle** — the usual reason a project is picked up after time away:
   re-examine *all* its open work (stray bugs, brain dumps, loose tasks and
   unstarted phases alike), rethink what the next steps are, and leave it
