@@ -551,9 +551,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: clean run, empty retro.
 - **Decision task** — the one open vault task tagged `decisions` that the
   weekly reading writes for the next morning when it has a rule proposal
-  (ADR 0037 d5): Lachy decides it at the top of a run
-  (`/thread:reflect --decide`); schedule, the reshuffle and orient's batches
-  never take it. _Avoid_: inbox, review queue.
+  or a held trade (a knob ADR 0037 d1 leaves to Lachy; ADR 0037 d5): Lachy
+  decides it at the top of a run (`/thread:reflect --decide`); schedule,
+  the reshuffle and orient's batches never take it. _Avoid_: inbox, review
+  queue.
 - **Rollout settings** — the operator's `~/.config/thread/rollouts.toml`,
   `ladder.toml`'s sibling: `[defaults]`, the `[guardrails]` bounds and
   per-repo `[repo."owner/name"]` tables (keyed by the GitHub origin),
