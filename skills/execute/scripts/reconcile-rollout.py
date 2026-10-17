@@ -37,8 +37,9 @@ Subcommands:
               while anything starts, restarts, runs, awaits Integration or integrates; otherwise the first of
               "git-env", "paused", "empty", "complete" (or "done"), "awaiting-sign-off" and "stuck". With every
               task merged, `halt` is "complete" (run the completion ceremony), or "done" when the ceremony already
-              ran (p19-14: the rollout note reads `status: done` and sits in `Archive/Rollouts/`), so no entry
-              runs it twice; a done note still in Work/Tasks/ is an interrupted ceremony and stays "complete".
+              ran through its archive move (p19-14: the rollout note reads `status: done` and sits in
+              `Archive/Rollouts/`), so no entry runs it twice (the lead's `done` route runs only its last step,
+              the thread close); a done note still in Work/Tasks/ is an interrupted ceremony and stays "complete".
               "awaiting-sign-off" (ADR 0034) replaces "stuck" only when every unlanded task of the rollout waits on
               a gate alone: W starts as the set-aside rows at `gate` (a race-held one reads `race`, so it never
               counts), then gains, to a fixpoint, each queued row whose every unsatisfied dependency resolves
@@ -2257,11 +2258,13 @@ def _set_aside_entry(r) -> dict:
 
 
 def _ceremony_done(rollout_path: Path, rollout_note) -> bool:
-    """True when the rollout's completion ceremony already ran to its end (p19-14): the note reads `status: done`
-    and sits in an `Archive/Rollouts/` directory, where the ceremony's last step moves it. `next` then halts "done",
-    never "complete", so no entry (repair's hand-off included) runs the ceremony a second time. A done note still
-    in Work/Tasks/ is an interrupted ceremony (stamped, never moved), so it stays "complete" and a re-entry finishes
-    it. The path is made absolute first, so a relative `--rollout` given from inside the archive still reads."""
+    """True when the rollout's completion ceremony already ran through its archive move (p19-14): the note
+    reads `status: done` and sits in an `Archive/Rollouts/` directory, where that move puts it, the step before
+    the ceremony's last (the thread close, which the lead's `done` route still runs: nothing on disk says it
+    ran). `next` then halts "done", never "complete", so no entry (repair's hand-off included) runs the rest of
+    the ceremony a second time. A done note still in Work/Tasks/ is an interrupted ceremony (stamped, never
+    moved), so it stays "complete" and a re-entry finishes it. The path is made absolute first, so a relative
+    `--rollout` given from inside the archive still reads."""
     parent = rollout_path.absolute().parent
     return (_status(rollout_note) == "done"
             and parent.name == "Rollouts" and parent.parent.name == "Archive")

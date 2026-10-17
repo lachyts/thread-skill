@@ -261,7 +261,8 @@ escalate it (§ 3c). Under a pause or a live queue, report it and leave it: the 
 `- <YYYY-MM-DD> repair: [[<slug>]] merged, never marked: flipped done (PR <url>); rollout already complete, no hand-off`,
 since no second ceremony copies it into a Completion log. Execute's loop would otherwise re-run that ceremony (a
 second Completion log, thread close, cron delete and archive move); its own idempotence guard, `next`'s `halt:
-"done"` on a done, archived note (execute § 4.5 step 5), is the backstop, never the route. A done note still in
+"done"` on a done, archived note (execute § 4.5 step 5), is the backstop, never the route (its `done` route still
+runs the thread close, the ceremony's one step after the archive commit). A done note still in
 `Work/Tasks/` is a ceremony interrupted before its archive move: say so, and point at `/thread:execute [[<rollout>]]`,
 which finishes it. A complete rollout whose note does not read done (its lead ended before the ceremony) is no stop:
 § 4's hand-off runs, `next` halts `complete`, and the ceremony it never ran is the hand-off's only work.

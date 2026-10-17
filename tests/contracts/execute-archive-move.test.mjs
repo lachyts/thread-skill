@@ -88,7 +88,7 @@ function checkArchive(files) {
 
   // signoff: the sign-off form's vault commit is by pathspec too, and names a `tracked` follow-on move-back's old path.
   const signoff = files.execute.split('\n')
-    .find((l) => l.startsWith("   - `/thread:close`, as above; then the heartbeat's `CronDelete`; then the vault commit")) ?? ''
+    .find((l) => l.startsWith("   - the heartbeat's `CronDelete`; then the vault commit")) ?? ''
   if (!signoff.includes('by pathspec as the full ceremony\'s, never the whole vault') ||
     !signoff.includes("plus the follow-on's old `Work/Tasks/Archive/**` path when *Existing follow-on* moved it back and printed `tracked`") ||
     !existing.includes("which the archive commit below (or the sign-off form's vault commit) must name")) fails.push('signoff')

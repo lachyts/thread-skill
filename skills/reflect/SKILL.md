@@ -70,7 +70,9 @@ root's git (commit messages, `docs/reviews/` and `git blame`), never fetched. By
 `reflections.jsonl` and the contract (above) too, and writes: `reflections.jsonl` through reflect.py; a bug task and
 the decision task under `~/repos/obsidian/Work/Tasks/`; the decision task's one line on its day page (task-writer
 § 3b); `tunings.jsonl` lines only through tune.py's `--auto` and `--revert`; and `call-journal` lines through
-`span --fold`. Its scratch dir is `/tmp/thread-reflect-week-<YYYY-MM-DD>/`. Neither form makes a git write or a PR.
+`span --fold`. Its scratch dir is `/tmp/thread-reflect-week-<YYYY-MM-DD>/`. `--decide` writes `watch-raised` lines
+through `reflect.py raised` and a `moot` line in the decision task through `reflect.py moot`, and marks the task done.
+Neither form makes a git write or a PR.
 
 ## Invocation forms
 
@@ -234,9 +236,9 @@ change a live rollout, Lachy edits its note.
 `/thread:reflect --weekly` reads every rollout since the last weekly Reflection, on its own, once a week (ADR 0037
 d4), or once a fortnight on a quiet streak (d6): the scripts score and sweep, the model traces each cost to its rule,
 and the writers record the outcome. It lands a bug task, an agreed knob or a knob's revert unasked (ADR 0037 d5); a
-rule proposal, and any Watch to confirm beside it, goes into one decision task for Lachy's next morning. Every write
-goes through `reflect.py` or tune.py, each idempotent, so a reading that dies part-way is finished by running the
-remaining steps against the same `span.json`.
+rule proposal (with any Watch to confirm beside it) or a held trade (a knob ADR 0037 d1 leaves to Lachy) goes into one
+decision task for Lachy's next morning. Every write goes through `reflect.py` or tune.py, each idempotent, so a reading
+that dies part-way is finished by running the remaining steps against the same `span.json`.
 
 What starts it is the daily sweep, which asks each day:
 
@@ -305,9 +307,19 @@ For each rollout, read its `friction` items, of seven kinds (`ask`, `set-aside`,
   `inWindow` is true: an Escape counts in the week it surfaced, against the rollout that landed the work.
 - A `churn` item is a review round that only answered the last round's fix (execute § 5): trace what the fix broke.
 
-For each `set-aside` item whose `movedBy` is `unrecorded`, open its `taskNote` and read its `## Needs you` and
-`## Integration log`; trace the Human fix you find there (ADR 0035) like a mid-run ask; when neither says what moved
-it, name it as unexplained.
+For each `set-aside` item whose `movedBy` is `unrecorded`, read what its `explainedIn` names: its `taskNote`'s
+`## Needs you` and `## Integration log`, a gate set-aside's `## Approved gates`, and the rollout note's `## Notes`
+lines that name the task; then its lines in the Run record (`mover` is the line that moved it on: a `slot-taken`
+`start` of `resume` is a signed-gate or Lost-call resume, one of `hand-back` a restart after a hand-back or a sign-off).
+
+- An `## Approved gates: standing approval` entry (a line ending `(approved <date> under the standing approval: …)`)
+  is a gate the Standing approval signed (ADR 0034), not Lachy: report it as what moved the task, never trace it as
+  his ask.
+- An `## Approved gates: sign-off` entry (a bare `(approved <date>)`) is Lachy's sign-off with no `gate-signed` line:
+  trace it as a sign-off `ask`.
+- A Human fix (ADR 0035) in `## Needs you`, `## Integration log` or the rollout note's `## Notes` is traced like a
+  mid-run ask.
+- When none of them says what moved it, name it as unexplained.
 
 Each item becomes a sighting (step 12), a bug (step 13), a knob (score.py's only: never invent one) or nothing,
 named with why. Read `freshReview` and `cannotShow` as reported, not traced. A `closed with no close line` flag is
@@ -355,21 +367,27 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py knobs --span /tm
 line, and a repo's land items all come from its newest rollout's file. `knobs` runs once, after them. Report every exit
 verbatim: an `applied` line, a `held <key>: <reason>` line (`agreement 1 of 3`, say; a key this Reflection's revert
 moved is held `Reflection <id> already moved <key>`), a refusal (exit 2) or a write failure (exit 1). Never `--pick`,
-`--record-only` or `--close`, and never edit `rollouts.toml`.
+`--record-only` or `--close`, and never edit `rollouts.toml`. A `held <key>: a trade (...): Lachy decides` or
+`held <key>: a caution: Lachy decides` line is a held trade (ADR 0037 d1): the weekly reading never lands it, and
+step 15's `decide` puts it in the decision task.
 
 ### 15. Decide
 
 Write `/tmp/thread-reflect-week-<YYYY-MM-DD>/decisions.json`, `{"<watch id>": {"why": "...", "amends": "..."}}`,
-one entry per recurring Watch: why it matters, and the rule it would amend. Then:
+one entry per recurring Watch: why it matters, and the rule it would amend; with no recurring Watch, write `{}`. Then:
 
 ```
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py decide --span /tmp/thread-reflect-week-<YYYY-MM-DD>/span.json --decisions /tmp/thread-reflect-week-<YYYY-MM-DD>/decisions.json
 ```
 
-It writes a decision task only with a rule proposal: a week with Watches to confirm alone writes none, and they
-wait. The task is scheduled for the next Melbourne morning, conversation-gated, and orient's audit lists it (orient
-§ 2). Put its line on its `scheduled:` day's page by task-writer § 3b; when `decide` printed `(was <date>)`, move the
-line from the old day's page.
+It writes a decision task only with a rule proposal or a held trade: a week with Watches to confirm alone writes none,
+and they wait (a task a held trade alone writes lists none). A held trade is listed once per (knob id, `from`): one an
+open decision task already lists gets a `## Still open` line; one a done decision task lists was decided there, and
+`decide` prints `trade <kid> at <from>: decided in [[<slug>]]` and never offers it at that `from` again; one only a
+dropped task lists, or one recorded moot, is offered again. A trade on a key this Reflection's revert moved waits for
+the next reading (`a revert of <key> comes first this Reflection`). The task is scheduled for the next Melbourne
+morning, conversation-gated, and orient's audit lists it (orient § 2). Put its line on its `scheduled:` day's page by
+task-writer § 3b; when `decide` printed `(was <date>)`, move the line from the old day's page.
 
 ### 16. Close
 
@@ -381,16 +399,17 @@ Exactly once, quiet weeks included: its line is the Reflection's record, and its
 0037 d6). Three quiet readings in a row move the reading to fortnightly (`cadence` 14), and any that is not quiet
 moves it back to weekly (7). The cadence is derived from the `quiet` flags: `close` writes it on its line for the
 record (what it was then), and its outcome line ends `cadence <old> -> <new>` when it changes. A quiet week writes
-only record lines, never a vault task. Every writer refuses a closed Reflection, so `close` refuses first (exit 2,
-nothing written) while step 14's `knobs` or step 15's `decide` has a line to write: run the step its stderr line
-names, then close.
+only record lines, and no vault task but the decision task a held trade needs (step 15): a held trade is no rule
+proposal, so it leaves the week quiet. Every writer refuses a closed Reflection, so `close` refuses first (exit 2,
+nothing written) while step 14's `knobs` or step 15's `decide` has a line to write (a knob line, a rule line, or a
+held trade no decision task lists for this Reflection): run the step its stderr line names, then close.
 
 ### 17. Report, then tidy
 
 Report the rollouts read (and the escapes-only and repairs-only ones), each trace and what it became, the Watches
 written (and any `extended` line), the bugs filed or found, each knob landed, reverted or held with its reason, the
-decision task (or none), the close line's counts and `quiet`, the `cannotShow` list and every flag. Then `rm -rf
-/tmp/thread-reflect-week-<YYYY-MM-DD>`.
+decision task (or none), with each held trade it lists, found decided or skipped behind a revert, the close line's
+counts and `quiet`, the `cannotShow` list and every flag. Then `rm -rf /tmp/thread-reflect-week-<YYYY-MM-DD>`.
 
 ## Deciding the decision task
 
@@ -404,13 +423,30 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py raised --watch <
 - **A yes to a rule item**: `raised` plain, then file the rule's grill task (task-writer § 4: a grill and an ADR
   before any build).
 - **A yes to a Watch to confirm**: the same with `--confirmed`, then the grill task.
-- **A no**: the same with `--declined`. It records his no and closes the Watch's cycle, so the pattern is proposed
-  again only when two later rollouts show it afresh, never next week from the same evidence.
+- **A no to a rule item or a Watch to confirm**: the same with `--declined`. It records his no and
+  closes the Watch's cycle, so the pattern is proposed again only when two later rollouts show it afresh, never next
+  week from the same evidence.
+- **A yes to a trade** (a `- trade` item): run `/thread:reflect [[<rollout>]]`, the item's by-hand Reflection (steps
+  1–8). At step 6 his yes is the score's proposal with the item's key and rule, and step 7's `--pick` applies it;
+  tune.py's line is the record.
+- **A yes that cannot apply**: the fresh score no longer proposes that key and rule, or tune.py refuses a stale
+  `from` (step 7 then runs `--record-only`). The item is answered, moot: record why with the `moot` command below. A
+  moot trade is not decided: the next weekly reading that holds it offers it again, at its new `from` when the value
+  moved, or at the same one.
+- **A no to a trade**: nothing to run. Its `- trade` line is the record once the task is done, and `decide` never
+  offers that trade at that `from` again.
 - **Not now, or not reached**: nothing. The Watch stays open, and the next weekly reading lists it under `## Still
-  open`.
+  open`; a held trade stays listed, and the next weekly reading that holds it adds a `## Still open` line.
+
+A yes that cannot apply, recorded under the item's own `## Reflection <id>` section:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py moot --task <slug> --trade <knob id> --from <from> --why "<the tune script's refusal, or: the fresh score no longer proposes it>"
+```
 
 Then mark the task done (`status: done` and `completed: <Melbourne today>`) only once every item it lists has had a
-yes or a no (each `raised` printed `raised` or `exists`). An item left open keeps the task open.
+yes or a no (each `raised` printed `raised` or `exists`; each trade's yes went through tune.py or `moot` printed `moot`
+or `exists`). An item left open keeps the task open.
 
 ## What the record cannot show
 
@@ -445,8 +481,11 @@ yes or a no (each `raised` printed `raised` or `exists`). An item left open keep
 - A repair run that writes no dated `repair:` line in the rollout note's `## Notes` and records no event is not seen
   by the weekly reading, nor is a `repair:` line on a rollout with no Run record (one that never ran): the repair
   lines are swept from the notes of the rollouts the record holds.
-- A Human fix (ADR 0035) has no event of its own: the weekly reading sees it only as a set-aside whose `movedBy` is
-  `unrecorded`, and then its `## Needs you` and `## Integration log` say what moved it, or nothing does.
+- A Human fix (ADR 0035) has no event of its own, nor does a gate signed on the note with no `gate-signed` line (one
+  signed before p21-2's events, by Lachy or the Standing approval, or written by hand): the weekly reading sees
+  either only as a set-aside whose `movedBy` is `unrecorded`, and then its task note's `## Needs you`,
+  `## Integration log` and `## Approved gates`, the rollout note's `## Notes` and its Run record lines (`mover`) say
+  what moved it, or nothing does.
 - /fresh-review churn names no rollout (`reviews.jsonl` carries none): the weekly reading reports it (`freshReview`)
   and traces none of it.
 - The Escapes sweep misses a record with no rollout note or Project root and a repo with no GitHub origin (both in
@@ -462,6 +501,14 @@ yes or a no (each `raised` printed `raised` or `exists`). An item left open keep
 - A single-rollout Watch is offered only beside a rule proposal, but still makes the week not quiet when it is new.
 - A declined Watch seen again in one rollout is neither new nor offered: it returns only when two later rollouts show
   it.
+- Lachy's no to a held trade is recorded only by a done decision task's `- trade` line, never in `reflections.jsonl`:
+  a decision task dropped unanswered decides nothing, so its trades are offered again while they are held; a task
+  marked done with a trade unanswered reads as his no; and a hand edit that removes a `- trade` line forgets the no. A
+  no holds for that (knob id, `from`) whatever later rollouts show, unlike a declined Watch, which returns when two
+  later rollouts show it afresh: the trade is offered again only once its value moves to a new `from`.
+- A held trade on a partial window is held `partial window`, so it reaches the decision task only in a later week
+  that reads the rollout whole; one on a rollout with no repo, note or settings is never a knob candidate, so it is
+  never offered.
 - A knob's revert does not by itself make a reading not quiet: the contract's quiet reading also has no revert, but
   `close`'s `quiet` counts new Watches, rule proposals, bugs and Guardrail breaches only, and the breach behind a
   revert counts only on a rollout whose run ended in the window (reflect.py's header).
@@ -479,8 +526,10 @@ yes or a no (each `raised` printed `raised` or `exists`). An item left open keep
   `--record-only` (step 7), and never ends the Reflection without a line.
 - By hand, don't pick for Lachy or treat a proposal's `agreeing` count as a pick; the weekly reading lands a knob only
   through `tune.py --auto` (ADR 0037 d5), never a rule.
-- Don't write a decision task for Watches to confirm alone: they wait for a rule proposal.
+- Don't write a decision task for Watches to confirm alone: they wait for a rule proposal, and a task a held trade
+  alone writes lists none.
 - Don't re-run step 10 after a write: a new span is a new Reflection.
 - Never overwrite or edit a done task: reflect.py creates a note by exclusive create and refuses a taken path.
 - Never write a close line from the weekly reading: `--close` is close-score.py's alone (ADR 0037 d4).
-- Never decide a rule item during a run, and never schedule, batch or reshuffle the decision task.
+- Never decide a rule item or a held trade during a run (the weekly reading never `--pick`s), and never schedule,
+  batch or reshuffle the decision task.
