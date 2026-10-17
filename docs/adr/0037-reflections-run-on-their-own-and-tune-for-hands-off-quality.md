@@ -1,8 +1,10 @@
 # 0037 — Reflections run on their own and tune for hands-off quality
 
 Date: 2026-10-15
-Status: accepted, not built (amends ADR 0032 decisions 3 and 5 and its objective; grilled with
-Lachy 2026-10-15 in `/thread:orient` on the Thread Skill repo)
+Status: accepted, the plugin half built by P21 (#144–#150) and shipped in 4.0.0; the workspaces half (d4's
+daily-sweep trigger, p21-9, and d7's `fixes:` key in the shared /add writer, p21-5) landed in
+claude-workspaces PR #5 (amends ADR 0032 decisions 3 and 5 and its objective; grilled with Lachy 2026-10-15 in
+`/thread:orient` on the Thread Skill repo)
 
 ## Context
 

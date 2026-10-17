@@ -57,7 +57,7 @@ test('ADR 0023 exists once, accepted, superseding ADR 0010, in the house format'
   const files = walk('docs/adr').filter((f) => /^docs\/adr\/0023-[^/]*\.md$/.test(f))
   assert.equal(files.length, 1, `expected exactly one docs/adr/0023-*.md, found ${JSON.stringify(files)}`)
   const t = read(files[0])
-  assert.match(t, /^Status: accepted \(supersedes ADR 0010; amends ADR 0003\)/m)
+  assert.match(t, /^Status: accepted, shipped in 3\.1\.0\b[^(\n]*\(supersedes ADR 0010; amends ADR 0003\)/m)
   for (const h of ['Context', 'Decision', 'Rejected', 'Consequences']) {
     assert.match(t, new RegExp(`^## ${h}$`, 'm'), `ADR 0023 has no ## ${h}`)
   }
