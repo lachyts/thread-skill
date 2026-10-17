@@ -3,7 +3,9 @@
 // already continues in another session", so the model invented one, and Lachy could not tell whether "leave it"
 // meant archiving the thread, archiving the session or doing nothing. The fix names the move outright:
 //
-//   - step 1 detects the case (a consumed or consumer-deleted handoff doc, or a live session holding the thread);
+//   - step 1 detects the case (a consumed or consumer-deleted handoff doc, or a live session holding the thread,
+//     the handoff's own started successor included) and, in a bullet of its own, the own branch every close
+//     option names;
 //   - step 3 recommends **Archive this session** (not a route: nothing is written, the THREAD.md stays active),
 //     drops keep going, handoff, stash and defer while another session holds the thread, and says why close
 //     stays on the menu although it still writes to what the other session holds;
@@ -14,8 +16,11 @@
 //   - § Don't bans the bare "Leave it" / "Keep thread" labels.
 //
 // Two pure checks, nextFails and contextFails, each returning a failure list: the real files and the controls
-// run through them, so a control proves its pin is not vacuous. Every line pin finds its line inside its own step
-// slice, so a moved line fails. Phrase checks run on collapsed text. Reads files only.
+// run through them, so a control proves its pin is not vacuous. Every numbered pin has at least one control that
+// breaks it and expects its failure: P1 (M), P1b (N), P2 (E, G), P2b (H), P3 (I), P4 (A, B, C, D, L, L2), P5 (O),
+// P6 (A, B, B2), P7 (F), P8 (P, Q), P9 (J), P10 (K). A control breaks one phrase or line of its pin, not every
+// phrase the pin lists. Every line pin finds its line inside its own step slice, so a moved line fails. Phrase
+// checks run on collapsed text. Reads files only.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { collapse, lineOf, read, slice } from '../lib/contract-text.mjs'
@@ -32,12 +37,15 @@ const DONT_WORDS = "- Don't label an option"
 const DONT_MOVES = "- Don't recommend or offer keep going"
 
 const DETECT = /^\s*- \*\*Whether the work continues in another session\*\*/
+const OWN_BRANCH = /^\s*- \*\*This session's own branch\*\*/
 const ARCHIVE_ROUTE = /^\s*- \*\*Archive this session\*\*/
 const CLOSE_ROUTE = /^\s*- \*\*`close`\*\*/
 const HOLDS = /^\s*\*\*While another session holds the thread\.\*\*/
 const MENU_LEAD = /^\s*\*\*The archive menu\.\*\*/
 const ARCHIVE_OPTION = /^\s*- label `Archive this session \(Recommended\)`/
 const CLOSE_OPTION = /^\s*- label `Close`/
+const OPTION_LABEL = /^\s*- label `([^`]*)`/
+const MENU_LABELS = [ARCHIVE_LABEL, 'Close']
 const DISPATCHED = /^\s*\*\*Archive this session, dispatched\.\*\*/
 const LEAVE = /\bleave it\b/i
 const KEEP = /\bkeep (the )?thread\b/i
@@ -77,10 +85,18 @@ function nextFails(text) {
   }
   if (fails.length) return fails
 
-  // P1 — step 1 reads whether the work continues elsewhere, and what a close would land.
+  // P1 — step 1 reads whether the work continues elsewhere, as one rule: a successor the handoff itself started
+  // counts whatever its doc reads, and nothing else does.
   needLine(fails, 'P1 step-1 detection bullet', lineOf(s1, DETECT), [
-    'status: consumed', 'deleted', 'another live session', 'Chorus Stage', '`pending`', 'close § The own branch',
+    'status: consumed', 'deleted', 'another live session', "the Chorus Stage's session list shows it",
+    'the handoff itself started the successor (the Chorus Stage, or the native task in Codex Desktop)',
+    'whatever its doc still reads', 'Nothing else counts', 'a doc still `pending` whose successor the handoff never started',
     '**Run from:**',
+  ])
+
+  // P1b — the own-branch fact, in a step-1 bullet of its own, so every menu's close option gets it.
+  needLine(fails, 'P1b step-1 own-branch bullet', lineOf(s1, OWN_BRANCH), [
+    'close § The own branch', 'Every menu', "the normal menu's as well as the archive menu's",
   ])
 
   // P2 — the step-3 Archive bullet alone: the compact paragraph's own "not a route" cannot satisfy it.
@@ -101,23 +117,26 @@ function nextFails(text) {
     'with no THREAD.md',
   ])
 
-  // P4 — the archive menu: exactly two options, Archive (recommended) first, each saying what it does.
+  // P4 — the archive menu: exactly two options, Archive (recommended) first, each saying what it does. The
+  // options are every list item from the lead to the next blank line, so a third one fails wherever it sits.
   const s4lines = s4.split('\n')
   const lead = s4lines.findIndex((l) => MENU_LEAD.test(l))
   if (lead < 0) fails.push('P4 archive menu: no **The archive menu.** line')
-  else need(fails, 'P4 archive menu lead', C(s4lines[lead]), ['exactly two options'])
-  const arch = s4lines.findIndex((l) => l.includes('label `' + ARCHIVE_LABEL + '`'))
-  const close = s4lines.findIndex((l) => l.includes('label `Close`'))
-  if (arch < 0) fails.push(`P4 archive menu: no label \`${ARCHIVE_LABEL}\` option`)
-  else need(fails, 'P4 archive option', C(s4lines[arch]), [
-    'Nothing is written.', 'The thread stays active in', 'archive this chat on the Stage', 'Codex Desktop',
-  ])
-  if (close < 0) fails.push('P4 archive menu: no label `Close` option')
-  else need(fails, 'P4 close option', C(s4lines[close]), [
-    CLOSE_DESC, 'queues its merge', 'is building on', 'With no THREAD.md',
-  ])
-  if (lead >= 0 && arch >= 0 && close >= 0 && !(lead < arch && arch < close)) {
-    fails.push('P4 archive menu: the options are not lead, then Archive (Recommended), then Close')
+  else {
+    need(fails, 'P4 archive menu lead', C(s4lines[lead]), ['exactly two options'])
+    const end = s4lines.findIndex((l, i) => i > lead && l.trim() === '')
+    const items = s4lines.slice(lead + 1, end < 0 ? undefined : end).filter((l) => /^\s*- /.test(l))
+    const labels = items.map((l) => l.match(OPTION_LABEL)?.[1] ?? l.trim())
+    if (JSON.stringify(labels) !== JSON.stringify(MENU_LABELS)) {
+      fails.push(`P4 archive menu options: ${JSON.stringify(labels)}, not ${JSON.stringify(MENU_LABELS)}`)
+    } else {
+      need(fails, 'P4 archive option', C(items[0]), [
+        'Nothing is written.', 'The thread stays active in', 'archive this chat on the Stage', 'Codex Desktop',
+      ])
+      need(fails, 'P4 close option', C(items[1]), [
+        CLOSE_DESC, 'queues its merge', 'is building on', 'With no THREAD.md',
+      ])
+    }
   }
 
   // P5 — the vocabulary rule, scoped to wording Lachy reads and tied to CONTEXT.md's **Thread** entry.
@@ -156,6 +175,10 @@ function nextFails(text) {
   return fails
 }
 
+const ROUTER_ENTRY = /^- \*\*Router \(`next`\)\*\*/
+const ROUTER_ARCHIVE = 'it recommends **archive this session** instead, which writes nothing and is never a route either.'
+const ROUTER_COMPACT = 'compact is a recommendation inside keep going, never a route.'
+
 function contextFails(text) {
   const fails = []
   // P9 — the **Thread** entry records the user-facing convention and keeps its agent-facing senses.
@@ -163,9 +186,10 @@ function contextFails(text) {
     'user-facing', '**session** names the live conversation', '**thread** the durable work its THREAD.md records',
     'Agent-facing prose keeps the two senses', 'must never be confused in skill prose',
   ])
-  // P10 — the **Router (`next`)** entry names the move, which is never a route either.
-  need(fails, 'P10 CONTEXT **Router (`next`)** entry', C(slice(text, /^- \*\*Router \(`next`\)\*\*/, /^- \*\*/)), [
-    'archive this session', 'never a route',
+  // P10 — the **Router (`next`)** entry names the move, which is never a route either. The compact clause before
+  // it already says "never a route", so the pin is the archive sentence's own words.
+  need(fails, 'P10 CONTEXT **Router (`next`)** entry', C(slice(text, ROUTER_ENTRY, /^- \*\*/)), [
+    ROUTER_ARCHIVE,
   ])
   return fails
 }
@@ -224,10 +248,13 @@ test('control A: the archive label reverted to "Leave it (Recommended)" fails th
   assert.ok(failsWith(fails, 'P6 forbidden wording'), `no P6 failure: ${fails}`)
 })
 
-test('control B: a "Leave it" option beside the intact archive option fails the forbidden wording alone', () => {
+test('control B: a "Leave it" option beside the intact archive option fails the menu and the forbidden wording, nothing else', () => {
   const added = '   - label `Leave it`, description "Do nothing for now."'
-  const bad = insertAfter(next, (l) => l.includes('label `' + ARCHIVE_LABEL + '`'), added)
-  assert.deepEqual(nextFails(bad), [forbidden(added)])
+  const bad = insertAfter(next, (l) => ARCHIVE_OPTION.test(l), added)
+  assert.deepEqual(nextFails(bad), [
+    `P4 archive menu options: ${JSON.stringify([ARCHIVE_LABEL, 'Leave it', 'Close'])}, not ${JSON.stringify(MENU_LABELS)}`,
+    forbidden(added),
+  ])
 })
 
 test('control B2: the exemption is the quoted literal, never the whole rule line', () => {
@@ -288,4 +315,55 @@ test('control J: a Thread entry without the user-facing convention fails', () =>
     '')
   const fails = contextFails(bad)
   assert.ok(failsWith(fails, 'P9 '), `no P9 failure: ${fails}`)
+})
+
+test('control K: a Router entry whose archive sentence makes it a route fails, though the compact clause still says "never a route"', () => {
+  const bad = mutate(context, 'which writes nothing and is never a route either.', 'which is a route like close.')
+  assert.ok(C(slice(bad, ROUTER_ENTRY, /^- \*\*/)).includes(ROUTER_COMPACT),
+    'control precondition: the Router entry lost the compact clause too')
+  assert.deepEqual(contextFails(bad), [`P10 CONTEXT **Router (\`next\`)** entry: ${ROUTER_ARCHIVE}`])
+})
+
+test('control L: a third option after Close fails the archive menu alone', () => {
+  const bad = insertAfter(next, (l) => CLOSE_OPTION.test(l), '   - label `Hand off`, description "Start a fresh session."')
+  assert.deepEqual(nextFails(bad), [
+    `P4 archive menu options: ${JSON.stringify([...MENU_LABELS, 'Hand off'])}, not ${JSON.stringify(MENU_LABELS)}`,
+  ])
+})
+
+test('control L2: a third option that is not a label line fails the archive menu too', () => {
+  const bad = insertAfter(next, (l) => ARCHIVE_OPTION.test(l), '   - `Hand off`: start a fresh session.')
+  const fails = nextFails(bad)
+  assert.ok(failsWith(fails, 'P4 archive menu options'), `no P4 failure: ${fails}`)
+})
+
+test('control M: a detection bullet that drops the successor the handoff itself started fails', () => {
+  const bad = mutateLine(next, DETECT,
+    ', or the handoff itself started the successor (the Chorus Stage, or the native task in Codex Desktop), whatever its doc still reads',
+    '')
+  const fails = nextFails(bad)
+  assert.ok(failsWith(fails, 'P1 '), `no P1 failure: ${fails}`)
+})
+
+test('control N: step 1 without its own-branch bullet fails, so the normal menu would lose the fact', () => {
+  const fails = nextFails(dropLine(next, OWN_BRANCH))
+  assert.ok(fails.includes('P1b step-1 own-branch bullet: missing'), `no P1b failure: ${fails}`)
+})
+
+test('control O: a vocabulary rule that no longer ties itself to CONTEXT.md fails', () => {
+  const bad = mutateLine(next, RULE_LEAD, "the user-facing convention in CONTEXT.md's **Thread** entry", 'by convention')
+  const fails = nextFails(bad)
+  assert.ok(failsWith(fails, 'P5 '), `no P5 failure: ${fails}`)
+})
+
+test("control P: a § Don't moves bullet that drops handoff, stash or defer fails", () => {
+  const bad = mutateLine(next, /^- Don't recommend or offer keep going/, 'keep going, handoff, stash or defer', 'keep going')
+  const fails = nextFails(bad)
+  assert.ok(failsWith(fails, "P8 § Don't moves bullet"), `no P8 failure: ${fails}`)
+})
+
+test("control Q: a § Don't label bullet that drops the session-for-this-chat clause fails", () => {
+  const bad = mutateLine(next, /^- Don't label an option/, ', and don\'t say "thread" for this chat in the menu', '')
+  const fails = nextFails(bad)
+  assert.ok(failsWith(fails, "P8 § Don't label bullet"), `no P8 failure: ${fails}`)
 })
