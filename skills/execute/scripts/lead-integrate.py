@@ -39,8 +39,10 @@ Subcommands:
       rename); O.rc and O.log are removed first, so a missing O.rc means the run did not finish (red). A
       failed bootstrap gives its rc and `env_bootstrap failed; verifier not run`. At the deadline the group
       gets SIGTERM, 10 s, then SIGKILL: rc 124. TERM/INT/HUP to verify itself kill the group the same way:
-      rc 128+n. --detach-at adds T as a detached worktree of R at SHA (refusing an existing path) and
-      removes it (`worktree remove --force`) whatever the verdict: the RACE re-verify.
+      rc 128+n. They are held while a step starts, so one landing before its group is recorded still kills it,
+      and each step starts with the caller's signal mask. --detach-at adds T as a detached worktree of R at SHA
+      (refusing an existing path) and removes it (`worktree remove --force`) whatever the verdict: the RACE
+      re-verify.
 
   push --repo R --slug S --head M
       A plain push of the task tree's M to origin/<branch> (never forced); the ls-remote read-back must
@@ -589,6 +591,7 @@ def cmd_prepare(args):
 # ---- verify --------------------------------------------------------------------------------------------
 
 KILL_GRACE = 10
+SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 TIMED_OUT = object()
 
 
@@ -631,9 +634,16 @@ def _kill_group(proc):
 
 
 def _run_step(cmd, tree, log, deadline):
-    proc = subprocess.Popen(["bash", "-c", cmd], cwd=tree, stdin=subprocess.DEVNULL, stdout=log,
-                            stderr=subprocess.STDOUT, start_new_session=True, env=ENV)
-    _live["proc"] = proc
+    # The new group lives in its own session, so a signal that lands before `_live` holds it would leave it running
+    # with no limit: hold SIGNALS until it does. The step itself starts with the caller's mask, not the held one.
+    mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+    try:
+        proc = subprocess.Popen(["bash", "-c", cmd], cwd=tree, stdin=subprocess.DEVNULL, stdout=log,
+                                stderr=subprocess.STDOUT, start_new_session=True, env=ENV,
+                                preexec_fn=lambda: signal.pthread_sigmask(signal.SIG_SETMASK, mask))
+        _live["proc"] = proc
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
     try:
         return proc.wait(timeout=max(0.0, deadline - time.monotonic()))
     except subprocess.TimeoutExpired:
@@ -671,7 +681,7 @@ def cmd_verify(args):
         added = True
     elif not tree.is_dir():
         raise EnvError(f"no tree at {tree}")
-    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    for s in SIGNALS:
         signal.signal(s, _on_signal)
     rc = None
     try:
@@ -702,7 +712,7 @@ def cmd_verify(args):
         except OSError:
             pass
     finally:
-        for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        for s in SIGNALS:
             signal.signal(s, signal.SIG_IGN)
         if added:
             git(os.path.expanduser(args.repo), "worktree", "remove", "--force", str(tree))
