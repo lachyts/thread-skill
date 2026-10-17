@@ -26,7 +26,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Thread** — a live agent conversation carrying working context. Ephemeral;
   dies with the session. (Deliberately overloaded with the file below — the
   plugin name trades on the overlap, but the two must never be confused in
-  skill prose.)
+  skill prose.) In wording Lachy reads (a router's menu options and their
+  descriptions) the convention is user-facing: **session** names the live
+  conversation and **thread** the durable work its THREAD.md records, because
+  that is how he reads the word. Agent-facing prose keeps the two senses above.
 - **THREAD.md** — the durable state-of-play *file* a thread can be persisted
   into. Project-side (`~/Projects/<Area>/<Project>/THREAD.md`), shared
   (`~/repos/workspaces/_shared/threads/<slug>.md`), or a **Repo thread** — a
@@ -38,7 +41,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"
   then dispatches to a route. A sibling, not a parent. Its *keep going* may
   carry a **compact recommendation**, which only Lachy acts on: compact is a
-  recommendation inside keep going, never a route.
+  recommendation inside keep going, never a route. When the work already
+  continues in another session it recommends **archive this session** instead,
+  which writes nothing and is never a route either.
 - **Orient** — the one shaping verb, at project altitude: audits a whole
   project/area (not one thread), then reshuffles it without asking (ADR 0036),
   unless told to steer it as it stands or just look. It schedules rollout-shaped
@@ -75,9 +80,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Defer** — dispose onto a specific day (`scheduled:`). "Tomorrow's problem."
 - **Handoff** — fork the working context to a fresh agent *now*; work continues
   immediately, this session ends. Always produces a **handoff doc** (below) and
-  a paste-ready prompt; in Codex Desktop also a visible native task. Model-invocable
-  on explicit fork intent (or router dispatch) only — never self-initiated because
-  the context feels long; that recommendation belongs to `next`.
+  a paste-ready prompt; in Codex Desktop or a Chorus Session also a visible native
+  task. Model-invocable on explicit fork intent (or router dispatch) only — never
+  self-initiated because the context feels long; that recommendation belongs to
+  `next`.
 - **Handoff doc** — the durable brief `thread:handoff`, its only writer, writes
   on explicit fork intent only (Lachy's ask, or his pick from a router's menu;
   never self-initiated) to `<home>/docs/handoffs/<date>-<slug>.md` and commits
@@ -551,9 +557,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: clean run, empty retro.
 - **Decision task** — the one open vault task tagged `decisions` that the
   weekly reading writes for the next morning when it has a rule proposal
-  (ADR 0037 d5): Lachy decides it at the top of a run
-  (`/thread:reflect --decide`); schedule, the reshuffle and orient's batches
-  never take it. _Avoid_: inbox, review queue.
+  or a held trade (a knob ADR 0037 d1 leaves to Lachy; ADR 0037 d5): Lachy
+  decides it at the top of a run (`/thread:reflect --decide`); schedule,
+  the reshuffle and orient's batches never take it. _Avoid_: inbox, review
+  queue.
 - **Rollout settings** — the operator's `~/.config/thread/rollouts.toml`,
   `ladder.toml`'s sibling: `[defaults]`, the `[guardrails]` bounds and
   per-repo `[repo."owner/name"]` tables (keyed by the GitHub origin),
