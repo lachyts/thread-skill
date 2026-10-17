@@ -728,20 +728,33 @@ fx c17
 # fraction: a rollout runs this suite in several worktrees at once, and a machine-wide pgrep on a bare duration
 # counted their sleepers as this run's survivors (2026-10-15, p20-2: "expected [0] got [4]").
 u=$(printf %07d $$)
-t0=$(date +%s)
-python3 "$LI" verify --tree "$WT" --out "$F/out/v" --timeout 2 --verifier "sleep 3171.$u & sleep 3172.$u; wait" >/dev/null
-el=$(( $(date +%s) - t0 ))
+# Structural, not a stopwatch (p22-1): a rollout at ceiling 4 loads the host to ~150, and the old "within 15 s"
+# bound went red there on correct code. The sleepers sleep 3171 s+, so only verify's kill can end them, and a
+# verify that waited for them could not return before they did: the bounds below (300 s for verify to return or
+# its children to start, 60 s for a killed child to vanish) are generous, never tight, and still fail a verify
+# that waits for its children, or one that leaves a child alive.
+# within <s> <cmd…>: poll <cmd> every 0.1 s until it succeeds (0) or <s> s of wall clock pass (1).
+within() { local end=$((SECONDS + $1)); shift; until "$@" 2>/dev/null; do [ "$SECONDS" -ge "$end" ] && return 1; sleep 0.1; done; }
+gone() { ! kill -0 "$1"; }
+sleepers() { pgrep -f "$1" | wc -l | tr -d ' '; }
+nosleeper() { [ "$(sleepers "$1")" = 0 ]; }
+python3 "$LI" verify --tree "$WT" --out "$F/out/v" --timeout 2 --verifier "sleep 3171.$u & sleep 3172.$u; wait" >/dev/null &
+vp=$!
+if within 300 gone "$vp"; then st=returned; else st="still running after 300 s"; kill -TERM "$vp"; fi; wait "$vp"
 ok "$(cat "$F/out/v.rc")" 124 "C17: the deadline → rc 124"
-ok "$([ "$el" -lt 15 ] && echo fast || echo "slow ${el}s")" fast "C17: … within 15 s"
-ok "$(pgrep -f "sleep 317[12]\.$u" | wc -l | tr -d ' ')" 0 "C17: no verifier child survives"
+ok "$st" returned "C17: … verify returns at its deadline, not when its verifier's children would"
+within 60 nosleeper "sleep 317[12]\.$u"
+ok "$(sleepers "sleep 317[12]\.$u")" 0 "C17: no verifier child survives"
 has "$(cat "$F/out/v.log")" "timed out after 2s" "C17: the log names the timeout"
 python3 "$LI" verify --tree "$WT" --out "$F/out/t" --timeout 600 --verifier "sleep 3173.$u & sleep 3174.$u; wait" >/dev/null &
 vp=$!
-n=0; until grep -q '== verifier:' "$F/out/t.log" 2>/dev/null && [ "$(pgrep -f "sleep 317[34]\.$u\$" | wc -l | tr -d ' ')" -ge 1 ]; do n=$((n+1)); [ "$n" -gt 100 ] && break; sleep 0.1; done
+started() { grep -q '== verifier:' "$F/out/t.log" && [ "$(sleepers "sleep 317[34]\.$u\$")" -ge 1 ]; }
+within 300 started && st=started || st="not started after 300 s"
+ok "$st" started "C17: the verifier's children run before the TERM"
 kill -TERM "$vp"; wait "$vp"
 ok "$(cat "$F/out/t.rc")" 143 "C17: TERM to verify → rc 143"
-n=0; while [ "$(pgrep -f "sleep 317[34]\.$u" | wc -l | tr -d ' ')" -gt 0 ] && [ "$n" -lt 30 ]; do n=$((n+1)); sleep 0.1; done
-ok "$(pgrep -f "sleep 317[34]\.$u" | wc -l | tr -d ' ')" 0 "C17: … and its children are gone"
+within 60 nosleeper "sleep 317[34]\.$u"
+ok "$(sleepers "sleep 317[34]\.$u")" 0 "C17: … and its children are gone"
 main from-main.txt "dep" "theirs: dep (#7)"
 prep; M=$(j "$J" 'd["mergeCommit"]')
 python3 "$LI" verify --tree "$WT" --out "$F/out/b" --timeout 60 --bootstrap 'test -f from-main.txt && touch .boot-ok' --verifier 'test -f .boot-ok && echo verified' >/dev/null
