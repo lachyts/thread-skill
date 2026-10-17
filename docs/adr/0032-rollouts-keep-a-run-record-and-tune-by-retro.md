@@ -5,6 +5,9 @@ Status: accepted, shipped in 3.0.0 (amends the rollout defaults that schedule st
 execute and reconcile assume, the rollout template's `## Resource budget`, and execute's "don't
 raise `parallel_ceiling` blindly" rule; grilled with Lachy 2026-10-04 in `/thread:orient Thread
 Skill`, from his question "why three tasks at once, why not ten?")
+*(Amended by ADR 0037, 2026-10-15: the Retro is now the Reflection (`/thread:reflect`), scored on two headlines,
+Hands-off rate and Quality, with Throughput a Guardrail; decision 5's gate is decided: a bug is filed, a knob lands
+once three Reflections agree, a rule never lands unasked.)*
 
 ## Context
 

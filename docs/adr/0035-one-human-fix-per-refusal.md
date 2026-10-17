@@ -1,8 +1,8 @@
 # 0035 — one human fix per refusal
 
 Date: 2026-10-13
-Status: proposed, implemented by p18-3 (amends ADR 0033; from the 2026-10-13 orient grill of
-`thread-skill-p18-3-one-human-fix-per-refusal`, after PR #107's three review rounds)
+Status: accepted, shipped in 3.1.0 (implemented by p18-3, #122; amends ADR 0033; from the 2026-10-13 orient
+grill of `thread-skill-p18-3-one-human-fix-per-refusal`, after PR #107's three review rounds)
 
 ## Context
 
