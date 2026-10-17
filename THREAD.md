@@ -10,6 +10,12 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-10-17 (evening): the P22 rollout ran 9/11 and closed awaiting sign-off.** `[[thread-skill-rollout-2026-10-17]]` (paused `paused_for: sign-off`, § Completion log): merged #157 to #165 in 7h 16m from the clone, phase 22 closed. Left: [[thread-skill-p19-10-eval-close-consumed-fixture]] is gate-pending on a spend gate (cap US$20, up to 6 eval invocations at `--max-cost-usd 4` each) that the standing approval refused (it cannot price the per-invocation "each"), and p19-5 waits on it.
+- **Landed:** p22-1 C17 load-tolerant (#157), p22-2 run-step signal window (#158), p22-3 close/carry vault grammar (#159), p22-7 weekly Reflection gaps (#160), reflect-cites the loops contract (#161), p22-4 close/handoff end on Chorus words (#162), p22-5 next offers Archive this session (#163), p22-6 ADR status sweep (#164), p19-11 handoff manual dry-run eval record (#165, spend signed under the standing approval, US$12).
+- **Run shape:** p22-4 plan-blocked once, auto-retried on opus-xhigh. reflect-cites' first merge hit a red required ubuntu check (`tests/pinned-tree.test.sh` bash 13, a flake: master and the other PRs were green), was set aside and auto-retried, and merged on its second CI. Five integrate calls (conflicts on vault-grammar.md, next/SKILL.md, ADR 0037; one shared-file judge-only; one branch-moved). No RACE, no git-env trip.
+- **p22-4 changed execute's ceremonies:** `/thread:close` now runs last, after the vault commit, with close's banner and the ROLLOUT-STATUS line in one message. This run's sign-off form followed the new order.
+- **The installed plugin is still 4.0.0** and the primary checkout is behind origin (P22 not live).
+
 **2026-10-17: 4.0.0 is installed; the P22 rollout is scheduled and a successor session in the clone is executing it.** `[[thread-skill-rollout-2026-10-17]]`: 11 tasks, p22-1..p22-7, [[thread-skill-reflect-cites-the-reflection-loops-contract]], p19-10, p19-11, then p19-5 last. Project root `~/repos/tools/thread-skill-rollout`, verifier `make test`, built-in settings, standing approval 50 USD (`file:defaults`).
 - **Scheduled** via `/thread:orient Thread Skill --steer` (no reshape; drift empty). § 0 passed once landing PR #154 merged (`1b9275c`); before that the pushed-base check refused on the primary's unlanded handoff commit.
 - **p19-5 respecced** (Lachy's yes): `skills/split/` is gone; over 700 at `9589e20` are reflect 1,066, close 979, handoff 887. Scope is now those three + `manifest.test.mjs` + a `docs/evals/` comparison record from two `make evals EVAL_ARGS='--runs 3'` runs (pre/post trim, ~40 USD); its plan declares the signed irreversible bullet plus one spend bullet; it `depends-on:` every task that edits close, handoff, reflect or next.
@@ -985,16 +991,20 @@ scheduled 2026-07-15.
 - **`bind-run` records `journalDir` as `<session>/workflows`**, while the transcripts live under `<session>/subagents/workflows/<runId>/`. `fold-journals` still found every call (19 folded, 0 warnings, 2026-10-09).
 - **Schedule does not run the self-rollout gate:** a rollout scheduled from the primary checkout gets it as Project root, and execute § 2.6 refuses it at launch. Re-point the note at `~/repos/tools/thread-skill-rollout` and fast-forward that clone ([[thread-skill-schedule-runs-the-self-rollout-gate]]).
 
+- **A landing PR that falls BEHIND master never auto-merges:** the ruleset requires an up-to-date branch, and GitHub does not update it. On 2026-10-17 #156 sat green but BEHIND after #155 merged; `gh api -X PUT repos/<o>/<r>/pulls/<n>/update-branch -f expected_head_sha=<sha>` unblocked it (the installed `gh` has no `pr update-branch`). Pushed-base waits on every queued close/… PR, not just the newest.
+- **A Workflow run's args are recorded in `<session>/workflows/<runId>.json`** once it completes: compare them with the built args file to prove a hand-pasted integrate call was verbatim (all five on 2026-10-17 matched).
+
 ## Resume instructions
 
-**Now (from 2026-10-17):** `[[thread-skill-rollout-2026-10-17]]` is executing in a successor session launched in the clone (it consumed `docs/handoffs/2026-10-17-execute-p22-rollout.md`).
-1. Check it with `/thread:status [[thread-skill-rollout-2026-10-17]]`; if stuck, `/thread:repair` from a session launched in `~/repos/tools/thread-skill-rollout`.
-2. When it completes: its post-rollout item (decide on a 4.1.0 release: `claude plugin update thread@thread`, `make release-check`, release PR with p19-5's comparison record), once no rollout holds the primary checkout.
+**Now (from 2026-10-17 evening):** `[[thread-skill-rollout-2026-10-17]]` is paused awaiting sign-off (9/11 merged).
+1. Lachy signs off (or declines) p19-10's spend gate (cap US$20; see its `## Gated inputs (awaiting sign-off)`). On a yes: `reconcile-rollout.py approve-gates --tasks thread-skill-p19-10-eval-close-consumed-fixture`, then `/thread:execute [[thread-skill-rollout-2026-10-17]]` from a session launched in `~/repos/tools/thread-skill-rollout` (Reinstate; p19-5 follows, its irreversible gate already signed).
+2. When it completes: the post-rollout item (decide on a 4.1.0 release: `claude plugin update thread@thread`, `make release-check`, release PR with p19-5's comparison record).
 3. Grill Lachy on the four waiting forks (PR #88, the 5c5a `.thread/` evidence, the thread-rollout-redesign worktree, the p21-5/p21-9 ruling).
 4. Next weekly Reflection is due 2026-10-24.
 
 ## Session log
 
+- 2026-10-17 (evening): executed the P22 rollout from the clone: 9/11 merged (#157–#165) in 7h 16m, phase 22 closed; p19-10 spend gate refused by the standing approval (unpriceable "each"), so the run closed in the sign-off form with p19-10 and p19-5 waiting; landing PR #156 needed an update-branch.
 - 2026-10-17: Steer-only orient scheduled `[[thread-skill-rollout-2026-10-17]]` (11 tasks: P22, reflect-cites, the P19 eval tail), respecced p19-5 for 4.0.0 (close/handoff/reflect, in-task `--runs 3` comparison), waited out landing PR #154 for pushed-base, handed execute to a clone session (#155).
 - 2026-10-16: P21 rollout executed unattended from the clone: 7/7 merged (#144–#150) in 8h 47m; 3 auto-retries, 1 standing approval, 2 integrator conflict merges, 1 macOS CI flake rerun; rollout archived, first-live-Reflection task filed; installed plugin still pre-P21.
 - 2026-10-15: #139 fixed and merged; P21 scheduled (+p21-9 split) and executing overnight from the clone; p15-7 landed in agents-config #1 by an orient child (review pending).
