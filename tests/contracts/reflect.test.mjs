@@ -170,6 +170,13 @@ const RETIRED = [new RegExp(`thread:${OLD}\\b`), new RegExp(`skills/${OLD}\\b`),
 const NOUN = new RegExp(`\\b${OLD}s?\\b`, 'i')
 const ADR_TITLE = new RegExp(`\\btune by ${Old}\\b`) // ADR 0032's title in the README's ADR list: history
 const KEPT = ['skills/reflect/SKILL.md', 'skills/reflect/scripts/score.py', 'skills/reflect/scripts/tune.py']
+// The reflection loops' shared contract (Chorus p77-3, ADR 0095 d6): the SKILL cites the estate copy, as Chorus's
+// /reflect does, and keeps the contract's words for a Watch, a quiet reading and the cadence.
+const LOOPS = ['The loops share one contract: `~/.agents/knowledge/reflection-loops.md`',
+  '**Watch**: a pattern seen once, carried to the next reading',
+  '**A quiet reading** has no new Watch, no rule proposal, no bug and no Guardrail breach',
+  '**The cadence** is weekly, fortnightly after three quiet readings in a row',
+  'derived from the `quiet` flags, never kept as a written value']
 
 // ---- the weekly reading (p21-7) --------------------------------------------------------------------------------
 
@@ -290,6 +297,7 @@ function check(files, notes = []) {
   const triggers = to < 0 ? '' : desc.slice(from, to + '/thread:reflect'.length)
   if (fm.name !== 'reflect' || !triggers.includes('"reflect on [[rollout]]"') || !triggers.includes('"how did the rollout run"') ||
     triggers.includes('Companion') || !desc.includes('Not for Chorus\'s Companion record')) fails.push('triggers')
+  if (!LOOPS.every((w) => collapse(s).includes(w))) fails.push('loops')
   const wk = weeklyFails(files)
   if (wk.length) { fails.push('weekly'); notes.push(`weekly: ${wk.join(', ')}`) }
   // the old skill directory holds no tracked content (a leftover byte-code cache or .DS_Store aside)
@@ -425,6 +433,12 @@ test('control: the takes-effect sentence gone fails effect', () => {
 test('control: a trigger dropped, or a Companion trigger added, fails triggers', () => {
   only('skill:triggers', swap('skill', '"reflect on [[rollout]]", ', ''), ['triggers'])
   only('skill:companion', swap('skill', '"how did the rollout run", ', '"how did the rollout run", "how did the Companion do", '), ['triggers'])
+})
+
+test('control: the contract uncited, or a contract word drifted, fails loops', () => {
+  only('skill', swap('skill', '`~/.agents/knowledge/reflection-loops.md`', '`docs/reflection-loops.md`'), ['loops'])
+  only('skill:quiet', swap('skill', 'no bug and no Guardrail breach', 'no bug'), ['loops'])
+  only('skill:cadence', swap('skill', 'never kept as a written value', 'kept on the closing line'), ['loops'])
 })
 
 test('control: the old scratch path or the old noun in the SKILL fails retired', () => {
