@@ -40,15 +40,19 @@ records (ADR 0037 "Considered" declined one shared Reflect skill), so the script
 Thread does, in the contract's words:
 
 - **Reflection**: a reading of a span after the fact that traces what cost Lachy to the rule that produced it, and
-  proposes Tunings. The by-hand form scores and proposes; the weekly reading also traces. Never *review* (code
-  review's word).
+  proposes Tunings. Never *review* (code review's word) or *retro*. The by-hand form scores and proposes; the
+  weekly reading also traces.
 - **Watch**: a pattern seen once, carried to the next reading. Thread's sighting is per rollout, so it becomes a rule
   proposal when another rollout shows it again, or at once when Lachy confirms it (step 12).
-- **Tuning**: one change, written into the record as its own line, at one of three altitudes: a **knob** (a number:
-  cheap, reversible, and it may land on its own), a **rule** (a grill and an ADR before a build; never lands unasked)
-  and a **bug** (filed as a task, never picked, never filed twice). Chorus's word and map altitudes are not Thread's.
-- **A quiet reading** has no new Watch, no rule proposal, no bug and no Guardrail breach; a knob card that only
-  gathers agreement, and a knob that landed on its own, keep it quiet. Its flag is `close`'s `quiet` (step 16).
+- **Tuning**: one change at one of three altitudes: a **knob** (a number: cheap, reversible, and it may land on its
+  own), a **rule** (a grill and an ADR before a build; never lands unasked) and a **bug** (filed as a task, never
+  picked, never filed twice). Chorus's word and map altitudes are not Thread's. A knob that lands is its own `applied`
+  entry on tune.py's one `tuning` line, which carries every pick of a by-hand Reflection (step 7) and every knob one
+  `--auto` call lands (step 14); in the weekly reading each Tuning is its own `proposal` line in `reflections.jsonl`
+  (one per knob_key, bug and rule item: steps 13–15).
+- **A quiet reading** has no new Watch, no rule proposal, no bug and no Guardrail breach; a knob proposal step 14
+  holds while it gathers agreement (`held <key>: agreement <n> of 3`), and a knob that landed on its own, keep it
+  quiet. Its flag is `close`'s `quiet` (step 16).
 - **The cadence** is weekly, fortnightly after three quiet readings in a row, and weekly again after any reading that
   is not quiet: derived from the `quiet` flags, never kept as a written value (a line's `cadence` says what it was
   then). Thread counts it in Melbourne dates (7 or 14 days, `reflect-due.py`), where Chorus counts sittings.
@@ -461,6 +465,10 @@ yes or a no (each `raised` printed `raised` or `exists`). An item left open keep
 - A knob's revert does not by itself make a reading not quiet: the contract's quiet reading also has no revert, but
   `close`'s `quiet` counts new Watches, rule proposals, bugs and Guardrail breaches only, and the breach behind a
   revert counts only on a rollout whose run ended in the window (reflect.py's header).
+- A `tunings.jsonl` line can carry several Tunings: the contract's ledger has one line per Tuning, but tune.py writes
+  a run's Tunings on ONE `tuning` line, an `applied` entry per knob, for a by-hand `--pick` of several (step 7) and
+  for an `--auto` call that lands several (step 14). Only the weekly reading's `proposal` lines in
+  `reflections.jsonl` give one line per knob; a by-hand Reflection's picks have none.
 
 ## Don'ts
 

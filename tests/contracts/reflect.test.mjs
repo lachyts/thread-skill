@@ -171,12 +171,20 @@ const NOUN = new RegExp(`\\b${OLD}s?\\b`, 'i')
 const ADR_TITLE = new RegExp(`\\btune by ${Old}\\b`) // ADR 0032's title in the README's ADR list: history
 const KEPT = ['skills/reflect/SKILL.md', 'skills/reflect/scripts/score.py', 'skills/reflect/scripts/tune.py']
 // The reflection loops' shared contract (Chorus p77-3, ADR 0095 d6): the SKILL cites the estate copy, as Chorus's
-// /reflect does, and keeps the contract's words for a Watch, a quiet reading and the cadence.
+// /reflect does, and keeps the contract's words for a Reflection, a Watch, a Tuning, a quiet reading and the cadence,
+// mapped to Thread's engine; § What the record cannot show names the two places the engine departs from it (GAPS).
+const AVOID = `Never *review* (code review's word) or *${OLD}*.` // the contract's banned words: the noun's one SKILL use
 const LOOPS = ['The loops share one contract: `~/.agents/knowledge/reflection-loops.md`',
+  '**Reflection**: a reading of a span after the fact that traces what cost Lachy to the rule that produced it', AVOID,
   '**Watch**: a pattern seen once, carried to the next reading',
+  'A knob that lands is its own `applied` entry on tune.py\'s one `tuning` line',
+  'in the weekly reading each Tuning is its own `proposal` line in `reflections.jsonl`',
   '**A quiet reading** has no new Watch, no rule proposal, no bug and no Guardrail breach',
+  'a knob proposal step 14 holds while it gathers agreement (`held <key>: agreement <n> of 3`)',
   '**The cadence** is weekly, fortnightly after three quiet readings in a row',
   'derived from the `quiet` flags, never kept as a written value']
+const GAPS = ['A knob\'s revert does not by itself make a reading not quiet', 'A `tunings.jsonl` line can carry several Tunings',
+  'Only the weekly reading\'s `proposal` lines in `reflections.jsonl` give one line per knob']
 
 // ---- the weekly reading (p21-7) --------------------------------------------------------------------------------
 
@@ -297,7 +305,8 @@ function check(files, notes = []) {
   const triggers = to < 0 ? '' : desc.slice(from, to + '/thread:reflect'.length)
   if (fm.name !== 'reflect' || !triggers.includes('"reflect on [[rollout]]"') || !triggers.includes('"how did the rollout run"') ||
     triggers.includes('Companion') || !desc.includes('Not for Chorus\'s Companion record')) fails.push('triggers')
-  if (!LOOPS.every((w) => collapse(s).includes(w))) fails.push('loops')
+  const cannot = collapse(sectionOf(s, /^## What the record cannot show$/))
+  if (!LOOPS.every((w) => collapse(s).includes(w)) || !GAPS.every((g) => cannot.includes(g))) fails.push('loops')
   const wk = weeklyFails(files)
   if (wk.length) { fails.push('weekly'); notes.push(`weekly: ${wk.join(', ')}`) }
   // the old skill directory holds no tracked content (a leftover byte-code cache or .DS_Store aside)
@@ -305,6 +314,7 @@ function check(files, notes = []) {
   // the retired name, in any form, over the product files
   const scan = { ...Object.fromEntries(SCANNED.map((k) => [NAMED[k], files[k]])), ...files.rest }
   let titles = 0
+  let avoids = 0
   let retired = false
   for (const [rel, text] of Object.entries(scan)) {
     if (skipped(rel) || text.includes('\0')) continue
@@ -313,6 +323,8 @@ function check(files, notes = []) {
       const noun = NOUN.test(l)
       if (!verb && !noun) return
       if (!verb && rel === 'README.md' && ADR_TITLE.test(l) && ++titles <= 1) return
+      // the contract's "Never *review* or *<noun>*", once, in the SKILL: the noun named as the word to avoid
+      if (!verb && rel === NAMED.skill && l.includes(AVOID) && !NOUN.test(l.replace(AVOID, '')) && ++avoids <= 1) return
       retired = true
       notes.push(`retired: ${rel}:${i + 1} ${l.trim().slice(0, 120)}`)
     })
@@ -437,8 +449,20 @@ test('control: a trigger dropped, or a Companion trigger added, fails triggers',
 
 test('control: the contract uncited, or a contract word drifted, fails loops', () => {
   only('skill', swap('skill', '`~/.agents/knowledge/reflection-loops.md`', '`docs/reflection-loops.md`'), ['loops'])
+  only('skill:reflection', swap('skill', 'traces what cost Lachy to the rule that produced it', 'scores what it read'), ['loops'])
+  only('skill:avoid', swap('skill', ` or *${OLD}*.`, '.'), ['loops'])
+  only('skill:tuning', swap('skill', 'entry on tune.py\'s one `tuning` line', 'line in `tunings.jsonl`'), ['loops'])
   only('skill:quiet', swap('skill', 'no bug and no Guardrail breach', 'no bug'), ['loops'])
+  only('skill:held', swap('skill', 'a knob proposal step 14\n  holds while it gathers agreement', 'a knob card that only\n  gathers agreement'), ['loops'])
   only('skill:cadence', swap('skill', 'never kept as a written value', 'kept on the closing line'), ['loops'])
+  only('skill:gap', swap('skill', '- A `tunings.jsonl` line can carry several Tunings:', '- A `tunings.jsonl` line:'), ['loops'])
+})
+
+test('control: the contract\'s banned noun outside its one clause fails retired', () => {
+  const line = real.skill.split('\n').find((l) => l.includes(AVOID))
+  assert.ok(line, 'control setup: no line carries the banned-words clause')
+  only('skill:twice', swap('skill', line, `${line}\n${line}`), ['retired'])
+  only('skill:same-line', swap('skill', AVOID, `${AVOID} No ${OLD} either.`), ['retired'])
 })
 
 test('control: the old scratch path or the old noun in the SKILL fails retired', () => {
