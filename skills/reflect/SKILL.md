@@ -33,6 +33,30 @@ The Reflection takes Chorus's word and shape (ADR 0037 d2): record → proposals
 for the weekly reading, Chorus's span → Watches → close. It reads rollouts' Run records, never the Companion's:
 "reflect on the Companion" is Chorus's `/reflect`.
 
+**The contract.** The loops share one contract: `~/.agents/knowledge/reflection-loops.md` (the estate copy, canonical;
+Chorus's `/reflect` cites it too): the words, the ledger line, the cadence and what lands alone. Read it, when it is
+there, before a `--weekly` or a `--decide` run; the scripts never read it. Each loop keeps its own engine and its own
+records (ADR 0037 "Considered" declined one shared Reflect skill), so the script headers stay the one copy of what
+Thread does, in the contract's words:
+
+- **Reflection**: a reading of a span after the fact that traces what cost Lachy to the rule that produced it, and
+  proposes Tunings. Never *review* (code review's word) or *retro*. The by-hand form scores and proposes; the
+  weekly reading also traces.
+- **Watch**: a pattern seen once, carried to the next reading. Thread's sighting is per rollout, so it becomes a rule
+  proposal when another rollout shows it again, or at once when Lachy confirms it (step 12).
+- **Tuning**: one change at one of three altitudes: a **knob** (a number: cheap, reversible, and it may land on its
+  own), a **rule** (a grill and an ADR before a build; never lands unasked) and a **bug** (filed as a task, never
+  picked, never filed twice). Chorus's word and map altitudes are not Thread's. A knob that lands is its own `applied`
+  entry on tune.py's one `tuning` line, which carries every pick of a by-hand Reflection (step 7) and every knob one
+  `--auto` call lands (step 14); in the weekly reading each Tuning is its own `proposal` line in `reflections.jsonl`
+  (one per knob_key, bug and rule item: steps 13–15).
+- **A quiet reading** has no new Watch, no rule proposal, no bug and no Guardrail breach; a knob proposal step 14
+  holds while it gathers agreement (`held <key>: agreement <n> of 3`), and a knob that landed on its own, keep it
+  quiet. Its flag is `close`'s `quiet` (step 16).
+- **The cadence** is weekly, fortnightly after three quiet readings in a row, and weekly again after any reading that
+  is not quiet: derived from the `quiet` flags, never kept as a written value (a line's `cadence` says what it was
+  then). Thread counts it in Melbourne dates (7 or 14 days, `reflect-due.py`), where Chorus counts sittings.
+
 ## Scope
 
 Reads the rollout note (`~/repos/obsidian/Work/Tasks/`, then `Work/Tasks/Archive/Rollouts/`), the Run record and
@@ -42,13 +66,13 @@ local `git remote get-url origin` in the Project root: no network. For the Escap
 every note under `~/repos/obsidian/Work/Tasks/`, Archive included, for `fixes:` and `merged_into:`; and the Project
 root's git (commit messages, `docs/reviews/` and `git blame`), never fetched. By hand it writes `fold-journals`'
 `call-journal` lines, and tune.py's one line and its picked keys; scratch files go under
-`/tmp/thread-reflect-<rollout-slug>/`, and it makes no vault write. The weekly reading reads every rollout record and
-`reflections.jsonl` too, and writes: `reflections.jsonl` through reflect.py; a bug task and the decision task under
-`~/repos/obsidian/Work/Tasks/`; the decision task's one line on its day page (task-writer § 3b); `tunings.jsonl` lines
-only through tune.py's `--auto` and `--revert`; and `call-journal` lines through `span --fold`. Its scratch dir is
-`/tmp/thread-reflect-week-<YYYY-MM-DD>/`. `--decide` writes `watch-raised` lines through `reflect.py raised` and a
-`moot` line in the decision task through `reflect.py moot`, and marks the task done. Neither form makes a git write or
-a PR.
+`/tmp/thread-reflect-<rollout-slug>/`, and it makes no vault write. The weekly reading reads every rollout record,
+`reflections.jsonl` and the contract (above) too, and writes: `reflections.jsonl` through reflect.py; a bug task and
+the decision task under `~/repos/obsidian/Work/Tasks/`; the decision task's one line on its day page (task-writer
+§ 3b); `tunings.jsonl` lines only through tune.py's `--auto` and `--revert`; and `call-journal` lines through
+`span --fold`. Its scratch dir is `/tmp/thread-reflect-week-<YYYY-MM-DD>/`. `--decide` writes `watch-raised` lines
+through `reflect.py raised` and a `moot` line in the decision task through `reflect.py moot`, and marks the task done.
+Neither form makes a git write or a PR.
 
 ## Invocation forms
 
@@ -223,7 +247,7 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect-due.py
 ```
 
 Exit 0 is due, 4 is not yet; any other exit starts nothing. It is due once the cadence's days (7, or 14 after three
-quiet Reflections in a row) have passed, in Melbourne dates, since the last Reflection's `until`, and at once when
+quiet readings in a row) have passed, in Melbourne dates, since the last Reflection's `until`, and at once when
 there is none. Its JSON names the cadence, the quiet streak and the day it falls due.
 
 ### 9. Preflight
@@ -372,13 +396,13 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span /tm
 ```
 
 Exactly once, quiet weeks included: its line is the Reflection's record, and its `quiet` feeds the cadence (ADR
-0037 d6). Three quiet Reflections in a row move the reading to fortnightly (`cadence` 14), and any that is not quiet
-moves it back to weekly (7): `close` writes the cadence on its line, and its outcome line ends `cadence <old> -> <new>`
-when it changes. A quiet week writes only record lines, and no vault task but the decision task a held trade needs
-(step 15): a held trade is no rule proposal, so it leaves the week quiet. Every writer refuses a closed Reflection, so
-`close` refuses first (exit 2, nothing written) while step 14's `knobs` or step 15's `decide` has a line to write (a
-knob line, a rule line, or a held trade no decision task lists for this Reflection): run the step its stderr line
-names, then close.
+0037 d6). Three quiet readings in a row move the reading to fortnightly (`cadence` 14), and any that is not quiet
+moves it back to weekly (7). The cadence is derived from the `quiet` flags: `close` writes it on its line for the
+record (what it was then), and its outcome line ends `cadence <old> -> <new>` when it changes. A quiet week writes
+only record lines, and no vault task but the decision task a held trade needs (step 15): a held trade is no rule
+proposal, so it leaves the week quiet. Every writer refuses a closed Reflection, so `close` refuses first (exit 2,
+nothing written) while step 14's `knobs` or step 15's `decide` has a line to write (a knob line, a rule line, or a
+held trade no decision task lists for this Reflection): run the step its stderr line names, then close.
 
 ### 17. Report, then tidy
 
@@ -485,6 +509,13 @@ or `exists`). An item left open keeps the task open.
 - A held trade on a partial window is held `partial window`, so it reaches the decision task only in a later week
   that reads the rollout whole; one on a rollout with no repo, note or settings is never a knob candidate, so it is
   never offered.
+- A knob's revert does not by itself make a reading not quiet: the contract's quiet reading also has no revert, but
+  `close`'s `quiet` counts new Watches, rule proposals, bugs and Guardrail breaches only, and the breach behind a
+  revert counts only on a rollout whose run ended in the window (reflect.py's header).
+- A `tunings.jsonl` line can carry several Tunings: the contract's ledger has one line per Tuning, but tune.py writes
+  a run's Tunings on ONE `tuning` line, an `applied` entry per knob, for a by-hand `--pick` of several (step 7) and
+  for an `--auto` call that lands several (step 14). Only the weekly reading's `proposal` lines in
+  `reflections.jsonl` give one line per knob; a by-hand Reflection's picks have none.
 
 ## Don'ts
 
