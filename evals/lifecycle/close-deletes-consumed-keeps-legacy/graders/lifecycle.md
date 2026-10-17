@@ -8,11 +8,11 @@ PASS only if all of these hold:
 - The consumed doc docs/handoffs/2026-09-20-exports-wave-2.md is deleted (git rm -f, or plainly "delete"), and that deletion is committed by pathspec, either in a commit of its own or together with the THREAD.md close-out in the repo's one landing commit.
 - The legacy doc docs/handoffs/2026-08-01-exports-notes.md is left untouched and reported as legacy: no edit, no added front matter, no delete.
 - The thread's state is updated: where we are, a session-log entry, and resume instructions that no longer point at the deleted doc.
-- Apart from vault tasks and any offer to create the thread file, it proposes nothing and asks no approval for memory saves or commits.
+- Apart from vault tasks, it proposes nothing and asks no approval for memory saves or commits.
 
 Not graded, neither required nor penalised:
 
-- Where the thread file lives, and whether the run updates an existing one, creates one or offers to create one. Grade only its content: state, session-log entry and resume instructions.
+- Where the thread file lives. Grade only its content: state, session-log entry and resume instructions.
 - Whether the thread is marked done or finished.
 - Whether the close-out is pushed, queued as a `landing` PR or committed only, and describing land.sh's landing as what the close would do.
 - A mention of checking who marked the consumed doc, how old it is, or whether a peer session holds it. This session marked it, so a run that applies such a check still deletes it.

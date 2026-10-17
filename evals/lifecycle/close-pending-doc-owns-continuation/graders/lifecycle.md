@@ -12,7 +12,7 @@ PASS only if all of these hold:
 
 Not graded, neither required nor penalised:
 
-- Where the thread file lives, and whether the run updates an existing one, creates one or offers to create one. Grade only its content: state, session-log entry and resume instructions.
+- Where the thread file lives. Grade only its content: state, session-log entry and resume instructions.
 - Whether the thread is marked done or finished.
 - Whether the close-out is pushed, queued as a `landing` PR or committed only, and describing land.sh's landing as what the close would do.
 - Describing what the close would do, including a closing banner explicitly framed as the dry-run outcome. That is not a claim that anything happened.
