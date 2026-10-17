@@ -31,7 +31,7 @@ The router for the undecided moment. A sibling of the decisive routes, not their
 
 4. **Offer the routes via `AskUserQuestion`** — recommended option first with "(Recommended)", the other viable routes after (drop any that plainly don't apply; keep ≤4). Option descriptions say what each route would *do to this specific thread* ("task on tomorrow's page", "committed handoff doc + prompt to paste into a fresh session"), not generic definitions.
 
-5. **Dispatch.** Run the chosen sibling's logic in full — task-writer capture for stash/defer, the committed `docs/handoffs/` doc + paste-ready prompt for handoff (plus the native task in Codex Desktop), the complete persist-and-commit ritual for close. "Keep going" means exactly that: state the next step and continue working, no ceremony. When compact was recommended, print the `/compact <focus>` line once, for Lachy to type, and end the turn, never run it: `/compact` runs only between turns, so working on would keep filling the context it relieves. The focus already names the next step, so work resumes after Lachy compacts.
+5. **Dispatch.** Run the chosen sibling's logic in full — task-writer capture for stash/defer, the committed `docs/handoffs/` doc + paste-ready prompt for handoff (plus the native task in Codex Desktop or a Chorus Session), the complete persist-and-commit ritual for close. "Keep going" means exactly that: state the next step and continue working, no ceremony. When compact was recommended, print the `/compact <focus>` line once, for Lachy to type, and end the turn, never run it: `/compact` runs only between turns, so working on would keep filling the context it relieves. The focus already names the next step, so work resumes after Lachy compacts.
 
 ## Don't
 

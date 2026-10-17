@@ -75,9 +75,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Defer** — dispose onto a specific day (`scheduled:`). "Tomorrow's problem."
 - **Handoff** — fork the working context to a fresh agent *now*; work continues
   immediately, this session ends. Always produces a **handoff doc** (below) and
-  a paste-ready prompt; in Codex Desktop also a visible native task. Model-invocable
-  on explicit fork intent (or router dispatch) only — never self-initiated because
-  the context feels long; that recommendation belongs to `next`.
+  a paste-ready prompt; in Codex Desktop or a Chorus Session also a visible native
+  task. Model-invocable on explicit fork intent (or router dispatch) only — never
+  self-initiated because the context feels long; that recommendation belongs to
+  `next`.
 - **Handoff doc** — the durable brief `thread:handoff`, its only writer, writes
   on explicit fork intent only (Lachy's ask, or his pick from a router's menu;
   never self-initiated) to `<home>/docs/handoffs/<date>-<slug>.md` and commits
