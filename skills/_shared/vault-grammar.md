@@ -48,8 +48,9 @@ member.
   `_phase_sort`, which feed `--phases` to reconcile-project in execute's phase-close ceremony.
 - `skills/_shared/scripts/next-action.py`: `DEAD_STATUSES` (Landed) and `OPEN_STATUSES` (Active).
 - orient § 2 (the sweep's in-flight report) and the reshuffle's R1 (the item set and its reach tiers).
-- `skills/reflect/scripts/reflect.py` `bug` and `decide`: reconcile-project.py's `LANDED` and its status read
-  (`Rec.status`), loaded, so an open task and a done one are told apart as everywhere else.
+- `skills/reflect/scripts/reflect.py` `bug`, `decide`, `close` and `moot`: reconcile-project.py's `LANDED` and its
+  status read (`Rec.status`), loaded, so an open task and a done one are told apart as everywhere else; decide and
+  close count only done and merged as deciding a held trade (`DECIDED`, LANDED less dropped).
 - `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both
   scripts' key and sort helpers against the examples under § Phase and task filenames.
 

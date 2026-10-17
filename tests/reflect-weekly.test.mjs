@@ -197,12 +197,78 @@ test('span: every friction kind, a Human fix as movedBy unrecorded with its task
   const fixed = f.find((x) => x.kind === 'set-aside' && x.task === 'fixed')
   assert.equal(fixed.movedBy, 'unrecorded')
   assert.equal(fixed.taskNote, path.join(h.tasks, 'Archive', '2026', 'fixed.md'))
+  assert.deepEqual([fixed.mover, fixed.explainedIn], [{ kind: 'lane-taken', at: '2026-09-04T05:00:00.000Z' }, []], 'an empty note, and demo\'s Notes name only [[stuck]]')
   const stuck = f.find((x) => x.kind === 'set-aside' && x.task === 'stuck')
   assert.equal(stuck.movedBy, null, 'still set aside at until')
   assert.equal(stuck.taskNote, null)
   assert.equal(f.find((x) => x.kind === 'set-aside' && x.task === 'retried').movedBy, 'auto-retry')
   assert.deepEqual(f.filter((x) => x.kind === 'churn').map((x) => [x.task, x.regression]), [['retried', 2]])
   assert.ok(s.cannotShow.some((c) => c.startsWith('[[fixed]] (demo) moved on with no recorded act')), JSON.stringify(s.cannotShow))
+})
+
+// The writers' own wording (p22-7): tune.py's auto_check gives a held trade's reason, gated_inputs.annotation() the
+// standing approval's `## Approved gates` suffix, so a change in either fails these fixtures.
+function pyOut(h, body, input) {
+  const r = spawnSync('python3', ['-B', '-c', ['import importlib.util, json, sys',
+    'spec = importlib.util.spec_from_file_location("m", sys.argv[1])', 'm = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)',
+    'a = json.load(sys.stdin)', body].join('\n'), input[0]], { encoding: 'utf8', cwd: h.home, env: env(h), input: JSON.stringify(input[1]) })
+  assert.equal(r.status, 0, r.stderr)
+  return JSON.parse(r.stdout)
+}
+const TUNE_PY = path.join(root, 'skills', 'reflect', 'scripts', 'tune.py')
+const GATED_PY = path.join(root, 'skills', '_shared', 'scripts', 'gated_inputs.py')
+const heldReason = (h, proposal) => pyOut(h, 'print(json.dumps(m.auto_check({}, a, None, [], [])[1]))', [TUNE_PY, proposal])
+const standingLine = (h, gate, date, usd, limit, source) => `- ${gate} ${pyOut(h, 'print(json.dumps(m.annotation(*a)))', [GATED_PY, [date, usd, limit, source]])}`
+
+test('span: an unrecorded set-aside carries mover and explainedIn; a gate set-aside\'s ## Approved gates is read as the standing approval or a sign-off, a plan set-aside\'s is not; cannotShow names the signed-gate case', (t) => {
+  const h = setup(t)
+  const S = (start) => ({ settings: { parallel_ceiling: 2 }, start })
+  const gate = { stage: 'gate', reasonClass: 'gate', setAsideAt: 'gate' }
+  emitAll(h, 'demo', byTs([
+    // gated: the p21-1 shape, a gate set-aside then a resume with no gate-signed line
+    [W(4, '00:00'), 'slot-taken', 'gated', S('start')],
+    [W(4, '00:30'), 'set-aside', 'gated', gate],
+    [W(4, '00:30'), 'slot-freed', 'gated', { outcome: 'set-aside' }],
+    [W(4, '02:00'), 'slot-taken', 'gated', S('resume')],
+    // signed: the chorus-p18-7 shape, approve-gates' bare line and no gate-signed line
+    [W(5, '00:00'), 'set-aside', 'signed', gate],
+    [W(5, '01:00'), 'lane-taken', 'signed', {}],
+    [W(5, '02:00'), 'set-aside', 'noted', { stage: 'implement', reasonClass: 'needs-human', setAsideAt: 'run' }],
+    [W(5, '03:00'), 'lane-taken', 'noted', {}],
+    [W(5, '04:00'), 'set-aside', 'both', gate],
+    [W(5, '05:00'), 'lane-taken', 'both', {}],
+    [W(6, '00:00'), 'set-aside', 'planned', { stage: 'plan', reasonClass: 'plan-rejected', setAsideAt: 'run' }],
+    [W(6, '01:00'), 'lane-taken', 'planned', {}],
+    [W(6, '02:00'), 'set-aside', 'postsign', gate],
+    [W(6, '03:00'), 'gate-signed', 'postsign', { standing: true, gates: 1 }],
+    [W(6, '04:00'), 'slot-taken', 'postsign', S('resume')],
+    [W(7, '00:00'), 'set-aside', 'waiting', gate],
+  ]))
+  rolloutNote(h, 'demo', { notes: ['- 2026-09-04 lead: [[noted|the noted task]] resumed by hand'] })
+  const standing = standingLine(h, 'spend: x — cap 8 USD total', '2026-09-04', 8, 30, 'task')
+  assert.match(standing, /^- spend: x — cap 8 USD total \(approved 2026-09-04 under the standing approval: /)
+  taskNote(h, 'gated', { body: `## Approved gates\n\n${standing}` })
+  taskNote(h, 'signed', { body: '## Approved gates\n\n- spend: y (approved 2026-09-04)' })
+  taskNote(h, 'noted')
+  taskNote(h, 'both', { body: `## Needs you\n\nWhich card?\n\n## Approved gates\n\n- spend: w (approved 2026-09-05)\n${standing}\n- spend: v signed by hand` })
+  taskNote(h, 'planned', { body: '## Approved gates\n\n- spend: z (approved 2026-09-04)' })
+  taskNote(h, 'postsign', { body: `## Approved gates\n\n${standing}` })
+  const s = span(h)
+  const by = Object.fromEntries(entryOf(s, 'demo').friction.filter((x) => x.kind === 'set-aside').map((x) => [x.task, x]))
+  const at = (d, hm) => `2026-09-0${d}T${hm}:00.000Z`
+  assert.deepEqual([by.gated.movedBy, by.gated.mover, by.gated.explainedIn],
+    ['unrecorded', { kind: 'slot-taken', at: at(4, '02:00'), start: 'resume' }, ['## Approved gates: standing approval']])
+  assert.deepEqual([by.signed.movedBy, by.signed.mover, by.signed.explainedIn],
+    ['unrecorded', { kind: 'lane-taken', at: at(5, '01:00') }, ['## Approved gates: sign-off']])
+  assert.deepEqual([by.noted.movedBy, by.noted.explainedIn], ['unrecorded', ['rollout ## Notes']], 'an aliased link on a line that is no repair line')
+  assert.deepEqual(by.both.explainedIn, ['## Needs you', '## Approved gates: standing approval', '## Approved gates: sign-off', '## Approved gates'],
+    'each label once, standing first; a hand-written line is the bare label')
+  assert.deepEqual([by.planned.movedBy, by.planned.explainedIn], ['unrecorded', []], 'gates are read only for a gate set-aside')
+  assert.deepEqual([by.postsign.movedBy, by.postsign.mover, by.postsign.explainedIn], ['gate-signed', null, null])
+  assert.deepEqual([by.waiting.movedBy, by.waiting.mover, by.waiting.explainedIn], [null, null, null])
+  const c = s.cannotShow.find((x) => x.startsWith('[[gated]] (demo) '))
+  assert.ok(c && c.startsWith('[[gated]] (demo) moved on with no recorded act: a Human fix, a gate signed on the note with no gate-signed line, or a hand edit'), JSON.stringify(s.cannotShow))
+  assert.ok(c.includes('## Approved gates') && c.includes('[[demo]]\'s ## Notes'), c)
 })
 
 // score.py's handsOff lists landed tasks only: span reads the asks from the record, so an act on a task still waiting
@@ -486,7 +552,7 @@ test('the Watch reader: recurring needs two rollouts in the cycle, not one rollo
   fs.appendFileSync(reflectionsFile(h), '{"kind": "watch", "id": "torn\n')
   const sp2 = fakeSpan(h, RID(2), ['a'])
   ok(h, watchArgs(sp2, ['a']))
-  assert.equal(ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks]).stdout, 'no rule proposal: no decision task\n', 'one rollout in two weeks')
+  assert.equal(ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks]).stdout, 'no rule proposal or held trade: no decision task\n', 'one rollout in two weeks')
   ok(h, ['close', '--span', sp2])
   const sp3 = fakeSpan(h, RID(3), ['b'])
   ok(h, watchArgs(sp3, ['b']))
@@ -496,7 +562,7 @@ test('the Watch reader: recurring needs two rollouts in the cycle, not one rollo
   ok(h, ['close', '--span', sp3])
   const sp4 = fakeSpan(h, RID(4), ['c'], { until: '2026-11-30T00:00:00.000Z' })
   ok(h, watchArgs(sp4, ['c']))
-  assert.equal(ok(h, ['decide', '--span', sp4, '--tasks-dir', h.tasks]).stdout, 'no rule proposal: no decision task\n', 'a new cycle starts empty')
+  assert.equal(ok(h, ['decide', '--span', sp4, '--tasks-dir', h.tasks]).stdout, 'no rule proposal or held trade: no decision task\n', 'a new cycle starts empty')
   // stale: span's watches[] marks a Watch with no line for 28 days before until (lines written by hand, back-dated)
   const h2 = setup(t)
   const wl = (ts, rid, rollouts) => JSON.stringify({ v: 1, ts, host: 'h', rollout: null, task: null, kind: 'watch', id: wid, rule: RULE, shape: SHAPE, rollouts, count: 1, reflection: rid })
@@ -545,7 +611,7 @@ test('declines: a no closes the cycle; one later rollout is neither new nor offe
   emitAll(h, 'c', byTs(life('x', W(4, '00:00'), W(4, '01:00'), { lane: [W(4, '01:00'), W(4, '01:10')] })))
   rolloutNote(h, 'c')
   const files = listing(h.tasks)
-  assert.equal(ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-17T09:00+10:00']).stdout, 'no rule proposal: no decision task\n')
+  assert.equal(ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-17T09:00+10:00']).stdout, 'no rule proposal or held trade: no decision task\n')
   assert.deepEqual(listing(h.tasks), files, 'no file written')
   ok(h, ['close', '--span', sp2])
   const c2 = rlines(h).at(-1)
@@ -815,7 +881,7 @@ test('decide: no task without a rule item; one task for the next Melbourne morni
   const [wid, one] = ids(h, [['w', RULE, SHAPE], ['w', 'grill-fit § How a fork comes back', 'a fork routed no gate']])
   const sp0 = fakeSpan(h, RID(1), ['a', 'b'])
   ok(h, watchArgs(sp0, ['a'], { rule: 'grill-fit § How a fork comes back', shape: 'a fork routed no gate' }))
-  assert.equal(ok(h, ['decide', '--span', sp0, '--tasks-dir', h.tasks]).stdout, 'no rule proposal: no decision task\n', 'Watches to confirm alone write nothing')
+  assert.equal(ok(h, ['decide', '--span', sp0, '--tasks-dir', h.tasks]).stdout, 'no rule proposal or held trade: no decision task\n', 'Watches to confirm alone write nothing')
   assert.deepEqual(listing(h.tasks), ['Archive', 'Archive/2026', 'Archive/Rollouts'])
   ok(h, watchArgs(sp0, ['a', 'b']))
   const bad = path.join(h.home, 'bad.json')
@@ -951,6 +1017,262 @@ test('close: a span knob or a revert tune.py wrote with no knob line is exit 2 n
   assert.deepEqual([c.kind, c.counts.knobs, c.counts.landed, c.counts.reverted, c.counts.rules], ['reflection', 1, 0, 1, 1])
 })
 
+// ---- held trades (p22-7, ADR 0037 d1 and d5) ---------------------------------------------------------------------------------
+// A knob held as Lachy's call (a trade or a caution) goes into the decision task once per (knob id, from); close refuses
+// while one has no line there from this Reflection; a yes that cannot apply is answered moot.
+
+const TRADE_KEY = ['k', 'o/r', 'max_plan_rounds', 'plan-rejected-raise', 1]
+const TRADE_LEAD = 'Trades for Lachy (ADR 0037 d1: a knob that trades one headline against the other, or a caution, is his call; a yes runs the by-hand Reflection, a no is recorded when this task is done):'
+const tradeProp = (kid, over = {}) => ({ key: 'max_plan_rounds', rule: 'plan-rejected-raise', direction: 1, from: 3, to: 4, ranAt: 3, knob_key: kid,
+  evidence: 'e1', trade: { gains: ['handsOffRate'], costs: ['quality'] }, caution: null, ...over })
+// A span whose one read rollout proposes `prop`, held in knobs with `reason`.
+function tradeSpan(h, rid, kid, { prop, reason, until, rollout = 'b', rollouts = [rollout], entries = {} }) {
+  return fakeSpan(h, rid, rollouts, { until, entries: { [rollout]: { window: { activeEnd: '2026-09-07T00:00:00.000Z' }, proposals: [prop] }, ...entries },
+    knobs: { revert: [], land: [], held: [{ id: kid, rollout, reason }] } })
+}
+const tradeItem = (kid, reason, { from = 3, to = 4, rollout = 'b', caution = '' } = {}) =>
+  `- trade ${kid} at ${from}: max_plan_rounds ${from} -> ${to} (plan-rejected-raise); ${reason}${caution ? `; caution ${caution}` : ''}; evidence e1; repo o/r; rollouts [[${rollout}]]; a yes runs /thread:reflect [[${rollout}]] and picks max_plan_rounds (plan-rejected-raise)`
+const setStatus = (p, status) => fs.writeFileSync(p, fs.readFileSync(p, 'utf8').replace(/\nstatus: \w+\n/, `\nstatus: ${status}\n`))
+const notesOf = (text) => text.slice(text.indexOf('## Notes'), text.indexOf('## Launch'))
+
+test('decide: a held trade alone writes the decision task with a trade item and no rule line; a re-run is byte-identical; a later week keeps it open once; a done task decides it; a new from is a new item; a dropped task decides nothing', (t) => {
+  const h = setup(t)
+  const [kid] = ids(h, [TRADE_KEY])
+  const prop = tradeProp(kid)
+  const reason = heldReason(h, prop)
+  assert.equal(reason, 'a trade (gains handsOffRate, costs quality): Lachy decides')
+  const dec = path.join(h.home, 'decisions.json')
+  fs.writeFileSync(dec, '{}')
+  const decide = (sp, now) => ok(h, ['decide', '--span', sp, '--decisions', dec, '--tasks-dir', h.tasks, '--now', now])
+  // R1: the trade alone writes the task
+  const sp1 = tradeSpan(h, RID(1), kid, { prop, reason })
+  ok(h, ['knobs', '--span', sp1])
+  assert.equal(decide(sp1, '2026-09-10T09:00+10:00').stdout, 'decision task thread-skill-decisions-2026-09-10: scheduled 2026-09-11 (new)\n')
+  const p = path.join(h.tasks, 'thread-skill-decisions-2026-09-10.md')
+  const first = fs.readFileSync(p, 'utf8')
+  assert.ok(first.endsWith(`## Reflection ${RID(1)}\n\n${TRADE_LEAD}\n${tradeItem(kid, reason)}\n`), first)
+  for (const not of ['- confirm ', 'Watches to confirm (', 'No new rule items', '\n## Still open\n']) assert.ok(!first.includes(not), not)
+  assert.ok(notesOf(first).includes('held trades'), notesOf(first))
+  assert.deepEqual(rlines(h).filter((l) => l.kind === 'proposal' && l.altitude === 'rule'), [], 'a trade writes no proposal line')
+  decide(sp1, '2026-09-11T00:10+10:00')
+  assert.equal(fs.readFileSync(p, 'utf8'), first, 'a re-run is byte-identical (its own section is skipped)')
+  ok(h, ['close', '--span', sp1, '--tasks-dir', h.tasks])
+  // R2: still open, listed once, a ## Still open line
+  const sp2 = tradeSpan(h, RID(2), kid, { prop, reason, until: '2026-09-17T14:00:00.000Z' })
+  ok(h, ['knobs', '--span', sp2])
+  assert.equal(decide(sp2, '2026-09-17T23:50+10:00').stdout, 'decision task thread-skill-decisions-2026-09-10: scheduled 2026-09-18 (was 2026-09-11) (appended)\n')
+  const second = fs.readFileSync(p, 'utf8')
+  assert.ok(second.includes(`## Reflection ${RID(2)}\n\nNo new trades; still open: trade ${kid} at 3 (see ## Still open)\n`), second)
+  assert.ok(second.includes(`## Still open\n\ntrade ${kid} at 3 still open 2026-09-18: Reflection ${RID(2)}, rollouts [[b]]\n`), second)
+  assert.equal(second.split(`- trade ${kid} at 3: `).length, 2, 'listed once')
+  decide(sp2, '2026-09-18T00:10+10:00')
+  assert.equal(fs.readFileSync(p, 'utf8'), second, 'a Still open re-run is byte-identical')
+  ok(h, ['close', '--span', sp2, '--tasks-dir', h.tasks])
+  // R3: the task is done, so the trade at 3 is decided and never offered again
+  setStatus(p, 'done')
+  const files = listing(h.tasks)
+  const doneSha = sha(p)
+  const rb = bytes(reflectionsFile(h))
+  const sp3 = tradeSpan(h, RID(3), kid, { prop, reason, until: '2026-09-24T14:00:00.000Z' })
+  assert.equal(decide(sp3, '2026-09-24T09:00+10:00').stdout,
+    `trade ${kid} at 3: decided in [[thread-skill-decisions-2026-09-10]]\nno rule proposal or held trade: no decision task\n`)
+  assert.deepEqual([listing(h.tasks), sha(p), bytes(reflectionsFile(h))], [files, doneSha, rb], 'nothing written')
+  // R4: the same knob at a new from is a new item
+  const p4 = tradeProp(kid, { from: 4, to: 5, ranAt: 4 })
+  const sp4 = tradeSpan(h, RID(4), kid, { prop: p4, reason, until: '2026-09-24T14:00:00.000Z' })
+  assert.equal(decide(sp4, '2026-09-24T09:00+10:00').stdout, 'decision task thread-skill-decisions-2026-09-24: scheduled 2026-09-25 (new)\n')
+  assert.ok(fs.readFileSync(path.join(h.tasks, 'thread-skill-decisions-2026-09-24.md'), 'utf8').includes(`${TRADE_LEAD}\n${tradeItem(kid, reason, { from: 4, to: 5 })}\n`))
+  // a dropped task decides nothing: the trade is listed anew
+  const h2 = setup(t)
+  const d1 = tradeSpan(h2, RID(1), kid, { prop, reason })
+  ok(h2, ['decide', '--span', d1, '--tasks-dir', h2.tasks, '--now', '2026-09-10T09:00+10:00'])
+  setStatus(path.join(h2.tasks, 'thread-skill-decisions-2026-09-10.md'), 'dropped')
+  const d2 = tradeSpan(h2, RID(2), kid, { prop, reason, until: '2026-09-17T14:00:00.000Z' })
+  assert.equal(ok(h2, ['decide', '--span', d2, '--tasks-dir', h2.tasks, '--now', '2026-09-17T23:50+10:00']).stdout,
+    'decision task thread-skill-decisions-2026-09-17: scheduled 2026-09-18 (new)\n')
+  assert.ok(fs.readFileSync(path.join(h2.tasks, 'thread-skill-decisions-2026-09-17.md'), 'utf8').endsWith(`## Reflection ${RID(2)}\n\n${TRADE_LEAD}\n${tradeItem(kid, reason)}\n`))
+})
+
+test('decide: only the two Lachy-decides holds are listed: a caution with its text; agreement, partial-window and not-newest holds are not; an older rollout\'s trade names that rollout; a key this Reflection\'s revert moved waits', (t) => {
+  const [kid] = ids(setup(t), [TRADE_KEY])
+  const NOW = '2026-09-10T09:00+10:00'
+  const task = (h) => fs.readFileSync(path.join(h.tasks, 'thread-skill-decisions-2026-09-10.md'), 'utf8')
+  // a caution
+  const h = setup(t)
+  const caution = 'risks quality, breached (40 against 30): a Guardrail against a Guardrail, Lachy decides'
+  const cprop = tradeProp(kid, { trade: null, caution })
+  const creason = heldReason(h, cprop)
+  assert.equal(creason, 'a caution: Lachy decides')
+  ok(h, ['decide', '--span', tradeSpan(h, RID(1), kid, { prop: cprop, reason: creason }), '--tasks-dir', h.tasks, '--now', NOW])
+  assert.ok(task(h).includes(`${TRADE_LEAD}\n${tradeItem(kid, creason, { caution })}\n`), task(h))
+  // holds that are no trade: span gives `not the repo's newest rollout` only once auto_check passes, so a trade keeps
+  // its own reason; decide reads the two Lachy-decides reasons alone
+  for (const reason of ['agreement 1 of 3', 'partial window', 'not the repo\'s newest rollout ([[c]] is)']) {
+    const hx = setup(t)
+    const before = listing(hx.tasks)
+    const r = ok(hx, ['decide', '--span', tradeSpan(hx, RID(1), kid, { prop: tradeProp(kid, { trade: null }), reason }), '--tasks-dir', hx.tasks, '--now', NOW])
+    assert.equal(r.stdout, 'no rule proposal or held trade: no decision task\n', reason)
+    assert.deepEqual(listing(hx.tasks), before, reason)
+  }
+  // a trade only the older rollout a proposes (the newer c proposes nothing for it) is offered on a
+  const ho = setup(t)
+  const prop = tradeProp(kid)
+  const reason = heldReason(ho, prop)
+  const older = fakeSpan(ho, RID(1), ['a', 'c'], {
+    entries: { a: { window: { activeEnd: '2026-09-05T00:00:00.000Z' }, proposals: [prop] }, c: { window: { activeEnd: '2026-09-08T00:00:00.000Z' }, proposals: [] } },
+    knobs: { revert: [], land: [], held: [{ id: kid, rollout: 'a', reason }] } })
+  ok(ho, ['decide', '--span', older, '--tasks-dir', ho.tasks, '--now', NOW])
+  assert.ok(task(ho).includes(tradeItem(kid, reason, { rollout: 'a' })), task(ho))
+  // a revert of the same key this Reflection: the trade's from is stale, so it waits for the next reading
+  const hr = setup(t)
+  fs.writeFileSync(tuningsFile(hr), `${JSON.stringify({ v: 2, ts: '2026-09-08T01:00:00.000Z', host: 'h', rollout: 'b', task: null, kind: 'tuning', id: 't-rev', repo: 'o/r',
+    window: { since: '2026-09-07T00:00:00.000Z', until: '2026-09-08T00:00:00.000Z' }, scores: {}, auto: true, reflection: RID(1), reverts: 't-old',
+    applied: [{ key: 'max_plan_rounds', from: 4, to: 3, ranAt: 4, rule: 'revert:plan-rejected-raise', evidence: 'e', agreeing: 0 }] })}\n`)
+  const sp = tradeSpan(hr, RID(1), kid, { prop, reason })
+  const before = listing(hr.tasks)
+  assert.equal(ok(hr, ['decide', '--span', sp, '--tasks-dir', hr.tasks, '--now', NOW]).stdout,
+    `trade ${kid} at 3: a revert of max_plan_rounds comes first this Reflection\nno rule proposal or held trade: no decision task\n`)
+  assert.deepEqual(listing(hr.tasks), before)
+  ok(hr, ['knobs', '--span', sp])
+  ok(hr, ['close', '--span', sp, '--tasks-dir', path.join(hr.home, 'no-such-dir')]) // close checks no skipped trade, so reads no vault
+})
+
+test('decide: a trade beside a rule item gives the rule item, the confirm block, then the trade block; close\'s decisionTask is the rule line\'s', (t) => {
+  const h = setup(t)
+  const [kid] = ids(h, [TRADE_KEY])
+  const [wid, one] = ids(h, [['w', RULE, SHAPE], ['w', 'grill-fit § How a fork comes back', 'a fork routed no gate']])
+  const prop = tradeProp(kid)
+  const reason = heldReason(h, prop)
+  const sp = tradeSpan(h, RID(1), kid, { prop, reason, rollouts: ['a', 'b'] })
+  twoWatches(h, RID(1), sp)
+  ok(h, ['decide', '--span', sp, '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00'])
+  const text = fs.readFileSync(path.join(h.tasks, 'thread-skill-decisions-2026-09-10.md'), 'utf8')
+  assert.equal(text.slice(text.indexOf(`## Reflection ${RID(1)}`)), [`## Reflection ${RID(1)}`, '',
+    `- ${wid}: rule ${RULE}; shape ${SHAPE}; rollouts [[a]], [[b]]; why not given; amends not given`, '',
+    'Watches to confirm (one rollout each; a yes files the rule\'s grill, a no records the decline):',
+    `- confirm ${one}: rule grill-fit § How a fork comes back; shape a fork routed no gate; rollout [[a]]`, '',
+    TRADE_LEAD, tradeItem(kid, reason), ''].join('\n'))
+  ok(h, ['knobs', '--span', sp])
+  ok(h, ['close', '--span', sp, '--tasks-dir', h.tasks])
+  const c = rlines(h).at(-1)
+  assert.deepEqual([c.kind, c.counts.rules, c.decisionTask], ['reflection', 1, 'thread-skill-decisions-2026-09-10'])
+})
+
+test('decide: with no recurring Watch, a decisions.json of {} prints the no-task line and writes nothing; close then closes', (t) => {
+  const h = setup(t)
+  const sp = fakeSpan(h, RID(1), ['a', 'b'])
+  ok(h, watchArgs(sp, ['a']))
+  const dec = path.join(h.out, 'decisions.json')
+  fs.writeFileSync(dec, '{}')
+  const files = listing(h.tasks)
+  const before = bytes(reflectionsFile(h))
+  assert.equal(ok(h, ['decide', '--span', sp, '--decisions', dec, '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00']).stdout,
+    'no rule proposal or held trade: no decision task\n')
+  assert.deepEqual([listing(h.tasks), bytes(reflectionsFile(h))], [files, before], 'nothing written')
+  ok(h, ['close', '--span', sp])
+  const c = rlines(h).at(-1)
+  assert.deepEqual([c.kind, c.counts.rules, c.counts.sightings, 'decisionTask' in c], ['reflection', 0, 1, false])
+})
+
+test('close: a held trade with no decision task line from this Reflection is exit 2 naming decide, nothing written; after decide, close writes decisionTask', (t) => {
+  const h = setup(t)
+  const [kid] = ids(h, [TRADE_KEY])
+  const prop = tradeProp(kid)
+  const reason = heldReason(h, prop)
+  const close = (hh, sp, extra = []) => reflect(hh, ['close', '--span', sp, '--tasks-dir', hh.tasks, ...extra])
+  const refusal = (rid) => `reflect: Reflection ${rid} is not closed: held trade ${kid} at 3 has no decision task line from this Reflection: run decide\n`
+  const sp1 = tradeSpan(h, RID(1), kid, { prop, reason })
+  ok(h, ['knobs', '--span', sp1])
+  const before = bytes(reflectionsFile(h))
+  const r = close(h, sp1)
+  assert.deepEqual([r.status, r.stderr], [2, refusal(RID(1))])
+  assert.deepEqual(bytes(reflectionsFile(h)), before, 'nothing written')
+  assert.deepEqual([close(h, sp1, ['--dry-run']).status, bytes(reflectionsFile(h))], [2, before], 'a dry run is refused alike')
+  ok(h, ['decide', '--span', sp1, '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00'])
+  assert.equal(close(h, sp1).status, 0)
+  const c1 = rlines(h).at(-1)
+  assert.deepEqual([c1.kind, c1.quiet, c1.counts.rules, c1.decisionTask], ['reflection', true, 0, 'thread-skill-decisions-2026-09-10'], 'a trade leaves the week quiet')
+  // R2: still open; refused before decide, then its Still open line in the R1 task names this Reflection
+  const sp2 = tradeSpan(h, RID(2), kid, { prop, reason, until: '2026-09-17T14:00:00.000Z' })
+  ok(h, ['knobs', '--span', sp2])
+  assert.deepEqual([close(h, sp2).stderr], [refusal(RID(2))])
+  ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-17T23:50+10:00'])
+  assert.equal(close(h, sp2).status, 0)
+  assert.equal(rlines(h).at(-1).decisionTask, 'thread-skill-decisions-2026-09-10')
+  // R3: the task is done, so close needs no decide, and names no task
+  setStatus(path.join(h.tasks, 'thread-skill-decisions-2026-09-10.md'), 'done')
+  const sp3 = tradeSpan(h, RID(3), kid, { prop, reason, until: '2026-09-24T14:00:00.000Z' })
+  ok(h, ['knobs', '--span', sp3])
+  assert.equal(close(h, sp3).status, 0, 'decided')
+  assert.ok(!('decisionTask' in rlines(h).at(-1)))
+  // a trade listed only in a dropped task is refused until decide lists it anew
+  const h2 = setup(t)
+  const d1 = tradeSpan(h2, RID(1), kid, { prop, reason })
+  ok(h2, ['decide', '--span', d1, '--tasks-dir', h2.tasks, '--now', '2026-09-10T09:00+10:00'])
+  setStatus(path.join(h2.tasks, 'thread-skill-decisions-2026-09-10.md'), 'dropped')
+  ok(h2, ['knobs', '--span', d1])
+  assert.deepEqual([close(h2, d1).status, close(h2, d1).stderr], [2, refusal(RID(1))], 'a dropped task\'s listing does not count')
+  ok(h2, ['decide', '--span', d1, '--tasks-dir', h2.tasks, '--now', '2026-09-10T10:00+10:00'])
+  assert.equal(close(h2, d1).status, 0)
+  assert.equal(rlines(h2).at(-1).decisionTask, 'thread-skill-decisions-2026-09-10-2')
+  // a held trade and no tasks dir: exit 1
+  const h3 = setup(t)
+  const d3 = tradeSpan(h3, RID(1), kid, { prop, reason })
+  ok(h3, ['knobs', '--span', d3])
+  const x = reflect(h3, ['close', '--span', d3, '--tasks-dir', path.join(h3.home, 'nope')])
+  assert.equal(x.status, 1)
+  assert.match(x.stderr, /--tasks-dir \S+nope is not a directory/)
+})
+
+test('moot: a yes that cannot apply is recorded under its section; the task can be done; the trade is offered again at the same from; a repeat exists; done, unknown or empty targets are exit 2', (t) => {
+  const h = setup(t)
+  const [kid] = ids(h, [TRADE_KEY])
+  const prop = tradeProp(kid)
+  const reason = heldReason(h, prop)
+  const slug = 'thread-skill-decisions-2026-09-10'
+  const p = path.join(h.tasks, `${slug}.md`)
+  const mootArgs = ({ task = slug, trade = kid, from = 3, why = 'tune.py: from 3 is stale', now = '2026-09-11T08:00+10:00' } = {}) =>
+    ['moot', '--task', task, '--trade', trade, '--from', String(from), '--why', why, '--tasks-dir', h.tasks, '--now', now]
+  ok(h, ['decide', '--span', tradeSpan(h, RID(1), kid, { prop, reason }), '--tasks-dir', h.tasks, '--now', '2026-09-10T09:00+10:00'])
+  const pre = fs.readFileSync(p, 'utf8')
+  const dry = ok(h, [...mootArgs(), '--dry-run'])
+  assert.match(dry.stdout, new RegExp(`^dry run, nothing written: moot trade ${kid} at 3 in \\[\\[${slug}\\]\\]`, 'm'))
+  assert.equal(fs.readFileSync(p, 'utf8'), pre, '--dry-run writes nothing')
+  assert.equal(ok(h, mootArgs()).stdout, `moot trade ${kid} at 3 in [[${slug}]] (## Reflection ${RID(1)})\n`)
+  const text = fs.readFileSync(p, 'utf8')
+  assert.equal(text, `${pre.trimEnd()}\nmoot ${kid} at 3 2026-09-11: tune.py: from 3 is stale\n`, 'the R1 section ends with the moot line')
+  assert.equal(ok(h, mootArgs()).stdout, `exists moot ${kid} at 3 in [[${slug}]]\n`)
+  assert.equal(fs.readFileSync(p, 'utf8'), text, 'a repeat is byte-identical')
+  taskNote(h, 'plain-task', { tags: '[task, ai]' })
+  for (const [over, re] of [[{ trade: 'deadbeef' }, `\\[\\[${slug}\\]\\] lists no trade deadbeef at 3`], [{ from: 4 }, `lists no trade ${kid} at 4`],
+    [{ why: '  ' }, '--why'], [{ task: 'plain-task' }, 'decisions'], [{ task: 'thread-skill-decisions-2099-01-01' }, 'no note']]) {
+    const x = reflect(h, mootArgs(over))
+    assert.equal(x.status, 2, JSON.stringify(over))
+    assert.match(x.stderr, new RegExp(re), JSON.stringify(over))
+    assert.equal(fs.readFileSync(p, 'utf8'), text, JSON.stringify(over))
+  }
+  // R2, the same trade at 3: the moot item decides nothing, so the open task lists it anew under R2
+  const sp2 = tradeSpan(h, RID(2), kid, { prop, reason, until: '2026-09-17T14:00:00.000Z' })
+  ok(h, ['knobs', '--span', sp2])
+  ok(h, ['decide', '--span', sp2, '--tasks-dir', h.tasks, '--now', '2026-09-17T23:50+10:00'])
+  const t2 = fs.readFileSync(p, 'utf8')
+  assert.ok(t2.endsWith(`## Reflection ${RID(2)}\n\n${TRADE_LEAD}\n${tradeItem(kid, reason)}\n`), t2)
+  assert.ok(!t2.includes('\n## Still open\n'), 'a new item, not a Still open line')
+  ok(h, ['close', '--span', sp2, '--tasks-dir', h.tasks])
+  // the next moot goes to the last section without one; with both moot the done task decides nothing
+  assert.equal(ok(h, mootArgs({ why: 'the fresh score\nno longer proposes it', now: '2026-09-18T08:00+10:00' })).stdout,
+    `moot trade ${kid} at 3 in [[${slug}]] (## Reflection ${RID(2)})\n`)
+  assert.ok(fs.readFileSync(p, 'utf8').endsWith(`\nmoot ${kid} at 3 2026-09-18: the fresh score no longer proposes it\n`))
+  setStatus(p, 'done')
+  const sp3 = tradeSpan(h, RID(3), kid, { prop, reason, until: '2026-09-24T14:00:00.000Z' })
+  assert.equal(ok(h, ['decide', '--span', sp3, '--tasks-dir', h.tasks, '--now', '2026-09-24T09:00+10:00']).stdout,
+    'decision task thread-skill-decisions-2026-09-24: scheduled 2026-09-25 (new)\n', 'offered again at the same from')
+  assert.ok(fs.readFileSync(path.join(h.tasks, 'thread-skill-decisions-2026-09-24.md'), 'utf8').includes(tradeItem(kid, reason)))
+  const dn = reflect(h, mootArgs())
+  assert.equal(dn.status, 2)
+  assert.match(dn.stderr, new RegExp(`${slug} is done: a done task is never written`))
+})
+
 // ---- rung ------------------------------------------------------------------------------------------------------------------
 
 const hasTomllib = spawnSync('python3', ['-c', 'import tomllib']).status === 0
@@ -1039,5 +1361,5 @@ test('the Verify week: one watch line per Watch, a rule line and the decision ta
   const h2 = setup(t)
   const sp = fakeSpan(h2, RID(1), ['week-a', 'week-b'])
   ok(h2, watchArgs(sp, ['week-a']))
-  assert.equal(ok(h2, ['decide', '--span', sp, '--tasks-dir', h2.tasks]).stdout, 'no rule proposal: no decision task\n')
+  assert.equal(ok(h2, ['decide', '--span', sp, '--tasks-dir', h2.tasks]).stdout, 'no rule proposal or held trade: no decision task\n')
 })
