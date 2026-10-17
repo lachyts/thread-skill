@@ -1,11 +1,13 @@
 // The vault grammar is defined once (skills/_shared/vault-grammar.md): the phase/task filename pattern and
 // the status sets. Its readers keep literal copies (reconcile-project.py's PHASE_N, LANDED and ACTIVE,
-// reconcile-rollout.py's PHASED_STEM_RE, next-action.py's DEAD_STATUSES and OPEN_STATUSES) because none of
-// them imports a doc; this test pins each copy to the doc, so neither side drifts silently. The two scripts'
-// phase-number helpers (reconcile-project.py's phase_key/phase_sort, reconcile-rollout.py's
-// _phase_key/_phase_sort) are run on the doc's own examples (`p03` is `p3`, `p3.5` and `p3.50` distinct, the
-// numeric order). The prose readers (orient § 2, reshuffle R1, reconcile-project.py's docstring) cite the doc
-// instead of restating it, and § Readers keeps the readers not yet adopted apart from the conforming ones.
+// reconcile-rollout.py's PHASED_STEM_RE and SHORT_ID_RE, next-action.py's DEAD_STATUSES and OPEN_STATUSES,
+// repo-track.sh's `active` and its `-` as `_` read) because none of them imports a doc; this test pins each
+// copy to the doc, so neither side drifts silently. Close's candidate statuses (SKILL.md's **Candidates.**)
+// are Active and Review and cite the doc. The two scripts' phase-number helpers (reconcile-project.py's
+// phase_key/phase_sort, reconcile-rollout.py's _phase_key/_phase_sort) are run on the doc's own examples
+// (`p03` is `p3`, `p3.5` and `p3.50` distinct, the numeric order). The prose readers (orient § 2, reshuffle
+// R1, reconcile-project.py's docstring) cite the doc instead of restating it, and § Readers lists every
+// reader, with no Not yet adopted line left (a stale one fails).
 // Controls prove the checks are not vacuous. Reads files and imports the scripts (no __pycache__ written).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -18,6 +20,8 @@ const CITE = '_shared/vault-grammar.md'
 const doc = read(DOC)
 const orient = read('skills/orient/SKILL.md')
 const reshuffle = read('skills/orient/reshuffle.md')
+const close = read('skills/close/SKILL.md')
+const repoTrack = read('skills/close/scripts/repo-track.sh')
 
 // ---- the doc's grammar --------------------------------------------------------------------------------
 
@@ -28,11 +32,12 @@ function statusSet(text, label) {
   return line ? [...line.matchAll(/`([^`]+)`/g)].map((m) => m[1]).sort() : null
 }
 
-// What the doc states: {landed, active, phaseN}, each null when the doc does not state it.
+// What the doc states: {landed, active, review, phaseN}, each null when the doc does not state it.
 function grammarOf(text) {
   const names = section(text, /^## Phase and task filenames\b/)
   const m = names?.match(/`PHASE_N` = `([^`]+)`/)
-  return { landed: statusSet(text, 'Landed'), active: statusSet(text, 'Active'), phaseN: m ? m[1] : null }
+  return { landed: statusSet(text, 'Landed'), active: statusSet(text, 'Active'), review: statusSet(text, 'Review'),
+    phaseN: m ? m[1] : null }
 }
 
 // The scripts' copies, loaded by import (each script is `__main__`-guarded).
@@ -46,7 +51,8 @@ def load(name, p):
     return m
 rp, rr, na = (load(n, p) for n, p in zip(("rp", "rr", "na"), sys.argv[1:4]))
 print(json.dumps({"LANDED": sorted(rp.LANDED), "ACTIVE": sorted(rp.ACTIVE), "PHASE_N": rp.PHASE_N,
-                  "PHASED_STEM_RE": rr.PHASED_STEM_RE.pattern, "DEAD_STATUSES": sorted(na.DEAD_STATUSES),
+                  "PHASED_STEM_RE": rr.PHASED_STEM_RE.pattern, "SHORT_ID_RE": rr.SHORT_ID_RE.pattern,
+                  "DEAD_STATUSES": sorted(na.DEAD_STATUSES),
                   "OPEN_STATUSES": sorted(na.OPEN_STATUSES), "doc": rp.__doc__}))
 `
 function scripts() {
@@ -65,9 +71,43 @@ function mismatches(g, s) {
   if (!g.active || !eq(s.ACTIVE, g.active)) out.push('reconcile-project ACTIVE')
   if (!g.phaseN || s.PHASE_N !== g.phaseN) out.push('reconcile-project PHASE_N')
   if (!g.phaseN || !s.PHASED_STEM_RE.includes(`-p(?P<n>${g.phaseN})-`)) out.push('reconcile-rollout PHASED_STEM_RE')
+  if (!g.phaseN || !s.SHORT_ID_RE.includes(`p(${g.phaseN})-(\\d+)`)) out.push('reconcile-rollout SHORT_ID_RE')
   if (!g.landed || !eq(s.DEAD_STATUSES, g.landed)) out.push('next-action DEAD_STATUSES')
   if (!g.active || !eq(s.OPEN_STATUSES, g.active)) out.push('next-action OPEN_STATUSES')
   return out
+}
+
+// ---- close's copies: repo-track.sh's literal and the candidate statuses --------------------------------
+
+// The names of repo-track.sh's failed checks against the doc's grammar `g`; [] when its `active` literal equals
+// Active and it reads a status lower-cased with `-` as `_`. A missing copy is a mismatch, never a crash.
+function repoTrackChecks(g, text) {
+  const out = []
+  const m = text.match(/^active='([^']*)'/m)
+  const set = m ? m[1].split(/\s+/).filter(Boolean).sort() : null
+  if (!g.active || !set || JSON.stringify(set) !== JSON.stringify(g.active)) out.push('repo-track.sh active')
+  if (!text.includes('tolower(') || !text.includes('gsub(/-/, "_"')) out.push('repo-track.sh dash read')
+  return out
+}
+
+// The first sentence of close's **Candidates.** paragraph (§ A finished task closes itself), collapsed; null
+// when absent. A sentence ends at `.`, `!` or `?` followed by whitespace, so `vault-grammar.md` never ends one.
+function candidatesOf(text) {
+  const s = section(text, /^## A finished task closes itself\b/)
+  const para = s?.split(/\n\s*\n/).find((p) => p.startsWith('**Candidates.**'))
+  return para ? collapse(para.slice('**Candidates.**'.length)).trim().split(/(?<=[.!?])\s/)[0] : null
+}
+
+// The names of the failed candidate-status checks; [] when the sentence's `at `status: …`` list is Active ∪
+// Review and the sentence cites the doc.
+function candidateChecks(g, text) {
+  const first = candidatesOf(text)
+  const list = first?.match(/ at `status: ([^`]+)`((?:, `[^`]+`)*)(?: or `([^`]+)`)?/)
+  const set = list ? [list[1], ...[...(list[2] ?? '').matchAll(/`([^`]+)`/g)].map((x) => x[1]), list[3]]
+    .filter(Boolean).sort() : null
+  const want = g.active && g.review ? [...g.active, ...g.review].sort() : null
+  return !want || !set || JSON.stringify(set) !== JSON.stringify(want) || !first.includes(CITE)
+    ? ['close candidate statuses'] : []
 }
 
 // ---- the phase-number helpers, on the doc's own examples ---------------------------------------------
@@ -140,17 +180,19 @@ function readersOf(text) {
   return at < 0 ? { adopted: s, notYet: null } : { adopted: s.slice(0, at), notYet: s.slice(at) }
 }
 const CONFORMING = ['reconcile-project.py', 'reconcile-rollout.py', 'next-action.py', 'orient', 'R1',
-  'tests/contracts/vault-grammar.test.mjs', 'reflect.py']
-const NOT_ADOPTED = ['repo-track.sh', 'candidate statuses', 'SHORT_ID_RE']
+  'tests/contracts/vault-grammar.test.mjs', 'reflect.py', 'repo-track.sh', 'candidate statuses', 'SHORT_ID_RE']
+const NOT_ADOPTED = []
 
-// The names of the failed § Readers checks; [] when every conforming reader is listed as such and the three
-// not yet adopted are named apart, never among the conforming ones.
-function readerChecks(text) {
+// The names of the failed § Readers checks; [] when every conforming reader is listed as such and, with
+// `notAdopted` empty, no Not yet adopted line is left; with it non-empty, those are named apart on that line,
+// never among the conforming ones.
+function readerChecks(text, notAdopted = NOT_ADOPTED) {
   const { adopted, notYet } = readersOf(text)
   const out = CONFORMING.filter((r) => !adopted.includes(r)).map((r) => `lists ${r}`)
+  if (notAdopted.length === 0) return notYet ? [...out, 'stale not yet adopted line'] : out
   if (!notYet) return [...out, 'not yet adopted line']
-  out.push(...NOT_ADOPTED.filter((r) => !notYet.includes(r)).map((r) => `not yet adopted names ${r}`))
-  out.push(...NOT_ADOPTED.filter((r) => adopted.includes(r)).map((r) => `${r} listed as conforming`))
+  out.push(...notAdopted.filter((r) => !notYet.includes(r)).map((r) => `not yet adopted names ${r}`))
+  out.push(...notAdopted.filter((r) => adopted.includes(r)).map((r) => `${r} listed as conforming`))
   return out
 }
 
@@ -206,11 +248,19 @@ test("both scripts' phase-number helpers hold the doc's examples: 03 is 3, 3.5 a
   assert.deepEqual(helperMismatches(ex, results), [])
 })
 
+test("repo-track.sh's active set equals the doc's, read lower-cased with `-` as `_`", () => {
+  assert.deepEqual(repoTrackChecks(grammarOf(doc), repoTrack), [])
+})
+
+test("close's candidate statuses are Active and Review, and cite the doc", () => {
+  assert.deepEqual(candidateChecks(grammarOf(doc), close), [])
+})
+
 test('orient § 2, reshuffle R1 and the reconcile-project docstring cite the doc and restate nothing', () => {
   assert.deepEqual(citations({ orientText: orient, reshuffleText: reshuffle, docstring: scripts().doc }), [])
 })
 
-test('§ Readers lists the conforming readers, and names the three not yet adopted apart from them', () => {
+test('§ Readers lists every reader, and no Not yet adopted line is left', () => {
   assert.deepEqual(readerChecks(doc), [])
 })
 
@@ -239,16 +289,19 @@ function mutate(text, from, to) {
 }
 
 test('controls: each § Readers check rejects its own known-bad shape', () => {
-  const lines = doc.split('\n')
-  const at = lines.findIndex((l) => l.startsWith(NOT_YET))
-  assert.ok(at >= 0, 'control is vacuous: no Not yet adopted line')
+  assert.equal(readersOf(doc).notYet, null, 'control is vacuous: the doc still has a Not yet adopted line')
+  const stale = `${doc.trimEnd()}\n\n${NOT_YET} (they keep their own grammar): \`X\`.\n`
   const cases = [
-    ['not yet adopted line', lines.slice(0, at).join('\n')],
+    ['stale not yet adopted line', stale],
     ['lists next-action.py', mutate(doc, /^- `skills\/_shared\/scripts\/next-action\.py`.*\n/m, '')],
-    ['not yet adopted names SHORT_ID_RE', mutate(doc, /(\*\*Not yet adopted\*\*[\s\S]*)`SHORT_ID_RE`/, '$1`ORDER_RE`')],
-    ['repo-track.sh listed as conforming', mutate(doc, /^(- `skills\/_shared\/scripts\/next-action\.py`.*)$/m, '$1 Also `repo-track.sh`.')],
+    ['lists repo-track.sh', mutate(doc, /^- `skills\/close\/scripts\/repo-track\.sh`.*\n/m, '')],
   ]
   for (const [want, text] of cases) assert.deepEqual(readerChecks(text), [want], `control ${want}`)
+  // the non-empty branch, for a later reader not yet adopted (`X`)
+  assert.deepEqual(readerChecks(doc, ['X']), ['not yet adopted line'], 'control not yet adopted line')
+  const named = mutate(doc, /^(- `skills\/_shared\/scripts\/next-action\.py`.*)$/m, '$1 Also `X`.')
+  assert.deepEqual(readerChecks(`${named.trimEnd()}\n\n${NOT_YET}: \`X\`.\n`, ['X']), ['X listed as conforming'],
+    'control X listed as conforming')
 })
 
 test('controls: a drifted set or a restored caveat fails its check', () => {
@@ -259,9 +312,17 @@ test('controls: a drifted set or a restored caveat fails its check', () => {
   const active = doc.replace(/^(- \*\*Active\*\*.*)`in_progress`/m, '$1`in-progress`')
   assert.notEqual(active, doc, 'control is vacuous: no Active bullet with `in_progress`')
   assert.deepEqual(mismatches(grammarOf(active), s), ['reconcile-project ACTIVE', 'next-action OPEN_STATUSES'])
+  assert.deepEqual(repoTrackChecks(grammarOf(active), repoTrack), ['repo-track.sh active'])
+  assert.deepEqual(candidateChecks(grammarOf(active), close), ['close candidate statuses'])
   const whole = doc.replace(/`PHASE_N` = `[^`]+`/, '`PHASE_N` = `\\d+`')
   assert.notEqual(whole, doc, 'control is vacuous: no PHASE_N')
-  assert.deepEqual(mismatches(grammarOf(whole), s), ['reconcile-project PHASE_N', 'reconcile-rollout PHASED_STEM_RE'])
+  assert.deepEqual(mismatches(grammarOf(whole), s),
+    ['reconcile-project PHASE_N', 'reconcile-rollout PHASED_STEM_RE', 'reconcile-rollout SHORT_ID_RE'])
+  const uncited = mutate(close, /( or `review`) \(each read per `[^`]*vault-grammar\.md` § Statuses[^)]*\)/, '$1')
+  assert.deepEqual(candidateChecks(grammarOf(doc), uncited), ['close candidate statuses'])
+  const noDash = mutate(repoTrack, 'gsub(/-/, "_", v); ', '')
+  assert.deepEqual(repoTrackChecks(grammarOf(doc), noDash), ['repo-track.sh dash read'])
+  assert.deepEqual(repoTrackChecks(grammarOf(doc), ''), ['repo-track.sh active', 'repo-track.sh dash read'])
 
   const caveat = reshuffle.replace(/^(## R1\..*\n(?:.*\n)*?.*`-p<N>-`)/m, '$1, though that script only reads whole-number phases')
   assert.notEqual(caveat, reshuffle, 'control is vacuous: no `-p<N>-` in R1')

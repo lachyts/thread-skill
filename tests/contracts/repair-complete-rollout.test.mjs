@@ -6,7 +6,8 @@
 //     and its Don't;
 //   - execute's idempotence guard: `next` halts "done" on a done, archived note (the behaviour is pinned in
 //     skills/execute/tests/reconcile-rollout-queue.test.sh, scenario halt-done), and the halt guard's `done`
-//     route runs no part of step 5.
+//     route runs none of step 5 but its last bullet, the thread close (close-handoff-chorus-words.test.mjs pins
+//     why that one runs again).
 // check() returns named failures, so the real text and each control run through identical logic.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -34,7 +35,7 @@ function check({ repair, execute }) {
 
   const ex = collapse(execute)
   const guard = ex.slice(Math.max(0, ex.indexOf('**Halt guard (last).**')))
-  if (!/`complete` → step 5; `done` → the completion ceremony already ran[^;]*`Archive\/Rollouts\/`[^;]*: report "already complete and archived: the completion ceremony is not re-run", run no part of step 5/.test(guard))
+  if (!/`complete` → step 5; `done` → the completion ceremony already ran through its archive move[^;]*`Archive\/Rollouts\/`[^;]*: report "already complete and archived: the completion ceremony is not re-run", run none of step 5 but its last bullet \(no second Completion log, cron delete, `retire` or move\)/.test(guard))
     fails.push('execute-halt-done')
   const s5 = ex.slice(Math.max(0, ex.indexOf('5. **Completion.**')))
   if (!/\*\*Idempotence guard \(p19-14\)\.\*\* The ceremony runs once per rollout\. `next` reports `halt: "done"`/.test(s5))
@@ -72,7 +73,7 @@ test("control: no Don't fails repair-dont", () => {
 })
 
 test('control: a halt guard that sends done to the ceremony fails execute-halt-done', () => {
-  const execute = EXECUTE.replace('run no part of step 5', 'then step 5')
+  const execute = EXECUTE.replace('run none of step 5 but its last bullet', 'then step 5')
   assert.deepEqual(check({ repair: REPAIR, execute }), ['execute-halt-done'])
 })
 

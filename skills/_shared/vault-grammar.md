@@ -3,8 +3,8 @@
 The one definition of how a vault note's filename places it in a phase and how its `status:` reads.
 `reconcile-project.py`'s drift detector, execute's phase-close ceremony, orient § 2's sweep and the
 reshuffle's R1 all read the vault through it, so they classify the same note the same way (§ Readers
-names three readers that do not yet). A reader that needs a pattern or a set cites the section here
-instead of restating it; the scripts that cannot cite a doc keep a literal copy that
+lists every reader). A reader that needs a pattern or a set cites the section here instead of
+restating it; the scripts that cannot cite a doc keep a literal copy that
 `tests/contracts/vault-grammar.test.mjs` pins to this file.
 
 ## Phase and task filenames
@@ -48,12 +48,16 @@ member.
   `_phase_sort`, which feed `--phases` to reconcile-project in execute's phase-close ceremony.
 - `skills/_shared/scripts/next-action.py`: `DEAD_STATUSES` (Landed) and `OPEN_STATUSES` (Active).
 - orient § 2 (the sweep's in-flight report) and the reshuffle's R1 (the item set and its reach tiers).
-- `skills/reflect/scripts/reflect.py` `bug` and `decide`: reconcile-project.py's `LANDED` and its status read
-  (`Rec.status`), loaded, so an open task and a done one are told apart as everywhere else.
+- `skills/reflect/scripts/reflect.py` `bug`, `decide`, `close` and `moot`: reconcile-project.py's `LANDED` and its
+  status read (`Rec.status`), loaded, so an open task and a done one are told apart as everywhere else; decide and
+  close count only done and merged as deciding a held trade (`DECIDED`, LANDED less dropped).
+- `skills/close/scripts/repo-track.sh`: `active` (Active), read as reconcile-project's `Rec.status` reads
+  it (a matched `'…'` or `"…"` pair stripped, as `_unq` does, then lower-cased with `-` as `_`). Close
+  step 2's tracked-task search prose and its edge-case bullet (`skills/close/SKILL.md`) read Active the
+  same way: `review` and `blocked` are never tracked.
+- close's candidate statuses (`skills/close/SKILL.md` § A finished task closes itself, **Candidates.**):
+  Active and Review, read per § Statuses.
+- `skills/execute/scripts/reconcile-rollout.py` carry's `SHORT_ID_RE` and `_order_hints`' short-id match:
+  `p<PHASE_N>-<M>`, the phase matched literally.
 - `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both
   scripts' key and sort helpers against the examples under § Phase and task filenames.
-
-**Not yet adopted** (they keep their own grammar, so do not assume they conform; follow-up task
-`thread-skill-close-and-carry-adopt-the-vault-grammar`): close's `repo-track.sh` (`open|in_progress`,
-so `in-progress` is missed), close's candidate statuses (`open`, `in_progress` or `review`) and carry's
-`SHORT_ID_RE` in `reconcile-rollout.py` (whole-number `p<N>-<M>` only).
