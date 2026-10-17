@@ -32,7 +32,7 @@ function statusSet(text, label) {
   return line ? [...line.matchAll(/`([^`]+)`/g)].map((m) => m[1]).sort() : null
 }
 
-// What the doc states: {landed, active, phaseN}, each null when the doc does not state it.
+// What the doc states: {landed, active, review, phaseN}, each null when the doc does not state it.
 function grammarOf(text) {
   const names = section(text, /^## Phase and task filenames\b/)
   const m = names?.match(/`PHASE_N` = `([^`]+)`/)

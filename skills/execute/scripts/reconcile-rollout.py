@@ -5125,16 +5125,15 @@ def _legacy_plan(note, rollout_model) -> dict:
 def _order_hints(src_note, rows) -> list:
     """carry's `order` lines (p17-2): each clause of the prior rollout's own prose that names two or more carried
     tasks, at least one `queued`, beside an ordering word, as `order <slug>,<slug>[,…]: <clause>`. An order kept only
-    in that prose (an older rollout note's lead rules, "p30-2 after p30-1") never reached `depends-on:`, so the
-    carry alone would drop it; schedule step 3 reads the clause and proposes the dependency. `rows` are carry's
-    (path, note, state, is_carried, plan), the tasks already on an open --from's --to included. Read per line, fenced
-    code skipped, a list item's marker stripped; a line splits into clauses at `;` and at sentence ends. A clause
-    names a task by a full wikilink to it, its bare slug, or its short id `p<N>-<M>` (the vault grammar's, `<N>` a
-    PHASE_N, so `p3.5-2` too; SHORT_ID_RE, which the contract test pins) when exactly one carried slug carries that
-    number, the phase matched literally (`p3.5` is never `p3.50` or `p305`); an ambiguous or unmatched one names
-    nothing. Every wikilink (any note), bare linked slug
-    and short id is blanked before the ordering words are read, so a word inside a name never counts. Direction is
-    left to the reader. Writes nothing; an exact duplicate line prints once."""
+    in that prose (an older rollout note's lead rules, "p30-2 after p30-1") never reached `depends-on:`, so the carry
+    alone would drop it; schedule step 3 reads the clause and proposes the dependency. `rows` are carry's (path, note,
+    state, is_carried, plan), the tasks already on an open --from's --to included. Read per line, fenced code skipped,
+    a list item's marker stripped; a line splits into clauses at `;` and at sentence ends. A clause names a task by a
+    full wikilink to it, its bare slug, or its short id `p<N>-<M>` (the vault grammar's, `<N>` a PHASE_N, so `p3.5-2`
+    too; SHORT_ID_RE, which the contract test pins) when exactly one carried slug carries that number, the phase
+    matched literally (`p3.5` is never `p3.50` or `p305`); an ambiguous or unmatched one names nothing. Every wikilink
+    (any note), bare linked slug and short id is blanked before the ordering words are read, so a word inside a name
+    never counts. Direction is left to the reader. Writes nothing; an exact duplicate line prints once."""
     carried = {path.stem.lower(): (path.stem, state) for path, _note, state, is_carried, _plan in rows if is_carried}
     if len(carried) < 2:
         return []

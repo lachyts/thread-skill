@@ -50,9 +50,12 @@ member.
 - orient § 2 (the sweep's in-flight report) and the reshuffle's R1 (the item set and its reach tiers).
 - `skills/reflect/scripts/reflect.py` `bug` and `decide`: reconcile-project.py's `LANDED` and its status read
   (`Rec.status`), loaded, so an open task and a done one are told apart as everywhere else.
-- `skills/close/scripts/repo-track.sh`: `active` (Active), read lower-cased with `-` as `_`.
-- close's candidate statuses (`skills/close/SKILL.md` § A finished task closes itself, **Candidates.**,
-  and step 2's tracked-task search): Active and Review, read per § Statuses.
+- `skills/close/scripts/repo-track.sh`: `active` (Active), read as reconcile-project's `Rec.status` reads
+  it (a matched `'…'` or `"…"` pair stripped, as `_unq` does, then lower-cased with `-` as `_`). Close
+  step 2's tracked-task search prose and its edge-case bullet (`skills/close/SKILL.md`) read Active the
+  same way: `review` and `blocked` are never tracked.
+- close's candidate statuses (`skills/close/SKILL.md` § A finished task closes itself, **Candidates.**):
+  Active and Review, read per § Statuses.
 - `skills/execute/scripts/reconcile-rollout.py` carry's `SHORT_ID_RE` and `_order_hints`' short-id match:
   `p<PHASE_N>-<M>`, the phase matched literally.
 - `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both
