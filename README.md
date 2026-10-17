@@ -258,7 +258,8 @@ final check that the run wrote nothing into the tree):
   orient's declared check, its gate and digest-bound advance (`orient-declared-check.test.mjs`),
   orient's one launch model and its double-dispatch guard (`orient-launch-model.test.mjs`), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
-  (`handoff-one-writer.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
+  (`handoff-one-writer.test.mjs`), `next`'s archive-this-session move and its session/thread menu wording
+  (`next-archive-session.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
   and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
 - **Reflection** — `tests/reflect-score.test.mjs` (`score.py` on synthetic records: running time and its
   exclusions, the Hands-off rate and its acts, Throughput's bound, the Slot-bound and lane-bound fixtures, each
