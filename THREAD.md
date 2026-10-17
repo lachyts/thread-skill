@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-16
+last_touched: 2026-10-17
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,12 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-10-17: 4.0.0 is installed; the P22 rollout is scheduled and a successor session in the clone is executing it.** `[[thread-skill-rollout-2026-10-17]]`: 11 tasks, p22-1..p22-7, [[thread-skill-reflect-cites-the-reflection-loops-contract]], p19-10, p19-11, then p19-5 last. Project root `~/repos/tools/thread-skill-rollout`, verifier `make test`, built-in settings, standing approval 50 USD (`file:defaults`).
+- **Scheduled** via `/thread:orient Thread Skill --steer` (no reshape; drift empty). § 0 passed once landing PR #154 merged (`1b9275c`); before that the pushed-base check refused on the primary's unlanded handoff commit.
+- **p19-5 respecced** (Lachy's yes): `skills/split/` is gone; over 700 at `9589e20` are reflect 1,066, close 979, handoff 887. Scope is now those three + `manifest.test.mjs` + a `docs/evals/` comparison record from two `make evals EVAL_ARGS='--runs 3'` runs (pre/post trim, ~40 USD); its plan declares the signed irreversible bullet plus one spend bullet; it `depends-on:` every task that edits close, handoff, reflect or next.
+- **Execute** handed off (`docs/handoffs/2026-10-17-execute-p22-rollout.md`, landing PR #155) to a Chorus Session launched in the clone, which consumed it.
+- **Waiting on Lachy (grill-me, not resolved):** PR #88 (merge trimmed or close), the 5c5a Codex worktree's `.thread/` evidence, the thread-rollout-redesign worktree (uncommitted, 11 unpushed commits), and the p21-5/p21-9 fork (workspaces master now matches origin, so it looks settled, but no ruling is written). Session-lane work (p11-7, estate/post-P12 chores, execute-offer-start-when-ready, GitHub email block): "Not now".
 
 **2026-10-16 (overnight): P21 has landed. `[[thread-skill-rollout-2026-10-15]]` (archived, § Completion log): 7/7 merged (#144 to #150) in 8h 47m, from the clone, hands-off. Phase 21 stays open for the session-lane p21-5 and p21-9.**
 - **Landed:** p21-1 rename Retro → Reflection, `/thread:reflect` (#144); p21-4 Escapes traced by `fixes:` + git (#145); p21-2 the two headlines in the score (#146); p21-3 Review churn recorded and scored (#147); p21-6 every close records a score line via `close-score.py` (#148); p21-7 the weekly Reflection, `reflect.py` (#149); p21-8 `reflect-due.py` + the quiet-streak cadence (#150).
@@ -731,6 +737,7 @@ scheduled 2026-07-15.
 
 ## Known quirks (don't re-derive)
 
+- **Pushed-base reads sibling clones (2026-10-17).** A handoff commit queued on the primary checkout (`~/repos/tools/thread-skill`) makes schedule § 0 refuse for the clone until its landing PR merges (~5 min CI). Wait it out; never open a second PR. Execute's launch re-runs the same check.
 - **An integrate call carries the task's approved plan verbatim in its args (2026-10-16).** The plans here ran 32–38k chars, so the lead re-emits ~40k of JSON through the Workflow tool call (execute § 4.5 step 3: "never retyped"). It worked, but it is the lead hand-copying a large blob; a plan path the engine reads would be safer. Same for a seeded revise's `plan`.
 - **A merge-task exit 1 on a known flake (2026-10-16).** When the red required check is a test the PR does not touch and the other OS is green, the lead reran the one failed job (`gh run rerun <id> --failed`) and re-ran `merge-task.sh` on the same integrated pair rather than set the task aside. Recorded in the P21 Completion log as a lead judgement call.
 - **`native_workflow.mjs init DIR SCRIPT ARGS CONFIG` takes ARGS and CONFIG as file paths**, not inline JSON: an inline jobs object fails `ENAMETOOLONG`. Write both to files beside the prompt (orient § 8 dispatch, 2026-10-15).
@@ -980,256 +987,15 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**Now (from 2026-10-16, after the P21 rollout):**
-1. **Update the installed plugin** once `[[chorus-rollout-2026-10-15]]` is no longer running on the primary checkout: bring `~/repos/tools/thread-skill` to origin/master (at or after `7f05ee9`, #150), then `make release-check` and decide whether this is a release (3.2.0: P21 changes verbs, `/thread:retro` → `/thread:reflect`).
-2. [[thread-skill-first-live-weekly-reflection]]: the first live `/thread:reflect` over `[[thread-skill-rollout-2026-10-15]]`.
-3. Session lane: p21-5 (workspaces `add-task.md` `fixes:` key) and p21-9 (daily sweep calls `reflect-due.py`), both now unblocked; then phase 21 can close.
-4. Start or keep the Stage card "Fresh-review the review-round emit (agents-config #1)" (session in `~/.agents`), and `git -C ~/.agents pull --ff-only` once its tree is clean.
-5. Attended: [[thread-skill-make-evals-on-opus]], then the eval rollout ([[thread-skill-eval-rollout-p19-evals]]).
-6. Offered, not run: `/thread:retro [[thread-skill-rollout-2026-10-15]]` (once installed, `/thread:reflect`).
-
-**Superseded 2026-10-16:**
-
-**Now (from 2026-10-15, evening, at close): P21 runs overnight; check it in the morning.**
-1. `/thread:status [[thread-skill-rollout-2026-10-15]]` (from any session). If stuck, `/thread:repair` from a session launched in the clone `~/repos/tools/thread-skill-rollout`.
-2. Start or keep the Stage card "Fresh-review the review-round emit (agents-config #1)" (session in `~/.agents`), and `git -C ~/.agents pull --ff-only` once its working tree is clean.
-3. Session lane once their dependencies land: p21-5 (workspaces `add-task.md`), p21-9 (daily sweep calls `reflect-due`).
-4. Attended: [[thread-skill-make-evals-on-opus]], then the eval rollout ([[thread-skill-eval-rollout-p19-evals]]).
-
-**Superseded 2026-10-15 (evening):**
-
-**Now (from 2026-10-15, later): P21 is being scheduled by the handoff session** (its doc, now consumed, is `docs/handoffs/2026-10-15-schedule-p21-reflections.md`).
-1. Check `/thread:status` for a P21 rollout. If there is none: confirm PR #139 merged, then run `/thread:orient Thread Skill --steer` from this repo, which schedules from the clone `~/repos/tools/thread-skill-rollout`.
-2. **Ask Lachy** whether tonight's run is P21 alone or P21 plus the eval rollout's p19-5, p19-10 and p19-11. The eval tasks need [[thread-skill-make-evals-on-opus]] first, and p19-5 needs his irreversible sign-off. Only one unfinished rollout is allowed per repo.
-3. Session lane, after their dependencies: p21-5 (workspaces `add-task.md`) and p21-8's daily-sweep half.
-
-**Superseded 2026-10-15 (later):**
-
-**Now (from 2026-10-15): 3.1.0 is installed. Next is the eval work.**
-1. **[[thread-skill-make-evals-on-opus]] first** (small Makefile PR; its Verify is one full Opus `make evals`, spend: ask first). It decides whether p19-10/p19-11 still have anything to chase.
-2. **Then the eval rollout** ([[thread-skill-eval-rollout-p19-evals]]): set `spend_approval_usd = 50` in `~/.config/thread/rollouts.toml` (the file does not exist yet), then `/thread:schedule --tasks` p19-5, p19-10..12 with the pre-trim baseline ordered before p19-5, from the clone `~/repos/tools/thread-skill-rollout`.
-3. **Cheap, any time:** [[thread-skill-adr-status-sweep-after-3-1]]; optionally `/thread:retro [[thread-skill-rollout-2026-10-14]]`.
-
-**Superseded 2026-10-15:**
-
-**Now (from 2026-10-13, later): P13 is closed and 3.0.0 is verified live. Next is scheduling P18 + P19.**
-1. **Steer-only `/thread:orient Thread Skill`** schedules P18 + P19 as one rollout, from the clone `~/repos/tools/thread-skill-rollout` (never the primary: `[[chorus-rollout-2026-10-13]]` holds it); p19-1 first. Let it place the three E2E findings (loose tasks, linked in Where we are) into P19 or alongside.
-2. **Fast-forward the primary** (`git reset --keep origin/master`) only when `unfinished-rollout.py running` no longer lists a rollout on it.
-3. PR #115 (the E2E record) has auto-merge queued; nothing waits on it.
-
-**Superseded 2026-10-13 (later):**
-
-**Now (from 2026-10-13): 3.0.0 installed; the E2E session (from handoff `docs/handoffs/2026-10-13-3-0-e2e.md`, consumed) is running p13-4.**
-1. **Finish p13-4** ([[thread-skill-p13-4-release-3-0-and-e2e]]): the live E2E from a dated copy of `docs/e2e/2026-09-23-baseline.md` (retired-verb rows rewritten for 3.0), then retire P13's interim rule and Lead actions, close p13-4 and P13. Lachy may drop `max_tier: opus` from AGENTS.md § Model tier.
-2. **Then a Steer-only `/thread:orient Thread Skill`** schedules P18 + P19 as one rollout, from the clone `~/repos/tools/thread-skill-rollout`; p19-1 first.
-
-**Superseded 2026-10-13:**
-
-**Now (from 2026-10-10): 3.0.0 is tagged; the primary checkout is held at `f0257cb` while `[[chorus-rollout-2026-10-10]]` and `[[event-script-rollout-2026-10-10]]` run on its engine (ADR 0031).**
-1. **When `python3 skills/_shared/scripts/unfinished-rollout.py running` lists neither:** finish p13-4 per its note ([[thread-skill-p13-4-release-3-0-and-e2e]], "Held" line): clear the stray `.claude/worktrees/run-record` (PR #88), `git reset --keep origin/master` here, `claude plugin update thread@thread` then `make release-check`, the E2E from a copy of `docs/e2e/2026-09-23-baseline.md`, retire the P13 interim rule. Lachy may drop `max_tier: opus` from his AGENTS.md § Model tier (told 2026-10-10).
-2. **Grill [[thread-skill-p18-3-one-human-fix-per-refusal]] with Lachy** before any code.
-3. **Cheap follow-ons:** [[thread-skill-p19-2-adr-status-sweep]]; the three eval tasks re-run cases (spend: ask first).
-
-**Superseded 2026-10-10:**
-
-**Now (from 2026-10-09, late): P16 and P17 have landed (#97 to #105). The primary checkout is held while `[[chorus-rollout-2026-10-09]]` runs from it (ADR 0031).**
-1. **When the Chorus rollout ends:** `git reset --keep origin/master` here, so the P16/P17 skills go live. Never pull, switch or update the plugin here while Chorus runs.
-2. **[[thread-skill-load-tolerant-timing-tests]] before the next rollout.** It is high priority: the 12a timing flake turned every Integration verify red at ceiling 4.
-3. **p13-4, release 3.0** ([[thread-skill-p13-4-release-3-0-and-e2e]], unblocked), in the session lane once the checkout is current: `make evals` first. Then [[ab-fable-vs-opus-planning]].
-4. **Retro:** `/thread:retro [[thread-skill-rollout-2026-10-09]]`, the first Retro on a live Run record ([[thread-skill-p15-6-first-retro-chorus-ceiling-3-to-5]] owns the live-record Retro).
-5. **Follow-ons:** [[thread-skill-schedule-runs-the-self-rollout-gate]], [[thread-skill-execute-needs-you-c-gaps]].
-
-**Superseded 2026-10-09 (late):**
-
-
-**Now (from 2026-10-06): P15 has landed. `[[chorus-rollout-2026-10-06]]` is running from the primary checkout at `1c5c3ca`, so the checkout is held again (ADR 0031).**
-0. **Watch the Chorus run for the mid-run engine switch** (Where we are): if its lead errors on a reconcile, lead-integrate or merge-task call, the P15 scripts are the first suspect.
-1. **p13-4 (3.0.0)** in the session lane, once the Chorus rollout ends (it updates the live checkout): `make evals` first. Then [[ab-fable-vs-opus-planning]].
-2. **Schedule P16:** `/thread:schedule Thread Skill` from a session in this repo picks up p16-1, p16-3, p16-4 and p16-5 (p16-4 waits on p16-3). [[thread-skill-p16-2-closing-questions-hook-exempts-rollout-turns]] needs a session in `~/repos/workspaces`. Self-rollouts run from the clone `~/repos/tools/thread-skill-rollout`.
-3. **First live Retro:** [[thread-skill-retro-first-live-run-record]] on the P16 rollout (check the events symlink first). [[thread-skill-p15-6-first-retro-chorus-ceiling-3-to-5]] (session lane) and [[thread-skill-p15-7-review-ledger-emits-review-rounds]] (`~/.agents`) close phase 15.
-4. **Carried:** p14-7's last Verify line (`land: held the primary checkout`, observable only while a rollout runs); [[thread-skill-land-takes-review-doc-deletions]]; the fresh-reviews of workspaces `29ca886` and `eb136df`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
-
-**Superseded 2026-10-06:**
-**Now (from 2026-10-04): the P13/P14 rollout is done; Chorus still runs on the primary checkout, which stays held.**
-1. **When Chorus ends:** `git reset --keep origin/master` in `~/repos/tools/thread-skill`, then p13-4 (3.0.0, `make evals` first) in the session lane: it updates the live checkout, so the ladder engine goes live. Then [[ab-fable-vs-opus-planning]].
-2. **p14-7's last Verify line** (a landing from the primary prints `land: held the primary checkout` while Chorus runs) is still unobserved; then mark [[thread-skill-p14-7-primary-checkout-holds]] done.
-3. **[[thread-skill-land-takes-review-doc-deletions]]**: fix the gap, then delete the six consumed review docs.
-4. **Still owed:** the fresh-reviews of workspaces `29ca886` and `eb136df`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
-
-**Superseded 2026-10-04:**
-**Now (from 2026-10-03, evening): the P13/P14 rollout is being scheduled in the clone; Chorus runs on this checkout.** The handoff `2026-10-03-schedule-p13-p14-rollout.md` was picked up by a session in `~/repos/tools/thread-skill-rollout` (consumed; its close deletes it).
-1. **Check progress there:** `/thread:status` on the Thread Skill rollout (from any session) and on `[[chorus-rollout-2026-10-03]]`. Never pull, switch, update the plugin or own-branch-land in this checkout while Chorus runs.
-2. **p14-7's last Verify line** (a landing from this checkout prints `land: held the primary checkout`) is still open: the 2026-10-03 close here had nothing to fast-forward (origin/master had not moved), so the hold was never consulted. The first landing here after origin moves (PR #74 or #75 merging) answers it; then mark [[thread-skill-p14-7-primary-checkout-holds]] done.
-3. **When Chorus ends:** `git reset --keep origin/master` here (held close-outs are on origin), then p13-4 (3.0.0, `make evals` first) in the session lane, then [[ab-fable-vs-opus-planning]].
-4. **Still owed:** the fresh-reviews of workspaces `29ca886` and `eb136df`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
-
-**Superseded 2026-10-03 (late afternoon):**
-**Now (from 2026-10-03): P12 is live; next is p12-13, GifLab's first queue run.** Nothing is running.
-1. **GifLab: Lachy re-orients it himself** (his call, 2026-10-03). Rather than `--regenerate` the wave-era rollout, he restructures GifLab's tasks with `/thread:orient GifLab` (Reshuffle) in a session launched in `~/repos/animately/giflab` and creates a new queue rollout. That run is [[thread-skill-p12-13-chorus-first-queue-run]]'s live acceptance: hard-pause `[[giflab-rollout-2026-09-23]]` first (orient won't supersede a started, unpaused rollout), and watch what the note lists (`ROLLOUT-STATUS`, `ROLLOUT-HEARTBEAT`, `path=lead` Integration-log lines, a signed-gate resume).
-2. **Thread's next: `/thread:orient Thread Skill` (Reshuffle) before scheduling P13** (recommended 2026-10-03). P13's notes ([[thread-skill-p13-the-ladder]]) were written before P12 landed, so they name the old engine and scripts; refresh them against `task.workflow.js`, `merge-task.sh`, `reconcile-rollout.py` and the lead loop, carry the interim rule and Lead actions, and start deep tasks at `xhigh` (P13 automates exactly that climb). Sort the run's follow-ups in the same pass, [[thread-skill-p14-1-pushed-base-ci-flake]] first: P13 is thread-skill's first queue rollout, and the flake can halt its merges. Then schedule p13-1 to p13-3 from the clone (Known quirks), then p13-4, the 3.0.0 release (run `make evals` first), which unparks Chorus's rollout. Then [[ab-fable-vs-opus-planning]].
-3. **The release question** goes into that orient: the queue is live at 2.11.0, and 3.0.0 waits for p13-4.
-4. **Follow-ups filed in the run:** [[thread-skill-p14-6-git-env-canary]], [[thread-skill-merge-task-followups]] (Lachy's `--admin` call), [[thread-skill-p14-2-queue-followups]], [[thread-skill-post-p12-cleanups]].
-5. **Still owed:** the fresh-reviews of workspaces `29ca886` and `eb136df` (one session in `~/repos/workspaces`); tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
-
-**Superseded 2026-10-03:**
-**Now (from 2026-09-30, night): P12 is being scheduled in a fresh session** (the handoff `docs/handoffs/2026-09-30-schedule-p12-queue-build.md`, consumed; its close deletes it).
-1. **Check the rollout first.** `/thread:status` on the P12 rollout, if one exists under `Work/Tasks/`. If none, run a Steer-only `/thread:orient Thread Skill` from this repo on a clean `master`: it schedules P12's wave-shaped tasks (p12-2 to p12-12, p12-14, p12-15) with `--tasks`, then offers execute. Past self-rollouts ran from the clone `~/repos/tools/thread-skill-rollout` (Known quirks).
-2. **Then:** p12-13 (GifLab's first queue run, session lane), P13 (p13-1 to p13-3 as a rollout, then p13-4, the 3.0.0 release, which unparks Chorus), then [[ab-fable-vs-opus-planning]].
-3. **The next-action slot** still names p11-7 (the daily lander); the queue build is the recommendation and p11-7 follows it.
-4. **Still owed:** the fresh-review of workspaces `29ca886`; tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
-
-**Superseded 2026-09-30:**
-**Now (from 2026-09-28, late afternoon): 2.10.0 is live. Nothing is running, no handoff is pending, and both checkouts are on `master` (after this close-out's PR merges, fast-forward the clone).**
-- **Next** (pick one; nothing is decided):
-  1. [[thread-skill-schedule-owns-one-live-rollout-per-repo]] and [[thread-skill-p19-7-one-vault-grammar]], the ADR 0027 follow-ups (the second edits `reconcile-project.py`).
-  2. [[thread-skill-p19-5-trim-descriptions-700-hard-cap]] (its p4-6 baseline exists).
-  3. [[thread-skill-rewave-a-blocked-task-within-its-rollout]].
-  4. Phase 9's rest: p9-2 (capture marker), p9-3 (open list prunes, close guard).
-  5. Still owed: the fresh-review of workspaces `29ca886` (a session in `~/repos/workspaces`); tags 2.7.1 at `e5903f5` and 2.9.0 at `43ff855`.
-- **Close-outs still go on a branch and a PR.** Run a thread-skill rollout from this clone on a clean `master`.
-
-**Superseded 2026-09-28 (late afternoon; the p10-4-p9-4-rollout handoff it pointed at is consumed and deleted):**
-**Now (from 2026-09-28, evening): 2.9.0 is live (orient's reshuffle, set-down next actions). Nothing is running and no handoff is pending. Both checkouts are on `master`.**
-- **Next:**
-  1. The next rollout: `/thread:schedule` on [[thread-skill-p10-4-close-flips-a-finished-task]] and p9-4, from the rollout clone (p10-3 landed in #32). Consider [[thread-skill-reconcile-apply-binds-reviewed-list]] with them. Phase 10 closes itself when p10-4 lands.
-  2. p4-6's eval baseline now exists (`docs/evals/2026-09-28-orient-reshuffle.md`), so [[thread-skill-p19-5-trim-descriptions-700-hard-cap]] can be scheduled.
-  3. The two ADR 0027 follow-ups: [[thread-skill-schedule-owns-one-live-rollout-per-repo]], [[thread-skill-p19-7-one-vault-grammar]].
-  4. Still owed: the fresh-review of workspaces `29ca886` (a session in `~/repos/workspaces`); tag 2.7.1 at `e5903f5` and 2.9.0 at `43ff855` (`claude plugin tag` tags HEAD, so from a clean checkout sitting on that commit).
-- **Close-outs still go on a branch and a PR** (master is protected, strict: a PR behind master must be updated before it merges).
-
-**Superseded 2026-09-28 (evening):**
-**Now (from 2026-09-28): 2.8.0 is released and tagged, and the reconcile step is accepted. Nothing is running.**
-- **First:** push this close-out branch, `docs/close-2026-09-28-p10-release`, in `~/repos/tools/thread-skill-rollout`, and open its PR (master is protected; p5-4). After it merges, switch that clone back to `master` and fast-forward it, so the next rollout's `merge-wave.sh` can fast-forward.
-- **Next:**
-  1. The next rollout: `/thread:schedule` on [[thread-skill-p10-3-orient-reports-and-fixes-drift]], [[thread-skill-p10-4-close-flips-a-finished-task]] and p9-4 together, from the rollout clone. #31 unblocked them. First check that `feat/orient-reshuffle` doesn't overlap p10-3. Phase 10 closes itself when they land.
-  2. Consider [[thread-skill-reconcile-apply-binds-reviewed-list]] alongside them. It touches the same script and orient's use of it.
-  3. Release again after the rollout: #31 is on master and unreleased (manifests still say 2.8.0).
-  4. Still owed: the fresh-review of workspaces `29ca886` (a session in `~/repos/workspaces`). Tag 2.7.1 at `e5903f5` if you want the history complete.
-
-**Superseded 2026-09-28 (the handoff it pointed at is consumed and deleted):**
-**Now (from 2026-09-27, late evening): the P10 rollout is done and archived. Nothing is running.**
-- **Next:**
-  1. Release P10: [[thread-skill-release-reconcile-step]]. Fast-forward the live checkout, bump the manifests by PR, update the plugin, then run `make release-check`.
-  2. [[thread-skill-reconcile-step-live-acceptance]]: check the Chorus dry run against the drift audit, then decide on `--apply`.
-  3. Land `feat/next-action-set-downs`, then schedule p10-3, p10-4 and p9-4 together.
-  4. Still owed: the fresh-review of workspaces `29ca886`; tag 2.7.1; `git remote set-head origin --auto`.
-- **This close is unpushed branch `docs/close-2026-09-27-p10-rollout`** in `~/repos/tools/thread-skill-rollout` (master is protected; p5-4). Push it and open a PR, or fold it into the release PR.
-
-**Superseded 2026-09-27 (late evening):**
-**Now (from 2026-09-27, evening): P10's first rollout is running from the clone. This checkout has nothing in flight.**
-- **Rollout:** `[[thread-skill-rollout-2026-09-27]]` is conducted from `~/repos/tools/thread-skill-rollout`. Check it with `/thread:status [[thread-skill-rollout-2026-09-27]]`. Its completion ceremony lists the follow-ups (schedule p10-3/p10-4, a live reconcile dry run, a release).
-- **Next:**
-  1. The fresh-review of workspaces `29ca886`, from a session in `~/repos/workspaces`.
-  2. Land `feat/next-action-set-downs` (consume its review handoff).
-  3. Schedule p10-3, p10-4 and p9-4 as the next rollout.
-  4. Still owed from p5-2: tag 2.7.1 and run `git remote set-head origin --auto` here.
-- **Close-outs go on a branch** until p5-4 lands (this close is `docs/close-2026-09-27`).
-
-**Now (from 2026-09-27): p5-2 is merged (#23, `e5903f5`) and 2.7.1 is live.** The cache was refreshed and
-`make release-check` is green on `e5903f5`. A same-version refresh needs `rm -rf` of the version dir and then
-`claude plugin install thread@thread`; `update` says "already at the latest version" and copies nothing.
-Still to do: tag 2.7.1 (`git fetch origin && git switch --detach origin/master && claude plugin tag --push`),
-and run `git remote set-head origin --auto` once here. Next: p5-3 (retire the rollout clone, a session),
-p5-4 (close and handoff on a protected default branch), then P6. This paragraph is an uncommitted edit on
-master; the next close's PR carries it (the p5-4 problem).
-
-**Now (from 2026-09-26): work the P5–P9 roadmap. Master is protected, and nothing is running.**
-- **Order:** P5: p5-2 (`$N` snippets into scripts, wave-shaped), p5-3 (retire the rollout clone, a session),
-  p5-4 (close and handoff on a protected default branch). Then P6 (p6-1 integrates protocol 4 first,
-  alone), then P7 and P8. P9 can run any time. p4-6 (the eval baseline, your spend) precedes p4-5.
-- **Every change lands by PR** (ADR 0025), including THREAD.md close-outs. A thread-skill self-rollout still
-  runs from a fresh clone of the repo, never this checkout.
-
-**Superseded 2026-09-26 (kept for the record):**
-**Now (from 2026-09-25, evening): 2.7.0 is released. Nothing is running and no handoff doc is pending.**
-- **Order** (the rest of the 2.7 plan, unchanged):
-  1. The eval baseline (Lachy's USD 5 spend, `thread-skill-eval-baseline-then-p4-5`), then schedule p4-5.
-     release-check now refuses a non-empty `evals/results/`, so record a paid run in `docs/evals/` and
-     clear the directory before the next release.
-  2. The E2E, once, on 2.7.0. Retarget `thread-skill-e2e-rerun-on-2-6-0` first, so one live pass covers
-     both releases.
-  3. Retire the rollout clone (`thread-skill-retire-rollout-clone`, now unblocked). It is clean at
-     `393829c`, with the four 2.7 task worktrees still under `.claude/worktrees/`.
-  - Any time alongside: the `$N` snippet fix (hands-on, because it needs a live probe),
-    `thread-skill-protect-master-ci` (Lachy's call), the p3-1 and p3-3 design calls,
-    `safepoint-uses-handoff-home-resolver` (in the workspaces repo), the stale 2.3.4 install, and the four
-    follow-ups filed at the 2.7.0 close (§ Where we are).
-- **Run embedded snippets from the source SKILL.md with `sed`** (§ Known quirks: the `$N` entry, and skill
-  text rendered at session start).
-
-**Superseded 2026-09-25 (evening): run the 2.7 rollout.** The order and the paste-ready lead prompt are in
-`20147f3`. The rollout ran as planned.
-- The instructions below predate this and are kept for history.
-
-**Superseded 2026-09-25 (afternoon): the self-rollout was ready to resume. Nothing was running.**
-- **Resume:** launch a fresh lead in `~/repos/tools/thread-skill-rollout` and run
-  `/thread:execute [[thread-skill-rollout-2026-09-23]]`. With the cursor at 2/7, it re-dispatches p4-1
-  (gates withdrawn), then runs waves 4–7. That is 8 tasks left.
-- **Lead rules** (rollout note § *Resolved 2026-09-24* and § *Resolved 2026-09-25*):
-  - never approve gates;
-  - never push or reset `master`/`main`;
-  - never point `GIT_DIR` at the clone;
-  - make no commits in this checkout;
-  - park anything only Lachy can decide.
-- **When it's done,** release 2.6.0 (brief § S2 step 6). Pull here first (`git pull --ff-only`, and this
-  file's uncommitted edit rides along), then bump, then run the cache dance.
-- The instructions below predate this and are kept for history.
-
-**Superseded 2026-09-24: the self-rollout was HALTED after wave 2, waiting on one decision.**
-- **Read first:** `[[thread-skill-rollout-2026-09-23]]` § Notes → *Halted after wave 2*. It has the leak,
-  the parked tasks and the exact commands for both routes.
-- **Decide:** (a) rewrite `origin/master` to `c667e9e` and delete `origin/main`, or (b) go forward-only.
-  Then re-invoke `/thread:execute [[thread-skill-rollout-2026-09-23]]` from a session launched in
-  `~/repos/tools/thread-skill-rollout`, never from here. The cold resume merges PR #7, re-dispatches p3-1
-  and p1-3, and continues from wave 3.
-- **Don't** approve p1-3's gates once anything has merged on top of `018a60a`. **Don't** hand-edit a task
-  back to `in_progress`: that is the verb 7 gap, and resume would re-dispatch merged work.
-- **When it's done,** release 2.6.0 (brief § S2 step 6). Pull here first (`git pull --ff-only`, and this
-  file's uncommitted edit rides along), then bump, then run the cache dance.
-- The older instructions below predate this and are kept for history.
-
-**The live E2E baseline is running.**
-- **The S1 verbs session is live**, launched in `~/repos/tools/zz-thread-e2e` (peer `zz-thread-e2e-0b`).
-  It consumed `docs/handoffs/2026-09-23-thread-e2e-verbs-1-13.md` and runs verbs 1–13.
-- **The live record** is `docs/e2e/2026-09-23-baseline.md`, which that session edits and commits.
-- **Pick up S2 from** the handoff its verb 13 writes into `~/repos/tools/zz-thread-e2e/docs/handoffs/`.
-  - Don't start S2 from here. The shared brief `docs/audits/2026-09-23-rollout-brief.md` § S2 carries
-    the rest, and the gather draft.
-  - Expect S2 to split: S2 in the fixture, then S3 here for the `rm -rf` and the rollout.
-- **Pending deletion:** the next close here deletes the consumed verbs doc, once no peer holds it.
-
-**Rollout redesign, 22 September 2026:** coordination now belongs to **thread 1**.
-Read the [thread 2 handback](/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/docs/implementation/2026-09-22-thread-2-closeout.md)
-and the current records owned by thread 3 and the native Claude pilot before
-acting. Their work continues independently; do not duplicate dispatch, reuse the
-completed Codex pools, or infer release readiness. The instructions below describe
-the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidate.
-
-0. **Nothing is half-done — the tree is clean and 2.5.1 is shipped.** The
-   2026-09-21 four-file batch was reviewed, corrected across two rounds and
-   committed; the cache dance ran and was verified (`diff -rq` against the
-   2.5.1 cache, suite green from the cache copy). A session restart is all that
-   is needed for 2.5.1 to load. Do **not** open a new `/code-review` chain on
-   the tier ceiling: `review-ledger.py` stopped the last one at 60%
-   regressions. The shipped code at `6b8188c` has had no clean-room pass —
-   `/simplify` is the engine that has never run on it and is the honest way to
-   close that gap. Start from § Open questions, which carries the two deferred
-   findings.
-1. Read this file, then `CONTEXT.md` and the ADRs in `docs/adr/` — the whole
-   directory, not a subset. The rollout lane, orient's self-launching and
-   close's autonomy each rest on an ADR added after v1.0.0.
-2. `skills/_shared/task-writer.md` is the single source for task shape —
-   never change task behaviour in a route skill directly.
-3. Automated checks are `README.md` § Tests. A live end-to-end checklist is
-   written from the current specs — `task-writer.md` § 3b (a `defer` is not
-   done until the target day note carries its `## To do` line; the TaskNotes
-   agenda is secondary discovery) plus each route's SKILL.md.
-   `docs/build-plan.md` § Verification is the historical v1.0.0 checklist: it
-   predates § 3b and passes a defer that writes only `scheduled:`. Don't
-   route live testing through it.
+**Now (from 2026-10-17):** `[[thread-skill-rollout-2026-10-17]]` is executing in a successor session launched in the clone (it consumed `docs/handoffs/2026-10-17-execute-p22-rollout.md`).
+1. Check it with `/thread:status [[thread-skill-rollout-2026-10-17]]`; if stuck, `/thread:repair` from a session launched in `~/repos/tools/thread-skill-rollout`.
+2. When it completes: its post-rollout item (decide on a 4.1.0 release: `claude plugin update thread@thread`, `make release-check`, release PR with p19-5's comparison record), once no rollout holds the primary checkout.
+3. Grill Lachy on the four waiting forks (PR #88, the 5c5a `.thread/` evidence, the thread-rollout-redesign worktree, the p21-5/p21-9 ruling).
+4. Next weekly Reflection is due 2026-10-24.
 
 ## Session log
 
+- 2026-10-17: Steer-only orient scheduled `[[thread-skill-rollout-2026-10-17]]` (11 tasks: P22, reflect-cites, the P19 eval tail), respecced p19-5 for 4.0.0 (close/handoff/reflect, in-task `--runs 3` comparison), waited out landing PR #154 for pushed-base, handed execute to a clone session (#155).
 - 2026-10-16: P21 rollout executed unattended from the clone: 7/7 merged (#144–#150) in 8h 47m; 3 auto-retries, 1 standing approval, 2 integrator conflict merges, 1 macOS CI flake rerun; rollout archived, first-live-Reflection task filed; installed plugin still pre-P21.
 - 2026-10-15: #139 fixed and merged; P21 scheduled (+p21-9 split) and executing overnight from the clone; p15-7 landed in agents-config #1 by an orient child (review pending).
 - 2026-10-15 (close, later): `/thread:orient` on the Retro, then a grill-with-docs: ADR 0037 + CONTEXT.md terms (#139), P21 phase and 8 tasks, p19-12 merged into p21-1, p15-7 raised, [[chorus-reflect-cadence]] filed; scheduling handed off (#140, consumed by its successor).
