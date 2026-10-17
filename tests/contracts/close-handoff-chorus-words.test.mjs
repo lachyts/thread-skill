@@ -13,7 +13,9 @@
 //   3. the skill text read THROUGH the port: close's four banners, the paraphrase counter-example, the
 //      NOT-closed form, the step-8 statement offer, rule (3)'s question line, a lead's status line, open
 //      save's checkpoint line and handoff's closing line, each extracted from the skill files themselves;
-//   4. prose and order pins through check(files), which returns named failures, each with a mutation control.
+//   4. prose and order pins through check(files), which returns named failures, each with a mutation control:
+//      among them execute's `done` route, which still runs the thread close (the ceremony's last step, after the
+//      archive commit that makes `next` read `done`), and handoff's closing line, printed only on a raised card.
 // A fifth, optional layer cross-checks the port against the real Python when CHORUS_SRC names Chorus's src/
 // (`CHORUS_SRC=~/repos/tools/chorus/src node --test <this file>`); tests/run.sh never sets it, so it skips.
 import { test } from 'node:test'
@@ -230,6 +232,7 @@ const closing = (report, last) => `${report}\n\n---\n\n${last}`
 const STATUS_DONE = 'ROLLOUT-STATUS: thread-skill-rollout-2026-10-17 merged=3/3 running=0 state=done'
 const STATUS_SIGNOFF = 'ROLLOUT-STATUS: thread-skill-rollout-2026-10-17 merged=2/3 running=0 state=halted reason="awaiting sign-off: [[thread-skill-p22-9]]"'
 const NEEDS_CALL = `Needs your call: ${SAMPLE.branch} PR https://github.com/lachyts/thread-skill/pull/159 — the finding needs an ADR change`
+const DISCARD = 'Discarded: the scratch timing table (re-derivable from the Run record).'
 
 // Every Response the tests read, so the drift check reads the same corpus.
 const corpus = new Set()
@@ -328,11 +331,11 @@ test('close step 9 rule (3): a Needs-your-call row\'s question line keeps the Se
   assert.ok(q, 'step 9 has no rule (3) question line')
   const d = banners(real.close)[3]
   assert.ok(d, 'no banner D')
-  const held = closing(`${REPORT}\n${NEEDS_CALL}\n${q}`, fill(d))
+  const held = closing(`${REPORT}\n${NEEDS_CALL}\n${DISCARD}\n${q}`, fill(d))
   assert.equal(R(held).asks, true, 'the question line does not ask')
   assert.equal(R(held).endsClosed, true)
   assert.equal(fastClose(held), null, 'a close that leaves a decision archives')
-  const bare = closing(`${REPORT}\n${NEEDS_CALL}`, fill(d))
+  const bare = closing(`${REPORT}\n${NEEDS_CALL}\n${DISCARD}`, fill(d))
   assert.equal(R(bare).asks, false, 'control: the row alone asks')
   assert.equal(fastClose(bare), 'closed', 'control: the row alone keeps the Session')
 })
@@ -383,6 +386,21 @@ const CLOSE_LAST = '   - **Close out the associated thread, last:**'
 const SIGNOFF_CLOSE = '   - `/thread:close`, last'
 const SIGNOFF_COMMIT = "   - the heartbeat's `CronDelete`; then the vault commit"
 const has = (s, list) => list.every((p) => collapse(s).includes(p))
+const HALT_GUARD = (t) => lineOf(t, /^ {3}5\. \*\*Halt guard \(last\)\.\*\*/) ?? ''
+const DONE_ROUTE = [
+  '`done` → the completion ceremony already ran through its archive move',
+  'run none of step 5 but its last bullet (no second Completion log, cron delete, `retire` or move), then that bullet, the thread close, as step 5 runs it, unless the Completion log recorded why the thread stays open',
+  "the status line right after close's banner in the same message",
+]
+const GUARD = [
+  '(the archive move below, the step before the last)',
+  "runs none of these steps but the last, the thread close: the halt guard's `done` route",
+  "a ceremony cut off between its archive commit and close's banner reads `done` too",
+]
+const STEP8_TAIL = "and a one-line discard note, then, only when a `Needs your call:` row printed, step 9's rule (3) question line as the report's last line, after the discard note."
+const RAISED = 'When `create_thread` on Chorus returned `Raised (task_id: …)` (§ Success contract, step 2), the Stage starts the next Session'
+const NOT_RAISED = 'that is § Fail closed, which never prints this line'
+const FAIL_CLOSED = "On Chorus, never print § Build the handoff prompt's closing line (`Handed off. The next Session is starting on the Stage …`) without a `Raised (task_id: …)` result"
 
 const RULES = [
   'Copy the banner exactly, never paraphrase it',
@@ -404,13 +422,20 @@ function check(files) {
   const fails = []
   const s9 = STEP9(files.close)
   if (!has(s9, RULES)) fails.push('close:rules')
+  // step 8 and rule (3) agree: the question line comes after the discard note, the report's last line
+  if (!collapse(STEP8(files.close)).endsWith(STEP8_TAIL) || !collapse(s9).includes("the report's last line, just before the `---`"))
+    fails.push('close:order')
   if (!(lineOf(s9, /^9\. /) ?? '').includes('(rule (2) below names its one exception)')) fails.push('close:intro')
   if (!collapse(STEP8(files.close)).includes(OFFER)) fails.push('close:offer')
   if (!has(EDGES(files.close), ['**On the Chorus Stage**', "step 9's rule (3) question line", 'leaves it unarchived'])) fails.push('close:edge')
-  if (['never as a question (the banner stays last)', 'Close never asks:', 'never a question, never a fought hook']
+  if (['never as a question (the banner stays last)', 'Close never asks:', 'Close never calls the question tool', 'never a question, never a fought hook']
     .some((old) => collapse(files.close).includes(old))) fails.push('close:asks')
 
+  const hg = HALT_GUARD(files.execute)
+  if (!has(hg, DONE_ROUTE) || collapse(hg).includes('run no part of step 5')) fails.push('execute:done')
   const cer = CEREMONY(files.execute)
+  const guard = cer.find((b) => b.startsWith('   - **Idempotence guard (p19-14).**')) ?? ''
+  if (!has(guard, GUARD) || guard.includes('(its last step below)')) fails.push('execute:guard')
   const at = (p) => cer.findIndex(p)
   const iClose = at((b) => b.startsWith(CLOSE_LAST))
   const iMove = at((b) => b.startsWith('   - Move the rollout note'))
@@ -428,7 +453,7 @@ function check(files) {
     !has(so[jClose], ['same message', 'with no tool call between them']) ||
     so.some((b, i) => i !== jClose && b.includes('/thread:close'))) fails.push('execute:signoff')
   if (!has(files.execute, [
-    "At completion, and in § 4.5 step 5's sign-off form, the report prints before that step's last bullet runs `/thread:close`",
+    "At completion, in § 4.5 step 5's sign-off form and on the halt guard's `done` route (§ 4.5 step 1.5), the report prints before step 5's last bullet runs `/thread:close`",
     "on a turn that ran `/thread:close`, right after close's banner in the same message",
   ])) fails.push('execute:report')
 
@@ -436,7 +461,9 @@ function check(files) {
   const steps = post.filter((l) => /^\d+\. /.test(l))
   const t5 = steps.find((l) => l.startsWith('5. ')) ?? ''
   if (!t5.includes('Record here why any associated thread stays open') ||
-    !(steps.at(-1) ?? '').startsWith('7. Close out any associated thread (run `/thread:close`), last')) fails.push('template')
+    !(steps.at(-1) ?? '').startsWith('7. Close out any associated thread (run `/thread:close`), last') ||
+    !(steps.at(-1) ?? '').includes("close's banner, then the lead's `ROLLOUT-STATUS:` line, end the session's last message (close step 9, rule (2))"))
+    fails.push('template')
 
   const h = files.handoff
   const intro = lineOf(h, 'Every handoff produces two artefacts') ?? ''
@@ -449,6 +476,8 @@ function check(files) {
   const hosts = section(h, /^## Other hosts/) ?? ''
   if (!collapse(hosts).includes('on Chorus the `task_id` in its `Raised (task_id: …)` result')) fails.push('handoff:hosts')
   if (!has(BUILD(h), ["shown fenced below, printed bare as close's banners are", 'with nothing after it'])) fails.push('handoff:build')
+  if (!has(BUILD(h), [RAISED, NOT_RAISED]) || !collapse(section(h, /^## Fail closed/) ?? '').includes(FAIL_CLOSED))
+    fails.push('handoff:raised')
   if (!has(lineOf(h, '**Lifecycle.**') ?? '', LIFE)) fails.push('handoff:lifecycle')
   if (!collapse(section(files.lifecycle, /^## Withdrawn/) ?? '').includes('keeps its brief')) fails.push('lifecycle:withdrawn')
   if (!(lineOf(files.next, /^5\. \*\*Dispatch\.\*\*/) ?? '').includes('(plus the native task in Codex Desktop or a Chorus Session)')) fails.push('next')
@@ -478,6 +507,10 @@ test('controls: close pins fail on their own mutation', () => {
   only('offer', swap('close', 'never as a question (step 9, rule (3))', 'as a question'), ['close:offer'])
   only('edge', swap('close', '- **On the Chorus Stage** →', '- **On the Stage** →'), ['close:edge'])
   only('asks', swap('close', 'never the question tool, never a fought hook', 'never a question, never a fought hook'), ['close:asks'])
+  only('asks:stop', swap('close', 'A stop never calls the question tool', 'Close never calls the question tool'), ['close:asks'])
+  // step 8 back to the order rule (3) contradicts: the question line before the discard note
+  only('order', swap('close', "lines, and a one-line discard note, then, only when a `Needs your call:` row printed, step 9's rule (3) question line as the report's last line, after the discard note.",
+    "lines (followed by step 9's rule (3) question line when there is one), and a one-line discard note."), ['close:order'])
 })
 
 test('controls: execute pins fail on their own mutation', () => {
@@ -498,17 +531,30 @@ test('controls: execute pins fail on their own mutation', () => {
   assert.ok(soClose && soCommit, 'control setup: no sign-off close or commit bullet')
   only('signoff:order', { ...real, execute: real.execute.replace(`${soCommit}\n${soClose}`, `${soClose}\n${soCommit}`) }, ['execute:signoff'])
   only('signoff:tool', { ...real, execute: real.execute.replace(soClose, soClose.replace('with no tool call between them', 'after a tool call')) }, ['execute:signoff'])
-  only('report', swap('execute', "At completion, and in § 4.5 step 5's sign-off form, the report prints before", 'At completion the report prints before'), ['execute:report'])
+  only('report', swap('execute', "At completion, in § 4.5 step 5's sign-off form and on the halt guard's `done` route (§ 4.5 step 1.5), the report prints before", 'At completion the report prints before'), ['execute:report'])
+  // the `done` route back to running no part of step 5: a ceremony cut off after its archive commit never closes
+  only('done', swap('execute', 'run none of step 5 but its last bullet (no second Completion log, cron delete, `retire` or move), then that bullet, the thread close, as step 5 runs it, unless the Completion log recorded why the thread stays open (step 5\'s *Idempotence guard* says why it runs again)',
+    'run no part of step 5 (no second Completion log, thread close, cron delete, `retire` or move)'), ['execute:done'])
+  only('done:status', swap('execute', "and end the turn `state=done`, the status line right after close's banner in the same message;", 'and end the turn `state=done`;'), ['execute:done'])
+  // the guard back to calling the archive move the ceremony's last step
+  only('guard', swap('execute', '(the archive move below, the step before the last)', '(its last step below)'), ['execute:guard'])
+  only('guard:why', swap('execute', "a ceremony cut off between its archive commit and close's banner reads `done` too", 'an archived ceremony is finished'), ['execute:guard'])
 })
 
 test('controls: template, handoff, lifecycle and next pins fail on their own mutation', () => {
   only('template:5', swap('template', 'Record here why any associated thread stays open', 'record here why any associated thread stays open'), ['template'])
   const t7 = lineStarting('template', '7. Close out any associated thread')
   only('template:last', swap('template', t7, `${t7}\n8. Tidy up.`), ['template'])
+  only('template:status', swap('template', "close's banner, then the lead's `ROLLOUT-STATUS:` line, end the session's last message (close step 9, rule (2))",
+    "close's banner ends the session's last message (close step 9)"), ['template'])
   only('handoff:intro', swap('handoff', 'Chorus starts the next Session from it at once', 'the listener Starts it'), ['handoff:intro'])
   only('handoff:contract', swap('handoff', 'On Chorus no directive is emitted', 'On Chorus the directive is emitted'), ['handoff:contract'])
   only('handoff:hosts', swap('handoff', 'on Chorus the `task_id` in its `Raised (task_id: …)` result', 'on Chorus its result'), ['handoff:hosts'])
   only('handoff:build', swap('handoff', "shown fenced below, printed bare as close's banners are", 'fenced'), ['handoff:build'])
+  // the closing line unconditional on Chorus again, or § Fail closed silent about it
+  only('handoff:raised', swap('handoff', 'When `create_thread` on Chorus returned `Raised (task_id: …)` (§ Success contract, step 2), the Stage', 'On Chorus the Stage'), ['handoff:raised'])
+  only('handoff:raised:else', swap('handoff', NOT_RAISED, 'that is § Fail closed'), ['handoff:raised'])
+  only('handoff:raised:fail', swap('handoff', FAIL_CLOSED, 'On Chorus, print the closing line'), ['handoff:raised'])
   only('handoff:lifecycle', swap('handoff', 'from its own row', 'from the card'), ['handoff:lifecycle'])
   only('lifecycle', swap('lifecycle', 'keeps its brief', 'loses its brief'), ['lifecycle:withdrawn'])
   only('next', swap('next', '(plus the native task in Codex Desktop or a Chorus Session)', '(plus the native task in Codex Desktop)'), ['next'])

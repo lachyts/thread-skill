@@ -209,7 +209,7 @@ test('#### The stop rule: the three ADR conditions, keys, infra, max, and the ho
     '`review-ledger.py` exit 1 is the stop (`ledger regression`)',
     "Every stop calls `--hold` with the diagnosis before step 8's report and the banner",
     'leaves the PR open with auto-merge off',
-    'Close never calls the question tool: the question goes on a `Needs your call:` row',
+    'A stop never calls the question tool: the question goes on a `Needs your call:` row',
     'xhigh floor', 'Opus lock',
     'the diagnosis as its comment',
   ])

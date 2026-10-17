@@ -57,6 +57,7 @@ If the native task-creation tool is absent, unavailable, or fails:
 - Do **not** run `codex exec`, `codex resume`, or another shell command to create a non-interactive Codex session. These sessions are not visible sidebar tasks.
 - Do **not** substitute a subagent, goal, background process, browser session, or desktop-automation attempt and describe it as a new thread.
 - Do **not** emit `::created-thread` without a successful native creation result.
+- On Chorus, never print § Build the handoff prompt's closing line (`Handed off. The next Session is starting on the Stage …`) without a `Raised (task_id: …)` result: an error result (a prompt over Chorus's length cap, say) or a missing `create_thread` raised no card, so no Session is starting, and the line would promise one.
 - Preserve the current work (the handoff doc is already written and handed to landing — § Success contract, step 1), print the prompt, and state plainly: “I couldn’t create a visible sidebar task from this session because the native task tool is unavailable. No hidden substitute was launched.”
 - Give the user the ready-to-paste prompt so they can open a new task manually. This is a **manual handoff**: the doc and prompt are complete and the lifecycle below applies to them in full — what is missing is the native task, not the handoff.
 
@@ -142,11 +143,13 @@ Keep it tight — the doc carries the depth; the prompt carries the momentum.
 
 When native task creation succeeds, seed the new task with the prompt (the doc path travels inside it), then report the created task and, in Codex Desktop, emit the required directive. When native task creation is unavailable, print the prompt and the absolute path of the handoff doc so the user can open a new task manually.
 
-On Chorus the Stage starts the next Session from the card at once, so the closing words never ask Lachy to start or open it: end the handoff's output on this line (shown fenced below, printed bare as close's banners are), with nothing after it and no question anywhere in the output:
+When `create_thread` on Chorus returned `Raised (task_id: …)` (§ Success contract, step 2), the Stage starts the next Session from the card at once, so the closing words never ask Lachy to start or open it: end the handoff's output on this line (shown fenced below, printed bare as close's banners are), with nothing after it and no question anywhere in the output:
 
 ```
 **Handed off. The next Session is starting on the Stage from <abs doc path>; if it could not start, its card says why and waits as an offer.**
 ```
+
+Any other result (an error, such as a prompt over Chorus's length cap) or no `create_thread` at all raised no card, so no Session is starting: that is § Fail closed, which never prints this line.
 
 ## Other hosts
 
