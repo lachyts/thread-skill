@@ -687,7 +687,10 @@ CH=""
 # sit only inside the names), the bare-slug p33-1 / p30-1 line (its one cue word sits inside a bare slug),
 # p30-2b after p30-1 (p30-2b is no short id: p30-2 runs on into a letter), the HTML comment (its `-->` is no
 # arrow), "Kept apart in review" (no cue) and the fenced line. The carried demo-p30-10-sweep keeps every
-# p30-1 from resolving to it: p30-10 is never p30-1.
+# p30-1 from resolving to it: p30-10 is never p30-1. A fractional phase's short id resolves (vault-grammar.md:
+# `p<PHASE_N>-<M>`), matched literally: the carried demo-p305-1-trap would make p3.5-1 ambiguous (no line) if
+# the `.` matched any character, and p3.50-2 after p3.5.1-1 names nothing (p3.50 is not p3.5; p3.5.1 is no
+# phase number).
 scen k7
 BODY='**The lead'"'"'s rules for this run:**
 - Dependencies: p30-2 after p30-1; p35-3 after p37-4; p37-4 after p36-2, p36-6; p39-2 after p39-1.
@@ -698,6 +701,8 @@ BODY='**The lead'"'"'s rules for this run:**
 - demo-p30-2-restart after demo-p30-1-ledger
 - demo-p33-1-then-the-rest and demo-p30-1-ledger share one card.
 - p30-2b after p30-1.
+- p3.5-2 after p3.5-1.
+- p3.50-2 after p3.5.1-1.
 <!-- p30-1 p30-2 -->
 - Kept apart in review: [[demo-p30-1-ledger]], [[demo-p36-2-ritual]]
 
@@ -706,7 +711,8 @@ p36-6 after p35-3
 ```' mkro $P.md "$R" "$DEMO" "$PAUSED"
 for t in demo-p30-1-ledger demo-p30-2-restart demo-p30-10-sweep demo-p35-3-voice demo-p36-2-ritual demo-p36-6-raycast \
   demo-p38-5-column demo-p38-6-column-reads demo-p32-4-turn-opened-after-a-restart demo-p33-1-then-the-rest demo-p40-1-probe \
-  side-p40-1-probe demo-p40-2-fix demo-p41-3-conductor; do mkt $t.md $P open; done
+  side-p40-1-probe demo-p40-2-fix demo-p41-3-conductor demo-p3.5-1-probe demo-p3.5-2-wire demo-p305-1-trap; do
+  mkt $t.md $P open; done
 mkt demo-p39-1-sessions.md $P in_progress 'owner: execute-old'
 mkt demo-p39-2-asides.md $P in_progress 'owner: execute-old'
 mkt demo-p37-4-settings.md $P done
@@ -715,7 +721,8 @@ ORDER="order demo-p30-2-restart,demo-p30-1-ledger: Dependencies: p30-2 after p30
 order demo-p36-2-ritual,demo-p36-6-raycast: p37-4 after p36-2, p36-6
 order demo-p38-5-column,demo-p38-6-column-reads: [[demo-p38-5-column]] → [[demo-p38-6-column-reads]]
 order demo-p41-3-conductor,demo-p40-2-fix: p41-3 needs p40-2's measured answers.
-order demo-p30-2-restart,demo-p30-1-ledger: demo-p30-2-restart after demo-p30-1-ledger"
+order demo-p30-2-restart,demo-p30-1-ledger: demo-p30-2-restart after demo-p30-1-ledger
+order demo-p3.5-2-wire,demo-p3.5-1-probe: p3.5-2 after p3.5-1."
 before=$(sums)
 carry --from "$T/$P.md" --dry-run
 ok "$rc" 0 "K7: the preview exits 0"
@@ -727,10 +734,12 @@ hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p33-1" "K7: … nor from 
 hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p39" "K7: … nor from a clause whose tasks have all started"
 hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p30-10" "K7: … a p30-1 never names demo-p30-10-sweep"
 hasnt "$(printf '%s\n' "$out" | grep '^order ')" "p30-2b" "K7: … nor does p30-2b name demo-p30-2-restart"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "demo-p305" "K7: … a fractional p3.5-1 is matched literally, never demo-p305-1-trap"
+hasnt "$(printf '%s\n' "$out" | grep '^order ')" "p3.50" "K7: … and p3.50-2 after p3.5.1-1 names nothing"
 hasnt "$(printf '%s\n' "$out" | grep '^order ')" "<!--" "K7: … and an HTML comment's --> is no arrow"
 ok "$(sums)" "$before" "K7: … and the preview writes nothing"
 carry --from "$T/$P.md" --to "$T/$N.md"
-ok "$rc|$(printf '%s\n' "$out" | tail -1)" "0|[written: 16]" "K7: carry exits 0, every carried note written"
+ok "$rc|$(printf '%s\n' "$out" | tail -1)" "0|[written: 19]" "K7: carry exits 0, every carried note written"
 ok "$(printf '%s\n' "$out" | grep '^order ')" "$ORDER" "K7: … printing the same order lines"
 # A re-run while P is still open (the window § 0's interrupted finish meets: step 6's carry ran, the run died
 # before step 7.5) reads P's prose against the tasks already on N, so it prints the same lines.

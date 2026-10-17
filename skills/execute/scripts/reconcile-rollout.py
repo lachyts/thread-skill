@@ -785,11 +785,12 @@ WIKILINK_OPEN_RE = re.compile(r"\[\[([^\]|#^\\]+)")
 # The rollout-body lines whose wikilinks rank a task: list items (`-`, `*`, `+`, `1.`) and table rows.
 RANKED_LINE_RE = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s|\|)")
 FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
-# carry's `order` hints (p17-2, _order_hints): a task's short id is its slug's `-p<N>-<M>-` number (`p30-10` is
-# never `p30-1`); a full wikilink, alias and all; a list item's leading marker; the clause breaks (`;` and a
-# sentence end, never `:`); and the ordering words, read only outside every task name. `(?<!-)` keeps an HTML
-# comment's `-->` out.
-SHORT_ID_RE = re.compile(r"(?<!\w)p(\d+)-(\d+)(?!\w)", re.I)
+# carry's `order` hints (p17-2, _order_hints): a task's short id is its slug's `-p<N>-<M>-` number, the vault
+# grammar's short id `p<PHASE_N>-<M>` (skills/_shared/vault-grammar.md § Phase and task filenames: `p3.5-2` too;
+# tests/contracts/vault-grammar.test.mjs pins this copy), and `p30-10` is never `p30-1`; a full wikilink, alias
+# and all; a list item's leading marker; the clause breaks (`;` and a sentence end, never `:`); and the ordering
+# words, read only outside every task name. `(?<!-)` keeps an HTML comment's `-->` out.
+SHORT_ID_RE = re.compile(r"(?<!\w)p(\d+(?:\.\d+)?)-(\d+)(?!\w)", re.I)
 WIKILINK_FULL_RE = re.compile(r"\[\[[^\]]*\]\]")
 LIST_MARK_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)")
 ORDER_CLAUSE_RE = re.compile(r";|(?<=[.!?])\s+")
@@ -5128,8 +5129,10 @@ def _order_hints(src_note, rows) -> list:
     carry alone would drop it; schedule step 3 reads the clause and proposes the dependency. `rows` are carry's
     (path, note, state, is_carried, plan), the tasks already on an open --from's --to included. Read per line, fenced
     code skipped, a list item's marker stripped; a line splits into clauses at `;` and at sentence ends. A clause
-    names a task by a full wikilink to it, its bare slug, or its short id `p<N>-<M>` when exactly one carried slug
-    carries that number (an ambiguous or unmatched one names nothing). Every wikilink (any note), bare linked slug
+    names a task by a full wikilink to it, its bare slug, or its short id `p<N>-<M>` (the vault grammar's, `<N>` a
+    PHASE_N, so `p3.5-2` too; SHORT_ID_RE, which the contract test pins) when exactly one carried slug carries that
+    number, the phase matched literally (`p3.5` is never `p3.50` or `p305`); an ambiguous or unmatched one names
+    nothing. Every wikilink (any note), bare linked slug
     and short id is blanked before the ordering words are read, so a word inside a name never counts. Direction is
     left to the reader. Writes nothing; an exact duplicate line prints once."""
     carried = {path.stem.lower(): (path.stem, state) for path, _note, state, is_carried, _plan in rows if is_carried}
@@ -5140,7 +5143,7 @@ def _order_hints(src_note, rows) -> list:
     name_re = re.compile(ORDER_MASK_RE.pattern + "|" + SHORT_ID_RE.pattern, re.I)
 
     def short_id(n, m):
-        hits = [s for s in carried if re.search(rf"(?:^|-)p{n}-{m}(?:-|$)", s)]
+        hits = [s for s in carried if re.search(rf"(?:^|-)p{re.escape(n)}-{m}(?:-|$)", s)]
         return hits[0] if len(hits) == 1 else None
 
     out, fenced = [], False
