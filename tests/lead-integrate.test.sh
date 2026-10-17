@@ -14,8 +14,10 @@
 #   and zsh -f ($, $(…), backticks, \ and ' single-quoted)   C16 stamp, usage, an unreachable origin   C17 timeouts, signals,
 #   the bootstrap, the race tree   C18 no relaunch loop   C19 an Integration set-aside re-enters   C20 the last
 #   task rejected   C21 plan, the approved plan for the two launches   C22 inputs --row, the integrate call's record
-#   checked against the note and its fallback prUrl a PR URL the engine takes, a bare #N built (p17-1). C10 is the landed list with a commit pushed without a PR (`unlisted`), and
-#   C11 also pins inputs --row's ports of historyError, rungRecordError and PR_URL.
+#   checked against the note and its fallback prUrl a PR URL the engine takes, a bare #N built (p17-1)   C23 a
+#   signal while a step starts, and the step's and verify's own signal mask (p22-2). C10 is the landed list with
+#   a commit pushed without a PR (`unlisted`), and C11 also pins inputs --row's ports of historyError,
+#   rungRecordError and PR_URL.
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -976,6 +978,73 @@ PAR=$(node --input-type=module -e "
   ]))
 " "$(p1args proj-a 3)" "$RECS" "$F")
 ok "$PAR" '[20,[],[],true]' "C22: all 20 proj-a records pass integrationArgsError; each refused row's raw fields fail it; the bad rung fails rungRecordError"
+
+# ======== C23: a signal while a step starts; the step's and verify's own signal mask (p22-2) ================
+# _run_step holds TERM/INT/HUP from just before Popen until _live records the new group (a signal in that window
+# used to leave the verifier's own session running with no limit), restores the caller's mask in the child
+# (preexec_fn) and in verify. Every check is structural (a pid, a file the trap writes, the mask), never a clock.
+fx c23
+u=$(printf %07d $$)
+T="$F/steptree"; mkdir -p "$T"
+# gone <pid>: the sleeper is dead (kill -0 fails, or it is a zombie), polled up to ~30 s; a survivor sleeps ~53 min,
+# so a long poll only slows a real failure. A survivor is then killed by its recorded pid so the suite never leaks it.
+gone() {
+  local p=$1 n=0
+  [ -n "$p" ] || { echo "no pid"; return; }
+  while [ "$n" -lt 300 ]; do
+    if ! kill -0 "$p" 2>/dev/null || [ "$(ps -o stat= -p "$p" 2>/dev/null | cut -c1)" = Z ]; then echo gone; return; fi
+    n=$((n+1)); sleep 0.1
+  done
+  kill "$p" 2>/dev/null; echo "survived"
+}
+# LATE: run lead-integrate's main with a Popen that, once the verifier's `bash -c` has started and written its
+# sleeper's pid, sends SIGTERM to this process before Popen returns: the Popen-to-_live window.
+LATE='
+import importlib.util, os, signal, subprocess, sys, time
+spec = importlib.util.spec_from_file_location("lead_integrate", sys.argv[1])
+li = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(li)
+class Late(subprocess.Popen):
+    def __init__(self, args, *a, **k):
+        super().__init__(args, *a, **k)
+        if list(args[:2]) == ["bash", "-c"]:
+            pid = os.path.join(k.get("cwd") or ".", "pid")
+            end = time.monotonic() + 10
+            while time.monotonic() < end:
+                try:
+                    if open(pid).read().strip():
+                        break
+                except OSError:
+                    pass
+                time.sleep(0.05)
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(0.5)
+subprocess.Popen = Late
+sys.exit(li.main(sys.argv[2:]))
+'
+python3 -B -c "$LATE" "$LI" verify --tree "$T" --out "$F/out/late" --timeout 60 --verifier "sleep 3181.$u & echo \$! > pid; wait" >/dev/null
+ok "$(cat "$F/out/late.rc" 2>/dev/null)" 143 "C23: SIGTERM between Popen and _live → rc 143"
+has "$(cat "$F/out/late.log" 2>/dev/null)" "stopped by signal 15" "C23: … the log names the signal"
+ok "$(gone "$(cat "$T/pid" 2>/dev/null)")" gone "C23: … and the step's group is killed (its sleeper is gone)"
+python3 "$LI" verify --tree "$T" --out "$F/out/trap" --timeout 1 \
+  --verifier "trap 'echo term > got; exit 0' TERM; sleep 3182.$u & echo \$! > tpid; wait" >/dev/null
+ok "$(cat "$F/out/trap.rc" 2>/dev/null)" 124 "C23: the deadline → rc 124"
+ok "$(cat "$T/got" 2>/dev/null)" term "C23: the step starts with TERM unblocked (its trap runs on the group's SIGTERM)"
+ok "$(gone "$(cat "$T/tpid" 2>/dev/null)")" gone "C23: … and its sleeper is gone"
+# MASK: one _run_step, then verify's own mask: TERM/INT/HUP no longer held, and a caller's own SIGUSR1 still held.
+MASK='
+import importlib.util, signal, sys, time
+spec = importlib.util.spec_from_file_location("lead_integrate", sys.argv[1])
+li = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(li)
+if sys.argv[4] == "usr1":
+    signal.pthread_sigmask(signal.SIG_BLOCK, [signal.SIGUSR1])
+rc = li._run_step("true", sys.argv[2], open(sys.argv[3], "ab", buffering=0), time.monotonic() + 60)
+held = set(signal.pthread_sigmask(signal.SIG_BLOCK, []))
+print(f"{rc}|{sorted(int(s) for s in held & {signal.SIGTERM, signal.SIGINT, signal.SIGHUP})}|{signal.SIGUSR1 in held}")
+'
+ok "$(python3 -B -c "$MASK" "$LI" "$T" "$F/out/mask.log" none)" "0|[]|False" "C23: after a step, verify holds none of TERM/INT/HUP"
+ok "$(python3 -B -c "$MASK" "$LI" "$T" "$F/out/mask.log" usr1)" "0|[]|True" "C23: … and a caller's own blocked SIGUSR1 stays blocked (the old mask is restored, not cleared)"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"
