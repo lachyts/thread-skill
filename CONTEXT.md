@@ -213,8 +213,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Vault grammar** — the phase/task filename pattern (whole or fractional phase
   numbers, `p3`, `p3.5`) and the status sets (landed, active, review, hold, in
   flight) the vault's readers classify by, defined once in
-  `skills/_shared/vault-grammar.md` (its § Readers names the readers not yet
-  adopted). _Avoid_: naming scheme.
+  `skills/_shared/vault-grammar.md` (its § Readers lists every reader).
+  _Avoid_: naming scheme.
 - **Reshuffle** — the usual reason a project is picked up after time away:
   re-examine *all* its open work (stray bugs, brain dumps, loose tasks and
   unstarted phases alike), rethink what the next steps are, and leave it
@@ -552,9 +552,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: clean run, empty retro.
 - **Decision task** — the one open vault task tagged `decisions` that the
   weekly reading writes for the next morning when it has a rule proposal
-  (ADR 0037 d5): Lachy decides it at the top of a run
-  (`/thread:reflect --decide`); schedule, the reshuffle and orient's batches
-  never take it. _Avoid_: inbox, review queue.
+  or a held trade (a knob ADR 0037 d1 leaves to Lachy; ADR 0037 d5): Lachy
+  decides it at the top of a run (`/thread:reflect --decide`); schedule,
+  the reshuffle and orient's batches never take it. _Avoid_: inbox, review
+  queue.
 - **Rollout settings** — the operator's `~/.config/thread/rollouts.toml`,
   `ladder.toml`'s sibling: `[defaults]`, the `[guardrails]` bounds and
   per-repo `[repo."owner/name"]` tables (keyed by the GitHub origin),

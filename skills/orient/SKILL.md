@@ -207,7 +207,7 @@ A situational report written for Lachy catching up, not a log:
   (`next: <next_action> ([[<task>]])`, or `No next action`), then state,
   blocker, staleness. Group: active / in-flight (dispatched) / stalled /
   dormant. An open decision task (§ 2 Decisions waiting) is listed first, as
-  blocked on Lachy: its rule proposals wait for his yes or no. A task with an open fork (§ 2 Open forks: named by `fork for Lachy` in its latest orient
+  blocked on Lachy: its rule proposals and held trades wait for his yes or no. A task with an open fork (§ 2 Open forks: named by `fork for Lachy` in its latest orient
   end line, with no `orient ruling:` line for it timed after that end line) is blocked on his
   decision: name every open fork (grill-me). A ruled fork is not listed.
 - **Drift**: one line, the counts plus names, split into unambiguous (fixed next, in § 4, unless

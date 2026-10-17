@@ -394,6 +394,15 @@ if extract repo-track "$tmp/snip-rt.sh"; then
   printf 'No front matter, but it names feat/x.\n' > "$T/f.md"
   task g-dot.md open 'The work sits on feat/p.'
   task h-ver.md open 'Release feat/q.1 shipped; see feat/q..'
+  # Statuses are read per vault-grammar.md § Statuses: lower-cased, `-` read as `_`; anything else is a hold.
+  task i-dash.md in-progress 'Branch feat/t is tracked here.'
+  task j-case.md In-Progress 'And feat/u is tracked here.'
+  task k-space.md 'in progress' 'feat/v sits here.'
+  task l-review.md review 'feat/w awaits review.'
+  task m-quote.md '"in-progress"' 'feat/s is tracked here too.'
+  # A matched '…' pair is stripped as a matched "…" one is (reconcile-project's _unq); an unpaired quote is not.
+  task n-squote.md "'in-progress'" 'feat/r is tracked here too.'
+  task o-unpaired.md '"in-progress' 'feat/o sits here.'
   # The snippet is a wrapper; the logic is repo-track.sh (a SKILL.md body holds no positional $N, p5-2).
   ok "$(grep -c 'skills/close/scripts/repo-track\.sh' "$tmp/snip-rt.sh")" 1 "the repo-track snippet calls repo-track.sh"
   # The Claude Code Bash tool's grep is a shell-snapshot function (ugrep honouring .gitignore): the script
@@ -413,6 +422,13 @@ if extract repo-track "$tmp/snip-rt.sh"; then
     track "$sh" br=feat/zz;  ok "$out" "" "[$sh] br=feat/zz → empty"; ok "$rc" 0 "[$sh] br=feat/zz → rc 0"
     track "$sh" br=feat/p;   ok "$out" g-dot "[$sh] br=feat/p → g-dot (a sentence-final period is a boundary)"; ok "$rc" 0 "[$sh] br=feat/p → rc 0"
     track "$sh" br=feat/q;   ok "$out" "" "[$sh] br=feat/q → empty (feat/q.1 and feat/q.. are other tokens)"; ok "$rc" 0 "[$sh] br=feat/q → rc 0"
+    track "$sh" br=feat/t;   ok "$out" i-dash "[$sh] br=feat/t → i-dash (TaskNotes' in-progress is in_progress)"; ok "$rc" 0 "[$sh] br=feat/t → rc 0"
+    track "$sh" br=feat/u;   ok "$out" j-case "[$sh] br=feat/u → j-case (In-Progress, read lower-cased)"; ok "$rc" 0 "[$sh] br=feat/u → rc 0"
+    track "$sh" br=feat/v;   ok "$out" "" "[$sh] br=feat/v → empty (in progress with a space is a hold)"; ok "$rc" 0 "[$sh] br=feat/v → rc 0"
+    track "$sh" br=feat/w;   ok "$out" "" "[$sh] br=feat/w → empty (review is not tracked)"; ok "$rc" 0 "[$sh] br=feat/w → rc 0"
+    track "$sh" br=feat/s;   ok "$out" m-quote "[$sh] br=feat/s → m-quote (a quoted \"in-progress\")"; ok "$rc" 0 "[$sh] br=feat/s → rc 0"
+    track "$sh" br=feat/r;   ok "$out" n-squote "[$sh] br=feat/r → n-squote (a single-quoted 'in-progress')"; ok "$rc" 0 "[$sh] br=feat/r → rc 0"
+    track "$sh" br=feat/o;   ok "$out" "" "[$sh] br=feat/o → empty (an unpaired \" is kept, so a hold)"; ok "$rc" 0 "[$sh] br=feat/o → rc 0"
     track "$sh" BASH_ENV="$tmp/poison-grep.sh" br=feat/x
     clean0 b-open "[$sh] a grep shell function is bypassed"
     track "$sh" HOME="$tmp/h2" br=feat/x
