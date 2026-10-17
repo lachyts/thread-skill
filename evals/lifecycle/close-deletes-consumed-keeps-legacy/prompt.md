@@ -6,7 +6,7 @@ timeout_seconds: 300
 allowed_tools: [Read, Glob, Grep, Skill]
 ---
 
-This is the exports-migration thread, in the repo at the current directory (a git repo on master; you can't run git or write files in this session). The repo's files aren't present in this sandbox; treat what I describe as what your scan and git would find, with the current directory as the repo's toplevel. Earlier in this session I picked up the handoff doc docs/handoffs/2026-09-20-exports-wave-2.md and marked it consumed, then finished wave 2: the CSV writer merged as PR #42 and `make test` is green. docs/handoffs/ holds exactly two files:
+This is the exports-migration thread, in the repo at the current directory (a git repo on master; you can't run git or write files in this session). The repo's files aren't present in this sandbox; treat what I describe as what your scan and git would find, with the current directory as the repo's toplevel. The thread file is the repo's top-level THREAD.md, front matter `slug: exports-migration`; your repo-thread lookup for that slug prints it. Its Where we are says wave 2 (the CSV writer) is in progress, and its Resume instructions are the pointer `Read <current directory>/docs/handoffs/2026-09-20-exports-wave-2.md first` (written as an absolute path). Earlier in this session I picked up the handoff doc docs/handoffs/2026-09-20-exports-wave-2.md and marked it consumed, then finished wave 2: the CSV writer merged as PR #42 and `make test` is green. docs/handoffs/ holds exactly two files:
 
 - 2026-09-20-exports-wave-2.md, whose front matter has `thread: exports-migration` and `status: consumed`
 - 2026-08-01-exports-notes.md, which has no front matter at all
