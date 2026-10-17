@@ -459,9 +459,9 @@ or `exists`). An item left open keeps the task open.
   lines are swept from the notes of the rollouts the record holds.
 - A Human fix (ADR 0035) has no event of its own, nor does a gate signed on the note with no `gate-signed` line (one
   signed before p21-2's events, by Lachy or the Standing approval, or written by hand): the weekly reading sees
-  either only as a set-aside whose `movedBy` is `unrecorded`, and then its task note's `## Needs you`, `## Integration
-  log` and `## Approved gates`, the rollout note's `## Notes` and its Run record lines (`mover`) say what moved it, or
-  nothing does.
+  either only as a set-aside whose `movedBy` is `unrecorded`, and then its task note's `## Needs you`,
+  `## Integration log` and `## Approved gates`, the rollout note's `## Notes` and its Run record lines (`mover`) say
+  what moved it, or nothing does.
 - /fresh-review churn names no rollout (`reviews.jsonl` carries none): the weekly reading reports it (`freshReview`)
   and traces none of it.
 - The Escapes sweep misses a record with no rollout note or Project root and a repo with no GitHub origin (both in
