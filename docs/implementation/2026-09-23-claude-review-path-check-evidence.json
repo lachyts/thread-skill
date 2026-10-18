@@ -1,0 +1,474 @@
+{
+  "check": "claude-review-path-check",
+  "date": "2026-09-23",
+  "handoff": "docs/handoffs/2026-09-23-claude-review-path-check.md",
+  "privateDirectory": "/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/.thread/claude-review-path-check-2026-09-23",
+  "resultsSha256": "c49d57cd80e8842a96589e9b2f937dd5a269979fa68852d7c3745ed696fd5f3a",
+  "hashIndexSha256": "a78475d4f4031b9675ac6159ab15658d6ce365eff6691502fa56ba64e4f6893a",
+  "summary": {
+    "rootSession": "9d3f4cab-2f63-4f8c-9cb8-a91481a4e12b",
+    "runtime": "2.1.280 (Claude Code)",
+    "binarySha256": "387a5c5dcdbb815085edf0baf79591f9d8894efe922bceaf3d75b1b08055229d",
+    "account": "claude-account-87779c3fb4aba28a",
+    "startupDefinitionsLoaded": true,
+    "policyDigest": "d2eb7979ad0423484979dedfbb76b52713421583256357637032c32e06a66f2d",
+    "exchange": {
+      "runId": "ebf2d7b6-53d7-4a19-bbc2-698aa61bb278",
+      "status": "complete",
+      "maxConcurrent": 2,
+      "account": "claude-account-87779c3fb4aba28a"
+    }
+  },
+  "ledger": {
+    "ceiling": 6,
+    "reserved": 6,
+    "attempted": 6
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "requestId": "4896919b99653bb84172b81365475fed",
+      "label": "review:capacity-boundary-review-fixture r1",
+      "requested": {
+        "model": "claude-opus-5-5",
+        "effort": "xhigh",
+        "role": "review",
+        "difficulty": "easy",
+        "qualityFailures": 0,
+        "exactModel": false
+      },
+      "resolved": {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": "xhigh",
+        "policyDigest": "d2eb7979ad0423484979dedfbb76b52713421583256357637032c32e06a66f2d",
+        "route": "normal"
+      },
+      "wrapper": {
+        "childId": "apair1-wrapper-ce6d7097860849aa",
+        "spawnShape": "in_process_teammate",
+        "definition": "thread-review-check-opus-xhigh",
+        "spawnDepth": 0,
+        "observed": {
+          "model": [
+            "claude-opus-5-5"
+          ],
+          "effort": [
+            "xhigh"
+          ],
+          "perTurnEffort": [
+            "xhigh"
+          ],
+          "assistantEntries": 15
+        },
+        "matchesResolved": true
+      },
+      "promptDelivery": {
+        "claimSha256": "9c4173835c2fb28186288f2f7f2e2dec80775526e9aced5e04497c87bb206f29",
+        "agentArgumentExact": true,
+        "childReceivedExact": true,
+        "transport": "teammate-message envelope"
+      },
+      "invocation": {
+        "id": "toolu_01GvdDj1TVGukfvVZmyDqCk5",
+        "count": 1,
+        "result": "Skill \"code-review\" launched (forked execution, running in the background).\n\nRunning in the background as @code-review"
+      },
+      "fork": {
+        "childId": "a237e9881c66a0fcc",
+        "meta": {
+          "agentType": "general-purpose",
+          "description": "/code-review xhigh Target: local commit range 35b…",
+          "name": "code-review",
+          "parentAgentId": "apair1-wrapper-ce6d7097860849aa",
+          "spawnDepth": 1,
+          "requestShape": "background",
+          "requestNonInteractive": true
+        },
+        "forkedSkill": {
+          "skillName": "code-review",
+          "attributionName": "code-review",
+          "effort": "xhigh"
+        },
+        "observed": {
+          "model": [
+            "claude-opus-5-5"
+          ],
+          "effort": [
+            "xhigh"
+          ],
+          "perTurnEffort": [
+            "xhigh"
+          ],
+          "assistantEntries": 7
+        },
+        "matchesResolved": true,
+        "outputSha256": "d7d29b3204dd102a9cd66c50533695bfc278934f8badbd6e3725b9076e7a1451",
+        "outputBytes": 2919,
+        "toolUses": 3,
+        "descendants": 0,
+        "adapterStatus": "complete",
+        "resultHash": "a71a960ae4e6d1eb6fd676a220e9dfb6da4c951be619830cf54457608441594a",
+        "reviewedHead": "6c1da3737ed5ad3d2ffcf23b6946f372644d126a"
+      },
+      "relay": {
+        "sendToolUse": "toolu_01GB2MRcyHJjs77wtb15ZxnV",
+        "sentExact": true,
+        "receivedExact": true,
+        "forkNotificationToWrapper": false
+      },
+      "wrapperResult": {
+        "verdict": "changes",
+        "reviewedHead": "6c1da3737ed5ad3d2ffcf23b6946f372644d126a",
+        "schemaValid": true,
+        "feedbackEntries": 4,
+        "allFindingsRetained": true,
+        "byteVerbatimContainer": false,
+        "retention": "prose entry byte-identical; findings re-serialised as compact JSON with byte-identical field values"
+      },
+      "adapter": {
+        "wrapperStatus": "accepted",
+        "wrapperResultHash": "c0c7090b0d176f102b515fd68e5f6ef00fc3e590854b9ea508266927e22301d1"
+      },
+      "receiptV2": "/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/.thread/claude-review-path-check-2026-09-23/pairs/pair1/receipt-v2.json"
+    },
+    {
+      "pair": 2,
+      "requestId": "a0851e26d4759d31513d474a4d4c8630",
+      "label": "review:capacity-boundary-review-fixture r2",
+      "requested": {
+        "model": "claude-opus-5-5",
+        "effort": "max",
+        "role": "review",
+        "difficulty": "easy",
+        "qualityFailures": 1,
+        "exactModel": false
+      },
+      "resolved": {
+        "harness": "claude",
+        "model": "claude-opus-5-5",
+        "effort": "max",
+        "policyDigest": "d2eb7979ad0423484979dedfbb76b52713421583256357637032c32e06a66f2d",
+        "route": "maximum"
+      },
+      "wrapper": {
+        "childId": "apair2-wrapper-ff8bde90362b4900",
+        "spawnShape": "in_process_teammate",
+        "definition": "thread-review-check-opus-max",
+        "spawnDepth": 0,
+        "observed": {
+          "model": [
+            "claude-opus-5-5"
+          ],
+          "effort": [
+            "xhigh"
+          ],
+          "perTurnEffort": [
+            "xhigh"
+          ],
+          "assistantEntries": 12
+        },
+        "matchesResolved": false
+      },
+      "promptDelivery": {
+        "claimSha256": "34144a39232bf2115396e82145a89141b229c6fce37024a773f240e2cdbee40f",
+        "agentArgumentExact": true,
+        "childReceivedExact": true,
+        "transport": "teammate-message envelope"
+      },
+      "invocation": {
+        "id": "toolu_01EPHWAuzVRsTCQtR2TzcTTK",
+        "count": 1,
+        "result": "Skill \"code-review\" launched (forked execution, running in the background).\n\nRunning in the background as @code-review"
+      },
+      "fork": {
+        "childId": "ac0dabb082815b4b0",
+        "meta": {
+          "agentType": "general-purpose",
+          "description": "/code-review xhigh 35b0c2e9dce692990f35280481d302…",
+          "name": "code-review",
+          "parentAgentId": "apair2-wrapper-ff8bde90362b4900",
+          "spawnDepth": 1,
+          "requestShape": "background",
+          "requestNonInteractive": true
+        },
+        "forkedSkill": {
+          "skillName": "code-review",
+          "attributionName": "code-review",
+          "effort": "xhigh"
+        },
+        "observed": {
+          "model": [
+            "claude-opus-5-5"
+          ],
+          "effort": [
+            "xhigh"
+          ],
+          "perTurnEffort": [
+            "xhigh"
+          ],
+          "assistantEntries": 12
+        },
+        "matchesResolved": false,
+        "outputSha256": "904ebd7425b0209599603ae70006dd2e72d6d892987b35b879691d1cd35bb8a6",
+        "outputBytes": 2449,
+        "toolUses": 6,
+        "descendants": 0,
+        "adapterStatus": "terminal",
+        "resultHash": "201a916ea7dafe6ef35f2c4c9d4d691a2a60f84e0606b92a9cc698b49a157bed",
+        "reviewedHead": null
+      },
+      "relay": {
+        "sendToolUse": "toolu_01GWESX9Zzgk4NViFqQHew2t",
+        "sentExact": true,
+        "receivedExact": true,
+        "forkNotificationToWrapper": false
+      },
+      "wrapperResult": {
+        "verdict": "changes",
+        "reviewedHead": "6c1da3737ed5ad3d2ffcf23b6946f372644d126a",
+        "schemaValid": true,
+        "feedbackEntries": 8,
+        "allFindingsRetained": true,
+        "byteVerbatimContainer": false,
+        "retention": "feedback entries are in-order verbatim substrings of the fork output; only inter-entry whitespace uncovered"
+      },
+      "adapter": {
+        "wrapperStatus": "blocked",
+        "wrapperResultHash": "0cc0735ba816304bb3269d882b23ea304e72f128536883d4880a4bdb58c90488"
+      },
+      "receiptV2": null
+    },
+    {
+      "pair": 3,
+      "requestId": "c6f772073e179decdaf8eb4552e88a6b",
+      "label": "review:capacity-boundary-review-fixture r3",
+      "requested": {
+        "model": "claude-fable-5-1",
+        "effort": "max",
+        "role": "review",
+        "difficulty": "easy",
+        "qualityFailures": 2,
+        "exactModel": false
+      },
+      "resolved": {
+        "harness": "claude",
+        "model": "claude-fable-5-1",
+        "effort": "max",
+        "policyDigest": "d2eb7979ad0423484979dedfbb76b52713421583256357637032c32e06a66f2d",
+        "route": "recovery"
+      },
+      "wrapper": {
+        "childId": "af6fe34d6aed3231d",
+        "spawnShape": "subagent",
+        "definition": "thread-review-check-fable-max",
+        "spawnDepth": 1,
+        "observed": {
+          "model": [
+            "claude-fable-5-1"
+          ],
+          "effort": [
+            "max"
+          ],
+          "perTurnEffort": [
+            "max"
+          ],
+          "assistantEntries": 23
+        },
+        "matchesResolved": true
+      },
+      "promptDelivery": {
+        "claimSha256": "51810c91ed632c39d01c726c1cc69dad2276f32d2a2eb1b3add98ed7b57c5b0e",
+        "agentArgumentExact": true,
+        "childReceivedExact": true,
+        "transport": "plain first user message"
+      },
+      "invocation": {
+        "id": "toolu_014co5NfKxEcLWki2qN3kixG",
+        "count": 1,
+        "result": "Skill \"code-review\" launched (forked execution, running in the background).\n\nRunning in the background as @code-review"
+      },
+      "fork": {
+        "childId": "aac860a02ce343193",
+        "meta": {
+          "agentType": "general-purpose",
+          "description": "/code-review xhigh 35b0c2e9dce692990f35280481d302…",
+          "name": "code-review",
+          "parentAgentId": "af6fe34d6aed3231d",
+          "spawnDepth": 2,
+          "requestShape": "background",
+          "requestNonInteractive": true
+        },
+        "forkedSkill": {
+          "skillName": "code-review",
+          "attributionName": "code-review",
+          "effort": "xhigh"
+        },
+        "observed": {
+          "model": [
+            "claude-fable-5-1"
+          ],
+          "effort": [
+            "xhigh"
+          ],
+          "perTurnEffort": [
+            "xhigh"
+          ],
+          "assistantEntries": 18
+        },
+        "matchesResolved": false,
+        "outputSha256": "c532e8cfaca669f473f02590412e8601c05dbcfa8356f5f6f14d3b13d66cedf3",
+        "outputBytes": 4914,
+        "toolUses": 6,
+        "descendants": 0,
+        "adapterStatus": "terminal",
+        "resultHash": "3c00a940d8cabeaa49eefc606b4be6fb0a14d2d4d033111c3bf5ea252de47fc2",
+        "reviewedHead": null
+      },
+      "relay": {
+        "sendToolUse": "toolu_015gFUm5JqbywLVontnxuzVf",
+        "sentExact": true,
+        "receivedExact": true,
+        "forkNotificationToWrapper": true
+      },
+      "wrapperResult": {
+        "verdict": "changes",
+        "reviewedHead": "6c1da3737ed5ad3d2ffcf23b6946f372644d126a",
+        "schemaValid": true,
+        "feedbackEntries": 6,
+        "allFindingsRetained": true,
+        "byteVerbatimContainer": false,
+        "retention": "prose entry byte-identical; each finding re-rendered as \"key: value\" lines with byte-identical field values"
+      },
+      "adapter": {
+        "wrapperStatus": "blocked",
+        "wrapperResultHash": "77883e7c500a0f026cfa90cbd9360cbc50a71b719f0b21875abb3971e21d3c9f"
+      },
+      "receiptV2": null
+    }
+  ],
+  "privateHashIndex": {
+    "START-HERE.md": "a69576ca42e4f5c945386f6d06eccfe5c206fdda284e26c518830fb47c2bce39",
+    "evidence/2026-09-23-builtin-code-review-inspection.json": "c4a8b0cad7ac7aa44b0eed7e377d9ef0c5fe1311b58f8afd44e760f34ecfba17",
+    "evidence/2026-09-23-definition-removal.json": "0a9b737f1402195e5294836df0a4a57dbab867b148189fdf83a6a50469e7a614",
+    "evidence/2026-09-23-native-preflight-9d3f4cab.json": "10e812bac91adf5464413337caf3750d14f81af441d093d595ceb109e96c8a48",
+    "evidence/2026-09-23-startup-precondition-0c1fdfb0.json": "7e2b17c70232386096dcca86c7d0e327f7fb81f23214717847b54097ec26b454",
+    "exchange/run.json": "9e03984b16640fc6ed38b613b21304bfe8b013f01f3d7b87f10d7a56bfce05ec",
+    "exchange-final-status.json": "79a517f04ac37147c40ad2db069fa2c2fcf60c90d06190907fabf05eaf9efcb9",
+    "fixture/.gitignore": "32dae3052f331ee34d628ef535709b301259a45df7c7522c4d35dcf49873f00b",
+    "fixture/capacity.py": "4fd66457231638bc9dc978af6b0ce89f5842b80dab608439d97b7274f97a4f2a",
+    "fixture/verify.py": "7098742c813256d7828c132fefd6f442ad1d016573317f786b9a6c1051b89f94",
+    "fixture.json": "a2042e0a9acd9948f8eaa68e76e25a38140b1a5164c90b3d014090a162296bfb",
+    "pairs/pair1/accepted.json": "3ed959ed37ed752e2445b863770367a228dd6d660287dd3b34889af54031f21d",
+    "pairs/pair1/advance-before-claim.json": "368051893b3575d7434ecd8a1af45b61a3b0ebc49dfb49e617456d7846756990",
+    "pairs/pair1/bind-fork.json": "7c690cac41b5f6fecf0a686e58fb467971681028fe987f3c40d7c0ef3e206f73",
+    "pairs/pair1/bind-wrapper.json": "cdfd9514b810a5bafbb0c55094d1a731f7a10e76313be2fcd416db84fa260daa",
+    "pairs/pair1/claim.json": "49626dead075a83daa857bcb05d4fe0e98be9744a39c3b4f9c727cf272f567e1",
+    "pairs/pair1/delivery.json": "cfc9973abfcda7ac164144e2d85ee2e9105a51bae990e6516b3928a34e365945",
+    "pairs/pair1/envelope-ok.json": "30a6327438d274022e00493ea2dcffd4fa950d3f0e222884e16f14ebb3200eaa",
+    "pairs/pair1/fork-observation.json": "d02ccfc552011df9057a24f4cf56c4e9b4a95e0b31c7fed5124659c717bf4ade",
+    "pairs/pair1/fork-output-evidence.json": "981662fa872899c3835dada581c04ca5c13ae5a31ebcc8fc2fa25c38905a944e",
+    "pairs/pair1/fork-output.txt": "d7d29b3204dd102a9cd66c50533695bfc278934f8badbd6e3725b9076e7a1451",
+    "pairs/pair1/fork-proof-complete.json": "b27f6e66362d8c2625c7ff3f29488b9e493d195f2bb3303646687196b482668b",
+    "pairs/pair1/invocation.json": "d2ac3b6cb631b3bb5dbc207ea655a4dd0021e6df342ad0b458f12c8e67fa5df2",
+    "pairs/pair1/native-review-and-relay-evidence.json": "d4290aaaddbde8fd7a49e8268fa572beb4818d0f3d327622636f2d7928219c89",
+    "pairs/pair1/prompt.txt": "9c4173835c2fb28186288f2f7f2e2dec80775526e9aced5e04497c87bb206f29",
+    "pairs/pair1/receipt-v2.json": "1b8e78bc6c5c8ce54a9fa8ca3dca76893da98da4d9a6bcd3f315ef357c357874",
+    "pairs/pair1/receipts/agent-a237e9881c66a0fcc.jsonl": "6778f2ca9be743e29867a838ef39f9766e5d659ef13f3ce32952bc0a68b69447",
+    "pairs/pair1/receipts/agent-a237e9881c66a0fcc.meta.json": "ebab47e91d3b5d384777cacf7a1c906403800a2bdc9a2a288ed20ffe92978850",
+    "pairs/pair1/receipts/agent-apair1-wrapper-ce6d7097860849aa.jsonl": "704be5a63cfaa2ccbd1b6e1cb136e357ba99b0f30083540fb8420d7c3b084066",
+    "pairs/pair1/receipts/agent-apair1-wrapper-ce6d7097860849aa.meta.json": "dcbf779c9ff36d93195c8a2b439b30a74ecbfbab985d47280132c359e26dc333",
+    "pairs/pair1/record-fork.json": "20a7776f180d82ce18312c54ce8b6d5ffed6487eba5fce0bf7b83bea6118ab27",
+    "pairs/pair1/relay-evidence.json": "6d556558161b18be23dc873533dbd948689bcfb4d5480b27b0cd37cc0c24503b",
+    "pairs/pair1/verdict-check.json": "dfd74ecd37e01ebd3d7c8aa0c155558a36dc14b7c5715ae492bdc1531224a467",
+    "pairs/pair1/wrapper-observation.json": "dc19bf5a159a250b138f44eb698593b749c902cfc27e0e7cabaf54f5f8480c49",
+    "pairs/pair1/wrapper-output.json": "5d47fc7a572ab0312b3d9b3bcae64efbf83ff6cef431745dc2e44a0547ce34c2",
+    "pairs/pair2/accepted.json": "50c27246ec91d6ea59fb6ff24b17f7e4b1043b208d368919de68837a2250887f",
+    "pairs/pair2/advance-before-claim.json": "83c6f15253656af1cb0961b29b6e5eb0bb98b12789aa4bf5df6c772aa0beaedf",
+    "pairs/pair2/bind-fork.json": "599657aadba0647edbd37d70001e90bf1a360b4aca5a9f3101b9c1089d79141a",
+    "pairs/pair2/bind-wrapper.json": "c56c39d69c0a5bdcfe79baa827a87ac6998c0662e585294ef5b0d3c8b1c32b53",
+    "pairs/pair2/claim.json": "1055d0716001eeb2c57a4450b79ccd09b0972a8d9754b20c3afda1ea3835ea98",
+    "pairs/pair2/delivery.json": "98291bf0653d4d10dd5f7fdd3f8ed11a744f308fa67c28ba4857a07a8dfaa1b4",
+    "pairs/pair2/envelope-blocked.json": "debe9d0ccb426a9063816cbe3831e809305fba7daa084dedf2dd4b3be63d4fcc",
+    "pairs/pair2/fork-observation.json": "6c2709e29e61c5f937042c9d1f9e4eca98ed85c74e24b517bcdaca2c9155c805",
+    "pairs/pair2/fork-output-evidence.json": "da4ebef2c5a04da420c661e10abf443516abd926596cfd149cd8fbfdc0427819",
+    "pairs/pair2/fork-output.txt": "904ebd7425b0209599603ae70006dd2e72d6d892987b35b879691d1cd35bb8a6",
+    "pairs/pair2/fork-proof-terminal.json": "4e1976103c468c334bb6a6802ea67c48d2e1b2e1f4eaf99bede5a7e708ec53d1",
+    "pairs/pair2/invocation.json": "bbb03b53f9b3ebde355fe758af0bc935f2fe60b4d4dbd46f1a4735e0f2d5878d",
+    "pairs/pair2/native-review-and-relay-evidence.json": "eaa82f363ba511e33141d702f220ef34c55f53cc23f825095e395901e90c1b69",
+    "pairs/pair2/prompt.txt": "34144a39232bf2115396e82145a89141b229c6fce37024a773f240e2cdbee40f",
+    "pairs/pair2/receipts/agent-ac0dabb082815b4b0.jsonl": "c0c875c11f5fcee734556361b5fec5fe51dede6179eb2706f793beb05d4b78eb",
+    "pairs/pair2/receipts/agent-ac0dabb082815b4b0.meta.json": "d8f92d39ae397933a840e9fb8e74a6f81beb16394b3917a06ca3abf088950edd",
+    "pairs/pair2/receipts/agent-apair2-wrapper-ff8bde90362b4900.jsonl": "659dbf8bf84ec23f56a281419912464c4c5df17a9f3bfff0a7afe0b1a7fa13ba",
+    "pairs/pair2/receipts/agent-apair2-wrapper-ff8bde90362b4900.meta.json": "d4da5f8da700dd8bcc0f1d76d6248b78c44de8ba1cbab3b6b17d3e8e2f52b297",
+    "pairs/pair2/record-fork.json": "f7afc684f4be07169f64e5c3e9e8c07df716858fe58ee4bd6285f8704cc00df5",
+    "pairs/pair2/relay-evidence.json": "c02fd6961beb861a15efe8098e6de5688da6cd42027487aa1143490994bfbef4",
+    "pairs/pair2/verdict-check.json": "b57b533d6ffaad955d4220e998684467d78c2460cc19ae731d742a401fb2ec2b",
+    "pairs/pair2/wrapper-observation.json": "380b3dd401a66bb567edda2d131587259c96f540f28ceea59b4de4642cf85856",
+    "pairs/pair2/wrapper-output.json": "c3a7c90ecb4a787b1595ee1578525d70bac75c6c0ca773d6e794eff4e272c95f",
+    "pairs/pair3/accepted.json": "d4ce3485f7c9e635b858a1537851d69e9030723a7766a958f0cf1927aa0c66c3",
+    "pairs/pair3/advance-before-claim.json": "474aa0443307f8ffbd17adf20bb86ac8a5f59e60a650a5ee8710eadff29dca37",
+    "pairs/pair3/bind-fork.json": "506783ffde8f1979ddc9cc37e6f0cf11bce17c9663de290f2d7c27f27ad713f5",
+    "pairs/pair3/bind-wrapper.json": "6a7558c26ae2758dfec3a030895da156110fe4d826cb9d66bbce027624d9e401",
+    "pairs/pair3/claim.json": "891baac23f9fbf39d0caede303a38955ecaed434a7ef5b892b01060826150428",
+    "pairs/pair3/delivery.json": "081369c6902838083579930781451ceb65400cf0c826c66c0811a2dff9830b7d",
+    "pairs/pair3/envelope-blocked.json": "9d7784e59ddade22140c642657edd5d1cc1e2504f21b08b33fdd1211a66695c0",
+    "pairs/pair3/fork-observation.json": "99af4a5d4bf7ec431de38e1ddd872ada2e09bf5b72da548cd675948914c7ece9",
+    "pairs/pair3/fork-output-evidence.json": "e92aa5676320d413a81cd0232a0eeb016422fbcd8eeb0d2847d1a22a1ec2776e",
+    "pairs/pair3/fork-output.txt": "c532e8cfaca669f473f02590412e8601c05dbcfa8356f5f6f14d3b13d66cedf3",
+    "pairs/pair3/fork-proof-terminal.json": "444bbe14a30c3f143254f56db08987ae39f92d4bdfabf8c617798c3564b29d47",
+    "pairs/pair3/invocation.json": "c0389c62847373a046af709f8ad884b941fadd3fc8e039e567ffba95a727b35a",
+    "pairs/pair3/native-review-and-relay-evidence.json": "a0d9997399ee2dbb75da7b1809c0e3f4133c4613deb9bba54b398aaf67eadd85",
+    "pairs/pair3/prompt.txt": "51810c91ed632c39d01c726c1cc69dad2276f32d2a2eb1b3add98ed7b57c5b0e",
+    "pairs/pair3/receipts/agent-aac860a02ce343193.jsonl": "6db957f59b8a6740556bab3c9551713b89989272202037ff8fc3f0baf14c9e11",
+    "pairs/pair3/receipts/agent-aac860a02ce343193.meta.json": "318b6e1f15a4b63dc74ecad2015e05b3bfa0cfc9c990c0cb320ff621dd8621d9",
+    "pairs/pair3/receipts/agent-af6fe34d6aed3231d.jsonl": "22e76d7a1ed6333ca4611d3320652ee8ae64a9d73c739b93bfb0036a25f6b4d1",
+    "pairs/pair3/receipts/agent-af6fe34d6aed3231d.meta.json": "cb946329c76c03168af90210503db7ad5674b9a9e5b87e48d987f5bd7a2b5475",
+    "pairs/pair3/record-fork.json": "c1057fb8b070a289a92acbe29c81e4878b4a7f3ca0582279a625f32e44966708",
+    "pairs/pair3/relay-evidence.json": "98a627453f284f0a748fb643e0c283cd504d383abd0d463ba6d44cbd19197011",
+    "pairs/pair3/verdict-check.json": "b3d6aa6b0a31ba64c73e511bd8ab6662110efb5b0aa62d5eeba9a8eb9e54f906",
+    "pairs/pair3/wrapper-handback.txt": "6c2394b51a6249b270be96c89d9498c8097e6439c9c9be07cf08d30344542222",
+    "pairs/pair3/wrapper-observation.json": "e27910f337af2030906745eb605ae8d311ac7b4cb43312d451bfb630f192c2bc",
+    "pairs/pair3/wrapper-output.json": "19f3e2c77a94a2af910fa0f62ee38b5e9afd548674e2c838402ac0e1d0e26691",
+    "preparation.json": "1a63a4f1ee8dcf53c63f1aa09a28459ee1584c80ec281e282b70713451c9a62b",
+    "prepared/adaptation.diff": "4c7a7b6d122a1a7a5a709aaabe7b12990daff117e5f1eb1938d42f1c009bf121",
+    "prepared/engine-capture.json": "6fb0700eea4cf7623308fec04995253407b08d5afacd40d1631bb6f525c4c05c",
+    "prepared/exchange-args.json": "01375bb87c3624594522f1b7c533e4eaf0df371a6e5a83869c3ec861c0104e13",
+    "prepared/exchange-config.json": "87bcc3fe9e67d446a68490cb8b5a9f0c8bbfefaf8aa76f37f24715a2d6bebac8",
+    "prepared/fixture-brief.md": "b050ded575006bc0a071b820a226effa66921164c7e258ee5a31399ce371f2fc",
+    "prepared/pair1-adapted-prompt.txt": "d2f8f8f3b3ca7e9f2a89a4486e69778b6506331b17c54a08d7251f0eeba2fc6d",
+    "prepared/pair1-engine-prompt.txt": "45f6c5038df4e42965c1a099f5f11e2f2b421d37d3944a9f749f33c0aa37c20f",
+    "prepared/pair2-adapted-prompt.txt": "986711bd74deae0e96ea27fd12072c7f3c5db249f24cc834698ca29411f12f12",
+    "prepared/pair2-engine-prompt.txt": "8219f43a096199a1bb9584fab28a9546f007654a5a9f872664d1ff292430eec4",
+    "prepared/pair3-adapted-prompt.txt": "0fde3494c8694cbdc2f8169a5779ace48928c49d51bf71c0f96fba1aed837b16",
+    "prepared/pair3-engine-prompt.txt": "d5255aa5960064c6a6715070a92a7c34a0d9ba8ee4a69f0bbcd1a191482a7317",
+    "prepared/pairs.json": "1faefe98373f043b78a8ff7461ca2f6908f1b875e7e7470c9b894582ef94d19a",
+    "prepared/review-path.workflow.js": "b4eb8cbecaf2b465100ea79812de5781fb9b284edf71b77c5290a6a6f0e3cd33",
+    "results.json": "c49d57cd80e8842a96589e9b2f937dd5a269979fa68852d7c3745ed696fd5f3a",
+    "snapshot/_shared/scripts/native_routing.md": "38d35b2b07bb64ce0614978c8892a843dd53ec7af90f77ee226f0210b1af542a",
+    "snapshot/_shared/scripts/native_routing.mjs": "a6ba0b9ed156c9c56bdddb37f1a8cbeb95d28b2e5a45b2de8addcb0b37d271e1",
+    "snapshot/_shared/scripts/native_workflow.md": "c7cfa508c41f0884aab42ca997dac2aab9e7d56b78bed15365f885a56472a9ec",
+    "snapshot/_shared/scripts/native_workflow.mjs": "1d478ce03cee75b512351b55aedbd56b90d62c3d05ae83e4fa83c53e4679ad89",
+    "snapshot/_shared/state/native-routing-policy.json": "c779955de6d15d48f96baa5888f811793328e1ff01ca3dd2c8c567b3961d213a",
+    "snapshot/thread/skills/execute/host-api.md": "7cc1aa028cf52111ed50a39a236f63dd50b9e372fb35eca8c4cf60a6bfb93e4e",
+    "snapshot/thread/skills/execute/routing-and-evidence.md": "09a408340e8057cbf82ebe76b524108aee49fdae4a67e786f2573a5199a0bbf0",
+    "snapshot/thread/skills/execute/tests/engine-routing.test.mjs": "e73eb9d0804469dd86315929691f2e201f63ad565d00ec1e99790af9f05746d4",
+    "snapshot/thread/skills/execute/wave-execute.workflow.js": "ac266e3fcfe631bc20e5c8b0d52d1800a70cc19c89e855db6b4f5138bbf16bef",
+    "spending.json": "f357cab491bb9b69ed4fcb390659a009544d711b40418ef597a4d690c7e0b194",
+    "tools/adapt.mjs": "58623a21b6b725c0f725670aea531a5c627d0db49a856f990586f51af3b4acc8",
+    "tools/capture.mjs": "6545d124b460ea6e270d70e6eba449e9bf4b9c24a286eaaf9ea061f6bb872a56",
+    "tools/delivery.py": "9c5858b26635d08f8f12fcf4b40fe89f13443dd2ccdb5698f30987221c85cfd2",
+    "tools/envelope.py": "438b1b431810678e17eccc13c2fe06f48d296307cc260621248e7e30e6dc29cd",
+    "tools/exchange.mjs": "edcfda3dfc03826b31d8d2ee4eee9bd983e8d6d46d92b69bb7f9b86d07de0ef1",
+    "tools/finalise.py": "85bce71542a097120deaa6839005a9d2c3480ba82da84989f24dcf610f9bfdb6",
+    "tools/forkout.py": "cf1dddd9d67ee8bb6b60d92d62bcd06964ff0248a1213cbcac24671c1d158cad",
+    "tools/forkproof.py": "6aa5a918e4b6fb4181d23b2aaa8fba93b232831ba23d264727ef49d9239d6ed2",
+    "tools/invocation.py": "f2fd6aa81fb9f612fda2c912711a85b07382aea8198b457617c04d162aca4f3b",
+    "tools/ledger.py": "f30a5a84d8674af38b4d5589799e10f0d39a72c10a0e859e249c300018ea6415",
+    "tools/observe.py": "8eef2569a36a2b02eaf790d4bf3987206a20abe79aa48cb6f4b44c90164699b9",
+    "tools/preflight.py": "6e8743e06d95df5917b1ac483033ac8e6f2aa52076b0427ac8a982b44c56a4fd",
+    "tools/receipt.py": "21160cbe86032fae0b402898512a3c61f345e3b866a153f3feec7251bdd617aa",
+    "tools/relay.py": "b868c863a3b13c2986dc6283222dfeb9385d5c4f05918bfa08a51714dff84406",
+    "tools/verdict.py": "78614dd3e51e0e4a98c62b9d7a44ca5795c5110f12914da65847e3170bf6bd9a"
+  }
+}

@@ -2,13 +2,63 @@
 slug: thread-skill
 created: 2026-07-14
 last_touched: 2026-09-23
-state: active
+state: paused
 scope: Build + maintain the thread:* plugin — continuity verbs + the wave rollout engine (one system, two lanes)
 ---
 
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-09-23 — paused at Lachy’s explicit request; the redesigned rollout is unfinished.**
+The coordinator task `thread 1` (01a0c5fe-6b59-7482-aab2-552cfb24f62e)
+closed after the new Claude review-path check failed. No new test allowance,
+live rollout, merge, release or installation is authorised by this close.
+The routing monitor was checked on disk and remains `PAUSED`; the existing
+Codex reviewer was interrupted, and no further audit work was dispatched.
+
+Current reviewed candidates: Thread runtime `db18cb467172861fa8d626b318561d724dcf0a2a`
+(later documentation HEAD `50d59f3` at this close), shared adapter
+`214aee11a52fe6d1d20759681db4cb664ffe2b29`; unchanged skill guidance
+`7273ac93833cd4d895534e45e37bead16fb6a834` and Reader isolation
+`8e5072c52ae69b7f19c2b7ec771305f258c3f887`. See
+[correction delivery](docs/implementation/2026-09-23-claude-review-correction.md)
+for local verification: host/state 86, engine 95, prompt checks 191, integration
+12, shared JS 74, plus six content checks and twelve verifier cases passed.
+These fixtures do not establish native maximum-effort review acceptance.
+
+The new native check, Claude session `9d3f4cab-2f63-4f8c-9cb8-a91481a4e12b`
+on 2.1.280, spent **6/6 attempted children**. Startup definitions loaded.
+Pair 1 observed Opus xhigh wrapper/fork, exact relay and adapter/schema acceptance;
+its reformatted feedback does **not** prove the stricter verbatim-feedback promise.
+Pair 2 observed Opus xhigh on both wrapper and fork despite max requested.
+Pair 3 observed Fable max wrapper and Fable xhigh fork. Both maximum routes remain
+incomplete. The coordinator checked all **122 indexed hashes**, exact bytes of all
+six saved transcripts against original native records, and actual root spawn calls.
+Independent revalidation found the three saved wrapper outputs schema-valid,
+including pair 3’s output matching its native SubagentHandback payload.
+
+Claude’s public [report](docs/implementation/2026-09-23-claude-review-path-check-report.md)
+and [index](docs/implementation/2026-09-23-claude-review-path-check-evidence.json)
+are present but untracked, authored by the Claude peer; close leaves them intact
+and does not commit them under another session’s ownership. The immutable private
+packet is `.thread/claude-review-path-check-2026-09-23/`. Do not run its old entry
+point or rewrite indexed files, including START-HERE.md. Temporary definitions
+were removed after hash checks. Two named Claude wrappers were last observed idle,
+not terminated; their cleanup is unconfirmed and requires native Claude controls.
+
+The five-probe Codex and five-probe Claude checks are also exhausted, as are the
+Codex verifier-preparation allowance (10) and Claude verifier v2 preparation
+allowance (12). Thread 4 is complete/idle; historical thread 3 is archived and
+its automation stays paused. No old execution or spending pool is reopened.
+
+The remaining decision is how to honour maximum reasoning with the native built-in:
+`/code-review xhigh` also sets fork effort; the installed `max` recipe fans out.
+There is no implemented or approved full-tree accounting fix yet. The user’s
+maximum-effort intent stands; a lower-effort exception was not agreed. The
+[refreshed continuation](docs/handoffs/2026-09-22-claude-pilot-audit-and-release.md)
+is the single next-session plan. All entries below are historical checkpoints,
+not instructions to restart a completed pilot.
 
 **2026-09-23 — Claude evidence independently audited; release remains pending.**
 The [independent audit](docs/audits/2026-09-23-claude-pilot-independent-audit.md)
@@ -277,6 +327,13 @@ scheduled 2026-07-15.
 
 ## What's been built / decided
 
+- 2026-09-23: shared routing policy and ADR 0022 fork/accounting plus task-verifier
+  corrections are committed candidate source. Independent source review and local
+  fixtures passed. Native Claude exposed an incompatible maximum-effort review
+  assumption; no relaxation, new review-tree design or release decision is accepted.
+- 2026-09-23: Lachy explicitly paused this work and invoked close. Resume only on
+  a new user request; the paused heartbeat cannot renew any spent allowance.
+
 - Plugin scaffold mirroring wave: manifests, CONTEXT.md, docs/adr/, README.
 - Decisions live in `docs/adr/` — read the directory, never a remembered
   subset. ADR 0001 (the task is the floor; the thread is the upgrade) and
@@ -301,6 +358,19 @@ scheduled 2026-07-15.
   artifact — a Notion page duplicated that guarantee.
 
 ## Open questions / decisions pending
+
+- How can the unmodified native maximum-level review and its descendants be
+  reserved, observed and recovered within one original allowance? Static inspection
+  confirms `max` fan-out; simply replacing `xhigh` breaks the two-call contract.
+- Which plain-subagent dispatch and result-delivery shape reliably preserves
+  requested effort and independent review? Named teammates ran at the root effort;
+  notification routing differed, and one reviewer read private fixture-answer data.
+- How should native findings be retained mechanically without relying on wrapper
+  reformatting? Pair 1’s adapter acceptance is narrower than literal prompt compliance.
+- The collection-helper audit was interrupted by close: preserve its concrete
+  preliminary findings below, then finish/disposition them before reusing helpers.
+- Native cleanup of pair1-wrapper/pair2-wrapper is unconfirmed. The saved status
+  established idle, not terminated; no at-most-two-live-children claim follows.
 
 - **Two tier-ceiling gaps deferred from the 2026-09-21 round-3 review**
   (`docs/reviews/2026-09-21-c9f09dd-df669e.md`, findings 12 and 14). Both are
@@ -348,6 +418,45 @@ scheduled 2026-07-15.
   the optional quieting fix).
 
 ## Known quirks (don't re-derive)
+
+### 2026-09-23 native review-path audit capture (paused)
+
+- The observed CLI 2.1.280 built-in derives fork effort from the review command
+  level. All three `/code-review xhigh` forks ran xhigh; model followed the wrapper.
+  Coordinator static recheck with `_shared/scripts/review-matrix.py` shows `max`
+  fans out for both relevant default-family models. CLI/version-specific facts,
+  not universal promises; no max review was launched in this check.
+- Named Agent calls produced in-process teammates; pair 2 ignored its definition’s
+  max and ran root xhigh. Plain pair 3 honoured Fable max. The startup directory
+  must contain the definitions before the session starts; the earlier parent-folder
+  preflight spent zero slots. Changing cwd inside it did not load definitions.
+- Exact fork output came from transcripts because notifications HTML-escape text.
+  Root relays were byte-exact. Wrappers preserved findings semantically but changed
+  their containers. The claim “pair 1 completed end to end” needs qualification.
+- Pairs 2/3 ran verifier copies outside the allowed fixture. Pair 3 also searched
+  enclosing private records and encountered the defect label, weakening independence.
+- Preliminary findings from the existing independent Codex built-in reviewer
+  `/root/ignored_file_fix_review` (reused context, no author conversation for this
+  audit; actual reasoning effort unobserved), **no helpers executed**:
+  1. `tools/finalise.py:32` hard-codes schemaValid=true, including blocked results
+     whose adapter never validates an output. Saved outputs happen to pass the
+     coordinator’s independent schema check; that does not fix the collector.
+  2. `tools/ledger.py:26–28` permits resolve back to reserved, after which attempt
+     can overwrite identity/increment without checking the attempt ceiling.
+     The actual six dispatches were independently corroborated; no overrun alleged.
+  3. `tools/relay.py` supports teammate-message only; saved pair 3 evidence uses
+     queued_command. `tools/verdict.py` expects finalText; pair 3 used SubagentHandback.
+     Ad-hoc collection produced evidence that those checked-in private helpers
+     cannot faithfully reproduce. Preserve the raw observations, fix a new version.
+  4. `tools/finalise.py:43–47` would hash an existing hash-index.json and then
+     overwrite it, leaving a stale self-hash on rerun. The current first-run index
+     excludes itself and all 122 indexed files match. Do not rerun it in place.
+  5. Original ListAgents results at 05:13:33Z and 05:22:12Z showed both named
+     wrappers idle. No shutdown proof was found. Sequential request reservations
+     do not establish the original live-child limit or successful teardown.
+- The reviewer was interrupted when Lachy closed the task; these are established
+  preliminary messages, not a finished no-findings audit. Original packet, source
+  pins, report and index remain unchanged. No runtime fix followed these findings.
 
 - **Two sessions can share one checkout** (a handoff consumer opened in the
   same directory). Every delete-at-close lifecycle here — handoff docs, review
@@ -464,54 +573,19 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**Read [the 23 September independent audit](docs/audits/2026-09-23-claude-pilot-independent-audit.md) first.** The audit requested by `docs/handoffs/2026-09-22-claude-pilot-audit-and-release.md` is complete in the main task. That handoff's release step is now qualified by the findings above; do not repeat the pilot or assume its completion establishes release readiness.
+Work is paused. On explicit resumption, read
+[the refreshed continuation](docs/handoffs/2026-09-22-claude-pilot-audit-and-release.md)
+first, then this file’s latest checkpoint. That handoff owns the remaining plan;
+do not run the exhausted capability-check prompts or infer release authority.
 
-**Claude pilot lane, 22 September 2026: complete.** Execution `db955f02…` is
-`ended` with all three outcomes merged; read `docs/implementation/2026-09-22-live-pilot.md`
-§ Native Claude slice and the acceptance task
-`~/repos/obsidian/Work/Tasks/thread-rollout-v4-native-acceptance.md` for what
-both slices observed and what is still open. Do not re-initialise or relaunch
-that execution. Release/installation of either candidate is a decision for
-Lachy, not an inference from these runs.
-
-**Rollout redesign, 22 September 2026:** coordination now belongs to **thread 1**.
-Read the [thread 2 handback](/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill/docs/implementation/2026-09-22-thread-2-closeout.md)
-and the current records owned by thread 3 and the native Claude pilot before
-acting. Their work continues independently; do not duplicate dispatch, reuse the
-completed Codex pools, or infer release readiness. The instructions below describe
-the earlier released 2.5.1 checkpoint, not completion of the protocol 4 candidate.
-
-**Claude pilot lane, 22 September 2026:** owned by session `9fce5030…` via the
-restart handoff `docs/handoffs/2026-09-22-claude-pilot-restart.md` (consumed;
-that session's close deletes it and restores `modelSettings.claude-fable-5-1.effortLevel`
-to `high`, removes the eight `rollout-*` agent definitions and the local Stop
-hook). Do not initialise a second execution against `.thread/pilot-claude-2026-09-22/`;
-read its `record/` status first if it exists.
-
-0. **Nothing is half-done — the tree is clean and 2.5.1 is shipped.** The
-   2026-09-21 four-file batch was reviewed, corrected across two rounds and
-   committed; the cache dance ran and was verified (`diff -rq` against the
-   2.5.1 cache, suite green from the cache copy). A session restart is all that
-   is needed for 2.5.1 to load. Do **not** open a new `/code-review` chain on
-   the tier ceiling: `review-ledger.py` stopped the last one at 60%
-   regressions. The shipped code at `6b8188c` has had no clean-room pass —
-   `/simplify` is the engine that has never run on it and is the honest way to
-   close that gap. Start from § Open questions, which carries the two deferred
-   findings.
-1. Read this file, then `CONTEXT.md` and the ADRs in `docs/adr/` — the whole
-   directory, not a subset. The rollout lane, orient's self-launching and
-   close's autonomy each rest on an ADR added after v1.0.0.
-2. `skills/_shared/task-writer.md` is the single source for task shape —
-   never change task behaviour in a route skill directly.
-3. Automated checks are `README.md` § Tests. A live end-to-end checklist is
-   written from the current specs — `task-writer.md` § 3b (a `defer` is not
-   done until the target day note carries its `## To do` line; the TaskNotes
-   agenda is secondary discovery) plus each route's SKILL.md.
-   `docs/build-plan.md` § Verification is the historical v1.0.0 checklist: it
-   predates § 3b and passes a defer that writes only `scheduled:`. Don't
-   route live testing through it.
+Authoritative candidate directory:
+`/Users/lachlants/.codex/worktrees/thread-rollout-redesign/thread-skill`.
+The canonical checkout `/Users/lachlants/repos/tools/thread-skill` has a pre-existing
+modified THREAD.md from other work; it was not overwritten or committed at this close.
 
 ## Session log
+
+- 2026-09-23 (coordinator close): Lachy paused the work. Saved reviewed correction pins, exhausted native/local allowances, failed maximum-effort review observations and interrupted helper-audit findings; refreshed continuation, retained original evidence, monitor remains paused. No runtime fixes, probes, installation or release at close.
 
 - 2026-09-22 (latest): Claude pilot lane — consumed the restart handoff, probed Fable at xhigh in the fresh session, initialised execution `db955f02…`, ran A/B/C to completion through fresh native children (#18, #19, #20 merged by the pinned host), observed pause/heartbeat-self-delete/single resume, three unattended changed-base recoveries through the corrected entry, one review-requested revision, five host-boundary schema rejections; wrote the report section, acceptance task and R-WAVE ledger entry (`d38a6ec` in the adapter worktree); restored the profile effort and removed the pilot definitions and Stop hook.
 - 2026-09-22: Claude pilot lane — consumed the Claude handoff, verified candidate `5d3e40f`, agreed A/B/C with allowances and a pause plan, prepared the private record/verifier/notes, probed hooks (hot-reload yes), agent definitions (model yes, effort no) and effort settings (no reload); withheld launch per the xhigh rule and handed off to a fresh session (`cc8640e`), which consumed it.
