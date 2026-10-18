@@ -10,10 +10,13 @@ trap 'rm -rf "$tmp"' EXIT
 
 # atleast2 <s>: ok when <s> is an integer >= 2.
 atleast2() { case "$1" in ''|*[!0-9]*) echo bad ;; *) if [ "$1" -ge 2 ]; then echo ok; else echo bad; fi ;; esac; }
+# /bin/bash joins only when it is another file (on a merged-/usr runner it is the same bash as /usr/bin/bash).
 shells=("$(command -v bash)")
-[ -x /bin/bash ] && [ "/bin/bash" != "${shells[0]}" ] && shells+=(/bin/bash)
+[ -x /bin/bash ] && ! [ /bin/bash -ef "${shells[0]}" ] && shells+=(/bin/bash)
 
+k=0
 for sh in "${shells[@]}"; do
+  k=$((k + 1))
   n="$sh ($("$sh" -c 'echo ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}'))"
   cap() { env -u THREAD_TEST_JOBS "$sh" -c '. tests/lib/test-jobs.sh; suite_cap "$@"; echo "rc=$?"' sh "$@"; }
   capj() { THREAD_TEST_JOBS="$1" "$sh" -c '. tests/lib/test-jobs.sh; suite_cap 12; echo "rc=$?"'; }
@@ -31,7 +34,7 @@ for sh in "${shells[@]}"; do
     ok "$(capj "$bad" | tr '\n' ' ')" "rc=2 " "$n: THREAD_TEST_JOBS='$bad' → return 2, nothing printed"
   done
   # ---- wait_for_room: never more than <cap> jobs at once, and every job runs -----------------------------------
-  D="$tmp/room-$(basename "$sh")"; mkdir -p "$D/in"
+  D="$tmp/room-$k"; mkdir -p "$D/in"   # one dir per arm, never shared
   "$sh" -c '. tests/lib/test-jobs.sh
     D=$1
     for i in 1 2 3 4 5 6; do
