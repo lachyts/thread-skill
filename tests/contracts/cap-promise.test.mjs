@@ -4,19 +4,22 @@
 //
 // Pins, in the engine's rendered prompts (skills/execute/task.workflow.js): the planner's and the plan reviser's Gated
 // inputs line, the plan judge's checklist bullet (sub-bullets allowed), its pricing fragment while args.gatePricer is
-// set (each parsed spend gate with a ready `exposure -` command on stdin, the approved-gate exemption, gateBounce, and
-// the capless rule that keeps a gate without exactly one cap on ADR 0008's automatic `changes`), the fragment's absence
-// without a pricer or a spend gate, and the mid-run agents' GATED_INPUTS_CHECK and IMPL_RESULT. In prose: schedule
-// § 7's Planner line and reshuffle R5.2's copy of it; execute § 3.7's *The Cap's format*, § 4's `gatePricer` args and
-// *Resolve `gatePricer`*, § 3's table row and § 6's bounce line; reconcile-rollout.py's `gate-pricer` verb; CONTEXT.md's
-// Cap entry.
+// set (each parsed spend gate with a ready `exposure -` command on stdin, the approved-gate exemption, gateBounce, the
+// usd-null rule that bounces only a gate the pricer could not price, with PLAN_JUDGE_PRICED's gateBounce description
+// saying the same, and the capless rule that keeps a gate without exactly one cap on ADR 0008's automatic `changes`),
+// the fragment's absence without a pricer or a spend gate, and the mid-run agents' GATED_INPUTS_CHECK and IMPL_RESULT.
+// The engine's bounce mark and reconcile-rollout.py's, which writes the bounce under `## Gate bounce (awaiting
+// sign-off)`. In prose: schedule § 7's Planner line and reshuffle R5.2's copy of it; execute § 3.7's *The Cap's
+// format*, § 4's `gatePricer` args and *Resolve `gatePricer`*, § 3's table row and § 6's bounce line;
+// reconcile-rollout.py's `gate-pricer` verb; CONTEXT.md's Cap entry.
 //
 // Same shape as execute-standing-approval.test.mjs: every rule lives in one function, checkCap(files, E), returning
 // named failures, so the real text and the controls run through identical logic; each control mutates one place and
 // must fail with exactly its rule. The required control that drops the judge check swaps in a planJudgePrompt with
 // gatePricingBlock removed: it fails judge-check, judge-capless and judge-absent's positive half, and nothing else.
 // Behaviour is pinned elsewhere: tests/gated-inputs.test.mjs (`exposure -`), skills/execute/tests/task-engine.test.mjs
-// (the bounce), prompt-invariants (the parse and the byte pins) and reconcile-rollout-standing.test.sh (gate-pricer).
+// (the bounce), prompt-invariants (the parse and the byte pins) and reconcile-rollout-standing.test.sh (gate-pricer, and
+// S8: a bounced note the standing approval never signs).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { collapse, read, section } from '../lib/contract-text.mjs'
@@ -30,7 +33,7 @@ const real = {
   context: read('CONTEXT.md'),
 }
 const ENGINE = loadEngine(['plannerPrompt', 'planReviserPrompt', 'planJudgePrompt', 'gatePricingBlock', 'GATED_INPUTS_CHECK',
-  'IMPL_RESULT', 'rungState'])
+  'IMPL_RESULT', 'rungState', 'PLAN_JUDGE_PRICED', 'BOUNCE_MARK'])
 
 const PRICER = '/home/x/.claude/plugins/cache/thread/thread/4.1.0/skills/_shared/scripts/gated_inputs.py'
 const GATE = 'spend: claude plugin eval re-runs of the two close cases — cap 24 USD'
@@ -91,14 +94,25 @@ function checkCap(f, E) {
   }
 
   // judge-check: the fragment, priced: each parsed spend gate in a quoted heredoc on stdin, the approved-gate
-  // exemption, the pricer's why quoted, the sub-bullet mismatch, gateBounce for a gates-only `changes`.
+  // exemption, the pricer's why quoted, the sub-bullet mismatch, gateBounce for a gates-only `changes`, and a gate still
+  // unpriced after the bounce going to Lachy, never to the standing approval.
   if (!jPricedRaw.includes(`\`\`\`bash\npython3 -I '${PRICER}' exposure - <<'EOF'\n${GATE}\nEOF\n\`\`\``) ||
     !has(jPriced, 'Spend gate pricing (ADR 0038; the standing approval is on for this task)', 'Price each EXACTLY as shown, the gate on stdin, never as a shell argument',
       'Skip a gate the task note\'s "## Approved gates" section already holds', 'quote its "why" verbatim and ask for one Cap that holds the whole spend',
-      'when its sub-bullets name spend its Cap does not hold', 'When such gates are your ONLY reason for "changes", list each in gateBounce exactly as shown above',
-      'the engine sends the plan back once without a climb, and a gate still flagged after that goes to Lachy for sign-off') ||
+      'when its sub-bullets name spend its Cap does not hold', 'when such gates are your ONLY reason for "changes", list each in gateBounce exactly as shown above',
+      'the engine sends the plan back once without a climb, and a gate still unpriced after that goes to Lachy for sign-off, never to the standing approval.') ||
     jPricedRaw.includes('credential: PROD_API_KEY\nEOF')) {
     fails.push('judge-check')
+  }
+
+  // judge-usd-null: gateBounce is only for a gate whose `exposure -` printed "usd": null. A gate that prices but whose
+  // sub-bullets break its Cap is an ordinary `changes` (it climbs), never the bounce-then-gate-pending override; the
+  // fragment and PLAN_JUDGE_PRICED's gateBounce description both say so.
+  const bounceDesc = collapse(String(((E.PLAN_JUDGE_PRICED || {}).properties || {}).gateBounce?.description || ''))
+  if (!has(jPriced, 'gateBounce is ONLY for gates whose "usd" printed null:',
+    'Never list a gate whose "usd" is an amount: a gate that prices but whose sub-bullets name spend its Cap does not hold is an ordinary "changes" (its planner raises the Cap or trims the split), never a bounce.') ||
+    !has(bounceDesc, 'every bullet is about spend gates whose `exposure -` printed "usd": null', 'Never a gate that priced (an amount in "usd"; its sub-bullets breaking its Cap is an ordinary changes)')) {
+    fails.push('judge-usd-null')
   }
 
   // judge-capless: the fragment keeps a spend gate without exactly one cap on ADR 0008's automatic `changes`.
@@ -135,14 +149,20 @@ function checkCap(f, E) {
     fails.push('reshuffle-planner')
   }
 
-  // execute-37: *The Cap's format*: the judge prices through `exposure -`; approved gates exempt; a gates-only
-  // `changes` never climbs and bounces once, then gate-pending, never plan-blocked, with the bounce line; a capless or
-  // two-cap gate stays ADR 0008's `changes`; no check while the standing approval is off.
+  // execute-37: *The Cap's format*: the judge prices through `exposure -`; approved gates exempt; only an unpriceable
+  // gate bounces: a gates-only `changes` never climbs and bounces once, then gate-pending, never plan-blocked, with the
+  // bounce line, which reconcile writes under `## Gate bounce (awaiting sign-off)`, where the standing approval signs
+  // nothing; a priced gate whose sub-bullets break its Cap, and a capless or two-cap gate, stay a climbing `changes`;
+  // no check while the standing approval is off.
   const cap37 = labelled(f.execute, S37, "The Cap's format (ADR 0038).")
   if (!has(cap37, 'A spend gate is **one line**, `spend: <what> — cap N USD`', "While § 4's `gatePricer` is set (the task's standing approval is on)",
-    'through `gated_inputs.py exposure -`, the gate on stdin', 'A gate already in `## Approved gates` is exempt.', '**never climbs**', '**bounces at most once per call**',
+    'through `gated_inputs.py exposure -`, the gate on stdin', 'A gate already in `## Approved gates` is exempt.',
+    'Only a gate the pricer cannot price (its `exposure -` printed `"usd": null`) may be bounced', '**never climbs**', '**bounces at most once per call**',
     '**gate-pending, never plan-blocked**', "the row's blockerDiagnosis carries `bounced by the plan judge (ADR 0038)`",
-    "A spend gate with no cap, or more than one, stays ADR 0008's automatic `changes`, which climbs.", 'With the standing approval off there is no check.')) {
+    'Reconcile writes that paragraph under **`## Gate bounce (awaiting sign-off)`**', 'while it stands `approve-gates --standing` signs nothing on the note',
+    'A gate that prices but whose sub-bullets name spend its Cap does not hold is an ordinary `changes`, which climbs',
+    "A spend gate with no cap, or more than one, stays ADR 0008's automatic `changes`, which climbs.", 'With the standing approval off there is no check.') ||
+    cap37.includes('the fail-closed pricer asks')) {
     fails.push('execute-37')
   }
 
@@ -158,9 +178,16 @@ function checkCap(f, E) {
     fails.push('execute-args')
   }
 
-  // execute-report: § 6 prints the bounce on its one line per event.
-  if (!collapse(section(f.execute, S6) ?? '').includes(`per gate-pending call whose blockerDiagnosis carries \`bounced by the plan judge (ADR 0038)\` ("[[task-k]] → gate-pending after the plan judge's bounce (ADR 0038): <its first feedback bullet>"`)) {
+  // execute-report: § 6 prints the bounce on its one line per event, and reconcile persists it on the note.
+  if (!collapse(section(f.execute, S6) ?? '').includes(`per gate-pending call whose blockerDiagnosis carries \`bounced by the plan judge (ADR 0038)\` ("[[task-k]] → gate-pending after the plan judge's bounce (ADR 0038): <its first feedback bullet>", § 3.7: reconcile also writes the paragraph under \`## Gate bounce (awaiting sign-off)\``)) {
     fails.push('execute-report')
+  }
+
+  // bounce-mark: reconcile-rollout.py finds the engine's bounce paragraph by the engine's own mark and writes it under
+  // `## Gate bounce (awaiting sign-off)`.
+  if (typeof E.BOUNCE_MARK !== 'string' || !E.BOUNCE_MARK || !f.reconcile.includes(`GATE_BOUNCE_MARK = "${E.BOUNCE_MARK}"`) ||
+    !f.reconcile.includes('GATE_BOUNCE_SECTION = "## Gate bounce (awaiting sign-off)"')) {
+    fails.push('bounce-mark')
   }
 
   // reconcile-verb: the docstring names gate-pricer as read-only, and it is wired.
@@ -169,8 +196,9 @@ function checkCap(f, E) {
     fails.push('reconcile-verb')
   }
 
-  // context: the Cap entry says the plan judge sends an unpriceable Cap back once, without a climb.
-  if (!collapse(f.context).includes('While the Standing approval is on, the plan judge prices the line and sends a Cap that does not price back to its planner once, without a climb (ADR 0038).')) {
+  // context: the Cap entry says the plan judge sends an unpriceable Cap back once, without a climb, and one still
+  // unpriced goes to Lachy, never to the Standing approval.
+  if (!collapse(f.context).includes('While the Standing approval is on, the plan judge prices the line and sends a Cap that does not price back to its planner once, without a climb; one still unpriced then goes to Lachy, never to the Standing approval (ADR 0038).')) {
     fails.push('context')
   }
   return fails
@@ -182,8 +210,8 @@ test('the engine prompts, execute, schedule, reshuffle, reconcile-rollout.py and
 
 // ---- controls: each mutates one place and must fail with exactly its rule ----------------------------------------
 
-const RULES = ['planner', 'reviser', 'judge-list', 'judge-check', 'judge-capless', 'judge-absent', 'mid-run', 'schedule-planner',
-  'reshuffle-planner', 'execute-37', 'execute-args', 'execute-report', 'reconcile-verb', 'context']
+const RULES = ['planner', 'reviser', 'judge-list', 'judge-check', 'judge-usd-null', 'judge-capless', 'judge-absent', 'mid-run',
+  'schedule-planner', 'reshuffle-planner', 'execute-37', 'execute-args', 'execute-report', 'bounce-mark', 'reconcile-verb', 'context']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -200,10 +228,24 @@ const onlyEngine = (over, rules, label) => {
   assert.deepEqual(checkCap(real, { ...ENGINE, ...over }), rules, label)
 }
 
-test('control: the judge check dropped (gatePricingBlock removed from planJudgePrompt) fails judge-check, judge-capless and judge-absent only', () => {
+test('control: the judge check dropped (gatePricingBlock removed from planJudgePrompt) fails judge-check, judge-usd-null, judge-capless and judge-absent only', () => {
   const dropped = (t, p, a) => ENGINE.planJudgePrompt(t, p, a).replace(ENGINE.gatePricingBlock(a, p), '')
   assert.notEqual(dropped(TASK, PLAN_SPEND, AP), ENGINE.planJudgePrompt(TASK, PLAN_SPEND, AP), 'the control removes the fragment')
-  onlyEngine({ planJudgePrompt: dropped }, ['judge-check', 'judge-capless', 'judge-absent'], 'no pricing fragment')
+  onlyEngine({ planJudgePrompt: dropped }, ['judge-check', 'judge-usd-null', 'judge-capless', 'judge-absent'], 'no pricing fragment')
+})
+
+test('control: a fragment that bounces a priced gate (the usd-null rule removed) fails judge-usd-null', () => {
+  const loose = (...x) => ENGINE.planJudgePrompt(...x).replace(/gateBounce is ONLY for gates whose "usd" printed\s+null: /, '')
+    .replace(/Never list a gate whose "usd" is an amount:[\s\S]*?never a bounce\.\s+/, '')
+  const priced = ENGINE.planJudgePrompt(TASK, PLAN_SPEND, AP)
+  assert.equal(priced.length - loose(TASK, PLAN_SPEND, AP).length > 200, true, 'the control removes both sentences')
+  onlyEngine({ planJudgePrompt: loose }, ['judge-usd-null'], 'priced gates bounce')
+})
+
+test("control: PLAN_JUDGE_PRICED's old gateBounce description fails judge-usd-null", () => {
+  const P = ENGINE.PLAN_JUDGE_PRICED
+  const old = { ...P, properties: { ...P.properties, gateBounce: { ...P.properties.gateBounce, description: "ONLY on a changes verdict whose every bullet is about spend gates' format: each such gate exactly as the prompt lists it, never one without exactly one cap; empty otherwise" } } }
+  onlyEngine({ PLAN_JUDGE_PRICED: old }, ['judge-usd-null'], 'old description')
 })
 
 test('control: a planner that keeps the split on the gate line fails planner', () => {
@@ -245,7 +287,14 @@ test("control: R5.2's Planner clause without the split fails reshuffle-planner",
 
 test('control: a format bounce that climbs fails execute-37', () => {
   onlyFile('execute', '**bounces at most once per call**', '**bounces until the last round**', 'execute-37', 'unbounded')
-  onlyFile('execute', 'A gate already in `## Approved gates` is exempt. A `changes`', 'A `changes`', 'execute-37', 'no exemption')
+  onlyFile('execute', 'A gate already in `## Approved gates` is exempt. Only a gate', 'Only a gate', 'execute-37', 'no exemption')
+})
+
+test("control: *The Cap's format* that bounces a priced gate, or signs a bounced note at sign-off, fails execute-37", () => {
+  onlyFile('execute', 'Only a gate the pricer cannot price (its `exposure -` printed `"usd": null`) may be bounced: a `changes` over such gates alone',
+    "A `changes` over spend gates' format alone", 'execute-37', 'any gate bounces')
+  onlyFile('execute', /Reconcile writes that paragraph under[\s\S]*?Lachy's sign-off removes the section\. /, 'At sign-off the fail-closed pricer asks with its why. ',
+    'execute-37', 'the pricer signs it')
 })
 
 test('control: a gatePricer resolved on a resume fails execute-args', () => {
@@ -254,6 +303,13 @@ test('control: a gatePricer resolved on a resume fails execute-args', () => {
 
 test('control: § 6 without the bounce line fails execute-report', () => {
   onlyFile('execute', "per gate-pending call whose blockerDiagnosis carries `bounced by the plan judge (ADR 0038)`", 'per bounce', 'execute-report', 'no line')
+  onlyFile('execute', '§ 3.7: reconcile also writes the paragraph under `## Gate bounce (awaiting sign-off)`', '§ 3.7: reconcile writes only the gate bullets for gate-pending',
+    'execute-report', 'not persisted')
+})
+
+test("control: an engine bounce mark reconcile-rollout.py does not find fails bounce-mark", () => {
+  onlyEngine({ BOUNCE_MARK: 'bounced by the plan judge:' }, ['bounce-mark'], 'mark drift')
+  onlyFile('reconcile', 'GATE_BOUNCE_SECTION = "## Gate bounce (awaiting sign-off)"', 'GATE_BOUNCE_SECTION = "## Gate bounce"', 'bounce-mark', 'section renamed')
 })
 
 test('control: gate-pricer unwired fails reconcile-verb', () => {
@@ -261,10 +317,11 @@ test('control: gate-pricer unwired fails reconcile-verb', () => {
 })
 
 test("control: CONTEXT.md's Cap entry without the bounce fails context", () => {
-  onlyFile('context', /While the\s+Standing approval is on, the plan judge prices the line and sends a Cap that\s+does not price back to its planner once, without a climb \(ADR 0038\)\./, '', 'context', 'no sentence')
+  onlyFile('context', /While the\s+Standing approval is on, the plan judge prices the line and sends a Cap that\s+does not price back to its planner once, without a climb; one still unpriced\s+then goes to Lachy, never to the Standing approval \(ADR 0038\)\./, '', 'context', 'no sentence')
+  onlyFile('context', /; one still unpriced\s+then goes to Lachy, never to the Standing approval \(ADR 0038\)\./, ' (ADR 0038).', 'context', 'no sign-off clause')
 })
 
-test('the rules are all named (14) and each has a control', () => {
-  assert.equal(RULES.length, 14)
+test('the rules are all named (16) and each has a control', () => {
+  assert.equal(RULES.length, 16)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

@@ -240,8 +240,9 @@ export const meta = {
 // gatedInputs lists the declared-but-unapproved gates when status is gate-pending
 // (a declared gate always pauses for a human — ADR 0008). A plan-gate gate-pending that follows a plan judge's
 // gates-only bounce (ADR 0038, planLoop) carries, after gateDiagnosis in blockerDiagnosis, a paragraph starting
-// `bounced by the plan judge (ADR 0038):` with that round's feedback; reconcile writes only the gate bullets for
-// gate-pending, so the lead quotes it in its § 6 line. reviewHistory is the accumulated by-round
+// `bounced by the plan judge (ADR 0038):` (bounceNote) with the gates it flagged and that round's feedback; reconcile
+// writes that paragraph under `## Gate bounce (awaiting sign-off)` beside the gate bullets, and while it stands
+// `approve-gates --standing` signs nothing on the note (each gate an ASK). reviewHistory is the accumulated by-round
 // review-judge rejection rationale ([{ round, feedback: [] }], empty when the PR approved first try);
 // approvedAtCeiling marks an approval on the FINAL review round with actual rejection history —
 // reconcile persists that history to the task note so ceiling approvals stay auditable.
@@ -305,13 +306,13 @@ const PLAN_JUDGE = {
 }
 
 // The plan judge's schema while args.gatePricer is set (ADR 0038): PLAN_JUDGE plus an optional gateBounce, the
-// spend gates a gates-only `changes` names (validated by gateBounceOf). planLoop uses it only with a pricer, so a
-// call without one keeps PLAN_JUDGE's opts (the resume-cache key).
+// unpriceable spend gates a gates-only `changes` names (validated by gateBounceOf). planLoop uses it only with a
+// pricer, so a call without one keeps PLAN_JUDGE's opts (the resume-cache key).
 const PLAN_JUDGE_PRICED = {
   ...PLAN_JUDGE,
   properties: {
     ...PLAN_JUDGE.properties,
-    gateBounce: { type: 'array', items: { type: 'string' }, description: "ONLY on a changes verdict whose every bullet is about spend gates' format: each such gate exactly as the prompt lists it, never one without exactly one cap; empty otherwise" },
+    gateBounce: { type: 'array', items: { type: 'string' }, description: 'ONLY on a changes verdict whose every bullet is about spend gates whose `exposure -` printed "usd": null: each such gate exactly as the prompt lists it. Never a gate that priced (an amount in "usd"; its sub-bullets breaking its Cap is an ordinary changes) and never one without exactly one cap; empty otherwise' },
   },
 }
 
@@ -580,9 +581,13 @@ function gateDiagnosis(gates) {
 // with the task's standing approval on, execute § 4), the plan judge's prompt lists each top-level spend gate the
 // engine parsed, each with a ready `exposure -` command (gatePricingBlock), and its schema gains gateBounce
 // (PLAN_JUDGE_PRICED). The judge runs the pricer because this sandbox has only agent() and log(): no process.
-// A `changes` whose every bullet is about spend gates' format names them in gateBounce; gateBounceOf validates the
-// claim against the parse and the cap backstop, and planLoop sends such a plan back once with no climb, then takes
-// the approve path, so the gates reach Lachy as gate-pending (with bounceNote), never plan-blocked.
+// A `changes` whose every bullet is about spend gates the pricer could not price (`"usd": null`) names them in
+// gateBounce; a gate that prices but whose sub-bullets break its Cap is an ordinary, climbing `changes`. gateBounceOf
+// validates the claim against the parse and the cap backstop, and planLoop sends such a plan back once with no climb,
+// then takes the approve path, so the gates reach Lachy as gate-pending (with bounceNote), never plan-blocked. The
+// engine cannot see the pricer's output, so it trusts the judge's usd-null claim; reconcile persists bounceNote under
+// `## Gate bounce (awaiting sign-off)`, and while that section stands `approve-gates --standing` signs nothing on the
+// note (each gate an ASK), so a gate the judge flagged never reaches the standing approval's signature.
 
 // The parsed gates whose kind (the text before the first `:`, trimmed, lowercased) is `spend`.
 function spendGates(declared) {
@@ -631,37 +636,50 @@ It prints one JSON line {"usd": "<amount>" | null, "why": "<reason>"}. Skip a ga
 aside): it is signed. Any other gate needs "changes" when its "usd" is null (quote its "why" verbatim and
 ask for one Cap that holds the whole spend), or when its sub-bullets name spend its Cap does not hold (a
 per-call limit × a count above it, a USD amount not folded in, a recurring or per-unit qualifier, a
-widening word such as soft, plus tax or fees, or more). When such gates are your ONLY reason for
-"changes", list each in gateBounce exactly as shown above: the engine sends the plan back once without a
-climb, and a gate still flagged after that goes to Lachy for sign-off. Never list a gate whose own line
-has no \`cap\` amount, or more than one: a spend gate without exactly one cap is the automatic "changes"
-above (ADR 0008), never a bounce. A cap in another currency, such as \`cap 30 AUD\`, which the pricer also
-reports as "no cap clause", may be listed. Leave gateBounce empty otherwise.`
+widening word such as soft, plus tax or fees, or more). gateBounce is ONLY for gates whose "usd" printed
+null: when such gates are your ONLY reason for "changes", list each in gateBounce exactly as shown above;
+the engine sends the plan back once without a climb, and a gate still unpriced after that goes to Lachy
+for sign-off, never to the standing approval. Never list a gate whose "usd" is an amount: a gate that
+prices but whose sub-bullets name spend its Cap does not hold is an ordinary "changes" (its planner
+raises the Cap or trims the split), never a bounce. Never list a gate whose own line has no \`cap\`
+amount, or more than one: a spend gate without exactly one cap is the automatic "changes" above (ADR
+0008), never a bounce. A cap in another currency, such as \`cap 30 AUD\`, which the pricer also reports
+as "no cap clause", may be listed. Leave gateBounce empty otherwise.`
 }
 
 // The validated gates-only bounce of a plan judge's verdict, or null (an ordinary `changes`): null without a usable
 // pricer, on any verdict but `changes`, when gateBounce (non-strings and blanks dropped) is empty, when it names a
 // gate that is not among the plan's parsed spend gates (normalizeGate), or one whose own line holds no cap amount
-// or more than one (ADR 0008: that is the automatic, climbing `changes`). It reads only args, the cached verdict and
-// the cached plan's parse, never task.approvedGates, so a signed-gate resume replays it identically.
+// or more than one (ADR 0008: that is the automatic, climbing `changes`). Whether the pricer printed `"usd": null`
+// for each is the judge's claim (the fragment allows nothing else): the engine cannot run it, so a priced gate the
+// judge wrongly lists still bounces here, and reconcile's `## Gate bounce (awaiting sign-off)` keeps it from the
+// standing approval. Returns the plan's own lines for the named gates, deduped, in the judge's order. It reads only
+// args, the cached verdict and the cached plan's parse, never task.approvedGates, so a signed-gate resume replays it
+// identically.
 function gateBounceOf(a, verdict, declared) {
   if (!pricerOf(a) || !verdict || verdict.verdict !== 'changes') return null
   const named = (Array.isArray(verdict.gateBounce) ? verdict.gateBounce : []).filter((g) => typeof g === 'string' && g.trim())
   if (!named.length) return null
   const own = new Map(spendGates(declared).map((g) => [normalizeGate(g), g]))
+  const lines = []
   for (const g of named) {
     const line = own.get(normalizeGate(g))
     if (line === undefined || capAmounts(line) !== 1) return null
+    if (!lines.includes(line)) lines.push(line)
   }
-  return named
+  return lines
 }
 
-// The paragraph a bounce override adds to the gate-pending row's blockerDiagnosis, after gateDiagnosis.
-function bounceNote(round, verdict, already) {
+// The paragraph a bounce override adds to the gate-pending row's blockerDiagnosis, after gateDiagnosis: it starts
+// BOUNCE_MARK (reconcile-rollout.py's GATE_BOUNCE_MARK finds it there and writes it, to the end, under `## Gate bounce
+// (awaiting sign-off)`), then names the flagged gates and that round's feedback, one line per bullet.
+const BOUNCE_MARK = 'bounced by the plan judge (ADR 0038):'
+function bounceNote(round, verdict, already, gates) {
   const feedback = (Array.isArray(verdict && verdict.feedback) ? verdict.feedback : []).filter((f) => typeof f === 'string')
-  return "\n\nbounced by the plan judge (ADR 0038): it still flagged these gates' format " +
-    (already ? 'after one bounce' : 'on the last plan round') + ', so they go to sign-off as written; its round-' + round +
-    ' feedback:\n' + feedback.map((f) => '  - ' + f).join('\n')
+  return '\n\n' + BOUNCE_MARK + ' it still read these gates as unpriceable ' +
+    (already ? 'after one bounce' : 'on the last plan round') + ', so they go to sign-off as written, never to the standing approval:\n' +
+    gates.map((g) => '  - ' + flattenLine(g)).join('\n') + '\nits round-' + round + ' feedback:\n' +
+    feedback.map((f) => '  - ' + flattenLine(f)).join('\n')
 }
 
 // The signed-gate continuation (p12-14, execute § 3.7). After `approve-gates`, the lead resumes the
@@ -1793,14 +1811,17 @@ async function planLoop(task, st, a) {
         blockerDiagnosis: 'needs a human decision: ' + q + '\nAccumulated reviewer feedback:\n' + roundLines(),
       }
     }
-    // A gates-only `changes` (ADR 0038): the judge named only spend gates' format, validated against this plan's
-    // parse and the cap backstop. The engine cannot tell a gate the pricer can never price from one the planner
-    // could fix, so it sends the plan back once; a second bounce, or one on the last round, takes the approve
-    // path, and the gates reach Lachy as gate-pending (where the fail-closed pricer asks with its why).
+    // A gates-only `changes` (ADR 0038): the judge named only spend gates the pricer could not price (`"usd": null`),
+    // validated against this plan's parse and the cap backstop; a priced gate whose sub-bullets break its Cap is an
+    // ordinary `changes` below. The engine cannot tell a gate the pricer can never price from one the planner could
+    // fix, so it sends the plan back once; a second bounce, or one on the last round, takes the approve path, and the
+    // gates reach Lachy as gate-pending with bounceNote, which reconcile persists under `## Gate bounce (awaiting
+    // sign-off)`: while it stands, `approve-gates --standing` signs nothing on the note and asks, so a gate the judge
+    // flagged never reaches the standing approval's signature, even one the judge wrongly called unpriceable.
     const bounce = gateBounceOf(a, verdict, parseGatedInputs(plan.plan))
     if (bounce && (gateBounced || round === task.maxPlanRounds)) {
       log(`plan-judge:${task.slug} r${round}: gate format only (${gateBounced ? 'bounced once already' : 'the last plan round'}) — the gates go to sign-off (ADR 0038)`)
-      return settle(round, bounceNote(round, verdict, gateBounced))
+      return settle(round, bounceNote(round, verdict, gateBounced, bounce))
     }
     if (round === task.maxPlanRounds) {
       return {

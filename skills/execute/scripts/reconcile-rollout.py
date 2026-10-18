@@ -367,7 +367,8 @@ Subcommands:
   approve-gates  Sign off a gate-pending task's declared gated inputs (ADR 0008): move the bullets
               under "## Gated inputs (awaiting sign-off)" into "## Approved gates" with a sign-off
               date (gate + cap + sign-off — the durable record the engine reads via task.approvedGates
-              so re-dispatches and resumes never re-ask those exact gates), remove the pending section,
+              so re-dispatches and resumes never re-ask those exact gates), remove the pending section
+              (and "## Gate bounce (awaiting sign-off)", ADR 0038),
               and flip the note by the stage it stopped (p12-14), read before the flip from the
               `## Integration log`'s last line paired with the gate-pending status (p12-16): `set-aside`
               with a `pr:` is a stop at Integration -> `status: review`, `ready:` restamped from --now and
@@ -393,7 +394,11 @@ Subcommands:
               otherwise the remaining bullets stay pending (rewritten without the covered ones) and the note
               stays gate-pending. Each remaining gate prints `ASK: <slug>: <gate>: <why>` (with a built-in
               limit, a priceable gate's why is `standing approval off (built-in 0): set [defaults]
-              spend_approval_usd in ~/.config/thread/rollouts.toml`). Exit 0: every gate covered and written;
+              spend_approval_usd in ~/.config/thread/rollouts.toml`). A note carrying "## Gate bounce (awaiting
+              sign-off)" (ADR 0038: the plan judge bounced its plan, reconcile wrote the section) has nothing
+              covered, whatever its gates price: each gate is an ASK whose why starts `the plan judge bounced
+              this plan (ADR 0038; …)` and ends with the pricer's reading, and nothing is written (exit 3). Lachy's
+              sign-off removes the section with the pending one. Exit 0: every gate covered and written;
               3: some or none covered (the covered ones written, an ASK line for each of the rest; a re-run on
               gates already judged writes nothing and exits 3); 1: an error, nothing written for that slug (a
               missing note, a task whose `rollout:` is not --rollout, a note that is not gate-pending with
@@ -609,7 +614,12 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
   blocked        -> status: blocked;        a run of blockerDiagnosis under "## Blocker diagnosis"
   plan-blocked   -> status: plan-blocked;   a run of blockerDiagnosis under "## Plan-blocked feedback"
   gate-pending   -> status: gate-pending;   UPSERT gatedInputs under "## Gated inputs (awaiting sign-off)"
-                    (upsert, not append: a refreshed declaration replaces the pending list, never stales)
+                    (upsert, not append: a refreshed declaration replaces the pending list, never stales);
+                    when blockerDiagnosis holds the plan judge's bounce paragraph (ADR 0038: one opening with
+                    `bounced by the plan judge (ADR 0038):`), UPSERT that paragraph, to its end, under
+                    "## Gate bounce (awaiting sign-off)"
+  gate bounce    -> (any status) a row that is not gate-pending, or a gate-pending row with no bounce paragraph,
+                    removes "## Gate bounce (awaiting sign-off)"; approve-gates' sign-off removes it too
   integration    -> (any status; a mode-'integrate' row's `integration` object) one bare line under
                     "## Integration log", exactly 10 space-separated tokens:
                       <startedAt> <outcome> path=<p> pr=<n> anchor=<sha> head=<sha> base=<sha> wait=<n|->
@@ -714,6 +724,16 @@ BLOCKED_SECTIONS = {
 GATE_PENDING_STATUS = "gate-pending"
 GATE_PENDING_SECTION = "## Gated inputs (awaiting sign-off)"
 APPROVED_GATES_SECTION = "## Approved gates"
+# The plan judge's bounce (ADR 0038): a gate-pending row whose blockerDiagnosis holds the engine's bounceNote paragraph
+# (it opens a paragraph with GATE_BOUNCE_MARK, task.workflow.js's BOUNCE_MARK) went to sign-off on a plan the judge
+# did NOT approve, over spend gates it read as unpriceable. Reconcile writes that paragraph, to its end, under
+# GATE_BOUNCE_SECTION (the flagged gates and the judge's feedback, for the person who signs) and removes the section on
+# any other row. While it stands, approve-gates --standing signs nothing on the note (_approve_standing: every pending
+# gate is an ASK naming it), so a gate the judge flagged is never signed unattended, even one it wrongly called
+# unpriceable; Lachy's sign-off (_sign_route) removes it.
+GATE_BOUNCE_SECTION = "## Gate bounce (awaiting sign-off)"
+GATE_BOUNCE_MARK = "bounced by the plan judge (ADR 0038):"
+GATE_BOUNCE_RE = re.compile(r"(?:\A|\n\n)(" + re.escape(GATE_BOUNCE_MARK) + r".*)\Z", re.S)
 # approve-gates' marker on a signed task sent back to in_progress (p12-14): the restart that directly follows
 # the sign-off reads it through mark-started, which removes it (execute § 3.7's fresh-call warning).
 GATES_SIGNED_KEY = "gates_signed"
@@ -2075,6 +2095,15 @@ def _ladder_top():
     return ladder["rungs"][-1], ladder["source"]
 
 
+def _gate_bounce(task) -> str:
+    """The plan judge's bounce paragraph (ADR 0038) in a row's blockerDiagnosis, from GATE_BOUNCE_MARK to the end,
+    stripped; '' when the row has none. The mark counts only at the start of the diagnosis or of a paragraph, so a gate
+    line that quotes it never does."""
+    diag = task.get("blockerDiagnosis")
+    m = GATE_BOUNCE_RE.search(diag.replace("\r\n", "\n")) if isinstance(diag, str) else None
+    return m.group(1).strip() if m else ""
+
+
 def _legacy_climb(task) -> str:
     """A pre-3.0.0 row's evidence of hardness (ADR 0029 compat): 'escalated' or 'tier-capped', '' for none.
     Only a row with no `rung` qualifies; every 3.0.0 row carries one (possibly '')."""
@@ -2206,6 +2235,15 @@ def cmd_reconcile(args) -> int:
                 else:
                     # p6-4: every run's feedback is kept as its own numbered run, never only the first.
                     note.append_run(heading, content, now)
+
+        # ADR 0038: the plan judge's bounce rides beside the pending gates (upserted, like them), and any other row,
+        # or a gate-pending row without one, settles an older one. Its presence is what keeps the standing approval off
+        # this note's gates (_approve_standing).
+        bounce = _gate_bounce(task) if status == GATE_PENDING_STATUS else ""
+        if bounce:
+            note.upsert_section(GATE_BOUNCE_SECTION, bounce)
+        else:
+            note.remove_section(GATE_BOUNCE_SECTION)
 
         # p12-16: an Integration row leaves one line in the note's `## Integration log` (the durable
         # record a cold lead, repair and the gate resume read). `integration: null` counts as absent.
@@ -5343,14 +5381,16 @@ def _gate_stage(note) -> str:
 
 
 def _sign_route(note, slug, now):
-    """Flip a gate-pending note whose gates are all signed by the stage it stopped (p12-14), its pending section
-    removed: a stop at Integration -> `review` with `ready:` restamped and `integrating:` removed; any other stop ->
-    `in_progress` with a `gates_signed:` marker. The stage is read before the flip. Returns (stage, route, ready_pr)."""
+    """Flip a gate-pending note whose gates are all signed by the stage it stopped (p12-14), its pending section (and
+    any plan judge's bounce beside it, ADR 0038) removed: a stop at Integration -> `review` with `ready:` restamped and
+    `integrating:` removed; any other stop -> `in_progress` with a `gates_signed:` marker. The stage is read before the
+    flip. Returns (stage, route, ready_pr)."""
     stage = _gate_stage(note)  # before the flip: the pairing reads status gate-pending
     if stage == "run" and _last_log_outcome(note) == "set-aside":
         print(f"WARN: {slug}: the Integration log's last line is set-aside but the note has no pr: — "
               "it cannot rejoin the Integration queue, so it goes to in_progress (its own call)", file=sys.stderr)
     note.remove_section(GATE_PENDING_SECTION)
+    note.remove_section(GATE_BOUNCE_SECTION)
     ready_pr = None
     if stage == "integration":
         note.set("status", "review")
@@ -5456,6 +5496,14 @@ def _ask_why(verdict, limit, gi):
             f"US${gi.format_usd(limit['value'])} ({limit['source']})")
 
 
+def _bounce_why(verdict, gi):
+    """Why a gate on a note the plan judge bounced stays pending under the standing approval (ADR 0038), with the
+    pricer's own reading of it: its why, or the exposure it would otherwise have signed."""
+    reading = verdict["why"] if verdict["usd"] is None else f"exposure US${gi.format_usd(verdict['usd'])}"
+    return (f"the plan judge bounced this plan (ADR 0038; its feedback is under {GATE_BOUNCE_SECTION}), so the "
+            f"standing approval signs none of its gates; the pricer reads: {reading}")
+
+
 def _approve_standing(args) -> int:
     """approve-gates --standing (ADR 0034; the module docstring): sign each pending spend gate the standing approval
     covers, leave the rest pending with an ASK line. Exit 0 every gate written, 3 some left, 1 an error."""
@@ -5507,10 +5555,16 @@ def _approve_standing(args) -> int:
         if err:
             errors.append(f"{slug}: {err}; nothing written")
             continue
+        # ADR 0038: a note the plan judge bounced went to sign-off on a plan it never approved; nothing on it is the
+        # standing approval's to sign, whatever the gate prices. The heading alone counts (fail-closed: an emptied
+        # section still refuses).
+        bounced = note.has_heading(GATE_BOUNCE_SECTION)
         covered, left = [], []
         for g in gates:
             verdict = gi.covered(g, limit["value"])
-            if verdict["covered"]:
+            if bounced:
+                left.append((g, _bounce_why(verdict, gi)))
+            elif verdict["covered"]:
                 covered.append((g, verdict["usd"]))
             else:
                 left.append((g, _ask_why(verdict, limit, gi)))

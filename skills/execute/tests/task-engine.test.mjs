@@ -582,12 +582,14 @@ test('p21-3: no judged round gives []: read-only, the pre-flight budget block, p
 })
 
 // ---- ADR 0038: a Cap is a promise. The plan judge prices spend gates while args.gatePricer is set ---------------
-// A judge `changes` whose every bullet is about spend gates' format names them in gateBounce. The engine validates
-// that claim (gateBounceOf: the plan's parsed spend gates, exactly one cap amount each), sends the plan back ONCE
+// A judge `changes` whose every bullet is about spend gates the pricer could not price (`"usd": null`) names them in
+// gateBounce; a priced gate whose sub-bullets break its Cap is an ordinary `changes` (C14). The engine validates the
+// claim it can see (gateBounceOf: the plan's parsed spend gates, exactly one cap amount each), sends the plan back ONCE
 // with no climb, and on a second bounce, or on the last plan round, takes the approve path: unapproved gates reach
-// Lachy as gate-pending (with the `bounced by the plan judge (ADR 0038)` paragraph), never plan-blocked. Cases run on
-// the bottom rung (opus-high) wherever a climb is observed. G never prices: the pricer reads `cap 30 AUD` as "no cap
-// clause", which ADR 0038 decision 2 bounces once, then sends to sign-off.
+// Lachy as gate-pending (with the `bounced by the plan judge (ADR 0038)` paragraph, which reconcile keeps from the
+// standing approval, C15), never plan-blocked. Cases run on the bottom rung (opus-high) wherever a climb is observed.
+// G never prices: the pricer reads `cap 30 AUD` as "no cap clause", which ADR 0038 decision 2 bounces once, then sends
+// to sign-off.
 const PRICER = '/home/x/.claude/plugins/cache/thread/thread/4.1.0/skills/_shared/scripts/gated_inputs.py'
 const G = 'spend: eval re-runs — cap 30 AUD'
 const planWith = (gates, marker = 'PLAN') => `Planned on: abc\n${marker}\n### Files to modify\n- x\n### Gated inputs\n${gates.map((g) => '- ' + g + '\n  - six runs at about four US dollars').join('\n')}\n### Risks / unknowns\n- none`
@@ -635,6 +637,8 @@ test('ADR 0038 C3: a second gates-only bounce takes the approve path — gate-pe
   assert.deepEqual([row.status, row.gatedInputs, row.planRoundsUsed, row.climbs, row.plan], ['gate-pending', [G], 2, [], null])
   assert.ok(row.blockerDiagnosis.startsWith(GATE_DIAG + '- ' + G + '\n\n' + BOUNCED), row.blockerDiagnosis)
   assert.ok(row.blockerDiagnosis.includes('after one bounce') && row.blockerDiagnosis.includes('  - fix plan-judge:proj-cap-g r2'), row.blockerDiagnosis)
+  assert.ok(row.blockerDiagnosis.endsWith(`${BOUNCED}: it still read these gates as unpriceable after one bounce, so they go to sign-off as written, never to the standing approval:\n  - ${G}\nits round-2 feedback:\n  - fix plan-judge:proj-cap-g r2`),
+    'the paragraph names the flagged gates, then the feedback: ' + row.blockerDiagnosis)
   assert.ok(r.logs.includes('plan-judge:proj-cap-g r2: gate format only (bounced once already) — the gates go to sign-off (ADR 0038)'), r.logs.join('\n'))
 })
 
@@ -781,4 +785,40 @@ test('ADR 0038 C13: a question beside a gateBounce keeps its precedence — plan
   assert.deepEqual(r.labels, ['plan:proj-cap-g', 'plan-judge:proj-cap-g r1'])
   const row = r.result.tasks[0]
   assert.deepEqual([row.status, row.needsHuman, row.climbs], ['plan-blocked', 'Which Login pays?', []])
+})
+
+// The reviewer's reproduction (p23-1 round 2): a gate whose own line prices (`cap 24 USD` -> {"usd": "24"}, under the
+// US$50 standing limit) while its sub-bullet spends 40. The fragment allows gateBounce only for a gate the pricer could
+// not price, so the judge's `changes` over it is ordinary: it climbs and ends plan-blocked, never the bounce override
+// that would hand the gate to the standing approval. C15 is a judge that breaks that rule: the engine cannot see the
+// pricer's output, so it bounces, and the note's `## Gate bounce (awaiting sign-off)` keeps the gate from the standing
+// approval (reconcile-rollout-standing.test.sh S8 runs this row through reconcile and approve-gates --standing).
+const G24 = 'spend: eval re-runs — cap 24 USD'
+const PLAN_24 = `Planned on: abc\n### Files to modify\n- x\n### Gated inputs\n- ${G24}\n  - 10 invocations at --max-cost-usd 4 (40 USD)\n### Risks / unknowns\n- none`
+
+test('ADR 0038 C14: a priced gate whose sub-bullets break its Cap, flagged on both rounds, is an ordinary `changes` — it climbs and ends plan-blocked', async () => {
+  const r = await run(pricedArgs(bottomGated({ maxPlanRounds: 2 })), { plan: PLAN_24, planJudge: () => 'changes' })
+  assert.equal(r.error, undefined)
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, PLAN_LABELS)
+  const row = r.result.tasks[0]
+  assert.deepEqual([row.status, row.gatedInputs, row.planRoundsUsed, row.climbs, row.plan], ['plan-blocked', [], 2, CLIMB, null])
+  assert.ok(row.blockerDiagnosis.startsWith('plan not approved after 2 rounds.'), row.blockerDiagnosis)
+  assert.ok(!row.blockerDiagnosis.includes(BOUNCED), 'no bounce paragraph: nothing for the standing approval to sign')
+  assert.ok(r.logs.every((l) => !l.includes('gate format only')), r.logs.join('\n'))
+  assert.equal(ranOf(r, 'plan-revise:proj-cap-g r2').effort, 'xhigh', 'the revise runs one rung up')
+  const p1 = promptOf(r, 'plan-judge:proj-cap-g r1')
+  assert.ok(p1.includes(`python3 -I '${PRICER}' exposure - <<'EOF'\n${G24}\nEOF`), 'the judge prices the line as parsed, without its sub-bullet')
+  assert.ok(p1.includes('gateBounce is ONLY for gates whose "usd" printed\nnull') && p1.includes('Never list a gate whose "usd" is an amount'),
+    'the fragment confines gateBounce to unpriced gates')
+})
+
+test('ADR 0038 C15: a judge that wrongly bounces the priced gate on both rounds: gate-pending whose bounce paragraph names it, for reconcile to keep from the standing approval', async () => {
+  const r = await run(pricedArgs(bottomGated({ maxPlanRounds: 2 })), { plan: PLAN_24, planJudge: () => 'changes', bounce: () => [G24] })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, PLAN_LABELS)
+  const row = r.result.tasks[0]
+  assert.deepEqual([row.status, row.gatedInputs, row.planRoundsUsed, row.climbs], ['gate-pending', [G24], 2, []])
+  assert.ok(row.blockerDiagnosis.startsWith(GATE_DIAG + '- ' + G24 + '\n\n' + BOUNCED + ':'), row.blockerDiagnosis)
+  assert.ok(row.blockerDiagnosis.includes(`never to the standing approval:\n  - ${G24}\nits round-2 feedback:\n  - fix plan-judge:proj-cap-g r2`), row.blockerDiagnosis)
 })
