@@ -70,7 +70,7 @@ The slug is whatever the invocation names. `/thread:schedule` writes rollout not
 
 If the frontmatter carries a `paused:` stamp, this invocation is a **reinstate** — see §4.5 *Reinstate* and *Pausing + reinstating a rollout* below.
 
-A `start: unattended` stamp (*Start when ready*, `_shared/vault-grammar.md` § Rollout start stamp) asks nothing of this invocation: § 4.5 step 1's first `next` removes it (`startCleared: true`), so the Chorus Stage never starts a second lead. A halt at §§ 2–2.7, before that `next`, leaves it for the Stage.
+A `start: unattended` stamp (*Start when ready*, `_shared/vault-grammar.md` § Rollout start stamp) asks nothing of this invocation: § 4.5 step 1's first `next` removes it (`startCleared: true`), so the Chorus Stage never starts a second lead. Any halt before that `next` leaves it for the Stage, and so does a refused `next` (exit 1), which writes nothing.
 
 ### 2. Protocol-version gate
 

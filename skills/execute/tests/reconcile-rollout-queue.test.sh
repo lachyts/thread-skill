@@ -1004,6 +1004,16 @@ J=$(nxt)
 ok "$(q "$J" "[d['halt']] + $su")" '["paused",true,true]' "start: a paused rollout's lead next halts paused and still clears the stamp"
 ok "$(fm ro start)" "<none>" "start: … the stamp is gone"
 ok "$(fm ro paused)" "paused: 2026-10-01T09:00+00:00" "start: … and paused: is kept"
+# One call, two writes: a soft pause that drains (nothing live) is saved first, then the stamp's clear saves the same
+# note again. Both must land.
+scen start-drain
+mkro $'- [[x]]' 'pause_requested: true' 'start: unattended'
+mkt x open
+J=$(nxt)
+ok "$(q "$J" "[d['pausedNow'], d['halt']] + $su")" '[true,"paused",true,true]' "start: a drained soft pause and the stamp's clear land in one next"
+ok "$(fm ro paused)" "paused: 2026-10-02T14:05+00:00" "start: … the paused: stamp is written"
+ok "$(fm ro pause_requested)" "<none>" "start: … pause_requested: is removed"
+ok "$(grep -c '^start:' "$D/ro.md")" 0 "start: … and no start: line is left"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-queue: ALL PASS"; else echo "reconcile-rollout-queue: FAILED"; fi

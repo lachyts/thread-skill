@@ -49,16 +49,21 @@ the frontmatter, its scalar lower-cased with quotes and an inline ` # comment` d
 other value (`start: manual`, an empty `start:`), a `start:` nested under another key, and a body line are
 no stamp; `started:` and `started_unattended:` are other keys.
 
-- **Writers**: the execute offer only, on the rollout note just written and never started: orient § 9's
-  Start when ready answer, and schedule step 8's **Start when ready.** on a standalone run.
-- **Reader**: the Chorus Stage (`src/stage/unattended.py` in the Chorus repo, Chorus ADR 0052 d6 as
+- **Writers**: the execute offer, on the rollout note just written and never started: orient § 9's
+  Start when ready answer, and schedule step 8's **Start when ready.** on a standalone run. And
+  schedule § 0's **Put back**, which only restores to a prior the exact line its Supersede prep removed,
+  when the run stops before step 6 writes its note.
+- **Readers**: the Chorus Stage (`src/stage/unattended.py` in the Chorus repo, Chorus ADR 0052 d6 as
   amended). It starts one lead (`/thread:execute [[<rollout>]]`) in the note's Project root once the
   note is runnable, and replaces the stamp in place with its own record,
-  `started_unattended: <stamp>`, which thread-skill never writes or clears.
+  `started_unattended: <stamp>`, which thread-skill never writes or clears. And `/thread:status`
+  (§ 1's **Start stamp**), which reports a stamped note nothing has started as waiting for the Stage
+  (its § 4 action 13).
 - **Clearers**: `reconcile-rollout.py next`, on every call off `--dry-run` that exits 0 (the lead's,
   execute § 4.5 step 1), which removes every top-level `start:` line reading `unattended` and reports
   `startCleared`, so a running rollout clears it; a refused `next` (exit 1) writes nothing, so the stamp
-  waits. And schedule's **Supersede prep**, which removes it from a prior it is about to supersede.
+  waits. And schedule's **Supersede prep**, which removes it from a prior it is about to supersede
+  (and step 1's confirm names the clear).
 
 ## Readers
 
@@ -82,5 +87,7 @@ no stamp; `started:` and `started_unattended:` are other keys.
   `p<PHASE_N>-<M>`, the phase matched literally.
 - `skills/execute/scripts/reconcile-rollout.py` `next`: `START_KEY` and `START_UNATTENDED` (the stamp
   above), read as `_scalar` reads a frontmatter value, and reported as `startUnattended`.
+- `skills/status/SKILL.md` § 1's **Start stamp** and § 4 action 13: the stamp above, read straight from the
+  frontmatter.
 - `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both
   scripts' key and sort helpers against the examples under § Phase and task filenames.

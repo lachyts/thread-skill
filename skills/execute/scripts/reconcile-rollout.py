@@ -2299,10 +2299,12 @@ def _ceremony_done(rollout_path: Path, rollout_note) -> bool:
 
 
 def cmd_next(args) -> int:
-    """Which tasks start now (ADR 0030 decision 1). Pure function of the notes, except that a drained soft pause is
-    stamped (`paused:`) here. New starts are picked greedily by `priority:`, then least file overlap with what is in
-    flight, then schedule rank, among the queued tasks ranked above the head Solo task (the first queued Solo task
-    by rank whose dependencies are met, p17-2); that task holds every task ranked below it, whatever their
+    """Which tasks start now (ADR 0030 decision 1). Pure function of the notes, except for two writes to the rollout
+    note off --dry-run: a drained soft pause is stamped (`paused:`) here, and once the refusals pass the rollout start
+    stamp (`start: unattended`, _clear_start) is removed (`startCleared`); one call can make both. New starts are
+    picked greedily by `priority:`, then least file overlap with what is in flight, then schedule rank, among the
+    queued tasks ranked above the head Solo task (the first queued Solo task by rank whose dependencies are met,
+    p17-2); that task holds every task ranked below it, whatever their
     `priority:` (each held `behind solo [[<head>]]`, a full ceiling included: only the head and the rows above it
     wait on `ceiling:`), and starts only when nothing else has started. A task an undecided RACE or UNVERIFIED holds
     (_race_holds) and that has not landed is re-read as set-aside at `race`: it never starts, restarts or

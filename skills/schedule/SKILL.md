@@ -123,11 +123,17 @@ which records Lachy's decision (step 6's carry would refuse the prior anyway). A
 (a gh failure) is no stop: carry its `ERROR:` lines into step 1's confirm and go on. A task it could
 not resolve carries at its recorded status, and execute's resume asks GitHub again.
 When `<prior>` carries `start: unattended` (*Start when ready*, `_shared/vault-grammar.md` § Rollout
-start stamp), remove that line before step 1 too: the Chorus Stage must never start a lead on a note
-this run supersedes, which would make step 6's carry refuse a running prior. The prior's other stamps,
-`superseded_by:` and the move stay step 7.5's. Report it in step 8 as `cleared [[<prior>]]'s start
-when ready: superseded here`; a cancelled run leaves the prior unstamped, and Lachy can pick Start when
-ready again.
+start stamp), remove that line before step 1 too, after `resume` (whose exit 3 stops the run first,
+the line untouched), and keep the exact line and its place: the Chorus Stage must never start a lead
+on a note this run supersedes, which would make step 6's carry refuse a running prior. Step 1's
+confirm names the clear: `cleared [[<prior>]]'s start when ready: a cancel puts it back`.
+**Put back.** A run that stops before step 6 writes its note (a cancel at step 1's confirm, or any
+stop from step 1 to step 5) puts that exact line back at its place in `<prior>`'s frontmatter, just
+below `status:` when that place is gone, and prints `restored [[<prior>]]'s start when ready: this run
+stopped before writing its note`. Once step 6 has written the note, the line is never put back: the
+prior's unlanded tasks are on their way to it, and a stop before step 7.5's close-out is the next
+`--regenerate`'s `interrupted` finish. The prior's other stamps, `superseded_by:` and the move stay
+step 7.5's. Report the clear in step 8 as `cleared [[<prior>]]'s start when ready: superseded here`.
 
 There is no minimum size: shape decides, not count. A rollout-shaped cluster of one still rolls
 out — the plan gate, verifier retry, master review, and auto-merge are the point. For N ≤ 2,
@@ -152,7 +158,7 @@ On `supersede <prior>` (§ 0), first run the git-env canary's `check-all` on the
 
 A non-zero preview exit stops the run before this run writes a rollout note or a task stamp: print its stderr verbatim. Exit 2 is a refusal, for one of two causes: an undecided RACE or UNVERIFIED on the prior (`/thread:repair [[<prior>]]` records Lachy's decision), or a refused ladder file when a carried task needs the top rung (`ERROR: carry: ladder file refused: <path>:<line>: <reason>`). The refused ladder's remedy is Lachy's edit to `~/.config/thread/ladder.toml` at the line named, then `--regenerate` again.
 
-Report the count and let the user confirm before proceeding. The confirm lists the candidates, each skipped task with its rollout, each skipped decision task and, on a supersede, both the carried and the kept lists (the carried list with its `restamp` lines and any `WARN: carry:` line for a value carry left in place), the `order` lines (this preview's and, after an `interrupted` finish, § 0's carry's) with step 3's proposals from them, any `ERROR:` lines from § 0's `resume`, the check's `WARN: <prior> is incomplete` line when it printed one, and, after an `interrupted` finish, § 0's pinned report.
+Report the count and let the user confirm before proceeding. The confirm lists the candidates, each skipped task with its rollout, each skipped decision task and, on a supersede, both the carried and the kept lists (the carried list with its `restamp` lines and any `WARN: carry:` line for a value carry left in place), the `order` lines (this preview's and, after an `interrupted` finish, § 0's carry's) with step 3's proposals from them, any `ERROR:` lines from § 0's `resume`, § 0's `cleared [[<prior>]]'s start when ready` line when the Supersede prep removed one, the check's `WARN: <prior> is incomplete` line when it printed one, and, after an `interrupted` finish, § 0's pinned report.
 
 ### 2. Extract file scope per task — best effort
 
@@ -535,7 +541,7 @@ This skill does not execute anything. The rollout note it produces is read by th
 - Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's probes (listed under Scope), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only, step 2.8's `rollout-settings.py`, whose `land.sh --origin-slug` runs a read-only `git remote get-url origin` (only when `rollouts.toml` holds a repo table), and `close-score.py` (step 7.5, § 0's `file` finish), whose git calls are read-only and whose only writes are its events-directory lines (both listed under Scope).
 - Never write a second unfinished rollout on a repo, and never supersede one that § 0 did not print as `supersede`.
 - Never move a rollout note except by step 7.5's move (which § 0 also runs for `file` and `interrupted`).
-- Never write `start: unattended` except at the execute offer (orient § 9, step 8's **Start when ready.**) on the note just written; § 0's Supersede prep only ever removes it.
+- Never write `start: unattended` except at the execute offer (orient § 9, step 8's **Start when ready.**) on the note just written, or as § 0's **Put back**: the exact line the Supersede prep removed, restored to the prior when the run stops before step 6 writes its note. The prep otherwise only removes it.
 
 ## Verification
 

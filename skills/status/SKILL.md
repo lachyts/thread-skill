@@ -83,6 +83,11 @@ closed this note out, so this rollout must never be reinstated or resumed: its t
 **Incomplete.** After § 2, read the JSON's `incomplete`: non-null means the rollout must not run as written
 (`next` refuses it), so headline it with its reason and the remedy, `/thread:schedule <project> --regenerate`.
 
+**Start stamp.** Read the rollout frontmatter's first top-level `start:` line straight from the note, as
+Lineage reads `supersedes:`, by `_shared/vault-grammar.md` § Rollout start stamp (its scalar lower-cased, quotes
+and an inline ` # comment` dropped): `unattended` is the stamp (*Start when ready*), any other value or none is
+no stamp. Only § 4's action 13 reads it.
+
 ### 2. Gather the vault state (deterministic)
 
 ```
@@ -540,7 +545,11 @@ Keep the whole report scannable: it's a glance, not a wall of text.
     standing or lapsed, whose owner session is alive is a live lead whatever its tasks read (§ 4's *Room stop*):
     action 10 matches it first, so this resume never runs under one; a standing one waits for the Stage's resume,
     a lapsed one for the owner's heartbeat.
-13. Nothing started → `/thread:execute [[<rollout>]]` to start.
+13. Nothing started → `/thread:execute [[<rollout>]]` to start. Under § 1's **Start stamp** (the
+    frontmatter's first top-level `start:` reads `unattended`) → "waiting for the Chorus Stage (Start when
+    ready): it starts the lead in the Project root once the note is runnable", and name
+    `/thread:execute [[<rollout>]]` only as the way to start it by hand now. Outside a Chorus Stage nothing
+    reads the stamp, so the note waits as Not yet does.
 
 **A refused ladder.** The Ladder refused flag reorders nothing: whichever action matches, from 7 to 13, gets
 the fix first: "fix `<ladder.source>` (<ladder.error>) first: execute halts `ladder file refused` at each call's
