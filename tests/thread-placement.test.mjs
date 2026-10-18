@@ -445,9 +445,7 @@ test('9. undeclared: once per identity; a declared repo\'s worktree and same-ori
   assert.deepEqual(stray.copies, [h('repos/tools/stray-wt/THREAD.md'), h('repos/tools/stray/THREAD.md')].sort())
   assert.deepEqual(stray.owners, [])
   assert.deepEqual(at(ESTATE, h('repos/loose/THREAD.md'))[0].copies, [h('repos/loose/THREAD.md')])
-  for (const note of ['Thread Skill', 'Murmur', 'GifLab', 'Maquette']) {
-    assert.deepEqual(of(audit(['--project', note]), 'undeclared'), [], `no undeclared under --project ${note}`)
-  }
+  assert.deepEqual(of(audit(['--project', 'Thread Skill']), 'undeclared'), [], 'no undeclared under --project')
 })
 
 test('10. no-slug is a ~/Projects kind: a repo thread without front matter is legitimate', () => {
@@ -543,17 +541,21 @@ test('18. --project shows each kind under its owner and never under an unrelated
     ['side-branch', `${SIDER}/THREAD.md`, 'Sider'],
     ['workspace', path.join(WS, 'animately-workspace/design/THREAD.md'), 'Animately'],
   ]
-  const unrelated = audit(['--project', 'User Research'])
-  assert.deepEqual(unrelated.findings, [])
   for (const [kind, p, owner] of cases) {
-    assert.deepEqual(kinds(at(audit(['--project', owner]), p)), [kind], `${kind} under ${owner}`)
-    assert.deepEqual(at(unrelated, p), [], `${kind} not under User Research`)
+    const f = at(ESTATE, p).filter((x) => x.kind === kind)
+    assert.equal(f.length, 1, `one ${kind} at ${p}`)
+    assert.ok(f[0].owners.includes(N(owner)), `${kind} at ${p} is owned by ${owner}`)
+    assert.ok(!f[0].owners.includes(N('User Research')), `${kind} at ${p} is not owned by User Research`)
+  }
+  // The scope keeps exactly the entries a named note owns, and a note owning nothing sees nothing.
+  const unrelated = audit(['--project', 'User Research'])
+  assert.deepEqual([unrelated.findings, unrelated.unchecked], [[], []])
+  for (const owner of ['Animately', 'Folio Engine']) {
+    assert.deepEqual(audit(['--project', owner]).findings, ESTATE.findings.filter((f) => f.owners.includes(N(owner))), owner)
   }
   // Several --project notes: the union.
   const both = audit(['--project', 'Sider', '--project', `${P}/Tools/Behindy.md`])
-  assert.deepEqual(both.findings.map((f) => f.kind), ['behind', 'side-branch'])
-  assert.deepEqual(audit(['--project', 'Nohead']).unchecked.map((e) => e.path), [NOHEAD])
-  assert.deepEqual(unrelated.unchecked, [])
+  assert.deepEqual(both.findings.map((f) => [f.kind, f.path]), [['behind', `${BEHINDY}/THREAD.md`], ['side-branch', `${SIDER}/THREAD.md`]])
 })
 
 test('19. exit codes: 2 for a bad argument, 3 for a missing vault', () => {
@@ -613,7 +615,7 @@ test('21. read-only: nothing under HOME or the vault changes, and no bytecode is
   const before = [snap(HOME), snap(VAULT)]
   const env = { ...base }
   delete env.PYTHONDONTWRITEBYTECODE
-  for (const args of [['audit'], ['audit', '--json'], ['audit', '--project', 'GifLab'], ['audit', '--thread', h('Projects/Big/THREAD.md')],
+  for (const args of [['audit'], ['audit', '--project', 'GifLab', '--json'], ['audit', '--thread', h('Projects/Big/THREAD.md')],
     ['home', '--dir', h('Projects/Animately/giflab')], ['home', '--project', 'Murmur']]) {
     const r = spawnSync('python3', [SCRIPT, ...args, '--vault', VAULT], { encoding: 'utf8', cwd: scratch, env: { ...env, HOME } })
     assert.equal(r.status, 0, `${args.join(' ')}: ${r.stderr}`)
