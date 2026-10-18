@@ -64,7 +64,8 @@ qualifying repo.
 
 Exit 0 when it ran. Exit 2 for a usage error, a bad --project, a --thread that is not a file or a --dir that is not
 a directory: stderr carries one line starting `thread-placement: `. Exit 3 when the vault, PyYAML or the import is
-missing (resolve-target's own exit 3 passes through).
+missing (resolve-target's own exit 3 passes through), except that `home --dir` for a directory not strictly below
+~/Projects prints nothing and exits 0 before it needs PyYAML or the vault: handoff runs it from every launch directory.
 """
 import argparse
 import fnmatch
@@ -108,6 +109,11 @@ except Exception as e:  # a broken install: report it as the check, never as a t
 
 NA = RT.NA
 real, within = RT.real, RT.within
+
+
+def strictly_below(p, r):
+    """`p` lies below `r`, never `r` itself (both physical paths)."""
+    return within(p, r) and p != r
 
 
 class Parser(argparse.ArgumentParser):
@@ -369,7 +375,7 @@ class Estate:
 
     def home_dir(self, d):
         """`home --dir`: the folder note's first qualifying repo, only strictly below ~/Projects."""
-        if not (within(d, self.projects) and d != self.projects):
+        if not strictly_below(d, self.projects):
             return None
         fn = self.folder(d)[0]
         return self.first_qual(fn)
@@ -632,7 +638,7 @@ class Audit:
     def run_thread(self, p):
         est = self.est
         repo_files = set(self.scanned["repo_threads"]) | set(self.scanned["repo_misnamed"])
-        if within(p, est.projects) and p != est.projects:
+        if strictly_below(p, est.projects):
             self.projects_tier(only=os.path.dirname(p))
         elif p in repo_files:
             I, _, _, main = est.identity(p)
@@ -715,12 +721,16 @@ def main(argv):
         if not os.path.isdir(d):
             fail(2, "--dir %s is not a directory" % args.dir)
         d = real(d)
+    home = RT.Home()
+    if d is not None and not strictly_below(d, real(home.projects)):
+        # No ~/Projects folder, so no folder note: nothing to print, and no reason to need PyYAML or the vault.
+        # Handoff runs this from every launch directory, a repo included.
+        return 0
     if NA.yaml is None:
         fail(3, "PyYAML is required: python3 -m pip install pyyaml")
     vroot = os.path.expanduser(args.vault)
     if not os.path.isdir(vroot):
         fail(3, "no vault at %s" % vroot)
-    home = RT.Home()
     vault = NA.Vault(vroot)
     index = RT.Index(vault)
     est = Estate(index, home, RT.Resolver(vault, index, home, args.launch_folders))

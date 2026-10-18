@@ -558,7 +558,7 @@ test('18. --project shows each kind under its owner and never under an unrelated
   assert.deepEqual(both.findings.map((f) => [f.kind, f.path]), [['behind', `${BEHINDY}/THREAD.md`], ['side-branch', `${SIDER}/THREAD.md`]])
 })
 
-test('19. exit codes: 2 for a bad argument, 3 for a missing vault', () => {
+test('19. exit codes: 2 for a bad argument, 3 for a missing vault, and home --dir outside ~/Projects needs neither', () => {
   const refused = (args, code, pattern, opts) => {
     const r = run(args, opts)
     assert.equal(r.status, code, `status for ${args.join(' ')}: ${r.stderr}`)
@@ -578,6 +578,21 @@ test('19. exit codes: 2 for a bad argument, 3 for a missing vault', () => {
   refused(['bogus'], 2)
   refused(['audit'], 3, /vault/, { vault: path.join(scratch, 'no-vault') })
   assert.equal(run(['audit', '--project', `${P}/Tools/Same.md`, '--json']).status, 0, 'a vault path settles a shared name')
+
+  // home --dir outside ~/Projects (a repo, ~/Projects itself, outside HOME) has no folder note to read, so it prints
+  // nothing and exits 0 before it needs the vault or PyYAML: handoff runs it from every launch directory. A
+  // ~/Projects folder still needs both. The shadow yaml.py makes next-action's `import yaml` fail.
+  const noYaml = path.join(scratch, 'no-yaml')
+  write(path.join(noYaml, 'yaml.py'), 'raise ImportError("no PyYAML in this test")\n')
+  const without = { 'no vault': { vault: path.join(scratch, 'no-vault') }, 'no PyYAML': { env: { PYTHONPATH: noYaml } } }
+  for (const [what, opts] of Object.entries(without)) {
+    for (const d of [h('repos/animately/giflab'), h('Projects'), scratch]) {
+      const r = run(['home', '--dir', d], opts)
+      assert.deepEqual([r.status, r.stdout, r.stderr], [0, '', ''], `home --dir ${d} with ${what}`)
+    }
+    refused(['home', '--dir', h('Projects/Animately/giflab')], 3, what === 'no vault' ? /vault/ : /PyYAML/, opts)
+    refused(['home', '--dir', h('repos/animately/giflab/THREAD.md')], 2, null, opts)
+  }
 })
 
 test('20. parity: scanned.repo_threads is exactly open\'s lookup with slug= empty', () => {
