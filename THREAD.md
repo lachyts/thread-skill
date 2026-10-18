@@ -1,7 +1,7 @@
 ---
 slug: thread-skill
 created: 2026-07-14
-last_touched: 2026-10-17
+last_touched: 2026-10-18
 state: active
 scope: Build + maintain the thread:* plugin — continuity verbs + the rollout queue engine (one system, two lanes)
 ---
@@ -9,6 +9,12 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 # thread-skill — THREAD
 
 ## Where we are
+
+**2026-10-18: ADR 0038 merged; P22's rollout is closed out and `[[thread-skill-rollout-2026-10-18]]` (P23 + carried p19-5) is executing from the clone.**
+- **`[[thread-skill-rollout-2026-10-17]]`**: 10/11 merged (p19-10 at 10:50 after Lachy signed its US$20 gate in the morning). It stalled overnight because the fail-closed pricer read the planners' prose (`each`, bare numbers, bare `plus`) and an undelivered push was logged as pushed. Superseded at 14:15 (Lachy: carry p19-5 forward), scored `t-20261018T055357Z-907caf`, archived to `Work/Tasks/Archive/Rollouts/`.
+- **ADR 0038 "a Cap is a promise"** (grill-with-docs, three clean-room review rounds, PR #168 `0b1c2a7`): one-line `spend: <what> — cap N USD` gates with the split in sub-bullets, pricer unchanged, plan judge prices via `exposure -`, one bounce for a never-priceable gate, ntfy fallback (`[notify] ntfy_topic` in `rollouts.toml`) only on Remote Control inactive/error. Built by `[[thread-skill-p23-rollouts-run-through-the-evening]]` (p23-1, 3, 4, 5, 6, 7; p23-2 folded into p23-1).
+- **Forks ruled:** PR #88 → trimmed landing (p23-7); 5c5a `.thread/` and the thread-rollout-redesign worktree archived under `~/Archive/thread-skill/` (+ branch `archive/thread-rollout-redesign`, `14676a3`); p21-5/p21-9 done. [[ntfy-noise-audit]] filed.
+- **Execute** handed off (`docs/handoffs/2026-10-18-execute-p23-rollout.md`, landing PR #169) to the Chorus Session "Thread Skill: execute the P23 rollout", which consumed it.
 
 **2026-10-17: 4.0.0 is installed; the P22 rollout is scheduled and a successor session in the clone is executing it.** `[[thread-skill-rollout-2026-10-17]]`: 11 tasks, p22-1..p22-7, [[thread-skill-reflect-cites-the-reflection-loops-contract]], p19-10, p19-11, then p19-5 last. Project root `~/repos/tools/thread-skill-rollout`, verifier `make test`, built-in settings, standing approval 50 USD (`file:defaults`).
 - **Scheduled** via `/thread:orient Thread Skill --steer` (no reshape; drift empty). § 0 passed once landing PR #154 merged (`1b9275c`); before that the pushed-base check refused on the primary's unlanded handoff commit.
@@ -987,14 +993,15 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**Now (from 2026-10-17):** `[[thread-skill-rollout-2026-10-17]]` is executing in a successor session launched in the clone (it consumed `docs/handoffs/2026-10-17-execute-p22-rollout.md`).
-1. Check it with `/thread:status [[thread-skill-rollout-2026-10-17]]`; if stuck, `/thread:repair` from a session launched in `~/repos/tools/thread-skill-rollout`.
-2. When it completes: its post-rollout item (decide on a 4.1.0 release: `claude plugin update thread@thread`, `make release-check`, release PR with p19-5's comparison record), once no rollout holds the primary checkout.
-3. Grill Lachy on the four waiting forks (PR #88, the 5c5a `.thread/` evidence, the thread-rollout-redesign worktree, the p21-5/p21-9 ruling).
+**Now (from 2026-10-18):** `[[thread-skill-rollout-2026-10-18]]` is executing in a successor session launched in the clone (it consumed `docs/handoffs/2026-10-18-execute-p23-rollout.md`).
+1. Check it with `/thread:status [[thread-skill-rollout-2026-10-18]]`; if stuck, `/thread:repair` from a session launched in `~/repos/tools/thread-skill-rollout`.
+2. Once p23-1 and p23-3 merge: Lachy sets `[notify] ntfy_topic` in `~/.config/thread/rollouts.toml`.
+3. When it completes: decide on a 4.1.0 release (`claude plugin update thread@thread`, `make release-check`, release PR with p19-5's comparison record), once no rollout holds the primary checkout (six other rollouts held it on 2026-10-18).
 4. Next weekly Reflection is due 2026-10-24.
 
 ## Session log
 
+- 2026-10-18: signed p19-10 (US$20) so it landed; grilled the overnight spend-gate stall into ADR 0038 (#168); superseded and archived the 10-17 rollout; scheduled P23 + carried p19-5 as `[[thread-skill-rollout-2026-10-18]]` and handed execute to a clone session (#169); archived the 5c5a and redesign evidence.
 - 2026-10-17: Steer-only orient scheduled `[[thread-skill-rollout-2026-10-17]]` (11 tasks: P22, reflect-cites, the P19 eval tail), respecced p19-5 for 4.0.0 (close/handoff/reflect, in-task `--runs 3` comparison), waited out landing PR #154 for pushed-base, handed execute to a clone session (#155).
 - 2026-10-16: P21 rollout executed unattended from the clone: 7/7 merged (#144–#150) in 8h 47m; 3 auto-retries, 1 standing approval, 2 integrator conflict merges, 1 macOS CI flake rerun; rollout archived, first-live-Reflection task filed; installed plugin still pre-P21.
 - 2026-10-15: #139 fixed and merged; P21 scheduled (+p21-9 split) and executing overnight from the clone; p15-7 landed in agents-config #1 by an orient child (review pending).
