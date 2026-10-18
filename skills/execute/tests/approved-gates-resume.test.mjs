@@ -174,6 +174,7 @@ const ARG_VARIANTS = [
   { name: 'knownBaselineFailures', args: { knownBaselineFailures: ['test_x — env (pre-existing)'] }, task: {} },
   { name: 'ignoreGate', args: {}, task: { ignoreGate: true } },
   { name: 'legacy model and effort', args: {}, task: { model: 'fable', effort: 'max' } },
+  { name: 'verifySlot', args: { verifySlot: { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 } }, task: {} },
   // ADR 0038: PLAN_G's spend gate renders the plan judge's pricing fragment. Its gates come from the plan text, never
   // from task.approvedGates, so the fragment is the same with and without them.
   { name: 'gatePricer', args: { gatePricer: '/home/x/.claude/plugins/cache/thread/thread/4.1.0/skills/_shared/scripts/gated_inputs.py' }, task: {} },

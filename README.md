@@ -86,6 +86,12 @@ writes all per-task vault frontmatter transitions deterministically and drives
 per-task resume; `skills/execute/scripts/lead-integrate.py` is the lead's side
 of Integration (the clean-path merge and its bounded verify, the trouble-path
 inputs and the lead's own set-aside rows).
+`skills/execute/scripts/verify-slot.py` holds the machine's verify slots (p23-4):
+at most `verify_slots` verifier suites run at once across every rollout on the
+machine (the lead's Integration and RACE verifies, and every agent's
+engine-rendered verifier), a further one waits, and each runs under a guard
+that ends a killed holder's suite before its verify slot frees;
+`verify-slot.py status` shows who holds each verify slot and who waits.
 `skills/execute/scripts/git-env-canary.py` is the lead's git-env canary: it
 watches the shared checkout's default branch and bareness around every launch
 and halts the queue on a change that is not a close-out (execute § 4.5).
@@ -201,7 +207,14 @@ Reflections in a row (ADR 0037 d4, d6).
   execute reads the note first, so an edit to the file reaches the next
   scheduled (or `--regenerate`d) rollout, not one already written. A task's
   own frontmatter still overrides `max_iterations`, `max_review_rounds` and
-  `max_plan_rounds`.
+  `max_plan_rounds`. `verify_slots` (built-in 2) is machine-wide: set it under
+  `[defaults]` only (a `[repo."owner/name"]` table that sets it is refused); it
+  is never stamped, and execute's `verify-timeout` reads it, validating the
+  whole file, at each loop entry. So install first: write a new key only once
+  the installed plugin knows it, because a refused file now halts every
+  rollout on the machine at its next entry, stamped or not. Stamping a key on
+  the rollout note does not clear that halt; only fixing the file at the line
+  its stderr names does.
 - **Schedule picks the rollout root (#108).** When the Project root is the
   live directory-source plugin checkout, schedule uses the separate
   `<repoPath>-rollout` clone, or refuses with the fix.
@@ -235,8 +248,10 @@ make test            # = bash tests/run.sh — the one entrypoint, and the self-
 make evals           # behaviour evals: real model calls, a human step, never part of make test
 ```
 
-`tests/run.sh` runs everything hermetically (temp `HOME` and global git config, no bytecode, and a
-final check that the run wrote nothing into the tree):
+`tests/run.sh` runs everything hermetically (temp `HOME` and global git config, a temp verify-slot
+pool, no bytecode, and a final check that the run wrote nothing into the tree). It runs at most a third
+of the cores' worth of background suites at once (at least 2; 4 on 12 cores), largest first, and node
+at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 4):
 
 - **Syntax** — `bash -n` on every shell script, `ast.parse` on every Python script, and a real parse
   of every `*.workflow.js` (`tests/lib/check-workflow-parse.sh`: the body wrapped the way the Workflow

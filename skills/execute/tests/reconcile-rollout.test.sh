@@ -588,32 +588,51 @@ nhrow task-nh blocked '"  \n "' > "$TMP/nh-ws.json"
 python3 "$SCRIPT" reconcile --result "$TMP/nh-ws.json" --tasks-dir "$TMP" >/dev/null
 pcheck "needs you: whitespace removes the section" "'## Needs you' not in t" task-nh
 
-echo "== verify-timeout (p14-2: the rollout's Integration verify timeout, read-only) =="
+echo "== verify-timeout (p14-2, p23-4: the rollout's Integration verify timeout and the machine's verify slots, read-only) =="
+# Every call pins HOME: verify-timeout reads verify_slots through rollout-settings.py (the whole rollouts.toml). $EH
+# holds no file (the built-in 2); VH's file sets [defaults] verify_slots; BH's is refused.
 mkvt() {  # mkvt <frontmatter line or ''> -> $TMP/vt-rollout.md
   { printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\n'; [ -n "$1" ] && printf '%s\n' "$1"; printf -- '---\n\n## Notes\n'; } > "$TMP/vt-rollout.md"
 }
-vt_ok() {  # vt_ok <label> <frontmatter line> <expected stdout>
+vt_ok() {  # vt_ok <label> <frontmatter line> <expected stdout> [HOME]
   mkvt "$2"; local before after got rc; before=$(shaof "$TMP/vt-rollout.md")
-  got=$(python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>/dev/null); rc=$?
+  got=$(HOME="${4:-$EH}" python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>/dev/null); rc=$?
   after=$(shaof "$TMP/vt-rollout.md")
   if [ "$rc" -eq 0 ] && [ "$got" = "$3" ] && [ "$before" = "$after" ]; then echo "ok   - verify-timeout: $1"
   else echo "FAIL - verify-timeout: $1 (rc $rc, got $got)"; fail=1; fi
 }
-vt_bad() {  # vt_bad <label> <frontmatter line> <raw repr in the message>
+vt_bad() {  # vt_bad <label> <frontmatter line> <raw repr in the message> [HOME]
   mkvt "$2"; local before after got err rc; before=$(shaof "$TMP/vt-rollout.md")
-  got=$(python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>"$TMP/vt.err"); rc=$?
+  got=$(HOME="${4:-$EH}" python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>"$TMP/vt.err"); rc=$?
   err=$(cat "$TMP/vt.err"); after=$(shaof "$TMP/vt-rollout.md")
   if [ "$rc" -eq 1 ] && [ -z "$got" ] && [ "$before" = "$after" ] \
      && [ "$err" = "ERROR: verify_timeout must be an integer from 1 to 6600, got $3" ]; then echo "ok   - verify-timeout: $1"
   else echo "FAIL - verify-timeout: $1 (rc $rc, out '$got', err '$err')"; fail=1; fi
 }
-vt_ok "absent -> 1800" '' '{"verifyTimeout": 1800, "harnessTimeoutMs": 2400000}'
-vt_ok "3600 -> 4200000" 'verify_timeout: 3600' '{"verifyTimeout": 3600, "harnessTimeoutMs": 4200000}'
-vt_ok "6600 -> 7200000 (the harness maximum)" 'verify_timeout: 6600' '{"verifyTimeout": 6600, "harnessTimeoutMs": 7200000}'
-vt_ok "1 is the floor" 'verify_timeout: 1' '{"verifyTimeout": 1, "harnessTimeoutMs": 601000}'
-vt_ok 'a quoted "1800"' 'verify_timeout: "1800"' '{"verifyTimeout": 1800, "harnessTimeoutMs": 2400000}'
-vt_ok "a trailing comment" 'verify_timeout: 1800 # note' '{"verifyTimeout": 1800, "harnessTimeoutMs": 2400000}'
-vt_ok "a commented-out key is absent" '# verify_timeout: 99' '{"verifyTimeout": 1800, "harnessTimeoutMs": 2400000}'
+vt_refused() {  # vt_refused <label> <frontmatter line> <HOME> <file:line the error names>
+  mkvt "$2"; local got err rc
+  got=$(HOME="$3" python3 "$SCRIPT" verify-timeout --rollout "$TMP/vt-rollout.md" 2>"$TMP/vt.err"); rc=$?
+  err=$(cat "$TMP/vt.err")
+  case "$err" in "ERROR: rollout settings refused: $4: "*) m=y;; *) m=n;; esac
+  if [ "$rc" -eq 3 ] && [ -z "$got" ] && [ "$m" = y ] && [ "$(printf '%s\n' "$err" | wc -l | tr -d ' ')" = 1 ]; then echo "ok   - verify-timeout: $1"
+  else echo "FAIL - verify-timeout: $1 (rc $rc, out '$got', err '$err')"; fail=1; fi
+}
+vt_ok "absent -> 1800, the harness maximum, slotWait 4800, verify_slots 2" '' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2}'
+vt_ok "3600 -> slotWait 3000" 'verify_timeout: 3600' '{"verifyTimeout": 3600, "harnessTimeoutMs": 7200000, "slotWait": 3000, "verifySlots": 2}'
+vt_ok "6600 -> slotWait 60 (the floor)" 'verify_timeout: 6600' '{"verifyTimeout": 6600, "harnessTimeoutMs": 7200000, "slotWait": 60, "verifySlots": 2}'
+vt_ok "6540 -> slotWait 60" 'verify_timeout: 6540' '{"verifyTimeout": 6540, "harnessTimeoutMs": 7200000, "slotWait": 60, "verifySlots": 2}'
+vt_ok "1 is the floor -> slotWait 6599" 'verify_timeout: 1' '{"verifyTimeout": 1, "harnessTimeoutMs": 7200000, "slotWait": 6599, "verifySlots": 2}'
+vt_ok 'a quoted "1800"' 'verify_timeout: "1800"' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2}'
+vt_ok "a trailing comment" 'verify_timeout: 1800 # note' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2}'
+vt_ok "a commented-out key is absent" '# verify_timeout: 99' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 2}'
+VH="$TMP/vt-home"; mkdir -p "$VH/.config/thread"; printf '[defaults]\nverify_slots = 3\n' > "$VH/.config/thread/rollouts.toml"
+vt_ok "[defaults] verify_slots = 3 -> verifySlots 3" '' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 3}' "$VH"
+vt_ok "a rollout note's verify_slots: is ignored (never stamped, never read)" 'verify_slots: 9' '{"verifyTimeout": 1800, "harnessTimeoutMs": 7200000, "slotWait": 4800, "verifySlots": 3}' "$VH"
+BH="$TMP/vt-bad-home"; mkdir -p "$BH/.config/thread"; printf '# settings\n[defaults]\nverify_slots = 0\n' > "$BH/.config/thread/rollouts.toml"
+vt_refused "a refused rollouts.toml -> exit 3, naming its file and line" '' "$BH" "$BH/.config/thread/rollouts.toml:3"
+vt_refused "a stamped rollout is halted too (the whole file is validated)" 'verify_timeout: 1800' "$BH" "$BH/.config/thread/rollouts.toml:3"
+RH="$TMP/vt-repo-home"; mkdir -p "$RH/.config/thread"; printf '[repo."o/r"]\nverify_slots = 1\n' > "$RH/.config/thread/rollouts.toml"
+vt_refused 'a [repo."o/r"] verify_slots -> exit 3 (machine-wide)' '' "$RH" "$RH/.config/thread/rollouts.toml:2"
 vt_bad "0" 'verify_timeout: 0' "'0'"
 vt_bad "-1" 'verify_timeout: -1' "'-1'"
 vt_bad "6601" 'verify_timeout: 6601' "'6601'"
@@ -622,7 +641,8 @@ vt_bad "true" 'verify_timeout: true' "'true'"
 vt_bad "null" 'verify_timeout: null' "'null'"
 vt_bad "empty" 'verify_timeout:' "''"
 vt_bad "abc" 'verify_timeout: abc' "'abc'"
-got=$(python3 "$SCRIPT" verify-timeout --rollout "$TMP/no-such-rollout.md" 2>"$TMP/vt.err"); rc=$?
+vt_bad "a bad verify_timeout beside a refused file exits 1 (checked first)" 'verify_timeout: 0' "'0'" "$BH"
+got=$(HOME="$EH" python3 "$SCRIPT" verify-timeout --rollout "$TMP/no-such-rollout.md" 2>"$TMP/vt.err"); rc=$?
 [ "$rc" -eq 1 ] && [ -z "$got" ] && grep -qF "ERROR: rollout note not found" "$TMP/vt.err" \
   && echo "ok   - verify-timeout: a missing note exits 1" || { echo "FAIL - verify-timeout: missing note (rc $rc)"; fail=1; }
 

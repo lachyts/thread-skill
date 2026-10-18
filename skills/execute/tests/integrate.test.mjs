@@ -1004,7 +1004,8 @@ test('static: no force, no PR merge, approvedGates-independent prompts, the row 
   assert.ok(!FORCE.test(src), 'engine source: no force flag')
   const LM = sha('9')
   const L3 = { source: '/home/x/.config/thread/ladder.toml', rungs: [{ name: 'solo', model: 'fable', effort: 'high', judge: 'high', review: 'max' }] }
-  for (const over of [{}, { ladder: L3 }, { defaultBranch: 'master', envBootstrap: 'poetry install', knownBaselineFailures: ['t — env'] }]) {
+  const VSLOT = { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }
+  for (const over of [{}, { ladder: L3 }, { defaultBranch: 'master', envBootstrap: 'poetry install', knownBaselineFailures: ['t — env'] }, { verifySlot: VSLOT }]) {
     const I = mkI({ landed: LANDED, reviewHistory: HIST2, reviewRoundsUsed: 2, trouble: ['conflict', 'red'] })
     const a = mkArgs(I, over)
     const j = { mergeCommit: M, headSha: F1, baseSha: B1, triggers: ['conflict'], path: 'integrator' }
@@ -1021,6 +1022,12 @@ test('static: no force, no PR merge, approvedGates-independent prompts, the row 
     const gated = mkArgs(I, over, { approvedGates: ['spend: x — cap $1'] })
     assert.equal(T.integratorPrompt(gated.task, gated, I), T.integratorPrompt(a.task, a, I))
     assert.equal(T.integrationReviewPrompt(gated.task, gated, I, j), T.integrationReviewPrompt(a.task, a, I, j))
+    // p23-4: with verifySlot the integrator's own verifier carries the Integration priority, exactly once; the judge
+    // renders no verifier, so it is byte-identical with and without it.
+    const prio = `run --slots ${VSLOT.slots} --priority --`
+    assert.equal(T.integratorPrompt(a.task, a, I).split(prio).length - 1, over.verifySlot ? 1 : 0)
+    const { verifySlot: _drop, ...noSlot } = a
+    assert.equal(T.integrationReviewPrompt(a.task, a, I, j), T.integrationReviewPrompt(a.task, noSlot, I, j))
   }
   for (const r of allRuns.filter((x) => x.row && x.row.integration)) {
     assert.deepEqual(Object.keys(r.row).sort(), [...ROW_KEYS, 'integration'].sort())
