@@ -23,7 +23,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
         with:
@@ -37,4 +37,11 @@ jobs:
         with:
           python-version: '3.12'
       - run: python3 -m pip install pyyaml
+      # tests/run.sh caps its background suites (p23-4) at max(2, ceil(cores / 3)), which is 2 on these 3- and
+      # 4-vCPU runners and models about 2 to 2.5 min slower than today. 4 keeps both runners saturated (land.test.sh
+      # fans out to 8 shards), so the shell phase models no longer than the uncapped run. If either job runs
+      # over 12 min, raise this (8, or drop it for all at once) before touching timeout-minutes again; the job
+      # names and the matrix stay as they are (ADR 0025).
       - run: make test
+        env:
+          THREAD_TEST_JOBS: "4"

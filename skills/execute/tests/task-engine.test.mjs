@@ -37,18 +37,26 @@ const slugOf = (label) => label.split(':')[1].split(/[ @]/)[0]
 //   needsHuman value a judge returns (absent ⇒ the key is left out); feedback(label) → a review judge's
 //   bullets (default one `fix <label>` on changes); head(label) → the head a review judge returns (absent ⇒
 //   the key is left out); dead(label) → true makes the agent return null on both runAgent attempts;
-//   result(label) → fields merged over an implement / investigate / revise result }
+//   result(label) → fields merged over an implement / investigate / revise result; bounce(label) → the gateBounce
+//   a plan judge returns (absent ⇒ the key is left out, ADR 0038); revisedPlan: the plan reviser's text, a string
+//   or (label) → string (default the planner's) }
+// Every dispatch's opts are recorded, in order, as { label, opts } (run()'s `opts`).
 function stub(script = {}) {
   const unknown = []
+  const seen = []
   const impl = async (prompt, opts) => {
     const label = (opts && opts.label) || ''
+    seen.push({ label, opts })
     const kind = label.split(':')[0]
     if (script.throwOn && kind === script.throwOn) throw new Error('scripted stage failure on ' + label)
     if (script.dead && script.dead(label)) return null
     switch (kind) {
       case 'plan':
-      case 'plan-revise':
-        return { ready: true, blocked: false, blockerCause: '', plan: script.plan || PLAN_TEXT }
+      case 'plan-revise': {
+        const rp = script.revisedPlan
+        const text = kind === 'plan-revise' && rp !== undefined ? (typeof rp === 'function' ? rp(label) : rp) : script.plan || PLAN_TEXT
+        return { ready: true, blocked: false, blockerCause: '', plan: text }
+      }
       case 'plan-judge':
       case 'review': {
         const fn = kind === 'review' ? script.review : script.planJudge
@@ -56,9 +64,11 @@ function stub(script = {}) {
         const q = script.ask ? script.ask(label) : undefined
         const fb = kind === 'review' && script.feedback ? script.feedback(label) : undefined
         const h = kind === 'review' && script.head ? script.head(label) : undefined
+        const b = kind === 'plan-judge' && script.bounce ? script.bounce(label) : undefined
         return {
           verdict, feedback: fb !== undefined ? fb : verdict === 'changes' ? [`fix ${label}`] : [],
           ...(q === undefined ? {} : { needsHuman: q }), ...(h === undefined ? {} : { head: h }),
+          ...(b === undefined ? {} : { gateBounce: b }),
         }
       }
       case 'implement':
@@ -87,13 +97,13 @@ function stub(script = {}) {
         throw new Error('stub: unknown agent label ' + label)
     }
   }
-  return { impl, unknown }
+  return { impl, unknown, seen }
 }
 
 async function run(args, script) {
   const s = stub(script)
   const out = await runTask(args, s.impl)
-  return { ...out, unknown: s.unknown, labels: out.calls.map((c) => c.label) }
+  return { ...out, unknown: s.unknown, labels: out.calls.map((c) => c.label), opts: s.seen }
 }
 
 test('one code-writing task: one row with exactly the 22 result fields (args stringified or object)', async () => {
@@ -569,4 +579,246 @@ test('p21-3: no judged round gives []: read-only, the pre-flight budget block, p
   const threw = await run(mkArgs(mkTask('proj-fix-a')), { review: () => 'changes', feedback: () => B3, throwOn: 'revise' })
   assert.equal(threw.result.tasks[0].blockerDiagnosis, THREW)
   assert.deepEqual(threw.result.tasks[0].reviewVerdicts, [{ round: 1, verdict: 'changes', head: '', feedback: B3 }])
+})
+
+// ---- ADR 0038: a Cap is a promise. The plan judge prices spend gates while args.gatePricer is set ---------------
+// A judge `changes` whose every bullet is about spend gates the pricer could not price (`"usd": null`) names them in
+// gateBounce; a priced gate whose sub-bullets break its Cap is an ordinary `changes` (C14). The engine validates the
+// claim it can see (gateBounceOf: the plan's parsed spend gates, exactly one cap amount each), sends the plan back ONCE
+// with no climb, and on a second bounce, or on the last plan round, takes the approve path: unapproved gates reach
+// Lachy as gate-pending (with the `bounced by the plan judge (ADR 0038)` paragraph, which reconcile keeps from the
+// standing approval, C15), never plan-blocked. Cases run on the bottom rung (opus-high) wherever a climb is observed.
+// G never prices: the pricer reads `cap 30 AUD` as "no cap clause", which ADR 0038 decision 2 bounces once, then sends
+// to sign-off.
+const PRICER = '/home/x/.claude/plugins/cache/thread/thread/4.1.0/skills/_shared/scripts/gated_inputs.py'
+const G = 'spend: eval re-runs — cap 30 AUD'
+const planWith = (gates, marker = 'PLAN') => `Planned on: abc\n${marker}\n### Files to modify\n- x\n### Gated inputs\n${gates.map((g) => '- ' + g + '\n  - six runs at about four US dollars').join('\n')}\n### Risks / unknowns\n- none`
+const PLAN_G = planWith([G])
+const BOUNCED = 'bounced by the plan judge (ADR 0038)'
+const GATE_DIAG = 'gated inputs await human sign-off (a declared gate always pauses — ADR 0008):\n'
+const pricedArgs = (task, over = {}) => mkArgs(task, { gatePricer: PRICER, ...over })
+const bottomGated = (over = {}) => mkTask('proj-cap-g', { rung: 'opus-high', planGate: true, ...over })
+const ranOf = (r, label) => r.result.tasks[0].ran.find((x) => x.label === label)
+const optsOf = (r, label) => (r.opts.find((x) => x.label === label) || {}).opts
+const promptOf = (r, label) => (r.calls.find((c) => c.label === label) || {}).prompt
+const CLIMB = [{ stage: 'plan', from: 'opus-high', to: 'opus-xhigh' }]
+const PLAN_LABELS = ['plan:proj-cap-g', 'plan-judge:proj-cap-g r1', 'plan-revise:proj-cap-g r2', 'plan-judge:proj-cap-g r2']
+
+test('ADR 0038 C1: with gatePricer, a gates-only `changes` is sent back with no climb; the r2 approve pauses at gate-pending', async () => {
+  const r = await run(pricedArgs(bottomGated()), {
+    plan: PLAN_G, planJudge: (l) => (l.endsWith(' r1') ? 'changes' : 'approve'), bounce: (l) => (l.endsWith(' r1') ? [G] : undefined),
+  })
+  assert.equal(r.error, undefined)
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, PLAN_LABELS)
+  const row = r.result.tasks[0]
+  assert.deepEqual([row.status, row.gatedInputs, row.planRoundsUsed, row.climbs], ['gate-pending', [G], 2, []])
+  assert.equal(ranOf(r, 'plan-revise:proj-cap-g r2').effort, 'high', 'the revise runs on the rung the call is on')
+  assert.ok(r.logs.includes('plan-judge:proj-cap-g r1: gate format only — sent back once, no climb (ADR 0038)'), r.logs.join('\n'))
+  assert.ok(!row.blockerDiagnosis.includes(BOUNCED), 'a judge approve adds no bounce paragraph')
+  assert.ok(optsOf(r, 'plan-judge:proj-cap-g r1').schema.properties.gateBounce, 'the priced schema carries gateBounce')
+  const p1 = promptOf(r, 'plan-judge:proj-cap-g r1')
+  assert.ok(p1.includes(`python3 -I '${PRICER}' exposure - <<'EOF'\n${G}\nEOF`), 'the judge gets the ready pricing command')
+})
+
+test('ADR 0038 C2 (control): the same `changes` with no gateBounce climbs', async () => {
+  const r = await run(pricedArgs(bottomGated()), { plan: PLAN_G, planJudge: (l) => (l.endsWith(' r1') ? 'changes' : 'approve') })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, PLAN_LABELS)
+  assert.deepEqual(r.result.tasks[0].climbs, CLIMB)
+  assert.equal(ranOf(r, 'plan-revise:proj-cap-g r2').effort, 'xhigh')
+})
+
+test('ADR 0038 C3: a second gates-only bounce takes the approve path — gate-pending with the bounce paragraph, no r3', async () => {
+  const r = await run(pricedArgs(bottomGated()), { plan: PLAN_G, planJudge: () => 'changes', bounce: () => [G] })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, PLAN_LABELS)
+  const row = r.result.tasks[0]
+  assert.deepEqual([row.status, row.gatedInputs, row.planRoundsUsed, row.climbs, row.plan], ['gate-pending', [G], 2, [], null])
+  assert.ok(row.blockerDiagnosis.startsWith(GATE_DIAG + '- ' + G + '\n\n' + BOUNCED), row.blockerDiagnosis)
+  assert.ok(row.blockerDiagnosis.includes('after one bounce') && row.blockerDiagnosis.includes('  - fix plan-judge:proj-cap-g r2'), row.blockerDiagnosis)
+  assert.ok(row.blockerDiagnosis.endsWith(`${BOUNCED}: it still read these gates as unpriceable after one bounce, so they go to sign-off as written, never to the standing approval:\n  - ${G}\nits round-2 feedback:\n  - fix plan-judge:proj-cap-g r2`),
+    'the paragraph names the flagged gates, then the feedback: ' + row.blockerDiagnosis)
+  assert.ok(r.logs.includes('plan-judge:proj-cap-g r2: gate format only (bounced once already) — the gates go to sign-off (ADR 0038)'), r.logs.join('\n'))
+})
+
+test('ADR 0038 C4: a bounce on the last plan round (max_plan_rounds 1) is gate-pending, never plan-blocked', async () => {
+  const r = await run(pricedArgs(bottomGated({ maxPlanRounds: 1 })), { plan: PLAN_G, planJudge: () => 'changes', bounce: () => [G] })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, ['plan:proj-cap-g', 'plan-judge:proj-cap-g r1'])
+  const row = r.result.tasks[0]
+  assert.deepEqual([row.status, row.gatedInputs, row.planRoundsUsed, row.climbs], ['gate-pending', [G], 1, []])
+  assert.ok(row.blockerDiagnosis.includes(BOUNCED) && row.blockerDiagnosis.includes('on the last plan round'), row.blockerDiagnosis)
+})
+
+test('ADR 0038 C5: a bounce naming a gate already signed still costs one revise round, then the approve implements', async () => {
+  const r = await run(pricedArgs(bottomGated({ approvedGates: [G] })), {
+    plan: PLAN_G, planJudge: (l) => (l.endsWith(' r1') ? 'changes' : 'approve'), bounce: (l) => (l.endsWith(' r1') ? [G] : undefined),
+  })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, [...PLAN_LABELS, 'implement:proj-cap-g', 'review:proj-cap-g r1'])
+  assert.deepEqual([r.result.tasks[0].status, r.result.tasks[0].climbs], ['review', []])
+})
+
+test('ADR 0038 C5b: two bounces on a signed gate: the override takes the approve path and implements the r2 plan', async () => {
+  const R2 = planWith([G], 'PLAN-R2-MARKER')
+  const r = await run(pricedArgs(bottomGated({ approvedGates: [G] })), { plan: PLAN_G, revisedPlan: R2, planJudge: () => 'changes', bounce: () => [G] })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, [...PLAN_LABELS, 'implement:proj-cap-g', 'review:proj-cap-g r1'])
+  assert.ok(promptOf(r, 'implement:proj-cap-g').includes('PLAN-R2-MARKER'))
+  const row = r.result.tasks[0]
+  assert.deepEqual([row.status, row.planRoundsUsed, row.climbs, row.plan], ['review', 2, [], R2])
+})
+
+test('ADR 0038 C6: without gatePricer a gateBounce is ignored — it climbs, and the judge gets no fragment and PLAN_JUDGE', async () => {
+  const r = await run(mkArgs(bottomGated()), {
+    plan: PLAN_G, planJudge: (l) => (l.endsWith(' r1') ? 'changes' : 'approve'), bounce: (l) => (l.endsWith(' r1') ? [G] : undefined),
+  })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.result.tasks[0].climbs, CLIMB)
+  assert.ok(!promptOf(r, 'plan-judge:proj-cap-g r1').includes('exposure -'))
+  assert.equal(optsOf(r, 'plan-judge:proj-cap-g r1').schema.properties.gateBounce, undefined)
+  assert.ok(r.logs.every((l) => !l.includes('ADR 0038')))
+})
+
+test('ADR 0038 C7: a gateBounce naming a gate the plan lacks is an ordinary `changes` — it climbs', async () => {
+  const r = await run(pricedArgs(bottomGated()), {
+    plan: PLAN_G, planJudge: (l) => (l.endsWith(' r1') ? 'changes' : 'approve'),
+    bounce: (l) => (l.endsWith(' r1') ? [G, 'spend: another API — cap 5 USD'] : undefined),
+  })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.result.tasks[0].climbs, CLIMB)
+})
+
+test('ADR 0038 C7b: a capless or a two-cap spend gate is never a bounce (the cap backstop) — it climbs', async () => {
+  for (const gate of ['spend: some API', 'spend: x — cap 5 USD and cap 3 USD', 'spend: y — cap TBD']) {
+    const r = await run(pricedArgs(bottomGated()), {
+      plan: planWith([gate]), planJudge: (l) => (l.endsWith(' r1') ? 'changes' : 'approve'), bounce: (l) => (l.endsWith(' r1') ? [gate] : undefined),
+    })
+    assert.deepEqual(r.unknown, [])
+    assert.deepEqual(r.result.tasks[0].climbs, CLIMB, gate)
+    assert.ok(r.logs.every((l) => !l.includes('no climb (ADR 0038)')), gate)
+  }
+})
+
+test('ADR 0038 C8: a later mixed `changes` after a bounce climbs once', async () => {
+  const r = await run(pricedArgs(bottomGated()), {
+    plan: PLAN_G, planJudge: (l) => (l.endsWith(' r3') ? 'approve' : 'changes'), bounce: (l) => (l.endsWith(' r1') ? [G] : undefined),
+  })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, [...PLAN_LABELS, 'plan-revise:proj-cap-g r3', 'plan-judge:proj-cap-g r3'])
+  const row = r.result.tasks[0]
+  assert.deepEqual([row.status, row.climbs, row.planRoundsUsed], ['gate-pending', CLIMB, 3])
+  assert.equal(ranOf(r, 'plan-revise:proj-cap-g r2').effort, 'high')
+  assert.equal(ranOf(r, 'plan-revise:proj-cap-g r3').effort, 'xhigh')
+})
+
+test('ADR 0038 C9: the judge prices each parsed spend gate as the engine parsed it; a None or credential-only plan renders no block', async () => {
+  const plan = 'Planned on: abc\n### Gated inputs\n1. spend: Replicate API for the full corpus —\n   cap 30 USD\n   - two re-renders\n- credential: PROD_API_KEY\n- Spend: `make evals` — cap $5\n### Risks'
+  const r = await run(pricedArgs(bottomGated()), { plan })
+  const p = promptOf(r, 'plan-judge:proj-cap-g r1')
+  const block = (g) => `\`\`\`bash\npython3 -I '${PRICER}' exposure - <<'EOF'\n${g}\nEOF\n\`\`\``
+  assert.ok(p.includes(block('spend: Replicate API for the full corpus — cap 30 USD')), 'a soft-wrap joined, its `1.` marker stripped')
+  assert.ok(p.includes(block('Spend: `make evals` — cap $5')), 'a gate kind in any case, `$` and backticks literal')
+  assert.equal(p.split("<<'EOF'").length - 1, 2, 'one block per spend gate, the credential gate never listed')
+  assert.ok(!p.includes('credential: PROD_API_KEY\nEOF'))
+  assert.ok(p.indexOf('Spend gate pricing (ADR 0038') > p.indexOf('the plan omits.') && p.indexOf('Spend gate pricing (ADR 0038') < p.indexOf('Task tree (hard rule'),
+    'the fragment follows the Gated inputs bullet, before TASK_TREE_RULE')
+  for (const none of [PLAN_TEXT, 'Planned on: abc\n### Gated inputs\n- credential: PROD_API_KEY\n### Risks']) {
+    const q = await run(pricedArgs(bottomGated()), { plan: none })
+    assert.ok(!promptOf(q, 'plan-judge:proj-cap-g r1').includes('Spend gate pricing'), none)
+  }
+})
+
+test('ADR 0038 C10: an unusable gatePricer is logged once and read as absent, never a throw', async () => {
+  for (const bad of ['relative/gated_inputs.py', 'C:\\x\\gated_inputs.py', "/tmp/it's/gated_inputs.py", '/x\\y/gated_inputs.py', '/x/other.py', 42]) {
+    const r = await run(pricedArgs(bottomGated(), { gatePricer: bad }), {
+      plan: PLAN_G, planJudge: (l) => (l.endsWith(' r1') ? 'changes' : 'approve'), bounce: (l) => (l.endsWith(' r1') ? [G] : undefined),
+    })
+    assert.equal(r.error, undefined, String(bad))
+    assert.deepEqual(r.unknown, [])
+    assert.equal(r.logs.filter((l) => l.startsWith('gatePricer: refusing ')).length, 1, String(bad))
+    assert.ok(r.logs.includes(`gatePricer: refusing ${JSON.stringify(bad)} — the plan judge's pricing check is off for this call (ADR 0038)`))
+    assert.ok(!promptOf(r, 'plan-judge:proj-cap-g r1').includes('exposure -'), String(bad))
+    assert.equal(optsOf(r, 'plan-judge:proj-cap-g r1').schema.properties.gateBounce, undefined)
+    assert.deepEqual(r.result.tasks[0].climbs, CLIMB, `${bad}: read as absent, the bounce is an ordinary changes`)
+  }
+  for (const absent of [undefined, null, '']) {
+    const r = await run(mkArgs(bottomGated(), absent === undefined ? {} : { gatePricer: absent }), { plan: PLAN_G })
+    assert.ok(r.logs.every((l) => !l.startsWith('gatePricer:')), String(absent))
+  }
+})
+
+test('ADR 0038 C11: a signed-gate resume after two bounces replays identically and implements the r2 plan', async () => {
+  const R1 = planWith([G], 'PLAN-R1-MARKER')
+  const R2 = planWith([G], 'PLAN-R2-MARKER')
+  const script = { plan: R1, revisedPlan: R2, planJudge: () => 'changes', bounce: () => [G] }
+  const argsA = pricedArgs(bottomGated())
+  const A = await run(argsA, script)
+  assert.deepEqual(A.unknown, [])
+  assert.deepEqual([A.result.tasks[0].status, A.result.tasks[0].gatedInputs, A.result.tasks[0].planRoundsUsed], ['gate-pending', [G], 2])
+  const argsB = structuredClone(argsA)
+  argsB.task.approvedGates = [G]
+  const B = await run(argsB, script)
+  assert.deepEqual(B.unknown, [])
+  assert.deepEqual(B.labels, [...A.labels, 'implement:proj-cap-g', 'review:proj-cap-g r1'])
+  assert.deepEqual(B.calls.slice(0, A.calls.length), A.calls, "A's calls are a byte-identical prefix of B's")
+  const impl = promptOf(B, 'implement:proj-cap-g')
+  assert.ok(impl.includes('PLAN-R2-MARKER') && !impl.includes('PLAN-R1-MARKER'), 'the implementer runs the r2 plan')
+  const row = B.result.tasks[0]
+  assert.deepEqual([row.status, row.planRoundsUsed, row.climbs], ['review', 2, []])
+})
+
+test('ADR 0038 C12: a gateBounce on an approve verdict is ignored and logged', async () => {
+  const r = await run(pricedArgs(bottomGated()), { plan: PLAN_G, bounce: () => [G] })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, ['plan:proj-cap-g', 'plan-judge:proj-cap-g r1'])
+  const row = r.result.tasks[0]
+  assert.deepEqual([row.status, row.gatedInputs], ['gate-pending', [G]])
+  assert.ok(!row.blockerDiagnosis.includes(BOUNCED))
+  assert.ok(r.logs.includes('plan-judge:proj-cap-g r1: gateBounce on an approve verdict ignored (ADR 0038)'), r.logs.join('\n'))
+})
+
+test('ADR 0038 C13: a question beside a gateBounce keeps its precedence — plan-blocked with the question', async () => {
+  const r = await run(pricedArgs(bottomGated()), { plan: PLAN_G, planJudge: () => 'changes', bounce: () => [G], ask: () => 'Which Login pays?' })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, ['plan:proj-cap-g', 'plan-judge:proj-cap-g r1'])
+  const row = r.result.tasks[0]
+  assert.deepEqual([row.status, row.needsHuman, row.climbs], ['plan-blocked', 'Which Login pays?', []])
+})
+
+// The reviewer's reproduction (p23-1 round 2): a gate whose own line prices (`cap 24 USD` -> {"usd": "24"}, under the
+// US$50 standing limit) while its sub-bullet spends 40. The fragment allows gateBounce only for a gate the pricer could
+// not price, so the judge's `changes` over it is ordinary: it climbs and ends plan-blocked, never the bounce override
+// that would hand the gate to the standing approval. C15 is a judge that breaks that rule: the engine cannot see the
+// pricer's output, so it bounces, and the note's `## Gate bounce (awaiting sign-off)` keeps the gate from the standing
+// approval (reconcile-rollout-standing.test.sh S8 runs this row through reconcile and approve-gates --standing).
+const G24 = 'spend: eval re-runs — cap 24 USD'
+const PLAN_24 = `Planned on: abc\n### Files to modify\n- x\n### Gated inputs\n- ${G24}\n  - 10 invocations at --max-cost-usd 4 (40 USD)\n### Risks / unknowns\n- none`
+
+test('ADR 0038 C14: a priced gate whose sub-bullets break its Cap, flagged on both rounds, is an ordinary `changes` — it climbs and ends plan-blocked', async () => {
+  const r = await run(pricedArgs(bottomGated({ maxPlanRounds: 2 })), { plan: PLAN_24, planJudge: () => 'changes' })
+  assert.equal(r.error, undefined)
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, PLAN_LABELS)
+  const row = r.result.tasks[0]
+  assert.deepEqual([row.status, row.gatedInputs, row.planRoundsUsed, row.climbs, row.plan], ['plan-blocked', [], 2, CLIMB, null])
+  assert.ok(row.blockerDiagnosis.startsWith('plan not approved after 2 rounds.'), row.blockerDiagnosis)
+  assert.ok(!row.blockerDiagnosis.includes(BOUNCED), 'no bounce paragraph: nothing for the standing approval to sign')
+  assert.ok(r.logs.every((l) => !l.includes('gate format only')), r.logs.join('\n'))
+  assert.equal(ranOf(r, 'plan-revise:proj-cap-g r2').effort, 'xhigh', 'the revise runs one rung up')
+  const p1 = promptOf(r, 'plan-judge:proj-cap-g r1')
+  assert.ok(p1.includes(`python3 -I '${PRICER}' exposure - <<'EOF'\n${G24}\nEOF`), 'the judge prices the line as parsed, without its sub-bullet')
+  assert.ok(p1.includes('gateBounce is ONLY for gates whose "usd" printed\nnull') && p1.includes('Never list a gate whose "usd" is an amount'),
+    'the fragment confines gateBounce to unpriced gates')
+})
+
+test('ADR 0038 C15: a judge that wrongly bounces the priced gate on both rounds: gate-pending whose bounce paragraph names it, for reconcile to keep from the standing approval', async () => {
+  const r = await run(pricedArgs(bottomGated({ maxPlanRounds: 2 })), { plan: PLAN_24, planJudge: () => 'changes', bounce: () => [G24] })
+  assert.deepEqual(r.unknown, [])
+  assert.deepEqual(r.labels, PLAN_LABELS)
+  const row = r.result.tasks[0]
+  assert.deepEqual([row.status, row.gatedInputs, row.planRoundsUsed, row.climbs], ['gate-pending', [G24], 2, []])
+  assert.ok(row.blockerDiagnosis.startsWith(GATE_DIAG + '- ' + G24 + '\n\n' + BOUNCED + ':'), row.blockerDiagnosis)
+  assert.ok(row.blockerDiagnosis.includes(`never to the standing approval:\n  - ${G24}\nits round-2 feedback:\n  - fix plan-judge:proj-cap-g r2`), row.blockerDiagnosis)
 })
