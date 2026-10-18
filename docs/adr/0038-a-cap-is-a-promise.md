@@ -24,17 +24,21 @@ comma). The pricer's fail-closed reading is the shared safety net; the fix belon
 
 ## Decision
 
-1. **A spend Gated input is one line: `spend: <what> — cap N USD <unit>`.** The **Cap** is that line's cap
-   clause (`total`, a month, or one per-Login count across K Logins). How the spend splits (run counts, per-call
+1. **A spend Gated input is one line: `spend: <what> — cap N USD`.** The **Cap** is that line's cap clause,
+   optionally with `total`, a month, or a per-Login count across K Logins. How the spend splits (run counts, per-call
    limits, iterations) goes in nested sub-bullets under it, which the engine already treats as commentary and
    never prices (ADR 0013). The pricer is unchanged and stays fail-closed: what the gate's own line says is all it
-   reads. Under this format p19-10's gate (`spend: claude plugin eval re-runs of the two close cases — cap 20 USD`)
-   prices US$20 and p19-5's prices US$50.
+   reads. Under this format p19-10's gate, restated with a Cap that holds its own split (`spend: claude plugin eval
+   re-runs of the two close cases — cap 24 USD`, sub-bullet: up to 6 invocations at `--max-cost-usd 4`), prices
+   US$24 and p19-5's (`spend: two make evals runs, pre-trim and post-trim — cap 50 USD total`) prices US$50.
 2. **The planner is taught the format, and the plan judge enforces it.** The engine's planner and plan-reviser
    prompts state decision 1's format. The plan judge runs the pricer on each top-level `spend:` bullet, passing the
    gate on stdin (never as a quoted shell argument, where `$` and backticks expand), and returns `changes` quoting
    the pricer's reason when a bullet does not price, or when its sub-bullets name spend the Cap does not hold. A
-   gate already in `## Approved gates` is exempt. Schedule's ask-ahead Planner line asks for the same format.
+   gate already in `## Approved gates` is exempt, and so is every gate while the standing approval is off. A
+   gate the pricer can never price (a non-USD cap, a per-Login cap with no known count) is bounced at most once
+   and then reaches Lachy as gate-pending, never plan-blocked. Schedule's and orient's ask-ahead Planner lines,
+   and any brief that dictates gate text, ask for the same format.
 3. **An undelivered needs-you push falls back to ntfy.** The topic is `[notify] ntfy_topic` in
    `~/.config/thread/rollouts.toml`, the operator file the standing approval already uses (the plugin is public);
    `rollout-settings.py` learns the table before any operator writes it, since it refuses unknown top-level tables.
@@ -55,6 +59,13 @@ comma). The pricer's fail-closed reading is the shared safety net; the fix belon
 
 ## Consequences
 
+- **Building it** (from the third review): the planner prompt's "bullets only" rule and the judge's "no
+  commentary" line must allow sub-bullets; `parseGatedInputs` must not read a tab- or one-space-indented sub-bullet
+  as a gate; the judge needs the pricer's path passed in its args (it runs in the target repo); it prices the gate
+  as the engine parses it (joined lines, `1.` markers stripped); a format-only `changes` should not climb the
+  rung; mid-run agents (GATED_INPUTS_CHECK) need the format too; stdin and the ntfy body must be quoted (`<<'EOF'`,
+  a JSON publish); a push-less run should try ntfy; the bounded retry needs a counter that survives the
+  sign-off pause.
 - **No pricer change.** `gated_inputs.py`'s rules, its fail-closed reading and ADR 0034's residuals stand. It gains
   a stdin form for the judge (`exposure -` reading one gate), printing one JSON line.
 - **The engine's prompts change** (planner, plan reviser, plan judge): their bytes change, so a call launched on the

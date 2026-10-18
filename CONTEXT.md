@@ -371,10 +371,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   takes a fresh call behind a warning (execute § 3.7).
   _Avoid_: approval item, spend gate, pre-approval.
 - **Cap** — the one USD ceiling a spend Gated input names on its own line,
-  `spend: <what> — cap N USD <unit>` (`total`, a month, or one per-Login count
-  across K Logins). It is a promise the task keeps; how the spend splits goes
-  in nested sub-bullets under the line, which are commentary and never priced
-  (ADR 0038).
+  `spend: <what> — cap N USD`, optionally with `total`, a month, or a
+  per-Login count across K Logins (`per Login per month across 3 Logins`). It
+  is a promise the task keeps; how the spend splits goes in nested sub-bullets
+  under the line, which are commentary and never priced (ADR 0038).
   _Avoid_: budget, limit (the Standing approval's limit is another thing).
 - **Standing approval** — Lachy's one-off sign-off for every spend Gated input
   whose **total exposure** is at most US$50: the cap summed across Logins,

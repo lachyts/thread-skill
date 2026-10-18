@@ -159,7 +159,8 @@ Reflections in a row (ADR 0037 d4, d6).
   `0035` — one human fix per refusal (amends 0033). `0036` — orient resolves
   its target before it reads, then reshuffles without asking (amends 0026 and
   0027). `0037` — Reflections run on their own and tune for hands-off quality
-  (amends 0032).
+  (amends 0032). `0038` — a Cap is a promise: a spend gate is one line, its split
+  in sub-bullets, and an undelivered push falls back to ntfy (amends 0034).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
