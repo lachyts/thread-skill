@@ -31,11 +31,28 @@ through time, from attention to merged PRs. Terms only — no implementation.
   conversation and **thread** the durable work its THREAD.md records, because
   that is how he reads the word. Agent-facing prose keeps the two senses above.
 - **THREAD.md** — the durable state-of-play *file* a thread can be persisted
-  into. Project-side (`~/Projects/<Area>/<Project>/THREAD.md`), shared
-  (`~/repos/workspaces/_shared/threads/<slug>.md`), or a **Repo thread** — a
-  tool repo's own toplevel `THREAD.md` under `~/repos`, found by `open`'s
-  repo-thread lookup; its slug is its front-matter `slug:`, else the repo
-  directory's name. Agent-facing.
+  into. A code project's thread is its **Repo thread**: the repo's own
+  toplevel `<repo>/THREAD.md` under `~/repos`, found by `open`'s repo-thread
+  lookup; its slug is its front-matter `slug:`, else the repo directory's
+  name, and the lookup matches either. Project-side
+  (`~/Projects/<Area>/<Project>/THREAD.md`) is for a project with no code
+  repo; shared (`~/repos/workspaces/_shared/threads/<slug>.md`) for
+  cross-workspace or meta work. One live thread per project, always named
+  THREAD.md: a finished arc moves out, never to a sibling `THREAD-<name>.md`
+  (ADR 0039). Agent-facing.
+- **Thread home** — where a project's one live thread lives: the first
+  qualifying repo its note's `repos:` declares (a main checkout at most three
+  directories below `~/repos`, outside obsidian, workspaces, `.claude` and
+  `_archive`), else its `~/Projects` folder. A workspace seat's subfolder is
+  never one (ADR 0039 d1, d3).
+- **Placement check** — the audit (`thread-placement.py`) of where every
+  thread sits against its thread home. Its kinds are `split-home` (not the
+  retired reshuffle verb *split*, ADR 0027: a `~/Projects` folder's thread
+  whose project's home is a repo, or a thread in a repo its project lists
+  after another), `misnamed`, `undeclared`, `no-slug`, `behind`,
+  `side-branch` and `workspace`. A repo-tier finding is reported once per
+  thread identity, at its main checkout's path, never once per copy
+  (ADR 0039 d5). Report-only: orient shows it, close warns with it.
 - **Route** — a decisive member (`stash`, `defer`, `handoff`, `close`) that
   disposes of the current thread with known intent.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"
@@ -307,6 +324,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   in `next`'s order: a task a queued task depends on, directly or through a
   folded member (`merged_into:`), first, then the oldest `ready:`, then schedule
   order. _Avoid_: the lane (that is the step, not the line).
+- **Verify slot** — one of the machine's `verify_slots` places a verifier suite
+  runs in, shared by every rollout on the machine (p23-4,
+  `scripts/verify-slot.py`): the lead's Integration and RACE verifies and every
+  agent's engine-rendered verifier take one, and a further suite waits rather
+  than piling on. Each slotted suite runs under a guard that ends a killed
+  holder's suite before its verify slot frees. The Integration priority: the
+  lead's Integration and RACE verifies, and the integrate call's own verifier
+  runs (`run --priority`), go before any task call's agent. Not a **Slot** (a
+  task's run in a Queue). _Avoid_: bare "slot", lock, semaphore.
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).
@@ -374,7 +400,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `spend: <what> — cap N USD`, optionally with `total`, a month, or a
   per-Login count across K Logins (`per Login per month across 3 Logins`). It
   is a promise the task keeps; how the spend splits goes in nested sub-bullets
-  under the line, which are commentary and never priced (ADR 0038).
+  under the line, which are commentary and never priced (ADR 0038). While the
+  Standing approval is on, the plan judge prices the line and sends a Cap that
+  does not price back to its planner once, without a climb; one still unpriced
+  then goes to Lachy, never to the Standing approval (ADR 0038).
   _Avoid_: budget, limit (the Standing approval's limit is another thing).
 - **Standing approval** — Lachy's one-off sign-off for every spend Gated input
   whose **total exposure** is at most US$50: the cap summed across Logins,
@@ -385,7 +414,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   without him (`approve-gates --standing`, run by the lead) and is recorded
   in `## Approved gates` with `(approved <date> under the standing approval:
   total exposure …)`, the task's ceiling, never a target; credential and
-  irreversible gates never pass under it (ADR 0034).
+  irreversible gates never pass under it (ADR 0034), nor does any gate on a
+  plan the plan judge bounced (ADR 0038).
   _Avoid_: spend envelope, auto-approve limit.
 - **Human fix** — the one stated act that moves a set-aside task no agent may
   move (sign a gate, decide a refused descope, restore an Integration with no
@@ -576,12 +606,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   resolved by `rollout-settings.py` and stamped into each rollout note by
   schedule, except `auto_retries` and the Standing approval's
   `spend_approval_usd`, which the execute verbs resolve themselves and
-  schedule never stamps. The machine-wide `[notify]` table holds
-  `ntfy_topic`, read by two scripts and never stamped: execute's
-  needs-you fallback publishes to it (ADR 0038), and tune.py refuses a
-  Tuning whose edit would change it. `rollout-settings.py`'s JSON says
-  only whether a topic is set, never the topic. _Avoid_: hardcoded
-  defaults, config.
+  schedule never stamps, and `verify_slots`, which is machine-wide
+  (`[defaults]` only), never stamped, and read by execute's `verify-timeout`
+  at each loop entry. That read validates the whole file, so a refused file
+  halts every rollout on the machine at its next entry; write a key (or the
+  `[notify]` table) only once the installed plugin knows it. The
+  machine-wide `[notify]` table holds `ntfy_topic`, read by two scripts and
+  never stamped: execute's needs-you fallback publishes to it (ADR 0038),
+  and tune.py refuses a Tuning whose edit would change it.
+  `rollout-settings.py`'s JSON says only whether a topic is set, never the
+  topic. _Avoid_: hardcoded defaults, config.
 
 ## Model ladder
 

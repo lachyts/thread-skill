@@ -16,6 +16,8 @@ of the file format:
     auto_retries = 2             # execute's automatic retries of a set-aside task (p16-4, ADR 0033); 0 disables
     spend_approval_usd = 50      # the standing approval (ADR 0034): a spend gate whose total exposure is at most
                                  # this many US dollars passes without a person; 0 (the built-in) is off
+    verify_slots = 2             # machine-wide (p23-4): at most this many verifier suites run at once across every
+                                 # rollout on this machine (execute's verify-slot.py); [defaults] only
 
     [guardrails]                 # the Reflection's bounds, machine-wide only
     tokens_per_merge_pct = 25    # tokens per merge may rise at most +25%
@@ -33,8 +35,9 @@ of the file format:
     [repo."lachyts/thread-skill"] # one repo, keyed by its GitHub origin's owner/name
     parallel_ceiling = 5
 
-The only top-level keys are `defaults`, `guardrails`, `notify` and `repo`. A repo table holds only the six rollout
-keys (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries` and `spend_approval_usd`). Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form.
+The only top-level keys are `defaults`, `guardrails`, `notify` and `repo`. A repo table holds every rollout key but
+`verify_slots` (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries`, `spend_approval_usd` and
+`verify_slots`; MACHINE_ONLY: `verify_slots`, which is machine-wide and refused under a `[repo."o/r"]` label). Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form.
 
 `[notify]` holds only `ntfy_topic` (NOTIFY_KEYS), machine-wide like `[guardrails]`: in `[defaults]` or a repo table it
 is an unknown key. Two scripts read it, both through the importable resolve(), in process: execute's
@@ -55,20 +58,24 @@ was given, under ORIGIN_TIMEOUT seconds, in its own process group (killed whole 
 Precedence for each rollout key (the callers apply the first two): task frontmatter → rollout frontmatter →
 `[repo."<slug>"]` (source `file:repo`) → `[defaults]` (`file:defaults`) → `built-in`. Guardrail sources are
 `file:guardrails` or `built-in`; `ntfy_topic`'s are `file:notify` or `built-in` (resolve()'s value null: no topic). Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
-max_plan_rounds 3, auto_retries 2, spend_approval_usd 0; guardrails 25 / 5 / 10 / 0 / 40 / 1.5 (hours_per_task,
+max_plan_rounds 3, auto_retries 2, spend_approval_usd 0, verify_slots 2; guardrails 25 / 5 / 10 / 0 / 40 / 1.5 (hours_per_task,
 a heuristic: Lachy's rollouts.toml sets the real bound). `auto_retries` is no Tuning key:
 schedule does not stamp it and a Reflection never proposes it; execute's `lead-integrate.py inputs` and
 `reconcile-rollout.py auto-retry` resolve it themselves (p16-4). Nor is `spend_approval_usd` (ADR 0034): schedule
 shows it but never stamps it on a rollout, and `reconcile-rollout.py approve-gates --standing` resolves it itself (task
 `spend_approval_usd:`, then rollout, then this file, then the built-in 0, which is off: the approval lives in this
-file, never in the skills, so a fresh install approves nothing). Write the key only once the installed plugin knows
-it: an older rollout-settings.py refuses an unknown key, and every rollout's settings with it.
+file, never in the skills, so a fresh install approves nothing). Nor is `verify_slots` (p23-4): machine-wide, so
+`[defaults]` only; never stamped on a rollout; execute's `reconcile-rollout.py verify-timeout` reads it at each loop
+entry through resolve(repo=None), which validates the whole file. Write a key only once the installed plugin knows
+it: an older rollout-settings.py refuses an unknown key, and every rollout's settings with it; and a refused file
+now halts every rollout on this machine at its next entry (execute's `verify-timeout`), stamped or not.
 
 Validation (ADR 0016: anything unknown or wrong is refused, never dropped):
 - an unknown top-level key or table key, `defaults` or `guardrails` that is not a table, a `repo` that is
   not a table, a value under `repo` that is not a table (named by its key: `[repo."o/r"] must be a table`);
-- a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys, 0 for `auto_retries` and
-  `spend_approval_usd` (a boolean, float or string is refused, and so is 0 for a Tuning key);
+- a rollout value that is not an integer >= its MINIMUM: 1 for the four Tuning keys and `verify_slots`, 0 for
+  `auto_retries` and `spend_approval_usd` (a boolean, float or string is refused, and so is 0 for a Tuning key);
+- a MACHINE_ONLY key (`verify_slots`) in a `[repo."o/r"]` table;
 - a guardrail that is not a non-negative integer or float (a boolean is refused; `quota_stalls` is an
   integer >= 0; `hours_per_task` is an integer or float > 0, since a bound of 0 breaches every run);
 - a `notify` that is not a table, an unknown key under it, or an `ntfy_topic` that is not an ntfy topic (a string of
@@ -88,7 +95,7 @@ Output. Exit 0 and one JSON line on stdout:
     {"path": "<expanded path>", "file": true|false, "repo": "<owner/name>"|null,
      "settings": {"parallel_ceiling": {"value": 4, "source": "built-in"}, "max_review_rounds": {...},
                   "max_iterations": {...}, "max_plan_rounds": {...}, "auto_retries": {...},
-                  "spend_approval_usd": {...}},
+                  "spend_approval_usd": {...}, "verify_slots": {...}},
      "guardrails": {"tokens_per_merge_pct": {"value": 25, "source": "built-in"}, ...},
      "notify": {"ntfy_topic": {"set": true|false, "source": "file:notify"|"built-in"}}}
 
@@ -106,9 +113,10 @@ and this python has none. On failure stdout is empty and stderr carries one line
 `rollout-settings: --repo <p>: <reason>`.
 
 Importable: resolve(repo=None, path=None), redacted(out) (resolve()'s object as the CLI prints it), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
-run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries` and
-`spend_approval_usd`: every key a `settings` object holds), MINIMUM, GUARDRAIL_KEYS, NOTIFY_KEYS, NOTIFY_BUILT_IN,
-TOPIC_RE, ORIGIN_TIMEOUT, default_path(), SettingsError(reason, line=None, code=2, subject=None).
+run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries`,
+`spend_approval_usd` and `verify_slots`: every key a `settings` object holds), MACHINE_ONLY, MINIMUM, GUARDRAIL_KEYS,
+NOTIFY_KEYS, NOTIFY_BUILT_IN, TOPIC_RE, ORIGIN_TIMEOUT, default_path(), SettingsError(reason, line=None, code=2,
+subject=None).
 """
 import argparse
 import importlib.util
@@ -125,15 +133,19 @@ LAND_SH = os.path.join(HERE, "land.sh")
 
 # The four Tuning keys (a Reflection proposes them; run_record.py's TUNING_KEYS is pinned to this tuple).
 KEYS = ("parallel_ceiling", "max_review_rounds", "max_iterations", "max_plan_rounds")
-# Every rollout key a table may hold and `settings` reports: the Tuning keys plus execute's automatic-retry budget and
-# the standing approval's limit in US dollars (ADR 0034; neither is Reflection-tunable).
-SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd")
+# Every rollout key a table may hold and `settings` reports: the Tuning keys plus execute's automatic-retry budget,
+# the standing approval's limit in US dollars (ADR 0034) and the machine's verify slots (p23-4); none of the three is
+# Reflection-tunable.
+SETTING_KEYS = KEYS + ("auto_retries", "spend_approval_usd", "verify_slots")
+# Machine-wide keys: valid under [defaults] only, refused in a [repo."o/r"] table (a verify slot is shared by every
+# rollout on the machine, whatever its repo).
+MACHINE_ONLY = ("verify_slots",)
 BUILT_IN = {"parallel_ceiling": 4, "max_review_rounds": 4, "max_iterations": 3, "max_plan_rounds": 3, "auto_retries": 2,
-            "spend_approval_usd": 0}
+            "spend_approval_usd": 0, "verify_slots": 2}
 # The least valid value of each rollout key: a Tuning key is >= 1; `auto_retries: 0` disables automatic retries;
 # `spend_approval_usd: 0` turns the standing approval off.
 MINIMUM = {"parallel_ceiling": 1, "max_review_rounds": 1, "max_iterations": 1, "max_plan_rounds": 1, "auto_retries": 0,
-           "spend_approval_usd": 0}
+           "spend_approval_usd": 0, "verify_slots": 1}
 # review_churn_pct (p21-3, ADR 0037 d1): Review churn's absolute bound, a non-negative number like the rates.
 # hours_per_task (p21-2): the Throughput Guardrail's absolute bound, skills/reflect/scripts/score.py's built-in too.
 GUARDRAIL_KEYS = ("tokens_per_merge_pct", "set_aside_rate_points", "conflict_rate_points", "quota_stalls",
@@ -345,6 +357,8 @@ def _validate(text, doc, path):
             if key not in SETTING_KEYS:
                 refuse("%s: unknown key %s (a rollout table holds %s)" % (label, json.dumps(key), ", ".join(SETTING_KEYS)),
                        at + (key,))
+            if key in MACHINE_ONLY and at[0] == "repo":
+                refuse("%s %s is machine-wide: set it under [defaults]" % (label, key), at + (key,))
             if isinstance(value, bool) or not isinstance(value, int) or value < MINIMUM[key]:
                 refuse("%s %s must be an integer >= %d, got %s" % (label, key, MINIMUM[key], _describe(value)), at + (key,))
         return dict(table)
