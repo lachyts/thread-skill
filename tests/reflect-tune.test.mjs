@@ -198,7 +198,8 @@ test('a config ending in [notify] gains [repo."o/r"] after a Tuning, the [notify
   const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
   assert.equal(r.status, 0, r.stderr)
   assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), `${NOTIFY_CONFIG}\n[repo."o/r"]\nparallel_ceiling = 5\n`)
-  assert.deepEqual(resolved(home, repo).notify, { ntfy_topic: { value: 't', source: 'file:notify' } })
+  // The CLI prints only whether a topic is set (rollout-settings.py's redacted()); the bytes above carry the topic itself.
+  assert.deepEqual(resolved(home, repo).notify, { ntfy_topic: { set: true, source: 'file:notify' } })
 })
 
 test('an edit that would change [notify] is refused: exit 2, nothing written', (t) => {

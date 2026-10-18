@@ -577,8 +577,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   schedule, except `auto_retries` and the Standing approval's
   `spend_approval_usd`, which the execute verbs resolve themselves and
   schedule never stamps. The machine-wide `[notify]` table holds
-  `ntfy_topic`, read only by execute's needs-you fallback (ADR 0038) and
-  never stamped. _Avoid_: hardcoded defaults, config.
+  `ntfy_topic`, read by two scripts and never stamped: execute's
+  needs-you fallback publishes to it (ADR 0038), and tune.py refuses a
+  Tuning whose edit would change it. `rollout-settings.py`'s JSON says
+  only whether a topic is set, never the topic. _Avoid_: hardcoded
+  defaults, config.
 
 ## Model ladder
 

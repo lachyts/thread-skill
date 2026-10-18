@@ -35,9 +35,13 @@ const GUARDRAIL_KEYS = ['tokens_per_merge_pct', 'set_aside_rate_points', 'confli
 const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, auto_retries: 2, spend_approval_usd: 0 }
 const GUARDRAILS_BUILT_IN = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0,
   review_churn_pct: 40, hours_per_task: 1.5 }
-// [notify] (ADR 0038 d3): the ntfy topic the needs-you fallback publishes to; unset (null) means no fallback.
+// [notify] (ADR 0038 d3): the ntfy topic the needs-you fallback publishes to; unset (null) means no fallback. resolve()
+// holds the topic; the CLI prints only whether it is set (redacted()), since on ntfy.sh a topic is its own read and
+// publish credential and the CLI runs in schedule's, execute's, status' and repair's transcripts.
 const NOTIFY_KEYS = ['ntfy_topic']
 const NOTIFY_BUILT_IN = { ntfy_topic: null }
+const UNSET = { ntfy_topic: { set: false, source: 'built-in' } }
+const SET = { ntfy_topic: { set: true, source: 'file:notify' } }
 const TABLES_LINE = 'rollouts.toml holds only [defaults], [guardrails], [notify] and [repo."owner/name"] tables'
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 
@@ -83,6 +87,17 @@ function resolves(home, args = [], opts = {}) {
   return JSON.parse(r.stdout)
 }
 
+// The importable resolve(repo, None) in process, as ntfy-push.py and tune.py call it: the topic itself, unredacted.
+function resolvedInProcess(home, repo = null) {
+  const r = run(home, [], {
+    argv: ['-B', '-c', `import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('rs', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(json.dumps(m.resolve(repo=sys.argv[2] if len(sys.argv) > 2 else None)))`, SCRIPT, ...(repo ? [repo] : [])],
+  })
+  assert.equal(r.status, 0, r.stderr)
+  return JSON.parse(r.stdout)
+}
+
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // Refused: exit `code`, nothing on stdout, one `rollout-settings: <path>[:<line>]: <reason>` line on stderr.
@@ -111,7 +126,7 @@ function assertAllBuiltIn(out) {
   for (const k of SETTING_KEYS) assert.deepEqual(out.settings[k], { value: BUILT_IN[k], source: 'built-in' })
   for (const k of GUARDRAIL_KEYS) assert.deepEqual(out.guardrails[k], { value: GUARDRAILS_BUILT_IN[k], source: 'built-in' })
   // An absent [notify] table resolves to no topic: the needs-you push has no ntfy fallback.
-  assert.deepEqual(out.notify, { ntfy_topic: { value: null, source: 'built-in' } })
+  assert.deepEqual(out.notify, UNSET)
 }
 
 // ---- R1: no file ----------------------------------------------------------------------------------------
@@ -431,16 +446,17 @@ test('R7 hours_per_task (p21-2) takes an integer or a float > 0, as file:guardra
 
 // ---- R8: the importable resolve() --------------------------------------------------------------------------
 
-test('R8 the importable resolve() and constants agree with the CLI', (t) => {
+test('R8 the importable resolve() and constants agree with the CLI, which prints resolve() redacted', (t) => {
   const home = tmpHome(t)
   writeSettings(home, ['[defaults]', 'max_iterations = 2', '[notify]', 'ntfy_topic = "t-1"', '[repo."o/r"]', 'parallel_ceiling = 6'])
   const repo = gitRepo(home, 'r', 'https://github.com/o/r')
   const cli = resolves(home, ['--repo', repo])
-  assert.deepEqual(cli.notify, { ntfy_topic: { value: 't-1', source: 'file:notify' } })
+  assert.deepEqual(cli.notify, SET)
   const r = run(home, [], {
     argv: ['-B', '-c', `import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location('rs', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-print(json.dumps({'out': m.resolve(repo=sys.argv[2]), 'keys': list(m.KEYS), 'gkeys': list(m.GUARDRAIL_KEYS),
+out = m.resolve(repo=sys.argv[2])
+print(json.dumps({'out': out, 'view': m.redacted(out), 'keys': list(m.KEYS), 'gkeys': list(m.GUARDRAIL_KEYS),
   'skeys': list(m.SETTING_KEYS), 'min': m.MINIMUM, 'nkeys': list(m.NOTIFY_KEYS), 'nbuilt': m.NOTIFY_BUILT_IN,
   'built': m.BUILT_IN, 'gbuilt': m.GUARDRAILS_BUILT_IN, 'timeout': m.ORIGIN_TIMEOUT, 'path': m.default_path()}))
 try:
@@ -450,7 +466,10 @@ except m.SettingsError as e:
   })
   assert.equal(r.status, 0, r.stderr)
   const [first, second] = r.stdout.trim().split('\n').map((l) => JSON.parse(l))
-  assert.deepEqual(first.out, cli)
+  // resolve() keeps the topic for its in-process readers; redacted() is exactly the CLI's line, and only notify differs.
+  assert.deepEqual(first.out.notify, { ntfy_topic: { value: 't-1', source: 'file:notify' } })
+  assert.deepEqual(first.view, cli)
+  assert.deepEqual({ ...first.out, notify: cli.notify }, cli)
   assert.deepEqual(first.keys, KEYS)
   assert.deepEqual(first.skeys, SETTING_KEYS)
   assert.deepEqual(first.min, MINIMUM)
@@ -522,9 +541,11 @@ test('R11 [notify] ntfy_topic resolves as file:notify beside [defaults] and a re
   const home = tmpHome(t)
   writeSettings(home, ['[defaults]', 'parallel_ceiling = 2', '', '[notify]', 'ntfy_topic = "thread-needs-you"   # a dedicated topic',
     '', '[repo."o/r"]', 'max_iterations = 5'])
-  const out = resolves(home, ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')])
+  const repo = gitRepo(home, 'r', 'https://github.com/o/r')
+  const out = resolves(home, ['--repo', repo])
   assert.deepEqual(Object.keys(out), ['path', 'file', 'repo', 'settings', 'guardrails', 'notify'])
-  assert.deepEqual(out.notify, { ntfy_topic: { value: 'thread-needs-you', source: 'file:notify' } })
+  assert.deepEqual(out.notify, SET)
+  assert.deepEqual(resolvedInProcess(home, repo).notify, { ntfy_topic: { value: 'thread-needs-you', source: 'file:notify' } })
   expectValues(out, { parallel_ceiling: 2, max_iterations: 5 }, { parallel_ceiling: 'file:defaults', max_iterations: 'file:repo' })
   for (const k of GUARDRAIL_KEYS) assert.equal(out.guardrails[k].source, 'built-in')
 })
@@ -538,6 +559,17 @@ test('R11 [notify] in dotted and inline-table form resolves like table form; an 
   ]) {
     const home = tmpHome(t)
     writeSettings(home, lines)
-    assert.deepEqual(resolves(home).notify, { ntfy_topic: want }, lines.join(' | '))
+    assert.deepEqual(resolvedInProcess(home).notify, { ntfy_topic: want }, lines.join(' | '))
+    assert.deepEqual(resolves(home).notify, want.value === null ? UNSET : SET, lines.join(' | '))
   }
+})
+
+test('R11 the CLI never prints the topic: stdout carries `set`, never the topic string or a `value` under notify', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['[notify]', 'ntfy_topic = "a-topic-only-resolve-sees"'])
+  const r = run(home)
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(!r.stdout.includes('a-topic-only-resolve-sees') && !r.stderr.includes('a-topic-only-resolve-sees'), 'the topic is unprinted')
+  assert.deepEqual(JSON.parse(r.stdout).notify, SET)
+  assert.equal(resolvedInProcess(home).notify.ntfy_topic.value, 'a-topic-only-resolve-sees')
 })

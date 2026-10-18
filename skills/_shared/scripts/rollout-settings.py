@@ -37,8 +37,11 @@ The only top-level keys are `defaults`, `guardrails`, `notify` and `repo`. A rep
 keys (SETTING_KEYS: the four Tuning keys, KEYS, plus `auto_retries` and `spend_approval_usd`). Dotted keys (`repo."o/r".parallel_ceiling = 5`) and inline tables are read the same as table form.
 
 `[notify]` holds only `ntfy_topic` (NOTIFY_KEYS), machine-wide like `[guardrails]`: in `[defaults]` or a repo table it
-is an unknown key. Its one reader is execute's skills/execute/scripts/ntfy-push.py (§ 6.5 *The ntfy fallback*). Install
-a release that knows the table before writing it: an older rollout-settings.py refuses an unknown top-level table, and
+is an unknown key. Two scripts read it, both through the importable resolve(), in process: execute's
+skills/execute/scripts/ntfy-push.py publishes to the topic (§ 6.5 *The ntfy fallback*), and reflect's tune.py refuses
+an edit whose result resolves another `[notify]` (a Tuning never touches the table). The CLI prints only whether a
+topic is set (see Output), never the topic: on ntfy.sh a topic is its own read and publish credential. Install a
+release that knows the table before writing it: an older rollout-settings.py refuses an unknown top-level table, and
 every rollout's settings with it.
 
 Repo keys. A repo key must be quoted (`[repo."owner/name"]`) and is an `owner/name` by land.sh's slug rule
@@ -51,7 +54,7 @@ was given, under ORIGIN_TIMEOUT seconds, in its own process group (killed whole 
 
 Precedence for each rollout key (the callers apply the first two): task frontmatter → rollout frontmatter →
 `[repo."<slug>"]` (source `file:repo`) → `[defaults]` (`file:defaults`) → `built-in`. Guardrail sources are
-`file:guardrails` or `built-in`; `ntfy_topic`'s are `file:notify` or `built-in` (null: no topic). Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
+`file:guardrails` or `built-in`; `ntfy_topic`'s are `file:notify` or `built-in` (resolve()'s value null: no topic). Built-ins: parallel_ceiling 4, max_review_rounds 4, max_iterations 3,
 max_plan_rounds 3, auto_retries 2, spend_approval_usd 0; guardrails 25 / 5 / 10 / 0 / 40 / 1.5 (hours_per_task,
 a heuristic: Lachy's rollouts.toml sets the real bound). `auto_retries` is no Tuning key:
 schedule does not stamp it and a Reflection never proposes it; execute's `lead-integrate.py inputs` and
@@ -87,7 +90,11 @@ Output. Exit 0 and one JSON line on stdout:
                   "max_iterations": {...}, "max_plan_rounds": {...}, "auto_retries": {...},
                   "spend_approval_usd": {...}},
      "guardrails": {"tokens_per_merge_pct": {"value": 25, "source": "built-in"}, ...},
-     "notify": {"ntfy_topic": {"value": "<topic>"|null, "source": "file:notify"|"built-in"}}}
+     "notify": {"ntfy_topic": {"set": true|false, "source": "file:notify"|"built-in"}}}
+
+`notify` is redacted (redacted()): `set` says whether a topic resolved, and the topic itself is never printed, since
+schedule, execute, status and repair run this CLI in a transcript and the Reflection keeps its JSON in a scratch file.
+resolve() returns the same object with `"value": "<topic>"|null` in place of `set`, for the in-process readers above.
 
 `repo` is the origin's owner/name as land.sh printed it (case kept), or null when no repo table could apply:
 no `--repo`, no file, no repo table, or no GitHub origin (no repo, no origin, another host: land.sh exit 4).
@@ -98,7 +105,7 @@ and this python has none. On failure stdout is empty and stderr carries one line
 `rollout-settings: <path>:<line>: <reason>`, `rollout-settings: <path>: <reason>` when no line applies, or
 `rollout-settings: --repo <p>: <reason>`.
 
-Importable: resolve(repo=None, path=None), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
+Importable: resolve(repo=None, path=None), redacted(out) (resolve()'s object as the CLI prints it), BUILT_IN, GUARDRAILS_BUILT_IN, KEYS (the four Tuning keys, which
 run_record.py's TUNING_KEYS, tune.py and score.py read), SETTING_KEYS (KEYS plus `auto_retries` and
 `spend_approval_usd`: every key a `settings` object holds), MINIMUM, GUARDRAIL_KEYS, NOTIFY_KEYS, NOTIFY_BUILT_IN,
 TOPIC_RE, ORIGIN_TIMEOUT, default_path(), SettingsError(reason, line=None, code=2, subject=None).
@@ -133,7 +140,8 @@ GUARDRAIL_KEYS = ("tokens_per_merge_pct", "set_aside_rate_points", "conflict_rat
                   "review_churn_pct", "hours_per_task")
 GUARDRAILS_BUILT_IN = {"tokens_per_merge_pct": 25, "set_aside_rate_points": 5, "conflict_rate_points": 10,
                        "quota_stalls": 0, "review_churn_pct": 40, "hours_per_task": 1.5}
-# [notify] (ADR 0038 d3): machine-wide, read only by execute's ntfy-push.py; no topic (None) means no ntfy fallback.
+# [notify] (ADR 0038 d3): machine-wide, read in process by execute's ntfy-push.py and reflect's tune.py; no topic (None)
+# means no ntfy fallback. The CLI prints only whether it is set (redacted()).
 NOTIFY_KEYS = ("ntfy_topic",)
 NOTIFY_BUILT_IN = {"ntfy_topic": None}
 TOPIC_RE = re.compile(r"[-_A-Za-z0-9]{1,64}\Z")  # ntfy's own topic rule
@@ -493,6 +501,14 @@ def resolve(repo=None, path=None):
             "notify": notify}
 
 
+def redacted(out):
+    """resolve()'s object as the CLI prints it: each [notify] value replaced by whether it is set, so the topic (a read
+    and publish credential on ntfy.sh) never reaches stdout or a transcript. The rest is resolve()'s, unchanged."""
+    view = dict(out)
+    view["notify"] = {key: {"set": v["value"] is not None, "source": v["source"]} for key, v in out["notify"].items()}
+    return view
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message):  # argparse's default prints multi-line usage; keep failures to one line
         sys.stderr.write("rollout-settings: %s\n" % message)
@@ -509,7 +525,7 @@ def main(argv):
     except SettingsError as e:
         sys.stderr.write("rollout-settings: %s\n" % e)
         return e.code
-    sys.stdout.write(json.dumps(out) + "\n")
+    sys.stdout.write(json.dumps(redacted(out)) + "\n")
     return 0
 
 
