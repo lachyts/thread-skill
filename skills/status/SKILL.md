@@ -579,7 +579,8 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
   `/thread:execute`. If you find yourself wanting to fix something, stop and recommend the repair verb.
 - **There is no cursor: the task notes are the progress.** Don't re-scan GitHub for progress; the live PR
   check is only for drift flags.
-- **Never call a writer.** Not `reconcile-rollout.py next` (it stamps `paused:` on a drained pause), `resume`,
+- **Never call a writer.** Not `reconcile-rollout.py next` (it stamps `paused:` on a drained pause and clears a
+  `start: unattended` stamp), `resume`,
   `hand-back` or any other, and never `step-boundary.py begin` or `step-boundary.py end`;
   `reconcile-rollout.py status`, `step-boundary.py stands` (§ 2's *Room stop*), `lead-integrate.py inputs` and `rollout-settings.py`
   (§ 2, a read) are the only Python scripts status runs, and `default-branch.sh` the only shell one (besides

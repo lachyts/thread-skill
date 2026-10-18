@@ -122,6 +122,12 @@ before this run writes anything, print its `HOLD:` lines and point at `/thread:r
 which records Lachy's decision (step 6's carry would refuse the prior anyway). Any other non-zero exit
 (a gh failure) is no stop: carry its `ERROR:` lines into step 1's confirm and go on. A task it could
 not resolve carries at its recorded status, and execute's resume asks GitHub again.
+When `<prior>` carries `start: unattended` (*Start when ready*, `_shared/vault-grammar.md` § Rollout
+start stamp), remove that line before step 1 too: the Chorus Stage must never start a lead on a note
+this run supersedes, which would make step 6's carry refuse a running prior. The prior's other stamps,
+`superseded_by:` and the move stay step 7.5's. Report it in step 8 as `cleared [[<prior>]]'s start
+when ready: superseded here`; a cancelled run leaves the prior unstamped, and Lachy can pick Start when
+ready again.
 
 There is no minimum size: shape decides, not count. A rollout-shaped cluster of one still rolls
 out — the plan gate, verifier retry, master review, and auto-merge are the point. For N ≤ 2,
@@ -437,15 +443,19 @@ Queue for {{PROJECT_NAME}} written to [[{{ROLLOUT_SLUG}}]] — N tasks (K carrie
 filed [[<P>]] into Archive/Rollouts/                     # one line per § 0 `file` finish
 finished the interrupted supersede of [[<P>]]; [[<N>]] was incomplete and is superseded here   # per `interrupted` finish
 scored [[<P>]]: <close-score's line>                     # per close-score.py run (step 7.5, § 0's `file` finish)
+cleared [[<P>]]'s start when ready: superseded here      # when § 0's Supersede prep removed its start: unattended
 Verifier: <detected command>
 Settings: parallel_ceiling <n> (<source>), max_review_rounds <n> (<source>), max_iterations <n> (<source>), max_plan_rounds <n> (<source>); standing approval <t> USD (<source>), or off (built-in 0)
 
 Open in Obsidian to review. To execute:
   execute [[{{ROLLOUT_SLUG}}]]                # continuous: the queue runs and merges to the end
   execute [[{{ROLLOUT_SLUG}}]] --gated        # pause for a human before each merge
+  start when ready                            # stamp start: unattended; the Chorus Stage starts the lead once the note is runnable
 
 The thread:execute skill at ${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md reads this note and runs the three-layer convergence engine (plan-gate → Ralph retry → master review) via the Workflow tool.
 ```
+
+**Start when ready.** When Lachy answers a standalone run's summary with it, stamp `start: unattended` as a top-level frontmatter line just below `status:` on the note this run wrote (`_shared/vault-grammar.md` § Rollout start stamp) and stop: nothing runs. Under orient § 6, schedule writes nothing here, because orient § 9's offer asks it. The stamp is never written before step 7's last write; the vault grammar's reader would wait on `incomplete:` anyway.
 
 **Pre-flight — gated tasks.** If the user kept any of step 3.5's human/release-gated tasks (a quote-only match is none), list them above the summary so the user clears them before executing (an unaddressed gate makes the agent refuse mid-run):
 
@@ -525,6 +535,7 @@ This skill does not execute anything. The rollout note it produces is read by th
 - Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's probes (listed under Scope), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only, step 2.8's `rollout-settings.py`, whose `land.sh --origin-slug` runs a read-only `git remote get-url origin` (only when `rollouts.toml` holds a repo table), and `close-score.py` (step 7.5, § 0's `file` finish), whose git calls are read-only and whose only writes are its events-directory lines (both listed under Scope).
 - Never write a second unfinished rollout on a repo, and never supersede one that § 0 did not print as `supersede`.
 - Never move a rollout note except by step 7.5's move (which § 0 also runs for `file` and `interrupted`).
+- Never write `start: unattended` except at the execute offer (orient § 9, step 8's **Start when ready.**) on the note just written; § 0's Supersede prep only ever removes it.
 
 ## Verification
 

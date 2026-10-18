@@ -938,6 +938,73 @@ J=$(nxt)
 ok "$(q "$J" 'd["awaitingIntegration"]')" '["a","u"]' "lane-order fold: a merged_into: cycle reaches no unit, so the order is ready:'s"
 ok "$(q "$J" "$holds")" '{"q":"depends on [[m2]] (folded into [[m2]] (merged))"}' "lane-order fold: … and the cycle holds its dependant"
 
+# ── the Start when ready stamp (p23-6; vault grammar § Rollout start stamp) ──────────────────────
+# `next` reports a top-level `start: unattended` (startUnattended) and, on every non-dry-run call that gets past its
+# refusals (the lead's), removes it (startCleared), so the Chorus Stage never starts a second lead. A refused `next`
+# writes nothing: the stamp waits. Chorus's record, `started_unattended:`, is never touched.
+su='[d["startUnattended"], d["startCleared"]]'
+scen start-when-ready
+mkro $'- [[x]]' 'start: unattended'
+mkt x open
+cp "$D/ro.md" "$D/ro.before"
+J=$(nxt --dry-run)
+ok "$(q "$J" "$su")" '[true,false]' "start: --dry-run reports the stamp and clears nothing"
+cmp -s "$D/ro.md" "$D/ro.before"; ok "$?" 0 "start: --dry-run leaves the note byte-identical"
+J=$(nxt)
+ok "$(q "$J" "$su")" '[true,true]' "start: the lead's next reports the stamp and clears it"
+ok "$(fm ro start)" "<none>" "start: the start: unattended line is gone"
+ok "$(q "$J" 'd["start"]')" '["x"]' "start: … and the queue still starts x"
+grep -v '^start: unattended$' "$D/ro.before" > "$D/ro.expect"
+cmp -s "$D/ro.md" "$D/ro.expect"; ok "$?" 0 "start: every other line of the note is unchanged"
+ok "$(q "$(nxt)" "$su")" '[false,false]' "start: a second next finds no stamp"
+scen start-forms
+mkro $'- [[x]]' 'start: "Unattended"  # by the offer'
+mkt x open
+ok "$(q "$(nxt)" "$su")" '[true,true]' "start: a quoted, any-case stamp with a comment is the stamp"
+ok "$(fm ro start)" "<none>" "start: … and it is cleared"
+mkro $'- [[x]]' "start: 'unattended'" 'start: unattended'
+ok "$(q "$(nxt)" "$su")" '[true,true]' "start: duplicate stamps read as one"
+ok "$(grep -c '^start:' "$D/ro.md")" 0 "start: … and every one is removed, so none can re-arm the Stage"
+mkro $'- [[x]]' 'start: manual'
+cp "$D/ro.md" "$D/ro.before"
+ok "$(q "$(nxt)" "$su")" '[false,false]' "start: start: manual is no stamp"
+cmp -s "$D/ro.md" "$D/ro.before"; ok "$?" 0 "start: … and its line is kept"
+mkro $'- [[x]]' 'start: manual' 'start: unattended'
+ok "$(q "$(nxt)" "$su")" '[false,true]' "start: the first start: line is the one read (manual), yet a later stamp is still removed"
+ok "$(fm ro start)" "start: manual" "start: … and start: manual beside it stays"
+mkro $'- [[x]]' 'start:'
+ok "$(q "$(nxt)" "$su")" '[false,false]' "start: an empty start: is no stamp"
+mkro $'- [[x]]' 'meta:' '  start: unattended'
+cp "$D/ro.md" "$D/ro.before"
+ok "$(q "$(nxt)" "$su")" '[false,false]' "start: an indented start: under another key is no stamp"
+cmp -s "$D/ro.md" "$D/ro.before"; ok "$?" 0 "start: … and it is left alone"
+mkro $'- [[x]]\n\nstart: unattended'
+cp "$D/ro.md" "$D/ro.before"
+ok "$(q "$(nxt)" "$su")" '[false,false]' "start: a body line is never read"
+cmp -s "$D/ro.md" "$D/ro.before"; ok "$?" 0 "start: … and the body is unchanged"
+mkro $'- [[x]]' 'started_unattended: 2026-10-18T21:00  # the Chorus Stage started its lead'
+cp "$D/ro.md" "$D/ro.before"
+ok "$(q "$(nxt)" "$su")" '[false,false]' "start: Chorus's started_unattended: record is no stamp"
+cmp -s "$D/ro.md" "$D/ro.before"; ok "$?" 0 "start: … and next never touches it"
+scen start-refused
+mkro $'- [[x]]' 'incomplete: true' 'start: unattended'
+mkt x open
+nxt >/dev/null 2>"$D/err"; rc=$?
+ok "$rc" 1 "start: an incomplete stamped rollout is refused (exit 1)"
+has "$(cat "$D/err")" "ERROR:" "start: … with an ERROR line"
+ok "$(fm ro start)" "start: unattended" "start: … and the stamp waits for the Stage"
+mkro $'- [[x]]' 'parallel_ceiling: 0' 'start: unattended'
+nxt >/dev/null 2>"$D/err"; rc=$?
+ok "$rc" 1 "start: an invalid ceiling is refused (exit 1)"
+ok "$(fm ro start)" "start: unattended" "start: … and the stamp stays"
+scen start-paused
+mkro $'- [[x]]' 'paused: 2026-10-01T09:00+00:00' 'start: unattended'
+mkt x open
+J=$(nxt)
+ok "$(q "$J" "[d['halt']] + $su")" '["paused",true,true]' "start: a paused rollout's lead next halts paused and still clears the stamp"
+ok "$(fm ro start)" "<none>" "start: … the stamp is gone"
+ok "$(fm ro paused)" "paused: 2026-10-01T09:00+00:00" "start: … and paused: is kept"
+
 echo
 if [ "$fail" -eq 0 ]; then echo "reconcile-rollout-queue: ALL PASS"; else echo "reconcile-rollout-queue: FAILED"; fi
 exit "$fail"

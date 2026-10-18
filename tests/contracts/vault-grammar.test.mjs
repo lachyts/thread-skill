@@ -7,7 +7,9 @@
 // phase_key/phase_sort, reconcile-rollout.py's _phase_key/_phase_sort) are run on the doc's own examples
 // (`p03` is `p3`, `p3.5` and `p3.50` distinct, the numeric order). The prose readers (orient § 2, reshuffle
 // R1, reconcile-project.py's docstring) cite the doc instead of restating it, and § Readers lists every
-// reader, with no Not yet adopted line left (a stale one fails).
+// reader, with no Not yet adopted line left (a stale one fails). § Rollout start stamp (p23-6) states the stamp
+// (`start: unattended`), its writers, its reader and its clearers; reconcile-rollout.py's START_KEY and
+// START_UNATTENDED are pinned to it.
 // Controls prove the checks are not vacuous. Reads files and imports the scripts (no __pycache__ written).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -52,6 +54,7 @@ def load(name, p):
 rp, rr, na = (load(n, p) for n, p in zip(("rp", "rr", "na"), sys.argv[1:4]))
 print(json.dumps({"LANDED": sorted(rp.LANDED), "ACTIVE": sorted(rp.ACTIVE), "PHASE_N": rp.PHASE_N,
                   "PHASED_STEM_RE": rr.PHASED_STEM_RE.pattern, "SHORT_ID_RE": rr.SHORT_ID_RE.pattern,
+                  "START_KEY": rr.START_KEY, "START_UNATTENDED": rr.START_UNATTENDED,
                   "DEAD_STATUSES": sorted(na.DEAD_STATUSES),
                   "OPEN_STATUSES": sorted(na.OPEN_STATUSES), "doc": rp.__doc__}))
 `
@@ -180,7 +183,8 @@ function readersOf(text) {
   return at < 0 ? { adopted: s, notYet: null } : { adopted: s.slice(0, at), notYet: s.slice(at) }
 }
 const CONFORMING = ['reconcile-project.py', 'reconcile-rollout.py', 'next-action.py', 'orient', 'R1',
-  'tests/contracts/vault-grammar.test.mjs', 'reflect.py', 'repo-track.sh', 'candidate statuses', 'SHORT_ID_RE']
+  'tests/contracts/vault-grammar.test.mjs', 'reflect.py', 'repo-track.sh', 'candidate statuses', 'SHORT_ID_RE',
+  'START_UNATTENDED']
 const NOT_ADOPTED = []
 
 // The names of the failed § Readers checks; [] when every conforming reader is listed as such and, with
@@ -213,10 +217,28 @@ function citations({ orientText, reshuffleText, docstring }) {
   return out
 }
 
+// ---- the rollout start stamp ----------------------------------------------------------------------------
+
+// The names of the failed § Rollout start stamp checks; [] when the section states `start: unattended`, names its
+// writers (orient § 9, schedule step 8), its reader (the Chorus Stage and its `started_unattended:` record) and its
+// clearer (`next`), and the script's START_KEY / START_UNATTENDED equal the stamp's key and value.
+function startStampChecks(text, s) {
+  const sec = collapse(section(text, /^## Rollout start stamp$/) ?? '')
+  const stamp = sec.match(/with `([a-z_]+): ([a-z]+)`/)
+  const out = []
+  if (!stamp) return ['states the stamp']
+  if (s.START_KEY !== stamp[1] || s.START_UNATTENDED !== stamp[2]) out.push('script constants')
+  for (const want of ['orient § 9', 'schedule step 8', 'Chorus Stage', '`started_unattended:', 'reconcile-rollout.py next',
+    '--dry-run', '**Supersede prep**']) {
+    if (!sec.includes(want)) out.push(`names ${want}`)
+  }
+  return out
+}
+
 // ---- tests --------------------------------------------------------------------------------------------
 
-test('the doc has the four sections the readers cite', () => {
-  for (const h of ['Phase and task filenames', 'Statuses', 'In flight', 'Readers']) {
+test('the doc has the five sections the readers cite', () => {
+  for (const h of ['Phase and task filenames', 'Statuses', 'In flight', 'Rollout start stamp', 'Readers']) {
     assert.ok(section(doc, new RegExp(`^## ${h}$`)), `${DOC} has no ## ${h}`)
   }
 })
@@ -258,6 +280,18 @@ test("close's candidate statuses are Active and Review, and cite the doc", () =>
 
 test('orient § 2, reshuffle R1 and the reconcile-project docstring cite the doc and restate nothing', () => {
   assert.deepEqual(citations({ orientText: orient, reshuffleText: reshuffle, docstring: scripts().doc }), [])
+})
+
+test("§ Rollout start stamp states the stamp, its writers, reader and clearers, and pins next's constants", () => {
+  assert.deepEqual(startStampChecks(doc, scripts()), [])
+})
+
+test('control: a drifted stamp or a dropped writer fails the start-stamp check', () => {
+  const s = scripts()
+  assert.deepEqual(startStampChecks(mutate(doc, 'with `start: unattended`', 'with `start: auto`'), s), ['script constants'])
+  assert.deepEqual(startStampChecks(mutate(doc, "orient § 9's", "orient's"), s), ['names orient § 9'])
+  assert.deepEqual(startStampChecks(mutate(doc, '## Rollout start stamp', '## Start stamp'), s), ['states the stamp'])
+  assert.deepEqual(startStampChecks(doc, { ...s, START_UNATTENDED: 'auto' }), ['script constants'])
 })
 
 test('§ Readers lists every reader, and no Not yet adopted line is left', () => {

@@ -27,7 +27,10 @@ Subcommands:
               Schedule order is each task's first wikilink on a list-item or table-row line of the rollout body;
               prose and fenced code never rank. Honours a soft pause: once nothing runs, awaits or integrates (a held
               RACE whose `integrating:` stands included, Race holds below), it stamps `paused:` and removes
-              `pause_requested` (the drain, ADR 0030 decision 5). Refuses an incomplete rollout (below): exit 1, no
+              `pause_requested` (the drain, ADR 0030 decision 5). `startUnattended` reports the rollout start stamp
+              (`start: unattended`, vault grammar § Rollout start stamp) and every call off --dry-run that gets past
+              its refusals removes it (`startCleared`), so a running rollout clears it and the Chorus Stage never
+              starts a second lead; a refusal leaves it. Refuses an incomplete rollout (below): exit 1, no
               stdout, one ERROR line naming why and the remedy, `/thread:schedule <its first project> --regenerate`.
               An unacked git-env trip (Git-env hold, below) is listed as `gitEnvHold` and makes `halt` "git-env",
               ahead of every other verdict. `awaitingIntegration` is the Integration queue's order: a task a queued
@@ -712,6 +715,12 @@ SPEND_APPROVAL_KEY = "spend_approval_usd"
 PAUSED_FOR_KEY = "paused_for"
 SIGN_OFF = "sign-off"
 PAUSE_LOG_SECTION = "## Pause log"
+# The rollout start stamp (p23-6; skills/_shared/vault-grammar.md § Rollout start stamp): the execute offer's
+# Start when ready writes a top-level `start: unattended`, the Chorus Stage reads it (the first `start:` line, scalar
+# lower-cased) and starts one lead once the note is runnable, and `next` reports it and, past its refusals and off
+# --dry-run, removes it, so the Stage never starts a second lead. Chorus's record, `started_unattended:`, is untouched.
+START_KEY = "start"
+START_UNATTENDED = "unattended"
 
 # Review-loop memory (2026-08-14): an approval on the FINAL review round with real rejection history
 # (engine flag approvedAtCeiling) persists the accumulated by-round rationale. An AUDIT RECORD, not an
@@ -819,6 +828,25 @@ def _scalar(value) -> str:
         return ""
     s = re.sub(r"\s+#.*$", "", str(value)).strip()
     return s.strip('"').strip("'").strip()
+
+
+def _start_unattended(note) -> bool:
+    """The rollout start stamp (START_KEY): the first top-level `start:` line reads `unattended`, quotes and comment
+    dropped, any case (the rule the Chorus Stage reads it by)."""
+    return _scalar(note.get(START_KEY)).lower() == START_UNATTENDED
+
+
+def _clear_start(note) -> bool:
+    """Remove every top-level `start:` frontmatter line whose scalar reads `unattended` (so a stale second line can
+    never re-arm the Stage); any other `start:` value and every indented line stay. True when one was removed."""
+    pat = re.compile(rf"^{re.escape(START_KEY)}:\s*(.*)$")
+    kept = [line for line in note._fm
+            if not ((m := pat.match(line)) and _scalar(m.group(1)).lower() == START_UNATTENDED)]
+    if len(kept) == len(note._fm):
+        return False
+    note._fm = kept
+    note.dirty = True
+    return True
 
 
 def _truthy_flag(value) -> bool:
@@ -2305,6 +2333,10 @@ def cmd_next(args) -> int:
         print(f"ERROR: {rollout_path.stem} is incomplete: {why}: never run it as written; supersede it with "
               f"/thread:schedule {project} --regenerate", file=sys.stderr)
         return 1
+    # The start stamp (START_KEY): reported as read at this call; the lead's call (not --dry-run) removes it, since a
+    # lead now runs the rollout. Every refusal above returned first, so a refused call leaves it for the Stage.
+    start_unattended = _start_unattended(rollout_note)
+    start_cleared = False
     race = _race_holds(rollout_note, [(r["path"], r["note"]) for r in rows])
     # race_held_lane: a held task whose `integrating:` stamp stands. The lead's RACE re-verify still holds the
     # lane on it, so it stays in flight for the drain, the solo rule, the overlap and the halt verdict; the
@@ -2409,6 +2441,9 @@ def cmd_next(args) -> int:
                 in_flight.update(best["files"])
     in_use = used + len(start)
     holds += [(r, f"ceiling: {in_use}/{ceiling} slots in use") for r in ceiling_held]
+    if not args.dry_run:
+        start_cleared = _clear_start(rollout_note)
+        rollout_note.save()
 
     # An unacked git-env trip (execute § 4.5 *Git-env canary*) holds the whole queue until /thread:repair records
     # Lachy's ack: nothing starts or restarts, every stalled or queued task is held, and the halt is "git-env",
@@ -2463,6 +2498,8 @@ def cmd_next(args) -> int:
         "paused": paused,
         "pauseRequested": pause_requested,
         "pausedNow": paused_now,
+        "startUnattended": start_unattended,
+        "startCleared": start_cleared,
         "halt": halt,
         "awaitingSignOff": sign_off,
         "progress": _progress_line(counts, _timeline(rows, counts, ceiling, now)),
@@ -5670,7 +5707,8 @@ def main() -> int:
                     help="comma-separated slugs whose task calls are live (default: every in_progress note); "
                          "any other in_progress note is stalled and restarts")
     nx.add_argument("--now", type=_iso_arg, default=None, help=now_help)
-    nx.add_argument("--dry-run", action="store_true", help="write nothing (a drained pause is reported, not stamped)")
+    nx.add_argument("--dry-run", action="store_true",
+                    help="write nothing (a drained pause is reported, not stamped; a start stamp is reported, not cleared)")
     nx.set_defaults(func=cmd_next)
 
     for name, func, help_ in (

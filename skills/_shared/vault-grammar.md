@@ -1,6 +1,7 @@
 # The vault grammar — phase and task names, statuses, in flight
 
-The one definition of how a vault note's filename places it in a phase and how its `status:` reads.
+The one definition of how a vault note's filename places it in a phase and how its `status:` reads,
+and a rollout's start stamp.
 `reconcile-project.py`'s drift detector, execute's phase-close ceremony, orient § 2's sweep and the
 reshuffle's R1 all read the vault through it, so they classify the same note the same way (§ Readers
 lists every reader). A reader that needs a pattern or a set cites the section here instead of
@@ -39,6 +40,26 @@ days old unless an end line in the note names the same run and job, written befo
 `status: in-progress` (TaskNotes' own spelling), `in_progress` or `review`; a phase with any such
 member.
 
+## Rollout start stamp
+
+A rollout note asks the Chorus Stage to start its lead with `start: unattended` (*Start when ready*,
+CONTEXT.md **Start when ready**). The key is `start`, read on the first top-level `start:` line of
+the frontmatter, its scalar lower-cased with quotes and an inline ` # comment` dropped:
+`start: unattended`, `start: "Unattended"` and `start: unattended  # by the offer` are the stamp. Any
+other value (`start: manual`, an empty `start:`), a `start:` nested under another key, and a body line are
+no stamp; `started:` and `started_unattended:` are other keys.
+
+- **Writers**: the execute offer only, on the rollout note just written and never started: orient § 9's
+  Start when ready answer, and schedule step 8's **Start when ready.** on a standalone run.
+- **Reader**: the Chorus Stage (`src/stage/unattended.py` in the Chorus repo, Chorus ADR 0052 d6 as
+  amended). It starts one lead (`/thread:execute [[<rollout>]]`) in the note's Project root once the
+  note is runnable, and replaces the stamp in place with its own record,
+  `started_unattended: <stamp>`, which thread-skill never writes or clears.
+- **Clearers**: `reconcile-rollout.py next`, on every call off `--dry-run` that exits 0 (the lead's,
+  execute § 4.5 step 1), which removes every top-level `start:` line reading `unattended` and reports
+  `startCleared`, so a running rollout clears it; a refused `next` (exit 1) writes nothing, so the stamp
+  waits. And schedule's **Supersede prep**, which removes it from a prior it is about to supersede.
+
 ## Readers
 
 - `skills/_shared/scripts/reconcile-project.py`: `PHASE_N`, `LANDED`, `ACTIVE`, `phase_key` and
@@ -59,5 +80,7 @@ member.
   Active and Review, read per § Statuses.
 - `skills/execute/scripts/reconcile-rollout.py` carry's `SHORT_ID_RE` and `_order_hints`' short-id match:
   `p<PHASE_N>-<M>`, the phase matched literally.
+- `skills/execute/scripts/reconcile-rollout.py` `next`: `START_KEY` and `START_UNATTENDED` (the stamp
+  above), read as `_scalar` reads a frontmatter value, and reported as `startUnattended`.
 - `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both
   scripts' key and sort helpers against the examples under § Phase and task filenames.
