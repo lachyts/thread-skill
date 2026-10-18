@@ -7,9 +7,9 @@ description: 'Open, resume, or start durable thread state. Use to load a THREAD.
 
 A **thread** is a long-running unit of work that spans conversations. Three kinds, same shape:
 
-- **Project thread** — `~/Projects/<Area>/<Project>/THREAD.md`. Bounded to a project under `~/Projects/`.
+- **Project thread** — `~/Projects/<Area>/<Project>/THREAD.md`, for a project under `~/Projects/` with no code repo.
 - **Shared thread** — `~/repos/workspaces/_shared/threads/<slug>.md`. Cross-workspace or meta-work.
-- **Repo thread** — a `THREAD.md` at a tool repo's toplevel under `~/repos` that § Repo-thread lookup lists. Its **effective slug** is its front-matter `slug:`, else its directory's name (`~/repos/tools/maquette/THREAD.md`, which has no front matter, is `maquette`).
+- **Repo thread** — a `THREAD.md` at a repo's toplevel under `~/repos` that § Repo-thread lookup lists: a code project's thread lives in its repo (ADR 0039). Its **effective slug** is its front-matter `slug:`, else its directory's name (`~/repos/tools/maquette/THREAD.md`, which has no front matter, is `maquette`).
 
 Wherever a skill reads a THREAD.md's `slug:` (handoff's `thread:` field and capture match, close's handoff scan), a repo thread supplies its effective slug. One without front matter never gains any (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Thread state).
 
@@ -53,7 +53,7 @@ A repo-thread row's `<label>` is its path relative to `~/repos`, as in § Repo-t
 
 1. Look for an existing thread: run § Repo-thread lookup with `slug=<slug>`. It searches `_shared/threads/<slug>.md`, then `~/Projects`, then repo threads, and stops at the first tier with a match; close's rung 2 uses this same order. One path → that file. Several → the CWD repo's has already won inside the repo tier; otherwise list labels and paths and ask. A hit comes before any creation rule, so `/thread:open maquette` opens the repo thread `~/repos/tools/maquette/THREAD.md`.
 2. If found → read the file, present a 4–6 line briefing (scope, state, where-we-are headline, top open question), and continue the conversation with that context loaded. If its Resume instructions point at a handoff doc (`Read <home>/docs/handoffs/<doc> first`), read that too, apply the `Run from:` check below (the handoff-doc pickup's step 2), and, when it is pending, **mark it consumed** — set `status: consumed` in its front matter, no commit — exactly as the handoff-doc pickup below does (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/handoff-lifecycle.md` § Pickup), then apply `handoff-lifecycle.md` § Thread state's pickup row; the thread is live again and `thread:close` will delete the doc. If the file is gone (its consumer's close deleted it and the pointer was never rewritten), say so in one line and brief from THREAD.md alone — `git log --all -- '<path>'` recovers the text if it matters.
-3. If not found → confirm with the user, ask for the scope (one line), then create the file from the canonical template with frontmatter populated. New shared threads also get appended to `INDEX.md`.
+3. If not found → confirm with the user, ask for the scope (one line), then create the file at the location § Creating a new thread gives, from the canonical template with frontmatter populated. New shared threads also get appended to `INDEX.md`.
 
 ### `/thread:open [[<task>]]` — pick up a stashed/deferred capture
 
@@ -108,9 +108,10 @@ if [ -n "$slug" ] && [ -z "$hits" ] && [ -d "$HOME/Projects" ]; then
 fi
 if [ -z "$hits" ] && [ -d "$HOME/repos" ]; then
   r=$(cd "$HOME/repos" 2>/dev/null && pwd -P)
-  hits=$(find "$r" -maxdepth 3 -name THREAD.md -not -path '*/.claude/*' -not -path "$r/obsidian/*" -not -path "$r/workspaces/*" 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do
-    s=$(fms); if [ -z "$s" ]; then d=${f%/THREAD.md}; s=${d##*/}; fi
-    if [ -z "$slug" ] || [ "$s" = "$slug" ]; then printf '%s\n' "$f"; fi
+  hits=$(find "$r" -maxdepth 4 -name THREAD.md -not -path '*/.claude/*' -not -path '*/_archive/*' -not -path "$r/obsidian/*" -not -path "$r/workspaces/*" 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do
+    d=${f%/THREAD.md}; d=${d##*/}
+    s=$(fms); if [ -z "$s" ]; then s=$d; fi
+    if [ -z "$slug" ] || [ "$s" = "$slug" ] || [ "$d" = "$slug" ]; then printf '%s\n' "$f"; fi
   done)
   if [ -n "$slug" ] && [ -n "$hits" ] && t=$(git rev-parse --show-toplevel 2>/dev/null); then
     case "$nl$hits$nl" in *"$nl$t/THREAD.md$nl"*) hits="$t/THREAD.md" ;; esac
@@ -120,21 +121,26 @@ if [ -n "$hits" ]; then printf '%s\n' "$hits"; fi
 # end thread:repo-thread-lookup
 ```
 
-- **First hit wins.** With a slug the tiers run in order — `~/repos/workspaces/_shared/threads/<slug>.md`, then every `~/Projects` THREAD.md whose front-matter `slug:` matches (depth 5 or less, never under an `_archive`, `.claude`, `.git` or `node_modules` directory), then repo threads — and the first tier with a match is the whole answer. A `_shared` or `~/Projects` thread therefore beats a repo thread with the same slug — which is why the `~/Projects` walk prunes: an archived or worktree copy would otherwise hide a live repo thread, and the bounded walk keeps close's rung 2 cheap. With `slug=` empty only repo threads are listed.
-- **Repo threads** are the `THREAD.md` files at depth 3 or less under `~/repos`, outside `~/repos/obsidian`, `~/repos/workspaces` and any `.claude` directory. A repo thread's effective slug is its front-matter `slug:` (CR-tolerant, quotes stripped); only when it has no front-matter `slug:` does the directory's name stand in, so a front-matter slug always wins. A `slug:` in the body never counts. A clone whose directory name differs from what Lachy calls it (`overlay-carousel (codex)`) is reached by slug only once its THREAD.md gains `slug:` front matter; add it by hand.
+- **First hit wins.** With a slug the tiers run in order — `~/repos/workspaces/_shared/threads/<slug>.md`, then every `~/Projects` THREAD.md whose front-matter `slug:` matches (depth 5 or less, never under an `_archive`, `.claude`, `.git` or `node_modules` directory), then repo threads matched by effective slug or directory name — and the first tier with a match is the whole answer. A `_shared` or `~/Projects` thread therefore beats a repo thread with the same slug — which is why the `~/Projects` walk prunes: an archived or worktree copy would otherwise hide a live repo thread, and the bounded walk keeps close's rung 2 cheap. With `slug=` empty only repo threads are listed.
+- **Repo threads** are the `THREAD.md` files at depth 4 or less under `~/repos`, outside `~/repos/obsidian`, `~/repos/workspaces`, any `.claude` directory and any `_archive` directory, so a repo one level deeper (`tools/mcp/<repo>`) is reached. A repo thread is matched by effective slug or directory name (ADR 0039 d4): `slug=` hits a THREAD.md whose effective slug or whose directory's name equals it, so `tools/renamed/THREAD.md` with `slug: other` answers both `slug=other` and `slug=renamed`. Its effective slug is its front-matter `slug:` (CR-tolerant, quotes stripped), else the directory's name, and that is what a handoff doc's `thread:` and close's scan carry. A `slug:` in the body never counts. A clone whose directory name differs from what Lachy calls it (`overlay-carousel (codex)`) is reached by its directory name too, `slug='overlay-carousel (codex)'`, and by its `slug:` once its THREAD.md carries one.
 - **The CWD tiebreak.** When several repo threads match the slug and one is at the toplevel of the CWD's git repo, that one alone is printed (the rollout clone's and the original's THREAD.md share a slug). Outside a git repo the tiebreak is skipped silently.
 - **Several paths printed** → list them as `<label> — <abs path>` and ask. A repo thread's **label** is its path relative to `~/repos` (`tools/overlay-carousel (codex)/THREAD.md`).
-- **Callers.** `list` step 3, `<slug>` step 1, the handoff-doc pickup's step 3 (`slug=<thread:>`), and `${CLAUDE_PLUGIN_ROOT}/skills/close/SKILL.md` § Identify the active thread (rungs 2 and 3) and its Process step 7.1 all run this snippet.
-- **Worktrees are excluded twice.** A `.claude/worktrees/<w>` toplevel sits deeper than depth 3 below `~/repos` for every realistic repo, and `-not -path '*/.claude/*'` drops it independently, so a later change to the depth limit cannot bring worktree copies in. `tests/repo-threads.test.sh` checks each exclusion with a mutation.
+- **Callers.** `list` step 3, `<slug>` step 1, the handoff-doc pickup's step 3 (`slug=<thread:>`), `${CLAUDE_PLUGIN_ROOT}/skills/close/SKILL.md` § Identify the active thread (rungs 2 and 3) and its Process step 7.1, and `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` **Split launch.** (case 2) all run this snippet; the placement check (`thread-placement.py`) walks the same files.
+- **Worktrees are excluded twice.** A `.claude/worktrees/<w>` copy sits deeper than depth 4 below `~/repos` for every realistic repo (`tools/<repo>/.claude/worktrees/<w>/THREAD.md` is depth 6), and `-not -path '*/.claude/*'` drops it independently, so a later change to the depth limit cannot bring worktree copies in. A linked worktree kept outside `.claude` (`animately/optimizer-worktrees/<w>`) is listed: the CWD tiebreak or the several-hits ask settles it, and the placement check reads it as its main checkout (ADR 0039 d5). `tests/repo-threads.test.sh` checks each exclusion with a mutation.
 
 ## Creating a new thread
 
-When creating, decide scope first:
+When creating, decide scope first. The first row answered Yes gives the location:
 
 | Question | Answer | Location |
 |---|---|---|
-| Is this work bounded to a single `~/Projects/<Area>/<Project>/`? | Yes | `<that project>/THREAD.md` |
+| Does the project's note declare a qualifying repo (ADR 0039 d1: a main checkout, ≤3 below `~/repos`, outside obsidian/workspaces/`.claude`/`_archive`)? `python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py" home --project "<note>"` prints its first one. From a `~/Projects` folder, `home --dir "$PWD"` answers without naming the note | Yes | `<repo>/THREAD.md` |
+| Is this work bounded to a single `~/Projects/<Area>/<Project>/` with no code repo? | Yes | `<that project>/THREAD.md` |
 | Does it span workspaces or live outside `~/Projects/`? | Yes | `_shared/threads/<slug>.md` |
+
+**One live thread per project.** A project has one live thread, always named `THREAD.md`. A finished or parked arc moves out of the way: to `docs/threads/<slug>.md` in a repo, or to `_archive/` under `~/Projects`; it never becomes a sibling `THREAD-<name>.md`. The hardcoded name is the contract: the lookup, close's rungs and step 7.1, land.sh and the git-env canary all key on `THREAD.md`, so a named sibling is invisible to every one of them (ADR 0039 d2).
+
+**Workspace subfolders.** A workspace seat's subfolder (`~/repos/workspaces/<seat>/<dir>/`) is not a thread home: the lookup never reaches it. Seat-hosted work keeps its thread in `_shared/threads/<slug>.md` (ADR 0039 d3).
 
 Slug rules: kebab-case, ≤4 words, names the *topic* not the verb. `memory-system-redesign` not `redesigning-memory`.
 
@@ -164,7 +170,8 @@ Group by state in the index — Active, Paused, Parked, Done, in that order; whi
 
 ## Don't
 
-- Don't put project work into a shared thread "because it's easier to find" — locality wins. Project threads live next to the project files.
+- Don't put project work into a shared thread "because it's easier to find" — locality wins. A code project's thread lives in its repo, any other project's next to its files.
+- Don't start a sibling `THREAD-<name>.md` beside a live THREAD.md — move the finished arc out instead (§ Creating a new thread, **One live thread per project.**).
 - Don't create a thread for one-shot work — daily-task-shaped things go to vault tasks, not threads (`thread:stash` / `thread:defer` handle the capture).
 - Don't create a thread when an existing one fits — search first.
 - Don't skip `thread:close` at the end of a session that touched a thread — the thread is only useful if it stays current.
