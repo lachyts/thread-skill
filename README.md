@@ -78,9 +78,11 @@ installing a version that knows the key, because an older `rollout-settings.py`
 refuses it, and every rollout's settings with it. `skills/_shared/scripts/gated_inputs.py`
 holds the exposure reading it applies and schedule's gated-input sweep.
 
-A needs-you push that does not reach you (Remote Control inactive, a push-tool
-error, or no push tool at all, as in Codex) falls back to ntfy once
+A needs-you push that does not reach you (any "not sent" but you at the
+terminal, such as Remote Control inactive or notifications turned off, a
+push-tool error, or no push tool at all, as in Codex) falls back to ntfy once
 `~/.config/thread/rollouts.toml` sets `[notify] ntfy_topic = "<topic>"`.
+`rollout-settings.py` prints only whether a topic is set, never the topic.
 Unset, there is no fallback, and an undelivered push is logged `push failed:`
 in the rollout note's `## Needs-you log` and retried once at the next loop
 entry. Install a release that knows the table before writing it: an older

@@ -4,6 +4,10 @@ Date: 2026-10-18
 Status: accepted, not built (amends ADR 0034 decision 2's ask-ahead wording and execute § 6.5's push rule; grilled
 with Lachy 2026-10-18 in the lead session of `[[thread-skill-rollout-2026-10-17]]`, rewritten the same day after two
 clean-room reviews of its earlier drafts)
+*(Amended 2026-10-19 by thread-skill-p23-3-needs-you-ntfy-fallback: d3's "Remote Control inactive" stands for every
+not-sent that reached nobody (notifications turned off, nowhere to send it, however the tool words it), so Lachy at
+the terminal is the one not-sent that counts as pushed and skips the fallback. `rollout-settings.py`'s CLI prints only
+whether a topic is set: on ntfy.sh a topic is its own read and publish credential.)*
 
 ## Context
 

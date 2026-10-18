@@ -138,27 +138,26 @@ function checkNeedsYou(skill, context = realContext) {
   // push-dedupe: the push goes through PushNotification (loaded with ToolSearch, status "proactive"), only when no
   // `## Needs-you log` line (`pushed via push:`, `pushed via ntfy:`, `push failed:` or a legacy `pushed:`) names the
   // same slug and question, and is logged `pushed via push:` after the call returns; an item is never pushed again but
-  // for its one retry, a legacy `pushed:` line matches for good (the log cannot tell an undelivered one), a "not sent"
-  // at the terminal counts as pushed, a failed delivery is logged `push failed`, and nothing pushes on every turn or
-  // report.
+  // for its one retry, a legacy `pushed:` line matches for good (the log cannot tell an undelivered one), and nothing
+  // pushes on every turn or report. Which not-sent counts as pushed is not-sent's; the `push failed:` line a failed
+  // delivery appends is ntfy-fallback's.
   if (!push.includes('ToolSearch `select:PushNotification`') || !push.includes('`PushNotification`') ||
     !push.includes('`status: "proactive"`') || !push.includes('`## Needs-you log`') ||
     !push.includes('any of `pushed via push:`, `pushed via ntfy:`, `push failed:` or a legacy `pushed:`, with the same `[[<slug>]]` and question') ||
     !push.includes('never push it again, on any later turn, heartbeat tick or session, but for *Retry once* below') ||
     !push.includes('A legacy `pushed:` line matches for good, even one written after "not sent (Remote Control inactive)"') ||
-    !push.includes('**"Not sent"**') || !push.includes('still counts as pushed and is logged `pushed via push:`') ||
-    !push.includes('push failed: <question>') ||
     !before(push, 'PushNotification', 'pushed via push: <question>') || /on every (turn|report)/i.test(push)) {
     fails.push('push-dedupe')
   }
 
-  // ntfy-fallback (ADR 0038 d3): the push falls back to ntfy only when the tool reports Remote Control inactive or an
-  // error, never when it reports Lachy at the terminal, and a run with no push tool tries ntfy too. The lead runs
-  // ntfy-push.py with the same message in a quoted heredoc (nothing in the message expands), logs `pushed via ntfy:` on
-  // exit 0 and `push failed:` on every other exit (no topic, exit 4, included), so no report claims Lachy was told.
+  // ntfy-fallback (ADR 0038 d3): the push falls back to ntfy when the tool reports an error or a not-sent of any cause
+  // (Remote Control inactive among them), never when it reports Lachy at the terminal, and a run with no push tool
+  // tries ntfy too. The lead runs ntfy-push.py with the same message in a quoted heredoc (nothing in the message
+  // expands), logs `pushed via ntfy:` on exit 0 and `push failed:` on every other exit (no topic, exit 4, included), so
+  // no report claims Lachy was told.
   // The old "no push tool: nothing is logged" bullet is gone.
   const ntfy = bullet(push, '- **The ntfy fallback.**')
-  if (!ntfy.includes('When `PushNotification` reports Remote Control inactive or an error') ||
+  if (!ntfy.includes('When `PushNotification` reports an error or a not-sent of any cause') ||
     !ntfy.includes('never when it reports Lachy at the terminal') ||
     !ntfy.includes('and when there is no push tool (a Codex run, or ToolSearch cannot load it)') ||
     !ntfy.includes("```bash python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/ntfy-push.py <<'NEEDS_YOU_ITEM' <the one-line message> NEEDS_YOU_ITEM ```") ||
@@ -168,6 +167,18 @@ function checkNeedsYou(skill, context = realContext) {
     !ntfy.includes('a refused rollouts.toml here never halts the rollout') ||
     /nothing is logged/.test(push)) {
     fails.push('ntfy-fallback')
+  }
+
+  // not-sent (ADR 0038 d3): a not-sent because Lachy is at the terminal is the only not-sent that counts as pushed
+  // (logged `pushed via push:`, never a fallback); every other not-sent (Remote Control inactive, notifications turned
+  // off, nowhere to send it, however the tool words it) reached nobody and takes the ntfy fallback, so no undelivered
+  // push is logged as delivered: the false `pushed:` record of 2026-10-10 and 2026-10-17 that ADR 0038 removes.
+  const notSent = bullet(push, '- **"Not sent"**')
+  if (!notSent.includes('- **"Not sent"** because Lachy is at the terminal is the only not-sent that counts as pushed:') ||
+    !notSent.includes('it is logged `pushed via push:` and it never falls back.') ||
+    !notSent.includes('Every other not-sent (Remote Control inactive, notifications turned off, nowhere to send it, however the tool words it) reached nobody, so it takes *The ntfy fallback*.') ||
+    /any other reason|still counts as pushed/i.test(notSent)) {
+    fails.push('not-sent')
   }
 
   // push-retry (ADR 0038 d3): a `push failed:` item is retried at most once more, at the next loop entry, before
@@ -415,7 +426,7 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
 
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
 
-const RULES = ['no-ask-in-flight', 'push-dedupe', 'ntfy-fallback', 'push-retry', 'kinds', 'turn-waiting', 'report-block', 'sign-off',
+const RULES = ['no-ask-in-flight', 'push-dedupe', 'ntfy-fallback', 'not-sent', 'push-retry', 'kinds', 'turn-waiting', 'report-block', 'sign-off',
   'guardrails', 'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'push-message', 'answers',
   'answered-items', 'glossary']
 const CONTROLLED = new Set()
@@ -463,13 +474,27 @@ test('control: the push dedupe removed, a push on every report, the log line fir
     'push-dedupe', 'the legacy pushed: clause deleted')
 })
 
-test('control: a fallback at the terminal, no topic read as delivered, the old no-push-tool bullet, or an unquoted heredoc fails ntfy-fallback', () => {
+test('control: a fallback at the terminal, one narrowed to Remote Control inactive, no topic read as delivered, the old no-push-tool bullet, or an unquoted heredoc fails ntfy-fallback', () => {
   only(edit(real, ', never when it reports Lachy at the terminal,', ','), 'ntfy-fallback', 'falls back at the terminal')
+  only(edit(real, 'When `PushNotification` reports an error or a not-sent of any cause,', 'When `PushNotification` reports Remote Control inactive or an error,'),
+    'ntfy-fallback', 'narrowed back to Remote Control inactive')
   only(edit(real, '4, no topic set, the fallback skipped; ', ''), 'ntfy-fallback', 'the exit-4 clause deleted')
   only(edit(real, '- **Retry once.**',
     "- **No push tool** (a Codex run, or ToolSearch cannot load it): nothing is logged, and the report's block carries the item.\n- **Retry once.**"),
   'ntfy-fallback', 'the no-push-tool bullet restored')
   only(edit(real, "ntfy-push.py <<'NEEDS_YOU_ITEM'", 'ntfy-push.py <<NEEDS_YOU_ITEM'), 'ntfy-fallback', 'the heredoc unquoted')
+})
+
+test('control: the not-sent parenthetical widened back, its no-fallback clause or its every-other-not-sent sentence gone, or another not-sent counted as pushed fails not-sent', () => {
+  only(edit(real, '**"Not sent"** because Lachy is at the terminal is the only not-sent that counts as pushed: it is logged `pushed via push:` and it never falls back.',
+    '**"Not sent"** (Lachy is at the terminal, or any other reason but Remote Control inactive) still counts as pushed and is logged `pushed via push:`; it never falls back.'),
+  'not-sent', 'the parenthetical widened back to any other reason')
+  only(edit(real, ' and it never falls back.', '.'), 'not-sent', 'it never falls back deleted')
+  only(edit(real, ' Every other not-sent (Remote Control inactive, notifications turned off, nowhere to send it, however the tool words it) reached nobody, so it takes *The ntfy fallback*.', ''),
+    'not-sent', 'the every-other-not-sent sentence deleted')
+  only(edit(real, 'however the tool words it) reached nobody, so it takes *The ntfy fallback*.',
+    'however the tool words it) reached nobody, so it takes *The ntfy fallback*. A not-sent because notifications are turned off still counts as pushed.'),
+  'not-sent', 'a turned-off not-sent counted as pushed')
 })
 
 test('control: an unbounded retry, one off loop entries, a re-push on ordinary turns, ntfy alone, or the legacy, counter or ordering sentence gone fails push-retry', () => {
@@ -602,7 +627,7 @@ test('control: CONTEXT.md without the entry, or without its Avoid list, fails gl
   only(real, 'glossary', 'the bounded retry removed', edit(realContext, 'retried at most once more, at the next loop entry', 'retried'))
 })
 
-test('the rules are all named (18) and each has a control', () => {
-  assert.equal(RULES.length, 18)
+test('the rules are all named (19) and each has a control', () => {
+  assert.equal(RULES.length, 19)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
