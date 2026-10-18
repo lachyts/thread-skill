@@ -14,8 +14,10 @@
 #   and zsh -f ($, $(…), backticks, \ and ' single-quoted)   C16 stamp, usage, an unreachable origin   C17 timeouts, signals,
 #   the bootstrap, the race tree   C18 no relaunch loop   C19 an Integration set-aside re-enters   C20 the last
 #   task rejected   C21 plan, the approved plan for the two launches   C22 inputs --row, the integrate call's record
-#   checked against the note and its fallback prUrl a PR URL the engine takes, a bare #N built (p17-1). C10 is the landed list with a commit pushed without a PR (`unlisted`), and
-#   C11 also pins inputs --row's ports of historyError, rungRecordError and PR_URL.
+#   checked against the note and its fallback prUrl a PR URL the engine takes, a bare #N built (p17-1)   C23 a
+#   signal while a step starts, and the step's and verify's own signal mask (p22-2). C10 is the landed list with
+#   a commit pushed without a PR (`unlisted`), and C11 also pins inputs --row's ports of historyError,
+#   rungRecordError and PR_URL.
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -726,20 +728,33 @@ fx c17
 # fraction: a rollout runs this suite in several worktrees at once, and a machine-wide pgrep on a bare duration
 # counted their sleepers as this run's survivors (2026-10-15, p20-2: "expected [0] got [4]").
 u=$(printf %07d $$)
-t0=$(date +%s)
-python3 "$LI" verify --tree "$WT" --out "$F/out/v" --timeout 2 --verifier "sleep 3171.$u & sleep 3172.$u; wait" >/dev/null
-el=$(( $(date +%s) - t0 ))
+# Structural, not a stopwatch (p22-1): a rollout at ceiling 4 loads the host to ~150, and the old "within 15 s"
+# bound went red there on correct code. The sleepers sleep 3171 s+, so only verify's kill can end them, and a
+# verify that waited for them could not return before they did: the bounds below (300 s for verify to return or
+# its children to start, 60 s for a killed child to vanish) are generous, never tight, and still fail a verify
+# that waits for its children, or one that leaves a child alive.
+# within <s> <cmd…>: poll <cmd> every 0.1 s until it succeeds (0) or <s> s of wall clock pass (1).
+within() { local end=$((SECONDS + $1)); shift; until "$@" 2>/dev/null; do [ "$SECONDS" -ge "$end" ] && return 1; sleep 0.1; done; }
+gone() { ! kill -0 "$1"; }
+sleepers() { pgrep -f "$1" | wc -l | tr -d ' '; }
+nosleeper() { [ "$(sleepers "$1")" = 0 ]; }
+python3 "$LI" verify --tree "$WT" --out "$F/out/v" --timeout 2 --verifier "sleep 3171.$u & sleep 3172.$u; wait" >/dev/null &
+vp=$!
+if within 300 gone "$vp"; then st=returned; else st="still running after 300 s"; kill -TERM "$vp"; fi; wait "$vp"
 ok "$(cat "$F/out/v.rc")" 124 "C17: the deadline → rc 124"
-ok "$([ "$el" -lt 15 ] && echo fast || echo "slow ${el}s")" fast "C17: … within 15 s"
-ok "$(pgrep -f "sleep 317[12]\.$u" | wc -l | tr -d ' ')" 0 "C17: no verifier child survives"
+ok "$st" returned "C17: … verify returns at its deadline, not when its verifier's children would"
+within 60 nosleeper "sleep 317[12]\.$u"
+ok "$(sleepers "sleep 317[12]\.$u")" 0 "C17: no verifier child survives"
 has "$(cat "$F/out/v.log")" "timed out after 2s" "C17: the log names the timeout"
 python3 "$LI" verify --tree "$WT" --out "$F/out/t" --timeout 600 --verifier "sleep 3173.$u & sleep 3174.$u; wait" >/dev/null &
 vp=$!
-n=0; until grep -q '== verifier:' "$F/out/t.log" 2>/dev/null && [ "$(pgrep -f "sleep 317[34]\.$u\$" | wc -l | tr -d ' ')" -ge 1 ]; do n=$((n+1)); [ "$n" -gt 100 ] && break; sleep 0.1; done
+started() { grep -q '== verifier:' "$F/out/t.log" && [ "$(sleepers "sleep 317[34]\.$u\$")" -ge 1 ]; }
+within 300 started && st=started || st="not started after 300 s"
+ok "$st" started "C17: the verifier's children run before the TERM"
 kill -TERM "$vp"; wait "$vp"
 ok "$(cat "$F/out/t.rc")" 143 "C17: TERM to verify → rc 143"
-n=0; while [ "$(pgrep -f "sleep 317[34]\.$u" | wc -l | tr -d ' ')" -gt 0 ] && [ "$n" -lt 30 ]; do n=$((n+1)); sleep 0.1; done
-ok "$(pgrep -f "sleep 317[34]\.$u" | wc -l | tr -d ' ')" 0 "C17: … and its children are gone"
+within 60 nosleeper "sleep 317[34]\.$u"
+ok "$(sleepers "sleep 317[34]\.$u")" 0 "C17: … and its children are gone"
 main from-main.txt "dep" "theirs: dep (#7)"
 prep; M=$(j "$J" 'd["mergeCommit"]')
 python3 "$LI" verify --tree "$WT" --out "$F/out/b" --timeout 60 --bootstrap 'test -f from-main.txt && touch .boot-ok' --verifier 'test -f .boot-ok && echo verified' >/dev/null
@@ -976,6 +991,81 @@ PAR=$(node --input-type=module -e "
   ]))
 " "$(p1args proj-a 3)" "$RECS" "$F")
 ok "$PAR" '[20,[],[],true]' "C22: all 20 proj-a records pass integrationArgsError; each refused row's raw fields fail it; the bad rung fails rungRecordError"
+
+# ======== C23: a signal while a step starts; the step's and verify's own signal mask (p22-2) ================
+# _run_step holds TERM/INT/HUP from just before Popen until _live records the new group (a signal in that window
+# used to leave the verifier's own session running with no limit), restores the caller's mask in the child
+# (preexec_fn) and in verify. Every check is structural (a pid, a file the trap writes, the mask), never a stopwatch:
+# like C17's, the only bounds (300 s for a step to start, 60 s for a killed sleeper to vanish) are generous and only
+# slow a real failure, never fail a correct one on a loaded host.
+fx c23
+u=$(printf %07d $$)
+T="$F/steptree"; mkdir -p "$T"
+# reaped <pid>: C17's within/gone on the sleeper the step recorded. A survivor sleeps ~53 min, so it is then
+# SIGKILLed by that recorded pid (plain TERM would not do: the regression the trap check below catches leaves TERM
+# blocked in the step), and the suite never leaks it.
+reaped() {
+  [ -n "$1" ] || { echo "no pid"; return; }
+  if within 60 gone "$1"; then echo gone; else kill -KILL "$1" 2>/dev/null; echo survived; fi
+}
+# LATE: run lead-integrate's main with a Popen that, once the verifier's `bash -c` has started and written its
+# sleeper's pid (waited for up to 300 s, as C17 waits), sends SIGTERM to this process before Popen returns: the
+# Popen-to-_live window. The deadline lies past that wait, so only the SIGTERM can end the step.
+LATE='
+import importlib.util, os, signal, subprocess, sys, time
+spec = importlib.util.spec_from_file_location("lead_integrate", sys.argv[1])
+li = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(li)
+class Late(subprocess.Popen):
+    def __init__(self, args, *a, **k):
+        super().__init__(args, *a, **k)
+        if list(args[:2]) == ["bash", "-c"]:
+            pid = os.path.join(k.get("cwd") or ".", "pid")
+            end = time.monotonic() + 300
+            while time.monotonic() < end:
+                try:
+                    if open(pid).read().strip():
+                        break
+                except OSError:
+                    pass
+                time.sleep(0.05)
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(0.5)
+subprocess.Popen = Late
+sys.exit(li.main(sys.argv[2:]))
+'
+python3 -B -c "$LATE" "$LI" verify --tree "$T" --out "$F/out/late" --timeout 600 --verifier "sleep 3181.$u & echo \$! > pid; wait" >/dev/null
+ok "$(cat "$F/out/late.rc" 2>/dev/null)" 143 "C23: SIGTERM between Popen and _live → rc 143"
+has "$(cat "$F/out/late.log" 2>/dev/null)" "stopped by signal 15" "C23: … the log names the signal"
+ok "$(reaped "$(cat "$T/pid" 2>/dev/null)")" gone "C23: … and the step's group is killed (its sleeper is gone)"
+# TRAP: verify in the background, its deadline never reached; once the step has set its TERM trap and started its
+# sleeper (tpid written), verify gets SIGTERM and _kill_group SIGTERMs the group. The trap runs only if the step
+# started with TERM unblocked.
+python3 "$LI" verify --tree "$T" --out "$F/out/trap" --timeout 600 \
+  --verifier "trap 'echo term > got; exit 0' TERM; sleep 3182.$u & echo \$! > tpid; wait" >/dev/null &
+vp=$!
+trapset() { [ -s "$T/tpid" ]; }
+within 300 trapset && st=started || st="not started after 300 s"
+ok "$st" started "C23: the step has set its TERM trap and started its sleeper before the TERM"
+kill -TERM "$vp"; wait "$vp"
+ok "$(cat "$F/out/trap.rc" 2>/dev/null)" 143 "C23: TERM to verify mid-step → rc 143"
+ok "$(cat "$T/got" 2>/dev/null)" term "C23: the step starts with TERM unblocked (its trap runs on the group's SIGTERM)"
+ok "$(reaped "$(cat "$T/tpid" 2>/dev/null)")" gone "C23: … and its sleeper is gone"
+# MASK: one _run_step, then verify's own mask: TERM/INT/HUP no longer held, and whatever the caller had blocked
+# before (its own SIGUSR1, or SIGTERM itself) still held: SIG_SETMASK to the old mask, not an UNBLOCK of SIGNALS.
+MASK='
+import importlib.util, signal, sys, time
+spec = importlib.util.spec_from_file_location("lead_integrate", sys.argv[1])
+li = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(li)
+signal.pthread_sigmask(signal.SIG_BLOCK, {"usr1": [signal.SIGUSR1], "term": [signal.SIGTERM]}.get(sys.argv[4], []))
+rc = li._run_step("true", sys.argv[2], open(sys.argv[3], "ab", buffering=0), time.monotonic() + 600)
+held = set(signal.pthread_sigmask(signal.SIG_BLOCK, []))
+print(f"{rc}|{sorted(int(s) for s in held & {signal.SIGTERM, signal.SIGINT, signal.SIGHUP})}|{signal.SIGUSR1 in held}")
+'
+ok "$(python3 -B -c "$MASK" "$LI" "$T" "$F/out/mask.log" none)" "0|[]|False" "C23: after a step, verify holds none of TERM/INT/HUP"
+ok "$(python3 -B -c "$MASK" "$LI" "$T" "$F/out/mask.log" usr1)" "0|[]|True" "C23: … and a caller's own blocked SIGUSR1 stays blocked (the old mask is restored, not cleared)"
+ok "$(python3 -B -c "$MASK" "$LI" "$T" "$F/out/mask.log" term)" "0|[15]|False" "C23: … and a caller's own blocked SIGTERM stays blocked (SIG_SETMASK to the old mask, not SIG_UNBLOCK of TERM/INT/HUP)"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"
