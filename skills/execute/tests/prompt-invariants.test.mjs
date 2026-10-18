@@ -370,6 +370,20 @@ ok(/bullets only/i.test(prvPrompt), 'planReviserPrompt: revision keeps the bulle
 ok(pBottom.includes('Gated inputs (hard rule'), 'implementerPrompt: carries the gated-inputs stop rule')
 ok(T.approvedPlanImplementerPrompt(taskI, 'PLAN', aI, ST_CLIMBED, '').includes('Gated inputs (hard rule'), 'approvedPlanImplementerPrompt: carries the stop rule')
 ok(T.reviserPrompt(taskI, { prUrl: 'u', branch: 'b', worktreePath: '/wt' }, [{ round: 1, feedback: ['f'] }], 2, aI, '').includes('Gated inputs (hard rule'), 'reviserPrompt: carries the stop rule')
+// ADR 0038: every prompt that declares a gate teaches the one-line Cap, and the sub-bullets that carry its split.
+ok(plPrompt.includes('"- spend: <what> — cap N USD"') && /ONE line whose Cap\s+holds the whole spend/.test(plPrompt) && /nested two spaces under its gate/.test(plPrompt),
+  'plannerPrompt (ADR 0038): the one-line `cap N USD` gate, its split in nested sub-bullets')
+ok(!/no prose, commentary/.test(plPrompt) && /no prose or footnotes/.test(plPrompt), 'plannerPrompt (ADR 0038): bullets only forbids prose and footnotes, never the sub-bullet commentary')
+ok(prvPrompt.includes('`- spend: <what> — cap N USD`') && /whose Cap holds\s+the whole spend \(its split in nested sub-bullets\)/.test(prvPrompt), 'planReviserPrompt (ADR 0038): the one-line `cap N USD` gate')
+ok(/Nested sub-bullets under a gate are commentary \(how a spend splits\) and are allowed; an\s+indented bullet is never a gate\./.test(pjPrompt) &&
+  pjPrompt.includes('"- spend: <what> — cap N USD", one line WITH a hard cap') && !/commentary does not belong/.test(pjPrompt), 'planJudgePrompt (ADR 0038): sub-bullets are allowed, the gate is one line with a hard cap')
+{
+  const E = loadEngine(['GATED_INPUTS_CHECK', 'IMPL_RESULT'])
+  for (const [name, text] of [['GATED_INPUTS_CHECK', E.GATED_INPUTS_CHECK], ['IMPL_RESULT.gatedInputs', E.IMPL_RESULT.properties.gatedInputs.description]]) {
+    ok(/"spend: <what> — cap N USD", one line whose Cap holds the whole spend, with\s+how it splits in blockerDiagnosis/.test(text), `${name} (ADR 0038): the one-line Cap, its split in blockerDiagnosis`)
+  }
+  ok(/CEILING to respect,\s+never a target/.test(E.GATED_INPUTS_CHECK), 'GATED_INPUTS_CHECK: an approved cap is still a ceiling, never a target')
+}
 
 // Parser: None → [], list items → entries, missing section → null (fail-closed upstream). Only list
 // items declare gates (ADR 0013, 2026-09-01 live failure): non-list prose is COMMENTARY, never a gate —
@@ -406,6 +420,27 @@ const doubledGate = T.parseGatedInputs('PLAN\n## Gated inputs\n\n### Gated input
 ok(doubledGate && doubledGate.length === 1 && doubledGate[0] === 'spend: Replicate API — cap USD 30', 'parseGatedInputs: a doubled heading keeps its gates, and the next other heading still ends the section')
 const doubledSplit = T.parseGatedInputs('PLAN\n### Gated inputs\n- credential: PROD_API_KEY\n#### Gated inputs\n- spend: x — cap $5\n### Risks')
 ok(doubledSplit && doubledSplit.length === 2 && doubledSplit[1] === 'spend: x — cap $5', 'parseGatedInputs: gates on both sides of a doubled heading are all declared (fail-safe — none dropped)')
+
+// ADR 0038: a spend gate is ONE line whose Cap holds the whole spend, and how it splits goes in sub-bullets under it.
+// Columns are counted (a tab advances to the next multiple of 4), so a tab sub-bullet is nested, and a one-space
+// unlabelled sub-bullet under a column-0 gate is commentary. Only a real column-0 gate makes a column-1 item
+// commentary: a None, prose, an empty item or a doubled heading never does, and a column-1 item labelled with a gate
+// kind is always a declaration (Obsidian renders a one-space bullet as a sibling, so it looks like a gate to Lachy).
+const pg = (body) => T.parseGatedInputs('PLAN\n### Gated inputs\n' + body + '\n### Risks')
+const G24 = '- spend: eval re-runs — cap 24 USD'
+const one = (r, want, label) => ok(r && r.length === want.length && want.every((w, i) => r[i] === w), `parseGatedInputs (ADR 0038): ${label} → ${JSON.stringify(r)}`)
+one(pg(`${G24}\n\t- up to 6 invocations at --max-cost-usd 4`), ['spend: eval re-runs — cap 24 USD'], 'a tab sub-bullet under a gate is commentary')
+one(pg(`${G24}\n - up to 6 invocations at --max-cost-usd 4`), ['spend: eval re-runs — cap 24 USD'], 'a one-space sub-bullet under a gate is commentary')
+one(pg(`${G24}\n\n - up to 6 invocations at --max-cost-usd 4`), ['spend: eval re-runs — cap 24 USD'], 'a blank line then a one-space sub-bullet under a gate is commentary (a loose list)')
+one(pg(' - spend: x — cap 5 USD'), ['spend: x — cap 5 USD'], 'a one-space item with no gate above is a declaration')
+one(pg('- None\n - spend: x — cap 5 USD'), ['spend: x — cap 5 USD'], 'a None never makes a column-1 gate commentary')
+one(pg('- None\n - up to 6 calls'), ['up to 6 calls'], 'a None never makes a column-1 item commentary (fail-closed)')
+one(pg(`${G24}\n - spend: B — cap 3 USD`), ['spend: eval re-runs — cap 24 USD', 'spend: B — cap 3 USD'], 'a column-1 item labelled with a gate kind is a declaration')
+one(pg(`${G24}\nThe split is below.\n - up to 6 calls`), ['spend: eval re-runs — cap 24 USD', 'up to 6 calls'], 'column-0 prose ends "under a gate"')
+one(pg(' - spend: A — cap 5 USD\n - credential: KEY'), ['spend: A — cap 5 USD', 'credential: KEY'], 'two column-1 gates with nothing above both stay gates')
+one(pg('- spend: Replicate API for the full corpus re-render —\n\tcap 5 USD'), ['spend: Replicate API for the full corpus re-render — cap 5 USD'], 'a tab-indented wrap keeps its cap')
+one(pg(' - spend: A — cap 5 USD\n - up to 6 calls'), ['spend: A — cap 5 USD', 'up to 6 calls'], 'a column-1 gate never makes the next column-1 item commentary')
+one(pg('- Credential: KEY\n  - from 1Password\n1. Spend: y — cap 2 USD\n   - two runs'), ['Credential: KEY', 'Spend: y — cap 2 USD'], 'any gate kind and a numbered marker, each with a 2-space or 3-space sub-bullet')
 
 // Scenario gate-A — plan-gated task declares a gate: pauses at the plan-gate, nothing implemented.
 effortCalls.length = 0
@@ -1053,6 +1088,27 @@ function agentPrompts(E) {
 // lead ride on REVIEW_VERDICT's descriptions alone), and runTask records only {label, prompt}. The schema change
 // does move the review judge's opts (`schema`), so a pre-p21-3 run resumed on this engine misses the cache on its
 // review calls: the same accepted break as p16-3's needsHuman field.
+// Re-pinned on purpose by p23-1 (ADR 0038, a Cap is a promise), the reviser pins and the calls hash: the planner's and
+// the plan reviser's Gated inputs lines teach the one-line `cap N USD` gate with its split in nested sub-bullets, the
+// plan judge's checklist bullet allows those sub-bullets, and GATED_INPUTS_CHECK (implementer, approved-plan
+// implementer, reviser) gives the same example. Each prompt is its old bytes plus exactly these edits: P23_1 holds
+// each [new, old] fragment, and the calls and revisers with every new fragment swapped back hash to the p18-1 pins
+// (1e51b62c…, 7c82d98a…, 7cf123a5…), which then chain to the older bases as before. No gatePricer is passed, so the
+// judge's pricing fragment renders '' and its schema stays PLAN_JUDGE. The rows hash did not move (no row field
+// changed, and no log line of these calls names ADR 0038); taskTreeSetup and the default-branch GOLDENs read none of
+// these fragments. Like KILL_RULE, a deliberate resume-cache break: a resume re-passes its run's own `scriptPath`.
+const P23_1 = [ // [new, old]
+  ["   ### Gated inputs      (REQUIRED — one markdown bullet (\"- \") at column 0 per human authorisation the task\n                          needs: \"- spend: <what> — cap N USD\" (a hard cap is mandatory: ONE line whose Cap\n                          holds the whole spend, optionally with \"total\", a month, or \"per Login per month\n                          across K Logins\"), \"- credential: <what>\", \"- irreversible: <what>\"; or exactly\n                          \"None\". BULLETS ONLY — no prose or footnotes in this section: the engine reads only\n                          list lines, and anything else is rejected. How a spend splits (run counts, per-call\n                          limits, iterations) goes in sub-bullets nested two spaces under its gate: commentary\n                          the engine never prices, which the Cap must hold. A non-empty declaration pauses the\n                          task for human sign-off —\n                          ",
+    "   ### Gated inputs      (REQUIRED — one markdown bullet (\"- \") per human authorisation the task needs:\n                          \"- spend: <what> — cap <amount>\" (a hard cap is mandatory), \"- credential: <what>\",\n                          \"- irreversible: <what>\"; or exactly \"None\". BULLETS ONLY — no prose, commentary,\n                          or footnotes in this section: the engine reads only list lines, and anything else\n                          is rejected. A non-empty declaration pauses the task for human sign-off —\n                          "], // planner
+  ["- Does the plan carry the required \"### Gated inputs\" section — either exactly \"None\" or concrete gate\n  BULLETS at column 0 (\"- spend: <what> — cap N USD\", one line WITH a hard cap / \"- credential: …\" /\n  \"- irreversible: …\")? A missing section, a spend gate without a cap, or non-bullet prose in the section\n  (the engine reads only list lines — a gate written as prose is rejected) is an automatic \"changes\"\n  (ADR 0008). Nested sub-bullets under a gate are commentary (how a spend splits) and are allowed; an\n  indented bullet is never a gate. Also flag a gate the brief implies but the plan omits.",
+    "- Does the plan carry the required \"### Gated inputs\" section — either exactly \"None\" or concrete gate\n  BULLETS (\"- spend: … — cap …\" WITH a hard cap / \"- credential: …\" / \"- irreversible: …\")? A missing\n  section, a spend gate without a cap, or non-bullet prose in the section (the engine reads only list\n  lines — a gate written as prose is rejected, and commentary does not belong there) is an\n  automatic \"changes\" (ADR 0008). Also flag a gate the brief implies but the plan omits."], // judge
+  ["Gated inputs — bullets only: declare spend as one line `- spend: <what> — cap N USD` whose Cap holds\nthe whole spend (its split in nested sub-bullets), credentials, irreversible actions, or exactly \"None\").",
+    "Gated inputs — bullets only: declare spend with a hard cap, credentials, irreversible actions, or\nexactly \"None\")."], // plan reviser
+  ["missing gate in gatedInputs (\"spend: <what> — cap N USD\", one line whose Cap holds the whole spend, with\nhow it splits in blockerDiagnosis / \"credential: <what>\" / \"irreversible: <what>\") and name them in\nblockerDiagnosis — a human signs off on the note and you'll be re-dispatched.",
+    "missing gate in gatedInputs (\"spend: <what> — cap <amount>\" / \"credential: <what>\" / \"irreversible:\n<what>\") and name them in blockerDiagnosis — a human signs off on the note and you'll be re-dispatched."], // GATED_INPUTS_CHECK
+]
+// A prompt with every p23-1 fragment swapped back for its old text.
+const preP23 = (p) => P23_1.reduce((x, [nw, od]) => x.split(nw).join(od), p)
 {
   const sha = (x) => crypto.createHash('sha256').update(x).digest('hex')
   const variants = []
@@ -1071,13 +1127,18 @@ function agentPrompts(E) {
   const KILL = '\n\n' + loadEngine(['KILL_RULE']).KILL_RULE
   const r2 = T.reviserPrompt(tR, iR, h2.slice(0, 1), 2, aR, '')
   const r3 = T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN')
-  ok(sha(r2) === '7c82d98ade2ee614902acc1de14809c93e8a1c029fe1d2ac4a3e370e5b307f33',
-    'byte pin: unseeded reviserPrompt, round 2 (re-pinned by p18-1: the base below plus KILL_RULE)')
-  ok(sha(r3) === '7cf123a54536b064d21ec820b854216ab61a1c5c19ccb7d3050bffefb5370f07',
-    'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back; re-pinned by p18-1)')
-  ok(sha(r2.replace(KILL, '')) === '0f7eca821281f140a718ea5bf84cec5c0a134a7924e8b2ff9d3abfe5ea9db585',
+  ok(sha(r2) === 'c3efcd934c7a8cb35159177c8786d920092e9ed721e1ae21c609a7413111a703',
+    'byte pin: unseeded reviserPrompt, round 2 (re-pinned by p23-1: the p23-1 base below plus the ADR 0038 edits)')
+  ok(sha(r3) === '97ff33a14d2b551893ee237975369c7e5947db49345828a7f09a6978123c413c',
+    'byte pin: unseeded reviserPrompt, round 3 with the plan (step-back; re-pinned by p23-1)')
+  ok(preP23(r2) !== r2 && preP23(r3) !== r3, 'p23-1: both revisers render a p23-1 fragment (GATED_INPUTS_CHECK), so the swap is no no-op')
+  ok(sha(preP23(r2)) === '7c82d98ade2ee614902acc1de14809c93e8a1c029fe1d2ac4a3e370e5b307f33',
+    'byte pin (p23-1 base): the round-2 reviser with the ADR 0038 fragments swapped back is its pre-p23-1 bytes (p18-1 pin)')
+  ok(sha(preP23(r3)) === '7cf123a54536b064d21ec820b854216ab61a1c5c19ccb7d3050bffefb5370f07',
+    'byte pin (p23-1 base): the round-3 reviser with the ADR 0038 fragments swapped back is its pre-p23-1 bytes (p18-1 pin)')
+  ok(sha(preP23(r2).replace(KILL, '')) === '0f7eca821281f140a718ea5bf84cec5c0a134a7924e8b2ff9d3abfe5ea9db585',
     'byte pin (p18-1 base): the round-2 reviser with KILL_RULE removed is its pre-p18-1 bytes')
-  ok(sha(r3.replace(KILL, '')) === '00eb424a53642e113f76ea70fc78644762f75c0a40d2edcee36429f760fed660',
+  ok(sha(preP23(r3).replace(KILL, '')) === '00eb424a53642e113f76ea70fc78644762f75c0a40d2edcee36429f760fed660',
     'byte pin (p18-1 base): the round-3 reviser with KILL_RULE removed is its pre-p18-1 bytes')
   ok(T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN', null) === T.reviserPrompt(tR, iR, h2, 3, aR, 'PLAN'),
     'byte pin: a null seeded argument renders the unseeded reviser')
@@ -1104,6 +1165,8 @@ function agentPrompts(E) {
   const RULE = loadEngine(['NEEDS_HUMAN_RULE']).NEEDS_HUMAN_RULE
   const calls = []
   const rows = []
+  const p23Calls = []
+  const logs = []
   const baseCalls = []
   const oldCalls = []
   const oldRows = []
@@ -1116,8 +1179,10 @@ function agentPrompts(E) {
     const r = await runTask(args, scripted)
     calls.push(JSON.stringify(r.calls))
     rows.push(JSON.stringify({ result: r.result, err: r.error && String(r.error) }))
-    baseCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: c.prompt.replace(KILL, '') }))))
-    oldCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: c.prompt.replace(KILL, '').replace(RULE, '') }))))
+    logs.push(...r.logs)
+    p23Calls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preP23(c.prompt) }))))
+    baseCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preP23(c.prompt).replace(KILL, '') }))))
+    oldCalls.push(JSON.stringify(r.calls.map((c) => ({ ...c, prompt: preP23(c.prompt).replace(KILL, '').replace(RULE, '') }))))
     const base = JSON.parse(JSON.stringify(r.result))
     for (const row of base.tasks) delete row.reviewVerdicts
     baseRows.push(JSON.stringify({ result: base, err: r.error && String(r.error) }))
@@ -1138,8 +1203,12 @@ function agentPrompts(E) {
     'byte pin (p16-3 base): the same rows with needsHuman and reviewVerdicts deleted are the pre-p16-3 rows')
   ok(sha(baseRows.join('\n')) === '7a9ecf48734cee23672a77dbbde09a3fcee91a110746b46665bc3aaecd0984da',
     'byte pin (p21-3 base): the same rows with reviewVerdicts deleted are the pre-p21-3 rows')
-  ok(sha(calls.join('\n')) === '1e51b62c997f39814ea75373fe38d97955c596ce77c7aa63762a4ab5c230cacc',
-    'byte pin: three whole task-mode calls — every label and prompt (re-pinned by p18-1: the p18-1 base above plus KILL_RULE)')
+  for (const [i, [nw]] of P23_1.entries()) ok(calls.some((c) => c.includes(JSON.stringify(nw).slice(1, -1))), `p23-1: fragment ${i + 1} renders in these calls, so its swap is no no-op`)
+  ok(logs.every((l) => !l.includes('ADR 0038')), 'p23-1: no log line of these calls names ADR 0038 (no gatePricer, no bounce)')
+  ok(sha(p23Calls.join('\n')) === '1e51b62c997f39814ea75373fe38d97955c596ce77c7aa63762a4ab5c230cacc',
+    'byte pin (p23-1 base): the same calls with the ADR 0038 fragments swapped back are the pre-p23-1 bytes (the p18-1 calls pin)')
+  ok(sha(calls.join('\n')) === '4f524ab665ea21cfbacd5db589bcb09d63bb45d1f4420fbe82053dde19e680f0',
+    'byte pin: three whole task-mode calls — every label and prompt (re-pinned by p23-1: the p23-1 base above plus the ADR 0038 edits)')
   ok(sha(rows.join('\n')) === '0137cf70ddf1d5131b4511462f43f1d639311e6b4ada4016af30a2269bd563d4',
     'byte pin: three whole task-mode calls — every row, rung record and reviewVerdicts included (re-pinned by p21-3: the p21-3 base above plus reviewVerdicts)')
 }
