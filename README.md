@@ -32,7 +32,7 @@ else runs as scoped sessions.
 | `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing. Schedules rollout-shaped phases itself, steers the rest (parallel-safe batches it dispatches as native child agents of its own session, ADR 0023, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
-| `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop also create a fresh visible sidebar task seeded with it; elsewhere label it a manual handoff. |
+| `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop or a Chorus Session also create a fresh visible task seeded with it (a sidebar task in Codex Desktop); elsewhere label it a manual handoff. |
 | `/thread:close` | done | Persist to THREAD.md + auto-commit; end-of-thread ritual; lands its close-out and its own branch (ADR 0028): the own branch is reviewed by `/fresh-review` before its merge is queued. |
 
 Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspaces/_shared/docs/adr/0008-next-action-slot.md`): each writes the task's `next_action:` and points the `next_task:` of every project note the task links (area notes skipped) at it, most recent winning — close only when the thread has a concrete next task. `orient` reads that slot first and fills it only when blank. Both go through `skills/_shared/scripts/next-action.py` (`skills/_shared/task-writer.md` § 4b).
@@ -45,7 +45,7 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 | `/thread:execute` | executor | Runs the rollout's queue on a dynamic **Workflow**: per-task plan-gate → Ralph-style verifier retry → master review, one task per Workflow call up to `parallel_ceiling`; the lead integrates each approved task with the latest main and auto-merges it (`--gated` = a merge hold before each merge). |
 | `/thread:status` | situational report | Read-only: where the rollout is, what's blocked, what drifted from GitHub reality, one recommended next action. |
 | `/thread:repair` | conductor | Diagnose a stuck rollout, reconcile drift, ask only the decisions no agent can make, resume via execute — the engine keeps sole merge authority. |
-| `/thread:reflect` | tuner | The Reflection (ADR 0032, renamed by ADR 0037): fold the journals, score the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to its landed tasks), the Guardrails (Throughput among them, bounded in running hours per task, and Review churn) against their bounds and the last Reflection, Slot and lane use, load and the binding constraint, and propose Tunings to `rollouts.toml`, each weighed for what it serves and risks; by hand only the ones Lachy picks are applied, by the tune script, which records each by-hand Reflection in `tunings.jsonl`. The weekly reading (`--weekly`, ADR 0037 d3–d5) reads every rollout since the last one, traces the friction to its rules, keeps Watches in `reflections.jsonl`, files bugs and lands a knob three Reflections agree on, never a rule: a rule proposal waits in one decision task for Lachy. |
+| `/thread:reflect` | tuner | The Reflection (ADR 0032, renamed by ADR 0037): fold the journals, score the Run record on its two headlines (Hands-off rate, and Quality from the Escapes traced to its landed tasks), the Guardrails (Throughput among them, bounded in running hours per task, and Review churn) against their bounds and the last Reflection, Slot and lane use, load and the binding constraint, and propose Tunings to `rollouts.toml`, each weighed for what it serves and risks; by hand only the ones Lachy picks are applied, by the tune script, which records each by-hand Reflection in `tunings.jsonl`. The weekly reading (`--weekly`, ADR 0037 d3–d5) reads every rollout since the last one, traces the friction to its rules, keeps Watches in `reflections.jsonl`, files bugs and lands a knob three Reflections agree on, never a rule: a rule proposal, or a held trade (a knob that trades one headline against the other), waits in one decision task for Lachy. |
 
 ## Runtime support
 
@@ -159,7 +159,8 @@ Reflections in a row (ADR 0037 d4, d6).
   `0035` — one human fix per refusal (amends 0033). `0036` — orient resolves
   its target before it reads, then reshuffles without asking (amends 0026 and
   0027). `0037` — Reflections run on their own and tune for hands-off quality
-  (amends 0032).
+  (amends 0032). `0038` — a Cap is a promise: a spend gate is one line, its split
+  in sub-bullets, and an undelivered push falls back to ntfy (amends 0034).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
@@ -258,7 +259,8 @@ final check that the run wrote nothing into the tree):
   orient's declared check, its gate and digest-bound advance (`orient-declared-check.test.mjs`),
   orient's one launch model and its double-dispatch guard (`orient-launch-model.test.mjs`), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
-  (`handoff-one-writer.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
+  (`handoff-one-writer.test.mjs`), `next`'s archive-this-session move and its session/thread menu wording
+  (`next-archive-session.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
   and files stay gone, and every surviving mention is a listed refusal, migration strip or history line).
 - **Reflection** — `tests/reflect-score.test.mjs` (`score.py` on synthetic records: running time and its
   exclusions, the Hands-off rate and its acts, Throughput's bound, the Slot-bound and lane-bound fixtures, each

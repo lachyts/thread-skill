@@ -16,17 +16,19 @@ scripts/companion/reflect.py (span / watch / raised / close) gives the shape: bo
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py knobs --span F [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py decide --span F [--decisions F] [--tasks-dir D] \\
         [--now ISO] [--dry-run]
-    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span F [--dry-run]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py close --span F [--tasks-dir D] [--dry-run]
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py moot --task <slug> --trade <knob id> --from N \\
+        --why W [--tasks-dir D] [--now ISO] [--dry-run]
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/reflect.py rung
 
-Writes. reflect.py is the only writer of reflections.jsonl (run_record.py's REFLECTIONS file, through
-run_record.emit: the kinds watch, watch-raised, proposal and reflection; run_record's docstring holds their schema,
-the Watch rule, the Agreement rule and the cadence rule) and of two kinds of vault task: a bug task
-(Work/Tasks/thread-skill-bug-<words>.md) and the decision task (Work/Tasks/thread-skill-decisions-<date>[-N].md). It
-never writes rollouts.toml or tunings.jsonl (tune.py is their one writer: step 14 runs `tune.py --revert` and
-`--auto`), never commits, and never touches git. `span --fold` runs reconcile-rollout.py fold-journals, whose
-call-journal lines are span's only write outside --out's directory. Every writer takes --dry-run: it prints the
-lines and the file text it would write, and writes nothing (Note.save(dry_run=True)).
+Writes. reflect.py is the only writer of reflections.jsonl (run_record.py's REFLECTIONS file, through run_record.emit:
+the kinds watch, watch-raised, proposal and reflection; run_record's docstring holds their schema, the Watch rule, the
+Agreement rule and the cadence rule) and of two kinds of vault task: a bug task (Work/Tasks/thread-skill-bug-<words>.md)
+and the decision task (Work/Tasks/thread-skill-decisions-<date>[-N].md), to which `moot` adds a line at decide time. It
+never writes rollouts.toml or tunings.jsonl (tune.py is their one writer: step 14 runs `tune.py --revert` and `--auto`),
+never commits, and never touches git. `span --fold` runs reconcile-rollout.py fold-journals, whose call-journal lines
+are span's only write outside --out's directory. Every writer takes --dry-run: it prints the lines and the file text it
+would write, and writes nothing (Note.save(dry_run=True)).
 
 Vault writes. A new note is created only by open(path, "x"), never over a file. A slug is taken when <slug>.md is
 directly under Work/Tasks or anywhere under Work/Tasks/Archive (recursive), since Obsidian resolves a wikilink by
@@ -69,8 +71,19 @@ r-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>. It reads every non-reserved <slug>.jsonl in th
   set-aside a set-aside line in the window: stage, reasonClass, setAsideAt, taskNote (Work/Tasks, then Archive, or
             null) and movedBy, the first later event of auto-retry, handed-back (with its via), answer-recorded,
             gate-signed, race-decided, carried, slot-taken, lane-taken or merged; `unrecorded` when a slot-taken,
-            lane-taken or merged comes first with no act or retry before it (a Human fix, ADR 0035, or a hand
-            edit); null while the task is still set aside at until.
+            lane-taken or merged comes first with no act or retry before it (a Human fix, ADR 0035, a gate signed
+            on the note with no gate-signed line, or a hand edit); null while the task is still set aside at until.
+            mover and explainedIn are null unless movedBy is `unrecorded`. mover is {kind, at, start?} of the line
+            that moved it on (start, run_record's enum, on a slot-taken only). explainedIn lists where its mover
+            may be written, in order: `## Needs you` and `## Integration log` when the task note holds text there;
+            for a set-aside whose stage is gate only (approve-gates signs a gate-pending task alone), its
+            `## Approved gates` lines, each label at most once: `## Approved gates: standing approval` (a line
+            ending gated_inputs.annotation()'s `(approved <date> under the standing approval: ...)`), `## Approved
+            gates: sign-off` (approve-gates' bare `(approved <date>)`), then `## Approved gates` (any other line);
+            and `rollout ## Notes` when a line of the rollout note's `## Notes` holds a wikilink to the task (read
+            as the repair lines' links are, so an alias, heading or path matches; the note is read once per
+            rollout, only when an unrecorded item exists). A null or unreadable note adds nothing. cannotShow
+            names each such task.
   retry     an auto-retry line in the window.
   descope   a handed-back line with via descope in the window.
   repair    each line of the rollout note's `## Notes` matching `- <YYYY-MM-DD> repair: ...` whose date is in the
@@ -146,37 +159,71 @@ line, id knob_key(repo, key, "revert:<rule>", -direction), with reverts and tuni
 before any is written (a refusal is exit 2, nothing written); then each (Reflection, id) not yet in reflections.jsonl is
 written.
 
-decide. Rule items are the recurring open Watches. --decisions is a JSON object {<watch id>: {why, amends}}; an entry
-naming a Watch that is not recurring, closed or unknown is exit 2; a recurring Watch it leaves out is still an item
-(why "not given"). Watches to confirm: the open one-rollout Watches this Reflection sighted, except one whose last
-cycle Lachy declined (it returns only as a rule item). No rule item prints `no rule proposal: no decision task` and
-writes nothing. Else the open `decisions`-tagged task directly under Work/Tasks, or a new one at the first untaken of
-thread-skill-decisions-<Melbourne date of now>, -2 ... -9 (past -9 is exit 2), created by exclusive create with
-scheduled: from resolve-day.py (no day: the next Melbourne morning; --now, tests only, is passed through), `## Notes`
-(conversation-gated), `## Launch` and `## Resume prompt` (no capture-done line: it is no capture). Then, through Note:
-when `## Reflection <id>` is absent and the task already existed, scheduled: moves to resolve-day.py's day; the
-section is appended once (its heading marks the visit) with the rule items no earlier section lists, the Watches to
-confirm, or "No new rule items; still open: <ids> (see ## Still open)"; each rule item an earlier section lists gets
-one `## Still open` line, `<id> still open <D>: Reflection <rid>, rollouts ...`, D the Melbourne date of until. A
-re-run finds the heading and moves nothing, so it is byte-identical at any hour. The sections are H2:
-append_section appends at the end of the body, where an H3 would fall inside `## Resume prompt`. One `proposal` line
-(altitude rule, vaultTask) per (Reflection, rule item). It prints the slug, the scheduled date (and the old one when
-moved) and new | appended.
+decide. Rule items are the recurring open Watches. --decisions is a JSON object {<watch id>: {why, amends}}, `{}` when
+no Watch recurs; an entry naming a Watch that is not recurring, closed or unknown is exit 2; a recurring Watch it leaves
+out is still an item (why "not given"). Watches to confirm: the open one-rollout Watches this Reflection sighted, except
+one whose last cycle Lachy declined (it returns only as a rule item); they are listed only beside a rule item. Held
+trades (ADR 0037 d1): each knob_lines() line, not landed and no revert, with an integer from, whose held is tune.py
+auto_check's `a trade (...): Lachy decides` or `a caution: Lachy decides` (held_trades(); a non-integer from is
+skipped on stderr). One on a repo and key a revert line of this Reflection moved prints `trade <kid> at <from>: a revert
+of <key> comes first this Reflection` and is not listed (its from is stale). Each (knob id, from) is read against every
+decision task's lines (trade_listings(): Work/Tasks and Archive, `- trade` items and `moot` lines under a
+`## Reflection` section, `trade ... still open` lines under `## Still open`; an item is moot when its own section
+holds a moot line for it): decided when a non-moot item is in a task whose status is DECIDED (done or merged; a dropped
+task decides nothing), printing `trade <kid> at <from>: decided in [[<slug>]]` (the first slug, sorted), and never
+listed again at that from; still when a non-moot item is in an open task directly under Work/Tasks, under a section
+other than this Reflection's own; else new (never listed, listed only in a dropped or archived task, every item moot, or
+listed only in this Reflection's own section, which is a re-run). No rule item and no new or still trade prints
+`no rule proposal or held trade: no decision task` and writes nothing. Else the open `decisions`-tagged task
+directly under Work/Tasks, or a new one at the first untaken of thread-skill-decisions-<Melbourne date of now>, -2 ...
+-9 (past -9 is exit 2), created by exclusive create with scheduled: from resolve-day.py (no day: the next Melbourne
+morning; --now, tests only, is passed through), `## Notes` (conversation-gated), `## Launch` and `## Resume prompt`
+(no capture-done line: it is no capture). Then, through Note: when `## Reflection <id>` is absent and the task already
+existed, scheduled: moves to resolve-day.py's day; the section is appended once (its heading marks the visit). Its rule
+part, only with a rule item: the rule items no earlier section lists, the Watches to confirm, or "No new rule items;
+still open: <ids> (see ## Still open)". Then, after a blank line when both are present, its trade part: TRADE_LEAD and
+one `- trade <kid> at <from>: <key> <from> -> <to> (<rule>); <held>[; caution <caution>]; evidence <evidence>; repo
+<repo>; rollouts ...; a yes runs /thread:reflect [[<newest>]] and picks <key> (<rule>)` line per new trade (evidence and
+caution the newest proposer's, folded and cut to 200), or, with no new trade and a still one, "No new trades; still
+open: trade <kid> at <from>[, ...] (see ## Still open)". Each rule item an earlier section lists gets one
+`## Still open` line, `<id> still open <D>: Reflection <rid>, rollouts ...`, then each still trade `trade <kid>
+at <from> still open <D>: Reflection <rid>, rollouts ...`, with `; listed in [[<slug>]]` when the open task listing it
+is not the one written; D is the Melbourne date of until. A re-run finds the heading and moves nothing, so it is
+byte-identical at any hour. The sections are H2: append_section appends at the end of the body, where an H3 would fall
+inside `## Resume prompt`. One `proposal` line (altitude rule, vaultTask) per (Reflection, rule item); a trade writes
+none (knobs' line, with its held reason, is its record, and Lachy's no is the done task's `- trade` line). It prints
+the slug, the scheduled date (and the old one when moved) and new | appended.
 
 close. Exactly one `reflection` line per Reflection (a second close is exit 2). The writers refuse a closed Reflection,
 so a skipped step could never be made up: first close checks that knobs and decide ran, and is exit 2 naming the step,
 nothing written, when a line knob_lines() gives (a span proposal with a knob_key, or a revert tune.py wrote for this
-Reflection) is not in reflections.jsonl (`run knobs`), or when a recurring Watch (the Watch reader's, which needs a line
-from this Reflection) has no rule `proposal` line from it (`run decide`). A `knobs` refusal (a run_record.check() of any
-of its lines) therefore blocks close too: it is a fault to fix, never a step to skip. The line: since, until, rollouts
-(read), escapesOnly, counts (sightings: Watch ids with a line from this Reflection; newWatches: those that are new;
-rules, bugs, filed, knobs, landed and reverted from its proposal lines; breaches: distinct (rollout, Guardrail) pairs
-over breachCounts rollouts), quiet (newWatches, rules, bugs and breaches all 0), repairsOnly when a rollout was read
-repairs-only, decisionTask when a rule line names one, and cadence: run_record's cadence() over reflections.jsonl
-with this line appended (three quiet Reflections in a row: 14; any that is not quiet: 7), on every line, so each change
-of cadence is on a record line, and the outcome line ends `cadence <old> -> <new>` when it changes. The writers watch,
-bug, knobs and decide refuse a closed Reflection. reflect-due.py beside it reads the same rule to say when the next
-reading is due (ADR 0037 d4 and d6).
+Reflection) is not in reflections.jsonl (`run knobs`), when a recurring Watch (the Watch reader's, which needs a line
+from this Reflection) has no rule `proposal` line from it (`run decide`), or when a held trade (decide's, the revert's
+skipped ones aside) meets none of (i) a non-moot item in a DECIDED task, (ii) an item under `## Reflection <this id>`
+in a task that is not dropped, (iii) a `still open` line naming this Reflection in a task that is not dropped (`held
+trade <kid> at <from> has no decision task line from this Reflection: run decide`). Only with a held trade does close
+read the vault: --tasks-dir (default the vault's Work/Tasks), exit 1 when it is no directory. A `knobs` refusal (a
+run_record.check() of any of its lines) therefore blocks close too: it is a fault to fix, never a step to skip. The
+line: since, until, rollouts (read), escapesOnly, counts (sightings: Watch ids with a line from this Reflection;
+newWatches: those that are new; rules, bugs, filed, knobs, landed and reverted from its proposal lines; breaches:
+distinct (rollout, Guardrail) pairs over breachCounts rollouts), quiet (newWatches, rules, bugs and breaches all 0),
+repairsOnly when a rollout was read repairs-only, decisionTask when a rule line names one (else the first task, sorted,
+whose line passed (ii) or (iii)), and cadence: run_record's cadence() over reflections.jsonl with this line appended
+(three quiet Reflections in a row: 14; any that is not quiet: 7), on every line, so each change of cadence is on a
+record line, and the outcome line ends `cadence <old> -> <new>` when it changes. The writers watch, bug, knobs and
+decide refuse a closed Reflection. reflect-due.py beside it reads the same rule to say when the next reading is due (ADR
+0037 d4 and d6).
+
+moot. Lachy's yes to a held trade that cannot apply (the fresh score no longer proposes its key and rule, or tune.py
+refuses a stale from) is answered here, at decide time, so it never refuses a closed Reflection and writes no
+reflections.jsonl line. The note is <tasks>/<slug>.md directly under Work/Tasks; exit 2, nothing written, when --why is
+empty, the note is absent, it has no frontmatter or no `decisions` tag, its status is Landed
+(`<slug> is <status>: a done task is never written`), or no `## Reflection <id>` section lists
+`- trade <kid> at <from>: ` (`[[<slug>]] lists no trade <kid> at <from>`). It writes
+`moot <kid> at <from> <D>: <why>` (D the Melbourne date of --now, else now; why folded and cut to 200) through
+Note.append_line into the last section that lists the item with no moot line for it, and prints `moot trade <kid> at
+<from> in [[<slug>]] (## Reflection <id>)`; when every such section has one it prints `exists moot <kid> at
+<from> in [[<slug>]]`. A moot item is no decision: the next reading that holds the trade offers it again.
 
 rung. The ladder (ladder.py's load()): it prints {rung, model "opus", effort, judge, review, top, topModel}, the own
 values of the highest opus rung, with a stderr note when the top rung is not opus (`rung: the ladder's top rung
@@ -184,9 +231,10 @@ values of the highest opus rung, with a stderr note when the top rung is not opu
 <effort>; ADR 0037 d4 names xhigh`). No opus rung is exit 2; a refused ladder exits with ladder.py's code and line.
 
 Exit codes: 0 done (exists and no-op answers included); 1 a file cannot be read or written (the events directory,
-tunings.jsonl, reflections.jsonl, --out, a note); 2 usage or a refusal (a path that exists, a watch call that leaves
-out a recorded rollout, a raise on a closed or unknown Watch, a closed Reflection, a close before knobs or decide ran,
-a run_record refusal); 3 no tz data, or no tomllib for `rung` over a present ladder file.
+tunings.jsonl, reflections.jsonl, --out, a note, a --tasks-dir that is no directory); 2 usage or a refusal (a path that
+exists, a watch call that leaves out a recorded rollout, a raise on a closed or unknown Watch, a closed Reflection, a
+close before knobs or decide ran, a run_record refusal, a moot on a done, absent or untagged task, of an unlisted
+trade or with no --why); 3 no tz data, or no tomllib for `rung` over a present ladder file.
 """
 from __future__ import annotations
 
@@ -230,6 +278,20 @@ ASKED_AHEAD_RE = re.compile(r"^## Decisions \(asked ahead|asked ahead at schedul
 MOVERS = ("auto-retry", "handed-back", "answer-recorded", "gate-signed", "race-decided", "carried", "slot-taken",
           "lane-taken", "merged")
 UNRECORDED_MOVERS = ("slot-taken", "lane-taken", "merged")
+SLOT_STARTS = ("start", "restart", "revise", "hand-back", "resume")  # run_record's slot-taken `start`
+# An `## Approved gates` line's suffix: gated_inputs.annotation()'s (the Standing approval) and approve-gates' bare
+# `(approved <date>)` (Lachy's sign-off, reconcile-rollout.py)
+STANDING_GATE_RE = re.compile(r"\(approved \d{4}-\d\d-\d\d under the standing approval\b[^)]*\)\s*$")
+SIGNED_GATE_RE = re.compile(r"\(approved \d{4}-\d\d-\d\d\)\s*$")
+# A held trade (ADR 0037 d1): tune.py auto_check's two Lachy-decides reasons, and the decision task's lines for it
+TRADE_HELD_RE = re.compile(r"^a (?:trade \(.*\)|caution): Lachy decides$")
+DECISION_SLUG_RE = re.compile(r"^thread-skill-decisions-\d{4}-\d\d-\d\d(?:-\d+)?$")
+TRADE_LINE_RE = re.compile(r"^- trade ([0-9a-f]{8}) at (-?\d+): ")
+TRADE_STILL_RE = re.compile(r"^trade ([0-9a-f]{8}) at (-?\d+) still open \S+: Reflection (r-[^,]+),")
+TRADE_MOOT_RE = re.compile(r"^moot ([0-9a-f]{8}) at (-?\d+) \S+: ")
+TRADE_TEXT_MAX = 200
+TRADE_LEAD = ("Trades for Lachy (ADR 0037 d1: a knob that trades one headline against the other, or a caution, is his "
+              "call; a yes runs the by-hand Reflection, a no is recorded when this task is done):")
 
 
 def _load(name, path):
@@ -252,6 +314,7 @@ LADDER = _load("thread_ladder", os.path.join(SHARED, "ladder.py"))
 Note, NOTES_SECTION, RACE_DECIDED_RE = REC.Note, REC.NOTES_SECTION, REC.RACE_DECIDED_RE
 WIKILINK_OPEN_RE, _wikilink_slug = REC.WIKILINK_OPEN_RE, REC._wikilink_slug
 LANDED = RP.LANDED
+DECIDED = LANDED - {"dropped"}  # a dropped decision task decides nothing
 REPAIR_SHAPES = ((None, "race-decided"), ("possible PR-less merge", "escalated"), ("merged, never marked", "flipped"),
                  ("git-env trip", "git-env"), ("raised to", "raise"), ("deferred:", "deferred"))
 # the holds a hold-started opens that are an ask: (act, detail)
@@ -802,9 +865,10 @@ class Span:
                 continue
             kind, task = d.get("kind"), d.get("task")
             if kind == "set-aside" and task:
+                moved, mover = self.moved_by(lines, i, task, until)
                 items.append({"kind": "set-aside", "rollout": slug, "task": task, "at": fmt(t), "stage": d.get("stage"),
                               "reasonClass": d.get("reasonClass"), "setAsideAt": d.get("setAsideAt"),
-                              "taskNote": self.task_note(task), "movedBy": self.moved_by(lines, i, task, until)})
+                              "taskNote": self.task_note(task), "movedBy": moved, "mover": mover, "explainedIn": None})
             elif kind == "auto-retry" and task:
                 items.append({"kind": "retry", "rollout": slug, "task": task, "at": fmt(t), "stage": d.get("stage"),
                               "retryClass": d.get("retryClass"), "used": d.get("used"), "budget": d.get("budget")})
@@ -815,10 +879,52 @@ class Span:
                               "findings": d.get("findings"), "regression": d.get("regression")})
         if entry["note"]:
             items.extend(self.repairs(slug, entry["note"], since, until))
-        for it in items:
-            if it["kind"] == "set-aside" and it["movedBy"] == "unrecorded":
-                self.cannot_show("[[%s]] (%s) moved on with no recorded act: a Human fix, or a hand edit; read its "
-                                 "## Needs you and ## Integration log" % (it["task"], slug))
+        unrecorded = [it for it in items if it["kind"] == "set-aside" and it["movedBy"] == "unrecorded"]
+        noted = self.notes_naming(entry["note"]) if unrecorded else set()
+        for it in unrecorded:
+            it["explainedIn"] = self.explained_in(it, noted)
+            self.cannot_show("[[%s]] (%s) moved on with no recorded act: a Human fix, a gate signed on the note with no "
+                             "gate-signed line, or a hand edit; read its ## Needs you, ## Integration log and ## Approved "
+                             "gates, [[%s]]'s ## Notes and its Run record lines" % (it["task"], slug, slug))
+
+    @staticmethod
+    def notes_naming(note_path):
+        """The task slugs a wikilink names on any line of the rollout note's `## Notes` (read as repairs() reads its
+        links, so an alias, heading or path matches), or an empty set for a null or unreadable note."""
+        note = read_note(note_path) if note_path else None
+        out = set()
+        if note is not None:
+            for link in WIKILINK_OPEN_RE.findall(note.section_text(NOTES_SECTION)):
+                s = _wikilink_slug(link)
+                if s:
+                    out.add(s)
+        return out
+
+    @staticmethod
+    def explained_in(item, noted):
+        """Where an unrecorded set-aside's mover may be written, in order: its task note's `## Needs you` and
+        `## Integration log` when non-empty; for a gate set-aside only (approve-gates signs a gate-pending task alone),
+        its `## Approved gates` lines, each label once (the Standing approval's annotation, approve-gates' bare
+        `(approved <date>)`, then any other line); and `rollout ## Notes` when a line there links the task."""
+        out = []
+        note = read_note(item["taskNote"]) if item["taskNote"] else None
+        if note is not None:
+            for sec in (REC.NEEDS_HUMAN_SECTION, REC.INTEGRATION_LOG_SECTION):
+                if note.section_text(sec):
+                    out.append(sec)
+            if item.get("stage") == "gate":
+                gates = [l.strip() for l in note.section_text(REC.APPROVED_GATES_SECTION).split("\n") if l.strip()]
+                standing = [l for l in gates if STANDING_GATE_RE.search(l)]
+                signed = [l for l in gates if SIGNED_GATE_RE.search(l)]
+                if standing:
+                    out.append("%s: standing approval" % REC.APPROVED_GATES_SECTION)
+                if signed:
+                    out.append("%s: sign-off" % REC.APPROVED_GATES_SECTION)
+                if len(gates) > len(standing) + len(signed):
+                    out.append(REC.APPROVED_GATES_SECTION)
+        if item["task"] in noted:
+            out.append("rollout %s" % NOTES_SECTION)
+        return out
 
     def ask(self, slug, task, at, act, detail):
         item = {"kind": "ask", "rollout": slug, "task": task, "at": at, "act": act, "detail": detail,
@@ -833,6 +939,8 @@ class Span:
 
     @staticmethod
     def moved_by(lines, i, task, until):
+        """(movedBy, mover) of the set-aside at lines[i]: mover is {kind, at, start?} of the slot-taken, lane-taken or
+        merged line that moved it on with no act before it (start on a slot-taken only), else None."""
         for t, _n, d in lines[i + 1:]:
             if t > until:
                 break
@@ -842,11 +950,14 @@ class Span:
             if kind == "carried" and d.get("rollout") != d.get("from"):
                 continue  # the to-file's copy: the from-file's line moved it
             if kind in UNRECORDED_MOVERS:
-                return "unrecorded"
+                mover = {"kind": kind, "at": fmt(t)}
+                if kind == "slot-taken" and d.get("start") in SLOT_STARTS:
+                    mover["start"] = d["start"]
+                return "unrecorded", mover
             if kind == "handed-back":
-                return "handed-back (via %s)" % d.get("via")
-            return kind
-        return None
+                return "handed-back (via %s)" % d.get("via"), None
+            return kind, None
+        return None, None
 
     def repairs(self, slug, note_path, since, until, flag_undated=True):
         """The repair items of one rollout note: its `## Notes` lines dated in the window (date_in()). An undated line
@@ -1435,9 +1546,9 @@ def decision_text(slug, title, scheduled, captured):
         "---", "tags: [task, ai, decisions]", "status: open", "priority: high", "projects: %s" % PROJECTS, "contexts: []",
         "scheduled: %s" % scheduled, "captured: %s" % captured, "launch: cc-thread", "---", "",
         "# %s" % title, "", "## Notes", "",
-        "Conversation-gated: the weekly Reflection's rule proposals and Watches to confirm, decided by Lachy at the top "
-        "of a run through `/thread:reflect --decide [[%s]]`, never during one (ADR 0037 d5). Never schedule, batch or "
-        "reshuffle it." % slug, "",
+        "Conversation-gated: the weekly Reflection's rule proposals, Watches to confirm and held trades (a knob ADR 0037 "
+        "d1 leaves to Lachy), decided by Lachy at the top of a run through `/thread:reflect --decide [[%s]]`, never "
+        "during one (ADR 0037 d5). Never schedule, batch or reshuffle it." % slug, "",
         "## Launch", "", "- **Launch:** `cc-thread`", "- **MCP:** none", "",
         "## Resume prompt", "", "Paste into a fresh agent session:", "", "```",
         "You're picking up \"%s\", the weekly Reflection's decision task." % title,
@@ -1460,6 +1571,92 @@ def listed_elsewhere(note, rid):
             if m:
                 out.add(m.group(1))
     return out
+
+
+def fold(text, cap=TRADE_TEXT_MAX):
+    """A free-text field on one line: newlines and runs of whitespace folded to one space, cut to `cap`."""
+    return " ".join(str(text or "").split())[:cap]
+
+
+def held_trades(span, tunings):
+    """(trades, skipped): the knobs knob_lines() holds as Lachy's call (ADR 0037 d1: its held reason is tune.py
+    auto_check's trade or caution), one per knob id. A trade on a repo and key a revert line of this Reflection moved is
+    skipped as (kid, from, key): the revert comes first, and that from is stale. Each trade carries the newest
+    proposer's (Span.newest_key, knob_lines' pick) evidence and caution, folded."""
+    lines = knob_lines(span, tunings)
+    reverted = {(f["repo"].lower(), f["key"]) for f in lines if f.get("reverts")}
+    newest = {}
+    for e in span["rollouts"]:
+        if e.get("mode") != "read" or not e.get("repo"):
+            continue
+        for p in e.get("proposals") or []:
+            kid = p.get("knob_key")
+            if kid and (kid not in newest or Span.newest_key(e) > Span.newest_key(newest[kid][0])):
+                newest[kid] = (e, p)
+    trades, skipped = [], []
+    for f in lines:
+        if f.get("landed") or f.get("reverts") or not TRADE_HELD_RE.match(str(f.get("held") or "")):
+            continue
+        if not isinstance(f.get("from"), int) or isinstance(f.get("from"), bool):
+            say("knob %s %s: held as Lachy's call with from %r, no integer: not listed"
+                % (f["id"], f["key"], f.get("from")))
+            continue
+        if (f["repo"].lower(), f["key"]) in reverted:
+            skipped.append((f["id"], f["from"], f["key"]))
+            continue
+        e, p = newest.get(f["id"], ({}, {}))
+        trades.append({"kid": f["id"], "from": f["from"], "to": f["to"], "key": f["key"], "rule": f["rule"],
+                       "repo": f["repo"], "held": f["held"], "rollouts": f["rollouts"],
+                       "newest": e.get("rollout") or f["rollouts"][-1],
+                       "evidence": fold(p.get("evidence")), "caution": fold(p.get("caution"))})
+    return trades, skipped
+
+
+def trade_listings(vault):
+    """One record per held-trade line of every decision task (thread-skill-decisions-<date>[-N].md tagged decisions,
+    Work/Tasks and Archive alike): {slug, status, root, section, where, rid, kid, from}. where is item (a `- trade`
+    line under `## Reflection <rid>`), moot (a `moot` line there) or still (a `## Still open` line, its rid read from
+    the line); section is the rid of the `## Reflection` section a line sits under, else None. An item is moot when its
+    slug and section hold a moot line for its (kid, from). A note with no frontmatter is skipped on stderr."""
+    out = []
+    if not vault.root.is_dir():
+        return out
+    for p in sorted(vault.root.rglob("thread-skill-decisions-*.md")):
+        if not DECISION_SLUG_RE.match(p.stem):
+            continue
+        rec = RP.Rec(p, "")
+        if rec.fm is None:
+            say("skipped %s: no frontmatter (%s)" % (p.name, rec.err))
+            continue
+        if "decisions" not in rec.tags:
+            continue
+        base = {"slug": p.stem, "status": rec.status, "root": p.parent == vault.root}
+        heading = None
+        for line in rec.body.split("\n"):
+            if line.startswith("## "):
+                heading = line.strip()
+                continue
+            section = heading[len("## Reflection "):].strip() if heading and heading.startswith("## Reflection ") else None
+            for where, regex, ok in (("item", TRADE_LINE_RE, section), ("moot", TRADE_MOOT_RE, section),
+                                     ("still", TRADE_STILL_RE, heading == "## Still open")):
+                m = regex.match(line) if ok else None
+                if m:
+                    out.append(dict(base, section=section, where=where, rid=m.group(3) if where == "still" else section,
+                                    kid=m.group(1), **{"from": int(m.group(2))}))
+                    break
+    moots = {(r["slug"], r["section"], r["kid"], r["from"]) for r in out if r["where"] == "moot"}
+    for r in out:
+        r["moot"] = r["where"] == "item" and (r["slug"], r["section"], r["kid"], r["from"]) in moots
+    return out
+
+
+def trade_line(tr):
+    """A new trade's item line in the decision task."""
+    return "- trade %s at %s: %s %s -> %s (%s); %s%s; evidence %s; repo %s; rollouts %s; a yes runs /thread:reflect " \
+           "[[%s]] and picks %s (%s)" % (
+               tr["kid"], tr["from"], tr["key"], tr["from"], tr["to"], tr["rule"], tr["held"],
+               "; caution %s" % tr["caution"] if tr["caution"] else "", tr["evidence"] or "not given", tr["repo"],
+               ", ".join("[[%s]]" % r for r in tr["rollouts"]), tr["newest"], tr["key"], tr["rule"])
 
 
 def cmd_decide(a):
@@ -1489,15 +1686,34 @@ def cmd_decide(a):
     rules = sorted((w for w in ws.values() if w["recurring"]), key=lambda w: w["id"])
     confirm = sorted((w for w in ws.values() if w["open"] and w["sighted"] and len(w["rollouts"]) == 1
                       and not w["declinedBefore"]), key=lambda w: w["id"])
-    if not rules:
-        print("no rule proposal: no decision task")
+    trades, skipped = held_trades(span, read_tunings())
+    for kid, frm, key in skipped:
+        print("trade %s at %s: a revert of %s comes first this Reflection" % (kid, frm, key))
+    vault = Vault(a.tasks_dir)
+    new_trades, still_trades = [], []  # still: (trade, the open task that lists it)
+    if trades:
+        if not vault.root.is_dir():
+            raise Stop("--tasks-dir %s is not a directory" % vault.root, 1)
+        listings = [r for r in trade_listings(vault) if r["where"] == "item" and not r["moot"]]
+        for tr in trades:
+            rows = [r for r in listings if (r["kid"], r["from"]) == (tr["kid"], tr["from"])]
+            decided = sorted(r["slug"] for r in rows if r["status"] in DECIDED)
+            if decided:
+                print("trade %s at %s: decided in [[%s]]" % (tr["kid"], tr["from"], decided[0]))
+                continue
+            open_ = sorted(r["slug"] for r in rows if r["root"] and r["status"] not in LANDED and r["section"] != rid)
+            if open_:
+                still_trades.append((tr, open_[0]))
+            else:
+                new_trades.append(tr)
+    if not rules and not new_trades and not still_trades:
+        print("no rule proposal or held trade: no decision task")
         return 0
     for w in rules:  # every rule line passes run_record before the task is touched
         check_line("proposal", {"id": w["id"], "altitude": "rule", "reflection": rid, "rollouts": w["rollouts"],
                                 "rule": w["rule"], "shape": w["shape"], "vaultTask": "thread-skill-decisions"})
     now = a.now
     now_t = to_ms(now, "--now") if now else now_ms()
-    vault = Vault(a.tasks_dir)
     if not vault.root.is_dir():
         raise Stop("--tasks-dir %s is not a directory" % vault.root, 1)
     existing = [(p, rec) for p, rec in vault.open_root_notes() if "decisions" in rec.tags]
@@ -1544,25 +1760,38 @@ def cmd_decide(a):
     seen_until = mdate(until)
     new_items = [w for w in rules if w["id"] not in before]
     still = [w for w in rules if w["id"] in before]
-    body = []
-    for w in new_items:
-        d = decisions.get(w["id"]) or {}
-        body.append("- %s: rule %s; shape %s; rollouts %s; why %s; amends %s" % (
-            w["id"], w["rule"], w["shape"], ", ".join("[[%s]]" % r for r in w["rollouts"]),
-            d.get("why") or "not given", d.get("amends") or "not given"))
-    if confirm:
-        if body:
-            body.append("")
-        body.append("Watches to confirm (one rollout each; a yes files the rule's grill, a no records the decline):")
-        body.extend("- confirm %s: rule %s; shape %s; rollout [[%s]]" % (w["id"], w["rule"], w["shape"], w["rollouts"][0])
-                    for w in confirm)
-    if not new_items:
-        lead = "No new rule items; still open: %s (see ## Still open)" % ", ".join(w["id"] for w in still)
-        body = [lead] + ([""] + body if body else [])
-    note.append_section(heading, "\n".join(body))
+    body = []  # the rule part, only beside a rule item: a task a held trade alone writes lists no Watch to confirm
+    if rules:
+        for w in new_items:
+            d = decisions.get(w["id"]) or {}
+            body.append("- %s: rule %s; shape %s; rollouts %s; why %s; amends %s" % (
+                w["id"], w["rule"], w["shape"], ", ".join("[[%s]]" % r for r in w["rollouts"]),
+                d.get("why") or "not given", d.get("amends") or "not given"))
+        if confirm:
+            if body:
+                body.append("")
+            body.append("Watches to confirm (one rollout each; a yes files the rule's grill, a no records the decline):")
+            body.extend("- confirm %s: rule %s; shape %s; rollout [[%s]]" % (w["id"], w["rule"], w["shape"], w["rollouts"][0])
+                        for w in confirm)
+        if not new_items:
+            lead = "No new rule items; still open: %s (see ## Still open)" % ", ".join(w["id"] for w in still)
+            body = [lead] + ([""] + body if body else [])
+    part = []  # the trade part
+    if new_trades:
+        part = [TRADE_LEAD] + [trade_line(tr) for tr in new_trades]
+    elif still_trades:
+        part = ["No new trades; still open: %s (see ## Still open)" % ", ".join(
+            "trade %s at %s" % (tr["kid"], tr["from"]) for tr, _s in still_trades)]
+    if body and part:
+        body.append("")
+    note.append_section(heading, "\n".join(body + part))
     for w in still:
         note.append_line("## Still open", "%s still open %s: Reflection %s, rollouts %s" % (
             w["id"], seen_until, rid, ", ".join("[[%s]]" % r for r in w["rollouts"])))
+    for tr, lister in still_trades:
+        note.append_line("## Still open", "trade %s at %s still open %s: Reflection %s, rollouts %s%s" % (
+            tr["kid"], tr["from"], seen_until, rid, ", ".join("[[%s]]" % r for r in tr["rollouts"]),
+            "" if lister == path.stem else "; listed in [[%s]]" % lister))
     try:
         note.save(dry_run=a.dry_run)
     except OSError as e:
@@ -1606,7 +1835,8 @@ def cmd_close(a):
 
     # every writer refuses a closed Reflection, so a step skipped now is lost for good: name it, write nothing
     missing = []
-    unknobbed = sorted({f["id"] for f in knob_lines(span, read_tunings())} - ids(lambda d: d.get("altitude") == "knob"))
+    tunings = read_tunings()
+    unknobbed = sorted({f["id"] for f in knob_lines(span, tunings)} - ids(lambda d: d.get("altitude") == "knob"))
     if unknobbed:
         missing.append("knob %s ha%s no knob proposal line: run knobs" % (", ".join(unknobbed),
                                                                          "s" if len(unknobbed) == 1 else "ve"))
@@ -1615,6 +1845,27 @@ def cmd_close(a):
     if unruled:
         missing.append("Watch %s recur%s in this Reflection with no rule proposal line: run decide"
                        % (", ".join(unruled), "s" if len(unruled) == 1 else ""))
+    # a held trade (ADR 0037 d1) needs a line from this Reflection in a decision task that is not dropped, unless a
+    # done one already decided it; with no held trade close reads no vault
+    trades, _skipped = held_trades(span, tunings)
+    listed_in = set()
+    if trades:
+        vault = Vault(a.tasks_dir)
+        if not vault.root.is_dir():
+            raise Stop("--tasks-dir %s is not a directory" % vault.root, 1)
+        listings = trade_listings(vault)
+        unlisted = []
+        for tr in trades:
+            rows = [r for r in listings if (r["kid"], r["from"]) == (tr["kid"], tr["from"])]
+            decided = any(r["where"] == "item" and not r["moot"] and r["status"] in DECIDED for r in rows)
+            here = {r["slug"] for r in rows if r["status"] != "dropped" and r["rid"] == rid
+                    and r["where"] in ("item", "still")}
+            listed_in |= here
+            if not decided and not here:
+                unlisted.append("%s at %s" % (tr["kid"], tr["from"]))
+        if unlisted:
+            missing.append("held trade %s ha%s no decision task line from this Reflection: run decide"
+                           % (", ".join(unlisted), "s" if len(unlisted) == 1 else "ve"))
     if missing:
         raise Stop("Reflection %s is not closed: %s" % (rid, "; ".join(missing)), 2)
 
@@ -1644,6 +1895,7 @@ def cmd_close(a):
     if repairs_only:
         fields["repairsOnly"] = repairs_only
     task = next((d.get("vaultTask") for d in mine if d.get("altitude") == "rule" and d.get("vaultTask")), None)
+    task = task or (sorted(listed_in)[0] if listed_in else None)
     if task:
         fields["decisionTask"] = task
     was, _ = RR.cadence(lines)
@@ -1652,6 +1904,49 @@ def cmd_close(a):
     done(a, "closed %s: %s, %s%s" % (rid, "quiet" if quiet else "not quiet",
                                      ", ".join("%s %d" % (k, v) for k, v in counts.items()),
                                      "; cadence %d -> %d" % (was, fields["cadence"]) if was != fields["cadence"] else ""))
+    return 0
+
+
+# ---- moot ------------------------------------------------------------------------------------------------------------
+
+def cmd_moot(a):
+    why = fold(a.why)
+    if not why:
+        raise Stop("--why must not be empty: say why the yes cannot apply", 2)
+    vault = Vault(a.tasks_dir)
+    if not vault.root.is_dir():
+        raise Stop("--tasks-dir %s is not a directory" % vault.root, 1)
+    path = vault.root / ("%s.md" % a.task)
+    if not path.is_file():
+        raise Stop("no note %s.md directly under %s" % (a.task, vault.root), 2)
+    rec = RP.Rec(path, "root")
+    if rec.fm is None or "decisions" not in rec.tags:
+        raise Stop("[[%s]] is no decision task (%s)" % (
+            a.task, "no frontmatter" if rec.fm is None else "its tags hold no decisions"), 2)
+    if rec.status in LANDED:
+        raise Stop("%s is %s: a done task is never written" % (a.task, rec.status), 2)
+    mine = [r for r in trade_listings(vault) if r["slug"] == a.task and r["where"] == "item"
+            and (r["kid"], r["from"]) == (a.trade, a.from_)]
+    if not mine:
+        raise Stop("[[%s]] lists no trade %s at %s" % (a.task, a.trade, a.from_), 2)
+    open_ = [r for r in mine if not r["moot"]]
+    if not open_:
+        print("exists moot %s at %s in [[%s]]" % (a.trade, a.from_, a.task))
+        return 0
+    zone()
+    day = mdate(to_ms(a.now, "--now") if a.now else now_ms())
+    heading = "## Reflection %s" % open_[-1]["section"]
+    note = read_note(path)
+    if note is None:
+        raise Stop("cannot read %s" % path, 1)
+    note.append_line(heading, "moot %s at %s %s: %s" % (a.trade, a.from_, day, why))
+    try:
+        note.save(dry_run=a.dry_run)
+    except OSError as e:
+        raise Stop("cannot write %s: %s" % (path, e), 1)
+    if a.dry_run:
+        print("would write %s:\n%s" % (path, note.render()))
+    done(a, "moot trade %s at %s in [[%s]] (%s)" % (a.trade, a.from_, a.task, heading))
     return 0
 
 
@@ -1744,11 +2039,20 @@ def main(argv):
     d.add_argument("--dry-run", action="store_true")
     c = sub.add_parser("close")
     c.add_argument("--span", required=True)
+    c.add_argument("--tasks-dir")
     c.add_argument("--dry-run", action="store_true")
+    m = sub.add_parser("moot")
+    m.add_argument("--task", required=True)
+    m.add_argument("--trade", required=True)
+    m.add_argument("--from", dest="from_", type=int, required=True)
+    m.add_argument("--why", required=True)
+    m.add_argument("--tasks-dir")
+    m.add_argument("--now", help="tests only: an aware ISO-8601 instant")
+    m.add_argument("--dry-run", action="store_true")
     sub.add_parser("rung")
     a = p.parse_args(argv)
     verbs = {"span": lambda x: Span(x).run(), "watch": cmd_watch, "raised": cmd_raised, "bug": cmd_bug,
-             "knobs": cmd_knobs, "decide": cmd_decide, "close": cmd_close, "rung": cmd_rung}
+             "knobs": cmd_knobs, "decide": cmd_decide, "close": cmd_close, "moot": cmd_moot, "rung": cmd_rung}
     if a.verb not in verbs:
         p.error("a verb is required: %s" % ", ".join(verbs))
     try:
