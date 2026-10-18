@@ -5,10 +5,11 @@
     <the one-line push message>
     NEEDS_YOU_ITEM
 
-The execute lead runs it when `PushNotification` reports Remote Control inactive or an error, or when there is no push
-tool (a Codex run, or ToolSearch cannot load it), with the same one-line message the push carried. It exists so the
-lead never hand-builds JSON from a free-text message (gates carry quotes) and never handles the topic. python >= 3.8
-syntax, stdlib plus curl. It writes nothing.
+The execute lead runs it when `PushNotification` reports an error or a not-sent of any cause but Lachy at the terminal
+(Remote Control inactive, notifications turned off, nowhere to send it), or when there is no push tool (a Codex run, or
+ToolSearch cannot load it), with the same one-line message the push carried. It exists so the lead never hand-builds
+JSON from a free-text message (gates carry quotes) and never handles the topic. python >= 3.8 syntax, stdlib plus curl.
+It writes nothing.
 
 --server   the ntfy server, default https://ntfy.sh. It must start with http:// or https://. The seam for tests and
            for a self-hosted server.
@@ -24,9 +25,11 @@ The topic is `[notify] ntfy_topic` in ~/.config/thread/rollouts.toml, read throu
 a URL, a curl error line, stdout or a transcript.
 
 The publish is one JSON body, {"topic", "message", "title": "thread: needs you", "priority": 4}, json.dumps'd
-(ASCII-escaped) and POSTed to --server with `curl -fsS -m <timeout> -H 'Content-Type: application/json' --data-binary
-@- <server>`, the JSON on curl's stdin, never in argv, the URL or a header: python's own HTTPS to ntfy is flaky on this
-Mac, and headers are latin-1, so an em dash in a Title header would break. curl's response body is discarded.
+(ASCII-escaped) and POSTed to --server with `curl -q -fsS -m <timeout> -H 'Content-Type: application/json'
+--data-binary @- <server>`, the JSON on curl's stdin, never in argv, the URL or a header: python's own HTTPS to ntfy is
+flaky on this Mac, and headers are latin-1, so an em dash in a Title header would break. `-q` comes first, the only
+place curl honours it, so no ~/.curlrc is read: an operator's curlrc can never change the method, the body or where
+the output goes, nor add a `--trace` that writes the topic-bearing body to a file. curl's response body is discarded.
 
 Order of checks: the arguments (exit 2), then stdin (exit 2), then the settings (exit 2 or 3), then the topic (exit 4),
 then curl (exit 0 or 1).
@@ -129,7 +132,9 @@ def _one_line(text):
 
 def _send(server, timeout, body):
     """curl the body to the server; None when sent, else the one-line reason it was not."""
-    cmd = ["curl", "-fsS", "-m", str(timeout), "-H", "Content-Type: application/json", "--data-binary", "@-", server]
+    # -q first, or curl reads ~/.curlrc, which could change the request or trace the topic-bearing body to a file.
+    cmd = ["curl", "-q", "-fsS", "-m", str(timeout), "-H", "Content-Type: application/json", "--data-binary", "@-",
+           server]
     try:
         p = subprocess.run(cmd, input=body, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout + BACKSTOP)
     except subprocess.TimeoutExpired:  # run() has already killed curl

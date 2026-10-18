@@ -4,9 +4,9 @@
 // command line, a URL, a header or stdout, and an em dash never goes in a header.
 //
 // Hermetic: each case gets its own mkdtemp HOME (so tests/run.sh's seeded, refused rollouts.toml is never read), an env
-// built from scratch (no proxy variables, no ~/.curlrc), and its own node http server on 127.0.0.1:0 passed as
-// --server, standing in for ntfy.sh. The script runs through an async spawn, never spawnSync, which would block the
-// event loop the in-process server answers on. Ordinary cases run `python3 -B` with PYTHONDONTWRITEBYTECODE=1; the
+// built from scratch (no proxy variables; the one ~/.curlrc is the curlrc case's own), and its own node http server on
+// 127.0.0.1:0 passed as --server, standing in for ntfy.sh. The script runs through an async spawn, never spawnSync,
+// which would block the event loop the in-process server answers on. Ordinary cases run `python3 -B` with PYTHONDONTWRITEBYTECODE=1; the
 // bytecode case runs a copy of the plugin layout without either and walks it for __pycache__. Nothing is written to
 // the tree.
 import { test } from 'node:test'
@@ -125,6 +125,46 @@ test('a trailing heredoc newline is stripped; a message with none is sent as is'
     assert.equal(r.status, 0, r.stderr)
     assert.equal(JSON.parse(srv.seen[0].body).message, 'msg', JSON.stringify(input))
   }
+})
+
+// curl itself, asynchronously (the in-process server must keep answering), for the curlrc case's probe.
+function curl(args, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('curl', args, { env, stdio: ['ignore', 'pipe', 'pipe'] })
+    let stderr = ''
+    child.stdout.resume()
+    child.stderr.on('data', (d) => { stderr += d })
+    child.on('error', reject)
+    child.on('close', (status) => resolve({ status, stderr }))
+  })
+}
+
+test('an operator ~/.curlrc never reaches the request: curl -q first, so no method, header, trace or output it sets applies', async (t) => {
+  const home = tmpHome(t)
+  withTopic(home)
+  const trace = path.join(home, 'trace.out')
+  const output = path.join(home, 'output.out')
+  fs.writeFileSync(path.join(home, '.curlrc'),
+    ['request = "PUT"', 'header = "X-Curlrc: read"', `trace = "${trace}"`, `output = "${output}"`, ''].join('\n'))
+  const env = { PATH: process.env.PATH, HOME: home, PYTHONDONTWRITEBYTECODE: '1' }
+  // The probe: a curl without -q under this HOME does read the curlrc, so the case below tests something.
+  const probe = await server(t)
+  const p = await curl(['-sS', '--data-binary', 'probe', probe.url], env)
+  assert.equal(p.status, 0, p.stderr)
+  assert.deepEqual([probe.seen[0].method, probe.seen[0].headers['x-curlrc']], ['PUT', 'read'], 'the curlrc is live without -q')
+  assert.ok(fs.existsSync(trace) && fs.existsSync(output), 'the curlrc trace and output files appear without -q')
+  fs.rmSync(trace)
+  fs.rmSync(output)
+  const srv = await server(t)
+  const r = await run(home, ['--server', srv.url], `${MESSAGE}\n`, { env })
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(srv.seen.length, 1)
+  const [req] = srv.seen
+  assert.equal(req.method, 'POST')
+  assert.equal(req.headers['x-curlrc'], undefined, 'no curlrc header')
+  assert.deepEqual(JSON.parse(req.body), { topic: 'thread-needs-you', message: MESSAGE, title: 'thread: needs you', priority: 4 })
+  assert.ok(!fs.existsSync(trace), 'no trace file holds the topic-bearing body')
+  assert.ok(!fs.existsSync(output), 'no output file')
 })
 
 // ---- no topic ---------------------------------------------------------------------------------------------
