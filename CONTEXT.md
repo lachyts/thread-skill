@@ -383,7 +383,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `spend: <what> — cap N USD`, optionally with `total`, a month, or a
   per-Login count across K Logins (`per Login per month across 3 Logins`). It
   is a promise the task keeps; how the spend splits goes in nested sub-bullets
-  under the line, which are commentary and never priced (ADR 0038).
+  under the line, which are commentary and never priced (ADR 0038). While the
+  Standing approval is on, the plan judge prices the line and sends a Cap that
+  does not price back to its planner once, without a climb; one still unpriced
+  then goes to Lachy, never to the Standing approval (ADR 0038).
   _Avoid_: budget, limit (the Standing approval's limit is another thing).
 - **Standing approval** — Lachy's one-off sign-off for every spend Gated input
   whose **total exposure** is at most US$50: the cap summed across Logins,
@@ -394,7 +397,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   without him (`approve-gates --standing`, run by the lead) and is recorded
   in `## Approved gates` with `(approved <date> under the standing approval:
   total exposure …)`, the task's ceiling, never a target; credential and
-  irreversible gates never pass under it (ADR 0034).
+  irreversible gates never pass under it (ADR 0034), nor does any gate on a
+  plan the plan judge bounced (ADR 0038).
   _Avoid_: spend envelope, auto-approve limit.
 - **Human fix** — the one stated act that moves a set-aside task no agent may
   move (sign a gate, decide a refused descope, restore an Integration with no

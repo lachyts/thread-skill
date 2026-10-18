@@ -63,6 +63,18 @@ export const meta = {
 //                                    //   Absent/null ⇒ every prompt byte-identical. Validated before any dispatch,
 //                                    //   in both modes. A resume re-passes its call's own args, so a call launched
 //                                    //   without it is resumed without it.
+//   gatePricer  : string,            // optional (ADR 0038); the absolute path of the plugin's gated_inputs.py,
+//                                    //   which `reconcile-rollout.py gate-pricer` prints. The lead passes it on
+//                                    //   a task's own call (start or restart) with planGate, and only while the
+//                                    //   task's standing approval is on (execute § 4). Fixed for the call: a
+//                                    //   resume re-passes it with the rest of its args. Set, the plan judge's
+//                                    //   prompt lists each parsed top-level spend gate with a ready
+//                                    //   `exposure -` command (gatePricingBlock) and its schema gains gateBounce
+//                                    //   (PLAN_JUDGE_PRICED); a gates-only `changes` then never climbs and
+//                                    //   bounces at most once per call (planLoop). Absent or '' ⇒ no fragment and
+//                                    //   PLAN_JUDGE's schema (byte-identical). A value that is not an absolute
+//                                    //   path ending /gated_inputs.py (or holds a quote, backslash or control
+//                                    //   character) is logged once and read as absent, never an error.
 //   task        : {                  // exactly ONE task object. An args object carrying
 //                                    //   `waves` (the pre-p12-5 shape) is refused before
 //                                    //   any dispatch, as is a missing, null or array `task`.
@@ -238,7 +250,11 @@ export const meta = {
 // the ladder lacks it ('' otherwise), and ran every dispatch as { label, rung, model, effort }, in order.
 // A block on the top rung is a wall at the operator's ceiling: raising it is an edit to the ladder file.
 // gatedInputs lists the declared-but-unapproved gates when status is gate-pending
-// (a declared gate always pauses for a human — ADR 0008). reviewHistory is the accumulated by-round
+// (a declared gate always pauses for a human — ADR 0008). A plan-gate gate-pending that follows a plan judge's
+// gates-only bounce (ADR 0038, planLoop) carries, after gateDiagnosis in blockerDiagnosis, a paragraph starting
+// `bounced by the plan judge (ADR 0038):` (bounceNote) with the gates it flagged and that round's feedback; reconcile
+// writes that paragraph under `## Gate bounce (awaiting sign-off)` beside the gate bullets, and while it stands
+// `approve-gates --standing` signs nothing on the note (each gate an ASK). reviewHistory is the accumulated by-round
 // review-judge rejection rationale ([{ round, feedback: [] }], empty when the PR approved first try);
 // approvedAtCeiling marks an approval on the FINAL review round with actual rejection history —
 // reconcile persists that history to the task note so ceiling approvals stay auditable.
@@ -301,6 +317,17 @@ const PLAN_JUDGE = {
   required: ['verdict', 'feedback'],
 }
 
+// The plan judge's schema while args.gatePricer is set (ADR 0038): PLAN_JUDGE plus an optional gateBounce, the
+// unpriceable spend gates a gates-only `changes` names (validated by gateBounceOf). planLoop uses it only with a
+// pricer, so a call without one keeps PLAN_JUDGE's opts (the resume-cache key).
+const PLAN_JUDGE_PRICED = {
+  ...PLAN_JUDGE,
+  properties: {
+    ...PLAN_JUDGE.properties,
+    gateBounce: { type: 'array', items: { type: 'string' }, description: 'ONLY on a changes verdict whose every bullet is about spend gates whose `exposure -` printed "usd": null: each such gate exactly as the prompt lists it. Never a gate that priced (an amount in "usd"; its sub-bullets breaking its Cap is an ordinary changes) and never one without exactly one cap; empty otherwise' },
+  },
+}
+
 const IMPL_RESULT = {
   type: 'object',
   additionalProperties: false,
@@ -313,7 +340,7 @@ const IMPL_RESULT = {
     worktreePath: { type: 'string', description: 'absolute worktree path from git rev-parse --show-toplevel' },
     blockerDiagnosis: { type: 'string', description: 'one-paragraph diagnosis when blocked, else empty string' },
     summary: { type: 'string', description: 'one-paragraph summary of what changed and was tested' },
-    gatedInputs: { type: 'array', items: { type: 'string' }, description: 'ONLY when you stopped before a gated action (ADR 0008): one line per human authorisation the task needs that the note\'s "## Approved gates" does not cover ("spend: <what> — cap <amount>" / "credential: <what>" / "irreversible: <what>"). Omit or empty otherwise.' },
+    gatedInputs: { type: 'array', items: { type: 'string' }, description: 'ONLY when you stopped before a gated action (ADR 0008): one line per human authorisation the task needs that the note\'s "## Approved gates" does not cover ("spend: <what> — cap N USD", one line whose Cap holds the whole spend, with how it splits in blockerDiagnosis / "credential: <what>" / "irreversible: <what>"). Omit or empty otherwise.' },
     needsHuman: { type: 'string', description: NEEDS_HUMAN_DESCRIPTION },
   },
   required: ['verified', 'blocked', 'escalate', 'prUrl', 'branch', 'worktreePath', 'blockerDiagnosis', 'summary'],
@@ -496,16 +523,25 @@ task needs — API spend (a hard cap is mandatory), credentials, or an irreversi
 note's "## Approved gates" section covers ALL of them, proceed — an approved cap is a CEILING to respect,
 never a target (blowing it is a verifier/review failure, not a re-ask). Otherwise STOP BEFORE the gated
 action: no spend, no credential use, no irreversible step, no PR. Return blocked=true with one line per
-missing gate in gatedInputs ("spend: <what> — cap <amount>" / "credential: <what>" / "irreversible:
-<what>") and name them in blockerDiagnosis — a human signs off on the note and you'll be re-dispatched.
+missing gate in gatedInputs ("spend: <what> — cap N USD", one line whose Cap holds the whole spend, with
+how it splits in blockerDiagnosis / "credential: <what>" / "irreversible: <what>") and name them in
+blockerDiagnosis — a human signs off on the note and you'll be re-dispatched.
 No operator override elsewhere in this prompt (release/hold gates) ever overrides THIS rule.`
 
 // Parse the plan's "### Gated inputs" section (any ##–#### level). Only TOP-LEVEL markdown list items
-// ("- " / "* " / "+ " / "1. " / "1) " at indent < 2) count as declarations — prose, footnotes, and
-// nested sub-bullets are commentary, never a gate (observed live 2026-09-01: a planner footnote after
-// bullets restating approved gates was captured as a phantom gate and paused a fully signed-off task;
-// ADR 0013). An indented non-list line directly under a gate is a soft-wrap continuation and is joined
-// back on, so a wrapped spend gate never loses its mandatory cap. "None" counts only when a line (or
+// ("- " / "* " / "+ " / "1. " / "1) ") count as declarations — prose, footnotes, and nested sub-bullets
+// are commentary, never a gate (observed live 2026-09-01: a planner footnote after bullets restating
+// approved gates was captured as a phantom gate and paused a fully signed-off task; ADR 0013). Indentation
+// is counted in columns (col: a space adds 1, a tab advances to the next multiple of 4), so a tab
+// sub-bullet is nested. A list item at column 0 is a declaration; at column 2 or more it is commentary.
+// At column 1 (a sloppy one-space nest, ADR 0038: how a spend splits goes in sub-bullets under its gate)
+// it is commentary only while `underGate` holds — the last column-0 declaration was a real gate — AND its
+// text does not start with a gate kind (GATE_KIND); otherwise it is a declaration exactly as at column 0.
+// Fail-closed: a None, prose, an empty item or a doubled heading never makes a column-1 item commentary,
+// and a gate-labelled column-1 item is always a gate (Obsidian renders a one-space bullet as a sibling, so
+// it looks like a gate to Lachy). A column-1 declaration never sets `underGate`. A blank line keeps it (a
+// loose list). A non-list line at column 2 or more directly under a gate is a soft-wrap continuation and
+// is joined back on, so a wrapped spend gate never loses its mandatory cap. "None" counts only when a line (or
 // bullet) is EXACTLY "None" — an embellished "None yet, but …" is not a clean declaration. Returns
 // null when the section is MISSING or carries no parseable declaration — no top-level list items and
 // no exact "None" — so a gate written ONLY as prose can never silently pass: the caller fails closed
@@ -515,6 +551,18 @@ No operator override elsewhere in this prompt (release/hold gates) ever override
 // then "### Gated inputs" / "None" read as no declaration and plan-blocked an approved plan) — is the
 // same section, not its end: parsing carries on, so the None counts and no gate on either side drops.
 const GATED_HEADING = /^#{2,4}\s+gated inputs\b/i
+// A list item's text that names a gate kind: at column 1 it is always a declaration (ADR 0038).
+const GATE_KIND = /^(?:spend|credential|irreversible)\s*:/i
+// A line's leading whitespace in columns: a space adds 1, a tab advances to the next multiple of 4.
+function col(raw) {
+  let c = 0
+  for (const ch of raw) {
+    if (ch === ' ') c += 1
+    else if (ch === '\t') c += 4 - (c % 4)
+    else break
+  }
+  return c
+}
 function parseGatedInputs(planText) {
   const lines = (planText || '').split('\n')
   const start = lines.findIndex((l) => GATED_HEADING.test(l.trim()))
@@ -522,23 +570,27 @@ function parseGatedInputs(planText) {
   const out = []
   let sawNone = false
   let open = false // the previous consumed line was a gate (or its wrap) — continuation may attach
+  let underGate = false // the last column-0 declaration was a real gate — a column-1 unlabelled item is its commentary
   for (let i = start + 1; i < lines.length; i++) {
     const raw = lines[i]
     const line = raw.trim()
-    if (GATED_HEADING.test(line)) { open = false; continue } // a doubled heading — same section
+    if (GATED_HEADING.test(line)) { open = false; underGate = false; continue } // a doubled heading — same section
     if (/^#{1,6}\s/.test(line)) break // next heading ends the section
-    if (!line) { open = false; continue } // a blank line ends any soft-wrap
-    const indent = raw.length - raw.replace(/^[ \t]+/, '').length
+    if (!line) { open = false; continue } // a blank line ends any soft-wrap; underGate stays (a loose list)
+    const c = col(raw)
     const m = line.match(/^(?:[-*+]|\d+[.)])\s+(.*)$/)
-    if (m && indent < 2) { // top-level list item — a declaration (or an explicit None)
+    const nested = m && (c >= 2 || (c === 1 && underGate && !GATE_KIND.test(m[1].trim())))
+    if (m && !nested) { // top-level list item — a declaration (or an explicit None)
       const bare = m[1].trim()
-      if (/^none\.?$/i.test(bare)) { sawNone = true; open = false; continue }
+      if (/^none\.?$/i.test(bare)) { sawNone = true; open = false; if (c === 0) underGate = false; continue }
       if (bare) { out.push(bare); open = true } else open = false
+      if (c === 0) underGate = !!bare // a column-1 declaration never sets (or clears) it
       continue
     }
-    if (!m && indent >= 2 && open) { out[out.length - 1] += ' ' + line; continue } // soft-wrap — keep the cap
+    if (!m && c >= 2 && open) { out[out.length - 1] += ' ' + line; continue } // soft-wrap — keep the cap
     // everything else — prose, footnotes, nested sub-bullets — is commentary, never a gate
     if (/^none\.?$/i.test(line)) sawNone = true
+    if (!m && c === 0) underGate = false // column-0 prose (or a bare None) ends "under a gate"
     open = false
   }
   return out.length || sawNone ? out : null // no items, no exact None — fail closed, same as missing
@@ -563,6 +615,113 @@ function unapprovedGates(declared, approved) {
 function gateDiagnosis(gates) {
   return 'gated inputs await human sign-off (a declared gate always pauses — ADR 0008):\n'
     + gates.map((g) => '- ' + g).join('\n')
+}
+
+// ---- A Cap is a promise (ADR 0038): the plan judge prices each spend gate ----
+// A spend gate is ONE line, `spend: <what> — cap N USD`, whose Cap holds the whole spend; how it splits goes in
+// sub-bullets under it (parseGatedInputs reads them as commentary). While the lead passes args.gatePricer (only
+// with the task's standing approval on, execute § 4), the plan judge's prompt lists each top-level spend gate the
+// engine parsed, each with a ready `exposure -` command (gatePricingBlock), and its schema gains gateBounce
+// (PLAN_JUDGE_PRICED). The judge runs the pricer because this sandbox has only agent() and log(): no process.
+// A `changes` whose every bullet is about spend gates the pricer could not price (`"usd": null`) names them in
+// gateBounce; a gate that prices but whose sub-bullets break its Cap is an ordinary, climbing `changes`. gateBounceOf
+// validates the claim against the parse and the cap backstop, and planLoop sends such a plan back once with no climb,
+// then takes the approve path, so the gates reach Lachy as gate-pending (with bounceNote), never plan-blocked. The
+// engine cannot see the pricer's output, so it trusts the judge's usd-null claim; reconcile persists bounceNote under
+// `## Gate bounce (awaiting sign-off)`, and while that section stands `approve-gates --standing` signs nothing on the
+// note (each gate an ASK), so a gate the judge flagged never reaches the standing approval's signature.
+
+// The parsed gates whose kind (the text before the first `:`, trimmed, lowercased) is `spend`.
+function spendGates(declared) {
+  return (declared || []).filter((g) => {
+    const i = String(g).indexOf(':')
+    return i > 0 && g.slice(0, i).trim().toLowerCase() === 'spend'
+  })
+}
+
+// args.gatePricer when usable, else '': a string that is an absolute path ending /gated_inputs.py, with no `'`,
+// backslash or control character (it is rendered single-quoted into a shell command).
+function pricerOf(a) {
+  const p = a && a.gatePricer
+  if (typeof p !== 'string' || !p.startsWith('/') || !p.endsWith('/gated_inputs.py')) return ''
+  return /['\\\u0000-\u001f\u007f]/.test(p) ? '' : p
+}
+
+// A gate's `cap`/`capped` clauses followed by an amount (any currency): the backstop that keeps a spend gate without
+// exactly one cap on ADR 0008's automatic, climbing `changes`, never a bounce. Keyed on the gate's own line, never on
+// the pricer's why: the pricer reports a non-USD cap (`cap 30 AUD`) as "no cap clause" too.
+const CAP_AMOUNT_RE = /\bcap(?:ped)?\b\s*(?:(?:at|of)\b\s*)?:?\s*(?:US\$|AU\$|NZ\$|CA\$|A\$|C\$|\$|€|£|¥|(?:USD|AUD|NZD|CAD|EUR|GBP|JPY)\b\s?)?\d/gi
+function capAmounts(gate) {
+  return (String(gate || '').match(CAP_AMOUNT_RE) || []).length
+}
+
+// The plan judge's pricing fragment, rendered into planJudgePrompt right after its Gated inputs bullet: '' without a
+// usable pricer or with no parsed spend gate (so the prompt is byte-identical), else this text with its own leading
+// "\n\n". The gates are the engine's parse of the plan text, never task.approvedGates; each goes on stdin through a
+// quoted heredoc, where `$` and backticks stay literal (a gate starts with its kind, so it is never `EOF`).
+function gatePricingBlock(a, planText) {
+  const pricer = pricerOf(a)
+  if (!pricer) return ''
+  const gates = spendGates(parseGatedInputs(planText))
+  if (!gates.length) return ''
+  const blocks = gates.map((g) => "```bash\npython3 -I '" + pricer + "' exposure - <<'EOF'\n" + g + '\nEOF\n```').join('\n')
+  return `
+
+Spend gate pricing (ADR 0038; the standing approval is on for this task): a spend gate is ONE line,
+\`spend: <what> — cap N USD\` (optionally \`total\`, a month, or \`per Login per month across K Logins\`), whose
+Cap holds the whole spend; how it splits goes in sub-bullets nested under it. The engine parsed these
+top-level spend gates from the plan's "### Gated inputs" (soft-wraps joined, list markers stripped). Price
+each EXACTLY as shown, the gate on stdin, never as a shell argument:
+${blocks}
+It prints one JSON line {"usd": "<amount>" | null, "why": "<reason>"}. Skip a gate the task note's
+"## Approved gates" section already holds (its "(approved …)" annotation stripped, whitespace and case
+aside): it is signed. Any other gate needs "changes" when its "usd" is null (quote its "why" verbatim and
+ask for one Cap that holds the whole spend), or when its sub-bullets name spend its Cap does not hold (a
+per-call limit × a count above it, a USD amount not folded in, a recurring or per-unit qualifier, a
+widening word such as soft, plus tax or fees, or more). gateBounce is ONLY for gates whose "usd" printed
+null: when such gates are your ONLY reason for "changes", list each in gateBounce exactly as shown above;
+the engine sends the plan back once without a climb, and a gate still unpriced after that goes to Lachy
+for sign-off, never to the standing approval. Never list a gate whose "usd" is an amount: a gate that
+prices but whose sub-bullets name spend its Cap does not hold is an ordinary "changes" (its planner
+raises the Cap or trims the split), never a bounce. Never list a gate whose own line has no \`cap\`
+amount, or more than one: a spend gate without exactly one cap is the automatic "changes" above (ADR
+0008), never a bounce. A cap in another currency, such as \`cap 30 AUD\`, which the pricer also reports
+as "no cap clause", may be listed. Leave gateBounce empty otherwise.`
+}
+
+// The validated gates-only bounce of a plan judge's verdict, or null (an ordinary `changes`): null without a usable
+// pricer, on any verdict but `changes`, when gateBounce (non-strings and blanks dropped) is empty, when it names a
+// gate that is not among the plan's parsed spend gates (normalizeGate), or one whose own line holds no cap amount
+// or more than one (ADR 0008: that is the automatic, climbing `changes`). Whether the pricer printed `"usd": null`
+// for each is the judge's claim (the fragment allows nothing else): the engine cannot run it, so a priced gate the
+// judge wrongly lists still bounces here, and reconcile's `## Gate bounce (awaiting sign-off)` keeps it from the
+// standing approval. Returns the plan's own lines for the named gates, deduped, in the judge's order. It reads only
+// args, the cached verdict and the cached plan's parse, never task.approvedGates, so a signed-gate resume replays it
+// identically.
+function gateBounceOf(a, verdict, declared) {
+  if (!pricerOf(a) || !verdict || verdict.verdict !== 'changes') return null
+  const named = (Array.isArray(verdict.gateBounce) ? verdict.gateBounce : []).filter((g) => typeof g === 'string' && g.trim())
+  if (!named.length) return null
+  const own = new Map(spendGates(declared).map((g) => [normalizeGate(g), g]))
+  const lines = []
+  for (const g of named) {
+    const line = own.get(normalizeGate(g))
+    if (line === undefined || capAmounts(line) !== 1) return null
+    if (!lines.includes(line)) lines.push(line)
+  }
+  return lines
+}
+
+// The paragraph a bounce override adds to the gate-pending row's blockerDiagnosis, after gateDiagnosis: it starts
+// BOUNCE_MARK (reconcile-rollout.py's GATE_BOUNCE_MARK finds it there and writes it, to the end, under `## Gate bounce
+// (awaiting sign-off)`), then names the flagged gates and that round's feedback, one line per bullet.
+const BOUNCE_MARK = 'bounced by the plan judge (ADR 0038):'
+function bounceNote(round, verdict, already, gates) {
+  const feedback = (Array.isArray(verdict && verdict.feedback) ? verdict.feedback : []).filter((f) => typeof f === 'string')
+  return '\n\n' + BOUNCE_MARK + ' it still read these gates as unpriceable ' +
+    (already ? 'after one bounce' : 'on the last plan round') + ', so they go to sign-off as written, never to the standing approval:\n' +
+    gates.map((g) => '  - ' + flattenLine(g)).join('\n') + '\nits round-' + round + ' feedback:\n' +
+    feedback.map((f) => '  - ' + flattenLine(f)).join('\n')
 }
 
 // The signed-gate continuation (p12-14, execute § 3.7). After `approve-gates`, the lead resumes the
@@ -925,11 +1084,15 @@ Steps:
    ### Caller-wiring     (what calls the new/changed surface; grep proof; are tests the only callers?)
    ### Edge cases        (explicit list)
    ### Risks / unknowns  (what could go wrong; what you want the reviewer to weigh in on)
-   ### Gated inputs      (REQUIRED — one markdown bullet ("- ") per human authorisation the task needs:
-                          "- spend: <what> — cap <amount>" (a hard cap is mandatory), "- credential: <what>",
-                          "- irreversible: <what>"; or exactly "None". BULLETS ONLY — no prose, commentary,
-                          or footnotes in this section: the engine reads only list lines, and anything else
-                          is rejected. A non-empty declaration pauses the task for human sign-off —
+   ### Gated inputs      (REQUIRED — one markdown bullet ("- ") at column 0 per human authorisation the task
+                          needs: "- spend: <what> — cap N USD" (a hard cap is mandatory: ONE line whose Cap
+                          holds the whole spend, optionally with "total", a month, or "per Login per month
+                          across K Logins"), "- credential: <what>", "- irreversible: <what>"; or exactly
+                          "None". BULLETS ONLY — no prose or footnotes in this section: the engine reads only
+                          list lines, and anything else is rejected. How a spend splits (run counts, per-call
+                          limits, iterations) goes in sub-bullets nested two spaces under its gate: commentary
+                          the engine never prices, which the Cap must hold. A non-empty declaration pauses the
+                          task for human sign-off —
                           regardless of config or continuous mode (ADR 0008). If the task note carries a
                           "## Approved gates" section, restate each still-needed approved gate VERBATIM as
                           a bullet (without its "(approved …)" annotation) — restated approved gates do not
@@ -969,10 +1132,11 @@ Check, against the task brief:
 - Are the edge cases the right ones?
 - Are the stated risks/unknowns the real ones?
 - Does the plan carry the required "### Gated inputs" section — either exactly "None" or concrete gate
-  BULLETS ("- spend: … — cap …" WITH a hard cap / "- credential: …" / "- irreversible: …")? A missing
-  section, a spend gate without a cap, or non-bullet prose in the section (the engine reads only list
-  lines — a gate written as prose is rejected, and commentary does not belong there) is an
-  automatic "changes" (ADR 0008). Also flag a gate the brief implies but the plan omits.
+  BULLETS at column 0 ("- spend: <what> — cap N USD", one line WITH a hard cap / "- credential: …" /
+  "- irreversible: …")? A missing section, a spend gate without a cap, or non-bullet prose in the section
+  (the engine reads only list lines — a gate written as prose is rejected) is an automatic "changes"
+  (ADR 0008). Nested sub-bullets under a gate are commentary (how a spend splits) and are allowed; an
+  indented bullet is never a gate. Also flag a gate the brief implies but the plan omits.${gatePricingBlock(a, planText)}
 
 ${TASK_TREE_RULE}
 
@@ -1018,8 +1182,8 @@ Run additional READ-ONLY investigation in the task tree as needed. Rewrite the p
 FIRST line is \`Planned on: <sha from your setup's tree base: line>\`, followed verbatim by any \`tree NOT
 attached\` line the setup printed and any \`tree NOT refreshed:\` line your prior plan quoted, with the SAME required sub-sections
 (Files to modify / Test strategy / Sibling-site check / Caller-wiring / Edge cases / Risks /
-Gated inputs — bullets only: declare spend with a hard cap, credentials, irreversible actions, or
-exactly "None").
+Gated inputs — bullets only: declare spend as one line \`- spend: <what> — cap N USD\` whose Cap holds
+the whole spend (its split in nested sub-bullets), credentials, irreversible actions, or exactly "None").
 Return ready=true with the rewritten plan in \`plan\`. If you discover the task is unrecoverable, return
 ready=false, blocked=true, blockerCause="<one line>".`
 }
@@ -1416,7 +1580,8 @@ checkout at "${a.repoPath}".`
 // - Climb (decision 3): each stage — plan, implement, review — climbs one rung at its FIRST evidence of
 //   hardness, once per call, never past the top: a planner that produced no plan, a plan-judge `changes`, a
 //   red one-shot or a blocked first implementer pass, a blocked investigator, a review-judge `changes`. On
-//   the top rung the climb is recorded as a no-op. A gate stop and a dead agent are never evidence.
+//   the top rung the climb is recorded as a no-op. A gate stop and a dead agent are never evidence, and nor
+//   is a plan judge's gates-only bounce (ADR 0038, planLoop).
 // - Effort and judges: every dispatch reads the CURRENT rung (implEffort, judgeEffort), so a climb carries
 //   the model and every role's effort at once, judges included.
 // - Verify shape: below the top, the implement stage's first pass verifies one-shot (verifyBlock); the retry
@@ -1649,35 +1814,45 @@ async function planLoop(task, st, a) {
   // letting a fresh planner read the rationale appended to the task note.
   const priorFeedback = []
   let round = 1
+  // A gates-only bounce (ADR 0038) has been sent back once in this call: the next one takes the approve path.
+  let gateBounced = false
+  // The approve path, on the current plan: the judge's approve, or a gates-only bounce it overrides (ADR 0038, with
+  // `note` added to the gate-pending diagnosis).
+  const settle = (at, note) => {
+    // Gated inputs (ADR 0008): a declared gate always pauses for a human — regardless of
+    // plan_approval config or continuous mode. Gates already approved on the note
+    // (task.approvedGates) are skipped, so re-dispatches never re-ask those exact gates.
+    const declared = parseGatedInputs(plan.plan)
+    if (declared === null) {
+      // The judge approved a plan WITHOUT the required section, or with a section carrying no
+      // parseable declaration — no list items, no "None" (its checklist forbids both, ADR 0013).
+      // Fail closed — but to plan-blocked, not gate-pending: there is nothing concrete for a
+      // human to sign, and a re-plan under the current prompt self-heals with a declaration.
+      return {
+        task, blocked: true, status: 'plan-blocked', planRoundsUsed: at,
+        blockerDiagnosis: 'plan was approved without a parseable "### Gated inputs" section — gates must be markdown bullets ("- spend/credential/irreversible: …") or exactly "None" (fail-closed, ADR 0008) — re-plan and declare each gate as a bullet or an explicit "None"',
+      }
+    }
+    const gates = unapprovedGates(declared, task.approvedGates)
+    if (gates.length) {
+      return {
+        task, blocked: true, status: 'gate-pending', gatedInputs: gates,
+        planRoundsUsed: at, blockerDiagnosis: gateDiagnosis(gates) + note,
+      }
+    }
+    return { task, blocked: false, plan: plan.plan, planRoundsUsed: at }
+  }
   while (round <= task.maxPlanRounds) {
     const verdict = await runAgent(planJudgePrompt(task, plan.plan, a), {
-      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: PLAN_JUDGE, model: cur(st).model, effort: judgeEffort(st, 'judge'),
+      label: `plan-judge:${task.slug} r${round}`, phase: 'Plan-gate', schema: pricerOf(a) ? PLAN_JUDGE_PRICED : PLAN_JUDGE, model: cur(st).model, effort: judgeEffort(st, 'judge'),
     }, st)
     if (verdict.__dead) return transientPlanBlock(task, round)
     if (verdict.verdict === 'approve' && askOf(verdict)) log(`plan-judge:${task.slug} r${round}: needsHuman on an approve verdict ignored`)
     if (verdict.verdict === 'approve') {
-      // Gated inputs (ADR 0008): a declared gate always pauses for a human — regardless of
-      // plan_approval config or continuous mode. Gates already approved on the note
-      // (task.approvedGates) are skipped, so re-dispatches never re-ask those exact gates.
-      const declared = parseGatedInputs(plan.plan)
-      if (declared === null) {
-        // The judge approved a plan WITHOUT the required section, or with a section carrying no
-        // parseable declaration — no list items, no "None" (its checklist forbids both, ADR 0013).
-        // Fail closed — but to plan-blocked, not gate-pending: there is nothing concrete for a
-        // human to sign, and a re-plan under the current prompt self-heals with a declaration.
-        return {
-          task, blocked: true, status: 'plan-blocked', planRoundsUsed: round,
-          blockerDiagnosis: 'plan was approved without a parseable "### Gated inputs" section — gates must be markdown bullets ("- spend/credential/irreversible: …") or exactly "None" (fail-closed, ADR 0008) — re-plan and declare each gate as a bullet or an explicit "None"',
-        }
+      if (Array.isArray(verdict.gateBounce) && verdict.gateBounce.some((g) => typeof g === 'string' && g.trim())) {
+        log(`plan-judge:${task.slug} r${round}: gateBounce on an approve verdict ignored (ADR 0038)`)
       }
-      const gates = unapprovedGates(declared, task.approvedGates)
-      if (gates.length) {
-        return {
-          task, blocked: true, status: 'gate-pending', gatedInputs: gates,
-          planRoundsUsed: round, blockerDiagnosis: gateDiagnosis(gates),
-        }
-      }
-      return { task, blocked: false, plan: plan.plan, planRoundsUsed: round }
+      return settle(round, '')
     }
     // Record this round's rejection BEFORE the max-rounds return and the reviser dispatch, so both the
     // plan-blocked diagnosis and the next reviser see the complete accumulated rationale (push with the
@@ -1693,6 +1868,18 @@ async function planLoop(task, st, a) {
         blockerDiagnosis: 'needs a human decision: ' + q + '\nAccumulated reviewer feedback:\n' + roundLines(),
       }
     }
+    // A gates-only `changes` (ADR 0038): the judge named only spend gates the pricer could not price (`"usd": null`),
+    // validated against this plan's parse and the cap backstop; a priced gate whose sub-bullets break its Cap is an
+    // ordinary `changes` below. The engine cannot tell a gate the pricer can never price from one the planner could
+    // fix, so it sends the plan back once; a second bounce, or one on the last round, takes the approve path, and the
+    // gates reach Lachy as gate-pending with bounceNote, which reconcile persists under `## Gate bounce (awaiting
+    // sign-off)`: while it stands, `approve-gates --standing` signs nothing on the note and asks, so a gate the judge
+    // flagged never reaches the standing approval's signature, even one the judge wrongly called unpriceable.
+    const bounce = gateBounceOf(a, verdict, parseGatedInputs(plan.plan))
+    if (bounce && (gateBounced || round === task.maxPlanRounds)) {
+      log(`plan-judge:${task.slug} r${round}: gate format only (${gateBounced ? 'bounced once already' : 'the last plan round'}) — the gates go to sign-off (ADR 0038)`)
+      return settle(round, bounceNote(round, verdict, gateBounced, bounce))
+    }
     if (round === task.maxPlanRounds) {
       return {
         task, blocked: true, status: 'plan-blocked', planRoundsUsed: round,
@@ -1701,7 +1888,13 @@ async function planLoop(task, st, a) {
     }
     // A judged `changes` is the plan stage's evidence of hardness: revision is iteration, and iteration
     // runs one rung up (once per stage — a later `changes` never climbs again; a no-op on the top rung).
-    escalate(st, task.slug, 'plan')
+    // A gates-only bounce is not (ADR 0038): it is the planner's wording of a Cap, so it never climbs.
+    if (bounce) {
+      gateBounced = true
+      log(`plan-judge:${task.slug} r${round}: gate format only — sent back once, no climb (ADR 0038)`)
+    } else {
+      escalate(st, task.slug, 'plan')
+    }
     plan = await runAgent(planReviserPrompt(task, plan.plan, priorFeedback, round + 1, a), {
       label: `plan-revise:${task.slug} r${round + 1}`, phase: 'Plan-gate', schema: PLAN_VERDICT, model: cur(st).model, effort: implEffort(st),
     }, st)
@@ -2888,6 +3081,11 @@ logLadder()
 // Progress/ETA relay: the sandbox has no clock, so the skill precomputes this line (reconcile-rollout.py
 // next / mark-started) from the task notes' started:/merged: stamps and the engine just surfaces it.
 if (a.progress) log(a.progress)
+// args.gatePricer (ADR 0038): a value pricerOf refuses reads as absent. The plan judge's pricing check is advisory
+// (approve-gates --standing still prices fail-closed), so a bad value is logged once and never throws.
+if (a.gatePricer !== undefined && a.gatePricer !== null && a.gatePricer !== '' && !pricerOf(a)) {
+  log(`gatePricer: refusing ${JSON.stringify(a.gatePricer)} — the plan judge's pricing check is off for this call (ADR 0038)`)
+}
 
 // A seeded revise uses its validated history with the empty rounds dropped (liveHistory); any other task
 // object passes through untouched.

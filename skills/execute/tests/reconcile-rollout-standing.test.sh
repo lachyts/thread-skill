@@ -9,6 +9,15 @@
 #          included) remain; any other set-aside, a RACE or an UNVERIFIED keeps `stuck`.
 #   Q3-Q5  await-sign-off (the sign-off pause), status's pausedFor and clear-pause's STILL-AWAITING refusal, then the
 #          reinstate once signed (by hand, or by a raised standing approval).
+#   S7     ADR 0038's one-line gates through approve-gates --standing: p19-10's restated gate (cap 24 USD) and p19-5's
+#          (cap 50 USD total) are signed; p19-10's original one-line gate asks, naming its two `each`.
+#   S8     ADR 0038's bounce, end to end from the engine: a priced gate (cap 24 USD) whose sub-bullet spends 40, flagged
+#          on both plan rounds, is plan-blocked when the judge obeys the usd-null rule; a judge that wrongly bounces it
+#          leaves `## Gate bounce (awaiting sign-off)` on the gate-pending note, and the standing approval asks instead of
+#          signing (the same gate without the section is signed). Lachy's sign-off removes it; other rows settle it.
+#   G1-G4  gate-pricer (ADR 0038): the gated_inputs.py path while the standing approval is on, "" with its why while it
+#          is off (built-in 0, or a task stamp of 0), and exit 1 with an ERROR line and no stdout on a bad stamp or a
+#          refused rollouts.toml. It writes nothing.
 # Temp notes only; no vault, no network. HOME is pinned on every call that reaches rollout-settings.py (tests/run.sh
 # seeds a refused rollouts.toml in its scratch HOME). bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -176,6 +185,151 @@ printf '\n## Integration log\n\n2026-10-13T10:00+00:00 set-aside path=integrator
   "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" "$(printf 'c%.0s' $(seq 40))" >> "$D/a.md"
 sa a
 ok "$rc|$(fm a status)|$(fm a ready)" "0|status: review|ready: 2026-10-14T09:00+00:00" "S6: at Integration it goes to review with ready:"
+
+# ── S7: ADR 0038's one-line gates (a Cap that holds its split) ───────────────────────────────────────
+scen s7
+# p19-10's original gate, from its archived note's line 157 (the `## Approved plan` quote, `> - ` stripped).
+P19_10='spend: `claude plugin eval` re-runs of close-deletes-consumed-keeps-legacy and close-pending-doc-owns-continuation, --runs 3 each, Opus model and judge, before and after the fix plus at most one more iteration (up to 6 invocations, each --max-cost-usd 4) — cap 20 USD'
+ONE24='spend: claude plugin eval re-runs of the two close cases — cap 24 USD'
+ONE50='spend: two make evals runs, pre-trim and post-trim — cap 50 USD total'
+ORDER=$'- [[a]]\n- [[b]]\n- [[c]]' mkro
+mkt a gate-pending; gate a "$ONE24"
+mkt b gate-pending; gate b "$ONE50"
+mkt c gate-pending; gate c "$P19_10"
+before=$(cat "$D/c.md")
+sa a,b,c
+ok "$rc" 3 "S7: two signed, one asks: exit 3"
+has "$out" "a: gate approved under the standing approval: $ONE24 (exposure US\$24 of US\$50, file:defaults)" "S7: p19-10's restated gate signs US\$24"
+has "$out" "b: gate approved under the standing approval: $ONE50 (exposure US\$50 of US\$50, file:defaults)" "S7: p19-5's one-line gate signs US\$50"
+has "$out" "ASK: c: $P19_10: per/each outside the cap clause: each, each" "S7: p19-10's original gate asks, naming its two each"
+ok "$(cat "$D/c.md")" "$before" "S7: the unpriceable gate's note is untouched"
+
+# ── S8: a gate the plan judge flagged never reaches the standing approval (ADR 0038, p23-1 round 2) ──────────────
+# The reviewer's reproduction, end to end: the engine (task.workflow.js, through tests/lib/engine.mjs) runs a plan whose
+# gate line prices (`cap 24 USD`, US$24, under the US$50 limit) while its sub-bullet spends 40, the plan judge flagging it
+# on both rounds. Obeying the fragment (no gateBounce: the gate priced), the row is plan-blocked, so approve-gates
+# --standing has nothing to sign. A judge that wrongly lists it in gateBounce gets the bounce override (gate-pending);
+# reconcile writes the bounce paragraph under `## Gate bounce (awaiting sign-off)`, and while it stands the standing
+# approval signs nothing on the note: an ASK, never `gate approved under the standing approval`. The same gate on a note
+# without the section is signed (the control: the section is what refuses). Lachy's sign-off removes both sections.
+ROOTDIR="$(cd "$HERE/../../.." && pwd)"
+S8_JS=$(cat <<'JS'
+import { runTask } from './tests/lib/engine.mjs'
+const [slug, bounce] = process.argv.slice(1)
+const G24 = 'spend: eval re-runs — cap 24 USD'
+const plan = `Planned on: abc\n### Files to modify\n- x\n### Gated inputs\n- ${G24}\n  - 10 invocations at --max-cost-usd 4 (40 USD)\n### Risks / unknowns\n- none`
+const feedback = ['the sub-bullet spends 40 USD (10 invocations at --max-cost-usd 4) against a Cap of 24 USD: raise the Cap or trim the runs']
+const args = { rolloutSlug: 'ro', repoPath: '/repo', verifier: 'make test', date: '2026-10-14',
+  gatePricer: '/x/skills/_shared/scripts/gated_inputs.py',
+  task: { slug, taskPath: `/vault/${slug}.md`, scope: 'cross-cutting', planGate: true, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 2, rung: 'opus-high' } }
+const out = await runTask(args, async (prompt, opts) => {
+  const kind = opts.label.split(':')[0]
+  if (kind === 'plan' || kind === 'plan-revise') return { ready: true, blocked: false, blockerCause: '', plan }
+  if (kind === 'plan-judge') return { verdict: 'changes', feedback, ...(bounce === 'yes' ? { gateBounce: [G24] } : {}) }
+  throw new Error('S8: unexpected agent ' + opts.label)
+})
+if (out.error) throw out.error
+process.stdout.write(JSON.stringify(out.result))
+JS
+)
+s8row() { (cd "$ROOTDIR" && node --input-type=module -e "$S8_JS" "$1" "$2"); }  # s8row <slug> <yes|no> — the result JSON
+rec() { HOME="$HE" python3 "$SCRIPT" reconcile --result "$1" --tasks-dir "$D" --now "$NOW" >/dev/null 2>&1; }
+G24='spend: eval re-runs — cap 24 USD'
+BOUNCE_H='## Gate bounce (awaiting sign-off)'
+scen s8
+ORDER=$'- [[a]]\n- [[b]]\n- [[c]]' mkro
+ok "$(printf '%s\n' "$G24" | python3 -I "$HERE/../../_shared/scripts/gated_inputs.py" exposure -)" '{"usd": "24", "why": ""}' "S8: the gate's own line prices US\$24, under the limit"
+# the judge obeys the fragment: no gateBounce for a priced gate, so an ordinary changes, plan-blocked
+mkt b in_progress
+s8row b no > "$TMP/s8-b.json"
+ok "$(q "$(cat "$TMP/s8-b.json")" '[d["tasks"][0]["status"], d["tasks"][0]["gatedInputs"], [c["stage"] for c in d["tasks"][0]["climbs"]]]')" '["plan-blocked",[],["plan"]]' "S8: obeyed, the engine row is plan-blocked and climbed"
+rec "$TMP/s8-b.json"
+ok "$(fm b status)|$(section b "$BOUNCE_H")" "status: plan-blocked|" "S8: … reconciled plan-blocked, no bounce section"
+sa b
+ok "$rc" 1 "S8: --standing refuses a note that is not gate-pending (exit 1)"
+hasnt "$out" "gate approved under the standing approval" "S8: … and signs nothing"
+# a judge that wrongly bounces the priced gate: gate-pending with the bounce, which the standing approval never signs
+mkt a in_progress
+s8row a yes > "$TMP/s8-a.json"
+ok "$(q "$(cat "$TMP/s8-a.json")" '[d["tasks"][0]["status"], d["tasks"][0]["gatedInputs"], d["tasks"][0]["climbs"]]')" "[\"gate-pending\",[\"$G24\"],[]]" "S8: wrongly bounced, the engine row is gate-pending with no climb"
+rec "$TMP/s8-a.json"
+ok "$(fm a status)|$(section a '## Gated inputs (awaiting sign-off)')" "status: gate-pending|- $G24" "S8: reconciled gate-pending with the gate pending"
+BS=$(section a "$BOUNCE_H")
+has "$BS" "bounced by the plan judge (ADR 0038): it still read these gates as unpriceable after one bounce, so they go to sign-off as written, never to the standing approval:" "S8: the bounce section opens with the engine's paragraph"
+has "$BS" "  - $G24" "S8: … names the flagged gate"
+has "$BS" "its round-2 feedback:" "S8: … and the round"
+has "$BS" "  - the sub-bullet spends 40 USD (10 invocations at --max-cost-usd 4) against a Cap of 24 USD: raise the Cap or trim the runs" "S8: … with the judge's feedback for the person who signs"
+rec "$TMP/s8-a.json"
+ok "$(section a "$BOUNCE_H")|$(grep -cxF "$BOUNCE_H" "$D/a.md")" "$BS|1" "S8: a re-reconcile keeps one bounce section, its text unchanged (upserted, never duplicated)"
+before=$(cat "$D/a.md")
+sa a
+ok "$rc" 3 "S8: --standing on the bounced note exits 3"
+hasnt "$out" "gate approved under the standing approval" "S8: the bounced gate never reaches the standing approval's signature"
+has "$out" "ASK: a: $G24: the plan judge bounced this plan (ADR 0038; its feedback is under $BOUNCE_H), so the standing approval signs none of its gates; the pricer reads: exposure US\$24" "S8: … it is an ASK naming the bounce and the pricer's reading"
+ok "$(cat "$D/a.md")" "$before" "S8: … and the note is byte-identical"
+# the control: the same gate on a gate-pending note without the bounce section is signed
+mkt c gate-pending; gate c "$G24"
+sa c
+ok "$rc" 0 "S8 (control): without the bounce section the same gate is covered"
+has "$out" "c: gate approved under the standing approval: $G24 (exposure US\$24 of US\$50, file:defaults)" "S8 (control): … under the standing approval"
+# Lachy's sign-off removes both sections and sends the task on
+out=$(python3 "$SCRIPT" approve-gates --tasks a --tasks-dir "$D" --date "$DATE" --now "$NOW" 2>&1); rc=$?
+ok "$rc|$(fm a status)" "0|status: in_progress" "S8: Lachy's sign-off flips the bounced note"
+ok "$(section a '## Gated inputs (awaiting sign-off)')|$(section a "$BOUNCE_H")" "|" "S8: … removing the pending and the bounce sections"
+ok "$(section a '## Approved gates')" "- $G24 (approved $DATE)" "S8: … recording his sign-off"
+# a later gate-pending row without a bounce, or any other row, settles an older bounce section
+mkt d in_progress
+s8row d yes > "$TMP/s8-d.json"; rec "$TMP/s8-d.json"
+ok "$(section d "$BOUNCE_H" | head -1 | cut -c1-37)" "bounced by the plan judge (ADR 0038):" "S8: d carries a bounce"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r=d["tasks"][0]; r["blockerDiagnosis"]=r["blockerDiagnosis"].split("\n\n")[0]; json.dump(d, open(sys.argv[2], "w"))' "$TMP/s8-d.json" "$TMP/s8-d2.json"
+rec "$TMP/s8-d2.json"
+ok "$(fm d status)|$(section d "$BOUNCE_H")" "status: gate-pending|" "S8: a gate-pending row with no bounce paragraph removes the section"
+rec "$TMP/s8-d.json"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); r=d["tasks"][0]; r["status"]="plan-blocked"; r["gatedInputs"]=[]; json.dump(d, open(sys.argv[2], "w"))' "$TMP/s8-d.json" "$TMP/s8-d3.json"
+rec "$TMP/s8-d3.json"
+ok "$(fm d status)|$(section d "$BOUNCE_H")" "status: plan-blocked|" "S8: a row of another status removes it too"
+
+# ── G1-G4: gate-pricer, the plan judge's pricer path for one call (ADR 0038) ─────────────────────────
+GI="$(cd "$HERE/../../_shared/scripts" && pwd -P)/gated_inputs.py"
+gp() {  # gp <home> <slugs> — gate-pricer; $out (stdout), $err (stderr), $rc
+  local h="$1" t="$2"
+  out=$(HOME="$h" python3 "$SCRIPT" gate-pricer --tasks "$t" --rollout "$D/ro.md" --tasks-dir "$D" 2>"$TMP/gp.err"); rc=$?
+  err=$(cat "$TMP/gp.err")
+}
+scen g1
+mkro; mkt a open; mkt b in_progress
+before=$(cat "$D/ro.md" "$D/a.md" "$D/b.md"); ev=$(events | wc -l | tr -d ' ')
+gp "$H50" a,b
+ok "$rc|$err" "0|" "G1: exit 0, nothing on stderr"
+ok "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" 2 "G1: one JSON line per slug"
+ok "$(q "$(printf '%s\n' "$out" | head -1)" '[d["slug"], d["limit"], d["source"], d["why"], sorted(d)]')" '["a",50,"file:defaults","",["gatePricer","limit","slug","source","why"]]' "G1: on at 50 from file:defaults, the keys"
+gpath=$(q "$(printf '%s\n' "$out" | head -1)" 'd["gatePricer"]')
+ok "$gpath" "\"$GI\"" "G1: gatePricer is the plugin's gated_inputs.py"
+case "$GI" in /*/gated_inputs.py) [ -f "$GI" ] && echo "ok   - G1: an absolute path to an existing file" || { echo "FAIL - G1: $GI is no file"; fail=1; } ;; *) echo "FAIL - G1: $GI not absolute"; fail=1 ;; esac
+ok "$(cat "$D/ro.md" "$D/a.md" "$D/b.md")|$(events | wc -l | tr -d ' ')" "$before|$ev" "G1: it writes nothing and records nothing"
+scen g2
+mkro; mkt a open
+gp "$HE" a
+ok "$rc" 0 "G2: the built-in 0 exits 0"
+ok "$(q "$out" '[d["gatePricer"], d["limit"], d["source"], d["why"]]')" '["",0,"built-in","standing approval off (built-in 0)"]' "G2: off, gatePricer \"\""
+scen g3
+mkro; mkt a open 'spend_approval_usd: 0'
+gp "$H50" a
+ok "$(q "$out" '[d["gatePricer"], d["limit"], d["source"], d["why"]]')" '["",0,"task","standing approval off (task 0)"]' "G3: a task stamp of 0 turns it off for that task"
+scen g4
+mkro; mkt a open 'spend_approval_usd: fifty'; mkt b open
+gp "$H50" a
+ok "$rc|$out" "1|" "G4: a bad stamp exits 1 with no stdout"
+has "$err" "ERROR: a: spend_approval_usd on [[a]] must be an integer >= 0" "G4: … and an ERROR line naming it"
+gp "$HR" b
+ok "$rc|$out" "1|" "G4: a refused rollouts.toml exits 1 with no stdout"
+has "$err" "ERROR: b: rollout settings refused" "G4: … and an ERROR line"
+sed -i.bak 's/^rollout: .*/rollout: "[[other]]"/' "$D/b.md" && rm -f "$D/b.md.bak"
+gp "$H50" b
+ok "$rc|$out" "1|" "G4: a task of another rollout exits 1 with no stdout"
+has "$err" "its rollout: is" "G4: … naming its rollout"
+gp "$H50" nope
+ok "$rc|$out" "1|" "G4: a missing note exits 1 with no stdout"
 
 # ── Q1: only gate-pending tasks and their queued dependants remain ───────────────────────────────────
 scen q1

@@ -225,7 +225,8 @@ signal (a repo, named MCP servers, live branch state), `add-task.md` § Launch c
      (whole US dollars) when the spend answer is above the standing approval; for any spend amount,
      the `## Decisions (asked ahead <date>)` section with the same two lines (its Spend line, naming
      `/thread:orient` where schedule's names `/thread:schedule`, and its Planner line asking for one
-     priceable total, e.g. `cap 50 USD per Login per month across 3 Logins`); and a credential or irreversible sign-off's `## Approved gates` bullet,
+     line whose Cap is one priceable total, e.g. `cap 50 USD per Login per month across 3 Logins`, with its
+     split in sub-bullets nested under the gate, ADR 0038); and a credential or irreversible sign-off's `## Approved gates` bullet,
      `- <kind>: <his words> (approved <date>, asked ahead at orient)`.
 3. **Renames rewrite backlinks, in one pass.** First check every target basename is free, in one
    listing. Then write all the old slugs to a file and find the files that mention any of them

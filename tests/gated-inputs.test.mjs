@@ -391,3 +391,119 @@ test('the sweep CLI prints one JSON line per note, body only, each hit with its 
   assert.match(bad.stderr, /^gated_inputs: .*no-such-note\.md: /)
   assert.equal(spawnSync('python3', ['-I', '-B', MODULE], { encoding: 'utf8' }).status, 2)
 })
+
+// ---- ADR 0038: a Cap is a promise. The stdin form `exposure -` the plan judge runs, and the one-line gate ----------
+// The pricer's rules do not change (ADR 0038 § Consequences, *No pricer change*): `exposure -` reads ONE gate on stdin
+// and prints the same reading as one JSON line, {"usd": "<amount>" | null, "why": "<reason>"}. The plan judge runs it
+// on each top-level spend gate the engine parsed (task.workflow.js gatePricingBlock), quoted `<<'EOF'` so `$` and
+// backticks in a gate never expand.
+
+// p19-10's original gate (thread-skill-rollout-2026-10-17), from its archived note's line 157: the `## Approved plan`
+// quote of its `### Gated inputs`, `> - ` stripped. Its line 49 (`## Approved gates`) carries the same gate plus
+// ` (approved 2026-10-18)`, which prices `unrecognised clause: …` instead, so the bare form is the one the judge sees.
+const P19_10 = 'spend: `claude plugin eval` re-runs of close-deletes-consumed-keeps-legacy and close-pending-doc-owns-continuation, --runs 3 each, Opus model and judge, before and after the fix plus at most one more iteration (up to 6 invocations, each --max-cost-usd 4) — cap 20 USD'
+// ADR 0038 decision 1's restatements: the Cap holds the whole spend, the split goes in sub-bullets.
+const P19_10_ONE_LINE = 'spend: claude plugin eval re-runs of the two close cases — cap 24 USD'
+const P19_5_ONE_LINE = 'spend: two make evals runs, pre-trim and post-trim — cap 50 USD total'
+
+// `exposure -` with `input` on stdin; args and env overridable. Returns {status, out (parsed when one JSON line), stderr}.
+function cli(input, args = ['exposure', '-'], env = {}) {
+  const r = spawnSync('python3', ['-I', '-B', MODULE, ...args], { input, env: { ...process.env, ...env } })
+  const stdout = r.stdout.toString('utf8')
+  let out = null
+  try { out = JSON.parse(stdout) } catch { out = null }
+  return { status: r.status, stdout, out, stderr: r.stderr.toString('utf8') }
+}
+
+test('ADR 0038: `exposure -` prices the one-line gates and names p19-10\'s `each`', () => {
+  assert.ok(!P19_10.includes('(approved'), 'the fixture is the bare gate from line 157, never the annotated line 49')
+  for (const [gate, want] of [
+    [P19_10_ONE_LINE, { usd: '24', why: '' }],
+    ['spend: claude plugin eval re-runs of the two close cases — cap 20 USD', { usd: '20', why: '' }],
+    [P19_5_ONE_LINE, { usd: '50', why: '' }],
+    ['spend: two make evals runs (pre-trim and post-trim) — cap 50 USD total', { usd: '50', why: '' }],
+    [P19_10, { usd: null, why: 'per/each outside the cap clause: each, each' }],
+  ]) {
+    const r = cli(gate + '\n')
+    assert.equal(r.status, 0, r.stderr)
+    assert.equal(r.stdout.split('\n').filter(Boolean).length, 1, 'one JSON line')
+    assert.deepEqual(r.out, want, gate)
+  }
+})
+
+test('ADR 0038: `exposure -` agrees with exposure() and holds under LC_ALL=C (the em dash still prices)', () => {
+  const gates = [PROBE, FAST, FAST_COUNTED, 'spend: image API — cap US$40, plus US$30 for the fallback',
+    'credential: the Replicate API key', 'spend: fast mode — cap US$12.50 per month', 'spend: x — cap 5 USD and cap 3 USD']
+  const want = py(gates.map((gate) => ({ op: 'exposure', gate })))
+  gates.forEach((gate, i) => {
+    for (const env of [{}, { LC_ALL: 'C', LANG: 'C' }]) {
+      const r = cli(gate, undefined, env)
+      assert.equal(r.status, 0, r.stderr)
+      assert.deepEqual([num(r.out.usd), r.out.why], [num(want[i].usd), want[i].why], `${gate} ${JSON.stringify(env)}`)
+    }
+  })
+  const c = cli(P19_10_ONE_LINE + '\r\n', undefined, { LC_ALL: 'C', LANG: 'C' })
+  assert.deepEqual(c.out, { usd: '24', why: '' }, 'a CRLF line under LC_ALL=C')
+  assert.equal(cli('spend: x — cap 2 USD for the €-priced tier').stdout.includes('€'), true, 'the why is UTF-8, never ASCII-escaped')
+})
+
+test('ADR 0038: `exposure` misuse exits 2 naming the stdin form; two lines ask; bad UTF-8 exits 1', () => {
+  for (const args of [['exposure'], ['exposure', P19_10_ONE_LINE], ['exposure', '-', 'extra']]) {
+    const r = cli(P19_10_ONE_LINE, args)
+    assert.equal(r.status, 2, JSON.stringify(args))
+    assert.match(r.stderr, /exposure - <<'EOF'/, 'the usage line names the stdin form')
+    assert.equal(r.stdout, '', 'nothing on stdout')
+  }
+  for (const empty of ['', '\n', '  \n\n']) {
+    const r = cli(empty)
+    assert.equal(r.status, 2, JSON.stringify(empty))
+    assert.match(r.stderr, /no gate on stdin/)
+  }
+  const two = cli(`${P19_10_ONE_LINE}\n${P19_5_ONE_LINE}\n`)
+  assert.equal(two.status, 0)
+  assert.deepEqual(two.out, { usd: null, why: 'stdin holds 2 lines: pass one gate' })
+  const bad = cli(Buffer.from([0x73, 0x70, 0xff, 0xfe, 0x0a]))
+  assert.equal(bad.status, 1)
+  assert.equal(bad.stdout, '')
+})
+
+test("ADR 0038: the judge's quoted heredoc keeps `$` literal; an unquoted one expands it away (control)", () => {
+  const run = (open) => spawnSync('bash', ['-c', `python3 -I -B '${MODULE}' exposure - ${open}\nspend: probe — cap $5\nEOF\n`], { encoding: 'utf8' })
+  const quoted = run("<<'EOF'")
+  assert.equal(quoted.status, 0, quoted.stderr)
+  assert.deepEqual(JSON.parse(quoted.stdout), { usd: '5', why: '' })
+  const bare = run('<<EOF')
+  assert.equal(bare.status, 0, bare.stderr)
+  assert.deepEqual(JSON.parse(bare.stdout), { usd: null, why: 'no cap clause' }, 'unquoted, `$5` expands to nothing')
+})
+
+test('ADR 0038 pipeline: sub-bullets are commentary, the one gate prices 24 through `exposure -` and the standing approval signs it', () => {
+  const T = loadEngine(['parseGatedInputs'])
+  const plan = [
+    'Planned on: abc', '### Files to modify', '- x', '### Gated inputs',
+    `- ${P19_10_ONE_LINE}`,
+    '  - up to 6 invocations at --max-cost-usd 4, --runs 3 each',
+    ' - one more iteration at most, each --max-cost-usd 4',
+    '\t- before and after the fix, Opus model and judge',
+    '### Risks / unknowns', '- none',
+  ].join('\n')
+  const gates = Array.from(T.parseGatedInputs(plan))
+  assert.deepEqual(gates, [P19_10_ONE_LINE], 'a 2-space, a one-space and a tab sub-bullet are all commentary')
+  assert.deepEqual(cli(gates[0] + '\n').out, { usd: '24', why: '' })
+  const D = fs.mkdtempSync(path.join(os.tmpdir(), 'cap-promise-'))
+  try {
+    const home = path.join(D, 'home')
+    fs.mkdirSync(path.join(home, '.config', 'thread'), { recursive: true })
+    fs.writeFileSync(path.join(home, '.config', 'thread', 'rollouts.toml'), '[defaults]\nspend_approval_usd = 50\n')
+    fs.mkdirSync(path.join(D, 'repo'))
+    fs.writeFileSync(path.join(D, 'ro.md'), `---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nparallel_ceiling: 4\n---\n\n## Notes\n\nProject root: \`${path.join(D, 'repo')}\`\n\n## Queue\n\n- [[a]]\n`)
+    fs.writeFileSync(path.join(D, 'a.md'), `---\ntags: [task]\nstatus: gate-pending\nrollout: "[[ro]]"\n---\n\n## Notes\n\nbody\n\n## Gated inputs (awaiting sign-off)\n\n${gates.map((g) => '- ' + g).join('\n')}\n`)
+    const r = spawnSync('python3', ['-I', '-B', RECONCILE, 'approve-gates', '--standing', '--tasks', 'a', '--rollout', path.join(D, 'ro.md'),
+      '--tasks-dir', D, '--date', '2026-10-18', '--now', '2026-10-18T09:00:00Z'],
+    { encoding: 'utf8', env: { ...process.env, HOME: home, THREAD_EVENTS_DIR: EVENTS } })
+    assert.equal(r.status, 0, r.stdout + r.stderr)
+    assert.ok(r.stdout.includes(`a: gate approved under the standing approval: ${P19_10_ONE_LINE} (exposure US$24 of US$50, file:defaults)`), r.stdout)
+  } finally {
+    fs.rmSync(D, { recursive: true, force: true })
+  }
+})
