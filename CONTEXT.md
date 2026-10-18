@@ -329,7 +329,7 @@ through time, from attention to merged PRs. Terms only — no implementation.
   written and ends, running nothing. The Chorus Stage starts the lead in the
   note's Project root once the note is runnable, and that lead's first `next`
   clears the stamp, so no second lead starts (vault grammar § Rollout start
-  stamp). Outside a Chorus Stage nothing reads it, so it waits like not yet.
+  stamp). Outside a Chorus Stage nothing acts on it, so it waits like not yet.
   _Avoid_: auto-start, scheduled start.
 - **Git-env canary** — the lead's check that the shared checkout (a rollout's
   `Project root`) kept its `refs/heads/<default>` and its bareness across each

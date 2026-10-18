@@ -549,7 +549,7 @@ Keep the whole report scannable: it's a glance, not a wall of text.
     frontmatter's first top-level `start:` reads `unattended`) → "waiting for the Chorus Stage (Start when
     ready): it starts the lead in the Project root once the note is runnable", and name
     `/thread:execute [[<rollout>]]` only as the way to start it by hand now. Outside a Chorus Stage nothing
-    reads the stamp, so the note waits as Not yet does.
+    acts on the stamp, so the note waits as Not yet does.
 
 **A refused ladder.** The Ladder refused flag reorders nothing: whichever action matches, from 7 to 13, gets
 the fix first: "fix `<ladder.source>` (<ladder.error>) first: execute halts `ladder file refused` at each call's

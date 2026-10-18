@@ -573,7 +573,7 @@ When § 6 wrote a rollout note, end with `AskUserQuestion`, recommended option f
   end: nothing runs here and no handoff is made. Print the note, the `/thread:execute [[<rollout>]]`
   line (still valid by hand) and one line: the Chorus Stage starts a lead in its Project root once
   the note is runnable, and that lead's first `next` clears the stamp. It suits a run nobody will be
-  there to start (the evening, a landing PR still queued). Outside a Chorus Stage nothing reads the
+  there to start (the evening, a landing PR still queued). Outside a Chorus Stage nothing acts on the
   stamp, so it waits like Not yet.
 
 Execute's own runtime gate still applies wherever it runs. No rollout written → no offer; § 6
