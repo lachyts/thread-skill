@@ -2,7 +2,8 @@
 //
 // The file is `~/.config/thread/rollouts.toml`, ladder.toml's sibling: `[defaults]` (the six rollout keys: the four
 // Tuning keys, execute's `auto_retries`, p16-4, and the standing approval's `spend_approval_usd`, ADR 0034),
-// `[guardrails]` (the Reflection's bounds) and `[repo."owner/name"]` tables keyed by the GitHub origin that
+// `[guardrails]` (the Reflection's bounds), `[notify]` (ADR 0038 d3: `ntfy_topic`, the needs-you push's ntfy fallback,
+// machine-wide like the guardrails) and `[repo."owner/name"]` tables keyed by the GitHub origin that
 // `land.sh --origin-slug` reads from the local clone. No file gives the built-in values. A present file that
 // does not validate is refused with one `rollout-settings: <path>[:<line>]: <reason>` line (ADR 0016's typo
 // rule), never a silent fall back to the built-ins.
@@ -34,6 +35,10 @@ const GUARDRAIL_KEYS = ['tokens_per_merge_pct', 'set_aside_rate_points', 'confli
 const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, auto_retries: 2, spend_approval_usd: 0 }
 const GUARDRAILS_BUILT_IN = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0,
   review_churn_pct: 40, hours_per_task: 1.5 }
+// [notify] (ADR 0038 d3): the ntfy topic the needs-you fallback publishes to; unset (null) means no fallback.
+const NOTIFY_KEYS = ['ntfy_topic']
+const NOTIFY_BUILT_IN = { ntfy_topic: null }
+const TABLES_LINE = 'rollouts.toml holds only [defaults], [guardrails], [notify] and [repo."owner/name"] tables'
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 
 // ---- helpers ------------------------------------------------------------------------------------------
@@ -100,11 +105,13 @@ function expectValues(out, values, sources) {
 }
 
 function assertAllBuiltIn(out) {
-  assert.deepEqual(Object.keys(out), ['path', 'file', 'repo', 'settings', 'guardrails'])
+  assert.deepEqual(Object.keys(out), ['path', 'file', 'repo', 'settings', 'guardrails', 'notify'])
   assert.deepEqual(Object.keys(out.settings), SETTING_KEYS)
   assert.deepEqual(Object.keys(out.guardrails), GUARDRAIL_KEYS)
   for (const k of SETTING_KEYS) assert.deepEqual(out.settings[k], { value: BUILT_IN[k], source: 'built-in' })
   for (const k of GUARDRAIL_KEYS) assert.deepEqual(out.guardrails[k], { value: GUARDRAILS_BUILT_IN[k], source: 'built-in' })
+  // An absent [notify] table resolves to no topic: the needs-you push has no ntfy fallback.
+  assert.deepEqual(out.notify, { ntfy_topic: { value: null, source: 'built-in' } })
 }
 
 // ---- R1: no file ----------------------------------------------------------------------------------------
@@ -243,7 +250,8 @@ const REFUSALS = [
   ['spend_approval_usd = -1', ['[defaults]', 'spend_approval_usd = -1'], 2, /\[defaults\] spend_approval_usd must be an integer >= 0, got -1/],
   ['spend_approval_usd = 50.5', ['[defaults]', 'spend_approval_usd = 50.5'], 2, /spend_approval_usd must be an integer >= 0, got a float/],
   ['spend_approval_usd = "50"', ['[defaults]', 'spend_approval_usd = "50"'], 2, /spend_approval_usd must be an integer >= 0, got a string/],
-  ['an unknown table [default]', ['# settings', '[default]', 'parallel_ceiling = 3'], 2, /unknown top-level key "default"/],
+  ['an unknown table [default]', ['# settings', '[default]', 'parallel_ceiling = 3'], 2,
+    new RegExp(`unknown top-level key "default" \\(${escapeRe(TABLES_LINE)}\\)`)],
   ['a repo key ending .git', ['[repo."o/r.git"]', 'parallel_ceiling = 3'], 1, /\.git/],
   ['a repo key that is no owner/name', ['[repo."not-a-slug"]', 'parallel_ceiling = 3'], 1, /owner\/name/],
   ['an all-dots repo name', ['[repo."o/..."]', 'parallel_ceiling = 3'], 1, /owner\/name/],
@@ -269,6 +277,19 @@ const REFUSALS = [
   ['an inline table with a bad nested key names the repo = line', ['# settings', 'repo = { "o/r" = { paralel_ceiling = 5 } }'], 2,
     /unknown key "paralel_ceiling"/],
   ['a TOML syntax error', ['[defaults]', 'parallel_ceiling = '], 2, /invalid TOML/],
+  // [notify] (ADR 0038 d3): a table holding only ntfy_topic, an ntfy topic (1 to 64 of A-Z, a-z, 0-9, - and _). A refused
+  // string is described, never echoed, so a near-miss topic never reaches a transcript.
+  ['notify as a scalar', ['notify = 5'], 1, /notify must be a table \(\[notify\]\), got 5/],
+  ['an unknown key in [notify]', ['[notify]', 'topic = "x"'], 2, /\[notify\]: unknown key "topic" \(\[notify\] holds ntfy_topic\)/],
+  ['an empty ntfy_topic', ['[notify]', 'ntfy_topic = ""'], 2, /\[notify\] ntfy_topic must be an ntfy topic .*, got an empty string/],
+  ['a URL as ntfy_topic (the topic alone, never the server)', ['# settings', '[notify]', 'ntfy_topic = "https://ntfy.sh/x"'], 3,
+    /\[notify\] ntfy_topic must be an ntfy topic .*, got a string holding another character$/m],
+  ['a boolean ntfy_topic', ['[notify]', 'ntfy_topic = true'], 2, /ntfy_topic must be an ntfy topic .*, got a boolean/],
+  ['a number as ntfy_topic', ['[notify]', 'ntfy_topic = 3'], 2, /ntfy_topic must be an ntfy topic .*, got 3/],
+  ['a 65-character ntfy_topic', ['[notify]', `ntfy_topic = "${'a'.repeat(65)}"`], 2, /ntfy_topic must be an ntfy topic .*, got a string of 65 characters/],
+  ['ntfy_topic in [defaults] (it is machine-wide, under [notify])', ['[defaults]', 'ntfy_topic = "x"'], 2, /\[defaults\]: unknown key "ntfy_topic"/],
+  ['ntfy_topic in a repo table', ['[repo."o/r"]', 'ntfy_topic = "x"'], 2, /\[repo\."o\/r"\]: unknown key "ntfy_topic"/],
+  ['a dotted bad ntfy_topic', ['notify.ntfy_topic = "a b"'], 1, /\[notify\] ntfy_topic must be an ntfy topic/],
 ]
 
 for (const [name, lines, line, reason] of REFUSALS) {
@@ -317,7 +338,7 @@ test('R4 a key the line scan cannot place is refused in the exact no-line form',
   const r = run(home)
   assert.equal(r.status, 2)
   assert.equal(r.stdout, '')
-  assert.equal(r.stderr, `rollout-settings: ${settingsPath(home)}: unknown top-level key "xA" (rollouts.toml holds only [defaults], [guardrails] and [repo."owner/name"] tables)\n`)
+  assert.equal(r.stderr, `rollout-settings: ${settingsPath(home)}: unknown top-level key "xA" (${TABLES_LINE})\n`)
 })
 
 test('R4 a refused file is refused with --repo too, and land.sh never runs for it', (t) => {
@@ -412,14 +433,15 @@ test('R7 hours_per_task (p21-2) takes an integer or a float > 0, as file:guardra
 
 test('R8 the importable resolve() and constants agree with the CLI', (t) => {
   const home = tmpHome(t)
-  writeSettings(home, ['[defaults]', 'max_iterations = 2', '[repo."o/r"]', 'parallel_ceiling = 6'])
+  writeSettings(home, ['[defaults]', 'max_iterations = 2', '[notify]', 'ntfy_topic = "t-1"', '[repo."o/r"]', 'parallel_ceiling = 6'])
   const repo = gitRepo(home, 'r', 'https://github.com/o/r')
   const cli = resolves(home, ['--repo', repo])
+  assert.deepEqual(cli.notify, { ntfy_topic: { value: 't-1', source: 'file:notify' } })
   const r = run(home, [], {
     argv: ['-B', '-c', `import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location('rs', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 print(json.dumps({'out': m.resolve(repo=sys.argv[2]), 'keys': list(m.KEYS), 'gkeys': list(m.GUARDRAIL_KEYS),
-  'skeys': list(m.SETTING_KEYS), 'min': m.MINIMUM,
+  'skeys': list(m.SETTING_KEYS), 'min': m.MINIMUM, 'nkeys': list(m.NOTIFY_KEYS), 'nbuilt': m.NOTIFY_BUILT_IN,
   'built': m.BUILT_IN, 'gbuilt': m.GUARDRAILS_BUILT_IN, 'timeout': m.ORIGIN_TIMEOUT, 'path': m.default_path()}))
 try:
     m.resolve(repo='/nonexistent/x')
@@ -435,6 +457,8 @@ except m.SettingsError as e:
   assert.deepEqual(first.gkeys, GUARDRAIL_KEYS)
   assert.deepEqual(first.built, BUILT_IN)
   assert.deepEqual(first.gbuilt, GUARDRAILS_BUILT_IN)
+  assert.deepEqual(first.nkeys, NOTIFY_KEYS)
+  assert.deepEqual(first.nbuilt, NOTIFY_BUILT_IN)
   assert.equal(first.timeout, 20)
   assert.equal(first.path, settingsPath(home))
   assert.deepEqual(second, ['--repo /nonexistent/x: not a directory', 2, null])
@@ -490,4 +514,30 @@ except m.SettingsError as e:
   assert.ok(elapsed < 5000, `bounded: took ${elapsed}ms`)
   const left = spawnSync('pgrep', ['-f', `sleep ${uniq}`], { encoding: 'utf8' })
   assert.equal(left.stdout.trim(), '', 'no sleep child survives')
+})
+
+// ---- R11: [notify] (ADR 0038 d3) ------------------------------------------------------------------------------
+
+test('R11 [notify] ntfy_topic resolves as file:notify beside [defaults] and a repo table; the rest is unchanged', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['[defaults]', 'parallel_ceiling = 2', '', '[notify]', 'ntfy_topic = "thread-needs-you"   # a dedicated topic',
+    '', '[repo."o/r"]', 'max_iterations = 5'])
+  const out = resolves(home, ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')])
+  assert.deepEqual(Object.keys(out), ['path', 'file', 'repo', 'settings', 'guardrails', 'notify'])
+  assert.deepEqual(out.notify, { ntfy_topic: { value: 'thread-needs-you', source: 'file:notify' } })
+  expectValues(out, { parallel_ceiling: 2, max_iterations: 5 }, { parallel_ceiling: 'file:defaults', max_iterations: 'file:repo' })
+  for (const k of GUARDRAIL_KEYS) assert.equal(out.guardrails[k].source, 'built-in')
+})
+
+test('R11 [notify] in dotted and inline-table form resolves like table form; an empty [notify] is no topic', (t) => {
+  for (const [lines, want] of [
+    [['notify.ntfy_topic = "x"'], { value: 'x', source: 'file:notify' }],
+    [['notify = { ntfy_topic = "A_b-9" }'], { value: 'A_b-9', source: 'file:notify' }],
+    [['[notify]', `ntfy_topic = "${'z'.repeat(64)}"`], { value: 'z'.repeat(64), source: 'file:notify' }],
+    [['[notify]', '# set once ntfy-noise-audit names a topic'], { value: null, source: 'built-in' }],
+  ]) {
+    const home = tmpHome(t)
+    writeSettings(home, lines)
+    assert.deepEqual(resolves(home).notify, { ntfy_topic: want }, lines.join(' | '))
+  }
 })
