@@ -370,16 +370,25 @@ through time, from attention to merged PRs. Terms only — no implementation.
   handle; a stop at Integration rejoins the Integration queue; otherwise it
   takes a fresh call behind a warning (execute § 3.7).
   _Avoid_: approval item, spend gate, pre-approval.
+- **Cap** — the one USD ceiling a spend Gated input names (`cap N USD`, with
+  any per-Login or per-month count inside its own clause). It is a promise the
+  task keeps, so the rest of the gate (how the work splits, per-call limits,
+  run counts) is the planner's account of the work and never widens it. Only
+  words that say the Cap is not the ceiling count: an amount after `plus` adds
+  to it, and a vaguer widening (`soft`, excluding tax, `or more`) asks. A
+  plan whose spend Gated input has no single Cap the Standing approval can
+  price goes back to its planner to restate, never to Lachy (ADR 0038).
+  _Avoid_: budget, limit (the Standing approval's limit is another thing).
 - **Standing approval** — Lachy's one-off sign-off for every spend Gated input
   whose **total exposure** is at most US$50: the cap summed across Logins,
   a recurring cap counted per month, US$50 itself included. The limit is
   the Rollout settings key `spend_approval_usd` (a task may carry its own,
-  an ask-ahead answer; built-in 0, which is off). Exposure counts every USD
-  amount the gate names; a shape it cannot price asks. Such a gate passes
+  an ask-ahead answer; built-in 0, which is off). Exposure is read from the
+  gate's **Cap** alone; a gate with no Cap, or more than one, asks. Such a gate passes
   without him (`approve-gates --standing`, run by the lead) and is recorded
   in `## Approved gates` with `(approved <date> under the standing approval:
   total exposure …)`, the task's ceiling, never a target; credential and
-  irreversible gates never pass under it (ADR 0034).
+  irreversible gates never pass under it (ADR 0034, ADR 0038).
   _Avoid_: spend envelope, auto-approve limit.
 - **Human fix** — the one stated act that moves a set-aside task no agent may
   move (sign a gate, decide a refused descope, restore an Integration with no

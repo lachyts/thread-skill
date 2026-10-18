@@ -4,6 +4,9 @@ Date: 2026-10-13
 Status: accepted, shipped in 3.1.0 (implemented by p18-2, #121; amends ADR 0008, where a gated input always
 paused the rollout until sign-off; from the 2026-10-13 orient grill of
 `thread-skill-p18-2-a-gate-never-holds-the-rollout`)
+*(Amended by ADR 0038, 2026-10-18: a spend Gated input is priced on its Cap alone, a promise the task keeps, so
+commentary outside the cap clause no longer asks; words that say the Cap is not the ceiling still count; the
+plan judge sends an unpriceable gate back to its planner; an undelivered needs-you push falls back to ntfy.)*
 
 ## Context
 
