@@ -174,6 +174,9 @@ const ARG_VARIANTS = [
   { name: 'knownBaselineFailures', args: { knownBaselineFailures: ['test_x — env (pre-existing)'] }, task: {} },
   { name: 'ignoreGate', args: {}, task: { ignoreGate: true } },
   { name: 'legacy model and effort', args: {}, task: { model: 'fable', effort: 'max' } },
+  // ADR 0038: PLAN_G's spend gate renders the plan judge's pricing fragment. Its gates come from the plan text, never
+  // from task.approvedGates, so the fragment is the same with and without them.
+  { name: 'gatePricer', args: { gatePricer: '/home/x/.claude/plugins/cache/thread/thread/4.1.0/skills/_shared/scripts/gated_inputs.py' }, task: {} },
 ]
 
 // Every render the engine can produce from a task object, as (E, task, a, st, c) → string. `c` carries the
@@ -250,6 +253,16 @@ test('Verify: every prompt and task-taking fragment renders byte-identical with 
   assert.ok(renders > 10000, `${renders} renders`)
 })
 
+test("Verify (ADR 0038): the gatePricer variant renders the judge's pricing fragment from the plan, the same with approvedGates", () => {
+  const v = ARG_VARIANTS.find((x) => x.name === 'gatePricer')
+  const a = { ...mkArgs({ planGate: true }), ...v.args }
+  const without = E.planJudgePrompt(a.task, PLAN_G, a)
+  assert.ok(without.includes(`exposure - <<'EOF'\n${G}\nEOF`), 'the fragment lists the plan\'s spend gate')
+  const withA = E.planJudgePrompt({ ...a.task, approvedGates: [G, ...SENTINEL_GATES] }, PLAN_G, a)
+  assert.equal(withA, without, 'approvedGates never reach the fragment, even when they hold the listed gate')
+  assert.ok(!E.planJudgePrompt(a.task, PLAN_NONE, a).includes('exposure -'), 'a None plan renders no fragment')
+})
+
 test('Verify: every prompt builder in the engine is in the render table', () => {
   const src = fs.readFileSync(enginePath, 'utf8')
   const builders = [...src.matchAll(/^function (\w+Prompt)\(/gm)].map((m) => m[1])
@@ -299,6 +312,29 @@ test('S-plan-r2: a gate declared on a revised plan — the revise and the climb 
   assert.ok(tail[0].prompt.includes(PLAN_G))
   assert.equal(tail[0].effort, 'xhigh', 'the implementer runs on the rung A reached')
   assert.deepEqual([B.row.rung, B.row.climbs, B.row.planRoundsUsed], [TOP, [{ stage: 'plan', from: BOTTOM, to: TOP }], 2])
+})
+
+test('S-plan-bounce (ADR 0038): two gates-only bounces stop gate-pending; the signed resume replays them and implements plan r2', async () => {
+  const GA = 'spend: Replicate API — cap 30 AUD'
+  const R1 = `Planned on: abc\n### Files to modify\n- x.js: the change (r1)\n### Gated inputs\n- ${GA}\n  - two re-renders\n### Risks / unknowns\n- none`
+  const R2 = R1.replace('(r1)', '(r2)')
+  const bounced = { verdict: 'changes', feedback: ['the Cap does not price'], gateBounce: [GA] }
+  const script = {
+    [`plan:${SLUG}`]: plan(R1),
+    [`plan-judge:${SLUG} r1`]: bounced,
+    [`plan-revise:${SLUG} r2`]: plan(R2),
+    [`plan-judge:${SLUG} r2`]: bounced,
+    [`implement:${SLUG}`]: green(`implement:${SLUG}`),
+    [`review:${SLUG} r1`]: approve,
+  }
+  const PRICER = '/home/x/.claude/plugins/cache/thread/thread/4.1.0/skills/_shared/scripts/gated_inputs.py'
+  const { A, B, tail } = await resumeAfterSignOff(mkArgs({ planGate: true }, { gatePricer: PRICER }), script, `implement:${SLUG}`)
+  assert.deepEqual(A.labels, [`plan:${SLUG}`, `plan-judge:${SLUG} r1`, `plan-revise:${SLUG} r2`, `plan-judge:${SLUG} r2`])
+  assert.deepEqual(A.row.gatedInputs, [GA])
+  assert.ok(A.row.blockerDiagnosis.includes('bounced by the plan judge (ADR 0038)'), A.row.blockerDiagnosis)
+  assert.equal(A.calls[2].effort, 'high', 'a gates-only bounce never climbs')
+  assert.ok(tail[0].prompt.includes(R2) && !tail[0].prompt.includes(R1), "the implementer's prompt carries plan r2")
+  assert.deepEqual([B.row.rung, B.row.climbs, B.row.planRoundsUsed], [BOTTOM, [], 2])
 })
 
 test('S-impl: a bottom-rung implementer stop resumes past the sign-off on its rung — never climbed', async () => {

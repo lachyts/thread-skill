@@ -401,6 +401,18 @@ Subcommands:
               --standing without --rollout is exit 1 (`ERROR: --standing needs --rollout`), nothing written. A
               note already fully approved stays `[no-change]`, exit 0.
 
+  gate-pricer  Read-only (ADR 0038; execute § 4's *Resolve `gatePricer`*): `--tasks <slugs> --rollout <note>`. For
+              each task it resolves the standing approval's limit exactly as approve-gates --standing does
+              (_standing_limit: task, rollout, rollouts.toml, built-in 0) and prints one JSON line, {"slug",
+              "gatePricer", "limit", "source", "why"}: gatePricer is the absolute path of
+              skills/_shared/scripts/gated_inputs.py when the limit is > 0, else "" with why `standing approval off
+              (<source> 0)` (why is "" when on). The lead passes a non-empty gatePricer as the task call's
+              args.gatePricer, and the plan judge then prices each spend gate through `exposure -`. Exit 1, with an
+              `ERROR:` line on stderr and no line for that slug, on a missing note, a task whose `rollout:` is not
+              --rollout, a `spend_approval_usd` stamp that is not an integer >= 0, refused rollout settings or a
+              missing gated_inputs.py; the lead then omits the key. It writes nothing and records no Run-record
+              event.
+
 Run record (p15-2, ADR 0032): each verb records its own Slot and lane transitions, and (p21-2) the human acts it
 carries out (a Recorded answer, a sign-off, a hand-back, a consumed RACE decision), through run_record.py's
 emit (one helper, _event), best-effort: a refusal or a write failure prints one `run_record:` line on stderr
@@ -5533,6 +5545,51 @@ def _approve_standing(args) -> int:
     return 1 if errors else (3 if asked else 0)
 
 
+# ---- gate-pricer ------------------------------------------------------------
+
+def cmd_gate_pricer(args) -> int:
+    """gate-pricer (ADR 0038; the module docstring): the plan judge's pricer path for each task's own call, set only
+    while the task's standing approval is on. Read-only: no write, no Run-record event. Exit 0, or 1 on any error."""
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.is_file():
+        print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
+        return 1
+    if not GATED_INPUTS_PY.is_file():
+        print(f"ERROR: gate-pricer: {GATED_INPUTS_PY} not found", file=sys.stderr)
+        return 1
+    try:
+        rollout_note = Note(rollout_path)
+    except ValueError as e:
+        print(f"ERROR: gate-pricer: {e}", file=sys.stderr)
+        return 1
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    errors = []
+    for slug in [s.strip() for s in args.tasks.split(",") if s.strip()]:
+        path = tasks_dir / f"{slug}.md"
+        if not path.exists():
+            errors.append(f"{slug}: task note not found at {path}")
+            continue
+        try:
+            note = Note(path)
+        except ValueError as e:
+            errors.append(str(e))
+            continue
+        if (_note_rollout(note) or "").lower() != rollout_path.stem.lower():
+            errors.append(f"{slug}: its rollout: is {note.get('rollout')!r}, not [[{rollout_path.stem}]]")
+            continue
+        limit, err = _standing_limit(note, rollout_note)
+        if err:
+            errors.append(f"{slug}: {err}")
+            continue
+        on = limit["value"] > 0
+        print(json.dumps({"slug": slug, "gatePricer": str(GATED_INPUTS_PY) if on else "", "limit": limit["value"],
+                          "source": limit["source"],
+                          "why": "" if on else f"standing approval off ({limit['source']} 0)"}, ensure_ascii=False))
+    for e in errors:
+        print(f"ERROR: {e}", file=sys.stderr)
+    return 1 if errors else 0
+
+
 # ---- clear-pause ------------------------------------------------------------
 
 def cmd_clear_pause(args) -> int:
@@ -5871,6 +5928,15 @@ def main() -> int:
     ag.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the ready: restamp of a stop at Integration)")
     ag.add_argument("--dry-run", action="store_true")
     ag.set_defaults(func=cmd_approve_gates)
+
+    gpr = sub.add_parser("gate-pricer", help="print each task's plan-judge pricer path (gated_inputs.py) as JSON, \"\" "
+                                             "while its standing approval is off; read-only (ADR 0038)")
+    gpr.add_argument("--tasks", required=True, help="comma-separated task slugs")
+    gpr.add_argument("--rollout", required=True,
+                     help="the rollout note, whose frontmatter and Project root resolve spend_approval_usd; the "
+                          "task's rollout: must name it")
+    gpr.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    gpr.set_defaults(func=cmd_gate_pricer)
 
     args = p.parse_args()
     return args.func(args)

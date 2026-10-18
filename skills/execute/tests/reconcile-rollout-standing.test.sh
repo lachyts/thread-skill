@@ -9,6 +9,11 @@
 #          included) remain; any other set-aside, a RACE or an UNVERIFIED keeps `stuck`.
 #   Q3-Q5  await-sign-off (the sign-off pause), status's pausedFor and clear-pause's STILL-AWAITING refusal, then the
 #          reinstate once signed (by hand, or by a raised standing approval).
+#   S7     ADR 0038's one-line gates through approve-gates --standing: p19-10's restated gate (cap 24 USD) and p19-5's
+#          (cap 50 USD total) are signed; p19-10's original one-line gate asks, naming its two `each`.
+#   G1-G4  gate-pricer (ADR 0038): the gated_inputs.py path while the standing approval is on, "" with its why while it
+#          is off (built-in 0, or a task stamp of 0), and exit 1 with an ERROR line and no stdout on a bad stamp or a
+#          refused rollouts.toml. It writes nothing.
 # Temp notes only; no vault, no network. HOME is pinned on every call that reaches rollout-settings.py (tests/run.sh
 # seeds a refused rollouts.toml in its scratch HOME). bash 3.2-compatible (macOS).
 set -uo pipefail
@@ -176,6 +181,66 @@ printf '\n## Integration log\n\n2026-10-13T10:00+00:00 set-aside path=integrator
   "$(printf 'a%.0s' $(seq 40))" "$(printf 'b%.0s' $(seq 40))" "$(printf 'c%.0s' $(seq 40))" >> "$D/a.md"
 sa a
 ok "$rc|$(fm a status)|$(fm a ready)" "0|status: review|ready: 2026-10-14T09:00+00:00" "S6: at Integration it goes to review with ready:"
+
+# ── S7: ADR 0038's one-line gates (a Cap that holds its split) ───────────────────────────────────────
+scen s7
+# p19-10's original gate, from its archived note's line 157 (the `## Approved plan` quote, `> - ` stripped).
+P19_10='spend: `claude plugin eval` re-runs of close-deletes-consumed-keeps-legacy and close-pending-doc-owns-continuation, --runs 3 each, Opus model and judge, before and after the fix plus at most one more iteration (up to 6 invocations, each --max-cost-usd 4) — cap 20 USD'
+ONE24='spend: claude plugin eval re-runs of the two close cases — cap 24 USD'
+ONE50='spend: two make evals runs, pre-trim and post-trim — cap 50 USD total'
+ORDER=$'- [[a]]\n- [[b]]\n- [[c]]' mkro
+mkt a gate-pending; gate a "$ONE24"
+mkt b gate-pending; gate b "$ONE50"
+mkt c gate-pending; gate c "$P19_10"
+before=$(cat "$D/c.md")
+sa a,b,c
+ok "$rc" 3 "S7: two signed, one asks: exit 3"
+has "$out" "a: gate approved under the standing approval: $ONE24 (exposure US\$24 of US\$50, file:defaults)" "S7: p19-10's restated gate signs US\$24"
+has "$out" "b: gate approved under the standing approval: $ONE50 (exposure US\$50 of US\$50, file:defaults)" "S7: p19-5's one-line gate signs US\$50"
+has "$out" "ASK: c: $P19_10: per/each outside the cap clause: each, each" "S7: p19-10's original gate asks, naming its two each"
+ok "$(cat "$D/c.md")" "$before" "S7: the unpriceable gate's note is untouched"
+
+# ── G1-G4: gate-pricer, the plan judge's pricer path for one call (ADR 0038) ─────────────────────────
+GI="$(cd "$HERE/../../_shared/scripts" && pwd -P)/gated_inputs.py"
+gp() {  # gp <home> <slugs> — gate-pricer; $out (stdout), $err (stderr), $rc
+  local h="$1" t="$2"
+  out=$(HOME="$h" python3 "$SCRIPT" gate-pricer --tasks "$t" --rollout "$D/ro.md" --tasks-dir "$D" 2>"$TMP/gp.err"); rc=$?
+  err=$(cat "$TMP/gp.err")
+}
+scen g1
+mkro; mkt a open; mkt b in_progress
+before=$(cat "$D/ro.md" "$D/a.md" "$D/b.md"); ev=$(events | wc -l | tr -d ' ')
+gp "$H50" a,b
+ok "$rc|$err" "0|" "G1: exit 0, nothing on stderr"
+ok "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" 2 "G1: one JSON line per slug"
+ok "$(q "$(printf '%s\n' "$out" | head -1)" '[d["slug"], d["limit"], d["source"], d["why"], sorted(d)]')" '["a",50,"file:defaults","",["gatePricer","limit","slug","source","why"]]' "G1: on at 50 from file:defaults, the keys"
+gpath=$(q "$(printf '%s\n' "$out" | head -1)" 'd["gatePricer"]')
+ok "$gpath" "\"$GI\"" "G1: gatePricer is the plugin's gated_inputs.py"
+case "$GI" in /*/gated_inputs.py) [ -f "$GI" ] && echo "ok   - G1: an absolute path to an existing file" || { echo "FAIL - G1: $GI is no file"; fail=1; } ;; *) echo "FAIL - G1: $GI not absolute"; fail=1 ;; esac
+ok "$(cat "$D/ro.md" "$D/a.md" "$D/b.md")|$(events | wc -l | tr -d ' ')" "$before|$ev" "G1: it writes nothing and records nothing"
+scen g2
+mkro; mkt a open
+gp "$HE" a
+ok "$rc" 0 "G2: the built-in 0 exits 0"
+ok "$(q "$out" '[d["gatePricer"], d["limit"], d["source"], d["why"]]')" '["",0,"built-in","standing approval off (built-in 0)"]' "G2: off, gatePricer \"\""
+scen g3
+mkro; mkt a open 'spend_approval_usd: 0'
+gp "$H50" a
+ok "$(q "$out" '[d["gatePricer"], d["limit"], d["source"], d["why"]]')" '["",0,"task","standing approval off (task 0)"]' "G3: a task stamp of 0 turns it off for that task"
+scen g4
+mkro; mkt a open 'spend_approval_usd: fifty'; mkt b open
+gp "$H50" a
+ok "$rc|$out" "1|" "G4: a bad stamp exits 1 with no stdout"
+has "$err" "ERROR: a: spend_approval_usd on [[a]] must be an integer >= 0" "G4: … and an ERROR line naming it"
+gp "$HR" b
+ok "$rc|$out" "1|" "G4: a refused rollouts.toml exits 1 with no stdout"
+has "$err" "ERROR: b: rollout settings refused" "G4: … and an ERROR line"
+sed -i.bak 's/^rollout: .*/rollout: "[[other]]"/' "$D/b.md" && rm -f "$D/b.md.bak"
+gp "$H50" b
+ok "$rc|$out" "1|" "G4: a task of another rollout exits 1 with no stdout"
+has "$err" "its rollout: is" "G4: … naming its rollout"
+gp "$H50" nope
+ok "$rc|$out" "1|" "G4: a missing note exits 1 with no stdout"
 
 # ── Q1: only gate-pending tasks and their queued dependants remain ───────────────────────────────────
 scen q1
