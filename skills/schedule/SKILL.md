@@ -217,6 +217,7 @@ It prints one JSON line: each key's `value` and its `source`, `file:repo` (the f
 - **A non-zero exit stops the run before this run writes a rollout note or a task stamp**: print its stderr line verbatim (`rollout-settings: <path>:<line>: <reason>`, or `rollout-settings: --repo <p>: <reason>`) with the remedy "edit `~/.config/thread/rollouts.toml` at the named line, then re-run". Exit 3 adds "needs python ≥ 3.11" (a present file needs tomllib). A bad value is refused loudly, never dropped (ADR 0016).
 - **On success**, name each value and its source in the confirm batch (e.g. `parallel_ceiling 5 (file:repo), max_review_rounds 4 (built-in), …`) and store them for step 6's four settings substitutions.
 - **`spend_approval_usd`** resolves here too (ADR 0034: the standing approval's limit in US dollars; built-in `0`, which is off). Name it beside the four (`standing approval 50 USD (file:defaults)`, or `standing approval off (built-in 0)`) for § 3.6's ask-ahead question. It is never stamped on the rollout: execute's `approve-gates --standing` resolves it itself at run time.
+- **`verify_slots`** resolves here too (machine-wide, `[defaults]` only, built-in 2): name it in the confirm batch; it is never stamped on the rollout, and execute's `verify-timeout` reads it at each entry.
 
 ### 3. Extract dependencies
 

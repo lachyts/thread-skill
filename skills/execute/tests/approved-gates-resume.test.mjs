@@ -174,6 +174,7 @@ const ARG_VARIANTS = [
   { name: 'knownBaselineFailures', args: { knownBaselineFailures: ['test_x — env (pre-existing)'] }, task: {} },
   { name: 'ignoreGate', args: {}, task: { ignoreGate: true } },
   { name: 'legacy model and effort', args: {}, task: { model: 'fable', effort: 'max' } },
+  { name: 'verifySlot', args: { verifySlot: { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 } }, task: {} },
 ]
 
 // Every render the engine can produce from a task object, as (E, task, a, st, c) → string. `c` carries the

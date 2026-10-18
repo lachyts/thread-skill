@@ -1,7 +1,8 @@
 // skills/_shared/scripts/rollout-settings.py — the resolver for the operator's rollout settings (p15-4, ADR 0032).
 //
-// The file is `~/.config/thread/rollouts.toml`, ladder.toml's sibling: `[defaults]` (the six rollout keys: the four
-// Tuning keys, execute's `auto_retries`, p16-4, and the standing approval's `spend_approval_usd`, ADR 0034),
+// The file is `~/.config/thread/rollouts.toml`, ladder.toml's sibling: `[defaults]` (the seven rollout keys: the four
+// Tuning keys, execute's `auto_retries`, p16-4, the standing approval's `spend_approval_usd`, ADR 0034, and the
+// machine-wide `verify_slots`, p23-4, which a repo table may not hold),
 // `[guardrails]` (the Reflection's bounds) and `[repo."owner/name"]` tables keyed by the GitHub origin that
 // `land.sh --origin-slug` reads from the local clone. No file gives the built-in values. A present file that
 // does not validate is refused with one `rollout-settings: <path>[:<line>]: <reason>` line (ADR 0016's typo
@@ -22,16 +23,19 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPT = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings.py')
 // KEYS are the four Tuning keys (run_record.py's TUNING_KEYS, tune.py and score.py read them); SETTING_KEYS adds
 // `auto_retries` (p16-4: execute's automatic retries, >= 0, not Reflection-tunable) and `spend_approval_usd` (ADR 0034: the
-// standing approval's limit in US dollars, >= 0, built-in 0 = off, not Reflection-tunable): every key a `settings` object holds.
+// standing approval's limit in US dollars, >= 0, built-in 0 = off, not Reflection-tunable) and `verify_slots` (p23-4: the
+// machine's verify slots, >= 1, built-in 2, [defaults] only): every key a `settings` object holds.
 const KEYS = ['parallel_ceiling', 'max_review_rounds', 'max_iterations', 'max_plan_rounds']
-const SETTING_KEYS = [...KEYS, 'auto_retries', 'spend_approval_usd']
-const MINIMUM = { parallel_ceiling: 1, max_review_rounds: 1, max_iterations: 1, max_plan_rounds: 1, auto_retries: 0, spend_approval_usd: 0 }
+const SETTING_KEYS = [...KEYS, 'auto_retries', 'spend_approval_usd', 'verify_slots']
+const MINIMUM = { parallel_ceiling: 1, max_review_rounds: 1, max_iterations: 1, max_plan_rounds: 1, auto_retries: 0, spend_approval_usd: 0,
+  verify_slots: 1 }
 // review_churn_pct (p21-3): Review churn's absolute bound, built-in 40.
 // hours_per_task (p21-2): the Throughput Guardrail's bound, running hours per task whose Slot or lane holding overlaps
 // the window.
 const GUARDRAIL_KEYS = ['tokens_per_merge_pct', 'set_aside_rate_points', 'conflict_rate_points', 'quota_stalls', 'review_churn_pct',
   'hours_per_task']
-const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, auto_retries: 2, spend_approval_usd: 0 }
+const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, auto_retries: 2, spend_approval_usd: 0,
+  verify_slots: 2 }
 const GUARDRAILS_BUILT_IN = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0,
   review_churn_pct: 40, hours_per_task: 1.5 }
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
@@ -173,6 +177,26 @@ test('R2 spend_approval_usd (ADR 0034): built-in 0 (off); [defaults] sets it, a 
   expectValues(out, { spend_approval_usd: 20 }, { spend_approval_usd: 'file:repo' })
 })
 
+test('R2 verify_slots (p23-4): built-in 2; [defaults] sets it (file:defaults)', (t) => {
+  const home = tmpHome(t)
+  assert.deepEqual(resolves(home).settings.verify_slots, { value: 2, source: 'built-in' })
+  writeSettings(home, ['[defaults]', 'verify_slots = 3'])
+  expectValues(resolves(home), { verify_slots: 3 }, { verify_slots: 'file:defaults' })
+  writeSettings(home, ['[defaults]', 'verify_slots = 1'])
+  expectValues(resolves(home), { verify_slots: 1 }, { verify_slots: 'file:defaults' })
+  writeSettings(home, ['[defaults]', 'verify_slots = 4', '[repo."o/r"]', 'parallel_ceiling = 2'])
+  const out = resolves(home, ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')])
+  expectValues(out, { verify_slots: 4, parallel_ceiling: 2 }, { verify_slots: 'file:defaults', parallel_ceiling: 'file:repo' })
+})
+
+test('R2 verify_slots in a repo table is refused at its line (machine-wide), with and without --repo', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['[defaults]', 'verify_slots = 2', '[repo."o/r"]', 'parallel_ceiling = 2', 'verify_slots = 1'])
+  const why = /\[repo\."o\/r"\] verify_slots is machine-wide: set it under \[defaults\]/
+  refused(home, { line: 5, reason: why })
+  refused(home, { line: 5, reason: why, args: ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')] })
+})
+
 // ---- R3: a repo override -----------------------------------------------------------------------------------
 
 test('R3 auto_retries in a repo table overrides [defaults] (file:repo)', (t) => {
@@ -238,8 +262,13 @@ const REFUSALS = [
   ['an unknown key in [defaults]', ['[defaults]', 'max_review_rounds = 3', 'paralel_ceiling = 3'], 3,
     /\[defaults\]: unknown key "paralel_ceiling"/],
   ['an unknown key in a repo table', ['[repo."o/r"]', 'max_rounds = 3'], 2, /\[repo\."o\/r"\]: unknown key "max_rounds"/],
-  ['an unknown key names all six rollout keys', ['[defaults]', 'auto_retry = 1'], 2,
-    /unknown key "auto_retry" \(a rollout table holds parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, auto_retries, spend_approval_usd\)/],
+  ['an unknown key names all seven rollout keys', ['[defaults]', 'auto_retry = 1'], 2,
+    /unknown key "auto_retry" \(a rollout table holds parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, auto_retries, spend_approval_usd, verify_slots\)/],
+  ['verify_slots = 0', ['[defaults]', 'verify_slots = 0'], 2, /\[defaults\] verify_slots must be an integer >= 1, got 0/],
+  ['verify_slots = true', ['[defaults]', 'verify_slots = true'], 2, /verify_slots must be an integer >= 1, got a boolean/],
+  ['verify_slots = 1.5', ['[defaults]', 'verify_slots = 1.5'], 2, /verify_slots must be an integer >= 1, got a float/],
+  ['verify_slots = "2"', ['[defaults]', 'verify_slots = "2"'], 2, /verify_slots must be an integer >= 1, got a string/],
+  ['a dotted repo verify_slots', ['repo."o/r".verify_slots = 2'], 1, /\[repo\."o\/r"\] verify_slots is machine-wide/],
   ['spend_approval_usd = -1', ['[defaults]', 'spend_approval_usd = -1'], 2, /\[defaults\] spend_approval_usd must be an integer >= 0, got -1/],
   ['spend_approval_usd = 50.5', ['[defaults]', 'spend_approval_usd = 50.5'], 2, /spend_approval_usd must be an integer >= 0, got a float/],
   ['spend_approval_usd = "50"', ['[defaults]', 'spend_approval_usd = "50"'], 2, /spend_approval_usd must be an integer >= 0, got a string/],

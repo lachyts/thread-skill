@@ -307,6 +307,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   in `next`'s order: a task a queued task depends on, directly or through a
   folded member (`merged_into:`), first, then the oldest `ready:`, then schedule
   order. _Avoid_: the lane (that is the step, not the line).
+- **Verify slot** — one of the machine's `verify_slots` places a verifier suite
+  runs in, shared by every rollout on the machine (p23-4,
+  `scripts/verify-slot.py`): the lead's Integration and RACE verifies and every
+  agent's engine-rendered verifier take one, and a further suite waits rather
+  than piling on. Each slotted suite runs under a guard that ends a killed
+  holder's suite before its verify slot frees. The Integration priority: the
+  lead's Integration and RACE verifies, and the integrate call's own verifier
+  runs (`run --priority`), go before any task call's agent. Not a **Slot** (a
+  task's run in a Queue). _Avoid_: bare "slot", lock, semaphore.
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).
@@ -573,7 +582,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   resolved by `rollout-settings.py` and stamped into each rollout note by
   schedule, except `auto_retries` and the Standing approval's
   `spend_approval_usd`, which the execute verbs resolve themselves and
-  schedule never stamps. _Avoid_: hardcoded defaults, config.
+  schedule never stamps, and `verify_slots`, which is machine-wide
+  (`[defaults]` only), never stamped, and read by execute's `verify-timeout`
+  at each loop entry. That read validates the whole file, so a refused file
+  halts every rollout on the machine at its next entry; write a key only once
+  the installed plugin knows it. _Avoid_: hardcoded defaults, config.
 
 ## Model ladder
 

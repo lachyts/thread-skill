@@ -51,6 +51,18 @@ export const meta = {
 //                                    //   reconcile-rollout.py, and the engine only RELAYS the line via
 //                                    //   log() for live /workflows visibility. Absent/empty ⇒ no extra log
 //                                    //   line (byte-identical).
+//   verifySlot  : object,            // optional (p23-4); { script, slots }: the absolute path of
+//                                    //   skills/execute/scripts/verify-slot.py and the machine's verify_slots
+//                                    //   (execute § 3's verify-timeout `verifySlots`). Set ⇒ every verifier line
+//                                    //   the engine renders runs as `<scrub> python3 '<script>' run --slots N --
+//                                    //   bash -c '<verifier>'` (slotted), so at most N suites run at once on the
+//                                    //   machine, with SLOT_TEXT beside it; the four TASK_TREE_RULE agents carry
+//                                    //   slotRule after KILL_RULE; and the integrate call's line carries
+//                                    //   `--priority` (engine-only: verifySlotArgsError refuses any key but script
+//                                    //   and slots, so no lead can give a task call the Integration priority).
+//                                    //   Absent/null ⇒ every prompt byte-identical. Validated before any dispatch,
+//                                    //   in both modes. A resume re-passes its call's own args, so a call launched
+//                                    //   without it is resumed without it.
 //   task        : {                  // exactly ONE task object. An args object carrying
 //                                    //   `waves` (the pre-p12-5 shape) is refused before
 //                                    //   any dispatch, as is a missing, null or array `task`.
@@ -373,6 +385,36 @@ const RM_RULE = 'Removing files (hard rule, the 2026-10-01 stall): remove a scra
 // replays on that engine.
 const KILL_RULE = 'Stopping processes (hard rule, the 2026-10-04 incident): stop only a process you started yourself, by the pid or process group you recorded when you started it (`kill <pid>`, `kill -- -<pgid>`). Never stop one by name or pattern (`pkill`, `killall`, `kill $(pgrep ...)`): the lead, other agents and other sessions run the same verifier on this machine, and an implementer whose `pkill -n` on the verifier pattern killed the Integration verify of the lead is why this rule exists.'
 
+// Verify slots (p23-4, Chorus ADR 0098 d6): at ceiling 4 every agent's verifier is a full suite, and on 2026-10-17
+// uncapped suites from several sessions drove one machine to load 66 and lost a merge to a load flake. With
+// args.verifySlot set, every verifier line the engine renders goes through scripts/verify-slot.py, which holds
+// one of the machine's `verify_slots` slots for the suite's life and ends the suite (its guard) if the wrapper is
+// killed. shq quotes one POSIX word ('…', each ' written '\''), so the verifier reaches `bash -c` byte for byte.
+function shq(s) {
+  return `'${String(s).replace(/'/g, "'\\''")}'`
+}
+
+// The verifier line an agent runs: scrubbed() when slot is absent (byte-identical); else the scrub, then the
+// wrapper, with `--priority` only from integrationVerify (the serial lane's own agent verifier).
+function slotted(verifier, slot) {
+  if (!slot) return scrubbed(verifier)
+  return `${GIT_ENV_SCRUB} python3 ${shq(slot.script)} run --slots ${slot.slots}${slot.priority ? ' --priority' : ''} -- bash -c ${shq(verifier)}`
+}
+
+// What an agent needs to know about the wrapped line. Static, single-quoted, one line: no apostrophe, no git span.
+const SLOT_TEXT = 'The wrapped verifier first waits for a free verify slot on this machine (a `verify-slot: waiting …` line on stderr): that wait is not a failure or a hang and never counts as an iteration. Run it in the background with a long timeout (up to 7200000 ms) and wait for it. To stop your own run, kill the wrapper by the pid you recorded (`kill <pid>`): its guard ends the suite with it. Never run the bare verifier, and never stop a run of another session.'
+
+// SLOT_TEXT beside a verify block's `- Verifier:` line; '' when slot is absent.
+function slotNote(slot) {
+  return slot ? `\n- Verify slot: ${SLOT_TEXT}` : ''
+}
+
+// The TASK_TREE_RULE agents' side (planner, investigator, plan judge, plan reviser): rule (iii) invites a verifier
+// run, so when slot is set they get the exact wrapped line after KILL_RULE; '' when it is absent (byte-identical).
+function slotRule(verifier, slot) {
+  return slot ? `\n\nVerify slot (hard rule, p23-4): if you run the verifier, run exactly \`${slotted(verifier, slot)}\`. ${SLOT_TEXT}` : ''
+}
+
 // The read-only agents' side of the pinned task tree (ADR 0030, p12-4). The planner, plan judge, plan
 // reviser and investigator all work in the task's ONE worktree (taskTreeSetup below), which the
 // implementer then builds in — so what they may touch there is narrow: read under the tree, map the
@@ -596,11 +638,11 @@ on account of it; proceed with the task as specified.`
 
 // baseline (item 2): array of "test_id — reason" lines, or empty/undefined. When empty the returned text is
 // BYTE-IDENTICAL to the pre-item-2 template (resume-cache invariant — do NOT edit the empty branch below).
-function ralphLoop(verifier, maxIterations, baseline) {
+function ralphLoop(verifier, maxIterations, baseline, slot) {
   if (baseline && baseline.length) {
     return `
 Verification loop (Ralph-style):
-- Verifier: ${scrubbed(verifier)}
+- Verifier: ${slotted(verifier, slot)}${slotNote(slot)}
 - Max iterations: ${maxIterations}
 - KNOWN BASELINE FAILURES (pre-existing, environmental — NOT yours; keep running the full verifier, do NOT
   \`--deselect\`/skip them — that hides real regressions):
@@ -620,7 +662,7 @@ ${baseline.map((b) => '  - ' + b).join('\n')}
   }
   return `
 Verification loop (Ralph-style):
-- Verifier: ${scrubbed(verifier)}
+- Verifier: ${slotted(verifier, slot)}${slotNote(slot)}
 - Max iterations: ${maxIterations}
 - For i = 1 .. ${maxIterations}:
   a. Run the verifier.
@@ -635,7 +677,7 @@ Verification loop (Ralph-style):
 // A first pass below the top rung does NOT iterate — one verifier run, then either green or a hand-over one
 // rung up. Iteration is evidence of hardness, and iteration runs on the rung above (see The ladder below).
 // baseline: same "test_id — reason" array as ralphLoop; the green criterion stays baseline-aware.
-function oneShotVerify(verifier, baseline) {
+function oneShotVerify(verifier, baseline, slot) {
   const green = baseline && baseline.length ? `
 - KNOWN BASELINE FAILURES (pre-existing, environmental — NOT yours; keep running the full verifier, do NOT
   \`--deselect\`/skip them — that hides real regressions):
@@ -646,7 +688,7 @@ ${baseline.map((b) => '  - ' + b).join('\n')}
 - GREEN CRITERION: the verifier exits 0 — the work is verified.`
   return `
 Verification (ONE-SHOT first pass — you do NOT iterate):
-- Verifier: ${scrubbed(verifier)}
+- Verifier: ${slotted(verifier, slot)}${slotNote(slot)}
 - Run the verifier EXACTLY ONCE.${green}
 - If green: the work is verified — proceed.
 - If red (any failure outside the green criterion): do NOT attempt a fix, do NOT run the verifier again,
@@ -661,10 +703,10 @@ Verification (ONE-SHOT first pass — you do NOT iterate):
 // first pass BELOW the top rung gets the one-shot (hand over one rung up on the first red); the retry after
 // the stage's climb, and every pass on the top rung, get the full Ralph loop — on the top there is no rung
 // to hand to.
-function verifyBlock(st, verifier, maxIterations, baseline) {
+function verifyBlock(st, verifier, maxIterations, baseline, slot) {
   return !onTop(st) && !climbOf(st, 'implement')
-    ? oneShotVerify(verifier, baseline)
-    : ralphLoop(verifier, maxIterations, baseline)
+    ? oneShotVerify(verifier, baseline, slot)
+    : ralphLoop(verifier, maxIterations, baseline, slot)
 }
 
 // Escalation hand-over context (empty-when-unused, like baselineManifest/gateOverride — the non-empty
@@ -799,7 +841,7 @@ Steps:
 2. If the fix is well-defined, work test-first (write the failing test before the fix). Use the
    superpowers:test-driven-development skill if applicable.
 3. If the task is investigation-first, produce findings, propose a fix in the task note, then implement.
-4. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
+4. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot)}
 5. If the verifier passed: open a PR titled \`audit-fix: <task subject>\`. The body must link the task
    note and explain what changed and why.
 6. Return your structured result: verified, blocked, escalate (as your verification block instructs;
@@ -830,12 +872,12 @@ ${GIT_ENV_RULE}
 
 ${RM_RULE}
 
-${KILL_RULE}
+${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
 Steps:
 1. Read the task note in full + every file it references (under the task tree).
 2. Run the read-only investigation it asks for (greps, reading tests, and a baseline verifier run to OBSERVE:
-   run it as \`${scrubbed(task.verifier || a.verifier)}\` from the task tree).
+   run it as \`${slotted(task.verifier || a.verifier, a.verifySlot)}\` from the task tree).
 3. Append your findings to the task note under a "## Findings" heading, starting with
    \`Investigated on: <sha from the setup's tree base: line>\` followed verbatim by any \`tree NOT refreshed:\`
    line the setup printed — concrete, with file:line refs.
@@ -865,14 +907,14 @@ ${GIT_ENV_RULE}
 
 ${RM_RULE}
 
-${KILL_RULE}
+${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
 Steps:
 1. Read the task note in full + every source file it references. Do not skim. ${PRIOR_FEEDBACK_NOTE}
 2. Read-only investigation to back the plan:
    - grep for sibling sites of the same anti-pattern across the file + codebase
    - identify callers of any function you intend to change/add
-   - run the verifier ONCE from the task tree to capture the baseline (\`${scrubbed(a.verifier)}\`) — observe only, write no fix code
+   - run the verifier ONCE from the task tree to capture the baseline (\`${slotted(a.verifier, a.verifySlot)}\`) — observe only, write no fix code
    - skim related tests
 3. Produce a plan whose FIRST line is \`Planned on: <sha from the setup's tree base: line>\`, followed verbatim
    by any \`tree NOT refreshed:\` or \`tree NOT attached\` line the setup printed, then EXACTLY these
@@ -938,7 +980,7 @@ ${GIT_ENV_RULE}
 
 ${RM_RULE}
 
-${KILL_RULE}
+${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
 Read the brief and grep the task tree as needed to verify the plan's claims — do not approve on faith.
 Decide: verdict "approve" if the plan is sound (clean or trivially nitpicky), else "changes" with 3–8
@@ -970,7 +1012,7 @@ ${GIT_ENV_RULE}
 
 ${RM_RULE}
 
-${KILL_RULE}
+${KILL_RULE}${slotRule(task.verifier || a.verifier, a.verifySlot)}
 
 Run additional READ-ONLY investigation in the task tree as needed. Rewrite the plan so that its
 FIRST line is \`Planned on: <sha from your setup's tree base: line>\`, followed verbatim by any \`tree NOT
@@ -1009,7 +1051,7 @@ blockerDiagnosis="plan-divergence: <one line>" instead of forging ahead.
 
 Steps:
 1. Implement the plan (test-first where the plan says so). ${PRIOR_FEEDBACK_NOTE}
-2. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
+2. ${verifyBlock(st, task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot)}
 3. On verifier pass: open a PR titled \`audit-fix: <task subject>\`, body links the task note + explains the change.
 4. Return your structured result: verified, blocked, escalate (as your verification block instructs; false
    otherwise), prUrl, branch, worktreePath (\`${GIT_ENV_SCRUB} git rev-parse --show-toplevel\`), blockerDiagnosis, summary.
@@ -1091,7 +1133,7 @@ ${latest.feedback.map((f) => '- ' + f).join('\n')}${guard}${stepBackBlock(priorF
 
 Push new commits to the existing branch (the PR auto-updates) — do NOT open a new PR.
 
-${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)}
+${ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot)}
 
 ${BUG_PREFLIGHTS}
 
@@ -1425,6 +1467,21 @@ function ladderArgsError(l) {
       if (!LADDER_EFFORTS.includes(r[k])) return `${at} (${r.name}): ${k} ${JSON.stringify(r[k])} is not one of ${LADDER_EFFORTS.join(', ')}`
     }
   }
+  return ''
+}
+
+// args.verifySlot (p23-4): '' when usable (or absent), else why not. Exactly { script, slots }: the absolute,
+// single-line path of verify-slot.py and an integer >= 1. Any other key (`priority` included: only
+// integrationVerify sets it, on its own copy) is a lead bug, refused before any dispatch in both modes.
+function verifySlotArgsError(v) {
+  if (v === undefined || v === null) return ''
+  if (typeof v !== 'object' || Array.isArray(v)) return `must be one object { script, slots }, got ${JSON.stringify(v)}`
+  const keys = Object.keys(v).sort()
+  if (keys.length !== 2 || keys[0] !== 'script' || keys[1] !== 'slots') return `must hold exactly script and slots, got keys ${JSON.stringify(Object.keys(v))}`
+  if (typeof v.script !== 'string' || !v.script.startsWith('/') || /[\r\n]/.test(v.script) || v.script.split('/').pop() !== 'verify-slot.py') {
+    return `script must be the absolute, single-line path of verify-slot.py, got ${JSON.stringify(v.script)}`
+  }
+  if (!Number.isInteger(v.slots) || v.slots < 1) return `slots must be an integer >= 1, got ${JSON.stringify(v.slots)}`
   return ''
 }
 
@@ -2390,7 +2447,8 @@ function integrationJudgeCheck(a, task, I, j) {
 // one-shot hand-over) with the note write replaced — the engine records the diagnosis with its marker.
 function integrationVerify(task, a) {
   const noteWrite = 'Also append that diagnosis to the task note under a "## Blocker diagnosis" heading.'
-  return ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures)
+  // The serial lane's own agent verifier: the only render with the Integration priority (p23-4).
+  return ralphLoop(task.verifier || a.verifier, task.maxIterations, a.knownBaselineFailures, a.verifySlot && { ...a.verifySlot, priority: true })
     .replace(noteWrite, 'Write nothing to the task note (the engine records the diagnosis), and push nothing.')
 }
 
@@ -2783,6 +2841,9 @@ if (mode !== 'task' && mode !== 'integrate') throw new Error(`args.mode: refusin
 // one is a lead bug, refused before any dispatch in both modes; an absent one is the built-in ladder.
 const badLadder = ladderArgsError(a.ladder)
 if (badLadder) throw new Error('args.ladder: ' + badLadder)
+// args.verifySlot (p23-4): the machine's verify slots, or absent. A malformed one is a lead bug, refused here.
+const badSlot = verifySlotArgsError(a.verifySlot)
+if (badSlot) throw new Error('args.verifySlot: ' + badSlot)
 // Printed at every call, so a run's log names the ladder it ran on (a path, or built-in).
 function logLadder() {
   const L = ladderOf(a)

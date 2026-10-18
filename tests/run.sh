@@ -7,8 +7,15 @@
 #
 # Discovery is by explicit globs, not bare `node --test` (which walks the whole tree): node:test files
 # and plain exit-code scripts both run under `node --test`; shell suites and the merge-task self-tests
-# run concurrently; output is printed grouped per suite in the original order. New suites join by
-# filename — including the protocol 4 branch's, unchanged.
+# run concurrently; output is printed grouped per suite in spawn order. New suites join by filename —
+# including the protocol 4 branch's, unchanged.
+#
+# Capped (p23-4): at most `suite_cap` background suites run at once (tests/lib/test-jobs.sh: THREAD_TEST_JOBS,
+# else max(2, ceil(cores / 3)), 4 on 12 cores), and node runs that many test files at once. The suites spawn
+# roughly longest-first: the two merge-task self-tests (reported before node, as always), then the shell suites
+# by file size, largest first (`ls -S`; no suite path holds a space, tests/test-jobs.test.sh pins it), so no
+# static list can drift. THREAD_VERIFY_SLOTS_DIR points into scratch, so a suite that takes a verify slot
+# (verify-slot.py) never waits on the machine's pool, nor an inner `make test` on its outer wrapper's slot.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$(pwd)
@@ -44,6 +51,9 @@ printf '%s\n' '# Seeded by tests/run.sh and refused on purpose: a suite that rea
 # file>/events make test` runs them all against an unwritable record (p15-2: recording never breaks a verb).
 # The suites that read the record (run-record, the fold and record suites) keep their own dir.
 export THREAD_EVENTS_DIR="${THREAD_TEST_EVENTS_DIR:-$scratch/events}"; unset XDG_STATE_HOME
+# The machine's verify slots (verify-slot.py, p23-4) stay in temp too: each suite that reaches a pool exports its
+# own (tests/contracts/verify-slot-hermetic.test.mjs), so this is the backstop.
+export THREAD_VERIFY_SLOTS_DIR="$scratch/verify-slots"
 export GIT_CONFIG_GLOBAL="$scratch/gitconfig"
 # A git hook running `make test` exports GIT_DIR & co. (and `git -c ...` exports GIT_CONFIG_PARAMETERS);
 # left set, every git call below and every suite's temp-repo git call (commits, pushes included) would land
@@ -59,6 +69,9 @@ git config --global init.defaultBranch main
 stamp="$scratch/stamp"; : > "$stamp"
 python3 -c 'import os,sys; sys.exit(os.stat(sys.argv[1]).st_mtime_ns % 10**9 == 0)' "$stamp" || sleep 1
 
+. tests/lib/test-jobs.sh
+max_jobs=$(suite_cap) || { echo "make test: THREAD_TEST_JOBS must be a positive integer, got '${THREAD_TEST_JOBS:-}'"; exit 2; }
+
 fail=0
 failed=""
 step() {  # step <label> <cmd...>
@@ -69,7 +82,8 @@ step() {  # step <label> <cmd...>
 }
 
 n=0; labels=()
-spawn() {  # spawn <label> <cmd...> — run in background, capture output + exit code by index
+spawn() {  # spawn <label> <cmd...> — run in background once there is room, capture output + exit code by index
+  wait_for_room "$max_jobs"
   local label="$1"; shift
   labels[$n]=$label
   { "$@" > "$scratch/$n.out" 2>&1; echo $? > "$scratch/$n.rc"; } &
@@ -88,7 +102,8 @@ sh_files=(skills/*/scripts/*.sh hooks/*.sh tests/*.sh tests/lib/*.sh)
 py_files=(skills/*/scripts/*.py hooks/*.py)
 wf_files=(skills/*/*.workflow.js skills/*/diagnostics/*.workflow.js)
 node_tests=(skills/execute/tests/*.test.mjs tests/*.test.mjs tests/contracts/*.test.mjs)
-sh_tests=(skills/execute/tests/*.test.sh tests/*.test.sh)
+# Largest first: a cheap longest-first order (p23-4), so the long suites start before the cap fills.
+sh_tests=($(ls -S skills/execute/tests/*.test.sh tests/*.test.sh))
 
 syntax_sh() { local f r=0; for f in "$@"; do bash -n "$f" || r=1; done; return $r; }
 syntax_py() { python3 -c 'import ast, sys
@@ -98,13 +113,15 @@ for p in sys.argv[1:]:
 step "bash syntax (${#sh_files[@]} files)"     syntax_sh "${sh_files[@]}"
 step "python syntax (${#py_files[@]} files)"   syntax_py "${py_files[@]}"
 step "workflow parse (${#wf_files[@]} files)"  bash tests/lib/check-workflow-parse.sh "${wf_files[@]}"
-# Independent suites run concurrently (each builds under its own mktemp); node runs once they finish.
+# Independent suites run concurrently (each builds under its own mktemp), at most $max_jobs at a time; node runs
+# once they finish, at the same concurrency.
+echo "== suites: at most $max_jobs at a time"
 spawn "merge-task classifier self-test"        bash skills/execute/scripts/merge-task.sh --self-test-classify
 spawn "merge-task base self-test"              bash skills/execute/scripts/merge-task.sh --self-test-base
 for t in "${sh_tests[@]}"; do spawn "$t" bash "$t"; done
 wait
 report 0; report 1
-step "node tests (${#node_tests[@]} files)"    node --test "${node_tests[@]}"
+step "node tests (${#node_tests[@]} files)"    node --test --test-concurrency="$max_jobs" "${node_tests[@]}"
 i=2; while [ "$i" -lt "$n" ]; do report "$i"; i=$((i+1)); done
 
 # A run must leave the checkout exactly as it found it (no bytecode, no stray state files).

@@ -336,11 +336,17 @@ Subcommands:
               started; no --to without --dry-run. A failed save is exit 1 at once: the prior note is still
               open, so the next unfinished-rollout check pairs the two notes as interrupted.
 
-  verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2): given a rollout note,
-              print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": (N + 600) * 1000} from its
-              `verify_timeout` frontmatter (an integer from 1 to 6600; absent -> 1800; a quoted value or a
-              trailing ` # comment` is read as `parallel_ceiling` is). Anything else, or no note: one ERROR
-              line on stderr, exit 1, no stdout. Only the rollout note is read.
+  verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2, p23-4): given a rollout
+              note, print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
+              max(60, 7200 - 600 - N), "verifySlots": V} from its `verify_timeout` frontmatter (an integer
+              from 1 to 6600; absent -> 1800; a quoted value or a trailing ` # comment` is read as
+              `parallel_ceiling` is) and the machine's `verify_slots` (rollout-settings.py resolve(repo=None):
+              rollouts.toml's [defaults], else the built-in 2; never read from the note). harnessTimeoutMs is
+              the harness maximum; slotWait bounds the lead verify's wait for a verify slot, so the wait, the
+              verifier and the 600 s margin fit inside it. A bad `verify_timeout`, or no note: one ERROR line on
+              stderr, exit 1, no stdout (checked first). A refused rollouts.toml (the whole file is validated),
+              a present one on a python with no tomllib, or a resolver that will not load: `ERROR: rollout
+              settings refused: <the resolver's line>`, exit 3, no stdout.
 
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
               `pause_requested`, and `paused_for`) from the rollout note. Run by /thread:execute's resume path
@@ -740,11 +746,14 @@ APPROVED_PLAN_LEAD_IN = ("The last approved plan, kept as a record for Integrati
 NEEDS_HUMAN_SECTION = "## Needs you"
 
 # The lead's Integration verify timeout (p14-2, execute § 3): rollout frontmatter `verify_timeout`, seconds.
-# The harness bound on the background command is the verifier's own bound plus a margin, and the harness
-# maximum is 7200000 ms, so the key tops out at 7200 - 600.
+# The harness bound on the background command is the harness maximum, 7200000 ms (HARNESS_MAX_S); inside it fit
+# the verify-slot wait (p23-4: slotWait = max(VERIFY_SLOT_WAIT_MIN, HARNESS_MAX_S - VERIFY_HARNESS_MARGIN - N)),
+# the verifier's own bound N and a margin, so the key tops out at 7200 - 600.
 DEFAULT_VERIFY_TIMEOUT = 1800
 VERIFY_HARNESS_MARGIN = 600
 MAX_VERIFY_TIMEOUT = 6600
+HARNESS_MAX_S = 7200
+VERIFY_SLOT_WAIT_MIN = 60
 
 # Every workflow status with a body section to write (reconcile) or scan (status).
 SECTION_BY_STATUS = {**BLOCKED_SECTIONS, GATE_PENDING_STATUS: GATE_PENDING_SECTION}
@@ -1801,6 +1810,36 @@ def _gated():
     return _GATED
 
 
+_SETTINGS_MOD = None
+
+
+def _settings_module():
+    """rollout-settings.py as a module (loaded once per process; raises when it will not load)."""
+    global _SETTINGS_MOD
+    if _SETTINGS_MOD is None:
+        spec = importlib.util.spec_from_file_location("thread_rollout_settings", ROLLOUT_SETTINGS_PY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _SETTINGS_MOD = mod
+    return _SETTINGS_MOD
+
+
+def _machine_settings():
+    """(settings, error): rollout-settings.py's resolve(repo=None), the machine-wide view (p23-4: `verify_slots`):
+    rollouts.toml's [defaults], then the built-in, the whole file validated. error is the resolver's own words (a
+    refused file `<path>:<line>: <reason>`, no tomllib, a loader failure); never raises."""
+    try:
+        mod = _settings_module()
+    except Exception as e:
+        return None, f"rollout-settings.py would not load: {e}"
+    try:
+        return mod.resolve(repo=None)["settings"], None
+    except mod.SettingsError as e:
+        return None, str(e)
+    except Exception as e:
+        return None, f"rollout-settings.py failed: {e}"
+
+
 def _resolved_settings(rollout_note) -> dict:
     """rollout-settings.py's resolve() for the rollout note's Project root (repo=None when it has no Project root line):
     rollouts.toml's [repo."<slug>"], then [defaults], then the built-in. {settings, error, cause, where}: settings is
@@ -1811,9 +1850,7 @@ def _resolved_settings(rollout_note) -> dict:
     share; it writes nothing and never raises."""
     root = _project_root(rollout_note)
     try:
-        spec = importlib.util.spec_from_file_location("thread_rollout_settings", ROLLOUT_SETTINGS_PY)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+        mod = _settings_module()
     except Exception as e:
         return {"settings": None, "error": f"rollout-settings.py would not load: {e}", "cause": "resolver", "where": ""}
     try:
@@ -5628,9 +5665,11 @@ def cmd_await_sign_off(args) -> int:
 # ---- verify-timeout -----------------------------------------------------------
 
 def cmd_verify_timeout(args) -> int:
-    """The lead's per-entry check of the rollout's `verify_timeout` (execute § 3, p14-2). Read-only. Valid:
-    one JSON line {"verifyTimeout": N, "harnessTimeoutMs": (N + 600) * 1000}, exit 0. Invalid or no note:
-    one ERROR line on stderr, exit 1, and the lead's entry writes nothing."""
+    """The lead's per-entry check of the rollout's `verify_timeout` and the machine's `verify_slots` (execute § 3,
+    p14-2, p23-4). Read-only. Valid: one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
+    max(60, 7200 - 600 - N), "verifySlots": V}, exit 0. A bad verify_timeout or no note: one ERROR line on stderr,
+    exit 1 (checked first). A refused rollouts.toml: `ERROR: rollout settings refused: …`, exit 3. Either way the
+    lead's entry writes nothing."""
     path = Path(os.path.expanduser(args.rollout))
     if not path.exists():
         print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
@@ -5644,7 +5683,18 @@ def cmd_verify_timeout(args) -> int:
     if err:
         print(f"ERROR: {err}", file=sys.stderr)
         return 1
-    print(json.dumps({"verifyTimeout": seconds, "harnessTimeoutMs": (seconds + VERIFY_HARNESS_MARGIN) * 1000}))
+    settings, err = _machine_settings()
+    if err is None:
+        try:
+            slots = settings["verify_slots"]["value"]
+        except Exception as e:
+            err = f"rollout-settings.py failed: no verify_slots ({e})"
+    if err:
+        print(f"ERROR: rollout settings refused: {err}", file=sys.stderr)
+        return 3
+    print(json.dumps({"verifyTimeout": seconds, "harnessTimeoutMs": HARNESS_MAX_S * 1000,
+                      "slotWait": max(VERIFY_SLOT_WAIT_MIN, HARNESS_MAX_S - VERIFY_HARNESS_MARGIN - seconds),
+                      "verifySlots": slots}))
     return 0
 
 
@@ -5851,8 +5901,9 @@ def main() -> int:
     aw.add_argument("--dry-run", action="store_true")
     aw.set_defaults(func=cmd_await_sign_off)
 
-    vt = sub.add_parser("verify-timeout", help="print the rollout's verify_timeout and its harness timeout as JSON, "
-                                               "or exit 1 when invalid (read-only; execute § 3)")
+    vt = sub.add_parser("verify-timeout", help="print the rollout's verify_timeout, the harness timeout, the verify-slot "
+                                               "wait and the machine's verify_slots as JSON; exit 1 on a bad "
+                                               "verify_timeout, 3 on refused rollout settings (read-only; execute § 3)")
     vt.add_argument("--rollout", required=True, help="path to the rollout note")
     vt.set_defaults(func=cmd_verify_timeout)
 
