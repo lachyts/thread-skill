@@ -9,7 +9,9 @@
 // list), the answered set-asides (under a pause, `awaiting repair`, `left`), and
 // a halt's fixed act (so two sessions word one item alike and the dedupe holds), the engine's needs-human
 // question shown on the item's detail line and carried by its push, one push per item
-// deduped on a `## Needs-you log` line and led by its act, where that log lives in the rollout note, the turn
+// deduped on a `## Needs-you log` line and led by its act, its ntfy fallback when the push does not reach Lachy (ADR 0038
+// decision 3: `pushed via push`, `pushed via ntfy`, `push failed`) and the one retry of a failed delivery at the next
+// loop entry, where that log lives in the rollout note, the turn
 // ending `waiting`, the report's `Needs you:` block, the answers' existing routes, § 3.7's and § 7's sign-off,
 // the § 8 guardrail and the Don't, CONTEXT.md's glossary entry, and no other ask site outside § 6.5, § 8 and the
 // Don'ts but the exact exemptions below.
@@ -45,6 +47,14 @@ function labelled(text, sectionRe, label) {
   return collapse(lines.slice(i, j < 0 ? undefined : j).join('\n'))
 }
 const before = (hay, a, b) => hay.indexOf(a) >= 0 && hay.indexOf(b) >= 0 && hay.indexOf(a) < hay.indexOf(b)
+
+// One bullet of the collapsed *Push once* paragraph: from its `- **…**` head to the next bullet's head, or ''.
+function bullet(push, head) {
+  const i = push.indexOf(head)
+  if (i < 0) return ''
+  const j = push.indexOf(' - **', i + head.length)
+  return push.slice(i, j < 0 ? undefined : j)
+}
 
 // One kind of the collapsed *Needs-you items* list: from its `- (x) **…**` head to the next kind's head, or ''.
 function kind(items, head) {
@@ -126,16 +136,57 @@ function checkNeedsYou(skill, context = realContext) {
   }
 
   // push-dedupe: the push goes through PushNotification (loaded with ToolSearch, status "proactive"), only when no
-  // `## Needs-you log` line names the same slug and question, and is logged after the call returns; an item is
-  // never pushed again, a "not sent" counts as pushed, a tool error is logged as `push failed`, and nothing pushes
-  // on every turn or report.
+  // `## Needs-you log` line (`pushed via push:`, `pushed via ntfy:`, `push failed:` or a legacy `pushed:`) names the
+  // same slug and question, and is logged `pushed via push:` after the call returns; an item is never pushed again but
+  // for its one retry, a legacy `pushed:` line matches for good (the log cannot tell an undelivered one), a "not sent"
+  // at the terminal counts as pushed, a failed delivery is logged `push failed`, and nothing pushes on every turn or
+  // report.
   if (!push.includes('ToolSearch `select:PushNotification`') || !push.includes('`PushNotification`') ||
     !push.includes('`status: "proactive"`') || !push.includes('`## Needs-you log`') ||
-    !push.includes('the same `[[<slug>]]` and question') || !push.includes('never push it again') ||
-    !push.includes('**"Not sent"**') || !push.includes('still counts as pushed and is logged') ||
-    !push.includes('is logged as `- <now> [[<slug>]] push failed: <question>`') ||
-    !before(push, 'PushNotification', 'pushed: <question>') || /on every (turn|report)/i.test(push)) {
+    !push.includes('any of `pushed via push:`, `pushed via ntfy:`, `push failed:` or a legacy `pushed:`, with the same `[[<slug>]]` and question') ||
+    !push.includes('never push it again, on any later turn, heartbeat tick or session, but for *Retry once* below') ||
+    !push.includes('A legacy `pushed:` line matches for good, even one written after "not sent (Remote Control inactive)"') ||
+    !push.includes('**"Not sent"**') || !push.includes('still counts as pushed and is logged `pushed via push:`') ||
+    !push.includes('push failed: <question>') ||
+    !before(push, 'PushNotification', 'pushed via push: <question>') || /on every (turn|report)/i.test(push)) {
     fails.push('push-dedupe')
+  }
+
+  // ntfy-fallback (ADR 0038 d3): the push falls back to ntfy only when the tool reports Remote Control inactive or an
+  // error, never when it reports Lachy at the terminal, and a run with no push tool tries ntfy too. The lead runs
+  // ntfy-push.py with the same message in a quoted heredoc (nothing in the message expands), logs `pushed via ntfy:` on
+  // exit 0 and `push failed:` on every other exit (no topic, exit 4, included), so no report claims Lachy was told.
+  // The old "no push tool: nothing is logged" bullet is gone.
+  const ntfy = bullet(push, '- **The ntfy fallback.**')
+  if (!ntfy.includes('When `PushNotification` reports Remote Control inactive or an error') ||
+    !ntfy.includes('never when it reports Lachy at the terminal') ||
+    !ntfy.includes('and when there is no push tool (a Codex run, or ToolSearch cannot load it)') ||
+    !ntfy.includes("```bash python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/ntfy-push.py <<'NEEDS_YOU_ITEM' <the one-line message> NEEDS_YOU_ITEM ```") ||
+    !ntfy.includes('Exit 0 appends `- <now> [[<slug>]] pushed via ntfy: <question>`') ||
+    !ntfy.includes('Any other exit appends `- <now> [[<slug>]] push failed: <question>`, so no report claims Lachy was told') ||
+    !ntfy.includes('4, no topic set, the fallback skipped;') ||
+    !ntfy.includes('a refused rollouts.toml here never halts the rollout') ||
+    /nothing is logged/.test(push)) {
+    fails.push('ntfy-fallback')
+  }
+
+  // push-retry (ADR 0038 d3): a `push failed:` item is retried at most once more, at the next loop entry, before
+  // anything new is pushed, through the whole push (PushNotification first, then the fallback); a second failure
+  // matches for good; on every other turn one `push failed:` line still blocks a re-push; a legacy `push failed:`
+  // (the old tool-error rule) gets the one retry; the log is the counter, so the bound survives the sign-off pause. No
+  // interval is named: the retry rides the loop entries, never a heartbeat tick's 20 minutes.
+  const retry = bullet(push, '- **Retry once.**')
+  if (!retry.includes('such an item is retried at most once more, at the next loop entry') ||
+    !retry.includes("At each loop entry (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry, `/thread:repair`'s hand-off and a room stop's resume)") ||
+    !retry.includes('exactly one `push failed:` line and no `pushed via` or `pushed:` line') ||
+    !retry.includes('before anything new is pushed') ||
+    !retry.includes('the whole push again: `PushNotification` first, then *The ntfy fallback*') ||
+    !retry.includes('two `push failed:` lines match for good') ||
+    !retry.includes('On any other turn, a heartbeat tick that does not re-enter *Cold resume* included, a single `push failed:` line is a match and the item is never re-pushed') ||
+    !retry.includes('A `push failed:` line logged under the old rule (a tool error, with no fallback) is a single failure too and gets this one retry') ||
+    !retry.includes('The log is the counter') || !retry.includes('survives the pause') ||
+    /every heartbeat tick|20 min|\*\/20/i.test(retry)) {
+    fails.push('push-retry')
   }
 
   // kinds: (a) a gate sign-off from `## Gated inputs (awaiting sign-off)`; (b) an undecided RACE or UNVERIFIED from
@@ -203,7 +254,7 @@ function checkNeedsYou(skill, context = realContext) {
 
   // guardrails: the § 8 bullet and the Don't.
   if (!s8.includes('- **No question tool while work is in flight** (§ 6.5): an open question holds the turn, so neither the Stop hook nor the heartbeat runs and every notification queues; needs-you items go in the report with one push each.') ||
-    !donts.includes("- Never call the question tool (`AskUserQuestion`, or the harness's own ask tool) while a task call, an integrate call, a background Integration command or a merge hold is live, and never push a needs-you item a `## Needs-you log` line already names (§ 6.5).")) {
+    !donts.includes("- Never call the question tool (`AskUserQuestion`, or the harness's own ask tool) while a task call, an integrate call, a background Integration command or a merge hold is live, and never push a needs-you item a `## Needs-you log` line already names, but for its one retry at a loop entry after a single `push failed:` line (§ 6.5).")) {
     fails.push('guardrails')
   }
 
@@ -298,9 +349,12 @@ function checkNeedsYou(skill, context = realContext) {
 
   // glossary: CONTEXT.md defines the term, with its block, its log, § 6.5 and an Avoid list, so later tasks reuse it,
   // and tells the rollout note's `## Needs-you log` (the lead's push record) apart from the task note's
-  // `## Needs you` (p16-3, the engine's question), two near-identical section names.
+  // `## Needs you` (p16-3, the engine's question), two near-identical section names; it names the ntfy fallback and
+  // the bounded retry (ADR 0038 d3), with no interval.
   const entry = collapse(slice(context, /^- \*\*Needs-you item\*\*/, /^(- \*\*|#)/) ?? '')
-  if (!['`Needs you:` block', '`## Needs-you log`', 'execute § 6.5', '_Avoid_: pending question, ask item'].every((k) => entry.includes(k)) ||
+  if (!['`Needs you:` block', '`## Needs-you log`', 'execute § 6.5', '_Avoid_: pending question, ask item',
+    'falling back to ntfy', 'retried at most once more, at the next loop entry'].every((k) => entry.includes(k)) ||
+    /every heartbeat tick|20 min|\*\/20/i.test(entry) ||
     !entry.includes("never the task note's `## Needs you` (p16-3), which holds the question the engine stopped on")) {
     fails.push('glossary')
   }
@@ -361,8 +415,9 @@ test('the openings _raise_field reads, the needs-human exits it excludes, and th
 
 // ---- controls: each mutates the real text in one place and must fail with exactly its rule ---------
 
-const RULES = ['no-ask-in-flight', 'push-dedupe', 'kinds', 'turn-waiting', 'report-block', 'sign-off', 'guardrails',
-  'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'push-message', 'answers', 'answered-items', 'glossary']
+const RULES = ['no-ask-in-flight', 'push-dedupe', 'ntfy-fallback', 'push-retry', 'kinds', 'turn-waiting', 'report-block', 'sign-off',
+  'guardrails', 'no-other-ask', 'log-placement', 'set-aside-fix', 'needs-human-shown', 'halt-act', 'push-message', 'answers',
+  'answered-items', 'glossary']
 const CONTROLLED = new Set()
 
 // Replaces the one occurrence of `from`; a control whose target is missing or ambiguous fails its setup.
@@ -396,13 +451,39 @@ test('control: the rule removed, narrowed, or barred by the turn\'s state fails 
     'no-ask-in-flight', 'The turn drops the in-loop scope')
 })
 
-test('control: the push dedupe removed, a push on every report, or the log line first fails push-dedupe', () => {
+test('control: the push dedupe removed, a push on every report, the log line first, or legacy lines re-pushed fails push-dedupe', () => {
   only(edit(real, lineIn(real, S65, '- **A matching line exists:**'), ''), 'push-dedupe', 'push dedupe removed')
-  only(edit(real, 'on any later turn, heartbeat tick or session.', 'on any later turn, heartbeat tick or session. Re-push every open item on every report.'),
-    'push-dedupe', 'push on every report')
+  only(edit(real, 'on any later turn, heartbeat tick or session, but for *Retry once* below.',
+    'on any later turn, heartbeat tick or session, but for *Retry once* below. Re-push every open item on every report.'),
+  'push-dedupe', 'push on every report')
   only(edit(real, 'load the deferred tool with ToolSearch `select:PushNotification`, then call',
-    'append `- <now> [[<slug>]] pushed: <question>` to the log, then load the deferred tool with ToolSearch `select:PushNotification`, then call'),
+    'append `- <now> [[<slug>]] pushed via push: <question>` to the log, then load the deferred tool with ToolSearch `select:PushNotification`, then call'),
   'push-dedupe', 'logged before the push')
+  only(edit(real, ' A legacy `pushed:` line matches for good, even one written after "not sent (Remote Control inactive)": the log cannot tell which push it recorded.', ''),
+    'push-dedupe', 'the legacy pushed: clause deleted')
+})
+
+test('control: a fallback at the terminal, no topic read as delivered, the old no-push-tool bullet, or an unquoted heredoc fails ntfy-fallback', () => {
+  only(edit(real, ', never when it reports Lachy at the terminal,', ','), 'ntfy-fallback', 'falls back at the terminal')
+  only(edit(real, '4, no topic set, the fallback skipped; ', ''), 'ntfy-fallback', 'the exit-4 clause deleted')
+  only(edit(real, '- **Retry once.**',
+    "- **No push tool** (a Codex run, or ToolSearch cannot load it): nothing is logged, and the report's block carries the item.\n- **Retry once.**"),
+  'ntfy-fallback', 'the no-push-tool bullet restored')
+  only(edit(real, "ntfy-push.py <<'NEEDS_YOU_ITEM'", 'ntfy-push.py <<NEEDS_YOU_ITEM'), 'ntfy-fallback', 'the heredoc unquoted')
+})
+
+test('control: an unbounded retry, one off loop entries, a re-push on ordinary turns, ntfy alone, or the legacy, counter or ordering sentence gone fails push-retry', () => {
+  only(edit(real, 'exactly one `push failed:` line', 'a `push failed:` line'), 'push-retry', 'unbounded')
+  only(edit(real, "At each loop entry (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry",
+    "At every heartbeat tick (top-down, *Cold resume*, *Reinstate*, the § 5 heartbeat's re-entry"), 'push-retry', 'off loop entries')
+  only(edit(real, 'a single `push failed:` line is a match and the item is never re-pushed',
+    'an item whose only line is a single `push failed:` is pushed again'), 'push-retry', 'ordinary turns re-push after one failure')
+  only(edit(real, '`PushNotification` first, then *The ntfy fallback*', 'ntfy-push.py alone'), 'push-retry', 'ntfy only')
+  only(edit(real, ' A `push failed:` line logged under the old rule (a tool error, with no fallback) is a single failure too and gets this one retry.', ''),
+    'push-retry', 'the legacy sentence deleted')
+  only(edit(real, ' The log is the counter: the rollout note stays in `Work/Tasks/` through the sign-off pause (§ 4.5 step 5), so the count survives the pause and any new session.', ''),
+    'push-retry', 'the counter sentence deleted')
+  only(edit(real, ', before anything new is pushed,', ','), 'push-retry', 'the ordering deleted')
 })
 
 test('control: an item kind dropped, or (c) re-deriving its causes, fails kinds', () => {
@@ -518,9 +599,10 @@ test('control: CONTEXT.md without the entry, or without its Avoid list, fails gl
   only(real, 'glossary', 'no entry', edit(realContext, `${entry}\n`, ''))
   only(real, 'glossary', 'no Avoid list', edit(realContext, '_Avoid_: pending question, ask item,', ''))
   only(real, 'glossary', 'the two sections not told apart', edit(realContext, "never the task note's `## Needs you` (p16-3)", "the task note's `## Needs you` (p16-3)"))
+  only(real, 'glossary', 'the bounded retry removed', edit(realContext, 'retried at most once more, at the next loop entry', 'retried'))
 })
 
-test('the rules are all named (16) and each has a control', () => {
-  assert.equal(RULES.length, 16)
+test('the rules are all named (18) and each has a control', () => {
+  assert.equal(RULES.length, 18)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })

@@ -405,13 +405,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Needs-you item** — a decision in a running rollout that is Lachy's alone:
   a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside only a person
   moves on, a merge hold's release, or a halt. The lead lists it in the
-  report's `Needs you:` block and pushes it once, deduped on its line in the
-  rollout note's `## Needs-you log`, the lead's push record. That log is
-  never the task note's `## Needs you` (p16-3), which holds the question the
-  engine stopped on; an item whose entry carries one shows it on its detail
-  line. The lead never puts an item through the question tool while anything
-  the session launched is in flight, and the queue runs on without the answer
-  (execute § 6.5). _Avoid_: pending question, ask item, open question.
+  report's `Needs you:` block and pushes it once (falling back to ntfy when
+  the push does not reach him), deduped on its line in the rollout note's
+  `## Needs-you log`, the lead's push record; an item whose delivery failed
+  on every channel is retried at most once more, at the next loop entry, then
+  deduped (ADR 0038). That log is never the task note's `## Needs you` (p16-3),
+  which holds the question the engine stopped on; an item whose entry carries
+  one shows it on its detail line. The lead never puts an item through the
+  question tool while anything the session launched is in flight, and the
+  queue runs on without the answer (execute § 6.5).
+  _Avoid_: pending question, ask item, open question.
 - **Agent-fixable block** — a block a re-dispatched agent can resolve alone.
   The live lead re-enters these itself through `reconcile-rollout.py
   auto-retry`, up to `auto_retries` times (default 2; an infra block after a
@@ -573,7 +576,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   resolved by `rollout-settings.py` and stamped into each rollout note by
   schedule, except `auto_retries` and the Standing approval's
   `spend_approval_usd`, which the execute verbs resolve themselves and
-  schedule never stamps. _Avoid_: hardcoded defaults, config.
+  schedule never stamps. The machine-wide `[notify]` table holds
+  `ntfy_topic`, read only by execute's needs-you fallback (ADR 0038) and
+  never stamped. _Avoid_: hardcoded defaults, config.
 
 ## Model ladder
 
