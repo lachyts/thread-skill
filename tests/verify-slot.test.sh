@@ -82,7 +82,8 @@ is_free() { [ "$(slot_state "$1" "$2")" = free ]; }
 nwaiters() { ls "$THREAD_VERIFY_SLOTS_DIR" 2>/dev/null | grep -c '^waiter-.*\.wait$'; }
 has_waiter() { [ "$(nwaiters)" -ge 1 ]; }
 # waiter <name> <pidfile>: a `run --slots 1` that records whether <pidfile>'s process was still alive when it got
-# the slot (overlap) or not (clean) in <name>.ran; its wrapper pid goes to <name>.w.
+# the slot (overlap) or not (clean) in <name>.ran; its wrapper pid goes to <name>.w. The redirection creates
+# <name>.ran before the check writes it, so callers wait for it to be non-empty, never merely to exist.
 waiter() {
   python3 "$VS" run --slots 1 -- sh -c "if sh '$tmp/alive.sh' \"\$(cat '$2')\"; then echo overlap; else echo clean; fi > '$D/$1.ran'" \
     > "$D/$1.out" 2> "$D/$1.err" &
@@ -120,7 +121,7 @@ waiter wr "$D/h.pid"
 within 300 grepq 'waiting for one of 1' "$D/wr.err" && s=queued || s="no waiting line in 300 s"
 ok "$s" queued "V3: a second run waits behind the held slot (its waiting line on stderr)"
 kill -KILL "$(w h)"
-within 60 exists "$D/wr.ran" && s=ran || s="the waiter never ran in 60 s"
+within 60 nonempty "$D/wr.ran" && s=ran || s="the waiter never ran in 60 s"
 ok "$s" ran "V3: after the wrapper's SIGKILL the waiter gets the slot"
 ok "$(cat "$D/wr.ran" 2>/dev/null)" clean "V3: … only once its TERM-ignoring command is gone (the guard's KILL and reap)"
 ok "$(dead "$(cat "$D/h.pid")" && echo reaped || echo present)" reaped "V3: … and that command is reaped (kill -0 fails: no zombie window)"
@@ -281,7 +282,7 @@ wait "$(w k)"; rc=$?
 ok "$rc" 137 "V13: the guard SIGKILLed alone → the wrapper exits 137"
 within 60 gone "$(cat "$D/k.pid")" && s=gone || s="alive after 60 s"
 ok "$s" gone "V13: … after killing the reported group itself"
-within 60 exists "$D/wk.ran" || echo "FAIL - V13: the waiter never ran"
+within 60 nonempty "$D/wk.ran" || echo "FAIL - V13: the waiter never ran"
 ok "$(cat "$D/wk.ran" 2>/dev/null)" clean "V13: … before it released: the waiter sees no overlap"
 wait "$(w wk)"
 
@@ -326,7 +327,7 @@ touch "$D/c.gate"
 wait "$hp"; rc=$?
 ok "$rc" 1 "V15: the injected OSError after the spawn → the wrapper exits 1"
 has "$(cat "$D/harness.err")" "injected" "V15: … naming it"
-within 60 exists "$D/wc.ran" && s=ran || s="the waiter never ran in 60 s"
+within 60 nonempty "$D/wc.ran" && s=ran || s="the waiter never ran in 60 s"
 ok "$s" ran "V15: the waiter gets the slot once the guard is done"
 ok "$(cat "$D/wc.ran" 2>/dev/null)" clean "V15: … only after the TERM-ignoring command is gone: the guard kept the slot held"
 ok "$(dead "$(cat "$D/c.pid")" && echo reaped || echo present)" reaped "V15: … killed and reaped by the guard"
