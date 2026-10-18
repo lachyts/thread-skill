@@ -161,6 +161,8 @@ Reflections in a row (ADR 0037 d4, d6).
   0027). `0037` — Reflections run on their own and tune for hands-off quality
   (amends 0032). `0038` — a Cap is a promise: a spend gate is one line, its split
   in sub-bullets, and an undelivered push falls back to ntfy (amends 0034).
+  `0039` — a code project's thread lives in its repo; one live THREAD.md per
+  project; the placement check (amends 0017).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
@@ -285,6 +287,11 @@ final check that the run wrote nothing into the tree):
   names, aliases and `area:`/`repos:` shapes and a fake HOME with umbrella repos — each rung and outcome,
   the clear winner and the close call, a shared directory, `--learn`'s one-line append and every refusal
   that writes nothing.
+- **Placement check** — `tests/thread-placement.test.mjs`: `thread-placement.py` against a fixture vault and a fake
+  HOME of repos, linked worktrees, a submodule, a clone, origins and seat subfolders — each kind and its owners, the
+  folder-to-note attribution (declared entry, exact name, repo name; never an ancestor or a fuzzy hit), one finding
+  per thread identity, `home`, the scopes, parity with open's lookup, and read-only runs;
+  `tests/contracts/thread-placement-wiring.test.mjs` pins its callers in open, close, handoff, orient and the docs.
 - **Declared check** — `tests/declared-check.test.mjs`: `declared-check.py` against a fixture vault and repos
   with a fixture check — undeclared, whole untruncated output and its digest, the advance on a matching digest
   and the hold on a changed one or a failed re-run, the group-killing time limit (and on a signal, even one that
