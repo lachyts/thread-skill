@@ -31,11 +31,28 @@ through time, from attention to merged PRs. Terms only — no implementation.
   conversation and **thread** the durable work its THREAD.md records, because
   that is how he reads the word. Agent-facing prose keeps the two senses above.
 - **THREAD.md** — the durable state-of-play *file* a thread can be persisted
-  into. Project-side (`~/Projects/<Area>/<Project>/THREAD.md`), shared
-  (`~/repos/workspaces/_shared/threads/<slug>.md`), or a **Repo thread** — a
-  tool repo's own toplevel `THREAD.md` under `~/repos`, found by `open`'s
-  repo-thread lookup; its slug is its front-matter `slug:`, else the repo
-  directory's name. Agent-facing.
+  into. A code project's thread is its **Repo thread**: the repo's own
+  toplevel `<repo>/THREAD.md` under `~/repos`, found by `open`'s repo-thread
+  lookup; its slug is its front-matter `slug:`, else the repo directory's
+  name, and the lookup matches either. Project-side
+  (`~/Projects/<Area>/<Project>/THREAD.md`) is for a project with no code
+  repo; shared (`~/repos/workspaces/_shared/threads/<slug>.md`) for
+  cross-workspace or meta work. One live thread per project, always named
+  THREAD.md: a finished arc moves out, never to a sibling `THREAD-<name>.md`
+  (ADR 0039). Agent-facing.
+- **Thread home** — where a project's one live thread lives: the first
+  qualifying repo its note's `repos:` declares (a main checkout at most three
+  directories below `~/repos`, outside obsidian, workspaces, `.claude` and
+  `_archive`), else its `~/Projects` folder. A workspace seat's subfolder is
+  never one (ADR 0039 d1, d3).
+- **Placement check** — the audit (`thread-placement.py`) of where every
+  thread sits against its thread home. Its kinds are `split-home` (not the
+  retired reshuffle verb *split*, ADR 0027: a `~/Projects` folder's thread
+  whose project's home is a repo, or a thread in a repo its project lists
+  after another), `misnamed`, `undeclared`, `no-slug`, `behind`,
+  `side-branch` and `workspace`. A repo-tier finding is reported once per
+  thread identity, at its main checkout's path, never once per copy
+  (ADR 0039 d5). Report-only: orient shows it, close warns with it.
 - **Route** — a decisive member (`stash`, `defer`, `handoff`, `close`) that
   disposes of the current thread with known intent.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"
