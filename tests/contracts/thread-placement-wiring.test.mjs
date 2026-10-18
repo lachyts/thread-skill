@@ -6,6 +6,8 @@
 //     named in the conversation never reaches rung 3), the ownership exception for an active thread outside
 //     `<home>`, step 1's `audit --thread` and step 8's placement row, and the split edge cases;
 //   - handoff **Split launch.**: the three cases, which thread the consumer's close writes, and the failure line;
+//     § Success contract's call site (Chorus `create_thread` gets `cwd: <the Run from: directory>` when that
+//     differs from this session's launch directory) and **Consumer home.**'s cwd clause, which case 1 leans on;
 //   - handoff-lifecycle § Home: the Ownership exception and the Split launch bullet;
 //   - orient § 2's Placement bullet and § 3's Placement line; task-writer § 6's creation site;
 //   - CONTEXT.md's terms, ADR 0039's decisions and README's ADR list.
@@ -113,6 +115,15 @@ function check(f) {
   if (!sl.includes('`placement: check failed (<first stderr line>) — Run from left at the launch directory`') ||
     !sl.includes('A destination Lachy names wins')) fails.push('ho-fail')
   if (!para(doc, 'Shape\\.').includes('**Split launch.**') || !para(doc, 'Consumer home\\.').includes('**Split launch.**')) fails.push('ho-shape')
+  // The call site: create_thread launches where Run from: points, so a split launch's consumer leaves the folder.
+  const call = collapse(slice(section(f.handoff, /^## Success contract/) ?? '', /^The user's explicit handoff request/, /^$/) ?? '')
+  if (!call.includes("On Chorus, `create_thread` gets `cwd: <the Run from: directory>` whenever that directory differs from this session's launch directory") ||
+    !call.includes('unless **Consumer home.** or **Split launch.** moved it') || !call.includes('A destination Lachy names wins') ||
+    call.includes('in the same project/workspace')) fails.push('ho-cwd')
+  // Consumer home moves the cwd itself, so case 1's "the doc, Run from: and cwd all move" holds by reference.
+  const ch = para(doc, 'Consumer home\\.')
+  if (!ch.includes('`Run from:` (**Shape.**) is that consumer launch directory') ||
+    !ch.includes("`create_thread`'s `cwd` moves with it")) fails.push('ho-home-cwd')
 
   // ---- handoff-lifecycle § Home ----
   const home = section(f.life, /^## Home/) ?? ''
@@ -206,7 +217,12 @@ test('each control fails with exactly its rule', () => {
     'ho-case3': e('handoff', "`active thread is not this folder's`", '`thread: <slug> resolves elsewhere`', '**Split launch.**'),
     'ho-consumer': e('handoff', "the repo's own THREAD.md never captures the session", "rung 3 may take the repo's THREAD.md", '**Split launch.**'),
     'ho-fail': e('handoff', '— Run from left at the launch directory`, then continue', '`, then stop', '**Split launch.**'),
-    'ho-shape': e('handoff', '**Split launch.**', 'a split launch', '**Shape.**'),
+    // Anchored on the paragraph's own lead: § Success contract and **Consumer home.** cite **Shape.** earlier.
+    'ho-shape': e('handoff', '**Split launch.**', 'a split launch', '**Shape.** Front matter'),
+    // The call site drops the cwd, so Chorus launches the consumer in this Session's own directory.
+    'ho-cwd': e('handoff', '`cwd: <the Run from: directory>`', 'its default `cwd`', '## Success contract'),
+    // Consumer home moves the doc and Run from: but leaves the cwd behind.
+    'ho-home-cwd': e('handoff', ", and `create_thread`'s `cwd` moves with it", '', '**Consumer home.** When the consumer'),
     'life-own': e('life', 'active thread whose THREAD.md lies outside it', 'active thread', '- **Ownership.**'),
     'life-split': e('life', 'Any other active thread → no move', 'Any other active thread moves too', '- **Split launch.**'),
     'orient-s2': e('orient', 'A scoped target and `--debrief` run none', 'Every target runs it', '- **Placement**'),
@@ -229,6 +245,12 @@ test('each control fails with exactly its rule', () => {
   assert.deepEqual(check(e('handoff', 'prints exactly that path', 'prints a path', '**Split launch.**')), ['ho-case2'])
   assert.deepEqual(check(e('handoff', 'ADR 0039 d6', 'ADR 0039', "`active thread is not this folder's`")), ['ho-case3'])
   assert.deepEqual(check(e('handoff', 'explicit reference (close rung 2)', 'reference', '**Split launch.**')), ['ho-consumer'])
+  // The call site: the cwd only when Lachy asks, the old same-project default back, or no destination of Lachy's.
+  assert.deepEqual(check(e('handoff', "whenever that directory differs from this session's launch directory", 'when Lachy names one', '## Success contract')), ['ho-cwd'])
+  assert.deepEqual(check(e('handoff', 'Give the new task a concise title', 'Create the new task in the same project/workspace. Give it a concise title', '## Success contract')), ['ho-cwd'])
+  assert.deepEqual(check(e('handoff', 'A destination Lachy names wins over all of this.', '', '## Success contract')), ['ho-cwd'])
+  // Consumer home's Run from: left at this session's launch directory.
+  assert.deepEqual(check(e('handoff', '`Run from:` (**Shape.**) is that consumer launch directory', '`Run from:` stays put', '**Consumer home.** When the consumer')), ['ho-home-cwd'])
   // The ADR loses its identity rule's git half, or the Case 3 sentence's reason.
   assert.deepEqual(check(e('adr', 'Git checks run per main checkout, never for a linked worktree', 'Git checks run per copy')), ['adr-identity'])
   assert.deepEqual(check(e('adr', "the work is not this folder's project's", 'it is unclear')), ['adr-case3'])

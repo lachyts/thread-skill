@@ -48,7 +48,7 @@ A handoff is complete only when all of these are true:
 
 Search specifically for the host-native task tools before acting: `create_thread`, `wait_threads`, `read_thread`, `send_message_to_thread`, and related tools. Do not confuse them with third-party tools whose names also contain “thread”, such as Twist or email connectors.
 
-The user's explicit handoff request is the authorisation to call `create_thread`; do not ask them to confirm the same action again. Unless they specify another destination, create the new task in the same project/workspace and give it a concise title derived from the task.
+The user's explicit handoff request is the authorisation to call `create_thread`; do not ask them to confirm the same action again. Give the new task a concise title derived from the task, and launch it in the doc's `Run from:` directory (§ Handoff document, **Shape.**): this session's project/workspace, unless **Consumer home.** or **Split launch.** moved it. On Chorus, `create_thread` gets `cwd: <the Run from: directory>` whenever that directory differs from this session's launch directory: Chorus defaults `cwd` to this Session's own directory, so without it a split launch's consumer would start in the `~/Projects` folder, and the project would list twice on the Stage (ADR 0039). A destination Lachy names wins over all of this.
 
 ## Fail closed — never create an invisible substitute
 
@@ -75,7 +75,7 @@ Its rules — project directory, seat, `_shared`, git toplevel, and `_shared` fo
 
 **Failure path.** If the resolver exits non-zero, prints nothing, or cannot be run (`CLAUDE_PLUGIN_ROOT` still unset after the re-run `plugin-root.md` rule 4 asks for, a stale cache), stop before writing: no doc, no landing call, no Thread-state row, no captures touched, no task created. Print `handoff: resolver failed (<its stderr, or "not found at <path>">) — no doc written` and ask Lachy for an absolute directory. Only a directory he names is used as `<home>`, never one the agent infers.
 
-**Consumer home.** When the consumer will launch somewhere other than this session's launch directory — the work moves to another repo, this repo is about to be deleted or moved, or **Split launch.** below sends it to the project's repo — resolve with `--dir <consumer launch dir>` (plus `--shared` for a shared thread), then write the doc there and hand it to landing with `home` set to that home (§ Commit it): land.sh resolves the repo that holds it. The prompt names that absolute path, and the producer's later `thread:close` still finds the doc through the THREAD.md Resume pointer.
+**Consumer home.** When the consumer will launch somewhere other than this session's launch directory — the work moves to another repo, this repo is about to be deleted or moved, or **Split launch.** below sends it to the project's repo — resolve with `--dir <consumer launch dir>` (plus `--shared` for a shared thread), then write the doc there and hand it to landing with `home` set to that home (§ Commit it): land.sh resolves the repo that holds it. `Run from:` (**Shape.**) is that consumer launch directory, and `create_thread`'s `cwd` moves with it (§ Success contract). The prompt names the doc's absolute path, and the producer's later `thread:close` still finds the doc through the THREAD.md Resume pointer.
 
 **Split launch.** Before resolving `<home>`, run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py" home --dir "$PWD"`. It prints nothing (the launch directory is not a `~/Projects` folder whose project's thread home is a repo) → no change. When it prints `<repo>` (ADR 0039 d6), the active thread's physical path decides the case:
 
@@ -149,7 +149,7 @@ The `Gates:` line comes from the grill-fit check's step 2(b): one line per Lachy
 
 Keep it tight — the doc carries the depth; the prompt carries the momentum.
 
-When native task creation succeeds, seed the new task with the prompt (the doc path travels inside it), then report the created task and, in Codex Desktop, emit the required directive. When native task creation is unavailable, print the prompt and the absolute path of the handoff doc so the user can open a new task manually.
+When native task creation succeeds, seed the new task with the prompt (the doc path travels inside it) and launch it in the `Run from:` directory (§ Success contract: on Chorus, `create_thread`'s `cwd`), then report the created task and, in Codex Desktop, emit the required directive. When native task creation is unavailable, print the prompt and the absolute path of the handoff doc so the user can open a new task manually.
 
 When `create_thread` on Chorus returned `Raised (task_id: …)` (§ Success contract, step 2), the Stage starts the next Session from the card at once, so the closing words never ask Lachy to start or open it: end the handoff's output on this line (shown fenced below, printed bare as close's banners are), with nothing after it and no question anywhere in the output:
 
