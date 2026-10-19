@@ -3,20 +3,24 @@
 // Nine rules, one pure function, check(files), over { relPath: text }:
 //   t1  the templates: the parallel template says `shape: parallel`; the serial one says `shape: serial`,
 //       `protocol_version: 5`, `incomplete: true` and `surfaces:` + `{{SURFACES}}`, holds none of the parallel
-//       engine's keys, and its `## Queue` holds `{{CHAIN_TABLE}}`, whose SKILL bullet names the four-column header
-//       and the Leg boundary (schedule-queue.test.mjs and execution-fit-shapes.test.mjs keep the retired words out
-//       of it, as of every schedule file);
+//       engine's keys, and its `## Queue` holds `{{CHAIN_TABLE}}`, whose SKILL bullet names the four-column header,
+//       a Task cell with step 6's `<short-alias>` (never the launch alias) and the Leg boundary
+//       (schedule-queue.test.mjs and execution-fit-shapes.test.mjs keep the retired words out of it, as of every
+//       schedule file);
 //   t2  schedule's `## Serial path` comes after step 8 and holds no `###` heading (so step 8's section and the
 //       contract helpers' section() read as before), and no product file still holds p24-1's interim stop;
 //   t3  the Serial path's steps name serial-chains.py, the serial check with `--surface`, ruling (c)'s session lane,
 //       one note per chain from serial-rollout-template.md, rollout-settings.py with its single-repo `--repo` rule,
 //       the stamps S6 never writes, the stamp it removes last, no execute offer and no `start: unattended`, and
-//       body-read surfaces only for members that declare none;
+//       body-read surfaces only for members that declare none; and the Don'ts let S6's last write remove
+//       `incomplete: true` beside step 7's, a stamp left on a serial note ending only by `status: dropped`;
 //   t4  § 0's first check span is the parallel one, with `--shape parallel` and `--regenerate`, and a supersede
 //       never crosses shapes;
-//   t5  execute § 2's shape line, orient § 7's one note per chain, orient § 9's no-offer sentence for a serial
+//   t5  execute § 2's shape line, orient § 6's § 0 stop naming a live serial chain on the repo and its
+//       `status: dropped` remedy, orient § 7's one note per chain, orient § 9's no-offer sentence for a serial
 //       note, and the vault grammar's parallel-only Writers clause;
-//   t6  CONTEXT.md's **Rollout**, **Shape**, **Serial rollout**, **Unfinished rollout** and **Surface** entries;
+//   t6  CONTEXT.md's **Rollout**, **Shape**, **Serial rollout**, **Unfinished rollout**, **Surface** and
+//       **Incomplete rollout** entries (a serial note's stamp ends only by `status: dropped`);
 //   t7  § 0's mixed-set sentence gives the serial-shaped members their follow-up line;
 //   t8  S3 checks every chain, stops the whole run before any write on any refusal, and reports every refusal
 //       together;
@@ -96,7 +100,8 @@ function check(files) {
   }
   if (!(section(files[SERIAL], /^## Queue$/) ?? '').includes('{{CHAIN_TABLE}}')) flag('t1', `${SERIAL} ## Queue has no {{CHAIN_TABLE}}`)
   const chainBullet = schedule.split('\n').find((l) => l.startsWith('- `{{CHAIN_TABLE}}` — ')) ?? ''
-  need('t1', `${SCHEDULE} {{CHAIN_TABLE}} bullet`, chainBullet, ['`| # | Task | Launch | Surfaces |`', 'Leg boundary'])
+  need('t1', `${SCHEDULE} {{CHAIN_TABLE}} bullet`, chainBullet, ['`| # | Task | Launch | Surfaces |`', 'Leg boundary',
+    '`| <n> | [[<full-slug>\\|<short-alias>]] | <launch> | <tokens> |`'])
 
   // ---- t2: where the Serial path sits, and no interim stop left ----
   const lines = schedule.split('\n')
@@ -126,6 +131,9 @@ function check(files) {
     flag('t3', 'S6 does not remove incomplete: true as its last write')
   }
   need('t3', 'S7', para(serialPath, '**S7. Summary.**'), ['no execute offer, no `start: unattended`'])
+  const dont = schedule.split('\n').find((l) => l.startsWith('- Never remove `incomplete: true`')) ?? ''
+  need('t3', `${SCHEDULE} Don't on incomplete: true`, C(dont), ["except as step 7's (or § Serial path S6's) last write",
+    'and one on a serial note, which a supersede never takes, ends only by `status: dropped`'])
 
   // ---- t4: § 0's parallel check, and no supersede across shapes ----
   const s0 = C(section(schedule, /^### 0\./))
@@ -137,6 +145,9 @@ function check(files) {
   need('t5', `${EXECUTE} § 2`, section(files[EXECUTE], /^### 2\. /) ?? '', [
     'Then the shape (`shape:`; no key reads as parallel): `shape: serial` → print `serial rollouts have no Leg runner yet: nothing runs` and stop; nothing is written and a `start: unattended` stays (p24-3 replaces this line).',
   ])
+  const stop = C(slice(files[ORIENT], /^ {2}- \*\*Schedule stopped at § 0\*\*/, /^ {2}- \*\*Uncommitted grill docs\.\*\*/))
+  need('t5', `${ORIENT} § 6's § 0 stop`, stop, ['or a live serial chain that writes the repo and so owns it',
+    '`status: dropped` on a never-started serial chain\'s note'])
   need('t5', `${ORIENT} § 7`, C(section(files[ORIENT], /^### 7\./)), ['one serial rollout note per chain'])
   need('t5', `${ORIENT} § 9`, C(section(files[ORIENT], /^### 9\./)), [
     'one offer per parallel note written; a serial note (`shape: serial`) gets no offer until execute runs Legs (p24-3)',
@@ -150,6 +161,9 @@ function check(files) {
   need('t6', 'CONTEXT **Shape**', entry(ctx, 'Shape'), ['`shape:` key', 'reads as parallel', 'A supersede never crosses shapes'])
   need('t6', 'CONTEXT **Serial rollout**', entry(ctx, 'Serial rollout'), ['One chain per note', 'Leg boundary'])
   need('t6', 'CONTEXT **Unfinished rollout**', entry(ctx, 'Unfinished rollout'), ['both shapes meet in the same check'])
+  need('t6', 'CONTEXT **Incomplete rollout**', entry(ctx, 'Incomplete rollout'), ['or S5 on § Serial path',
+    "until step 7's last write (S6's) removes it",
+    'the stamp on a serial note, which a supersede never takes, ends only by `status: dropped`'])
   need('t6', 'CONTEXT **Surface**', entry(ctx, 'Surface'), [
     '`repo:<absolute path>`', '`vault:<path>`', '`ext:<name>`', '`any`', "widens to that checkout's toplevel",
     'declared or derived', 'Working roots', '_Avoid_: footprint, file-set',
@@ -210,6 +224,10 @@ test('control: a {{CHAIN_TABLE}} bullet without the Leg boundary fails t1', () =
     ['t1'], 'no boundary')
 })
 
+test('control: a {{CHAIN_TABLE}} Task cell with a bare alias fails t1', () => {
+  only(swap(SCHEDULE, '[[<full-slug>\\|<short-alias>]] | <launch>', '[[<full-slug>\\|<alias>]] | <launch>'), ['t1'], 'alias')
+})
+
 test('control: a ### heading inside the Serial path fails t2', () => {
   only(swap(SCHEDULE, '**S3. Live chains.**', '### S3. Live chains\n\n**S3. Live chains.**'), ['t2'], 'heading')
 })
@@ -235,6 +253,15 @@ test('control: an S7 that makes an execute offer fails t3', () => {
   only(swap(SCHEDULE, 'no execute offer, no `start: unattended`', 'then the execute offer'), ['t3'], 'S7 offer')
 })
 
+test('control: a Don\'t that lets only step 7 remove incomplete: true fails t3', () => {
+  only(swap(SCHEDULE, "except as step 7's (or § Serial path S6's) last write", "except as step 7's last write"), ['t3'], 'dont S6')
+})
+
+test('control: a Don\'t whose serial stamp waits on a supersede fails t3', () => {
+  only(swap(SCHEDULE, 'and one on a serial note, which a supersede never takes, ends only by `status: dropped`',
+    'and one on a serial note the same way'), ['t3'], 'dont dropped')
+})
+
 test('control: a § 0 check without --shape parallel fails t4', () => {
   only(swap(SCHEDULE, 'unfinished-rollout.py check --shape parallel --repo', 'unfinished-rollout.py check --repo'), ['t4'], 'no shape')
 })
@@ -248,6 +275,15 @@ test('control: an execute § 2 without its shape line fails t5', () => {
     '`shape: serial` → proceed'), ['t5'], 'execute')
 })
 
+test('control: an orient § 0 stop that omits the live serial chain fails t5', () => {
+  only(swap(ORIENT, ', or a live serial chain\n    that writes the repo and so owns it (ADR 0040), any project\'s)', ')'), ['t5'], 'orient chain')
+})
+
+test('control: an orient § 0 stop without the dropped remedy fails t5', () => {
+  only(swap(ORIENT, '\n    `status: dropped` on a never-started serial chain\'s note (no Leg runner runs it yet, p24-3;\n    dropping it frees its tasks),', ''),
+    ['t5'], 'orient dropped')
+})
+
 test('control: a vault grammar whose Writers drop the parallel-only clause fails t5', () => {
   only(swap(GRAMMAR, ', on a parallel\n  note only until execute runs Legs (p24-3)', ''), ['t5'], 'writers')
 })
@@ -258,6 +294,15 @@ test('control: a Surface entry without the toplevel widening fails t6', () => {
 
 test('control: a Surface entry that claims Working roots fails t6', () => {
   only(swap(CONTEXT, "never\n  its launch profile's other Working roots", "and\n  its launch profile's other roots"), ['t6'], 'working roots')
+})
+
+test('control: an Incomplete rollout entry whose serial stamp waits on a supersede fails t6', () => {
+  only(swap(CONTEXT, 'and the stamp on a serial note, which a supersede never takes, ends\n  only by `status: dropped`',
+    'and so does the stamp on a serial note'), ['t6'], 'incomplete dropped')
+})
+
+test('control: an Incomplete rollout entry that forgets S6 fails t6', () => {
+  only(swap(CONTEXT, "until step 7's last\n  write (S6's) removes it", "until step 7's last\n  write removes it"), ['t6'], 'incomplete S6')
 })
 
 test('control: a § 0 mixed-set sentence without the follow-up line fails t7', () => {

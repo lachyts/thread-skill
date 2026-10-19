@@ -598,9 +598,10 @@ at dispatch.
 Incomplete (incomplete, read by `next`, `status` and unfinished-rollout.py): a never-started rollout that must
 not run as written. The first that applies:
   - it carries `incomplete: true`. Every rollout note is born with it (the schedule template, written at
-    step 6), and step 7's last write removes it once every task is stamped, so a /thread:schedule run that
-    stopped anywhere in between leaves it. Schedule § 0 also stamps it on the note an interrupted supersede
-    wrote; that stamp ends only when a later supersede closes the note;
+    step 6, or the serial template at § Serial path S5), and step 7's (S6's) last write removes it once every
+    task is stamped, so a /thread:schedule run that stopped anywhere in between leaves it. Schedule § 0 also
+    stamps it on the note an interrupted supersede wrote; that stamp ends only when a later supersede closes
+    the note, and one left on a serial note, which a supersede never takes, ends only by `status: dropped`;
   - its `supersedes:` names a rollout still unfinished beside it (not done or dropped): the supersede has
     not closed that one out (schedule step 7.5), which is what ends this reason.
 Neither reason reads the task notes' links, so a task taken out of a rollout (repair's `defer`, a gate
@@ -1637,9 +1638,9 @@ def incomplete(rollout_path: Path, rollout_note, linked, index) -> str:
     if not never_started(rollout_note, linked)[0]:
         return ""
     if _truthy_flag(rollout_note.get("incomplete")):
-        return ("it carries incomplete: true (the /thread:schedule run that wrote it never reached step 7's last "
-                "write, which removes it once every task is stamped, or § 0 stamped it finishing an interrupted "
-                "supersede), so its queue may name tasks never stamped to it")
+        return ("it carries incomplete: true (the /thread:schedule run that wrote it never reached step 7's (or "
+                "§ Serial path S6's) last write, which removes it once every task is stamped, or § 0 stamped it "
+                "finishing an interrupted supersede), so its queue may name tasks never stamped to it")
     prior = (_wikilink_slug(_scalar(rollout_note.get("supersedes"))) or "").lower()
     entry = index.get(prior) if prior else None
     if entry is not None and entry[0].parent.resolve() == rollout_path.parent.resolve() and \

@@ -359,12 +359,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   in the same check: a parallel run on a place an unfinished serial chain
   writes is refused, and so is a serial chain whose **Surface** overlaps a live
   chain's or an unfinished parallel rollout's Project root (schedule § Serial
-  path). It is
-  narrower than live: a superseded note stamped done but not yet moved is live
-  but not unfinished, and so is a rollout whose every task merged before its
-  completion ceremony ran. `--regenerate` supersedes this project's unfinished
-  rollout when it is paused or never started. _Avoid_: live (for this meaning),
-  active, open.
+  path). It is narrower than live: a superseded note stamped done but not yet
+  moved is live but not unfinished, and so is a rollout whose every task merged
+  before its completion ceremony ran. `--regenerate` supersedes this project's
+  unfinished rollout when it is paused or never started. _Avoid_: live (for
+  this meaning), active, open.
 - **Supersede** — a new rollout taking over an unfinished one: every unlanded
   task carries over (a `review` task with an open PR awaits Integration, an
   open one is queued, a running or set-aside one keeps its state), and merged
@@ -379,10 +378,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   born with (schedule step 6, or S5 on § Serial path) until step 7's last
   write (S6's) removes it once every task is stamped, and which schedule § 0
   stamps on the note an interrupted supersede wrote; or its `supersedes:`
-  names a rollout still unfinished beside it. The queue refuses to start it. Only the stamp needs a supersede to end it
-  once its run has stopped; closing out the `supersedes:` target ends the other
-  reason. A task taken out of a rollout never makes it incomplete. _Avoid_:
-  half-written, broken.
+  names a rollout still unfinished beside it. The queue refuses to start it.
+  Once its run has stopped, the stamp on a parallel note needs a supersede to
+  end it, and the stamp on a serial note, which a supersede never takes, ends
+  only by `status: dropped`; closing out the `supersedes:` target ends the
+  other reason. A task taken out of a rollout never makes it incomplete.
+  _Avoid_: half-written, broken.
 - **Wave** — a set of tasks safe to run together because none shares a file
   (ADR 0009). Retired by ADR 0030: see **Queue**. Its fit-test adjective
   **Wave-shaped** is now **Parallel-shaped**. _Avoid_: round, phase, stage.
