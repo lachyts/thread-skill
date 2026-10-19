@@ -46,8 +46,9 @@ the frontmatter, its scalar lower-cased with quotes and an inline ` # comment` d
 other value (`start: manual`, an empty `start:`), a `start:` nested under another key, and a body line are
 no stamp; `started:` and `started_unattended:` are other keys.
 
-- **Writers**: the execute offer, on the rollout note just written and never started: orient § 9's
-  Start when ready answer, and schedule step 8's **Start when ready.** on a standalone run. And
+- **Writers**: the execute offer, on the rollout note just written and never started, on a parallel
+  note only until execute runs Legs (p24-3): orient § 9's Start when ready answer, and schedule step
+  8's **Start when ready.** on a standalone run. And
   schedule § 0's **Put back**, which only restores to a prior the exact line its Supersede prep removed,
   when the run stops before step 6 writes its note.
 - **Readers**: the Chorus Stage (`src/stage/unattended.py` in the Chorus repo, Chorus ADR 0052 d6 as

@@ -300,26 +300,51 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Rollout** — a backlog of related tasks landed as one coordinated effort,
   described by one always-dated Obsidian note
   (`<slug>-rollout-<YYYY-MM-DD>`) whose **Shape** is parallel or serial. At
-  most one parallel rollout is **unfinished** per repo; new parallel-shaped
-  work supersedes it rather than running beside it (schedule § 0, ADR 0027,
-  ADR 0030). Serial rollouts are limited by surfaces, not by repo (ADR 0040).
-  _Avoid_: batch, run, campaign.
+  most one parallel rollout is **unfinished** per repo, and none on a place a
+  live serial chain writes; new parallel-shaped work supersedes it rather than
+  running beside it (schedule § 0, ADR 0027, ADR 0030). Serial rollouts are
+  limited by **Surface**s, not by repo (ADR 0040): one chain per note, refused
+  while a live chain shares a surface. _Avoid_: batch, run, campaign.
 - **Shape** — whether a rollout runs in parallel or in serial; the one word
   that tells the two kinds apart. Every rollout verb (schedule, execute,
-  status, repair, reflect) takes either shape. _Avoid_: mode, lane (a lane
-  holds both shapes).
+  status, repair, reflect) takes either shape. A rollout note says it with its
+  `shape:` key, `parallel` or `serial`; a note with no `shape:` key (every note
+  before p24-2) reads as parallel. A supersede never crosses shapes. _Avoid_:
+  mode, lane (a lane holds both shapes).
 - **Parallel rollout** — a rollout run as a **Queue**: each task in its own
   worktree-isolated agent, landed as its own PR through Integration. Every
   rollout before 2026-10-19 is one.
 - **Serial rollout** — a rollout run as a chain of **Legs**: visible,
   interactive sessions that each work tasks themselves, close, and hand the
   rest to a fresh successor. No worktrees, and no subagents but each task's
-  clean-room review. _Avoid_: relay (Chorus's word for sending a command to a
-  session).
+  clean-room review. One chain per note (schedule § Serial path): its
+  `surfaces:` claims the **Surface**s the chain writes, and each `## Queue` row
+  names the launch its Leg opens in, so a launch change between two rows is a
+  Leg boundary. Nothing runs one until Legs ship (p24-3). _Avoid_: relay
+  (Chorus's word for sending a command to a session).
 - **Leg** — one session's part of a serial rollout: it finishes any task its
   predecessor left claimed, then claims tasks one at a time (up to five, fewer
   when its context grows heavy or a task proves large), closes, and hands over.
   _Avoid_: shift, stint, iteration (one task in a Ralph loop), batch.
+- **Surface** — a place a serial chain writes, written as a token in a serial
+  note's `surfaces:` (and in a task's own, optional `surfaces:`). Five kinds:
+  `repo:<absolute path>` (a filesystem place; overlaps on equality or
+  containment at a `/`, case-folded), `vault:<path>` (vault-relative; overlaps
+  on a segment-boundary prefix), `vault` (the whole vault; overlaps every vault
+  token), `ext:<name>` (an external system such as a CMS or DNS zone;
+  case-folded equality) and `any` (overlaps every token). Kinds never overlap
+  one another, save `any`. A path becomes a token by `serial-chains.py`'s
+  claim: the vault is a note space, so a path in it claims `vault:<rel>`;
+  every path inside a git checkout widens to that checkout's toplevel,
+  declared or derived, since its index and HEAD are what Legs share; a path in
+  no checkout is claimed path-only. A member's surfaces are, in order: its
+  declared `surfaces:` (its whole claim), else derived from its launch folder
+  and its `## Launch` paths; a surface added at schedule unions in; with no
+  source, `vault` alone (the default, with a WARN). The guarantee and its
+  limit: a member claims what it names, never its launch profile's other
+  Working roots (a workspace launcher's `add_dirs`), nor a repo or external
+  system it writes but names nowhere: declare `surfaces:` for those. Two
+  checkouts of one origin are two surfaces. _Avoid_: footprint, file-set.
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
@@ -327,7 +352,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Unfinished rollout** — a live rollout that is neither `done` nor `dropped`
   and still has a task not merged (or no task yet): the one parallel rollout a
   repo may hold at a time, which schedule § 0's unfinished-rollout check
-  enforces. It is
+  enforces. A serial rollout is unfinished the same way, and both shapes meet
+  in the same check: a parallel run on a place an unfinished serial chain
+  writes is refused, and so is a serial chain whose **Surface** overlaps a live
+  chain's or an unfinished parallel rollout's Project root (schedule § Serial
+  path). It is
   narrower than live: a superseded note stamped done but not yet moved is live
   but not unfinished, and so is a rollout whose every task merged before its
   completion ceremony ran. `--regenerate` supersedes this project's unfinished
@@ -339,13 +368,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   tasks stay with the old note. The old note closes last, after the new
   rollout's tasks are stamped, with `superseded_by:`, and is filed in
   `Archive/Rollouts/`. A protocol-3 rollout in flight migrates this way, once
-  hard-paused (ADR 0030). _Avoid_: migrate (alone), replace.
+  hard-paused (ADR 0030). Same shape only: a serial run supersedes nothing
+  (p24-2), and a parallel run never takes a serial note. _Avoid_: migrate
+  (alone), replace.
 - **Incomplete rollout** — a never-started rollout that must not run as
   written. Either it carries `incomplete: true`, which every rollout note is
-  born with (schedule step 6) until step 7's last write removes it once every
-  task is stamped, and which schedule § 0 stamps on the note an interrupted
-  supersede wrote; or its `supersedes:` names a rollout still unfinished beside
-  it. The queue refuses to start it. Only the stamp needs a supersede to end it
+  born with (schedule step 6, or S5 on § Serial path) until step 7's last
+  write (S6's) removes it once every task is stamped, and which schedule § 0
+  stamps on the note an interrupted supersede wrote; or its `supersedes:`
+  names a rollout still unfinished beside it. The queue refuses to start it. Only the stamp needs a supersede to end it
   once its run has stopped; closing out the `supersedes:` target ends the other
   reason. A task taken out of a rollout never makes it incomplete. _Avoid_:
   half-written, broken.

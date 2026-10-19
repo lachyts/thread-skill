@@ -3,15 +3,16 @@
 //   s1  execution-fit.md runs the test in order: 1. Session lane, 2. Parallel-shaped, 3. Serial-shaped, each with
 //       its test. An external publish is serial-shaped and never parallel-shaped (ruling a), a measurement window
 //       or delayed verification waits on a date (ruling b), there are no serial self-rollouts (ruling c: orient § 6
-//       applies it now, schedule's serial path in p24-2, never "schedule enforces this" today), and a shared
-//       surface makes work serial-shaped only alongside a failed parallel clause or sign.
+//       applies it, and schedule's serial path enforces it through serial-chains.py), and a shared surface makes
+//       work serial-shaped only alongside a failed parallel clause or sign.
 //   s2  the retired term (/rollout-?\s*shaped/i on collapsed text, so a wrapped or capitalised form still counts)
 //       appears once in CONTEXT.md, after `_Avoid_:` in its **Parallel-shaped** entry, and in no other product
 //       file (skills/** outside skills/*/tests/, hooks/**, README.md, CONTEXT.md, .claude-plugin/*.json) and no
 //       test file (tests/**, skills/*/tests/**).
 //   s3  orient § 6 steers serial-shaped and session-lane work, Autonomous and Mixed schedule a serial rollout
-//       (§ 7, one schedule call per project) and Mixed keeps its handed item out of it; § 9 offers on a note
-//       § 6 or § 7 wrote and names schedule's interim stop; §§ 8 and 10 are retired tombstones, and `--debrief`
+//       (§ 7, one schedule call per project, one serial rollout note per chain) and Mixed keeps its handed item out
+//       of it; § 9 offers on a parallel note § 6 or § 7 wrote, makes no offer on a serial note until Legs ship, and
+//       names a surface overlap among its no-offer reasons; §§ 8 and 10 are retired tombstones, and `--debrief`
 //       stops at the top of § 1, before the resolver, and appears nowhere else but § 10 and the invocation forms;
 //       the description drops the fan-out trigger and `--debrief`; and none of the batch machinery survives.
 //   s4  the vault grammar's In flight drops the `dispatched:` stamp and the start claim; CONTEXT.md retires the
@@ -19,7 +20,7 @@
 //       (**Serial-shaped** with the no-machine-check clause).
 //   s5  schedule § 0 routes only session-lane misfits to the session lane, never a serial-shaped member save
 //       ruling (c)'s plugin-repo work, lists the no-machine-check clause among its serial-shaped members, and
-//       stops an all-serial set with its interim line before it resolves the target repo.
+//       routes an all-serial set to its ## Serial path before it resolves the target repo.
 //   s6  the other retired-batch surfaces: reflect's decision text and SKILL.md, grill-fit.md, the README's orient
 //       row and § Runtime support, and execution-fit.md's opening.
 //
@@ -46,8 +47,8 @@ const README = 'README.md'
 
 // The retired term, any case, hyphen optional, any whitespace between (a line wrap included once collapsed).
 const RETIRED = /rollout-?\s*shaped/gi
-// Schedule's interim answer to an all-serial set, until p24-2's serial writer replaces it.
-const STOP = '`no serial writer yet: nothing stamped`'
+// Schedule § 0's route for an all-serial set: its ## Serial path, taken before the target repo is resolved.
+const ROUTE = 'this run takes **## Serial path** below'
 const STEER = '- **Serial-shaped and session-lane work → steer.**'
 
 const SKILL_TESTS = /^skills\/[^/]+\/tests\//
@@ -127,7 +128,7 @@ function check(files) {
     /\(b\)[^.]*measurement window/, /\(c\) \*\*No serial self-rollouts\.\*\*/,
   ])
   const rulingC = C(slice(fit, /^- \(c\) /, /^(- |$)/))
-  need('s1', `${FIT} ruling (c)`, rulingC, ['Orient § 6 applies this ruling now', "schedule's serial path (p24-2) will enforce it"])
+  need('s1', `${FIT} ruling (c)`, rulingC, ['Orient § 6 applies this ruling now', "schedule's serial path enforces it"])
   never('s1', `${FIT} ruling (c)`, rulingC, [/schedule enforces/])
   need('s1', FIT, C(fit), ['Mixed sets split', 'Count is never a criterion'])
   if (!lines.includes('## Dispatch blockers — parallel-shaped but not yet runnable')) {
@@ -163,11 +164,12 @@ function check(files) {
   const olines = orient.split('\n')
   if (!olines.includes('### 7. Autonomous: a serial rollout')) flag('s3', `${ORIENT} has no ### 7. Autonomous: a serial rollout`)
   need('s3', `${ORIENT} § 7`, C(section(orient, /^### 7\./)), [
-    '`${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md`', '`--tasks', 'once per project', STOP,
+    '`${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md`', '`--tasks', 'once per project', 'one serial rollout note per chain',
   ])
   const s9 = C(section(orient, /^### 9\./))
-  need('s3', `${ORIENT} § 9`, s9, ['When § 6 or § 7 wrote a rollout note'])
-  need('s3', `${ORIENT} § 9 closing line`, sentences(s9).find((x) => x.startsWith('No rollout written')) ?? '', ['`no serial writer yet'])
+  need('s3', `${ORIENT} § 9`, s9, ['When § 6 or § 7 wrote a rollout note',
+    'a serial note (`shape: serial`) gets no offer until execute runs Legs (p24-3)'])
+  need('s3', `${ORIENT} § 9 closing line`, sentences(s9).find((x) => x.startsWith('No rollout written')) ?? '', ['a surface overlap with a live chain'])
   for (const n of ['8', '10']) {
     if (!olines.some((l) => new RegExp(`^### ${n}\\. .*\\(retired\\)$`).test(l))) flag('s3', `${ORIENT} § ${n} heading does not end (retired)`)
   }
@@ -211,10 +213,10 @@ function check(files) {
   if (!sentences(s0).some((x) => x.includes('serial-shaped') && x.includes('never routed to the session lane'))) {
     flag('s5', `${SCHEDULE} § 0 has no sentence keeping a serial-shaped member out of the session lane`)
   }
-  const stopAt = s0.indexOf(STOP)
+  const routeAt = s0.indexOf(ROUTE)
   const resolveAt = s0.indexOf('After the misfit scan, resolve')
-  if (stopAt < 0 || resolveAt < 0 || stopAt > resolveAt) {
-    flag('s5', `${SCHEDULE} § 0 does not print ${STOP} before "After the misfit scan, resolve" (${stopAt}, ${resolveAt})`)
+  if (routeAt < 0 || resolveAt < 0 || routeAt > resolveAt) {
+    flag('s5', `${SCHEDULE} § 0 does not route an all-serial set to ## Serial path before "After the misfit scan, resolve" (${routeAt}, ${resolveAt})`)
   }
 
   // ---- s6: the other retired-batch surfaces ----
@@ -290,9 +292,9 @@ test('control: execution-fit.md without ruling (c) fails s1', () => {
   only({ [FIT]: real[FIT].replace(`${c}\n`, '') }, ['s1'], 'no ruling c')
 })
 
-test('control: ruling (c) that says schedule enforces it today fails s1', () => {
-  only(swap(FIT, "Orient § 6 applies this ruling now, before it calls schedule; schedule's serial path (p24-2) will enforce it.",
-    'Schedule enforces this.'), ['s1'], 'ruling c enforcer')
+test('control: ruling (c) without schedule\'s serial path as its enforcer fails s1', () => {
+  only(swap(FIT, "Orient § 6 applies this ruling now, before it calls schedule; schedule's serial path enforces it",
+    'Schedule enforces this'), ['s1'], 'ruling c enforcer')
 })
 
 test('control: a parallel step without its publish clause fails s1', () => {
@@ -399,17 +401,30 @@ test('control: a § 0 serial-shaped list without the no-machine-check clause fai
   only(swap(SCHEDULE, '(vault notes, several repos) or no machine check inside the run,', '(vault notes, several repos),'), ['s5'], 'machine check')
 })
 
-test('control: a § 0 without the interim stop line fails s5', () => {
-  only(swap(SCHEDULE, STOP, '`nothing stamped`'), ['s5'], 'no stop line')
+test('control: a § 0 without the route to its ## Serial path fails s5', () => {
+  only(swap(SCHEDULE, ROUTE, 'this run stops here'), ['s5'], 'no route')
 })
 
-test('control: the interim stop after "After the misfit scan, resolve" fails s5', () => {
+test('control: the route after "After the misfit scan, resolve" fails s5', () => {
   const s0 = section(real[SCHEDULE], /^### 0\./)
-  const para = s0.split('\n\n').find((p) => p.includes(STOP))
-  assert.ok(para, 'control setup: no § 0 paragraph holds the stop line')
+  const para = s0.split('\n\n').find((p) => collapse(p).includes(ROUTE))
+  assert.ok(para, 'control setup: no § 0 paragraph holds the route')
   const moved = real[SCHEDULE].replace(`${para}\n\n`, '').replace(/After the misfit scan, resolve[^.]*\./, (m) => `${m} ${para}`)
   assert.notEqual(moved, real[SCHEDULE], 'control setup: nothing moved')
-  only({ [SCHEDULE]: moved }, ['s5'], 'stop moved')
+  only({ [SCHEDULE]: moved }, ['s5'], 'route moved')
+})
+
+test('control: an orient § 7 that writes one note per project fails s3', () => {
+  only(swapIn(ORIENT, /^### 7\./, /^### 8\./, 'one serial rollout note per chain', 'one note per project'), ['s3'], '§ 7 note per chain')
+})
+
+test('control: an orient § 9 that offers on a serial note fails s3', () => {
+  only(swap(ORIENT, 'a serial note (`shape: serial`) gets no offer until execute runs Legs (p24-3)',
+    'a serial note (`shape: serial`) gets the same offer'), ['s3'], '§ 9 serial offer')
+})
+
+test('control: an orient § 9 closing line without the surface overlap fails s3', () => {
+  only(swap(ORIENT, 'or a surface overlap with a live chain', 'or a refusal'), ['s3'], '§ 9 closing')
 })
 
 test('control: reflect.py\'s old decision sentence fails s6', () => {

@@ -1,6 +1,6 @@
 ---
 name: schedule
-description: 'Use when planning a parallel rollout of Obsidian tasks under a single project — produces a thin rollout note (data only) that `/thread:execute` runs as a queue on the Workflow engine. Reads tasks from ~/repos/obsidian/Work/Tasks/, orders the queue (dependencies recorded in frontmatter, Solo proposed for sweeping changes), auto-merges affine same-file task clusters (same change, artificially split) into one dispatch unit, refuses a second unfinished rollout on a repo (--regenerate supersedes this project''s paused or unstarted one, carrying its unlanded tasks), and writes an always-dated <project-slug>-rollout-<YYYY-MM-DD>.md with `protocol_version: 5` + config defaults. Scope: Obsidian only.'
+description: 'Use when planning a rollout (parallel or serial) of Obsidian tasks under a single project — produces a thin rollout note (data only) that `/thread:execute` runs as a queue. Reads tasks from ~/repos/obsidian/Work/Tasks/, orders the queue (dependencies recorded in frontmatter, Solo proposed for sweeping changes), auto-merges affine same-file task clusters into one dispatch unit, refuses a second unfinished parallel rollout on a repo (--regenerate supersedes this project''s paused or unstarted one, carrying its unlanded tasks), writes one `shape: serial` note per serial chain, and always dates <project-slug>-rollout-<YYYY-MM-DD>.md, with `protocol_version: 5`. Scope: Obsidian only.'
 ---
 
 # /thread:schedule — turn a backlog of Obsidian tasks into a rollout note
@@ -13,7 +13,7 @@ This skill is the **planner**. The rollout note it produces is a data artefact �
 
 ## Scope
 
-**Obsidian only**, plus § 0's self-rollout, remote, landing-register and pushed-base probes of the target repo; the self-rollout probe reads the plugin marketplace registry, and on a match makes read-only `git rev-parse` and `git remote get-url` calls in the sibling `<repoPath>-rollout`; the pushed-base probe runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving or pruning only remote-tracking refs; § 0's unfinished-rollout check reads `git remote get-url` in each rollout note's Project root; a supersede's `reconcile-rollout.py resume` makes read-only `gh pr view`/`gh repo view` calls; a supersede's `git-env-canary.py check-all` and `retire` (steps 1 and 6) read the prior's Project root with read-only git calls and write only the prior note's `## Git-env log` and the canary's own records, kept outside the repo; § 4.7 reads the operator's ladder file through `ladder.py` (a local file, no network); step 2.8 reads the operator's `~/.config/thread/rollouts.toml` through `rollout-settings.py` (a local file, no network), which runs `land.sh --origin-slug` and so a read-only `git remote get-url origin` in the Project root when the file holds a repo table; § 3.6 runs `gated_inputs.py sweep` (it reads task notes only); step 7.5 (and § 0's `file` finish) runs `close-score.py` on the prior (ADR 0037 d4), which reads the prior note, the Run record, `reviews.jsonl` and `tunings.jsonl` under the events directory, `rollouts.toml` through `rollout-settings.py`, every note under `Work/Tasks/` (Archive included) for `fixes:`/`merged_into:`, and the Project root's git, read-only and never fetched (land.sh's `git remote get-url origin`, escapes.py's read-only rev-parse/symbolic-ref/log/show/rev-list/merge-base/cat-file/diff-tree/blame reads, and `git remote get-url origin` in each clone `reviews.jsonl` names), and writes only fold-journals' `call-journal` lines to the prior's Run record and tune.py's one `tunings.jsonl` line, both under the events directory, outside the vault and the repo (its scratch dir is removed on exit); and step 7.5 moves a superseded rollout note with a plain `mv`. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
+**Obsidian only**, plus § 0's self-rollout, remote, landing-register and pushed-base probes of the target repo; the self-rollout probe reads the plugin marketplace registry, and on a match makes read-only `git rev-parse` and `git remote get-url` calls in the sibling `<repoPath>-rollout`; the pushed-base probe runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in the target repo and its known clones, moving or pruning only remote-tracking refs; § 0's unfinished-rollout check reads `git remote get-url` in each rollout note's Project root; a supersede's `reconcile-rollout.py resume` makes read-only `gh pr view`/`gh repo view` calls; a supersede's `git-env-canary.py check-all` and `retire` (steps 1 and 6) read the prior's Project root with read-only git calls and write only the prior note's `## Git-env log` and the canary's own records, kept outside the repo; § 4.7 reads the operator's ladder file through `ladder.py` (a local file, no network); step 2.8 reads the operator's `~/.config/thread/rollouts.toml` through `rollout-settings.py` (a local file, no network), which runs `land.sh --origin-slug` and so a read-only `git remote get-url origin` in the Project root when the file holds a repo table; § 3.6 runs `gated_inputs.py sweep` (it reads task notes only); step 7.5 (and § 0's `file` finish) runs `close-score.py` on the prior (ADR 0037 d4), which reads the prior note, the Run record, `reviews.jsonl` and `tunings.jsonl` under the events directory, `rollouts.toml` through `rollout-settings.py`, every note under `Work/Tasks/` (Archive included) for `fixes:`/`merged_into:`, and the Project root's git, read-only and never fetched (land.sh's `git remote get-url origin`, escapes.py's read-only rev-parse/symbolic-ref/log/show/rev-list/merge-base/cat-file/diff-tree/blame reads, and `git remote get-url origin` in each clone `reviews.jsonl` names), and writes only fold-journals' `call-journal` lines to the prior's Run record and tune.py's one `tunings.jsonl` line, both under the events directory, outside the vault and the repo (its scratch dir is removed on exit); and step 7.5 moves a superseded rollout note with a plain `mv`; § Serial path's `serial-chains.py` (S2) reads task notes, project notes under `Work/Projects/`, `launch-folders.json` and the plugin's `.claude-plugin/plugin.json`, with a read-only `git rev-parse --show-toplevel` and `git remote get-url origin` per path it claims, its S3 check reads notes only, and its S4 runs `rollout-settings.py` as step 2.8 does. Reads from and writes to `~/repos/obsidian/Work/Tasks/`. Not for Linear, GitHub issues, or any other backlog source.
 
 ## Invocation forms
 
@@ -31,32 +31,32 @@ The argument resolves to a project-note slug (the thing the task's `projects:` f
 ### 0. Execution-fit gate
 
 Run the execution-fit test (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` — the
-canonical definition, three-way since ADR 0040). This run writes a **parallel rollout**, for
-**parallel-shaped** work: tasks that converge on ONE code repo, land as a PR each, and verify
-machine-checkably inside the run (tests / build / greps), with no external publish and no tool or
-launch profile the lead lacks. Before computing anything, scan the candidate set for misfits of
-two kinds. **Session-lane misfits**: tasks that are conversation-gated, whose ordering constraint
+canonical definition, three-way since ADR 0040). This run writes a **parallel rollout** for
+**parallel-shaped** work, or, for an all-serial set, serial rollouts (§ Serial path). Parallel-shaped
+work is tasks that converge on ONE code repo, land as a PR each, and verify machine-checkably inside
+the run (tests / build / greps), with no external publish and no tool or launch profile the lead
+lacks. Before computing anything, scan the candidate set for misfits of two kinds. **Session-lane misfits**: tasks that are conversation-gated, whose ordering constraint
 is a measurement window or calendar date rather than file overlap, or whose verification only
 arrives days later (impact measures). **Serial-shaped members**: tasks with no PR per task (vault
 notes, several repos) or no machine check inside the run, whose core action is an external
 publish (CMS / live site / DNS / config console), or that need an external tool or launch profile
-the lead lacks. Each is named in the gate as serial-shaped and left unstamped; a serial-shaped
-member is never routed to the session lane, save ruling (c)'s plugin-repo work (the fit doc's
-**Rulings**). Orient § 6 applies ruling (c) before it calls schedule, and schedule's serial path
-(p24-2) will enforce it once the repo is resolved: the all-serial stop below runs before that, so
-it cannot tell the plugin's own repo.
+the lead lacks. In a mixed set each is named in the gate as serial-shaped and left unstamped; a
+serial-shaped member is never routed to the session lane, save ruling (c)'s plugin-repo work (the fit
+doc's **Rulings**). Orient § 6 applies ruling (c) before it calls schedule, and schedule's serial path
+enforces it (`serial-chains.py`).
 
-When no member is parallel-shaped and any is serial-shaped, stop here, before the target repo is
-resolved: print one line, `no serial writer yet: nothing stamped`, then each serial-shaped member
-(and any session-lane misfit, as such). No task stamped, no rollout note, no heartbeat; no `Local:`
-read, no question, no probe and no fetch.
+When no member is parallel-shaped and any is serial-shaped, this run takes **## Serial path** below
+and skips the rest of § 0: no `Local:` read, no probe, no fetch. Any session-lane misfit is named as
+such and left unstamped there (S1).
 
 If session-lane misfits dominate, **stop and route the set to the session lane** (`defer` for
 `scheduled:`-date dispatch, `open` via the task's `## Launch` block), its serial-shaped members
 excepted, instead of forcing a rollout: the engine's parallelism is forbidden by isolation
 windows, and the queue cannot see a window or calendar constraint. A mixed set is fine if the
 parallel-shaped subset can roll out while the misfits stay unstamped — name each misfit in the gate
-with its outcome (serial-shaped or session lane).
+with its outcome (serial-shaped or session lane), and end the gate with the serial-shaped members'
+follow-up line, `/thread:schedule --tasks <serial members>`, which takes them down the serial path once
+this run is done. A run writes one shape.
 
 After the misfit scan, resolve the target repo, the project root the rollout note will carry, and check
 the dispatch blockers against it. Read the project note's `Local:` line; if there is none, ask the user
@@ -77,9 +77,11 @@ the user gave the path), and no cited paths: rollout worktrees branch from `orig
 local default branch ahead of it (in this clone or a known sibling clone) hides those commits from
 the agents. Last, run the unfinished-rollout check against the same resolved path, passing
 `--regenerate` exactly when this run has it:
-`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check --repo <resolved path> (--project <target> | --tasks <this run's --tasks list>) [--regenerate]`.
-A repo holds at most one unfinished rollout (one directly in `Work/Tasks/`, neither `done` nor
-`dropped`, with a task not yet merged). A rollout awaiting sign-off (`paused_for: sign-off`, execute § 4.5
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check --shape parallel --repo <resolved path> (--project <target> | --tasks <this run's --tasks list>) [--regenerate]`.
+A repo holds at most one unfinished parallel rollout (one directly in `Work/Tasks/`, neither `done` nor
+`dropped`, with a task not yet merged), and none on a place a live serial chain writes: the check
+refuses a parallel run whose root overlaps a surface of an unfinished serial chain, since that chain
+owns it, and a supersede never crosses shapes. A rollout awaiting sign-off (`paused_for: sign-off`, execute § 4.5
 step 5's form: only gates wait on Lachy) is unfinished too: the refusal names its waiting tasks and the
 sign-off path (sign off, then `/thread:execute`, or `/thread:repair` to defer them), and `--regenerate` on
 this project's rollout carries them forward still gate-pending. The check prints exactly one stdout line:
@@ -542,6 +544,76 @@ Expected to gate (each set aside for your sign-off if its plan declares a gate n
 swept, dismissed: [[task-u]] token (an LLM token count: "~31.5k tokens")
 ```
 
+## Serial path
+
+An all-serial set (§ 0: no member parallel-shaped, at least one serial-shaped) runs here instead of steps 1–8, and
+writes one **serial rollout** note per chain (ADR 0040): `shape: serial`, the chain's tasks in order, each row with
+the launch its Leg opens in, and the chain's surfaces. Chains whose surfaces are disjoint run side by side; a chain
+that writes a repo checkout owns that checkout. A member claims its launch folder, each path its `## Launch` names
+and each surface added for it, or exactly what it declares in `surfaces:`, and every claimed path inside a git
+checkout widens to that checkout's toplevel. It never claims its launch profile's other Working roots (a workspace
+launcher's `add_dirs`), nor a repo or external system it writes but names nowhere: those are outside schedule's
+sight, which is why the default's WARN says to declare `surfaces:` for them (`serial-chains.py`'s header is the one
+statement of the surface grammar).
+
+**S1. Discover.** Step 1's filters and skip rules pick the members (or take the `--tasks` set): a task already
+linked to a live rollout of either shape is skipped and named, and so is a decision task. Session-lane misfits are
+named as such and left unstamped. A standalone run confirms the member list in S4's batch; under orient § 7
+nothing is asked.
+
+**S2. Plan.** Run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/serial-chains.py plan --tasks <serial members> [--surface <slug>=<raw>]… [--dep <slug>=<slug>]…`.
+It prints one JSON line: `chains` (each with its `tasks` in order, its `surfaces`, its `members` with each one's
+`surfaces`, `source`, `added` and `launch`, and its `externalDeps`), `sessionLane` and `warns`. Pass a path the
+agent reads in a member's body (outside `## Launch`) as `--surface <slug>=<path>` only for a member with no
+declared `surfaces:`: a declaration is the member's whole claim. Exit 3 (an unknown, null or missing launch
+folder, a missing launch-folders file an alias needs, a dependency cycle, a malformed declared token) or exit 2
+stops the run before anything is written: print its stderr verbatim. Name each `sessionLane` member, with its
+`why`, as ruling (c)'s session lane (no serial self-rollouts, the fit doc's **Rulings**) and leave it unstamped.
+Carry the `warns` to the confirm and to S7.
+
+**S3. Live chains.** For every chain, run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check --shape serial --surface <token>… (--project <target> | --tasks <the chain's members>)`,
+one `--surface` per token of the chain's `surfaces`, passed verbatim from S2's JSON (and `--regenerate` when this
+run has it, which only WARNs: a serial run supersedes nothing). Every chain is checked, even after one is refused.
+`none` → go on. Any refusal (`refuse …`, exit 3) or exit 2 stops the whole run before anything is written, and
+every refusal's stderr goes in one report: each line names the live chain or unfinished parallel rollout, its
+project and state, the overlapping pair and its remedy (a never-started chain's is `status: dropped`, which frees
+its tasks for a later run). Carry `WARN:` lines to S7.
+
+**S4. Gates and confirm.** § 3's dependency extraction, § 3.5's gate sweep and § 3.6's gated-input sweep run over
+the members. § 3.6's `<t>` comes from
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/rollout-settings.py`, with `--repo <path>` exactly when the
+chain holds one `repo:` token that is a directory, else with no `--repo`; a non-zero exit stops the run as step
+2.8's does. A standalone run's confirm batch lists S1's members; each chain (its order, each row's launch, each
+member's surfaces with its source and its added tokens); the session-lane members; the WARNs; and the questions
+(§ 3's dependencies, § 3.5's gates, § 3.6's ask-ahead). A confirmed dependency (passed as
+`--dep <dependant>=<dependency>`), or a surface Lachy adds for any member (passed as `--surface`, which always
+unions in, declared or not), re-runs S2 and S3. Under orient § 7 nothing is asked: the kept gates and § 3.6's hits
+are listed in S7. Steps 2, 2.5–2.8, 4, 4.5, 4.7 and Solo are skipped on this path, and `plan_approval:`, `scope:`,
+`rung:` and `solo:` are never proposed.
+
+**S5. Write.** One note per chain, from `${CLAUDE_PLUGIN_ROOT}/skills/schedule/serial-rollout-template.md`. Naming
+follows step 6: the first chain takes the next free `<slug>-rollout-<YYYY-MM-DD>` name and each further chain the
+next ordinal (`-2`, `-3`, …), never **Overwrite**. The shared placeholders (`{{PROJECT_NAME}}`, `{{DATE}}`,
+`{{THREAD_LINE}}`, `{{QUEUE_RATIONALE}}`, `{{POST_ROLLOUT_ITEMS}}`) are substituted as step 6's bullets say, and
+the template's own as below. Keep the template's `incomplete: true`: S6 removes it.
+- `{{SURFACES}}` — the chain's `surfaces` from S2, one `  - "<token>"` line each (quoted, two-space indent), under the template's `surfaces:` key: the places this chain owns while it is unfinished.
+- `{{CHAIN_TABLE}}` — the rendered `## Queue` table, header row `| # | Task | Launch | Surfaces |` included, one row per task in S2's order: `| <n> | [[<full-slug>\|<alias>]] | <launch> | <tokens> |`, where `<launch>` is the row's alias and folder, each in backticks, joined by `from` (`` `cc-ops` from `<folder>` ``), and `<tokens>` its member's surfaces, each in backticks. A launch change between two rows is a Leg boundary: a Leg works only rows of the launch it opened in. No wikilink appears outside the Task cell, since a row's first wikilink is its rank.
+- `{{SURFACE_SOURCES}}` — one line per member, `- <slug>: <tokens> (<source>[; added: <tokens>])`, from S2's `members`.
+
+**S6. Stamp.** Each member of each note written gets `rollout: "[[<its note>]]"`, step 7's clear (its second
+bullet), its confirmed `depends-on:` entries and, on a standalone run, § 3.6's ask-ahead writes (step 7's
+`spend_approval_usd:`, `## Decisions (asked ahead <date>)` and `## Approved gates` bullets). Nothing else is
+stamped: no `scope:`, `plan_approval:`, `rung:` or `solo:`, and never a derived or added `surfaces:`. Then remove
+the note's `incomplete: true` line, as its last write, once every member is stamped.
+
+**S7. Summary.** Per note: its name, its chain order with each row's launch, and its surfaces. Then the
+session-lane members, the WARNs and the gated pre-flight (§ 3.5's kept gates, § 3.6's ask-ahead and dismissals, as
+step 8 lists them). Then one line: "nothing runs it yet: `/thread:execute` stops at its § 2 shape line until Legs
+ship (p24-3); no execute offer, no `start: unattended`; until it runs or is dropped (`status: dropped`) it holds
+its surfaces, so a parallel run on a checkout it claims, or another chain over them, is refused".
+
 ## Execution lives in `/thread:execute`
 
 This skill does not execute anything. The rollout note it produces is read by the sibling **`/thread:execute`** skill (`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`), which resolves per-task config and calls the **Workflow** tool with `task.workflow.js` — the convergence engine (plan-gate → Ralph retry → master review). The engine is not duplicated into individual rollout notes; improvements to the script reach every rollout immediately.
@@ -554,10 +626,12 @@ This skill does not execute anything. The rollout note it produces is read by th
 - Never remove `incomplete: true` from a rollout note except as step 7's last write on the note this run wrote: a stamp on any other note (§ 0's on an interrupted supersede's note, or one a stopped run left) ends only when a supersede closes that note out.
 - Don't touch tasks outside the target project (the `projects:` filter is strict).
 - Don't fill in `touches:` on tasks where you regex-detected files — that promotes a guess into authoritative metadata. Only the user does that. The **one** exception is the combined note authored in step 4.5: when every member has its own `touches:`, its `touches:` is their union, so it's a derivation, not a fresh guess. (Separately, the `## File-sets` block in the **rollout note** — step 6 — records the best-effort file-sets, but that's rollout-note data the executor reads, never task frontmatter, so it doesn't touch this rule.)
-- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's probes (listed under Scope), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only, step 2.8's `rollout-settings.py`, whose `land.sh --origin-slug` runs a read-only `git remote get-url origin` (only when `rollouts.toml` holds a repo table), and `close-score.py` (step 7.5, § 0's `file` finish), whose git calls are read-only and whose only writes are its events-directory lines (both listed under Scope).
-- Never write a second unfinished rollout on a repo, and never supersede one that § 0 did not print as `supersede`.
+- Don't run `git` operations or open PRs from the planner — the planner only reads/writes vault files, except § 0's probes (listed under Scope), a supersede's `reconcile-rollout.py resume`, whose `gh pr view` / `gh repo view` calls are read-only, a supersede's `git-env-canary.py check-all` and `retire`, whose git calls are read-only, step 2.8's `rollout-settings.py`, whose `land.sh --origin-slug` runs a read-only `git remote get-url origin` (only when `rollouts.toml` holds a repo table), `close-score.py` (step 7.5, § 0's `file` finish), whose git calls are read-only and whose only writes are its events-directory lines (both listed under Scope), and § Serial path's `serial-chains.py`, whose `git rev-parse --show-toplevel` and `git remote get-url origin` calls are read-only (listed under Scope).
+- Never write a second unfinished parallel rollout on a repo, or a serial chain over a live chain's surface, and never supersede one that § 0 did not print as `supersede`.
+- Never supersede across shapes: a serial run supersedes nothing, and a parallel run never takes a serial note.
+- Never stamp a derived or added `surfaces:` on a task: a task's `surfaces:` is its own declaration.
 - Never move a rollout note except by step 7.5's move (which § 0 also runs for `file` and `interrupted`).
-- Never write `start: unattended` except at the execute offer (orient § 9, step 8's **Start when ready.**) on the note just written, or as § 0's **Put back**: the exact line the Supersede prep removed, restored to the prior when the run stops before step 6 writes its note. The prep otherwise only removes it.
+- Never write `start: unattended` except at the execute offer (orient § 9, step 8's **Start when ready.**) on the note just written, or as § 0's **Put back**: the exact line the Supersede prep removed, restored to the prior when the run stops before step 6 writes its note. The prep otherwise only removes it; never on a serial note.
 
 ## Verification
 
@@ -573,6 +647,12 @@ End-to-end test against an existing backlog (e.g. GifLab):
 8. Prints summary pointing the user toward `/thread:execute`
 
 Then from a fresh session: paste `execute [[giflab-rollout-<YYYY-MM-DD>]]` (the dated note just written) — the `/thread:execute` skill should pick it up, gate on `protocol_version: 5`, resolve per-task config, and call the Workflow tool with `task.workflow.js` to run the three-layer convergence engine per task (visible live via `/workflows`).
+
+### Serial regression (§ Serial path)
+
+- Two serial-shaped tasks that declare disjoint `surfaces:` give two notes, `<slug>-rollout-<date>` and `-2`, each `shape: serial` with one chain, and no task stamped with a `surfaces:`.
+- Two tasks in one checkout give one note with one chain; when their aliases differ, its `## Queue` rows carry two launches, a Leg boundary between them.
+- A chain whose surface overlaps a live serial note's is refused at S3 with that note's remedy, and nothing is written.
 
 ### Merge regression (step 4.5)
 

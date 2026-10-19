@@ -32,6 +32,8 @@ Subcommands:
               its refusals removes it (`startCleared`), so a running rollout clears it and the Chorus Stage never
               starts a second lead; a refusal leaves it. Refuses an incomplete rollout (below): exit 1, no
               stdout, one ERROR line naming why and the remedy, `/thread:schedule <its first project> --regenerate`.
+              Refuses a serial rollout (`shape: serial`, ADR 0040) first, before its ceiling is read: exit 1, no
+              stdout, one ERROR line, nothing written and `start:` kept, since no Leg runner runs one yet (p24-3).
               An unacked git-env trip (Git-env hold, below) is listed as `gitEnvHold` and makes `halt` "git-env",
               ahead of every other verdict. `awaitingIntegration` is the Integration queue's order: a task a queued
               task depends on, directly or through a folded member (`merged_into:`), first, then the oldest
@@ -869,6 +871,15 @@ def _scalar(value) -> str:
         return ""
     s = re.sub(r"\s+#.*$", "", str(value)).strip()
     return s.strip('"').strip("'").strip()
+
+
+SHAPES = ("parallel", "serial")   # a rollout note's `shape:` (ADR 0040); no key reads as parallel
+
+
+def _shape(note) -> str:
+    """A rollout note's Shape: `serial` when its `shape:` scalar says `serial` (case-folded, quotes and an inline
+    ` # comment` dropped), else `parallel` (no key, `parallel` or any other value)."""
+    return SHAPES[1] if _scalar(note.get("shape")).lower() == SHAPES[1] else SHAPES[0]
 
 
 def _start_unattended(note) -> bool:
@@ -2410,6 +2421,10 @@ def cmd_next(args) -> int:
         return 1
     now = _now(args)
     rollout_note = Note(rollout_path)
+    if _shape(rollout_note) == "serial":
+        print(f"ERROR: {rollout_path.stem}: shape: serial: serial rollouts have no Leg runner yet: nothing runs "
+              "(p24-3)", file=sys.stderr)
+        return 1
     ceiling, err = _ceiling(rollout_note)
     if err:
         print(f"ERROR: {rollout_path.stem}: {err}", file=sys.stderr)

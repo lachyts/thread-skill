@@ -347,9 +347,9 @@ Under Autonomous or Mixed, run `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md` 
 `--tasks <members>` **once per project**: each call's members are exactly that project's
 serial-shaped members of the clusters § 6 named, less Mixed's handed item. Each member goes in
 exactly one call, under the first project in its `projects:` that this orient swept, so no call
-spans two projects: schedule's `projects:` filter is strict, and it writes one
-`<project-slug>-rollout` note per project. Never a bare project run. Schedule's serial path decides
-chains and surfaces (ADR 0040). The steering answer authorises every call, and § 9 follows each
+spans two projects: schedule's `projects:` filter is strict, and it writes one serial rollout note
+per chain (schedule § Serial path). Never a bare project run. Schedule's serial path decides chains
+and surfaces (ADR 0040). The steering answer authorises every call, and § 9 follows each
 note written. A project with nothing left gets no call, and orient says so.
 
 - **Exclusions** (kept out of every `--tasks`; the fit test already sends most of them to the
@@ -364,11 +364,13 @@ note written. A project with nothing left gets no call, and orient says so.
   decided. Also excluded: in-flight tasks (§ 2). A task whose playbook demands sign-off before
   external effects goes in with that gate declared (schedule § 3.5), so it is set aside, never run
   past (ADR 0008, ADR 0034).
-- **Schedule stopped at § 0** → handled as in § 6: report its line and remedy; nothing is stamped.
-- **Interim line.** Until schedule writes serial rollouts, its § 0 answers each all-serial call
-  with `no serial writer yet: nothing stamped` before it resolves any repo. Report that line per
-  call and leave the members unstamped where the reshuffle put them; the next move is Hands-on or
-  a later `/thread:orient <project> --steer`.
+- **Schedule stopped at § 0, or on its serial path's plan or surface check** (S2, S3) → handled as
+  in § 6: report its line and remedy; nothing is stamped.
+- **Surface overlap or session lane.** A chain refused at S3 overlaps a live chain or an unfinished
+  parallel rollout: report the refusal lines and their remedy (a never-started chain's is `status:
+  dropped`, which names whose note it is), and leave the members unstamped where the reshuffle put
+  them; the next move is Hands-on or a later `/thread:orient <project> --steer`. Members schedule
+  sends to ruling (c)'s session lane (`serial-chains.py`'s `sessionLane`) stay unstamped: name them.
 - **Uncommitted grill docs.** § 6's hold applies to any repo a member writes.
 
 ### 8. Batches (retired)
@@ -382,7 +384,8 @@ them, though an end line with an open fork still counts (§ 2 Open forks). Old r
 ### 9. The execute offer
 
 When § 6 or § 7 wrote a rollout note, end with `AskUserQuestion`, recommended option first, one
-offer per note written:
+offer per parallel note written; a serial note (`shape: serial`) gets no offer until execute runs
+Legs (p24-3): name it, its chain and each row's launch, and say it waits:
 
 - **Fresh session** (recommended after a reshuffle, which has filled this context) — run
   `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` with its usual home (never a commit on the
@@ -402,8 +405,8 @@ offer per note written:
   stamp, so it waits like Not yet.
 
 Execute's own runtime gate still applies wherever it runs. No rollout written → no offer; § 6 or
-§ 7 names why (a running or blocked rollout, uncommitted grill docs, a schedule blocker, or
-schedule's `no serial writer yet: nothing stamped` stop).
+§ 7 names why (a running or blocked rollout, uncommitted grill docs, a schedule blocker, or a surface
+overlap with a live chain).
 
 ### 10. `--debrief` (retired)
 
@@ -430,7 +433,8 @@ given). It resolves, asks, reads and writes nothing.
   logic; parallel- and serial-shaped work go to schedule (the execution-fit test
   decides, hard); execute runs only through the execute offer.
 - **Don't put parallel-shaped work in a serial rollout**, and don't schedule a bare project run (always `--tasks`).
-- **Never a second unfinished rollout per repo, and never another rollout's lifecycle**: schedule
+- **Never a second unfinished parallel rollout per repo, never a serial chain over a live chain's
+  surface, and never another rollout's lifecycle**: schedule
   § 0 supersedes only what its unfinished-rollout check allows (this project's, paused or never
   started); anything else waits (§ 6).
 - **Don't use orient for a single live thread** — that's `next`.
