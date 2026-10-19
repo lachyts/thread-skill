@@ -301,8 +301,8 @@ open. Steer only skips this step, so its open forks wait for the next Reshuffle.
     prior rollout). Orient reports any such finish from schedule's output, never as "nothing
     written". The phases are written and wait; orient reports schedule's remedy and names the next
     move: `/thread:status` (then `repair`) for a stuck rollout or a serial chain that has run,
-    `status: dropped` on a never-started serial chain's note (no Leg runner runs it yet, p24-3;
-    dropping it frees its tasks), or a later `/thread:orient <project>` (`--steer` is enough) once
+    `status: dropped` on a never-started serial chain's note (dropping it frees its tasks) or run
+    that chain, or a later `/thread:orient <project>` (`--steer` is enough) once
     the repo is free.
   - **Uncommitted grill docs.** If R3's grill left `CONTEXT.md` or `docs/adr/` changes
     uncommitted in the target repo, schedule nothing there either: every worktree branches from
@@ -387,8 +387,8 @@ them, though an end line with an open fork still counts (§ 2 Open forks). Old r
 ### 9. The execute offer
 
 When § 6 or § 7 wrote a rollout note, end with `AskUserQuestion`, recommended option first, one
-offer per parallel note written; a serial note (`shape: serial`) gets no offer until execute runs
-Legs (p24-3): name it, its chain and each row's launch, and say it waits:
+offer per parallel note written; a serial note (`shape: serial`) gets no offer: name it, its chain,
+each row's launch and Leg 1's start line, and never stamp `start: unattended` on it:
 
 - **Fresh session** (recommended after a reshuffle, which has filled this context) — run
   `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` with its usual home (never a commit on the

@@ -589,7 +589,7 @@ mkser ran.md "$DEMO" 'surfaces: ["ext:ran"]'; mkt r1.md ran in_progress 'owner: 
 chs --surface ext:cms --project Demo
 ok "$out|$rc" "refuse mine,theirs|3" "S9: two overlapping chains refuse both"
 has "$err" "[[mine]] (Demo; never started)" "S9: this project's never-started chain, with its project"
-has "$err" "no Leg runner runs it yet (p24-3): stamp [[mine]] \`status: dropped\` to free its tasks (step 1 then takes them again), then re-run" "S9: … gets the drop remedy naming p24-3"
+has "$err" "run it (\`/thread:execute [[mine]]\` from its first row's launch) or stamp [[mine]] \`status: dropped\` to free its tasks (step 1 then takes them again), then re-run" "S9: … gets the run-or-drop remedy"
 has "$err" "[[theirs]] (Other; never started)" "S9: another project's never-started chain, with its project"
 has "$err" "stamp [[theirs]] \`status: dropped\`" "S9: … gets the drop remedy too"
 chs --surface ext:inc --project Demo
@@ -599,6 +599,10 @@ chs --surface ext:ran --project Demo
 has "$err" "[[ran]] (Demo; has run: " "S9: a chain whose task carries owner: has run"
 has "$err" "wait for it to finish, or /thread:status then /thread:repair" "S9: … and gets wait-or-status-repair"
 hasnt "$err" "status: dropped" "S9: … never the drop remedy"
+mkser legged.md "$DEMO" 'surfaces: ["ext:legged"]'; printf '\n## Leg log\n\n- 2026-10-20T10:00+00:00 Leg 1 began: leg-1 session s in cc-x from /x\n' >> "$T/legged.md"
+chs --surface ext:legged --project Demo
+has "$err" "[[legged]] (Demo; has run: " "S9: a chain with a ## Leg log and no owners has run"
+hasnt "$err" "status: dropped" "S9: … so it never gets the drop remedy"
 
 scen s10
 mkser q.md "$DEMO" 'surfaces:' '  - "vault:Work/A, B/x"'

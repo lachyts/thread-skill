@@ -33,7 +33,8 @@ Subcommands:
               starts a second lead; a refusal leaves it. Refuses an incomplete rollout (below): exit 1, no
               stdout, one ERROR line naming why and the remedy, `/thread:schedule <its first project> --regenerate`.
               Refuses a serial rollout (`shape: serial`, ADR 0040) first, before its ceiling is read: exit 1, no
-              stdout, one ERROR line, nothing written and `start:` kept, since no Leg runner runs one yet (p24-3).
+              stdout, one ERROR line, nothing written and `start:` kept: a serial rollout runs as Legs (execute
+              legs.md, leg.py), never through next.
               An unacked git-env trip (Git-env hold, below) is listed as `gitEnvHold` and makes `halt` "git-env",
               ahead of every other verdict. `awaitingIntegration` is the Integration queue's order: a task a queued
               task depends on, directly or through a folded member (`merged_into:`), first, then the oldest
@@ -590,7 +591,8 @@ so once the hold is acked the RACE hold applies unchanged.
 
 Never started (never_started, read by `carry` and skills/_shared/scripts/unfinished-rollout.py): no execute
 session has run the rollout. Only execute's own marks count. On the rollout note: `paused:`, a truthy
-`pause_requested`, `completed:`, or a `## Pause log` / `## Completion log` heading line. On a linked task note:
+`pause_requested`, `completed:`, or a `## Pause log`, `## Completion log` or `## Leg log` (a serial rollout's Legs,
+leg.py) heading line. On a linked task note:
 a non-empty `owner:` or `integrating:`. A task's status and its `started:` / `ready:` / `merged:` stamps never
 count, because a carry keeps them. A protocol-3 run shows through the `owner:` its engine stamped on each task
 at dispatch.
@@ -1599,7 +1601,7 @@ def _queue_state(note):
     return "other", None
 
 
-STARTED_HEADINGS = ("## Pause log", "## Completion log")
+STARTED_HEADINGS = ("## Pause log", "## Completion log", "## Leg log")
 
 
 def _valued(value) -> bool:
@@ -1611,7 +1613,7 @@ def _valued(value) -> bool:
 def never_started(rollout_note, linked):
     """(True, '') when no execute session has run this rollout, else (False, reason). Only execute's own
     marks count (the module docstring's "Never started"): the rollout note's `paused:`, truthy
-    `pause_requested`, `completed:`, a `## Pause log` or `## Completion log` heading; a linked task note's
+    `pause_requested`, `completed:`, a `## Pause log`, `## Completion log` or `## Leg log` heading; a linked task note's
     non-empty `owner:` or `integrating:` (`linked` is `_scan`'s list of (path, Note)). A task's status and
     its started:/ready:/merged: stamps never count, so a freshly carried rollout is still never started. A
     protocol-3 run shows through the `owner:` its engine stamped on each task at dispatch."""
@@ -2423,8 +2425,8 @@ def cmd_next(args) -> int:
     now = _now(args)
     rollout_note = Note(rollout_path)
     if _shape(rollout_note) == "serial":
-        print(f"ERROR: {rollout_path.stem}: shape: serial: serial rollouts have no Leg runner yet: nothing runs "
-              "(p24-3)", file=sys.stderr)
+        print(f"ERROR: {rollout_path.stem}: shape: serial: a serial rollout runs as Legs, never through next: "
+              f"/thread:execute [[{rollout_path.stem}]] runs its next Leg (execute legs.md)", file=sys.stderr)
         return 1
     ceiling, err = _ceiling(rollout_note)
     if err:

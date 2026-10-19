@@ -117,7 +117,8 @@ Verbs (writing verbs: begin, claim, smoke, file-fix, done, set-aside, file-follo
       (<reason>), then`. Then `status: done`, `completed:`, a `## Completion log` (a line per Leg: launch, begun–closed,
       done and set aside; each --log-line; `Post-rollout items:` with each disposition; a `Chain commits:` line per
       checkout or `Chain commits: none`; `Reflection: not scored (serial; p24-4)`), the move to
-      `Archive/Rollouts/` (`git mv` when tracked, else a rename), and one vault commit by pathspec (the archived note,
+      `Archive/Rollouts/` (a git move when `git ls-files --error-unmatch` finds the note, else a rename), and one
+      vault commit by pathspec (the archived note,
       the follow-ons this Leg filed, each --also path, the old path when tracked). A failed commit is
       `committed: false`, exit 0: the daily sweep commits it.
   handed --started <id> | --manual <why>

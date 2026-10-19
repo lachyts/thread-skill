@@ -322,16 +322,26 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rollout before 2026-10-19 is one.
 - **Serial rollout** — a rollout run as a chain of **Legs**: visible,
   interactive sessions that each work tasks themselves, close, and hand the
-  rest to a fresh successor. No worktrees, and no subagents but each task's
-  clean-room review. One chain per note (schedule § Serial path): its
-  `surfaces:` claims the **Surface**s the chain writes, and each `## Queue` row
-  names the launch its Leg opens in, so a launch change between two rows is a
-  Leg boundary. Nothing runs one until Legs ship (p24-3). _Avoid_: relay
-  (Chorus's word for sending a command to a session).
-- **Leg** — one session's part of a serial rollout: it finishes any task its
-  predecessor left claimed, then claims tasks one at a time (up to five, fewer
-  when its context grows heavy or a task proves large), closes, and hands over.
-  _Avoid_: shift, stint, iteration (one task in a Ralph loop), batch.
+  rest to a fresh successor. No task worktrees (leg.py's transient scratch
+  revert only), and no subagents but each task's clean-room review. One chain
+  per note (schedule § Serial path): its `surfaces:` claims the **Surface**s the
+  chain writes, and each `## Queue` row names the launch its Leg opens in, so a
+  launch change between two rows is a Leg boundary. execute runs its Legs
+  (`skills/execute/legs.md`). A serial note is never paused: a Leg stops through
+  `leg.py close --outcome stopped`. _Avoid_: relay (Chorus's word for sending a
+  command to a session).
+- **Leg** — one session's part of a serial rollout (`skills/execute/legs.md`).
+  In order: execute's git-env check, `leg.py begin`, the preflight (the
+  launch's required tools answer), the smoke test (the Verify line of every
+  task the previous Leg finished), any task its predecessor left claimed, the
+  fix tasks, then new tasks claimed one at a time: up to five fresh claims, the
+  inherited task aside, fewer when its context grows heavy or a task proves
+  large, and never closing mid-task. Each code-writing task gets one clean-room
+  review before it is done. Its close ritual lands its close-outs commit-only,
+  hands the rest to a fresh Leg through the Stage (a labelled manual hand-over
+  elsewhere), and ends on a `ROLLOUT-STATUS:` line; every Leg whose Close reads
+  *closed* reports to the origin. _Avoid_: shift, stint, iteration (one task
+  in a Ralph loop), batch.
 - **Surface** — a place a serial chain writes, written as a token in a serial
   note's `surfaces:` (and in a task's own, optional `surfaces:`). Five kinds:
   `repo:<absolute path>` (a filesystem place; overlaps on equality or
@@ -653,7 +663,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   produces. _Avoid_: correctness, polish.
 - **Escape** — landed work that later needs a fix it should not have needed:
   a follow-up fix task traced to it by its `fixes:` key, a revert, or a later review finding
-  against its lines. Counted against the rollout that landed it, so it is
+  against its lines. A Leg's fix task names the task whose Verify failed in `verifies:`, which is
+  never an Escape; its `fixes:` names the chain task whose work caused the failure, if any. Counted against the rollout that landed it, so it is
   known only after the run: each weekly reading counts the ones that surfaced
   that week against the rollout that landed them, however old (ADR 0037 d4).
   _Avoid_: bug (alone), regression (a review round's word).

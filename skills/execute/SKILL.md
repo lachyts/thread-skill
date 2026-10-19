@@ -1,11 +1,11 @@
 ---
 name: execute
-description: 'Use to execute a rollout queue — reads the rollout note, resolves per-task config, and runs the convergence engine on the Workflow tool (plan-gate → verifier retry → master review), one task per call up to the parallel ceiling; the lead integrates each approved task with the latest main and is its only merger. Continuous by default; --gated pauses before each merge; a gated input sets its task aside for sign-off, never the rollout. Triggers on "execute [[rollout-slug]]", "pause the rollout", "reinstate [[rollout]]", or explicit /thread:execute. Only runs `protocol_version: 5` rollouts; older notes are refused with a /thread:schedule --regenerate prompt.'
+description: 'Use to execute a rollout queue — reads the rollout note, resolves per-task config, and runs the convergence engine on the Workflow tool (plan-gate → verifier retry → master review), one task per call up to the parallel ceiling; the lead integrates each approved task with the latest main and is its only merger. Continuous by default; --gated pauses before each merge; a gated input sets its task aside for sign-off, never the rollout. Triggers on "execute [[rollout-slug]]", "pause the rollout", "reinstate [[rollout]]", or explicit /thread:execute. Only runs `protocol_version: 5` rollouts; older notes are refused with a /thread:schedule --regenerate prompt. A serial rollout runs as Legs.'
 ---
 
 # /thread:execute — run a rollout's queue on the Workflow engine
 
-`/thread:execute` is the executor half of the rollout split. Where `/thread:schedule` writes the rollout note (data), this skill reads it, resolves config, and hands the convergence work to a **dynamic Workflow** script. This skill is a thin shim; the engine lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/task.workflow.js`.
+`/thread:execute` is the executor half of the rollout split. Where `/thread:schedule` writes the rollout note (data), this skill reads it, resolves config, and hands the convergence work to a **dynamic Workflow** script. This skill is a thin shim; the engine lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/task.workflow.js`. A serial note (`shape: serial`, ADR 0040) never reaches the engine: § 2's shape line sends it to `${CLAUDE_PLUGIN_ROOT}/skills/execute/legs.md`, where this session runs one **Leg** of its chain.
 
 **Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 
@@ -41,7 +41,7 @@ Existing scheduled jobs and journals retain their runtime.
 
 ## Scope
 
-Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` produced by `/thread:schedule` (older undated `<slug>-rollout` notes still resolve — see step 1). The Workflow's agents operate in isolated git worktrees they create under the target repo (`<repoPath>/.claude/worktrees/`) and open PRs. The lead session updates task frontmatter in the vault and, at completion, sets `status: done` on the phase notes the rollout finished and may file a `phase-close-followup-*` task (ADR 0026), and, at completion, records the rollout's score: `close-score.py` writes fold's `call-journal` lines and one `tunings.jsonl` line under the events directory, outside the vault (ADR 0037 d4). Does not touch any other backlog source.
+Reads `~/repos/obsidian/Work/Tasks/<slug>-rollout-<YYYY-MM-DD>.md` produced by `/thread:schedule` (older undated `<slug>-rollout` notes still resolve — see step 1). The Workflow's agents operate in isolated git worktrees they create under the target repo (`<repoPath>/.claude/worktrees/`) and open PRs. The lead session updates task frontmatter in the vault and, at completion, sets `status: done` on the phase notes the rollout finished and may file a `phase-close-followup-*` task (ADR 0026), and, at completion, records the rollout's score: `close-score.py` writes fold's `call-journal` lines and one `tunings.jsonl` line under the events directory, outside the vault (ADR 0037 d4). Does not touch any other backlog source. A serial rollout's Legs (`legs.md`) write its task notes, the rollout note's `## Leg log` and commits in its chain checkouts; they make no task worktrees, only `leg.py`'s scratch revert worktree, removed before the verb returns.
 
 ## Invocation forms
 
@@ -56,6 +56,8 @@ approved task with the latest base branch (`main` unless §4's `defaultBranch` s
 merges it — no per-PR confirmation. `--gated` is the same queue with a **merge hold** before each merge (§4.5
 *Merge hold*): task calls keep running while the lane waits for your go-ahead.
 
+**A serial rollout runs as Legs.** `/thread:execute [[<serial note>]]` runs one Leg of its chain in this session (`legs.md`): it begins, works tasks one at a time, closes and hands the rest to a fresh Leg. `--take-over` (a dead Leg's claim) and `--resume <N>` (this conversation's own Leg after its session id changed) pass through to `leg.py begin` (`skills/execute/legs.md` § Begin).
+
 **A wave number is refused.** `execute Wave N of [[rollout]]` prints "single-wave mode is gone (ADR 0030): run `execute [[rollout]]`, or add `--gated` to approve each merge" and stops.
 
 In a live session, "retry [[task]]" re-enters a set-aside task: run `reconcile-rollout.py hand-back --tasks <slug>` (§4.5 *Set aside*), which spends the answers its `## Repair input` holds in the same save (ADR 0035: each live key becomes `(block <fingerprint>; handed back <stamp>)`, so an identical re-block goes back to Lachy), then §4.5 step 1. Its exit 2 means an undecided RACE or UNVERIFIED holds the task: print its ERROR line and stop there, since only Lachy's `RACE decided:` line (through `/thread:repair`) releases it.
@@ -68,7 +70,7 @@ Resolve `[[<slug>]]` to `~/repos/obsidian/Work/Tasks/<slug>.md`. Read frontmatte
 
 The slug is whatever the invocation names. `/thread:schedule` writes rollout notes **always dated** — `<project-slug>-rollout-<YYYY-MM-DD>` for the first rollout of a day, or `<project-slug>-rollout-<YYYY-MM-DD>-<N>` (N≥2) for each subsequent rollout that same day (the first-of-day stays bare-date). Legacy notes from before this rule use the undated `<project-slug>-rollout`; execute still resolves them. The ordinal is purely `/thread:schedule`'s collision-avoidance scheme; execute reads the exact note it's handed and needs no special parsing. If the user names a rollout ambiguously (e.g. "execute today's giflab rollout") and several dated/ordinal notes match, **list the matches and ask which** (the question tool only with nothing live in this session, § 6.5) — don't assume the highest ordinal.
 
-If the frontmatter carries a `paused:` stamp, this invocation is a **reinstate** — see §4.5 *Reinstate* and *Pausing + reinstating a rollout* below.
+If the frontmatter carries a `paused:` stamp, this invocation is a **reinstate** — see §4.5 *Reinstate* and *Pausing + reinstating a rollout* below. A serial note (`shape: serial`) is never paused: a Leg stops through `leg.py close --outcome stopped` (`skills/execute/legs.md` § Close), and "pause the rollout" in a Leg means that. A `paused:` or `pause_requested:` stamp on one is not a reinstate: § 2's shape line sends the note to legs.md, whose `begin` refuses it with its remedy.
 
 A `start: unattended` stamp (*Start when ready*, `_shared/vault-grammar.md` § Rollout start stamp) asks nothing of this invocation: § 4.5 step 1's first `next` removes it (`startCleared: true`), so the Chorus Stage never starts a second lead. Any halt before that `next` leaves it for the Stage, and so does a refused `next` (exit 1), which writes nothing.
 
@@ -85,7 +87,7 @@ Then the version:
 - Missing `protocol_version`, or `protocol_version: 2` or `3` → print: "This rollout predates the queue (ADR 0030). If a session is running it, hard-pause it (*Pausing + reinstating a rollout*), then `/thread:schedule <project> --regenerate`: the supersede carries every unlanded task into a `protocol_version: 5` queue." Stop. (The legacy prose executor and the stored-cursor engine are retired — there is no engine to fall back to.)
 - `protocol_version` other than `5` → print "unsupported protocol version <N>; this executor supports protocol_version: 5" and stop.
 
-Then the shape (`shape:`; no key reads as parallel): `shape: serial` → print `serial rollouts have no Leg runner yet: nothing runs` and stop; nothing is written and a `start: unattended` stays (p24-3 replaces this line).
+Then the shape (`shape:`; no key reads as parallel): `shape: serial` → run `${CLAUDE_PLUGIN_ROOT}/skills/execute/legs.md` instead of §§ 2.5–8, and write nothing here.
 
 **Incomplete check (once, after § 2.7).** Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py status --rollout <rollout-note>` (read-only). A non-null `incomplete` is printed with its remedy, `/thread:schedule <project> --regenerate`, before the first `next` (which refuses the same rollout, exit 1, on its own: § 7).
 
@@ -703,9 +705,9 @@ ROLLOUT-STATUS: <rollout-slug> merged=<K>/<N> running=<R> state=<running|waiting
 - `running` — in-session driving work remains **right now** (a call returned and needs reconcile, a task needs integrating or merging, a slot is free). The plugin's Stop-hook driver (§8) refuses to let the session stop on this state — so never end a turn on `running` unless you genuinely stopped mid-work.
 - `waiting` — a task call, an integrate call, a background Integration command or a merge hold is in flight, or a retry cool-down (quota or infra) is pending (§4.5 step 1.5), or a room stop stands (§ Room stop); nothing to do until its notification or the cool-down's end (the heartbeat cron is the backstop). A hold's `waiting` carries its `reason=` (`gated: …` or `review required: …`), and so does a cool-down's (`quota cool-down: …` or `infra cool-down: …`) and a room stop's (`room stop: …`).
 - `halted` — a §7 stop condition fired, a requested pause took effect (*Pausing + reinstating a rollout*), or §4.5 step 5's sign-off form closed the run (`ROLLOUT-STATUS: <rollout-slug> merged=<K>/<N> running=<R> state=halted reason="awaiting sign-off: [[<slug>]]"`, naming each gate-pending task) — always include `reason=`.
-- `done` — completion ceremony performed.
+- `done` — completion ceremony performed; for a Leg, its close ritual with its successor started, or the chain complete (`skills/execute/legs.md` § Report).
 
-`reason` appears only on `halted`, on a hold and on a retry cool-down (§4.5 step 1.5), and on a room stop (§ Room stop). Keep it short and quote-free. This line is the contract the automatic driver (§8) keys off — the Stop hook parses it with a strict regex, so keep the format byte-stable.
+`reason` appears only on `halted`, on a hold and on a retry cool-down (§4.5 step 1.5), and on a room stop (§ Room stop). A Leg's `done` and `waiting` lines carry one too (`handed off to Leg <N+1>`, `review in flight: [[t]]`): `skills/execute/legs.md` § Report maps every Leg turn end to its line. Keep it short and quote-free. This line is the contract the automatic driver (§8) keys off — the Stop hook parses it with a strict regex, so keep the format byte-stable.
 
 **Merging:** the lead merges only after Integration (§4.5 steps 3-4), through `scripts/merge-task.sh` — never an inline `gh pr merge`; under `--gated` it first waits at a merge hold for your go-ahead. merge-task.sh never updates a branch: it merges a PR only onto the base its Integration used (exit 3 otherwise).
 
@@ -808,7 +810,7 @@ Division of labour: **Stop hook** = "don't stop while there's driving work"; **h
 
 ## Pausing + reinstating a rollout
 
-"Pause the rollout" means **soft pause** by default; **hard pause** only when it must stop *now*. Either way the pause is recorded on the rollout note, and reinstating is plain `/thread:execute [[rollout]]` — no separate resume command, no new state machine. Neither pause runs the § 2.5, § 2.6 or § 2.7 gates: stopping work is never blocked, even for a listed repo or a register the check can't read. (Terms: `CONTEXT.md` → *Pause*, *Reinstate*.)
+"Pause the rollout" means **soft pause** by default; **hard pause** only when it must stop *now*. A serial rollout is never paused: its Leg stops through `leg.py close --outcome stopped` (`skills/execute/legs.md` § Close), and a `paused:` or `pause_requested:` stamp on a serial note is refused by `leg.py begin` with its remedy. Either way the pause is recorded on the rollout note, and reinstating is plain `/thread:execute [[rollout]]` — no separate resume command, no new state machine. Neither pause runs the § 2.5, § 2.6 or § 2.7 gates: stopping work is never blocked, even for a listed repo or a register the check can't read. (Terms: `CONTEXT.md` → *Pause*, *Reinstate*.)
 
 **Soft pause (default).** Stamp `pause_requested: true` on the rollout note's frontmatter (a lead-session edit — it's rollout config, not task status). Nothing is interrupted, and **the queue drains** (ADR 0030 decision 5): `next` starts and restarts nothing new, step 1.2 launches no seeded revise, and every running task call finishes while every approved task integrates and merges. Once nothing runs, awaits Integration or integrates, `next` stamps `paused: <timestamp>`, removes `pause_requested` and reports `halt: paused`; the loop exits with `state=halted reason="paused at user request"`. A plain rejection during the drain waits, set aside, for the reinstate. Zero extra agent calls. To cancel a pending request before it takes effect, remove the `pause_requested:` line (or run `clear-pause`). A room-stopped call (§ Room stop) is in-flight work: it counts as running in `--running`, and the drain resumes it at step 1.3 or 1.4 before `next` stamps `paused:`.
 
@@ -827,6 +829,8 @@ While `paused:` stands, nothing is launched, undone, set aside or re-run: a stop
 A paused rollout is **intentional**, not stalled: `/thread:status` reports it as paused (stamp + since-when + what's left). Under a pause `/thread:repair` only records escalations and decisions (a `RACE decided:` line included) and defers a set-aside task; when the pause is stamped, it may also write a confirmed `pr:` or defer a RACE task whose merge does not stand. It never hands back.
 
 ## Room stop (a Chorus Session's Login at its line)
+
+A Leg of a serial rollout runs `skills/execute/legs.md` § Room stop instead.
 
 0. **What it is.** On the Chorus Stage, a room stop is Chorus ADR 0071's lead half: start nothing, stop each Workflow call the moment its running agent's result is in the run's journal, report that nothing is mid-step so the Stage can switch the Login, and resume every stopped call on the Stage's re-send. The engine needs no change (it has no shell to read a flag): the lead watches the journals with `${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py`. A room stop is never a Pause (*Pausing + reinstating a rollout*). Stopping work is never gated, so § 2.5, § 2.6 and § 2.7 do not run for it.
 1. **Trigger, and when it stands.** The trigger is a Prompt or Steer whose text starts `Chorus: ` and says this Session's Login `is at its week's line` or `is at its 5-hour line` (the 5-hour form may add that Chorus waits for the reset on this Login). The room stop stands from item 2's `## Pause log` line until the `room stop ended` line that item 9's entry writes. When this session cannot tell whether one stands (after a compaction, say), `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py stands --rollout <rollout-note>` decides: exit 0 or 4 means it stands (4: at or past its bound, item 11). A second signal changes nothing: `begin` writes nothing, and a running watch is not relaunched.
@@ -879,6 +883,7 @@ A paused rollout is **intentional**, not stalled: `/thread:status` reports it as
 - Never launch, resume, verify or call merge-task without its canary step (§ 4.5 *Git-env canary*), never route a merge-task result without the `check-all`, never take a route under a git-env hold but 0/5/2/70, never `mark-done` on a RACE rc after a git-env halt, and never ack from execute: the ack is `/thread:repair`'s, on Lachy's word.
 - Never launch a background command without a `timeout`.
 - Never call the question tool (`AskUserQuestion`, or the harness's own ask tool) while a task call, an integrate call, a background Integration command or a merge hold is live, and never push a needs-you item a `## Needs-you log` line already names, but for its one retry at a loop entry after a single `push failed:` line (§ 6.5).
+- Never run a serial note (`shape: serial`) through `next` or the Workflow engine: § 2's shape line sends it to legs.md.
 - Don't skip the protocol-version gate. Legacy (absent, 2 or 3) rollouts must be regenerated, not retrofitted.
 - Don't update a task's `status:` from inside a subagent — the lead session reconciles after the workflow returns.
 - Don't hand-roll the convergence loop in the conversation — that engine moved into `task.workflow.js`. If the loop needs changing, edit the script and (for an interrupted run) re-invoke with `resumeFromRunId`.

@@ -76,8 +76,9 @@ Outcomes (parallel, the default), the first that applies:
   2b. Unfinished serial notes whose surfaces overlap --repo's token (a live chain owns the places it writes) ->
      `refuse <their slugs, sorted>`, exit 3, one stderr line each: `[[s]] (<label>; <state>) is a serial chain that
      writes <token> and owns that place (ADR 0040): <remedy>`. The remedy names whose note it is: never started,
-     `status: dropped` frees its tasks (no Leg runner runs it yet, p24-3), an incomplete one with its incomplete
-     line first; one that has run, wait for it or /thread:status then /thread:repair. Else U empty -> `none`, exit 0.
+     run it (`/thread:execute [[slug]]` from its first row's launch) or stamp it `status: dropped`, which frees its
+     tasks, an incomplete one with its incomplete line first; one that has run (a `## Leg log` counts), wait for it
+     or /thread:status then /thread:repair. Else U empty -> `none`, exit 0.
   3. U is exactly one interrupted pair {P, N} and N is this project's: with --regenerate `interrupted P N`,
      exit 0; without, `refuse P,N` (sorted), exit 3, and stderr says N is incomplete.
   4. U is one note X: eligible with --regenerate -> `supersede X`, exit 0 (an incomplete X WARNs that this
@@ -349,9 +350,9 @@ def serial_notes(rr, notes, tasks_dir, warns, mine, warned):
 def serial_remedy(s) -> str:
     """R3's remedy for a live serial note, naming whose note it is."""
     if s["fresh"]:
-        drop = (f"no Leg runner runs it yet (p24-3): stamp [[{s['slug']}]] `status: dropped` to free its tasks (step 1 "
-                "then takes them again), then re-run; declare `surfaces:` on its tasks before re-scheduling them if the "
-                "claim was too broad")
+        drop = (f"run it (`/thread:execute [[{s['slug']}]]` from its first row's launch) or stamp [[{s['slug']}]] "
+                "`status: dropped` to free its tasks (step 1 then takes them again), then re-run; declare `surfaces:` on "
+                "its tasks before re-scheduling them if the claim was too broad")
         return f"{s['slug']} is incomplete: {s['incomplete']}; {drop}" if s["incomplete"] else drop
     return "wait for it to finish, or /thread:status then /thread:repair"
 
