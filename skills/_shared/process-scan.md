@@ -2,6 +2,8 @@
 
 The one statement of category 7, the process-observation scan. `thread:close` runs it in full as its category 7; `thread:stash` and `thread:defer` run it in silent mode on every exit (ADR 0012, 0014, 0015). The writers cite this file; none restates it.
 
+**Plugin root.** This spec is read as a file, never rendered: run its commands by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
+
 ## The bar
 
 A **process observation** is a genuine stage-shift, pivot, reusable move, revealing failure, or cross-workstream effect in *how the project is being made*. Stage-gated, never per-iteration: another numbered pass existing is not an observation; discovering that one variable had to lock before the others could move is. Most sessions have none — NOOP is the expected outcome.

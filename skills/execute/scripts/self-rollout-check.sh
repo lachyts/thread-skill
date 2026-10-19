@@ -204,7 +204,7 @@ if [ "$mode" = check ]; then
   live "$R" || exit 0
   echo "$SR: $raw is, or contains, $what." >&2
   echo "$SR: the plugin runs live from it, so every engine change merged there becomes the engine of the rollout's next task call." >&2
-  echo "$SR: make a separate clone at $R-rollout (git clone <origin URL> \"$R-rollout\"), then run /thread:schedule <project> --regenerate, which re-roots the rollout there; never hand-edit its Project root." >&2
+  echo "$SR: run it from its rollout clone at $R-rollout (git clone <origin URL> \"$R-rollout\"): /thread:schedule <project> --regenerate makes the clone when it is missing and re-roots the rollout there (ADR 0042); never hand-edit its Project root." >&2
   exit 3
 fi
 
@@ -307,7 +307,7 @@ usable() {  # the usable-clone checks, in order; exits 3 naming the first that f
   C=$(canon "$C")
   t=$(toplevel "$C") && [ "$t" = "$C" ] || not_usable "it is not the top of a git work tree"
   gc=$(git -C "$C" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && [ -n "$gc" ] && gc=$(canon "$gc")
-  case "$gc" in "$C"/*) ;; *) not_usable "it is a linked worktree of ${gc:-another repository}, not a separate clone" ;; esac
+  case "$gc" in "$C"/*) ;; *) not_usable "it is a linked worktree of ${gc:-another repository}, not its own clone" ;; esac
   b=$(slug_of "$C") && [ -n "$b" ] || not_usable "its origin does not name a GitHub <owner>/<name>"
   [ "$(lower "$b")" = "$(lower "$TSLUG")" ] || not_usable "its origin is $b, not $TSLUG"
   live "$C" && not_usable "it holds a live plugin checkout: $what"

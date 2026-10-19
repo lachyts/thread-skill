@@ -65,8 +65,8 @@ for sh in "${shells[@]}"; do
 
   write_reg "$home/repos/plug" "$tmp/other"
   run "$home/repos/plug"; ok "$rc" 3 "$n: repoPath is a directory-source checkout → 3"
-  has "$err" "make a separate clone at $home/repos/plug-rollout (" "$n: … the fix on stderr, naming <repoPath>-rollout"
-  has "$err" "then run /thread:schedule <project> --regenerate, which re-roots the rollout there; never hand-edit its Project root" "$n: … through --regenerate, never a hand edit"
+  has "$err" "run it from its rollout clone at $home/repos/plug-rollout (" "$n: … the fix on stderr, naming <repoPath>-rollout"
+  has "$err" "/thread:schedule <project> --regenerate makes the clone when it is missing and re-roots the rollout there (ADR 0042); never hand-edit its Project root" "$n: … through --regenerate, never a hand edit"
   has "$err" "'thread'" "$n: … naming the marketplace"
   run "$tmp/link"; ok "$rc" 3 "$n: via a symlink to it → 3"
   run "$home/repos/plug/"; ok "$rc" 3 "$n: with a trailing / → 3"
@@ -107,7 +107,7 @@ for sh in "${shells[@]}"; do
   rm -f "$reg"
   run "$pd/plugin" CLAUDE_PLUGIN_ROOT="$pd/plugin"; ok "$rc" 3 "$n: repoPath is \${CLAUDE_PLUGIN_ROOT}, no registry → 3"
   has "$err" "the root this session runs the plugin from" "$n: … naming the plugin root"
-  has "$err" "make a separate clone at $pd/plugin-rollout (" "$n: … and the same fix"
+  has "$err" "run it from its rollout clone at $pd/plugin-rollout (" "$n: … and the same fix"
   run "$pd" CLAUDE_PLUGIN_ROOT="$pd/plugin"; ok "$rc" 3 "$n: repoPath contains \${CLAUDE_PLUGIN_ROOT} → 3"
   run "$tmp/pdlink" CLAUDE_PLUGIN_ROOT="$pd/plugin/"; ok "$rc" 3 "$n: … via a symlink to repoPath, a trailing / on the root → 3"
   run "$pd/plugin/skills" CLAUDE_PLUGIN_ROOT="$pd/plugin"; ok "$rc|$err" "0|" "$n: repoPath inside \${CLAUDE_PLUGIN_ROOT}, not containing it → 0"
@@ -214,7 +214,7 @@ rm -rf "$sib/plug"
 
 # a linked worktree of the primary shares its .git: not a separate clone
 rm -rf "$sib"; g -C "$live" worktree add -q --detach "$sib"
-res "$bash_sh" "$live"; no "it is a linked worktree of $live/.git, not a separate clone" "resolve: a linked worktree of the primary at the clone's place"
+res "$bash_sh" "$live"; no "it is a linked worktree of $live/.git, not its own clone" "resolve: a linked worktree of the primary at the clone's place"
 # CDPATH must not steer the common-dir lookup (the review reproduced `cd` honouring it)
 res "$bash_sh" "$live" CDPATH="$decoy"; ok "$rc|$out" "3|" "resolve: … still 3 with a hostile CDPATH"
 # Local: naming a linked worktree: point it at the main checkout

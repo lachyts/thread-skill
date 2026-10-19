@@ -13,7 +13,8 @@
 //   - status's Don'ts give the stamp's clear as a reason `next` is a writer;
 //   - status § 1 reads the stamp straight from the frontmatter (its **Start stamp**), and action 13 reports a
 //     stamped note nothing has started as waiting for the Chorus Stage, naming `/thread:execute` only by hand;
-//   - CONTEXT.md has a **Start when ready** entry naming the stamp.
+//   - CONTEXT.md has a **Start when ready** entry naming the stamp;
+//   - the vault grammar's Readers and that entry say the Stage starts the lead in the rollout clone (ADR 0042).
 // check(files) returns the names of the failed rules; every rule has a mutation control below, so none is
 // vacuous. Reads files only.
 import { test } from 'node:test'
@@ -28,6 +29,7 @@ const real = {
   execute: read('skills/execute/SKILL.md'),
   status: read('skills/status/SKILL.md'),
   context: read('CONTEXT.md'),
+  grammar: read('skills/_shared/vault-grammar.md'),
 }
 
 // The blank-line paragraph of `text` that starts with `label`, collapsed; '' when absent.
@@ -71,7 +73,12 @@ function check(f) {
     out.push('status action 13')
   }
   const entry = collapse(f.context.split('\n- ').find((e) => e.startsWith('**Start when ready**')) ?? '')
-  if (!entry.includes(STAMP) || !entry.includes('Chorus Stage') || !entry.includes('`next`')) out.push('context entry')
+  if (!entry.includes(STAMP) || !entry.includes('Chorus Stage') || !entry.includes('`next`') ||
+    !entry.includes("note's Project root, the **Rollout clone** (ADR 0042)")) out.push('context entry')
+  // ADR 0042: the Stage starts the lead in the rollout clone, the Project root, so its launch passes execute § 2.8.
+  const readers = collapse((section(f.grammar, /^## Rollout start stamp/) ?? '').split('\n- ').find((b) => b.startsWith('**Readers**')) ?? '')
+  if (!readers.includes("in the note's Project root, the rollout clone for every rollout scheduled after P26 (ADR 0042)") ||
+    !readers.includes('execute § 2.8')) out.push('stage starts in the clone')
   return out
 }
 
@@ -104,6 +111,8 @@ test('controls: each rule fails on its own known-bad shape', () => {
       '13. Nothing started → `/thread:execute [[<rollout>]]` to start.')],
     ['status action 13', mutate('status', 'only as the way to start it by hand now', 'to start it')],
     ['context entry', mutate('context', '- **Start when ready**', '- **Unattended start**')],
+    ['stage starts in the clone', mutate('grammar', 'so its launch passes execute § 2.8', 'so it starts')],
+    ['context entry', mutate('context', "note's Project root, the **Rollout clone** (ADR 0042)", "note's Project root")],
   ]
   for (const [want, files] of cases) assert.deepEqual(check(files), [want], `control ${want}`)
 })
