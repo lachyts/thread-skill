@@ -45,10 +45,13 @@ The repo checks, schedule § 0's order, once per repo path that a live project's
 realpath; the declared strings kept):
   git                 `git rev-parse --show-toplevel`. A missing path, a plain directory or a failed probe leaves
                       every check unchecked with its reason.
-  self-rollout        `bash self-rollout-check.sh --resolve <declared path>`: exit 0 prints the rolloutRoot (kept
-                      realpath'd, as `path` is); exit 3 blocks (its stderr kept), and the toplevel stands in so the
-                      later checks still report; any other exit is unchecked. Every check below runs against the
-                      rolloutRoot's git root.
+  self-rollout        `bash self-rollout-check.sh --resolve <declared path>` (ADR 0042: every parallel rollout runs from
+                      its rollout clone `<toplevel>-rollout`): exit 0 prints the rolloutRoot, the clone (kept
+                      realpath'd, as `path` is); exit 4 (no clone yet: schedule § 0 makes it) and exit 5 (no GitHub
+                      origin: no-github-origin reports it) are no blocker; exit 3 blocks (its stderr kept: an unusable
+                      clone, ~/Projects itself, a linked worktree, a parent that would track the clone); on 3, 4 and 5
+                      the toplevel stands in, never the would-be clone, so the later checks still report; any other
+                      exit is unchecked. Every check below runs against the rolloutRoot's git root.
   no-github-origin    `bash land.sh --origin-slug`: exit 0 is `github`, exit 4 blocks, else unchecked.
   landing-register    `landing-register.py check`: 0 clear; 3 blocks (`landingRegister.line` is the `listed
                       <owner/name>: <reason>` line); 4 is recorded only (no-github-origin covers it); else unchecked.
@@ -60,8 +63,10 @@ realpath; the declared strings kept):
                       when it is present locally (`remote`), else of refs/remotes/origin/<d> (`last-fetch`); an ahead
                       set touching no file blocks; one touching only THREAD.md (threadOnly), or whose content beyond
                       THREAD.md is already on origin (contentOnOrigin: every touched file matches origin, or only
-                      THREAD.md differs and the set touches more than THREAD.md), does not, so every non-blocking
-                      ahead row carries one of the two. pushed-base.sh stays the gate: it fetches and walks the full
+                      THREAD.md differs and the set touches more than THREAD.md), does not; nor does a peer's
+                      (cloneRooted: the root is a rollout clone, `self-rollout-check.sh --in-place`, and this is
+                      another clone of the set, which pushed-base.sh blocks only on a path a task cites, and the scan
+                      cites none), so every non-blocking ahead row carries one of the three. pushed-base.sh stays the gate: it fetches and walks the full
                       clone set; tests/estate-scan.test.mjs runs it on copies of the fixtures for parity.
   unfinished-rollout  `unfinished-rollout.py check --repo <root> --project <name>` per declaring project, without
                       --regenerate: exit 3 blocks, 0 is the verdict (`none`, `file`), else unchecked.
@@ -107,7 +112,8 @@ Output, one JSON object (schema 1; --compact for one line):
                unreadable, project done, or other; raw is next-action's resolve_project reason (or RT.dead_why's);
   repos[]     {path, declared[], declaredBy[], exists, git, toplevel, nested, rolloutRoot, selfRollout {exit, stderr},
                origin, github, landingRegister {exit, line}, defaultBranch, defaultBranchSource (remote|cached|null),
-               unpushed[] {clone, ahead, basis (remote|last-fetch), touched[], threadOnly, contentOnOrigin, blocks,
+               unpushed[] {clone, ahead, basis (remote|last-fetch), touched[], threadOnly, contentOnOrigin,
+               cloneRooted, blocks,
                commits[] (up to 5, `log --oneline`)}, verifier {command, source: <agent doc>|Makefile|
                pyproject.toml|package.json|rollout <slug>|CLAUDE.md section} | null,
                unfinishedRollout[] {project, verdict, line, exit, stderr}, blockers[] {check, why},
@@ -673,13 +679,17 @@ class Scan:
         s = run.run(["bash", SELF_ROLLOUT_SH, "--resolve", declared])
         r.self_rollout = {"exit": s.exit, "stderr": s.err}
         printed = s.out.strip().splitlines()[-1] if s.ok and s.out.strip() else None
-        # realpath'd, as `path` is, so a declared `.../repo/` reads back equal to its path.
+        # realpath'd, as `path` is, so a declared `.../repo/` reads back equal to its path. On exit 4 the clone does not
+        # exist yet: the toplevel stands in, never the would-be clone it prints, for every later check.
         r.rollout_root = os.path.realpath(printed) if printed else r.toplevel
         if printed is None:
             if s.why:
                 r.unchecked.append({"check": "self-rollout", "why": s.why})
+            elif s.exit in (4, 5):
+                pass  # 4: no clone yet, schedule § 0 makes it; 5: no GitHub origin, no-github-origin reports it
             elif s.exit == 3:
-                why = next((ln.strip() for ln in s.err.splitlines() if "is not a usable rollout clone" in ln), None)
+                keys = ("is not a usable rollout clone", "has no rollout clone", "would track", "land ")
+                why = next((ln.strip() for ln in s.err.splitlines() if any(k in ln for k in keys)), None)
                 r.blockers.append({"check": "self-rollout", "why": why or last_line(s.err) or "exit 3"})
             else:
                 r.unchecked.append({"check": "self-rollout", "why": "error"})
@@ -725,7 +735,9 @@ class Scan:
             f.unchecked.append({"check": "landing-register", "why": lr.why or "error"})
 
         tip = self.default_branch(f, root)
-        self.unpushed(f, [root] + primaries, tip)
+        # A clone-rooted root (ADR 0042): the other clones of the set are peers, never a block without cited paths.
+        cr = run.run(["bash", SELF_ROLLOUT_SH, "--in-place", root])
+        self.unpushed(f, [root] + primaries, tip, clone_rooted=cr.exit == 0)
         self.verifier(f, root, [root] + primaries)
         return f
 
@@ -761,7 +773,7 @@ class Scan:
             f.unchecked.append({"check": "default-branch", "why": c.why or "no cached origin/HEAD"})
         return None
 
-    def unpushed(self, f, clones, tip):
+    def unpushed(self, f, clones, tip, clone_rooted=False):
         """pushed-base.sh's ahead classification (execution-fit.md § Dispatch blockers, **Pushed base**), restated:
         it fetches and walks the full clone set, the scan reads what is already local."""
         run, d = self.runner, f.branch
@@ -793,7 +805,7 @@ class Scan:
                                  "error": "%s: %s" % (c, n.why or last_line(n.err) or "cannot count %s" % d)})
                 continue
             row = {"clone": c, "ahead": int(n.out.strip()), "basis": basis, "touched": [], "threadOnly": False,
-                   "contentOnOrigin": False, "blocks": False, "commits": []}
+                   "contentOnOrigin": False, "cloneRooted": False, "blocks": False, "commits": []}
             if row["ahead"]:
                 t = run.git(c, "diff", "--no-renames", "--name-only", "-z", "%s...%s" % (up, local))
                 if t.why:
@@ -825,6 +837,8 @@ class Scan:
                         other = True  # a failed comparison blocks: fail closed
                 row["touched"] = touched
                 row["threadOnly"] = thread_only
+                if other and clone_rooted and c != clones[0]:
+                    row["cloneRooted"], other = True, False
                 row["blocks"] = other
                 lg = run.git(c, "log", "--oneline", "--no-decorate", "-n", "5", "%s..%s" % (up, local))
                 row["commits"] = lg.out.splitlines() if lg.ok else []

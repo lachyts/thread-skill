@@ -138,9 +138,11 @@ repo('D', { 'pyproject.toml': '[tool.poetry]\nname = "d"\n' })
 commit(R('D'), {}, 'chore: empty', ['--allow-empty'])
 // E: origin a local bare path (no GitHub origin), CLAUDE.md names its verifier.
 repo('E', { 'CLAUDE.md': '# E\n\nVerifier: `make check`\n' }, { bare: 'local/e.git', origin: path.join(S, 'remotes', 'local', 'e.git') })
-// F: a directory-source marketplace with no F-rollout clone.
+// F: a directory-source marketplace whose F-rollout is a plain directory, so no usable rollout clone (exit 3).
 repo('F', { Makefile: 'test:\n\ttrue\n' })
-// G: a directory-source marketplace with a usable G-rollout clone, and the primary's main one content commit ahead.
+mkdir(R('F-rollout'))
+// G: a directory-source marketplace with a usable G-rollout clone, and the primary's main one content commit ahead:
+// clone-rooted (ADR 0042), so the primary is a peer that never blocks without a cited path.
 repo('G', { Makefile: 'test:\n\ttrue\n' })
 git(['clone', '-q', path.join(S, 'remotes', 'fixture', 'g.git'), R('G-rollout')])
 git(['-C', R('G-rollout'), 'remote', 'set-url', 'origin', 'git@github.com:fixture/g.git'])
@@ -497,7 +499,9 @@ test('4. repos: each dispatch blocker, the verifier, the nested path, the separa
   assert.equal(a.exists, true)
   assert.equal(a.git, true)
   assert.equal(a.nested, false)
-  assert.equal(a.rolloutRoot, R('A'))
+  assert.equal(a.rolloutRoot, R('A'), 'no A-rollout yet (exit 4): the toplevel stands in')
+  assert.equal(a.selfRollout.exit, 4)
+  assert.match(a.selfRollout.stderr, /no rollout clone at .*\/A-rollout yet/)
   assert.equal(a.github, 'fixture/a')
   assert.equal(a.origin, 'git@github.com:fixture/a.git')
   assert.deepEqual(a.declaredBy, ['Crowned One'])
@@ -522,7 +526,8 @@ test('4. repos: each dispatch blocker, the verifier, the nested path, the separa
   const sub = repoAt(j, R('A/sub'))
   assert.equal(sub.nested, true)
   assert.equal(sub.toplevel, R('A'))
-  assert.equal(sub.rolloutRoot, R('A/sub'), 'the self-rollout check runs on the declared path itself')
+  assert.equal(sub.rolloutRoot, R('A'), 'the self-rollout check runs on the declared path itself; with no clone yet the toplevel stands in')
+  assert.equal(sub.selfRollout.exit, 4)
   for (const k of ['origin', 'github', 'landingRegister', 'defaultBranch', 'unpushed', 'verifier', 'unfinishedRollout', 'blockers']) {
     assert.deepEqual(sub[k], a[k], `A/sub shares A's ${k}`)
   }
@@ -554,7 +559,9 @@ test('4. repos: each dispatch blocker, the verifier, the nested path, the separa
   assert.deepEqual(d.verifier, { command: 'poetry run pytest', source: 'pyproject.toml' })
 
   const e = repoAt(j, R('E'))
-  assert.deepEqual(checks(e.blockers), ['no-github-origin'])
+  assert.deepEqual(checks(e.blockers), ['no-github-origin'], 'no GitHub origin: self-rollout exit 5 adds no blocker of its own')
+  assert.equal(e.selfRollout.exit, 5)
+  assert.equal(e.rolloutRoot, R('E'))
   assert.equal(e.github, null)
   assert.equal(e.landingRegister.exit, 4)
   assert.deepEqual(e.verifier, { command: 'make check', source: 'CLAUDE.md' })
@@ -569,8 +576,9 @@ test('4. repos: each dispatch blocker, the verifier, the nested path, the separa
   const g = repoAt(j, R('G'))
   assert.equal(g.selfRollout.exit, 0)
   assert.equal(g.rolloutRoot, R('G-rollout'))
-  assert.deepEqual(checks(g.blockers), ['unpushed-default'])
-  assert.deepEqual(g.unpushed.map((u) => [u.clone, u.ahead, u.blocks]), [[R('G-rollout'), 0, false], [R('G'), 1, true]])
+  assert.deepEqual(checks(g.blockers), [], 'clone-rooted: the primary\'s ahead commit is a peer\'s, no blocker')
+  assert.deepEqual(g.unpushed.map((u) => [u.clone, u.ahead, u.cloneRooted, u.blocks]),
+    [[R('G-rollout'), 0, false, false], [R('G'), 1, true, false]])
 
   const missing = repoAt(j, R('missing'))
   assert.equal(missing.exists, false)
@@ -774,15 +782,15 @@ test('13. unpushed: a commit landed by squash, and one beyond THREAD.md landed b
   const j = ok(lab())
   const q = repoAt(j, R('Q'))
   assert.deepEqual(q.unpushed.map(({ commits, ...u }) => u), [{ clone: R('Q'), ahead: 1, basis: 'remote', touched: ['q.txt'],
-    threadOnly: false, contentOnOrigin: true, blocks: false }])
+    threadOnly: false, contentOnOrigin: true, cloneRooted: false, blocks: false }])
   assert.ok(!checks(q.blockers).includes('unpushed-default'))
   const m = repoAt(j, R('M'))
   assert.deepEqual(m.unpushed.map(({ commits, ...u }) => u), [{ clone: R('M'), ahead: 1, basis: 'remote',
-    touched: ['THREAD.md', 'm.txt'], threadOnly: false, contentOnOrigin: true, blocks: false }])
+    touched: ['THREAD.md', 'm.txt'], threadOnly: false, contentOnOrigin: true, cloneRooted: false, blocks: false }])
   assert.ok(!checks(m.blockers).includes('unpushed-default'))
   // Every non-blocking ahead row, here and in V1, carries the reason it does not block.
   for (const row of [...j.repos, ...ok(online()).repos].flatMap((r) => r.unpushed)) {
-    if (row.ahead && !row.blocks) assert.ok(row.threadOnly || row.contentOnOrigin, JSON.stringify(row))
+    if (row.ahead && !row.blocks) assert.ok(row.threadOnly || row.contentOnOrigin || row.cloneRooted, JSON.stringify(row))
   }
 })
 
