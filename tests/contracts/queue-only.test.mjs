@@ -13,7 +13,7 @@
 //     every /wave/i line matches an entry for its file, and no entry matches more lines than its max.
 // (b2) Test files (tests/** and skills/*/tests/**) carry an exact /wave/i line count each; an unlisted one has none.
 // (c) Every product entry still matches a line, so a stale exemption fails.
-// (d) The retired files are gone, with no alias. (e) CONTEXT.md defines **Rollout-shaped**.
+// (d) The retired files are gone, with no alias. (e) CONTEXT.md defines **Parallel-shaped**.
 //
 // One pure function, check(files), over { relPath: text }: the real tree and the controls run through it, and
 // each control mutates the real files in memory and must fail with exactly its rules. __pycache__, .DS_Store and
@@ -41,7 +41,7 @@ const PRODUCT = [
   { id: 'P7', file: 'skills/schedule/SKILL.md', re: /legacy `wave:`/, max: 5, why: 'migration (tombstones, carry, step 7, Verification)' },
   { id: 'P8', file: 'skills/orient/reshuffle.md', re: /legacy `wave:`/, max: 1, why: 'migration (R5)' },
   { id: 'P9', file: 'CONTEXT.md', re: /^- \*\*Wave\*\* — /, max: 1, why: 'history (the retired entry)' },
-  { id: 'P10', file: 'CONTEXT.md', re: /\*\*Wave-shaped\*\* is now \*\*Rollout-shaped\*\*/, max: 1, why: 'history (the renamed term)' },
+  { id: 'P10', file: 'CONTEXT.md', re: /\*\*Wave-shaped\*\* is now \*\*Parallel-shaped\*\*/, max: 1, why: 'history (the renamed term)' },
   { id: 'P11', file: 'README.md', re: /the separate `wave` plugin/, max: 1, why: 'history' },
   { id: 'P12', file: 'README.md', re: /`lachyts\/wave-skill`/, max: 1, why: 'history' },
   { id: 'P13', file: 'README.md', re: /`0009` — thread absorbs wave|`docs\/wave-THREAD-archive\.md`/, max: 2, why: 'history (ADR 0009, the archive)' },
@@ -120,7 +120,7 @@ function check(files) {
   }
   for (const t of TESTS) if (!(t.file in files)) flag('b2', `${t.id} (${t.file}) is missing`)
   for (const p of RETIRED) if (p in files) flag('d', `${p} exists`)
-  if (!/^- \*\*Rollout-shaped\*\* — /m.test(files['CONTEXT.md'] ?? '')) flag('e', 'CONTEXT.md has no **Rollout-shaped** entry')
+  if (!/^- \*\*Parallel-shaped\*\* — /m.test(files['CONTEXT.md'] ?? '')) flag('e', 'CONTEXT.md has no **Parallel-shaped** entry')
   return { fails: [...fails].sort(), details }
 }
 
@@ -157,7 +157,7 @@ test('control: a README wave sentence outside the listed lines fails (b)', () =>
 })
 
 test('control: wave-shaped in CONTEXT outside the Wave entry fails (b)', () => {
-  only(swap('CONTEXT.md', '- **Rollout-shaped** — passes the fit test', '- **Rollout-shaped** — wave-shaped work: passes the fit test'), ['b'], 'CONTEXT')
+  only(swap('CONTEXT.md', '- **Parallel-shaped** — passes the fit test', '- **Parallel-shaped** — wave-shaped work: passes the fit test'), ['b'], 'CONTEXT')
 })
 
 test('control: a third "wave" tuple in reconcile-rollout.py fails (b), over its max', () => {
@@ -186,6 +186,6 @@ test('control: a recreated retired file fails (d)', () => {
   only({ 'hooks/wave-stop-driver.py': '#!/usr/bin/env python3\n' }, ['d'], 'alias')
 })
 
-test('control: a removed Rollout-shaped entry fails (e)', () => {
-  only(swap('CONTEXT.md', '- **Rollout-shaped** — ', '- **Fit** — '), ['e'], 'no entry')
+test('control: a removed Parallel-shaped entry fails (e)', () => {
+  only(swap('CONTEXT.md', '- **Parallel-shaped** — ', '- **Fit** — '), ['e'], 'no entry')
 })
