@@ -12,7 +12,9 @@
 // START_UNATTENDED are pinned to it. estate-scan.py (p25-1) loads next-action.py's DEAD_STATUSES and OPEN_STATUSES
 // rather than copying them, and keeps one literal, REVIEW_STATUSES, pinned to the doc's Review set; it counts a
 // phase's members by the literal filename prefix with reconcile-project.py's PHASE_N loaded, never copied, and its
-// § Readers bullet says so (tests/estate-scan.test.mjs case 14 holds the behaviour).
+// § Readers bullet says so (tests/estate-scan.test.mjs case 14 holds the behaviour); its `inFlight` goes through its
+// own in_flight helper. estate-dispatch.py (p25-3) loads Active, § In flight and the start stamp's reader
+// (NA.OPEN_STATUSES, ES.in_flight, ES.link_live, RR._start_unattended) and copies none of them.
 // Controls prove the checks are not vacuous. Reads files and imports the scripts (no __pycache__ written).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -24,6 +26,7 @@ const DOC = 'skills/_shared/vault-grammar.md'
 const CITE = '_shared/vault-grammar.md'
 const doc = read(DOC)
 const estateScan = read('skills/_shared/scripts/estate-scan.py')
+const estateDispatch = read('skills/_shared/scripts/estate-dispatch.py')
 const orient = read('skills/orient/SKILL.md')
 const reshuffle = read('skills/orient/reshuffle.md')
 const close = read('skills/close/SKILL.md')
@@ -133,6 +136,24 @@ function estateScanChecks(g, text) {
   if (/\{\s*"open",\s*"in_progress"\s*\}|\{\s*"in_progress",\s*"open"\s*\}/.test(text)) out.push('estate-scan Active literal')
   if (!/\bRP\.PHASE_N\b/.test(text)) out.push('estate-scan PHASE_N loaded')
   if (!g.phaseN || text.includes(g.phaseN)) out.push('estate-scan PHASE_N literal')
+  if (!/inFlight=in_flight\(/.test(text)) out.push('estate-scan inFlight through in_flight')
+  return out
+}
+
+// The names of estate-dispatch.py's failed checks; [] when it reads Active, § In flight and the start stamp through
+// the loaded modules and holds no literal of its own: no `"in_progress"`, no REVIEW_STATUSES, no Active set and no
+// `"unattended"`.
+function estateDispatchChecks(text) {
+  const out = []
+  for (const name of ['NA.OPEN_STATUSES', 'ES.in_flight', 'ES.link_live', 'RR._start_unattended']) {
+    if (!text.includes(name)) out.push(`estate-dispatch loads ${name}`)
+  }
+  if (text.includes('"in_progress"')) out.push('estate-dispatch in_progress literal')
+  if (/REVIEW_STATUSES\s*=/.test(text)) out.push('estate-dispatch REVIEW_STATUSES literal')
+  if (/\{\s*"open",\s*"in_progress"\s*\}|\{\s*"in_progress",\s*"open"\s*\}|\(\s*"open",\s*"in_progress"\s*\)/.test(text)) {
+    out.push('estate-dispatch Active literal')
+  }
+  if (text.includes('"unattended"')) out.push('estate-dispatch unattended literal')
   return out
 }
 
@@ -219,7 +240,7 @@ function readersOf(text) {
 }
 const CONFORMING = ['reconcile-project.py', 'reconcile-rollout.py', 'next-action.py', 'orient', 'R1',
   'tests/contracts/vault-grammar.test.mjs', 'reflect.py', 'repo-track.sh', 'candidate statuses', 'SHORT_ID_RE',
-  'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py']
+  'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py', 'estate-dispatch.py']
 const NOT_ADOPTED = []
 
 // The names of the failed § Readers checks; [] when every conforming reader is listed as such and, with
@@ -314,6 +335,21 @@ test("estate-scan.py's Review literal equals the doc's, and it loads Active and 
   assert.deepEqual(estateScanChecks(grammarOf(doc), estateScan), [])
 })
 
+test('estate-dispatch.py reads Active, § In flight and the start stamp through the loaded modules, copying none', () => {
+  assert.deepEqual(estateDispatchChecks(estateDispatch), [])
+})
+
+test('control: each estate-dispatch check rejects its own known-bad shape', () => {
+  for (const name of ['NA.OPEN_STATUSES', 'ES.in_flight', 'ES.link_live', 'RR._start_unattended']) {
+    assert.deepEqual(estateDispatchChecks(estateDispatch.replaceAll(name, 'LOCAL')), [`estate-dispatch loads ${name}`])
+  }
+  assert.deepEqual(estateDispatchChecks(`${estateDispatch}\nST = "in_progress"\n`), ['estate-dispatch in_progress literal'])
+  assert.deepEqual(estateDispatchChecks(`${estateDispatch}\nREVIEW_STATUSES = frozenset()\n`), ['estate-dispatch REVIEW_STATUSES literal'])
+  assert.deepEqual(estateDispatchChecks(`${estateDispatch}\nACTIVE = {"in_progress", "open"}\n`),
+    ['estate-dispatch in_progress literal', 'estate-dispatch Active literal'])
+  assert.deepEqual(estateDispatchChecks(`${estateDispatch}\nSTAMP = "unattended"\n`), ['estate-dispatch unattended literal'])
+})
+
 test("estate-scan.py counts a phase's members by the literal filename prefix, PHASE_N loaded, and § Readers says so", () => {
   assert.deepEqual(estateScanReaderChecks(doc), [])
 })
@@ -341,6 +377,8 @@ test('control: a drifted Review literal, a private Active set or an unloaded set
   assert.deepEqual(estateScanChecks(g, `${estateScan}\nACTIVE = {"open", "in_progress"}\n`), ['estate-scan Active literal'])
   assert.deepEqual(estateScanChecks(g, estateScan.replaceAll('NA.OPEN_STATUSES', 'OPEN')), ['estate-scan OPEN_STATUSES loaded'])
   assert.deepEqual(estateScanChecks(g, estateScan.replaceAll('NA.DEAD_STATUSES', 'DEAD')), ['estate-scan DEAD_STATUSES loaded'])
+  assert.deepEqual(estateScanChecks(g, mutate(estateScan, 'inFlight=in_flight(st, rollout_live)',
+    'inFlight=rollout_live or st in ("in_progress",) or st in REVIEW_STATUSES')), ['estate-scan inFlight through in_flight'])
 })
 
 test("close's candidate statuses are Active and Review, and cite the doc", () => {
