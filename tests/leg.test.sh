@@ -742,7 +742,7 @@ ok "$(q 'd["restart"]["prompt"].split(chr(10))[0]')|$(q 'd["restart"]["takeOver"
    "L13b: … the restart prompt's first line runs the next Leg, no take-over"
 ok "$(q 'd["next"]["action"]')|$(q 'd["next"]["task"]')|$(q 'd["next"]["inherit"]')" "finish|t1|True" "L13b: … next is finish t1, inherited"
 has "$(q 'd["needsYou"]')" "stalled: no Leg is open" "L13b: … and a needs-you item for the stall"
-ok "$(q 'd["legs"][0]["outcome"]')|$(q 'd["legs"][0]["claimed"]')" "stopped|['t1']" "L13b: … Leg 1's outcome and claims"
+ok "$(q 'd["legs"][0]["outcome"]')|$(q 'd["legs"][0]["claimed"]')" "stopped|[{'task': 't1', 'at': '$NOW'}]" "L13b: … Leg 1's outcome and claims"
 SESS=s2 leg begin --cwd "$F"; ok "$rc|$(q 'd["leg"]')" "0|2" "L13b2: Leg 2 begins"
 leg status
 ok "$(q 'd["chain"]')|$(q 'd["openLeg"]')|$(q 'd["stall"]')|$(q 'd["progress"]["running"]')" "live|2|None|0" \
@@ -771,7 +771,7 @@ has "$(q 'd["needsYou"]')" "halted at Leg 1: a revert conflict" "L13d: … a nee
 snap; SESS=r1 leg restarted --leg 2 --pending; ok "$rc" 3 "L13k: restarted under a standing halt is exit 3"; same "L13k: halt"
 leg clear-halt --reason "resolved by hand"
 leg status
-ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')|$(q 'd["restart"]["task"]')|$(q 'd["haltCleared"]["reason"]')" "stalled|None|t2|resolved by hand" \
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')|$(q 'd["restart"]["task"]')|$(q 'd["haltCleared"]')" "stalled|None|t2|[{'at': '$NOW', 'reason': 'resolved by hand', 'leg': 1}]" \
    "L13d: after clear-halt: stalled, nothing blocking the restart of t2"
 snap; SESS= leg restarted --leg 2 --pending
 ok "$rc" 1 "L13k: restarted with no session id is exit 1"; has "$err" "--session" "L13k: … naming --session"; same "L13k: unknown --pending"
@@ -794,6 +794,7 @@ ok "$rc|$(q 'd["restarted"]["how"]')|$(q 'd["restarted"]["manual"]')" "0|manual|
 snap; SESS=r2 leg restarted --leg 3 --pending; ok "$rc" 1 "L13k: --leg 3 (not the next Leg) is exit 1"; same "L13k: --leg 3"
 printf -- '- %s restart: Leg 2 pending (session unknown)\n' "$NOW" >> "$T/$RO.md"
 leg status; ok "$(q 'd["restarted"]["how"]')|$(q 'd["restarted"]["session"]')" "pending|unknown" "L13k: a hand-written pending line of session unknown stands"
+ok "$(q '[x["how"] for x in d["restarts"]]')" "['pending', 'started', 'manual', 'pending']" "L13k: … status lists every restart line"
 snap; SESS=r9 leg restarted --leg 2 --started X; ok "$rc" 3 "L13k: … and never matches: exit 3"; same "L13k: unknown pending"
 SESS=s2 leg begin --cwd "$F"; ok "$rc|$(q 'd["leg"]')|$(q 'd["inherited"]')" "0|2|['t2']" "L13k: Leg 2 begins and inherits t2"
 ok "$(logn 'Leg 2 began: leg-2 session s2')" 1 "L13k: … its began line reads Leg 2"
@@ -808,7 +809,7 @@ leg status
 ok "$(q 'd["chain"]')|$(q 'd["restart"]["blockedBy"]')|$(q 'd["restart"]["task"]')" "awaiting-successor|None|t6" \
    "L13e: a handoff with no hand-over line: awaiting-successor, nothing blocking"
 # (h) per-Leg event lists equal the log lines
-ok "$(q '",".join(d["legs"][0]["claimed"])')|$(q '",".join(d["legs"][0]["done"])')" "t1,t2,t3,t4,t5|t1,t2,t3,t4,t5" "L13h: Leg 1's claimed and done lists"
+ok "$(q '",".join(x["task"] for x in d["legs"][0]["claimed"])')|$(q '",".join(x["task"] for x in d["legs"][0]["done"])')" "t1,t2,t3,t4,t5|t1,t2,t3,t4,t5" "L13h: Leg 1's claimed and done lists"
 ok "$(q 'len(d["legs"][0]["claimed"])')|$(q 'len(d["legs"][0]["done"])')" "$(logn 'Leg 1 claimed ')|$(logn 'Leg 1 done ')" "L13h: … equal its log lines"
 leg handed --started task_x
 leg status

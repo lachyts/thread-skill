@@ -142,11 +142,13 @@ restarted):
       not found, or one that is not serial, is exit 1 (`read it with reconcile-rollout.py status`). It prints `note`
       {status, archived, incomplete (its reason, or null), paused (the `paused:` stamp, `pause_requested`, or null),
       supersededBy}, `progress`, `chain` (the chain state, below), `openLeg` (its number, or null), `halt` {reason,
-      leg} and `haltCleared` {at, reason} (the latest `halt cleared:` line), `restarted` and `restart` (below),
+      leg} (the standing halt), `haltCleared` (every `halt cleared:` line: [{at, reason, leg (the halted Leg it
+      cleared)}]), `restarted` and `restart` (below), `restarts` (every `restart:` line, as `restarted` reads one),
       `legs` (one per Leg: n, owner, session, alias, folder, began, closed, closedStamp, outcome (handoff, complete,
       stuck, stopped, halted, lost, or null while open), handover, tookOver, lastAt (its own last line's stamp: a
-      taker's `closed: lost` line for it is not its own), and its log lines as lists: claimed, took, done, setAside,
-      filed, followOns (slugs), smoke [{task, result}], reverted [{sha, top}]), `rows` (one per Queue row: n, slug,
+      taker's `closed: lost` line for it is not its own), and its log lines in order, each with its stamp `at`:
+      claimed, done, filed and followOns [{task, at}], took [{task, at, from}], setAside [{task, at, status}], smoke
+      [{task, at, result}], reverted [{sha, top, at}]), `rows` (one per Queue row: n, slug,
       state, status, owner, leg, launch, fix (the task its `verifies:` names, a fix task's target), fixes (its
       `fixes:`), held (why next holds it), deps (each depends-on/blocked-by entry resolved through `merged_into:`
       tombstones, rr._fold_unit), dependants (below) and setAside {status, summary, gates, fingerprint
@@ -2074,24 +2076,44 @@ def legs_json(chain):
         # A lost Leg's `closed: lost` line is its taker's, written at the take-over: never this Leg's own activity.
         mine = [e for e in own if not (e["kind"] == "closed" and e["rest"].split(":", 1)[1].strip().startswith("lost"))]
 
-        def slugs(kind):
-            return [e["slug"] for e in own if e["kind"] == kind and e["slug"]]
+        def tasks(kind):
+            return [{"task": e["slug"], "at": e["stamp"]} for e in own if e["kind"] == kind and e["slug"]]
 
-        smoke = []
+        took = []
         for e in own:
-            if e["kind"] == "smoke" and e["slug"]:
-                smoke.append({"task": e["slug"], "result": e["rest"].split("]]", 1)[-1].strip()})
+            m = re.search(r"\(inherited from Leg (\d+)\)", e["rest"]) if e["kind"] == "took" and e["slug"] else None
+            if m:
+                took.append({"task": e["slug"], "at": e["stamp"], "from": int(m.group(1))})
+        aside = []
+        for e in own:
+            m = re.match(r"^set aside \[\[[^\]]*\]\] \(([^)]*)\)", e["rest"]) if e["kind"] == "set aside" else None
+            if m and e["slug"]:
+                aside.append({"task": e["slug"], "at": e["stamp"], "status": m.group(1)})
+        smoke = [{"task": e["slug"], "at": e["stamp"], "result": e["rest"].split("]]", 1)[-1].strip()}
+                 for e in own if e["kind"] == "smoke" and e["slug"]]
         reverted = []
         for e in own:
             m = re.match(r"^reverted (\S+) in (.*)$", e["rest"]) if e["kind"] == "reverted" else None
             if m:
-                reverted.append({"sha": m.group(1), "top": m.group(2)})
+                reverted.append({"sha": m.group(1), "top": m.group(2), "at": e["stamp"]})
         out.append({"n": n, "owner": f"leg-{n}", "session": g["session"], "alias": g["alias"], "folder": g["folder"],
                     "began": g["began"], "closed": g["closed"], "closedStamp": g["closedStamp"],
                     "outcome": leg_outcome(g["closed"]), "handover": g["handover"], "tookOver": g["tookOver"],
-                    "lastAt": mine[-1]["stamp"] if mine else None, "claimed": slugs("claimed"), "took": slugs("took"),
-                    "done": slugs("done"), "setAside": slugs("set aside"), "smoke": smoke, "filed": slugs("filed"),
-                    "reverted": reverted, "followOns": slugs("follow-on")})
+                    "lastAt": mine[-1]["stamp"] if mine else None, "claimed": tasks("claimed"), "took": took,
+                    "done": tasks("done"), "setAside": aside, "smoke": smoke, "filed": tasks("filed"),
+                    "reverted": reverted, "followOns": tasks("follow-on")})
+    return out
+
+
+def cleared_json(chain):
+    """Every `halt cleared:` line as {at, reason, leg}: leg is the halted Leg it cleared (the latest `closed: halted:`
+    line before it)."""
+    out, halted = [], None
+    for e in chain.log:
+        if e["kind"] == "closed" and leg_outcome(e["rest"].split(":", 1)[1].strip()) == "halted":
+            halted = e["n"]
+        elif e["kind"] == "halt cleared":
+            out.append({"at": e["stamp"], "reason": e["rest"], "leg": halted})
     return out
 
 
@@ -2220,7 +2242,6 @@ def cmd_status(ctx, a):
     stall = stall_of(chain, open_leg)
     restart = restart_of(ctx, chain, fresh, n_next, open_leg, halt, restarted)
     state = chain_state(chain, inc, paused, superseded, halt, restarted, open_leg, stall, fresh)
-    cleared = [e for e in chain.log if e["kind"] == "halt cleared"]
     items = needs_you(ctx, chain, None, None)
     if halt is not None:
         items.append(f"[[{ctx.slug}]] halted at Leg {halt[1]}: {reason_text(halt[0], 140)}: the halt is yours to "
@@ -2247,8 +2268,10 @@ def cmd_status(ctx, a):
             "progress": chain.progress(open_leg["n"] if open_leg is not None else None), "chain": state,
             "openLeg": open_leg["n"] if open_leg is not None else None,
             "halt": {"reason": halt[0], "leg": halt[1]} if halt is not None else None,
-            "haltCleared": {"at": cleared[-1]["stamp"], "reason": cleared[-1]["rest"]} if cleared else None,
-            "restarted": restarted, "legs": legs_json(chain), "rows": [row_json(chain, r) for r in chain.rows],
+            "haltCleared": cleared_json(chain), "restarted": restarted,
+            "restarts": [{"leg": e["leg"], "how": e["how"], "started": e["started"], "manual": e["manual"],
+                          "session": e["session"], "at": e["stamp"]} for e in chain.log if e["kind"] == "restart"],
+            "legs": legs_json(chain), "rows": [row_json(chain, r) for r in chain.rows],
             "smoke": smoke_list(chain, open_leg["n"] if open_leg is not None else n_next), "fixes": fixes,
             "next": next_json(own), "stall": stall, "restart": restart, "needsYou": items}
 
