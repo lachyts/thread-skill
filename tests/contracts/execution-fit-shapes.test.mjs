@@ -2,19 +2,23 @@
 // the glossary's alias, and orient's child-agent batches retire. Six rules:
 //   s1  execution-fit.md runs the test in order: 1. Session lane, 2. Parallel-shaped, 3. Serial-shaped, each with
 //       its test. An external publish is serial-shaped and never parallel-shaped (ruling a), a measurement window
-//       or delayed verification waits on a date (ruling b), there are no serial self-rollouts (ruling c), and a
-//       shared surface makes work serial-shaped only alongside a failed parallel clause or sign.
+//       or delayed verification waits on a date (ruling b), there are no serial self-rollouts (ruling c: orient § 6
+//       applies it now, schedule's serial path in p24-2, never "schedule enforces this" today), and a shared
+//       surface makes work serial-shaped only alongside a failed parallel clause or sign.
 //   s2  the retired term (/rollout-?\s*shaped/i on collapsed text, so a wrapped or capitalised form still counts)
 //       appears once in CONTEXT.md, after `_Avoid_:` in its **Parallel-shaped** entry, and in no other product
 //       file (skills/** outside skills/*/tests/, hooks/**, README.md, CONTEXT.md, .claude-plugin/*.json) and no
 //       test file (tests/**, skills/*/tests/**).
 //   s3  orient § 6 steers serial-shaped and session-lane work, Autonomous and Mixed schedule a serial rollout
 //       (§ 7, one schedule call per project) and Mixed keeps its handed item out of it; § 9 offers on a note
-//       § 6 or § 7 wrote and names schedule's interim stop; §§ 8 and 10 are retired tombstones; the description
-//       drops the fan-out trigger and `--debrief`; and none of the batch machinery survives.
+//       § 6 or § 7 wrote and names schedule's interim stop; §§ 8 and 10 are retired tombstones, and `--debrief`
+//       stops at the top of § 1, before the resolver, and appears nowhere else but § 10 and the invocation forms;
+//       the description drops the fan-out trigger and `--debrief`; and none of the batch machinery survives.
 //   s4  the vault grammar's In flight drops the `dispatched:` stamp and the start claim; CONTEXT.md retires the
-//       stamp and the Dispatch artefact, keeps the Decision task off orient's batches and states both shapes.
-//   s5  schedule § 0 routes only session-lane misfits to the session lane, never a serial-shaped member, and
+//       stamp and the Dispatch artefact, keeps the Decision task off orient's batches and states both shapes
+//       (**Serial-shaped** with the no-machine-check clause).
+//   s5  schedule § 0 routes only session-lane misfits to the session lane, never a serial-shaped member save
+//       ruling (c)'s plugin-repo work, lists the no-machine-check clause among its serial-shaped members, and
 //       stops an all-serial set with its interim line before it resolves the target repo.
 //   s6  the other retired-batch surfaces: reflect's decision text and SKILL.md, grill-fit.md, the README's orient
 //       row and § Runtime support, and execution-fit.md's opening.
@@ -122,6 +126,9 @@ function check(files) {
     /\(a\) \*\*An external publish is serial-shaped\*\*/, 'sets the task aside', 'waits on a date',
     /\(b\)[^.]*measurement window/, /\(c\) \*\*No serial self-rollouts\.\*\*/,
   ])
+  const rulingC = C(slice(fit, /^- \(c\) /, /^(- |$)/))
+  need('s1', `${FIT} ruling (c)`, rulingC, ['Orient § 6 applies this ruling now', "schedule's serial path (p24-2) will enforce it"])
+  never('s1', `${FIT} ruling (c)`, rulingC, [/schedule enforces/])
   need('s1', FIT, C(fit), ['Mixed sets split', 'Count is never a criterion'])
   if (!lines.includes('## Dispatch blockers — parallel-shaped but not yet runnable')) {
     flag('s1', `${FIT} has no ## Dispatch blockers — parallel-shaped but not yet runnable heading`)
@@ -166,6 +173,18 @@ function check(files) {
   }
   const description = orient.match(/^description: (.*)$/m)?.[1] ?? ''
   never('s3', `${ORIENT} description`, description, [/fan out background session/i, '--debrief'])
+  const s1o = section(orient, /^### 1\./) ?? ''
+  const debriefAt = C(s1o).indexOf('**`--debrief` stops first.**')
+  const resolverAt = C(s1o).indexOf('resolve-target.py')
+  if (debriefAt < 0 || resolverAt < 0 || debriefAt > resolverAt) {
+    flag('s3', `${ORIENT} § 1 does not stop on \`--debrief\` before the resolver (${debriefAt}, ${resolverAt})`)
+  }
+  never('s3', `${ORIENT} § 1`, C(s1o), [/own flags \(`--debrief`/])
+  const s10 = section(orient, /^### 10\./) ?? ''
+  need('s3', `${ORIENT} § 10`, C(s10), ['before the resolver runs or anything is asked', 'the arguments as given'])
+  const forms = section(orient, /^## Invocation forms/) ?? ''
+  const debriefRest = orient.replace(/^description: .*$/m, '').replace(s1o, '').replace(s10, '').replace(forms, '')
+  never('s3', `${ORIENT} outside § 1, § 10 and the invocation forms`, debriefRest, ['--debrief'])
   const s8 = section(orient, /^### 8\./) ?? ''
   never('s3', `${ORIENT} outside § 8`, orient.replace(s8, ''), [/\bdispatched\b/i])
   never('s3', ORIENT, C(orient), ['native_workflow', /Double-dispatch guard/i, /Twin check/i, 'run_in_background',
@@ -182,11 +201,12 @@ function check(files) {
   if (!decision) flag('s4', `${CONTEXT} has no **Decision task**`)
   never('s4', `${CONTEXT} **Decision task**`, decision, ["orient's batches"])
   need('s4', `${CONTEXT} **Parallel-shaped**`, par, ['no external publish'])
-  need('s4', `${CONTEXT} **Serial-shaped**`, C(entry(ctx, 'Serial-shaped')), ['only alongside'])
+  need('s4', `${CONTEXT} **Serial-shaped**`, C(entry(ctx, 'Serial-shaped')), ['only alongside', 'no machine check inside the run'])
 
   // ---- s5: schedule § 0 never sends a serial-shaped member to the session lane, and stops an all-serial set early ----
   const s0 = C(section(files[SCHEDULE], /^### 0\./))
-  need('s5', `${SCHEDULE} § 0`, s0, ['If session-lane misfits dominate'])
+  need('s5', `${SCHEDULE} § 0`, s0, ['If session-lane misfits dominate', 'no machine check inside the run',
+    "save ruling (c)'s plugin-repo work"])
   never('s5', `${SCHEDULE} § 0`, s0, [/If misfits dominate/])
   if (!sentences(s0).some((x) => x.includes('serial-shaped') && x.includes('never routed to the session lane'))) {
     flag('s5', `${SCHEDULE} § 0 has no sentence keeping a serial-shaped member out of the session lane`)
@@ -270,6 +290,11 @@ test('control: execution-fit.md without ruling (c) fails s1', () => {
   only({ [FIT]: real[FIT].replace(`${c}\n`, '') }, ['s1'], 'no ruling c')
 })
 
+test('control: ruling (c) that says schedule enforces it today fails s1', () => {
+  only(swap(FIT, "Orient § 6 applies this ruling now, before it calls schedule; schedule's serial path (p24-2) will enforce it.",
+    'Schedule enforces this.'), ['s1'], 'ruling c enforcer')
+})
+
 test('control: a parallel step without its publish clause fails s1', () => {
   only(swap(FIT, 'its core action is not an external publish, and', 'and'), ['s1'], 'no publish clause')
 })
@@ -309,6 +334,17 @@ test('control: the fan-out trigger back in the description fails s3', () => {
     '"split/break this plan into numbered, phased tasks", "fan out background sessions on <project>",'), ['s3'], 'fan-out')
 })
 
+test('control: a § 1 that strips `--debrief` and runs the resolver fails s3', () => {
+  const stop = slice(real[ORIENT], /^\*\*`--debrief` stops first\.\*\*/, /^$/)
+  assert.ok(stop, 'control setup: no --debrief stop paragraph')
+  const stripped = swap(ORIENT, "orient's own flags (`--steer`,", "orient's own flags (`--debrief`, `--steer`,")[ORIENT]
+  only({ [ORIENT]: stripped.replace(`${stop}\n\n`, '') }, ['s3'], 'debrief resolved')
+})
+
+test('control: `--debrief` back as a § 2 reach clause fails s3', () => {
+  only(swap(ORIENT, 'A scoped target runs none.', 'A scoped target and `--debrief` run none.'), ['s3'], 'debrief § 2')
+})
+
 test('control: a § 9 that offers only on § 6\'s note fails s3', () => {
   only(swap(ORIENT, 'When § 6 or § 7 wrote a rollout note', 'When § 6 wrote a rollout note'), ['s3'], '§ 9')
 })
@@ -338,6 +374,10 @@ test('control: a Parallel-shaped entry without its publish clause fails s4', () 
   only(swapIn(CONTEXT, /^- \*\*Parallel-shaped\*\*/, /^- \*\*(?!Parallel)/, 'with no external publish and', 'with'), ['s4'], 'parallel')
 })
 
+test('control: a Serial-shaped entry without the no-machine-check clause fails s4', () => {
+  only(swapIn(CONTEXT, /^- \*\*Serial-shaped\*\*/, /^- \*\*(?!Serial)/, 'no machine check inside the run,', ''), ['s4'], 'serial machine check')
+})
+
 test('control: a Serial-shaped entry that lets a shared surface decide alone fails s4', () => {
   only(swapIn(CONTEXT, /^- \*\*Serial-shaped\*\*/, /^- \*\*(?!Serial)/, 'only alongside one of these', 'on its own'), ['s4'], 'serial')
 })
@@ -347,7 +387,16 @@ test('control: a § 0 that routes every misfit to the session lane fails s5', ()
 })
 
 test('control: a § 0 without the never-routed clause fails s5', () => {
-  only(swap(SCHEDULE, '; a serial-shaped member is never routed to the session lane', ''), ['s5'], 'never routed')
+  only(swap(SCHEDULE, "; a serial-shaped member is never routed to the session lane, save ruling (c)'s plugin-repo work (the fit doc's **Rulings**)", ''),
+    ['s5'], 'never routed')
+})
+
+test('control: a § 0 without ruling (c)\'s carve-out fails s5', () => {
+  only(swap(SCHEDULE, ", save ruling (c)'s plugin-repo work (the fit doc's **Rulings**)", ''), ['s5'], 'carve-out')
+})
+
+test('control: a § 0 serial-shaped list without the no-machine-check clause fails s5', () => {
+  only(swap(SCHEDULE, '(vault notes, several repos) or no machine check inside the run,', '(vault notes, several repos),'), ['s5'], 'machine check')
 })
 
 test('control: a § 0 without the interim stop line fails s5', () => {

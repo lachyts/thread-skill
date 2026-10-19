@@ -51,10 +51,13 @@ Both rollout shapes go through schedule and execute's runtime gate.
 
 ### 1. Resolve the target
 
+**`--debrief` stops first.** When the arguments carry `--debrief`, print § 10's line and stop,
+before the resolver runs: no resolver call, no question, no read and no write.
+
 The target is one project, one area or one note (CONTEXT.md **Target**, ADR 0036), and the resolver
 runs before § 2 reads anything. Quoted prose is a scoped target, as below. Anything else, with
-orient's own flags (`--debrief`, `--steer`, `--look`, and the words "steer only" or "look only")
-removed, goes once to
+orient's own flags (`--steer`, `--look`, and the words "steer only" or "look only") removed, goes
+once to
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py "<argument>"`, run from the
 session directory. The argument is quoted as one word, so a `[[link]]` never meets the shell's
 globbing; a bare invocation passes none. It prints one JSON object: `outcome` (`resolved`,
@@ -109,8 +112,8 @@ resolved), a `dir_anchor` (the area the directory sits in), a one-line `reason` 
   `learn_dir` is null. When he lands on a *project*, from the ask, the re-ask or a typed answer,
   hold that `learn_dir` with the project's `note` field: the picked option's, or the re-resolved
   target's `note` when a typed answer resolves to a project. The learn waits for § 4. Nothing is
-  held for an area pick, a confirmed first pick, Look only (`--look`), a scoped target, `--debrief` or a dry
-  run, and a directory with no `learn_dir` is never written back.
+  held for an area pick, a confirmed first pick, Look only (`--look`), a scoped target or a dry run,
+  and a directory with no `learn_dir` is never written back.
 
 A project or scoped target narrows § 2 to that project (§ 2 Scope); an area target keeps the area
 sweep.
@@ -156,7 +159,7 @@ and Drift and the slots for each swept project.
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py audit --project "<note>" [--project "<note>"]…`
   once, with one `--project` per note swept (each its vault-relative path). Keep its summary line, its finding
   lines (`<kind>: <path> — <detail> · fix: <fix>`) and its `unchecked:` lines for § 3. Report-only: it writes
-  nothing, and orient moves no thread on it. A scoped target and `--debrief` run none. A non-zero exit is one
+  nothing, and orient moves no thread on it. A scoped target runs none. A non-zero exit is one
   `thread-placement:` line in § 3, never a blocker.
 - **Declared check** (ADR 0036 d6; CONTEXT.md **Declared check**): for a project target only, run
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/declared-check.py run "<note>"` once, with
@@ -170,7 +173,7 @@ and Drift and the slots for each swept project.
   also with `timeout: 300000` (it runs the check twice).
   `undeclared` adds nothing. Any other status is its one `audit` line, and a non-zero exit its one
   `declared-check:` line: report it in § 3 and carry on, never a blocker. An area or scoped target
-  and `--debrief` run no check.
+  runs no check.
 - **Related projects**: projects the target's notes link or name, and projects linking the
   target, especially ones `status: parked` or being absorbed by it. Read their unstarted phases
   and loose tasks for overlap with the target's open work (the reshuffle may pull them in).
@@ -404,9 +407,11 @@ schedule's `no serial writer yet: nothing stamped` stop).
 
 ### 10. `--debrief` (retired)
 
-`/thread:orient <target> --debrief` prints
-`--debrief is retired (ADR 0040): orient dispatches no batches; run /thread:orient <target>` and
-stops.
+`/thread:orient <target> --debrief` stops at the top of § 1, before the resolver runs or anything
+is asked, and prints
+`--debrief is retired (ADR 0040): orient dispatches no batches; run /thread:orient <target>`, with
+`<target>` replaced by the arguments as given, less `--debrief` (nothing when no other argument was
+given). It resolves, asks, reads and writes nothing.
 
 ## Don't
 

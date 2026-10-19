@@ -20,10 +20,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   (ADR 0009). _Avoid_: rollout-shaped (its name until 2026-10-19, when
   "rollout" came to cover both shapes).
 - **Serial-shaped** — work an agent can finish without Lachy present that is
-  not parallel-shaped: no PR per task (vault notes, several repos), an external
-  publish, or an external tool or launch profile the lead lacks; a shared
-  surface makes work serial-shaped only alongside one of these. Runs as a
-  Serial rollout.
+  not parallel-shaped: no PR per task (vault notes, several repos), no machine
+  check inside the run, an external publish, or an external tool or launch
+  profile the lead lacks; a shared surface makes work serial-shaped only
+  alongside one of these. Runs as a Serial rollout.
 - **Task floor** — the invariant: every stash/defer writes a self-contained
   vault task routed to the right project. The guarantee that makes shutting an
   agent down feel safe. The Task is also the shared atom of both ladders:

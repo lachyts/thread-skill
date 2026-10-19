@@ -103,8 +103,8 @@ test('orient reshuffles by default; --steer and --look opt out, and Look only wr
   const forms = section(orient, /^## Invocation forms/) ?? ''
   assertHas(forms, 'orient § Invocation forms', [/--steer\s+# /, /--look\s+# /])
   assert.doesNotMatch(forms, /Reshuffle \/ Steer only \/ Look only/, 'the invocation forms still offer the three-way question')
-  // § 1 strips the opt-outs before the resolver sees the argument, as it does `--debrief`.
-  assertHas(S(1), 'orient § 1', [/orient's own flags \(`--debrief`, `--steer`, `--look`/])
+  // § 1 strips the opt-outs before the resolver sees the argument; `--debrief` stops before it (§ 10, ADR 0040).
+  assertHas(S(1), 'orient § 1', [/orient's own flags \(`--steer`, `--look`/])
 })
 
 // The three-way question is gone from every surface Lachy or the model reads; only the flag wording stays.

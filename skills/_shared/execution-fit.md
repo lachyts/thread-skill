@@ -55,7 +55,9 @@ first outcome that holds wins:
 - (b) A measurement window or delayed verification **waits on a date**, so it is session lane.
 - (c) **No serial self-rollouts.** Serial-shaped work for the plugin's own repo (any checkout of
   `lachyts/thread-skill`) goes to the session lane. Its clone belongs to the parallel
-  self-rollout (ADR 0031, ADR 0042), and schedule enforces this.
+  self-rollout (ADR 0031, ADR 0042). Orient § 6 applies this ruling now, before it calls schedule;
+  schedule's serial path (p24-2) will enforce it. Until then schedule § 0 stops an all-serial set
+  before it resolves the repo, so it cannot tell the plugin's own repo there.
 
 **Mixed sets split.** The parallel-shaped subset becomes a parallel rollout, the serial-shaped
 subset a serial rollout, and session-lane members stay unstamped. Name the split when reporting.

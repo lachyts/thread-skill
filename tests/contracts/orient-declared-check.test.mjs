@@ -35,7 +35,7 @@ function check(orient, reshuffle) {
   if (!dc.includes(`python3 ${SCRIPT} advance "<note>" --expect <digest>\`, also with \`timeout: 300000\``) ||
     !/Keep the header's `digest`/.test(dc)) fails.push('advance')
   if (!/its one `audit` line/.test(dc) || !/never a blocker/.test(dc)) fails.push('blocker')
-  if (!/An area or scoped target and `--debrief` run no check/.test(dc)) fails.push('reach')
+  if (!/An area or scoped target runs no check/.test(dc)) fails.push('reach')
   if (!/read all `bytes`/.test(dc) || !/saves to a file is read whole from that file, never from its preview/.test(dc)) fails.push('whole')
   if (!/the declared check's entries \(§ 2\), each a loose item/.test(shape)) fails.push('shape')
 
@@ -83,7 +83,7 @@ test('each control fails with exactly its rule', () => {
     call: o('for a project target only', 'for every target'),
     advance: o('advance "<note>" --expect <digest>', 'advance "<note>"'),
     blocker: o('never a blocker', 'a blocker'),
-    reach: o('An area or scoped target and `--debrief` run no check', 'Every target runs it'),
+    reach: o('An area or scoped target runs no check', 'Every target runs it'),
     whole: o('never from its preview', 'or its preview'),
     shape: o("the declared check's entries (§ 2), each a loose item", 'the declared check', '- **Shape**'),
     contract: r('quoted or not', 'unquoted', own),

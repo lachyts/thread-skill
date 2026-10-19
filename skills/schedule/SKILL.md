@@ -38,10 +38,13 @@ launch profile the lead lacks. Before computing anything, scan the candidate set
 two kinds. **Session-lane misfits**: tasks that are conversation-gated, whose ordering constraint
 is a measurement window or calendar date rather than file overlap, or whose verification only
 arrives days later (impact measures). **Serial-shaped members**: tasks with no PR per task (vault
-notes, several repos), whose core action is an external publish (CMS / live site / DNS / config
-console), or that need an external tool or launch profile the lead lacks. Each is named in the
-gate as serial-shaped and left unstamped; a serial-shaped member is never routed to the session
-lane.
+notes, several repos) or no machine check inside the run, whose core action is an external
+publish (CMS / live site / DNS / config console), or that need an external tool or launch profile
+the lead lacks. Each is named in the gate as serial-shaped and left unstamped; a serial-shaped
+member is never routed to the session lane, save ruling (c)'s plugin-repo work (the fit doc's
+**Rulings**). Orient § 6 applies ruling (c) before it calls schedule, and schedule's serial path
+(p24-2) will enforce it once the repo is resolved: the all-serial stop below runs before that, so
+it cannot tell the plugin's own repo.
 
 When no member is parallel-shaped and any is serial-shaped, stop here, before the target repo is
 resolved: print one line, `no serial writer yet: nothing stamped`, then each serial-shaped member
