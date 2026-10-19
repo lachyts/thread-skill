@@ -3,8 +3,10 @@
 //
 // The description checks guard a failure that is otherwise silent: over the model-facing skill-listing
 // budget, whole descriptions drop out and skills render as bare names, killing natural-language
-// triggering (THREAD.md § Known quirks). 1,536 chars is Claude Code's per-description cap; the total is
-// a ratchet — lower it when descriptions are trimmed, never raise it to make a test pass.
+// triggering (THREAD.md § Known quirks). Eval runs load no user settings, so they see Claude Code's
+// default listing budget. 700 chars is this plugin's hard cap per description, well under Claude Code's
+// own 1,536-char per-description cap; the total is a ratchet — lower it after trims, never raise it to
+// make a test pass.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -14,8 +16,8 @@ import { fileURLToPath } from 'node:url'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8')
 
-const DESCRIPTION_CAP = 1536
-const DESCRIPTION_TOTAL_RATCHET = 8600
+const DESCRIPTION_LIMIT = 700
+const DESCRIPTION_TOTAL_RATCHET = 7600
 
 // Minimal frontmatter reader for the shapes this repo uses: `key: plain`, `key: 'single ''quoted'''`,
 // `key: "double quoted"`, one line each. Anything else fails loudly rather than parsing wrong.
@@ -64,11 +66,14 @@ test('every skill directory has a SKILL.md whose name is the directory', () => {
   for (const { dir, fm } of skills) assert.equal(fm.name, dir, `skills/${dir}: name "${fm.name}"`)
 })
 
-test(`each description exists and fits the ${DESCRIPTION_CAP}-char listing cap`, () => {
+test(`each description exists and fits the ${DESCRIPTION_LIMIT}-char hard cap`, () => {
   for (const { dir, fm } of skills) {
     assert.ok(fm.description && fm.description.length > 40, `skills/${dir}: missing/empty description`)
-    assert.ok(fm.description.length <= DESCRIPTION_CAP, `skills/${dir}: description ${fm.description.length} > ${DESCRIPTION_CAP}`)
   }
+  const over = skills
+    .filter(({ fm }) => fm.description.length > DESCRIPTION_LIMIT)
+    .map(({ dir, fm }) => `skills/${dir} ${fm.description.length}`)
+  assert.deepEqual(over, [], `descriptions over ${DESCRIPTION_LIMIT} chars: ${over.join(', ')}`)
 })
 
 test(`descriptions total ≤ ${DESCRIPTION_TOTAL_RATCHET} chars (ratchet — lower it after trims)`, () => {

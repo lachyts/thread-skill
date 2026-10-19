@@ -19,8 +19,8 @@ alone.
 **Contains no route logic of its own** beyond batching, emission and the reshuffle: hands-on focus
 dispatches to `${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` (or the task's own `## Launch` block);
 rollout-shaped phases go to `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md`; the execute offer runs
-`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` or `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md`.
-None is re-implemented here. The execution-fit test
+`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` or `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md`,
+or stamps the note for the Stage. None is re-implemented here. The execution-fit test
 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`) decides the lane, hard, not as a
 preference.
 
@@ -158,13 +158,20 @@ and Drift and the slots for each swept project.
   the lines § 5 writes); phase notes in `Work/Phases/` for the area's projects. The reshuffle
   classifies from this sweep; it does not walk the folders again.
 - **Threads**: THREAD.md state lines across the area's project dirs
-  (`~/Projects/<Area>/*/THREAD.md`) and `_shared/threads/`.
+  (`~/Projects/<Area>/*/THREAD.md`), in `<repo>/THREAD.md` for every repo the target's projects
+  declare (a code project's thread lives in its repo, ADR 0039), and in `_shared/threads/`.
 - **Drift** (ADR 0026): run the shared reconcile step as a dry run for every project in the target
   in one Bash call,
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/reconcile-project.py --project <slug> --json`,
   saving each project's output to its own file under one `mktemp -d` directory (`<dir>/<slug>.json`)
   and printing the path and the JSON. Keep its UNAMBIGUOUS and AMBIGUOUS lists and each saved path:
   § 4 binds the apply to that file. It writes nothing to the vault.
+- **Placement** (ADR 0039 d5; CONTEXT.md **Placement check**): for a project or area target, run
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py audit --project "<note>" [--project "<note>"]…`
+  once, with one `--project` per note swept (each its vault-relative path). Keep its summary line, its finding
+  lines (`<kind>: <path> — <detail> · fix: <fix>`) and its `unchecked:` lines for § 3. Report-only: it writes
+  nothing, and orient moves no thread on it. A scoped target and `--debrief` run none. A non-zero exit is one
+  `thread-placement:` line in § 3, never a blocker.
 - **Declared check** (ADR 0036 d6; CONTEXT.md **Declared check**): for a project target only, run
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/declared-check.py run "<note>"` once, with
   § 1's vault-relative `note` field and a 300-second command timeout (`timeout: 300000`). A plain
@@ -215,6 +222,9 @@ A situational report written for Lachy catching up, not a log:
   Call the line the notice for those fixes only when fixes will follow (a default or `--steer` run
   on a project or area); on a `--look` run or a scoped target, say it is report-only. Omit the line
   when both lists are empty.
+- **Placement**: the § 2 audit's summary line, then one line per finding with its fix, and its
+  `unchecked:` lines; or its one `thread-placement:` line. Omit the line on `placement: none`.
+  Report-only: a misplaced thread is moved by project-structure-audit or by Lachy, never by this run.
 - **Shape**: how much a reshuffle has to work with: loose tasks, brain dumps, unstarted phases,
   overlaps found in related projects, and any live rollout; plus the declared check's entries
   (§ 2), each a loose item until the reshuffle places it, or its one audit line.
@@ -568,6 +578,13 @@ When § 6 wrote a rollout note, end with `AskUserQuestion`, recommended option f
 - **Here** — run `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` on the rollout note in this
   session, when the reshuffle was small and this session was launched in the target repo.
 - **Not yet** — name the rollout note and the `/thread:execute [[<rollout>]]` line, and stop.
+- **Start when ready** — stamp `start: unattended` as a top-level frontmatter line just below
+  `status:` on the rollout note § 6 wrote (`_shared/vault-grammar.md` § Rollout start stamp), then
+  end: nothing runs here and no handoff is made. Print the note, the `/thread:execute [[<rollout>]]`
+  line (still valid by hand) and one line: the Chorus Stage starts a lead in its Project root once
+  the note is runnable, and that lead's first `next` clears the stamp. It suits a run nobody will be
+  there to start (the evening, a landing PR still queued). Outside a Chorus Stage nothing acts on the
+  stamp, so it waits like Not yet.
 
 Execute's own runtime gate still applies wherever it runs. No rollout written → no offer; § 6
 names why (a running or blocked rollout, uncommitted grill docs, a schedule blocker).

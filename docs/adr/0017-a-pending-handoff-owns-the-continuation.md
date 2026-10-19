@@ -32,6 +32,7 @@ and a half-applied operation or detached HEAD skips it with a `not versioned:` l
 only writer of a handoff doc, on explicit fork intent only. The hook references in § Context,
 § Decision, § Rejected and § Consequences are history — no hook-forced handoff exists any
 more — and the body-section list is the skill's own.)*
+*(Amended by ADR 0039, 2026-10-18: the repo-thread lookup reaches depth 4, skips _archive, and matches by slug or directory name.)*
 
 ## Context
 

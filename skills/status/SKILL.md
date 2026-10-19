@@ -83,6 +83,11 @@ closed this note out, so this rollout must never be reinstated or resumed: its t
 **Incomplete.** After § 2, read the JSON's `incomplete`: non-null means the rollout must not run as written
 (`next` refuses it), so headline it with its reason and the remedy, `/thread:schedule <project> --regenerate`.
 
+**Start stamp.** Read the rollout frontmatter's first top-level `start:` line straight from the note, as
+Lineage reads `supersedes:`, by `_shared/vault-grammar.md` § Rollout start stamp (its scalar lower-cased, quotes
+and an inline ` # comment` dropped): `unattended` is the stamp (*Start when ready*), any other value or none is
+no stamp. Only § 4's action 13 reads it.
+
 ### 2. Gather the vault state (deterministic)
 
 ```
@@ -187,9 +192,11 @@ nothing more:
 
 **A RACE has three states.** Merge-task's exit 5 means the PR merged, but as a combination nobody
 verified. Execute's RACE procedure (execute § 4.5) appends the `## Race log` line first, then re-verifies the
-merge commit in the background for up to 40 minutes with the lane held: green → `mark-done`; red, rc 124 or a
-missing rc → a halt with `reason="RACE: origin/<default> fails the verifier"`. Its verdict file is
-`<repoPath>/.claude/integration/race-<slug>.rc`, written last, so an absent one means unfinished. A task that a
+merge commit in the background for up to two hours, a verify-slot wait included, with the lane held: green →
+`mark-done`; red, rc 124 or a missing rc → a halt with `reason="RACE: origin/<default> fails the verifier"`. Its
+verdict file is `<repoPath>/.claude/integration/race-<slug>.rc`, written last, so an absent one means unfinished. A
+`noslot` verdict file reads like an absent one: the re-verify has not run (no verify slot came in time), and the
+lead re-runs it with the lane held. A task that a
 `## Race log` line names and that is not done is in the first of these states that matches:
 
 - **Decided:** a dated `## Notes` line on the rollout note records `repair: [[<slug>]] RACE decided: …`. If
@@ -540,7 +547,11 @@ Keep the whole report scannable: it's a glance, not a wall of text.
     standing or lapsed, whose owner session is alive is a live lead whatever its tasks read (§ 4's *Room stop*):
     action 10 matches it first, so this resume never runs under one; a standing one waits for the Stage's resume,
     a lapsed one for the owner's heartbeat.
-13. Nothing started → `/thread:execute [[<rollout>]]` to start.
+13. Nothing started → `/thread:execute [[<rollout>]]` to start. Under § 1's **Start stamp** (the
+    frontmatter's first top-level `start:` reads `unattended`) → "waiting for the Chorus Stage (Start when
+    ready): it starts the lead in the Project root once the note is runnable", and name
+    `/thread:execute [[<rollout>]]` only as the way to start it by hand now. Outside a Chorus Stage nothing
+    acts on the stamp, so the note waits as Not yet does.
 
 **A refused ladder.** The Ladder refused flag reorders nothing: whichever action matches, from 7 to 13, gets
 the fix first: "fix `<ladder.source>` (<ladder.error>) first: execute halts `ladder file refused` at each call's
@@ -579,7 +590,8 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
   `/thread:execute`. If you find yourself wanting to fix something, stop and recommend the repair verb.
 - **There is no cursor: the task notes are the progress.** Don't re-scan GitHub for progress; the live PR
   check is only for drift flags.
-- **Never call a writer.** Not `reconcile-rollout.py next` (it stamps `paused:` on a drained pause), `resume`,
+- **Never call a writer.** Not `reconcile-rollout.py next` (it stamps `paused:` on a drained pause and clears a
+  `start: unattended` stamp), `resume`,
   `hand-back` or any other, and never `step-boundary.py begin` or `step-boundary.py end`;
   `reconcile-rollout.py status`, `step-boundary.py stands` (§ 2's *Room stop*), `lead-integrate.py inputs` and `rollout-settings.py`
   (§ 2, a read) are the only Python scripts status runs, and `default-branch.sh` the only shell one (besides

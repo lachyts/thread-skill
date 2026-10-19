@@ -155,6 +155,24 @@ test('control: --regenerate only in a later sentence fails scheduleCall', () => 
   assert.equal(scheduleCall(s6.replace('`--tasks <members>`', '`--regenerate --tasks <members>`')), true)
 })
 
-test('the execute offer has three answers and never homes a commit on the target default branch', () => {
-  assertHas(S(9), 'orient § 9', ['**Fresh session**', '**Here**', '**Not yet**', /default-branch/])
+// The Start when ready answer of § 9 (p23-6), collapsed: from its bold label to the next answer or the end of the
+// list; null when absent.
+const startWhenReady = (s9) => s9.match(/- \*\*Start when ready\*\*(.*?)(?= - \*\*|Execute's own runtime gate|$)/)?.[1] ?? null
+
+test('the execute offer has four answers and never homes a commit on the target default branch', () => {
+  assertHas(S(9), 'orient § 9', ['**Fresh session**', '**Here**', '**Not yet**', '**Start when ready**',
+    /`start: unattended`/, /default-branch/])
+})
+
+test('Start when ready stamps the note and runs neither execute nor handoff', () => {
+  const answer = startWhenReady(S(9))
+  assertHas(answer, 'orient § 9 Start when ready', [/stamp `start: unattended`/, /nothing runs/, /no handoff/,
+    /Chorus Stage/, /`\/thread:execute \[\[<rollout>\]\]`/])
+  for (const run of ['execute/SKILL.md', 'handoff/SKILL.md']) {
+    assert.ok(!answer.includes(run), `the Start when ready answer runs ${run}`)
+  }
+  // control: an answer that runs execute fails the check
+  const ran = S(9).replace('then end: nothing runs here', 'then run `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md`; nothing runs here')
+  assert.notEqual(ran, S(9), 'control is vacuous: the answer text moved')
+  assert.ok(startWhenReady(ran).includes('execute/SKILL.md'), 'control: the mutated answer names execute')
 })

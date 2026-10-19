@@ -21,6 +21,10 @@
 //                               gated) fires on the round-3+ reviser; both ceiling outcomes return the
 //                               accumulated reviewHistory, and only a with-history final-round approval
 //                               sets approvedAtCeiling.
+//   - verify slots (p23-4)    → args.verifySlot absent: every prompt byte-identical (the whole-call pins); set: the
+//                               eight verifier-bearing builders render the wrapped line with SLOT_TEXT once, the four
+//                               TASK_TREE_RULE builders carry slotRule after KILL_RULE, only the integrator carries
+//                               --priority, and a malformed value is refused before any dispatch.
 // Evaluates only the pure-function region of the engine (before the orchestration that needs Workflow
 // globals) in a vm sandbox. Run: node tests/prompt-invariants.test.mjs   (exit 0 = pass)
 import fs from 'node:fs'
@@ -28,6 +32,7 @@ import vm from 'node:vm'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import crypto from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { loadEngine, runTask } from '../../../tests/lib/engine.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -1046,6 +1051,109 @@ function agentPrompts(E) {
   }
   ok(E.askOf({ needsHuman: '  q?  ' }) === 'q?' && E.askOf({ needsHuman: ' \n ' }) === '' && E.askOf({ needsHuman: 7 }) === '' &&
     E.askOf({ needsHuman: ['q'] }) === '' && E.askOf({}) === '' && E.askOf(null) === '', 'askOf: the trimmed string, else ""')
+}
+
+// ---- Verify slots (p23-4): args.verifySlot wraps every verifier line the engine renders ------------------------
+// With args.verifySlot = { script, slots }, the eight verifier-bearing builders render the wrapped line
+// (`<scrub> python3 '<script>' run --slots N -- bash -c '<verifier>'`), never the bare scrubbed verifier; SLOT_TEXT
+// sits once in each (beside the verify block's `- Verifier:` line, or in slotRule); the four TASK_TREE_RULE builders
+// carry slotRule right after KILL_RULE; only the integrator's line carries `--priority`; the two review judges render
+// no verifier and stay byte-identical. Absent, every prompt is byte-identical (the whole-call pins below).
+{
+  const E = loadEngine(['KILL_RULE', 'SLOT_TEXT', 'GIT_ENV_SCRUB', 'shq', 'slotted', 'slotRule', 'scrubbed', 'verifySlotArgsError', ...RULE_BUILDERS])
+  const V = `make test && echo "it's $HOME"`
+  const SLOT = { script: '/plugins/thread/1.0.0/skills/execute/scripts/verify-slot.py', slots: 2 }
+  const H = (c) => c.repeat(40)
+  const tk = { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', maxIterations: 3, scope: 'cross-cutting' }
+  const im = { prUrl: 'https://github.com/o/r/pull/1', worktreePath: '/repo/.claude/worktrees/proj-fix-x', branch: 'audit-fix/fix-x' }
+  const I = {
+    prUrl: im.prUrl, branch: im.branch, worktreePath: im.worktreePath, headSha: H('a'), taskBase: H('b'), mainSha: H('c'), trouble: ['conflict'],
+    landed: [], plan: 'PLAN', reviewHistory: [{ round: 1, feedback: ['fix it'] }], reviewRoundsUsed: 1,
+    rung: { startRung: 'opus-high', rung: 'opus-xhigh', climbs: [] },
+  }
+  const J = { mergeCommit: H('d'), headSha: H('e'), baseSha: H('c'), triggers: ['conflict'], path: 'integrator' }
+  const render = (ar) => {
+    const climbed = E.rungState(tk, ar)
+    E.escalate(climbed, tk.slug, 'implement')
+    const states = [E.rungState(tk, ar), climbed]
+    return {
+      implementerPrompt: states.map((st) => E.implementerPrompt(tk, ar, st, '')),
+      approvedPlanImplementerPrompt: states.map((st) => E.approvedPlanImplementerPrompt(tk, 'PLAN', ar, st, '')),
+      reviserPrompt: [E.reviserPrompt(tk, im, [{ round: 1, feedback: ['fix it'] }], 2, ar, '')],
+      readOnlyPrompt: [E.readOnlyPrompt(tk, ar, states[0], '')],
+      plannerPrompt: [E.plannerPrompt(tk, ar, states[0], '')],
+      planJudgePrompt: [E.planJudgePrompt(tk, 'PLAN', ar)],
+      planReviserPrompt: [E.planReviserPrompt(tk, 'PLAN', [{ round: 1, feedback: ['fix it'] }], 2, ar)],
+      integratorPrompt: [E.integratorPrompt(tk, ar, I)],
+      reviewJudgePrompt: [E.reviewJudgePrompt(tk, im, ar, [])],
+      integrationReviewPrompt: [E.integrationReviewPrompt(tk, ar, I, J)],
+    }
+  }
+  const base = { repoPath: '/repo', verifier: V, rolloutSlug: 'r' }
+  const off = render(base)
+  const on = render({ ...base, verifySlot: SLOT })
+  const onB = render({ ...base, verifySlot: SLOT, knownBaselineFailures: ['t — env'] })
+  const BEARING = ['implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt', 'plannerPrompt',
+    'planJudgePrompt', 'planReviserPrompt', 'integratorPrompt']
+  const TREE = ['readOnlyPrompt', 'plannerPrompt', 'planJudgePrompt', 'planReviserPrompt']
+  const times = (hay, needle) => hay.split(needle).length - 1
+  const wrapped = E.slotted(V, SLOT)
+  const prio = E.slotted(V, { ...SLOT, priority: true })
+  // [] when every prompt holds; else what failed.
+  const slotFails = (byName, rule) => {
+    const out = []
+    for (const name of BEARING) {
+      for (const p of byName[name]) {
+        const line = name === 'integratorPrompt' ? prio : wrapped
+        if (!p.includes(line)) out.push(`${name}: the wrapped line`)
+        if (p.includes(E.scrubbed(V))) out.push(`${name}: no bare scrubbed verifier`)
+        if (times(p, E.SLOT_TEXT) !== 1) out.push(`${name}: SLOT_TEXT once`)
+        if (name === 'integratorPrompt' ? times(p, `run --slots ${SLOT.slots} --priority --`) !== 1 : p.includes('--priority')) out.push(`${name}: --priority only in the integrator, once`)
+        if (TREE.includes(name) && !p.includes(E.KILL_RULE + rule(name))) out.push(`${name}: slotRule right after KILL_RULE`)
+      }
+    }
+    return out
+  }
+  const ruleOf = () => E.slotRule(V, SLOT)
+  ok(JSON.stringify(slotFails(on, ruleOf)) === '[]', 'verifySlot: the eight verifier-bearing builders render the wrapped line once-noted, slotRule after KILL_RULE in the four tree builders, --priority only in the integrator')
+  ok(JSON.stringify(slotFails(onB, ruleOf)) === '[]', 'verifySlot: … with a baseline manifest too')
+  for (const name of ['reviewJudgePrompt', 'integrationReviewPrompt']) {
+    ok(on[name][0] === off[name][0], `verifySlot: ${name} is byte-identical with and without it (it renders no verifier)`)
+  }
+  for (const name of TREE) {
+    ok(on[name][0].replace(E.slotRule(V, SLOT), '') === off[name][0].replace(E.scrubbed(V), wrapped), `verifySlot: ${name} is its unslotted bytes, the wrapped line in place of the scrubbed one, plus exactly slotRule`)
+  }
+  // controls: each fails exactly its check
+  const noRule = { ...on, planJudgePrompt: on.planJudgePrompt.map((p) => p.replace(E.slotRule(V, SLOT), '')) }
+  ok(slotFails(noRule, ruleOf).some((f) => f.startsWith('planJudgePrompt:')), 'verifySlot control: a plan judge without slotRule fails')
+  const prioLeak = { ...on, implementerPrompt: on.implementerPrompt.map((p) => p.replace(wrapped, prio)) }
+  ok(slotFails(prioLeak, ruleOf).some((f) => f === 'implementerPrompt: --priority only in the integrator, once'), 'verifySlot control: --priority in a task-call builder fails')
+  ok(typeof E.SLOT_TEXT === 'string' && !E.SLOT_TEXT.includes('\n') && !/['$]|\$\{/.test(E.SLOT_TEXT) && !/`[^`]*\bgit\s/.test(E.SLOT_TEXT) &&
+    E.SLOT_TEXT.includes('`kill <pid>`') && E.SLOT_TEXT.includes('7200000'), 'SLOT_TEXT: one static line, no apostrophe or git span; it names the pid stop and the long timeout')
+  ok(wrapped.startsWith(E.GIT_ENV_SCRUB + " python3 '" + SLOT.script + "' run --slots 2 -- bash -c '"), 'slotted: the scrub, then the wrapper, then bash -c')
+  ok(E.slotted(V, undefined) === E.scrubbed(V) && E.slotted(V, null) === E.scrubbed(V), 'slotted: absent ⇒ exactly scrubbed()')
+  // shq round-trips through bash -c
+  for (const w of [V, "a'b", "'", "$(echo no)", '`echo no`', 'x\\y', '']) {
+    const r = spawnSync('bash', ['-c', `printf %s ${E.shq(w)}`], { encoding: 'utf8' })
+    ok(r.status === 0 && r.stdout === w, `shq: ${JSON.stringify(w)} round-trips through bash -c`)
+  }
+  // runTask refuses a bad verifySlot before any agent() call, in both modes
+  const LADDER = { source: 'built-in', rungs: [{ name: 'opus-high', model: 'opus', effort: 'high', judge: 'high', review: 'xhigh' }] }
+  const mk = (verifySlot, mode) => ({
+    rolloutSlug: 'r', repoPath: '/repo', verifier: 'make test', date: '2026-10-18', ladder: LADDER, verifySlot,
+    task: { slug: 'proj-fix-x', taskPath: '/vault/proj-fix-x.md', scope: 'cross-cutting', planGate: false, maxIterations: 3, maxReviewRounds: 3, maxPlanRounds: 3 },
+    ...(mode ? { mode } : {}),
+  })
+  const BAD = [['a string', SLOT.script], ['an extra key', { ...SLOT, extra: 1 }], ['priority: true', { ...SLOT, priority: true }],
+    ['a relative script', { script: 'skills/execute/scripts/verify-slot.py', slots: 2 }], ['a multi-line script', { script: '/a/verify-slot.py\n/b/verify-slot.py', slots: 2 }],
+    ['a wrong basename', { script: '/a/verify.py', slots: 2 }], ['slots 0', { ...SLOT, slots: 0 }], ['slots 1.5', { ...SLOT, slots: 1.5 }]]
+  for (const mode of [undefined, 'integrate']) {
+    for (const [what, v] of BAD) {
+      const r = await runTask(mk(v, mode), async () => { throw new Error('agent() must not run') })
+      ok(r.error && /args\.verifySlot/.test(String(r.error)) && r.calls.length === 0, `runTask (${mode || 'task'} mode) refuses verifySlot ${what} before any agent() call`)
+    }
+  }
+  ok(E.verifySlotArgsError(undefined) === '' && E.verifySlotArgsError(null) === '' && E.verifySlotArgsError(SLOT) === '', 'verifySlotArgsError: absent, null and { script, slots } are usable')
 }
 
 // ---- Byte pins (p12-6): task mode renders exactly what it did before Integration existed ----------

@@ -31,11 +31,28 @@ through time, from attention to merged PRs. Terms only — no implementation.
   conversation and **thread** the durable work its THREAD.md records, because
   that is how he reads the word. Agent-facing prose keeps the two senses above.
 - **THREAD.md** — the durable state-of-play *file* a thread can be persisted
-  into. Project-side (`~/Projects/<Area>/<Project>/THREAD.md`), shared
-  (`~/repos/workspaces/_shared/threads/<slug>.md`), or a **Repo thread** — a
-  tool repo's own toplevel `THREAD.md` under `~/repos`, found by `open`'s
-  repo-thread lookup; its slug is its front-matter `slug:`, else the repo
-  directory's name. Agent-facing.
+  into. A code project's thread is its **Repo thread**: the repo's own
+  toplevel `<repo>/THREAD.md` under `~/repos`, found by `open`'s repo-thread
+  lookup; its slug is its front-matter `slug:`, else the repo directory's
+  name, and the lookup matches either. Project-side
+  (`~/Projects/<Area>/<Project>/THREAD.md`) is for a project with no code
+  repo; shared (`~/repos/workspaces/_shared/threads/<slug>.md`) for
+  cross-workspace or meta work. One live thread per project, always named
+  THREAD.md: a finished arc moves out, never to a sibling `THREAD-<name>.md`
+  (ADR 0039). Agent-facing.
+- **Thread home** — where a project's one live thread lives: the first
+  qualifying repo its note's `repos:` declares (a main checkout at most three
+  directories below `~/repos`, outside obsidian, workspaces, `.claude` and
+  `_archive`), else its `~/Projects` folder. A workspace seat's subfolder is
+  never one (ADR 0039 d1, d3).
+- **Placement check** — the audit (`thread-placement.py`) of where every
+  thread sits against its thread home. Its kinds are `split-home` (not the
+  retired reshuffle verb *split*, ADR 0027: a `~/Projects` folder's thread
+  whose project's home is a repo, or a thread in a repo its project lists
+  after another), `misnamed`, `undeclared`, `no-slug`, `behind`,
+  `side-branch` and `workspace`. A repo-tier finding is reported once per
+  thread identity, at its main checkout's path, never once per copy
+  (ADR 0039 d5). Report-only: orient shows it, close warns with it.
 - **Route** — a decisive member (`stash`, `defer`, `handoff`, `close`) that
   disposes of the current thread with known intent.
 - **Router (`next`)** — the undecided sibling. Answers "what's my next move?"
@@ -48,7 +65,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   project/area (not one thread), then reshuffles it without asking (ADR 0036),
   unless told to steer it as it stands or just look. It schedules rollout-shaped
   work itself, routes the rest by the execution-fit test, and ends with the
-  **execute offer** (run the rollout in a fresh session, here, or not yet).
+  **execute offer** (run the rollout in a fresh session, here, not yet, or
+  start when ready).
   Pointed at a single plan, design note or brain dump it runs a **scoped
   reshuffle** of that note alone. Absorbs the former `split` and `gather` verbs
   (ADR 0027).
@@ -307,6 +325,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   in `next`'s order: a task a queued task depends on, directly or through a
   folded member (`merged_into:`), first, then the oldest `ready:`, then schedule
   order. _Avoid_: the lane (that is the step, not the line).
+- **Verify slot** — one of the machine's `verify_slots` places a verifier suite
+  runs in, shared by every rollout on the machine (p23-4,
+  `scripts/verify-slot.py`): the lead's Integration and RACE verifies and every
+  agent's engine-rendered verifier take one, and a further suite waits rather
+  than piling on. Each slotted suite runs under a guard that ends a killed
+  holder's suite before its verify slot frees. The Integration priority: the
+  lead's Integration and RACE verifies, and the integrate call's own verifier
+  runs (`run --priority`), go before any task call's agent. Not a **Slot** (a
+  task's run in a Queue). _Avoid_: bare "slot", lock, semaphore.
 - **Cursor** — the durable record of rollout progress, the single source of
   truth for "where was I": in a Queue, the rollout's task notes, a task
   marked done being a task merged (ADR 0030).
@@ -323,6 +350,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   paused, never-started and protocol-3 rollouts, and keeps one whose every
   task merged but whose completion ceremony has not run. _Avoid_: active, in
   flight.
+- **Start when ready** — the execute offer's fourth answer (orient § 9,
+  schedule step 8): it stamps `start: unattended` on the rollout note just
+  written and ends, running nothing. The Chorus Stage starts the lead in the
+  note's Project root once the note is runnable, and that lead's first `next`
+  clears the stamp, so no second lead starts (vault grammar § Rollout start
+  stamp). Outside a Chorus Stage nothing acts on it, so it waits like not yet.
+  _Avoid_: auto-start, scheduled start.
 - **Git-env canary** — the lead's check that the shared checkout (a rollout's
   `Project root`) kept its `refs/heads/<default>` and its bareness across each
   **Window** (execute § 4.5, ADR 0030). A local commit not on
@@ -409,13 +443,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Needs-you item** — a decision in a running rollout that is Lachy's alone:
   a gate sign-off, an undecided RACE or UNVERIFIED, a set-aside only a person
   moves on, a merge hold's release, or a halt. The lead lists it in the
-  report's `Needs you:` block and pushes it once, deduped on its line in the
-  rollout note's `## Needs-you log`, the lead's push record. That log is
-  never the task note's `## Needs you` (p16-3), which holds the question the
-  engine stopped on; an item whose entry carries one shows it on its detail
-  line. The lead never puts an item through the question tool while anything
-  the session launched is in flight, and the queue runs on without the answer
-  (execute § 6.5). _Avoid_: pending question, ask item, open question.
+  report's `Needs you:` block and pushes it once (falling back to ntfy when
+  the push does not reach him), deduped on its line in the rollout note's
+  `## Needs-you log`, the lead's push record; an item whose delivery failed
+  on every channel is retried at most once more, at the next loop entry, then
+  deduped (ADR 0038). That log is never the task note's `## Needs you` (p16-3),
+  which holds the question the engine stopped on; an item whose entry carries
+  one shows it on its detail line. The lead never puts an item through the
+  question tool while anything the session launched is in flight, and the
+  queue runs on without the answer (execute § 6.5).
+  _Avoid_: pending question, ask item, open question.
 - **Agent-fixable block** — a block a re-dispatched agent can resolve alone.
   The live lead re-enters these itself through `reconcile-rollout.py
   auto-retry`, up to `auto_retries` times (default 2; an infra block after a
@@ -577,7 +614,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   resolved by `rollout-settings.py` and stamped into each rollout note by
   schedule, except `auto_retries` and the Standing approval's
   `spend_approval_usd`, which the execute verbs resolve themselves and
-  schedule never stamps. _Avoid_: hardcoded defaults, config.
+  schedule never stamps, and `verify_slots`, which is machine-wide
+  (`[defaults]` only), never stamped, and read by execute's `verify-timeout`
+  at each loop entry. That read validates the whole file, so a refused file
+  halts every rollout on the machine at its next entry; write a key (or the
+  `[notify]` table) only once the installed plugin knows it. The
+  machine-wide `[notify]` table holds `ntfy_topic`, read by two scripts and
+  never stamped: execute's needs-you fallback publishes to it (ADR 0038),
+  and tune.py refuses a Tuning whose edit would change it.
+  `rollout-settings.py`'s JSON says only whether a topic is set, never the
+  topic. _Avoid_: hardcoded defaults, config.
 
 ## Model ladder
 

@@ -186,6 +186,40 @@ test('a table without the key gets it inserted after its last key; the repo key 
   assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), '[repo."O/R"]\nmax_review_rounds = 4  # kept\nparallel_ceiling = 5\n\n[repo."o/other"]\nparallel_ceiling = 9\n')
 })
 
+// [notify] (ADR 0038 d3) is machine-wide: a Tuning never touches it. tune.py edits rollouts.toml line by line, so the table
+// survives byte for byte, and a guard beside the Guardrails' refuses any edit whose result resolves another [notify].
+const NOTIFY_CONFIG = '[defaults]\nparallel_ceiling = 4\n\n[notify]\nntfy_topic = "t"   # the needs-you fallback\n'
+
+test('a config ending in [notify] gains [repo."o/r"] after a Tuning, the [notify] lines byte for byte', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  writeToml(home, NOTIFY_CONFIG)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  const r = tune(home, ['--scores', scores, '--pick', 'p1', '--repo', repo])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), `${NOTIFY_CONFIG}\n[repo."o/r"]\nparallel_ceiling = 5\n`)
+  // The CLI prints only whether a topic is set (rollout-settings.py's redacted()); the bytes above carry the topic itself.
+  assert.deepEqual(resolved(home, repo).notify, { ntfy_topic: { set: true, source: 'file:notify' } })
+})
+
+test('an edit that would change [notify] is refused: exit 2, nothing written', (t) => {
+  const home = tmpHome(t)
+  const repo = gitRepo(home)
+  writeToml(home, NOTIFY_CONFIG)
+  const scores = writeScores(home, { proposals: [P('p1', 'parallel_ceiling', 4, 5)] })
+  // A future edit path that drops the topic: edit_text's result with the ntfy_topic line removed.
+  const r = spawnSync('python3', ['-B', '-c', `import importlib.util, sys
+spec = importlib.util.spec_from_file_location('tune', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+real = m.edit_text
+m.edit_text = lambda *a: '\\n'.join(l for l in real(*a).split('\\n') if not l.startswith('ntfy_topic'))
+sys.exit(m.main(sys.argv[2:]))`, TUNE, '--scores', scores, '--pick', 'p1', '--repo', repo], { encoding: 'utf8', cwd: home, env: env(home) })
+  assert.equal(r.status, 2, r.stderr)
+  assert.match(r.stderr, /^tune: the edit changes \[notify\]: nothing written\n$/)
+  assert.equal(fs.readFileSync(tomlPath(home), 'utf8'), NOTIFY_CONFIG, 'the config is byte-identical')
+  assert.ok(!fs.existsSync(tuningsPath(home)), 'no tunings.jsonl')
+  assert.deepEqual(fs.readdirSync(path.dirname(tomlPath(home))), ['rollouts.toml'], 'no temp file left')
+})
+
 test('an O/R origin is accepted for scores on o/r', (t) => {
   const home = tmpHome(t)
   const repo = gitRepo(home, 'git@github.com:O/R.git')
