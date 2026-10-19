@@ -58,8 +58,9 @@
 #      same GitHub <owner>/<name> as T; no live plugin checkout in it (the plain mode's match); and, when it sits
 #      inside a work tree P, `git -C P check-ignore -q -- <rel>/` exits 0 (P never tracks it). Its branch, working
 #      tree and lag are not asked: execute's worktrees branch from a freshly fetched origin/<default>.
-#   8. `<sub>` missing from C: exit 3, "land <sub> first".
-#   9. Exit 0 prints `C[/<sub>]`.
+#   8. Exit 0 prints `C[/<sub>]`. A `<sub>` missing from C is no refusal here: --resolve never fetches, so C may
+#      only be behind origin (a seat pushed since the clone was made). It adds a stderr `note:` that C has no <sub>
+#      yet, and --ensure, which fast-forwards C first, is the one that refuses when C still lacks it.
 # Exit 2 is the check unable to run (usage, python3 or land.sh missing). It never clones, fetches or writes.
 #
 # ---- --ensure <Local:>: schedule § 0 only, after the remote, gh and landing-register checks and Lachy's yes to the
@@ -69,7 +70,9 @@
 # one `git clone -- <raw remote.origin.url of T> <C>` with GIT_TERMINAL_PROMPT=0 and `ssh -o BatchMode=yes` unless
 # the operator set an ssh command (land.sh's rule), a failed clone exiting 2 with git's first line and the probe
 # directory removed; the usable-clone checks, re-run on every invocation; the clone refresh (below); the local-state
-# notes (below); then `C[/<sub>]` on stdout, or exit 3 when `<sub>` is missing. Exits: 0, 2, 3, 5.
+# notes (below); then `C[/<sub>]` on stdout, or exit 3 when C still lacks `<sub>` after the refresh: "land <sub>
+# first" when origin/<default> lacks it too, else that the clone could not move to it (the refresh's note says why).
+# Exits: 0, 2, 3, 5.
 #   Local-state notes. A fresh clone lacks only gitignored state, and nothing is copied: one `note:` per item on a
 #   fixed list that the in-place checkout has and the clone lacks, at the toplevel and at the root's sub-path, on
 #   every run: `.claude/settings.local.json`, `CLAUDE.local.md`, `.env`, `.env.local`, `.envrc`, an untracked
@@ -315,10 +318,17 @@ usable() {  # the usable-clone checks, in order; exits 3 naming the first that f
     not_usable "$P would track it (its ignore rules do not cover $REL/), so its next git add -A (the daily sweep's) would embed it as a gitlink: add /$REL/ to $P's .gitignore"
   fi
 }
-sub_present() {
-  [ -z "$SUB" ] || [ -d "$C/$SUB" ] || {
+sub_missing() { [ -n "$SUB" ] && [ ! -d "$C/$SUB" ]; }
+sub_present() {  # --ensure only, after the refresh: exits 3 when C still lacks <sub>
+  local d
+  sub_missing || return 0
+  d=$(default_of "$C") || d=''
+  if [ -n "$d" ] && [ "$(git -C "$C" cat-file -t "refs/remotes/origin/$d:$SUB" 2>/dev/null)" = tree ]; then
+    echo "$SR: $C has no $SUB, though origin/$d has it: the clone could not fast-forward to origin/$d (the note above says why), so fix that in $C, then re-run /thread:schedule" >&2
+  else
     echo "$SR: $C has no $SUB: the rollout clone holds only what origin holds, so land $SUB first (commit it and land it on origin's default branch), then re-run /thread:schedule" >&2
-    exit 3; }
+  fi
+  exit 3
 }
 
 # refresh_clone <clone> <root sub-path> <warn 1|0>: fetch, then a fast-forward on the default branch. stderr only.
@@ -406,7 +416,9 @@ case "$mode" in
       exit 4
     fi
     usable
-    sub_present
+    if sub_missing; then
+      echo "$SR: note: $C has no $SUB yet: --resolve never fetches, so the clone may only be behind origin; --ensure fast-forwards it first and refuses only if it still lacks $SUB" >&2
+    fi
     out_path
     exit 0 ;;
 

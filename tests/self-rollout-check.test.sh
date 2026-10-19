@@ -177,8 +177,9 @@ res "$bash_sh" "$sib"; ok "$rc|$out" "0|$sib" "resolve: Local: naming the clone 
 mkdir -p "$live/sub" "$sib/sub" "$live/only"
 res "$bash_sh" "$live/sub"; ok "$rc|$out" "0|$sib/sub" "resolve: a sub-path maps to <clone>/<sub>"
 res "$bash_sh" "$sib/sub"; ok "$rc|$out" "0|$sib/sub" "resolve: … and the clone's own sub-path names itself"
-res "$bash_sh" "$live/only"; ok "$rc|$out" "3|" "resolve: a sub-path the clone lacks → 3"
-has "$err" "land only first" "resolve: … land <sub> first"
+res "$bash_sh" "$live/only"; ok "$rc|$out" "0|$sib/only" "resolve: a sub-path the clone lacks → still 0 and <clone>/<sub> (it never fetches: the clone may only be stale)"
+has "$err" "note: $sib has no only yet: --resolve never fetches" "resolve: … with a note that leaves the refusal to --ensure"
+lacks "$err" "land only first" "resolve: … never the land-it-first refusal"
 rmdir "$live/only"
 
 # Its branch, working tree and lag are no rollout's concern: the real rollout clone carries the engine's own
@@ -366,6 +367,28 @@ ok "$([ -e "$pn/N/n3-rollout" ] && echo left || echo gone)" gone "ensure: … th
 ok "$(git -C "$pn" status --porcelain)" "$before" "ensure: … the parent's status unchanged"
 printf '/N/n3/\n/N/n3-rollout/\n' > "$pn/.gitignore"
 sr --ensure "$pn/N/n3"; ok "$rc|$out" "0|$pn/N/n3-rollout" "ensure: nested with the ignore line → made"
+
+# A stale clone (the review's reproduction): twin ws and clone ws-rollout, then a seat newseat/ pushed to origin and
+# pulled into the twin. --resolve never fetches, so it must not refuse what --ensure's refresh brings in: schedule
+# § 0 would stop at its exit 3, never reach --ensure, and loop on the remedy for ever.
+srv o/st; st="$home/repos/st"; cl o/st "$st"; cl o/st "$st-rollout"
+push o/st newseat/README.md seat; env $SSHENV git -C "$st" pull -q origin master 2>/dev/null
+sr --resolve "$st/newseat"; ok "$rc|$out" "0|$st-rollout/newseat" "stale clone: --resolve on a seat origin has and the clone lacks → 0, <clone>/<sub>"
+has "$err" "note: $st-rollout has no newseat yet" "stale clone: … with the note"
+lacks "$err" "land newseat first" "stale clone: … never 'land newseat first'"
+sr --ensure "$st/newseat"; ok "$rc|$out" "0|$st-rollout/newseat" "stale clone: --ensure fast-forwards it → 0, <clone>/<sub>"
+ok "$([ -d "$st-rollout/newseat" ] && echo there)" there "stale clone: … the seat is in the clone now"
+# --ensure keeps the hard check: a seat origin lacks too, and one origin has that the clone cannot move to
+mkdir -p "$st/local-only"
+sr --resolve "$st/local-only"; ok "$rc|$out" "0|$st-rollout/local-only" "stale clone: --resolve on a seat only the twin has → 0 and the note"
+sr --ensure "$st/local-only"; ok "$rc|$out" "3|" "stale clone: --ensure on a seat origin lacks → 3"
+has "$err" "$st-rollout has no local-only: the rollout clone holds only what origin holds, so land local-only first" "stale clone: … land it first"
+git -C "$st-rollout" switch -q -c side; push o/st seat2/README.md two; env $SSHENV git -C "$st" pull -q origin master 2>/dev/null
+sr --ensure "$st/seat2"; ok "$rc|$out" "3|" "stale clone: origin has the seat but the clone is on another branch → 3"
+has "$err" "not refreshed: on 'side', not master" "stale clone: … the refresh's note"
+has "$err" "$st-rollout has no seat2, though origin/master has it: the clone could not fast-forward to origin/master" "stale clone: … says origin has it, never 'land it first'"
+lacks "$err" "land seat2 first" "stale clone: … not the land-it-first remedy"
+git -C "$st-rollout" switch -q master
 
 # 4. --refresh: a clone root only
 push o/e1 c.txt two

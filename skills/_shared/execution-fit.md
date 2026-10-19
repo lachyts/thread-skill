@@ -112,13 +112,16 @@ script's header is the one statement of what matches, of what makes a clone usab
   git, a linked worktree (point `Local:` at the main checkout), `~/Projects` itself (a text-only monorepo,
   never a Project root), `self-rollout-check: <path> is not a usable rollout clone: <reason>` (not a
   directory, not a work tree's top, a linked worktree, another repository, a live plugin checkout, or a
-  parent work tree that would track it), or a sub-path the clone lacks (land it first).
+  parent work tree that would track it). A sub-path the clone lacks is no refusal here: `--resolve` never
+  fetches, so the clone may only be stale, and it exits 0 with `C/<sub>` and a `note:`.
 - **`--ensure`** (schedule § 0, after Lachy's yes when the clone is new): makes a missing clone (inside another
   work tree, an empty-directory `git check-ignore` probe first, removed and exit 3 when that tree would track
   it; then one `git clone` of the raw origin URL, never prompting), re-runs the usable checks, fast-forwards
   the clone's default branch (`fetch`, then `merge --ff-only --no-autostash`; a note when it cannot move),
   notes the gitignored local state the in-place checkout has and the clone lacks (nothing is copied), and
-  prints the Project root. Exits 0, 2 (a failed clone, nothing left behind), 3 and 5.
+  prints the Project root. Exits 0, 2 (a failed clone, nothing left behind), 3 (`--resolve`'s refusals, a
+  parent that would track a new clone, or a sub-path the clone still lacks after its fast-forward: land it
+  first, or, when `origin/<default>` has it, let the clone move) and 5.
 - **Empty** (execute § 2.6): exit 0 is no match; exit 3 is a match, with the match lines and the fix on
   stderr. Execute never swaps a root: its rollout note is already written.
 - **Exit 2**, in either mode, is the check itself failing (the script missing with the root set, an empty

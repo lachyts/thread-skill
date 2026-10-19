@@ -145,7 +145,11 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
     !s0S.some((x) => x.startsWith('Only the Project root moves') && x.includes('`<localPath>`') &&
       x.includes("step 6's Thread line keep the `Local:` path")) ||
     !s0S.some((x) => x.startsWith('Exit 3 (no usable clone') && x.includes('exit 5 (no GitHub origin)') &&
-      x.includes('is a stop')) ||
+      x.includes('is a stop') && x.includes('from `--ensure` alone, a sub-path the clone still lacks')) ||
+    // A stale clone (a sub-path pushed since it was made) is `--resolve`'s exit 0 with a note, never a stop: only
+    // `--ensure`, after its fast-forward, refuses.
+    !s0S.some((x) => x.startsWith('**Exit 0** (the clone exists)') && x.includes('`--ensure` directly, even when') &&
+      x.includes('the clone has no `<sub>` yet') && x.includes('a stale clone is no stop')) ||
     !s0.includes('`rollout clone <C> was created by this run and stays: the next /thread:schedule reuses it`')) fails.push('s0-self-rollout')
 
   // reroot-guard: on a supersede, step 1's Re-root guard exists and names repair § 5's clean defer as its remedy.
@@ -406,6 +410,10 @@ test('control: § 0 that resolves before the register check, without --resolve o
     ['s0-self-rollout'], 'exit 3 no stop')
   only({ schedule: edit(real.schedule, S0, 'was created by this run and stays', 'was created by this run and is removed') },
     ['s0-self-rollout'], 'no stays line')
+  only({ schedule: edit(real.schedule, S0, 'so a stale clone is no\n   stop,', 'so a stale clone is a stop,') },
+    ['s0-self-rollout'], "a stale clone's note a stop")
+  only({ schedule: edit(real.schedule, S0, 'a parent that would track it, or, from `--ensure` alone, a\n   sub-path the clone still lacks after its fast-forward)',
+    'a parent that would track it, a sub-path the clone lacks)') }, ['s0-self-rollout'], "--resolve's missing sub-path a stop")
 })
 
 test('control: a Re-root guard that is gone, or names another remedy, fails reroot-guard', () => {

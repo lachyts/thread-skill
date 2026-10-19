@@ -78,7 +78,9 @@ peer session's commit in the in-place checkout never moves the tree a rollout in
    when its stderr has a `nested in <P>` line, the question adds "<P> must ignore it: the clone step checks
    that first and creates nothing if <P> would track it". Yes → run the same snippet with `<mode>` set to
    `--ensure`, with the Bash tool's `timeout: 600000`; No → stop before step 1, with nothing written.
-   **Exit 0** (the clone exists) → run the snippet with `<mode>` set to `--ensure` directly. `--ensure`
+   **Exit 0** (the clone exists) → run the snippet with `<mode>` set to `--ensure` directly, even when its
+   stderr has a `note:` that the clone has no `<sub>` yet: `--resolve` never fetches, so a stale clone is no
+   stop, and `--ensure` refuses only when the clone still lacks it after its fast-forward. `--ensure`
    makes the clone when it is missing (an empty-directory ignore probe first when it would sit inside
    another work tree, then one `git clone`), re-checks it, fast-forwards it (`git fetch` and a
    `merge --ff-only` of its default branch) and notes the gitignored local state the in-place checkout
@@ -87,8 +89,9 @@ peer session's commit in the in-place checkout never moves the tree a rollout in
    from the clone, naming both paths, and carry its `note:` and `WARN:` lines to step 8's "Pre-flight —
    rollout clone". Only the Project root moves: `<localPath>` below and step 6's Thread line keep the
    `Local:` path, where the thread lives. Exit 3 (no usable clone: outside git, a linked worktree,
-   `~/Projects` itself, an unusable clone, a parent that would track it, a sub-path the clone lacks),
-   exit 5 (no GitHub origin), exit 2 or any other non-zero exit of either mode is a stop, below.
+   `~/Projects` itself, an unusable clone, a parent that would track it, or, from `--ensure` alone, a
+   sub-path the clone still lacks after its fast-forward), exit 5 (no GitHub origin), exit 2 or any other
+   non-zero exit of either mode is a stop, below.
 5. Then run the pushed-base check from the same § Dispatch blockers (a pointer, never a copy) with the
    resolved path, `<localPath>` set to the project note's `Local:` path (empty if the user gave the
    path), and no cited paths: rollout worktrees branch from `origin/<default>`, so a local default branch
