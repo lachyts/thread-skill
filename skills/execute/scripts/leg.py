@@ -362,8 +362,7 @@ class Lock:
 
     def __exit__(self, *exc):
         if self.fd is not None:
-            fcntl.flock(self.fd, fcntl.LOCK_UN)
-            os.close(self.fd)
+            os.close(self.fd)  # closing the descriptor is the release (verify-slot.py's rule: never an unlock call)
         return False
 
 
