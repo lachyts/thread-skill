@@ -17,6 +17,10 @@ reconcile-rollout.py's DEFAULT_TASKS_DIR, which must be an existing directory):
         Runs the common pass (below), then writes this window's open `armed` record, with the ref of the pass's
         single state read, only when the pass exits 0. R bare at arm is itself a trip (`core.bare true at arm`;
         no record). Under a hold it exits 3 and writes no record. A retired rollout: exit 2, nothing created.
+        Refuses (exit 2, nothing written: no record, no log line, no pass) a window whose owner does not hold
+        (the owner rule below), its stderr naming the missing stamp (`mark-started` for a task window,
+        `mark-integrating` for the rest), so a skipped stamp stops at the arm, never as a later
+        `record not armed` trip (p26-1).
   check --repo R --default B --slug S --kind K
         Runs the pass, then closes this window's record: `armed` and clean -> a `checked` tombstone; tripped
         (now or by an earlier verb) -> `closed: true`, no second trip line; a closed tripped record -> unchanged.
@@ -54,9 +58,11 @@ note to confirm it; a clean record whose owner no longer holds is closed `checke
 an unacked trip or any record reads `tripped`, else 0.
 
 Owner rule: an `armed` window can only be open while its vault owner holds: kind `task` while the task note's queue
-state is `running`; `integrate`, `verify` and `race-verify` while the note carries `integrating:`. A note missing
-from an existing tasks dir counts as holding (fail-closed), with a stderr WARN. An orphan is compared once and
-closed.
+state is `running`; `integrate`, `verify` and `race-verify` while the note holds the Integration lane
+(reconcile-rollout.py `_holds_lane`: `review` with a `pr:` and `integrating:`, or a current `integrated`
+Integration-log line, the window an integrate call's reconciled row leaves before step 4's RACE re-verify). A note
+missing from an existing tasks dir counts as holding (fail-closed), with a stderr WARN. An orphan is compared once
+and closed. `arm` refuses a window whose owner does not hold.
 
 The comparison (baseline against now; B and O are read by `_read_state`, the only state reader):
   - bareness changed, either ref absent (but not both), or origin's B absent -> a trip;
@@ -134,7 +140,7 @@ RR = _load_reconcile()
 Note = RR.Note
 _git_env_hold = RR._git_env_hold
 _queue_state = RR._queue_state
-_scalar = RR._scalar
+_holds_lane = RR._holds_lane
 _scan = RR._scan
 _project_root = RR._project_root
 DEFAULT_TASKS_DIR = RR.DEFAULT_TASKS_DIR
@@ -445,7 +451,7 @@ class Ctx:
         note = hit[1]
         if rec["kind"] == "task":
             return _queue_state(note)[0] == "running"
-        return bool(_scalar(note.get("integrating")))
+        return _holds_lane(note)
 
 
 def _stamp():
@@ -565,6 +571,15 @@ def cmd_arm(ctx, args):
     if ctx.retired():
         raise CanaryError(f"rollout retired: {ctx.stem} takes no new window")
     _validate(ctx, args.repo, args.default)
+    # The owner rule at the arm (p26-1): a window armed with no owner would close at the next pass and its own check
+    # would trip `record not armed`. Refuse before the pass, so nothing is compared, logged or written.
+    if not ctx.owner_holds({"slug": args.slug, "kind": args.kind}):
+        if args.kind == "task":
+            st = RR._status(ctx._index[args.slug.lower()][1]) or "none"
+            raise CanaryError(f"refused: [[{args.slug}]] is not running (status {st}): stamp status: in_progress and "
+                              "run reconcile-rollout.py mark-started first; nothing armed")
+        raise CanaryError(f"refused: [[{args.slug}]] holds no integrating: — run reconcile-rollout.py "
+                          "mark-integrating first; nothing armed")
     rc, state, recs = _pass(ctx, want_state=True)
     bare, ref, _origin = state
     if bare:

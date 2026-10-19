@@ -9,7 +9,9 @@ never force-pushes.
 Subcommands:
 
   prepare --repo R --slug S --default D --note N [--tasks-dir T]
-      Decide how one approved task integrates. In order: fetch origin with --prune (retried once; failing
+      Decide how one approved task integrates. Refuses (exit 1, nothing fetched or merged) a note with no
+      `integrating:`: every route into execute § 4.5 step 3 runs mark-integrating first, so a skipped stamp
+      stops here (p26-1). In order: fetch origin with --prune (retried once; failing
       twice is exit 8); H = origin/<branch> (absent: route `set-aside`, reason `origin/<branch> does not
       exist — the PR branch is gone`); the anchor A = the engine's ANCHOR_RECIPE (pinned copy) with
       WT=<repo> (a `stale-ref X` is deleted with `update-ref -d <ref> X`, guarded by X, and the recipe
@@ -135,8 +137,8 @@ Subcommands:
   stamp
       Now, in reconcile's `_stamp` form (the integrate call's startedAt, log-integration's --started).
 
-Exit codes: 0 a verdict (or verify finished; its own exit is the rc), 1 refused (push, undo), 2 usage or
-environment, 8 retryable (prepare's fetch failed twice), 75 verify got no verify slot in time (O.rc `noslot`). Stdlib only; `Note` and `_stamp` come from
+Exit codes: 0 a verdict (or verify finished; its own exit is the rc), 1 refused (push, undo, prepare without
+integrating:), 2 usage or environment, 8 retryable (prepare's fetch failed twice), 75 verify got no verify slot in time (O.rc `noslot`). Stdlib only; `Note` and `_stamp` come from
 reconcile-rollout.py (importlib), and every git and child process runs with git's repo-local variables
 (`git rev-parse --local-env-vars`) scrubbed. The engine copies (ANCHOR_RECIPE, the branch and tree names,
 the merge message, integrationMarker, parseIntegrationMarker, stageDiagnosis's escape, and inputs --row's
@@ -320,7 +322,7 @@ def rung_record_error(g):
 # ---- plumbing ------------------------------------------------------------------------------------------
 
 class Refused(Exception):
-    """Exit 1: the verb refused (push, undo)."""
+    """Exit 1: the verb refused (push, undo, prepare)."""
 
 
 class EnvError(Exception):
@@ -519,6 +521,11 @@ def cmd_prepare(args):
     if not out_of(git(repo, "rev-parse", "--git-dir")):
         raise EnvError(f"{repo} is not a git repo")
     _path, note = _load_note(args.note)
+    # The lane's stamp (p26-1): step 3 runs mark-integrating before prepare on every route into it, so a note with
+    # no `integrating:` is a skipped stamp. Refuse before the fetch, the anchor, any ref deletion, stash or merge.
+    if not rr._scalar(note.get("integrating")):
+        raise Refused(f"[[{args.slug}]] carries no integrating: — run reconcile-rollout.py mark-integrating --tasks "
+                      f"{args.slug} first (execute § 4.5 step 3); nothing fetched or merged")
     tasks_dir = Path(os.path.expanduser(args.tasks_dir)) if args.tasks_dir else _path.parent
     br, tree = branch_of(args.slug), worktree_dir(str(repo), args.slug)
     out = {"slug": args.slug, "branch": br, "worktreePath": tree, "prHead": None, "anchor": None, "taskBase": None,
