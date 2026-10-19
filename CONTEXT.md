@@ -6,20 +6,50 @@ through time, from attention to merged PRs. Terms only — no implementation.
 ## The system
 
 - **Lane** — one of the two dispatch surfaces every cluster of open work gets
-  exactly one of: the **rollout lane** (`schedule` → `execute`: worktrees,
-  PRs, convergence engine, auto-merge) or the **session lane** (scoped
-  sessions dispatched by calendar and attention: `defer`, a task's `## Launch`
-  block via `open`, orient's cc-* batches).
-- **Execution-fit test** — the single rule deciding a cluster's lane
-  (`skills/_shared/execution-fit.md`). Decides hard, never as a preference.
-- **Rollout-shaped** — passes the fit test: converges on ONE code repo, lands as
-  a PR per task, verifies machine-checkably inside the run. Shape only —
-  count is never a criterion (ADR 0009).
+  exactly one of: the **rollout lane** (unattended work run from a rollout
+  note, as a **Parallel rollout** or a **Serial rollout**) or the **session
+  lane** (work that needs Lachy present or waits on a date: `defer`, or a
+  task's `## Launch` block via `open`).
+- **Execution-fit test** — the single rule deciding a cluster's lane and, in
+  the rollout lane, its shape (`skills/_shared/execution-fit.md`): parallel-shaped,
+  serial-shaped, or session-lane. Decides hard, never as a preference.
+- **Parallel-shaped** — passes the fit test's first clause: converges on ONE
+  code repo, lands as a PR per task, verifies machine-checkably inside the run.
+  Runs as a Parallel rollout. Shape only — count is never a criterion
+  (ADR 0009). _Avoid_: rollout-shaped (its name until 2026-10-19, when
+  "rollout" came to cover both shapes).
+- **Serial-shaped** — work an agent can finish without Lachy present that is
+  not parallel-shaped: no PR per task, a shared surface, an external tool or a
+  launch profile the lead lacks. Runs as a Serial rollout.
 - **Task floor** — the invariant: every stash/defer writes a self-contained
   vault task routed to the right project. The guarantee that makes shutting an
   agent down feel safe. The Task is also the shared atom of both ladders:
   planning (project → phase → task) and execution (rollout → task, run as a
   Queue since ADR 0030).
+
+## Estate (all projects)
+
+- **Estate pass** — orient at estate altitude, run by `orient-all`: one look
+  across every project in the vault that puts ready work in motion. It grades open work, batches
+  Lachy's decisions, starts rollouts, and sends any project that needs real
+  design thinking to its own orient. It never reshapes a project itself.
+  `orient` is the same act at project altitude; a project graded **Orient**
+  gets its own `orient` session. _Avoid_: rally, global orient, portfolio
+  review, triage (alone).
+- **Readiness grade** — what a task needs from Lachy before an agent can
+  finish it, given in the estate pass's scan-only first pass: **Ready** (an
+  agent can finish it without inventing a decision nothing records), **One
+  call** (a single decision, offered with a recommendation), **Grill** (a few
+  low-level decisions an agent with the project's thread, ADRs and code can
+  recommend on), or **Orient** (the decisions shape the project, so it needs a
+  full-context session). _Avoid_: tier 1/2/3, traffic lights.
+- **Unpark offer** — the estate pass's question about a parked project with
+  ready work: unpark it (it becomes queued), snooze it (asked again only after
+  a fortnight or when its ready work grows), or kill it (done and archived).
+- **Review load** — the attention a rollout hands back to Lachy once it runs:
+  PRs to read, sign-offs, eye-checks. Shown beside the work the estate pass
+  queues, because his attention is spent twice, once deciding and once
+  reviewing.
 
 ## Continuity (threads and attention)
 
@@ -80,8 +110,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   only once Lachy has passed those items at the gate, so it says what he has
   seen. The check owns its record (ADR 0036).
 - **Batch** — a parallel-safe cluster of open work (disjoint files/surfaces)
-  matched to the narrowest covering launch profile; the session-lane unit
-  orient dispatches. Never contains a rollout-shaped cluster.
+  that orient dispatched as child agents of its own session. Retired
+  2026-10-19: serial-shaped work runs as a **Serial rollout**, with chains
+  side by side when its surfaces are disjoint. _Avoid_: batch, for any
+  current dispatch unit.
 - **Dispatch artefact** — a batch's durable contract: the prompt file under
   `<workspace>/.scratch/orient/`. Since ADR 0010 orient launches the batch
   session from it itself — the steering answer is the sole authorisation —
@@ -264,9 +296,25 @@ through time, from attention to merged PRs. Terms only — no implementation.
 
 - **Rollout** — a backlog of related tasks landed as one coordinated effort,
   described by one always-dated Obsidian note
-  (`<slug>-rollout-<YYYY-MM-DD>`). At most one is **unfinished** per repo; new
-  rollout-shaped work supersedes it rather than running beside it (schedule § 0,
-  ADR 0027, ADR 0030). _Avoid_: batch, run, campaign.
+  (`<slug>-rollout-<YYYY-MM-DD>`) whose **Shape** is parallel or serial. At
+  most one parallel rollout is **unfinished** per repo; new parallel-shaped
+  work supersedes it rather than running beside it (schedule § 0, ADR 0027,
+  ADR 0030). _Avoid_: batch, run, campaign.
+- **Shape** — whether a rollout runs in parallel or in serial; the one word
+  that tells the two kinds apart. Every rollout verb (schedule, execute,
+  status, repair, reflect) takes either shape. _Avoid_: mode, lane (a lane
+  holds both shapes).
+- **Parallel rollout** — a rollout run as a **Queue**: each task in its own
+  worktree-isolated agent, landed as its own PR through Integration. Every
+  rollout before 2026-10-19 is one.
+- **Serial rollout** — a rollout run as a chain of **Legs**: visible,
+  interactive sessions that each work tasks themselves, close, and hand the
+  rest to a fresh successor. No worktrees and no subagents. _Avoid_: relay
+  (Chorus's word for sending a command to a session).
+- **Leg** — one session's part of a serial rollout: it finishes any task its
+  predecessor left claimed, then claims tasks one at a time (up to five, fewer
+  when its context grows heavy or a task proves large), closes, and hands over.
+  _Avoid_: shift, stint, iteration (one task in a Ralph loop), batch.
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
@@ -297,8 +345,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   half-written, broken.
 - **Wave** — a set of tasks safe to run together because none shares a file
   (ADR 0009). Retired by ADR 0030: see **Queue**. Its fit-test adjective
-  **Wave-shaped** is now **Rollout-shaped**. _Avoid_: round, phase, stage.
-- **Queue** — how a rollout runs: tasks in parallel, each from the `main` of
+  **Wave-shaped** is now **Parallel-shaped**. _Avoid_: round, phase, stage.
+- **Queue** — how a parallel rollout runs: tasks in parallel, each from the `main` of
   its start, up to the parallel ceiling, held back only by dependencies or a
   **Solo** task, never a shared file (ADR 0030). _Avoid_: batch (the
   session lane's).
