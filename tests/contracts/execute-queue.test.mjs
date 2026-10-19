@@ -651,6 +651,9 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     !s27c.includes('In a clone-rooted rollout (every rollout scheduled after P26, and every self-rollout), a commit in any other clone of the set') ||
     !s27c.includes('In an in-place-rooted rollout, one in another clone of the set is still named first') ||
     !s28c.includes('--launch-check') || !s28c.includes('reason="launched outside the Project root"') ||
+    // Repair's hand-off enters the loop past § 2.7, so it runs § 2.8 itself (repair § 4), never exempt from it.
+    /repair hand-off/.test(s28c) ||
+    !s28c.includes("Repair's hand-off (`/thread:repair` § 4) enters the loop past § 2.7, so it runs this snippet itself before it hands off, and on exit 3 stops at its diagnosis with no hand-off") ||
     stampAt < 0 || ripAt < stampAt || logAt < ripAt || !S(skill, /^## Scope/).includes('--refresh-in-place')) fails.push('clone-root')
 
   // s5 (the dead-run resume keeps its shape for its consumers) is part of lost-call's routing: § 5 names *Lost call*.
@@ -687,6 +690,8 @@ test('control: § 2.7 without the cited paths, or step 5 without the twin refres
   only(sk('   - Refresh the in-place checkout once: `bash ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh --refresh-in-place <Project root>`',
     '   - Leave the in-place checkout alone'), 'clone-root', 'no twin refresh')
   only(sk('reason="launched outside the Project root"`.', 'reason="elsewhere"`.'), 'clone-root', 'no launch gate reason')
+  only(sk('`resumeFromRunId` resume or Stage re-send. Repair\'s hand-off (`/thread:repair` § 4) enters the loop past\n§ 2.7, so it runs this snippet itself before it hands off, and on exit 3 stops at its diagnosis with no hand-off,\ntelling Lachy to run `/thread:execute` from the Project root.',
+    '`resumeFromRunId` resume, repair hand-off or Stage re-send.'), 'clone-root', "§ 2.8 exempting repair's hand-off")
 })
 
 test('control: protocol 3 proceeding fails protocol-5', () => {

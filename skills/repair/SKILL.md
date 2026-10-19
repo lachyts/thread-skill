@@ -589,7 +589,14 @@ there is nothing to clear. Per stage:
   undecided (§ 3c; report the hold and stop there), a git-env hold stands (§ 3e; report it and stop there) or
   the ladder file is refused (§ 2; name the file and stop there), and never on a rollout whose ceremony already ran
   (§ 3a's complete-rollout stop: report the repair and stop there): execute's queue loop, entered at its §4.5 resume
-  (*Cold resume*): execute § 2.5 first (then § 2.6), then execute § 3's `verify_timeout` check (a halt there
+  (*Cold resume*). First the launch-directory check, execute § 2.8's snippet (point at it; never copy it here):
+  `self-rollout-check.sh --launch-check <Project root> <launch dir>`, the launch directory being this session's
+  primary working directory as the harness reports it, never `pwd`. A lead's tools reset every `cd` outside it, so
+  a repair launched in the vault or in the in-place checkout would run a clone-rooted rollout's merges, verifies
+  and worktrees from the wrong tree. Exit 0 goes on (pass a `WARN:` on); exit 3, exit 2 or any other non-zero exit
+  stops repair at the diagnosis, with no hand-off: print its stderr verbatim and tell Lachy to start a session in
+  the Project root and run `/thread:execute [[<rollout>]]` there. Then execute § 2.5 (then § 2.6), then execute
+  § 3's `verify_timeout` check (a halt there
   writes nothing), then the canary's `check-all` (execute § 4.5 *Git-env canary*; a non-zero exit halts), then
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/step-boundary.py end --rollout <rollout-note>` (execute
   § Room stop: every loop entry ends a room stop, here one an ended owner session left, lapsed or not; with none standing

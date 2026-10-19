@@ -201,7 +201,9 @@ A lead's tools reset every `cd` outside the directory the session was launched i
 run from its clone (ADR 0042) must launch at the rollout's `Project root`, or at an ancestor of it within the
 root's toplevel: anywhere else its merges, verifies and worktrees would run in the wrong tree.
 **Entry points only**, exactly as § 2.7: run the snippet directly after § 2.7, and never on a heartbeat, driver, completion
-notification, `resumeFromRunId` resume, repair hand-off or Stage re-send. `<repoPath>` is the rollout's
+notification, `resumeFromRunId` resume or Stage re-send. Repair's hand-off (`/thread:repair` § 4) enters the loop past
+§ 2.7, so it runs this snippet itself before it hands off, and on exit 3 stops at its diagnosis with no hand-off,
+telling Lachy to run `/thread:execute` from the Project root. `<repoPath>` is the rollout's
 `Project root`; `<launchDir>` is this session's primary working directory as the harness reports it (the
 environment block's "Primary working directory"), never `pwd`: a `cd` earlier in the session moves the
 shell, not the launch directory. **Pausing is exempt**, exactly as for § 2.5.
