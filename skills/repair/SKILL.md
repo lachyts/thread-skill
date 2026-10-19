@@ -691,7 +691,7 @@ line, and writes no note of its own: leg.py reads each deferred row as deferred,
 § 5's footer, live or archived).
 
 **(c) A halt** (`chain` halted). Show the halted Leg's `closed: halted:` line, the held task's latest `## Blocker
-diagnosis`, and `git -C <top> status --porcelain` for each `leg_base` top of that task. Ask. Only on his word:
+diagnosis` (if it has one), and `git -C <top> status --porcelain` for each `leg_base` top of that task. Ask. Only on his word:
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py clear-halt --rollout <rollout-note> --reason "<his words>"`, then
 re-read `leg.py status`: the chain reads stalled, and (e) restarts it.
 
