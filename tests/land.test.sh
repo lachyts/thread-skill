@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # skills/_shared/scripts/land.sh — the shared landing route (ADR 0028, queue and finish) — close's
 # `# thread:land` snippet and handoff's `# thread:handoff-land` snippet (cases 1–41), and its own-branch mode
-# with close's `# thread:land-own` snippet (cases 42–70). Fixture repos talk to bare "servers" under $tmp/srv
-# through a fake ssh that maps git@github.com:<o>/<r>.git and ssh://git@github.com/<o>/<r>.git there; a fake
+# with close's `# thread:land-own` snippet (cases 42–70); `--route`, the route class alone, is case 74. Fixture
+# repos talk to bare "servers" under $tmp/srv through a fake ssh that maps git@github.com:<o>/<r>.git and
+# ssh://git@github.com/<o>/<r>.git there; a fake
 # `gh` (tests/fixtures/land/fake-gh.py) logs every call and serves protection, access, PR list/create/merge,
 # labels, update-branch, the user, PR bodies, hold comments and per-SHA check-runs and status. Every handed
 # path goes through a symlinked alias of the temp dir, so the physical-path handling is exercised on every run.
@@ -1575,6 +1576,50 @@ git -C "$W" rm -q docs/reviews/sub/n.md; git -C "$W" commit -qm "🔧 chore(revi
 land GH_PROT=false -- "$W" "$W/THREAD.md"
 res "case 73b nested deletion" 1 "stuck: local commits not from a close-out: 🔧 chore(review): nested delete"
 }  # end shard_8
+
+# ==== --route: the route class alone, read-only (self-rollout-check.sh --refresh-in-place's diverged remedy) =======
+shard_9() {
+echo "== 74. --route: the route class, local only, no network"
+# route <repo> → $out, $err, $rc (logs reset); parity <label> <repo> <want>: --route's line, then a plain call's
+# outcome on the same repo: `not landed: <reason>` for commit-only, a stuck register line for unknown, and for
+# landable a result past S2 (neither of those).
+route() { : > "$LOG_SSH"; : > "$LOG_GH"; out=$($LAND_SHELL "$LAND" --route "$1" 2>"$tmp/err"); rc=$?; err=$(cat "$tmp/err"); }
+parity() {
+  local label=$1 repo=$2 want=$3
+  route "$repo"
+  ok "$out|$rc" "$want|0" "$label: --route prints [$want], exit 0"
+  ok "$(lines "$out")" 1 "$label: exactly one stdout line"
+  nossh "$label --route"; nogh "$label --route"; tmpempty "$label --route"
+  land GH_PROT=false -- "$repo" "$repo/THREAD.md"
+  case $want in
+    "commit-only: "*) ok "$out" "not landed: ${want#commit-only: }" "$label: parity: a plain call is not landed for the same reason" ;;
+    "unknown: "*) case $out in "stuck: ${want#unknown: }"*) ok y y "$label: parity: a plain call is stuck on the register" ;; *) ok "$out" "stuck: ${want#unknown: }…" "$label: parity" ;; esac ;;
+    landable) case $out in "not landed: "*|"stuck: landing register"*) ok "$out" "past S2" "$label: parity: a plain call goes on past S2" ;; *) ok y y "$label: parity: a plain call goes on past S2 ($out)" ;; esac ;;
+  esac
+}
+for e in repos/workspaces repos/obsidian .claude .agents Projects Projects/Life/audio-archive \
+         Projects/Life/grandma-shirleys-book Projects/Narcissus/narcissus-echo repos/concepts/cc; do
+  sw "$HOME/$e"; git -C "$HOME/$e" add THREAD.md; git -C "$HOME/$e" commit -qm t
+  parity "case 74 ~/$e" "$HOME/$e" "commit-only: swept by the daily sweep"
+done
+ghreset; mkrepo c74r; printf -- '- o/c74r — shared team repo\n' > "$LANDING_REGISTER"; edit
+parity "case 74 registered" "$W" "commit-only: listed o/c74r: shared team repo"
+: > "$LANDING_REGISTER"
+ghreset; mkrepo c74g https://gitlab.com/o/c74g.git; edit
+parity "case 74 gitlab" "$W" "commit-only: no GitHub origin"
+ghreset; mkrepo c74l; edit
+parity "case 74 landable" "$W" "landable"
+ghreset; mkrepo c74d; edit; rm -f "$LANDING_REGISTER"; ln -s "$tmp/nowhere.md" "$LANDING_REGISTER"
+route "$W"; ok "$rc" 0 "case 74 dangling register: --route exits 0"
+case $out in "unknown: landing register: landing-register: "*) ok y y "case 74 dangling register: unknown: landing register: …" ;; *) ok "$out" "unknown: landing register: landing-register: …" "case 74 dangling register" ;; esac
+parity "case 74 dangling register" "$W" "${out}"
+rm -f "$LANDING_REGISTER"; : > "$LANDING_REGISTER"
+route "$W/src"; ok "$out" landable "case 74: a path inside the repo resolves to its toplevel"
+out=$($LAND_SHELL "$LAND" --route 2>/dev/null); rc=$?; ok "$rc|$out" "2|" "case 74: no argument → usage exit 2, stdout empty"
+out=$($LAND_SHELL "$LAND" --route "" 2>/dev/null); rc=$?; ok "$rc|$out" "2|" "case 74: an empty argument → usage exit 2"
+out=$($LAND_SHELL "$LAND" --route a b 2>/dev/null); rc=$?; ok "$rc|$out" "2|" "case 74: an extra argument → usage exit 2"
+route "$tmp/t"; case $out in "unknown: not a git work tree"*) ok y y "case 74: outside git → unknown" ;; *) ok "$out" "unknown: not a git work tree…" "case 74: outside git" ;; esac
+}  # end shard_9
 
 # ---- run this child's shard -------------------------------------------------------------------------------
 declare -F "shard_$shard" >/dev/null || { echo "FAIL - no shard_$shard"; exit 1; }

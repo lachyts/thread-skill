@@ -5,6 +5,7 @@
 #
 #   land.sh [--slug <s>] [-F <msgfile>] [--commit-only] [--] <repo> [<path>…]
 #   land.sh --origin-slug <repo>      prints <owner>/<name> for a GitHub origin, else exit 4, stdout empty
+#   land.sh --route <repo>            prints the route class, read-only, no network (below), exit 0
 #
 # <repo> is any path inside the repo, a directory `git rm -f` just removed included: it resolves through
 # its nearest existing ancestor. Each <path> must be THREAD.md, */THREAD.md, or a file directly under
@@ -34,6 +35,12 @@
 #   without moving the branch. A protected landing is unaffected: its PR merges on GitHub.
 #   Protected → push HEAD unchanged to close/<cdate>-<slug>-<sha12>, open the PR over REST, label it
 #   `landing`, queue `gh pr merge --auto --merge`, and update-branch once when origin/<d> moved on.
+#   route_class is the local half (swept, then the register), shared by S2, O2 and --route, so the three never
+#   drift. --route <repo> prints its class as one line through result(): `landable`, `commit-only: <reason>` (swept
+#   by the daily sweep, listed on the landing register, no GitHub origin) or `unknown: landing register: <first
+#   line>` (the register unreadable); exit 0, usage exit 2. It reports the class only: protected or unprotected
+#   needs the network and is S3's, never --route's. Its caller is self-rollout-check.sh --refresh-in-place, whose
+#   diverged-twin remedy follows the twin's route (ADR 0042).
 #
 # Own-branch mode (ADR 0028 §§ 1–3, 5; close's § Land the own branch) lands the session's own branch <B>:
 #
@@ -146,7 +153,7 @@ git_line() {
 
 result() { printf '%s\n' "$1" > "$LAND_RES"; }
 
-usage() { echo "land: usage: land.sh [--slug <s>] [-F <msgfile>] [--commit-only] [--] <repo> [<path>…] | land.sh --origin-slug <repo> | land.sh --own-branch --branch <B> [--queue --reviewed <sha> | --hold -F <diagnosis>] [--] <repo>"; exit 2; }
+usage() { echo "land: usage: land.sh [--slug <s>] [-F <msgfile>] [--commit-only] [--] <repo> [<path>…] | land.sh --origin-slug <repo> | land.sh --route <repo> | land.sh --own-branch --branch <B> [--queue --reviewed <sha> | --hold -F <diagnosis>] [--] <repo>"; exit 2; }
 
 # phys <path>: PHYS_ANC is the nearest existing directory, physical; PHYS_TAIL the missing rest ('' or
 # /a/b). PHYS is both joined. A `.` or `..` in the missing tail cannot be resolved, so it fails.
@@ -246,6 +253,24 @@ swept() {
   return 1
 }
 
+# route_class <top>: the route class of the repo at <top>, local only: swept by the daily sweep, then the landing
+# register. Sets RC_CLASS (landable, deferred or pending) and RC_REASON (a deferred reason, or a pending stuck
+# reason). The register reader's stderr passes through. Needs $tmpd. S2, O2 and --route call it.
+route_class() {
+  local reg reg_rc
+  RC_CLASS=landable; RC_REASON=
+  if swept "$1"; then RC_CLASS=deferred; RC_REASON="swept by the daily sweep"; return 0; fi
+  reg=$(python3 "$here/landing-register.py" check "$1" 2>"$tmpd/reg.err"); reg_rc=$?
+  [ -s "$tmpd/reg.err" ] && cat "$tmpd/reg.err"
+  case $reg_rc in
+    0) ;;
+    3) RC_CLASS=deferred; RC_REASON=$reg ;;
+    4) RC_CLASS=deferred; RC_REASON="no GitHub origin" ;;
+    *) RC_CLASS=pending; RC_REASON="landing register: $(first_line "$tmpd/reg.err")" ;;
+  esac
+  return 0
+}
+
 # The whole flow. It runs in a subshell whose fd 1 is stderr; its one result goes through result().
 main() {
   SECONDS=0
@@ -263,6 +288,21 @@ main() {
     phys "$2"; [ $? = 1 ] && exit 4
     slug=$(origin_slug "$(git -C "$PHYS_ANC" remote get-url origin 2>/dev/null)") || exit 4
     result "$slug"; exit 0
+  fi
+  if [ "${1:-}" = --route ]; then
+    [ $# -eq 2 ] && [ -n "$2" ] || usage
+    tmpd=$(mktemp -d "${TMPDIR:-/tmp}/land.XXXXXX") || { result "unknown: cannot create temp dir"; exit 0; }
+    trap 'rm -rf "$tmpd"' EXIT
+    phys "$2"; [ $? = 1 ] && { result "unknown: cannot resolve $2"; exit 0; }
+    top=$(git -C "$PHYS_ANC" rev-parse --show-toplevel 2>"$tmpd/top.err") && [ -n "$top" ] && top=$(cd "$top" && pwd -P) \
+      || { result "unknown: not a git work tree: $(first_line "$tmpd/top.err")"; exit 0; }
+    route_class "$top"
+    case $RC_CLASS in
+      landable) result landable ;;
+      deferred) result "commit-only: $RC_REASON" ;;
+      *) result "unknown: $RC_REASON" ;;
+    esac
+    exit 0
   fi
   while [ $# -gt 0 ]; do
     case $1 in
@@ -323,17 +363,11 @@ main() {
   # ---- S2. Route class, local only --------------------------------------------------------------------
   if [ -n "$commit_only" ]; then
     class=deferred; reason=commit-only
-  elif swept "$top"; then
-    class=deferred; reason="swept by the daily sweep"
   else
-    local reg reg_rc
-    reg=$(python3 "$here/landing-register.py" check "$top" 2>"$tmpd/reg.err"); reg_rc=$?
-    [ -s "$tmpd/reg.err" ] && cat "$tmpd/reg.err"
-    case $reg_rc in
-      0) class=landable ;;
-      3) class=deferred; reason=$reg ;;
-      4) class=deferred; reason="no GitHub origin" ;;
-      *) class=pending; pending="landing register: $(first_line "$tmpd/reg.err")" ;;
+    route_class "$top"; class=$RC_CLASS
+    case $class in
+      deferred) reason=$RC_REASON ;;
+      pending) pending=$RC_REASON ;;
     esac
   fi
 
@@ -869,7 +903,7 @@ subjects() {
 }
 
 own_main() {
-  local B= act= rev= note= repo top b bref d= slug tmpd out rc m od ob own_restore= own_ref= reg reg_rc
+  local B= act= rev= note= repo top b bref d= slug tmpd out rc m od ob own_restore= own_ref=
   local state n= url= login auto me R H st infra res prot wf
   while [ $# -gt 0 ]; do
     case $1 in
@@ -916,14 +950,10 @@ own_main() {
   d=$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null) && d=${d#refs/remotes/origin/}
 
   # ---- O2. Route, local only ------------------------------------------------------------------------------
-  swept "$top" && own_finish "not landed: swept by the daily sweep" 0
-  reg=$(python3 "$here/landing-register.py" check "$top" 2>"$tmpd/reg.err"); reg_rc=$?
-  [ -s "$tmpd/reg.err" ] && cat "$tmpd/reg.err"
-  case $reg_rc in
-    0) ;;
-    3) own_finish "not landed: $reg" 0 ;;
-    4) own_finish "not landed: no GitHub origin" 0 ;;
-    *) own_finish "stuck: landing register: $(first_line "$tmpd/reg.err")" 1 ;;
+  route_class "$top"
+  case $RC_CLASS in
+    deferred) own_finish "not landed: $RC_REASON" 0 ;;
+    pending) own_finish "stuck: $RC_REASON" 1 ;;
   esac
   slug=$(origin_slug "$(git remote get-url origin 2>/dev/null)") || own_finish "stuck: origin is not a GitHub slug" 1
 
