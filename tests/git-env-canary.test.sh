@@ -754,6 +754,72 @@ ok "$(head -n 1 "$S/flock" 2>/dev/null)|$(tail -n 1 "$S/flock" 2>/dev/null)|$(gr
   "t: check-all meets the held lock (busy), waits, and takes it once the holder releases"
 ok "$rc" 0 "t: … and returns 0"
 
+# ── w: arm refuses a window whose owner does not hold (p26-1) ────────────────────────────────────────────────
+# A window armed with no owner closes at the next pass, and its own check then trips `record not armed`: a false
+# halt that needs Lachy. `arm` refuses it instead (exit 2, nothing written), so the lead's skipped stamp stops at
+# the arm. The owner of an integrate, verify or race-verify window is the Integration lane (reconcile-rollout.py
+# `_holds_lane`): `integrating:`, or a current `integrated` Integration-log line.
+noint() { python3 - "$V/$1.md" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+open(p, "w").write("".join(l for l in t.splitlines(True) if not l.startswith("integrating:")))
+PY
+}
+scen w1
+mkt A open
+arm A task; ok "$rc|$(recf A task state)|$(grep -c git-env "$RO")" "2|<none>|0" "w1: arm a task window on a note that is not running → 2, no record, no log line"
+has "$err" "[[A]] is not running" "w1: … stderr names the note"
+has "$err" "mark-started" "w1: … and the stamp to run"
+scen w2
+mkt A review 'pr: https://github.com/o/r/pull/1'
+for k in integrate verify race-verify; do
+  arm A "$k"; ok "$rc|$(recf A "$k" state)|$(grep -c git-env "$RO")" "2|<none>|0" "w2: arm $k on a review note with no integrating: and no log → 2, nothing written"
+  has "$err" "holds no integrating:" "w2: … $k: stderr names the missing stamp"
+  has "$err" "mark-integrating" "w2: … $k: and the verb to run"
+done
+# w3: the 2026-10-19 incident. A verify window's tombstone, then `integrating:` removed (an integrate call's
+# reconciled row) and the stamp skipped: the arm refuses and leaves the tombstone and the note untouched.
+scen w3
+mkt A review 'pr: https://github.com/o/r/pull/1' 'integrating: 2026-10-19T10:00+00:00'
+arm A verify; chk A verify; ok "$rc|$(recf A verify state)" '0|"checked"' "w3: a verify window armed and checked → a checked tombstone"
+noint A
+ro0=$(cksum < "$RO"); rec0=$(cksum < "$(recp A verify)")
+arm A verify; ok "$rc|$(recf A verify state)" '2|"checked"' "w3: integrating: removed, arm verify → 2, the tombstone kept"
+ok "$(cksum < "$RO")|$(cksum < "$(recp A verify)")" "$ro0|$rec0" "w3: … the rollout note and the record byte-identical"
+python3 - "$V/A.md" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+open(p, "w").write(t.replace("pr: https://github.com/o/r/pull/1\n", "pr: https://github.com/o/r/pull/1\nintegrating: 2026-10-19T11:00+00:00\n", 1))
+PY
+arm A verify; ok "$rc" 0 "w3: integrating: stamped again (mark-integrating), arm verify → 0"
+chk A verify; ok "$rc|$(trips A)" "0|0" "w3: … its check → 0, no record not armed"
+# w4: an integrate call's `integrated` row removes `integrating:`; step 4's RACE re-verify still arms (D2).
+A40=$(printf "%040d" 0 | tr 0 a); B40=$(printf "%040d" 0 | tr 0 b); C40=$(printf "%040d" 0 | tr 0 c)
+ILINE="2026-10-19T10:30+00:00 integrated path=integrator pr=1 anchor=$A40 head=$B40 base=$C40 wait=1 duration=1 triggers=-"
+scen w4
+mkt A review 'pr: https://github.com/o/r/pull/1' 'ready: 2026-10-19T10:00+00:00'
+printf '\n## Integration log\n\n%s\n' "$ILINE" >> "$V/A.md"
+arm A race-verify; ok "$rc" 0 "w4: a current integrated line and no integrating:, arm race-verify → 0"
+chk A race-verify; ok "$rc|$(trips A)" "0|0" "w4: … its check → 0, no record not armed"
+scen w4b
+mkt A review 'pr: https://github.com/o/r/pull/1' 'ready: 2026-10-19T11:00+00:00'
+printf '\n## Integration log\n\n%s\n' "$ILINE" >> "$V/A.md"
+arm A race-verify; ok "$rc|$(recf A race-verify state)" "2|<none>" "w4b: ready: restamped after the integrated line (a hand-back), arm race-verify → 2, no record"
+# w5: a tasks dir lacking the owner's note still counts as holding (fail-closed), so the arm goes ahead.
+scen w5
+mkt A open
+mkdir -p "$S/empty"
+TD="$S/empty" arm A task; ok "$rc|$(recf A task state)" '0|"armed"' "w5: a tasks dir lacking A's note → arm 0"
+has "$err" "WARN: owner note A not found under $S/empty" "w5: … with the WARN"
+# w6: the refusal comes before the pass, so it compares and logs nothing; the next pass still trips A.
+scen w6
+mkt A in_progress; mkt B open
+arm A; code
+arm B task; ok "$rc|$(trips A)|$(recf A task state)|$(recf B task state)" '2|0|"armed"|<none>' "w6: A armed, the ref moves, arm B (not running) → 2, A's window untouched"
+call; ok "$rc|$(trips A)" "3|1" "w6: … the next check-all trips A"
+
 # ── o: end to end ────────────────────────────────────────────────────────────────────────────────────────────
 for variant in ref bare; do
   scen "o-$variant"
