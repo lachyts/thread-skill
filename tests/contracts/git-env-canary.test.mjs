@@ -432,7 +432,7 @@ test('control: an ADR bullet without the upgrade gap fails adr', () => {
 test('control: an exit-3 row without mark-integrating, no step-3 exit-1 route or an integrating:-only owner rule fails owner-refusal', () => {
   const row3 = real.execute.split('\n').find((l) => l.startsWith('   | 3 | '))
   only('execute', row3, row3.replace('`mark-integrating`, ', ''), 'owner-refusal', 'exit-3 row')
-  const exit1 = real.execute.split('\n').find((l) => l.startsWith('    - **exit 1**'))
+  const exit1 = real.execute.split('\n').find((l) => l.startsWith('   - **exit 1**'))
   only('execute', exit1 + '\n', '', 'owner-refusal', 'step-3 exit 1')
   const owner = real.execute.split('\n').find((l) => l.startsWith('- **The owner rule.**'))
   only('execute', owner, "- **The owner rule.** A window can only be open while its vault owner holds: a task call's note reads `in_progress`; an integrate call's, a verify's or a RACE re-verify's note carries `integrating:`. Once the owner no longer holds, any canary verb compares the window once and closes it, so a hard pause's TaskStop'd calls, a crash between `arm` and launch and a dead call's window all end.", 'owner-refusal', 'owner rule reverted')

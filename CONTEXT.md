@@ -426,8 +426,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Window** — the span from a launch's canary `arm` to its `check`: a
   Workflow call, a resume, the lead's Integration verify or a RACE re-verify.
   A window can only be open while its vault owner holds (`in_progress` for a
-  task call, `integrating:` for the rest); an orphan is compared once and
-  closed. _Avoid_: watch, session.
+  task call, the Integration lane (`integrating:` or a current `integrated`
+  log line) for the rest); `arm` refuses a window whose owner does not hold;
+  an orphan is compared once and closed. _Avoid_: watch, session.
 - **Git-env hold** — the unacked trip lines on a rollout note's
   `## Git-env log`: while one stands, `next` halts `git-env`, nothing starts,
   integrates or merges, and `carry` refuses the rollout. Only a **Git-env ack**
