@@ -10,21 +10,22 @@ yields the Unpark offers. It spawns nothing and asks nothing. python >= 3.9 with
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py rank --scan FILE|- --grades FILE
         [--grades FILE]... [--today YYYY-MM-DD] [--vault PATH] [--compact]
-    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py snooze <project> --ready N
+    python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py snooze <project> (--ready N | --clear)
         [--today YYYY-MM-DD] [--vault PATH]
 
 Defaults: rank takes today and the vault from the scan JSON's `today` and `vault`; snooze takes the local date and
 ~/repos/obsidian. `rank` writes nothing: it reads the scan, the grades files and, for each parked project, its note's
-snooze keys. `snooze` writes two frontmatter keys on one project note. No subprocess, no network, no bytecode
-(sys.dont_write_bytecode is set before any sibling loads). Exit 0 when done (every per-task problem is inside the
-JSON); 2 on a usage error or a refusal (one `estate-rank:` stderr line, nothing written): a scan that is not JSON or
-whose `schema` is not 1, a grades file that is not JSON or not an object or array, an unknown verb or flag, and every
-snooze refusal; 3 when the vault, PyYAML or a sibling script is missing.
+snooze keys. `snooze` writes two frontmatter keys on one project note, or with --clear removes them. No subprocess,
+no network, no bytecode (sys.dont_write_bytecode is set before any sibling loads). Exit 0 when done (every per-task
+problem is inside the JSON); 2 on a usage error or a refusal (one `estate-rank:` stderr line, nothing written): a scan
+that is not JSON or whose `schema` is not 1, a grades file that is not JSON or not an object or array, an unknown verb
+or flag, and every snooze refusal; 3 when the vault, PyYAML or a sibling script is missing.
 
 What it reuses. Loaded by path inside main(), so importing this file runs nothing (the contract test reads its
 constants that way): resolve-target.py (RT: dead_why), and through it next-action.py (RT.NA: Vault, resolve_project,
-Note.edited and save, status_of, Refused); estate-scan.py (ES: as_date, jsonable, STANDING_RANK and standing_of), so
-the estate pass keeps one date reader and one status-to-standing rule.
+Note with its edited and save, status_of, Refused, and the ODD_BREAKS, LOADER and yaml its edit reads by);
+estate-scan.py (ES: as_date, jsonable, STANDING_RANK and standing_of), so the estate pass keeps one frontmatter
+reader, one date reader and one status-to-standing rule.
 
 The inputs:
 - The scan: estate-scan.py's schema 1. Read: tasks {slug, note, title, statusClass, inFlight, projects, due,
@@ -45,8 +46,9 @@ Validation. Invalid (listed with every error, never ranked): a grade outside GRA
 decision that is not an object, or has no non-empty `question` or `recommendation`, or whose `options` is missing, not
 a list, or not OPTIONS_MIN to OPTIONS_MAX distinct non-empty strings, or does not hold the recommendation (compared
 stripped and case-insensitively). Warned and kept: a missing or unknown `size` reads as M; a missing or unknown
-decision `confidence` as low; a malformed `deadline` is dropped; a gate kind outside GATE_KINDS is dropped; a
-non-boolean `eyeCheck` reads as false; a `repo` on a task that is not parallel is ignored.
+decision `confidence` as low; a malformed `deadline`, or one before today (an event already past cannot be met; the
+scan's overdue `due:` still counts), is dropped; a gate kind outside GATE_KINDS is dropped; a non-boolean `eyeCheck`
+reads as false; a `repo` on a task that is not parallel is ignored.
 
 The raise (readiness-grade.md § The raise): the decision count implies a grade (0 Ready, 1 One call, 2+ Grill) and the
 task takes the higher of that and the agent's grade (`why: "decisions"`); then any `low` decision raises it one step
@@ -85,7 +87,8 @@ Output, one JSON object (schema 1; --compact for one line):
                serial tasks other than Orient only, grouped by (home, shape, root); a serial run's root is null;
   decisions[] {slug, home, round (one-call | grill), grade, minutes, cumulativeMinutes, decisions[], blockedBy[]}: the
                One calls in rank order, then the Grills, parked homes' tasks left out;
-  orient[]    {project, note, tasks[]}, by project name;
+  orient[]    {project, note, tasks[]}: the Orient tasks by home, by project name, parked homes left out (their work
+               waits on the Unpark offer, as in decisions[]); counts.orient counts every Orient task, parked included;
   unpark[]    {project, note, ready, readyTasks[], offer, why, snooze {until, ready} | null, options[] (unpark, snooze,
                kill; only when offered), snoozeWrite {snoozed_until, snoozed_ready}}: each parked project with a home
                task graded Ready and not held, by name. It is snoozed while today < snoozed_until and the Ready count is
@@ -97,6 +100,12 @@ snooze <project> --ready N: the project by name or vault path (next-action's res
 live project (RT.dead_why) whose ES.standing_of(status) is parked, with N an integer >= 0. It sets `snoozed_until:
 "<today + SNOOZE_DAYS>"` and `snoozed_ready: N` through next-action's one-key edit, re-parses (the frontmatter must be
 the old one plus the two keys), writes the note in place once and prints `snoozed <note> until <date> (ready <N>)`.
+
+snooze <project> --clear: the unpark and kill writes' first step (readiness-grade.md § The Unpark offer), so a project
+parked again later starts with no snooze. Any live project, parked or not; refused when dead or when its frontmatter
+does not parse. It removes every SNOOZE_KEYS entry (a key given twice included), re-parses (the frontmatter must be the
+old one minus those keys, else refused), writes the note in place once and prints `cleared the snooze on <note>`; a
+note with neither key is left untouched, `no snooze on <note>`, exit 0.
 """
 import argparse
 import datetime
@@ -438,6 +447,8 @@ class Ranker:
             date = self.ES.as_date(dl.get("date")) if isinstance(dl, dict) else None
             if date is None:
                 warns.append("%s: deadline %s is not {date: YYYY-MM-DD, why}; dropped" % (slug, shown(dl)))
+            elif date < self.today:  # an event already past cannot be met; the scan's overdue `due:` still counts
+                warns.append("%s: deadline %s is before today, already past; dropped" % (slug, date.isoformat()))
             else:
                 deadline = (date, text(dl.get("why")))
         gates = e.get("gates")
@@ -733,7 +744,8 @@ class Ranker:
                                       "decisions": r["decisions"], "blockedBy": r["blockedBy"]})
         orient = {}
         for r in orient_rows:
-            orient.setdefault((r["home"], r["_homeNote"]), []).append(r["slug"])
+            if r["standing"] != "parked":  # parked: its Orient tasks wait on its Unpark offer, as its decisions do
+                orient.setdefault((r["home"], r["_homeNote"]), []).append(r["slug"])
         orient = [{"project": name, "note": note, "tasks": slugs} for (name, note), slugs in sorted(orient.items())]
         unpark = self.unpark(ranked)
 
@@ -759,6 +771,34 @@ class Ranker:
 
 # ---- snooze --------------------------------------------------------------------------------------------------------
 
+def cleared(NA, note):
+    """The note's text with every SNOOZE_KEYS entry removed, or None when it carries neither. Raises NA.Refused.
+
+    next-action's one-key edit only sets a key, so the removal lives here, located the way it locates one (the key and
+    value nodes' marks from yaml.compose) and checked the way it checks one: the re-parsed frontmatter must be the old
+    one minus the snooze keys, so a layout the line cut would damage (a flow mapping) is refused, never written."""
+    body = note.body()
+    if NA.ODD_BREAKS.search(body):
+        raise NA.Refused("%s: frontmatter has line breaks other than \\n" % note.path)
+    root = NA.yaml.compose(body, Loader=NA.LOADER)
+    first, lines, spans = note.span[0], list(note.lines), []
+    for k, v in (root.value if root is not None else []):
+        if isinstance(k, NA.yaml.ScalarNode) and k.value in SNOOZE_KEYS:
+            start = first + k.start_mark.line
+            end = first + v.end_mark.line + (1 if v.end_mark.column else 0)
+            while end - 1 > start and lines[end - 1].strip() == "":  # keep blank lines after the value
+                end -= 1
+            spans.append((start, max(end, start + 1)))
+    if not spans:
+        return None
+    for start, end in sorted(spans, reverse=True):
+        del lines[start:end]
+    check = NA.Note(note.path, "".join(lines))
+    if check.fm != {k: v for k, v in note.fm.items() if k not in SNOOZE_KEYS}:
+        raise NA.Refused("%s: clearing the snooze would change other frontmatter; left alone" % note.path)
+    return check.text
+
+
 def snooze(RT, ES, args):
     NA = RT.NA
     vroot = os.path.expanduser(args.vault)
@@ -775,9 +815,24 @@ def snooze(RT, ES, args):
     note = vault.note(rel)
     dead = RT.dead_why(rel, note)
     if dead:
-        fail(2, "%s is %s; only a parked project is snoozed" % (shown_rel, dead))
+        fail(2, "%s is %s; %s" % (shown_rel, dead, "only a live project's snooze is cleared" if args.clear
+                                  else "only a parked project is snoozed"))
     if note.fm is None:
         fail(2, "%s: %s" % (shown_rel, note.error))
+    if args.clear:  # any live project: the unpark and kill writes clear the record whatever the order of their writes
+        try:
+            out = cleared(NA, note)
+        except NA.Refused as e:
+            fail(2, str(e))
+        if out is None:
+            sys.stdout.write("no snooze on %s\n" % shown_rel)
+            return
+        try:
+            note.save(out)
+        except OSError as e:
+            fail(2, "cannot write %s: %s" % (shown_rel, e))
+        sys.stdout.write("cleared the snooze on %s\n" % shown_rel)
+        return
     standing = ES.standing_of(NA.status_of(note))
     if standing != "parked":
         fail(2, "%s is not parked (standing: %s); only a parked project is snoozed" % (shown_rel, standing))
@@ -812,7 +867,9 @@ def parse(argv):
     r.add_argument("--compact", action="store_true")
     s = sub.add_parser("snooze", allow_abbrev=False)
     s.add_argument("project")
-    s.add_argument("--ready", required=True)
+    mode = s.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--ready")
+    mode.add_argument("--clear", action="store_true")
     s.add_argument("--today")
     s.add_argument("--vault", default=VAULT_DEFAULT)
     args = p.parse_args(argv)
@@ -821,9 +878,10 @@ def parse(argv):
     if args.today is not None:
         args.today = parse_date(args.today, "--today")
     if args.verb == "snooze":
-        if not re.fullmatch(r"\d+", args.ready.strip()):
-            fail(2, "--ready must be a count, an integer 0 or more: %r" % args.ready)
-        args.ready = int(args.ready.strip())
+        if args.ready is not None:
+            if not re.fullmatch(r"\d+", args.ready.strip()):
+                fail(2, "--ready must be a count, an integer 0 or more: %r" % args.ready)
+            args.ready = int(args.ready.strip())
         if args.today is None:
             args.today = datetime.date.today()
     return args

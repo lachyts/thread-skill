@@ -35,9 +35,18 @@ writes nothing: no vault edit, no repo or git write, no fetch, and it asks Lachy
 
 ## What the agent reads
 
-- The project's thread: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py home --project <note>`
-  prints its home repo, whose THREAD.md is the thread (nothing printed: the project has no thread home).
-- The home repo's `docs/adr/` and `CONTEXT.md`.
+- The project's thread, at its thread home (CONTEXT.md **Thread home**; ADR 0039 d1). For a project with no code repo
+  the thread is the only record of its decisions, so it is always looked for:
+  - `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py home --project <note>` prints the home
+    repo when the project declares a qualifying one, and that repo's `THREAD.md` is the thread.
+  - When it prints nothing, the project has no code repo, and its thread is its `~/Projects/<Area>/<Project>/THREAD.md`,
+    or `_shared/threads/<slug>.md` for cross-workspace work (`${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` § Creating
+    a new thread). Find it by slug with open's § Repo-thread lookup, `slug=<the project's slug>`, whose first two tiers
+    are these homes (`_shared/threads/<slug>.md`, then each `~/Projects` THREAD.md by its `slug:`; a repo-tier hit is
+    no home of a project without a qualifying repo). With no hit there, find it by directory name: the `THREAD.md` in
+    the project's own folder, `~/Projects/<Area>/<Project>/` named like the project note (never under `_archive`).
+    Only when neither finds one has the project no thread, and the grade rests on the rest of this list.
+- The home repo's `docs/adr/` and `CONTEXT.md`, when there is a home repo.
 - Each task note in full, and the notes its `depends-on:` names.
 - The code each task names.
 - The gate sweep, `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/gated_inputs.py sweep <note>...`: its hits
@@ -101,7 +110,9 @@ written as the decision it may hide, with `confidence: low`.
 - `size`: `S` (under an hour of agent work), `M` (a few hours) or `L` (a day or more). A missing or unknown size reads
   as M, with a warning.
 - `deadline`: `{date, why}` for an event or season about to pass that the agent finds (a launch, a festival, a
-  booking window). A task's `due:` comes from the scan; the earlier of the two counts.
+  booking window): today or later. One before today has already passed and cannot be met, so the ranker drops it
+  with a warning. A task's `due:` comes from the scan, and an overdue `due:` still counts; the earlier of the two
+  counts.
 - `gates`: the kinds of gated input (ADR 0008) the task will need: `spend`, `credential` or `irreversible`. An
   external publish is `irreversible`, per execution-fit.md's ruling (a).
 - `eyeCheck`: `true` when only Lachy can judge the result (how it looks, sounds, reads or feels).
@@ -195,7 +206,10 @@ script's docstring). It writes nothing.
 6. **Home name, then slug**, so the order is total and a rerun is byte-equal.
 
 Orient tasks have no rank. They follow the ranked tasks, by home and slug, and `orient[]` lists them by project, each
-project for its own `orient` session whatever the budget.
+project for its own `orient` session whatever the budget. A parked project is never listed there: its Orient tasks
+stay in `tasks[]` and wait on its Unpark offer, as its One calls and Grills do (**decisions[]** below), so the pass
+starts no session on a shelved project. A parked project with no Ready work gets no offer and stays shelved; once
+unparked, by an offer or by hand, the next pass lists its Orient tasks.
 
 **Leverage** is agent work per minute of Lachy's attention: `SIZE_MINUTES[size]` over the larger of
 `ATTENTION_FLOOR` and the attention minutes. Attention is deciding plus reviewing: `DECISION_MINUTES[grade]` per
@@ -250,19 +264,28 @@ script's failure: `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md` rule 4's
 A parked project (standing `parked`) with at least one home task graded Ready after the raise and not held gets one
 row in `unpark[]`: its ready count and tasks, and the offer CONTEXT.md **Unpark offer** words. Unpark it (it becomes
 `status: queued`), snooze it, or kill it (done and archived). The unpark and kill writes are the lead's (p25-3). The
-snooze has one writer:
+snooze record has one writer:
 
 ```bash
 python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py snooze <project> --ready <n>
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-rank.py snooze <project> --clear
 ```
 
-It writes two keys on the project note, beside its `status: parked`: `snoozed_until`, today plus `SNOOZE_DAYS` (a
-fortnight), and `snoozed_ready`, the ready count it was snoozed at. Each row's `snoozeWrite` holds both values. It
+`--ready` writes two keys on the project note, beside its `status: parked`: `snoozed_until`, today plus `SNOOZE_DAYS`
+(a fortnight), and `snoozed_ready`, the ready count it was snoozed at. Each row's `snoozeWrite` holds both values. It
 refuses (exit 2, nothing written) anything but a live project the scan would read as parked, and any frontmatter it
 cannot edit cleanly.
 
-The record is read only on a parked project, so stale keys on an unparked one mean nothing. A snoozed project is not
-offered again (`offer: false`, with the date and both counts in its `why`) while today is before `snoozed_until` and
-its ready count, the Ready tasks not held, is at most `snoozed_ready`. It is offered again once the fortnight is over
-or its ready work grows. A `snoozed_until` that is not a date is a warning and no snooze; with no `snoozed_ready` the
-snooze is date-only, and the project is offered again only when the date passes.
+`--clear` removes both keys. **The unpark and kill writes run it first**, before they change the status: a snooze
+outlives the parking it was given for, so a project unparked, then parked again before its `snoozed_until`, would
+otherwise come back still snoozed and hide its Unpark offer. It takes any live project, parked or not, and a note
+with neither key is left untouched (`no snooze on <note>`, exit 0); it refuses (exit 2, nothing written) a dead
+project and any frontmatter it cannot cut cleanly.
+
+The record is read only on a parked project, and cleared whenever the project leaves parked through the offer. A
+project unparked by hand keeps its keys, and if it is parked again, the old snooze hides the offer for at most what is
+left of its fortnight. A snoozed project is not offered again (`offer: false`, with the date and both counts in its
+`why`) while today is before `snoozed_until` and its ready count, the Ready tasks not held, is at most
+`snoozed_ready`. It is offered again once the fortnight is over or its ready work grows. A `snoozed_until` that is not
+a date is a warning and no snooze; with no `snoozed_ready` the snooze is date-only, and the project is offered again
+only when the date passes.

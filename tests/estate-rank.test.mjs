@@ -67,6 +67,7 @@ P('ParkBadDate', 'parked', '\nsnoozed_until: soon')
 P('ParkNoReady', 'parked')
 P('ParkDepOnly', 'parked')
 P('ParkChain', 'parked')
+P('ParkOrient', 'parked')  // its only task is Orient: no orient session and no Unpark offer
 P('ParkCaps', 'Parked')  // a capitalised status reads as parked in the scan and in the snooze writer alike
 P('DoneProj', 'parked', '\ndone: true')  // dead: not in the scan, refused by the snooze writer
 write(path.join(V, 'Work', 'Projects', 'Area', 'Area.md'), fm('tags:\n  - area'))
@@ -89,7 +90,7 @@ T('que-call', 'open', ['Que'], '\ndue: 2026-10-25')
 T('que-overdue', 'open', ['Que'], '\ndue: 2026-10-01')
 for (const s of ['que-serial', 'que-orient', 'que-grill']) T(s, 'open', ['Que'])
 T('qc-top', 'open', ['QueCrowned'])
-const LAB = Array.from({ length: 22 }, (_, i) => `lab-${String(i + 1).padStart(2, '0')}`)
+const LAB = Array.from({ length: 24 }, (_, i) => `lab-${String(i + 1).padStart(2, '0')}`)
 for (const s of LAB) T(s, 'open', ['Lab'])
 T('loose', 'open', [])
 T('hold-only', 'open', ['Hold'], links('depends-on', ['act-orient']))
@@ -117,6 +118,7 @@ T('pn-call', 'open', ['ParkNoReady'], '\ndue: 2026-10-21')
 T('pdo-a', 'open', ['ParkDepOnly'], links('depends-on', ['act-orient']))
 T('pc-a', 'open', ['ParkChain'])
 T('pc-b', 'open', ['ParkChain'], links('depends-on', ['pc-a']))
+T('por-orient', 'open', ['ParkOrient'])
 
 // ---- The scan, once ------------------------------------------------------------------------------------------
 const scanRun = spawnSync('python3', [SCAN, '--vault', V, '--today', TODAY, '--deadline', '0'],
@@ -171,6 +173,7 @@ const PARKED = [
   { project: 'ParkNoReady', tasks: [G('pn-call', 'One call', 'serial', { decisions: one() })] },
   { project: 'ParkDepOnly', tasks: [R('pdo-a')] },
   { project: 'ParkChain', tasks: [R('pc-a'), R('pc-b')] },
+  { project: 'ParkOrient', tasks: [G('por-orient', 'Orient', 'serial')] },
 ]
 const gradesFile = (name, data) => { const p = path.join(S, `grades-${name}.json`); write(p, JSON.stringify(data, null, 2) + '\n'); return p }
 const MAIN_FILES = [...Object.entries(MAIN).map(([project, tasks]) => gradesFile(project, { project, tasks })),
@@ -360,6 +363,8 @@ test('4. validation: a bad entry is invalid with every error, never guessed; the
     G('lab-19', 'Ready', 'serial', { gates: ['spend', 'bribery'] }),
     G('lab-20', 'Ready', 'serial'),
     G('lab-22', 'Maybe', 'batch'),
+    G('lab-23', 'Ready', 'serial', { deadline: { date: '2026-01-01', why: 'the launch was in January' } }),
+    G('lab-24', 'Ready', 'serial', { deadline: { date: TODAY, why: 'the booking window closes tonight' } }),
     G('act-inprog', 'Ready', 'serial'),
     G('ghost', 'Ready', 'serial'),
   ]
@@ -399,6 +404,15 @@ test('4. validation: a bad entry is invalid with every error, never guessed; the
   assert.deepEqual(row(j, 'lab-19').gates, ['spend'])
   assert.equal(row(j, 'lab-20').grade, 'Ready', "the home's entry wins over the first")
   const warned = (re) => assert.ok(j.warnings.some((w) => re.test(w)), `no warning ${re}: ${j.warnings.join('\n')}`)
+  // A grader deadline before today has passed and cannot be met: dropped with a warning, never ranked as overdue
+  // (the scan's overdue `due:` keeps its place: case 5's que-overdue). One on today counts.
+  const past = row(j, 'lab-23')
+  assert.deepEqual([past.deadline, past.dueSoon], [null, false])
+  warned(/^lab-23: deadline 2026-01-01 is before today, already past; dropped$/)
+  assert.ok(!j.warnings.some((w) => w.startsWith('lab-24')), j.warnings.join('\n'))
+  assert.deepEqual(row(j, 'lab-24').deadline, { date: TODAY, source: 'grader', why: 'the booking window closes tonight' })
+  assert.equal(row(j, 'lab-24').dueSoon, true)
+  assert.ok(row(j, 'lab-24').rank < past.rank, 'the past deadline puts lab-23 nowhere near the top')
   warned(/lab-18.*size/)
   warned(/lab-19.*bribery/)
   warned(/lab-20/)
@@ -434,7 +448,7 @@ test('5. acceptance: a due-soon task ranks above a higher-leverage undated one; 
   // The ranks are 1..n over the graded tasks other than Orient; Orient follows, unranked.
   const ranked = j.tasks.filter((t) => t.rank !== null)
   assert.deepEqual(ranked.map((t) => t.rank), ranked.map((_, i) => i + 1))
-  assert.deepEqual(j.tasks.filter((t) => t.rank === null).map((t) => t.slug), ['act-orient', 'que-orient'])
+  assert.deepEqual(j.tasks.filter((t) => t.rank === null).map((t) => t.slug), ['act-orient', 'por-orient', 'que-orient'])
 })
 
 // ---- 6. Leverage ---------------------------------------------------------------------------------------------------
@@ -559,10 +573,17 @@ test('9. decisions: One calls first, then Grills, each in rank order, with minut
 })
 
 // ---- 10. orient[] -------------------------------------------------------------------------------------------------------
-test('10. orient: the Orient tasks, grouped by project', () => {
+test('10. orient: the Orient tasks, grouped by project; a parked project gets no orient session', () => {
   const j = ok(main())
   assert.deepEqual(j.orient, [{ project: 'Act', note: 'Work/Projects/Act.md', tasks: ['act-orient'] },
     { project: 'Que', note: 'Work/Projects/Que.md', tasks: ['que-orient'] }])
+  // A parked project's Orient task stays in tasks[], unranked, and waits on its Unpark offer as its decisions do;
+  // with no Ready work there is no offer either, so the pass leaves the shelved project alone.
+  const po = row(j, 'por-orient')
+  assert.deepEqual([po.grade, po.standing, po.rank, po.run], ['Orient', 'parked', null, null])
+  assert.ok(!j.orient.some((o) => o.project === 'ParkOrient' || o.tasks.includes('por-orient')), JSON.stringify(j.orient))
+  assert.ok(!j.unpark.some((u) => u.project === 'ParkOrient'))
+  assert.equal(j.counts.orient, 3, 'counts.orient counts every Orient task, parked included')
 })
 
 // ---- 11. Acceptance: Unpark -----------------------------------------------------------------------------------------------
@@ -589,6 +610,7 @@ test('11. acceptance: each parked project with ready work yields an Unpark offer
   assert.ok(j.warnings.some((w) => w.includes('ParkBadDate') && w.includes('snoozed_until')), j.warnings.join('\n'))
   assert.ok(!u.ParkNoReady, 'a One call is no ready work')
   assert.ok(!u.ParkDepOnly, 'its only Ready task is held by an Orient dependency')
+  assert.ok(!u.ParkOrient, 'an Orient task is no ready work')
   assert.deepEqual([u.ParkChain.offer, u.ParkChain.ready, u.ParkChain.readyTasks], [true, 2, ['pc-a', 'pc-b']],
     'a dependency inside the same parked project does not hold')
   assert.equal(j.counts.unpark, 7)
@@ -627,6 +649,9 @@ test('13. snooze refuses anything but a parked project, writing nothing; it agre
   const VR = copyVault('v-refuse')
   write(path.join(VR, 'Work', 'Projects', 'ParkDup.md'),
     fm('tags:\n  - project\nstatus: parked\nsnoozed_until: 2026-10-01\nsnoozed_until: 2026-10-02'))
+  // A flow-mapping frontmatter: cutting the snooze line would cut the whole mapping, so --clear refuses it.
+  write(path.join(VR, 'Work', 'Projects', 'ParkFlow.md'),
+    fm('{tags: [project], status: parked, snoozed_until: "2026-10-30", snoozed_ready: 1}'))
   const held = bytes(VR)
   const cases = [
     [['Act'], /Work\/Projects\/Act\.md is not parked \(standing: active\); only a parked project is snoozed/],
@@ -640,6 +665,14 @@ test('13. snooze refuses anything but a parked project, writing nothing; it agre
   for (const [[name, ready = '0'], re] of cases) {
     refusal(py(['snooze', name, '--ready', ready, '--vault', VR, '--today', TODAY]), re)
   }
+  const clears = [
+    [['DoneProj', '--clear'], /done.*only a live project's snooze is cleared/],
+    [['Nope', '--clear'], /no note/],
+    [['ParkFlow', '--clear'], /clearing the snooze would change other frontmatter; left alone/],
+    [['ParkOffer', '--clear', '--ready', '1'], /not allowed with/],
+    [['ParkOffer'], /required/],
+  ]
+  for (const [args, re] of clears) refusal(py(['snooze', ...args, '--vault', VR, '--today', TODAY]), re)
   assert.deepEqual(bytes(VR), held, 'nothing written')
   // Parity: for every project the scan lists, the writer accepts it exactly when the scan's standing is parked.
   const s = scanned()
@@ -731,4 +764,49 @@ test('16. dependencies: what holds a task, why, and which group of its run it si
   const whys = new Set(j.tasks.flatMap((t) => t.blockedBy.map((b) => b.why)))
   assert.deepEqual([...whys].sort(), ['Grill', 'One call', 'Orient', 'cycle', 'held', 'hold', 'invalid', 'parked', 'ungraded', 'unhomed'])
   assert.equal(j.counts.held, j.tasks.filter((t) => t.blockedBy.length).length)
+})
+
+// ---- 17. Snooze --clear -----------------------------------------------------------------------------------------------
+test('17. snooze --clear: the unpark and kill writes remove the record, so a project parked again is offered again', () => {
+  const VC = copyVault('v-clear')
+  const note = path.join(VC, 'Work', 'Projects', 'ParkOffer.md')
+  const before = fs.readFileSync(note, 'utf8')
+  const offerOf = (vault) => ok(rank(MAIN_FILES, ['--vault', vault])).unpark.find((x) => x.project === 'ParkOffer')
+  const parkedAgain = () => fs.writeFileSync(note, fs.readFileSync(note, 'utf8').replace('status: queued', 'status: parked'))
+  const unparked = () => fs.writeFileSync(note, fs.readFileSync(note, 'utf8').replace('status: parked', 'status: queued'))
+  assert.equal(py(['snooze', 'ParkOffer', '--ready', '1', '--vault', VC, '--today', TODAY]).status, 0)
+  assert.equal(offerOf(VC).offer, false, 'snoozed')
+  // The gap the clear closes: unparked without it, then parked again inside the fortnight, the old snooze comes back
+  // and hides the offer.
+  unparked()
+  parkedAgain()
+  assert.equal(offerOf(VC).offer, false, 'a stale snooze outlives the parking it was given for')
+  // The lead's unpark write: --clear first, then the status. Parked again, the project is offered again.
+  const c = py(['snooze', 'ParkOffer', '--clear', '--vault', VC])
+  assert.equal(c.status, 0, c.stderr)
+  assert.equal(c.stdout, 'cleared the snooze on Work/Projects/ParkOffer.md\n')
+  assert.equal(c.stderr, '')
+  assert.equal(fs.readFileSync(note, 'utf8'), before, 'both keys gone, every other byte kept')
+  unparked()
+  parkedAgain()
+  assert.deepEqual([offerOf(VC).offer, offerOf(VC).snooze], [true, null], 'offered again: no stale snooze')
+  // Nothing to clear: untouched, exit 0.
+  const st = fs.statSync(note).mtimeMs
+  const none = py(['snooze', 'ParkOffer', '--clear', '--vault', VC])
+  assert.deepEqual([none.status, none.stdout, none.stderr], [0, 'no snooze on Work/Projects/ParkOffer.md\n', ''])
+  assert.equal(fs.statSync(note).mtimeMs, st)
+  // Any live project, parked or not: an unparked project's stale keys go too.
+  const stale = path.join(VC, 'Work', 'Projects', 'Stale.md')
+  const s0 = fs.readFileSync(stale, 'utf8')
+  assert.equal(py(['snooze', 'Stale', '--clear', '--vault', VC]).status, 0)
+  assert.equal(fs.readFileSync(stale, 'utf8'), s0.replace('\nsnoozed_until: 2026-12-01\nsnoozed_ready: 9', ''))
+  // A key given twice is removed both times; a date-only record (one key) is cleared too.
+  const dup = path.join(VC, 'Work', 'Projects', 'ParkDup.md')
+  write(dup, fm('tags:\n  - project\nstatus: parked\nsnoozed_until: 2026-10-01\nsnoozed_until: 2026-10-02\ncolour: blue'))
+  assert.equal(py(['snooze', 'ParkDup', '--clear', '--vault', VC]).status, 0)
+  assert.equal(fs.readFileSync(dup, 'utf8'), fm('tags:\n  - project\nstatus: parked\ncolour: blue'))
+  const dateOnly = path.join(VC, 'Work', 'Projects', 'ParkDateOnly.md')
+  assert.equal(py(['snooze', 'ParkDateOnly', '--clear', '--vault', VC]).status, 0)
+  assert.ok(!fs.readFileSync(dateOnly, 'utf8').includes('snoozed_'))
+  assert.deepEqual(snap(V), BEFORE, 'only the copy was written')
 })

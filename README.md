@@ -333,12 +333,14 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   parity with `pushed-base.sh` on copies of the fixtures.
 - **Estate rank** — `tests/estate-rank.test.mjs`: `estate-rank.py` over the real scan of a fixture vault and
   hand-written grades files — every graded task's grade, shape and recommended answers, validation that lists every
-  error and never guesses, the raise, the ranking key (a due-soon task above a higher-leverage undated one, crowned
-  meaning `status: crowned` only, parked last), exact leverage, candidate runs with their Review load, shared roots and
-  verbatim blockers, the decision rounds, `orient[]`, dependency holds (each why, transitive holds, cycles), the Unpark
-  offers and the snooze writer's round trip, refusals and parity with the scan's standing, usage exits, byte-equal
-  reruns and read-only runs; `tests/contracts/readiness-grade.test.mjs` pins `skills/_shared/readiness-grade.md` to
-  the script's constants, its hold reasons, gated_inputs.py's gate kinds, CONTEXT.md's terms and ADR 0041's ruling.
+  error and never guesses (a grader deadline already past dropped), the raise, the ranking key (a due-soon task above a
+  higher-leverage undated one, crowned meaning `status: crowned` only, parked last), exact leverage, candidate runs
+  with their Review load, shared roots and verbatim blockers, the decision rounds, `orient[]` (parked projects left
+  out), dependency holds (each why, transitive holds, cycles), the Unpark offers and the snooze writer's round trip,
+  its `--clear` and refusals and parity with the scan's standing, usage exits, byte-equal reruns and read-only runs;
+  `tests/contracts/readiness-grade.test.mjs` pins `skills/_shared/readiness-grade.md` to the script's constants and
+  its `--clear`, its hold reasons, gated_inputs.py's gate kinds, the thread homes, CONTEXT.md's terms and ADR 0041's
+  ruling.
 - **Declared check** — `tests/declared-check.test.mjs`: `declared-check.py` against a fixture vault and repos
   with a fixture check — undeclared, whole untruncated output and its digest, the advance on a matching digest
   and the hold on a changed one or a failed re-run, the group-killing time limit (and on a signal, even one that

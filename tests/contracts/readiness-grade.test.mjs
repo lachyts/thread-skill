@@ -6,13 +6,16 @@
 //       CONTEXT.md **Readiness grade**.
 //   c3  § The ranking's `| Constant | Value |` table equals the script's constants, name for name and value for value
 //       (p25-4's grade log and the weekly Reflection tune them in one place).
-//   c4  § The Unpark offer names both SNOOZE_KEYS and SNOOZE_DAYS; GATE_KINDS equals the keys of
-//       gated_inputs.py's sweep (one gate vocabulary).
+//   c4  § The Unpark offer names both SNOOZE_KEYS and SNOOZE_DAYS, and the writer's `snooze <project> --clear`
+//       that the unpark and kill writes run first (a re-parked project must not come back snoozed), which the
+//       script's own parser accepts; GATE_KINDS equals the keys of gated_inputs.py's sweep (one gate vocabulary).
 //   c5  § The ranking states the six-step key in order, crowned meaning standing crowned "never the `crowned:` date",
 //       and ADR 0041 § Build rulings names the order and the doc.
 //   c6  § Shape cites execution-fit.md read with every decision answered; § The raise states both steps; § Each decision
 //       requires 2 to 4 options with the recommendation one of them; § The grade cites grill-fit.md steps 2(a) and 2(b)
-//       and orient § 2 Open forks rather than restating either.
+//       and orient § 2 Open forks rather than restating either; § What the agent reads cites CONTEXT.md
+//       **Thread home** with all three homes (the repo, the ~/Projects folder, _shared/threads) and open's
+//       § Repo-thread lookup, so a project with no code repo still has its thread read.
 //   c7  CONTEXT.md has **Ranked slate**, and **Readiness grade** says low confidence raises the grade (no scan-only
 //       first pass).
 //   c8  § Dependencies names every `blockedBy` why the script can emit, its HOLD_WHYS.
@@ -50,6 +53,10 @@ er, gi = load("thread_estate_rank", sys.argv[1]), load("thread_gated_inputs", sy
 out = {n: getattr(er, n) for n in json.loads(sys.argv[3])}
 out["HOLD_WHYS"] = er.HOLD_WHYS
 out["sweepKeys"] = list(gi.sweep(""))
+try:
+    out["clears"] = er.parse(["snooze", "p", "--clear"]).clear is True
+except SystemExit:
+    out["clears"] = False
 print(json.dumps(out))
 `
 function constants() {
@@ -110,7 +117,10 @@ function check(files, consts) {
   }
 
   // c4: the snooze record and the gate vocabulary.
-  need('c4', '§ The Unpark offer', sec(doc, 'The Unpark offer'), [...(consts.SNOOZE_KEYS ?? []).map((k) => `\`${k}\``), '`SNOOZE_DAYS`'])
+  const unpark = sec(doc, 'The Unpark offer')
+  need('c4', '§ The Unpark offer', unpark, [...(consts.SNOOZE_KEYS ?? []).map((k) => `\`${k}\``), '`SNOOZE_DAYS`'])
+  need('c4', '§ The Unpark offer', C(unpark), ['estate-rank.py snooze <project> --clear', 'The unpark and kill writes run it first'])
+  if (consts.clears !== true) flag('c4', 'estate-rank.py snooze does not accept --clear')
   if (JSON.stringify(consts.GATE_KINDS) !== JSON.stringify(consts.sweepKeys)) {
     flag('c4', `GATE_KINDS ${JSON.stringify(consts.GATE_KINDS)} ≠ gated_inputs sweep keys ${JSON.stringify(consts.sweepKeys)}`)
   }
@@ -133,6 +143,8 @@ function check(files, consts) {
   for (const own of ['**Resolvable**', 'bake a gate line', 'List the forks']) {
     if (grade.includes(own)) flag('c6', `§ The grade restates grill-fit.md ("${own}")`)
   }
+  need('c6', '§ What the agent reads', C(sec(doc, 'What the agent reads')), ['**Thread home**', 'thread-placement.py home',
+    '`~/Projects/<Area>/<Project>/THREAD.md`', '`_shared/threads/<slug>.md`', '§ Repo-thread lookup'])
 
   // c7: CONTEXT.md's terms.
   need('c7', 'CONTEXT.md **Ranked slate**', C(entry(context, 'Ranked slate')), ['Review load', 'Unpark offer', 'leverage'])
@@ -182,8 +194,10 @@ test('control c3: a table value that drifts from the script fails c3 alone', () 
   only(swap(FILES, DOC, '`{"S": 30, "M": 120, "L": 480}`', '`{"S": 60, "M": 120, "L": 480}`'), CONSTS, ['c3'], 'c3')
 })
 
-test('control c4: a snooze key the doc no longer names, or a gate kind the sweep lacks, fails c4 alone', () => {
+test('control c4: a snooze key the doc no longer names, the clear step gone, or a gate kind the sweep lacks, fails c4 alone', () => {
   only(swapAll(FILES, DOC, '`snoozed_ready`', '`snoozed_count`'), CONSTS, ['c4'], 'c4 doc')
+  only(swap(FILES, DOC, 'The unpark and kill writes run it first', 'The unpark and kill writes may run it'), CONSTS, ['c4'], 'c4 clear doc')
+  only(FILES, { ...CONSTS, clears: false }, ['c4'], 'c4 clear script')
   only(FILES, { ...CONSTS, sweepKeys: ['spend', 'credential'] }, ['c4'], 'c4 sweep')
 })
 
@@ -192,8 +206,9 @@ test('control c5: the crowned: date reading, or the ADR ruling gone, fails c5 al
   only(swap(FILES, ADR, 'How the slate ranks', 'How it ranks'), CONSTS, ['c5'], 'c5 adr')
 })
 
-test('control c6: a dropped grill-fit citation fails c6 alone', () => {
+test('control c6: a dropped grill-fit citation, or a thread home the reading list drops, fails c6 alone', () => {
   only(swap(FILES, DOC, 'step 2(b)', 'its second half'), CONSTS, ['c6'], 'c6')
+  only(swap(FILES, DOC, '`~/Projects/<Area>/<Project>/THREAD.md`', 'its folder thread'), CONSTS, ['c6'], 'c6 thread home')
 })
 
 test('control c7: CONTEXT.md without **Ranked slate** fails c7 alone', () => {
