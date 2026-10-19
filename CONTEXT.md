@@ -13,14 +13,17 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Execution-fit test** — the single rule deciding a cluster's lane and, in
   the rollout lane, its shape (`skills/_shared/execution-fit.md`): parallel-shaped,
   serial-shaped, or session-lane. Decides hard, never as a preference.
-- **Parallel-shaped** — passes the fit test's first clause: converges on ONE
-  code repo, lands as a PR per task, verifies machine-checkably inside the run.
+- **Parallel-shaped** — passes the fit test's parallel step: converges on ONE
+  code repo, lands as a PR per task, verifies machine-checkably inside the run,
+  with no external publish and no tool or launch profile the lead lacks.
   Runs as a Parallel rollout. Shape only — count is never a criterion
   (ADR 0009). _Avoid_: rollout-shaped (its name until 2026-10-19, when
   "rollout" came to cover both shapes).
 - **Serial-shaped** — work an agent can finish without Lachy present that is
-  not parallel-shaped: no PR per task, a shared surface, an external tool or a
-  launch profile the lead lacks. Runs as a Serial rollout.
+  not parallel-shaped: no PR per task (vault notes, several repos), an external
+  publish, or an external tool or launch profile the lead lacks; a shared
+  surface makes work serial-shaped only alongside one of these. Runs as a
+  Serial rollout.
 - **Task floor** — the invariant: every stash/defer writes a self-contained
   vault task routed to the right project. The guarantee that makes shutting an
   agent down feel safe. The Task is also the shared atom of both ladders:
@@ -93,8 +96,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   which writes nothing and is never a route either.
 - **Orient** — the one shaping verb, at project altitude: audits a whole
   project/area (not one thread), then reshuffles it without asking (ADR 0036),
-  unless told to steer it as it stands or just look. It schedules rollout-shaped
-  work itself, routes the rest by the execution-fit test, and ends with the
+  unless told to steer it as it stands or just look. It schedules parallel-shaped
+  work itself and, when Lachy steers Autonomous or Mixed, serial-shaped work as
+  a serial rollout; it routes the rest by the execution-fit test and ends with the
   **execute offer** (run the rollout in a fresh session, here, not yet, or
   start when ready).
   Pointed at a single plan, design note or brain dump it runs a **scoped
@@ -116,13 +120,11 @@ through time, from attention to merged PRs. Terms only — no implementation.
   side by side when its surfaces are disjoint. _Avoid_: batch, for any
   current dispatch unit.
 - **Dispatch artefact** — a batch's durable contract: the prompt file under
-  `<workspace>/.scratch/orient/`. Since ADR 0010 orient launches the batch
-  session from it itself — the steering answer is the sole authorisation —
-  and a hand-run terminal one-liner survives only as the no-cmux fallback.
-- **`dispatched:` stamp** — `dispatched: YYYY-MM-DD` task frontmatter written
-  at emission; marks the task in-flight so orient never double-batches it.
-  Superseded by the batch session's end-of-run note update; stale stamps are
-  cleared by `--debrief`.
+  `<workspace>/.scratch/orient/`. Retired 2026-10-19 (ADR 0040) with orient's
+  batches; existing prompt files are inert history, read by nothing.
+- **`dispatched:` stamp** — `dispatched: YYYY-MM-DD` task frontmatter orient
+  wrote when it dispatched a batch. Retired 2026-10-19 (ADR 0040) with
+  orient's batches; existing stamps are inert history, read by nothing.
 - **Thread-worthy** — passes the thread-shape test (8+ substantive turns,
   deferred decisions, artefacts produced). Only thread-worthy work earns a
   THREAD.md.
@@ -661,8 +663,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Decision task** — the one open vault task tagged `decisions` that the
   weekly reading writes for the next morning when it has a rule proposal
   or a held trade (a knob ADR 0037 d1 leaves to Lachy; ADR 0037 d5): Lachy
-  decides it at the top of a run (`/thread:reflect --decide`); schedule,
-  the reshuffle and orient's batches never take it. _Avoid_: inbox, review
+  decides it at the top of a run (`/thread:reflect --decide`); schedule
+  (either shape) and the reshuffle never take it. _Avoid_: inbox, review
   queue.
 - **Rollout settings** — the operator's `~/.config/thread/rollouts.toml`,
   `ladder.toml`'s sibling: `[defaults]`, the `[guardrails]` bounds and

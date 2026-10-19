@@ -31,17 +31,29 @@ The argument resolves to a project-note slug (the thing the task's `projects:` f
 ### 0. Execution-fit gate
 
 Run the execution-fit test (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md` — the
-canonical definition). Rollouts are for **rollout-shaped** work: tasks that converge on ONE
-code repo, land as a PR each, and verify machine-checkably inside the run (tests / build /
-greps). Before computing anything, scan the candidate set for misfits — tasks whose core action
-is an external publish (CMS / live site / DNS / config console), whose ordering constraint is a
-measurement window or calendar date rather than file overlap, or whose verification only
-arrives days later (impact measures). If misfits dominate, **stop and route the set to the
-session lane** (`defer` for `scheduled:`-date dispatch, `open` via the task's `## Launch`
-block) instead of forcing a rollout: the engine's parallelism is forbidden by isolation
-windows, every externally-publishing task pauses at the human gate (ADR 0008; execute § 3.7), and
-the queue cannot see a window or calendar constraint. A mixed set is fine if
-the rollout-shaped subset can roll out while the misfits stay unstamped — name them in the gate.
+canonical definition, three-way since ADR 0040). This run writes a **parallel rollout**, for
+**parallel-shaped** work: tasks that converge on ONE code repo, land as a PR each, and verify
+machine-checkably inside the run (tests / build / greps), with no external publish and no tool or
+launch profile the lead lacks. Before computing anything, scan the candidate set for misfits of
+two kinds. **Session-lane misfits**: tasks that are conversation-gated, whose ordering constraint
+is a measurement window or calendar date rather than file overlap, or whose verification only
+arrives days later (impact measures). **Serial-shaped members**: tasks with no PR per task (vault
+notes, several repos), whose core action is an external publish (CMS / live site / DNS / config
+console), or that need an external tool or launch profile the lead lacks. Each is named in the
+gate as serial-shaped and left unstamped; a serial-shaped member is never routed to the session
+lane.
+
+When no member is parallel-shaped and any is serial-shaped, stop here, before the target repo is
+resolved: print one line, `no serial writer yet: nothing stamped`, then each serial-shaped member
+(and any session-lane misfit, as such). No task stamped, no rollout note, no heartbeat; no `Local:`
+read, no question, no probe and no fetch.
+
+If session-lane misfits dominate, **stop and route the set to the session lane** (`defer` for
+`scheduled:`-date dispatch, `open` via the task's `## Launch` block), its serial-shaped members
+excepted, instead of forcing a rollout: the engine's parallelism is forbidden by isolation
+windows, and the queue cannot see a window or calendar constraint. A mixed set is fine if the
+parallel-shaped subset can roll out while the misfits stay unstamped — name each misfit in the gate
+with its outcome (serial-shaped or session lane).
 
 After the misfit scan, resolve the target repo, the project root the rollout note will carry, and check
 the dispatch blockers against it. Read the project note's `Local:` line; if there is none, ask the user
@@ -110,7 +122,7 @@ since unlisting is Lachy's call, for the self-rollout check it is the whole stde
 fix), for the pushed-base check's exit 3 it is the whole stderr (the
 ahead commits and the land-by-PR or wait-for-the-landing-PR remedy), and for the unfinished-rollout
 check's refusal or exit 2 it is the whole stderr (each unfinished rollout with its remedy). The
-cluster is still rollout-shaped; don't re-route it to the session lane.
+cluster is still parallel-shaped; don't re-route it to the session lane or a serial rollout.
 
 **Supersede prep.** Only once every § 0 check has passed and the unfinished-rollout check printed
 `supersede <prior>` (directly, or on the re-run after an `interrupted` finish), run
@@ -135,7 +147,7 @@ prior's unlanded tasks are on their way to it, and a stop before step 7.5's clos
 `--regenerate`'s `interrupted` finish. The prior's other stamps, `superseded_by:` and the move stay
 step 7.5's. Report the clear in step 8 as `cleared [[<prior>]]'s start when ready: superseded here`.
 
-There is no minimum size: shape decides, not count. A rollout-shaped cluster of one still rolls
+There is no minimum size: shape decides, not count. A parallel-shaped cluster of one still rolls
 out — the plan gate, verifier retry, master review, and auto-merge are the point. For N ≤ 2,
 note that the ceremony is thin and proceed.
 
@@ -533,7 +545,7 @@ This skill does not execute anything. The rollout note it produces is read by th
 
 ## Don'ts
 
-- Don't refuse small rollouts — shape decides, not count (`skills/_shared/execution-fit.md`). A one-task rollout-shaped rollout is valid; note the ceremony is thin and proceed.
+- Don't refuse small rollouts — shape decides, not count (`skills/_shared/execution-fit.md`). A one-task parallel rollout is valid; note the ceremony is thin and proceed.
 - Don't auto-merge dependency cycles silently — if A depends on B and B depends on A, surface and ask. (This is about *dependency* cycles — distinct from the affinity-cluster consolidation in step 4.5, which is a sanctioned auto-merge of same-*change* tasks.)
 - Never overwrite or reuse an existing rollout note: step 6's naming prompt offers only Advance or Cancel.
 - Never remove `incomplete: true` from a rollout note except as step 7's last write on the note this run wrote: a stamp on any other note (§ 0's on an interrupted supersede's note, or one a stopped run left) ends only when a supersede closes that note out.

@@ -11,9 +11,10 @@ themselves, pointer lines, and retiring a phase the move emptied). When R3 grill
 docs**, the interview also writes `CONTEXT.md` + `docs/adr/` in the **resolved project repo**
 (never committed here: orient § 6 holds scheduling until they land). Nothing else outside the
 vault: out-of-vault backlinks are reported, not rewritten (R5.3). Never git/gh. Never stamps
-`rollout:` or `scope:`: orient § 6 hands rollout-shaped phases to schedule, which owns them. After
-the gate, a declared check's own `--advance` moves its record (§ Declared check): the check writes
-it and owns how it lands, so orient still runs no git.
+`rollout:` or `scope:`: orient § 6 hands parallel-shaped phases to schedule, and § 7 serial-shaped
+ones under Autonomous or Mixed; schedule owns them. After the gate, a declared check's own
+`--advance` moves its record (§ Declared check): the check writes it and owns how it lands, so
+orient still runs no git.
 
 ## Scoped targets
 

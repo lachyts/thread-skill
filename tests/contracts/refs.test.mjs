@@ -39,7 +39,6 @@ const EXTERNAL = [
   ['obsidian-schema.md', 'Task'],
   ['claude-base-instructions.md', 'Claude memory management'],
   ['triage-batching-protocol.md', '6'],
-  ['CLAUDE.md', 'Launch profiles'],
   ['~/.agents/skills/method/SKILL.md', 'Which ledger a row goes to'],
   ['~/repos/workspaces/_shared/CONTEXT.md', 'Next action'],
 ]

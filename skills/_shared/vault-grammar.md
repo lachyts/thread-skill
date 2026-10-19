@@ -34,11 +34,8 @@ A `status:` is read lower-cased, with `-` read as `_`: TaskNotes' own spelling `
 ## In flight
 
 A task stamped `rollout:` whose rollout note is still live (CONTEXT.md **Live rollout**: the link
-resolves to a note directly in `Work/Tasks/`), a `dispatched:` stamp or an orient start claim ≤7
-days old unless an end line in the note names the same run and job, written before or after it
-(orient § 2's Vault body read finds them; orient § 8 Double-dispatch guard, rule 1), or
-`status: in-progress` (TaskNotes' own spelling), `in_progress` or `review`; a phase with any such
-member.
+resolves to a note directly in `Work/Tasks/`), or `status: in-progress` (TaskNotes' own spelling),
+`in_progress` or `review`; a phase with any such member.
 
 ## Rollout start stamp
 

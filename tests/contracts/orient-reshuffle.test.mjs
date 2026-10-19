@@ -31,9 +31,11 @@ test('phases number from N_max + 1, never from phase 0, and ordinals are never r
 })
 
 test('in flight is defined once, in the vault grammar, with TaskNotes spelling', () => {
-  assertHas(collapse(section(grammar, /^## In flight$/) ?? ''), 'vault-grammar.md § In flight',
-    ['`status: in-progress`', '`in_progress`', '`review`', '`dispatched:`', '**Live rollout**'])
-  assertHas(S(2), 'orient § 2', ['_shared/vault-grammar.md` § In flight', /never re-batch it/, /never reshuffle it/])
+  const inFlight = collapse(section(grammar, /^## In flight$/) ?? '')
+  assertHas(inFlight, 'vault-grammar.md § In flight', ['`status: in-progress`', '`in_progress`', '`review`', '**Live rollout**'])
+  // ADR 0040 retired orient's batches: a `dispatched:` stamp no longer puts a task in flight.
+  assert.doesNotMatch(inFlight, /`dispatched:`/, 'vault-grammar.md § In flight still reads the retired stamp')
+  assertHas(S(2), 'orient § 2', ['_shared/vault-grammar.md` § In flight', /never route it again/, /never reshuffle it/])
   assert.doesNotMatch(S(2), /`dispatched:` stamp/, 'orient § 2 restates the in-flight definition')
   assertHas(R(1), 'R1', [/vault grammar's definition/, /never change/, /AMBIGUOUS/, /`thread`-tagged/,
     /contains `task` but not `thread`/, '`-p<N>-`'])
@@ -117,7 +119,7 @@ test('no surface still offers Reshuffle / Steer only / Look only as a question',
   }
 })
 
-test('orient schedules only rollout-shaped members and never runs another rollout', () => {
+test('orient schedules only parallel-shaped members and never runs another rollout', () => {
   assertHas(S(6), 'orient § 6', ['--tasks', '--regenerate', /At most one unfinished rollout per repo/,
     'unfinished-rollout check', /scoped target routes only the tasks its own reshuffle wrote/,
     /schedule nothing and touch nothing/, 'repair', /Uncommitted grill docs/])
