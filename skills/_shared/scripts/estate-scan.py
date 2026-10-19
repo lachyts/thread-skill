@@ -696,8 +696,8 @@ class Scan:
             extra = {}
             if not os.environ.get("GIT_SSH_COMMAND") and not os.environ.get("GIT_SSH"):
                 c = run.git(root, "config", "--get", "core.sshCommand")
-                if not (c.ok and c.out.strip()) and not c.why:
-                    extra["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"  # land.sh's rule: never prompt
+                if not (c.ok and c.out.strip()):  # land.sh's rule (an unanswered probe stays non-interactive too)
+                    extra["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
             r = run.git(root, "ls-remote", "--symref", "origin", "HEAD", extra=extra)
             branch = None
             for ln in r.out.splitlines() if r.ok else []:
@@ -979,10 +979,13 @@ class Scan:
                "unfinishedRollout": [], "blockers": [], "unchecked": [], "errors": []}
         if r.git_why is not None or f is None:
             why = r.git_why or "error"
-            out["unchecked"] = [{"check": c, "why": why} for c in CHECKS]
-            if r.self_rollout is not None:
-                out.update(rolloutRoot=r.rollout_root, selfRollout=r.self_rollout)
-            out["errors"] = r.errors
+            if r.self_rollout is None:  # git never answered: nothing was checked
+                out["unchecked"] = [{"check": c, "why": why} for c in CHECKS]
+                return out
+            # git and self-rollout ran, but the rolloutRoot's git root did not resolve: the later checks never ran.
+            later = [{"check": c, "why": why} for c in CHECKS if CHECK_RANK[c] > CHECK_RANK["self-rollout"]]
+            out.update(rolloutRoot=r.rollout_root, selfRollout=r.self_rollout, blockers=ordered(r.blockers),
+                       unchecked=ordered(r.unchecked + later), errors=r.errors)
             return out
         out.update(rolloutRoot=r.rollout_root, selfRollout=r.self_rollout, origin=f.origin, github=f.github,
                    landingRegister=f.landing, defaultBranch=f.branch, defaultBranchSource=f.source,
