@@ -322,6 +322,15 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   folder-to-note attribution (declared entry, exact name, repo name; never an ancestor or a fuzzy hit), one finding
   per thread identity, `home`, the scopes, parity with open's lookup, and read-only runs;
   `tests/contracts/thread-placement-wiring.test.mjs` pins its callers in open, close, handoff, orient and the docs.
+- **Estate scan** — `tests/estate-scan.test.mjs`: `estate-scan.py` against fixture vaults, fixture repos and a fake
+  ssh remote — done and parked projects, open tasks homed under every live project and the unhomed with their
+  reasons, each dispatch blocker (self-rollout, GitHub origin, landing register, unpushed default branch, unfinished
+  rollout, verifier), the verifier's section reading (a `## Verifier`, `### Tests` or `## Testing` heading, an
+  `@AGENTS.md` import, a `Tests:` line) and a live rollout's `verifier:` (given only to the repo whose toplevel its
+  Project root is, never to a parent repo), phase members by filename prefix, content already on origin, live
+  rollouts' status with pending sign-offs, BatchMode, `--offline`, the group-killing timeout and absolute deadline
+  (and SIGTERM), an unreadable Tasks note, the env scrub when its probe fails, read-only runs, byte-equal reruns and
+  parity with `pushed-base.sh` on copies of the fixtures.
 - **Declared check** — `tests/declared-check.test.mjs`: `declared-check.py` against a fixture vault and repos
   with a fixture check — undeclared, whole untruncated output and its digest, the advance on a matching digest
   and the hold on a changed one or a failed re-run, the group-killing time limit (and on a signal, even one that
