@@ -65,7 +65,7 @@ Verbs (writing verbs: begin, claim, smoke, file-fix, done, set-aside, file-follo
       minus `docs/reviews/`, the `:(literal)` pathspecs, and a WARN per commit in the range with no `Task:` line at
       all, unless it touches only `docs/reviews/`. `codeWriting` is any such commit.
   smoke --task <t> --result pass|fail|not-run [--why <text>]
-      Logs `smoke: [[t]] pass|fail|not run[: <why>]` for a task on this Leg's smoke list.
+      Logs `smoke: [[t]] pass|fail|not run[: <why>]` for a chain task (one on begin's smoke list).
   file-fix --target <t> --cause own|chain|outside|drift [--culprit <L>] --evidence <line> [--excerpt <text>]
       A done chain task t whose Verify failed gets a fix task: `verifies: "[[t]]"` always; `fixes:` names the
       culprit only for own (`[[t]]`) and chain (`[[L]]`). The cause is checked against git, else exit 1: chain needs
@@ -1498,7 +1498,7 @@ def set_pointer(note, item_k, name, title):
 def write_followup(ctx, chain, name_base, title, body_lines):
     name = free_name(chain, name_base)
     path = ctx.tasks / f"{name}.md"
-    body = f"\n## Notes\n\n" + "\n".join(body_lines).rstrip() + "\n"
+    body = "\n## Notes\n\n" + "\n".join(body_lines).rstrip() + "\n"
     text = new_task_text(ctx, rr._fm_block(chain.note, "projects"), [], body)
     if not ctx.dry:
         atomic_write(path, text)
