@@ -33,8 +33,8 @@
 #     only in the member that contains them, made member-relative; THREAD.md dropped) and is not an existing
 #     directory in that member, its toplevel included: such a directory is noted once per member,
 #     `cited directory <p> does not scope <member>'s ahead commits`, so a task body naming a repo root never
-#     re-blocks every peer. With no cited paths (schedule § 0, execute § 2.7 before a run's tasks cite anything) no
-#     peer blocks.
+#     re-blocks every peer. With no cited paths (schedule § 0; execute § 2.7 when no not-yet-merged task cites one,
+#     `reconcile-rollout.py cited`) no peer blocks.
 #   Warn — each cited path on its own (never batched): a relative path in every member, an absolute or ~/
 #     one in the member containing it (else a note). Per (member, path): `diff HEAD` + `diff --cached`
 #     (uncommitted), `diff origin/<b>...HEAD` three-dot AND `diff origin/<b> HEAD` two-dot (committed on the
