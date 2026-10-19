@@ -155,6 +155,23 @@ test('Edge cases name the landing cases', () => {
   assert.ok(!e.includes('close never fetches'), 'the old "close never fetches" edge case survives')
 })
 
+test('rollout clones (ADR 0042): the rungs, 7.2 and landing read a clone as its twin and never hand a path in it', () => {
+  const ident = section(text(), /^## Identify the active thread/) ?? ''
+  const rung = (n) => ident.split('\n').find((l) => l.startsWith(`${n}. `)) ?? ''
+  assertHas(rung(1), 'close rung 1', ['a CWD inside a rollout clone reads as the same directory in its in-place twin', '`self-rollout-check.sh --in-place`'])
+  assertHas(rung(3), 'close rung 3', ['or its twin when `self-rollout-check.sh --in-place` names one', "a rollout clone's copy"])
+  const l = s72() ?? ''
+  const reviews = l.slice(l.indexOf('**Consumed review docs.**'))
+  assertHas(reviews, "7.2's Consumed review docs clause", ["in the CWD's repo, read as its in-place twin when `self-rollout-check.sh --in-place` names one",
+    'A rollout clone is never handed'])
+  assert.ok(!reviews.includes("and in the CWD's repo when that is another git repo"), "7.2 still hands the CWD's repo unqualified")
+  assertHas(l, "7.2's **Rollout clones** sentence", ['**Rollout clones.**', 'git -C <clone> checkout -- <rel>', '`left in rollout clone: <path>',
+    'A mark another session set is never touched'])
+  assertHas(slice(LAND(), /^\*\*Collecting per repo\.\*\*/, /^\*\*Review docs\.\*\*/), '**Collecting per repo**', ['never a path inside a rollout clone'])
+  assertHas(STEP8(), 'step 8', ['`left in rollout clone: <path> (written before ADR 0042: land its deletion by a PR from a worktree)`'])
+  assertHas(EDGES(), '§ Edge cases', ['**Not inside `~/repos/workspaces/` or its rollout clone `~/repos/workspaces-rollout/`.**'])
+})
+
 test('condition 2 still never merges, pushes or fetches to prove it', () => {
   assertHas(lineOf(text(), '**Condition 2 — landed on the default branch.**'), 'condition 2', ['Close never merges, pushes or fetches to prove it.'])
 })
