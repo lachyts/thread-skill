@@ -35,7 +35,12 @@ Until now, the rollout lane ran only work that converges on one repo, lands as a
 ## Consequences
 
 - A Leg resets context at a natural boundary, never mid-task. Anthropic's March 2026 harness post dropped resets because Opus 4.5 no longer needed them for context anxiety. The resets here buy other things: crash checkpoints, the right launch profile, and protection from context rot.
-- Left for the P24 build grill:
-  - the startup smoke test a Leg runs on the state its predecessor left;
-  - how a Leg's work is reviewed, given that self-review runs lenient;
-  - whether a serial rollout may share a repo with an unfinished parallel rollout.
+- The three questions left for the P24 build grill were ruled in the same day's `/thread:orient Thread Skill` reshuffle (below).
+
+## Build-grill rulings
+
+Ruled with Lachy on 2026-10-19, in the `/thread:orient Thread Skill` reshuffle grill.
+
+- **A Leg's startup smoke test** is the preflight (the rollout's required tools and accounts answer) plus the Verify line of the predecessor's last done task. A failing Verify reopens that task as the Leg's first claim, so nothing new starts on a broken base. Re-running every finished task's Verify was rejected: it grows with each Leg and re-touches external surfaces. A per-rollout smoke command was rejected too, because most serial work has no repo verifier to declare.
+- **A Leg's code is reviewed at close by `/fresh-review` at xhigh.** It is the one subagent a Leg may spawn, and the clean room offsets lenient self-review. Findings are fixed before the handover. A review-ledger STOP sets the task aside, and the chain goes on. Having the successor Leg review its predecessor's diff was rejected: the last Leg has no successor.
+- **The one-per-repo limit follows writes, not shape.** A repo has at most one unfinished rollout that writes its checkout, of either shape. A serial rollout whose tasks only launch from the repo (they write the vault or external tools, never that checkout) may run beside a parallel one. A Leg works in place, so a checkout-writing Leg beside a parallel rollout would move the master that rollout's git-env canary watches. ADR 0042 moves every parallel rollout to its own clone, but the rule stands for a serial rollout's own checkout.

@@ -387,8 +387,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: checkpoint, pointer, progress marker.
 - **Primary checkout** — the git checkout the plugin runs from, live (a
   directory-source install, or `--plugin-dir`): every rollout's lead, in any
-  repo, runs its engine from it. A self-rollout's repo is a separate clone, so
-  its merges never reach it. It never moves while a **Running rollout**
+  repo, runs its engine from it. Every parallel rollout's repo is a separate
+  clone, `<repo>-rollout` (ADR 0042), so its merges never reach it. It never moves while a **Running rollout**
   exists (ADR 0031). Not the engine's "main checkout", which is a rollout's own
   repo. _Avoid_: live checkout, installed copy.
 - **Running rollout** — a live, started rollout at the current protocol,
