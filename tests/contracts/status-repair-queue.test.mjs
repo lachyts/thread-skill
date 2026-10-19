@@ -832,9 +832,10 @@ const RUN = { escalation: ACTIONS.indexOf('an open escalation') + 1, nothing: AC
 const CAVEAT = 'drift is invisible offline; re-run with the live check before resuming'
 const ANCHOR = 'update-ref -d refs/integration-anchor/<inputs.branch> <X>'
 // The only commands status may invoke: its two script reads, § 3's gh/git reads, execute § 4's default-branch
-// resolver and § 2's room-stop read, `step-boundary.py stands` (p18-1; the grep reads are no command).
+// resolver, § 2's room-stop read, `step-boundary.py stands` (p18-1), and § 5's serial-chain read, `leg.py status`
+// (p24-4; the grep reads are no command).
 const READS = ['reconcile-rollout.py status', 'lead-integrate.py inputs', 'gh pr view', 'gh pr list', 'git worktree list', 'git remote get-url',
-  'default-branch.sh', 'step-boundary.py stands']
+  'default-branch.sh', 'step-boundary.py stands', 'leg.py status']
 const BAN = /\bwaves?\b|merged_through_wave|resume-filter|mark-dispatched|cursor behind|advance the cursor|smart-halt|single-wave|re-?wave|protocol 4/i
 const TIER_WORDS = [['max', 'tier'].join('_'), ['tier', 'capped'].join('_'), ['Opus', '4.8'].join(' '), ['err toward', 'fable'].join(' ')]   // the tier vocabulary (ADR 0029), built from parts so this file stays out of the Verify grep
 const UNLANDED = 'queued, running, awaiting-integration, integrating or set-aside'

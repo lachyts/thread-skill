@@ -505,6 +505,45 @@ test('--close needs --record-only; a bad --close value is refused; both write no
   refusedNothingWritten(home, ['--scores', scores, '--record-only', '--close', 'weekly'], 2, /^tune: argument --close: invalid choice/, CONFIG)
 })
 
+// ---- a serial score (p24-4): serial-score.py's, recorded only as its close line -------------------------------------
+
+const SERIAL_HEADLINE = { throughput: 2.333, runningHours: 3, merges: 7, tokensPerMerge: null, setAsideRate: null, conflictRate: null,
+  quotaStalls: null, handsOffRate: 0.8571, quality: 0.8571, reviewChurn: null }
+function writeSerial(home, over = {}) {
+  const p = path.join(home, 'serial-score.json')
+  fs.writeFileSync(p, JSON.stringify({ rollout: 'demo-rollout', repo: null, shape: 'serial', window: WINDOW, headline: SERIAL_HEADLINE,
+    binding: null, proposals: [], withheld: [], flags: [], ...over }))
+  return p
+}
+
+test('a serial score records one close line: shape serial, repo null, its null scores kept; a second run writes nothing', (t) => {
+  const home = tmpHome(t)
+  const scores = writeSerial(home)
+  const r = tune(home, ['--scores', scores, '--record-only', '--close', 'completion'])
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(r.stderr, '')
+  const [l, ...rest] = lines(tuningsPath(home))
+  assert.equal(rest.length, 0)
+  assert.deepEqual([l.shape, l.repo, l.close, l.applied, l.scores.quotaStalls, l.scores.merges, 'binding' in l], ['serial', null, 'completion', [], null, 7, false])
+  assert.match(r.stdout, new RegExp(`^recorded ${l.id} in \\S+: no Tuning applied \\(a serial chain's close line: never a baseline\\)\n$`))
+  const again = tune(home, ['--scores', scores, '--record-only', '--close', 'completion'])
+  assert.equal(again.stdout, `already recorded ${l.id} (completion) in ${tuningsPath(home)}: nothing written\n`)
+  assert.equal(lines(tuningsPath(home)).length, 1)
+})
+
+test('a serial score is refused, exit 2 and nothing written, by --record-only with no --close and by --pick, --auto and --revert', (t) => {
+  const home = tmpHome(t)
+  writeToml(home, CONFIG)
+  const scores = writeSerial(home)
+  refusedNothingWritten(home, ['--scores', scores, '--record-only'], 2, /^tune: a serial score is recorded only as its close line/, CONFIG)
+  const repo = gitRepo(home)
+  const rid = 'r-20261015T000000Z-abcdef'
+  for (const args of [['--pick', 'p1', '--repo', repo], ['--auto', '--repo', repo, '--reflection', rid],
+    ['--revert', 't-20261005T000000Z-abcdef', '--repo', repo, '--reflection', rid]]) {
+    refusedNothingWritten(home, ['--scores', scores, ...args], 2, /^tune: a serial score proposes no Tuning/, CONFIG)
+  }
+})
+
 test('a null repo with --close still writes nothing (exit 0); --dry-run --close prints the line with its close and writes nothing', (t) => {
   const home = tmpHome(t)
   const r = tune(home, ['--scores', writeScores(home, { repo: null }), '--record-only', '--close', 'completion'])

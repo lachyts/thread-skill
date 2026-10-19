@@ -26,8 +26,9 @@ reads the operator's local ladder file (`~/.config/thread/ladder.toml`), and, fo
 `lead-integrate.py inputs` resolves `auto_retries` the same way, inside its own read, for a set-aside task whose
 notes lack it. Either read of the settings file runs land.sh's `--origin-slug` read, and so one local
 `git remote get-url origin` in the Project root, when the file holds a repo table: no network. It also runs
-execute's `step-boundary.py stands`, a read of the rollout note's `## Pause log` (§ 2's *Room stop*). Writes nothing.
-Obsidian + GitHub read access only.
+execute's `step-boundary.py stands`, a read of the rollout note's `## Pause log` (§ 2's *Room stop*). On a
+`shape: serial` note its one read is `leg.py status` (§ 5): the note's `## Leg log`, its Queue and its task notes,
+read with no lock, no network and no `gh` or `git` call. Writes nothing. Obsidian + GitHub read access only.
 
 ## Invocation forms
 
@@ -41,9 +42,11 @@ status of [[giflab-rollout]]               # natural language — same thing
 
 ### 1. Resolve the rollout note
 
-Resolve `[[<slug>]]` → `~/repos/obsidian/Work/Tasks/<slug>.md`. If several dated/ordinal notes match an
-ambiguous name (e.g. "today's giflab rollout"), **list the matches and ask which**: don't assume. Read the
-body's `Project root: \`<repoPath>\`` line: it's the repo for the live checks.
+Resolve `[[<slug>]]` → `~/repos/obsidian/Work/Tasks/<slug>.md`, else `Work/Tasks/Archive/Rollouts/<slug>.md`: a
+rollout whose completion ceremony already ran (a serial chain's Complete moves its note there itself). The path it
+resolves is `<rollout-note>` in every read below. If several dated/ordinal notes match an ambiguous name (e.g.
+"today's giflab rollout"), **list the matches and ask which**: don't assume. Read the body's `Project root: \`<repoPath>\`` line: it's the repo for the live checks (a serial
+note has none: § 5).
 
 **Lineage first, then the version.** A supersede carries a rollout's unlanded tasks to its successor whatever
 the prior's `protocol_version` (a legacy rollout is exactly what a supersede migrates), so status reads the
@@ -70,7 +73,8 @@ closed this note out, so this rollout must never be reinstated or resumed: its t
   note too: `--regenerate` would only meet the same refusal.
 
 **Protocol version.** With no lineage match, read it from the note (the status JSON does not carry it):
-`grep -m1 '^protocol_version:' ~/repos/obsidian/Work/Tasks/<slug>.md`.
+`grep -m1 '^protocol_version:' <rollout-note>`, the path resolved above (`Work/Tasks/<slug>.md`, or its
+`Archive/Rollouts/` copy: every completed serial chain is read there).
 
 - `protocol_version: 5` → § 2.
 - Absent, `2` or `3` → the rollout predates the queue (ADR 0030). Report it with execute § 2's remedy: if a
@@ -79,6 +83,11 @@ closed this note out, so this rollout must never be reinstated or resumed: its t
   `protocol_version: 5` queue. Render no queue.
 - Any other value → report "unsupported protocol version <N>; the queue reads protocol_version: 5", render no
   queue, and recommend nothing runnable.
+
+**Shape.** Then read `shape:` from the note as the version is read (`grep -m1 '^shape:' <rollout-note>`, the
+same resolved path; no key reads as parallel). `shape: serial` → § 5 instead of §§ 2–4: a
+serial rollout is a chain of Legs, not a queue, so the status JSON, the live cross-check and the queue report do not
+apply to it. Any other value is parallel: § 2.
 
 **Incomplete.** After § 2, read the JSON's `incomplete`: non-null means the rollout must not run as written
 (`next` refuses it), so headline it with its reason and the remedy, `/thread:schedule <project> --regenerate`. On
@@ -579,6 +588,74 @@ fix ahead of whichever action matches and moves none of them, and so do an unres
 rollout settings. Offline, every resume or reinstate
 recommendation carries § 3's caveat.
 
+### 5. A serial chain
+
+A `shape: serial` note (§ 1's **Shape**) is a chain of **Legs** (CONTEXT.md, ADR 0040), not a queue: §§ 2–4 do not
+apply, and nothing here is cross-checked live (a chain has no PRs, no worktrees and no lead). Its one read, a pure
+read with no lock, no network and no git:
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py status --rollout <rollout-note>
+```
+
+leg.py's header defines every key it prints: the chain states, the stall, the restart and its blocker, and the
+dependants. Exit 1 means the note is gone or not serial: report its `error`. Render the report from that JSON alone:
+
+- **Headline.** `[[<rollout>]] — serial chain <chain>: <progress.done>/<progress.total> done`, plus `Leg <openLeg>
+  open`, `HALTED at Leg <halt.leg>: <halt.reason>`, `INCOMPLETE: <note.incomplete>`, `superseded by
+  [[<note.supersededBy>]]` or `archived` (`note.archived`) when they apply.
+- **Legs.** One line per `legs` entry: `Leg <n> <alias> from <folder>`, `<began>` to its `closedStamp` (or `open`),
+  its `outcome`, its done and set-aside tasks, `took over from Leg <tookOver>` and its `handover` when set. A lost
+  Leg shows its `lastAt`, its own last line.
+- **Queue.** The `rows`, one line each, grouped: **Done** (`state` done, with its `leg`); **Claimed** (`state`
+  running, with its `owner`; none means a hand-back's re-entry, which the next Leg claims); **Queued** (`state`
+  queued, with `held` when set, else "next"); **Set aside** (`state` set-aside, with `setAside.status`,
+  `setAside.summary`, where it re-enters (a gate: Lachy's sign-off; a block: a hand-back or a defer, both
+  `/thread:repair`'s § 7 (b)) and its `dependants`, "[[b]], [[c]] wait on it"). A footer sentence lists the rows
+  outside the count: each `deferred` row (deferred out of the chain, live or archived) and each `missing` one (its
+  note not found, held), e.g. `Outside the count: [[x]] deferred, [[y]] missing.`
+- **Smoke list.** The `smoke` entries: the next Leg re-runs each one's Verify, and `why` says why. With none, no
+  block.
+- **Needs you.** `needsYou`, verbatim, one per line under `Needs you (<n>)`; with none, no block.
+- **Stall.** When `stall` is set: each claimed task with its owner and its Leg's outcome, then `stall.why`.
+- **Restart.** When `restart` is set: `Leg <restart.leg>` in `restart.launch` (or "any launch, from
+  `restart.cwd`" when `restart.anyLaunch`), its `task`, "take-over" when `restart.takeOver`, and "blocked by
+  `<restart.blockedBy>`" when set. Its `prompt` is printed, fenced, only where an action below hands it to Lachy.
+
+A terminal chain (`complete`, `dropped`, `superseded` or `incomplete`: `begin` refuses each) has no Leg to act next,
+so leg.py prints it no `restart`, no `next` and an empty `smoke`: its report has no Restart and no Smoke list.
+
+**Recommended action** for a serial chain: exactly one, the first whose `chain` matches.
+
+- S1 `complete` → "chain complete" (or "already archived"): nothing to run.
+- S2 `dropped` or `superseded` → nothing runs it; a superseded one → `/thread:status [[<note.supersededBy>]]`.
+- S3 `incomplete` → stamp it `status: dropped`, then `/thread:schedule --tasks <its tasks>` (§ 1's **Incomplete**).
+- S4 `paused` → "a serial note is never paused: delete its `paused:` (and `pause_requested:`) line, then
+  `/thread:execute [[<rollout>]]`". Report only.
+- S5 `halted` → `/thread:repair [[<rollout>]]`: the halt's evidence, and its clearing on Lachy's word.
+- S6 `restarting` → by `restarted.how`: `pending` → wait, a repair is starting Leg `<restarted.leg>`; `started` →
+  wait for that Session (`restarted.started`); `manual` → paste `restart.prompt` in `restart.launch`, or any launch
+  from `restart.cwd` when `restart.anyLaunch`. From another session, check the Chorus Stage first, and only if that
+  session is gone run `/thread:repair [[<rollout>]]`.
+- S7 `live` → "Leg `<openLeg>` is live: check that session first; if it is gone, `/thread:repair [[<rollout>]]` takes
+  it over".
+- S8 `awaiting-successor` → by the last Leg's `handover`: `started <id>` → wait for that Session, or check it;
+  `manual …` → paste `restart.prompt` in `restart.launch` (or any launch from `restart.cwd` when
+  `restart.anyLaunch`), or `/thread:repair [[<rollout>]]`, which asks whether it was pasted; no hand-over line →
+  `/thread:repair [[<rollout>]]`.
+- S9 `completable` → "`/thread:execute [[<rollout>]]` from `restart.cwd` (the last Leg's folder), or any folder but
+  this plugin's own checkout (begin refuses it, ADR 0040): a Complete Leg works no row".
+- S10 `stopped` → `/thread:execute [[<rollout>]]` as `restart.launch` when you want it to go on (with no `restart`,
+  only set-aside rows are left: S12's repair). A `stall` here is the stopped Leg's claim: that Leg's `begin`
+  inherits it, so its needs-you item's `/thread:repair` would start the same Leg.
+- S11 `stalled` → `/thread:repair [[<rollout>]]`.
+- S12 `stuck` → `/thread:repair [[<rollout>]]`: sign each gate, hand back a block, or defer it with its dependants.
+- S13 `not-started` or `ready` → `/thread:execute [[<rollout>]]` as `restart.launch`.
+
+The order is the precedence, as § 4's is: a lineage or an incomplete note stops everything, a halt comes before any
+restart, and a Session that may still be live (a pending or started restart, an open Leg, a started hand-over) is
+checked before anything starts another, so two Legs never run one chain.
+
 ## Loopable
 
 Status is read-only, so it's safe to run under the built-in `/loop` as a rollout watchdog:
@@ -597,7 +674,8 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
 - **Never call a writer.** Not `reconcile-rollout.py next` (it stamps `paused:` on a drained pause and clears a
   `start: unattended` stamp), `resume`,
   `hand-back` or any other, and never `step-boundary.py begin` or `step-boundary.py end`;
-  `reconcile-rollout.py status`, `step-boundary.py stands` (§ 2's *Room stop*), `lead-integrate.py inputs` and `rollout-settings.py`
+  `reconcile-rollout.py status`, `step-boundary.py stands` (§ 2's *Room stop*), `leg.py status` (§ 5, a serial
+  note's one read), `lead-integrate.py inputs` and `rollout-settings.py`
   (§ 2, a read) are the only Python scripts status runs, and `default-branch.sh` the only shell one (besides
   the `land.sh --origin-slug` that `rollout-settings.py` runs itself). Never `lead-integrate.py prepare`,
   `set-aside`, `push` or `undo`, `merge-task.sh`, a `gh pr close`, `merge` or `reopen`, a `git push`, `fetch`
@@ -607,7 +685,10 @@ See execute's §8 (*Unattended driving*) for the full pattern set.
   that has not landed, at most one guarded default-branch read and at most one guarded `gh pr list`. Status is
   a glance; keep it cheap.
 - **Don't parse the `## Queue` table** for the task list: use the `status` subcommand's glob-by-backlink (it
-  catches tasks the table omits).
+  catches tasks the table omits). A serial chain's Queue is read by `leg.py status` alone (§ 5).
+- **Don't run a serial chain's other `leg.py` verbs.** Not `begin`, `restarted` or `clear-halt` (`/thread:repair`'s
+  § 7 runs the last two, on Lachy's word where it asks), and never a `## Leg log` edit: § 5 only reads, and
+  recommends.
 - **Don't recommend a resume against a live queue** unless its owner session, checked there, shows no run or
   has ended, and never under a room stop, standing or lapsed, while its owner session is alive, whatever
   `/workflows` shows and whatever its tasks read (§ 4's *Room stop*), a stamped pause's reinstate excepted

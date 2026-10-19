@@ -338,8 +338,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   chain writes, and each `## Queue` row names the launch its Leg opens in, so a
   launch change between two rows is a Leg boundary. execute runs its Legs
   (`skills/execute/legs.md`). A serial note is never paused: a Leg stops through
-  `leg.py close --outcome stopped`. _Avoid_: relay (Chorus's word for sending a
-  command to a session).
+  `leg.py close --outcome stopped`. status reads it as a chain (`leg.py status`:
+  its Legs, its chain state, a **Stalled chain**), repair restarts it, and its
+  Complete scores it into one close line (serial-score.py). _Avoid_: relay
+  (Chorus's word for sending a command to a session).
 - **Leg** — one session's part of a serial rollout (`skills/execute/legs.md`).
   In order: execute's git-env check, `leg.py begin`, the preflight (the
   launch's required tools answer), the smoke test (the Verify line of every
@@ -351,8 +353,20 @@ through time, from attention to merged PRs. Terms only — no implementation.
   review before it is done. Its close ritual lands its close-outs commit-only,
   hands the rest to a fresh Leg through the Stage (a labelled manual hand-over
   elsewhere), and ends on a `ROLLOUT-STATUS:` line; every Leg whose Close reads
-  *closed* reports to the origin. _Avoid_: shift, stint, iteration (one task
-  in a Ralph loop), batch.
+  *closed* reports to the origin. A Leg whose Session died is taken over, or
+  the next one started, by `/thread:repair`, which never runs a Leg itself.
+  _Avoid_: shift, stint, iteration (one task in a Ralph loop), batch.
+- **Stalled chain** — a serial chain with claimed work and no Leg open: a task
+  in progress for a Leg that closed (stopped, or halted and since cleared) or
+  never began, and nothing starts the Leg that inherits it. `leg.py status`
+  sets its `stall` field; its chain state reads `stalled` only when no earlier
+  state matches, so a Leg that stopped holding a claim reads `stopped` (and a
+  standing halt `halted`), the `stall` set beside it. `/thread:repair`
+  restarts it by starting the next Leg as a new Session, once nothing shows a
+  Session still holding it. An open Leg whose Session died reads live, never
+  stalled, until a take-over closes it `lost`: leg.py never reads the Stage,
+  so repair's `list_sessions` check is what finds that Session gone. _Avoid_:
+  hung, frozen.
 - **Surface** — a place a serial chain writes, written as a token in a serial
   note's `surfaces:` (and in a task's own, optional `surfaces:`). Five kinds:
   `repo:<absolute path>` (a filesystem place; overlaps on equality or
@@ -696,8 +710,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   traces what cost them to the rule that produced it, names what bound the
   run (Slots, the Integration lane, quota, dependencies) and proposes
   Tunings. The same word and shape as Chorus's Reflection over the
-  Companion's record. Its verb is `/thread:reflect`. _Avoid_: retro, review
-  (the engine's).
+  Companion's record. Its verb is `/thread:reflect`. A serial rollout is read
+  from its Leg log instead (serial-score.py): running time, the Hands-off rate
+  and a Quality from `fixes:` alone, with no load, binding or proposal.
+  _Avoid_: retro, review (the engine's).
 - **Tuning** — one proposed change at one
   of three altitudes, as in Chorus: a **knob** (a value in the operator's
   rollout settings: a repo's Parallel ceiling, a round cap, read by the next
@@ -713,7 +729,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   of its own through the same tune script (ADR 0037 d4). The weekly reading
   writes a line there only when it lands or reverts a knob, never a close
   line, and records its Watches, proposals and close in `reflections.jsonl`.
-  _Avoid_: tweak, auto-tune.
+  A serial rollout's close line carries `shape: serial` and no repo: it moves
+  no key and is never a baseline. _Avoid_: tweak, auto-tune.
 - **Watch** — a pattern a Reflection saw in one rollout and would not yet
   propose a rule for: named, written to the record and carried into the next
   Reflection. It becomes a rule proposal when a later rollout shows the same
