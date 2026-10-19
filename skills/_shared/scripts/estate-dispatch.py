@@ -81,8 +81,14 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   A run is scheduled when it has members left; it is parallel with a root, or serial; its repo row has no blocker
   (`unchecked` passes: schedule § 0 is the gate); it is not parked, unless unparked here (then only its Ready, unheld
   members go); and it is the best-ranked parallel run on its root (keyed on rolloutRoot when set, else root). Every
-  other run waits, with why {kind: parked | nothing decided | repo unknown | no repo declared | blocker | same root,
-  detail}.
+  other run waits, with why {kind: parked | nothing decided | repo unknown | no repo declared | blocker | same root |
+  dependency not scheduled, detail}.
+  Then the dependencies: a member whose rank dependsOn[] names an open (a scan task), not-in-flight task that no
+  scheduled entry holds as a member is held, with blockedBy {slug, why: `dependency not scheduled`}, since
+  reconcile-rollout's _dep_status would hold its row until that task lands, and it never would (its run waits, or it
+  is session-lane work, which no run holds; on a `same root` waiter, a deadlock). The runs are then chosen again with
+  those members held, to a fixpoint: a run that loses every member waits with that kind and frees its root, and its
+  members' dependants are held in turn.
   Schedule entries: {run, project, note, projectSlug, batchKeys[], shape, root, rolloutRoot, members[], args
   ("--tasks a,b,c", never --regenerate), batch, review {pr, signOff, eyeCheck, minutes}}. projectSlug is the name
   NFKD-folded to ASCII and lower-cased, apostrophes (' and ’) deleted, every other run outside [a-z0-9] made a `-`, the
@@ -100,7 +106,8 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   superseded, lineage, version, serial and status unread.
   Output: {schema, vault, today, schedule[], waiting[] {run, project, note, shape, root, rolloutRoot, members[], why},
   rollouts[], reinstate[], orient[] {name, note, area[]} (the rank's, whatever the budget), held[] {slug, run, grade,
-  blockedBy}, undecided[] {slug, run, grade}, sessionLane[] {slug, home, grade}}.
+  blockedBy (the rank holds that stand, then the unscheduled dependencies)}, undecided[] {slug, run, grade},
+  sessionLane[] {slug, home, grade}}.
 
 sessions --plan P [--wrote PATH]... [--status SLUG=N]...: the sessions to start, in start order. STATUS_ACTIONS maps
   each status § 4 **Recommended action** rule (its number, as a status agent reports it) to the item it may start:
@@ -109,8 +116,9 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]...: the sessions to start,
   (RR._shape) is an execute item in its Project root (no root: manual); a serial one is a `leg` item for Leg 1, in
   its `## Queue` row 1's launch folder, manual when its alias starts `cx-` (legs.md § Hand over).
   --status SLUG=N: SLUG one of plan.rollouts[], N an integer 1 to 13 (else exit 2). An execute item only with
-  canExecute, a reinstate only with reinstate, a repair only with canRepair; every live rollout that gets no item
-  goes to left[] {rollout, action (null: status unread), holds[], why}.
+  canExecute, a reinstate only with reinstate and canExecute (so a sign-off pause that every gate signed but another
+  hold stands on, serial, a start stamp or a drain, gets none), a repair only with canRepair; every live rollout that
+  gets no item goes to left[] {rollout, action (null: status unread), holds[], why}.
   Orient items: one per plan.orient[], prompt `/thread:orient [[<name>]]`, with one more line per --wrote note whose
   `projects:` resolves to that project, naming it. Order: the written-note items (in --wrote order), the live
   execute items by slug, the repair items by slug, the orient items last. A title over TITLE_MAX is cut to
@@ -119,14 +127,16 @@ sessions --plan P [--wrote PATH]... [--status SLUG=N]...: the sessions to start,
   prompt, tldr, manual, why}, left[]}.
 
 record --task SLUG|PATH --question Q --answer A --recommended R [--fork F] [--today D]: one answer into its task. Q, A,
-  R and F have every whitespace run (newlines included) folded to one space. Refused (exit 2, the file
-  byte-identical): no such task note directly in Work/Tasks, a note that is not a `task`, a status outside Active
-  (NA.status_of not in NA.OPEN_STATUSES), a task in flight (ES.in_flight over ES.link_live of its `rollout:`), a value
-  empty after the fold, and a --fork that the latest `orient end:` line in its `## Notes` does not name as `fork for
-  Lachy: F`. The bullet `- <Q> → <A> (asked at /thread:orient-all; recommended: <R>)` extends in place the section
-  DECISIONS_HEADING of the same date (after its last line, before the next `## ` heading outside a fence), else opens
-  that section at the note's end (schedule step 7's form). --fork also appends RULING_LINE (orient § 5's) as the last
-  `## Notes` line. One in-place write (the inode kept), printing `recorded <note>: <Q> → <A>`; nothing to add prints
+  R and F have every whitespace run (newlines included) folded to one space, and Q loses a leading link to its own
+  task (`[[<slug>]] `, as a rounds index text opens; ER.slug_key compares), so the note never links to itself and a
+  rerun with the bare question is [no-change]. Refused (exit 2, the file byte-identical): no such task note directly
+  in Work/Tasks, a note that is not a `task`, a status outside Active (NA.status_of not in NA.OPEN_STATUSES), a task
+  in flight (ES.in_flight over ES.link_live of its `rollout:`), a value empty after the fold (Q after its link is cut
+  too), and a --fork that the latest `orient end:` line in its `## Notes` does not name as `fork for Lachy: F`. The
+  bullet `- <Q> → <A> (asked at /thread:orient-all; recommended: <R>)` extends in place the section DECISIONS_HEADING
+  of the same date (after its last line, before the next `## ` heading outside a fence), else opens that section at
+  the note's end (schedule step 7's form). --fork also appends RULING_LINE (orient § 5's) as the last `## Notes`
+  line. One in-place write (the inode kept), printing `recorded <note>: <Q> → <A>`; nothing to add prints
   `<note>: <Q> → <A> [no-change]`, exit 0.
 """
 import argparse
@@ -193,6 +203,7 @@ STATUS_ACTIONS = {
 HOLDS = ("superseded", "lineage", "version", "incomplete", "serial", "paused", "draining", "live queue", "start stamp",
          "status unread")
 NO_REPAIR = frozenset({"superseded", "lineage", "version", "serial", "status unread"})
+DEP_UNSCHEDULED = "dependency not scheduled"  # plan's own hold, and the why of a run it empties
 
 
 def fail(code, reason):
@@ -621,6 +632,20 @@ class Plan:
         self.unparked = set(unparked)
         self.signed = set(signed)
         self._clear = {}
+        self.open = {}  # the scan's tasks (open: not landed, not archived) by lower-case slug, the first one kept
+        for t in self.scan["tasks"]:
+            if isinstance(t, dict) and isinstance(t.get("slug"), str):
+                self.open.setdefault(t["slug"].lower(), t)
+
+    def deps(self, slug):
+        """The open, not-in-flight scan tasks the task's rank dependsOn[] names, matched as the ranker matches them
+        (ER.slug_key, case-insensitively), in order. reconcile-rollout's _dep_status holds a row until each lands."""
+        out = []
+        for link in (self.rows.get(slug) or {}).get("dependsOn") or []:
+            t = self.open.get(self.M.ER.slug_key(link))
+            if t is not None and not t.get("inFlight") and t["slug"] not in out:
+                out.append(t["slug"])
+        return out
 
     def home_unparked(self, slug):
         t = self.rows.get(slug) or {}
@@ -653,9 +678,9 @@ class Plan:
         self._clear[slug] = ok
         return ok
 
-    def standing_holds(self, slug):
-        return [h for h in (self.rows.get(slug) or {}).get("blockedBy") or []
-                if not self.clear_one(h)]
+    def standing_holds(self, slug, unscheduled):
+        return [h for h in (self.rows.get(slug) or {}).get("blockedBy") or [] if not self.clear_one(h)] + [
+            {"slug": d, "why": DEP_UNSCHEDULED} for d in unscheduled.get(slug) or []]
 
     def clear_one(self, h):
         d, why = h.get("slug"), h.get("why")
@@ -667,7 +692,8 @@ class Plan:
             return self.home_unparked(d) and self.clear(d, set())
         return False
 
-    def run(self):
+    def choose(self, unscheduled):
+        """(held, undecided, entries, waiting): the runs chosen with every slug in `unscheduled` held."""
         held, undecided, entries, waiting = {}, {}, [], []
         roots = {}
         for order, run in enumerate(r for r in self.rank["runs"] if isinstance(r, dict)):
@@ -676,16 +702,18 @@ class Plan:
                                           self.rows.get(s, {}).get("rank") or 0, s))
             parked = bool(run.get("parked"))
             unparked = parked and (run.get("project") in self.unparked or run.get("note") in self.unparked)
-            members = []
+            members, lost = [], []
             for s in slugs:
                 t = self.rows.get(s) or {}
-                if parked:
+                if s in unscheduled:  # only ever a former member, so decided with every rank hold clear
+                    lost.append(s)
+                    held[s] = t
+                elif parked:
                     if t.get("grade") == "Ready" and not t.get("blockedBy"):
                         members.append(s)
                     elif unparked:
                         (undecided if t.get("grade") != "Ready" else held)[s] = t
-                    continue
-                if s not in self.decided:
+                elif s not in self.decided:
                     undecided[s] = t
                 elif not self.clear(s, set()):
                     held[s] = t
@@ -694,6 +722,9 @@ class Plan:
             why = None
             if parked and not unparked:
                 why = {"kind": "parked", "detail": "the project is parked: its Unpark offer decides"}
+            elif not members and lost:
+                why = {"kind": DEP_UNSCHEDULED, "detail": "every member left depends on a task no scheduled run "
+                       "holds: %s" % ", ".join(sorted({d for s in lost for d in unscheduled[s]}))}
             elif not members:
                 why = {"kind": "nothing decided", "detail": "no member is decided with every hold clear"}
             elif run.get("shape") == "parallel" and not run.get("root"):
@@ -722,6 +753,25 @@ class Plan:
             row.update(projectSlug=project_slug(name), batchKeys=batch_keys(name), args="--tasks " + ",".join(members),
                        batch=None, review=review, _order=order)
             entries.append(row)
+        return held, undecided, entries, waiting
+
+    def run(self):
+        # A member whose dependency no scheduled entry holds would wait on it forever, so it is held, and the runs are
+        # chosen again: a run can lose every member, freeing its root and stranding its dependants. `unscheduled`
+        # only grows, so this stops within one round per task.
+        unscheduled = {}
+        while True:
+            held, undecided, entries, waiting = self.choose(unscheduled)
+            scheduled = {m for e in entries for m in e["members"]}
+            more = {}
+            for e in entries:
+                for m in e["members"]:
+                    missing = [d for d in self.deps(m) if d not in scheduled]
+                    if missing:
+                        more[m] = missing
+            if not more:
+                break
+            unscheduled.update(more)
         # Batches: parallel entries take the lowest batch whose keys never meet theirs; serial ones follow, one each.
         batches = []
         for e in (x for x in entries if x["shape"] == "parallel"):
@@ -754,8 +804,8 @@ class Plan:
             "schema": SCHEMA, "vault": self.vroot, "today": self.rank.get("today") or today_of(self.scan),
             "schedule": schedule, "waiting": waiting, "rollouts": rollouts,
             "reinstate": [r["slug"] for r in rollouts if r["reinstate"]], "orient": orient,
-            "held": [{"slug": s, "run": run_of.get(s), "grade": t.get("grade"), "blockedBy": self.standing_holds(s)}
-                     for s, t in sorted(held.items())],
+            "held": [{"slug": s, "run": run_of.get(s), "grade": t.get("grade"),
+                      "blockedBy": self.standing_holds(s, unscheduled)} for s, t in sorted(held.items())],
             "undecided": [{"slug": s, "run": run_of.get(s), "grade": t.get("grade")}
                           for s, t in sorted(undecided.items())],
             "sessionLane": [{"slug": t["slug"], "home": t.get("home"), "grade": t.get("grade")}
@@ -912,7 +962,9 @@ def cmd_sessions(args):
             continue
         kind, words = STATUS_ACTIONS[n]
         root = os.path.expanduser(r["projectRoot"]) if r.get("projectRoot") else None
-        if kind in ("execute", "reinstate") and (r.get("reinstate") if kind == "reinstate" else r.get("canExecute")):
+        # canExecute is every hold clear, but for the sign-off pause when every gate is signed (reinstate): so a
+        # reinstate needs both, and a sign-off pause with any other hold (serial, a start stamp, a drain) gets nothing.
+        if kind in ("execute", "reinstate") and r.get("canExecute") and (kind == "execute" or r.get("reinstate")):
             why = ("status action 8: the sign-off pause, every gate signed this pass" if kind == "reinstate"
                    else "status action %d: %s" % (n, words))
             executes.append({"kind": "execute", "rollout": slug, "note": r.get("note"),
@@ -928,6 +980,9 @@ def cmd_sessions(args):
         else:
             if kind is None:
                 why = "status action %d (%s) starts nothing from here" % (n, words)
+            elif kind == "reinstate" and r.get("reinstate"):
+                why = "status action 8 (%s): every gate signed, but held by %s" % (
+                    words, ", ".join(h for h in r.get("holds") or [] if h != "paused") or "nothing")
             elif kind == "reinstate" and r.get("pausedFor") == "sign-off":
                 why = "status action 8 (%s): a gate is still unsigned, so the sign-off pause holds" % words
             elif kind == "reinstate" and "paused" in (r.get("holds") or []):
@@ -994,6 +1049,16 @@ def insert_last(lines, span, line):
     return lines[:last + 1] + [line + "\n"] + lines[last + 1:]
 
 
+SELF_LINK = re.compile(r"\[\[([^\[\]]*)\]\](?:\s+|$)")
+
+
+def without_self_link(q, slug, slug_key):
+    """The folded question with a leading link to its own task (`[[<slug>]] `, as a rounds index text opens) cut, so
+    the bullet never links the note to itself and the bare question reads as the same answer."""
+    m = SELF_LINK.match(q)
+    return q[m.end():] if m and slug_key("[[%s]]" % m.group(1)) == slug.lower() else q
+
+
 def latest_end_forks(lines, span):
     """(index, forks) of the last `orient end:` line in the section, or (None, [])."""
     hit = None
@@ -1025,6 +1090,9 @@ def cmd_record(args):
     except NA.Refused as e:
         fail(2, str(e))
     shown = rel.replace(os.sep, "/")
+    q = without_self_link(q, os.path.basename(rel)[:-3], M.ER.slug_key)
+    if q == "":
+        fail(2, "--question is empty once its leading [[%s]] is stripped" % os.path.basename(rel)[:-3])
     note = NA.Note.load(os.path.join(vault.root, rel))
     if note.fm is None:
         fail(2, "%s: %s" % (shown, note.error))

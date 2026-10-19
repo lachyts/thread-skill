@@ -76,6 +76,8 @@ P('Grl', 'active')
 P('Sess', 'active')
 P('Bo', 'queued')
 P('Rec', 'active')
+P('Deps', 'active', repos('deps'))
+P('Chain', 'active', repos('chain'))
 
 for (const s of ['crown-a', 'crown-b']) T(s, 'open', ['Crown'])
 T('act-a', 'open', ['Act'])
@@ -112,6 +114,12 @@ for (const s of LAB) T(s, 'open', ['Lab'])
 for (const s of ['grl-a', 'grl-b']) T(s, 'open', ['Grl'])
 T('sess-a', 'open', ['Sess'])
 T('bo-orient', 'open', ['Bo'])
+// Ready work on a dependency the ranker lets pass (Ready, unheld) but no scheduled run will hold: the same-root waiter's
+// task (a deadlock, as Act takes the root), a blocked run's, session-lane work; and, held in turn, work on one of them.
+T('act-on-shared', 'open', ['Act'], links('depends-on', ['shared-a']))
+T('deps-blk', 'open', ['Deps'], links('depends-on', ['blk-a']))
+T('deps-sess', 'open', ['Deps'], links('depends-on', ['sess-a']))
+T('chain-a', 'open', ['Chain'], links('depends-on', ['deps-blk']))
 
 // The record cases' tasks (ungraded: an ungraded task holds nothing it does not block).
 const END = '- 2026-10-19T10:00:00Z orient end: run 1, job 2, partial: fork for Lachy: Keep v3 or v4; evidence: x.py:3; ' +
@@ -222,7 +230,8 @@ const GRADES = {
   Crown: [R('crown-a'), R('crown-b')],
   Act: [R('act-a', 'parallel', { size: 'M' }),
     G('act-call', 'One call', 'parallel', { decisions: [D('Which store?', 'sqlite', ['sqlite', LONG60], { fork: 'Store choice' })] }),
-    R('act-dep'), G('act-orient', 'Orient', 'serial'), R('act-held'), R('act-on-park'), R('act-cyc-a'), R('act-cyc-b')],
+    R('act-dep'), G('act-orient', 'Orient', 'serial'), R('act-held'), R('act-on-park'), R('act-cyc-a'), R('act-cyc-b'),
+    R('act-on-shared')],
   Shared: [R('shared-a')],
   Mira: [R('mira-a')],
   Mirb: [R('mirb-a')],
@@ -245,6 +254,8 @@ const GRADES = {
     G('grl-b', 'Grill', 'serial', { decisions: [D('Keep v3 or v4?', 'v4', ['v4', 'v3'], { fork: 'Keep v3 or v4' }), D('Size?', 'small', ['small', 'large'])] })],
   Sess: [R('sess-a', 'session')],
   Bo: [G('bo-orient', 'Orient', 'serial')],
+  Deps: [R('deps-blk'), R('deps-sess')],
+  Chain: [R('chain-a')],
 }
 const GRADE_FILES = Object.entries(GRADES).map(([project, tasks], i) => {
   const p = path.join(S, 'grades', `grades-${String(i).padStart(2, '0')}.json`)
@@ -523,6 +534,18 @@ test('D7. acceptance: plan schedules decided members whose holds clear, and noth
   for (const c of ['act-cyc-a', 'act-cyc-b']) assert.ok(u.held.some((x) => x.slug === c), `${c} stays held, decided or not`)
   assert.deepEqual(entryOf(tracked(plan(['--unparked', 'Work/Projects/ParkA.md'])), act).members, ['act-a', 'act-on-park'],
     '--unparked takes the note too')
+  // A dependency the ranker lets pass but no scheduled entry holds: the member is held, whatever is decided.
+  const rk = ranked()
+  const NOT = (slug) => [{ slug, why: 'dependency not scheduled' }]
+  const WANT = { 'act-on-shared': 'shared-a', 'deps-blk': 'blk-a', 'deps-sess': 'sess-a', 'chain-a': 'deps-blk' }
+  for (const p of [j, d, u]) {
+    for (const [slug, dep] of Object.entries(WANT)) {
+      assert.deepEqual(rk.tasks.find((t) => t.slug === slug).blockedBy, [], `${slug}: the ranker holds nothing`)
+      assert.deepEqual(p.held.find((x) => x.slug === slug)?.blockedBy, NOT(dep), `${slug} waits on ${dep}`)
+      assert.ok(!p.schedule.some((e) => e.members.includes(slug)), `${slug} is not scheduled`)
+    }
+  }
+  assert.ok(entryOf(j, act).members.includes('act-a'), 'the run keeps its other members')
 })
 
 // ---- D8. plan: runs ---------------------------------------------------------------------------------------------------
@@ -556,6 +579,20 @@ test('D8. plan: a blocker, an unknown or undeclared repo, a shared root and a pa
   assert.deepEqual(entryOf(u, park.run).members, ['pa-ready'], 'only its Ready, unheld members go')
   for (const w of ['Holds/serial/-', 'Lab/serial/-', 'Grl/serial/-']) assert.equal(waitOf(j, w).why.kind, 'nothing decided', w)
   assert.ok(!j.waiting.some((w) => w.run === runId('Act', 'parallel', 'shared')))
+  // A run whose every member depends on a task no scheduled entry holds (a blocked run's, session-lane work) waits, and
+  // so, at the fixpoint, does a run whose member depends on one of its members.
+  const deps = waitOf(j, runId('Deps', 'parallel', 'deps'))
+  assert.deepEqual([deps.members, deps.why], [[], { kind: 'dependency not scheduled',
+    detail: 'every member left depends on a task no scheduled run holds: blk-a, sess-a' }])
+  assert.deepEqual(waitOf(j, runId('Chain', 'parallel', 'chain')).why,
+    { kind: 'dependency not scheduled', detail: 'every member left depends on a task no scheduled run holds: deps-blk' })
+  // A run that loses every member frees its root for the next run on it.
+  const mira = structuredClone(rk)
+  mira.tasks.find((t) => t.slug === 'mira-a').dependsOn = ['[[blk-a]]']
+  const m = ok(py(['plan', '--rank', keep('rank-mira-on-blk.json', JSON.stringify(mira)), '--scan', SCAN_FILE]))
+  assert.equal(waitOf(m, runId('Mira', 'parallel', 'mira')).why.kind, 'dependency not scheduled')
+  assert.deepEqual(entryOf(m, mirb.run).members, ['mirb-a'], 'the same-root waiter goes once the root is free')
+  depsScheduled(m, mira)
 })
 
 // ---- D8b. plan: batches ----------------------------------------------------------------------------------------------
@@ -567,6 +604,20 @@ function batchesHold(j) {
   for (const [b, es] of Object.entries(by)) {
     for (const x of es) for (const y of es) {
       if (x !== y) assert.ok(!x.batchKeys.some((k) => y.batchKeys.includes(k)), `batch ${b}: ${x.run} and ${y.run} share a key`)
+    }
+  }
+}
+// Every scheduled member's open, not-in-flight dependencies are scheduled members too (reconcile-rollout holds the row
+// until each lands).
+function depsScheduled(j, rk = ranked()) {
+  const key = (link) => String(link).replace(/^\[\[|\]\]$/g, '').split('|')[0].split('#')[0].split('/').pop().replace(/\.md$/i, '').trim().toLowerCase()
+  const open = new Map()
+  for (const t of scanned().tasks) if (!open.has(t.slug.toLowerCase())) open.set(t.slug.toLowerCase(), t)
+  const members = new Set(j.schedule.flatMap((e) => e.members))
+  for (const s of members) {
+    for (const link of rk.tasks.find((t) => t.slug === s).dependsOn) {
+      const t = open.get(key(link))
+      if (t && !t.inFlight) assert.ok(members.has(t.slug), `${s} depends on ${t.slug}, which no scheduled entry holds`)
     }
   }
 }
@@ -588,7 +639,10 @@ test('D8b. plan: entries whose names may meet on one note slug never share a bat
   const serial = j.schedule.filter((x) => x.shape === 'serial').map((x) => x.batch)
   assert.deepEqual(serial, [top + 1, top + 2])
   assert.deepEqual(j.schedule.map((x) => x.batch), [...j.schedule.map((x) => x.batch)].sort((a, b) => a - b), 'listed by batch')
-  for (const p of allPlans) batchesHold(p)
+  for (const p of allPlans) {
+    batchesHold(p)
+    depsScheduled(p)
+  }
 })
 
 // ---- D9. plan: orient whatever the budget -------------------------------------------------------------------------------
@@ -670,6 +724,14 @@ test('D12. acceptance: record writes each answer into its task note, folded to o
   assert.equal(w.status, 0, w.stderr)
   assert.match(w.stdout, /\[no-change\]/)
   assert.equal(fs.statSync(file('rec-new')).mtimeMs, mt)
+  // The question as the rounds index words it, `[[<slug>]] ` first (an alias and any case too): the self-link is cut,
+  // so it is the same answer, no change, and the note never links to itself.
+  for (const q of ['[[rec-new]] Which way?', '[[Rec-New|that task]]  Which\n way?']) {
+    w = rec('rec-new', q, 'left', 'left')
+    assert.deepEqual([w.status, w.stdout], [0, 'Work/Tasks/rec-new.md: Which way? → left [no-change]\n'], q)
+  }
+  assert.equal(fs.statSync(file('rec-new')).mtimeMs, mt)
+  assert.ok(!read('rec-new').includes('[[rec-new]]'))
   // A second answer the same day extends the section; a new date makes a new section.
   rec('rec-new', 'Cache?', 'none', 'lru')
   assert.equal(read('rec-new'), `${before}\n## Decisions (asked ahead ${TODAY})\n\n${B('Which way?', 'left', 'left')}\n${B('Cache?', 'none', 'lru')}\n`)
@@ -695,6 +757,9 @@ test('D12. acceptance: record writes each answer into its task note, folded to o
   assert.match(read('rec-fork'), new RegExp(`${END.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\n- \\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z orient ruling: Keep v3 or v4 → v4\n\n## Plan\n`))
   // An open task whose rollout is archived is not in flight: it records.
   assert.equal(rec('rec-arch', 'Q?', 'yes', 'yes').status, 0)
+  // A leading link to another task is the question's own text, kept.
+  assert.equal(rec('rec-arch', '[[rec-new]] first?', 'yes', 'yes').status, 0)
+  assert.ok(read('rec-arch').includes(`\n${B('[[rec-new]] first?', 'yes', 'yes')}\n`), read('rec-arch'))
   // Refusals: exit 2, the file byte-identical.
   const cases = [
     ['no-such-task', [], /no task note/],
@@ -713,6 +778,7 @@ test('D12. acceptance: record writes each answer into its task note, folded to o
   }
   const held = read('rec-new')
   refusal(rec('rec-new', 'Q?', ' \n\t ', 'A'), /--answer is empty/)
+  refusal(rec('rec-new', ' [[rec-new]] ', 'A', 'A'), /--question is empty once its leading \[\[rec-new\]\] is stripped/)
   assert.equal(read('rec-new'), held)
   assert.deepEqual(snap(V), BEFORE, 'only the copy was written')
 })
@@ -815,6 +881,33 @@ test('D15. acceptance: sessions starts written notes, live rollouts only on the 
   const re = one(SIGNED_FILE(), 'signoff-rollout-2026-10-19', 8)
   assert.deepEqual([re.item?.kind, re.item?.prompt], ['execute', '/thread:execute [[signoff-rollout-2026-10-19]]'])
   assert.equal(one(PLAN_FILE(), 'live-rollout-2026-10-19', 7).item?.kind, 'repair', 'repair runs beside a live lead')
+  // A sign-off pause every gate signed but another hold stands on (a start stamp: the Stage starts it; serial: Legs
+  // run it) gets no item at action 8: the reinstate needs canExecute too. Two copies of the sign-off rollout, each with
+  // one more line, in a vault copy and a scan copy that carry them.
+  const VS = copyVault('signoff-held')
+  const so = fs.readFileSync(path.join(TASKS, 'signoff-rollout-2026-10-19.md'), 'utf8')
+  const sc = scanned()
+  const soRow = sc.rollouts.find((r) => r.slug === 'signoff-rollout-2026-10-19')
+  const HELD = { 'sostamp-rollout-2026-10-19': ['\nstart: unattended', 'start stamp'], 'soserial-rollout-2026-10-19': ['\nshape: serial', 'serial'] }
+  for (const [slug, [line]] of Object.entries(HELD)) {
+    assert.ok(so.includes('\npaused_for: sign-off'))
+    write(path.join(VS, 'Work', 'Tasks', `${slug}.md`), so.replace('\npaused_for: sign-off', `\npaused_for: sign-off${line}`))
+    sc.rollouts.push({ ...structuredClone(soRow), slug, note: `Work/Tasks/${slug}.md` })
+  }
+  const heldPlan = ok(py(['plan', '--rank', RANK_FILE, '--scan', keep('scan-signoff-held.json', JSON.stringify(sc)), '--vault', VS,
+    '--signed', 'gate-so']))
+  const heldFile = keep('plan-signoff-held.json', JSON.stringify(heldPlan))
+  for (const [slug, [, hold]] of Object.entries(HELD)) {
+    const r = rolloutOf(heldPlan, slug)
+    assert.deepEqual([r.reinstate, r.canExecute, r.holds.includes('paused'), r.holds.includes(hold)], [true, false, true, true], slug)
+    for (const n of [8, 6, 13]) {
+      const got = one(heldFile, slug, n)
+      assert.equal(got.item, undefined, `${slug} at action ${n}`)
+      assert.ok(got.left.holds.includes(hold), `${slug}: ${JSON.stringify(got.left)}`)
+    }
+    assert.equal(one(heldFile, slug, 8).left.why, `status action 8 (\`paused\`): every gate signed, but held by ${hold}`)
+  }
+  assert.equal(one(heldFile, 'signoff-rollout-2026-10-19', 8).item?.kind, 'execute', 'the signed sign-off pause alone reinstates')
   // No --status: status unread.
   const bare = ok(sessions(PLAN_FILE()))
   assert.deepEqual(bare.left.map((x) => [x.action, x.why]).filter(([a]) => a !== null), [])

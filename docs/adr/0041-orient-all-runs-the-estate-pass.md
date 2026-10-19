@@ -64,9 +64,9 @@ Rulings made while P25 is built. No build grill ran for P25, so each bullet is a
   - *The budget order.* Pending sign-offs are asked first and always, whatever the budget; then the One calls, then the Unpark offers, then the Grills, each in rank order, until the first that does not fit the minutes left.
   - *A sign-off is asked only after its gates are shown verbatim*, the plan judge's bounce under them, and the `Sign off` answer lists exactly the lines `approve-gates` will sign.
   - *Schedules run through forks that ask and route nothing.* Each fork answers schedule's questions as orient-all § 6 lists them, returns its misfits unrouted, and forks for names that could meet on one note slug run one at a time.
-  - *Only decided, unheld members are scheduled*, one parallel run per root, and nothing is superseded: a run that waits names why.
+  - *Only decided, unheld members are scheduled*, each only when every open dependency it names is itself scheduled (a rollout row waits until its dependency lands, and an unscheduled one never would), one parallel run per root, and nothing is superseded: a run that waits names why.
   - *An unpark dispatches now*: the unparked project's Ready, unheld work starts in the same pass.
   - *Kill is Mark done*: `done: true` and `completed:`, as the vault's own Mark done writes it.
-  - *Live rollouts get sessions only on status's actions 6, 7, 8 (a sign-off signed in this pass), 11 and 13*, behind the plan's holds, and never on 9, 10, 12 or a plain pause, so no second lead is ever started.
-  - *Child orients are held only by an `Orient:` Session*, start after every execute, and name the note the pass wrote for their project.
+  - *Live rollouts get sessions only on status's actions 6, 7, 8 (a sign-off signed in this pass, and no other hold), 11 and 13*, behind the plan's holds, and never on 9, 10, 12 or a plain pause, so no second lead is ever started.
+  - *Child orients are held only by a Session named exactly the orient item's title* (`Orient: <project>`, cut as `create_thread` was given it), start after every execute, and name the note the pass wrote for their project.
   - *Session-lane work is listed, never started.*

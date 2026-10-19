@@ -10,16 +10,19 @@
 //       verbatim; § 4 passes `asks` verbatim, prints a later sign-off's gates again before its call, maps a label to
 //       its full text through texts[], and cites repair § 3's "presented verbatim"; § 5 is in conversation, "stop"
 //       ends it, and record folds line breaks.
-//   o4  §§ 4-5 record through estate-dispatch.py, whose DECISIONS_HEADING and RULING_LINE are schedule step 7's
-//       heading and orient § 5's ruling line (a python child loads them).
+//   o4  §§ 4-5 record through estate-dispatch.py, each call spelled out from its decision (§ 4's from
+//       `rounds.oneCalls[]`, the bare question): --question <decision.question>, --recommended
+//       <decision.options[0]> and [--fork <decision.fork>], `--fork` exactly when the decision carries one; and
+//       DECISIONS_HEADING and RULING_LINE are schedule step 7's heading and orient § 5's ruling line (a python child
+//       loads them).
 //   o5  § 4's Unpark and sign-off writes: estate-rank.py unpark, snooze --ready and kill, and approve-gates --tasks.
 //   o6  § 6 runs `plan`, forks `/thread:schedule <entry.args>` with the projectSlug line, one batch at a time, and
 //       answers schedule's questions in exactly 15 items; schedule's **Under orient-all.** paragraph cites orient-all § 6
 //       and routes nothing, S1 and S4 name orient-all, and nothing pairs orient-all with --regenerate.
 //   o7  § 7 runs `sessions` with --wrote and --status and starts exactly items[]; its table's numbers; the Session
-//       tools in order, state from the list only, identity-only reads; orient and repair candidates by their own
-//       names alone; create_thread, the paste-ready prompts, orients last with the note line; its cites; and
-//       `start: unattended` only in the Don't.
+//       tools in order, state from the list only, identity-only reads; orient and repair candidates by the item's
+//       exact `title` alone (sessions cuts it); row 8 needs plan.reinstate[] and canExecute; create_thread, the
+//       paste-ready prompts, orients last with the note line; its cites; and `start: unattended` only in the Don't.
 //   o8  § 9 asks nothing, writes only under $S, runs `plan --rounds --assume-answered` and `sessions` with no --wrote,
 //       and names every command it never runs.
 //   o9  plugin-root.md, CONTEXT.md (**Decision round**, **Dispatch plan**), ADR 0041's p25-3 ruling and the README
@@ -153,8 +156,11 @@ function check(files, consts) {
     'no sign-off is ever asked unseen', '`texts[]`', 'a gate is presented verbatim, repair § 3', 'Sign-offs are always asked'])
   need('o3', '§ 5', s5, ['in conversation', 'Lachy\'s "stop" ends the rounds', '`record` folds their line breaks'])
 
-  // o4: the decision write, pinned to schedule step 7 and orient § 5.
-  for (const [name, s] of [['§ 4', s4], ['§ 5', s5]]) need('o4', name, s, ['estate-dispatch.py record'])
+  // o4: the decision write, spelled out from the decision, and pinned to schedule step 7 and orient § 5.
+  const RECORD = ['estate-dispatch.py record', '--question <decision.question>', '--recommended <decision.options[0]>',
+    '[--fork <decision.fork>]', '`--fork` exactly when the decision carries one']
+  need('o4', '§ 4', s4, [...RECORD, '`rounds.oneCalls[]`', '`decision.question` is the bare question'])
+  need('o4', '§ 5', s5, [...RECORD, '--answer <his words>'])
   const heading = (consts.DECISIONS_HEADING ?? '').replace('{date}', '<YYYY-MM-DD>')
   const ruling = (consts.RULING_LINE ?? '').replace('{stamp}', '<UTC ISO>').replace('{fork}', '<fork>').replace('{answer}', '<ruling>')
   if (!heading || !sec(files[SCHEDULE], /^### 7\. Update each task's frontmatter/).includes(`\n${heading}\n`)) {
@@ -187,7 +193,8 @@ function check(files, consts) {
   // o7: the sessions.
   need('o7', '§ 7', s7, ['estate-dispatch.py sessions', '--wrote', '--status', 'Start exactly `items[]`, never another',
     'never from a read', 'asking only whether it is that rollout\'s lead or Leg',
-    "An orient item's only candidates are Sessions named `Orient: <project>`", "a repair item's only Sessions named `Repair: <rollout>`",
+    "An orient item's only candidates are Sessions named exactly the item's `title`",
+    "a repair item's only Sessions named exactly its `title`", 'the name `create_thread` was given',
     'No other Session ever holds an orient or repair item', '`create_thread`', 'paste-ready prompt', 'then orient last',
     'Child orients start after every execute', "the orient prompt's second line names the note",
     '`skills/execute/legs.md` § Hand over', 'handoff § Success contract'])
@@ -199,7 +206,8 @@ function check(files, consts) {
   const nothing = rows.filter((r) => /^nothing/.test(r.item)).flatMap((r) => r.nums).sort((a, b) => a - b)
   if (JSON.stringify(starts) !== JSON.stringify(STARTS)) flag('o7', `§ 7's table starts on ${JSON.stringify(starts)}`)
   if (JSON.stringify(nothing) !== JSON.stringify([1, 2, 3, 4, 5, 9, 10, 12])) flag('o7', `§ 7's nothing row is ${JSON.stringify(nothing)}`)
-  if (!/plan\.reinstate\[\]/.test(rows.find((r) => r.nums.includes(8))?.item ?? '')) flag('o7', 'row 8 does not name plan.reinstate[]')
+  const row8 = rows.find((r) => r.nums.includes(8))?.item ?? ''
+  if (!/plan\.reinstate\[\]/.test(row8) || !row8.includes('`canExecute`')) flag('o7', 'row 8 does not name plan.reinstate[] and `canExecute`')
   const stamps = skill.split('\n').filter((l) => l.includes('start: unattended'))
   if (stamps.length !== 1 || !dont.includes(C(stamps[0]).replace(/^- /, '').trim())) flag('o7', '`start: unattended` outside the Don\'t')
 
@@ -273,9 +281,13 @@ test('control o3: the gates no longer verbatim in § 3, or the re-print before a
     'Ask each call'), CONSTS, ['o3'], 're-print')
 })
 
-test('control o4: a decision heading that drifts from schedule step 7 fails o4 alone', () => {
+test('control o4: a decision heading that drifts from schedule step 7, a Grill record without its fork, or the index text as the question fails o4 alone', () => {
   only(FILES, { ...CONSTS, DECISIONS_HEADING: '## Decisions ({date})' }, ['o4'], 'heading')
   only(FILES, { ...CONSTS, RULING_LINE: '- {stamp} ruling: {fork} → {answer}' }, ['o4'], 'ruling')
+  only(swap(FILES, SKILL, '--answer <his words> --recommended <decision.options[0]> [--fork <decision.fork>]`',
+    '--answer <his words> --recommended <decision.options[0]>`'), CONSTS, ['o4'], 'grill fork')
+  only(swap(FILES, SKILL, '--question <decision.question> --answer <the full option text', '--question <q> --answer <the full option text'),
+    CONSTS, ['o4'], 'one-call question')
 })
 
 test('control o5: the kill write gone fails o5 alone', () => {
@@ -288,10 +300,13 @@ test('control o6: a sixteenth answer, or schedule routing for orient-all, fails 
     CONSTS, ['o6'], 'schedule')
 })
 
-test('control o7: any Session in the project holding an orient, or state read from a Session, fails o7 alone', () => {
-  only(swap(FILES, SKILL, "An orient item's only candidates are Sessions named `Orient: <project>`",
+test('control o7: any Session in the project holding an orient, a repair matched on its uncut name, state read from a Session, or a reinstate past a hold fails o7 alone', () => {
+  only(swap(FILES, SKILL, "An orient item's only candidates are Sessions named exactly the item's `title`",
     "An orient item's candidates are any Session in the project"), CONSTS, ['o7'], 'orient candidates')
+  only(swap(FILES, SKILL, "a repair item's only Sessions named exactly its `title`",
+    "a repair item's only Sessions named `Repair: <rollout>`"), CONSTS, ['o7'], 'repair by uncut name')
   only(swap(FILES, SKILL, 'never from a read', 'from a read when unsure'), CONSTS, ['o7'], 'read for state')
+  only(swap(FILES, SKILL, ' and `plan` holds nothing else on it (`canExecute`)', ''), CONSTS, ['o7'], 'row 8 canExecute')
 })
 
 test('control o8: a dry run that relays fails o8 alone', () => {

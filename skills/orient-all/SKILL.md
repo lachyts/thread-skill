@@ -100,9 +100,11 @@ question text to its item, and each picked label to its full option text (`texts
 
 Act on each answer as it lands:
 
-- **One call**: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task <slug> --question <q> --answer <the full option text, or his typed words> --recommended <texts[0]> [--fork <fork>]`,
-  `--fork` exactly when the index entry carries one. A refusal (the task went in flight since the scan, say) is
-  reported in § 8 with the answer, unrecorded.
+- **One call**: with `decision` the `rounds.oneCalls[]` entry's for the index entry's `slug`,
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task <slug> --question <decision.question> --answer <the full option text, or his typed words> --recommended <decision.options[0]> [--fork <decision.fork>]`,
+  `--fork` exactly when the decision carries one. `decision.question` is the bare question: the index text opens
+  with `[[<slug>]] `, which `record` cuts too, so the note never links to itself. A refusal (the task went in flight
+  since the scan, say) is reported in § 8 with the answer, unrecorded.
 - **Sign-off**: `Sign off` runs
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <slug>`; a non-zero
   exit is reported. `Not now` does nothing.
@@ -116,10 +118,13 @@ decided. Sign-offs are always asked, whatever the budget.
 
 ### 5. Grill rounds
 
-Take each `rounds.grill[]` task in order and put its decisions to Lachy one at a time, in conversation: the
-question, then the options with the recommendation first and its why. Record each answer at once with the same
-`estate-dispatch.py record` call as § 4, passing his words as he gave them: `record` folds their line breaks into
-spaces. Lachy's "stop" ends the rounds. A Grill task is decided only when every one of its decisions is answered.
+Take each `rounds.grill[]` task in order and put its `decisions[]` to Lachy one at a time, in conversation: the
+question, then the options with the recommendation first and its why. Record each answer at once, `decision` the one
+just asked:
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/estate-dispatch.py record --task <slug> --question <decision.question> --answer <his words> --recommended <decision.options[0]> [--fork <decision.fork>]`,
+`--fork` exactly when the decision carries one, so an open fork answered here gets its `orient ruling:` line and is
+not asked again. His words go as he gave them: `record` folds their line breaks into spaces. Lachy's "stop" ends the
+rounds. A Grill task is decided only when every one of its decisions is answered.
 
 ### 6. Schedule
 
@@ -171,7 +176,7 @@ spaces. Lachy's "stop" ends the rounds. A Grill task is decided only when every 
    |---|---|
    | 6, every task merged | execute (the ceremony), when `plan` holds nothing on it |
    | 7, an open escalation | repair |
-   | 8, `paused` | execute only when the rollout is in `plan.reinstate[]`; a plain `paused:` (Lachy's) gets nothing |
+   | 8, `paused` | execute only when the rollout is in `plan.reinstate[]` and `plan` holds nothing else on it (`canExecute`); a plain `paused:` (Lachy's) gets nothing |
    | 11, a drift flag or a Needs you item | repair |
    | 13, nothing started | execute, when `plan` holds nothing on it (the Start stamp is a hold: the Stage starts it) |
    | 1–5, 9, 10, 12 | nothing: lineage, version, incomplete, a drain, a live queue or room stop, and a resume status cannot check from here |
@@ -181,10 +186,12 @@ spaces. Lachy's "stop" ends the rounds. A Grill task is decided only when every 
 4. **On the Chorus Stage** (the `create_thread` tool answers ToolSearch, searched for as in handoff § Success contract):
    1. Call `list_sessions` once. Each Session's state comes from the list, never from a read: running a Turn, waiting
       on the listener, a failed last Turn, or at rest, with its background work.
-   2. **Candidates, by item kind.** An orient item's only candidates are Sessions named `Orient: <project>`, and a
-      repair item's only Sessions named `Repair: <rollout>`. An execute or Leg item's are the Sessions whose name is
-      the item's title or contains the rollout slug, other than `Repair:` ones. No other Session ever holds an orient
-      or repair item: a running lead in the project holds neither (repair's live-queue mode runs beside a lead).
+   2. **Candidates, by item kind.** An orient item's only candidates are Sessions named exactly the item's `title`,
+      and a repair item's only Sessions named exactly its `title`: the name `create_thread` was given, `Orient: <project>`
+      or `Repair: <rollout>` as `sessions` cuts it to 60 characters with `…`, so a long name never matches its uncut
+      form. An execute or Leg item's are the Sessions whose name is the item's title or contains the rollout slug,
+      other than `Repair:` ones. No other Session ever holds an orient or repair item: a running lead in the project
+      holds neither (repair's live-queue mode runs beside a lead).
    3. A candidate that is running, waiting, failed, or at rest with background work running: start nothing for the
       item, and name the Session and its state.
    4. A candidate at rest with nothing running: an execute or Leg candidate not named exactly the item's title gets
@@ -245,7 +252,7 @@ It asks nothing, and writes only under `$S`. It never runs `record`, `approve-ga
   nor on a plain `paused:`. Never start a second lead.
 - Relay into a Session the list shows running, waiting, failed or busy with background work, or read a Session for
   its state.
-- Let any Session but an `Orient:` one hold a child orient.
+- Let any Session but one named exactly the orient item's `title` hold a child orient.
 - Sign a gate Lachy did not sign in this pass, or ask a sign-off whose gates he has not been shown verbatim.
 - Start session-lane or parked work, other than a project unparked in this pass.
 - Schedule a run that waits, run two batches at once, route a fork's misfits, or run its follow-up line.
