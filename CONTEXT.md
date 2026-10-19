@@ -46,12 +46,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   and every live rollout's status. Scripts scan, the model decides: the
   grading and ranking come after it. _Avoid_: audit, for the scan alone.
 - **Readiness grade** — what a task needs from Lachy before an agent can
-  finish it, given in the estate pass's scan-only first pass: **Ready** (an
-  agent can finish it without inventing a decision nothing records), **One
-  call** (a single decision, offered with a recommendation), **Grill** (a few
-  low-level decisions an agent with the project's thread, ADRs and code can
-  recommend on), or **Orient** (the decisions shape the project, so it needs a
-  full-context session). _Avoid_: tier 1/2/3, traffic lights.
+  finish it, given by the estate pass's per-project grading agents after the
+  Estate scan: **Ready** (an agent can finish it without inventing a decision
+  nothing records), **One call** (a single decision, offered with a
+  recommendation), **Grill** (a few low-level decisions an agent with the
+  project's thread, ADRs and code can recommend on), or **Orient** (the
+  decisions shape the project, so it needs a full-context session). A decision
+  the agent cannot recommend on with confidence raises the grade one step.
+  _Avoid_: tier 1/2/3, traffic lights.
 - **Unpark offer** — the estate pass's question about a parked project with
   ready work: unpark it (it becomes queued), snooze it (asked again only after
   a fortnight or when its ready work grows), or kill it (done and archived).
@@ -59,6 +61,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   PRs to read, sign-offs, eye-checks. Shown beside the work the estate pass
   queues, because his attention is spent twice, once deciding and once
   reviewing.
+- **Ranked slate** — the estate pass's ranking of graded open work by agent
+  work per minute of Lachy's attention (deciding plus reviewing), its
+  leverage: parked projects last; work due within a fortnight (overdue
+  included) above everything else; then crowned projects; then leverage.
+  Grouped into candidate runs with their Review load, work held by an open
+  dependency set apart, beside the One call and Grill decisions in asking
+  order, the projects that need their own orient, and the Unpark offers
+  (`skills/_shared/readiness-grade.md`). _Avoid_: backlog, priority list.
 
 ## Continuity (threads and attention)
 
