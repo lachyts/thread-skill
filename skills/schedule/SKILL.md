@@ -58,6 +58,12 @@ with its outcome (serial-shaped or session lane), and end the gate with the seri
 follow-up line, `/thread:schedule --tasks <serial members>`, which takes them down the serial path once
 this run is done. A run writes one shape.
 
+**Under orient-all.** A fork of `/thread:orient-all` runs this skill with `--tasks` and asks nothing: the
+decision round there authorised the member set. Each question below takes orient-all § 6's answer, and step 6
+names the note with the slug its prompt gives. It routes nothing: § 0's session-lane routing and the follow-up
+`/thread:schedule --tasks <serial members>` line are returned to orient-all, never run. Step 8 (or S7) reports
+them.
+
 After the misfit scan, resolve the target repo, the project root the rollout note will carry, and check
 the dispatch blockers against it. Read the project note's `Local:` line; if there is none, ask the user
 for the path. First run the self-rollout check in
@@ -479,7 +485,7 @@ Open in Obsidian to review. To execute:
 The thread:execute skill at ${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md reads this note and runs the three-layer convergence engine (plan-gate → Ralph retry → master review) via the Workflow tool.
 ```
 
-**Start when ready.** When Lachy answers a standalone run's summary with it, stamp `start: unattended` as a top-level frontmatter line just below `status:` on the note this run wrote (`_shared/vault-grammar.md` § Rollout start stamp) and stop: nothing runs. Under orient § 6, schedule writes nothing here, because orient § 9's offer asks it. The stamp is never written before step 7's last write; the vault grammar's reader would wait on `incomplete:` anyway.
+**Start when ready.** When Lachy answers a standalone run's summary with it, stamp `start: unattended` as a top-level frontmatter line just below `status:` on the note this run wrote (`_shared/vault-grammar.md` § Rollout start stamp) and stop: nothing runs. Under orient § 6, schedule writes nothing here, because orient § 9's offer asks it. Under orient-all, schedule writes nothing here either. The stamp is never written before step 7's last write; the vault grammar's reader would wait on `incomplete:` anyway.
 
 **Pre-flight — gated tasks.** If the user kept any of step 3.5's human/release-gated tasks (a quote-only match is none), list them above the summary so the user clears them before executing (an unaddressed gate makes the agent refuse mid-run):
 
@@ -562,7 +568,7 @@ repo: a WARN names it.
 **S1. Discover.** Step 1's filters and skip rules pick the members (or take the `--tasks` set): a task already
 linked to a live rollout of either shape is skipped and named, and so is a decision task. Session-lane misfits are
 named as such and left unstamped. A standalone run confirms the member list in S4's batch; under orient § 7
-nothing is asked.
+or orient-all § 6 nothing is asked.
 
 **S2. Plan.** Run
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/serial-chains.py plan --tasks <serial members> [--surface <slug>=<raw>]… [--dep <slug>=<slug>]…`.
@@ -592,7 +598,7 @@ chain holds one `repo:` token that is a directory, else with no `--repo`; a non-
 member's surfaces with its source and its added tokens); the session-lane members; the WARNs; and the questions
 (§ 3's dependencies, § 3.5's gates, § 3.6's ask-ahead). A confirmed dependency (passed as
 `--dep <dependant>=<dependency>`), or a surface Lachy adds for any member (passed as `--surface`, which always
-unions in, declared or not), re-runs S2 and S3. Under orient § 7 nothing is asked: the kept gates and § 3.6's hits
+unions in, declared or not), re-runs S2 and S3. Under orient § 7 or orient-all § 6 nothing is asked: the kept gates and § 3.6's hits
 are listed in S7. Steps 2, 2.5–2.8, 4, 4.5, 4.7 and Solo are skipped on this path, and `plan_approval:`, `scope:`,
 `rung:` and `solo:` are never proposed.
 

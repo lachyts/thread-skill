@@ -34,6 +34,7 @@ sessions.
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
 | `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing. Schedules parallel-shaped phases itself, steers the rest (a serial rollout for serial-shaped work, ADR 0040, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
+| `/thread:orient-all` | where is my attention best placed? | The estate pass (ADR 0041): orient across every project at once. Scans the vault, grades and ranks all open work by agent work per minute of Lachy's attention, asks the sign-offs, One calls, Unpark offers and Grills that fit his stated time budget, writes each answer into its task, schedules the runs that are ready (forked `/thread:schedule` calls, batched so no two can name one note), then starts every execute, Leg 1, repair and child orient as a visible Chorus session, or prints paste-ready prompts off the Stage. Never reshapes a project; `--dry-run` writes nothing. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
 | `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop or a Chorus Session also create a fresh visible task seeded with it (a sidebar task in Codex Desktop); elsewhere label it a manual handoff. |
@@ -56,7 +57,9 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 Orient's audit, reshuffle and steering are portable, and orient spawns no child
 agents (ADR 0040 retired the ADR 0023 batches). The rollout executor still
 requires its canonical Workflow runtime; shared source and skill discovery do not
-provide that runtime.
+provide that runtime. The estate pass (`/thread:orient-all`) grades through read-only agents and schedules through
+forked subagents, and starts its sessions as visible Chorus sessions on the Stage; anywhere else it ends with
+paste-ready prompts.
 
 ## The convergence engine
 
@@ -337,10 +340,22 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   higher-leverage undated one, crowned meaning `status: crowned` only, parked last), exact leverage, candidate runs
   with their Review load, shared roots and verbatim blockers, the decision rounds, `orient[]` (parked projects left
   out), dependency holds (each why, transitive holds, cycles), the Unpark offers and the snooze writer's round trip,
-  its `--clear` and refusals and parity with the scan's standing, usage exits, byte-equal reruns and read-only runs;
+  its `--clear` and refusals and parity with the scan's standing, the `unpark` and `kill` writes (one save each, the
+  snooze cleared with the status, an umbrella with a live sub-project refused, parity with the scan's parked set), a
+  decision's `fork` passed through, usage exits, byte-equal reruns and read-only runs;
   `tests/contracts/readiness-grade.test.mjs` pins `skills/_shared/readiness-grade.md` to the script's constants and
   its `--clear`, its hold reasons, gated_inputs.py's gate kinds, the thread homes, CONTEXT.md's terms and ADR 0041's
   ruling.
+- **Estate dispatch** — `tests/estate-dispatch.test.mjs`: `estate-dispatch.py` over the real scan and rank of a
+  fixture vault, with injected rollout summaries — `slices` (one file per home, never overwriting), `rounds` (the
+  sign-offs asked only under no pause or the sign-off pause, their gates raw and as `approve-gates` signs them, the
+  cut to the budget, held decisions skipped, AskUserQuestion payloads with short labels and unique texts), `plan`
+  (decided, unheld members only, blockers, shared roots and parked runs waiting, batches that keep names that may
+  meet apart, each live rollout's holds and the signed reinstate), `sessions` (written notes, the status allow-list
+  behind the holds, orients last) and `record` (the answer folded to one line into `## Decisions (asked ahead
+  <date>)`, the fork's ruling, every refusal byte-identical), usage exits, byte-equal reruns and read-only runs;
+  `tests/contracts/orient-all.test.mjs` pins `skills/orient-all/SKILL.md` to the script, to schedule's answered
+  questions and to status § 4's numbered actions.
 - **Declared check** — `tests/declared-check.test.mjs`: `declared-check.py` against a fixture vault and repos
   with a fixture check — undeclared, whole untruncated output and its digest, the advance on a matching digest
   and the hold on a changed one or a failed re-run, the group-killing time limit (and on a signal, even one that

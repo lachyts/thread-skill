@@ -69,6 +69,18 @@ through time, from attention to merged PRs. Terms only — no implementation.
   dependency set apart, beside the One call and Grill decisions in asking
   order, the projects that need their own orient, and the Unpark offers
   (`skills/_shared/readiness-grade.md`). _Avoid_: backlog, priority list.
+- **Decision round** — the estate pass's questions, within the time budget
+  Lachy states. First the One-call round: pending sign-offs always, each
+  after its gates are shown verbatim, then One calls, then Unpark offers,
+  batched through AskUserQuestion. Then Grill rounds, in conversation, while
+  time remains. Each answer is written into its task's `## Decisions (asked
+  ahead <date>)` (`skills/orient-all/SKILL.md`). _Avoid_: triage round.
+- **Dispatch plan** — what the estate pass starts once the decisions are in:
+  a schedule per candidate run whose decided, unheld members are clear of
+  dispatch blockers, in batches; then one visible session per new parallel
+  execute and serial Leg 1, per live rollout that status sends to a ceremony,
+  a start, a signed reinstate or a repair, and per child orient (paste-ready
+  prompts off the Stage). _Avoid_: launch list.
 
 ## Continuity (threads and attention)
 
