@@ -58,6 +58,9 @@ starts a comment, and `&&`, `||`, `;`, `|` and `&` start a new command. A comman
 each `--add-dir <path>` (with any further path spans after it: the flag takes several) or `--add-dir=<path>`,
 and of a `cd <path>` that starts the command, where a path starts `/`, `~/` or `$HOME/` (`${HOME}/`). Any other
 path in a fenced block is not claimed: a fence holds commands, and a path a command only reads is no surface.
+A `## Launch` path (a path span or a launch-command path) that is `/`, the home directory or an ancestor of it (a
+bare `cd ~`, `--add-dir ~`) is never claimed, with a WARN: it would contain every repo token and so over-claim
+the estate (too_broad).
 
 Launch, per member. Alias: the task's `launch:`, else the `launch:` of its first project note (the `projects:`
 wikilink's file under `<vault>/Work/Projects/**`, a match outside Archive/ first). Folder: `by_alias[alias]`, else
@@ -404,6 +407,16 @@ def _path_arg(w: str):
     return w if w == "~" or w.startswith(("~/", "/")) else None
 
 
+def too_broad(path: str) -> bool:
+    """A `## Launch` path that is `/`, the home directory or an ancestor of it (compared as written and as
+    realpaths): claimed, it would contain every repo token, so the plan skips it with a WARN."""
+    full = os.path.expanduser(path)
+    home = os.path.expanduser("~")
+    fulls = {posixpath.normpath(full), os.path.realpath(full)}
+    homes = {posixpath.normpath(home), os.path.realpath(home)}
+    return any(f == "/" or f == h or h.startswith(f + "/") for f in fulls for h in homes)
+
+
 def command_paths(cmd: str):
     """(path, via) for each launch-command path of one shell line (the header's rule): via is `--add-dir` or `cd`."""
     words, out, i, first = _cmd_words(cmd), [], 0, True
@@ -679,8 +692,15 @@ def cmd_plan(args) -> int:
                 refusals.append(why)
 
         cw = []
-        launch_named = launch_paths(note.section_text("## Launch"))
         declared = read_surfaces(note)
+        launch_named = []
+        for path, via in launch_paths(note.section_text("## Launch")):
+            if not too_broad(path):
+                launch_named.append((path, via))
+            elif not declared:
+                cw.append(f"WARN: {slug}: its ## Launch {via or 'path'} {path} is / or the home directory (or above "
+                          "it): not claimed, since it would contain every repo; declare `surfaces:` for what the "
+                          "task writes there")
         tokens, added = [], []
         if declared:
             for raw in declared:

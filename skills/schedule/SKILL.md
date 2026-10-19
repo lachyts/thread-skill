@@ -555,7 +555,9 @@ project and each surface added for it, or exactly what it declares in `surfaces:
 git checkout widens to that checkout's toplevel. It never claims its launch profile's other Working roots (a
 workspace launcher's `add_dirs`), another project's `Local:`, a project's `repos:`, nor a repo or external system
 it writes but names nowhere: those are outside schedule's sight, which is why the default's WARN says to declare
-`surfaces:` for them (`serial-chains.py`'s header is the one statement of the surface grammar).
+`surfaces:` for them (`serial-chains.py`'s header is the one statement of the surface grammar). Nor does it claim a
+`## Launch` path that is `/` or the home directory (a bare `cd ~` or `--add-dir ~`), which would contain every
+repo: a WARN names it.
 
 **S1. Discover.** Step 1's filters and skip rules pick the members (or take the `--tasks` set): a task already
 linked to a live rollout of either shape is skipped and named, and so is a decision task. Session-lane misfits are

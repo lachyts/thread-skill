@@ -11,7 +11,8 @@
 #   P2c  the default (the vault only) and its stated limit; a declared `any`
 #   P2d  launch commands (`--add-dir` and a leading `cd`, fenced or in a span) and the first project's `Local:` are
 #        derived claims; a fenced path no such command names, a comment, a Read item, a declared member, a second
-#        project's `Local:` and a backticked `Local:` with no path claim nothing
+#        project's `Local:` and a backticked `Local:` with no path claim nothing; a `## Launch` path that is `/` or
+#        the home directory is never claimed (a WARN for an undeclared member)
 #   P3   the overlap grammar (pure), symlinks, clones, a comma inside a token, sibling subdirectories, a malformed token
 #   P4   ruling (c): a member on a checkout of lachyts/thread-skill (a `## Launch` `--add-dir` or `cd` path, declared
 #        or not, its surface, its launch folder, its project's `Local:` or `repos:`) goes to the session lane
@@ -230,6 +231,27 @@ cc-g --add-dir \"\$HOME/h\" \\
 $F" mkt c4 'launch: cc-g'
 HOME="$TMP" plan --tasks c4
 ok "$(mem c4 surfaces)" "[\"repo:$G\",\"repo:$H\",\"repo:$N/a\"]" "P2d: a continued line's --add-dir \"\$HOME/…\" and --add-dir=<path> both claim"
+# A bare home or root would contain every repo token (the whole estate): never claimed. HOME=$TMP, so ~/h is $H.
+LAUNCH="$F""sh
+cd ~ && cc-g --add-dir ~ ~/h
+cc-g --add-dir /
+$F
+- **Repo:** \`~/\`" mkt c6 'launch: cc-g'
+HOME="$TMP" plan --tasks c6
+ok "$rc|$(mem c6 surfaces)|$(mem c6 source)" "0|[\"repo:$G\",\"repo:$H\"]|\"derived\"" "P2d: cd ~, --add-dir ~, --add-dir / and a \`~/\` span claim nothing; ~/h after --add-dir ~ still claims"
+ok "$(j '[w for w in d["warns"] if "is / or the home directory" in w]' | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')" 4 "P2d: … each with a WARN naming it"
+has "$(j 'd["warns"]')" "c6: its ## Launch --add-dir ~ is / or the home directory (or above it): not claimed" "P2d: … the WARN names the flag and the path"
+hasnt "$(j 'd["warns"]')" "repo:$TMP " "P2d: … and no path-only claim on the home directory"
+LAUNCH="$F""sh
+cc-g --add-dir ~
+$F" mkt c7 'launch: cc-g' 'surfaces: ["ext:c7"]'
+HOME="$TMP" plan --tasks c7
+ok "$(mem c7 surfaces)|$(j 'd["warns"]')" '["ext:c7"]|[]' "P2d control: a declared member's --add-dir ~ draws no WARN (its declaration is its claim)"
+LAUNCH="$F""sh
+cc-g --add-dir ~/h
+$F" mkt c8 'launch: cc-g'
+HOME="$TMP" plan --tasks c8
+ok "$(mem c8 surfaces)|$(j 'd["warns"]')" "[\"repo:$G\",\"repo:$H\"]|[]" "P2d control: a path below the home directory is claimed, with no WARN"
 LAUNCH="- **Launch:** \`cd $H && claude\`" mkt c5
 plan --tasks c5
 ok "$(mem c5 surfaces)|$(mem c5 launch)" "[\"repo:$H\"]|{\"alias\":\"claude\",\"folder\":\"$H\"}" "P2d: a leading cd in an inline launch span claims its checkout"

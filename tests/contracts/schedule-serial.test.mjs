@@ -19,8 +19,9 @@
 //   t5  execute § 2's shape line, orient § 6's § 0 stop naming a live serial chain on the repo and its
 //       `status: dropped` remedy, orient § 7's one note per chain, orient § 9's no-offer sentence for a serial
 //       note, and the vault grammar's parallel-only Writers clause;
-//   t6  CONTEXT.md's **Rollout**, **Shape**, **Serial rollout**, **Unfinished rollout**, **Surface** and
-//       **Incomplete rollout** entries (a serial note's stamp ends only by `status: dropped`);
+//   t6  CONTEXT.md's **Rollout**, **Shape**, **Serial rollout**, **Unfinished rollout**, **Surface** (a `## Launch`
+//       path at `/` or the home directory never claimed) and **Incomplete rollout** entries (a serial note's stamp
+//       ends only by `status: dropped`);
 //   t7  § 0's mixed-set sentence gives the serial-shaped members their follow-up line;
 //   t8  S3 checks every chain, stops the whole run before any write on any refusal, and reports every refusal
 //       together;
@@ -167,6 +168,7 @@ function check(files) {
   need('t6', 'CONTEXT **Surface**', entry(ctx, 'Surface'), [
     '`repo:<absolute path>`', '`vault:<path>`', '`ext:<name>`', '`any`', "widens to that checkout's toplevel",
     'declared or derived', 'Working roots', '_Avoid_: footprint, file-set',
+    'A `## Launch` path that is `/` or the home directory is never claimed',
   ])
 
   // ---- t7: the mixed set's follow-up line ----
@@ -316,6 +318,10 @@ test('control: an S3 that stops at its first refused chain fails t8', () => {
 
 test('control: an S3 that writes the other chains fails t8', () => {
   only(swap(SCHEDULE, 'stops the whole run before anything is written, and\nevery refusal', 'stops that chain, and\nevery refusal'), ['t8'], 'whole run')
+})
+
+test('control: a Surface entry that claims the home directory fails t6', () => {
+  only(swap(CONTEXT, 'A `## Launch` path that is `/` or the home directory is never\n  claimed', 'A `## Launch` path that is `/` or the home directory is\n  claimed'), ['t6'], 'home directory')
 })
 
 test('control: a description back on "a second unfinished rollout" fails t9', () => {
