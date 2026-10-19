@@ -298,9 +298,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Rollout** — a backlog of related tasks landed as one coordinated effort,
   described by one always-dated Obsidian note
   (`<slug>-rollout-<YYYY-MM-DD>`) whose **Shape** is parallel or serial. At
-  most one parallel rollout is **unfinished** per repo; new parallel-shaped
-  work supersedes it rather than running beside it (schedule § 0, ADR 0027,
-  ADR 0030). _Avoid_: batch, run, campaign.
+  most one rollout of each shape is **unfinished** per repo; new work of a
+  shape supersedes that shape's rollout rather than running beside it
+  (schedule § 0, ADR 0027, ADR 0030, ADR 0040). _Avoid_: batch, run, campaign.
 - **Shape** — whether a rollout runs in parallel or in serial; the one word
   that tells the two kinds apart. Every rollout verb (schedule, execute,
   status, repair, reflect) takes either shape. _Avoid_: mode, lane (a lane
@@ -310,8 +310,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rollout before 2026-10-19 is one.
 - **Serial rollout** — a rollout run as a chain of **Legs**: visible,
   interactive sessions that each work tasks themselves, close, and hand the
-  rest to a fresh successor. No worktrees and no subagents. _Avoid_: relay
-  (Chorus's word for sending a command to a session).
+  rest to a fresh successor. No worktrees, and no subagents but each task's
+  clean-room review. _Avoid_: relay (Chorus's word for sending a command to a
+  session).
 - **Leg** — one session's part of a serial rollout: it finishes any task its
   predecessor left claimed, then claims tasks one at a time (up to five, fewer
   when its context grows heavy or a task proves large), closes, and hands over.
@@ -321,8 +322,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `resolve_rollout` and close's owner exclusion read a task's rollout as live
   this way. _Avoid_: active rollout.
 - **Unfinished rollout** — a live rollout that is neither `done` nor `dropped`
-  and still has a task not merged (or no task yet): the one rollout a repo may
-  hold at a time, which schedule § 0's unfinished-rollout check enforces. It is
+  and still has a task not merged (or no task yet): the one rollout of its
+  shape a repo may hold at a time, which schedule § 0's unfinished-rollout
+  check enforces. It is
   narrower than live: a superseded note stamped done but not yet moved is live
   but not unfinished, and so is a rollout whose every task merged before its
   completion ceremony ran. `--regenerate` supersedes this project's unfinished
@@ -388,10 +390,15 @@ through time, from attention to merged PRs. Terms only — no implementation.
   _Avoid_: checkpoint, pointer, progress marker.
 - **Primary checkout** — the git checkout the plugin runs from, live (a
   directory-source install, or `--plugin-dir`): every rollout's lead, in any
-  repo, runs its engine from it. Every parallel rollout's repo is a separate
-  clone, `<repo>-rollout` (ADR 0042), so its merges never reach it. It never moves while a **Running rollout**
+  repo, runs its engine from it. A self-rollout's repo is a separate clone,
+  so its merges never reach it. It never moves while a **Running rollout**
   exists (ADR 0031). Not the engine's "main checkout", which is a rollout's own
   repo. _Avoid_: live checkout, installed copy.
+- **Rollout clone** — a repo's second full clone, `<toplevel>-rollout`, the
+  Project root of its parallel rollouts so peer sessions' commits to the main
+  checkout never reach a rollout's windows. Today only a self-rollout uses
+  one; from P26, every parallel rollout does (ADR 0042). _Avoid_: mirror,
+  fork.
 - **Running rollout** — a live, started rollout at the current protocol,
   neither `done` nor `dropped` and not hard-paused: one a lead may be running
   on the primary checkout. It differs from unfinished both ways: it leaves out
