@@ -550,11 +550,12 @@ An all-serial set (§ 0: no member parallel-shaped, at least one serial-shaped) 
 writes one **serial rollout** note per chain (ADR 0040): `shape: serial`, the chain's tasks in order, each row with
 the launch its Leg opens in, and the chain's surfaces. Chains whose surfaces are disjoint run side by side; a chain
 that writes a repo checkout owns that checkout. A member claims its launch folder, each path its `## Launch` names
-and each surface added for it, or exactly what it declares in `surfaces:`, and every claimed path inside a git
-checkout widens to that checkout's toplevel. It never claims its launch profile's other Working roots (a workspace
-launcher's `add_dirs`), nor a repo or external system it writes but names nowhere: those are outside schedule's
-sight, which is why the default's WARN says to declare `surfaces:` for them (`serial-chains.py`'s header is the one
-statement of the surface grammar).
+(its launch commands' `--add-dir` and `cd` paths among them, fenced or not), each `Local:` path of its first
+project and each surface added for it, or exactly what it declares in `surfaces:`, and every claimed path inside a
+git checkout widens to that checkout's toplevel. It never claims its launch profile's other Working roots (a
+workspace launcher's `add_dirs`), another project's `Local:`, a project's `repos:`, nor a repo or external system
+it writes but names nowhere: those are outside schedule's sight, which is why the default's WARN says to declare
+`surfaces:` for them (`serial-chains.py`'s header is the one statement of the surface grammar).
 
 **S1. Discover.** Step 1's filters and skip rules pick the members (or take the `--tasks` set): a task already
 linked to a live rollout of either shape is skipped and named, and so is a decision task. Session-lane misfits are

@@ -21,8 +21,8 @@ Surfaces (CONTEXT.md **Surface**). A surface is a place a chain writes, as a can
   any                   the unknown: overlaps every token of every kind.
 Kinds never overlap one another, save `any`. A task's own note and the chain's note are never surfaces.
 
-How a path becomes a token (claim; the same for a declared `repo:` path, a `## Launch` path, a launch folder and a
---surface path):
+How a path becomes a token (claim; the same for a declared `repo:` path, a `## Launch` path, a project's `Local:`,
+a launch folder and a --surface path):
   1. `~` expanded; the path must be absolute. The realpath of its nearest existing ancestor, with the rest appended
      and normalised; a path that does not exist yet is claimed through that ancestor, with a WARN naming it.
   2. At or under the vault root's realpath: `vault` (the root itself) or `vault:<rel>`. The vault is a note space,
@@ -39,14 +39,25 @@ Each member's surfaces:
      The declaration is the member's whole claim before additions: it replaces derivation.
   2. Derived (no declaration): every backticked path span in its `## Launch` outside a **Read...** or **MCP** item
      (a span that starts `~/` or `/`, holds no whitespace or `:`, and, `/`-rooted, has two segments or more, so
-     `/seo:impact`, `/morning` and alias spans are skipped), plus its launch folder, for a member with an alias.
+     `/seo:impact`, `/morning` and alias spans are skipped); every launch-command path there (below); each
+     `` Local: `<path>` `` in the body of its first project note (the first `projects:` wikilink's); and its
+     launch folder, for a member with an alias.
   3. Added: each `--surface <slug>=<raw>` unions in, declared member or not (a path or `repo:` value through claim,
      any other token through parse_token), and is listed in the member's `added`.
   4. Default (nothing from 1-3): `vault`, with a WARN to declare `surfaces:`.
 `source` is `declared` (1 non-empty), else `derived` (2 or 3 gave a token), else `default`. The guarantee: a
-member claims its launch folder, each path its `## Launch` names and each surface added for it, or exactly what it
-declares. It never claims its launch profile's other Working roots (a workspace launcher's `add_dirs`), nor a repo
-or external system it writes but names nowhere: those are outside schedule's sight.
+member claims its launch folder, each path its `## Launch` names (its launch commands' `--add-dir` and `cd` paths
+among them), each `Local:` path of its first project and each surface added for it, or exactly what it declares.
+It never claims its launch profile's other Working roots (a workspace launcher's `add_dirs`), another project's
+`Local:`, a project's `repos:` entries, nor a repo or external system it writes but names nowhere: those are
+outside schedule's sight.
+
+Launch-command paths. In `## Launch`, outside a **Read...** or **MCP** item, each line of a fenced block (a `\`
+line end continues it) and each backticked span that is not a path span is read as shell: quotes stripped, `#`
+starts a comment, and `&&`, `||`, `;`, `|` and `&` start a new command. A command's path is the argument of
+each `--add-dir <path>` (with any further path spans after it: the flag takes several) or `--add-dir=<path>`,
+and of a `cd <path>` that starts the command, where a path starts `/`, `~/` or `$HOME/` (`${HOME}/`). Any other
+path in a fenced block is not claimed: a fence holds commands, and a path a command only reads is no surface.
 
 Launch, per member. Alias: the task's `launch:`, else the `launch:` of its first project note (the `projects:`
 wikilink's file under `<vault>/Work/Projects/**`, a match outside Archive/ first). Folder: `by_alias[alias]`, else
@@ -55,8 +66,9 @@ it has exactly one, else from the vault root. Each row keeps its own launch: a l
 Leg boundary (ADR 0040).
 
 Ruling (c), no serial self-rollouts: plugin.json's `repository`, normalised (norm_origin), against the origin of
-each of a member's `repo:` checkouts, its launch folder, every `` Local: `<path>` `` in its project notes' bodies and
-their `repos:` entries. A match sends the member to `sessionLane`, with a `why` naming the source.
+each launch-command path in a member's `## Launch` (declared member or not), each of its `repo:` checkouts, its
+launch folder, every `` Local: `<path>` `` in its project notes' bodies and their `repos:` entries. A match sends
+the member to `sessionLane`, with a `why` naming the source (the first match, in that order).
 
 Grouping: connected components over surface overlap, plus `depends-on:` / `blocked-by:` / --dep edges inside the
 set. Each chain is ordered topologically (Kahn's); among the ready tasks the next row is the lowest phase N of
@@ -84,6 +96,7 @@ import json
 import os
 import posixpath
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -168,13 +181,6 @@ def overlaps(a, b) -> bool:
 def overlap_pairs(A, B):
     """Every (a, b) with a from A and b from B that overlap, in order."""
     return [(a, b) for a in A for b in B if overlaps(a, b)]
-
-
-def _unquote(s: str) -> str:
-    s = s.strip()
-    if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
-        return s[1:-1].strip()
-    return s
 
 
 def _item_value(raw: str) -> str:
@@ -369,7 +375,9 @@ SPAN_RE = re.compile(r"`([^`\n]+)`")
 LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$")
 SKIP_LABEL_RE = re.compile(r"^[*_\s]*(?:read\w*|mcp)\b", re.I)
 PHASE_RE = re.compile(r"(?:^|-)p(\d+(?:\.\d+)?)-(\d+)(?=-|$)", re.I)
-LOCAL_RE = re.compile(r"Local:\s*`([^`\n]+)`")
+LOCAL_RE = re.compile(r"Local:\s*`(~?/[^`\n]*)`")
+CMD_PUNCT = ";&|"
+HOME_RE = re.compile(r"^\$(?:HOME|\{HOME\})(?=/|$)")
 
 
 def is_path_span(s: str) -> bool:
@@ -380,15 +388,70 @@ def is_path_span(s: str) -> bool:
     return s.startswith("/") and len([p for p in s.split("/") if p]) >= 2
 
 
-def launch_spans(text: str):
-    """The path spans of a `## Launch` body: backticked, outside fenced blocks and outside a **Read...** or **MCP**
-    item (a list item or an unindented line starts an item; an indented line continues it; a blank line ends it)."""
-    out, fence, skip = [], False, False
+def _cmd_words(cmd: str):
+    """A shell line's words: quotes stripped, `#` a comment, each run of `;`, `&` and `|` a word of its own."""
+    lex = shlex.shlex(cmd, posix=True, punctuation_chars=CMD_PUNCT)
+    lex.whitespace_split = True
+    try:
+        return list(lex)
+    except ValueError:  # an unbalanced quote: plain whitespace words
+        return cmd.split()
+
+
+def _path_arg(w: str):
+    """A command argument as a path to claim (`$HOME` read as `~`), or None when it is not absolute."""
+    w = HOME_RE.sub("~", w)
+    return w if w == "~" or w.startswith(("~/", "/")) else None
+
+
+def command_paths(cmd: str):
+    """(path, via) for each launch-command path of one shell line (the header's rule): via is `--add-dir` or `cd`."""
+    words, out, i, first = _cmd_words(cmd), [], 0, True
+    while i < len(words):
+        w = words[i]
+        i += 1
+        if w and set(w) <= set(CMD_PUNCT):
+            first = True
+            continue
+        if first and w == "cd":
+            p = _path_arg(words[i]) if i < len(words) else None
+            if p:
+                out.append((p, "cd"))
+        elif w == "--add-dir":
+            p = _path_arg(words[i]) if i < len(words) else None
+            while p:
+                out.append((p, "--add-dir"))
+                i += 1
+                nxt = HOME_RE.sub("~", words[i]) if i < len(words) else ""
+                p = nxt if is_path_span(nxt) else None
+        elif w.startswith("--add-dir="):
+            p = _path_arg(w[len("--add-dir="):])
+            if p:
+                out.append((p, "--add-dir"))
+        first = False
+    return out
+
+
+def launch_paths(text: str):
+    """(path, via) for each path a `## Launch` body names, outside a **Read...** or **MCP** item (a list item, an
+    unindented line or an unindented fence starts an item; an indented line continues it; a blank line outside a
+    fence ends it): via is None for a backticked path span, else the launch-command path's flag (`--add-dir` or
+    `cd`), read from each fenced line and each backticked span that is not a path span."""
+    out, fence, skip, cont = [], False, False, ""
     for line in text.split("\n"):
         if FENCE_RE.match(line):
-            fence = not fence
+            if not fence and not line[:1].isspace():
+                skip = False
+            fence, cont = not fence, ""
             continue
         if fence:
+            if skip:
+                continue
+            if line.rstrip().endswith("\\"):
+                cont += line.rstrip()[:-1] + " "
+                continue
+            out.extend(command_paths(cont + line))
+            cont = ""
             continue
         if not line.strip():
             skip = False
@@ -399,7 +462,8 @@ def launch_spans(text: str):
         elif not line[:1].isspace():
             skip = bool(SKIP_LABEL_RE.match(line))
         if not skip:
-            out.extend(s for s in SPAN_RE.findall(line) if is_path_span(s))
+            for s in SPAN_RE.findall(line):
+                out.extend([(s, None)] if is_path_span(s) else command_paths(s))
     return out
 
 
@@ -615,6 +679,7 @@ def cmd_plan(args) -> int:
                 refusals.append(why)
 
         cw = []
+        launch_named = launch_paths(note.section_text("## Launch"))
         declared = read_surfaces(note)
         tokens, added = [], []
         if declared:
@@ -632,8 +697,11 @@ def cmd_plan(args) -> int:
                     refusals.append(f"{slug}: surfaces: {raw} is not a surface token ({e}): write one of "
                                     f"{TOKEN_FORMS}")
         else:
-            for span in launch_spans(note.section_text("## Launch")):
-                tokens.append(claim(span, slug, vault_real, git, cw))
+            for path, _ in launch_named:
+                tokens.append(claim(path, slug, vault_real, git, cw))
+            if proj_names:
+                for loc in LOCAL_RE.findall(projects.read(proj_names[0])[1]):
+                    tokens.append(claim(loc, slug, vault_real, git, cw))
             if folder:
                 tokens.append(claim(folder, slug, vault_real, git, cw))
         for raw in adds.get(slug.lower(), []):
@@ -654,7 +722,8 @@ def cmd_plan(args) -> int:
         launch = {"alias": alias or "claude", "folder": folder}
 
         # Ruling (c): no serial self-rollouts.
-        sources = [(f"its surface {t}", parse_token(t)[1]) for t in canon if t.startswith("repo:")]
+        sources = [(f"its ## Launch {via} {p}", os.path.expanduser(p)) for p, via in launch_named if via]
+        sources += [(f"its surface {t}", parse_token(t)[1]) for t in canon if t.startswith("repo:")]
         if alias and folder:
             sources.append((f"its launch folder {folder} ({alias})", folder))
         for pname in proj_names:

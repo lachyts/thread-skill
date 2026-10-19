@@ -41,7 +41,7 @@ One row per task, in chain order: its rank, its launch (the alias and the folder
 
 ## Surfaces
 
-The frontmatter's `surfaces:` is the union of the members' claims below. While this note is unfinished, no other serial chain over any of them is scheduled, and no parallel rollout rooted on one of them. Each member's claim and where it came from (`declared`: its own `surfaces:`; `derived`: its `## Launch` paths and launch folder, or a surface added at schedule; `default`: no source, so the vault only):
+The frontmatter's `surfaces:` is the union of the members' claims below. While this note is unfinished, no other serial chain over any of them is scheduled, and no parallel rollout rooted on one of them. Each member's claim and where it came from (`declared`: its own `surfaces:`; `derived`: its `## Launch` paths (its launch commands' `--add-dir` and `cd` paths among them), its first project's `Local:` and its launch folder, or a surface added at schedule; `default`: no source, so the vault only):
 
 {{SURFACE_SOURCES}}
 

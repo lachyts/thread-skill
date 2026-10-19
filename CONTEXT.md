@@ -338,13 +338,16 @@ through time, from attention to merged PRs. Terms only — no implementation.
   every path inside a git checkout widens to that checkout's toplevel,
   declared or derived, since its index and HEAD are what Legs share; a path in
   no checkout is claimed path-only. A member's surfaces are, in order: its
-  declared `surfaces:` (its whole claim), else derived from its launch folder
-  and its `## Launch` paths; a surface added at schedule unions in; with no
-  source, `vault` alone (the default, with a WARN). The guarantee and its
-  limit: a member claims what it names, never its launch profile's other
-  Working roots (a workspace launcher's `add_dirs`), nor a repo or external
-  system it writes but names nowhere: declare `surfaces:` for those. Two
-  checkouts of one origin are two surfaces. _Avoid_: footprint, file-set.
+  declared `surfaces:` (its whole claim), else derived from its launch folder,
+  its `## Launch` paths (a launch command's `--add-dir` and `cd` paths among
+  them, fenced or not) and its first project's `Local:`; a surface added at
+  schedule unions in; with no source, `vault` alone (the default, with a
+  WARN). The guarantee and its limit: a member claims what it names, never
+  its launch profile's other Working roots (a workspace launcher's
+  `add_dirs`), another project's `Local:` or a project's `repos:`, nor a repo
+  or external system it writes but names nowhere: declare `surfaces:` for
+  those. Two checkouts of one origin are two surfaces. _Avoid_: footprint,
+  file-set.
 - **Live rollout** — a rollout note directly in `Work/Tasks/` (not under
   `Archive/`), whatever its status. Location only: reconcile-project.py's
   `resolve_rollout` and close's owner exclusion read a task's rollout as live

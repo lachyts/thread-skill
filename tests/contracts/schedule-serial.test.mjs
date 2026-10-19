@@ -257,7 +257,7 @@ test('control: a Surface entry without the toplevel widening fails t6', () => {
 })
 
 test('control: a Surface entry that claims Working roots fails t6', () => {
-  only(swap(CONTEXT, "never its launch profile's other\n  Working roots", "and its launch profile's other\n  roots"), ['t6'], 'working roots')
+  only(swap(CONTEXT, "never\n  its launch profile's other Working roots", "and\n  its launch profile's other roots"), ['t6'], 'working roots')
 })
 
 test('control: a § 0 mixed-set sentence without the follow-up line fails t7', () => {

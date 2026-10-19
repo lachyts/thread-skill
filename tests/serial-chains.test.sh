@@ -9,11 +9,14 @@
 #   P2b  a launch folder or path inside a checkout widens to its toplevel, declared or derived; workspace launchers
 #        share one checkout, so their members form one chain with a launch per row (their markers are never read)
 #   P2c  the default (the vault only) and its stated limit; a declared `any`
+#   P2d  launch commands (`--add-dir` and a leading `cd`, fenced or in a span) and the first project's `Local:` are
+#        derived claims; a fenced path no such command names, a comment, a Read item, a declared member, a second
+#        project's `Local:` and a backticked `Local:` with no path claim nothing
 #   P3   the overlap grammar (pure), symlinks, clones, a comma inside a token, sibling subdirectories, a malformed token
-#   P4   ruling (c): a member on a checkout of lachyts/thread-skill (its surface, its launch folder, its project's
-#        `Local:` or `repos:`) goes to the session lane
+#   P4   ruling (c): a member on a checkout of lachyts/thread-skill (a `## Launch` `--add-dir` or `cd` path, declared
+#        or not, its surface, its launch folder, its project's `Local:` or `repos:`) goes to the session lane
 #   P5   launch: by_alias then plain_aliases, the null, missing and unknown refusals, the project's `launch:`, the
-#        alias-less member, a missing launch-folders file
+#        alias-less member (from its one repo, its project's `Local:` included), a missing launch-folders file
 #   P6   exit 2
 # Temp vaults, temp git repos with literal origin URLs (only `git rev-parse` and `git remote get-url` read them).
 # No vault, no network. bash 3.2-compatible (macOS).
@@ -198,6 +201,61 @@ ok "$(j "$chains")" '[["f1"],["f3"]]' "P2c: … but not with a declared repo: ta
 plan --tasks f2,f3,f4,f5
 ok "$(j "$chains")" '[["f2","f4","f5","f3"]]' "P2c: a declared any overlaps a repo:, an ext: and a vault task (rows of one launch kept together)"
 
+# ── P2d: launch commands and the first project's Local: ───────────────────────────────────────────────
+scen p2d
+F='```'
+LAUNCH="$F""bash
+cc-g --add-dir $H
+$F
+
+No MCP required." mkt c1 'launch: cc-g'
+plan --tasks c1
+ok "$(mem c1 surfaces)|$(mem c1 source)" "[\"repo:$G\",\"repo:$H\"]|\"derived\"" "P2d: a fenced cc-g --add-dir \$H claims repo:\$H beside the launch folder's checkout"
+LAUNCH="$F""bash
+cc-g
+cat $H/README.md
+$F" mkt c2 'launch: cc-g'
+plan --tasks c2
+ok "$(mem c2 surfaces)" "[\"repo:$G\"]" "P2d control: a fenced block with no --add-dir claims nothing extra (a path a command only reads)"
+LAUNCH="$F""bash
+# cc-g --add-dir $H
+cc-g
+$F
+- **Read first:** \`cc-g --add-dir $H\`" mkt c3 'launch: cc-g'
+plan --tasks c3
+ok "$(mem c3 surfaces)" "[\"repo:$G\"]" "P2d control: a commented-out --add-dir and one in a Read item claim nothing"
+LAUNCH="$F""sh
+cc-g --add-dir \"\$HOME/h\" \\
+  --add-dir=$N/a
+$F" mkt c4 'launch: cc-g'
+HOME="$TMP" plan --tasks c4
+ok "$(mem c4 surfaces)" "[\"repo:$G\",\"repo:$H\",\"repo:$N/a\"]" "P2d: a continued line's --add-dir \"\$HOME/…\" and --add-dir=<path> both claim"
+LAUNCH="- **Launch:** \`cd $H && claude\`" mkt c5
+plan --tasks c5
+ok "$(mem c5 surfaces)|$(mem c5 launch)" "[\"repo:$H\"]|{\"alias\":\"claude\",\"folder\":\"$H\"}" "P2d: a leading cd in an inline launch span claims its checkout"
+PBODY="Repo: x · Local: \`$H/\` · more" mkp HProj
+PBODY="Local: \`$N/b\`" mkp NProj
+mkp Bare
+PBODY="(not a single repo, so no \`Local:\` marker): scouts in \`$G/sub\`" mkp NoLocal
+mkt k1 'launch: cc-g' 'projects: ["[[HProj]]"]'
+plan --tasks k1
+ok "$(mem k1 surfaces)|$(mem k1 source)" "[\"repo:$G\",\"repo:$H\"]|\"derived\"" "P2d: an undeclared member claims its first project's Local: checkout beside its launch folder"
+mkt k2 'projects: ["[[HProj]]"]' 'surfaces: ["ext:k"]'
+plan --tasks k2
+ok "$(mem k2 surfaces)" '["ext:k"]' "P2d control: a declared member never claims its project's Local:"
+mkt k3 'projects: ["[[Bare]]", "[[HProj]]"]'
+plan --tasks k3
+ok "$(mem k3 surfaces)|$(mem k3 source)" '["vault"]|"default"' "P2d control: a second project's Local: is not claimed"
+mkt k4 'projects: ["[[NProj]]"]'
+plan --tasks k4
+ok "$(mem k4 surfaces)" "[\"repo:$N/b\"]" "P2d: a Local: in no checkout is claimed path-only"
+mkt k5 'projects: ["[[NoLocal]]"]'
+plan --tasks k5
+ok "$(mem k5 surfaces)" '["vault"]' "P2d control: a backticked \`Local:\` that names no path claims nothing"
+LAUNCH="- **Repo:** \`$H\`" mkt k6
+plan --tasks k6,k1
+ok "$(j "$chains")" '[["k1","k6"]]' "P2d: a member writing \$H shares a chain with one whose project's Local: is \$H"
+
 # ── P3: the overlap grammar ───────────────────────────────────────────────────────────────────────────
 ovl() {
   python3 - "$SC" "$@" <<'PY'
@@ -256,6 +314,26 @@ ok "$(j '[s["slug"] for s in d["sessionLane"]]')" '["r6"]' "P4: a project whose 
 mkt r7 "surfaces: [\"repo:$G\"]"
 plan --tasks r7
 ok "$(j "$chains")|$(j 'd["sessionLane"]')" '[["r7"]]|[]' "P4 control: another origin gives a chain"
+F='```'
+LAUNCH="$F""bash
+cc-a-seo --add-dir $TS
+$F" mkt r8 'launch: cc-a-seo'
+plan --tasks r8
+ok "$(j "$chains")|$(j '[s["slug"] for s in d["sessionLane"]]')" '[]|["r8"]' "P4: a fenced cc-a-seo --add-dir <thread-skill> with no project Local: goes to the session lane"
+has "$(j 'd["sessionLane"][0]["why"]')" "its ## Launch --add-dir $TS is a checkout of github.com/lachyts/thread-skill" "P4: … with a why naming the --add-dir path"
+LAUNCH="$F""bash
+cc-a-seo --add-dir $TS
+$F" mkt r9 'launch: cc-a-seo' 'surfaces: ["ext:z"]'
+plan --tasks r9
+has "$(j 'd["sessionLane"][0]["why"]')" "its ## Launch --add-dir $TS" "P4: … even when it declares surfaces"
+LAUNCH="- **Launch:** \`cd $TS2 && claude\`" mkt r10
+plan --tasks r10
+has "$(j 'd["sessionLane"][0]["why"]')" "its ## Launch cd $TS2 is a checkout of github.com/lachyts/thread-skill" "P4: a leading cd in an inline launch span does the same"
+LAUNCH="$F""bash
+cc-a-seo --add-dir $H
+$F" mkt r11 'launch: cc-a-seo'
+plan --tasks r11
+ok "$(j "$chains")|$(j 'd["sessionLane"]')" '[["r11"]]|[]' "P4 control: an --add-dir on another origin gives a chain"
 
 # ── P5: launch ────────────────────────────────────────────────────────────────────────────────────────
 scen p5
@@ -287,6 +365,10 @@ mkt l8 "surfaces: [\"repo:$G\"]"; mkt l9 'surfaces: ["ext:x"]'; mkt l10 "surface
 plan --tasks l8,l9,l10
 ok "$(mem l8 launch)" "{\"alias\":\"claude\",\"folder\":\"$G\"}" "P5: an alias-less row opens claude from its single repo"
 ok "$(mem l9 launch)|$(mem l10 launch)" "{\"alias\":\"claude\",\"folder\":\"$V\"}|{\"alias\":\"claude\",\"folder\":\"$V\"}" "P5: … or from the vault root with zero or several repos"
+PBODY="Local: \`$H\`" mkp HLocal
+mkt l11 'projects: ["[[HLocal]]"]'
+plan --tasks l11
+ok "$(mem l11 launch)|$(mem l11 surfaces)" "{\"alias\":\"claude\",\"folder\":\"$H\"}|[\"repo:$H\"]" "P5: an alias-less row whose project's Local: is its one repo opens claude from it"
 LFX="$TMP/none.json" plan --tasks l2
 ok "$rc|$out" "3|" "P5: a missing launch-folders file while an alias needs it exits 3"
 has "$err" "l2: launch alias cc-g needs $TMP/none.json, which is missing or unreadable" "P5: … naming the path"

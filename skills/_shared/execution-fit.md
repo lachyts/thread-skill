@@ -56,8 +56,9 @@ first outcome that holds wins:
 - (c) **No serial self-rollouts.** Serial-shaped work for the plugin's own repo (any checkout of
   `lachyts/thread-skill`) goes to the session lane. Its clone belongs to the parallel
   self-rollout (ADR 0031, ADR 0042). Orient § 6 applies this ruling now, before it calls schedule;
-  schedule's serial path enforces it (`serial-chains.py` sends a member whose repo surface, launch
-  folder or project `Local:` is a checkout of `lachyts/thread-skill` to the session lane).
+  schedule's serial path enforces it (`serial-chains.py` sends a member whose `## Launch` `--add-dir`
+  or `cd` path, repo surface, launch folder or project `Local:` or `repos:` is a checkout of
+  `lachyts/thread-skill` to the session lane).
 
 **Mixed sets split.** The parallel-shaped subset becomes a parallel rollout, the serial-shaped
 subset a serial rollout, and session-lane members stay unstamped. Name the split when reporting.
