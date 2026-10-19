@@ -47,11 +47,13 @@ realpath; the declared strings kept):
                       every check unchecked with its reason.
   self-rollout        `bash self-rollout-check.sh --resolve <declared path>` (ADR 0042: every parallel rollout runs from
                       its rollout clone `<toplevel>-rollout`): exit 0 prints the rolloutRoot, the clone (kept
-                      realpath'd, as `path` is); exit 4 (no clone yet: schedule § 0 makes it) and exit 5 (no GitHub
-                      origin: no-github-origin reports it) are no blocker; exit 3 blocks (its stderr kept: an unusable
-                      clone, ~/Projects itself, a linked worktree, a parent that would track the clone); on 3, 4 and 5
-                      the toplevel stands in, never the would-be clone, so the later checks still report; any other
-                      exit is unchecked. Every check below runs against the rolloutRoot's git root.
+                      realpath'd, as `path` is); a sub-path the clone lacks yet is still exit 0 with a `note:` (a
+                      stale clone: --ensure fast-forwards it), and the clone's toplevel is its git root; exit 4 (no
+                      clone yet: schedule § 0 makes it) and exit 5 (no GitHub origin: no-github-origin reports it) are
+                      no blocker; exit 3 blocks (its stderr kept: an unusable clone, ~/Projects itself, a linked
+                      worktree, a parent that would track the clone); on 3, 4 and 5 the toplevel stands in, never the
+                      would-be clone, so the later checks still report; any other exit is unchecked. Every check
+                      below runs against the rolloutRoot's git root.
   no-github-origin    `bash land.sh --origin-slug`: exit 0 is `github`, exit 4 blocks, else unchecked.
   landing-register    `landing-register.py check`: 0 clear; 3 blocks (`landingRegister.line` is the `listed
                       <owner/name>: <reason>` line); 4 is recorded only (no-github-origin covers it); else unchecked.
@@ -65,9 +67,12 @@ realpath; the declared strings kept):
                       THREAD.md is already on origin (contentOnOrigin: every touched file matches origin, or only
                       THREAD.md differs and the set touches more than THREAD.md), does not; nor does a peer's
                       (cloneRooted: the root is a rollout clone, `self-rollout-check.sh --in-place`, and this is
-                      another clone of the set, which pushed-base.sh blocks only on a path a task cites, and the scan
-                      cites none), so every non-blocking ahead row carries one of the three. pushed-base.sh stays the gate: it fetches and walks the full
-                      clone set; tests/estate-scan.test.mjs runs it on copies of the fixtures for parity.
+                      another clone of the set; or the root is a toplevel standing in for self-rollout's exit 4,
+                      whose clone --ensure makes at origin/<d>, so every clone of the set is that clone's peer;
+                      pushed-base.sh blocks a peer only on a path a task cites, and the scan cites none), so every
+                      non-blocking ahead row carries one of the three. A toplevel standing in for exit 3 or 5 keeps
+                      the strict rule. pushed-base.sh stays the gate: it fetches and walks the full clone set;
+                      tests/estate-scan.test.mjs runs it on copies of the fixtures for parity, as schedule § 0 would.
   unfinished-rollout  `unfinished-rollout.py check --repo <root> --project <name>` per declaring project, without
                       --regenerate: exit 3 blocks, 0 is the verdict (`none`, `file`), else unchecked.
   no-verifier         schedule § 2.5's order, read from the root's working tree: a `Verifier: \\`<cmd>\\`` line in the
@@ -457,6 +462,7 @@ class Repo:
         self.toplevel = None
         self.rollout_root = None
         self.root = None  # the rolloutRoot's git root, realpath'd: every check after self-rollout reads it
+        self.stand_in = False  # self-rollout's exit 4: the toplevel stands in for a clone --ensure would make
         self.self_rollout = None
         self.blockers, self.unchecked, self.errors = [], [], []
 
@@ -680,15 +686,16 @@ class Scan:
         r.self_rollout = {"exit": s.exit, "stderr": s.err}
         printed = s.out.strip().splitlines()[-1] if s.ok and s.out.strip() else None
         # realpath'd, as `path` is, so a declared `.../repo/` reads back equal to its path. On exit 4 the clone does not
-        # exist yet: the toplevel stands in, never the would-be clone it prints, for every later check.
+        # exist yet: the toplevel stands in, never the would-be clone it prints, for every later check, as the peer it
+        # becomes once --ensure clones at origin/<d> (root_facts).
         r.rollout_root = os.path.realpath(printed) if printed else r.toplevel
         if printed is None:
             if s.why:
                 r.unchecked.append({"check": "self-rollout", "why": s.why})
             elif s.exit in (4, 5):
-                pass  # 4: no clone yet, schedule § 0 makes it; 5: no GitHub origin, no-github-origin reports it
+                r.stand_in = s.exit == 4  # 4: no clone yet, schedule § 0 makes it; 5: no-github-origin reports it
             elif s.exit == 3:
-                keys = ("is not a usable rollout clone", "has no rollout clone", "would track", "land ")
+                keys = ("is not a usable rollout clone", "has no rollout clone", "would track")
                 why = next((ln.strip() for ln in s.err.splitlines() if any(k in ln for k in keys)), None)
                 r.blockers.append({"check": "self-rollout", "why": why or last_line(s.err) or "exit 3"})
             else:
@@ -698,14 +705,19 @@ class Scan:
         if real in (r.path, r.toplevel):
             r.root = r.toplevel
             return
-        t = run.git(r.rollout_root, "rev-parse", "--show-toplevel")
+        # A stale clone may lack the sub-path yet (exit 0 with its `note:`): its nearest directory names the clone.
+        at = r.rollout_root
+        while not os.path.isdir(at) and os.path.dirname(at) != at:
+            at = os.path.dirname(at)
+        t = run.git(at, "rev-parse", "--show-toplevel")
         if t.ok and t.out.strip():
             r.root = os.path.realpath(t.out.strip())
         else:
             r.git_why = t.why or "the rollout root is not a git repo"
 
-    def root_facts(self, root, primaries):
-        """Every check of one git root, in schedule § 0's order, with its clone set [root] + primaries."""
+    def root_facts(self, root, primaries, stand_in=False):
+        """Every check of one git root, in schedule § 0's order, with its clone set [root] + primaries. stand_in: the
+        root is a toplevel standing in for self-rollout's exit 4."""
         run, f = self.runner, RootFacts()
         o = run.git(root, "remote", "get-url", "origin")
         f.origin = o.out.strip() if o.ok and o.out.strip() else None
@@ -735,10 +747,17 @@ class Scan:
             f.unchecked.append({"check": "landing-register", "why": lr.why or "error"})
 
         tip = self.default_branch(f, root)
-        # A clone-rooted root (ADR 0042): the other clones of the set are peers, never a block without cited paths.
-        cr = run.run(["bash", SELF_ROLLOUT_SH, "--in-place", root])
-        self.unpushed(f, [root] + primaries, tip, clone_rooted=cr.exit == 0)
-        self.verifier(f, root, [root] + primaries)
+        # Peers (ADR 0042) block only on a cited path, and the scan cites none. A clone-rooted root's other clones are
+        # peers. A stand-in for exit 4 is one itself: schedule § 0's --ensure clones at origin/<d>, so the clone it
+        # roots at has nothing ahead and pushed-base reads this checkout through --also <Local:>.
+        clones = [root] + primaries
+        if stand_in:
+            peers = set(clones)
+        else:
+            cr = run.run(["bash", SELF_ROLLOUT_SH, "--in-place", root])
+            peers = set(clones[1:]) if cr.exit == 0 else set()
+        self.unpushed(f, clones, tip, peers)
+        self.verifier(f, root, clones)
         return f
 
     def default_branch(self, f, root):
@@ -773,9 +792,10 @@ class Scan:
             f.unchecked.append({"check": "default-branch", "why": c.why or "no cached origin/HEAD"})
         return None
 
-    def unpushed(self, f, clones, tip, clone_rooted=False):
+    def unpushed(self, f, clones, tip, peers=frozenset()):
         """pushed-base.sh's ahead classification (execution-fit.md § Dispatch blockers, **Pushed base**), restated:
-        it fetches and walks the full clone set, the scan reads what is already local."""
+        it fetches and walks the full clone set, the scan reads what is already local. peers: the clones that block
+        only on a cited path (cloneRooted)."""
         run, d = self.runner, f.branch
         if d is None:
             why = next((u["why"] for u in f.unchecked if u["check"] == "default-branch"), "no default branch")
@@ -837,7 +857,7 @@ class Scan:
                         other = True  # a failed comparison blocks: fail closed
                 row["touched"] = touched
                 row["threadOnly"] = thread_only
-                if other and clone_rooted and c != clones[0]:
+                if other and c in peers:
                     row["cloneRooted"], other = True, False
                 row["blocks"] = other
                 lg = run.git(c, "log", "--oneline", "--no-decorate", "-n", "5", "%s..%s" % (up, local))
@@ -1050,13 +1070,16 @@ class Scan:
                 else:
                     row["error"] = "vault"
             list(pool.map(self.probe_repo, repos))
-            roots = {}
+            roots, stand_ins = {}, set()
             for r in repos:
                 if r.root and r.git_why is None:
                     roots.setdefault(r.root, set())
                     if r.toplevel != r.root:
                         roots[r.root].add(r.toplevel)
-            facts = dict(zip(sorted(roots), pool.map(lambda k: self.root_facts(k, sorted(roots[k])), sorted(roots))))
+                    if r.stand_in:
+                        stand_ins.add(r.root)
+            facts = dict(zip(sorted(roots), pool.map(lambda k: self.root_facts(k, sorted(roots[k]), k in stand_ins),
+                                                     sorted(roots))))
             pairs = sorted({(name, r.root) for r in repos if r.root and r.git_why is None for name in r.by})
             unfinished = dict(zip(pairs, pool.map(lambda pr: self.unfinished(*pr), pairs))) if tasks_ok else {}
             for row in rollouts:

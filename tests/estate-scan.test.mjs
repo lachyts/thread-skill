@@ -13,9 +13,10 @@
 // determinism, a GIT_SSH_COMMAND run, a --deadline 0 run behind a `git` shim, and a run behind a shim whose
 // `rev-parse --local-env-vars` fails. V2 holds a chmod-000 note under Work/Tasks/Archive/ (the vault-level case;
 // skipped under root). V3 declares one repo whose remote hangs. V4 holds the verifier repos (VV, VT, VI, VL, VJ, VR,
-// VN, VH, VS, and the nested pair NP and NP/inner), the content-on-origin repos (Q, M) and the phase-membership
-// notes. Case 16 runs pushed-base.sh on copies of A, C, D, Q and M under S/parity (it fetches), never on the repos
-// case 9 snapshots.
+// VN, VH, VS, and the nested pair NP and NP/inner), the content-on-origin repos (Q, M), the clone repos (K, whose
+// K-rollout is ahead on its own, and ST, whose ST-rollout is stale) and the phase-membership notes. Case 16 runs
+// pushed-base.sh as schedule § 0 runs it, on copies of A, C, D, Q, M and K and fresh clones under S/parity (it
+// fetches), never on the repos case 9 snapshots.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -169,6 +170,24 @@ landOnOrigin('Q', { 'q.txt': 'landed by squash\n' })
 repo('M', { Makefile: 'test:\n\ttrue\n' })
 commit(R('M'), { 'THREAD.md': '# Thread\n', 'm.txt': 'landed by squash\n' }, 'feat: m and the thread')
 landOnOrigin('M', { 'm.txt': 'landed by squash\n' })
+// cloneOf(name): <name>-rollout, a full clone of the bare with the GitHub-shaped origin, as --ensure makes it.
+function cloneOf(name) {
+  const c = R(`${name}-rollout`)
+  git(['clone', '-q', path.join(S, 'remotes', 'fixture', `${name.toLowerCase()}.git`), c])
+  git(['-C', c, 'remote', 'set-url', 'origin', `git@github.com:fixture/${name.toLowerCase()}.git`])
+  return c
+}
+// K: a usable K-rollout clone whose own main is one empty commit ahead; the in-place K is level with origin. The
+// clone's own ahead commits keep the strict rule: an ahead set touching no file blocks.
+repo('K', { Makefile: 'test:\n\ttrue\n' })
+commit(cloneOf('K'), {}, 'chore: empty in the clone', ['--allow-empty'])
+// ST: a stale clone. ST-rollout was cloned before the seat newseat/ landed on origin from ST, so it lacks the seat ST
+// declares: --resolve exits 0 with a note, never a refusal (schedule § 0's --ensure fast-forwards it).
+repo('ST', { Makefile: 'test:\n\ttrue\n' })
+cloneOf('ST')
+commit(R('ST'), { 'newseat/README.md': '# seat\n' }, 'feat: newseat')
+git(['-C', R('ST'), 'push', '-q', path.join(S, 'remotes', 'fixture', 'st.git'), 'main:main'])
+git(['-C', R('ST'), 'update-ref', 'refs/remotes/origin/main', 'HEAD'])
 
 // The verifier repos (schedule § 2.5 step 1's section, which only a model reads): none has a Makefile, a
 // pyproject.toml or a package.json, so the agent docs (and VR's live rollout) decide.
@@ -291,6 +310,7 @@ const T4 = (rel, text) => write(path.join(V4, 'Work', 'Tasks', rel), text)
 const PH4 = (rel, text) => write(path.join(V4, 'Work', 'Phases', rel), text)
 P4('Verifier Lab.md', project('queued', `\nrepos:${VERIFIER_REPOS.map((n) => `\n  - ~/repos/${n}`).join('')}`))
 P4('Unpushed Lab.md', project('queued', '\nrepos:\n  - ~/repos/Q\n  - ~/repos/M'))
+P4('Clone Lab.md', project('queued', '\nrepos:\n  - ~/repos/K\n  - ~/repos/ST/newseat'))
 P4('Phase Lab.md', project('queued'))
 // VR's live rollout carries the verifier its schedule confirmed.
 T4(`${RV}.md`, fm('tags:\n  - task\n  - rollout\nstatus: open\nprotocol_version: 5\nparallel_ceiling: 1\n' +
@@ -505,7 +525,9 @@ test('4. repos: each dispatch blocker, the verifier, the nested path, the separa
   assert.equal(a.github, 'fixture/a')
   assert.equal(a.origin, 'git@github.com:fixture/a.git')
   assert.deepEqual(a.declaredBy, ['Crowned One'])
-  assert.deepEqual(checks(a.blockers), ['unpushed-default', 'unfinished-rollout'])
+  // The stand-in for exit 4 is the peer it becomes: schedule § 0's --ensure clones A-rollout at origin/main, so the
+  // in-place main ahead of it blocks only on a cited path (case 16 runs pushed-base.sh that way).
+  assert.deepEqual(checks(a.blockers), ['unfinished-rollout'])
   assert.deepEqual(a.unchecked, [])
   assert.equal(a.defaultBranch, 'main')
   assert.equal(a.defaultBranchSource, 'remote')
@@ -514,7 +536,8 @@ test('4. repos: each dispatch blocker, the verifier, the nested path, the separa
   assert.equal(a.unpushed[0].ahead, 1)
   assert.equal(a.unpushed[0].basis, 'remote')
   assert.deepEqual(a.unpushed[0].touched, ['a.txt'])
-  assert.equal(a.unpushed[0].blocks, true)
+  assert.equal(a.unpushed[0].cloneRooted, true)
+  assert.equal(a.unpushed[0].blocks, false)
   assert.match(a.unpushed[0].commits[0], /feat: local only/)
   assert.deepEqual(a.verifier, { command: 'make test', source: 'Makefile' })
   assert.equal(a.unfinishedRollout.length, 1)
@@ -552,10 +575,11 @@ test('4. repos: each dispatch blocker, the verifier, the nested path, the separa
   assert.deepEqual(c.verifier, { command: 'npm test', source: 'package.json' })
 
   const d = repoAt(j, R('D'))
-  assert.deepEqual(checks(d.blockers), ['unpushed-default'])
+  assert.deepEqual(checks(d.blockers), [], 'a stand-in for exit 4 is a peer, so even an ahead set touching no file does not block')
   assert.equal(d.unpushed[0].ahead, 1)
   assert.deepEqual(d.unpushed[0].touched, [])
-  assert.equal(d.unpushed[0].blocks, true, 'an ahead set touching no file blocks')
+  assert.equal(d.unpushed[0].cloneRooted, true)
+  assert.equal(d.unpushed[0].blocks, false)
   assert.deepEqual(d.verifier, { command: 'poetry run pytest', source: 'pyproject.toml' })
 
   const e = repoAt(j, R('E'))
@@ -621,7 +645,8 @@ test('6. --offline: no remote is asked; the cached origin/HEAD and the last fetc
   assert.equal(a.defaultBranch, 'main')
   assert.equal(a.defaultBranchSource, 'cached')
   assert.equal(a.unpushed[0].basis, 'last-fetch')
-  assert.deepEqual(checks(a.blockers), ['unpushed-default', 'unfinished-rollout'])
+  assert.deepEqual(checks(a.blockers), ['unfinished-rollout'])
+  assert.equal(a.unpushed[0].cloneRooted, true)
 })
 
 // ---- 7. Timeout and deadline ------------------------------------------------------------------------------------
@@ -817,24 +842,60 @@ test("15. a failed `git rev-parse --local-env-vars` still scrubs a hook's GIT_DI
 
 // ---- 16. Parity with pushed-base.sh ----------------------------------------------------------------------------------
 // pushed-base.sh is the gate the scan restates: run it on copies of the fixtures (it fetches, so never on the repos
-// the read-only case 9 snapshots) and hold every row's blocks to its exit 3, and each non-blocking reason to its note.
-test('16. parity: the scan blocks exactly where pushed-base.sh exits 3, and names the same reason where it does not', () => {
+// the read-only case 9 snapshots) as schedule § 0 runs it, and hold every ahead row's blocks to its exit 3, and each
+// non-blocking reason to its note. A, C, D, Q and M have no rollout clone (self-rollout exit 4), so it runs on a
+// fresh clone of origin, the clone --ensure would make, with `--also` the copy of the ahead in-place checkout; K runs
+// on copies of its clone and its twin, `--also` the twin.
+test('16. parity: the scan blocks exactly where pushed-base.sh exits 3 as schedule § 0 runs it, and names the same reason where it does not', () => {
   const PUSHED_BASE = path.join(root, 'skills', '_shared', 'scripts', 'pushed-base.sh')
   const rows = Object.fromEntries([...ok(online()).repos, ...ok(lab()).repos].map((r) => [r.path, r]))
   // Each fixture's pushed-base exit, and for a non-blocking one the row's reason and pushed-base's note for it.
-  const want = { A: [3], D: [3], C: [0, 'threadOnly', /touching only THREAD\.md: not a blocker/],
+  const PEER = /is a peer of the clone-rooted Project root .*: not a blocker \(ADR 0042\)/
+  const want = { A: [0, 'cloneRooted', PEER], D: [0, 'cloneRooted', PEER],
+    C: [0, 'threadOnly', /touching only THREAD\.md: not a blocker/],
     Q: [0, 'contentOnOrigin', /, but their content is already on origin/],
-    M: [0, 'contentOnOrigin', /beyond THREAD\.md their content is already on origin/] }
+    M: [0, 'contentOnOrigin', /beyond THREAD\.md their content is already on origin/], K: [3] }
   for (const [name, [exit, reason, note]] of Object.entries(want)) {
-    const copy = path.join(S, 'parity', name)
-    fs.cpSync(R(name), copy, { recursive: true })
-    const r = spawnSync('bash', [PUSHED_BASE, copy, 'main'], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+    const twin = path.join(S, 'parity', name)
+    const clone = `${twin}-rollout`
+    fs.cpSync(R(name), twin, { recursive: true })
+    if (fs.existsSync(R(`${name}-rollout`))) {
+      fs.cpSync(R(`${name}-rollout`), clone, { recursive: true })
+    } else {
+      assert.equal(rows[R(name)].selfRollout.exit, 4, `${name}: no rollout clone yet`)
+      git(['clone', '-q', path.join(S, 'remotes', 'fixture', `${name.toLowerCase()}.git`), clone])
+      git(['-C', clone, 'remote', 'set-url', 'origin', `git@github.com:fixture/${name.toLowerCase()}.git`])
+    }
+    const r = spawnSync('bash', [PUSHED_BASE, '--also', twin, clone, 'main'], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
     assert.equal(r.status, exit, `${name}: pushed-base exit ${r.status}: ${r.stderr}`)
-    const row = rows[R(name)].unpushed.find((u) => u.clone === R(name))
-    assert.ok(row, `${name} has an unpushed row`)
+    const ahead = rows[R(name)].unpushed.filter((u) => u.ahead)
+    assert.equal(ahead.length, 1, `${name} has one ahead row: ${JSON.stringify(rows[R(name)].unpushed)}`)
+    const row = ahead[0]
     assert.equal(row.blocks, r.status === 3, `${name}: blocks ${row.blocks}, pushed-base exit ${r.status}`)
+    assert.equal(checks(rows[R(name)].blockers).includes('unpushed-default'), r.status === 3, `${name}: the blocker`)
     if (row.blocks) continue
     assert.equal(row[reason], true, `${name}: the non-blocking row names its reason: ${JSON.stringify(row)}`)
     assert.match(r.stderr, note, name)
   }
+})
+
+// ---- 17. Clones: a clone's own ahead set, and a stale clone --------------------------------------------------------
+test("17. clones: a clone's own ahead set keeps the strict rule; a stale clone lacking a declared seat is no refusal", () => {
+  const j = ok(lab())
+  const k = repoAt(j, R('K'))
+  assert.equal(k.selfRollout.exit, 0)
+  assert.equal(k.rolloutRoot, R('K-rollout'))
+  assert.deepEqual(checks(k.blockers), ['unpushed-default'])
+  assert.deepEqual(k.unpushed.map((u) => [u.clone, u.ahead, u.touched, u.cloneRooted, u.blocks]),
+    [[R('K-rollout'), 1, [], false, true], [R('K'), 0, [], false, false]], 'an ahead set touching no file blocks')
+  // The review's reproduction: --resolve never fetches, so a seat pushed since the clone was made is a note, and the
+  // clone's toplevel is still the root every later check reads.
+  const st = repoAt(j, R('ST/newseat'))
+  assert.equal(st.selfRollout.exit, 0, st.selfRollout.stderr)
+  assert.match(st.selfRollout.stderr, /note: .*\/ST-rollout has no newseat yet/)
+  assert.equal(st.rolloutRoot, R('ST-rollout/newseat'))
+  assert.deepEqual(st.blockers, [])
+  assert.deepEqual(st.unchecked, [])
+  assert.deepEqual(st.unpushed.map((u) => [u.clone, u.ahead]), [[R('ST-rollout'), 0], [R('ST'), 0]])
+  assert.deepEqual(st.verifier, { command: 'make test', source: 'Makefile' })
 })
