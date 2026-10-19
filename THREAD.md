@@ -10,11 +10,23 @@ scope: Build + maintain the thread:* plugin — continuity verbs + the rollout q
 
 ## Where we are
 
+**2026-10-19: orient reshuffled today's grill into P24–P26; `[[thread-skill-rollout-2026-10-19]]` (10 tasks) is handed to a session in the clone.**
+- **Docs:** PR #178 merged (`90034b0`): ADR 0040 (parallel/serial rollouts, Legs), 0041 (orient-all), 0042 (every parallel rollout runs from its `<toplevel>-rollout` clone), CONTEXT.md. CI had been red because `queue-only.test.mjs` pinned the old **Rollout-shaped** entry.
+- **Rulings (orient grill + review):**
+  - A Leg's smoke test re-runs its predecessor Leg's Verifies; a failure files a `fixes:` task and never reopens a done task.
+  - Each code-writing Leg task gets `/fresh-review` xhigh before it is done.
+  - Serial rollouts are limited by surfaces, not by repo, and there are no serial self-rollouts.
+  - Every parallel rollout scheduled after P26 runs from its clone.
+  - No standalone 4.1.0: one release follows P24–P26.
+- **Review chain:** round 1 found 15 gaps (fixed in `9c41535`); round 2 was 14/15 regressions on that fix, so the ledger stopped it. PR #180 cuts the ADRs back to decisions, and the open questions sit on p24-2, p24-3 and p26-2 for their plans.
+- **Rollout:** 10 tasks: P24 serial rollouts, P25 orient-all, and new P26 (rollouts never share a checkout: the canary-arms fix plus the clone rule). p24-1 is Solo first; `rung: opus-xhigh` on p24-3, p25-2, p25-3 and p26-2. Project root `~/repos/tools/thread-skill-rollout`, `make test`, ceiling 4. Handoff doc landing PR #181; the successor waits for #180, then runs execute.
+- **Filed:** [[thread-skill-install-from-the-version-cache]] (weigh at the release: a cache install would retire the ADR 0031 hold and the self-rollout clone special case). The release task is now [[thread-skill-release-after-p24-p25]]. The slot points at p24-1.
+
 **2026-10-19: P23 and the P19 tail have landed. `[[thread-skill-rollout-2026-10-18]]` (archived, § Completion log): 7/7 merged (#171–#177) in 25h 9m from the clone; phases 19 and 23 closed.**
 - **Landed:** p23-1 one-line spend gate + plan-judge pricing (#171), p19-5 description trim + 700 hard cap (#172; post-trim evals 0.986 vs 0.978, US$40.52), p23-5 a code project's thread lives in its repo + `thread-placement.py` + ADR 0039 (#173), p23-4 machine-wide verify slots + `tests/run.sh` cap (#174), p23-6 Start when ready (#175), p23-3 ntfy fallback for undelivered needs-you pushes (#176), p23-7 PR #88's still-true corrections + the reflect-close-score deadline-regex flake fix (#177; #88 closed, superseded).
 - **Run shape:** p23-4 and p23-5 plan-blocked once each (3 rounds), auto-retried 1/2, then landed. Integration: two lead merges (p23-1, p23-7), four integrator calls (p19-5 red on load timeout; p23-4 and p23-3 conflicts; p23-5 red flake + shared files), one judge-only shared-file review (p23-6). No RACE, no git-env trip, no needs-you item, no gate reached Lachy.
 - **Interruptions survived:** three Chorus room stops (claude-2 5-hour, animately week, claude-2 week) and three usage-limit cuts (claude-2 monthly spend, main 5-hour twice); every stopped or cut call was resumed by `resumeFromRunId` with its original args, never reconciled.
-- **Not live yet:** the installed plugin is still 4.0.0 and the primary checkout is 36 behind origin. [[thread-skill-release-4-1-0]] carries the release decision and the install-first `[notify] ntfy_topic` / `verify_slots` settings. Scored `t-20261019T005958Z-d79bbe`.
+- **Not live yet:** the installed plugin is still 4.0.0 and the primary checkout is 36 behind origin. [[thread-skill-release-after-p24-p25]] carries the release decision and the install-first `[notify] ntfy_topic` / `verify_slots` settings. Scored `t-20261019T005958Z-d79bbe`.
 
 **2026-10-18: ADR 0038 merged; P22's rollout is closed out and `[[thread-skill-rollout-2026-10-18]]` (P23 + carried p19-5) is executing from the clone.**
 - **`[[thread-skill-rollout-2026-10-17]]`**: 10/11 merged (p19-10 at 10:50 after Lachy signed its US$20 gate in the morning). It stalled overnight because the fail-closed pricer read the planners' prose (`each`, bare numbers, bare `plus`) and an undelivered push was logged as pushed. Superseded at 14:15 (Lachy: carry p19-5 forward), scored `t-20261018T055357Z-907caf`, archived to `Work/Tasks/Archive/Rollouts/`.
@@ -1014,14 +1026,16 @@ scheduled 2026-07-15.
 
 ## Resume instructions
 
-**Now (from 2026-10-19):** no rollout is running on this repo; P19 and P23 are closed.
-1. [[thread-skill-release-4-1-0]]: decide and cut 4.1.0 (`claude plugin update thread@thread`, `make release-check`, release PR citing `docs/evals/2026-10-18-p19-5-description-trim.md`). Until it is installed the lead runs the 4.0.0 engine: none of P22/P23 is live.
-2. Only after installing: set `[notify] ntfy_topic` (once [[ntfy-noise-audit]] names it) and, if wanted, `verify_slots` under `[defaults]` in `~/.config/thread/rollouts.toml`. An older install refuses both.
-3. Next weekly Reflection is due 2026-10-24; `/thread:reflect [[thread-skill-rollout-2026-10-18]]` is on offer meanwhile.
+**Now (from 2026-10-19):** `[[thread-skill-rollout-2026-10-19]]` runs in a successor session launched in `~/repos/tools/thread-skill-rollout`, which has consumed `docs/handoffs/2026-10-19-execute-p24-p26-rollout.md`.
+1. Check it with `/thread:status [[thread-skill-rollout-2026-10-19]]`; if it is stuck, run `/thread:repair` from a session launched in the clone.
+2. If PR #180 or #181 is still open, update its branch (REST `update-branch`; `gh pr update-branch` doesn't exist in this gh).
+3. When P24–P26 land, cut the release: [[thread-skill-release-after-p24-p25]], weighing [[thread-skill-install-from-the-version-cache]]. The primary checkout stays held while any rollout runs on it (ADR 0031).
+4. The next weekly Reflection is due 2026-10-24.
 
 ## Session log
 
-- 2026-10-19: executed `[[thread-skill-rollout-2026-10-18]]` from the clone: 7/7 merged (#171–#177) in 25h 9m through three room stops and three usage-limit cuts; phases 19 and 23 closed; 4.1.0 release decision filed as [[thread-skill-release-4-1-0]].
+- 2026-10-19: orient: fixed and merged #178 (ADR 0040/0041/0042); grilled P24's build questions and the in-place-master collision into rulings; two fresh-review rounds, the second stopped on regressions, so #180 took the ADRs back to decisions; scheduled [[thread-skill-rollout-2026-10-19]] (P24–P26) and handed execute to the clone; filed the cache-install question.
+- 2026-10-19: executed `[[thread-skill-rollout-2026-10-18]]` from the clone: 7/7 merged (#171–#177) in 25h 9m through three room stops and three usage-limit cuts; phases 19 and 23 closed; 4.1.0 release decision filed as [[thread-skill-release-after-p24-p25]].
 - 2026-10-18: signed p19-10 (US$20) so it landed; grilled the overnight spend-gate stall into ADR 0038 (#168); superseded and archived the 10-17 rollout; scheduled P23 + carried p19-5 as `[[thread-skill-rollout-2026-10-18]]` and handed execute to a clone session (#169); archived the 5c5a and redesign evidence.
 - 2026-10-17 (evening): executed the P22 rollout from the clone: 9/11 merged (#157–#165) in 7h 16m, phase 22 closed; p19-10 spend gate refused by the standing approval (unpriceable "each"), so the run closed in the sign-off form with p19-10 and p19-5 waiting; landing PR #156 needed an update-branch.
 - 2026-10-17: Steer-only orient scheduled `[[thread-skill-rollout-2026-10-17]]` (11 tasks: P22, reflect-cites, the P19 eval tail), respecced p19-5 for 4.0.0 (close/handoff/reflect, in-task `--runs 3` comparison), waited out landing PR #154 for pushed-base, handed execute to a clone session (#155).
