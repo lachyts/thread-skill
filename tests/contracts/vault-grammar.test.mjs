@@ -13,8 +13,9 @@
 // rather than copying them, and keeps one literal, REVIEW_STATUSES, pinned to the doc's Review set; it counts a
 // phase's members by the literal filename prefix with reconcile-project.py's PHASE_N loaded, never copied, and its
 // § Readers bullet says so (tests/estate-scan.test.mjs case 14 holds the behaviour); its `inFlight` goes through its
-// own in_flight helper. estate-dispatch.py (p25-3) loads Active, § In flight and the start stamp's reader
-// (NA.OPEN_STATUSES, ES.in_flight, ES.link_live, RR._start_unattended) and copies none of them.
+// own in_flight helper. estate-dispatch.py (p25-3) loads Active, § In flight, the start stamp's reader and the
+// dependency rule a rollout row waits on (NA.OPEN_STATUSES, ES.in_flight, ES.link_live, RR._start_unattended,
+// RR._dep_status) and copies none of them.
 // Controls prove the checks are not vacuous. Reads files and imports the scripts (no __pycache__ written).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -140,12 +141,12 @@ function estateScanChecks(g, text) {
   return out
 }
 
-// The names of estate-dispatch.py's failed checks; [] when it reads Active, § In flight and the start stamp through
-// the loaded modules and holds no literal of its own: no `"in_progress"`, no REVIEW_STATUSES, no Active set and no
-// `"unattended"`.
+// The names of estate-dispatch.py's failed checks; [] when it reads Active, § In flight, the start stamp and a
+// dependency's landing through the loaded modules and holds no literal of its own: no `"in_progress"`, no
+// REVIEW_STATUSES, no Active set, no `"unattended"` and no `"dropped"`.
 function estateDispatchChecks(text) {
   const out = []
-  for (const name of ['NA.OPEN_STATUSES', 'ES.in_flight', 'ES.link_live', 'RR._start_unattended']) {
+  for (const name of ['NA.OPEN_STATUSES', 'ES.in_flight', 'ES.link_live', 'RR._start_unattended', 'RR._dep_status']) {
     if (!text.includes(name)) out.push(`estate-dispatch loads ${name}`)
   }
   if (text.includes('"in_progress"')) out.push('estate-dispatch in_progress literal')
@@ -154,6 +155,7 @@ function estateDispatchChecks(text) {
     out.push('estate-dispatch Active literal')
   }
   if (text.includes('"unattended"')) out.push('estate-dispatch unattended literal')
+  if (text.includes('"dropped"')) out.push('estate-dispatch dropped literal')
   return out
 }
 
@@ -335,12 +337,12 @@ test("estate-scan.py's Review literal equals the doc's, and it loads Active and 
   assert.deepEqual(estateScanChecks(grammarOf(doc), estateScan), [])
 })
 
-test('estate-dispatch.py reads Active, § In flight and the start stamp through the loaded modules, copying none', () => {
+test('estate-dispatch.py reads Active, § In flight, the start stamp and a dependency\'s landing through the loaded modules, copying none', () => {
   assert.deepEqual(estateDispatchChecks(estateDispatch), [])
 })
 
 test('control: each estate-dispatch check rejects its own known-bad shape', () => {
-  for (const name of ['NA.OPEN_STATUSES', 'ES.in_flight', 'ES.link_live', 'RR._start_unattended']) {
+  for (const name of ['NA.OPEN_STATUSES', 'ES.in_flight', 'ES.link_live', 'RR._start_unattended', 'RR._dep_status']) {
     assert.deepEqual(estateDispatchChecks(estateDispatch.replaceAll(name, 'LOCAL')), [`estate-dispatch loads ${name}`])
   }
   assert.deepEqual(estateDispatchChecks(`${estateDispatch}\nST = "in_progress"\n`), ['estate-dispatch in_progress literal'])
@@ -348,6 +350,7 @@ test('control: each estate-dispatch check rejects its own known-bad shape', () =
   assert.deepEqual(estateDispatchChecks(`${estateDispatch}\nACTIVE = {"in_progress", "open"}\n`),
     ['estate-dispatch in_progress literal', 'estate-dispatch Active literal'])
   assert.deepEqual(estateDispatchChecks(`${estateDispatch}\nSTAMP = "unattended"\n`), ['estate-dispatch unattended literal'])
+  assert.deepEqual(estateDispatchChecks(`${estateDispatch}\nGONE = {"dropped", "done"}\n`), ['estate-dispatch dropped literal'])
 })
 
 test("estate-scan.py counts a phase's members by the literal filename prefix, PHASE_N loaded, and § Readers says so", () => {

@@ -224,7 +224,8 @@ One message of statements, no question:
   `<owner tag>`, then `/thread:execute [[<rollout>]]`", the tag from `plan.rollouts[].owners`; for a plain pause,
   "paused by you: the reinstate is yours";
 - the waiting runs, each with its why;
-- the held and undecided members;
+- the held and undecided members, each held one with its `blockedBy` whys (a `dependency scheduled late` one goes
+  next pass; a `dependency dropped` or `dependency not found` one goes only once its `depends-on:` link changes);
 - the session-lane work, listed and never started;
 - the caveats.
 

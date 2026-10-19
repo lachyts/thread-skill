@@ -98,6 +98,8 @@ no stamp; `started:` and `started_unattended:` are other keys.
   `<slug>-p<N>-`, never by a task's `phase:` key, with reconcile-project.py's `PHASE_N` loaded rather than copied.
 - `skills/_shared/scripts/estate-dispatch.py` `record` (the estate pass's decision write): Active through
   next-action's `OPEN_STATUSES` and `status_of`, and § In flight through estate-scan's `in_flight` and `link_live`,
-  all loaded rather than copied. It writes only into an Active task that is not in flight.
+  all loaded rather than copied. It writes only into an Active task that is not in flight. Its `plan` reads whether
+  a dependency outside the scan has landed through reconcile-rollout's `_dep_status` and `_fold_unit`, loaded, so it
+  holds a member exactly as long as a rollout row would wait on that dependency.
 - `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both
   scripts' key and sort helpers against the examples under § Phase and task filenames.

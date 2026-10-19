@@ -350,8 +350,9 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   fixture vault, with injected rollout summaries — `slices` (one file per home, never overwriting), `rounds` (the
   sign-offs asked only under no pause or the sign-off pause, their gates raw and as `approve-gates` signs them, the
   cut to the budget, held decisions skipped, AskUserQuestion payloads with short labels and unique texts), `plan`
-  (decided, unheld members only, blockers, shared roots and parked runs waiting, batches that keep names that may
-  meet apart, each live rollout's holds and the signed reinstate), `sessions` (written notes, the status allow-list
+  (decided, unheld members only, each with every dependency it needs scheduled and every why read against the final
+  schedule, blockers, shared roots and parked runs waiting, batches that keep names that may meet apart, each live
+  rollout's holds and the signed reinstate), `sessions` (written notes, the status allow-list
   behind the holds, orients last) and `record` (the answer folded to one line into `## Decisions (asked ahead
   <date>)`, the fork's ruling, every refusal byte-identical), usage exits, byte-equal reruns and read-only runs;
   `tests/contracts/orient-all.test.mjs` pins `skills/orient-all/SKILL.md` to the script, to schedule's answered

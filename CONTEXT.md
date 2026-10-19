@@ -77,8 +77,9 @@ through time, from attention to merged PRs. Terms only — no implementation.
   ahead <date>)` (`skills/orient-all/SKILL.md`). _Avoid_: triage round.
 - **Dispatch plan** — what the estate pass starts once the decisions are in:
   a schedule per candidate run whose decided, unheld members are clear of
-  dispatch blockers, each with its open dependencies scheduled too, in
-  batches; then one visible session per new parallel
+  dispatch blockers, each with every dependency it needs scheduled in the
+  same pass (one held only because its dependency was scheduled late goes
+  next pass), in batches; then one visible session per new parallel
   execute and serial Leg 1, per live rollout that status sends to a ceremony,
   a start, a signed reinstate or a repair, and per child orient (paste-ready
   prompts off the Stage). _Avoid_: launch list.

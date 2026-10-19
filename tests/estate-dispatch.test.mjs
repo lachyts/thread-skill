@@ -120,6 +120,14 @@ T('act-on-shared', 'open', ['Act'], links('depends-on', ['shared-a']))
 T('deps-blk', 'open', ['Deps'], links('depends-on', ['blk-a']))
 T('deps-sess', 'open', ['Deps'], links('depends-on', ['sess-a']))
 T('chain-a', 'open', ['Chain'], links('depends-on', ['deps-blk']))
+// Dependencies outside the scan, for rank copies to name: reconcile-rollout's _dep_status holds a row until its
+// dependency lands, so a dropped note, an archived open one (by tag or by folder) or a link to no note never frees it; a
+// done note and a tombstone folded into a done unit hold nothing; a tombstone folded into an open unit holds as that unit.
+T('gone-dropped', 'dropped', ['Rec'])
+write(path.join(TASKS, 'gone-archived.md'), fm('tags:\n  - task\n  - archived\nstatus: open\nprojects:\n  - "[[Rec]]"'))
+write(path.join(TASKS, 'Archive', 'gone-shelved.md'), fm('tags:\n  - task\nstatus: open\nprojects:\n  - "[[Rec]]"'))
+T('tomb-open', 'merged', ['Rec'], '\nmerged_into: "[[shared-a]]"')
+T('tomb-done', 'merged', ['Rec'], '\nmerged_into: "[[rec-done]]"')
 
 // The record cases' tasks (ungraded: an ungraded task holds nothing it does not block).
 const END = '- 2026-10-19T10:00:00Z orient end: run 1, job 2, partial: fork for Lachy: Keep v3 or v4; evidence: x.py:3; ' +
@@ -314,8 +322,15 @@ const entryOf = (j, run) => { const e = j.schedule.find((x) => x.run === run); a
 const waitOf = (j, run) => { const e = j.waiting.find((x) => x.run === run); assert.ok(e, `a waiting run ${run}: ${j.waiting.map((x) => x.run).join(', ')}`); return e }
 const rolloutOf = (j, slug) => { const r = j.rollouts.find((x) => x.slug === slug); assert.ok(r, slug); return r }
 const runId = (project, shape, rootName) => `${project}/${shape}/${rootName ? ROOT(rootName) : '-'}`
+// Every plan the suite reads, with the rank it was planned from, for D8b's invariants.
 const allPlans = []
-const tracked = (run) => { const j = ok(run); allPlans.push(j); return j }
+const tracked = (run, rk = null) => { const j = ok(run); allPlans.push({ j, rk }); return j }
+// A rank copy with some tasks' dependsOn[] replaced, planned (the ranker's own holds are left as they were).
+function planWith(name, deps, more = []) {
+  const rk = structuredClone(ranked())
+  for (const [slug, list] of Object.entries(deps)) rk.tasks.find((t) => t.slug === slug).dependsOn = list.map((d) => `[[${d}]]`)
+  return { rk, j: tracked(py(['plan', '--rank', keep(`rank-${name}.json`, JSON.stringify(rk)), '--scan', SCAN_FILE, ...more]), rk) }
+}
 
 // mtime and size of every file under a dir, and its bytes, for the read-only and refusal cases.
 function snap(dir) {
@@ -586,16 +601,65 @@ test('D8. plan: a blocker, an unknown or undeclared repo, a shared root and a pa
     detail: 'every member left depends on a task no scheduled run holds: blk-a, sess-a' }])
   assert.deepEqual(waitOf(j, runId('Chain', 'parallel', 'chain')).why,
     { kind: 'dependency not scheduled', detail: 'every member left depends on a task no scheduled run holds: deps-blk' })
-  // A run that loses every member frees its root for the next run on it.
-  const mira = structuredClone(rk)
-  mira.tasks.find((t) => t.slug === 'mira-a').dependsOn = ['[[blk-a]]']
-  const m = ok(py(['plan', '--rank', keep('rank-mira-on-blk.json', JSON.stringify(mira)), '--scan', SCAN_FILE]))
-  assert.equal(waitOf(m, runId('Mira', 'parallel', 'mira')).why.kind, 'dependency not scheduled')
+  // The pre-hold: a member whose dependency cannot go whatever the root contest decides (here a blocked run's task) is
+  // held before any root is contested, so its run never takes the root, and the next run on it goes.
+  const act = runId('Act', 'parallel', 'shared')
+  const mira = runId('Mira', 'parallel', 'mira')
+  const { j: m } = planWith('mira-on-blk', { 'mira-a': ['blk-a'] })
+  assert.deepEqual(waitOf(m, mira).why,
+    { kind: 'dependency not scheduled', detail: 'every member left depends on a task no scheduled run holds: blk-a' })
   assert.deepEqual(entryOf(m, mirb.run).members, ['mirb-a'], 'the same-root waiter goes once the root is free')
-  depsScheduled(m, mira)
+  // The review's probe: Act's act-a depends on Mirb's task. Mira never takes the clone root, so Mirb goes, act-a goes
+  // with it, and Act keeps its root: the lower-ranked Shared still waits on it.
+  const { j: ma } = planWith('mira-act', { 'mira-a': ['blk-a'], 'act-a': ['mirb-a'] })
+  assert.deepEqual(entryOf(ma, act).members, ['act-a'], 'act-a is scheduled, its dependency with it')
+  assert.deepEqual(entryOf(ma, mirb.run).members, ['mirb-a'])
+  assert.equal(waitOf(ma, shared.run).why.kind, 'same root')
+  assert.ok(waitOf(ma, shared.run).why.detail.includes(act), waitOf(ma, shared.run).why.detail)
+  assert.ok(!ma.held.some((x) => x.slug === 'act-a'))
+  assert.deepEqual(ma.held.find((x) => x.slug === 'act-on-shared').blockedBy, [{ slug: 'shared-a', why: 'dependency not scheduled' }])
+  // A genuine late hold, a same-root cascade the pre-hold cannot foresee: crown-a and crown-b depend on shared-a, whose
+  // run loses the shared root to Act, and act-a depends on crown-a. The first choice holds both Crown members; the
+  // second holds act-a, so Act empties and frees the root, and Shared goes. crown-a and crown-b stay held, so the plan
+  // never flips back, and say why: their dependency was scheduled only after they were held, and they go next pass.
+  const crown = runId('Crown', 'parallel', 'crown')
+  const { j: late } = planWith('late', { 'crown-a': ['shared-a'], 'crown-b': ['shared-a'], 'act-a': ['crown-a'] })
+  assert.deepEqual(entryOf(late, shared.run).members, ['shared-a'])
+  const LATE = [{ slug: 'shared-a', why: 'dependency scheduled late' }]
+  for (const s of ['crown-a', 'crown-b', 'act-on-shared']) assert.deepEqual(late.held.find((x) => x.slug === s)?.blockedBy, LATE, s)
+  assert.deepEqual(late.held.find((x) => x.slug === 'act-a').blockedBy, [{ slug: 'crown-a', why: 'dependency not scheduled' }])
+  assert.deepEqual(waitOf(late, crown).why, { kind: 'dependency scheduled late',
+    detail: 'every member left was held before its dependency was scheduled, and goes next pass: shared-a' })
+  assert.deepEqual(waitOf(late, act).why,
+    { kind: 'dependency not scheduled', detail: 'every member left depends on a task no scheduled run holds: crown-a' })
+  // Dependencies outside the scan. reconcile-rollout holds a row until its dependency lands, and a dropped note, an
+  // archived open one (by tag or in the Archive folder) or a link to no note never does, so the member is held; a landed
+  // dependency, or a tombstone folded into a landed unit, holds nothing; a tombstone folded into an open unit holds as it.
+  const { j: g } = planWith('gone', { 'crown-a': ['gone-dropped', 'rec-done'], 'crown-b': ['tomb-done', 'rec-done'],
+    'lt1-a': ['gone-archived'], 'lt2-a': ['gone-shelved'], 'cafe1-a': ['no-such-task'], 'cafe2-a': ['tomb-open'] })
+  assert.deepEqual(entryOf(g, crown).members, ['crown-b'], 'a landed dependency, direct or folded, holds nothing')
+  const gone = (slug) => g.held.find((x) => x.slug === slug)?.blockedBy
+  assert.deepEqual(gone('crown-a'), [{ slug: 'gone-dropped', why: 'dependency dropped' }])
+  assert.deepEqual(gone('lt1-a'), [{ slug: 'gone-archived', why: 'dependency dropped' }])
+  assert.deepEqual(gone('lt2-a'), [{ slug: 'gone-shelved', why: 'dependency dropped' }])
+  assert.deepEqual(gone('cafe1-a'), [{ slug: 'no-such-task', why: 'dependency not found' }])
+  assert.deepEqual(gone('cafe2-a'), [{ slug: 'shared-a', why: 'dependency not scheduled' }], 'a tombstone holds as its unit')
+  assert.deepEqual(waitOf(g, runId("Lachy's Tools", 'parallel', 'lt1')).why,
+    { kind: 'dependency not scheduled', detail: 'every member left depends on a task no scheduled run holds: gone-archived' })
 })
 
 // ---- D8b. plan: batches ----------------------------------------------------------------------------------------------
+// Every dependency why is read against the final schedule: no held member or waiting run names, as not scheduled, a task
+// some entry holds as a member, nor, as scheduled late, one no entry holds.
+function whysHonest(j) {
+  const members = new Set(j.schedule.flatMap((e) => e.members))
+  const check = (who, slug, why) => {
+    if (why === 'dependency not scheduled') assert.ok(!members.has(slug), `${who} names ${slug} not scheduled, but it is`)
+    if (why === 'dependency scheduled late') assert.ok(members.has(slug), `${who} names ${slug} scheduled late, but it is not`)
+  }
+  for (const h of j.held) for (const b of h.blockedBy) check(h.slug, b.slug, b.why)
+  for (const w of j.waiting) for (const s of w.why.detail.split(': ').pop().split(', ')) check(w.run, s, w.why.kind)
+}
 function batchesHold(j) {
   const by = {}
   for (const e of j.schedule) (by[e.batch] ??= []).push(e)
@@ -639,10 +703,17 @@ test('D8b. plan: entries whose names may meet on one note slug never share a bat
   const serial = j.schedule.filter((x) => x.shape === 'serial').map((x) => x.batch)
   assert.deepEqual(serial, [top + 1, top + 2])
   assert.deepEqual(j.schedule.map((x) => x.batch), [...j.schedule.map((x) => x.batch)].sort((a, b) => a - b), 'listed by batch')
-  for (const p of allPlans) {
+  for (const { j: p, rk } of allPlans) {
     batchesHold(p)
-    depsScheduled(p)
+    depsScheduled(p, rk ?? ranked())
+    whysHonest(p)
   }
+  assert.ok(allPlans.some(({ j: p }) => p.held.some((h) => h.blockedBy.some((b) => b.why === 'dependency scheduled late'))),
+    'some plan holds a member late')
+  // The control: the round-2 plan, which named a scheduled task as not scheduled, fails the invariant.
+  const bad = structuredClone(allPlans.find(({ j: p }) => p.schedule.some((x) => x.members.includes('mirb-a'))).j)
+  bad.held.push({ slug: 'act-a', run: 'Act/parallel/x', grade: 'Ready', blockedBy: [{ slug: 'mirb-a', why: 'dependency not scheduled' }] })
+  assert.throws(() => whysHonest(bad), /mirb-a not scheduled, but it is/)
 })
 
 // ---- D9. plan: orient whatever the budget -------------------------------------------------------------------------------

@@ -31,7 +31,8 @@ constants that way): estate-rank.py (ER: Ranker's index, the gradeable rule; slu
 REVIEW_MINUTES), and through ER.load_siblings resolve-target.py's next-action.py (NA: Vault, Note, status_of,
 OPEN_STATUSES, links_in, tags_of) and estate-scan.py (ES: first_link, link_live and in_flight, vault-grammar.md
 § In flight stated once); reconcile-rollout.py (RR: Note, GATE_PENDING_SECTION, GATE_BOUNCE_SECTION,
-PROJECT_ROOT_RE, _shape and _start_unattended, the start stamp's reader); and, for `sessions` only, leg.py (LEG:
+PROJECT_ROOT_RE, _shape and _start_unattended, the start stamp's reader; _dep_status and _fold_unit, the dependency
+rule a rollout row waits on); and, for `sessions` only, leg.py (LEG:
 split_cells, LAUNCH_RE, LINK_RE and QUEUE, the serial Queue's row grammar).
 
 slices --scan F --dir D: one file per home project with gradeable tasks (ER's rule: statusClass active, not in flight,
@@ -78,17 +79,27 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   hold on it clears: a One call or Grill hold when the dependency is decided and clear, a `held` hold when the
   dependency is clear, a `parked` hold when the dependency's home is in --unparked (by name or note) and it is clear;
   no other hold ever clears (memo and cycle guard).
+  The dependencies. reconcile-rollout's _dep_status holds a rollout row until each dependency lands, so a member is
+  scheduled only with every dependency it needs scheduled too. A rank dependsOn[] link is matched as the ranker
+  matches it (ER.slug_key) to an open scan task, else read through RR._dep_status and RR._fold_unit over the vault's
+  task notes (a lazy copy of RR._scan's index): one landed, or open and in flight (a live rollout lands it), is
+  satisfied; an open one not in flight (a merged tombstone's unit too) is needed; one that left the scan without
+  landing (status dropped, an `archived` tag, the Archive folder) holds the member as `dependency dropped`, and a link
+  to no task note as `dependency not found`, since nothing ever lands them.
   A run is scheduled when it has members left; it is parallel with a root, or serial; its repo row has no blocker
   (`unchecked` passes: schedule § 0 is the gate); it is not parked, unless unparked here (then only its Ready, unheld
-  members go); and it is the best-ranked parallel run on its root (keyed on rolloutRoot when set, else root). Every
-  other run waits, with why {kind: parked | nothing decided | repo unknown | no repo declared | blocker | same root |
-  dependency not scheduled, detail}.
-  Then the dependencies: a member whose rank dependsOn[] names an open (a scan task), not-in-flight task that no
-  scheduled entry holds as a member is held, with blockedBy {slug, why: `dependency not scheduled`}, since
-  reconcile-rollout's _dep_status would hold its row until that task lands, and it never would (its run waits, or it
-  is session-lane work, which no run holds; on a `same root` waiter, a deadlock). The runs are then chosen again with
-  those members held, to a fixpoint: a run that loses every member waits with that kind and frees its root, and its
-  members' dependants are held in turn.
+  members go); and it is the best-ranked parallel run on its root (keyed on rolloutRoot when set, else root). Before
+  that root contest, the pre-hold: a member whose needed dependency can never go this pass, whatever the contest
+  decides (undecided or held, session-lane or in no run, a member of a run that waits parked, blocker, repo unknown
+  or no repo declared, or itself pre-held: transitively, to a fixpoint), is held, so the contest never hands a root to
+  a run that would only lose its members afterwards. What the pre-hold cannot foresee is a dependency in a run that
+  loses the contest: after it, each scheduled member with a needed dependency no entry holds is held, and the runs are
+  chosen again, since a run can lose every member and free its root. Those holds only grow, so the plan is stable and
+  never flips back; a member held so whose dependencies a later round did schedule stays held this pass, and goes
+  next pass. Every other run waits, with why {kind: parked | nothing decided | repo unknown | no repo declared |
+  blocker | same root | dependency not scheduled | dependency scheduled late, detail}; the last two are a run whose
+  every member the dependencies took, worded from the final schedule: `dependency not scheduled` naming only the
+  dependencies no entry holds, else `dependency scheduled late` naming the ones a later round scheduled.
   Schedule entries: {run, project, note, projectSlug, batchKeys[], shape, root, rolloutRoot, members[], args
   ("--tasks a,b,c", never --regenerate), batch, review {pr, signOff, eyeCheck, minutes}}. projectSlug is the name
   NFKD-folded to ASCII and lower-cased, apostrophes (' and ’) deleted, every other run outside [a-z0-9] made a `-`, the
@@ -106,8 +117,10 @@ plan --rank R --scan S [--decided SLUG]... [--unparked NOTE]... [--signed SLUG].
   superseded, lineage, version, serial and status unread.
   Output: {schema, vault, today, schedule[], waiting[] {run, project, note, shape, root, rolloutRoot, members[], why},
   rollouts[], reinstate[], orient[] {name, note, area[]} (the rank's, whatever the budget), held[] {slug, run, grade,
-  blockedBy (the rank holds that stand, then the unscheduled dependencies)}, undecided[] {slug, run, grade},
-  sessionLane[] {slug, home, grade}}.
+  blockedBy (the rank holds that stand, then, for a member the dependencies took, read against the final schedule:
+  {slug, why: `dependency not scheduled`} for each needed dependency no entry holds, `dependency dropped` or
+  `dependency not found` for each that never lands, or, when none of those is left, {slug, why: `dependency scheduled
+  late`} for each it was held on)}, undecided[] {slug, run, grade}, sessionLane[] {slug, home, grade}}.
 
 sessions --plan P [--wrote PATH]... [--status SLUG=N]...: the sessions to start, in start order. STATUS_ACTIONS maps
   each status § 4 **Recommended action** rule (its number, as a status agent reports it) to the item it may start:
@@ -203,7 +216,11 @@ STATUS_ACTIONS = {
 HOLDS = ("superseded", "lineage", "version", "incomplete", "serial", "paused", "draining", "live queue", "start stamp",
          "status unread")
 NO_REPAIR = frozenset({"superseded", "lineage", "version", "serial", "status unread"})
-DEP_UNSCHEDULED = "dependency not scheduled"  # plan's own hold, and the why of a run it empties
+# plan's own dependency holds (blockedBy whys), and the why kinds of a run they empty.
+DEP_UNSCHEDULED = "dependency not scheduled"
+DEP_LATE = "dependency scheduled late"
+DEP_DROPPED = "dependency dropped"
+DEP_MISSING = "dependency not found"
 
 
 def fail(code, reason):
@@ -624,6 +641,30 @@ def cmd_rounds(args):
 
 # ---- plan --------------------------------------------------------------------------------------------------------
 
+class TaskIndex:
+    """reconcile-rollout _scan's dependency index, read lazily: the stem (lower-cased) of every note under Work/Tasks,
+    Archive included, to (path, RR.Note), a root copy preferred over an archived one. RR._fold_unit and RR._dep_status
+    read it only through get(), so only the notes a dependency names are parsed."""
+
+    def __init__(self, RR, tasks_dir):
+        self.RR, self.tasks_dir, self.paths, self.found = RR, tasks_dir, {}, {}
+        if tasks_dir.is_dir():
+            for p in sorted(tasks_dir.rglob("*.md")):
+                self.paths.setdefault(p.stem.lower(), []).append(p)
+
+    def get(self, key, default=None):
+        if key not in self.found:
+            self.found[key] = None
+            for p in sorted(self.paths.get(key, ()), key=lambda x: x.parent != self.tasks_dir):
+                try:
+                    self.found[key] = (p, self.RR.Note(p))
+                    break
+                except (OSError, ValueError):
+                    continue
+        got = self.found[key]
+        return default if got is None else got
+
+
 class Plan:
     def __init__(self, M, rank, scan, vroot, decided, unparked, signed):
         self.M, self.rank, self.scan, self.vroot = M, rank, scan, vroot
@@ -631,20 +672,41 @@ class Plan:
         self.decided = {s for s, t in self.rows.items() if t.get("grade") == "Ready"} | set(decided)
         self.unparked = set(unparked)
         self.signed = set(signed)
-        self._clear = {}
+        self._clear, self._deps, self._index = {}, {}, None
         self.open = {}  # the scan's tasks (open: not landed, not archived) by lower-case slug, the first one kept
         for t in self.scan["tasks"]:
             if isinstance(t, dict) and isinstance(t.get("slug"), str):
                 self.open.setdefault(t["slug"].lower(), t)
 
+    def index(self):
+        if self._index is None:
+            self._index = TaskIndex(self.M.RR, Path(self.vroot) / self.M.NA.TASKS_DIR)
+        return self._index
+
     def deps(self, slug):
-        """The open, not-in-flight scan tasks the task's rank dependsOn[] names, matched as the ranker matches them
-        (ER.slug_key, case-insensitively), in order. reconcile-rollout's _dep_status holds a row until each lands."""
-        out = []
+        """[(dependency, why)], in dependsOn[] order: each dependency that would hold the task's rollout row, read as
+        the module docstring's plan paragraph on dependencies says. DEP_UNSCHEDULED marks one needed (an open scan
+        task, not in flight, that a scheduled entry must hold); DEP_DROPPED and DEP_MISSING one that never lands."""
+        if slug in self._deps:
+            return self._deps[slug]
+        RR, out = self.M.RR, []
         for link in (self.rows.get(slug) or {}).get("dependsOn") or []:
-            t = self.open.get(self.M.ER.slug_key(link))
-            if t is not None and not t.get("inFlight") and t["slug"] not in out:
-                out.append(t["slug"])
+            key = self.M.ER.slug_key(link)
+            t = self.open.get(key)
+            if t is None:
+                if not key or RR._dep_status(key, self.index())[0]:
+                    continue
+                t = self.open.get(RR._fold_unit(key, self.index())[0].lower())
+            if t is None:
+                found = self.index().get(key)
+                dep = (found[0].stem, DEP_DROPPED) if found else (key, DEP_MISSING)
+            elif t.get("inFlight"):
+                continue
+            else:
+                dep = (t["slug"], DEP_UNSCHEDULED)
+            if all(d != dep[0] for d, _ in out):
+                out.append(dep)
+        self._deps[slug] = out
         return out
 
     def home_unparked(self, slug):
@@ -678,10 +740,6 @@ class Plan:
         self._clear[slug] = ok
         return ok
 
-    def standing_holds(self, slug, unscheduled):
-        return [h for h in (self.rows.get(slug) or {}).get("blockedBy") or [] if not self.clear_one(h)] + [
-            {"slug": d, "why": DEP_UNSCHEDULED} for d in unscheduled.get(slug) or []]
-
     def clear_one(self, h):
         d, why = h.get("slug"), h.get("why")
         if why in ("One call", "Grill"):
@@ -692,10 +750,10 @@ class Plan:
             return self.home_unparked(d) and self.clear(d, set())
         return False
 
-    def choose(self, unscheduled):
-        """(held, undecided, entries, waiting): the runs chosen with every slug in `unscheduled` held."""
-        held, undecided, entries, waiting = {}, {}, [], []
-        roots = {}
+    def choose(self, late):
+        """(held, undecided, entries, waiting, lost): the runs chosen with every slug in `late` held. lost is the set
+        of members the dependencies took; a waiting row that lost every member carries `_lost` for run() to word."""
+        held, undecided, runs = {}, {}, []
         for order, run in enumerate(r for r in self.rank["runs"] if isinstance(r, dict)):
             slugs = sorted(set((run.get("ready") or []) + (run.get("waiting") or []) + (run.get("blocked") or [])),
                            key=lambda s: (self.rows.get(s, {}).get("rank") is None,
@@ -705,9 +763,8 @@ class Plan:
             members, lost = [], []
             for s in slugs:
                 t = self.rows.get(s) or {}
-                if s in unscheduled:  # only ever a former member, so decided with every rank hold clear
+                if s in late:  # only ever a former member, so decided with every rank hold clear
                     lost.append(s)
-                    held[s] = t
                 elif parked:
                     if t.get("grade") == "Ready" and not t.get("blockedBy"):
                         members.append(s)
@@ -719,12 +776,31 @@ class Plan:
                     held[s] = t
                 else:
                     members.append(s)
+            # A run that waits whatever the root contest decides: parked, rootless or blocked.
+            fixed = (parked and not unparked) or (run.get("shape") == "parallel" and not run.get("root")) \
+                or bool(run.get("blockers"))
+            runs.append((order, run, parked and not unparked, members, lost, fixed))
+        # The pre-hold, before any root is contested: a member whose dependency can never go this pass, whatever the
+        # contest decides, is held, transitively. Only a member of a run the contest can schedule may go.
+        pool = {s for _, _, _, members, _, fixed in runs if not fixed for s in members}
+        while True:
+            out = {s for s in pool if any(why != DEP_UNSCHEDULED or d not in pool for d, why in self.deps(s))}
+            if not out:
+                break
+            pool -= out
+        entries, waiting, roots, gone = [], [], {}, set()
+        for order, run, still_parked, members, lost, fixed in runs:
+            if not fixed:
+                lost = lost + [s for s in members if s not in pool]
+                members = [s for s in members if s in pool]
+            for s in lost:
+                held[s] = self.rows.get(s) or {}
+                gone.add(s)
             why = None
-            if parked and not unparked:
+            if still_parked:
                 why = {"kind": "parked", "detail": "the project is parked: its Unpark offer decides"}
             elif not members and lost:
-                why = {"kind": DEP_UNSCHEDULED, "detail": "every member left depends on a task no scheduled run "
-                       "holds: %s" % ", ".join(sorted({d for s in lost for d in unscheduled[s]}))}
+                why = {"kind": DEP_UNSCHEDULED, "detail": None}  # worded by run() from the final schedule
             elif not members:
                 why = {"kind": "nothing decided", "detail": "no member is decided with every hold clear"}
             elif run.get("shape") == "parallel" and not run.get("root"):
@@ -745,6 +821,8 @@ class Plan:
                    "members": members}
             if why:
                 row["why"] = why
+                if why["detail"] is None:
+                    row["_lost"] = lost
                 waiting.append(row)
                 continue
             review = {k: sum((self.rows[m].get("review") or {}).get(k) or 0 for m in members)
@@ -753,25 +831,44 @@ class Plan:
             row.update(projectSlug=project_slug(name), batchKeys=batch_keys(name), args="--tasks " + ",".join(members),
                        batch=None, review=review, _order=order)
             entries.append(row)
-        return held, undecided, entries, waiting
+        return held, undecided, entries, waiting, gone
 
     def run(self):
-        # A member whose dependency no scheduled entry holds would wait on it forever, so it is held, and the runs are
-        # chosen again: a run can lose every member, freeing its root and stranding its dependants. `unscheduled`
-        # only grows, so this stops within one round per task.
-        unscheduled = {}
+        # The pre-hold (choose) foresees every dependency that cannot go whatever the root contest decides. What it
+        # cannot foresee is a dependency in a run that loses its root: its dependants are held after the contest, and
+        # the runs are chosen again, since a run can lose every member and free its root. `late` only grows, so this
+        # stops within one round per task, and the plan never flips back.
+        late = {}
         while True:
-            held, undecided, entries, waiting = self.choose(unscheduled)
+            held, undecided, entries, waiting, gone = self.choose(late)
             scheduled = {m for e in entries for m in e["members"]}
             more = {}
             for e in entries:
                 for m in e["members"]:
-                    missing = [d for d in self.deps(m) if d not in scheduled]
+                    missing = [d for d, _ in self.deps(m) if d not in scheduled]
                     if missing:
                         more[m] = missing
             if not more:
                 break
-            unscheduled.update(more)
+            late.update(more)
+
+        def dep_holds(s):
+            """Its dependency holds, read against the final schedule: only dependencies still not scheduled, or, when a
+            later round scheduled every one, the ones it was held for, as DEP_LATE."""
+            out = [{"slug": d, "why": why} for d, why in self.deps(s) if why != DEP_UNSCHEDULED or d not in scheduled]
+            return out or [{"slug": d, "why": DEP_LATE} for d in late.get(s) or []]
+
+        for w in waiting:
+            lost = w.pop("_lost", None)
+            if lost is None:
+                continue
+            holds = [h for s in lost for h in dep_holds(s)]
+            absent = sorted({h["slug"] for h in holds if h["why"] != DEP_LATE})
+            if absent:
+                w["why"]["detail"] = "every member left depends on a task no scheduled run holds: " + ", ".join(absent)
+            else:
+                w["why"] = {"kind": DEP_LATE, "detail": "every member left was held before its dependency was "
+                            "scheduled, and goes next pass: " + ", ".join(sorted({h["slug"] for h in holds}))}
         # Batches: parallel entries take the lowest batch whose keys never meet theirs; serial ones follow, one each.
         batches = []
         for e in (x for x in entries if x["shape"] == "parallel"):
@@ -805,7 +902,8 @@ class Plan:
             "schedule": schedule, "waiting": waiting, "rollouts": rollouts,
             "reinstate": [r["slug"] for r in rollouts if r["reinstate"]], "orient": orient,
             "held": [{"slug": s, "run": run_of.get(s), "grade": t.get("grade"),
-                      "blockedBy": self.standing_holds(s, unscheduled)} for s, t in sorted(held.items())],
+                      "blockedBy": [h for h in t.get("blockedBy") or [] if not self.clear_one(h)]
+                      + (dep_holds(s) if s in gone else [])} for s, t in sorted(held.items())],
             "undecided": [{"slug": s, "run": run_of.get(s), "grade": t.get("grade")}
                           for s, t in sorted(undecided.items())],
             "sessionLane": [{"slug": t["slug"], "home": t.get("home"), "grade": t.get("grade")}
