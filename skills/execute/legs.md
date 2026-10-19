@@ -101,7 +101,7 @@ A Leg never calls the question tool (`AskUserQuestion`, or the harness's own ask
 
 ADR 0040's close ritual: stamp each task done or set aside, save the learnings, review any code written, and commit. Tasks are stamped and code is reviewed as each task ends. At the Leg's end, in this order:
 
-1. `leg.py close --outcome handoff|complete|stuck|stopped|halt [--reason <r>] --cwd "$PWD"`, before any `create_thread`, so the successor's `begin` already reads this Leg closed. It refuses handoff, complete and stuck while this Leg owns an in_progress task; stopped and halt leave the task claimed for the next Leg. It prints `progress`, `commit_only`, `needs_you`, `handover` (handoff only) and `status_line` (every outcome but handoff).
+1. `leg.py close --outcome handoff|stuck|stopped|halt [--reason <r>] --cwd "$PWD"`, before any `create_thread`, so the successor's `begin` already reads this Leg closed. A Leg that completes the chain closes in § Complete step 4 instead, with `--outcome complete --reflection`: without `--reflection` that outcome is a usage error (exit 2). It refuses handoff and stuck while this Leg owns an in_progress task; stopped and halt leave the task claimed for the next Leg. It prints `progress`, `commit_only`, `needs_you`, `handover` (handoff only) and `status_line` (every outcome but handoff).
 2. Push each `needs_you` item once (§ Needs you).
 3. `/thread:close`, which runs close § Under a Leg: the close-outs land commit-only in each `commit_only` checkout, step 6 asks nothing, and the hand-over (§ Hand over) runs between sub-step 7 and step 8.
 4. `leg.py handed` (§ Hand over) records the hand-over and prints the handoff's status line.

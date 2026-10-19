@@ -14,7 +14,8 @@
 //       Report table verbatim, never `running`, a `waiting` line from `next --waiting`, a labelled and pushed manual
 //       hand-over;
 //   e7  the close order (leg.py close before create_thread → pushes → /thread:close with the hand-over between 7 and
-//       8 → handed → banner → ROLLOUT-STATUS), the lock and exit 5's retry-once, no question tool;
+//       8 → handed → banner → ROLLOUT-STATUS), step 1's outcomes without a bare `complete` (it needs --reflection: §
+//       Complete step 4), the lock and exit 5's retry-once, no question tool;
 //   e8  the docs: CONTEXT's **Leg** and **Serial rollout** entries, ADR 0040's Decision line and its new bullet, the
 //       README row;
 //   e9  close § Under a Leg: each rule (a follow-on after Complete filed with no pointer among them), placed after ##
@@ -176,6 +177,12 @@ function check(f, product = tree) {
     /^3\. `\/thread:close`.*runs between sub-step 7 and step 8/, /^4\. `leg\.py handed`/,
     /^5\. close's banner, then the `ROLLOUT-STATUS:` line/].map((re) => cl.findIndex((x) => re.test(x)))
   if (ci.some((i, k) => i !== k)) flag('e7', `§ Close's steps are out of order: ${ci}`)
+  const close1 = cl[0] ?? ''
+  const cmd1 = (close1.match(/^1\. `([^`]*)`/) ?? ['', ''])[1]
+  if (/\bcomplete\b/.test(cmd1) && !cmd1.includes('--reflection')) flag('e7', `§ Close step 1 offers complete without --reflection: ${cmd1}`)
+  if (!close1.includes('closes in § Complete step 4 instead, with `--outcome complete --reflection`')) {
+    flag('e7', '§ Close step 1 does not send a completing Leg to § Complete step 4')
+  }
   need('e7', 'legs.md § Concurrency', sec(legs, 'Concurrency'), ['holds the rollout\'s lock', 'exit 5',
     'retry the verb once', '`halted reason="halt: rollout note locked"`'])
   need('e7', 'legs.md § Don\'ts', sec(legs, "Don'ts"), ['Never call the question tool in a Leg', 'Never make a Workflow call',
@@ -289,6 +296,10 @@ test('control: a status table row that drifts fails e6', () => {
 })
 test('control: create_thread before leg.py close fails e7', () => {
   only('legs', '--cwd "$PWD"`, before any `create_thread`, so', '--cwd "$PWD"`, after `create_thread`, so', ['e7'], 'order')
+})
+test('control: § Close step 1 offering a bare complete fails e7', () => {
+  only('legs', '1. `leg.py close --outcome handoff|stuck|stopped|halt [--reason <r>]', '1. `leg.py close --outcome handoff|complete|stuck|stopped|halt [--reason <r>]',
+    ['e7'], 'complete')
 })
 test('control: a Leg that may call the question tool fails e7', () => {
   only('legs', '- Never call the question tool in a Leg:', '- Call the question tool when unsure:', ['e7'], 'question')
