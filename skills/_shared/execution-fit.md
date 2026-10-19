@@ -76,12 +76,18 @@ schedule gate stops before anything is written (no task stamped, no rollout
 note, no heartbeat) and names the remedy. Fix the blocker, then schedule again.
 Six blockers:
 
-**Self-rollout.** A rollout must never run against the checkout the plugin itself runs from. When the
-repo path is, or contains, the plugin's live checkout (a **directory-source** marketplace,
-`claude plugin marketplace add <dir>`, or a `--plugin-dir` session), `${CLAUDE_PLUGIN_ROOT}` IS that
-checkout, so every engine or skill change a merge lands there becomes the engine of the rollout's next task
-call (p12-4, ADR 0030). This blocker runs first, since in schedule it decides the path every other blocker
-checks:
+**Self-rollout.** Every parallel rollout scheduled after P26 runs from its **rollout clone** (ADR 0042): a
+second full clone of the repository beside its toplevel, `<toplevel>-rollout`, never nested inside it, so a
+peer session's commit in the in-place checkout never moves the tree a rollout integrates in; the
+self-rollout's clone is the first case of that rule, not an exception to it. And a rollout must never run
+against the checkout the plugin itself runs from. When the repo path is, or contains, the plugin's live
+checkout (a **directory-source** marketplace, `claude plugin marketplace add <dir>`, or a `--plugin-dir`
+session), `${CLAUDE_PLUGIN_ROOT}` IS that checkout, so every engine or skill change a merge lands there
+becomes the engine of the rollout's next task call (p12-4, ADR 0030). Execute § 2.6 runs this blocker first,
+on the Project root. Schedule § 0 runs the GitHub origin and landing register checks below on the `Local:`
+path first (they key on the GitHub origin, which the clone shares, so a repo they refuse is never cloned),
+then this snippet's `--resolve` and `--ensure`, which decide the path the pushed-base and unfinished-rollout
+checks use:
 
 ```bash
 # thread:self-rollout-check (extracted and tested by tests/self-rollout-check.test.sh)
@@ -94,14 +100,25 @@ bash "$sc" $M "$R"
 # end thread:self-rollout-check
 ```
 
-`<mode>` is `--resolve` in schedule § 0 and empty in execute § 2.6. `self-rollout-check.sh` is read-only
-(it never clones, fetches or writes), and its header is the one statement of what matches and of what
-makes a clone usable.
+`<mode>` is `--resolve`, then `--ensure`, in schedule § 0 (estate-scan.py runs `--resolve` too) and empty in
+execute § 2.6. The plain mode and `--resolve` are read-only; `--ensure` writes only the rollout clone. The
+script's header is the one statement of what matches, of what makes a clone usable, and of every mode.
 
-- **`--resolve`** (schedule § 0 only): exit 0 prints the Project root to use, the repo path itself when
-  nothing matches, or the separate clone `<repoPath>-rollout` when the repo path matches and that clone is
-  usable. Exit 3 is a match with no usable clone: the match lines, one
-  `self-rollout-check: <path> is not a usable rollout clone: <reason>` line and the fix, on stderr.
+- **`--resolve`** (schedule § 0, read-only): every git `Local:` maps to its rollout clone, `C[/<sub>]` (a
+  sub-path kept; `C` is the toplevel itself when it already is a rollout clone). Exit 0 prints the usable
+  clone. Exit 4 prints the would-be clone when none exists yet, its stderr naming the origin URL and, when it
+  would sit inside another work tree P, a `nested in <P>` line. Exit 5 is no GitHub origin (empty stdout;
+  the remote check's remedy). Exit 3 is no usable clone, nothing on stdout and the reason on stderr: outside
+  git, a linked worktree (point `Local:` at the main checkout), `~/Projects` itself (a text-only monorepo,
+  never a Project root), `self-rollout-check: <path> is not a usable rollout clone: <reason>` (not a
+  directory, not a work tree's top, a linked worktree, another repository, a live plugin checkout, or a
+  parent work tree that would track it), or a sub-path the clone lacks (land it first).
+- **`--ensure`** (schedule § 0, after Lachy's yes when the clone is new): makes a missing clone (inside another
+  work tree, an empty-directory `git check-ignore` probe first, removed and exit 3 when that tree would track
+  it; then one `git clone` of the raw origin URL, never prompting), re-runs the usable checks, fast-forwards
+  the clone's default branch (`fetch`, then `merge --ff-only --no-autostash`; a note when it cannot move),
+  notes the gitignored local state the in-place checkout has and the clone lacks (nothing is copied), and
+  prints the Project root. Exits 0, 2 (a failed clone, nothing left behind), 3 and 5.
 - **Empty** (execute § 2.6): exit 0 is no match; exit 3 is a match, with the match lines and the fix on
   stderr. Execute never swaps a root: its rollout note is already written.
 - **Exit 2**, in either mode, is the check itself failing (the script missing with the root set, an empty
@@ -214,10 +231,20 @@ single-quoted, or nothing. The check runs over a **clone set**, not one checkout
 clone, plus `<localPath>`, plus every directory-source plugin marketplace path in
 `known_marketplaces.json` (read through `self-rollout-check.sh --list-dirs`, the one registry parser),
 each kept only when its raw `origin` URL names the same `<owner>/<name>` and de-duplicated by real path. The
-registry source matters here: the self-rollout blocker above forces a separate rollout clone when the repo
-path is a directory-source marketplace checkout, so the registry names the primary checkout then, and a
-close-out committed in the primary is still seen (a `--plugin-dir` primary is in no registry: the project
-note's `Local:` path, passed as `<localPath>`, covers it).
+repo path is the rollout clone, so the project note's `Local:` path, passed as `<localPath>`, names the
+in-place checkout, and the registry names a self-rollout's primary checkout (a `--plugin-dir` primary is in
+no registry: `Local:` covers it).
+
+**Clone-rooted.** When the repo path's toplevel is a rollout clone (`self-rollout-check.sh --in-place` names
+its twin: every rollout scheduled after P26, and every self-rollout), the root keeps the rule below and every
+other member is a peer: the in-place checkout, the primary checkout of a self-rollout among them. A peer's
+ahead commits block only when they touch a **scoping** cited path; any other ahead peer is one note naming up
+to three of its commits (with the ADR 0031 wait for a held primary). A cited path scopes a member when it
+resolves there as the Warn half below resolves it (relative paths and globs in every member, `~/` and
+absolute paths only in the member that contains them) and is not an existing directory in that member, its
+toplevel included: a task body that names a repo root or a folder notes it, `cited directory <p> does not
+scope <member>'s ahead commits`, and never re-blocks every peer. With no cited paths no peer blocks. A
+rollout rooted in place before ADR 0042 keeps the strict rule for every member.
 
 - **Exit 0** prints `pushed`; any notes and WARN lines on stderr pass through to the user.
 - **Exit 3**: some known clone's local `<default>` is ahead of `origin/<default>` with content that
@@ -252,15 +279,18 @@ The check runs `git fetch --prune` of `origin/<default>` and `origin/close/*` in
 moves remote-tracking refs only: no working tree, branch or HEAD changes. The prune drops the tracking ref
 of a `close/…` branch deleted on origin, so its commits read stranded, never queued for ever. It runs
 from schedule § 0 with no cited paths, again after schedule's step-2 detection with the cited paths, and
-from execute § 2.7 at entry points only, never per merge: `origin/<default>` moves with every merge, and a close-out committed
-mid-rollout must not halt an unattended run. Nothing names such a commit at each merge in the general case:
-merge-task's local refresh reads only the rollout's repo path, so it names one committed there, but one
-committed in another clone of the set (the primary checkout of a self-rollout's separate clone) first
-surfaces when the next entry halts on it.
+from execute § 2.7 at entry points only, never per merge, with the paths the not-yet-merged tasks cite
+(`reconcile-rollout.py cited`): `origin/<default>` moves with every merge, and a close-out committed
+mid-rollout must not halt an unattended run. merge-task's local refresh reads only the rollout's repo path,
+so it names a commit made there; its in-place refresh (`self-rollout-check.sh --refresh-in-place`) names one
+in a clone-rooted rollout's in-place checkout as `ahead` or `diverged`, and that halts the next entry only
+when it touches a cited path. In a rollout rooted in place before ADR 0042, one committed in another clone
+of the set first surfaces when the next entry halts on it.
 
 **Unfinished rollout.** A repo holds at most one unfinished parallel rollout: one directly in `Work/Tasks/`,
 neither `done` nor `dropped`, with a task not yet merged; and none on a place a live serial chain writes
-(ADR 0040). schedule § 0 runs
+(ADR 0040). Surfaces compare `repo:<realpath>` literally, so a rollout rooted in its clone and a chain on
+the in-place checkout coexist as peers (ADR 0042). schedule § 0 runs
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check` against the resolved repo path last,
 after the pushed-base check, and its one stdout line decides: see schedule § 0 for each outcome (`none`,
 `supersede`, `file`, `interrupted`, `refuse`) and its remedy. A running or never-superseded rollout on the

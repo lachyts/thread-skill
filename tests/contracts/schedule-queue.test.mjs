@@ -2,7 +2,8 @@
 // schedule skill or its template, protocol 5, the queue's stamps (`solo: true`, `depends-on:`), and the
 // one-unfinished-rollout-per-repo rule wired into § 0 (the check, the supersede's `resume`, the `file`
 // and `interrupted` finishes, the `incomplete: true` stamp and the pinned "is incomplete" report), § 0's
-// self-rollout `--resolve` wired first (its output is the Project root) with step 1's Re-root guard, the
+// rollout-clone order (ADR 0042: the remote, gh and register checks, then `--resolve`, the ask, `--ensure`, whose
+// output is the Project root, then pushed-base and unfinished-rollout) with step 1's Re-root guard, the
 // carry preview in step 1, a release gate's drop decided before step 6 (or, at step 8, taken out with its
 // row), Solo and dependency proposals for queued tasks only (step 5), step 6's Advance/Cancel-only naming,
 // a note born `incomplete: true` (the template) that only step 7's last write clears, and orient leaving
@@ -123,19 +124,29 @@ function checkSchedule({ schedule, template, orient, taskWriter = '', manifests 
   if (!s0.includes('`file <slug> <path>`') || !s0.includes('`interrupted <prior> <new>`') ||
     !/reconcile-rollout\.py carry --from/.test(s0)) fails.push('s0-outcomes')
 
-  // s0-self-rollout: § 0 resolves the root first, running execution-fit.md's self-rollout snippet with
-  // `--resolve` before the remote check; its output is the path step 6 writes as {{REPO_PATH}}; the Thread line
-  // and <localPath> keep the `Local:` path; exit 3 is a stop. The rule itself is tested on the script
-  // (tests/self-rollout-check.test.sh); this pins only the wiring. Positions are checked found first, so a
-  // missing phrase (at() = -1) can't pass the ordering vacuously.
-  const srAt = at('First run the self-rollout check')
-  const rcAt = at('Then run the remote check')
+  // s0-self-rollout (ADR 0042): every parallel rollout runs from its rollout clone. § 0 reads `Local:`, runs the
+  // remote check, gh and the landing register check on it (a repo they refuse is never cloned), then
+  // execution-fit.md's self-rollout snippet with `--resolve` (read-only), asks one question before cloning on exit
+  // 4, runs `--ensure` on that yes and on exit 0, and only then the pushed-base check, against `--ensure`'s output,
+  // which step 6 writes as {{REPO_PATH}}; the Thread line and <localPath> keep the `Local:` path; exits 3, 5 and 2
+  // are a stop, and a clone this run made is named as staying. The rule itself is tested on the script
+  // (tests/self-rollout-check.test.sh); this pins only the wiring. Positions are checked found first, so a missing
+  // phrase (at() = -1) can't pass the ordering vacuously.
+  const rcAt = at('Run the remote check')
+  const lrAt = at('run the landing register check')
+  const srAt = at('Then run the self-rollout check')
+  const enAt = at('`<mode>` set to `--ensure`')
+  const pbAt = at('Then run the pushed-base check')
   const s0S = sentences(s0)
-  if (srAt < 0 || rcAt < 0 || srAt > rcAt || !s0.includes('with `<mode>` set to `--resolve`') ||
-    !s0S.some((x) => x.includes('its one stdout line is the resolved path') && x.includes('step 6 writes it as `{{REPO_PATH}}`')) ||
+  if (rcAt < 0 || lrAt < 0 || srAt < 0 || enAt < 0 || pbAt < 0 || rcAt > lrAt || lrAt > srAt || srAt > enAt ||
+    enAt > pbAt || !s0.includes('with `<mode>` set to `--resolve`') ||
+    !s0S.some((x) => x.includes('**Exit 4**') && x.includes('ask one AskUserQuestion') && x.includes('Create the rollout clone')) ||
+    !s0S.some((x) => x.includes('Its one stdout line is the resolved path') && x.includes('step 6 writes it as `{{REPO_PATH}}`')) ||
     !s0S.some((x) => x.startsWith('Only the Project root moves') && x.includes('`<localPath>`') &&
       x.includes("step 6's Thread line keep the `Local:` path")) ||
-    !s0S.some((x) => x.startsWith('Exit 3 (a live checkout with no usable clone)') && x.includes('is a stop'))) fails.push('s0-self-rollout')
+    !s0S.some((x) => x.startsWith('Exit 3 (no usable clone') && x.includes('exit 5 (no GitHub origin)') &&
+      x.includes('is a stop')) ||
+    !s0.includes('`rollout clone <C> was created by this run and stays: the next /thread:schedule reuses it`')) fails.push('s0-self-rollout')
 
   // reroot-guard: on a supersede, step 1's Re-root guard exists and names repair § 5's clean defer as its remedy.
   const s1g = section(schedule, S1) ?? ''
@@ -380,17 +391,21 @@ test('control: § 0 without --regenerate on the check, or without resume, fails'
     ['s0-check'], 'no resume')
 })
 
-test('control: § 0 that resolves after the remote check, without --resolve, ignores its output, moves the Thread line or goes on at exit 3 fails s0-self-rollout', () => {
-  only({ schedule: edit(real.schedule, S0, 'After the misfit scan, resolve', 'After the misfit scan, run the remote check. Then run the remote check, then resolve') },
-    ['s0-self-rollout'], 'resolved after the remote check')
-  only({ schedule: edit(real.schedule, S0, '`<mode>` set to', '`<mode>` left empty, not') },
+test('control: § 0 that resolves before the register check, without --resolve or the ask, ignores its output, moves the Thread line, goes on at exit 3 or loses the stays line fails s0-self-rollout', () => {
+  only({ schedule: edit(real.schedule, S0, '2. Run the remote check', '2. Then run the self-rollout check first. Run the remote check') },
+    ['s0-self-rollout'], 'resolved before the register check')
+  only({ schedule: edit(real.schedule, S0, 'with `<mode>` set to `--resolve`', 'with `<mode>` left empty') },
     ['s0-self-rollout'], 'no --resolve')
+  only({ schedule: edit(real.schedule, S0, 'ask one AskUserQuestion,', 'run `--ensure` at once,') },
+    ['s0-self-rollout'], 'cloning without the ask')
   only({ schedule: edit(real.schedule, S0, 'step 6 writes it as `{{REPO_PATH}}`', 'step 6 writes the `Local:` path as `{{REPO_PATH}}`') },
     ['s0-self-rollout'], '{{REPO_PATH}} not its output')
   only({ schedule: edit(real.schedule, S0, "step 6's Thread line keep the", "step 6's Thread line follow it, not the") },
     ['s0-self-rollout'], 'the Thread line moved to the clone')
-  only({ schedule: edit(real.schedule, S0, 'non-zero exit is a stop, below.', 'non-zero exit is reported, and § 0 goes on.') },
+  only({ schedule: edit(real.schedule, S0, 'non-zero exit of either mode is a stop, below.', 'non-zero exit of either mode is reported, and § 0 goes on.') },
     ['s0-self-rollout'], 'exit 3 no stop')
+  only({ schedule: edit(real.schedule, S0, 'was created by this run and stays', 'was created by this run and is removed') },
+    ['s0-self-rollout'], 'no stays line')
 })
 
 test('control: a Re-root guard that is gone, or names another remedy, fails reroot-guard', () => {
