@@ -85,6 +85,8 @@ Then the version:
 - Missing `protocol_version`, or `protocol_version: 2` or `3` → print: "This rollout predates the queue (ADR 0030). If a session is running it, hard-pause it (*Pausing + reinstating a rollout*), then `/thread:schedule <project> --regenerate`: the supersede carries every unlanded task into a `protocol_version: 5` queue." Stop. (The legacy prose executor and the stored-cursor engine are retired — there is no engine to fall back to.)
 - `protocol_version` other than `5` → print "unsupported protocol version <N>; this executor supports protocol_version: 5" and stop.
 
+Then the shape (`shape:`; no key reads as parallel): `shape: serial` → print `serial rollouts have no Leg runner yet: nothing runs` and stop; nothing is written and a `start: unattended` stays (p24-3 replaces this line).
+
 **Incomplete check (once, after § 2.7).** Run `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py status --rollout <rollout-note>` (read-only). A non-null `incomplete` is printed with its remedy, `/thread:schedule <project> --regenerate`, before the first `next` (which refuses the same rollout, exit 1, on its own: § 7).
 
 ### 2.5. Landing-register gate

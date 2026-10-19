@@ -56,8 +56,9 @@ first outcome that holds wins:
 - (c) **No serial self-rollouts.** Serial-shaped work for the plugin's own repo (any checkout of
   `lachyts/thread-skill`) goes to the session lane. Its clone belongs to the parallel
   self-rollout (ADR 0031, ADR 0042). Orient § 6 applies this ruling now, before it calls schedule;
-  schedule's serial path (p24-2) will enforce it. Until then schedule § 0 stops an all-serial set
-  before it resolves the repo, so it cannot tell the plugin's own repo there.
+  schedule's serial path enforces it (`serial-chains.py` sends a member whose `## Launch` `--add-dir`
+  or `cd` path, repo surface, launch folder or project `Local:` or `repos:` is a checkout of
+  `lachyts/thread-skill` to the session lane).
 
 **Mixed sets split.** The parallel-shaped subset becomes a parallel rollout, the serial-shaped
 subset a serial rollout, and session-lane members stay unstamped. Name the split when reporting.
@@ -257,12 +258,15 @@ merge-task's local refresh reads only the rollout's repo path, so it names one c
 committed in another clone of the set (the primary checkout of a self-rollout's separate clone) first
 surfaces when the next entry halts on it.
 
-**Unfinished rollout.** A repo holds at most one unfinished rollout: one directly in `Work/Tasks/`, neither
-`done` nor `dropped`, with a task not yet merged. schedule § 0 runs
+**Unfinished rollout.** A repo holds at most one unfinished parallel rollout: one directly in `Work/Tasks/`,
+neither `done` nor `dropped`, with a task not yet merged; and none on a place a live serial chain writes
+(ADR 0040). schedule § 0 runs
 `${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/unfinished-rollout.py check` against the resolved repo path last,
 after the pushed-base check, and its one stdout line decides: see schedule § 0 for each outcome (`none`,
 `supersede`, `file`, `interrupted`, `refuse`) and its remedy. A running or never-superseded rollout on the
-repo is a stop, never a second rollout beside it. Beside it sits orient § 6's *Uncommitted grill docs* hold:
+repo is a stop, never a second rollout beside it. Serial chains are limited by surfaces instead: schedule
+§ Serial path runs the same script with `--shape serial`, once per chain. Beside it sits orient § 6's
+*Uncommitted grill docs* hold:
 `CONTEXT.md` or `docs/adr/` changes a grill left uncommitted in the target repo hold scheduling there too,
 because every worktree branches from `origin`, which lacks them.
 

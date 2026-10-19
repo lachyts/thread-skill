@@ -32,6 +32,8 @@ Subcommands:
               its refusals removes it (`startCleared`), so a running rollout clears it and the Chorus Stage never
               starts a second lead; a refusal leaves it. Refuses an incomplete rollout (below): exit 1, no
               stdout, one ERROR line naming why and the remedy, `/thread:schedule <its first project> --regenerate`.
+              Refuses a serial rollout (`shape: serial`, ADR 0040) first, before its ceiling is read: exit 1, no
+              stdout, one ERROR line, nothing written and `start:` kept, since no Leg runner runs one yet (p24-3).
               An unacked git-env trip (Git-env hold, below) is listed as `gitEnvHold` and makes `halt` "git-env",
               ahead of every other verdict. `awaitingIntegration` is the Integration queue's order: a task a queued
               task depends on, directly or through a folded member (`merged_into:`), first, then the oldest
@@ -596,9 +598,10 @@ at dispatch.
 Incomplete (incomplete, read by `next`, `status` and unfinished-rollout.py): a never-started rollout that must
 not run as written. The first that applies:
   - it carries `incomplete: true`. Every rollout note is born with it (the schedule template, written at
-    step 6), and step 7's last write removes it once every task is stamped, so a /thread:schedule run that
-    stopped anywhere in between leaves it. Schedule § 0 also stamps it on the note an interrupted supersede
-    wrote; that stamp ends only when a later supersede closes the note;
+    step 6, or the serial template at § Serial path S5), and step 7's (S6's) last write removes it once every
+    task is stamped, so a /thread:schedule run that stopped anywhere in between leaves it. Schedule § 0 also
+    stamps it on the note an interrupted supersede wrote; that stamp ends only when a later supersede closes
+    the note, and one left on a serial note, which a supersede never takes, ends only by `status: dropped`;
   - its `supersedes:` names a rollout still unfinished beside it (not done or dropped): the supersede has
     not closed that one out (schedule step 7.5), which is what ends this reason.
 Neither reason reads the task notes' links, so a task taken out of a rollout (repair's `defer`, a gate
@@ -869,6 +872,15 @@ def _scalar(value) -> str:
         return ""
     s = re.sub(r"\s+#.*$", "", str(value)).strip()
     return s.strip('"').strip("'").strip()
+
+
+SHAPES = ("parallel", "serial")   # a rollout note's `shape:` (ADR 0040); no key reads as parallel
+
+
+def _shape(note) -> str:
+    """A rollout note's Shape: `serial` when its `shape:` scalar says `serial` (case-folded, quotes and an inline
+    ` # comment` dropped), else `parallel` (no key, `parallel` or any other value)."""
+    return SHAPES[1] if _scalar(note.get("shape")).lower() == SHAPES[1] else SHAPES[0]
 
 
 def _start_unattended(note) -> bool:
@@ -1626,9 +1638,9 @@ def incomplete(rollout_path: Path, rollout_note, linked, index) -> str:
     if not never_started(rollout_note, linked)[0]:
         return ""
     if _truthy_flag(rollout_note.get("incomplete")):
-        return ("it carries incomplete: true (the /thread:schedule run that wrote it never reached step 7's last "
-                "write, which removes it once every task is stamped, or § 0 stamped it finishing an interrupted "
-                "supersede), so its queue may name tasks never stamped to it")
+        return ("it carries incomplete: true (the /thread:schedule run that wrote it never reached step 7's (or "
+                "§ Serial path S6's) last write, which removes it once every task is stamped, or § 0 stamped it "
+                "finishing an interrupted supersede), so its queue may name tasks never stamped to it")
     prior = (_wikilink_slug(_scalar(rollout_note.get("supersedes"))) or "").lower()
     entry = index.get(prior) if prior else None
     if entry is not None and entry[0].parent.resolve() == rollout_path.parent.resolve() and \
@@ -2410,6 +2422,10 @@ def cmd_next(args) -> int:
         return 1
     now = _now(args)
     rollout_note = Note(rollout_path)
+    if _shape(rollout_note) == "serial":
+        print(f"ERROR: {rollout_path.stem}: shape: serial: serial rollouts have no Leg runner yet: nothing runs "
+              "(p24-3)", file=sys.stderr)
+        return 1
     ceiling, err = _ceiling(rollout_note)
     if err:
         print(f"ERROR: {rollout_path.stem}: {err}", file=sys.stderr)

@@ -106,9 +106,17 @@ node_tests=(skills/execute/tests/*.test.mjs tests/*.test.mjs tests/contracts/*.t
 sh_tests=($(ls -S skills/execute/tests/*.test.sh tests/*.test.sh))
 
 syntax_sh() { local f r=0; for f in "$@"; do bash -n "$f" || r=1; done; return $r; }
-syntax_py() { python3 -c 'import ast, sys
+# Warnings are errors: an invalid escape such as '\`' in a non-raw string is a silent DeprecationWarning on python
+# 3.11 but a SyntaxWarning on stderr on every run from 3.12 (CI's), which breaks each suite that pins an empty
+# stderr. Each file is parsed on its own, so one bad file names itself and the rest still get checked.
+syntax_py() { python3 -W error::DeprecationWarning -W error::SyntaxWarning -c 'import ast, sys
+r = 0
 for p in sys.argv[1:]:
-    ast.parse(open(p).read(), p)' "$@"; }
+    try:
+        ast.parse(open(p).read(), p)
+    except SyntaxError as e:
+        print(f"{p}:{e.lineno}: {e.msg}"); r = 1
+sys.exit(r)' "$@"; }
 
 step "bash syntax (${#sh_files[@]} files)"     syntax_sh "${sh_files[@]}"
 step "python syntax (${#py_files[@]} files)"   syntax_py "${py_files[@]}"

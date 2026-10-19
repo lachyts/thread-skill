@@ -14,6 +14,7 @@ due:
 captured: {{DATE}}
 # saved as: <slug>-rollout-<YYYY-MM-DD>.md — always dated (a 2nd same-day rollout gets a -N suffix); legacy undated <slug>-rollout notes keep their names, the rollout readers resolve both. See schedule SKILL.md step 6.
 protocol_version: 5
+shape: parallel  # ADR 0040: parallel | serial; a note with no shape: reads as parallel
 verifier: {{VERIFIER}}
 max_iterations: {{MAX_ITERATIONS}}
 max_review_rounds: {{MAX_REVIEW_ROUNDS}}
