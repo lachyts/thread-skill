@@ -39,6 +39,12 @@ through time, from attention to merged PRs. Terms only — no implementation.
   `orient` is the same act at project altitude; a project graded **Orient**
   gets its own `orient` session. _Avoid_: rally, global orient, portfolio
   review, triage (alone).
+- **Estate scan** — the estate pass's deterministic first pass
+  (`skills/_shared/scripts/estate-scan.py`), with no model calls: every
+  project not done, parked ones marked; its open tasks; its repos and their
+  dispatch blockers (schedule § 0's checks, plus the verifier); the deadlines;
+  and every live rollout's status. Scripts scan, the model decides: the
+  grading and ranking come after it. _Avoid_: audit, for the scan alone.
 - **Readiness grade** — what a task needs from Lachy before an agent can
   finish it, given in the estate pass's scan-only first pass: **Ready** (an
   agent can finish it without inventing a decision nothing records), **One
