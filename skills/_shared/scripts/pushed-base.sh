@@ -128,12 +128,7 @@ for c in "${members[@]}"; do
   fi
 done
 
-# ---- block: a member's local <b> ahead of origin/<b> --------------------------------------------------
-# Ancestry alone over-counts: a commit landed by a squash or cherry-picked PR stays "ahead" for ever. So an
-# ahead member blocks only when some of its content is not on origin/<b>: a file the ahead commits touch
-# (merges included) differs between origin/<b> and local <b>. THREAD.md is set aside first. Landed content
-# that origin/<b> has since changed blocks, and so does an ahead set that touches no file (empty commits,
-# net-zero changes): with nothing to compare, the gate stays conservative.
+# ---- path helpers: the Warn half and the clone-rooted scoping resolve cited paths the same way ------------
 resolve() {  # resolve <absolute path>: the deepest existing ancestor through `pwd -P`, plus the rest as written
   local p="$1" rest='' d
   while [ "${#p}" -gt 1 ] && [ "${p%/}" != "$p" ]; do p=${p%/}; done
@@ -176,6 +171,13 @@ peer_scoped() {  # peer_scoped <member> [<cited path>…]: 0 when the member's a
   o=$(git -C "$m" -c core.quotePath=false diff --no-renames --name-only "$up...refs/heads/$b" -- "${specs[@]}" 2>/dev/null) || return 0
   [ -n "$o" ]
 }
+
+# ---- block: a member's local <b> ahead of origin/<b> --------------------------------------------------
+# Ancestry alone over-counts: a commit landed by a squash or cherry-picked PR stays "ahead" for ever. So an
+# ahead member blocks only when some of its content is not on origin/<b>: a file the ahead commits touch
+# (merges included) differs between origin/<b> and local <b>. THREAD.md is set aside first. Landed content
+# that origin/<b> has since changed blocks, and so does an ahead set that touches no file (empty commits,
+# net-zero changes): with nothing to compare, the gate stays conservative.
 blocked=0 broken=0
 up="refs/remotes/origin/$b"
 reset_hint() {  # reset_hint <member>: the command that drops local <b>'s landed commits
