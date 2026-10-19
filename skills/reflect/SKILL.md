@@ -66,7 +66,9 @@ local `git remote get-url origin` in the Project root: no network. For the Escap
 every note under `~/repos/obsidian/Work/Tasks/`, Archive included, for `fixes:` and `merged_into:`; and the Project
 root's git (commit messages, `docs/reviews/` and `git blame`), never fetched. By hand it writes `fold-journals`'
 `call-journal` lines, and tune.py's one line and its picked keys; scratch files go under
-`/tmp/thread-reflect-<rollout-slug>/`, and it makes no vault write. The weekly reading reads every rollout record,
+`/tmp/thread-reflect-<rollout-slug>/`, and it makes no vault write. A serial note's reading (§ 1) runs
+`serial-score.py` alone, which reads the note's Leg log through `leg.py status`, the Run record and the task notes,
+and writes nothing. The weekly reading reads every rollout record,
 `reflections.jsonl` and the contract (above) too, and writes: `reflections.jsonl` through reflect.py; a bug task and
 the decision task under `~/repos/obsidian/Work/Tasks/`; the decision task's one line on its day page (task-writer
 § 3b); `tunings.jsonl` lines only through tune.py's `--auto` and `--revert`; and `call-journal` lines through
@@ -101,6 +103,19 @@ line never blocks.
 Several matches for a loose name: list them and ask which. Read its body's ``Project root: `<repoPath>` `` line.
 A note that cannot be found stops the Reflection: say so, and offer a record-only score by slug (step 4 without
 `--note`) only on Lachy's word.
+
+**A serial note** (`shape: serial`, ADR 0040) is a chain of Legs, with no Workflow journals, Slots, lane or Project
+root, so steps 2–8 do not apply to it. Its reading is one read-only script, whose header holds the rules (the Leg
+spans, the merges, the Hands-off rate from the record's acts and halt clears, and Quality from `fixes:` only):
+
+```
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/reflect/scripts/serial-score.py --rollout <rollout note path>
+```
+
+Present its headline, its window and its flags, as step 5 presents a score: Throughput, the Hands-off rate and a
+Quality that is always partial. It makes no proposals, so nothing is picked, and the reading stops here: it never
+reaches step 4's score, so step 7 does not apply. A serial score is recorded only as its chain's close line, which
+close-score.py writes at the chain's Complete (`skills/execute/legs.md` § Complete).
 
 ### 2. Fold the Workflow journals (idempotent)
 
