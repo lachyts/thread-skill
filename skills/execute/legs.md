@@ -20,7 +20,7 @@ A Leg runs in this order, and never in another:
 6. Work the fix tasks (§ Fix tasks).
 7. Claim new tasks one at a time (§ The task loop).
 
-The cap is up to five fresh claims per Leg, fix tasks included. The inherited task never counts, so a Leg holds at most six tasks. A Leg closes sooner when its context grows heavy or a task proves large. It closes only between tasks, never mid-task.
+The cap is up to five fresh claims per Leg, fix tasks included. The inherited task never counts, so a Leg holds at most six tasks, and a task re-claimed in the same Leg (after a gate's standing approval or a hand-back) counts once. A Leg closes sooner when its context grows heavy or a task proves large. It closes only between tasks, never mid-task.
 
 ## Begin
 
@@ -38,7 +38,7 @@ For each item of begin's `mcp` list (the `**MCP:** required …` items in the `#
 
 ## Smoke test
 
-begin's `smoke` list is every task the previous Leg stamped done (`leg: <N-1>`, the inherited task it finished included, so it can hold six), every done task a not-done fix names in `verifies:`, and every task whose latest smoke result is `fail` with no fix filed since. For each entry, run its `**Verify:**` line from its row's launch folder. With no Verify line, its Acceptance criteria are the check. Record each result with `leg.py smoke --task <t> --result pass|fail|not-run [--why <text>]`. `not run` (a check this launch cannot run) is recorded and never carried.
+begin's `smoke` list is every done task that no Leg after the one that finished it has smoke-tested, every done task a not-done fix names in `verifies:`, and every task whose latest smoke result is `fail` with no fix filed for it since. The first is the previous Leg's tasks (the inherited task it finished included, so it can hold six), plus any an earlier Leg finished when the Leg after it was lost, stopped or halted before it logged their results: a lost Leg never leaves a base unverified. For each entry, run its `**Verify:**` line from its row's launch folder. With no Verify line, its Acceptance criteria are the check. Record each result with `leg.py smoke --task <t> --result pass|fail|not-run [--why <text>]`. `not run` (a check this launch cannot run) is recorded and never carried.
 
 A failing Verify never reopens a finished task: the task stays `done`. Trace the cause and file a fix task (§ Fix tasks). A failure traced to the inherited task's partial work files no fix: its `fail` is carried to the next Leg's smoke test until a `pass`.
 
@@ -67,7 +67,7 @@ Run `next` again after every `done` or `set-aside`.
 - Skip its `sf=` … `[ "$rc" -eq 0 ] || exit 1` lines. A Leg's transcript spans several tasks, so `session-files.py` would return all of them. Set `paths=(…)` and `spec=(…)` from `leg.py change --task <t> --top <top>` (its `paths` and `spec`), then run the block from its `resume point`.
 - `~/.agents/skills/fresh-review/SKILL.md` § Step 2, check 3, is skipped: no `review-ledger.py`. The ledger chains every doc in a repo with a 2h gap, so a later task's round would read the earlier task's work as a REGRESSION.
 - `~/.agents/skills/fresh-review/SKILL.md` § Step 4, its offer to apply fixes after Lachy picks, is replaced: the Leg judges each finding itself. It fixes the finding with new `Task:` commits, or annotates it as deliberate, with the reason. Step 4's re-dispatch is replaced too: there is no second round, and the Leg re-runs the Verify line green instead. Step 5 runs as written: commit the doc, then mark it consumed.
-- The review runs in the background, so the turn ends `waiting reason="review in flight: [[<t>]]"` (§ Report) until its notification arrives. A lost review is re-dispatched once.
+- The review runs in the background, so the turn ends on `leg.py next --waiting "review in flight: [[<t>]]"`'s `status_line` (§ Report) until its notification arrives. A lost review is re-dispatched once.
 - On Codex, fresh-review takes its exit-3 route: `{SCOPE}` is the task's commits by full SHA, and `{PATH_SCOPE}` its paths.
 
 A review that does not converge sets the task aside as `blocked` and reverts its code (`leg.py set-aside --task <t> --revert --reason <why>`). There are four cases: a finding needs Lachy; the Verify is still red after two fix attempts; the review is lost twice, or says "nothing in scope" twice; or the change touches a checkout other than the cwd's.
@@ -87,7 +87,7 @@ When a smoke Verify of a finished task t fails, trace who broke it, then run `le
 | `outside` | a peer's or the daily sweep's commit broke it | none |
 | `drift` | an external API, account or tool changed | none |
 
-leg.py checks each cause against git, and a cause the evidence does not fit is exit 1 with nothing written. chain needs L's `Task:` commits to touch t's paths; outside needs an untrailered commit on t's paths after t's last trailered commit; drift needs t's paths unchanged since then. A vault-only task (no paths) takes own or drift only. An outside culprit that is a known task is named in the evidence, never in `fixes:`.
+leg.py checks each cause against git, and a cause the evidence does not fit is exit 1 with nothing written. chain needs one of L's `Task:` commits on t's paths to come after t's last `Task:` commit there (L is a later chain task, never one that landed before t passed its own Verify); outside needs an untrailered commit on t's paths after t's last trailered commit; drift needs t's paths unchanged since then. A vault-only task (no paths) takes own or drift only. An outside culprit that is a known task is named in the evidence, never in `fixes:`.
 
 The fix task's Queue row goes ahead of the first queued row, in this Leg's launch, and the Leg works it before any new claim. t stays done. A re-run files nothing new while a not-done fix for t exists. A fix that is itself set aside never stops the chain: later Legs re-run t's Verify (t stays on the smoke list through `verifies:`), and `next` holds every task that depends on t, `depends on [[t]] (awaiting fix [[f]])`.
 
@@ -120,7 +120,7 @@ The rollout note and its `## Leg log` are the brief: a Leg writes no handoff doc
 
 ## Report
 
-Every Leg turn ends with `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=<state>[ reason="…"]`. K is the done Queue rows, fix rows included; N is every Queue row; R is 1 while this Leg owns an in_progress task, else 0. leg.py prints the exact line (`status_line`), and it is never `running`: no Stop-hook drive applies to a Leg.
+Every Leg turn ends with `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=<state>[ reason="…"]`. K is the done Queue rows, fix rows included; N is every Queue row; R is 1 while this Leg owns an in_progress task, else 0. leg.py prints the exact line (`status_line`): `close`, `handed` and a refused `begin` print theirs, and a `waiting` turn end takes `leg.py next --waiting "<reason>"`'s, with the reason as the table gives it. Whichever verb prints it, it is never `running`: no Stop-hook drive applies to a Leg.
 
 | Turn end | `state` and `reason` | Chorus Close | Stop hook |
 |---|---|---|---|
@@ -143,7 +143,7 @@ When `next` says `complete`, run the ceremony in this order (the serial template
 1. **Phases.** execute § 4.5 step 5's ADR 0026 bullet: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py touched-phases --rollout <rollout note>`, then `reconcile-project.py <line> --kinds phase --apply` per line, and a `phase-close-followup-<rollout-slug>` task on a failure. Pass each outcome as `--log-line`, and each phase note it wrote as `--also <path>`. The canary, fold-journals and close-score stay parallel-only: p24-4 scores serial rollouts.
 2. **Post-rollout items.** `leg.py post-items` lists them with their indices. File each item that is live work with `leg.py file-followup --item <k> --title <t> --why <w>`, a loose open task whose pointer replaces item k. Give every other item a disposition at the close, `--disposition <k>="<text>"`.
 3. **`leg.py close --outcome complete [--disposition …]… [--log-line …]… [--also <path>]…`.** It refuses, with nothing written, an item with neither a pointer nor a disposition, and an Archive name collision (checked first). It asks land.sh's own route for each chain checkout (`land.sh --route`, read-only). On `landable <d>`, the chain's commits are only its `Task:`-trailered ones, and when some are missing from `origin/<d>` it files a land follow-on listing them: open a PR from them, or push them, since ADR 0028 lands only close-out commits on its own. On `not landed: <reason>` it files nothing. On `stuck:` it files the follow-on with every chain commit there, and the act starts with checking the landing route. Then it stamps `status: done` and `completed:`, writes the `## Completion log` (a line per Leg, the phase lines, each item's disposition, the `Chain commits:` lines and `Reflection: not scored (serial; p24-4)`), moves the note to `Archive/Rollouts/`, and commits by pathspec in the vault. `committed: false` (a peer's `index.lock`, say) is fine: the daily sweep commits it.
-4. `/thread:close` (close § Under a Leg), the banner, then `state=done`.
+4. `/thread:close` (close § Under a Leg), the banner, then `state=done`. The note is in `Archive/Rollouts/` by now: `leg.py file-followup` finds it there and files a new-task candidate with no pointer (close § Under a Leg).
 
 ## A report from a later Leg
 
@@ -151,7 +151,7 @@ A Prompt that starts `[Reported back by Chorus from …` in the Session of a Leg
 
 ## Room stop
 
-A Chorus room signal (execute § Room stop, item 1) in a Leg: claim nothing new, finish the step in hand (a commit, a `leg.py` verb), and end the turn `waiting reason="room stop: …"`. The Stage's re-send re-enters `/thread:execute`, and `begin` resumes this session's Leg silently. A review agent lost to the switch is re-dispatched once. The room stop writes nothing to the rollout note.
+A Chorus room signal (execute § Room stop, item 1) in a Leg: claim nothing new, finish the step in hand (a commit, a `leg.py` verb), and end the turn on `leg.py next --waiting "room stop: <text>"`'s `status_line` (`waiting reason="room stop: …"`). The Stage's re-send re-enters `/thread:execute`, and `begin` resumes this session's Leg silently. A review agent lost to the switch is re-dispatched once. The room stop writes nothing to the rollout note.
 
 ## Concurrency
 

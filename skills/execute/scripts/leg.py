@@ -9,7 +9,8 @@ hand-edits frontmatter. Stdlib only, python >= 3.9, POSIX (fcntl). It loads reco
 _scan, _queue_state, _dep_status, incomplete, _stamp, PHASED_STEM_RE, _norm_gate, _fm_block), as serial-chains.py
 and unfinished-rollout.py do, and serial-chains.py for norm_origin.
 
-Common flags: --rollout <path, or a slug under --tasks-dir> · --tasks-dir (default <vault>/Work/Tasks) · --vault
+Common flags: --rollout <path, or a slug under --tasks-dir; once that note is gone, its `Archive/Rollouts/` copy,
+which every writing verb but file-followup refuses (exit 1)> · --tasks-dir (default <vault>/Work/Tasks) · --vault
 (default the tasks dir's grandparent when --tasks-dir is given, else ~/repos/obsidian) · --now <ISO> (stamps; the
 clock otherwise) · --session <id> (default CLAUDE_CODE_SESSION_ID, then CODEX_THREAD_ID, else `unknown`) ·
 --harness claude|codex (default: codex under CODEX_THREAD_ID alone, else claude) · --dry-run (compute and print,
@@ -41,18 +42,21 @@ Verbs (writing verbs: begin, claim, smoke, file-fix, done, set-aside, file-follo
       folder of the first row the Leg must work (an inherited claim, else the first fix task, else the first
       claimable row), and a `cx-*` alias needs codex (any other, claude); a mismatch is exit 4 with the row's launch
       line and the Leg prompt, nothing written. A resume skips the check. Prints the Leg, its inherited tasks, its
-      smoke list (every task the previous Leg stamped done, `leg: N-1`; every done task a not-done fix names in
-      `verifies:`; every task whose latest smoke result is `fail` with no fix filed since; each with its
-      `**Verify:**` line or null), the not-done fix tasks, the required MCP namespaces of this launch's unlanded rows
-      (their `## Launch` `**MCP:** required …` items), `next` and `progress`.
-  next                                       (read-only, no lock)
+      smoke list (every done task stamped `leg: K`, K < N, with no `smoke:` line from a Leg after K: the previous
+      Leg's, and an earlier Leg's that a lost, stopped or halted Leg never smoke-tested; every done task a not-done
+      fix names in `verifies:`; every task whose latest smoke result is `fail` with no fix filed for it since; each
+      with its `**Verify:**` line or null), the not-done fix tasks, the required MCP namespaces of this launch's
+      unlanded rows (their `## Launch` `**MCP:** required …` items), `next` and `progress`.
+  next [--waiting <reason>]                  (read-only, no lock)
       The Leg's next act: `finish` (a task this Leg owns, or an inherited claim of a closed Leg: `inherit: true`),
-      else `handoff` at five fresh claims (`claimed` lines; an inherited `took` never counts), else `claim` of the
+      else `handoff` at five fresh claims (distinct tasks with a `claimed` line in this Leg, so a task re-claimed
+      after a gate or a hand-back counts once; an inherited `took` never counts), else `claim` of the
       first claimable fix task (`verifies:`), else of the first claimable row in Queue order (status open, or
       in_progress with no owner: a hand-back's or a sign-off's re-entry), else `complete` (every counted row done),
       else `stuck`. A claimable row in another launch than the Leg's is a Leg boundary: `handoff`. A row whose
       dependency (depends-on/blocked-by) is not done is held `depends on [[d]] (<why>)`, and one whose done
-      dependency has a not-done fix is held `depends on [[d]] (awaiting fix [[f]])`.
+      dependency has a not-done fix is held `depends on [[d]] (awaiting fix [[f]])`. --waiting adds the turn's
+      `status_line`, `state=waiting reason="<reason>"` (a review in flight, a room stop: legs.md § Report).
   claim --task <t> [--inherit] [--gate <gate>]...
       Re-runs next under the lock: <t> must be what it proposes (with --inherit, an inherited `finish`). Stamps
       `status: in_progress`, `owner: leg-N`, `leg: N`, `started:` (the first wins), consumes `handed_back:` and
@@ -69,7 +73,8 @@ Verbs (writing verbs: begin, claim, smoke, file-fix, done, set-aside, file-follo
   file-fix --target <t> --cause own|chain|outside|drift [--culprit <L>] --evidence <line> [--excerpt <text>]
       A done chain task t whose Verify failed gets a fix task: `verifies: "[[t]]"` always; `fixes:` names the
       culprit only for own (`[[t]]`) and chain (`[[L]]`). The cause is checked against git, else exit 1: chain needs
-      L a done chain row other than t whose `Task: [[L]]` commits touch one of t's paths in t's checkout; outside
+      L a done chain row other than t with a `Task: [[L]]` commit in t's checkout that touches one of t's paths and
+      came after t's last trailered commit there (in `<last>..HEAD`, so L is a later chain task); outside
       needs a commit after t's last trailered commit there that touches t's paths and carries no chain task's
       trailer; drift needs t's paths unchanged since t's last trailered commit (working tree included). A task
       with no paths (vault-only) passes own or drift only. The note `<project>-followup-fix-<t's descriptive
@@ -100,7 +105,9 @@ Verbs (writing verbs: begin, claim, smoke, file-fix, done, set-aside, file-follo
       A loose open task (follow-on frontmatter: tags, status open, priority, work_depth, projects copied from the
       rollout, contexts, scheduled, due, captured; never rollout:, phase: or owner:), named
       `<project>-followup-<title words>[-<k>]`, and a `## Post-rollout` pointer: item k rewritten, or a new item.
-      Logs `follow-on [[f]] (close|post-item <k>)` against the latest Leg, closed or not.
+      Logs `follow-on [[f]] (close|post-item <k>)` against the latest Leg, closed or not. After Complete (the note
+      read from `Archive/Rollouts/`) it files the task alone: no pointer and no log line, since the archived note's
+      committed Completion log is the chain's final record (`pointer: false`); --item there is exit 1.
   close --outcome handoff|complete|stuck|stopped|halt [--reason <r>] [--cwd <dir>] [--disposition <k>=<text>]...
         [--log-line <text>]... [--also <path>]...
       Refuses handoff, complete and stuck while this Leg owns an in_progress task (stopped and halt leave it claimed
@@ -145,10 +152,11 @@ it). Its line forms are stable (p24-4 reads them); readers key them by Leg numbe
   - <stamp> halt cleared: <reason>
 
 The status mapping (legs.md § Report): every Leg turn ends `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R>
-state=<state>[ reason="…"]`, R 1 while this Leg owns an in_progress task. It is never `running`: handed --started
-`done reason="handed off to Leg <N+1>"`; handed --manual `halted reason="manual handoff: Leg <N+1> in <alias> from
-<folder>"`; complete `done`; stuck `halted reason="awaiting you: <k> set aside"`; stopped `halted reason="stopped:
-<r>"`; halt `halted reason="halt: <r>"`; a refused begin `halted reason="<refusal>"`.
+state=<state>[ reason="…"]`, R 1 while this Leg owns an in_progress task. It is never `running`: next --waiting
+<r> `waiting reason="<r>"`; handed --started `done reason="handed off to Leg <N+1>"`; handed --manual `halted
+reason="manual handoff: Leg <N+1> in <alias> from <folder>"`; complete `done`; stuck `halted reason="awaiting you:
+<k> set aside"`; stopped `halted reason="stopped: <r>"`; halt `halted reason="halt: <r>"`; a refused begin `halted
+reason="<refusal>"`.
 
 The lock. Every writing verb holds an exclusive fcntl.flock on `<lock dir>/<rollout stem>.lock` for its whole run,
 git work included: `<lock dir>` is $THREAD_LEG_LOCK_DIR, else ${XDG_STATE_HOME:-~/.local/state}/thread/legs, outside
@@ -290,6 +298,14 @@ class Ctx:
         p = Path(os.path.expanduser(raw))
         if not p.exists() and "/" not in raw:
             p = self.tasks / f"{(rr._wikilink_slug(raw) or raw)}.md"
+        # Complete moves the note to Archive/Rollouts/ before the last Leg's /thread:close runs, so a gone live note
+        # reads its archived copy (file-followup then writes nothing into it; every other writing verb refuses it:
+        # begin as done, the rest through ARCHIVE_REFUSED).
+        self.archived = False
+        if not p.exists():
+            alt = self.tasks / "Archive" / "Rollouts" / p.name
+            if alt.is_file():
+                p, self.archived = alt, True
         self.rollout = p
         self.slug = p.stem
         if args.now:
@@ -651,7 +667,9 @@ def plan_next(chain, leg_n, alias, folder, cap=True, launch=True, dead=()):
         r = inherited[0]
         return {"action": "finish", "task": r.slug, "inherit": True, "from": owner_leg(r.note), "row": r,
                 "held": held, "setAside": aside}
-    claims = sum(1 for e in chain.log if e["n"] == leg_n and e["kind"] == "claimed") if leg_n else 0
+    # Distinct tasks: a task set aside at a gate or handed back, then re-claimed in this Leg, is one fresh claim.
+    claims = len({e["slug"].lower() for e in chain.log
+                  if e["n"] == leg_n and e["kind"] == "claimed" and e["slug"]}) if leg_n else 0
 
     def claimable(r):
         if r.note is None or r.state not in ("queued", "running"):
@@ -803,10 +821,19 @@ def smoke_list(chain, n):
         note = r.note if r is not None else (chain.index.get(key) or (None, None))[1]
         out.append({"task": r.slug if r else slug, "verify": verify_line(note), "why": [why]})
 
-    if n > 1:
-        for r in chain.rows:
-            if r.state == "done" and rr._scalar(r.note.get("leg")) == str(n - 1):
-                add(r.slug, f"done by Leg {n - 1}")
+    # Every done task that no Leg after its finisher has smoke-tested: the previous Leg's, and an earlier Leg's
+    # whose successor died, stopped or halted before (or part-way through) its smoke test.
+    smoked = {}
+    for e in chain.log:
+        if e["kind"] == "smoke" and e["slug"]:
+            smoked.setdefault(e["slug"].lower(), set()).add(e["n"])
+    for r in chain.rows:
+        k = rr._scalar(r.note.get("leg")) if r.state == "done" and r.note is not None else ""
+        if not k.isdigit() or int(k) >= n:
+            continue
+        k = int(k)
+        if not any(m > k for m in smoked.get(r.slug.lower(), ())):
+            add(r.slug, f"done by Leg {k}" + ("" if k == n - 1 else ", never smoke-tested since"))
     for _p, fnote, v in chain.fix_notes():
         r = chain.row(v)
         if rr._status(fnote) != "done" and r is not None and r.state == "done":
@@ -819,7 +846,8 @@ def smoke_list(chain, n):
     for key, (ln, _pos, res) in latest.items():
         if not res.startswith("fail"):
             continue
-        filed = any(e["kind"] == "filed" and e["n"] >= ln and f"(verifies [[{key}" in e["rest"].lower() for e in chain.log)
+        # The closed link: a fix filed for t10 (or foo-bar) is never one for t1 (or foo).
+        filed = any(e["kind"] == "filed" and e["n"] >= ln and f"(verifies [[{key}]]" in e["rest"].lower() for e in chain.log)
         if not filed:
             r = chain.row(key)
             add(r.slug if r else key, f"failed at Leg {ln}'s smoke test, no fix filed")
@@ -933,10 +961,16 @@ def begin_out(ctx, chain, n, resumed, took_over=None, alias=None, folder=None):
 
 
 def cmd_next(ctx, a):
+    if a.waiting is not None and not a.waiting.strip():
+        raise Usage("--waiting needs a reason (`review in flight: [[<t>]]`, `room stop: <text>`)")
     chain = Chain(ctx)
     leg = my_leg(ctx, chain)
     plan = plan_next(chain, leg["n"], leg["alias"], leg["folder"])
-    return {"verb": "next", "rollout": ctx.slug, "leg": leg["n"], **next_json(plan), "progress": chain.progress(leg["n"])}
+    prog = chain.progress(leg["n"])
+    out = {"verb": "next", "rollout": ctx.slug, "leg": leg["n"], **next_json(plan), "progress": prog}
+    if a.waiting is not None:
+        out["status_line"] = status_line(ctx.slug, prog, "waiting", a.waiting)
+    return out
 
 
 def stamp_bases(ctx, row):
@@ -1133,14 +1167,25 @@ def check_cause(chain, target, a):
         cul = chain.row(a.culprit)
         if cul is None or cul.note is None or cul.state != "done" or cul.slug.lower() == target.slug.lower():
             raise Refuse(1, f"--culprit [[{a.culprit}]] is not a done task of this chain other than [[{target.slug}]]")
+        touched = False
         for t in tops:
+            if not t["commits"] or not t["paths"]:
+                continue
+            last = t["commits"][-1]["sha"]  # t's last trailered commit in this checkout
             mine = []
             for top, base in leg_base(cul.note):
                 if top == t["top"]:
                     got, _ = commits_for(top, base, cul.slug)
                     mine.extend(got or [])
-            if any(p in t["paths"] for _s, _j, ps in mine for p in ps):
+            hits = [s for s, _j, ps in mine if any(p in t["paths"] for p in ps)]
+            touched = touched or bool(hits)
+            # A later chain task: one of its commits on t's paths is in <last>..HEAD, never an ancestor of t's own.
+            if any(not is_ancestor(t["top"], s, last) for s in hits):
                 return cul
+        if touched:
+            raise Refuse(1, f"[[{cul.slug}]]'s Task: commits on [[{target.slug}]]'s paths all came before "
+                            f"[[{target.slug}]]'s last Task: commit: it landed before [[{target.slug}]] passed its own "
+                            "Verify, so it is no later chain task that broke it")
         raise Refuse(1, f"[[{cul.slug}]]'s Task: commits touch none of [[{target.slug}]]'s paths: not its culprit")
     if a.culprit:
         raise Refuse(2, "--culprit goes with --cause chain only")
@@ -1490,8 +1535,6 @@ def set_pointer(note, item_k, name, title):
         at = mark + 1
         while at < end and not lines[at].strip():
             at += 1
-        if at < end and not re.match(r"^[-*] ", lines[at]):
-            pass
     note._set_body_lines(lines[:at] + [new] + lines[at:])
 
 
@@ -1509,20 +1552,27 @@ def cmd_file_followup(ctx, a):
     with Lock(ctx):
         chain = Chain(ctx)
         leg = my_leg(ctx, chain, closed_ok=True)
+        if ctx.archived and a.item is not None:
+            raise Refuse(1, f"{ctx.slug} is complete and archived: its Post-rollout items were settled at Complete; "
+                            "file the task without --item")
         items = post_items(chain.note)
         if a.item is not None and not any(i["k"] == a.item for i in items):
             raise Refuse(1, f"no Post-rollout item {a.item} (there are {len(items)})")
         item_text = next((i["text"] for i in items if i["k"] == a.item), None)
-        body = [f"# {a.title.strip()}", "", a.why.strip(), "",
-                f"Filed by Leg {leg['n']} of [[{ctx.slug}]]" + (f" from its Post-rollout item {a.item}: {item_text}"
-                                                              if a.item is not None else " at its close") + "."]
+        where = (f" from its Post-rollout item {a.item}: {item_text}" if a.item is not None
+                 else " after its Complete (the archived note holds no pointer to it)" if ctx.archived
+                 else " at its close")
+        body = [f"# {a.title.strip()}", "", a.why.strip(), "", f"Filed by Leg {leg['n']} of [[{ctx.slug}]]{where}."]
         name, path = write_followup(ctx, chain, f"{project_of(ctx)}-followup-{kebab(a.title)}", a.title, body)
-        set_pointer(chain.note, a.item, name, reason_text(a.title, 120))
-        tag = f"post-item {a.item}" if a.item is not None else "close"
-        log_line(chain.note, leg_line(ctx, leg["n"], f"follow-on [[{name}]] ({tag})"))
-        save(ctx, chain.note)
+        if not ctx.archived:
+            # The archived note is never written: its committed Completion log is the chain's final record.
+            set_pointer(chain.note, a.item, name, reason_text(a.title, 120))
+            tag = f"post-item {a.item}" if a.item is not None else "close"
+            log_line(chain.note, leg_line(ctx, leg["n"], f"follow-on [[{name}]] ({tag})"))
+            save(ctx, chain.note)
         return {"verb": "file-followup", "rollout": ctx.slug, "leg": leg["n"], "followup": name, "path": str(path),
-                "item": a.item, "dryRun": ctx.dry}
+                "item": a.item, "pointer": not ctx.archived, "archived": str(ctx.rollout) if ctx.archived else None,
+                "dryRun": ctx.dry}
 
 
 # ---- close ----------------------------------------------------------------------------------------------------------
@@ -1850,7 +1900,8 @@ def parser():
     g = s.add_mutually_exclusive_group()
     g.add_argument("--take-over", action="store_true")
     g.add_argument("--resume", type=int)
-    sub.add_parser("next", parents=[common])
+    s = sub.add_parser("next", parents=[common])
+    s.add_argument("--waiting")
     s = sub.add_parser("claim", parents=[common])
     s.add_argument("--task", required=True)
     s.add_argument("--inherit", action="store_true")
@@ -1903,6 +1954,8 @@ def parser():
 VERBS = {"begin": cmd_begin, "next": cmd_next, "claim": cmd_claim, "change": cmd_change, "smoke": cmd_smoke,
          "file-fix": cmd_file_fix, "done": cmd_done, "set-aside": cmd_set_aside, "post-items": cmd_post_items,
          "file-followup": cmd_file_followup, "close": cmd_close, "handed": cmd_handed, "clear-halt": cmd_clear_halt}
+# The writing verbs an archived (completed) note refuses up front; begin refuses it as done, with its status line.
+ARCHIVE_REFUSED = ("claim", "smoke", "file-fix", "done", "set-aside", "close", "handed", "clear-halt")
 
 
 def main(argv=None) -> int:
@@ -1916,6 +1969,9 @@ def main(argv=None) -> int:
         rr = _load("reconcile_rollout", RR_SRC)
         sc = _load("serial_chains", SC_SRC)
         ctx = Ctx(args)
+        if ctx.archived and verb in ARCHIVE_REFUSED:
+            raise Refuse(1, f"{ctx.slug} is complete and archived ({ctx.rollout}): only file-followup writes after "
+                            "Complete, and it writes nothing into the archived note")
         emit(VERBS[verb](ctx, args))
         return 0
     except Usage as e:

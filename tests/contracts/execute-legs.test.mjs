@@ -11,13 +11,15 @@
 //   e5  fix tasks: `verifies:` on every fix, `fixes:` names the culprit (own: the task; chain: the later chain task;
 //       outside and drift: none), the task stays done, its dependants held through `verifies:`;
 //   e6  the hand-over and status: create_thread's fields (no brief, report_back on), a report per *closed* Leg, the §
-//       Report table verbatim, never `running`, a labelled and pushed manual hand-over;
+//       Report table verbatim, never `running`, a `waiting` line from `next --waiting`, a labelled and pushed manual
+//       hand-over;
 //   e7  the close order (leg.py close before create_thread → pushes → /thread:close with the hand-over between 7 and
 //       8 → handed → banner → ROLLOUT-STATUS), the lock and exit 5's retry-once, no question tool;
 //   e8  the docs: CONTEXT's **Leg** and **Serial rollout** entries, ADR 0040's Decision line and its new bullet, the
 //       README row;
-//   e9  close § Under a Leg: each rule, placed after ## Edge cases, no fence and no retired close:asks phrase, and the
-//       four appended pointers after their pinned sentences;
+//   e9  close § Under a Leg: each rule (a follow-on after Complete filed with no pointer among them), placed after ##
+//       Edge cases, no fence and no retired close:asks phrase, and the four appended pointers after their pinned
+//       sentences;
 //   e10 Complete: legs.md § Complete's steps in order with the routed land follow-on, and the serial template's
 //       Post-rollout in the same order.
 // Each rule has a mutation control that must fail with exactly that rule. Phrase checks run on collapsed text. Reads
@@ -161,7 +163,7 @@ function check(f, product = tree) {
     'leave `report_back` at its default (on)', 'labelled `manual handoff`, and pushes it once', 'leg.py handed --started <id>',
     'leg.py handed --manual "<why>"'])
   const rep = sec(legs, 'Report')
-  need('e6', 'legs.md § Report', rep, ['it is never `running`',
+  need('e6', 'legs.md § Report', rep, ['it is never `running`', 'a `waiting` turn end takes `leg.py next --waiting "<reason>"`\'s',
     'Every Leg whose Close reads *closed* reports to the origin when it closes', 'A `halted` or `waiting` Leg never reports'])
   const table = rep.split('\n').filter((l) => l.startsWith('|'))
   if (JSON.stringify(table) !== JSON.stringify(TABLE)) flag('e6', 'legs.md § Report\'s table is not the pinned table')
@@ -200,7 +202,8 @@ function check(f, product = tree) {
   need('e9', 'close § Under a Leg', ul, ["sets `mode='--commit-only'` for each top in `commit_only`", 'Sub-step 7.9 is skipped',
     '`leg.py file-followup --title <t> --why <w>`', 'Each mark-done option becomes a statement row', '`Left for Lachy: …` row',
     "Rule (3)'s question line never prints", 'runs after sub-step 7 and before step 8', "prints after step 8's landing rows",
-    "a Leg's `ROLLOUT-STATUS:` line is a rollout lead's line for rule (2)"])
+    "a Leg's `ROLLOUT-STATUS:` line is a rollout lead's line for rule (2)",
+    'After Complete, `leg.py close` has already moved the note to `Archive/Rollouts/`: file-followup reads it there and files the task with no pointer'])
   if (/^\s*(```|~~~)/m.test(ul)) flag('e9', '§ Under a Leg holds a fenced block')
   for (const old of RETIRED_ASKS) if (C(ul).includes(old)) flag('e9', `§ Under a Leg holds ${old}`)
   for (const p of POINTERS) if (!C(close).includes(p)) flag('e9', `close does not hold: ${p}`)
@@ -300,6 +303,13 @@ test('control: § Under a Leg moved before ## Edge cases fails e9', () => {
   const moved = real.close.replace(`${ul}\n`, '').replace('## Edge cases\n', `${ul}\n## Edge cases\n`)
   const { fails } = check({ ...real, close: moved })
   assert.deepEqual(fails, ['e9'])
+})
+test('control: a waiting line built by hand fails e6', () => {
+  only('legs', 'a `waiting` turn end takes `leg.py next --waiting "<reason>"`\'s, with', 'a `waiting` turn end is written by hand, with',
+    ['e6'], 'waiting')
+})
+test('control: a pointer written into the archived note fails e9', () => {
+  only('close', 'files the task with no pointer and no log line', 'files the task with a pointer in the archived note', ['e9'], 'archived')
 })
 test('control: a retired close:asks phrase in § Under a Leg fails e9', () => {
   only('close', 'and is pushed once (execute § 6.5).', 'and is pushed once (execute § 6.5). Close never asks: it pushes.', ['e9'], 'asks')

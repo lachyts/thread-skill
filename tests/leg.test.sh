@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # skills/execute/scripts/leg.py: a serial rollout's Legs (ADR 0040, p24-3; skills/execute/legs.md).
 #   L1   two Legs (5 + 2) with a handoff, then Complete: post-items, a follow-on, dispositions, the Completion log,
-#        the archive and one vault commit; an Archive collision; L1v the routed land follow-on and its controls
+#        the archive and one vault commit; an Archive collision; next --waiting; file-followup after Complete reads
+#        the archived note and writes nothing into it; L1v the routed land follow-on and its controls
 #   L2   a lost Leg: exit 3 for another session, --take-over inherits the claim, five fresh claims beside it, the
-#        same-session resume, CODEX_THREAD_ID, `unknown` never matching, --resume; L4c six smoke entries
+#        same-session resume, CODEX_THREAD_ID, `unknown` never matching, --resume; L4c six smoke entries; L2b a Leg
+#        lost or stopped before its smoke test hands its unsmoked tasks on
 #   L3   gates: set aside at the gate, the chain goes on, stuck at the end, approve-gates (bare and --standing) and
-#        hand-back re-enter through claim
-#   L4   fix tasks: own, chain, outside and drift checked against git; idempotent; a half-written filing; L4b a fix
-#        set aside keeps its target on the smoke list and holds its dependant
+#        hand-back re-enter through claim; a re-claimed task is one fresh claim
+#   L4   fix tasks: own, chain (a later task only), outside and drift checked against git; idempotent; a
+#        half-written filing; L4b a fix set aside keeps its target on the smoke list and holds its dependant; L4e
+#        a fix for t10 is never one for t1
 #   L5   the review gate on done; L5b change
 #   L6   set-aside --revert: the commit, a conflict, a dirty path; close --outcome halt and clear-halt
 #   L7   the launch check, a two-launch chain, a codex boundary and a manual hand-over
@@ -145,7 +148,20 @@ ok "$(q '",".join(e["task"] for e in d["smoke"])')" "t1,t2,t3,t4,t5" "L1: Leg 2'
 ok "$(q 'd["smoke"][0]["verify"]')" '**Verify:** `test -f t1.done`' "L1: … each with its Verify line"
 for t in t1 t2 t3 t4 t5; do SESS=s2 leg smoke --task "$t" --result pass; done
 ok "$(logn 'Leg 2 smoke: \[\[t.\]\] pass')" 5 "L1: five smoke passes logged"
-for t in t6 t7; do SESS=s2 leg next; ok "$(q 'd["task"]')" "$t" "L1: Leg 2 next is $t"; SESS=s2 finish "$t"; done
+SESS=s2 leg next; ok "$(q 'd["task"]')" t6 "L1: Leg 2 next is t6"
+SESS=s2 leg claim --task t6; ok "$rc" 0 "claim t6"
+snap; SESS=s2 leg next --waiting "review in flight: [[t6]]"
+ok "$rc|$(q 'd["status_line"]')" "0|ROLLOUT-STATUS: $RO merged=5/7 running=1 state=waiting reason=\"review in flight: [[t6]]\"" \
+   "L1: next --waiting prints the review-in-flight line, R 1 while t6 is claimed"
+keepline
+SESS=s2 leg next --waiting "room stop: stopping calls at a step boundary"
+ok "$(q 'd["status_line"]')" "ROLLOUT-STATUS: $RO merged=5/7 running=1 state=waiting reason=\"room stop: stopping calls at a step boundary\"" \
+   "L1: … and the room stop's"
+keepline; same "L1: next --waiting writes nothing"
+SESS=s2 leg next; ok "$(q '"status_line" in d')" False "L1: a bare next prints no status line"
+SESS=s2 leg next --waiting " "; ok "$rc|$out" "2|" "L1: --waiting with no reason is a usage error"
+SESS=s2 leg done --task t6 --verify pass; ok "$rc" 0 "done t6"
+SESS=s2 leg next; ok "$(q 'd["task"]')" t7 "L1: Leg 2 next is t7"; SESS=s2 finish t7
 SESS=s2 leg next; ok "$(q 'd["action"]')" complete "L1: then next is complete"
 SESS=s2 leg post-items
 ok "$(q 'len(d["items"])')|$(q 'd["items"][1]["text"]')" "2|Tell the team the chain landed." "L1: post-items lists the 2 items"
@@ -180,6 +196,28 @@ ok "$(git -C "$V" show --name-status --no-renames --format= HEAD | sort -k2 | tr
    "A Work/Tasks/Archive/Rollouts/$RO.md|A Work/Tasks/$fu.md|D Work/Tasks/$RO.md|" \
    "L1: the vault commit holds exactly the archived note, the follow-on and the tracked old path"
 ok "$(git -C "$V" status --porcelain -- "Work/Tasks/$RO.md" "Work/Tasks/Archive/Rollouts/$RO.md")" "" "L1: … and leaves neither path dirty"
+# close § Under a Leg, step 6, after Complete: the note is archived, so file-followup reads it there and files the task
+# alone, writing nothing into the archived note.
+cp "$A" "$TMP/snapA"
+SESS=s2 leg file-followup --title "Tidy the release notes" --why "A close candidate after Complete."
+fa=$(q 'd["followup"]')
+ok "$rc|$fa|$(q 'd["pointer"]')|$(q 'd["archived"]')" "0|demo-followup-tidy-the-release-notes|False|$A" \
+   "L1: after Complete, file-followup by the live path reads the archived note and files the task"
+ok "$(fm "$fa" status)|$(fm "$fa" rollout)" "open|<none>" "L1: … a loose open task"
+has "$(cat "$T/$fa.md")" "Filed by Leg 2 of [[$RO]] after its Complete (the archived note holds no pointer to it)." "L1: … saying so"
+cmp -s "$A" "$TMP/snapA"; ok "$?" 0 "L1: … and the archived note is byte-identical: no pointer, no log line"
+ok "$([ -e "$T/$RO.md" ] && echo y || echo n)" n "L1: … and no live note is recreated"
+out=$(cd "$F" && python3 "$LEG" file-followup --title "Check the dashboards" --why w --rollout "$RO" --tasks-dir "$T" \
+      --vault "$V" --now "$NOW" --session s2 2>"$TMP/err"); rc=$?
+ok "$rc|$(q 'd["archived"]')|$(q 'd["followup"]')" "0|$A|demo-followup-check-the-dashboards" "L1: … and by its slug"
+SESS=s2 leg file-followup --item 1 --title x --why y
+ok "$rc" 1 "L1: --item on the archived note is exit 1"; has "$err" "settled at Complete" "L1: … saying why"
+cmp -s "$A" "$TMP/snapA"; ok "$?" 0 "L1: … the archived note still byte-identical"
+SESS=s3 leg begin --cwd "$F"; ok "$rc" 1 "L1: begin on the archived chain is exit 1"; has "$err" "is done" "L1: … it is done"
+for v in "handed --started task_q" "smoke --task t1 --result pass" "clear-halt --reason x"; do
+  leg $v; ok "$rc" 1 "L1: $v on the archived note is exit 1"; has "$err" "complete and archived" "L1: … $v says so"
+done
+cmp -s "$A" "$TMP/snapA"; ok "$?" 0 "L1: … and the archived note stays byte-identical"
 ok "$(find "$T" -name '.*.tmp' | wc -l | tr -d ' ')" 0 "L1: no temp file is left under Work/Tasks"
 
 # ---- repo helpers ------------------------------------------------------------------------------------------------
@@ -310,6 +348,25 @@ SESS=s9 leg begin --cwd "$F" --resume 4
 ok "$rc|$(q 'd["resumed"]')|$(logn 'Leg 4 resumed: session s9')" "0|logged|1" "L2: --resume 4 logs resumed"
 snap; SESS=s9 leg begin --cwd "$F"; ok "$rc|$(q 'd["resumed"]')" "0|silent" "L2: … and that session now resumes silently"; same "L2: resumed"
 
+# L2b: a Leg lost, or stopped, before (or part-way through) its smoke test hands its unsmoked tasks on
+scen l2b
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2 t3 t4)
+for t in t1 t2 t3 t4; do mkt "$t"; done
+smk() { q '",".join(e["task"] for e in d["smoke"])'; }
+leg begin --cwd "$F"; finish t1; finish t2; leg close --outcome handoff; leg handed --started x
+SESS=s2 leg begin --cwd "$F"; ok "$(smk)" "t1,t2" "L2b: Leg 2's smoke list is t1, t2; then Leg 2 dies before its smoke test"
+SESS=s3 leg begin --cwd "$F" --take-over
+ok "$rc|$(q 'd["leg"]')|$(smk)" "0|3|t1,t2" "L2b: a take-over before the smoke test carries t1 and t2 to Leg 3"
+ok "$(q 'd["smoke"][0]["why"]')" "['done by Leg 1, never smoke-tested since']" "L2b: … each saying why"
+SESS=s3 leg smoke --task t1 --result pass
+SESS=s3 leg close --outcome stopped --reason "out of time"
+SESS=s4 leg begin --cwd "$F"; ok "$rc|$(smk)" "0|t2" "L2b: a stop part-way through the smoke test carries only the unsmoked t2"
+SESS=s4 leg close --outcome stopped --reason "out of time again"
+SESS=s5 leg begin --cwd "$F"; ok "$rc|$(smk)" "0|t2" "L2b: a close --outcome stopped before the smoke test carries t2 again"
+SESS=s5 leg smoke --task t2 --result not-run --why "needs a device"
+SESS=s5 finish t3; SESS=s5 leg close --outcome handoff; SESS=s5 leg handed --started y
+SESS=s6 leg begin --cwd "$F"; ok "$rc|$(smk)" "0|t3" "L2b: once logged, even as not run, a task is never carried: Leg 6 checks t3 only"
+
 # ════ L3: gates ═════════════════════════════════════════════════════════════════════════════════════════════════════
 scen l3
 G1='spend: OpenAI API for the audit — cap 5 USD'
@@ -353,6 +410,9 @@ has "$(cat "$T/t1.md")" "Set aside by Leg 1 of [[$RO]]: blocked on a missing key
 python3 "$RR" hand-back --tasks t1 --tasks-dir "$T" > "$TMP/hb" 2>&1; ok "$?|$(fm t1 status)" "0|in_progress" "L3: hand-back re-enters it"
 leg next; ok "$(q 'd["task"]')" t1 "L3: … next claims it"
 leg claim --task t1; ok "$rc|$(fm t1 handed_back)" "0|<none>" "L3: … and claim consumes handed_back"
+ok "$(logn 'Leg 1 claimed \[\[t1\]\]')" 3 "L3: t1 has three claimed lines in Leg 1 (the gate, the standing approval, the hand-back)"
+leg done --task t1 --verify pass; leg next
+ok "$(q 'd["task"]')|$(q 'd["claims"]')" "t2|1" "L3: … and counts as one fresh claim"
 
 # ════ L4: fix tasks ═════════════════════════════════════════════════════════════════════════════════════════════════
 scen l4
@@ -374,6 +434,11 @@ SESS=s2 leg file-fix --target t3 --cause chain --culprit nope --evidence x; ok "
 SESS=s2 leg file-fix --target t3 --cause outside --evidence x; ok "$rc" 1 "L4: outside with no untrailered commit on t3's paths is exit 1"
 SESS=s2 leg file-fix --target t3 --cause drift --evidence x; ok "$rc" 1 "L4: drift after a commit to t3's paths is exit 1"
 has "$err" "use own, chain or outside" "L4: … with the hint"; same "L4: refusals"
+# t3, then t5, both wrote a.txt: t3 landed before t5 passed its own Verify, so it never broke t5 ...
+SESS=s2 leg file-fix --target t5 --cause chain --culprit t3 --evidence x
+ok "$rc" 1 "L4: a culprit whose commits on t5's paths all came before t5's last Task: commit is exit 1"
+has "$err" "all came before [[t5]]'s last Task: commit" "L4: … saying so"; same "L4: culprit t3 for t5"
+# ... and the control: the same pair the other way round, t5 after t3, is the culprit (below).
 SESS=s2 leg file-fix --target t3 --cause chain --culprit t5 --evidence "Verify failed: a.txt reads t5" --excerpt "FAIL: a.txt"
 f1=$(q 'd["fix"]')
 ok "$rc|$f1" "0|demo-followup-fix-t3" "L4: chain --culprit t5 files the fix"
@@ -423,6 +488,17 @@ has "$(q 'd["held"]')" "depends on [[t2]] (awaiting fix [[$fx]])" "L4b: t2's dep
 SESS=s2 leg close --outcome stuck; SESS=s3 leg begin --cwd "$R"
 ok "$(q '",".join(e["task"] for e in d["smoke"])')" "t1,t2" "L4b: Leg 3 re-verifies t2 (its fix is not done) and carries t1's fail; t3's not run is not carried"
 unset CWD
+# L4e: a fix filed for t10 is never one for t1 (the closed link, not a prefix)
+scen l4e
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t10 t2); mkt t1; mkt t10; mkt t2
+leg begin --cwd "$F"; finish t1; finish t10; leg close --outcome handoff; leg handed --started x
+SESS=s2 leg begin --cwd "$F"
+SESS=s2 leg smoke --task t1 --result fail --why "t1 broke"; SESS=s2 leg smoke --task t10 --result fail
+SESS=s2 leg file-fix --target t10 --cause drift --evidence "the API changed"; ok "$rc" 0 "L4e: a fix for t10"
+SESS=s2 leg close --outcome stopped --reason "out of time"
+SESS=s3 leg begin --cwd "$F"
+ok "$rc|$(q '",".join(e["task"] for e in d["smoke"])')" "0|t1,t10" "L4e: Leg 3 carries t1's fail beside t10's fix"
+ok "$(q 'd["smoke"][0]["why"]')" "[\"failed at Leg 2's smoke test, no fix filed\"]" "L4e: … t1 for its unfixed fail"
 
 # ════ L5: the review gate; L5b: change ══════════════════════════════════════════════════════════════════════════════
 scen l5
@@ -581,7 +657,8 @@ ok "$(grep -c . "$TMP/net.log")" 0 "L10: … and no gh or ssh call was made"
 unset CWD
 
 # ════ L11: the status mapping ═══════════════════════════════════════════════════════════════════════════════════════
-ok "$(grep -c . "$STATUS_LINES")" 9 "L11: nine status lines collected (handed, complete, unclosed, stuck, halt, wrong launch, manual, paused, stopped)"
+ok "$(grep -c . "$STATUS_LINES")" 11 "L11: eleven status lines collected (handed, review in flight, room stop, complete, unclosed, stuck, halt, wrong
+   launch, manual, paused, stopped)"
 bad=$(python3 - "$HOOK" "$STATUS_LINES" <<'PY'
 import importlib.util, re, sys
 spec = importlib.util.spec_from_file_location("drv", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)

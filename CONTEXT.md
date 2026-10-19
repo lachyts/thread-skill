@@ -333,7 +333,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Leg** — one session's part of a serial rollout (`skills/execute/legs.md`).
   In order: execute's git-env check, `leg.py begin`, the preflight (the
   launch's required tools answer), the smoke test (the Verify line of every
-  task the previous Leg finished), any task its predecessor left claimed, the
+  finished task no later Leg has checked yet: the previous Leg's, and a lost
+  or stopped Leg's unchecked list), any task its predecessor left claimed, the
   fix tasks, then new tasks claimed one at a time: up to five fresh claims, the
   inherited task aside, fewer when its context grows heavy or a task proves
   large, and never closing mid-task. Each code-writing task gets one clean-room
