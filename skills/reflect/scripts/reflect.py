@@ -54,9 +54,10 @@ r-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>. It reads every non-reserved <slug>.jsonl in th
   writes no tunings.jsonl line: such a rollout is read in the week it ran and leaves no baseline.
 - note (Work/Tasks/<slug>.md, then Work/Tasks/Archive/Rollouts/<slug>.md) and its ``Project root:`` line, the repo
   (rollout-settings.py's _origin_slug, cached per root), the settings (rollout-settings.py's resolve(repo=root,
-  path=--config), written to <dir of F>/<slug>.settings.json), --fold's fold-journals, and score.py (--rollout --note
-  --settings --repo-slug --repo --tasks-dir --until --out <dir of F>/<slug>.score.json). A missing note, a refused
-  settings file or no origin: scored by slug, flagged, and never a knob candidate. No single rollout stops the span.
+  path=--config), redacted as the CLI prints it and written to <dir of F>/<slug>.settings.json), --fold's
+  fold-journals, and score.py (--rollout --note --settings --repo-slug --repo --tasks-dir --until --out
+  <dir of F>/<slug>.score.json). A missing note, a refused settings file or no origin: scored by slug, flagged, and
+  never a knob candidate. No single rollout stops the span.
 - breachCounts: true only for a read, non-partial rollout whose window.activeEnd falls in [since, until], so a
   Guardrail breach counts in the week its run ends. A partial rollout's breaches are reported, not counted.
 - friction, each item {kind, rollout, task, at, ...}:
@@ -765,7 +766,7 @@ class Span:
                 doc = RS.resolve(repo=entry["root"], path=expand(self.a.config) if self.a.config else None)
                 settings = os.path.join(self.out_dir, "%s.settings.json" % slug)
                 with open(settings, "w", encoding="utf-8") as f:
-                    json.dump(doc, f)
+                    json.dump(RS.redacted(doc), f)  # the CLI's own JSON: whether an ntfy topic is set, never the topic
                 entry["settingsFile"] = settings
             except RS.SettingsError as e:
                 entry["flags"].append("rollout-settings refused (%s): scored without settings, never a knob candidate" % e)

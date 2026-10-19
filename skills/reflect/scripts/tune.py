@@ -80,7 +80,7 @@ inserts the key after the table's last key; with no table it appends `[repo."<sc
 under [defaults] still gets a repo entry: Tunings are per repo). No file, or a comment-only one, is created
 or appended to; a missing parent directory is created, and removed again when a failure leaves it empty. The
 result goes to a temp file in the same directory and must resolve with each picked key at its `to` from
-`file:repo`, every other key and Guardrail unchanged.
+`file:repo`, every other key and Guardrail unchanged, and `[notify]` (ADR 0038 d3, machine-wide) unchanged too.
 
 Write order: (1) every check above; (2) ONE `tuning` line carrying every pick, through
 run_record.emit(strict=True), its returned bool checked: one os.write, so tunings.jsonl gains the whole set
@@ -610,6 +610,8 @@ def _apply(scores, applied, names, repo, config, before, dry_run, auto=None):
                 raise Stop("the edit resolves %s to %s, not %s: nothing written" % (k, after["settings"][k], want), 2)
         if after["guardrails"] != before["guardrails"]:
             raise Stop("the edit changes the Guardrails: nothing written", 2)
+        if after["notify"] != before["notify"]:  # machine-wide (ADR 0038 d3): a Tuning never drops the ntfy topic
+            raise Stop("the edit changes [notify]: nothing written", 2)
         tid = new_id()
         fields = line_fields(scores, applied, tid, auto=auto)
         if dry_run:
