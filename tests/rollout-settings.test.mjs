@@ -1,8 +1,10 @@
 // skills/_shared/scripts/rollout-settings.py — the resolver for the operator's rollout settings (p15-4, ADR 0032).
 //
-// The file is `~/.config/thread/rollouts.toml`, ladder.toml's sibling: `[defaults]` (the six rollout keys: the four
-// Tuning keys, execute's `auto_retries`, p16-4, and the standing approval's `spend_approval_usd`, ADR 0034),
-// `[guardrails]` (the Reflection's bounds) and `[repo."owner/name"]` tables keyed by the GitHub origin that
+// The file is `~/.config/thread/rollouts.toml`, ladder.toml's sibling: `[defaults]` (the seven rollout keys: the four
+// Tuning keys, execute's `auto_retries`, p16-4, the standing approval's `spend_approval_usd`, ADR 0034, and the
+// machine-wide `verify_slots`, p23-4, which a repo table may not hold),
+// `[guardrails]` (the Reflection's bounds), `[notify]` (ADR 0038 d3: `ntfy_topic`, the needs-you push's ntfy fallback,
+// machine-wide like the guardrails) and `[repo."owner/name"]` tables keyed by the GitHub origin that
 // `land.sh --origin-slug` reads from the local clone. No file gives the built-in values. A present file that
 // does not validate is refused with one `rollout-settings: <path>[:<line>]: <reason>` line (ADR 0016's typo
 // rule), never a silent fall back to the built-ins.
@@ -22,18 +24,29 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPT = path.join(root, 'skills', '_shared', 'scripts', 'rollout-settings.py')
 // KEYS are the four Tuning keys (run_record.py's TUNING_KEYS, tune.py and score.py read them); SETTING_KEYS adds
 // `auto_retries` (p16-4: execute's automatic retries, >= 0, not Reflection-tunable) and `spend_approval_usd` (ADR 0034: the
-// standing approval's limit in US dollars, >= 0, built-in 0 = off, not Reflection-tunable): every key a `settings` object holds.
+// standing approval's limit in US dollars, >= 0, built-in 0 = off, not Reflection-tunable) and `verify_slots` (p23-4: the
+// machine's verify slots, >= 1, built-in 2, [defaults] only): every key a `settings` object holds.
 const KEYS = ['parallel_ceiling', 'max_review_rounds', 'max_iterations', 'max_plan_rounds']
-const SETTING_KEYS = [...KEYS, 'auto_retries', 'spend_approval_usd']
-const MINIMUM = { parallel_ceiling: 1, max_review_rounds: 1, max_iterations: 1, max_plan_rounds: 1, auto_retries: 0, spend_approval_usd: 0 }
+const SETTING_KEYS = [...KEYS, 'auto_retries', 'spend_approval_usd', 'verify_slots']
+const MINIMUM = { parallel_ceiling: 1, max_review_rounds: 1, max_iterations: 1, max_plan_rounds: 1, auto_retries: 0, spend_approval_usd: 0,
+  verify_slots: 1 }
 // review_churn_pct (p21-3): Review churn's absolute bound, built-in 40.
 // hours_per_task (p21-2): the Throughput Guardrail's bound, running hours per task whose Slot or lane holding overlaps
 // the window.
 const GUARDRAIL_KEYS = ['tokens_per_merge_pct', 'set_aside_rate_points', 'conflict_rate_points', 'quota_stalls', 'review_churn_pct',
   'hours_per_task']
-const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, auto_retries: 2, spend_approval_usd: 0 }
+const BUILT_IN = { parallel_ceiling: 4, max_review_rounds: 4, max_iterations: 3, max_plan_rounds: 3, auto_retries: 2, spend_approval_usd: 0,
+  verify_slots: 2 }
 const GUARDRAILS_BUILT_IN = { tokens_per_merge_pct: 25, set_aside_rate_points: 5, conflict_rate_points: 10, quota_stalls: 0,
   review_churn_pct: 40, hours_per_task: 1.5 }
+// [notify] (ADR 0038 d3): the ntfy topic the needs-you fallback publishes to; unset (null) means no fallback. resolve()
+// holds the topic; the CLI prints only whether it is set (redacted()), since on ntfy.sh a topic is its own read and
+// publish credential and the CLI runs in schedule's, execute's, status' and repair's transcripts.
+const NOTIFY_KEYS = ['ntfy_topic']
+const NOTIFY_BUILT_IN = { ntfy_topic: null }
+const UNSET = { ntfy_topic: { set: false, source: 'built-in' } }
+const SET = { ntfy_topic: { set: true, source: 'file:notify' } }
+const TABLES_LINE = 'rollouts.toml holds only [defaults], [guardrails], [notify] and [repo."owner/name"] tables'
 const REAL_GIT = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 
 // ---- helpers ------------------------------------------------------------------------------------------
@@ -78,6 +91,17 @@ function resolves(home, args = [], opts = {}) {
   return JSON.parse(r.stdout)
 }
 
+// The importable resolve(repo, None) in process, as ntfy-push.py and tune.py call it: the topic itself, unredacted.
+function resolvedInProcess(home, repo = null) {
+  const r = run(home, [], {
+    argv: ['-B', '-c', `import importlib.util, json, sys
+spec = importlib.util.spec_from_file_location('rs', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+print(json.dumps(m.resolve(repo=sys.argv[2] if len(sys.argv) > 2 else None)))`, SCRIPT, ...(repo ? [repo] : [])],
+  })
+  assert.equal(r.status, 0, r.stderr)
+  return JSON.parse(r.stdout)
+}
+
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // Refused: exit `code`, nothing on stdout, one `rollout-settings: <path>[:<line>]: <reason>` line on stderr.
@@ -100,11 +124,13 @@ function expectValues(out, values, sources) {
 }
 
 function assertAllBuiltIn(out) {
-  assert.deepEqual(Object.keys(out), ['path', 'file', 'repo', 'settings', 'guardrails'])
+  assert.deepEqual(Object.keys(out), ['path', 'file', 'repo', 'settings', 'guardrails', 'notify'])
   assert.deepEqual(Object.keys(out.settings), SETTING_KEYS)
   assert.deepEqual(Object.keys(out.guardrails), GUARDRAIL_KEYS)
   for (const k of SETTING_KEYS) assert.deepEqual(out.settings[k], { value: BUILT_IN[k], source: 'built-in' })
   for (const k of GUARDRAIL_KEYS) assert.deepEqual(out.guardrails[k], { value: GUARDRAILS_BUILT_IN[k], source: 'built-in' })
+  // An absent [notify] table resolves to no topic: the needs-you push has no ntfy fallback.
+  assert.deepEqual(out.notify, UNSET)
 }
 
 // ---- R1: no file ----------------------------------------------------------------------------------------
@@ -173,6 +199,26 @@ test('R2 spend_approval_usd (ADR 0034): built-in 0 (off); [defaults] sets it, a 
   expectValues(out, { spend_approval_usd: 20 }, { spend_approval_usd: 'file:repo' })
 })
 
+test('R2 verify_slots (p23-4): built-in 2; [defaults] sets it (file:defaults)', (t) => {
+  const home = tmpHome(t)
+  assert.deepEqual(resolves(home).settings.verify_slots, { value: 2, source: 'built-in' })
+  writeSettings(home, ['[defaults]', 'verify_slots = 3'])
+  expectValues(resolves(home), { verify_slots: 3 }, { verify_slots: 'file:defaults' })
+  writeSettings(home, ['[defaults]', 'verify_slots = 1'])
+  expectValues(resolves(home), { verify_slots: 1 }, { verify_slots: 'file:defaults' })
+  writeSettings(home, ['[defaults]', 'verify_slots = 4', '[repo."o/r"]', 'parallel_ceiling = 2'])
+  const out = resolves(home, ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')])
+  expectValues(out, { verify_slots: 4, parallel_ceiling: 2 }, { verify_slots: 'file:defaults', parallel_ceiling: 'file:repo' })
+})
+
+test('R2 verify_slots in a repo table is refused at its line (machine-wide), with and without --repo', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['[defaults]', 'verify_slots = 2', '[repo."o/r"]', 'parallel_ceiling = 2', 'verify_slots = 1'])
+  const why = /\[repo\."o\/r"\] verify_slots is machine-wide: set it under \[defaults\]/
+  refused(home, { line: 5, reason: why })
+  refused(home, { line: 5, reason: why, args: ['--repo', gitRepo(home, 'r', 'https://github.com/o/r')] })
+})
+
 // ---- R3: a repo override -----------------------------------------------------------------------------------
 
 test('R3 auto_retries in a repo table overrides [defaults] (file:repo)', (t) => {
@@ -238,12 +284,18 @@ const REFUSALS = [
   ['an unknown key in [defaults]', ['[defaults]', 'max_review_rounds = 3', 'paralel_ceiling = 3'], 3,
     /\[defaults\]: unknown key "paralel_ceiling"/],
   ['an unknown key in a repo table', ['[repo."o/r"]', 'max_rounds = 3'], 2, /\[repo\."o\/r"\]: unknown key "max_rounds"/],
-  ['an unknown key names all six rollout keys', ['[defaults]', 'auto_retry = 1'], 2,
-    /unknown key "auto_retry" \(a rollout table holds parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, auto_retries, spend_approval_usd\)/],
+  ['an unknown key names all seven rollout keys', ['[defaults]', 'auto_retry = 1'], 2,
+    /unknown key "auto_retry" \(a rollout table holds parallel_ceiling, max_review_rounds, max_iterations, max_plan_rounds, auto_retries, spend_approval_usd, verify_slots\)/],
+  ['verify_slots = 0', ['[defaults]', 'verify_slots = 0'], 2, /\[defaults\] verify_slots must be an integer >= 1, got 0/],
+  ['verify_slots = true', ['[defaults]', 'verify_slots = true'], 2, /verify_slots must be an integer >= 1, got a boolean/],
+  ['verify_slots = 1.5', ['[defaults]', 'verify_slots = 1.5'], 2, /verify_slots must be an integer >= 1, got a float/],
+  ['verify_slots = "2"', ['[defaults]', 'verify_slots = "2"'], 2, /verify_slots must be an integer >= 1, got a string/],
+  ['a dotted repo verify_slots', ['repo."o/r".verify_slots = 2'], 1, /\[repo\."o\/r"\] verify_slots is machine-wide/],
   ['spend_approval_usd = -1', ['[defaults]', 'spend_approval_usd = -1'], 2, /\[defaults\] spend_approval_usd must be an integer >= 0, got -1/],
   ['spend_approval_usd = 50.5', ['[defaults]', 'spend_approval_usd = 50.5'], 2, /spend_approval_usd must be an integer >= 0, got a float/],
   ['spend_approval_usd = "50"', ['[defaults]', 'spend_approval_usd = "50"'], 2, /spend_approval_usd must be an integer >= 0, got a string/],
-  ['an unknown table [default]', ['# settings', '[default]', 'parallel_ceiling = 3'], 2, /unknown top-level key "default"/],
+  ['an unknown table [default]', ['# settings', '[default]', 'parallel_ceiling = 3'], 2,
+    new RegExp(`unknown top-level key "default" \\(${escapeRe(TABLES_LINE)}\\)`)],
   ['a repo key ending .git', ['[repo."o/r.git"]', 'parallel_ceiling = 3'], 1, /\.git/],
   ['a repo key that is no owner/name', ['[repo."not-a-slug"]', 'parallel_ceiling = 3'], 1, /owner\/name/],
   ['an all-dots repo name', ['[repo."o/..."]', 'parallel_ceiling = 3'], 1, /owner\/name/],
@@ -269,6 +321,19 @@ const REFUSALS = [
   ['an inline table with a bad nested key names the repo = line', ['# settings', 'repo = { "o/r" = { paralel_ceiling = 5 } }'], 2,
     /unknown key "paralel_ceiling"/],
   ['a TOML syntax error', ['[defaults]', 'parallel_ceiling = '], 2, /invalid TOML/],
+  // [notify] (ADR 0038 d3): a table holding only ntfy_topic, an ntfy topic (1 to 64 of A-Z, a-z, 0-9, - and _). A refused
+  // string is described, never echoed, so a near-miss topic never reaches a transcript.
+  ['notify as a scalar', ['notify = 5'], 1, /notify must be a table \(\[notify\]\), got 5/],
+  ['an unknown key in [notify]', ['[notify]', 'topic = "x"'], 2, /\[notify\]: unknown key "topic" \(\[notify\] holds ntfy_topic\)/],
+  ['an empty ntfy_topic', ['[notify]', 'ntfy_topic = ""'], 2, /\[notify\] ntfy_topic must be an ntfy topic .*, got an empty string/],
+  ['a URL as ntfy_topic (the topic alone, never the server)', ['# settings', '[notify]', 'ntfy_topic = "https://ntfy.sh/x"'], 3,
+    /\[notify\] ntfy_topic must be an ntfy topic .*, got a string holding another character$/m],
+  ['a boolean ntfy_topic', ['[notify]', 'ntfy_topic = true'], 2, /ntfy_topic must be an ntfy topic .*, got a boolean/],
+  ['a number as ntfy_topic', ['[notify]', 'ntfy_topic = 3'], 2, /ntfy_topic must be an ntfy topic .*, got 3/],
+  ['a 65-character ntfy_topic', ['[notify]', `ntfy_topic = "${'a'.repeat(65)}"`], 2, /ntfy_topic must be an ntfy topic .*, got a string of 65 characters/],
+  ['ntfy_topic in [defaults] (it is machine-wide, under [notify])', ['[defaults]', 'ntfy_topic = "x"'], 2, /\[defaults\]: unknown key "ntfy_topic"/],
+  ['ntfy_topic in a repo table', ['[repo."o/r"]', 'ntfy_topic = "x"'], 2, /\[repo\."o\/r"\]: unknown key "ntfy_topic"/],
+  ['a dotted bad ntfy_topic', ['notify.ntfy_topic = "a b"'], 1, /\[notify\] ntfy_topic must be an ntfy topic/],
 ]
 
 for (const [name, lines, line, reason] of REFUSALS) {
@@ -317,7 +382,7 @@ test('R4 a key the line scan cannot place is refused in the exact no-line form',
   const r = run(home)
   assert.equal(r.status, 2)
   assert.equal(r.stdout, '')
-  assert.equal(r.stderr, `rollout-settings: ${settingsPath(home)}: unknown top-level key "xA" (rollouts.toml holds only [defaults], [guardrails] and [repo."owner/name"] tables)\n`)
+  assert.equal(r.stderr, `rollout-settings: ${settingsPath(home)}: unknown top-level key "xA" (${TABLES_LINE})\n`)
 })
 
 test('R4 a refused file is refused with --repo too, and land.sh never runs for it', (t) => {
@@ -410,16 +475,18 @@ test('R7 hours_per_task (p21-2) takes an integer or a float > 0, as file:guardra
 
 // ---- R8: the importable resolve() --------------------------------------------------------------------------
 
-test('R8 the importable resolve() and constants agree with the CLI', (t) => {
+test('R8 the importable resolve() and constants agree with the CLI, which prints resolve() redacted', (t) => {
   const home = tmpHome(t)
-  writeSettings(home, ['[defaults]', 'max_iterations = 2', '[repo."o/r"]', 'parallel_ceiling = 6'])
+  writeSettings(home, ['[defaults]', 'max_iterations = 2', '[notify]', 'ntfy_topic = "t-1"', '[repo."o/r"]', 'parallel_ceiling = 6'])
   const repo = gitRepo(home, 'r', 'https://github.com/o/r')
   const cli = resolves(home, ['--repo', repo])
+  assert.deepEqual(cli.notify, SET)
   const r = run(home, [], {
     argv: ['-B', '-c', `import importlib.util, json, sys
 spec = importlib.util.spec_from_file_location('rs', sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-print(json.dumps({'out': m.resolve(repo=sys.argv[2]), 'keys': list(m.KEYS), 'gkeys': list(m.GUARDRAIL_KEYS),
-  'skeys': list(m.SETTING_KEYS), 'min': m.MINIMUM,
+out = m.resolve(repo=sys.argv[2])
+print(json.dumps({'out': out, 'view': m.redacted(out), 'keys': list(m.KEYS), 'gkeys': list(m.GUARDRAIL_KEYS),
+  'skeys': list(m.SETTING_KEYS), 'min': m.MINIMUM, 'nkeys': list(m.NOTIFY_KEYS), 'nbuilt': m.NOTIFY_BUILT_IN,
   'built': m.BUILT_IN, 'gbuilt': m.GUARDRAILS_BUILT_IN, 'timeout': m.ORIGIN_TIMEOUT, 'path': m.default_path()}))
 try:
     m.resolve(repo='/nonexistent/x')
@@ -428,13 +495,18 @@ except m.SettingsError as e:
   })
   assert.equal(r.status, 0, r.stderr)
   const [first, second] = r.stdout.trim().split('\n').map((l) => JSON.parse(l))
-  assert.deepEqual(first.out, cli)
+  // resolve() keeps the topic for its in-process readers; redacted() is exactly the CLI's line, and only notify differs.
+  assert.deepEqual(first.out.notify, { ntfy_topic: { value: 't-1', source: 'file:notify' } })
+  assert.deepEqual(first.view, cli)
+  assert.deepEqual({ ...first.out, notify: cli.notify }, cli)
   assert.deepEqual(first.keys, KEYS)
   assert.deepEqual(first.skeys, SETTING_KEYS)
   assert.deepEqual(first.min, MINIMUM)
   assert.deepEqual(first.gkeys, GUARDRAIL_KEYS)
   assert.deepEqual(first.built, BUILT_IN)
   assert.deepEqual(first.gbuilt, GUARDRAILS_BUILT_IN)
+  assert.deepEqual(first.nkeys, NOTIFY_KEYS)
+  assert.deepEqual(first.nbuilt, NOTIFY_BUILT_IN)
   assert.equal(first.timeout, 20)
   assert.equal(first.path, settingsPath(home))
   assert.deepEqual(second, ['--repo /nonexistent/x: not a directory', 2, null])
@@ -490,4 +562,43 @@ except m.SettingsError as e:
   assert.ok(elapsed < 5000, `bounded: took ${elapsed}ms`)
   const left = spawnSync('pgrep', ['-f', `sleep ${uniq}`], { encoding: 'utf8' })
   assert.equal(left.stdout.trim(), '', 'no sleep child survives')
+})
+
+// ---- R11: [notify] (ADR 0038 d3) ------------------------------------------------------------------------------
+
+test('R11 [notify] ntfy_topic resolves as file:notify beside [defaults] and a repo table; the rest is unchanged', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['[defaults]', 'parallel_ceiling = 2', '', '[notify]', 'ntfy_topic = "thread-needs-you"   # a dedicated topic',
+    '', '[repo."o/r"]', 'max_iterations = 5'])
+  const repo = gitRepo(home, 'r', 'https://github.com/o/r')
+  const out = resolves(home, ['--repo', repo])
+  assert.deepEqual(Object.keys(out), ['path', 'file', 'repo', 'settings', 'guardrails', 'notify'])
+  assert.deepEqual(out.notify, SET)
+  assert.deepEqual(resolvedInProcess(home, repo).notify, { ntfy_topic: { value: 'thread-needs-you', source: 'file:notify' } })
+  expectValues(out, { parallel_ceiling: 2, max_iterations: 5 }, { parallel_ceiling: 'file:defaults', max_iterations: 'file:repo' })
+  for (const k of GUARDRAIL_KEYS) assert.equal(out.guardrails[k].source, 'built-in')
+})
+
+test('R11 [notify] in dotted and inline-table form resolves like table form; an empty [notify] is no topic', (t) => {
+  for (const [lines, want] of [
+    [['notify.ntfy_topic = "x"'], { value: 'x', source: 'file:notify' }],
+    [['notify = { ntfy_topic = "A_b-9" }'], { value: 'A_b-9', source: 'file:notify' }],
+    [['[notify]', `ntfy_topic = "${'z'.repeat(64)}"`], { value: 'z'.repeat(64), source: 'file:notify' }],
+    [['[notify]', '# set once ntfy-noise-audit names a topic'], { value: null, source: 'built-in' }],
+  ]) {
+    const home = tmpHome(t)
+    writeSettings(home, lines)
+    assert.deepEqual(resolvedInProcess(home).notify, { ntfy_topic: want }, lines.join(' | '))
+    assert.deepEqual(resolves(home).notify, want.value === null ? UNSET : SET, lines.join(' | '))
+  }
+})
+
+test('R11 the CLI never prints the topic: stdout carries `set`, never the topic string or a `value` under notify', (t) => {
+  const home = tmpHome(t)
+  writeSettings(home, ['[notify]', 'ntfy_topic = "a-topic-only-resolve-sees"'])
+  const r = run(home)
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(!r.stdout.includes('a-topic-only-resolve-sees') && !r.stderr.includes('a-topic-only-resolve-sees'), 'the topic is unprinted')
+  assert.deepEqual(JSON.parse(r.stdout).notify, SET)
+  assert.equal(resolvedInProcess(home).notify.ntfy_topic.value, 'a-topic-only-resolve-sees')
 })

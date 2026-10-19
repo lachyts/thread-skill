@@ -377,9 +377,9 @@ evidence.** For each one, show:
    `status: done` means the note was reverted or clobbered (say so if there is none);
 5. for a RACE only, the lead's re-verify verdict, so Lachy decides with it on screen: the owner session's halt
    reason (`RACE: origin/<default> fails the verifier`), and the verdict file
-   `<repoPath>/.claude/integration/race-<slug>.rc` (`0` green; any other rc red, `124` a timeout; absent: it
-   never finished, which reads as red) with the tail of `race-<slug>.log` beside it. An UNVERIFIED task was
-   never re-verified: say so.
+   `<repoPath>/.claude/integration/race-<slug>.rc` (`0` green; any other rc red, `124` a timeout; `noslot`
+   never ran (no verify slot came in time); absent: it never finished, which reads as red) with the tail of
+   `race-<slug>.log` beside it. An UNVERIFIED task was never re-verified: say so.
 
 Then append a dated `## Notes` line to the rollout note (create the section if missing), e.g.
 `- <YYYY-MM-DD> repair: [[<slug>]] possible PR-less merge (PR #<n>, head audit-fix/<alias>, MERGED) escalated;

@@ -4,6 +4,10 @@ Date: 2026-10-18
 Status: accepted, not built (amends ADR 0034 decision 2's ask-ahead wording and execute § 6.5's push rule; grilled
 with Lachy 2026-10-18 in the lead session of `[[thread-skill-rollout-2026-10-17]]`, rewritten the same day after two
 clean-room reviews of its earlier drafts)
+*(Amended 2026-10-19 by thread-skill-p23-3-needs-you-ntfy-fallback: d3's "Remote Control inactive" stands for every
+not-sent that reached nobody (notifications turned off, nowhere to send it, however the tool words it), so Lachy at
+the terminal is the one not-sent that counts as pushed and skips the fallback. `rollout-settings.py`'s CLI prints only
+whether a topic is set: on ntfy.sh a topic is its own read and publish credential.)*
 
 ## Context
 
@@ -69,8 +73,13 @@ comma). The pricer's fail-closed reading is the shared safety net; the fix belon
 - **No pricer change.** `gated_inputs.py`'s rules, its fail-closed reading and ADR 0034's residuals stand. It gains
   a stdin form for the judge (`exposure -` reading one gate), printing one JSON line.
 - **The engine's prompts change** (planner, plan reviser, plan judge): their bytes change, so a call launched on the
-  old script and resumed keeps its own `scriptPath` and replays unchanged. A judge `changes` over a gate's format
-  climbs like any other `changes`; it should be rare once the planner is taught the format.
+  old script and resumed keeps its own `scriptPath` and replays unchanged. A judge `changes` over gates the pricer
+  cannot price (`"usd": null`) alone never climbs and bounces at most once per call. The engine cannot tell a gate the
+  pricer can never price from one the planner could fix, so a gate still unpriced after the bounce goes to sign-off as
+  gate-pending, with the judge's feedback on the note (`## Gate bounce (awaiting sign-off)`), and the standing approval
+  signs nothing on a bounced note: it asks, even for a gate the judge wrongly called unpriceable. A gate that prices but
+  whose sub-bullets break its Cap is an ordinary `changes`, which climbs, and so is a spend gate with no cap, or more
+  than one (ADR 0008).
 - **Schedule step 7's Planner line** (`## Decisions (asked ahead <date>)`) asks for the one-line gate with the
   split in sub-bullets.
 - **Execute § 6.5** gains decision 3, `tests/contracts/execute-needs-you.test.mjs` its new log lines, and

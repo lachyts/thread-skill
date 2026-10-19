@@ -2,6 +2,9 @@
 """gated_inputs.py — the gated-input sweep and the standing approval's exposure reading (ADR 0008, ADR 0034).
 
     python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/gated_inputs.py sweep <note>...
+    python3 -I ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/gated_inputs.py exposure - <<'EOF'
+    <one gate>
+    EOF
 
 The single home of two readings of free text. Stdlib only; it writes nothing and makes no network call.
 
@@ -72,6 +75,15 @@ The single home of two readings of free text. Stdlib only; it writes nothing and
    `every`/`a`/`an` before a noun not on UNIT_NOUNS (`every push`, `every image`) reads x1, safe because the cap is
    the task's total ceiling (the engine's GATED_INPUTS_CHECK, task.workflow.js) and the annotation records "total
    exposure"; digits inside code spans.
+
+   CLI (ADR 0038): `exposure -` reads ONE gate on stdin and prints exposure()'s reading as one JSON line,
+   {"usd": "<amount>" | null, "why": "<reason>"}, the amount as format_usd writes it, then exits 0. The plan judge runs
+   it on each top-level spend gate the engine parsed, the gate on stdin through a quoted heredoc (`<<'EOF'`), never as
+   a shell argument, where `$` and backticks would expand. stdin is decoded as UTF-8 whatever the locale (bad UTF-8:
+   exit 1) and split on newlines, a trailing CR dropped; exactly one non-blank line is a gate. Two or more print
+   {"usd": null, "why": "stdin holds <n> lines: pass one gate"} and exit 0; none exits 2 ("no gate on stdin"). A gate
+   passed as an argument, or `exposure` with no `-`, is a usage error (exit 2). The output is UTF-8, never
+   ASCII-escaped.
 
 3. `annotation(date, usd, limit, source)` is the `## Approved gates` suffix a standing approval writes:
    `(approved <date> under the standing approval: total exposure US$<x>, limit US$<t> from <source>)`. It begins
@@ -401,9 +413,40 @@ def annotation(date, usd, limit, source):
 
 # ---- CLI --------------------------------------------------------------------------------------------------------
 
+USAGE = ("usage: gated_inputs.py sweep <note>...\n"
+         "       gated_inputs.py exposure - <<'EOF'   (one gate on stdin, then EOF on its own line)\n")
+
+
+def _exposure_cli():
+    """`exposure -` (module docstring, 2: CLI): one gate on stdin, one JSON line on stdout."""
+    try:
+        text = sys.stdin.buffer.read().decode("utf-8")
+    except UnicodeDecodeError as e:
+        sys.stderr.write(f"gated_inputs: exposure: stdin is not UTF-8: {e}\n")
+        return 1
+    lines = [l[:-1] if l.endswith("\r") else l for l in text.split("\n")]
+    gates = [l for l in lines if l.strip()]
+    if not gates:
+        sys.stderr.write("gated_inputs: exposure: no gate on stdin\n" + USAGE)
+        return 2
+    if len(gates) > 1:
+        out = {"usd": None, "why": f"stdin holds {len(gates)} lines: pass one gate"}
+    else:
+        r = exposure(gates[0])
+        out = {"usd": None if r["usd"] is None else format_usd(r["usd"]), "why": r["why"]}
+    sys.stdout.buffer.write((json.dumps(out, ensure_ascii=False) + "\n").encode("utf-8"))
+    sys.stdout.buffer.flush()
+    return 0
+
+
 def main(argv):
+    if argv[:1] == ["exposure"]:
+        if argv != ["exposure", "-"]:
+            sys.stderr.write(USAGE)
+            return 2
+        return _exposure_cli()
     if len(argv) < 2 or argv[0] != "sweep":
-        sys.stderr.write("usage: gated_inputs.py sweep <note>...\n")
+        sys.stderr.write(USAGE)
         return 2
     code = 0
     for path in argv[1:]:

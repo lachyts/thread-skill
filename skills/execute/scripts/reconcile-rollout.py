@@ -339,11 +339,17 @@ Subcommands:
               started; no --to without --dry-run. A failed save is exit 1 at once: the prior note is still
               open, so the next unfinished-rollout check pairs the two notes as interrupted.
 
-  verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2): given a rollout note,
-              print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": (N + 600) * 1000} from its
-              `verify_timeout` frontmatter (an integer from 1 to 6600; absent -> 1800; a quoted value or a
-              trailing ` # comment` is read as `parallel_ceiling` is). Anything else, or no note: one ERROR
-              line on stderr, exit 1, no stdout. Only the rollout note is read.
+  verify-timeout  Read-only, for /thread:execute § 3's once-per-entry check (p14-2, p23-4): given a rollout
+              note, print one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
+              max(60, 7200 - 600 - N), "verifySlots": V} from its `verify_timeout` frontmatter (an integer
+              from 1 to 6600; absent -> 1800; a quoted value or a trailing ` # comment` is read as
+              `parallel_ceiling` is) and the machine's `verify_slots` (rollout-settings.py resolve(repo=None):
+              rollouts.toml's [defaults], else the built-in 2; never read from the note). harnessTimeoutMs is
+              the harness maximum; slotWait bounds the lead verify's wait for a verify slot, so the wait, the
+              verifier and the 600 s margin fit inside it. A bad `verify_timeout`, or no note: one ERROR line on
+              stderr, exit 1, no stdout (checked first). A refused rollouts.toml (the whole file is validated),
+              a present one on a python with no tomllib, or a resolver that will not load: `ERROR: rollout
+              settings refused: <the resolver's line>`, exit 3, no stdout.
 
   clear-pause Reinstate a paused rollout: remove the `paused:` stamp (and any pending
               `pause_requested`, and `paused_for`) from the rollout note. Run by /thread:execute's resume path
@@ -370,7 +376,8 @@ Subcommands:
   approve-gates  Sign off a gate-pending task's declared gated inputs (ADR 0008): move the bullets
               under "## Gated inputs (awaiting sign-off)" into "## Approved gates" with a sign-off
               date (gate + cap + sign-off — the durable record the engine reads via task.approvedGates
-              so re-dispatches and resumes never re-ask those exact gates), remove the pending section,
+              so re-dispatches and resumes never re-ask those exact gates), remove the pending section
+              (and "## Gate bounce (awaiting sign-off)", ADR 0038),
               and flip the note by the stage it stopped (p12-14), read before the flip from the
               `## Integration log`'s last line paired with the gate-pending status (p12-16): `set-aside`
               with a `pr:` is a stop at Integration -> `status: review`, `ready:` restamped from --now and
@@ -396,13 +403,29 @@ Subcommands:
               otherwise the remaining bullets stay pending (rewritten without the covered ones) and the note
               stays gate-pending. Each remaining gate prints `ASK: <slug>: <gate>: <why>` (with a built-in
               limit, a priceable gate's why is `standing approval off (built-in 0): set [defaults]
-              spend_approval_usd in ~/.config/thread/rollouts.toml`). Exit 0: every gate covered and written;
+              spend_approval_usd in ~/.config/thread/rollouts.toml`). A note carrying "## Gate bounce (awaiting
+              sign-off)" (ADR 0038: the plan judge bounced its plan, reconcile wrote the section) has nothing
+              covered, whatever its gates price: each gate is an ASK whose why starts `the plan judge bounced
+              this plan (ADR 0038; …)` and ends with the pricer's reading, and nothing is written (exit 3). Lachy's
+              sign-off removes the section with the pending one. Exit 0: every gate covered and written;
               3: some or none covered (the covered ones written, an ASK line for each of the rest; a re-run on
               gates already judged writes nothing and exits 3); 1: an error, nothing written for that slug (a
               missing note, a task whose `rollout:` is not --rollout, a note that is not gate-pending with
               pending gates, a `spend_approval_usd` stamp that is not an integer >= 0, rollout settings refused).
               --standing without --rollout is exit 1 (`ERROR: --standing needs --rollout`), nothing written. A
               note already fully approved stays `[no-change]`, exit 0.
+
+  gate-pricer  Read-only (ADR 0038; execute § 4's *Resolve `gatePricer`*): `--tasks <slugs> --rollout <note>`. For
+              each task it resolves the standing approval's limit exactly as approve-gates --standing does
+              (_standing_limit: task, rollout, rollouts.toml, built-in 0) and prints one JSON line, {"slug",
+              "gatePricer", "limit", "source", "why"}: gatePricer is the absolute path of
+              skills/_shared/scripts/gated_inputs.py when the limit is > 0, else "" with why `standing approval off
+              (<source> 0)` (why is "" when on). The lead passes a non-empty gatePricer as the task call's
+              args.gatePricer, and the plan judge then prices each spend gate through `exposure -`. Exit 1, with an
+              `ERROR:` line on stderr and no line for that slug, on a missing note, a task whose `rollout:` is not
+              --rollout, a `spend_approval_usd` stamp that is not an integer >= 0, refused rollout settings or a
+              missing gated_inputs.py; the lead then omits the key. It writes nothing and records no Run-record
+              event.
 
 Run record (p15-2, ADR 0032): each verb records its own Slot and lane transitions, and (p21-2) the human acts it
 carries out (a Recorded answer, a sign-off, a hand-back, a consumed RACE decision), through run_record.py's
@@ -600,7 +623,12 @@ Status mapping (workflow status -> note writes), per execute/SKILL.md §6:
   blocked        -> status: blocked;        a run of blockerDiagnosis under "## Blocker diagnosis"
   plan-blocked   -> status: plan-blocked;   a run of blockerDiagnosis under "## Plan-blocked feedback"
   gate-pending   -> status: gate-pending;   UPSERT gatedInputs under "## Gated inputs (awaiting sign-off)"
-                    (upsert, not append: a refreshed declaration replaces the pending list, never stales)
+                    (upsert, not append: a refreshed declaration replaces the pending list, never stales);
+                    when blockerDiagnosis holds the plan judge's bounce paragraph (ADR 0038: one opening with
+                    `bounced by the plan judge (ADR 0038):`), UPSERT that paragraph, to its end, under
+                    "## Gate bounce (awaiting sign-off)"
+  gate bounce    -> (any status) a row that is not gate-pending, or a gate-pending row with no bounce paragraph,
+                    removes "## Gate bounce (awaiting sign-off)"; approve-gates' sign-off removes it too
   integration    -> (any status; a mode-'integrate' row's `integration` object) one bare line under
                     "## Integration log", exactly 10 space-separated tokens:
                       <startedAt> <outcome> path=<p> pr=<n> anchor=<sha> head=<sha> base=<sha> wait=<n|->
@@ -705,6 +733,16 @@ BLOCKED_SECTIONS = {
 GATE_PENDING_STATUS = "gate-pending"
 GATE_PENDING_SECTION = "## Gated inputs (awaiting sign-off)"
 APPROVED_GATES_SECTION = "## Approved gates"
+# The plan judge's bounce (ADR 0038): a gate-pending row whose blockerDiagnosis holds the engine's bounceNote paragraph
+# (it opens a paragraph with GATE_BOUNCE_MARK, task.workflow.js's BOUNCE_MARK) went to sign-off on a plan the judge
+# did NOT approve, over spend gates it read as unpriceable. Reconcile writes that paragraph, to its end, under
+# GATE_BOUNCE_SECTION (the flagged gates and the judge's feedback, for the person who signs) and removes the section on
+# any other row. While it stands, approve-gates --standing signs nothing on the note (_approve_standing: every pending
+# gate is an ASK naming it), so a gate the judge flagged is never signed unattended, even one it wrongly called
+# unpriceable; Lachy's sign-off (_sign_route) removes it.
+GATE_BOUNCE_SECTION = "## Gate bounce (awaiting sign-off)"
+GATE_BOUNCE_MARK = "bounced by the plan judge (ADR 0038):"
+GATE_BOUNCE_RE = re.compile(r"(?:\A|\n\n)(" + re.escape(GATE_BOUNCE_MARK) + r".*)\Z", re.S)
 # approve-gates' marker on a signed task sent back to in_progress (p12-14): the restart that directly follows
 # the sign-off reads it through mark-started, which removes it (execute § 3.7's fresh-call warning).
 GATES_SIGNED_KEY = "gates_signed"
@@ -749,11 +787,14 @@ APPROVED_PLAN_LEAD_IN = ("The last approved plan, kept as a record for Integrati
 NEEDS_HUMAN_SECTION = "## Needs you"
 
 # The lead's Integration verify timeout (p14-2, execute § 3): rollout frontmatter `verify_timeout`, seconds.
-# The harness bound on the background command is the verifier's own bound plus a margin, and the harness
-# maximum is 7200000 ms, so the key tops out at 7200 - 600.
+# The harness bound on the background command is the harness maximum, 7200000 ms (HARNESS_MAX_S); inside it fit
+# the verify-slot wait (p23-4: slotWait = max(VERIFY_SLOT_WAIT_MIN, HARNESS_MAX_S - VERIFY_HARNESS_MARGIN - N)),
+# the verifier's own bound N and a margin, so the key tops out at 7200 - 600.
 DEFAULT_VERIFY_TIMEOUT = 1800
 VERIFY_HARNESS_MARGIN = 600
 MAX_VERIFY_TIMEOUT = 6600
+HARNESS_MAX_S = 7200
+VERIFY_SLOT_WAIT_MIN = 60
 
 # Every workflow status with a body section to write (reconcile) or scan (status).
 SECTION_BY_STATUS = {**BLOCKED_SECTIONS, GATE_PENDING_STATUS: GATE_PENDING_SECTION}
@@ -1829,6 +1870,36 @@ def _gated():
     return _GATED
 
 
+_SETTINGS_MOD = None
+
+
+def _settings_module():
+    """rollout-settings.py as a module (loaded once per process; raises when it will not load)."""
+    global _SETTINGS_MOD
+    if _SETTINGS_MOD is None:
+        spec = importlib.util.spec_from_file_location("thread_rollout_settings", ROLLOUT_SETTINGS_PY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _SETTINGS_MOD = mod
+    return _SETTINGS_MOD
+
+
+def _machine_settings():
+    """(settings, error): rollout-settings.py's resolve(repo=None), the machine-wide view (p23-4: `verify_slots`):
+    rollouts.toml's [defaults], then the built-in, the whole file validated. error is the resolver's own words (a
+    refused file `<path>:<line>: <reason>`, no tomllib, a loader failure); never raises."""
+    try:
+        mod = _settings_module()
+    except Exception as e:
+        return None, f"rollout-settings.py would not load: {e}"
+    try:
+        return mod.resolve(repo=None)["settings"], None
+    except mod.SettingsError as e:
+        return None, str(e)
+    except Exception as e:
+        return None, f"rollout-settings.py failed: {e}"
+
+
 def _resolved_settings(rollout_note) -> dict:
     """rollout-settings.py's resolve() for the rollout note's Project root (repo=None when it has no Project root line):
     rollouts.toml's [repo."<slug>"], then [defaults], then the built-in. {settings, error, cause, where}: settings is
@@ -1839,9 +1910,7 @@ def _resolved_settings(rollout_note) -> dict:
     share; it writes nothing and never raises."""
     root = _project_root(rollout_note)
     try:
-        spec = importlib.util.spec_from_file_location("thread_rollout_settings", ROLLOUT_SETTINGS_PY)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+        mod = _settings_module()
     except Exception as e:
         return {"settings": None, "error": f"rollout-settings.py would not load: {e}", "cause": "resolver", "where": ""}
     try:
@@ -2091,6 +2160,15 @@ def _ladder_top():
     return ladder["rungs"][-1], ladder["source"]
 
 
+def _gate_bounce(task) -> str:
+    """The plan judge's bounce paragraph (ADR 0038) in a row's blockerDiagnosis, from GATE_BOUNCE_MARK to the end,
+    stripped; '' when the row has none. The mark counts only at the start of the diagnosis or of a paragraph, so a gate
+    line that quotes it never does."""
+    diag = task.get("blockerDiagnosis")
+    m = GATE_BOUNCE_RE.search(diag.replace("\r\n", "\n")) if isinstance(diag, str) else None
+    return m.group(1).strip() if m else ""
+
+
 def _legacy_climb(task) -> str:
     """A pre-3.0.0 row's evidence of hardness (ADR 0029 compat): 'escalated' or 'tier-capped', '' for none.
     Only a row with no `rung` qualifies; every 3.0.0 row carries one (possibly '')."""
@@ -2222,6 +2300,15 @@ def cmd_reconcile(args) -> int:
                 else:
                     # p6-4: every run's feedback is kept as its own numbered run, never only the first.
                     note.append_run(heading, content, now)
+
+        # ADR 0038: the plan judge's bounce rides beside the pending gates (upserted, like them), and any other row,
+        # or a gate-pending row without one, settles an older one. Its presence is what keeps the standing approval off
+        # this note's gates (_approve_standing).
+        bounce = _gate_bounce(task) if status == GATE_PENDING_STATUS else ""
+        if bounce:
+            note.upsert_section(GATE_BOUNCE_SECTION, bounce)
+        else:
+            note.remove_section(GATE_BOUNCE_SECTION)
 
         # p12-16: an Integration row leaves one line in the note's `## Integration log` (the durable
         # record a cold lead, repair and the gate resume read). `integration: null` counts as absent.
@@ -5370,14 +5457,16 @@ def _gate_stage(note) -> str:
 
 
 def _sign_route(note, slug, now):
-    """Flip a gate-pending note whose gates are all signed by the stage it stopped (p12-14), its pending section
-    removed: a stop at Integration -> `review` with `ready:` restamped and `integrating:` removed; any other stop ->
-    `in_progress` with a `gates_signed:` marker. The stage is read before the flip. Returns (stage, route, ready_pr)."""
+    """Flip a gate-pending note whose gates are all signed by the stage it stopped (p12-14), its pending section (and
+    any plan judge's bounce beside it, ADR 0038) removed: a stop at Integration -> `review` with `ready:` restamped and
+    `integrating:` removed; any other stop -> `in_progress` with a `gates_signed:` marker. The stage is read before the
+    flip. Returns (stage, route, ready_pr)."""
     stage = _gate_stage(note)  # before the flip: the pairing reads status gate-pending
     if stage == "run" and _last_log_outcome(note) == "set-aside":
         print(f"WARN: {slug}: the Integration log's last line is set-aside but the note has no pr: — "
               "it cannot rejoin the Integration queue, so it goes to in_progress (its own call)", file=sys.stderr)
     note.remove_section(GATE_PENDING_SECTION)
+    note.remove_section(GATE_BOUNCE_SECTION)
     ready_pr = None
     if stage == "integration":
         note.set("status", "review")
@@ -5483,6 +5572,14 @@ def _ask_why(verdict, limit, gi):
             f"US${gi.format_usd(limit['value'])} ({limit['source']})")
 
 
+def _bounce_why(verdict, gi):
+    """Why a gate on a note the plan judge bounced stays pending under the standing approval (ADR 0038), with the
+    pricer's own reading of it: its why, or the exposure it would otherwise have signed."""
+    reading = verdict["why"] if verdict["usd"] is None else f"exposure US${gi.format_usd(verdict['usd'])}"
+    return (f"the plan judge bounced this plan (ADR 0038; its feedback is under {GATE_BOUNCE_SECTION}), so the "
+            f"standing approval signs none of its gates; the pricer reads: {reading}")
+
+
 def _approve_standing(args) -> int:
     """approve-gates --standing (ADR 0034; the module docstring): sign each pending spend gate the standing approval
     covers, leave the rest pending with an ASK line. Exit 0 every gate written, 3 some left, 1 an error."""
@@ -5534,10 +5631,16 @@ def _approve_standing(args) -> int:
         if err:
             errors.append(f"{slug}: {err}; nothing written")
             continue
+        # ADR 0038: a note the plan judge bounced went to sign-off on a plan it never approved; nothing on it is the
+        # standing approval's to sign, whatever the gate prices. The heading alone counts (fail-closed: an emptied
+        # section still refuses).
+        bounced = note.has_heading(GATE_BOUNCE_SECTION)
         covered, left = [], []
         for g in gates:
             verdict = gi.covered(g, limit["value"])
-            if verdict["covered"]:
+            if bounced:
+                left.append((g, _bounce_why(verdict, gi)))
+            elif verdict["covered"]:
                 covered.append((g, verdict["usd"]))
             else:
                 left.append((g, _ask_why(verdict, limit, gi)))
@@ -5570,6 +5673,51 @@ def _approve_standing(args) -> int:
     for e in errors:
         print(f"ERROR: {e}", file=sys.stderr)
     return 1 if errors else (3 if asked else 0)
+
+
+# ---- gate-pricer ------------------------------------------------------------
+
+def cmd_gate_pricer(args) -> int:
+    """gate-pricer (ADR 0038; the module docstring): the plan judge's pricer path for each task's own call, set only
+    while the task's standing approval is on. Read-only: no write, no Run-record event. Exit 0, or 1 on any error."""
+    rollout_path = Path(os.path.expanduser(args.rollout))
+    if not rollout_path.is_file():
+        print(f"ERROR: rollout note not found at {rollout_path}", file=sys.stderr)
+        return 1
+    if not GATED_INPUTS_PY.is_file():
+        print(f"ERROR: gate-pricer: {GATED_INPUTS_PY} not found", file=sys.stderr)
+        return 1
+    try:
+        rollout_note = Note(rollout_path)
+    except ValueError as e:
+        print(f"ERROR: gate-pricer: {e}", file=sys.stderr)
+        return 1
+    tasks_dir = Path(os.path.expanduser(args.tasks_dir))
+    errors = []
+    for slug in [s.strip() for s in args.tasks.split(",") if s.strip()]:
+        path = tasks_dir / f"{slug}.md"
+        if not path.exists():
+            errors.append(f"{slug}: task note not found at {path}")
+            continue
+        try:
+            note = Note(path)
+        except ValueError as e:
+            errors.append(str(e))
+            continue
+        if (_note_rollout(note) or "").lower() != rollout_path.stem.lower():
+            errors.append(f"{slug}: its rollout: is {note.get('rollout')!r}, not [[{rollout_path.stem}]]")
+            continue
+        limit, err = _standing_limit(note, rollout_note)
+        if err:
+            errors.append(f"{slug}: {err}")
+            continue
+        on = limit["value"] > 0
+        print(json.dumps({"slug": slug, "gatePricer": str(GATED_INPUTS_PY) if on else "", "limit": limit["value"],
+                          "source": limit["source"],
+                          "why": "" if on else f"standing approval off ({limit['source']} 0)"}, ensure_ascii=False))
+    for e in errors:
+        print(f"ERROR: {e}", file=sys.stderr)
+    return 1 if errors else 0
 
 
 # ---- clear-pause ------------------------------------------------------------
@@ -5667,9 +5815,11 @@ def cmd_await_sign_off(args) -> int:
 # ---- verify-timeout -----------------------------------------------------------
 
 def cmd_verify_timeout(args) -> int:
-    """The lead's per-entry check of the rollout's `verify_timeout` (execute § 3, p14-2). Read-only. Valid:
-    one JSON line {"verifyTimeout": N, "harnessTimeoutMs": (N + 600) * 1000}, exit 0. Invalid or no note:
-    one ERROR line on stderr, exit 1, and the lead's entry writes nothing."""
+    """The lead's per-entry check of the rollout's `verify_timeout` and the machine's `verify_slots` (execute § 3,
+    p14-2, p23-4). Read-only. Valid: one JSON line {"verifyTimeout": N, "harnessTimeoutMs": 7200000, "slotWait":
+    max(60, 7200 - 600 - N), "verifySlots": V}, exit 0. A bad verify_timeout or no note: one ERROR line on stderr,
+    exit 1 (checked first). A refused rollouts.toml: `ERROR: rollout settings refused: …`, exit 3. Either way the
+    lead's entry writes nothing."""
     path = Path(os.path.expanduser(args.rollout))
     if not path.exists():
         print(f"ERROR: rollout note not found at {path}", file=sys.stderr)
@@ -5683,7 +5833,18 @@ def cmd_verify_timeout(args) -> int:
     if err:
         print(f"ERROR: {err}", file=sys.stderr)
         return 1
-    print(json.dumps({"verifyTimeout": seconds, "harnessTimeoutMs": (seconds + VERIFY_HARNESS_MARGIN) * 1000}))
+    settings, err = _machine_settings()
+    if err is None:
+        try:
+            slots = settings["verify_slots"]["value"]
+        except Exception as e:
+            err = f"rollout-settings.py failed: no verify_slots ({e})"
+    if err:
+        print(f"ERROR: rollout settings refused: {err}", file=sys.stderr)
+        return 3
+    print(json.dumps({"verifyTimeout": seconds, "harnessTimeoutMs": HARNESS_MAX_S * 1000,
+                      "slotWait": max(VERIFY_SLOT_WAIT_MIN, HARNESS_MAX_S - VERIFY_HARNESS_MARGIN - seconds),
+                      "verifySlots": slots}))
     return 0
 
 
@@ -5891,8 +6052,9 @@ def main() -> int:
     aw.add_argument("--dry-run", action="store_true")
     aw.set_defaults(func=cmd_await_sign_off)
 
-    vt = sub.add_parser("verify-timeout", help="print the rollout's verify_timeout and its harness timeout as JSON, "
-                                               "or exit 1 when invalid (read-only; execute § 3)")
+    vt = sub.add_parser("verify-timeout", help="print the rollout's verify_timeout, the harness timeout, the verify-slot "
+                                               "wait and the machine's verify_slots as JSON; exit 1 on a bad "
+                                               "verify_timeout, 3 on refused rollout settings (read-only; execute § 3)")
     vt.add_argument("--rollout", required=True, help="path to the rollout note")
     vt.set_defaults(func=cmd_verify_timeout)
 
@@ -5911,6 +6073,15 @@ def main() -> int:
     ag.add_argument("--now", type=_iso_arg, default=None, help=now_help + " (the ready: restamp of a stop at Integration)")
     ag.add_argument("--dry-run", action="store_true")
     ag.set_defaults(func=cmd_approve_gates)
+
+    gpr = sub.add_parser("gate-pricer", help="print each task's plan-judge pricer path (gated_inputs.py) as JSON, \"\" "
+                                             "while its standing approval is off; read-only (ADR 0038)")
+    gpr.add_argument("--tasks", required=True, help="comma-separated task slugs")
+    gpr.add_argument("--rollout", required=True,
+                     help="the rollout note, whose frontmatter and Project root resolve spend_approval_usd; the "
+                          "task's rollout: must name it")
+    gpr.add_argument("--tasks-dir", default=str(DEFAULT_TASKS_DIR), help=tasks_dir_help)
+    gpr.set_defaults(func=cmd_gate_pricer)
 
     args = p.parse_args()
     return args.func(args)

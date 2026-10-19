@@ -35,12 +35,13 @@ const consts = (() => {
 })()
 const [LOG, TRIP, ACK] = consts
 
-// § 3c item 5 as it stood before p14-6: repair's § 3e carries the git-env reading, § 3c is never edited for it.
+// § 3c item 5 as it stood before p14-6, plus p23-4's `noslot` reading: repair's § 3e carries the git-env reading, § 3c
+// is never edited for it.
 const C3_ITEM5 = "5. for a RACE only, the lead's re-verify verdict, so Lachy decides with it on screen: the owner session's halt\n" +
   "   reason (`RACE: origin/<default> fails the verifier`), and the verdict file\n" +
-  "   `<repoPath>/.claude/integration/race-<slug>.rc` (`0` green; any other rc red, `124` a timeout; absent: it\n" +
-  "   never finished, which reads as red) with the tail of `race-<slug>.log` beside it. An UNVERIFIED task was\n" +
-  '   never re-verified: say so.'
+  "   `<repoPath>/.claude/integration/race-<slug>.rc` (`0` green; any other rc red, `124` a timeout; `noslot`\n" +
+  "   never ran (no verify slot came in time); absent: it never finished, which reads as red) with the tail of\n" +
+  '   `race-<slug>.log` beside it. An UNVERIFIED task was never re-verified: say so.'
 // Heartbeat clause (4), byte for byte: the merge-result rule reaches it through "act on it as §4.5 would".
 const HB4 = '(4) If a background Integration command this session launched (the verifier, merge-task.sh, a backoff) has not ' +
   'reported: when its result file exists (`<out>.rc`, or `.claude/merge-task.status`), act on it as §4.5 would; otherwise do nothing more.'
@@ -369,7 +370,7 @@ test('control: each RACE site or in-flight definition without its git-env halt f
 
 test('control: the follow-on reading moved into § 3c fails race-followon', () => {
   const s = 'For this slug only, absent means the re-verify\n  never ran, or was skipped or stopped by the git-env halt, not a red result; `0` means it ran green but the\n  lead never acted on it.'
-  const moved = edit(edit(real.repair, s, ''), '   never re-verified: say so.\n', `   never re-verified: say so. ${s.replace(/\n {2}/g, ' ')}\n`)
+  const moved = edit(edit(real.repair, s, ''), 'was never re-verified: say so.\n', `was never re-verified: say so. ${s.replace(/\n {2}/g, ' ')}\n`)
   CONTROLLED.add('race-followon')
   assert.deepEqual(check({ ...real, repair: moved }), ['race-followon'], 'moved into § 3c')
 })

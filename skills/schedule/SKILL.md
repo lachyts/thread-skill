@@ -229,6 +229,7 @@ It prints one JSON line: each key's `value` and its `source`, `file:repo` (the f
 - **A non-zero exit stops the run before this run writes a rollout note or a task stamp**: print its stderr line verbatim (`rollout-settings: <path>:<line>: <reason>`, or `rollout-settings: --repo <p>: <reason>`) with the remedy "edit `~/.config/thread/rollouts.toml` at the named line, then re-run". Exit 3 adds "needs python ≥ 3.11" (a present file needs tomllib). A bad value is refused loudly, never dropped (ADR 0016).
 - **On success**, name each value and its source in the confirm batch (e.g. `parallel_ceiling 5 (file:repo), max_review_rounds 4 (built-in), …`) and store them for step 6's four settings substitutions.
 - **`spend_approval_usd`** resolves here too (ADR 0034: the standing approval's limit in US dollars; built-in `0`, which is off). Name it beside the four (`standing approval 50 USD (file:defaults)`, or `standing approval off (built-in 0)`) for § 3.6's ask-ahead question. It is never stamped on the rollout: execute's `approve-gates --standing` resolves it itself at run time.
+- **`verify_slots`** resolves here too (machine-wide, `[defaults]` only, built-in 2): name it in the confirm batch; it is never stamped on the rollout, and execute's `verify-timeout` reads it at each entry.
 
 ### 3. Extract dependencies
 
@@ -415,7 +416,7 @@ The ask-ahead section is exactly:
 ## Decisions (asked ahead <YYYY-MM-DD>)
 
 - Spend: Lachy approved up to <N> USD total exposure for this task at /thread:schedule (summed across Logins, a recurring cap counted per month).
-- Planner: word each spend gate as one priceable total, its period and count (in the cap's own unit) inside the cap clause, e.g. `spend: <what> — cap 50 USD per Login per month across 3 Logins`; the cap is the task's whole ceiling, so price per-item spend into the total (never "every push" or "each image"); keep other counts, `per`/`each` words, bare numbers and words that widen the cap (`plus` tax, fees or overage, `soft`, `to start`) out of the bullet (detail goes in the plan's other sections). A cap the standing approval cannot price is asked mid-run.
+- Planner: word each spend gate as one line whose Cap is one priceable total, its period and count (in the cap's own unit) inside the cap clause, e.g. `spend: <what> — cap 50 USD per Login per month across 3 Logins`; the Cap is the task's whole ceiling, so price per-item spend into the total (never "every push" or "each image"); put how it splits (run counts, per-call limits, iterations) in sub-bullets nested under the gate, which the Cap must hold, and keep other counts, `per`/`each` words, bare numbers and words that widen the cap (`plus` tax, fees or overage, `soft`, `to start`) off the gate's own line (ADR 0038). A cap the standing approval cannot price is asked mid-run.
 ```
 
 The `## Decisions` prefix makes it a recorded decision (descope asks before touching it) and keeps it out of the brief; the planner reads the note in full, so its Planner line shapes the gate the standing approval prices.

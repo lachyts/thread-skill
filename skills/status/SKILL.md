@@ -192,9 +192,11 @@ nothing more:
 
 **A RACE has three states.** Merge-task's exit 5 means the PR merged, but as a combination nobody
 verified. Execute's RACE procedure (execute § 4.5) appends the `## Race log` line first, then re-verifies the
-merge commit in the background for up to 40 minutes with the lane held: green → `mark-done`; red, rc 124 or a
-missing rc → a halt with `reason="RACE: origin/<default> fails the verifier"`. Its verdict file is
-`<repoPath>/.claude/integration/race-<slug>.rc`, written last, so an absent one means unfinished. A task that a
+merge commit in the background for up to two hours, a verify-slot wait included, with the lane held: green →
+`mark-done`; red, rc 124 or a missing rc → a halt with `reason="RACE: origin/<default> fails the verifier"`. Its
+verdict file is `<repoPath>/.claude/integration/race-<slug>.rc`, written last, so an absent one means unfinished. A
+`noslot` verdict file reads like an absent one: the re-verify has not run (no verify slot came in time), and the
+lead re-runs it with the lane held. A task that a
 `## Race log` line names and that is not done is in the first of these states that matches:
 
 - **Decided:** a dated `## Notes` line on the rollout note records `repair: [[<slug>]] RACE decided: …`. If

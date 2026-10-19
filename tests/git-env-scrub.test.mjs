@@ -6,7 +6,9 @@
 // - every engine-rendered command that runs git or the verifier starts with GIT_ENV_SCRUB (the land.sh form);
 // - every agent prompt carries GIT_ENV_RULE exactly once, ahead of any verifier command it renders;
 // - the edit-noop-repro diagnostic scrubs every git command its probe runs.
-// tests/git-env-scrub.test.sh executes the rendered verifier and the lead's § 4 check under a real GIT_DIR.
+// - with args.verifySlot (p23-4), the wrapped verifier line starts with the scrub too, and SLOT_TEXT holds no git span.
+// tests/git-env-scrub.test.sh executes the rendered verifier (bare and wrapped) and the lead's § 4 check under a real
+// GIT_DIR.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -19,7 +21,7 @@ const T = loadEngine([
   'implementerPrompt', 'approvedPlanImplementerPrompt', 'reviserPrompt', 'readOnlyPrompt', 'plannerPrompt',
   'planReviserPrompt', 'planJudgePrompt', 'reviewJudgePrompt', 'integratorPrompt', 'integrationReviewPrompt',
   'branchTreeSetup', 'integrationMergeStep', 'integrationJudgeCheck', 'integrationMergeReads', 'ANCHOR_RECIPE',
-  'rungState', 'escalate',
+  'rungState', 'escalate', 'slotted', 'SLOT_TEXT',
 ])
 const SCRUB = 'unset $(git rev-parse --local-env-vars 2>/dev/null);'
 
@@ -138,6 +140,39 @@ test('(f) every inline code span that runs git starts with the scrub', () => {
   for (const name of ['readOnlyPrompt', 'plannerPrompt']) {
     assert.ok(all[name][0].includes(`${SCRUB} git status && make test`), `${name} renders the scrubbed verifier`)
   }
+})
+
+// p23-4: the same two rules with args.verifySlot set, the integrator (its `--priority` line) included.
+const SLOT = { script: '/plugins/thread/x/skills/execute/scripts/verify-slot.py', slots: 2 }
+test('(e) with verifySlot: every verifier-bearing prompt renders the wrapped line, scrubbed, after GIT_ENV_RULE', () => {
+  for (const a of [{ repoPath: '/repo', verifier: 'make test', verifySlot: SLOT }, { repoPath: '/repo', verifier: 'make test', knownBaselineFailures: ['t — env'], verifySlot: SLOT }]) {
+    const all = builders(a)
+    for (const [name, prompts] of Object.entries(all)) {
+      for (const p of prompts) {
+        assert.equal(count(p, T.GIT_ENV_RULE), 1, `${name}: GIT_ENV_RULE once`)
+        if (VERIFYING.includes(name)) {
+          const line = T.slotted('make test', name === 'integratorPrompt' ? { ...SLOT, priority: true } : SLOT)
+          assert.ok(line.startsWith(`${SCRUB} python3 `), line)
+          const v = p.indexOf(line)
+          assert.ok(v > -1, `${name}: renders the wrapped verifier`)
+          assert.ok(p.indexOf(T.GIT_ENV_RULE) < v, `${name}: the rule precedes the verifier command`)
+          assert.ok(!p.includes(`${SCRUB} make test`), `${name}: never the bare scrubbed verifier`)
+        }
+      }
+    }
+  }
+})
+
+test('(f) with verifySlot: every inline code span that runs git starts with the scrub; SLOT_TEXT has no git span', () => {
+  const a = { repoPath: '/repo', verifier: 'git status && make test', verifySlot: SLOT }
+  for (const [name, prompts] of Object.entries(builders(a))) {
+    for (const p of prompts) {
+      for (const [, span] of p.matchAll(/`([^`\n]*)`/g)) {
+        if (/(^|[\s;&|(])git\s/.test(span)) assert.ok(span.startsWith(SCRUB), `${name}: \`${span}\``)
+      }
+    }
+  }
+  for (const [, span] of T.SLOT_TEXT.matchAll(/`([^`\n]*)`/g)) assert.ok(!/\bgit\b/.test(span), `SLOT_TEXT span: \`${span}\``)
 })
 
 test('(b2) the four Integration steps start with the scrub on their first command line', () => {
