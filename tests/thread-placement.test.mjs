@@ -613,6 +613,39 @@ test('20. parity: scanned.repo_threads is exactly open\'s lookup with slug= empt
   assert.deepEqual(ESTATE.scanned.project_misnamed, [h('Projects/Animately/giflab/THREAD-leaderboard.md')])
 })
 
+test('20b. rollout clones (ADR 0042): their copies are no thread, parity holds, and a nested clone gives no duplicate finding', () => {
+  const HR = path.join(scratch, 'home-rollout')
+  const hr = (rel) => path.join(HR, rel)
+  const pair = (twin, a, b) => {
+    for (const [d, u] of [[twin, a], [`${twin}-rollout`, b]]) { repo(d); git(['-C', d, 'remote', 'add', 'origin', u]) }
+  }
+  repo(hr('Projects'), { commit: true })
+  pair(hr('repos/tools/pairy'), 'git@github.com:Own/Pairy.git', 'https://github.com/own/pairy.git')
+  write(hr('repos/tools/pairy/THREAD.md'), thread('pairy'))
+  write(hr('repos/tools/pairy-rollout/THREAD.md'), thread('pairy'))
+  pair(hr('repos/workspaces'), 'https://github.com/o/ws.git', 'https://github.com/o/ws.git')
+  write(hr('repos/workspaces-rollout/seat/THREAD.md'), thread('seat'))
+  pair(hr('Projects/N/nest'), 'git@github.com:o/nest.git', 'git@github.com:o/nest.git')
+  write(hr('Projects/N/nest/THREAD.md'), '# nest, no front matter\n')
+  write(hr('Projects/N/nest-rollout/THREAD.md'), '# nest, no front matter\n')
+  // a *-rollout with no GitHub origin is no rollout clone: listed, as in the lookup (repo-threads.test.sh's foo-rollout)
+  repo(hr('repos/tools/plain-rollout')); write(hr('repos/tools/plain-rollout/THREAD.md'), thread('plain'))
+  const j = audit([], { home: HR })
+  const snippet = fs.readFileSync(OPEN, 'utf8').split('\n')
+  const a = snippet.findIndex((l) => l.startsWith('# thread:repo-thread-lookup'))
+  const b = snippet.findIndex((l) => l.startsWith('# end thread:repo-thread-lookup'))
+  const r = spawnSync('bash', ['-c', snippet.slice(a + 1, b).join('\n')], { cwd: path.join(scratch, 'plain'), encoding: 'utf8',
+    env: { ...base, HOME: HR, slug: '' } })
+  assert.equal(r.status, 0)
+  const lookup = r.stdout.split('\n').filter(Boolean)
+  assert.deepEqual(j.scanned.repo_threads, lookup, 'parity with the lookup, rollout clones and all')
+  assert.deepEqual(lookup, [hr('repos/tools/pairy/THREAD.md'), hr('repos/tools/plain-rollout/THREAD.md')])
+  assert.deepEqual(j.scanned.project_threads, [hr('Projects/N/nest/THREAD.md')], 'the nested clone copy is never scanned')
+  const noSlug = of(j, 'no-slug').map((f) => f.path)
+  assert.deepEqual(noSlug, [hr('Projects/N/nest/THREAD.md')], 'one no-slug finding, at the twin: never a duplicate at the clone')
+  for (const f of j.findings) assert.ok(!f.path.includes('-rollout/THREAD.md') || f.path.includes('plain-rollout'), `no finding at a clone copy: ${f.kind} ${f.path}`)
+})
+
 test('21. read-only: nothing under HOME or the vault changes, and no bytecode is written', () => {
   const snap = (dir) => {
     const out = {}

@@ -15,15 +15,17 @@ from the environment; every path is realpath'd. Read-only: no writes, no network
 A <note> is a live project or area note (resolve-target's index), by vault path or basename.
 
 The walks. The repo tier mirrors open's § Repo-thread lookup exactly: every entry below realpath ~/repos at depth <= 4
-(no pruning, no symlink followed), minus the lookup's four path tests (`*/.claude/*`, `$r/obsidian/*`,
-`$r/workspaces/*`, `*/_archive/*`); THREAD.md is a repo thread, any other THREAD*.md a misnamed one. The ~/Projects
-tier mirrors the lookup's ~/Projects walk (depth <= 5, `_archive`, `.claude`, `.git` and `node_modules` pruned). The
-workspaces tier is every THREAD*.md below ~/repos/workspaces at depth <= 4, `_shared`, `.claude`, `.git`,
-`node_modules` and `_archive` pruned.
+(no pruning, no symlink followed), minus the lookup's five path tests (`*/.claude/*`, `$r/obsidian/*`,
+`$r/workspaces/*`, `$r/workspaces-rollout/*`, `*/_archive/*`); THREAD.md is a repo thread, any other THREAD*.md a
+misnamed one. The ~/Projects tier mirrors the lookup's ~/Projects walk (depth <= 5, `_archive`, `.claude`, `.git` and
+`node_modules` pruned). Both drop a file whose git toplevel is a rollout clone (ADR 0042: named `<S>-rollout`, beside a
+same-origin main checkout `<S>`; `self-rollout-check.sh --in-place`, asked once per `*-rollout` toplevel), whose
+THREAD*.md is a copy of its twin's, never a thread: the lookup's `rc` test. The workspaces tier is every THREAD*.md
+below ~/repos/workspaces at depth <= 4, `_shared`, `.claude`, `.git`, `node_modules` and `_archive` pruned.
 
 A qualifying repo (ADR 0039 d1) is a main checkout (its `.git` a directory; a linked worktree, a submodule or a
 --separate-git-dir checkout has a `.git` file) one to three directories below ~/repos, outside obsidian, workspaces,
-`.claude`, `_archive`, `node_modules` and dot-dirs. A note's thread home is its first qualifying `repos:` entry.
+workspaces-rollout, `.claude`, `_archive`, `node_modules` and dot-dirs. A note's thread home is its first qualifying `repos:` entry.
 
 The thread identity of a repo-tier file f is `<home repo>/<f below its git toplevel>`: the home repo is f's main
 checkout (a linked worktree reads as it) when a live note declares it, else the one declared qualifying repo sharing
@@ -59,8 +61,8 @@ fix: …` line per unchecked repo, then `placement: none` or `placement: <N> fin
 ` · unchecked <n>`. --json prints {findings: [{kind, basis, path, copies, owners, detail, fix}], unchecked: [{path,
 owners, fix}], summary, scanned: {repo_threads, repo_misnamed, project_threads, project_misnamed,
 workspace_threads}}; owners are vault paths, and every list of paths is bytewise sorted. `home` prints the repo or
-nothing: for --dir only strictly below ~/Projects, through the folder note; for --project, the note's first
-qualifying repo.
+nothing: for --dir only strictly below ~/Projects, through the folder note (resolve-target's directory rungs, which
+read a nested rollout clone as its in-place twin); for --project, the note's first qualifying repo.
 
 Exit 0 when it ran. Exit 2 for a usage error, a bad --project, a --thread that is not a file or a --dir that is not
 a directory: stderr carries one line starting `thread-placement: `. Exit 3 when the vault, PyYAML or the import is
@@ -78,6 +80,7 @@ import sys
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 RESOLVE_TARGET_PY = os.path.join(HERE, "resolve-target.py")
+SELF_ROLLOUT_SH = os.path.join(HERE, "..", "..", "execute", "scripts", "self-rollout-check.sh")
 KINDS = ("split-home", "misnamed", "undeclared", "no-slug", "behind", "side-branch", "workspace")
 GIT_TIMEOUT = 30
 PROJECTS_PRUNE = frozenset({"_archive", ".claude", ".git", "node_modules"})
@@ -228,6 +231,7 @@ class Estate:
         self._urls = {}
         self._branches = {}
         self._folders = {}
+        self._clones = {}
         # resolve-target's own git_roots, cached per repo: its directory rungs call it once per folder, and every
         # ~/Projects folder sits in the one umbrella repo.
         self._rt_roots = resolver.git_roots
@@ -249,7 +253,7 @@ class Estate:
                 for e in entries:
                     if e.name.startswith(".") or e.name in ("_archive", "node_modules"):
                         continue
-                    if depth == 0 and e.name in ("obsidian", "workspaces"):
+                    if depth == 0 and e.name in ("obsidian", "workspaces", "workspaces-rollout"):
                         continue
                     try:
                         if not e.is_dir(follow_symlinks=False):
@@ -317,6 +321,23 @@ class Estate:
         if key not in self._roots:
             self._roots[key] = self._rt_roots(d)
         return self._roots[key]
+
+    def clone_copy(self, f):
+        """True when file f sits in a rollout clone (ADR 0042): its toplevel is named *-rollout and
+        `self-rollout-check.sh --in-place` names an in-place twin. Asked once per toplevel."""
+        if "-rollout/" not in f:
+            return False
+        top, _ = self.roots(os.path.dirname(f))
+        if not top or not os.path.basename(top).endswith("-rollout"):
+            return False
+        if top not in self._clones:
+            try:
+                r = subprocess.run(["bash", SELF_ROLLOUT_SH, "--in-place", top], capture_output=True, text=True,
+                                   stdin=subprocess.DEVNULL, env=self.git.env, timeout=GIT_TIMEOUT)
+                self._clones[top] = r.returncode == 0
+            except (OSError, subprocess.SubprocessError):
+                self._clones[top] = False
+        return self._clones[top]
 
     def identity(self, f):
         """(identity path, home repo, toplevel, main checkout); a file outside git is its own identity."""
@@ -405,7 +426,10 @@ class Audit:
         for p, name in find(r, 4):
             if not is_thread_file(name):
                 continue
-            if "/.claude/" in p or "/_archive/" in p or p.startswith(r + "/obsidian/") or p.startswith(r + "/workspaces/"):
+            if ("/.claude/" in p or "/_archive/" in p or p.startswith(r + "/obsidian/") or p.startswith(r + "/workspaces/")
+                    or p.startswith(r + "/workspaces-rollout/")):
+                continue
+            if self.est.clone_copy(p):
                 continue
             self.scanned["repo_threads" if name == "THREAD.md" else "repo_misnamed"].append(p)
 
@@ -414,7 +438,7 @@ class Audit:
         if not os.path.isdir(p):
             return
         for f, name in find(p, 5, PROJECTS_PRUNE):
-            if is_thread_file(name):
+            if is_thread_file(name) and not self.est.clone_copy(f):
                 self.scanned["project_threads" if name == "THREAD.md" else "project_misnamed"].append(f)
 
     def walk_workspaces(self):
