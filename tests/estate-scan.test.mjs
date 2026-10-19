@@ -13,8 +13,9 @@
 // determinism, a GIT_SSH_COMMAND run, a --deadline 0 run behind a `git` shim, and a run behind a shim whose
 // `rev-parse --local-env-vars` fails. V2 holds a chmod-000 note under Work/Tasks/Archive/ (the vault-level case;
 // skipped under root). V3 declares one repo whose remote hangs. V4 holds the verifier repos (VV, VT, VI, VL, VJ, VR,
-// VN), the content-on-origin repos (Q, M) and the phase-membership notes. Case 16 runs pushed-base.sh on copies
-// of A, C, D, Q and M under S/parity (it fetches), never on the repos case 9 snapshots.
+// VN, VH, VS, and the nested pair NP and NP/inner), the content-on-origin repos (Q, M) and the phase-membership
+// notes. Case 16 runs pushed-base.sh on copies of A, C, D, Q and M under S/parity (it fetches), never on the repos
+// case 9 snapshots.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -179,6 +180,14 @@ repo('VR', { 'CLAUDE.md': '# VR\n\nTests: `python3 -m unittest discover -s tests
 // VN: nothing names a test, and its one import resolves outside the repo (never followed).
 repo('VN', { 'CLAUDE.md': '# VN\n\n## Architecture\n\nPlain prose; the shared notes are @../shared-notes.md.\n' })
 write(R('shared-notes.md'), '# Shared\n\n## Testing\n\n`pytest`\n')
+// VH and VS: a `## Verifier` and a `### Tests` heading over prose alone, with no code and no `Tests:` line, so the
+// heading is all that reads as the section (event-planner's live `## Verifier`).
+repo('VH', { 'CLAUDE.md': '# VH\n\n## Verifier\n\nAsk before landing; the rig decides which suite runs.\n' })
+repo('VS', { 'CLAUDE.md': '# VS\n\n### Tests\n\nThe suite lives with the hardware rig.\n' })
+// NP and NP/inner: a parent repo with no verifier of its own, and a separate git repo nested inside it (no
+// verifier either, so its live rollout decides). NP/docs is a plain directory of the parent, not a repo.
+repo('NP', { 'CLAUDE.md': '# NP\n\n## Architecture\n\nThe parent; inner/ is its own repository.\n', 'docs/x.md': 'x\n' })
+repo('NP/inner', { 'README.md': '# inner\n' }, { bare: 'fixture/np-inner.git' })
 
 const marketplaces = { 'fx-f': { source: { source: 'directory', path: R('F') }, installLocation: R('F') },
   'fx-g': { source: { source: 'directory', path: R('G') }, installLocation: R('G') } }
@@ -271,8 +280,10 @@ mkdir(path.join(V3, 'Work', 'Tasks'))
 
 // ---- Vault V4: the verifier repos, the squash and mixed repos, and phase membership by filename prefix ----------
 const V4 = path.join(S, 'v4')
-const VERIFIER_REPOS = ['VV', 'VT', 'VI', 'VL', 'VJ', 'VR', 'VN']
+const VERIFIER_REPOS = ['VV', 'VT', 'VI', 'VL', 'VJ', 'VR', 'VN', 'VH', 'VS']
 const RV = 'vr-rollout-2026-10-19'
+const RN = 'np-inner-rollout-2026-10-19'
+const RD = 'np-docs-rollout-2026-10-19'
 const P4 = (rel, text) => write(path.join(V4, 'Work', 'Projects', rel), text)
 const T4 = (rel, text) => write(path.join(V4, 'Work', 'Tasks', rel), text)
 const PH4 = (rel, text) => write(path.join(V4, 'Work', 'Phases', rel), text)
@@ -282,6 +293,13 @@ P4('Phase Lab.md', project('queued'))
 // VR's live rollout carries the verifier its schedule confirmed.
 T4(`${RV}.md`, fm('tags:\n  - task\n  - rollout\nstatus: open\nprotocol_version: 5\nparallel_ceiling: 1\n' +
   'verifier: python3 -m unittest discover -s tests\nprojects:\n  - "[[Verifier Lab]]"', '\n## Notes\n\nProject root: `~/repos/VR`\n'))
+// Nest Lab declares the parent and the repo nested inside it. One live rollout is rooted at the nested repo, one at
+// the parent's plain docs/ directory: neither is the parent's toplevel, so the parent takes neither verifier:.
+P4('Nest Lab.md', project('queued', '\nrepos:\n  - ~/repos/NP\n  - ~/repos/NP/inner'))
+const nestRollout = (verifier, at) => fm('tags:\n  - task\n  - rollout\nstatus: open\nprotocol_version: 5\n' +
+  `parallel_ceiling: 1\nverifier: ${verifier}\nprojects:\n  - "[[Nest Lab]]"`, `\n## Notes\n\nProject root: \`${at}\`\n`)
+T4(`${RN}.md`, nestRollout('swift test', '~/repos/NP/inner'))
+T4(`${RD}.md`, nestRollout('make docs', '~/repos/NP/docs'))
 // Phase notes: `-p1-` and `-p10-`, `p3.5` and `p3.50`, and one whose name has no `-p<N>-` at all.
 const phaseNote = (n) => fm(`tags:\n  - phase\nphase: ${n}\nstatus: open\nprojects:\n  - "[[Phase Lab]]"`)
 PH4('phase-lab-p1-start.md', phaseNote('1'))
@@ -721,10 +739,11 @@ test('11. usage: an unknown flag is exit 2 with one line, a missing vault exit 3
 })
 
 // ---- 12. The verifier: § 2.5 step 1's section, the agent docs' imports, a live rollout's verifier ------------------
-test("12. verifier: a Verifier or Testing section, an imported AGENTS.md or a Tests: line is the model's to read, no blocker", () => {
+test("12. verifier: a section, an AGENTS.md import or a Tests: line is the model's to read; a rollout's verifier: is its own repo's", () => {
   const j = ok(lab())
   const SECTION = { command: null, source: 'CLAUDE.md section' }
-  for (const name of ['VV', 'VT', 'VI', 'VL']) {
+  // VH and VS have nothing but the heading (`## Verifier`, `### Tests`): no code, no `Tests:` line.
+  for (const name of ['VV', 'VT', 'VI', 'VL', 'VH', 'VS']) {
     const r = repoAt(j, R(name))
     assert.deepEqual(r.verifier, SECTION, `${name}: ${JSON.stringify(r.verifier)}`)
     assert.ok(!checks(r.blockers).includes('no-verifier'), `${name} has no no-verifier blocker`)
@@ -738,6 +757,15 @@ test("12. verifier: a Verifier or Testing section, an imported AGENTS.md or a Te
   const vn = repoAt(j, R('VN'))
   assert.equal(vn.verifier, null, 'an import outside the repo is never followed')
   assert.deepEqual(vn.blockers.filter((b) => b.check === 'no-verifier'),
+    [{ check: 'no-verifier', why: 'no verifier detected (schedule § 2.5)' }])
+  // A live rollout's verifier: belongs to the repo whose toplevel its Project root is, exactly: the nested repo
+  // takes its own, and the parent takes neither the nested repo's nor the one rooted at its plain docs/ directory.
+  const inner = repoAt(j, R('NP/inner'))
+  assert.deepEqual(inner.verifier, { command: 'swift test', source: `rollout ${RN}` })
+  assert.ok(!checks(inner.blockers).includes('no-verifier'))
+  const parent = repoAt(j, R('NP'))
+  assert.equal(parent.verifier, null, `a parent repo never takes a rollout rooted below its toplevel: ${JSON.stringify(parent.verifier)}`)
+  assert.deepEqual(parent.blockers.filter((b) => b.check === 'no-verifier'),
     [{ check: 'no-verifier', why: 'no verifier detected (schedule § 2.5)' }])
 })
 

@@ -69,13 +69,14 @@ realpath; the declared strings kept):
                       agent docs (source: the file it is in), a Makefile `test:` target (`make test`), pyproject.toml
                       [tool.poetry] (`poetry run pytest`), package.json scripts.test (`npm test`). The agent docs are
                       CLAUDE.md and AGENTS.md, each with the files it imports by `@path` (inside the root, 5 hops).
-                      With none of these, a live rollout whose Project root is in the clone set (the root or a
-                      declared toplevel, or inside one) gives its `verifier:` as {command, source: "rollout <slug>"},
-                      the first by slug. Then § 2.5 step 1's section, which only a model can read: an agent doc
-                      with a heading naming Verifier, Verification, Test(s) or Testing (`## Running / testing`
-                      too), a `Tests:`-style line, or a test
-                      command (pytest, unittest, `make test`, `npm test`, ...) in code is {command: null, source:
-                      "CLAUDE.md section"}, no blocker. Only a root with none of it blocks.
+                      With none of these, a live rollout whose Project root is one of the clone set's toplevels
+                      (the root or a declared toplevel, by realpath equality) gives its `verifier:` as {command,
+                      source: "rollout <slug>"}, the first by slug. A Project root below a toplevel gives nothing
+                      here, so a parent repo never takes the verifier of a repo nested inside it. Then § 2.5
+                      step 1's section, which only a model can read: an agent doc with a heading naming Verifier,
+                      Verification, Test(s) or Testing (`## Running / testing` too), a `Tests:`-style line, or a
+                      test command (pytest, unittest, `make test`, `npm test`, ...) in code is {command: null,
+                      source: "CLAUDE.md section"}, no blocker. Only a root with none of it blocks.
 
 Probes. Each child runs in its own session with stdin from /dev/null and the caller's env minus `git rev-parse
 --local-env-vars` (computed by the first probe; git's local_repo_env, LOCAL_REPO_ENV, is dropped too, so a probe
@@ -837,8 +838,9 @@ class Scan:
             f.unchecked.append({"check": "unpushed-default", "why": problem})
 
     def verifier(self, f, root, clones):
-        """schedule § 2.5's detection order, restated (SKILL.md prose: nothing to import), then a live rollout's
-        `verifier:` on the same clone set, then § 2.5 step 1's section for the model to read."""
+        """schedule § 2.5's detection order, restated (SKILL.md prose: nothing to import), then the `verifier:` of a
+        live rollout whose Project root is one of the clone set's toplevels, then § 2.5 step 1's section for the
+        model to read."""
         def text(name):
             try:
                 with open(os.path.join(root, name), encoding="utf-8", errors="replace") as fh:
@@ -848,8 +850,9 @@ class Scan:
         docs = self.agent_docs(root)
         make, pyproject, package = text("Makefile"), text("pyproject.toml"), text("package.json")
         line = next(((name, m.group(1).strip()) for name, t in docs for m in [VERIFIER_LINE.search(t)] if m), None)
-        rollout = next(((slug, cmd) for slug, at, cmd in self.rollout_verifiers
-                        if any(at == c or at.startswith(c.rstrip(os.sep) + os.sep) for c in clones)), None)
+        # Exact realpath equality with a clone's toplevel: a Project root below one may sit in a repo nested inside
+        # it, and a parent repo must never take a nested repo's verifier.
+        rollout = next(((slug, cmd) for slug, at, cmd in self.rollout_verifiers if at in clones), None)
         if line:
             f.verifier = {"command": line[1], "source": line[0]}
         elif make is not None and any(self.test_target(ln) for ln in make.splitlines()):
