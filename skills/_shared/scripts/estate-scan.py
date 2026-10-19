@@ -16,9 +16,10 @@ the vault, PyYAML or a sibling script is missing.
 What it reuses. Loaded by path: resolve-target.py (RT: `done_flag`/`dead_why`, its "Live targets" rule, and
 `flatten`/`unlink`), and through it next-action.py (RT.NA: Note, Vault and its link resolution, tags_of, status_of,
 as_list, links_in, read_slots, DEAD_STATUSES and OPEN_STATUSES), so the vault keeps one frontmatter
-reader; reconcile-rollout.py for its PROJECT_ROOT_RE. The statuses read per `_shared/vault-grammar.md` § Statuses:
-Landed and Active are next-action's sets; Review is the one literal here, REVIEW_STATUSES, pinned to the doc by
-tests/contracts/vault-grammar.test.mjs. In flight is § In flight. Run as children, never copied:
+reader; reconcile-rollout.py for its PROJECT_ROOT_RE; reconcile-project.py for its PHASE_N. The statuses read per
+`_shared/vault-grammar.md` § Statuses: Landed and Active are next-action's sets; Review is the one literal here,
+REVIEW_STATUSES, pinned to the doc by tests/contracts/vault-grammar.test.mjs. In flight is § In flight; a phase's
+members are § Phase and task filenames' literal prefix `<slug>-p<N>-`. Run as children, never copied:
 self-rollout-check.sh --resolve, land.sh --origin-slug, landing-register.py check, unfinished-rollout.py check and
 reconcile-rollout.py status. Restated, each cited: schedule § 2.5's verifier detection (SKILL.md prose, nothing to
 import), and pushed-base.sh's ahead classification (execution-fit.md § Dispatch blockers, **Pushed base**).
@@ -28,7 +29,10 @@ The vault (pure Python, never under the deadline):
   tag, not status done/merged/dropped, not `done: true` or "true").
 - Tasks: notes directly in Work/Tasks tagged `task`, neither `rollout` nor `phase`, not landed, not `archived`.
 - Rollouts: notes directly in Work/Tasks tagged `rollout` (CONTEXT.md **Live rollout**: live by location).
-- Phases: notes directly in Work/Phases tagged `phase`, not landed, not `archived`.
+- Phases: notes directly in Work/Phases tagged `phase`, not landed, not `archived`. A phase's openTasks counts the
+  open tasks whose filename starts with the phase note's own `<slug>-p<N>-` (the leftmost `-p<PHASE_N>-` in its
+  name), as reconcile-project.py reads membership: never a task's `phase:` key, so `-p1-` never reaches `-p10-` and
+  `p3.5` and `p3.50` stay apart. A phase note whose name has no such prefix has no members: openTasks is null.
 - A note whose frontmatter is present but broken (does not parse, is not a mapping, never closes, unreadable) is
   listed in `skipped`; a note with no frontmatter is out of scope.
 - The Tasks-dir pre-check: every *.md under Work/Tasks, Archive/ included (the set reconcile-rollout's _scan reads),
@@ -41,9 +45,10 @@ The repo checks, schedule § 0's order, once per repo path that a live project's
 realpath; the declared strings kept):
   git                 `git rev-parse --show-toplevel`. A missing path, a plain directory or a failed probe leaves
                       every check unchecked with its reason.
-  self-rollout        `bash self-rollout-check.sh --resolve <declared path>`: exit 0 prints the rolloutRoot; exit 3
-                      blocks (its stderr kept), and the toplevel stands in so the later checks still report; any
-                      other exit is unchecked. Every check below runs against the rolloutRoot's git root.
+  self-rollout        `bash self-rollout-check.sh --resolve <declared path>`: exit 0 prints the rolloutRoot (kept
+                      realpath'd, as `path` is); exit 3 blocks (its stderr kept), and the toplevel stands in so the
+                      later checks still report; any other exit is unchecked. Every check below runs against the
+                      rolloutRoot's git root.
   no-github-origin    `bash land.sh --origin-slug`: exit 0 is `github`, exit 4 blocks, else unchecked.
   landing-register    `landing-register.py check`: 0 clear; 3 blocks (`landingRegister.line` is the `listed
                       <owner/name>: <reason>` line); 4 is recorded only (no-github-origin covers it); else unchecked.
@@ -53,17 +58,28 @@ realpath; the declared strings kept):
   unpushed-default    over the clone set: the rolloutRoot's git root, plus the declared path's toplevel when it
                       differs. pushed-base.sh's rule: a clone with no local <d> is skipped; ahead of the remote tip
                       when it is present locally (`remote`), else of refs/remotes/origin/<d> (`last-fetch`); an ahead
-                      set touching no file blocks; one touching only THREAD.md, or whose content is already on
-                      origin, does not. pushed-base.sh stays the gate: it fetches and walks the full clone set.
+                      set touching no file blocks; one touching only THREAD.md (threadOnly), or whose content beyond
+                      THREAD.md is already on origin (contentOnOrigin: every touched file matches origin, or only
+                      THREAD.md differs and the set touches more than THREAD.md), does not, so every non-blocking
+                      ahead row carries one of the two. pushed-base.sh stays the gate: it fetches and walks the full
+                      clone set; tests/estate-scan.test.mjs runs it on copies of the fixtures for parity.
   unfinished-rollout  `unfinished-rollout.py check --repo <root> --project <name>` per declaring project, without
                       --regenerate: exit 3 blocks, 0 is the verdict (`none`, `file`), else unchecked.
-  no-verifier         schedule § 2.5's order, read from the root's working tree: CLAUDE.md `Verifier: \\`<cmd>\\``,
-                      a Makefile `test:` target (`make test`), pyproject.toml [tool.poetry] (`poetry run pytest`),
-                      package.json scripts.test (`npm test`). A CLAUDE.md Verification or Testing heading with none of
-                      these is {command: null, source: "CLAUDE.md section"} for the model to read, no blocker.
+  no-verifier         schedule § 2.5's order, read from the root's working tree: a `Verifier: \\`<cmd>\\`` line in the
+                      agent docs (source: the file it is in), a Makefile `test:` target (`make test`), pyproject.toml
+                      [tool.poetry] (`poetry run pytest`), package.json scripts.test (`npm test`). The agent docs are
+                      CLAUDE.md and AGENTS.md, each with the files it imports by `@path` (inside the root, 5 hops).
+                      With none of these, a live rollout whose Project root is in the clone set (the root or a
+                      declared toplevel, or inside one) gives its `verifier:` as {command, source: "rollout <slug>"},
+                      the first by slug. Then § 2.5 step 1's section, which only a model can read: an agent doc
+                      with a heading naming Verifier, Verification, Test(s) or Testing (`## Running / testing`
+                      too), a `Tests:`-style line, or a test
+                      command (pytest, unittest, `make test`, `npm test`, ...) in code is {command: null, source:
+                      "CLAUDE.md section"}, no blocker. Only a root with none of it blocks.
 
 Probes. Each child runs in its own session with stdin from /dev/null and the caller's env minus `git rev-parse
---local-env-vars` (computed by the first probe), plus land.sh's no-prompt set (GIT_TERMINAL_PROMPT=0,
+--local-env-vars` (computed by the first probe; git's local_repo_env, LOCAL_REPO_ENV, is dropped too, so a probe
+that fails still scrubs a hook's GIT_DIR), plus land.sh's no-prompt set (GIT_TERMINAL_PROMPT=0,
 GCM_INTERACTIVE=never, GH_PROMPT_DISABLED=1) and PYTHONDONTWRITEBYTECODE=1; git also gets LC_ALL=C, and ls-remote
 gets `GIT_SSH_COMMAND='ssh -o BatchMode=yes'` only when GIT_SSH_COMMAND, GIT_SSH and the repo's core.sshCommand are
 all unset (land.sh's rule). Each waits min(--timeout, time left to the deadline); at expiry its whole process group
@@ -78,7 +94,8 @@ Output, one JSON object (schema 1; --compact for one line):
   vaultErrors[] {kind: unreadable-tasks-notes | no-tasks-dir, notes[], skips[]},
   projects[]  {name, note, status (raw), standing: crowned|active|queued|parked|other|none, parked, crowned, lane,
                area[], aliases[], nextTask {result: live|blank|dead:<reason>, task, next_action}, repos[] (as
-               declared), tasks[] (slugs), openTasks, phases[] {slug, note, status, phase, openTasks}, rollouts[],
+               declared), tasks[] (slugs), openTasks, phases[] {slug, note, status, phase (its `phase:` as
+               written), openTasks (by filename prefix; null with none)}, rollouts[],
                nextDue (the earliest due on or after today), overdue}
                ordered crowned, active, queued, parked, other, none, then by name, then by note;
   tasks[]     {slug, note, title, status, statusClass: active|review|hold, projects[] (live project names),
@@ -90,7 +107,8 @@ Output, one JSON object (schema 1; --compact for one line):
   repos[]     {path, declared[], declaredBy[], exists, git, toplevel, nested, rolloutRoot, selfRollout {exit, stderr},
                origin, github, landingRegister {exit, line}, defaultBranch, defaultBranchSource (remote|cached|null),
                unpushed[] {clone, ahead, basis (remote|last-fetch), touched[], threadOnly, contentOnOrigin, blocks,
-               commits[] (up to 5, `log --oneline`)}, verifier {command, source} | null,
+               commits[] (up to 5, `log --oneline`)}, verifier {command, source: <agent doc>|Makefile|
+               pyproject.toml|package.json|rollout <slug>|CLAUDE.md section} | null,
                unfinishedRollout[] {project, verdict, line, exit, stderr}, blockers[] {check, why},
                unchecked[] {check, why}, errors[] {check, error}}, by path; blockers and unchecked in the check
                order above, and unchecked means not clear (`deadline`, `timeout`, `vault`, `error`, ...);
@@ -124,6 +142,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILLS = os.path.dirname(os.path.dirname(HERE))
 RESOLVE_TARGET_PY = os.path.join(HERE, "resolve-target.py")
+RECONCILE_PROJECT_PY = os.path.join(HERE, "reconcile-project.py")
 RECONCILE_ROLLOUT_PY = os.path.join(SKILLS, "execute", "scripts", "reconcile-rollout.py")
 SELF_ROLLOUT_SH = os.path.join(SKILLS, "execute", "scripts", "self-rollout-check.sh")
 LAND_SH = os.path.join(HERE, "land.sh")
@@ -144,7 +163,21 @@ REAP_BOUND = 2.0  # how long a killed probe's reap may take before it is left to
 ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 H1 = re.compile(r"#[ \t]+(\S.*?)[ \t]*#*[ \t]*$")
 VERIFIER_LINE = re.compile(r"Verifier:\s*`([^`\n]+)`")
-VERIFIER_HEADING = re.compile(r"^#{1,6}\s+(?:Verification|Testing)\b", re.M | re.I)
+# schedule § 2.5 step 1's section, which a model reads: a heading, a `Tests:`-style line, or a test command in code.
+VERIFIER_HEADING = re.compile(r"^#{1,6}[ \t]+[^\n]*?\b(?:Verifier|Verification|Tests?|Testing)\b", re.M | re.I)
+TESTS_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?[*_]*(?:Verifier|Verification|Tests?|Testing)[*_]*[ \t]*:", re.M | re.I)
+TEST_COMMAND = re.compile(r"\b(?:pytest|unittest|(?:make|just)[ \t]+(?:test|check)|(?:npm|pnpm|yarn|bun)[ \t]+(?:run[ \t]+)?test"
+                          r"|(?:cargo|go|swift|deno|mix)[ \t]+test|vitest|jest|rspec)\b")
+CODE = re.compile(r"^(```|~~~)[^\n]*\n.*?^\1[ \t]*$|`[^`\n]+`", re.M | re.S)  # a fenced block or a code span
+IMPORT = re.compile(r"(?:^|(?<=\s))@([^\s`]+)", re.M)  # Claude Code's `@path` import (read outside code)
+AGENT_DOCS = ("CLAUDE.md", "AGENTS.md")
+IMPORT_HOPS = 5  # Claude Code's import depth
+# git's local_repo_env (`git rev-parse --local-env-vars` on git 2.47): dropped from every child's env even when the
+# probe for the current list fails, so a hook's GIT_DIR or GIT_WORK_TREE never reaches a probe.
+LOCAL_REPO_ENV = frozenset({
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY", "GIT_DIR", "GIT_WORK_TREE", "GIT_IMPLICIT_WORK_TREE", "GIT_GRAFT_FILE", "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS", "GIT_REPLACE_REF_BASE", "GIT_PREFIX", "GIT_SHALLOW_FILE", "GIT_COMMON_DIR"})
 # Each resolve_project reason (next-action.py) the way the estate pass reads it; anything unmatched is `other`.
 LINK_WHY = (("not a project note (", "not a project"), ("ambiguous (", "ambiguous"), ("area note (", "area note"),
             ("no closed frontmatter (", "project unreadable"), ("frontmatter does not parse (", "project unreadable"),
@@ -173,7 +206,8 @@ def _load(name, path):
 
 def load_siblings():
     out = []
-    for name, path in (("thread_resolve_target", RESOLVE_TARGET_PY), ("thread_reconcile_rollout", RECONCILE_ROLLOUT_PY)):
+    for name, path in (("thread_resolve_target", RESOLVE_TARGET_PY), ("thread_reconcile_rollout", RECONCILE_ROLLOUT_PY),
+                       ("thread_reconcile_project", RECONCILE_PROJECT_PY)):
         try:
             out.append(_load(name, path))
         except SystemExit:  # resolve-target's own exit 3 (next-action.py would not load), already on stderr
@@ -302,13 +336,15 @@ class Runner:
 
     def _env_for_children(self):
         """The caller's env minus git's repo-local names (a hook's GIT_DIR & co.), plus the no-prompt set; built by
-        the first probe, so --deadline 0 runs not even this. None when the deadline stops it."""
+        the first probe, so --deadline 0 runs not even this. None when the deadline stops it. The names are
+        LOCAL_REPO_ENV plus whatever `git rev-parse --local-env-vars` prints, so a probe that fails, times out or
+        cannot start still drops the fixed list before the env is cached."""
         with self._env_lock:
             if self._env is None:
                 r = self._spawn(["git", "rev-parse", "--local-env-vars"], dict(os.environ))
                 if r.why == "deadline":
                     return None
-                names = set(r.out.split()) if r.ok else set()
+                names = LOCAL_REPO_ENV | (set(r.out.split()) if r.ok else set())
                 env = {k: v for k, v in os.environ.items() if k not in names}
                 env.update(GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never", GH_PROMPT_DISABLED="1",
                            PYTHONDONTWRITEBYTECODE="1")
@@ -428,8 +464,11 @@ class RootFacts:
 
 
 class Scan:
-    def __init__(self, RT, RR, args):
-        self.RT, self.RR, self.NA = RT, RR, RT.NA
+    def __init__(self, RT, RR, RP, args):
+        self.RT, self.RR, self.RP, self.NA = RT, RR, RP, RT.NA
+        # vault-grammar.md § Phase and task filenames: a phase note `<slug>-p<N>-<desc>`, PHASE_N loaded, not copied.
+        self.phase_prefix = re.compile(r"^(.+?)-p(%s)-" % RP.PHASE_N)
+        self.rollout_verifiers = []  # (slug, realpath'd Project root, verifier:) of each live rollout carrying both
         self.args = args
         self.vault = self.NA.Vault(os.path.expanduser(args.vault))
         self.root = self.vault.root
@@ -633,7 +672,8 @@ class Scan:
         s = run.run(["bash", SELF_ROLLOUT_SH, "--resolve", declared])
         r.self_rollout = {"exit": s.exit, "stderr": s.err}
         printed = s.out.strip().splitlines()[-1] if s.ok and s.out.strip() else None
-        r.rollout_root = printed or r.toplevel
+        # realpath'd, as `path` is, so a declared `.../repo/` reads back equal to its path.
+        r.rollout_root = os.path.realpath(printed) if printed else r.toplevel
         if printed is None:
             if s.why:
                 r.unchecked.append({"check": "self-rollout", "why": s.why})
@@ -685,7 +725,7 @@ class Scan:
 
         tip = self.default_branch(f, root)
         self.unpushed(f, [root] + primaries, tip)
-        self.verifier(f, root)
+        self.verifier(f, root, [root] + primaries)
         return f
 
     def default_branch(self, f, root):
@@ -759,6 +799,7 @@ class Scan:
                     problem = problem or t.why
                     continue
                 touched = [x for x in t.out.split("\0") if x] if t.ok else []
+                thread_only = bool(touched) and all(os.path.basename(x) == "THREAD.md" for x in touched)
                 other = not touched  # an ahead set touching no file blocks
                 if touched:
                     q = run.run(["git", "-C", c, "--literal-pathspecs", "diff", "--quiet", "--no-renames", up, local,
@@ -776,10 +817,13 @@ class Scan:
                             continue
                         differ = [x for x in w.out.split("\0") if x] if w.ok else []
                         other = not differ or any(os.path.basename(x) != "THREAD.md" for x in differ)
+                        # Only THREAD.md differs, and the set touches more than THREAD.md: pushed-base's "beyond
+                        # THREAD.md their content is already on origin" note.
+                        row["contentOnOrigin"] = not other and not thread_only
                     else:
                         other = True  # a failed comparison blocks: fail closed
                 row["touched"] = touched
-                row["threadOnly"] = bool(touched) and all(os.path.basename(x) == "THREAD.md" for x in touched)
+                row["threadOnly"] = thread_only
                 row["blocks"] = other
                 lg = run.git(c, "log", "--oneline", "--no-decorate", "-n", "5", "%s..%s" % (up, local))
                 row["commits"] = lg.out.splitlines() if lg.ok else []
@@ -792,28 +836,72 @@ class Scan:
         elif problem:
             f.unchecked.append({"check": "unpushed-default", "why": problem})
 
-    def verifier(self, f, root):
-        """schedule § 2.5's detection order, restated (SKILL.md prose: nothing to import)."""
+    def verifier(self, f, root, clones):
+        """schedule § 2.5's detection order, restated (SKILL.md prose: nothing to import), then a live rollout's
+        `verifier:` on the same clone set, then § 2.5 step 1's section for the model to read."""
         def text(name):
             try:
                 with open(os.path.join(root, name), encoding="utf-8", errors="replace") as fh:
                     return fh.read()
             except OSError:
                 return None
-        claude, make, pyproject, package = text("CLAUDE.md"), text("Makefile"), text("pyproject.toml"), text("package.json")
-        m = VERIFIER_LINE.search(claude or "")
-        if m:
-            f.verifier = {"command": m.group(1).strip(), "source": "CLAUDE.md"}
+        docs = self.agent_docs(root)
+        make, pyproject, package = text("Makefile"), text("pyproject.toml"), text("package.json")
+        line = next(((name, m.group(1).strip()) for name, t in docs for m in [VERIFIER_LINE.search(t)] if m), None)
+        rollout = next(((slug, cmd) for slug, at, cmd in self.rollout_verifiers
+                        if any(at == c or at.startswith(c.rstrip(os.sep) + os.sep) for c in clones)), None)
+        if line:
+            f.verifier = {"command": line[1], "source": line[0]}
         elif make is not None and any(self.test_target(ln) for ln in make.splitlines()):
             f.verifier = {"command": "make test", "source": "Makefile"}
         elif pyproject is not None and any(ln.strip() == "[tool.poetry]" for ln in pyproject.splitlines()):
             f.verifier = {"command": "poetry run pytest", "source": "pyproject.toml"}
         elif self.npm_test(package):
             f.verifier = {"command": "npm test", "source": "package.json"}
-        elif claude is not None and VERIFIER_HEADING.search(claude):
+        elif rollout:
+            f.verifier = {"command": rollout[1], "source": "rollout %s" % rollout[0]}
+        elif any(self.names_tests(t) for _, t in docs):
             f.verifier = {"command": None, "source": "CLAUDE.md section"}
         else:
             f.blockers.append({"check": "no-verifier", "why": "no verifier detected (schedule § 2.5)"})
+
+    @staticmethod
+    def agent_docs(root):
+        """[(name, text)]: CLAUDE.md, then AGENTS.md, each followed depth-first by the files it imports with Claude
+        Code's `@path` (outside code, relative to the importing file, up to IMPORT_HOPS deep). An imported file must
+        resolve inside the root; each file is read once; `name` is its path from the root as reached."""
+        out, seen = [], set()
+
+        def visit(path, hops):
+            real = os.path.realpath(path)
+            if real in seen or (hops and real != root and not real.startswith(root.rstrip(os.sep) + os.sep)):
+                return
+            try:
+                with open(real, encoding="utf-8", errors="replace") as fh:
+                    body = fh.read()
+            except OSError:
+                return
+            seen.add(real)
+            out.append((os.path.relpath(os.path.normpath(path), root), body))
+            if hops >= IMPORT_HOPS:
+                return
+            for token in IMPORT.findall(CODE.sub("", body)):
+                for cand in dict.fromkeys((token, token.rstrip(".,;:!?)]"))):
+                    p = os.path.join(os.path.dirname(real), os.path.expanduser(cand))
+                    if cand and os.path.isfile(p):
+                        visit(p, hops + 1)
+                        break
+
+        for name in AGENT_DOCS:
+            visit(os.path.join(root, name), 0)
+        return out
+
+    @staticmethod
+    def names_tests(text):
+        """§ 2.5 step 1's section, which only a model can read: a heading naming Verifier, Verification, Test(s) or
+        Testing, a `Tests:`-style line, or a test command (pytest, unittest, `make test`, `npm test`, ...) in code."""
+        return bool(VERIFIER_HEADING.search(text) or TESTS_LINE.search(text)
+                    or any(TEST_COMMAND.search(m.group(0)) for m in CODE.finditer(text)))
 
     @staticmethod
     def test_target(line):
@@ -911,19 +999,24 @@ class Scan:
         for p in projects.values():
             p["tasks"].sort()
             p["openTasks"] = len(p["tasks"])
-        by_slug = {row["slug"]: homes[row["slug"]][1] for row in tasks}
         for rel, note in phase_notes:
-            value = note.get("phase")
+            # Membership is by the literal filename prefix `<slug>-p<N>-` (vault-grammar.md § Phase and task
+            # filenames, as reconcile-project.py reads it), never by a task's `phase:` key; a phase note whose name
+            # has no such prefix has no members to count (null).
+            m = self.phase_prefix.match(slug_of(rel))
+            prefix = "%s-p%s-" % m.groups() if m else None
+            count = sum(1 for row in tasks if row["slug"].startswith(prefix)) if prefix else None
             for prel in {self.resolve(link)[0] for link in self.NA.links_in(note.get("projects"))} - {None}:
-                p = projects[prel]
-                count = sum(1 for t in p["tasks"] if value is not None and by_slug[t].get("phase") is not None
-                            and str(by_slug[t].get("phase")) == str(value))
-                p["phases"].append({"slug": slug_of(rel), "note": slash(rel), "status": jsonable(note.get("status")),
-                                    "phase": jsonable(value), "openTasks": count})
+                projects[prel]["phases"].append({"slug": slug_of(rel), "note": slash(rel),
+                                                 "status": jsonable(note.get("status")),
+                                                 "phase": jsonable(note.get("phase")), "openTasks": count})
         rollouts = [self.rollout_row(rel, note) for rel, note in rollout_notes]
         for row, (rel, note) in zip(rollouts, rollout_notes):
             for prel in {self.resolve(link)[0] for link in self.NA.links_in(note.get("projects"))} - {None}:
                 projects[prel]["rollouts"].append(row["slug"])
+            cmd, at = note.get("verifier"), os.path.expanduser(row["projectRoot"] or "")
+            if isinstance(cmd, str) and cmd.strip() and os.path.isabs(at):
+                self.rollout_verifiers.append((row["slug"], os.path.realpath(at), cmd.strip()))
         for p in projects.values():
             p["phases"].sort(key=lambda x: x["slug"])
             p["rollouts"].sort()
@@ -1047,13 +1140,13 @@ def parse(argv):
 
 def main(argv):
     args = parse(argv)
-    RT, RR = load_siblings()
+    RT, RR, RP = load_siblings()
     if RT.NA.yaml is None:
         fail(3, "PyYAML is required: python3 -m pip install pyyaml")
     vroot = os.path.expanduser(args.vault)
     if not os.path.isdir(vroot):
         fail(3, "no vault at %s" % vroot)
-    out = Scan(RT, RR, args).run()
+    out = Scan(RT, RR, RP, args).run()
     text = json.dumps(out, ensure_ascii=False, separators=(",", ":")) if args.compact else \
         json.dumps(out, ensure_ascii=False, indent=2)
     sys.stdout.buffer.write((text + "\n").encode("utf-8", "replace"))

@@ -10,8 +10,11 @@
 // rollout clone and G has G-rollout.
 //
 // The main vault V1 runs once online and once offline (shared across the cases), plus a second online run for
-// determinism, a GIT_SSH_COMMAND run, and a --deadline 0 run behind a `git` shim. V2 holds a chmod-000 note under
-// Work/Tasks/Archive/ (the vault-level case; skipped under root). V3 declares one repo whose remote hangs.
+// determinism, a GIT_SSH_COMMAND run, a --deadline 0 run behind a `git` shim, and a run behind a shim whose
+// `rev-parse --local-env-vars` fails. V2 holds a chmod-000 note under Work/Tasks/Archive/ (the vault-level case;
+// skipped under root). V3 declares one repo whose remote hangs. V4 holds the verifier repos (VV, VT, VI, VL, VJ, VR,
+// VN), the content-on-origin repos (Q, M) and the phase-membership notes. Case 16 runs pushed-base.sh on copies
+// of A, C, D, Q and M under S/parity (it fetches), never on the repos case 9 snapshots.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -85,6 +88,10 @@ fs.chmodSync(path.join(S, 'bin', 'ssh'), 0o755)
 const realGit = spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8', env: base }).stdout.trim()
 write(path.join(S, 'shim', 'git'), `#!/bin/sh\n: > '${path.join(S, 'git-called')}'\nexec '${realGit}' "$@"\n`)
 fs.chmodSync(path.join(S, 'shim', 'git'), 0o755)
+// A `git` shim whose `rev-parse --local-env-vars` fails (the scrub probe), every other call the real git.
+write(path.join(S, 'shim-noenv', 'git'),
+  `#!/bin/sh\n[ "$1" = rev-parse ] && [ "$2" = --local-env-vars ] && exit 1\nexec '${realGit}' "$@"\n`)
+fs.chmodSync(path.join(S, 'shim-noenv', 'git'), 0o755)
 
 write(path.join(S, 'register.md'), '# Landing register\n\n- fixture/b — fixture listing\n')
 
@@ -140,6 +147,38 @@ commit(R('G'), { 'g.txt': 'primary only\n' }, 'feat: primary only')
 // H: the hanging remote, with a cached origin/HEAD.
 repo('H', { Makefile: 'test:\n\ttrue\n' }, { bare: null, origin: 'git@github.com:fixture/hang.git' })
 mkdir(R('plain'))  // a plain directory, no git
+
+// landOnOrigin(name, files): origin's main gains `files` as its own squash commit (through a scratch clone of the
+// bare), and the repo fetches it by path, so the remote tip is local and refs/remotes/origin/main is that tip.
+function landOnOrigin(name, files) {
+  const bare = path.join(S, 'remotes', 'fixture', `${name.toLowerCase()}.git`)
+  const work = path.join(S, 'squash', name)
+  git(['clone', '-q', bare, work])
+  commit(work, files, `squash: ${name}`)
+  git(['-C', work, 'push', '-q', 'origin', 'main:main'])
+  git(['-C', R(name), 'fetch', '-q', bare, '+refs/heads/main:refs/remotes/origin/main'])
+}
+// Q: local main one commit ahead whose content already landed on origin through a squash (contentOnOrigin).
+repo('Q', { Makefile: 'test:\n\ttrue\n' })
+commit(R('Q'), { 'q.txt': 'landed by squash\n' }, 'feat: q')
+landOnOrigin('Q', { 'q.txt': 'landed by squash\n' })
+// M: ahead by a commit touching THREAD.md and a file whose content landed by squash (only THREAD.md differs).
+repo('M', { Makefile: 'test:\n\ttrue\n' })
+commit(R('M'), { 'THREAD.md': '# Thread\n', 'm.txt': 'landed by squash\n' }, 'feat: m and the thread')
+landOnOrigin('M', { 'm.txt': 'landed by squash\n' })
+
+// The verifier repos (schedule § 2.5 step 1's section, which only a model reads): none has a Makefile, a
+// pyproject.toml or a package.json, so the agent docs (and VR's live rollout) decide.
+repo('VV', { 'CLAUDE.md': '# VV\n\n## Verifier\n\n```bash\npython3 -m unittest discover tests\n```\n\nRun before every commit.\n' })
+repo('VT', { 'CLAUDE.md': '# VT\n\n## Testing\n\nRun the suite before a commit.\n' })
+repo('VI', { 'CLAUDE.md': '@AGENTS.md\n', 'AGENTS.md': '# VI\n\n## Common commands\n\n```bash\nuv sync\n' +
+  'uv run python -m pytest tests/ -v    # the smoke suite\n```\n' })
+repo('VL', { 'CLAUDE.md': '# VL\n\nTests: `python3 -m unittest discover -s tests -t tests` — deterministic.\n' })
+repo('VJ', { 'CLAUDE.md': '# VJ\n\nSee @docs/agents.md for the rules.\n', 'docs/agents.md': '# Rules\n\nVerifier: `make verify`\n' })
+repo('VR', { 'CLAUDE.md': '# VR\n\nTests: `python3 -m unittest discover -s tests`\n' })
+// VN: nothing names a test, and its one import resolves outside the repo (never followed).
+repo('VN', { 'CLAUDE.md': '# VN\n\n## Architecture\n\nPlain prose; the shared notes are @../shared-notes.md.\n' })
+write(R('shared-notes.md'), '# Shared\n\n## Testing\n\n`pytest`\n')
 
 const marketplaces = { 'fx-f': { source: { source: 'directory', path: R('F') }, installLocation: R('F') },
   'fx-g': { source: { source: 'directory', path: R('G') }, installLocation: R('G') } }
@@ -230,6 +269,32 @@ const V3 = path.join(S, 'v3')
 write(path.join(V3, 'Work', 'Projects', 'Hang Project.md'), project('queued', '\nrepos:\n  - ~/repos/H'))
 mkdir(path.join(V3, 'Work', 'Tasks'))
 
+// ---- Vault V4: the verifier repos, the squash and mixed repos, and phase membership by filename prefix ----------
+const V4 = path.join(S, 'v4')
+const VERIFIER_REPOS = ['VV', 'VT', 'VI', 'VL', 'VJ', 'VR', 'VN']
+const RV = 'vr-rollout-2026-10-19'
+const P4 = (rel, text) => write(path.join(V4, 'Work', 'Projects', rel), text)
+const T4 = (rel, text) => write(path.join(V4, 'Work', 'Tasks', rel), text)
+const PH4 = (rel, text) => write(path.join(V4, 'Work', 'Phases', rel), text)
+P4('Verifier Lab.md', project('queued', `\nrepos:${VERIFIER_REPOS.map((n) => `\n  - ~/repos/${n}`).join('')}`))
+P4('Unpushed Lab.md', project('queued', '\nrepos:\n  - ~/repos/Q\n  - ~/repos/M'))
+P4('Phase Lab.md', project('queued'))
+// VR's live rollout carries the verifier its schedule confirmed.
+T4(`${RV}.md`, fm('tags:\n  - task\n  - rollout\nstatus: open\nprotocol_version: 5\nparallel_ceiling: 1\n' +
+  'verifier: python3 -m unittest discover -s tests\nprojects:\n  - "[[Verifier Lab]]"', '\n## Notes\n\nProject root: `~/repos/VR`\n'))
+// Phase notes: `-p1-` and `-p10-`, `p3.5` and `p3.50`, and one whose name has no `-p<N>-` at all.
+const phaseNote = (n) => fm(`tags:\n  - phase\nphase: ${n}\nstatus: open\nprojects:\n  - "[[Phase Lab]]"`)
+PH4('phase-lab-p1-start.md', phaseNote('1'))
+PH4('phase-lab-p10-later.md', phaseNote('10'))
+PH4('phase-lab-p3.5-half.md', phaseNote('3.5'))
+PH4('phase-lab-p3.50-other.md', phaseNote('"3.50"'))
+PH4('phase-lab-odd.md', phaseNote('2'))
+// Tasks: membership is the filename prefix, never the `phase:` key (b says 10, f says 3.5, the last two say 1).
+const PHASE_TASKS = { 'phase-lab-p1-1-a': ['open', 1], 'phase-lab-p1-2-b': ['open', 10], 'phase-lab-p1-3-c': ['done', 1],
+  'phase-lab-p10-1-d': ['open', 10], 'phase-lab-p3.5-1-e': ['open', 3.5], 'phase-lab-p3.50-1-f': ['open', 3.5],
+  'phase-lab-plugin-p1-1-g': ['open', 1], 't-phase-key-only': ['open', 1] }
+for (const [slug, [status, n]] of Object.entries(PHASE_TASKS)) T4(`${slug}.md`, task(status, ['Phase Lab'], `\nphase: ${n}`))
+
 // ---- Running the scan ------------------------------------------------------------------------------------------
 const env = { ...base }
 for (const name of ['GIT_SSH_COMMAND', 'GIT_SSH', 'CLAUDE_PLUGIN_ROOT', 'PYTHONDONTWRITEBYTECODE']) delete env[name]
@@ -259,6 +324,7 @@ const once = (fn) => { let v; return () => (v ??= fn()) }
 const ok = (run) => { assert.equal(run.status, 0, run.stderr); assert.ok(run.json, `no JSON on stdout: ${run.stdout.slice(0, 300)}`); return run.json }
 const online = once(() => scan(V1))
 const offline = once(() => scan(V1, ['--offline']))
+const lab = once(() => scan(V4))
 
 // The snapshot for case 9, taken before the first run: mtime and size of everything under HOME (the repos and
 // their .git included) and the vault.
@@ -311,8 +377,9 @@ test('1. projects: done, archived, area and untagged notes are absent; parked is
   assert.deepEqual(proj(j, 'Repo F').repos, ['~/repos/F'], 'a scalar repos: is one declared repo')
   assert.deepEqual(c.nextTask, { result: 'live', task: 't-open-past', next_action: 'Ship the past task' })
   assert.deepEqual(proj(j, 'Queued One').nextTask, { result: 'blank', task: null, next_action: null })
+  // t-open-past and t-open-future carry `phase: 1`, but membership is the filename prefix `crowned-one-p1-` (case 14).
   assert.deepEqual(c.phases, [{ slug: 'crowned-one-p1-start', note: 'Work/Phases/crowned-one-p1-start.md', status: 'open',
-    phase: 1, openTasks: 2 }])
+    phase: 1, openTasks: 0 }])
   assert.equal(j.counts.projects, 10)
   assert.equal(j.counts.parked, 1)
 })
@@ -444,6 +511,7 @@ test('4. repos: each dispatch blocker, the verifier, the nested path, the separa
 
   const b = repoAt(j, R('B'))
   assert.deepEqual(b.declared, ['~/repos/B/'])
+  assert.equal(b.rolloutRoot, R('B'), 'a declared trailing slash: rolloutRoot is realpath\'d, as path is')
   assert.deepEqual(checks(b.blockers), ['landing-register', 'no-verifier'])
   assert.deepEqual(b.landingRegister, { exit: 3, line: 'listed fixture/b: fixture listing' })
   assert.equal(b.blockers[0].why, 'listed fixture/b: fixture listing')
@@ -452,9 +520,11 @@ test('4. repos: each dispatch blocker, the verifier, the nested path, the separa
 
   const c = repoAt(j, R('C'))
   assert.deepEqual(c.declared, [`${R('C')}/`, '~/repos/C'], 'two spellings of one repo, deduped, both kept')
+  assert.equal(c.rolloutRoot, R('C'))
   assert.deepEqual(c.blockers, [])
   assert.equal(c.unpushed[0].ahead, 1)
   assert.equal(c.unpushed[0].threadOnly, true)
+  assert.equal(c.unpushed[0].contentOnOrigin, false, "THREAD.md's own content is not on origin")
   assert.equal(c.unpushed[0].blocks, false)
   assert.deepEqual(c.verifier, { command: 'npm test', source: 'package.json' })
 
@@ -648,4 +718,87 @@ test('11. usage: an unknown flag is exit 2 with one line, a missing vault exit 3
   assert.equal(j.vault, V1)
   assert.equal(j.deadlineHit, false)
   assert.deepEqual(j.vaultErrors, [])
+})
+
+// ---- 12. The verifier: § 2.5 step 1's section, the agent docs' imports, a live rollout's verifier ------------------
+test("12. verifier: a Verifier or Testing section, an imported AGENTS.md or a Tests: line is the model's to read, no blocker", () => {
+  const j = ok(lab())
+  const SECTION = { command: null, source: 'CLAUDE.md section' }
+  for (const name of ['VV', 'VT', 'VI', 'VL']) {
+    const r = repoAt(j, R(name))
+    assert.deepEqual(r.verifier, SECTION, `${name}: ${JSON.stringify(r.verifier)}`)
+    assert.ok(!checks(r.blockers).includes('no-verifier'), `${name} has no no-verifier blocker`)
+  }
+  assert.deepEqual(repoAt(j, R('VJ')).verifier, { command: 'make verify', source: 'docs/agents.md' },
+    "an imported file's Verifier: line names that file")
+  const vr = repoAt(j, R('VR'))
+  assert.deepEqual(vr.verifier, { command: 'python3 -m unittest discover -s tests', source: `rollout ${RV}` },
+    "a live rollout on the same root gives its verifier: before the section reading")
+  assert.ok(!checks(vr.blockers).includes('no-verifier'))
+  const vn = repoAt(j, R('VN'))
+  assert.equal(vn.verifier, null, 'an import outside the repo is never followed')
+  assert.deepEqual(vn.blockers.filter((b) => b.check === 'no-verifier'),
+    [{ check: 'no-verifier', why: 'no verifier detected (schedule § 2.5)' }])
+})
+
+// ---- 13. Unpushed: content already on origin -----------------------------------------------------------------------
+test('13. unpushed: a commit landed by squash, and one beyond THREAD.md landed by squash, carry contentOnOrigin and do not block', () => {
+  const j = ok(lab())
+  const q = repoAt(j, R('Q'))
+  assert.deepEqual(q.unpushed.map(({ commits, ...u }) => u), [{ clone: R('Q'), ahead: 1, basis: 'remote', touched: ['q.txt'],
+    threadOnly: false, contentOnOrigin: true, blocks: false }])
+  assert.ok(!checks(q.blockers).includes('unpushed-default'))
+  const m = repoAt(j, R('M'))
+  assert.deepEqual(m.unpushed.map(({ commits, ...u }) => u), [{ clone: R('M'), ahead: 1, basis: 'remote',
+    touched: ['THREAD.md', 'm.txt'], threadOnly: false, contentOnOrigin: true, blocks: false }])
+  assert.ok(!checks(m.blockers).includes('unpushed-default'))
+  // Every non-blocking ahead row, here and in V1, carries the reason it does not block.
+  for (const row of [...j.repos, ...ok(online()).repos].flatMap((r) => r.unpushed)) {
+    if (row.ahead && !row.blocks) assert.ok(row.threadOnly || row.contentOnOrigin, JSON.stringify(row))
+  }
+})
+
+// ---- 14. Phase membership: the filename prefix, never the phase: key -----------------------------------------------
+test('14. phases: openTasks counts the open tasks named <slug>-p<N>-, so -p1- never reaches -p10- and 3.5 and 3.50 stay apart', () => {
+  const j = ok(lab())
+  const counts = Object.fromEntries(proj(j, 'Phase Lab').phases.map((p) => [p.slug, p.openTasks]))
+  assert.deepEqual(counts, {
+    'phase-lab-odd': null, // no `-p<N>-` in its name: no members
+    'phase-lab-p1-start': 2, // a and b (b's `phase: 10` is not membership); c is done; plugin-… and t-… never match
+    'phase-lab-p10-later': 1,
+    'phase-lab-p3.5-half': 1,
+    'phase-lab-p3.50-other': 1,
+  })
+  assert.equal(proj(j, 'Phase Lab').phases.find((p) => p.slug === 'phase-lab-p3.50-other').phase, '3.50',
+    'phase is the `phase:` key as written')
+})
+
+// ---- 15. The env scrub when its probe fails --------------------------------------------------------------------------
+test("15. a failed `git rev-parse --local-env-vars` still scrubs a hook's GIT_DIR from every probe", () => {
+  const run = scan(V1, [], { PATH: `${path.join(S, 'shim-noenv')}:${env.PATH}`, GIT_DIR: path.join(R('B'), '.git') })
+  assert.deepEqual(ok(run).repos, ok(online()).repos, 'GIT_DIR never reaches a probe')
+})
+
+// ---- 16. Parity with pushed-base.sh ----------------------------------------------------------------------------------
+// pushed-base.sh is the gate the scan restates: run it on copies of the fixtures (it fetches, so never on the repos
+// the read-only case 9 snapshots) and hold every row's blocks to its exit 3, and each non-blocking reason to its note.
+test('16. parity: the scan blocks exactly where pushed-base.sh exits 3, and names the same reason where it does not', () => {
+  const PUSHED_BASE = path.join(root, 'skills', '_shared', 'scripts', 'pushed-base.sh')
+  const rows = Object.fromEntries([...ok(online()).repos, ...ok(lab()).repos].map((r) => [r.path, r]))
+  // Each fixture's pushed-base exit, and for a non-blocking one the row's reason and pushed-base's note for it.
+  const want = { A: [3], D: [3], C: [0, 'threadOnly', /touching only THREAD\.md: not a blocker/],
+    Q: [0, 'contentOnOrigin', /, but their content is already on origin/],
+    M: [0, 'contentOnOrigin', /beyond THREAD\.md their content is already on origin/] }
+  for (const [name, [exit, reason, note]] of Object.entries(want)) {
+    const copy = path.join(S, 'parity', name)
+    fs.cpSync(R(name), copy, { recursive: true })
+    const r = spawnSync('bash', [PUSHED_BASE, copy, 'main'], { encoding: 'utf8', cwd: S, env, timeout: 60000 })
+    assert.equal(r.status, exit, `${name}: pushed-base exit ${r.status}: ${r.stderr}`)
+    const row = rows[R(name)].unpushed.find((u) => u.clone === R(name))
+    assert.ok(row, `${name} has an unpushed row`)
+    assert.equal(row.blocks, r.status === 3, `${name}: blocks ${row.blocks}, pushed-base exit ${r.status}`)
+    if (row.blocks) continue
+    assert.equal(row[reason], true, `${name}: the non-blocking row names its reason: ${JSON.stringify(row)}`)
+    assert.match(r.stderr, note, name)
+  }
 })
