@@ -349,10 +349,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
 - **Stalled chain** — a serial chain with claimed work and no Leg open: a task
   in progress for a Leg that closed (stopped, or halted and since cleared) or
   never began, and nothing starts the Leg that inherits it. `leg.py status`
-  reports it as `stall` and the chain state `stalled`; `/thread:repair`
+  sets its `stall` field; its chain state reads `stalled` only when no earlier
+  state matches, so a Leg that stopped holding a claim reads `stopped` (and a
+  standing halt `halted`), the `stall` set beside it. `/thread:repair`
   restarts it by starting the next Leg as a new Session, once nothing shows a
-  Session still holding it. An open Leg whose Session died reads live, not
-  stalled, until the Stage shows that Session gone. _Avoid_: hung, frozen.
+  Session still holding it. An open Leg whose Session died reads live, never
+  stalled, until a take-over closes it `lost`: leg.py never reads the Stage,
+  so repair's `list_sessions` check is what finds that Session gone. _Avoid_:
+  hung, frozen.
 - **Surface** — a place a serial chain writes, written as a token in a serial
   note's `surfaces:` (and in a task's own, optional `surfaces:`). Five kinds:
   `repo:<absolute path>` (a filesystem place; overlaps on equality or
