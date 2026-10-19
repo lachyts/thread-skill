@@ -284,7 +284,8 @@ moves remote-tracking refs only: no working tree, branch or HEAD changes. The pr
 of a `close/…` branch deleted on origin, so its commits read stranded, never queued for ever. It runs
 from schedule § 0 with no cited paths, again after schedule's step-2 detection with the cited paths, and
 from execute § 2.7 at entry points only, never per merge, with the paths the not-yet-merged tasks cite
-(`reconcile-rollout.py cited`): `origin/<default>` moves with every merge, and a close-out committed
+(`reconcile-rollout.py cited`; when that call fails, the entry halts instead of passing none, since with no
+cited paths no peer blocks): `origin/<default>` moves with every merge, and a close-out committed
 mid-rollout must not halt an unattended run. merge-task's local refresh reads only the rollout's repo path,
 so it names a commit made there; its in-place refresh (`self-rollout-check.sh --refresh-in-place`) names one
 in a clone-rooted rollout's in-place checkout as `ahead` or `diverged`, and that halts the next entry only

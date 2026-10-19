@@ -161,7 +161,9 @@ never halts and never touches a root rolled out in place before ADR 0042. Then r
 snippet here) against the rollout's `Project root`. Its `<citedPaths>` are the lines of
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py cited --rollout <rollout-note>`,
 each single-quoted: the paths the not-yet-merged tasks cite (their `touches:`, ADR globs, `CONTEXT.md` and
-`~/` paths, never THREAD.md); a non-zero exit there passes none and is a `WARN:` for the report. For
+`~/` paths, never THREAD.md). A non-zero exit there fails closed: the pushed-base check never runs, and the
+entry takes the write-nothing halt below with `reason="pushed-base check failed"`, its stderr printed verbatim.
+Running it with no cited paths instead would let no peer block, so a commit a task needs would pass silently. For
 `<localPath>`, take the rollout's first `projects:` wikilink and resolve it with
 `find ~/repos/obsidian/Work/Projects -name '<Name>.md'`: with exactly one match carrying a `Local:` line,
 use its backticked path; otherwise leave it empty (the marketplace registry still covers the primary
@@ -189,8 +191,9 @@ exactly as for § 2.5.
   clone, and the remedy: land them by PR, or wait for the queued `close/…` landing PR) above the
   ROLLOUT-STATUS line and end the turn with
   `ROLLOUT-STATUS: <slug> merged=<K>/<N> running=<R> state=halted reason="local default branch is ahead of origin"`.
-- **Exit 2** (a fetch or the default-branch lookup failed, a script not found with the root set): the
-  same write-nothing halt with `reason="pushed-base check failed"`. The guard's `pushed-base: /skills/… not
+- **Exit 2** (a fetch or the default-branch lookup failed, a script not found with the root set), or
+  `reconcile-rollout.py cited` exiting non-zero before it: the same write-nothing halt with
+  `reason="pushed-base check failed"`. The guard's `pushed-base: /skills/… not
   found` is no halt: export the root and re-run by `plugin-root.md` rule 4 first.
 - **Any other non-zero exit** (1, 127, …): the same write-nothing halt with
   `reason="pushed-base check failed"`. The gate fails closed on any status it does not define.

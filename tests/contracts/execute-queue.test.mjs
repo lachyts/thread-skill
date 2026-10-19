@@ -647,6 +647,10 @@ function checkExecute({ skill, hooksJson, exists, template }) {
   const ripAt = s5raw.indexOf('self-rollout-check.sh --refresh-in-place <Project root>')
   const logAt = s5raw.indexOf('   - Append a `## Completion log`')
   if (!s27c.includes('reconcile-rollout.py cited --rollout <rollout-note>') ||
+    // A failed `cited` call fails closed: with no cited paths no peer blocks, so passing none would fail open.
+    !s27c.includes('A non-zero exit there fails closed: the pushed-base check never runs, and the entry takes the write-nothing halt below with `reason="pushed-base check failed"`') ||
+    !s27c.includes('or `reconcile-rollout.py cited` exiting non-zero before it: the same write-nothing halt with `reason="pushed-base check failed"`') ||
+    /passes none/.test(s27c) ||
     !before(s27c, 'self-rollout-check.sh --refresh <Project root>', 'Then run the pushed-base check') ||
     !s27c.includes('In a clone-rooted rollout (every rollout scheduled after P26, and every self-rollout), a commit in any other clone of the set') ||
     !s27c.includes('In an in-place-rooted rollout, one in another clone of the set is still named first') ||
@@ -692,6 +696,8 @@ test('control: § 2.7 without the cited paths, or step 5 without the twin refres
   only(sk('reason="launched outside the Project root"`.', 'reason="elsewhere"`.'), 'clone-root', 'no launch gate reason')
   only(sk('`resumeFromRunId` resume or Stage re-send. Repair\'s hand-off (`/thread:repair` § 4) enters the loop past\n§ 2.7, so it runs this snippet itself before it hands off, and on exit 3 stops at its diagnosis with no hand-off,\ntelling Lachy to run `/thread:execute` from the Project root.',
     '`resumeFromRunId` resume, repair hand-off or Stage re-send.'), 'clone-root', "§ 2.8 exempting repair's hand-off")
+  only(sk('A non-zero exit there fails closed: the pushed-base check never runs, and the\nentry takes the write-nothing halt below with `reason="pushed-base check failed"`, its stderr printed verbatim.\nRunning it with no cited paths instead would let no peer block, so a commit a task needs would pass silently.',
+    'A non-zero exit there passes none and is a `WARN:` for the report.'), 'clone-root', 'a failed cited call fails open')
 })
 
 test('control: protocol 3 proceeding fails protocol-5', () => {
