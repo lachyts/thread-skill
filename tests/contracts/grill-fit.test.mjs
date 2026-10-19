@@ -1,15 +1,15 @@
-// The grill-fit check (skills/_shared/grill-fit.md): when orient composes a batch prompt or handoff composes its
-// paste-ready prompt, every fork the cold downstream session could hit is either marked resolvable ("decide X
-// from Y") or gated back to Lachy (grill-me), and a prompt with no forks carries no grill language, meaning no
-// gate lines and no "decide X from Y" lines. The stop at an unforeseen fork and the fork end-line form are
-// standing end-of-run mechanics every batch prompt carries, so they never count as grill language.
+// The grill-fit check (skills/_shared/grill-fit.md): when handoff composes its paste-ready prompt, every fork the
+// cold downstream session could hit is either marked resolvable ("decide X from Y") or gated back to Lachy
+// (grill-me), and a prompt with no forks carries no grill language, meaning no gate lines and no "decide X from Y"
+// lines. Orient composes no cold prompts since ADR 0040 retired its batches (pinned in
+// execution-fit-shapes.test.mjs), so it no longer runs the check.
 //
-// A fork a batch child meets comes back in the one record orient already reads: the run's single mandatory
-// end line, `partial: fork for Lachy: …` naming every fork, which § 2's pinned body read finds. A fork stays
-// open (§ 2 Open forks) until an `orient ruling:` line timed after that end line rules on it: § 5 counts a
-// task with an open fork as unclear, so the reshuffle grill puts the fork to Lachy and writes his ruling into
-// the note, and § 3, § 6, § 7 and § 10 stop holding back or reporting a ruled fork. Handoff's consumer is
-// interactive, so it stops at the fork and asks; a resolvable fork lands in its Context: or Next move: line.
+// Orient still reads what a retired batch left behind: its single end line, `partial: fork for Lachy: …` naming
+// every fork, which § 2's pinned body read finds. A fork stays open (§ 2 Open forks) until an `orient ruling:`
+// line timed after that end line rules on it: § 5 counts a task with an open fork as unclear, so the reshuffle
+// grill puts the fork to Lachy and writes his ruling into the note, and § 3, § 6 and § 7 stop holding back or
+// reporting a ruled fork. Handoff's consumer is interactive, so it stops at the fork and asks; a resolvable fork
+// lands in its Context: or Next move: line.
 //
 // Three pure checks, fragmentFails / orientFails / handoffFails, each returning a failure list: the real files
 // and the controls run through them, so a control proves its check is not vacuous. Every phrase check runs
@@ -23,14 +23,14 @@ const ORIENT = 'skills/orient/SKILL.md'
 const HANDOFF = 'skills/handoff/SKILL.md'
 
 const CITE = '${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md'
-// The fork form of orient's end line: one literal, carried identically by the fragment and orient's
-// End-of-run bullet, so the two homes cannot drift apart unnoticed. A run writes one end line, so each
-// further fork is appended to it (FORK_MORE), never written as a second end line.
+// The fork form of a retired orient batch's end line: one literal, carried identically by the fragment and
+// orient's § 2 Open forks definition, so the two homes cannot drift apart unnoticed. A run wrote one end line, so
+// each further fork is appended to it (FORK_MORE), never written as a second end line.
 const FORK_END = 'partial: fork for Lachy: <fork>; evidence: <…>'
 const FORK_MORE = '`; fork for Lachy: <fork>; evidence: <…>` appended for each further fork'
 // Lachy's ruling on one fork, the line § 5 writes and § 2's definition reads.
 const RULING = 'orient ruling: <fork> → <ruling>'
-// What marks a fork open, restated where it is used (§ 3, § 7, § 10) after the § 2 definition.
+// What marks a fork open, restated where it is used (§ 3, § 7) after the § 2 definition.
 const OPEN = /\(§ 2 Open forks: named by `fork for Lachy` in its latest orient end line, with no `orient ruling:` line for it timed after that end line\)/
 // What "no grill language" means, in both homes: no gate lines and no "decide X from Y" lines.
 const NO_GRILL = /no grill language[^.]*no gate lines and no "decide X from Y" lines/
@@ -55,10 +55,9 @@ function fragmentFails(text) {
   const lines = text.trimEnd().split('\n')
   if (lines.length > MAX_LINES) fails.push(`${FRAG} has ${lines.length} lines (> ${MAX_LINES})`)
   need(fails, FRAG, C(text), [
-    NO_GRILL, /returns to Lachy/i, /resolvable/i, 'decide X from Y',
-    'do NOT spawn a remediation fix task directly', FORK_END, /one end line naming every fork/, /--debrief/,
+    /today handoff § Build the handoff prompt/, NO_GRILL, /returns to Lachy/i, /resolvable/i, 'decide X from Y',
+    'do NOT spawn a remediation fix task directly', FORK_END, /one end line naming every fork/,
     'stops at the fork and asks', /conversation-gated/, /mid-work/, 'ADR 0008',
-    /not grill language: they are standing end-of-run mechanics every orient batch prompt carries, forks or none/,
     /orient § 5\) and writes his ruling into the task note as an `orient ruling:` line/,
   ])
   const quote = collapse(lines.filter((l) => /^>/.test(l)).map((l) => l.replace(/^>\s?/, '')).join(' '))
@@ -69,23 +68,8 @@ function fragmentFails(text) {
 
 function orientFails(text) {
   const fails = []
-  const spec = slice(text, /^\*\*Every batch prompt must carry\*\*/, /^Close the dispatch/)
-  if (!(spec ?? '').split('\n').some((l) => l.startsWith('- **Grill-fit gates**'))) {
-    fails.push('emission spec: no - **Grill-fit gates** bullet')
-  }
-  need(fails, 'Grill-fit gates bullet', C(slice(spec, /^- \*\*Grill-fit gates\*\*/, /^- \*\*/)), [
-    CITE, NO_GRILL, /a fork Lachy already ruled on \(§ 5\) goes in as his ruling/,
-    /not grill language: they are standing end-of-run mechanics every prompt carries, forks or none/,
-  ])
-  const eor = C(slice(text, /^- \*\*End-of-run updates\*\*/, /^- \*\*/))
-  need(fails, 'End-of-run updates bullet', eor, [
-    'orient end: run <Run:>, job <Job:>', FORK_END, FORK_MORE, /the run's single end line names every fork/,
-    'status: open', /a Lachy-owned fork no gate foresaw/, /never resolving the fork or spawning a task for it/,
-  ])
-  if (eor.includes('(one per fork)')) fails.push('End-of-run updates bullet: one end line per fork')
-
   // § 2's pinned body read, taken from the text itself, must find a two-fork end line and a ruling line:
-  // that read is how § 3, § 7 and § 10 tell an open fork from a ruled one.
+  // that read is how § 3 and § 7 tell an open fork from a ruled one.
   const s2 = slice(text, /^### 2\./, /^### 3\./)
   const vault = C(slice(s2, /^- \*\*Vault\*\*/, /^- /))
   const rgs = [...vault.matchAll(/rg -n '([^']+)'/g)].map((m) => new RegExp(m[1]))
@@ -95,9 +79,10 @@ function orientFails(text) {
   else if (!rgs[0].test(endLine)) fails.push(`§ 2 Vault: its run-line rg ${rgs[0]} misses a fork end line`)
   if (!rgs.some((re) => re.test(ruling))) fails.push('§ 2 Vault: no rg body-read pattern finds a ruling line')
   need(fails, '§ 2 Open forks', C(slice(s2, /^- \*\*Open forks\*\*/, /^- /)), [
-    /the one definition; §§ 3, 5, 6, 7 and 10 use it/,
-    `each fork a task's latest orient end line names (\`fork for Lachy: <fork>\`, § 8 End-of-run updates) stays ` +
-      `open until an \`${RULING}\` line in its \`## Notes\`, timed after that end line, rules on it.`,
+    /the one definition; §§ 3, 5, 6 and 7 use it/,
+    FORK_END, FORK_MORE,
+    "each fork a task's latest orient end line names (`fork for Lachy: <fork>`)",
+    `stays open until an \`${RULING}\` line in its \`## Notes\`, timed after that end line, rules on it.`,
     /A ruled fork is decided: it is never reported, excluded or grilled again/,
   ])
 
@@ -113,15 +98,6 @@ function orientFails(text) {
   need(fails, '§ 7 Exclusions', C(slice(text, /^- \*\*Exclusions\*\*/, /^(- \*\*|#{2,4} )/)), [
     OPEN, /counts as conversation-gated at any age/, /until Lachy rules on every open fork in a reshuffle grill \(§ 5\)/,
     /the ruling lines keep it decided/,
-  ])
-  need(fails, '§ 8 step 5', C(slice(text, /^5\. \*\*Collect and accept\.\*\*/, /^\*\*Every batch prompt must carry\*\*/)), [
-    /fork for Lachy/, /never as a follow-up task/,
-  ])
-  need(fails, 'Close the dispatch', C(slice(text, /^Close the dispatch/, /^#### /)), [
-    'fork for Lachy: [[<task>]] <fork> (grill-me)',
-  ])
-  need(fails, '§ 10', C(section(text, /^### 10\./)), [
-    OPEN, /decision for Lachy/, /every open fork with its evidence/, /A ruled fork is not reported again/,
   ])
   if (/orient fork:/.test(text)) fails.push(`${ORIENT}: names an "orient fork:" line kind`)
   return fails
@@ -181,27 +157,16 @@ test('the grill-fit fragment carries the check, the verbatim example, both retur
   assert.deepEqual(fragmentFails(frag), [])
 })
 
-test('orient and handoff both cite the fragment by plugin path', () => {
-  for (const [name, text] of [[ORIENT, orient], [HANDOFF, handoff]]) {
-    assert.ok(text.includes(CITE), `${name} does not cite ${CITE}`)
-  }
+test('handoff cites the fragment by plugin path', () => {
+  assert.ok(handoff.includes(CITE), `${HANDOFF} does not cite ${CITE}`)
 })
 
-test('orient gates forks in every batch prompt, grills each open fork and keeps a ruled fork decided', () => {
+test('orient grills each open fork and keeps a ruled fork decided', () => {
   assert.deepEqual(orientFails(orient), [])
 })
 
 test('handoff runs the check, carries an optional Gates: line, places a resolvable fork and names the fork in What remains', () => {
   assert.deepEqual(handoffFails(handoff), [])
-})
-
-test('control: orient without the Grill-fit gates bullet fails', () => {
-  const lines = orient.split('\n')
-  const i = lines.findIndex((l) => l.startsWith('- **Grill-fit gates**'))
-  assert.ok(i >= 0, 'control precondition: no Grill-fit gates bullet')
-  const j = lines.findIndex((l, k) => k > i && /^- \*\*/.test(l))
-  const cut = [...lines.slice(0, i), ...lines.slice(j)].join('\n')
-  assert.ok(orientFails(cut).some((f) => f.startsWith('emission spec')))
 })
 
 test('control: orient with "fork for Lachy" reduced to "fork" fails', () => {
@@ -229,26 +194,15 @@ test('control: a § 5 that never puts an open fork to Lachy fails', () => {
   assert.ok(orientFails(bad).some((f) => f.startsWith('§ 5')))
 })
 
-test('control: § 3 and § 10 that still report a ruled fork fail', () => {
+test('control: a § 3 that still reports a ruled fork fails', () => {
   const s3 = mutateIn(orient, /^- \*\*Balls in the air\*\*/, /^- \*\*/, 'A ruled fork is not listed.', '')
   assert.ok(orientFails(s3).some((f) => f.startsWith('§ 3')))
-  const s10 = mutateIn(orient, /^### 10\./, /^## /, 'A ruled fork is not reported again.', '')
-  assert.ok(orientFails(s10).some((f) => f.startsWith('§ 10')))
 })
 
-test('control: an End-of-run bullet with one end line per fork fails', () => {
-  const bad = mutateIn(orient, /^- \*\*End-of-run updates\*\*/, /^- \*\*/,
-    `${FORK_END}\`, with \`; fork for Lachy: <fork>; evidence: <…>\` appended for each further fork, so the run's single end line names every fork.`,
-    `${FORK_END}\` (one per fork).`)
-  const fails = orientFails(bad)
-  assert.ok(fails.includes('End-of-run updates bullet: one end line per fork'))
-  assert.ok(fails.some((f) => f.includes(FORK_MORE)))
-})
-
-test('control: a Grill-fit gates bullet that drops the standing-mechanics carve-out fails', () => {
-  const bad = mutateIn(orient, /^- \*\*Grill-fit gates\*\*/, /^- \*\*/,
-    'The stop at a Lachy-owned fork and the fork end-line form are not grill language: they are standing end-of-run mechanics every prompt carries, forks or none (End-of-run updates).', '')
-  assert.ok(orientFails(bad).some((f) => f.startsWith('Grill-fit gates bullet')))
+test('control: an Open forks definition without the appended-forks clause fails', () => {
+  const bad = mutateIn(orient, /^- \*\*Open forks\*\*/, /^(- |#{2,4} )/,
+    ', with `; fork for Lachy: <fork>; evidence: <…>` appended for each further fork', '')
+  assert.ok(orientFails(bad).some((f) => f.startsWith('§ 2 Open forks') && f.includes(FORK_MORE)))
 })
 
 test('control: handoff without the Gates: line fails', () => {
@@ -275,11 +229,9 @@ test('control: the fragment without "no grill language" fails', () => {
   assert.notDeepEqual(fragmentFails(mutate(frag ?? '', 'no grill language', 'no extra wording', 'gi')), [])
 })
 
-test('control: a fragment whose "no grill language" swallows the standing fork mechanics fails', () => {
+test('control: a fragment whose "no grill language" drops "no gate lines" fails', () => {
   const bad = mutate(frag ?? '', 'no gate lines and no "decide X from Y" lines', 'nothing about forks')
   assert.ok(fragmentFails(bad).some((f) => f.includes('no gate lines')))
-  const cut = mutate(frag ?? '', 'are not grill language: they are standing end-of-run mechanics', 'are dropped too:')
-  assert.ok(fragmentFails(cut).some((f) => f.includes('standing end-of-run mechanics')))
 })
 
 test('control: a fragment whose fork end line drifts from orient\'s fails', () => {

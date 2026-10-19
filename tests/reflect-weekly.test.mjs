@@ -912,6 +912,9 @@ test('decide: no task without a rule item; one task for the next Melbourne morni
   for (const line of ['tags: [task, ai, decisions]', 'status: open', 'priority: high', 'scheduled: 2026-09-11', 'captured: 2026-09-10', 'launch: cc-thread']) assert.ok(fm.includes(`\n${line}\n`), line)
   assert.deepEqual(text.split('\n').filter((l) => /^## /.test(l)), ['## Notes', '## Launch', '## Resume prompt', `## Reflection ${RID(1)}`])
   assert.ok(text.includes('Conversation-gated'))
+  // ADR 0040 retired orient's batches: the decision task's note names only schedule and the reshuffle.
+  assert.ok(text.includes('Never schedule or reshuffle it.'))
+  assert.doesNotMatch(text, /batch or reshuffle/)
   assert.ok(text.includes('- **Launch:** `cc-thread`'))
   assert.ok(text.includes('Next move: /thread:reflect --decide [[thread-skill-decisions-2026-09-10]]'))
   assert.doesNotMatch(text, /mark the capture done/)

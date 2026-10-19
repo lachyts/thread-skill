@@ -140,7 +140,7 @@ function check(f) {
   const s2 = section(f.orient, /^### 2\./) ?? ''
   const place = collapse(slice(s2, /^- \*\*Placement\*\*/, /^- /) ?? '')
   if (!place.includes('python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py audit --project "<note>"') ||
-    !place.includes('Report-only') || !place.includes('A scoped target and `--debrief` run none') ||
+    !place.includes('Report-only') || !place.includes('A scoped target runs none') ||
     !place.includes('never a blocker')) fails.push('orient-s2')
   const p3 = collapse(slice(section(f.orient, /^### 3\./) ?? '', /^- \*\*Placement\*\*/, /^- /) ?? '')
   if (!p3.includes('Omit the line on `placement: none`')) fails.push('orient-s3')
@@ -225,7 +225,7 @@ test('each control fails with exactly its rule', () => {
     'ho-home-cwd': e('handoff', ", and `create_thread`'s `cwd` moves with it", '', '**Consumer home.** When the consumer'),
     'life-own': e('life', 'active thread whose THREAD.md lies outside it', 'active thread', '- **Ownership.**'),
     'life-split': e('life', 'Any other active thread → no move', 'Any other active thread moves too', '- **Split launch.**'),
-    'orient-s2': e('orient', 'A scoped target and `--debrief` run none', 'Every target runs it', '- **Placement**'),
+    'orient-s2': e('orient', 'A scoped target runs none', 'Every target runs it', '- **Placement**'),
     'orient-s3': e('orient', 'Omit the line on `placement: none`', 'Always print it', '### 3.'),
     writer: e('writer', '§ Creating a new thread', '§ Repo-thread lookup', '## 6.'),
     'ctx-thread': e('context', '`<repo>/THREAD.md`', '`<repo>/README.md`', '- **THREAD.md** —'),

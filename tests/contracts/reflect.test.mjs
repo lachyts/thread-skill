@@ -14,8 +14,8 @@
 // unrecorded set-aside from what its `explainedIn` names, the standing approval reported and a sign-off traced (p22-7);
 // Lachy's no is recorded; a held trade reaches the decision task, once per (knob id, from), and a yes that cannot
 // apply is answered `moot` (p22-7, w16); step 15 names `{}` for a week with no recurring Watch (p22-7, w15); and the
-// decision task stays out of schedule § 1, the reshuffle's R1 and orient's batches, listed by orient § 2 (the
-// `weekly` rule).
+// decision task stays out of schedule § 1, the reshuffle's R1 and orient § 7's serial rollout, listed by orient
+// § 2 (the `weekly` rule).
 //
 // One pure function, check(files), over { name: text } plus `tree` (the paths under skills/) and `rest` ({ relPath:
 // text } of every other file the retired-name scan reads): the real files and the controls run through it, and each
@@ -234,9 +234,9 @@ function weeklyFails(files) {
   const s15 = collapse(sectionOf(s, /^### 15\. /))
   if (!s15.includes('a decision task only with a rule proposal or a held trade')) out.push('w6')
   const o2 = collapse(sectionOf(files.orient, /^### 2\. Audit/))
-  const o7 = collapse(sectionOf(files.orient, /^### 7\. Batch/))
+  const o7 = collapse(sectionOf(files.orient, /^### 7\. /))
   if (!o2.includes('**Decisions waiting**: an open task tagged `decisions`') || !o2.includes('`/thread:reflect --decide`') ||
-    !o7.includes('The weekly Reflection\'s decision task (tagged `decisions`') || !o7.includes('is conversation-gated and never batched')) out.push('w7')
+    !o7.includes('The weekly Reflection\'s decision task (tagged `decisions`') || !o7.includes('is conversation-gated and never goes into a serial rollout')) out.push('w7')
   const cannot = collapse(sectionOf(s, /^## What the record cannot show$/))
   if (!CANNOT.every((c) => cannot.includes(c))) out.push('w8')
   if (!GRILLS.every((g) => s11.includes(g))) out.push('w9')
@@ -578,7 +578,7 @@ test('control: step 15 writing a decision task without a rule proposal, or not f
 
 test('control: orient § 2 without its decisions bullet, or § 7 without its exclusion, fails weekly (w7)', () => {
   weekly('orient', swap('orient', '- **Decisions waiting**: an open task tagged `decisions`', '- **Decisions**: a task'), 'w7')
-  weekly('orient:batch', swap('orient', 'is conversation-gated and never batched', 'may be batched'), 'w7')
+  weekly('orient:serial', swap('orient', 'is conversation-gated and never goes into a serial rollout', 'may go into a serial rollout'), 'w7')
 })
 
 test('control: a weekly cannot-show line dropped fails weekly (w8)', () => {

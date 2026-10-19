@@ -1549,7 +1549,7 @@ def decision_text(slug, title, scheduled, captured):
         "# %s" % title, "", "## Notes", "",
         "Conversation-gated: the weekly Reflection's rule proposals, Watches to confirm and held trades (a knob ADR 0037 "
         "d1 leaves to Lachy), decided by Lachy at the top of a run through `/thread:reflect --decide [[%s]]`, never "
-        "during one (ADR 0037 d5). Never schedule, batch or reshuffle it." % slug, "",
+        "during one (ADR 0037 d5). Never schedule or reshuffle it." % slug, "",
         "## Launch", "", "- **Launch:** `cc-thread`", "- **MCP:** none", "",
         "## Resume prompt", "", "Paste into a fresh agent session:", "", "```",
         "You're picking up \"%s\", the weekly Reflection's decision task." % title,

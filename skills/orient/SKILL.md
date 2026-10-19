@@ -1,6 +1,6 @@
 ---
 name: orient
-description: 'Pick a project back up and reshuffle it: audit a project/area after time away, re-sort its open work (bugs, brain dumps, loose tasks, unstarted phases), grill what is unclear, write phases and tasks, schedule the rollout-shaped ones and offer to execute. One plan, design note or brain dump becomes phased tasks. Triggers on "orient me on <project>", "where is <project> at overall", "reshuffle <project>", "turn these tasks into a roadmap", "split/break this plan into numbered, phased tasks", "fan out background sessions on <project>", or /thread:orient [target]; --debrief sweeps batches. One thread: thread:next.'
+description: 'Pick a project back up and reshuffle it: audit a project/area after time away, re-sort its open work (bugs, brain dumps, loose tasks, unstarted phases), grill what is unclear, write phases and tasks, route parallel- and serial-shaped work to rollouts and offer to execute. One plan, design note or brain dump becomes phased tasks. Triggers on "orient me on <project>", "where is <project> at overall", "reshuffle <project>", "turn these tasks into a roadmap", "split/break this plan into numbered, phased tasks", or /thread:orient [target]. One thread: thread:next.'
 ---
 
 # /thread:orient — pick a project up and reshuffle it
@@ -10,39 +10,28 @@ answers "what's my move?" for the *current thread*; `orient` answers it for a *w
 area* returned to after time away. It audits the balls in the air, recommends ONE best use of
 Lachy's time, then reshuffles without asking (ADR 0036 d5): `--steer` routes the work as it stands and
 `--look` stops at the audit. A reshuffle re-sorts all the open work, grills what is unclear and writes
-the result at one gate (`reshuffle.md`). Orient then routes by lane:
-it schedules rollout-shaped phases itself, steers the session-lane work (batches dispatched as
-native child agents of this session, a focus item, or both) and ends with the **execute offer**.
+the result at one gate (`reshuffle.md`). Orient then routes by the three-way execution-fit test:
+it schedules parallel-shaped phases itself, steers the serial-shaped and session-lane work (a
+serial rollout, a focus item, or both) and ends with the **execute offer**.
 Pointed at a single plan, design note or brain dump, it runs a **scoped reshuffle** of that note
 alone.
 
-**Contains no route logic of its own** beyond batching, emission and the reshuffle: hands-on focus
+**Contains no route logic of its own** beyond the reshuffle: hands-on focus
 dispatches to `${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` (or the task's own `## Launch` block);
-rollout-shaped phases go to `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md`; the execute offer runs
+parallel- and serial-shaped work go to `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md`; the execute offer runs
 `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` or `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md`,
 or stamps the note for the Stage. None is re-implemented here. The execution-fit test
-(`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`) decides the lane, hard, not as a
+(`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`) decides the lane and shape, hard, not as a
 preference.
 
 **Plugin root.** A command taken from text read as a file (a plugin file this skill sends you to, or this SKILL.md itself when a router or `sed` reads it instead of the Skill tool rendering it) runs by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 
 ## Runtime boundary
 
-The project audit, reshuffle, steering and task-note debrief are shared. Autonomous batches use
-the calling harness's native child tools and current account (ADR 0023: one launch model), never a
-model CLI or a new cmux/Orca model session. The shared exchange at
-`~/repos/workspaces/_shared/scripts/native_workflow.md` supplies journalled claims, native child
-bindings and result validation. Its generic batch engine is `native_workflow_batch.workflow.js`;
-it dispatches already prepared prompts and contains no project/domain workflow.
+Orient's audit, reshuffle and steering are portable, and orient spawns no child agents: ADR 0040
+retired the batches of ADR 0023. Hands-on pickup follows `open`'s contract.
 
-Native children inherit available tools; a target workspace path does not load another MCP
-profile. Before dispatch, check every batch's required capability and account against the calling
-session. If a required scoped capability is absent, retain the prompt and report that batch
-blocked/undispatched. Do not silently switch harness, account or launch a broader profile. Other
-independent batches may proceed. Hands-on pickup follows `open`'s contract.
-
-Rollout-shaped work still goes through schedule and execute's runtime gate. The native exchange does
-not supply execute's detached Stop-hook/heartbeat driver.
+Both rollout shapes go through schedule and execute's runtime gate.
 
 ## Invocation forms
 
@@ -55,17 +44,20 @@ not supply execute's detached Stop-hook/heartbeat driver.
 /thread:orient [[<design, phase or brain-dump note>]]   # scoped reshuffle of that note
 /thread:orient ~/.claude/plans/<plan>.md  # scoped reshuffle of an approved plan file
 /thread:orient "<prose describing the work>"            # scoped reshuffle of inline prose
-/thread:orient Chorus --debrief           # sweep previously dispatched batches (§ 10)
+/thread:orient Chorus --debrief           # retired (§ 10)
 ```
 
 ## Process
 
 ### 1. Resolve the target
 
+**`--debrief` stops first.** When the arguments carry `--debrief`, print § 10's line and stop,
+before the resolver runs: no resolver call, no question, no read and no write.
+
 The target is one project, one area or one note (CONTEXT.md **Target**, ADR 0036), and the resolver
 runs before § 2 reads anything. Quoted prose is a scoped target, as below. Anything else, with
-orient's own flags (`--debrief`, `--steer`, `--look`, and the words "steer only" or "look only")
-removed, goes once to
+orient's own flags (`--steer`, `--look`, and the words "steer only" or "look only") removed, goes
+once to
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/resolve-target.py "<argument>"`, run from the
 session directory. The argument is quoted as one word, so a `[[link]]` never meets the shell's
 globbing; a bare invocation passes none. It prints one JSON object: `outcome` (`resolved`,
@@ -113,17 +105,15 @@ resolved), a `dir_anchor` (the area the directory sits in), a one-line `reason` 
   and every option, taking the first non-empty item of a list-valued `area:`.
 - The registry row (`~/repos/workspaces/_shared/workspace-registry.md`) gives the workspace dir,
   launcher aliases, and project roots. **Areas with no workspace** (Life, 2D, …) get a vault-only
-  audit; dispatch still runs, as native children with whatever the calling session carries, and
-  the registry's launcher aliases are named only for a blocked batch (§ 7 Capability fit). For a
-  project target both apply through its area and feed only §§ 7–8 dispatch.
+  audit.
 - **The learned directory.** The `learn_dir` to hold always comes from the first answer, the
   directory's, and survives everything after it in § 1: the re-ask after he stops a `resolved`
   pick, a typed or `Other` answer, and that answer's re-resolution as an argument, whose own
   `learn_dir` is null. When he lands on a *project*, from the ask, the re-ask or a typed answer,
   hold that `learn_dir` with the project's `note` field: the picked option's, or the re-resolved
   target's `note` when a typed answer resolves to a project. The learn waits for § 4. Nothing is
-  held for an area pick, a confirmed first pick, Look only (`--look`), a scoped target, `--debrief` or a dry
-  run, and a directory with no `learn_dir` is never written back.
+  held for an area pick, a confirmed first pick, Look only (`--look`), a scoped target or a dry run,
+  and a directory with no `learn_dir` is never written back.
 
 A project or scoped target narrows § 2 to that project (§ 2 Scope); an area target keeps the area
 sweep.
@@ -151,11 +141,10 @@ and Drift and the slots for each swept project.
   README note) under the vault folder `Work/Projects/<Folder>/`, at any
   depth; `Work/Tasks/` frontmatter sweep (`rg` for
   `projects:` matching the area or its projects — collect `status`,
-  `priority`, `scheduled`, `due`, `dispatched`, `launch`, `phase`,
-  `rollout`, `tags`, `projects`), plus one body read of those task notes for orient's run lines
-  (`rg -n 'orient (start|dispatch|end): run'`: the start claims, dispatch lines and end lines § 8
-  Double-dispatch guard writes) and a second for Lachy's fork rulings (`rg -n 'orient ruling: '`,
-  the lines § 5 writes); phase notes in `Work/Phases/` for the area's projects. The reshuffle
+  `priority`, `scheduled`, `due`, `launch`, `phase`,
+  `rollout`, `tags`, `projects`), plus one body read of those task notes for orient end lines
+  (`rg -n 'orient end: run'`: the end lines § 2 Open forks reads) and a second for Lachy's fork
+  rulings (`rg -n 'orient ruling: '`, the lines § 5 writes); phase notes in `Work/Phases/` for the area's projects. The reshuffle
   classifies from this sweep; it does not walk the folders again.
 - **Threads**: THREAD.md state lines across the area's project dirs
   (`~/Projects/<Area>/*/THREAD.md`), in `<repo>/THREAD.md` for every repo the target's projects
@@ -170,7 +159,7 @@ and Drift and the slots for each swept project.
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/thread-placement.py audit --project "<note>" [--project "<note>"]…`
   once, with one `--project` per note swept (each its vault-relative path). Keep its summary line, its finding
   lines (`<kind>: <path> — <detail> · fix: <fix>`) and its `unchecked:` lines for § 3. Report-only: it writes
-  nothing, and orient moves no thread on it. A scoped target and `--debrief` run none. A non-zero exit is one
+  nothing, and orient moves no thread on it. A scoped target runs none. A non-zero exit is one
   `thread-placement:` line in § 3, never a blocker.
 - **Declared check** (ADR 0036 d6; CONTEXT.md **Declared check**): for a project target only, run
   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/declared-check.py run "<note>"` once, with
@@ -184,7 +173,7 @@ and Drift and the slots for each swept project.
   also with `timeout: 300000` (it runs the check twice).
   `undeclared` adds nothing. Any other status is its one `audit` line, and a non-zero exit its one
   `declared-check:` line: report it in § 3 and carry on, never a blocker. An area or scoped target
-  and `--debrief` run no check.
+  runs no check.
 - **Related projects**: projects the target's notes link or name, and projects linking the
   target, especially ones `status: parked` or being absorbed by it. Read their unstarted phases
   and loose tasks for overlap with the target's open work (the reshuffle may pull them in).
@@ -193,13 +182,15 @@ and Drift and the slots for each swept project.
   trees also surface aborted-session partial edits worth flagging.
 - **In flight** (the reshuffle's reach tiers use it too): as defined once in
   `${CLAUDE_PLUGIN_ROOT}/skills/_shared/vault-grammar.md` § In flight, which also holds the
-  phase/task filename pattern and the status sets this sweep reads. The orient start claims and end
-  lines it weighs are the run lines the Vault body read finds (§ 8 Double-dispatch guard, rule 1).
-  Report it as such; never re-batch it (§ 7) and never reshuffle it.
-- **Open forks** (the one definition; §§ 3, 5, 6, 7 and 10 use it): each fork a task's latest
-  orient end line names (`fork for Lachy: <fork>`, § 8 End-of-run updates) stays open until an
+  phase/task filename pattern and the status sets this sweep reads. Report it as such; never route
+  it again (§ 6) and never reshuffle it.
+- **Open forks** (the one definition; §§ 3, 5, 6 and 7 use it): each fork a task's latest
+  orient end line names (`fork for Lachy: <fork>`) stays open until an
   `orient ruling: <fork> → <ruling>` line in its `## Notes`, timed after that end line, rules on
-  it. A task with any open fork is blocked on Lachy. A ruled fork is decided: it is never
+  it. The end line is the one orient's retired batches (§ 8) wrote into a task's `## Notes`,
+  `- <UTC ISO> orient end: run <run>, job <job>, partial: fork for Lachy: <fork>; evidence: <…>`,
+  with `; fork for Lachy: <fork>; evidence: <…>` appended for each further fork. A task with any
+  open fork is blocked on Lachy. A ruled fork is decided: it is never
   reported, excluded or grilled again, whatever route the task takes next. A later run's end line
   supersedes the whole set.
 - **Decisions waiting**: an open task tagged `decisions` (the weekly Reflection's decision task,
@@ -212,7 +203,7 @@ A situational report written for Lachy catching up, not a log:
 - **Headline** (1–2 sentences): the state of the project as a whole.
 - **Balls in the air**: per-sub-project one-liners — the slot first
   (`next: <next_action> ([[<task>]])`, or `No next action`), then state,
-  blocker, staleness. Group: active / in-flight (dispatched) / stalled /
+  blocker, staleness. Group: active / in-flight / stalled /
   dormant. An open decision task (§ 2 Decisions waiting) is listed first, as
   blocked on Lachy: its rule proposals and held trades wait for his yes or no. A task with an open fork (§ 2 Open forks: named by `fork for Lachy` in its latest orient
   end line, with no `orient ruling:` line for it timed after that end line) is blocked on his
@@ -242,7 +233,7 @@ the reshuffle (§ 5), which writes nothing before its gate and whose grill he ca
 question. The opt-outs come with the invocation (§ Invocation forms):
 
 - **Steer only** (`--steer`, or "steer only" in the arguments) — no reshaping: route the open work
-  as it stands (§ 6), e.g. to dispatch batches as native child agents of this session.
+  as it stands (§ 6), e.g. to schedule a serial rollout.
 - **Look only** (`--look`, or "look only" in the arguments) — the audit was the deliverable; stop
   after § 3, with no writes of any kind: no drift fixes, no learned directory, no slot write.
 - **An empty shape** (§ 3 Shape: nothing loose, unclear or unphased, and no pull-ins) — nothing to
@@ -286,12 +277,14 @@ open. Steer only skips this step, so its open forks wait for the next Reshuffle.
 
 ### 6. Route
 
-- **Run the execution-fit test** on each phase the reshuffle touched and on each other open
-  cluster, and name its lane. Mixed sets split, as the fit-test doc says.
-- **Rollout-shaped → the rollout lane, scheduled here.** Run
+- **Run the execution-fit test**, three-way, on each phase the reshuffle touched and on each other
+  open cluster, and name its outcome: parallel-shaped, serial-shaped or session lane. Mixed sets
+  split, as the fit-test doc says. Serial-shaped work on the plugin's own repo counts as session
+  lane (the fit doc's ruling (c)).
+- **Parallel-shaped → a parallel rollout, scheduled here.** Run
   `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md` with `--regenerate --tasks <members>`, naming
-  exactly the members of the rollout-shaped phases (or clusters) on that repo: never a bare project
-  run, which would also sweep up misfits, session-lane phases and whatever the grill left
+  exactly the members of the parallel-shaped phases (or clusters) on that repo: never a bare project
+  run, which would also sweep up serial-shaped and session-lane phases and whatever the grill left
   unresolved. A task with an open fork (§ 2) is left out of `--tasks` until Lachy rules on it. A
   scoped target routes only the tasks its own reshuffle wrote. **At most one
   unfinished rollout per repo**, and schedule § 0's unfinished-rollout check enforces it.
@@ -314,20 +307,26 @@ open. Steer only skips this step, so its open forks wait for the next Reshuffle.
     route), then an orient with `--steer` schedules.
 
   Schedule's own § 0 checks can still stop it with a named remedy, which orient reports.
-  Session-lane batches are never offered for rollout-shaped work; orient never re-implements the
+  A serial rollout never takes parallel-shaped work; orient never re-implements the
   merge engine.
-- **Everything else → the session lane.** If any session-lane work is left, steer it with
-  `AskUserQuestion`, recommended option first (informed by the audit — e.g. if almost nothing is
-  parallel-safe, recommend Hands-on):
-  - **Autonomous** — cluster the parallelisable work into batches and dispatch them as native
-    child agents of this session (§§ 7–8), which stays open as their lead until each returns;
-    Lachy stays focused elsewhere. This answer IS the launch authorisation — no per-batch confirm
-    follows (ADR 0023).
+- **Serial-shaped and session-lane work → steer.** If any serial-shaped or session-lane work is
+  left, steer it with `AskUserQuestion`, recommended option first (informed by the audit — e.g.
+  no serial-shaped cluster → recommend Hands-on):
+  - **Autonomous** (offered only when a serial-shaped cluster exists) — schedule the serial-shaped
+    clusters as a serial rollout (§ 7) while Lachy stays focused elsewhere. This answer IS the
+    scheduling authorisation: no per-cluster confirm follows. The execute offer (§ 9) follows any
+    note written, and the session-lane work stays where the reshuffle put it.
   - **Hands-on** — he has time for this project: if the best-focus item has a THREAD.md or capture
     task, run `open`'s pickup logic; else follow the task note's `## Launch` / `## Resume prompt`.
-    No ceremony beyond that.
-  - **Mixed** — dispatch the parallel-safe batches AND hand him the highest-leverage item.
-  - **Not now** — leave the session-lane work where the reshuffle put it.
+    No ceremony beyond that. Serial-shaped clusters stay unstamped.
+  - **Mixed** (offered only when a serial-shaped cluster exists) — hand him the highest-leverage
+    serial-shaped or session-lane item, as Hands-on does, AND schedule the remaining serial-shaped
+    members as a serial rollout (§ 7). The handed item is left out of the serial `--tasks` list,
+    and it is never a task § 6 just stamped.
+  - **Not now** — leave the serial-shaped and session-lane work unstamped where the reshuffle put
+    it.
+
+  With only session-lane work, the options are Hands-on and Not now.
 - **The slot write** (fill-blank only — estate ADR 0008 decision 4), after the steering answer:
   in every mode but Look only or a dry run, when the recommendation is a task note that stays
   open, run
@@ -342,232 +341,48 @@ open. Steer only skips this step, so its open forks wait for the next Reshuffle.
   completes the capture, so the pointer would be dead the moment it landed.
   An ordinary task stays open there and gets the fill like any other.
 
-### 7. Batch (Autonomous / Mixed)
+### 7. Autonomous: a serial rollout
 
-Batching is the session lane — only work that **fails** the execution-fit test
-is batched here (rollout-shaped work already went to schedule in § 6). Cluster the
-dispatchable open work into **parallel-safe batches**:
+Under Autonomous or Mixed, run `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md` with
+`--tasks <members>` **once per project**: each call's members are exactly that project's
+serial-shaped members of the clusters § 6 named, less Mixed's handed item. Each member goes in
+exactly one call, under the first project in its `projects:` that this orient swept, so no call
+spans two projects: schedule's `projects:` filter is strict, and it writes one
+`<project-slug>-rollout` note per project. Never a bare project run. Schedule's serial path decides
+chains and surfaces (ADR 0040). The steering answer authorises every call, and § 9 follows each
+note written. A project with nothing left gets no call, and orient says so.
 
-- **Disjoint surfaces**: no two batches may edit the same files, vault notes,
-  or external surfaces (e.g. the same Webflow page/fields). A shared surface
-  → same batch, or explicit ownership noted in both prompts.
-- **Capability fit**: children inherit this session's tools and account, so
-  match each batch's required MCP namespaces and accounts against the calling
-  session. A batch missing one is **blocked**, never substituted: its prompt
-  file is kept (§ 8 step 1), its tasks stay unstamped and it gets no job. The
-  report names the covering alias from the workspace's
-  `CLAUDE.md § Launch profiles` table or the registry (e.g. SEO work →
-  `cc-animately-seo`) for a hand launch, which still runs the Twin check.
-  Run orient from the narrowest covering profile, because kitchen-sink sets
-  kill fan-out ("Prompt is too long"). That table + the registry are the
-  only config — orient maintains no manifest of its own.
-- **Exclusions**: conversation-gated tasks (need Lachy's input — say so, leave
-  them for Hands-on or the next reshuffle's grill). The weekly Reflection's decision task (tagged
-  `decisions`, § 2 Decisions waiting) is conversation-gated and never batched: Lachy decides it at
-  the top of a run. A task with an open fork (§ 2 Open forks: named
-  by `fork for Lachy` in its latest orient end line, with no `orient ruling:` line for it timed
-  after that end line) counts as conversation-gated at any age: a batch stopped it at a grill-fit
-  fork, and it stays out until Lachy rules on every open fork in a reshuffle grill (§ 5), which
-  writes each ruling into the note. Its next batch prompt carries his rulings, and whatever route
-  the task takes instead (Hands-on, the rollout lane, Not now, a capability-blocked batch), the
-  ruling lines keep it decided. Also excluded: in-flight tasks and tasks a live run covers
-  (§ 8 Double-dispatch guard, rules 1 and 2), found before clustering; work
-  whose playbook demands human sign-off before external effects.
+- **Exclusions** (kept out of every `--tasks`; the fit test already sends most of them to the
+  session lane): conversation-gated tasks (need Lachy's input — say so, leave them for Hands-on or
+  the next reshuffle's grill). The weekly Reflection's decision task (tagged `decisions`, § 2
+  Decisions waiting) is conversation-gated and never goes into a serial rollout: Lachy decides it
+  at the top of a run. A task with an open fork (§ 2 Open forks: named by `fork for Lachy` in its
+  latest orient end line, with no `orient ruling:` line for it timed after that end line) counts
+  as conversation-gated at any age, and it stays out until Lachy rules on every open fork in a
+  reshuffle grill (§ 5), which writes each ruling into the note; whatever route the task takes
+  instead (Hands-on, a parallel rollout, a serial rollout, Not now), the ruling lines keep it
+  decided. Also excluded: in-flight tasks (§ 2). A task whose playbook demands sign-off before
+  external effects goes in with that gate declared (schedule § 3.5), so it is set aside, never run
+  past (ADR 0008, ADR 0034).
+- **Schedule stopped at § 0** → handled as in § 6: report its line and remedy; nothing is stamped.
+- **Interim line.** Until schedule writes serial rollouts, its § 0 answers each all-serial call
+  with `no serial writer yet: nothing stamped` before it resolves any repo. Report that line per
+  call and leave the members unstamped where the reshuffle put them; the next move is Hands-on or
+  a later `/thread:orient <project> --steer`.
+- **Uncommitted grill docs.** § 6's hold applies to any repo a member writes.
 
-### 8. Dispatch the batches
+### 8. Batches (retired)
 
-Each batch runs as a native child agent of this session (ADR 0023) through the shared exchange
-(§ Runtime boundary). For each dispatch:
-
-1. **Home, run dir and `issued:`.** Resolve the area's home, run the Double-dispatch guard's rule 2
-   Ignored check from its anchor, then `mkdir -p <home>`. Pick a free run dir name (rule 2 Names);
-   orient never creates the run dir. Take `issued:` once, at whole seconds:
-   `date -u +%Y-%m-%dT%H:%M:%SZ` (UTC, no fraction, the form the Twin check's `touch -d` takes on
-   BSD and GNU alike). Re-read every covered note against rule 1 and run rule 2's lookup, dropping
-   what they catch, so nothing that landed since the audit slips in under the new `issued:`. Write
-   each prompt, header first, to its unique `<home>/<YYYY-MM-DD>-<batch-slug>-prompt.txt`; a
-   capability-blocked batch's prompt is kept the same way.
-2. **Tier, capability and jobs.** Read the operator's ladder with
-   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/_shared/scripts/ladder.py` (ADR 0029). Its last rung is
-   the top, and every job names that rung's `model` and `effort`, so no child inherits a default
-   silently. A refused ladder (non-zero exit) blocks every batch; report its stderr line. Run the
-   capability and ownership check (§ 7 Capability fit). Assemble `args.jobs` for the supported
-   batches as
-   `{ key: <batch-slug>, prompt: <full prompt>, options: { model: <top model>, effort: <top effort> } }`
-   and run `init` once, on the free run dir name, with `native_workflow_batch.workflow.js`, with
-   `SKILL_CALLER_HARNESS`/`SKILL_CALLER_SESSION` set to this session (`$CLAUDE_CODE_SESSION_ID` on
-   Claude) and config `{ "models": { "<top model>": { "model": "<native model>" } } }`.
-3. **Claim, spawn, bind.** `advance`, then `claim` a pending request (the pre-spawn lock), then
-   spawn a clean native child with the request's exact prompt, model and effort, then `bind` the
-   returned child ID at once. The spawn must return the child's ID before the child works: on
-   Claude, an Agent call with `run_in_background: true`, never a foreground call, whose ID comes
-   back only after the child has run and written its end line. One spawn per message, since rule 3
-   stamps before the next spawn. A harness with no such spawn cannot dispatch: every batch is
-   blocked. Where the harness has no per-child effort control, the report says the effort was
-   inherited. Children and all their nested agents and reviewers stay in this harness and account.
-4. **Stamp after bind** (rule 3), before the next spawn. A claim without a bound child is never
-   stamped. Respect available concurrency; queue excess batches without launching another model
-   process.
-5. **Collect and accept.** This session is the lead and stays open until every child returns:
-   collect its output, `accept` its envelope, `advance`. Recover an interrupted child rather than
-   clearing its claim. Report each batch as running, complete or blocked, with its native ID and
-   run dir. Every fork a child reports (in its result or its `fork for Lachy` end line) goes to
-   Lachy as a decision (grill-me) in that batch's close-out line, never as a follow-up task spawned
-   on his behalf.
-
-**Every batch prompt must carry** (the emission spec):
-
-- **Header** — the prompt opens with one line each: `Dispatch:` (the lead's local date),
-  `issued:` (step 1's UTC time, whole seconds), `Run:` (the run dir's absolute path), `Job:`
-  (the batch slug), `Lead:` (`<harness> <config dir> <peer name> [<ref>]` from the lead's own
-  peer-list header, or `<harness> <config dir> <session ID> (no peer ref)`; the config dir is
-  `${CLAUDE_CONFIG_DIR:-$HOME/.claude}` on Claude, the same expression `reconcile-rollout.py`
-  uses, or `${CODEX_HOME:-$HOME/.codex}` on Codex), `Covers:` (task-note paths) and `Owns:` (repo
-  paths and external surfaces, never a `Covers:` note). Times are UTC ISO with `Z` and compare as
-  instants; `Dispatch:` and `dispatched:` are local dates and compare only with each other or a
-  date-only progress line.
-- **Execute-directly framing** — this is a worklist to run, not a plan to
-  grill or re-scope. Name the concrete tasks and their notes.
-- **Preflight** — verify the batch's required MCP namespaces and accounts are
-  present among the tools inherited from the lead session, and make one cheap
-  authenticated call each; missing/unauthenticated → STOP and report blocked
-  (same guard as task-writer § 5).
-- **Twin check, then reconcile — before the first edit.**
-  1. Re-read every `Covers:` note.
-  2. STOP and report, with no edits, on any live-twin signal in them: a start claim timed after
-     `issued:`, whatever run it names; a dispatch line timed after `issued:` that names another run
-     or job; a bare `dispatched:` (no dispatch line in the note) dated after `Dispatch:`; a progress
-     line timed after `issued:`, or a date-only one dated after `Dispatch:`; or, where the harness
-     offers a peer list (e.g. `ListAgents`), a live peer other than this child and its `Lead:` that
-     names a covered task or this job. The lead's own stamp is never a signal: the dispatch line
-     naming this prompt's own `Run:` and `Job:`, and the `dispatched:` written with it.
-  3. Probe `Owns:` only, never a `Covers:` note (step 2 reads those, and the lead's stamp edits them
-     after `issued:`). Stamp a reference file at `issued:` (`ref=$(mktemp)`, then
-     `touch -d <issued:> "$ref"`) and, for each owned path that exists, run
-     `find -H <path> -path '*/.git' -prune -o -newer "$ref" -print`: BSD and GNU `find` both take
-     `-H` and `-newer`, where macOS `find` cannot parse `issued:` as a date. `-H` follows an owned
-     path that is a symlink to a directory, which the default walk examines only as the link, and
-     the prune skips `.git/`, whose index any `git status` rewrites. If that lists anything, or,
-     inside a git work tree, `git status --porcelain -- <path>` shows the path deleted, or, in a
-     code repository (never the Obsidian vault, whose backup sweep commits older edits late),
-     `git log --all --since=<issued:> -- <path>` lists a commit, another session is live on it:
-     STOP. A probe that errors (`touch`, `find` or a git probe exits non-zero) is a STOP too: a
-     probe with no answer never reads as "nothing newer". Once the probes have run, STOP or not,
-     `rm -f "$ref"`. A dirty owned path none of these flags was
-     modified only before `issued:`: an aborted partial, which you reconcile by building on it or
-     reporting it, never by `checkout`, `reset`, `clean` or `stash`.
-  4. Write a one-line start claim into each `Covers:` note's `## Notes` before editing anything:
-     `- <UTC ISO> orient start: run <Run:>, job <Job:>, child <your ID, or unknown>`.
-- **Domain playbook gates** — staging-first, confirm-before-publish, and any
-  domain-specific sign-off rules from the workspace's playbooks. No Linear
-  filing unless the active profile carries a Linear server.
-- **Grill-fit gates** — run `${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` over the batch's
-  work: a fork the child can settle from code or data is written as "decide X from Y", a Lachy
-  decision gets a gate line, and a fork Lachy already ruled on (§ 5) goes in as his ruling. A
-  batch with no forks carries no grill language, meaning no gate lines and no "decide X from Y"
-  lines. The stop at a Lachy-owned fork and the fork end-line form are not grill language: they are
-  standing end-of-run mechanics every prompt carries, forks or none (End-of-run updates).
-- **Cross-batch coordination** — name any shared surfaces and who owns them;
-  check task-note progress stamps before editing anything another batch might
-  own.
-- **End-of-run updates** — update each covered task note per TaskNotes
-  conventions (status/progress stamp, superseding `dispatched:`), so a later
-  orient run or `--debrief` reads the truth from the notes, and add the
-  mandatory end line
-  `- <UTC ISO> orient end: run <Run:>, job <Job:>, <done | blocked: … | partial: …>` to its
-  `## Notes`. It is the only record if the lead ends before collecting. At a gate line, or at a
-  Lachy-owned fork no gate foresaw, the child stops that task, never resolving the fork or spawning
-  a task for it. The task stays `status: open` (never `done`, nor `in-progress`, which § 2 reads as
-  in flight), and its end line ends `partial: fork for Lachy: <fork>; evidence: <…>`, with
-  `; fork for Lachy: <fork>; evidence: <…>` appended for each further fork, so the run's single
-  end line names every fork. The child's result names them too.
-- **Execution context** — identify the canonical workspace, project and required
-  authenticated tools. Native tools come from the parent session. Isolate code
-  edits in worktrees where needed; do not expect a worktree to load MCP profiles.
-
-Close the dispatch with one line per batch: native child ID, batch title, tasks
-covered, the model and effort as spawned (or "effort inherited"), and
-verified-running, completed or blocked, plus `fork for Lachy: [[<task>]] <fork> (grill-me)` for
-each fork it reported.
-
-#### Double-dispatch guard
-
-One batch lands once (ADR 0023). Four rules hold it at both ends, orient's dispatch and each
-child's preflight:
-
-1. **In flight stays out.** A task with a `dispatched:` stamp or an orient start claim ≤7 days old
-   is in flight (§ 2, whose Vault body read finds the claims) unless an end line in the note names
-   the same run and job (a stamp's run and job are its dispatch line's), wherever that line sits:
-   run dirs are unique and never reused, so the order the lines were written in never matters, and
-   an end line written before a late stamp still settles the task. In flight, it is excluded and
-   reported. It is re-dispatched only by the **override**, the one sequence used everywhere:
-   1. Lachy names the task in the steering answer.
-   2. Rule 2's lookup runs.
-   3. If a run in flight elsewhere (b) covers the task, orient reports
-      `in flight in <run dir>, lead <Lead:>, last activity <UTC>` and dispatches nothing for it.
-   4. Lachy names it again.
-   5. Orient dispatches it in a new run dir and writes `override of <prior run dir>` into its
-      report and the dispatch line.
-
-   With no run in flight elsewhere, naming the task once is enough. An own run (a) is recovered,
-   never overridden.
-2. **One unique run dir per dispatch, and a lookup before `init`.**
-   - **Home.** `<workspace>/.scratch/orient/`, or
-     `~/repos/workspaces/_shared/.scratch/orient/<area-slug>/` for an area with no workspace (the
-     area name lowercased, other runs of characters as `-`). One home per area holds all its
-     prompt files and run dirs.
-   - **Ignored.** Check from the anchor, which always exists: the workspace root, or
-     `~/repos/workspaces/_shared` for an area home. Never `git -C <home>`: it exits 128 while the
-     home does not exist yet. If `git -C <anchor> rev-parse --is-inside-work-tree` prints `true`,
-     `git -C <anchor> check-ignore -q <home below the anchor>/runs/x/run.json` must exit 0;
-     otherwise every batch is blocked, the missing `.gitignore` line is named and nothing is
-     written. An anchor outside a git work tree needs no check. Orient never edits `.gitignore`.
-     Once the check passes, `mkdir -p <home>` for the prompt files.
-   - **Names.** The run dir is `<home>/runs/<YYYY-MM-DD>-<dispatch-slug>/` and the prompt file
-     `<home>/<YYYY-MM-DD>-<batch-slug>-prompt.txt`; when one already exists, append `-2`, `-3`, …
-     until it does not. An existing run dir or prompt file is never reused or overwritten. Orient
-     only checks that the run dir's name is free and never creates the run dir: `init` makes it
-     private (mode 700) and refuses one that is not. Job keys are the batch slugs.
-   - **Read.** Before `init`, read every `<home>/runs/*/run.json` as data (none while `runs/` is
-     absent). A job's requests are those whose `options.label` equals its key; `requests[].key` is
-     an engine path and is never matched.
-   - **Request states.** A job with no request, or only `pending` ones, was never claimed;
-     `claimed` or `dispatched` is live; `accepted`, `interrupted`, `blocked` or `denied` is
-     settled, and a settled job never blocks.
-   - **Overlap.** A run overlaps a new batch when its `status` is not `complete` and one of its
-     unsettled jobs has the batch's key or a `Covers:` line (in its stored prompt) naming a task
-     note the batch covers. Each overlapping run is one of three:
-   - **(a) Own** (its `caller` is this harness and session): `status`, recover each ambiguous
-     claim by inspecting this session's native children and binding the actual child, then
-     `advance`. Never a second `init`, never a replacement spawn.
-   - **(b) In flight elsewhere.** When this session has a peer list, runs under the config dir the
-     run's `Lead:` line records, and that line carries a ref, the peer list decides: a listed ref
-     is a live lead and the run is in flight; a missing one is gone. A peer list shows only its
-     own config dir's sessions, so in every other case (no peer list, no ref, another config dir:
-     a Codex lead, a pre-0023 run, another profile) the clock decides: an unsettled job is live
-     and the run's newest activity (`events[].at`, plus the start claims, dispatch lines and
-     progress lines in the covered notes) is ≤7 days old, or the run never claimed and its newest
-     event is under an hour old. Its covered tasks are excluded and reported until rule 1's
-     override.
-   - **(c) Abandoned** (neither): reported, and it stops blocking. Its stamped or start-claimed
-     tasks stay in flight under rule 1 for their 7 days: an abandoned verdict never frees work on
-     its own before that window.
-
-   Never call a helper on, edit, move or advance a foreign run: the exchange refuses another
-   caller, and its own lead may still be collecting.
-3. **Stamp right after bind.** Immediately after a batch's `bind`, before the next spawn, write in
-   one edit of each covered note the frontmatter `dispatched: <YYYY-MM-DD>` (local date) and the
-   `## Notes` line
-   `- <UTC ISO> orient dispatch: run <Run:>, job <key>, child <ID>, lead <Lead:>, model <model>, effort <effort>`.
-   A note that already holds this run and job's end line gets no stamp: its child finished first,
-   and its end-of-run update stands. Stamping before the spawn would mark unlaunched work as in
-   flight; the journal claim is the pre-spawn lock.
-4. **Every prompt carries the Twin check** (the emission spec), so a second paste or a re-run of a
-   prompt stops before its first edit.
+ADR 0040 retired orient's child-agent batches (ADR 0023): orient spawns no child and writes no
+prompt file, run journal, start claim, dispatch line or frontmatter stamp for one. `dispatched:`
+stamps and orient run lines already in task notes are inert history: § 2 In flight no longer reads
+them, though an end line with an open fork still counts (§ 2 Open forks). Old run directories under
+`.scratch/orient/` are left alone.
 
 ### 9. The execute offer
 
-When § 6 wrote a rollout note, end with `AskUserQuestion`, recommended option first:
+When § 6 or § 7 wrote a rollout note, end with `AskUserQuestion`, recommended option first, one
+offer per note written:
 
 - **Fresh session** (recommended after a reshuffle, which has filled this context) — run
   `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md` with its usual home (never a commit on the
@@ -579,72 +394,42 @@ When § 6 wrote a rollout note, end with `AskUserQuestion`, recommended option f
   session, when the reshuffle was small and this session was launched in the target repo.
 - **Not yet** — name the rollout note and the `/thread:execute [[<rollout>]]` line, and stop.
 - **Start when ready** — stamp `start: unattended` as a top-level frontmatter line just below
-  `status:` on the rollout note § 6 wrote (`_shared/vault-grammar.md` § Rollout start stamp), then
+  `status:` on the rollout note § 6 or § 7 wrote (`_shared/vault-grammar.md` § Rollout start stamp), then
   end: nothing runs here and no handoff is made. Print the note, the `/thread:execute [[<rollout>]]`
   line (still valid by hand) and one line: the Chorus Stage starts a lead in its Project root once
   the note is runnable, and that lead's first `next` clears the stamp. It suits a run nobody will be
   there to start (the evening, a landing PR still queued). Outside a Chorus Stage nothing acts on the
   stamp, so it waits like Not yet.
 
-Execute's own runtime gate still applies wherever it runs. No rollout written → no offer; § 6
-names why (a running or blocked rollout, uncommitted grill docs, a schedule blocker).
+Execute's own runtime gate still applies wherever it runs. No rollout written → no offer; § 6 or
+§ 7 names why (a running or blocked rollout, uncommitted grill docs, a schedule blocker, or
+schedule's `no serial writer yet: nothing stamped` stop).
 
-### 10. `--debrief`
+### 10. `--debrief` (retired)
 
-`/thread:orient <target> --debrief` skips the reshuffle and steering and runs the recovery sweep:
-
-- **Runs.** Classify every run under the area's home as § 8 Double-dispatch guard rule 2 does. An
-  own run (this session's ID: a lead resumed with `claude --resume <id>` keeps its ID, a
-  `--fork-session` copy does not) is recovered here: `status`, recover ambiguous claims, collect
-  and `accept`, `advance`. A foreign run is reported in flight or abandoned, read-only: only its
-  own lead can accept its envelopes, so a dead lead's uncollected envelopes are lost and the
-  children's end lines in the task notes are the record.
-- **Notes.** Sweep the area's stamped and start-claimed task notes (§ 2's Vault sweep and its body
-  read) and report per batch: completed, stalled or never launched. Clear a `dispatched:` stamp
-  only when it is settled, meaning an end line names its dispatch line's run and job, in any order
-  (rule 1), or stale: older than 7 days with no progress line, or, at any age, never launched,
-  meaning its dispatch line names a run whose journal exists and records no bound child
-  (`childId`) for its job. A stamp with no dispatch line, or whose named journal is missing (a hand
-  launch, a pre-0023 stamp), is unknown, never "never launched", and keeps its 7 days. An
-  unsettled stamp inside its 7 days stays, an abandoned run's included. A task with an open fork
-  (§ 2 Open forks: named by `fork for Lachy` in its latest orient end line, with no
-  `orient ruling:` line for it timed after that end line) is reported as a decision for Lachy
-  (grill-me), every open fork with its evidence, never as completed work or a task to spawn. A
-  ruled fork is not reported again.
-
-A fresh `/thread:orient` audit is the lightweight version of this.
+`/thread:orient <target> --debrief` stops at the top of § 1, before the resolver runs or anything
+is asked, and prints
+`--debrief is retired (ADR 0040): orient dispatches no batches; run /thread:orient <target>`, with
+`<target>` replaced by the arguments as given, less `--debrief` (nothing when no other argument was
+given). It resolves, asks, reads and writes nothing.
 
 ## Don't
 
-- **Do not pretend native children load a different profile.** Check required
-  tools in the calling session; missing dependencies block that batch.
-- **Don't ask a second launch confirmation.** The steering answer authorises
-  the launch (ADR 0023); composing batches and firing them is mechanics.
-- **Don't dispatch from a full-profile session.** The lead's profile is its
-  children's profile, and kitchen-sink MCP sets kill sub-agent fan-out ("Prompt
-  is too long"): run orient from the narrowest profile that covers the batches.
-- **Do not substitute another harness or account.** Native child dispatch is the
-  default; absent capabilities are reported instead of shelling out to a model.
 - **Don't turn a reported fork into a task.** A `fork for Lachy` end line is Lachy's decision
-  (grill-me): § 3, the close-out and `--debrief` surface it, § 5's grill puts it to him, and § 6
-  and § 7 hold the task back until he rules. Nothing spawns a task for it: his ruling, written
-  into the note as an `orient ruling:` line, is what decides it.
-- **Don't re-batch in-flight work** (§ 2, § 8 Double-dispatch guard): only the
-  two-step naming override re-dispatches it. Don't stamp or write anything —
+  (grill-me): § 3 surfaces it, § 5's grill puts it to him, and § 6 and § 7 hold the task back
+  until he rules. Nothing spawns a task for it: his ruling, written into the note as an
+  `orient ruling:` line, is what decides it.
+- **Don't route in-flight work again** (§ 2). Don't stamp or write anything —
   the slot write included — in Look only or dry runs.
-- **Don't adopt another session's run journal.** Read it as data; never
-  `status`, `advance`, edit or move it. Don't create a run dir, or reuse or
-  overwrite an existing run dir or prompt file.
 - **Don't reshuffle in-flight work.** Its scope, phase and body are frozen; only new members may
   join its phase (`reshuffle.md` R1).
 - **Don't write before the reshuffle's gate**, drift fixes and the learned `repos:` entry (§ 4) aside.
 - **Don't recommend more than one focus item**, and don't pad the audit —
   headline, balls in the air, drift, shape, one recommendation, then the reshuffle (§ 4).
 - **Don't re-implement siblings or the engine.** Hands-on focus runs `open`'s
-  logic; rollout-shaped work goes to schedule (the execution-fit test
-  decides, hard); execute runs only through the execute offer; batch clusters never grow a merge
-  engine here.
-- **Don't batch a rollout-shaped cluster**, and don't schedule a bare project run (always `--tasks`).
+  logic; parallel- and serial-shaped work go to schedule (the execution-fit test
+  decides, hard); execute runs only through the execute offer.
+- **Don't put parallel-shaped work in a serial rollout**, and don't schedule a bare project run (always `--tasks`).
 - **Never a second unfinished rollout per repo, and never another rollout's lifecycle**: schedule
   § 0 supersedes only what its unfinished-rollout check allows (this project's, paused or never
   started); anything else waits (§ 6).

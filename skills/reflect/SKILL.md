@@ -284,9 +284,9 @@ For each rollout, read its `friction` items, of seven kinds (`ask`, `set-aside`,
   mid-run ask. A mid-run ask is traced to the grill that should have asked it before the run: orient § 5
   (Reshuffle), where `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § R2 (Sort and propose) sorted the task
   clear, or where `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § R3 (Grill the unclear) never put the fork
-  to Lachy; `${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` § How a fork comes back, where the batch prompt
-  routed no gate; orient § 7 (Batch), where a conversation-gated task entered a batch; and, only for spend, a
-  credential or an irreversible action, schedule § 3.5 (Detect human/release gates) or schedule § 3.6 (Sweep for
+  to Lachy; `${CLAUDE_PLUGIN_ROOT}/skills/_shared/grill-fit.md` § How a fork comes back, where a cold prompt
+  routed no gate; orient § 7 (Autonomous), where a conversation-gated task entered a serial rollout; and, only for
+  spend, a credential or an irreversible action, schedule § 3.5 (Detect human/release gates) or schedule § 3.6 (Sweep for
   gated-input smell), or `${CLAUDE_PLUGIN_ROOT}/skills/orient/reshuffle.md` § R3 (Grill the unclear), item (c),
   asked ahead. An ask whose `askedAhead` is true was asked at the top and still came back: trace why the answer
   did not hold. span reads each ask from the record in the week it happened, on a landed task or one still waiting
@@ -531,5 +531,5 @@ or `exists`). An item left open keeps the task open.
 - Don't re-run step 10 after a write: a new span is a new Reflection.
 - Never overwrite or edit a done task: reflect.py creates a note by exclusive create and refuses a taken path.
 - Never write a close line from the weekly reading: `--close` is close-score.py's alone (ADR 0037 d4).
-- Never decide a rule item or a held trade during a run (the weekly reading never `--pick`s), and never schedule,
-  batch or reshuffle the decision task.
+- Never decide a rule item or a held trade during a run (the weekly reading never `--pick`s), and never schedule
+  or reshuffle the decision task.

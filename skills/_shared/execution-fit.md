@@ -1,53 +1,75 @@
-# The execution-fit test — which lane owns a cluster
+# The execution-fit test — which lane and shape own a cluster
 
-One system, two dispatch lanes. Every cluster of open tasks gets exactly one:
+One system, two lanes, three outcomes. Every cluster of open tasks gets exactly one:
 
-- **The rollout lane** (`/thread:schedule` → `/thread:execute`): worktrees, PRs,
-  the three-layer convergence engine, Integration and auto-merge.
-- **The session lane**: scoped sessions dispatched by calendar and attention —
-  `defer` (`scheduled:` dates do the dispatch), a task's `## Launch` block via
-  `open`, or orient's parallel-safe native batches (ADR 0023).
+- **The rollout lane**: unattended work run from a rollout note (`/thread:schedule` →
+  `/thread:execute`), in two shapes (ADR 0040):
+  - a **parallel rollout**: worktrees, a PR per task, the three-layer convergence engine,
+    Integration and auto-merge;
+  - a **serial rollout**: a chain of Legs working its tasks one at a time.
+- **The session lane**: work that needs Lachy present or waits on a date, dispatched by calendar
+  and attention — `defer` (`scheduled:` dates do the dispatch), or a task's `## Launch` block via
+  `open`.
 
 **Plugin root.** This spec is read as a file, never rendered: run its commands by `${CLAUDE_PLUGIN_ROOT}/skills/_shared/plugin-root.md`.
 
-**The test decides, hard.** It is not a preference and not a count. A cluster is
-**rollout-shaped** when all three hold:
+**The test decides, hard.** It is not a preference and not a count. It runs in order, and the
+first outcome that holds wins:
 
-1. **One repo** — the tasks converge on ONE code repository.
-2. **PR-per-task** — each task lands as an independently-shippable PR.
-3. **In-run verification** — success is machine-checkable inside the run
-   (tests / build / greps), not days later.
+1. **Session lane** — any one of these sends a task there:
+   - It is conversation-gated: it needs Lachy present, for input before an agent can act
+     (task-writer § 5 notes this in the body).
+   - Its ordering constraint is a measurement window or calendar date, not file overlap. The
+     engine's parallelism is forbidden by isolation windows, and the queue cannot see a window
+     or calendar constraint.
+   - Its verification only arrives days or weeks later (impact measures): nothing inside a run
+     can verify it.
+2. **Parallel-shaped** — all three clauses below hold, its core action is not an external publish,
+   and it needs no external tool or launch profile the lead lacks (a parallel rollout's agents run
+   on the lead session's tools):
+   1. **One repo** — the tasks converge on ONE code repository.
+   2. **PR-per-task** — each task lands as an independently-shippable PR.
+   3. **In-run verification** — success is machine-checkable inside the run
+      (tests / build / greps), not days later.
 
-Rollout-shaped → the rollout lane, even for a single task: a one-task rollout still
-buys the plan gate, the verifier retry loop, the master review, and auto-merge —
-autonomous convergence on one PR. Not rollout-shaped → the session lane; a rollout
-buys nothing there.
+   Parallel-shaped → a parallel rollout, even for a single task: a one-task rollout still buys
+   the plan gate, the verifier retry loop, the master review, and auto-merge — autonomous
+   convergence on one PR.
+3. **Serial-shaped** — everything else an agent can finish unattended:
+   - a parallel clause fails: no PR per task (vault notes, or work spread over several repos), or
+     no machine check inside the run;
+   - its core action is an external publish (CMS, live site, DNS, config console);
+   - it needs an external tool or launch profile the lead lacks.
 
-**Signs a task is NOT rollout-shaped** (any one disqualifies it):
+   A shared surface, or tasks that build on each other, make work serial-shaped only when one of
+   these already holds: a parallel rollout orders dependent same-repo tasks itself (`depends-on:`,
+   Solo). Serial-shaped → a serial rollout.
 
-- Its core action is an external publish — CMS, live site, DNS, config console.
-  (An external publish is an irreversible or credential gate, so it always
-  stops its task for Lachy's sign-off and never passes the standing approval —
-  ADR 0008, ADR 0034; execute § 3.7.)
-- Its ordering constraint is a measurement window or calendar date, not file
-  overlap. The engine's parallelism is forbidden by isolation windows, and
-  the queue cannot see a window or calendar constraint.
-- Its verification only arrives days or weeks later (impact measures) — the
-  verifier loop has nothing to verify inside the run.
-- It is conversation-gated: it needs Lachy's input before an agent can act
-  (task-writer § 5 notes this in the body).
+**Rulings** (2026-10-19, ADR 0040 and the P24 plan review):
 
-**Mixed sets split.** The rollout-shaped subset rolls out; the misfits stay
-unstamped in the session lane. Name the split when reporting.
+- (a) **An external publish is serial-shaped**, never parallel-shaped, even in one repo with a PR
+  per task. It is an irreversible or credential gate: the gate sets the task aside for Lachy's
+  sign-off while the chain goes on, and never passes the standing approval (ADR 0008, ADR 0034;
+  execute § 3.7). A publish that needs him in the conversation is conversation-gated, so it is
+  session lane.
+- (b) A measurement window or delayed verification **waits on a date**, so it is session lane.
+- (c) **No serial self-rollouts.** Serial-shaped work for the plugin's own repo (any checkout of
+  `lachyts/thread-skill`) goes to the session lane. Its clone belongs to the parallel
+  self-rollout (ADR 0031, ADR 0042). Orient § 6 applies this ruling now, before it calls schedule;
+  schedule's serial path (p24-2) will enforce it. Until then schedule § 0 stops an all-serial set
+  before it resolves the repo, so it cannot tell the plugin's own repo there.
+
+**Mixed sets split.** The parallel-shaped subset becomes a parallel rollout, the serial-shaped
+subset a serial rollout, and session-lane members stay unstamped. Name the split when reporting.
 
 **Count is never a criterion.** There is no minimum rollout size — shape
 decides, not size. (Decided 2026-08-12, ADR 0009; supersedes schedule's old
 "<3 tasks" floor.)
 
-## Dispatch blockers — rollout-shaped but not yet runnable
+## Dispatch blockers — parallel-shaped but not yet runnable
 
-A cluster that fails a blocker is **still rollout-shaped**: do not route it to the
-session lane. schedule § 0 runs these checks; callers that read this file
+A cluster that fails a blocker is **still parallel-shaped**: do not route it to the
+session lane or a serial rollout. schedule § 0 runs these checks; callers that read this file
 for the fit test route through schedule rather than checking themselves. The
 schedule gate stops before anything is written (no task stamped, no rollout
 note, no heartbeat) and names the remedy. Fix the blocker, then schedule again.

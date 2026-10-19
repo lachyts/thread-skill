@@ -6,9 +6,13 @@ Claude Code plugin, twelve skills, two lanes. The **continuity verbs** solve
 **rollout verbs** run large multi-PR changes as a queue of tasks on a
 convergence engine, each integrated with the latest main before it merges. One
 rule connects them: the **execution-fit test** (`skills/_shared/execution-fit.md`)
-decides which lane owns a cluster — hard, never as a preference. Rollout-shaped
-work (one repo, PR-per-task, machine-verifiable in-run) rolls out; everything
-else runs as scoped sessions.
+decides which lane owns a cluster — hard, never as a preference. Parallel-shaped
+work (one repo, PR-per-task, machine-verifiable in-run, no external publish, no
+tool the lead lacks) rolls out as a parallel rollout; serial-shaped work an agent
+can still finish unattended (vault notes, several repos, no machine check in the
+run, an external publish, a tool or profile the lead lacks) as a serial rollout
+(ADR 0040); work that needs Lachy present or waits on a date runs as scoped
+sessions.
 
 > Until v2.0.0 the rollout verbs shipped as the separate `wave` plugin
 > (`lachyts/wave-skill`, now archived). The namespace is `/thread:*`
@@ -29,7 +33,7 @@ else runs as scoped sessions.
 |---|---|---|
 | `/thread:open` | resume/start | Open or create a durable `THREAD.md`; also picks up a stashed/deferred task (`/thread:open [[task]]`) and auto-completes it. |
 | `/thread:next` | "what's my move?" | Router/advisor: summarise where we are, recommend a move, dispatch to a sibling route. |
-| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing. Schedules rollout-shaped phases itself, steers the rest (parallel-safe batches it dispatches as native child agents of its own session, ADR 0023, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
+| `/thread:orient` | back on a project, balls in the air | The one shaping verb (ADR 0027): resolves its target (a project, area or note) from the argument or the session directory, asking only on a close call, then audits it and recommends the best use of time, then reshuffles without asking (ADR 0036: re-sort bugs, brain dumps, loose tasks and unstarted phases; grill what is unclear; write phases and `pN-M` tasks at one gate); `--steer` routes the work as it stands and `--look` stops at the audit, writing nothing. Schedules parallel-shaped phases itself, steers the rest (a serial rollout for serial-shaped work, ADR 0040, or a focus item via `open`), and ends with the execute offer. Pointed at one plan, design note or brain dump it runs a scoped reshuffle that turns it into phased tasks. |
 | `/thread:stash` | out of time, not my focus | Self-contained vault task, **no date**. Locked in, safely dormant. |
 | `/thread:defer [day]` | tomorrow's problem | Self-contained vault task **scheduled** for `[day]` (default tomorrow). Surfaces on that day's page. |
 | `/thread:handoff` | fork now | Write a durable `docs/handoffs/` doc and land it (committed, then pushed or its merge queued, never waited on — ADR 0028) + paste-ready prompt (never OS temp; the consumer marks it consumed, its close deletes it — ADR 0017). In Codex Desktop or a Chorus Session also create a fresh visible task seeded with it (a sidebar task in Codex Desktop); elsewhere label it a manual handoff. |
@@ -49,13 +53,10 @@ Stash, defer and close are the **set-downs** (estate ADR 0008, `~/repos/workspac
 
 ## Runtime support
 
-Orient's audit, reshuffle, steering and task-note debrief are portable. Its
-batches run as native child agents of the calling session, through the shared
-native-workflow exchange (ADR 0023): no terminal multiplexer and no launch
-profile is required, the calling session must stay open to collect them, and a
-batch that needs a tool or account the session lacks is reported blocked, never
-substituted. The rollout executor still requires its canonical Workflow runtime;
-shared source and skill discovery do not provide that runtime.
+Orient's audit, reshuffle and steering are portable, and orient spawns no child
+agents (ADR 0040 retired the ADR 0023 batches). The rollout executor still
+requires its canonical Workflow runtime; shared source and skill discovery do not
+provide that runtime.
 
 ## The convergence engine
 
@@ -129,7 +130,7 @@ Reflections in a row (ADR 0037 d4, d6).
 
 ## Design
 
-- `CONTEXT.md` — the domain glossary (lane, rollout-shaped, Task floor, Router,
+- `CONTEXT.md` — the domain glossary (lane, parallel-shaped, Task floor, Router,
   rollout, cursor, conductor, drift, tier, …).
 - `skills/_shared/execution-fit.md` — the canonical lane rule.
 - `skills/_shared/task-writer.md` — the single spec for writing + routing the
@@ -179,7 +180,9 @@ Reflections in a row (ADR 0037 d4, d6).
   (amends 0032). `0038` — a Cap is a promise: a spend gate is one line, its split
   in sub-bullets, and an undelivered push falls back to ntfy (amends 0034).
   `0039` — a code project's thread lives in its repo; one live THREAD.md per
-  project; the placement check (amends 0017).
+  project; the placement check (amends 0017). `0040` — a rollout is parallel or
+  serial: a three-way execution-fit test, and orient's child-agent batches
+  retire (amends 0023).
 - `docs/wave-THREAD-archive.md` — wave's full build history, verbatim.
 - `docs/build-plan.md` — the approved 2026-07-14 build plan, historical.
 
@@ -285,7 +288,8 @@ at the same concurrency; `THREAD_TEST_JOBS=<n> make test` sets the cap (CI pins 
   script), the next-action set-down write and orient's slot read (`next-action.test.mjs`), orient's
   target resolution before it reads and its one learned `repos:` write (`orient-target.test.mjs`),
   orient's declared check, its gate and digest-bound advance (`orient-declared-check.test.mjs`),
-  orient's one launch model and its double-dispatch guard (`orient-launch-model.test.mjs`), and
+  orient's launch-model history (`orient-launch-model.test.mjs`), the three-way execution-fit test and
+  orient's retired batches (`execution-fit-shapes.test.mjs`, ADR 0040), and
   `thread:handoff` as the handoff doc's one writer plus `next`'s compact recommendation
   (`handoff-one-writer.test.mjs`), `next`'s archive-this-session move and its session/thread menu wording
   (`next-archive-session.test.mjs`), and the queue as the only rollout (`queue-only.test.mjs`: retired names
