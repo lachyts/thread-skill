@@ -32,7 +32,10 @@ The ladder. Rung 1, an argument: a [[link]]; a path (it contains `/` or starts w
 note, a folder through its folder note) or outside it (a file is a scoped target, a directory runs the
 directory rungs); else a typed name, matched over every live key. The directory rungs read a linked worktree
 as the same sub-path of its main checkout (the checkout's root when it lacks that path), so a worktree of an
-umbrella repo keeps its sub-path. Rung 2, the directory: the longest live `repos:` entry that is the cwd,
+umbrella repo keeps its sub-path; then a directory in a rollout clone (ADR 0042) as its in-place twin's same
+directory (`self-rollout-check.sh --in-place`, asked only for a `*-rollout` toplevel), so the clone's top-level,
+main root and learn_dir are the twin's and a lead's session in the clone resolves its project exactly as one in
+the in-place checkout (a hand-made ~/Projects-rollout/<A>/<P> reads as ~/Projects/<A>/<P>). Rung 2, the directory: the longest live `repos:` entry that is the cwd,
 that sub-path, its git top-level or its git main root, or a whole-component prefix of one; several declarers
 ask. Rung 3, a workspace (launch-folders.json) holding the directory more deeply than any declaration: its
 name, matched against area and folder-project notes. Rung 4, the directory's own name, matched within the
@@ -79,6 +82,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 NEXT_ACTION_PY = os.path.join(HERE, "next-action.py")
+SELF_ROLLOUT_SH = os.path.join(HERE, "..", "..", "execute", "scripts", "self-rollout-check.sh")
 VAULT_DEFAULT = "~/repos/obsidian"
 LAUNCH_FOLDERS_DEFAULT = "~/repos/workspaces/_shared/state/launch-folders.json"
 FLOOR = 0.65    # below this best score, nothing is a match
@@ -363,6 +367,7 @@ class Resolver:
         self.lf_path = launch_folders
         self._roots = None
         self._declared = None
+        self._twins = {}
 
     # -- rung 1 --
 
@@ -504,6 +509,26 @@ class Resolver:
         main = os.path.dirname(common) if os.path.basename(common) == ".git" else top
         return top, main
 
+    def in_place(self, d):
+        """`self-rollout-check.sh --in-place d`: the in-place twin's path for a directory inside a rollout clone
+        (ADR 0042), else None. Cached; any failure to run is None (no clone)."""
+        if d not in self._twins:
+            twin = None
+            try:
+                names = subprocess.run(["git", "rev-parse", "--local-env-vars"], capture_output=True, text=True,
+                                       stdin=subprocess.DEVNULL, timeout=30).stdout.split()
+                env = dict(os.environ)
+                for name in names:
+                    env.pop(name, None)
+                r = subprocess.run(["bash", SELF_ROLLOUT_SH, "--in-place", d], capture_output=True, text=True,
+                                   stdin=subprocess.DEVNULL, env=env, timeout=60)
+                if r.returncode == 0 and r.stdout.strip() and os.path.isdir(r.stdout.strip()):
+                    twin = real(r.stdout.strip())
+            except (OSError, subprocess.SubprocessError):
+                twin = None
+            self._twins[d] = twin
+        return self._twins[d]
+
     def learnable(self, o):
         """(o, None) when `--learn` may write `o`, else (None, why)."""
         home = self.home
@@ -569,6 +594,11 @@ class Resolver:
         if G and top and top != G:  # a linked worktree: the same sub-path of the main checkout, else its root
             L = real(os.path.join(G, os.path.relpath(C, top))) if within(C, top) else G
             L = L if os.path.isdir(L) else G
+        if G and os.path.basename(G).endswith("-rollout"):  # a rollout clone: its in-place twin (ADR 0042)
+            twin = self.in_place(L)
+            if twin:
+                L = twin
+                top, G = self.git_roots(L)
         roots, lf_why = self.workspace_roots()
         note = "; rung 3 skipped: %s" % lf_why if lf_why else ""
         F = self.frames(L, G)
