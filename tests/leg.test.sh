@@ -17,7 +17,8 @@
 #   L8   refusals; L9 an exported GIT_DIR; L10 the close-out landing under a Leg; L11 the status mapping
 #   L12  the lock: an interleaved hand-over and successor, racing begins, the timeout
 #   L13  status (read-only, no lock): the chain states, the stall, the restart and its blockers, set-asides, per-Leg
-#        lists, a take-over's lastAt, dependants and the defer closure; restarted: its checks, in order
+#        lists, a take-over's lastAt, dependants and the defer closure, a terminal chain with no restart, next or
+#        smoke list (L13g, L13o); restarted: its checks, in order
 # Temp vaults (git repos), temp repos with literal origins and update-ref'd origin refs, so land.sh --route never
 # needs the network; a fake gh and ssh log any call. HOME, LANDING_REGISTER and THREAD_LEG_LOCK_DIR are temp;
 # --now and --session are pinned. bash 3.2-compatible (macOS).
@@ -853,6 +854,8 @@ T="$TMP/l1/vault/Work/Tasks" V="$TMP/l1/vault" leg status
 ok "$rc|$(q 'd["chain"]')|$(q 'd["note"]["archived"]')|$(q 'd["note"]["status"]')|$(q 'd["progress"]')" "0|complete|True|done|{'done': 7, 'total': 7, 'running': 0}" \
    "L13g: L1's archived chain reads complete"
 ok "$(q '[g["outcome"] for g in d["legs"]]')" "['handoff', 'complete']" "L13g: … Leg 1 handed off, Leg 2 completed"
+ok "$(q 'd["restart"]')|$(q 'd["next"]')|$(q 'd["smoke"]')" "None|None|[]" \
+   "L13g: … no restart, no next act and no smoke list: begin refuses a complete chain"
 T="$TMP/l1/vault/Work/Tasks" V="$TMP/l1/vault" SESS=r1 leg restarted --leg 3 --pending
 ok "$rc" 1 "L13k: restarted on an archived note is exit 1"; ok "$(cksum < "$A1")" "$c1" "L13g: … the archived note unchanged"
 # (j) a non-serial note, and no note
@@ -907,6 +910,30 @@ T="$T2" V="$S/vault2" leg status
 ok "$(q 'd["chain"]')|$(q '[r["state"] for r in d["rows"]]')" "completable|['deferred', 'deferred', 'deferred', 'done', 'deferred']" \
    "L13n2: deferring the closure makes the chain completable"
 cmp -s "$T2/$RO.md" "$TMP/snap2"; ok "$?" 0 "L13n2: … and the rollout note is byte-identical"
+# (o) the terminal states: dropped, superseded and incomplete print no restart, no next and no smoke list; paused
+# keeps them (what runs once the stamp is gone)
+scen l13o
+mkro '' $(rows cc-demo "$F" '`ext:x`' t1 t2); mkt t1; mkt t2
+leg begin --cwd "$F"; finish t1; leg close --outcome stopped --reason "out of time"
+cp "$T/$RO.md" "$TMP/l13o-note"
+leg status
+ok "$(q 'd["chain"]')|$(q 'd["restart"]["task"]')|$(q 'd["next"]["action"]')|$(q '[x["task"] for x in d["smoke"]]')" "stopped|t2|claim|['t1']" \
+   "L13o: stopped with t1 done: a restart of t2, next claims it, t1 on the smoke list"
+for st in 'status: dropped|dropped' 'superseded_by: "[[other-rollout]]"|superseded' 'incomplete: true|incomplete' \
+          'paused: 2026-10-20T10:00+00:00|paused'; do
+  line=${st%|*}; want=${st#*|}
+  cp "$TMP/l13o-note" "$T/$RO.md"
+  if [ "$want" = dropped ]; then subst "$T/$RO.md" 'status: open' "$line"; else subst "$T/$RO.md" 'status: open' "status: open
+$line"; fi
+  leg status
+  if [ "$want" = paused ]; then
+    ok "$rc|$(q 'd["chain"]')|$(q 'd["restart"]["task"]')|$(q 'd["next"]["action"]')|$(q 'len(d["smoke"])')" "0|paused|t2|claim|1" \
+       "L13o: paused keeps the restart, next and smoke list"
+  else
+    ok "$rc|$(q 'd["chain"]')|$(q 'd["restart"]')|$(q 'd["next"]')|$(q 'd["smoke"]')" "0|$want|None|None|[]" \
+       "L13o: $want prints no restart, no next and no smoke list"
+  fi
+done
 
 echo
 if [ "$fail" -eq 0 ]; then echo "leg.test.sh: ALL PASS"; else echo "leg.test.sh: FAILED"; fi

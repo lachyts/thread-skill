@@ -155,7 +155,9 @@ restarted):
       (rr._block_fingerprint)} for a set-aside row), `smoke` (the smoke list of the Leg that acts next: the open
       one, else Leg last + 1), `fixes` (the not-done fix rows), `next` (the open Leg's next act, else a fresh
       Leg's), `stall` and `needsYou` (needs_you's items, plus a halt, a manual hand-over, a pending or manual
-      restart and a stall). Stamps print raw, as the log holds them.
+      restart and a stall). In a terminal chain state (complete, dropped, superseded, incomplete: begin refuses
+      each, so no Leg acts next) `restart` and `next` are null and `smoke` is empty. Stamps print raw, as the log
+      holds them.
   restarted --leg <N> (--pending | --started <id> | --manual <why>) [--replace]
       Records that /thread:repair is starting Leg N (repair § 7 (e)), so a second repair, or status, sees it:
       `--pending` before its create_thread, then `--started <id>` (the new Session's id) or `--manual <why>` (a
@@ -203,7 +205,9 @@ The chain, as status reads it (repair and serial-score.py read these; this is th
   closed or absent (legOutcome `absent`), or null. It is null whenever a Leg is open: a successor between its
   begin and its `claim --inherit`, and a take-over, hold the claim too.
 - The restart: what a fresh Leg N (N = the last Leg + 1) would do, from next's plan for it (no cap, no launch
-  boundary, an open Leg K read as dead), when that plan is finish, claim or complete; else null. {leg, title
+  boundary, an open Leg K read as dead), when that plan is finish, claim or complete and the chain state is not
+  terminal (complete, dropped, superseded or incomplete); else null. A paused chain keeps it: what runs once the
+  stamp is gone. {leg, title
   (`Leg <N>: <slug>`, at most 60 characters), prompt (the Leg prompt, ` --take-over` on its first line when a Leg
   is open), takeOver, tldr, cwd, harness, launch, task, anyLaunch, blockedBy}. For finish or claim: cwd is the
   row's folder (realpath), harness codex for a `cx-*` alias else claude, launch `<alias> from <folder>`, task its
@@ -265,6 +269,7 @@ GATES_PENDING = "## Gated inputs (awaiting sign-off)"
 APPROVED_GATES = "## Approved gates"
 CAP = 5
 OUTCOMES = ("handoff", "complete", "stuck", "stopped", "halt")
+TERMINAL = ("complete", "dropped", "superseded", "incomplete")   # the chain states begin refuses for good
 REVIEWS = "docs/reviews/"
 SET_ASIDE = {"blocked", "review-blocked", "plan-blocked", "gate-pending"}
 LAUNCH_RE = re.compile(r"^`([^`]+)`\s+from\s+`([^`]+)`$")
@@ -1803,7 +1808,8 @@ def cmd_close(ctx, a):
             plan = plan_next(chain, n + 1, None, None, cap=False, launch=False)
             row = plan.get("row")
             if row is None:
-                raise Refuse(1, f"nothing to hand over (next is {plan['action']}): close --outcome complete or stuck")
+                raise Refuse(1, f"nothing to hand over (next is {plan['action']}): run legs.md § Complete (its close "
+                                "--outcome complete takes --reflection), or close --outcome stuck")
             line = f"closed: handoff to Leg {n + 1} in {row.alias} from {row.folder}"
             prog = chain.progress(n)
             out["handover"] = {
@@ -2240,8 +2246,10 @@ def cmd_status(ctx, a):
                       dead=(open_leg["n"],) if open_leg is not None else ())
     own = plan_next(chain, open_leg["n"], open_leg["alias"], open_leg["folder"]) if open_leg is not None else fresh
     stall = stall_of(chain, open_leg)
-    restart = restart_of(ctx, chain, fresh, n_next, open_leg, halt, restarted)
     state = chain_state(chain, inc, paused, superseded, halt, restarted, open_leg, stall, fresh)
+    # begin refuses each terminal state, so no Leg acts next: no restart, no smoke list, no next act.
+    ended = state in TERMINAL
+    restart = None if ended else restart_of(ctx, chain, fresh, n_next, open_leg, halt, restarted)
     items = needs_you(ctx, chain, None, None)
     if halt is not None:
         items.append(f"[[{ctx.slug}]] halted at Leg {halt[1]}: {reason_text(halt[0], 140)}: the halt is yours to "
@@ -2272,8 +2280,9 @@ def cmd_status(ctx, a):
             "restarts": [{"leg": e["leg"], "how": e["how"], "started": e["started"], "manual": e["manual"],
                           "session": e["session"], "at": e["stamp"]} for e in chain.log if e["kind"] == "restart"],
             "legs": legs_json(chain), "rows": [row_json(chain, r) for r in chain.rows],
-            "smoke": smoke_list(chain, open_leg["n"] if open_leg is not None else n_next), "fixes": fixes,
-            "next": next_json(own), "stall": stall, "restart": restart, "needsYou": items}
+            "smoke": [] if ended else smoke_list(chain, open_leg["n"] if open_leg is not None else n_next),
+            "fixes": fixes, "next": None if ended else next_json(own), "stall": stall, "restart": restart,
+            "needsYou": items}
 
 
 def cmd_restarted(ctx, a):
