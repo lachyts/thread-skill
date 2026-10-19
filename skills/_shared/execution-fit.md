@@ -130,8 +130,9 @@ script's header is the one statement of what matches, of what makes a clone usab
   open). The guard's `not found at /skills/…` is not this exit 2: the root was never exported, so export it
   and re-run by `plugin-root.md` rule 4 first.
 
-On any non-zero exit from a run with the root set, stop and print the stderr verbatim: it names the fix. The clone's location is a
-convention, not a setting: a clone anywhere else is not found.
+On any non-zero exit from a run with the root set, except `--resolve`'s exit 4, which schedule § 0
+answers with its question, stop and print the stderr verbatim: it names the fix. The clone's location is
+a convention, not a setting: a clone anywhere else is not found.
 
 **GitHub `origin`.** The engine branches every worktree from
 `origin/<default branch>` and lands each task as a GitHub PR that merge-task

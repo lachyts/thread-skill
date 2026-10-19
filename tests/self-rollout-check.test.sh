@@ -568,6 +568,11 @@ print("ok" if hit and hit.group("state") == "halted" else "no match")
 PY
 )" ok "the § 2.6 halt line matches the Stop hook's STATUS_RE"
 has "$(grep -n '^# thread:self-rollout-check' "$ef")" "tests/self-rollout-check.test.sh" "execution-fit.md's snippet names this test"
+# The stop rule carves out --resolve's exit 4: schedule § 0 asks, then runs --ensure, so a reader following
+# execution-fit.md alone must not stop there.
+eff=$(tr '\n' ' ' < "$ef" | tr -s ' ')
+has "$eff" "On any non-zero exit from a run with the root set, except \`--resolve\`'s exit 4, which schedule § 0 answers with its question, stop and print the stderr verbatim" "execution-fit.md's stop rule carves out --resolve's exit 4"
+has "$eff" "Exit 4 prints the would-be clone when none exists yet" "… and its --resolve bullet names exit 4"
 
 # ---- wiring: execute § 2.8, the launch-directory gate (ADR 0042) ----------------------------------------------
 s28=$(sect '### 2.8. Launch-directory gate' '### 3.')
