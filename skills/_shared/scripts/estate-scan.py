@@ -15,14 +15,17 @@ the vault, PyYAML or a sibling script is missing.
 
 What it reuses. Loaded by path: resolve-target.py (RT: `done_flag`/`dead_why`, its "Live targets" rule, and
 `flatten`/`unlink`), and through it next-action.py (RT.NA: Note, Vault and its link resolution, tags_of, status_of,
-as_list, links_in, read_slots, DEAD_STATUSES and OPEN_STATUSES), so the vault keeps one frontmatter
-reader; reconcile-rollout.py for its PROJECT_ROOT_RE; reconcile-project.py for its PHASE_N. The statuses read per
+as_list, links_in, read_slots, DEAD_STATUSES and OPEN_STATUSES), so the vault keeps one frontmatter reader;
+reconcile-rollout.py for its PROJECT_ROOT_RE; reconcile-project.py for its PHASE_N. The statuses read per
 `_shared/vault-grammar.md` § Statuses: Landed and Active are next-action's sets; Review is the one literal here,
-REVIEW_STATUSES, pinned to the doc by tests/contracts/vault-grammar.test.mjs. In flight is § In flight; a phase's
-members are § Phase and task filenames' literal prefix `<slug>-p<N>-`. Run as children, never copied:
-self-rollout-check.sh --resolve, land.sh --origin-slug, landing-register.py check, unfinished-rollout.py check and
-reconcile-rollout.py status. Restated, each cited: schedule § 2.5's verifier detection (SKILL.md prose, nothing to
-import), and pushed-base.sh's ahead classification (execution-fit.md § Dispatch blockers, **Pushed base**).
+REVIEW_STATUSES, pinned to the doc by tests/contracts/vault-grammar.test.mjs. In flight is § In flight, stated once in
+three module-level helpers that estate-dispatch.py's `record` loads too: first_link (a `rollout:` value's first link),
+link_live (it resolves to a note directly in Work/Tasks) and in_flight (live, `in_progress` or Review, on a status
+already read by status_of); a phase's members are § Phase and task filenames' literal prefix `<slug>-p<N>-`. Run as
+children, never copied: self-rollout-check.sh --resolve, land.sh --origin-slug, landing-register.py check,
+unfinished-rollout.py check and reconcile-rollout.py status. Restated, each cited: schedule § 2.5's verifier detection
+(SKILL.md prose, nothing to import), and pushed-base.sh's ahead classification (execution-fit.md § Dispatch blockers,
+**Pushed base**).
 
 The vault (pure Python, never under the deadline):
 - Projects: notes under Work/Projects outside Archive/, tagged `project`, with RT.dead_why None (not the `archived`
@@ -254,6 +257,25 @@ def standing_of(status):
     """A project's standing from its status as NA.status_of reads it: crowned, active, queued or parked as itself, any
     other status `other`, none `none`. The one rule: the scan's `standing` and estate-rank.py's snooze writer read it."""
     return status if status in STANDINGS else ("other" if status else "none")
+
+
+def first_link(NA, value):
+    """A frontmatter value's first wikilink target, else its stripped text, else None (a `rollout:` value)."""
+    links = NA.links_in(value)
+    if links:
+        return links[0]
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def link_live(NA, vault, link):
+    """vault-grammar.md § In flight's live rollout: the link resolves to a note directly in NA.TASKS_DIR."""
+    return bool(link) and any(os.path.dirname(t) == NA.TASKS_DIR for t in vault.targets(link))
+
+
+def in_flight(status, live):
+    """vault-grammar.md § In flight for a task: its rollout link is live, or its status (as NA.status_of reads it, so
+    `in-progress` is `in_progress`) is in_progress or Review."""
+    return live or status == "in_progress" or status in REVIEW_STATUSES
 
 
 def link_why(raw):
@@ -596,10 +618,7 @@ class Scan:
         return out
 
     def first_link(self, value):
-        links = self.NA.links_in(value)
-        if links:
-            return links[0]
-        return value.strip() if isinstance(value, str) and value.strip() else None
+        return first_link(self.NA, value)
 
     def read_tasks(self, projects):
         NA = self.NA
@@ -620,7 +639,7 @@ class Scan:
                 elif prel not in live:
                     live.append(prel)
             rollout = self.first_link(note.get("rollout"))
-            rollout_live = bool(rollout) and any(os.path.dirname(t) == NA.TASKS_DIR for t in self.vault.targets(rollout))
+            rollout_live = link_live(NA, self.vault, rollout)
             row = {
                 "slug": slug, "note": slash(rel), "title": self.title(note) or slug, "status": jsonable(note.get("status")),
                 "statusClass": ("active" if st in NA.OPEN_STATUSES else "review" if st in REVIEW_STATUSES else "hold"),
@@ -629,7 +648,7 @@ class Scan:
             for key in ("phase", "priority", "scope", "work_depth", "launch", "due", "scheduled", "captured"):
                 row[key] = jsonable(note.get(key))
             row.update(dependsOn=self.deps(note), rollout=rollout, rolloutLive=rollout_live,
-                       inFlight=rollout_live or st in ("in_progress",) or st in REVIEW_STATUSES)
+                       inFlight=in_flight(st, rollout_live))
             tasks.append(row)
             homes[slug] = (live, note)
             if not live:
