@@ -45,7 +45,12 @@ _git_env(), lead-integrate.py and unfinished-rollout.py's git_env() build the sa
 
 The ref. refs/remotes/origin/HEAD; else exactly one of origin/main or origin/master, flagged ("origin/HEAD unset:
 ...; `git remote set-head origin --auto` pins it"); else HEAD, flagged. It is never fetched, so the block reports
-ref {name, tip, tipDate}: a revert or review pushed since the last fetch is missed. No commit on it: `unread: no
+ref {name, tip, tipDate, top}: a revert or review pushed since the last fetch is missed. The in-place checkout (ADR
+0042): when `top` is a rollout clone (`self-rollout-check.sh --in-place` names its twin), a clone idle between
+rollouts is fetched only by its own runs, while the twin is fetched by merge-task and Lachy's sessions. So when the
+twin's refs/remotes/origin/HEAD strictly descends from the clone's ref tip, every git read comes from the twin
+instead, flagged ("ref read from the in-place checkout <p>: fresher than the Project root's"), and ref.top names it;
+on a tie, or when the clone is fresher, from the clone, unflagged. No commit on it: `unread: no
 commit on <ref>`. One full log of it (`git log --format=%H%x1f%P%x1f%s%x1f%b%x1e <tip>`, every reachable commit,
 never --first-parent: a squash can be reachable only through a second parent) feeds both the task commits and the
 reverts; if it fails both are `unread: git log failed: <first stderr line>`.
@@ -70,7 +75,9 @@ its commits, so one revert counts once for each of them, flagged.
 (c) reviews, mirroring the fresh-review ledger's reading (personal, outside the plugin, so not imported). The docs:
     the newest add or modify of each `docs/reviews/*.md` in `git log --all --diff-filter=AM --format=@@%H
     --name-only -- docs/reviews/` (the lifecycle deletes consumed docs, so history is the main source), read in one
-    `git cat-file --batch`; a working-tree `<top>/docs/reviews/*.md` wins over its history. No doc in either is a
+    `git cat-file --batch`; a working-tree `docs/reviews/*.md` wins over its history. The working trees read are the
+    block's reviewTrees: the Project root's checkout, and its in-place twin when it is a rollout clone (a lead's
+    pending docs sit in the clone, a peer session's in the twin), the clone's copy winning a doc both hold. No doc in either is a
     fact, not a failure: reviews read, reviewDocs 0. Reviews are unread only with no --repo, no top, no ref, a
     failed full log or a failed doc log. A doc: front matter `head:` and `status:`; its findings table is the first
     table with numbered rows, ending at the first non-row line; the header gives the `file:line` column (else cell
@@ -96,8 +103,8 @@ its commits, so one revert counts once for each of them, flagged.
     such as a stale rule number after its renumbering) on the task that last wrote that line, so Quality can read too
     low there.
 
-The block: {count, landed, quality, partial, bySource {fixes, reverts, reviews}, reviewDocs, tasks [{task, pr,
-commits, evidence}], sources {fixes, reverts, reviews: "read" | "unread: <why>"}, ref, excluded {dropped, selfNamed,
+The block: {count, landed, quality, partial, bySource {fixes, reverts, reviews}, reviewDocs, reviewTrees, tasks [{task,
+pr, commits, evidence}], sources {fixes, reverts, reviews: "read" | "unread: <why>"}, ref, excluded {dropped, selfNamed,
 unreadNotes, rejectedRows, unresolved, unresolvedDocs, unlandedDocs, unresolvedRows}}. Escapes are deduped per
 landed task: count is the landed tasks with any evidence (null when every source is unread), and every piece is
 listed. bySource.<s> counts the landed tasks with evidence from s (null when s is unread); reviewDocs the docs read
@@ -119,6 +126,7 @@ from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RECONCILE_PY = os.path.join(os.path.dirname(os.path.dirname(HERE)), "execute", "scripts", "reconcile-rollout.py")
+SELF_ROLLOUT_SH = os.path.join(os.path.dirname(os.path.dirname(HERE)), "execute", "scripts", "self-rollout-check.sh")
 
 SOURCES = ("fixes", "reverts", "reviews")
 EVIDENCE = {"fixes": "fixes", "reverts": "revert", "reviews": "review"}  # bySource key -> evidence `source`
@@ -281,6 +289,7 @@ class _Escapes:
         self.ref = self.top = self.genv = None
         self.log, self.by_sha = [], {}
         self.review_docs = None
+        self.review_trees = None
 
     def flag(self, text):
         if text not in self.flags:
@@ -346,6 +355,7 @@ class _Escapes:
         return {
             "count": count, "landed": n, "quality": quality, "partial": bool(unread or unresolved or rows),
             "bySource": by, "reviewDocs": self.review_docs if "reviews" in read else None,
+            "reviewTrees": self.review_trees if "reviews" in read else None,
             "tasks": [{"task": t, "pr": self.landed[t]["pr"], "commits": self.commits.get(t, []),
                        "evidence": self.evidence[t]} for t in escaped],
             "sources": {s: self.sources.get(s, "unread: not read") for s in SOURCES},
@@ -455,13 +465,26 @@ class _Escapes:
         if rc != 0 or not out.strip():
             return "--repo %s is not a git work tree" % self.repo
         self.top = out.strip()
+        self.review_trees = [self.top]
+        twin = self._twin()
+        if twin:
+            self.review_trees.append(twin)
         rev, name = self._resolve_ref()
         rc, out, _err = self.git("show", "-s", "--format=%H%x1f%ct", rev + "^{commit}", "--")
         parts = out.strip().split("\x1f")
         if rc != 0 or len(parts) != 2:
             return "no commit on %s" % name
         tip = parts[0]
-        self.ref = {"name": name, "tip": tip, "tipDate": _utc(parts[1])}
+        if twin and self._fresher(twin, tip):
+            clone, self.top = self.top, twin
+            rev, name = self._resolve_ref()
+            rc, out, _err = self.git("show", "-s", "--format=%H%x1f%ct", rev + "^{commit}", "--")
+            parts = out.strip().split("\x1f")
+            if rc != 0 or len(parts) != 2:
+                return "no commit on %s in the in-place checkout %s" % (name, twin)
+            tip = parts[0]
+            self.flag("ref read from the in-place checkout %s: fresher than the Project root's (%s)" % (twin, clone))
+        self.ref = {"name": name, "tip": tip, "tipDate": _utc(parts[1]), "top": self.top}
         rc, out, err = self.git("log", "--format=%H%x1f%P%x1f%s%x1f%b%x1e", tip, "--")
         if rc != 0:
             return "git log failed: %s" % _first(err)
@@ -474,6 +497,33 @@ class _Escapes:
             self.by_sha[c["sha"]] = c
         self._task_commits()
         return None
+
+    def _twin(self):
+        """The in-place twin's toplevel when top is a rollout clone (ADR 0042), else None. Never raises."""
+        if not os.path.basename(self.top).endswith("-rollout"):
+            return None
+        try:
+            p = subprocess.run(["bash", SELF_ROLLOUT_SH, "--in-place", self.top], stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, env=self.genv, timeout=GIT_TIMEOUT)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        twin = p.stdout.decode("utf-8", "replace").strip()
+        return twin if p.returncode == 0 and twin and os.path.isdir(twin) else None
+
+    def _fresher(self, twin, tip):
+        """True when the twin's refs/remotes/origin/HEAD strictly descends from the clone's ref tip."""
+        try:
+            p = subprocess.run(["git", "-C", twin, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD^{commit}"],
+                               stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
+                               env=self.genv, timeout=GIT_TIMEOUT)
+            theirs = p.stdout.decode("utf-8", "replace").strip()
+            if p.returncode != 0 or not theirs or theirs == tip:
+                return False
+            p = subprocess.run(["git", "-C", twin, "merge-base", "--is-ancestor", tip, theirs], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, env=self.genv, timeout=GIT_TIMEOUT)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return p.returncode == 0
 
     def _verify(self, ref):
         rc, out, _err = self.git("rev-parse", "--verify", "--quiet", ref + "^{commit}")
@@ -612,12 +662,13 @@ class _Escapes:
         specs = {p: "%s:%s" % (c, p) for p, c in newest.items()}
         texts = self._cat(list(specs.values()))
         docs = {p: texts[s] for p, s in specs.items() if s in texts}
-        for f in sorted(glob.glob(os.path.join(glob.escape(self.top), REVIEWS, "*.md"))):
-            try:
-                with open(f, encoding="utf-8", errors="replace") as fh:
-                    docs["%s/%s" % (REVIEWS, os.path.basename(f))] = fh.read()
-            except OSError:
-                continue
+        for tree in reversed(self.review_trees or [self.top]):  # the Project root's checkout last: its copy wins
+            for f in sorted(glob.glob(os.path.join(glob.escape(tree), REVIEWS, "*.md"))):
+                try:
+                    with open(f, encoding="utf-8", errors="replace") as fh:
+                        docs["%s/%s" % (REVIEWS, os.path.basename(f))] = fh.read()
+                except OSError:
+                    continue
         parsed = [(p, _parse_doc(docs[p])) for p in sorted(docs)]
         self.review_docs = len(parsed)
         cited = [(p, d) for p, d in parsed if any(r["cite"] for r in d["rows"])]

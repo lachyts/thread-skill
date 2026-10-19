@@ -74,8 +74,8 @@ empty.
 Writes, both under the events directory, outside the vault and the repo: fold-journals' `call-journal` lines in the
 rollout's Run record, and tune.py's one tunings.jsonl line. Reads: the rollout note; the Run record, reviews.jsonl and
 tunings.jsonl; ~/.config/thread/rollouts.toml through rollout-settings.py; every note under Work/Tasks/ (Archive
-included) for `fixes:` and `merged_into:` (score.py's escapes.py); the Project root's git, read-only and never
-fetched: land.sh's `git remote get-url origin`, escapes.py's rev-parse, symbolic-ref, show, log, rev-list,
+included) for `fixes:` and `merged_into:` (score.py's escapes.py); the Project root's git (or its in-place
+checkout's when fresher, ADR 0042), read-only and never fetched: land.sh's `git remote get-url origin`, escapes.py's rev-parse, symbolic-ref, show, log, rev-list,
 merge-base, cat-file, diff-tree and blame, and `git remote get-url origin` in each clone reviews.jsonl names
 (score.py, through rollout-settings.py's _origin_slug).
 

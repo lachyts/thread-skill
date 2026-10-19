@@ -563,6 +563,88 @@ test('E11: a fixer note and a revert dated after --until still count', (t) => {
   assert.deepEqual(a.escapes.bySource, { fixes: 1, reverts: 1, reviews: 0 })
 })
 
+// ---- E13: the in-place checkout (ADR 0042) -----------------------------------------------------------------------
+// A clone-rooted rollout's Project root is <work>-rollout, a clone of the same origin beside its in-place twin <work>.
+// escapes.py never fetches, so both get GitHub-form origin URLs (what self-rollout-check.sh --in-place compares) once
+// their remote-tracking refs are where each case wants them.
+function rolloutPair(home) {
+  const w = new Repo(home)  // the in-place twin: <home>/work
+  const c = path.join(home, 'work-rollout')
+  const clone = () => w.g(['clone', '-q', w.origin, c], { cwd: home })
+  const gh = () => { for (const d of [w.dir, c]) w.g(['-C', d, 'remote', 'set-url', 'origin', 'git@github.com:o/r.git'], { cwd: home }) }
+  return { w, c, clone, gh }
+}
+
+test('E13: a twin strictly fresher than the clone root is read instead, flagged; its revert counts and is dated', (t) => {
+  const home = tmpHome(t)
+  const { w, c, clone, gh } = rolloutPair(home)
+  w.commit('init', { 'README.md': 'demo\n' })
+  const s1 = w.commit('a1: add a (#1)', { 'a.txt': 'a1\n' })
+  w.publish()
+  clone()
+  const rv = w.revert(s1, 'Revert "a1: add a (#1)" (#2)')
+  w.publish()  // only the twin has fetched the revert
+  gh()
+  note(home, 'a1')
+  emitAll(home, 'ra', [merged(D(5, '01:00'), 'a1', { pr: 1 })])
+  const a = run(home, 'ra', { repo: c })
+  assert.equal(a.escapes.count, 1)
+  assert.deepEqual(a.escapes.bySource, { fixes: 0, reverts: 1, reviews: 0 })
+  assert.equal(a.escapes.ref.tip, rv)
+  assert.equal(a.escapes.ref.top, w.dir)
+  assert.deepEqual(a.escapes.reviewTrees, [c, w.dir])
+  assert.ok(has(a.flags, new RegExp(`^escapes: ref read from the in-place checkout ${w.dir}: fresher than the Project root's \\(${c}\\)$`)), a.flags.join('\n'))
+})
+
+test('E13: on a tie the clone root is read; a pending review doc only in the clone counts, and so does one only in place', (t) => {
+  const home = tmpHome(t)
+  const { w, c, clone, gh } = rolloutPair(home)
+  w.commit('init', { 'README.md': 'demo\n', 'c.txt': 'c1\nc2\nc3\n' })
+  w.commit('a1: part one (#5)', { 'c.txt': 'c1\nc2 one\nc3\n' })
+  const later = w.commit('later work', { 'e.txt': 'e\n' })
+  w.publish()
+  clone()
+  gh()
+  note(home, 'a1')
+  emitAll(home, 'ra', [merged(D(5, '01:00'), 'a1', { pr: 5 })])
+  const doc = 'docs/reviews/2026-10-06-later.md'
+  const write = (dir) => { fs.mkdirSync(path.join(dir, 'docs', 'reviews'), { recursive: true }); fs.writeFileSync(path.join(dir, doc), reviewDoc(later.slice(0, 7), 'pending', [[1, 'c.txt:2', '—']])) }
+  write(c)
+  const a = run(home, 'ra', { repo: c })
+  assert.equal(a.escapes.count, 1, 'the lead\'s pending doc in the clone')
+  assert.equal(task(a, 'a1').evidence[0].doc, doc)
+  assert.equal(a.escapes.ref.top, c, 'a tie reads the clone root')
+  assert.ok(!has(a.flags, /ref read from the in-place checkout/), a.flags.join('\n'))
+  assert.deepEqual(a.escapes.reviewTrees, [c, w.dir])
+  fs.rmSync(path.join(c, doc))
+  write(w.dir)
+  const b = run(home, 'ra', { repo: c })
+  assert.equal(b.escapes.count, 1, 'a peer session\'s pending doc in the in-place checkout')
+  // both hold it: the clone's copy wins (here it rejects the row)
+  fs.writeFileSync(path.join(c, doc), reviewDoc(later.slice(0, 7), 'pending', [[1, 'c.txt:2', '**skip**: not a bug']]))
+  const d = run(home, 'ra', { repo: c })
+  assert.equal(d.escapes.count, 0, 'the clone\'s copy wins a doc both hold')
+})
+
+test('E13: a clone root fresher than its twin is read itself, unflagged', (t) => {
+  const home = tmpHome(t)
+  const { w, c, clone, gh } = rolloutPair(home)
+  w.commit('init', { 'README.md': 'demo\n' })
+  const s1 = w.commit('a1: add a (#1)', { 'a.txt': 'a1\n' })
+  w.publish()
+  clone()
+  w.g(['revert', '--no-edit', s1], { cwd: c })
+  w.g(['-C', c, 'push', '-q', 'origin', 'HEAD:main'], { cwd: home })
+  w.g(['-C', c, 'fetch', '-q', 'origin'], { cwd: home })  // the clone moved on; the twin never fetched
+  gh()
+  note(home, 'a1')
+  emitAll(home, 'ra', [merged(D(5, '01:00'), 'a1', { pr: 1 })])
+  const a = run(home, 'ra', { repo: c })
+  assert.equal(a.escapes.ref.top, c)
+  assert.equal(a.escapes.count, 1)
+  assert.ok(!has(a.flags, /ref read from the in-place checkout/), a.flags.join('\n'))
+})
+
 // ---- E12: nothing landed ------------------------------------------------------------------------------------
 
 test('E12: nothing landed: no Escapes, Quality null, flagged', (t) => {
