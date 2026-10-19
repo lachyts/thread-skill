@@ -85,7 +85,8 @@ version stop's `--regenerate` would only meet schedule's refusal again.
 - `protocol_version` absent, `2` or `3` → execute § 2's remedy: hard-pause it if a session is running it, then
   `/thread:schedule <project> --regenerate`. Stop.
 - any other value except `5` → "unsupported protocol version <N>; the queue reads protocol_version: 5". Stop.
-- `incomplete` → `/thread:schedule <project> --regenerate`. Stop.
+- `incomplete` → `/thread:schedule <project> --regenerate`; on a `shape: serial` note, which nothing supersedes,
+  stamp it `status: dropped`, then `/thread:schedule --tasks <its tasks>`. Stop.
 
 Then one of three modes holds, each evaluated before anything is written: a pause, a live queue, or no lead
 live. Two rules cut across them.

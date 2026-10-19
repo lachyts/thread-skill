@@ -1,6 +1,6 @@
 // Schedule writes serial rollouts (ADR 0040, p24-2): the prose and templates around serial-chains.py and the
 // serial check (their behaviour is pinned by tests/serial-chains.test.sh and tests/unfinished-rollout.test.sh S1-S12).
-// Nine rules, one pure function, check(files), over { relPath: text }:
+// Ten rules, one pure function, check(files), over { relPath: text }:
 //   t1  the templates: the parallel template says `shape: parallel`; the serial one says `shape: serial`,
 //       `protocol_version: 5`, `incomplete: true` and `surfaces:` + `{{SURFACES}}`, holds none of the parallel
 //       engine's keys, and its `## Queue` holds `{{CHAIN_TABLE}}`, whose SKILL bullet names the four-column header,
@@ -25,7 +25,9 @@
 //   t7  § 0's mixed-set sentence gives the serial-shaped members their follow-up line;
 //   t8  S3 checks every chain, stops the whole run before any write on any refusal, and reports every refusal
 //       together;
-//   t9  the schedule description names the parallel refusal and the serial notes.
+//   t9  the schedule description names the parallel refusal and the serial notes;
+//   t10 status (§ 1's **Incomplete** and § 4's item 5) and repair (its `incomplete` stop) give a `shape: serial`
+//       note's incomplete stamp its own remedy, `status: dropped`, since `--regenerate` never ends it.
 // Each rule has a mutation control that must fail with exactly that rule. Phrase checks run on collapsed text.
 // __pycache__, .DS_Store and any file holding a NUL byte are skipped. Reads files only.
 import { test } from 'node:test'
@@ -41,6 +43,8 @@ const EXECUTE = 'skills/execute/SKILL.md'
 const ORIENT = 'skills/orient/SKILL.md'
 const GRAMMAR = 'skills/_shared/vault-grammar.md'
 const CONTEXT = 'CONTEXT.md'
+const STATUS = 'skills/status/SKILL.md'
+const REPAIR = 'skills/repair/SKILL.md'
 const INTERIM = 'no serial writer yet'
 
 const SKILL_TESTS = /^skills\/[^/]+\/tests\//
@@ -183,6 +187,13 @@ function check(files) {
   const d = schedule.match(/^description: (.*)$/m)?.[1] ?? ''
   need('t9', `${SCHEDULE} description`, d, ['refuses a second unfinished parallel rollout', '`shape: serial` note per serial chain'])
 
+  // ---- t10: status and repair on a serial note's incomplete stamp ----
+  const serialRemedy = [/\bon a `shape: serial` note\b/i, '`status: dropped`', '`/thread:schedule --tasks <its tasks>`']
+  need('t10', `${STATUS} § 1 **Incomplete**`, para(files[STATUS], '**Incomplete.**'),
+    [...serialRemedy, '`--regenerate` never ends its stamp'])
+  need('t10', `${STATUS} § 4 item 5`, C(slice(files[STATUS], /^5\. `incomplete` → /, /^6\. /)), serialRemedy)
+  need('t10', `${REPAIR} incomplete stop`, C(slice(files[REPAIR], /^- `incomplete` → /, /^(?! {2})/)), serialRemedy)
+
   return { fails: [...fails].sort(), details }
 }
 
@@ -194,7 +205,7 @@ test('schedule writes serial rollouts: templates, the Serial path, § 0, execute
 })
 
 test('the scan reads every file the rules need', () => {
-  for (const f of [SCHEDULE, TEMPLATE, SERIAL, EXECUTE, ORIENT, GRAMMAR, CONTEXT, 'README.md']) assert.ok(f in real, `${f} is not scanned`)
+  for (const f of [SCHEDULE, TEMPLATE, SERIAL, EXECUTE, ORIENT, GRAMMAR, CONTEXT, STATUS, REPAIR, 'README.md']) assert.ok(f in real, `${f} is not scanned`)
 })
 
 // ---- controls: each mutates the real files in memory and must fail with exactly its rule ----------------
@@ -322,6 +333,18 @@ test('control: an S3 that writes the other chains fails t8', () => {
 
 test('control: a Surface entry that claims the home directory fails t6', () => {
   only(swap(CONTEXT, 'A `## Launch` path that is `/` or the home directory is never\n  claimed', 'A `## Launch` path that is `/` or the home directory is\n  claimed'), ['t6'], 'home directory')
+})
+
+test('control: a status Incomplete paragraph with only --regenerate fails t10', () => {
+  only(swap(STATUS, 'On\na `shape: serial` note', 'On\na `shape: parallel` note'), ['t10'], 'status § 1')
+})
+
+test('control: a status item 5 without the serial remedy fails t10', () => {
+  only(swap(STATUS, '--regenerate`; on a `shape: serial` note, stamp it `status: dropped`,\n   then `/thread:schedule --tasks <its tasks>` (§ 1', '--regenerate` (§ 1'), ['t10'], 'status § 4')
+})
+
+test('control: a repair incomplete stop without the serial remedy fails t10', () => {
+  only(swap(REPAIR, '; on a `shape: serial` note, which nothing supersedes,\n  stamp it `status: dropped`, then `/thread:schedule --tasks <its tasks>`', ''), ['t10'], 'repair')
 })
 
 test('control: a description back on "a second unfinished rollout" fails t9', () => {

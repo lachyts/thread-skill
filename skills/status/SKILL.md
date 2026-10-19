@@ -81,7 +81,10 @@ closed this note out, so this rollout must never be reinstated or resumed: its t
   queue, and recommend nothing runnable.
 
 **Incomplete.** After § 2, read the JSON's `incomplete`: non-null means the rollout must not run as written
-(`next` refuses it), so headline it with its reason and the remedy, `/thread:schedule <project> --regenerate`.
+(`next` refuses it), so headline it with its reason and the remedy, `/thread:schedule <project> --regenerate`. On
+a `shape: serial` note (read from the note, as the protocol version is) the remedy is instead `status: dropped`,
+then `/thread:schedule --tasks <its tasks>`: a serial run supersedes nothing, so `--regenerate` never ends its stamp
+(schedule § Serial path).
 
 **Start stamp.** Read the rollout frontmatter's first top-level `start:` line straight from the note, as
 Lineage reads `supersedes:`, by `_shared/vault-grammar.md` § Rollout start stamp (its scalar lower-cased, quotes
@@ -486,7 +489,8 @@ Keep the whole report scannable: it's a glance, not a wall of text.
 3. Predates the queue (`protocol_version` absent, `2` or `3`) → execute § 2's remedy: hard-pause it if a
    session is running it, then `/thread:schedule <project> --regenerate`.
 4. Unsupported protocol version → report it; nothing runnable to recommend.
-5. `incomplete` → `/thread:schedule <project> --regenerate`.
+5. `incomplete` → `/thread:schedule <project> --regenerate`; on a `shape: serial` note, stamp it `status: dropped`,
+   then `/thread:schedule --tasks <its tasks>` (§ 1's **Incomplete**).
 6. Every task merged → "rollout complete: run the completion ceremony through `/thread:execute [[<rollout>]]`"
    (or "already archived").
 7. An open escalation, an undecided RACE / UNVERIFIED or a possible PR-less merge →
