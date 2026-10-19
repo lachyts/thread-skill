@@ -2,20 +2,27 @@
 // (their behaviour is pinned by tests/leg.test.sh L13), close-score.py's serial path and serial-score.py (pinned by
 // tests/reflect-close-score.test.mjs and tests/reflect-serial-score.test.mjs). One pure function, check(files), over
 // { key: text }; each rule has a mutation control that fails exactly that rule. Phrase checks run on collapsed text.
-//   s-route      status § 1's **Shape** sends `shape: serial` to § 5 instead of §§ 2–4;
+//   s-route      status § 1's **Shape** sends `shape: serial` to § 5 instead of §§ 2–4, and its version and shape greps
+//                read the note § 1 resolved (`<rollout-note>`, an `Archive/Rollouts/` copy included), never a fixed
+//                `Work/Tasks/<slug>.md`;
 //   s-read       § 5's one read is `leg.py status`, fenced, and § 5 names no other `.py` verb in a code span;
 //   s-report     § 5's report: the headline, the Legs, the Queue groups (a set-aside with its `dependants`), the
-//                footer of deferred and missing rows, the smoke list, Needs you, the Stall and the Restart;
+//                footer of deferred and missing rows, the smoke list, Needs you, the Stall and the Restart, and a
+//                terminal chain with no Restart and no Smoke list;
 //   s-order      § 5's recommended actions S1–S13 in order, one chain state each; S9 runs a Complete Leg from
-//                `restart.cwd` or any folder but this plugin's own checkout;
+//                `restart.cwd` or any folder but this plugin's own checkout; S6's and S8's paste names any launch
+//                from `restart.cwd` for a Complete restart (`restart.anyLaunch`, whose `launch` is null);
 //   r-route      repair § 1 scans a serial note through status § 5 and, after the Stops, sends it to § 7;
 //   r-halt       § 7 (c): the halt's evidence, then `leg.py clear-halt` only on Lachy's word;
-//   r-takeover   § 7 (d): `list_sessions` present stops, gone (or his word) takes over, else ask; (e)'s open-Leg
-//                clause needs (d)'s evidence and the take-over prompt;
-//   r-restart    § 7 (e) step 1: every `restart.blockedBy` value in order with its evidence, the "checks only"
-//                sentence, and the steps re-read → `restarted --pending` → `create_thread` → `--started`, or the
-//                manual handoff → `--manual`; never `leg.py begin`;
-//   r-restarting § 7 (e) step 2's outcomes: a standing restart stops, a begun Leg stops, no session id stops;
+//   r-takeover   § 7 (d), run whenever `restart.takeOver` (whatever blocks first): `list_sessions` present stops, gone
+//                (or his word) takes over, else ask; (e)'s open-Leg clause needs (d)'s evidence and the take-over
+//                prompt;
+//   r-restart    § 7 (e) step 1: every `restart.blockedBy` value in order with its evidence, (d)'s evidence whenever
+//                `restart.takeOver` (the restart clause included: a standing restart outranks an open Leg), the
+//                "checks only" sentence, and the steps re-read → `restarted --pending` → `create_thread` →
+//                `--started`, or the manual handoff → `--manual`; never `leg.py begin`;
+//   r-restarting § 7 (e) step 2's outcomes: a standing restart stops, `recorded: false` by `began` (a begun Leg
+//                stops, this session's own standing line goes on to step 3), no session id stops;
 //   r-setaside   § 7 (b): `approve-gates` on sign-off, a declined gate deferred, a hand-back recorded first;
 //   r-defer      § 7 (b)'s Defer: the `dependants`, the chain-or-fix ask, one `defer` of the closure, a held
 //                dependant never written, and no retire block or `## Notes` line;
@@ -89,7 +96,11 @@ function check(f) {
 
   // ---- status ----
   const s1 = section(f.status, /^### 1\. /) ?? ''
-  need('s-route', 'status § 1', s1, ['**Shape.**', '`shape: serial` → § 5 instead of §§ 2–4'])
+  need('s-route', 'status § 1', s1, ['**Shape.**', '`shape: serial` → § 5 instead of §§ 2–4', 'The path it resolves is `<rollout-note>`',
+    "`grep -m1 '^protocol_version:' <rollout-note>`", "`grep -m1 '^shape:' <rollout-note>`"])
+  if (/grep -m1 '\^(protocol_version|shape):' ~\/repos\/obsidian\/Work\/Tasks\/<slug>\.md/.test(C(s1))) {
+    flag('s-route', "status § 1 greps the rollout's version or shape at a fixed Work/Tasks/<slug>.md")
+  }
   const s5 = section(f.status, /^### 5\. A serial chain$/) ?? ''
   if (!s5) flag('s-read', 'status has no § 5')
   if (!s5.split('\n').some((l) => l.trim() === 'python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py status --rollout <rollout-note>')) {
@@ -99,7 +110,9 @@ function check(f) {
   if (!verbs.length || verbs.some((v) => v !== 'leg.py status')) flag('s-read', `§ 5 names ${verbs.join(', ')}`)
   need('s-report', 'status § 5', s5, ['**Headline.**', '**Legs.**', '**Queue.**', '**Done**', '**Claimed**', '**Queued**', '**Set aside**',
     'and its `dependants`', 'Outside the count', 'each `deferred` row', "each `missing` one", '**Smoke list.**', '**Needs you.**',
-    '`needsYou`, verbatim', '**Stall.**', '`stall.why`', '**Restart.**', '"blocked by `<restart.blockedBy>`"'])
+    '`needsYou`, verbatim', '**Stall.**', '`stall.why`', '**Restart.**', '"blocked by `<restart.blockedBy>`"',
+    'A terminal chain (`complete`, `dropped`, `superseded` or `incomplete`: `begin` refuses each)',
+    'its report has no Restart and no Smoke list'])
   const acts = s5.split('\n').filter((l) => /^- S\d+ /.test(l)).map((l) => item(s5, new RegExp(`^${l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)))
   const nums = acts.map((a) => Number(a.match(/^- S(\d+) /)[1]))
   if (JSON.stringify(nums) !== JSON.stringify(S_STATES.map((_s, i) => i + 1))) flag('s-order', `§ 5's actions are S${nums.join(', S')}`)
@@ -113,6 +126,11 @@ function check(f) {
     !s9.includes('a Complete Leg works no row')) flag('s-order', `S9 is ${s9}`)
   for (const k of [4, 10, 11]) if (!C(acts[k]).includes('`/thread:repair [[<rollout>]]`')) flag('s-order', `S${k + 1} does not route to repair`)
   if (!C(acts[6]).includes('check that session first')) flag('s-order', 'S7 does not check the session first')
+  for (const k of [5, 7]) {
+    if (!C(acts[k]).replace(/[()]/g, '').includes('any launch from `restart.cwd` when `restart.anyLaunch`')) {
+      flag('s-order', `S${k + 1}'s paste names only restart.launch`)
+    }
+  }
 
   // ---- repair ----
   const r1 = section(f.repair, /^### 1\. /) ?? ''
@@ -134,7 +152,8 @@ function check(f) {
   need('r-halt', '§ 7 (c)', c, ['`closed: halted:`', '`## Blocker diagnosis`', '`git -C <top> status --porcelain`', 'Ask. Only on his word:',
     '`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py clear-halt --rollout <rollout-note> --reason "<his words>"`'])
 
-  need('r-takeover', '§ 7 (d)', d, ['with `list_sessions`', 'the session is present → "Leg K is live', 'and stop',
+  need('r-takeover', '§ 7 (d)', d, ['**(d) An open Leg** (`restart.takeOver` true:', 'whatever `restart.blockedBy` names first',
+    'a standing restart outranks an open Leg there', 'with `list_sessions`', 'the session is present → "Leg K is live', 'and stop',
     'it is gone from `list_sessions`, or Lachy says Leg K is dead → (e), with the take-over', '→ ask Lachy'])
   const step1 = item(e, /^1\. \*\*Restartable\?\*\*/)
   const bullets = step1.split('\n').filter((l) => /^\s+- /.test(l)).map((l) => item(step1, new RegExp(`^${l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)))
@@ -152,6 +171,9 @@ function check(f) {
   if (!ho.includes('only after `list_sessions` shows X gone, or Lachy says X never ran')) flag('r-restart', `handover clause: ${ho}`)
   if (!rs.includes('only with `--replace` in step 2, after its own check') || !rs.includes('`list_sessions` shows that id gone') ||
     !rs.includes('Lachy says it never started')) flag('r-restart', `restart clause: ${rs}`)
+  if (!rs.includes("With `restart.takeOver`, (d)'s evidence for Leg K too")) flag('r-restart', `the restart clause skips (d) on a take-over: ${rs}`)
+  need('r-restart', '§ 7 (e)', e, ["Whenever `restart.takeOver` is true, whatever the blocker, the restart needs (d)'s evidence",
+    "A previous repair's check never stands in for it"])
   for (const w of ['stalled', 'awaiting-successor with no hand-over line', 'stopped, on his word', 'completable, not-started or ready, on his ask']) {
     if (!nul.includes(w)) flag('r-restart', `the null clause lacks ${w}`)
   }
@@ -166,7 +188,9 @@ function check(f) {
 
   const step2 = C(item(e, /^2\. \*\*Mark it\.\*\*/))
   for (const p of ['with `--replace` only on the `restart Leg N` branch', 'Exit 3 → report the standing restart, and stop',
-    '`recorded: false` → Leg N began meanwhile: stop', 'Exit 1 naming `--session` → this session has no id: report it, and stop; never invent one']) {
+    '`recorded: false` → by `began`: `true`, Leg N began meanwhile: stop',
+    "`false`, this session's own identical line already stands", 'go on to step 3',
+    'Exit 1 naming `--session` → this session has no id: report it, and stop; never invent one']) {
     if (!step2.includes(p)) flag('r-restarting', `step 2 lacks ${p}`)
   }
 
@@ -251,6 +275,24 @@ const lineOf = (key, start) => {
 test('control: status § 1 sending a serial note to § 2 fails s-route', () => {
   only('status', '`shape: serial` → § 5 instead of §§ 2–4', '`shape: serial` → § 2', ['s-route'], 'route')
 })
+test('control: status § 1 grepping the shape at a fixed Work/Tasks path fails s-route only', () => {
+  only('status', "`grep -m1 '^shape:' <rollout-note>`", "`grep -m1 '^shape:'\n~/repos/obsidian/Work/Tasks/<slug>.md`", ['s-route'], 'shape grep')
+})
+test('control: status § 1 grepping the version at a fixed Work/Tasks path fails s-route only', () => {
+  only('status', "`grep -m1 '^protocol_version:' <rollout-note>`", "`grep -m1 '^protocol_version:' ~/repos/obsidian/Work/Tasks/<slug>.md`",
+    ['s-route'], 'version grep')
+})
+test('control: a terminal chain still rendering a Restart fails s-report', () => {
+  only('status', ': its report has no Restart and no Smoke list.', ': it renders them as usual.', ['s-report'], 'terminal')
+})
+test('control: S6 pasting in restart.launch alone fails s-order', () => {
+  only('status', "paste `restart.prompt` in `restart.launch`, or any launch\n  from `restart.cwd` when `restart.anyLaunch`.",
+    'paste `restart.prompt` in `restart.launch`.', ['s-order'], 's6')
+})
+test('control: S8 pasting in restart.launch alone fails s-order', () => {
+  only('status', "paste `restart.prompt` in `restart.launch` (or any launch from `restart.cwd` when\n  `restart.anyLaunch`), or",
+    'paste `restart.prompt` in `restart.launch`, or', ['s-order'], 's8')
+})
 test('control: a second leg.py verb in status § 5 fails s-read', () => {
   only('status', '- **Smoke list.** The `smoke` entries:', '- **Smoke list.** `leg.py restarted` lists the `smoke` entries:', ['s-read'], 'verb')
 })
@@ -305,7 +347,24 @@ test('control: a handover clause without its evidence fails r-restart', () => {
   only('repair', 'only after `list_sessions` shows X gone, or Lachy says X never ran.', 'restart it.', ['r-restart'], 'handover')
 })
 test('control: a step 2 that invents a session id fails r-restarting', () => {
-  only('repair', 'report it,\n   and stop; never invent one.', 'pass a made-up one.', ['r-restarting'], 'invent')
+  only('repair', 'report it, and stop; never invent one.', 'pass a made-up one.', ['r-restarting'], 'invent')
+})
+test('control: a step 2 that stops on its own standing line fails r-restarting', () => {
+  only('repair', "`recorded: false` → by `began`: `true`, Leg N began meanwhile: stop; `false`, this session's own identical line\n   already stands (a re-run of this step, after a compaction say): go on to step 3.",
+    '`recorded: false` → Leg N began meanwhile: stop.', ['r-restarting'], 'began')
+})
+test('control: (e) without the take-over evidence rule fails r-restart only', () => {
+  only('repair', "   Whenever `restart.takeOver` is true, whatever the blocker, the restart needs (d)'s evidence: Leg K's session gone\n" +
+    "   from `list_sessions`, or Lachy's word that Leg K is dead. A previous repair's check never stands in for it.\n\n", '', ['r-restart'], 'takeover rule')
+})
+test('control: a restart clause that skips (d) on a take-over fails r-restart only', () => {
+  only('repair', "\n     With `restart.takeOver`, (d)'s evidence for Leg K too, and the prompt is the take-over form.", '', ['r-restart'], 'restart clause')
+})
+test('control: a (d) keyed on blockedBy alone fails r-takeover only', () => {
+  only('repair', "**(d) An open Leg** (`restart.takeOver` true: Leg K, the `openLeg`, is open, and `<id>` is the `session` of its\n" +
+    "`legs` entry), whatever `restart.blockedBy` names first: a standing restart outranks an open Leg there, so a chain\n" +
+    "`restarting` over an open Leg still needs this check.", '**(d) An open Leg** (`restart.blockedBy` reads `open Leg K (session <id>)`).',
+    ['r-takeover'], 'd trigger')
 })
 test('control: a hand-back before its record-answer fails r-setaside', () => {
   only('repair', '  - Hand back: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-answer',
@@ -339,8 +398,8 @@ test('control: leg.py begin in § 7 fails r-allow only', () => {
   only('repair', '**(a) Diagnose.** Show status § 5\'s report:', '**(a) Diagnose.** Run `leg.py begin`, then show status § 5\'s report:', ['r-allow'], 'begin')
 })
 test('control: a Notes line written by § 7 fails r-notes', () => {
-  only('repair', 're-read `leg.py status`: the chain reads stalled, and (e) restarts it.',
-    're-read `leg.py status`: the chain reads stalled, and (e) restarts it. Record it as `- <YYYY-MM-DD> repair: [[<rollout>]] halt cleared`.',
+  only('repair', 'its rows leave (ready, completable or stuck), and (e) restarts it.',
+    'its rows leave (ready, completable or stuck), and (e) restarts it. Record it as `- <YYYY-MM-DD> repair: [[<rollout>]] halt cleared`.',
     ['r-notes'], 'notes')
 })
 test('control: a Complete whose failed score stops the ceremony fails l-score', () => {

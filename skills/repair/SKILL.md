@@ -693,10 +693,12 @@ line, and writes no note of its own: leg.py reads each deferred row as deferred,
 **(c) A halt** (`chain` halted). Show the halted Leg's `closed: halted:` line, the held task's latest `## Blocker
 diagnosis` (if it has one), and `git -C <top> status --porcelain` for each `leg_base` top of that task. Ask. Only on his word:
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py clear-halt --rollout <rollout-note> --reason "<his words>"`, then
-re-read `leg.py status`: the chain reads stalled, and (e) restarts it.
+re-read `leg.py status`: the chain reads stalled when the halted Leg held a claim (the next Leg inherits it), else what
+its rows leave (ready, completable or stuck), and (e) restarts it.
 
-**(d) An open Leg** (`restart.blockedBy` reads `open Leg K (session <id>)`). Check the Chorus Stage with
-`list_sessions`:
+**(d) An open Leg** (`restart.takeOver` true: Leg K, the `openLeg`, is open, and `<id>` is the `session` of its
+`legs` entry), whatever `restart.blockedBy` names first: a standing restart outranks an open Leg there, so a chain
+`restarting` over an open Leg still needs this check. Check the Chorus Stage with `list_sessions`:
 
 - the session is present → "Leg K is live in session `<id>`": report it, and stop;
 - it is gone from `list_sessions`, or Lachy says Leg K is dead → (e), with the take-over;
@@ -712,9 +714,13 @@ re-read `leg.py status`: the chain reads stalled, and (e) restarts it.
    - `handover started <X>` → only after `list_sessions` shows X gone, or Lachy says X never ran.
    - `restart Leg N (<how>)` → only with `--replace` in step 2, after its own check: for `started` (its id is
      `restarted.started`), `list_sessions` shows that id gone; for `pending` or `manual`, Lachy says it never started.
+     With `restart.takeOver`, (d)'s evidence for Leg K too, and the prompt is the take-over form.
    - null → by `chain`: stalled; awaiting-successor with no hand-over line, or a manual one Lachy says he has not
      pasted; stopped, on his word; completable, not-started or ready, on his ask.
    - Anything else → report it, and stop.
+
+   Whenever `restart.takeOver` is true, whatever the blocker, the restart needs (d)'s evidence: Leg K's session gone
+   from `list_sessions`, or Lachy's word that Leg K is dead. A previous repair's check never stands in for it.
 
    `leg.py restarted` checks only the halt, the numbering (Leg N not begun, N = last_n + 1) and a standing restart.
    It never checks the open Leg or the hand-over, so that evidence is this step's. Nothing later re-checks a
@@ -722,13 +728,15 @@ re-read `leg.py status`: the chain reads stalled, and (e) restarts it.
    start.
 2. **Mark it.** `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py restarted --rollout <rollout-note> --leg <restart.leg> --pending`,
    with `--replace` only on the `restart Leg N` branch. Exit 3 → report the standing restart, and stop.
-   `recorded: false` → Leg N began meanwhile: stop. Exit 1 naming `--session` → this session has no id: report it,
-   and stop; never invent one.
+   `recorded: false` → by `began`: `true`, Leg N began meanwhile: stop; `false`, this session's own identical line
+   already stands (a re-run of this step, after a compaction say): go on to step 3. Exit 1 naming `--session` → this
+   session has no id: report it, and stop; never invent one.
 3. **Start it** with the host's `create_thread`, chosen as § Native runtime binding says (a claude harness, or
    `restart.anyLaunch`, on the Chorus Stage): `title`, `prompt`, `tldr` and `cwd` from `restart`, no `brief`,
    `report_back` on. Then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py restarted --rollout <rollout-note> --leg <N> --started <its id>`.
 4. **Otherwise** (no host tool, a codex launch off Codex Desktop, or a `create_thread` error): print `restart.prompt`
-   fenced with its launch line (`restart.launch`, or any launch from `restart.cwd`), labelled `manual handoff`, then
+   fenced with its launch line (`restart.launch`, or any launch from `restart.cwd` when `restart.anyLaunch`), labelled
+   `manual handoff`, then
    `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py restarted --rollout <rollout-note> --leg <N> --manual "<why>"`.
 
 § 7 writes no `## Notes` line by hand: the Leg log (through leg.py) and each task note's own records are the chain's
