@@ -52,7 +52,7 @@ It never claims its launch profile's other Working roots (a workspace launcher's
 `Local:`, a project's `repos:` entries, nor a repo or external system it writes but names nowhere: those are
 outside schedule's sight.
 
-Launch-command paths. In `## Launch`, outside a **Read...** or **MCP** item, each line of a fenced block (a `\`
+Launch-command paths. In `## Launch`, outside a **Read...** or **MCP** item, each line of a fenced block (a `\\`
 line end continues it) and each backticked span that is not a path span is read as shell: quotes stripped, `#`
 starts a comment, and `&&`, `||`, `;`, `|` and `&` start a new command. A command's path is the argument of
 each `--add-dir <path>` (with any further path spans after it: the flag takes several) or `--add-dir=<path>`,
