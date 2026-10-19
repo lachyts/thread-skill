@@ -323,7 +323,7 @@ test('the overall deadline clips a step cap: a 30 s land cap under --deadline 5 
   const fx = fixture(t)
   const fake = hangingGit(fx)
   const r = closeScore(fx, [...ARGS(fx), '--deadline', '5'], { PATH: fake.PATH })
-  notScored(fx, r, new RegExp(`^close-score: ${SLUG}: not scored: (land\\.sh --origin-slug timed out after [1-5]s \\(overall deadline 5s\\)|overall deadline 5s reached before \\S+)\\n$`))
+  notScored(fx, r, new RegExp(`^close-score: ${SLUG}: not scored: ((fold-journals|rollout-settings\\.py|land\\.sh --origin-slug) timed out after [1-5]s \\(overall deadline 5s\\)|overall deadline 5s reached before (fold-journals|rollout-settings\\.py|land\\.sh --origin-slug))\\n$`))
   assert.ok(r.elapsed < 15000, `elapsed ${r.elapsed} ms: the 30 s land cap was clipped`)
   if (fs.existsSync(fake.pidFile)) {
     const pid = Number(fs.readFileSync(fake.pidFile, 'utf8'))
