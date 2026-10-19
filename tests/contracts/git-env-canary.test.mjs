@@ -258,6 +258,20 @@ function check({ execute, status, repair, schedule, context, readme, adr, canary
     !s27.includes("land.sh's `closeout_shaped`; stricter than its S9, so no merge and no empty commit") ||
     !s27.includes('a close-out committed on the local default branch mid-rollout must not halt an unattended run. The git-env canary (§ 4.5) honours this')) fails.push('owner-closeout')
 
+  // owner-refusal (p26-1): `arm` refuses a window whose owner does not hold, and an integrate, verify or RACE
+  // window's owner is the Integration lane (`_holds_lane`), so a skipped stamp stops at the arm, never as a
+  // `record not armed` trip; step 3 routes prepare's exit 1 (no `integrating:`) to mark-integrating; and step 4's
+  // exit-3 row spells step 3 out from its start, the stamp included.
+  const ownerB = bullet(canRaw, 'The owner rule.')
+  const exit1 = st3.includes('**exit 1**') ? st3.slice(st3.indexOf('**exit 1**'), st3.indexOf('**exit 2**')) : ''
+  const row3 = rows['3'] ?? ''
+  if (!ownerB.includes('`arm` refuses a window whose owner does not hold') ||
+    !(ownerB.includes('`_holds_lane`') || ownerB.includes('current `integrated` Integration-log line')) ||
+    !exit1.includes('mark-integrating') || !exit1.includes('`prepare` again, once') ||
+    !before(row3, '§ 2.5', 'check-all') || !before(row3, 'check-all', 'mark-integrating') || !before(row3, 'mark-integrating', 'prepare') ||
+    !ctxWindow.includes('the Integration lane') || !ctxWindow.includes('`arm` refuses a window whose owner does not hold') ||
+    !adr.includes('*(Amended 2026-10-19 by thread-skill-p26-1:')) fails.push('owner-refusal')
+
   // status: § 2 reads gitEnvHold, § 3 flags it (offline too), § 4's headline and action 7 route it to repair.
   if (!status2.includes('plus `gitEnvHold`') || !gflag.includes('it holds offline too') ||
     !status4.includes('`GIT-ENV HOLD: [[a]], [[b]]`') ||
@@ -301,7 +315,7 @@ test('the git-env canary holds at every site, consumer and record', () => {
 
 const RULES = ['marker-tie', 'arm-sites', 'check-sites', 'check-all-sites', 'integrate-check', 'prepare-cases', 'step11-halt',
   'lane-free', 'race-gitenv', 'race-followon', 'drop-guard', 'merge-result', 'exit-rule', 'owner-closeout', 'status', 'schedule',
-  'repair', 'adr', 'context-readme']
+  'repair', 'adr', 'context-readme', 'owner-refusal']
 const CONTROLLED = new Set()
 function edit(text, from, to) {
   assert.ok(text.includes(from), `control setup: ${from.slice(0, 80)} not found`)
@@ -413,6 +427,15 @@ test('control: a repair hand-off not held behind the git-env hold fails repair',
 
 test('control: an ADR bullet without the upgrade gap fails adr', () => {
   only('adr', 'and the upgrade path:', 'and', 'adr', 'upgrade')
+})
+
+test('control: an exit-3 row without mark-integrating, no step-3 exit-1 route or an integrating:-only owner rule fails owner-refusal', () => {
+  const row3 = real.execute.split('\n').find((l) => l.startsWith('   | 3 | '))
+  only('execute', row3, row3.replace('`mark-integrating`, ', ''), 'owner-refusal', 'exit-3 row')
+  const exit1 = real.execute.split('\n').find((l) => l.startsWith('    - **exit 1**'))
+  only('execute', exit1 + '\n', '', 'owner-refusal', 'step-3 exit 1')
+  const owner = real.execute.split('\n').find((l) => l.startsWith('- **The owner rule.**'))
+  only('execute', owner, "- **The owner rule.** A window can only be open while its vault owner holds: a task call's note reads `in_progress`; an integrate call's, a verify's or a RACE re-verify's note carries `integrating:`. Once the owner no longer holds, any canary verb compares the window once and closes it, so a hard pause's TaskStop'd calls, a crash between `arm` and launch and a dead call's window all end.", 'owner-refusal', 'owner rule reverted')
 })
 
 test('control: no README line fails context-readme', () => {

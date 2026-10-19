@@ -21,7 +21,9 @@
 #   deadline   C25 no slot within --slot-wait → rc `noslot`, exit 75, the verifier never ran, the race tree removed
 #   C26 TERM during the wait   C27 a lone --slots or --slot-wait   C28 a SIGKILL of verify: its guard ends the
 #   step and frees the slot, no rc   C17s C17's deadline and TERM arms slotted   C23s C23's TRAP and LATE arms
-#   slotted (the LATE signal lands while the guard starts).
+#   slotted (the LATE signal lands while the guard starts). C29 prepare refuses a note with no integrating: (exit 1,
+#   nothing fetched, deleted, stashed or merged)   C29b the 2026-10-19 slip: merge-task's exit 3 after an integrate
+#   call's integrated row, re-run with no mark-integrating (p26-1).
 # Hermetic: temp repos, PATH shim, ssh disabled, every merge-task interval 0; the verify slots in a temp pool
 # (tests/lib/merge-task-env.sh exports THREAD_VERIFY_SLOTS_DIR).
 set -uo pipefail
@@ -55,7 +57,8 @@ else echo "SKIP - zsh arm: zsh not installed on this $(uname) runner"; fi
 # ---- fixtures -------------------------------------------------------------------------------------------
 # fx <name>: a fresh scenario. Origin (MT_SRV) holds master (base.txt, a.txt) and the task branch $BR (one
 # commit: a.txt line 1 and t.txt — H0, the approved head); p is a pusher clone; R the project checkout; WT the
-# task tree as the engine's setup leaves it; V the vault: ro.md and $SLUG.md (review, pr: #5, ready:).
+# task tree as the engine's setup leaves it; V the vault: ro.md and $SLUG.md (review, pr: #5, ready:, and the
+# integrating: step 3's mark-integrating stamps before every prepare, p26-1).
 fx() {
   echo "== $1"
   F="$tmp/$1"; mkdir -p "$F"
@@ -76,7 +79,7 @@ fx() {
   g -C "$R" worktree add -q "$WT" -b "$BR" "origin/$BR" >/dev/null 2>&1
   V="$F/vault"; mkdir -p "$V"
   printf -- '---\ntags: [task, rollout]\nstatus: open\nprotocol_version: 5\nparallel_ceiling: 2\n---\n\nProject root: `%s`\n\n## Queue\n\n- [[%s]]\n' "$R" "$SLUG" > "$V/ro.md"
-  printf -- '---\ntags: [task]\nstatus: review\nscope: cross-cutting\nrollout: "[[ro]]"\npr: %s\nready: 2026-10-02T11:00+00:00\nreview_rounds_used: 1\n---\n\n## Notes\n\nt5\n' "$PR" > "$V/$SLUG.md"
+  printf -- '---\ntags: [task]\nstatus: review\nscope: cross-cutting\nrollout: "[[ro]]"\npr: %s\nready: 2026-10-02T11:00+00:00\nintegrating: 2026-10-02T11:30+00:00\nreview_rounds_used: 1\n---\n\n## Notes\n\nt5\n' "$PR" > "$V/$SLUG.md"
 }
 # main <file> <content> [subject]: a commit on origin's master from p; B is the new tip.
 main() {
@@ -619,6 +622,7 @@ g -C "$WT" fetch -q origin
 g -C "$WT" merge -q --no-ff --no-commit origin/side >/dev/null 2>&1
 printf 'dead integrator edit\n' >> "$WT/base.txt"
 onbranch merge --no-ff --no-edit -m "a dead integrator's pushed merge" origin/side
+python3 "$RR" mark-integrating --tasks "$SLUG" --tasks-dir "$V" >/dev/null   # step 1.4 → step 3: the stamp before prepare
 prep
 ok "$(j "$J" 'd["abortedMerge"]')|$(git -C "$WT" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1 && echo left || echo none)" "true|none" "C13b: prepare aborts the merge left in progress"
 ok "$(j "$J" 'd["stashed"]')" "integration leftovers $M" "C13b: … stashes the tracked edit"
@@ -1211,6 +1215,43 @@ ok "$(reaped "$(cat "$T2/pid" 2>/dev/null)")" gone "C23s: … and the step's gro
 within 60 vfree && st=free || st="held after 60 s"
 ok "$st" free "C23s: … and the verify slot is free"
 for p in "${vpids[@]}"; do kill -0 "$p" 2>/dev/null && kill -TERM "$p"; done
+
+# ======== C29: prepare refuses a note with no integrating: (p26-1) ===========================================
+# Every route into step 3's prepare passes mark-integrating first; a skipped stamp stops here, before anything
+# is fetched, deleted, stashed or merged, and the lead's fix is the stamp, then prepare again.
+noint() { sed -i.bak '/^integrating:/d' "$V/$SLUG.md"; }
+fx c29
+noint
+X=$(git -C "$R" commit-tree "$(git -C "$R" rev-parse "$TB^{tree}")" -m dangling)
+git -C "$R" update-ref "refs/integration-anchor/$BR" "$X"
+printf 'leftover\n' >> "$WT/t.txt"
+O0=$(git -C "$R" rev-parse refs/remotes/origin/master)
+main m.txt "theirs"
+prep
+ok "$prc|$J" "1|" "C29: no integrating: → prepare exits 1 and prints no JSON"
+has "$(cat "$F/prep.err")" "carries no integrating:" "C29: … stderr names the missing stamp"
+has "$(cat "$F/prep.err")" "mark-integrating" "C29: … and the verb to run"
+ok "$(git -C "$R" rev-parse -q --verify "refs/integration-anchor/$BR" || echo gone)" "$X" "C29: … the stale anchor ref is not deleted"
+ok "$(git -C "$WT" stash list)|$(git -C "$WT" diff --name-only)" "|t.txt" "C29: … nothing stashed, the leftover still in the tree"
+ok "$(git -C "$R" rev-parse refs/remotes/origin/master)" "$O0" "C29: … and nothing fetched (origin/master unchanged after main moved)"
+python3 "$RR" mark-integrating --tasks "$SLUG" --tasks-dir "$V" >/dev/null
+prep
+ok "$prc|$(j "$J" 'd["route"]')" "0|verify" "C29: mark-integrating, then prepare again → 0, route verify"
+# C29b: the incident's sequence. An integrate call's integrated row (reconcile removed integrating:), then
+# merge-task's exit 3 (main moved): step 3 again from its start, so a prepare with no mark-integrating refuses.
+fx c29b
+main a.txt "$(printf 'a1\na2\na3\na4\nA5 theirs')" "theirs: a5 (#6)"; B0=$B
+onbranch merge --no-ff --no-edit -m "Merge origin/master into $BR (Integration)" origin/master
+M1=$(git --git-dir "$MT_SRV" rev-parse "refs/heads/$BR")
+g -C "$WT" pull -q --ff-only origin "$BR" 2>/dev/null
+addlog "$V/$SLUG.md" "2026-10-02T11:30+00:00 integrated path=integrator pr=5 anchor=$H0 head=$M1 base=$B0 wait=5 duration=3 triggers=shared-file"
+noint
+main m.txt "theirs" "theirs: m (#8)"
+prep
+ok "$prc" 1 "C29b: base moved after an integrated row, prepare with no mark-integrating → 1"
+python3 "$RR" mark-integrating --tasks "$SLUG" --tasks-dir "$V" >/dev/null
+prep
+ok "$prc|$(j "$J" 'd["case"]')|$(j "$J" 'd["route"]')" "0|ii|verify" "C29b: mark-integrating, then prepare → 0, case (ii), route verify"
 
 echo; [ "$fail" -eq 0 ] && echo "lead-integrate: ALL PASS" || echo "lead-integrate: SOME FAILED"
 exit "$fail"
