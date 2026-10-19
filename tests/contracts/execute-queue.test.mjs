@@ -1,5 +1,6 @@
 // Execute's lead runs the queue (ADR 0030 decisions 2 to 5, p12-9): the § 4.5 loop and its neighbours in
-// skills/execute/SKILL.md, the Stop hook it drives and the heartbeat prompt that backs it up. The scripts the prose
+// skills/execute/SKILL.md (the rollout clone's § 2.7 refresh and cited paths, § 2.8 launch gate and completion twin
+// refresh among them, ADR 0042), the Stop hook it drives and the heartbeat prompt that backs it up. The scripts the prose
 // calls are executed elsewhere (tests/lead-integrate.test.sh, skills/execute/tests/reconcile-rollout-lead.test.sh,
 // skills/execute/tests/rollout-stop-driver.test.sh); this pins the prose an LLM lead follows.
 //
@@ -635,6 +636,23 @@ function checkExecute({ skill, hooksJson, exists, template }) {
     fails.push('lane-order')
   }
 
+  // clone-root (ADR 0042, p26-2): § 2.7 refreshes the rollout clone before the pushed-base check and passes the
+  // not-yet-merged tasks' cited paths (`reconcile-rollout.py cited`), with the clone-rooted sentence; § 2.8 gates the
+  // launch directory; step 5 refreshes the in-place twin between the `status: done` stamp and the Completion log; and
+  // Scope names the twin refresh.
+  const s27c = S(skill, /^### 2\.7\. /)
+  const s28c = S(skill, /^### 2\.8\. /)
+  const s5raw = stepRaw(skill, 5)
+  const stampAt = s5raw.indexOf('   - Stamp `status: done` + `completed: <date>` on the rollout frontmatter.')
+  const ripAt = s5raw.indexOf('self-rollout-check.sh --refresh-in-place <Project root>')
+  const logAt = s5raw.indexOf('   - Append a `## Completion log`')
+  if (!s27c.includes('reconcile-rollout.py cited --rollout <rollout-note>') ||
+    !before(s27c, 'self-rollout-check.sh --refresh <Project root>', 'Then run the pushed-base check') ||
+    !s27c.includes('In a clone-rooted rollout (every rollout scheduled after P26, and every self-rollout), a commit in any other clone of the set') ||
+    !s27c.includes('In an in-place-rooted rollout, one in another clone of the set is still named first') ||
+    !s28c.includes('--launch-check') || !s28c.includes('reason="launched outside the Project root"') ||
+    stampAt < 0 || ripAt < stampAt || logAt < ripAt || !S(skill, /^## Scope/).includes('--refresh-in-place')) fails.push('clone-root')
+
   // s5 (the dead-run resume keeps its shape for its consumers) is part of lost-call's routing: § 5 names *Lost call*.
   if (!s5.includes('(§ 4.5 *Lost call*)') || !before(s5, '(§ 4.5 *Lost call*)', 'resumeFromRunId: <runId>')) fails.push('lost-call')
   return [...new Set(fails)]
@@ -650,7 +668,7 @@ const RULES = ['protocol-5', 'launch', 'slots', 'auto-revise', 'halt-guard', 'lo
   'trouble-path', 'integrate-args', 'set-aside', 'merge-exits', 'holds', 'checks', 'pauses', 'single-wave', 'status-line',
   'heartbeat', 'heartbeat-register', 'no-wave-mechanics', 'driver', 'resume-running', 'lineage', 'race-hold', 'budget',
   'ladder', 'verify-timeout', 'approved-plan', 'descope', 'settings', 'lane-order', 'auto-retry', 'recorded-answer',
-  'verify-slots']
+  'verify-slots', 'clone-root']
 const CONTROLLED = new Set()
 
 function edit(text, from, to) {
@@ -662,6 +680,14 @@ const only = (mut, rule, label) => {
   assert.deepEqual(checkExecute({ ...real, ...mut }), [rule], label)
 }
 const sk = (from, to) => ({ skill: edit(real.skill, from, to) })
+
+test('control: § 2.7 without the cited paths, or step 5 without the twin refresh, fails clone-root', () => {
+  only(sk('`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py cited --rollout <rollout-note>`', '`nothing`'),
+    'clone-root', 'no cited paths')
+  only(sk('   - Refresh the in-place checkout once: `bash ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/self-rollout-check.sh --refresh-in-place <Project root>`',
+    '   - Leave the in-place checkout alone'), 'clone-root', 'no twin refresh')
+  only(sk('reason="launched outside the Project root"`.', 'reason="elsewhere"`.'), 'clone-root', 'no launch gate reason')
+})
 
 test('control: protocol 3 proceeding fails protocol-5', () => {
   only(sk('- `protocol_version: 5` → proceed.', '- `protocol_version: 3` → proceed.'), 'protocol-5', 'protocol 3')
@@ -1128,7 +1154,7 @@ test("control: no Don't on a hand-written key fails recorded-answer", () => {
   only(sk(', and never write, supersede or spend a `## Repair input` key by hand', ''), 'recorded-answer', 'keys by hand')
 })
 
-test('the rules are all named (34) and each has a control', () => {
-  assert.equal(RULES.length, 34)
+test('the rules are all named (35) and each has a control', () => {
+  assert.equal(RULES.length, 35)
   assert.deepEqual(RULES.filter((r) => !CONTROLLED.has(r)), [])
 })
