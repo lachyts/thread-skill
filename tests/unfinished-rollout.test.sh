@@ -17,8 +17,8 @@
 #           refused by `next`, reported by `status` and the check, until a completed supersede closes it.
 #   I8      § 0's interrupted finish after step 6's carry already ran still prints the prior's `order` lines (p17-2)
 #   R1-R4   unfinished-rollout.py running: land.sh's primary-checkout hold (ADR 0031)
-#   S1-S12  shapes (ADR 0040, p24-2): the parallel check skips serial notes and refuses a run on a place a live serial
-#           chain writes, before any supersede (S2c); the serial check (`--shape serial --surface <token>...`) refuses a
+#   S1-S13  shapes (ADR 0040, p24-2): the parallel check skips serial notes and refuses a run on a place a live serial
+#           chain writes, before any supersede (S2c), never a clone root beside an in-place chain (S13, ADR 0042); the serial check (`--shape serial --surface <token>...`) refuses a
 #           chain over a live chain's surface or an unfinished parallel rollout's Project root, supersedes nothing,
 #           and names whose note it is in each remedy; tokens compare literally (realpath and the vault mapping only)
 #   D1-D3   a task taken out of a rollout whose step 7 ended (repair's `defer`, a gate dropped late, with or
@@ -622,6 +622,20 @@ chs --surface vault:Work --project Demo
 ok "$out|$rc" "refuse ro-v|3" "S12: a parallel rollout rooted in the vault meets a vault: token (the vault mapping)"
 chs --surface vault:Other --project Demo
 ok "$out|$rc" "none|0" "S12 control: a disjoint vault: token passes"
+
+# S13 (ADR 0042, an invariant pin: surface tokens compare `repo:<realpath>` literally, so this held at c096776): a
+# rollout clone beside its in-place checkout. A clone root never overlaps an in-place serial chain, so the two coexist
+# as peers; a chain that claims repo:<clone>, or a pre-P26 root in place, still refuses.
+scen s13
+mkrepo "$S/repo-rollout" https://github.com/demo/repo.git
+mkser ser.md "$DEMO" "surfaces: [\"repo:$R\"]"
+chk --repo "$S/repo-rollout" --project Demo
+ok "$out|$rc" "none|0" "S13: --repo <clone> against an in-place serial chain → none: the two coexist"
+chk --repo "$R" --project Demo
+ok "$out|$rc" "refuse ser|3" "S13: --repo <in-place> against the same chain → refuse (a pre-P26 root)"
+mkser ser.md "$DEMO" "surfaces: [\"repo:$S/repo-rollout\"]"
+chk --repo "$S/repo-rollout" --project Demo
+ok "$out|$rc" "refuse ser|3" "S13: --repo <clone> against a chain that claims repo:<clone> → refuse"
 
 # ── K1-K4: carry ──────────────────────────────────────────────────────────────────────────────────────
 scen k
