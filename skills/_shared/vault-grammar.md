@@ -86,5 +86,8 @@ no stamp; `started:` and `started_unattended:` are other keys.
   above), read as `_scalar` reads a frontmatter value, and reported as `startUnattended`.
 - `skills/status/SKILL.md` § 1's **Start stamp** and § 4 action 13: the stamp above, read straight from the
   frontmatter.
+- `skills/_shared/scripts/estate-scan.py` (the estate scan): Landed and Active through `DEAD_STATUSES`,
+  `OPEN_STATUSES` and `status_of`, loaded from the next-action script rather than copied; Review through its pinned
+  literal `REVIEW_STATUSES`; and § In flight, for each open task's `inFlight`.
 - `tests/contracts/vault-grammar.test.mjs` pins every literal copy above to this file, and checks both
   scripts' key and sort helpers against the examples under § Phase and task filenames.

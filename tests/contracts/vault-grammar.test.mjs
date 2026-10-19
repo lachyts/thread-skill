@@ -9,7 +9,8 @@
 // R1, reconcile-project.py's docstring) cite the doc instead of restating it, and § Readers lists every
 // reader, with no Not yet adopted line left (a stale one fails). § Rollout start stamp (p23-6) states the stamp
 // (`start: unattended`), its writers, its readers and its clearers; reconcile-rollout.py's START_KEY and
-// START_UNATTENDED are pinned to it.
+// START_UNATTENDED are pinned to it. estate-scan.py (p25-1) loads next-action.py's DEAD_STATUSES and OPEN_STATUSES
+// rather than copying them, and keeps one literal, REVIEW_STATUSES, pinned to the doc's Review set.
 // Controls prove the checks are not vacuous. Reads files and imports the scripts (no __pycache__ written).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -20,6 +21,7 @@ import { collapse, read, root, section } from '../lib/contract-text.mjs'
 const DOC = 'skills/_shared/vault-grammar.md'
 const CITE = '_shared/vault-grammar.md'
 const doc = read(DOC)
+const estateScan = read('skills/_shared/scripts/estate-scan.py')
 const orient = read('skills/orient/SKILL.md')
 const reshuffle = read('skills/orient/reshuffle.md')
 const close = read('skills/close/SKILL.md')
@@ -113,6 +115,22 @@ function candidateChecks(g, text) {
     ? ['close candidate statuses'] : []
 }
 
+// ---- estate-scan.py: the loaded sets and its one literal -------------------------------------------------
+
+// The names of estate-scan.py's failed checks against the doc's grammar `g`; [] when its REVIEW_STATUSES literal
+// equals Review, it reads Active and Landed through the loaded next-action module (`NA.OPEN_STATUSES`,
+// `NA.DEAD_STATUSES`), and it holds no literal copy of the Active set. A missing literal is a mismatch, never a crash.
+function estateScanChecks(g, text) {
+  const out = []
+  const m = text.match(/^REVIEW_STATUSES = frozenset\(\{([^}]*)\}\)/m)
+  const set = m ? [...m[1].matchAll(/"([^"]*)"/g)].map((x) => x[1]).sort() : null
+  if (!g.review || !set || JSON.stringify(set) !== JSON.stringify(g.review)) out.push('estate-scan REVIEW_STATUSES')
+  if (!/\bNA\.OPEN_STATUSES\b/.test(text)) out.push('estate-scan OPEN_STATUSES loaded')
+  if (!/\bNA\.DEAD_STATUSES\b/.test(text)) out.push('estate-scan DEAD_STATUSES loaded')
+  if (/\{\s*"open",\s*"in_progress"\s*\}|\{\s*"in_progress",\s*"open"\s*\}/.test(text)) out.push('estate-scan Active literal')
+  return out
+}
+
 // ---- the phase-number helpers, on the doc's own examples ---------------------------------------------
 
 // The examples the doc's Comparing and ordering bullet states: {same: [a, b]} (`p03` is `p3`), {distinct:
@@ -184,7 +202,7 @@ function readersOf(text) {
 }
 const CONFORMING = ['reconcile-project.py', 'reconcile-rollout.py', 'next-action.py', 'orient', 'R1',
   'tests/contracts/vault-grammar.test.mjs', 'reflect.py', 'repo-track.sh', 'candidate statuses', 'SHORT_ID_RE',
-  'START_UNATTENDED', 'skills/status/SKILL.md']
+  'START_UNATTENDED', 'skills/status/SKILL.md', 'estate-scan.py']
 const NOT_ADOPTED = []
 
 // The names of the failed § Readers checks; [] when every conforming reader is listed as such and, with
@@ -273,6 +291,23 @@ test("both scripts' phase-number helpers hold the doc's examples: 03 is 3, 3.5 a
 
 test("repo-track.sh's active set equals the doc's, read lower-cased with `-` as `_`", () => {
   assert.deepEqual(repoTrackChecks(grammarOf(doc), repoTrack), [])
+})
+
+test("estate-scan.py's Review literal equals the doc's, and it loads Active and Landed from next-action.py", () => {
+  assert.deepEqual(estateScanChecks(grammarOf(doc), estateScan), [])
+})
+
+test('control: a drifted Review literal, a private Active set or an unloaded set fails the estate-scan check', () => {
+  const g = grammarOf(doc)
+  assert.deepEqual(estateScanChecks(g, mutate(estateScan, 'REVIEW_STATUSES = frozenset({"review"})',
+    'REVIEW_STATUSES = frozenset({"reviewing"})')), ['estate-scan REVIEW_STATUSES'])
+  assert.deepEqual(estateScanChecks(g, mutate(estateScan, /^REVIEW_STATUSES = .*$/m, '')), ['estate-scan REVIEW_STATUSES'])
+  const review = doc.replace(/^(- \*\*Review\*\*.*)`review`/m, '$1`in_review`')
+  assert.notEqual(review, doc, 'control is vacuous: no Review bullet with `review`')
+  assert.deepEqual(estateScanChecks(grammarOf(review), estateScan), ['estate-scan REVIEW_STATUSES'])
+  assert.deepEqual(estateScanChecks(g, `${estateScan}\nACTIVE = {"open", "in_progress"}\n`), ['estate-scan Active literal'])
+  assert.deepEqual(estateScanChecks(g, estateScan.replaceAll('NA.OPEN_STATUSES', 'OPEN')), ['estate-scan OPEN_STATUSES loaded'])
+  assert.deepEqual(estateScanChecks(g, estateScan.replaceAll('NA.DEAD_STATUSES', 'DEAD')), ['estate-scan DEAD_STATUSES loaded'])
 })
 
 test("close's candidate statuses are Active and Review, and cite the doc", () => {
