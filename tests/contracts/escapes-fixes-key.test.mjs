@@ -6,7 +6,9 @@
 // - stash, defer and close (its follow-up row and step 7.6) name the key where they cite task-writer § 4;
 // - reshuffle R5.2 sets it on every task it writes, R5.3's rewrite covers it, R5.4's survivor takes the union;
 // - schedule step 4.5's combined note takes the members' union;
-// - CONTEXT.md's Escape entry names the key;
+// - CONTEXT.md's Escape entry names the key, and says a Leg's fix names its failed task in `verifies:`, never an Escape;
+// - execute legs.md (a Leg's fix task, p24-3) writes `verifies:` on every fix and `fixes:` for the culprit only, citing
+//   task-writer § 4;
 // - reflect step 4 passes `--repo <Project root>`, and step 5 presents Quality, partial included (an unread source,
 //   an unresolved task or a failed blame, any of them even with all three sources read);
 // - reflect step 13 (the weekly reading's bug, p21-7) passes `--fixes`, so a bug fixing landed work carries `fixes:`.
@@ -27,6 +29,7 @@ const FILES = {
   schedule: 'skills/schedule/SKILL.md',
   context: 'CONTEXT.md',
   reflect: 'skills/reflect/SKILL.md',
+  legs: 'skills/execute/legs.md',
 }
 const real = Object.fromEntries(Object.entries(FILES).map(([k, p]) => [k, read(p)]))
 
@@ -88,6 +91,10 @@ function check(f) {
   if (!has(slice(r5, /^4\. \*\*Other dispositions\.\*\*/, /^5\. /), /survivor first takes the union of the merged items' `fixes:`.*gets `status: dropped`/)) fails.push('reshuffle-r5.4')
   if (!all(bullet(section(f.schedule, /^### 4\.5\./), /^- `fixes:` = /), ['the **union** of the members\' `fixes:`', 'status: merged', 'dedupes per landed task'])) fails.push('schedule-4.5')
   if (!has(entry(f.context, '- **Escape** — '), `traced to it by its ${KEY} key`)) fails.push('context')
+  if (!has(entry(f.context, '- **Escape** — '), 'names the task whose Verify failed in `verifies:`, which is never an Escape'))
+    fails.push('context-verifies')
+  if (!all(f.legs, ['Every fix task names t in `verifies:`', '`verifies:` is never an Escape', '`fixes:` names the culprit',
+    'task-writer § 4'])) fails.push('legs')
   const step4 = section(f.reflect, /^### 4\. Score/)
   if (!fencedBlocks(step4 ?? '').some((b) => b.some((l) => l.includes('--repo <Project root>')))) fails.push('reflect-4')
   if (!all(bullet(section(f.reflect, /^### 5\. Present/), /^- \*\*Quality\*\*/),
@@ -143,6 +150,16 @@ test('control: schedule 4.5 without the union bullet fails schedule-4.5', () => 
 
 test('control: CONTEXT.md\'s Escape entry without the key fails context', () => {
   only('context', 'traced to it by its `fixes:` key', 'traced to it', ['context'])
+})
+
+test('control: CONTEXT.md\'s Escape entry calling verifies: an Escape fails context-verifies', () => {
+  only('context', 'which is\n  never an Escape', 'which is\n  an Escape', ['context-verifies'])
+})
+
+test('control: legs.md without verifies: on every fix, or with fixes: naming the failed task, fails legs', () => {
+  only('legs', 'Every fix task names t in `verifies:`', 'A fix task may name t', ['legs'])
+  only('legs', '`fixes:` names the culprit', '`fixes:` names t', ['legs'])
+  only('legs', '(task-writer § 4, ADR 0037 d7)', '(ADR 0037 d7)', ['legs'])
 })
 
 test('control: reflect step 4 without --repo, or step 5 without Quality\'s partial reading, fails its rule', () => {

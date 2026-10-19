@@ -1015,7 +1015,7 @@ ok "$(fm ro paused)" "paused: 2026-10-02T14:05+00:00" "start: … the paused: st
 ok "$(fm ro pause_requested)" "<none>" "start: … pause_requested: is removed"
 ok "$(grep -c '^start:' "$D/ro.md")" 0 "start: … and no start: line is left"
 
-# ── serial: a `shape: serial` note (ADR 0040, p24-2) has no Leg runner yet, so next refuses it, before its ceiling ──
+# ── serial: a `shape: serial` note (ADR 0040) runs as Legs (execute legs.md, p24-3), so next refuses it, before its ceiling ──
 # A hand-written serial note: no Project root, no parallel_ceiling, and a start: unattended stamp that must wait.
 scen serial
 printf -- '%s\n' '---' 'tags: [task, rollout]' 'status: open' 'protocol_version: 5' 'shape: serial' 'start: unattended' \
@@ -1026,7 +1026,8 @@ cp "$D/ro.md" "$D/ro.before"
 for dry in "" --dry-run; do
   nxt $dry > "$D/out" 2> "$D/err"; rc=$?
   ok "$rc|$(cat "$D/out")" "1|" "serial: next ${dry:-(lead)} refuses a serial note: exit 1, no stdout"
-  has "$(cat "$D/err")" "serial rollouts have no Leg runner yet" "serial: … naming why (${dry:-lead})"
+  has "$(cat "$D/err")" "a serial rollout runs as Legs, never through next: /thread:execute [[ro]] runs its next Leg (execute legs.md)" \
+    "serial: … naming why and the Leg route (${dry:-lead})"
   hasnt "$(cat "$D/err")" "parallel_ceiling is absent" "serial: … before its ceiling is read (${dry:-lead})"
   cmp -s "$D/ro.md" "$D/ro.before"; ok "$?" 0 "serial: … and the note is byte-identical, start: kept (${dry:-lead})"
 done

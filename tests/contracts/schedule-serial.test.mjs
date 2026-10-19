@@ -148,23 +148,24 @@ function check(files) {
 
   // ---- t5: execute, orient and the vault grammar ----
   need('t5', `${EXECUTE} § 2`, section(files[EXECUTE], /^### 2\. /) ?? '', [
-    'Then the shape (`shape:`; no key reads as parallel): `shape: serial` → print `serial rollouts have no Leg runner yet: nothing runs` and stop; nothing is written and a `start: unattended` stays (p24-3 replaces this line).',
+    'Then the shape (`shape:`; no key reads as parallel): `shape: serial` → run `${CLAUDE_PLUGIN_ROOT}/skills/execute/legs.md` instead of §§ 2.5–8, and write nothing here.',
   ])
   const stop = C(slice(files[ORIENT], /^ {2}- \*\*Schedule stopped at § 0\*\*/, /^ {2}- \*\*Uncommitted grill docs\.\*\*/))
   need('t5', `${ORIENT} § 6's § 0 stop`, stop, ['or a live serial chain that writes the repo and so owns it',
-    '`status: dropped` on a never-started serial chain\'s note'])
+    '`status: dropped` on a never-started serial chain\'s note', 'or run that chain'])
   need('t5', `${ORIENT} § 7`, C(section(files[ORIENT], /^### 7\./)), ['one serial rollout note per chain'])
   need('t5', `${ORIENT} § 9`, C(section(files[ORIENT], /^### 9\./)), [
-    'one offer per parallel note written; a serial note (`shape: serial`) gets no offer until execute runs Legs (p24-3)',
+    'one offer per parallel note written; a serial note (`shape: serial`) gets no offer: name it, its chain, each row\'s launch and Leg 1\'s start line, and never stamp `start: unattended` on it',
   ])
   const writers = C(slice(files[GRAMMAR], /^- \*\*Writers\*\*/, /^- \*\*Readers\*\*/))
-  need('t5', `${GRAMMAR} Writers`, writers, ['on a parallel note only until execute runs Legs (p24-3)'])
+  need('t5', `${GRAMMAR} Writers`, writers, ['on a parallel note only (the Stage starts a lead in a note\'s Project root; a serial note has none)'])
 
   // ---- t6: the glossary ----
   const ctx = files[CONTEXT] ?? ''
   need('t6', 'CONTEXT **Rollout**', entry(ctx, 'Rollout'), ['and none on a place a live serial chain writes', 'one chain per note'])
   need('t6', 'CONTEXT **Shape**', entry(ctx, 'Shape'), ['`shape:` key', 'reads as parallel', 'A supersede never crosses shapes'])
-  need('t6', 'CONTEXT **Serial rollout**', entry(ctx, 'Serial rollout'), ['One chain per note', 'Leg boundary'])
+  need('t6', 'CONTEXT **Serial rollout**', entry(ctx, 'Serial rollout'), ['One chain per note', 'Leg boundary',
+    'execute runs its Legs'])
   need('t6', 'CONTEXT **Unfinished rollout**', entry(ctx, 'Unfinished rollout'), ['both shapes meet in the same check'])
   need('t6', 'CONTEXT **Incomplete rollout**', entry(ctx, 'Incomplete rollout'), ['or S5 on § Serial path',
     "until step 7's last write (S6's) removes it",
@@ -284,7 +285,7 @@ test('control: a § 0 that lets a supersede cross shapes fails t4', () => {
 })
 
 test('control: an execute § 2 without its shape line fails t5', () => {
-  only(swap(EXECUTE, '`shape: serial` → print `serial rollouts have no Leg runner yet: nothing runs` and stop',
+  only(swap(EXECUTE, '`shape: serial` → run `${CLAUDE_PLUGIN_ROOT}/skills/execute/legs.md` instead of §§ 2.5–8',
     '`shape: serial` → proceed'), ['t5'], 'execute')
 })
 
@@ -293,12 +294,12 @@ test('control: an orient § 0 stop that omits the live serial chain fails t5', (
 })
 
 test('control: an orient § 0 stop without the dropped remedy fails t5', () => {
-  only(swap(ORIENT, '\n    `status: dropped` on a never-started serial chain\'s note (no Leg runner runs it yet, p24-3;\n    dropping it frees its tasks),', ''),
+  only(swap(ORIENT, '\n    `status: dropped` on a never-started serial chain\'s note (dropping it frees its tasks) or run\n    that chain,', ''),
     ['t5'], 'orient dropped')
 })
 
 test('control: a vault grammar whose Writers drop the parallel-only clause fails t5', () => {
-  only(swap(GRAMMAR, ', on a parallel\n  note only until execute runs Legs (p24-3)', ''), ['t5'], 'writers')
+  only(swap(GRAMMAR, ', on a parallel\n  note only (the Stage starts a lead in a note\'s Project root; a serial note has none)', ''), ['t5'], 'writers')
 })
 
 test('control: a Surface entry without the toplevel widening fails t6', () => {
