@@ -41,6 +41,8 @@ execute [[{{ROLLOUT_SLUG}}]]                # continuous: the queue runs and mer
 execute [[{{ROLLOUT_SLUG}}]] --gated        # pause for a human before each merge
 ```
 
+*Start when ready*: `start: unattended` in this note's frontmatter (the execute offer writes it, never this template; `skills/_shared/vault-grammar.md` § Rollout start stamp). The Chorus Stage starts the lead once the note is runnable, and the lead's first `next` clears it.
+
 The contract lives in `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` — three-layer convergence (plan-gate → Ralph-style agent-side verifier retry → master-side review-and-revise loop). The rollout-level defaults in this note's frontmatter (`verifier`, `max_iterations`, `max_review_rounds`, `plan_approval`, `max_plan_rounds`, `parallel_ceiling`) are inherited by every task; per-task overrides go in the task's own frontmatter.
 
 `plan_approval: scope-gated` (the default) makes the plan-gate fire only for `scope: cross-cutting` tasks — single-file + read-only tasks skip it. Set to `off` for legacy behaviour (no plan-gate); `required` to gate every task. The plan-gate inserts one review round before Ralph: the planner returns a structured plan and an autonomous plan judge approves it or sends it back, up to `max_plan_rounds`; only an approved plan reaches the implementer.

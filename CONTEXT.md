@@ -65,7 +65,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   project/area (not one thread), then reshuffles it without asking (ADR 0036),
   unless told to steer it as it stands or just look. It schedules rollout-shaped
   work itself, routes the rest by the execution-fit test, and ends with the
-  **execute offer** (run the rollout in a fresh session, here, or not yet).
+  **execute offer** (run the rollout in a fresh session, here, not yet, or
+  start when ready).
   Pointed at a single plan, design note or brain dump it runs a **scoped
   reshuffle** of that note alone. Absorbs the former `split` and `gather` verbs
   (ADR 0027).
@@ -349,6 +350,13 @@ through time, from attention to merged PRs. Terms only — no implementation.
   paused, never-started and protocol-3 rollouts, and keeps one whose every
   task merged but whose completion ceremony has not run. _Avoid_: active, in
   flight.
+- **Start when ready** — the execute offer's fourth answer (orient § 9,
+  schedule step 8): it stamps `start: unattended` on the rollout note just
+  written and ends, running nothing. The Chorus Stage starts the lead in the
+  note's Project root once the note is runnable, and that lead's first `next`
+  clears the stamp, so no second lead starts (vault grammar § Rollout start
+  stamp). Outside a Chorus Stage nothing acts on it, so it waits like not yet.
+  _Avoid_: auto-start, scheduled start.
 - **Git-env canary** — the lead's check that the shared checkout (a rollout's
   `Project root`) kept its `refs/heads/<default>` and its bareness across each
   **Window** (execute § 4.5, ADR 0030). A local commit not on

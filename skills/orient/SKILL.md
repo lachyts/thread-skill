@@ -19,8 +19,8 @@ alone.
 **Contains no route logic of its own** beyond batching, emission and the reshuffle: hands-on focus
 dispatches to `${CLAUDE_PLUGIN_ROOT}/skills/open/SKILL.md` (or the task's own `## Launch` block);
 rollout-shaped phases go to `${CLAUDE_PLUGIN_ROOT}/skills/schedule/SKILL.md`; the execute offer runs
-`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` or `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md`.
-None is re-implemented here. The execution-fit test
+`${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` or `${CLAUDE_PLUGIN_ROOT}/skills/handoff/SKILL.md`,
+or stamps the note for the Stage. None is re-implemented here. The execution-fit test
 (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/execution-fit.md`) decides the lane, hard, not as a
 preference.
 
@@ -578,6 +578,13 @@ When § 6 wrote a rollout note, end with `AskUserQuestion`, recommended option f
 - **Here** — run `${CLAUDE_PLUGIN_ROOT}/skills/execute/SKILL.md` on the rollout note in this
   session, when the reshuffle was small and this session was launched in the target repo.
 - **Not yet** — name the rollout note and the `/thread:execute [[<rollout>]]` line, and stop.
+- **Start when ready** — stamp `start: unattended` as a top-level frontmatter line just below
+  `status:` on the rollout note § 6 wrote (`_shared/vault-grammar.md` § Rollout start stamp), then
+  end: nothing runs here and no handoff is made. Print the note, the `/thread:execute [[<rollout>]]`
+  line (still valid by hand) and one line: the Chorus Stage starts a lead in its Project root once
+  the note is runnable, and that lead's first `next` clears the stamp. It suits a run nobody will be
+  there to start (the evening, a landing PR still queued). Outside a Chorus Stage nothing acts on the
+  stamp, so it waits like Not yet.
 
 Execute's own runtime gate still applies wherever it runs. No rollout written → no offer; § 6
 names why (a running or blocked rollout, uncommitted grill docs, a schedule blocker).
