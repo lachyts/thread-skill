@@ -368,25 +368,27 @@ EOF
   [ -z "$changed" ] || echo "$SR: WARN: the refresh changed the lead's own config ($(printf '%s' "$changed" | sed 's/^ //; s/ /, /g')): this session loaded the old copy, so start a fresh session in $c${sub:+/$sub}, then /thread:execute the rollout again to pick it up" >&2
 }
 
-# local_notes: the gitignored state the in-place checkout has and the clone lacks; nothing is copied.
-local_notes() {
-  local pair ip c f k rel
-  for pair in "" "$SUB"; do
-    [ "$pair" = "" ] || [ -n "$SUB" ] || continue
-    if [ -n "$pair" ]; then ip="$IP/$pair"; c="$C/$pair"; rel="$pair/"; else ip=$IP; c=$C; rel=''; fi
-    [ -d "$ip" ] && [ -d "$c" ] || continue
-    for f in .claude/settings.local.json CLAUDE.local.md .env .env.local .envrc; do
-      if [ -e "$ip/$f" ] && [ ! -e "$c/$f" ]; then
-        echo "$SR: note: $c lacks $f, which $ip has: gitignored local state is never copied; copy it by hand if the lead needs it" >&2
-      fi
-    done
-    if [ -e "$ip/.mcp.json" ] && [ ! -e "$c/.mcp.json" ] && ! git -C "$IP" ls-files --error-unmatch -- "${rel}.mcp.json" >/dev/null 2>&1; then
-      echo "$SR: note: $c lacks the untracked .mcp.json that $ip has: its local MCP servers are not there; copy or regenerate it if the lead needs them" >&2
-    fi
-    if [ -e "$c/.workspace-launch.json" ] && [ ! -e "$c/.mcp.json" ]; then
-      echo "$SR: WARN: $c/.workspace-launch.json has no .mcp.json beside it: the Chorus Stage refuses a Session there (launch.py LaunchRefused) until one is generated or copied in" >&2
+# local_notes: the gitignored state the in-place checkout has and the clone lacks; nothing is copied. Checked at the
+# toplevel and at the root's sub-path.
+notes_at() {  # notes_at <in-place dir> <clone dir> <sub-path prefix, '' or 'sub/'>
+  local ip="$1" c="$2" rel="$3" f
+  [ -d "$ip" ] && [ -d "$c" ] || return 0
+  for f in .claude/settings.local.json CLAUDE.local.md .env .env.local .envrc; do
+    if [ -e "$ip/$f" ] && [ ! -e "$c/$f" ]; then
+      echo "$SR: note: $c lacks $f, which $ip has: gitignored local state is never copied; copy it by hand if the lead needs it" >&2
     fi
   done
+  if [ -e "$ip/.mcp.json" ] && [ ! -e "$c/.mcp.json" ] && ! git -C "$IP" ls-files --error-unmatch -- "${rel}.mcp.json" >/dev/null 2>&1; then
+    echo "$SR: note: $c lacks the untracked .mcp.json that $ip has: its local MCP servers are not there; copy or regenerate it if the lead needs them" >&2
+  fi
+  if [ -e "$c/.workspace-launch.json" ] && [ ! -e "$c/.mcp.json" ]; then
+    echo "$SR: WARN: $c/.workspace-launch.json has no .mcp.json beside it: the Chorus Stage refuses a Session there (launch.py LaunchRefused) until one is generated or copied in" >&2
+  fi
+}
+local_notes() {
+  local k
+  notes_at "$IP" "$C" ''
+  [ -z "$SUB" ] || notes_at "$IP/$SUB" "$C/$SUB" "$SUB/"
   for k in user.name user.email core.hooksPath; do
     if [ -n "$(git -C "$IP" config --local --get "$k" 2>/dev/null)" ] && [ -z "$(git -C "$C" config --local --get "$k" 2>/dev/null)" ]; then
       echo "$SR: note: $C lacks the local git config $k that $IP sets: set it with git -C $C config $k <value> if the lead needs it" >&2

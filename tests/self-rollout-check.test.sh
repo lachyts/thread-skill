@@ -345,6 +345,7 @@ has "$err" "note: $e1-rollout/sub lacks .envrc, which $e1/sub has" "ensure: … 
 has "$err" "lacks the untracked .mcp.json that $e1 has" "ensure: … a note for the untracked .mcp.json"
 has "$err" "lacks the local git config user.email that $e1 sets" "ensure: … a note for the local git config"
 ok "$([ -e "$e1-rollout/.env" ] && echo copied || echo absent)" absent "ensure: … nothing copied"
+sr --ensure "$e1"; ok "$(printf '%s\n' "$err" | grep -c "lacks .env, which")" 1 "ensure: a root Local: notes each item once"
 push o/e1 sub/.workspace-launch.json '{}'
 sr --ensure "$e1/sub"; has "$err" "WARN: $e1-rollout/sub/.workspace-launch.json has no .mcp.json beside it" "ensure: a launch marker with no .mcp.json → WARN"
 # a failed clone: nothing left behind
