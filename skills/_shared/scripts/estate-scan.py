@@ -132,7 +132,8 @@ Output, one JSON object (schema 1; --compact for one line):
                the status call's last stderr line, `deadline`, `timeout` or `vault`;
   deadlines[] {date, kind: "due", task, projects[]}, by date then task;
   skipped[]   {note, why}, by note.
-Grading and ranking are the estate pass's next step, never this script's.
+Grading and ranking are the estate pass's next step (skills/_shared/readiness-grade.md, estate-rank.py), never this
+script's.
 """
 import argparse
 import datetime
@@ -258,6 +259,12 @@ def as_date(v):
         except ValueError:
             return None
     return None
+
+
+def standing_of(status):
+    """A project's standing from its status as NA.status_of reads it: crowned, active, queued or parked as itself, any
+    other status `other`, none `none`. The one rule: the scan's `standing` and estate-rank.py's snooze writer read it."""
+    return status if status in STANDINGS else ("other" if status else "none")
 
 
 def link_why(raw):
@@ -563,8 +570,7 @@ class Scan:
                 note = self.note(rel)
                 if note is None or "project" not in NA.tags_of(note) or RT.dead_why(rel, note):
                     continue
-                st = NA.status_of(note)
-                standing = st if st in STANDINGS else ("other" if st else "none")
+                standing = standing_of(NA.status_of(note))
                 slot = NA.read_slots(self.vault, [rel])[0]
                 rows[rel] = {
                     "name": slug_of(rel), "note": slash(rel), "status": jsonable(note.get("status")),

@@ -27,7 +27,7 @@ Serial-rollout plan for one chain of `[[{{PROJECT_NAME}}]]` tasks (ADR 0040): Le
 
 ## How to execute
 
-Legs run this chain from p24-3: each Leg opens in a row's launch and works only rows of the launch it opened in, so a launch change between two rows is a Leg boundary. Until then `/thread:execute` stops at its § 2 shape line: nothing runs this note, and it takes no execute offer and no start stamp. To give its surfaces back before it runs, stamp it `status: dropped`; its tasks are then free for a later `/thread:schedule`.
+Legs run this chain (execute's legs.md). Leg 1 opens in row 1's launch (its alias, from its folder) and runs `/thread:execute [[<this note>]]`. Each Leg works only rows of the launch it opened in, so a launch change between two rows is a Leg boundary: it claims up to five tasks, one at a time, closes, and hands the rest to a fresh Leg, whose brief is this note's `## Leg log`. This note takes no execute offer and no start stamp, and it is never paused: a Leg stops through `leg.py close --outcome stopped`. To give its surfaces back before it runs, stamp it `status: dropped`; its tasks are then free for a later `/thread:schedule`.
 
 ## Queue
 
@@ -47,12 +47,15 @@ The frontmatter's `surfaces:` is the union of the members' claims below. While t
 
 ## Post-rollout
 
-When every task is done, run the completion ceremony:
+When every task is done, the last Leg runs the completion ceremony (the Complete section of execute's `legs.md`), in this order:
 
-1. Mark this rollout `status: done` and stamp `completed: <YYYY-MM-DD>` in the frontmatter.
-2. File any follow-on work as new open tasks in `Work/Tasks/` and rewrite the items below as thin pointers to them. Never leave live work as checklist prose inside a done note.
-3. Append a `## Completion log`: each Leg, the tasks it finished, and the disposition of each item below.
-4. Move this note to `Work/Tasks/Archive/Rollouts/`, never overwriting a same-named note there.
+1. Close the phases this chain touched (`touched-phases`, then `reconcile-project.py --kinds phase --apply`), filing a `phase-close-followup-*` task on a failure.
+2. File each item below that is live work as a new open follow-on task in `Work/Tasks/`, and rewrite the item as a thin pointer to it; give every other item a disposition. The land-chain follow-on joins them when a chain checkout lands on origin and the chain's `Task:` commits are not on it yet. Never leave live work as checklist prose inside a done note.
+3. Score the chain: run `close-score.py --rollout <this note> --close completion`, and keep its one line as the reflection; a failed score never stops the ceremony.
+4. Mark this rollout `status: done` and stamp `completed: <YYYY-MM-DD>` in the frontmatter.
+5. Append a `## Completion log`: each Leg, the tasks it finished and set aside, the disposition of each item below, and the reflection.
+6. Move this note to `Work/Tasks/Archive/Rollouts/`, never overwriting a same-named note there, and commit it by pathspec.
+7. Run `/thread:close`.
 
 Rollout-specific items go here:
 

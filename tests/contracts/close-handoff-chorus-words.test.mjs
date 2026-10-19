@@ -188,6 +188,7 @@ const real = {
   template: read('skills/schedule/rollout-template.md'),
   next: read('skills/next/SKILL.md'),
   open: read('skills/open/SKILL.md'),
+  legs: read('skills/execute/legs.md'),
 }
 
 const STEP8 = (t) => lineOf(t, /^8\. \*\*Print the "What landed" report/) ?? ''
@@ -583,4 +584,35 @@ test('drift: the port reads every fixture exactly as Chorus does', { skip: !proc
   assert.equal(r.status, 0, r.stderr)
   const py = JSON.parse(r.stdout)
   texts.forEach((t, i) => assert.deepEqual(reading(t), py[i], `port and Chorus disagree on ${JSON.stringify(t)}`))
+})
+
+// A serial rollout's Leg (execute legs.md § Report, p24-3): each turn end read through the port, and legs.md's own
+// table names the same Close for each. A Leg's line is a rollout lead's line for close step 9's rule (2).
+test('a Leg\'s turn ends read through the port as legs.md § Report says', () => {
+  const RO = 'demo-rollout-2026-10-20'
+  const line = (k, state, reason) => `ROLLOUT-STATUS: ${RO} merged=${k}/7 running=0 state=${state}${reason ? ` reason="${reason}"` : ''}`
+  const [bA, bB] = banners(real.close).map(fill)
+  assert.ok(bA && bB, 'close step 9 has banners A and B')
+  const LEG_REPORT = 'landing /Users/lachlants/repos/tools/demo: not landed: commit-only\nhand-over: started task_x'
+  const manual = 'manual handoff:\n\n```\n/thread:execute [[' + RO + ']]\nLeg 2 of the serial chain; the brief is the rollout note\'s ## Leg log: /x\n```\n\ncx-demo from /Users/lachlants/repos/tools/demo'
+  const cases = [
+    ['handoff, successor started', closing(LEG_REPORT, `${bB}\n${line(5, 'done', 'handed off to Leg 2')}`), ['closed', '']],
+    ['complete', closing(REPORT, `${bB}\n${line(7, 'done')}`), ['closed', '']],
+    ['handoff, manual', closing(`${REPORT}\n${manual}`, `${bA}\n${line(5, 'halted', 'manual handoff: Leg 2 in cx-demo from /Users/lachlants/repos/tools/demo')}`),
+      ['halted', cutOnAWord('manual handoff: Leg 2 in cx-demo from /Users/lachlants/repos/tools/demo', REASON_CHARS)]],
+    ['Mid-Leg, review in flight', line(3, 'waiting', 'review in flight: [[t3]]'), ['nothing yet', '']],
+    ['stuck', closing(REPORT, `${bA}\n${line(3, 'halted', 'awaiting you: 1 set aside')}`), ['halted', 'awaiting you: 1 set aside']],
+  ]
+  for (const [, text, want] of cases) assert.deepEqual(R(text).statusClose, want, text.slice(-160))
+  assert.equal(R(cases[2][1]).asks, false, 'a manual hand-over asks nothing')
+  assert.equal(R('Leg 2 reported: handed off to Leg 3').asks, false, 'a report from a later Leg is one statement line')
+  assert.deepEqual(R(line(7, 'done')).statusClose, ['work to review', 'the rollout'], 'control: done with no banner')
+  // legs.md § Report's table: the Chorus Close column names the same reading for each turn end.
+  const table = (section(real.legs, /^## Report/) ?? '').split('\n').filter((l) => l.startsWith('| ') && !l.startsWith('| Turn end'))
+  const close = Object.fromEntries(table.map((l) => l.split('|').map((c) => c.trim())).map((c) => [c[1], c[3]]))
+  const word = { closed: '*closed*', 'nothing yet': '*nothing yet*', halted: 'demand' }
+  for (const [turn, , want] of cases) {
+    assert.ok(close[turn], `legs.md § Report has no row for ${turn}`)
+    assert.ok(close[turn].startsWith(word[want[0]]), `legs.md § Report reads ${turn} as ${close[turn]}, the port as ${want[0]}`)
+  }
 })

@@ -1,6 +1,6 @@
 ---
 name: repair
-description: 'Use to unstick a rollout that has stalled — run it whenever there''s an issue with the whole rollout, not a single task. Triggers on "repair [[rollout]]", "fix this rollout", "[[rollout]] is stuck", "sort out [[rollout]]", "unblock the rollout", or after /thread:status shows blockers/drift. A thin CONDUCTOR over /thread:execute (never a second engine): it diagnoses (runs /thread:status), reconciles drift, asks YOU only the decisions no agent can make and writes them into the notes, leaves agent-fixable blocks to execute, dependency-aware-defers wedged tasks, then hands off to execute''s resume — the engine keeps sole merge authority. Scope: Obsidian + gh/git + the execute engine.'
+description: 'Use to unstick a stalled rollout: any issue with the whole rollout, not a single task. Triggers on "repair [[rollout]]", "fix this rollout", "[[rollout]] is stuck", "sort out [[rollout]]", "unblock the rollout", or after /thread:status shows blockers/drift. A thin CONDUCTOR over /thread:execute (never a second engine): it diagnoses (runs /thread:status), reconciles drift, asks YOU only the decisions no agent can make and records them, leaves agent-fixable blocks to execute, dependency-aware-defers wedged tasks, then hands off to execute''s resume or starts a serial chain''s next Leg — the engine keeps sole merge authority. Scope: Obsidian + gh/git + the execute engine + the Chorus Stage.'
 ---
 
 # /thread:repair — sort out a stuck rollout (conductor, not an engine)
@@ -31,7 +31,11 @@ original run's caller/session and native child identities. Read
 session's pending claims. Recover the actual native children first; otherwise report the unresolved
 ownership. Codex has no detached driver: repair preserves the diagnosis and the hand-backs, and the queue can
 then run only as a session-driven `--gated` run. Do not claim that a request for continuous repair has been
-completed by preparing one. Never create a second convergence engine.
+completed by preparing one. Never create a second convergence engine. A serial chain (§ 7) makes no task call. Its
+`create_thread` opens a new visible Session that runs `/thread:execute` itself, as `skills/execute/legs.md` § Hand over
+does. There is no engine preflight, no native child and no claim adopted: the new Leg's `begin` takes the chain
+under leg.py's lock. The host tool is the one `skills/execute/legs.md` § Hand over picks: the Chorus Stage's for a
+claude launch, Codex Desktop's own per /thread:handoff for codex, and a manual handoff otherwise.
 
 ## Scope
 
@@ -39,7 +43,11 @@ Reads/writes `~/repos/obsidian/Work/Tasks/`, makes `gh`/`git` calls against the 
 `/thread:execute`'s queue loop, and, at a close-out's finish (§ 1), `close-score.py`: it writes fold-journals'
 `call-journal` lines and one `tunings.jsonl` line under the events directory, outside the vault, and reads every
 note under `Work/Tasks/` (Archive included) and the Project root's git, read-only and never fetched. Merges only
-ever happen through execute's merge step (`merge-task.sh`).
+ever happen through execute's merge step (`merge-task.sh`). On a serial chain (§ 7) it runs `leg.py status`
+(read-only), `leg.py restarted` and, on Lachy's word, `leg.py clear-halt`. These are the only Leg-log writes it makes,
+under leg.py's lock. It also runs the task-note verbs `approve-gates`, `record-answer`, `hand-back` and `defer`, a
+read-only `git status --porcelain` in the chain's checkouts, and the Chorus Stage's `list_sessions` and
+`create_thread`, which starts a new Session. It makes no `gh` call and no task call there.
 
 ## Invocation forms
 
@@ -57,8 +65,9 @@ Resolve `[[<slug>]]` (ask if ambiguous): `~/repos/obsidian/Work/Tasks/<slug>.md`
 `Work/Tasks/Archive/Rollouts/<slug>.md`, a rollout whose completion ceremony already ran (§ 3a's
 complete-rollout stop). Run the **`/thread:status` scan with the live cross-check on**
 (repair is about to act, so it always checks reality): the per-task queue state, each task's
-`lead-integrate.py inputs`, the drift flags and the repo path. Show the user the situational report first:
-they should see what they're repairing.
+`lead-integrate.py inputs`, the drift flags and the repo path. On a `shape: serial` note the scan is status § 5's
+`leg.py status` instead, with no live cross-check: a chain has no PRs and no lead. Show the user the situational
+report first: they should see what they're repairing.
 
 **Stops**, first match in this order, before anything else and before anything is written (the close-out
 below writes only on Lachy's confirmation). The lineage stops come first, whatever the note's
@@ -87,6 +96,9 @@ version stop's `--regenerate` would only meet schedule's refusal again.
 - any other value except `5` → "unsupported protocol version <N>; the queue reads protocol_version: 5". Stop.
 - `incomplete` → `/thread:schedule <project> --regenerate`; on a `shape: serial` note, which nothing supersedes,
   stamp it `status: dropped`, then `/thread:schedule --tasks <its tasks>`. Stop.
+
+**A serial chain.** After the Stops, a `shape: serial` note (read from the note, as status § 1's **Shape** reads
+it) goes to § 7, instead of the modes below and §§ 2–6.
 
 Then one of three modes holds, each evaluated before anything is written: a pause, a live queue, or no lead
 live. Two rules cut across them.
@@ -650,6 +662,93 @@ possible PR-less merges, RACE / UNVERIFIED (task + PR + the re-verify verdict + 
 merges into another base (task + PR + base), and each git-env trip (§ 3e: the trip lines, the evidence's sha,
 the choice, any restore and its rescue line, and the ack line).
 
+### 7. A serial chain
+
+A `shape: serial` note (§ 1) is a chain of **Legs** (`skills/execute/legs.md`), and repair is its conductor, never a
+Leg: a Leg works the chain's tasks, while repair answers what only Lachy can, clears what he says, and starts the next
+Leg as a new Session. Every step re-reads `leg.py status` (status § 5's read), whose header defines each key below.
+
+**(a) Diagnose.** Show status § 5's report: the headline, the Legs, the Queue, Needs you, the Stall and the Restart.
+The Stops are § 1's, already passed. Then (b) for every set-aside row, whatever the chain state, and then the first of
+(c), (d) and (e) that applies.
+
+**(b) Set-asides, in any state.** For each row with `setAside`:
+
+- **A gate** (`setAside.status` gate-pending): present each of its `setAside.gates` verbatim. On his sign-off,
+  `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py approve-gates --tasks <t> --rollout <rollout-note>`:
+  the next Leg's claim re-enters it. If he declines it, Defer (below).
+- **A block** (blocked, review-blocked or plan-blocked): `AskUserQuestion` quoting `setAside.summary`, offering hand
+  back (with his guidance), defer, or leave it set aside.
+  - Hand back: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py record-answer --tasks <t> --rollout <rollout-note> --kind decision --ask "<the ask, verbatim>" --answer "<his answer, verbatim>" --fingerprint <row.setAside.fingerprint> --form hand-back`,
+    then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py hand-back --tasks <t> --answer <the stamp record-answer printed>`.
+    The task reads claimable, and the next Leg's claim re-enters it with his answer as its latest `## Repair input`
+    (`skills/execute/legs.md` § The task loop).
+  - Leave: it stays set aside, and nothing more is asked this run.
+- **Defer, dependency-aware** (§ 5's steps 1 and 3): read the row's `dependants` from `leg.py status`: its
+  depends-on and blocked-by closure, transitive, through `merged_into:` tombstones, read the way next holds a
+  dependency.
+  - None → `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/reconcile-rollout.py defer --tasks <t> --rollout <rollout-note>`.
+  - Some → ask: *"[[B]], [[C]] depend on [[A]]: defer the whole chain, or keep and fix [[A]]?"* Defer the chain →
+    one `reconcile-rollout.py defer --tasks <t>,<each dependant> --rollout <rollout-note>`. Keep and fix → the hand
+    back above.
+  - A dependant a Leg holds (its `state` running, with an `owner`) → ask, and never write it or defer A alone.
+
+A serial defer has no retire block (a serial task has no PR, task tree or anchor), deletes no Queue row or File-sets
+line, and writes no note of its own: leg.py reads each deferred row as deferred, skipped and not counted (status
+§ 5's footer, live or archived).
+
+**(c) A halt** (`chain` halted). Show the halted Leg's `closed: halted:` line, the held task's latest `## Blocker
+diagnosis` (if it has one), and `git -C <top> status --porcelain` for each `leg_base` top of that task. Ask. Only on his word:
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py clear-halt --rollout <rollout-note> --reason "<his words>"`, then
+re-read `leg.py status`: the chain reads stalled when the halted Leg held a claim (the next Leg inherits it), else what
+its rows leave (ready, completable or stuck), and (e) restarts it.
+
+**(d) An open Leg** (`restart.takeOver` true: Leg K, the `openLeg`, is open, and `<id>` is the `session` of its
+`legs` entry), whatever `restart.blockedBy` names first: a standing restart outranks an open Leg there, so a chain
+`restarting` over an open Leg still needs this check. Check the Chorus Stage with `list_sessions`:
+
+- the session is present → "Leg K is live in session `<id>`": report it, and stop;
+- it is gone from `list_sessions`, or Lachy says Leg K is dead → (e), with the take-over;
+- it cannot be resolved (no Stage, an id the Stage does not show) → ask Lachy.
+
+**(e) Restart.** The next Leg starts as a new Session, never in this one.
+
+1. **Restartable?** Re-read `leg.py status`. `restart` null → report why (a stuck chain goes back to (b)), and stop.
+   Otherwise, by `restart.blockedBy`:
+   - `halt` → never: (c) first.
+   - `open Leg K (session <id>)` → only after (d) found `<id>` gone from `list_sessions`, or Lachy said Leg K is dead;
+     the prompt is then the take-over form (`restart.takeOver`).
+   - `handover started <X>` → only after `list_sessions` shows X gone, or Lachy says X never ran.
+   - `restart Leg N (<how>)` → only with `--replace` in step 2, after its own check: for `started` (its id is
+     `restarted.started`), `list_sessions` shows that id gone; for `pending` or `manual`, Lachy says it never started.
+     With `restart.takeOver`, (d)'s evidence for Leg K too, and the prompt is the take-over form.
+   - null → by `chain`: stalled; awaiting-successor with no hand-over line, or a manual one Lachy says he has not
+     pasted; stopped, on his word; completable, not-started or ready, on his ask.
+   - Anything else → report it, and stop.
+
+   Whenever `restart.takeOver` is true, whatever the blocker, the restart needs (d)'s evidence: Leg K's session gone
+   from `list_sessions`, or Lachy's word that Leg K is dead. A previous repair's check never stands in for it.
+
+   `leg.py restarted` checks only the halt, the numbering (Leg N not begun, N = last_n + 1) and a standing restart.
+   It never checks the open Leg or the hand-over, so that evidence is this step's. Nothing later re-checks a
+   take-over: the new Leg's `begin --take-over` closes Leg K `lost`. `begin`'s lock and exit 3 back up only a doubled
+   start.
+2. **Mark it.** `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py restarted --rollout <rollout-note> --leg <restart.leg> --pending`,
+   with `--replace` only on the `restart Leg N` branch. Exit 3 → report the standing restart, and stop.
+   `recorded: false` → by `began`: `true`, Leg N began meanwhile: stop; `false`, this session's own identical line
+   already stands (a re-run of this step, after a compaction say): go on to step 3. Exit 1 naming `--session` → this
+   session has no id: report it, and stop; never invent one.
+3. **Start it** with the host's `create_thread`, chosen as § Native runtime binding says (a claude harness, or
+   `restart.anyLaunch`, on the Chorus Stage): `title`, `prompt`, `tldr` and `cwd` from `restart`, no `brief`,
+   `report_back` on. Then `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py restarted --rollout <rollout-note> --leg <N> --started <its id>`.
+4. **Otherwise** (no host tool, a codex launch off Codex Desktop, or a `create_thread` error): print `restart.prompt`
+   fenced with its launch line (`restart.launch`, or any launch from `restart.cwd` when `restart.anyLaunch`), labelled
+   `manual handoff`, then
+   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/execute/scripts/leg.py restarted --rollout <rollout-note> --leg <N> --manual "<why>"`.
+
+§ 7 writes no `## Notes` line by hand: the Leg log (through leg.py) and each task note's own records are the chain's
+record, and its Completion log is the last Leg's.
+
 ## Don'ts
 
 - **Don't treat `paused:` or `pause_requested` as drift.** A pause is intentional (§ 1): repair never clears
@@ -697,7 +796,14 @@ the choice, any restore and its rescue line, and the ack line).
   A hand-off would re-run the completion ceremony on it.
 - **Don't reinstate a rollout another rollout's `supersedes:` names.** Its unlanded tasks were carried there;
   finish its close-out instead (§ 1).
-- **Don't defer a task with dependants alone.** Compute the closure first; defer the chain or fix it.
+- **Don't defer a task with dependants alone.** Compute the closure first; defer the chain or fix it. On a serial
+  chain the closure is `leg.py status`'s `dependants` (§ 7 (b)).
+- **Don't run a serial chain's Legs.** § 7 runs only `leg.py status`, `leg.py restarted`, `leg.py clear-halt` (his
+  word only), `approve-gates`, `record-answer`, `hand-back` and `defer` (with its dependants), and the Chorus Stage's
+  `list_sessions` and `create_thread`. Never `leg.py begin`, `claim`, `done`, `close`, `set-aside`, `smoke`,
+  `file-fix`, `handed` or `file-followup`; no Workflow, `next`, `resume` or hand-off loop; no hand edit of the Leg log
+  or the frontmatter, and no `## Notes` line; and never take over a session `list_sessions` shows present, without
+  his word.
 - **Don't loop.** One hand-back per task per run (§ 4's Leash); then surface and let the user decide.
 - **Don't run repair under the built-in `/loop` (and never suggest it).** Repair is input-gated by design: it
   asks the user decisions no agent can make, so an unattended loop would either hang on the question or

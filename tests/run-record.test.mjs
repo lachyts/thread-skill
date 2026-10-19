@@ -537,8 +537,30 @@ test('a tuning with close completion or supersede is recorded with it', (t) => {
   assert.deepEqual(lines(path.join(ev(home), 'tunings.jsonl')).map((l) => [l.rollout, l.close]), [['r', 'completion'], ['s', 'supersede']])
 })
 
+// A serial close line (p24-4): close-score.py's serial path through tune.py --record-only --close completion. A chain
+// has no one repo, so repo is null, and its parallel-only scores (quotaStalls among them) are null.
+const SERIAL_SCORES = { ...SCORES, tokensPerMerge: null, setAsideRate: null, conflictRate: null, quotaStalls: null, reviewChurn: null }
+// binding: undefined drops tuning()'s binding from the JSON: a serial line carries none
+const serial = (over = {}) => tuning({ repo: null, scores: SERIAL_SCORES, applied: [], close: 'completion', shape: 'serial', binding: undefined, ...over })
+test('a serial close line: repo null, quotaStalls null, shape serial, applied [], a close', (t) => {
+  const home = tmpHome(t)
+  emitOk(home, ['--rollout', 'r', '--kind', 'tuning', '--json', JSON.stringify(serial())], { env: EV(home) })
+  const [l] = lines(path.join(ev(home), 'tunings.jsonl'))
+  assert.deepEqual([l.shape, l.repo, l.scores.quotaStalls, l.close, l.applied], ['serial', null, null, 'completion', []])
+})
+
 const { merges: _m, ...SCORES_LESS } = SCORES
 const TUNING_REFUSALS = [
+  ['a null repo on a parallel line', 'r', tuning({ repo: null })],
+  ['an empty repo', 'r', tuning({ repo: '' })],
+  ['quotaStalls null on a parallel line', 'r', tuning({ scores: { ...SCORES, quotaStalls: null } })],
+  ['a shape other than serial', 'r', tuning({ shape: 'parallel' })],
+  ['a serial line with a repo', 'r', serial({ repo: 'o/r' })],
+  ['a serial line with no close', 'r', (({ close, ...rest }) => rest)(serial())],
+  ['a serial line with an applied entry', 'r', serial({ applied: [APPLIED] })],
+  ['a serial line with a binding', 'r', serial({ binding: 'none-clear' })],
+  ['a serial line that voids another', 'r', serial({ voids: 't-0' })],
+  ['a serial auto line', 'r', serial({ auto: true, reflection: 'r-20261015T000000Z-abcdef' })],
   ['a close outside the enum', 'r', tuning({ applied: [], close: 'weekly' })],
   ['no rollout', null, tuning()],
   ['scores missing a key', 'r', tuning({ scores: SCORES_LESS })],

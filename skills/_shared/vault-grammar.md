@@ -47,7 +47,8 @@ other value (`start: manual`, an empty `start:`), a `start:` nested under anothe
 no stamp; `started:` and `started_unattended:` are other keys.
 
 - **Writers**: the execute offer, on the rollout note just written and never started, on a parallel
-  note only until execute runs Legs (p24-3): orient § 9's Start when ready answer, and schedule step
+  note only (the Stage starts a lead in a note's Project root; a serial note has none): orient § 9's
+  Start when ready answer, and schedule step
   8's **Start when ready.** on a standalone run. And
   schedule § 0's **Put back**, which only restores to a prior the exact line its Supersede prep removed,
   when the run stops before step 6 writes its note.

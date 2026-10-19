@@ -665,9 +665,10 @@ the note's `incomplete: true` line, as its last write, once every member is stam
 
 **S7. Summary.** Per note: its name, its chain order with each row's launch, and its surfaces. Then the
 session-lane members, the WARNs and the gated pre-flight (§ 3.5's kept gates, § 3.6's ask-ahead and dismissals, as
-step 8 lists them). Then one line: "nothing runs it yet: `/thread:execute` stops at its § 2 shape line until Legs
-ship (p24-3); no execute offer, no `start: unattended`; until it runs or is dropped (`status: dropped`) it holds
-its surfaces, so a parallel run on a checkout it claims, or another chain over them, is refused".
+step 8 lists them). Then one line: "Leg 1 opens in row 1's launch and runs `/thread:execute [[<note>]]`;
+no execute offer, no `start: unattended` (the Stage's unattended start needs a Project root); until it finishes or
+is dropped (`status: dropped`) it holds its surfaces, so a parallel run on a checkout it claims, or another chain
+over them, is refused".
 
 ## Execution lives in `/thread:execute`
 

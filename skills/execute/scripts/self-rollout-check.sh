@@ -98,11 +98,11 @@
 #   not moved: an operation is in progress · fast-forwarded to origin/<d> (<old7>..<new7>) · not moved: local
 #   changes overlap origin/<d> · ahead: <repo-state.sh line> · already at origin/<d> ·
 #   not moved: diverged: <N> local-only commit(s) (<repo-state.sh line>), <M> behind origin/<d>; <remedy>
-# The diverged remedy follows the twin's landing route, `land.sh --route <twin>`: `commit-only: <reason>` (swept by
-# the daily sweep, listed on the landing register) gives the `git -C <twin> merge --no-edit origin/<d>` advice;
-# `landable` waits for its queued landing PR, which the next merge-task or land.sh S4 fast-forwards, plus a
-# stranded addendum when repo-state.sh counts stranded commits; `unknown: <reason>` names no route. Exit 0 always;
-# 2 only on a usage error, so it never changes merge-task's exit.
+# The diverged remedy follows the twin's landing route, land.sh's read-only route mode `land.sh --route -- <twin>`:
+# `not landed: <reason>` (swept by the daily sweep, listed on the landing register, no GitHub origin) gives the
+# `git -C <twin> merge --no-edit origin/<d>` advice; `landable <d>` waits for its queued landing PR, which the next
+# merge-task or land.sh S4 fast-forwards, plus a stranded addendum when repo-state.sh counts stranded commits;
+# `stuck: <reason>` names no route. Exit 0 always; 2 only on a usage error, so it never changes merge-task's exit.
 #
 # ---- --launch-check <Project root> <launch dir>: a lead's tools reset any `cd` outside its launch directory, so it
 # must launch at the Project root, or at an ancestor of it at or below the root's toplevel. Exit 0 passes; exit 3
@@ -491,11 +491,11 @@ case "$mode" in
     fi
     if [ "$behind" = 0 ]; then echo "in-place: $tw ahead: $rs"; exit 0; fi
     line="in-place: $tw not moved: diverged: $ahead local-only commit(s) ($rs), $behind behind origin/$d; "
-    route=$(bash "$LAND" --route "$tw" 2>/dev/null)
+    route=$(bash "$LAND" --route -- "$tw" 2>/dev/null)
     case "$route" in
-      "commit-only: "*)
-        line="$line$tw is commit-only (${route#commit-only: }), so integrate it there: git -C $tw merge --no-edit origin/$d keeps the local shas a review doc cites, and its pushes are refused until then" ;;
-      landable)
+      "not landed: "*)
+        line="$line$tw is commit-only (${route#not landed: }), so integrate it there: git -C $tw merge --no-edit origin/$d keeps the local shas a review doc cites, and its pushes are refused until then" ;;
+      "landable "*)
         line="$line$tw lands by PR: once its queued landing PR merges, the next merge-task or land.sh S4 fast-forwards it"
         s=''
         case "$rs" in
@@ -503,8 +503,8 @@ case "$mode" in
           *" — stranded") s=$ahead ;;
         esac
         [ -z "$s" ] || line="$line; $s stranded commit(s) are in no close/ branch: the next /thread:close in $tw carries close-out commits, anything else is its owner's to land" ;;
-      "unknown: "*)
-        line="$line$tw's landing route is unknown (${route#unknown: }): integrate it by the repo's own rules" ;;
+      "stuck: "*)
+        line="$line$tw's landing route is unknown (${route#stuck: }): integrate it by the repo's own rules" ;;
       *)
         line="$line$tw's landing route is unknown (land.sh --route gave no answer): integrate it by the repo's own rules" ;;
     esac

@@ -46,12 +46,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   and every live rollout's status. Scripts scan, the model decides: the
   grading and ranking come after it. _Avoid_: audit, for the scan alone.
 - **Readiness grade** — what a task needs from Lachy before an agent can
-  finish it, given in the estate pass's scan-only first pass: **Ready** (an
-  agent can finish it without inventing a decision nothing records), **One
-  call** (a single decision, offered with a recommendation), **Grill** (a few
-  low-level decisions an agent with the project's thread, ADRs and code can
-  recommend on), or **Orient** (the decisions shape the project, so it needs a
-  full-context session). _Avoid_: tier 1/2/3, traffic lights.
+  finish it, given by the estate pass's per-project grading agents after the
+  Estate scan: **Ready** (an agent can finish it without inventing a decision
+  nothing records), **One call** (a single decision, offered with a
+  recommendation), **Grill** (a few low-level decisions an agent with the
+  project's thread, ADRs and code can recommend on), or **Orient** (the
+  decisions shape the project, so it needs a full-context session). A decision
+  the agent cannot recommend on with confidence raises the grade one step.
+  _Avoid_: tier 1/2/3, traffic lights.
 - **Unpark offer** — the estate pass's question about a parked project with
   ready work: unpark it (it becomes queued), snooze it (asked again only after
   a fortnight or when its ready work grows), or kill it (done and archived).
@@ -59,6 +61,14 @@ through time, from attention to merged PRs. Terms only — no implementation.
   PRs to read, sign-offs, eye-checks. Shown beside the work the estate pass
   queues, because his attention is spent twice, once deciding and once
   reviewing.
+- **Ranked slate** — the estate pass's ranking of graded open work by agent
+  work per minute of Lachy's attention (deciding plus reviewing), its
+  leverage: parked projects last; work due within a fortnight (overdue
+  included) above everything else; then crowned projects; then leverage.
+  Grouped into candidate runs with their Review load, work held by an open
+  dependency set apart, beside the One call and Grill decisions in asking
+  order, the projects that need their own orient, and the Unpark offers
+  (`skills/_shared/readiness-grade.md`). _Avoid_: backlog, priority list.
 
 ## Continuity (threads and attention)
 
@@ -322,16 +332,41 @@ through time, from attention to merged PRs. Terms only — no implementation.
   rollout before 2026-10-19 is one.
 - **Serial rollout** — a rollout run as a chain of **Legs**: visible,
   interactive sessions that each work tasks themselves, close, and hand the
-  rest to a fresh successor. No worktrees, and no subagents but each task's
-  clean-room review. One chain per note (schedule § Serial path): its
-  `surfaces:` claims the **Surface**s the chain writes, and each `## Queue` row
-  names the launch its Leg opens in, so a launch change between two rows is a
-  Leg boundary. Nothing runs one until Legs ship (p24-3). _Avoid_: relay
+  rest to a fresh successor. No task worktrees (leg.py's transient scratch
+  revert only), and no subagents but each task's clean-room review. One chain
+  per note (schedule § Serial path): its `surfaces:` claims the **Surface**s the
+  chain writes, and each `## Queue` row names the launch its Leg opens in, so a
+  launch change between two rows is a Leg boundary. execute runs its Legs
+  (`skills/execute/legs.md`). A serial note is never paused: a Leg stops through
+  `leg.py close --outcome stopped`. status reads it as a chain (`leg.py status`:
+  its Legs, its chain state, a **Stalled chain**), repair restarts it, and its
+  Complete scores it into one close line (serial-score.py). _Avoid_: relay
   (Chorus's word for sending a command to a session).
-- **Leg** — one session's part of a serial rollout: it finishes any task its
-  predecessor left claimed, then claims tasks one at a time (up to five, fewer
-  when its context grows heavy or a task proves large), closes, and hands over.
+- **Leg** — one session's part of a serial rollout (`skills/execute/legs.md`).
+  In order: execute's git-env check, `leg.py begin`, the preflight (the
+  launch's required tools answer), the smoke test (the Verify line of every
+  finished task no later Leg has checked yet: the previous Leg's, and a lost
+  or stopped Leg's unchecked list), any task its predecessor left claimed, the
+  fix tasks, then new tasks claimed one at a time: up to five fresh claims, the
+  inherited task aside, fewer when its context grows heavy or a task proves
+  large, and never closing mid-task. Each code-writing task gets one clean-room
+  review before it is done. Its close ritual lands its close-outs commit-only,
+  hands the rest to a fresh Leg through the Stage (a labelled manual hand-over
+  elsewhere), and ends on a `ROLLOUT-STATUS:` line; every Leg whose Close reads
+  *closed* reports to the origin. A Leg whose Session died is taken over, or
+  the next one started, by `/thread:repair`, which never runs a Leg itself.
   _Avoid_: shift, stint, iteration (one task in a Ralph loop), batch.
+- **Stalled chain** — a serial chain with claimed work and no Leg open: a task
+  in progress for a Leg that closed (stopped, or halted and since cleared) or
+  never began, and nothing starts the Leg that inherits it. `leg.py status`
+  sets its `stall` field; its chain state reads `stalled` only when no earlier
+  state matches, so a Leg that stopped holding a claim reads `stopped` (and a
+  standing halt `halted`), the `stall` set beside it. `/thread:repair`
+  restarts it by starting the next Leg as a new Session, once nothing shows a
+  Session still holding it. An open Leg whose Session died reads live, never
+  stalled, until a take-over closes it `lost`: leg.py never reads the Stage,
+  so repair's `list_sessions` check is what finds that Session gone. _Avoid_:
+  hung, frozen.
 - **Surface** — a place a serial chain writes, written as a token in a serial
   note's `surfaces:` (and in a task's own, optional `surfaces:`). Five kinds:
   `repo:<absolute path>` (a filesystem place; overlaps on equality or
@@ -668,7 +703,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   produces. _Avoid_: correctness, polish.
 - **Escape** — landed work that later needs a fix it should not have needed:
   a follow-up fix task traced to it by its `fixes:` key, a revert, or a later review finding
-  against its lines. Counted against the rollout that landed it, so it is
+  against its lines. A Leg's fix task names the task whose Verify failed in `verifies:`, which is
+  never an Escape; its `fixes:` names the chain task whose work caused the failure, if any. Counted against the rollout that landed it, so it is
   known only after the run: each weekly reading counts the ones that surfaced
   that week against the rollout that landed them, however old (ADR 0037 d4).
   _Avoid_: bug (alone), regression (a review round's word).
@@ -689,8 +725,10 @@ through time, from attention to merged PRs. Terms only — no implementation.
   traces what cost them to the rule that produced it, names what bound the
   run (Slots, the Integration lane, quota, dependencies) and proposes
   Tunings. The same word and shape as Chorus's Reflection over the
-  Companion's record. Its verb is `/thread:reflect`. _Avoid_: retro, review
-  (the engine's).
+  Companion's record. Its verb is `/thread:reflect`. A serial rollout is read
+  from its Leg log instead (serial-score.py): running time, the Hands-off rate
+  and a Quality from `fixes:` alone, with no load, binding or proposal.
+  _Avoid_: retro, review (the engine's).
 - **Tuning** — one proposed change at one
   of three altitudes, as in Chorus: a **knob** (a value in the operator's
   rollout settings: a repo's Parallel ceiling, a round cap, read by the next
@@ -706,7 +744,8 @@ through time, from attention to merged PRs. Terms only — no implementation.
   of its own through the same tune script (ADR 0037 d4). The weekly reading
   writes a line there only when it lands or reverts a knob, never a close
   line, and records its Watches, proposals and close in `reflections.jsonl`.
-  _Avoid_: tweak, auto-tune.
+  A serial rollout's close line carries `shape: serial` and no repo: it moves
+  no key and is never a baseline. _Avoid_: tweak, auto-tune.
 - **Watch** — a pattern a Reflection saw in one rollout and would not yet
   propose a rule for: named, written to the record and carried into the next
   Reflection. It becomes a rule proposal when a later rollout shows the same

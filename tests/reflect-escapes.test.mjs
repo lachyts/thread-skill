@@ -661,3 +661,25 @@ test('E12: nothing landed: no Escapes, Quality null, flagged', (t) => {
   assert.equal(a.headline.quality, null)
   assert.ok(has(a.flags, /^escapes: nothing landed in the window: Quality is null$/), a.flags.join('\n'))
 })
+
+// ---- E13: a Leg's fix task (p24-3): `verifies:` is never an Escape; `fixes:` charges the culprit ------------------
+
+test('E13: a fix with verifies: alone charges nobody; one with verifies: a1 and fixes: a2 charges a2, not a1', (t) => {
+  const home = tmpHome(t)
+  const w = new Repo(home)
+  w.commit('init', { 'README.md': 'demo\n' })
+  w.commit('a1: add a (#1)', { 'a.txt': 'a1\n' })
+  const s2 = w.commit('a2: rework a (#2)', { 'a.txt': 'a2\n' })
+  w.publish()
+  note(home, 'a1'); note(home, 'a2')
+  note(home, 'f-v', ['status: open', 'verifies: "[[a1]]"'])
+  emitAll(home, 'ra', [merged(D(5, '01:00'), 'a1', { pr: 1 }), merged(D(5, '02:00'), 'a2', { pr: 2 })])
+  const v = run(home, 'ra', { repo: w.dir })
+  assert.equal(v.escapes.count, 0, 'a fix that only verifies a1 is no Escape')
+  assert.deepEqual(v.escapes.tasks, [])
+  note(home, 'f-c', ['status: open', 'verifies: "[[a1]]"', 'fixes: "[[a2]]"'])
+  const c = run(home, 'ra', { repo: w.dir })
+  assert.equal(c.escapes.count, 1)
+  assert.deepEqual(c.escapes.tasks, [{ task: 'a2', pr: 2, commits: [s2], evidence: [{ source: 'fixes', note: 'f-c', status: 'open' }] }],
+    'fixes: names the culprit a2, so the Escape is a2\'s and never a1\'s')
+})

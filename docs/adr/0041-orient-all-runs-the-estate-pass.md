@@ -47,3 +47,16 @@ Lachy's scarcest resource is attention, not usage limits. The question he wants 
   - WSJF's time-criticality term;
   - GTD's Someday/Maybe review behind the Unpark offer.
 - Auto-start opens several sessions at once, and the child orients wait on Lachy. The time budget bounds the parent's questions, not the children's.
+
+## Build rulings
+
+Rulings made while P25 is built. No build grill ran for P25, so each bullet is a plan's reading of the Decision above, dated and naming its canonical file. The first awaits Lachy's confirmation.
+
+- **How the slate ranks** (the p25-2 plan, 2026-10-20; `skills/_shared/readiness-grade.md` is canonical).
+  - *The key, an interpretation for Lachy to confirm.* The Decision says crowned projects come first, parked ones last, and deadlines rank above leverage. This reading also puts deadlines above the crowned set: the key is parked last, then work due within a fortnight (overdue included), then crowned projects, then leverage, and a parked project's work stays last whatever its deadlines. The literal alternative (crowned above deadlines) would bury every overdue task under the crowned project's whole backlog. Flipping it is one tuple in `estate-rank.py`.
+  - *Crowned* means `status: crowned`, never a `crowned:` date, which queued projects carry too.
+  - *The raise.* The decision count implies a grade (none is Ready, one is One call, two or more is Grill), and a task takes the higher of that and the agent's grade; then any decision the agent cannot recommend on with confidence raises it one step. A One call or Grill with no decision is invalid, and every decision offers 2 to 4 options with the recommendation among them.
+  - *Holds.* Only `depends-on:` and `blocked-by:` hold a task, as in the queue. A dependency that is in flight, or graded Ready and not held (and not in another, parked project), does not hold; anything else does, transitively. A hold never moves a rank: it sets the task apart in its run and keeps it out of the Unpark count.
+  - *Parked work waits on its Unpark offer.* A parked project's One calls and Grills stay out of the decision rounds and its Orient tasks out of `orient[]`, so the pass starts no session on a shelved project.
+  - *The snooze record* is two keys in the project note's frontmatter, `snoozed_until` and `snoozed_ready`, written only by `estate-rank.py snooze`, beside the `status: parked` the unpark and kill writes change. Those writes clear it first (`snooze --clear`), so a snooze never outlives an unpark or kill made through the offer to hide the project when it is parked again.
+  - *The constants* (agent minutes per size, Lachy's minutes per decision and per review item, the fortnight) are starting values, pinned between the doc and the script, for the grade log and the weekly Reflection to tune.

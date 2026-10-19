@@ -5,7 +5,7 @@
 #
 #   land.sh [--slug <s>] [-F <msgfile>] [--commit-only] [--] <repo> [<path>…]
 #   land.sh --origin-slug <repo>      prints <owner>/<name> for a GitHub origin, else exit 4, stdout empty
-#   land.sh --route <repo>            prints the route class, read-only, no network (below), exit 0
+#   land.sh --route [--] <repo>       the route a landing would take, read-only (below)
 #
 # <repo> is any path inside the repo, a directory `git rm -f` just removed included: it resolves through
 # its nearest existing ancestor. Each <path> must be THREAD.md, */THREAD.md, or a file directly under
@@ -35,12 +35,17 @@
 #   without moving the branch. A protected landing is unaffected: its PR merges on GitHub.
 #   Protected → push HEAD unchanged to close/<cdate>-<slug>-<sha12>, open the PR over REST, label it
 #   `landing`, queue `gh pr merge --auto --merge`, and update-branch once when origin/<d> moved on.
-#   route_class is the local half (swept, then the register), shared by S2, O2 and --route, so the three never
-#   drift. --route <repo> prints its class as one line through result(): `landable`, `commit-only: <reason>` (swept
-#   by the daily sweep, listed on the landing register, no GitHub origin) or `unknown: landing register: <first
-#   line>` (the register unreadable); exit 0, usage exit 2. It reports the class only: protected or unprotected
-#   needs the network and is S3's, never --route's. Its caller is self-rollout-check.sh --refresh-in-place, whose
-#   diverged-twin remedy follows the twin's route (ADR 0042).
+#   route_class is the local half (swept, then the register), shared by S2 and O2, so a landing, route mode (which
+#   runs S2) and the own branch never drift.
+#
+# Route mode (`--route`, read-only; leg.py's Complete, execute legs.md; self-rollout-check.sh --refresh-in-place,
+# whose diverged-twin remedy follows the twin's route, ADR 0042) runs S1 with no paths through S3 exactly as
+# a landing does and returns before S4: nothing is fetched, committed or pushed (the one bounded ls-remote S3 makes
+# when origin/HEAD is unset aside). It prints one line: `landable <d>` (exit 0) when a landing would push to <d>,
+# `not landed: <reason>` (exit 0) for a deferred class, with the very reason a landing prints, or `stuck: <reason>`
+# (exit 1) for a pending class or an S1 stop (a detached HEAD, a half-applied operation, not a work tree). Any other
+# flag, or a path, with it is a usage error (exit 2, stdout empty). It is opt-in and read only after S3, so every
+# other route is unchanged.
 #
 # Own-branch mode (ADR 0028 §§ 1–3, 5; close's § Land the own branch) lands the session's own branch <B>:
 #
@@ -153,7 +158,7 @@ git_line() {
 
 result() { printf '%s\n' "$1" > "$LAND_RES"; }
 
-usage() { echo "land: usage: land.sh [--slug <s>] [-F <msgfile>] [--commit-only] [--] <repo> [<path>…] | land.sh --origin-slug <repo> | land.sh --route <repo> | land.sh --own-branch --branch <B> [--queue --reviewed <sha> | --hold -F <diagnosis>] [--] <repo>"; exit 2; }
+usage() { echo "land: usage: land.sh [--slug <s>] [-F <msgfile>] [--commit-only] [--] <repo> [<path>…] | land.sh --origin-slug <repo> | land.sh --route [--] <repo> | land.sh --own-branch --branch <B> [--queue --reviewed <sha> | --hold -F <diagnosis>] [--] <repo>"; exit 2; }
 
 # phys <path>: PHYS_ANC is the nearest existing directory, physical; PHYS_TAIL the missing rest ('' or
 # /a/b). PHYS is both joined. A `.` or `..` in the missing tail cannot be resolved, so it fails.
@@ -255,7 +260,7 @@ swept() {
 
 # route_class <top>: the route class of the repo at <top>, local only: swept by the daily sweep, then the landing
 # register. Sets RC_CLASS (landable, deferred or pending) and RC_REASON (a deferred reason, or a pending stuck
-# reason). The register reader's stderr passes through. Needs $tmpd. S2, O2 and --route call it.
+# reason). The register reader's stderr passes through. Needs $tmpd. S2 and O2 call it; --route reads it through S2.
 route_class() {
   local reg reg_rc
   RC_CLASS=landable; RC_REASON=
@@ -280,7 +285,7 @@ main() {
 
   if [ "${1:-}" = --own-branch ]; then shift; own_main "$@"; exit 1; fi
 
-  local slug_arg= msgfile= commit_only= repo made= pending= class= reason= b= bref= d= top slug
+  local slug_arg= msgfile= commit_only= route_only= repo made= pending= class= reason= b= bref= d= top slug
   local -a paths=() rels=() list=()
 
   if [ "${1:-}" = --origin-slug ]; then
@@ -290,21 +295,12 @@ main() {
     result "$slug"; exit 0
   fi
   if [ "${1:-}" = --route ]; then
-    [ $# -eq 2 ] && [ -n "$2" ] || usage
-    tmpd=$(mktemp -d "${TMPDIR:-/tmp}/land.XXXXXX") || { result "unknown: cannot create temp dir"; exit 0; }
-    trap 'rm -rf "$tmpd"' EXIT
-    phys "$2"; [ $? = 1 ] && { result "unknown: cannot resolve $2"; exit 0; }
-    top=$(git -C "$PHYS_ANC" rev-parse --show-toplevel 2>"$tmpd/top.err") && [ -n "$top" ] && top=$(cd "$top" && pwd -P) \
-      || { result "unknown: not a git work tree: $(first_line "$tmpd/top.err")"; exit 0; }
-    route_class "$top"
-    case $RC_CLASS in
-      landable) result landable ;;
-      deferred) result "commit-only: $RC_REASON" ;;
-      *) result "unknown: $RC_REASON" ;;
-    esac
-    exit 0
+    shift; [ "${1:-}" = -- ] && shift
+    [ $# -eq 1 ] && [ -n "$1" ] || usage
+    case $1 in -*) usage ;; esac
+    route_only=1
   fi
-  while [ $# -gt 0 ]; do
+  while [ -z "$route_only" ] && [ $# -gt 0 ]; do
     case $1 in
       --slug) [ $# -ge 2 ] || usage; slug_arg=$2; shift 2 ;;
       -F) [ $# -ge 2 ] && [ -n "$2" ] || usage; msgfile=$2; shift 2 ;;
@@ -386,6 +382,15 @@ main() {
       fi
     fi
     if [ "$class" = landable ] && [ "$b" != "$d" ]; then class=deferred; reason="on $b, not $d"; fi
+  fi
+
+  # ---- S3b. --route: the class S2-S3 reached, and nothing more -------------------------------------------
+  if [ -n "$route_only" ]; then
+    case $class in
+      landable) result "landable $d"; exit 0 ;;
+      deferred) result "not landed: $reason"; exit 0 ;;
+      *) result "stuck: $pending"; exit 1 ;;
+    esac
   fi
 
   # ---- S4. Refresh: only a landable repo on its default branch ------------------------------------------
