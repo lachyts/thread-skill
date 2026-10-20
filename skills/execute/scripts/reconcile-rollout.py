@@ -236,9 +236,13 @@ Subcommands:
               journalDir is --journal-dir (absolute), else `<dir>/<session id>/workflows` for the one match of
               `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/*/${CLAUDE_CODE_SESSION_ID}.jsonl`. The owner must
               hold: task or revise -> the note reads `in_progress`; integrate -> it holds the lane (_holds_lane).
-              A Lost-call resume binds with the kind it resumes plus --resumed-from. Exit 1 (one ERROR line,
-              nothing written): no note, no `rollout:`, an unresolvable journal dir, a failed owner check. Exit 2:
-              usage (a malformed runId or a relative --journal-dir).
+              A Lost-call resume binds with the kind it resumes plus --resumed-from. A --journal-dir must hold
+              `<runId>.json`, or be a `workflows/` dir whose session holds `subagents/workflows/<runId>/` (the
+              run's transcript dir, made at launch; the journal lands beside the dir's other journals when the
+              call ends), so the Workflow tool's printed Transcript dir is refused while the note still holds
+              its state and the lead can rebind (p27-3). Exit 1 (one ERROR line, nothing written): no note, no
+              `rollout:`, an unresolvable or refused journal dir (the refusal names the session's `workflows/`
+              dir), a failed owner check. Exit 2: usage (a malformed runId or a relative --journal-dir).
 
   free-lane   `--tasks <slug>`: the lead frees the lane at the lane-free rule or a § 7 halt (p15-2). Requires
               _holds_lane (else exit 1, nothing written); closes the task's open merge hold, then records
@@ -3960,6 +3964,28 @@ def _journal_dir(args):
     return str(hits[0].parent / sid / "workflows"), None
 
 
+def _journal_dir_refusal(jdir: str, run_id: str):
+    """Why an explicit --journal-dir cannot hold run_id's journal, or None (p27-3). fold-journals reads
+    <jdir>/<runId>.json, which the Workflow tool writes into the session's workflows/ dir only when the call
+    ends; at launch it has created the run's transcript dir, <session>/subagents/workflows/<runId>/ (the
+    "Transcript dir" it prints). So the dir passes when it holds <runId>.json, or when it is a workflows/ dir
+    whose session holds that run subdir. Anything else (that Transcript dir above all) would only warn
+    `no journal at` at the fold, once the note has moved on and no rebind is possible."""
+    if os.path.isfile(os.path.join(jdir, f"{run_id}.json")):
+        return None
+    run_sub = os.path.join("subagents", "workflows", run_id)
+    if os.path.basename(jdir) == "workflows" and os.path.isdir(os.path.join(os.path.dirname(jdir), run_sub)):
+        return None
+    parts = Path(jdir).parts
+    if len(parts) >= 4 and parts[-3:-1] == ("subagents", "workflows"):  # <session>/subagents/workflows/<run>
+        likely = str(Path(*parts[:-3]) / "workflows")
+    else:
+        likely = "<session>/workflows"
+    return (f"--journal-dir {jdir} holds no {run_id}.json and is no workflows/ dir whose session holds "
+            f"{run_sub}/ (the Workflow tool's Transcript dir is not the journal dir): pass the session's "
+            f"workflows/ dir, {likely}")
+
+
 def cmd_bind_run(args) -> int:
     """run-bound for the call the lead just launched (the module docstring's bind-run)."""
     def usage(msg):
@@ -3993,6 +4019,8 @@ def cmd_bind_run(args) -> int:
               f"{_status(note) or 'none'!r}; nothing written", file=sys.stderr)
         return 1
     jdir, err = _journal_dir(args)
+    if not err and args.journal_dir:
+        err = _journal_dir_refusal(jdir, args.run_id)
     if err:
         print(f"ERROR: bind-run: {slug}: {err}; nothing written", file=sys.stderr)
         return 1
