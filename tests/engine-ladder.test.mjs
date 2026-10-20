@@ -362,7 +362,7 @@ const SLUG = 'proj-fix-a'
 const PR = 'https://github.com/o/r/pull/7'
 const mkI = (over = {}) => ({
   prUrl: PR, branch: 'audit-fix/fix-a', worktreePath: `/repo/.claude/worktrees/${SLUG}`, headSha: H('a'), taskBase: H('b'), mainSha: H('c'),
-  trouble: ['conflict'], landed: [], plan: '', reviewHistory: [], reviewRoundsUsed: 1, rung: { startRung: '', rung: '', climbs: [] }, ...over,
+  trouble: ['conflict'], landed: [], reviewHistory: [], reviewRoundsUsed: 1, rung: { startRung: '', rung: '', climbs: [] }, ...over,
 })
 const integrateArgs = (I, over = {}) => mkArgs(mkTask(SLUG, { scope: 'cross-cutting' }), { mode: 'integrate', integration: I, ...over })
 

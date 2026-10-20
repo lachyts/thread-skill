@@ -47,17 +47,54 @@ date by the next Reflection, once the day is whole). An instant counts in [since
 span. The window: --until defaults to now, and a future --until is clamped to now and flagged; --since defaults to
 the last `reflection` line's until, else until - 7 days; since after until is exit 2. span mints the Reflection's id,
 r-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>. It reads every non-reserved <slug>.jsonl in the events directory with a line in
-[since, until] (the read rollouts), and for each:
+[since, until], and every `shape: serial` note directly under Work/Tasks or under Archive/Rollouts whose `## Leg log`
+has a line stamped in [since, until] (a chain records only Lachy's acts, so a hands-off one has no record line): the
+read rollouts. Each entry's shape is its note's (close-score.py's read: reconcile-rollout.py's Note and _shape;
+parallel with no note). For each:
 - closeLine: {id, close} from tune.py's close_line(), or null (a voided close line reads as none). A rollout whose
   note resolves under Work/Tasks/Archive/Rollouts/, or whose `status:` is done or dropped, with a null closeLine is
   flagged `closed with no close line: no baseline` and named in cannotShow; a running rollout's null is not. span
   writes no tunings.jsonl line: such a rollout is read in the week it ran and leaves no baseline.
-- note (Work/Tasks/<slug>.md, then Work/Tasks/Archive/Rollouts/<slug>.md) and its ``Project root:`` line, the repo
+- note (Work/Tasks/<slug>.md, then Work/Tasks/Archive/Rollouts/<slug>.md) and, for a parallel one (a serial chain:
+  below), its ``Project root:`` line, the repo
   (rollout-settings.py's _origin_slug, cached per root), the settings (rollout-settings.py's resolve(repo=root,
   path=--config), redacted as the CLI prints it and written to <dir of F>/<slug>.settings.json), --fold's
   fold-journals, and score.py (--rollout --note --settings --repo-slug --repo --tasks-dir --until --out
   <dir of F>/<slug>.score.json). A missing note, a refused settings file or no origin: scored by slug, flagged, and
   never a knob candidate. No single rollout stops the span.
+- A serial chain (ADR 0040) takes the serial path instead of the note's Project root, the repo, the settings, --fold
+  and score.py, as close-score.py's serial path does: `serial-score.py --rollout <note> --tasks-dir <tasks> --until
+  <until> --out <dir of F>/<slug>.score.json` (its header the one copy of the serial score's rules), flagged SERIAL_FLAG.
+  root, repo and binding are null, proposals [] and chain is leg.py's chain state (the score's, else, with no
+  readable score, the `leg.py status` read below; null only when neither reads): a chain is never a knob candidate
+  (knobs() skips it whatever it holds), since its score proposes nothing and its line is never a baseline. A non-zero
+  exit (2 for an --until before Leg 1 began, say) is flagged and the friction is still read. Its friction is the
+  record's (below: its asks, and the note's repair lines) plus the chain's own, from one `leg.py status`
+  (serial-score.py's leg_status(); an unreadable status is flagged and adds none), each in the window:
+  set-aside a Leg log `set aside` line: leg, status (leg.py's), stage (gate for gate-pending, plan, review, else
+            block), reasonClass null, setAsideAt `leg`, taskNote, and movedBy: the first record act on the task after
+            it (answer-recorded, gate-signed, `gate-signed (standing)` for a standing one, handed-back with its via, or
+            race-decided) before the end of the minute of the Leg log's next claimed, took or done of it (a Leg-log
+            stamp floors to its minute, so an act in that minute came first: serial-score.py's done + 60 s rule);
+            else `unrecorded`, with mover {kind (claimed | took | done), at, leg} of that pick-up; null while nothing
+            picked it up by until.
+            explainedIn and cannotShow as a parallel unrecorded set-aside's.
+  ask       a `halt cleared:` line, act haltCleared (serial-score.py's act: a halt is Lachy's to clear), its task the
+            first one a later Leg took from the halted Leg (null when none), detail `Leg <K>'s halt cleared: <reason>`,
+            and halted: the reason the halted Leg's `closed: halted: <reason>` line gives (null when none).
+  restart   one per restart, never one per `restart:` line (serial-score.py's fold_restarts(), its header's Restarts
+            rule the one copy): repair § 7 (e) writes step 2's `pending` line and then step 3's `started` or step
+            4's `manual` line for one restart, read as one item; a `--replace` re-mark is a second restart. leg (the
+            Leg it starts), how (pending | started | manual: its latest line's, at or before until), started, manual,
+            session (the marking repair's), began (that Leg's `began` stamp on its last restart, else null), and at:
+            its first line's stamp, which decides the window. how `pending` means step 2 ran with no step 3 or 4
+            line after it: with began null, trace why the start never happened, not why the last Leg did not hand
+            over; with began set the Leg did start, by a route that wrote no line.
+  escape    each piece of serial-score.py's escapes block (`fixes:` only: a fix task that names a chain task, its
+            Leg-filed smoke fixes among them), dated as the sweep dates a fixer, with at and inWindow. The sweep below
+            never reaches a chain (its record has no `merged` lines), so a chain's Escapes are read only in a week
+            span reads it.
+  A chain has no retry, descope or churn of its own, and no breach (its score has no Guardrails).
 - breachCounts: true only for a read, non-partial rollout whose window.activeEnd falls in [since, until], so a
   Guardrail breach counts in the week its run ends. A partial rollout's breaches are reported, not counted.
 - friction, each item {kind, rollout, task, at, ...}:
@@ -118,9 +155,10 @@ r-<UTC YYYYMMDDTHHMMSSZ>-<6 hex>. It reads every non-reserved <slug>.jsonl in th
   rollout of its repo that passes tune.py's revert_check), land[] (the proposals of a repo's newest non-partial read
   rollout that pass tune.py's auto_check, over the same reflections.jsonl read and the same agreement as tune.py, and
   whose key no revert[] item names) and held[] (the rest, each with its reason).
-span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | escapes-only | repairs-only), note,
-root, repo, status, closeLine, score, window, partial, headline{handsOffRate, quality, reviewChurn, throughput},
-breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[]}], freshReview[] (/fresh-review
+span.json: {reflection, since, until, previous, rollouts[{rollout, mode (read | escapes-only | repairs-only), shape
+(parallel | serial), note, root, repo, status, closeLine, score, window, partial, headline{handsOffRate, quality,
+reviewChurn, throughput}, breached, breachCounts, binding, proposals (each with its knob_key), flags, friction[], and
+chain on a read serial one}], freshReview[] (/fresh-review
 rounds in the window with regression > 0, reported only: reviews.jsonl names no rollout), watches[] (every open Watch:
 rule, shape, rollouts, count, recurring, stale, new, declinedBefore, lastSeen), knobs{revert, land, held}, bugsOpen[],
 decisionTask, grades (grades.py's block: log, window, all, pending, episodes), cannotShow[], flags[]}. stderr gets one
@@ -272,11 +310,13 @@ SKILLS = os.path.dirname(os.path.dirname(HERE))
 SHARED = os.path.join(SKILLS, "_shared", "scripts")
 RECONCILE_PY = os.path.join(SKILLS, "execute", "scripts", "reconcile-rollout.py")
 SCORE_PY = os.path.join(HERE, "score.py")
+SERIAL_PY = os.path.join(HERE, "serial-score.py")
 RESOLVE_DAY_PY = os.path.join(SHARED, "resolve-day.py")
 
 ZONE = "Australia/Melbourne"
 STALE_DAYS = 28
 DAY_MS = 24 * 3600 * 1000
+MINUTE_MS = 60 * 1000  # a Leg-log stamp's precision: it floors to its minute
 NEEDS_YOU_MAX = 600
 REPAIR_TEXT_MAX = 300
 SCORE_TIMEOUT = 420
@@ -288,6 +328,15 @@ REPAIR_RE = re.compile(r"^- (\d{4}-\d\d-\d\d) repair:\s*(.+)$", re.I)
 UNDATED_REPAIR_RE = re.compile(r"^-\s+(?:(\S+)\s+)?repair:", re.I)
 SLUG_WORDS_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+){0,4}\Z")
 ASKED_AHEAD_RE = re.compile(r"^## Decisions \(asked ahead|asked ahead at schedule", re.M)
+# A serial note's Leg log (leg.py's LEG_LOG) and the stamp of each of its line forms (leg.py's LOG_RE, CLEARED_RE and
+# RESTART_RE): span reads a chain whose log has a line in the window, Run record or not
+LEG_LOG = "## Leg log"
+LEG_STAMP_RE = re.compile(r"^- (\S+) (?:Leg \d+ |halt cleared: |restart: Leg \d+ )")
+SERIAL_FLAG = "a serial chain (ADR 0040): scored by serial-score.py (no fold, settings or score.py), never a knob candidate"
+# A chain's set-aside (leg.py's statuses) read as the parallel stage it matches, so explained_in() reads a gate's gates
+SERIAL_STAGES = {"gate-pending": "gate", "plan-blocked": "plan", "review-blocked": "review", "blocked": "block"}
+# The record lines that move a chain's set-aside on (the human acts a serial chain's verbs write)
+SERIAL_MOVERS = ("answer-recorded", "gate-signed", "handed-back", "race-decided")
 MOVERS = ("auto-retry", "handed-back", "answer-recorded", "gate-signed", "race-decided", "carried", "slot-taken",
           "lane-taken", "merged")
 UNRECORDED_MOVERS = ("slot-taken", "lane-taken", "merged")
@@ -319,6 +368,7 @@ def _load(name, path):
 RR = _load("thread_run_record", os.path.join(SHARED, "run_record.py"))
 RS = _load("thread_rollout_settings", os.path.join(SHARED, "rollout-settings.py"))
 SCORE = _load("thread_score", SCORE_PY)
+SERIAL = _load("thread_serial_score", SERIAL_PY)  # leg_status() and Unreadable: the chain friction's one leg.py read
 TUNE = _load("thread_tune", os.path.join(HERE, "tune.py"))
 ESC = _load("thread_escapes", os.path.join(HERE, "escapes.py"))
 GR = _load("thread_grades", os.path.join(HERE, "grades.py"))
@@ -595,6 +645,13 @@ def project_root(note_path):
     return root if os.path.isdir(root) else None
 
 
+def shape_of(note_path):
+    """A rollout note's Shape, read as close-score.py reads it (reconcile-rollout.py's Note and _shape): `serial` or
+    `parallel`; a note Note cannot read is parallel."""
+    note = read_note(note_path)
+    return REC._shape(note) if note is not None else "parallel"
+
+
 def create(path, text, dry_run):
     """A new note by exclusive create (never over a file). Exit 2 when the path exists, 1 when it cannot be written."""
     if dry_run:
@@ -745,9 +802,9 @@ class Span:
     # -- one read rollout -------------------------------------------------------------------------------------------
 
     def read_rollout(self, slug, lines, since, until, tunings_file):
-        entry = {"rollout": slug, "mode": "read", "note": None, "root": None, "repo": None, "status": None,
-                 "closeLine": None, "score": None, "window": None, "partial": None, "headline": None, "breached": [],
-                 "breachCounts": False, "binding": None, "proposals": [], "flags": [], "friction": []}
+        entry = {"rollout": slug, "mode": "read", "shape": "parallel", "note": None, "root": None, "repo": None,
+                 "status": None, "closeLine": None, "score": None, "window": None, "partial": None, "headline": None,
+                 "breached": [], "breachCounts": False, "binding": None, "proposals": [], "flags": [], "friction": []}
         try:
             hit = TUNE.close_line(slug, path=tunings_file)
         except OSError as e:
@@ -768,6 +825,8 @@ class Span:
                 entry["flags"].append("closed with no close line: no baseline")
                 self.cannot_show("[[%s]] is closed (%s) with no close line: read this week, no baseline written"
                                  % (slug, "archived" if archived else entry["status"]))
+            if shape_of(note) == "serial":
+                return self.read_chain(entry, note, lines, since, until)
             entry["root"] = project_root(note)
             if entry["root"] is None:
                 entry["flags"].append("no Project root: scored by slug, never a knob candidate")
@@ -821,6 +880,136 @@ class Span:
             self.flag("[[%s]]: %s" % (slug, f))
         return entry, sc
 
+    # -- one read serial chain (ADR 0040) -----------------------------------------------------------------------------
+
+    def read_chain(self, entry, note, lines, since, until):
+        """A `shape: serial` note: serial-score.py instead of fold-journals, the settings resolve and score.py (close-score's
+        serial path), and the chain's friction from leg.py status beside the record's. Never a knob candidate."""
+        slug = entry["rollout"]
+        entry["shape"] = "serial"
+        entry["chain"] = None
+        entry["flags"].append(SERIAL_FLAG)
+        out = os.path.join(self.out_dir, "%s.score.json" % slug)
+        argv = [sys.executable, SERIAL_PY, "--rollout", str(note), "--tasks-dir", str(self.vault.root),
+                "--until", fmt(until), "--out", out]
+        rc, _o, err = run(argv, SCORE_TIMEOUT, self.genv)
+        sc = None
+        if rc == 0:
+            try:
+                with open(out, encoding="utf-8") as f:
+                    sc = json.load(f)
+                entry["score"] = out
+            except (OSError, ValueError) as e:
+                entry["flags"].append("serial-score.py wrote no readable score: %s" % e)
+        else:
+            entry["flags"].append("serial-score.py exited %s: %s" % (rc, first_line(err)))
+        if sc is not None:
+            self.scored(entry, sc, since, until)
+            entry["proposals"] = []  # a serial score proposes nothing, and its line is never a baseline
+            entry["chain"] = sc.get("chain")
+        try:
+            st = SERIAL.leg_status(str(note), str(self.vault.root), self.genv)
+        except SERIAL.Unreadable as e:
+            st = None
+            entry["flags"].append("%s: no chain friction read" % e)
+        if sc is None and st is not None:  # no score (a non-zero exit, say --until before Leg 1): status's own state
+            entry["chain"] = st.get("chain")
+        extra = self.chain_friction(slug, st, sc, lines, since, until) if st is not None else []
+        self.friction(entry, lines, since, until, extra)
+        for f in entry["flags"]:
+            self.flag("[[%s]]: %s" % (slug, f))
+        return entry, sc
+
+    def chain_friction(self, slug, st, sc, lines, since, until):
+        """A chain's own friction items, from leg.py status (`st`) and serial-score's escapes block (`sc`): each in-window
+        `set aside` line (movedBy read from the record's acts and the Leg log's later claim), `halt cleared:` line (an
+        ask), restart (serial-score's fold_restarts(): its `restart:` lines read as one), and each Escape the block's
+        `fixes:` evidence dates in or out of the window."""
+        items = []
+
+        def at_ms(stamp):
+            try:
+                return SCORE.to_ms(stamp)
+            except Exception:  # a stamp leg.py printed raw that run_record's _stamp refuses
+                self.flag("[[%s]]: a Leg-log stamp %r does not parse: skipped" % (slug, stamp))
+                return None
+
+        moves = []  # (ms, task, kind, leg) of every Leg-log claim, take and done: what picks a set-aside task back up
+        for g in st.get("legs") or []:
+            for kind in ("claimed", "took", "done"):
+                for e in g.get(kind) or []:
+                    t = at_ms(e.get("at"))
+                    if t is not None and e.get("task"):
+                        moves.append((t, e["task"].lower(), kind, g.get("n")))
+        moves.sort(key=lambda m: m[0])
+        for g in st.get("legs") or []:
+            for e in g.get("setAside") or []:
+                t = at_ms(e.get("at"))
+                if t is None or not since <= t <= until or not e.get("task"):
+                    continue
+                moved, mover = self.chain_moved_by(lines, moves, e["task"], t, until)
+                items.append({"kind": "set-aside", "rollout": slug, "task": e["task"], "at": fmt(t), "leg": g.get("n"),
+                              "stage": SERIAL_STAGES.get(e.get("status"), "block"), "status": e.get("status"),
+                              "reasonClass": None, "setAsideAt": "leg", "taskNote": self.task_note(e["task"]),
+                              "movedBy": moved, "mover": mover, "explainedIn": None})
+        took, halted = {}, {}
+        for g in st.get("legs") or []:
+            for e in g.get("took") or []:
+                took.setdefault(e.get("from"), e.get("task"))
+            if g.get("outcome") == "halted":  # its close line, `halted: <reason>`: what the trace starts from
+                halted[g.get("n")] = (g.get("closed") or "").split(":", 1)[-1].strip() or None
+        for c in st.get("haltCleared") or []:
+            t = at_ms(c.get("at"))
+            if t is None or not since <= t <= until:
+                continue
+            detail = "Leg %s's halt cleared: %s" % (c.get("leg"), c.get("reason"))
+            item = self.ask(slug, took.get(c.get("leg")), t, "haltCleared", detail)
+            item["halted"] = halted.get(c.get("leg"))
+            items.append(item)
+        for r in SERIAL.fold_restarts(st, until, at_ms):  # one per restart, never per line: its first line's stamp
+            if not since <= r["at"] <= until:
+                continue
+            items.append({"kind": "restart", "rollout": slug, "task": None, "at": fmt(r["at"]), "leg": r["leg"],
+                          "how": r["how"], "started": r["started"], "manual": r["manual"], "session": r["session"],
+                          "began": fmt(r["began"]) if r["began"] is not None else None})
+        block = (sc or {}).get("escapes") if isinstance((sc or {}).get("escapes"), dict) else None
+        if block:
+            dates = self.dates(None, block)  # fixes: only (no repo), so no git is read
+            for tk in block.get("tasks") or []:
+                for ev in tk.get("evidence") or []:
+                    day, undated = dates.get(self.ev_key(ev), (None, False))
+                    item = {"kind": "escape", "rollout": slug, "task": tk.get("task"), "source": ev.get("source"),
+                            "at": day, "inWindow": self.in_window(day, since, until), "evidence": ev}
+                    if undated:
+                        item["undated"] = True
+                    items.append(item)
+        return items
+
+    @staticmethod
+    def chain_moved_by(lines, moves, task, at, until):
+        """(movedBy, mover) of a chain's set-aside at `at` (ms): the first human act on the task in the record after it
+        (its kind, a hand-back with its via), when it comes before the end of the minute of the Leg log's next claim,
+        take or done of the task (a Leg-log stamp floors to its minute and a record act is ms, so an act in that minute
+        came first: legs.md signs a gate, then claims, serial-score.py's done + 60 s rule); `unrecorded` with mover
+        {kind, at, leg} when a Leg picked the task up with no act before it; else None."""
+        key = task.lower()
+        pick = next((m for m in moves if m[0] > at and m[1] == key and m[0] <= until), None)
+        for t, _n, d in lines:
+            if t <= at:
+                continue
+            if t > until or (pick is not None and t >= pick[0] + MINUTE_MS):
+                break
+            if str(d.get("task") or "").lower() != key or d.get("kind") not in SERIAL_MOVERS:
+                continue
+            if d["kind"] == "gate-signed" and d.get("standing") is True:
+                return "gate-signed (standing)", None
+            if d["kind"] == "handed-back":
+                return "handed-back (via %s)" % d.get("via"), None
+            return d["kind"], None
+        if pick is not None:
+            return "unrecorded", {"kind": pick[2], "at": fmt(pick[0]), "leg": pick[3]}
+        return None, None
+
     def scored(self, entry, sc, since, until):
         w = sc.get("window") or {}
         entry["window"] = w
@@ -848,7 +1037,9 @@ class Span:
         p = self.vault.find(task) if task else None
         return str(p) if p else None
 
-    def friction(self, entry, lines, since, until):
+    def friction(self, entry, lines, since, until, extra=()):
+        """The friction items of one read rollout: the record's, then `extra` (a chain's own, chain_friction()), then
+        its note's repair lines; every unrecorded set-aside among them gets its explainedIn and a cannotShow line."""
         slug, items = entry["rollout"], entry["friction"]
         # ask: straight from the record, for every task, landed or not (score.py's handsOff lists landed tasks only):
         # each human act line (score.py's human_act) and each hold a hold-started opens (paired as score.py pairs them)
@@ -892,6 +1083,7 @@ class Span:
             elif kind == "review-verdict" and task and isinstance(d.get("regression"), int) and d["regression"] > 0:
                 items.append({"kind": "churn", "rollout": slug, "task": task, "at": fmt(t), "round": d.get("round"),
                               "findings": d.get("findings"), "regression": d.get("regression")})
+        items.extend(extra)
         if entry["note"]:
             items.extend(self.repairs(slug, entry["note"], since, until))
         unrecorded = [it for it in items if it["kind"] == "set-aside" and it["movedBy"] == "unrecorded"]
@@ -1008,6 +1200,42 @@ class Span:
             out.append({"kind": "repair", "rollout": slug, "task": tasks[0] if tasks else None, "tasks": tasks,
                         "at": day, "date": day, "text": text[:REPAIR_TEXT_MAX], "shape": shape})
         return out
+
+    # -- the serial chains with no record line in the window ------------------------------------------------------------
+
+    def serial_notes(self):
+        """(slug, path) of every `shape: serial` note holding a Leg log, directly under Work/Tasks, then under
+        Archive/Rollouts (a live note wins its slug, as rollout_note() resolves it)."""
+        seen = set()
+        for d in (self.vault.root, self.vault.root / "Archive" / "Rollouts"):
+            if not d.is_dir():
+                continue
+            for p in sorted(d.glob("*.md")):
+                if p.stem.lower() in seen or p.stem in RR.RESERVED:
+                    continue
+                try:
+                    if "\n%s" % LEG_LOG not in p.read_text(encoding="utf-8"):
+                        continue
+                except (OSError, UnicodeDecodeError):
+                    continue
+                if shape_of(p) == "serial":
+                    seen.add(p.stem.lower())
+                    yield p.stem, p
+
+    def leg_log_in(self, note_path, since, until):
+        """Whether a line of the note's `## Leg log` is stamped in [since, until]."""
+        note = read_note(note_path)
+        for line in (note.section_text(LEG_LOG) if note is not None else "").split("\n"):
+            m = LEG_STAMP_RE.match(line.rstrip())
+            if not m:
+                continue
+            try:
+                t = SCORE.to_ms(m.group(1))
+            except Exception:
+                continue
+            if since <= t <= until:
+                return True
+        return False
 
     # -- the Escapes sweep (ADR 0037 d4) ----------------------------------------------------------------------------
 
@@ -1167,7 +1395,8 @@ class Span:
         out = {"revert": [], "land": [], "held": []}
         by_repo = {}  # the knob-capable read rollouts (a note, a root, an origin, settings and a score), per repo
         for e in entries:
-            if e["mode"] == "read" and e["rollout"] in scores and e["repo"] and e.get("settingsFile") and e["note"]:
+            if e["mode"] == "read" and e.get("shape") != "serial" and e["rollout"] in scores and e["repo"] \
+                    and e.get("settingsFile") and e["note"]:
                 by_repo.setdefault(e["repo"].lower(), []).append(e)
         # reverts first: each standing auto line against a read, non-partial rollout of its repo
         reverting = set()
@@ -1278,6 +1507,17 @@ class Span:
             entries.append(entry)
             if sc is not None:
                 scores[slug] = sc
+        # A serial chain records only Lachy's acts, so a hands-off chain has no record line in the window (or no record
+        # at all): it is read when its note's Leg log has a line in the window.
+        for slug, note in self.serial_notes():
+            key = slug.lower()  # a record's name is run_record's lowercased slug
+            if key in read or not self.leg_log_in(note, since, until):
+                continue
+            entry, sc = self.read_rollout(slug, records.get(key, []), since, until, tunings_file)
+            read[key] = entry
+            entries.append(entry)
+            if sc is not None:
+                scores[slug] = sc
         swept = self.sweep(records, read, since, until)
         for slug in sorted(s for s in swept if s in read):
             read[slug]["friction"].extend(swept[slug])
@@ -1294,10 +1534,10 @@ class Span:
                 continue
             root = project_root(note) if note else None
             entries.append({"rollout": slug, "mode": "escapes-only" if inw else "repairs-only",
-                            "note": str(note) if note else None, "root": root, "repo": self.origin(root),
-                            "status": None, "closeLine": None, "score": None, "window": None, "partial": None,
-                            "headline": None, "breached": [], "breachCounts": False, "binding": None, "proposals": [],
-                            "flags": [], "friction": inw + reps})
+                            "shape": shape_of(note) if note else "parallel", "note": str(note) if note else None,
+                            "root": root, "repo": self.origin(root), "status": None, "closeLine": None, "score": None,
+                            "window": None, "partial": None, "headline": None, "breached": [], "breachCounts": False,
+                            "binding": None, "proposals": [], "flags": [], "friction": inw + reps})
         self.cannot_show("a repair run that writes no dated repair: line and records no event is not seen, nor is a "
                          "repair: line on a rollout with no Run record")
         fresh = self.fresh_review(ev, since, until)
