@@ -191,7 +191,10 @@ Subcommands:
               Each task carries `rung` (its `rung:` stamp, or null) and `rungDrift`: the stamp when a
               readable ladder lacks it and the task is unlanded (queued, running, awaiting-integration,
               integrating, set-aside), else "". A set-aside task whose note holds a `## Needs you`
-              question also carries `needsHuman` (p16-3, normalised); no other task carries the key. Pure
+              question also carries `needsHuman` (p16-3, normalised); no other task carries the key. A task
+              set aside at Integration whose latest run opens a named marker (p27-4, integration_block) also
+              carries `integrationBlock`: `conflict` (an Integration conflict, `integration: conflict
+              unresolved in …`) or `red` (`integration: verifier red: …`); the key is absent otherwise. Pure
               read; no network.
 
   touched-phases  Read-only, for /thread:execute's completion ceremony (ADR 0026): given a rollout note,
@@ -536,8 +539,10 @@ Integration`); declined; prepare (any other lead integration reason); revise-sto
 TRANSIENT_DIAGNOSIS); then gate (gate-pending); needs-human (p16-3: the row's own needsHuman is a non-empty
 string, never the note's `## Needs you`, so an integrate or lead row, which carries null, never reads it; a
 question is no round run out, so it must not reach plan-rejected or review-rounds, the classes the Reflection raises
-a round cap on); then by status: plan-rejected, review-rounds, approved-without-pr (review with no PR),
-integration-set-aside (an integrate row's set-aside), else blocked.
+a round cap on); then by status: plan-rejected, review-rounds, approved-without-pr (review with no PR), then an
+integrate row's set-aside by its diagnosis's first line (integration_block, p27-4): integration-conflict (an
+Integration conflict, `integration: conflict unresolved in …`), integration-red (`integration: verifier red: …`),
+else integration-set-aside; else blocked.
 idle-slots reason, first match ("queued" is queued and not starting this call): gitEnvHold -> hold-git-env;
 paused or pauseRequested -> pause-drain; the first held queued row's reason: `depends on` -> dependency,
 solo or behind solo -> solo; no queued row and a RACE in raceHold -> hold-race; no queued row and a set-aside
@@ -823,6 +828,28 @@ OUTSIDE_N = {"folded", "other"}                     # queue states that are not 
 # The vault's TaskNotes priority scale. `medium`, missing or unknown read as normal.
 PRIORITY_WEIGHTS = {"high": 3, "normal": 2, "low": 1, "none": 0}
 INTEGRATION_PREFIX = "integration:"                 # a blocked task's latest diagnosis -> set aside at Integration
+# The engine's two named set-asides at Integration (p27-4, task.workflow.js INTEGRATION_CONFLICT_MARK and
+# INTEGRATION_RED_MARK, lowercased): an Integration conflict and a verifier red. tests/lead-integrate.test.sh C11
+# pins both, and integration_block against the engine's integrationBlockOf, byte-equal.
+INTEGRATION_CONFLICT_MARK = "integration: conflict unresolved in "
+INTEGRATION_RED_MARK = "integration: verifier red: "
+
+
+def integration_block(text):
+    """The engine's integrationBlockOf: which named set-aside at Integration a run's text opens — "conflict" (an
+    Integration conflict), "red" (a verifier red at Integration) or None. The first non-blank line decides, stripped
+    of JavaScript's whitespace and lowercased. Readers: status's per-task `integrationBlock`, the Run record's
+    set-aside reasonClass (_reason_class) and lead-integrate.py's set-aside escape."""
+    for line in ("" if text is None else str(text)).split("\n"):
+        first = line.strip(_JS_WS)
+        if first:
+            low = first.lower()
+            if low.startswith(INTEGRATION_CONFLICT_MARK):
+                return "conflict"
+            if low.startswith(INTEGRATION_RED_MARK):
+                return "red"
+            return None
+    return None
 # A rung name (ADR 0029): written raw as `rung: <name>`, so a plain lowercase token YAML reads back as the same
 # string — ladder.py's NAME_RE and YAML_WORDS, and the engine's LADDER_NAME and LADDER_YAML_WORDS.
 # tests/ladder.test.mjs (L9) feeds the same names to all three and pins that they agree.
@@ -3097,6 +3124,12 @@ def cmd_status(args) -> int:
         ask = needs_human(r["note"]) if r["state"] == "set-aside" else ""
         if ask:
             row["needsHuman"] = ask
+        # p27-4: a task set aside at Integration whose latest run opens a named marker carries which one (`conflict`:
+        # an Integration conflict, `red`: a verifier red); the key is absent otherwise, as needsHuman's is.
+        block = integration_block(row["blockerSummary"]) \
+            if r["state"] == "set-aside" and r["setAsideAt"] == "integration" else None
+        if block:
+            row["integrationBlock"] = block
         return row
 
     tasks = [task_row(r) for r in sorted(rows, key=_rank)]
@@ -3744,7 +3777,9 @@ def _reason_class(note_status, integ, lead, prior, failed, reason, diag, pr, ask
     if note_status == "review" and not pr:
         return "approved-without-pr"
     if integ is not None and integ.get("outcome") == "set-aside":
-        return "integration-set-aside"
+        # p27-4: an Integration conflict and a verifier red at Integration are named by the diagnosis's first line.
+        block = integration_block(diag)
+        return f"integration-{block}" if block else "integration-set-aside"
     return "blocked"
 
 

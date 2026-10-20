@@ -130,7 +130,10 @@ Subcommands:
       record's set-aside by it (p15-2).
       blockerDiagnosis is the
       engine's own rendering: integrationMarker('set-aside', reason, history) for `integration` (it strips
-      one leading `integration:`, so merge-task's exit-4 text passes through unchanged),
+      one leading `integration:`, so merge-task's exit-4 text passes through unchanged, and escapes a reason
+      that would read as one of the engine's two named markers, `integration: conflict unresolved in …` or
+      `integration: verifier red: …`, as `integration: set aside: <reason>`: the lead never writes either, and
+      prepare's own conflict routes to `trouble ["conflict"]`, never a set-aside),
       integrationMarker('revise-stopped', …) for `revise-stopped`, and stageDiagnosis's `own run: `
       escape for `own`; the history is `inputs`' history.
 
@@ -235,8 +238,11 @@ def integration_marker(kind, reason, history):
         return REVISE_MARKER + tail
     if kind == "revise-stopped":
         return REVISE_MARKER + "\nrevise stopped: " + flatten_line(reason) + tail
-    return INTEGRATION_PREFIX + flatten_line(re.sub("^" + JS_S + "*integration:" + JS_S + "*", "", str(reason or ""),
-                                                    flags=re.I)) + tail
+    body = flatten_line(re.sub("^" + JS_S + "*integration:" + JS_S + "*", "", str(reason or ""), flags=re.I))
+    # The engine's escape (p27-4): a reason that would read as a named marker (rr.integration_block) is `set aside: `.
+    if rr.integration_block(INTEGRATION_PREFIX + body):
+        body = "set aside: " + body
+    return INTEGRATION_PREFIX + body + tail
 
 
 def parse_integration_marker(text):

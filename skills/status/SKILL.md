@@ -122,6 +122,9 @@ rollout body, i.e. the `## Queue` table; unlisted tasks after). Status reads the
 - per task: `slug`, `status`, `queueState`, `setAsideAt`, `pr`, `solo`, `started`, `merged`, `integrating`,
   `waitingOn`, `blockerSummary`, `rung` and `rungDrift`. A set-aside task whose note holds a `## Needs you`
   question (a gate included) also carries `needsHuman`: that question, normalised; the key is absent otherwise.
+  A task set aside at Integration whose latest run opens a named marker also carries `integrationBlock`:
+  `conflict` (an **Integration conflict**, `integration: conflict unresolved in …`, its resolution brief beneath)
+  or `red` (a verifier red at Integration, `integration: verifier red: …`); the key is absent otherwise.
 
 Each task's `queueState` is one of the six in the count (`merged`, `running`, `integrating`,
 `awaiting-integration`, `queued`, `set-aside`) or one of two outside it: `folded` (an affine tombstone) and
@@ -313,7 +316,7 @@ names, once) or the lineage (`supersedes [[<prior>]]`,
 | `awaiting-integration` | **Awaiting Integration** | its PR and `ready:` (`inputs.readyAt`) |
 | `running` | **Running** | the `owner:` tag; no `owner:` means it was handed back and restarts at the lead's next step; no `started` means it is starting; `auto-retry <autoRetriesUsed>` when above 0 (the verdict sets the counters before its first refusal, so `inputs` carries them for a running note too) |
 | `queued` | **Queued** | `waitingOn`, else "behind solo [[x]]" when a started task x carries `solo`, or when x is the first queued task in rank order that carries `solo` and has no `waitingOn` and ranks above this one (`next` holds every task below such a Solo task, whatever its `priority:`; a Solo task with a `waitingOn` holds nothing), else "next free slot" |
-| `set-aside` | **Set aside** | where it re-enters (below), the first line of `blockerSummary`, its automatic retry's count and cool-down (**Automatic retry first**, below), and `answered: …` for an answered one (**Needs you**, below) |
+| `set-aside` | **Set aside** | where it re-enters (below), the first line of `blockerSummary`, its automatic retry's count and cool-down (**Automatic retry first**, below), and `answered: …` for an answered one (**Needs you**, below); a task set aside at Integration names its `integrationBlock`: `Integration conflict → …` in place of `at Integration → …` for `conflict`, `at Integration, verifier red → …` for `red` |
 
 **Rungs.** Every task line also shows `rung <name>` when its note has one (§ 2's `rung`).
 
@@ -460,7 +463,7 @@ Running (1)
 Queued (1)
   [[proj-queued]]           depends on [[proj-at-integration]] (blocked) · rung gone
 Set aside (7)
-  [[proj-at-integration]]   at Integration → the lead's automatic retry · integration: conflict in a.js cannot be resolved · auto-retry 0/2
+  [[proj-at-integration]]   Integration conflict → the lead's automatic retry · integration: conflict unresolved in a.js · auto-retry 0/2
   [[proj-rejected]]         revise (automatic) → the lead launches it · revise: rejected at Integration re-review
   [[proj-revise-stopped]]   revise stopped → your decision, then hand-back, then a seeded revise · revise stopped: red after three iterations · auto-retry 2/2
   [[proj-review-blocked]]   review-blocked, rejected → the lead's automatic retry (one round raised) · Round 1: · auto-retry 1/2

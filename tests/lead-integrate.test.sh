@@ -426,12 +426,20 @@ H2 = [{"round": 1, "feedback": ["own-run fix"]}, {"round": 2, "feedback": ["keep
 HE = [{"round": 1, "feedback": ["", " "]}, {"round": 3, "feedback": ["a\nb", "  c  "]}]
 reasons = ["merge step STOP: fetch origin failed twice", "integration: head moved after Integration (PR head x)",
            "INTEGRATION:  shouty", "  integration:x", "multi\nline\n reason", "", "integration: integration: doubled",
-           "merge declined at the --gated hold"]
+           "merge declined at the --gated hold",
+           # p27-4: reasons that would read as a named marker are escaped `integration: set aside: ` on both sides
+           "verifier red: x", "Conflict unresolved in a.js", "integration: verifier red: y"]
 markers = [[k, r, h] for k in ("set-aside", "revise-stopped", "rejected") for r in reasons for h in ([], H2, HE)]
 parse = ["revise: rejected at Integration re-review — revise on the branch, then re-integrate\nrevise stopped: x\n\nRound 1 rejection:\n- a\n- b\n\nRound 2 (Integration) rejection:\n- c",
          "integration: foo\n\nRound 1 rejection:\n- a", "Round 1:\n- a\n\nRound 2:\n- b", "", "  \n\nplain text\n- not a round",
          "REVISE: Rejected at integration re-review — x", "round 3 REJECTION:\n- y\nstray\n- z", "Round 1:\n-  spaced  \n- \n",
-         " integration: spaced", "Round 01:\n- leading zero"]
+         " integration: spaced", "Round 01:\n- leading zero",
+         # p27-4: an Integration conflict's marker with its brief and history; a shouty red; the escape
+         "integration: conflict unresolved in a.js, b.js\n\nResolution brief (Integration conflict): merging the latest main "
+         "conflicted and the integrator could not keep both intents, so it aborted the merge and pushed nothing.\n"
+         "- Conflicting paths: a.js, b.js\n- Theirs: https://github.com/o/r/pull/5 (theirs: rename) touched a.js; brief /vault/t.md\n"
+         "- The integrator: a.js: both rename foo\n\nRound 1 rejection:\n- own-run fix\n\nRound 2 (Integration) rejection:\n- keep their rename",
+         "INTEGRATION: Verifier Red: x", "integration: set aside: conflict unresolved in a.js"]
 minutes = [["2026-10-02T12:00+00:00", "2026-10-02T12:30+00:00"], ["2026-10-02T12:00:00Z", "2026-10-02T12:00:59Z"],
            ["2026-10-02T12:00:00Z", "2026-10-02T12:01:29.9Z"], ["2026-10-02T12:00:30Z", "2026-10-02T12:01:00Z"],
            ["2026-10-02T22:00+10:00", "2026-10-02T12:05Z"], ["2026-02-30T00:00Z", "2026-03-01T00:00Z"],
@@ -473,7 +481,7 @@ PY
 ENG=$(node --input-type=module -e "
   import { loadEngine } from './tests/lib/engine.mjs'
   const T = loadEngine(['ANCHOR_RECIPE', 'shortAlias', 'worktreeDir', 'integrationMergeStep', 'integrationMarker', 'stageDiagnosis', 'wholeMinutes', 'parseIntegrationMarker',
-    'historyError', 'rungRecordError', 'PR_URL'])
+    'historyError', 'rungRecordError', 'PR_URL', 'integrationBlockOf', 'INTEGRATION_CONFLICT_MARK', 'INTEGRATION_RED_MARK'])
   const c = JSON.parse(process.argv[1])
   const st = T.integrationMergeStep({ repoPath: '/r', defaultBranch: 'master' }, { slug: 'proj-t5' }, { headSha: 'a'.repeat(40), taskBase: 'b'.repeat(40) })
   const br = st.match(/BR=\"([^\"]+)\"/)[1]
@@ -489,6 +497,8 @@ ENG=$(node --input-type=module -e "
     rungs: c.rungs.map((g) => T.rungRecordError(g) === ''),
     urls: c.urls.map((u) => T.PR_URL.test(u)),
     div: [T.rungRecordError(c.div[0]) === '', T.historyError(c.div[1], true) === ''],
+    blocks: c.parse.map((x) => T.integrationBlockOf(x)),
+    marks: [T.INTEGRATION_CONFLICT_MARK, T.INTEGRATION_RED_MARK],
   }))
 " "$CASES")
 PY_=$(python3 - "$LI" "$CASES" <<'PY'
@@ -507,11 +517,13 @@ print(json.dumps({
   "rungs": [m.rung_record_error(g) == "" for g in c["rungs"]],
   "urls": [bool(m.ENGINE_PR_URL_RE.fullmatch(u)) for u in c["urls"]],
   "div": [m.rung_record_error(c["div"][0]) == "", m.history_error(c["div"][1], True) == ""],
+  "blocks": [m.rr.integration_block(x) or "" for x in c["parse"]],
+  "marks": [m.rr.INTEGRATION_CONFLICT_MARK, m.rr.INTEGRATION_RED_MARK],
 }, ensure_ascii=False))
 PY
 )
 canon() { python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(json.dumps(d[sys.argv[2]], sort_keys=True, ensure_ascii=False))' "$1" "$2"; }
-for k in recipe names mergeMsg markers own minutes parse hist rungs urls; do
+for k in recipe names mergeMsg markers own minutes parse hist rungs urls blocks marks; do
   ok "$(canon "$PY_" "$k")" "$(canon "$ENG" "$k")" "C11: lead-integrate's $k is byte-equal to the engine's"
 done
 # the cases are not vacuous: each list holds both verdicts, in the engine's own words (control)
@@ -520,6 +532,10 @@ ok "$(canon "$ENG" rungs)|$(canon "$ENG" urls)" "[true, true, true, true$(printf
 ok "$(canon "$ENG" div)|$(canon "$PY_" div)" "[true, true]|[false, false]" "C11: the two deliberate divergences (a pre-3.0.0 tier record, a float round) pass the engine and are refused here"
 ok "$(canon "$ENG" names)" '[["audit-fix/t5", "/r/.claude/worktrees/proj-t5"], ["audit-fix/solo", "/r/.claude/worktrees/solo"], ["audit-fix/b-c", "/r/.claude/worktrees/a-b-c"]]' "C11: the names themselves (control)"
 ok "$(python3 -c 'import json,sys; print(sum(1 for x in json.loads(sys.argv[1])["markers"] if x.lower().startswith("integration: integration:")))' "$PY_")" 3 "C11: only the doubled-prefix reason (x3 histories) keeps a second prefix (the engine strips one)"
+ok "$(python3 -c 'import json,sys; b=json.loads(sys.argv[1])["blocks"]; print(sorted(set(b)), b[-3:])' "$ENG")" "['', 'conflict', 'red'] ['conflict', 'red', '']" \
+  "C11: the engine's integrationBlockOf names a conflict, a red and the escape '' (control)"
+ok "$(python3 -c 'import json,sys; print(sum(1 for x in json.loads(sys.argv[1])["markers"] if x.startswith("integration: set aside: ")))' "$PY_")" 9 \
+  "C11: the three marker-shaped reasons (x3 histories) are escaped 'integration: set aside: '"
 
 # ======== C12: inputs parity ============================================================================
 nfx c12 4
