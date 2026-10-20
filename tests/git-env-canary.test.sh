@@ -908,6 +908,37 @@ ms A; ok "$rc|$(started A)|$(recf A task state)" "0|1|<none>" "m8: a rollout wit
 mkro "$S/gone"
 mkt B in_progress
 ms B; ok "$rc|$(started B)|$(recf B task state)" "0|1|<none>" "m8: a Project root naming a missing directory, no flags → 0, started: stamped, no record"
+# m8 fail-closed: a Project root mark-started cannot stat, or a rollout note that exists but cannot be read (the note
+# at mode 000, or the note under a mode-000 parent), may need the arm, so with no flags it refuses: exit 2, A.md
+# byte-identical, no record, no slot-taken. Python 3.14's Path.is_dir()/is_file() return False on EACCES, so these
+# legs fail against a check built on them under python3.14. The modes are restored before the asserts. Skipped as
+# root (a mode-000 dir can still be entered).
+mslocked() {  # mslocked <name> <path to chmod 000> <restore mode>: ms A on a fresh in_progress A, then the asserts
+  a0=$(cksum < "$V/A.md")
+  chmod 000 "$2"; ms A; chmod "$3" "$2"
+  ok "$rc|$(cksum < "$V/A.md")|$(recf A task state)|$(slots)" "2|$a0|<none>|0" "m8 fail-closed ($1), no flags → 2, A.md byte-identical, no record, no slot-taken"
+  has "$err" "--arm-repo <repoPath> --arm-default <B>" "m8 fail-closed ($1): … stderr names both flags"
+}
+if (mkdir -p "$TMP/m8-probe/d" && chmod 000 "$TMP/m8-probe" && ! [ -e "$TMP/m8-probe/d" ]); then
+  chmod 755 "$TMP/m8-probe"
+  scen m8-root
+  mkdir -p "$S/locked/repo"; mkro "$S/locked/repo"
+  mkt A in_progress
+  mslocked "a Project root under a mode-000 parent" "$S/locked" 755
+  has "$err" "Project root $S/locked/repo cannot be stat'ed" "m8 fail-closed (root): … naming the root it cannot stat"
+  scen m8-note
+  mkt A in_progress
+  mslocked "the rollout note at mode 000" "$RO" 644
+  has "$err" "the rollout note $RO cannot be read" "m8 fail-closed (note): … naming the note"
+  scen m8-note-dir
+  mkdir -p "$S/lockro"; mv "$RO" "$S/lockro/ro.md"; RO="$S/lockro/ro.md"
+  mkt A in_progress
+  mslocked "the rollout note under a mode-000 parent" "$S/lockro" 755
+  has "$err" "the rollout note $RO cannot be read" "m8 fail-closed (note dir): … naming the note"
+else
+  chmod 755 "$TMP/m8-probe" 2>/dev/null
+  echo "SKIP - m8 fail-closed legs (a mode-000 dir can still be entered here)"
+fi
 # m9: the canary binds --repo to the Project root.
 scen m9
 mkt A in_progress
