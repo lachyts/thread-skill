@@ -670,9 +670,15 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
   // `trickle:` hold that never halts; step 1.1 relays the WARN line verbatim, once per session; step 1.6 waits on a
   // `trickle:` hold with its reason=; § 5's Heartbeat paragraph covers that waiting turn and clause (7) reads its reason
   // as no hold; § 6's waiting bullet, § 8's Stop-hook paragraph and the driver's docstring and block reason name it.
+  // A restart waits on the ceiling alone (the round-1 respawn deadlock), so the paragraph says so, and step 1.2's
+  // automatic retry restarts within the ceiling, never held by the Trickle. Step 1.5's halt guard turns a `stuck` over
+  // a seeded revise step 1.2 held only for want of `slotLimit` into a Trickle wait, never § 7 (the round-1 false stuck),
+  // and step 1.2's seeded revise names that clause.
   const trickleP = labelled(skill, 'The Trickle (Chorus ADR 0104).')
   const tr1 = subs[0]?.text ?? ''
   const tr6 = sub(/^End the turn `waiting`/)?.text ?? ''
+  const trGuard = sub(/^\*\*Halt guard/)?.text ?? ''
+  const trRev = sub(/\*\*Seeded revises \(automatic\)/)?.text ?? ''
   const waitingB = collapse(s6raw.split('\n').find((l) => l.startsWith('- `waiting` — ')) ?? '')
   const hookP = collapse(skill.split('\n').find((l) => l.startsWith('**The Stop-hook driver**')) ?? '')
   const drvDoc = collapse((driver ?? '').split('"""')[1] ?? '')
@@ -691,7 +697,15 @@ function checkExecute({ skill, hooksJson, exists, template, driver }) {
     !hb7.includes('(a `trickle:` reason is no hold: the Trickle may have room now)') ||
     !waitingB.includes('or `next` holds a task on the Trickle (§4.5 step 1.6)') || !waitingB.includes("a Trickle wait's (`trickle: …`)") ||
     !hookP.includes('or a Trickle wait stands)') ||
-    !drvDoc.includes('or a Trickle wait stands') || !drvBlock.includes('or a Trickle wait stands')) fails.push('trickle')
+    !drvDoc.includes('or a Trickle wait stands') || !drvBlock.includes('or a Trickle wait stands') ||
+    !trickleP.includes('A restart waits on the ceiling alone') ||
+    !trickleP.includes('counting every `in_progress` task of this rollout, live or stalled') ||
+    !trRev.includes('within the ceiling like any restart, never held by the Trickle') ||
+    !trRev.includes('A revise held only by `slotLimit`, below `ceiling`, is a Trickle wait: the halt guard (step 1.5) never halts on it') ||
+    !trGuard.includes('A `stuck` while step 1.2 held an `autoRevise: true` seeded revise only for want of `slotLimit`') ||
+    !trGuard.includes('ends the turn `waiting` with `reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`, never § 7') ||
+    !trGuard.includes("Like `next`'s own `trickle:` hold, it waits whatever else is set aside") ||
+    !(S(skill, S7) ?? '').includes('and never while step 1.2 holds a seeded revise on the Trickle, a Trickle wait (§4.5 step 1.5)')) fails.push('trickle')
   return [...new Set(fails)]
 }
 
@@ -1217,12 +1231,28 @@ test('control: § 4.5 without the Trickle at any one site fails trickle', () => 
   only(sk('and a `trickle:` hold never halts the rollout', 'and a `trickle:` hold halts the rollout `stuck`'), 'trickle', 'a Trickle hold halts')
   only(sk(' A `WARN: ~/.config/thread/away.json` line on its stderr (a stale or unreadable Away state file, `skills/execute/away.md` § Reading it) is printed verbatim the first time this session sees that exact line, which is held for the session\'s life like step 1.2\'s judged keys; nothing else changes.', ''),
     'trickle', 'no WARN relay in step 1.1')
-  only(sk(' A `trickle:` hold (*The Trickle*) ends the turn `waiting` too:', ' A `trickle:` hold (*The Trickle*) halts the turn:'), 'trickle', 'no Trickle wait in step 1.6')
+  only(sk(' A `trickle:` hold (*The Trickle*) ends the turn `waiting` too,', ' A `trickle:` hold (*The Trickle*) halts the turn,'), 'trickle', 'no Trickle wait in step 1.6')
   only(sk('`reason="trickle: <trickle.running>/<trickle.limit> tasks running on this Mac"`', '`reason="trickle"`'), 'trickle', 'no Trickle reason=')
   only(sk(" and a Trickle wait's `waiting` turn (§4.5 step 1.6).", '.'), 'trickle', 'heartbeat paragraph without the Trickle wait')
   only(sk(' (a `trickle:` reason is no hold: the Trickle may have room now)', ''), 'trickle', 'clause (7) without its parenthetical')
-  only(sk(', or `next` holds a task on the Trickle (§4.5 step 1.6); nothing to do until', '; nothing to do until'), 'trickle', "§ 6's waiting bullet without it")
+  only(sk(', or `next` holds a task on the Trickle (§4.5 step 1.6) or step 1.2 holds a seeded revise on it (§4.5 step 1.5); nothing to do until', '; nothing to do until'),
+    'trickle', "§ 6's waiting bullet without it")
   only(sk(', a retry cool-down is pending, or a Trickle wait stands)', ', or a retry cool-down is pending)'), 'trickle', "§ 8's Stop-hook paragraph without it")
+})
+test('control: a restart held by the Trickle, or a Trickle-held revise that halts stuck, fails trickle', () => {
+  only(sk(' A restart waits on the ceiling alone:', ' A restart waits on `slotLimit` too:'), 'trickle', 'a restart held by the Trickle')
+  only(sk('counting every `in_progress` task of this rollout, live or stalled, as every other lead counts them. A restart',
+    'counting its live tasks only. A restart'), 'trickle', 'stalled tasks uncounted')
+  only(sk('within the ceiling like any restart, never held by the Trickle', 'within `slotLimit`'), 'trickle', 'an automatic retry held by the Trickle')
+  only(sk(' A revise held only by `slotLimit`, below `ceiling`, is a Trickle wait: the halt guard (step 1.5) never halts on it.', ''),
+    'trickle', 'step 1.2 without the pointer to the guard')
+  only(sk(', never § 7: the revise launches once the Mac has room', ', then § 7: the revise launches once the Mac has room'), 'trickle', 'the guard halts')
+  const guard = real.skill.split('\n').find((l) => l.includes('**Halt guard (last).**'))
+  const clause = guard.slice(guard.indexOf(' A `stuck` while step 1.2 held an `autoRevise: true`'))
+  only(sk(clause, ''), 'trickle', 'no Trickle clause in the halt guard')
+  only(sk("Like `next`'s own `trickle:` hold, it waits whatever else is set aside", 'It waits unless an UNVERIFIED task is set aside'),
+    'trickle', 'an UNVERIFIED task halts the Trickle wait')
+  only(sk(', and never while step 1.2 holds a seeded revise on the Trickle, a Trickle wait (§4.5 step 1.5)', ''), 'trickle', "§ 7's stuck halts over a Trickle-held revise")
 })
 test("control: the driver's docstring or block reason without the Trickle wait fails trickle", () => {
   const drv = (from, to) => { assert.ok(real.driver.includes(from), from); return { driver: real.driver.replace(from, to) } }
